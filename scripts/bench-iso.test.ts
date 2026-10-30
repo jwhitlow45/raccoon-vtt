@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { CDPSession, Page } from "playwright-core";
-import { CAP_FIRST_ROW, gate, timedUntil } from "./bench-iso.ts";
+import { CAP_FIRST_ROW, gate, tetherWork, timedUntil } from "./bench-iso.ts";
 
 /*
  * The isometric bench's build rows (docs/design-v1-iso-area-shapes.md 6
@@ -24,6 +24,11 @@ function fakePage(costs: readonly number[], doneAfter: number): { page: Page; cd
 }
 
 describe("the isometric bench's build rows", () => {
+  test("the long diagonal tether row exercises the full stroke within a linear candidate bound", async () => {
+    const work = await tetherWork();
+    assert.equal(work.visited, 2404);
+    assert.ok(work.candidates <= 32 * 200 + 32, `${work.candidates} candidates`);
+  });
   test("take a build's frames until it is done, and none of the idle ones after it", async () => {
     const costs = [40, 6, 6, 6, 6, 180, 0.1, 0.1, 0.1];
     const { page, cdp, done } = fakePage(costs, 6);

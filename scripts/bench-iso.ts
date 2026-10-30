@@ -57,6 +57,7 @@
  *   node scripts/bench-iso.ts --report before.json iso.json
  *   DATABASE_URL=postgres://... node scripts/bench-iso.ts --parity shots/before
  *   node scripts/bench-iso.ts --compare shots/before shots/after
+ *   node scripts/bench-iso.ts --tether
  */
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -66,6 +67,17 @@ import { chromium, type BrowserContext, type CDPSession, type Page } from "playw
 import sharp from "sharp";
 import WebSocket from "ws";
 import { pickOption, pickTool, ROOT, startServer } from "../e2e/harness.ts";
+
+/** A low-zoom diagonal tether across the largest map. This CPU row needs no browser or database. */
+export async function tetherWork(length = 200): Promise<{ candidates: number; visited: number }> {
+  // Keep browser-only canvas types out of the server tools' compilation.
+  const { strokeSubcells } = await import(new URL("../client/canvas/relief/stand.ts", import.meta.url).href) as {
+    strokeSubcells(a: { x: number; y: number }, b: { x: number; y: number }, r: number, visit: (x: number, y: number) => boolean): number;
+  };
+  let visited = 0;
+  const candidates = strokeSubcells({ x: 0, y: 0 }, { x: length, y: length }, 1 / 12, () => { visited++; return true; });
+  return { candidates, visited };
+}
 
 const PHONE = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true };
 const CPU_SLOWDOWN = 4;
@@ -1095,7 +1107,12 @@ if (argv[1] && import.meta.url.endsWith(argv[1].replace(/^.*scripts\//, "scripts
     const i = argv.indexOf(name);
     return i >= 0 ? argv[i + 1] : undefined;
   };
-  if (argv.includes("--compare")) {
+  if (argv.includes("--tether")) {
+    await tetherWork();
+    const start = performance.now();
+    const work = await tetherWork();
+    console.log(JSON.stringify({ row: "long diagonal tether, 200 cells, 12 px", ...work, ms: performance.now() - start }));
+  } else if (argv.includes("--compare")) {
     const i = argv.indexOf("--compare");
     const diffs = await comparePngs(argv[i + 1]!, argv[i + 2]!);
     console.log(diffs.length === 0 ? "every image matches pixel for pixel" : diffs.join("\n"));

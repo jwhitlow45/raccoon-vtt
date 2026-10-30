@@ -10,7 +10,7 @@ import { footprint, type ViewToken } from "../../lib/scene.ts";
 import { FogView, type CellBox } from "./fogView.ts";
 import { pillReach } from "../../features/measure/pillPlace.ts";
 import { dragTagPill } from "../dragTag.ts";
-import { boxStands, creatureStands, dimmedForDm, ghostStands, ghostTagStands, lineStands, splitTokens, tokenBox, tokenBoxes } from "./stand.ts";
+import { boxStands, creatureStands, dimmedForDm, ghostStands, ghostTagStands, lineStands, splitTokens, strokeSubcells, tokenBox, tokenBoxes } from "./stand.ts";
 import { withExplored } from "../../features/vision/exploredFog.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
 import { readFileSync } from "node:fs";
@@ -855,4 +855,99 @@ describe("a caught creature's ring at its standee's base (D-261026-31, design 4.
     );
     assert.deepEqual(byToken.get("x"), ["#111111", "#222222"]);
   });
+});
+
+
+test("ISO34-TETHER-COST: a long thin diagonal checks a stroke band, not its bounding rectangle", () => {
+  for (const length of [50, 100, 200]) {
+    let visits = 0;
+    const checked = strokeSubcells({ x: -length / 2, y: -length / 2 }, { x: length / 2, y: length / 2 }, 0.08, () => { visits++; return true; });
+    assert.ok(checked <= 32 * length + 32, `${length} cells: ${checked} candidates exceeds the stroke-band bound`);
+    assert.ok(visits > 4 * length, "the full diagonal must be visited");
+  }
+});
+
+
+type StrokePoint = { x: number; y: number };
+
+// The original exhaustive scan is the oracle for the row-band optimization.
+function exhaustiveStroke(a: StrokePoint, b: StrokePoint, r: number, visit: (sx: number, sy: number) => boolean): void {
+  const k = FOG_SUBCELLS;
+  const s = 1 / k;
+  // Float slack, so a square the stroke's edge touches is never missed.
+  const near = Math.max(0, r) + 1e-9;
+  const x0 = Math.floor((Math.min(a.x, b.x) - near) * k) - 1;
+  const x1 = Math.floor((Math.max(a.x, b.x) + near) * k);
+  const y0 = Math.floor((Math.min(a.y, b.y) - near) * k) - 1;
+  const y1 = Math.floor((Math.max(a.y, b.y) + near) * k);
+  for (let sy = y0; sy <= y1; sy++) {
+    for (let sx = x0; sx <= x1; sx++) if (squareGap(a, b, sx * s, sy * s, s) <= near && !visit(sx, sy)) return;
+  }
+}
+
+/** The distance from the segment a to b to the closed square at x, y of side s: 0 where they meet. */
+function squareGap(a: StrokePoint, b: StrokePoint, x: number, y: number, s: number): number {
+  if (segmentMeetsBox(a, b, x, y, x + s, y + s)) return 0;
+  let d = Math.min(boxGap(a, x, y, s), boxGap(b, x, y, s));
+  for (const c of [{ x, y }, { x: x + s, y }, { x, y: y + s }, { x: x + s, y: y + s }]) d = Math.min(d, segmentGap(c, a, b));
+  return d;
+}
+
+/** Whether the segment meets the closed box: Liang and Barsky's clip, which keeps a part of it. */
+function segmentMeetsBox(a: StrokePoint, b: StrokePoint, x0: number, y0: number, x1: number, y1: number): boolean {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  let lo = 0;
+  let hi = 1;
+  for (const [p, q] of [[-dx, a.x - x0], [dx, x1 - a.x], [-dy, a.y - y0], [dy, y1 - a.y]] as const) {
+    if (p === 0) {
+      if (q < 0) return false;
+      continue;
+    }
+    const t = q / p;
+    if (p < 0) lo = Math.max(lo, t);
+    else hi = Math.min(hi, t);
+    if (lo > hi) return false;
+  }
+  return true;
+}
+
+function boxGap(p: StrokePoint, x: number, y: number, s: number): number {
+  return Math.hypot(Math.max(x - p.x, 0, p.x - x - s), Math.max(y - p.y, 0, p.y - y - s));
+}
+
+function segmentGap(p: StrokePoint, a: StrokePoint, b: StrokePoint): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
+  return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
+}
+
+test("ISO34-TETHER-COST: band enumeration matches exhaustive closed-square coverage and early exits", () => {
+  const random = rng(4034);
+  const cases: [StrokePoint, StrokePoint, number][] = [
+    [{ x: 0, y: 0 }, { x: 3, y: 3 }, 0],
+    [{ x: -1, y: 0.25 }, { x: 2, y: 0.25 }, 0],
+    [{ x: 0, y: -3 }, { x: 0, y: 2 }, 0.25],
+    [{ x: -0.25, y: -0.25 }, { x: -0.25, y: -0.25 }, 0],
+    [{ x: -0.25, y: -0.25 }, { x: -0.25, y: -0.25 }, 0.5],
+  ];
+  for (let i = 0; i < 300; i++) cases.push([
+    { x: random() * 12 - 6, y: random() * 12 - 6 },
+    { x: random() * 12 - 6, y: random() * 12 - 6 },
+    i % 3 === 0 ? 0 : random(),
+  ]);
+  for (const [a, b, r] of cases) {
+    const want: string[] = [];
+    exhaustiveStroke(a, b, r, (x, y) => { want.push(`${x},${y}`); return true; });
+    const got: string[] = [];
+    const checked = strokeSubcells(a, b, r, (x, y) => { got.push(`${x},${y}`); return true; });
+    assert.deepEqual(got, want, JSON.stringify([a, b, r]));
+    const stop = Math.min(3, want.length);
+    const first: string[] = [];
+    const early = strokeSubcells(a, b, r, (x, y) => { first.push(`${x},${y}`); return first.length < stop; });
+    assert.deepEqual(first, want.slice(0, stop));
+    assert.ok(early <= checked);
+  }
 });

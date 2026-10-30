@@ -200,8 +200,9 @@ type P = { x: number; y: number };
  * round caps can paint. Closed squares fail closed: a line along a
  * sub-cell line, or through a corner, counts the sub-cells on both sides
  * of it, and a stroke whose edge only touches a square counts it.
+ * Returns the number of candidate squares checked, for the tether bench.
  */
-export function strokeSubcells(a: P, b: P, r: number, visit: (sx: number, sy: number) => boolean): void {
+export function strokeSubcells(a: P, b: P, r: number, visit: (sx: number, sy: number) => boolean): number {
   const k = FOG_SUBCELLS;
   const s = 1 / k;
   // Float slack, so a square the stroke's edge touches is never missed.
@@ -210,9 +211,25 @@ export function strokeSubcells(a: P, b: P, r: number, visit: (sx: number, sy: nu
   const x1 = Math.floor((Math.max(a.x, b.x) + near) * k);
   const y0 = Math.floor((Math.min(a.y, b.y) - near) * k) - 1;
   const y1 = Math.floor((Math.max(a.y, b.y) + near) * k);
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  let checked = 0;
   for (let sy = y0; sy <= y1; sy++) {
-    for (let sx = x0; sx <= x1; sx++) if (squareGap(a, b, sx * s, sy * s, s) <= near && !visit(sx, sy)) return;
+    // Only this row's expanded strip can meet the stroke. The final gap
+    // test keeps round caps and closed corner touches identical to a full scan.
+    const t0 = dy === 0 ? 0 : (sy * s - near - a.y) / dy;
+    const t1 = dy === 0 ? 1 : ((sy + 1) * s + near - a.y) / dy;
+    const lo = Math.max(0, Math.min(t0, t1));
+    const hi = Math.min(1, Math.max(t0, t1));
+    if (hi < lo) continue;
+    const left = Math.max(x0, Math.floor((Math.min(a.x + lo * dx, a.x + hi * dx) - near) * k) - 1);
+    const right = Math.min(x1, Math.floor((Math.max(a.x + lo * dx, a.x + hi * dx) + near) * k));
+    for (let sx = left; sx <= right; sx++) {
+      checked++;
+      if (squareGap(a, b, sx * s, sy * s, s) <= near && !visit(sx, sy)) return checked;
+    }
   }
+  return checked;
 }
 
 /** The distance from the segment a to b to the closed square at x, y of side s: 0 where they meet. */
