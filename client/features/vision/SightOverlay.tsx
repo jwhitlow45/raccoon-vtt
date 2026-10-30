@@ -1,10 +1,11 @@
 import { memo, useEffect, useMemo, useState } from "react";
-import { Shape } from "react-konva";
+import { Group, Shape } from "react-konva";
 import { sightOf } from "#shared/keys.ts";
 import type { Scene } from "#shared/model.ts";
-import { pixelBox } from "../../canvas/fogSeam.ts";
+import { fogSeam } from "../../canvas/fogSeam.ts";
+import { useIsoGround } from "../../canvas/relief/context.ts";
 import { useRoomView } from "../../state/view.ts";
-import { NOT_SEEN, PARTY_PALETTE, SightRaster, VEIL_PALETTE, type Palette } from "./sightRaster.ts";
+import { NOT_SEEN, PARTY_PALETTE, SightRaster, VEIL_PALETTE, type Palette, type Rgba } from "./sightRaster.ts";
 import type { SightMode } from "./sightMode.ts";
 
 /** How far past the scene's edge the overlay reaches, in cells, as the fog's frame does. */
@@ -88,6 +89,15 @@ function css(rgba: readonly number[]): string {
   return `rgba(${rgba[0]}, ${rgba[1]}, ${rgba[2]}, ${(rgba[3] ?? 0) / 255})`;
 }
 
+/** Opaque unseen pixels can overlap the frame in an isolated surface, then receive their tint once. */
+export function sightPaint(mode: SightMode, isometric: boolean): { palette: Palette; opacity: number } {
+  const palette = mode === "party" ? PARTY_PALETTE : VEIL_PALETTE;
+  if (!isometric) return { palette, opacity: 1 };
+  const opacity = palette[NOT_SEEN][3] / 255;
+  const normalize = (c: Rgba): Rgba => [c[0], c[1], c[2], Math.round(c[3] / opacity)];
+  return { palette: [normalize(palette[0]), normalize(palette[1]), normalize(palette[2]), normalize(palette[3])], opacity };
+}
+
 /**
  * The party's sight on the overlay layer, below the fog image (section
  * 4.3.7): one image of the scene at one pixel per sub-cell, drawn with
@@ -102,7 +112,9 @@ function css(rgba: readonly number[]): string {
 export const SightOverlay = memo(function SightOverlay(props: { scene: Pick<Scene, "id" | "bounds">; mode: SightMode }) {
   const { scene, mode } = props;
   const sight = useRoomView((s) => (s.view ? sightOf(s.view) : undefined));
-  const drawn = useMemo(() => new SightCanvas(scene.bounds, mode === "party" ? PARTY_PALETTE : VEIL_PALETTE), [scene.id, scene.bounds.w, scene.bounds.h, mode]);
+  const isometric = useIsoGround() !== null;
+  const paint = useMemo(() => sightPaint(mode, isometric), [mode, isometric]);
+  const drawn = useMemo(() => new SightCanvas(scene.bounds, paint.palette), [scene.id, scene.bounds.w, scene.bounds.h, paint]);
   // Counts the frames spent finishing a large change, each one an update that writes the next tiles.
   const [frame, setFrame] = useState(0);
   const version = useMemo(() => drawn.update(sight, scene.id), [drawn, sight, scene.id, frame]);
@@ -114,38 +126,45 @@ export const SightOverlay = memo(function SightOverlay(props: { scene: Pick<Scen
 
   const w = scene.bounds.w;
   const h = scene.bounds.h;
+  return <SightSurface drawn={drawn} w={w} h={h} version={version} isometric={isometric} opacity={paint.opacity} />;
+});
+
+/** The frame and raster share one drawing surface. */
+export function SightSurface({ drawn, w, h, version, isometric, opacity }: { drawn: Pick<SightCanvas, "canvas" | "ok" | "palette">; w: number; h: number; version: number; isometric: boolean; opacity: number }) {
   const unseen = css(drawn.palette[NOT_SEEN]);
   return (
-    <Shape
-      listening={false}
-      perfectDrawEnabled={false}
-      // Not read by Konva: a changed value is what makes react-konva redraw the layer.
-      sightVersion={version}
-      sceneFunc={(ctx) => {
-        const g = ctx._context;
-        g.save();
-        // The frame and the image meet on whole pixels where they can (canvas/fogSeam.ts), as the fog's do, so the veil leaves no lighter line at the scene's edge. The image keeps the scene's rectangle and is clipped there. On Isometric's slant they meet at the edge itself: an overlap would shade this translucent overlay twice there.
-        const box = pixelBox(g.getTransform(), w, h);
-        // Past the scene's edge nothing is in sight, as fail-closed fog treats it.
-        g.fillStyle = unseen;
-        g.beginPath();
-        g.rect(-FRAME_CELLS, -FRAME_CELLS, w + FRAME_CELLS * 2, h + FRAME_CELLS * 2);
-        if (box) g.rect(box.x, box.y, box.w, box.h);
-        else g.rect(0, 0, w, h);
-        g.fill("evenodd");
-        if (box) {
+    <Group listening={false} isolated={isometric} opacity={opacity}>
+      <Shape
+        listening={false}
+        perfectDrawEnabled={false}
+        // Not read by Konva: a changed value is what makes react-konva redraw the layer.
+        sightVersion={version}
+        selfRectFunc={() => ({ x: -FRAME_CELLS, y: -FRAME_CELLS, width: w + FRAME_CELLS * 2, height: h + FRAME_CELLS * 2 })}
+        sceneFunc={(ctx) => {
+          const g = ctx._context;
+          g.save();
+          // Slanted edges overlap inside the opaque unseen frame. The isolated group applies translucency once, as FogShape does.
+          const { hole, clip } = fogSeam(g.getTransform(), w, h);
+          // Past the scene's edge nothing is in sight, as fail-closed fog treats it.
+          g.fillStyle = unseen;
           g.beginPath();
-          g.rect(box.x, box.y, box.w, box.h);
-          g.clip();
-        }
-        if (drawn.ok) {
-          g.imageSmoothingEnabled = true;
-          g.drawImage(drawn.canvas, 0, 0, w, h);
-        } else {
-          g.fillRect(0, 0, w, h);
-        }
-        g.restore();
-      }}
-    />
+          g.rect(-FRAME_CELLS, -FRAME_CELLS, w + FRAME_CELLS * 2, h + FRAME_CELLS * 2);
+          g.rect(hole.x, hole.y, hole.w, hole.h);
+          g.fill("evenodd");
+          if (clip) {
+            g.beginPath();
+            g.rect(clip.x, clip.y, clip.w, clip.h);
+            g.clip();
+          }
+          if (drawn.ok) {
+            g.imageSmoothingEnabled = true;
+            g.drawImage(drawn.canvas, 0, 0, w, h);
+          } else {
+            g.fillRect(0, 0, w, h);
+          }
+          g.restore();
+        }}
+      />
+    </Group>
   );
-});
+}
