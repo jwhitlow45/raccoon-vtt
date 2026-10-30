@@ -482,29 +482,59 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     await dm.locator(".konvajs-content").first().waitFor();
   }
 
+  /*
+   * Both pages load the room once per interface size and only resize the
+   * window between the sizes that share it, and Draw is turned on and off
+   * live. A load per size and per Draw setting spent more than a session's
+   * 20 snapshots a minute (server/rooms/budgets.ts), so the server held back
+   * the next test's loads, past its 30 s wait on CI.
+   */
+  let toolbarScale: number | null = null;
+  async function sizeBoth(view: { width: number; height: number; scale: number }): Promise<void> {
+    if (toolbarScale === view.scale) {
+      await dm.setViewportSize({ width: view.width, height: view.height });
+      await player.setViewportSize({ width: view.width, height: view.height });
+      return;
+    }
+    await sizeDm(view);
+    await setUp(view);
+    toolbarScale = view.scale;
+  }
+
+  /** The tool strip once two measures in a row agree, so a resize's or a setting's new layout has landed. */
+  async function steadyToolSection(page: Page, scale: number) {
+    let last = "";
+    const settled = await waitFor("the tool strip to settle", async () => {
+      const now = await toolSection(page, scale);
+      const same = JSON.stringify(now) === last;
+      last = JSON.stringify(now);
+      return same ? { now } : null;
+    });
+    return settled.now;
+  }
+
   for (const view of [
     { width: 390, height: 844, scale: 1 },
-    { width: 390, height: 844, scale: 1.3 },
     { width: 360, height: 740, scale: 1 },
-    { width: 360, height: 740, scale: 1.3 },
     { width: 320, height: 568, scale: 1 },
-    { width: 320, height: 568, scale: 1.3 },
     // Measured and shown, not held to the rule: the tablet and the sideways phone keep their bars.
     { width: 820, height: 1180, scale: 1 },
     { width: 844, height: 390, scale: 1 },
+    { width: 390, height: 844, scale: 1.3 },
+    { width: 360, height: 740, scale: 1.3 },
+    { width: 320, height: 568, scale: 1.3 },
   ]) {
     const label = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
     const phone = view.width < 500 && view.height > view.width;
     const tag = `${view.width}x${view.height}-${Math.round(view.scale * 100)}`;
     test(`fl10-tb. the tools span their section of the bottom bar with Draw shown and with it hidden, the DM's as the player's: ${label}`, async () => {
-      await sizeDm(view);
+      await sizeBoth(view);
       try {
         for (const draw of ["all", "none"] as const) {
           // With Draw hidden a player has four tools, which is all a room with no drawing shows.
           await ops.send({ t: "room.update", settings: { playersDraw: draw } });
-          await setUp(view);
           await waitFor(`the toolbar with Draw ${draw === "all" ? "shown" : "hidden"}`, async () => ((await player.locator('nav[aria-label="Tools"] button[title^="Draw"]').count()) === (draw === "all" ? 1 : 0) ? true : null));
-          const m = { player: await toolSection(player, view.scale), dm: draw === "all" ? await toolSection(dm, view.scale) : null };
+          const m = { player: await steadyToolSection(player, view.scale), dm: draw === "all" ? await steadyToolSection(dm, view.scale) : null };
           await shots.take(player, `player-toolbar-${draw === "all" ? "draw" : "nodraw"}-${tag}`);
           if (draw === "all") await shots.take(dm, `dm-toolbar-${tag}`);
           // The sideways phone shares the toolbar's row with the options, so it has no strip to measure.
