@@ -552,7 +552,8 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     const chip = player.getByRole("button", { name: new RegExp(`^DEX save: rolled ${rolled.total} \\(1d20\\+4, your bonus: \\d+\\)\\. (Pass|Fail)\\. Final\\. Open to ask the DM to change it\\.$`) });
     await chip.waitFor();
 
-    await live.getByRole("button", { expanded: false }).first().tap();
+    // The card's own expander: a waiting Roll also carries aria-expanded, for its one-roll options.
+    await live.locator('button[aria-expanded="false"]:not([aria-haspopup])').first().tap();
     // The DM reads the player's typed bonus as theirs (LP7-DICE-11).
     await live.getByText(new RegExp(`^rolled ${rolled.total} \\(1d20\\+4, their bonus: \\d+\\)`)).waitFor();
 
@@ -606,10 +607,11 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
 
     // The DM rolls the waiting creature from the live card: its Fail is recorded with the total.
     const live = dm.getByRole("group", { name: "Roll request: DEX save, DC 13" });
-    await live.getByRole("button", { expanded: false }).first().tap();
+    await live.locator('button[aria-expanded="false"]:not([aria-haspopup])').first().tap();
     await live.getByRole("button", { name: "Roll +5: fails (Stunned) for Thorn" }).tap();
     await live.getByText(/^rolled \d+ \(1d20\+5: \d+\)(, natural (20|1))?, fails \(Stunned\)/).waitFor();
-    await c.getByText(/^Rolled \d+ \(1d20\+5: \d+\)\.( Natural (20|1)\.)? Fail \(Stunned\)\. Final\./).waitFor();
+    // A d20 result names its mode, Normal here (docs/design-v1-roll-mode-menu.md 4).
+    await c.getByText(/^Rolled \d+ \(1d20\+5: \d+\)\.( Natural (20|1)\.)? Normal\. Fail \(Stunned\)\. Final\./).waitFor();
     await shots.take(dm, "rolls-dm-rolled-for-thorn");
     await closeAll();
 

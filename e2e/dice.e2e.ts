@@ -8,7 +8,7 @@ import { chromium, type Browser, type BrowserContext, type Locator, type Page } 
 import { FORMULA_ERRORS } from "#shared/dice/formula.ts";
 import { keptD20 } from "#shared/dice/roll.ts";
 import type { DiceRoll, LogEntry, LogEvent } from "#shared/model.ts";
-import { ConsoleWatch, diceFoldsOpen, OpSocket, openSideTab, reopenRoom, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, diceFoldsOpen, OpSocket, openSideTab, reopenRoom, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * Dice on the server (docs/design-v1-dice.md 13), on the real server serving
@@ -394,6 +394,62 @@ function sideways(page: Page, selector: string): Promise<number> {
     return el ? el.scrollWidth - el.clientWidth : -1;
     `,
   );
+}
+
+/** A roll's one-roll menu (docs/design-v1-roll-mode-menu.md 3.3), by its source's name. */
+function rollMenu(page: Page, name: RegExp): Locator {
+  return page.getByRole("menu", { name });
+}
+
+/**
+ * Brings `button` to its scroller's middle and focuses it, once the scroll
+ * has settled, so no scroll moves the source under its menu (3.3).
+ */
+async function focusStill(button: Locator): Promise<void> {
+  await button.evaluate((el) => (el as unknown as { scrollIntoView(o: object): void }).scrollIntoView({ block: "center" }));
+  let last = "";
+  await waitFor("the scroll to settle", async () => {
+    await sleep(120);
+    const box = JSON.stringify(await button.boundingBox());
+    const still = box === last;
+    last = box;
+    return still || null;
+  });
+  await button.evaluate((el) => (el as unknown as { focus(o: object): void }).focus({ preventScroll: true }));
+}
+
+/** Opens `button`'s one-roll menu by its ContextMenu key and picks `pick`, then hands back the dice line that lands. */
+async function menuRoll(page: Page, watch: SocketWatch, button: Locator, menu: RegExp, pick: string): Promise<DiceLine> {
+  const before = diceLines(watch.state?.log).length;
+  await focusStill(button);
+  await page.keyboard.press("ContextMenu");
+  await rollMenu(page, menu).getByRole("menuitem", { name: pick }).click();
+  return waitFor(`the line of ${pick}`, () => diceLines(watch.state?.log).slice(before).at(-1)?.data ?? null);
+}
+
+/** Where the panel's own Adv, Dis and Secret stand, which a menu pick never changes. */
+async function panelModes(page: Page): Promise<{ adv: boolean; dis: boolean; secret: boolean }> {
+  const group = page.getByRole("group", { name: "For the next roll" }).filter({ visible: true });
+  const pressed = async (name: RegExp) => (await group.getByRole("button", { name }).getAttribute("aria-pressed")) === "true";
+  return { adv: await pressed(/^Advantage$/), dis: await pressed(/^Disadvantage$/), secret: await pressed(/^(Hide from players|Only the DM sees it)$/) };
+}
+
+async function setPanelModes(page: Page, want: { adv: boolean; secret: boolean }): Promise<void> {
+  const group = page.getByRole("group", { name: "For the next roll" }).filter({ visible: true });
+  const now = await panelModes(page);
+  if (now.adv !== want.adv) await group.getByRole("button", { name: "Advantage", exact: true }).click();
+  if (now.secret !== want.secret) await group.getByRole("button", { name: /^(Hide from players|Only the DM sees it)$/ }).click();
+  await waitFor("the panel's modes", async () => {
+    const m = await panelModes(page);
+    return m.adv === want.adv && m.secret === want.secret ? true : null;
+  });
+}
+
+/** What the sticky line's result says beside its total: the mode the server rolled, and Secret (rollMode.ts effectiveRollMode). */
+async function resultWords(page: Page): Promise<string | null> {
+  const result = page.locator('[data-dice-last] [aria-label="Show this roll in Recent rolls"]').filter({ visible: true });
+  await result.waitFor();
+  return result.getAttribute("aria-description");
 }
 
 describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
@@ -1286,6 +1342,165 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
       const live = await rolling.evaluate((el) => (el as unknown as { closest(s: string): { outerHTML: string } | null }).closest('[role="status"], [role="alert"], [aria-live]:not([aria-live="off"])')?.outerHTML.slice(0, 120) ?? null);
       assert.equal(live, null, `"Rolling…" is in a live region: ${live}`);
       await shots.take(page, "dice-rolling-held");
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("dpf1-d1. a one-roll pick sends its own mode, the result line says what the server rolled, and the panel's Adv and Secret stay pressed", async () => {
+    await player.setViewportSize({ width: 390, height: 844 });
+    await player.emulateMedia({ reducedMotion: "reduce" });
+    try {
+      await openDicePhone(player);
+      await setPanelModes(player, { adv: true, secret: true });
+      const roll = player.locator('dialog[data-rvtt-sheet][aria-label="Dice"]').getByRole("button", { name: "Roll", exact: true });
+
+      await field(player).fill("1d20+1 Normal pick");
+      let line = await menuRoll(player, playerSocket, roll, /^Roll options for Dice formula$/, "Roll normally");
+      assert.deepEqual([line.to, line.rolls[0]?.mode, line.rolls[0]?.cancelled], ["all", undefined, undefined], "Normal drops the pressed Adv and Secret for this roll, to a player's default, public");
+      assert.equal(await resultWords(player), "Normal");
+      assert.deepEqual(await panelModes(player), { adv: true, dis: false, secret: true }, "and leaves both pressed");
+
+      await field(player).fill("1d20+2 Dis pick");
+      line = await menuRoll(player, playerSocket, roll, /^Roll options for Dice formula$/, "Roll with Disadvantage");
+      assert.deepEqual([line.to, line.rolls[0]?.mode], ["dm", "dis"], "Disadvantage in place of the pressed Adv, keeping the pressed Secret");
+      assert.equal(await resultWords(player), "Disadvantage, Secret");
+      assert.deepEqual(await panelModes(player), { adv: true, dis: false, secret: true });
+
+      // Restrained gives Disadvantage on Dexterity saves: the menu's Advantage cancels it, and the line says so.
+      const effectId = randomUUID();
+      await ops!.send({ t: "actor.effect.add", target: { characterId: run.thornId }, effect: { id: effectId, key: "restrained" } });
+      try {
+        const save = thornRolls(player).getByRole("button", { name: /^Dexterity save/ });
+        await waitFor("Restrained on Pat's Thorn", () => playerSocket.state?.characters[run.thornId]?.actor.effects.some((e) => e.id === effectId) || null);
+        await sleep(300);
+        line = await menuRoll(player, playerSocket, save, /^Roll options for Dexterity save/, "Roll with Advantage");
+        assert.deepEqual([line.rolls[0]?.mode, line.rolls[0]?.cancelled, line.to], [undefined, true, "dm"], "Advantage and Restrained's Disadvantage cancel");
+        assert.equal(await resultWords(player), "Normal: Advantage and Disadvantage cancelled, Secret");
+        line = await menuRoll(player, playerSocket, save, /^Roll options for Dexterity save/, "Roll normally");
+        assert.deepEqual([line.rolls[0]?.mode, line.rolls[0]?.cancelled, line.to], ["dis", undefined, "all"], "Normal drops the pressed Adv, never Restrained");
+        assert.equal(await resultWords(player), "Disadvantage");
+      } finally {
+        await ops!.send({ t: "actor.effect.remove", target: { characterId: run.thornId }, effectId });
+      }
+      assert.deepEqual(await panelModes(player), { adv: true, dis: false, secret: true }, "four picks pressed nothing and used nothing up");
+      await shots.take(player, "dpf1-d1-result-words");
+    } finally {
+      await setPanelModes(player, { adv: false, secret: false });
+      await player.emulateMedia({ reducedMotion: null });
+    }
+  });
+
+  test("dpf1-d2. Again's menu repeats a secret roll's formula with the chosen mode, still secret and with its label", async () => {
+    await player.emulateMedia({ reducedMotion: "reduce" });
+    try {
+      await openDicePhone(player);
+      await setPanelModes(player, { adv: false, secret: true });
+      const first = await rollWithEnter(player, playerSocket, "1d20+3 Perception");
+      assert.equal(first.to, "dm");
+      const again = player.locator('dialog[data-rvtt-sheet][aria-label="Dice"] [data-dice-last]').getByRole("button", { name: "Again", exact: true });
+      await focusStill(again);
+      await player.keyboard.press("ContextMenu");
+      const menu = rollMenu(player, /^Roll options for Again$/);
+      await menu.waitFor();
+      assert.equal(await menu.getByRole("menuitem", { name: "Roll secretly" }).getAttribute("aria-disabled"), "true", "a repeat keeps its recorded visibility");
+      const before = diceLines(playerSocket.state?.log).length;
+      await menu.getByRole("menuitem", { name: "Roll with Disadvantage" }).click();
+      const line = await waitFor("the repeat", () => diceLines(playerSocket.state?.log).slice(before).at(-1)?.data ?? null);
+      assert.deepEqual([line.to, line.rolls[0]?.mode, line.rolls[0]?.label], ["dm", "dis", "Perception"], "secret as recorded, Disadvantage, its own label");
+      assert.match(line.rolls[0]!.formula, /^2d20kl1\+3$/, "the recorded 1d20+3 with Disadvantage");
+      assert.equal(await resultWords(player), "Disadvantage, Secret");
+      assert.deepEqual(await panelModes(player), { adv: false, dis: false, secret: false }, "the first roll used the pressed Secret, the repeat nothing");
+    } finally {
+      await setPanelModes(player, { adv: false, secret: false });
+      await player.emulateMedia({ reducedMotion: null });
+    }
+  });
+
+  test("dpf1-d3. the damage menu offers no Advantage, and its Secret sends a critical with its rider once, the Critical going as after a tap", async () => {
+    await player.emulateMedia({ reducedMotion: "reduce" });
+    try {
+      await openDicePhone(player);
+      const rolls = thornRolls(player);
+      const critical = rolls.getByRole("button", { name: "Critical Hit for Longsword's next damage", exact: true });
+      // The Longsword's own rider: the long weapon of step 17 has one of the same name.
+      const smite = namedRow(rolls.getByRole("button", { name: "Longsword", exact: true })).getByRole("button", { name: "Divine Smite: add 2d8 to the next damage", exact: true });
+      await critical.click();
+      await smite.click();
+      assert.equal(await critical.getAttribute("aria-pressed"), "true");
+      assert.equal(await smite.getAttribute("aria-pressed"), "true");
+      const damage = rolls.getByRole("button", { name: /^Longsword damage/ });
+      await focusStill(damage);
+      await player.keyboard.press("ContextMenu");
+      const menu = rollMenu(player, /^Roll options for Longsword damage/);
+      assert.deepEqual(await menu.getByRole("menuitem").allInnerTexts(), ["Roll secretly", "Roll normally"], "no d20 choice for damage");
+      const before = diceLines(playerSocket.state?.log).length;
+      await menu.getByRole("menuitem", { name: "Roll secretly" }).click();
+      const line = await waitFor("the damage", () => diceLines(playerSocket.state?.log).slice(before).at(-1)?.data ?? null);
+      await sleep(400);
+      assert.equal(diceLines(playerSocket.state?.log).length, before + 1, "one damage line");
+      assert.equal(line.to, "dm");
+      assert.deepEqual(line.rolls.map((r) => [r.type, r.crit !== undefined, r.mode]), [["slashing", true, undefined], ["radiant", true, undefined]], "the weapon's and the rider's dice, both critical, no mode");
+      await waitFor("the Critical let go", async () => ((await critical.getAttribute("aria-pressed")) === "false" ? true : null));
+      if ((await smite.getAttribute("aria-pressed")) === "true") await smite.click();
+    } finally {
+      await player.emulateMedia({ reducedMotion: null });
+    }
+  });
+
+  test("dpf1-d4. a pick the server refuses, one whose answer never comes, and one lost with its socket each leave the panel's Adv pressed", async () => {
+    const context = await browser.newContext({ viewport: PHONE, deviceScaleFactor: 2, isMobile: true, hasTouch: true, reducedMotion: "reduce" });
+    try {
+      await context.addCookies(await playerContext.cookies(server.origin));
+      const page = await context.newPage();
+      const route: { spoil: boolean; hold: boolean; held: number; socket: { close(): Promise<void> } | null } = { spoil: false, hold: false, held: 0, socket: null };
+      await page.routeWebSocket(/\/ws\?room=/, (ws) => {
+        const upstream = ws.connectToServer();
+        route.socket = ws;
+        ws.onMessage((m) => {
+          if (typeof m === "string" && m.includes('"dice.roll"')) {
+            if (route.hold) {
+              route.held++;
+              return;
+            }
+            // A die of no sides, which the server refuses in its own words.
+            if (route.spoil) return upstream.send(m.replace(/"formula":"1d20/, '"formula":"1d0'));
+          }
+          upstream.send(m);
+        });
+        upstream.onMessage((m) => ws.send(m));
+      });
+      await page.goto(`${server.origin}/r/${run.roomId}`);
+      await page.getByRole("status", { name: "Connected" }).first().waitFor();
+      await openDicePhone(page);
+      await setPanelModes(page, { adv: true, secret: false });
+      const sheet = page.locator('dialog[data-rvtt-sheet][aria-label="Dice"]');
+      const roll = sheet.getByRole("button", { name: "Roll", exact: true });
+      const line = sheet.locator("[data-dice-last]");
+      const pick = async (formula: string) => {
+        await field(page).fill(formula);
+        await focusStill(roll);
+        await page.keyboard.press("ContextMenu");
+        await rollMenu(page, /^Roll options for Dice formula$/).getByRole("menuitem", { name: "Roll with Disadvantage" }).click();
+      };
+
+      route.spoil = true;
+      await pick("1d20+1 Refused");
+      await line.getByRole("alert").waitFor();
+      route.spoil = false;
+      assert.deepEqual(await panelModes(page), { adv: true, dis: false, secret: false }, "a refusal left Adv pressed");
+
+      route.hold = true;
+      await pick("1d20+2 Held");
+      await waitFor("the pick held", () => (route.held === 1 ? true : null));
+      await line.getByText("Rolling…", { exact: true }).waitFor({ timeout: 3_000 });
+      assert.deepEqual(await panelModes(page), { adv: true, dis: false, secret: false }, "a pick waiting on its answer left Adv pressed");
+      // The socket goes with the pick unanswered. The page sends it again or finds it never landed, and either way takes nothing from the panel.
+      await route.socket!.close();
+      route.hold = false;
+      await line.getByText(/^This may have happened|^\d/).first().waitFor({ timeout: 15_000 });
+      assert.deepEqual(await panelModes(page), { adv: true, dis: false, secret: false }, "a pick lost with its socket left Adv pressed");
+      await shots.take(page, "dpf1-d4-unknown");
     } finally {
       await context.close();
     }

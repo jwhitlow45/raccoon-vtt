@@ -313,6 +313,27 @@ describe("raccoon-vtt a player's save spell", { timeout: 600_000 }, () => {
     await shots.take(pat, "savespell-block");
   });
 
+  test("dpf1-s1. the block's Roll 8d6 Fire and ask offers Secret and Normal only, for the damage alone, and opening and closing it by ContextMenu sends nothing (docs/design-v1-roll-mode-menu.md 1)", async () => {
+    const dice = sheet(pat, "Dice");
+    const block = dice.getByRole("group", { name: "Ask for saves: Fireball" });
+    const send = block.getByRole("button", { name: "Roll 8d6 Fire and ask" });
+    assert.equal(await send.getAttribute("aria-haspopup"), "menu", "the damage roll has the menu");
+    assert.equal(await send.getAttribute("aria-keyshortcuts"), "ContextMenu Shift+F10");
+    const lines = diceLines(patSocket.state?.log).length;
+    const asks = Object.keys(patSocket.state?.rolls ?? {}).length;
+    await send.focus();
+    await pat.keyboard.press("ContextMenu");
+    const menu = pat.getByRole("menu", { name: "Roll options for Roll 8d6 Fire and ask" });
+    await menu.waitFor();
+    assert.deepEqual(await menu.getByRole("menuitem").allInnerTexts(), ["Roll secretly", "Roll normally"], "damage takes no Advantage or Disadvantage");
+    await shots.take(pat, "dpf1-s1-cast-damage-menu");
+    await pat.keyboard.press("Escape");
+    await menu.waitFor({ state: "detached" });
+    await pat.waitForTimeout(500);
+    assert.equal(diceLines(patSocket.state?.log).length, lines, "no dice");
+    assert.equal(Object.keys(patSocket.state?.rolls ?? {}).length, asks, "no ask");
+  });
+
   test("ss-2. at level 4, Roll 9d6 Fire and ask throws the dice and asks, and the waiting line shows", async () => {
     const dice = sheet(pat, "Dice");
     await dice.getByRole("button", { name: "Slot level for Fireball, higher" }).tap();

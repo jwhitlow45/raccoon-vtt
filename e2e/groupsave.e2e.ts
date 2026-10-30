@@ -595,7 +595,8 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
       if (hits > 0) await fold.getByText(`Scimitar: ${hits} hit${hits === 1 ? "" : "s"}`, { exact: false }).waitFor();
       await fold.tap();
       await waitFor(`Shared attacks open (${why})`, async () => ((await fold.getAttribute("aria-expanded")) === "true" ? true : null));
-      await rolls.getByText(/^\d+ (hit|miss|Critical Hit)(, \d+ (hit|miss|Critical Hit)){2}$/).waitFor();
+      // Each result may name its returned mode, such as "(Normal)" (docs/design-v1-roll-mode-menu.md 4).
+      await rolls.getByText(/^\d+ (hit|miss|Critical Hit)( \([^)]+\))?(, \d+ (hit|miss|Critical Hit)( \([^)]+\))?){2}$/).waitFor();
       if (hits > 0) await rolls.getByRole("button", { name: hitWords(hits), exact: true }).waitFor();
     };
 
@@ -604,6 +605,24 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     let hits = hitsOf(sent);
     await reopened(hits, "before the answer");
     await shots.take(dm, "dp-groupsave-shared-before-answer-130");
+    // The results' mode words add no line on a phone at 130% (docs/design-v1-roll-mode-menu.md 6: no new wrapping).
+    // A clone without them, at the same width, is the line as it was.
+    const lines = await rolls.getByText(/^\d+ (hit|miss|Critical Hit)( \([^)]+\))?(, \d+ (hit|miss|Critical Hit)( \([^)]+\))?){2}$/).evaluate((note) => {
+      type El = { textContent: string | null; parentElement: El; getBoundingClientRect(): { height: number }; cloneNode(deep: boolean): El; remove(): void; appendChild(e: El): void; style: { visibility: string; position: string; width: string } };
+      const el = note as unknown as El;
+      const text = el.textContent ?? "";
+      const bare = el.cloneNode(true);
+      bare.textContent = text.replace(/ \([^)]+\)/g, "");
+      bare.style.visibility = "hidden";
+      bare.style.position = "absolute";
+      bare.style.width = `${(note as unknown as { clientWidth: number }).clientWidth}px`;
+      el.parentElement.appendChild(bare);
+      const out = { text, bareText: bare.textContent, shown: el.getBoundingClientRect().height, bare: bare.getBoundingClientRect().height };
+      bare.remove();
+      return out;
+    });
+    assert.notEqual(lines.bareText, lines.text, `the clone dropped the mode words: ${JSON.stringify(lines)}`);
+    assert.ok(lines.shown <= lines.bare + 0.5, `the mode words wrap the shared attack's results: ${JSON.stringify(lines)}`);
     // Folded between Attack and Damage.
     await fold.tap();
     await reopened(hits, "between Attack and Damage");
@@ -630,7 +649,7 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
       const before = diceLines(dmSocket.state?.log).length;
       await rolls.getByRole("button", { name: hitWords(hits), exact: true }).tap();
       await waitFor("the hits' damage line", () => diceLines(dmSocket.state?.log).slice(before).find((l) => l.rolls.every((r) => r.label?.startsWith(`Scimitar damage for ${hits} hits`))) ?? null);
-      await rolls.getByText(/^\d+ damage\. Every HP entry offers it as a chip\.$/).waitFor();
+      await rolls.getByText(/^\d+ damage(, Secret)?\. Every HP entry offers it as a chip\.$/).waitFor();
     }
 
     // Fewer than two selected ends the view of several, and its hits go with it.
@@ -641,7 +660,7 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     await rolls.locator("[data-dice-card]").getByRole("heading", { name: "3 selected" }).waitFor();
     await attack(3).waitFor();
     assert.equal(await rolls.getByRole("button", { name: /^Roll damage for/ }).count(), 0, "the old hits are gone");
-    assert.equal(await rolls.getByText(/^\d+ (hit|miss|Critical Hit),/).count(), 0, "the old results are gone");
+    assert.equal(await rolls.getByText(/^\d+ (hit|miss|Critical Hit)( \([^)]+\))?,/).count(), 0, "the old results are gone");
     await diceSheet(dm).getByRole("button", { name: "Close Dice" }).tap();
   });
 

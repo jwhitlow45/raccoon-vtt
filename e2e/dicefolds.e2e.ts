@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
-import { barControl, ConsoleWatch, OpSocket, openSideTab, reopenRoom, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, OpSocket, openSideTab, reopenRoom, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * The Dice panel's folds (docs/design-v1-dice-pass.md 6), on the real
@@ -242,6 +242,44 @@ async function landed(page: Page, within: Locator) {
   assert.ok(seen.modesBottom <= seen.bottom, `the roll modes end inside the panel: ${JSON.stringify(seen)}`);
   assert.ok(seen.cardBottom <= seen.bottom, `the card follows them whole: ${JSON.stringify(seen)}`);
   return seen;
+}
+
+/**
+ * Brings `button` to its scroller's middle, waits for the scroll to settle,
+ * focuses it and opens its one-roll menu with the ContextMenu key, focus in
+ * the menu (docs/design-v1-roll-mode-menu.md 3.3). A scroll that takes
+ * the source out of view closes the menu, so none may still be running.
+ */
+async function keyMenu(page: Page, button: Locator, name: RegExp): Promise<Locator> {
+  await button.evaluate((el) => (el as unknown as { scrollIntoView(o: object): void }).scrollIntoView({ block: "center" }));
+  let last = "";
+  await waitFor("the scroll to settle", async () => {
+    await sleep(120);
+    const box = JSON.stringify(await button.boundingBox());
+    const still = box === last;
+    last = box;
+    return still || null;
+  });
+  await button.evaluate((el) => (el as unknown as { focus(o: object): void }).focus({ preventScroll: true }));
+  await page.keyboard.press("ContextMenu");
+  const menu = page.getByRole("menu", { name });
+  await menu.waitFor();
+  return menu;
+}
+
+/** Pat's dice lines, which grow by one for each roll that lands. */
+function patDiceCount(): number {
+  return (patSocket.state?.log ?? []).filter((e) => e.data?.type === "dice").length;
+}
+
+/** What has focus, by its role and name, or "body". */
+function focusedOn(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const el = (globalThis as unknown as { document: { activeElement: { tagName: string; getAttribute(n: string): string | null; closest(s: string): unknown } | null; body: unknown } }).document;
+    const at = el.activeElement;
+    if (!at || at === el.body) return "body";
+    return `${at.getAttribute("role") ?? at.tagName.toLowerCase()} ${at.getAttribute("aria-label") ?? ""}${at.closest('dialog[data-rvtt-sheet][aria-label="Dice"]') ? " (in Dice)" : ""}`;
+  });
 }
 
 const DM_GROUPS = ["Saves and checks", "Skills", "Actions"] as const;
@@ -639,6 +677,87 @@ describe("raccoon-vtt dice folds", { timeout: 300_000 }, () => {
       assert.deepEqual(phone.watch.errors, [], "the routed phone logged errors");
     } finally {
       await phone.context.close();
+    }
+  });
+
+  test("dpf1-f1. a save's one-roll menu closes with nothing sent as the DM's ask changes its route, focus staying on the save, whose new menu answers with Secret shown off", async () => {
+    const dice = await openDiceSheet(pat);
+    const options = dice.locator("[data-roll-options]");
+    await pick(options, "Thorn");
+    if ((await fold(options, "Saves and checks").getAttribute("aria-expanded")) === "false") await fold(options, "Saves and checks").tap();
+    const save = options.getByRole("button", { name: /^Wisdom save/ });
+    const menu = await keyMenu(pat, save, /^Roll options for Wisdom save, proficient$/);
+    const sent = patDiceCount();
+    const id = randomUUID();
+    await ask(id, { characterId: run.thornChar }, "wis");
+    await menu.waitFor({ state: "detached" });
+    await sleep(600);
+    assert.equal(patDiceCount(), sent, "the route change sent no roll");
+    assert.match(await focusedOn(pat), /^button Wisdom save, proficient, answers the DM's request.* \(in Dice\)$/, "focus stays on the save");
+    const answer = await keyMenu(pat, save, /^Roll options for Wisdom save, proficient, answers the DM's request/);
+    assert.equal(await answer.getByRole("menuitem", { name: "Roll secretly" }).getAttribute("aria-disabled"), "true");
+    await answer.getByRole("menuitem", { name: "Roll with Advantage" }).tap();
+    await waitFor("Thorn's answer", () => (dmSocket.state?.rolls[id]?.targets[0]?.total !== undefined ? true : null));
+  });
+
+  test("dpf1-f2. an attack's menu closes with nothing sent as the DM changes its bonus, and the next one sends the new bonus", async () => {
+    const options = (await openDiceSheet(pat)).locator("[data-roll-options]");
+    const attack = options.getByRole("button", { name: "Longsword", exact: true });
+    const menu = await keyMenu(pat, attack, /^Roll options for Longsword$/);
+    const sent = patDiceCount();
+    const rolls = THORN_STATS.rolls.map((r) => (r.id === "ls" ? { ...r, attack: { prof: true, bonus: 2 } } : r));
+    await ops.send({ t: "character.update", characterId: run.thornChar, patch: { stats: { ...THORN_STATS, rolls } } });
+    try {
+      await menu.waitFor({ state: "detached" });
+      await sleep(600);
+      assert.equal(patDiceCount(), sent, "the stale attack sent nothing");
+      const again = await keyMenu(pat, attack, /^Roll options for Longsword$/);
+      await again.getByRole("menuitem", { name: "Roll with Advantage" }).tap();
+      const line = await waitFor("the new attack", () => (patSocket.state?.log ?? []).filter((e) => e.data?.type === "dice").slice(sent).at(-1)?.data ?? null);
+      assert.equal(line.type === "dice" ? line.rolls[0]?.formula : null, "2d20kh1+8", "+6 and the new +2, with Advantage");
+    } finally {
+      await ops.send({ t: "character.update", characterId: run.thornChar, patch: { stats: THORN_STATS } });
+    }
+  });
+
+  test("dpf1-f3. folding the source's group closes its menu with nothing sent", async () => {
+    const options = (await openDiceSheet(pat)).locator("[data-roll-options]");
+    const skills = fold(options, "Skills");
+    const was = await skills.getAttribute("aria-expanded");
+    if (was === "false") await skills.tap();
+    const athletics = options.getByRole("button", { name: /^Athletics check/ });
+    await athletics.evaluate((el) => (el as unknown as { scrollIntoView(o: object): void }).scrollIntoView({ block: "center" }));
+    await sleep(300);
+    await athletics.click({ button: "right" });
+    const menu = pat.getByRole("menu", { name: /^Roll options for Athletics check/ });
+    await menu.waitFor();
+    const sent = patDiceCount();
+    await skills.tap();
+    await menu.waitFor({ state: "detached" });
+    await sleep(600);
+    assert.equal(patDiceCount(), sent, "the fold sent nothing");
+    assert.equal(await skills.getAttribute("aria-expanded"), "false");
+    if (was === "true") await skills.tap();
+  });
+
+  test("dpf1-f4. a menu whose creature leaves Pat's panel goes with it, focus landing in the Dice sheet, never on the page", async () => {
+    const options = (await openDiceSheet(pat)).locator("[data-roll-options]");
+    await pick(options, "Sildar");
+    // The NPC has no numbers here, so its Initiative rolls by the bonus typed.
+    await options.getByRole("textbox", { name: "Bonus", exact: true }).fill("+2");
+    const initiative = options.getByRole("button", { name: /^Initiative/ });
+    const menu = await keyMenu(pat, initiative, /^Roll options for Initiative/);
+    const sent = patDiceCount();
+    await ops.send({ t: "token.update", tokenId: run.sildar.id, patch: { ownerIds: [] } });
+    try {
+      await menu.waitFor({ state: "detached" });
+      await sleep(600);
+      assert.equal(patDiceCount(), sent, "the creature's leaving sent nothing");
+      assert.match(await focusedOn(pat), /\(in Dice\)$/, `focus went to the Dice sheet: ${await focusedOn(pat)}`);
+    } finally {
+      await ops.send({ t: "token.update", tokenId: run.sildar.id, patch: { ownerIds: [run.patId] } });
+      await tab(options, "Sildar").waitFor();
+      await pick(options, "Thorn");
     }
   });
 
