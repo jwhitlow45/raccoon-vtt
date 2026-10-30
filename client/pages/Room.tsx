@@ -1923,11 +1923,12 @@ function Toasts(props: {
   return (
     <>
       <ToastVoice toasts={toasts} heldSince={heldSince} />
-      {overMap.length > 0 ? <ToastStack stack={stacks.notices} style={{ width: "100%" }} /> : null}
-      {props.layer && lowAt !== null
+      {/* Keep empty stacks mounted until the layout effect moves their last host, so React cannot detach its focused action first. */}
+      <ToastStack stack={stacks.notices} style={{ width: "100%" }} />
+      {props.layer
         ? createPortal(
             // Under the column's first card, the card's edges, so the toast lines up with it. Under a pane's header, across the map as the notices are.
-            <ToastStack stack={stacks.layer} style={{ position: "absolute", top: lowAt.top, ...(lowAt.edges ? { left: lowAt.edges.left, right: lowAt.edges.right } : { left: 0, right: 0, padding: `0 ${theme.space(3)}px` }) }} />,
+            <ToastStack stack={stacks.layer} style={{ position: "absolute", top: lowAt?.top ?? 0, ...(lowAt?.edges ? { left: lowAt.edges.left, right: lowAt.edges.right } : { left: 0, right: 0, padding: `0 ${theme.space(3)}px` }) }} />,
             props.layer,
           )
         : null}

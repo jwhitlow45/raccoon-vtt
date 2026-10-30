@@ -1187,7 +1187,14 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       await dm.waitForTimeout(300);
       await springs();
       await toast.waitFor();
-      // FU39-B: reparenting the toast as the pane changes shape keeps its action focused.
+      // FU39-ASTRA-01: settling the card leaves the sole toast, so turning the
+      // pane sideways moves it to notices, and turning back empties notices.
+      for (const due of dmSocket.state?.traps[trapId]?.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId, due: due.id });
+      await dm.waitForTimeout(300);
+      assert.equal(await dm.locator("[data-toast]").count(), 1, "FU39-ASTRA-01: the moving toast must be alone");
+      const inLayer = () => toast.evaluate((el) => (el as unknown as { closest(selector: string): unknown }).closest("[data-rvtt-toast-layer]") !== null);
+      assert.equal(await inLayer(), true, "FU39-ASTRA-01: the upright pane must start the toast in the layer");
+      await toast.evaluate((el) => (el as unknown as { setAttribute(name: string, value: string): void }).setAttribute("data-e2e-kept", "sole-toast"));
       await save.focus();
       assert.equal(await save.evaluate((el) => el === (el as unknown as { ownerDocument: { activeElement: unknown } }).ownerDocument.activeElement), true);
       await dm.setViewportSize({ width: 844, height: 390 });
@@ -1195,8 +1202,18 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       const sideways = await rectOf(toast);
       assert.ok(sideways.top >= 0 && sideways.bottom <= 390, `turned sideways, the trap's toast stands at ${sideways.top} to ${sideways.bottom}, off the screen`);
       assert.ok(await wholeInReach(save), "turned sideways, the trap's Save and damage is out of reach");
-      assert.equal(await save.evaluate((el) => el === (el as unknown as { ownerDocument: { activeElement: unknown } }).ownerDocument.activeElement), true, "FU39-B: moving the toast blurred Save and damage");
+      assert.equal(await inLayer(), false, "FU39-ASTRA-01: turning sideways must empty the source layer");
+      assert.equal(await save.evaluate((el) => el === (el as unknown as { ownerDocument: { activeElement: unknown } }).ownerDocument.activeElement), true, "FU39-ASTRA-01: layer to notices blurred Save and damage");
+      assert.equal(await toast.getAttribute("data-e2e-kept"), "sole-toast", "FU39-ASTRA-01: the toast remounted");
       await shots.take(dm, "dmphone-lp18-pane-toast-turned");
+      await dm.setViewportSize({ width: 390, height: 844 });
+      await dm.waitForTimeout(800);
+      assert.equal(await dm.locator("[data-toast]").count(), 1);
+      assert.equal(await inLayer(), true, "FU39-ASTRA-01: turning upright must empty the source notices");
+      assert.equal(await save.evaluate((el) => el === (el as unknown as { ownerDocument: { activeElement: unknown } }).ownerDocument.activeElement), true, "FU39-ASTRA-01: notices to layer blurred Save and damage");
+      assert.equal(await toast.getAttribute("data-e2e-kept"), "sole-toast", "FU39-ASTRA-01: the toast remounted on return");
+      assert.ok(await wholeInReach(save), "FU39-ASTRA-01: the returned action is out of reach");
+      await shots.take(dm, "dmphone-fu39-sole-toast-returned");
     } finally {
       await dm.setViewportSize({ width: 390, height: 844 });
       for (const due of dmSocket.state?.traps[trapId]?.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId, due: due.id });

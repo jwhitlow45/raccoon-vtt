@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import * as React from "react";
+import { transformWithOxc } from "vite";
 import { keptMapFoot, putToastHosts } from "./toastPlacement.ts";
 import { nextToastPlaces, NO_TOAST_PLACES } from "../canvas/barDock.ts";
 
@@ -23,6 +26,11 @@ function page() {
       this.children.splice(before ? this.children.indexOf(before) : this.children.length, 0, node);
       node.parent = this;
     }
+    remove() {
+      if (this.contains(doc.activeElement)) doc.activeElement = null;
+      if (this.parent) this.parent.children.splice(this.parent.children.indexOf(this), 1);
+      this.parent = null;
+    }
     focus(options?: FocusOptions) { doc.activeElement = this; this.options = options; this.focusCalls++; }
   }
   const stack = new Host();
@@ -30,11 +38,40 @@ function page() {
   const first = new Host();
   const moved = new Host();
   const action = new Host();
+  const root = new Host();
+  root.insertBefore(stack, null);
+  root.insertBefore(other, null);
   stack.insertBefore(first, null);
   other.insertBefore(moved, null);
   moved.insertBefore(action, null);
   return { doc, stack, other, first, moved, action, place: (hosts: Host[]) => putToastHosts(stack as unknown as HTMLElement, hosts as unknown as HTMLElement[]) };
 }
+
+// Run the stack portion of Toasts' JSX. The fake commit removes omitted stacks
+// before the real placement helper runs, matching React's mutation/layout order.
+const room = readFileSync(new URL("./Room.tsx", import.meta.url), "utf8");
+const start = room.indexOf("\n", room.indexOf("<ToastVoice toasts=", room.indexOf("function Toasts(")));
+const end = room.indexOf("\n      {drawn.map", start);
+assert.ok(start > 0 && end > start, "Toasts must expose its stack rendering for the lifecycle check");
+const { code } = await transformWithOxc(`function renderStacks(props, overMap, lowAt, stacks) { return <>${room.slice(start, end)}</>; }`, "toast-stacks.tsx", { jsx: { runtime: "classic" } });
+const renderStacks = new Function("React", "createPortal", "ToastStack", "theme", `${code}\nreturn renderStacks;`)(React, (node: unknown) => node, "toast-stack", { space: (n: number) => 4 * n }) as (props: object, overMap: unknown[], lowAt: object | null, stacks: object) => React.ReactElement<{ children: React.ReactNode }>;
+
+for (const direction of ["notices to layer", "layer to notices"] as const) test(`FU39-ASTRA-01: a focused sole toast survives ${direction} through the commit`, () => {
+  const p = page();
+  p.first.remove();
+  const toLayer = direction === "notices to layer";
+  const source = toLayer ? p.stack : p.other;
+  const target = toLayer ? p.other : p.stack;
+  source.insertBefore(p.moved, null);
+  p.action.focus();
+  const rendered = renderStacks({ layer: {} }, toLayer ? [] : [{}], toLayer ? { top: 100, edges: null } : null, { notices: p.stack, layer: p.other });
+  const kept = React.Children.toArray(rendered.props.children).map((node) => (node as React.ReactElement<{ stack: typeof p.stack }>).props.stack);
+  for (const stack of [p.stack, p.other]) if (!kept.includes(stack)) stack.remove();
+  putToastHosts(target as unknown as HTMLElement, [p.moved as unknown as HTMLElement]);
+  assert.equal(p.doc.activeElement, p.action, "the source stack must stay connected until its focused toast moves");
+  assert.equal(source.children.length, 0);
+  assert.deepEqual(target.children, [p.moved]);
+});
 
 test("FU39-B: a focused toast action keeps focus when its host moves between stacks", () => {
   const p = page();
