@@ -1,9 +1,9 @@
-import { chunkKey, doorChunk, keys, wallMidpoint } from "./keys.ts";
+import { chunkKey, doorChunk, holderChunkKey, keys, wallMidpoint } from "./keys.ts";
 import { imageAssetId } from "./imageRef.ts";
 import { eventLines } from "./logRings.ts";
 import type { Actor, BuildChunk, CastAsk, Character, Drawing, DurationAnchor, Effect, ImageRef, InitEntry, JournalAccess, PromptKey, RollTarget, RoomSettings, RoomState, Scene, Token, Viewer } from "./model.ts";
 import { MAX_ROUTE_REACH, syncStampFits, type ActorTarget, type CharacterExpect, type DoorRef, type ExpectPart, type Op, type OpOf, type RefusalCode, type TokenInput, type TokenPatch } from "./protocol.ts";
-import { gridOfToken, hash128, inSightOfNonOwners, ownsCharacter, ownsToken, projectEntity, stableStringify, viewerSceneId, type ProjectOpts, type ProjectedEncounter } from "./project.ts";
+import { gridOfToken, hash128, inSightOfNonOwners, ownsCharacter, ownsToken, projectEntity, shownFreeWall, stableStringify, viewerSceneId, type ProjectOpts, type ProjectedEncounter } from "./project.ts";
 import { CHARACTER_CHANGED, LIMITS } from "./limits.ts";
 import { restoreAddedAssets } from "./referencedAssets.ts";
 import { handoutPages } from "./handouts.ts";
@@ -2033,8 +2033,22 @@ export function stopWords(state: RoomState, ground: Ground | null, walker: Walke
   const met = legStopPart(state, at, end);
   if (!met?.part) return SOMETHING_BLOCKS;
   const ledge = met.stop.blocker === "ledge";
-  if (!partLive(ground, met.part, ledge)) return SOMETHING_BLOCKS;
+  if (!partLive(ground, met.part, ledge, met.stop.door ? doorMatchesLive(state, ground, met.stop.door) : undefined)) return SOMETHING_BLOCKS;
   return ledge ? LEDGE_IN_THE_WAY : WALL_IN_THE_WAY;
+}
+
+/** The version of a free door the sender reads at the met cell must match the live blocker before it can borrow a neighboring cell's sight. */
+function doorMatchesLive(state: RoomState, ground: Ground, door: DoorRef): ((x: number, y: number) => boolean) | undefined {
+  if ("edge" in door) return undefined;
+  const key = chunkKey(ground.sceneId, door.cx, door.cy);
+  const wall = state.buildChunks[key]?.walls?.find((w) => w.id === door.id);
+  if (!wall) return undefined;
+  const live = stableStringify(shownFreeWall(wall));
+  return (x, y) => {
+    const memory = ground.holder !== null && ground.own(x, y) ? state.memoryBy?.[holderChunkKey(ground.sceneId, ground.holder, door.cx, door.cy)] : state.memory?.[key];
+    const version = memory?.walls?.[door.id]?.find((v) => v.cells.includes(`${x},${y}`));
+    return version === undefined || stableStringify(version.wall) === live;
+  };
 }
 
 /**

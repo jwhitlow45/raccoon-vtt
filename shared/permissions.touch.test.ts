@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
 import { edge, heights, lift, liftAllBut, paint, remember, wall } from "./discoveryTestutil.ts";
 import { chunkKey } from "./keys.ts";
+import { playerChunk, projectState } from "./project.ts";
 import type { EdgeFeature, RoomState } from "./model.ts";
 import { cellVision } from "./perPlayerTestutil.ts";
 import {
@@ -13,6 +14,7 @@ import {
   canApply,
   doorReachPassed,
   touchLanding,
+  stopWords,
   type PermissionDeps,
 } from "./permissions.ts";
 import type { Op, OpOf } from "./protocol.ts";
@@ -20,6 +22,8 @@ import { applyOp } from "./reducer.ts";
 import { visionRules } from "./ruleHooks.ts";
 import { placedOnHex, tokenRefHex } from "./rules/footprint.ts";
 import { sceneGrid } from "./rules/grid.ts";
+import { deviceGround } from "./rules/held.ts";
+import { ownWalk } from "./rules/movement.ts";
 import { hexAt, hexCenter, hexKey, hexNeighbors, type Hex, type HexGrid } from "./rules/hex.ts";
 import { sideWall } from "./rules/hexWalls.testkit.ts";
 import { NO_ROOM_TO_GROW } from "./rules/resize.ts";
@@ -129,6 +133,80 @@ describe("a walk the real build stops (the touch rule)", () => {
     // With nothing there the walk is not stopped at all, and a wall further on stops it with the same words.
     edge(open, "10,5,w", WALL);
     assert.equal(decide(east, open), SOMETHING_BLOCKS);
+  });
+
+  test("LP23-B-IMPORT-2: a held imported door hugging live ground names its blocker on the server and device", () => {
+    for (const inset of [6 / 64, 1 / 8]) {
+      for (const remembered of [false, true]) for (const horizontal of [false, true]) {
+        const s = base();
+        s.tokens.thorn = { ...s.tokens.thorn!, x: horizontal ? 5 : 6, y: horizontal ? 6 : 5 };
+        lift(s, "party", { x: 4, y: 4, w: 5, h: 5 });
+        const a: [number, number] = [8 + inset, 5 + 6 / 64];
+        const b: [number, number] = [8 + inset, 6 - 6 / 64];
+        const door = wall(s, "aaaaaaaaaaaa", horizontal ? [a[1], a[0]] : a, horizontal ? [b[1], b[0]] : b, { kind: "door", state: "closed", secret: false, discovered: false });
+        if (remembered) remember(s, null, 0, 0, { walls: { [door.id]: [{ wall: door, cells: [horizontal ? "5,8" : "8,5"] }] } });
+        const move: OpOf<"token.move"> = horizontal ? { ...east, x: 5, y: 12 } : east;
+        assert.deepEqual(playerChunk(s, { sceneId: "s1", cx: 0, cy: 0 }, null)?.walls?.find((w) => w.id === door.id), door);
+        assert.equal(decide(move, s), WALL_IN_THE_WAY, `${inset}, remembered=${remembered}, horizontal=${horizontal}`);
+        assert.equal(touchLanding(move, P1, s, deps)?.words, WALL_IN_THE_WAY);
+        const view = projectState(s, P1, { sceneId: "s1" }) as unknown as RoomState;
+        assert.equal(stopWords(view, deviceGround(view, "s1"), ownWalk(s.tokens.thorn!), { x: move.x, y: move.y, elevation: 0 }, "wall"), WALL_IN_THE_WAY);
+      }
+    }
+  });
+
+  test("LP23-B-IMPORT-2: a hidden difference beside live ground still names nothing", () => {
+    for (const remembered of ["absent", "open", "moved"] as const) {
+      const s = base();
+      lift(s, "dm", { x: 0, y: 3, w: 8, h: 5 });
+      lift(s, "party", { x: 8, y: 5, w: 1, h: 1 });
+      const door = wall(s, "aaaaaaaaaaaa", [8 + 6 / 64, 5 + 6 / 64], [8 + 6 / 64, 6 - 6 / 64], { kind: "door", state: "closed", secret: false, discovered: false });
+      const old = remembered === "absent" ? null : remembered === "open" ? { ...door, f: { kind: "door" as const, state: "open" as const, secret: false, discovered: false } } : { ...door, a: [8.5, 5] as [number, number], b: [8.5, 6] as [number, number] };
+      remember(s, null, 0, 0, { walls: { [door.id]: [{ wall: old, cells: ["8,5"] }] } });
+      assert.equal(decide(east, s), SOMETHING_BLOCKS, remembered);
+      assert.equal(touchLanding(east, P1, s, deps)?.words, SOMETHING_BLOCKS, remembered);
+    }
+  });
+
+  test("LP23-B-IMPORT-2: the met cell chooses the holder's own door memory before the party's", () => {
+    for (const ownGround of [false, true]) {
+      for (const ownClosed of [false, true]) {
+        const s = base();
+        s.scenes.s1 = { ...s.scenes.s1!, vision: { on: true, light: "dark", perPlayer: true } };
+        s.holders = { s1: { sceneId: "s1", rev: 0, entries: [{ memberId: "p1", on: true }] } };
+        lift(s, "dm", { x: 0, y: 3, w: 8, h: 5 });
+        lift(s, "party", { x: 8, y: 5, w: 1, h: 1 });
+        if (ownGround) lift(s, { holder: "p1" }, { x: 8, y: 5, w: 1, h: 1 });
+        const door = wall(s, "aaaaaaaaaaaa", [8 + 6 / 64, 5], [8 + 6 / 64, 6], { kind: "door", state: "closed", secret: false, discovered: false });
+        const open = { ...door, f: { kind: "door" as const, state: "open" as const, secret: false, discovered: false } };
+        remember(s, "p1", 0, 0, { walls: { [door.id]: [{ wall: ownClosed ? door : open, cells: ["8,5"] }] } });
+        remember(s, null, 0, 0, { walls: { [door.id]: [{ wall: ownClosed ? open : door, cells: ["8,5"] }] } });
+        assert.equal(decide(east, s), ownGround === ownClosed ? WALL_IN_THE_WAY : SOMETHING_BLOCKS, `ownGround=${ownGround}, ownClosed=${ownClosed}`);
+      }
+    }
+  });
+
+  test("LP23-B-IMPORT-2: the hug needs held ground, half a sub-cell, and a wall along the side", () => {
+    for (const kind of ["unheld", "far", "crossing"] as const) {
+      const s = base();
+      lift(s, "dm", { x: 0, y: 3, w: 8, h: 5 });
+      if (kind !== "unheld") lift(s, "party", { x: 8, y: 5, w: 1, h: 1 });
+      const x = 8 + (kind === "far" ? 13 / 64 : 6 / 64);
+      wall(s, "aaaaaaaaaaaa", kind === "crossing" ? [8, 5.5] : [x, 5], kind === "crossing" ? [8.5, 5.5] : [x, 6], { kind: "door", state: "closed", secret: false, discovered: false });
+      assert.equal(decide(east, s), SOMETHING_BLOCKS, kind);
+    }
+  });
+
+  test("LP23-B-IMPORT-2: the reported grid-line door and wall junction already names the visible wall", () => {
+    const s = base({ light: "bright" });
+    s.tokens.thorn = { ...s.tokens.thorn!, x: 4, y: 1 };
+    lift(s, "party", { x: 0, y: 0, w: 10, h: 10 });
+    wall(s, "aaaaaaaaaaaa", [5, 1], [5, 1.5]);
+    wall(s, "bbbbbbbbbbbb", [5, 1.5], [5, 2.5], { kind: "door", state: "closed", secret: false, discovered: false });
+    wall(s, "cccccccccccc", [5, 2.5], [5, 9]);
+    const across: OpOf<"token.move"> = { t: "token.move", tokenId: "thorn", x: 6, y: 1 };
+    assert.equal(decide(across, s), WALL_IN_THE_WAY);
+    assert.equal(touchLanding(across, P1, s, deps)?.words, WALL_IN_THE_WAY);
   });
 
   test("a diagonal past the corner of an unheld raised cell: the generic words, today's where the cell is revealed", () => {

@@ -460,9 +460,11 @@ export function convexLive(ground: Ground, hull: readonly Point[], work?: { n: n
  * part is cut at the grid lines, and each stretch is judged at its middle,
  * which lies inside the cells the stretch lies in or on the line between
  * them. Hexes read the same way (hexPartLive). Cells off the scene hold
- * nothing to hide.
+ * nothing to hide. A free door within half a sub-cell of a square's side
+ * may use the live cell across it only where `matchesLive` confirms its
+ * held version equals the blocker.
  */
-export function partLive(ground: Ground, [ax, ay, bx, by]: readonly [number, number, number, number], both: boolean): boolean {
+export function partLive(ground: Ground, [ax, ay, bx, by]: readonly [number, number, number, number], both: boolean, matchesLive?: (x: number, y: number) => boolean): boolean {
   if (isHex(ground.grid)) return hexPartLive(ground, [ax, ay, bx, by], both);
   const cuts = [0, 1];
   for (const [a, b] of [
@@ -477,11 +479,22 @@ export function partLive(ground: Ground, [ax, ay, bx, by]: readonly [number, num
   }
   cuts.sort((p, q) => p - q);
   const beside = (v: number) => (Number.isInteger(v) ? [v - 1, v] : [Math.floor(v)]);
+  // A door inside half a sight sub-cell can hide every sample behind it.
+  // Only a matching held version may borrow sight from across that side.
+  const band = 0.5 / SUB;
+  const hugs = (a: number, b: number, along: boolean) => along && Math.round(a) === Math.round(b) && Math.max(Math.abs(a - Math.round(a)), Math.abs(b - Math.round(b))) <= band;
+  const hugX = hugs(ax, bx, Math.abs(bx - ax) <= Math.abs(by - ay));
+  const hugY = hugs(ay, by, Math.abs(by - ay) <= Math.abs(bx - ax));
   const liveAt = (x: number, y: number) => {
     const cells = beside(x).flatMap((cx) => beside(y).map((cy) => [cx, cy] as const));
     const on = cells.filter(([cx, cy]) => cx >= 0 && cy >= 0 && cx < ground.bounds.w && cy < ground.bounds.h);
     const live = (c: readonly [number, number]) => ground.live(c[0], c[1]);
-    return on.length === 0 || (both ? on.every(live) : on.some(live));
+    if (on.length === 0 || (both ? on.every(live) : on.some(live))) return true;
+    if (both || !matchesLive) return false;
+    return on.some(([cx, cy]) => {
+      if (!ground.held(cx, cy) || !matchesLive(cx, cy)) return false;
+      return (hugX && ground.live(cx < Math.round(x) ? cx + 1 : cx - 1, cy)) || (hugY && ground.live(cx, cy < Math.round(y) ? cy + 1 : cy - 1));
+    });
   };
   if (ax === bx && ay === by) return liveAt(ax, ay);
   for (let i = 1; i < cuts.length; i++) {
