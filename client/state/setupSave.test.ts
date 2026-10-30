@@ -9,8 +9,11 @@ import { createRoomStore } from "./store.ts";
 import { FakeClock, FakeOutbox } from "./testing.ts";
 
 const SAVED = "Saved. Undo in Setup history.";
+const TOO_LARGE = "This change is too large to undo.";
 const rename: ClientOp = { t: "scene.update", sceneId: "s1", patch: { name: "The crypt" } };
-type Ev = Extract<ServerMessage, { t: "ev" }>;
+type StateEvent = Extract<ServerMessage, { t: "ev" }>;
+type Ack = NonNullable<StateEvent["ackDetails"]>[number] & { recorded?: boolean; tooLarge?: true };
+type Ev = Omit<StateEvent, "ackDetails"> & { ackDetails?: Ack[] };
 
 function setup(viewer: Viewer = DM) {
   const room = createRoomStore({ roomId: "R1", you: viewer, clock: new FakeClock() });
@@ -19,11 +22,12 @@ function setup(viewer: Viewer = DM) {
   const snapshot = (watermark = 0) => room.applySnapshot({ t: "snapshot", seq: room.store.getState().seq, watermark, state: projectState(roomState(), viewer, { sceneId: "s1" }), you: { ...viewer, sceneId: "s1" } });
   snapshot();
   const event = (n: number, scope: UndoScope = "setup", changed = true, extra: Partial<Ev> = {}): Ev => ({
-    t: "ev", seq: room.store.getState().seq + 1, changes: [], acks: [n], ackDetails: [{ n, scope, changed }], ...extra,
+    t: "ev", seq: room.store.getState().seq + 1, changes: [], acks: [n], ackDetails: [{ n, scope, changed, recorded: true }], ...extra,
   });
   const notices = () => room.store.getState().toasts.filter((toast) => toast.text === SAVED);
-  const clear = () => notices().forEach((toast) => room.ui.dismissToast(toast.id));
-  return { room, snapshot, event, notices, clear };
+  const oversized = () => room.store.getState().toasts.filter((toast) => toast.text === TOO_LARGE);
+  const clear = () => [...notices(), ...oversized()].forEach((toast) => room.ui.dismissToast(toast.id));
+  return { room, snapshot, event, notices, oversized, clear };
 }
 
 test("only a server-confirmed effective Setup save announces, including quiet editors", () => {
@@ -90,8 +94,8 @@ test("details must match both an acknowledgment and a pending command by number"
     const other = s.room.dispatch(rename)!;
     const ev = s.event(n);
     if (kind === "no-ack") ev.acks = [];
-    if (kind === "foreign-number") ev.ackDetails = [{ n: 999, scope: "setup", changed: true }];
-    if (kind === "pending-other") ev.ackDetails = [{ n: other, scope: "setup", changed: true }];
+    if (kind === "foreign-number") ev.ackDetails = [{ n: 999, scope: "setup", changed: true, recorded: true }];
+    if (kind === "pending-other") ev.ackDetails = [{ n: other, scope: "setup", changed: true, recorded: true }];
     s.room.applyEv(ev);
     assert.equal(s.notices().length, 0, kind);
     s.room.dispose();
@@ -110,7 +114,7 @@ test("per-op effects survive a batch that returns to its starting values", () =>
   const s = setup();
   const first = s.room.dispatch(rename)!;
   const second = s.room.dispatch({ t: "scene.update", sceneId: "s1", patch: { name: "s1" } })!;
-  s.room.applyEv(s.event(first, "setup", true, { seq: 2, acks: [first, second], ackDetails: [{ n: second, scope: "setup", changed: true }, { n: first, scope: "setup", changed: true }] }));
+  s.room.applyEv(s.event(first, "setup", true, { seq: 2, acks: [first, second], ackDetails: [{ n: second, scope: "setup", changed: true, recorded: true }, { n: first, scope: "setup", changed: true, recorded: true }] }));
   assert.equal(s.notices().length, 1, "one confirmation for this batch of saves, despite no net projected change");
   s.room.dispose();
 });
@@ -157,15 +161,83 @@ test("randomized scopes, effects, refusals, missing receipts and lost answers ke
       const changed = next() % 3 !== 0;
       const kind = next() % 5;
       const ev = s.event(n, scope, changed, { seq: s.room.store.getState().seq + 1 + next() % 5 });
+      const recorded = next() % 3 !== 0;
+      const tooLarge = !recorded && next() % 2 === 0;
+      ev.ackDetails = [{ n, scope, changed, recorded, ...(tooLarge ? { tooLarge: true as const } : {}) }];
       if (kind === 0) delete ev.ackDetails;
       if (kind === 1) ev.rejects = [{ n, code: "invalid", message: "No longer available" }];
       if (kind === 2) s.snapshot(n);
       else s.room.applyEv(ev);
-      assert.equal(s.notices().length, kind > 2 && scope === "setup" && changed ? 1 : 0, `seed ${seed}, step ${step}: only an accepted effective Setup receipt confirms`);
+      assert.equal(s.notices().length, kind > 2 && scope === "setup" && changed && recorded ? 1 : 0, `seed ${seed}, step ${step}: only an accepted effective Setup receipt confirms`);
+      assert.equal(s.oversized().length, kind > 2 && changed && tooLarge ? 1 : 0, `seed ${seed}, step ${step}: only the oversized flag warns`);
+      const warning = s.oversized()[0]?.id;
       const id = s.notices()[0]?.id;
       s.room.applyEv(ev);
+      assert.equal(s.oversized()[0]?.id, warning, "warnings never repeat on replay");
       assert.equal(s.notices()[0]?.id, id, `seed ${seed}, step ${step}: repeated delivery never repeats confirmation`);
     }
+    s.room.dispose();
+  }
+});
+
+
+test("only a recorded Setup step promises Undo, including legacy metadata", () => {
+  for (const recorded of [false, undefined]) {
+    const s = setup();
+    const n = s.room.dispatch(rename)!;
+    s.room.applyEv(s.event(n, "setup", true, { ackDetails: [{ n, scope: "setup", changed: true, ...(recorded === undefined ? {} : { recorded }) }] }));
+    assert.equal(s.notices().length, 0);
+    assert.equal(s.oversized().length, 0, "unrecorded alone does not mean oversized");
+    s.room.dispose();
+  }
+});
+
+for (const viewer of [DM, P1]) for (const scope of ["play", "setup"] as const) test(`${viewer.role} gets one oversized ${scope} warning, including quiet commands`, () => {
+  for (const quiet of [false, true]) {
+    const s = setup(viewer);
+    const n = s.room.dispatch(rename, { quiet })!;
+    const ev = s.event(n, scope, true, { ackDetails: [{ n, scope, changed: true, recorded: false, tooLarge: true }] });
+    s.room.applyEv(ev);
+    assert.equal(s.notices().length, 0);
+    assert.equal(s.oversized().length, 1);
+    const id = s.oversized()[0]!.id;
+    s.room.applyEv(ev);
+    assert.equal(s.oversized()[0]!.id, id);
+    const again = s.room.dispatch(rename, { quiet })!;
+    s.room.applyEv(s.event(again, scope, true, { ackDetails: [{ n: again, scope, changed: true, recorded: false, tooLarge: true }] }));
+    assert.equal(s.oversized().length, 1);
+    assert.notEqual(s.oversized()[0]!.id, id, "a later oversized save has a fresh result");
+    s.room.dispose();
+  }
+});
+
+test("an oversized save clears an earlier promise and dominates a mixed batch", () => {
+  const s = setup();
+  const old = s.room.dispatch(rename)!;
+  s.room.applyEv(s.event(old));
+  assert.equal(s.notices().length, 1);
+  const large = s.room.dispatch(rename)!;
+  const small = s.room.dispatch(rename)!;
+  s.room.applyEv(s.event(large, "setup", true, { acks: [large, small], ackDetails: [
+    { n: large, scope: "setup", changed: true, recorded: false, tooLarge: true },
+    { n: small, scope: "setup", changed: true, recorded: true },
+  ] }));
+  assert.equal(s.notices().length, 0);
+  assert.equal(s.oversized().length, 1);
+  s.room.dispose();
+});
+
+test("oversized details need an effective, pending, accepted command on this device", () => {
+  for (const kind of ["unchanged", "foreign", "no-ack", "refused", "snapshot"] as const) {
+    const s = setup();
+    const n = s.room.dispatch(rename)!;
+    const ev = s.event(n, "setup", true, { ackDetails: [{ n: kind === "foreign" ? n + 1 : n, scope: "setup", changed: kind !== "unchanged", recorded: false, tooLarge: true }] });
+    if (kind === "no-ack") ev.acks = [];
+    if (kind === "refused") ev.rejects = [{ n, code: "invalid", message: "Refused" }];
+    if (kind === "snapshot") s.snapshot(n);
+    s.room.applyEv(ev);
+    assert.equal(s.oversized().length, 0, kind);
+    assert.equal(s.notices().length, 0, kind);
     s.room.dispose();
   }
 });

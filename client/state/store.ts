@@ -65,6 +65,8 @@ export const OP_ANSWER_MS = 10_000;
 /** Pending ops older than this are dropped on reconnect: the server keeps watermarks much longer, but nobody wants a 12 hour old edit. */
 export const MAX_OP_AGE_MS = 12 * 60 * 60 * 1000;
 const MAX_TOASTS = 3;
+const SETUP_SAVED = "Saved. Undo in Setup history.";
+const TOO_LARGE_TO_UNDO = "This change is too large to undo.";
 /**
  * What the forget question says when the answer to its Go ahead was lost
  * with the connection (RoomView.forgetAsk): the snapshot after holds what
@@ -208,6 +210,7 @@ export type RoomStoreState = RoomView & {
 
 type Snapshot = Extract<ServerMessage, { t: "snapshot" }>;
 type Ev = Extract<ServerMessage, { t: "ev" }>;
+type OpRecording = NonNullable<Ev["ackDetails"]>[number] & { recorded?: boolean; tooLarge?: true };
 
 /** Where the store sends ops. `send` returns false when the socket is not open. */
 export type Outbox = { send(msg: ClientMessage): boolean };
@@ -981,8 +984,12 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
           ? [{ from: op.t, scope: op.scope ?? "play", label: restored.what }]
           : [];
       });
-      if (s.you?.role === "dm" && msg.ackDetails?.some((detail) => detail.scope === "setup" && detail.changed && accepted.some((p) => p.n === detail.n))) {
-        renew("Saved. Undo in Setup history.", "info");
+      const ownDetails = ((msg.ackDetails ?? []) as readonly OpRecording[]).filter((detail) => accepted.some((p) => p.n === detail.n));
+      if (ownDetails.some((detail) => detail.changed && detail.tooLarge === true)) {
+        toasts = toasts.filter((toast) => toast.text !== SETUP_SAVED);
+        renew(TOO_LARGE_TO_UNDO, "info");
+      } else if (s.you?.role === "dm" && ownDetails.some((detail) => detail.scope === "setup" && detail.changed && detail.recorded === true)) {
+        renew(SETUP_SAVED, "info");
       }
       // Builder ops the server asked about (FORGET_ASK), one question for all of them, and a question answered once its ops are.
       const asks: { n: number; op: ClientOp; group?: string; groupScope?: "setup" }[] = [];
