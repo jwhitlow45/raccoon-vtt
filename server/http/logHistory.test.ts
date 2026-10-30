@@ -6,7 +6,7 @@ import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
 import { projectLogEntry } from "#shared/project.ts";
 import { member, rng } from "#shared/testutil.ts";
 import { captureView, compareIds, LogHistory, type HistoryMetadata, type HistoryReader, type HistoryView } from "../rooms/logHistory.ts";
-import { LogScanBudget } from "../rooms/logScanBudget.ts";
+import { LogScanBudget, ScanCancelledError } from "../rooms/logScanBudget.ts";
 import { lineAccess, readerStreams, storedKey } from "../rooms/persistence.ts";
 
 /**
@@ -34,8 +34,11 @@ class Archive {
       return lineAccess(entry).map((a) => ({ stream: a.stream, member: a.memberId, seq: key.seq, line: key.line, id: entry.id }));
     });
   }
-  /** Every statement a reader sent, by its first words. */
+  /** Every statement a reader sent, by its first words, and in full. */
   readonly statements: string[] = [];
+  readonly texts: string[] = [];
+  /** Runs as a statement's answer is handed back, in the same tick: where a test lands its cancel. */
+  answered: ((text: string) => void) | null = null;
   connect = () => Promise.resolve(new FakeClient(this) as never);
 }
 
@@ -77,6 +80,13 @@ class FakeClient extends EventEmitter {
   query(text: string, params: unknown[] = []): Promise<{ rows: unknown[] }> {
     const t = text.replace(/\s+/g, " ").trim();
     this.#archive.statements.push(t.split(" ").slice(0, 2).join(" "));
+    this.#archive.texts.push(t);
+    const answer = this.#answer(t, params);
+    this.#archive.answered?.(t);
+    return answer;
+  }
+
+  #answer(t: string, params: unknown[]): Promise<{ rows: unknown[] }> {
     if (t.startsWith("begin") || t === "rollback") return Promise.resolve({ rows: [] });
     if (t.startsWith("select exists")) return Promise.resolve({ rows: [{ incomplete: this.#archive.rows.some((r) => !r.complete) }] });
     if (t.startsWith("declare")) {
@@ -285,5 +295,43 @@ describe("the indexed reader against the raw reader", () => {
     assert.deepEqual([...used], ["raw"]);
     assert.deepEqual(wanted, ["ROOM"]);
     assert.ok(!archive.statements.includes("select exists"), "no completeness check runs without the index");
+  });
+
+  test("a cancel that lands as a statement answers sends no more SQL and fails the read, on the indexed and the raw reader alike", async () => {
+    const state = roomState();
+    const viewer: Viewer = { memberId: DM_ID, role: "dm" };
+    const cases: { reader: HistoryReader; at: RegExp; what: string }[] = [
+      { reader: "indexed", at: /^select id, seq::text as seq_text/, what: "a stream's candidates" },
+      { reader: "indexed", at: /^select id, entry from room_log/, what: "the quantum's last statement" },
+      { reader: "raw", at: /^fetch /, what: "the cursor's fetch" },
+      { reader: "raw", at: /^select id, entry from room_log/, what: "the batch's last statement" },
+    ];
+    for (const c of cases) {
+      const archive = new Archive();
+      archive.rows = randomRows(rng(5), 300).map((entry) => ({ entry, complete: true }));
+      const abort = new AbortController();
+      let sentAfter = -1;
+      archive.answered = (text) => {
+        if (sentAfter >= 0 || !c.at.test(text)) return;
+        sentAfter = archive.texts.length;
+        abort.abort(new Error("client went away"));
+      };
+      const history = new LogHistory({
+        pool: archive,
+        metadata: c.reader === "indexed" ? { ready: true, want: () => undefined } : undefined,
+        batchRows: 50,
+        cancel: () => Promise.resolve(),
+      });
+      const budget = new LogScanBudget();
+      const scan = budget.open({ pool: "page", roomId: "ROOM", memberId: DM_ID, signal: abort.signal });
+      try {
+        await assert.rejects(history.page(captureView({ state, seq: 1e9 }, "ROOM", viewer), { limit: 10 }, scan), ScanCancelledError, `${c.reader}, at ${c.what}`);
+      } finally {
+        scan.close();
+        budget.close();
+      }
+      assert.ok(sentAfter > 0, `${c.reader}: the cancel landed`);
+      assert.deepEqual(archive.texts.slice(sentAfter), [], `${c.reader}, at ${c.what}: no statement after the cancel`);
+    }
   });
 });

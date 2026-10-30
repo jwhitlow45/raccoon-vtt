@@ -7,6 +7,7 @@ import { uuidv7 } from "#shared/ids.ts";
 import type { LogEntry } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { heldOpLines, ReceiptLines } from "../rooms/logHistory.ts";
+import { stateThrough } from "./receipts.ts";
 import { ScanBusyError, ScanCancelledError } from "../rooms/logScanBudget.ts";
 import { startEngine, type Engine } from "../rooms/testing.ts";
 
@@ -23,6 +24,8 @@ type Lookup = { parts: ({ part: number; state: "committed"; seq: number; lines: 
 describe("GET /api/rooms/:id/receipts/:tag from the archive", () => {
   let t: Engine;
   const appName = `rvtt-receipts-itest-${randomBytes(4).toString("hex")}`;
+  /** Runs before each statement of a lookup, for the tests that hold one. */
+  let beforeQuery: ((text: string) => Promise<void>) | null = null;
   before(async () => {
     t = await startEngine({
       log: {
@@ -34,7 +37,7 @@ describe("GET /api/rooms/:id/receipts/:tag from the archive", () => {
             return c;
           },
         },
-        receipts: { deadlineMs: 400 },
+        receipts: { deadlineMs: 400, beforeQuery: (text) => beforeQuery?.(text) ?? Promise.resolve() },
       },
     });
     t.app.logMigration.start();
@@ -119,6 +122,94 @@ describe("GET /api/rooms/:id/receipts/:tag from the archive", () => {
     }
     assert.equal((await pip.get(`/api/rooms/${roomId}/receipts/${tag}`)).statusCode, 200, "the next lookup is served");
   });
+
+  test("a receipt committed while the lookup reads the rows is projected against a state that holds its op, so its lines come back", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Receipts racing");
+    const pip = t.client();
+    await pip.join(roomId, "Pip");
+    const pipSocket = await t.connect(roomId, pip);
+    await pipSocket.snapshot(uuidv7());
+    // The archive refuses every line, so the op's lines live in the room's live log alone.
+    const assets = t.app.assets as unknown as { archiveDiskOk: () => Promise<boolean> };
+    const own = Object.getOwnPropertyDescriptor(assets, "archiveDiskOk");
+    assets.archiveDiskOk = () => Promise.resolve(false);
+    const tag = uuidv7();
+    let reached!: () => void;
+    const atRows = new Promise<void>((r) => (reached = r));
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    beforeQuery = async (text) => {
+      if (!/from roll_receipts/.test(text)) return;
+      beforeQuery = null;
+      reached();
+      await held;
+    };
+    try {
+      const lookup = pip.get(`/api/rooms/${roomId}/receipts/${tag}`);
+      await atRows;
+      // The op commits while the lookup waits to read its receipt.
+      const rolled = await pipSocket.apply({ t: "dice.roll", tag, to: "all", rolls: [{ formula: "1d20" }] } as Op);
+      assert.ok(rolled.acks?.length);
+      release();
+      const res = await lookup;
+      assert.equal(res.statusCode, 200, res.body);
+      const parts = res.json<Lookup>().parts;
+      assert.equal(parts.length, 1);
+      const part = parts[0]!;
+      assert.ok(part.state === "committed" && part.seq === rolled.seq);
+      assert.equal(part.state === "committed" && part.lines.length, 1, "the op's line, from the state that holds it");
+    } finally {
+      beforeQuery = null;
+      if (own) Object.defineProperty(assets, "archiveDiskOk", own);
+      else delete (assets as { archiveDiskOk?: unknown }).archiveDiskOk;
+    }
+  });
+
+  test("a lookup whose receipt rows are locked answers busy at its deadline, and its statement is stopped on the server", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Receipts locked");
+    const pip = t.client();
+    await pip.join(roomId, "Pip");
+    const pipSocket = await t.connect(roomId, pip);
+    await pipSocket.snapshot(uuidv7());
+    const tag = uuidv7();
+    await pipSocket.apply({ t: "dice.roll", tag, to: "all", rolls: [{ formula: "1d20" }] } as Op);
+    const holder = await t.pool.connect();
+    try {
+      await holder.query("begin");
+      // A row lock would not stop a select: only a lock on the table does.
+      await holder.query("lock table roll_receipts in access exclusive mode");
+      const started = Date.now();
+      const res = await pip.get(`/api/rooms/${roomId}/receipts/${tag}`);
+      assert.equal(res.statusCode, 503, res.body);
+      assert.ok(Date.now() - started < 3_000, "bounded by the deadline");
+      let waiting = 1;
+      for (let i = 0; i < 100 && waiting > 0; i++) {
+        waiting = (await t.pool.query("select 1 from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock' and query like '%from roll_receipts%'")).rowCount ?? 0;
+        if (waiting > 0) await new Promise((r) => setTimeout(r, 20));
+      }
+      assert.equal(waiting, 0, "the receipt read no longer waits on the lock");
+    } finally {
+      await holder.query("rollback");
+      holder.release();
+    }
+    assert.equal((await pip.get(`/api/rooms/${roomId}/receipts/${tag}`)).statusCode, 200);
+  });
+});
+
+describe("a lookup's wait for the room's state", () => {
+  test("returns the state once it reaches the newest receipt's seq, and a cancel ends the wait", async () => {
+    const actor = { committed: { state: { meta: { name: "five" } } as never, seq: 5 } };
+    assert.equal(await stateThrough(actor, 5, new AbortController().signal), actor.committed.state, "a state already there is taken at once");
+    const later = stateThrough(actor, 6, new AbortController().signal);
+    setTimeout(() => (actor.committed = { state: { meta: { name: "six" } } as never, seq: 6 }), 30);
+    assert.equal(((await later) as unknown as { meta: { name: string } }).meta.name, "six");
+    const abort = new AbortController();
+    const never = stateThrough(actor, 99, abort.signal);
+    setTimeout(() => abort.abort(new Error("deadline")), 30);
+    await assert.rejects(never, ScanCancelledError);
+  });
 });
 
 /** A connection whose answers a test controls: pending queries fail when it is destroyed, as a real one's do. */
@@ -126,11 +217,14 @@ class Fake extends EventEmitter {
   readonly steps: string[] = [];
   hang = false;
   fail = false;
+  /** Runs as a statement's answer is handed back, in the same tick. */
+  answered: (() => void) | null = null;
   #pending: ((err: Error) => void)[] = [];
   query(config: { text: string }): Promise<{ rows: unknown[] }> {
     this.steps.push(config.text.trim().split(/\s+/).slice(0, 2).join(" "));
     if (this.fail) return Promise.reject(new Error("statement failed"));
     if (this.hang) return new Promise((_resolve, reject) => this.#pending.push(reject));
+    this.answered?.();
     return Promise.resolve({ rows: [] });
   }
   release(destroy?: boolean): void {
@@ -179,6 +273,19 @@ describe("a receipt lookup's connection, every step bounded and cancellable", ()
     await assert.rejects(reading, ScanCancelledError);
     assert.deepEqual(order, ["cancel after select entry"], "the cancel request first, before the connection goes");
     assert.deepEqual(conn.steps, ["select entry", "destroy"]);
+  });
+
+  test("a cancel that lands as a statement answers sends no more SQL, and fails the lookup even when that was its last", async () => {
+    for (const seqs of [[1, 2], [1]]) {
+      const conn = new Fake();
+      const abort = new AbortController();
+      conn.answered = () => abort.abort(new Error("client went away"));
+      let cancels = 0;
+      const lines = new ReceiptLines({ pool: { connect: () => Promise.resolve(conn) } as never, cancel: async () => void cancels++ });
+      await assert.rejects(lines.read("ROOM", seqs, viewer, abort.signal), ScanCancelledError, `seqs ${seqs.join(",")}`);
+      assert.deepEqual(conn.steps, ["select entry", "destroy"], `seqs ${seqs.join(",")}: one statement, then the drop`);
+      assert.equal(cancels, 1);
+    }
   });
 
   test("a failed statement destroys the connection after a cancel request, and a lookup that ends well returns it", async () => {

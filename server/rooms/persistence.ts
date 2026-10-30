@@ -358,8 +358,8 @@ export async function loadReceipts(pool: Pool, roomId: string, since: Date): Pro
 }
 
 /** One member's receipts of one tag, every part, read by key: the lookup reads nothing of anyone else's. */
-export async function readReceipts(pool: Pool, roomId: string, memberId: string, tag: string): Promise<ReceiptRow[]> {
-  const { rows } = await pool.query<{ part: number; state: ReceiptRow["state"]; seq: string | null; code: string | null; message: string | null; at: Date }>(
+export async function readReceipts(q: Queryable, roomId: string, memberId: string, tag: string): Promise<ReceiptRow[]> {
+  const { rows } = await q.query<{ part: number; state: ReceiptRow["state"]; seq: string | null; code: string | null; message: string | null; at: Date }>(
     `select part, state, seq::text, code, message, at from roll_receipts
      where room_id = $1 and member_id = $2 and tag = $3 order by part`,
     [roomId, memberId, tag],

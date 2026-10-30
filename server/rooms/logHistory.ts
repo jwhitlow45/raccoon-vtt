@@ -5,6 +5,7 @@ import type { LogNames } from "#shared/logText.ts";
 import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
 import { projectArchivedLog, projectState } from "#shared/project.ts";
 import { SessionFold, type LogSession } from "../http/logExport.ts";
+import type { Queryable } from "../auth/tx.ts";
 import { previewOmits } from "./fanout.ts";
 import { ScanBusyError, ScanCancelledError, type Scan } from "./logScanBudget.ts";
 import {
@@ -16,9 +17,11 @@ import {
   readLogEntries,
   readLogLines,
   readOpLinesByAccess,
+  readReceipts,
   type LogAccess,
   type LogBound,
   type LogScanRange,
+  type ReceiptRow,
 } from "./persistence.ts";
 
 /**
@@ -164,6 +167,27 @@ export function compareIds(a: string, b: string): number {
 function bound(id: string, inclusive: boolean): LogBound {
   const at = id.indexOf(":");
   return { seq: id.slice(0, at), index: Number(id.slice(at + 1)), inclusive };
+}
+
+// Connections ---------------------------------------------------------------
+
+/**
+ * A connection's queries for one scan or lookup, refused once its cancel has
+ * fired or the connection is being dropped. A cancel can land while a
+ * statement is finishing: its answer still comes back, but the next
+ * statement must not go out in the moment before the cancel request and
+ * the drop are done, so this refuses it, as ScanCancelledError. `queryMs`
+ * bounds each statement where the pool sets no query timeout of its own.
+ * `before` is a test's hook, run before each statement goes out.
+ */
+export function guardedQueries(client: Pick<pg.ClientBase, "query">, signal: AbortSignal, dropping: () => boolean, opts: { queryMs?: number; before?: (text: string) => Promise<void> } = {}): Queryable {
+  return {
+    query: async <R extends pg.QueryResultRow = pg.QueryResultRow>(text: string, values?: unknown[]): Promise<pg.QueryResult<R>> => {
+      await opts.before?.(text);
+      if (signal.aborted || dropping()) throw new ScanCancelledError(signal.reason);
+      return opts.queryMs === undefined ? client.query<R>(text, values) : client.query<R>({ text, values, query_timeout: opts.queryMs } as pg.QueryConfig);
+    },
+  };
 }
 
 // Admission -----------------------------------------------------------------
@@ -335,7 +359,7 @@ export class LogHistory {
    * pool cannot give now frees the turn and is asked for again, until the
    * lease wait runs out.
    */
-  async #quantum<T>(scan: Scan, fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
+  async #quantum<T>(scan: Scan, fn: (q: Queryable) => Promise<T>): Promise<T> {
     let unavailableSince: number | null = null;
     for (;;) {
       try {
@@ -350,7 +374,7 @@ export class LogHistory {
     }
   }
 
-  async #onConnection<T>(scan: Scan, fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
+  async #onConnection<T>(scan: Scan, fn: (q: Queryable) => Promise<T>): Promise<T> {
     const client = await this.#connect(scan);
     const letGo = scan.retain();
     let ended = false;
@@ -369,7 +393,10 @@ export class LogHistory {
     scan.signal.addEventListener("abort", onAbort);
     try {
       if (scan.signal.aborted) throw new ScanCancelledError(scan.signal.reason);
-      return await fn(client);
+      const out = await fn(guardedQueries(client, scan.signal, () => dropping !== null));
+      // A cancel that landed as the last statement answered fails the quantum too: its answer is not used.
+      if (scan.signal.aborted) throw new ScanCancelledError(scan.signal.reason);
+      return out;
     } catch (err) {
       await drop();
       if (scan.signal.aborted) throw new ScanCancelledError(scan.signal.reason);
@@ -407,6 +434,8 @@ export class LogHistory {
    */
   async *#rawBatches(view: HistoryView, range: Pick<LogScanRange, "order" | "lower" | "upper">, scan: Scan, pass: "page" | "sessions" | "bounds" | "lines"): AsyncGenerator<LogEntry[]> {
     let client: pg.PoolClient | null = null;
+    /** The cursor connection's queries, refused once the scan is cancelled (guardedQueries). */
+    let sql: Queryable | null = null;
     let letGo: (() => void) | null = null;
     let dropping: Promise<void> | null = null;
     let failed = false;
@@ -443,13 +472,14 @@ export class LogHistory {
                 await drop();
                 throw new ScanCancelledError(scan.signal.reason);
               }
+              sql = guardedQueries(taken, scan.signal, () => dropping !== null);
               // One snapshot for the cursor and every entry read beside it.
-              await taken.query("begin isolation level repeatable read read only");
-              await declareLogScan(taken, CURSOR, { ...range, roomId: view.roomId, maxSeq: view.seq });
+              await sql.query("begin isolation level repeatable read read only");
+              await declareLogScan(sql, CURSOR, { ...range, roomId: view.roomId, maxSeq: view.seq });
             }
-            const held = client as pg.PoolClient;
-            const ids = await fetchLogIds(held, CURSOR, this.#batchRows);
-            const rows = await readLogEntries(held, view.roomId, ids);
+            const q = sql as Queryable;
+            const ids = await fetchLogIds(q, CURSOR, this.#batchRows);
+            const rows = await readLogEntries(q, view.roomId, ids);
             await this.#onBatch?.({ roomId: view.roomId, pass, reader: "raw" });
             return { entries: projectRows(view, rows), done: ids.length < this.#batchRows };
           });
@@ -460,6 +490,8 @@ export class LogHistory {
           await scan.wait(CONNECTION_RETRY_MS);
           continue;
         }
+        // A cancel that landed as the batch's last statement answered: the batch is not given out.
+        if (scan.signal.aborted) throw new ScanCancelledError(scan.signal.reason);
         if (batch.entries.length > 0) yield batch.entries;
         if (batch.done) return;
       }
@@ -776,12 +808,15 @@ export type ReceiptLinesOptions = {
   cancel?: (client: pg.PoolClient) => Promise<void>;
   checkoutMs?: number;
   queryMs?: number;
+  /** For tests: runs before each statement goes out. */
+  beforeQuery?: (text: string) => Promise<void>;
 };
 
 /**
- * The lines committed ops wrote, for the receipt lookup
- * (server/http/receipts.ts), unprojected: the caller projects them against
- * the one state it captured. Once the room's metadata is complete they are
+ * The receipt lookup's reads (server/http/receipts.ts): the caller's
+ * receipt rows and the lines their committed ops wrote, unprojected: the
+ * caller projects them against the one state it captured. Once the room's
+ * metadata is complete the lines are
  * read by the caller's own streams and the op's seq, the access table's key
  * (design: access-prefix receipts), and otherwise by the raw query, which
  * reads every row of the room to find the op's. Either way the projection
@@ -790,7 +825,8 @@ export type ReceiptLinesOptions = {
  * Every step is bounded and stops at the request's cancel: the checkout by
  * `checkoutMs` (a connection handed over after that is destroyed), each
  * query by `queryMs`. A cancelled or failed lookup sends its backend a
- * cancel request and destroys the connection, with no more SQL on it.
+ * cancel request and destroys the connection, with no more SQL on it
+ * (guardedQueries), and fails even when its last statement had answered.
  */
 export class ReceiptLines {
   #pool: Pick<pg.Pool, "connect">;
@@ -798,6 +834,7 @@ export class ReceiptLines {
   #cancel: (client: pg.PoolClient) => Promise<void>;
   #checkoutMs: number;
   #queryMs: number;
+  #before: ((text: string) => Promise<void>) | undefined;
 
   constructor(opts: ReceiptLinesOptions) {
     this.#pool = opts.pool;
@@ -805,29 +842,56 @@ export class ReceiptLines {
     this.#cancel = opts.cancel ?? cancelRequest;
     this.#checkoutMs = opts.checkoutMs ?? RECEIPT_CHECKOUT_MS;
     this.#queryMs = opts.queryMs ?? RECEIPT_QUERY_MS;
+    this.#before = opts.beforeQuery;
   }
 
-  /** Each seq's lines, read on one connection after one completeness check. */
-  async read(roomId: string, seqs: readonly number[], viewer: Viewer, signal: AbortSignal): Promise<Map<number, LogEntry[]>> {
+  /**
+   * The receipt lookup's reads, on one connection: the caller's receipts of
+   * one tag, then the state they are projected against, which `capture`
+   * takes only once the rows are read, so no receipt is newer than its
+   * state, then the archive's lines of each committed op the state's live
+   * log no longer holds (heldOpLines).
+   */
+  async lookup(roomId: string, viewer: Viewer, tag: string, signal: AbortSignal, capture: (rows: readonly ReceiptRow[]) => Promise<RoomState>): Promise<{ rows: ReceiptRow[]; state: RoomState; lines: Map<number, LogEntry[]> }> {
+    return this.#withConnection(signal, async (q) => {
+      const rows = await readReceipts(q, roomId, viewer.memberId, tag);
+      const state = await capture(rows);
+      const lines = new Map<number, LogEntry[]>();
+      const missing: number[] = [];
+      for (const row of rows) {
+        if (row.state !== "committed" || row.seq === null || lines.has(row.seq)) continue;
+        const held = heldOpLines(state, viewer, row.seq);
+        if (held) lines.set(row.seq, held);
+        else missing.push(row.seq);
+      }
+      for (const [seq, read] of await this.#lines(q, roomId, missing, viewer)) lines.set(seq, read);
+      return { rows, state, lines };
+    });
+  }
+
+  /** Each seq's lines from the archive, read on one connection after one completeness check. */
+  read(roomId: string, seqs: readonly number[], viewer: Viewer, signal: AbortSignal): Promise<Map<number, LogEntry[]>> {
+    return this.#withConnection(signal, (q) => this.#lines(q, roomId, seqs, viewer));
+  }
+
+  async #lines(q: Queryable, roomId: string, seqs: readonly number[], viewer: Viewer): Promise<Map<number, LogEntry[]>> {
     const out = new Map<number, LogEntry[]>();
     if (seqs.length === 0) return out;
-    await this.#withConnection(signal, async (q) => {
-      const metadata = this.#metadata;
-      let indexed = false;
-      if (metadata?.ready) {
-        indexed = !(await archiveIncomplete(q, roomId));
-        if (!indexed) metadata.want(roomId);
-      } else metadata?.want(roomId);
-      const streams = readerStreams(viewer);
-      for (const seq of seqs) {
-        if (out.has(seq)) continue;
-        out.set(seq, indexed ? await readOpLinesByAccess(q, roomId, seq, streams) : await readLogLines(q, roomId, seq));
-      }
-    });
+    const metadata = this.#metadata;
+    let indexed = false;
+    if (metadata?.ready) {
+      indexed = !(await archiveIncomplete(q, roomId));
+      if (!indexed) metadata.want(roomId);
+    } else metadata?.want(roomId);
+    const streams = readerStreams(viewer);
+    for (const seq of seqs) {
+      if (out.has(seq)) continue;
+      out.set(seq, indexed ? await readOpLinesByAccess(q, roomId, seq, streams) : await readLogLines(q, roomId, seq));
+    }
     return out;
   }
 
-  async #withConnection(signal: AbortSignal, fn: (q: Pick<pg.PoolClient, "query">) => Promise<void>): Promise<void> {
+  async #withConnection<T>(signal: AbortSignal, fn: (q: Queryable) => Promise<T>): Promise<T> {
     const client = await checkout(this.#pool, signal, this.#checkoutMs);
     let ended = false;
     const onEnd = () => {
@@ -842,11 +906,12 @@ export class ReceiptLines {
       })());
     const onAbort = () => void drop();
     signal.addEventListener("abort", onAbort);
-    const queryMs = this.#queryMs;
-    const bounded = { query: (text: string, values?: unknown[]) => client.query({ text, values, query_timeout: queryMs } as pg.QueryConfig) } as Pick<pg.PoolClient, "query">;
     try {
       if (signal.aborted) throw new ScanCancelledError(signal.reason);
-      await fn(bounded);
+      const out = await fn(guardedQueries(client, signal, () => dropping !== null, { queryMs: this.#queryMs, before: this.#before }));
+      // A cancel that landed as the last statement answered fails the lookup too: its answer is not used.
+      if (signal.aborted) throw new ScanCancelledError(signal.reason);
+      return out;
     } catch (err) {
       await drop();
       if (signal.aborted) throw new ScanCancelledError(signal.reason);

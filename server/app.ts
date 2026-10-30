@@ -19,7 +19,7 @@ import { registerLogRoutes, type LogRouteOptions } from "./http/log.ts";
 import { watchPoolErrors } from "./db.ts";
 import { LogScanBudget } from "./rooms/logScanBudget.ts";
 import { registerReceiptRoutes, type ReceiptRouteOptions } from "./http/receipts.ts";
-import { ReceiptLines } from "./rooms/logHistory.ts";
+import { ReceiptLines, type ReceiptLinesOptions } from "./rooms/logHistory.ts";
 import { LogHistoryMigration, type MigrationOptions } from "./rooms/logHistoryMigration.ts";
 import { registerMemberRoutes } from "./http/members.ts";
 import { registerRoomRoutes } from "./http/rooms.ts";
@@ -51,7 +51,7 @@ export type AppDeps = {
   /** The asset service's options, for tests: a starter catalog of their own (docs/design-v1-starter-art.md 5). */
   assets?: AssetRouteOptions;
   /** The log archive reader's admission and batches, its metadata worker, and the receipt lookup's archive reads, for tests. */
-  log?: Omit<LogRouteOptions, "pool"> & { migration?: Partial<Omit<MigrationOptions, "budget" | "guard">>; receipts?: Omit<ReceiptRouteOptions, "lines"> & { checkoutMs?: number; queryMs?: number } };
+  log?: Omit<LogRouteOptions, "pool"> & { migration?: Partial<Omit<MigrationOptions, "budget" | "guard">>; receipts?: Omit<ReceiptRouteOptions, "lines"> & Pick<ReceiptLinesOptions, "checkoutMs" | "queryMs" | "beforeQuery"> };
 };
 
 /**
@@ -178,7 +178,7 @@ export async function buildApp({ config, pool, gateway, hasher, rooms, ws, expor
   // Started by server/main.ts once the server listens. Stopped first on close: its job's connection is gone before the pools end.
   app.addHook("preClose", async () => logMigration.stop());
   await registerLogRoutes(app, kit, { manager, options: { ...logOptions, budget, pool: scanPool, history: { ...logOptions.history, metadata: logMigration } } });
-  const receiptLines = new ReceiptLines({ pool, metadata: logMigration, checkoutMs: receiptOptions?.checkoutMs, queryMs: receiptOptions?.queryMs });
+  const receiptLines = new ReceiptLines({ pool, metadata: logMigration, checkoutMs: receiptOptions?.checkoutMs, queryMs: receiptOptions?.queryMs, beforeQuery: receiptOptions?.beforeQuery });
   await registerReceiptRoutes(app, kit, { manager, options: { deadlineMs: receiptOptions?.deadlineMs, lines: receiptLines } });
   await registerXCardRoutes(app, kit, { manager });
   await registerPlayerViewRoutes(app, kit, { manager });
