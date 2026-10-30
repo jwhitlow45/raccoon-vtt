@@ -1116,6 +1116,40 @@ describe("the toasts' places in the layer, around a map pane (LP15-FU-8, FU21B-A
     assert.deepEqual(s.places.get(2), { low: 250, column: true }, "it joins the stack where it stands");
   });
 
+  for (const source of ["card", "pane", "bar"] as const) test(`HF-41: new toasts join the retained ${source} stack after its anchor closes`, () => {
+    const opening: Partial<Now> = source === "card"
+      ? { low: 113 }
+      : source === "pane"
+        ? { paneStands: true, pane: 113 }
+        : { overBar: { ids: new Set([1]), at: 113, opening: 1 } };
+    let s = step(NO_TOAST_PLACES, [1], opening);
+    s = step(s, [1]);
+    const kept = s.places.get(1);
+    assert.ok(inToastLayer(kept));
+    // Resolving Fireball leaves its toast under the old card. Later asks
+    // must not start a second stack at the notices' top and grow over it.
+    for (let newest = 2; newest <= 4; newest++) {
+      const ids = Array.from({ length: newest }, (_, i) => i + 1);
+      s = step(s, ids);
+      assert.deepEqual(ids.map((id) => s.places.get(id)), ids.map(() => kept));
+      assert.deepEqual([...s.awaitCard], [], "a toast joining a retained stack is already placed");
+    }
+    s = step(s, [2, 3, 4, 5]);
+    assert.deepEqual(s.places.get(5), kept, "the next toast keeps the stack after its first toast expires");
+    s = step(s, [6]);
+    assert.equal(s.places.get(6), "map", "an empty retained stack leaves no position behind");
+  });
+
+  test("HF-41: later toasts leave an older notice above the card and join the retained stack below", () => {
+    let s = step(NO_TOAST_PLACES, [1]);
+    s = step(s, [1, 2], { low: 180, mapFoot: 112 });
+    s = step(s, [1, 2, 3, 4], { mapFoot: 112 });
+    assert.equal(s.places.get(1), "map", "the notice being read stays put");
+    for (const id of [2, 3, 4]) assert.deepEqual(s.places.get(id), { low: 180, column: true });
+    const sheet = step(s, [1, 2, 3, 4, 5], { slot: true });
+    assert.equal(sheet.places.get(5), "sheet", "the modal sheet keeps its own toast slot");
+  });
+
   test("a column stack keeps its top through a turn of the screen, and takes the cards' edges as they stand now (PL2-ASTRA-02)", () => {
     let s = step(NO_TOAST_PLACES, [1], { low: 140 });
     assert.deepEqual(toastLayerPlace(s, [1], sideways), { top: 140, edges: { left: 196, right: 348 } });
@@ -1526,10 +1560,10 @@ describe("a toast over a spanning token bar's header (review LP19-BS-2)", () => 
     s = step(s, [1], { overBar: { ids: new Set([1]), at: 121, opening: 1 } });
     assert.deepEqual(s.places.get(1), { low: 121, column: false, bar: 1 });
     assert.deepEqual(toastLayerPlace(s, [1], upright), { top: 121, edges: null });
-    // Clear of the header now, it stays, and the next toast that comes over the header joins it below.
+    // Clear of the header now, it stays, and the next toast joins it directly.
     s = step(s, [1]);
     s = step(s, [1, 2]);
-    assert.equal(s.places.get(2), "map");
+    assert.deepEqual(s.places.get(2), s.places.get(1));
     s = step(s, [1, 2], { overBar: { ids: new Set([2]), at: 121, opening: 1 } });
     assert.deepEqual(s.places.get(2), s.places.get(1));
     // Under the column's card, where the bar's top also stands.

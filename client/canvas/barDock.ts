@@ -1564,9 +1564,10 @@ export function inToastLayer(place: ToastPlace | undefined): boolean {
  * a spanning token bar's header with barToastTop's place there
  * (`overBar`).
  *
- * The layer keeps one stack. A new toast joins it, or starts one under
- * the column's first card or the pane's header. While a pane stands, the
- * whole stack goes under its header on any render that has the header's
+ * The layer keeps one stack. A new toast joins it even after its card or
+ * header goes away, or starts one under the column's first card or the
+ * pane's header. While a pane stands, the whole stack goes under its
+ * header on any render that has the header's
  * place, and follows it: a column stack moves there once, as the pane
  * opens, and a stack a closed pane left joins the next pane's header. So
  * do the toasts at the top of the notices (review FU21B-OP-7), where a
@@ -1704,7 +1705,9 @@ export function nextToastPlaces(
               ? { low: now.low, column: true }
               : "map";
     const below = fresh === "sheet" || !now.layer ? undefined : [...places.values()].find(inToastLayer);
-    const at = below !== undefined && (inToastLayer(fresh) || now.paneStands) ? below : fresh;
+    // A retained stack still owns later toasts after its card or header goes.
+    // Starting again at the notices' top would grow a second stack over it.
+    const at = below ?? fresh;
     places.set(id, at);
     // A toast that comes while the turn lasts takes the card's place as it reads now, which may be the card as it stood before, or joins a stack that does: it moves with that stack as the column measures again, rather than holding it there (review FU22B-ASTRA-03).
     if (underCard && typeof at === "object" && at.column) turning.add(id);

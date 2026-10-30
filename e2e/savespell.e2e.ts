@@ -7,6 +7,7 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import type { AreaTemplate, LogEntry, LogEvent } from "../shared/model.ts";
 import { ConsoleWatch, diceFoldsOpen, dragCells, LoadWatch, multiSelect, OpSocket, pagePoint, pickTool, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { toastOverlapLines } from "./helpers/alignment.ts";
 
 /**
  * A player's save spell end to end (docs/design-v1-player-save-spell.md 8),
@@ -421,6 +422,8 @@ describe("raccoon-vtt a player's save spell", { timeout: 600_000 }, () => {
     // Still picked in the Area tool, the area reads as asked and has no control that changes it.
     await areaOptions(pat).getByText("Saves asked", { exact: false }).first().waitFor();
     for (const id of ["size", "delete"]) assert.equal(await hasSlot(pat, id), false, `the asked area offers ${id}`);
+    assert.ok(await pat.locator("[data-toast]:visible").count() >= 2, "HF-41: the asked area must exercise multiple toasts");
+    assert.deepEqual(await toastOverlapLines(pat, "HF-41 asked area"), [], "visible toasts must never overlap");
     await shots.take(pat, "savespell-asked-area");
     await dragCells(pat, BOUNDS, { x: 5, y: 9 }, { x: 7, y: 9 });
     await pat.waitForTimeout(400);

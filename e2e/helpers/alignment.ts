@@ -1081,6 +1081,21 @@ export async function toastLaneLines(page: Page, screen: string): Promise<string
     .map((s) => `${screen}: toast "${s.text}" under an alert card starts ${round(s.toast.l - s.card!.l)} px and ends ${round(s.toast.r - s.card!.r)} px off the card's edges`);
 }
 
+/** A line for each pair of toast boxes whose visible portions overlap. */
+export async function toastOverlapLines(page: Page, screen: string): Promise<string[]> {
+  const seen = await page.evaluate(toastsInPage);
+  const lines: string[] = [];
+  for (let i = 0; i < seen.length; i++) {
+    const a = seen[i]!;
+    for (const b of seen.slice(i + 1)) {
+      const width = Math.min(a.toast.r, b.toast.r) - Math.max(a.toast.l, b.toast.l);
+      const height = Math.min(a.toast.b, b.toast.b) - Math.max(a.toast.t, b.toast.t);
+      if (width > 0 && height > 0) lines.push(`${screen}: toast "${a.text}" overlaps "${b.text}" by ${width.toFixed(1)} x ${height.toFixed(1)} px`);
+    }
+  }
+  return lines;
+}
+
 /** How many toasts show under an alert card, so a sweep can tell that its lane check met one. */
 export async function toastsUnderCards(page: Page): Promise<number> {
   return (await page.evaluate(toastsInPage)).filter((s) => s.card !== null).length;
