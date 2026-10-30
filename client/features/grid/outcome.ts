@@ -61,27 +61,22 @@ export function applyGrid(input: {
  * The ops Use default sends, as one undo step: the grid the import started
  * with, and the size the scene had then. The size is put back as it was,
  * not fitted to that grid: a battle mat that took its first image, or a
- * scene that took new art, had a size of its own. A find that switched
- * the scene's shape has its shape put back first, so the grid lands on
- * cells of that shape.
+ * scene that took new art, had a size of its own. Shape, calibration and
+ * size travel in one op, so a refused switch cannot leave half a reset.
  */
 export function fallbackOps(scene: GridScene, fallback: Fallback): ClientOp[] {
-  const ops: ClientOp[] = [];
-  if (fallback.shape !== undefined && fallback.shape !== mapShape(sceneGrid(scene))) ops.push({ t: "scene.update", sceneId: scene.id, patch: { gridShape: fallback.shape } });
-  ops.push(...gridOps(scene, fallback, false));
+  const shape = fallback.shape ?? mapShape(sceneGrid(scene));
   const { bounds } = fallback;
-  if (bounds.w !== scene.bounds.w || bounds.h !== scene.bounds.h) ops.push({ t: "scene.update", sceneId: scene.id, patch: { bounds } });
-  return ops;
+  if (shape === mapShape(sceneGrid(scene)) && sameCalibration(fallback, scene.map) && bounds.w === scene.bounds.w && bounds.h === scene.bounds.h) return [];
+  return [{ t: "scene.setGrid", sceneId: scene.id, cellPx: fallback.cellPx, originPx: fallback.originPx, gridShape: shape, bounds }];
 }
 
 /**
  * Use default, after an import applied a grid or only switched its shape:
- * `fallbackOps` as one undo step, and the box on the grid put back. The ops are not one
- * transaction, so when the find switched the scene's shape and the scene
- * can no longer take its old shape back (heights painted on its hexes
- * since, say), nothing is sent: the grid and size it started with are
- * cells of that shape. The note keeps Use default and says why, for once
- * what holds the scene is gone. False when refused.
+ * `fallbackOps` as one undo step, and the box on the grid put back. A
+ * locally known switch refusal keeps the note and says why. The server
+ * rechecks the same rule atomically with the calibration and size in case
+ * another device changed the scene since. False when refused locally.
  */
 export function putBack(input: {
   actions: Gesture;

@@ -330,9 +330,19 @@ export function sceneSetMap(tx: Tx, op: OpOf<"scene.setMap">): void {
 export function sceneSetGrid(tx: Tx, op: OpOf<"scene.setGrid">): void {
   const scene = tx.scene(op.sceneId);
   if (!scene.map) throw invalid("the scene has no map to align");
-  if (scene.phases) {
-    tx.write(keys.scene(scene.id), onHexGrid(setGridWithPhases(scene, op)));
+  const next: Scene = { ...scene };
+  if (op.gridShape !== undefined) {
+    // Use default must recheck against the server's current cell data before any part of the restoration lands.
+    const shape = storedShape(op.gridShape);
+    const refusal = switchRefusal(tx.state, scene, gridOfShape(shape));
+    if (refusal !== null) throw invalid(refusal);
+    if (shape === undefined) delete next.gridShape;
+    else next.gridShape = shape;
+  }
+  if (op.bounds !== undefined) next.bounds = op.bounds;
+  if (next.phases) {
+    tx.write(keys.scene(scene.id), onHexGrid(setGridWithPhases(next, op)));
     return;
   }
-  tx.write(keys.scene(scene.id), onHexGrid({ ...scene, map: { ...scene.map, cellPx: op.cellPx, originPx: op.originPx } }));
+  tx.write(keys.scene(scene.id), onHexGrid({ ...next, map: { ...scene.map, cellPx: op.cellPx, originPx: op.originPx } }));
 }

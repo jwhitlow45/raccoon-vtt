@@ -184,3 +184,90 @@ describe("the shape switch (HX-D14)", () => {
     assert.deepEqual(columns.templates.a1, area);
   });
 });
+
+describe("atomic grid restoration (H3-USEDEFAULT-RACE)", () => {
+  const map = { assetId: "a1", widthPx: 700, heightPx: 700, cellPx: 70, originPx: { x: 10, y: 10 } };
+  const restore = { t: "scene.setGrid", sceneId: "s1", cellPx: 47, originPx: { x: 0, y: 0 }, gridShape: "squares", bounds: { w: 29, h: 21 } } as const;
+  const before = () => room({ scenes: { s1: { ...room().scenes.s1!, gridShape: "hexRows", map } } });
+
+  test("shape, calibration and bounds restore in one scene write and one inverse, with phases too", () => {
+    for (const phased of [false, true]) {
+      let state = before();
+      if (phased) {
+        state = run(state, { t: "scene.update", sceneId: "s1", patch: { phases: [
+          { id: "day", name: "Day", assetId: "a1", widthPx: 700, heightPx: 700 },
+          { id: "night", name: "Night", assetId: "a2", widthPx: 1400, heightPx: 1400 },
+        ] } }).state;
+        state = run(state, { t: "scene.setPhase", sceneId: "s1", phaseId: "night" }).state;
+      }
+      const result = step(state, restore);
+      assert.ok(result.ok);
+      const scene = result.state.scenes.s1!;
+      assert.equal(scene.gridShape, undefined);
+      assert.deepEqual(scene.bounds, restore.bounds);
+      assert.equal(scene.map!.cellPx, restore.cellPx);
+      assert.deepEqual(scene.map!.originPx, restore.originPx);
+      assert.ok(result.global, "the shape switch reprojects the scene");
+      assert.deepEqual(result.touched, ["scene:s1"]);
+      assert.equal(result.inverse?.length, 1, "all values belong to one undo step");
+      if (phased) {
+        assert.equal(scene.phaseGrid!.cellPx, restore.cellPx / 2, "calibration is converted from the active phase into reference pixels");
+        const day = run(result.state, { t: "scene.setPhase", sceneId: "s1", phaseId: "day" }).state.scenes.s1!;
+        assert.equal(day.map!.cellPx, restore.cellPx / 2);
+      }
+      const restored = run(result.state, undo(result.inverse!)).state.scenes.s1!;
+      const { rev: _old, ...old } = state.scenes.s1!;
+      const { rev: _restored, ...actual } = restored;
+      assert.deepEqual(actual, old, "one undo restores all three values and the phase reference");
+    }
+  });
+
+  test("switch refusal and invalid hex calibration leave every restoration field untouched", () => {
+    const state = run(before(), { t: "build.height", sceneId: "s1", cells: ["1,1"], height: 10 }).state;
+    const saved = structuredClone(state);
+    assert.match(refusal(state, restore), /heights on its hexes/);
+    assert.deepEqual(state, saved);
+    const empty = before();
+    assert.equal(refusal(empty, { ...restore, gridShape: "hexColumns", originPx: { x: -1, y: 0 } }), HEX_ORIGIN);
+    assert.deepEqual(empty, before());
+    const imported = room({ scenes: { s1: { ...room().scenes.s1!, map, gridFromFile: true } } });
+    assert.equal(refusal(imported, { ...restore, gridShape: "hexRows" }), OWN_SQUARE_GRID);
+    const phased = run(empty, { t: "scene.update", sceneId: "s1", patch: { phases: [
+      { id: "day", name: "Day", assetId: "a1", widthPx: 700, heightPx: 700 },
+      { id: "night", name: "Night", assetId: "a2", widthPx: 1400, heightPx: 1400 },
+    ] } }).state;
+    const oldPhase = structuredClone(phased);
+    assert.match(refusal(phased, { ...restore, cellPx: 10_000 }), /would not fit every phase/);
+    assert.deepEqual(phased, oldPhase, "a phase's calibration refusal cannot leave the shape or bounds restored");
+  });
+
+  test("restoration supports either hex orientation and same-shape edits with cell data", () => {
+    for (const shape of ["hexRows", "hexColumns"] as const) {
+      const squares = room({ scenes: { s1: { ...room().scenes.s1!, map } } });
+      const result = run(squares, { ...restore, gridShape: shape }).state;
+      assert.equal(result.scenes.s1!.gridShape, shape);
+      const held = run(result, { t: "build.rough", sceneId: "s1", cells: ["1,1"], on: true }).state;
+      const calibrated = run(held, { ...restore, gridShape: shape, cellPx: 60 }).state.scenes.s1!;
+      assert.equal(calibrated.map!.cellPx, 60);
+      assert.equal(calibrated.gridShape, shape);
+    }
+  });
+
+  test("existing setGrid payloads preserve shape and bounds at old op versions, including phases", () => {
+    for (const phased of [false, true]) {
+      let state = run(before(), { t: "build.rough", sceneId: "s1", cells: ["1,1"], on: true }).state;
+      if (phased) state = run(state, { t: "scene.update", sceneId: "s1", patch: { phases: [{ id: "day", name: "Day", assetId: "a1", widthPx: 700, heightPx: 700 }] } }).state;
+      const op = opSchema.parse({ t: "scene.setGrid", sceneId: "s1", cellPx: 47, originPx: { x: 0, y: 0 } });
+      for (const opVersion of [1, 24, 28, 29, 30, 31, 32, undefined]) {
+        const result = applyOp(state, op, A, { ...env(200), opVersion });
+        assert.ok(result.ok, String(opVersion));
+        const scene = result.state.scenes.s1!;
+        assert.equal(scene.gridShape, state.scenes.s1!.gridShape);
+        assert.deepEqual(scene.bounds, state.scenes.s1!.bounds);
+        assert.equal(scene.map!.cellPx, 47);
+        assert.deepEqual(scene.map!.originPx, { x: 0, y: 0 });
+        assert.equal(result.global, false);
+      }
+    }
+  });
+});

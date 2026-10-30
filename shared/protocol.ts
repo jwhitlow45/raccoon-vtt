@@ -2029,7 +2029,14 @@ const stateClientOps = [
   op("scene.delete", { sceneId: id }),
   op("scene.reorder", { order: z.array(id).min(1).max(50) }),
   op("scene.setMap", { sceneId: id, map: sceneMap.nullable() }),
-  op("scene.setGrid", { sceneId: id, cellPx: sceneMap.shape.cellPx, originPx: sceneMap.shape.originPx }),
+  op("scene.setGrid", {
+    sceneId: id,
+    cellPx: sceneMap.shape.cellPx,
+    originPx: sceneMap.shape.originPx,
+    /** Use default restores these with the calibration, subject to the shape switch's refusal. */
+    gridShape: gridShapeChoice.optional(),
+    bounds: sceneBounds.optional(),
+  }),
   /** Switches the map to one of the scene's phases (docs/design-v1-maps-vision.md section 3.4). */
   op("scene.setPhase", { sceneId: id, phaseId: id }),
   /**

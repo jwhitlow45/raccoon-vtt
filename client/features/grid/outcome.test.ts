@@ -3,7 +3,8 @@ import { describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
 import type { Scene, SceneMap } from "#shared/model.ts";
 import type { ClientOp, Op } from "#shared/protocol.ts";
-import { apply, room as roomState } from "#shared/testutil.ts";
+import { apply, DM, env, room as roomState } from "#shared/testutil.ts";
+import { applyOp } from "#shared/reducer.ts";
 import { mapScene } from "../scenes/create.ts";
 import { importScene, placeMap } from "../uvtt/batch.ts";
 import { detectGrid, type AxisFit, type GridDetection } from "./detect.ts";
@@ -65,8 +66,7 @@ describe("what a search does to the scene", () => {
     assert.deepEqual(fallback, { cellPx: 47, originPx: { x: 0, y: 0 }, bounds: { w: 60, h: 40 } });
     const ops = fallbackOps(live.scene(), fallback!);
     assert.deepEqual(ops, [
-      { t: "scene.setGrid", sceneId: "s1", cellPx: 47, originPx: { x: 0, y: 0 } },
-      { t: "scene.update", sceneId: "s1", patch: { bounds: { w: 60, h: 40 } } },
+      { t: "scene.setGrid", sceneId: "s1", cellPx: 47, originPx: { x: 0, y: 0 }, gridShape: "squares", bounds: { w: 60, h: 40 } },
     ]);
     assert.deepEqual(fallbackOps(mat, fallback!), [], "nothing to send when the scene is so already");
   });
@@ -252,8 +252,11 @@ function liveRoom() {
   const actions = {
     dispatch(op: ClientOp, opts?: { group?: string }) {
       sent.push({ op, group: opts?.group });
-      if (op.t === "scene.setGrid") scene = { ...scene, map: { ...scene.map, cellPx: op.cellPx, originPx: op.originPx } };
-      else if (op.t === "scene.update" && op.patch.bounds) scene = { ...scene, bounds: op.patch.bounds };
+      if (op.t === "scene.setGrid") {
+        scene = { ...scene, map: { ...scene.map, cellPx: op.cellPx, originPx: op.originPx }, ...(op.bounds ? { bounds: op.bounds } : {}) };
+        if (op.gridShape === "squares") delete scene.gridShape;
+        else if (op.gridShape) scene.gridShape = op.gridShape;
+      } else if (op.t === "scene.update" && op.patch.bounds) scene = { ...scene, bounds: op.patch.bounds };
       else if (op.t === "scene.update" && op.patch.gridShape) {
         const { gridShape: _, ...rest } = scene;
         scene = op.patch.gridShape === "squares" ? rest : { ...rest, gridShape: op.patch.gridShape };
@@ -1023,7 +1026,7 @@ describe("a hex find held only by the stretch margin (D-261029-210)", () => {
       assert.match(lineOf(live)!, new RegExp(`Found hex ${orient}\\. The grid is hex ${orient} now\\. Check the box`));
       assert.ok(note?.fallback);
       assert.equal(putBack({ actions: live.actions, store: live.store, scene: live.scene(), fallback: note.fallback }), true);
-      assert.deepEqual(live.sent.slice(1).map((s) => s.op), [{ t: "scene.update", sceneId: "s1", patch: { gridShape: "squares" } }]);
+      assert.deepEqual(live.sent.slice(1).map((s) => s.op), [{ t: "scene.setGrid", sceneId: "s1", gridShape: "squares", cellPx: scene.map.cellPx, originPx: scene.map.originPx, bounds: scene.bounds }]);
       assert.deepEqual(live.scene(), scene, "Use default restores the original shape, grid and size");
       assert.equal(live.store.getState().found, null);
     }
@@ -1132,6 +1135,37 @@ describe("a hex find held only by the stretch margin (D-261029-210)", () => {
 describe("squares and hexes both looked for (docs/design-v1-grid-detect.md 10.7)", () => {
   const HEX_ROWS = gridOfShape("hexRows");
 
+  test("Use default refuses the whole restoration when another device adds ground after the client's check (H3-USEDEFAULT-RACE)", () => {
+    const client = room();
+    const scene = { ...roomState().scenes.s1!, gridShape: "hexRows" as const, map: { ...MAP, ...HEX_CAL }, bounds: { w: 23, h: 16 } };
+    let server = roomState({ scenes: { s1: scene } });
+    const refusals: string[] = [];
+    let sent = 0;
+    const actions = {
+      newId: () => "restore",
+      dispatch(op: ClientOp) {
+        const result = applyOp(server, op, DM, env(++sent + 1));
+        if (result.ok) server = result.state;
+        else refusals.push(result.message);
+        return sent;
+      },
+    };
+    assert.equal(putBack({
+      actions,
+      store: client.store,
+      scene,
+      fallback: { ...MAP, bounds: SCENE.bounds, shape: "squares" },
+      refusal: () => {
+        server = apply(server, { t: "build.rough", sceneId: "s1", cells: ["1,1"], on: true });
+        return null;
+      },
+    }), true, "the client approved before it received the other device's edit");
+    assert.equal(refusals.length, 1);
+    assert.match(refusals[0]!, /difficult ground/);
+    assert.deepEqual(server.scenes.s1, scene, "a refused shape restoration cannot change calibration or bounds");
+    assert.equal(sent, 1, "one atomic operation");
+  });
+
   test("hexes found on a new map in a square room start the scene on hexes with the grid, one undo step, and Use default puts back both", () => {
     const live = liveRoom();
     const guess = { cellPx: 47, originPx: { x: 0, y: 0 } };
@@ -1156,9 +1190,7 @@ describe("squares and hexes both looked for (docs/design-v1-grid-detect.md 10.7)
     assert.deepEqual(note?.fallback, { ...guess, bounds: SCENE.bounds, shape: "squares" });
     const back = fallbackOps(live.scene(), note!.fallback!);
     assert.deepEqual(back, [
-      { t: "scene.update", sceneId: "s1", patch: { gridShape: "squares" } },
-      { t: "scene.setGrid", sceneId: "s1", ...guess },
-      { t: "scene.update", sceneId: "s1", patch: { bounds: SCENE.bounds } },
+      { t: "scene.setGrid", sceneId: "s1", ...guess, gridShape: "squares", bounds: SCENE.bounds },
     ]);
     for (const op of back) live.actions.dispatch(op);
     assert.equal(live.scene().gridShape, undefined, "shape back");
@@ -1187,7 +1219,7 @@ describe("squares and hexes both looked for (docs/design-v1-grid-detect.md 10.7)
     // The heights gone, Use default puts back the shape, the guess and the size as one step.
     assert.equal(putBack({ actions: live.actions, store: live.store, scene: live.scene(), fallback, refusal: () => null }), true);
     const back = live.sent.slice(before);
-    assert.deepEqual(back[0]?.op, { t: "scene.update", sceneId: "s1", patch: { gridShape: "squares" } });
+    assert.deepEqual(back.map((x) => x.op), [{ t: "scene.setGrid", sceneId: "s1", ...guess, gridShape: "squares", bounds: SCENE.bounds }]);
     assert.ok(back.every((x) => x.group === back[0]!.group));
     assert.equal(live.scene().gridShape, undefined);
     assert.ok(sameCalibration(live.scene().map, guess));
