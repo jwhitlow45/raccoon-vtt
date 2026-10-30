@@ -469,7 +469,7 @@ export class RoomActor {
         deps.log.error({ roomId, seq, reason }, "room replay failed, serving it read-only");
       },
       undefined,
-      () => admitArchive(opts.archiveGuard, deps.log, roomId),
+      () => admitArchive(opts.archiveGuard, deps.log, roomId, opts.now),
     );
     if (!loaded) return null;
     // The receipts younger than 24 hours, so a restart keeps the duplicate rule and the day's caps (docs/design-v1-dice.md 1.2).
@@ -2000,7 +2000,7 @@ export class RoomActor {
           outcomeUnknown = false;
         }
         // Asked again on every attempt, since free space can come back or run out between them.
-        write.archive = !lines || (await admitArchive(this.#opts.archiveGuard, this.#log, this.roomId, batch.seq));
+        write.archive = !lines || (await admitArchive(this.#opts.archiveGuard, this.#log, this.roomId, this.#opts.now));
         await commitBatch(this.#pool, this.roomId, write);
         break;
       } catch (err) {
@@ -2137,7 +2137,8 @@ export class RoomActor {
 
   /**
    * A room at its storage quota becomes read-only except for deletions (design 10.5), and recovers when it shrinks.
-   * The quota counts what a room's members can choose to store or delete, never the log archive (quota.ts).
+   * The log archive is left out of the quota (quota.ts): it keeps every line for good and nothing in the room deletes
+   * it, so the free-disk floor bounds it instead.
    */
   async #checkQuota(): Promise<void> {
     if (this.#opts.quotaBytes <= 0 || this.replayFailed) return;
@@ -2360,10 +2361,36 @@ function sleep(ms: number): Promise<void> {
 }
 
 /** The archive guard's answer, with the operator's warning when it refuses. */
-async function admitArchive(guard: ArchiveGuard, log: Logger, roomId: string, seq?: number): Promise<boolean> {
+async function admitArchive(guard: ArchiveGuard, log: Logger, roomId: string, now: Clock): Promise<boolean> {
   const ok = await archiveAdmitted(guard);
-  if (!ok) log.warn({ roomId, seq }, "free disk is under the floor or could not be read, so log lines were not archived");
+  if (!ok) warnArchiveSkipped(log, roomId, now());
   return ok;
+}
+
+const ARCHIVE_WARN_MS = 60_000;
+/** Each room's refused archive writes since its last warning. */
+const archiveSkips = new Map<string, { at: number; since: number }>();
+
+/**
+ * Warns that a room's log lines were not archived, at most once a minute per
+ * room, with how many writes were refused since the last warning: a short
+ * disk refuses every batch, and a warning each time would fill the log with
+ * the same line (and maybe the disk it is short of).
+ */
+export function warnArchiveSkipped(log: Logger, roomId: string, now: number): void {
+  const last = archiveSkips.get(roomId);
+  if (last && now - last.at < ARCHIVE_WARN_MS) {
+    last.since++;
+    return;
+  }
+  log.warn({ roomId, refused: (last?.since ?? 0) + 1 }, "free disk is under the floor or could not be read, so log lines were not archived");
+  archiveSkips.delete(roomId);
+  archiveSkips.set(roomId, { at: now, since: 0 });
+  // Rooms warned about long ago are forgotten, oldest first, so the map stays as small as the rooms short of disk now.
+  for (const [room, seen] of archiveSkips) {
+    if (now - seen.at < ARCHIVE_WARN_MS) break;
+    archiveSkips.delete(room);
+  }
 }
 
 /**

@@ -28,7 +28,7 @@ import { newRoomId } from "../auth/roomId.ts";
 import { newMember, type NewRoom } from "../auth/roomRecords.ts";
 import { randomToken, sha256 } from "../auth/tokens.ts";
 import { withTx } from "../auth/tx.ts";
-import type { Logger } from "./actor.ts";
+import { warnArchiveSkipped, type Logger } from "./actor.ts";
 import { EXPORT_FORMAT, EXPORT_FORMAT_VERSION, assetFileName } from "./exportRoom.ts";
 import type { RoomGateway } from "./gateway.ts";
 import { archiveAdmitted, archiveLines } from "./persistence.ts";
@@ -265,7 +265,7 @@ export async function importRoom(deps: ImportDeps, zipPath: string, form: Import
       // The archive takes the lines only while the shared volume is over its floor. Short of space the room still
       // comes, with the log its rings hold.
       const archive = await archiveAdmitted(() => deps.assets.archiveDiskOk());
-      if (!archive) deps.log.warn({ roomId }, "free disk is under the floor or could not be read, so the import's log lines were not archived");
+      if (!archive) warnArchiveSkipped(deps.log, roomId, Date.now());
       await withTx(deps.pool, async (tx) => {
         await deps.gateway.createRoom(roomId, state, tx);
         if (archive) await archiveLines(tx, roomId, remapped.log);

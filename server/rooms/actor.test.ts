@@ -4133,18 +4133,26 @@ describe("the log archive's guards", () => {
   const join = (actor: RoomActor, name: string) =>
     actor.sys({ t: "sys.memberJoin", member: { id: uuidv7(), name, color: "#336699", kind: "player", createdAt: new Date().toISOString() } });
 
-  test("a batch whose lines the free-disk guard refuses commits without them, with a warning, and each batch asks again", async () => {
+  test("a batch whose lines the free-disk guard refuses commits without them, each batch asks again, and the warning comes once a minute with a count", async () => {
     const dm = member("DM", "dm");
     const db = new FakeDb({ state: createInitialState({ roomName: "Short disk", dm }), dmGrants: [dm.id] });
     const { pool, sql } = recording(db);
     const warnings: string[] = [];
+    const refused: unknown[] = [];
     let answer: () => Promise<boolean> = () => Promise.resolve(false);
-    const d = deps(db);
+    let clock = 5_000_000;
+    const d = deps(db, { roomId: `SHORTDSK` });
     const actor = await RoomActor.load({
       ...d,
       pool,
-      log: { ...quiet, warn: (_obj: unknown, msg?: string) => void warnings.push(msg ?? "") },
-      options: { ...d.options, archiveGuard: () => answer() },
+      log: {
+        ...quiet,
+        warn: (obj: unknown, msg?: string) => {
+          warnings.push(msg ?? "");
+          refused.push((obj as { refused?: number }).refused);
+        },
+      },
+      options: { ...d.options, now: () => clock, archiveGuard: () => answer() },
     });
     assert.ok(actor);
     const archived = () => sql.filter((s) => s.startsWith("insert into room_log")).length;
@@ -4159,11 +4167,17 @@ describe("the log archive's guards", () => {
       answer = () => Promise.reject(new Error("statfs failed"));
       await join(actor, "Quin");
       assert.equal(archived(), 0, "a failed check counts as no");
+      assert.equal(warnings.length, 1, "not again within the minute");
+      clock += 60_000;
+      answer = () => Promise.resolve(false);
+      await join(actor, "Sam");
+      assert.equal(archived(), 0);
       assert.equal(warnings.length, 2);
+      assert.deepEqual(refused, [1, 2], "the minute's second warning counts both refusals since the first");
       answer = () => Promise.resolve(true);
       await join(actor, "Rho");
       assert.equal(archived(), 1);
-      assert.equal(actor.committed.seq, 3);
+      assert.equal(actor.committed.seq, 4);
     } finally {
       db.freeze();
       void actor.shutdown({ code: 1012, snapshot: false });
