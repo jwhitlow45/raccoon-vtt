@@ -139,6 +139,15 @@ async function closeSheet(page: Page, name: string): Promise<void> {
   await s.waitFor({ state: "hidden" });
 }
 
+/** Taps away the toasts the steps before left over the map, as groupsave.e2e.ts does, so a tap on a cell under them reaches the map. */
+async function dismissToasts(page: Page): Promise<void> {
+  for (let i = 0; i < 8; i++) {
+    const toast = page.locator("button[data-toast], div[data-toast] > button").filter({ visible: true });
+    if ((await toast.count()) === 0) return;
+    await toast.first().tap({ timeout: 1000 }).catch(() => {});
+  }
+}
+
 function areaOptions(page: Page): Locator {
   return page.getByRole("toolbar", { name: "Area options" });
 }
@@ -476,6 +485,8 @@ describe("raccoon-vtt a player's save spell", { timeout: 600_000 }, () => {
 
   test("ss-7b. Hold Person's block takes the focus for its opening only, and folded, its ask still closes it and the DM's Dismiss clears the folded line", async () => {
     await pickTool(pat, "Select");
+    // ss-7's ask and the DM's Dismiss leave two notes over Pat's map, the first with about a second of its 5 s left, and Thorn's cell lies under the second.
+    await dismissToasts(pat);
     await tapCell(pat, BOUNDS, run.thorn);
     await multiSelect(pat.getByRole("dialog", { name: "Thorn actions" }));
     for (const g of run.goblins) await tapCell(pat, BOUNDS, g);
