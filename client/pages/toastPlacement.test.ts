@@ -352,6 +352,60 @@ test("FU39-B: the room publishes visible spanning toasts and the column uses onl
   }
 });
 
+test("FU40-B pl2-b: a toast above a full measured column reserves space immediately", () => {
+  const placeStart = room.indexOf("  floorWas.current = props.restFloor;");
+  const placeEnd = room.indexOf("  const { places } = placed.current;", placeStart);
+  const publishStart = room.indexOf("    const notices = stacks.notices.box.current;");
+  const publishEnd = room.indexOf("    // The foot of the toasts over the map", publishStart);
+  assert.ok(placeStart > 0 && placeEnd > placeStart && publishStart > 0 && publishEnd > publishStart);
+  let seed = 320568;
+  const random = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32);
+  for (let sequence = 0; sequence < 100; sequence++) {
+    const zoom = sequence % 2 ? 1.3 : 1;
+    const unmeasured = sequence % 4 < 2;
+    // The 320 x 568 capture: cards start at 108 and end at 497, while
+    // the fallback toast occupies 116..160 and covers the first title.
+    const toast = { id: 1, top: 116 * zoom, bottom: 160 * zoom };
+    const facts = { top: 108, content: 389, cover: 389, first: 124 };
+    const low = toastTop({ spanning: true, column: facts, cards: true, optionsTop: 508 });
+    assert.equal(low, null, "the full column leaves under 44 px below it");
+    const props = { restFloor: null, pane: null, paneStands: false, low, columnTop: unmeasured ? null : 108, layer: {}, spanning: true };
+    const state: { mapToasts: ReturnType<typeof mapToastBox> } = { mapToasts: null };
+    const bindings = {
+      props, placed: { current: NO_TOAST_PLACES }, floorWas: { current: null }, ids: [1], slot: null, turned: false,
+      mapFoot: { current: null }, recent: new Set([1]), overBar: undefined, anew: undefined, turnStarted: false,
+      mapMeasured: { current: null }, zoom, nextToastPlaces, mapToastBox, keptMapFoot, EDGE,
+      overMap: [toast],
+      stacks: { notices: { box: { current: { getBoundingClientRect: () => toast } } } },
+      hosts: { current: new Map([[1, { firstElementChild: { getBoundingClientRect: () => toast } }]]) },
+      dockStore: { getState: () => state, setState: (patch: typeof state) => Object.assign(state, patch) },
+    };
+    const place = new Function(...Object.keys(bindings), stripTypeScriptTypes(room.slice(placeStart, placeEnd)));
+    const publish = new Function(...Object.keys(bindings), stripTypeScriptTypes(room.slice(publishStart, publishEnd)));
+    const frame = () => { place(...Object.values(bindings)); publish(...Object.values(bindings)); };
+    if (unmeasured) {
+      for (let i = 0, count = 1 + Math.floor(random() * 4); i < count; i++) {
+        frame();
+        assert.equal(state.mapToasts?.keptBottom, null, "an unmeasured card must not be pushed by its waiting toast");
+        assert.ok(bindings.placed.current.awaitCard.has(1));
+      }
+      props.columnTop = 108;
+    }
+    frame();
+    const top = columnTop(108, null, state.mapToasts?.keptBottom ?? null, 108);
+    assert.equal(top, 168, "a measured full column must clear the fallback toast before it ages out");
+    assert.equal(top - toast.bottom / zoom, EDGE, "the first card stands exactly 8 px below the toast");
+    assert.equal(bindings.placed.current.awaitCard.size, 0, "no room under a measured card ends the provisional exclusion");
+    props.columnTop = top;
+    for (let i = 0, count = 1 + Math.floor(random() * 4); i < count; i++) {
+      if (random() < 0.5) bindings.recent.clear();
+      frame();
+      assert.equal(columnTop(108, null, state.mapToasts?.keptBottom ?? null, top), top, "repeated measurement and aging must not push the cards again");
+      assert.equal(bindings.placed.current.places.get(1), "map", "the fallback toast stays where it was read");
+    }
+  }
+});
+
 test("FU39-B: only the visible part of a scrolling toast reserves column space", () => {
   const boxes = [{ id: 1, top: 10, bottom: 90 }, { id: 2, top: 98, bottom: 300 }];
   assert.deepEqual(mapToastBox(boxes, new Set([2]), 1, { top: 50, bottom: 150 }), { top: 50, bottom: 150, keptBottom: 90 });

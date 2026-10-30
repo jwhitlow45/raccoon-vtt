@@ -1604,7 +1604,9 @@ export function inToastLayer(place: ToastPlace | undefined): boolean {
  * under, while it is still new (`recent`, the ids that came moments ago),
  * takes its place again, as if it came now, on the first render that has
  * a place under the card (`low`), as the turn's rule does. Once it is
- * placed anew, or no longer new, a card moves it no more.
+ * placed anew, or no longer new, a card moves it no more. A settled,
+ * measured column with no room below it (`cardMeasured` with null `low`)
+ * ends that wait immediately, so the toast reserves space above its cards.
  *
  * On an upright phone the toasts in `overBar` take their places again
  * under the spanning token bar's header, in the layer, as toasts that
@@ -1644,6 +1646,8 @@ export function nextToastPlaces(
     turned?: boolean;
     mapFoot?: number | null;
     recent?: ReadonlySet<number>;
+    /** A settled card height is known, so null low means no room below it. */
+    cardMeasured?: boolean;
     /** The toasts to place under a spanning bar's header (toastsUnderHead), barToastTop's place under it, and the bar's opening, which then owns the stack (reviews LP19-BS-2, LP19-Q1, LP19-OPUS-3 and FU24-OPUS-1). */
     overBar?: { ids: ReadonlySet<number>; at: number | null; opening: number | null };
     /** The toasts that take their place anew for a resting strip, as toasts that came now would (docs/design-v1-bar-compact.md 3.5). */
@@ -1661,7 +1665,8 @@ export function nextToastPlaces(
   // A card can take a toast under it only in the layer, with no sheet's slot and no pane standing.
   const cardRoom = now.layer && !now.slot && !now.paneStands;
   const recent = now.recent ?? new Set<number>();
-  const awaitCard = new Set(now.ids.filter((id) => was.awaitCard.has(id) && recent.has(id)));
+  const cardUnavailable = now.cardMeasured === true && now.low === null;
+  const awaitCard = new Set(now.ids.filter((id) => !cardUnavailable && was.awaitCard.has(id) && recent.has(id)));
   // The turn's first card: a place under a card where the render before had none, as the turn starts.
   const turnCard = now.turnStarted === true && was.low === null && now.low !== null;
   // A toast over a spanning bar's header takes its place again under it, in the layer, as one that came now would there. The layer's one stack goes with it, since a new toast would join it over the header again, and that bar's opening owns the stack from then on.
@@ -1713,7 +1718,7 @@ export function nextToastPlaces(
     places.set(id, at);
     // A toast that comes while the turn lasts takes the card's place as it reads now, which may be the card as it stood before, or joins a stack that does: it moves with that stack as the column measures again, rather than holding it there (review FU22B-ASTRA-03).
     if (underCard && typeof at === "object" && at.column) turning.add(id);
-    if (at === "map" && now.low === null && cardRoom && recent.has(id)) awaitCard.add(id);
+    if (at === "map" && now.low === null && cardRoom && !cardUnavailable && recent.has(id)) awaitCard.add(id);
   }
   for (const id of awaitCard) if (places.get(id) !== "map") awaitCard.delete(id);
   return { places, paneLast: freeze ? null : paneLast, paneStood: now.paneStands, turning, awaitCard, low: now.low };

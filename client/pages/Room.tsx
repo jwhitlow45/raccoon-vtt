@@ -1840,7 +1840,7 @@ function Toasts(props: {
   // Wait for that card to clear it before committing a new toast below the card.
   const mapBefore = props.spanning && mapMeasured.current ? mapToastBox(mapMeasured.current.boxes.filter((b) => ids.includes(b.id)), new Set([...placed.current.awaitCard].filter((id) => recent.has(id))), zoom, mapMeasured.current.clip) : null;
   const cardSettled = mapBefore?.keptBottom == null || (props.columnTop !== null && props.columnTop + 0.5 >= mapBefore.keptBottom + EDGE);
-  placed.current = nextToastPlaces(placed.current, { ids, pane: props.pane, paneStands: props.paneStands, low: cardSettled ? props.low : null, layer: props.layer !== null, slot: slot !== null, turned, mapFoot: mapFoot.current, recent, overBar, anew, turnStarted });
+  placed.current = nextToastPlaces(placed.current, { ids, pane: props.pane, paneStands: props.paneStands, low: cardSettled ? props.low : null, cardMeasured: cardSettled && props.columnTop !== null, layer: props.layer !== null, slot: slot !== null, turned, mapFoot: mapFoot.current, recent, overBar, anew, turnStarted });
   const { places } = placed.current;
   useEffect(() => {
     if (slot) return;
