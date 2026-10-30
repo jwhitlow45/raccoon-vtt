@@ -1,4 +1,5 @@
-# Every check on a push to main or to a ci/ branch, on Linux: the typecheck
+# Every check on a push to main or to a ci/ branch, and on pull requests to
+# main, on Linux: the typecheck
 # with the integration tests, the unit tests, and the e2e files in 14 shards.
 # That is 17 jobs with the build. One run peaks at 16 Linux jobs of the
 # account's 20, so a run that overlaps it queues part of its shards: a single
@@ -29,6 +30,8 @@ name: CI
 on:
   push:
     branches: [main, "ci/**"]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
