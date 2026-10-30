@@ -1,6 +1,8 @@
 import { createContext, useContext, useRef } from "react";
 import { useStore } from "zustand";
 import type { StoreApi } from "zustand/vanilla";
+import type { HexGrid } from "#shared/rules/hex.ts";
+import type { GroundCell } from "../../lib/groundCells.ts";
 import type { Turn } from "../../lib/view.ts";
 import { useRoomView, type RoomView } from "../../state/view.ts";
 import type { FogView } from "./fogView.ts";
@@ -30,6 +32,8 @@ export type IsoGround = {
   ground: (x: number, y: number) => number;
   /** On hexes, the highest drawn ground of the hexes a box holds (isoPlace.ts hexBoxGround). Absent on squares, whose boxes read their cells. */
   top?: (box: { x0: number; y0: number; x1: number; y1: number }) => number;
+  /** On hexes, the drawn ground hex by hex, for a mark laid in parts on the hexes under it (markStand.ts groundPieces). Absent on squares. */
+  surface?: { grid: HexGrid; atCell: (c: GroundCell) => number };
 };
 
 export const IsoGroundContext = createContext<IsoGround | null>(null);

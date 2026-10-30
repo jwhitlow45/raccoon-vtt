@@ -522,6 +522,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
       place: "ground",
       ground: (x: number, y: number) => heights.atPoint({ x, y }),
       top: isHex(grid) ? (box: { x0: number; y0: number; x1: number; y1: number }) => hexBoxGround(heights, box) : undefined,
+      surface: isHex(grid) ? { grid, atCell: heights.atCell } : undefined,
     }),
     [turn, fog, stand, uprightIds, heights, grid],
   );

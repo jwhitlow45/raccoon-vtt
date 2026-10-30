@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 import { Arrow, Circle, Ellipse, Group, Line, Rect, Text } from "react-konva";
 import type { Drawing, DrawingKind, RoomState } from "#shared/model.ts";
 import { drawsHere, viewPointOf } from "../../canvas/isoPlace.ts";
@@ -116,7 +116,7 @@ const FLAT: GroundPiece[] = [{ lift: { x: 0, y: 0 }, clip: null }];
  * lands on a revealed top.
  */
 export function draftDrawn(
-  iso: Pick<IsoGround, "fog" | "turn" | "ground"> | null,
+  iso: Pick<IsoGround, "fog" | "turn" | "ground" | "surface"> | null,
   draft: DrawToolState["draft"],
   textAt: Point | null,
   width: number,
@@ -169,7 +169,7 @@ function Draft(props: {
     <>
       {at.pieces.map((piece, i) => (
         <Group key={i} x={piece.lift.x} y={piece.lift.y} listening={false}>
-          {piece.clip ? <Clipped rects={piece.clip}>{marks}</Clipped> : marks}
+          {piece.clip ? <Clipped rects={piece.clip}>{marks}</Clipped> : piece.polys ? <ClippedPolys polys={piece.polys}>{marks}</ClippedPolys> : marks}
         </Group>
       ))}
     </>
@@ -222,4 +222,24 @@ function DrawingShape(props: { kind: DrawingKind; points: number[]; style: Drawi
         />
       );
   }
+}
+
+/** Children drawn inside polygons in cells: on hexes, a draft's part on the hexes of one ground (canvas/markStand.ts groundPieces). */
+function ClippedPolys(props: { polys: readonly (readonly { x: number; y: number }[])[]; children: ReactNode }) {
+  const { polys } = props;
+  return (
+    <Group
+      listening={false}
+      clipFunc={(ctx) => {
+        ctx.beginPath();
+        for (const poly of polys) {
+          ctx.moveTo(poly[0]!.x, poly[0]!.y);
+          for (let i = 1; i < poly.length; i++) ctx.lineTo(poly[i]!.x, poly[i]!.y);
+          ctx.closePath();
+        }
+      }}
+    >
+      {props.children}
+    </Group>
+  );
 }

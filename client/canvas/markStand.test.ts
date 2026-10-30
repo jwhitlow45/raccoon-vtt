@@ -14,6 +14,8 @@ import { auraClip, groundPieces, markStands, pillStands, tetherShows } from "./m
 import { liftInPlane } from "./isoPlace.ts";
 import type { Turn } from "../lib/view.ts";
 import { FogView } from "./relief/fogView.ts";
+import type { HexGrid } from "#shared/rules/hex.ts";
+import { cellAtPoint, groundSurface } from "../lib/groundCells.ts";
 
 /**
  * The stand rule for the board's marks (markStand.ts) is security
@@ -402,3 +404,74 @@ describe("the stand rule for the board's marks", () => {
   });
 });
 
+
+describe("a mark moving on raised hexes (design 7, review HXR1-ASTRA-2)", () => {
+  const ROWS: HexGrid = { shape: "hex", orient: "rows" };
+  const COLUMNS: HexGrid = { shape: "hex", orient: "columns" };
+  const surfaceOf = (grid: HexGrid, cells: Record<string, number>) => groundSurface(grid, { w: 16, h: 16 }, (c) => cells[`${c.col},${c.row}`] ?? 0);
+
+  test("rows hex (3,3) at 2: a small preview around (4.02, 2.65), inside that hex, lifts to its top, where square cell centers read 0", () => {
+    // The box (4, 2.63) to (4.04, 2.67) lies inside (3,3), clear of its top corner at (4, 2.59375).
+    const surface = surfaceOf(ROWS, { "3,3": 2 });
+    const fog = new FogView(null, "s1", { w: 16, h: 16 });
+    for (const turn of [0, 1, 2, 3] as Turn[]) {
+      const pieces = groundPieces({ fog, turn, ground: (x, y) => surface.atPoint({ x, y }), surface: { grid: ROWS, atCell: surface.atCell } }, { x0: 4, y0: 2.63, x1: 4.04, y1: 2.67 });
+      assert.deepEqual(pieces, [{ lift: liftInPlane(turn, 2), clip: null }], `turn ${turn}`);
+    }
+  });
+
+  test("any box on random hex heights and fog: each piece lies in hexes of its own ground and in revealed sub-cells, and together they cover what shows of the box", () => {
+    const random = rng(0x4e5);
+    for (const grid of [ROWS, COLUMNS]) {
+      for (let round = 0; round < 30; round++) {
+        const cells: Record<string, number> = {};
+        for (let r = 0; r < 18; r++) for (let c = 0; c < 18; c++) cells[`${c},${r}`] = [0, 0, 2, -1][Math.floor(random() * 4)]!;
+        const surface = surfaceOf(grid, cells);
+        const partial = random() < 0.5;
+        const fog = partial ? fogOf([[0, 0, 7, 16], [9, 0, 16, 16]], [[28, 20], [29, 20], [28, 21], [33, 9]]) : new FogView(null, "s1", { w: 16, h: 16 });
+        const x0 = 1 + random() * 10;
+        const y0 = 1 + random() * 10;
+        const box = { x0, y0, x1: x0 + 0.3 + random() * 3, y1: y0 + 0.3 + random() * 3 };
+        const turn = Math.floor(random() * 4) as Turn;
+        const pieces = groundPieces({ fog, turn, ground: (x, y) => surface.atPoint({ x, y }), surface: { grid, atCell: surface.atCell } }, box);
+        let area = 0;
+        for (const piece of pieces) {
+          const g = [-1, 0, 2].find((h) => {
+            const d = liftInPlane(turn, h);
+            return Math.abs(d.x - piece.lift.x) < 1e-12 && Math.abs(d.y - piece.lift.y) < 1e-12;
+          });
+          assert.ok(g !== undefined, "a piece lifted by no ground");
+          const polys = piece.polys ?? (piece.clip ? piece.clip.map((r) => [{ x: r.x, y: r.y }, { x: r.x + r.w, y: r.y }, { x: r.x + r.w, y: r.y + r.h }, { x: r.x, y: r.y + r.h }]) : [[{ x: box.x0, y: box.y0 }, { x: box.x1, y: box.y0 }, { x: box.x1, y: box.y1 }, { x: box.x0, y: box.y1 }]]);
+          for (const poly of polys) {
+            area += Math.abs(polyArea(poly));
+            // Points well inside each piece read its ground and are shown.
+            const c = { x: poly.reduce((t, p) => t + p.x, 0) / poly.length, y: poly.reduce((t, p) => t + p.y, 0) / poly.length };
+            for (const p of [c, ...poly.map((q) => ({ x: q.x + (c.x - q.x) * 0.05, y: q.y + (c.y - q.y) * 0.05 }))]) {
+              assert.equal(surface.atCell(cellAtPoint(grid, p)), g, `${grid.orient} round ${round}: a piece on another hex's ground at (${p.x}, ${p.y})`);
+              assert.ok(fog.revealed(Math.floor(p.x * FOG_SUBCELLS), Math.floor(p.y * FOG_SUBCELLS)), `${grid.orient} round ${round}: a piece over fog`);
+            }
+          }
+        }
+        let open = 0;
+        const n = 120;
+        for (let k = 0; k < n; k++) for (let j = 0; j < n; j++) {
+          const x = box.x0 + ((box.x1 - box.x0) * (k + 0.5)) / n;
+          const y = box.y0 + ((box.y1 - box.y0) * (j + 0.5)) / n;
+          if (fog.revealed(Math.floor(x * FOG_SUBCELLS), Math.floor(y * FOG_SUBCELLS))) open++;
+        }
+        const shown = (open / n / n) * (box.x1 - box.x0) * (box.y1 - box.y0);
+        assert.ok(Math.abs(area - shown) < 0.02 * (box.x1 - box.x0) * (box.y1 - box.y0) + 1e-9, `${grid.orient} round ${round}: pieces cover ${area}, the box shows ${shown}`);
+      }
+    }
+  });
+});
+
+function polyArea(poly: readonly { x: number; y: number }[]): number {
+  let a = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i]!;
+    const q = poly[(i + 1) % poly.length]!;
+    a += p.x * q.y - q.x * p.y;
+  }
+  return a / 2;
+}
