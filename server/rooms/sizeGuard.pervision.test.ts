@@ -4,7 +4,7 @@ import { checkOps, serverApply, type Applier } from "#shared/differential.ts";
 import { holderTileKey, tileKey } from "#shared/keys.ts";
 import { serializedBytes } from "#shared/limits.ts";
 import type { Encounter, ExploredTile, FogTile, PathStop, RoomState, Viewer } from "#shared/model.ts";
-import { projectState } from "#shared/project.ts";
+import { projectState, type ProjectedState } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { encodeTile, fullTileBits, tilesAcross } from "#shared/rules/fog.ts";
 import { sightEntryMaxBytes } from "#shared/rules/vision.ts";
@@ -22,6 +22,12 @@ import { growthBound, measuredFromStored, measuredStateBytes, PER_PLAYER_FULL, p
 
 const BITS = encodeTile(fullTileBits());
 const WIDE = Number.MAX_SAFE_INTEGER;
+
+/** Companion blocks and derived undo metadata have their own bounds outside the scene quota. */
+function projectionBytes(view: ProjectedState): number {
+  const { hpUndoLogIds: _undo, ...meta } = view.meta;
+  return serializedBytes({ ...view, meta, companionBlocks: {} });
+}
 
 /** Ids as long as the schema allows, so every widest count is met. */
 const longId = (n: number) => `${String(n).padStart(2, "0")}${"x".repeat(62)}`;
@@ -80,7 +86,7 @@ describe("the size guard's per-player reserves", () => {
     assert.ok(storedAsItIs(full) <= measure, `stored ${storedAsItIs(full)} within the measure ${measure}`);
     // A few bytes over at most: each map counts one comma more than it holds.
     assert.ok(measure - storedAsItIs(full) < 64, `the measure is ${measure - storedAsItIs(full)} bytes over`);
-    const projected = serializedBytes({ ...projectState(full, DM, { sceneId: "s1" }), companionBlocks: {} });
+    const projected = projectionBytes(projectState(full, DM, { sceneId: "s1" }));
     // Vision is off, so the projection holds no sight: the rest of the measure alone must hold it.
     const sight = tilesAcross(40) * tilesAcross(30) * sightEntryMaxBytes("s1");
     assert.ok(projected <= projectedSceneBytes(full, "s1") - sight, `the DM's projection ${projected} within the scene's measure less its sight, ${projectedSceneBytes(full, "s1") - sight}`);
@@ -247,7 +253,7 @@ describe("a per-player scene that shrinks", () => {
     const measure = measuredStateBytes(after);
     assert.ok(stored <= measure, `stored ${stored} within the measure ${measure}`);
     assert.equal(measuredFromStored(serializedBytes(after), after), measure, "a snapshot's bytes measure alike");
-    const projected = serializedBytes({ ...projectState(after, DM, { sceneId: "s1" }), companionBlocks: {} });
+    const projected = projectionBytes(projectState(after, DM, { sceneId: "s1" }));
     assert.ok(projected <= projectedSceneBytes(after, "s1"), `the DM's projection ${projected} within the scene's measure ${projectedSceneBytes(after, "s1")}`);
     // A room loaded from that snapshot, with limits just under what it holds, is refused.
     assert.equal(new SizeGuard({ stateLimit: stored - 1 }).check(after, [], 0).ok, false, "the room's limit");
@@ -268,7 +274,7 @@ describe("a per-player scene that shrinks", () => {
       assert.ok(result.ok);
       const projected = projectState(result.state, DM, { sceneId: "s1" });
       assert.equal(Object.keys(projected.fogAll ?? {}).length, tilesAcross(200) ** 2, "the shared fog keeps a tile over each of the DM's");
-      const bytes = serializedBytes({ ...projected, companionBlocks: {} });
+      const bytes = projectionBytes(projected);
       assert.ok(bytes <= projectedSceneBytes(result.state, "s1"), `the DM's projection ${bytes} within the scene's measure ${projectedSceneBytes(result.state, "s1")}`);
     });
   }

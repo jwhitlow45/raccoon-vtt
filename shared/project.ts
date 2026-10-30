@@ -3556,14 +3556,16 @@ function projectMemberCtx(_ctx: Ctx, member: Member): Member {
 }
 
 function projectMetaCtx(ctx: Ctx): ProjectedState["meta"] {
-  const { name, settings, playerSceneId, view } = ctx.state.meta;
-  const meta = { name, settings, playerSceneId, view };
-  if (ctx.viewer.role !== "dm") return meta;
+  if (ctx.viewer.role !== "dm") {
+    // Preview can start from the DM's view, so discard its private derived metadata.
+    const { hpUndoLogIds: _undo, ...meta } = ctx.state.meta as ProjectedState["meta"];
+    return meta;
+  }
   // Archive pages can outlive the server's undo records. Send their current
   // eligibility with live updates, independently of the DM's shorter tail.
   const reverted = new Set(ctx.state.log.flatMap((e) => e.data?.type === "hp" && e.data.back && e.data.of ? [e.data.of] : []));
   const hpUndoLogIds = ctx.state.log.filter((e) => e.data?.type === "hp" && e.data.revert && !e.data.back && !reverted.has(e.id)).map((e) => e.id);
-  return { ...meta, hpUndoLogIds };
+  return { ...ctx.state.meta, hpUndoLogIds };
 }
 
 /** One entity as the viewer may see it, or null when the viewer may not know it exists. */

@@ -63,7 +63,12 @@ function stored(state: RoomState): string {
  * else on those with it.
  */
 function seenBy(state: RoomState, viewer: Viewer, view: ProjectedState): string {
-  if (viewer.role === "dm") return stableStringify({ ...view, log: withReminders(state, view.log) });
+  if (viewer.role === "dm") {
+    // Retained undo ids are derived view metadata absent from the historical build.
+    // Compare all stored meta fields. Dedicated log tests cover undo retention.
+    const { hpUndoLogIds: _undo, ...meta } = view.meta;
+    return stableStringify({ ...view, meta, log: withReminders(state, view.log) });
+  }
   const fogged = (sceneId: string) => state.scenes[sceneId]?.fogEnabled === true;
   const out = { ...view, log: view.log.filter((line) => !onFoggedArea(state, line)) } as Record<string, unknown>;
   out.buildChunks = Object.fromEntries(Object.entries(view.buildChunks).filter(([, chunk]) => !fogged(chunk.sceneId)));

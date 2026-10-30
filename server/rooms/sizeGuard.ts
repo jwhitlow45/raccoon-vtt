@@ -59,8 +59,8 @@ import { keyBytes, MEMORY_CAP, wallLargestBytes } from "./memorySize.ts";
  *
  * A DM's projection of a scene is exactly the two parts with the JSON around
  * them (and an empty sight map, whose real tiles the sight reserve covers),
- * and the log's lines outside the measure, so the measure is the
- * projection's size less those.
+ * and the log's lines and derived undo metadata outside the measure, so
+ * the measure is the projection's size less those.
  *
  * Traps (docs/design-v1-traps.md 6.7) are counted so that a springing
  * never moves a measure: a trap's own fields exactly and, in place of what
@@ -83,6 +83,13 @@ import { keyBytes, MEMORY_CAP, wallLargestBytes } from "./memorySize.ts";
  * (shared/limits.ts), and the measure leaves them out. A hidden area's
  * reminder, another player's aura or a whisper between others then never
  * changes whether a player's op passes.
+ *
+ * The DM's derived meta.hpUndoLogIds likewise rides outside the measure:
+ * it includes private log ids, so charging their actual bytes could reveal
+ * hidden HP changes through another player's quota refusal. Only retained
+ * shared and DM lines hold undo records, at most MAX_LOG + dmLogLines ids
+ * (400). At 25 characters per id plus JSON, this adds less than 12 KiB to
+ * a DM snapshot. It never grows stored state or the scene's quota.
  */
 
 function roomFull(limit: number): LimitCheck {

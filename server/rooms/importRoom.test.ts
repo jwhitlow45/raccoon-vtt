@@ -183,7 +183,12 @@ describe("wave 4 import limits (docs/design-v1-maps-vision.md 2.4)", () => {
       const state = room({ scenes: { s1: scene("s1", { bounds: { w: 200, h: 200 }, fogEnabled: true, vision: { on: true, light: "dark" } }) } });
       const pad = token("pad", { sceneId: "s1", notes: "" });
       state.tokens.pad = pad;
-      const measured = () => serializedBytes(projectState({ ...state, sight: {} } as unknown as RoomState, DM_VIEW, { sceneId: "s1" }));
+      const measured = () => {
+        const view = projectState({ ...state, sight: {} } as unknown as RoomState, DM_VIEW, { sceneId: "s1" });
+        // Undo metadata has its own bound outside the scene quota.
+        const { hpUndoLogIds: _undo, ...meta } = view.meta;
+        return serializedBytes({ ...view, meta });
+      };
       pad.notes = "x".repeat(bytes - measured());
       assert.equal(measured(), bytes);
       return state;

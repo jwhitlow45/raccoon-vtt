@@ -550,6 +550,25 @@ function assertNoWave5Leaks(state: RoomState, viewer: Viewer, p: ProjectedState,
 }
 
 describe("projection properties over random rooms", () => {
+  test("FU39-OPUS-6: room metadata passes through while derived undo ids stay DM-only", () => {
+    const state = room();
+    const meta = { ...state.meta, futureField: { enabled: true } };
+    const storedMeta = structuredClone(meta);
+    state.meta = meta;
+    for (const viewer of [DM, P1, DISPLAY]) {
+      const expected = viewer.role === "dm" ? { ...meta, hpUndoLogIds: [] } : meta;
+      assert.deepEqual(projectState(state, viewer, { sceneId: "s1" }).meta, expected, viewer.memberId);
+      assert.deepEqual(projectEntity(keys.meta, state, viewer, { sceneId: "s1" }), expected, `${viewer.memberId} delta`);
+    }
+    // Preview starts from a DM projection, whose private derived field must not pass through.
+    const preview = { ...state, meta: { ...meta, hpUndoLogIds: ["1:900000"] } };
+    for (const viewer of [P1, DISPLAY]) {
+      assert.deepEqual(projectState(preview, viewer, { sceneId: "s1" }).meta, meta);
+      assert.deepEqual(projectEntity(keys.meta, preview, viewer, { sceneId: "s1" }), meta);
+    }
+    assert.deepEqual(state.meta, storedMeta, "projection never adds derived fields to stored metadata");
+  });
+
   test("no player projection leaks, and projectEntity agrees with projectState", () => {
     for (let seed = 1; seed <= 250; seed++) {
       const state = randomState(rng(seed));
