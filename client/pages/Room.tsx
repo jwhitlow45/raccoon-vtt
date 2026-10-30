@@ -841,7 +841,7 @@ function RoomPage() {
   useLayoutEffect(() => {
     const lasting = lastingRef.current;
     if (!lasting) {
-      barDock.setState({ notices: null, lasting: null });
+      barDock.setState({ notices: null, lasting: null, noticesSpanning: !besideLane });
       return;
     }
     const measure = () => {
@@ -854,7 +854,7 @@ function RoomPage() {
       // Spanning the map, they push the alerts column down. Beside its lane they leave the column be, but the token bar and the tool's options keep clear of them either way.
       const notices = besideLane ? null : bottom;
       const state = barDock.getState();
-      if (state.notices !== notices || state.lasting !== bottom) barDock.setState({ notices, lasting: bottom });
+      if (state.notices !== notices || state.lasting !== bottom || state.noticesSpanning !== !besideLane) barDock.setState({ notices, lasting: bottom, noticesSpanning: !besideLane });
     };
     measure();
     const observer = new ResizeObserver(measure);

@@ -283,6 +283,133 @@ test("HF-41 R1: a kept notice followed by a trap and its card places the trap to
   }
 });
 
+/** Run the real render and its layout effect, keeping the previous committed latch. */
+function alertColumnRender() {
+  const source = readFileSync(new URL("../features/encounter/InitiativeStrip.tsx", import.meta.url), "utf8");
+  const start = source.indexOf("  const laneTop = chrome ?");
+  const end = source.indexOf("  const push =", start);
+  assert.ok(start > 0 && end > start);
+  const held = { current: null as unknown };
+  let effects: (() => void)[] = [];
+  const bindings = {
+    chrome: { top: 52, bottom: 60 } as { top: number; bottom: number } | null, EDGE, columnTop,
+    alerts: [{ id: "turn:1", kind: "turn" }] as { id: string; kind: string; says?: string }[],
+    turnHidden: false, folded: false, footRolls: false, rolls: null as { drawnIds: string[] } | null,
+    forFootCard: false, forPane: false, overlay: false, laneRow: null as string | null, barSummary: null as object | null,
+    asked: null as string | null, roomSummary: {} as object | null, firstHeight: 80, height: 844,
+    noticesSpanning: true, zoom: 1, lasting: null as number | null,
+    mapToasts: null as { keptBottom: number | null } | null,
+    useRef: () => held, useLayoutEffect: (effect: () => void) => effects.push(effect),
+  };
+  const run = new Function(...Object.keys(bindings), `${stripTypeScriptTypes(source.slice(start, end))}\nreturn colTop;`);
+  return (patch: Partial<typeof bindings> = {}) => {
+    Object.assign(bindings, patch);
+    effects = [];
+    const top = run(...Object.values(bindings)) as number | null;
+    for (const effect of effects) effect();
+    return top;
+  };
+}
+
+test("FU40B-OPUS-2: the drawn card set and layout release a pushed top in the same render", () => {
+  const changes = [
+    { name: "next turn", patch: { alerts: [{ id: "turn:2", kind: "turn" }] }, top: 60 },
+    { name: "another alert arrives", patch: { alerts: [{ id: "turn:1", kind: "turn" }, { id: "check:1", kind: "concentration" }] }, top: 60 },
+    { name: "turn card is hidden", patch: { turnHidden: true }, top: 60 },
+    { name: "column empties", patch: { alerts: [] }, top: 60 },
+    { name: "column folds under a sheet", patch: { folded: true }, top: 60 },
+    { name: "rotation puts notices beside the lane", patch: { noticesSpanning: false }, top: 60 },
+    { name: "lane top moves", patch: { chrome: { top: 64, bottom: 60 } }, top: 72 },
+    { name: "pane summary hides the cards", patch: { forPane: true }, top: 60 },
+    { name: "bar summary hides the cards", patch: { laneRow: "bar", barSummary: {} }, top: 60 },
+    { name: "foot-card summary hides the cards", patch: { forFootCard: true }, top: 60 },
+    { name: "cards move to the overlay", patch: { overlay: true }, top: 60 },
+    { name: "shorter room would hide the latched cards", patch: { height: 220 }, top: 60 },
+    { name: "interface zoom changes", patch: { zoom: 1.3 }, top: 60 },
+  ];
+  for (const change of changes) {
+    const render = alertColumnRender();
+    assert.equal(render({ mapToasts: { keptBottom: 112 } }), 120);
+    assert.equal(render({ mapToasts: null }), 120, `${change.name}: toast expiry alone must not move a live button`);
+    assert.equal(render(change.patch), change.top, `${change.name}: the release cannot wait for another render`);
+    assert.equal(render(), change.top, `${change.name}: the next render cannot restore the stale push`);
+  }
+  const render = alertColumnRender();
+  const a = { id: "a", kind: "notice", says: "First words" };
+  const b = { id: "b", kind: "notice", says: "Second words" };
+  assert.equal(render({ alerts: [a, b], mapToasts: { keptBottom: 112 } }), 120);
+  assert.equal(render({ alerts: [{ ...b, says: "Changed words" }, a], mapToasts: null }), 120, "reordering the same IDs or changing their words preserves the latch");
+  assert.equal(render({ alerts: [a] }), 60, "removing a drawn card releases it");
+  assert.equal(render({ alerts: [], rolls: { drawnIds: ["roll:r1"] }, mapToasts: { keptBottom: 112 } }), 120);
+  assert.equal(render({ mapToasts: null }), 120);
+  assert.equal(render({ rolls: { drawnIds: ["roll:r2"] } }), 60, "same-count roll replacements have distinct identity");
+  let seed = 502;
+  const random = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32);
+  for (let sequence = 0; sequence < 100; sequence++) {
+    const draw = alertColumnRender();
+    const foot = 90 + Math.floor(random() * 100);
+    assert.equal(draw({ mapToasts: { keptBottom: foot } }), foot + EDGE);
+    for (let frame = 0, count = 1 + Math.floor(random() * 5); frame < count; frame++) {
+      assert.equal(draw({ mapToasts: null }), foot + EDGE, "toast-only renders preserve the pushed top");
+    }
+    const change = changes[Math.floor(random() * changes.length)]!;
+    assert.equal(draw(change.patch), change.top, "an identity or layout change releases independently of the toast's age");
+  }
+});
+
+test("FU40B-OPUS-2: roll publications track the IDs drawn, including same-count replacements", () => {
+  const dm = readFileSync(new URL("../features/rolls/DmDesk.tsx", import.meta.url), "utf8");
+  const player = readFileSync(new URL("../features/rolls/PlayerRolls.tsx", import.meta.url), "utf8");
+  const idsLine = (source: string) => {
+    const line = source.split("\n").find((line) => line.startsWith("  const drawnIds ="));
+    assert.ok(line, "the roll renderer publishes its drawn identities");
+    return `${stripTypeScriptTypes(line)}\nreturn drawnIds;`;
+  };
+  const dmIds = new Function("shownTraps", "shownAsks", "shownCards", "stack", idsLine(dm));
+  assert.deepEqual(dmIds([{ due: { id: "spring1" } }], [{ id: "ask1" }], [{ id: "request1" }], { button: "more" }), ["trap:spring1", "cast:ask1", "roll:request1", "rolls:summary"]);
+  assert.deepEqual(dmIds([], [], [], { button: "sheet" }), ["rolls:summary"]);
+  const playerIds = new Function("shown", "width", "CARD_MIN_WIDTH", "cardHidden", "yieldsToBar", "chips", "stack", idsLine(player));
+  assert.deepEqual(playerIds({ id: "r1" }, 800, 600, false, false, [{ id: "r2" }, { id: "r3" }], { shown: 1, button: "more" }), ["roll:r1", "chip:r2", "rolls:summary"]);
+  for (const [width, hidden, yields] of [[390, false, false], [800, true, false], [800, false, true]] as const) {
+    assert.deepEqual(playerIds({ id: "r1" }, width, 600, hidden, yields, [], { shown: 0, button: null }), [], "a hidden or foot card is not in the column");
+  }
+  const source = readFileSync(new URL("../components/sheetFocus.ts", import.meta.url), "utf8");
+  const start = source.indexOf("export function useAlertsSummary(");
+  const end = source.indexOf("\n/**", start);
+  assert.ok(start > 0 && end > start);
+  let deps: unknown[] = [];
+  const published: { drawnIds?: string[] }[] = [];
+  const registry = {};
+  const bindings = {
+    useScoped: () => registry, sheetFocusSlot: {}, useRef: () => ({ current: undefined }),
+    useLayoutEffect: (effect: () => void, next: unknown[]) => {
+      if (next.length !== deps.length || next.some((x, i) => x !== deps[i])) effect();
+      deps = next;
+    },
+    publishAlertsSummary: (_registry: unknown, entry: { drawnIds?: string[] }) => { published.push(entry); },
+  };
+  const publish = new Function(...Object.keys(bindings), `${stripTypeScriptTypes(source.slice(start, end).replace("export function", "function"))}\nreturn useAlertsSummary;`)(...Object.values(bindings));
+  const entry = { text: "Rolls", name: "Two rolls", waiting: false, requests: 2, open() {} };
+  publish({ ...entry, drawnIds: ["roll:a", "roll:b"] });
+  publish({ ...entry, drawnIds: ["roll:b", "roll:a"] });
+  assert.equal(published.length, 1, "reordering identical IDs does not publish a new set");
+  publish({ ...entry, drawnIds: ["roll:c", "roll:b"] });
+  assert.deepEqual(published.map((p) => p.drawnIds), [["roll:a", "roll:b"], ["roll:b", "roll:c"]], "same words and count still publish a replacement card");
+});
+
+test("FU40B-OPUS-2: a rotation publishes beside-lane placement even with no lasting notice", () => {
+  const start = room.indexOf("      const notices = besideLane ? null : bottom;");
+  const end = room.indexOf("\n    };", start);
+  assert.ok(start > 0 && end > start);
+  const state = { notices: null, lasting: null, noticesSpanning: true };
+  const dock = { getState: () => state, setState: (patch: object) => Object.assign(state, patch) };
+  const measure = new Function("besideLane", "bottom", "barDock", stripTypeScriptTypes(room.slice(start, end)));
+  measure(true, null, dock);
+  assert.equal(state.noticesSpanning, false);
+  measure(false, null, dock);
+  assert.equal(state.noticesSpanning, true);
+});
+
 test("FU39-ASTRA-04 and FU39-S-2: a turn keeps its pushed top after the aged toast moves or expires", () => {
   const input = { ids: [1], pane: null, paneStands: false, low: null, layer: true, slot: false, recent: new Set<number>() };
   const before = nextToastPlaces(NO_TOAST_PLACES, input);
@@ -304,8 +431,6 @@ test("FU39-B: the room publishes visible spanning toasts and the column uses onl
   const measureEnd = room.indexOf("    // The foot of the toasts over the map", measureStart);
   assert.ok(measureStart > 0 && measureEnd > measureStart);
   const alerts = readFileSync(new URL("../features/encounter/InitiativeStrip.tsx", import.meta.url), "utf8");
-  const colLine = alerts.split("\n").find((line) => line.startsWith("  const colTop ="));
-  assert.ok(colLine);
   const rulesStart = alerts.indexOf("    const rules = {");
   const rulesEnd = alerts.indexOf("\n    };", rulesStart);
   assert.ok(rulesStart > 0 && rulesEnd > rulesStart);
@@ -327,11 +452,11 @@ test("FU39-B: the room publishes visible spanning toasts and the column uses onl
     const measure = () => publish(...Object.values(bindings));
     measure();
     assert.ok(state.mapToasts, "the room must publish clearance before the first card is placed");
-    const placeColumn: (...args: unknown[]) => number = new Function("laneTop", "lasting", "mapToasts", "columnTop", "cardsWaiting", "heldTop", `${colLine}\nreturn colTop;`) as (...args: unknown[]) => number;
-    const top = placeColumn(60, null, state.mapToasts, columnTop, true, { current: null }) as number;
-    assert.equal(placeColumn(60, null, null, columnTop, true, { current: 120 }), 120, "the mounted column keeps its latched top when the toast leaves");
-    assert.equal(placeColumn(60, null, null, columnTop, false, { current: 120 }), 60, "an empty column ignores the latch");
-    assert.ok(Math.abs(top - 120) < 1e-9, "the real column must clear the kept toast without reserving the waiting toast");
+    const placeColumn = alertColumnRender();
+    const top = placeColumn({ mapToasts: state.mapToasts });
+    assert.equal(placeColumn({ mapToasts: null }), top, "the mounted column keeps its latched top when the toast leaves");
+    assert.equal(placeColumn({ alerts: [] }), 60, "an empty column ignores the latch");
+    assert.ok(top !== null && Math.abs(top - 120) < 1e-9, "the real column must clear the kept toast without reserving the waiting toast");
     const rulesBindings = {
       usual: { left: 12, right: 378, top: 160 * zoom, height: 44 * zoom },
       chrome: { safe: { left: 0 }, top: 60, controls: 60 }, zoom, height: 844,

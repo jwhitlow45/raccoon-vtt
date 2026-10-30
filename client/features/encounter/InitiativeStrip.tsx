@@ -589,6 +589,7 @@ function FightAlerts() {
   const typing = useStore(dock, (s) => s.typing);
   const placed = useMemo(() => (chrome ? placedChrome(chrome, typing) : null), [chrome, typing]);
   const lasting = useStore(dock, (s) => s.notices);
+  const noticesSpanning = useStore(dock, (s) => s.noticesSpanning);
   const mapToasts = useStore(dock, (s) => s.mapToasts);
   const toastRow = useStore(dock, (s) => s.toastRow);
   const bar = useStore(dock, (s) => s.bar);
@@ -615,21 +616,11 @@ function FightAlerts() {
   const turnShown = combat.turn !== null && local.shown.has(combat.turn.id);
   const turnFolded = !turnShown && (narrow || turnFit !== "open");
   const turnHidden = !turnShown && turnFit === "hidden";
-  const laneTop = chrome ? chrome.top + EDGE : null;
-  const cardsWaiting = alerts.some((a) => a.kind !== "turn" || !turnHidden) || (!footRolls && rolls !== null);
-  const heldTop = useRef<number | null>(null);
-  const colTop = laneTop === null ? null : columnTop(laneTop, lasting, mapToasts?.keptBottom ?? null, cardsWaiting ? heldTop.current : null);
-  useLayoutEffect(() => {
-    heldTop.current = cardsWaiting ? colTop : null;
-  }, [cardsWaiting, colTop]);
-  const push = laneTop !== null && colTop !== null ? colTop - laneTop : 0;
   // A roll card folded at the screen's foot, for a compact bar or a screen too short for it, needs the row to stand for it, room or not (PlayerRolls.tsx).
   const forFootCard = !folded && footYields && barSummary !== null;
   // The first card's height as last drawn, which the row standing in for the cards keeps: measured afresh whenever what waits changes.
   const [firstHeight, setFirstHeight] = useState(0);
   const [asked, setAsked] = useState<AskedAlerts | null>(null);
-  const toOptions = chrome ? height - chrome.top - chrome.bottom - push : Infinity;
-  const cramped = !folded && roomSummary !== null && firstHeight > 0 && toOptions < EDGE + firstHeight;
   /*
    * A map pane drawn as a card where the lane leaves it no room beside the
    * cards has the row stand for them, with the pane's words, which win
@@ -642,6 +633,27 @@ function FightAlerts() {
   const paneLane = useStore(alertsDock, (s) => s.paneLane);
   const laneRow = summaryFor({ paneLane: folded || asked !== null ? null : (paneLane?.lane ?? null), barLane: bar?.lane ?? null });
   const forPane = drawsPaneRow({ paneLane: paneLane?.lane ?? null, barLane: bar?.lane ?? null, folded, asked: asked !== null, waiting: paneSummary !== null });
+  const overlay = asked !== null && asked !== "column" && !folded;
+  const laneTop = chrome ? chrome.top + EDGE : null;
+  const columnHidden = folded || forFootCard || forPane || overlay || (laneRow === "bar" && barSummary !== null);
+  const drawnIds = columnHidden ? [] : [...alerts.filter((a) => a.kind !== "turn" || !turnHidden).map((a) => `${a.kind}:${a.id}`), ...(rolls?.drawnIds ?? [])];
+  const cardsWaiting = drawnIds.length > 0;
+  // Only the same cards in the same lane keep the push. Compare during render
+  // so a replacement or layout move never paints with the previous latch.
+  const heldKey = JSON.stringify([[...new Set(drawnIds)].sort(), laneTop, noticesSpanning, zoom]);
+  const heldTop = useRef<{ key: string; top: number | null } | null>(null);
+  const keptTop = cardsWaiting && heldTop.current?.key === heldKey ? heldTop.current.top : null;
+  const candidateTop = laneTop === null ? null : columnTop(laneTop, lasting, mapToasts?.keptBottom ?? null, keptTop);
+  // A latch that would hide the cards cannot keep their buttons in place.
+  // Drop it before the final cramped check, so release cannot toggle a fold.
+  const candidateCramped = !asked && roomSummary !== null && firstHeight > 0 && chrome !== null && candidateTop !== null && height - chrome.bottom - candidateTop < firstHeight;
+  const colTop = candidateCramped && laneTop !== null ? columnTop(laneTop, lasting, mapToasts?.keptBottom ?? null) : candidateTop;
+  useLayoutEffect(() => {
+    heldTop.current = cardsWaiting && !candidateCramped ? { key: heldKey, top: colTop } : null;
+  }, [cardsWaiting, candidateCramped, heldKey, colTop]);
+  const push = laneTop !== null && colTop !== null ? colTop - laneTop : 0;
+  const toOptions = chrome ? height - chrome.top - chrome.bottom - push : Infinity;
+  const cramped = !folded && roomSummary !== null && firstHeight > 0 && toOptions < EDGE + firstHeight;
   const forRoom = cramped && !asked && !forFootCard && !forPane;
   const summary = forPane ? paneSummary : forRoom ? roomSummary : barSummary;
   const summarized = forFootCard || forRoom || forPane || (!folded && laneRow === "bar" && summary !== null);
@@ -665,7 +677,6 @@ function FightAlerts() {
     }
     setFirstHeight(0);
   }, [waits]);
-  const overlay = asked !== null && asked !== "column" && !folded;
   useLayoutEffect(() => {
     if (dock.getState().alertsOverlay !== overlay) dock.setState({ alertsOverlay: overlay });
   }, [dock, overlay]);

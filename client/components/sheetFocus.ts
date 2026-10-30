@@ -112,6 +112,8 @@ export type AlertsSummaryEntry = {
   waiting: boolean;
   /** How many requests the line stands for, so the dock's closing advice says "see them" for several. */
   requests: number;
+  /** Stable IDs of cards and chips currently drawn in the alerts column. */
+  drawnIds?: readonly string[];
   /** How many of those its words leave out, such as two asks for saves under "Dart plate went off", which the summary counts in its "+N". None when absent. */
   unnamed?: number;
   /**
@@ -157,7 +159,7 @@ function subscribeAlertsSummary(registry: SheetFocusRegistry, listener: () => vo
  * Publishes the rolls' part of the alerts summary while mounted, or
  * nothing for null. `open` may be a new function on every render: the
  * reader always calls the latest one. A change of the words, of `waiting`
- * or of the count publishes again.
+ * or of the count or drawn card IDs publishes again.
  */
 export function useAlertsSummary(entry: AlertsSummaryEntry | null): void {
   const registry = useScoped(sheetFocusSlot);
@@ -168,10 +170,11 @@ export function useAlertsSummary(entry: AlertsSummaryEntry | null): void {
   const waiting = entry?.waiting ?? false;
   const requests = entry?.requests ?? 0;
   const unnamed = entry?.unnamed ?? 0;
+  const drawnKey = JSON.stringify([...(entry?.drawnIds ?? [])].sort());
   useLayoutEffect(() => {
     if (text === null || name === null) return;
-    return publishAlertsSummary(registry, { text, name, waiting, requests, unnamed, open: (options) => open.current?.(options) });
-  }, [registry, text, name, waiting, requests, unnamed]);
+    return publishAlertsSummary(registry, { text, name, waiting, requests, unnamed, drawnIds: JSON.parse(drawnKey) as string[], open: (options) => open.current?.(options) });
+  }, [registry, text, name, waiting, requests, unnamed, drawnKey]);
 }
 
 /**

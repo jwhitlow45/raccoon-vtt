@@ -190,6 +190,10 @@ export function DmDesk() {
   const forSaves = asked.length === 0 ? null : asked.length === 1 ? `${askWho} asks for saves` : `${asked.length} asks for saves`;
   const wentOff = sprung.length === 0 ? null : sprung.length === 1 ? `${sprung[0]!.trap.name} went off` : `${sprung.length} traps went off`;
   const rollsName = cards.length > 0 ? (asks > 0 ? `${counted.name}, ${asks} ${asks === 1 ? "asks" : "ask"} to change a roll` : counted.name) : null;
+  const shownTraps = sprung.slice(0, stack.shown);
+  const shownAsks = asked.slice(0, Math.max(0, stack.shown - sprung.length));
+  const shownCards = cards.slice(0, Math.max(0, stack.shown - sprung.length - asked.length));
+  const drawnIds = [...shownTraps.map(({ due }) => `trap:${due.id}`), ...shownAsks.map((ask) => `cast:${ask.id}`), ...shownCards.map((request) => `roll:${request.id}`), ...(stack.button ? ["rolls:summary"] : [])];
   useAlertsSummary(
     items > 0
       ? {
@@ -197,6 +201,7 @@ export function DmDesk() {
           name: [wentOff, forSaves, rollsName].filter((x): x is string => x !== null).join(", "),
           waiting: asks > 0 || forSaves !== null || wentOff !== null,
           requests: items,
+          drawnIds,
           unnamed: deskUnnamed({ traps: sprung.length, asks: asked.length, cards: cards.length }),
           open,
         }
@@ -208,9 +213,6 @@ export function DmDesk() {
   // One its save-ends card holds stays folded: Allow and Keep show once, on that card.
   const opensAt = (request: RollRequest, i: number) => !held.has(request.id) && (layout.startsOpen(i) || (!phone && request.targets.some((t) => t.change !== undefined)));
   // The traps stand first, then the asks, so the newest two are counted over all three, and what folds is the rest of each.
-  const shownTraps = sprung.slice(0, stack.shown);
-  const shownAsks = asked.slice(0, Math.max(0, stack.shown - sprung.length));
-  const shownCards = cards.slice(0, Math.max(0, stack.shown - sprung.length - asked.length));
   const foldedCards = stack.button === "sheet" ? cards : cards.slice(Math.max(0, PHONE_CHIPS - sprung.length - asked.length));
   const foldedAsks = stack.button === "sheet" ? asked : asked.slice(Math.max(0, PHONE_CHIPS - sprung.length));
   const foldedTraps = stack.button === "sheet" ? sprung : sprung.slice(PHONE_CHIPS);
