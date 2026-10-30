@@ -30,6 +30,24 @@ export type RollModeMenuBinding = {
   pressStyle: CSSProperties;
 };
 
+/** Browser scroll anchoring may move the panel as results land. Keep an open menu while its source is still in view. */
+export function handleRollModeScroll(input: { target: EventTarget | null; anchor: HTMLElement | null; open: boolean; cancel(): void; close(): void }): void {
+  const { target, anchor } = input;
+  if (!anchor || !(target === document || target instanceof Element && target.contains(anchor))) return;
+  if (input.open) {
+    const source = anchor.getBoundingClientRect();
+    const viewport = { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight };
+    const container = target instanceof Element ? target.getBoundingClientRect() : viewport;
+    const left = Math.max(source.left, container.left, viewport.left);
+    const top = Math.max(source.top, container.top, viewport.top);
+    const right = Math.min(source.right, container.right, viewport.right);
+    const bottom = Math.min(source.bottom, container.bottom, viewport.bottom);
+    if (left < right && top < bottom) return;
+  }
+  input.cancel();
+  input.close();
+}
+
 export function useRollModeMenu(options: UseRollModeMenuOptions): RollModeMenuBinding {
   const latest = useRef(options);
   latest.current = options;
@@ -106,10 +124,7 @@ export function useRollModeMenu(options: UseRollModeMenuOptions): RollModeMenuBi
     const move = (e: PointerEvent) => { machine.current?.move({ id: e.pointerId, x: e.clientX, y: e.clientY }); if (machine.current?.activeId === null) clearTouch(); };
     const end = (e: PointerEvent) => { if (machine.current?.activeId === e.pointerId) { e.type === "pointerup" ? machine.current.up(e.pointerId) : machine.current.cancel(); clearTouch(); } };
     const cancel = () => { machine.current?.cancel(); clearTouch(); };
-    const scroll = (e: Event) => {
-      const anchor = current.current.anchor.current;
-      if (e.target === document || e.target instanceof Node && anchor && e.target.contains(anchor)) { cancel(); current.current.close("anchor"); }
-    };
+    const scroll = (e: Event) => handleRollModeScroll({ target: e.target, anchor: current.current.anchor.current, open: openedSource.current !== null, cancel, close: () => current.current.close("anchor") });
     const key = () => { machine.current?.key(); clearTouch(); };
     const blur = () => { cancel(); current.current.close("anchor"); };
     const hidden = () => { if (document.hidden) { cancel(); current.current.close("anchor"); } };

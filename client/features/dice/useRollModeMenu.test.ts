@@ -73,3 +73,57 @@ test("a pick closes and focuses before dispatch, names the source origin and rev
     menu.props.onPick("dis"); assert.deepEqual(events, ["focus"], "an invalid live target closes without rolling");
   } finally { Object.assign(globalThis, previous); }
 });
+
+test("containing scrolls preserve an open menu while its source remains visible", async () => {
+  const { handleRollModeScroll } = await import("./useRollModeMenu.tsx");
+  const previous = { document: globalThis.document, window: globalThis.window, Element: globalThis.Element };
+  class ScrollElement {
+    rect = { left: 10, right: 110, top: 20, bottom: 120 };
+    child: ScrollElement | null = null;
+    contains(node: unknown) { return node === this || node === this.child; }
+    getBoundingClientRect() { return this.rect; }
+  }
+  const source = new ScrollElement();
+  source.rect = { left: 30, right: 74, top: 40, bottom: 84 };
+  const scroller = new ScrollElement(); scroller.child = source;
+  Object.assign(globalThis, { document: {}, window: { innerWidth: 300, innerHeight: 200 }, Element: ScrollElement });
+  try {
+    let cancelled = 0, closed = 0;
+    const scroll = (target: unknown, open = true) => handleRollModeScroll({ target: target as EventTarget, anchor: source as unknown as HTMLElement, open, cancel: () => { cancelled++; }, close: () => { closed++; } });
+    scroll(scroller);
+    assert.deepEqual([cancelled, closed], [0, 0], "a browser adjustment must not dismiss a visible source or release its consumed finger");
+    source.rect.top = 15; source.rect.bottom = 59;
+    scroll(scroller);
+    assert.deepEqual([cancelled, closed], [0, 0], "a partly visible source keeps its menu");
+    source.rect.top = -24; source.rect.bottom = 20;
+    scroll(scroller);
+    assert.deepEqual([cancelled, closed], [1, 1], "no overlap at the container edge closes the menu");
+    source.rect = { left: 30, right: 74, top: 40, bottom: 84 };
+    scroll(scroller, false);
+    assert.deepEqual([cancelled, closed], [2, 2], "any containing scroll still cancels a pending hold");
+    scroll(new ScrollElement(), false);
+    assert.deepEqual([cancelled, closed], [2, 2], "menu scrolling and unrelated scrolling do not dismiss the source");
+    scroll(document);
+    assert.deepEqual([cancelled, closed], [2, 2], "a visible source survives a document scroll too");
+    source.rect.top = 200; source.rect.bottom = 244;
+    scroll(document);
+    assert.deepEqual([cancelled, closed], [3, 3], "a source below the viewport closes the menu");
+    scroller.rect = { left: 10, right: 110, top: 180, bottom: 280 };
+    scroll(scroller);
+    assert.deepEqual([cancelled, closed], [4, 4], "a nested scroller cannot keep an offscreen source alive");
+    scroller.rect = { left: 10, right: 110, top: 20, bottom: 120 };
+    for (const rect of [
+      { left: 110, right: 154, top: 40, bottom: 84 },
+      { left: -34, right: 10, top: 40, bottom: 84 },
+      { left: 30, right: 74, top: 120, bottom: 164 },
+      { left: 30, right: 30, top: 40, bottom: 84 },
+    ]) {
+      source.rect = rect;
+      const before = closed; scroll(scroller);
+      assert.equal(closed, before + 1, "a source past any container edge or with no area closes");
+    }
+    source.rect = { left: 30, right: 74, top: 119.5, bottom: 163.5 };
+    const before = closed; scroll(scroller);
+    assert.equal(closed, before, "fractional overlap at an interface scale still counts as visible");
+  } finally { Object.assign(globalThis, previous); }
+});
