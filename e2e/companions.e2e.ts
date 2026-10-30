@@ -155,15 +155,24 @@ async function setUp(page: Page, cdp: CDPSession, view: View): Promise<void> {
 
 /** Opens a panel: from the side panel's tabs from 900 layout px up, else from the Panels sheet's list, as size.e2e.ts does. */
 async function openPanel(page: Page, title: string): Promise<void> {
-  if (await page.getByRole("tablist", { name: "Panels" }).isVisible()) return openSideTab(page, title);
+  const tabs = page.getByRole("tablist", { name: "Panels" });
+  if (await tabs.isVisible()) return openSideTab(page, title);
   // Already open: a sheet on a subpage, such as a character's page, has Back where All panels was, and the tool bar's Panels would close it.
-  if (await page.locator(`dialog[data-rvtt-sheet][aria-label="${title}"]`).isVisible()) return;
+  const sheet = page.locator(`dialog[data-rvtt-sheet][aria-label="${title}"]`);
+  if (await sheet.isVisible()) return;
   const picker = page.getByRole("list", { name: "Panels" });
   const all = page.getByRole("button", { name: "All panels" });
   if (await picker.isVisible()) {
     // The list is already open.
   } else if (await all.isVisible()) await all.click();
-  else await page.locator('button[title="Panels"]').click();
+  else {
+    await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
+    // Add and place can hide the desktop panel. Panels restores its tabs, while a phone restores its sheet or picker.
+    await tabs.or(picker).or(sheet).or(all).filter({ visible: true }).first().waitFor();
+    if (await tabs.isVisible()) return openSideTab(page, title);
+    if (await sheet.isVisible()) return;
+    if (!(await picker.isVisible())) await all.click();
+  }
   await picker.getByRole("button", { name: new RegExp(`^${title}( ?\\d+ unread)?$`) }).click();
 }
 
