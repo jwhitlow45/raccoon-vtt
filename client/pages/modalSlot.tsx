@@ -16,7 +16,7 @@ import { scopeSlot, useScoped } from "../state/scope.ts";
  *
  * - Every notice under the sheet's header and above its body: "Viewing as
  *   Pat" first, then the connection banner, the DM's frame bar, a map
- *   layer that did not load, "Your turn" and the toasts. They push the
+ *   layer that did not load, the Undo rollout notice, "Your turn" and the toasts. They push the
  *   body down rather than lie over it, so the body still scrolls every
  *   control into reach, and nothing in it covers them: on a 480 x 320
  *   phone at 130% two lasting notices covered the Log's Send, and the
@@ -29,9 +29,9 @@ import { scopeSlot, useScoped } from "../state/scope.ts";
  * again.
  */
 
-export type ModalSlotName = "preview" | "connection" | "frame" | "quiet" | "turn" | "toasts" | "status";
+export type ModalSlotName = "preview" | "connection" | "frame" | "quiet" | "undo" | "turn" | "toasts" | "status";
 
-const SHOWN: readonly ModalSlotName[] = ["preview", "connection", "frame", "quiet", "turn", "toasts"];
+const SHOWN: readonly ModalSlotName[] = ["preview", "connection", "frame", "quiet", "undo", "turn", "toasts"];
 
 /** The places of notices that go by themselves within seconds. */
 const PASSING: readonly ModalSlotName[] = ["turn", "toasts"];

@@ -1,4 +1,5 @@
 import { CorrectionAnnouncements } from "../features/log/corrections.ts";
+import { undoNotice, type UndoNotice } from "./historyNotice.ts";
 import { historyCommandSchema, type HistoryDirection, type HistoryMessage, type UndoGroupOptions } from "#shared/undoContract.ts";
 import { blockerText, EMPTY_HISTORY, HistoryController, type HistoryActivation, type HistoryCommand } from "./history.ts";
 import { createStore, type StoreApi } from "zustand/vanilla";
@@ -213,6 +214,7 @@ export type Outbox = { send(msg: ClientMessage): boolean };
 
 /** UI state setters for `local` (design section 14.1). They never touch the room. */
 export type RoomUi = {
+  dismissUndoNotice?(): void;
   openHistory?(target: { scope: "play" | "setup"; direction?: "undo" | "redo" } | null): void;
   setTool(id: string): void;
   /**
@@ -343,6 +345,7 @@ export type RoomStoreOptions = {
   clock?: Clock;
   random?: () => number;
   clientId?: string;
+  undoNotice?: Pick<UndoNotice, "claim">;
 };
 
 /**
@@ -539,6 +542,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     changed: (value) => {
       store.setState({ history: value });
       if (!value.summary || get().you?.role !== "dm") return;
+      if (value.summary.setup && (options.undoNotice ?? undoNotice).claim()) store.setState({ undoNotice: true });
       for (const scope of ["play", "setup"] as const) for (const direction of ["undo", "redo"] as const) {
         const head = value.summary[scope]?.[direction].head;
         const key = `${scope}:${direction}`;
@@ -688,6 +692,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
   };
 
   const ui: RoomUi = {
+    dismissUndoNotice: () => store.setState({ undoNotice: false }),
     openHistory: (historyReview) => store.setState({ historyReview }),
     setTool(id) {
       const local = get().local;
