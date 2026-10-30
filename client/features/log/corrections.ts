@@ -1,12 +1,6 @@
 import { compareLogIds } from "#shared/keys.ts";
+import { describeEvent, type LogNames } from "#shared/logText.ts";
 import type { LogEntry } from "#shared/model.ts";
-import type { CorrectionLogEvent } from "#shared/undoContract.ts";
-
-export function correctionText(data: CorrectionLogEvent, dm = false): string {
-  const verb = data.from === "undo" ? "undid" : "redid";
-  if (dm && data.label) return `The DM ${verb}${data.scope === "setup" ? " setup:" : ""} ${data.label}.`;
-  return `The DM ${verb} a ${data.scope} change${data.name ? ` to ${data.name}` : ""}.`;
-}
 
 /** Snapshots seed the cursor silently, so reconnect and archive reads never repeat a notice. */
 export class CorrectionAnnouncements {
@@ -18,13 +12,13 @@ export class CorrectionAnnouncements {
     this.advance(log);
   }
 
-  take(log: readonly LogEntry[], dm: boolean): { id: string; text: string }[] {
+  take(log: readonly LogEntry[], dm: boolean, names: LogNames): { id: string; text: string }[] {
     if (!this.loaded) return [];
     const fresh = log.filter((line) => this.seen === null || compareLogIds(line.id, this.seen) > 0);
     this.advance(log);
     return fresh.flatMap((line) => {
-      const data = line.data as LogEntry["data"] | CorrectionLogEvent;
-      return data?.type === "correction" ? [{ id: line.id, text: correctionText(data, dm) }] : [];
+      const data = line.data;
+      return data?.type === "correction" ? [{ id: line.id, text: describeEvent(data, names, dm) }] : [];
     });
   }
 

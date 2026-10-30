@@ -1010,7 +1010,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         for (const n of settled) sentAt.delete(n);
         retryAttempt = 0;
       }
-      for (const correction of corrections.take(confirmed.log, s.you?.role === "dm")) {
+      for (const correction of corrections.take(confirmed.log, s.you?.role === "dm", confirmed as RoomState)) {
         toasts = withToast(toasts, { id: ++toastSeq, text: correction.text, tone: "info", logged: true });
       }
       // An `ev` that touches a token settles any drag preview of it (design 7.6).
