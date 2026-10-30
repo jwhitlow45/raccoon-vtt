@@ -1,3 +1,4 @@
+import { FakeClock } from "./testing.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { ClientMessage, ClientOp, EphEvent } from "#shared/protocol.ts";
@@ -7,7 +8,7 @@ import { createRoomActions, dispatchGesture, validEph } from "./actions.ts";
 import { createRoomStore } from "./store.ts";
 
 function setup() {
-  const room = createRoomStore({ roomId: "R1", you: DM, clientId: "c1" });
+  const room = createRoomStore({ roomId: "R1", you: DM, clientId: "c1", clock: new FakeClock() });
   const sent: EphEvent[] = [];
   const actions = createRoomActions(room, { sendEph: (e) => void sent.push(e), switchScene: () => {} });
   return { room, sent, actions };
@@ -79,7 +80,7 @@ describe("one gesture is one undo step", () => {
   });
 
   test("the group goes out with each op, and again when the op is resent", () => {
-    const room = createRoomStore({ roomId: "R1", you: DM, clientId: "c1" });
+    const room = createRoomStore({ roomId: "R1", you: DM, clientId: "c1", clock: new FakeClock() });
     const out: ClientMessage[] = [];
     room.setOutbox({ send: (msg) => (out.push(msg), true) });
     room.applySnapshot({ t: "snapshot", seq: 0, state: emptyProjected(), you: { memberId: DM.memberId, role: "dm", sceneId: "s1" }, watermark: 0 });
@@ -96,4 +97,31 @@ describe("one gesture is one undo step", () => {
       { n: 2, g: undefined },
     ]);
   });
+});
+
+test("mixed setup gestures declare their scope on the first part and every retry", () => {
+  const room = createRoomStore({ roomId: "R1", you: DM, clientId: "c1", clock: new FakeClock() });
+  const out: ClientMessage[] = [];
+  room.setOutbox({ send: (message) => (out.push(message), true) });
+  room.applySnapshot({ t: "snapshot", seq: 0, state: emptyProjected(), you: { ...DM, sceneId: "s1" }, watermark: 0 });
+  const actions = createRoomActions(room, { sendEph() {}, switchScene() {} });
+  dispatchGesture(actions, [{ t: "scene.update", sceneId: "s1", patch: { gridShape: "hexRows" } }, { t: "scene.setGrid", sceneId: "s1", cellPx: 50, originPx: { x: 0, y: 0 } }], { groupScope: "setup" });
+  const sent = out.filter((message) => message.t === "op") as (Extract<ClientMessage, { t: "op" }> & { groupScope?: string })[];
+  assert.equal(sent.length, 2);
+  assert.ok(sent[0]!.g);
+  assert.ok(sent.every((message) => message.g === sent[0]!.g && message.groupScope === "setup"));
+  room.suspend();
+  room.applySnapshot({ t: "snapshot", seq: 0, state: emptyProjected(), you: { ...DM, sceneId: "s1" }, watermark: 0 });
+  assert.deepEqual(out.slice(2), sent);
+  room.dispose();
+});
+
+test("setup group declarations require a group and a DM", () => {
+  for (const role of ["dm", "player"] as const) {
+    const room = createRoomStore({ roomId: "R1", you: { ...DM, role }, clock: new FakeClock() });
+    const op = { t: "scene.update" as const, sceneId: "s1", patch: { name: "New name" } };
+    assert.equal(room.dispatch(op, { groupScope: "setup", ...(role === "player" ? { group: "gesture" } : {}) }), null);
+    assert.equal(room.store.getState().pending.length, 0);
+    room.dispose();
+  }
 });

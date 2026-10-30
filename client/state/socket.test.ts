@@ -922,3 +922,34 @@ describe("the access signal", () => {
     assert.equal(version(), 3);
   });
 });
+
+test("history waits for this connection's snapshot, rejects retired socket callbacks, and keeps captured heads on retry", () => {
+  const s = setup();
+  const head = "00000000-0000-4000-8000-000000000001";
+  const history = { t: "history", epoch: "00000000-0000-4000-8000-000000000002", seq: 0, serial: 0, watermark: 0,
+    play: { undo: { head: { id: head, label: "moving Bree" }, depth: 1 }, redo: { head: null, depth: 0 } } };
+  const emit = (message: unknown) => s.last().onmessage?.({ data: JSON.stringify(message) });
+  s.socket.start();
+  s.last().open();
+  emit(history);
+  assert.equal(s.room.store.getState().history?.ready, false);
+  s.last().emit(s.snapshot());
+  emit(history);
+  assert.equal(s.room.store.getState().history?.ready, true);
+  s.room.activateHistory("undo");
+  const first = s.last().take("op")[0]!;
+  assert.equal(first.t, "op");
+  if (first.t !== "op") throw new Error("missing op");
+  assert.equal((first.op as { head: string }).head, head);
+  emit({ ...history, serial: 1, play: { ...history.play, undo: { depth: 1, head: { id: "00000000-0000-4000-8000-000000000009", label: "another step" } } } });
+  s.clock.advance(OP_ANSWER_MS);
+  assert.deepEqual(s.last().take("op")[0], first, "retry preserves the captured head");
+  const oldCallback = s.last().onmessage!;
+  s.last().drop(1006);
+  s.clock.advance(250);
+  s.connect();
+  oldCallback({ data: JSON.stringify(history) });
+  assert.equal(s.room.store.getState().history?.ready, false);
+  s.socket.dispose();
+  s.room.dispose();
+});

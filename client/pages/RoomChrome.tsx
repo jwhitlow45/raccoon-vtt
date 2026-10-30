@@ -1,3 +1,6 @@
+import { HistoryDialogs } from "../panels/SetupHistory.tsx";
+import { EMPTY_HISTORY, HISTORY_LOADING } from "../state/history.ts";
+import { Loading } from "../components/Loading.tsx";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type ReactNode } from "react";
 import { largerEach } from "../canvas/barDock.ts";
 import { fitSlot } from "../canvas/fitSlot.ts";
@@ -233,14 +236,31 @@ export function PauseScreen() {
  */
 export function UndoButtons(props: { tuck?: boolean }) {
   const actions = useRoomActions();
+  const history = useRoomView((s) => s.history ?? EMPTY_HISTORY);
+  const online = useRoomView((s) => s.connection === "open");
+  const held = useRoomView((s) => s.buildHeldSince !== undefined);
+  const preview = usePreview() !== null;
+  const disabled = !online || preview || history.pending > 0;
+  const description = (direction: "undo" | "redo") => {
+    const verb = direction === "undo" ? "Undo" : "Redo";
+    const head = history.summary?.play[direction].head;
+    return head ? `${verb} your last play or board change: ${head.label}` : `${verb} your last play or board change`;
+  };
   const undoKey = useKeyHint("undo");
   const redoKey = useKeyHint("redo");
   return (
     <span style={{ flex: "none", display: "flex", marginRight: props.tuck === false ? 0 : -theme.space(2) }}>
-      <IconButton label="Undo" title="Undo your last change" keys={undoKey} draw="undo" onClick={() => actions.undo()} />
-      <IconButton label="Redo" title="Redo what you undid" keys={redoKey} draw="redo" onClick={() => actions.redo()} />
+      <IconButton label="Undo" title={description("undo")} keys={undoKey} draw="undo" disabled={preview || (!held && (disabled || (history.ready && !history.summary?.play.undo.head)))} onClick={(e) => actions.undo({ control: "toolbar-undo", detail: e.detail })} />
+      <IconButton label="Redo" title={description("redo")} keys={redoKey} draw="redo" disabled={disabled || held || (history.ready && !history.summary?.play.redo.head)} onClick={(e) => actions.redo({ control: "toolbar-redo", detail: e.detail })} />
+      <HistoryDialogs />
     </span>
   );
+}
+
+export function HistoryLoading() {
+  const slow = useRoomView((s) => s.history?.slow === true);
+  const reviewing = useRoomView((s) => !!s.historyReview);
+  return slow && !reviewing ? <Loading text={HISTORY_LOADING} delay={0} style={{ background: theme.color.surface, padding: theme.space(2), borderRadius: theme.radius.md }} /> : null;
 }
 
 /**
@@ -253,6 +273,7 @@ export function UndoButtons(props: { tuck?: boolean }) {
 function IconButton(props: {
   label: string;
   title: string;
+  disabled?: boolean;
   /** The key of the shortcut it does (state/shortcuts.ts useKeyHint): in its tooltip and `aria-keyshortcuts`, never its name. */
   keys?: KeyHint | null;
   draw: IconName | { path: string };
@@ -270,6 +291,7 @@ function IconButton(props: {
       <button
         type="button"
         aria-label={props.label}
+        disabled={props.disabled}
         aria-keyshortcuts={props.keys?.aria}
         {...props.anchor}
         {...tooltip.anchor()}
@@ -284,8 +306,8 @@ function IconButton(props: {
           border: `${theme.line.border}px solid transparent`,
           borderRadius: theme.radius.md,
           background: "transparent",
-          color: theme.color.text,
-          cursor: "pointer",
+          color: props.disabled ? theme.color.textDisabled : theme.color.text,
+          cursor: props.disabled ? "default" : "pointer",
         }}
       >
         {typeof props.draw === "string" ? (

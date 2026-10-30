@@ -1,3 +1,4 @@
+import { usePreview } from "../dm/previewContext.ts";
 import { useEffect } from "react";
 import { useStore } from "zustand";
 import type { DrawingKind } from "#shared/model.ts";
@@ -303,6 +304,10 @@ function DrawOptions(props: { role: "dm" | "player" }) {
   const withTool = (fn: (ctx: ToolContext) => void) => tool.activeCtx && fn(tool.activeCtx);
   const memberColor = useRoomView((s) => (s.you ? s.view?.members[s.you.memberId]?.color : undefined)) ?? theme.color.crest;
   const actions = useRoomActions();
+  const historyUnavailable = useRoomView((s) => s.connection !== "open" || !!s.history?.pending);
+  const preview = usePreview() !== null;
+  const historyBlocked = historyUnavailable || preview;
+  const held = useRoomView((s) => s.buildHeldSince !== undefined);
   const sceneId = useRoomView((s) => s.sceneId);
   const color = st.color ?? memberColor;
 
@@ -322,7 +327,7 @@ function DrawOptions(props: { role: "dm" | "player" }) {
             id: "undo",
             priority: 1,
             control: (
-              <OptButton icon="undo" label="Undo your last change" rowWords="Undo" shortcut="undo" onClick={() => actions.undo()} />
+              <OptButton icon="undo" label="Undo your last play or board change" rowWords="Undo" shortcut="undo" disabled={preview || (!held && historyBlocked)} onClick={(e) => actions.undo({ control: "draw-undo", detail: e?.detail })} />
             ),
           },
           { id: "clearMine", priority: 1, control: clearMine },
@@ -464,8 +469,8 @@ function DrawOptions(props: { role: "dm" | "player" }) {
             </OptButton>
           ),
         },
-        { id: "undo", priority: 2 + drop, control: <OptButton icon="undo" label="Undo your last change" rowWords="Undo" shortcut="undo" onClick={() => actions.undo()} /> },
-        { id: "redo", priority: 3 + drop, control: <OptButton icon="redo" label="Redo" rowWords="Redo" shortcut="redo" onClick={() => actions.redo()} /> },
+        { id: "undo", priority: 2 + drop, control: <OptButton icon="undo" label="Undo your last play or board change" rowWords="Undo" shortcut="undo" disabled={preview || (!held && historyBlocked)} onClick={(e) => actions.undo({ control: "draw-undo", detail: e?.detail })} /> },
+        { id: "redo", priority: 3 + drop, control: <OptButton icon="redo" label="Redo" rowWords="Redo" shortcut="redo" disabled={held || historyBlocked} onClick={(e) => actions.redo({ control: "draw-redo", detail: e?.detail })} /> },
         props.role === "dm" && {
           id: "dmOnly",
           priority: 5 + drop,

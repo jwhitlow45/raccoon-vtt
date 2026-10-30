@@ -19,7 +19,7 @@ import { formatRoomId } from "../lib/roomId.ts";
 import { theme } from "../lib/theme.ts";
 import { useScoped } from "../state/scope.ts";
 import { useKeyHint, withKey } from "../state/shortcuts.ts";
-import { useRoomView } from "../state/view.ts";
+import { useRoomUi, useRoomView } from "../state/view.ts";
 import AboutPanel from "./AboutPanel.tsx";
 import MembersPanel from "./MembersPanel.tsx";
 import SettingsPanel from "./SettingsPanel.tsx";
@@ -45,6 +45,7 @@ export default function MenuPanel(props: PanelProps) {
   const role = useRoomView((s) => s.you?.role ?? "player");
   const roomId = useRoomView((s) => s.roomId);
   const preview = usePreview();
+  const ui = useRoomUi();
   const [page, setPage] = useState<Page | null>(null);
   const [copied, setCopied] = useState(false);
   // Leave room asks once while a PDF upload is under way on this device (docs/design-v1-pdf-handouts.md 4.1.6).
@@ -88,6 +89,7 @@ export default function MenuPanel(props: PanelProps) {
         </Button>
       </div>
       <ViewRow />
+      {role === "dm" && !preview ? <MenuItem icon="undo" title="Setup history" detail="Undo or redo your saved definitions and configuration." onClick={() => ui.openHistory?.({ scope: "setup" })} /> : null}
       <MenuItem icon="group" title="Members" detail={role === "dm" ? "Who is here, kicking, the player password and DM devices." : "Who is here and who is online."} page="members" onClick={() => setPage("members")} />
       {role === "dm" ? <MenuItem icon="settings" title="Room settings" detail="Movement, HP, combat, distance and backups." page="settings" onClick={() => setPage("settings")} /> : null}
       <MenuItem

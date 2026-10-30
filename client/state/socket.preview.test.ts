@@ -206,3 +206,15 @@ describe("a preview socket under random sequences", () => {
     }
   });
 });
+
+test("View as ignores history even if a DM summary arrives on its socket", () => {
+  const s = setup();
+  s.socket.start();
+  s.last().open();
+  s.last().emit(s.snapshot(P1));
+  const stack = { head: { id: "00000000-0000-4000-8000-000000000001", label: "private DM step" }, depth: 1 };
+  s.last().onmessage?.({ data: JSON.stringify({ t: "history", epoch: "00000000-0000-4000-8000-000000000002", seq: 0, serial: 0, watermark: 0, play: { undo: stack, redo: stack }, setup: { undo: stack, redo: stack } }) });
+  assert.equal(s.state().history?.summary, null);
+  s.socket.dispose();
+  s.store.dispose();
+});

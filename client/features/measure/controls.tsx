@@ -1428,7 +1428,7 @@ export function OptionsDivider() {
 export function OptButton(props: {
   ref?: Ref<HTMLButtonElement>;
   /** With `repeat`, a return of false says a limit is reached, which ends the repeat. */
-  onClick(): unknown;
+  onClick(event?: { detail: number }): unknown;
   children?: ReactNode;
   label?: string;
   pressed?: boolean;
@@ -1492,8 +1492,8 @@ function LiveOptButton(props: Parameters<typeof OptButton>[0] & { place: SlotPla
   const hints = useKeyHints();
   const keys = props.shortcut === undefined ? null : hints(props.shortcut);
   const tip = short ? full : props.label;
-  const act = () => {
-    const result = props.onClick();
+  const act = (event: { detail: number }) => {
+    const result = props.onClick(event);
     if (props.ends) task?.();
     return result;
   };
@@ -1511,7 +1511,7 @@ function LiveOptButton(props: Parameters<typeof OptButton>[0] & { place: SlotPla
       aria-label={short ? (hasWords(props.short) ? undefined : props.label) : children === undefined ? props.label : accessibleName(children, props.label)}
       aria-keyshortcuts={keys?.aria}
       title={tip === undefined ? undefined : withKey(tip, keys)}
-      onClick={(e) => (props.repeat ? hold.click(e.detail === 0) : act())}
+      onClick={(e) => (props.repeat ? hold.click(e.detail === 0) : act(e))}
       onPointerDown={props.repeat ? hold.pointerDown : undefined}
       onContextMenu={props.repeat ? (e) => e.preventDefault() : undefined}
       style={{

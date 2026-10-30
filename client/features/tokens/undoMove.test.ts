@@ -6,7 +6,10 @@ import type { PendingOp, RoomView } from "../../state/types.ts";
 import { token } from "#shared/testutil.ts";
 import { afterAnswers, afterQueued, barTokenIds, followOps, lastMoveSlot, MAX_OFFERS, offered, offersMarkUndo, offersUndo, undoOf, type Offers } from "./undoMove.ts";
 
-const queued = (n: number, op: ClientOp, group?: string): PendingOp => (group === undefined ? { n, op, at: 0 } : { n, op, at: 0, group });
+const queued = (n: number, input: ClientOp | ReturnType<typeof undoOf>, group?: string): PendingOp => {
+  const op = "t" in input ? input : { t: "undo" as const, of: input.of, head: "00000000-0000-4000-8000-000000000001" };
+  return group === undefined ? { n, op, at: 0 } : { n, op, at: 0, group };
+};
 const move = (tokenId: string): ClientOp => ({ t: "token.move", tokenId, x: 1, y: 1 });
 const raise = (tokenId: string): ClientOp => ({ t: "token.update", tokenId, patch: { elevation: 5 } });
 const NONE: Offers = { offers: [], undoing: null };
@@ -26,7 +29,7 @@ describe("Undo move in the token bar", () => {
     assert.equal(offersUndo(top, ["a"]), true);
     assert.equal(offersUndo(top, ["c", "b"]), true);
     assert.equal(offersUndo(top, ["c"]), false);
-    assert.deepEqual(undoOf(top!), { t: "undo", of: 1 });
+    assert.deepEqual(undoOf(top!), { of: 1 });
   });
 
   test("an attach or a detach offers it on the holder's bar too, and a rider's bar offers its mount's move (docs/design-v1-attach.md 8.3)", () => {
@@ -49,7 +52,7 @@ describe("Undo move in the token bar", () => {
     const top = offered(after([move("a"), move("b")]));
     assert.equal(offersUndo(top, ["a"]), false);
     assert.equal(offersUndo(top, ["b"]), true);
-    assert.deepEqual(undoOf(top!), { t: "undo", of: 2 });
+    assert.deepEqual(undoOf(top!), { of: 2 });
   });
 
   test("once the server takes the top move back for the bar, the one below is offered, down to the drag", () => {
@@ -57,7 +60,7 @@ describe("Undo move in the token bar", () => {
     let s = after([move("a"), raise("a"), raise("a"), raise("a")]);
     for (const n of [4, 3, 2, 1]) {
       const top = offered(s)!;
-      assert.deepEqual(undoOf(top), { t: "undo", of: n });
+      assert.deepEqual(undoOf(top), { of: n });
       const press = queued(10 + n, undoOf(top));
       s = afterQueued(s, "player", press);
       assert.equal(offered(s), null, "nothing to press while the undo is on its way");
@@ -76,11 +79,11 @@ describe("Undo move in the token bar", () => {
     assert.equal(offersMarkUndo(top, "a"), true);
     assert.equal(offersMarkUndo(top, "b"), false);
     assert.equal(offersMarkUndo(offered(after([move("a")])), "a"), false, "a move is no mark");
-    assert.deepEqual(undoOf(top), { t: "undo", of: 2 });
+    assert.deepEqual(undoOf(top), { of: 2 });
     const press = queued(3, undoOf(top));
     s = afterAnswers(afterQueued(s, "player", press), [], []);
     assert.equal(offersUndo(offered(s), ["a"]), true, "the move's own undo is back");
-    assert.deepEqual(undoOf(offered(s)!), { t: "undo", of: 1 });
+    assert.deepEqual(undoOf(offered(s)!), { of: 1 });
     assert.deepEqual(afterAnswers(after([move("a"), mark]), [], [2]), NONE, "a refused mark leaves this device unsure of the stack");
   });
 
@@ -90,14 +93,14 @@ describe("Undo move in the token bar", () => {
     s = afterQueued(s, "player", queued(4, move("c")));
     s = afterAnswers(s, [queued(4, move("c"))], []);
     assert.deepEqual(s.offers.map((o) => o.ns), [[1], [4]]);
-    assert.deepEqual(undoOf(offered(s)!), { t: "undo", of: 4 });
+    assert.deepEqual(undoOf(offered(s)!), { of: 4 });
   });
 
   test("any other undo or redo, from a keyboard or a toolbar, and a drawing op end every offer", () => {
-    assert.deepEqual(after([move("a"), move("b"), { t: "undo" }]), NONE, "Ctrl+Z took B back, so A is not to be offered on B");
-    assert.deepEqual(after([move("a"), { t: "redo" }]), NONE);
+    assert.deepEqual(after([move("a"), move("b"), { t: "undo", head: "00000000-0000-4000-8000-000000000001" } as ClientOp]), NONE, "Ctrl+Z took B back, so A is not to be offered on B");
+    assert.deepEqual(after([move("a"), { t: "redo", head: "00000000-0000-4000-8000-000000000001" } as ClientOp]), NONE);
     assert.deepEqual(after([move("a"), raise("a"), { t: "drawing.delete", drawingId: "d" }]), NONE);
-    assert.deepEqual(after([move("a"), move("b"), { t: "undo", of: 1 }]), NONE, "an undo naming a step below the top is not the bar's");
+    assert.deepEqual(after([move("a"), move("b"), { t: "undo", of: 1, head: "00000000-0000-4000-8000-000000000001" } as ClientOp]), NONE, "an undo naming a step below the top is not the bar's");
   });
 
   test("a change of elevation or facing alone goes on top, other changes leave the offers", () => {
@@ -115,7 +118,7 @@ describe("Undo move in the token bar", () => {
   test("the bands of one gesture are one offer, named by the last band", () => {
     const s = after([move("x"), queued(2, move("a"), "g"), queued(3, move("b"), "g")]);
     assert.deepEqual(s.offers, [{ tokenIds: ["x"], ns: [1] }, { tokenIds: ["a", "b"], ns: [2, 3], group: "g" }]);
-    assert.deepEqual(undoOf(offered(s)!), { t: "undo", of: 3 });
+    assert.deepEqual(undoOf(offered(s)!), { of: 3 });
   });
 
   test("a refused move, or a refused undo from the bar, ends every offer, a refusal of something else does not", () => {
@@ -162,11 +165,11 @@ describe("Undo move in the token bar", () => {
     room.setState({ pending: [queued(2, raise("a"))] });
     room.setState({ pending: [] });
     assert.deepEqual(offered(slot.getState())?.ns, [2], "answered and gone from the queue, the change is still the newest step");
-    room.setState({ pending: [queued(3, { t: "undo", of: 2 })] });
+    room.setState({ pending: [queued(3, { t: "undo", of: 2, head: "00000000-0000-4000-8000-000000000001" } as ClientOp)] });
     assert.equal(offered(slot.getState()), null);
     room.setState({ pending: [] });
     assert.deepEqual(offered(slot.getState())?.ns, [1], "the drag is next");
-    room.setState({ pending: [queued(4, { t: "undo" })] });
+    room.setState({ pending: [queued(4, { t: "undo", head: "00000000-0000-4000-8000-000000000001" } as ClientOp)] });
     assert.equal(offered(slot.getState()), null);
     room.setState({ pending: [queued(5, move("b"))] });
     room.setState({ pending: [], refused: [5] });

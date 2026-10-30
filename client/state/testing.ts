@@ -70,3 +70,13 @@ export class FakeOutbox implements Outbox {
     return ns;
   }
 }
+
+/** A fixed, explicit head for transport tests that do not simulate server stacks. */
+export const TEST_HISTORY_HEAD = "00000000-0000-4000-8000-000000000001";
+
+export function applyTestHistory(room: import("./store.ts").RoomStore, watermark: number): void {
+  const s = room.store.getState();
+  const stack = { head: { id: TEST_HISTORY_HEAD, label: "moving a token" }, depth: 1 };
+  room.applyHistory({ t: "history", epoch: "00000000-0000-4000-8000-000000000002", seq: s.seq, serial: (s.history?.summary?.serial ?? 0) + 1, watermark,
+    play: { undo: stack, redo: stack }, ...(s.you?.role === "dm" ? { setup: { undo: stack, redo: stack } } : {}) });
+}

@@ -1,3 +1,5 @@
+import type { HistoryActivation, HistoryCommand, HistoryView } from "./history.ts";
+import type { UndoGroupOptions } from "#shared/undoContract.ts";
 import type { DiceRoll, MemberId, RoomState, SceneId } from "#shared/model.ts";
 import type { ClientOp, EphEvent, RefusalCode } from "#shared/protocol.ts";
 import type { ProjectedState } from "#shared/project.ts";
@@ -164,6 +166,7 @@ export type PendingOp = {
   at: number;
   /** The undo group it was sent under, if any (design 7.7). */
   group?: string;
+  groupScope?: "setup";
   /** Told the op's answer once it settles (OpAnswer), with the reason when it was refused. */
   onAnswer?: OnAnswer;
   /** No toast answers it: the caller says what became of it (DispatchOptions). */
@@ -465,6 +468,8 @@ export function crossWide(local: LocalUi, wide: boolean): LocalUi {
  * every call. Derive those with useMemo from stable slices instead.
  */
 export type RoomView = {
+  history?: HistoryView;
+  historyReview?: { scope: "play" | "setup"; direction?: "undo" | "redo" } | null;
   roomId: string;
   you: You | null;
   /**
@@ -561,7 +566,7 @@ export type RoomView = {
  * while others still waited, so the question says the outcome is not known
  * whenever it closes (MD4-ASTRA-8).
  */
-export type ForgetAsk = { asks: readonly { n: number; op: ClientOp; group?: string }[]; sending?: readonly number[]; unsure?: true };
+export type ForgetAsk = { asks: readonly ({ n: number; op: ClientOp } & UndoGroupOptions)[]; sending?: readonly number[]; unsure?: true };
 
 /** How many refused op numbers RoomView.refused keeps. One `ev` rarely refuses more than a handful. */
 export const MAX_REFUSED = 20;
@@ -579,7 +584,7 @@ export type RoomActions = {
    * undo takes the whole gesture back (design 7.7). `onAnswer` hears once
    * what became of it (OpAnswer).
    */
-  dispatch(op: ClientOp, opts?: { group?: string; onAnswer?: OnAnswer; quiet?: boolean; holds?: () => readonly ClientOp[] }): number | null;
+  dispatch(op: ClientOp | HistoryCommand, opts?: UndoGroupOptions & { onAnswer?: OnAnswer; quiet?: boolean; holds?: () => readonly ClientOp[] }): number | null;
   /**
    * Sends an ephemeral event on the current scene, coalesced to one per
    * animation frame (design 7.6), and shows it locally as this member's own.
@@ -590,9 +595,9 @@ export type RoomActions = {
   /** DM only: view another scene. The latest pick wins. */
   switchScene(sceneId: SceneId): void;
   /** Sends an undo, or while a builder gesture waits on its asks, cancels the newest such gesture instead (holdBuild). */
-  undo(): void;
+  undo(options?: HistoryActivation): void;
   /** Sends a redo, or while a builder gesture waits on its asks, does nothing (holdBuild). */
-  redo(): void;
+  redo(options?: HistoryActivation): void;
   /**
    * A builder gesture waiting on its asks (builder/ask.ts, D-261027-07):
    * until the returned release is called, the store refuses at input

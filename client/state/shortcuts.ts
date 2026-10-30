@@ -137,6 +137,11 @@ export function undoShortcut(e: KeyPress): "undo" | "redo" | null {
   return e.shiftKey ? "redo" : "undo";
 }
 
+/** Only the focused history sheet owns these keys. Its text fields keep native Undo. */
+export function setupHistoryShortcut(e: KeyPress, gates: { focused: boolean; dm: boolean; preview: boolean; confirming: boolean }): "undo" | "redo" | null {
+  return gates.focused && gates.dm && !gates.preview && !gates.confirming ? undoShortcut(e) : null;
+}
+
 /** A tool as the table needs it: its id, and for the status the name and the main choice its key moves through. */
 export type ShortcutTool = { id: string; label?: string; cycle?: ToolCycle };
 
@@ -388,7 +393,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   {
     id: "undo",
     keys: "Ctrl+Z",
-    does: "Undo your last change",
+    does: "Undo your last play or board change",
     roles: ["dm", "player"],
     modifier: true,
     match: (e) => letterOf(e) === "z" && !e.shiftKey,
@@ -397,7 +402,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   {
     id: "redo",
     keys: "Ctrl+Shift+Z",
-    does: "Redo what you undid",
+    does: "Redo your last play or board change",
     roles: ["dm", "player"],
     modifier: true,
     match: (e) => letterOf(e) === "z" && e.shiftKey,
@@ -750,6 +755,7 @@ export const SURFACES = [
   "Label, pin and light panes",
   "Dialogs",
   "Adding an image",
+  "Setup history",
 ] as const;
 
 export type Surface = (typeof SURFACES)[number];
@@ -1067,6 +1073,11 @@ export const BEHAVIORS: readonly Behavior[] = [
   { id: "dialogEscape", input: "Escape", does: "Close it. A journal page or a monster with unsaved changes asks first", roles: EVERYONE, device: "keys", surface: "Dialogs" },
   { id: "dialogTab", input: "Tab, Shift+Tab", does: "Move through its controls without leaving it", roles: EVERYONE, device: "keys", surface: "Dialogs" },
 
+  { id: "setupUndo", input: "Ctrl+Z (Cmd+Z on a Mac)", does: "Undo the next setup step", roles: DM, device: "keys", surface: "Setup history" },
+  { id: "setupRedo", input: "Ctrl+Shift+Z (Cmd+Shift+Z on a Mac)", does: "Redo the next setup step", roles: DM, device: "keys", surface: "Setup history" },
+  { id: "setupEscape", input: "Escape", does: "Close the sheet and return focus to its opener", roles: DM, device: "keys", surface: "Setup history" },
+  { id: "historyDoubleClick", input: "Double click or tap on Undo or Redo", does: "Take back or restore one step. A second tap in the same double-click sequence never takes the following step", roles: EVERYONE, device: "pointer" },
+
   // Every image entry: features/images/pasteRouter.ts, which picks the one a paste lands in (docs/design-v1-paste.md 1.3).
   {
     id: "pickerPaste",
@@ -1103,6 +1114,7 @@ export const KEYS_INTRO = "On any device with a keyboard. They do nothing while 
 const POINTER_INTRO = "On any device. A token that carries others, such as a rider's mount or a holder of a torch, drags as a group.";
 
 const SURFACE_INTRO: Partial<Record<Surface, string>> = {
+  "Setup history": "While this sheet has focus, outside text fields. Separate key presses wait for the next step. Held keys do not repeat.",
   Toolbar: "Each tool key picks its tool, also one behind Setup or the tool menu.",
   "Tool options": "A tool's options row, its More options and the pop-ups its buttons open.",
   "Side panel tabs":

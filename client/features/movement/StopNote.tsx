@@ -126,6 +126,7 @@ export function StopNoteHost(props: { scene: Scene; camera: Camera; viewport: Si
         return state.view ? dropView(state.view, state.you?.role ?? "player") : null;
       },
       dispatch: (op, opts) => actions.dispatch(op, opts),
+      undo: (options) => actions.undo(options),
       notify: (text, tone) => ui.notify(text, tone),
       done: close,
     });

@@ -1,3 +1,4 @@
+import type { HistoryActivation } from "../../state/history.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { RoomState, Token } from "#shared/model.ts";
@@ -31,6 +32,9 @@ function harness(state: RoomState) {
         sent.push({ op, answer: opts.onAnswer, quiet: opts.quiet === true });
         return sent.length;
       },
+      undo(options: HistoryActivation) {
+        sent.push({ op: { t: "undo", of: options.of, head: "00000000-0000-4000-8000-000000000001" } as ClientOp, answer: options.onAnswer!, quiet: options.quiet === true });
+      },
       notify(text: string, tone: string) {
         notes.push([text, tone]);
       },
@@ -52,7 +56,7 @@ describe("Teleport here", () => {
     const { state, note } = walked();
     const h = harness(state);
     runTeleport(note, h.deps);
-    assert.deepEqual(h.sent.map((s) => s.op), [{ t: "undo", of: 7 }]);
+    assert.deepEqual(h.sent.map((s) => s.op), [{ t: "undo", of: 7, head: "00000000-0000-4000-8000-000000000001" }]);
     // The flow says what became of the walk, so the undo's own "Undid moving Thorn." stays away.
     assert.equal(h.sent[0]!.quiet, true);
     // The server takes the walk back: the token stands where the walk began.
@@ -126,7 +130,7 @@ describe("Teleport here", () => {
   test("an op the store will not queue ends the flow", () => {
     const { state, note } = walked();
     const h = harness(state);
-    runTeleport(note, { ...h.deps, dispatch: () => null });
+    runTeleport(note, { ...h.deps, undo: (options) => options.onAnswer?.("unknown"), dispatch: () => null });
     assert.equal(h.finished, 1);
   });
 

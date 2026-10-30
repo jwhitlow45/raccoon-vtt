@@ -818,19 +818,23 @@ function GroupBarHp(props: { tokens: readonly ViewToken[]; rest?: HpRest }) {
 function UndoMoveButton(props: { tokenIds: readonly string[]; arrow?: boolean }) {
   const actions = useRoomActions();
   const offer = useStore(useScoped(lastMoveSlot), offered);
+  const unavailable = useRoomView((s) => s.connection !== "open" || !!s.history?.pending);
+  const preview = usePreview() !== null;
+  const blocked = unavailable || preview;
   if (!offer || !offersUndo(offer, props.tokenIds)) return null;
   // The button goes with the move it took back, Roll taking the strip's place, so focus moves to the bar's frame, as Revive's does (D-261024-42).
-  const undo = () => {
+  const undo = (event?: { detail: number }) => {
     const pressed = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    if (actions.dispatch(undoOf(offer)) !== null) handFocusOn(pressed?.closest<HTMLElement>(BAR_FRAME), [":scope"]);
+    actions.undo({ ...undoOf(offer), control: "token-undo", detail: event?.detail });
+    handFocusOn(pressed?.closest<HTMLElement>(BAR_FRAME), [":scope"]);
   };
   // The strip's is the undo arrow alone, named and tipped "Undo move" as the top bar's Undo is, so it fits Roll's place (docs/design-v1-bar-compact.md R13).
   return props.arrow ? (
-    <BarButton icon="undo" iconOnly always onClick={undo}>
+    <BarButton icon="undo" iconOnly always disabled={blocked} onClick={undo}>
       Undo move
     </BarButton>
   ) : (
-    <BarButton onClick={undo}>Undo move</BarButton>
+    <BarButton disabled={blocked} onClick={undo}>Undo move</BarButton>
   );
 }
 
@@ -850,20 +854,22 @@ function CountLegButton(props: { token: ViewToken }) {
   const slot = useScoped(lastMoveSlot);
   const offer = useStore(slot, offered);
   const undoing = useStore(slot, (s) => s.undoing !== null);
+  const historyBlocked = useRoomView((s) => s.connection !== "open" || !!s.history?.pending);
+  const preview = usePreview() !== null;
   const path = pathNow(encounter, props.token, role);
   const last = path && path.stops.length >= 2 ? path.stops[path.stops.length - 1] : undefined;
   const before = path && path.stops.length >= 2 ? path.stops[path.stops.length - 2] : undefined;
   // A resize's leg, or a squeeze's in place, is no move, so it has nothing to stop counting (docs/design-v1-token-window.md 8.7).
   if (!last || !before || reshapeLeg(before, last, stopFootprint(props.token))) return null;
   const off = last.uncounted === true;
-  const press = () => {
+  const press = (event?: { detail: number }) => {
     // The bar's undo waits for the server, and a second press meanwhile would act on a mark about to change.
-    if (undoing) return;
-    if (offer && offersMarkUndo(offer, props.token.id)) actions.dispatch(undoOf(offer));
+    if (undoing || historyBlocked || preview) return;
+    if (offer && offersMarkUndo(offer, props.token.id)) actions.undo({ ...undoOf(offer), control: "token-count-undo", detail: event?.detail });
     else actions.dispatch({ t: "token.countLeg", tokenId: props.token.id, counts: off });
   };
   return (
-    <BarButton pressed={off} label="The last move doesn't count against Speed, for a shove or a teleport" onClick={press}>
+    <BarButton disabled={undoing || historyBlocked || preview} pressed={off} label="The last move doesn't count against Speed, for a shove or a teleport" onClick={press}>
       Doesn't count
     </BarButton>
   );
@@ -2139,7 +2145,7 @@ function StepperRow(props: { label: string; children: ReactNode; group?: boolean
  */
 function BarButton(props: {
   ref?: Ref<HTMLButtonElement>;
-  onClick(): void;
+  onClick(event?: { detail: number }): void;
   /** The words, which an icon alone keeps as its name. An icon alone named by `label` needs none. */
   children?: ReactNode;
   label?: string;

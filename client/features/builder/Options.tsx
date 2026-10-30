@@ -1,3 +1,4 @@
+import { usePreview } from "../dm/previewContext.ts";
 import { useCallback, useRef } from "react";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
@@ -153,6 +154,10 @@ export default function BuilderOptions() {
   const scene = useRoomView((v) => (v.sceneId ? v.view?.scenes[v.sceneId] : undefined));
   const hasLights = useRoomView((v) => (v.sceneId ? sceneHasLights(v.view?.lights, v.sceneId) : false));
   const actions = useRoomActions();
+  const historyUnavailable = useRoomView((s) => s.connection !== "open" || !!s.history?.pending);
+  const preview = usePreview() !== null;
+  const historyBlocked = historyUnavailable || preview;
+  const held = useRoomView((s) => s.buildHeldSince !== undefined);
   const ui = useRoomUi();
   const sceneShape = scene ? sceneGrid(scene) : SQUARES;
   const heightHint = useHeightHint(scene?.autoWalls, s.mode === "rough", sceneShape);
@@ -228,8 +233,8 @@ export default function BuilderOptions() {
         </ValueChip>
       ),
     },
-    { id: "undo", priority: 2 + drop, control: <OptButton icon="undo" label="Undo your last change" rowWords="Undo" shortcut="undo" onClick={() => actions.undo()} /> },
-    { id: "redo", priority: 4 + drop, control: <OptButton icon="redo" label="Redo" rowWords="Redo" shortcut="redo" onClick={() => actions.redo()} /> },
+    { id: "undo", priority: 2 + drop, control: <OptButton icon="undo" label="Undo your last play or board change" rowWords="Undo" shortcut="undo" disabled={preview || (!held && historyBlocked)} onClick={(e) => actions.undo({ control: "builder-undo", detail: e?.detail })} /> },
+    { id: "redo", priority: 4 + drop, control: <OptButton icon="redo" label="Redo" rowWords="Redo" shortcut="redo" disabled={held || historyBlocked} onClick={(e) => actions.redo({ control: "builder-redo", detail: e?.detail })} /> },
   ];
   if (s.mode === "paint") slots.push(terrain(1), brush(3));
   if (s.mode === "rect") slots.push(terrain(1));

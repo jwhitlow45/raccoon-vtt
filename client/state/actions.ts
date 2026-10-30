@@ -22,13 +22,13 @@ export function validEph(e: EphEvent): boolean {
  * back, not the last band. Returns the numbers of the ops it queued, so a
  * button can wait for the server's answer to all of them.
  */
-export function dispatchGesture(actions: Pick<RoomActions, "dispatch" | "newId">, ops: readonly ClientOp[], opts: { alwaysGroup?: boolean } = {}): number[] {
+export function dispatchGesture(actions: Pick<RoomActions, "dispatch" | "newId">, ops: readonly ClientOp[], opts: { alwaysGroup?: boolean; groupScope?: "setup" } = {}): number[] {
   // A lone op is one step anyway. A gesture the server names as a whole, such as a folder rename, keeps its group
   // even then, so its step reads as the gesture and not as its one op.
-  const group = ops.length > 1 || opts.alwaysGroup ? actions.newId() : undefined;
+  const group = ops.length > 1 || opts.alwaysGroup || opts.groupScope ? actions.newId() : undefined;
   const sent: number[] = [];
   for (const op of ops) {
-    const n = actions.dispatch(op, group === undefined ? undefined : { group });
+    const n = actions.dispatch(op, group === undefined ? undefined : { group, ...(opts.groupScope ? { groupScope: opts.groupScope } : {}) });
     if (n !== null) sent.push(n);
   }
   return sent;
@@ -56,12 +56,13 @@ export function createRoomActions(room: RoomStore, socket: Pick<RoomSocket, "sen
     },
     switchScene: (sceneId) => socket.switchScene(sceneId),
     // Undo while a gesture waits takes back that gesture, which the server never saw, and sends no undo.
-    undo: () => {
-      if (!room.cancelHeld()) void room.dispatch({ t: "undo" });
+    undo: (options) => {
+      if (options?.scope !== "setup" && options?.of === undefined && room.cancelHeld()) return;
+      if (!room.activateHistory("undo", options)) options?.onAnswer?.("unknown", undefined, "snapshot");
     },
     holdBuild: (cancel) => room.holdBuild(cancel),
     // Redo while a gesture waits does nothing: the store refuses it, since the step it brings back may be a builder one.
-    redo: () => void room.dispatch({ t: "redo" }),
+    redo: (options) => { if (!room.activateHistory("redo", options)) options?.onAnswer?.("unknown", undefined, "snapshot"); },
     newId: () => uuidv7(),
     moveToken: (tokenId, x, y) => void room.dispatch({ t: "token.move", tokenId, x, y }),
     moveTokens(moves) {

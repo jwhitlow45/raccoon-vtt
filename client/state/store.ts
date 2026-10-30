@@ -1,3 +1,6 @@
+import { CorrectionAnnouncements } from "../features/log/corrections.ts";
+import { historyCommandSchema, type HistoryDirection, type HistoryMessage, type UndoGroupOptions } from "#shared/undoContract.ts";
+import { blockerText, EMPTY_HISTORY, HistoryController, type HistoryActivation, type HistoryCommand } from "./history.ts";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { uuidv7 } from "#shared/ids.ts";
 import { parseKey } from "#shared/keys.ts";
@@ -167,7 +170,7 @@ export function withToast(toasts: readonly Toast[], toast: Toast): Toast[] {
 }
 
 /** Options for one dispatched op. */
-export type DispatchOptions = {
+export type DispatchOptions = UndoGroupOptions & {
   /**
    * An undo group id. Ops dispatched with the same group, one after
    * another, undo as one step: one brush stroke, or one room sent in bands.
@@ -209,6 +212,7 @@ export type Outbox = { send(msg: ClientMessage): boolean };
 
 /** UI state setters for `local` (design section 14.1). They never touch the room. */
 export type RoomUi = {
+  openHistory?(target: { scope: "play" | "setup"; direction?: "undo" | "redo" } | null): void;
   setTool(id: string): void;
   /**
    * Selects a token, leaving its action bar as it is. Null lets go. `opens`
@@ -286,7 +290,10 @@ export type RoomStore = {
   // From the page.
 
   /** Queues an op, shows its predicted result at once, and sends it when the socket allows. Returns its `n`, or null when the op is malformed. */
-  dispatch(op: ClientOp, opts?: DispatchOptions): number | null;
+  dispatch(op: ClientOp | HistoryCommand, opts?: DispatchOptions): number | null;
+  activateHistory(direction: HistoryDirection, options?: HistoryActivation): boolean;
+  applyHistory(message: HistoryMessage, connection?: number): void;
+  historyConnection(): number;
   /**
    * A builder gesture waiting on its asks (builder/ask.ts, D-261027-07):
    * until the returned release is called, `dispatch` refuses every op that
@@ -370,11 +377,12 @@ export function refusalText(code: RefusalCode, message: string): string {
  * and a refusal reads as its own sentence: "Not saved." would be wrong,
  * since nothing was being saved.
  */
-export function undoAnswer(t: "undo" | "redo", answer: { what: string | undefined } | { refused: string }): { text: string; tone: Toast["tone"] } {
+export function undoAnswer(t: "undo" | "redo", answer: { what: string | undefined } | { refused: string }, scope: "play" | "setup" = "play"): { text: string; tone: Toast["tone"] } {
   if ("what" in answer) {
     const verb = t === "undo" ? "Undid" : "Redid";
-    return { text: answer.what ? `${verb} ${answer.what}.` : `${verb} your last ${t === "undo" ? "change" : "undone change"}.`, tone: "info" };
+    return { text: answer.what ? `${verb}${scope === "setup" ? " setup:" : ""} ${answer.what}.` : `${verb} your last ${t === "undo" ? "change" : "undone change"}.`, tone: "info" };
   }
+  if (answer.refused === "Reload to use Undo") return { text: answer.refused, tone: "error" };
   const detail = answer.refused.trim().replace(/\.$/, "");
   if (!detail) return { text: `Could not ${t}.`, tone: "error" };
   const text = detail[0]!.toUpperCase() + detail.slice(1) + ".";
@@ -487,9 +495,12 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     refused: [],
     trapped: [],
     sceneLoad: SCENE_LOAD_IDLE,
+    history: EMPTY_HISTORY,
   }));
 
+  const corrections = new CorrectionAnnouncements();
   let nextN = 1;
+  let terminal = 0;
   let outbox: Outbox | null = null;
   /** A snapshot is applied on the current socket, so ops may go out. */
   let ready = false;
@@ -519,6 +530,25 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
   let disposed = false;
 
   const get = () => store.getState();
+
+  const retainedNotices = new Map<string, string>();
+  const history = new HistoryController({
+    context: () => ({ seq: get().seq, terminal, issued: nextN - 1, enabled: ready && get().connection === "open" && !get().ended, dm: get().you?.role === "dm" }),
+    send: (command, opts) => room.dispatch(command, opts),
+    changed: (value) => {
+      store.setState({ history: value });
+      if (!value.summary || get().you?.role !== "dm") return;
+      for (const scope of ["play", "setup"] as const) for (const direction of ["undo", "redo"] as const) {
+        const head = value.summary[scope]?.[direction].head;
+        const key = `${scope}:${direction}`;
+        const signature = JSON.stringify(head ?? null);
+        if (retainedNotices.get(key) === signature) continue;
+        retainedNotices.set(key, signature);
+        if (head?.retained) pushToast(blockerText(head.retained), "info", undefined, { label: "Review step", run: () => ui.openHistory?.({ scope, direction }) });
+      }
+    },
+    notify: (text) => pushToast(text, "info"),
+  }, clock);
 
   /** Rebuilds the view from `confirmed` and `pending`, sharing every entity that did not change. */
   function derive(next: Pick<RoomStoreState, "confirmed" | "seq" | "pending" | "you" | "sceneId">): Pick<RoomStoreState, "view" | "busy"> {
@@ -585,6 +615,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       sceneId: patch.sceneId !== undefined ? patch.sceneId : s.sceneId,
     };
     store.setState({ ...patch, ...derive(next) });
+    history.refresh();
   }
 
   function setEphemeral(ephemeral: RoomStoreState["ephemeral"], extra: Partial<RoomStoreState> = {}): void {
@@ -621,7 +652,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     const now = clock.now();
     for (const p of get().pending) {
       if (sentAt.has(p.n)) continue;
-      if (!outbox.send(p.group === undefined ? { t: "op", n: p.n, op: p.op } : { t: "op", n: p.n, op: p.op, g: p.group })) break;
+      if (!outbox.send(p.group === undefined ? { t: "op", n: p.n, op: p.op } : { t: "op", n: p.n, op: p.op, g: p.group, ...(p.groupScope ? { groupScope: p.groupScope } : {}) })) break;
       sentAt.set(p.n, now);
     }
     armAnswerTimer();
@@ -656,6 +687,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
   };
 
   const ui: RoomUi = {
+    openHistory: (historyReview) => store.setState({ historyReview }),
     setTool(id) {
       const local = get().local;
       if (local.tool !== id) store.setState({ local: { ...local, tool: id } });
@@ -744,15 +776,20 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         const groups = new Set(ask.asks.flatMap((a) => (a.group !== undefined ? [a.group] : [])));
         for (const group of groups) {
           const n = takenInGroup.get(group);
-          if (n !== undefined) room.dispatch({ t: "undo", of: n }, { quiet: true });
+          // Setup has no origin-matched Undo. Do not guess which current head belongs to this partial gesture.
+          if (n !== undefined && ask.asks.some((a) => a.group === group && a.groupScope === "setup")) {
+            pushToast("Some setup changes were saved. Undo them in Setup history.", "info");
+            continue;
+          }
+          if (n !== undefined) room.activateHistory("undo", { of: n, quiet: true });
         }
         return;
       }
       const sending: number[] = [];
-      for (const { op, group } of ask.asks) {
+      for (const { op, group, groupScope } of ask.asks) {
         // A gesture's ask was answered by the question itself: its ops go again with the yes.
         if (op.t === "undo" || op.t === "redo" || op.t === "build.ask") continue;
-        const n = room.dispatch({ ...op, forget: true } as ClientOp, group !== undefined ? { group } : undefined);
+        const n = room.dispatch({ ...op, forget: true } as ClientOp, group !== undefined ? { group, ...(groupScope ? { groupScope } : {}) } : undefined);
         if (n !== null) sending.push(n);
       }
       store.setState({ forgetAsk: sending.length > 0 ? { asks: ask.asks, sending } : null });
@@ -764,10 +801,24 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     clientId,
     ui,
 
+    activateHistory(direction, options) {
+      if (held.length > 0 && options?.of === undefined) return false;
+      return history.activate(direction, options);
+    },
+
+    applyHistory(message, connection) {
+      history.receive(message, connection);
+    },
+    historyConnection: () => history.generation,
+
     dispatch(op, opts) {
       // Nothing that could land before a builder gesture waiting on its asks goes, whoever sends it (D-261027-07).
       if (held.length > 0 && overtakes(op)) return null;
-      const parsed = clientOpSchema.safeParse(op);
+      if (opts?.groupScope && (!opts.group || get().you?.role !== "dm")) {
+        pushToast("Only a DM can declare a grouped setup change.");
+        return null;
+      }
+      const parsed = op.t === "undo" || op.t === "redo" ? historyCommandSchema.safeParse(op) : clientOpSchema.safeParse(op);
       if (!parsed.success) {
         console.error("raccoon: refusing to send a malformed op", op, parsed.error);
         pushToast("That change could not be sent.");
@@ -776,6 +827,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       const n = nextN++;
       const pendingOp: PendingOp = { n, op: parsed.data, at: clock.now() };
       if (opts?.group !== undefined) pendingOp.group = opts.group;
+      if (opts?.groupScope !== undefined) pendingOp.groupScope = opts.groupScope;
       if (opts?.onAnswer !== undefined) pendingOp.onAnswer = opts.onAnswer;
       if (opts?.quiet === true) pendingOp.quiet = true;
       if (opts?.holds !== undefined) pendingOp.holds = opts.holds;
@@ -839,6 +891,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
 
     applySnapshot(msg) {
       const s = get();
+      corrections.snapshot((msg.state as ProjectedState).log);
       // A table display's projection is a player's who owns nothing (docs/design-v1-dm-tools.md 3.1), so its rules are a player's.
       const you: You = { memberId: msg.you.memberId, role: msg.you.role === "dm" ? "dm" : "player" };
       const sceneId = msg.you.sceneId;
@@ -846,12 +899,14 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       // watermark than anything sent would mean a reused clientId: never
       // hand out an `n` the server already considers settled.
       nextN = Math.max(nextN, msg.watermark + 1);
+      terminal = Math.max(terminal, msg.watermark);
       const pending = s.pending.filter((p) => p.n > msg.watermark);
       // The snapshot holds what the server made of these, but not whether it refused one: its answer was lost with the socket.
       const lost = s.pending.filter((p) => p.n <= msg.watermark);
       sentAt.clear();
       retryTimer.clear();
       retryAttempt = 0;
+      history.snapshot();
       ready = true;
       const ephemeral = sceneId === s.sceneId ? keepLocal(s.ephemeral) : EMPTY_EPHEMERAL;
       // The server sends `access` only to a socket holding a snapshot, and
@@ -884,6 +939,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       const confirmed = applyChanges(s.confirmed, msg.changes);
       const settled = new Set<number>(msg.acks ?? []);
       for (const r of msg.rejects ?? []) settled.add(r.n);
+      for (const n of settled) terminal = Math.max(terminal, n);
       let pending = s.pending;
       let refused = s.refused;
       let trapped = s.trapped;
@@ -897,7 +953,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         toasts = withToast(toasts.filter((t) => t.text !== text), { id: ++toastSeq, text, tone });
       };
       // Builder ops the server asked about (FORGET_ASK), one question for all of them, and a question answered once its ops are.
-      const asks: { n: number; op: ClientOp; group?: string }[] = [];
+      const asks: { n: number; op: ClientOp; group?: string; groupScope?: "setup" }[] = [];
       let forgetAsk = s.forgetAsk ?? null;
       if (forgetAsk?.sending && forgetAsk.sending.every((n) => settled.has(n) || !pending.some((p) => p.n === n))) {
         if (forgetAsk.unsure) toast(FORGET_UNSURE, "info");
@@ -915,23 +971,24 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
           }
           const op = sent?.op;
           if ((op?.t !== "undo" && op?.t !== "redo") || sent?.quiet) continue;
-          const answer = undoAnswer(op.t, { what: restored.get(n) });
-          renew(answer.text, answer.tone);
+          const answer = undoAnswer(op.t, { what: restored.get(n) }, "scope" in op && op.scope === "setup" ? "setup" : "play");
+          renew("discard" in op && op.discard ? "Discarded this step. The game stays as it is." : answer.text, answer.tone);
         }
         for (const r of msg.rejects ?? []) {
           const sent = pending.find((p) => p.n === r.n);
           const op = sent?.op;
           if (!op || sent.quiet) continue;
-          if (r.code === "forget" && (op.t === "undo" || op.t === "redo")) {
+          if (r.code === "forget" && (op.t === "undo" || op.t === "redo") && "head" in op && typeof op.head === "string") {
             // The undo toast's confirm (docs/design-v1-map-discovery.md 5.3): a yes names the refused step's n, which the server checks still heads the stack.
-            const again = { ...op, forget: r.n };
+            const expected = op.head;
+            const scope = "scope" in op ? op.scope as "play" | "setup" | undefined : undefined;
             // Pressed while a builder gesture waits on its asks, it does nothing and the toast stays, as the store would refuse its step (`overtakes`).
-            const action = { label: op.t === "undo" ? "Forget and undo" : "Forget and redo", run: () => void room.dispatch(again), ready: () => held.length === 0 };
+            const action = { label: op.t === "undo" ? "Forget and undo" : "Forget and redo", run: () => { room.activateHistory(op.t, { expected, scope, forget: r.n, ...(op.t === "undo" && op.of !== undefined ? { of: op.of } : {}) }); }, ready: () => held.length === 0 && get().connection === "open" && !get().history?.pending };
             toasts = withToast(toasts.filter((t) => t.text !== FORGET_ASK), { id: ++toastSeq, text: FORGET_ASK, tone: "info", action });
             continue;
           }
           if (r.code === "forget") {
-            const group = sent.group !== undefined ? { group: sent.group } : {};
+            const group = sent.group !== undefined ? { group: sent.group, ...(sent.groupScope ? { groupScope: sent.groupScope } : {}) } : {};
             // A gesture's ask stands for the ops it holds, which the question asks about and its yes sends.
             if (op.t === "build.ask") for (const held of sent.holds?.() ?? []) asks.push({ n: r.n, op: held, ...group });
             else asks.push({ n: r.n, op, ...group });
@@ -952,6 +1009,9 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         if (msg.trapped?.length) trapped = [...(trapped ?? []), ...msg.trapped].slice(-MAX_REFUSED);
         for (const n of settled) sentAt.delete(n);
         retryAttempt = 0;
+      }
+      for (const correction of corrections.take(confirmed.log, s.you?.role === "dm")) {
+        toasts = withToast(toasts, { id: ++toastSeq, text: correction.text, tone: "info", logged: true });
       }
       // An `ev` that touches a token settles any drag preview of it (design 7.6).
       const touchedTokens = new Set<string>();
@@ -1016,6 +1076,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
 
     suspend() {
       ready = false;
+      history.suspend();
       sentAt.clear();
       retryTimer.clear();
       answerTimer.clear();
@@ -1026,6 +1087,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
 
     setConnection(connection) {
       if (get().connection !== connection) store.setState({ connection });
+      history.refresh();
     },
 
     setYou(you) {
@@ -1046,6 +1108,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       retryTimer.clear();
       answerTimer.clear();
       store.setState({ ended });
+      history.suspend();
     },
 
     dispose() {
@@ -1055,6 +1118,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       retryTimer.clear();
       answerTimer.clear();
       sweepTimer.clear();
+      history.dispose();
     },
   };
   return room;

@@ -1,3 +1,4 @@
+import type { StackHistoryCommand } from "#shared/undoContract.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { serializedBytes } from "#shared/limits.ts";
@@ -8,7 +9,7 @@ import { LocalServer } from "../../dev/localServer.ts";
 import { createRoomActions } from "../../state/actions.ts";
 import { RoomScope } from "../../state/scope.ts";
 import { ACTION_TOAST_MS, createRoomStore, MAX_OP_AGE_MS, toastsLeft } from "../../state/store.ts";
-import { FakeClock, FakeOutbox } from "../../state/testing.ts";
+import { applyTestHistory, TEST_HISTORY_HEAD, FakeClock, FakeOutbox } from "../../state/testing.ts";
 import type { OnAnswer, OpRefusal, UnknownCause } from "../../state/types.ts";
 import type { ToolContext, ToolPointer } from "../tools.ts";
 import { askOps, BUILD_NOT_MADE, dispatchBuild, whileAsking, type BuildContext } from "./ask.ts";
@@ -190,7 +191,9 @@ function page() {
   const ctx: BuildContext = { actions, ui: room.ui, scene: state.scenes.s1!, waiting: (change) => void (counted.waiting += change), asking: () => counted.waiting > 0 };
   const connect = () => {
     const hello = room.prepareHello();
+    room.setConnection("open");
     room.applySnapshot(server.hello({ resumeFrom: hello.resumeFrom, sceneId: "s1" }));
+    applyTestHistory(room, hello.resumeFrom - 1);
   };
   /** Every op the page sent goes to the server, and its answers come back, until the page sends nothing more. */
   const deliver = () => {
@@ -199,7 +202,7 @@ function page() {
       outbox.sent = [];
       if (ops.length === 0) return;
       for (const msg of server.batch(ops) as ServerMessage[]) {
-        if (msg.t === "ev") room.applyEv(msg);
+        if (msg.t === "ev") { room.applyEv(msg); applyTestHistory(room, Math.max(0, ...ops.map((op) => op.n))); }
         else if (msg.t === "snapshot") room.applySnapshot(msg);
       }
     }
@@ -287,7 +290,7 @@ describe("no builder edit overtakes a gesture waiting on its asks (MD4-ASTRA-9, 
       // An Undo or Redo the server asked about leaves its toast up, then a rectangle waits on its asks.
       const p = page();
       p.connect();
-      const n = p.room.dispatch({ t })!;
+      const n = p.room.dispatch({ t, head: TEST_HISTORY_HEAD } as StackHistoryCommand)!;
       p.room.applyEv({ t: "ev", seq: p.room.store.getState().seq + 1, changes: [], rejects: [{ n, code: "forget", message: FORGET_ASK }] });
       const toast = () => p.room.store.getState().toasts.find((x) => x.action !== undefined);
       assert.equal(toast()?.action?.label, t === "undo" ? "Forget and undo" : "Forget and redo");
@@ -330,7 +333,7 @@ describe("no builder edit overtakes a gesture waiting on its asks (MD4-ASTRA-9, 
     t.mock.method(Date, "now", () => now);
     const p = page();
     p.connect();
-    const n = p.room.dispatch({ t: "undo" })!;
+    const n = p.room.dispatch({ t: "undo", head: TEST_HISTORY_HEAD })!;
     p.room.applyEv({ t: "ev", seq: p.room.store.getState().seq + 1, changes: [], rejects: [{ n, code: "forget", message: FORGET_ASK }] });
     p.deliver();
     const toast = () => p.room.store.getState().toasts.find((x) => x.text === FORGET_ASK)!;
@@ -357,7 +360,7 @@ describe("no builder edit overtakes a gesture waiting on its asks (MD4-ASTRA-9, 
     t.mock.method(Date, "now", () => now);
     const p = page();
     p.connect();
-    const n = p.room.dispatch({ t: "undo" })!;
+    const n = p.room.dispatch({ t: "undo", head: TEST_HISTORY_HEAD })!;
     p.room.applyEv({ t: "ev", seq: p.room.store.getState().seq + 1, changes: [], rejects: [{ n, code: "forget", message: FORGET_ASK }] });
     p.deliver();
     const toast = () => p.room.store.getState().toasts.find((x) => x.text === FORGET_ASK)!;
@@ -382,8 +385,8 @@ describe("no builder edit overtakes a gesture waiting on its asks (MD4-ASTRA-9, 
     const p = page();
     p.connect();
     dispatchBuild(p.ctx, rect);
-    for (const op of [{ t: "undo" }, { t: "undo", forget: 3 }, { t: "redo" }, { t: "redo", forget: 3 }] as ClientOp[]) assert.equal(p.room.dispatch(op), null, JSON.stringify(op));
-    assert.notEqual(p.room.dispatch({ t: "undo", of: 1 }), null, "the token bar's Undo move and a stroke's quiet undo are aimed at one op");
+    for (const op of [{ t: "undo", head: TEST_HISTORY_HEAD }, { t: "undo", head: TEST_HISTORY_HEAD, forget: 3 }, { t: "redo", head: TEST_HISTORY_HEAD }, { t: "redo", head: TEST_HISTORY_HEAD, forget: 3 }] as (ClientOp | StackHistoryCommand)[]) assert.equal(p.room.dispatch(op), null, JSON.stringify(op));
+    assert.notEqual(p.room.dispatch({ t: "undo", head: TEST_HISTORY_HEAD, of: 1 }), null, "the token bar's Undo move and a stroke's quiet undo are aimed at one op");
     assert.notEqual(p.room.dispatch({ t: "undo", log: "1:1" }), null, "an HP change taken back from its log line");
     assert.deepEqual(p.sentKinds(), ["build.ask", "undo", "undo"]);
   });

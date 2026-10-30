@@ -1,3 +1,4 @@
+import type { HistoryActivation } from "../../state/history.ts";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import type { RoomState, Token } from "#shared/model.ts";
 import { isPoseOp, onPlayerUndoStack, type ClientOp } from "#shared/protocol.ts";
@@ -141,8 +142,8 @@ export function offersMarkUndo(offer: Offer | null, tokenId: string): boolean {
 }
 
 /** The undo a press sends: of the move's newest op, so it takes back that move or nothing. */
-export function undoOf(offer: Offer): ClientOp {
-  return { t: "undo", of: newest(offer) };
+export function undoOf(offer: Offer): HistoryActivation {
+  return { of: newest(offer) };
 }
 
 /** Keeps a Room's offers in step with the ops its store queues and the answers it hears. Returns the unsubscribe. */

@@ -10,7 +10,7 @@ import { LocalServer } from "../dev/localServer.ts";
 import { turnOp } from "../features/encounter/logic.ts";
 import { DRAG_END_HOLD_MS, PREVIEW_IDLE_MS } from "./ephemeral.ts";
 import { createRoomStore, FORGET_UNSURE, MAX_OP_AGE_MS, OP_ANSWER_MS, refusalText, replayPending, type RoomStore } from "./store.ts";
-import { FakeClock, FakeOutbox } from "./testing.ts";
+import { applyTestHistory, TEST_HISTORY_HEAD, FakeClock, FakeOutbox } from "./testing.ts";
 import { INITIAL_LOCAL, panelView, sheetOpen, withoutBelow, withPanel, type LocalUi, type OpAnswer, type OpRefusal, type UnknownCause } from "./types.ts";
 
 type Snapshot = Extract<ServerMessage, { t: "snapshot" }>;
@@ -25,7 +25,9 @@ function setup(state: RoomState, viewer: Viewer = DM, sceneId = "s1") {
   room.setOutbox(outbox);
   const connect = () => {
     const hello = room.prepareHello();
+    room.setConnection("open");
     room.applySnapshot(server.hello({ resumeFrom: hello.resumeFrom, sceneId }));
+    applyTestHistory(room, hello.resumeFrom - 1);
   };
   /** Delivers the ops the store sent since the last call to the server as one batch, and its answers back to the store. */
   const deliver = (): ServerMessage[] => {
@@ -286,7 +288,7 @@ describe("which ops are optimistic", () => {
     const s = setup(room({ tokens: { g1: token("g1") } }));
     s.connect();
     const before = s.state().view;
-    s.room.dispatch({ t: "undo" });
+    s.room.dispatch({ t: "undo", head: TEST_HISTORY_HEAD });
     assert.equal(s.state().view, before);
   });
 
@@ -456,12 +458,12 @@ describe("undo answers", () => {
   test("an undo or redo says what it took back", () => {
     const s = setup(room({ tokens: { g1: token("g1") } }));
     s.connect();
-    const undo = s.room.dispatch({ t: "undo" })!;
+    const undo = s.room.dispatch({ t: "undo", head: TEST_HISTORY_HEAD })!;
     answer(s, { acks: [undo], restored: [{ n: undo, what: "moving Goblin 2" }] });
-    const redo = s.room.dispatch({ t: "redo" })!;
+    const redo = s.room.dispatch({ t: "redo", head: TEST_HISTORY_HEAD })!;
     answer(s, { acks: [redo], restored: [{ n: redo, what: "moving Goblin 2" }] });
     // A resent undo the server had already settled comes back without its words.
-    const again = s.room.dispatch({ t: "undo" })!;
+    const again = s.room.dispatch({ t: "undo", head: TEST_HISTORY_HEAD })!;
     answer(s, { acks: [again] });
     assert.deepEqual(
       s.state().toasts.map((t) => [t.text, t.tone]),
@@ -476,10 +478,10 @@ describe("undo answers", () => {
   test("a second undo that reads the same shows as a new toast, so each press visibly lands", () => {
     const s = setup(room({ tokens: { g1: token("g1") } }));
     s.connect();
-    const first = s.room.dispatch({ t: "undo" })!;
+    const first = s.room.dispatch({ t: "undo", head: TEST_HISTORY_HEAD })!;
     answer(s, { acks: [first], restored: [{ n: first, what: "moving Goblin 2" }] });
     const id = s.state().toasts[0]!.id;
-    const second = s.room.dispatch({ t: "undo" })!;
+    const second = s.room.dispatch({ t: "undo", head: TEST_HISTORY_HEAD })!;
     answer(s, { acks: [second], restored: [{ n: second, what: "moving Goblin 2" }] });
     assert.equal(s.state().toasts.length, 1);
     assert.notEqual(s.state().toasts[0]!.id, id);
@@ -488,9 +490,9 @@ describe("undo answers", () => {
   test("a quiet undo, as Teleport here sends, shows no toast whatever its answer", () => {
     const s = setup(room({ tokens: { g1: token("g1") } }));
     s.connect();
-    const taken = s.room.dispatch({ t: "undo", of: 3 }, { quiet: true })!;
+    const taken = s.room.dispatch({ t: "undo", head: TEST_HISTORY_HEAD, of: 3 }, { quiet: true })!;
     answer(s, { acks: [taken], restored: [{ n: taken, what: "moving Goblin 2" }] });
-    const refused = s.room.dispatch({ t: "undo", of: 4 }, { quiet: true })!;
+    const refused = s.room.dispatch({ t: "undo", head: TEST_HISTORY_HEAD, of: 4 }, { quiet: true })!;
     answer(s, { rejects: [{ n: refused, code: "invalid", message: "could not undo that move: it is no longer your newest change" }] });
     assert.deepEqual(s.state().toasts, []);
     assert.equal(s.state().pending.length, 0);
@@ -499,9 +501,9 @@ describe("undo answers", () => {
   test("a refused undo reads as its own sentence, never as an unsaved change", () => {
     const s = setup(room({ tokens: { g1: token("g1") } }));
     s.connect();
-    const empty = s.room.dispatch({ t: "redo" })!;
+    const empty = s.room.dispatch({ t: "redo", head: TEST_HISTORY_HEAD })!;
     answer(s, { rejects: [{ n: empty, code: "invalid", message: "nothing to redo" }] });
-    const changed = s.room.dispatch({ t: "undo" })!;
+    const changed = s.room.dispatch({ t: "undo", head: TEST_HISTORY_HEAD })!;
     answer(s, { rejects: [{ n: changed, code: "invalid", message: "could not undo moving Goblin 2: it was changed since" }] });
     assert.deepEqual(
       s.state().toasts.map((t) => [t.text, t.tone]),
@@ -516,7 +518,7 @@ describe("undo answers", () => {
     const s = setup(room({ tokens: { g1: token("g1") } }));
     s.connect();
     for (const reason of [WALL_IN_THE_WAY_BACK, LEDGE_IN_THE_WAY_BACK]) {
-      const redo = s.room.dispatch({ t: "redo" })!;
+      const redo = s.room.dispatch({ t: "redo", head: TEST_HISTORY_HEAD })!;
       answer(s, { rejects: [{ n: redo, code: "forbidden", message: `could not redo moving Thorn: ${reason}` }] });
     }
     assert.deepEqual(
@@ -1081,6 +1083,28 @@ describe("refusal toasts", () => {
 });
 
 describe("the forget question (docs/design-v1-map-discovery.md 5.3)", () => {
+  test("canceling a partial setup gesture never sends a Play origin undo", () => {
+    const s = setup(room());
+    s.connect();
+    const options = { group: "setup-gesture", groupScope: "setup" as const };
+    const a = s.room.dispatch({ t: "scene.update", sceneId: "s1", patch: { name: "Setup" } }, options)!;
+    const b = s.room.dispatch({ t: "build.paint", sceneId: "s1", terrain: "stone", cells: ["1,0"] }, options)!;
+    s.room.applyEv({ t: "ev", seq: s.state().seq + 1, changes: [], acks: [a], rejects: [{ n: b, code: "forget", message: FORGET_ASK }] });
+    applyTestHistory(s.room, b);
+    s.room.ui.answerForget(false);
+    assert.equal(s.state().pending.length, 0);
+    assert.ok(s.state().toasts.some((toast) => toast.text === "Some setup changes were saved. Undo them in Setup history."));
+    s.room.dispose();
+  });
+  test("a grouped setup retry preserves its scope through the forget question", () => {
+    const s = setup(room());
+    s.connect();
+    const n = s.room.dispatch({ t: "build.paint", sceneId: "s1", terrain: "stone", cells: ["1,0"] }, { group: "setup-gesture", groupScope: "setup" })!;
+    s.room.applyEv({ t: "ev", seq: s.state().seq + 1, changes: [], rejects: [{ n, code: "forget", message: FORGET_ASK }] });
+    s.room.ui.answerForget(true);
+    assert.equal(s.state().pending[0]?.groupScope, "setup");
+    s.room.dispose();
+  });
   const paint = (x: number): ClientOp => ({ t: "build.paint", sceneId: "s1", terrain: "stone", cells: [`${x},0`] });
 
   test("a builder gesture asked about waits on one question, with no toast, and a yes sends its ops again with forget under their group", () => {
@@ -1121,10 +1145,11 @@ describe("the forget question (docs/design-v1-map-discovery.md 5.3)", () => {
     const b = s.room.dispatch(paint(2), { group: "g1" })!;
     const c = s.room.dispatch(paint(3), { group: "g1" })!;
     s.room.applyEv({ t: "ev", seq: s.state().seq + 1, changes: [], acks: [a, b], rejects: [{ n: c, code: "forget", message: FORGET_ASK }] });
+    applyTestHistory(s.room, c);
     s.room.ui.answerForget(false);
     assert.equal(s.state().forgetAsk, null);
     const undo = s.room.store.getState().pending;
-    assert.deepEqual(undo.map((p) => [p.op, p.quiet]), [[{ t: "undo", of: b }, true]]);
+    assert.deepEqual(undo.map((p) => [p.op, p.quiet]), [[{ t: "undo", head: TEST_HISTORY_HEAD, scope: "play", of: b }, true]]);
   });
 
   test("a gesture's ask refused with forget asks the question about the ops it holds, whose yes sends them with the yes and whose no sends nothing", () => {
@@ -1155,8 +1180,9 @@ describe("the forget question (docs/design-v1-map-discovery.md 5.3)", () => {
     const b = s.room.dispatch(paint(2), { group: "g1" })!;
     // The ask fits, but the room changed before the last band came: only it is asked about.
     s.room.applyEv({ t: "ev", seq: s.state().seq + 1, changes: [], acks: [ask, a], rejects: [{ n: b, code: "forget", message: FORGET_ASK }] });
+    applyTestHistory(s.room, b);
     s.room.ui.answerForget(false);
-    assert.deepEqual(s.state().pending.map((p) => p.op), [{ t: "undo", of: a }], "the band taken, not the ask");
+    assert.deepEqual(s.state().pending.map((p) => p.op), [{ t: "undo", head: TEST_HISTORY_HEAD, scope: "play", of: a }], "the band taken, not the ask");
     // The ask taken and every band asked about after it: nothing of the gesture changed the build, so a no sends nothing.
     const only = setup(room());
     only.connect();
@@ -1261,12 +1287,13 @@ describe("the forget question (docs/design-v1-map-discovery.md 5.3)", () => {
   test("an Undo asked about asks in its toast, whose yes names the refused undo's n", () => {
     const s = setup(room());
     s.connect();
-    const u = s.room.dispatch({ t: "undo" })!;
+    const u = s.room.dispatch({ t: "undo", head: TEST_HISTORY_HEAD })!;
     s.room.applyEv({ t: "ev", seq: s.state().seq + 1, changes: [], rejects: [{ n: u, code: "forget", message: FORGET_ASK }] });
     const toast = s.state().toasts.find((t) => t.text === FORGET_ASK);
     assert.equal(toast?.action?.label, "Forget and undo");
     assert.equal(s.state().forgetAsk ?? null, null);
+    applyTestHistory(s.room, u);
     toast!.action!.run();
-    assert.deepEqual(s.room.store.getState().pending.at(-1)?.op, { t: "undo", forget: u });
+    assert.deepEqual(s.room.store.getState().pending.at(-1)?.op, { t: "undo", head: TEST_HISTORY_HEAD, scope: "play", forget: u });
   });
 });

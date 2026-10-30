@@ -84,7 +84,7 @@ describe("when a thumbnail is drawn", () => {
     assert.notEqual(mark, null);
     assert.equal(w.begin("a"), null);
     // An undo lands while it draws.
-    w.observe({ you: dm, sceneId: "a", view: view("a"), pending: [{ n: 2, op: { t: "undo" }, at: 0 }] });
+    w.observe({ you: dm, sceneId: "a", view: view("a"), pending: [{ n: 2, op: { t: "undo", head: "00000000-0000-4000-8000-000000000001" } as ClientOp, at: 0 }] });
     w.end("a", mark!, true);
     assert.ok(w.changed("a"));
     // A failed drawing keeps the mark for next time.

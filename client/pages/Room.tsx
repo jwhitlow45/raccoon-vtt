@@ -133,7 +133,7 @@ import {
 } from "./optionsLayout.ts";
 import { OptionsFrameContext, type OptionsFrame } from "../features/measure/controls.tsx";
 import type { Rect } from "../components/popoverPlace.ts";
-import { Badge, FindButton, FitButton, FullscreenButton, PauseScreen, Stacked, UndoButtons, useAccentVars, useEscape, useNoPageZoom, usePreloadAndReopen, useRoomTitle, ViewButton } from "./RoomChrome.tsx";
+import { Badge, FindButton, FitButton, FullscreenButton, HistoryLoading, PauseScreen, Stacked, UndoButtons, useAccentVars, useEscape, useNoPageZoom, usePreloadAndReopen, useRoomTitle, ViewButton } from "./RoomChrome.tsx";
 import { DockHeaderActions, DockRow, FoldStatus, SAFE_PROBE_STYLE, useDockSummary, useLayoutHeight, useSafeAreas, type DockActions } from "./RoomDock.tsx";
 
 /** What the DM panel's count says while a PDF upload waits on the DM. */
@@ -1020,6 +1020,7 @@ function RoomPage() {
             <Banner />
             {role === "dm" ? <FrameViewBar /> : null}
             <QuietLoadNotice />
+            <HistoryLoading />
           </div>
           <Toasts
             spanning={!besideLane}

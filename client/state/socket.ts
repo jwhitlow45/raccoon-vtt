@@ -1,3 +1,4 @@
+import { historyMessageSchema } from "#shared/undoContract.ts";
 import { serverMessageSchema, type ClientMessage, type EphEvent, type ServerMessage } from "#shared/protocol.ts";
 import type { RoomStore } from "./store.ts";
 import { backoffDelay, BACKOFF_CAP_MS, realClock, Timer, type Clock } from "./timing.ts";
@@ -602,6 +603,11 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
     try {
       json = typeof data === "string" ? JSON.parse(data) : null;
     } catch {
+      return;
+    }
+    if (json && typeof json === "object" && "t" in json && json.t === "history") {
+      const history = historyMessageSchema.safeParse(json);
+      if (history.success && phase === "open" && previewOf === undefined) room.applyHistory(history.data);
       return;
     }
     const parsed = serverMessageSchema.safeParse(json);

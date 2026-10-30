@@ -1,3 +1,4 @@
+import type { HistoryMessage } from "#shared/undoContract.ts";
 import { isDiceOp, resolveDiceOp } from "#shared/dice/resolve.ts";
 import { serverDraw } from "#shared/dice/roll.ts";
 import { allKeys, dependents, diffProjection, hash128, heldOf, projectEntity, projectState } from "#shared/project.ts";
@@ -60,6 +61,12 @@ export class LocalServer {
       you: { memberId: this.viewer.memberId, role: this.viewer.role, sceneId },
       watermark: this.committed,
     };
+  }
+
+  /** The dev fixture has no stacks, but still supplies authoritative empty history. */
+  history(): HistoryMessage {
+    const scope = () => ({ undo: { head: null, depth: 0 }, redo: { head: null, depth: 0 } });
+    return { t: "history", epoch: "00000000-0000-4000-8000-000000000001", seq: this.seq, serial: 0, watermark: this.committed, play: scope(), ...(this.viewer.role === "dm" ? { setup: scope() } : {}) };
   }
 
   /**
@@ -342,7 +349,7 @@ export function localSocketFactory(options: LocalSocketOptions): {
       return this.preview !== null;
     }
 
-    emit(msg: ServerMessage): void {
+    emit(msg: ServerMessage | HistoryMessage): void {
       if (this.readyState !== 1) return;
       setTimeout(() => this.onmessage?.({ data: JSON.stringify(msg) }), latency);
     }
@@ -365,6 +372,7 @@ export function localSocketFactory(options: LocalSocketOptions): {
           setTimeout(() => {
             if (this.readyState !== 1) return;
             this.emit(options.server.hello(msg));
+            this.emit(options.server.history());
             this.emit({ t: "presence", online: options.members() });
           }, options.snapshotDelayMs ?? 0);
           return;
@@ -376,6 +384,7 @@ export function localSocketFactory(options: LocalSocketOptions): {
             const ops = this.queue;
             this.queue = [];
             for (const out of options.server.batch(ops)) this.emit(out);
+            this.emit(options.server.history());
             if (options.server.playerSceneMoved()) this.emit({ t: "resync", reason: "scene" });
           }, 20);
           return;
@@ -430,7 +439,10 @@ export function localSocketFactory(options: LocalSocketOptions): {
     },
     // A preview hears only its own player's view, which the server sends it.
     push(msg) {
-      for (const socket of open) if (!socket.isPreview) socket.emit(msg);
+      for (const socket of open) if (!socket.isPreview) {
+        socket.emit(msg);
+        if (msg.t === "ev" || msg.t === "snapshot") socket.emit(options.server.history());
+      }
     },
   };
 }

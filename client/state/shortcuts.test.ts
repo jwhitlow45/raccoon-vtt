@@ -581,7 +581,7 @@ describe("the sheet's rows beside the keys", () => {
     for (const b of BEHAVIORS) {
       if (b.surface !== undefined) assert.equal(b.device, "keys", `${b.id}: a surface lists only its keys`);
       // The drags of attached tokens (docs/design-v1-attach.md 4.6), which move a group or a mount, and the tap again on a standee, which picks one no plain tap reaches (docs/design-v1-isometric-view.md 6.2).
-      if (b.device === "pointer") assert.match(b.input, /^(Drag .*(carries|carried|mount)|Tap a standee again$)/, b.id);
+      if (b.device === "pointer") assert.match(b.input, /^(Drag .*(carries|carried|mount)|Tap a standee again$|Double click or tap on Undo or Redo$)/, b.id);
       if (b.device !== "mouse") continue;
       // A mouse row names a key, or a button other than the left one, or the trackpad's pinch, which arrives as Ctrl and the wheel.
       assert.match(b.input, /^(Shift|Ctrl|Space|Right-click|Drag with the right or middle button)/, b.id);
@@ -607,7 +607,7 @@ describe("the sheet's rows beside the keys", () => {
       assert.deepEqual(titles(role, ANDROID).slice(0, 3), ["Keys", POINTER_SECTION, "Android"], role);
       assert.deepEqual(titles(role, { mouse: true, android: true }).slice(0, 4), ["Keys", MOUSE_SECTION, POINTER_SECTION, "Android"], role);
     }
-    assert.deepEqual(inputs("player", IPHONE, POINTER_SECTION), ["Drag a token that carries others", "Drag the rider of a controlled mount", "Drag any other carried token", "Tap a standee again"]);
+    assert.deepEqual(inputs("player", IPHONE, POINTER_SECTION), ["Drag a token that carries others", "Drag the rider of a controlled mount", "Drag any other carried token", "Tap a standee again", "Double click or tap on Undo or Redo"]);
     assert.deepEqual(inputs("player", DESKTOP, MOUSE_SECTION), [
       "Shift or Ctrl+click a token (Cmd on a Mac)",
       "Shift or Ctrl+drag on empty map (Cmd on a Mac)",
@@ -1245,4 +1245,15 @@ describe("a surface's own buttons show its fixed keys, apart from the room's (D-
       assert.ok(!SHORTCUTS.some((s) => s.id === id), `${id} is no room shortcut`);
     }
   });
+});
+
+test("focused setup keys preserve native editing, repeated keys, and other dialogs", async () => {
+  const { setupHistoryShortcut } = await import("./shortcuts.ts");
+  const yes = { focused: true, dm: true, preview: false, confirming: false };
+  const key = press({ key: "z", code: "KeyZ", ctrlKey: true });
+  assert.equal(setupHistoryShortcut(key, yes), "undo");
+  assert.equal(setupHistoryShortcut({ ...key, shiftKey: true }, yes), "redo");
+  for (const target of [{ tagName: "INPUT", type: "text" }, { tagName: "TEXTAREA" }, { isContentEditable: true }]) assert.equal(setupHistoryShortcut({ ...key, target }, yes), null);
+  assert.equal(setupHistoryShortcut({ ...key, repeat: true }, yes), null);
+  for (const no of [{ focused: false }, { dm: false }, { preview: true }, { confirming: true }]) assert.equal(setupHistoryShortcut(key, { ...yes, ...no }), null);
 });

@@ -33,8 +33,8 @@ describe("scene thumbnails", () => {
       [{ t: "scene.setPhase", sceneId: "s", phaseId: "p" }, "s"],
       [{ t: "scene.update", sceneId: "s", patch: { background: "#000000" } }, "s"],
       [{ t: "scene.update", sceneId: "s", patch: { autoWalls: "floor" } }, "s"],
-      [{ t: "undo" }, "viewing"],
-      [{ t: "redo" }, "viewing"],
+      [{ t: "undo", head: "00000000-0000-4000-8000-000000000001" } as ClientOp, "viewing"],
+      [{ t: "redo", head: "00000000-0000-4000-8000-000000000001" } as ClientOp, "viewing"],
       // A thumbnail of its own must not ask for another one.
       [{ t: "scene.update", sceneId: "s", patch: { thumb: "t" } }, null],
       [{ t: "scene.update", sceneId: "s", patch: { name: "Crypt", folder: "Act one", fogEnabled: true } }, null],

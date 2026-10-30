@@ -1,3 +1,4 @@
+import type { HistoryActivation } from "../../state/history.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { landing } from "#shared/rules/movement.ts";
 import type { OpAnswer } from "../../state/types.ts";
@@ -44,6 +45,7 @@ export type TeleportDeps = {
   /** The room as this device sees it now. */
   view(): DropView | null;
   dispatch(op: ClientOp, opts: { onAnswer(answer: OpAnswer): void; quiet?: boolean }): number | null;
+  undo(options: HistoryActivation): void;
   notify(text: string, tone: "info" | "error"): void;
   /** The flow is over, whichever way it went: the note goes. */
   done(): void;
@@ -64,24 +66,21 @@ export function runTeleport(note: StopNote, deps: TeleportDeps): void {
     return;
   }
   // The flow says itself what became of the walk, so the undo's own toast stays away.
-  const n = deps.dispatch(
-    { t: "undo", of: note.n },
-    {
-      quiet: true,
-      onAnswer(answer) {
-        if (answer === "taken") {
-          sendTeleport(note, deps, true);
-        } else if (answer === "refused") {
-          deps.notify(WALK_STILL_COUNTS, "info");
-          sendTeleport(note, deps, false);
-        } else {
-          deps.notify(ANSWER_LOST, "error");
-          deps.done();
-        }
-      },
+  deps.undo({
+    of: note.n,
+    quiet: true,
+    onAnswer(answer) {
+      if (answer === "taken") {
+        sendTeleport(note, deps, true);
+      } else if (answer === "refused") {
+        deps.notify(WALK_STILL_COUNTS, "info");
+        sendTeleport(note, deps, false);
+      } else {
+        deps.notify(ANSWER_LOST, "error");
+        deps.done();
+      }
     },
-  );
-  if (n === null) deps.done();
+  });
 }
 
 function sendTeleport(note: StopNote, deps: TeleportDeps, walkTakenBack: boolean): void {
