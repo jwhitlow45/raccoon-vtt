@@ -231,17 +231,18 @@ describe("the deletion barrier", () => {
     await socket.apply({ t: "token.update", tokenId, patch: { image: { assetId: second, crop: { cx: 0.5, cy: 0.5, zoom: 1 } } } });
     const actor = t.manager.get(roomId)!;
     assert.equal(await actor.deletionStep(deleteUnused(t.pool, roomId, [first])), 1);
-    const undo = await socket.apply({ t: "undo" });
+    // A token's art is Setup.
+    const undo = await socket.step("undo", "setup");
     assert.equal(undo.rejects?.[0]?.code, "gone");
     assert.match(undo.rejects?.[0]?.message ?? "", /^could not undo .*: its image was deleted since$/);
     assert.equal((actor.committed.state.tokens[tokenId]?.image as { assetId: string }).assetId, second);
 
     await socket.apply({ t: "token.update", tokenId, patch: { image: { assetId: kept, crop: { cx: 0.5, cy: 0.5, zoom: 1 } } } });
-    const ok = await socket.apply({ t: "undo" });
+    const ok = await socket.step("undo", "setup");
     assert.equal(ok.rejects, undefined);
     assert.equal((actor.committed.state.tokens[tokenId]?.image as { assetId: string }).assetId, second);
     // And redo puts the image that remains back.
-    const redo = await socket.apply({ t: "redo" });
+    const redo = await socket.step("redo", "setup");
     assert.equal(redo.rejects, undefined);
     assert.equal((actor.committed.state.tokens[tokenId]?.image as { assetId: string }).assetId, kept);
   });

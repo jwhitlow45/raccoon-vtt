@@ -284,17 +284,19 @@ describe("projection over the socket", () => {
     const goblin = tokenOp(sceneId);
     await dm.apply(goblin.op);
     await dm.apply({ t: "token.move", tokenId: goblin.id, x: 7, y: 7 });
-    const undone = await dm.apply({ t: "undo" });
+    const undone = await dm.step("undo");
     const back = tokenIn(undone.changes, goblin.id);
     assert.ok(back && "value" in back);
     assert.equal((back.value as ProjectedToken).x, 2);
-    const redone = await dm.apply({ t: "redo" });
+    const redone = await dm.step("redo");
     assert.equal((tokenIn(redone.changes, goblin.id) as { value: ProjectedToken }).value.x, 7);
-    const empty = await dm.apply({ t: "redo" });
-    assert.equal(empty.rejects?.[0]?.code, "invalid");
+    assert.equal(await dm.historyHead("play", "redo"), null);
+    const empty = await dm.step("redo");
+    assert.deepEqual(empty.rejects?.map((r) => [r.code, r.message]), [["invalid", "Play history changed. Check the next change."]]);
     // A player's stack holds only drawings, so the goblin move is not theirs to undo.
-    const nothing = await player.apply({ t: "undo" });
-    assert.equal(nothing.rejects?.[0]?.code, "invalid");
+    assert.equal(await player.historyHead(), null);
+    const nothing = await player.step("undo");
+    assert.deepEqual(nothing.rejects?.map((r) => [r.code, r.message]), [["invalid", "Play history changed. Check the next change."]]);
     const { rows } = await t.pool.query<{ op: { t: string } }>("select op from room_ops where room_id = $1 order by seq", [roomId]);
     assert.ok(rows.some((r) => r.op.t === "sys.restore"));
     assert.ok(!rows.some((r) => r.op.t === "undo" || r.op.t === "redo"));
@@ -337,7 +339,8 @@ describe("projection over the socket", () => {
 
     const deleted = await dm.apply({ t: "monster.delete", monsterId: id });
     assert.deepEqual(deleted.changes.find((c) => c.key === key), { key, deleted: true });
-    const undone = await dm.apply({ t: "undo" });
+    // A library definition is Setup.
+    const undone = await dm.step("undo", "setup");
     assert.equal((undone.changes.find((c) => c.key === key) as { value: CustomMonster }).value.ac, 18);
     assert.equal(await player.maybe("ev", (m) => m.changes.some((c) => c.key.startsWith("monster:")), 300), null);
     assert.equal(await player2.maybe("ev", (m) => m.changes.some((c) => c.key.startsWith("monster:")), 300), null);
@@ -377,12 +380,13 @@ describe("projection over the socket", () => {
     assert.equal(lineOf(deleted.changes), undefined, "the player's own ev carries no line");
 
     // The undo takes back the drawing, never the delete.
-    const undone = await player.apply({ t: "undo" });
+    const undone = await player.step("undo");
     assert.deepEqual(undone.rejects ?? [], []);
     assert.deepEqual(undone.changes.find((c) => c.key === `drawing:${line.id}`), { key: `drawing:${line.id}`, deleted: true });
     assert.equal(undone.changes.some((c) => c.key === `character:${solo}` || c.key === `token:${pc.id}`), false);
-    const nothing = await player.apply({ t: "undo" });
-    assert.equal(nothing.rejects?.[0]?.code, "invalid");
+    assert.equal(await player.historyHead(), null);
+    const nothing = await player.step("undo");
+    assert.deepEqual(nothing.rejects?.map((r) => [r.code, r.message]), [["invalid", "Play history changed. Check the next change."]]);
     dm.close();
     player.close();
   });

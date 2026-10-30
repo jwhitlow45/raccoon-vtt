@@ -235,7 +235,7 @@ test("undo-ack-hello: raw legacy and modern hellos negotiate only their connecti
   await history(modern);
   const saved = await modern.apply({ t: "room.update", name: "Modern save" });
   assert.deepEqual(saved.acks, [1]);
-  assert.deepEqual(saved.ackDetails, [{ n: 1, scope: "setup", changed: true }]);
+  assert.deepEqual(saved.ackDetails, [{ n: 1, scope: "setup", changed: true, recorded: true }]);
   assert.equal(oldEventSchema.safeParse(saved).success, false);
   const observed = await legacy.next("ev", (message) => message.seq === saved.seq);
   assert.equal(observed.ackDetails, undefined);

@@ -373,8 +373,8 @@ describe("image cleanup", () => {
     assert.equal(deleted.statusCode, 200, deleted.body);
     assert.deepEqual(new Set(deleted.json<{ deleted: string[] }>().deleted), new Set([first.id, second.id]));
     assert.ok(await rowExists(blank.id), "the other document's page stays");
-    // Its pages are gone, so undoing the delete is refused.
-    const undo = await socket.apply({ t: "undo" });
+    // Its pages are gone, so undoing the delete is refused. Keeping a document is Setup.
+    const undo = await socket.step("undo", "setup");
     assert.equal(undo.rejects?.[0]?.code, "gone");
     assert.match(undo.rejects?.[0]?.message ?? "", /its image was deleted since/);
   });
@@ -394,7 +394,7 @@ describe("image cleanup", () => {
     const deleted = await dm.post(url, { ids: [first.id, second.id] });
     assert.equal(deleted.statusCode, 200, deleted.body);
     // Showing it again by undoing the close is refused: its pages are gone.
-    const undo = await socket.apply({ t: "undo" });
+    const undo = await socket.step("undo");
     assert.equal(undo.rejects?.[0]?.code, "gone");
     assert.match(undo.rejects?.[0]?.message ?? "", /its image was deleted since/);
   });
@@ -407,7 +407,7 @@ describe("image cleanup", () => {
     await socket.apply({ t: "token.delete", tokenId: create.token.id });
     const res = await dm.post(`/api/rooms/${roomId}/assets/delete`, { ids: [img.id] });
     assert.equal(res.statusCode, 200, res.body);
-    const undo = await socket.apply({ t: "undo" });
+    const undo = await socket.step("undo");
     assert.equal(undo.rejects?.[0]?.code, "gone");
     assert.match(undo.rejects?.[0]?.message ?? "", /its image was deleted since/);
   });

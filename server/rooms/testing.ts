@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +6,7 @@ import type { FastifyInstance, InjectOptions, LightMyRequestResponse } from "fas
 import pg from "pg";
 import WebSocket from "ws";
 import type { Op, ServerMessage } from "#shared/protocol.ts";
+import type { HistoryDirection, HistoryScope } from "#shared/undoContract.ts";
 import { buildApp, type AppDeps } from "../app.ts";
 import { ipKey } from "../auth/ipKey.ts";
 import { TEST_DATABASE_URL, testConfig } from "../auth/testing.ts";
@@ -255,6 +256,7 @@ export class Socket {
   #waiters: Array<{ match: (m: ServerMessage) => boolean; resolve: (m: ServerMessage) => void; reject: (err: Error) => void; timer: NodeJS.Timeout }> = [];
   #closedWith: { code: number; reason: string } | null = null;
   #n = 0;
+  #history: Extract<ServerMessage, { t: "history" }> | null = null;
 
   private constructor(ws: WebSocket) {
     this.ws = ws;
@@ -359,6 +361,36 @@ export class Socket {
   async apply(op: Op | Record<string, unknown>): Promise<Extract<ServerMessage, { t: "ev" }>> {
     const n = this.op(op);
     return this.next("ev", (m) => (m.acks?.includes(n) ?? false) || (m.rejects?.some((r) => r.n === n) ?? false));
+  }
+
+  /**
+   * The head a stack Undo or Redo must name, read from the newest history summary that covers
+   * every op this socket sent, as the client captures it. Null when that history is empty.
+   */
+  async historyHead(scope: HistoryScope = "play", direction: HistoryDirection = "undo"): Promise<string | null> {
+    this.#takeHistory();
+    if (!this.#history || this.#history.watermark < this.#n) {
+      this.#history = await this.next("history", (m) => m.watermark >= this.#n);
+      this.#takeHistory();
+    }
+    const history = scope === "play" ? this.#history.play : this.#history.setup;
+    return history?.[direction].head?.id ?? null;
+  }
+
+  /** Keeps the newest summary from the backlog, which holds them in arrival order. */
+  #takeHistory(): void {
+    for (let i = this.received.findIndex((m) => m.t === "history"); i >= 0; i = this.received.findIndex((m) => m.t === "history")) {
+      this.#history = this.received.splice(i, 1)[0] as Extract<ServerMessage, { t: "history" }>;
+    }
+  }
+
+  /**
+   * Sends a stack Undo or Redo naming the current head, as the toolbar and Setup history do.
+   * An empty history sends an id no step has, so the server's head check answers it.
+   */
+  async step(t: HistoryDirection, scope?: HistoryScope): Promise<Extract<ServerMessage, { t: "ev" }>> {
+    const head = (await this.historyHead(scope, t)) ?? randomUUID();
+    return this.apply({ t, head, ...(scope ? { scope } : {}) });
   }
 
   async waitClosed(timeoutMs = 5_000): Promise<{ code: number; reason: string }> {

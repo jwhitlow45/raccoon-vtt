@@ -41,8 +41,8 @@ describe("wave 3 maps on the server", () => {
     assert.equal((await s.apply({ t: "scene.update", sceneId, patch: { thumb: map.id } })).rejects?.[0]?.code, "gone");
     assert.equal((await s.apply({ t: "scene.update", sceneId, patch: { name: "Crypt" } })).rejects, undefined);
     assert.equal((await s.apply({ t: "scene.update", sceneId, patch: { thumb: thumb.id } })).rejects, undefined);
-    // The undo takes back the rename, the step before the thumbnail, and keeps the thumbnail.
-    const undone = await s.apply({ t: "undo" });
+    // Setup Undo takes back the rename, the step before the thumbnail, and keeps the thumbnail.
+    const undone = await s.step("undo", "setup");
     assert.equal(undone.rejects, undefined);
     const scene = undone.changes.find((c) => c.key === `scene:${sceneId}`);
     assert.ok(scene && "value" in scene);
