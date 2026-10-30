@@ -429,6 +429,7 @@ function hexWalk(src: PickSource, v: ViewPoint, top: number, bottom: number): Pi
   return flat(at(z), z, visited);
 }
 
+/** The cell a trace moving by `step` along an axis is in at `x`: on a cell line, the cell it moves into. */
 function cellOf(x: number, step: number, n: number): number {
   const cell = step > 0 ? Math.floor(x) : Math.ceil(x) - 1;
   return Math.min(n - 1, Math.max(0, cell));
