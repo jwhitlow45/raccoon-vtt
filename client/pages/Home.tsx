@@ -194,10 +194,11 @@ export function KnownRoomRow(props: { room: KnownRoom; standing: RoomStanding | 
           onClose={() => setForgetting(false)}
           footer={
             <>
-              <Button onClick={() => setForgetting(false)}>Cancel</Button>
+              <Button onClick={() => setForgetting(false)} style={{ flex: "1 1 auto" }}>Cancel</Button>
               <Button
                 variant="danger"
                 armed
+                style={{ flex: "1 1 auto" }}
                 onClick={() => {
                   setForgetting(false);
                   props.onForget();
