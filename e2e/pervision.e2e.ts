@@ -1063,6 +1063,9 @@ describe("raccoon-vtt per-player vision run", { timeout: 600_000 }, () => {
       await previewView.waitFor();
       await waitFor("FU39-B: the preview turned halfway", async () => ((await previewView.locator("svg").evaluate((el) => (el as unknown as { style: { transform: string } }).style.transform)) === "scale(-1, -1)" ? true : null));
       assert.equal(await dm.evaluate((id) => (globalThis as unknown as { localStorage: { getItem(k: string): string | null } }).localStorage.getItem(`rvtt.view.${id}`), run.roomId), savedView, "FU39-B: preview hook overwrote the DM's view");
+      // The shared preview check measures the Top-down stage, kept at zero size in Isometric.
+      await dm.evaluate(() => (globalThis as unknown as { __rvttIsoHook: { pick(p: string): void } }).__rvttIsoHook.pick("topDown"));
+      await preview.getByRole("button", { name: "View: Top-down", exact: true }).waitFor();
       await previewShows("Ben", run.benId, "bar's list", fromBar);
 
       await openSideTab(dm, "Token");
