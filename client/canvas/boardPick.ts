@@ -58,7 +58,9 @@ export function boardPickOf(ctx: { scope: RoomScope; camera(): Camera }): BoardP
  * drawn ground its ray meets (view.ts pickGround), moved toward the hit
  * cell's center as far as `hexAt` needs to name that cell
  * (groundCells.ts ruleBoundPoint), so a placement or a tap reads the hex
- * whose surface showed under the finger.
+ * whose surface showed under the finger. In Top-down nothing stands, so
+ * the press stays where it fell and names `hexAt`'s hex as it always has,
+ * though a rounded edge's sliver lies in its neighbor's canonical polygon.
  */
 export function pressAt(pick: BoardPick, screen: Point): Point {
   return pressHit(pick, screen).rule;
@@ -67,7 +69,7 @@ export function pressAt(pick: BoardPick, screen: Point): Point {
 /** A press's hit: the walk's geometric point, height and cell, and the point the rules read (`pressAt`). */
 export function pressHit(pick: BoardPick, screen: Point): PickHit & { rule: Point } {
   const hit = pickWalk(pick, screen);
-  return { ...hit, rule: ruleBoundPoint(pick.grid, hit.cell, hit.point) };
+  return { ...hit, rule: pick.view.kind === "topDown" ? hit.point : ruleBoundPoint(pick.grid, hit.cell, hit.point) };
 }
 
 /** A cell's drawn ground in cells of height, under a world point: 0 in Top-down, off the scene and below the stand threshold. */

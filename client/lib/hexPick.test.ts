@@ -9,7 +9,7 @@ import { dragGround, dragLanding } from "../canvas/isoDrag.ts";
 import { occupiedHexes } from "#shared/rules/footprint.ts";
 import { viewToScreen, type Camera, type Point } from "./camera.ts";
 import { cellAtPoint, cellPolygon, groundSurface, HIT_RECONCILE, neighborOf, polygonSide, ruleBoundPoint, type GroundCell } from "./groundCells.ts";
-import { isometric, pickWalk, toView, toWorld, type DrawnHeights, type Turn, type ViewPoint } from "./view.ts";
+import { isometric, pickWalk, TOP_DOWN, toView, toWorld, type DrawnHeights, type Turn, type ViewPoint } from "./view.ts";
 
 /*
  * Hex ground for the pointer (docs/design-v1-iso-hex-relief.md 5.1 and 7):
@@ -252,6 +252,28 @@ describe("the hex ray walk (7)", () => {
 });
 
 describe("a press on hexes reaches the rules as the hex it showed (7)", () => {
+  test("Top-down keeps a press where it fell, so a rounded edge's sliver still names hexAt's hex, as before the relief (review HXR1-ASTRA-5)", () => {
+    const room = { buildChunks: {}, fogTiles: {}, meta: { settings: { feetPerCell: 5 } } } as never;
+    const pick = boardPickFor({ room, scene: { id: "s1", bounds: { w: 12, h: 12 }, gridShape: "hexRows" }, role: "dm", fog: false, view: TOP_DOWN, camera: CAM, lowPower: false }, new DrawnHeightsMemo());
+    const world = { x: 3.993, y: 2.598 };
+    assert.deepEqual(hexAt(ROWS, world), { col: 3, row: 2 });
+    const screen = viewToScreen(CAM, toView(TOP_DOWN, world, 0));
+    const at = pressAt(pick, screen);
+    assert.ok(Math.hypot(at.x - world.x, at.y - world.y) < 1e-9, `moved to (${at.x}, ${at.y})`);
+    assert.deepEqual(hexAt(ROWS, at), { col: 3, row: 2 });
+    // A sweep of presses on rounded edges: Top-down never moves one.
+    const rand = mulberry32(0x7d0);
+    for (let i = 0; i < 2000; i++) {
+      const h = { col: 1 + Math.floor(rand() * 9), row: 1 + Math.floor(rand() * 9) };
+      const pts = poly(ROWS, h);
+      const k = Math.floor(rand() * 6);
+      const t = rand();
+      const p = { x: pts[k]!.x + (pts[(k + 1) % 6]!.x - pts[k]!.x) * t, y: pts[k]!.y + (pts[(k + 1) % 6]!.y - pts[k]!.y) * t };
+      const got = pressAt(pick, viewToScreen(CAM, toView(TOP_DOWN, p, 0)));
+      assert.ok(Math.hypot(got.x - p.x, got.y - p.y) < 1e-9, `(${p.x}, ${p.y}) moved to (${got.x}, ${got.y})`);
+    }
+  });
+
   test("every face and top hit near rounded edges, both orientations and every turn: pressAt names the hit hex for hexAt and a Medium's snap, within 1/64 cell of the hit", () => {
     const rand = mulberry32(0xface);
     for (const [orient, grid] of [
