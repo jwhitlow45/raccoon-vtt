@@ -33,7 +33,7 @@ test("ALERTS-FIRSTCARD: a 359 px desk measures its first trap card, not the whol
     }
     getBoundingClientRect() { return { height: this.height }; }
   }
-  const firstHeight = new Function("HTMLElement", "getComputedStyle", `${stripTypeScriptTypes(source.slice(from, to))}\nreturn firstCardHeight;`)(Element, (e: Element) => ({ display: e.display })) as (el: Element, turn?: boolean) => number;
+  const firstHeight = new Function("HTMLElement", "getComputedStyle", `${stripTypeScriptTypes(source.slice(from, to))}\nreturn firstCardHeight;`)(Element, (e: Element) => ({ display: e.display })) as (el: Element) => number;
   const oldWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
   try {
     Object.defineProperty(globalThis, "window", { configurable: true, value: { innerWidth: 320 / 1.3, innerHeight: 568 / 1.3 } });
@@ -48,17 +48,22 @@ test("ALERTS-FIRSTCARD: a 359 px desk measures its first trap card, not the whol
     const stack = new Element(359, [new Element(62), new Element(237), new Element(44)], /data-alert-stack=""/.test(outer[1]!) ? { alertStack: "" } : {}, "grid");
     const cards = new Element(359, [new Element(0, [stack], { alert: "rolls" }, "contents")]);
     assert.equal(firstHeight(cards), 62, "the 359 px desk must not become the first card");
-    assert.equal(firstHeight(cards, true), 62, "toast clearance uses the same first trap card");
     const zoom = 1.3;
     const first = firstHeight(cards) / zoom;
-    const facts = columnFacts(null, { top: 120, measured: { content: 359 / zoom, first, cover: firstHeight(cards, true) / zoom } });
+    const measureFrom = source.indexOf("const measured = drawn(cards) ?");
+    const measureTo = source.indexOf(";", measureFrom);
+    assert.ok(measureFrom > 0 && measureTo > measureFrom);
+    const measureCards = new Function("cards", "zoom", "drawn", "firstCardHeight", `${stripTypeScriptTypes(source.slice(measureFrom, measureTo + 1))}\nreturn measured;`);
+    const measured = measureCards(cards, zoom, () => true, firstHeight);
+    const facts = columnFacts(null, { top: 120, measured });
     assert.ok(facts);
     assert.equal(200 < EDGE + first, false, "the 200 px lane can keep the first card without folding");
-    assert.equal(toastTop({ spanning: true, column: facts, cards: true, optionsTop: 400 }), 120 + first + EDGE, "a waiting toast clears the first card by 8 px");
+    assert.equal(toastTop({ spanning: true, column: facts, cards: true, optionsTop: 500 }), 120 + 359 / zoom + EDGE, "a waiting toast clears every card in the desk, not only the first");
+    assert.equal(toastTop({ spanning: true, column: facts, cards: true, optionsTop: 400 }), null, "with no room under the stack, a toast cannot cover its later cards");
     const hidden = new Element(0);
     const turn = new Element(44, [], { alert: "turn" });
     assert.equal(firstHeight(new Element(44, [hidden, turn])), 0, "a lone turn card still cannot force a fold");
-    assert.equal(firstHeight(new Element(44, [hidden, turn]), true), 44, "toasts still clear a lone turn card");
+    assert.equal(measureCards(new Element(44, [hidden, turn]), 1, () => true, firstHeight).cover, 44, "toasts still clear a lone turn card");
     const wholeCard = new Element(150, [new Element(44)], {}, "grid");
     assert.equal(firstHeight(new Element(150, [wholeCard])), 150, "a card's own grid must not be reduced to its header");
   } finally {

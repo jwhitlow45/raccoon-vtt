@@ -622,7 +622,7 @@ export type Lane = "none" | "stacked" | "beside" | "summary";
  * and its first card's. `row` is where its summary row stands while it has
  * risen from the column's top (InitiativeStrip.tsx FightAlerts), over the
  * band or the top bar's row, so the bar under it may take the room it left.
- * `cover` is the height of its first card counting a turn card, which only
+ * `cover` is the height of all its drawn cards, including a turn card, which only
  * a toast keeps under (toastTop): the bar's lane and a pane skip a turn
  * card, so a turn card alone gives facts whose `first` is 0.
  */
@@ -1393,8 +1393,8 @@ export const TOAST_MIN = 44;
 
 /**
  * Where a toast that shows now starts on a phone (docs/design-v1-bar-dock.md
- * 1.3): 8 px under the alerts column's first card, a turn card included
- * (`cover`), its top plus its height, while the notices span the map over
+ * 1.3): 8 px under the alerts column's drawn cards, a turn card included
+ * (`cover`), its top plus their height, while the notices span the map over
  * the column and it shows a card (`cards`), so the toast never covers that
  * card's buttons. Null
  * keeps it at the top of the notices as before: beside the lane, with no
