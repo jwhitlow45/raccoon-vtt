@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { generatePassphrase } from "#shared/passphrase.ts";
 import { Button } from "../components/Button.tsx";
 import { Checkbox } from "../components/Checkbox.tsx";
+import { Dialog } from "../components/Dialog.tsx";
 import { Card, ErrorText, Field, Page } from "../components/Field.tsx";
 import { Icon } from "../components/Icon.tsx";
 import { Notice } from "../components/Notice.tsx";
@@ -135,8 +136,9 @@ function YourRooms() {
   );
 }
 
-function KnownRoomRow(props: { room: KnownRoom; standing: RoomStanding | null; onForget(): void }) {
+export function KnownRoomRow(props: { room: KnownRoom; standing: RoomStanding | null; onForget(): void }) {
   const { room, standing } = props;
+  const [forgetting, setForgetting] = useState(false);
   const s = standing?.kind === "in" ? standing : null;
   const role = s?.role ?? room.role;
   const memberName = s?.memberName ?? room.memberName;
@@ -181,9 +183,36 @@ function KnownRoomRow(props: { room: KnownRoom; standing: RoomStanding | null; o
           <span style={{ fontSize: theme.font.small, color: standing?.kind === "out" ? theme.color.warning : theme.color.textMuted }}>{status}</span>
         ) : null}
       </button>
-      <Button variant="danger" size="sm" onClick={props.onForget} aria-label={`Forget ${name} on this device`} style={{ alignSelf: "center" }}>
+      <Button variant="danger" size="sm" onClick={() => setForgetting(true)} aria-label={`Forget ${name} on this device`} style={{ alignSelf: "center" }}>
         Forget
       </Button>
+      {forgetting ? (
+        <Dialog
+          title="Forget this room?"
+          phone="sheet"
+          width="sm"
+          onClose={() => setForgetting(false)}
+          footer={
+            <>
+              <Button onClick={() => setForgetting(false)}>Cancel</Button>
+              <Button
+                variant="danger"
+                armed
+                onClick={() => {
+                  setForgetting(false);
+                  props.onForget();
+                }}
+              >
+                Forget room
+              </Button>
+            </>
+          }
+        >
+          <p style={{ margin: 0, overflowWrap: "anywhere" }}>
+            Forgetting {name} only removes it from this device's list. The room itself stays.
+          </p>
+        </Dialog>
+      ) : null}
     </li>
   );
 }
