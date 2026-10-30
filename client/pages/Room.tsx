@@ -44,7 +44,6 @@ import { SheetHeader } from "../components/SheetHeader.tsx";
 import { NOTICE_TONES } from "../components/tones.ts";
 import { addsWords, useTooltip } from "../components/Tooltip.tsx";
 import { QuietLoadNotice } from "./QuietLoadNotice.tsx";
-import { UndoNotice } from "./UndoNotice.tsx";
 import { keptMapFoot, mapToastBox, putToastHosts } from "./toastPlacement.ts";
 import { BlackoutChip } from "./BlackoutChip.tsx";
 import { Loading } from "../components/Loading.tsx";
@@ -1021,7 +1020,6 @@ function RoomPage() {
             <Banner />
             {role === "dm" ? <FrameViewBar /> : null}
             <QuietLoadNotice />
-            <UndoNotice />
             <HistoryLoading />
           </div>
           <Toasts

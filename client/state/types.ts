@@ -468,7 +468,6 @@ export function crossWide(local: LocalUi, wide: boolean): LocalUi {
  * every call. Derive those with useMemo from stable slices instead.
  */
 export type RoomView = {
-  undoNotice?: boolean;
   history?: HistoryView;
   historyReview?: { scope: "play" | "setup"; direction?: "undo" | "redo" } | null;
   roomId: string;

@@ -3,9 +3,9 @@ import { test } from "node:test";
 import { projectState } from "#shared/project.ts";
 import { DM, P1, room as testRoom } from "#shared/testutil.ts";
 import type { HistoryMessage } from "#shared/undoContract.ts";
-import { createRoomStore } from "./store.ts";
+import { ACTION_TOAST_MS, createRoomStore, drawnToasts, toastsLeft } from "./store.ts";
 import { FakeClock } from "./testing.ts";
-import { UndoNotice, UNDO_NOTICE_KEY, UNDO_NOTICE_LAST_DAY } from "./historyNotice.ts";
+import { UndoNotice, UNDO_NOTICE, UNDO_NOTICE_KEY, UNDO_NOTICE_LAST_DAY } from "./historyNotice.ts";
 
 const NOW = Date.parse("2026-10-30T12:00:00Z");
 const empty = () => ({ undo: { head: null, depth: 0 }, redo: { head: null, depth: 0 } });
@@ -16,8 +16,9 @@ function page(role: "dm" | "player" | "display" = "dm", claim = () => true) {
   const room = createRoomStore({ roomId: "R1", you: viewer, clock: new FakeClock(), undoNotice: { claim } });
   room.setConnection("open");
   const snapshot = () => room.applySnapshot({ t: "snapshot", seq: 0, watermark: 0, state: projectState(testRoom(), viewer, { sceneId: "s1" }), you: { ...viewer, role, sceneId: "s1" } });
-  const shown = () => room.store.getState().undoNotice === true;
-  return { room, snapshot, shown };
+  const notice = () => room.store.getState().toasts.find((toast) => toast.text === UNDO_NOTICE);
+  const shown = () => notice() !== undefined;
+  return { room, snapshot, notice, shown };
 }
 
 test("the rollout notice waits for accepted scoped DM history after a snapshot", () => {
@@ -99,16 +100,22 @@ test("missing storage and throwing access, reads or writes still show once per p
   }
 });
 
-test("dismissal lasts through history updates, reconnects and fresh room pages", () => {
+test("the notice is a passing toast that opens Setup history and never returns through history updates, reconnects and fresh room pages", () => {
+  assert.equal(UNDO_NOTICE, "Undo now separates play from setup. Earlier undo history was cleared. Setup history is in the menu.");
   const storage = memoryStorage();
   const once = new UndoNotice(() => storage);
   const p = page("dm", () => once.claim(NOW));
   p.snapshot();
   p.room.applyHistory(message());
-  assert.equal(p.shown(), true);
-  assert.equal(p.room.store.getState().toasts.length, 0, "the lasting notice does not create a timed duplicate");
-  p.room.ui.dismissUndoNotice!();
-  assert.equal(p.shown(), false);
+  const toast = p.notice();
+  assert.ok(toast, "the DM hears it once the first scoped history arrives");
+  assert.equal(toast.tone, "info");
+  assert.equal(toast.action?.label, "Setup history", "its button stays long enough to read the whole notice");
+  assert.equal(p.room.store.getState().toasts.filter((t) => t.text === UNDO_NOTICE).length, 1);
+  toast.action!.run();
+  assert.deepEqual(p.room.store.getState().historyReview, { scope: "setup" });
+  p.room.ui.openHistory!(null);
+  p.room.ui.dismissToast(toast.id);
   p.room.applyHistory({ ...message(), serial: 1 });
   assert.equal(p.shown(), false);
   p.room.suspend();
@@ -123,6 +130,18 @@ test("dismissal lasts through history updates, reconnects and fresh room pages",
   next.room.applyHistory(message());
   assert.equal(next.shown(), false);
   next.room.dispose();
+});
+
+test("the notice passes on its own like any toast with a button, so it never holds a band of the map", () => {
+  const p = page("dm", () => true);
+  p.snapshot();
+  p.room.applyHistory(message());
+  const toast = p.notice();
+  assert.ok(toast);
+  const drawn = drawnToasts([toast], [toast.id], NOW);
+  assert.deepEqual(toastsLeft(drawn, NOW + ACTION_TOAST_MS - 1), [{ id: toast.id, ms: 1, runs: true }]);
+  assert.deepEqual(toastsLeft(drawn, NOW + ACTION_TOAST_MS), [{ id: toast.id, ms: 0, runs: true }]);
+  p.room.dispose();
 });
 
 test("retired connections and foreign epochs never consume the device notice", () => {

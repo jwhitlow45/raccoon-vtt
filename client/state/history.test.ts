@@ -5,6 +5,10 @@ import { DM, room as testRoom } from "#shared/testutil.ts";
 import { createRoomActions } from "./actions.ts";
 import { createRoomStore } from "./store.ts";
 import { FakeClock, FakeOutbox } from "./testing.ts";
+import { undoNotice } from "./historyNotice.ts";
+
+// This process is a device that already saw the rollout notice, which would otherwise be one more toast in the first DM room's counts.
+undoNotice.claim();
 
 test("stack activation waits for authoritative history after a snapshot", () => {
   const room = createRoomStore({ roomId: "R1", you: DM, clock: new FakeClock() });

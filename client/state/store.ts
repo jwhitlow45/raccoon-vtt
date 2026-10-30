@@ -1,5 +1,5 @@
 import { CorrectionAnnouncements, type OwnCorrection } from "../features/log/corrections.ts";
-import { undoNotice, type UndoNotice } from "./historyNotice.ts";
+import { UNDO_NOTICE, undoNotice, type UndoNotice } from "./historyNotice.ts";
 import { historyCommandSchema, type HistoryDirection, type HistoryMessage, type UndoGroupOptions } from "#shared/undoContract.ts";
 import { blockerText, EMPTY_HISTORY, HistoryController, type HistoryActivation, type HistoryCommand } from "./history.ts";
 import { createStore, type StoreApi } from "zustand/vanilla";
@@ -217,7 +217,6 @@ export type Outbox = { send(msg: ClientMessage): boolean };
 
 /** UI state setters for `local` (design section 14.1). They never touch the room. */
 export type RoomUi = {
-  dismissUndoNotice?(): void;
   openHistory?(target: { scope: "play" | "setup"; direction?: "undo" | "redo" } | null): void;
   setTool(id: string): void;
   /**
@@ -546,7 +545,8 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     changed: (value) => {
       store.setState({ history: value });
       if (!value.summary || get().you?.role !== "dm") return;
-      if (value.summary.setup && (options.undoNotice ?? undoNotice).claim()) store.setState({ undoNotice: true });
+      // An announcement, not a lasting condition: it passes like any toast, so it never holds a band of the map or pushes later toasts onto it.
+      if (value.summary.setup && (options.undoNotice ?? undoNotice).claim()) pushToast(UNDO_NOTICE, "info", undefined, { label: "Setup history", run: () => ui.openHistory?.({ scope: "setup" }) });
       for (const scope of ["play", "setup"] as const) for (const direction of ["undo", "redo"] as const) {
         const head = value.summary[scope]?.[direction].head;
         const key = `${scope}:${direction}`;
@@ -710,7 +710,6 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
   };
 
   const ui: RoomUi = {
-    dismissUndoNotice: () => store.setState({ undoNotice: false }),
     openHistory: (historyReview) => store.setState({ historyReview }),
     setTool(id) {
       const local = get().local;
