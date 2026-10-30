@@ -1732,14 +1732,14 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
 
   test("ISOA-5. a sphere aimed with the Area tool stands coarse and whole in the drag layer while the mouse moves, then in the depth list once it rests", async () => {
     await dm.bringToFront();
-    await pickTool(dm, "Area");
-    await pickOption(dm, "Area", "Shape", "Sphere");
-    const at = await isoPoint(dm, { x: 18.5, y: 4.5 }, 0);
-    await dm.mouse.click(at.x, at.y);
-    await layoutWhen(dm, "the draft standing at rest", (x) => x.order.some((e) => e.kind === "band" && e.area === "draft"));
-    await dm.mouse.move(at.x, at.y);
-    await dm.mouse.down();
     try {
+      await pickTool(dm, "Area");
+      await pickOption(dm, "Area", "Shape", "Sphere");
+      const at = await isoPoint(dm, { x: 18.5, y: 4.5 }, 0);
+      await dm.mouse.click(at.x, at.y);
+      await layoutWhen(dm, "the draft standing at rest", (x) => x.order.some((e) => e.kind === "band" && e.area === "draft"));
+      await dm.mouse.move(at.x, at.y);
+      await dm.mouse.down();
       let seen = false;
       for (let i = 1; i <= 12 && !seen; i++) {
         await dm.mouse.move(at.x + i * 4, at.y + i * 2);
@@ -1752,10 +1752,11 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
       await layoutWhen(dm, "at rest, in the depth list", (x) => x.order.some((e) => e.kind === "band" && e.area === "draft"));
       assert.equal((await dragVolumes(dm)).volumes.length, 0, "and no longer in the drag layer");
     } finally {
+      // An early assertion must not leave Area active for the token-drag case.
       await dm.mouse.up();
+      await dm.keyboard.press("Escape");
+      await pickTool(dm, "Select");
     }
-    await dm.keyboard.press("Escape");
-    await pickTool(dm, "Select");
     await layoutWhen(dm, "the draft gone", (x) => !x.order.some((e) => e.kind === "band" && e.area === "draft"));
   });
 

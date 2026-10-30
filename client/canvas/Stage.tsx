@@ -378,10 +378,14 @@ export function MapStage(props: {
    * scene's image.
    */
   const insetsRef = useRef(insets);
+  const viewSeenRef = useRef(shown);
   insetsRef.current = insets;
   useLayoutEffect(() => {
     if (!size || cameraSceneRef.current === scene.id) return;
     cameraSceneRef.current = scene.id;
+    // This camera already uses the new scene's view. A simultaneous turn
+    // must not convert it again from the previous scene's view.
+    viewSeenRef.current = shownRef.current;
     pendingCamRef.current = null;
     let next: Camera;
     if (scene.defaultView) {
@@ -402,7 +406,6 @@ export function MapStage(props: {
    * the clear part of the canvas, else the ground a press at that part's
    * middle meets. Each stands at its drawn height in each view.
    */
-  const viewSeenRef = useRef(shown);
   useLayoutEffect(() => {
     const before = viewSeenRef.current;
     viewSeenRef.current = shown;
