@@ -3,6 +3,14 @@
   "license": "AGPL-3.0-only",
   "version": "0.2.0",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jwhitlow45/raccoon-vtt.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jwhitlow45/raccoon-vtt/issues"
+  },
+  "homepage": "https://hub.docker.com/r/jwhitlow45/raccoon-vtt",
   "type": "module",
   "imports": {
     "#shared/*": "./shared/*",
