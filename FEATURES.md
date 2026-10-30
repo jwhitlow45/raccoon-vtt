@@ -726,7 +726,7 @@ Choose an image, the stamp picker, New scene's Map image, Show a handout, and a 
 - Respects the system's reduced-motion setting.
 - In a room, the browser tab reads `RaccoonVTT · <room name>`.
 - A click or tap outside a dialog closes it, except a handout or a picture from the Library.
-- Dialogs reserve space for classic scrollbars, so filtering a short or long creature list in Take a shape keeps the content at the same width.
+- Take a shape reserves space for classic scrollbars in its creature list, so filtering a short or long list keeps the content at the same width.
 
 ## Backups and moving a room
 

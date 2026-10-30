@@ -165,7 +165,7 @@ Its own document: docs/design-v1-token-panel-groups.md. In short: AC, speed, Pas
 - **Abilities three across** (`PcStatsView`): a 3 x 2 grid of small raised boxes, each the ability's abbreviation (11 px capitals), the score (16 px bold) and modifier, and "Save +4" (bold when proficient, which a screen reader hears as "proficient"). 116 px where the table took 181.
 - The roll lines keep their wording, which already names a save's DC ("DC 14 Dexterity save").
 - **Rolls now** (a shape) stays one line under the shape's note.
-- **Take a shape** sits on the stat block's header row as the group's action (the token panel doc 4).
+- **Take a shape** sits on the stat block's header row as the group's action (the token panel doc 4). Its creature list reserves classic scrollbar space through the picker's `bodyStyle`, so filtering keeps the content at the same width. The shared Dialog body does not reserve scrollbar space by default.
 
 ### 6.2 The PC block's editor
 
