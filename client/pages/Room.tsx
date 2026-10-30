@@ -868,8 +868,9 @@ function RoomPage() {
   /*
    * Where a toast that shows now starts (barDock.ts toastTop): on a phone,
    * where the notices span the map over the alerts column and the column
-   * shows a card, 8 px under its first card, so a toast never covers the
-   * card's buttons. Each toast takes its place as it shows (Toasts), in a
+   * shows cards, 8 px below all drawn cards. With under 44 px left below,
+   * it stays above them and the column clears it. Each toast takes its
+   * place as it shows (Toasts), in a
    * layer of its own beside the notices, whose stack would move it. While a
    * map pane stands as a bottom sheet, which folds the column, 8 px under
    * the pane's header instead, which the layer's stack follows while the
@@ -1657,8 +1658,9 @@ function Banner() {
  * While a sheet shows in the very short mode, a new toast shows and is read
  * out inside it, at the top of its body (pages/modalSlot.tsx), since the
  * modal leaves the map's notices out of reach. On a phone whose alerts
- * column shows a card, a new toast starts under that card (`low`,
- * barDock.ts toastTop), in `layer`, and joins any toast already there,
+ * column shows cards, a new toast starts below all drawn cards (`low`,
+ * barDock.ts toastTop), or above them when under 44 px remains below.
+ * A toast in `layer` joins any toast already there,
  * below it, so their stack keeps the top its first took, and across the
  * cards' edges as they stand now (`edges`, barDock.ts columnEdges). A toast
  * shown in the sheet goes with the sheet.
@@ -1690,9 +1692,10 @@ function Banner() {
  * are.
  *
  * When the screen turns, a toast at the top of the notices that now
- * meets the column's first card is placed again as if it came now, under
- * that card, and again as the column measures the card anew while the
- * turn lasts (review LP17-AW-1), so it never covers the card's buttons.
+ * meets the column's cards is placed again as if it came now, below all
+ * drawn cards where a toast row fits, and again as the column measures
+ * anew while the turn lasts (review LP17-AW-1). Without that room it stays
+ * above the cards, which clear the toast.
  * So is a toast that came with its card, as a trap's does, once the
  * column measures that card (review LP18-TO-5), and a toast already at the
  * top of the notices as a turn starts, once the column measures the
@@ -1956,7 +1959,7 @@ function Toasts(props: {
       <ToastStack stack={stacks.notices} style={{ width: "100%" }} />
       {props.layer
         ? createPortal(
-            // Under the column's first card, the card's edges, so the toast lines up with it. Under a pane's header, across the map as the notices are.
+            // Below the drawn column cards, take their edges. Under a pane's header, span the map as the notices do.
             <ToastStack stack={stacks.layer} style={{ position: "absolute", top: lowAt?.top ?? 0, ...(lowAt?.edges ? { left: lowAt.edges.left, right: lowAt.edges.right } : { left: 0, right: 0, padding: `0 ${theme.space(3)}px` }) }} />,
             props.layer,
           )

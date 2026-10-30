@@ -1388,7 +1388,7 @@ export function columnEdges(input: ColumnWidth): ToastEdges {
   return { left: input.mapWidth - right - columnCards(input).card, right };
 }
 
-/** A toast's least height, a touch target's: the room it needs under the column's first card. */
+/** A toast needs one touch target's height below all drawn cards, or stays above the column. */
 export const TOAST_MIN = 44;
 
 /**
@@ -1530,11 +1530,12 @@ export function headAsksToasts(slot: { shownAt: number | null; opening: number |
 
 /**
  * Where a toast stands: at the top of the map's notices, in the toasts' own
- * layer under the column's first card (`low`, in the chrome's px, and
+ * layer below all drawn column cards (`low`, in the chrome's px, and
  * `column`), under a spanning token bar's header (across the map, `bar`
  * being the opening of the bar whose header placed it, spanToastSlot) or
  * where a map pane's header last stood (across the map), or under that
  * header while the pane stands ("pane"), or in the very short sheet.
+ * Without a full toast row below the cards it stays above the column.
  */
 export type ToastPlace = "map" | "sheet" | "pane" | { low: number; column: boolean; bar?: number };
 
@@ -1565,8 +1566,9 @@ export function inToastLayer(place: ToastPlace | undefined): boolean {
  * (`overBar`).
  *
  * The layer keeps one stack. A new toast joins it even after its card or
- * header goes away. With no stack there, it starts one under the column's
- * first card or the pane's header. While a pane stands, the whole stack
+ * header goes away. With no stack there, it starts one below all drawn
+ * column cards or the pane's header. Without a full row below the cards,
+ * it stays above the column. While a pane stands, the whole stack
  * follows its header on any render that has the header's place. A column
  * stack moves there as the pane opens. A stack left by a closed pane
  * joins the next pane's header too. So do the toasts at the top of the
@@ -1578,8 +1580,8 @@ export function inToastLayer(place: ToastPlace | undefined): boolean {
  * with no header place (`pane` null), its first or one with too little
  * room, so the stack neither moves nor freezes on those. Just after the
  * screen turns (`turned`), a toast at the top of the notices that now
- * meets the column's first card, which a place under that card (`low`)
- * says, takes its place again as if it came now (review LP17-AW-1). It
+ * meets the column's cards takes its place again below all drawn cards
+ * where a toast row fits (`low`), as if it came now (review LP17-AW-1). It
  * goes on taking it while the turn lasts (`turning`), since the first
  * place after a turn may come from the card as it stood before, until
  * the column measures it again. So does a toast that comes under the
