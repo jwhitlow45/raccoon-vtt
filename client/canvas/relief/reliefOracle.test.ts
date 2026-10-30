@@ -50,20 +50,46 @@ function inPath(path: readonly Sub[], p: Pt): boolean {
 }
 
 /** A 2D context that rasterizes at sample points only, recording each point's paints in order. */
+/** A path made apart from the context, in its own units, as the drawing keeps its shapes' (a browser's Path2D). */
+class TestPath2D {
+  readonly subs: Pt[][] = [];
+  #cur: Pt[] | null = null;
+  moveTo(x: number, y: number): void {
+    this.#cur = [{ x, y }];
+    this.subs.push(this.#cur);
+  }
+  lineTo(x: number, y: number): void {
+    if (!this.#cur) {
+      this.#cur = [];
+      this.subs.push(this.#cur);
+    }
+    this.#cur.push({ x, y });
+  }
+  closePath(): void {
+    this.#cur = null;
+  }
+}
+// The drawing makes its kept paths with the browser's Path2D, which node lacks.
+(globalThis as { Path2D?: unknown }).Path2D = TestPath2D;
+
 function sampler(points: readonly Pt[]): { g: CanvasRenderingContext2D; paints: Paint[][] } {
   const paints: Paint[][] = points.map(() => []);
-  type State = { m: number[]; clips: Sub[][]; fill: string };
+  /** A pattern of the ground: its own transform from pattern space, the ground's device pixels, to user space. */
+  type Pattern = { m: number[]; setTransform(t: { a: number; b: number; c: number; d: number; e: number; f: number }): void };
+  type State = { m: number[]; clips: Sub[][]; fill: string | Pattern };
   let st: State = { m: [1, 0, 0, 1, 0, 0], clips: [], fill: "" };
   const stack: State[] = [];
   let path: Sub[] = [];
   let cur: Sub | null = null;
   const tx = (x: number, y: number): Pt => ({ x: st.m[0]! * x + st.m[2]! * y + st.m[4]!, y: st.m[1]! * x + st.m[3]! * y + st.m[5]! });
   const clipped = (p: Pt) => st.clips.every((c) => inPath(c, p));
+  /** A kept path's subpaths through the transform as it is now, as a canvas reads one when it fills, or the path being built. */
+  const subsOf = (p: unknown): Sub[] => (p instanceof TestPath2D ? p.subs.map((sub) => sub.map((q) => tx(q.x, q.y))) : path);
   const g = {
     get fillStyle() {
       return st.fill;
     },
-    set fillStyle(v: string) {
+    set fillStyle(v: string | Pattern) {
       st.fill = v;
     },
     strokeStyle: "",
@@ -99,12 +125,24 @@ function sampler(points: readonly Pt[]): { g: CanvasRenderingContext2D; paints: 
     closePath() {
       cur = null;
     },
-    clip() {
-      st.clips = [...st.clips, path.map((s) => [...s])];
+    clip(p?: unknown) {
+      st.clips = [...st.clips, subsOf(p).map((s) => [...s])];
     },
-    fill() {
+    fill(at?: unknown) {
+      const fill = st.fill;
+      const subs = subsOf(at);
       points.forEach((p, i) => {
-        if (clipped(p) && inPath(path, p)) paints[i]!.push({ kind: "fill", style: st.fill });
+        if (!clipped(p) || !inPath(subs, p)) return;
+        if (typeof fill === "string") {
+          paints[i]!.push({ kind: "fill", style: fill });
+          return;
+        }
+        // The ground pixel a pattern shows at p: p through the inverse of the context's transform after the pattern's.
+        const [a, b, c, d, e, f] = compose(st.m, fill.m);
+        const det = a * d - b * c;
+        const x = p.x - e;
+        const y = p.y - f;
+        paints[i]!.push({ kind: "copy", src: { x: (d * x - c * y) / det, y: (a * y - b * x) / det } });
       });
     },
     stroke() {},
@@ -112,7 +150,7 @@ function sampler(points: readonly Pt[]): { g: CanvasRenderingContext2D; paints: 
       const a = tx(x, y);
       const b = tx(x + w, y + h);
       points.forEach((p, i) => {
-        if (clipped(p) && p.x >= Math.min(a.x, b.x) && p.x <= Math.max(a.x, b.x) && p.y >= Math.min(a.y, b.y) && p.y <= Math.max(a.y, b.y)) paints[i]!.push({ kind: "fill", style: st.fill });
+        if (clipped(p) && p.x >= Math.min(a.x, b.x) && p.x <= Math.max(a.x, b.x) && p.y >= Math.min(a.y, b.y) && p.y <= Math.max(a.y, b.y)) paints[i]!.push({ kind: "fill", style: typeof st.fill === "string" ? st.fill : "pattern" });
       });
     },
     drawImage(_img: unknown, sx: number, sy: number, sw: number, sh: number, dx: number, dy: number) {
@@ -126,11 +164,39 @@ function sampler(points: readonly Pt[]): { g: CanvasRenderingContext2D; paints: 
     ellipse() {
       throw new Error("no pillars here");
     },
-    createPattern() {
-      return null;
+    createPattern(img: unknown): Pattern | null {
+      // Only the ground stage's canvas is copied as a pattern here: textures stay off in these scenes.
+      if (!img || typeof img !== "object" || !("width" in img)) return null;
+      const pattern: Pattern = {
+        m: [1, 0, 0, 1, 0, 0],
+        setTransform(t) {
+          pattern.m = [t.a, t.b, t.c, t.d, t.e, t.f];
+        },
+      };
+      return pattern;
     },
   };
   return { g: g as unknown as CanvasRenderingContext2D, paints };
+}
+
+/** Each cell's own side color, distinct in every channel step, and with the light mixed in still distinct. */
+function lookOf(col: number, row: number): string {
+  return `rgb(${20 + 3 * (col + 2)}, ${20 + 3 * (row + 2)}, 200)`;
+}
+
+/** An rgb() color with an rgba() one laid over it, as a canvas mixes them, worked here apart from the drawing's own code. */
+function mixed(base: string, over: string): string {
+  const b = base.match(/[\d.]+/g)!.map(Number);
+  const o = over.match(/[\d.]+/g)!.map(Number);
+  const a = o[3]!;
+  return `rgb(${[0, 1, 2].map((i) => Math.round(b[i]! * (1 - a) + o[i]! * a)).join(", ")})`;
+}
+
+/** The matrix `m` then `n` applies after it, as a canvas composes its transform with a pattern's: m times n. */
+function compose(m: readonly number[], n: readonly number[]): [number, number, number, number, number, number] {
+  const [a, b, c, d, e, f] = m as [number, number, number, number, number, number];
+  const [p, q, r, s, t, u] = n as [number, number, number, number, number, number];
+  return [a * p + c * q, b * p + d * q, a * r + c * s, b * r + d * s, a * t + c * u + e, b * t + d * u + f];
 }
 
 /** The oracle's polygon of a cell: hex.ts's canonical corners, or the unit square. */
@@ -229,7 +295,7 @@ function source(s: Scene): PieceSource {
   return {
     ground: (x, y) => groundOf(s, x, y),
     terrain: () => null,
-    look: (x, y) => ({ texture: null, color: `look:${x},${y}` }),
+    look: (x, y) => ({ texture: null, color: lookOf(x, y) }),
     bounds: { w: s.w, h: s.h },
     grid: s.grid,
   };
@@ -295,9 +361,11 @@ function check(s: Scene, turn: Turn, rand: () => number, n: number, relief = rel
     // A side above 0 is the higher cell's near side, one below 0 the pit's far side: whichever draws it wears its own look.
     const owner = hit.z > 0 ? { col: hit.col, row: hit.row } : hit.from;
     if (!owner) return;
-    const want = `look:${owner.col},${owner.row}`;
+    const want = lookOf(owner.col, owner.row);
     const p = list[last];
-    if (!p || p.kind !== "fill" || p.style !== want) fails.push(`${at}: a side of ${want} shows, but the last paint is ${JSON.stringify(p)}`);
+    // A plain look and the light from the left fill as one color, mixed.
+    const worn = [want, mixed(want, theme.relief.lit), mixed(want, theme.relief.shaded)];
+    if (!p || p.kind !== "fill" || !worn.includes(p.style)) fails.push(`${at}: a side of ${want} shows, but the last paint is ${JSON.stringify(p)}`);
   });
   return fails;
 }

@@ -46,7 +46,7 @@ import { useDraggedIds } from "../draggedIds.ts";
 import type { IsoToken } from "../TokenNode.tsx";
 import { groupWalls, meets, ReliefIndex, type DrawPiece, type Item, type StandeeIn } from "./buckets.ts";
 import { IsoGroundContext, TreeShownContext, useShownView, useTreeShownStore, useTreeShownView, type IsoGround } from "./context.ts";
-import { drawRun, type DrawContext } from "./drawRelief.ts";
+import { drawRun, type DrawContext, type GroundCopy } from "./drawRelief.ts";
 import { FogView } from "./fogView.ts";
 import { cellLook, CellTints, hexLook, imageReader } from "./looks.ts";
 import type { VBox } from "./pieces.ts";
@@ -438,6 +438,8 @@ function IsoBoardImpl(props: IsoBoardProps) {
   const reliefLayerRef = useRef<Konva.Layer>(null);
   const mainRef = useRef<Konva.Stage>(null);
   const dc = useRef<DrawContext | null>(null);
+  // Counts the ground's draws (Konva's layer `draw` event, on every path that draws it), so the tops copy one pattern of each.
+  const groundCopy = useRef<GroundCopy>({ version: 0, made: -1, canvas: null, pattern: null });
   dc.current = {
     turn,
     camera: cam,
@@ -446,6 +448,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
     textures,
     view: { x0: topLeft.x, y0: topLeft.y, x1: bottomRight.x, y1: bottomRight.y },
     openings: (region, box, asker) => relief.openingsMeeting(region, turn, box, asker),
+    groundCopy: groundCopy.current,
   };
 
   const onStage = props.onStage;
@@ -454,8 +457,11 @@ function IsoBoardImpl(props: IsoBoardProps) {
     const reliefLayer = reliefLayerRef.current;
     if (!ground || !reliefLayer) return;
     const scheduler = new FrameScheduler(ground, reliefLayer);
+    const copy = groundCopy.current;
+    ground.on("draw.groundCopy", () => void copy.version++);
     onStage(mainRef.current);
     return () => {
+      ground.off("draw.groundCopy");
       scheduler.detach();
       onStage(null);
     };

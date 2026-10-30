@@ -12,10 +12,10 @@ import { boundsOf, facesOf, type CellPiece, type Face, type PitRegion, type Side
  * Drawing a run of relief pieces (docs/design-v1-isometric-view.md 5.5):
  * one Konva shape that does not listen draws every piece between two
  * standees, in depth order. A column draws its sides, then its top: the
- * ground stage's pixels under the cell, copied up by the lift and clipped
- * to the lifted polygon (a square's diamond, a hex's six corners), read
- * only from the source box. Neighboring tops at one lift share a clip and
- * a copy. A pit draws its floor, the ground's pixels copied down and
+ * ground stage's pixels under the cell, copied up by the lift into the
+ * lifted polygon (a square's diamond, a hex's six corners) as a fill with
+ * a pattern of the ground, one pattern for each ground drawn. Neighboring
+ * tops at one lift share a fill. A pit draws its floor, the ground's pixels copied down and
  * clipped to its own floor polygon, then its far sides, all inside the
  * openings of its connected region, so a floor seen through a neighbor's
  * opening shows its own pixels and its own shade
@@ -36,7 +36,12 @@ export type DrawContext = {
   view: VBox;
   /** The cells of a pit region whose openings meet a view box (buckets.ts openingsMeeting). Absent, every cell of the region. */
   openings?: (region: PitRegion, box: VBox, asker: object) => readonly CellPiece[];
+  /** The ground's pixels as one pattern for every top a relief draw copies, made again once the ground has drawn since. Absent, each copy makes its own. */
+  groundCopy?: GroundCopy;
 };
+
+/** A pattern of the ground stage's pixels, and which of its draws it holds (`version` counts them, IsoBoard.tsx). */
+export type GroundCopy = { version: number; made: number; canvas: HTMLCanvasElement | null; pattern: CanvasPattern | null };
 
 type Pt = { x: number; y: number };
 
@@ -71,10 +76,20 @@ function addPoly(g: CanvasRenderingContext2D, pts: readonly Pt[]): void {
 }
 
 /** A side as it draws: the parallelogram from `a` to `b` and `h` view units down. */
-type SideShape = { a: Pt; b: Pt; h: number; left: boolean };
+type SideShape = { a: Pt; b: Pt; h: number; left: boolean; path: Path2D | null };
 
 /** A cell piece's drawing at a turn, in view units: its bounds, its sides, and its polygon at its own height and at 0. */
-type CellShape = { bounds: VBox; sides: readonly SideShape[]; top: readonly Pt[]; atZero: readonly Pt[] };
+type CellShape = {
+  bounds: VBox;
+  sides: readonly SideShape[];
+  top: readonly Pt[];
+  atZero: readonly Pt[];
+  /** The box of its polygon at 0, where a copy of its top reads the ground. */
+  source: VBox;
+  /** Its top, and every side's outline together, as paths made once, where the canvas has them (tests' fakes may not). */
+  topPath: Path2D | null;
+  outline: Path2D | null;
+};
 
 /*
  * Kept with each piece, turn by turn. A piece's geometry never changes once
@@ -91,15 +106,60 @@ function shapeOf(p: CellPiece, turn: Turn): CellShape {
   const kept = byTurn[turn];
   if (kept) return kept;
   const view = isometric(turn);
-  const sides = facesOf(p, turn).map((f: Face) => ({
-    a: toView(view, { x: f.ax, y: f.ay }, f.z1),
-    b: toView(view, { x: f.bx, y: f.by }, f.z1),
-    h: K * (f.z1 - f.z0),
-    left: f.left,
-  }));
-  const shape = { bounds: boundsOf(p, turn), sides, top: lifted(turn, p.poly, p.z), atZero: lifted(turn, p.poly, 0) };
+  const paths = typeof Path2D === "function";
+  const sides = facesOf(p, turn).map((f: Face): SideShape => {
+    const a = toView(view, { x: f.ax, y: f.ay }, f.z1);
+    const b = toView(view, { x: f.bx, y: f.by }, f.z1);
+    const h = K * (f.z1 - f.z0);
+    return { a, b, h, left: f.left, path: paths ? sidePath(new Path2D(), a, b, h) : null };
+  });
+  const top = lifted(turn, p.poly, p.z);
+  const atZero = lifted(turn, p.poly, 0);
+  const source: VBox = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+  for (const q of atZero) {
+    source.x0 = Math.min(source.x0, q.x);
+    source.y0 = Math.min(source.y0, q.y);
+    source.x1 = Math.max(source.x1, q.x);
+    source.y1 = Math.max(source.y1, q.y);
+  }
+  let outline: Path2D | null = null;
+  if (paths && sides.length > 0) {
+    outline = new Path2D();
+    for (const f of sides) sidePath(outline, f.a, f.b, f.h);
+  }
+  const shape = { bounds: boundsOf(p, turn), sides, top, atZero, source, topPath: paths ? polyPath(new Path2D(), top) : null, outline };
   byTurn[turn] = shape;
   return shape;
+}
+
+/** Adds the parallelogram from `a` to `b` and `h` view units down to a path. */
+function sidePath<P extends Path2D>(path: P, a: Pt, b: Pt, h: number): P {
+  path.moveTo(a.x, a.y);
+  path.lineTo(b.x, b.y);
+  path.lineTo(b.x, b.y + h);
+  path.lineTo(a.x, a.y + h);
+  path.closePath();
+  return path;
+}
+
+/** Adds a closed polygon to a path. */
+function polyPath<P extends Path2D>(path: P, pts: readonly Pt[]): P {
+  path.moveTo(pts[0]!.x, pts[0]!.y);
+  for (let i = 1; i < pts.length; i++) path.lineTo(pts[i]!.x, pts[i]!.y);
+  path.closePath();
+  return path;
+}
+
+/** Fills `path`, or the context's own path when there is none. */
+function fillWith(g: CanvasRenderingContext2D, path: Path2D | null): void {
+  if (path) g.fill(path);
+  else g.fill();
+}
+
+/** Strokes `path`, or the context's own path when there is none. */
+function strokeWith(g: CanvasRenderingContext2D, path: Path2D | null): void {
+  if (path) g.stroke(path);
+  else g.stroke();
 }
 
 function boundsAt(p: StaticPiece, turn: Turn): VBox {
@@ -115,18 +175,60 @@ function openingsOf(p: CellPiece | WallItem, dc: DrawContext): readonly CellPiec
   return dc.openings ? dc.openings(p.region, boundsAt(p, dc.turn), p) : p.region.cells;
 }
 
-/**
- * Fills the parallelogram from `a` to `b` and `h` view units down with a
- * look: its texture laid along the edge one tile per TEXTURE_CELLS cells of
- * length and of height, else its tone, then the light from the left.
- */
-function fillSide(g: CanvasRenderingContext2D, a: Pt, b: Pt, h: number, look: SideLook, left: boolean | null, dc: DrawContext, tint: string | null = null): void {
-  g.beginPath();
+/** Adds the parallelogram from `a` to `b` and `h` view units down to the path. */
+function addSide(g: CanvasRenderingContext2D, a: Pt, b: Pt, h: number): void {
   g.moveTo(a.x, a.y);
   g.lineTo(b.x, b.y);
   g.lineTo(b.x, b.y + h);
   g.lineTo(a.x, a.y + h);
   g.closePath();
+}
+
+/** A color as red, green, blue (0 to 255) and alpha (0 to 1), from `#rgb`, `#rrggbb`, `rgb()` or `rgba()`, else null. */
+function parseColor(c: string): [number, number, number, number] | null {
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(c);
+  if (hex) {
+    const v = hex[1]!.length === 3 ? [...hex[1]!].map((d) => d + d).join("") : hex[1]!;
+    return [parseInt(v.slice(0, 2), 16), parseInt(v.slice(2, 4), 16), parseInt(v.slice(4, 6), 16), 1];
+  }
+  const fn = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)$/i.exec(c);
+  return fn ? [Number(fn[1]), Number(fn[2]), Number(fn[3]), fn[4] === undefined ? 1 : Number(fn[4])] : null;
+}
+
+/** Opaque colors with a translucent one laid over them, by `base|over`: a side's tone and the light from the left as one fill. */
+const blends = new Map<string, string | null>();
+const BLENDS_KEPT = 4096;
+
+/** `over` laid on an opaque `base`, as the canvas composites it, or null when either is not a color read here or `base` is not opaque. */
+export function blended(base: string, over: string): string | null {
+  const key = `${base}|${over}`;
+  const kept = blends.get(key);
+  if (kept !== undefined) return kept;
+  const b = parseColor(base);
+  const o = parseColor(over);
+  let out: string | null = null;
+  if (b && o && b[3] === 1) {
+    const mix = (i: number) => Math.round(b[i]! * (1 - o[3]) + o[i]! * o[3]);
+    out = `rgb(${mix(0)}, ${mix(1)}, ${mix(2)})`;
+  }
+  if (blends.size >= BLENDS_KEPT) blends.clear();
+  blends.set(key, out);
+  return out;
+}
+
+/**
+ * Fills the parallelogram from `a` to `b` and `h` view units down with a
+ * look: its texture laid along the edge one tile per TEXTURE_CELLS cells of
+ * length and of height, else its tone, then the light from the left. A
+ * plain tone and its light fill once, mixed. Its outline follows unless the
+ * caller strokes it with others (`stroke` false).
+ */
+function fillSide(g: CanvasRenderingContext2D, a: Pt, b: Pt, h: number, look: SideLook, left: boolean | null, dc: DrawContext, tint: string | null = null, stroke = true, path: Path2D | null = null): void {
+  if (!path) {
+    g.beginPath();
+    addSide(g, a, b, h);
+  }
+  const light = left === null ? null : left ? theme.relief.lit : theme.relief.shaded;
   const img = look.texture && look.texture !== "pit" && look.texture !== "pillar" && look.texture !== "stairs" ? dc.textures[look.texture as TexturedTerrain] : undefined;
   const pattern = img ? patternOf(g, img) : null;
   if (pattern && img && img.naturalWidth > 0) {
@@ -135,54 +237,77 @@ function fillSide(g: CanvasRenderingContext2D, a: Pt, b: Pt, h: number, look: Si
     const k = TEXTURE_CELLS / img.naturalWidth;
     pattern.setTransform(new DOMMatrix([((b.x - a.x) / length) * k, ((b.y - a.y) / length) * k, 0, K * k, a.x, a.y]));
     g.fillStyle = pattern;
+    fillWith(g, path);
   } else {
-    g.fillStyle = look.texture && !img ? (TERRAIN_COLORS[look.texture as TexturedTerrain] ?? look.color) : look.color;
+    const tone = look.texture && !img ? (TERRAIN_COLORS[look.texture as TexturedTerrain] ?? look.color) : look.color;
+    const mixed = !tint && light ? blended(tone, light) : null;
+    g.fillStyle = mixed ?? tone;
+    fillWith(g, path);
+    if (mixed) return outline(g, dc, stroke, path);
   }
-  g.fill();
   if (tint) {
     g.fillStyle = tint;
-    g.fill();
+    fillWith(g, path);
   }
-  if (left !== null) {
-    g.fillStyle = left ? theme.relief.lit : theme.relief.shaded;
-    g.fill();
+  if (light) {
+    g.fillStyle = light;
+    fillWith(g, path);
   }
-  g.strokeStyle = theme.relief.edge;
-  g.lineWidth = 1 / (dc.camera.scale * dc.pixelRatio);
-  g.stroke();
+  outline(g, dc, stroke, path);
 }
 
+/** Strokes the path as the thin line round sides and walls, when `stroke`. */
+function outline(g: CanvasRenderingContext2D, dc: DrawContext, stroke: boolean, path: Path2D | null = null): void {
+  if (!stroke) return;
+  g.strokeStyle = theme.relief.edge;
+  g.lineWidth = 1 / (dc.camera.scale * dc.pixelRatio);
+  strokeWith(g, path);
+}
+
+/** A piece's sides, each filled, then their outlines in one stroke: they meet only along their shared edges. */
 function drawSides(g: CanvasRenderingContext2D, p: CellPiece, dc: DrawContext): void {
-  for (const f of shapeOf(p, dc.turn).sides) fillSide(g, f.a, f.b, f.h, p.look, f.left, dc);
+  const shape = shapeOf(p, dc.turn);
+  if (shape.sides.length === 0) return;
+  for (const f of shape.sides) fillSide(g, f.a, f.b, f.h, p.look, f.left, dc, null, false, f.path);
+  if (!shape.outline) {
+    g.beginPath();
+    for (const f of shape.sides) addSide(g, f.a, f.b, f.h);
+  }
+  outline(g, dc, true, shape.outline);
+}
+
+/** The path of cells' tops: the one piece's own when it is alone, else the context's path, built here. */
+function topsPath(g: CanvasRenderingContext2D, cells: readonly CellPiece[], turn: Turn): Path2D | null {
+  if (cells.length === 1) {
+    const own = shapeOf(cells[0]!, turn).topPath;
+    if (own) return own;
+  }
+  g.beginPath();
+  for (const c of cells) addPoly(g, shapeOf(c, turn).top);
+  return null;
 }
 
 /**
  * Copies the ground under cells of one height, moved by that height up (a
- * top) or down (a pit's floor, negative), inside their polygons at it. The
- * clip is built in view units under the run's transform, then the copy
- * runs in device pixels, with the clip it made still in force.
+ * top) or down (a pit's floor, negative), inside their polygons at it: one
+ * path of those polygons in view units, filled with the ground's pixels
+ * shifted by the lift.
  */
 function copyGround(g: CanvasRenderingContext2D, cells: readonly CellPiece[], dc: DrawContext, tone: string): void {
   const shift = K * cells[0]!.z * dc.camera.scale * dc.pixelRatio;
-  g.save();
-  g.beginPath();
+  const path = topsPath(g, cells, dc.turn);
   let x0 = Infinity;
   let y0 = Infinity;
   let x1 = -Infinity;
   let y1 = -Infinity;
   for (const c of cells) {
-    const shape = shapeOf(c, dc.turn);
-    addPoly(g, shape.top);
     // The source box from the clip's own polygon at 0, before the copy's lift, so a pit's floor reads exactly the pixels it shows.
-    for (const p of shape.atZero) {
-      x0 = Math.min(x0, p.x);
-      y0 = Math.min(y0, p.y);
-      x1 = Math.max(x1, p.x);
-      y1 = Math.max(y1, p.y);
-    }
+    const box = shapeOf(c, dc.turn).source;
+    x0 = Math.min(x0, box.x0);
+    y0 = Math.min(y0, box.y0);
+    x1 = Math.max(x1, box.x1);
+    y1 = Math.max(y1, box.y1);
   }
-  g.clip();
-  g.setTransform(1, 0, 0, 1, 0, 0);
   // The view box in device pixels: the camera only scales and moves, so its corners map to corners.
   ({ x: x0, y: y0 } = device(dc, { x: x0, y: y0 }));
   ({ x: x1, y: y1 } = device(dc, { x: x1, y: y1 }));
@@ -190,25 +315,43 @@ function copyGround(g: CanvasRenderingContext2D, cells: readonly CellPiece[], dc
   // Past the ground stage's margin there is nothing to copy: the face tone fills the rest until the map pans up.
   if (!ground || y1 > ground.height || y0 < 0 || x0 < 0 || x1 > ground.width) {
     g.fillStyle = tone;
-    g.fillRect(x0, y0 - shift, x1 - x0, y1 - y0);
+    fillWith(g, path);
   }
-  if (ground && ground.width > 0 && ground.height > 0) {
-    const sx = Math.max(0, Math.floor(x0));
-    const sy = Math.max(0, Math.floor(y0));
-    const sw = Math.min(ground.width, Math.ceil(x1)) - sx;
-    const sh = Math.min(ground.height, Math.ceil(y1)) - sy;
-    if (sw > 0 && sh > 0) g.drawImage(ground, sx, sy, sw, sh, sx, sy - shift, sw, sh);
-  }
-  g.restore();
+  const pattern = groundPattern(g, dc);
+  if (!pattern) return;
+  // Pattern space is the ground's device pixels, moved up by the lift: undo the run's view transform, then shift.
+  const k = dc.pixelRatio * dc.camera.scale;
+  const ex = dc.pixelRatio * dc.camera.x;
+  const ey = dc.pixelRatio * dc.camera.y;
+  pattern.setTransform({ a: 1 / k, b: 0, c: 0, d: 1 / k, e: -ex / k, f: -(ey + shift) / k });
+  g.fillStyle = pattern;
+  fillWith(g, path);
+}
+
+/**
+ * The ground's pixels as a pattern. A pattern holds the canvas as it was
+ * when made, so one made once for each ground draw serves every top the
+ * relief copies after it, where a clip and an image copy for each top
+ * cost a phone's frame on alternating heights (docs/design-v1-iso-hex-relief.md 9).
+ */
+function groundPattern(g: CanvasRenderingContext2D, dc: DrawContext): CanvasPattern | null {
+  const ground = dc.ground;
+  if (!ground || ground.width === 0 || ground.height === 0) return null;
+  const copy = dc.groundCopy;
+  if (!copy) return g.createPattern(ground, "no-repeat");
+  if (copy.pattern && copy.made === copy.version && copy.canvas === ground) return copy.pattern;
+  copy.pattern = g.createPattern(ground, "no-repeat");
+  copy.made = copy.version;
+  copy.canvas = ground;
+  return copy.pattern;
 }
 
 /** The outline of tops at one height, so a platform's edge reads on flat art. */
 function outlineTops(g: CanvasRenderingContext2D, cells: readonly CellPiece[], dc: DrawContext): void {
-  g.beginPath();
-  for (const c of cells) addPoly(g, shapeOf(c, dc.turn).top);
+  const path = topsPath(g, cells, dc.turn);
   g.strokeStyle = theme.relief.edge;
   g.lineWidth = 1 / (dc.camera.scale * dc.pixelRatio);
-  g.stroke();
+  strokeWith(g, path);
 }
 
 /**
@@ -224,10 +367,9 @@ function drawPit(g: CanvasRenderingContext2D, p: CellPiece, dc: DrawContext): vo
   for (const o of openingsOf(p, dc)) addPoly(g, shapeOf(o, dc.turn).atZero);
   g.clip("nonzero");
   copyGround(g, [p], dc, theme.relief.side);
-  g.beginPath();
-  addPoly(g, shapeOf(p, dc.turn).top);
+  const floor = topsPath(g, [p], dc.turn);
   g.fillStyle = theme.relief.pitShade;
-  g.fill();
+  fillWith(g, floor);
   drawSides(g, p, dc);
   g.restore();
 }
