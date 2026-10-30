@@ -12,9 +12,9 @@ import { readDdbCharacter } from "../shared/ddb/read.ts";
 import { SKILLS } from "../shared/rules/skills.ts";
 import { loadMonsters, monsterActor, type SrdMonster } from "../shared/srd/monsters.ts";
 import { trapPreset } from "../shared/srd/traps.ts";
-import { barControl, ConsoleWatch, dragCells, expandBar, OpSocket, openSceneGroup, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, ROOT, sceneGroup, sceneGroupFold, Shots, sideTabName, SocketWatch, startServer, tapCell, touchSwipe, untilReady, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, dragCells, expandBar, multiSelect, OpSocket, openSceneGroup, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, ROOT, sceneGroup, sceneGroupFold, Shots, sideTabName, SocketWatch, startServer, tapCell, touchSwipe, untilReady, waitFor, wholeInReach, type Server } from "./harness.ts";
 import { DEFAULT_SNAPSHOT_BUDGET } from "../server/rooms/budgets.ts";
-import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measureAlignment, menuWordLines, pillLines, popoverScrollbarLines, toastLaneLines, toastsUnderCards, type HeaderPlace, type PillPoint } from "./helpers/alignment.ts";
+import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measureAlignment, menuWordLines, pillLines, popoverScrollbarLines, proficiencyLines, toastLaneLines, toastsUnderCards, type HeaderPlace, type PillPoint } from "./helpers/alignment.ts";
 import { moreMenuFixture } from "./helpers/menuFixture.ts";
 
 /**
@@ -323,6 +323,7 @@ class Sweep {
     if (await shown.locator('[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]').count()) await this.add(page, screen, await menuWordLines(shown, `${this.at} ${screen}`));
     const popovers = shown.and(page.locator("[data-rvtt-popover]")).or(shown.locator("[data-rvtt-popover]"));
     if (await popovers.count()) await this.add(page, screen, await popoverScrollbarLines(popovers, `${this.at} ${screen}`));
+    await this.add(page, screen, await proficiencyLines(shown, `${this.at} ${screen}`, false));
   }
 
   /** The board's pills, as `screen`, with each trap name's pointer it read counted as a screen of its own. */
@@ -1175,7 +1176,7 @@ async function skillLabelScreen(sweep: Sweep, page: Page, host: Locator, creatur
         return text === name || text?.startsWith(`${name} `);
       }) as unknown as El | undefined;
       if (!button) { out.push(`${name} is missing`); continue; }
-      const label = button.querySelector("span:first-child") ?? button;
+      const label = button.querySelector("[data-proficiency-name]") ?? button.querySelector("span:first-child") ?? button;
       const range = label.ownerDocument.createRange();
       range.selectNodeContents(label);
       const rects = Array.from(range.getClientRects()).filter((r) => r.width > 0);
@@ -2161,7 +2162,7 @@ async function groupOverflowLines(root: Locator, at: string, screen: string): Pr
     }
     return { out, folded };
   });
-  return { lines: found.out.map((line) => `${at} ${screen}: ${line}`), folded: found.folded };
+  return { lines: [...found.out.map((line) => `${at} ${screen}: ${line}`), ...await proficiencyLines(root, `${at} ${screen}`, false)], folded: found.folded };
 }
 
 /**
@@ -2203,15 +2204,16 @@ async function groupHeaderLines(panel: Locator, at: string, screen: string, acti
       if (lines(name) !== 1) out.push(`${label}: its name takes ${lines(name)} lines`);
       const summaryId = fold?.getAttribute("aria-describedby");
       const summary = summaryId ? g.document.getElementById(summaryId) : null;
+      const wholeUnits = summary !== null && summary.getAttribute("data-summary-wrap") !== null;
       // Every group keeps the floor, one without an icon too (D-261028-84). Words fewer than the floor ("Pat") show whole in less, so the floor is what a cut summary keeps.
-      if (summary) {
+      if (summary && !wholeUnits) {
         const floor = 4 * parseFloat(g.getComputedStyle(summary).fontSize) * zoom(summary);
         const width = summary.getBoundingClientRect().width;
         const cut = summary.scrollWidth > summary.clientWidth;
         if (cut && width < floor - 0.5) out.push(`${label}: its summary is cut at ${width.toFixed(1)} px, under its ${floor.toFixed(1)} px floor`);
       }
-      // A summary wraps under its name only where the name and its floor cannot share the row (docs/design-v1-design-pass.md 4.1): never a token panel's.
-      if (summary && summary.getBoundingClientRect().top >= name.getBoundingClientRect().bottom - 0.5) out.push(`${label}: its summary wrapped under its name`);
+      // Marked summaries intentionally use a full row and wrap between intact skill/save units.
+      if (summary && !wholeUnits && summary.getBoundingClientRect().top >= name.getBoundingClientRect().bottom - 0.5) out.push(`${label}: its summary wrapped under its name`);
       const heading = fold?.parentElement;
       const action = heading?.nextElementSibling ?? null;
       if (action && heading) {
@@ -3271,6 +3273,317 @@ export function roomTest(): void {
     await restartFight();
     await waitFor("the four traps on the DM's copy", () => Object.keys(dmSocket.state?.traps ?? {}).length === 4 || null);
   });
+}
+
+const FL7 = { monster: randomUUID(), token: randomUUID(), companion: randomUUID(), block: randomUUID() };
+const FL7_MONSTER_AT = { x: 1, y: 2 };
+const FL7_COMPANION_AT = { x: 2, y: 2 };
+const FL7_STATS = {
+  abilities: { str: 10, dex: 14, con: 10, int: 10, wis: 14, cha: 10 },
+  saves: ["dex", "con"],
+  skills: { athletics: "prof", "animal-handling": "prof", "sleight-of-hand": "expert", perception: "expert" },
+  jack: true,
+  adjust: { allSaves: 1 },
+  defenses: {},
+  rolls: [],
+};
+const FL7_BLOCK = {
+  size: "medium", type: "Humanoid", alignment: "Neutral", ac: 12, initiative: 0,
+  hp: { average: 30, formula: "4d8 + 12" }, speed: "30 ft.",
+  abilities: { str: { score: 10, save: 2 }, dex: { score: 10, save: 0 }, con: { score: 10, save: 2 }, int: { score: 10, save: 0 }, wis: { score: 10, save: 0 }, cha: { score: 10, save: 0 } },
+  skills: "Animal Handling +2, Sleight of Hand +4, Perception +0",
+  vulnerabilities: "", resistances: "", immunities: "", gear: "", senses: "", passivePerception: 10, languages: "Common", cr: "1", xp: 200,
+  traits: [], actions: [], bonusActions: [], reactions: [], legendaryActions: [],
+};
+
+/** A required FL-7 root cannot pass by matching no labels, even if the rest of the page is aligned. */
+async function proficiencyScreen(sweep: Sweep, page: Page, screen: string, root: Locator): Promise<void> {
+  const labels = root.locator("[data-proficiency-label]").filter({ visible: true });
+  await labels.first().waitFor();
+  await labels.first().evaluate(async (node) => {
+    await (node as unknown as { ownerDocument: { fonts: { ready: Promise<unknown> } } }).ownerDocument.fonts.ready;
+  });
+  await sweep.measure(page, `fl7-${screen}`, labels);
+  await sweep.add(page, `fl7-${screen}`, await proficiencyLines(root, `${sweep.at} fl7-${screen}`));
+}
+
+async function proficiencyLevel(root: Locator, words: RegExp, level: "none" | "prof" | "expert"): Promise<void> {
+  const label = root.locator("[data-proficiency-label]").filter({ hasText: words }).first();
+  await label.waitFor();
+  const marker = label.locator("[data-proficiency-marker]");
+  await waitFor(`fl7: ${words} resolves to ${level}`, async () => (await marker.getAttribute("data-proficiency-marker")) === level || null);
+  assert.equal(await marker.getAttribute("data-proficiency-marker"), level, `fl7: ${words} has ${level}`);
+  if (level === "none") {
+    assert.equal(await marker.getAttribute("aria-hidden"), "true", "fl7: an empty slot is silent");
+    assert.equal(await marker.locator("svg").count(), 0, "fl7: neither has no glyph");
+  } else {
+    const name = level === "prof" ? "Proficient" : "Expertise";
+    assert.equal(await marker.getAttribute("aria-label"), name, `fl7: ${name} is accessible`);
+    assert.equal(await marker.getAttribute("title"), name, `fl7: ${name} has its tooltip`);
+  }
+}
+
+async function proficiencyOptions(sweep: Sweep, page: Page, host: Locator, kind: "pc" | "monster" | "companion"): Promise<void> {
+  const options = host.locator("[data-roll-options]");
+  await unfoldAll(options);
+  await proficiencyLevel(options, /^Animal Handling /, "prof");
+  await proficiencyLevel(options, /^Sleight of Hand /, "expert");
+  await proficiencyLevel(options, /^Perception /, kind === "pc" ? "expert" : "none");
+  await proficiencyLevel(options, /^STR /, kind === "pc" ? "none" : "prof");
+  await proficiencyLevel(options, /^DEX /, kind === "pc" ? "prof" : "none");
+  assert.equal(await options.locator("[data-proficiency-label]").count(), 24, "fl7: all six saves and eighteen skills have fixed slots");
+  await proficiencyScreen(sweep, page, `${kind}-dice`, options);
+  for (const [name, screen] of [["Saves and checks", "saves"], ["Skills", "skills"]] as const) {
+    const fold = options.getByRole("button", { name, exact: true });
+    await fold.click();
+    assert.equal(await fold.getAttribute("aria-expanded"), "false", `fl7: ${name} folds`);
+    const group = options.locator("[data-panel-group]").filter({ has: page.getByRole("button", { name, exact: true }) });
+    await proficiencyScreen(sweep, page, `${kind}-${screen}-folded`, group);
+    if (screen === "saves") assert.equal(await group.locator("[data-proficiency-label]").count(), 6, "fl7: the folded summary keeps all six marked saves");
+    await fold.click();
+  }
+  if (kind === "pc") {
+    const skill = options.locator("button").filter({ has: page.locator("[data-proficiency-name]").filter({ hasText: /^Sleight of Hand / }) }).first();
+    await skill.click();
+    const last = host.locator("[data-dice-last]");
+    await proficiencyLevel(last, /Sleight of Hand/, "expert");
+    await proficiencyScreen(sweep, page, "sticky-result", last);
+  }
+}
+
+async function proficiencyToken(sweep: Sweep, page: Page, name: string, at: { x: number; y: number }, screen: string): Promise<void> {
+  await closeSheets(page);
+  await escapeAll(page);
+  const bar = await selectToken(page, name, at);
+  assert.ok(bar, `fl7: ${name}'s token bar opens`);
+  await expandBar(bar);
+  const more = bar.getByRole("button", { name: "More stats", exact: true });
+  if (await visible(more)) await more.click();
+  await proficiencyScreen(sweep, page, `${screen}-summary`, bar.locator("[data-saves]"));
+  const panel = await openPanel(page, "Token");
+  const fold = panel.getByRole("button", { name: "Stat block", exact: true });
+  await fold.waitFor();
+  if ((await fold.getAttribute("aria-expanded")) !== "true") await fold.click();
+  await proficiencyScreen(sweep, page, `${screen}-block`, panel);
+}
+
+/** Requests, answers and chips use a creature's selected test, not the shared request heading. */
+async function proficiencyRequests(sweep: Sweep, page: Page): Promise<void> {
+  await closeSheets(pat);
+  await escapeAll(pat);
+  await closeSheets(page);
+  await escapeAll(page);
+  const id = randomUUID();
+  await ops.send({ t: "roll.ask", request: { id, test: { kind: "check", choices: [{ ability: "wis", skill: "perception" }] }, dc: 14, dcShown: true, resultShown: true, targets: [{ characterId: run.ids.thornChar }] } });
+  try {
+    const card = pat.getByRole("dialog", { name: "The DM asks for a roll" });
+    await card.waitFor();
+    await proficiencyLevel(card, /Perception/, "expert");
+    await proficiencyScreen(sweep, pat, "player-request", card);
+    const dmCard = page.getByRole("group", { name: /^Roll request:.*Perception/ }).filter({ visible: true }).first();
+    await dmCard.waitFor();
+    const toggle = dmCard.locator("button[aria-expanded]").first();
+    if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+    await proficiencyLevel(dmCard.locator("li"), /Perception/, "expert");
+    await proficiencyScreen(sweep, page, "dm-request", dmCard);
+    await patOps.send({ t: "roll.dice", tag: randomUUID(), rollId: id, target: { characterId: run.ids.thornChar } });
+    await waitFor("fl7: the player's rolled answer", () => dmSocket.state?.rolls[id]?.targets[0]?.dice);
+    await proficiencyScreen(sweep, page, "dm-answer", dmCard.locator("li"));
+    const fold = card.getByRole("button", { name: "Done, fold it into a chip", exact: true });
+    if (await visible(fold)) await fold.click();
+    const chip = pat.locator("button").filter({ has: pat.locator("[data-proficiency-label]").filter({ hasText: /Perception/ }) }).filter({ visible: true }).first();
+    await proficiencyLevel(chip, /Perception/, "expert");
+    await proficiencyScreen(sweep, pat, "player-chip", chip);
+  } finally {
+    await ops.send({ t: "roll.close", rollIds: [id] });
+  }
+  const choiceId = randomUUID();
+  await ops.send({ t: "roll.ask", request: { id: choiceId, test: { kind: "check", choices: [{ ability: "wis", skill: "perception" }, { ability: "wis", skill: "animal-handling" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.ids.thornChar }] } });
+  try {
+    const card = pat.getByRole("dialog", { name: "The DM asks for a roll" });
+    await card.waitFor();
+    await proficiencyLevel(card, /Perception/, "expert");
+    await proficiencyLevel(card, /Animal Handling/, "prof");
+    await proficiencyScreen(sweep, pat, "player-choices", card);
+  } finally {
+    await ops.send({ t: "roll.close", rollIds: [choiceId] });
+  }
+}
+
+async function proficiencyResults(sweep: Sweep, page: Page): Promise<void> {
+  await closeSheets(page);
+  await escapeAll(page);
+  await openPanel(page, "Token");
+  await patOps.send({ t: "dice.roll", tag: randomUUID(), to: "all", rolls: [{ formula: "1d20+8", label: "Perception check", creature: { characterId: run.ids.thornChar } }] });
+  const toast = page.locator("[data-toast]").filter({ hasText: /Perception/ }).filter({ visible: true }).last();
+  await proficiencyLevel(toast, /Perception/, "expert");
+  await proficiencyScreen(sweep, page, "toast", toast);
+  const dice = await openDice(page);
+  const recent = dice.locator("[data-dice-recent]");
+  await unfoldAll(recent);
+  await proficiencyLevel(recent, /Perception/, "expert");
+  await proficiencyScreen(sweep, page, "recent", recent);
+  await recent.getByRole("button", { name: "Recent rolls", exact: true }).click();
+  await proficiencyLevel(recent, /Perception/, "expert");
+  await proficiencyScreen(sweep, page, "recent-folded", recent);
+  assert.equal(await recent.locator("[data-proficiency-label]").count(), 1, "fl7: the folded Recent summary keeps its marked result");
+  const log = await openPanel(page, "Log");
+  await proficiencyLevel(log, /Perception/, "expert");
+  await proficiencyScreen(sweep, page, "log", log);
+}
+
+async function proficiencyGroup(sweep: Sweep, page: Page): Promise<void> {
+  await closeSheets(page);
+  await escapeAll(page);
+  const bar = await selectToken(page, "FL7 Monster", FL7_MONSTER_AT);
+  assert.ok(bar, "fl7: group selection starts at the monster");
+  await multiSelect(bar);
+  await tapCell(page, BOUNDS, FL7_COMPANION_AT);
+  const group = page.locator('[role="dialog"][data-bar-mode]').filter({ hasText: /2 selected/ }).first();
+  await group.waitFor();
+  await (await barControl(group, "Roll")).click();
+  const host = await openDice(page);
+  await host.getByRole("button", { name: "Set up a group save", exact: true }).click();
+  await host.getByRole("combobox", { name: "Ability", exact: true }).selectOption("str");
+  await proficiencyScreen(sweep, page, "group-setup", host);
+  const labels = host.locator("[data-proficiency-label]");
+  assert.equal(await labels.count(), 2, "fl7: one marker per group creature");
+  assert.equal(await labels.locator('[data-proficiency-marker="prof"]').count(), 2, "fl7: each creature's Strength save is proficient");
+  const rolled = () => (dmSocket.state?.log ?? []).filter((entry) => entry.data?.type === "dice" && entry.data.rolls.some((roll) => roll.tokenId === FL7.token)).length;
+  const before = rolled();
+  const start = host.getByRole("button", { name: /^Roll \d+ saves?( and ask \d+ players?)?$|^Ask \d+ players?$/ }).first();
+  await start.click();
+  await waitFor("fl7: the group's server result lands", () => rolled() > before || null);
+  await proficiencyScreen(sweep, page, "group-results", host);
+  await host.getByRole("button", { name: "Discard", exact: true }).first().click();
+  const confirm = host.getByRole("button", { name: "Keep it", exact: true });
+  if (await visible(confirm)) await host.getByRole("button", { name: "Discard", exact: true }).first().click();
+  const requests = Object.keys(dmSocket.state?.rolls ?? {});
+  if (requests.length) await ops.send({ t: "roll.close", rollIds: requests });
+  await closeSheets(page);
+  const none = page.getByRole("button", { name: "Deselect all" }).first();
+  if (await visible(none)) await none.click();
+  const done = page.getByRole("button", { name: "Done", exact: true }).first();
+  if (await visible(done)) await done.click();
+}
+
+async function proficiencyEncounter(sweep: Sweep, page: Page): Promise<void> {
+  await closeSheets(page);
+  await escapeAll(page);
+  const concentration = randomUUID();
+  await ops.send({ t: "actor.effect.add", target: { tokenId: FL7.token }, effect: { id: concentration, key: "concentrating", spell: "Hex" } });
+  await ops.send({ t: "actor.hp", target: { tokenId: FL7.token }, change: { kind: "damage", amount: 1 } });
+  const card = await alertCard(page, "Concentration save for FL7 Monster");
+  assert.ok(card, "fl7: concentration card is reachable");
+  await proficiencyLevel(card, /Concentration save/, "prof");
+  await proficiencyScreen(sweep, page, "concentration", card);
+  await card.getByRole("button", { name: "Passed", exact: true }).click();
+  await ops.send({ t: "actor.effect.remove", target: { tokenId: FL7.token }, effectId: concentration });
+  await escapeAll(page);
+  await ops.send({ t: "encounter.end" });
+  await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: FL7.token, value: 20 }, { id: randomUUID(), tokenId: run.ids.thorn, value: 10 }] });
+  await ops.send({ t: "encounter.next" });
+  const effectId = randomUUID();
+  await ops.send({ t: "actor.effect.add", target: { tokenId: FL7.token }, effect: { id: effectId, key: "frightened", save: { ability: "str", dc: 14 } } });
+  await ops.send({ t: "encounter.next" });
+  const waiting = page.locator('[data-alert-id^="saveEnds:"]').first();
+  await waiting.waitFor({ state: "attached" });
+  const title = await waiting.getAttribute("aria-label");
+  assert.ok(title, "fl7: save-ends card names its save");
+  const ends = await alertCard(page, title);
+  assert.ok(ends, "fl7: save-ends card is reachable");
+  await proficiencyLevel(ends, /Strength save/, "prof");
+  await proficiencyScreen(sweep, page, "save-ends", ends);
+  await ops.send({ t: "actor.effect.remove", target: { tokenId: FL7.token }, effectId });
+  await ops.send({ t: "actor.hp", target: { tokenId: FL7.token }, change: { kind: "heal", amount: 1 } });
+  await restartFight();
+}
+
+/** FL-7 has its own matrix so every required surface is measured in both color schemes. */
+export function proficiencyTests(): void {
+  test("fl7-helper. the geometry check rejects wrapped labels, shifted markers and missing roots", async () => {
+    const page = await dmContext.newPage();
+    try {
+      await page.setContent('<div id="root" style="width:280px;font:14px/20px sans-serif"><span data-proficiency-label style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap"><span data-proficiency-marker="prof" style="display:inline-flex;flex:none;width:14px;height:14px"></span><span data-proficiency-name>Sleight of Hand +7</span></span></div><div id="empty"></div>');
+      const root = page.locator("#root");
+      assert.deepEqual(await proficiencyLines(root, "fl7-helper"), [], "fl7: an aligned label passes");
+      await root.locator("[data-proficiency-marker]").evaluate((node) => {
+        (node as unknown as { style: { position: string; top: string } }).style.position = "relative";
+        (node as unknown as { style: { top: string } }).style.top = "3px";
+      });
+      assert.match((await proficiencyLines(root, "fl7-helper")).join("\n"), /marker center/, "fl7: a 3 px shift fails");
+      await root.locator("[data-proficiency-marker]").evaluate((node) => { (node as unknown as { style: { top: string } }).style.top = "0px"; });
+      await root.locator("[data-proficiency-name]").evaluate((node) => {
+        const style = (node as unknown as { style: { width: string; whiteSpace: string } }).style;
+        style.width = "45px";
+        style.whiteSpace = "normal";
+      });
+      assert.match((await proficiencyLines(root, "fl7-helper")).join("\n"), /wraps/, "fl7: a wrapped skill fails");
+      assert.match((await proficiencyLines(page.locator("#empty"), "fl7-helper")).join("\n"), /no visible/, "fl7: measuring nothing fails");
+    } finally {
+      await page.close();
+    }
+  });
+  test("fl7-a. explicit PC flags, listed monster bonuses and a projected companion block", async () => {
+    await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { level: 5, stats: FL7_STATS } });
+    await ops.send({ t: "monster.create", monster: { ...FL7_BLOCK, id: FL7.monster, name: "FL7 Monster" } });
+    await ops.send({ t: "companionBlock.create", block: { ...FL7_BLOCK, id: FL7.block, characterId: run.ids.thornChar, name: "FL7 Companion" } });
+    await ops.send({ t: "token.create", token: { id: FL7.token, sceneId: run.sceneId, kind: "monster", name: "FL7 Monster", size: "medium", ...FL7_MONSTER_AT, disposition: "hostile", actor: { inline: actor({ monsterId: FL7.monster }) } } });
+    await ops.send({ t: "token.create", token: { id: FL7.companion, sceneId: run.sceneId, kind: "npc", name: "FL7 Companion", size: "medium", ...FL7_COMPANION_AT, disposition: "ally", companion: { of: run.ids.thornChar, turn: "shared" }, actor: { inline: actor({ blockId: FL7.block }) } } });
+  });
+  for (const scheme of ["light", "dark"] as const) {
+    for (const size of SIZES.filter((s) => ["1440x900", "390x844", "360x740", "320x568"].includes(s.name))) {
+      for (const scale of SCALES) {
+        test(`fl7-${scheme}-${size.name}-${scale}. every creature skill/save label stays on one line and its marker centers within 1 px`, async () => {
+          const sweep = new Sweep(`fl7-${scheme}-${size.name}-${scale}`);
+          const page = await dmPageFor(size);
+          await page.emulateMedia({ colorScheme: scheme });
+          await pat.emulateMedia({ colorScheme: scheme });
+          await openAt(page, size, scale);
+          await openAt(pat, size, scale);
+          await proficiencyToken(sweep, page, "FL7 Monster", FL7_MONSTER_AT, "monster");
+          await proficiencyOptions(sweep, page, await openDice(page), "monster");
+          await proficiencyToken(sweep, page, "FL7 Companion", FL7_COMPANION_AT, "companion");
+          await proficiencyOptions(sweep, page, await openDice(page), "companion");
+
+          const dice = await openDice(pat);
+          const tabs = dice.getByRole("tablist", { name: "Roll for" });
+          await tabs.getByRole("tab", { name: "Thorn", exact: true }).click();
+          await proficiencyOptions(sweep, pat, dice, "pc");
+          await tabs.getByRole("tab", { name: "FL7 Companion", exact: true }).click();
+          await proficiencyOptions(sweep, pat, dice, "companion");
+          await tabs.getByRole("tab", { name: "Warhorse", exact: true }).click();
+          await unfoldAll(dice.locator("[data-roll-options]"));
+          assert.equal(await dice.locator('[data-roll-options] [data-proficiency-marker="prof"], [data-roll-options] [data-proficiency-marker="expert"]').count(), 0, "fl7: an owned creature without a stat block has no guessed glyphs");
+          await proficiencyScreen(sweep, pat, "unknown-dice", dice.locator("[data-roll-options]"));
+          await tabs.getByRole("tab", { name: "Thorn", exact: true }).click();
+          const sheet = await thornsPage(pat);
+          const fold = sheet.getByRole("button", { name: "Stat block", exact: true });
+          if ((await fold.getAttribute("aria-expanded")) !== "true") await fold.click();
+          await proficiencyScreen(sweep, pat, "pc-sheet", sheet.locator("[data-pc-stats]"));
+          await sheet.getByText("Jack of All Trades", { exact: true }).waitFor();
+
+          await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { actor: { srdId: "wolf", wildShape: true } } });
+          await sheet.locator("[data-shape-numbers]").waitFor();
+          await proficiencyScreen(sweep, pat, "wild-shape", sheet);
+          await proficiencyScreen(sweep, pat, "shape-effective", sheet.locator("[data-shape-numbers]"));
+          await proficiencyLevel(sheet.locator("[data-shape-numbers]"), /^DEX /, "prof");
+          await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { actor: { srdId: "wolf" } } });
+          await waitFor("fl7: Polymorph uses the beast's saving proficiency", async () => (await sheet.locator('[data-shape-numbers] [data-proficiency-label]').filter({ hasText: /^DEX / }).locator("[data-proficiency-marker]").getAttribute("data-proficiency-marker")) === "none" || null);
+          await proficiencyScreen(sweep, pat, "polymorph", sheet);
+          await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { actor: { srdId: null } } });
+          await sheet.locator("[data-pc-stats]").waitFor();
+
+          await proficiencyRequests(sweep, page);
+          await proficiencyResults(sweep, page);
+          await proficiencyGroup(sweep, page);
+          await proficiencyEncounter(sweep, page);
+          assert.deepEqual(sweep.lines, [], `fl7: labels or markers out of line:\n${sweep.lines.join("\n")}`);
+          console.log(`${sweep.at}: measured ${[...sweep.seen].join(", ")}`);
+        });
+      }
+    }
+  }
 }
 
 /** How many steps SIZES at SCALES make, pl3-b1 to pl3-b12. The two steps after them take the next numbers. */

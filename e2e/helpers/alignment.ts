@@ -122,6 +122,83 @@ import type { Locator, Page } from "playwright-core";
 /** The most a part may be off, in CSS px. Offsets are rounded to 0.1 px first, so layout rounding at 130% (1.0 px) passes. */
 export const LIMIT_PX = 1;
 
+/** Skill/save units keep their marker, name and number together, including outside a button. */
+export async function proficiencyLines(root: Locator, screen: string, required = true): Promise<string[]> {
+  const measured = await root.evaluateAll((roots) => {
+    type Rect = { left: number; right: number; top: number; bottom: number; width: number; height: number };
+    type El = {
+      textContent: string | null;
+      nodeType: number;
+      childNodes: ArrayLike<El>;
+      parentElement: El | null;
+      currentCSSZoom?: number;
+      clientWidth: number;
+      scrollWidth: number;
+      matches(selector: string): boolean;
+      querySelector(selector: string): El | null;
+      querySelectorAll(selector: string): ArrayLike<El>;
+      getBoundingClientRect(): Rect;
+      getAttribute(name: string): string | null;
+      ownerDocument: {
+        createRange(): { selectNodeContents(node: El): void; getClientRects(): ArrayLike<Rect> };
+        defaultView: { getComputedStyle(node: El): { overflowX: string; paddingLeft: string; paddingRight: string; borderLeftWidth: string; borderRightWidth: string } };
+      };
+    };
+    const labels = new Set<El>();
+    for (const root of roots as unknown as El[]) {
+      if (root.matches("[data-proficiency-label]")) labels.add(root);
+      for (const label of Array.from(root.querySelectorAll("[data-proficiency-label]"))) labels.add(label);
+    }
+    const lines: string[] = [];
+    let count = 0;
+    for (const label of labels) {
+      const box = label.getBoundingClientRect();
+      if (box.width === 0 || box.height === 0) continue;
+      count++;
+      const name = label.querySelector("[data-proficiency-name]");
+      const marker = label.querySelector("[data-proficiency-marker]");
+      const words = name?.textContent?.trim() || "unnamed proficiency label";
+      if (!name || !marker) {
+        lines.push(`${words}: missing the name or fixed marker slot`);
+        continue;
+      }
+      const rects: Rect[] = [];
+      const readText = (node: El): void => {
+        if (node.nodeType === 3 && node.textContent?.trim()) {
+          const range = name.ownerDocument.createRange();
+          range.selectNodeContents(node);
+          rects.push(...Array.from(range.getClientRects()).filter((r) => r.width > 0 && r.height > 0));
+        } else for (const child of Array.from(node.childNodes)) readText(child);
+      };
+      readText(name);
+      const zoom = label.currentCSSZoom ?? 1;
+      // Small ability capitals and a larger bonus share a baseline, so their glyph boxes overlap rather than sharing a top.
+      if (rects.length === 0 || Math.max(...rects.map((r) => r.top)) >= Math.min(...rects.map((r) => r.bottom)) - zoom) lines.push(`${words}: skill/save name or number wraps`);
+      const mark = marker.getBoundingClientRect();
+      const text = name.getBoundingClientRect();
+      const off = Math.abs((mark.top + mark.bottom - text.top - text.bottom) / 2) / zoom;
+      if (off > 1) lines.push(`${words}: marker center is ${off.toFixed(2)} px from the name`);
+      if (mark.width <= 0 || Math.abs(mark.width - mark.height) / zoom > 1) lines.push(`${words}: marker slot is missing or not square`);
+      if (label.scrollWidth > label.clientWidth + 1) lines.push(`${words}: label overflows its own unit`);
+      for (let ancestor = label.parentElement; ancestor; ancestor = ancestor.parentElement) {
+        const css = ancestor.ownerDocument.defaultView.getComputedStyle(ancestor);
+        if (!ancestor.matches("button") && !["hidden", "clip", "auto", "scroll"].includes(css.overflowX)) continue;
+        const parent = ancestor.getBoundingClientRect();
+        const parentZoom = ancestor.currentCSSZoom ?? 1;
+        const inset = ancestor.matches("button");
+        const left = parent.left + (inset ? parseFloat(css.paddingLeft) + parseFloat(css.borderLeftWidth) : 0) * parentZoom;
+        const right = parent.right - (inset ? parseFloat(css.paddingRight) + parseFloat(css.borderRightWidth) : 0) * parentZoom;
+        if (box.left < left - parentZoom || box.right > right + parentZoom) {
+          lines.push(`${words}: label or marker runs outside its button or clipping ancestor`);
+          break;
+        }
+      }
+    }
+    return { count, lines };
+  });
+  return [...(required && measured.count === 0 ? ["no visible skill/save labels were measured"] : []), ...measured.lines].map((line) => `${screen}: ${line}`);
+}
+
 /** The interface's indent step (theme.space(3)), in CSS px: the least a nested list or group is set in to make a column of its own. */
 export const INDENT_PX = 12;
 
