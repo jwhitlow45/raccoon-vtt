@@ -2,7 +2,8 @@
  * The wave 4 server rows of the performance gate (docs/design-v1-maps-vision.md
  * section 4.3.6), end to end through the room actor at the caps: each row is
  * one op as a socket sends it, timed from its arrival until the last socket
- * in the room has been sent its `ev`. That covers permissions with the
+ * in the room has been sent the batch's frames, history after `ev` included.
+ * That covers permissions with the
  * movement test, the reducer and its "seen" marks, the limits step with the
  * split's counting pass and the sight piece cap, the size guard with both
  * reserves, the explore step, the commit (against a database that answers at
@@ -20,7 +21,7 @@
  *
  * Each row's time includes everything around it, so it is held to the row's
  * own budget: a row that fits end to end fits alone. The fan-out row is the
- * time from the commit to the last `ev` of a source's move. Run it alone,
+ * time from the commit to the last frame of a source's move. Run it alone,
  * with nothing else busy, on the machine being gated:
  *
  *   node scripts/bench-server4.ts            (a laptop: budgets over 1.5, the reference server's ratio on this bench)
@@ -52,7 +53,7 @@
 import { chunkKey, holderChunkKey, holderTileKey, tileKey, wallChunk } from "../shared/keys.ts";
 import { SNAPSHOT_VERSION } from "../shared/migrate.ts";
 import { DEFAULT_SETTINGS, FOG_SUBCELLS, type BuildChunk, type EdgeFeature, type FreeWall, type Member, type MemoryChunk, type RoomState, type TerrainId, type Token } from "../shared/model.ts";
-import { MAX_ASK_OPS, type Op } from "../shared/protocol.ts";
+import { MAX_ASK_OPS, type Op, type ServerMessage } from "../shared/protocol.ts";
 import { uuidv7 } from "../shared/ids.ts";
 import { encodeTile, fullTileBits, TILE_SUB } from "../shared/rules/fog.ts";
 import { projectState } from "../shared/project.ts";
@@ -238,16 +239,27 @@ type Table = {
   actor: RoomActor;
   dm: Connection;
   players: Connection[];
-  /** When anything was last sent to any socket, and the last message to the socket that sent the op being timed. */
-  sent: { last: number; sender: Connection | null; senderText: string };
+  /** When anything was last sent, and every frame to the current sender during this op or ask. */
+  sent: { last: number; sender: Connection | null; senderMessages: string[] };
   db: Span;
   n: Map<Connection, number>;
 };
 
+type OpAnswer = Extract<ServerMessage, { t: "ev" }>;
+
+/** History and presence can follow the state event that acknowledged this op. Read the stream outside the timed socket send. */
+export function benchAnswer(messages: readonly string[], n: number): OpAnswer | null {
+  for (const text of messages) {
+    const message = JSON.parse(text) as ServerMessage;
+    if (message.t === "ev" && (message.acks?.includes(n) || message.rejects?.some((r) => r.n === n))) return message;
+  }
+  return null;
+}
+
 type SitDownTimes = { load: number[]; first: number[]; later: number[] };
 
 /** Loads the room and connects the DM and the players, each with its snapshot, as a table sitting down. */
-async function sitDown(state: RoomState, times?: SitDownTimes): Promise<Table> {
+export async function sitDown(state: RoomState, times?: SitDownTimes): Promise<Table> {
   const t0 = performance.now();
   const db: Span = { commitAt: 0, drawn: 0 };
   live = db;
@@ -263,7 +275,7 @@ async function sitDown(state: RoomState, times?: SitDownTimes): Promise<Table> {
   const actor = await RoomActor.load(deps);
   if (!actor) throw new Error("the bench room did not load");
   times?.load.push(performance.now() - t0);
-  const sent: Table["sent"] = { last: 0, sender: null, senderText: "" };
+  const sent: Table["sent"] = { last: 0, sender: null, senderMessages: [] };
   const open = (memberId: string, role: "dm" | "player"): Connection => {
     let conn: Connection | null = null;
     const socket = {
@@ -272,7 +284,7 @@ async function sitDown(state: RoomState, times?: SitDownTimes): Promise<Table> {
       CONNECTING: 0,
       send: (text: string) => {
         sent.last = performance.now();
-        if (conn === sent.sender) sent.senderText = text;
+        if (conn === sent.sender) sent.senderMessages.push(text);
       },
       close: () => undefined,
       terminate: () => undefined,
@@ -308,11 +320,12 @@ function settle(): Promise<void> {
 
 type Timing = { total: number; fanout: number; drawn: number };
 
-/** Sends one op from `conn` and times it to the last `ev` any socket was sent, from the commit to that `ev`, and the holders' rasters drawn in between. */
-async function send(table: Table, conn: Connection, op: Op, refusalOk = false): Promise<Timing> {
+/** Sends one op from `conn` and times it to the last frame any socket was sent, from the commit to that frame, and the holders' rasters drawn in between. */
+export async function send(table: Table, conn: Connection, op: Op, refusalOk = false): Promise<Timing> {
   const n = (table.n.get(conn) ?? 0) + 1;
   table.n.set(conn, n);
   table.sent.sender = conn;
+  table.sent.senderMessages = [];
   const t0 = performance.now();
   table.db.commitAt = 0;
   table.db.drawn = 0;
@@ -321,10 +334,7 @@ async function send(table: Table, conn: Connection, op: Op, refusalOk = false): 
   // so its time is the actor's work on it, which is over when `op` returns.
   const worked = performance.now() - t0;
   await settle();
-  const answered = () => {
-    const answer = JSON.parse(table.sent.senderText) as { t: string; acks?: number[]; rejects?: { n: number; message: string }[] };
-    return answer.t === "ev" && (answer.acks?.includes(n) || answer.rejects?.some((r) => r.n === n)) ? answer : null;
-  };
+  const answered = () => benchAnswer(table.sent.senderMessages, n);
   let answer = answered();
   if (!answer) {
     for (let wait = 0; wait < 100 && !answer; wait++) {
@@ -416,7 +426,7 @@ async function runLevel(level: "bright" | "dark", feetPerCell: number, rows: Row
     budget: 10,
     ms: move.fanout,
     // Per player, the fan-out is the first to read each holder's tiles, so their rasters are drawn in it.
-    covers: `commit to the last ev of that move, 7 sockets${perPlayer ? ", each holder's raster drawn" : ""}: the gate reads its 10 ms budget on the server box and 6.7 ms (10 over 1.5) on a laptop`,
+    covers: `commit to the last frame of that move, 7 sockets${perPlayer ? ", each holder's raster drawn" : ""}: the gate reads its 10 ms budget on the server box and 6.7 ms (10 over 1.5) on a laptop`,
   });
   if (perPlayer) {
     const part = "a part of the fan-out row above, which the gate reads, shown against the same limit";
@@ -556,7 +566,7 @@ async function runFogOff(level: "bright" | "dark", rows: Row[]): Promise<void> {
     return send(table, owner(table, t), { t: "token.move", tokenId: t.id, x: t.x + (r % 24 < 12 ? 1 : -1), y: t.y });
   });
   const where = `${level} scene, ${PER_PLAYER}, fog off`;
-  rows.push({ row: `Sight fan-out for all players in one batch, ${where}`, budget: 10, ms: move.fanout, covers: "commit to the last ev of a player's token.move, 7 sockets: the gate reads its 10 ms budget on the server box and 6.7 ms (10 over 1.5) on a laptop" });
+  rows.push({ row: `Sight fan-out for all players in one batch, ${where}`, budget: 10, ms: move.fanout, covers: "commit to the last frame of a player's token.move, 7 sockets: the gate reads its 10 ms budget on the server box and 6.7 ms (10 over 1.5) on a laptop" });
   rows.push({ row: `Holders' rasters drawn in that fan-out, ${where}`, budget: 10, ms: move.drawn, covers: "a part of the fan-out row above, shown against the same limit: each holder's tiles read the first time" });
   await table.actor.shutdown({ code: 1012, snapshot: false });
 }
@@ -697,7 +707,7 @@ async function runDiscovery(perPlayer: boolean, rows: Row[]): Promise<void> {
     return t;
   });
   rows.push({ row: `A move exploring a tile, ${where}`, budget: 25, ms: explore.total, covers: "the DM's token.move into a tile hidden again: the explore and the map step" });
-  rows.push({ row: `Sight fan-out for that move, ${where}`, budget: 10, ms: explore.fanout, covers: "commit to the last ev, 7 sockets" });
+  rows.push({ row: `Sight fan-out for that move, ${where}`, budget: 10, ms: explore.fanout, covers: "commit to the last frame, 7 sockets" });
   await table.actor.shutdown({ code: 1012, snapshot: false });
 
   // Every layer's memory at its cap.
@@ -711,7 +721,7 @@ async function runDiscovery(perPlayer: boolean, rows: Row[]): Promise<void> {
     return send(full, owner(full, t), { t: "token.move", tokenId: t.id, x: t.x + (r % 24 < 12 ? 1 : -1), y: t.y });
   });
   rows.push({ row: `A move with every layer's memory full, ${where}`, budget: 25, ms: move.total, covers: "a player's token.move, with the leg test, explore, the map step and the fan-out (MD-O-21)" });
-  rows.push({ row: `Sight fan-out for that move, memory full, ${where}`, budget: 10, ms: move.fanout, covers: "commit to the last ev, 7 sockets" });
+  rows.push({ row: `Sight fan-out for that move, memory full, ${where}`, budget: 10, ms: move.fanout, covers: "commit to the last frame, 7 sockets" });
   const levels = ["dim", "bright", "dark"] as const;
   const global = await timed(async (r) => {
     await jiggle(full);
@@ -840,13 +850,13 @@ function longestTurn(): { stop: () => number } {
 }
 
 /** Sends a gesture's asks from the DM back to back under a group of their own and times the longest synchronous turn and the whole time to the last one's answer. */
-async function askTimed(table: Table, ops: readonly Op[]): Promise<{ turn: number; total: number }> {
+export async function askTimed(table: Table, ops: readonly Op[]): Promise<{ turn: number; total: number }> {
   const conn = table.dm;
   const group = uuidv7();
   const parts: Op[] = [];
   for (let k = 0; k < ops.length; k += MAX_ASK_OPS) parts.push({ t: "build.ask", sceneId: SCENE, ops: ops.slice(k, k + MAX_ASK_OPS) as never, part: parts.length, ...(k + MAX_ASK_OPS < ops.length ? { more: true as const } : {}) });
   table.sent.sender = conn;
-  table.sent.senderText = "";
+  table.sent.senderMessages = [];
   const sampler = longestTurn();
   const t0 = performance.now();
   let n = 0;
@@ -855,16 +865,12 @@ async function askTimed(table: Table, ops: readonly Op[]): Promise<{ turn: numbe
     table.n.set(conn, n);
     await table.actor.op(conn, n, part, group);
   }
-  const answered = () => {
-    if (!table.sent.senderText) return false;
-    const answer = JSON.parse(table.sent.senderText) as { t: string; acks?: number[]; rejects?: { n: number }[] };
-    return answer.t === "ev" && (answer.acks?.includes(n) === true || answer.rejects?.some((r) => r.n === n) === true);
-  };
+  const answered = () => benchAnswer(table.sent.senderMessages, n);
   for (let wait = 0; wait < 20_000 && !answered(); wait++) await new Promise((resolve) => setTimeout(resolve, 1));
   const total = performance.now() - t0;
   const turn = sampler.stop();
-  if (!answered()) throw new Error("the ask got no answer");
-  const answer = JSON.parse(table.sent.senderText) as { rejects?: { n: number; message: string }[] };
+  const answer = answered();
+  if (!answer) throw new Error("the ask got no answer");
   const refused = answer.rejects?.find((r) => r.n === n);
   if (refused) throw new Error(`the ask was refused: ${refused.message}`);
   return { turn, total };
