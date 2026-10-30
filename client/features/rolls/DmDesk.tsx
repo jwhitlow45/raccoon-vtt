@@ -237,6 +237,7 @@ export function DmDesk() {
         summaryButton
       ) : items > 0 ? (
         <div
+          data-alert-stack=""
           style={{
             display: "grid",
             gridTemplateColumns: "minmax(0, 1fr)",

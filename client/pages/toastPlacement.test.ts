@@ -1,3 +1,4 @@
+import "../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
@@ -7,6 +8,64 @@ import { transformWithOxc } from "vite";
 import { keptMapFoot, mapToastBox, putToastHosts } from "./toastPlacement.ts";
 import { columnFacts, columnTop, EDGE, nextToastPlaces, NO_TOAST_PLACES, raisedRow, SHADOW_ROOM, toastTop, type ColumnFacts } from "../canvas/barDock.ts";
 import { theme } from "../lib/theme.ts";
+
+test("ALERTS-FIRSTCARD: a 359 px desk measures its first trap card, not the whole stack", async () => {
+  const { createStore } = await import("zustand/vanilla");
+  const { room, trap } = await import("#shared/testutil.ts");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { RoomProvider } = await import("../state/view.ts");
+  const { RoomScope, RoomScopeProvider } = await import("../state/scope.ts");
+  const { DmDesk } = await import("../features/rolls/DmDesk.tsx");
+  const source = readFileSync(new URL("../features/encounter/InitiativeStrip.tsx", import.meta.url), "utf8");
+  const from = source.indexOf("function firstCard(");
+  const to = source.indexOf("/** The alerts over the screen:", from);
+  assert.ok(from > 0 && to > from);
+  class Element {
+    height: number;
+    children: Element[];
+    dataset: { alert?: string; alertStack?: string };
+    display: string;
+    constructor(height: number, children: Element[] = [], dataset: { alert?: string; alertStack?: string } = {}, display = "block") {
+      this.height = height;
+      this.children = children;
+      this.dataset = dataset;
+      this.display = display;
+    }
+    getBoundingClientRect() { return { height: this.height }; }
+  }
+  const firstHeight = new Function("HTMLElement", "getComputedStyle", `${stripTypeScriptTypes(source.slice(from, to))}\nreturn firstCardHeight;`)(Element, (e: Element) => ({ display: e.display })) as (el: Element, turn?: boolean) => number;
+  const oldWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  try {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: { innerWidth: 320 / 1.3, innerHeight: 568 / 1.3 } });
+    const traps = Object.fromEntries(Array.from({ length: 7 }, (_, i) => {
+      const t = trap(`trap${i}`);
+      return [t.id, { ...t, rig: { ...t.rig!, due: [{ id: `due${i}`, at: "2026-10-30T00:00:00Z", how: "enter" as const, by: [], hits: [] }] } }];
+    }));
+    const store = createStore(() => ({ view: room({ traps }), roomId: "r1", sceneId: "s1", you: { memberId: "dm1", role: "dm" }, connection: "open", pending: [], local: { panel: null, panelList: false, sheetHidden: false } }));
+    const html = renderToStaticMarkup(React.createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, children: React.createElement(RoomScopeProvider, { scope: new RoomScope(), children: React.createElement(DmDesk) }) }));
+    const outer = /^<div\b([^>]*)>/.exec(html);
+    assert.ok(outer, "the desk renders its stack");
+    const stack = new Element(359, [new Element(62), new Element(237), new Element(44)], /data-alert-stack=""/.test(outer[1]!) ? { alertStack: "" } : {}, "grid");
+    const cards = new Element(359, [new Element(0, [stack], { alert: "rolls" }, "contents")]);
+    assert.equal(firstHeight(cards), 62, "the 359 px desk must not become the first card");
+    assert.equal(firstHeight(cards, true), 62, "toast clearance uses the same first trap card");
+    const zoom = 1.3;
+    const first = firstHeight(cards) / zoom;
+    const facts = columnFacts(null, { top: 120, measured: { content: 359 / zoom, first, cover: firstHeight(cards, true) / zoom } });
+    assert.ok(facts);
+    assert.equal(200 < EDGE + first, false, "the 200 px lane can keep the first card without folding");
+    assert.equal(toastTop({ spanning: true, column: facts, cards: true, optionsTop: 400 }), 120 + first + EDGE, "a waiting toast clears the first card by 8 px");
+    const hidden = new Element(0);
+    const turn = new Element(44, [], { alert: "turn" });
+    assert.equal(firstHeight(new Element(44, [hidden, turn])), 0, "a lone turn card still cannot force a fold");
+    assert.equal(firstHeight(new Element(44, [hidden, turn]), true), 44, "toasts still clear a lone turn card");
+    const wholeCard = new Element(150, [new Element(44)], {}, "grid");
+    assert.equal(firstHeight(new Element(150, [wholeCard])), 150, "a card's own grid must not be reduced to its header");
+  } finally {
+    if (oldWindow) Object.defineProperty(globalThis, "window", oldWindow);
+    else Reflect.deleteProperty(globalThis, "window");
+  }
+});
 
 /** A portal host move blurs its descendant, as insertBefore does in the browser. */
 function page() {

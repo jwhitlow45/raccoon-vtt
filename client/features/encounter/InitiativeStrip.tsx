@@ -1161,7 +1161,8 @@ function FightAlerts() {
 
 /**
  * The first card as drawn: the first child with a box, looking inside a
- * wrapper with `display: contents`, as the rolls' is. A turn card is never
+ * wrapper with `display: contents` or a marked stack, as the rolls use.
+ * A card's own grid stays whole. A turn card is never
  * it: it lasts the whole turn, so it never moves the bar or forces the
  * summary row (docs/design-v1-combat-controls.md 4.2). With `turn` it may
  * be, for a toast, which keeps under a turn card alone too (barDock.ts
@@ -1170,7 +1171,7 @@ function FightAlerts() {
 function firstCard(cards: HTMLElement, turn = false): HTMLElement | null {
   for (const child of cards.children) {
     if (!(child instanceof HTMLElement) || (!turn && child.dataset.alert === "turn")) continue;
-    if (getComputedStyle(child).display === "contents") {
+    if (child.dataset.alertStack !== undefined || getComputedStyle(child).display === "contents") {
       const inner = firstCard(child, turn);
       if (inner) return inner;
       continue;

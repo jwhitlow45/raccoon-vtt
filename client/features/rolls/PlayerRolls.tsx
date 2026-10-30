@@ -398,6 +398,7 @@ export function PlayerRolls() {
         summaryButton
       ) : (
         <div
+          data-alert-stack=""
           style={{
             display: "grid",
             gridTemplateColumns: "minmax(0, 1fr)",
