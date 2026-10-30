@@ -602,7 +602,8 @@ panelFile(null, () => {
     assert.ok(Math.max(...boxes.map((box) => box.top)) - Math.min(...boxes.map((box) => box.top)) <= 1, "390 x 844: proficiency markers preserve the single save line");
     await noSideScroll(saves, "390 x 844: all six saves");
     assert.deepEqual(await proficiencyLines(saves, "390 x 844: summary saves"), [], "every marker is placed and every label fits");
-    assert.deepEqual(await proficiencyHeightLines(goblin, "390 x 844: goblin bar"), [], "the bar has the same height with markers hidden");
+    // A goblin lists no saves, so its bar may hold no marker: the dragon bar's check (above) is the one that must hide some.
+    assert.deepEqual(await proficiencyHeightLines(goblin, "390 x 844: goblin bar", false), [], "the bar has the same height with markers hidden");
     // At 100% the expanded bar's full layout shows Apply wherever its token stands (barButtons.ts barCapacity).
     await applyInView(goblin, "390 x 844, Goblin 4 mid-screen");
     // A token at the scene's foot gets the same layout: the field under the mode buttons, no More stats.
