@@ -22,6 +22,12 @@
  *   15 ft emanation on a creature, and four fliers among them, 16 tokens.
  * - cap: 200 areas, a scene's most, over an 80 by 80 scene.
  * - giant: a 200 by 200 hex rows scene where a 500 ft emanation comes in.
+ * - hexRows and hexColumns: a fully raised 40 by 40 hex scene on each
+ *   orientation (docs/design-v1-iso-hex-relief.md 9): a terrace,
+ *   alternating heights, pits and a seeded field over the whole height
+ *   range, a wall across levels, 40 creatures of mixed sizes and four
+ *   areas, with pans at 40 px, 12 px and fit, a local drag, a warm turn and
+ *   a 40 ft cube on alternating hex heights coming in.
  *
  * Rows: pan (the typical scene at 40 px, the caps at fit and at 40 px, the
  * crowd at 40 px), a local drag (each whole frame), the ringed and aura'd
@@ -67,6 +73,7 @@ import { chromium, type BrowserContext, type CDPSession, type Page } from "playw
 import sharp from "sharp";
 import WebSocket from "ws";
 import { pickOption, pickTool, ROOT, startServer } from "../e2e/harness.ts";
+import { hexCenter, sceneHexes } from "../shared/rules/hex.ts";
 
 /** A low-zoom diagonal tether across the largest map. This CPU row needs no browser or database. */
 export async function tetherWork(length = 200): Promise<{ candidates: number; visited: number }> {
@@ -261,6 +268,48 @@ function giant(sceneId: string): Built {
   const walker = token(sceneId, "Scout", 100, 100);
   return { ops: [{ t: "scene.update", sceneId, patch: { bounds: { w: 200, h: 200 }, fogEnabled: false, gridShape: "hexRows" } }, { t: "token.create", token: walker }], walker: walker.id as string, bounds: { w: 200, h: 200 }, at40: { x: 100, y: 100 } };
 }
+
+/**
+ * A fully raised 40 by 40 hex scene on one orientation
+ * (docs/design-v1-iso-hex-relief.md 9): its 1,778 hexes all off the
+ * ground, a flat-topped 10 ft terrace over its west third, hexes
+ * alternating 5 ft and 15 ft over the middle so every side shows, a
+ * mixed field of pits, and a seeded field from -100 ft to 200 ft in the
+ * east. On it, a wall across several levels, 40 creatures of mixed sizes
+ * and the four areas of the area design's cost section.
+ */
+export function hexRelief(orient: "rows" | "columns") {
+  return (sceneId: string, dmId: string): Built => {
+    const G = { shape: "hex", orient } as const;
+    const bounds = { w: 40, h: 40 };
+    const ops: Op[] = [{ t: "scene.update", sceneId, patch: { bounds, fogEnabled: false, gridShape: orient === "rows" ? "hexRows" : "hexColumns" } }];
+    let seed = orient === "rows" ? 0x40 : 0x41;
+    const rand = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+    const byFeet = new Map<number, string[]>();
+    for (const h of sceneHexes(G, bounds)) {
+      const c = hexCenter(G, h);
+      const feet = c.x < 13 ? 10 : c.x < 26 ? ((h.col + h.row) % 2 === 0 ? 5 : 15) : c.y < 14 ? -5 * (1 + Math.floor(rand() * 4)) : 5 * (Math.floor(rand() * 61) - 20) || 5;
+      byFeet.set(feet, [...(byFeet.get(feet) ?? []), `${h.col},${h.row}`]);
+    }
+    for (const [height, list] of byFeet) for (const part of chunked(list, 2000)) ops.push({ t: "build.height", sceneId, cells: part, height });
+    // A wall across the terrace's edge and the alternating hexes, in runs a free wall may hold.
+    for (let i = 0; i < 4; i++) ops.push({ t: "build.walls", sceneId, put: [{ id: `hxbenchw${String(i).padStart(4, "0")}`, a: [8 + i * 6, 20], b: [14 + i * 6, 20.5], f: { kind: "wall" } }] });
+    const tokens: Op[] = [];
+    const sizes = ["medium", "medium", "small", "large", "medium", "huge", "medium", "gargantuan"] as const;
+    for (let i = 0; i < 40; i++) tokens.push(token(sceneId, `Creature ${i + 1}`, 3 + (i % 10) * 3.6, 4 + Math.floor(i / 10) * 8, { size: sizes[i % sizes.length] }));
+    for (const t of tokens) ops.push({ t: "token.create", token: t });
+    ops.push(template(sceneId, dmId, { shape: "sphere", size: 20, origin: { x: 20.5, y: 15.5, z: 10 } }));
+    ops.push(template(sceneId, dmId, { shape: "cone", size: 30, origin: { x: 17, y: 18, z: 0 }, yaw: 315, pitch: 40, color: "#e5484d" }));
+    ops.push(template(sceneId, dmId, { shape: "cylinder", size: 10, height: 40, origin: { x: 23.5, y: 13.5, z: 0 }, color: "#30a46c" }));
+    ops.push(template(sceneId, dmId, { shape: "emanation", size: 15, origin: { x: 18.5, y: 13.5, z: 0 }, attachedTo: tokens[13]!.id, includeOrigin: false, color: "#f38400" }));
+    // The walker is a Medium at (17.4, 20), near the camera, so it stays on a phone's screen in every view.
+    return { ops, walker: tokens[24]!.id as string, bounds, at40: { x: 20, y: 20 } };
+  };
+}
+
+/** The 40 ft cube the hex relief rows bring in over the alternating hexes, and the row names. */
+const HEX_CUBE = { shape: "cube", size: 40, origin: { x: 16, y: 26, z: 20 }, yaw: 0 };
+const hexRow = (orient: string, what: string) => `${what}, hex relief ${orient}`;
 
 // ---------------------------------------------------------------- the page
 
@@ -621,6 +670,23 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
   try {
     await page.goto(`${server.origin}/`);
     const built: Record<string, { room: Room; scene: Built; dm: Socket }> = {};
+    const cookieNow = async () => (await context.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
+    /*
+     * One DM socket at a time beside the page's: the server lets a session hold
+     * eight (server/rooms/budgets.ts DEFAULT_SOCKET_CAPS), fewer than the rooms.
+     * A room's socket closes once its scene is built, and the room being timed
+     * opens a new one (`dmOf`).
+     */
+    let live: string | null = null;
+    const dmOf = async (kind: string): Promise<Socket> => {
+      const b = built[kind]!;
+      if (live === kind) return b.dm;
+      if (live !== null) built[live]!.dm.close();
+      b.dm = await Socket.open(server.origin, b.room.roomId, await cookieNow());
+      sockets.push(b.dm);
+      live = kind;
+      return b.dm;
+    };
     // The rooms for areas come last, so the others keep their ids and the parity images of before still match.
     for (const [kind, make] of [
       ["typical", typical],
@@ -629,20 +695,22 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       ["areas", areas],
       ["cap", cap],
       ["giant", giant],
+      ["hexRows", hexRelief("rows")],
+      ["hexColumns", hexRelief("columns")],
     ] as const) {
       const room = await createRoom(page, `Bench iso ${kind} ${stamp}`);
       rooms.push(room);
-      const cookie = (await context.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
-      const dm = await Socket.open(server.origin, room.roomId, cookie);
-      sockets.push(dm);
+      const dm = await Socket.open(server.origin, room.roomId, await cookieNow());
       const scene = make(dm.sceneId, dm.memberId);
       for (const op of scene.ops) await dm.op(op);
+      dm.close();
       built[kind] = { room, scene, dm };
     }
 
     if (opts.parity) {
       mkdirSync(opts.parity, { recursive: true });
-      for (const [kind, { room, scene, dm }] of Object.entries(built)) {
+      for (const [kind, { room, scene }] of Object.entries(built)) {
+        const dm = await dmOf(kind);
         // Fixed cameras: a fit follows the bars over the map as they measure, which can land a fraction of a pixel apart from run to run.
         for (const [shot, zoom] of [
           ["far", Math.max(4, 400 / scene.bounds.w)],
@@ -689,9 +757,11 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       }
     };
     const open = async (kind: string, zoom: number | "fit") => {
-      const { room, scene, dm } = built[kind]!;
+      const { room, scene } = built[kind]!;
+      const dm = await dmOf(kind);
       await startAt(dm, scene.at40, zoom);
       await openView(context, page, view, room.roomId);
+      return dm;
     };
 
     // The typical scene.
@@ -817,8 +887,7 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       await add("pan, 200 areas, 40 px", () => throttled(() => rounds(() => touchPan(page, cdp, STEPS))));
     }
     if (!opts.only || opts.only.some((o) => GIANT_ROW.includes(o))) {
-      const { dm } = built.giant!;
-      await open("giant", 40);
+      const dm = await open("giant", 40);
       let made: Op | null = null;
       const arrivals: number[] = [];
       const builds: number[] = [];
@@ -839,6 +908,43 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       rows.push({ row: GIANT_ARRIVAL_ROW, view, ms: stats(arrivals.slice(1)) });
       rows.push({ row: GIANT_ROW, view, ms: frameStats(frames) });
       if (view === "isometric") rows.push({ row: GIANT_STOOD_ROW, view, ms: stats(builds.slice(1)) });
+    }
+
+    // The fully raised hex scenes, each orientation: pans at the zooms around the threshold and at fit, a local drag, and in Isometric a turn and a 40 ft cube coming in.
+    for (const orient of ["rows", "columns"] as const) {
+      const kind = orient === "rows" ? "hexRows" : "hexColumns";
+      const { scene } = built[kind]!;
+      for (const zoom of [40, 12, "fit"] as const) {
+        await open(kind, zoom);
+        await add(hexRow(orient, `pan, ${zoom === "fit" ? "fit" : `${zoom} px`}`), () => throttled(() => rounds(() => touchPan(page, cdp, STEPS))));
+      }
+      const dm = await open(kind, 40);
+      await add(hexRow(orient, "local drag, whole frame, 40 px"), () => throttled(() => rounds(() => touchDrag(page, cdp, scene.walker, STEPS))));
+      if (view === "isometric" && (!opts.only || opts.only.some((o) => "hex relief".includes(o) || o.includes("hex relief")))) {
+        const hook = (call: "turn" | "pick", arg?: unknown) => page.evaluate(([c, a]) => (globalThis as unknown as { __rvttIsoHook?: Record<string, (a: unknown) => unknown> }).__rvttIsoHook?.[c]?.(a), [call, arg] as const);
+        // A turn keeps still the point a press at the middle meets, here a column up to 200 ft tall at the scene's near corner, so the
+        // camera would walk off toward it turn by turn. The selected walker is the point it keeps instead (boardPick.ts heldPoint).
+        await select(page, [scene.walker]);
+        for (const t of [1, 2, 3, 0] as const) {
+          await hook("turn", t);
+          await frames(page, 6);
+          await waitStood(page);
+        }
+        await add(`turn, hex relief ${orient}, 40 px, each turn visited before`, () => throttled(() => rounds(() => timed(page, cdp, 4, async (i) => void (await hook("turn", (i + 1) % 4)), 4))));
+        let made: Op | null = null;
+        const builds: number[] = [];
+        const frames2 = await throttled(() =>
+          rounds(async () => {
+            if (made) await dm.op({ t: "template.delete", templateId: (made.template as { id: string }).id });
+            made = template(dm.sceneId, dm.memberId, HEX_CUBE);
+            const got = await timedUntil(page, cdp, () => dm.op(made!), () => stoodNow(page));
+            builds.push(got.ms);
+            return got.frames;
+          }),
+        );
+        rows.push({ row: hexRow(orient, "a 40 ft cube on alternating hex heights, each frame while it builds, 40 px"), view, ms: frameStats(frames2) });
+        rows.push({ row: hexRow(orient, "a 40 ft cube on alternating hex heights, until it stands (ms whole, not a frame)"), view, ms: stats(builds.slice(1)) });
+      }
     }
 
     if (view === "isometric") {
@@ -989,7 +1095,7 @@ async function waitStood(page: Page): Promise<number> {
     if (await stoodNow(page)) return Date.now();
     await page.waitForTimeout(50);
   }
-  throw new Error("the areas never all stood");
+  throw new Error(`the areas never all stood: ${JSON.stringify(await volumesNow(page))}`);
 }
 /** In Isometric's pass it runs back in Top-down with the isometric tree mounted and hidden, whose side tints read the map (ISO2-OPUS-12). */
 const MAP_ROW = "a map image set and taken away from another device of the DM's, caps, 40 px";

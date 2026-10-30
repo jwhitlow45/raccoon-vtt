@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { CDPSession, Page } from "playwright-core";
-import { CAP_FIRST_ROW, gate, tetherWork, timedUntil } from "./bench-iso.ts";
+import { CAP_FIRST_ROW, gate, hexRelief, tetherWork, timedUntil } from "./bench-iso.ts";
 
 /*
  * The isometric bench's build rows (docs/design-v1-iso-area-shapes.md 6
@@ -42,5 +42,23 @@ describe("the isometric bench's build rows", () => {
     assert.match(gate(CAP_FIRST_ROW, { median: 6, max: 180, n: frames.length, frames }, undefined), /^OVER: 1 of 31 frames past 16\.0, the largest 180\.0/);
     assert.match(gate(CAP_FIRST_ROW, { median: 6, max: 12, n: 2, frames: [6, 12] }, undefined), /^ok, every frame/);
     assert.match(gate("pan, typical, 40 px", { median: 15, max: 40, n: 2 }, 9), /^ok/, "a row of frames that are not a build's keeps its median");
+  });
+});
+
+describe("the hex relief rooms (docs/design-v1-iso-hex-relief.md 9)", () => {
+  test("each orientation raises every one of a 40 by 40 scene's 1,778 hexes, across the whole height range, with a wall, 40 creatures and four areas", () => {
+    for (const orient of ["rows", "columns"] as const) {
+      const built = hexRelief(orient)("s1", "dm");
+      const heights = built.ops.filter((o) => o.t === "build.height") as { cells: string[]; height: number }[];
+      const cells = heights.flatMap((o) => o.cells);
+      assert.equal(new Set(cells).size, 1778, orient);
+      assert.equal(cells.length, 1778, `${orient}: each hex once`);
+      assert.ok(heights.every((o) => o.height !== 0), `${orient}: none left at 0`);
+      const feet = heights.map((o) => o.height);
+      assert.ok(Math.min(...feet) <= -100 + 5 && Math.max(...feet) >= 195, `${orient}: ${Math.min(...feet)} to ${Math.max(...feet)}`);
+      assert.equal(built.ops.filter((o) => o.t === "token.create").length, 40);
+      assert.equal(built.ops.filter((o) => o.t === "template.create").length, 4);
+      assert.ok(built.ops.some((o) => o.t === "build.walls"));
+    }
   });
 });
