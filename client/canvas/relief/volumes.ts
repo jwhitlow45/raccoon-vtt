@@ -1,6 +1,7 @@
 import { CHUNK_CELLS } from "#shared/model.ts";
 import type { AreaContext, AreaTemplateInput } from "#shared/rules/aoe.ts";
 import { bandKey, VolumeCache, type BandDraw, type Volume, type WorldBox } from "../../features/areas/volume.ts";
+import { cellId, neighborsOf, type GroundCell } from "../../lib/groundCells.ts";
 import { K, turnAxes, type DrawnHeights, type Turn } from "../../lib/view.ts";
 import { meets, type VolumePiece } from "./buckets.ts";
 import type { VolumeLook } from "./drawRelief.ts";
@@ -88,16 +89,19 @@ function drawnInView(vol: Volume, turn: Turn, view: VBox): boolean {
 }
 
 /**
- * The openings at 0 of the pits under a built volume's plan, world
- * polygons, which clip what lies inside them (design 4.3): every pit cell
- * its box meets, grown by the deepest drawn pit's reach down the screen,
- * so a part below 0 shows through a neighbor's opening in its region as
- * well as its own (docs/design-v1-iso-hex-relief.md 5.2). Kept per volume:
- * its drawn heights are part of its key.
+ * The openings at 0 of the pit regions under a built volume's plan, world
+ * polygons, which clip what lies inside them (design 4.3): the pits its
+ * plan meets and every pit joined to them side by side (the index's
+ * regions, buckets.ts), as far as the deepest drawn pit's reach down the
+ * screen past its box, so a part below 0 shows through a neighbor's
+ * opening in its region as well as its own
+ * (docs/design-v1-iso-hex-relief.md 5.2), and never through an unrelated
+ * pit's, whose opening swept up would show it over flat ground (review
+ * HXR1-ASTRA-1). Kept per volume: its drawn heights are part of its key.
  */
 const pitsOf = new WeakMap<Volume, readonly (readonly { x: number; y: number }[])[]>();
 
-export function pitsUnder(vol: Volume, heights: Pick<DrawnHeights, "low" | "cellsIn" | "atCell" | "polygon">): readonly (readonly { x: number; y: number }[])[] {
+export function pitsUnder(vol: Volume, heights: Pick<DrawnHeights, "grid" | "low" | "cellsIn" | "atCell" | "polygon">): readonly (readonly { x: number; y: number }[])[] {
   let pits = pitsOf.get(vol);
   if (pits) return pits;
   const box = vol.box;
@@ -105,7 +109,28 @@ export function pitsUnder(vol: Volume, heights: Pick<DrawnHeights, "low" | "cell
   // Only a solid reaching below the ground at 0 can lie in a pit.
   if (box && box.z0 < 0) {
     const reach = 2 * K * Math.max(0, -heights.low) + 1;
-    for (const c of heights.cellsIn({ x0: box.x0 - reach, y0: box.y0 - reach, x1: box.x1 + reach, y1: box.y1 + reach })) if (heights.atCell(c) < 0) out.push(heights.polygon(c));
+    const near = new Map<number, GroundCell>();
+    for (const c of heights.cellsIn({ x0: box.x0 - reach, y0: box.y0 - reach, x1: box.x1 + reach, y1: box.y1 + reach })) if (heights.atCell(c) < 0) near.set(cellId(c), c);
+    // From the pits under the plan, through pits side by side, as the index joins its regions.
+    const joined = new Set<number>();
+    const queue: GroundCell[] = [];
+    for (const c of heights.cellsIn(box)) {
+      const id = cellId(c);
+      if (near.has(id) && !joined.has(id)) {
+        joined.add(id);
+        queue.push(c);
+      }
+    }
+    while (queue.length > 0) {
+      for (const n of neighborsOf(heights.grid, queue.pop()!)) {
+        const id = cellId(n);
+        if (near.has(id) && !joined.has(id)) {
+          joined.add(id);
+          queue.push(n);
+        }
+      }
+    }
+    for (const [id, c] of near) if (joined.has(id)) out.push(heights.polygon(c));
   }
   pitsOf.set(vol, (pits = out));
   return pits;

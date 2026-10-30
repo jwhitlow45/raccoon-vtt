@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { flatHeights } from "../../lib/view.ts";
+import { flatHeights, type DrawnHeights } from "../../lib/view.ts";
+import { SQUARES, type Grid } from "#shared/rules/grid.ts";
+import { groundSurface } from "../../lib/groundCells.ts";
+import { drawVolume } from "./drawRelief.ts";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import { FOG_SUBCELLS, type FogTile } from "#shared/model.ts";
@@ -287,5 +290,98 @@ describe("the board's areas standing as their real shapes", () => {
     const src = readFileSync(new URL("./IsoBoard.tsx", import.meta.url), "utf8");
     assert.match(src, /const heights = useMemo\(\(\) => drawnHeights\(src, feet\), \[src, feet\]\);/);
     assert.match(src, /\(\{ heights, tiles: props\.viewerFog, px: octave, fog, live: liveGround \}\)/);
+  });
+});
+
+/** Drawn heights on a grid from cells in cells of height, every other cell 0. */
+function heightsOn(grid: Grid, bounds: { w: number; h: number }, cells: Record<string, number>): DrawnHeights {
+  const surface = groundSurface(grid, bounds, (c) => cells[`${c.col},${c.row}`] ?? 0);
+  const values = Object.values(cells);
+  return { ...surface, low: Math.min(0, ...values), high: Math.max(0, ...values), at: (x, y) => surface.atCell({ col: x, row: y }) };
+}
+
+/** How many fills cover a view point, inside every clip in force: a canvas that reads paths in view units, with no transform. */
+function fillsAt(point: { x: number; y: number }): { g: CanvasRenderingContext2D; count: () => number } {
+  type Sub = { x: number; y: number }[];
+  let path: Sub[] = [];
+  let clips: Sub[][] = [];
+  const stack: Sub[][][] = [];
+  let n = 0;
+  const inside = (subs: Sub[]) =>
+    subs.some((poly) => {
+      let odd = false;
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const a = poly[i]!;
+        const b = poly[j]!;
+        if (a.y > point.y !== b.y > point.y && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) odd = !odd;
+      }
+      return odd;
+    });
+  const g = {
+    save: () => stack.push(clips),
+    restore: () => {
+      clips = stack.pop()!;
+    },
+    beginPath: () => {
+      path = [];
+    },
+    moveTo: (x: number, y: number) => path.push([{ x, y }]),
+    lineTo: (x: number, y: number) => path[path.length - 1]!.push({ x, y }),
+    closePath: () => {},
+    clip: () => {
+      clips = [...clips, path];
+    },
+    fill: () => {
+      if (inside(path) && clips.every(inside)) n++;
+    },
+    stroke: () => {},
+    setLineDash: () => {},
+    fillStyle: "",
+    strokeStyle: "",
+    lineJoin: "",
+    lineCap: "",
+    lineWidth: 1,
+    globalAlpha: 1,
+  };
+  return { g: g as unknown as CanvasRenderingContext2D, count: () => n };
+}
+
+describe("an area below 0 shows only through its own pits (review HXR1-ASTRA-1)", () => {
+  test("squares, lone pits (2,2) and (4,4) at -4 cells, a 5 ft cube in (2,2) at -0.8 cells: (4,4)'s opening admits none of it over the flat ground between", () => {
+    const bounds = { w: 8, h: 8 };
+    const heights = heightsOn(SQUARES, bounds, { "2,2": -4, "4,4": -4 });
+    const fog = new FogView(null, "s1", bounds);
+    const w: VolumeWorld = { heights, tiles: null, px: 32, fog, live: null };
+    const cube: AreaTemplateInput = { id: "c", rev: 1, shape: "cube", size: 5, origin: { x: 2.5, y: 2.5, z: -4 }, yaw: 0, includeOrigin: true };
+    const v = new BoardVolumes();
+    v.sync([{ id: "c", template: cube, ctx: ctxOf(bounds, null), look: LOOK }], w);
+    settle(v, w);
+    const now = v.now(0, VIEW, w);
+    assert.ok(now.standing.has("c"));
+    const pits = now.pieces[0]!.pits;
+    assert.deepEqual(pits, [heights.polygon({ col: 2, row: 2 })], "its own pit's opening alone");
+    // The sample over flat ground (3.4798, 3.4798), where (4,4)'s opening swept up would let the cube's fill through.
+    const at = fillsAt({ x: 0, y: 2.460587276 });
+    const high = now.pieces.flatMap((p) => p.draws.map((d) => d.high));
+    const low = now.pieces.flatMap((p) => p.draws.map((d) => d.low));
+    drawVolume(at.g, high, low, pits, LOOK, 0, 1 / 32);
+    assert.equal(at.count(), 0);
+    // With (4,4)'s opening too, the sample is filled: it tells the two apart.
+    const both = fillsAt({ x: 0, y: 2.460587276 });
+    drawVolume(both.g, high, low, [...pits, heights.polygon({ col: 4, row: 4 })], LOOK, 0, 1 / 32);
+    assert.ok(both.count() > 0);
+  });
+
+  test("a pit joined to the one under the plan, side by side, still opens: the part shows through its region's neighbor", () => {
+    const bounds = { w: 8, h: 8 };
+    // (4,2) lies past the cube's plan, joined to it only through (3,2).
+    const heights = heightsOn(SQUARES, bounds, { "2,2": -4, "3,2": -4, "4,2": -4, "5,5": -4 });
+    const w: VolumeWorld = { heights, tiles: null, px: 32, fog: new FogView(null, "s1", bounds), live: null };
+    const cube: AreaTemplateInput = { id: "c", rev: 1, shape: "cube", size: 5, origin: { x: 2.5, y: 2.5, z: -4 }, yaw: 0, includeOrigin: true };
+    const v = new BoardVolumes();
+    v.sync([{ id: "c", template: cube, ctx: ctxOf(bounds, null), look: LOOK }], w);
+    settle(v, w);
+    const pits = v.now(0, VIEW, w).pieces[0]!.pits;
+    assert.deepEqual(new Set(pits), new Set([heights.polygon({ col: 2, row: 2 }), heights.polygon({ col: 3, row: 2 }), heights.polygon({ col: 4, row: 2 })]));
   });
 });

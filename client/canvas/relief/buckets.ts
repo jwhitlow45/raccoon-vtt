@@ -81,7 +81,7 @@ export type VolumePiece = {
   draws: readonly BandDraw[];
   bounds: VBox;
   look: VolumeLook;
-  /** The openings at 0 of the pit regions under the area, world polygons, which clip what lies inside them (design 4.3, Pits). */
+  /** The openings at 0 of the pits under the area's plan and those joined to them side by side, as far as their reach down the screen, world polygons, which clip what lies inside them (design 4.3, Pits, volumes.ts pitsUnder). */
   pits: readonly (readonly { x: number; y: number }[])[];
 };
 
