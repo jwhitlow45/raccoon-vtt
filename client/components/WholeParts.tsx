@@ -50,8 +50,8 @@ export function refitOn(row: Pick<HTMLElement, "clientWidth">, fit: () => void, 
  * clips it to one line (components/Panel.tsx). Where the line cannot hold
  * every part, it ends with "…" after the last part that fits, so a part
  * is never cut and a marked name always shows whole with its mark
- * (D-261030-437). Only a first part too long for the line on its own is
- * cut, by the summary's own ellipsis. The parts past the cut stay for a
+ * (D-261030-437). Only a first part too long for the line with "…" after
+ * it is cut, by the summary's own ellipsis. The parts past the cut stay for a
  * screen reader, which hears the whole line as the fold's description.
  *
  * It measures after layout and again when its row changes width or a web
@@ -84,8 +84,7 @@ export function WholeParts(props: { parts: readonly { join: string; node: ReactN
         // "…" follows what would have joined the first hidden part: ", …" in a list, " · …" between kinds.
         join.textContent = part.getAttribute("data-summary-join") ?? "";
       }
-      // One part alone still too long keeps the summary's own ellipsis, inside it.
-      if (over()) more.hidden = true;
+      // A first part too long to keep "…" after it keeps "…" anyway: the summary's own ellipsis then cuts the part, so a cut line always ends with "…" (FL-12).
       clip.setAttribute("data-summary-cut", "");
     };
     fit();
