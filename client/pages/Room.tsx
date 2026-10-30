@@ -2569,8 +2569,10 @@ const TOOLBAR_LINES = {
  *
  * - On a phone, the DM's setup tools stand behind Setup, a menu of tiles,
  *   so seven buttons and Panels fit a 390 px phone without scrolling. The
- *   buttons share the row, each from 44 px up to 68 px, and scroll where
- *   even 44 px each do not fit (components/ScrollStrip.tsx).
+ *   buttons share the row, each from 44 px up with no cap, so any number
+ *   of tools ends where Panels starts. They scroll where even 44 px each do
+ *   not fit (components/ScrollStrip.tsx). From a 600 px layout width, a
+ *   tablet upright, each stops at 68 px as before.
  * - From 900 px up every tool shows, with a divider before the setup tools.
  * - Where the options share the toolbar's row (the merged and pair
  *   arrangements), every button is 56 px with its name, or 44 px icons
@@ -2655,7 +2657,7 @@ function Toolbar(props: {
   const shown = arrangement === "pair" ? tools.filter((t) => t.id === "select" || t.id === lastTool?.id) : tools.filter((t) => layout.ids.includes(t.id));
   const divider = arrangement === "pair" ? null : layout.divider;
   const activeSetup = setupTools.find((t) => t.id === props.tool) ?? null;
-  // The width of a button: fixed where the options share the row, shared and capped on a phone's own row, as before from 900 px up.
+  // The width of a button: fixed where the options share the row, shared on a phone's own row without a cap, and capped at 68 px from a 600 px layout width, as before. From 900 px up the buttons float.
   const size: ButtonSize = inRow ? { fixed: props.named ? TOOL_BUTTON_NAMED : TOOL_BUTTON_ICON } : wide ? "floating" : props.phone ? "shared" : "capped";
   const line = (key: keyof typeof TOOLBAR_LINES) => `${ids}-${key}`;
   const frame = useMemo(() => toolbarPopoverFrame(props.popover, props.toolbar), [props.popover, props.toolbar]);
