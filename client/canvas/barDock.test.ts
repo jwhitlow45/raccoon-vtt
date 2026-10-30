@@ -1150,6 +1150,17 @@ describe("the toasts' places in the layer, around a map pane (LP15-FU-8, FU21B-A
     assert.equal(sheet.places.get(5), "sheet", "the modal sheet keeps its own toast slot");
   });
 
+  test("HF41-S2: map toasts reaching past the card do not start another stack beside a retained layer stack", () => {
+    let s = step(NO_TOAST_PLACES, [1]);
+    s = step(s, [1, 2], { low: 250, mapFoot: 112 });
+    // The notices now end below the current card but above the retained
+    // layer stack. A new notice at the top would grow over that stack.
+    s = step(s, [1, 2, 3], { low: 131, mapFoot: 226 });
+    assert.equal(s.places.get(1), "map");
+    assert.deepEqual(s.places.get(2), { low: 250, column: true });
+    assert.deepEqual(s.places.get(3), s.places.get(2));
+  });
+
   test("a column stack keeps its top through a turn of the screen, and takes the cards' edges as they stand now (PL2-ASTRA-02)", () => {
     let s = step(NO_TOAST_PLACES, [1], { low: 140 });
     assert.deepEqual(toastLayerPlace(s, [1], sideways), { top: 140, edges: { left: 196, right: 348 } });

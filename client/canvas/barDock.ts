@@ -1565,14 +1565,14 @@ export function inToastLayer(place: ToastPlace | undefined): boolean {
  * (`overBar`).
  *
  * The layer keeps one stack. A new toast joins it even after its card or
- * header goes away, or starts one under the column's first card or the
- * pane's header. While a pane stands, the whole stack goes under its
- * header on any render that has the header's
- * place, and follows it: a column stack moves there once, as the pane
- * opens, and a stack a closed pane left joins the next pane's header. So
- * do the toasts at the top of the notices (review FU21B-OP-7), where a
- * pane that rises to the top bars would have them over its header and
- * Close. They move into the layer without being drawn anew (Room.tsx
+ * header goes away. With no stack there, it starts one under the column's
+ * first card or the pane's header. While a pane stands, the whole stack
+ * follows its header on any render that has the header's place. A column
+ * stack moves there as the pane opens. A stack left by a closed pane
+ * joins the next pane's header too. So do the toasts at the top of the
+ * notices (review FU21B-OP-7). A pane rising to the top bars would
+ * otherwise leave those toasts over its header and Close. They move
+ * into the layer without being drawn anew (Room.tsx
  * Toasts), so none is announced again. When the pane goes away, the
  * stack freezes at the header's last place. A pane can stand for a render
  * with no header place (`pane` null), its first or one with too little
@@ -1593,7 +1593,8 @@ export function inToastLayer(place: ToastPlace | undefined): boolean {
  * another time moves no toast itself, so nothing jumps under a finger.
  * A toast that would start under the card while toasts at the notices'
  * top reach down past it (`mapFoot`, their foot as last drawn) joins them
- * there instead, so the two stacks never overlap (review LP18-TO-4). A
+ * there instead if no layer stack exists (review LP18-TO-4). Otherwise it
+ * joins the retained layer stack, so the notices cannot grow over it. A
  * pane that stops standing as the screen turns leaves its toasts to be
  * placed anew (review LP18-TO-3).
  *
@@ -1691,7 +1692,8 @@ export function nextToastPlaces(
   }
   for (const id of now.ids) {
     if (places.has(id)) continue;
-    // Toasts already at the notices' top that reach down past the card, as a trap's toast that came with its card does, would be covered by a stack started under the card, so the new toast joins them below instead (review LP18-TO-4).
+    // With no layer stack, a new toast joins notices that reach past the
+    // card instead of starting a stack over them (review LP18-TO-4).
     const mapReaches = now.low !== null && now.mapFoot != null && now.mapFoot + EDGE > now.low && [...places.values()].includes("map");
     const fresh: ToastPlace = now.slot
       ? "sheet"

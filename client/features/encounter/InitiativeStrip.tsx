@@ -835,6 +835,8 @@ function FightAlerts() {
   );
 
   // The cards' measures, while they are drawn. Folded or summarized they keep the last ones, so hiding them never reads as having none, at the column's top now (barDock.ts columnFacts).
+  // The rolls summary also brings trap and save cards from the child desk.
+  // Measure them before paint so their waiting toasts can move below them.
   useLayoutEffect(() => {
     const cards = cardsRef.current;
     if (!cards || colTop === null) return;
@@ -860,7 +862,7 @@ function FightAlerts() {
     const observer = new ResizeObserver(measure);
     observer.observe(cards);
     return () => observer.disconnect();
-  }, [dock, colTop, zoom, alerts, summarized, folded, forFootCard, forRoom, overlay, rowPlace.lift]);
+  }, [dock, colTop, zoom, alerts, rolls, summarized, folded, forFootCard, forRoom, overlay, rowPlace.lift]);
   useLayoutEffect(() => () => dock.setState({ column: null }), [dock]);
 
   /*

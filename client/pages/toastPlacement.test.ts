@@ -5,7 +5,7 @@ import { test } from "node:test";
 import * as React from "react";
 import { transformWithOxc } from "vite";
 import { keptMapFoot, mapToastBox, putToastHosts } from "./toastPlacement.ts";
-import { columnTop, EDGE, nextToastPlaces, NO_TOAST_PLACES, raisedRow, SHADOW_ROOM } from "../canvas/barDock.ts";
+import { columnFacts, columnTop, EDGE, nextToastPlaces, NO_TOAST_PLACES, raisedRow, SHADOW_ROOM, toastTop, type ColumnFacts } from "../canvas/barDock.ts";
 import { theme } from "../lib/theme.ts";
 
 /** A portal host move blurs its descendant, as insertBefore does in the browser. */
@@ -132,6 +132,61 @@ test("FU39-B: a first card clears an older toast while its new toast moves below
     assert.equal(columnTop(60, null, nextFoot), top, "moving the new toast must not move its card again");
     const settled = nextToastPlaces(placed, { ...input, low, mapFoot: nextFoot, recent: new Set<number>() });
     assert.deepEqual(settled.places, placed.places, "aging out of CARD_MS must not move either toast");
+  }
+});
+
+test("HF-41 R1: a kept notice followed by a trap and its card places the trap toast below the card before an observer runs", () => {
+  const alerts = readFileSync(new URL("../features/encounter/InitiativeStrip.tsx", import.meta.url), "utf8");
+  const start = alerts.indexOf("  useLayoutEffect(() => {\n    const cards = cardsRef.current;");
+  const end = alerts.indexOf("\n  useLayoutEffect(() => () => dock.setState({ column: null })", start);
+  assert.ok(start > 0 && end > start);
+  for (const zoom of [1, 1.3]) {
+    const input = { ids: [1], pane: null, paneStands: false, low: null, layer: true, slot: false, recent: new Set<number>() };
+    let placed = nextToastPlaces(NO_TOAST_PLACES, input);
+    const kept = { id: 1, top: 68 * zoom, bottom: 112 * zoom };
+    const keptFoot = keptMapFoot([kept], placed.awaitCard, zoom);
+    const top = columnTop(60, null, keptFoot);
+    const state = { column: null as ColumnFacts | null, bar: null };
+    let cardHeight = 0;
+    let dependencies: readonly unknown[] | undefined;
+    let cleanUp: (() => void) | undefined;
+    // A child can publish its trap card after the empty column measured.
+    // Run React's dependency check without delivering ResizeObserver yet.
+    const bindings = {
+      useLayoutEffect: (effect: () => (() => void) | undefined, next: readonly unknown[]) => {
+        if (dependencies && next.every((value, i) => Object.is(value, dependencies![i]))) return;
+        cleanUp?.();
+        dependencies = next;
+        cleanUp = effect();
+      },
+      cardsRef: { current: { getBoundingClientRect: () => ({ height: cardHeight * zoom }) } },
+      colTop: top, zoom, alerts: [], rolls: null as object | null,
+      summarized: false, folded: false, forFootCard: false, forRoom: false, overlay: false, rowPlace: { lift: 0 },
+      drawn: () => true, firstCardHeight: () => cardHeight * zoom, setFirstHeight: () => {},
+      dock: { getState: () => state, setState: (patch: { column: ColumnFacts | null }) => Object.assign(state, patch) },
+      columnFacts, SUMMARY_ROW: 44,
+      ResizeObserver: class { observe() {} disconnect() {} },
+    };
+    const measure = new Function(...Object.keys(bindings), stripTypeScriptTypes(alerts.slice(start, end)));
+    measure(...Object.values(bindings));
+    assert.equal(state.column, null, "Wait here stands above an empty column");
+    const waiting = { ...input, ids: [1, 2], recent: new Set([2]), mapFoot: keptFoot };
+    placed = nextToastPlaces(placed, waiting);
+    assert.equal(placed.places.get(2), "map");
+    assert.deepEqual([...placed.awaitCard], [2], "the trap waits for its card's first measurement");
+    const map = mapToastBox([kept, { id: 2, top: 120 * zoom, bottom: 226 * zoom }], placed.awaitCard, zoom, { top: 68 * zoom, bottom: 226 * zoom });
+    assert.equal(columnTop(60, null, map!.keptBottom), top, "the waiting toast must not move the card");
+    cardHeight = 62;
+    bindings.rolls = { text: "Stepstone went off", requests: 1 };
+    measure(...Object.values(bindings));
+    const low = toastTop({ spanning: true, column: state.column, cards: true, optionsTop: 780 });
+    placed = nextToastPlaces(placed, { ...waiting, low });
+    assert.deepEqual(placed.places.get(2), { low: top + cardHeight + EDGE, column: true }, "the trap toast must clear the card in its first visible frame");
+    assert.equal(placed.places.get(1), "map", "the kept notice stays where it is being read");
+    assert.ok(top >= kept.bottom / zoom + EDGE);
+    const settled = nextToastPlaces(placed, { ...waiting, low, recent: new Set<number>() });
+    assert.deepEqual(settled.places, placed.places, "the trap toast must not move again after its card wait ends");
+    cleanUp?.();
   }
 });
 
