@@ -61,6 +61,8 @@ import type { Locator, Page } from "playwright-core";
  *   their first lines.
  * - A `role="img"` is one picture, its insides drawn on purpose (the AC
  *   shield sets its number above its middle).
+ * - A proficiency marker reserves the same square with or without a
+ *   glyph. Its empty slot still places the label and its column's edge.
  * - Content placed absolutely beside content in the flow (a badge, a
  *   ring around a die) is placed against its containing block on purpose.
  *   A control whose only content is placed so is measured by it.
@@ -132,6 +134,7 @@ export async function proficiencyLines(root: Locator, screen: string, required =
       childNodes: ArrayLike<El>;
       parentElement: El | null;
       currentCSSZoom?: number;
+      clientLeft: number;
       clientWidth: number;
       scrollWidth: number;
       matches(selector: string): boolean;
@@ -186,8 +189,9 @@ export async function proficiencyLines(root: Locator, screen: string, required =
         const parent = ancestor.getBoundingClientRect();
         const parentZoom = ancestor.currentCSSZoom ?? 1;
         const inset = ancestor.matches("button");
-        const left = parent.left + (inset ? parseFloat(css.paddingLeft) + parseFloat(css.borderLeftWidth) : 0) * parentZoom;
-        const right = parent.right - (inset ? parseFloat(css.paddingRight) + parseFloat(css.borderRightWidth) : 0) * parentZoom;
+        const left = parent.left + (inset ? parseFloat(css.paddingLeft) + parseFloat(css.borderLeftWidth) : ancestor.clientLeft) * parentZoom;
+        // clientWidth measures the actual clipping area with either overlay or classic scrollbars.
+        const right = inset ? parent.right - (parseFloat(css.paddingRight) + parseFloat(css.borderRightWidth)) * parentZoom : parent.left + (ancestor.clientLeft + ancestor.clientWidth) * parentZoom;
         if (box.left < left - parentZoom || box.right > right + parentZoom) {
           lines.push(`${words}: label or marker runs outside its button or clipping ancestor`);
           break;
@@ -525,7 +529,7 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
 
   const say = (el: DomElement) => `${roleOf(el)} "${nameOf(el)}"`;
 
-  const isPicture = (el: DomElement) => PICTURE.includes(tag(el)) || el.getAttribute("role") === "img";
+  const isPicture = (el: DomElement) => PICTURE.includes(tag(el)) || el.getAttribute("role") === "img" || el.matches("[data-proficiency-marker]");
 
   /** Whether an element cuts what overflows it, as a scroller or an ellipsis does. */
   const clips = (el: DomElement) => {

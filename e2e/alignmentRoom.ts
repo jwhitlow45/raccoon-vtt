@@ -1146,17 +1146,7 @@ const DRAGON_AT = { x: 5, y: 10 };
 
 /** The Dice panel: the side panel's tab where the page has one, else the Panels sheet's Dice. */
 async function openDice(page: Page): Promise<Locator> {
-  const sheet = page.locator('dialog[data-rvtt-sheet][aria-label="Dice"]');
-  if (await visible(sheet)) return sheet;
-  const tabs = page.getByRole("tablist", { name: "Panels" });
-  if (await visible(tabs)) {
-    await openSideTab(page, "Dice");
-    return page.getByRole("tabpanel", { name: sideTabName("Dice") });
-  }
-  await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
-  await page.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Dice/ }).click();
-  await sheet.waitFor();
-  return sheet;
+  return openPanel(page, "Dice");
 }
 
 /** Every skill's name and bonus stay on one line, wholly inside their button, even if its tag needs another line. */
@@ -1398,16 +1388,14 @@ async function closeSheets(page: Page): Promise<void> {
  * An alert card by its name: in the alerts column, or, where the column
  * stands as its summary row, in the alerts that row opens over the screen.
  */
-async function alertCard(page: Page, name: string): Promise<Locator | null> {
+async function alertCard(page: Page, name: string | RegExp): Promise<Locator | null> {
   const inColumn = page.getByRole("group", { name, exact: true }).filter({ visible: true }).first();
   if (await showsWithin(inColumn, 3_000)) return inColumn;
   const summary = page.getByRole("button", { name: /Tap to answer\.$|to see them\.$|to see it\.$/ });
   if (!(await visible(summary))) return null;
   await summary.first().click();
-  const overlay = page.getByRole("dialog", { name: "Alerts" });
-  if (!(await showsWithin(overlay, 2_500))) return null;
-  const over = overlay.getByRole("group", { name, exact: true }).first();
-  return (await showsWithin(over, 2_000)) ? over : null;
+  // A summary can restore the column or open Alerts. The named group is reachable in either place.
+  return (await showsWithin(inColumn, 4_500)) ? inColumn : null;
 }
 
 /** The tracker: the side panel's tab from 900 layout px up, else the sheet the turn strip's button opens. */
@@ -1457,15 +1445,20 @@ async function openCharacters(page: Page): Promise<Locator> {
 
 /** A panel by its title: the side panel's tab where the page has one, else the Panels sheet's. */
 async function openPanel(page: Page, title: string): Promise<Locator> {
+  const sheet = page.locator(`dialog[data-rvtt-sheet][aria-label="${title}"]`);
+  if (await visible(sheet)) return sheet;
+  await closeSheets(page);
   const tabs = page.getByRole("tablist", { name: "Panels" });
   if (await visible(tabs)) {
     await openSideTab(page, title);
     return page.getByRole("tabpanel", { name: sideTabName(title) });
   }
-  const sheet = page.locator(`dialog[data-rvtt-sheet][aria-label="${title}"]`);
-  if (await visible(sheet)) return sheet;
-  await closeSheets(page);
   await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
+  // A hidden desktop panel returns as tabs. A phone returns as the panel picker.
+  if (await showsWithin(tabs, 300)) {
+    await openSideTab(page, title);
+    return page.getByRole("tabpanel", { name: sideTabName(title) });
+  }
   await page.getByRole("region", { name: "Panels" }).getByRole("button", { name: new RegExp(`^${title}`) }).click();
   await sheet.waitFor();
   return sheet;
@@ -1923,15 +1916,24 @@ async function groupSaveScreen(sweep: Sweep, page: Page, screen: string, trap: s
   }
 }
 
+/** Short screens fold a new request into Roll asked until the player opens it. */
+async function playerRequestCard(page: Page): Promise<Locator | null> {
+  const card = page.getByRole("dialog", { name: "The DM asks for a roll" }).filter({ visible: true }).first();
+  const summary = page.getByRole("button", { name: /^Roll asked:/ }).filter({ visible: true }).first();
+  if (!(await showsWithin(card.or(summary).first(), 4_000))) return null;
+  if (!(await visible(card))) await summary.click();
+  return (await showsWithin(card, 3_000)) ? card : null;
+}
+
 /** Pat's ask card, as the DM asks for Thorn's save: Thorn has no stat block, so the card's roll row holds the bonus field and the extra dice. */
 async function askScreen(sweep: Sweep, page: Page): Promise<void> {
   const id = randomUUID();
   await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "dex" }] }, dc: 14, dcShown: true, resultShown: true, targets: [{ characterId: run.ids.thornChar }] } });
-  const card = page.locator('[aria-label="The DM asks for a roll"]');
-  if (await showsWithin(card.filter({ visible: true }).first(), 4_000)) await sweep.measure(page, "pat-ask", card);
+  const card = await playerRequestCard(page);
+  if (card) await sweep.measure(page, "pat-ask", card);
   else await sweep.missing(page, "pat-ask", "the DM's ask showed no card");
   await ops.send({ t: "roll.close", rollIds: [id] });
-  await card.first().waitFor({ state: "detached" });
+  await page.locator('[aria-label="The DM asks for a roll"]').first().waitFor({ state: "detached" });
 }
 
 /** Pat's screens at one size: his ask card on a phone, the Ruler, a drag's stop note, and the toast of his own walk. */
@@ -3323,9 +3325,19 @@ async function proficiencyLevel(root: Locator, words: RegExp, level: "none" | "p
   }
 }
 
-async function proficiencyOptions(sweep: Sweep, page: Page, host: Locator, kind: "pc" | "monster" | "companion"): Promise<void> {
+async function unfoldProficiencyOptions(host: Locator): Promise<Locator> {
   const options = host.locator("[data-roll-options]");
-  await unfoldAll(options);
+  // The options load after the panel. Folded summaries can already contain some of the same labels.
+  for (const name of ["Saves and checks", "Skills"]) {
+    const fold = options.getByRole("button", { name, exact: true });
+    await fold.waitFor();
+    if ((await fold.getAttribute("aria-expanded")) !== "true") await fold.click();
+  }
+  return options;
+}
+
+async function proficiencyOptions(sweep: Sweep, page: Page, host: Locator, kind: "pc" | "monster" | "companion"): Promise<void> {
+  const options = await unfoldProficiencyOptions(host);
   await proficiencyLevel(options, /^Animal Handling /, "prof");
   await proficiencyLevel(options, /^Sleight of Hand /, "expert");
   await proficiencyLevel(options, /^Perception /, kind === "pc" ? "expert" : "none");
@@ -3376,14 +3388,29 @@ async function proficiencyRequests(sweep: Sweep, page: Page): Promise<void> {
   const id = randomUUID();
   await ops.send({ t: "roll.ask", request: { id, test: { kind: "check", choices: [{ ability: "wis", skill: "perception" }] }, dc: 14, dcShown: true, resultShown: true, targets: [{ characterId: run.ids.thornChar }] } });
   try {
-    const card = pat.getByRole("dialog", { name: "The DM asks for a roll" });
-    await card.waitFor();
+    const card = await playerRequestCard(pat);
+    assert.ok(card, "fl7: the player's request is reachable from its card or summary");
     await proficiencyLevel(card, /Perception/, "expert");
     await proficiencyScreen(sweep, pat, "player-request", card);
-    const dmCard = page.getByRole("group", { name: /^Roll request:.*Perception/ }).filter({ visible: true }).first();
-    await dmCard.waitFor();
+    const title = /^Roll request:.*Perception/;
+    let dmCard = await alertCard(page, title);
+    assert.ok(dmCard, "fl7: the DM request is reachable from its card or summary");
     const toggle = dmCard.locator("button[aria-expanded]").first();
-    if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+    if ((await toggle.getAttribute("aria-expanded")) !== "true") {
+      const opened = await dmCard.elementHandle();
+      await toggle.click();
+      let last = "";
+      let still = 0;
+      await waitFor("fl7: the expanded DM request holds still or moves into Alerts", async () => {
+        const box = JSON.stringify(await opened?.boundingBox().catch(() => null));
+        still = box === last ? still + 1 : 0;
+        last = box;
+        return still >= 2 ? true : null;
+      }, 3_000);
+      await opened?.dispose();
+      dmCard = await alertCard(page, title);
+      assert.ok(dmCard, "fl7: the expanded DM request stays reachable");
+    }
     await proficiencyLevel(dmCard.locator("li"), /Perception/, "expert");
     await proficiencyScreen(sweep, page, "dm-request", dmCard);
     await patOps.send({ t: "roll.dice", tag: randomUUID(), rollId: id, target: { characterId: run.ids.thornChar } });
@@ -3400,8 +3427,8 @@ async function proficiencyRequests(sweep: Sweep, page: Page): Promise<void> {
   const choiceId = randomUUID();
   await ops.send({ t: "roll.ask", request: { id: choiceId, test: { kind: "check", choices: [{ ability: "wis", skill: "perception" }, { ability: "wis", skill: "animal-handling" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.ids.thornChar }] } });
   try {
-    const card = pat.getByRole("dialog", { name: "The DM asks for a roll" });
-    await card.waitFor();
+    const card = await playerRequestCard(pat);
+    assert.ok(card, "fl7: the player's choices are reachable from their card or summary");
     await proficiencyLevel(card, /Perception/, "expert");
     await proficiencyLevel(card, /Animal Handling/, "prof");
     await proficiencyScreen(sweep, pat, "player-choices", card);
@@ -3420,10 +3447,12 @@ async function proficiencyResults(sweep: Sweep, page: Page): Promise<void> {
   await proficiencyScreen(sweep, page, "toast", toast);
   const dice = await openDice(page);
   const recent = dice.locator("[data-dice-recent]");
-  await unfoldAll(recent);
+  const recentFold = recent.getByRole("button", { name: "Recent rolls", exact: true });
+  await recentFold.waitFor();
+  if ((await recentFold.getAttribute("aria-expanded")) !== "true") await recentFold.click();
   await proficiencyLevel(recent, /Perception/, "expert");
   await proficiencyScreen(sweep, page, "recent", recent);
-  await recent.getByRole("button", { name: "Recent rolls", exact: true }).click();
+  await recentFold.click();
   await proficiencyLevel(recent, /Perception/, "expert");
   await proficiencyScreen(sweep, page, "recent-folded", recent);
   assert.equal(await recent.locator("[data-proficiency-label]").count(), 1, "fl7: the folded Recent summary keeps its marked result");
@@ -3501,6 +3530,58 @@ async function proficiencyEncounter(sweep: Sweep, page: Page): Promise<void> {
 
 /** FL-7 has its own matrix so every required surface is measured in both color schemes. */
 export function proficiencyTests(): void {
+  test("fl7-helper. empty, proficient and expert slots share edges and retain drift and overflow checks", async () => {
+    const page = await dmContext.newPage();
+    const marker = (level: "none" | "prof" | "expert") => `<span data-proficiency-marker="${level}"${level === "none" ? ' aria-hidden="true"' : ' role="img"'}>${level === "none" ? "" : '<svg width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="3" /></svg>'}</span>`;
+    const label = (level: "none" | "prof" | "expert", name: string) => `<span data-proficiency-label>${marker(level)}<span data-proficiency-name>${name}</span></span>`;
+    try {
+      for (const scale of SCALES) {
+        await page.setContent(`<style>
+          body { margin:0; font:14px/20px sans-serif; }
+          [data-proficiency-label] { display:inline-flex; align-items:center; gap:.25em; white-space:nowrap; }
+          [data-proficiency-marker] { display:inline-flex; align-items:center; justify-content:center; flex:none; width:1em; height:1em; }
+          button { display:flex; align-items:center; text-align:left; font:inherit; padding:0 6px; min-width:0; height:44px; border:1px solid; }
+        </style><main style="width:280px;zoom:${scale}">
+          <div id="rows" style="display:grid;gap:4px">
+            <button>${label("none", "Acrobatics +2")}</button>
+            <button>${label("prof", "Animal Handling +2")}</button>
+            <button>${label("expert", "Sleight of Hand +4")}</button>
+          </div>
+          <div id="answer" style="display:grid;gap:4px;margin-top:12px">
+            ${label("none", "DEX save")}
+            <div style="display:flex"><button>Roll d20</button></div>
+            <p style="margin:0">Type your bonus first.</p>
+          </div>
+          <div id="clipped" style="width:120px;height:30px;overflow-y:scroll;overflow-x:hidden;border:2px solid">
+            <div style="height:80px">${label("none", "DEX +0")}</div>
+          </div>
+        </main>`);
+        const root = page.locator("#rows");
+        const measure = async (where: Locator) => alignmentLines(await measureAlignment(where), "fl7-helper");
+        assert.deepEqual(await measure(root), [], `fl7: each reserved slot places its row at ${scale}`);
+        assert.deepEqual(await measure(page.locator("#answer")), [], `fl7: an unmarked request label starts at its slot at ${scale}`);
+        const second = root.locator("[data-proficiency-label]").nth(1);
+        await second.evaluate((node) => { (node as unknown as { style: { marginLeft: string } }).style.marginLeft = "3px"; });
+        assert.match((await measure(root)).join("\n"), /edge /, `fl7: a shifted marked row still fails at ${scale}`);
+        await second.evaluate((node) => { (node as unknown as { style: { marginLeft: string } }).style.marginLeft = "0px"; });
+        const empty = root.locator('[data-proficiency-marker="none"]');
+        await empty.evaluate((node) => { (node as unknown as { style: { position: string; top: string } }).style.position = "relative"; (node as unknown as { style: { top: string } }).style.top = "3px"; });
+        assert.match((await proficiencyLines(root, "fl7-helper")).join("\n"), /marker center/, `fl7: a shifted empty slot still fails at ${scale}`);
+        await empty.evaluate((node) => { (node as unknown as { style: { top: string } }).style.top = "0px"; });
+        await root.locator("button").first().evaluate((node) => { (node as unknown as { style: { width: string } }).style.width = "80px"; });
+        assert.match((await proficiencyLines(root, "fl7-helper")).join("\n"), /outside its button/, `fl7: a unit wider than its button still fails at ${scale}`);
+        const clipped = page.locator("#clipped");
+        await clipped.evaluate((node) => {
+          const box = node as unknown as { clientWidth: number; querySelector(selector: string): { offsetWidth: number; style: { marginLeft: string } } };
+          const unit = box.querySelector("[data-proficiency-label]");
+          unit.style.marginLeft = `${box.clientWidth - unit.offsetWidth + 3}px`;
+        });
+        assert.match((await proficiencyLines(clipped, "fl7-helper")).join("\n"), /clipping ancestor/, `fl7: clipping uses the actual scrollport width at ${scale}`);
+      }
+    } finally {
+      await page.close();
+    }
+  });
   test("fl7-helper. the geometry check rejects wrapped labels, shifted markers and missing roots", async () => {
     const page = await dmContext.newPage();
     try {
@@ -3553,7 +3634,7 @@ export function proficiencyTests(): void {
           await tabs.getByRole("tab", { name: "FL7 Companion", exact: true }).click();
           await proficiencyOptions(sweep, pat, dice, "companion");
           await tabs.getByRole("tab", { name: "Warhorse", exact: true }).click();
-          await unfoldAll(dice.locator("[data-roll-options]"));
+          await unfoldProficiencyOptions(dice);
           assert.equal(await dice.locator('[data-roll-options] [data-proficiency-marker="prof"], [data-roll-options] [data-proficiency-marker="expert"]').count(), 0, "fl7: an owned creature without a stat block has no guessed glyphs");
           await proficiencyScreen(sweep, pat, "unknown-dice", dice.locator("[data-roll-options]"));
           await tabs.getByRole("tab", { name: "Thorn", exact: true }).click();
