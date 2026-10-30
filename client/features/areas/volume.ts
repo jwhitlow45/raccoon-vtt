@@ -3,6 +3,9 @@ import { coverageCacheKey, eachHexPrism, MAX_SCENE_CELLS, resolveArea, type Area
 import type { Point3 } from "#shared/rules/geom.ts";
 import { cornerAt, hexAt, hexCenter, hexCorners } from "#shared/rules/hex.ts";
 import { crossingsAt, insideCrossings, type Polygon, type PolygonIndex } from "#shared/rules/walls.ts";
+import { isHex } from "#shared/rules/grid.ts";
+import type { HexGrid } from "#shared/rules/hex.ts";
+import { cellAtPoint, cellPolygon, cellsMeeting, polygonSide, sameCell, type GroundCell, type GroundSurface } from "../../lib/groundCells.ts";
 import { K, turnAxes, type Turn } from "../../lib/view.ts";
 
 /**
@@ -34,6 +37,15 @@ import { K, turnAxes, type Turn } from "../../lib/view.ts";
  * takes its cuts in one global order, clip lines, bucket lines, ground
  * lines, levels, then the bands, so the two faces beside an edge part it
  * at the same vertices whenever their buckets are cut.
+ *
+ * On a hex scene the ground cut follows the hexes instead
+ * (docs/design-v1-iso-hex-relief.md 8): each face is cut by the six
+ * canonical sides of each hex it meets, one plane per lattice side shared
+ * by both hexes beside it, then by that hex's level, its part at or below
+ * the ground dropped. A face lying along a side belongs to the one hex its
+ * solid lies in, read by a sample into the solid against the canonical
+ * polygons, so two hexes never both emit it. The work is the face's own
+ * hexes, never the whole lines of every side across its plan.
  */
 
 /** Within this of a plane a vertex lies on it. */
@@ -56,6 +68,8 @@ const BUCKET_Y = 2e5;
 const GROUND_X = 3e5;
 const GROUND_Y = 4e5;
 const LEVEL = 5e5;
+/** Hex side planes, one per canonical side of the lattice, numbered as first met. */
+const HEX_SIDE = 1e7;
 const BAND = 6e5;
 /** Band indices run from -BAND_SPAN, more than the deepest a 200 cell scene reaches. */
 const BAND_SPAN = 4096;
@@ -151,6 +165,8 @@ export type VolumeInput = {
   bounds: { w: number; h: number };
   /** The drawn ground in cells of height at a cell (view.ts DrawnHeights.at), never real heights. */
   ground: (x: number, y: number) => number;
+  /** On a hex scene the drawn ground as a surface (groundCells.ts), whose hexes the ground cut follows. Absent on squares. */
+  surface?: GroundSurface;
   /** Screen pixels a cell at the zoom octave the mesh is built for. */
   px: number;
   /** 16 around, while it moves (design 4.2 step 1). */
@@ -198,6 +214,12 @@ class Store {
   readonly plan = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
   /** Hexes a hex stack's walk has visited, counted apart from the budget for the tests. */
   visits = 0;
+  /**
+   * On a hex scene, the vertices hex side planes made, by position: several
+   * sides meet at a hex corner, and two faces cut there by different sides
+   * must still share the corner's vertex, or the edge between them opens.
+   */
+  merge: Map<string, number> | null = null;
 
   add(x: number, y: number, z: number): number {
     if (3 * (this.n + 1) > this.p.length) {
@@ -245,7 +267,14 @@ class Store {
     if (pl.snap === 1) x = pl.e;
     else if (pl.snap === 2) y = pl.e;
     else if (pl.snap === 3) z = pl.e;
+    const at = this.merge && pl.id >= HEX_SIDE ? `${Math.round(x * 1e9)},${Math.round(y * 1e9)},${Math.round(z * 1e9)}` : null;
+    const same = at !== null ? this.merge!.get(at) : undefined;
+    if (same !== undefined) {
+      cache.set(key, same);
+      return same;
+    }
     const id = this.add(x, y, z);
+    if (at !== null) this.merge!.set(at, id);
     cache.set(key, id);
     return id;
   }
@@ -1591,6 +1620,13 @@ export class Volume {
   #drawEpoch = 0;
   readonly #st = new Store();
   readonly #ground: (x: number, y: number) => number;
+  /** A hex scene's surface, whose canonical sides the ground cut follows, or null on squares. */
+  readonly #hex: (GroundSurface & { grid: HexGrid }) | null;
+  /** Each lattice side's plane, by its two corners, and each level's, by its height, made once for every face that meets them. */
+  readonly #sidePlanes = new Map<string, Plane>();
+  readonly #levels = new Map<number, Plane>();
+  /** The levels of every hex under the shell's plan, low to high, which cut every face on a hex scene. */
+  #hexLevels: Plane[] = [];
   readonly #bounds: { w: number; h: number };
   readonly #buckets: Bucket[] = [];
   readonly #byKey = new Map<string, number>();
@@ -1608,6 +1644,8 @@ export class Volume {
     this.solid = area.solid;
     this.banded = input.banded ?? true;
     this.#ground = input.ground;
+    this.#hex = input.surface && isHex(input.surface.grid) ? (input.surface as GroundSurface & { grid: HexGrid }) : null;
+    if (this.#hex) this.#st.merge = new Map();
     this.#bounds = { w: clampScene(input.bounds.w), h: clampScene(input.bounds.h) };
     this.#across0 = Math.max(1, Math.ceil(this.#bounds.w / CHUNK_CELLS));
     this.#down0 = Math.max(1, Math.ceil(this.#bounds.h / CHUNK_CELLS));
@@ -1761,7 +1799,16 @@ export class Volume {
       if (budget.spend(f.v.length)) yield;
     }
     this.#footprint = yield* print.finish(budget);
-    if (capped.length > 0) this.#groundPlanes = yield* groundPlanes(this.#ground, under, this.#bounds, budget);
+    if (capped.length > 0 && !this.#hex) this.#groundPlanes = yield* groundPlanes(this.#ground, under, this.#bounds, budget);
+    // On hexes every level under the plan cuts every face, as on squares, so the parts either side of any edge part it at the same heights.
+    if (capped.length > 0 && this.#hex) {
+      const heights = new Set<number>();
+      for (const c of cellsMeeting(this.#hex.grid, { x0: under.x0 - EPS, y0: under.y0 - EPS, x1: under.x1 + EPS, y1: under.y1 + EPS }, null)) {
+        heights.add(this.#hex.atCell(c));
+        if (budget.spend(1)) yield;
+      }
+      this.#hexLevels = [...heights].sort((p, q) => p - q).map((z) => this.#level(z));
+    }
     this.#box = capped.length > 0 ? under : null;
 
     // 6. Each face cut by the bucket lines across it, x then y as every cut runs (a line a face's neighbor takes and it skips would part their shared edge differently), each piece filed where its middle reads.
@@ -1872,9 +1919,9 @@ export class Volume {
     // A face at a time and a cut at a time: the ground's planes, the pieces at or below the ground dropped, then the first band family and each strip that makes by the second.
     const done: Poly[] = [];
     for (const face of pending) {
-      for (const p of yield* cutEach(st, face, planes, budget)) {
+      for (const p of this.#hex ? yield* this.#hexCut(face, budget) : yield* cutEach(st, face, planes, budget)) {
         if (budget.spend(p.v.length)) yield;
-        if (onOrBelow(st, p, ground)) continue;
+        if (!this.#hex && onOrBelow(st, p, ground)) continue;
         if (!this.banded) {
           done.push(p);
           continue;
@@ -1884,7 +1931,9 @@ export class Volume {
         for (const strip of strips) yield* this.#bandFamily(strip, 1, done, budget);
       }
     }
-    let guides = cutGuides(b.guidesPending, planes).filter((g) => (g.az + g.bz) / 2 > ground(Math.floor((g.ax + g.bx) / 2), Math.floor((g.ay + g.by) / 2)) + EPS);
+    let guides = this.#hex
+      ? this.#hexGuides(b.guidesPending)
+      : cutGuides(b.guidesPending, planes).filter((g) => (g.az + g.bz) / 2 > ground(Math.floor((g.ax + g.bx) / 2), Math.floor((g.ay + g.by) / 2)) + EPS);
     if (this.banded) guides = guides.flatMap((g) => this.#bandGuide(g));
     if (budget.spend(b.guidesPending.length * (1 + planes.length) + guides.length)) yield;
     const F = this.#faces;
@@ -1934,6 +1983,130 @@ export class Volume {
       n.drawJobs.clear();
     }
     this.#drawEpoch++;
+  }
+
+  /** A hex's six side planes, each with the sign its inside takes. */
+  #hexSides(cell: GroundCell): { pl: Plane; inside: 1 | -1 }[] {
+    const grid = this.#hex!.grid;
+    const poly = cellPolygon(grid, cell);
+    const c = { x: 0, y: 0 };
+    for (const q of poly) {
+      c.x += q.x / poly.length;
+      c.y += q.y / poly.length;
+    }
+    return poly.map((p, k) => {
+      const q = poly[(k + 1) % poly.length]!;
+      const pl = this.#sidePlane(p, q);
+      return { pl, inside: pl.a * c.x + pl.b * c.y - pl.e > 0 ? 1 : -1 };
+    });
+  }
+
+  /** The plane through a lattice side, the same object whichever hex beside it asks, oriented from its lesser corner. */
+  #sidePlane(p: { x: number; y: number }, q: { x: number; y: number }): Plane {
+    const [a, b] = p.x < q.x || (p.x === q.x && p.y < q.y) ? [p, q] : [q, p];
+    const key = `${Math.round(a.x * 64)},${Math.round(a.y * 64)}|${Math.round(b.x * 64)},${Math.round(b.y * 64)}`;
+    let pl = this.#sidePlanes.get(key);
+    if (pl) return pl;
+    const id = HEX_SIDE + this.#sidePlanes.size;
+    if (a.x === b.x) pl = { id, a: 1, b: 0, c: 0, e: a.x, snap: 1 };
+    else if (a.y === b.y) pl = { id, a: 0, b: 1, c: 0, e: a.y, snap: 2 };
+    else {
+      const nx = b.y - a.y;
+      const ny = -(b.x - a.x);
+      const len = Math.hypot(nx, ny);
+      pl = { id, a: nx / len, b: ny / len, c: 0, e: (nx * a.x + ny * a.y) / len, snap: 0 };
+    }
+    this.#sidePlanes.set(key, pl);
+    return pl;
+  }
+
+  #level(z: number): Plane {
+    let pl = this.#levels.get(z);
+    if (!pl) this.#levels.set(z, (pl = { id: LEVEL + this.#levels.size, a: 0, b: 0, c: 1, e: z, snap: 3 }));
+    return pl;
+  }
+
+  /**
+   * A face cut by the hexes it meets (section 8): its part in each hex, by
+   * the hex's six sides, then by the hex's level, the part above it kept.
+   * A part lying along a side, which both hexes' closed polygons hold, goes
+   * to the hex a sample into the solid reads before any level cut, so it is
+   * emitted once and cut by its owner's ground alone. The perimeter past
+   * the scene's last whole hexes reads 0, as the surface does.
+   */
+  *#hexCut(face: Poly, budget: Budget): Job<Poly[]> {
+    const st = this.#st;
+    const surface = this.#hex!;
+    const box = planBox(st, [face]);
+    const out: Poly[] = [];
+    const cells = cellsMeeting(surface.grid, { x0: box.x0 - EPS, y0: box.y0 - EPS, x1: box.x1 + EPS, y1: box.y1 + EPS }, null);
+    const levels = this.#hexLevels.filter((pl) => pl.e > box.z0 + EPS && pl.e < box.z1 - EPS);
+    for (const cell of cells) {
+      let p: Poly | null = face;
+      let along = false;
+      for (const { pl, inside } of this.#hexSides(cell)) {
+        if (budget.spend(p.v.length)) yield;
+        let off = 0;
+        for (const i of p.v) off = Math.max(off, Math.abs(st.d(pl, i)));
+        if (off <= EPS) {
+          along = true;
+          continue;
+        }
+        const [pos, neg] = splitPoly(st, p, pl);
+        p = inside > 0 ? pos : neg;
+        if (!p) break;
+      }
+      if (!p) continue;
+      if (along && !sameCell(this.#ownerOf(p), cell)) continue;
+      const z = surface.atCell(cell);
+      for (const piece of yield* cutEach(st, p, levels, budget)) {
+        let top = -Infinity;
+        for (const i of piece.v) top = Math.max(top, st.p[3 * i + 2]!);
+        if (top <= z + EPS) continue;
+        out.push(piece);
+      }
+    }
+    return out;
+  }
+
+  /** The hex a face along a side belongs to: the canonical polygon a point just inside the solid lies in, opposite the face's outward normal. */
+  #ownerOf(p: Poly): GroundCell {
+    const [x, y] = centroid(this.#st, p.v);
+    const len = Math.hypot(p.nx, p.ny) || 1;
+    const k = 1e-5 / len;
+    return cellAtPoint(this.#hex!.grid, { x: x - k * p.nx, y: y - k * p.ny });
+  }
+
+  /** Guides cut at the sides of the hexes they cross, each piece kept where it stands above its hex's ground. */
+  #hexGuides(guides: readonly Guide[]): Guide[] {
+    const surface = this.#hex!;
+    const out: Guide[] = [];
+    for (const g of guides) {
+      const box = { x0: Math.min(g.ax, g.bx) - EPS, y0: Math.min(g.ay, g.by) - EPS, x1: Math.max(g.ax, g.bx) + EPS, y1: Math.max(g.ay, g.by) + EPS };
+      const planes = cellsMeeting(surface.grid, box, null).flatMap((c) => this.#hexSides(c).map((s) => s.pl));
+      for (const piece of cutGuides([g], [...new Set(planes)])) {
+        if ((piece.az + piece.bz) / 2 > surface.atPoint({ x: (piece.ax + piece.bx) / 2, y: (piece.ay + piece.by) / 2 }) + EPS) out.push(piece);
+      }
+    }
+    return out;
+  }
+
+  /** `onGround` on hexes: level with the ground of a hex that holds the edge, or up a hex side between the two hexes' heights. */
+  #onHexGround(ax: number, ay: number, az: number, bx: number, by: number, bz: number): boolean {
+    const surface = this.#hex!;
+    const box = { x0: Math.min(ax, bx) - ON, y0: Math.min(ay, by) - ON, x1: Math.max(ax, bx) + ON, y1: Math.max(ay, by) + ON };
+    const holding: number[] = [];
+    for (const c of cellsMeeting(surface.grid, box, null)) {
+      const poly = cellPolygon(surface.grid, c);
+      if (polygonSide(poly, { x: ax, y: ay }, ON) < 0 || polygonSide(poly, { x: bx, y: by }, ON) < 0) continue;
+      const z = surface.atCell(c);
+      if (Math.abs(az - z) <= ON && Math.abs(bz - z) <= ON) return true;
+      holding.push(z);
+    }
+    if (holding.length < 2) return false;
+    const lo = Math.min(...holding) - ON;
+    const hi = Math.max(...holding) + ON;
+    return Math.min(...holding) !== Math.max(...holding) && az >= lo && az <= hi && bz >= lo && bz <= hi;
   }
 
   /** The buckets made around one, the eight that can hold a face across one of its edges or corners. */
@@ -2401,6 +2574,7 @@ export class Volume {
     const p = this.#st.p;
     const [ax, ay, az] = [p[3 * a]!, p[3 * a + 1]!, p[3 * a + 2]!];
     const [bx, by, bz] = [p[3 * b]!, p[3 * b + 1]!, p[3 * b + 2]!];
+    if (this.#hex) return this.#onHexGround(ax, ay, az, bx, by, bz);
     const mx = (ax + bx) / 2;
     const my = (ay + by) / 2;
     const g = this.#ground;
@@ -2706,8 +2880,8 @@ export function everySubcell(fp: Footprint, test: (sx: number, sy: number) => bo
 export type VolumeRequest = {
   template: AreaTemplateInput;
   ctx: AreaContext;
-  /** The viewer's drawn heights (view.ts drawnHeights), by identity: a new object is new ground. */
-  heights: { at(x: number, y: number): number };
+  /** The viewer's drawn heights (view.ts drawnHeights), by identity: a new object is new ground. On a hex scene its surface carries the hexes the ground cut follows. */
+  heights: { at(x: number, y: number): number } & Partial<GroundSurface>;
   /** The viewer's fog tiles, by identity. */
   tiles: unknown;
   px: number;
@@ -2740,7 +2914,8 @@ export class VolumeCache {
     }
     const area = resolveArea(req.template, req.ctx);
     const heights = req.heights;
-    const volume = area ? buildVolume({ area, bounds: req.ctx.bounds, ground: (x, y) => heights.at(x, y), px: zoomOctave(req.px), coarse: req.coarse, banded: req.banded ?? true }) : null;
+    const surface = heights.grid && isHex(heights.grid) ? (heights as GroundSurface) : undefined;
+    const volume = area ? buildVolume({ area, bounds: req.ctx.bounds, ground: (x, y) => heights.at(x, y), surface, px: zoomOctave(req.px), coarse: req.coarse, banded: req.banded ?? true }) : null;
     this.#entries.delete(id);
     this.#entries.set(id, { key, heights: req.heights, tiles: req.tiles, volume });
     if (this.#entries.size > this.#max) {

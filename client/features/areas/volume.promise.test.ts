@@ -624,7 +624,7 @@ describe("a player's volume (design 4.4 and 9)", () => {
       const area = resolveArea(t, ctxOf(bounds, null));
       assert.ok(area);
       const vols = [10, 40].map((hidden) => {
-        const heights = drawnHeights({ chunks: chunks(hidden), sceneId: "s", bounds, fog: tiles, stand: true }, 5);
+        const heights = drawnHeights({ chunks: chunks(hidden), sceneId: "s", bounds, grid: SQUARES, fog: tiles, stand: true }, 5);
         const v = buildVolume({ area, bounds, ground: heights.at, px: 40 });
         v.ensureAll();
         return v;
