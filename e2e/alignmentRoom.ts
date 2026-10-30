@@ -3371,6 +3371,8 @@ async function proficiencyOptions(sweep: Sweep, page: Page, host: Locator, kind:
 async function proficiencyToken(sweep: Sweep, page: Page, name: string, at: { x: number; y: number }, screen: string): Promise<void> {
   await closeSheets(page);
   await escapeAll(page);
+  // Expanding the previous bar pans the map. Closing it keeps that pan, which can leave the next token under the header.
+  await page.getByRole("button", { name: "Fit the map to the screen", exact: true }).click();
   const bar = await selectToken(page, name, at);
   assert.ok(bar, `fl7: ${name}'s token bar opens`);
   await expandBar(bar);
