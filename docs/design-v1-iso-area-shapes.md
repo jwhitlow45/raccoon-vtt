@@ -234,8 +234,12 @@ Filled by ISOA-2's docs commit, with every place the build went its own way and 
 - **Caps.** On a convex shell each cap is one polygon of the shell's own vertices. A hex stack's caps, which need not be convex, are cut into triangles. Where a sliver corner leaves two chain ends a hair apart, the upright edge joins each end to the nearest start.
 - **Pinches.** The clip can leave a sliver touching the rest of the mesh along an upright line. The edges there are used twice each way, and each pair links up.
 - **Hex ground** is cut by square cells. Hexes have no heights until H3, which will need hex step lines.
-- **The center rule off the scene.** On squares the center inclusion rule reads no scene bounds (`Sampler.pointInside`), so a creature left off the scene when it shrank can be caught where no solid stands. The promise test holds for creatures on the scene, and one test keeps the exception (review ISOA1-ASTRA-03). The rules' fix is a follow-up.
+- **The center rule at the scene edge.** From op version 33 and in live play, the square-grid center inclusion rule clips to the scene in `Sampler.pointInside` (`areaCentersOnScene`, D-261029-327). The bounds are half-open: `0 <= x < width` and `0 <= y < height`. A creature whose center is outside cannot be caught, including one left there when the scene shrank. Older ops retain their original off-scene result. The tests cover the boundary and the replay exception (ISOA1-ASTRA-03, ISOA1-PTIN).
 - **Bench:** the build rows are in section 6.
+
+**Op version 33 (follow-up batch 39).** The 32 to 33 migration is an identity step. Its three gates are `mountsOnPlayerScene` (controlled rides require the players' scene, including character-only rows), `guardsHolderPick` (a supplied holder-list revision must match) and `areaCentersOnScene` (square-grid center inclusion stops at the scene bounds). They apply from op 33 and in live play. `encounter.reorder.finished` and `vision.holders.rev` are optional fields that no older stored op carries. Older ops preserve their original behavior and restore hashes. The snapshot version stays at 29.
+
+Deploy: back up the database first and reload every open page, including table displays. New ops are stored at version 33. Rollback: an older build refuses those ops, so a room with version 33 ops after its last snapshot needs the backup from before the deploy (`shared/migrate.ts`, step 32 to 33).
 
 **ISOA-2, the board** (`relief/buckets.ts`, `drawRelief.ts`, new `relief/volumes.ts` and `relief/VolumeShape.tsx`, `relief/IsoBoard.tsx`, `relief/stand.ts`, the areas layers, `DragMarks.tsx`, `TokenNode.tsx`):
 

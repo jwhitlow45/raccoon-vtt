@@ -164,6 +164,10 @@ turn event: seenBy?: MemberId[], toSeenBy?: MemberId[]
 - **Undo** names in `server/rooms/undoLabels.ts`: "making sight per player on the scene Crypt", "making sight whole party on the scene Crypt", "choosing who sees for themselves on the scene Crypt". `isGlobalChange` compares `perPlayer` and the list.
 - **Import**: paths are not imported (remap.ts:343). Turn starts in the encounter and every `encounterHistory` snapshot map their lists through `memberList`.
 
+**Op version 33 (follow-up batch 39).** The 32 to 33 migration is an identity step. Its three gates are `mountsOnPlayerScene` (controlled rides require the players' scene, including character-only rows), `guardsHolderPick` (a supplied holder-list revision must match) and `areaCentersOnScene` (square-grid center inclusion stops at the scene bounds). They apply from op 33 and in live play. `encounter.reorder.finished` and `vision.holders.rev` are optional fields that no older stored op carries. Older ops preserve their original behavior and restore hashes. The snapshot version stays at 29.
+
+Deploy: back up the database first and reload every open page, including table displays. New ops are stored at version 33. Rollback: an older build refuses those ops, so a room with version 33 ops after its last snapshot needs the backup from before the deploy (`shared/migrate.ts`, step 32 to 33).
+
 ### 6.8 Accounting that reads no list
 
 Who a list names and what a holder explored depend on that player's sight, so no measure reads them. Bounds come from encoded byte lengths. UUID figures are examples.

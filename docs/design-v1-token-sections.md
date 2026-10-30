@@ -46,7 +46,7 @@ Every control and section on each surface, for the DM and a player, on a monster
 | Locked | / the lock, the DM | | | Token settings | | ok |
 | Duplicate | / the DM | | | **missing** | | **gap** |
 | Delete, Dismiss | / Delete (the DM), Dismiss (a companion's player) | | | Remove: Delete, the DM | Remove | **gap**: Dismiss |
-| The row's own: Hidden (the row), In lair, roll reminder, Roll Initiative, Auto Initiative, Move after, tie order, Remove from the fight | | the DM. A player: Roll again, Remove | | | | the row's, section 4 |
+| The row's own: Hidden (the row), In lair, roll reminder, Roll Initiative, Auto Initiative, End turn and move after {rider}, tie order, Remove from the fight | | the DM. A player: Roll again, Remove | | | | the row's, section 4 |
 | Alert cards: death save, Regeneration, recharge, save-ends, with Roll, Apply, Skip, Dismiss | | | | | | prompts, homed in Hit points, Uses and Conditions |
 
 What each viewer and kind changes:
@@ -119,7 +119,7 @@ The creature's things first, in Combat's order, then the row's own setup, then R
 | | The DM | A player, own row | A companion's sub-row |
 |---|---|---|---|
 | The creature's | Revive (dead), **Uses** with the pips, Reaction used, Ready, Stat block | **Uses**, Reaction used, Ready, Stat block | Revive (the DM), **Uses**, Reaction used (its own), Ready, Stat block |
-| The row's own | Roll or Roll again, **Row hidden from players**, In lair, Initiative roll reminder, Initiative modifier with Roll Initiative and Auto Initiative's group, Move after {rider}, Move up and Move down | Roll again | |
+| The row's own | Roll or Roll again, **Row hidden from players**, In lair, Initiative roll reminder, Initiative modifier with Roll Initiative and Auto Initiative's group, End turn and move after {rider}, Move up and Move down | Roll again | |
 | Last | Remove | Remove | |
 
 Today the DM's Uses group comes tenth, after the row's Roll, Hidden, In lair, roll reminder and Auto Initiative controls. In lair stays the row's: it is set as the creature joins (`joinEntry`), and its switch waits on the row's block. The row's pips wrap as the panel's do.
