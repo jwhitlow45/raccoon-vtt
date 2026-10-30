@@ -70,6 +70,24 @@ test("fl12: marked text frames a name with the rest of its word, its bonus and t
   assert.equal(spokenText("Pat rolled 2 Perception checks.", [{ at: 13, length: 16, level: "expert" }]), "Pat rolled 2 Perception checks, expertise.", "the spoken level follows the whole word");
 });
 
+test("fl12: a bonus written any way a stat block may write it joins its frame, with the punctuation after it (FL12-SOL-01)", () => {
+  for (const [text, framed] of [
+    ["Skills Perception+6, Stealth +2", "Perception+6,"],
+    ["Skills Perception + 6, Stealth +2", "Perception + 6,"],
+    ["Skills Perception  +6, Stealth +2", "Perception  +6,"],
+    ["Skills Perception –1, Stealth +2", "Perception –1,"],
+    ["Skills Perception −1; Stealth +2", "Perception −1;"],
+    ["Skills Perception - 1.", "Perception - 1."],
+  ] as const) {
+    const html = renderToStaticMarkup(createElement(MarkedText, { text, marks: [{ at: 7, length: 10, level: "prof" as const }] }));
+    assert.equal(html.replace(/<[^>]*>/g, ""), text, "the words are unchanged");
+    assert.equal(framedWords(html), framed, `"${text}" frames "${framed}"`);
+  }
+  // A bonus on the next line is not the name's: a frame never reaches across a line break.
+  const html = renderToStaticMarkup(createElement(MarkedText, { text: "Skills Perception\n+6", marks: [{ at: 7, length: 10, level: "prof" as const }] }));
+  assert.equal(framedWords(html), "Perception");
+});
+
 test("fl7: neither keeps a bare span with no mark, no tooltip and no name", () => {
   assert.equal(renderToStaticMarkup(createElement(ProficiencyLabel, { level: "none", children: "Perception" })), '<span data-proficiency-label="" data-proficiency-level="none">Perception</span>');
 });

@@ -25,11 +25,12 @@ export function spokenProficiency(level: Proficiency): string {
  * outside that box, so it hugs the words' ink and runs 1 px past each
  * side. Vertical padding on an inline box lays nothing out, and a shadow
  * scrolls nothing. The frame is 0.99 em and its two lines tall, so frames
- * on two lines at Inter's own spacing (1.21 em) keep 1 px apart.
+ * on two lines at Inter's own spacing (1.21 em) do not touch: they are
+ * 0.85 px apart at 13 px and 1.06 px at 14 px.
  *
  * Expertise fills its frame with a tint of the same color. A second line
  * would need 2 px more on every side, and there is none: one space leaves
- * 1.6 px between two frames at 13 px, and the next line 1 px.
+ * 1.6 px between two frames at 13 px, and the next line under 1 px.
  * Punctuation right after a roll joins its unit (MarkedText), so no frame
  * runs into a comma or a colon. A unit cut over two lines draws a whole
  * frame on each.
@@ -135,8 +136,13 @@ export function spokenText(text: string, marks: Marks): string {
   return out + text.slice(from);
 }
 
-/** A bonus right after a test's name ("Perception +7"), which the mark takes in with the name. */
-const BONUS = /^ [+−-]\d+/;
+/**
+ * A bonus right after a test's name, which the mark takes in with the name:
+ * written any way a stat block's Skills line is read (StatBlockView.tsx
+ * listedMarks), "Perception +7", "Perception+7", "Perception + 7" or with a
+ * dash for its sign, but never across a line break.
+ */
+const BONUS = /^[^\S\r\n]*[+−–-][^\S\r\n]*\d+/;
 /** Punctuation right after a roll, which its frame takes in rather than touch. */
 const STOP = /^[,.:;]/;
 
