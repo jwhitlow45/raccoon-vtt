@@ -123,6 +123,25 @@ test("skill names keep one line with room for their bonus in equal grid columns"
   }
 });
 
+test("fl7: save buttons keep their original accessible names and name the marker separately", () => {
+  const markup = render(P1, false);
+  const dexterity = /<button[^>]*aria-label="Dexterity save"[^>]*>(.*?)<\/button>/.exec(markup)?.[1];
+  assert.ok(dexterity, "the save action keeps its established accessible name");
+  assert.match(dexterity, /aria-label="Proficient"/);
+  assert.match(dexterity, /data-proficiency-name=""[^>]*>DEX \+7</);
+});
+
+test("fl7: save columns give the complete marked label room before choosing how many fit", () => {
+  for (const typedBonus of [undefined, "", "-20", "+30"]) {
+    const markup = render(P1, false, false, {}, true, typedBonus);
+    const saves = markup.slice(markup.indexOf('role="group" aria-label="Saves"'), markup.indexOf('role="group" aria-label="Checks"'));
+    const width = typedBonus === undefined ? 104 : 136;
+    assert.ok(saves.includes(`grid-template-columns:repeat(auto-fill, minmax(min(100%, ${width}px), 1fr))`), "save columns shrink in count before the marker and label can overflow");
+    assert.equal(saves.match(/data-proficiency-label/g)?.length, 6);
+    assert.equal(saves.match(/data-proficiency-name="" style="white-space:nowrap"/g)?.length, 6);
+  }
+});
+
 describe("a roll option's result shows in the header line, never under its button (docs/design-v1-dice-ui.md 4.1)", () => {
   test("before any roll, the options draw and no total is anywhere", () => {
     const markup = render(P1, false);

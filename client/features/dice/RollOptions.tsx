@@ -550,7 +550,7 @@ function OptionGroups(props: Shown) {
         </div>
       ) : null}
       <Group label="Saves and checks" {...groupFold("saves")} summaryWrap summary={proficientFoldSummary(ctx, "saves", asks.saves, sharedNote)}>
-        <Grid label="Saves" note={numbers ? saveNote : undefined}>
+        <Grid label="Saves" note={numbers ? saveNote : undefined} cellWidth={numbers ? 104 : 136}>
           {ABILITY_KEYS.map((a) =>
             !numbers ? (
               <D20Cell key={a} ctx={ctx} test={{ kind: "save", ability: a }} bonus={0} unknown={{ typed }} text={typedText(ABILITY_SHORT[a], typed)} />
@@ -724,12 +724,13 @@ function Fill(props: { children: ReactNode }) {
 /** A named roll's rows sit between 1 px lines with `space(2)` above and below (3.2). */
 const ROW = { paddingBlock: theme.space(2), borderTop: `${theme.line.border}px solid ${theme.color.border}` } as const;
 
-function Grid(props: { label: string; note?: string; children: ReactNode }) {
+function Grid(props: { label: string; note?: string; cellWidth?: number; children: ReactNode }) {
   return (
     <div role="group" aria-label={props.label} style={{ display: "grid" }}>
       <GroupLabel note={props.note || undefined}>{props.label}</GroupLabel>
       {/* Rows of one height, so a cell whose tag wraps under its words at 130% never leaves its neighbors in the next row shorter. */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gridAutoRows: "1fr", gap: theme.space(1) }}>{props.children}</div>
+      {/* Marked saves need room for their slot and bonus. A typed d20 bonus needs a wider cell. */}
+      <div style={{ display: "grid", gridTemplateColumns: props.cellWidth ? `repeat(auto-fill, minmax(min(100%, ${props.cellWidth}px), 1fr))` : "repeat(3, minmax(0, 1fr))", gridAutoRows: "1fr", gap: theme.space(1) }}>{props.children}</div>
     </div>
   );
 }
@@ -811,7 +812,6 @@ function D20Cell(props: { ctx: Ctx; test: D20Test; bonus: number; unknown?: { ty
     .split(" ")
     .filter((part) => part && !said.includes(part));
   const level = test.kind === "save" || (test.kind === "check" && test.skill) ? creatureProficiency(ctx.dice, ctx.creature, test) : undefined;
-  const proficiencyName = level === "expert" ? "Expertise" : level === "prof" ? "Proficient" : "";
   const tag = [route.kind === "answer" ? "Asked" : "", ...own].filter(Boolean).join(" ");
   return (
     <OptionCell
@@ -819,7 +819,7 @@ function D20Cell(props: { ctx: Ctx; test: D20Test; bonus: number; unknown?: { ty
       level={level}
       nowrap={level !== undefined}
       tag={tag || undefined}
-      name={[label, proficiencyName, how, words].filter(Boolean).join(", ")}
+      name={[label, how, words].filter(Boolean).join(", ")}
       row={row}
       disabled={ctx.blocked ?? tap.waits}
       grow={props.grow}
