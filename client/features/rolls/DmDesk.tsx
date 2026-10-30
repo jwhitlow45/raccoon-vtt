@@ -302,6 +302,7 @@ export function DmCard(props: { toggleRef(el: HTMLButtonElement | null): void; o
           type="button"
           onClick={props.onToggle}
           aria-expanded={props.open}
+          aria-label={[title, `${tally.answered}${hidden}`, asks].filter(Boolean).join(" ")}
           style={{
             flex: "1 1 180px",
             minWidth: 0,

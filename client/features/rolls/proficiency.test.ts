@@ -5,7 +5,9 @@ import { createStore } from "zustand/vanilla";
 import type { ReactNode } from "react";
 import type { RollRequest, RollTarget } from "#shared/model.ts";
 import { EMPTY_PC_STATS } from "#shared/rules/pcStats.ts";
+import { testShortText } from "#shared/rules/skills.ts";
 import { character, DM, room } from "#shared/testutil.ts";
+import { tallyText } from "./logic.ts";
 
 const { createElement, createRef } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
@@ -53,6 +55,16 @@ test("fl7: the DM's one-creature heading marks both choices before an answer", (
   assert.equal(labels(html).length, 2);
   assert.match(labels(html)[0]!, /data-proficiency-marker="expert"/);
   assert.match(labels(html)[1]!, /data-proficiency-marker="prof"/);
+});
+
+test("fl7: a DM request disclosure keeps its established name while its markers have their own names", () => {
+  const ask = request();
+  const html = render(createElement(DmCard, { request: ask, open: false, toggleRef() {}, onClose() {}, onToggle() {} }));
+  const button = /<button[^>]*aria-expanded="false"[^>]*>/.exec(html)?.[0];
+  assert.ok(button);
+  assert.ok(button.includes(`aria-label="${testShortText(ask.test)} ${tallyText(ask).answered}"`));
+  assert.match(html, /aria-label="Expertise"/);
+  assert.match(html, /aria-label="Proficient"/);
 });
 
 test("fl7: a chosen chip marks only the chosen skill and keeps its total beside it once", () => {
