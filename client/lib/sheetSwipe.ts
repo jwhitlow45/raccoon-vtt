@@ -48,10 +48,15 @@ export const SWIPES_ATTR = "data-sheet-swipes";
 export const SLIDE_TO_ATTR = "data-sheet-swipe-to";
 /** Sent on the surface once a swipe is over and it stands at rest again, for whatever held its measure. */
 export const SWIPE_REST_EVENT = "rvtt-sheet-swipe-rest";
-/** On the surface while a finger holds it (SheetSwipe.holding), for the forced colors rule and the checks of the held glow. */
+/** On the surface while a finger holds it (SheetSwipe.holding), for the forced colors rule. */
 export const HELD_ATTR = "data-sheet-held";
-/** The custom property the surface sets while held, which its grabber takes as its color (components/SheetGrabber.tsx): the held glow (4.8). */
+/** The member's color while held, mixed with controlBorder by the grabber (4.8). */
 export const HELD_COLOR_VAR = "--rvtt-grabber-held";
+export const PULL_VAR = "--rvtt-grabber-pull";
+export const STRETCH_VAR = "--rvtt-grabber-stretch";
+export const GRABBER_TRANSITION_VAR = "--rvtt-grabber-transition";
+/** A stationary press warms to 30% of the member's color before the pull takes over. */
+export const HOLD_MS = 300;
 
 /** The style that makes a header a grab area: no pan starts there, so every move is the page's to read, and pinch zoom still works where the page allows it. */
 export const GRAB_STYLE = { touchAction: "pinch-zoom" } as const;
@@ -171,8 +176,14 @@ export class SheetSwipe {
     return this.shown();
   }
 
+  /** Position only, so a flick can commit before the grabber fills (4.8). */
+  get pull(): number {
+    if (this.phase !== "claimed" || !this.begun) return 0;
+    return swipePull({ ...this.begun, position: this.shown(), unsaved: this.unsaved });
+  }
+
   /**
-   * A finger holds the surface, for the held glow (4.8): from a press on
+   * A finger holds the surface, for the grabber's pull feedback (4.8): from a press on
    * the grab area clear of its controls, or from the claim of any touch,
    * until the touch lifts, is cancelled or is left to the browser. A tap on
    * Back or Close holds nothing, and neither does a touch on content that
@@ -340,6 +351,20 @@ export function stepDistance(up: number, scale: number): number {
   return Math.max(up * SNAP_SHARE, theme.touch * scale);
 }
 
+/**
+ * Travel toward the next stand, divided by its slow-release threshold.
+ * Position is the shown position, including unsaved resistance. From full
+ * screen the next stand is normal, so the fill stays full beyond it.
+ * A nonpositive closeAt means there is no closing stand in that direction.
+ */
+export function swipePull(i: { stand: SwipeStand; position: number; closeAt: number; up: number; scale: number; unsaved: boolean }): number {
+  let progress = 0;
+  if (i.stand === "full" && i.up > 0) progress = (i.position + i.up) / stepDistance(i.up, i.scale);
+  else if (i.position < 0 && i.up > 0) progress = -i.position / stepDistance(i.up, i.scale);
+  else if (i.position > 0 && i.closeAt > 0) progress = i.position / closeDistance(i.closeAt, i.scale);
+  return Math.max(0, Math.min(i.unsaved ? 0.5 : 1, progress));
+}
+
 // ------------------------------------------------------------ the surface over time
 
 /** Where the surface shows: its position, and for the whole screen's box, whether its foot stays at the toolbar's top (4.7). */
@@ -347,8 +372,8 @@ export type SwipeLook = { position: number; clip: boolean };
 
 /** What a session does to the page. The hook does it with the DOM, the randomized test with a record. */
 export type SwipeHost = {
-  /** Shows the surface and its riders at `look`, easing there over SLIDE_MS with `ease`, or puts them at rest with null. */
-  place(look: SwipeLook | null, ease: boolean): void;
+  /** Shows the surface and its riders, easing over SLIDE_MS with `ease`, or puts them at rest with null. Only finger moves supply `pull`. */
+  place(look: SwipeLook | null, ease: boolean, pull?: number): void;
   /** Gives the panel sheet the whole screen's box, still beside the map, for a drag above its normal top or a step down (4.7), or its own box back. */
   rise(on: boolean): void;
   /** Listens on the document for new touches, and for the last finger's lift, while a touch is followed (4.5). */
@@ -426,7 +451,7 @@ export class SwipeSession {
       this.host.rise(true);
     }
     this.placed = true;
-    this.host.place({ position, clip: s.stand === "normal" }, false);
+    this.host.place({ position, clip: s.stand === "normal" }, false, this.touch.pull);
     return step.cancel;
   }
 
@@ -508,7 +533,7 @@ export class SwipeSession {
     if (this.held.delete(id) && this.held.size === 0) this.host.guard(false);
   }
 
-  /** Tells the host when the touch's hold changes, so the grabber's glow follows the swipe's own state. */
+  /** Tells the host when the touch's hold changes, so the grabber follows the swipe's own state. */
   private showHold(): void {
     const on = this.touch.holding;
     if (on === this.holdShown) return;
@@ -911,7 +936,12 @@ export function useSheetSwipe(surface: RefObject<HTMLElement | null>, options: S
     };
 
     const host: SwipeHost = {
-      place(look, ease) {
+      place(look, ease, pull) {
+        if (pull !== undefined) {
+          el.style.setProperty(PULL_VAR, String(pull));
+          el.style.setProperty(STRETCH_VAR, String(host.reducedMotion() ? 0 : pull));
+          el.style.setProperty(GRABBER_TRANSITION_VAR, "none");
+        }
         const g = geometry;
         if (look === null || !g) {
           for (const node of moving) clearStyle(node);
@@ -1012,8 +1042,12 @@ export function useSheetSwipe(surface: RefObject<HTMLElement | null>, options: S
       held(on) {
         el.toggleAttribute(HELD_ATTR, on);
         // The member's own color, which every other control in view wears: a custom property inherited by the grabber, so the swipe renders nothing.
-        if (on) el.style.setProperty(HELD_COLOR_VAR, theme.color.accent);
-        else el.style.removeProperty(HELD_COLOR_VAR);
+        if (on) {
+          el.style.setProperty(HELD_COLOR_VAR, theme.color.accent);
+          el.style.setProperty(GRABBER_TRANSITION_VAR, `color ${HOLD_MS}ms ease`);
+        } else {
+          for (const name of [HELD_COLOR_VAR, PULL_VAR, STRETCH_VAR, GRABBER_TRANSITION_VAR]) el.style.removeProperty(name);
+        }
       },
     };
     const swipe = new SwipeSession(host);

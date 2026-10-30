@@ -1,14 +1,11 @@
 import { createElement, type CSSProperties } from "react";
 import { useSheetHandle } from "../features/device/settings.ts";
-import { HELD_COLOR_VAR } from "../lib/sheetSwipe.ts";
+import { GRABBER_TRANSITION_VAR, HELD_COLOR_VAR, PULL_VAR, SLIDE_MS, STRETCH_VAR } from "../lib/sheetSwipe.ts";
 import { theme } from "../lib/theme.ts";
 import { grabberDesign, grabberRoom, GRABBER_TOP, type GrabberDesign } from "./grabberDesigns.ts";
 
 /** Marks the grabber, for the checks that every sheet that swipes shows exactly one. */
 export const GRABBER_ATTR = "data-sheet-grabber";
-
-/** The held glow's fade each way (4.8). Reduced motion cuts every transition to nothing (globals.css). */
-export const GLOW_MS = 150;
 
 /**
  * The room a header keeps above its first line where it holds the
@@ -38,9 +35,9 @@ export function useGrabberRoom(): number {
  * content that it swipes by. It takes no pointer, so a touch on it lands
  * on what lies under it, and a tap beside it still reaches Back or Close.
  *
- * Its color is the custom property the swipe sets on the surface while a
- * finger holds it (sheetSwipe.ts HELD_COLOR_VAR, the member's accent), and
- * controlBorder at rest, so the glow comes and goes without a render.
+ * The host's custom properties mix the member's color with controlBorder
+ * and stretch the drawing with the pull, without a render or header move.
+ * Reduced motion keeps the stretch at zero and cuts the color's fade.
  * Forced colors would trade the color for the system's text color, so
  * globals.css gives it GrayText at rest and Highlight while held there.
  */
@@ -55,8 +52,10 @@ export function SheetGrabber() {
         top: GRABBER_TOP,
         left: "50%",
         marginLeft: -design.width / 2,
-        color: `var(${HELD_COLOR_VAR}, ${theme.color.controlBorder})`,
-        transition: `color ${GLOW_MS}ms ease`,
+        color: `color-mix(in srgb, var(${HELD_COLOR_VAR}, ${theme.color.controlBorder}) calc(30% + var(${PULL_VAR}, 0) * 70%), ${theme.color.controlBorder})`,
+        transform: `scale(calc(1 + var(${STRETCH_VAR}, 0) * 0.4), calc(1 - var(${STRETCH_VAR}, 0) * 0.25))`,
+        transformOrigin: "center",
+        transition: `var(${GRABBER_TRANSITION_VAR}, color ${SLIDE_MS}ms ease, transform ${SLIDE_MS}ms cubic-bezier(0.34, 1.56, 0.64, 1))`,
         pointerEvents: "none",
       }}
     />

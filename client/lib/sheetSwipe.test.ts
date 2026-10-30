@@ -22,6 +22,7 @@ import {
   stopsClaimed,
   SwipeSession,
   swipeEnd,
+  swipePull,
   TypedValues,
   UP_CLAIM_PX,
   type FieldNode,
@@ -846,6 +847,7 @@ class FakePage {
   helds: boolean[] = [];
   unsavedNow: boolean;
   last: { look: SwipeLook | null; ease: boolean } | null = null;
+  pulls: number[] = [];
   looks: SwipeLook[] = [];
   private timers: { at: number; fn: () => void; live: boolean }[] = [];
   private now = 0;
@@ -854,7 +856,8 @@ class FakePage {
   constructor(opts: { unsaved?: boolean; reduced?: boolean } = {}) {
     this.unsavedNow = opts.unsaved ?? false;
     this.host = {
-      place: (look, ease) => {
+      place: (look, ease, pull) => {
+        if (pull !== undefined) this.pulls.push(pull);
         this.placed = look !== null;
         this.last = { look, ease };
         if (look) this.looks.push(look);
@@ -1051,6 +1054,9 @@ describe("12. randomized touches, from both stands", () => {
           page.looks = [];
           // The glow follows the machine's own hold: on from a claim until the touch stops, never for a control's tap or a touch that may not swipe.
           assert.equal(page.heldOn, session.touch.holding, `${where}: the host's glow differs from the hold`);
+          const pull = session.touch.pull;
+          assert.ok(pull >= 0 && pull <= (unsavedAtClaim ? 0.5 : 1), `${where}: pull escaped its bounds`);
+          if (session.touch.phase !== "claimed") assert.equal(pull, 0, `${where}: an inactive touch has pull`);
           if (!followed || stopped) assert.equal(page.heldOn, false, `${where}: held by a touch that may not swipe, or one stopped`);
           else if (claimedAt !== null) assert.equal(page.heldOn, true, `${where}: a claimed touch not held`);
           else if (s.control) assert.equal(page.heldOn, false, `${where}: a tap on a control held the surface`);
@@ -1061,6 +1067,7 @@ describe("12. randomized touches, from both stands", () => {
         const speed = speedAt(trail, at);
         const liftCancelled = session.end(at);
         assert.equal(page.heldOn, false, `${where}: held past the lift`);
+        assert.equal(session.touch.pull, 0, `${where}: pull survived the lift`);
         if (liftCancelled) assert.notEqual(claimedAt, null, `${where}: a lift cancelled for an unclaimed touch`);
         // Other presses on the surface or a rider while it slides or rests: one held is stopped to its end, after the slide too, and one at rest is never held.
         const presses2 = new Map<number, boolean>();
@@ -1140,5 +1147,112 @@ describe("12. randomized touches, from both stands", () => {
       assert.equal(session.holding, false);
     }
     for (const [what, count] of Object.entries(reached)) assert.ok(count > 20, `only ${count} ${what} in ${RUNS} runs`);
+  });
+});
+
+describe("FL-8. pull toward the next stand", () => {
+  test("rest, partway, at and past the closing threshold, scaled by the sheet's height", () => {
+    for (const closeAt of [200, 400, 800]) {
+      for (const share of [0, 0.25, 0.5, 1, 1.4]) {
+        near(swipePull({ stand: "normal", position: closeAt / 2 * share, closeAt, up: 0, scale: 1, unsaved: false }), Math.min(1, share));
+      }
+    }
+    near(swipePull({ stand: "normal", position: 50, closeAt: 200, up: 0, scale: 1, unsaved: false }), 0.5);
+    near(swipePull({ stand: "normal", position: 50, closeAt: 800, up: 0, scale: 1, unsaved: false }), 0.125);
+  });
+
+  test("both directions between normal and full, including a pull beyond the next stand", () => {
+    for (const up of [200, 400]) {
+      for (const stand of ["normal", "full"] as const) {
+        for (const share of [0, 0.25, 0.5, 1, 2, 3]) {
+          const position = stand === "normal" ? -up / 2 * share : -up + up / 2 * share;
+          near(swipePull({ stand, position, closeAt: 400, up, scale: 1, unsaved: false }), Math.min(1, share));
+        }
+      }
+    }
+  });
+
+  test("the minimum travel agrees with a slow release, including at 130%", () => {
+    for (const scale of [1, 1.3]) {
+      for (const position of [22 * scale, 44 * scale]) {
+        const i = { stand: "normal" as const, position, closeAt: 60, up: 80, scale, unsaved: false };
+        near(swipePull(i), position / (44 * scale));
+        assert.equal(swipeEnd({ ...i, speed: 0 }) === "closed", position === 44 * scale);
+        near(swipePull({ ...i, position: -position }), position / (44 * scale));
+        assert.equal(swipeEnd({ ...i, position: -position, speed: 0 }) === "full", position === 44 * scale);
+      }
+    }
+  });
+
+  test("no pull toward a missing stand, or upward from full screen", () => {
+    for (const position of [-10, -100, -1000]) near(swipePull({ stand: "normal", position, closeAt: 400, up: 0, scale: 1, unsaved: false }), 0);
+    near(swipePull({ stand: "normal", position: 100, closeAt: 0, up: 0, scale: 1, unsaved: false }), 0);
+    near(swipePull({ stand: "full", position: -350, closeAt: 400, up: 300, scale: 1, unsaved: false }), 0);
+  });
+
+  test("unsaved resistance uses the shown position, and caps every direction at half", () => {
+    const touch = new SheetSwipe();
+    touch.start(start({ up: 200 }));
+    touch.move({ dx: 0, dy: 108, at: 30, cancelable: true });
+    assert.equal(touch.claimed(true), 50);
+    near(touch.pull, 0.25);
+    for (const dy of [208, 408, 1008]) {
+      touch.move({ dx: 0, dy, at: 60, cancelable: true });
+      near(touch.pull, 0.5);
+    }
+    touch.move({ dx: 0, dy: -200, at: 90, cancelable: true });
+    near(touch.pull, 0.5, "the unsaved cap also applies toward full");
+    near(swipePull({ stand: "full", position: 0, closeAt: 400, up: 200, scale: 1, unsaved: true }), 0.5);
+  });
+
+  test("holding without moving, a reversal, cancel and a new touch never retain pull", () => {
+    const touch = new SheetSwipe();
+    assert.equal(touch.pull, 0);
+    touch.start(start());
+    assert.equal(touch.holding, true);
+    assert.equal(touch.pull, 0);
+    touch.move({ dx: 0, dy: 108, at: 30, cancelable: true });
+    near(touch.pull, 0.5);
+    touch.move({ dx: 0, dy: 0, at: 60, cancelable: true });
+    near(touch.pull, 0);
+    touch.move({ dx: 0, dy: 208, at: 90, cancelable: true });
+    near(touch.pull, 1);
+    touch.cancel();
+    assert.equal(touch.holding, false);
+    assert.equal(touch.pull, 0);
+    touch.start(start({ stand: "full", up: 300 }));
+    assert.equal(touch.pull, 0);
+    touch.end(100);
+    assert.equal(touch.pull, 0);
+  });
+
+  test("a flick commits with less than full pull", () => {
+    const touch = new SheetSwipe();
+    touch.start(start());
+    touch.move({ dx: 0, dy: 48, at: 20, cancelable: true });
+    near(touch.pull, 0.2);
+    assert.equal(touch.end(21).end, "closed");
+    assert.equal(touch.pull, 0);
+  });
+
+  test("the session passes pull after reading unsaved input, with reduced motion too, and clears the hold on cancel", () => {
+    for (const reduced of [false, true]) {
+      const page = new FakePage({ unsaved: true, reduced });
+      const session = new SwipeSession(page.host);
+      session.begin(sessionStart());
+      assert.equal(session.touch.pull, 0);
+      session.move({ dx: 0, dy: 108, at: 30, cancelable: true });
+      assert.deepEqual(page.pulls, [0.25]);
+      session.move({ dx: 0, dy: 608, at: 60, cancelable: true });
+      assert.deepEqual(page.pulls, [0.25, 0.5]);
+      session.cancel();
+      assert.equal(session.touch.pull, 0);
+      assert.equal(page.heldOn, false);
+      assert.equal(session.sliding, !reduced);
+      page.settle();
+      assert.equal(page.closes, 0);
+      assert.equal(page.placed, false);
+      assert.deepEqual(page.pulls, [0.25, 0.5], "settling never sends a target as finger pull");
+    }
   });
 });

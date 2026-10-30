@@ -53,9 +53,10 @@ describe("the sheet grabber", () => {
     assert.match(pill, /height="4"/);
     assert.match(style, /left:50%/);
     assert.match(style, /margin-left:-18px/);
-    // controlBorder at rest, and the member's accent through the custom property the swipe sets while a finger holds the sheet, fading 150 ms each way.
-    assert.match(style, /color:var\(--rvtt-grabber-held, #76747f\)/);
-    assert.match(style, /transition:color 150ms ease/);
+    assert.match(style, /color:color-mix\(in srgb, var\(--rvtt-grabber-held, #76747f\) calc\(30% \+ var\(--rvtt-grabber-pull, 0\) \* 70%\), #76747f\)/);
+    assert.match(style, /transform:scale\(calc\(1 \+ var\(--rvtt-grabber-stretch, 0\) \* 0.4\), calc\(1 - var\(--rvtt-grabber-stretch, 0\) \* 0.25\)\)/);
+    assert.match(style, /transform-origin:center/);
+    assert.match(style, /transition:var\(--rvtt-grabber-transition, color 200ms ease, transform 200ms cubic-bezier\(0.34, 1.56, 0.64, 1\)\)/);
   });
 
   test("a pane's header shows one as a sheet, reaching over the frame's 4 px top padding and growing 4 px for it", () => {

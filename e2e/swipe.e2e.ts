@@ -1729,11 +1729,11 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     }
   });
 
-  test("grab-c. the grabber lights up in the member's own color from a press on the header until the lift, fading 150 ms, and a tap on Close lights nothing", async () => {
+  test("fl8-hold. the grabber warms to 30% of the member's color over 300 ms, follows a drag, and a tap on Close lights nothing", async () => {
     // Pat's page, whose accent is his green, not the crest yellow.
     await setUp(player, { width: 375, height: 667, scale: 1 });
     const sheet = await openPanel(player, "Log");
-    await steadyRect(sheet);
+    const box = await steadyRect(sheet);
     const pill = sheet.locator("[data-sheet-grabber]");
     const colors = await systemColors(player);
     // Pat's green, lifted for contrast on a dark surface (lib/accent.ts), and neither the crest yellow nor the grey at rest.
@@ -1747,18 +1747,22 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
       const s = (globalThis as unknown as Win).getComputedStyle(el as unknown as El);
       return { property: s.transitionProperty ?? "", duration: s.transitionDuration ?? "" };
     });
-    assert.deepEqual(look, { property: "color", duration: "0.15s" });
+    assert.deepEqual(look, { property: "color, transform", duration: "0.2s, 0.2s" });
     const finger = new Finger(playerCdp, player);
     await finger.down(await headerPoint(sheet));
     assert.equal(await sheet.getAttribute("data-sheet-held"), "", "the press on the header did not hold the sheet");
-    await waitFor("the glow to warm", async () => ((await colorOf(pill)) === colors.accent ? true : null), 1_000);
+    const held = await mixedGrabberColor(player, 0);
+    await waitFor("the held color to warm", async () => ((await colorOf(pill)) === held ? true : null), 1_000);
+    const holdTransition = await grabberLook(sheet);
+    assert.equal(holdTransition.property, "color");
+    assert.equal(holdTransition.duration, "0.3s");
     await shots.take(player, "grab-c-held-375x667-100");
     await finger.drag(30);
-    assert.equal(await colorOf(pill), colors.accent, "dragged");
+    await checkPull(sheet, 22 / Math.max(box.height / 2, 44));
     await finger.up();
     assert.equal(await settled(sheet), "rest", "a short drag springs back");
     assert.equal(await sheet.getAttribute("data-sheet-held"), null);
-    await waitFor("the glow to cool", async () => ((await colorOf(pill)) === colors.rest ? true : null), 1_000);
+    await expectGrabberRest(sheet);
     // Under forced colors: the system's muted text at rest, its highlight while held.
     await player.emulateMedia({ forcedColors: "active" });
     try {
@@ -1784,12 +1788,12 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     assert.equal(await settled(sheet), "gone", "the tap on Close did not close the sheet");
   });
 
-  test("grab-d. with reduced motion the glow comes and goes at once, with no fade", async () => {
+  test("fl8-reduced. reduced motion changes the color at once and never stretches, on the pull or the release", async () => {
     await player.emulateMedia({ reducedMotion: "reduce" });
     try {
       await setUp(player, { width: 375, height: 667, scale: 1 });
       const sheet = await openPanel(player, "Log");
-      await steadyRect(sheet);
+      const box = await steadyRect(sheet);
       const pill = sheet.locator("[data-sheet-grabber]");
       const colors = await systemColors(player);
       const duration = await pill.evaluate((el) => parseFloat((globalThis as unknown as Win).getComputedStyle(el as unknown as El).transitionDuration ?? ""));
@@ -1797,13 +1801,92 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
       const finger = new Finger(playerCdp, player);
       await finger.down(await headerPoint(sheet));
       // Read in the frame after the press: no fade to wait for.
-      assert.equal(await colorAfterFrame(pill), colors.accent, "the glow did not come at once");
+      assert.equal(await colorAfterFrame(pill), await mixedGrabberColor(player, 0), "the held color did not come at once");
+      const commit = Math.max(box.height / 2, 44);
+      await finger.drag(8 + commit * 0.5);
+      await checkPull(sheet, 0.5, true);
       await finger.up();
-      assert.equal(await colorAfterFrame(pill), colors.rest, "the glow did not go at once");
+      assert.equal(await colorAfterFrame(pill), colors.rest, "the pull color did not go at once");
+      await expectGrabberRest(sheet);
       await sheet.getByRole("button", { name: "Close Log" }).click();
     } finally {
       await player.emulateMedia({ reducedMotion: null });
     }
+  });
+
+  test("fl8-pull. each design fills and stretches with the sheet at 25%, 50% and 100% of the slow-release distance, down and up", async () => {
+    await setUp(player, { width: 390, height: 844, scale: 1 });
+    try {
+      for (const design of GRABBER_DESIGNS) {
+        await pickHandle(player, design.id);
+        for (const direction of [1, -1]) {
+          const sheet = await openPanel(player, "Log");
+          const box = await steadyRect(sheet);
+          const header = await rectOf(sheet.locator("[data-sheet-grab]").first());
+          const commit = Math.max((direction > 0 ? box.height : box.top) / 2, 44);
+          const slop = direction > 0 ? 8 : 16;
+          const finger = new Finger(playerCdp, player);
+          await finger.down(await headerPoint(sheet));
+          let previous = 0;
+          for (const share of [0.25, 0.5, 1]) {
+            const distance = direction * (slop + commit * share);
+            await finger.drag(distance - previous);
+            previous = distance;
+            await checkPull(sheet, share);
+            const movedHeader = await rectOf(sheet.locator("[data-sheet-grab]").first());
+            assert.ok(Math.abs(movedHeader.height - header.height) < 1, `${design.id}: the stretch changed header height`);
+            assert.ok(Math.abs(movedHeader.width - header.width) < 1, `${design.id}: the stretch changed header width`);
+            if (share >= 0.5) await shots.take(player, `fl8-${design.id}-${direction > 0 ? "down" : "up"}-${share === 1 ? "full" : "mid"}-pull-390x844`);
+          }
+          // Reach full pull, then return short of the threshold. A slow lift must spring back.
+          await finger.drag(direction * (slop + commit * 0.25) - previous);
+          await checkPull(sheet, 0.25);
+          await finger.rest(120);
+          await finger.up();
+          assert.equal(await settled(sheet), "rest");
+          assert.equal(await sheet.getAttribute("aria-modal"), null, "the short release filled the sheet");
+          await expectGrabberRest(sheet);
+          await sheet.getByRole("button", { name: "Close Log" }).click();
+        }
+      }
+    } finally {
+      await player.evaluate(() => (globalThis as unknown as { localStorage: { removeItem(k: string): void } }).localStorage.removeItem("rvtt.sheetHandle"));
+    }
+  });
+
+  test("fl8-unsaved. unsaved input follows at half and caps the pull at half, then keeps the draft on release and cancel", async () => {
+    await setUp(player, { width: 390, height: 844, scale: 1 });
+    const sheet = await openPanel(player, "Log");
+    const box = await steadyRect(sheet);
+    const commit = Math.max(box.height / 2, 44);
+    const message = sheet.getByLabel("Message");
+    await message.fill("FL-8 unsent message");
+    await message.blur();
+    const finger = new Finger(playerCdp, player);
+    await finger.down(await headerPoint(sheet));
+    await finger.drag(8 + commit * 0.5);
+    await checkPull(sheet, 0.25);
+    await finger.drag(commit * 0.5);
+    await checkPull(sheet, 0.5);
+    await finger.drag(commit * 0.5);
+    await checkPull(sheet, 0.5);
+    await finger.rest(120);
+    await finger.up();
+    assert.equal(await settled(sheet), "rest");
+    await expectGrabberRest(sheet);
+    assert.equal(await message.inputValue(), "FL-8 unsent message");
+    // A second finger cancels the hold and its pull even while the first remains down.
+    await finger.down(await headerPoint(sheet));
+    await finger.drag(8 + commit);
+    await checkPull(sheet, 0.5);
+    await finger.second(mapPoint());
+    await expectGrabberRest(sheet);
+    await finger.up();
+    assert.equal(await settled(sheet), "rest");
+    assert.equal(await message.inputValue(), "FL-8 unsent message");
+    await message.fill("");
+    await message.blur();
+    await sheet.getByRole("button", { name: "Close Log" }).click();
   });
 });
 
@@ -1833,7 +1916,7 @@ function colorOf(locator: Locator): Promise<string> {
   return locator.first().evaluate((el) => (globalThis as unknown as Win).getComputedStyle(el as unknown as El).color ?? "");
 }
 
-/** An element's color in the second frame from now: the frame that draws a change starts its transition, and the next shows where it stands, so a 150 ms fade is still under way there. */
+/** An element's color in the second frame from now: a normal fade would still be under way. */
 function colorAfterFrame(locator: Locator): Promise<string> {
   return locator.first().evaluate(
     (el) =>
@@ -1858,8 +1941,59 @@ function systemColors(page: Page): Promise<{ rest: string; accent: string; grayT
       probe.remove();
       return out;
     };
-    return { rest: read("#76747f"), accent: read("var(--rvtt-accent)"), grayText: read("GrayText"), highlight: read("Highlight") };
+    return { rest: read("color-mix(in srgb, #76747f 30%, #76747f)"), accent: read("var(--rvtt-accent)"), grayText: read("GrayText"), highlight: read("Highlight") };
   });
+}
+
+/** A browser-resolved mix, so rgb() versus color(srgb) serialization cannot disguise a wrong color. */
+function mixedGrabberColor(page: Page, pull: number): Promise<string> {
+  return page.evaluate((p) => {
+    type Probe = { style: Record<string, string>; remove(): void };
+    const g = globalThis as unknown as Win & { document: { createElement(t: string): Probe; body: { appendChild(n: Probe): void } } };
+    const probe = g.document.createElement("span");
+    probe.style.color = `color-mix(in srgb, var(--rvtt-accent) calc(30% + ${p} * 70%), #76747f)`;
+    g.document.body.appendChild(probe);
+    const color = g.getComputedStyle(probe as unknown as El).color ?? "";
+    probe.remove();
+    return color;
+  }, pull);
+}
+
+function grabberLook(surface: Locator): Promise<{ color: string; matrix: number[]; pull: number; property: string; duration: string }> {
+  return surface.evaluate((el) => {
+    const g = globalThis as unknown as Win;
+    const node = el as unknown as El;
+    const drawing = node.querySelector("[data-sheet-grabber]");
+    if (!drawing) throw new Error("the sheet has no grabber");
+    const style = g.getComputedStyle(drawing);
+    const transform = style.transform ?? "";
+    const matrix = transform === "none" ? [1, 0, 0, 1, 0, 0] : (transform.match(/^matrix\(([^)]+)\)$/)?.[1] ?? "").split(",").map(Number);
+    const props = (el as unknown as { style: { getPropertyValue(name: string): string } }).style;
+    return { color: style.color ?? "", matrix, pull: Number(props.getPropertyValue("--rvtt-grabber-pull")), property: style.transitionProperty ?? "", duration: style.transitionDuration ?? "" };
+  });
+}
+
+async function checkPull(surface: Locator, expected: number, reduced = false): Promise<void> {
+  const look = await waitFor("FL-8: the sheet's pull to follow the touch", async () => {
+    const value = await grabberLook(surface);
+    return Math.abs(value.pull - expected) < 0.01 ? value : null;
+  }, 3_000);
+  assert.equal(look.color, await mixedGrabberColor(surface.page(), look.pull), `FL-8: wrong mix at pull ${look.pull}`);
+  assert.equal(look.property, "none", "FL-8: a transition trails the finger");
+  const stretch = reduced ? 0 : look.pull;
+  const matrix = [1 + 0.4 * stretch, 0, 0, 1 - 0.25 * stretch, 0, 0];
+  assert.equal(look.matrix.length, 6, "FL-8: the drawing has no valid scale transform");
+  matrix.forEach((value, i) => assert.ok(Math.abs(look.matrix[i]! - value) < 0.0001, `FL-8: wrong scale at pull ${look.pull}: ${look.matrix}`));
+}
+
+async function expectGrabberRest(surface: Locator): Promise<void> {
+  const colors = await systemColors(surface.page());
+  await waitFor("FL-8: the color and drawing to return to rest", async () => {
+    const look = await grabberLook(surface);
+    return look.color === colors.rest && look.matrix.length === 6 && look.matrix.every((value, i) => Math.abs(value - [1, 0, 0, 1, 0, 0][i]!) < 0.0001) ? true : null;
+  }, 1_000);
+  assert.equal(await surface.getAttribute("data-sheet-held"), null);
+  assert.equal((await grabberLook(surface)).pull, 0);
 }
 
 /** Opens the page called Notes that says `text`, of the two that share the title. */

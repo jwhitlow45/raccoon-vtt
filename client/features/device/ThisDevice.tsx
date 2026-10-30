@@ -150,7 +150,7 @@ export default function ThisDevice() {
         </Button>
       </Section>
       <Section label="Sheet handle">
-        <Help id={handleHelp}>The mark at the top of a phone's sheets that shows you can swipe them. It lights up in your color while you hold one.</Help>
+        <Help id={handleHelp}>The mark at the top of a phone's sheets that shows you can swipe them. It fills with your color as you pull one, fully when letting go would move it.</Help>
         <Select aria-label="Sheet handle" aria-describedby={handleHelp} value={handle} onChange={(e) => setSheetHandle(parseGrabber(e.target.value))} style={{ width: "100%" }}>
           {GRABBER_DESIGNS.map((d) => (
             <option key={d.id} value={d.id}>
