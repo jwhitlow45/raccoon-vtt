@@ -702,9 +702,24 @@ restFile(null, () => {
           assert.ok(await wholeInReach(trap.getByRole("button", { name: "Save and damage", exact: true })), "the row's Save and damage is out of reach");
           await lined(trap, "the trap's toast as the row");
           await shots.take(dm, "br-f-11-dm-trap-row");
+          // FU39 confer: a surviving row toast keeps its focused action as
+          // the viewport gives it a normal stack, then takes it back to the row.
+          const live = dm.locator("[data-toast]").filter({ hasText: "Needle Plate went off: Scout." });
+          const save = live.getByRole("button", { name: "Save and damage", exact: true });
+          await save.evaluate((el) => (el as unknown as { setAttribute(name: string, value: string): void }).setAttribute("data-e2e-kept", "row-action"));
+          await save.focus();
+          for (const view of [{ width: 390, height: 844, row: false }, { width: 320, height: 440, row: true }]) {
+            await dm.setViewportSize({ width: view.width, height: view.height });
+            await waitFor("the toast's new form", async () => (await live.getAttribute("data-toast-form") === "row") === view.row ? true : null);
+            assert.equal(await live.evaluate((el) => (el as unknown as { closest(selector: string): unknown }).closest("[data-toast-over-bars]") !== null), view.row);
+            assert.equal(await save.getAttribute("data-e2e-kept"), "row-action", "FU39 confer: resizing remounted the action");
+            assert.equal(await save.evaluate((el) => el === (el as unknown as { ownerDocument: { activeElement: unknown } }).ownerDocument.activeElement), true, "FU39 confer: resizing lost action focus");
+            assert.ok(await wholeInReach(save), "FU39 confer: the relocated action is out of reach");
+          }
           await trap.getByRole("button").first().click();
           const whole = dm.locator('[data-toast-form="whole"]').filter({ hasText: "Needle Plate went off: Scout." });
           await whole.waitFor();
+          assert.equal(await whole.getByRole("button", { name: "Save and damage", exact: true }).getAttribute("data-e2e-kept"), "row-action", "FU39 confer: showing the whole toast remounted its action");
           await lined(whole, "the trap's toast whole");
           await shots.take(dm, "br-f-11-dm-trap-whole");
           // Its words dismiss it, and the error that waited takes the row.

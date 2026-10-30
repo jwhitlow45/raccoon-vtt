@@ -1768,12 +1768,7 @@ function Toasts(props: {
   // The box of the toast over the bars, as the row or whole, so the alerts' summary row stands clear of it, or in the strip's header (D-261024-23).
   const dockStore = useScoped(barDockSlot);
   const rowBox = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const r = rowToast !== undefined ? rowBox.current?.getBoundingClientRect() : undefined;
-    const next = r ? { top: r.top, bottom: r.bottom } : null;
-    const was = dockStore.getState().toastRow;
-    if (next === null ? was !== null : was === null || Math.abs(was.top - next.top) > 0.5 || Math.abs(was.bottom - next.bottom) > 0.5) dockStore.setState({ toastRow: next });
-  });
+  const rowStack = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => () => dockStore.setState({ toastRow: null }), [dockStore]);
   useEffect(() => {
     if (wholeToast === undefined) return;
@@ -1851,9 +1846,10 @@ function Toasts(props: {
   const inSheet = slot ? showing.filter((t) => places.get(t.id) === "sheet") : [];
   const low = overBars ? [] : showing.filter((t) => inToastLayer(places.get(t.id)));
   const lowAt = toastLayerPlace(placed.current, ids, props.edges);
-  const drawn = [...overMap, ...low];
+  const mapToasts = [...overMap, ...low];
+  const drawn = [...mapToasts, ...(rowToast ? [rowToast] : [])];
   // The toasts drawn now, in the very short sheet and the one row too, start their time as they first draw (review BC-OPUS-35).
-  const drawnKey = [...drawn, ...inSheet, ...(rowToast ? [rowToast] : [])].map((t) => t.id).join(",");
+  const drawnKey = [...drawn, ...inSheet].map((t) => t.id).join(",");
   useLayoutEffect(() => {
     if (drawnKey !== "") ui.toastsDrawn(drawnKey.split(",").map(Number));
   }, [drawnKey, ui]);
@@ -1877,6 +1873,12 @@ function Toasts(props: {
     };
     put(stacks.notices.stack.current, overMap);
     put(stacks.layer.stack.current, low);
+    put(rowStack.current, rowToast ? [rowToast] : []);
+    // Read the row after relocating its host, before the alerts use its box.
+    const r = rowToast !== undefined ? rowBox.current?.getBoundingClientRect() : undefined;
+    const nextRow = r ? { top: r.top, bottom: r.bottom } : null;
+    const wasRow = dockStore.getState().toastRow;
+    if (nextRow === null ? wasRow !== null : wasRow === null || Math.abs(wasRow.top - nextRow.top) > 0.5 || Math.abs(wasRow.bottom - nextRow.bottom) > 0.5) dockStore.setState({ toastRow: nextRow });
     const height = (t: Toast) => hosts.current.get(t.id)?.firstElementChild?.getBoundingClientRect().height ?? 0;
     for (const [stack, list] of [
       [stacks.notices, overMap],
@@ -1899,7 +1901,7 @@ function Toasts(props: {
     spanToast.foot = feet.length > 0 ? Math.max(...feet) : null;
     // A toast that just showed over the bar's header takes its place again under it, on a render before the browser paints. While the bar opens, so does every toast already showing there (review LP19-Q1).
     const opening = barOpening(spanToast.shownAt, Date.now());
-    const boxes = drawn.flatMap((t) => {
+    const boxes = mapToasts.flatMap((t) => {
       const r = opening || recent.has(t.id) ? hosts.current.get(t.id)?.firstElementChild?.getBoundingClientRect() : undefined;
       return r && r.height > 0 ? [{ id: t.id, top: r.top / zoom, bottom: r.bottom / zoom }] : [];
     });
@@ -1932,22 +1934,25 @@ function Toasts(props: {
             props.layer,
           )
         : null}
-      {drawn.map((t) => createPortal(<ToastNote toast={t} onDismiss={() => ui.dismissToast(t.id)} />, hostOf(t.id), `toast-${t.id}`))}
-      {props.layer && rowToast
+      {drawn.map((t) => createPortal(
+        <ToastNote
+          toast={t}
+          form={t.id === rowToast?.id ? (wholeToast ? "whole" : "row") : "stack"}
+          onDismiss={() => ui.dismissToast(t.id)}
+          onWhole={() => {
+            setWhole(t.id);
+            ui.holdToast(t.id, true);
+          }}
+          onShrink={shrink}
+        />,
+        hostOf(t.id),
+        `toast-${t.id}`,
+      ))}
+      {props.layer
         ? createPortal(
             // Over the top bar's row, 4 px from the safe top, as wide as the layer less its sides. Whole, it stands from the safe top down.
             <div ref={rowBox} data-toast-over-bars="" style={{ position: "absolute", top: props.safeTop + (wholeToast ? 0 : theme.space(1)), left: 0, right: 0, padding: `0 ${theme.space(3)}px`, display: "flex", justifyContent: "center" }}>
-              <ToastNote
-                key={rowToast.id}
-                toast={rowToast}
-                form={wholeToast ? "whole" : "row"}
-                onDismiss={() => ui.dismissToast(rowToast.id)}
-                onWhole={() => {
-                  setWhole(rowToast.id);
-                  ui.holdToast(rowToast.id, true);
-                }}
-                onShrink={shrink}
-              />
+              <div ref={rowStack} style={{ display: "contents" }} />
             </div>,
             props.layer,
           )
@@ -2154,7 +2159,7 @@ function ToastStack(props: { stack: ReturnType<typeof useToastStack>; style: CSS
  * right end, its words whole and the row's full height. Whole: the stack's
  * form with a 44 px Close at its top right, which shrinks it back.
  */
-function ToastNote(props: { toast: Toast; onDismiss(): void; form?: "stack" | "row" | "whole"; onWhole?(): void; onShrink?(): void; closeRoom?: boolean }) {
+function ToastNote(props: { toast: Toast; onDismiss(): void; form?: "stack" | "row" | "whole"; onWhole?(): void; onShrink?(): void }) {
   const t = props.toast;
   const form = props.form ?? "stack";
   const tone = NOTICE_TONES[t.tone === "error" ? "danger" : "info"];
@@ -2174,71 +2179,47 @@ function ToastNote(props: { toast: Toast; onDismiss(): void; form?: "stack" | "r
     boxShadow: theme.shadow.float,
   };
   const action = t.action;
-  if (form === "row") {
-    return (
+  const row = form === "row";
+  const whole = form === "whole";
+  const boxed = row || action !== undefined;
+  const wordsStyle: CSSProperties = row
+    ? { flex: "1 1 auto", minWidth: theme.touch, padding: `0 ${theme.space(2)}px 0 ${theme.space(3)}px`, background: "transparent", border: "none", color: "inherit", font: "inherit", textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: "pointer" }
+    : action
+      ? { flex: "1 1 200px", minWidth: 0, minHeight: theme.touch, padding: 0, background: "transparent", border: "none", color: "inherit", font: "inherit", textAlign: "left", cursor: "pointer" }
+      : { ...look, padding: `${theme.space(2)}px ${whole ? theme.touch : theme.space(3)}px ${theme.space(2)}px ${theme.space(3)}px`, cursor: "pointer" };
+  // Keep the same controls at the same React positions when a resize changes
+  // the form. Only their layout changes, so a focused action is never detached.
+  return (
+    <div data-toast-form={whole ? "whole" : undefined} style={whole ? { position: "relative", width: "100%", maxWidth: TOAST_MAX_PX, pointerEvents: "auto" } : { display: "flex", flexDirection: "column", width: "100%", maxWidth: row ? "none" : TOAST_MAX_PX }}>
       <div
-        data-toast=""
-        data-toast-form="row"
-        style={{ ...look, maxWidth: "none", height: theme.touch, minHeight: 0, boxSizing: "border-box", border: "none", outline: `${theme.line.border}px solid ${tone.outline}`, outlineOffset: -theme.line.border, display: "flex", alignItems: "stretch", overflow: "hidden" }}
+        data-toast={boxed ? "" : undefined}
+        data-toast-form={row ? "row" : undefined}
+        style={row
+          ? { ...look, maxWidth: "none", height: theme.touch, minHeight: 0, boxSizing: "border-box", border: "none", outline: `${theme.line.border}px solid ${tone.outline}`, outlineOffset: -theme.line.border, display: "flex", alignItems: "stretch", overflow: "hidden" }
+          : action
+            ? { ...look, display: "flex", alignItems: "center", flexWrap: "wrap", gap: theme.space(2), padding: `${theme.space(1)}px ${whole ? theme.touch : theme.space(2)}px ${theme.space(1)}px ${theme.space(3)}px` }
+            : { display: "contents" }}
       >
-        <button
-          type="button"
-          aria-label={t.text}
-          onClick={props.onWhole}
-          style={{ flex: "1 1 auto", minWidth: theme.touch, padding: `0 ${theme.space(2)}px 0 ${theme.space(3)}px`, background: "transparent", border: "none", color: "inherit", font: "inherit", textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: "pointer" }}
-        >
-          {t.text}
+        <button type="button" data-toast={boxed ? undefined : ""} aria-label={row ? t.text : undefined} onClick={row ? props.onWhole : props.onDismiss} style={wordsStyle}>
+          {!row && !action && t.die ? <ToastD20 die={t.die} text={t.text} /> : t.text}
         </button>
         {action ? (
           <Button
             size="sm"
             onClick={() => {
+              // A button not ready, such as Forget and undo while a builder gesture waits, does nothing and keeps the toast.
               if (action.ready?.() === false) return;
               props.onDismiss();
               action.run();
             }}
-            style={{ flex: "none", height: theme.touch, minHeight: theme.touch }}
+            style={{ flex: "none", ...(row ? { height: theme.touch, minHeight: theme.touch } : null) }}
           >
             {action.label}
           </Button>
         ) : null}
       </div>
-    );
-  }
-  if (form === "whole") {
-    return (
-      <div data-toast-form="whole" style={{ position: "relative", width: "100%", maxWidth: TOAST_MAX_PX, pointerEvents: "auto" }}>
-        <ToastNote toast={t} onDismiss={props.onDismiss} closeRoom />
-        <IconButton icon="close" label="Close" onClick={props.onShrink} style={{ position: "absolute", top: 0, right: 0 }} />
-      </div>
-    );
-  }
-  if (action) {
-    // A button cannot hold another, so the words dismiss as a button of their own beside the action's.
-    return (
-      <div data-toast="" style={{ ...look, display: "flex", alignItems: "center", flexWrap: "wrap", gap: theme.space(2), padding: `${theme.space(1)}px ${props.closeRoom ? theme.touch : theme.space(2)}px ${theme.space(1)}px ${theme.space(3)}px` }}>
-        <button type="button" onClick={props.onDismiss} style={{ flex: "1 1 200px", minWidth: 0, minHeight: theme.touch, padding: 0, background: "transparent", border: "none", color: "inherit", font: "inherit", textAlign: "left", cursor: "pointer" }}>
-          {t.text}
-        </button>
-        <Button
-          size="sm"
-          onClick={() => {
-            // A button not ready, such as Forget and undo while a builder gesture waits, does nothing and keeps the toast.
-            if (action.ready?.() === false) return;
-            props.onDismiss();
-            action.run();
-          }}
-          style={{ flex: "none" }}
-        >
-          {action.label}
-        </Button>
-      </div>
-    );
-  }
-  return (
-    <button type="button" data-toast="" onClick={props.onDismiss} style={{ ...look, padding: `${theme.space(2)}px ${props.closeRoom ? theme.touch : theme.space(3)}px ${theme.space(2)}px ${theme.space(3)}px`, cursor: "pointer" }}>
-      {t.die ? <ToastD20 die={t.die} text={t.text} /> : t.text}
-    </button>
+      {whole ? <IconButton icon="close" label="Close" onClick={props.onShrink} style={{ position: "absolute", top: 0, right: 0 }} /> : null}
+    </div>
   );
 }
 
