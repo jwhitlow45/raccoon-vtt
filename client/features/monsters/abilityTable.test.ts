@@ -45,7 +45,9 @@ describe("a monster block's ability table, three across (docs/design-v1-dice-ui.
     const markup = withoutFrames(renderToStaticMarkup(createElement(StatBlockView, { view: monsters[0]!, source: "srd" })));
     assert.doesNotMatch(markup, /<table/);
     assert.equal(markup.match(/<dt/g)?.length, 6);
-    // FL-12 (D-261030-527): the Dex save is framed whole, "Save +3", and its picture names it for a screen reader.
-    assert.match(markup, /data-proficiency-level="prof" title="Proficient"[^>]*>Save<span data-proficiency-marker="prof" role="img" aria-label="Proficient"[^>]*><\/span><\/span> <\/span>\+3/, "the aboleth's Dex save is set apart and named");
+    // FL-13 (D-261030-539): the grid marks nothing. The block's Proficiencies line names the save.
+    assert.doesNotMatch(markup, /data-proficiency/, "no mark in the grid");
+    assert.match(markup, /<dd[^>]*font-weight:\d+[^>]*><span[^>]*>Save <\/span>\+3<\/dd>/, "the aboleth's Dex save stays set apart in bold");
+    assert.match(markup, /<strong>Proficiencies<\/strong> Dexterity saves/);
   });
 });

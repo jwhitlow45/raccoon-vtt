@@ -1,19 +1,17 @@
 import { useEffect, useRef, useState, type Ref } from "react";
 import type { RollNumbers } from "#shared/dice/bonus.ts";
-import { ABILITY_KEYS, type AbilityKey, type Character } from "#shared/model.ts";
-import type { Proficiency } from "#shared/rules/proficiency.ts";
+import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Character } from "#shared/model.ts";
 import { pcShape } from "#shared/rules/pcStats.ts";
-import { ABILITY_ABBR } from "#shared/rules/skills.ts";
+import { SKILLS } from "#shared/rules/skills.ts";
 import { signed } from "#shared/statBlock.ts";
 import { Loading } from "../../components/Loading.tsx";
 import { GROUP_BOX, GROUP_FOLD, Group, Help } from "../../components/Panel.tsx";
-import { MarkedText, ProficiencyLabel, ProficiencyUnit } from "../../components/ProficiencyMark.tsx";
 import { handFocusNow, handFocusOn, pressedControl } from "../../lib/handFocus.ts";
+import { proficiencyLines } from "../../lib/proficiencyLines.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { editsPcStats } from "../tokens/access.ts";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
-import { findMarks } from "../dice/proficiencyPresentation.ts";
 import { useProficiency } from "../dice/useProficiency.ts";
 import { StatBlockView } from "../monsters/StatBlockView.tsx";
 import { pcBlockSummary, takeShapeWords } from "../tokens/creatureKind.ts";
@@ -155,6 +153,10 @@ function ShapeBody(props: { character: Character; edits: boolean }) {
   const { numbers } = useCharacterRollNumbers(character.id);
   const levelOf = useProficiency();
   const self = { characterId: character.id };
+  const lines = proficiencyLines({
+    saves: ABILITY_KEYS.map((ability) => ({ ability, level: levelOf(self, { kind: "save", ability }) })),
+    skills: SKILL_KEYS.map((skill) => ({ skill, level: levelOf(self, { kind: "check", ability: SKILLS[skill].ability, skill }) })),
+  });
   const endBox = useRef<HTMLDivElement>(null);
   // End the shape goes with the shape, so focus moves to the group's fold, which reads the section as it now stands, as Make a companion's does.
   const endShape = () => {
@@ -181,25 +183,23 @@ function ShapeBody(props: { character: Character; edits: boolean }) {
       {numbers ? (
         <p data-shape-numbers="" style={{ margin: 0, fontSize: theme.font.body14 }}>
           <span style={{ color: theme.color.textMuted }}>Rolls now: saves </span>
-          <SaveUnits text={saveUnitsOf(savesOf(numbers)).join(", ")} level={(ability) => levelOf(self, { kind: "save", ability })} />
-          <span style={{ color: theme.color.textMuted }}>, </span>
-          <ProficiencyUnit level={levelOf(self, { kind: "check", ability: "wis", skill: "perception" })}>
-            <span style={{ color: theme.color.textMuted }}>
-              <ProficiencyLabel level={levelOf(self, { kind: "check", ability: "wis", skill: "perception" })} bare>Perception</ProficiencyLabel>{" "}
-            </span>
-            {signed(numbers.skills.perception ?? numbers.abilities.wis.mod)}
-          </ProficiencyUnit>
+          {saveUnitsOf(savesOf(numbers)).join(", ")}
+          <span style={{ color: theme.color.textMuted }}>, Perception </span>
+          {signed(numbers.skills.perception ?? numbers.abilities.wis.mod)}
         </p>
       ) : null}
+      {/* Wild Shape keeps the druid's own proficiencies beside the beast's, so the creature's block below does not list them all (D-261029-419). Another shape's block lists its own. */}
+      {numbers && pcShape(character) === "wild"
+        ? lines.map((line) => (
+            <p key={line.label} data-shape-proficiency="" style={{ margin: 0, fontSize: theme.font.body14 }}>
+              <strong>{line.label}</strong> {line.names.join(", ")}
+            </p>
+          ))
+        : null}
       {end}
       {monster ? <StatBlockView view={monster} source="srd" credit /> : <Note>This character takes the shape of an SRD creature this app does not have.</Note>}
     </>
   );
-}
-
-/** "STR +5, DEX +3, …" with each ability marked as the shape rolls it now: Wild Shape keeps the druid's own, Polymorph takes the beast's (D-261029-419). */
-function SaveUnits(props: { text: string; level(ability: AbilityKey): Proficiency }) {
-  return <MarkedText text={props.text} marks={findMarks(props.text, ABILITY_KEYS.map((ability) => ({ label: ABILITY_ABBR[ability], level: props.level(ability) })))} />;
 }
 
 function savesOf(numbers: RollNumbers): Record<AbilityKey, number> {

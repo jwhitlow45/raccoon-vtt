@@ -3,9 +3,8 @@ import { ABILITY_KEYS, SKILL_KEYS, type Character, type PcRoll } from "#shared/m
 import { statsDefenses, pcActorNumbers, pcDerived, sortedRolls } from "#shared/rules/pcStats.ts";
 import { ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
 import { signed } from "#shared/statBlock.ts";
-import { MarkedText } from "../../components/ProficiencyMark.tsx";
+import { proficiencyLines } from "../../lib/proficiencyLines.ts";
 import { theme } from "../../lib/theme.ts";
-import { findMarks } from "../dice/proficiencyPresentation.ts";
 import { AbilityGrid } from "../monsters/AbilityGrid.tsx";
 import { defenseLinesOf, rollReading, rollTitle } from "./reading.ts";
 
@@ -25,6 +24,11 @@ export function PcStatsView(props: { character: Pick<Character, "stats" | "level
   const d = pcDerived(stats, level);
   const actorNumbers = pcActorNumbers(stats, level);
   const skills = SKILL_KEYS.filter((s) => stats.skills[s] !== undefined || (stats.adjust.skills?.[s] ?? 0) !== 0);
+  // The flags are the sheet's own, so a skill adjusted without one is neither, and Jack of All Trades marks nothing (D-261030-539).
+  const lines = proficiencyLines({
+    saves: ABILITY_KEYS.map((ability) => ({ ability, level: stats.saves.includes(ability) ? "prof" : "none" })),
+    skills: skills.map((skill) => ({ skill, level: stats.skills[skill] ?? "none" })),
+  });
   const defenses = defenseLinesOf(statsDefenses(stats));
   const rolls = sortedRolls(stats.rolls);
   const group = (kind: PcRoll["kind"]) => rolls.filter((r) => r.kind === kind);
@@ -34,11 +38,12 @@ export function PcStatsView(props: { character: Pick<Character, "stats" | "level
         <strong>Level {level ?? "not set"}</strong>, PB {signed(d.pb)}
       </p>
       <AbilityGrid abilities={ABILITY_KEYS.map((a) => ({ key: a, score: String(stats.abilities[a]), mod: signed(d.mods[a]), save: signed(d.saves[a].total), proficient: stats.saves.includes(a) }))} />
-      {skills.length > 0 ? (
-        <Labeled label="Skills">
-          <SkillsText text={skills.map((s) => `${SKILLS[s].name} ${signed(d.skills[s].total)}${stats.skills[s] === "expert" ? " (expertise)" : ""}`).join(", ")} skills={skills.map((s) => ({ label: SKILLS[s].name, level: stats.skills[s] ?? "none" }))} />
+      {skills.length > 0 ? <Labeled label="Skills">{skills.map((s) => `${SKILLS[s].name} ${signed(d.skills[s].total)}`).join(", ")}</Labeled> : null}
+      {lines.map((line) => (
+        <Labeled key={line.label} label={line.label}>
+          {line.names.join(", ")}
         </Labeled>
-      ) : null}
+      ))}
       {stats.jack ? <Labeled label="Jack of All Trades">{`${signed(Math.floor(d.pb / 2))} to skills with neither`}</Labeled> : null}
       <p style={LINE}>
         <strong>Initiative</strong> {signed(actorNumbers.initBonus)}, <strong>Passive Perception</strong> {actorNumbers.passivePerception}
@@ -69,11 +74,6 @@ export function PcStatsView(props: { character: Pick<Character, "stats" | "level
 }
 
 const LINE: CSSProperties = { margin: 0 };
-
-/** The Skills line as written, "(expertise)" and all, each skill's name marked from its own flag (D-261030-438). */
-function SkillsText(props: { text: string; skills: readonly { label: string; level: "none" | "prof" | "expert" }[] }) {
-  return <MarkedText text={props.text} marks={findMarks(props.text, props.skills)} />;
-}
 
 function Labeled(props: { label: string; children: ReactNode }) {
   return (

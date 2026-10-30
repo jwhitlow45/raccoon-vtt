@@ -357,12 +357,14 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     assert.equal(anaSocket.state!.characters[run.bree.characterId]!.level, 5);
     assert.equal(anaSocket.state!.characters[run.bree.characterId]!.actor.initBonus, 3, "initiative follows the block");
     const view = panel.locator("[data-pc-stats]");
-    await view.getByText("Stealth +9 (expertise)").waitFor();
+    await view.getByText("Stealth +9").waitFor();
+    // FL-13 (D-261030-539): proficiency is listed under Skills, never marked.
+    await view.locator("p").filter({ hasText: /^Proficiencies Dexterity saves$/ }).waitFor();
+    await view.locator("p").filter({ hasText: /^Expertise Stealth$/ }).waitFor();
     await view.getByText("Initiative").waitFor();
     // The Dex box of the six across: its score, its modifier, and its save named as proficient (docs/design-v1-dice-ui.md 6.1).
     assert.match((await view.textContent()) ?? "", /DEX16 \+3Save \+6/);
-    // FL-12 (D-261030-527): the proficient save is framed, "Save +6", and its picture names it for a screen reader.
-    await view.locator("[data-ability-grid] > div").filter({ hasText: /^DEX/ }).locator('[data-proficiency-level="prof"]').getByRole("img", { name: "Proficient", exact: true }).waitFor({ state: "attached" });
+    assert.equal(await panel.locator('[data-proficiency-level="prof"], [data-proficiency-level="expert"], [data-proficiency-mark]').count(), 0, "no frame or picture marks the sheet or the saves line");
     assert.match(await savesLine(ana), /DEX \+6/);
     await shots.take(ana, "pcstats-panel");
   });
@@ -402,7 +404,7 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
 
   test("2. the DM's device shows the totals, and Cy's has none of the block", async () => {
     const panel = await showBree(dm);
-    await panel.locator("[data-pc-stats]").getByText("Stealth +9 (expertise)").waitFor();
+    await panel.locator("[data-pc-stats]").getByText("Stealth +9").waitFor();
     assert.match(await savesLine(dm), /DEX \+6/);
     await shots.take(dm, "pcstats-dm-panel");
     await waitFor("Cy's view of Bree", () => cySocket.state?.characters[run.bree.characterId] ?? null);
@@ -455,7 +457,7 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     await sheet.getByLabel("Level", { exact: true }).fill("9");
     await sheet.getByRole("button", { name: "Save", exact: true }).click();
     await sheet.waitFor({ state: "detached" });
-    await panel.locator("[data-pc-stats]").getByText("Stealth +11 (expertise)").waitFor();
+    await panel.locator("[data-pc-stats]").getByText("Stealth +11").waitFor();
     assert.match(await savesLine(ana), /DEX \+7/);
     assert.match(await savesLine(dm), /DEX \+7/);
   });

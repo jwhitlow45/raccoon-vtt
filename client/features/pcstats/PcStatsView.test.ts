@@ -29,16 +29,14 @@ describe("a PC block's abilities three across (docs/design-v1-dice-ui.md 6.1)", 
     assert.match(boxes[1]!, /<strong[^>]*>18<\/strong> <span[^>]*>\+4<\/span>/, "the score and its modifier");
   });
 
-  test("a proficient save is bold and named proficient, the others neither", () => {
-    // FL-12 (D-261030-527): a proficient save is framed whole, "Save +7", and its picture names it for a screen reader.
-    const save = (box: string) => /<dd[^>]*font-weight:(\d+)[^>]*><span[^>]*><span data-proficiency-label="" data-proficiency-level="\w+"[^>]*>Save(<span data-proficiency-marker="prof" role="img" aria-label="Proficient"[^>]*><\/span>)?<\/span> <\/span>([^<]+)<\/dd>/.exec(box);
+  test("a proficient save is bold and the grid marks nothing (D-261030-539)", () => {
+    assert.doesNotMatch(markup, /data-proficiency/);
+    const save = (box: string) => /<dd[^>]*font-weight:(\d+)[^>]*><span[^>]*>Save <\/span>([^<]+)<\/dd>/.exec(box);
     const dex = save(boxes[1]!);
     const str = save(boxes[0]!);
     assert.ok(dex && str);
-    assert.equal(dex[3], "+7", "Dex +4 and proficiency +3");
-    assert.ok(dex[2], "a screen reader hears it is proficient");
+    assert.equal(dex[2], "+7", "Dex +4 and proficiency +3");
     assert.ok(Number(dex[1]) > Number(str[1]), "bold beside the plain Str save");
-    assert.equal(str[3], "+0");
-    assert.equal(str[2], undefined);
+    assert.equal(str[2], "+0");
   });
 });
