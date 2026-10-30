@@ -147,7 +147,7 @@ describe("how an import ended", () => {
     assert.deepEqual(outcome, { k: "unconfirmed" });
     assert.equal(
       outcomeText(outcome, "Crypt", true).text,
-      "The connection dropped during the import, and Crypt could not be confirmed complete. It may be missing walls, doors or lights. Undo takes the whole import back.",
+      "The connection dropped during the import, and Crypt could not be confirmed complete. It may be missing walls, doors or lights. Undo setup in Setup history takes the whole import back.",
     );
   });
 
@@ -159,13 +159,13 @@ describe("how an import ended", () => {
     assert.deepEqual(outcome, { k: "complete", checked: true });
     const said = outcomeText(outcome, "Crypt", true);
     assert.equal(said.tone, "info");
-    assert.match(said.text, /Crypt is complete: every wall, door and light is in\. Undo takes the whole import back\.$/);
+    assert.match(said.text, /Crypt is complete: every wall, door and light is in\. Undo setup in Setup history takes the whole import back\.$/);
   });
 
   test("contents that could not be counted are unconfirmed, never complete", () => {
     const answers: Answers = { taken: 3, refused: 0, unknown: 1 };
     assert.deepEqual(importOutcome(answers, { exists: true, contents: null }, { edges: 1, walls: 1, lights: 0 }), { k: "unconfirmed" });
-    assert.match(outcomeText({ k: "unconfirmed" }, "Crypt", false).text, /Open it from the Scenes panel\. Undo takes the whole import back\.$/);
+    assert.match(outcomeText({ k: "unconfirmed" }, "Crypt", false).text, /Open it from the Scenes panel\. Undo setup in Setup history takes the whole import back\.$/);
   });
 
   test("a scene that is not there was not made, refused or lost", () => {
@@ -181,6 +181,7 @@ describe("how an import ended", () => {
     assert.equal(mustCount({ taken: 2, refused: 1, unknown: 1 }, true), false);
     assert.deepEqual(importOutcome({ taken: 2, refused: 1, unknown: 1 }, { exists: true, contents: null }, sent), { k: "partial" });
     assert.equal(outcomeText({ k: "partial" }, "Crypt", false).text, PARTIAL_IMPORT);
+    assert.match(PARTIAL_IMPORT, /Undo setup in Setup history/);
   });
 
   test("a hidden import finished on another scene says where to find it", () => {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { clientOpSchema } from "#shared/protocol.ts";
 import { apply, room, scene } from "#shared/testutil.ts";
-import { copiedAll, copiesNothing, copyButtonText, copyLine, copyNotes, copyPatch, copyResult, copyTitle, MAPS_JOIN, MAPS_RESET, PLAYERS_HERE } from "./copyRules.ts";
+import { COPY_UNDO, copiedAll, copiesNothing, copyButtonText, copyLine, copyNotes, copyPatch, copyResult, copyTitle, MAPS_JOIN, MAPS_RESET, PLAYERS_HERE } from "./copyRules.ts";
 import { playersSeeOf } from "./playersSeeRules.ts";
 
 /** "Use these settings on other scenes…" (docs/design-v1-map-discovery.md 8.3, decision 18). */
@@ -65,4 +65,8 @@ describe("using a scene's vision settings on others", () => {
     assert.equal(copyResult([{ name: "A", answer: "taken" }, { name: "Hall", answer: "unknown" }]), "Copied to 1 of 2 scenes. Hall: The connection dropped before the server answered.");
     assert.equal(copyResult([{ name: "Hall", answer: "refused" }]), "Copied to 0 of 1 scene. Hall: That could not be done.");
   });
+});
+
+test("copied scene settings name their Setup undo control", () => {
+  assert.equal(COPY_UNDO, "Undo setup in Setup history puts the settings back. Players' remembered maps stay changed.");
 });

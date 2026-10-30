@@ -8,7 +8,7 @@ import { BUILD_ASKING } from "./ask.ts";
 
 /** The forget question's title, and what it says the yes does. */
 export const FORGET_TITLE = "Remembered map";
-export const FORGET_HELP = "Their map can keep only so much that changed out of their sight. The ground this change runs past that goes back under the fog for them, as if never seen, and Undo does not bring it back.";
+export const FORGET_HELP = "Their map can keep only so much that changed out of their sight. The ground this change runs past that goes back under the fog for them, as if never seen, and neither Undo nor Undo setup in Setup history brings it back.";
 export const FORGET_YES = "Go ahead";
 export const FORGET_BUSY = "Saving…";
 

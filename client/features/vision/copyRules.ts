@@ -28,7 +28,7 @@ export function copiesNothing(scene: Pick<Scene, "fogEnabled" | "vision">, patch
 }
 
 export const COPY_HELP = "Copies Players see, Light and Sight. Movement and walls stay as they are.";
-export const COPY_UNDO = "Undo puts the settings back, not players' maps.";
+export const COPY_UNDO = "Undo setup in Setup history puts the settings back. Players' remembered maps stay changed.";
 export const PLAYERS_HERE = "The players are here. They see the change at once.";
 export const MAPS_RESET = "Players' remembered maps here reset.";
 export const MAPS_JOIN = "Each player's own map here joins the party's.";

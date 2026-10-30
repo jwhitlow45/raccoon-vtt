@@ -143,3 +143,8 @@ describe("the warnings and Like's line", () => {
     assert.equal(likeSummary({ fogEnabled: false }), "Everything, Bright, Whole party, players' moves not blocked");
   });
 });
+
+test("vision configuration warnings name Setup history", () => {
+  assert.match(LEAVE_EXPLORE_TEXT, /Undo setup in Setup history/);
+  assert.match(JOIN_MAPS_TEXT, /Undo setup in Setup history/);
+});

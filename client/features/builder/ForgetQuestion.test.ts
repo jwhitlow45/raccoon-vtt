@@ -23,3 +23,7 @@ test("FU39-B: the hold ending enables Go ahead, and sending keeps the existing b
   assert.match(draw(true, false).footer, /aria-busy="true"/);
   assert.match(draw(true, false).footer, /Saving…/);
 });
+
+test("the memory warning covers both Play and Setup undo", () => {
+  assert.match(draw(false, false).body, /neither Undo nor Undo setup in Setup history brings it back/);
+});

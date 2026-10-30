@@ -35,10 +35,10 @@ export const WALLLESS_TEXT = "This map has no walls yet, so party vision shows p
 export const WALLLESS_ELSEWHERE = "If its map has no walls yet, party vision shows players all of it at once.";
 
 /** Leaving Explore where players explored, from the preset, the switches or the copy sheet (8.1, LK-9). */
-export const LEAVE_EXPLORE_TEXT = "Players will see the build as it is now on everything they explored. Undo does not bring back what they remembered.";
+export const LEAVE_EXPLORE_TEXT = "Players will see the build as it is now on everything they explored. Undo setup in Setup history does not bring back what they remembered.";
 
 /** Per player to Whole party, where players hold maps of their own (8.1). */
-export const JOIN_MAPS_TEXT = "Each player's own map joins the party's. Undo does not split them again.";
+export const JOIN_MAPS_TEXT = "Each player's own map joins the party's. Undo setup in Setup history does not split them again.";
 
 /** The room default's help, and the new scene form's note when a map image steps down from it (8.2). */
 export const IMAGE_STEPS_DOWN = "Under Explore a map image with no walls starts on Reveal by hand, since party vision would show players all of it.";

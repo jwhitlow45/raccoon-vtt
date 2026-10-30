@@ -94,7 +94,7 @@ export function importOutcome(answers: Answers, room: { exists: boolean; content
   return whole ? { k: "complete", checked: true } : { k: "unconfirmed" };
 }
 
-export const PARTIAL_IMPORT = "The server refused part of the import, so the scene may be missing walls. Undo takes the whole import back.";
+export const PARTIAL_IMPORT = "The server refused part of the import, so the scene may be missing walls. Undo setup in Setup history takes the whole import back.";
 
 /** The outcome in one sentence. `opened` says whether the new scene is on screen, or the DM must go to it. */
 export function outcomeText(outcome: ImportOutcome, name: string, opened: boolean): { text: string; tone: "info" | "error" } {
@@ -102,7 +102,7 @@ export function outcomeText(outcome: ImportOutcome, name: string, opened: boolea
   switch (outcome.k) {
     case "complete":
       return outcome.checked
-        ? { text: `The connection dropped during the import, but ${name} is complete: every wall, door and light is in. Undo takes the whole import back.`, tone: "info" }
+        ? { text: `The connection dropped during the import, but ${name} is complete: every wall, door and light is in. Undo setup in Setup history takes the whole import back.`, tone: "info" }
         : { text: `${name} is imported, with every wall, door and light.${goTo}`, tone: "info" };
     case "none":
       return { text: outcome.lost ? "The connection dropped during the import, and no scene was made. Try again." : "The server refused the import, so no scene was made.", tone: "error" };
@@ -110,7 +110,7 @@ export function outcomeText(outcome: ImportOutcome, name: string, opened: boolea
       return { text: PARTIAL_IMPORT, tone: "error" };
     case "unconfirmed":
       return {
-        text: `The connection dropped during the import, and ${name} could not be confirmed complete. It may be missing walls, doors or lights.${goTo} Undo takes the whole import back.`,
+        text: `The connection dropped during the import, and ${name} could not be confirmed complete. It may be missing walls, doors or lights.${goTo} Undo setup in Setup history takes the whole import back.`,
         tone: "error",
       };
   }
