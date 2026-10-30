@@ -100,6 +100,24 @@ test("fl7: a desk row marks the choice its answer recorded where the answer name
   assert.deepEqual(marks(html).slice(2), [{ level: "prof", words: "WIS (Perception)" }]);
 });
 
+test("fl7: a reopened desk row marks the choice its earlier answer recorded (FL7-SOL-02)", () => {
+  const ask = request([{ characterId: "hero", previous: { choice: 1, total: 17 } }]);
+  const html = render(createElement(DmCard, { request: ask, open: true, toggleRef() {}, onClose() {}, onToggle() {} }));
+  const answer = dmAnswerText(ask.targets[0]!, ask.test);
+  assert.equal(answer, "waiting again, was WIS (Perception): typed 17");
+  assert.ok(text(html).includes(answer));
+  assert.deepEqual(marks(html).slice(2), [{ level: "prof", words: "WIS (Perception)" }]);
+});
+
+test("fl7: a replaced answer marks its own choice and the one it replaced, each at its own level (FL7-SOL-02)", () => {
+  const ask = request([{ characterId: "hero", choice: 0, total: 15, previous: { choice: 1, total: 9 } }]);
+  const html = render(createElement(DmCard, { request: ask, open: true, toggleRef() {}, onClose() {}, onToggle() {} }));
+  const answer = dmAnswerText(ask.targets[0]!, ask.test);
+  assert.equal(answer, "DEX (Stealth): typed 15, changed from WIS (Perception): typed 9");
+  assert.ok(text(html).includes(answer));
+  assert.deepEqual(marks(html).slice(2), [{ level: "expert", words: "DEX (Stealth)" }, { level: "prof", words: "WIS (Perception)" }]);
+});
+
 test("fl7: the player card's question keeps its words and size, and marks the save for its one creature", () => {
   const ask = request();
   ask.test = { kind: "save", choices: [{ ability: "dex" }] };

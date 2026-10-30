@@ -1,9 +1,9 @@
 import { testOf, type D20Test } from "#shared/dice/bonus.ts";
-import type { RollRequest, RollTarget } from "#shared/model.ts";
+import type { RollAnswer, RollRequest, RollTarget } from "#shared/model.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
 import type { Proficiency } from "#shared/rules/proficiency.ts";
 import { choiceLabels, findMarks, marksTest, type TextMark } from "../dice/proficiencyPresentation.ts";
-import { choiceShort, targetRef } from "./logic.ts";
+import { answered, choiceShort, targetRef } from "./logic.ts";
 
 /*
  * Where a request's words name its test for one creature, and how
@@ -29,10 +29,22 @@ export function rowTest(request: Pick<RollRequest, "test" | "spell">, target: Ro
   return marksTest(test) ? test : null;
 }
 
-/** An answer's words that name its recorded choice of two ("DEX: typed 17", "Sent DEX 13"), that choice marked. */
+/**
+ * An answer's words that name a recorded choice of two, each marked with
+ * the choice its own answer recorded: the answer now, which leads the line
+ * at `from` ("DEX: typed 17", "Sent DEX 13"), and on the DM's line the
+ * answer it replaced or a reopen set aside, after "changed from " or
+ * "was " (logic.ts dmAnswerText, FL7-SOL-02).
+ */
 export function answerChoiceMarks(text: string, request: Pick<RollRequest, "test" | "spell">, target: RollTarget, levelOf: LevelOf, from = 0): TextMark[] {
-  const choice = request.test.choices.length > 1 && target.choice !== undefined ? request.test.choices[target.choice] : undefined;
-  const test = choice ? testOf(request, target.choice) : null;
-  if (!choice || !marksTest(test)) return [];
-  return findMarks(text, [{ label: choiceShort(choice), level: levelOf(targetRef(target), test) }], from);
+  const ref = targetRef(target);
+  const labelOf = (answer: RollAnswer, after: string) => {
+    const choice = request.test.choices.length > 1 && answer.choice !== undefined && answered(answer) ? request.test.choices[answer.choice] : undefined;
+    const test = choice ? testOf(request, answer.choice) : null;
+    return choice && marksTest(test) ? [{ label: choiceShort(choice), level: levelOf(ref, test), after }] : [];
+  };
+  // A bare mark ("marked Pass") names no choice, so the answer now is marked only where the line starts with it.
+  const now = labelOf(target, "").filter(({ label }) => text.startsWith(label, from));
+  const was = target.previous ? labelOf(target.previous, answered(target) ? "changed from " : "was ") : [];
+  return findMarks(text, [...now, ...was], from);
 }
