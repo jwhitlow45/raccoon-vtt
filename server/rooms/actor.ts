@@ -1,6 +1,5 @@
 import type { FastifyBaseLogger } from "fastify";
 import { keys, parseKey, readEntity, type EntityKey } from "#shared/keys.ts";
-import { holdsOp } from "#shared/logRings.ts";
 import { BLOCK_SAVES_TOO_FAST, BLOCKS_AT_QUOTA, BLOCKS_ROOM_TOO_FULL, checkLimits, LIMITS, ROLLING_TOO_FAST, type LimitCheck } from "#shared/limits.ts";
 import { serverDraw, type Draw } from "#shared/dice/roll.ts";
 import { withTodaysSrdIds } from "#shared/migrate.ts";
@@ -10,7 +9,7 @@ import { canApply, doorReachPassed, touchLanding, MOVE_PLAYERS_FIRST_BACK, type 
 import { holderOf, linkHolds, onHolder } from "#shared/rules/attach.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
 import { landedElevation } from "#shared/rules/movement.ts";
-import { gridOfToken, hashValue, inSightOfNonOwners, projectArchivedLog, projectEntity, visibleAssetIds } from "#shared/project.ts";
+import { gridOfToken, hashValue, inSightOfNonOwners, projectEntity, visibleAssetIds } from "#shared/project.ts";
 import { ASK_LOST, clientOpSchema, FORGET_ASK, isPoseOp, isResizeOp, serverOnlyOpSchema, type Op, type OpOf, type RefusalCode, type RestoreEntry, type ServerMessage, type ServerOnlyOp } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { restoreAddedAssets } from "#shared/referencedAssets.ts";
@@ -823,28 +822,9 @@ export class RoomActor {
     return ids;
   }
 
-  /**
-   * The lines a committed op of this seq wrote, `<seq>:<index>`, while the
-   * in-memory log still holds every one the viewer reads (holdsOp), for the
-   * receipt lookup (docs/design-v1-dice.md 1.2). Null once some may have
-   * left it: the archive has them, unless an older archive's trim or a
-   * short disk (persistence.ts ArchiveGuard) kept them out.
-   */
-  committedLines(seq: number, viewer: Viewer): LogEntry[] | null {
-    if (!holdsOp(this.#committed.state, viewer, seq)) return null;
-    const prefix = `${seq}:`;
-    const lines = this.#committed.state.log.filter((e) => e.id.startsWith(prefix));
-    return lines.length > 0 ? lines : null;
-  }
-
   /** How many receipts the room holds younger than 24 hours, staged ones included, and one member's: for the receipt tests. */
   receiptCounts(memberId?: string): { room: number; member: number; players: number } {
     return { room: this.#receipts.size, member: memberId === undefined ? 0 : this.#receipts.countOf(memberId), players: this.#receipts.players };
-  }
-
-  /** Projects log rows from the database for a viewer with each line's own rules, as the live log's (design 7.3). */
-  projectLog(entries: LogEntry[], viewer: Viewer, sceneId: string | null): LogEntry[] {
-    return projectArchivedLog(this.#committed.state, entries, viewer, { sceneId });
   }
 
   /**
