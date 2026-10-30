@@ -427,3 +427,49 @@ jobs:
       - name: Remove the builder
         if: always() && env.MODE == 'build'
         run: docker buildx rm raccoon || true
+
+  release-notes:
+    needs: publish
+    if: github.event_name == 'push' && github.ref_type == 'tag' && needs.publish.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      content: ${{ steps.notes.outputs.content }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Generate this release's notes
+        id: notes
+        uses: orhun/git-cliff-action@a9a95522b26fe6403f7bb24031f21fb573d0f5ff # v4.9.1
+        with:
+          config: cliff.toml
+          args: --current --strip header
+          github_token: ${{ github.token }}
+
+  release:
+    needs: [publish, release-notes]
+    if: github.event_name == 'push' && github.ref_type == 'tag' && needs.publish.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          NOTES: ${{ needs.release-notes.outputs.content }}
+        run: |
+          if found=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" 2>&1); then
+            echo "Release $TAG already exists. Leaving it unchanged."
+          elif [ "$found" = "release not found" ]; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --verify-tag --title "$TAG" --notes "$NOTES"
+          else
+            printf '%s\n' "$found" >&2
+            exit 1
+          fi

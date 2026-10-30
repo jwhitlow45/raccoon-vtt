@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, test } from "node:test";
@@ -21,10 +21,10 @@ const SOURCE = "https://github.com/example/raccoon-vtt";
 const BOTH = "linux/amd64 linux/arm64";
 
 /** The step's script: the lines of its `run: |` block, as GitHub hands them to bash. */
-function stepScript(): string {
+function stepScript(step = STEP): string {
   const lines = readFileSync(new URL("../.github/workflows/image.yml", import.meta.url), "utf8").split("\n");
-  const name = lines.findIndex((l) => l.trim() === `- name: ${STEP}`);
-  assert.ok(name >= 0, `no step named "${STEP}"`);
+  const name = lines.findIndex((l) => l.trim() === `- name: ${step}`);
+  assert.ok(name >= 0, `no step named "${step}"`);
   const run = lines.findIndex((l, i) => i > name && l.trim() === "run: |");
   const indent = lines[run + 1]!.length - lines[run + 1]!.trimStart().length;
   const body: string[] = [];
@@ -147,5 +147,70 @@ describe("the image workflow's check of a version Docker Hub holds already", { s
     const r = check({ fails: "ERROR: 500 at 100%\n::warning::injected annotation" });
     assert.equal(r.status, 1, r.out);
     assert.deepEqual(commands(r.out), [`::error::Could not tell whether 0.2.0 is on Docker Hub: ${escaped("ERROR: 500 at 100%\n::warning::injected annotation")}`]);
+  });
+});
+
+/** A job's YAML block, so permission and dependency checks cannot match another job. */
+function jobBlock(name: string): string {
+  const workflow = readFileSync(new URL("../.github/workflows/image.yml", import.meta.url), "utf8");
+  const block = workflow.split(`\n  ${name}:\n`)[1];
+  assert.ok(block, `no job named ${name}`);
+  return block.split(/\n  [\w-]+:\n/)[0]!;
+}
+
+function publishRelease(state: "exists" | "missing" | "unreachable"): { status: number | null; calls: string[] } {
+  const dir = mkdtempSync(path.join(tmpdir(), "raccoon-release-step-"));
+  try {
+    writeFileSync(path.join(dir, "gh"), `#!/bin/bash
+printf '%s\\n' "$1 $2" >> "$CALLS"
+if [ "$2" = view ]; then
+  case "$STATE" in
+    exists) exit 0 ;;
+    missing) echo 'release not found' >&2; exit 1 ;;
+    unreachable) echo 'connection refused' >&2; exit 1 ;;
+  esac
+fi
+[ "$2" = create ]
+`);
+    chmodSync(path.join(dir, "gh"), 0o755);
+    const result = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", stepScript("Publish the GitHub Release")], {
+      encoding: "utf8",
+      env: { PATH: `${dir}:${process.env.PATH ?? ""}`, STATE: state, CALLS: path.join(dir, "calls"), TAG: "v0.2.0", GITHUB_REPOSITORY: "example/raccoon-vtt", NOTES: "Release notes\n\nWith paragraphs." },
+    });
+    return { status: result.status, calls: readFileSync(path.join(dir, "calls"), "utf8").trim().split("\n") };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+describe("GitHub Releases follow successful image publication", () => {
+  test("both jobs require a successful tag publish and notes run with a read-only token", () => {
+    assert.equal(existsSync(new URL("../.github/workflows/release.yml", import.meta.url)), false);
+    for (const name of ["release-notes", "release"]) {
+      const block = jobBlock(name);
+      assert.match(block, /needs: (?:publish|\[publish, release-notes\])/);
+      assert.match(block, /if: github.event_name == 'push' && github.ref_type == 'tag' && needs.publish.result == 'success'/);
+    }
+    const notes = jobBlock("release-notes");
+    assert.match(notes, /permissions:\n      contents: read\n/);
+    assert.doesNotMatch(notes, /contents: write/);
+    assert.match(notes, /github_token: \$\{\{ github.token \}\}/);
+    assert.match(notes, /content: \$\{\{ steps.notes.outputs.content \}\}/);
+    const release = jobBlock("release");
+    assert.match(release, /needs: \[publish, release-notes\]/);
+    assert.match(release, /NOTES: \$\{\{ needs.release-notes.outputs.content \}\}/);
+    assert.doesNotMatch(release, /uses:/);
+  });
+
+  test("an existing Release is left unchanged", () => {
+    assert.deepEqual(publishRelease("exists"), { status: 0, calls: ["release view"] });
+  });
+
+  test("a missing Release is created after checking for it", () => {
+    assert.deepEqual(publishRelease("missing"), { status: 0, calls: ["release view", "release create"] });
+  });
+
+  test("a failed lookup never creates a Release", () => {
+    assert.deepEqual(publishRelease("unreachable"), { status: 1, calls: ["release view"] });
   });
 });
