@@ -83,12 +83,18 @@ const EXPORT_DEADLINE_MS = 30_000;
 export type LogRouteOptions = {
   /** The pool scans take their cursors' connections from. Defaults to the app's own pool. */
   pool?: Pick<pg.Pool, "connect">;
-  budget?: Partial<ScanBudgetOptions>;
+  /** The budget's limits, or for tests a budget to watch. */
+  budget?: Partial<ScanBudgetOptions> | LogScanBudget;
   history?: Omit<LogHistoryOptions, "pool">;
+  /** Whole-request deadlines, for tests. */
+  deadlines?: { pageMs?: number; exportMs?: number };
 };
 
 export function registerLogRoutes(app: FastifyInstance, kit: AuthKit, deps: { manager: RoomManager; options?: LogRouteOptions }): Promise<void> {
-  const budget = new LogScanBudget(deps.options?.budget);
+  const given = deps.options?.budget;
+  const budget = given instanceof LogScanBudget ? given : new LogScanBudget(given);
+  const pageMs = deps.options?.deadlines?.pageMs ?? PAGE_DEADLINE_MS;
+  const exportMs = deps.options?.deadlines?.exportMs ?? EXPORT_DEADLINE_MS;
   const history = new LogHistory({ pool: deps.options?.pool ?? kit.pool, ...deps.options?.history });
   deps.manager.onDelete((roomId) => budget.cancelRoom(roomId));
   app.addHook("preClose", async () => budget.close());
@@ -157,7 +163,7 @@ export function registerLogRoutes(app: FastifyInstance, kit: AuthKit, deps: { ma
       const admitted = await admission(req, grant);
       const actor = await deps.manager.acquire(roomId);
       const view = captureView(actor.committed, roomId, { memberId: grant.memberId, role: grant.role });
-      const { scan, close } = openScan(reply, "page", roomId, grant.memberId, PAGE_DEADLINE_MS);
+      const { scan, close } = openScan(reply, "page", roomId, grant.memberId, pageMs);
       try {
         const page = await history.sessions(view, { before, limit: query.data.limit }, scan).catch((err: unknown) => {
           throw scanFailure(err);
@@ -193,7 +199,7 @@ export function registerLogRoutes(app: FastifyInstance, kit: AuthKit, deps: { ma
         const admitted = await admission(req, grant);
         const actor = await deps.manager.acquire(roomId);
         const view = captureView(actor.committed, roomId, { memberId: grant.memberId, role: grant.role });
-        opened = openScan(reply, "export", roomId, grant.memberId, EXPORT_DEADLINE_MS);
+        opened = openScan(reply, "export", roomId, grant.memberId, exportMs);
         const { scan, close } = opened;
         // The first pass finds the title's dates and the file's name, so the headers go out right before the lines.
         const ends = await history.bounds(view, range, scan).catch((err: unknown) => {
@@ -230,12 +236,16 @@ export function registerLogRoutes(app: FastifyInstance, kit: AuthKit, deps: { ma
             end();
           }
         }
+        if (scan.signal.aborted) throw new HttpError(503, "busy", { retryAfter: 1 });
         const stream = Readable.from(body(), { objectMode: false });
         // A stream destroyed before it was read never runs the body, and one destroyed mid-batch stops its query here.
         stream.on("close", () => {
           scan.cancel(new Error("export stream closed"));
           end();
         });
+        // A cancelled scan (deadline, room deletion, shutdown) ends the stream itself: a reader that stopped reading
+        // leaves the body waiting at its last chunk, where nothing else would release the scan's lease.
+        scan.signal.addEventListener("abort", () => stream.destroy(new Error("export cancelled")), { once: true });
         streaming = true;
         return reply
           .header("content-type", "text/markdown; charset=utf-8")
@@ -273,7 +283,7 @@ export function registerLogRoutes(app: FastifyInstance, kit: AuthKit, deps: { ma
         const scene = grant.role === "dm" && as === undefined ? (sceneId ?? committed.state.meta.playerSceneId) : null;
         const viewer: Viewer = as === undefined ? { memberId: grant.memberId, role: grant.role } : { memberId: as, role: "player" };
         const view = captureView(committed, roomId, viewer, { sceneId: scene, previewBy: as === undefined ? null : grant.memberId });
-        opened = openScan(reply, "page", roomId, grant.memberId, PAGE_DEADLINE_MS);
+        opened = openScan(reply, "page", roomId, grant.memberId, pageMs);
         const page = await history.page(view, { before, after, limit }, opened.scan).catch((err: unknown) => {
           throw scanFailure(err);
         });

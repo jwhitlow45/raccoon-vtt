@@ -6,6 +6,7 @@ import type { LogNames } from "#shared/logText.ts";
 import type { LogEntry } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { startEngine, type Engine, type Socket, type TestClient } from "../rooms/testing.ts";
+import { LogScanBudget } from "../rooms/logScanBudget.ts";
 import { renderLogExport } from "./logExport.ts";
 
 /**
@@ -500,5 +501,45 @@ describe("a streamed export", () => {
     const res = await pending;
     assert.equal(res.statusCode, 403);
     assert.deepEqual(res.json(), { error: "no_access" });
+  });
+});
+
+describe("an export whose reader stops reading", () => {
+  let t: Engine;
+  const budget = new LogScanBudget();
+  before(async () => {
+    t = await startEngine({ log: { budget, deadlines: { exportMs: 1_500 } } });
+  });
+  after(() => t.close());
+
+  test("ends at its deadline without another read: the body aborts, the lease and the room's export slot come back", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Stalled");
+    const dmId = (await dm.me(roomId)).memberId!;
+    const pip = t.client();
+    await pip.join(roomId, "Pip");
+    // About 10 MB of Markdown, far more than the socket and stream buffers hold.
+    await t.pool.query(
+      `insert into room_log (room_id, id, at, entry)
+       select $1, '0:' || g, '2025-09-01T19:00:00Z',
+         jsonb_build_object('id', '0:' || g, 'at', '2025-09-01T19:00:00.000Z', 'kind', 'chat', 'from', $2::text, 'text', repeat('a', 500) || g)
+       from generate_series(1, 20000) g`,
+      [roomId, dmId],
+    );
+    const res = await fetch(`${t.url.replace(/^ws/, "http")}/api/rooms/${roomId}/log/export?tz=UTC`, {
+      headers: { cookie: `rvtt=${dm.token}`, "cf-connecting-ip": dm.ip, "sec-fetch-site": "same-origin" },
+    });
+    assert.equal(res.status, 200);
+    const reader = res.body!.getReader();
+    assert.match(new TextDecoder().decode((await reader.read()).value), /^# Stalled: log of /);
+    // The reader stops. Past the deadline the scan lets go of everything without being read again.
+    for (let i = 0; i < 100 && budget.usage.scans > 0; i++) await new Promise((r) => setTimeout(r, 50));
+    assert.deepEqual(budget.usage, { turns: { page: 0, export: 0 }, leases: { page: 0, export: 0 }, waiting: 0, scans: 0 });
+    const next = await pip.get(`/api/rooms/${roomId}/log/export?tz=UTC`);
+    assert.equal(next.statusCode, 200, next.body);
+    const rest = await (async () => {
+      for (;;) if ((await reader.read()).done) return "ended";
+    })().catch(() => "aborted");
+    assert.equal(rest, "aborted", "the stalled body ends without its last chunk");
   });
 });
