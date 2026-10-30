@@ -372,3 +372,27 @@ describe("signing the published image", () => {
     ]);
   });
 });
+
+describe("the image's exact-commit CI gate", () => {
+  for (const event of ["push", "pull_request"]) {
+    test(`a successful ${event} run ${event === "push" ? "satisfies" : "does not satisfy"} the release gate`, () => {
+      const dir = mkdtempSync(path.join(tmpdir(), "raccoon-ci-gate-"));
+      try {
+        writeFileSync(path.join(dir, "gh"), `#!/bin/bash
+case " $* " in
+  *' --event push '*) [ "$CI_EVENT" != push ] || { echo 1; exit 0; }; echo 0 ;;
+  *) echo 1 ;;
+esac
+`);
+        chmodSync(path.join(dir, "gh"), 0o755);
+        const run = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", stepScript("ci.yml passed on the tagged commit")], {
+          encoding: "utf8",
+          env: { PATH: `${dir}:${process.env.PATH ?? ""}`, CI_EVENT: event, GITHUB_REPOSITORY: "example/raccoon-vtt", SHA: REVISION },
+        });
+        assert.equal(run.status, event === "push" ? 0 : 1, run.stdout + run.stderr);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
+});

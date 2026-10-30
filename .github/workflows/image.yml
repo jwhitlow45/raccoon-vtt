@@ -202,7 +202,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ needs.check.outputs.sha }}
         run: |
-          runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$SHA" --status success --json databaseId --jq length)
+          runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$SHA" --event push --status success --json databaseId --jq length)
           if [ "$runs" -eq 0 ]; then
             echo "::error::ci.yml has no successful run on $SHA. Wait for CI to pass on this commit, then re-run this workflow."
             exit 1
