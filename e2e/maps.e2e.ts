@@ -13,6 +13,7 @@ import { retainedGrid, starterMapScene } from "../client/features/starter/mapSce
 import { theme } from "../client/lib/theme.ts";
 import { ConsoleWatch, dragWorld, openSceneGroup, openSideTab, pickOption, pickTool, pressOption, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
+import { undoSetup } from "./helpers/undoScope.ts";
 import { assetRow, chooseStarterWork, starterWork } from "./starterPick.ts";
 
 /**
@@ -451,7 +452,7 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     assert.deepEqual(Object.keys(playerSocket.state?.scenes ?? {}), [run.sceneId]);
   });
 
-  test("gd-a. a drawn grid is found on upload, Use default and Undo take it back, Find the grid finds it again, a map without one keeps the guess, and a Universal VTT scene is only offered the box", async () => {
+  test("gd-a. a drawn grid is found on upload, Use default and Undo setup take it back, Find the grid finds it again, a map without one keeps the guess, and a Universal VTT scene is only offered the box", async () => {
     // Both maps are drawn here by code (client/features/grid/synthetic.ts), never art: noise, and on one
     // of them 70 px squares whose lines cross at (20, 35). Neither name gives a size.
     const DRAWN = { cellPx: 70, originPx: { x: 20, y: 35 }, bounds: { w: 19, h: 13 } };
@@ -508,11 +509,11 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     await gridOptions.getByRole("button", { name: "Use default", exact: true }).click();
     await waitFor("the guess back", () => gridIs(keep, GUESS) || null);
 
-    // Find the grid, on a scene whose grid is wrong, finds it again. Undo takes it back in one step.
+    // Find the grid, on a scene whose grid is wrong, finds it again. Grid calibration is Setup, so Undo setup takes it back in one step.
     await gridOptions.getByRole("button", { name: "Find the grid", exact: true }).click();
     await waitFor("the found grid again", () => gridIs(keep, DRAWN) || null, 15_000);
     await dm.getByText("Found a grid of 70 px squares.").first().waitFor();
-    await dm.getByRole("button", { name: "Undo", exact: true }).click();
+    await undoSetup(dm);
     await waitFor("one undo back to the guess", () => gridIs(keep, GUESS) || null);
 
     // A map without a grid keeps the guess, and Line up grid asks for a box as before. The Scenes
@@ -810,7 +811,8 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     // Nothing more is said once the scene is made.
     assert.equal(await dm.getByText(/^This map brings/).count(), 0);
 
-    await dm.getByRole("button", { name: "Undo", exact: true }).click();
+    // An import is one Setup gesture (docs/design-v1-undo-scope.md 3), taken back whole by one Undo setup.
+    await undoSetup(dm);
     await waitFor("one undo taking the scene, its walls and its lights away", () => {
       const state = dmSocket.state;
       if (sceneOf(state, scene.id)) return null;

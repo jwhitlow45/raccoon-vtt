@@ -4,7 +4,7 @@ import WebSocket from "ws";
 import type { Page } from "playwright-core";
 import { clientOpSchema, type ServerMessage } from "../../shared/protocol.ts";
 import { historyMessageSchema, type HistoryDirection, type HistoryMessage, type HistoryScope } from "../../shared/undoContract.ts";
-import { openSideTab, waitFor, type SocketWatch } from "../harness.ts";
+import { openSideTab, untilReady, waitFor, type SocketWatch } from "../harness.ts";
 
 type WireMessage = ServerMessage | HistoryMessage;
 type Event = Extract<ServerMessage, { t: "ev" }>;
@@ -99,4 +99,15 @@ export async function setupHistory(page: Page) {
 
 export function playControl(page: Page, direction: HistoryDirection) {
   return page.locator("header:has(h1)").first().getByRole("button", { name: direction === "undo" ? "Undo" : "Redo", exact: true });
+}
+
+/** Takes back the newest Setup step from Setup history, as a DM does, and closes the sheet. The top bar's Undo never reaches it. */
+export async function undoSetup(page: Page): Promise<void> {
+  const { sheet } = await setupHistory(page);
+  const undo = sheet.getByRole("button", { name: "Undo setup", exact: true });
+  await untilReady(undo, "Undo setup");
+  await undo.click();
+  await sheet.locator("[data-history-result]").filter({ hasText: /^Undid setup: / }).waitFor();
+  await page.keyboard.press("Escape");
+  await sheet.waitFor({ state: "detached" });
 }

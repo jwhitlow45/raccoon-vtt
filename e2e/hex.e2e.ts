@@ -16,9 +16,9 @@ import { arrowStep, isometric } from "../client/lib/view.ts";
 import { HEX_LIMITS, NEW_SCENES_HELP } from "../client/features/grid/words.ts";
 import { calibrationFromHexFind } from "../client/features/grid/calibrate.ts";
 import { drawMap } from "../client/features/grid/synthetic.ts";
-import { assertCanvasAt, barControl, ConsoleWatch, dragWorld, expandBar, openSceneGroup, openSideTab, sceneGroup, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, SocketWatch, startServer, untilReady, waitFor, type Server } from "./harness.ts";
+import { assertCanvasAt, barControl, ConsoleWatch, dragWorld, expandBar, openSceneGroup, openSideTab, sceneGroup, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
-import { setupHistory } from "./helpers/undoScope.ts";
+import { undoSetup } from "./helpers/undoScope.ts";
 import { wallsRound } from "../shared/rules/hexWalls.testkit.ts";
 
 /**
@@ -571,17 +571,6 @@ async function hexSizeControls(page: Page, tokenId: string, at: string, shot: st
   await openScenes(page);
   await page.keyboard.press("Escape");
   return off;
-}
-
-/** Takes back the newest Setup step from Setup history, as a DM does, and closes the sheet. */
-async function undoSetup(page: Page): Promise<void> {
-  const { sheet } = await setupHistory(page);
-  const undo = sheet.getByRole("button", { name: "Undo setup", exact: true });
-  await untilReady(undo, "Undo setup");
-  await undo.click();
-  await sheet.locator("[data-history-result]").filter({ hasText: /^Undid setup: / }).waitFor();
-  await page.keyboard.press("Escape");
-  await sheet.waitFor({ state: "detached" });
 }
 
 describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
