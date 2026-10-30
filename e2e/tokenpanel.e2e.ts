@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import type { Locator, Page } from "playwright-core";
 import { INTER_FAMILY } from "../client/lib/interFont.ts";
-import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
+import { alignmentLines, measureAlignment, proficiencyLines } from "./helpers/alignment.ts";
 import { barControl, expandBar, multiSelect, openSideTab, pagePoint, waitFor, wholeInReach } from "./harness.ts";
 import { assetRow, chooseStarterWork, starterCounts, starterWork } from "./starterPick.ts";
 import { actor, applyInView, bar, combatSections, DESK, dm, dmCdp, dmConsole, dmContext, dmSocket, type El, failSrdData, familyOf, fieldBeforeModes, fitMap, focused, foldedSummary, footprintRect, groupIn, hpPairSideBySide, inside, labelUnderFade, LONG_IMMUNITIES, mapBadges, mapLocks, noSideScroll, openGroup, ops, panelFile, panelOf, player, playerCdp, playerContext, playerSocket, rectOf, resize, ringsCompact, ringsFull, run, sectionIn, server, settle, setUp, SHEET, shots, speedUnitsWhole, steadyAboveSize, stepperRows, storedFolds, tapToken, tokenPanel, type View } from "./tokenpanelRoom.ts";
@@ -580,8 +580,18 @@ panelFile(null, () => {
     await expandBar(goblin);
     const vitals = await rectOf(goblin.locator("[data-vitals]"));
     assert.ok(vitals.height < 30, `the vitals take more than one line spanning: ${vitals.height} px`);
-    const saves = await rectOf(goblin.locator("[data-saves]"));
-    assert.ok(saves.height < 30, `the saves take more than one line spanning: ${saves.height} px`);
+    const saves = goblin.locator("[data-saves]");
+    const labels = saves.locator("[data-proficiency-label]");
+    assert.deepEqual(await labels.allTextContents(), ["STR −1", "DEX +2", "CON +0", "INT +0", "WIS −1", "CHA −1"], "all six names and bonuses stay whole");
+    const boxes = await Promise.all((await labels.all()).map(rectOf));
+    for (const start of [0, 3]) {
+      const row = boxes.slice(start, start + 3);
+      assert.ok(Math.max(...row.map((box) => box.top)) - Math.min(...row.map((box) => box.top)) <= 1, `saves ${start + 1} to ${start + 3} share a row: ${JSON.stringify(row)}`);
+    }
+    // The six marker slots add width. This phone keeps the complete saves in two balanced triples.
+    assert.ok(boxes[3]!.top >= boxes[0]!.bottom - 1, "the second triple starts below the first");
+    await noSideScroll(saves, "390 x 844: all six saves");
+    assert.deepEqual(await proficiencyLines(saves, "390 x 844: summary saves"), [], "every marker is centered and every label fits");
     // At 100% the expanded bar's full layout shows Apply wherever its token stands (barButtons.ts barCapacity).
     await applyInView(goblin, "390 x 844, Goblin 4 mid-screen");
     // A token at the scene's foot gets the same layout: the field under the mode buttons, no More stats.

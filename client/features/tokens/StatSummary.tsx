@@ -206,14 +206,16 @@ const VITALS_PART = { ...LINE_PART, alignItems: "center" } as const;
 const QUICK_PART = { ...VITALS_PART, columnGap: theme.space(1) } as const;
 const QUICK_BETWEEN = { marginInlineEnd: theme.space(2) } as const;
 const SAVES_PART = { ...LINE_PART, alignItems: "baseline" } as const;
+const SAVES_TRIPLE = { display: "inline-flex", flexWrap: "nowrap", flex: "none", alignItems: "baseline", columnGap: theme.space(1.5) } as const;
 
 /**
  * The six saves, "Saves" then "STR +5" and the rest, each a unit that
  * never breaks. The abbreviation takes the ability grid's small capitals
  * (AbilityGrid.tsx): at the body's size, capitals widen the line past one
  * row on a phone held upright, where "Str" fit. Where one line does not
- * hold them, they wrap three and three, "Saves" with the first three, so
- * no save stands alone (D-261024-42). While the SRD chunk loads the line
+ * hold them, they wrap three and three. The heading can stand above the
+ * first triple when it leaves too little room, but no save stands alone
+ * (D-261024-42). While the SRD chunk loads the line
  * keeps its place and, after the usual 200 ms, says so, and a failed load
  * offers the reload.
  */
@@ -246,9 +248,9 @@ export function SavesLine(props: { block: LinkedBlock }) {
     <div data-saves="" style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", rowGap: theme.space(1), columnGap: theme.space(1.5), fontSize: theme.font.body14 }}>
       <span data-saves-part="" style={SAVES_PART}>
         <span style={{ color: theme.color.textMuted }}>Saves</span>
-        {saves.slice(0, 3)}
+        <span data-saves-triple="" style={SAVES_TRIPLE}>{saves.slice(0, 3)}</span>
       </span>
-      <span data-saves-part="" style={SAVES_PART}>
+      <span data-saves-part="" data-saves-triple="" style={SAVES_TRIPLE}>
         {saves.slice(3)}
       </span>
     </div>
