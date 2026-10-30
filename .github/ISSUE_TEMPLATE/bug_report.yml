@@ -1,0 +1,71 @@
+name: Bug report
+description: Report something that does not work as expected.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For vulnerabilities, use the Security tab's "Report a vulnerability" option instead of a public issue. Do not include passwords, private room links or other private data.
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened?
+      description: Describe the problem. Include screenshots or errors if useful.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: List the steps that lead to the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: Copy the version from the About panel, or provide the container image tag.
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device and operating system
+      placeholder: Phone, tablet or computer, with its model and OS version
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and version
+    validations:
+      required: true
+  - type: input
+    id: screen-size
+    attributes:
+      label: Screen size
+      description: Give the browser's width and height in pixels if known, and portrait or landscape on a phone or tablet.
+    validations:
+      required: true
+  - type: input
+    id: interface-size
+    attributes:
+      label: Interface size
+      description: Give the app's interface size setting and any browser zoom or operating system text scaling.
+    validations:
+      required: true
+  - type: dropdown
+    id: role
+    attributes:
+      label: Were you the DM or a player?
+      options:
+        - DM
+        - Player
+        - Table display
+    validations:
+      required: true

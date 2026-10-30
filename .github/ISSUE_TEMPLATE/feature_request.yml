@@ -1,0 +1,22 @@
+name: Feature request
+description: Suggest an improvement to RaccoonVTT.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe what you are trying to do and where you get stuck.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to change?
+      description: Describe the behavior you would find useful.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and context
+      description: Include workarounds you have tried or examples that help explain the request.
