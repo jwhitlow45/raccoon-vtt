@@ -193,6 +193,8 @@ describe("raccoon-vtt notes and pins on a wave 5 build", { timeout: 180_000 }, (
   test("3. Back on the pin pane while Done is pending says so too, and stays in the room (W5-ASTRA-07)", async () => {
     await waitFor("the DM's socket back", () => dmSocket.state?.pins[run.pinId]?.label === "Old well" || null, 30_000);
     await dm.getByRole("status", { name: "Connected" }).first().waitFor({ timeout: 30_000 });
+    // The same notice still showing from step 2 would be kept, not said again, and since then "Saved. Undo in Setup history." was said last. Let it pass first.
+    await dm.locator("[data-toast]").filter({ hasText: PENDING_NOTICE }).waitFor({ state: "detached", timeout: 15_000 });
     // The pin's marker is a 28 px pin over its point, so its middle is 14 px above it.
     const tip = await pagePoint(dm, run.bounds, { x: 8.5, y: 6.5 });
     await dm.mouse.click(tip.x, tip.y - 14);
