@@ -1,15 +1,10 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
 import { describe, test } from "node:test";
 import type { RoomState } from "./model.ts";
 import { clientOps, serverOnlyOps, type ActorPatch, type Op, type OpOf } from "./protocol.ts";
 import { character, room, token } from "./testutil.ts";
 import type { UndoScope } from "./undoContract.ts";
-
-type Classifier = { undoScope(op: Op, before: RoomState): UndoScope; UNDO_SCOPE_BY_OP: Record<Op["t"], unknown> };
-const path = new URL("./undoScope.ts", import.meta.url);
-// Lane A owns this module. Missing scaffolding is a skip, never fail-first evidence.
-const classifier: Classifier | null = existsSync(path) ? await import(path.href) as Classifier : null;
+import { UNDO_SCOPE_BY_OP, undoScope } from "./undoScope.ts";
 
 const inventory = {
   play: [
@@ -34,17 +29,16 @@ function before(): RoomState {
 }
 
 function scope(op: unknown, state = before()): UndoScope {
-  assert.ok(classifier, "lane A's classifier scaffold is available");
-  return classifier.undoScope(op as Op, state);
+  return undoScope(op as Op, state);
 }
 
-describe("undo classifier inventory", { skip: classifier === null ? "waiting for lane A shared/undoScope.ts" : false }, () => {
+describe("undo classifier inventory", () => {
   test("every client protocol discriminant and server op has an explicit inventory entry", () => {
     const expected = [...Object.values(inventory).flat(), ...fieldSensitive];
     assert.equal(new Set(expected).size, expected.length);
     const actual = clientOps.map((schema) => schema.shape.t.value);
     assert.deepEqual([...expected].sort(), [...new Set(actual)].sort());
-    assert.deepEqual(Object.keys(classifier!.UNDO_SCOPE_BY_OP).sort(), [...new Set([...clientOps, ...serverOnlyOps].map((schema) => schema.shape.t.value))].sort());
+    assert.deepEqual(Object.keys(UNDO_SCOPE_BY_OP).sort(), [...new Set([...clientOps, ...serverOnlyOps].map((schema) => schema.shape.t.value))].sort());
   });
 
   for (const [expected, types] of Object.entries(inventory)) {
