@@ -385,3 +385,36 @@ describe("an area below 0 shows only through its own pits (review HXR1-ASTRA-1)"
     assert.deepEqual(new Set(pits), new Set([heights.polygon({ col: 2, row: 2 }), heights.polygon({ col: 3, row: 2 }), heights.polygon({ col: 4, row: 2 })]));
   });
 });
+
+describe("an area that stood, over ground that changed (design 8, review HXR1-ASTRA-3)", () => {
+  const ROWS: Grid = { shape: "hex", orient: "rows" };
+  const bounds = { w: 16, h: 16 };
+  const ball = sphere("s", 8, 8, 10);
+  const at = (heights: DrawnHeights, fog = new FogView(null, "s1", bounds)): VolumeWorld => ({ heights, tiles: null, px: 32, fog, live: null });
+
+  test("a hex raised under a standing sphere lays it flat until its new shape is built, then it stands again", () => {
+    const v = new BoardVolumes();
+    const before = at(heightsOn(ROWS, bounds, {}));
+    v.sync([{ id: "s", template: ball, ctx: ctxOf(bounds, null), look: LOOK }], before);
+    settle(v, before);
+    assert.equal(shows(v.now(0, VIEW, before)), "s");
+    // The hex under its middle raised 3 cells: the old mesh would stand through the new ground.
+    const raised = at(heightsOn(ROWS, bounds, { "7,9": 3 }));
+    v.sync([{ id: "s", template: ball, ctx: ctxOf(bounds, null), look: LOOK }], raised);
+    assert.equal(shows(v.now(0, VIEW, raised)), " waiting", "flat and waiting while the new shape builds");
+    settle(v, raised);
+    assert.equal(shows(v.now(0, VIEW, raised)), "s");
+  });
+
+  test("a fog change that leaves the drawn ground as it was keeps the sphere standing while its next shape builds", () => {
+    const v = new BoardVolumes();
+    const before = at(heightsOn(ROWS, bounds, { "2,2": 1 }));
+    v.sync([{ id: "s", template: ball, ctx: ctxOf(bounds, null), look: LOOK }], before);
+    settle(v, before);
+    assert.equal(shows(v.now(0, VIEW, before)), "s");
+    // The same drawn ground as a new object, as every fog change makes it, and a new fog that still shows the sphere's footprint.
+    const after = at(heightsOn(ROWS, bounds, { "2,2": 1 }), new FogView(null, "s1", bounds));
+    v.sync([{ id: "s", template: ball, ctx: ctxOf(bounds, null), look: LOOK }], { ...after, tiles: {} });
+    assert.equal(shows(v.now(0, VIEW, { ...after, tiles: {} })), "s", "the old shape stands meanwhile");
+  });
+});

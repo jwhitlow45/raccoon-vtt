@@ -159,6 +159,28 @@ export function bandPieces(vol: Volume, turn: Turn, keys: readonly string[], id:
   return out.sort((a, b) => a.band - b.band);
 }
 
+/** The drawn heights each volume was built on. */
+const builtOn = new WeakMap<Volume, DrawnHeights>();
+
+/**
+ * Whether the drawn ground a volume stands on reads the same in `now` as
+ * it did in `was`: the grid, the bounds, and every cell under its box and
+ * as far around as a pit's opening can show it, by content, since heights
+ * are made anew on every fog change.
+ */
+export function sameGroundUnder(vol: Volume, was: DrawnHeights | undefined, now: DrawnHeights): boolean {
+  if (!was) return false;
+  if (was === now) return true;
+  const a = was.grid;
+  const b = now.grid;
+  if (a.shape !== b.shape || (a.shape === "hex" && b.shape === "hex" && a.orient !== b.orient)) return false;
+  if (was.bounds.w !== now.bounds.w || was.bounds.h !== now.bounds.h) return false;
+  const box = vol.box ?? vol.reach;
+  const reach = 2 * K * Math.max(0, -Math.min(was.low, now.low)) + 1;
+  for (const c of now.cellsIn({ x0: box.x0 - reach, y0: box.y0 - reach, x1: box.x1 + reach, y1: box.y1 + reach })) if (was.atCell(c) !== now.atCell(c)) return false;
+  return true;
+}
+
 type Slot = {
   entry: VolumeEntry;
   /** The volume its inputs ask for now, maybe still building, or null when the area resolves to nothing. */
@@ -180,13 +202,23 @@ export class BoardVolumes {
     return this.#slots.get(id)?.next ?? null;
   }
 
-  /** The areas to stand, each volume got from the cache, which builds nothing until asked. */
+  /**
+   * The areas to stand, each volume got from the cache, which builds
+   * nothing until asked. A volume that stood keeps standing while the next
+   * builds only over the drawn ground it was built on: where that ground
+   * changed under it, it lies flat until the next stands (design 8), and
+   * a change of fog alone, which makes new heights with the same ground,
+   * keeps it (on the stand test as ever).
+   */
   sync(entries: readonly VolumeEntry[], world: VolumeWorld): void {
     const next = new Map<string, Slot>();
     for (const entry of entries) {
       const old = this.#slots.get(entry.id);
       const vol = this.#cache.get({ template: entry.template, ctx: entry.ctx, heights: world.heights, tiles: world.tiles, px: world.px, coarse: false });
-      next.set(entry.id, { entry, next: vol, shown: old?.shown ?? null, turns: old?.turns ?? new Set() });
+      if (vol && !builtOn.has(vol)) builtOn.set(vol, world.heights);
+      let shown = old?.shown ?? null;
+      if (shown && shown !== vol && !sameGroundUnder(shown, builtOn.get(shown), world.heights)) shown = null;
+      next.set(entry.id, { entry, next: vol, shown, turns: shown ? (old?.turns ?? new Set()) : new Set() });
     }
     this.#slots = next;
   }
