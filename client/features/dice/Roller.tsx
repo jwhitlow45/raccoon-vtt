@@ -129,6 +129,9 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
   const head = useMemo(() => headerRoll(rolls), [rolls]);
   const firstLine = committed?.lines[0]?.id ?? null;
   const data = committed?.lines[0]?.data;
+  const target = first ? rollTarget(first) : null;
+  const test = first ? rollTest(first) : null;
+  const marked = target !== null && test !== null && rolls.length === 1;
   // A polite live region says each result once, from the render that first holds it, so it is said as it lands on the server even while the dice still fly.
   const said = first && head ? spokenResult(head, spokenVerdict(first, data)) : "";
   if (!last) return null;
@@ -144,9 +147,6 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
   else {
     const verdict = shownVerdict(first, data);
     const label = head.label !== undefined ? labelText(head.label) : "once" in last ? last.label : undefined;
-    const target = rollTarget(first);
-    const test = rollTest(first);
-    const marked = target !== null && test !== null && rolls.length === 1;
     body = (
       <button
         type="button"
@@ -177,8 +177,8 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
         minWidth: 0,
       }}
     >
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), minHeight: LAST_LINE_PX, fontSize: theme.font.body14 }}>
-        <div style={{ display: "flex", alignItems: "center", flex: "1 1 190px", minWidth: 0 }}>{body}</div>
+      <div style={{ display: "flex", flexWrap: marked ? "wrap" : "nowrap", alignItems: "center", gap: theme.space(2), minHeight: LAST_LINE_PX, fontSize: theme.font.body14 }}>
+        <div style={{ display: "flex", alignItems: "center", flex: marked ? "1 1 190px" : 1, minWidth: 0 }}>{body}</div>
         {again ? (
           <Button size="sm" variant="quiet" icon="again" busy={waiting} style={{ flex: "none" }} onClick={() => panel.again(again.rolls, again.to, throws.origin())}>
             Again
