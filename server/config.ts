@@ -23,6 +23,12 @@ const Env = z.object({
   DATABASE_URL: z.string().min(1),
   PUBLIC_ORIGIN: z.string().url().optional(),
   ASSET_DIR: z.string().default(".data/assets"),
+  /**
+   * A folder on the disk that holds the database, for the log archive's
+   * free-disk floor (server/assets/quota.ts hasFreeDisk). Unset, the archive
+   * checks ASSET_DIR's disk, which is right while the two share one.
+   */
+  DATABASE_DISK_DIR: emptyAsUnset(z.string().optional()),
   TRUST_CF_CONNECTING_IP: z.enum(["0", "1"]).default("0"),
   SERPAPI_KEY: z.string().optional(),
   TURNSTILE_SITE_KEY: z.string().optional(),

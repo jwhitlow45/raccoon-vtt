@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, test } from "node:test";
+import type pg from "pg";
+import { loadConfig } from "../config.ts";
 import { AssetError } from "./errors.ts";
 import { assertFreeDisk, hasFreeDisk, ROOM_ARCHIVE_BYTES_SQL, ROOM_QUOTA_BYTES_SQL, RoomQuota } from "./quota.ts";
+import { AssetService } from "./service.ts";
 
 function quota413(err: unknown): boolean {
   return err instanceof AssetError && err.status === 413 && err.code === "quota_exceeded";
@@ -112,6 +118,36 @@ describe("the free-disk floor", () => {
     assert.equal(await hasFreeDisk(here, Number.MAX_SAFE_INTEGER), false);
     await assert.rejects(assertFreeDisk(here, Number.MAX_SAFE_INTEGER), (err: unknown) => err instanceof AssetError && err.status === 507);
     await assert.rejects(hasFreeDisk("/no/such/volume/here", 1));
+  });
+
+  test("the log archive checks DATABASE_DISK_DIR's disk when it is set, the asset folder's when not, and uploads always the asset folder's", async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "raccoon-disk-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    // statfs fails on a folder that is not there, naming it, so each check
+    // shows which folder it reads.
+    const missing = join(root, "missing");
+    const services: AssetService[] = [];
+    t.after(() => Promise.all(services.map((s) => s.close())));
+    const service = (env: Record<string, string>): AssetService => {
+      const config = loadConfig({ DATABASE_URL: "postgres://unused", ...env });
+      const made = new AssetService({ pool: {} as pg.Pool, config, minFreeBytes: 1 });
+      services.push(made);
+      return made;
+    };
+    const readsMissing = (err: unknown) => (err as NodeJS.ErrnoException).code === "ENOENT" && (err as NodeJS.ErrnoException).path === missing;
+
+    const apart = service({ ASSET_DIR: root, DATABASE_DISK_DIR: missing });
+    await assert.rejects(apart.archiveDiskOk(), readsMissing);
+    await apart.assertFreeDisk();
+
+    const uploadsApart = service({ ASSET_DIR: missing, DATABASE_DISK_DIR: root });
+    assert.equal(await uploadsApart.archiveDiskOk(), true);
+    await assert.rejects(uploadsApart.assertFreeDisk(), readsMissing);
+
+    const shared = service({ ASSET_DIR: missing });
+    await assert.rejects(shared.archiveDiskOk(), readsMissing);
+    const emptyIsUnset = service({ ASSET_DIR: missing, DATABASE_DISK_DIR: "" });
+    await assert.rejects(emptyIsUnset.archiveDiskOk(), readsMissing);
   });
 
   test("the quota's sum leaves the log archive out, which only a room's size on disk counts", () => {

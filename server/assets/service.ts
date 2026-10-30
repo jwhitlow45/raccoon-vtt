@@ -86,6 +86,8 @@ export class AssetService {
   readonly pool: pg.Pool;
   readonly config: Config;
   readonly assetDir: string;
+  /** The folder whose disk the log archive's floor checks: DATABASE_DISK_DIR, else the asset folder. */
+  readonly databaseDiskDir: string;
   readonly tmpDir: string;
   readonly minFreeBytes: number;
   readonly quota: RoomQuota;
@@ -106,6 +108,7 @@ export class AssetService {
     this.pool = opts.pool;
     this.config = opts.config;
     this.assetDir = resolve(opts.config.ASSET_DIR);
+    this.databaseDiskDir = opts.config.DATABASE_DISK_DIR === undefined ? this.assetDir : resolve(opts.config.DATABASE_DISK_DIR);
     this.tmpDir = opts.tmpDir ?? join(this.assetDir, "tmp");
     this.minFreeBytes = opts.minFreeBytes ?? MIN_FREE_BYTES;
     this.quota = new RoomQuota(opts.config.ROOM_QUOTA_MB * 1024 * 1024, (roomId) => roomStoredBytes(opts.pool, roomId));
@@ -169,9 +172,9 @@ export class AssetService {
     return assertFreeDisk(this.assetDir, this.minFreeBytes);
   }
 
-  /** The log archive's guard (persistence.ts ArchiveGuard): the same floor on the same volume as uploads. */
+  /** The log archive's guard (persistence.ts ArchiveGuard): the uploads' floor, on the database's disk. */
   archiveDiskOk(): Promise<boolean> {
-    return hasFreeDisk(this.assetDir, this.minFreeBytes);
+    return hasFreeDisk(this.databaseDiskDir, this.minFreeBytes);
   }
 
   /** The hourly budgets an upload spends (limits.ts hourlyChecks). */

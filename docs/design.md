@@ -1985,6 +1985,7 @@ All of this happens within 25 s.
 | `DATABASE_URL` | yes | Postgres |
 | `PUBLIC_ORIGIN` | yes in production | Exact origin for the WebSocket Origin check and CSRF (`https://vtt.example.com`) |
 | `ASSET_DIR` | no, default `/data/assets` | Image storage |
+| `DATABASE_DISK_DIR` | no, default `ASSET_DIR` | A folder on the database's disk, where the log archive checks its free-disk floor |
 | `TRUST_CF_CONNECTING_IP` | production `1` | Use `CF-Connecting-IP` for client IPs |
 | `SERPAPI_KEY` | no | Enables image search through SerpApi. Without it, since v1 wave 5, image search uses Openverse alone (section 11.3) |
 | `OPENVERSE_CLIENT_ID`, `OPENVERSE_CLIENT_SECRET` | no | v1 wave 5: an Openverse registration, for 40 results a search and a larger daily budget. Both or neither, else the boot stops. Unset, Openverse is searched anonymously |

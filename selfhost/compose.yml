@@ -102,6 +102,10 @@ services:
       # hash from `node scripts/admin.ts hash-password`, single-quoted in
       # .env). This service alone receives it.
       - ADMIN_PASSWORD_HASH
+      # The log archive's free-disk check reads this folder's disk. It needs
+      # a mount of a folder on the database's disk. Unset, it reads the
+      # image volume's.
+      - DATABASE_DISK_DIR
       # Abuse limits. The defaults match server/config.ts. They are spelled
       # out because an empty value would otherwise reach the app as 0 and
       # stop it booting.

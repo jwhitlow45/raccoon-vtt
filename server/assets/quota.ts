@@ -153,9 +153,10 @@ export async function assertFreeDisk(dir: string, minFreeBytes: number): Promise
 }
 
 /**
- * Whether the volume holding `dir` has at least `minFreeBytes` free. The
- * log archive asks it before each write as well as uploads do, since the
- * database shares this volume: the floor leaves Postgres room to keep
+ * Whether the volume holding `dir` has at least `minFreeBytes` free.
+ * Uploads ask it of the asset folder. The log archive asks it before each
+ * write of DATABASE_DISK_DIR, or of the asset folder's disk when that is
+ * unset (the usual one-disk setup): the floor leaves Postgres room to keep
  * committing ops when one room's history has grown large.
  */
 export async function hasFreeDisk(dir: string, minFreeBytes: number): Promise<boolean> {
