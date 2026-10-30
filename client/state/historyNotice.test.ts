@@ -5,8 +5,9 @@ import { DM, P1, room as testRoom } from "#shared/testutil.ts";
 import type { HistoryMessage } from "#shared/undoContract.ts";
 import { createRoomStore } from "./store.ts";
 import { FakeClock } from "./testing.ts";
-import { UndoNotice, UNDO_NOTICE_KEY } from "./historyNotice.ts";
+import { UndoNotice, UNDO_NOTICE_KEY, UNDO_NOTICE_LAST_DAY } from "./historyNotice.ts";
 
+const NOW = Date.parse("2026-10-30T12:00:00Z");
 const empty = () => ({ undo: { head: null, depth: 0 }, redo: { head: null, depth: 0 } });
 const message = (seq = 0): HistoryMessage => ({ t: "history", epoch: "00000000-0000-4000-8000-000000000001", seq, serial: 0, watermark: 0, play: empty(), setup: empty() });
 
@@ -73,10 +74,10 @@ test("the notice persists once per device, including empty or unfamiliar storage
   for (const initial of [null, "", "0", "unfamiliar"]) {
     const storage = memoryStorage(initial);
     const first = new UndoNotice(() => storage);
-    assert.equal(first.claim(), true, String(initial));
-    assert.equal(first.claim(), false, "one page never repeats it");
+    assert.equal(first.claim(NOW), true, String(initial));
+    assert.equal(first.claim(NOW), false, "one page never repeats it");
     assert.deepEqual(storage.writes, [[UNDO_NOTICE_KEY, "1"]]);
-    assert.equal(new UndoNotice(() => storage).claim(), false, "a fresh page reads the device flag");
+    assert.equal(new UndoNotice(() => storage).claim(NOW), false, "a fresh page reads the device flag");
     assert.equal(storage.writes.length, 1, "reading an existing flag does not rewrite it");
   }
 });
@@ -85,13 +86,13 @@ test("missing storage and throwing access, reads or writes still show once per p
   const denied = () => { throw new Error("storage denied"); };
   for (const storage of [() => null, denied, () => ({ getItem: denied, setItem: denied }), () => ({ getItem: () => null, setItem: denied })]) {
     const notice = new UndoNotice(storage);
-    assert.equal(notice.claim(), true);
-    assert.equal(notice.claim(), false);
+    assert.equal(notice.claim(NOW), true);
+    assert.equal(notice.claim(NOW), false);
   }
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
   Object.defineProperty(globalThis, "localStorage", { configurable: true, get: denied });
   try {
-    assert.equal(new UndoNotice().claim(), true, "accessing the browser property itself may throw");
+    assert.equal(new UndoNotice().claim(NOW), true, "accessing the browser property itself may throw");
   } finally {
     if (descriptor) Object.defineProperty(globalThis, "localStorage", descriptor);
     else Reflect.deleteProperty(globalThis, "localStorage");
@@ -101,7 +102,7 @@ test("missing storage and throwing access, reads or writes still show once per p
 test("dismissal lasts through history updates, reconnects and fresh room pages", () => {
   const storage = memoryStorage();
   const once = new UndoNotice(() => storage);
-  const p = page("dm", () => once.claim());
+  const p = page("dm", () => once.claim(NOW));
   p.snapshot();
   p.room.applyHistory(message());
   assert.equal(p.shown(), true);
@@ -117,7 +118,7 @@ test("dismissal lasts through history updates, reconnects and fresh room pages",
   assert.equal(p.shown(), false);
   p.room.dispose();
   const fresh = new UndoNotice(() => storage);
-  const next = page("dm", () => fresh.claim());
+  const next = page("dm", () => fresh.claim(NOW));
   next.snapshot();
   next.room.applyHistory(message());
   assert.equal(next.shown(), false);
@@ -142,4 +143,23 @@ test("retired connections and foreign epochs never consume the device notice", (
   assert.equal(p.shown(), true);
   assert.equal(claims, 1);
   p.room.dispose();
+});
+
+test("the rollout notice ends after November 13 UTC without touching storage", () => {
+  const storage = memoryStorage();
+  assert.equal(new UndoNotice(() => storage).claim(Date.parse("2026-11-13T23:59:59.999Z")), true);
+  for (const at of ["2026-11-14T00:00:00Z", "2027-02-01T12:00:00Z"]) {
+    let accessed = false;
+    const late = new UndoNotice(() => { accessed = true; return memoryStorage(); });
+    assert.equal(late.claim(Date.parse(at)), false, at);
+    assert.equal(accessed, false, "expired notice does not need site storage");
+    assert.equal(late.claim(Date.parse("2026-11-01T00:00:00Z")), false, "an expired page never claims it later");
+  }
+});
+
+
+test("the browser clock applies the fixed rollout cutoff by default", (t) => {
+  assert.equal(UNDO_NOTICE_LAST_DAY, "2026-11-13");
+  t.mock.method(Date, "now", () => Date.parse("2026-11-14T00:00:00Z"));
+  assert.equal(new UndoNotice(() => memoryStorage()).claim(), false);
 });
