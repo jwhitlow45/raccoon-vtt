@@ -2850,6 +2850,50 @@ export function alignmentFile(title: string, steps: () => void): void {
 
 /** pl3-0: the helper on drawn cases, which needs no room. */
 export function helperTest(): void {
+  test("fl5-d. radio card groups keep their outer edge, while moved groups, card boxes and contents still fail", async () => {
+    const page = await dmContext.newPage();
+    try {
+      for (const scale of [1, 1.3]) {
+        // RadioCards paints every card's border. ViewMenu paints only the chosen label, with the native radio hidden over it.
+        for (const quiet of [false, true]) {
+          await page.setContent(`<style>
+            * { box-sizing: border-box }
+            #cards { width: 260px; font: 14px/20px sans-serif; zoom: ${scale} }
+            [role="radiogroup"] { display: grid; gap: 4px }
+            label { position: relative; display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 4px 8px; border: 1px solid ${quiet ? "transparent" : "#777"} }
+            label.chosen { background: #333; border-color: #777 }
+            input { width: 20px; height: 20px; margin: 0; flex: none; ${quiet ? "position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0" : ""} }
+          </style><div id="cards">
+            <div>Players see</div><div>Choose a view</div>
+            <div role="radiogroup" aria-label="Players see">
+              <label class="chosen"><input type="radio" name="view" checked><span>Explore</span></label>
+              <label><input type="radio" name="view"><span>Guide</span></label>
+              <label><input type="radio" name="view"><span>Show all</span></label>
+            </div>
+          </div>`);
+          const root = page.locator("#cards");
+          const group = root.getByRole("radiogroup");
+          const card = group.locator("label").first();
+          const lines = async () => alignmentLines(await measureAlignment(root), `fl5-d ${scale} ${quiet ? "quiet" : "bordered"}`);
+          assert.deepEqual(await lines(), [], "card padding must not move the group's outer edge");
+          for (const target of [group, card]) {
+            for (const shift of [-3, 3]) {
+              await target.evaluate((el, x) => { (el as unknown as { style: { transform: string } }).style.transform = `translateX(${x}px)`; }, shift);
+              assert.ok((await lines()).some((line) => line.includes(": edge ")), `a card or group moved ${shift}px must fail`);
+            }
+            await target.evaluate((el) => { (el as unknown as { style: { transform: string } }).style.transform = ""; });
+          }
+          for (const padding of [5, 11]) {
+            await card.evaluate((el, px) => { (el as unknown as { style: { paddingLeft: string } }).style.paddingLeft = `${px}px`; }, padding);
+            assert.ok((await lines()).some((line) => line.includes(": edge ")), `card content moved to ${padding}px padding must fail`);
+          }
+        }
+      }
+    } finally {
+      await page.close();
+    }
+  });
+
   test("fl5-c. grouped and ungrouped menu rows share an edge, and shifted groups or rows still fail", async () => {
     const page = await dmContext.newPage();
     try {
@@ -3449,14 +3493,29 @@ function moreMenuTest(size: Size, scale: number, at: string): void {
       assert.equal(await menu.locator('[role^="menuitem"]').last().evaluate((el) => el === (globalThis as unknown as { document: { activeElement: unknown } }).document.activeElement), true);
       assert.deepEqual(await popoverScrollbarLines(box, `${at} at the bottom`), []);
       if (size.touch) {
-        await page.keyboard.press("Home");
-        await resetScroll();
-        const rect = await box.boundingBox();
-        assert.ok(rect);
+        // Start touch in a fresh scroller, after it paints, so the wheel and focus scrolls above cannot still be settling on the compositor.
+        await page.keyboard.press("Escape");
+        await opener.click();
+        await box.getByText("Scroll for more", { exact: true }).waitFor();
+        await box.evaluate(async () => {
+          const win = globalThis as unknown as { requestAnimationFrame(callback: () => void): void };
+          await new Promise<void>((resolve) => win.requestAnimationFrame(() => win.requestAnimationFrame(resolve)));
+        });
+        assert.equal(await scrollTop(), 0, "the fresh menu starts at the top before touch");
+        await shots.take(page, `fl5-more-${at}-before-touch`);
+        const swipe = await box.evaluate((el) => {
+          type Box = { getBoundingClientRect(): { left: number; top: number; width: number; height: number }; contains(node: unknown): boolean; ownerDocument: { elementFromPoint(x: number, y: number): unknown } };
+          const box = el as unknown as Box;
+          const rect = box.getBoundingClientRect();
+          const x = rect.left + rect.width / 2;
+          const from = { x, y: rect.top + rect.height * 0.75 };
+          const to = { x, y: rect.top + rect.height * 0.25 };
+          return { from, to, inside: box.contains(box.ownerDocument.elementFromPoint(from.x, from.y)) };
+        });
+        assert.ok(swipe.inside, `${at}: the touch must start inside the scroller`);
         const cdp = await dmContext.newCDPSession(page);
         try {
-          const x = rect.x + rect.width / 2;
-          await touchSwipe(cdp, { x, y: rect.y + rect.height - 50 }, { x, y: rect.y + 50 }, { steps: 12, everyMs: 30 });
+          await touchSwipe(cdp, swipe.from, swipe.to, { steps: 12, everyMs: 30 });
           await waitFor(`${at}: the hidden-scrollbar menu scrolls by touch`, async () => (await scrollTop()) > 0 || null);
         } finally {
           await cdp.detach();

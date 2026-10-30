@@ -644,9 +644,9 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
     const box = paints(row) ? round(rectOf(row).l) : null;
     const nested = row.matches('ul, ol, fieldset, [role="group"], [role="list"], [role="radiogroup"]');
     const column = nested && box === null && parts.every((a, i) => i === 0 || a.t >= parts[i - 1]!.b - 1);
-    // A transparent column keeps each nested row's own edge. Comparing its controls' outer boxes with an ungrouped row's words counts that row's padding as drift.
+    // Grouped menu items keep the content edge they use ungrouped. Other controls, such as radio cards, meet the surrounding column at their outer boxes.
     const starts = parts.map((a) => {
-      const edge = column && a.element ? edgeOf(a.element) : null;
+      const edge = column && a.element?.matches('[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]') ? edgeOf(a.element) : null;
       return edge?.words ?? edge?.box ?? a.l;
     });
     const words = starts.length ? round(Math.min(...starts)) : null;
