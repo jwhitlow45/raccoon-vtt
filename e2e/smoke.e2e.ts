@@ -7,7 +7,7 @@ import { chromium, type Browser, type BrowserContext, type Page } from "playwrig
 import sharp from "sharp";
 import type { RoomState, Scene, Token } from "#shared/model.ts";
 import { generatePassphrase } from "#shared/passphrase.ts";
-import { ConsoleWatch, dragCells, dragWorld, measureSnapshot, openSideTab, pickOption, Shots, SocketWatch, startServer, tapCell, undoNoticeSeen, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, dragCells, dragWorld, measureSnapshot, openSideTab, pickOption, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * The Stage 3 smoke run (design section 18): the real server serving the
@@ -94,7 +94,6 @@ describe("raccoon-vtt smoke run", { timeout: 300_000 }, () => {
     server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
     browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1" });
     dmContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
-    await undoNoticeSeen(dmContext);
     playerContext = await browser.newContext({
       viewport: { width: 390, height: 844 },
       deviceScaleFactor: 2,

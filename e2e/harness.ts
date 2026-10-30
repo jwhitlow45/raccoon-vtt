@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { BrowserContext, CDPSession, Locator, Page, Request } from "playwright-core";
+import assert from "node:assert/strict";
+import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page, type Request } from "playwright-core";
 import WebSocket from "ws";
 import type { RoomState } from "#shared/model.ts";
 import { applyChanges, type ProjectedState } from "#shared/project.ts";
@@ -264,14 +265,15 @@ export async function diceFoldsOpen(context: BrowserContext): Promise<void> {
 }
 
 /**
- * Makes each page the context opens a DM device that already saw the one-time
- * "Undo now separates play from setup" toast (client/state/historyNotice.ts),
- * before the page's own scripts run. Until its rollout window ends, the
- * toast greets every new DM device for 12 seconds over the map's top, where
- * a suite's first taps land. A suite not about it calls this once.
- * undo-scope.e2e.ts covers the notice itself.
+ * Every browser context an e2e file opens is a device that already saw the
+ * one-time "Undo now separates play from setup" toast
+ * (client/state/historyNotice.ts), set before the page's own scripts run.
+ * Until its rollout window ends, the toast greets every new DM device for
+ * 12 seconds over the map's top, where a suite's first taps land, so no
+ * suite meets it unasked. Only a test of the notice itself opts out, with
+ * freshDeviceContext. The flag means nothing to a player's page.
  */
-export async function undoNoticeSeen(context: BrowserContext): Promise<void> {
+async function undoNoticeSeen(context: BrowserContext): Promise<void> {
   await context.addInitScript((key) => {
     try {
       localStorage.setItem(key, "1");
@@ -279,6 +281,36 @@ export async function undoNoticeSeen(context: BrowserContext): Promise<void> {
       // A page with no storage, such as about:blank, shows no room.
     }
   }, UNDO_NOTICE_KEY);
+}
+
+const unmarkedContext = new WeakMap<Browser, Browser["newContext"]>();
+
+// Every e2e file imports this module before it launches a browser, and shares this one `chromium`.
+const launch = chromium.launch.bind(chromium);
+chromium.launch = async (...args: Parameters<typeof chromium.launch>) => {
+  const browser = await launch(...args);
+  const newContext = browser.newContext.bind(browser);
+  unmarkedContext.set(browser, newContext);
+  // Browser.newPage opens its context through newContext, so it is marked too.
+  browser.newContext = async (...options: Parameters<Browser["newContext"]>) => {
+    const context = await newContext(...options);
+    await undoNoticeSeen(context);
+    return context;
+  };
+  return browser;
+};
+const launchPersistent = chromium.launchPersistentContext.bind(chromium);
+chromium.launchPersistentContext = async (...args: Parameters<typeof chromium.launchPersistentContext>) => {
+  const context = await launchPersistent(...args);
+  await undoNoticeSeen(context);
+  return context;
+};
+
+/** A context for a device that has not seen the undo notice yet: for the notice's own tests only. */
+export function freshDeviceContext(browser: Browser, ...options: Parameters<Browser["newContext"]>): Promise<BrowserContext> {
+  const newContext = unmarkedContext.get(browser);
+  assert(newContext, "the browser was not launched through this harness's chromium");
+  return newContext(...options);
 }
 
 type Json = Record<string, unknown>;

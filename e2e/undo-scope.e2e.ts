@@ -10,7 +10,7 @@ import { isCellFullyFogged } from "#shared/rules/fog.ts";
 import { EMPTY_PC_STATS } from "#shared/rules/pcStats.ts";
 import { actor, companionBlock } from "#shared/testutil.ts";
 import type { CorrectionLogEvent, HistoryMessage } from "#shared/undoContract.ts";
-import { ConsoleWatch, Shots, SocketWatch, openSideTab, pickTool, startServer, undoNoticeSeen, untilReady, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, Shots, SocketWatch, openSideTab, pickTool, freshDeviceContext, startServer, untilReady, waitFor, type Server } from "./harness.ts";
 import { UndoWire, historyOf, openMenu, playControl, setupHistory } from "./helpers/undoScope.ts";
 
 const PORT = Number(process.env.E2E_PORT ?? 3100) + 4;
@@ -96,8 +96,6 @@ describe("undo-scope batch A", { timeout: 300_000 }, () => {
     for (const [index, name] of ["DM", "same DM phone", "co-DM", "Bree's player", "unrelated player"].entries()) {
       const phone = index === 1 || index === 3;
       const context = await browser.newContext({ viewport: phone ? { width: 390, height: 844 } : { width: 1440, height: 900 }, isMobile: phone, hasTouch: phone });
-      // undo-scope-notice covers the rollout notice in contexts of its own. Here it would only stand over the controls.
-      await undoNoticeSeen(context);
       const page = await context.newPage();
       page.setDefaultTimeout(10_000);
       if (index === 0) await page.routeWebSocket(/\/ws\?room=/, (socket) => {
@@ -586,7 +584,8 @@ describe("undo-scope batch A", { timeout: 300_000 }, () => {
     const sizes = [{ width: 390, height: 844, label: "390x844" }, { width: 320, height: 568, label: "320x568" }];
     for (const [i, { width, height, label }] of [...sizes, { width: 390, height: 844, label: "after" }].entries()) {
       const late = i === sizes.length;
-      const context = await browser.newContext({ viewport: { width, height }, isMobile: true, hasTouch: true });
+      // A device that has not seen the notice, which the harness otherwise marks every context as.
+      const context = await freshDeviceContext(browser, { viewport: { width, height }, isMobile: true, hasTouch: true });
       try {
         await context.addCookies(await dm().context.cookies(server.origin));
         const page = await context.newPage();
