@@ -26,7 +26,11 @@ export type DamageSummaryLines = {
   targets: { name: string; amount: number; defenses: DefenseSummaryLine[] }[];
 };
 
-/** Presentation only. Amounts and applied defense notes come from the shared rule. */
+/**
+ * Presentation only. Amounts and applied defense notes come from the shared
+ * rule. Callers pass parts normalized with nonnegativeDamageParts to rowDamage
+ * so result.byPart has the same indexes as the parts displayed here.
+ */
 export function damageSummary(parts: readonly OutcomePart[], context: DamageSummaryContext & { targets?: readonly (DamageSummaryContext & { name: string })[] } = {}): DamageSummaryLines {
   parts = nonnegativeDamageParts(parts);
   const result = context.targets ? undefined : context.result;
