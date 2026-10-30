@@ -210,3 +210,11 @@ Filled in by each lane's docs commit.
 - **S3.** As section 4.
 
 ### Lane 2, panels
+
+- **S4.** As section 4. The inner grid holds only the far rows, so the group's `space(2)` gap sits under the label alone.
+- **S5.** As section 4, on lane 1's markers. The padding now carries the whole `space(2)`, so rule 2 reads it as gap.
+- **S6.** The "Changes" h4 takes a `-space(1)` bottom margin inside the notice section's `space(2)` gap, as Group save's "Damage" label does, since the notice blocks render flat. The Credits entries sit in one inner grid at `space(3)`, so the h3 keeps `space(2)` to the first entry.
+- **S7.** As section 4. Nothing moves.
+- **S8.** As section 4. The label and the field share a column at `space(1)`.
+- **S9.** `IMPORT_CHOICE_NAME` is exported from UvttLightChoice.tsx. Its unit test also reads ImportDialog's source for the portal label's use of it, since the label sits in a component the test does not render. The `uvtt-import` root already carries a portal that lets light through, so the label is on screen when it measures.
+- **Checks.** The whole sweep, `proficiency`, `maps`, `reach`, `dice` and `attach` pass on lane 1's tip with no spacing line left. With S4, S5, S6 and S8 removed, their lines return in the sweep (Farther away, Saves and Checks, Credits and Changes, the pairing code's label).
