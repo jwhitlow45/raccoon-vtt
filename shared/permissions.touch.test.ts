@@ -168,6 +168,37 @@ describe("a walk the real build stops (the touch rule)", () => {
     }
   });
 
+  test("FU40AC-OPUS-1: a whole remembered-open door never names its closed live blocker in another cell", () => {
+    for (const reverse of [false, true]) for (const remembered of [false, true]) {
+      const s = base();
+      const metRow = reverse ? 5 : 6;
+      const rememberedRow = reverse ? 6 : 5;
+      s.tokens.thorn = { ...s.tokens.thorn!, y: metRow };
+      lift(s, "dm", { x: 0, y: 3, w: 8, h: 5 });
+      lift(s, "party", { x: 8, y: 5, w: 1, h: 2 });
+      const a: [number, number] = [8 + 6 / 64, 5 + 6 / 64];
+      const b: [number, number] = [8 + 6 / 64, 7 - 6 / 64];
+      const door = wall(s, "aaaaaaaaaaaa", reverse ? b : a, reverse ? a : b, { kind: "door", state: "closed", secret: false, discovered: false });
+      if (remembered) remember(s, null, 0, 0, { walls: { [door.id]: [{ wall: { ...door, f: { kind: "door", state: "open", secret: false, discovered: false } }, cells: [`8,${rememberedRow}`] }] } });
+      const shown = playerChunk(s, { sceneId: "s1", cx: 0, cy: 0 }, null)?.walls?.find((w) => w.id === door.id);
+      assert.equal(shown?.f.kind === "door" ? shown.f.state : null, remembered ? "open" : "closed");
+      const move = { ...east, y: metRow };
+      const words = remembered ? SOMETHING_BLOCKS : WALL_IN_THE_WAY;
+      assert.equal(decide(move, s), words, `reverse=${reverse}, remembered=${remembered}`);
+      assert.equal(touchLanding(move, P1, s, deps)?.words, words);
+      if (remembered) {
+        const redo: Op = { t: "sys.restore", entries: [{ key: "token:thorn", value: { ...s.tokens.thorn!, x: 12 } }], from: "redo", deps: true };
+        assert.equal(decide(redo, s), SOMETHING_BLOCKS_BACK, "a refused redo cannot name the hidden change");
+        assert.equal(touchLanding(redo, P1, s, deps), null);
+        const revealed = structuredClone(s);
+        lift(revealed, "dm", { x: 8, y: metRow, w: 1, h: 1 });
+        const now = playerChunk(revealed, { sceneId: "s1", cx: 0, cy: 0 }, null)?.walls?.find((w) => w.id === door.id);
+        assert.equal(now?.f.kind === "door" ? now.f.state : null, "closed", "a later live cell selects the live door whole");
+        assert.equal(decide(move, revealed), WALL_IN_THE_WAY);
+      }
+    }
+  });
+
   test("LP23-B-IMPORT-2: the met cell chooses the holder's own door memory before the party's", () => {
     for (const ownGround of [false, true]) {
       for (const ownClosed of [false, true]) {

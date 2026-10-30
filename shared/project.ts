@@ -1994,6 +1994,54 @@ const FILED_REACH = 3;
 /** One free wall as an element: its real chunk and id, its live value as players see it, and the versions each layer remembers. */
 type WallElement = { cx: number; cy: number; id: string; live: FreeWall | undefined; party?: readonly RememberedWall[]; mine?: readonly RememberedWall[] };
 
+/** The same per-cell choices select both the whole visible door and any non-door pieces of its element. */
+function heldWallParts(ground: Ground, e: Pick<WallElement, "live" | "party" | "mine">, inFocus?: (cell: string) => boolean, near?: (wall: FreeWall | null | undefined) => boolean): { door: FreeWall | null; stretches: CellPiece[] } {
+  const stretches: CellPiece[] = [];
+  const candidates = [e.live, ...(e.party ?? []).map((v) => v.wall), ...(e.mine ?? []).map((v) => v.wall)];
+  const anyDoor = candidates.some((w) => w && visibleDoor(w));
+  if (!anyDoor && near && !candidates.some(near)) return { door: null, stretches: [] };
+  const cells = new Set<string>();
+  for (const wall of candidates) {
+    if (wall) for (const span of wallSpans(ground.grid, wall)) cells.add(span.cell);
+  }
+  let door: { wall: FreeWall; live: boolean } | null = null;
+  for (const cell of cells) {
+    if (!anyDoor && inFocus && !inFocus(cell)) continue;
+    if (!ground.keyHeld(cell)) continue;
+    const live = ground.keyLive(cell);
+    let wall: FreeWall | null | undefined = e.live;
+    if (!live) {
+      const version = (ground.keyOwn(cell) ? e.mine : e.party)?.find((v) => v.cells.includes(cell));
+      if (version) wall = version.wall;
+    }
+    if (!wall) continue;
+    const span = wallSpans(ground.grid, wall).find((s) => s.cell === cell);
+    if (!span) continue;
+    if (visibleDoor(wall)) {
+      if (door === null || (live && !door.live)) door = { wall, live };
+      continue;
+    }
+    const { a, b } = wallLattice(wall);
+    stretches.push({ a, b, t0: span.t0, t1: span.t1, kind: wall.f.kind === "window" ? "window" : "wall" });
+  }
+  return { door: door?.wall ?? null, stretches };
+}
+
+/**
+ * The whole visible door a class receives: a live cell's door takes
+ * precedence, otherwise the first held cell's visible door. This is also
+ * the witness for naming a blocker beside live ground.
+ */
+export function heldFreeDoor(state: RoomState, ground: Ground, at: { cx: number; cy: number; id: string }): FreeWall | null {
+  const key = chunkKey(ground.sceneId, at.cx, at.cy);
+  const wall = state.buildChunks[key]?.walls?.find((w) => w.id === at.id);
+  return heldWallParts(ground, {
+    live: wall ? shownFreeWall(wall) : undefined,
+    party: ground.remembers ? state.memory?.[key]?.walls?.[at.id] : undefined,
+    mine: ground.remembers && ground.holder !== null ? state.memoryBy?.[holderChunkKey(ground.sceneId, ground.holder, at.cx, at.cy)]?.walls?.[at.id] : undefined,
+  }).door;
+}
+
 /**
  * The free walls players of one class get, filed by position (5.2): every
  * wall of the given positions (all of the scene's when null), live and
@@ -2047,34 +2095,9 @@ function scenePieces(state: RoomState, scene: Scene, ground: Ground, positions: 
   const doors: FreeWall[] = [];
   for (const key of [...elements.keys()].sort()) {
     const e = elements.get(key)!;
-    const candidates = [e.live, ...(e.party ?? []).map((v) => v.wall), ...(e.mine ?? []).map((v) => v.wall)];
-    const anyDoor = candidates.some((w) => w && visibleDoor(w));
-    if (!anyDoor && !candidates.some(near)) continue;
-    const cells = new Set<string>();
-    for (const wall of candidates) {
-      if (wall) for (const span of wallSpans(ground.grid, wall)) cells.add(span.cell);
-    }
-    let door: { wall: FreeWall; live: boolean } | null = null;
-    for (const cell of cells) {
-      if (!anyDoor && !inFocus(cell)) continue;
-      if (!ground.keyHeld(cell)) continue;
-      const live = ground.keyLive(cell);
-      let wall: FreeWall | null | undefined = e.live;
-      if (!live) {
-        const version = (ground.keyOwn(cell) ? e.mine : e.party)?.find((v) => v.cells.includes(cell));
-        if (version) wall = version.wall;
-      }
-      if (!wall) continue;
-      const span = wallSpans(ground.grid, wall).find((s) => s.cell === cell);
-      if (!span) continue;
-      if (visibleDoor(wall)) {
-        if (door === null || (live && !door.live)) door = { wall, live };
-        continue;
-      }
-      const { a, b } = wallLattice(wall);
-      stretches.push({ a, b, t0: span.t0, t1: span.t1, kind: wall.f.kind === "window" ? "window" : "wall" });
-    }
-    if (door) doors.push(door.wall);
+    const held = heldWallParts(ground, e, inFocus, near);
+    stretches.push(...held.stretches);
+    if (held.door) doors.push(held.door);
   }
   const filed = new Map<string, FreeWall[]>();
   const file = (pos: string, wall: FreeWall) => {
