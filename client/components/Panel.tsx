@@ -292,11 +292,10 @@ export function Group(props: {
           lineHeight: theme.leading.body,
           color: theme.color.textMuted,
           whiteSpace: "nowrap",
-          overflow: "hidden",
+          // Clipped 1 px out from its box, so the frame a proficiency mark draws 1 px outside its first or last word shows whole (D-261030-527), while the summary's box and words stay where they were. Clip, unlike hidden, cuts with "…" and takes a margin.
+          overflow: "clip",
+          overflowClipMargin: 1,
           textOverflow: "ellipsis",
-          // 1 px of room at each side, so the frame a proficiency mark draws 1 px outside its first or last word is not cut (D-261030-527). The margins take it back, the auto left one wherever the line has room.
-          paddingInline: 1,
-          marginRight: -1,
         }}
       >
         {props.summary}
