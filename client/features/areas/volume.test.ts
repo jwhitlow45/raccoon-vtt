@@ -5,7 +5,7 @@ import { creaturesInArea, resolveArea, type AreaContext, type AreaTemplateInput,
 import { gridOfShape, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import { hexAt, hexKey, type HexGrid } from "#shared/rules/hex.ts";
 import { deriveWalls, indexBuild, type WallSet } from "#shared/rules/walls.ts";
-import { bandAt, buildVolume, everySubcell, segmentsAround, towardViewer, VolumeCache, zoomOctave, type Volume, type VolumeLine } from "./volume.ts";
+import { bandAt, buildVolume, everySubcell, segmentsAround, towardViewer, volumeInternals, VolumeCache, zoomOctave, type Volume, type VolumeLine } from "./volume.ts";
 import {
   capLoops,
   capTriangles,
@@ -1124,4 +1124,137 @@ describe("bounded work (design 6)", () => {
       console.log(`${name}: ${faces} faces, built in ${(whole / 8).toFixed(1)} ms; first slice ${Math.max(...first).toFixed(2)} ms, slices p99 ${p99(all).toFixed(2)}, max ${max.toFixed(2)} (${(max - 1.5).toFixed(2)} past the deadline)`);
     }
   });
+});
+
+
+test("ISOA2-OPUS-2: backward chaining yields within its work budget and preserves every pair", () => {
+  const n = 4096;
+  let reads = 0;
+  const pairs = new Proxy(Array.from({ length: n }, (_, i) => [n - i - 1, n - i]).flat(), {
+    get(target, key, receiver) {
+      if (typeof key === "string" && /^\d+$/.test(key)) reads++;
+      return Reflect.get(target, key, receiver);
+    },
+  });
+  const points = Float64Array.from(Array.from({ length: n + 1 }, (_, i) => [i, 0, 0]).flat());
+  const budget = new volumeInternals.Budget();
+  budget.deadline = -Infinity;
+  function* job() {
+    const result = volumeInternals.chained(pairs, points, budget);
+    return result instanceof Float64Array ? result : yield* result;
+  }
+  const run = job();
+  let slices = 0;
+  for (;;) {
+    const before = reads;
+    const charged = budget.total;
+    const step = run.next();
+    assert.ok(reads - before <= 1024, `${reads - before} actual pair reads in one expired-deadline slice`);
+    assert.ok(budget.total - charged <= 128, "charged work is bounded too");
+    if (step.done) {
+      assert.deepEqual(step.value, points);
+      break;
+    }
+    slices++;
+  }
+  assert.ok(slices > 10, "the long chain must spread work across slices");
+});
+
+// Freeze the original traversal order, including branches and duplicate endpoints.
+function referenceChained(pairs: readonly number[], p: Float64Array): Float64Array {
+  const at = new Map<number, number[]>();
+  const n = pairs.length >> 1;
+  for (let e = 0; e < n; e++) {
+    for (const v of [pairs[2 * e]!, pairs[2 * e + 1]!]) {
+      const list = at.get(v);
+      if (list) list.push(e);
+      else at.set(v, [e]);
+    }
+  }
+  const used = new Uint8Array(n);
+  const out: number[] = [];
+  const other = (e: number, v: number) => (pairs[2 * e] === v ? pairs[2 * e + 1]! : pairs[2 * e]!);
+  // From a vertex, the next unused edge when it is the only one left there, so a line stops where three meet.
+  const onward = (v: number): number => {
+    const list = at.get(v)!;
+    let found = -1;
+    for (const e of list) {
+      if (used[e]) continue;
+      if (found >= 0) return -1;
+      found = e;
+    }
+    return found;
+  };
+  for (let e0 = 0; e0 < n; e0++) {
+    if (used[e0]) continue;
+    used[e0] = 1;
+    const line = [pairs[2 * e0]!, pairs[2 * e0 + 1]!];
+    for (let v = line[line.length - 1]!, e = onward(v); e >= 0; e = onward(v)) {
+      used[e] = 1;
+      v = other(e, v);
+      line.push(v);
+    }
+    for (let v = line[0]!, e = onward(v); e >= 0; e = onward(v)) {
+      used[e] = 1;
+      v = other(e, v);
+      line.unshift(v);
+    }
+    if (out.length > 0) out.push(NaN, NaN, NaN);
+    for (const v of line) out.push(p[3 * v]!, p[3 * v + 1]!, p[3 * v + 2]!);
+  }
+  return Float64Array.from(out);
+}
+
+/** Segments `[ax, ay, az, bx, by, bz, ...]` chained as `chained` does, by their points: the guides, which carry no vertex ids. */
+function referenceChainedPoints(segs: readonly number[]): Float64Array {
+  const ids = new Map<string, number>();
+  const pts: number[] = [];
+  const pairs: number[] = [];
+  for (let i = 0; i + 2 < segs.length; i += 3) {
+    const key = `${segs[i]},${segs[i + 1]},${segs[i + 2]}`;
+    let id = ids.get(key);
+    if (id === undefined) {
+      ids.set(key, (id = pts.length / 3));
+      pts.push(segs[i]!, segs[i + 1]!, segs[i + 2]!);
+    }
+    pairs.push(id);
+  }
+  return referenceChained(pairs, Float64Array.from(pts));
+}
+
+
+test("ISOA2-OPUS-2: sliced and unsliced chains match the original order for branches, cycles and duplicate points", () => {
+  const random = mulberry32(402);
+  const run = <T>(job: Generator<void, T>): T => { for (;;) { const step = job.next(); if (step.done) return step.value; } };
+  const points = Float64Array.from([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1]);
+  const cases = [[0, 1, 1, 2, 2, 3, 3, 0], [0, 1, 0, 2, 0, 3], [0, 4, 4, 1, 1, 0], [0, 0, 0, 1, 0, 1], []];
+  for (let round = 0; round < 80; round++) cases.push(Array.from({ length: 80 }, () => Math.floor(random() * 6)));
+  for (const pairs of cases) {
+    const segs = pairs.flatMap((id) => [...points.subarray(3 * id, 3 * id + 3)]);
+    for (const deadline of [Infinity, -Infinity]) {
+      const budget = new volumeInternals.Budget();
+      budget.deadline = deadline;
+      assert.deepEqual(run(volumeInternals.chained(pairs, points, budget)), referenceChained(pairs, points));
+      assert.deepEqual(run(volumeInternals.chainedPoints(segs, budget)), referenceChainedPoints(segs));
+    }
+  }
+});
+
+test("ISOA2-OPUS-2: guide endpoint indexing charges actual reads before the deadline can be overrun", () => {
+  let reads = 0;
+  const points = new Proxy(Array.from({ length: 4096 }, (_, i) => [i + 1, 0, 0, i, 0, 0]).flat(), {
+    get(target, key, receiver) {
+      if (typeof key === "string" && /^\d+$/.test(key)) reads++;
+      return Reflect.get(target, key, receiver);
+    },
+  });
+  const budget = new volumeInternals.Budget();
+  budget.deadline = -Infinity;
+  const run = volumeInternals.chainedPoints(points, budget);
+  for (;;) {
+    const before = reads;
+    const step = run.next();
+    assert.ok(reads - before <= 384, `${reads - before} guide coordinate reads in one expired slice`);
+    if (step.done) break;
+  }
 });

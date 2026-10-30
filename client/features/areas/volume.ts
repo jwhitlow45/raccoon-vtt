@@ -1489,7 +1489,7 @@ function finish<T>(job: Job<T>): T {
  * between one and the next: each edge once, each line run on through
  * every point where it meets one other edge only.
  */
-function chained(pairs: readonly number[], p: Float64Array): Float64Array {
+function* chained(pairs: readonly number[], p: ArrayLike<number>, budget: Budget): Job<Float64Array> {
   const at = new Map<number, number[]>();
   const n = pairs.length >> 1;
   for (let e = 0; e < n; e++) {
@@ -1498,56 +1498,83 @@ function chained(pairs: readonly number[], p: Float64Array): Float64Array {
       if (list) list.push(e);
       else at.set(v, [e]);
     }
+    if (budget.spend(1)) yield;
   }
   const used = new Uint8Array(n);
   const out: number[] = [];
   const other = (e: number, v: number) => (pairs[2 * e] === v ? pairs[2 * e + 1]! : pairs[2 * e]!);
-  // From a vertex, the next unused edge when it is the only one left there, so a line stops where three meet.
-  const onward = (v: number): number => {
+  // Stop at branches. Charge even used edges, since a branch may have many.
+  function* onward(v: number): Job<number> {
     const list = at.get(v)!;
     let found = -1;
     for (const e of list) {
+      if (budget.spend(1)) yield;
       if (used[e]) continue;
       if (found >= 0) return -1;
       found = e;
     }
     return found;
-  };
+  }
   for (let e0 = 0; e0 < n; e0++) {
+    if (budget.spend(1)) yield;
     if (used[e0]) continue;
     used[e0] = 1;
     const line = [pairs[2 * e0]!, pairs[2 * e0 + 1]!];
-    for (let v = line[line.length - 1]!, e = onward(v); e >= 0; e = onward(v)) {
+    for (let v = line[line.length - 1]!, e = yield* onward(v); e >= 0; e = yield* onward(v)) {
       used[e] = 1;
       v = other(e, v);
       line.push(v);
+      if (budget.spend(1)) yield;
     }
-    for (let v = line[0]!, e = onward(v); e >= 0; e = onward(v)) {
+    // Keep the backward half separately, so growing it never shifts the line.
+    const back: number[] = [];
+    for (let v = line[0]!, e = yield* onward(v); e >= 0; e = yield* onward(v)) {
       used[e] = 1;
       v = other(e, v);
-      line.unshift(v);
+      back.push(v);
+      if (budget.spend(1)) yield;
     }
     if (out.length > 0) out.push(NaN, NaN, NaN);
-    for (const v of line) out.push(p[3 * v]!, p[3 * v + 1]!, p[3 * v + 2]!);
+    for (let i = back.length - 1; i >= 0; i--) {
+      const v = back[i]!;
+      out.push(p[3 * v]!, p[3 * v + 1]!, p[3 * v + 2]!);
+      if (budget.spend(1)) yield;
+    }
+    for (const v of line) {
+      out.push(p[3 * v]!, p[3 * v + 1]!, p[3 * v + 2]!);
+      if (budget.spend(1)) yield;
+    }
   }
-  return Float64Array.from(out);
+  const result = new Float64Array(out.length);
+  for (let i = 0; i < out.length; i++) {
+    result[i] = out[i]!;
+    if (budget.spend(1)) yield;
+  }
+  return result;
 }
 
-/** Segments `[ax, ay, az, bx, by, bz, ...]` chained as `chained` does, by their points: the guides, which carry no vertex ids. */
-function chainedPoints(segs: readonly number[]): Float64Array {
-  const ids = new Map<string, number>();
+/** Guide endpoints use numeric coordinates so chaining allocates no string per point. */
+function* chainedPoints(segs: readonly number[], budget: Budget): Job<Float64Array> {
+  const ids = new Map<number, Map<number, Map<number, number>>>();
   const pts: number[] = [];
   const pairs: number[] = [];
   for (let i = 0; i + 2 < segs.length; i += 3) {
-    const key = `${segs[i]},${segs[i + 1]},${segs[i + 2]}`;
-    let id = ids.get(key);
+    const x = segs[i]!;
+    const y = segs[i + 1]!;
+    const z = segs[i + 2]!;
+    let ys = ids.get(x);
+    if (!ys) ids.set(x, (ys = new Map()));
+    let zs = ys.get(y);
+    if (!zs) ys.set(y, (zs = new Map()));
+    let id = zs.get(z);
     if (id === undefined) {
-      ids.set(key, (id = pts.length / 3));
-      pts.push(segs[i]!, segs[i + 1]!, segs[i + 2]!);
+      zs.set(z, (id = pts.length / 3));
+      pts.push(x, y, z);
     }
     pairs.push(id);
+    if (budget.spend(1)) yield;
   }
-  return chained(pairs, Float64Array.from(pts));
+  return yield* chained(pairs, pts, budget);
 }
 
 /** An area's mesh, its footprint, and its buckets, each cut the first time it is asked for. */
@@ -2133,17 +2160,19 @@ export class Volume {
       }
       if (budget.spend(2 * n)) yield;
     }
-    b.guides.forEach((g, k) => {
+    for (let k = 0; k < b.guides.length; k++) {
+      const g = b.guides[k]!;
       const part = partOf(t.guideBand[k]!, lowAt(Math.min(g.az, g.bz)));
       (t.guideNear[k] === 1 ? part.guide : part.guideHidden).push(g.ax, g.ay, g.az, g.bx, g.by, g.bz);
-    });
-    if (budget.spend(b.guides.length)) yield;
+      if (budget.spend(1)) yield;
+    }
     const { c, s } = turnAxes(turn);
     const out: BandDraw[] = [];
     for (const [band, [high, low]] of bands) {
       const box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
-      const grow = (q: ArrayLike<number>) => {
+      const grow = function* (q: ArrayLike<number>): Job {
         for (let i = 0; i + 2 < q.length; i += 3) {
+          if (budget.spend(1)) yield;
           if (Number.isNaN(q[i]!)) continue;
           const u = c * q[i]! - s * q[i + 1]!;
           const v = (s * q[i]! + c * q[i + 1]!) / 2 - K * q[i + 2]!;
@@ -2153,17 +2182,17 @@ export class Volume {
           if (v > box.y1) box.y1 = v;
         }
       };
-      const done = (q: Build): BandPart => {
-        for (const loop of q.far) grow(loop);
-        for (const loop of q.near) grow(loop);
-        const part: BandPart = { far: q.far, near: q.near, outline: chained(q.outline, p), hidden: chained(q.hidden, p), guide: chainedPoints(q.guide), guideHidden: chainedPoints(q.guideHidden) };
-        grow(part.outline);
-        grow(part.hidden);
-        grow(part.guide);
-        grow(part.guideHidden);
+      const done = function* (q: Build): Job<BandPart> {
+        for (const loop of q.far) yield* grow(loop);
+        for (const loop of q.near) yield* grow(loop);
+        const part: BandPart = { far: q.far, near: q.near, outline: yield* chained(q.outline, p, budget), hidden: yield* chained(q.hidden, p, budget), guide: yield* chainedPoints(q.guide, budget), guideHidden: yield* chainedPoints(q.guideHidden, budget) };
+        yield* grow(part.outline);
+        yield* grow(part.hidden);
+        yield* grow(part.guide);
+        yield* grow(part.guideHidden);
         return part;
       };
-      out.push({ band, high: done(high), low: done(low), box });
+      out.push({ band, high: yield* done(high), low: yield* done(low), box });
       if (budget.spend(1)) yield;
     }
     out.sort((x, y) => x.band - y.band);
@@ -2732,7 +2761,7 @@ export function volumeKey(req: Pick<VolumeRequest, "template" | "ctx" | "px" | "
  * loops random scenes seldom make long enough to show a missing stop. One
  * export, so nothing else reaches past the volume (review ISOA1-F-9).
  */
-export const volumeInternals = { Budget, Store, loopsOnLine, earClip, LineIndex, NearLines, lineThrough };
+export const volumeInternals = { chained, chainedPoints, Budget, Store, loopsOnLine, earClip, LineIndex, NearLines, lineThrough };
 export type VolumeJob<T> = Job<T>;
 export type VolumePlane = Plane;
 export type VolumePoly = Poly;
