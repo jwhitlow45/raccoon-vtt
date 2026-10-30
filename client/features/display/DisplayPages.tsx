@@ -93,42 +93,44 @@ function CodePage(props: { hash: string; badId: boolean }) {
         </p>
         {props.badId ? <ErrorText>That link does not name a room. Enter the code instead.</ErrorText> : null}
         <form onSubmit={submit} style={{ display: "grid", gap: theme.space(3) }}>
-          <label htmlFor="display-code" style={{ fontSize: theme.font.body14, fontWeight: theme.weight.strong }}>
-            Code from the DM's screen
-          </label>
-          <input
-            id="display-code"
-            ref={fieldRef}
-            value={input}
-            autoFocus
-            autoComplete="off"
-            autoCapitalize="characters"
-            autoCorrect="off"
-            spellCheck={false}
-            maxLength={16}
-            placeholder="K7QH 2MXA 4F"
-            disabled={busy}
-            onChange={(e) => {
-              setInput(formatDisplayCode(e.target.value.replace(/[^0-9a-z\s-]/gi, "")));
-              setError(null);
-            }}
-            style={{
-              // Its own width would be 20 characters of 36 px type, wider than a phone, so it takes the card's.
-              width: "100%",
-              minWidth: 0,
-              minHeight: TV_CODE_FIELD_HEIGHT,
-              padding: `0 ${theme.space(4)}px`,
-              borderRadius: theme.radius.md,
-              // The field look (components/Field.tsx), with a line twice as strong, so its edge shows across a room.
-              border: `${theme.line.strong}px solid ${error ? theme.color.danger : busy ? theme.color.border : theme.color.controlBorder}`,
-              background: theme.color.bg,
-              color: busy ? theme.color.textDisabled : theme.color.text,
-              fontFamily: theme.font.mono,
-              fontSize: TV_TEXT.code,
-              letterSpacing: "0.08em",
-              textAlign: "center",
-            }}
-          />
+          <div style={{ display: "grid", gap: theme.space(1) }}>
+            <label htmlFor="display-code" style={{ fontSize: theme.font.body14, fontWeight: theme.weight.strong }}>
+              Code from the DM's screen
+            </label>
+            <input
+              id="display-code"
+              ref={fieldRef}
+              value={input}
+              autoFocus
+              autoComplete="off"
+              autoCapitalize="characters"
+              autoCorrect="off"
+              spellCheck={false}
+              maxLength={16}
+              placeholder="K7QH 2MXA 4F"
+              disabled={busy}
+              onChange={(e) => {
+                setInput(formatDisplayCode(e.target.value.replace(/[^0-9a-z\s-]/gi, "")));
+                setError(null);
+              }}
+              style={{
+                // Its own width would be 20 characters of 36 px type, wider than a phone, so it takes the card's.
+                width: "100%",
+                minWidth: 0,
+                minHeight: TV_CODE_FIELD_HEIGHT,
+                padding: `0 ${theme.space(4)}px`,
+                borderRadius: theme.radius.md,
+                // The field look (components/Field.tsx), with a line twice as strong, so its edge shows across a room.
+                border: `${theme.line.strong}px solid ${error ? theme.color.danger : busy ? theme.color.border : theme.color.controlBorder}`,
+                background: theme.color.bg,
+                color: busy ? theme.color.textDisabled : theme.color.text,
+                fontFamily: theme.font.mono,
+                fontSize: TV_TEXT.code,
+                letterSpacing: "0.08em",
+                textAlign: "center",
+              }}
+            />
+          </div>
           <Button
             type="submit"
             variant="primary"
