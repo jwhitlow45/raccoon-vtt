@@ -4,6 +4,10 @@
 
 <h1 align="center">raccoon-vtt</h1>
 
+<p align="center">
+  <a href="https://hub.docker.com/r/jwhitlow45/raccoon-vtt">Docker image on Docker Hub</a>
+</p>
+
 A self-hosted virtual tabletop for D&D groups playing the 2024 rules
 (5.5e), on a square grid. It is made for phones first, and works on
 tablets, laptops and a TV at the table too. Every device stays in sync
@@ -53,21 +57,58 @@ too when a change alters a step it describes.
 
 ## Quick start
 
-To try it with nothing but Docker:
+To try it on your own computer with nothing but Docker, run the published
+image from [Docker Hub](https://hub.docker.com/r/jwhitlow45/raccoon-vtt)
+next to a postgres. Nothing to clone or build:
 
 ```bash
-git clone <this repository's URL> raccoon-vtt
-cd raccoon-vtt
-docker compose up --build raccoon
+mkdir raccoon-vtt-try && cd raccoon-vtt-try
+cat > compose.yml <<'EOF'
+name: raccoon-try
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: raccoon
+      POSTGRES_PASSWORD: raccoon
+      POSTGRES_DB: raccoon
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U raccoon -d raccoon"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  raccoon:
+    image: docker.io/jwhitlow45/raccoon-vtt:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgres://raccoon:raccoon@postgres:5432/raccoon
+      PUBLIC_ORIGIN: http://127.0.0.1:9180
+    ports:
+      - "127.0.0.1:9180:3000"
+    volumes:
+      - assets:/data/assets
+volumes:
+  db:
+  assets:
+EOF
+docker compose up -d
 ```
 
-This builds the production image and starts it next to a development
-postgres, on http://127.0.0.1:9180. Open exactly that address, not
+Then open http://127.0.0.1:9180. Open exactly that address, not
 `localhost`, because the WebSocket checks Origin exactly. Create a room on
 the Home page. To see the player's side, copy the player link from the
-room's Menu and open it in a private window or another browser. It runs with `NODE_ENV=development`, because
-production insists on an https origin. To put it on the internet, follow
-[Deploying](#deploying).
+room's Menu and open it in a private window or another browser.
+
+It runs with `NODE_ENV=development`, because production insists on an https
+origin, and it listens only on this computer. `docker compose down` stops
+it and keeps your rooms. `docker compose down -v` deletes them too. To put
+it on the internet, follow
+[Self-hosting with the published image](#self-hosting-with-the-published-image).
 
 ## Local development
 
@@ -107,9 +148,10 @@ follows `PORT`.
 | `pnpm admin <command>` | the admin commands below, against the dev database |
 | `pnpm test:backup` | the backup check (`scripts/backup-check.ts`): `docker/backup.sh` through its compose services, in a compose project and postgres of its own (port 5235). Needs Docker, takes about 5 minutes. Run it before a release that touches backups |
 
-`docker compose up --build raccoon`, from the [Quick start](#quick-start),
-is also how to try a build of the production image before it goes to a
-server.
+`docker compose up --build raccoon` builds the production image from this
+checkout and runs it against the dev postgres, on http://127.0.0.1:9180, as
+the [Quick start](#quick-start) runs the published one. It is how to try a
+build before it goes to a server.
 
 ## Continuous integration
 
