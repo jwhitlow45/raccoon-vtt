@@ -548,6 +548,20 @@ proxy holds here too. It adds two things:
 Its project, network and volume names are the same as
 `docker-compose.server.yml`'s, so the two cannot run on one host at once.
 
+### Verify the image
+
+Images published with signing enabled carry a keyless Cosign signature for
+their multi-architecture digest. With [Cosign](https://docs.sigstore.dev/cosign/verifying/verify/)
+installed, replace `X.Y.Z` with the release version and verify its release
+workflow identity before running it. Older releases may be unsigned.
+
+```sh
+cosign verify \
+  --certificate-identity-regexp '^https://github[.]com/jwhitlow45/raccoon-vtt/[.]github/workflows/image[.]yml@refs/tags/v[0-9]+[.][0-9]+[.][0-9]+$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  docker.io/jwhitlow45/raccoon-vtt:X.Y.Z
+```
+
 ### What you need
 
 - A Linux server with Docker Engine 28 or later, as in

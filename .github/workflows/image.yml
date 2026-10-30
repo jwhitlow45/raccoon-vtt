@@ -13,8 +13,9 @@
 # the same builder and cache, so the amd64 image pushed is the one tested:
 # it checks that their config digests match before it tags anything. It
 # never rebuilds or replaces a version Docker Hub already has. A run that
-# stopped after pushing X.Y.Z can be run again, and then only tags. X.Y and
-# latest move only forward, by what Docker Hub holds (scripts/release-tags.ts).
+# stopped after pushing X.Y.Z can be run again to sign and finish tagging.
+# X.Y and latest move only forward, by what Docker Hub holds
+# (scripts/release-tags.ts).
 #
 # A run on a ci/ branch that changes the image's own files, and a run
 # started by hand, do the checks and the smoke test, and never push. A change
@@ -23,8 +24,8 @@
 # release's run, which fails before it pushes anything if the image is
 # broken.
 #
-# Only actions/checkout, pinned as in ci.yml. Everything else is the docker
-# CLI and buildx in run steps, so no third-party action ever sees the token.
+# Actions are pinned by full SHA. Docker Hub credentials reach only the
+# run steps that log in, including the step that signs the published index.
 name: Image
 
 on:
@@ -212,14 +213,17 @@ jobs:
   # Docker Hub's own state decides what it does, read inside the release
   # slot. X.Y.Z not there: build, smoke-test, push and tag. X.Y.Z there from
   # this same commit: a run before this one pushed it and stopped before the
-  # floating tags, so this one only tags. X.Y.Z there from anything else:
-  # refused, since a published version is never rebuilt or replaced.
+  # floating tags, so this one signs and finishes tagging. X.Y.Z there from
+  # anything else: refused, since a published version is never rebuilt or replaced.
   publish:
     needs: [check, build-arm64, ci-green]
     if: needs.check.outputs.publish == 'true'
     environment: dockerhub
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
     env:
       VERSION: ${{ needs.check.outputs.version }}
       MINOR: ${{ needs.check.outputs.minor }}
@@ -285,7 +289,7 @@ jobs:
             echo "MODE=resume"
             echo "INDEX=$index"
           } >> "$GITHUB_ENV"
-          echo "$VERSION is on Docker Hub from this commit ($index): only the floating tags are left to do."
+          echo "$VERSION is on Docker Hub from this commit ($index): signing and floating tags remain."
       # QEMU for arm64, from tonistiigi/binfmt qemu-v10.2.1 by digest. Only
       # the production install runs emulated: the Dockerfile builds the
       # client on the runner's own platform.
@@ -356,9 +360,31 @@ jobs:
           fi
           echo "INDEX=$index" >> "$GITHUB_ENV"
           echo "The pushed linux/amd64 image is the one smoke-tested ($pushed): index $index, linux/amd64 $amd64, linux/arm64 $arm64."
-      # X.Y.Z first, so a run that stops partway can be run again and only
-      # tags. X.Y and latest each move only when Docker Hub has no such tag
-      # or it holds this release or an older one (scripts/release-tags.ts).
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      # INDEX comes only from a completed push or a verified published
+      # version. Signing it again lets a stopped release resume safely.
+      - name: Sign the published index
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ "$MODE" != build && "$MODE" != resume ]]; then
+            echo "::error::No completed image push or verified release to sign."
+            exit 1
+          fi
+          if ! [[ "$INDEX" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::The published image digest is missing or invalid."
+            exit 1
+          fi
+          trap 'docker logout docker.io' EXIT
+          printf '%s' "$DOCKERHUB_TOKEN" | docker login docker.io --username "$DOCKERHUB_USERNAME" --password-stdin
+          docker buildx imagetools inspect --raw "$IMAGE@$INDEX" > /dev/null
+          cosign sign --yes "$IMAGE@$INDEX"
+      # X.Y.Z first, so a run that stops partway resumes by signing and
+      # tagging. X.Y and latest each move only when Docker Hub has no such
+      # tag or it holds this release or an older one (scripts/release-tags.ts).
       - name: Tag
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
