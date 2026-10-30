@@ -1,0 +1,201 @@
+# raccoon-vtt v1: a mode menu for one roll
+
+Status: designed for DP-F1 on 2026-10-30. Code references are from main at `de083a47ca084e07dd004068a9401df4bf15bd5b`. Client only, with the limits in section 2. No implementation or browser measurements are claimed here.
+
+The project owner approved the explanation of a one-off menu on roll buttons: long-press on touch or right-click with a mouse, then Roll with Advantage, Roll with Disadvantage, Roll secretly or Roll normally. The panel toggles stay unchanged. D&D Beyond's dice are the model. This settles the feature, not the choices marked Decided below.
+
+## Scope
+
+- **In**: every control that actually rolls, in the Dice panel, tracker, HP entries, request cards and fight cards, including batches, healing and recharge. One shared interaction and one mode rule.
+- **Out**: new roll surfaces, new roll permissions, automatic background rolls, changes to final answers, and changes to server ops, projection or stored room data.
+- **Existing behavior**: the explanation described toggles that stay pressed after a roll. Today's toggles are already consumed by an ordinary panel roll (`useDicePanel.ts:124-142`, `:211-246`). Keep that behavior. A menu roll neither consumes nor changes them.
+- **Fixed**: 44 px targets, 16 px fields, no feature requiring hover or long-press, results in their existing place, and alignment within 1 px.
+
+## 1. Which controls
+
+Paths in this section are relative to `client/`. A location names the present control or the handler that supplies its roll. Every listed actual roll gets the same hold, context menu and keys, with no added control or layout change.
+
+**Modes**: D means Advantage, Disadvantage and Normal. V means an explicit visibility choice is supported by the current op. F means visibility is fixed by the current route. A fixed route shows Secret disabled with a reason, rather than pretending to honor it. Non-d20 damage never offers Advantage or Disadvantage, even if someone typed a d20 as its damage formula.
+
+| Surface and control | Present location | Modes and route |
+|---|---|---|
+| Formula field's Roll | `features/dice/Roller.tsx:331`, `:398` | D when the parsed formula accepts `applyMode`, otherwise Normal only, plus V |
+| Sticky Again | `features/dice/Roller.tsx:178` | D for eligible plain d20s, Normal for other dice, plus V |
+| Recent rolls' Again | `features/dice/RecentRolls.tsx:259` | Same as sticky Again, own repeatable dice lines only |
+| Ability saves, checks and skills | `features/dice/RollOptions.tsx:757`, `:778` | D + V for free rolls, D + F when answering a request |
+| Initiative and Roll instead | `features/dice/RollOptions.tsx:835`, `:852` | D + V, guarded write to the existing tracker row |
+| Death Save in the creature card | `features/dice/RollOptions.tsx:873`, `:881` | D + F, `actor.deathRoll` |
+| Named Attack, every action group and spell | `features/dice/RollOptions.tsx:1020`, through `D20Cell` | D + V, same critical detection |
+| Damage, Heal, named plain Roll | `features/dice/RollOptions.tsx:1042`, `:1075`, `:1085` | Normal + V, plain Roll also D if its formula qualifies |
+| Named Recharge | `features/dice/RollOptions.tsx:1088` | Normal + F, `actor.rechargeRoll` |
+| Several selected: saves, checks, skills | `features/dice/groupSave/GroupOptions.tsx:90`, `:119`, `:205` | D + V for the server rolls of this gesture, section 4 for asked rows |
+| Several selected: shared Attack and hits' Damage | `features/dice/groupSave/GroupOptions.tsx:348`, `:371`, `:379` | Attack D + V, Damage Normal + V |
+| Several selected: Initiative | `features/dice/groupSave/GroupOptions.tsx:387` | D + V through the auto-initiative plan |
+| Group save: Roll saves/checks and ask | `features/dice/groupSave/GroupSave.tsx:325`, `:609` | D + V for server rows, section 4 for asked rows |
+| Group save: waiting row's Roll | `features/dice/groupSave/GroupSave.tsx:531`, `:1009` | D + F, `roll.dice` |
+| Group save: Roll them or Roll again on a server row | `features/dice/groupSave/GroupSave.tsx:548`, `:1016` | D + V, a fresh explicit roll, never an automatic retry |
+| Group save: damage Roll or Roll again | `features/dice/groupSave/GroupSave.tsx:345`, `:810` | Normal + V when the field contains dice, no menu on a typed amount's action |
+| Player's Roll damage and ask | `features/dice/cast/CastBlock.tsx:318`, `:369` | Normal + V for the damage only, ask unchanged |
+| Player request card's Roll | `features/rolls/PlayerRolls.tsx:948`, `:966` | D + F, `roll.dice`, chosen ability and typed bonus retained |
+| DM live request card's waiting Roll | `features/rolls/DmDesk.tsx:413`, `:437`, `:460` | D + F, `unanswered` guard retained |
+| Tracker row's Initiative Roll, inline and in options | `features/encounter/Row.tsx:726`, `:772`, `:879` | D + V if it rolls, no menu on the unknown-bonus opener |
+| Tracker Auto Initiative and row Roll Initiative | `features/encounter/AutoInitiative.tsx:131`, `:292` | D + V for this plan's new dice, grouping mode unchanged |
+| HP death-save row, wherever embedded | `features/tokens/HpSection.tsx:642`, `:673` | D + F, covers token bars, token panel and character sheet |
+| Turn's death-save card | `features/combat/DeathSaveCard.tsx:60`, `:91` | D + F, same turn record and regeneration guard |
+| Concentration card | `features/encounter/InitiativeStrip.tsx:1443`, `:1495` | D + V, existing concentration result and resistance handling |
+| Save-ends card, own roll or linked request | `features/encounter/SaveEndsCard.tsx:121`, `:130`, `:189` | D + V for its own dice, D + F for a linked request |
+| Recharge card and every Uses list's Roll recharge | `features/encounter/RechargeCard.tsx:47`, `:73`, `features/combat/CombatUses.tsx:364` | Normal + F, shared turn record and ready mark |
+
+**Openers are not rolls.** Single and group token bars' Roll (`canvas/TokenActionBar.tsx:334`, `:679`, `:794`) open Dice. Group save (`RollOptions.tsx:1181`), Set up a group save, Ask for saves, Ask the DM to roll and Request a roll open or send an ask. Give those no mode menu. The stat block views (`features/pcstats/PcStatsView.tsx:50`, `features/pcstats/PcStatBlock.tsx:176`, `features/tokens/StatBlockSection.tsx`) remain text. Their sheet's actual HP Death Roll is covered above. Quick dice (`Roller.tsx:421`) add dice to the field, so their tap and hold never roll.
+
+**Other non-roll actions stay themselves.** Critical, riders, Used, Use, Fail without rolling, Pass, Fail, typed Send, initiative Score and Apply get no menu. Allow on an existing reroll ask executes the approved change, not a fresh roll with a different mode. Again on a failed request to ask players sends no dice. No menu on it. Automatic initiative joins and background settlement never open a menu.
+
+## 2. Visibility, from the code
+
+`dice.roll` alone accepts `to: "all" | "dm"` (`shared/protocol.ts:1589-1597`). **Secret means the DM and the roller can read the dice.** A player's own secret roll is still visible to that player (`shared/project.ts:3430-3456`). Other eligible players read only "… rolled in secret." A hidden or unseen creature can leave no line. This feature must not promise that the player is blind to their own result.
+
+- Menu action: **Roll secretly**. Its description is "You and the DM see the result." for a player, "Hide the dice from players." for a DM. Show that explanation as visible help above the list too. Existing visibility and initiative-order restrictions still apply.
+- `roll.dice` has no visibility field (`shared/protocol.ts:1631-1642`). A request answer follows the request's projection and reaches the DM and its creature's players. Secret is disabled with "Request answers keep the request's visibility." Normal does not change it or expose a hidden DC or verdict.
+- `actor.deathRoll` has mode but no visibility (`shared/protocol.ts:1648-1655`). `actor.rechargeRoll` has neither mode nor visibility (`:1662-1669`). Both choose visibility on the server (`shared/reducer/dice.ts:145`, `:181`): secret for a DM's monster, open otherwise. Show "This roll's visibility is set by the creature." on disabled Secret. Recharge offers Normal only as an enabled action.
+- A secret initiative roll still writes its total to the tracker under the tracker's rules. Secret damage or concentration still has its ordinary effects. Secret hides dice, not the resulting HP, conditions, turn order or ask.
+- Public variants must use the existing public label and `dcOnLine` rules, including hidden trap names, save-ends and concentration. Never carry a DM-only DC or label from a secret envelope into a public one.
+
+**Scope limit.** Literal "only the DM sees it" for a player's own roll, or selectable secrecy for request answers, death saves and recharge, requires protocol, server and projection work. That is outside this client design and is reported for coordination. The disabled choices above are an explicit client-only limit, not a full implementation of that stronger promise.
+
+## 3. Opening and closing
+
+### 3.1 A shortcut with an existing visible route
+
+Each actual roll keeps its present button, visible words, accessible name, width and position. No split arrow, added glyph, padding or minimum-width change. The owner's FL-7 words decide the layout: "ensure it is on the same line and does not cause wrapping". Every roll button and grid keeps today's widths, rows and columns at every size and interface scale.
+
+The button supports ContextMenu and Shift+F10 when focused (`aria-keyshortcuts="ContextMenu Shift+F10"`). Enter and Space still roll. Keep existing accessible descriptions and append a short menu hint: "Hold, right-click or Shift+F10 for Advantage, Disadvantage, Secret or Normal." Omit unavailable d20 choices on non-d20 controls. Associate the menu with its source through `aria-haspopup="menu"`, `aria-expanded` and `aria-controls`. Do not spread the popover's default click or arrow-key open handler onto the roll button.
+
+VoiceOver and TalkBack users focus the roll button and double-tap and hold to use the touch shortcut. A plain double-tap still rolls. Verify that the synthesized hold reaches the same menu without first rolling. Readers with a keyboard can use either context-menu key. Keep the Dice panel's visible Advantage, Disadvantage and Secret toggles and each card's existing controls: they remain the non-hold route to choosing how to roll, with an ordinary roll after clearing modes for Normal. The menu adds a one-off shortcut, not an exclusive roll capability.
+
+Discover it in the shortcut sheet, FEATURES.md and the DM guide, plus one help line near the Dice panel's toggles: "Hold or right-click a roll button for one-roll options. Keyboard: Shift+F10." Put that help in the roller's help area, outside the roll-button rows and grids. The menu adds no permanent control beside a roll.
+
+### 3.2 Mouse, touch and gesture ownership
+
+1. **Tap**: ordinary primary click, including a reader's synthesized click, runs the existing action once. Never roll on pointerdown. A touch released before the hold fires remains a tap.
+2. **Mouse**: `contextmenu` on the roll button prevents the native menu and opens this menu, anchored to that button. Primary-button mouse holds do not arm it. Right-drag on the canvas still pans.
+3. **Touch**: one primary touch on the roll button arms `LongPress` (`lib/gestures.ts:8`, `:162`): 500 ms, cancelled beyond 8 screen CSS px of travel. Use screen coordinates before interface zoom, not canvas coordinates. Readers' double-tap-and-hold uses this same shortcut.
+4. **Before opening**: after 200 ms of a still hold, show an inset accent outline on the button. No new row, text, spinner, vibration or animation loop. Clear it on cancellation or opening. It means the press is being held, not that dice are rolling. Reduced motion uses the same static outline.
+5. **Yield**: cancel on movement beyond slop, scrolling any containing scroller, `pointercancel`, a second pointer anywhere, loss of capture, window blur, hidden document, disabled/busy change or unmount. Clear both timers and the outline. A move out and back cannot rearm the hold. A cancelled moving gesture cannot roll on release.
+6. **Scroll and swipe**: leave native panning and pinch enabled. Do not capture the pointer or prevent pointerdown/move before the hold fires. The sheet owns its swipe and sends `pointercancel` when it claims (`lib/sheetSwipe.ts:1013`, `:1285`). Its existing control/grab tests remain in charge outside the menu. Add an owned-content boundary for this menu in `startsOn` (`lib/sheetSwipe.ts:636`), so its rows and native scrolling cannot drag the containing sheet. Do not use `touch-action: none` on the scrolling menu.
+7. **After opening**: mark the initiating press consumed. Its eventual up/click, even over a menu row, selects nothing and rolls nothing. Selection needs a new tap/click or key. Scope click suppression to that press, clear it on a new press or key, and never swallow a subsequent keyboard or reader click with `detail === 0`.
+8. **Browser events**: distinguish mouse, key and touch contextmenu events. A native touch `contextmenu` can open only for the still-eligible active press, or be swallowed as a duplicate of its fired hold. A late event after cancellation opens nothing. Suppress touch callout/text selection only on these controls. Existing tooltip hold timers must not also fire on them. Compose or disable that hold in the shared roll control, especially Again's icon button (`components/Tooltip.tsx:19`, `:141`).
+
+Register on DOM roll controls only. Never install a map-wide contextmenu or long-press handler. The canvas's `CameraGesture`, hold-to-ping, token drag, selection box and pan/pinch keep their own presses. Cancelling a roll hold for a second finger must leave the browser or canvas free to handle it.
+
+### 3.3 Menu and focus
+
+Use `Menu`'s list layout with `kind: "action"` items inside `Popover kind="menu"`, not a new menu implementation (`components/Menu.tsx:173-194`, `components/Popover.tsx:113`). Actions roll immediately and close, without changing a checked setting. Order: Roll with Advantage, Roll with Disadvantage, Roll secretly, Roll normally. Omit both d20 actions where meaningless. Keep unavailable Secret visibly disabled with its section 2 description. Menu's descriptions are hidden accessible text today. The roll-menu wrapper also renders the applicable Secret/Normal/batch explanations as short visible help above the list, without changing Menu's API.
+
+Reuse Popover's viewport/keyboard bounds, rise and scroll behavior on phones as well as computers. Its small anchored menu is the existing menu pattern. No second sheet or scrim. Raise the local host while open, so the menu clears sticky headers and cards. Do not mark it as a tool-options popover: that would fold the request card that owns the roll button (`features/rolls/PlayerRolls.tsx:260-267`).
+
+Keyboard opening focuses the first enabled item. Up/Down, Home/End, typeahead, Enter/Space, Tab/Shift+Tab, Escape and Android Back follow Menu/Popover. Pointer opening follows Popover's existing focus rules. The menu's accessible name is "Roll options for <roll>". Disabled items have readable descriptions. Escape returns focus to the source roll button. In `onPick`, capture the invocation, then explicitly close/focus before sending it, since Menu ordinarily invokes its callback before closing. If the card settles or the source vanishes, use its existing parent/card focus fallback, never a removed button.
+
+Closing without a pick changes nothing. A selection, creature, request choice, formula, bonus, slot, rider or critical state changed while open closes the menu. So do a folded source group, its scroll, a route change or becoming busy/blocked. Revalidate the live target and route when picking. Never let a menu meant for one creature roll another.
+
+## 4. One roll's meaning
+
+An override is passed with this invocation, never written to `diceChoicesSlot`, card chips, the group-save switch, tracker reminders or device storage. Opening reads no choices destructively. Picking does not call `take()`, `press()` or a fake press-then-restore. A refusal, unknown answer or delayed result also leaves every toggle and its version unchanged.
+
+| Action | Manual d20 sources for this invocation | Visibility |
+|---|---|---|
+| Roll with Advantage | Replace panel, card-chip and formula-word sources with one Advantage source | The source's ordinary visibility as it stands, without consuming it |
+| Roll with Disadvantage | Replace those manual sources with one Disadvantage source | Same |
+| Roll secretly | Keep the manual d20 sources that an ordinary tap here would use | `to: "dm"`, where supported |
+| Roll normally | Remove panel, card-chip and formula-word sources | `to: "all"` where supported, fixed route otherwise |
+
+Keep the creature's preset sources, including the tracker row's existing reminder, extra dice, exhaustion, automatic failure and Magic Resistance. Resolve all retained sources plus the one menu source once with `advantageFields`, after gathering them. Any Advantage and any Disadvantage cancel, however many of either (doc 1, `docs/design-v1-dice.md` 3.3). Preserve `cancelled: true`. Normal removes a manual toggle, not Restrained or Bless. Its description says "Ignore manual modes and Secret for this roll. Creature effects still apply." A fixed route's version says "Ignore manual modes for this roll. Creature effects and visibility still apply."
+
+- **Examples**: panel Dis on, menu Advantage, no preset: Advantage, Dis still on. Restrained Dex save plus menu Advantage: Normal, cancelled. Hasted and Restrained plus menu Advantage: Normal, cancelled. Normal with panel Adv and Secret on: ordinary public roll, both toggles still on. Normal with Poisoned on an attack: Disadvantage. Secret on a damage roll: secret damage, no d20 mode.
+- **Cards**: ordinary cards retain their own Adv/Dis chips and ignore panel modes as today. Menu modes override their manual chip for this invocation only. Typed bonus and extra dice stay. Never clear typed totals, invent an unknown +0, reopen a final answer or bypass `unanswered`.
+- **Ask route**: a DM option that would open Request a roll gets no roll-mode menu while in that route. Its ordinary tap still asks. The menu never silently flips Ask off to roll for the player. An existing unanswered request switches it to the request-answer menu and its fixed visibility.
+- **Batch**: one gesture means every new die that gesture actually sends, including split batches and typed damage parts. Resolve each creature's preset independently. A mixed Roll and ask applies modes only to its server rows, described in the menu as "Applies to server rolls only. Players choose their own modes." Sending an ask cannot force its later answer's mode with today's protocol. If no server row rolls, the ask-only action has no menu.
+- **Group save**: use a temporary invocation envelope for mode and visibility, including safe public labels/DCs. Do not change `page.secret`, `rollNow` defaults or later damage/retry choices. An invocation carried across its replacement confirmation is in memory only and is dropped on Keep, cancellation or reload. The page's stored shape stays the same.
+- **Auto initiative**: apply the override before building groups, so different resulting modes/extras never share a draw accidentally. Keep the tracker's By creature/One each/All at once choice, score behavior, guarded writes and join rules. Previously kept values and automatic later joins are outside this invocation.
+- **Again**: a normal tap repeats the recorded roll exactly as today. Its mode menu reconstructs the recorded asked formula with `againInput`/`askedRoll`, removes the old aggregate `mode`/`cancelled`, and adds the chosen mode. For a creature with explicit `save` or `initiative` metadata, gather its current preset's advantage sources too. Secret instead preserves the recorded mode/cancellation, changing only visibility. Keep the recorded formula's bonus and extra terms unchanged, so Bless or Exhaustion terms are never added twice. Critical damage and types stay. On a public menu repeat, use "Repeated roll" unless a safe public label can be rebuilt from live context, and omit unverified recorded DC/AC. An old check or ordinary attack has no test metadata, so no current creature preset can safely be inferred from it. Show "Repeats the recorded formula. Current advantage effects apply only to identified saves and initiative." Its Normal description says "Ignore the recorded mode and Secret. Formula terms stay." Do not infer a test from free text. A heterogeneous batch offers d20 modes only if every member qualifies. Request answers and death saves still have no Again.
+
+**The result line tells what happened.** Keep one result location: the Dice sticky line, an existing card or a batch row. Use returned `mode` for "Advantage" or "Disadvantage", `cancelled` for "Normal: Advantage and Disadvantage cancelled", and otherwise "Normal" for d20 tests. Show Secret from the returned envelope, not the menu label. The compact sticky line keeps its total and Again first and may put this detail in its accessible description and expanded Recent rolls. Its polite result announcement includes the effective mode and Secret once. Other viewers learn only what their projected line already contains. No optimistic total and no new result row below a Dice option.
+
+## 5. Parts and build boundaries
+
+- **New shared pieces** in `client/features/dice/`: `rollMode.ts` for capability and source/envelope rules, `rollPress.ts` for a pure gesture state machine, `useRollModeMenu.tsx` for the single hook, and `RollModeMenu.tsx` for Menu/Popover rendering. The hook composes events and descriptions onto the existing button, with the menu rendered out of flow as a sibling. It adds no button wrapper or layout style. All surfaces use it, including custom `OptionCell` and `Cell`. Each passes live eligibility, a source identity, a name, the ordinary tap and `onRoll(override)`. Use explicit capability props, not a scan for buttons whose text says Roll.
+- **Sending**: extend `useDicePanel.ts` with an explicit per-invocation override that preserves sticky results, throw origin, receipts and batches without consuming choices. `{ to }` alone is insufficient: today it bypasses the sticky line. Extend `useRollOption.ts`, request `card.ts`, `CardRoll.tsx` and auto planning to accept unresolved menu sources. Do not resolve a preset before combining it with the menu.
+- **Consumers**: every actual control in section 1 touches its listed file. `groupSave/chain.ts`, `start.ts`, `cast/cast.ts`, and `encounter/autoRoll.ts` need invocation plumbing where their commands are prepared away from the button. `Roller.tsx`, `RecentRolls.tsx` and, if needed, `logic.ts` render the effective result words and repeat menus. `DicePanel.tsx` keeps throw origins tied to the original roll control, not the chosen menu row.
+- **Shared primitives**: reuse `Menu.tsx`, `Popover.tsx` and `lib/gestures.ts` without changing unrelated behavior. Add the explicit menu-owned boundary and regression test to `lib/sheetSwipe.ts`. Only if event composition needs it, add a narrow opt-out for tooltip touch holds to `Button.tsx`/`IconButton.tsx` and cover it in their tests. Keep inline theme styles. No new package.
+- **Scope size**: complete coverage exceeds the preamble's eight-file fast-lane limit even before tests and docs. This is a feature build in the lanes below. Do not omit secondary surfaces to fit a fast lane.
+
+### 5.1 Feature-build lanes and ownership
+
+Freeze the shared contract first. Then lanes A, B and C can build their consumers independently in isolated workspaces. Lane D integrates their exact committed tips, owns all e2e edits and runs the combined verification. A file and its unit tests have one owner. A consumer needing a contract change sends it to lane A, rather than editing lane A's files.
+
+| Lane | Owned files and work |
+|---|---|
+| A: contract, then single-creature Dice | First commit: the four shared pieces above, `dice/useDicePanel.ts`, `dice/useRollOption.ts`, `client/lib/sheetSwipe.ts`, any required `client/components/Button.tsx`/`IconButton.tsx` tooltip opt-out, and their unit/randomized tests. Freeze override types, event/description props, eligibility and menu rendering before B/C branch. Then `dice/RollOptions.tsx`, `dice/Roller.tsx`, `dice/RecentRolls.tsx`, `dice/logic.ts`, `dice/DicePanel.tsx` and their unit tests, including the help line and repeat/result rules |
+| B: batches, casts and auto initiative | `dice/groupSave/GroupOptions.tsx`, `dice/groupSave/GroupSave.tsx`, `dice/groupSave/chain.ts`, `dice/groupSave/start.ts`, `dice/cast/CastBlock.tsx`, `dice/cast/cast.ts`, `encounter/AutoInitiative.tsx`, `encounter/autoRoll.ts` and their unit/randomized tests. Own invocation envelopes across replacement, mixed asks and safe public labels, plus auto grouping before resolution |
+| C: request, tracker and fight controls | `rolls/PlayerRolls.tsx`, `rolls/DmDesk.tsx`, `rolls/card.ts`, `encounter/CardRoll.tsx`, `encounter/Row.tsx`, `encounter/InitiativeStrip.tsx`, `encounter/SaveEndsCard.tsx`, `encounter/RechargeCard.tsx`, `combat/DeathSaveCard.tsx`, `combat/CombatUses.tsx`, `tokens/HpSection.tsx` and their unit tests. Preserve request finality, typed bonus disclosure, turn records, fixed visibility and focus |
+| D: integration, e2e and final docs | All e2e files named in section 6, new `rollmodes.e2e.ts`, `alignmentRoom.ts`, any required harness/duration metadata, `client/state/shortcuts.ts` and registry tests. After integrating A/B/C, own `FEATURES.md`, `docs/dm-guide.md`, affected guide images and this design's As built section in the final docs commit. Run the full affected checks and alignment sweep on that integrated tip |
+
+Paths above are under `client/features/` unless otherwise qualified, with the contract primitives under `client/components/` and `client/lib/`. No lane owns shared/server/schema changes. Report a need for one to coordination. Contract and consumer commits stay separate, and D's docs commit follows the verified integration.
+
+## 6. UI checklist and verification
+
+- **Loading**: opening is immediate and sends nothing. A pick closes, then uses the source's existing delayed busy state and receipt. Busy/offline/preview guards block the roll and its menu. Where Roll d20 first opens a bonus field, keep that opener usable and offer the mode menu only once its action can actually roll. No second dispatch while busy. Refusal and unknown results use their existing plain words.
+- **Keys and focus**: test both context keys on each control family, unchanged Enter/Space activation, dismissal and fallback after a card removes itself. Browser default context menus remain outside roll controls. Holding cannot swallow the next keyboard activation.
+- **Screen readers**: preserve the button's name and prior descriptions, append the short shortcut hint, and announce expanded state, effective mode and result once. Verify VoiceOver and TalkBack double-tap-and-hold as well as plain double-tap. Never describe a player as unable to read their own secret roll. Verify the actual accessibility tree, not only HTML strings.
+- **Large interface**: existing roll targets and menu rows stay 44 px, inputs 16 px. Buttons and grids keep their existing widths, rows and columns, with no new wrapping caused by this feature. Long menu names and disabled reasons wrap without sideways scrolling or clipped glyphs. Existing toggles and card controls remain available without a hold. No information requires the hold outline, hover or color.
+
+| Case | Expected | Test |
+|---|---|---|
+| 499 ms tap, 500 ms fired hold, movement at 8 and over 8 px | Tap once, menu only, boundary consistent | `rollPress.test.ts`, fake clock |
+| Scroll, sheet swipe, second touch, pointercancel, unmount | No menu, no roll, no pending timers | Gesture unit and phone e2e |
+| Hold then release over a menu row, then Enter | Release does nothing, Enter works once | Unit and e2e |
+| Native contextmenu after a touch hold | One menu, no native callout, no duplicate | Gesture unit and browser e2e |
+| Adv/Dis/Normal/Secret with presets and manual choices | Section 4, cancellation retained, store/version untouched | `rollMode.test.ts`, `flow.test.ts`, request/card tests |
+| Damage, multi-d20, kept d20, recharge | Only eligible actions, fixed visibility explained | Mode unit and render tests |
+| Player Secret and a hidden creature, both viewers | Own result retained, others get projected bare line or none | Existing dice e2e extended |
+| Request, death save and recharge Secret | Disabled with correct reason, original op used | Capability unit and e2e |
+| Mixed batch, no server rows, replacement Keep, refusal/reload | Override reaches only sent dice and never later work | Chain/cast unit and e2e |
+| Menu Normal on monster initiative, private DC or trap name | Ordinary visibility restrictions and safe public envelope | Mode/chain unit and e2e |
+| Again: Secret, Normal, old check/attack, saved save/initiative | Correct recorded-mode handling, no duplicate extra terms or private labels | Repeat unit and e2e |
+| Creature/formula/rider changed while menu open | Menu closes, no stale dispatch | Hook unit and e2e |
+| Every control family by hold, right-click and keys | Same one-shot operation, next ordinary roll unchanged | New `e2e/rollmodes.e2e.ts` |
+| VoiceOver/TalkBack double-tap and hold, plain double-tap | Menu without an initial roll, or one ordinary roll | Manual assistive-technology check and supported browser e2e |
+| Existing roll rows/grids before and after enhancement | Identical widths, rows and columns at all six sizes/scales | DOM geometry regression and alignment e2e |
+| All six size/scale combinations | Every root measured, nothing over 1 px | Alignment sweeps |
+
+Add randomized fake-clock event sequences to `rollPress.random.test.ts`: at most one menu per press, at most one roll per activation, nothing after cancellation/unmount, no hold selection on release, no later key swallowed, and no timer left after a terminal event. Mutation-check every new rule with its fix removed. Keep meaningful render tests for unchanged button roles/names, composed descriptions, no extra control or layout style, no form double submit, disabled choices, and all consumer capability registrations.
+
+Build e2e labels start `dpf1-`. Extend `dice.e2e.ts`, `rolls.e2e.ts`, `groupsave.e2e.ts`, `savespell.e2e.ts`, `combat.e2e.ts`, `combatuses.e2e.ts`, `bardock.e2e.ts`, `dicefolds.e2e.ts` and `shortcuts.e2e.ts` where those surfaces change. Run those and `reach`. Reserve the new e2e port through coordination, not a guessed offset. Existing integration tests are regression checks. No new server integration contract is proposed.
+
+**Alignment roots**: today's `dmDiceScreens` and `patDiceScreens` cover the Dice card, groups, modes, last and recent lines at the requested sizes (`e2e/alignmentRoom.ts:138`, `:1209`, `:1248`). Existing group-save and combat roots cover their host layouts, not open roll menus. Add `dpf1-` roots and expected counts for each changed host and its open menu: free Roll, both Agains, save/skill/attack/damage, several-selected, group-save main/row/damage, player cast, player/DM request, tracker inline/options/auto, HP death roll in bar/panel/character sheet, and concentration/save-ends/death/recharge/Uses cards. Include fixed-visibility disabled reasons and long names.
+
+Run `measureAlignment` for every applicable root at **1440 x 900, 390 x 844 and 320 x 568, each at 100% and 130%**, for DM and player capabilities. Add roots to the relevant `dmScreens`, `patScreens`, dice and combat functions or a shared roll-menu screens helper called by them. Do not count a closed host as coverage of its open menu. Run `alignment`, `alignment-wide` and `alignment-icons`, including menu word and scrollbar checks. Add cardinality expectations so missing roots fail. Save new screenshots under `screenshots/roll-mode-menu/` without overwriting earlier ones. Inspect them all before declaring the build complete.
+
+## 7. Docs, in the build's last docs commit
+
+- `client/state/shortcuts.ts`: add BEHAVIORS for right-click on a roll (`mouse`), hold a roll for 500 ms (`pointer`), ContextMenu or Shift+F10 (`keys`), and readers' double-tap and hold (`pointer`). Register the reused menu navigation/dismissal keys for this context too. List scope across Dice, Initiative, Roll requests and Token and character fields without installing global key handlers. This feature explicitly records the new touch behavior as well as keys. Update registry parity tests and `FEATURES.md`'s generated/matching tables.
+- `FEATURES.md`: Dice gains the one-roll shortcut menu, its unchanged visible toggle alternative, cancel rule, Normal, untouched toggles and exact Secret semantics. Roll options, Several creatures, Rolls, Combat and Initiative, and recharge/death/concentration entries name their coverage and fixed-visibility limits. Keep the existing ordinary-toggle reset behavior accurate.
+- `docs/dm-guide.md`: Dice/Typing a roll and Roll options explain the gestures, context-menu keys, reader double-tap and hold, existing toggle alternative, Normal and Secret. Several creatures and The group save explain server rows versus asks. Asking for rolls, Combat and initiative, Alerts during a fight, Uses and Legendary Actions, and Shortcuts explain their controls and limits. Refresh affected Dice, request and shortcut pictures, with a relative image path. Never document a disabled mode as working. The build also adds section 3.1's exact help line near the Dice toggles.
+
+## 8. Decided, for the project owner to overrule
+
+These follow the approved one-off behavior, the phone rules and the D&D Beyond dice model. Choices 450 and 458 incorporate the coordinator's revision from the owner's FL-7 words. The remaining choices are guesses, each logged with its rejected alternative. No product question is needed.
+
+1. **D-261030-450: hold/right-click/context-key shortcut, existing toggles as the visible route.** Rejected: a split arrow beside every roll. Why: the owner's FL-7 words, "ensure it is on the same line and does not cause wrapping", decide it. Keep every button and grid's layout. Describe the shortcut to readers, including double-tap and hold, and teach it in help and docs.
+2. **D-261030-451: reuse 500 ms and 8 px, with a static hint after 200 ms.** Rejected: a shorter new threshold or a progress animation. Why: the app already has this hold rule, and the hint costs no layout or rendering loop.
+3. **D-261030-452: four immediate actions, with visibility independent for Adv/Dis.** Rejected: a modal form or six combined mode/visibility actions. Why: the approved four choices stay small and one pick rolls.
+4. **D-261030-453: Normal clears manual choices and Secret, preserving presets.** Rejected: disabling conditions, or leaving Secret on. Why: it overrides panel toggles without bypassing the creature's rules.
+5. **D-261030-454: state the existing Secret rule and disable unsupported secrecy.** Rejected: hiding results in the client, changing the op or promising DM-only reads. Why: projection is the security boundary and the task is client only. The stronger promise remains a reported scope limit.
+6. **D-261030-455: one gesture covers its new batch dice, not future answers.** Rejected: persisting a batch mode or forcing player answers through a new request field. Why: choices last one invocation and current asks cannot carry them.
+7. **D-261030-456: add menus to actual rolls, never roll through an Ask opener.** Rejected: treating every Roll-labelled opener as dice, or turning Ask off behind the DM's back. Why: retain the existing route and player ownership.
+8. **D-261030-457: ordinary Again repeats exactly, its menu replaces the recorded mode.** Rejected: locking every repeat to its old mode or inferring a test from its label. Why: an explicit menu chooses again while the old button keeps its promise. Historical check/attack test identity is absent, so disclose that limit rather than fabricate current presets.
+9. **D-261030-458: anchored shared Menu/Popover everywhere, with unchanged roll widths, rows and columns.** Rejected: a bespoke phone sheet, split arrows, extra wrapping, lost grid columns or squeezed targets. Why: reuse the approved primitives and preserve 44 px targets at larger interface sizes. The owner's FL-7 words decide that this shortcut adds no layout change. Keep the menu-owned sheet-swipe boundary.
+10. **D-261030-459: no stored menu state and no toggle consume/restore trick.** Rejected: temporarily pressing modes and restoring them on answer. Why: late results must never overwrite a newer choice, and the menu's contract is no toggle change at all.
+
+## As built
+
+Not built. The builder records every departure here, with the affected section and reason. In particular, do not mark unsupported secrecy as completed without a separately coordinated server/protocol design and build.
