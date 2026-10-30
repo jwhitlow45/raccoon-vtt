@@ -22,9 +22,9 @@ const { RecentRolls } = await import("./RecentRolls.tsx");
 const { ProficientEvent, eventMarks } = await import("./ProficientEvent.tsx");
 
 /*
- * FL-7 rework (D-261030-436 to 438): the Dice panel, Recent rolls, the Log
- * and toasts keep their words and layout, and only a test's name gains its
- * underline.
+ * FL-7 rework (D-261030-436 to 438) and FL-12 (D-261030-527): the Dice
+ * panel, Recent rolls, the Log and toasts keep their words and layout, and
+ * only a test's name gains its mark, a border around it and its bonus.
  */
 
 function state(): RoomState {
@@ -76,6 +76,8 @@ test("fl7: folded save and skill lines keep foldSummary's words, cut only betwee
   assert.ok(text(html).includes(foldSummary({ group: "skills", skills: [{ name: "Perception", bonus: 3, check: 0 }, { name: "Stealth", bonus: 6, check: 0 }] })));
   const all = marks(html);
   assert.ok(all.includes("prof:Dex") && all.includes("expert:Stealth") && all.includes("prof:Perception"));
+  // A test with no proficiency still says so, as every place that names a test does (FL12-OPUS-3).
+  assert.ok(all.includes("none:Str") && all.includes("none:Cha"), all.join(", "));
 });
 
 test("fl7: Recent rolls marks the label after the creature, and never says a player's own character twice (FL7-R1-11)", () => {

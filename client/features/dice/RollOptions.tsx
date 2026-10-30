@@ -471,9 +471,10 @@ function CardBody(props: Shown) {
 /** A folded line whose saves and skills carry their marks, cut only between whole parts. Nothing to say leaves no line. */
 function markedSummary(ctx: Ctx, parts: readonly SummaryPart[]): ReactNode {
   if (parts.length === 0) return "";
-  const levels = parts.map((part) => (marksTest(part.test) ? creatureProficiency(ctx.dice, ctx.creature, part.test) : "none"));
+  // null for a part that names no test, which carries no level at all.
+  const levels = parts.map((part) => (marksTest(part.test) ? creatureProficiency(ctx.dice, ctx.creature, part.test) : null));
   // A framed part takes the comma after it, which would otherwise touch its frame, from the next part's join: the words stay the same, and a cut after it still reads ", …".
-  const takes = parts.map((_, i) => levels[i] !== "none" && (parts[i + 1]?.join.startsWith(",") ?? false));
+  const takes = parts.map((_, i) => (levels[i] === "prof" || levels[i] === "expert") && (parts[i + 1]?.join.startsWith(",") ?? false));
   return (
     <WholeParts
       words={parts.map((part) => part.join + part.lead + part.name + part.rest).join("")}
@@ -482,7 +483,7 @@ function markedSummary(ctx: Ctx, parts: readonly SummaryPart[]): ReactNode {
         node: (
           <>
             {part.lead}
-            <SummaryUnit level={levels[i]!} name={part.name} rest={part.rest + (takes[i] ? "," : "")} />
+            <SummaryUnit level={levels[i] ?? null} name={part.name} rest={part.rest + (takes[i] ? "," : "")} />
           </>
         ),
       }))}
@@ -490,9 +491,10 @@ function markedSummary(ctx: Ctx, parts: readonly SummaryPart[]): ReactNode {
   );
 }
 
-/** A folded line's part, "Athletics +6,": a marked one is framed with its bonus and the comma after it. */
-function SummaryUnit(props: { level: Proficiency; name: string; rest: string }) {
-  if (props.level === "none") return <>{props.name}{props.rest}</>;
+/** A folded line's part, "Athletics +6,": a marked one is framed with its bonus and the comma after it, and a test with no proficiency still names its level. */
+function SummaryUnit(props: { level: Proficiency | null; name: string; rest: string }) {
+  if (props.level === null) return <>{props.name}{props.rest}</>;
+  if (props.level === "none") return <><ProficiencyLabel level="none">{props.name}</ProficiencyLabel>{props.rest}</>;
   return (
     <ProficiencyUnit level={props.level}>
       <ProficiencyLabel level={props.level} bare>{props.name}</ProficiencyLabel>
