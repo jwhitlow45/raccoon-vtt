@@ -1304,9 +1304,18 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
       await control.scrollIntoViewIfNeeded();
       for (let attempt = 1; attempt <= 4; attempt++) {
         await dm.evaluate(() => ((globalThis as unknown as { __touches: unknown[] }).__touches = []));
-        await swipe(dmCdp, await headerPoint(sheet), 8 + 50);
-        // Where the control is now, as the sheet springs back.
-        await touchTap(dmCdp, dm, await middleOf(control));
+        // The slide's motion is held where it starts, so the control stands still between the read of where it is and
+        // the touch, however slow the machine: it moves fastest just then, and a touch that came late landed past it, on
+        // no control. The slide itself, which decides what a touch does, runs on the page's timer (lib/sheetSwipe.ts
+        // SLIDE_MS), which this leaves alone.
+        await dmCdp.send("Animation.setPlaybackRate", { playbackRate: 0 });
+        try {
+          await swipe(dmCdp, await headerPoint(sheet), 8 + 50);
+          // Where the control is now, as the sheet springs back.
+          await touchTap(dmCdp, dm, await middleOf(control));
+        } finally {
+          await dmCdp.send("Animation.setPlaybackRate", { playbackRate: 1 });
+        }
         assert.equal(await settled(sheet), "rest", `${what}: the sheet did not come back to rest`);
         const touches = await dm.evaluate(() => (globalThis as unknown as { __touches: { on: string; moving: boolean }[] }).__touches);
         if (touches[1]?.moving) {
