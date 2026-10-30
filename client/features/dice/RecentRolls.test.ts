@@ -197,3 +197,19 @@ test("only own homogeneous d20 repeats get a menu, and fixed repeats omit Secret
   const other = render([entry({ type: "dice", by: "p2", to: "all", rolls: [LONGSWORD] })]);
   assert.doesNotMatch(other, /aria-haspopup|Roll again:/);
 });
+
+test("plain and cancelled d20 rows keep the same visible words without another mode label", () => {
+  const draw = (roll: DiceRoll) => render([entry({ type: "dice", by: "p1", to: "all", rolls: [roll] })]);
+  const words = (markup: string) => markup
+    .replace(/<span\b[^>]*\bhidden=""[^>]*>[^<]*<\/span>/g, "")
+    .replace(/<span style="position:absolute;[^"]*"[^>]*>[^<]*<\/span>/g, "")
+    .replace(/<[^>]*>/g, "");
+  const plain = draw(LONGSWORD);
+  assert.match(words(plain), /Longsword/);
+  assert.match(words(plain), /1d20\+6/);
+  assert.doesNotMatch(words(plain), /Normal|Advantage|Disadvantage/);
+  assert.doesNotMatch(plain, />Normal<\/span>/, "plain rolls gain no extra mode description either");
+  const cancelled = draw({ ...LONGSWORD, cancelled: true });
+  assert.equal(words(cancelled), words(plain), "cancellation adds no words that can wrap into another line");
+  assert.match(cancelled, /<span style="position:absolute;[^"]*">Normal: Advantage and Disadvantage cancelled<\/span>/);
+});

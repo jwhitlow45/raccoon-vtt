@@ -206,7 +206,8 @@ function RollLine(props: { roll: DiceRoll; row: { dc?: number; ac?: number }; na
           <span style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2), rowGap: theme.space(1), minWidth: 0 }}>
             <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{formula}</span>
             <DiceFaces result={roll} />
-            {!roll.mode && effectiveRollMode(roll) ? <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{effectiveRollMode(roll)}</span> : null}
+            {/* Cancellation stays readable without widening the dice line. */}
+            {roll.cancelled ? <span style={visuallyHidden}>{effectiveRollMode(roll)}</span> : null}
           </span>
           {/* Only the DM's copy keeps the mark of an initiative roll kept from players (docs/design-v1-combat-flow.md 11.3). */}
           {roll.hidden ? (
