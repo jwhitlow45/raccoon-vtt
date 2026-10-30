@@ -137,13 +137,17 @@ export async function proficiencyHeightLines(root: Locator, screen: string, requ
       querySelectorAll(selector: string): ArrayLike<El>;
       getAttribute(name: string): string | null;
       getBoundingClientRect(): { width: number; height: number };
+      style: {
+        getPropertyValue(name: string): string;
+        getPropertyPriority(name: string): string;
+        setProperty(name: string, value: string, priority: string): void;
+        removeProperty(name: string): void;
+      };
       ownerDocument: {
-        head: { appendChild(node: Style): void };
-        createElement(tag: string): Style;
-        defaultView: { getComputedStyle(node: El): { visibility: string } };
+        querySelectorAll(selector: string): ArrayLike<El>;
+        defaultView: { getComputedStyle(node: El): { visibility: string; display: string } };
       };
     };
-    type Style = { textContent: string | null; remove(): void };
     const containers = new Set<El>();
     let count = 0;
     for (const root of roots as unknown as El[]) {
@@ -160,16 +164,21 @@ export async function proficiencyHeightLines(root: Locator, screen: string, requ
       }
     }
     const before = [...containers].map((node) => ({ node, height: node.getBoundingClientRect().height, zoom: node.currentCSSZoom ?? 1 }));
-    const styles: Style[] = [];
+    const markers = [...new Set(before.map(({ node }) => node.ownerDocument))].flatMap((doc) => Array.from(doc.querySelectorAll("[data-proficiency-marker]")));
+    const visible = markers.filter((marker) => {
+      const rect = marker.getBoundingClientRect();
+      const css = marker.ownerDocument.defaultView.getComputedStyle(marker);
+      return rect.width > 0 && rect.height > 0 && css.visibility === "visible" && css.display !== "none";
+    });
+    const styles = markers.map((marker) => ({ marker, display: marker.style.getPropertyValue("display"), priority: marker.style.getPropertyPriority("display") }));
     const lines: string[] = [];
     try {
       // Keep both reads in one browser task so ResizeObservers cannot freeze the temporary layout into app state.
-      for (const doc of new Set(before.map(({ node }) => node.ownerDocument))) {
-        const style = doc.createElement("style");
-        style.textContent = "[data-proficiency-marker] { display: none !important; }";
-        styles.push(style);
-        doc.head.appendChild(style);
-      }
+      // CSSOM properties work under the app's CSP, which rejects injected style elements.
+      for (const marker of markers) marker.style.setProperty("display", "none", "important");
+      const notHidden = visible.filter((marker) => marker.ownerDocument.defaultView.getComputedStyle(marker).display !== "none");
+      if (visible.length > 0 && notHidden.length === visible.length) lines.push("no visible proficiency markers were hidden");
+      if (notHidden.length > 0) lines.push(`${notHidden.length} of ${visible.length} visible proficiency markers did not compute display: none`);
       for (const { node, height, zoom } of before) {
         const without = node.getBoundingClientRect().height;
         const difference = Math.abs(height - without) / zoom;
@@ -178,11 +187,14 @@ export async function proficiencyHeightLines(root: Locator, screen: string, requ
         lines.push(`${node.tagName.toLowerCase()} "${name}": proficiency markers change container height by ${difference.toFixed(2)} px (${(height / zoom).toFixed(2)} with, ${(without / zoom).toFixed(2)} without)`);
       }
     } finally {
-      for (const style of styles) style.remove();
+      for (const { marker, display, priority } of styles) {
+        if (display) marker.style.setProperty("display", display, priority);
+        else marker.style.removeProperty("display");
+      }
     }
-    return { count, lines };
+    return { count, visible: visible.length, lines };
   });
-  return [...(required && measured.count === 0 ? ["no visible skill/save containers were measured"] : []), ...measured.lines].map((line) => `${screen}: ${line}`);
+  return [...(required && measured.count === 0 ? ["no visible skill/save containers were measured"] : []), ...(required && measured.visible === 0 ? ["no visible proficiency markers were hidden"] : []), ...measured.lines].map((line) => `${screen}: ${line}`);
 }
 
 /** Skill/save units keep their marker, name and number together, including outside a button. */
