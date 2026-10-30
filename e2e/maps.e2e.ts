@@ -345,9 +345,12 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     await dm.getByRole("button", { name: `Show ${PHASE.name}` }).click();
     await waitFor("the player's map to switch", () => sceneOf(playerSocket.state, run.sceneId)?.map?.assetId === run.fireAssetId || null);
     await loaded;
-    const dmScene = sceneOf(dmSocket.state, run.sceneId);
-    assert.equal(dmScene?.phaseId, run.firePhaseId);
-    assert.equal(dmScene?.map?.cellPx, UVTT.ppg, "the grid stays on the same cells");
+    // The DM's socket hears the switch on its own, in no set order with the player's.
+    const dmScene = await waitFor("the DM's phase to switch", () => {
+      const s = sceneOf(dmSocket.state, run.sceneId);
+      return s?.phaseId === run.firePhaseId ? s : null;
+    });
+    assert.equal(dmScene.map?.cellPx, UVTT.ppg, "the grid stays on the same cells");
     assertNoDmFields(sceneOf(playerSocket.state, run.sceneId));
     assert.equal(playerSocket.everSaw(PHASE.name), false, "a phase's name reached the player");
     assert.equal(playerSocket.everSaw("phaseGrid"), false);

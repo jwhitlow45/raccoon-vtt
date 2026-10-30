@@ -847,7 +847,8 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await ops.send({ t: "template.create", template: { id: run.fireball, sceneId: run.sceneId, shape: "sphere", size: 20, origin: { ...corner, z: 0 }, yaw: 0, includeOrigin: true, color: "#e5484d", ownerId: dmId, visibility: "all" } });
     await ops.send({ t: "template.create", template: { id: run.guardians, sceneId: run.sceneId, shape: "emanation", size: 15, origin: { ...hexCenter(G, { col: 3, row: 12 }), z: 0 }, yaw: 0, attachedTo: run.thorn, casterId: run.thorn, includeOrigin: false, color: "#ffc53d", ownerId: dmId, visibility: "all" } });
     await waitFor("both areas in Pat's copy", () => (patSocket.state?.templates[run.fireball] && patSocket.state?.templates[run.guardians] ? true : null));
-    const state = dmSocket.state!;
+    // The DM's page hears them on its own socket, in no set order with Pat's.
+    const state = await waitFor("both areas in the DM's copy", () => (dmSocket.state?.templates[run.fireball] && dmSocket.state?.templates[run.guardians] ? dmSocket.state : null));
     const ctx = { settings: state.meta.settings, bounds: BOUNDS, grid: G, walls: null, tokens: state.tokens as Record<string, Token> };
     const names = (id: string) => creaturesInArea(state.templates[id] as AreaTemplate, Object.values(state.tokens) as Token[], ctx).map((t) => state.tokens[t]!.name);
     const fireball = names(run.fireball);
