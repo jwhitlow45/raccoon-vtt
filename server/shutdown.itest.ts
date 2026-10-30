@@ -113,3 +113,69 @@ test("a shutdown with sockets open stamps every session's last sight, a slow cli
   dmSocket.ws.terminate();
   playerSocket.ws.terminate();
 });
+
+test("a shutdown during a log backfill batch stops it: the backend is told to stop, its connection and locks are gone, and the close is bounded", async () => {
+  const tag = `rvtt-shutdown-logb-${randomBytes(4).toString("hex")}`;
+  const ownPool = new pg.Pool({ connectionString: config.DATABASE_URL, max: 5 });
+  let reached!: () => void;
+  const inBatch = new Promise<void>((r) => (reached = r));
+  const logApp = await buildApp({
+    config: { ...config, ASSET_DIR: assetDir },
+    pool: ownPool,
+    log: {
+      migration: {
+        connect: async () => {
+          const c = new pg.Client({ connectionString: config.DATABASE_URL, application_name: tag });
+          c.on("error", () => undefined);
+          await c.connect();
+          return c;
+        },
+        batchRows: 20,
+        onStep: async (step, signal) => {
+          // The first batch holds its turn here, rows read and not yet completed, until the shutdown cancels it.
+          if (step.kind === "batch") {
+            reached();
+            await new Promise<never>((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("cancelled")), { once: true }));
+          }
+        },
+      },
+    },
+  });
+  await logApp.listen({ port: 0, host: "127.0.0.1" });
+  const dm = new TestClient(() => logApp, randomIp(), userAgent, (roomId) => rooms.push(roomId));
+  ips.push(dm.ip);
+  const { roomId } = await dm.createRoom("Backfill at shutdown");
+  // Rows an older server wrote, with no metadata, so a read queues the room for the backfill.
+  await check.query(
+    `insert into room_log (room_id, id, at, entry)
+     select $1, g || ':0', now(), jsonb_build_object('id', g || ':0', 'at', now()::text, 'kind', 'chat', 'from', 'nobody', 'text', 'old ' || g)
+     from generate_series(100, 160) g`,
+    [roomId],
+  );
+  logApp.logMigration.start();
+  for (let i = 0; i < 500 && !logApp.logMigration.ready; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.ok(logApp.logMigration.ready);
+  const page = await dm.get(`/api/rooms/${roomId}/log?limit=5`);
+  assert.equal(page.statusCode, 200, page.body);
+  await inBatch;
+  const held = await check.query<{ n: number }>("select count(*)::int as n from pg_stat_activity where application_name = $1 and datname = current_database()", [tag]);
+  assert.equal(held.rows[0]!.n, 1, "the backfill's own connection");
+
+  const started = Date.now();
+  await closeServer(logApp, () => ownPool.end());
+  assert.ok(Date.now() - started < 5_000, "bounded");
+  let left = { backends: 1, locks: 1 };
+  for (let i = 0; i < 100 && (left.backends > 0 || left.locks > 0); i++) {
+    const { rows } = await check.query<{ backends: number; locks: number }>(
+      `select (select count(*)::int from pg_stat_activity where application_name = $1 and datname = current_database()) as backends,
+              (select count(*)::int from pg_locks where locktype = 'advisory' and classid::bigint = $2
+                 and database = (select oid from pg_database where datname = current_database())) as locks`,
+      [tag, 0x52565455],
+    );
+    left = rows[0]!;
+    if (left.backends > 0 || left.locks > 0) await new Promise((r) => setTimeout(r, 20));
+  }
+  assert.deepEqual(left, { backends: 0, locks: 0 }, "no backend or room lock of the backfill outlives the shutdown");
+  const nulls = await check.query<{ n: number }>("select count(*)::int as n from room_log where room_id = $1 and seq is null", [roomId]);
+  assert.equal(nulls.rows[0]!.n, 61, "the cut batch completed nothing");
+});

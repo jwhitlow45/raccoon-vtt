@@ -17,8 +17,10 @@ import { registerExportRoutes, type ExportOptions } from "./http/export.ts";
 import { registerJoinRoutes } from "./http/join.ts";
 import { registerLogRoutes, type LogRouteOptions } from "./http/log.ts";
 import { watchPoolErrors } from "./db.ts";
-import { DEFAULT_SCAN_BUDGET, LogScanBudget } from "./rooms/logScanBudget.ts";
-import { registerReceiptRoutes } from "./http/receipts.ts";
+import { LogScanBudget } from "./rooms/logScanBudget.ts";
+import { registerReceiptRoutes, type ReceiptRouteOptions } from "./http/receipts.ts";
+import { ReceiptLines } from "./rooms/logHistory.ts";
+import { LogHistoryMigration, type MigrationOptions } from "./rooms/logHistoryMigration.ts";
 import { registerMemberRoutes } from "./http/members.ts";
 import { registerRoomRoutes } from "./http/rooms.ts";
 import { registerSecurity } from "./http/security.ts";
@@ -48,8 +50,8 @@ export type AppDeps = {
   ddb?: Partial<DdbImportOptions>;
   /** The asset service's options, for tests: a starter catalog of their own (docs/design-v1-starter-art.md 5). */
   assets?: AssetRouteOptions;
-  /** The log archive reader's admission and batches, for tests. */
-  log?: Omit<LogRouteOptions, "pool">;
+  /** The log archive reader's admission and batches, its metadata worker, and the receipt lookup's archive reads, for tests. */
+  log?: Omit<LogRouteOptions, "pool"> & { migration?: Partial<Omit<MigrationOptions, "budget" | "guard">>; receipts?: Omit<ReceiptRouteOptions, "lines"> & { checkoutMs?: number; queryMs?: number } };
 };
 
 /**
@@ -61,6 +63,10 @@ export type AppDeps = {
  */
 const LOG_SCAN_CHECKOUT_MS = 500;
 const LOG_SCAN_QUERY_MS = 15_000;
+
+/** The log metadata worker's own connections (server/rooms/logHistoryMigration.ts), named so an operator can tell them apart. */
+const LOG_METADATA_APP = "raccoon-log-metadata";
+const LOG_METADATA_CONNECT_MS = 5_000;
 
 /**
  * Builds the HTTP and WebSocket server without listening, so integration
@@ -146,14 +152,34 @@ export async function buildApp({ config, pool, gateway, hasher, rooms, ws, expor
   await registerAdminRoutes(app, kit);
   await registerWebSocket(app, { manager, config, options: ws });
   await registerExportRoutes(app, kit, { manager, options: exportOptions });
-  const budget = log?.budget;
-  const leases = budget instanceof LogScanBudget ? budget.options.leases : { ...DEFAULT_SCAN_BUDGET.leases, ...budget?.leases };
+  const { migration: migrationOptions, receipts: receiptOptions, ...logOptions } = log ?? {};
+  // One budget for the readers and the metadata worker's backfill, so its batches wait behind a room's readers.
+  const budget = logOptions.budget instanceof LogScanBudget ? logOptions.budget : new LogScanBudget(logOptions.budget);
+  const leases = budget.options.leases;
   const scanPool = new pg.Pool({ ...pool.options, max: leases.page + leases.export, connectionTimeoutMillis: LOG_SCAN_CHECKOUT_MS, query_timeout: LOG_SCAN_QUERY_MS });
   // A connection that drops while a scan holds it errors on the client, which must never go unheard.
   watchPoolErrors(scanPool, (err, where) => app.log.warn({ err, where }, "log scan connection failed"));
   app.addHook("onClose", async () => scanPool.end());
-  await registerLogRoutes(app, kit, { manager, options: { ...log, pool: scanPool } });
-  await registerReceiptRoutes(app, kit, { manager });
+  const logMigration = new LogHistoryMigration({
+    connect: async () => {
+      const client = new pg.Client({ ...pool.options, application_name: LOG_METADATA_APP, connectionTimeoutMillis: LOG_METADATA_CONNECT_MS });
+      // Heard from the start: an error event with no listener would end the process.
+      client.on("error", (err) => app.log.warn({ err }, "log metadata connection failed"));
+      await client.connect();
+      return client;
+    },
+    log: app.log,
+    ...migrationOptions,
+    budget,
+    guard: () => app.assets.archiveDiskOk(),
+  });
+  app.decorate("logMigration", logMigration);
+  manager.onDelete((roomId) => logMigration.cancelRoom(roomId));
+  // Started by server/main.ts once the server listens. Stopped first on close: its job's connection is gone before the pools end.
+  app.addHook("preClose", async () => logMigration.stop());
+  await registerLogRoutes(app, kit, { manager, options: { ...logOptions, budget, pool: scanPool, history: { ...logOptions.history, metadata: logMigration } } });
+  const receiptLines = new ReceiptLines({ pool, metadata: logMigration, checkoutMs: receiptOptions?.checkoutMs, queryMs: receiptOptions?.queryMs });
+  await registerReceiptRoutes(app, kit, { manager, options: { deadlineMs: receiptOptions?.deadlineMs, lines: receiptLines } });
   await registerXCardRoutes(app, kit, { manager });
   await registerPlayerViewRoutes(app, kit, { manager });
   // On the strict egress port, whose squid list names D&D Beyond's character service alone (docs/design-v1-pc-stats.md 6.3).
@@ -171,5 +197,7 @@ declare module "fastify" {
     config: Config;
     pool: pg.Pool;
     rooms: RoomManager;
+    /** The log archive's metadata worker, which server/main.ts starts once the server listens. */
+    logMigration: LogHistoryMigration;
   }
 }

@@ -1078,3 +1078,106 @@ describe("archive scans and what happens around them", () => {
     }
   });
 });
+
+describe("GET /api/rooms/:id/log with the archive's metadata complete", () => {
+  let t: Engine;
+  const readers: string[] = [];
+  const appName = `rvtt-log-itest-${Math.random().toString(36).slice(2, 10)}`;
+  before(async () => {
+    t = await startEngine({
+      log: {
+        budget: { pageBurst: 100_000, pagePerSec: 100_000 },
+        history: { onBatch: async ({ reader }) => void readers.push(reader) },
+        migration: {
+          connect: async () => {
+            const c = new pg.Client({ connectionString: TEST_DATABASE_URL, application_name: appName });
+            c.on("error", () => undefined);
+            await c.connect();
+            return c;
+          },
+        },
+      },
+    });
+    t.app.logMigration.start();
+    for (let i = 0; i < 1_000 && !t.app.logMigration.ready; i++) await new Promise((r) => setTimeout(r, 20));
+    assert.ok(t.app.logMigration.ready);
+  });
+  after(() => t.close());
+
+  async function walk(c: TestClient, roomId: string, limit: number): Promise<string[]> {
+    const bodies: string[] = [];
+    let before: string | null = null;
+    do {
+      const res = await c.get(`/api/rooms/${roomId}/log?limit=${limit}${before ? `&before=${before}` : ""}`);
+      assert.equal(res.statusCode, 200, res.body);
+      bodies.push(res.body);
+      before = res.json<Page>().nextBefore;
+    } while (before !== null && bodies.length < 10_000);
+    return bodies;
+  }
+
+  /** Reads until the backfill has completed the room and a read is indexed. */
+  async function settled(c: TestClient, roomId: string): Promise<void> {
+    for (let i = 0; i < 500; i++) {
+      readers.length = 0;
+      await c.get(`/api/rooms/${roomId}/log?limit=1`);
+      if (readers.includes("indexed")) return;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    assert.fail("the room was never completed");
+  }
+
+  test("every readable line stays reachable through the indexed reader, with the raw reader's pages, however long a hidden run", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Indexed runs");
+    const dmId = (await dm.me(roomId)).memberId!;
+    const pip = t.client();
+    const pipId = await pip.join(roomId, "Pip");
+    const quin = t.client();
+    await quin.join(roomId, "Quin");
+    const chat = (id: string, at: string, text: string) =>
+      t.pool.query("insert into room_log (room_id, id, at, entry) values ($1, $2, $3, $4)", [roomId, id, at, JSON.stringify({ id, at, kind: "chat", from: dmId, text })]);
+    await chat("0:0", "2025-01-01T10:00:00.000Z", "first");
+    await chat("0:50000", "2025-01-01T11:00:00.000Z", "last");
+    // Rows written straight to the table, as an older server did: read raw until the backfill completes them.
+    readers.length = 0;
+    const raw = await walk(quin, roomId, 2);
+    assert.equal(readers[0], "raw", "the first read is raw, and queues the room");
+    await settled(quin, roomId);
+    readers.length = 0;
+    assert.deepEqual(await walk(quin, roomId, 2), raw, "the indexed reader's pages are the raw reader's");
+    assert.ok(!readers.includes("raw"));
+    let stored = 0;
+    for (const run of [999, 1_000, 1_001, 1_100, 20_000]) {
+      await t.pool.query(
+        `insert into room_log (room_id, id, at, entry)
+         select $1, '0:' || g, $4::timestamptz,
+           jsonb_build_object('id', '0:' || g, 'at', $4::text, 'kind', 'whisper', 'from', $5::text, 'to', jsonb_build_array($6::text), 'text', 'psst ' || g)
+         from generate_series($2::int, $3::int) g`,
+        [roomId, stored + 1, run, "2025-01-01T10:30:00.000Z", dmId, pipId],
+      );
+      stored = run;
+      await settled(quin, roomId);
+      readers.length = 0;
+      assert.deepEqual(await walk(quin, roomId, 2), raw, `run of ${run}`);
+      assert.deepEqual(await walk(quin, roomId, 100), await walkRaw(quin, roomId, 100), `run of ${run}, pages of 100`);
+    }
+    const pipLines = (await walk(pip, roomId, 100)).flatMap((b) => JSON.parse(b).entries as LogEntry[]);
+    assert.equal(pipLines.filter((e) => e.kind === "whisper").length, 20_000);
+    const unindexed = await t.pool.query("select 1 from room_log where room_id = $1 and seq is null", [roomId]);
+    assert.equal(unindexed.rowCount, 0);
+
+    /** The same walk with one row lacking metadata, which sends every read raw, then put back. */
+    async function walkRaw(c: TestClient, room: string, limit: number): Promise<string[]> {
+      await t.pool.query("update room_log set seq = null where room_id = $1 and id = '0:1'", [room]);
+      try {
+        readers.length = 0;
+        const bodies = await walk(c, room, limit);
+        assert.ok(!readers.includes("indexed"), "a row without metadata sends every read raw");
+        return bodies;
+      } finally {
+        await t.pool.query("update room_log set seq = 0 where room_id = $1 and id = '0:1'", [room]);
+      }
+    }
+  });
+});
