@@ -90,7 +90,7 @@ The sticky line at the top of the panel (`LastResult`, docs/design-v1-dice.md 8.
 - **Answers and death saves** (LP7-DICE-10): `LastRoll` gains a form `{ tag, once: true, label }`, set when the panel sends a request's answer (`roll.dice`) or a death save (`actor.deathRoll`). The line reads the roll from its own log line (`rollsOf` already reads an answer's `roll` line). It shows the total, the label ("Dexterity save", "Death save"), the faces and the verdict, and no Again, since neither can be sent again as it went. Its place stays empty, the label taking the room (`p-answer-sticky-01`).
 - **Again** keeps its word beside the `again` icon (icons doc), since it is the line's one action.
 - **A short line never cuts a glyph** (the project owner's iPhone, at 390 px with Safari's text larger: a die cut in half). The total and Again stay. The rest gives way in turn: "and 3 more", then the dice, whole chips at a time, with "+2" for those dropped, then the label to its "…". Past that, each goes whole: "+2", the verdict, and last a critical hit's sum. Each part sits in a one-line box inside the one before it, whose items wrap whole onto a hidden second line, so nothing is clipped through. The e2e checks it at 390 x 844 at 100% and 130%, and at 320 x 568 at 130%, which stands for a small iPhone with larger text.
-- **A roll option's words wrap inside their button** and never run past it (the same iPhone: "Group save, DC 16 Wis" overflowed its button). Cells, small buttons and chips that hold a name or a DC wrap, and the e2e sweeps every button in the options at 390 x 844 at 100% and 130%, the Aboleth's among them.
+- **A roll option's words stay inside their button.** Skill names and their bonuses stay on one line in wider, equal columns (4.3). Other cells, small buttons and chips that hold a name or a DC may wrap (the same iPhone: "Group save, DC 16 Wis" overflowed its button). The e2e sweeps every button in the options at 390 x 844 at 100% and 130%, the Aboleth's among them.
 - **Bleed**: its sideways negative margins go (3.1 rule 5).
 
 ### 4.2 The roller
@@ -105,7 +105,7 @@ Unchanged in layout: the formula field with Roll, the reading, the quick dice st
 - **A cell's name** for a screen reader keeps everything the old sub line said: "Dexterity save, answers the DM's request, Dis: Restrained. +1d4: Blessed".
 - **Initiative** spans two of the three columns: "Initiative +2" with the tag "sets row" or "replaces 15". A monster in a room that uses scores shows "Score 12" in one column beside "Roll instead" in two.
 - **Death save** (while dying, leading as today) spans two columns the same way.
-- **Skills** keep their fold and their two columns of 140 px or more.
+- **Skills** keep their fold and use equal columns of at least 200 px, fitting as many as the panel allows and falling to one column on narrower screens. Every skill name and its bonus, including Animal Handling, stays on one line at 100% and 130%. A tag may move below it. The grid never grows wider than its panel.
 - **Attacks** say their preset once in the actions' label ("ACTIONS  Attacks +1d4: Blessed"), so every Attack button is one word.
 
 ### 4.4 Named rolls
