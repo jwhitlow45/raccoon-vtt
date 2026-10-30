@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { describe, test } from "node:test";
 import type { RoomState } from "./model.ts";
-import { clientOpSchema, opSchema, type ActorPatch, type Op, type OpOf } from "./protocol.ts";
+import { clientOps, serverOnlyOps, type ActorPatch, type Op, type OpOf } from "./protocol.ts";
 import { character, room, token } from "./testutil.ts";
 import type { UndoScope } from "./undoContract.ts";
 
@@ -42,9 +42,9 @@ describe("undo classifier inventory", { skip: classifier === null ? "waiting for
   test("every client protocol discriminant and server op has an explicit inventory entry", () => {
     const expected = [...Object.values(inventory).flat(), ...fieldSensitive];
     assert.equal(new Set(expected).size, expected.length);
-    const actual = clientOpSchema.options.map((schema) => schema.shape.t.value);
-    assert.deepEqual([...expected].sort(), [...actual].sort());
-    assert.deepEqual(Object.keys(classifier!.UNDO_SCOPE_BY_OP).sort(), opSchema.options.map((schema) => schema.shape.t.value).sort());
+    const actual = clientOps.map((schema) => schema.shape.t.value);
+    assert.deepEqual([...expected].sort(), [...new Set(actual)].sort());
+    assert.deepEqual(Object.keys(classifier!.UNDO_SCOPE_BY_OP).sort(), [...new Set([...clientOps, ...serverOnlyOps].map((schema) => schema.shape.t.value))].sort());
   });
 
   for (const [expected, types] of Object.entries(inventory)) {
@@ -57,7 +57,7 @@ describe("undo classifier inventory", { skip: classifier === null ? "waiting for
   } satisfies Record<keyof OpOf<"token.update">["patch"], readonly [unknown, UndoScope]>;
 
   test("the token field matrix covers every schema patch key", () => {
-    const schema = clientOpSchema.options.find((s) => s.shape.t.value === "token.update");
+    const schema = clientOps.find((s) => s.shape.t.value === "token.update");
     assert.ok(schema && "patch" in schema.shape);
     assert.deepEqual(Object.keys(tokenFields).sort(), Object.keys((schema.shape.patch as { shape: object }).shape).sort());
   });
@@ -67,7 +67,7 @@ describe("undo classifier inventory", { skip: classifier === null ? "waiting for
   }
 
   test("bulk token fields use the same allowlist", () => {
-    const schema = clientOpSchema.options.find((s) => s.shape.t.value === "token.updateMany");
+    const schema = clientOps.find((s) => s.shape.t.value === "token.updateMany");
     assert.ok(schema && "patch" in schema.shape);
     const fields = Object.keys((schema.shape.patch as { shape: object }).shape);
     for (const field of fields) {
@@ -120,7 +120,7 @@ describe("undo classifier inventory", { skip: classifier === null ? "waiting for
       assert.equal(scope({ t: "token.update", tokenId: "pc", patch: { actor } }), "play");
       assert.equal(scope({ t: "token.update", tokenId: "goblin", patch: { actor } }), "setup");
     }
-    for (const actor of [{ ...take, hp: { max: 30 } }, { ...take, hp: { cur: 8 } }, { srdId: "wolf", ac: 12 }, { ...take, notes: "extra" }, { ...take, futureField: true }]) {
+    for (const actor of [{ ...take, hp: { max: 30 } }, { ...take, hp: { cur: 8 } }, { srdId: "wolf", ac: 12 }, { srdId: "wolf", speeds: { walk: 40 } }, { ...take, notes: "extra" }, { ...take, futureField: true }]) {
       assert.equal(scope({ t: "character.update", characterId: "bree", patch: { actor } }), "setup");
     }
     assert.equal(scope({ t: "character.update", characterId: "bree", patch: { actor: take, level: 6 } }), "setup");

@@ -1476,11 +1476,11 @@ describe("hex grids, phase H3: op version 28, snapshot version 29 (docs/design-v
 });
 
 describe("follow-up batch 35: op version 29, a rider's seat on a squeezing mount on hexes and squares (D-261029-52, D-261029-53)", () => {
-  test("brought op version 29, the snapshot's unchanged", () => {
+  test("retains the op-29 step alongside the later snapshot-30 upgrade", () => {
     assert.ok(OP_VERSION >= 29);
-    assert.equal(SNAPSHOT_VERSION, 29);
+    assert.equal(SNAPSHOT_VERSION, 30);
     assert.ok(opMigrations.some((s) => s.from === 28 && s.to === 29));
-    assert.ok(!snapshotMigrations.some((s) => s.from === 29));
+    assert.ok(snapshotMigrations.some((s) => s.from === 29 && s.to === 30));
   });
 
   test("the op step is the identity, a squeezed riding move on hexes included", () => {
@@ -1509,11 +1509,11 @@ describe("follow-up batch 35: op version 29, a rider's seat on a squeezing mount
 });
 
 describe("follow-up batch 36: op version 30, passengers on a holder that starts its walk squeezed and stands across a stair band (D-261029-56, D-261029-58)", () => {
-  test("are the versions now, the snapshot's unchanged", () => {
+  test("retains the op-30 step alongside the later snapshot-30 upgrade", () => {
     assert.ok(OP_VERSION >= 30);
-    assert.equal(SNAPSHOT_VERSION, 29);
+    assert.equal(SNAPSHOT_VERSION, 30);
     assert.ok(opMigrations.some((s) => s.from === 29 && s.to === 30));
-    assert.ok(!snapshotMigrations.some((s) => s.from === 29));
+    assert.ok(snapshotMigrations.some((s) => s.from === 29 && s.to === 30));
   });
 
   test("the op step is the identity, a squeezed holder's moves on squares and hexes included", () => {
@@ -1549,11 +1549,11 @@ describe("follow-up batch 36: op version 30, passengers on a holder that starts 
 });
 
 describe("follow-up batch 37: op version 32, a walk off a holder on hexes crosses the raised sides between its hexes, and a dragged creature walks full size (D-261029-170, D-261029-171)", () => {
-  test("is the version now, the snapshot's unchanged", () => {
+  test("retains the op-32 step alongside the later snapshot-30 upgrade", () => {
     assert.ok(OP_VERSION >= 32);
-    assert.equal(SNAPSHOT_VERSION, 29);
+    assert.equal(SNAPSHOT_VERSION, 30);
     assert.ok(opMigrations.some((s) => s.from === 31 && s.to === 32));
-    assert.ok(!snapshotMigrations.some((s) => s.from === 29));
+    assert.ok(snapshotMigrations.some((s) => s.from === 29 && s.to === 30));
   });
 
   test("the op step is the identity, a rider's walk off a mount on hexes included", () => {
@@ -1589,7 +1589,7 @@ describe("follow-up batch 37: op version 32, a walk off a holder on hexes crosse
 
 describe("follow-up batch 39: op version 33", () => {
   test("keeps stored operations unchanged through the identity step", () => {
-    assert.equal(OP_VERSION, 33);
+    assert.equal(OP_VERSION, 34);
     const op = { t: "vision.holders", sceneId: "s1", on: ["p1"] };
     assert.equal(runMigrations(op, 32, 33, opMigrations), op);
     assert.throws(() => runMigrations(op, 33, 32, opMigrations), /down/);

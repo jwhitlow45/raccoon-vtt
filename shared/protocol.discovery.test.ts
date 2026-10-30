@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { uuidv7 } from "./ids.ts";
 import { encodeTile, fullTileBits } from "./rules/fog.ts";
 import { FORGET_ASK, clientOpSchema, opSchema, refusalCodes, serverMessageSchema, serverOnlyOpSchema } from "./protocol.ts";
 
@@ -101,14 +102,22 @@ describe("the ask before forgetting (5.3)", () => {
       { t: "build.height", sceneId: "s1", cells: ["1,1"], height: 5, forget: true },
       { t: "build.stairs", sceneId: "s1", cells: ["1,1"], up: "n", forget: true },
       { t: "build.rough", sceneId: "s1", cells: ["1,1"], on: true, forget: true },
-      { t: "undo", forget: 12 },
-      { t: "redo", forget: 13 },
-      { t: "redo" },
+      { t: "undo", head: uuidv7(), forget: 12 },
+      { t: "redo", head: uuidv7(), forget: 13 },
+      { t: "redo", head: uuidv7() },
     ];
     for (const op of ops) assert.ok(clientOpSchema.safeParse(op).success, JSON.stringify(op));
     assert.equal(clientOpSchema.safeParse({ t: "build.paint", sceneId: "s1", terrain: "stone", cells: ["1,1"], forget: false }).success, false, "only a yes is sent");
-    assert.equal(clientOpSchema.safeParse({ t: "undo", forget: true }).success, false, "an undo's yes names its step");
+    assert.equal(clientOpSchema.safeParse({ t: "undo", head: uuidv7(), forget: true }).success, false, "an undo's yes names its step");
     assert.equal(clientOpSchema.safeParse({ t: "door.set", sceneId: "s1", door: { edge: "1,1,n" }, state: "open", forget: true }).success, false, "a door forgets silently");
+  });
+
+  test("legacy stack commands, including a remembered forget answer, need a reload", () => {
+    for (const op of [{ t: "undo" }, { t: "redo" }, { t: "undo", forget: 12 }, { t: "redo", forget: 13 }, { t: "undo", of: 1 }]) {
+      const parsed = clientOpSchema.safeParse(op);
+      assert.equal(parsed.success, false, JSON.stringify(op));
+      if (!parsed.success) assert.ok(parsed.error.issues.some((issue) => issue.message === "Reload to use Undo"));
+    }
   });
 
   test("the refusal is its own code, and the question its own words", () => {

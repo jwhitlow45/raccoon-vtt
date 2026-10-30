@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { uuidv7 } from "./ids.ts";
 import { keys } from "./keys.ts";
 import type { LogEvent, RoomState, Viewer } from "./model.ts";
 import { MAX_NAME, type Op, type RestoreEntry } from "./protocol.ts";
@@ -53,6 +54,9 @@ function setup() {
   return state;
 }
 
+const undoCommand = { t: "undo" as const, head: uuidv7() };
+const redoCommand = { t: "redo" as const, head: uuidv7() };
+
 function fresh(): ReturnType<typeof setup> {
   return setup();
 }
@@ -86,8 +90,8 @@ describe("the reducer itself", () => {
   });
 
   test("refuses undo and redo, which the server resolves first", () => {
-    assert.equal(refused(fresh(), { t: "undo" }).code, "invalid");
-    assert.equal(refused(fresh(), { t: "redo" }).code, "invalid");
+    assert.equal(refused(fresh(), undoCommand).code, "invalid");
+    assert.equal(refused(fresh(), redoCommand).code, "invalid");
   });
 
   test("reports touched keys, log entries and the global flag", () => {

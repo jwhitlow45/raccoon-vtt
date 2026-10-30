@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { uuidv7 } from "./ids.ts";
 import { projectState } from "./project.ts";
 import { reads, satisfies } from "./reads.ts";
 import { DM, P1, P2, actor, blockOf, character, companionBlock, customMonster, entry, reveal, room, token } from "./testutil.ts";
@@ -22,7 +23,7 @@ const view = (state = setup(), viewer = P1, sceneId = "s1") => ({ state, viewer,
 describe("reads", () => {
   test("undo, redo and server ops are never optimistic", () => {
     const v = view(setup(), DM);
-    for (const op of [{ t: "undo" as const }, { t: "redo" as const }]) {
+    for (const op of [{ t: "undo" as const, head: uuidv7() }, { t: "redo" as const, head: uuidv7() }]) {
       const r = reads(op, v.state);
       assert.ok("never" in r);
       assert.ok(!satisfies(r, v.projected, DM, v.opts));

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
+import { historyMessageSchema, type HistoryMessage, type HistoryScope } from "#shared/undoContract.ts";
 import { createInitialState } from "#shared/initial.ts";
 import { chunkKey, holderChunkKey, holderTileKey } from "#shared/keys.ts";
 import {
@@ -25,7 +26,7 @@ import { ASK_LOST, FORGET_ASK, type Op, type OpOf, type ServerMessage } from "#s
 import { projectState } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { actor as testActor, character as testCharacter, companionBlock as testBlock, entry as testEntry, template as testTemplate, token as testToken } from "#shared/testutil.ts";
-import { ASK_CHAIN_MS, FORGET_STALE, RoomActor, RoomReplayFailed, SysOpRefused, type ActorDeps } from "./actor.ts";
+import { ASK_CHAIN_MS, RoomActor, RoomReplayFailed, SysOpRefused, type ActorDeps } from "./actor.ts";
 import { layerCharge, MEMORY_CAP } from "./memorySize.ts";
 import { mapStepOps } from "./remember.ts";
 import { layerHeld } from "#shared/reducer/memory.ts";
@@ -198,12 +199,43 @@ function within<T>(ms: number, work: Promise<T>): Promise<T | "stuck"> {
   return Promise.race([work, late]).finally(() => clearTimeout(timer));
 }
 
+type HistoryRequest = { t: "undo" | "redo"; scope?: HistoryScope; of?: number; forget?: number };
+type TestOp = Op | HistoryRequest;
+const delivered = new WeakMap<Connection, ServerMessage[]>();
+const forgetHeads = new WeakMap<Connection, Map<number, string>>();
+
+/** Normal fixture commands capture delivered heads. Raw legacy refusals live in undo.scope.test.ts. */
+async function sendWithHistory(actor: RoomActor, conn: Connection, n: number, raw: unknown, group?: string): Promise<void> {
+  let op = raw;
+  if (raw && typeof raw === "object" && "t" in raw && (raw.t === "undo" || raw.t === "redo") && !("head" in raw) && !("log" in raw)) {
+    const sent = delivered.get(conn);
+    assert.ok(sent, "fixture connection captures history");
+    if (n > 1) assert.notEqual(await answerTo(sent, n - 1), "stuck", "capture the head after the preceding command commits");
+    const messages = sent as (ServerMessage | HistoryMessage)[];
+    const summary = messages.findLast((m) => m.t === "history");
+    assert.ok(summary, "normal Undo fixtures require delivered history");
+    const history = historyMessageSchema.parse(summary);
+    assert.ok(history.watermark >= n - 1, "history covers the preceding terminal answer");
+    const request = raw as HistoryRequest;
+    const scope = request.scope ?? "play";
+    const questions = forgetHeads.get(conn) ?? new Map<number, string>();
+    forgetHeads.set(conn, questions);
+    // Empty-stack probes still send a valid opaque head. They must never become legacy-command probes.
+    const head = request.forget === undefined ? (history[scope]?.[request.t].head?.id ?? uuidv7()) : questions.get(request.forget);
+    assert.ok(head, "a forget answer keeps the head captured by its question");
+    questions.set(n, head);
+    op = { ...request, head };
+  }
+  await actor.op(conn, n, op, group);
+}
+
 /** A socket stand-in that keeps what the actor sends. */
 function connect(actor: RoomActor, who: Member, role: "dm" | "player" = "dm"): { conn: Connection; sent: ServerMessage[] } {
   const sent: ServerMessage[] = [];
   const socket = { readyState: 1, OPEN: 1, CONNECTING: 0, send: (text: string) => sent.push(JSON.parse(text) as ServerMessage), close: () => undefined, terminate: () => undefined };
   const conn = new Connection(socket as never, { sessionId: uuidv7(), roomId: ROOM, memberId: who.id, role }, "203.0.113.9");
   actor.attach(conn);
+  delivered.set(conn, sent);
   return { conn, sent };
 }
 
@@ -481,7 +513,7 @@ describe("op admission", () => {
         { t: "encounter.start", entries: [{ id: entryId, tokenId, groupKey: OLD }] },
       ];
       for (const [i, op] of stale.entries()) {
-        await actor.op(conn, i + 1, op);
+        await sendWithHistory(actor, conn, i + 1, op);
         const answer = await answerTo(sent, i + 1);
         assert.ok(answer !== "stuck" && answer.acks?.includes(i + 1), `${op.t} is applied`);
       }
@@ -499,11 +531,11 @@ describe("op admission", () => {
       assert.ok(db.storedRows.every((row) => (row as { op_version: number }).op_version === OP_VERSION));
 
       // The fight's undo and redo take it back and bring it again under the id it was stored with.
-      await actor.op(conn, 5, { t: "undo" });
+      await sendWithHistory(actor, conn, 5, { t: "undo" });
       const undone = await answerTo(sent, 5);
       assert.ok(undone !== "stuck" && undone.acks?.includes(5));
       assert.equal(actor.committed.state.encounter, null);
-      await actor.op(conn, 6, { t: "redo" });
+      await sendWithHistory(actor, conn, 6, { t: "redo" });
       const redone = await answerTo(sent, 6);
       assert.ok(redone !== "stuck" && redone.acks?.includes(6));
 
@@ -656,13 +688,13 @@ describe("undo", () => {
       await actor.op(conn, 3, { t: "build.paint", sceneId, terrain: "stone", cells: ["17,1"] }, "stroke");
       assert.notEqual(await answerTo(sent, 3), "stuck");
       assert.equal(Object.keys(actor.committed.state.buildChunks).length, 2);
-      await actor.op(conn, 4, { t: "undo" });
+      await sendWithHistory(actor, conn, 4, { t: "undo" });
       const undone = await answerTo(sent, 4);
       assert.ok(undone !== "stuck" && undone.acks?.includes(4));
       assert.deepEqual(actor.committed.state.buildChunks, {});
-      await actor.op(conn, 5, { t: "undo" });
+      await sendWithHistory(actor, conn, 5, { t: "undo" });
       const empty = await answerTo(sent, 5);
-      assert.ok(empty !== "stuck" && empty.rejects?.[0]?.message === "nothing to undo");
+      assert.ok(empty !== "stuck" && empty.rejects?.[0]?.message === "Play history changed. Check the next change.");
     } finally {
       db.freeze();
       void actor.shutdown({ code: 1012, snapshot: false });
@@ -682,13 +714,13 @@ describe("undo", () => {
       await actor.hello(conn, { clientId: "c1", resumeFrom: 1 });
       // As the Scenes panel sends a rename (client/features/scenes/folders.ts sendFolderRename): one op, under a group.
       await actor.op(conn, 1, { t: "scene.update", sceneId, patch: { folder: "Act two" } }, "rename");
-      await actor.op(conn, 2, { t: "undo" });
+      await sendWithHistory(actor, conn, 2, { t: "undo", scope: "setup" });
       const renamed = await answerTo(sent, 2);
       assert.ok(renamed !== "stuck");
       assert.deepEqual(renamed.restored, [{ n: 2, what: "renaming the folder Act one to Act two" }]);
       // "Move to folder" sends the same op alone, and reads as the move it is.
       await actor.op(conn, 3, { t: "scene.update", sceneId, patch: { folder: "Act two" } });
-      await actor.op(conn, 4, { t: "undo" });
+      await sendWithHistory(actor, conn, 4, { t: "undo", scope: "setup" });
       const moved = await answerTo(sent, 4);
       assert.ok(moved !== "stuck");
       assert.deepEqual(moved.restored, [{ n: 4, what: "moving the scene Crypt to the folder Act two" }]);
@@ -718,13 +750,13 @@ describe("undo", () => {
       await actor.op(conn, n++, { t: "encounter.add", entries: placed.map((id) => ({ id: uuidv7(), tokenId: id })) }, "drop");
       assert.notEqual(await answerTo(sent, n - 1), "stuck");
       assert.equal(actor.committed.state.encounter?.entries.length, 4);
-      await actor.op(conn, n, { t: "undo" });
+      await sendWithHistory(actor, conn, n, { t: "undo" });
       const undone = await answerTo(sent, n);
       assert.ok(undone !== "stuck");
       assert.deepEqual(undone.restored, [{ n, what: "adding 3 tokens" }]);
       assert.deepEqual(Object.keys(actor.committed.state.tokens), [tokenId]);
       assert.equal(actor.committed.state.encounter?.entries.length, 1);
-      await actor.op(conn, n + 1, { t: "redo" });
+      await sendWithHistory(actor, conn, n + 1, { t: "redo" });
       const redone = await answerTo(sent, n + 1);
       assert.ok(redone !== "stuck");
       assert.deepEqual(redone.restored, [{ n: n + 1, what: "adding 3 tokens" }]);
@@ -751,8 +783,8 @@ describe("undo answers", () => {
       await actor.op(phone.conn, 1, { t: "token.move", tokenId, x: 2, y: 2 });
       await actor.op(phone.conn, 2, { t: "token.update", tokenId, patch: { name: "Snik" } });
       await actor.op(phone.conn, 3, { t: "token.move", tokenId, x: 3, y: 3 });
-      await actor.op(phone.conn, 4, { t: "undo" });
-      await actor.op(phone.conn, 5, { t: "undo" });
+      await sendWithHistory(actor, phone.conn, 4, { t: "undo" });
+      await sendWithHistory(actor, phone.conn, 5, { t: "undo", scope: "setup" });
       const second = await answerTo(phone.sent, 5);
       assert.ok(second !== "stuck");
       const restored = phone.sent.flatMap((m) => (m.t === "ev" ? (m.restored ?? []) : []));
@@ -764,7 +796,7 @@ describe("undo answers", () => {
       // The laptop moves it, so the phone's first move is no longer its to take back.
       await actor.op(laptop.conn, 1, { t: "token.move", tokenId, x: 9, y: 9 });
       assert.notEqual(await answerTo(laptop.sent, 1), "stuck");
-      await actor.op(phone.conn, 6, { t: "undo" });
+      await sendWithHistory(actor, phone.conn, 6, { t: "undo" });
       const refused = await answerTo(phone.sent, 6);
       assert.ok(refused !== "stuck");
       assert.deepEqual(refused.rejects, [{ n: 6, code: "invalid", message: "could not undo moving Goblin: it was changed since" }]);
@@ -808,11 +840,11 @@ describe("undo answers", () => {
       // The players move on, and the scene they drew on stays for Ayla's undo and is deleted before Bram's.
       await actor.op(table.conn, 1, { t: "room.setPlayerScene", sceneId: cave });
       assert.notEqual(await answerTo(table.sent, 1), "stuck");
-      await actor.op(phones[0]!.conn, 3, { t: "undo" });
+      await sendWithHistory(actor, phones[0]!.conn, 3, { t: "undo" });
       const kept = await answerTo(phones[0]!.sent, 3);
       await actor.op(table.conn, 2, { t: "scene.delete", sceneId: mat });
       assert.notEqual(await answerTo(table.sent, 2), "stuck");
-      await actor.op(phones[1]!.conn, 3, { t: "undo" });
+      await sendWithHistory(actor, phones[1]!.conn, 3, { t: "undo" });
       const deleted = await answerTo(phones[1]!.sent, 3);
       for (const answer of [kept, deleted]) {
         assert.ok(answer !== "stuck");
@@ -849,27 +881,27 @@ describe("taking an HP change back from the log", () => {
       await actor.op(phone.conn, 1, { t: "actor.hp", target: { tokenId }, change: { kind: "damage", amount: 3 } });
       assert.notEqual(await answerTo(phone.sent, 1), "stuck");
       const line = lastHpLine();
-      await actor.op(phone.conn, 2, { t: "undo", log: line });
+      await sendWithHistory(actor, phone.conn, 2, { t: "undo", log: line });
       const forbidden = await answerTo(phone.sent, 2);
       assert.ok(forbidden !== "stuck");
       assert.deepEqual(forbidden.rejects, [{ n: 2, code: "forbidden", message: "only the DM takes back a change from the log" }]);
-      await actor.op(table.conn, 1, { t: "undo", log: line });
+      await sendWithHistory(actor, table.conn, 1, { t: "undo", log: line });
       const undone = await answerTo(table.sent, 1);
       assert.ok(undone !== "stuck");
       assert.deepEqual(undone.restored, [{ n: 1, what: "damaging Goblin" }]);
       assert.equal(goblinHp(), 7);
       // A change taken back from the log goes on no stack: Redo would put it back with no line to say so.
-      await actor.op(table.conn, 2, { t: "redo" });
+      await sendWithHistory(actor, table.conn, 2, { t: "redo" });
       const redone = await answerTo(table.sent, 2);
       assert.ok(redone !== "stuck");
-      assert.deepEqual(redone.rejects, [{ n: 2, code: "invalid", message: "nothing to redo" }]);
+      assert.deepEqual(redone.rejects, [{ n: 2, code: "invalid", message: "Play history changed. Check the next change." }]);
       assert.equal(goblinHp(), 7);
-      await actor.op(table.conn, 3, { t: "undo" });
+      await sendWithHistory(actor, table.conn, 3, { t: "undo" });
       const undone3 = await answerTo(table.sent, 3);
       assert.ok(undone3 !== "stuck");
-      assert.deepEqual(undone3.rejects, [{ n: 3, code: "invalid", message: "nothing to undo" }]);
+      assert.deepEqual(undone3.rejects, [{ n: 3, code: "invalid", message: "Play history changed. Check the next change." }]);
       assert.equal(goblinHp(), 7);
-      await actor.op(table.conn, 4, { t: "undo", log: line });
+      await sendWithHistory(actor, table.conn, 4, { t: "undo", log: line });
       const twice = await answerTo(table.sent, 4);
       assert.ok(twice !== "stuck");
       assert.deepEqual(twice.rejects, [{ n: 4, code: "invalid", message: "could not undo damaging Goblin: it was already taken back" }]);
@@ -879,7 +911,7 @@ describe("taking an HP change back from the log", () => {
       const older = lastHpLine();
       await actor.op(table.conn, 6, { t: "actor.hp", target: { tokenId }, change: { kind: "damage", amount: 1 } });
       assert.notEqual(await answerTo(table.sent, 6), "stuck");
-      await actor.op(table.conn, 7, { t: "undo", log: older });
+      await sendWithHistory(actor, table.conn, 7, { t: "undo", log: older });
       const changed = await answerTo(table.sent, 7);
       assert.ok(changed !== "stuck");
       assert.deepEqual(changed.rejects, [{ n: 7, code: "invalid", message: "could not undo damaging Goblin: it was changed since" }]);
@@ -943,7 +975,7 @@ describe("a player's undo", () => {
       await actor.op(phone.conn, 1, { t: "token.move", tokenId, x: 5, y: 5 });
       await actor.op(table.conn, 1, { t: "actor.hp", target: { tokenId }, change: { kind: "damage", amount: 3 } });
       assert.notEqual(await answerTo(table.sent, 1), "stuck");
-      await actor.op(phone.conn, 2, { t: "undo" });
+      await sendWithHistory(actor, phone.conn, 2, { t: "undo" });
       const undone = await answerTo(phone.sent, 2);
       assert.ok(undone !== "stuck");
       assert.deepEqual(undone.restored, [{ n: 2, what: "moving Goblin" }]);
@@ -951,15 +983,15 @@ describe("a player's undo", () => {
       assert.deepEqual([goblin().x, goblin().y], [1, 1]);
       const hurt = goblin().actor;
       assert.equal("inline" in hurt && hurt.inline.hp.cur, 4);
-      await actor.op(phone.conn, 3, { t: "redo" });
+      await sendWithHistory(actor, phone.conn, 3, { t: "redo" });
       assert.notEqual(await answerTo(phone.sent, 3), "stuck");
       assert.deepEqual([goblin().x, goblin().y], [5, 5]);
       // The DM moves it on, so the player's move is no longer theirs to take back.
-      await actor.op(phone.conn, 4, { t: "undo" });
-      await actor.op(phone.conn, 5, { t: "redo" });
+      await sendWithHistory(actor, phone.conn, 4, { t: "undo" });
+      await sendWithHistory(actor, phone.conn, 5, { t: "redo" });
       await actor.op(table.conn, 2, { t: "token.move", tokenId, x: 8, y: 8 });
       assert.notEqual(await answerTo(table.sent, 2), "stuck");
-      await actor.op(phone.conn, 6, { t: "undo" });
+      await sendWithHistory(actor, phone.conn, 6, { t: "undo" });
       const refused = await answerTo(phone.sent, 6);
       assert.ok(refused !== "stuck");
       assert.deepEqual(refused.rejects, [{ n: 6, code: "invalid", message: "could not undo moving Goblin: it was moved or resized since" }]);
@@ -987,12 +1019,12 @@ describe("a player's undo", () => {
       const goblin = () => actor.committed.state.tokens[tokenId]!;
       await actor.op(phone.conn, 1, { t: "token.move", tokenId, x: 5, y: 5 });
       await actor.op(phone.conn, 2, { t: "token.update", tokenId, patch: { elevation: 10 } });
-      await actor.op(phone.conn, 3, { t: "undo" });
+      await sendWithHistory(actor, phone.conn, 3, { t: "undo" });
       const first = await answerTo(phone.sent, 3);
       assert.ok(first !== "stuck");
       assert.deepEqual(first.restored, [{ n: 3, what: "changing Goblin" }]);
       assert.deepEqual([goblin().x, goblin().y, goblin().elevation], [5, 5, 0]);
-      await actor.op(phone.conn, 4, { t: "undo" });
+      await sendWithHistory(actor, phone.conn, 4, { t: "undo" });
       const second = await answerTo(phone.sent, 4);
       assert.ok(second !== "stuck");
       assert.deepEqual(second.restored, [{ n: 4, what: "moving Goblin" }]);
@@ -1019,7 +1051,7 @@ describe("a player's undo", () => {
       await actor.op(phone.conn, 1, { t: "token.move", tokenId, x: 5, y: 5 });
       for (const [n, elevation] of [[2, 5], [3, 10], [4, 15]] as const) await actor.op(phone.conn, n, { t: "token.update", tokenId, patch: { elevation } });
       for (const [n, of, after] of [[5, 4, [5, 5, 10]], [6, 3, [5, 5, 5]], [7, 2, [5, 5, 0]], [8, 1, [1, 1, 0]]] as const) {
-        await actor.op(phone.conn, n, { t: "undo", of });
+        await sendWithHistory(actor, phone.conn, n, { t: "undo", of });
         const answer = await answerTo(phone.sent, n);
         assert.ok(answer !== "stuck" && answer.restored?.length === 1, `the undo of op ${of}`);
         assert.deepEqual([goblin().x, goblin().y, goblin().elevation], after);
@@ -1043,7 +1075,7 @@ describe("a player's undo", () => {
       const phone = connect(actor, player, "player");
       await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
       await actor.op(phone.conn, 1, { t: "token.update", tokenId, patch: { elevation: 10 } });
-      await actor.op(phone.conn, 2, { t: "undo" });
+      await sendWithHistory(actor, phone.conn, 2, { t: "undo" });
       const undone = await answerTo(phone.sent, 2);
       assert.ok(undone !== "stuck");
       assert.deepEqual(undone.restored, [{ n: 2, what: "changing Goblin" }]);
@@ -1075,11 +1107,11 @@ describe("a player's undo", () => {
 
       await actor.op(phone.conn, 1, { t: "token.move", tokenId, x: 5, y: 5 });
       await actor.op(phone.conn, 2, { t: "token.move", tokenId: other, x: 6, y: 6 });
-      await actor.op(phone.conn, 3, { t: "undo" });
+      await sendWithHistory(actor, phone.conn, 3, { t: "undo" });
       assert.notEqual(await answerTo(phone.sent, 3), "stuck");
       assert.deepEqual(at(other), [1, 1]);
       // The Wolf's bar still offered its move: the Goblin's stays where it is.
-      await actor.op(phone.conn, 4, { t: "undo", of: 2 });
+      await sendWithHistory(actor, phone.conn, 4, { t: "undo", of: 2 });
       const stale = await answerTo(phone.sent, 4);
       assert.ok(stale !== "stuck");
       assert.deepEqual(stale.rejects, [{ n: 4, ...notNewest }]);
@@ -1088,17 +1120,17 @@ describe("a player's undo", () => {
       // The laptop's move, under the same op number, is not the phone's.
       await actor.op(laptop.conn, 1, { t: "token.move", tokenId: other, x: 7, y: 7 });
       assert.notEqual(await answerTo(laptop.sent, 1), "stuck");
-      await actor.op(phone.conn, 5, { t: "undo", of: 1 });
+      await sendWithHistory(actor, phone.conn, 5, { t: "undo", of: 1 });
       const covered = await answerTo(phone.sent, 5);
       assert.ok(covered !== "stuck");
       assert.deepEqual(covered.rejects, [{ n: 5, ...notNewest }]);
       assert.deepEqual(at(other), [7, 7]);
 
-      await actor.op(laptop.conn, 2, { t: "undo", of: 1 });
+      await sendWithHistory(actor, laptop.conn, 2, { t: "undo", of: 1 });
       const own = await answerTo(laptop.sent, 2);
       assert.ok(own !== "stuck");
       assert.deepEqual(own.restored, [{ n: 2, what: "moving Wolf" }]);
-      await actor.op(phone.conn, 6, { t: "undo", of: 1 });
+      await sendWithHistory(actor, phone.conn, 6, { t: "undo", of: 1 });
       const first = await answerTo(phone.sent, 6);
       assert.ok(first !== "stuck");
       assert.deepEqual(first.restored, [{ n: 6, what: "moving Goblin" }]);
@@ -1129,7 +1161,7 @@ describe("a player's undo", () => {
       await actor.op(table.conn, 2, { t: "token.update", tokenId, patch: { sceneId: crypt } });
       await actor.op(table.conn, 3, { t: "room.setPlayerScene", sceneId: crypt });
       assert.notEqual(await answerTo(table.sent, 3), "stuck");
-      await actor.op(phone.conn, 2, { t: "undo" });
+      await sendWithHistory(actor, phone.conn, 2, { t: "undo" });
       const refused = await answerTo(phone.sent, 2);
       assert.ok(refused !== "stuck");
       assert.deepEqual(refused.rejects, [{ n: 2, code: "invalid", message: "could not undo moving Goblin: it was moved or resized since" }]);
@@ -1155,7 +1187,7 @@ describe("a player's undo", () => {
       const phone = connect(actor, player, "player");
       await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
       await actor.op(phone.conn, 1, { t: "token.move", tokenId, x: 5, y: 5 });
-      await actor.op(phone.conn, 2, { t: "undo" });
+      await sendWithHistory(actor, phone.conn, 2, { t: "undo" });
       const undone = await answerTo(phone.sent, 2);
       assert.ok(undone !== "stuck");
       assert.deepEqual(undone.restored, [{ n: 2, what: "moving Merchant" }]);
@@ -1185,12 +1217,12 @@ describe("undo and replay", () => {
       await actor.op(laptop.conn, 1, { t: "token.create", token: { id: tokenId, sceneId, kind: "monster", name: "Rat", size: "tiny", x: 1, y: 1, actor: { inline } } });
       assert.notEqual(await answerTo(laptop.sent, 1), "stuck");
       // The laptop's token is on the scene, so the phone may not take the scene back.
-      await actor.op(phone.conn, 2, { t: "undo" });
+      await sendWithHistory(actor, phone.conn, 2, { t: "undo", scope: "setup" });
       const refused = await answerTo(phone.sent, 2);
       assert.ok(refused !== "stuck");
       assert.match(refused.rejects?.[0]?.message ?? "", /^could not undo .*: other work depends on it$/);
       assert.ok(actor.committed.state.scenes[sceneId]);
-      await actor.op(laptop.conn, 2, { t: "undo" });
+      await sendWithHistory(actor, laptop.conn, 2, { t: "undo" });
       const undone = await answerTo(laptop.sent, 2);
       assert.ok(undone !== "stuck" && undone.acks?.includes(2));
       assert.equal(actor.committed.state.tokens[tokenId], undefined);
@@ -1228,17 +1260,17 @@ describe("the path of a turn and a player's undo", () => {
       await actor.op(table.conn, 3, { t: "actor.hp", target: { tokenId }, change: { kind: "damage", amount: 3 } });
       assert.notEqual(await answerTo(table.sent, 3), "stuck");
       assert.deepEqual(legs(), [[1, 1, false], [5, 5, true]]);
-      await actor.op(phone.conn, 3, { t: "undo", of: 2 });
+      await sendWithHistory(actor, phone.conn, 3, { t: "undo", of: 2 });
       const unmarked = await answerTo(phone.sent, 3);
       assert.ok(unmarked !== "stuck");
       assert.deepEqual(unmarked.restored, [{ n: 3, what: "not counting the last move of Goblin" }]);
       assert.deepEqual(legs(), [[1, 1, false], [5, 5, false]]);
-      await actor.op(phone.conn, 4, { t: "undo", of: 1 });
+      await sendWithHistory(actor, phone.conn, 4, { t: "undo", of: 1 });
       assert.notEqual(await answerTo(phone.sent, 4), "stuck");
       assert.deepEqual([goblin().x, goblin().y, goblin().path], [1, 1, undefined]);
       const hurt = goblin().actor;
       assert.equal("inline" in hurt && hurt.inline.hp.cur, 4);
-      await actor.op(phone.conn, 5, { t: "redo" });
+      await sendWithHistory(actor, phone.conn, 5, { t: "redo" });
       assert.notEqual(await answerTo(phone.sent, 5), "stuck");
       assert.deepEqual(legs(), [[1, 1, false], [5, 5, false]], "a redo puts the leg back with the move");
     } finally {
@@ -1267,7 +1299,7 @@ describe("an area's damage", () => {
       await actor.op(table.conn, 1, { t: "actor.damageMany", hits: [{ target: { tokenId }, amount: 6 }, { target: { tokenId: second }, amount: 6 }] });
       assert.notEqual(await answerTo(table.sent, 1), "stuck");
       assert.deepEqual([hp(tokenId), hp(second)], [{ cur: 1, max: 7, temp: 0 }, { cur: 4, max: 7, temp: 0 }]);
-      await actor.op(table.conn, 2, { t: "undo" });
+      await sendWithHistory(actor, table.conn, 2, { t: "undo" });
       const undone = await answerTo(table.sent, 2);
       assert.ok(undone !== "stuck");
       assert.deepEqual(undone.restored, [{ n: 2, what: "damaging 2 creatures" }]);
@@ -1302,19 +1334,19 @@ describe("an area's damage", () => {
       };
       assert.deepEqual([lineOf(tokenId).data.left, lineOf(tokenId).data.revert?.before.hp], [{ cur: 1, max: 7, temp: 0 }, { cur: 7, max: 7, temp: 0 }]);
       assert.deepEqual([lineOf(second).data.left, lineOf(second).data.revert?.before.hp], [{ cur: 4, max: 7, temp: 0 }, { cur: 7, max: 7, temp: 3 }]);
-      await actor.op(table.conn, 2, { t: "undo", log: lineOf(second).id });
+      await sendWithHistory(actor, table.conn, 2, { t: "undo", log: lineOf(second).id });
       const one = await answerTo(table.sent, 2);
       assert.ok(one !== "stuck");
       assert.deepEqual(one.restored, [{ n: 2, what: "damaging Goblin 2" }]);
       assert.deepEqual([hp(tokenId), hp(second)], [{ cur: 1, max: 7, temp: 0 }, { cur: 7, max: 7, temp: 3 }]);
       // The area's step would put back the creature the DM already took back, so it refuses and changes nothing.
-      await actor.op(table.conn, 3, { t: "undo" });
+      await sendWithHistory(actor, table.conn, 3, { t: "undo" });
       const whole = await answerTo(table.sent, 3);
       assert.ok(whole !== "stuck");
       assert.deepEqual(whole.rejects, [{ n: 3, code: "invalid", message: "could not undo damaging 2 creatures: it was changed since" }]);
       assert.deepEqual([hp(tokenId), hp(second)], [{ cur: 1, max: 7, temp: 0 }, { cur: 7, max: 7, temp: 3 }]);
       // The other creature's line still comes back on its own.
-      await actor.op(table.conn, 4, { t: "undo", log: lineOf(tokenId).id });
+      await sendWithHistory(actor, table.conn, 4, { t: "undo", log: lineOf(tokenId).id });
       const other = await answerTo(table.sent, 4);
       assert.ok(other !== "stuck");
       assert.deepEqual(other.restored, [{ n: 4, what: "damaging Goblin" }]);
@@ -1340,7 +1372,7 @@ describe("pit traps' walls counted ahead in the limits step (docs/design-v1-trap
       await actor.hello(conn, { clientId: "c1", resumeFrom: 1 });
       let n = 0;
       const send = async (op: Op) => {
-        await actor.op(conn, ++n, op);
+        await sendWithHistory(actor, conn, ++n, op);
         const answer = await answerTo(sent, n);
         assert.ok(answer !== "stuck");
         return answer.rejects?.find((r) => r.n === n) ?? null;
@@ -1411,7 +1443,7 @@ describe("the split's caps in the limits step", () => {
       await actor.hello(conn, { clientId: "c1", resumeFrom: 1 });
       let n = 0;
       const send = async (op: Parameters<RoomActor["op"]>[2]) => {
-        await actor.op(conn, ++n, op);
+        await sendWithHistory(actor, conn, ++n, op);
         const answer = await answerTo(sent, n);
         assert.ok(answer !== "stuck");
         return answer.rejects?.find((r) => r.n === n) ?? null;
@@ -1461,7 +1493,7 @@ describe("the split's caps in the limits step", () => {
       await actor.op(laptop.conn, 1, { t: "build.walls", sceneId, put: east });
       const placed = await answerTo(laptop.sent, 1);
       assert.ok(placed !== "stuck" && placed.acks?.includes(1));
-      await actor.op(phone.conn, 3, { t: "undo" });
+      await sendWithHistory(actor, phone.conn, 3, { t: "undo" });
       const undo = await answerTo(phone.sent, 3);
       assert.ok(undo !== "stuck");
       assert.equal(undo.rejects?.[0]?.code, "quota");
@@ -1503,7 +1535,7 @@ describe("the pillar cap in the limits step", () => {
       const counters = conns.map(() => 0);
       await run(actor, async (who, op) => {
         const n = ++counters[who]!;
-        await actor.op(conns[who]!.conn, n, op);
+        await sendWithHistory(actor, conns[who]!.conn, n, op);
         const answer = await answerTo(conns[who]!.sent, n);
         assert.ok(answer !== "stuck");
         return answer.rejects?.find((r) => r.n === n) ?? null;
@@ -1602,7 +1634,7 @@ describe("the door and window cap in the limits step", () => {
       const counters = conns.map(() => 0);
       await run(actor, async (who, op) => {
         const n = ++counters[who]!;
-        await actor.op(conns[who]!.conn, n, op);
+        await sendWithHistory(actor, conns[who]!.conn, n, op);
         const answer = await answerTo(conns[who]!.sent, n);
         assert.ok(answer !== "stuck");
         return answer.rejects?.find((r) => r.n === n) ?? null;
@@ -1711,7 +1743,7 @@ describe("the drawn edge cap in the limits step", () => {
       const counters = conns.map(() => 0);
       await run(actor, async (who, op) => {
         const n = ++counters[who]!;
-        await actor.op(conns[who]!.conn, n, op);
+        await sendWithHistory(actor, conns[who]!.conn, n, op);
         const answer = await answerTo(conns[who]!.sent, n);
         assert.ok(answer !== "stuck");
         const r = answer.rejects?.find((x) => x.n === n);
@@ -1937,7 +1969,7 @@ async function withRoom(
       actor,
       async (op) => {
         n++;
-        await actor.op(table.conn, n, op);
+        await sendWithHistory(actor, table.conn, n, op);
         const answer = await answerTo(table.sent, n);
         assert.ok(answer !== "stuck");
         const refusal = answer.rejects?.find((r) => r.n === n);
@@ -2234,7 +2266,7 @@ describe("the lit token light cap in the limits step (docs/design-v1-maps-vision
       const counters = { dm: 0, player: 0 };
       await run(actor, async (who, op) => {
         const n = ++counters[who];
-        await actor.op(conns[who].conn, n, op);
+        await sendWithHistory(actor, conns[who].conn, n, op);
         const answer = await answerTo(conns[who].sent, n);
         assert.ok(answer !== "stuck");
         return answer.rejects?.find((r) => r.n === n) ?? null;
@@ -2686,8 +2718,8 @@ describe("a player's undo of getting on and off (docs/design-v1-attach.md 8.3)",
       assert.notEqual(await answerTo(table.sent, 2), "stuck");
       const thorn = () => actor.committed.state.tokens.thorn!;
       const mounts = () => actor.committed.state.encounter?.turnStart?.mounts;
-      const ok = async (n: number, op: Op) => {
-        await actor.op(phone.conn, n, op);
+      const ok = async (n: number, op: TestOp) => {
+        await sendWithHistory(actor, phone.conn, n, op);
         const ev = await answerTo(phone.sent, n);
         assert.ok(ev !== "stuck" && !(ev.rejects?.some((r) => r.n === n) ?? false), `${op.t} ${n}: ${JSON.stringify(ev)}`);
         return ev;
@@ -2734,7 +2766,7 @@ describe("traps in the actor (docs/design-v1-traps.md 6.5 and 6.7)", () => {
     state: RoomState,
     dm: Member,
     pc: Member,
-    run: (actor: RoomActor, dmSend: (op: Op, group?: string) => Promise<{ code: string; message: string } | null>, pcSend: (op: Op, group?: string) => Promise<{ code: string; message: string } | null>) => Promise<void>,
+    run: (actor: RoomActor, dmSend: (op: TestOp, group?: string) => Promise<{ code: string; message: string } | null>, pcSend: (op: TestOp, group?: string) => Promise<{ code: string; message: string } | null>) => Promise<void>,
     options: Partial<ActorDeps["options"]> = {},
   ): Promise<void> {
     const db = new FakeDb({ state, dmGrants: [dm.id] });
@@ -2746,9 +2778,9 @@ describe("traps in the actor (docs/design-v1-traps.md 6.5 and 6.7)", () => {
         const c = connect(actor, who, role);
         await actor.hello(c.conn, { clientId: client, resumeFrom: 1 });
         let n = 0;
-        return async (op: Op, group?: string) => {
+        return async (op: TestOp, group?: string) => {
           n++;
-          await actor.op(c.conn, n, op, group);
+          await sendWithHistory(actor, c.conn, n, op, group);
           const answer = await answerTo(c.sent, n);
           assert.ok(answer !== "stuck");
           const refusal = answer.rejects?.find((r) => r.n === n);
@@ -2781,7 +2813,7 @@ describe("traps in the actor (docs/design-v1-traps.md 6.5 and 6.7)", () => {
       assert.equal(await pcSend({ t: "token.move", tokenId: "thorn", x: 8, y: 2 }), null);
       assert.equal(actor.committed.state.tokens.thorn!.x, 4, "stopped on the plate");
       assert.deepEqual(await pcSend({ t: "undo" }), { code: "invalid", message: "could not undo moving Thorn: something happened on the way. Ask the DM" });
-      assert.deepEqual(await pcSend({ t: "undo" }), { code: "invalid", message: "nothing to undo" }, "the step was dropped");
+      assert.deepEqual(await pcSend({ t: "undo" }), { code: "invalid", message: "Play history changed. Check the next change." }, "the step was dropped");
       assert.equal(actor.committed.state.tokens.thorn!.x, 4);
       assert.equal(await dmSend({ t: "token.move", tokenId: "gob", x: 8, y: 4 }), null);
       assert.equal(await dmSend({ t: "undo" }), null);
@@ -2804,7 +2836,7 @@ describe("traps in the actor (docs/design-v1-traps.md 6.5 and 6.7)", () => {
         assert.ok(answer !== "stuck" && answer.acks?.includes(1));
         assert.equal(actor.committed.state.traps.plate!.state, "sprung");
         assert.deepEqual(answer.trapped, marked ? [1] : undefined, `a move to ${x}`);
-        await actor.op(conn, 2, { t: "undo" });
+        await sendWithHistory(actor, conn, 2, { t: "undo" });
         const undone = await answerTo(sent, 2);
         assert.ok(undone !== "stuck");
         assert.equal(undone.rejects?.length ?? 0, marked ? 1 : 0, "the undo answers as the mark says");
@@ -3219,6 +3251,7 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
     const socket = { readyState: 1, OPEN: 1, CONNECTING: 0, send: (text: string) => sent.push(JSON.parse(text) as ServerMessage), close: () => undefined, terminate: () => undefined };
     const conn = new Connection(socket as never, { sessionId, roomId: ROOM, memberId: dm.id, role: "dm" }, "203.0.113.9", { now });
     actor.attach(conn);
+    delivered.set(conn, sent);
     return { conn, sent, sessionId };
   }
 
@@ -3507,7 +3540,7 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
       assert.equal(await send(band(20)), null);
       assert.deepEqual(await send({ t: "undo" }), { code: "forget", message: FORGET_ASK });
       assert.equal(await send({ t: "build.paint", sceneId, terrain: "grass", cells: ["2,2"] }), null);
-      assert.deepEqual(await send({ t: "undo", forget: 6 }), { code: "invalid", message: FORGET_STALE });
+      assert.deepEqual(await send({ t: "undo", forget: 6 }), { code: "invalid", message: "Play history changed. Check the next change." });
       assert.equal(cell(), "wood");
     });
   });
@@ -3811,7 +3844,7 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
         const phone = connect(actor, player, "player");
         await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
         // The device holds no heights there, so it sends 0 ft.
-        await actor.op(phone.conn, 1, op);
+        await sendWithHistory(actor, phone.conn, 1, op);
         const answer = await answerTo(phone.sent, 1);
         assert.ok(answer !== "stuck" && !answer.rejects?.length, `${op.t}: ${JSON.stringify(answer !== "stuck" && answer.rejects)}`);
         check(actor.committed.state);

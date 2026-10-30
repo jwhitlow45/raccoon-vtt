@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { uuidv7 } from "./ids.ts";
 import type { LogEntry, MoveAnyToken, RoomState } from "./model.ts";
 import { canApply, MOVE_PLAYERS_FIRST, movesAnyToken, NO_ROOM_TO_GROW_BACK, PLAYED_WITH_OTHERS, WALL_IN_THE_WAY, WALL_IN_THE_WAY_BACK, type AssetKind, type PermissionDeps } from "./permissions.ts";
 import { projectState } from "./project.ts";
 import { isPoseOp, isResizeOp, onPlayerUndoStack, type Op, type OpOf, type RestoreEntry } from "./protocol.ts";
 import { NO_ROOM_TO_GROW, OWNER_SIZES, RESIZE_KEEPS_PLACE, resizeSpot } from "./rules/resize.ts";
 import { DM, P1, P2, actor, apply, blockOf, character, customMonster, drawing, entry, imageRef, reveal, room, template, token } from "./testutil.ts";
+
+const undoCommand = { t: "undo" as const, head: uuidv7() };
 
 const deps: PermissionDeps = { canUseAsset: (memberId, assetId) => assetId.startsWith(`${memberId}-`) || assetId === "shared" };
 
@@ -39,7 +42,7 @@ describe("DM", () => {
     assert.equal(code({ t: "actor.life", target: { tokenId: "gob" }, life: "dead" }, DM), "ok");
     assert.equal(code({ t: "member.update", memberId: "dm1", name: "G" }, DM), "ok");
     assert.equal(code({ t: "member.update", memberId: "p1", name: "G" }, DM), "forbidden");
-    assert.equal(code({ t: "undo" }, DM), "ok");
+    assert.equal(code(undoCommand, DM), "ok");
     assert.equal(code({ t: "sys.restore", entries: [{ key: "token:gob", value: null, expectRev: 1 }], from: "undo" }, DM), "ok");
   });
 
@@ -152,7 +155,7 @@ describe("player role rules", () => {
     assert.equal(code({ t: "log.chat", text: "hi" }), "ok");
     assert.equal(code({ t: "log.whisper", to: ["p2"], text: "hi" }), "ok");
     assert.equal(code({ t: "log.whisper", to: ["ghost"], text: "hi" }), "gone");
-    assert.equal(code({ t: "undo" }), "ok");
+    assert.equal(code(undoCommand), "ok");
     // Taking an HP change back from the log is the DM's.
     assert.equal(code({ t: "undo", log: "4:0" }), "forbidden");
     assert.equal(code({ t: "undo", log: "4:0" }, DM), "ok");

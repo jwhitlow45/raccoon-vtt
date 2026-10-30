@@ -17,6 +17,14 @@ import { tallyOf } from "./undoLabels.ts";
 const inverse = (n: number): RestoreEntry[] => [{ key: `token:${n}`, value: null, expectRev: n }];
 const step = (n: number) => ({ entries: inverse(n), label: `edit ${n}` });
 
+function assertStep(actual: ReturnType<UndoStacks["popUndo"]>, expected: unknown): void {
+  assert.ok(actual);
+  const { id, ...entry } = actual as typeof actual & { id?: string };
+  assert.match(id ?? "", /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "each recorded or transferred step has an opaque UUID");
+  assert.deepEqual(entry, expected);
+}
+
+
 describe("UndoStacks", () => {
   test("the DM records every op, a player only drawing ops and token moves, a change of elevation or facing alone included", () => {
     assert.equal(UndoStacks.records("dm", { t: "log.chat", text: "x" }), true);
@@ -46,10 +54,10 @@ describe("UndoStacks", () => {
     const s = new UndoStacks();
     s.push("dm", inverse(1), "edit 1");
     s.push("dm", inverse(2), "edit 2");
-    assert.deepEqual(s.popUndo("dm"), step(2));
+    assertStep(s.popUndo("dm"), step(2));
     s.pushRestored("dm", "undo", inverse(20), "edit 20");
     assert.deepEqual(s.depth("dm"), { undo: 1, redo: 1 });
-    assert.deepEqual(s.popRedo("dm"), step(20));
+    assertStep(s.popRedo("dm"), step(20));
     s.pushRestored("dm", "redo", inverse(2), "edit 2");
     assert.deepEqual(s.depth("dm"), { undo: 2, redo: 0 });
     s.push("dm", inverse(3), "edit 3");
@@ -74,7 +82,7 @@ describe("UndoStacks", () => {
     const s = new UndoStacks();
     for (let i = 0; i < 70; i++) s.push("p1", inverse(i), `edit ${i}`);
     assert.equal(s.depth("p1").undo, UNDO_DEPTH);
-    assert.deepEqual(s.popUndo("p1"), step(69));
+    assertStep(s.popUndo("p1"), step(69));
     assert.equal(s.depth("p2").undo, 0);
   });
 
@@ -85,7 +93,7 @@ describe("UndoStacks", () => {
     s.push("dm", inverse(3), "edit 3", "stroke");
     s.push("dm", inverse(4), "edit 4", "stroke");
     assert.deepEqual(s.depth("dm"), { undo: 2, redo: 0 });
-    assert.deepEqual(s.popUndo("dm"), { entries: [...inverse(2), ...inverse(3), ...inverse(4)], label: "edit 2", group: "stroke" });
+    assertStep(s.popUndo("dm"), { entries: [...inverse(2), ...inverse(3), ...inverse(4)], label: "edit 2", group: "stroke", gesture: { group: "stroke", declared: false } });
     // A group that another op interrupted carries on as a new step.
     s.push("dm", inverse(5), "edit 5", "rect");
     s.push("dm", inverse(6), "edit 6");
