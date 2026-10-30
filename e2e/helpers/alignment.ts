@@ -222,15 +222,16 @@ export async function proficiencyHeightLines(root: Locator, screen: string, requ
  *   line inside it and expertise with a second line 2 px in.
  * "Proficient" or "Expertise" is its label's tooltip and its picture's
  * name. Wherever any of the roll shows, its whole border shows: no box
- * that clips cuts it, except where "…" cuts the words themselves, or a
- * scroller shows the rest by scrolling. A unit's border keeps at least
- * 1 px clear of every character outside it, a neighbor unit's border
- * included, and never crosses its own words. A name a box clips out of
+ * that clips cuts it, past any overflow-clip-margin it keeps, except where
+ * "…" cuts the words themselves, or as far as a scroller scrolls to show
+ * the rest. A unit's border keeps at least 1 px clear of every character
+ * outside it, a neighbor unit's border included, and never crosses its
+ * own words, measured by their glyphs' outlines. A name a box clips out of
  * view whole, or kept from sight for a screen reader as a folded line's
  * parts past its cut are, has nothing to see.
  */
 export async function proficiencyLines(root: Locator, screen: string, required = true): Promise<string[]> {
-  const measured = await root.evaluateAll((roots) => {
+  const measured = await root.evaluateAll(async (roots) => {
     type Rect = { top: number; bottom: number; left: number; right: number; width: number; height: number };
     type Box = { l: number; r: number; t: number; b: number };
     type Css = {
@@ -249,6 +250,8 @@ export async function proficiencyLines(root: Locator, screen: string, required =
       clientTop: number;
       clientWidth: number;
       clientHeight: number;
+      scrollLeft: number;
+      scrollTop: number;
       offsetWidth: number;
       offsetHeight: number;
       scrollWidth: number;
@@ -293,12 +296,77 @@ export async function proficiencyLines(root: Locator, screen: string, required =
       return srgb ? [...srgb[1]!.trim().split(/\s+/).map(Number), srgb[2] === undefined ? 1 : Number(srgb[2])] : null;
     };
     const overlaps = (a: Box, b: Box) => Math.min(a.r, b.r) - Math.max(a.l, b.l) > 0.01 && Math.min(a.b, b.b) - Math.max(a.t, b.t) > 0.01;
-    /** The ink of each character of a text node, from the canvas's own measure of its glyph at the node's font. */
+    /*
+     * A glyph's ink is measured from its outline, not from a canvas at the
+     * size it is drawn. On Linux a canvas gives whole pixels rounded out
+     * (Inter's H 11 px tall at 14 px, where its outline is 10.19), which
+     * would put ink past a frame the outline clears. So each family the
+     * page loads with @font-face is loaded again, pinned to the optical
+     * size Chrome draws it at (its CSS font size, before any zoom), and
+     * measured at 1000 px, where a pixel is a thousandth of the glyph.
+     * A font the page does not load is measured at its own size.
+     */
+    type Face = { load(): Promise<unknown> };
+    type Fonts = { add(face: Face): void };
+    type Rule = { type: number; style: { getPropertyValue(name: string): string } };
+    type Window = {
+      fetch(url: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer> }>;
+      FontFace: new (family: string, source: ArrayBuffer, descriptors: Record<string, string>) => Face;
+      proficiencyInkFaces?: Map<string, string>;
+    };
+    const page = globalThis as unknown as Window;
+    const pinned = (page.proficiencyInkFaces ??= new Map<string, string>());
+    const sources = new Map<string, { src: string; weight: string }>();
+    for (const sheet of Array.from((doc as unknown as { styleSheets?: ArrayLike<{ cssRules: ArrayLike<Rule> }> } | undefined)?.styleSheets ?? [])) {
+      let rules: Rule[] = [];
+      try {
+        rules = Array.from(sheet.cssRules);
+      } catch {
+        continue;
+      }
+      for (const rule of rules) {
+        // 5 is CSSRule.FONT_FACE_RULE. Only the upright face: a mark's words are never set in italics.
+        if (rule.type !== 5 || !["", "normal"].includes(rule.style.getPropertyValue("font-style"))) continue;
+        const family = rule.style.getPropertyValue("font-family").replace(/["']/g, "").trim();
+        const src = /url\(["']?([^"')]+)["']?\)/.exec(rule.style.getPropertyValue("src"))?.[1];
+        if (src && !sources.has(family)) sources.set(family, { src, weight: rule.style.getPropertyValue("font-weight") || "100 900" });
+      }
+    }
+    const opszOf = (look: Css) => parseFloat(look.getPropertyValue("font-size"));
+    const familyOf = (look: Css) => look.getPropertyValue("font-family").split(",")[0]!.replace(/["']/g, "").trim();
+    const keyOf = (look: Css) => `${familyOf(look)}|${opszOf(look)}`;
+    /** Faces still to load, as `family|opsz`, found on a pass that measured them at their drawn size. */
+    const needed = new Set<string>();
+    const outline = (look: Css): { font: string; scale: number } | null => {
+      if (!sources.has(familyOf(look))) return null;
+      const name = pinned.get(keyOf(look));
+      if (!name) {
+        needed.add(keyOf(look));
+        return null;
+      }
+      return { font: `${look.getPropertyValue("font-style")} ${look.getPropertyValue("font-weight")} 1000px "${name}"`, scale: parseFloat(look.getPropertyValue("font-size")) / 1000 };
+    };
+    const loadFaces = async () => {
+      const fonts = (doc as unknown as { fonts?: Fonts } | undefined)?.fonts;
+      if (!fonts) return;
+      for (const key of needed) {
+        const [family, opsz] = key.split("|") as [string, string];
+        const source = sources.get(family)!;
+        const bytes = await (await page.fetch(source.src)).arrayBuffer();
+        const name = `proficiency-ink-${pinned.size}`;
+        const face = new page.FontFace(name, bytes, { weight: source.weight, variationSettings: `"opsz" ${opsz}` });
+        // Loaded before it joins the page's fonts, so the page sees no font load and refits nothing.
+        await face.load();
+        fonts.add(face);
+        pinned.set(key, name);
+      }
+    };
+    /** The ink of each character of a text node: its glyph's outline, placed on the baseline the page lays it on. */
     const inks = (text: El, near?: Box[]): Box[] => {
       const parent = text.parentElement;
       if (!context || !parent) return [];
       const look = style(parent);
-      context.font = look.font;
+      const precise = outline(look);
       const zoom = parent.currentCSSZoom ?? 1;
       const words = text.textContent ?? "";
       const out: Box[] = [];
@@ -312,9 +380,13 @@ export async function proficiencyLines(root: Locator, screen: string, required =
         range.setEnd(text, i + 1);
         const r = Array.from(range.getClientRects()).find((rect) => rect.width > 0 && rect.height > 0);
         if (!r) continue;
+        // The baseline from the drawn size, whose descent the browser rounds as it lays the line out.
+        context.font = look.font;
+        const baseline = r.bottom - context.measureText(ch).fontBoundingBoxDescent * zoom;
+        if (precise) context.font = precise.font;
         const m = context.measureText(ch);
-        const baseline = r.bottom - m.fontBoundingBoxDescent * zoom;
-        out.push({ l: r.left - m.actualBoundingBoxLeft * zoom, r: r.left + m.actualBoundingBoxRight * zoom, t: baseline - m.actualBoundingBoxAscent * zoom, b: baseline + m.actualBoundingBoxDescent * zoom });
+        const k = (precise?.scale ?? 1) * zoom;
+        out.push({ l: r.left - m.actualBoundingBoxLeft * k, r: r.left + m.actualBoundingBoxRight * k, t: baseline - m.actualBoundingBoxAscent * k, b: baseline + m.actualBoundingBoxDescent * k });
       }
       return out;
     };
@@ -325,136 +397,173 @@ export async function proficiencyLines(root: Locator, screen: string, required =
       }
       return into;
     };
-    const units: { mark: El; outer: Box[]; words: string }[] = [];
-    const seenMarks = new Set<El>();
-    let count = 0;
-    for (const label of labels) {
-      const css = style(label);
-      const box = label.getBoundingClientRect();
-      if (box.width === 0 || box.height === 0 || css.visibility === "hidden") continue;
-      // A name kept from sight for a screen reader sits in a box clipped to nothing (lib/a11y.ts VISUALLY_HIDDEN).
-      let unseen = false;
-      for (let ancestor = label.parentElement; ancestor && !unseen; ancestor = ancestor.parentElement) unseen = style(ancestor).clip === "rect(0px, 0px, 0px, 0px)";
-      if (unseen) continue;
-      count++;
-      const level = label.getAttribute("data-proficiency-level");
-      const word = level === "expert" ? "Expertise" : "Proficient";
-      const words = label.textContent?.trim() || "an unnamed mark";
-      const marker = label.querySelector(`[data-proficiency-marker="${level}"][role="img"]`);
-      if (label.getAttribute("title") !== word || marker?.getAttribute("aria-label") !== word) lines.push(`${words}: not named ${word}`);
-      const mark = label.closest("[data-proficiency-mark]");
-      if (!mark) {
-        lines.push(`${words}: no box draws its mark`);
-        continue;
-      }
-      if (mark.getAttribute("data-proficiency-mark") !== level) lines.push(`${words}: its box draws ${mark.getAttribute("data-proficiency-mark")}, not ${level}`);
-      if (seenMarks.has(mark)) continue;
-      seenMarks.add(mark);
-      const form = mark.getAttribute("data-proficiency-form");
-      const look = style(mark);
-      // currentColor resolves to the words' own color, which the lines below must match: never the accent of a focus ring or a chosen control.
-      const color = look.color;
-      const ring = (px: number) => `${color} 0px 0px 0px ${px}px inset`;
-      const shadows = look.boxShadow.split(/,(?![^(]*\))/).map((part) => part.trim());
-      const zoom = mark.currentCSSZoom ?? 1;
-      // Inside a zoomed box the browser reports a length set in px over its zoom: 1px reads 0.77px at 130%.
-      const px = (value: string, want: number) => [1, zoom].some((z) => Math.abs(parseFloat(value) * z - want) < 0.05);
-      const outline = look.outlineStyle === "none" ? null : look;
-      const lineOf = (offset: number) => outline !== null && px(outline.outlineWidth, 1) && outline.outlineColor === color && px(outline.outlineOffset, offset);
-      let right = false;
-      if (form === "unit") {
-        // Expertise's fill is the words' color, faint: a tint, never a second color or a solid block.
-        const hue = channels(color);
-        const fill = channels(look.backgroundColor);
-        const tint = hue !== null && fill !== null && [0, 1, 2].every((i) => Math.abs(hue[i]! - fill[i]!) < 0.01) && fill[3]! >= 0.08 && fill[3]! <= 0.25;
-        const trimmed = look.getPropertyValue("text-box-trim") === "trim-both" && look.getPropertyValue("text-box-edge") === "cap alphabetic";
-        right =
-          trimmed && parseFloat(look.borderTopLeftRadius) > 0 && outline === null && parseFloat(look.borderLeftWidth) === 0 && look.backgroundImage === "none" &&
-          shadows.length === 1 && shadows[0] === `${color} 0px 0px 0px 1px` && (level === "expert" ? tint : fill?.[3] === 0);
-      } else if (form === "frame") {
-        right = shadows.length === 1 && shadows[0] === ring(1) && parseFloat(look.borderTopLeftRadius) > 0 && (level === "expert" ? lineOf(-3) : outline === null);
-      } else if (form === "box") {
-        right = look.borderLeftColor === color && (level === "expert" ? shadows.length === 2 && shadows[1] === ring(3) && outline === null : shadows.length === 1 && shadows[0] === ring(1) && outline === null);
-      }
-      const drawn = form === "unit" ? (level === "expert" ? "expertise's line and tint" : "proficient's line") : level === "expert" ? "expertise's two lines" : "proficient's line";
-      if (!right) lines.push(`${words}: its ${form ?? "unnamed"} box does not draw ${drawn} in its words' color (${look.boxShadow}; fill ${look.backgroundColor}; outline ${look.outlineStyle} ${look.outlineWidth} ${look.outlineOffset})`);
-      const fragments = Array.from(mark.getClientRects()).filter((r) => r.width > 0 && r.height > 0);
-      // What the mark paints: a unit's line 1 px outside its box, frames and boxes inside their own.
-      const outer = fragments.map((r) => grow(r, form === "unit" ? zoom : 0));
-      // The roll's words, not its padded box, say whether a box shows it.
-      const reach = mark.ownerDocument.createRange();
-      reach.selectNodeContents(mark);
-      const said = Array.from(reach.getClientRects()).filter((r) => r.width > 0 && r.height > 0);
-      // Wherever any of the roll shows, its whole border shows. A scroller shows the rest of a roll by scrolling, along each way it scrolls, so no box further out cuts it that way either.
-      let scrollsX = false;
-      let scrollsY = false;
-      walk: for (let ancestor = mark.parentElement; ancestor; ancestor = ancestor.parentElement) {
-        const around = style(ancestor);
-        if (around.overflowX === "visible" && around.overflowY === "visible") continue;
-        const edge = ancestor.getBoundingClientRect();
-        const scale = ancestor.currentCSSZoom ?? 1;
-        // Its box inside the border and any scrollbar. The client sizes are whole pixels, so the far sides come off the drawn edge by what the border and scrollbar take: a fractional width rounds alike in both sizes.
-        const inside: Box = {
-          l: edge.left + ancestor.clientLeft * scale,
-          t: edge.top + ancestor.clientTop * scale,
-          r: edge.right - (ancestor.offsetWidth - ancestor.clientLeft - ancestor.clientWidth) * scale,
-          b: edge.bottom - (ancestor.offsetHeight - ancestor.clientTop - ancestor.clientHeight) * scale,
-        };
-        // A box that clips the roll's words whole holds it out of view, as the sticky result does a part it drops onto its unseen second line: no box further out cuts what is not seen.
-        if (!said.some((r) => overlaps(grow(grow(r, 0), -0.5), inside))) break;
-        scrollsY ||= /auto|scroll/.test(around.overflowY) && ancestor.scrollHeight > ancestor.clientHeight + 1;
-        scrollsX ||= /auto|scroll/.test(around.overflowX) && ancestor.scrollWidth > ancestor.clientWidth + 1;
-        // Only a box a line or two tall clips a line. A pane or scroller that shows part of one is scrolled there, unless the roll is wholly in it.
-        const whole = said.every((r) => r.top >= inside.t - 0.5 && r.bottom <= inside.b + 0.5 && r.left >= inside.l - 0.5 && r.right <= inside.r + 0.5);
-        if (edge.height > 64 * scale && !whole) continue;
-        // "…" cuts a roll's words at the box's end, and their border with them: no border closes around part of its words.
-        const cut = around.textOverflow === "ellipsis" && said.some((r) => r.right > inside.r + 0.5);
-        for (const o of outer) {
-          const past = Math.max(scrollsX ? 0 : inside.l - o.l, scrollsX || cut ? 0 : o.r - inside.r, scrollsY ? 0 : Math.max(inside.t - o.t, o.b - inside.b));
+    const run = () => {
+      lines.length = 0;
+      const units: { mark: El; outer: Box[]; words: string }[] = [];
+      const seenMarks = new Set<El>();
+      let count = 0;
+      for (const label of labels) {
+        const css = style(label);
+        const box = label.getBoundingClientRect();
+        if (box.width === 0 || box.height === 0 || css.visibility === "hidden") continue;
+        // A name kept from sight for a screen reader sits in a box clipped to nothing (lib/a11y.ts VISUALLY_HIDDEN).
+        let unseen = false;
+        for (let ancestor = label.parentElement; ancestor && !unseen; ancestor = ancestor.parentElement) unseen = style(ancestor).clip === "rect(0px, 0px, 0px, 0px)";
+        if (unseen) continue;
+        count++;
+        const level = label.getAttribute("data-proficiency-level");
+        const word = level === "expert" ? "Expertise" : "Proficient";
+        const words = label.textContent?.trim() || "an unnamed mark";
+        const marker = label.querySelector(`[data-proficiency-marker="${level}"][role="img"]`);
+        if (label.getAttribute("title") !== word || marker?.getAttribute("aria-label") !== word) lines.push(`${words}: not named ${word}`);
+        const mark = label.closest("[data-proficiency-mark]");
+        if (!mark) {
+          lines.push(`${words}: no box draws its mark`);
+          continue;
+        }
+        if (mark.getAttribute("data-proficiency-mark") !== level) lines.push(`${words}: its box draws ${mark.getAttribute("data-proficiency-mark")}, not ${level}`);
+        if (seenMarks.has(mark)) continue;
+        seenMarks.add(mark);
+        const form = mark.getAttribute("data-proficiency-form");
+        const look = style(mark);
+        // currentColor resolves to the words' own color, which the lines below must match: never the accent of a focus ring or a chosen control.
+        const color = look.color;
+        const ring = (px: number) => `${color} 0px 0px 0px ${px}px inset`;
+        const shadows = look.boxShadow.split(/,(?![^(]*\))/).map((part) => part.trim());
+        const zoom = mark.currentCSSZoom ?? 1;
+        // Inside a zoomed box the browser reports a length set in px over its zoom: 1px reads 0.77px at 130%.
+        const px = (value: string, want: number) => [1, zoom].some((z) => Math.abs(parseFloat(value) * z - want) < 0.05);
+        const outline = look.outlineStyle === "none" ? null : look;
+        const lineOf = (offset: number) => outline !== null && px(outline.outlineWidth, 1) && outline.outlineColor === color && px(outline.outlineOffset, offset);
+        let right = false;
+        if (form === "unit") {
+          // Expertise's fill is the words' color, faint: a tint, never a second color or a solid block.
+          const hue = channels(color);
+          const fill = channels(look.backgroundColor);
+          const tint = hue !== null && fill !== null && [0, 1, 2].every((i) => Math.abs(hue[i]! - fill[i]!) < 0.01) && fill[3]! >= 0.08 && fill[3]! <= 0.25;
+          const trimmed = look.getPropertyValue("text-box-trim") === "trim-both" && look.getPropertyValue("text-box-edge") === "cap alphabetic";
+          right =
+            trimmed && parseFloat(look.borderTopLeftRadius) > 0 && outline === null && parseFloat(look.borderLeftWidth) === 0 && look.backgroundImage === "none" &&
+            shadows.length === 1 && shadows[0] === `${color} 0px 0px 0px 1px` && (level === "expert" ? tint : fill?.[3] === 0);
+        } else if (form === "frame") {
+          right = shadows.length === 1 && shadows[0] === ring(1) && parseFloat(look.borderTopLeftRadius) > 0 && (level === "expert" ? lineOf(-3) : outline === null);
+        } else if (form === "box") {
+          right = look.borderLeftColor === color && (level === "expert" ? shadows.length === 2 && shadows[1] === ring(3) && outline === null : shadows.length === 1 && shadows[0] === ring(1) && outline === null);
+        }
+        const drawn = form === "unit" ? (level === "expert" ? "expertise's line and tint" : "proficient's line") : level === "expert" ? "expertise's two lines" : "proficient's line";
+        if (!right) lines.push(`${words}: its ${form ?? "unnamed"} box does not draw ${drawn} in its words' color (${look.boxShadow}; fill ${look.backgroundColor}; outline ${look.outlineStyle} ${look.outlineWidth} ${look.outlineOffset})`);
+        const fragments = Array.from(mark.getClientRects()).filter((r) => r.width > 0 && r.height > 0);
+        // What the mark paints: a unit's line 1 px outside its box, frames and boxes inside their own.
+        const outer = fragments.map((r) => grow(r, form === "unit" ? zoom : 0));
+        // The roll's words, not its padded box, say whether a box shows it.
+        const reach = mark.ownerDocument.createRange();
+        reach.selectNodeContents(mark);
+        const said = Array.from(reach.getClientRects()).filter((r) => r.width > 0 && r.height > 0);
+        /*
+         * Wherever any of the roll shows, its whole border shows. Each box
+         * that clips it narrows the window the frame must fit in, its
+         * overflow-clip-margin included. A scroller widens how far the frame
+         * may move, by as far as it scrolls each way: back to its scroll
+         * origin and on to its scroll size, never past. So a frame cut at a
+         * scroller's start, or by a box around a scroller that no scrolling
+         * brings it inside, is cut, and one scrolled partly out of view is
+         * not. The boxes inside a scroller move with the frame as it
+         * scrolls, so past a scroller the window starts again from its own
+         * box along that way.
+         */
+        const held = outer.map((o) => ({ ...o }));
+        const win: Box = { l: -Infinity, r: Infinity, t: -Infinity, b: Infinity };
+        const move = { l: 0, r: 0, t: 0, b: 0 };
+        for (let ancestor = mark.parentElement; ancestor; ancestor = ancestor.parentElement) {
+          const around = style(ancestor);
+          if (around.overflowX === "visible" && around.overflowY === "visible") continue;
+          const edge = ancestor.getBoundingClientRect();
+          const scale = ancestor.currentCSSZoom ?? 1;
+          // Its box inside the border and any scrollbar. The client sizes are whole pixels, so the far sides come off the drawn edge by what the border and scrollbar take: a fractional width rounds alike in both sizes.
+          const inside: Box = {
+            l: edge.left + ancestor.clientLeft * scale,
+            t: edge.top + ancestor.clientTop * scale,
+            r: edge.right - (ancestor.offsetWidth - ancestor.clientLeft - ancestor.clientWidth) * scale,
+            b: edge.bottom - (ancestor.offsetHeight - ancestor.clientTop - ancestor.clientHeight) * scale,
+          };
+          // A box that clips the roll's words whole holds it out of view, as the sticky result does a part it drops onto its unseen second line: no box further out cuts what is not seen.
+          if (!said.some((r) => overlaps(grow(grow(r, 0), -0.5), inside))) break;
+          const scrollsX = /auto|scroll/.test(around.overflowX) && ancestor.scrollWidth > ancestor.clientWidth + 1;
+          const scrollsY = /auto|scroll/.test(around.overflowY) && ancestor.scrollHeight > ancestor.clientHeight + 1;
+          // Only a box a line or two tall clips a line. A pane that shows part of one is scrolled there, unless the roll is wholly in it. A scroller is judged by how far it scrolls.
+          const whole = said.every((r) => r.top >= inside.t - 0.5 && r.bottom <= inside.b + 0.5 && r.left >= inside.l - 0.5 && r.right <= inside.r + 0.5);
+          if (edge.height > 64 * scale && !whole && !scrollsX && !scrollsY) continue;
+          // A box that clips with overflow: clip paints its overflow-clip-margin past its inside too.
+          const margin = (overflow: string) => (overflow === "clip" ? (parseFloat(around.getPropertyValue("overflow-clip-margin")) || 0) * scale : 0);
+          const shown: Box = { l: inside.l - margin(around.overflowX), r: inside.r + margin(around.overflowX), t: inside.t - margin(around.overflowY), b: inside.b + margin(around.overflowY) };
+          if (scrollsX) {
+            move.l -= (ancestor.scrollWidth - ancestor.clientWidth - ancestor.scrollLeft) * scale;
+            move.r += ancestor.scrollLeft * scale;
+            Object.assign(win, { l: -Infinity, r: Infinity });
+          }
+          if (scrollsY) {
+            move.t -= (ancestor.scrollHeight - ancestor.clientHeight - ancestor.scrollTop) * scale;
+            move.b += ancestor.scrollTop * scale;
+            Object.assign(win, { t: -Infinity, b: Infinity });
+          }
+          Object.assign(win, { l: Math.max(win.l, shown.l), r: Math.min(win.r, shown.r), t: Math.max(win.t, shown.t), b: Math.min(win.b, shown.b) });
+          // "…" cuts a roll's words at the box's end, and their border with them: no border closes around part of its words, here or further out.
+          if (around.textOverflow === "ellipsis" && said.some((r) => r.right > inside.r + 0.5)) for (const o of held) o.r = Math.min(o.r, shown.r);
+          // How far past the window the frame stays at its best place along one way: it must shift by at least `need`, by at most `room`, and only within [least, most].
+          const short = (need: number, room: number, least: number, most: number) => {
+            const best = Math.min(most, Math.max(least, (need + room) / 2));
+            return Math.max(need - best, best - room, 0);
+          };
+          const past = Math.max(...held.map((o) => Math.max(short(win.l - o.l, win.r - o.r, move.l, move.r), short(win.t - o.t, win.b - o.b, move.t, move.b))));
           if (past > 0.5) {
             lines.push(`${words}: its border runs ${(past / scale).toFixed(2)} px past the ${ancestor.tagName.toLowerCase()} that clips it`);
-            break walk;
-          }
-        }
-      }
-      if (form !== "unit") continue;
-      units.push({ mark, outer, words });
-      // A unit's border never crosses its own words: their ink stays inside the box its line is drawn around.
-      const inner = fragments.map((r) => grow(r, 0));
-      const own = texts(mark, null).flatMap((text) => inks(text));
-      if (own.some((ink) => !inner.some((band) => ink.l >= band.l - 0.25 && ink.r <= band.r + 0.25 && ink.t >= band.t - 0.25 && ink.b <= band.b + 0.25))) lines.push(`${words}: its border crosses its own words`);
-      // And keeps 1 px clear of every character outside it, in the line or row it sits in: past inline boxes and flex or grid items, to the first box that is neither.
-      let block = mark.parentElement;
-      const item = (node: El) => node.parentElement !== null && /flex|grid/.test(style(node.parentElement).display);
-      for (let up = 0; block && up < 6 && (style(block).display.startsWith("inline") || item(block)); up++) block = block.parentElement;
-      if (!block) continue;
-      const near = outer.map((o) => grow(o, 12 * zoom));
-      for (const text of texts(block, mark)) {
-        const parent = text.parentElement;
-        if (!parent || mark.contains(parent) || style(parent).visibility === "hidden") continue;
-        // Words kept for a screen reader alone, as a folded line's parts past its cut, draw nothing. Words in a sticky layer, as a pane's foot, cover the line rather than stand beside it.
-        let kept = false;
-        for (let up: El | null = parent; up && up !== block && !kept; up = up.parentElement) kept = style(up).clip === "rect(0px, 0px, 0px, 0px)" || (/sticky|fixed/.test(style(up).position) && !up.contains(mark));
-        if (kept) continue;
-        for (const ink of inks(text, near)) {
-          if (!near.some((n) => overlaps(n, ink))) continue;
-          const gap = Math.min(...outer.map((o) => apart(o, ink)));
-          if (gap < 1 * zoom - 0.25) {
-            lines.push(`${words}: its border is ${(gap / zoom).toFixed(2)} px from a character outside it`);
             break;
           }
         }
+        if (form !== "unit") continue;
+        units.push({ mark, outer, words });
+        // A unit's border never crosses its own words: their ink stays inside the box its line is drawn around.
+        const inner = fragments.map((r) => grow(r, 0));
+        const own = texts(mark, null).flatMap((text) => inks(text));
+        if (own.some((ink) => !inner.some((band) => ink.l >= band.l - 0.25 && ink.r <= band.r + 0.25 && ink.t >= band.t - 0.25 && ink.b <= band.b + 0.25))) lines.push(`${words}: its border crosses its own words`);
+        // And keeps 1 px clear of every character outside it, in the line or row it sits in: past inline boxes and flex or grid items, to the first box that is neither.
+        let block = mark.parentElement;
+        const item = (node: El) => node.parentElement !== null && /flex|grid/.test(style(node.parentElement).display);
+        for (let up = 0; block && up < 6 && (style(block).display.startsWith("inline") || item(block)); up++) block = block.parentElement;
+        if (!block) continue;
+        const near = outer.map((o) => grow(o, 12 * zoom));
+        for (const text of texts(block, mark)) {
+          const parent = text.parentElement;
+          if (!parent || mark.contains(parent) || style(parent).visibility === "hidden") continue;
+          // Words kept for a screen reader alone, as a folded line's parts past its cut, draw nothing. Words in a sticky layer, as a pane's foot, cover the line rather than stand beside it.
+          let kept = false;
+          for (let up: El | null = parent; up && up !== block && !kept; up = up.parentElement) kept = style(up).clip === "rect(0px, 0px, 0px, 0px)" || (/sticky|fixed/.test(style(up).position) && !up.contains(mark));
+          if (kept) continue;
+          for (const ink of inks(text, near)) {
+            if (!near.some((n) => overlaps(n, ink))) continue;
+            const gap = Math.min(...outer.map((o) => apart(o, ink)));
+            if (gap < 1 * zoom - 0.25) {
+              lines.push(`${words}: its border is ${(gap / zoom).toFixed(2)} px from a character outside it`);
+              break;
+            }
+          }
+        }
       }
-    }
-    // No two units' borders touch. One space leaves 1.6 px between them at 13 px, and two lines at Inter's own spacing 1 px, except at 13 px and 130%: Chrome rounds that line down to 20 px, which leaves 0.65 px.
-    for (const [i, a] of units.entries()) {
-      for (const b of units.slice(i + 1)) {
-        const gap = Math.min(...a.outer.flatMap((x) => b.outer.map((y) => apart(x, y))));
-        const zoom = a.mark.currentCSSZoom ?? 1;
-        if (gap < 0.5 * zoom) lines.push(`${a.words}: its border is ${(gap / zoom).toFixed(2)} px from ${b.words}'s`);
+      // No two units' borders touch. One space leaves 1.6 px between them at 13 px, and two lines at Inter's own spacing 0.85 px, or 0.65 px at 130%, where Chrome rounds that line down to 20 px.
+      for (const [i, a] of units.entries()) {
+        for (const b of units.slice(i + 1)) {
+          const gap = Math.min(...a.outer.flatMap((x) => b.outer.map((y) => apart(x, y))));
+          const zoom = a.mark.currentCSSZoom ?? 1;
+          if (gap < 0.5 * zoom) lines.push(`${a.words}: its border is ${(gap / zoom).toFixed(2)} px from ${b.words}'s`);
+        }
       }
-    }
-    return { count, lines };
+      return { count, lines };
+    };
+    // A first pass finds the faces to load. Once they are, a second pass measures every glyph by its outline.
+    const first = run();
+    if (needed.size === 0) return first;
+    await loadFaces();
+    return run();
   });
   return [...(required && measured.count === 0 ? ["no visible proficiency marks were measured"] : []), ...measured.lines].map((line) => `${screen}: ${line}`);
 }

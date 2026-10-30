@@ -2,7 +2,7 @@ import { UndoWire, setupHistory } from "./helpers/undoScope.ts";
 import { damageSummaryAlignment } from "./helpers/damageSummary.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
@@ -15,6 +15,7 @@ import { loadMonsters, monsterActor, type SrdMonster } from "../shared/srd/monst
 import { trapPreset } from "../shared/srd/traps.ts";
 import { barControl, ConsoleWatch, dragCells, expandBar, multiSelect, OpSocket, openSceneGroup, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, ROOT, sceneGroup, sceneGroupFold, Shots, sideTabName, SocketWatch, startServer, tapCell, touchSwipe, untilReady, waitFor, wholeInReach, type Server } from "./harness.ts";
 import { DEFAULT_SNAPSHOT_BUDGET } from "../server/rooms/budgets.ts";
+import { INTER_FILES } from "../client/lib/interFont.ts";
 import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measureAlignment, menuWordLines, pillLines, popoverScrollbarLines, proficiencyHeightLines, proficiencyLines, toastLaneLines, toastsUnderCards, type HeaderPlace, type PillPoint } from "./helpers/alignment.ts";
 import { measureSpacing, spacingLines, type SpacingFinding } from "./helpers/spacing.ts";
 import { moreMenuFixture } from "./helpers/menuFixture.ts";
@@ -3547,6 +3548,13 @@ function markedUnit(level: "prof" | "expert", words: string, spoil: { tail?: str
   return `<span data-proficiency-mark="${level}" data-proficiency-form="unit" style="${lines};${spoil.style ?? ""}">${markedLabel(level, words, spoil.title ?? word)}${spoil.tail ?? ""}</span>`;
 }
 
+/**
+ * The app's own Inter for the helper checks' pages, which are not the app's
+ * and so do not load it: a frame's padding is set to clear Inter's marks,
+ * and the system's sans-serif differs on each platform.
+ */
+const INTER_FACE = `<style>@font-face{font-family:Inter;src:url(data:font/woff2;base64,${readFileSync(path.join(ROOT, "public", INTER_FILES.roman)).toString("base64")}) format("woff2");font-weight:100 900}</style>`;
+
 /** A marked name with no mark of its own, as a unit or a button around it draws it. */
 function markedLabel(level: "prof" | "expert", words: string, title = level === "expert" ? "Expertise" : "Proficient"): string {
   const word = level === "expert" ? "Expertise" : "Proficient";
@@ -3926,7 +3934,7 @@ export function proficiencyTests(): void {
   test("fl12-helper. the frame check rejects a wrong or colored line, a missing name or frame, one cut or crowding a character, its words or a neighbor, but not one out of view", async () => {
     const page = await dmContext.newPage();
     try {
-      await page.setContent(`<div style="font:14px/1.4 sans-serif;color:#eee;background:#222;padding:8px">
+      await page.setContent(`${INTER_FACE}<div style="font:14px/1.4 Inter;color:#eee;background:#222;padding:8px">
         <p id="good">Rolls: ${markedUnit("prof", "Perception", { tail: " +5," })} and ${markedUnit("expert", "Sleight of Hand")} today</p>
         <div id="frame" style="width:120px;height:24px;overflow:hidden;display:flex;align-items:center;line-height:1.2"><span data-proficiency-mark="expert" data-proficiency-form="frame" style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:3px 4px;border-radius:6px;box-shadow:inset 0 0 0 1px currentColor;outline:1px solid currentColor;outline-offset:-3px">${markedLabel("expert", "Sleight of Hand check")}</span></div>
         <button id="box" data-proficiency-mark="expert" data-proficiency-form="box" style="color:#eee;background:#333;border:1px solid #777;border-color:currentColor;box-shadow:inset 0 0 0 2px #333, inset 0 0 0 3px currentColor;padding:0 12px;min-height:44px">${markedLabel("expert", "Stealth")} +4</button>
@@ -3937,16 +3945,25 @@ export function proficiencyTests(): void {
         <p id="unnamed">${markedUnit("prof", "Perception", { title: "" })}</p>
         <p id="bare">${markedLabel("prof", "Perception")}</p>
         <div id="clipped" style="width:200px;height:15px;overflow:hidden;line-height:15px">${markedUnit("prof", "Perception")}</div>
+        <div id="clip-margin" style="width:200px;height:15px;overflow:clip;overflow-clip-margin:3px;line-height:15px">${markedUnit("prof", "Perception")}</div>
         <div id="scrolled" style="width:200px;height:28px;padding-left:1px;overflow:auto;line-height:14px"><br>${markedUnit("prof", "Perception")}<br>&nbsp;</div>
+        <div id="first-line" style="width:200px;height:80px;padding-left:1px;overflow:auto;line-height:10px">${markedUnit("prof", "Perception")}${"<br>".repeat(12)}&nbsp;</div>
+        <div id="scrolled-within" style="width:201px;height:27.3px;overflow:hidden"><div style="width:200px;height:28px;padding-left:1px;overflow:auto;line-height:14px"><br>${markedUnit("prof", "Perception")}<br>&nbsp;</div></div>
+        <div id="nested" style="width:100px;overflow:hidden;line-height:20px"><div style="width:200px;overflow-x:auto;overflow-y:hidden"><div style="box-sizing:border-box;width:400px;white-space:nowrap;padding-left:285px">${markedUnit("prof", "DEX", { tail: " +5" })}</div></div></div>
         <div id="ellipsis" style="width:60px;padding-left:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${markedUnit("prof", "Perception check")}</div>
+        <div id="clip-scrolled" style="width:200px;height:30px;padding-left:2px;overflow:auto;line-height:20px"><div style="height:20px"></div><div style="overflow:clip;overflow-clip-margin:2px;white-space:nowrap">${markedUnit("prof", "Perception")}</div><div style="height:60px"></div></div>
+        <div id="clip-scrolled-across" style="width:100px;padding-block:3px;overflow-x:auto;overflow-y:hidden;white-space:nowrap;line-height:20px"><span style="display:inline-block;margin-left:60px;margin-right:200px;overflow:clip;overflow-clip-margin:2px">${markedUnit("prof", "Perception")}</span></div>
+        <div id="ellipsis-scrolled" style="width:100px;height:30px;overflow:auto"><div style="width:60px;padding-left:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${markedUnit("prof", "Perception check")}</div><div style="height:60px"></div></div>
         <div id="dropped" style="height:30px;overflow:hidden"><div style="width:100px;height:20px;overflow:hidden;display:flex;flex-wrap:wrap;line-height:20px"><span style="flex:none;width:100px;height:20px"></span><span>${markedUnit("expert", "Perception")}</span></div></div>
         <p id="comma">${markedUnit("expert", "Perception")}, Stealth</p>
         <div id="covered" style="padding:0 2px"><div style="position:sticky;top:0;margin-bottom:-20px;background:#222">Apply</div>${markedUnit("prof", "Perception")}</div>
         <p id="neighbors">${markedUnit("prof", "DEX", { tail: " +5" })}${markedUnit("prof", "CON", { tail: " +2" })}</p>
         <p id="tight">${markedUnit("prof", "Perception", { style: "padding:0;margin:0" })}</p>
+        <p id="ascender">${markedUnit("prof", "Hff", { style: "padding-top:0" })}</p>
         <p id="lines">${markedUnit("expert", "Perception")} and
           ${markedUnit("prof", "Stealth")}</p>
       </div>`);
+      await page.evaluate(() => (globalThis as unknown as { document: { fonts: { ready: Promise<unknown> } } }).document.fonts.ready);
       const lines = async (id: string) => (await proficiencyLines(page.locator(`#${id}`), "fl12-helper")).join("\n");
       assert.equal(await lines("good"), "", "proficient and expertise units, a comma inside one");
       assert.equal(await lines("frame"), "", "a frame from inside, as the sticky result draws one");
@@ -3958,15 +3975,41 @@ export function proficiencyTests(): void {
       assert.match(await lines("unnamed"), /not named Proficient/);
       assert.match(await lines("bare"), /no box draws its mark/);
       assert.match(await lines("clipped"), /border runs .* past the div that clips it/, "a line box too short for the frame cuts it");
+      assert.equal(await lines("clip-margin"), "", "a box that clips 3 px out from itself shows the frame whole, as a folded group's summary does");
       assert.equal(await lines("scrolled"), "", "a scroller shows the rest of a frame by scrolling");
+      assert.equal(await lines("scrolled-within"), "", "a box a fraction of a pixel short of its scroller cuts nothing scrolling shows, as a sheet around a pane at 85% is");
+      assert.match(await lines("first-line"), /border runs .* past the div that clips it/, "no scrolling shows what is cut before a scroller's start (FL12-OPUS-4)");
+      // Scrolled to its end, the scroller shows the roll's start through the narrower box around it, which cuts the rest for good: no scrolling brings it further in (FL12-SOL-02).
+      await page.locator("#nested > div").evaluate((node) => {
+        (node as unknown as { scrollLeft: number }).scrollLeft = 200;
+      });
+      assert.match(await lines("nested"), /border runs .* past the div that clips it/, "a box around a scroller cuts what no scrolling brings inside it");
       assert.equal(await lines("ellipsis"), "", "a frame cut with its words by \"…\"");
+      assert.equal(await lines("ellipsis-scrolled"), "", "what \"…\" cuts is not seen by a scroller around it either");
+      assert.equal(await lines("clip-scrolled"), "", "a box that clips a line scrolls with it, so a scroller still shows the rest of its frame");
+      assert.equal(await lines("clip-scrolled-across"), "", "and so does one scrolled across");
       // FL-7's foot check failed here: a part the sticky result drops onto its unseen second line is out of view, not cut by the boxes further out.
       assert.equal(await lines("dropped"), "", "a roll a box clips out of view whole has no border to cut");
       assert.match(await lines("comma"), /border is .* px from a character outside it/, "a comma right after a frame crowds it");
       assert.equal(await lines("covered"), "", "a sticky foot over a frame covers it rather than crowds it");
       assert.match(await lines("neighbors"), /border is .* px from/, "two frames side by side touch");
       assert.match(await lines("tight"), /border crosses its own words/, "a frame with no room inside it runs over its words");
+      // Inter's f stands 0.47 px over its capitals at its 14 px optical size, and level with them at 32: the outline is measured at the size the page draws.
+      assert.match(await lines("ascender"), /border crosses its own words/, "a frame at the capitals' height crosses an f");
       assert.equal(await lines("lines"), "", "an expertise frame beside a space and a proficient one keep clear");
+      // Linux's canvas gives a glyph's bounds in whole pixels rounded out (Inter's H 11 px tall at 14 px). The check measures outlines, so a frame that clears them still passes there.
+      await page.evaluate(() => {
+        type Metrics = Record<"width" | "fontBoundingBoxAscent" | "fontBoundingBoxDescent" | "actualBoundingBoxAscent" | "actualBoundingBoxDescent" | "actualBoundingBoxLeft" | "actualBoundingBoxRight", number>;
+        const proto = (globalThis as unknown as { CanvasRenderingContext2D: { prototype: { measureText(text: string): Metrics } } }).CanvasRenderingContext2D.prototype;
+        const measure = proto.measureText;
+        proto.measureText = function (text: string) {
+          const m = measure.call(this, text);
+          const out = (v: number) => Math.ceil(v - 1e-6);
+          return { ...m, width: m.width, fontBoundingBoxAscent: m.fontBoundingBoxAscent, fontBoundingBoxDescent: m.fontBoundingBoxDescent, actualBoundingBoxAscent: out(m.actualBoundingBoxAscent), actualBoundingBoxDescent: out(m.actualBoundingBoxDescent), actualBoundingBoxLeft: out(m.actualBoundingBoxLeft), actualBoundingBoxRight: out(m.actualBoundingBoxRight) };
+        };
+      });
+      assert.equal(await lines("good"), "", "whole-pixel canvas bounds do not cross a frame its glyphs' outlines clear");
+      assert.match(await lines("tight"), /border crosses its own words/, "and a frame with no room still crosses them");
     } finally {
       await page.close();
     }
