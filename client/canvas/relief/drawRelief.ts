@@ -1,8 +1,8 @@
 import type { TexturedTerrain } from "../../features/builder/geometry.ts";
 import { TERRAIN_COLORS, TERRAIN_SWATCHES, TEXTURE_CELLS } from "../../features/builder/textures.ts";
-import { viewToScreen, type Camera } from "../../lib/camera.ts";
+import type { Camera } from "../../lib/camera.ts";
 import { theme } from "../../lib/theme.ts";
-import { isometric, K, toView, turnAxes, type Turn, type ViewPoint } from "../../lib/view.ts";
+import { isometric, K, toView, turnAxes, type Turn } from "../../lib/view.ts";
 import type { BandPart } from "../../features/areas/volume.ts";
 import { meets, type DrawPiece, type VolumePiece } from "./buckets.ts";
 import { patternOf } from "./looks.ts";
@@ -38,7 +38,24 @@ export type DrawContext = {
   openings?: (region: PitRegion, box: VBox, asker: object) => readonly CellPiece[];
   /** The ground's pixels as one pattern for every top a relief draw copies, made again once the ground has drawn since. Absent, each copy makes its own. */
   groundCopy?: GroundCopy;
+  /**
+   * On a scroll of the kept picture (kept.ts), the boxes it paints, in
+   * device pixels: a piece draws when its painted bounds meet one of them,
+   * each tested on its own. Absent, the canvas's whole view.
+   */
+  regions?: readonly VBox[] | null;
+  /** Where a draw records the painted box, in device pixels, of each cell it draws whose top or floor takes the face tone (docs/design-v1-relief-pan.md 5.3). */
+  toned?: VBox[];
 };
+
+/**
+ * How far a relief piece's paint reaches past its geometric bounds, in
+ * device pixels: half of its 1 device pixel outline, and 1 more for the
+ * antialiasing of its edges (docs/design-v1-relief-pan.md 5.2).
+ */
+const PIECE_REACH_PX = 1.5;
+/** The same for an area's bands, in CSS pixels before the 1 device pixel: half of a selected area's 2.5 px outline, the widest it draws. */
+const VOLUME_REACH_CSS = 1.25;
 
 /** A pattern of the ground stage's pixels, and which of its draws it holds (`version` counts them, IsoBoard.tsx). */
 export type GroundCopy = { version: number; made: number; canvas: HTMLCanvasElement | null; pattern: CanvasPattern | null };
@@ -56,10 +73,103 @@ export function viewSpaceOf(g: CanvasRenderingContext2D, camera: Camera, pixelRa
   viewSpace(g, { camera, pixelRatio });
 }
 
-/** A view point in device pixels. */
-function device(dc: DrawContext, v: Pt): Pt {
-  const p = viewToScreen(dc.camera, v as ViewPoint);
-  return { x: p.x * dc.pixelRatio, y: p.y * dc.pixelRatio };
+/** A view box in device pixels, grown by `reach` device pixels on every side. */
+export function deviceBox(dc: Pick<DrawContext, "camera" | "pixelRatio">, b: VBox, reach = 0): VBox {
+  const k = dc.pixelRatio * dc.camera.scale;
+  const ex = dc.pixelRatio * dc.camera.x;
+  const ey = dc.pixelRatio * dc.camera.y;
+  return { x0: b.x0 * k + ex - reach, y0: b.y0 * k + ey - reach, x1: b.x1 * k + ex + reach, y1: b.y1 * k + ey + reach };
+}
+
+/** A relief piece's painted bounds in device pixels: what its fills, outlines and their antialiasing can touch. */
+export function paintedBox(p: StaticPiece, dc: DrawContext): VBox {
+  return deviceBox(dc, boundsAt(p, dc.turn), PIECE_REACH_PX);
+}
+
+/** A standee's painted bounds in device pixels: its StandeeShape bounds, which hold its ring, shadow, outlines, caught rings and facing tick with its decor's reach, and its antialiasing. */
+export function standeePaintedBox(s: { bounds: VBox }, dc: DrawContext): VBox {
+  return deviceBox(dc, s.bounds, 1);
+}
+
+/** An area's band's painted bounds in device pixels. */
+function volumeBox(v: VolumePiece, dc: DrawContext): VBox {
+  return deviceBox(dc, v.bounds, VOLUME_REACH_CSS * dc.pixelRatio + 1);
+}
+
+/** Each run's pieces' bounds together at a turn, kept with the run's list, which a layout makes anew whenever it changes. */
+const runBounds = new WeakMap<readonly DrawPiece[], { turn: Turn; box: VBox }>();
+
+/**
+ * A run's painted bounds in device pixels: its pieces' bounds together,
+ * grown by the widest reach any of them paints, an area's selected outline.
+ * A scroll skips a run whose box meets none of its regions.
+ */
+export function runPaintedBox(pieces: readonly DrawPiece[], dc: DrawContext): VBox {
+  let kept = runBounds.get(pieces);
+  if (!kept || kept.turn !== dc.turn) {
+    const box: VBox = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+    for (const p of pieces) {
+      const b = p.kind === "volume" ? p.bounds : boundsAt(p, dc.turn);
+      box.x0 = Math.min(box.x0, b.x0);
+      box.y0 = Math.min(box.y0, b.y0);
+      box.x1 = Math.max(box.x1, b.x1);
+      box.y1 = Math.max(box.y1, b.y1);
+    }
+    kept = { turn: dc.turn, box };
+    runBounds.set(pieces, kept);
+  }
+  return deviceBox(dc, kept.box, Math.max(PIECE_REACH_PX, VOLUME_REACH_CSS * dc.pixelRatio + 1));
+}
+
+/** Whether a painted box meets what this draw paints: one of a scroll's regions, else the canvas's view. */
+function paints(box: VBox, dc: DrawContext, view: VBox): boolean {
+  const regions = dc.regions;
+  if (!regions) return meets(box, view);
+  for (const r of regions) if (meets(box, r)) return true;
+  return false;
+}
+
+/**
+ * Whether a cell's top or floor takes the face tone: some pixel of it on
+ * the canvas copies ground from past the ground canvas's top or bottom.
+ * The test is the cell's own, so its look never depends on the cells it
+ * batches with. A copy reads straight up or down from where it shows, so
+ * the canvas's sides never tone a pixel that shows (docs/design-v1-relief-pan.md 5.3).
+ */
+function tonedCell(c: CellPiece, dc: DrawContext, view: VBox): boolean {
+  const ground = dc.ground;
+  if (!ground || ground.width === 0 || ground.height === 0) return true;
+  const k = dc.pixelRatio * dc.camera.scale;
+  const ey = dc.pixelRatio * dc.camera.y;
+  const s = shapeOf(c, dc.turn).source;
+  const shift = K * c.z * k;
+  // The rows it shows on, with the antialiased pixel past each edge, which copies the ground at its own middle, then the rows of the ground they copy.
+  const y0 = Math.max(s.y0 * k + ey - shift - EDGE_PX, view.y0);
+  const y1 = Math.min(s.y1 * k + ey - shift + EDGE_PX, view.y1);
+  if (y0 >= y1) return false;
+  return y0 + shift < 0 || y1 + shift > ground.height;
+}
+
+/** The pixel an antialiased edge reaches past a fill's polygon. */
+const EDGE_PX = 1;
+
+/** The canvas's view in device pixels. */
+function deviceView(dc: DrawContext): VBox {
+  return deviceBox(dc, dc.view);
+}
+
+/**
+ * The painted boxes, in device pixels, of every cell of `pieces` on the
+ * canvas whose top or floor takes the face tone at this camera: the cells
+ * a scroll repaints, as they may gain or lose the ground (5.3).
+ */
+export function tonedBoxes(pieces: readonly DrawPiece[], dc: DrawContext, out: VBox[]): void {
+  const view = deviceView(dc);
+  for (const p of pieces) {
+    if (p.kind !== "column" && p.kind !== "pit") continue;
+    const box = paintedBox(p, dc);
+    if (meets(box, view) && tonedCell(p, dc, view)) out.push(box);
+  }
 }
 
 /** A cell's polygon at height z, in view units, corner by corner. */
@@ -293,32 +403,22 @@ function topsPath(g: CanvasRenderingContext2D, cells: readonly CellPiece[], turn
  * path of those polygons in view units, filled with the ground's pixels
  * shifted by the lift.
  */
-function copyGround(g: CanvasRenderingContext2D, cells: readonly CellPiece[], dc: DrawContext, tone: string): void {
+function copyGround(g: CanvasRenderingContext2D, cells: readonly CellPiece[], dc: DrawContext, tone: string, view: VBox): void {
   const shift = K * cells[0]!.z * dc.camera.scale * dc.pixelRatio;
-  const path = topsPath(g, cells, dc.turn);
-  let x0 = Infinity;
-  let y0 = Infinity;
-  let x1 = -Infinity;
-  let y1 = -Infinity;
+  // Past the ground stage's margin there is nothing to copy: the face tone fills the rest until the map pans up. Each cell tones by its own copy, never its batch's.
+  let toned: CellPiece[] | null = null;
   for (const c of cells) {
-    // The source box from the clip's own polygon at 0, before the copy's lift, so a pit's floor reads exactly the pixels it shows.
-    const box = shapeOf(c, dc.turn).source;
-    x0 = Math.min(x0, box.x0);
-    y0 = Math.min(y0, box.y0);
-    x1 = Math.max(x1, box.x1);
-    y1 = Math.max(y1, box.y1);
+    if (!tonedCell(c, dc, view)) continue;
+    (toned ??= []).push(c);
+    dc.toned?.push(paintedBox(c, dc));
   }
-  // The view box in device pixels: the camera only scales and moves, so its corners map to corners.
-  ({ x: x0, y: y0 } = device(dc, { x: x0, y: y0 }));
-  ({ x: x1, y: y1 } = device(dc, { x: x1, y: y1 }));
-  const ground = dc.ground;
-  // Past the ground stage's margin there is nothing to copy: the face tone fills the rest until the map pans up.
-  if (!ground || y1 > ground.height || y0 < 0 || x0 < 0 || x1 > ground.width) {
+  if (toned) {
     g.fillStyle = tone;
-    fillWith(g, path);
+    fillWith(g, topsPath(g, toned, dc.turn));
   }
   const pattern = groundPattern(g, dc);
   if (!pattern) return;
+  const path = topsPath(g, cells, dc.turn);
   // Pattern space is the ground's device pixels, moved up by the lift: undo the run's view transform, then shift.
   const k = dc.pixelRatio * dc.camera.scale;
   const ex = dc.pixelRatio * dc.camera.x;
@@ -361,12 +461,12 @@ function outlineTops(g: CanvasRenderingContext2D, cells: readonly CellPiece[], d
  * nearer pit of the region draws later, so where two floors meet on screen
  * the nearer one shows, each with its own pixels and one shade.
  */
-function drawPit(g: CanvasRenderingContext2D, p: CellPiece, dc: DrawContext): void {
+function drawPit(g: CanvasRenderingContext2D, p: CellPiece, dc: DrawContext, view: VBox): void {
   g.save();
   g.beginPath();
   for (const o of openingsOf(p, dc)) addPoly(g, shapeOf(o, dc.turn).atZero);
   g.clip("nonzero");
-  copyGround(g, [p], dc, theme.relief.side);
+  copyGround(g, [p], dc, theme.relief.side, view);
   const floor = topsPath(g, [p], dc.turn);
   g.fillStyle = theme.relief.pitShade;
   fillWith(g, floor);
@@ -440,14 +540,24 @@ function drawStanding(g: CanvasRenderingContext2D, w: WallItem, dc: DrawContext)
   fillSide(g, a, b, h, look, a.x < b.x === a.y > b.y, dc, w.piece.kind === "wall" ? theme.relief.wallTint : null);
 }
 
-/** Draws one run of pieces, in the order given. */
+/**
+ * Draws one run of pieces, in the order given, each whose painted bounds
+ * meet what this draw paints (the view, or a scroll's regions). Tops batch
+ * by the run itself, never by what a draw culls: a batch is consecutive
+ * columns at one lift, parted by any other piece, drawn or not. A scroll's
+ * strip and a whole draw of one layout then fill the same unions, so their
+ * pixels agree where neighboring tops meet (docs/design-v1-relief-pan.md 5.2).
+ */
 export function drawRun(g: CanvasRenderingContext2D, pieces: readonly DrawPiece[], dc: DrawContext): void {
   g.save();
   viewSpace(g, dc);
+  const view = deviceView(dc);
   let batch: CellPiece[] = [];
+  let lift: number | null = null;
   const flush = () => {
+    lift = null;
     if (batch.length === 0) return;
-    copyGround(g, batch, dc, batch[0]!.look.color);
+    copyGround(g, batch, dc, batch[0]!.look.color, view);
     outlineTops(g, batch, dc);
     batch = [];
   };
@@ -468,7 +578,7 @@ export function drawRun(g: CanvasRenderingContext2D, pieces: readonly DrawPiece[
       i = end - 1;
       flush();
       for (const run of byArea.values()) {
-        if (!run.some((v) => meets(v.bounds, dc.view))) continue;
+        if (!run.some((v) => paints(volumeBox(v, dc), dc, view))) continue;
         const high: BandPart[] = [];
         const low: BandPart[] = [];
         for (const v of run) {
@@ -481,17 +591,19 @@ export function drawRun(g: CanvasRenderingContext2D, pieces: readonly DrawPiece[
       }
       continue;
     }
-    if (!meets(boundsAt(p, dc.turn), dc.view)) continue;
     if (p.kind === "column") {
       // Sides of later columns at one lift never overlap earlier tops at that lift, so the tops can wait for one copy.
-      if (batch.length > 0 && batch[0]!.z !== p.z) flush();
+      if (lift !== null && lift !== p.z) flush();
+      lift = p.z;
+      if (!paints(paintedBox(p, dc), dc, view)) continue;
       drawSides(g, p, dc);
       batch.push(p);
       continue;
     }
     flush();
+    if (!paints(paintedBox(p, dc), dc, view)) continue;
     if (p.kind === "wall") drawWall(g, p, dc);
-    else drawPit(g, p, dc);
+    else drawPit(g, p, dc, view);
   }
   flush();
   g.restore();

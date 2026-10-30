@@ -5,9 +5,10 @@ import { useStore } from "zustand";
 import type { BuildChunk, FogTile, Scene } from "#shared/model.ts";
 import { measurePill } from "../../../canvas/measureText.ts";
 import { VISUALLY_HIDDEN } from "../../../lib/a11y.ts";
-import type { Camera, Insets, Size } from "../../../lib/camera.ts";
+import type { Insets, Size } from "../../../lib/camera.ts";
+import { useChromeCamera, type ChromeCamera } from "../../../state/liveCamera.ts";
 import { groundAnchor } from "../../../canvas/anchors.ts";
-import { drawnAt, type BoardPick } from "../../../canvas/boardPick.ts";
+import { drawnAt } from "../../../canvas/boardPick.ts";
 import { theme } from "../../../lib/theme.ts";
 import { useScoped } from "../../../state/scope.ts";
 import { TOAST_MS } from "../../../state/store.ts";
@@ -43,7 +44,7 @@ const EDGE_PX = 1.5;
  * screen reader already knows it when the first reading arrives. Only the
  * pill comes and goes.
  */
-export function ReadoutHost(props: { scene: Scene; tool: string; camera: Camera; viewport: Size; insets: Insets; pick: BoardPick }) {
+export function ReadoutHost(props: { scene: Scene; tool: string; chrome: ChromeCamera; viewport: Size; insets: Insets }) {
   const slot = useScoped(readoutSlot);
   const readout = useStore(slot.store, (s) => s.readout);
   const spoken = useStore(slot.store, (s) => s.spoken);
@@ -87,19 +88,21 @@ export function ReadoutHost(props: { scene: Scene; tool: string; camera: Camera;
         {spoken}
       </div>
       {open && readout ? (
-        <ReadoutPill words={words} cell={readout.cell} grid={sceneGrid(scene)} camera={props.camera} viewport={props.viewport} insets={props.insets} pick={props.pick} />
+        <ReadoutPill words={words} cell={readout.cell} grid={sceneGrid(scene)} chrome={props.chrome} viewport={props.viewport} insets={props.insets} />
       ) : null}
     </>
   );
 }
 
 /** The pill points at its cell's middle, on the cell's top as the isometric view raises it (docs/design-v1-isometric-view.md 5.3). */
-function ReadoutPill(props: { words: ReadoutWords; cell: { x: number; y: number }; grid: Grid; camera: Camera; viewport: Size; insets: Insets; pick: BoardPick }) {
+function ReadoutPill(props: { words: ReadoutWords; cell: { x: number; y: number }; grid: Grid; chrome: ChromeCamera; viewport: Size; insets: Insets }) {
   const { words, grid } = props;
+  // At the camera the canvas last drew, subscribed only while the pill shows (docs/design-v1-relief-pan.md 6.3).
+  const { camera, pick } = useChromeCamera(props.chrome, true)!;
   const width = Math.ceil(measurePill(words.pill, FONT_PX, theme.font.body)) + 2 * PAD_PX;
   // A hex's middle is its center, its cell being its key.
   const middle = isHex(grid) ? hexCenter(grid, { col: props.cell.x, row: props.cell.y }) : { x: props.cell.x + 0.5, y: props.cell.y + 0.5 };
-  const anchor = groundAnchor(props.camera, props.pick, middle, drawnAt(props.pick, middle));
+  const anchor = groundAnchor(camera, pick, middle, drawnAt(pick, middle));
   const place = readoutPlace({ anchor, viewport: props.viewport, insets: props.insets, width, height: BODY_HEIGHT });
   if (!place) return null;
   const bodyTop = place.pointer?.side === "up" ? POINTER_PX : 0;

@@ -1,8 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import type { StoreApi } from "zustand/vanilla";
 import { ISO_TEST_FLAG } from "../../features/view/choice.ts";
 import { pickView, turnView, withPick, withTurn, type StoredView, type ViewPick } from "../../features/view/store.ts";
+import type { Camera } from "../../lib/camera.ts";
 import type { Turn } from "../../lib/view.ts";
+import type { KeptStats } from "./kept.ts";
 import type { Item } from "./buckets.ts";
 import type { VolumesNow } from "./volumes.ts";
 
@@ -15,7 +17,51 @@ import type { VolumesNow } from "./volumes.ts";
  */
 const HOOK = "__rvttIsoHook";
 
-export type Hook = { pick(pick: ViewPick | "follow"): void; turn(turn: Turn): void; layout?(): BoardLayout | null; volumes?(): BoardVolumesNow | null };
+export type Hook = {
+  pick(pick: ViewPick | "follow"): void;
+  turn(turn: Turn): void;
+  layout?(): BoardLayout | null;
+  volumes?(): BoardVolumesNow | null;
+  /** The board's kept picture's counts (docs/design-v1-relief-pan.md 9 and 10.3). */
+  kept?(): KeptCounts | null;
+  /** Repaints the relief whole at the camera on screen, on the next frame, as any content change does. */
+  repaint?(): void;
+  /** The relief canvas's pixels as a PNG data URL, exactly as kept. */
+  pixels?(): string | null;
+  /** The camera the canvas last drew. */
+  drawn?(): Camera | null;
+};
+
+/** What the bench and the tests count of a board's frames: the kept picture's draws and painted shares, background slices, and board and map renders. */
+export type KeptCounts = KeptStats & { probe: string; frames: number; draws: number; cameraGroundDraws: number; slices: number; slicesInWhole: number; boardCommits: number; mapCommits: number };
+
+/** A mounted board's kept picture, as the hook reads it. */
+export type KeptReport = { counts(): Omit<KeptCounts, "boardCommits" | "mapCommits"> | null; repaint(): void; pixels(): string | null; drawn(): Camera | null };
+
+const keptBoards: KeptReport[] = [];
+/** Commits of the isometric board and of the map stage, counted only with the test flag. */
+const commits = { board: 0, map: 0 };
+
+/** Registers a board's kept picture for the hook while it is mounted, with the test flag only. */
+export function useKeptReport(report: () => KeptReport): void {
+  const on = flagged();
+  useEffect(() => {
+    if (!on) return;
+    const mine = report();
+    keptBoards.push(mine);
+    return () => {
+      keptBoards.splice(keptBoards.indexOf(mine), 1);
+    };
+  }, [on]);
+}
+
+/** Counts a commit of the board or the map stage, with the test flag only: a pan inside a cull step commits neither (docs/design-v1-relief-pan.md 6). */
+export function useCommitCount(which: "board" | "map"): void {
+  const on = flagged();
+  useLayoutEffect(() => {
+    if (on) commits[which]++;
+  });
+}
 
 /** How many areas stand on the board and whether one waits to, read without the depth list, so the bench can ask each frame of a build at no cost to it. */
 export type BoardVolumesNow = { standing: number; waiting: boolean };
@@ -110,6 +156,13 @@ export function useIsoTestHook(key: string, sceneId: string, memory?: StoreApi<S
         const r = boards.at(-1)?.last;
         return r ? { standing: r.volumes?.standing.size ?? 0, waiting: r.volumes?.waiting ?? false } : null;
       },
+      kept: () => {
+        const c = keptBoards.at(-1)?.counts();
+        return c ? { ...c, boardCommits: commits.board, mapCommits: commits.map } : null;
+      },
+      repaint: () => keptBoards.at(-1)?.repaint(),
+      pixels: () => keptBoards.at(-1)?.pixels() ?? null,
+      drawn: () => keptBoards.at(-1)?.drawn() ?? null,
     });
   }, [on, key, sceneId, memory]);
 }

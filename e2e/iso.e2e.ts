@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -10,7 +10,7 @@ import { ConsoleWatch, openSideTab, OpSocket, pagePoint, pickOption, pickTool, r
 import { alignmentLines, LIMIT_PX, measureAlignment } from "./helpers/alignment.ts";
 import { isometric, toWorld, type Turn, type ViewPoint } from "../client/lib/view.ts";
 import { placedOnHex } from "../shared/rules/footprint.ts";
-import { cornerAt, hexCenter, hexCorners, hexNeighbors, type Hex, type HexGrid } from "../shared/rules/hex.ts";
+import { cornerAt, hexCenter, hexCorners, hexInScene, hexNeighbors, type Hex, type HexGrid } from "../shared/rules/hex.ts";
 
 /**
  * The isometric view's choice (docs/design-v1-isometric-view.md 7 and 8,
@@ -2057,6 +2057,224 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await reopenRoom(dm);
     assert.deepEqual(consoles.dm.errors, [], "the DM's board drew without an error");
     assert.deepEqual(consoles.pat.errors, [], "Pat's board drew without an error");
+  });
+
+  test("HXPERF2-1. a pan keeps the relief's picture: by touch, Space with the left button and the middle button, on hex rows, hex columns and squares at a pixel ratio of 2 and hex rows at 1.5, across cull steps, past a pit by the screen's top, through a height edit, a fog reveal and a turn, equal to a whole repaint, with a height readout on its cell at 100% and 130%", async () => {
+    if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+    const bounds = { w: 30, h: 30 };
+    const map = await uploadStripes(bounds);
+    const patState = await patContext.storageState();
+    const dmState = await dmContext.storageState();
+    const phone15 = await browser.newContext({ storageState: patState, viewport: { width: 390, height: 844 }, deviceScaleFactor: 1.5, isMobile: true, hasTouch: true });
+    const mouse2 = await browser.newContext({ storageState: dmState, viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
+    for (const c of [phone15, mouse2]) await c.addInitScript(HOOK_FLAG);
+    const pat15 = await phone15.newPage();
+    const dmMouse = await mouse2.newPage();
+    consoles.phone.attach(pat15);
+    consoles.keys.attach(dmMouse);
+    await pat15.goto(pat.url());
+    await dmMouse.goto(dm.url());
+    type Kept = { whole: number; scrolls: number; why: Record<string, number>; probe: string; boardCommits: number; mapCommits: number };
+    const kept = (page: Page) => page.evaluate(() => (globalThis as unknown as { __rvttIsoHook: { kept(): Kept | null } }).__rvttIsoHook.kept());
+    const nextFrames = (page: Page, n: number) =>
+      page.evaluate(
+        (k) =>
+          new Promise<void>((r) => {
+            const raf = (globalThis as unknown as { requestAnimationFrame(f: () => void): number }).requestAnimationFrame;
+            let i = 0;
+            const f = () => (++i >= k ? r() : void raf(f));
+            raf(f);
+          }),
+        n,
+      );
+    /** The relief canvas as kept, then after a whole repaint at the same camera: their largest difference in any channel. */
+    const compare = async (page: Page, what: string) => {
+      await nextFrames(page, 4);
+      const before = await kept(page);
+      const a = await page.evaluate(() => (globalThis as unknown as { __rvttIsoHook: { pixels(): string | null } }).__rvttIsoHook.pixels());
+      await page.evaluate(() => (globalThis as unknown as { __rvttIsoHook: { repaint(): void } }).__rvttIsoHook.repaint());
+      await nextFrames(page, 3);
+      const b = await page.evaluate(() => (globalThis as unknown as { __rvttIsoHook: { pixels(): string | null } }).__rvttIsoHook.pixels());
+      const after = await kept(page);
+      assert.ok(a && b, `${what}: the relief canvas reads back`);
+      assert.ok(after!.whole > before!.whole, `${what}: the hook's repaint drew whole`);
+      const decode = async (url: string) => (await sharp(Buffer.from(url.split(",")[1]!, "base64")).raw().toBuffer({ resolveWithObject: true }));
+      const [x, y] = await Promise.all([decode(a), decode(b)]);
+      assert.equal(x.info.width, y.info.width);
+      let worst = 0;
+      let over = 0;
+      const box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+      const ch = x.info.channels;
+      for (let i = 0; i < x.data.length; i++) {
+        const d = Math.abs(x.data[i]! - y.data[i]!);
+        worst = Math.max(worst, d);
+        if (d <= 2) continue;
+        over++;
+        const px = Math.floor(i / ch);
+        const [cx, cy] = [px % x.info.width, Math.floor(px / x.info.width)];
+        box.x0 = Math.min(box.x0, cx);
+        box.y0 = Math.min(box.y0, cy);
+        box.x1 = Math.max(box.x1, cx);
+        box.y1 = Math.max(box.y1, cy);
+      }
+      if (worst > 2 && SHOT_DIR !== "0") {
+        mkdirSync(SHOT_DIR, { recursive: true });
+        const name = what.replace(/[^a-z0-9]+/gi, "-");
+        await sharp(x.data, { raw: x.info }).png().toFile(path.join(SHOT_DIR, `hxperf2-${name}-kept.png`));
+        await sharp(y.data, { raw: y.info }).png().toFile(path.join(SHOT_DIR, `hxperf2-${name}-whole.png`));
+      }
+      maxDiffs.push(`${what}: ${worst}/255 at most, ${over} channel values past 2/255`);
+      // The GPU antialiases a line a few levels apart when it draws it in a strip and in a whole repaint: up to one antialiased edge pixel in ten thousand may differ by more than 2/255, never a region.
+      assert.ok(over <= x.data.length * 1e-4 && worst <= 64, `${what}: the kept picture differs from a whole repaint by ${worst}/255 in a channel, in ${over} channel values within ${JSON.stringify(box)} of ${x.info.width}x${x.info.height}`);
+    };
+    const maxDiffs: string[] = [];
+    /** 37 small moves one way and 37 back, each in a frame of its own, with `midway` between the halves. */
+    const pan = async (page: Page, how: "touch" | "space" | "middle", midway?: () => Promise<void>) => {
+      // On open map left of the middle, clear of the bars: the isometric stage's own box, not the hidden Top-down one's.
+      const board = await isoCamera(page);
+      const start = { x: board.left + 120, y: board.top + 360 };
+      const cdp = how === "touch" ? await page.context().newCDPSession(page) : null;
+      const at = (i: number) => ({ x: start.x + i * 7, y: start.y + i * 3 });
+      if (cdp) await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ ...start, id: 0 }] });
+      else {
+        if (how === "space") await page.keyboard.down("Space");
+        await page.mouse.move(start.x, start.y);
+        await page.mouse.down({ button: how === "middle" ? "middle" : "left" });
+      }
+      const move = async (p: { x: number; y: number }) => {
+        if (cdp) await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ ...p, id: 0 }] });
+        else await page.mouse.move(p.x, p.y);
+        await nextFrames(page, 1);
+      };
+      for (let i = 1; i <= 37; i++) await move(at(i));
+      if (midway) await midway();
+      for (let i = 36; i >= 0; i--) await move(at(i));
+      if (cdp) {
+        await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+        await cdp.detach();
+      } else {
+        await page.mouse.up({ button: how === "middle" ? "middle" : "left" });
+        if (how === "space") await page.keyboard.up("Space");
+      }
+    };
+
+    for (const shape of ["hexRows", "hexColumns", "squares"] as const) {
+      const sceneId = randomUUID();
+      const walker = randomUUID();
+      await ops.send({ t: "scene.create", scene: { id: sceneId, name: `HXPERF2 ${shape}`, bounds, fogEnabled: true, ...(shape === "squares" ? {} : { gridShape: shape }) } });
+      await ops.send({ t: "scene.setMap", sceneId, map });
+      // Opens with a band of pits across the top of the screen, and the rest raised 5 to 15 ft in alternation.
+      await ops.send({ t: "scene.update", sceneId, patch: { blockMovement: false, defaultView: { x: 12, y: 9, zoom: 40 } } });
+      const raised: Record<number, string[]> = { 5: [], 10: [], 15: [], [-10]: [] };
+      const inScene = (x: number, y: number) => shape === "squares" || hexInScene({ shape: "hex", orient: shape === "hexRows" ? "rows" : "columns" }, bounds, { col: x, row: y });
+      for (let y = 0; y < bounds.h; y++) for (let x = 0; x < bounds.w; x++) if (inScene(x, y)) raised[y >= 3 && y <= 5 ? -10 : [5, 10, 15][(x + 2 * y) % 3]!]!.push(`${x},${y}`);
+      for (const [height, cells] of Object.entries(raised)) await ops.send({ t: "build.height", sceneId, cells, height: Number(height) });
+      await ops.send(tokenOp(walker, { sceneId, kind: "npc", name: "Walker", size: "medium", x: 13, y: 12, disposition: "ally", ownerIds: [patSocket.you!.memberId] }));
+      await ops.send({ t: "fog.live", sceneId, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "rect", x: 0, y: 0, w: 22, h: 30 } }] });
+      await ops.send({ t: "room.setPlayerScene", sceneId });
+      await waitFor(`Pat on ${shape}`, () => (patSocket.state?.meta.playerSceneId === sceneId ? true : null));
+
+      const pages: [Page, string, "touch" | "space" | "middle"][] = [[pat, "Pat's phone at 2", "touch"]];
+      if (shape === "hexRows") pages.push([pat15, "Pat's phone at 1.5", "touch"], [dmMouse, "the DM's page at 2, Space", "space"], [dmMouse, "the DM's page at 2, middle button", "middle"]);
+      for (const [page, who, how] of pages) {
+        await page.bringToFront();
+        // The middle button pans the DM's page the Space case opened, on the same scene.
+        if (how !== "middle") await reopenRoom(page);
+        if (page === dmMouse && how !== "middle") {
+          // The scene is picked in the Scenes panel on a wide window, then the window narrows to the phone's size again.
+          await dmMouse.setViewportSize({ width: 1280, height: 800 });
+          await openSideTab(dmMouse, "Scenes");
+          await dmMouse.getByRole("tabpanel", { name: "Scenes" }).getByRole("button", { name: new RegExp(`^HXPERF2 ${shape}`) }).first().click();
+          // Hidden before the window narrows, where it would show as a sheet over the map.
+          const hide = dmMouse.getByRole("button", { name: "Hide panels" });
+          if (await hide.isVisible()) await hide.click();
+          await dmMouse.setViewportSize({ width: 390, height: 844 });
+          await nextFrames(dmMouse, 20);
+        }
+        await isoOn(page, 0);
+        await nextFrames(page, 6);
+        const before = await kept(page);
+        assert.equal(before!.probe, "ok", `${who}: the self-copy probe passed`);
+        await pan(page, how);
+        const after = await kept(page);
+        const scrolls = after!.scrolls - before!.scrolls;
+        const commits = after!.boardCommits - before!.boardCommits;
+        assert.ok(scrolls >= 40, `${shape}, ${who}: ${scrolls} of 74 moves scrolled`);
+        assert.ok(commits <= 20, `${shape}, ${who}: the board rendered ${commits} times in 74 moves, once a cull step and once at the end`);
+        await compare(page, `${shape}, ${who}, after a pan across cull steps`);
+      }
+
+      // Mid-pan on Pat's phone: a height edit from the DM's socket, then a fog reveal, then a turn, each repainting whole and the pan scrolling again after.
+      await pat.bringToFront();
+      await pan(pat, "touch", async () => {
+        await ops.send({ t: "build.height", sceneId, cells: ["14,13", "15,13"], height: 20 });
+        await nextFrames(pat, 4);
+      });
+      await compare(pat, `${shape}, a height edit mid-pan`);
+      await pan(pat, "touch", async () => {
+        await ops.send({ t: "fog.live", sceneId, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "rect", x: 22, y: 0, w: 4, h: 30 } }] });
+        await nextFrames(pat, 6);
+      });
+      await compare(pat, `${shape}, a fog reveal mid-pan`);
+      await pat.evaluate(() => (globalThis as unknown as { __rvttIsoHook: { turn(t: number): void } }).__rvttIsoHook.turn(1));
+      await nextFrames(pat, 6);
+      await pan(pat, "touch");
+      await compare(pat, `${shape}, a pan at turn 1`);
+      await pat.evaluate(() => (globalThis as unknown as { __rvttIsoHook: { turn(t: number): void } }).__rvttIsoHook.turn(0));
+
+      if (shape === "hexRows") {
+        // A height readout hung on its cell (heights/ReadoutHost.tsx) on the DM's computer, through a pan across a cull step, at 100% and 130%: it moves with the camera the canvas last drew, read from the hook in the same evaluation, never a Konva node.
+        for (const scale of [1, 1.3]) {
+          await dm.bringToFront();
+          await dm.evaluate((v) => localStorage.setItem("rvtt.uiScale", String(v)), scale);
+          await reopenRoom(dm);
+          await openSideTab(dm, "Scenes");
+          await dm.getByRole("tabpanel", { name: "Scenes" }).getByRole("button", { name: /^HXPERF2 hexRows/ }).first().click();
+          await isoOn(dm, 0);
+          await nextFrames(dm, 6);
+          const board = await isoCamera(dm);
+          await dm.mouse.click(board.left + 360, board.top + 260);
+          await dm.locator("[data-rvtt-height-pill]").first().waitFor();
+          const read = () =>
+            dm.evaluate(() => {
+              const hook = (globalThis as unknown as { __rvttIsoHook: { drawn(): { x: number; y: number } | null } }).__rvttIsoHook;
+              const doc = (globalThis as unknown as { document: { querySelector(s: string): { getBoundingClientRect(): { x: number; y: number } } | null } }).document;
+              const r = doc.querySelector("[data-rvtt-height-pill]")?.getBoundingClientRect();
+              return { drawn: hook.drawn(), pill: r ? { x: r.x, y: r.y } : null };
+            });
+          const rest = await read();
+          const start = { x: board.left + 300, y: board.top + 420 };
+          await dm.keyboard.down("Space");
+          await dm.mouse.move(start.x, start.y);
+          await dm.mouse.down();
+          let worst = 0;
+          const before = await kept(dm);
+          for (let i = 1; i <= 16; i++) {
+            await dm.mouse.move(start.x + i * 9, start.y + i * 4);
+            await nextFrames(dm, 2);
+            const now = await read();
+            assert.ok(now.drawn && rest.drawn && now.pill && rest.pill, "the readout and the drawn camera read");
+            worst = Math.max(worst, Math.abs(now.pill.x - rest.pill.x - (now.drawn.x - rest.drawn.x)), Math.abs(now.pill.y - rest.pill.y - (now.drawn.y - rest.drawn.y)));
+          }
+          const after = await kept(dm);
+          await dm.mouse.up();
+          await dm.keyboard.up("Space");
+          assert.ok(after!.scrolls > before!.scrolls, "the pan scrolled");
+          assert.ok(after!.boardCommits - before!.boardCommits <= 4, `the board rendered ${after!.boardCommits - before!.boardCommits} times in 16 moves`);
+          assert.ok(worst <= 1, `at ${scale * 100}%, the readout strayed ${worst.toFixed(2)} px from its cell through the pan`);
+          await dm.keyboard.press("Escape");
+        }
+        await dm.evaluate(() => localStorage.removeItem("rvtt.uiScale"));
+        await reopenRoom(dm);
+      }
+    }
+    console.log(`HXPERF2 kept against whole: ${maxDiffs.join("; ")}`);
+    await ops.send({ t: "room.setPlayerScene", sceneId: run.sceneId });
+    await reopenRoom(pat);
+    await phone15.close();
+    await mouse2.close();
+    assert.deepEqual(consoles.phone.errors, [], "Pat's 1.5 phone drew without an error");
+    assert.deepEqual(consoles.keys.errors, [], "the DM's mouse page drew without an error");
   });
 
   test("ISO-12. no page logged an error", () => {

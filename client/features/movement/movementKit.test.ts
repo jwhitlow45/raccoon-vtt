@@ -15,6 +15,12 @@ const { stopNoteSlot } = await import("./store.ts");
 const { holdMarkSizes } = await import("./MoveLayer.tsx");
 const { COMPACT_NOTE_ROOM, FULL_NOTE_ROOM, StopNoteHost } = await import("./StopNote.tsx");
 const { GroundNotice } = await import("./GroundNotice.tsx");
+const { flatPick } = await import("../../canvas/boardPick.ts");
+
+/** The chrome's camera in Top-down at one camera, as the board passes it (state/liveCamera.ts ChromeCamera). */
+function flatChrome(camera: { x: number; y: number; scale: number }) {
+  return { iso: false, rendered: camera, zoom: 1, pickOf: (c: typeof camera) => flatPick(c) };
+}
 
 /*
  * The movement feature's notes and marks on the kit (docs/design-v1-look-pass-2.md
@@ -58,7 +64,7 @@ describe("the stopped walk's note (D31)", () => {
     // A static render reads a store's first state (useSyncExternalStore's server snapshot), so the note is made the first.
     Object.assign(slot, { getInitialState: slot.getState });
     const scene = view.scenes.s1!;
-    return inRoom(view, createElement(StopNoteHost, { scene, camera: { x: 0, y: 0, scale: 40 }, viewport: { width, height }, insets: { top: 52, right: 0, bottom, left: 0 } }), scope);
+    return inRoom(view, createElement(StopNoteHost, { scene, chrome: flatChrome({ x: 0, y: 0, scale: 40 }), viewport: { width, height }, insets: { top: 52, right: 0, bottom, left: 0 } }), scope);
   }
 
   test("is a map pane's width inside the canvas's margins", () => {
@@ -93,7 +99,7 @@ describe("the stopped walk's note on a short screen (review LP2L2-ASTRA-2)", () 
     const slot = scope.get(stopNoteSlot);
     slot.setState({ note });
     Object.assign(slot, { getInitialState: slot.getState });
-    return inRoom(view, createElement(StopNoteHost, { scene: view.scenes.s1!, camera: { x: 0, y: 0, scale: 12 }, viewport: { width, height }, insets: { top: 52, right: 0, bottom: 60, left: 0 } }), scope);
+    return inRoom(view, createElement(StopNoteHost, { scene: view.scenes.s1!, chrome: flatChrome({ x: 0, y: 0, scale: 12 }), viewport: { width, height }, insets: { top: 52, right: 0, bottom: 60, left: 0 } }), scope);
   }
   const topOf = (markup: string) => Number(/top:(\d+(?:\.\d+)?)px/.exec(markup)?.[1]);
 
@@ -166,7 +172,7 @@ describe("what the stopped walk's note says aloud (review P3-7)", () => {
     const slot = scope.get(stopNoteSlot);
     slot.setState({ note });
     Object.assign(slot, { getInitialState: slot.getState });
-    const markup = inRoom(view, createElement(StopNoteHost, { scene: view.scenes.s1!, camera: { x: 0, y: 0, scale: 40 }, viewport: { width: 1280, height: 800 }, insets: { top: 52, right: 0, bottom: 60, left: 0 } }), scope);
+    const markup = inRoom(view, createElement(StopNoteHost, { scene: view.scenes.s1!, chrome: flatChrome({ x: 0, y: 0, scale: 40 }), viewport: { width: 1280, height: 800 }, insets: { top: 52, right: 0, bottom: 60, left: 0 } }), scope);
     const statuses = markup.match(/role="status"/g) ?? [];
     assert.equal(statuses.length, 1, "one status");
     assert.match(markup, /<span role="status" aria-live="polite">Stopped at a wall\. There is no way around it that you have seen\.<\/span>/);

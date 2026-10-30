@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
+import { liveCameraSlot } from "../../state/liveCamera.ts";
 import type { ControllerProps } from "../layers.ts";
-import { useRoomScope } from "../../state/scope.ts";
+import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { currentFocus, focusEvent, focusFromStage, publishFocus } from "./camera.ts";
 import { sendsView, useShowView, viewEvent } from "./tableDisplay.ts";
@@ -11,9 +12,11 @@ const FOLLOW_MS = 120;
 /**
  * Draws nothing: a controller, mounted once outside both of the board's
  * drawing trees (features/layers.ts CONTROLLERS), so one device sends one
- * camera stream whichever view shows. The board renders it on every camera
- * change, with the camera, canvas and view it shows (`live`), and it reads
- * them then. On a DM's device it publishes the
+ * camera stream whichever view shows. The board renders it with the canvas
+ * and view it shows (`live`), and it hears each camera move from the room's
+ * live camera (state/liveCamera.ts) without rendering, since in Isometric a
+ * pan inside the board's cull step renders nothing
+ * (docs/design-v1-relief-pan.md 6.3). On a DM's device it publishes the
  * camera for "Bring everyone here", and while "Follow me" is on it sends
  * the camera to the players, throttled, plus once more whenever someone
  * comes online, so a player who joins mid-scene catches up.
@@ -26,8 +29,9 @@ const FOLLOW_MS = 120;
  */
 export function CameraController(props: ControllerProps) {
   // The latest camera, for the timers that send it later.
+  const camera = useScoped(liveCameraSlot);
   const liveRef = useRef(props.live);
-  liveRef.current = props.live;
+  liveRef.current = { ...props.live, camera: camera.camera ?? props.live.camera };
   const actions = useRoomActions();
   const scope = useRoomScope();
   const follow = useRoomView((s) => s.view?.meta.view.follow === true);
@@ -63,8 +67,8 @@ export function CameraController(props: ControllerProps) {
     lastSentRef.current = performance.now();
   };
 
-  // Every render follows a camera or size change, so read the camera each time.
-  useEffect(() => {
+  // Each render and each camera move, read the camera then.
+  const publish = () => {
     if (!dm) return;
     publishFocus(scope, { sceneId, ...focusFromStage(liveRef.current) });
     if (toDisplays) {
@@ -82,7 +86,20 @@ export function CameraController(props: ControllerProps) {
       timerRef.current = null;
       send();
     }, wait);
-  });
+  };
+  const publishRef = useRef(publish);
+  publishRef.current = publish;
+  useEffect(() => publishRef.current());
+  useEffect(() => {
+    let seen = camera.camera;
+    return camera.subscribe(() => {
+      const c = camera.camera;
+      if (!c || c === seen) return;
+      seen = c;
+      liveRef.current = { ...liveRef.current, camera: c };
+      publishRef.current();
+    });
+  }, [camera]);
 
   // `send` reads the latest focus when it runs, so it is not a dependency.
   useEffect(() => {

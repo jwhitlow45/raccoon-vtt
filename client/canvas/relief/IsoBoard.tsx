@@ -1,5 +1,5 @@
 import type Konva from "konva";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { Ellipse, Group, Layer, Rect, Shape, Stage } from "react-konva";
 import { CHUNK_CELLS, DEFAULT_SETTINGS, type BuildChunk, type Label, type RoomState, type Scene, type TerrainId, type Token } from "#shared/model.ts";
 import { SAMPLES } from "#shared/rules/aoe.ts";
@@ -22,7 +22,7 @@ import { isoLayersOf, type LayerProps } from "../../features/layers.ts";
 import { SightOverlay } from "../../features/vision/SightOverlay.tsx";
 import type { SightMode } from "../../features/vision/sightMode.ts";
 import type { AssetVariant } from "../../lib/api.ts";
-import { NO_INSETS, screenToView, type Camera, type Size } from "../../lib/camera.ts";
+import { cameraOfStage, NO_INSETS, screenToView, type Camera, type Size } from "../../lib/camera.ts";
 import { DISPOSITION_RING } from "../../lib/tokenView.ts";
 import { footprint, type ViewToken } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
@@ -41,21 +41,23 @@ import { RemoteDrags, type EasedDrags, type IsoGhost } from "../RemoteDrags.tsx"
 import { DragMarks } from "../DragMarks.tsx";
 import { useBoardText, type BoardTextInput, type TokenText } from "../useBoardText.ts";
 import { decorPlace, IsoNamesContext, isoTokenBoxes, mapLabelInk, tokenLayoutPills, viewPill } from "./isoText.ts";
-import { boardPillsSlot } from "../boardView.ts";
+import { BoardViewContext, boardPillsSlot, boardViewsOf, type BoardViews } from "../boardView.ts";
 import { useDraggedIds } from "../draggedIds.ts";
 import type { IsoToken } from "../TokenNode.tsx";
 import { groupWalls, meets, ReliefIndex, type DrawPiece, type Item, type StandeeIn } from "./buckets.ts";
 import { IsoGroundContext, TreeShownContext, useShownView, useTreeShownStore, useTreeShownView, type IsoGround } from "./context.ts";
-import { drawRun, type DrawContext, type GroundCopy } from "./drawRelief.ts";
+import { drawRun, runPaintedBox, standeePaintedBox, type DrawContext, type GroundCopy } from "./drawRelief.ts";
 import { FogView } from "./fogView.ts";
 import { cellLook, CellTints, hexLook, imageReader } from "./looks.ts";
 import type { VBox } from "./pieces.ts";
 import { pillarPieces, wallPieces, type WallPiece } from "./runs.ts";
-import { FrameScheduler } from "./scheduler.ts";
+import { FrameScheduler, type KeptLayer } from "./scheduler.ts";
+import { keptHost, onDeviceGrid, screenBox } from "./kept.ts";
+import { liveCameraSlot, type CameraFit } from "../../state/liveCamera.ts";
 import { previewLanding, seenChunks } from "./seenChunks.ts";
 import { dimmedForDm, ghostStands, ghostTagStands, ringsAtBase, splitTokens, tokenBox } from "./stand.ts";
 import { BoardVolumes, type VolumeEntry, type VolumeWorld } from "./volumes.ts";
-import { useLayoutReport } from "./isoTest.ts";
+import { useCommitCount, useKeptReport, useLayoutReport } from "./isoTest.ts";
 import { ON_GROUND, standeeShape, type Seat } from "./standee.ts";
 import { hexBoxGround } from "../isoPlace.ts";
 import { COVER_INSET, drawsInset } from "../../features/attach/groups.ts";
@@ -134,8 +136,6 @@ const EMPTY_TEMPLATES: RoomState["templates"] = {};
 const EMPTY_TOKENS: RoomState["tokens"] = {};
 const NO_RINGS: readonly string[] = [];
 const NO_RING_PAIRS: ReadonlySet<string> = new Set();
-/** The most an animation frame gives to standing areas as their real shapes (docs/design-v1-iso-area-shapes.md 6). */
-const VOLUME_SLICE_MS = 6;
 /** While areas still build, how often the ones done since come in. */
 const VOLUME_LAYOUT_MS = 250;
 const NO_SPOTS: Readonly<Record<string, { x: number; y: number }>> = {};
@@ -164,6 +164,9 @@ export const IsoBoard = memo(
 function IsoBoardImpl(props: IsoBoardProps) {
   const { scene, cam, size, turn, hidden } = props;
   const view = isometric(turn);
+  // The room's live camera (state/liveCamera.ts) and this board's frame scheduler, which the stages' applier and the area build both use.
+  const live = useScoped(liveCameraSlot);
+  const schedulerRef = useRef<FrameScheduler | null>(null);
   // While hidden it keeps what it last read, so a brush stroke in Top-down walks no walls, heights or buckets here, and it reads afresh when shown.
   const chunks = useShownView(!hidden, (s) => s.view?.buildChunks ?? EMPTY_CHUNKS);
   const feet = useShownView(!hidden, (s) => s.view?.meta.settings.feetPerCell ?? DEFAULT_SETTINGS.feetPerCell);
@@ -267,16 +270,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
   }, [standing, src, grid, feet, turn, cam.scale, size.height, props.keepIds, byId, props.tokens]);
 
   // The canvas's view box, grown and snapped in steps, so a pan lays out again only when it crosses a step.
-  const step = CULL_STEP_PX / cam.scale;
-  const topLeft = screenToView(cam, { x: 0, y: 0 });
-  const bottomRight = screenToView(cam, { x: size.width, y: size.height });
-  const cull: VBox = {
-    x0: (Math.floor(topLeft.x / step) - 1) * step,
-    y0: (Math.floor(topLeft.y / step) - 1) * step,
-    x1: (Math.ceil(bottomRight.x / step) + 1) * step,
-    y1: (Math.ceil(bottomRight.y / step) + 1) * step,
-  };
-  const cullKey = `${cull.x0},${cull.y0},${cull.x1},${cull.y1}`;
+  const { box: cull, key: cullKey } = cullOf(cam, size);
 
   /*
    * Areas standing as their real shapes (docs/design-v1-iso-area-shapes.md):
@@ -331,20 +325,28 @@ function IsoBoardImpl(props: IsoBoardProps) {
   }, [hidden, volumes, entries, world]);
   // Each frame's slice of building, and a render when something new can stand.
   const [volumeTick, setVolumeTick] = useState(0);
-  // Areas build nearest the middle of what the viewer sees, past the panels over the board.
+  // Areas build nearest the middle of what the viewer sees, past the panels over the board, at the camera on screen: a pan inside a cull step renders nothing.
   const clear = props.insets ?? NO_INSETS;
-  const middle = screenToView(cam, { x: (clear.left + size.width - clear.right) / 2, y: (clear.top + size.height - clear.bottom) / 2 });
-  const sliceView = useRef({ turn, cull, world, middle });
-  sliceView.current = { turn, cull, world, middle };
+  const sliceView = useRef({ turn, cull, world, clear, size, cam });
+  sliceView.current = { turn, cull, world, clear, size, cam };
+  /*
+   * The build runs as the frame scheduler's background work
+   * (scheduler.ts background): after the frame's draw, with what the frame
+   * leaves of its budget, and never in a frame that repaints the relief
+   * whole or began with a repaint waiting, so a standing area's publish
+   * and its repaint never share a frame with a slice (docs/design-v1-relief-pan.md 8).
+   */
   useEffect(() => {
-    if (!volumesSynced || entries.length === 0) return;
-    let frame = 0;
+    const scheduler = schedulerRef.current;
+    if (!volumesSynced || entries.length === 0 || !scheduler) return;
     let changed = false;
     let laidOut = performance.now();
-    const tick = () => {
-      const { turn: at, cull: box, world: w, middle: mid } = sliceView.current;
+    return scheduler.background((until) => {
+      const { turn: at, cull: box, world: w, clear: bars, size: s, cam: rendered } = sliceView.current;
+      const c = live.camera ?? rendered;
+      const mid = screenToView(c, { x: (bars.left + s.width - bars.right) / 2, y: (bars.top + s.height - bars.bottom) / 2 });
       const start = performance.now();
-      const step = volumes.step(at, box, w, start + VOLUME_SLICE_MS, mid);
+      const step = volumes.step(at, box, w, until, mid);
       changed ||= step.changed;
       // A layout redraws the whole relief, so while areas keep standing one by one they come in together a few times a second, and at once when the last does.
       if (changed && (!step.more || start - laidOut >= VOLUME_LAYOUT_MS)) {
@@ -352,11 +354,9 @@ function IsoBoardImpl(props: IsoBoardProps) {
         laidOut = start;
         setVolumeTick((n) => n + 1);
       }
-      if (step.more) frame = requestAnimationFrame(tick);
-    };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [volumesSynced, entries.length, volumes, turn, cullKey, world]);
+      return step.more;
+    });
+  }, [volumesSynced, entries.length, volumes, turn, cullKey, world, props.stageKey, live]);
   const volumesNow = useMemo(() => (volumesSynced ? volumes.now(turn, cull, world) : null), [volumesSynced, volumes, turn, cullKey, world, volumeTick]);
 
   // Rings at the bases of the creatures that stand by the stand rule itself, in each area whose volume stands (D-261026-31).
@@ -436,36 +436,147 @@ function IsoBoardImpl(props: IsoBoardProps) {
   const groundStageRef = useRef<Konva.Stage>(null);
   const groundLayerRef = useRef<Konva.Layer>(null);
   const reliefLayerRef = useRef<Konva.Layer>(null);
+  const reliefRootRef = useRef<Konva.Group>(null);
   const mainRef = useRef<Konva.Stage>(null);
   const dc = useRef<DrawContext | null>(null);
-  // Counts the ground's draws (Konva's layer `draw` event, on every path that draws it), so the tops copy one pattern of each.
+  // Counts the ground's draws (Konva's layer `draw` event, on every path that draws it), so the tops copy one pattern of each and the kept picture knows a ground draw it did not ask for.
   const groundCopy = useRef<GroundCopy>({ version: 0, made: -1, canvas: null, pattern: null });
+  // The camera-derived fields are set again from the main stage at each draw (scheduler.ts KeptHost.prepare), so a draw between renders culls by the view on screen.
   dc.current = {
     turn,
     camera: cam,
     pixelRatio: reliefLayerRef.current?.getCanvas().getPixelRatio() ?? 1,
     ground: groundLayerRef.current ? (groundLayerRef.current.getCanvas()._canvas as HTMLCanvasElement) : null,
     textures,
-    view: { x0: topLeft.x, y0: topLeft.y, x1: bottomRight.x, y1: bottomRight.y },
+    view: screenBox(cam, size),
     openings: (region, box, asker) => relief.openingsMeeting(region, turn, box, asker),
     groundCopy: groundCopy.current,
   };
 
+  /*
+   * The camera reaches the stages without React (docs/design-v1-relief-pan.md
+   * 6.2): the room's live camera holds the camera on screen, and the applier
+   * positions both stages at it, its translation on the relief canvas's
+   * device grid, inside the scheduler's camera move, so the relief scrolls.
+   * It answers how the camera stands to the layout this board last rendered.
+   */
+  const sizeRef = useRef(size);
+  sizeRef.current = size;
+  const hiddenRef = useRef(hidden);
+  hiddenRef.current = hidden;
+  const renderedCull = useRef({ key: cullKey, box: cull });
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const byStandeeRef = useRef(byStandee);
+  byStandeeRef.current = byStandee;
+  const spotsRef = useRef(spots);
+  spotsRef.current = spots;
+  /** The camera last put on the stages, the stage it went on and at what pixel ratio. */
+  const lastApplied = useRef<{ camera: Camera | null; stage: Konva.Stage | null; ratio: number }>({ camera: null, stage: null, ratio: 0 });
+  const applyCamera = useCallback(
+    (c: Camera) => {
+      const main = mainRef.current;
+      const groundStage = groundStageRef.current;
+      const layer = reliefLayerRef.current;
+      const scheduler = schedulerRef.current;
+      if (!main || !groundStage || !layer || !scheduler) return;
+      const ratio = layer.getCanvas().getPixelRatio();
+      lastApplied.current = { camera: c, stage: main, ratio };
+      const applied = onDeviceGrid(c, ratio);
+      scheduler.moveCamera(() => {
+        for (const st of [main, groundStage]) {
+          st.x(applied.x);
+          st.y(applied.y);
+          st.scaleX(applied.scale);
+          st.scaleY(applied.scale);
+        }
+      });
+      live.setApplied(c, applied);
+    },
+    [live],
+  );
+
   const onStage = props.onStage;
+  const stageKey = props.stageKey;
   useLayoutEffect(() => {
     const ground = groundLayerRef.current;
     const reliefLayer = reliefLayerRef.current;
-    if (!ground || !reliefLayer) return;
+    const main = mainRef.current;
+    if (!ground || !reliefLayer || !main) return;
     const scheduler = new FrameScheduler(ground, reliefLayer);
+    schedulerRef.current = scheduler;
     const copy = groundCopy.current;
     ground.on("draw.groundCopy", () => void copy.version++);
-    onStage(mainRef.current);
+    const stageCamera = (): Camera => cameraOfStage(main);
+    scheduler.keep(
+      keptHost<Konva.Node>({
+        layer: reliefLayer as unknown as KeptLayer,
+        camera: stageCamera,
+        size: () => sizeRef.current,
+        turn: () => dc.current?.turn ?? 0,
+        key: () => stageKey,
+        groundVersion: () => copy.version,
+        dc: () => dc.current,
+        items: () => itemsRef.current,
+        children: () => reliefRootRef.current?.getChildren() ?? [],
+        boxOf: (child, d) => paintedBoxOf(child, d, byStandeeRef.current, spotsRef.current),
+        drawChild: (child, canvas) => child.drawScene(canvas as never),
+      }),
+    );
+    // The chrome hung on map points hears of the camera once the canvas has drawn it (liveCamera.ts drawn).
+    scheduler.afterDraw(() => {
+      if (!hiddenRef.current) live.setDrawn(stageCamera());
+    });
+    onStage(main);
     return () => {
       ground.off("draw.groundCopy");
       scheduler.detach();
+      if (schedulerRef.current === scheduler) schedulerRef.current = null;
       onStage(null);
     };
-  }, [props.stageKey, onStage]);
+  }, [stageKey, onStage, live]);
+
+  // After a render the stages take the live camera when it, the stage or the pixel ratio is new since the last one applied, as react-konva sets
+  // a prop only when it changes: a render never writes an older camera back, and one that changes nothing moves nothing. The applier goes to
+  // the room only while this board shows.
+  useLayoutEffect(() => {
+    renderedCull.current = { key: cullKey, box: cull };
+    const want = live.camera ?? cam;
+    const last = lastApplied.current;
+    if (last.camera !== want || last.stage !== mainRef.current || last.ratio !== reliefLayerRef.current?.getCanvas().getPixelRatio()) applyCamera(want);
+    if (hidden) {
+      if (live.applier) live.applier = null;
+      live.setDrawn(null);
+      return;
+    }
+    live.applier = (c) => {
+      applyCamera(c);
+      return cullFit(renderedCull.current, c, sizeRef.current);
+    };
+  });
+  useLayoutEffect(
+    () => () => {
+      live.applier = null;
+      live.setDrawn(null);
+    },
+    [live],
+  );
+  // What the bench and the e2e read of this board's frames (isoTest.ts), with the test flag only.
+  useKeptReport(() => ({
+    counts: () => {
+      const s = schedulerRef.current;
+      if (!s?.kept) return null;
+      return { ...s.kept.stats, why: { ...s.kept.stats.why }, probe: s.kept.probe, frames: s.frames, draws: s.draws, cameraGroundDraws: s.cameraGroundDraws, slices: s.slices, slicesInWhole: s.slicesInWhole };
+    },
+    repaint: () => reliefLayerRef.current?.batchDraw(),
+    pixels: () => (reliefLayerRef.current?.getCanvas()._canvas as HTMLCanvasElement | undefined)?.toDataURL("image/png") ?? null,
+    drawn: () => live.drawn,
+  }));
+  useCommitCount("board");
+  // A texture's image arriving changes what the tops and sides draw, but no node's props: the relief repaints whole for it.
+  useLayoutEffect(() => {
+    reliefLayerRef.current?.batchDraw();
+  }, [textures]);
 
   // Map labels split once by the stand rule: those that stand draw in the overlay, and the build on the ground stage leaves them out by id.
   // Split again when Inter loads, since the widths measured in the fallback font no longer hold.
@@ -554,6 +665,9 @@ function IsoBoardImpl(props: IsoBoardProps) {
     [src, grid, feet, fog, turn, cam.scale, size.height, store, chunks, scene.id, w, h, props.viewerFog, props.role],
   );
 
+  // The ground stage's layers cull by the layout's box, a step past the view, so a pan between steps finds them drawn. Its pills keep their points (5.8).
+  const groundView = useMemo((): BoardViews => ({ clear: cull, canvas: cull }), [cullKey]);
+
   return (
     <div style={{ position: "absolute", inset: 0, pointerEvents: hidden ? "none" : undefined }} aria-hidden={hidden || undefined}>
       <TreeShownContext.Provider value={!hidden}>
@@ -564,15 +678,12 @@ function IsoBoardImpl(props: IsoBoardProps) {
           ref={groundStageRef}
           width={width}
           height={hidden ? 0 : height + margin}
-          x={cam.x}
-          y={cam.y}
-          scaleX={cam.scale}
-          scaleY={cam.scale}
           listening={false}
           // Hidden, both stages skip the draws their layers' own store subscriptions still ask for, past the memo.
           visible={!hidden}
           style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none" }}
         >
+          <BoardViewContext.Provider value={groundView}>
           <Layer ref={groundLayerRef} listening={false}>
             <Group scaleY={groups.outer.scaleY}>
               <Group rotation={groups.inner.rotation}>
@@ -591,11 +702,12 @@ function IsoBoardImpl(props: IsoBoardProps) {
               </Group>
             </Group>
           </Layer>
+          </BoardViewContext.Provider>
         </Stage>
-        <Stage key={`main:${props.stageKey}`} ref={mainRef} width={width} height={height} x={cam.x} y={cam.y} scaleX={cam.scale} scaleY={cam.scale} visible={!hidden} style={{ ...props.stageStyle, position: "absolute", left: 0, top: 0 }}>
+        <Stage key={`main:${props.stageKey}`} ref={mainRef} width={width} height={height} visible={!hidden} style={{ ...props.stageStyle, position: "absolute", left: 0, top: 0 }}>
           <Layer ref={reliefLayerRef}>
             <Group scaleY={groups.outer.scaleY}>
-              <Group rotation={groups.inner.rotation}>
+              <Group ref={reliefRootRef} rotation={groups.inner.rotation}>
                 {items.map((item, i) =>
                   item.kind === "run" ? <ReliefRun key={`run${i}`} pieces={item.pieces} dc={dc} /> : props.renderToken(byId.get(item.id)!, isoOf.get(item.id)!, isoText.get(item.id)),
                 )}
@@ -611,6 +723,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
             (canvas/dragLayer.ts), over its own rings, auras and tethers, so each
             frame of this device's drag redraws this layer alone.
           */}
+          <LiveBoardView size={size} insets={clear}>
           <Layer>
             <Group scaleY={groups.outer.scaleY} listening={false}>
               <Group rotation={groups.inner.rotation}>
@@ -656,6 +769,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
                 }),
             )}
           </Layer>
+          </LiveBoardView>
         </Stage>
         {aiming && settings && !hidden ? (
           <AimProbe settings={settings} chunks={chunks} liveGround={liveGround} scene={scene} fog={fog} aimMoving={aimMoving} tool={areaTool} draft={draft} selectedId={selectedArea} live={areaLive} templates={templates} role={props.role} youId={youId} casts={casts} onAim={setAim} />
@@ -666,6 +780,19 @@ function IsoBoardImpl(props: IsoBoardProps) {
       </TreeShownContext.Provider>
     </div>
   );
+}
+
+/**
+ * The board view the drag and overlay layers read (canvas/boardView.ts), at
+ * the live camera: the upright pills slide into the clear part of the screen
+ * through a pan that renders no board, and only they render for it (5.8).
+ */
+function LiveBoardView(props: { size: Size; insets: Insets; children: ReactNode }) {
+  const live = useScoped(liveCameraSlot);
+  const camera = useSyncExternalStore(live.subscribe, live.getCamera, live.getCamera);
+  const { size, insets } = props;
+  const value = useMemo(() => (camera ? boardViewsOf(camera, size, insets) : null), [camera, size.width, size.height, insets.top, insets.right, insets.bottom, insets.left]);
+  return <BoardViewContext.Provider value={value}>{props.children}</BoardViewContext.Provider>;
 }
 
 /** The area the Area tool aims once the finger rests, and the context it reads. */
@@ -735,11 +862,36 @@ function withoutTokens(tokens: Readonly<Record<string, Token | undefined>>, hide
 /** A standing token as the board lays it out: its depth entry, its drawn base and seat, and the box its decor lays out on. */
 type Standing = StandeeIn & { ground: number; capped: boolean; drawn: number; rise: number; inset: number; frame: VBox; ring: VBox };
 
+/** The pieces each run's shape draws, so a scroll's walk over the relief's children can bound it (paintedBoxOf). */
+const RUN_PIECES = new WeakMap<Konva.Node, readonly DrawPiece[]>();
+
+/**
+ * A child of the relief root's painted bounds in device pixels: a run's
+ * pieces together, a standee's StandeeShape bounds, which hold its ring,
+ * shadow, outlines, caught rings and facing tick with its decor's reach.
+ * Null for a child it cannot bound, which a scroll always draws: a creature
+ * lying flat, or a standee this device's drag places somewhere else.
+ */
+function paintedBoxOf(node: Konva.Node, dc: DrawContext, standees: ReadonlyMap<string, Standing>, spots: Readonly<Record<string, unknown>>): VBox | null {
+  const pieces = RUN_PIECES.get(node);
+  if (pieces) return runPaintedBox(pieces, dc);
+  const s = standees.get(node.id());
+  if (!s || spots[s.id] !== undefined) return null;
+  return standeePaintedBox(s, dc);
+}
+
 /** One run of relief pieces, drawn by one shape that does not listen. */
 const ReliefRun = memo(function ReliefRun(props: { pieces: DrawPiece[]; dc: { readonly current: DrawContext | null } }) {
   const { pieces, dc } = props;
+  const register = useCallback(
+    (node: Konva.Shape | null) => {
+      if (node) RUN_PIECES.set(node, pieces);
+    },
+    [pieces],
+  );
   return (
     <Shape
+      ref={register}
       listening={false}
       perfectDrawEnabled={false}
       sceneFunc={(ctx) => {
@@ -813,6 +965,33 @@ const UprightLabels = memo(function UprightLabels(props: { labels: readonly Pick
 function terrainAt(chunks: Readonly<Record<string, BuildChunk | undefined>>, sceneId: string, x: number, y: number): TerrainId | null {
   const chunk = chunks[`${sceneId}:${Math.floor(x / CHUNK_CELLS)},${Math.floor(y / CHUNK_CELLS)}`];
   return chunk?.cells[`${x},${y}`] ?? null;
+}
+
+/**
+ * The view box the board lays out for at a camera: the canvas's, grown and
+ * snapped to steps of CULL_STEP_PX screen pixels with a step to spare on
+ * every side, and its key, which changes only when a pan crosses a step.
+ */
+export function cullOf(cam: Camera, size: Size): { box: VBox; key: string; view: VBox } {
+  const step = CULL_STEP_PX / cam.scale;
+  const topLeft = screenToView(cam, { x: 0, y: 0 });
+  const bottomRight = screenToView(cam, { x: size.width, y: size.height });
+  const box: VBox = {
+    x0: (Math.floor(topLeft.x / step) - 1) * step,
+    y0: (Math.floor(topLeft.y / step) - 1) * step,
+    x1: (Math.ceil(bottomRight.x / step) + 1) * step,
+    y1: (Math.ceil(bottomRight.y / step) + 1) * step,
+  };
+  return { box, key: `${box.x0},${box.y0},${box.x1},${box.y1}`, view: { x0: topLeft.x, y0: topLeft.y, x1: bottomRight.x, y1: bottomRight.y } };
+}
+
+/** How a camera stands to the layout rendered for `rendered`: in its cull step, past it with the view still inside its box, or out of it (docs/design-v1-relief-pan.md 5.6). */
+export function cullFit(rendered: { key: string; box: VBox }, cam: Camera, size: Size): CameraFit {
+  const now = cullOf(cam, size);
+  if (now.key === rendered.key) return "inside";
+  const v = now.view;
+  const b = rendered.box;
+  return v.x0 >= b.x0 && v.y0 >= b.y0 && v.x1 <= b.x1 && v.y1 <= b.y1 ? "step" : "out";
 }
 
 function sameBox(a: VBox, b: VBox): boolean {

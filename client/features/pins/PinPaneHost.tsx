@@ -2,7 +2,8 @@ import { Suspense, useEffect } from "react";
 import { useStore } from "zustand";
 import type { Scene } from "#shared/model.ts";
 import { LoadBoundary } from "../../components/LoadBoundary.tsx";
-import type { Camera, Insets, Size } from "../../lib/camera.ts";
+import type { Insets, Size } from "../../lib/camera.ts";
+import { useChromeCamera, type ChromeCamera } from "../../state/liveCamera.ts";
 import { retryableLazy } from "../../lib/retryableLazy.ts";
 import { useAlertsLane } from "../../pages/fold.ts";
 import { RoomLoadNotice } from "../../panels/Panels.tsx";
@@ -24,7 +25,7 @@ const PinPane = retryableLazy(() => import("./PinPane.tsx"), { roles: ["dm"] });
  * it no longer applies: its pin is gone or on another scene, the Pin tool
  * was put down, or a token was tapped, whose bar takes its place.
  */
-export function PinPaneHost(props: { scene: Scene; tool: string; camera: Camera; viewport: Size; insets: Insets; shown?: PinView }) {
+export function PinPaneHost(props: { scene: Scene; tool: string; chrome: ChromeCamera; viewport: Size; insets: Insets; shown?: PinView }) {
   const store = useScoped(pinSlot).store;
   const paneId = useStore(store, (s) => s.paneId);
   const pin = useRoomView((s) => (paneId ? s.view?.pins[paneId] : undefined));
@@ -34,10 +35,12 @@ export function PinPaneHost(props: { scene: Scene; tool: string; camera: Camera;
   useEffect(() => {
     if (paneId !== null && !open) store.setState({ paneId: null });
   }, [paneId, open, store]);
-  if (!open || !pin) return null;
+  // At the camera the canvas last drew, subscribed only while it shows (docs/design-v1-relief-pan.md 6.3).
+  const at = useChromeCamera(props.chrome, open);
+  if (!open || !pin || !at) return null;
   const close = () => store.setState({ paneId: null });
   // While the pane's code downloads, and if it fails to, the shared notices take the box the pane will appear in, beside the fight's alerts as the pane will stand.
-  const place = panePlacement({ viewport: props.viewport, insets: props.insets, box: pinScreenBox(pin, props.camera, props.shown), height: PANE_HEIGHT_UNMEASURED, lane });
+  const place = panePlacement({ viewport: props.viewport, insets: props.insets, box: pinScreenBox(pin, at.camera, props.shown), height: PANE_HEIGHT_UNMEASURED, lane });
   return (
     <LoadBoundary
       fallback={(f) => (
@@ -47,7 +50,7 @@ export function PinPaneHost(props: { scene: Scene; tool: string; camera: Camera;
       )}
     >
       <Suspense fallback={<PaneLoadingFrame text="Loading the pin editor…" place={place} close={close} />}>
-        <PinPane pin={pin} camera={props.camera} viewport={props.viewport} insets={props.insets} {...(props.shown ? { shown: props.shown } : {})} onClose={close} />
+        <PinPane pin={pin} camera={at.camera} viewport={props.viewport} insets={props.insets} {...(props.shown ? { shown: props.shown } : {})} onClose={close} />
       </Suspense>
     </LoadBoundary>
   );

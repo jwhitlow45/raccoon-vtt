@@ -5,9 +5,10 @@ import { Button } from "../../components/Button.tsx";
 import { IconButton } from "../../components/IconButton.tsx";
 import { Help } from "../../components/Panel.tsx";
 import { PaneHeader } from "../../components/SheetHeader.tsx";
-import type { Camera, Insets, Size } from "../../lib/camera.ts";
+import type { Insets, Size } from "../../lib/camera.ts";
+import { useChromeCamera, type ChromeCamera } from "../../state/liveCamera.ts";
 import { footAnchor } from "../../canvas/anchors.ts";
-import { flatPick, groundUnder, type BoardPick } from "../../canvas/boardPick.ts";
+import { groundUnder } from "../../canvas/boardPick.ts";
 import { footprint } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
@@ -62,7 +63,7 @@ export const COMPACT_NOTE_ROOM = Math.ceil(2 * theme.touch + GAP + PAD_TOP + PAD
  * time, and it comes back when the bar closes. The stopped drop itself
  * closes the bar (send.ts), so the note wins after a drag.
  */
-export function StopNoteHost(props: { scene: Scene; camera: Camera; viewport: Size; insets: Insets; pick?: BoardPick }) {
+export function StopNoteHost(props: { scene: Scene; chrome: ChromeCamera; viewport: Size; insets: Insets }) {
   const slot = useScoped(stopNoteSlot);
   const note = useStore(slot, (s) => s.note);
   const busy = useStore(slot, (s) => s.busy);
@@ -91,13 +92,15 @@ export function StopNoteHost(props: { scene: Scene; camera: Camera; viewport: Si
     observer.observe(el);
     return () => observer.disconnect();
   }, [shown]);
+  // At the camera the canvas last drew, subscribed only while the note shows (docs/design-v1-relief-pan.md 6.3).
+  const at = useChromeCamera(props.chrome, shown);
 
-  if (!shown || !note || !token) return null;
+  if (!shown || !note || !token || !at) return null;
 
   const fp = footprint(token);
   // Under the ghost where the walk stopped: in Isometric under its ring, on the ground drawn there (docs/design-v1-isometric-view.md 5.3).
-  const pick = props.pick ?? flatPick(props.camera);
-  const anchor = footAnchor(props.camera, pick, { x: note.ghost.x, y: note.ghost.y, w: fp.w, h: fp.h }, groundUnder(pick, { ...token, x: note.ghost.x, y: note.ghost.y, squeeze: undefined }));
+  const pick = at.pick;
+  const anchor = footAnchor(at.camera, pick, { x: note.ghost.x, y: note.ghost.y, w: fp.w, h: fp.h }, groundUnder(pick, { ...token, x: note.ghost.x, y: note.ghost.y, squeeze: undefined }));
   // A card over the map as wide as a map pane, inside the canvas's 8 px margins.
   const width = Math.min(PANE_WIDTH, props.viewport.width - 2 * theme.space(2));
   /*

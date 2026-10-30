@@ -2,7 +2,8 @@ import { Suspense, useEffect } from "react";
 import { useStore } from "zustand";
 import type { Scene } from "#shared/model.ts";
 import { LoadBoundary } from "../../components/LoadBoundary.tsx";
-import type { Camera, Insets, Size } from "../../lib/camera.ts";
+import type { Insets, Size } from "../../lib/camera.ts";
+import { useChromeCamera, type ChromeCamera } from "../../state/liveCamera.ts";
 import { retryableLazy } from "../../lib/retryableLazy.ts";
 import { useAlertsLane } from "../../pages/fold.ts";
 import { RoomLoadNotice } from "../../panels/Panels.tsx";
@@ -25,7 +26,7 @@ const LightPane = retryableLazy(() => import("./LightPane.tsx"), { roles: ["dm"]
  * applies: the light is gone or on another scene, or the tool or the
  * builder's mode moved on.
  */
-export function LightPaneHost(props: { scene: Scene; camera: Camera; viewport: Size; insets: Insets }) {
+export function LightPaneHost(props: { scene: Scene; chrome: ChromeCamera; viewport: Size; insets: Insets }) {
   const modeStore = useScoped(lightModeSlot).store;
   const paneOpen = useStore(modeStore, (s) => s.paneOpen);
   const lightId = useStore(useScoped(lightSlot), (s) => s.lightId);
@@ -39,10 +40,12 @@ export function LightPaneHost(props: { scene: Scene; camera: Camera; viewport: S
   useEffect(() => {
     if (paneOpen && !open) modeStore.setState({ paneOpen: false });
   }, [paneOpen, open, modeStore]);
-  if (!open || !light) return null;
+  // At the camera the canvas last drew, subscribed only while it shows (docs/design-v1-relief-pan.md 6.3).
+  const at = useChromeCamera(props.chrome, open);
+  if (!open || !light || !at) return null;
   const close = () => modeStore.setState({ paneOpen: false });
   // While the pane's code downloads, and if it fails to, the shared notices take the box the pane will appear in.
-  const place = panePlacement({ viewport: props.viewport, insets: props.insets, box: lightScreenBox(light, props.camera), height: PANE_HEIGHT_UNMEASURED, lane });
+  const place = panePlacement({ viewport: props.viewport, insets: props.insets, box: lightScreenBox(light, at.camera), height: PANE_HEIGHT_UNMEASURED, lane });
   return (
     <LoadBoundary
       fallback={(f) => (
@@ -52,7 +55,7 @@ export function LightPaneHost(props: { scene: Scene; camera: Camera; viewport: S
       )}
     >
       <Suspense fallback={<PaneLoadingFrame text="Loading the light editor…" place={place} close={close} />}>
-        <LightPane light={light} camera={props.camera} viewport={props.viewport} insets={props.insets} onClose={close} />
+        <LightPane light={light} camera={at.camera} viewport={props.viewport} insets={props.insets} onClose={close} />
       </Suspense>
     </LoadBoundary>
   );

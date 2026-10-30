@@ -2,7 +2,8 @@ import { Suspense, useEffect } from "react";
 import { useStore } from "zustand";
 import type { BuildChunk, Scene } from "#shared/model.ts";
 import { LoadBoundary } from "../../components/LoadBoundary.tsx";
-import type { Camera, Insets, Size } from "../../lib/camera.ts";
+import type { Insets, Size } from "../../lib/camera.ts";
+import { useChromeCamera, type ChromeCamera } from "../../state/liveCamera.ts";
 import { retryableLazy } from "../../lib/retryableLazy.ts";
 import { useAlertsLane } from "../../pages/fold.ts";
 import { RoomLoadNotice } from "../../panels/Panels.tsx";
@@ -29,7 +30,7 @@ const NO_CHUNKS: Readonly<Record<string, BuildChunk>> = {};
  * token's bar shows while a tool takes the map's taps. While the map picks
  * something for the trap, the pane hides with its folds kept.
  */
-export function TrapPaneHost(props: { scene: Scene; tool: string; camera: Camera; viewport: Size; insets: Insets }) {
+export function TrapPaneHost(props: { scene: Scene; tool: string; chrome: ChromeCamera; viewport: Size; insets: Insets }) {
   const store = useScoped(trapSlot).store;
   const paneId = useStore(store, (s) => s.paneId);
   const picking = useStore(store, (s) => s.picking !== null);
@@ -41,10 +42,12 @@ export function TrapPaneHost(props: { scene: Scene; tool: string; camera: Camera
   useEffect(() => {
     if (paneId !== null && !open) store.setState({ paneId: null, picking: null });
   }, [paneId, open, store]);
-  if (!open || !trap) return null;
+  // At the camera the canvas last drew, subscribed only while it shows (docs/design-v1-relief-pan.md 6.3).
+  const at = useChromeCamera(props.chrome, open);
+  if (!open || !trap || !at) return null;
   const close = () => store.setState({ paneId: null });
   // While the pane's code downloads, and if it fails to, the shared notices take the box the pane will appear in.
-  const place = panePlacement({ viewport: props.viewport, insets: props.insets, box: trapScreenBox(sceneGrid(props.scene), trap, chunks, props.camera), height: PANE_HEIGHT_UNMEASURED, lane });
+  const place = panePlacement({ viewport: props.viewport, insets: props.insets, box: trapScreenBox(sceneGrid(props.scene), trap, chunks, at.camera), height: PANE_HEIGHT_UNMEASURED, lane });
   return (
     <LoadBoundary
       fallback={(f) => (
@@ -54,7 +57,7 @@ export function TrapPaneHost(props: { scene: Scene; tool: string; camera: Camera
       )}
     >
       <Suspense fallback={<PaneLoadingFrame text="Loading the trap editor…" place={place} close={close} />}>
-        <TrapPane trap={trap} hidden={picking} camera={props.camera} viewport={props.viewport} insets={props.insets} onClose={close} />
+        <TrapPane trap={trap} hidden={picking} camera={at.camera} viewport={props.viewport} insets={props.insets} onClose={close} />
       </Suspense>
     </LoadBoundary>
   );

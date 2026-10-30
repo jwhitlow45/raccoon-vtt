@@ -2,6 +2,7 @@ import { applyPixelRatio } from "./konvaSetup.ts";
 import { popoverSlot } from "../components/popoverRules.ts";
 import type Konva from "konva";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { Layer, Stage } from "react-konva";
 import { DEFAULT_SETTINGS, type RoomState, type Scene, type Token } from "#shared/model.ts";
 import { holderOf as linkedHolder, linkHolds } from "#shared/rules/attach.ts";
@@ -71,6 +72,7 @@ import { stageMountKey, uiScale, useLowPower, useMapVariant, useUiScale } from "
 import { mapFocusSlot, spaceMovesMap } from "../pages/mapFocus.ts";
 import { localDragSlot } from "../state/localDrags.ts";
 import { useRoomScope } from "../state/scope.ts";
+import { liveCameraSlot, showGestureCamera, useChromeCamera, type ChromeAt, type ChromeCamera } from "../state/liveCamera.ts";
 import { addsToSelection, barDismiss, frontToBack, nextUnderTap } from "../state/selection.ts";
 import { hexNudge, stageKeysSlot } from "../state/shortcuts.ts";
 import { sheetOpen as sheetIsOpen, type Opening } from "../state/types.ts";
@@ -90,7 +92,7 @@ import { MapLayer, SharedMapImage } from "./layers/MapLayer.tsx";
 import { createEasedDrags, RemoteDragClock, RemoteDrags } from "./RemoteDrags.tsx";
 import { TreeShownContext } from "./relief/context.ts";
 import { IsoBoard } from "./relief/IsoBoard.tsx";
-import { useIsoTestHook } from "./relief/isoTest.ts";
+import { useCommitCount, useIsoTestHook } from "./relief/isoTest.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { previewViewSlot } from "../features/view/choice.ts";
 import { placedTextBoxes } from "./textBoxes.ts";
@@ -291,9 +293,38 @@ export function MapStage(props: {
     setTopStage(stage);
   }, []);
   const [size, setSize] = useState<Size | null>(null);
-  const [cam, setCam] = useState<Camera | null>(null);
-  const camRef = useRef<Camera | null>(null);
-  camRef.current = cam;
+  /*
+   * The camera lives in the room's live camera slot (state/liveCamera.ts,
+   * docs/design-v1-relief-pan.md 6.2): every path writes it, and `camRef`
+   * reads it, so a render mid-pan never hands a press, keepInView or a
+   * second finger an older camera. `cam`, the state, is what the board and
+   * the controllers render with: in Isometric a pan inside the board's cull
+   * step moves the stages through the applier and renders nothing.
+   */
+  const liveCam = scope.get(liveCameraSlot);
+  const [cam, setCamState] = useState<Camera | null>(null);
+  const camRef = useMemo(
+    () => ({
+      get current(): Camera | null {
+        return liveCam.camera;
+      },
+      set current(c: Camera | null) {
+        liveCam.write(c);
+      },
+    }),
+    [liveCam],
+  );
+  const setCam = useCallback(
+    (c: Camera) => {
+      liveCam.write(c);
+      setCamState(c);
+    },
+    [liveCam],
+  );
+  // The camera the last render took, so a gesture's end sets state once if the applier moved the stages since.
+  const renderedCamRef = useRef(cam);
+  renderedCamRef.current = cam;
+  useCommitCount("map");
   const cameraSceneRef = useRef<string | null>(null);
   /**
    * The last fit, while its camera is still the one on screen. The fitted
@@ -799,8 +830,9 @@ export function MapStage(props: {
   const lowPowerRef = useRef(lowPower);
   lowPowerRef.current = lowPower;
   const pickOfRef = useRef<(c: Camera) => BoardPick>(null!);
+  // At the camera on screen it reads the one the stages took, on the device grid, so a press and the drawing agree (liveCamera.ts appliedFor).
   pickOfRef.current = (c) =>
-    boardPickFor({ room: store.getState().view, scene: sceneRef.current, role, fog: fogRef.current.on, view: shownRef.current, camera: c, lowPower: lowPowerRef.current, canvasHeight: sizeRef.current?.height }, heightsMemoRef.current);
+    boardPickFor({ room: store.getState().view, scene: sceneRef.current, role, fog: fogRef.current.on, view: shownRef.current, camera: liveCam.appliedFor(c), lowPower: lowPowerRef.current, canvasHeight: sizeRef.current?.height }, heightsMemoRef.current);
   /** Whether a creature draws above the fog for this viewer (vision/drawsAboveFog), for the stand rule's reads outside the board (boardPick.ts standsFor). */
   const aboveFogRef = useRef<(t: ViewToken) => boolean>(() => true);
   /** The highest drawn ground in a rectangle at a zoom, for a fit (fitScene). */
@@ -975,9 +1007,17 @@ export function MapStage(props: {
       frameRef.current = 0;
       const c = pendingCamRef.current;
       pendingCamRef.current = null;
-      if (c) setCam(c);
+      if (c) showCamRef.current(c);
     });
   }, []);
+
+  // A gesture's camera on its frame: in Isometric a pan inside the board's cull step moves the stages and renders nothing (liveCamera.ts showGestureCamera).
+  const showCamRef = useRef((c: Camera) => setCam(c));
+  showCamRef.current = (c: Camera) => {
+    const state = showGestureCamera(liveCam, c, isoShown, gestureRef.current.pointers.size === 0);
+    if (state === "now") flushSync(() => setCamState(c));
+    else if (state === "later") setCamState(c);
+  };
 
   useEffect(() => () => cancelAnimationFrame(frameRef.current), []);
 
@@ -1297,6 +1337,9 @@ export function MapStage(props: {
     const pointersDown = () => {
       viewGestureRef.current.pointers = gesture.pointers.size > 0;
       syncGesture();
+      // The gesture's end sets state to its last camera once, for the controllers and the saved and followed views (docs/design-v1-relief-pan.md 6.3). A frame still waiting does it itself.
+      const c = liveCam.camera;
+      if (gesture.pointers.size === 0 && frameRef.current === 0 && c && renderedCamRef.current !== c) setCamState(c);
     };
     const onDownMarked = (e: PointerEvent) => {
       onDown(e);
@@ -1643,8 +1686,9 @@ export function MapStage(props: {
   const live: Live | null = cam && size ? { camera: cam, viewport: size, view: shown } : null;
   // The view and drawn heights the chrome over the map stands by (boardPick.ts).
   const pick = cam ? pickOfRef.current(cam) : null;
-  // Whether the selected creature stands as a standee or lies flat under the fog, where the chrome over it hangs.
-  const selectedStands = !selected || !pick || standsFor(pick, aboveFogOf)(selected);
+  // The camera the chrome hung on map points stands by: in Isometric the one the canvas last drew, read by each piece only while it shows (liveCamera.ts useChromeCamera).
+  const pickOf = useCallback((c: Camera) => pickOfRef.current(c), []);
+  const chrome: ChromeCamera | null = cam ? { iso: isoShown, rendered: cam, zoom, pickOf } : null;
 
   return (
     <div ref={wrapRef} style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
@@ -1747,40 +1791,53 @@ export function MapStage(props: {
         // through to the map (its children take them, globals.css), and what
         // sits at a point of the map gets that point in the layer's pixels.
         <div data-rvtt-pass="" {...smallUi(zoom)} style={{ position: "absolute", inset: 0, pointerEvents: "none", ...chromeZoom(zoom) }}>
-          {barShown && selected && group.length >= 2 ? (
-            <GroupActionBar
-              tokens={group}
-              movable={group.filter(canDrag).length}
-              anchor={inZoomed(worldAnchor(cam, selected, pick!, selectedStands), zoom)}
-              viewport={sizeInZoomed(size, zoom)}
-              tokenHeight={tokenRise(cam, selected, worldAnchor(cam, selected, pick!, selectedStands), zoom, pick!, selectedStands)}
-              onClose={() => ui.select(null)}
-              onShift={shiftForBar}
-            />
-          ) : barShown && selected ? (
-            <TokenActionBar
-              // Keyed by token, so an armed Delete or a half-typed HP entry never carries over to the next token tapped.
-              key={selected.id}
-              token={selected}
-              anchor={inZoomed(belowLabel(worldAnchor(cam, selected, pick!, selectedStands), shownText.get(selected.id)), zoom)}
-              viewport={sizeInZoomed(size, zoom)}
-              tokenHeight={tokenRise(cam, selected, belowLabel(worldAnchor(cam, selected, pick!, selectedStands), shownText.get(selected.id)), zoom, pick!, selectedStands)}
-              fullAccess={role === "dm" || ownsToken(selected)}
-              onDetails={() => onOpenDetails(selected.id)}
-              onShift={shiftForBar}
-              onClose={() => {
-                if (barDismiss(store.getState().local, props.tokenPanelShown === true) === "hide") (props.onHideBar ?? (() => ui.showActions(false)))();
-                else ui.select(null);
+          {barShown && selected && chrome ? (
+            <AtDrawnCamera chrome={chrome}>
+              {({ raw, pick: at }) => {
+                // Whether the selected creature stands as a standee or lies flat under the fog, where the chrome over it hangs.
+                const stands = standsFor(at, aboveFogOf)(selected);
+                const anchor = worldAnchor(raw, selected, at, stands);
+                if (group.length >= 2) {
+                  return (
+                    <GroupActionBar
+                      tokens={group}
+                      movable={group.filter(canDrag).length}
+                      anchor={inZoomed(anchor, zoom)}
+                      viewport={sizeInZoomed(size, zoom)}
+                      tokenHeight={tokenRise(raw, selected, anchor, zoom, at, stands)}
+                      onClose={() => ui.select(null)}
+                      onShift={shiftForBar}
+                    />
+                  );
+                }
+                const under = belowLabel(anchor, shownText.get(selected.id));
+                return (
+                  <TokenActionBar
+                    // Keyed by token, so an armed Delete or a half-typed HP entry never carries over to the next token tapped.
+                    key={selected.id}
+                    token={selected}
+                    anchor={inZoomed(under, zoom)}
+                    viewport={sizeInZoomed(size, zoom)}
+                    tokenHeight={tokenRise(raw, selected, under, zoom, at, stands)}
+                    fullAccess={role === "dm" || ownsToken(selected)}
+                    onDetails={() => onOpenDetails(selected.id)}
+                    onShift={shiftForBar}
+                    onClose={() => {
+                      if (barDismiss(store.getState().local, props.tokenPanelShown === true) === "hide") (props.onHideBar ?? (() => ui.showActions(false)))();
+                      else ui.select(null);
+                    }}
+                  />
+                );
               }}
-            />
+            </AtDrawnCamera>
           ) : null}
-          {role === "dm" && pick ? <LabelPaneHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(paneInsets, zoom)} pick={pick} /> : null}
-          {role === "dm" ? <LightPaneHost scene={scene} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(paneInsets, zoom)} /> : null}
-          {role === "dm" ? <PinPaneHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(paneInsets, zoom)} {...(pick ? { shown: viewGround(pick) } : {})} /> : null}
-          {role === "dm" ? <TrapPaneHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(paneInsets, zoom)} /> : null}
-          {pick ? <DoorPillHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} pick={pick} /> : null}
-          {pick ? <ReadoutHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} pick={pick} /> : null}
-          {draggingId === null && pick ? <StopNoteHost scene={scene} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} pick={pick} /> : null}
+          {role === "dm" && chrome ? <LabelPaneHost scene={scene} tool={tool.id} chrome={chrome} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(paneInsets, zoom)} /> : null}
+          {role === "dm" && chrome ? <LightPaneHost scene={scene} chrome={chrome} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(paneInsets, zoom)} /> : null}
+          {role === "dm" && chrome ? <PinPaneHost scene={scene} tool={tool.id} chrome={chrome} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(paneInsets, zoom)} {...(pick ? { shown: viewGround(pick) } : {})} /> : null}
+          {role === "dm" && chrome ? <TrapPaneHost scene={scene} tool={tool.id} chrome={chrome} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(paneInsets, zoom)} /> : null}
+          {chrome ? <DoorPillHost scene={scene} tool={tool.id} chrome={chrome} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} /> : null}
+          {chrome ? <ReadoutHost scene={scene} tool={tool.id} chrome={chrome} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} /> : null}
+          {draggingId === null && chrome ? <StopNoteHost scene={scene} chrome={chrome} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} /> : null}
         </div>
       ) : null}
       <div
@@ -1797,6 +1854,16 @@ export function MapStage(props: {
       />
     </div>
   );
+}
+
+/**
+ * Chrome hung on map points at the camera the canvas last drew: renders
+ * its child with that camera, again each time the board's scheduler draws
+ * a new one, and only while it is mounted (liveCamera.ts useChromeCamera).
+ */
+function AtDrawnCamera(props: { chrome: ChromeCamera; children: (at: ChromeAt) => ReactNode }) {
+  const at = useChromeCamera(props.chrome, true);
+  return at ? <>{props.children(at)}</> : null;
 }
 
 /**
