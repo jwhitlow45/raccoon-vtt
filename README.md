@@ -756,10 +756,19 @@ repository to exist.
 1. On main, bump `version` in `package.json` to the new `X.Y.Z` and run
    `pnpm selfhost`, which writes the new `X.Y` into `selfhost/`, and
    `pnpm readme-button`, which draws the new version into the Docker Hub
-   button at the top of this file (it needs Chrome). Commit all three. The
-   unit tests fail while either is out of date.
-2. Wait for CI to pass on that commit.
-3. Tag the commit `vX.Y.Z` and push the tag.
+   button at the top of this file (it needs Chrome).
+2. Regenerate the changelog before tagging. Replace `X.Y.Z` with the new
+   version:
+
+   ```sh
+   docker run --rm -v "$PWD:/app" -w /app ghcr.io/orhun/git-cliff/git-cliff:2.14.2 --config cliff.toml --tag vX.Y.Z -o CHANGELOG.md
+   ```
+
+   Commit the version bump and all generated files, including CHANGELOG.md.
+   Unit tests fail while the generated files or newest released changelog
+   heading are out of date.
+3. Wait for CI to pass on that commit.
+4. Tag the commit `vX.Y.Z` and push the tag.
 
 The tag starts the Image workflow. It checks that the tag matches
 `package.json`, that the commit is on main and that CI passed on that exact

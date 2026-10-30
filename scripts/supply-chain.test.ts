@@ -15,3 +15,10 @@ test("CI's PostgreSQL services use docker-compose.yml's pinned digest", () => {
     assert.equal(image.split("@")[1], pinned, "update ci.yml's PostgreSQL service images after a Compose image bump");
   }
 });
+
+test("the changelog's newest released heading matches package.json, after any Unreleased section", () => {
+  const { version } = JSON.parse(readFileSync(new URL("package.json", root), "utf8")) as { version: string };
+  const changelog = readFileSync(new URL("CHANGELOG.md", root), "utf8");
+  const released = /^## v(\d+\.\d+\.\d+)(?:[ \t]|$)/m.exec(changelog)?.[1];
+  assert.equal(released, version, "regenerate CHANGELOG.md with git-cliff --tag after bumping the version");
+});

@@ -1,9 +1,11 @@
 [changelog]
 header = "# Changelog\n\n"
 body = """
-{% if version %}\
+{% if version %}
+
 ## {{ version }} ({{ timestamp | date(format="%Y-%m-%d") }})
-{% else %}\
+{% else %}
+
 ## Unreleased
 {% endif %}\
 {% if version == "v0.1.0" %}
@@ -11,6 +13,7 @@ First public release
 {% else %}\
 {% for group, commits in commits | group_by(attribute="group") %}
 ### {{ group }}
+
 {% for commit in commits %}\
 - {% if commit.scope %}**{{ commit.scope }}**: {% endif %}\
 {% if commit.breaking %}[breaking] {% endif %}{{ commit.message }}
