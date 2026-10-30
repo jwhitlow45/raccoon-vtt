@@ -97,6 +97,23 @@ async function setUp(page: Page, view: { width: number; height: number; scale: n
   await page.locator(".konvajs-content").first().waitFor();
 }
 
+let nextXCardAt = 0;
+
+/** A dismissed card cannot reopen from a tap merged into its room's previous 10 s window. */
+async function showXCard(): Promise<Locator> {
+  const wait = nextXCardAt - performance.now();
+  if (wait > 0) await sleep(Math.ceil(wait));
+  const since = dmSocket.received.length;
+  const sent = await playerContext.request.post(`${server.origin}/api/rooms/${run.roomId}/xcard`, { headers: { Origin: server.origin } });
+  assert.ok(sent.ok(), `the X-card answered ${sent.status()}`);
+  // Start after the response, so the server's merge window has certainly ended before the next tap.
+  nextXCardAt = performance.now() + 10_000;
+  await waitFor("the X-card signal on the DM's room socket", () => dmSocket.received.slice(since).some((text) => (JSON.parse(text) as { t?: string }).t === "xcard") || null);
+  const card = dm.getByRole("dialog", { name: "X-card", exact: true }).locator("section").first();
+  await card.waitFor();
+  return card;
+}
+
 function panelsButton(page: Page): Locator {
   return page.locator('nav[aria-label="Tools"] button[title="Panels"]');
 }
@@ -828,10 +845,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await sheet.getByRole("button", { name: "Close Monsters" }).click();
 
     // The X-card, which has no header: a drag down on the card dismisses it.
-    const sent = await playerContext.request.post(`${server.origin}/api/rooms/${run.roomId}/xcard`, { headers: { Origin: server.origin } });
-    assert.ok(sent.ok(), `the X-card answered ${sent.status()}`);
-    const card = dm.getByRole("dialog", { name: "X-card" }).locator("section").first();
-    await card.waitFor();
+    const card = await showXCard();
     const c = await steadyRect(card);
     await swipe(dmCdp, { x: c.left + c.width / 2, y: c.top + 30 }, closePast(c.height));
     assert.equal(await settled(card), "gone", "the X-card stayed");
@@ -1441,9 +1455,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await touchTap(dmCdp, dm, await middleOf(filters.getByRole("button", { name: /^Close/ })));
     assert.equal(await settled(filters), "gone", "a tap on the filters' Close did not close them");
     await monsters.getByRole("button", { name: "Close Monsters" }).click();
-    const sent = await playerContext.request.post(`${server.origin}/api/rooms/${run.roomId}/xcard`, { headers: { Origin: server.origin } });
-    assert.ok(sent.ok(), `the X-card answered ${sent.status()}`);
-    const xcard = dm.getByRole("dialog", { name: "X-card" }).locator("section").first();
+    const xcard = await showXCard();
     await steadyRect(xcard);
     await expectGrabbers(dm, ["X-card"], "the X-card");
     await checkFit(xcard, 1, "the X-card");
@@ -1690,9 +1702,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
       ]) {
         await setUp(dm, view);
         await pickHandle(dm, "mask");
-        const sent = await playerContext.request.post(`${server.origin}/api/rooms/${run.roomId}/xcard`, { headers: { Origin: server.origin } });
-        assert.ok(sent.ok(), `the X-card answered ${sent.status()}`);
-        const card = dm.getByRole("dialog", { name: "X-card" }).locator("section").first();
+        const card = await showXCard();
         try {
           await steadyRect(card);
           await expectGrabbers(dm, ["X-card"], "FU39-B: the X-card with the mask");
