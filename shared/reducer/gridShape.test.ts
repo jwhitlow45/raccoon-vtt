@@ -258,7 +258,7 @@ describe("atomic grid restoration (H3-USEDEFAULT-RACE)", () => {
       let state = run(before(), { t: "build.rough", sceneId: "s1", cells: ["1,1"], on: true }).state;
       if (phased) state = run(state, { t: "scene.update", sceneId: "s1", patch: { phases: [{ id: "day", name: "Day", assetId: "a1", widthPx: 700, heightPx: 700 }] } }).state;
       const op = opSchema.parse({ t: "scene.setGrid", sceneId: "s1", cellPx: 47, originPx: { x: 0, y: 0 } });
-      for (const opVersion of [1, 24, 28, 29, 30, 31, 32, undefined]) {
+      for (const opVersion of [1, 24, 28, 29, 30, 31, 32, 33, 34, undefined]) {
         const result = applyOp(state, op, A, { ...env(200), opVersion });
         assert.ok(result.ok, String(opVersion));
         const scene = result.state.scenes.s1!;
