@@ -7,6 +7,12 @@ import { LIGHT_LEVELS } from "./settings.ts";
 import type { LightProposal } from "./uvttLight.ts";
 
 /**
+ * The name of each choice on the import dialog, one style so "Light, for party vision" and
+ * "Portals that don't block light" read like "Players see", whatever size the dialog's text is.
+ */
+export const IMPORT_CHOICE_NAME = { fontSize: theme.font.input, fontWeight: theme.weight.strong } as const;
+
+/**
  * The light level on a Universal VTT import's summary sheet
  * (docs/design-v1-maps-vision.md section 4.3.8): what the file proposes,
  * which the DM can change. It is the level party vision uses, at once
@@ -18,7 +24,7 @@ export function UvttLightChoice(props: { value: LightLevel; proposal: LightPropo
   const labelId = useId();
   return (
     <div style={{ display: "grid", gap: theme.space(1) }}>
-      <span id={labelId} style={{ fontWeight: theme.weight.strong }}>
+      <span id={labelId} style={IMPORT_CHOICE_NAME}>
         Light, for party vision
       </span>
       <Segmented<LightLevel>

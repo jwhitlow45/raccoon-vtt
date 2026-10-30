@@ -39,7 +39,7 @@ import type { LightLevel, Scene, ScenePreset } from "#shared/model.ts";
 import { NewScenePlayersSee, type PlayersSeeValue } from "../vision/PlayersSee.tsx";
 import { walllessFile } from "../vision/playersSeeRules.ts";
 import { lightOf } from "../vision/settings.ts";
-import { UvttLightChoice } from "../vision/UvttLightChoice.tsx";
+import { IMPORT_CHOICE_NAME, UvttLightChoice } from "../vision/UvttLightChoice.tsx";
 import { lightsLead, startingLight, type LightProposal, whyShown } from "../vision/uvttLight.ts";
 
 /**
@@ -549,7 +549,7 @@ function Options(props: {
       {props.read.info.hasObjects ? <Checkbox label="Objects block sight and movement" checked={props.objects} disabled={props.disabled} onChange={props.onObjects} /> : null}
       {props.read.info.lightPortals > 0 ? (
         <div style={{ display: "grid", gap: theme.space(1) }}>
-          <span id={portalsId} style={{ fontWeight: theme.weight.strong }}>
+          <span id={portalsId} style={IMPORT_CHOICE_NAME}>
             Portals that don't block light import as
           </span>
           <Segmented<ImportOptions["portals"]>
