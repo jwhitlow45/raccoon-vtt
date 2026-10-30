@@ -437,6 +437,92 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     });
   }
 
+  /**
+   * The tools section of the phone's bottom bar (FL-10): where the first
+   * and last tool stand against the strip they share, in screen px. The
+   * strip keeps 3 layout px at each end for a focus ring
+   * (components/ScrollStrip.tsx), so the section runs from those insets.
+   * Where the buttons do not fit, the strip scrolls, so the first is
+   * measured at its start and the last at its end.
+   */
+  function toolSection(page: Page, scale: number) {
+    return page.evaluate((zoom) => {
+      type Box = { left: number; right: number; top: number; bottom: number };
+      type Node = { querySelectorAll(s: string): ArrayLike<{ getBoundingClientRect(): Box }>; getBoundingClientRect(): Box; scrollWidth: number; clientWidth: number; scrollLeft: number; children: ArrayLike<Node> };
+      const g = globalThis as unknown as { document: { querySelector(s: string): Node | null } };
+      const nav = g.document.querySelector('nav[aria-label="Tools"]');
+      const scroller = nav?.children[0]?.children[0];
+      if (!scroller || scroller.querySelectorAll("button").length === 0) return null;
+      const edge = 3 * zoom;
+      const buttons = () => Array.from(scroller.querySelectorAll("button")).map((b) => b.getBoundingClientRect());
+      scroller.scrollLeft = 0;
+      const strip = scroller.getBoundingClientRect();
+      const first = buttons()[0]!;
+      scroller.scrollLeft = scroller.scrollWidth;
+      const all = buttons();
+      const last = all[all.length - 1]!;
+      scroller.scrollLeft = 0;
+      return {
+        count: all.length,
+        scrolls: scroller.scrollWidth > scroller.clientWidth + 1,
+        startGap: first.left - (strip.left + edge),
+        endGap: strip.right - edge - last.right,
+        tops: Array.from(new Set(all.map((b) => Math.round(b.top)))).length,
+        minWidth: Math.min(...all.map((b) => b.right - b.left)) / zoom,
+        minHeight: Math.min(...all.map((b) => b.bottom - b.top)) / zoom,
+      };
+    }, scale);
+  }
+
+  async function sizeDm(view: { width: number; height: number; scale: number }): Promise<void> {
+    await dm.setViewportSize({ width: view.width, height: view.height });
+    await dm.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), view.scale);
+    await reopenRoom(dm);
+    await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+    await dm.locator(".konvajs-content").first().waitFor();
+  }
+
+  for (const view of [
+    { width: 390, height: 844, scale: 1 },
+    { width: 390, height: 844, scale: 1.3 },
+    { width: 360, height: 740, scale: 1 },
+    { width: 360, height: 740, scale: 1.3 },
+    { width: 320, height: 568, scale: 1 },
+    { width: 320, height: 568, scale: 1.3 },
+    // Measured and shown, not held to the rule: the tablet and the sideways phone keep their bars.
+    { width: 820, height: 1180, scale: 1 },
+    { width: 844, height: 390, scale: 1 },
+  ]) {
+    const label = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+    const phone = view.width < 500 && view.height > view.width;
+    const tag = `${view.width}x${view.height}-${Math.round(view.scale * 100)}`;
+    test(`fl10-tb. the tools span their section of the bottom bar with Draw shown and with it hidden, the DM's as the player's: ${label}`, async () => {
+      await sizeDm(view);
+      try {
+        for (const draw of ["all", "none"] as const) {
+          // With Draw hidden a player has four tools, which is all a room with no drawing shows.
+          await ops.send({ t: "room.update", settings: { playersDraw: draw } });
+          await setUp(view);
+          await waitFor(`the toolbar with Draw ${draw === "all" ? "shown" : "hidden"}`, async () => ((await player.locator('nav[aria-label="Tools"] button[title^="Draw"]').count()) === (draw === "all" ? 1 : 0) ? true : null));
+          const m = { player: await toolSection(player, view.scale), dm: draw === "all" ? await toolSection(dm, view.scale) : null };
+          await shots.take(player, `player-toolbar-${draw === "all" ? "draw" : "nodraw"}-${tag}`);
+          if (draw === "all") await shots.take(dm, `dm-toolbar-${tag}`);
+          if (!phone) continue;
+          for (const [who, one] of Object.entries(m)) {
+            if (!one) continue;
+            const where = `${who}, Draw ${draw}, ${label}`;
+            assert.ok(Math.abs(one.startGap) <= 1, `${where}: the first tool is ${one.startGap} px from its section's start`);
+            assert.ok(Math.abs(one.endGap) <= 1, `${where}: the last tool is ${one.endGap} px from its section's end`);
+            assert.equal(one.tops, 1, `${where}: a tool wrapped`);
+            assert.ok(one.minWidth >= 43.5 && one.minHeight >= 43.5, `${where}: a tool is under 44 px (${one.minWidth} x ${one.minHeight})`);
+          }
+        }
+      } finally {
+        await ops.send({ t: "room.update", settings: { playersDraw: "all" } });
+      }
+    });
+  }
+
   test("3. time is up on the player's turn: End turn stays on screen at 130% and the name keeps a few letters (LPD-PLAYER-4, LPD-DMPHONE-2)", async () => {
     await ops.send({ t: "room.update", settings: { turnTimerSec: 4 } });
     await ops.send({

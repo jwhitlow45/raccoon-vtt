@@ -166,6 +166,12 @@ export const theme = {
     /** From this width up, panels dock beside the map instead of opening as sheets (design section 14.4). */
     wideMinWidth: 900,
     /**
+     * From this width up, a stacked toolbar's buttons stop growing at
+     * SHARED_MAX (pages/Room.tsx) rather than filling their section, so a
+     * tablet's bar stays as it was. Under it, on a phone, they fill it.
+     */
+    tabletMinWidth: 600,
+    /**
      * Below this width, but wide, the top bar holds the turn chip and End
      * Turn beside the room name, so the player's chip shrinks to its color
      * dot and the room name keeps its room.

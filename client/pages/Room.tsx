@@ -1139,6 +1139,7 @@ function RoomPage() {
           ref={toolbarRef}
           zoom={zoom}
           wide={wide}
+          phone={width < theme.layout.tabletMinWidth}
           tools={tools}
           tool={tool.id}
           arrangement={optionsPlaceNow.arrangement}
@@ -2589,6 +2590,8 @@ function Toolbar(props: {
   ref?: Ref<HTMLElement>;
   zoom: number;
   wide: boolean;
+  /** A phone's width: the buttons on its own row share all of it, however few there are. */
+  phone: boolean;
   tools: ToolDef[];
   tool: string;
   arrangement: Arrangement;
@@ -2653,7 +2656,7 @@ function Toolbar(props: {
   const divider = arrangement === "pair" ? null : layout.divider;
   const activeSetup = setupTools.find((t) => t.id === props.tool) ?? null;
   // The width of a button: fixed where the options share the row, shared and capped on a phone's own row, as before from 900 px up.
-  const size: ButtonSize = inRow ? { fixed: props.named ? TOOL_BUTTON_NAMED : TOOL_BUTTON_ICON } : wide ? "floating" : "shared";
+  const size: ButtonSize = inRow ? { fixed: props.named ? TOOL_BUTTON_NAMED : TOOL_BUTTON_ICON } : wide ? "floating" : props.phone ? "shared" : "capped";
   const line = (key: keyof typeof TOOLBAR_LINES) => `${ids}-${key}`;
   const frame = useMemo(() => toolbarPopoverFrame(props.popover, props.toolbar), [props.popover, props.toolbar]);
   // Each tool's key in its tooltip, as this device has it (the shortcut sheet may have changed it). None where the tool has no key: none in the table, or its default taken by another tool's change (keyBindings.ts UNBOUND).
@@ -2885,19 +2888,24 @@ function PanelPicker(props: { panels: PanelDef[]; current: string; badges: Recor
 }
 
 /**
- * How wide a toolbar button is. On a phone's own row the buttons share it,
- * from 44 px up to 68 px with 4 px of padding inside, so seven buttons and
- * Panels fit a 390 px phone (5.1), with Panels at 44 px there. Where the
- * options share the toolbar's row they take a fixed width (5.3). A
- * computer's floating buttons stay as before.
+ * How wide a toolbar button is. On a phone's own row the buttons share all
+ * of it, from 44 px up with 4 px of padding inside, so seven buttons and
+ * Panels fit a 390 px phone (5.1), with Panels at 44 px there. A player
+ * with four tools has no more to fill the row with, so each grows, and the
+ * row ends where the Panels section starts, as the DM's does. A tablet
+ * short of the wide layout shares its row the same way but stops each at
+ * SHARED_MAX, as it always has ("capped"). Where the options share the
+ * toolbar's row they take a fixed width (5.3). A computer's floating
+ * buttons stay as before.
  */
-type ButtonSize = "shared" | "panels" | "floating" | { fixed: number };
+type ButtonSize = "shared" | "capped" | "panels" | "floating" | { fixed: number };
 
-/** The most a shared toolbar button grows to on a phone. */
+/** The most a tablet's shared toolbar button grows to. */
 const SHARED_MAX = 68;
 
 function sizeStyle(size: ButtonSize | undefined): CSSProperties {
-  if (size === "shared") return { flex: "1 1 0", minWidth: theme.touch, maxWidth: SHARED_MAX, padding: `0 ${theme.space(1)}px` };
+  if (size === "shared") return { flex: "1 1 0", minWidth: theme.touch, padding: `0 ${theme.space(1)}px` };
+  if (size === "capped") return { flex: "1 1 0", minWidth: theme.touch, maxWidth: SHARED_MAX, padding: `0 ${theme.space(1)}px` };
   // Panels' word fills its 44 px with no padding of its own, so seven tools and Panels fit a 390 px phone to the pixel.
   if (size === "panels") return { flex: "none", minWidth: theme.touch, padding: 0 };
   if (typeof size === "object") return { flex: "none", width: size.fixed, minWidth: size.fixed, padding: 0 };
