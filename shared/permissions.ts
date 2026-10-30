@@ -59,6 +59,8 @@ import { EXHAUSTION_MAX_LEVEL, levelFits } from "./srd/conditions.ts";
 export type AssetKind = "map" | "token" | "handout" | "thumb";
 
 export type PermissionDeps = {
+  /** The view before the actor's pending batch. Its map memory is settled, unlike the staged build's. */
+  batchBefore?: RoomState;
   /** Whether the member may reference the asset: their own upload, or one in their visible set (design 11.2). */
   canUseAsset: (memberId: string, assetId: string, kind: AssetKind) => boolean;
   /**
@@ -2013,16 +2015,17 @@ function hexStoppingStep(state: RoomState, g: HexGrid, walker: Walker, to: LegEn
  * nothing on its own, names none.
  */
 function walkWords(c: Check, walker: Walker, to: LegEnd, blocker: Blocker): string {
-  return stopWords(c.state, c.liveGround(walker.sceneId), walker, to, blocker);
+  return stopWords(c.state, c.liveGround(walker.sceneId), walker, to, blocker, c.deps.batchBefore);
 }
 
 /**
  * `walkWords` on a given live ground: the server's for the sender, or a
  * player's device's own (rules/held.ts deviceGround), which predicts the
  * words of its own stops by the same rule (6, the words). Null ground
- * gives today's words, named by `blocker`.
+ * gives today's words, named by `blocker`. The server also supplies the
+ * batch-start state while the staged build still awaits its map memory.
  */
-export function stopWords(state: RoomState, ground: Ground | null, walker: Walker, to: LegEnd, blocker: Blocker): string {
+export function stopWords(state: RoomState, ground: Ground | null, walker: Walker, to: LegEnd, blocker: Blocker, batchBefore?: RoomState): string {
   if (!ground) return blocker === "wall" ? WALL_IN_THE_WAY : LEDGE_IN_THE_WAY;
   const step = stoppingStep(state, walker, to);
   if (!step) return SOMETHING_BLOCKS;
@@ -2033,12 +2036,12 @@ export function stopWords(state: RoomState, ground: Ground | null, walker: Walke
   const met = legStopPart(state, at, end);
   if (!met?.part) return SOMETHING_BLOCKS;
   const ledge = met.stop.blocker === "ledge";
-  if (!partLive(ground, met.part, ledge, met.stop.door ? doorMatchesLive(state, ground, met.stop.door) : undefined)) return SOMETHING_BLOCKS;
+  if (!partLive(ground, met.part, ledge, met.stop.door ? doorMatchesLive(state, ground, met.stop.door, batchBefore) : undefined)) return SOMETHING_BLOCKS;
   return ledge ? LEDGE_IN_THE_WAY : WALL_IN_THE_WAY;
 }
 
 /** The door shown whole must match the live blocker before it can borrow a neighboring cell's sight. Non-door pieces still read their met cell. */
-function doorMatchesLive(state: RoomState, ground: Ground, door: DoorRef): ((x: number, y: number) => boolean) | undefined {
+function doorMatchesLive(state: RoomState, ground: Ground, door: DoorRef, batchBefore?: RoomState): ((x: number, y: number) => boolean) | undefined {
   if ("edge" in door) return undefined;
   const key = chunkKey(ground.sceneId, door.cx, door.cy);
   const wall = state.buildChunks[key]?.walls?.find((w) => w.id === door.id);
@@ -2046,8 +2049,15 @@ function doorMatchesLive(state: RoomState, ground: Ground, door: DoorRef): ((x: 
   const shown = shownFreeWall(wall);
   const live = stableStringify(shown);
   const held = heldFreeDoor(state, ground, door);
-  if (held || shown.f.kind === "door") {
-    const matches = held !== null && stableStringify(held) === live;
+  // Memory is written at batch end. Until then, the starting view must also
+  // match, or a hidden edit could borrow neighboring sight before it is remembered.
+  let heldBefore = held;
+  if (batchBefore && batchBefore !== state) {
+    const beforeGround = groundOf(batchBefore, ground.sceneId, ground.holder);
+    heldBefore = beforeGround ? heldFreeDoor(batchBefore, beforeGround, door) : null;
+  }
+  if (held || heldBefore || shown.f.kind === "door") {
+    const matches = held !== null && heldBefore !== null && stableStringify(held) === live && stableStringify(heldBefore) === live;
     return () => matches;
   }
   return (x, y) => {

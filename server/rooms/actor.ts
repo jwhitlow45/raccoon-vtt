@@ -1596,6 +1596,7 @@ export class RoomActor {
 
   #permissionDeps(viewer: Viewer, facts: Map<string, AssetFact>): PermissionDeps {
     return {
+      batchBefore: this.#batch?.before,
       canUseAsset: (memberId, assetId, kind) => {
         const fact = facts.get(assetId.toLowerCase());
         if (!fact || fact.roomId !== this.roomId || fact.kind !== kind) return false;

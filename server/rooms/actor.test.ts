@@ -3,6 +3,7 @@ import { describe, test } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
 import { historyMessageSchema, type HistoryMessage, type HistoryScope } from "#shared/undoContract.ts";
 import { createInitialState } from "#shared/initial.ts";
+import { lift, wall } from "#shared/discoveryTestutil.ts";
 import { chunkKey, holderChunkKey, holderTileKey } from "#shared/keys.ts";
 import {
   BLOCK_SAVES_TOO_FAST,
@@ -20,7 +21,7 @@ import { partySight, type VisionWorld } from "#shared/rules/vision.ts";
 import { groundAt } from "#shared/rules/heights.ts";
 import { sceneWalls, splitCheck, splitRefusal } from "#shared/rules/walls.ts";
 import { OP_VERSION, SNAPSHOT_VERSION } from "#shared/migrate.ts";
-import { MOVE_PLAYERS_FIRST } from "#shared/permissions.ts";
+import { MOVE_PLAYERS_FIRST, SOMETHING_BLOCKS_BACK } from "#shared/permissions.ts";
 import type { Actor, FreeWall, Member, RoomState, Trap } from "#shared/model.ts";
 import { ASK_LOST, FORGET_ASK, type Op, type OpOf, type ServerMessage } from "#shared/protocol.ts";
 import { projectState } from "#shared/project.ts";
@@ -3669,6 +3670,62 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
       assert.equal(answer.rejects?.[0]?.code, "gone", JSON.stringify(answer.rejects));
       assert.equal(actor.committed.state.memory?.[chunkKey(sceneId, 5, 3)]?.edges?.["91,50,w"], undefined, "the touch dropped the door they remembered");
       assert.deepEqual((db.storedRows as { op: { t: string } }[]).map((r) => r.op.t).slice(-1), ["sys.remember"], "by the map step, stored");
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  });
+
+  for (const changed of [true, false]) for (const routed of [false, true]) test(`FU40AC-OPUS-6: a refused redo reads the door held before its batch, changed=${changed}, routed=${routed}`, async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    const state = createInitialState({ roomName: "Door memory", dm });
+    state.members[player.id] = player;
+    const sceneId = state.meta.playerSceneId!;
+    state.scenes[sceneId] = { ...state.scenes[sceneId]!, bounds: { w: 24, h: 16 }, blockMovement: false, autoWalls: "off", fogEnabled: true, vision: { on: true, light: "dark" } };
+    const pcId = uuidv7();
+    state.tokens[pcId] = testToken(pcId, { sceneId, kind: "pc", name: "Ayla", disposition: "ally", ownerIds: [player.id], x: 2, y: 5, actor: { inline: { ...inline, effects: [{ id: "e1", key: "blinded", name: "Blinded" } as never] } } });
+    lift(state, "dm", { x: 0, y: 3, w: 8, h: 5 }, sceneId);
+    lift(state, "party", { x: 8, y: 5, w: 1, h: 1 }, sceneId);
+    const door = wall(state, "aaaaaaaaaaaa", [8 + 6 / 64, 5 + 6 / 64], [8 + 6 / 64, 6 - 6 / 64], { kind: "door", state: changed ? "open" : "closed", secret: false, discovered: false }, sceneId);
+    const key = chunkKey(sceneId, 0, 0);
+    const db = new FakeDb({ state, dmGrants: [dm.id] });
+    let commits = 0;
+    db.hooks.commit = () => { commits++; };
+    const base = deps(db);
+    const actor = await RoomActor.load({ ...base, options: { ...base.options, batchMs: 200 } });
+    assert.ok(actor);
+    try {
+      const table = connect(actor, dm);
+      const phone = connect(actor, player, "player");
+      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
+      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      // Prepare a redo while movement is unrestricted, so the unchanged closed-door control has the same history.
+      await actor.op(phone.conn, 1, { t: "token.move", tokenId: pcId, x: 12, y: 5, ...(routed ? { route: [[12, 5, 0, 0]] } : {}) });
+      const moved = await answerTo(phone.sent, 1);
+      assert.ok(moved !== "stuck" && moved.acks?.includes(1));
+      assert.equal(actor.committed.state.tokens[pcId]!.x, 12);
+      await sendWithHistory(actor, phone.conn, 2, { t: "undo" });
+      const undone = await answerTo(phone.sent, 2);
+      assert.ok(undone !== "stuck" && undone.acks?.includes(2));
+      await actor.op(table.conn, 1, { t: "scene.update", sceneId, patch: { blockMovement: true } });
+      assert.notEqual(await answerTo(table.sent, 1), "stuck");
+      assert.equal(actor.committed.state.tokens[pcId]!.x, 2);
+      assert.equal(actor.committed.state.memory?.[key]?.walls?.[door.id], undefined, "the door still needs no remembered difference");
+      const shownDoor = () => projectState(actor.committed.state, { memberId: player.id, role: "player" }, { sceneId }).buildChunks[key]?.walls?.find((w) => w.id === door.id);
+      assert.deepEqual(shownDoor(), door);
+      const beforeCommits = commits;
+      void actor.op(table.conn, 2, { t: "door.set", sceneId, door: { cx: 0, cy: 0, id: door.id }, state: "closed" });
+      await sendWithHistory(actor, phone.conn, 3, { t: "redo" });
+      const closed = await answerTo(table.sent, 2);
+      const refused = await answerTo(phone.sent, 3);
+      assert.ok(closed !== "stuck" && closed.acks?.includes(2));
+      assert.ok(refused !== "stuck");
+      assert.equal(closed.seq, refused.seq, "the door edit and redo settled in one batch");
+      assert.equal(commits - beforeCommits, 1, "both terminal answers used one commit");
+      assert.deepEqual(shownDoor(), door, "the player's whole door stays as it was before the batch");
+      assert.equal(actor.committed.state.tokens[pcId]!.x, 2, "the redo stays refused in place");
+      assert.equal(refused.rejects?.find((r) => r.n === 3)?.message, `could not redo moving Ayla: ${changed ? SOMETHING_BLOCKS_BACK : "a wall is in the way"}`);
     } finally {
       db.freeze();
       void actor.shutdown({ code: 1012, snapshot: false });
