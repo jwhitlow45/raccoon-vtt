@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { after, before, describe, test } from "node:test";
+import { after, afterEach, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import { GRABBER_DESIGNS, grabberRoom, type GrabberId } from "../client/components/grabberDesigns.ts";
 import { barControl, ConsoleWatch, OpSocket, openSceneGroup, pagePoint, pickOption, pickTool, readCamera, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
@@ -161,6 +161,8 @@ async function bodyPoint(sheet: Locator, down = 40): Promise<Pt> {
   return { x: r.left + r.width / 2, y: r.top + down };
 }
 
+const fingersDown = new Set<Finger>();
+
 /**
  * One finger through the browser's touch input, as a phone sends it. Each
  * event carries its own time, since the page reads a flick from the
@@ -186,6 +188,7 @@ class Finger {
   async down(p: Pt): Promise<void> {
     this.at = p;
     this.clock = Date.now() / 1000;
+    fingersDown.add(this);
     await this.cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: p.x, y: p.y, id: 1 }], timestamp: this.clock });
   }
 
@@ -223,7 +226,14 @@ class Finger {
   async up(afterMs = 2): Promise<void> {
     const before = await lifts(this.page);
     await this.cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [], timestamp: this.stamp(afterMs) });
+    fingersDown.delete(this);
     await waitFor("the page to hear the lift", async () => (await lifts(this.page)) > before || null, 3_000);
+  }
+
+  /** A failed assertion must not leave a touch held across the next test's navigation. */
+  async cancel(): Promise<void> {
+    await this.cdp.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
+    fingersDown.delete(this);
   }
 }
 
@@ -365,6 +375,10 @@ async function touchTap(cdp: CDPSession, page: Page, at: Pt): Promise<void> {
 }
 
 describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, () => {
+  afterEach(async () => {
+    for (const finger of fingersDown) await finger.cancel();
+  });
+
   before(async () => {
     server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
     browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1" });
@@ -1822,7 +1836,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
         for (const direction of [1, -1]) {
           const sheet = await openPanel(player, "Log");
           const box = await steadyRect(sheet);
-          const header = await rectOf(sheet.locator("[data-sheet-grab]").first());
+          const header = await headerLayout(sheet);
           const commit = Math.max((direction > 0 ? box.height : box.top) / 2, 44);
           const slop = direction > 0 ? 8 : 16;
           const finger = new Finger(playerCdp, player);
@@ -1833,9 +1847,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
             await finger.drag(distance - previous);
             previous = distance;
             await checkPull(sheet, share);
-            const movedHeader = await rectOf(sheet.locator("[data-sheet-grab]").first());
-            assert.ok(Math.abs(movedHeader.height - header.height) < 1, `${design.id}: the stretch changed header height`);
-            assert.ok(Math.abs(movedHeader.width - header.width) < 1, `${design.id}: the stretch changed header width`);
+            checkHeaderLayout(header, await headerLayout(sheet), design.id, direction < 0);
             if (share >= 0.5) await shots.take(player, `fl8-${design.id}-${direction > 0 ? "down" : "up"}-${share === 1 ? "full" : "mid"}-pull-390x844`);
           }
           // Reach full pull, then return short of the threshold. A slow lift must spring back.
@@ -1977,13 +1989,74 @@ async function checkPull(surface: Locator, expected: number, reduced = false): P
   const look = await waitFor("FL-8: the sheet's pull to follow the touch", async () => {
     const value = await grabberLook(surface);
     return Math.abs(value.pull - expected) < 0.01 ? value : null;
-  }, 3_000);
+  }, 3_000).catch(async (error: unknown) => {
+    throw new Error(`FL-8: expected pull ${expected}, got ${JSON.stringify(await grabberLook(surface))}, held=${await surface.getAttribute("data-sheet-held")}, transform=${await transformOf(surface)}`, { cause: error });
+  });
   assert.equal(look.color, await mixedGrabberColor(surface.page(), look.pull), `FL-8: wrong mix at pull ${look.pull}`);
   assert.equal(look.property, "none", "FL-8: a transition trails the finger");
   const stretch = reduced ? 0 : look.pull;
   const matrix = [1 + 0.4 * stretch, 0, 0, 1 - 0.25 * stretch, 0, 0];
   assert.equal(look.matrix.length, 6, "FL-8: the drawing has no valid scale transform");
   matrix.forEach((value, i) => assert.ok(Math.abs(look.matrix[i]! - value) < 0.0001, `FL-8: wrong scale at pull ${look.pull}: ${look.matrix}`));
+}
+
+/**
+ * The upward claim removes the sheet's border once, as it takes the full
+ * screen's box. Compare the header with that box's content edges, and its
+ * controls with the header, so only this existing shape change is allowed.
+ */
+function headerLayout(surface: Locator) {
+  return surface.evaluate((el) => {
+    const g = globalThis as unknown as Win;
+    const sheet = el as unknown as El;
+    const header = sheet.querySelector("header[data-sheet-grab]") as (El & { querySelectorAll(s: string): ArrayLike<El> }) | null;
+    if (!header) throw new Error("the sheet has no grab header");
+    const outer = sheet.getBoundingClientRect();
+    const box = header.getBoundingClientRect();
+    const style = g.getComputedStyle(sheet);
+    const scale = Number(style.zoom) || 1;
+    const px = (name: string) => parseFloat(style[name] ?? "0") * scale;
+    const border = { left: px("borderLeftWidth"), right: px("borderRightWidth"), top: px("borderTopWidth") };
+    const padding = { left: px("paddingLeft"), right: px("paddingRight"), top: px("paddingTop") };
+    const child = (node: El) => {
+      const r = node.getBoundingClientRect();
+      return { name: node.getAttribute("aria-label"), left: r.left - box.left, right: box.right - r.right, top: r.top - box.top, width: r.width, height: r.height };
+    };
+    const title = header.querySelector("h2, h3");
+    if (!title) throw new Error("the grab header has no title");
+    return {
+      sheetWidth: outer.width,
+      border, padding,
+      insetLeft: border.left + padding.left, insetRight: border.right + padding.right, insetTop: border.top + padding.top,
+      left: box.left - outer.left, right: outer.right - box.right, top: box.top - outer.top,
+      width: box.width, height: box.height,
+      title: child(title),
+      buttons: Array.from(header.querySelectorAll("button")).map(child).filter((b) => b.width > 2 && b.height > 2),
+    };
+  });
+}
+
+function checkHeaderLayout(before: Awaited<ReturnType<typeof headerLayout>>, after: Awaited<ReturnType<typeof headerLayout>>, design: string, rising: boolean): void {
+  const near = (a: number, b: number, what: string) => assert.ok(Math.abs(a - b) < 1, `FL-8 ${design}: ${what}: ${a} versus ${b}. Before: ${JSON.stringify(before)}. After: ${JSON.stringify(after)}`);
+  for (const side of ["left", "right", "top"] as const) {
+    near(after.padding[side], before.padding[side], `sheet ${side} padding changed`);
+    near(after.border[side], rising ? 0 : before.border[side], `sheet ${side} border changed unexpectedly`);
+  }
+  near(after.sheetWidth, before.sheetWidth, "sheet width changed");
+  near(after.width + after.insetLeft + after.insetRight, before.width + before.insetLeft + before.insetRight, "header width changed beyond the sheet's borders and padding");
+  near(after.width, after.sheetWidth - after.insetLeft - after.insetRight, "header does not fill the content width");
+  near(after.left, after.insetLeft, "header moved from the content's left edge");
+  near(after.right, after.insetRight, "header moved from the content's right edge");
+  near(after.top, after.insetTop, "header moved from the content's top edge");
+  near(after.height, before.height, "header height changed");
+  for (const key of ["left", "right", "top", "height"] as const) near(after.title[key], before.title[key], `title ${key} changed`);
+  assert.equal(after.buttons.length, before.buttons.length, "FL-8: the visible header buttons changed");
+  before.buttons.forEach((button, i) => {
+    const current = after.buttons[i]!;
+    assert.equal(current.name, button.name, "FL-8: a header button changed");
+    const edge = button.left < button.right ? "left" : "right";
+    for (const key of [edge, "top", "width", "height"] as const) near(current[key], button[key], `${button.name} ${key} changed`);
+  });
 }
 
 async function expectGrabberRest(surface: Locator): Promise<void> {
