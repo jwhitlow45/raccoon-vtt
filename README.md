@@ -989,6 +989,29 @@ open page reload. Until it reloads, an old page has no View button, and an
 old table display drops what a DM in Isometric shows it, so Follow the DM
 stands still there.
 
+The update that splits Undo into Play and Setup history
+(docs/design-v1-undo-scope.md, batch A) saves rooms at snapshot version 30
+and stores changes at op version 34, which the builds before it cannot read:
+they answer "Something went wrong" for every room, even a room whose stored
+changes hold none of the new ones. Back up first. Rooms, backups and stored
+changes from before it take the new versions as they load, through identity
+migration steps (33 to 34 for changes, 29 to 30 for rooms). There is no
+database table migration and no manual conversion of rooms. The restart that
+deploys it clears every DM's and player's in-memory undo history, since those
+histories are never stored, so nothing that was undoable before the update
+can be undone after it. Going back is the same restore: check out the commit
+you ran before (`git log` lists it), rebuild with
+`docker compose -f docker-compose.server.yml up -d --build`, then follow
+Restore under Backups with the backup taken just before the update. Only that
+backup works: a build before this update refuses a room saved after it, so
+the restore cannot be skipped. Every room loses what changed after that
+backup. Reload every page left open across the update, table displays
+included, since there is no client version check and no version step makes an
+open page reload. Until it reloads, an old page's Undo or Redo gets a
+terminal "Reload to use Undo" refusal and takes nothing back, and its other
+queued changes that this build still accepts may still arrive. An old page
+shows no Setup history.
+
 Compose rebuilds the image and replaces only the containers that changed. On
 the way down the app closes every WebSocket with code 1012, finishes each
 room's current write and saves a snapshot, so phones reconnect on their own
