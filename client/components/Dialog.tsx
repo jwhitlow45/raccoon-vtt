@@ -26,11 +26,10 @@ export type DialogProps = {
   /** A short line at the footer's left: what the main button will do, or why it cannot yet. */
   status?: ReactNode;
   /**
-   * The footer's buttons grow to share the line they stand on
-   * (docs/design-v1-polish.md R6), so the status takes the line's spare
-   * room ahead of them: a button beside it keeps its own width, and one
-   * that wraps under it fills its line. Off, the status and the buttons
-   * share spare room as they always have.
+   * The status takes the line's spare room ahead of the buttons. When a
+   * caller gives its buttons flex-grow, a button beside the status keeps
+   * its own width and one that wraps under it fills its line. Buttons do
+   * not grow by default. Off, the status keeps its usual flex sizing.
    */
   statusGrow?: boolean;
   /** The card's width on a computer: `layout.dialog.sm`, `md` or `lg`. */
