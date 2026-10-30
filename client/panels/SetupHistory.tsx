@@ -32,7 +32,10 @@ export function SetupHistory(props: { scope?: HistoryScope; direction?: HistoryD
   const [discard, setDiscard] = useState<{ direction: HistoryDirection; head: HistoryHead } | null>(null);
   const ui = useRoomUi();
   const forget = useRoomView((s) => s.toasts.find((toast) => toast.text === FORGET_ASK && toast.action));
-  const disabled = !connected || !dm || preview || held || history.pending > 0;
+  const blocked = !connected || !dm || preview || held;
+  // A command on its way shows busy and refuses taps, but keeps its focus, so the sheet's keys stay with Setup history.
+  const busy = history.pending > 0;
+  const disabled = blocked || busy;
   const title = scope === "setup" ? "Setup history" : "Play history";
 
   useEffect(() => {
@@ -49,10 +52,28 @@ export function SetupHistory(props: { scope?: HistoryScope; direction?: HistoryD
     return () => window.removeEventListener("keydown", onKey, true);
   }, [actions, connected, held, dm, preview, scope, discard]);
 
+  // A focused action disabled as its history empties drops focus to the page, which would hand the sheet's keys to Play.
+  // Keep it in the sheet: on the next action still enabled, else the sheet's body.
+  const focusInside = useRef(false);
+  useEffect(() => {
+    const sheet = body.current?.closest("dialog");
+    if (!focusInside.current || !sheet?.open || discard) return;
+    const active = document.activeElement;
+    // Only focus that fell to the page or stayed on a disabled control here is lost. Focus moved on, as to the opener on close, stays there.
+    if (active && active !== document.body && !(sheet.contains(active) && active.matches(":disabled"))) return;
+    (body.current?.querySelector<HTMLElement>("button:not(:disabled)") ?? body.current)?.focus();
+  });
+
   if (!dm || preview) return null;
   return (
     <Dialog title={title} phone="sheet" width="sm" onClose={props.onClose}>
-      <div ref={body} data-setup-history={scope} style={{ display: "grid", gap: theme.space(4), minWidth: 0, overflowWrap: "anywhere" }}>
+      <div
+        ref={body}
+        tabIndex={-1}
+        onFocus={() => { focusInside.current = true; }}
+        onBlur={(event) => { if (event.relatedTarget && !body.current?.contains(event.relatedTarget as Node)) focusInside.current = false; }}
+        data-setup-history={scope}
+        style={{ outline: "none", display: "grid", gap: theme.space(4), minWidth: 0, overflowWrap: "anywhere" }}>
         <p style={{ margin: 0 }}>{scope === "setup" ? "Your saved definitions and configuration have their own history. Play and board changes stay in Undo." : "Your play and board changes have their own history. Saved definitions and configuration stay in Setup history."}</p>
         {!connected ? <p role="status">Connect to use history.</p> : <Loading text={HISTORY_LOADING} active={!history.ready || history.pending > 0} />}
         {(["undo", "redo"] as const).map((direction) => {
@@ -63,13 +84,13 @@ export function SetupHistory(props: { scope?: HistoryScope; direction?: HistoryD
           return (
             <section key={direction} aria-label={`${label} step`} style={{ display: "grid", gap: theme.space(2), minWidth: 0 }}>
               <p id={`history-${scope}-${direction}`} style={{ margin: 0, whiteSpace: "normal" }}>{head?.label ?? (history.ready ? `Nothing to ${direction}.` : "Waiting for history.")}</p>
-              <Button disabled={disabled || (history.ready && !head)} title={withKey(label, key)} aria-keyshortcuts={key?.aria} aria-describedby={`history-${scope}-${direction}`} onClick={(event) => actions[direction]({ scope, control: `history-${scope}-${direction}`, detail: event.detail })}>{label}</Button>
+              <Button disabled={blocked || (history.ready && !head)} busy={busy} title={withKey(label, key)} aria-keyshortcuts={key?.aria} aria-describedby={`history-${scope}-${direction}`} onClick={(event) => actions[direction]({ scope, control: `history-${scope}-${direction}`, detail: event.detail })}>{label}</Button>
               {head?.retained ? (
                 <div data-history-review style={{ display: "grid", gap: theme.space(2), minWidth: 0 }}>
                   <p style={{ margin: 0 }}>{blockerText(head.retained)}</p>
                   <Button expanded={review === direction} onClick={() => setReview(review === direction ? null : direction)}>Review step</Button>
                   {review === direction ? <>
-                    <Button disabled={disabled} onClick={(event) => actions[direction]({ scope, expected: head.id, control: `retry-${scope}-${direction}`, detail: event.detail })}>Retry</Button>
+                    <Button disabled={blocked} busy={busy} onClick={(event) => actions[direction]({ scope, expected: head.id, control: `retry-${scope}-${direction}`, detail: event.detail })}>Retry</Button>
                     <Button variant="danger" disabled={disabled} onClick={() => setDiscard({ direction, head })}>Discard this step</Button>
                   </> : null}
                 </div>
@@ -86,8 +107,9 @@ export function SetupHistory(props: { scope?: HistoryScope; direction?: HistoryD
       </div>
       {discard ? (
         <Dialog title="Discard this step" phone="sheet" width="sm" onClose={() => setDiscard(null)} footer={<>
-          <Button onClick={() => setDiscard(null)}>Cancel</Button>
-          <Button variant="danger" disabled={disabled} onClick={(event) => {
+          {/* Each fills the line it stands on, so the pair wrapped on a narrow phone keeps one edge (docs/design-v1-polish.md R6). */}
+          <Button onClick={() => setDiscard(null)} style={{ flex: "1 1 auto" }}>Cancel</Button>
+          <Button variant="danger" disabled={disabled} style={{ flex: "1 1 auto" }} onClick={(event) => {
             actions[discard.direction]({ scope, expected: discard.head.id, discard: true, control: `discard-${scope}-${discard.direction}`, detail: event.detail });
             setDiscard(null);
           }}>Discard this step</Button>
