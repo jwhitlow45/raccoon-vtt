@@ -52,6 +52,36 @@ export function isoNamePill(candidates: readonly PillSpec[], layout: IsoNames, s
     }
     if (tokenCost === 0 && otherCost === 0) break;
   }
+  // A raised name can sit over a wire whose normal positions all meet a
+  // creature. Try a small extra gap along the pointer before accepting an
+  // overlap. Keep the anchor on the shape and add at most two view units of gap.
+  if (tokenCost > 0) {
+    let distance = Infinity;
+    const above = [...layout.boxes].sort((a, b) => b.y1 - a.y1);
+    const below = [...layout.boxes].sort((a, b) => a.y0 - b.y0);
+    for (const candidate of candidates) {
+      if (!candidate.above && !candidate.below) continue;
+      const box = pillInkReach({ ...viewPill(candidate, layout.view, layout.ground), scale });
+      let shift = 0;
+      for (const obstacle of candidate.above ? above : below) {
+        if (box.x0 >= obstacle.x1 || box.x1 <= obstacle.x0) continue;
+        if (box.y0 >= obstacle.y1 || box.y1 <= obstacle.y0) continue;
+        const dy = candidate.above ? obstacle.y0 - box.y1 - 1 / scale : obstacle.y1 - box.y0 + 1 / scale;
+        shift += Math.abs(dy);
+        box.y0 += dy;
+        box.y1 += dy;
+      }
+      if (shift === 0 || shift > 2 || shift > distance) continue;
+      const pushed = { ...candidate, offsetPx: (candidate.offsetPx ?? 0) + shift * scale };
+      if (!allowed(pushed)) continue;
+      const other = overlap(box, otherBoxes);
+      if (shift < distance || other < otherCost) {
+        best = pushed;
+        distance = shift;
+        otherCost = other;
+      }
+    }
+  }
   return best;
 }
 

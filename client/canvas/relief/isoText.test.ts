@@ -1,24 +1,27 @@
 import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { before, describe, test } from "node:test";
-import { actor, token } from "#shared/testutil.ts";
+import { actor, token, trap as makeTrap } from "#shared/testutil.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 import { labelShape } from "../../features/builder/labelShape.ts";
 import { overlaps, type Box } from "../../lib/boardText.ts";
 import type { ViewToken } from "../../lib/scene.ts";
 import { isometric, toView, toWorld, type Turn } from "../../lib/view.ts";
-import { pillPlace, pillReach } from "../../features/measure/pillPlace.ts";
+import { pillInkReach, pillPlace, pillReach } from "../../features/measure/pillPlace.ts";
 import { tokenBoxes as topDownBoxes } from "../../features/areas/labelSpot.ts";
 import { standeeShape } from "./standee.ts";
 
 const { layoutBoardText } = await import("../useBoardText.ts");
 const { areaNamePill } = await import("../../features/areas/TemplateLayer.tsx");
+const { trapNamePill, isoTrapNamePill } = await import("../../features/traps/TrapLayer.tsx");
 const { decorPlace, isoTokenBoxes, isoNamePill, tokenLayoutPills, mapLabelInk, viewPill } = await import("./isoText.ts");
 const { measureLabel } = await import("../../features/builder/draw.ts");
 
 before(() => {
-  // Inter widths from the shipped font at 12 px. The estimate alone picks a
-  // different area candidate and misses the browser fixture's narrow overlap.
-  const widths: Record<string, number> = { Raised: 37.99, Bree: 26.16, Grum: 31.08, Front: 29.26, Behind: 39.29, "30/30": 34.29, "Area name": 61.16, "Wire trap": 51.95 };
+  // Inter widths at 12 px. Raised and Wire trap come from the browser's
+  // measured boxes after removing padding and strokes. Other widths were
+  // measured from the shipped font. Estimates pick different candidates.
+  const widths: Record<string, number> = { Raised: 38.979736328125, Bree: 26.16, Grum: 31.08, Front: 29.26, Behind: 39.29, "30/30": 34.29, "Area name": 61.16, "Wire trap": 53.93608093261719 };
   const context = {
     font: "",
     measureText(text: string) {
@@ -196,15 +199,18 @@ test("ISO34-LABELS: a centered pill must also clear the token label after slidin
 });
 
 
-test("ISO34-LABELS: real area candidates clear the raised name's halo beside Bree and a wire trap", () => {
+test("ISO34-LABELS: real area and trap candidates clear the raised name's halo beside Bree and a wire trap", () => {
   const scale = 40;
   const raised = token("raised", { x: 10, y: 10, elevation: 20, name: "Raised", actor: { inline: { ...actor(), hp: { cur: 30, max: 30, temp: 0 }, ac: 12 } } }) as ViewToken;
   const tokens = [raised, token("bree", { kind: "npc", x: 6, y: 9, name: "Bree", disposition: "ally" }), token("grum", { kind: "npc", x: 2, y: 2, size: "large", name: "Grum", disposition: "ally" }), token("front", { x: 13, y: 9, name: "Front" }), token("behind", { x: 12, y: 8, name: "Behind" })].map((t) => ({ ...t, actor: raised.actor })) as ViewToken[];
+  let kept: ReturnType<typeof layoutBoardText>["placed"] | undefined;
   for (const turn of [0, 1, 2, 3] as Turn[]) {
     const view = isometric(turn);
     const ground = (x: number, y: number) => x >= 8 && x < 12 && y >= 4 && y < 8 ? 2 : 0;
     const place = (t: ViewToken) => decorPlace(view, t, standeeShape(turn, { x: t.x, y: t.y, w: t.size === "large" ? 2 : 1, h: t.size === "large" ? 2 : 1 }, t.elevation / 5, ground(t.x, t.y), scale, 900));
-    const text = layoutBoardText({ tokens, scale, characters: undefined, role: "dm", ownsToken: () => true, activeTokenId: null, selectedId: null, pills: [], mapLabels: [], lockShown: () => false, fontEpoch: 0, place }, undefined).out;
+    const laid = layoutBoardText({ tokens, scale, characters: undefined, role: "dm", ownsToken: () => true, activeTokenId: null, selectedId: null, pills: [], mapLabels: [], lockShown: () => false, fontEpoch: 0, place }, kept);
+    kept = laid.placed;
+    const text = laid.out;
     const label = text.get(raised.id)!.label!;
     const at = place(raised);
     // The browser reads the first Text's getClientRect, including its px/4 stroke.
@@ -214,14 +220,29 @@ test("ISO34-LABELS: real area candidates clear the raised name's halo beside Bre
     const point = toWorld(view, toView({ kind: "topDown" }, { x: (ink.x0 + ink.x1) / 2, y: ink.y1 }));
     const names = { view, ground, boxes: isoTokenBoxes(tokens, text, scale, place) };
     const original = { ...point, name: "Area name", size: "map" as const, small: true, maxLines: 2 as const, above: true, below: false };
-    const trap = { x: Math.round(point.x), y: Math.round(point.y), name: "Wire trap", size: "map" as const, small: true, maxLines: 1 as const, offsetPx: 11, below: true };
-    const traps = [trap, ...[0, -0.25, 0.25, -0.5, 0.5].flatMap((f) => [true, false].map((above) => ({ ...trap, x: trap.x + 2 * f, above, below: !above })))];
-    const chosenTrap = isoNamePill(traps, names, scale);
+    const x = Math.round(point.x);
+    const y = Math.round(point.y);
+    const trap = makeTrap("wire", { name: "Wire trap", zone: { wire: { a: [x - 1, y], b: [x + 1, y] } } });
+    const originalTrap = trapNamePill(SQUARES, trap, {}, scale, true)!;
+    const chosenTrap = isoTrapNamePill(originalTrap, SQUARES, trap, {}, names, scale, () => true);
+    if (turn === 3) {
+      // Match the captured browser rectangles before checking the new placement.
+      const captured = { x: 780.5640951736806, y: 297.72020664195173, width: 45.979736328125, height: 15 };
+      assert.ok(Math.abs((ink.x1 - ink.x0) * scale - captured.width) < 1e-9);
+      assert.ok(Math.abs((ink.y1 - ink.y0) * scale - captured.height) < 1e-9);
+      const camera = { x: captured.x - ink.x0 * scale, y: captured.y - ink.y0 * scale };
+      const old = pillPlace({ ...viewPill({ ...originalTrap, x: x - 1, above: true, below: false }, view, ground), scale }, null).box;
+      const drawn = { x: old.x0 * scale + camera.x - 0.75, y: old.y0 * scale + camera.y - 0.75, width: (old.x1 - old.x0) * scale + 1.5, height: (old.y1 - old.y0) * scale + 1.5 };
+      const wanted = { x: 743.5516516239726, y: 299.3814575050762, width: 63.43608093261719, height: 29.3 };
+      for (const key of ["x", "y", "width", "height"] as const) assert.ok(Math.abs(drawn[key] - wanted[key]) < 1e-9, `captured trap ${key}: ${drawn[key]}`);
+    }
     const chosen = areaNamePill(original, { kind: "circle", x: point.x, y: point.y + 1, r: 1 }, names, scale, () => true, [chosenTrap]);
-    const box = pillPlace({ ...viewPill(chosen, view, ground), scale }, null).box;
-    const gap = Math.max(box.x0 - ink.x1, ink.x0 - box.x1, box.y0 - ink.y1, ink.y0 - box.y1) * scale - 0.75;
-    // Match the browser assertion's 1 px antialiasing allowance at every turn.
-    assert.ok(gap >= -1, `turn ${turn}: area outline overlaps the raised name by ${-gap} px: ${JSON.stringify({ box, ink, chosen })}`);
+    for (const placed of [chosen, chosenTrap]) {
+      const box = pillPlace({ ...viewPill(placed, view, ground), scale }, null).box;
+      const gap = Math.max(box.x0 - ink.x1, ink.x0 - box.x1, box.y0 - ink.y1, ink.y0 - box.y1) * scale - 0.75;
+      // Match the browser assertion's 1 px antialiasing allowance at every turn.
+      assert.ok(gap >= -1, `turn ${turn}: ${placed.name} overlaps the raised name by ${-gap} px: ${JSON.stringify({ box, ink, chosen: placed })}`);
+    }
   }
 });
 
@@ -235,4 +256,28 @@ test("ISO34-LABELS: the area candidate's outline counts even when its fill clear
   const far = { ...original, ...toWorld(view, toView({ kind: "topDown" }, { x: 0, y: 2 })) };
   assert.ok(!overlaps(reach, ink), "the unstroked box misses the collision");
   assert.equal(isoNamePill([original, far], { view, ground: () => 0, boxes: [ink] }, SCALE), far);
+});
+
+
+test("ISO34-LABELS: crowded names move past successive token boxes only where the fog permits", () => {
+  const view = isometric(0);
+  const scale = 40;
+  const point = toWorld(view, toView({ kind: "topDown" }, { x: 0, y: 0 }));
+  for (const above of [false, true]) {
+    const original = { ...point, name: "Wire trap", size: "map" as const, small: true, above, below: !above, offsetPx: 12 };
+    const first = pillInkReach({ ...viewPill(original, view, () => 0), scale });
+    const near = above ? { ...first, y0: first.y1 - 0.25, y1: first.y1 - 0.1 } : { ...first, y0: first.y0 + 0.1, y1: first.y0 + 0.25 };
+    // Clear initially, this box blocks the first move. It comes first in
+    // the input to catch a search that never revisits a passed obstacle.
+    const next = above ? { ...first, y0: first.y0 - 0.2, y1: first.y0 - 0.1 } : { ...first, y0: first.y1 + 0.1, y1: first.y1 + 0.2 };
+    const names = { view, ground: () => 0, boxes: [next, near] };
+    const pushed = isoNamePill([original], names, scale);
+    assert.ok(pushed.offsetPx! > original.offsetPx);
+    assert.deepEqual({ x: pushed.x, y: pushed.y }, point, "the pointer keeps its shape anchor");
+    const box = pillInkReach({ ...viewPill(pushed, view, () => 0), scale });
+    assert.ok(names.boxes.every((b) => !overlaps(box, b)), "the whole outlined pill clears both obstacles");
+    assert.equal(isoNamePill([original], names, scale, (p) => p.offsetPx === original.offsetPx), original, "no pushing the name onto fogged ground");
+    const far = above ? { ...first, y0: first.y0 - 3 } : { ...first, y1: first.y1 + 3 };
+    assert.equal(isoNamePill([original], { ...names, boxes: [far] }, scale), original, "a name cannot move more than two extra view units from its shape");
+  }
 });

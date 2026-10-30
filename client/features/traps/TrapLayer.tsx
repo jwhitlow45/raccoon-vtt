@@ -12,7 +12,7 @@ import { MarkPill } from "../../canvas/IsoParts.tsx";
 import { drawsHere, viewPointOf } from "../../canvas/isoPlace.ts";
 import { markStands, pillStands } from "../../canvas/markStand.ts";
 import { useIsoGround, useTreeShownStore, useTreeShownView, type IsoGround } from "../../canvas/relief/context.ts";
-import { IsoNamesContext, isoNamePill } from "../../canvas/relief/isoText.ts";
+import { IsoNamesContext, isoNamePill, type IsoNames } from "../../canvas/relief/isoText.ts";
 import { theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
 import { contextFrom } from "../areas/coverage.ts";
@@ -122,6 +122,17 @@ export function trapNamePill(g: Grid, trap: Trap, chunks: Readonly<Record<string
   return badge ? { ...pill, x: badge.x, y: badge.y, offsetPx: BADGE_PX / 2 + 2, below: true } : null;
 }
 
+/** Standing trap names use the same candidates in placement and its geometry tests. */
+export function isoTrapNamePill(original: PillSpec, grid: Grid, trap: Trap, chunks: Readonly<Record<string, BuildChunk>>, names: IsoNames, scale: number, allowed: (p: PillSpec) => boolean): PillSpec {
+  const box = zoneBox(grid, trap, chunks);
+  if (!box) return original;
+  const candidates: PillSpec[] = [original];
+  for (const f of [0, -0.25, 0.25, -0.5, 0.5]) {
+    for (const above of [true, false]) candidates.push({ ...original, x: (box.x0 + box.x1) / 2 + f * (box.x1 - box.x0), y: above ? box.y0 : box.y1, above, below: !above });
+  }
+  return isoNamePill(candidates, names, scale, allowed);
+}
+
 const NO_PILLS: readonly PillSpec[] = [];
 
 const TrapMark = memo(function TrapMark(props: { trap: Trap; chunks: Readonly<Record<string, BuildChunk>>; scale: number; dm: boolean; iso: IsoGround | null; grid: Grid }) {
@@ -135,13 +146,7 @@ const TrapMark = memo(function TrapMark(props: { trap: Trap; chunks: Readonly<Re
   const name = useMemo(() => {
     const allowed = (p: PillSpec) => !props.iso || pillStands(props.iso.fog, { ...p, scale });
     if (!original || !names || !allowed(original)) return original;
-    const box = zoneBox(grid, trap, props.chunks);
-    if (!box) return original;
-    const candidates: PillSpec[] = [original];
-    for (const f of [0, -0.25, 0.25, -0.5, 0.5]) {
-      for (const above of [true, false]) candidates.push({ ...original, x: (box.x0 + box.x1) / 2 + f * (box.x1 - box.x0), y: above ? box.y0 : box.y1, above, below: !above });
-    }
-    return isoNamePill(candidates, names, scale, allowed);
+    return isoTrapNamePill(original, grid, trap, props.chunks, names, scale, allowed);
   }, [original, names, props.iso, scale, grid, trap, props.chunks]);
   const nameKey = name ? JSON.stringify(name) : "";
   // Keyed on what the name says and where, so a pinch that keeps it shown publishes nothing new.
