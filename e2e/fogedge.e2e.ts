@@ -436,10 +436,8 @@ async function sweep(state: FogState): Promise<void> {
 
 /**
  * The DM's Party sight on a scene with party vision and no party, so the
- * veil lies over all of it, under the DM's fog: Top-down at every ratio
- * and camera. Isometric keeps the veil's frame and image meeting at the
- * edge itself (SightOverlay.tsx), where a line a few levels lighter stays
- * under the DM's fog, so it is not read here.
+ * veil lies over all of it, under the DM's fog, at every ratio and camera.
+ * FU40-B also checks each isometric turn with the same pixel allowance.
  */
 async function sweepVeiled(): Promise<void> {
   misses.length = 0;
@@ -455,13 +453,16 @@ async function sweepVeiled(): Promise<void> {
           return konva.stages.some((s) => s.width() > 0 && s.visible() && s.find((n) => n.getAttr("sightVersion") !== undefined).length > 0) || null;
         }),
       );
-      for (const cam of CAMERAS) {
-        const label = `dm, topDown, ratio ${ratio}, ${cam.scale} px a cell, Party sight`;
-        const placement = await placeBoard(page, cam);
-        await assertOnCanvas(page, placement, label);
-        checkEdges(await grab(page, placement, ratio), placement, label, "dm", "veiled");
+      for (const turn of [null, 0, 1, 2, 3]) {
+        if (turn !== null) await isoAt(page, turn);
+        for (const cam of CAMERAS) {
+          const label = `dm, ${turn === null ? "topDown" : `isometric turn ${turn}`}, ratio ${ratio}, ${cam.scale} px a cell, Party sight`;
+          const placement = await placeBoard(page, cam);
+          await assertOnCanvas(page, placement, label);
+          checkEdges(await grab(page, placement, ratio), placement, label, "dm", "veiled");
+        }
+        if (ratio === 2) await shots.take(page, `fu40-b-fogedge-veiled-dm-${turn === null ? "topDown" : `isometric-${turn}`}-ratio-2`);
       }
-      if (ratio === 2) await shots.take(page, "fogedge-veiled-dm-topDown-ratio-2");
     } finally {
       await context.close();
     }
@@ -543,7 +544,7 @@ describe("raccoon-vtt the fog's edge", { timeout: 600_000 }, () => {
     assert.deepEqual(misses, []);
   });
 
-  test("FE-5. party vision with the DM's Party sight on and the scene fogged again: the veil under the DM's fog is one even tint across the edge in Top-down", async () => {
+  test("FU40-B FE-5. party sight under the DM's fog keeps an even edge tint in Top-down and every isometric turn", async () => {
     await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: randomUUID(), mode: "hide", shape: { kind: "rect", x: 0, y: 0, w: BOUNDS.w, h: BOUNDS.h } }] });
     await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { vision: { on: true, light: "dark" } } });
     await sweepVeiled();
