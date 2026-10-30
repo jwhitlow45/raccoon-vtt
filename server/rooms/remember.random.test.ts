@@ -17,8 +17,8 @@ import { chunkHeights, chunkMarks } from "#shared/rules/heights.ts";
 import { sceneWalls } from "#shared/rules/walls.ts";
 import { chance, DM, env, int, pick, rng, token } from "#shared/testutil.ts";
 import { exploreOp } from "./explore.ts";
-import { MEMORY_CAP } from "./memorySize.ts";
-import { mapStepOps } from "./remember.ts";
+import { chunkCharge, MEMORY_CAP } from "./memorySize.ts";
+import { layerKey, mapStepOps, memoryGrowth } from "./remember.ts";
 
 /**
  * MX2 end to end through the map step (docs/design-v1-map-discovery.md 13):
@@ -167,12 +167,14 @@ function randomOp(r: () => number, state: RoomState, n: number): Op {
 /** One batch as the actor runs it: the ops, the explore, the map step. */
 function batch(state: RoomState, ops: readonly Op[], seq: number): RoomState {
   const before = state;
+  const estimates = new Map<string, number>();
   let s = state;
   const touched: EntityKey[] = [];
   let n = seq * 10;
   const run = (op: Op, by: Viewer) => {
     const r = applyOp(s, op, by, env(n++));
     if (!r.ok) return false;
+    if (by === DM) for (const [key, bytes] of memoryGrowth(s, r.state, r.touched)) estimates.set(key, (estimates.get(key) ?? 0) + bytes);
     touched.push(...r.touched);
     s = r.state;
     return true;
@@ -187,6 +189,10 @@ function batch(state: RoomState, ops: readonly Op[], seq: number): RoomState {
     const parsed = serverOnlyOpSchema.safeParse(op);
     assert.ok(parsed.success, `the map step's op validates: ${parsed.error?.issues[0]?.message}`);
     assert.ok(run(op, SERVER), "the map step applies");
+  }
+  for (const layer of layersOf(s)) {
+    const charge = (state: RoomState) => memoryOf(state, layer).reduce((sum, chunk) => sum + chunkCharge(state.scenes.s1!, chunk), 0);
+    assert.ok(charge(s) - charge(before) <= (estimates.get(layerKey("s1", layer)) ?? 0), `batch ${seq}, layer ${layer}: estimated growth covers actual growth`);
   }
   return s;
 }

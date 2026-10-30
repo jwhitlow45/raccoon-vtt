@@ -523,6 +523,46 @@ describe("the map step", () => {
 });
 
 describe("the estimate for the ask (5.3)", () => {
+  function assertGrowthCoversStep(before: RoomState, op: Op): void {
+    const result = applyOp(before, op, DM, env(9));
+    assert.ok(result.ok);
+    const growth = memoryGrowth(before, result.state, result.touched);
+    let after = result.state;
+    for (const remember of mapStepOps({ before, after, touched: result.touched, cap: () => Infinity })) {
+      const applied = applyOp(after, remember, SERVER, env(10));
+      assert.ok(applied.ok);
+      after = applied.state;
+    }
+    for (const layer of [null, "p1"] as const) {
+      const charge = (state: RoomState) => Object.values(layer === null ? state.memory ?? {} : state.memoryBy ?? {})
+        .filter((chunk) => chunk.sceneId === "s1" && (chunk.memberId ?? null) === layer)
+        .reduce((sum, chunk) => sum + chunkCharge(state.scenes.s1!, chunk), 0);
+      const actual = charge(after) - charge(before);
+      assert.ok(actual > 0, `the fixture adds memory for ${layer}`);
+      assert.ok((growth.get(layerKey("s1", layer)) ?? 0) >= actual, `the estimate covers ${actual} bytes for ${layer}`);
+    }
+  }
+
+  test("a 2,000-cell edit outside every held layer does no detailed terrain reads", () => {
+    const before = fogRoom({ vision: true, perPlayer: true, bounds: { w: 160, h: 64 } });
+    before.holders = { s1: { sceneId: "s1", rev: 0, entries: [{ memberId: "p1", on: true }] } };
+    lift(before, "party", { x: 1, y: 1, w: 1, h: 1 });
+    lift(before, { holder: "p1" }, { x: 2, y: 2, w: 1, h: 1 });
+    const cells = Array.from({ length: 2_000 }, (_, i) => `${32 + i % 100},${16 + Math.floor(i / 100)}`);
+    const result = applyOp(before, { t: "build.paint", sceneId: "s1", terrain: "stone", cells }, DM, env(9));
+    assert.ok(result.ok);
+    let reads = 0;
+    const after = { ...result.state, buildChunks: Object.fromEntries(Object.entries(result.state.buildChunks).map(([key, chunk]) => [key, {
+      ...chunk,
+      cells: new Proxy(chunk.cells, { get(target, property, receiver) {
+        if (typeof property === "string" && Object.hasOwn(target, property)) reads++;
+        return Reflect.get(target, property, receiver);
+      } }),
+    }])) };
+    assert.equal(memoryGrowth(before, after, result.touched).size, 0);
+    assert.equal(reads, 0, "unheld cells need no terrain values or automatic-wall comparisons");
+  });
+
   test("counts every change on a layer's remembered ground, out of sight or not, and nothing elsewhere", () => {
     withCellVision(() => {
       const s = batch(crypt(), []).state;
@@ -537,5 +577,63 @@ describe("the estimate for the ask (5.3)", () => {
       assert.ok(r2.ok);
       assert.equal(memoryGrowth(s, r2.state, r2.touched).size, 0, "ground no layer holds adds nothing");
     });
+  });
+
+  test("moved marks count both the old and new held boxes for every layer", () => {
+    for (const field of ["label", "stamp"] as const) for (const heldX of [4, 34]) {
+      const before = fogRoom({ vision: true, perPlayer: true });
+      before.holders = { s1: { sceneId: "s1", rev: 0, entries: [{ memberId: "p1", on: true }] } };
+      lift(before, "party", { x: heldX, y: 4, w: 2, h: 2 });
+      lift(before, { holder: "p1" }, { x: heldX, y: 4, w: 2, h: 2 });
+      if (field === "label") {
+        before.labels.mark12345678 = { id: "mark12345678", sceneId: "s1", rev: 0, x: 4, y: 4, text: "X", size: 1 };
+        assertGrowthCoversStep(before, { t: "build.label", sceneId: "s1", labelId: "mark12345678", label: { x: 34, y: 4, text: "X", size: 1 } });
+      } else {
+        const stamp = { id: "mark12345678", art: { key: "barrel" }, x: 4, y: 4, w: 1, h: 1, rotation: 0, z: 0, visibility: "all" as const };
+        before.stamps[stamp.id] = { ...stamp, sceneId: "s1", rev: 0 };
+        assertGrowthCoversStep(before, { t: "build.stamps", sceneId: "s1", put: [{ ...stamp, x: 34 }] });
+      }
+    }
+  });
+
+  test("moved walls count old and new held spans outside their midpoint chunks", () => {
+    for (const heldX of [14, 30]) {
+      const before = fogRoom({ vision: true, perPlayer: true });
+      before.holders = { s1: { sceneId: "s1", rev: 0, entries: [{ memberId: "p1", on: true }] } };
+      lift(before, "party", { x: heldX, y: 4, w: 1, h: 1 });
+      lift(before, { holder: "p1" }, { x: heldX, y: 4, w: 1, h: 1 });
+      const old = wall(before, "wall12345678", [14, 4.5], [22, 4.5]);
+      assertGrowthCoversStep(before, { t: "build.walls", sceneId: "s1", remove: [{ cx: 1, cy: 0, id: old.id }], put: [{ ...old, a: [30, 4.5], b: [38, 4.5] }] });
+    }
+  });
+
+  test("changed explored layers invalidate an estimate without changing the build", () => {
+    const before = fogRoom({ vision: true });
+    const result = applyOp(before, { t: "build.paint", sceneId: "s1", terrain: "stone", cells: ["4,4"] }, DM, env(9));
+    assert.ok(result.ok);
+    assert.equal(memoryGrowth(before, result.state, result.touched).size, 0);
+    const explored = { ...result.state };
+    lift(explored, "party", { x: 4, y: 4, w: 1, h: 1 });
+    assert.ok((memoryGrowth(before, explored, result.touched).get(layerKey("s1", null)) ?? 0) > 0);
+  });
+
+  test("an unheld edit counts the automatic edge beside held ground in the previous chunk", () => {
+    const before = fogRoom({ vision: true, perPlayer: true });
+    before.holders = { s1: { sceneId: "s1", rev: 0, entries: [{ memberId: "p1", on: true }] } };
+    lift(before, "party", { x: 15, y: 4, w: 1, h: 1 });
+    lift(before, { holder: "p1" }, { x: 15, y: 4, w: 1, h: 1 });
+    assertGrowthCoversStep(before, { t: "build.paint", sceneId: "s1", terrain: "stone", cells: ["16,4"] });
+  });
+
+  test("an unheld stair edit still counts changed directions in distant held chunks", () => {
+    const before = fogRoom({ vision: true, perPlayer: true });
+    before.holders = { s1: { sceneId: "s1", rev: 0, entries: [{ memberId: "p1", on: true }] } };
+    const run: [number, number][] = Array.from({ length: 39 }, (_, i) => [2 + i, 20]);
+    paint(before, { x: 2, y: 20, w: 39, h: 1 });
+    stairs(before, run, "a");
+    stairs(before, [[40, 20]], "e");
+    lift(before, "party", { x: 3, y: 20, w: 1, h: 1 });
+    lift(before, { holder: "p1" }, { x: 3, y: 20, w: 1, h: 1 });
+    assertGrowthCoversStep(before, { t: "build.stairs", sceneId: "s1", cells: ["40,20"], up: "w" });
   });
 });

@@ -74,6 +74,7 @@ type WallElement = { cx: number; cy: number; id: string; was: FreeWall | null; n
 type MarkElement = { field: MarkField; id: string; was: Mark | null; now: Mark | null };
 
 type Changed = { cells: CellElement[]; walls: WallElement[]; marks: MarkElement[] };
+type Held = ReturnType<typeof layerHeld>;
 
 /** Every `sys.remember` the batch needs, one per scene, in scene id order. */
 export function mapStepOps(input: MapStepInput): OpOf<"sys.remember">[] {
@@ -249,21 +250,21 @@ function shownMark(state: RoomState, field: MarkField, id: string, sceneId: stri
 }
 
 /*
- * What changed, kept for the last few spans from each state: the estimate
- * reads an op's span from the batch's start, and a batch of one op gives
- * the step the same span, whose explore changes no build, scene, label or
- * stamp, so the step reuses the estimate's answer.
+ * What changed, kept for the last few spans from each state. Full map-step
+ * answers depend on the build. Estimates also depend on the explored
+ * layers and their holders, so their filtered answers stay separate.
  */
 const changes = new WeakMap<RoomState, { after: readonly unknown[]; sig: string; changed: Changed }[]>();
 
-function changedOnce(before: RoomState, after: RoomState, scene: Scene, touch: SceneTouch): Changed {
-  const deps = [after.buildChunks, after.scenes, after.labels, after.stamps];
+function changedOnce(before: RoomState, after: RoomState, scene: Scene, touch: SceneTouch, held?: Held): Changed {
+  // Estimates omit unheld elements. The map step still needs its complete answer, even when explore replaces the layers.
+  const deps = [after.buildChunks, after.scenes, after.labels, after.stamps, held ? after : null];
   const sig = JSON.stringify([scene.id, [...touch.chunks].sort(), touch.scene, touch.marks.map((m) => `${m.field}|${m.id}`).sort()]);
   let kept = changes.get(before);
   if (!kept) changes.set(before, (kept = []));
   const hit = kept.find((k) => k.sig === sig && k.after.every((d, i) => d === deps[i]));
   if (hit) return hit.changed;
-  const changed = changedOn(before, after, scene, touch);
+  const changed = changedOn(before, after, scene, touch, held);
   kept.push({ after: deps, sig, changed });
   if (kept.length > 4) kept.shift();
   return changed;
@@ -277,7 +278,7 @@ function changedOnce(before: RoomState, after: RoomState, scene: Scene, touch: S
  * automatic walls rule, the grid shape, fog, vision or per player), and
  * the stairs' positions where the stair map did.
  */
-function changedOn(before: RoomState, after: RoomState, scene: Scene, touch: SceneTouch): Changed {
+function changedOn(before: RoomState, after: RoomState, scene: Scene, touch: SceneTouch, held?: Held): Changed {
   const sceneId = scene.id;
   const was = before.scenes[sceneId];
   const grid = sceneGrid(scene);
@@ -299,13 +300,15 @@ function changedOn(before: RoomState, after: RoomState, scene: Scene, touch: Sce
     const [cx, cy] = at.split(",").map(Number) as [number, number];
     const cb = before.buildChunks[chunkKey(sceneId, cx, cy)];
     const ca = after.buildChunks[chunkKey(sceneId, cx, cy)];
-    if (cb !== ca) cellsChanged(out, sceneId, cx, cy, cb, ca);
-    if (!hex && edgesMayDiffer(before, after, sceneId, cx, cy, ruleB !== ruleA)) {
+    if (cb !== ca) cellsChanged(out, grid, cx, cy, cb, ca, held);
+    const edgesHeld = !held || held.range({ x0: cx * CHUNK_CELLS - 1, y0: cy * CHUNK_CELLS - 1, x1: (cx + 1) * CHUNK_CELLS, y1: (cy + 1) * CHUNK_CELLS });
+    if (!hex && edgesHeld && edgesMayDiffer(before, after, sceneId, cx, cy, ruleB !== ruleA)) {
       for (let k = 0; k < CELLS; k++) {
         const x = cx * CHUNK_CELLS + (k % CHUNK_CELLS);
         const y = cy * CHUNK_CELLS + Math.floor(k / CHUNK_CELLS);
         for (const side of ["n", "w"] as const) {
           const key = `${x},${y},${side}`;
+          if (held && !edgeCells(key).some((cell) => held.key(cell))) continue;
           const b = was ? shownEdge(before.buildChunks, sceneId, ruleB, key) : null;
           const a = shownEdge(after.buildChunks, sceneId, ruleA, key);
           if (!sameValue(b, a)) out.cells.push({ field: "edges", key, cx, cy, cells: edgeCells(key), was: b, now: a });
@@ -313,10 +316,11 @@ function changedOn(before: RoomState, after: RoomState, scene: Scene, touch: Sce
       }
     }
   }
-  if (touch.chunks.size > 0 || touch.scene) stairsChanged(out, before, after, scene);
+  if (touch.chunks.size > 0 || touch.scene) stairsChanged(out, before, after, scene, held);
   for (const { field, id } of touch.marks) {
     const b = shownMark(before, field, id, sceneId);
     const a = shownMark(after, field, id, sceneId);
+    if (held && ![b, a].some((mark) => mark !== null && held.range(field === "labels" ? labelCells(mark as Label) : stampCells(mark as Stamp)))) continue;
     if (!sameMark(b, a)) out.marks.push({ field, id, was: b, now: a });
   }
   return out;
@@ -349,24 +353,27 @@ function edgesMayDiffer(before: RoomState, after: RoomState, sceneId: string, cx
 }
 
 /** The cell-keyed elements and the free walls of one position whose chunk the batch replaced. */
-function cellsChanged(out: Changed, sceneId: string, cx: number, cy: number, cb: BuildChunk | undefined, ca: BuildChunk | undefined): void {
-  if (cb?.cells !== ca?.cells) {
+function cellsChanged(out: Changed, grid: Grid, cx: number, cy: number, cb: BuildChunk | undefined, ca: BuildChunk | undefined, held?: Held): void {
+  const cellsHeld = !held || isHex(grid) || held.range({ x0: cx * CHUNK_CELLS, y0: cy * CHUNK_CELLS, x1: (cx + 1) * CHUNK_CELLS, y1: (cy + 1) * CHUNK_CELLS });
+  if (cellsHeld && cb?.cells !== ca?.cells) {
     const keys = new Set([...Object.keys(cb?.cells ?? {}), ...Object.keys(ca?.cells ?? {})]);
     for (const key of [...keys].sort()) {
+      if (held && !held.key(key)) continue;
       const b = cb?.cells[key] ?? null;
       const a = ca?.cells[key] ?? null;
       if (b !== a) out.cells.push({ field: "cells", key, cx, cy, cells: [key], was: b, now: a });
     }
   }
-  const hb = cb ? chunkHeights(cb) : null;
-  const ha = ca ? chunkHeights(ca) : null;
-  const mb = cb ? chunkMarks(cb) : null;
-  const ma = ca ? chunkMarks(ca) : null;
-  const rb = cb?.rough;
-  const ra = ca?.rough;
+  const hb = cellsHeld && cb ? chunkHeights(cb) : null;
+  const ha = cellsHeld && ca ? chunkHeights(ca) : null;
+  const mb = cellsHeld && cb ? chunkMarks(cb) : null;
+  const ma = cellsHeld && ca ? chunkMarks(ca) : null;
+  const rb = cellsHeld ? cb?.rough : undefined;
+  const ra = cellsHeld ? ca?.rough : undefined;
   if (hb !== ha || mb !== ma || rb !== ra) {
     for (let k = 0; k < CELLS; k++) {
       const key = `${cx * CHUNK_CELLS + (k % CHUNK_CELLS)},${cy * CHUNK_CELLS + Math.floor(k / CHUNK_CELLS)}`;
+      if (held && !held.key(key)) continue;
       const h0 = hb ? hb[k]! : 0;
       const h1 = ha ? ha[k]! : 0;
       if (h0 !== h1) out.cells.push({ field: "heights", key, cx, cy, cells: [key], was: h0, now: h1 });
@@ -380,15 +387,18 @@ function cellsChanged(out: Changed, sceneId: string, cx: number, cy: number, cb:
   }
   if (cb?.walls !== ca?.walls) {
     const walls = new Map<string, { was: FreeWall | null; now: FreeWall | null }>();
-    for (const w of cb?.walls ?? []) walls.set(w.id, { was: shownFreeWall(w), now: null });
+    for (const w of cb?.walls ?? []) walls.set(w.id, { was: w, now: null });
     for (const w of ca?.walls ?? []) {
       const e = walls.get(w.id);
-      if (e) e.now = shownFreeWall(w);
-      else walls.set(w.id, { was: null, now: shownFreeWall(w) });
+      if (e) e.now = w;
+      else walls.set(w.id, { was: null, now: w });
     }
     for (const id of [...walls.keys()].sort()) {
       const e = walls.get(id)!;
-      if (!sameWall(e.was, e.now)) out.walls.push({ cx, cy, id, was: e.was, now: e.now });
+      if (held && ![e.was, e.now].some((w) => w !== null && wallSpans(grid, w).some((s) => held.key(s.cell)))) continue;
+      const was = e.was ? shownFreeWall(e.was) : null;
+      const now = e.now ? shownFreeWall(e.now) : null;
+      if (!sameWall(was, now)) out.walls.push({ cx, cy, id, was, now });
     }
   }
 }
@@ -408,12 +418,13 @@ function hasStairs(chunk: BuildChunk | undefined): boolean {
  * chunks away can turn a stair players remember (ASTRA-4): every stair cell
  * whose direction differs between the maps before and after.
  */
-function stairsChanged(out: Changed, before: RoomState, after: RoomState, scene: Scene): void {
+function stairsChanged(out: Changed, before: RoomState, after: RoomState, scene: Scene, held?: Held): void {
   const was = before.scenes[scene.id];
   // Only the scene's own positions, read before deriving either stair map: most scenes hold no stair at all.
   const positions = new Set<string>();
   for (const s of was ? [was, scene] : [scene]) {
     for (const { cx, cy } of chunkPositions(s)) {
+      if (held && !isHex(sceneGrid(scene)) && !held.range({ x0: cx * CHUNK_CELLS, y0: cy * CHUNK_CELLS, x1: (cx + 1) * CHUNK_CELLS, y1: (cy + 1) * CHUNK_CELLS })) continue;
       if (hasStairs(before.buildChunks[chunkKey(scene.id, cx, cy)]) || hasStairs(after.buildChunks[chunkKey(scene.id, cx, cy)])) positions.add(`${cx},${cy}`);
     }
   }
@@ -431,6 +442,7 @@ function stairsChanged(out: Changed, before: RoomState, after: RoomState, scene:
       const x = cx * CHUNK_CELLS + (k % CHUNK_CELLS);
       const y = cy * CHUNK_CELLS + Math.floor(k / CHUNK_CELLS);
       const key = `${x},${y}`;
+      if (held && !held.key(key)) continue;
       const stairB = (marksB !== null && marksB[k] !== ".") || cb?.cells[key] === "stairs";
       const stairA = (marksA !== null && marksA[k] !== ".") || ca?.cells[key] === "stairs";
       if (!stairB && !stairA) continue;
@@ -927,11 +939,15 @@ export function memoryGrowth(before: RoomState, after: RoomState, touched: reado
   for (const [sceneId, touch] of byScene) {
     const scene = after.scenes[sceneId];
     if (!scene || !keepsMemory(scene) || (touch.chunks.size === 0 && !touch.scene && touch.marks.length === 0)) continue;
-    const changed = changedOnce(before, after, scene, touch);
+    const layers = layersOf(after, scene).map((layer) => ({ layer, held: layerHeld(after, scene, layer) }));
+    const heldByAny: Held = {
+      key: (cell) => layers.some(({ held }) => held.key(cell)),
+      range: (range) => layers.some(({ held }) => held.range(range)),
+    };
+    const changed = changedOnce(before, after, scene, touch, heldByAny);
     if (changed.cells.length + changed.walls.length + changed.marks.length === 0) continue;
     const grid = sceneGrid(scene);
-    for (const layer of layersOf(after, scene)) {
-      const held = layerHeld(after, scene, layer);
+    for (const { layer, held } of layers) {
       // The entries the step could write, filed as it would file them, so each chunk's envelope and whole-chunk fields count once.
       const chunks = new Map<string, Record<string, Record<string, unknown>>>();
       const put = (at: string, field: MemoryField, key: string, value: unknown) => {
