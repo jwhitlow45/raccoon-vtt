@@ -190,6 +190,12 @@ export class UndoStacks {
    */
   push(memberId: string, inverse: RestoreEntry[], label: string, group?: string, poses?: Record<string, Pose>, origin?: Origin, tally?: Tally, teleport = false, walk?: Walk, rides?: Ride[], trapped = false, history: RecordHistory = {}): void {
     if (inverse.length === 0) return;
+    // Reducers can write a new revision without changing a value. Compare the
+    // entire inverse before recording so a no-effect edit preserves Redo,
+    // while an effective edit keeps all its guards for an atomic restore.
+    if (inverse.every((entry) => entry.expectRev === null
+      ? entry.value === null
+      : entry.expectRev === undefined && entry.expectHash !== undefined && guardMatches(entry, entry.value ?? null))) return;
     label = label.slice(0, 200);
     const member = this.#member(memberId);
     const s = member[history.scope ?? "play"];
