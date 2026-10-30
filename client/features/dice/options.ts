@@ -6,7 +6,7 @@ import type { DayUse, LimitedUse, RechargeUse } from "#shared/dice/uses.ts";
 import { keptD20 } from "#shared/dice/roll.ts";
 import { LIMITS } from "#shared/limits.ts";
 import type { ActorTarget, ClientOp } from "#shared/protocol.ts";
-import { ABILITY_KEYS, SKILL_KEYS, type CharacterId, type CritRule, type DiceRoll, type InitEntry, type LogEntry, type LogEvent, type RollRequest, type RollTarget, type RoomState, type TokenId, type UseMark } from "#shared/model.ts";
+import { ABILITY_KEYS, SKILL_KEYS, type SkillKey, type CharacterId, type CritRule, type DiceRoll, type InitEntry, type LogEntry, type LogEvent, type RollRequest, type RollTarget, type RoomState, type TokenId, type UseMark } from "#shared/model.ts";
 import { findEntryFor } from "#shared/rules/durations.ts";
 import type { RollPreset } from "#shared/rules/rollReminders.ts";
 import { ABILITY_ABBR, ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
@@ -15,6 +15,7 @@ import { damageSummary, type DamageSummaryLines } from "./damageSummaryLines.ts"
 import type { PanelRoll } from "./useDicePanel.ts";
 import type { CastBlock } from "./optionState.ts";
 import type { CastPhase } from "./cast/cast.ts";
+import { askedTest } from "./proficiencyPresentation.ts";
 import { CREATURE_GROUPS, foldKey, type CreatureGroup, type DiceFoldsStore, type FoldKind } from "./diceFolds.ts";
 import { d20Text, parseBonus, TYPE_BONUS } from "../rolls/card.ts";
 import { ownsCharacter, ownsToken } from "../tokens/access.ts";
@@ -660,8 +661,8 @@ const ABILITY_WORD: Record<string, string> = Object.fromEntries(ABILITY_KEYS.map
 export type FoldSummaryInput =
   /** Saves and checks: the shared notes, then the six saves, or none for a creature whose numbers this viewer lacks. */
   | { group: "saves"; note: string; saves: Readonly<Record<string, number>> | null }
-  /** Skills: each with its bonus and its ability's plain check. */
-  | { group: "skills"; skills: readonly { name: string; bonus: number; check: number }[] }
+  /** Skills: each with its bonus and its ability's plain check, and its key where its name is to carry a mark. */
+  | { group: "skills"; skills: readonly { name: string; bonus: number; check: number; key?: SkillKey }[] }
   /** Traits and the action groups: their rows. */
   | { group: "rows"; rows: readonly { name: string; used?: boolean }[] }
   | { group: "spells"; dc?: number | undefined; attack?: number | undefined; count: number };
@@ -670,31 +671,61 @@ export type FoldSummaryInput =
 export type GroupWaiting = { asked: readonly string[]; casts: readonly string[] };
 
 /**
+ * One part of a folded line: what joins it to the part before, the words
+ * that lead its kind ("Asked: "), its name, the rest ("+7"), and the test
+ * the name stands for, which a mark reads. The line cuts only between
+ * parts, never inside one (D-261030-437).
+ */
+export type SummaryPart = { join: string; lead: string; name: string; rest: string; test: D20Test | null };
+
+type PartWords = Omit<SummaryPart, "join" | "lead">;
+
+/**
  * A group's one line while folded (6.5): "asks Thorn · Str +4, Dex +1, …",
  * "Athletics +6, Insight +4", "Rend, Acid Breath (used)", "DC 14 · +6 to
  * hit · 13 spells". What waits in it comes first, so a folded group still
  * says it was asked: "Asked: DEX save", "Ask for saves waiting: Fireball".
  */
 export function foldSummary(input: FoldSummaryInput, waiting?: GroupWaiting): string {
-  const parts = [waiting && waiting.asked.length > 0 ? `Asked: ${waiting.asked.join(", ")}` : "", waiting && waiting.casts.length > 0 ? `Ask for saves waiting: ${waiting.casts.join(", ")}` : ""];
+  return foldSummaryParts(input, waiting)
+    .map((part) => part.join + part.lead + part.name + part.rest)
+    .join("");
+}
+
+/** foldSummary's line as its parts: a list's items part by ", ", its kinds by " · ". */
+export function foldSummaryParts(input: FoldSummaryInput, waiting?: GroupWaiting): SummaryPart[] {
+  const word = (name: string): PartWords => ({ name, rest: "", test: null });
+  const kinds: { lead: string; items: PartWords[] }[] = [
+    { lead: "Asked: ", items: (waiting?.asked ?? []).map((asked) => ({ ...word(asked), test: askedTest(asked) })) },
+    { lead: "Ask for saves waiting: ", items: (waiting?.casts ?? []).map(word) },
+  ];
+  const one = (text: string) => kinds.push({ lead: "", items: text ? [word(text)] : [] });
   switch (input.group) {
     case "saves": {
       const saves = input.saves;
-      parts.push(input.note, saves ? ABILITY_KEYS.map((a) => `${ABILITY_WORD[a]} ${signedText(saves[a] ?? 0)}`).join(", ") : "");
+      one(input.note);
+      kinds.push({ lead: "", items: saves ? ABILITY_KEYS.map((a) => ({ name: ABILITY_WORD[a]!, rest: ` ${signedText(saves[a] ?? 0)}`, test: { kind: "save", ability: a } })) : [] });
       break;
     }
     case "skills":
       // A skill above its ability's check is one the creature is trained in, or better: the rest read as the check does.
-      parts.push(input.skills.filter((s) => s.bonus > s.check).map((s) => `${s.name} ${signedText(s.bonus)}`).join(", "));
+      kinds.push({
+        lead: "",
+        items: input.skills.filter((s) => s.bonus > s.check).map((s) => ({ name: s.name, rest: ` ${signedText(s.bonus)}`, test: s.key ? { kind: "check", ability: SKILLS[s.key].ability, skill: s.key } : null })),
+      });
       break;
     case "rows":
-      parts.push(input.rows.map((r) => (r.used ? `${r.name} (used)` : r.name)).join(", "));
+      kinds.push({ lead: "", items: input.rows.map((r) => word(r.used ? `${r.name} (used)` : r.name)) });
       break;
     case "spells":
-      parts.push(input.dc !== undefined ? `DC ${input.dc}` : "", input.attack !== undefined ? `${signedText(input.attack)} to hit` : "", input.count > 0 ? `${input.count} ${input.count === 1 ? "spell" : "spells"}` : "");
+      one(input.dc !== undefined ? `DC ${input.dc}` : "");
+      one(input.attack !== undefined ? `${signedText(input.attack)} to hit` : "");
+      one(input.count > 0 ? `${input.count} ${input.count === 1 ? "spell" : "spells"}` : "");
       break;
   }
-  return parts.filter(Boolean).join(" · ");
+  return kinds
+    .filter((kind) => kind.items.length > 0)
+    .flatMap((kind, k) => kind.items.map((item, i) => ({ join: i > 0 ? ", " : k > 0 ? " · " : "", lead: i === 0 ? kind.lead : "", ...item })));
 }
 
 /** One level of a creature's spells: its label, or null where the spells take none. */

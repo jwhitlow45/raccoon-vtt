@@ -1,55 +1,47 @@
-import { Fragment } from "react";
 import { testOf, type D20Test } from "#shared/dice/bonus.ts";
-import { describeEvent, labelText, type LogNames } from "#shared/logText.ts";
+import { creatureName, describeEvent, labelText, memberName, type LogNames } from "#shared/logText.ts";
 import type { LogEvent } from "#shared/model.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
-import { ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
-import { ProficientTest } from "./ProficientTest.tsx";
-import { rollTarget, rollTest } from "./proficiencyPresentation.ts";
+import type { Proficiency } from "#shared/rules/proficiency.ts";
+import { ABILITY_NAMES } from "#shared/rules/skills.ts";
+import { MarkedText } from "../../components/ProficiencyMark.tsx";
+import { choiceLabels, findMarks, marksTest, rollTarget, rollTest, type TextMark } from "./proficiencyPresentation.ts";
 
-/** Split an identified label, never a creature name that happens to contain the same words. */
-export function ProficientText(props: { text: string; label: string; creature: ActorTarget; test: D20Test }) {
-  const at = props.text.lastIndexOf(props.label);
-  if (at < 0) return <>{props.text}</>;
-  return <>{props.text.slice(0, at)}<ProficientTest creature={props.creature} test={props.test}>{props.label}</ProficientTest>{props.text.slice(at + props.label.length)}</>;
-}
+export type LevelOf = (creature: ActorTarget, test: D20Test) => Proficiency;
 
-function RequestWords(props: { text: string; data: Extract<LogEvent, { type: "roll" }>; creature: ActorTarget }) {
-  const { data } = props;
-  const parts = data.test.choices.flatMap((choice, i) => {
-    if (data.choice !== undefined && data.choice !== i) return [];
-    const label = choice.skill ? SKILLS[choice.skill].name : `${ABILITY_NAMES[choice.ability]}${data.test.choices.length === 1 || data.choice !== undefined ? " saving throw" : ""}`;
-    const at = props.text.lastIndexOf(label);
-    return at < 0 ? [] : [{ label, at, test: testOf(data, i) }];
-  }).sort((a, b) => a.at - b.at);
-  let from = 0;
-  return <>{parts.map((part, i) => {
-    const before = props.text.slice(from, part.at);
-    from = part.at + part.label.length;
-    return <Fragment key={i}>{before}<ProficientTest creature={props.creature} test={part.test}>{part.label}</ProficientTest></Fragment>;
-  })}{props.text.slice(from)}</>;
-}
-
-export function ProficientEvent(props: { data: LogEvent; names: LogNames; dm: boolean }) {
-  const { data, names, dm } = props;
+/**
+ * A log line's words, exactly as describeEvent writes them, and the tests
+ * in them to mark. Each label is found after the name the line starts
+ * with, so a creature or member named like a skill is never marked.
+ */
+export function eventMarks(data: LogEvent, names: LogNames, dm: boolean, levelOf: LevelOf): { text: string; marks: TextMark[] } {
   const text = describeEvent(data, names, dm);
   if (data.type === "dice") {
-    const lines = text.split("\n");
-    const start = data.rolls.length > 1 ? 1 : 0;
-    return <>{lines.map((line, i) => {
-      const roll = data.rolls[i - start];
-      const target = roll ? rollTarget(roll) : null;
-      const test = roll ? rollTest(roll) : null;
-      return <Fragment key={i}>{i > 0 ? "\n" : ""}{roll?.label && target && test ? <ProficientText text={line} label={labelText(roll.label)} creature={target} test={test} /> : line}</Fragment>;
-    })}</>;
+    const labels = data.rolls.flatMap((roll) => {
+      const target = rollTarget(roll);
+      const test = rollTest(roll);
+      // A creature's roll reads "for Thorn, Perception check: " (shared/logText.ts rollSubject).
+      return target && roll.label !== undefined && marksTest(test) ? [{ label: labelText(roll.label), level: levelOf(target, test), after: ", " }] : [];
+    });
+    return { text, marks: findMarks(text, labels, memberName(names, data.by).length) };
   }
-  if (data.type === "roll") {
-    const target = rollTarget(data);
-    return target ? <RequestWords text={text} data={data} creature={target} /> : <>{text}</>;
+  const target = data.type === "roll" || data.type === "saveEnds" ? rollTarget(data) : null;
+  if (data.type === "roll" && target) {
+    // rollText names the recorded choice alone, else every choice.
+    const shown = data.choice !== undefined && data.test.choices[data.choice] ? [data.choice] : data.test.choices.map((_, i) => i);
+    const labels = choiceLabels(data.test, shown).map(({ index, label }) => ({ label, level: levelOf(target, testOf(data, index)) }));
+    return { text, marks: findMarks(text, labels, creatureName(names, data).length) };
   }
-  if (data.type === "saveEnds") {
-    const target = rollTarget(data);
-    if (target) return <ProficientText text={text} label={`DC ${data.dc} ${ABILITY_NAMES[data.ability]} save`} creature={target} test={{ kind: "save", ability: data.ability }} />;
+  if (data.type === "saveEnds" && target) {
+    // The save, never the DC before it (FL7-R1-13): "a DC 15 Wisdom save ends it".
+    const labels = [{ label: `${ABILITY_NAMES[data.ability]} save`, level: levelOf(target, { kind: "save", ability: data.ability }), after: `DC ${data.dc} ` }];
+    return { text, marks: findMarks(text, labels, creatureName(names, data).length) };
   }
-  return <>{text}</>;
+  return { text, marks: [] };
+}
+
+/** A log line with its tests marked, its words unchanged. */
+export function ProficientEvent(props: { data: LogEvent; names: LogNames; dm: boolean; levelOf: LevelOf }) {
+  const { text, marks } = eventMarks(props.data, props.names, props.dm, props.levelOf);
+  return <MarkedText text={text} marks={marks} />;
 }

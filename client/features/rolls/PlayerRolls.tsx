@@ -1,8 +1,7 @@
-import { ProficientTest } from "../dice/ProficientTest.tsx";
-import { signedText } from "../dice/options.ts";
-import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type Ref, type RefObject } from "react";
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type ReactNode, type Ref, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import type { Effect, RollRequest, RollTarget, RoomState } from "#shared/model.ts";
+import type { Proficiency } from "#shared/rules/proficiency.ts";
 import { bonusFor, testOf } from "#shared/dice/bonus.ts";
 import { rollReminders } from "#shared/rules/rollReminders.ts";
 import { choiceText } from "#shared/rules/skills.ts";
@@ -11,6 +10,7 @@ import { Button } from "../../components/Button.tsx";
 import { Chip } from "../../components/Chip.tsx";
 import { Menu } from "../../components/Menu.tsx";
 import { Popover, usePopover } from "../../components/Popover.tsx";
+import { MarkedText, ProficiencyLabel, spokenProficiency, spokenText } from "../../components/ProficiencyMark.tsx";
 import type { Rect } from "../../components/popoverPlace.ts";
 import { popoverSlot } from "../../components/popoverRules.ts";
 import { Input } from "../../components/Field.tsx";
@@ -30,10 +30,12 @@ import { useScoped } from "../../state/scope.ts";
 import { sheetOpen, type OpAnswer, type OpRefusal } from "../../state/types.ts";
 import { playersTypeTotals } from "#shared/permissions.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
-import { creatureRolls } from "../dice/creature.ts";
+import { creatureProficiency, creatureRolls } from "../dice/creature.ts";
 import { presetFor } from "../dice/presets.ts";
+import { findMarks, marksTest } from "../dice/proficiencyPresentation.ts";
 import { NEEDS_CONNECTION, sendRoll, useRollSender } from "../dice/send.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
+import { useProficiency } from "../dice/useProficiency.ts";
 import { refusalWords } from "../dice/useReceipt.ts";
 import { useOpenPcStats } from "../pcstats/open.ts";
 import { editsPcStats } from "../tokens/access.ts";
@@ -53,7 +55,7 @@ import {
   type AnswerFlow,
   type AnswerOffers,
   type AnswerOp,
-  dcText,
+  askLine,
   CARD_MIN_WIDTH,
   cardFoldsUnderSheet,
   chipLine,
@@ -62,6 +64,7 @@ import {
   chipsStayShown,
   deskLayout,
   draftKey,
+  finalAnswerText,
   finalForPlayer,
   foldedChips,
   foldsAfterSend,
@@ -81,8 +84,8 @@ import {
   targetRef,
   type AnswerDraft,
 } from "./logic.ts";
+import { answerChoiceMarks, requestMarks, rowTest, type LevelOf } from "./marks.ts";
 import { cardStyle, focusable } from "./parts.tsx";
-import { compactTestName, PlayerAnswerLine, RequestTestLabels } from "./RequestTestLabels.tsx";
 
 const NO_ROLLS = {};
 
@@ -455,6 +458,7 @@ export function RollCard(props: {
   onFocusWithin(inside: boolean): void;
 }) {
   const { request } = props;
+  const levelOf = useProficiency();
   const zoom = useUiScale();
   // The toolbar and the active tool's options as Room measured them (canvas/barDock.ts Chrome), in the card's own pixels, lifted onto the on-screen keyboard while someone types (placedChrome).
   const measured = useStore(useScoped(barDockSlot), (s) => s.chrome);
@@ -508,6 +512,7 @@ export function RollCard(props: {
     if (foldsAfterSend(request, key, rolledHere)) props.onFold();
   };
   const done = request.targets.every(answered);
+  const question = askLine(request);
   /*
    * At the screen's foot the card's header (what to roll, and Later) sticks
    * to its top on an opaque fill, so it shows whatever scrolls under it,
@@ -589,7 +594,6 @@ export function RollCard(props: {
         {...(props.sheet ? { [GRAB_ATTR]: "" } : {})}
         style={{
           display: "flex",
-          flexWrap: "wrap",
           alignItems: "flex-start",
           gap: theme.space(2),
           // At the foot it reaches over the card's top padding, taken back from its margin, so the grabber drawn there is on the grab area, stuck or not. Its content stands the grabber's room under the card's top edge, as a sheet header's buttons do.
@@ -611,13 +615,10 @@ export function RollCard(props: {
         {/* In the header's top padding, the grabber's room. */}
         {props.sheet ? <SheetGrabber /> : null}
         {/* Set down so its first line's middle meets Later's, as a checkbox meets its label's first line (docs/design-v1-polish.md R1): a question on several lines starts beside Later rather than centering on it. */}
-        <div style={{ flex: "1 1 180px", minWidth: 0, display: "grid", gap: theme.space(0.5), paddingTop: QUESTION_DROP }}>
+        <div style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(0.5), paddingTop: QUESTION_DROP }}>
           {/* The DC joins the question's line (5.1), one line less on every card. */}
-          <div data-request-heading="" style={{ fontSize: theme.font.body14, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight }}>
-            The DM asks for <RequestTestLabels request={request} target={request.targets.length === 1 ? request.targets[0] : undefined} />
-            {request.spell ? " against a spell" : ""}
-            {dcText(request, "player") ? <span style={{ whiteSpace: "nowrap" }}>{`, ${dcText(request, "player")}`}</span> : null}
-            {request.note ? `: ${request.note}` : ""}.
+          <div style={{ fontSize: theme.font.input, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight }}>
+            <MarkedText text={question} marks={request.targets.length === 1 ? requestMarks(question, request, request.targets[0]!, levelOf, { from: "The DM asks for ".length }) : []} />
           </div>
         </div>
         {done ? (
@@ -740,6 +741,7 @@ function CreatureAnswer(props: {
   const creatures = useMemo(() => [ref], [ref]);
   const { dice } = useDiceView(creatures);
   const rolls = dice ? creatureRolls(dice, ref) : null;
+  const levelOf: LevelOf = (creature, test) => (dice ? creatureProficiency(dice, creature, test) : "none");
   const two = request.test.choices.length > 1;
   const bonuses = request.test.choices.map((_, i) => (rolls?.numbers ? bonusFor(rolls.numbers, testOf(request, i)) : null));
   const key = draftKey(request.id, target);
@@ -907,11 +909,16 @@ function CreatureAnswer(props: {
         paddingTop: props.several ? theme.space(2) : 0,
       }}
     >
-      {props.several || target.tokenId !== undefined ? <strong style={{ fontSize: theme.font.input }}>{name}</strong> : null}
-      {!two && !target.dice && !final ? <span style={{ fontSize: theme.font.body14 }}><ProficientTest creature={ref} test={test}>{compactTestName(test)}{bonuses[picked] !== null && bonuses[picked] !== undefined ? ` ${signedText(bonuses[picked]!)}` : ""}</ProficientTest></span> : null}
+      {props.several || target.tokenId !== undefined ? <strong style={{ fontSize: theme.font.input }}>{props.several ? <RowName name={name} request={request} target={target} levelOf={levelOf} /> : name}</strong> : null}
       {target.dice || final ? (
         <>
-          {target.dice ? <RolledResult request={request} target={target} /> : <div style={{ fontSize: theme.font.body14 }}><PlayerAnswerLine request={request} target={target} /></div>}
+          {target.dice ? (
+            <RolledResult target={target} />
+          ) : (
+            <div style={{ fontSize: theme.font.body14 }}>
+              <MarkedText text={`${finalAnswerText(target, request.test)}. Final.`} marks={answerChoiceMarks(finalAnswerText(target, request.test), request, target, levelOf, "Sent ".length)} />
+            </div>
+          )}
           <AskChange
             target={target}
             name={name}
@@ -935,7 +942,7 @@ function CreatureAnswer(props: {
               label="Which one you rolled"
               value={choice}
               grow
-              options={request.test.choices.map((c, i) => ({ value: i as 0 | 1, title: choiceLabel(choiceText(c), bonuses[i] ?? null), label: <ProficientTest creature={ref} test={testOf(request, i)}>{choiceLabel(compactTestName(testOf(request, i)), bonuses[i] ?? null)}</ProficientTest> }))}
+              options={request.test.choices.map((c, i) => choiceOption(i as 0 | 1, choiceText(c), bonuses[i] ?? null, marksTest(testOf(request, i)) ? levelOf(ref, testOf(request, i)) : null))}
               onChange={(i) => {
                 setChoice(i);
                 keep({ choice: i });
@@ -1089,7 +1096,11 @@ function CreatureAnswer(props: {
               ) : null}
             </div>
           ) : null}
-          {answered(target) ? <div style={{ fontSize: theme.font.small, color: theme.color.textMuted }}><PlayerAnswerLine request={request} target={target} /></div> : null}
+          {answered(target) ? (
+            <div style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>
+              <MarkedText text={chipLine(request, target)} marks={requestMarks(chipLine(request, target), request, target, levelOf, { short: true })} />
+            </div>
+          ) : null}
           {flow.error ? (
             <div role="alert" style={{ fontSize: theme.font.small, color: theme.color.dangerText }}>
               {flow.error}
@@ -1101,8 +1112,22 @@ function CreatureAnswer(props: {
   );
 }
 
+/** A creature's name on a card for several, marked for the one test its row stands for, since the question above stays neutral (D-261029-415). */
+function RowName(props: { name: string; request: RollRequest; target: RollTarget; levelOf: LevelOf }) {
+  const test = rowTest(props.request, props.target);
+  return test ? <ProficiencyLabel level={props.levelOf(targetRef(props.target), test)}>{props.name}</ProficiencyLabel> : <>{props.name}</>;
+}
+
+/** One of two choices, "Wisdom (Perception) +5", its words marked where the choice takes a mark, and its name saying so (FL7-R1-08). */
+function choiceOption(value: 0 | 1, words: string, bonus: number | null, level: Proficiency | null): { value: 0 | 1; label: ReactNode; title?: string } {
+  const text = choiceLabel(words, bonus);
+  if (level === null || level === "none") return { value, label: text };
+  // One span, so the option's flex box keeps the space before the bonus, as it does in the plain words.
+  return { value, label: <span><MarkedText text={text} marks={findMarks(text, [{ label: words, level }])} /></span>, title: `${text}${spokenProficiency(level)}` };
+}
+
 /** How far the question stands under Later's top: its first line, 16 px at tight leading, centered on Later's 44 px. */
-const QUESTION_DROP = (theme.touch - theme.font.body14 * theme.leading.tight) / 2;
+const QUESTION_DROP = (theme.touch - theme.font.input * theme.leading.tight) / 2;
 
 /** The bonus field, as wide as "-20" in the 16 px field (Appendix A: 64 px). */
 const BONUS_FIELD_WIDTH = 64;
@@ -1177,7 +1202,7 @@ function viewportBound(): Rect {
  * (1d20+5 with Advantage: 12, 7 dropped). Pass." with a dropped die struck
  * through, a natural 20 or 1, then "Final."
  */
-export function RolledResult(props: { request: RollRequest; target: RollTarget }) {
+function RolledResult(props: { target: RollTarget }) {
   const { target } = props;
   const dice = target.dice!;
   const shown = rolledDice(dice);
@@ -1185,7 +1210,7 @@ export function RolledResult(props: { request: RollRequest; target: RollTarget }
   const verdict = verdictText(target);
   return (
     <div style={{ fontSize: theme.font.body14 }}>
-      Rolled <RequestTestLabels request={props.request} target={target} total={target.total ?? dice.total} /> ({shown.formula}
+      Rolled <strong>{target.total ?? dice.total}</strong> ({shown.formula}
       {shown.faces.length > 0 ? ": " : ""}
       {shown.faces.map((f, i) => (
         <Fragment key={i}>
@@ -1216,6 +1241,9 @@ export function RollChip(props: { buttonRef?: RefObject<HTMLButtonElement | null
   const names = useRoomView((s) => (s.view ? request.targets.map((t) => creatureName(s.view!, t)).join("|") : ""));
   const several = request.targets.length > 1;
   const lines = request.targets.map((t, i) => chipLine(request, t, several ? { name: names.split("|")[i] ?? "" } : {}));
+  // Each line is one creature's, so each marks its test with that creature's level.
+  const levelOf = useProficiency();
+  const marks = request.targets.map((t, i) => requestMarks(lines[i]!, request, t, levelOf, { short: true }));
   // A final answer opens the card too, to ask the DM to change it (docs/design-v1-roll-request.md 5.4). Only an answer from before tags, which no ask can name, leaves nothing to open.
   const changeable = request.targets.some((t) => !finalForPlayer(request, t) || t.tag !== undefined);
   const style = {
@@ -1227,10 +1255,11 @@ export function RollChip(props: { buttonRef?: RefObject<HTMLButtonElement | null
     display: "grid",
     gap: theme.space(0.5),
   } as const;
-  const text = lines.map((_line, i) => {
-    const target = request.targets[i]!;
-    return <span key={i}>{several ? `${names.split("|")[i] ?? ""}: ` : ""}<PlayerAnswerLine request={request} target={target} /></span>;
-  });
+  const text = lines.map((line, i) => (
+    <span key={i}>
+      <MarkedText text={line} marks={marks[i]!} />
+    </span>
+  ));
   if (!changeable) {
     return (
       <div role="status" style={style}>
@@ -1239,7 +1268,7 @@ export function RollChip(props: { buttonRef?: RefObject<HTMLButtonElement | null
     );
   }
   return (
-    <button ref={props.buttonRef} type="button" onClick={props.onOpen} aria-label={chipName(request, lines)} style={{ ...style, cursor: "pointer" }}>
+    <button ref={props.buttonRef} type="button" onClick={props.onOpen} aria-label={chipName(request, lines.map((line, i) => spokenText(line, marks[i]!)))} style={{ ...style, cursor: "pointer" }}>
       {text}
     </button>
   );

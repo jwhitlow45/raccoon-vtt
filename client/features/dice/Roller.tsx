@@ -1,9 +1,8 @@
 import { Fragment, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
-import { ProficientTest } from "./ProficientTest.tsx";
-import { rollTarget, rollTest } from "./proficiencyPresentation.ts";
 import { addDie, formatFormula, parseRollText } from "#shared/dice/formula.ts";
 import { labelText } from "#shared/logText.ts";
 import type { DiceRoll, LogEntry } from "#shared/model.ts";
+import type { Proficiency } from "#shared/rules/proficiency.ts";
 import { Button } from "../../components/Button.tsx";
 import { Chip } from "../../components/Chip.tsx";
 import { Input } from "../../components/Field.tsx";
@@ -12,17 +11,20 @@ import { IconButton } from "../../components/IconButton.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { choiceLook } from "../../components/looks.ts";
 import { sectionLabelLook } from "../../components/Panel.tsx";
+import { ProficiencyLabel } from "../../components/ProficiencyMark.tsx";
 import { ScrollStrip } from "../../components/ScrollStrip.tsx";
 import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
 import { answerVerdict, headerRoll, readHistory, readingOf, rollsOf, rollVerdict, stepHistory, withHistory, writeHistory, type HeaderRoll } from "./logic.ts";
 import { critical } from "./options.ts";
+import { marksTest, rollTarget, rollTest } from "./proficiencyPresentation.ts";
 import { FACE_CHIP, faceChips } from "./RecentRolls.tsx";
 import { Tray } from "./throw/Tray.tsx";
 import { useThrows, useThrowView } from "./throw/useThrows.ts";
 import { againOf, useDicePanel, useLastRoll } from "./useDicePanel.ts";
 import { useRollBlocked } from "./useRollOption.ts";
+import { useProficiency } from "./useProficiency.ts";
 import { useReceipt } from "./useReceipt.ts";
 
 /**
@@ -129,9 +131,7 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
   const head = useMemo(() => headerRoll(rolls), [rolls]);
   const firstLine = committed?.lines[0]?.id ?? null;
   const data = committed?.lines[0]?.data;
-  const target = first ? rollTarget(first) : null;
-  const test = first ? rollTest(first) : null;
-  const marked = target !== null && test !== null && rolls.length === 1;
+  const levelOf = useProficiency();
   // A polite live region says each result once, from the render that first holds it, so it is said as it lands on the server even while the dice still fly.
   const said = first && head ? spokenResult(head, spokenVerdict(first, data)) : "";
   if (!last) return null;
@@ -147,6 +147,10 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
   else {
     const verdict = shownVerdict(first, data);
     const label = head.label !== undefined ? labelText(head.label) : "once" in last ? last.label : undefined;
+    // The label is the first roll's own unless several damage types share it, which is no test.
+    const target = rollTarget(first);
+    const test = head.label !== undefined && head.label === first.label ? rollTest(first) : null;
+    const level = target && marksTest(test) ? levelOf(target, test) : undefined;
     body = (
       <button
         type="button"
@@ -154,8 +158,8 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
         aria-label={`Show this roll in Recent rolls`}
         style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: theme.space(2), minWidth: 0, flex: 1, minHeight: LAST_LINE_PX, overflow: "hidden", whiteSpace: "nowrap" }}
       >
-        <span style={{ flex: "none", fontSize: marked ? theme.font.body14 : theme.font.heading, fontWeight: theme.weight.bold, fontVariantNumeric: "tabular-nums" }}>{marked ? <ProficientTest creature={target} test={test}>{label} {head.total.toLocaleString("en-US")}</ProficientTest> : head.total.toLocaleString("en-US")}</span>
-        <ResultRest sum={head.sums} label={marked ? undefined : label} dice={head.dice} more={head.more} verdict={verdict} />
+        <span style={{ flex: "none", fontSize: theme.font.heading, fontWeight: theme.weight.bold, fontVariantNumeric: "tabular-nums" }}>{head.total.toLocaleString("en-US")}</span>
+        <ResultRest sum={head.sums} label={label} level={level} dice={head.dice} more={head.more} verdict={verdict} />
       </button>
     );
   }
@@ -177,8 +181,8 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
         minWidth: 0,
       }}
     >
-      <div style={{ display: "flex", flexWrap: marked ? "wrap" : "nowrap", alignItems: "center", gap: theme.space(2), minHeight: LAST_LINE_PX, fontSize: theme.font.body14 }}>
-        <div style={{ display: "flex", alignItems: "center", flex: marked ? "1 1 190px" : 1, minWidth: 0 }}>{body}</div>
+      <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), minHeight: LAST_LINE_PX, fontSize: theme.font.body14 }}>
+        <div style={{ display: "flex", alignItems: "center", flex: 1, minWidth: 0 }}>{body}</div>
         {again ? (
           <Button size="sm" variant="quiet" icon="again" busy={waiting} style={{ flex: "none" }} onClick={() => panel.again(again.rolls, again.to, throws.origin())}>
             Again
@@ -235,7 +239,7 @@ function LineStart(props: { reverse?: boolean; dice?: boolean }) {
  * the last, so a part gives up nothing while one before it in turn still
  * has room (docs/design-v1-dice-ui.md 4.1).
  */
-function ResultRest(props: { sum: string | null; label: string | undefined; dice: readonly DiceRoll[]; more: number; verdict: string | null }) {
+function ResultRest(props: { sum: string | null; label: string | undefined; level?: Proficiency | undefined; dice: readonly DiceRoll[]; more: number; verdict: string | null }) {
   // A damage of several types shows every part's dice, each part keyed apart since each restarts its chips' keys.
   const chips = useMemo(() => {
     const parts = props.dice.map((roll) => faceChips(roll));
@@ -270,7 +274,7 @@ function ResultRest(props: { sum: string | null; label: string | undefined; dice
         ) : null}
         {/* Grows only to its own width, so the parts after it sit beside it rather than at the line's end. */}
         <span style={{ flex: "1 1 0", minWidth: 0, maxWidth: "max-content", display: "flex", alignItems: "center", gap: theme.space(2), overflow: "hidden" }}>
-          {props.label ? <span style={{ flex: "0 10 auto", minWidth: 0, fontSize: theme.font.body14, overflow: "hidden", textOverflow: "ellipsis" }}>{props.label}</span> : null}
+          {props.label ? <span style={{ flex: "0 10 auto", minWidth: 0, fontSize: theme.font.body14, overflow: "hidden", textOverflow: "ellipsis" }}>{props.level ? <ProficiencyLabel level={props.level}>{props.label}</ProficiencyLabel> : props.label}</span> : null}
           {chips === null ? (
             // A stored formula that no longer parses shows as its text (rolledTerms).
             <span style={{ flex: "0 1000 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", ...muted }}>{props.dice.map((roll) => roll.formula).join(" + ")}</span>

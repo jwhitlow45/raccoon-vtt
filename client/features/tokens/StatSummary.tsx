@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ABILITY_KEYS, type AbilityKey, type Actor, type Character, type Token } from "#shared/model.ts";
 import { blockRollNumbers, pcRollNumbers, type RollNumbers } from "#shared/dice/bonus.ts";
-import { proficiencyFor, type Proficiency } from "#shared/rules/proficiency.ts";
+import { proficiencyFor, type Proficiency, type ProficiencySource } from "#shared/rules/proficiency.ts";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
 import { AcBadge } from "../../components/AcBadge.tsx";
 import { Button } from "../../components/Button.tsx";
@@ -61,10 +61,9 @@ export function useLinkedBlock(
   if (wild && block.kind === "ready") {
     if (shaped.failed) return { kind: "failed" };
     if (!shaped.numbers) return { kind: "loading" };
-    return {
-      kind: "numbers", saves: savesOf(shaped.numbers), defenses: defenseLines(block.block),
-      proficiency: saveProficiencies({ stats: character.stats, monster: { numbers: blockRollNumbers(block.block), cr: block.block.cr }, wildShape: true }),
-    };
+    // Wild Shape keeps the druid's own proficiencies beside the beast's (D-261029-419).
+    const proficiency = saveProficiencies({ ...(character?.stats ? { stats: character.stats } : {}), monster: { numbers: blockRollNumbers(block.block), cr: block.block.cr }, wildShape: true });
+    return { kind: "numbers", saves: savesOf(shaped.numbers), proficiency, defenses: defenseLines(block.block) };
   }
   return block;
 }
@@ -75,14 +74,16 @@ function savesOf(numbers: RollNumbers): Record<AbilityKey, number> {
   return saves;
 }
 
-function saveProficiencies(source: Parameters<typeof proficiencyFor>[1]): Record<AbilityKey, Proficiency> {
-  return Object.fromEntries(ABILITY_KEYS.map((ability) => [ability, proficiencyFor({ kind: "save", ability }, source)])) as Record<AbilityKey, Proficiency>;
+function saveProficiencies(source: ProficiencySource): Record<AbilityKey, Proficiency> {
+  const out = {} as Record<AbilityKey, Proficiency>;
+  for (const key of ABILITY_KEYS) out[key] = proficiencyFor({ kind: "save", ability: key }, source);
+  return out;
 }
 
 /** A player character's saves and defense lines from its own stat block, or null without one (docs/design-v1-pc-stats.md 7.4). */
 function pcSummary(character: Character): LinkedBlock | null {
   const numbers = pcRollNumbers(character);
-  if (!numbers || character.actor.srdId !== undefined) return null;
+  if (!numbers || !character.stats || character.actor.srdId !== undefined) return null;
   return { kind: "numbers", saves: savesOf(numbers), proficiency: saveProficiencies({ stats: character.stats }), defenses: pcDefenseLines(character) };
 }
 
@@ -206,17 +207,14 @@ const VITALS_PART = { ...LINE_PART, alignItems: "center" } as const;
 const QUICK_PART = { ...VITALS_PART, columnGap: theme.space(1) } as const;
 const QUICK_BETWEEN = { marginInlineEnd: theme.space(2) } as const;
 const SAVES_PART = { ...LINE_PART, alignItems: "baseline" } as const;
-const SAVES_TRIPLE = { display: "inline-flex", flexWrap: "nowrap", flex: "none", alignItems: "baseline", columnGap: theme.space(1.5) } as const;
 
 /**
  * The six saves, "Saves" then "STR +5" and the rest, each a unit that
  * never breaks. The abbreviation takes the ability grid's small capitals
  * (AbilityGrid.tsx): at the body's size, capitals widen the line past one
  * row on a phone held upright, where "Str" fit. Where one line does not
- * hold them, they wrap three and three. Compact proficiency marks sit
- * below each abbreviation without widening it, so they add no rows.
- * The triples stay whole so no save stands alone
- * (D-261024-42). While the SRD chunk loads the line
+ * hold them, they wrap three and three, "Saves" with the first three, so
+ * no save stands alone (D-261024-42). While the SRD chunk loads the line
  * keeps its place and, after the usual 200 ms, says so, and a failed load
  * offers the reload.
  */
@@ -233,15 +231,16 @@ export function SavesLine(props: { block: LinkedBlock }) {
   if (block.kind === "failed") {
     return <SrdLoadFailed what="Saves" inline />;
   }
-  const proficiencies = block.kind === "numbers" ? block.proficiency : saveProficiencies({ monster: { numbers: blockRollNumbers(block.block), cr: block.block.cr } });
+  // A monster's listed saves, or a character's own flags, mark each ability where its save is proficient.
+  const proficiency = block.kind === "numbers" ? block.proficiency : saveProficiencies({ monster: { numbers: blockRollNumbers(block.block), cr: block.block.cr } });
   const saves = (block.kind === "numbers" ? saveUnitsOf(block.saves) : saveUnits(block.block)).map((text, i) => {
     const [ability, value] = text.split(" ");
     return (
       <span key={ability} style={{ whiteSpace: "nowrap" }}>
-        <ProficiencyLabel level={proficiencies?.[ABILITY_KEYS[i]!] ?? "none"}>
-          <span style={{ color: theme.color.textMuted, fontSize: theme.font.tiny, fontWeight: theme.weight.bold, letterSpacing: theme.caps }}>{ability} </span>
-          <span style={{ fontWeight: theme.weight.strong }}>{value}</span>
-        </ProficiencyLabel>
+        <span style={{ color: theme.color.textMuted, fontSize: theme.font.tiny, fontWeight: theme.weight.bold, letterSpacing: theme.caps }}>
+          <ProficiencyLabel level={proficiency?.[ABILITY_KEYS[i]!] ?? "none"}>{ability}</ProficiencyLabel>{" "}
+        </span>
+        <span style={{ fontWeight: theme.weight.strong }}>{value}</span>
       </span>
     );
   });
@@ -249,9 +248,9 @@ export function SavesLine(props: { block: LinkedBlock }) {
     <div data-saves="" style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", rowGap: theme.space(1), columnGap: theme.space(1.5), fontSize: theme.font.body14 }}>
       <span data-saves-part="" style={SAVES_PART}>
         <span style={{ color: theme.color.textMuted }}>Saves</span>
-        <span data-saves-triple="" style={SAVES_TRIPLE}>{saves.slice(0, 3)}</span>
+        {saves.slice(0, 3)}
       </span>
-      <span data-saves-part="" data-saves-triple="" style={SAVES_TRIPLE}>
+      <span data-saves-part="" style={SAVES_PART}>
         {saves.slice(3)}
       </span>
     </div>

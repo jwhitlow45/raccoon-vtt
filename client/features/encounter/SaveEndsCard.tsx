@@ -2,13 +2,14 @@ import { useMemo, useState } from "react";
 import { bonusFor } from "#shared/dice/bonus.ts";
 import { pendingSaves, type PendingSave } from "#shared/rules/saveEnds.ts";
 import { ABILITY_NAMES } from "#shared/rules/skills.ts";
+import { MarkedText } from "../../components/ProficiencyMark.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
-import { creatureRolls } from "../dice/creature.ts";
-import { ProficientTest } from "../dice/ProficientTest.tsx";
+import { creatureProficiency, creatureRolls } from "../dice/creature.ts";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { creatureKey } from "../dice/options.ts";
 import { presetFor } from "../dice/presets.ts";
+import { findMarks } from "../dice/proficiencyPresentation.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
 import { useActOnce, useRollBlocked } from "../dice/useRollOption.ts";
 import { alertCard } from "./alertCard.ts";
@@ -166,7 +167,8 @@ export function SaveEndsCard(props: { pending: PendingSave; onResult(text: strin
       <div>
         <div style={{ fontWeight: theme.weight.bold }}>{model.head}</div>
         <div style={{ fontSize: theme.font.body14, color: theme.color.textMuted }}>
-          <ProficientTest creature={pending.target} test={test}>{`${ABILITY_NAMES[test.ability]} save, DC ${pending.effect.save.dc}`}</ProficientTest>, ends it.
+          {/* "Wisdom save, DC 15, ends it.": the save carries the mark, never its DC (FL7-R1-13). */}
+          <MarkedText text={model.save} marks={findMarks(model.save, [{ label: `${ABILITY_NAMES[pending.effect.save.ability]} save`, level: dice ? creatureProficiency(dice, pending.target, test) : "none" }])} />
         </div>
       </div>
       {model.status || trouble ? (

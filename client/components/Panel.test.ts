@@ -8,14 +8,6 @@ const { GROUP_BOX, GROUP_FOLD, Group, Section } = await import("./Panel.tsx");
 
 /** A panel's groups (docs/design-v1-dice-ui.md 3.2, docs/design-v1-token-panel-groups.md 4), as markup. */
 describe("Group", () => {
-  test("fl7: a structured summary keeps atomic labels whole instead of clipping them", () => {
-    const markup = renderToStaticMarkup(createElement(Group, { label: "Skills", open: false, onToggle() {}, summaryWrap: true, summary: "Sleight of Hand +8" }));
-    const look = /id="[^"]+-summary"[^>]* style="([^"]*)"/.exec(markup)?.[1];
-    assert.ok(look);
-    assert.match(look, /white-space:normal/);
-    assert.match(look, /overflow:visible/);
-    assert.match(look, /flex:1 1 100%/);
-  });
   test("its name is an h3 holding the disclosure, which says open or folded in aria-expanded and is named by the name alone", () => {
     const folded = renderToStaticMarkup(createElement(Group, { label: "Combat", open: false, onToggle: () => {}, summary: "HP 3/7 · 2 conditions" }, "inside"));
     assert.match(folded, /<h3[^>]*><button[^>]*aria-labelledby="([^"]+)"[^>]*aria-expanded="false"/);

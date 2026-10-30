@@ -35,6 +35,20 @@ const THORN: PcStats = {
   rolls: [{ id: "r1", name: "Rapier", kind: "weapon", ability: "dex", attack: { prof: true, bonus: 0 }, dice: [{ formula: "1d8", mod: true, type: "piercing" }] }],
 };
 
+/**
+ * The markup with FL-7's marks and a folded line's parts taken out, so
+ * these tests read the words and layout as they were drawn before them
+ * (proficiencySurfaces.test.ts reads the marks).
+ */
+function unmarked(markup: string): string {
+  return markup
+    .replace(/<span data-proficiency-marker="\w+"[^>]*><\/span>/g, "")
+    .replace(/<span data-proficiency-label="" data-proficiency-level="\w+"[^>]*>([^<]*)<\/span>/g, "$1")
+    .replace(/<span data-summary-more=""[^>]*><span><\/span>…<\/span>/g, "")
+    .replace(/<span data-summary-part="" data-summary-join="[^"]*">((?:[^<]|<(?!\/?span))*)<\/span>/g, "$1")
+    .replace(/(id="[^"]*-summary"[^>]*>)<span>([^<]*)<\/span>/g, "$1$2");
+}
+
 // Totals no button's own words could hold, so finding one in the markup can only be a result.
 const TOTALS = { save: 4141, attack: 4242, damage: 4343 };
 
@@ -96,7 +110,7 @@ function render(viewer: Viewer, landed: boolean, pending = false, requests: Room
     choices.getInitialState = choices.getState;
   }
   const store = createStore(() => ({ view: { ...view, log }, roomId: "r1", connection: "open", you: viewer, sceneId: "s1", local: { selectedIds: [], multi: false } }));
-  return renderToStaticMarkup(
+  return unmarked(renderToStaticMarkup(
     createElement(RoomProvider, {
       store: store as never,
       actions: { dispatch: () => 1 } as never,
@@ -107,7 +121,7 @@ function render(viewer: Viewer, landed: boolean, pending = false, requests: Room
         children: [createElement(LastResult, { key: "last", onOpen() {} }), createElement(OptionsList, { key: "list", dice, rolls, creature, tokenId: "tt", name: "Thorn" })],
       }),
     }),
-  );
+  ));
 }
 
 test("skill names keep one line with room for their bonus in equal grid columns", () => {
@@ -120,25 +134,6 @@ test("skill names keep one line with room for their bonus in equal grid columns"
       assert.match(label, /white-space:nowrap/, `${name} stays on one line`);
       if (typedBonus !== undefined) assert.ok(label.includes(`d20${typedBonus}`), "a creature without numbers keeps its typed bonus");
     }
-  }
-});
-
-test("fl7: save buttons keep their original accessible names and name the marker separately", () => {
-  const markup = render(P1, false);
-  const dexterity = /<button[^>]*aria-label="Dexterity save"[^>]*>(.*?)<\/button>/.exec(markup)?.[1];
-  assert.ok(dexterity, "the save action keeps its established accessible name");
-  assert.match(dexterity, /aria-label="Proficient"/);
-  assert.match(dexterity, /data-proficiency-name=""[^>]*>DEX \+7</);
-});
-
-test("fl7: save columns give the complete marked label room before choosing how many fit", () => {
-  for (const typedBonus of [undefined, "", "-20", "+30"]) {
-    const markup = render(P1, false, false, {}, true, typedBonus);
-    const saves = markup.slice(markup.indexOf('role="group" aria-label="Saves"'), markup.indexOf('role="group" aria-label="Checks"'));
-    const width = typedBonus === undefined ? 104 : 136;
-    assert.ok(saves.includes(`grid-template-columns:repeat(auto-fill, minmax(min(100%, ${width}px), 1fr))`), "save columns shrink in count before the marker and label can overflow");
-    assert.equal(saves.match(/data-proficiency-label/g)?.length, 6);
-    assert.equal(saves.match(/data-proficiency-name="" style="white-space:nowrap"/g)?.length, 6);
   }
 });
 
@@ -214,7 +209,7 @@ describe("the creature's card and groups", () => {
       input.body === "player"
         ? createElement(PlayerOptions, { view, selected: [] })
         : createElement(OptionsList, { dice, rolls: creatureRolls(dice, creature)!, creature, tokenId: input.creature?.tokenId ?? "tt", name: input.creature ? "Goblin" : "Thorn" });
-    return renderToStaticMarkup(
+    return unmarked(renderToStaticMarkup(
       createElement(RoomProvider, {
         store: store as never,
         actions: { dispatch: () => 1, newId: () => "x" } as never,
@@ -222,11 +217,11 @@ describe("the creature's card and groups", () => {
         assets: { url: () => "" } as never,
         children: createElement(RoomScopeProvider, { scope, children: body }),
       }),
-    );
+    ));
   }
 
   // A group's heading less its folded line, which describes it rather than naming it.
-  const headings = (markup: string, tag: "h3" | "h4") => [...markup.matchAll(new RegExp(`<${tag}[^>]*>(.*?)</${tag}>`, "g"))].map((m) => m[1]!.replace(/<span id="[^"]*-summary".*/, "").replace(/<[^>]*>/g, "").trim());
+  const headings = (markup: string, tag: "h3" | "h4") => [...markup.matchAll(new RegExp(`<${tag}[^>]*>(.*?)</${tag}>`, "g"))].map((m) => m[1]!.replace(/<span id="[^"]*-summary".*?<\/span>/, "").replace(/<[^>]*>/g, "").trim());
 
   test("one creature: a region named for it wraps its card, whose header names it, and its groups in today's order, Initiative in the card", () => {
     const markup = draw({ state: room2({}, false), body: "player" });
@@ -241,34 +236,9 @@ describe("the creature's card and groups", () => {
   test("a folded group draws its line and none of its controls, and an open one draws them", () => {
     const markup = draw({ state: room2({}, false), body: "player" });
     assert.doesNotMatch(markup, /DEX \+7/, "Saves and checks folded on a phone draws no cell");
-    assert.match(markup, /aria-expanded="false"[^>]*>.*?Saves and checks/, "the group is folded");
-    assert.match(markup.replace(/<[^>]*>/g, ""), /Saves and checks.*?Str \+0, Dex \+7/, "its folded line says the saves");
+    assert.match(markup, /aria-expanded="false"[^>]*>.*?Saves and checks.*?Str \+0, Dex \+7/, "its folded line says the saves");
     assert.match(markup, /Rapier/, "Actions starts open");
     assert.deepEqual(headings(markup, "h4"), ["Cantrips", "Level 1"], "Spells by level, each an h4");
-  });
-
-  test("fl7: folded save and skill summaries retain each proficiency beside its name and bonus", () => {
-    const state = room2({}, false);
-    state.characters.thorn!.stats!.skills = { stealth: "prof", perception: "expert" };
-    const markup = draw({ state, body: "list" });
-    const labels = markup.split('data-proficiency-label=""').slice(1);
-    assert.equal(labels.length, 8, "six saves and two trained skills while folded");
-    assert.ok(labels.some((label) => label.includes('data-proficiency-marker="prof"') && label.includes("Dex +7")));
-    assert.ok(labels.some((label) => label.includes('data-proficiency-marker="expert"') && label.includes("Perception +7")));
-    assert.ok(labels.some((label) => label.includes('data-proficiency-marker="prof"') && label.includes("Stealth +7")));
-  });
-
-  test("fl7: a folded waiting request marks its known skill identity and keeps the Asked status", () => {
-    const request: RollRequest = { id: "q1", rev: 0, test: { kind: "check", choices: [{ ability: "str", skill: "perception" }] }, dcShown: false, resultShown: true, at: "", targets: [{ characterId: "thorn" }] };
-    const state = room2({ q1: request }, false);
-    state.characters.thorn!.stats!.skills = { perception: "expert" };
-    const scope = new RoomScope();
-    draw({ scope, state, body: "list" });
-    scope.get(diceFoldsSlot).tap("pc.skills", false, false);
-    const markup = draw({ scope, state, body: "list" });
-    const labels = markup.split('data-proficiency-label=""').slice(1);
-    assert.ok(labels.some((label) => label.includes('data-proficiency-marker="expert"') && label.includes("Perception check")));
-    assert.match(markup.replace(/<[^>]*>/g, ""), /Asked: Perception check · Perception \+7/);
   });
 
   test("two or more: tabs across the card, named by the creatures, the picked one the Tab stop, each controlling the region, and no heading repeats the name", () => {
@@ -303,12 +273,12 @@ describe("the creature's card and groups", () => {
     const request: RollRequest = { id: "q1", rev: 0, test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: false, resultShown: true, at: "2026-10-23T20:00:00.000Z", targets: [{ characterId: "thorn" }] };
     const scope = new RoomScope();
     const first = draw({ scope, state: room2({ q1: request }, false), body: "list" });
-    assert.match(first, /DEX \+7[^<]*(?:<\/span>)+<span[^>]*>Asked/, "Saves and checks opened on the render that first saw the ask");
+    assert.match(first, /DEX \+7[^<]*<\/span><span[^>]*>Asked/, "Saves and checks opened on the render that first saw the ask");
     // The viewer folds it, and the options draw again, as after a tab pick.
     scope.get(diceFoldsSlot).tap("pc.saves", false, false);
     const again = draw({ scope, state: room2({ q1: request }, false), body: "list" });
     assert.doesNotMatch(again, /DEX \+7/, "seen, so it stays folded");
-    assert.match(again.replace(/<[^>]*>/g, ""), /Asked: DEX save · Str \+0/, "its line leads with the ask still waiting");
+    assert.match(again, /Asked: DEX save · Str \+0/, "its line leads with the ask still waiting");
   });
 
   test("an ask for a monster opens the monster's Saves and checks, never a character's", () => {

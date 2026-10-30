@@ -2,12 +2,11 @@ import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
-import type { DiceRoll, LogEntry, RoomState, Viewer } from "#shared/model.ts";
+import type { RoomState, Viewer } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import { DM, P1, room } from "#shared/testutil.ts";
 import { theme } from "../../lib/theme.ts";
 import { diceChoicesSlot } from "./useDicePanel.ts";
-import { receiptsSlot } from "./useReceipt.ts";
 
 /*
  * The roller's part of the dice pass (docs/design-v1-dice-pass.md 4, 7.4
@@ -106,30 +105,6 @@ describe("the roll modes: Next roll, Adv and Dis joined, Secret apart (4)", () =
 });
 
 describe("the roller's frame (7.4, 7.7, 7.9)", () => {
-  test("fl7: ordinary results keep Again on one line while a skill result keeps its whole label", () => {
-    const draw = (roll: DiceRoll) => {
-      const scope = new RoomScope();
-      const log: LogEntry[] = [{ id: "1:0", at: "", kind: "event", data: { type: "dice", tag: "last", by: "dm1", to: "all", rolls: [roll] } }];
-      const tracker = scope.get(receiptsSlot);
-      tracker.env = { lookup: async () => ({ parts: [] }), log: () => log };
-      tracker.sending("last", 0);
-      tracker.answer("last", 0, "taken");
-      const choices = scope.get(diceChoicesSlot);
-      choices.setState({ last: { tag: "last", rolls: [{ formula: roll.formula, label: roll.label }], to: "all" } });
-      choices.getInitialState = choices.getState;
-      return inRoom(DM, [createElement(LastResult, { key: "last", onOpen() {} })], scope);
-    };
-    const ordinary = draw({ formula: "100d6", faces: Array(100).fill(4), total: 400, label: "A very long free roll label that gives way to Again" });
-    const line = /data-dice-last=""[^>]*><div style="([^"]*)"><div style="([^"]*)"/.exec(ordinary);
-    assert.ok(line);
-    assert.match(line[1]!, /flex-wrap:nowrap/, "an ordinary result must not add a second header row");
-    assert.match(line[2]!, /flex:1;/, "its content yields width to Again without a fixed basis");
-    assert.match(ordinary, />Again</);
-    const skill = draw({ characterId: "hero", formula: "1d20+5", faces: [10], total: 15, label: "Sleight of Hand check" });
-    assert.match(skill, /data-proficiency-name=""[^>]*>Sleight of Hand check 15</);
-    assert.match(skill, />Again</);
-  });
-
   test("the sticky line gives the pane's top padding back half above its row and half below, its height unchanged", () => {
     const scope = new RoomScope();
     const choices = scope.get(diceChoicesSlot);

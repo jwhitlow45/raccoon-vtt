@@ -237,8 +237,6 @@ export function Group(props: {
   open?: boolean;
   onToggle?(): void;
   summary?: ReactNode;
-  /** Structured roll labels need their whole marker/name/number unit visible. */
-  summaryWrap?: boolean;
   /** On the header's row after the name, outside the disclosure: "Take a shape", "Attach a stat block". */
   action?: ReactNode;
   foldRef?: Ref<HTMLButtonElement>;
@@ -272,7 +270,6 @@ export function Group(props: {
     !open && props.summary ? (
       <span
         id={summaryId}
-        data-summary-wrap={props.summaryWrap ? "" : undefined}
         style={{
           flex: "1 1 4em",
           width: "4em",
@@ -287,7 +284,6 @@ export function Group(props: {
           whiteSpace: "nowrap",
           overflow: "hidden",
           textOverflow: "ellipsis",
-          ...(props.summaryWrap ? { flex: "1 1 100%", width: "100%", maxWidth: "100%", textAlign: "left", whiteSpace: "normal", overflow: "visible", textOverflow: "clip" } as const : {}),
         }}
       >
         {props.summary}

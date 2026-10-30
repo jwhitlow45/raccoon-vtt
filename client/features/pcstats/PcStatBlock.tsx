@@ -1,19 +1,24 @@
 import { useEffect, useRef, useState, type Ref } from "react";
-import { ABILITY_KEYS, type Character } from "#shared/model.ts";
+import type { RollNumbers } from "#shared/dice/bonus.ts";
+import { ABILITY_KEYS, type AbilityKey, type Character } from "#shared/model.ts";
+import type { Proficiency } from "#shared/rules/proficiency.ts";
 import { pcShape } from "#shared/rules/pcStats.ts";
 import { ABILITY_ABBR } from "#shared/rules/skills.ts";
 import { signed } from "#shared/statBlock.ts";
 import { Loading } from "../../components/Loading.tsx";
 import { GROUP_BOX, GROUP_FOLD, Group, Help } from "../../components/Panel.tsx";
+import { MarkedText, ProficiencyLabel } from "../../components/ProficiencyMark.tsx";
 import { handFocusNow, handFocusOn, pressedControl } from "../../lib/handFocus.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { editsPcStats } from "../tokens/access.ts";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
+import { findMarks } from "../dice/proficiencyPresentation.ts";
+import { useProficiency } from "../dice/useProficiency.ts";
 import { StatBlockView } from "../monsters/StatBlockView.tsx";
 import { pcBlockSummary, takeShapeWords } from "../tokens/creatureKind.ts";
 import { useSrdList } from "../tokens/StatSummary.tsx";
-import { ProficientTest } from "../dice/ProficientTest.tsx";
+import { saveUnitsOf } from "../tokens/statSummary.ts";
 import { Note, SmallButton } from "../tokens/ui.tsx";
 import { useOpenPcStats, useOpenResync } from "./open.ts";
 import { lastSyncedLine, resyncNumber } from "./resync.ts";
@@ -148,6 +153,8 @@ function ShapeBody(props: { character: Character; edits: boolean }) {
   const monster = list?.find((m) => m.srdId === srdId);
   // The numbers its rolls get, read from the SRD table as the server reads them.
   const { numbers } = useCharacterRollNumbers(character.id);
+  const levelOf = useProficiency();
+  const self = { characterId: character.id };
   const endBox = useRef<HTMLDivElement>(null);
   // End the shape goes with the shape, so focus moves to the group's fold, which reads the section as it now stands, as Make a companion's does.
   const endShape = () => {
@@ -174,22 +181,26 @@ function ShapeBody(props: { character: Character; edits: boolean }) {
       {numbers ? (
         <p data-shape-numbers="" style={{ margin: 0, fontSize: theme.font.body14 }}>
           <span style={{ color: theme.color.textMuted }}>Rolls now: saves </span>
-          {ABILITY_KEYS.map((ability, i) => (
-            <span key={ability}>
-              {i > 0 ? ", " : null}
-              <ProficientTest creature={{ characterId: character.id }} test={{ kind: "save", ability }}>
-                {`${ABILITY_ABBR[ability]} ${signed(numbers.abilities[ability].save)}`}
-              </ProficientTest>
-            </span>
-          ))}
-          {", "}
-          <ProficientTest creature={{ characterId: character.id }} test={{ kind: "check", ability: "wis", skill: "perception" }}>
-            {`Perception ${signed(numbers.skills.perception ?? numbers.abilities.wis.mod)}`}
-          </ProficientTest>
+          <SaveUnits text={saveUnitsOf(savesOf(numbers)).join(", ")} level={(ability) => levelOf(self, { kind: "save", ability })} />
+          <span style={{ color: theme.color.textMuted }}>
+            , <ProficiencyLabel level={levelOf(self, { kind: "check", ability: "wis", skill: "perception" })}>Perception</ProficiencyLabel>{" "}
+          </span>
+          {signed(numbers.skills.perception ?? numbers.abilities.wis.mod)}
         </p>
       ) : null}
       {end}
       {monster ? <StatBlockView view={monster} source="srd" credit /> : <Note>This character takes the shape of an SRD creature this app does not have.</Note>}
     </>
   );
+}
+
+/** "STR +5, DEX +3, …" with each ability marked as the shape rolls it now: Wild Shape keeps the druid's own, Polymorph takes the beast's (D-261029-419). */
+function SaveUnits(props: { text: string; level(ability: AbilityKey): Proficiency }) {
+  return <MarkedText text={props.text} marks={findMarks(props.text, ABILITY_KEYS.map((ability) => ({ label: ABILITY_ABBR[ability], level: props.level(ability) })))} />;
+}
+
+function savesOf(numbers: RollNumbers): Record<AbilityKey, number> {
+  const saves = {} as Record<AbilityKey, number>;
+  for (const a of ABILITY_KEYS) saves[a] = numbers.abilities[a].save;
+  return saves;
 }

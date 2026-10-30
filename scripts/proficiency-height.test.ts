@@ -3,91 +3,84 @@ import { test } from "node:test";
 import type { Locator } from "playwright-core";
 import { proficiencyHeightLines } from "../e2e/helpers/alignment.ts";
 
-/** Run the browser callback against controlled geometry, including a CSSOM write that has no effect. */
-function fixture(options: { blocked?: number[]; count?: number; wraps?: boolean; throws?: boolean; inline?: string; priority?: string } = {}) {
+/** Runs the browser callback against controlled geometry, including a CSSOM write that has no effect, as a page that refused it would. */
+function fixture(options: { blocked?: number[]; count?: number; grows?: boolean; throws?: boolean } = {}) {
+  const MARK = "text-decoration: underline dotted 2px;";
   class Style {
-    value = options.inline ?? "";
-    priority = options.priority ?? "";
+    css = MARK;
     blocked = false;
-    getPropertyValue() { return this.value; }
-    getPropertyPriority() { return this.priority; }
-    setProperty(_name: string, value: string, priority: string) {
-      if (this.blocked && value === "none") return;
-      this.value = value;
-      this.priority = priority;
-    }
-    removeProperty() { this.value = ""; this.priority = ""; }
+    get cssText() { return this.css; }
+    set cssText(value: string) { if (!this.blocked) this.css = value; }
   }
-  const markers: Element[] = [];
   const labels: Element[] = [];
-  const doc = {
-    querySelectorAll: () => markers,
-    defaultView: { getComputedStyle: (node: Element) => ({ visibility: "visible", display: node.style.value || "inline-flex" }) },
-    // The old style-element path models the app's CSP: it changes no computed styles.
-    head: { appendChild() {} },
-    createElement: () => ({ textContent: "", remove() {} }),
-  };
+  const pictures: Element[] = [];
+  const doc = { defaultView: { getComputedStyle: (node: Element) => ({ visibility: "visible", textDecorationLine: node.style.cssText.includes("underline") ? "underline" : "none" }) } };
   class Element {
     style = new Style();
     tagName = "SPAN";
-    textContent = "Perception +7";
+    textContent = "Perception";
     parentElement: Element | null = null;
     ownerDocument = doc;
     kind: string;
     constructor(kind: string) { this.kind = kind; }
-    matches(selector: string) { return this.kind === "label" && selector === "[data-proficiency-label]"; }
-    querySelectorAll(selector: string) { return selector === "[data-proficiency-label]" ? this.kind === "root" ? labels : [] : markers; }
+    matches() { return this.kind === "label"; }
+    querySelectorAll(selector: string) {
+      if (this.kind === "root") return labels;
+      return this.kind === "label" && selector === "[data-proficiency-marker]" ? pictures.filter((p) => p.parentElement === this) : [];
+    }
     getAttribute() { return null; }
     getBoundingClientRect() {
-      if (this.kind === "marker") return this.style.value === "none" ? { width: 0, height: 0 } : { width: 14, height: 14 };
-      const hidden = markers.length > 0 && markers.every((marker) => marker.style.value === "none");
-      if (options.throws && hidden) throw new Error("measurement failed");
-      return { width: 180, height: options.wraps && !hidden ? 40 : 20 };
+      const bare = labels.length > 0 && labels.every((label) => !label.style.cssText.includes("underline"));
+      if (options.throws && bare) throw new Error("measurement failed");
+      return { width: 180, height: options.grows && !bare ? 40 : 20 };
     }
   }
   const root = new Element("root");
-  const label = new Element("label");
-  label.parentElement = root;
-  labels.push(label);
   for (let i = 0; i < (options.count ?? 2); i++) {
-    const marker = new Element("marker");
-    marker.style.blocked = options.blocked?.includes(i) ?? false;
-    markers.push(marker);
+    const label = new Element("label");
+    label.parentElement = root;
+    label.style.blocked = options.blocked?.includes(i) ?? false;
+    labels.push(label);
+    const picture = new Element("picture");
+    picture.parentElement = label;
+    picture.style.css = "position: absolute;";
+    pictures.push(picture);
   }
   const locator = { evaluateAll: async (read: (roots: Element[]) => unknown) => read([root]) } as unknown as Locator;
-  return { locator, markers };
+  return { locator, labels, pictures, MARK };
 }
 
-test("proficiency heights: CSSOM hiding works without a style element and restores inline priorities", async () => {
-  const { locator, markers } = fixture({ inline: "inline-flex", priority: "important" });
+test("proficiency heights: the CSSOM takes marks off without a style element and puts them back as they were", async () => {
+  const { locator, labels, pictures, MARK } = fixture();
   assert.deepEqual(await proficiencyHeightLines(locator, "fixture"), []);
-  for (const marker of markers) assert.deepEqual([marker.style.value, marker.style.priority], ["inline-flex", "important"]);
+  for (const label of labels) assert.equal(label.style.cssText, MARK);
+  for (const picture of pictures) assert.equal(picture.style.cssText, "position: absolute;");
 });
 
-test("proficiency heights: hiding that does nothing cannot pass with unchanged heights", async () => {
+test("proficiency heights: taking marks off that does nothing cannot pass with unchanged heights", async () => {
   const { locator } = fixture({ blocked: [0, 1] });
-  assert.match((await proficiencyHeightLines(locator, "fixture")).join("\n"), /no visible proficiency markers were hidden/);
+  assert.match((await proficiencyHeightLines(locator, "fixture")).join("\n"), /2 of 2 marks kept their underline/);
 });
 
-test("proficiency heights: every visible marker must hide, even when one succeeds", async () => {
+test("proficiency heights: every mark must come off, even when one does", async () => {
   const { locator } = fixture({ blocked: [1] });
-  assert.match((await proficiencyHeightLines(locator, "fixture")).join("\n"), /1.*marker.*did not compute display: none/);
+  assert.match((await proficiencyHeightLines(locator, "fixture")).join("\n"), /1 of 2 marks kept their underline/);
 });
 
-test("proficiency heights: added rows fail and temporary display properties are removed", async () => {
-  const { locator, markers } = fixture({ wraps: true });
-  assert.match((await proficiencyHeightLines(locator, "fixture")).join("\n"), /change container height by 20.00 px/);
-  for (const marker of markers) assert.equal(marker.style.value, "");
+test("proficiency heights: a mark that adds height fails and every mark is put back", async () => {
+  const { locator, labels, MARK } = fixture({ grows: true });
+  assert.match((await proficiencyHeightLines(locator, "fixture")).join("\n"), /change its height by 20.00 px/);
+  for (const label of labels) assert.equal(label.style.cssText, MARK);
 });
 
-test("proficiency heights: a required check cannot measure only labels without markers", async () => {
+test("proficiency heights: a required check cannot pass with no mark", async () => {
   const { locator } = fixture({ count: 0 });
-  assert.match((await proficiencyHeightLines(locator, "fixture")).join("\n"), /no visible proficiency markers were hidden/);
-  assert.deepEqual(await proficiencyHeightLines(locator, "fixture", false), [], "ordinary sweep roots without markers are optional");
+  assert.match((await proficiencyHeightLines(locator, "fixture")).join("\n"), /no visible proficiency marks were measured/);
+  assert.deepEqual(await proficiencyHeightLines(locator, "fixture", false), [], "ordinary sweep roots without marks are optional");
 });
 
-test("proficiency heights: a measurement exception still restores every marker", async () => {
-  const { locator, markers } = fixture({ throws: true });
+test("proficiency heights: a measurement exception still puts every mark back", async () => {
+  const { locator, labels, MARK } = fixture({ throws: true });
   await assert.rejects(proficiencyHeightLines(locator, "fixture"), /measurement failed/);
-  for (const marker of markers) assert.equal(marker.style.value, "");
+  for (const label of labels) assert.equal(label.style.cssText, MARK);
 });

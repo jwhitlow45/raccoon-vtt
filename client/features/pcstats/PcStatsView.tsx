@@ -3,9 +3,9 @@ import { ABILITY_KEYS, SKILL_KEYS, type Character, type PcRoll } from "#shared/m
 import { statsDefenses, pcActorNumbers, pcDerived, sortedRolls } from "#shared/rules/pcStats.ts";
 import { ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
 import { signed } from "#shared/statBlock.ts";
-import { proficiencyFor } from "#shared/rules/proficiency.ts";
-import { ProficiencyLabel } from "../../components/ProficiencyMark.tsx";
+import { MarkedText } from "../../components/ProficiencyMark.tsx";
 import { theme } from "../../lib/theme.ts";
+import { findMarks } from "../dice/proficiencyPresentation.ts";
 import { AbilityGrid } from "../monsters/AbilityGrid.tsx";
 import { defenseLinesOf, rollReading, rollTitle } from "./reading.ts";
 
@@ -35,14 +35,9 @@ export function PcStatsView(props: { character: Pick<Character, "stats" | "level
       </p>
       <AbilityGrid abilities={ABILITY_KEYS.map((a) => ({ key: a, score: String(stats.abilities[a]), mod: signed(d.mods[a]), save: signed(d.saves[a].total), proficient: stats.saves.includes(a) }))} />
       {skills.length > 0 ? (
-        <Labeled label="Skills">{skills.map((s, i) => (
-          <span key={s}>
-            {i > 0 ? ", " : null}
-            <ProficiencyLabel level={proficiencyFor({ kind: "check", ability: SKILLS[s].ability, skill: s }, { stats })}>
-              {`${SKILLS[s].name} ${signed(d.skills[s].total)}`}
-            </ProficiencyLabel>
-          </span>
-        ))}</Labeled>
+        <Labeled label="Skills">
+          <SkillsText text={skills.map((s) => `${SKILLS[s].name} ${signed(d.skills[s].total)}${stats.skills[s] === "expert" ? " (expertise)" : ""}`).join(", ")} skills={skills.map((s) => ({ label: SKILLS[s].name, level: stats.skills[s] ?? "none" }))} />
+        </Labeled>
       ) : null}
       {stats.jack ? <Labeled label="Jack of All Trades">{`${signed(Math.floor(d.pb / 2))} to skills with neither`}</Labeled> : null}
       <p style={LINE}>
@@ -74,6 +69,11 @@ export function PcStatsView(props: { character: Pick<Character, "stats" | "level
 }
 
 const LINE: CSSProperties = { margin: 0 };
+
+/** The Skills line as written, "(expertise)" and all, each skill's name marked from its own flag (D-261030-438). */
+function SkillsText(props: { text: string; skills: readonly { label: string; level: "none" | "prof" | "expert" }[] }) {
+  return <MarkedText text={props.text} marks={findMarks(props.text, props.skills)} />;
+}
 
 function Labeled(props: { label: string; children: ReactNode }) {
   return (

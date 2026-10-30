@@ -1,7 +1,4 @@
 import { Fragment, useMemo, useState, type CSSProperties, type ReactNode } from "react";
-import { ProficientTest } from "./ProficientTest.tsx";
-import { ProficientEvent } from "./ProficientEvent.tsx";
-import { rollTarget, rollTest } from "./proficiencyPresentation.ts";
 import { naturalOf, rolledTerms } from "#shared/dice/roll.ts";
 import { creatureName, describeEvent, diceText, keptFrom, labelText, memberName, rolledFormula, type LogNames } from "#shared/logText.ts";
 import type { DiceResult, DiceRoll, LogEntry } from "#shared/model.ts";
@@ -10,13 +7,17 @@ import { Button } from "../../components/Button.tsx";
 import { Empty } from "../../components/Empty.tsx";
 import { IconButton } from "../../components/IconButton.tsx";
 import { Group } from "../../components/Panel.tsx";
+import { MarkedText, ProficiencyLabel } from "../../components/ProficiencyMark.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomUi, useRoomView } from "../../state/view.ts";
 import { usePanelHere } from "../panels.ts";
 import { useDiceFolds } from "./diceFolds.ts";
 import { againInput, askedRoll, recentRolls, rollVerdict, type RecentRow } from "./logic.ts";
+import { eventMarks, ProficientEvent, type LevelOf } from "./ProficientEvent.tsx";
+import { findMarks, marksTest, rollTarget, rollTest, type TextMark } from "./proficiencyPresentation.ts";
 import type { ThrowOrigin } from "./throw/store.ts";
 import { useThrows, useThrowView } from "./throw/useThrows.ts";
+import { useProficiency } from "./useProficiency.ts";
 
 /**
  * Recent rolls (docs/design-v1-dice.md 8.3): every roll in the viewer's
@@ -58,6 +59,20 @@ export function recentSummary(rows: readonly RecentRow[], names: LogNames, dm: b
   const what = first.label !== undefined ? labelText(first.label) : rolledFormula(first);
   const more = row.rolls.length - 1;
   return `${who} ${first.total.toLocaleString("en-US")} ${what}${more > 0 ? ` and ${more} more` : ""}`;
+}
+
+/** recentSummary's words with the test they name marked: an answer's as the Log marks it, a creature's roll at its label. */
+function recentSummaryMarks(rows: readonly RecentRow[], names: LogNames, dm: boolean, levelOf: LevelOf): { text: string; marks: TextMark[] } | null {
+  const text = recentSummary(rows, names, dm);
+  const row = rows[0];
+  if (text === null || !row) return null;
+  if (row.kind === "answer") return eventMarks(row.line, names, dm, levelOf);
+  const first = row.kind === "dice" ? row.rolls[0] : undefined;
+  const target = first ? rollTarget(first) : null;
+  const test = first ? rollTest(first) : null;
+  if (!first || !target || first.label === undefined || !marksTest(test)) return { text, marks: [] };
+  // "Thorn 19 Perception check": the label follows the total.
+  return { text, marks: findMarks(text, [{ label: labelText(first.label), level: levelOf(target, test), after: `${first.total.toLocaleString("en-US")} ` }], creatureName(names, first).length) };
 }
 
 /**
@@ -136,14 +151,16 @@ const QUIET_INSET = theme.space(3) + theme.line.border;
  * at the line's far end, the row's Again, so a row of one roll takes one or
  * two lines rather than three.
  */
-function RollLine(props: { roll: DiceRoll; row: { dc?: number; ac?: number }; names: LogNames; by?: string; lead?: ReactNode; end?: ReactNode; floor?: boolean }) {
+function RollLine(props: { roll: DiceRoll; row: { dc?: number; ac?: number }; names: LogNames; levelOf: LevelOf; by?: string; lead?: ReactNode; end?: ReactNode; floor?: boolean }) {
   const { roll } = props;
   const creature = roll.tokenId !== undefined || roll.characterId !== undefined ? creatureName(props.names, roll) : null;
   // "Thorn 9 Thorn, Longsword damage" said the name twice where a player rolls for the character of the same name.
-  const what = [creature !== null && creature === props.by ? null : creature, roll.label === undefined ? undefined : labelText(roll.label)].filter(Boolean).join(", ");
-  const verdict = rollVerdict(roll, props.row);
+  const named = creature !== null && creature === props.by ? null : creature;
+  const label = roll.label === undefined ? undefined : labelText(roll.label);
+  const what = [named, label].filter(Boolean).join(", ");
   const target = rollTarget(roll);
   const test = rollTest(roll);
+  const verdict = rollVerdict(roll, props.row);
   const formula = rolledFormula(roll);
   const again = props.end !== undefined && props.end !== null;
   const split = !again && props.floor === true;
@@ -169,10 +186,17 @@ function RollLine(props: { roll: DiceRoll; row: { dc?: number; ac?: number }; na
       >
         <LastGrows>
           {props.lead}
-          <span style={{ fontSize: target && test ? theme.font.body14 : theme.font.input, fontWeight: theme.weight.bold, fontVariantNumeric: "tabular-nums" }}>{target && test ? <ProficientTest creature={target} test={test}>{roll.label} {roll.total.toLocaleString("en-US")}</ProficientTest> : roll.total.toLocaleString("en-US")}</span>
+          <span style={{ fontSize: theme.font.input, fontWeight: theme.weight.bold, fontVariantNumeric: "tabular-nums" }}>{roll.total.toLocaleString("en-US")}</span>
           {what ? (
             <span style={{ fontSize: theme.font.body14, overflowWrap: "anywhere" }}>
-              {target && test ? creature : what}
+              {target && label && marksTest(test) ? (
+                <>
+                  {named ? `${named}, ` : ""}
+                  <ProficiencyLabel level={props.levelOf(target, test)}>{label}</ProficiencyLabel>
+                </>
+              ) : (
+                what
+              )}
             </span>
           ) : null}
           {/* The formula and its dice wrap together, so a line never holds dice with no words, which would read as a label above them. */}
@@ -223,7 +247,7 @@ function LastGrows(props: { children: ReactNode[] }) {
   );
 }
 
-function Row(props: { row: RecentRow; names: LogNames; me: string; dm: boolean; open: boolean; again(rolls: DiceRollInput[], to: "all" | "dm", origin: ThrowOrigin): void }) {
+function Row(props: { row: RecentRow; names: LogNames; levelOf: LevelOf; me: string; dm: boolean; open: boolean; again(rolls: DiceRollInput[], to: "all" | "dm", origin: ThrowOrigin): void }) {
   const { row, names } = props;
   const throws = useThrows();
   const [all, setAll] = useState(props.open);
@@ -241,7 +265,9 @@ function Row(props: { row: RecentRow; names: LogNames; me: string; dm: boolean; 
     return (
       <li data-roll-row={row.ids.join(" ")} style={base}>
         <div style={{ ...FLOOR, gap: theme.space(1) }}>
-          <span style={{ fontSize: theme.font.body14, overflowWrap: "anywhere" }}>{<ProficientEvent data={row.line} names={names} dm={props.dm} />}</span>
+          <span style={{ fontSize: theme.font.body14, overflowWrap: "anywhere" }}>
+            <ProficientEvent data={row.line} names={names} dm={props.dm} levelOf={props.levelOf} />
+          </span>
           {row.line.dice ? <DiceFaces result={row.line.dice} /> : null}
         </div>
       </li>
@@ -274,7 +300,7 @@ function Row(props: { row: RecentRow; names: LogNames; me: string; dm: boolean; 
     <li data-roll-row={row.ids.join(" ")} style={base}>
       {single ? null : who}
       {shown.map((roll, i) => (
-        <RollLine key={i} roll={roll} row={row} names={names} by={memberName(names, row.by)} lead={single ? who : undefined} end={i === shown.length - 1 ? again : undefined} floor={single} />
+        <RollLine key={i} roll={roll} row={row} names={names} levelOf={props.levelOf} by={memberName(names, row.by)} lead={single ? who : undefined} end={i === shown.length - 1 ? again : undefined} floor={single} />
       ))}
       {row.rolls.length > FOLDED && !all ? (
         <div>
@@ -300,24 +326,18 @@ export function RecentRolls(props: { names: LogNames; me: string; open: string |
   const { held } = useThrowView();
   const { fold } = useDiceFolds();
   const rows = useMemo(() => recentRolls(log, held), [log, held]);
-  const summary = recentSummary(rows, props.names, dm);
-  const newest = rows[0];
-  const first = newest?.kind === "dice" ? newest.rolls[0] : undefined;
-  const target = first ? rollTarget(first) : null;
-  const test = first ? rollTest(first) : null;
-  const structuredSummary = first && target && test ? (
-    <>{creatureName(props.names, first)} <ProficientTest creature={target} test={test}>{first.label} {first.total.toLocaleString("en-US")}</ProficientTest>{newest?.kind === "dice" && newest.rolls.length > 1 ? ` and ${newest.rolls.length - 1} more` : ""}</>
-  ) : newest?.kind === "answer" ? <ProficientEvent data={newest.line} names={props.names} dm={dm} /> : null;
+  const levelOf = useProficiency();
+  const summary = recentSummaryMarks(rows, props.names, dm, levelOf);
   return (
     // A group is no landmark (components/Panel.tsx), so the mark sits on a plain box around it.
     <div data-dice-recent="" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)" }}>
-      <Group label="Recent rolls" {...fold("recent")} summaryWrap={structuredSummary !== null} summary={structuredSummary ?? summary ?? undefined}>
+      <Group label="Recent rolls" {...fold("recent")} summary={summary ? <MarkedText text={summary.text} marks={summary.marks} /> : undefined}>
         {rows.length === 0 ? (
           <Empty>No rolls yet. Type a formula or tap a die.</Empty>
         ) : (
           <ol style={{ listStyle: "none", margin: 0, padding: 0 }}>
             {rows.map((row) => (
-              <Row key={`${row.key}:${props.open !== null && row.ids.includes(props.open)}`} row={row} names={props.names} me={props.me} dm={dm} open={props.open !== null && row.ids.includes(props.open)} again={props.again} />
+              <Row key={`${row.key}:${props.open !== null && row.ids.includes(props.open)}`} row={row} names={props.names} levelOf={levelOf} me={props.me} dm={dm} open={props.open !== null && row.ids.includes(props.open)} again={props.again} />
             ))}
           </ol>
         )}

@@ -1,5 +1,4 @@
 import { ABILITY_KEYS, type AbilityKey } from "#shared/model.ts";
-import { listedProficiency } from "#shared/rules/proficiency.ts";
 
 /** One ability as a stat block's grid shows it, its numbers as the block's text writes them ("+5", "−1"). */
 export type AbilityBox = { key: AbilityKey; score: string; mod: string; save: string; proficient: boolean };
@@ -30,7 +29,7 @@ export function splitAbilityTable(text: string): SplitBlock | null {
     const row = ROW.exec(lines[at + 2 + i] ?? "");
     if (!row || row[1]!.toLowerCase() !== key) return null;
     const [, , score, mod, save] = row as unknown as [string, string, string, string, string];
-    abilities.push({ key, score, mod, save, proficient: listedProficiency(Number(save.replace("−", "-")), Number(mod.replace("−", "-")), 0, false) === "prof" });
+    abilities.push({ key, score, mod, save, proficient: save.replace("−", "-") !== mod.replace("−", "-") });
   }
   const end = at + 2 + ABILITY_KEYS.length;
   // A table cell line straight after the six rows means a table of another shape.

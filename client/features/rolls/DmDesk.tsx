@@ -6,6 +6,7 @@ import { useStore } from "zustand";
 import type { RollRequest, RollTarget } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { Input } from "../../components/Field.tsx";
+import { MarkedText, ProficiencyLabel } from "../../components/ProficiencyMark.tsx";
 import { useAlertsSummary } from "../../components/sheetFocus.ts";
 import { revealAndFocus } from "../../lib/reveal.ts";
 import { theme } from "../../lib/theme.ts";
@@ -22,6 +23,7 @@ import { useGroupSave } from "../dice/groupSave/store.ts";
 import { presetFor } from "../dice/presets.ts";
 import { NEEDS_CONNECTION, sendRoll, useRollSender } from "../dice/send.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
+import { useProficiency } from "../dice/useProficiency.ts";
 import { refusalWords } from "../dice/useReceipt.ts";
 import { useLayoutSize } from "../device/layout.ts";
 import { AskRow } from "./AskRow.tsx";
@@ -35,6 +37,7 @@ import {
   chipsStayShown,
   deskLayout,
   dcText,
+  dmAnswerText,
   foldedChips,
   heldBySaveEnds,
   newestFirst,
@@ -46,12 +49,12 @@ import {
   testShortText,
   wantsMark,
 } from "./logic.ts";
+import { answerChoiceMarks, requestMarks, rowTest, type LevelOf } from "./marks.ts";
 import { askSlot, closeAsk } from "./open.ts";
 import { RequestSheet } from "./RequestSheet.tsx";
 import { deskTraps, foldedWithTraps } from "../traps/desk.ts";
 import { TrapCard } from "../traps/TrapCard.tsx";
 import { cardStyle, ResultBadge } from "./parts.tsx";
-import { DmAnswerLine, RequestTestLabels } from "./RequestTestLabels.tsx";
 
 const NO_ROLLS = {};
 const NO_CASTS = {};
@@ -293,18 +296,20 @@ export function DmCard(props: { toggleRef(el: HTMLButtonElement | null): void; o
   const asks = asking.length === 1 && asking[0]!.change ? askRowText(asking[0]!.change, askName) : tally.asks;
   const dc = dcText(request, "dm");
   const title = `${testShortText(request.test)}${dc ? `, ${dc}` : ""}`;
+  // The title marks its test only for one creature. With several, each row's name carries its own (D-261029-415).
+  const levelOf = useProficiency();
+  const titleMarks = request.targets.length === 1 ? requestMarks(title, request, request.targets[0]!, levelOf, { short: true }) : [];
   const hidden = request.resultShown ? "" : ", pass or fail hidden from players";
   return (
     <section role="group" aria-label={`Roll request: ${title}`} style={{ ...cardStyle, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
+      <div style={{ display: "flex", alignItems: "center", gap: theme.space(1) }}>
         <button
           ref={props.toggleRef}
           type="button"
           onClick={props.onToggle}
           aria-expanded={props.open}
-          aria-label={[title, `${tally.answered}${hidden}`, asks].filter(Boolean).join(" ")}
           style={{
-            flex: "1 1 180px",
+            flex: 1,
             minWidth: 0,
             minHeight: theme.touch,
             display: "grid",
@@ -318,9 +323,8 @@ export function DmCard(props: { toggleRef(el: HTMLButtonElement | null): void; o
             cursor: "pointer",
           }}
         >
-          <span data-request-heading="" style={{ fontWeight: theme.weight.bold, fontSize: theme.font.body14 }}>
-            <RequestTestLabels request={request} target={request.targets.length === 1 ? request.targets[0] : undefined} />
-            {dc ? <span style={{ whiteSpace: "nowrap" }}>{`, ${dc}`}</span> : null}
+          <span style={{ fontWeight: theme.weight.bold, fontSize: theme.font.body14 }}>
+            <MarkedText text={title} marks={titleMarks} />
           </span>
           <span style={{ fontSize: theme.font.small, color: theme.color.textMuted, fontVariantNumeric: "tabular-nums" }}>
             {tally.answered}
@@ -342,7 +346,7 @@ export function DmCard(props: { toggleRef(el: HTMLButtonElement | null): void; o
           {request.note ? <div style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{request.note}</div> : null}
           <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: theme.space(1) }}>
             {request.targets.map((target) => (
-              <TargetRow key={targetKey(target)} request={request} target={target} />
+              <TargetRow key={targetKey(target)} request={request} target={target} levelOf={levelOf} />
             ))}
           </ul>
         </>
@@ -351,12 +355,15 @@ export function DmCard(props: { toggleRef(el: HTMLButtonElement | null): void; o
   );
 }
 
-function TargetRow(props: { request: RollRequest; target: RollTarget }) {
+function TargetRow(props: { request: RollRequest; target: RollTarget; levelOf: LevelOf }) {
   const { request, target } = props;
   const actions = useRoomActions();
   const name = useRoomView((s) => (s.view ? targetName(s.view, target, s.sceneId) : ""));
   const ref = targetRef(target);
   const waiting = !answered(target);
+  // With several creatures the title stays neutral, so a row's name carries its mark. A recorded choice of two is marked where the answer names it.
+  const nameTest = request.targets.length > 1 ? rowTest(request, target) : null;
+  const answerText = dmAnswerText(target, request.test);
   const mark = (result: "pass" | "fail") => {
     if (target.result === result) return;
     actions.dispatch({ t: "roll.answer", rollId: request.id, target: ref, result, tag: actions.newId() });
@@ -367,19 +374,20 @@ function TargetRow(props: { request: RollRequest; target: RollTarget }) {
     <li
       style={{
         display: "flex",
-        flexWrap: "wrap",
         alignItems: "center",
         gap: theme.space(1),
         borderTop: `${theme.line.border}px solid ${theme.color.border}`,
         paddingTop: theme.space(1),
       }}
     >
-      <div style={{ flex: "1 1 160px", minWidth: 0, display: "grid" }}>
+      <div style={{ flex: 1, minWidth: 0, display: "grid" }}>
         <span style={{ display: "flex", alignItems: "center", gap: theme.space(1), minWidth: 0 }}>
-          <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: theme.font.body14 }}>{name}</strong>
+          <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: theme.font.body14 }}>{nameTest ? <ProficiencyLabel level={props.levelOf(ref, nameTest)}>{name}</ProficiencyLabel> : name}</strong>
           <ResultBadge result={target.result} wantsMark={wantsMark(request, target)} />
         </span>
-        <span style={{ fontSize: theme.font.body14 }}><DmAnswerLine request={request} target={target} /></span>
+        <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>
+          <MarkedText text={answerText} marks={answerChoiceMarks(answerText, request, target, props.levelOf)} />
+        </span>
         {answered(target) ? (
           // It acts in place, so it reads as a quiet button rather than a link's accent (docs/design-v1-visual.md F24).
           <Button

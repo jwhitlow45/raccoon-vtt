@@ -43,15 +43,14 @@ function render(state: RoomState, child: ReactNode): string {
   }));
 }
 
-test("fl7: a save-ends card marks the creature's save and keeps its DC with the label", () => {
+test("fl7: a save-ends card keeps its words and marks the creature's save, never its DC (FL7-R1-13)", () => {
   const state = fixture();
   const pending = pendingSaves(state)[0]!;
   const markup = render(state, createElement(SaveEndsCard, { pending, onResult() {} }));
   assert.match(markup, /aria-label="Proficient"/);
-  assert.match(markup, /data-proficiency-label/);
-  assert.match(markup, /Wisdom save, DC 15/);
-  assert.match(markup, /white-space:nowrap/);
-  assert.match(markup, /ends it\./);
+  assert.match(markup, /data-proficiency-level="prof"[^>]*>Wisdom save<span/, "the save alone carries the mark");
+  assert.match(markup.replace(/<[^>]*>/g, ""), /Wisdom save, DC 15, ends it\./);
+  assert.doesNotMatch(markup, /white-space:nowrap">Wisdom/, "no unit added around the save");
   state.characters.hero!.stats = { ...STATS, saves: ["con"] };
   assert.doesNotMatch(render(state, createElement(SaveEndsCard, { pending, onResult() {} })), /aria-label="Proficient"/);
 });
@@ -60,9 +59,9 @@ test("fl7: concentration reads Constitution save proficiency, not a skill flag",
   const state = fixture();
   const card = createElement(ConcentrationCard, { prompt: { logId: "1:0", target: { characterId: "hero" }, dc: 12 }, onDone() {}, onResult() {} });
   const markup = render(state, card);
-  assert.match(markup, /aria-label="Proficient"/);
+  assert.match(markup, /data-proficiency-level="prof"[^>]*>Concentration save<span/);
   assert.doesNotMatch(markup, /aria-label="Expertise"/);
-  assert.match(markup, /Constitution save, DC 12/);
+  assert.match(markup.replace(/<[^>]*>/g, ""), /took damage\. Constitution save, DC 12\./, "the line under it is as before FL-7");
   const noSave = fixture();
   noSave.characters.hero!.stats = { ...STATS, saves: ["wis"] };
   assert.doesNotMatch(render(noSave, card), /aria-label="Proficient"/);

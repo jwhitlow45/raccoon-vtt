@@ -1,4 +1,4 @@
-import { useMemo, type CSSProperties, type ReactNode } from "react";
+import { createContext, Fragment, useContext, useMemo, type CSSProperties, type ReactNode } from "react";
 import { theme } from "../lib/theme.ts";
 import { keyChord, parseMarkdown, type Block, type GuideAlert, type Inline } from "./markdown.ts";
 
@@ -22,15 +22,32 @@ export type MarkdownImage = { url: string; width: number; height: number };
  * image's relative path to a file the build bundled, and an image it does
  * not know is left out. A link to a heading stays on the page.
  */
-export function Markdown(props: { text: string; style?: CSSProperties; journal?: boolean; guide?: boolean; image?(src: string): MarkdownImage | null }) {
+export function Markdown(props: { text: string; style?: CSSProperties; journal?: boolean; guide?: boolean; image?(src: string): MarkdownImage | null; texts?: MarkdownTexts }) {
   const journal = props.journal === true;
   const guide = props.guide === true;
   const blocks = useMemo(() => parseMarkdown(props.text, { journal, guide }), [props.text, journal, guide]);
   return (
     <div style={{ fontSize: theme.font.body14, lineHeight: 1.45, overflowWrap: "anywhere", ...props.style }}>
-      <MarkdownBlocks blocks={blocks} guide={guide} {...(props.image ? { image: props.image } : {})} />
+      <TextsContext.Provider value={props.texts ?? null}>
+        <MarkdownBlocks blocks={blocks} guide={guide} {...(props.image ? { image: props.image } : {})} />
+      </TextsContext.Provider>
     </div>
   );
+}
+
+/**
+ * Draws a run of plain text in place of its words alone: a stat block
+ * marks the skills and saves its Skills and Saving Throws lines list
+ * (monsters/StatBlockView.tsx). `lead` is the bold words before the run in
+ * its paragraph, such as "Skills", or null. Without it every run is its
+ * words, so the markup is the same as ever.
+ */
+export type MarkdownTexts = (text: string, lead: string | null) => ReactNode;
+
+const TextsContext = createContext<MarkdownTexts | null>(null);
+
+function boldWords(node: Inline | undefined): string | null {
+  return node?.kind === "bold" ? node.children.map((child) => (child.kind === "text" ? child.text : "")).join("") : null;
 }
 
 /**
@@ -448,8 +465,9 @@ function cellStyle(head: boolean): CSSProperties {
 }
 
 export function Inlines(props: { content: Inline[] }): ReactNode {
+  const texts = useContext(TextsContext);
   return props.content.map((node, i) => {
-    if (node.kind === "text") return node.text;
+    if (node.kind === "text") return texts ? <Fragment key={i}>{texts(node.text, boldWords(props.content[i - 1]))}</Fragment> : node.text;
     if (node.kind === "break") return <br key={i} />;
     if (node.kind === "code") {
       const keys = keyChord(node.text);

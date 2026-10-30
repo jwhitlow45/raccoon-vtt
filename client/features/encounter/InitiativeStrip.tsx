@@ -4,6 +4,7 @@ import { useStore } from "zustand";
 import type { Effect, LogEntry } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { Icon } from "../../components/Icon.tsx";
+import { ProficiencyLabel } from "../../components/ProficiencyMark.tsx";
 import { askedAlerts, barDockSlot, CARD_MAX, columnFacts, columnRoom, columnTop, DOCK_MIN_WIDTH, EDGE, placedChrome, raisedRow, SHADOW_ROOM, SUMMARY_ROW, type AskedAlerts } from "../../canvas/barDock.ts";
 import { ScrollForMore } from "../../canvas/TokenActionBar.tsx";
 import { useAlertsSummaryEntry } from "../../components/sheetFocus.ts";
@@ -49,8 +50,7 @@ import { RollAlerts } from "../rolls/RollAlerts.tsx";
 import { knownOrTyped } from "../rolls/card.ts";
 import { CARD_MIN_WIDTH } from "../rolls/logic.ts";
 import { bonusFor } from "#shared/dice/bonus.ts";
-import { creatureRolls } from "../dice/creature.ts";
-import { ProficientTest } from "../dice/ProficientTest.tsx";
+import { creatureProficiency, creatureRolls } from "../dice/creature.ts";
 import { dropOldRechargeMarks } from "../dice/options.ts";
 import { presetFor } from "../dice/presets.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
@@ -1476,11 +1476,13 @@ export function ConcentrationCard(props: { prompt: ConcentrationPrompt; onDone()
       style={{ ...card, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}
     >
       <div>
-        <div style={{ fontWeight: theme.weight.bold }}><ProficientTest creature={prompt.target} test={CONCENTRATION_TEST}>Concentration save</ProficientTest></div>
+        <div style={{ fontWeight: theme.weight.bold }}>
+          <ProficiencyLabel level={dice ? creatureProficiency(dice, prompt.target, CONCENTRATION_TEST) : "none"}>Concentration save</ProficiencyLabel>
+        </div>
         <div style={{ fontSize: theme.font.body14, color: theme.color.textMuted }}>
           {name}
           {spell ? ` (${spell})` : ""} took damage.
-          {" "}<span style={{ whiteSpace: "nowrap" }}>{prompt.dc !== undefined ? `Constitution save, DC ${prompt.dc}.` : "Constitution save."}</span>
+          {prompt.dc !== undefined ? ` Constitution save, DC ${prompt.dc}.` : " Constitution save."}
         </div>
       </div>
       {model.status || trouble ? (

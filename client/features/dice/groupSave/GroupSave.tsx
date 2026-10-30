@@ -1,12 +1,11 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { ProficientTest } from "../ProficientTest.tsx";
-import { testLabel } from "../options.ts";
 import { bonusFor } from "#shared/dice/bonus.ts";
 import type { AdvantageSource } from "#shared/dice/formula.ts";
 import { uuidv7 } from "#shared/ids.ts";
 import { ABILITY_KEYS, CONDITION_KEYS, SKILL_KEYS, type AbilityKey, type ConditionKey, type Effect, type RoomState, type SkillKey } from "#shared/model.ts";
 import type { ActorTarget, OpOf } from "#shared/protocol.ts";
 import { DAMAGE_TYPES, damageTypeName, type DamageType } from "#shared/rules/damage.ts";
+import type { Proficiency } from "#shared/rules/proficiency.ts";
 import { ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
 import { effectName } from "#shared/logText.ts";
 import { DamageSummary } from "../DamageSummary.tsx";
@@ -16,6 +15,7 @@ import { Checkbox } from "../../../components/Checkbox.tsx";
 import { Chip, ChipRow } from "../../../components/Chip.tsx";
 import { Input } from "../../../components/Field.tsx";
 import { Notice } from "../../../components/Notice.tsx";
+import { ProficiencyLabel } from "../../../components/ProficiencyMark.tsx";
 import { Segmented } from "../../../components/Segmented.tsx";
 import { stickyPaneFoot } from "../../../components/Sheet.tsx";
 import { Section } from "../../../components/Panel.tsx";
@@ -28,9 +28,10 @@ import { SaveEndsFields, type SaveEndsForm } from "../../tokens/SaveEndsFields.t
 import { FieldRow, Note, NumberField, Select, Stepper } from "../../tokens/ui.tsx";
 import { limitedUses } from "#shared/dice/uses.ts";
 import { abilityOp, actorOf } from "../../combat/logic.ts";
-import { creatureBlock, creatureRolls } from "../creature.ts";
+import { creatureBlock, creatureProficiency, creatureRolls } from "../creature.ts";
 import { creatureKey, holderTarget, markOnRoll, rechargeUseOf, signedText, spendOnStart, spendsFor } from "../options.ts";
 import { presetFor } from "../presets.ts";
+import { marksTest } from "../proficiencyPresentation.ts";
 import { useRollSender } from "../send.ts";
 import { useDicePanel } from "../useDicePanel.ts";
 import { useDiceView } from "../useDiceView.ts";
@@ -214,6 +215,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   const rows = live;
   const tooMany = rows.length > 100;
   const shown: Page = page.phase === "setup" ? { ...page, rows } : page;
+  const pageTest = d20Of(page.test, page.spell);
   const key = (t: { tokenId?: string; characterId?: string }) => (view ? creatureKey(view, t) : "");
 
   // Answers come from the requests in the view (5.3), and creatures that left are marked gone, after the roll.
@@ -526,6 +528,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
           key={row.holder}
           page={shown}
           row={row}
+          level={dice && marksTest(pageTest) ? creatureProficiency(dice, row.target, pageTest) : undefined}
           outcome={outcomes.get(row.holder)!}
           loading={loading && row.bonus === null}
           blocked={blocked ?? (offScene ? "Go back to the scene first." : null)}
@@ -910,6 +913,8 @@ function GroupRow(props: {
   outcome: ReturnType<typeof rowOutcome>;
   /** Its stat block is still loading, so how it rolls is not known yet. */
   loading: boolean;
+  /** How proficient it is in the page's save or skill, which its name carries: the page names the test once for every row (D-261029-415). */
+  level?: Proficiency | undefined;
   blocked: string | null;
   onChange(page: Page): void;
   /** The DM's roll of an asked row, with the bonus typed for a creature with no stat block. */
@@ -942,7 +947,7 @@ function GroupRow(props: {
   return (
     <div style={{ display: "grid", gap: theme.space(1), padding: `${theme.space(1)}px 0`, borderTop: `${theme.line.border}px solid ${theme.color.border}` }}>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2), rowGap: theme.space(1) }}>
-        <span style={{ fontWeight: theme.weight.strong, minWidth: 80, flex: "1 1 80px", overflowWrap: "anywhere" }}>{row.name}</span>
+        <span style={{ fontWeight: theme.weight.strong, minWidth: 80, flex: "1 1 80px", overflowWrap: "anywhere" }}>{props.level ? <ProficiencyLabel level={props.level}>{row.name}</ProficiencyLabel> : row.name}</span>
         {takes ? (
           <Button size="sm" variant="quiet" expanded={editing} aria-label={`${row.name}'s damage, ${outcome.amount}${s.amount !== undefined ? ", typed" : ""}. Change it`} onClick={() => setEditing((e) => !e)} style={{ fontVariantNumeric: "tabular-nums", minWidth: 44 }}>
             {String(outcome.amount)}
@@ -961,7 +966,6 @@ function GroupRow(props: {
           />
         </div>
       </div>
-      {page.test.kind !== "none" ? <span style={{ fontSize: theme.font.small }}><ProficientTest creature={row.target} test={page.test}>{testLabel(page.test)}{row.bonus !== null ? ` ${signedText(row.bonus)}` : ""}</ProficientTest></span> : null}
       {takes && editing ? (
         <RowDamageField name={row.name} value={s.amount} computed={outcome.computed} summary={outcome.summary} onChange={(value) => props.onChange(setAmount(page, row.holder, value))} />
       ) : null}
