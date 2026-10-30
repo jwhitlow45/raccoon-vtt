@@ -68,6 +68,8 @@ Each cause is fixed once, where it lives.
 - **R8. The options line puts a hint at the top of a reading's box** (PL13: 1 finding). OptionsLine holds the box at a 14 px reading's height so the map's reserve never changes, and lays a 13 px hint in it as a block. The line centers its words in that height (a flex column, `justify-content: center`), so a hint and a reading share a middle. A one-cell grid did the same, but the cut line's button, `calc(100% + 20px)` wide against its own track, sent React into error 185 (maximum update depth) and the options strip into its error boundary.
 - **R9. A toast under the column spans the map** (PL14: 1 finding). The toast layer is the map's width less 12 px each side. Under a card, it takes the column's left and right edges, which `toastTop` already reads beside its top, so the toast lines up with the card above it.
 
+As built, FU40-B: R9 fixes horizontal edges. The 8 px vertical gap clears every drawn card, so it is below the first card only when that card is alone. `pl2-b` checks both one and three unfolded concentration cards at every phone size. When the full stack leaves under 44 px for a toast, the toast stays above it and the column clears the toast. The single-card case still checks exact spacing and edges at every size and through both screen rotations.
+
 ## 3. The fixes
 
 Three lanes from the stacked tip, each one builder in its own workspace. No protocol, op, stored data, snapshot or server change, and no feature removed. FEATURES.md and the guide's words do not change. Lane 1's fixes show in the guide's `trap-pane.webp` and `resync.webp`, lane 2's in `action-bar.webp` and `mounted-turn.webp`, to retake at the next guide pass.
