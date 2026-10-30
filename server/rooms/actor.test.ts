@@ -3676,7 +3676,9 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
     }
   });
 
-  for (const changed of [true, false]) for (const routed of [false, true]) test(`FU40AC-OPUS-6: a refused redo reads the door held before its batch, changed=${changed}, routed=${routed}`, async () => {
+  for (const change of ["close", "unchanged", "lock", "unlock", "add secret", "move secret", "unchanged secret"] as const) for (const routed of [false, true]) test(`FU40AC-OPUS-${change.includes("secret") ? 8 : 6}: a refused redo reads the door held before its batch, change=${change}, routed=${routed}`, async () => {
+    const secret = change.includes("secret");
+    const visibleChanged = change === "close" || change === "add secret" || change === "move secret";
     const dm = member("DM", "dm");
     const player = member("Ayla", "player");
     const state = createInitialState({ roomName: "Door memory", dm });
@@ -3686,8 +3688,12 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
     const pcId = uuidv7();
     state.tokens[pcId] = testToken(pcId, { sceneId, kind: "pc", name: "Ayla", disposition: "ally", ownerIds: [player.id], x: 2, y: 5, actor: { inline: { ...inline, effects: [{ id: "e1", key: "blinded", name: "Blinded" } as never] } } });
     lift(state, "dm", { x: 0, y: 3, w: 8, h: 5 }, sceneId);
-    lift(state, "party", { x: 8, y: 5, w: 1, h: 1 }, sceneId);
-    const door = wall(state, "aaaaaaaaaaaa", [8 + 6 / 64, 5 + 6 / 64], [8 + 6 / 64, 6 - 6 / 64], { kind: "door", state: changed ? "open" : "closed", secret: false, discovered: false }, sceneId);
+    lift(state, "party", { x: 8, y: 5, w: 2, h: 1 }, sceneId);
+    const door: FreeWall = { id: "aaaaaaaaaaaa", a: [8 + 6 / 64, 5 + 6 / 64], b: [8 + 6 / 64, 6 - 6 / 64], f: { kind: "door", state: change === "close" ? "open" : change === "unlock" ? "locked" : "closed", secret, discovered: false } };
+    if (change !== "add secret") {
+      const offset = change === "move secret" ? 1 : 0;
+      wall(state, door.id, [door.a[0] + offset, door.a[1]], [door.b[0] + offset, door.b[1]], door.f, sceneId);
+    }
     const key = chunkKey(sceneId, 0, 0);
     const db = new FakeDb({ state, dmGrants: [dm.id] });
     let commits = 0;
@@ -3712,10 +3718,17 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
       assert.notEqual(await answerTo(table.sent, 1), "stuck");
       assert.equal(actor.committed.state.tokens[pcId]!.x, 2);
       assert.equal(actor.committed.state.memory?.[key]?.walls?.[door.id], undefined, "the door still needs no remembered difference");
-      const shownDoor = () => projectState(actor.committed.state, { memberId: player.id, role: "player" }, { sceneId }).buildChunks[key]?.walls?.find((w) => w.id === door.id);
-      assert.deepEqual(shownDoor(), door);
+      const shownWalls = () => projectState(actor.committed.state, { memberId: player.id, role: "player" }, { sceneId }).buildChunks[key]?.walls ?? [];
+      const beforeWalls = shownWalls();
+      assert.equal(beforeWalls.length, change === "add secret" ? 0 : 1);
+      if (secret) assert.ok(beforeWalls.every((w) => w.f.kind === "wall"), "unfound secret doors are only wall pieces to the player");
+      else assert.deepEqual(beforeWalls, [{ ...door, f: { kind: "door", state: change === "close" ? "open" : "closed", secret: false, discovered: false } }], "a visible door hides its lock");
       const beforeCommits = commits;
-      void actor.op(table.conn, 2, { t: "door.set", sceneId, door: { cx: 0, cy: 0, id: door.id }, state: "closed" });
+      const edit: Op = change === "unchanged secret"
+        ? { t: "scene.update", sceneId, patch: { name: "Same door" } }
+        : secret ? { t: "build.walls", sceneId, put: [door] }
+        : { t: "door.set", sceneId, door: { cx: 0, cy: 0, id: door.id }, state: change === "lock" ? "locked" : "closed" };
+      void actor.op(table.conn, 2, edit);
       await sendWithHistory(actor, phone.conn, 3, { t: "redo" });
       const closed = await answerTo(table.sent, 2);
       const refused = await answerTo(phone.sent, 3);
@@ -3723,9 +3736,10 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
       assert.ok(refused !== "stuck");
       assert.equal(closed.seq, refused.seq, "the door edit and redo settled in one batch");
       assert.equal(commits - beforeCommits, 1, "both terminal answers used one commit");
-      assert.deepEqual(shownDoor(), door, "the player's whole door stays as it was before the batch");
+      assert.deepEqual(shownWalls(), beforeWalls, "the player's wall and door pieces stay as they were before the batch");
+      if (secret && visibleChanged) assert.equal(actor.committed.state.memory?.[key]?.walls?.[door.id]?.find((v) => v.cells.includes("8,5"))?.wall, null, "the batch-end map remembers no wall in the new cell");
       assert.equal(actor.committed.state.tokens[pcId]!.x, 2, "the redo stays refused in place");
-      assert.equal(refused.rejects?.find((r) => r.n === 3)?.message, `could not redo moving Ayla: ${changed ? SOMETHING_BLOCKS_BACK : "a wall is in the way"}`);
+      assert.equal(refused.rejects?.find((r) => r.n === 3)?.message, `could not redo moving Ayla: ${visibleChanged ? SOMETHING_BLOCKS_BACK : "a wall is in the way"}`);
     } finally {
       db.freeze();
       void actor.shutdown({ code: 1012, snapshot: false });

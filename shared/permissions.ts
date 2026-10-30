@@ -2048,6 +2048,12 @@ function doorMatchesLive(state: RoomState, ground: Ground, door: DoorRef, batchB
   if (!wall) return undefined;
   const shown = shownFreeWall(wall);
   const live = stableStringify(shown);
+  // Secret doors project as wall pieces, whose per-cell memory also waits
+  // for batch end. Compare shown versions so private locks cannot change the words.
+  if (batchBefore && batchBefore !== state) {
+    const before = batchBefore.buildChunks[key]?.walls?.find((w) => w.id === door.id);
+    if (!before || stableStringify(shownFreeWall(before)) !== live) return () => false;
+  }
   const held = heldFreeDoor(state, ground, door);
   // Memory is written at batch end. Until then, the starting view must also
   // match, or a hidden edit could borrow neighboring sight before it is remembered.
