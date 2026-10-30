@@ -214,7 +214,7 @@ describe("a drag's preview lands as the drop would, here or as another member's 
 
   test("the isometric board's ghosts and every shadow read this landing", () => {
     const board = readFileSync(new URL("./relief/IsoBoard.tsx", import.meta.url), "utf8");
-    assert.match(board, /const landing = room \? previewLanding\(room, props\.role, seen, t, at\) : t\.elevation;\n\s+const base = drawnBase\(src, range, landing\)/);
+    assert.match(board, /const landing = room \? previewLanding\(room, props\.role, seen, t, at\) : t\.elevation;\n\s+const base = drawnBase\(src, cells, landing\)/);
     assert.match(readFileSync(new URL("./TokenShadow.tsx", import.meta.url), "utf8"), /previewLanding\(view, role, ground, token, spotAt\)/);
   });
 });

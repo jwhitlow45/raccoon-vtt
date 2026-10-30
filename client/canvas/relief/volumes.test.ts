@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { flatHeights } from "../../lib/view.ts";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import { FOG_SUBCELLS, type FogTile } from "#shared/model.ts";
@@ -47,7 +48,7 @@ function fogBut(fogged: readonly (readonly [number, number])[]): { tiles: Record
   return { tiles, view: new FogView(tiles, "s1", BOUNDS) };
 }
 
-const flat = { at: () => 0 };
+const flat = flatHeights(BOUNDS);
 
 function world(fog: FogView = new FogView(null, "s1", BOUNDS), tiles: unknown = null, live: LiveSub | null = null): VolumeWorld {
   return { heights: flat, tiles, px: 32, fog, live };

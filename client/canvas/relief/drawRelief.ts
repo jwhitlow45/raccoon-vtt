@@ -6,16 +6,20 @@ import { isometric, K, toView, turnAxes, type Turn, type ViewPoint } from "../..
 import type { BandPart } from "../../features/areas/volume.ts";
 import { meets, type DrawPiece, type VolumePiece } from "./buckets.ts";
 import { patternOf } from "./looks.ts";
-import { boundsOf, facesOf, type CellPiece, type Face, type SideLook, type StaticPiece, type VBox, type WallItem } from "./pieces.ts";
+import { boundsOf, facesOf, type CellPiece, type Face, type PitRegion, type SideLook, type StaticPiece, type VBox, type WallItem } from "./pieces.ts";
 
 /**
  * Drawing a run of relief pieces (docs/design-v1-isometric-view.md 5.5):
  * one Konva shape that does not listen draws every piece between two
  * standees, in depth order. A column draws its sides, then its top: the
  * ground stage's pixels under the cell, copied up by the lift and clipped
- * to the lifted diamond, read only from the source box. Neighboring tops at
- * one lift share a clip and a copy. A pit draws its floor, the ground's
- * pixels copied down, and its far sides, inside its opening. Consecutive
+ * to the lifted polygon (a square's diamond, a hex's six corners), read
+ * only from the source box. Neighboring tops at one lift share a clip and
+ * a copy. A pit draws its floor, the ground's pixels copied down and
+ * clipped to its own floor polygon, then its far sides, all inside the
+ * openings of its connected region, so a floor seen through a neighbor's
+ * opening shows its own pixels and its own shade
+ * (docs/design-v1-iso-hex-relief.md 5.2). Consecutive
  * bands of one area standing as its real shape draw as one
  * (docs/design-v1-iso-area-shapes.md 4.3 and 5).
  */
@@ -30,6 +34,8 @@ export type DrawContext = {
   textures: Partial<Record<TexturedTerrain, HTMLImageElement>>;
   /** The canvas's view box, so a piece off screen costs a box test. */
   view: VBox;
+  /** The cells of a pit region whose openings meet a view box (buckets.ts openingsMeeting). Absent, every cell of the region. */
+  openings?: (region: PitRegion, box: VBox, asker: object) => readonly CellPiece[];
 };
 
 type Pt = { x: number; y: number };
@@ -51,10 +57,62 @@ function device(dc: DrawContext, v: Pt): Pt {
   return { x: p.x * dc.pixelRatio, y: p.y * dc.pixelRatio };
 }
 
-/** The cell's diamond at height z, in view units, corner by corner. */
-function diamond(turn: Turn, x: number, y: number, z: number): Pt[] {
+/** A cell's polygon at height z, in view units, corner by corner. */
+function lifted(turn: Turn, poly: readonly Pt[], z: number): Pt[] {
   const view = isometric(turn);
-  return [toView(view, { x, y }, z), toView(view, { x: x + 1, y }, z), toView(view, { x: x + 1, y: y + 1 }, z), toView(view, { x, y: y + 1 }, z)];
+  return poly.map((p) => toView(view, p, z));
+}
+
+/** Adds a closed polygon to the path. */
+function addPoly(g: CanvasRenderingContext2D, pts: readonly Pt[]): void {
+  g.moveTo(pts[0]!.x, pts[0]!.y);
+  for (let i = 1; i < pts.length; i++) g.lineTo(pts[i]!.x, pts[i]!.y);
+  g.closePath();
+}
+
+/** A side as it draws: the parallelogram from `a` to `b` and `h` view units down. */
+type SideShape = { a: Pt; b: Pt; h: number; left: boolean };
+
+/** A cell piece's drawing at a turn, in view units: its bounds, its sides, and its polygon at its own height and at 0. */
+type CellShape = { bounds: VBox; sides: readonly SideShape[]; top: readonly Pt[]; atZero: readonly Pt[] };
+
+/*
+ * Kept with each piece, turn by turn. A piece's geometry never changes once
+ * built (buckets.ts makes new pieces when their cells or neighbors change),
+ * so a pan reads these back instead of projecting every corner again each
+ * frame (docs/design-v1-iso-hex-relief.md 9).
+ */
+const cellShapes = new WeakMap<CellPiece, (CellShape | undefined)[]>();
+const wallBounds = new WeakMap<WallItem, (VBox | undefined)[]>();
+
+function shapeOf(p: CellPiece, turn: Turn): CellShape {
+  let byTurn = cellShapes.get(p);
+  if (!byTurn) cellShapes.set(p, (byTurn = []));
+  const kept = byTurn[turn];
+  if (kept) return kept;
+  const view = isometric(turn);
+  const sides = facesOf(p, turn).map((f: Face) => ({
+    a: toView(view, { x: f.ax, y: f.ay }, f.z1),
+    b: toView(view, { x: f.bx, y: f.by }, f.z1),
+    h: K * (f.z1 - f.z0),
+    left: f.left,
+  }));
+  const shape = { bounds: boundsOf(p, turn), sides, top: lifted(turn, p.poly, p.z), atZero: lifted(turn, p.poly, 0) };
+  byTurn[turn] = shape;
+  return shape;
+}
+
+function boundsAt(p: StaticPiece, turn: Turn): VBox {
+  if (p.kind !== "wall") return shapeOf(p, turn).bounds;
+  let byTurn = wallBounds.get(p);
+  if (!byTurn) wallBounds.set(p, (byTurn = []));
+  return (byTurn[turn] ??= boundsOf(p, turn));
+}
+
+/** The openings at 0 a pit piece draws inside: its region's that meet its bounds, or its own. */
+function openingsOf(p: CellPiece | WallItem, dc: DrawContext): readonly CellPiece[] {
+  if (!p.region) return p.kind === "wall" ? [] : [p];
+  return dc.openings ? dc.openings(p.region, boundsAt(p, dc.turn), p) : p.region.cells;
 }
 
 /**
@@ -94,29 +152,29 @@ function fillSide(g: CanvasRenderingContext2D, a: Pt, b: Pt, h: number, look: Si
   g.stroke();
 }
 
-function drawFace(g: CanvasRenderingContext2D, f: Face, look: SideLook, dc: DrawContext): void {
-  const view = isometric(dc.turn);
-  const a = toView(view, { x: f.ax, y: f.ay }, f.z1);
-  const b = toView(view, { x: f.bx, y: f.by }, f.z1);
-  fillSide(g, a, b, K * (f.z1 - f.z0), look, f.left, dc);
+function drawSides(g: CanvasRenderingContext2D, p: CellPiece, dc: DrawContext): void {
+  for (const f of shapeOf(p, dc.turn).sides) fillSide(g, f.a, f.b, f.h, p.look, f.left, dc);
 }
 
-/** Copies the ground under a set of cells, moved by `shift` device pixels up (a top) or down (a pit's floor, negative), inside `clip`. */
-function copyGround(g: CanvasRenderingContext2D, cells: readonly CellPiece[], clipZ: number, sourceZ: number, shiftZ: number, dc: DrawContext, tone: string): void {
-  const shift = K * shiftZ * dc.camera.scale * dc.pixelRatio;
+/**
+ * Copies the ground under cells of one height, moved by that height up (a
+ * top) or down (a pit's floor, negative), inside their polygons at it. The
+ * clip is built in view units under the run's transform, then the copy
+ * runs in device pixels, with the clip it made still in force.
+ */
+function copyGround(g: CanvasRenderingContext2D, cells: readonly CellPiece[], dc: DrawContext, tone: string): void {
+  const shift = K * cells[0]!.z * dc.camera.scale * dc.pixelRatio;
   g.save();
-  g.setTransform(1, 0, 0, 1, 0, 0);
   g.beginPath();
   let x0 = Infinity;
   let y0 = Infinity;
   let x1 = -Infinity;
   let y1 = -Infinity;
   for (const c of cells) {
-    const clip = diamond(dc.turn, c.x, c.y, clipZ).map((p) => device(dc, p));
-    g.moveTo(clip[0]!.x, clip[0]!.y);
-    for (let i = 1; i < 4; i++) g.lineTo(clip[i]!.x, clip[i]!.y);
-    g.closePath();
-    for (const p of diamond(dc.turn, c.x, c.y, sourceZ).map((q) => device(dc, q))) {
+    const shape = shapeOf(c, dc.turn);
+    addPoly(g, shape.top);
+    // The source box from the clip's own polygon at 0, before the copy's lift, so a pit's floor reads exactly the pixels it shows.
+    for (const p of shape.atZero) {
       x0 = Math.min(x0, p.x);
       y0 = Math.min(y0, p.y);
       x1 = Math.max(x1, p.x);
@@ -124,6 +182,10 @@ function copyGround(g: CanvasRenderingContext2D, cells: readonly CellPiece[], cl
     }
   }
   g.clip();
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  // The view box in device pixels: the camera only scales and moves, so its corners map to corners.
+  ({ x: x0, y: y0 } = device(dc, { x: x0, y: y0 }));
+  ({ x: x1, y: y1 } = device(dc, { x: x1, y: y1 }));
   const ground = dc.ground;
   // Past the ground stage's margin there is nothing to copy: the face tone fills the rest until the map pans up.
   if (!ground || y1 > ground.height || y0 < 0 || x0 < 0 || x1 > ground.width) {
@@ -143,30 +205,30 @@ function copyGround(g: CanvasRenderingContext2D, cells: readonly CellPiece[], cl
 /** The outline of tops at one height, so a platform's edge reads on flat art. */
 function outlineTops(g: CanvasRenderingContext2D, cells: readonly CellPiece[], dc: DrawContext): void {
   g.beginPath();
-  for (const c of cells) {
-    const d = diamond(dc.turn, c.x, c.y, c.z);
-    g.moveTo(d[0]!.x, d[0]!.y);
-    for (let i = 1; i < 4; i++) g.lineTo(d[i]!.x, d[i]!.y);
-    g.closePath();
-  }
+  for (const c of cells) addPoly(g, shapeOf(c, dc.turn).top);
   g.strokeStyle = theme.relief.edge;
   g.lineWidth = 1 / (dc.camera.scale * dc.pixelRatio);
   g.stroke();
 }
 
+/**
+ * A pit (5.2): inside the openings at 0 of its connected region, its floor,
+ * the ground under it copied down by its depth and clipped to its own floor
+ * polygon, then darkened inside that polygon alone, then its far sides. A
+ * nearer pit of the region draws later, so where two floors meet on screen
+ * the nearer one shows, each with its own pixels and one shade.
+ */
 function drawPit(g: CanvasRenderingContext2D, p: CellPiece, dc: DrawContext): void {
   g.save();
-  const opening = diamond(dc.turn, p.x, p.y, 0);
   g.beginPath();
-  g.moveTo(opening[0]!.x, opening[0]!.y);
-  for (let i = 1; i < 4; i++) g.lineTo(opening[i]!.x, opening[i]!.y);
-  g.closePath();
-  g.clip();
-  // The floor is the cell's ground moved down by the depth, then darkened by it.
-  copyGround(g, [p], 0, 0, p.z, dc, theme.relief.side);
+  for (const o of openingsOf(p, dc)) addPoly(g, shapeOf(o, dc.turn).atZero);
+  g.clip("nonzero");
+  copyGround(g, [p], dc, theme.relief.side);
+  g.beginPath();
+  addPoly(g, shapeOf(p, dc.turn).top);
   g.fillStyle = theme.relief.pitShade;
   g.fill();
-  for (const f of facesOf(p, dc.turn)) drawFace(g, f, p.look, dc);
+  drawSides(g, p, dc);
   g.restore();
 }
 
@@ -211,7 +273,16 @@ function drawPillar(g: CanvasRenderingContext2D, w: WallItem, dc: DrawContext): 
   g.stroke();
 }
 
+/** A wall piece, inside the openings of its pit region, swept up, when it stands below 0: the near rim hides its foot (5.2). */
 function drawWall(g: CanvasRenderingContext2D, w: WallItem, dc: DrawContext): void {
+  if (!w.region) return drawStanding(g, w, dc);
+  g.save();
+  clipToPits(g, openingsOf(w, dc).map((c) => c.poly), dc.turn);
+  drawStanding(g, w, dc);
+  g.restore();
+}
+
+function drawStanding(g: CanvasRenderingContext2D, w: WallItem, dc: DrawContext): void {
   if (w.piece.kind === "pillar") return drawPillar(g, w, dc);
   const view = isometric(dc.turn);
   const top = w.base + w.rise;
@@ -234,7 +305,7 @@ export function drawRun(g: CanvasRenderingContext2D, pieces: readonly DrawPiece[
   let batch: CellPiece[] = [];
   const flush = () => {
     if (batch.length === 0) return;
-    copyGround(g, batch, batch[0]!.z, 0, batch[0]!.z, dc, batch[0]!.look.color);
+    copyGround(g, batch, dc, batch[0]!.look.color);
     outlineTops(g, batch, dc);
     batch = [];
   };
@@ -268,11 +339,11 @@ export function drawRun(g: CanvasRenderingContext2D, pieces: readonly DrawPiece[
       }
       continue;
     }
-    if (!meets(boundsOf(p, dc.turn), dc.view)) continue;
+    if (!meets(boundsAt(p, dc.turn), dc.view)) continue;
     if (p.kind === "column") {
       // Sides of later columns at one lift never overlap earlier tops at that lift, so the tops can wait for one copy.
       if (batch.length > 0 && batch[0]!.z !== p.z) flush();
-      for (const f of facesOf(p, dc.turn)) drawFace(g, f, p.look, dc);
+      drawSides(g, p, dc);
       batch.push(p);
       continue;
     }
@@ -324,27 +395,44 @@ function addLines(g: CanvasRenderingContext2D, q: Pts, c: number, s: number): vo
 }
 
 /**
- * Clips to the openings of pit cells swept up past the canvas's top, in
- * view units, so the near rim hides what lies below it, as it hides a
- * standee there (docs/design-v1-isometric-view.md 5.5).
+ * An opening at 0 swept up past the canvas's top, in view units: its lower
+ * edge from its leftmost corner to its rightmost, then straight up. Every
+ * sweep winds the same way, so a union of them clips as one.
  */
-export function clipToPits(g: CanvasRenderingContext2D, pits: readonly { x: number; y: number }[], turn: Turn): void {
-  const view = isometric(turn);
-  g.beginPath();
-  for (const cell of pits) {
-    const corners = [toView(view, cell), toView(view, { x: cell.x + 1, y: cell.y }), toView(view, { x: cell.x + 1, y: cell.y + 1 }), toView(view, { x: cell.x, y: cell.y + 1 })];
-    const left = corners.reduce((a, b) => (b.x < a.x ? b : a));
-    const right = corners.reduce((a, b) => (b.x > a.x ? b : a));
-    const bottom = corners.reduce((a, b) => (b.y > a.y ? b : a));
-    const sky = Math.min(left.y, right.y) - 1e5;
-    g.moveTo(left.x, left.y);
-    g.lineTo(bottom.x, bottom.y);
-    g.lineTo(right.x, right.y);
-    g.lineTo(right.x, sky);
-    g.lineTo(left.x, sky);
-    g.closePath();
+export function pitSweep(turn: Turn, poly: readonly Pt[]): Pt[] {
+  const pts = lifted(turn, poly, 0);
+  const n = pts.length;
+  let l = 0;
+  let r = 0;
+  for (let i = 1; i < n; i++) {
+    if (pts[i]!.x < pts[l]!.x) l = i;
+    if (pts[i]!.x > pts[r]!.x) r = i;
   }
-  g.clip();
+  // Of the two chains from the leftmost corner to the rightmost, the lower one on screen.
+  const chain = (step: 1 | -1): Pt[] => {
+    const out: Pt[] = [pts[l]!];
+    for (let i = (l + step + n) % n; i !== r; i = (i + step + n) % n) out.push(pts[i]!);
+    out.push(pts[r]!);
+    return out;
+  };
+  const a = chain(1);
+  const b = chain(-1);
+  const low = (c: Pt[]) => c.slice(1, -1).reduce((m, p) => Math.max(m, p.y), -Infinity);
+  const lower = low(a) >= low(b) ? a : b;
+  const sky = Math.min(pts[l]!.y, pts[r]!.y) - 1e5;
+  return [...lower, { x: pts[r]!.x, y: sky }, { x: pts[l]!.x, y: sky }];
+}
+
+/**
+ * Clips to pit openings swept up past the canvas's top, in view units, so
+ * the near rim hides what lies below it, as it hides a standee there
+ * (docs/design-v1-isometric-view.md 5.5). `pits` are the openings' world
+ * polygons, the connected region's that meet what is clipped.
+ */
+export function clipToPits(g: CanvasRenderingContext2D, pits: readonly (readonly Pt[])[], turn: Turn): void {
+  g.beginPath();
+  for (const poly of pits) addPoly(g, pitSweep(turn, poly));
+  g.clip("nonzero");
 }
 
 /**
@@ -354,7 +442,7 @@ export function clipToPits(g: CanvasRenderingContext2D, pits: readonly { x: numb
  * units to a screen pixel. The parts inside a pit's opening draw clipped
  * to the openings of `pits`.
  */
-export function drawVolume(g: CanvasRenderingContext2D, high: readonly BandPart[], low: readonly BandPart[], pits: readonly { x: number; y: number }[], look: VolumeLook, turn: Turn, unit: number): void {
+export function drawVolume(g: CanvasRenderingContext2D, high: readonly BandPart[], low: readonly BandPart[], pits: readonly (readonly { x: number; y: number }[])[], look: VolumeLook, turn: Turn, unit: number): void {
   const { c, s } = turnAxes(turn);
   const a = theme.area;
   const dim = look.dm ? a.dmOpacity : 1;

@@ -1,7 +1,7 @@
 import { CHUNK_CELLS } from "#shared/model.ts";
 import type { AreaContext, AreaTemplateInput } from "#shared/rules/aoe.ts";
 import { bandKey, VolumeCache, type BandDraw, type Volume, type WorldBox } from "../../features/areas/volume.ts";
-import { K, turnAxes, type Turn } from "../../lib/view.ts";
+import { K, turnAxes, type DrawnHeights, type Turn } from "../../lib/view.ts";
 import { meets, type VolumePiece } from "./buckets.ts";
 import type { VolumeLook } from "./drawRelief.ts";
 import type { FogView } from "./fogView.ts";
@@ -25,7 +25,7 @@ import { VolumeStand, type LiveSub } from "./stand.ts";
 export type VolumeEntry = { id: string; template: AreaTemplateInput; ctx: AreaContext; look: VolumeLook };
 
 /** What every volume on a board reads besides its area: the viewer's drawn heights and fog tiles, by identity, the zoom, and the viewer's fog and live ground for the stand rule. */
-export type VolumeWorld = { heights: { at(x: number, y: number): number }; tiles: unknown; px: number; fog: FogView; live: LiveSub | null };
+export type VolumeWorld = { heights: DrawnHeights; tiles: unknown; px: number; fog: FogView; live: LiveSub | null };
 
 /** Footprints this small are tested at once, in a render: about a twentieth of a millisecond. */
 const SMALL_FOOTPRINT = 4096;
@@ -87,17 +87,25 @@ function drawnInView(vol: Volume, turn: Turn, view: VBox): boolean {
   return viewKeys(vol, turn, view).every((key) => vol.drawnNow(key, turn) !== null);
 }
 
-/** The pit cells under a built volume's plan, whose openings clip what lies inside them (design 4.3), kept per volume: its drawn heights are part of its key. */
-const pitsOf = new WeakMap<Volume, readonly { x: number; y: number }[]>();
+/**
+ * The openings at 0 of the pits under a built volume's plan, world
+ * polygons, which clip what lies inside them (design 4.3): every pit cell
+ * its box meets, grown by the deepest drawn pit's reach down the screen,
+ * so a part below 0 shows through a neighbor's opening in its region as
+ * well as its own (docs/design-v1-iso-hex-relief.md 5.2). Kept per volume:
+ * its drawn heights are part of its key.
+ */
+const pitsOf = new WeakMap<Volume, readonly (readonly { x: number; y: number }[])[]>();
 
-export function pitsUnder(vol: Volume, heights: { at(x: number, y: number): number }): readonly { x: number; y: number }[] {
+export function pitsUnder(vol: Volume, heights: Pick<DrawnHeights, "low" | "cellsIn" | "atCell" | "polygon">): readonly (readonly { x: number; y: number }[])[] {
   let pits = pitsOf.get(vol);
   if (pits) return pits;
   const box = vol.box;
-  const out: { x: number; y: number }[] = [];
+  const out: (readonly { x: number; y: number }[])[] = [];
   // Only a solid reaching below the ground at 0 can lie in a pit.
   if (box && box.z0 < 0) {
-    for (let y = Math.floor(box.y0); y < Math.ceil(box.y1); y++) for (let x = Math.floor(box.x0); x < Math.ceil(box.x1); x++) if (heights.at(x, y) < 0) out.push({ x, y });
+    const reach = 2 * K * Math.max(0, -heights.low) + 1;
+    for (const c of heights.cellsIn({ x0: box.x0 - reach, y0: box.y0 - reach, x1: box.x1 + reach, y1: box.y1 + reach })) if (heights.atCell(c) < 0) out.push(heights.polygon(c));
   }
   pitsOf.set(vol, (pits = out));
   return pits;
@@ -108,7 +116,7 @@ export function pitsUnder(vol: Volume, heights: { at(x: number, y: number): numb
  * `keys` have drawn so far: each band once, with every bucket's part of it
  * and their box (buckets.ts VolumePiece).
  */
-export function bandPieces(vol: Volume, turn: Turn, keys: readonly string[], id: string, look: VolumeLook, pits: readonly { x: number; y: number }[]): VolumePiece[] {
+export function bandPieces(vol: Volume, turn: Turn, keys: readonly string[], id: string, look: VolumeLook, pits: readonly (readonly { x: number; y: number }[])[]): VolumePiece[] {
   const byBand = new Map<number, { draws: BandDraw[]; box: VBox }>();
   for (const key of keys) {
     const d = vol.drawnNow(key, turn);

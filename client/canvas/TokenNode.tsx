@@ -25,7 +25,8 @@ import { useTokenImage } from "./useImage.ts";
 import { isAssetImage } from "#shared/imageRef.ts";
 import { glyphColor, glyphSide, iconPath2D, imageFace, useIconGlyph } from "../features/images/icons.ts";
 import { COVER_INSET, pressBoxes, type CellBox } from "../features/attach/groups.ts";
-import { groundGroups, isometric, toView, type Turn } from "../lib/view.ts";
+import { groundGroups, type Turn } from "../lib/view.ts";
+import { pitSweep } from "./relief/drawRelief.ts";
 import { standeeParts } from "./relief/standee.ts";
 import { CAUGHT_RING } from "../features/areas/TemplateLayer.tsx";
 
@@ -62,8 +63,8 @@ export type IsoToken = {
   rise: number;
   /** The share of its size its art draws at: COVER_INSET when it rides a holder it covers, else 1. */
   inset: number;
-  /** The pit cells it stands in, whose openings clip it (5.5). */
-  pits: readonly { x: number; y: number }[];
+  /** The openings at 0 of the pit region it stands in, world polygons, that clip it (5.5). */
+  pits: readonly (readonly { x: number; y: number }[])[];
   /** On the DM's device, a standee the players cannot see draws dimmed (5.4). */
   dim: boolean;
   pressOnly: boolean;
@@ -228,30 +229,22 @@ function FootprintPress(props: { rects: readonly { x: number; y: number; w: numb
 }
 
 /**
- * Clips a standee in a pit to the openings of its pit cells swept up past
+ * Clips a standee in a pit to the openings of its pit region swept up past
  * the canvas's top, so the near rim hides what is below it (5.5). Drawn in
  * view units: the clip undoes the ground's turn and squash, then restores
  * the transform, so the path stays and Konva's own transform is untouched.
  */
 function clipToOpenings(ctx: Konva.Context, iso: IsoToken, at: { x: number; y: number }): void {
-  const view = isometric(iso.turn);
   const g = groundGroups(iso.turn);
   ctx.save();
   ctx.translate(-at.x, -at.y);
   ctx.rotate((g.upright.rotation * Math.PI) / 180);
   ctx.scale(1, g.upright.scaleY);
   ctx.beginPath();
-  for (const cell of iso.pits) {
-    const corners = [toView(view, cell), toView(view, { x: cell.x + 1, y: cell.y }), toView(view, { x: cell.x + 1, y: cell.y + 1 }), toView(view, { x: cell.x, y: cell.y + 1 })];
-    const left = corners.reduce((a, b) => (b.x < a.x ? b : a));
-    const right = corners.reduce((a, b) => (b.x > a.x ? b : a));
-    const bottom = corners.reduce((a, b) => (b.y > a.y ? b : a));
-    const sky = Math.min(left.y, right.y) - 1e5;
-    ctx.moveTo(left.x, left.y);
-    ctx.lineTo(bottom.x, bottom.y);
-    ctx.lineTo(right.x, right.y);
-    ctx.lineTo(right.x, sky);
-    ctx.lineTo(left.x, sky);
+  for (const poly of iso.pits) {
+    const pts = pitSweep(iso.turn, poly);
+    ctx.moveTo(pts[0]!.x, pts[0]!.y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i]!.x, pts[i]!.y);
     ctx.closePath();
   }
   ctx.restore();

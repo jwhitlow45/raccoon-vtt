@@ -97,7 +97,7 @@ describe("an area's run of bands drawn as one", () => {
   });
 
   test("what lies inside a pit's opening draws only inside the openings' clip, and with no pit to clip by, not at all", () => {
-    const pits = [{ x: 3, y: 3 }];
+    const pits = [[{ x: 3, y: 3 }, { x: 4, y: 3 }, { x: 4, y: 4 }, { x: 3, y: 4 }]];
     const { g, calls } = canvas();
     drawVolume(g, [part(true)], [part(true)], pits, { color: "#3fa7ff", dm: false, selected: false, preview: false }, 1, 1);
     const clip = calls.findIndex((c) => c.name === "clip");

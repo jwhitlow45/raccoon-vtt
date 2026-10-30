@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
+import { footprintCells } from "../../lib/groundCells.ts";
 import { describe, test } from "node:test";
 import { CHUNK_CELLS, FOG_SUBCELLS, type BuildChunk, type FogTile } from "#shared/model.ts";
 import { tileKey } from "#shared/keys.ts";
 import { encodeTile, TILE_BYTES, TILE_SUB } from "#shared/rules/fog.ts";
-import { occupiedRange } from "#shared/rules/footprint.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
 import { drawnBase, drawnFootprintGround, heightsStand, isometric, K, toView, type DrawnSource, type Turn } from "../../lib/view.ts";
 import { readFileSync } from "node:fs";
@@ -40,9 +40,9 @@ function fogHiding(...hidden: string[]): Record<string, FogTile> {
 
 /** A standee's shape as the board places it: base and ground from the drawn heights, in cells. */
 function placed(src: DrawnSource, token: { x: number; y: number; elevation: number }, turn: Turn = 0) {
-  const range = occupiedRange(SQUARES, { ...token, size: "medium" });
-  const base = drawnBase(src, range, token.elevation) / FEET;
-  const ground = drawnFootprintGround(src, range) / FEET;
+  const cells = footprintCells(SQUARES, { ...token, size: "medium" });
+  const base = drawnBase(src, cells, token.elevation) / FEET;
+  const ground = drawnFootprintGround(src, cells) / FEET;
   return standeeShape(turn, { x: token.x, y: token.y, w: 1, h: 1 }, base, ground, 40, 800);
 }
 
@@ -77,7 +77,7 @@ describe("standees", () => {
   test("security: a party token at one stored elevation on fogged ground draws the same over hidden 0 ft and hidden 10 ft", () => {
     for (const elevation of [0, 10, 25, -5]) {
       const shapes = [0, 10, 30].map((hidden) => {
-        const src: DrawnSource = { chunks: chunks({ "6,6": hidden, "2,2": 10 }), sceneId: "s1", bounds: { w: 16, h: 16 }, fog: fogHiding("6,6"), stand: true };
+        const src: DrawnSource = { chunks: chunks({ "6,6": hidden, "2,2": 10 }), sceneId: "s1", bounds: { w: 16, h: 16 }, grid: SQUARES, fog: fogHiding("6,6"), stand: true };
         return placed(src, { x: 6, y: 6, elevation });
       });
       assert.deepEqual(shapes[1], shapes[0], `at ${elevation} ft`);
@@ -162,7 +162,7 @@ describe("standees", () => {
 
   test("at 12 px a cell a standee on a seen 10 ft platform stands 10 ft up, and at 11 px it stands on the flat ground", () => {
     const at = (scale: number) => {
-      const src: DrawnSource = { chunks: chunks({ "6,6": 10 }), sceneId: "s1", bounds: { w: 16, h: 16 }, fog: null, stand: heightsStand(scale, false) };
+      const src: DrawnSource = { chunks: chunks({ "6,6": 10 }), sceneId: "s1", bounds: { w: 16, h: 16 }, grid: SQUARES, fog: null, stand: heightsStand(scale, false) };
       return placed(src, { x: 6, y: 6, elevation: 10 });
     };
     const ground = toView(isometric(0), { x: 6.5, y: 6.5 });

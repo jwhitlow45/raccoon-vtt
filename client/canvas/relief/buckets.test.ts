@@ -9,6 +9,8 @@ import { groupWalls, meets, ReliefIndex, stretches, type Item, type StandeeIn, t
 import { boundsOf, facesOf, keyOf, sortKey, type PieceSource } from "./pieces.ts";
 import { bandPieces, pitsUnder, sideOf } from "./volumes.ts";
 import type { WallPiece } from "./runs.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
+import { groundSurface, type GroundCell } from "../../lib/groundCells.ts";
 import { standeeShape } from "./standee.ts";
 
 /** Drawn ground in cells, keyed "x,y". */
@@ -30,7 +32,9 @@ function index(ground: Record<string, number>, walls: WallPiece[] = [], bounds =
 /** A standee of w by h cells with its top-left at x, y, standing at `base` cells. */
 function standee(id: string, x: number, y: number, base = 0, w = 1, h = 1, extra: Partial<StandeeIn> = {}, turn: Turn = 0): StandeeIn {
   const shape = standeeShape(turn, { x, y, w, h }, base, 0, 40, 800);
-  return { id, x: x + w / 2, y: y + h / 2, range: { x0: Math.floor(x), y0: Math.floor(y), x1: Math.ceil(x + w), y1: Math.ceil(y + h) }, base, holder: null, bounds: shape.bounds, art: shape.art, ...extra };
+  const cells: GroundCell[] = [];
+  for (let row = Math.floor(y); row < Math.ceil(y + h); row++) for (let col = Math.floor(x); col < Math.ceil(x + w); col++) cells.push({ col, row });
+  return { id, x: x + w / 2, y: y + h / 2, cells, base, holder: null, bounds: shape.bounds, art: shape.art, ...extra };
 }
 
 const EVERYTHING = { x0: -1e6, y0: -1e6, x1: 1e6, y1: 1e6 };
@@ -295,7 +299,8 @@ function bandsOf(t: Pick<AreaTemplateInput, "shape" | "size" | "origin"> & Parti
   const vol = buildVolume({ area, bounds, ground: at, px: 40 });
   vol.ensureAll();
   for (const key of vol.keys) assert.ok(vol.drawn(key, turn));
-  return bandPieces(vol, turn, vol.keys, id, LOOK, pitsUnder(vol, { at }));
+  const values = Object.values(ground);
+  return bandPieces(vol, turn, vol.keys, id, LOOK, pitsUnder(vol, { ...groundSurface(SQUARES, bounds, (c) => at(c.col, c.row)), low: Math.min(0, ...values) }));
 }
 
 /** A band made up for a case: its key at its middle, over everything. */
@@ -315,11 +320,9 @@ function entries(items: Item[], turn: Turn): Entry[] {
 function raiseOf(s: StandeeIn, all: readonly StandeeIn[], ground: Record<string, number>, turn: Turn): number {
   const own = (t: StandeeIn) => {
     let key = sortKey(turn, t.x, t.y);
-    for (let y = t.range.y0; y < t.range.y1; y++) {
-      for (let x = t.range.x0; x < t.range.x1; x++) {
-        const z = ground[`${x},${y}`] ?? 0;
-        if (z !== 0 && z <= t.base) key = Math.max(key, sortKey(turn, x + 0.5, y + 0.5));
-      }
+    for (const { col: x, row: y } of t.cells) {
+      const z = ground[`${x},${y}`] ?? 0;
+      if (z !== 0 && z <= t.base) key = Math.max(key, sortKey(turn, x + 0.5, y + 0.5));
     }
     return key;
   };
@@ -537,7 +540,8 @@ describe("areas standing as their real shapes in the depth list (docs/design-v1-
       const pieces = bandsOf({ shape: "sphere", size: 5, origin: { x: 12, y: 12, z: -10 } }, ground, turn);
       assert.ok(pieces.length >= 2);
       for (const p of pieces) {
-        const pits = p.pits.map((c) => `${c.x},${c.y}`);
+        // Each opening a square's polygon, its first corner the cell's key.
+        const pits = p.pits.map((c) => `${c[0]!.x},${c[0]!.y}`);
         // The cells under its plan, every one a pit's.
         assert.ok(["11,11", "12,11", "11,12", "12,12"].every((c) => pits.includes(c)) && pits.every((c) => ground[c] === -4), `turn ${turn}: ${pits}`);
         for (const d of p.draws) assert.ok(d.high.far.length + d.high.near.length === 0, `turn ${turn}: all of it lies inside the opening`);

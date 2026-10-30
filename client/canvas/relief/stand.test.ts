@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { flatHeights } from "../../lib/view.ts";
 import { describe, test } from "node:test";
 import { FOG_SUBCELLS, type FogTile, type SightTile, type Token } from "#shared/model.ts";
 import { tileKey } from "#shared/keys.ts";
@@ -808,7 +809,7 @@ describe("an area stands as its real shape only over a player's live ground (doc
     const ctx = ctxOf(bounds, null, tokens as never);
     const look = { color: "#e5484d", dm: false, selected: false, preview: false };
     const clear = areaFog([[0, 0, 32, 32]]);
-    const world = (fog: FogView, tiles: unknown) => ({ heights: { at: () => 0 }, tiles, px: 40, fog, live: null });
+    const world = (fog: FogView, tiles: unknown) => ({ heights: flatHeights(bounds), tiles, px: 40, fog, live: null });
     assert.ok(wholeVolume({ template: aura, ctx, banded: true }, "a", look, 0, world(clear.view, clear.tiles), Infinity).pieces?.length, "over revealed ground it stands");
     const edge = areaFog([[0, 0, 32, 32]], [[4 * 4, 6 * 4]]);
     assert.deepEqual(wholeVolume({ template: aura, ctx, banded: true }, "a", look, 0, world(edge.view, edge.tiles), Infinity), { pieces: null, more: false });

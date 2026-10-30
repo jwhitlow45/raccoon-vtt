@@ -1,4 +1,6 @@
-import type { TerrainId } from "#shared/model.ts";
+import { FOG_SUBCELLS, type TerrainId } from "#shared/model.ts";
+import { hexSubcells, type HexGrid } from "#shared/rules/hex.ts";
+import { cellPolygon, type GroundCell } from "../../lib/groundCells.ts";
 import { TERRAIN_COLORS, TERRAIN_SWATCHES } from "../../features/builder/textures.ts";
 import { isSymbolTerrain, type TexturedTerrain } from "../../features/builder/geometry.ts";
 import { theme } from "../../lib/theme.ts";
@@ -15,6 +17,12 @@ import type { SideLook } from "./pieces.ts";
  * neighbors, so a revealed cell's tint could carry art from under the fog.
  * For a player only cells with every sub-cell revealed take the tint, and
  * the rest the neutral side tone.
+ *
+ * A hex's tint reads the pixels wholly inside its canonical polygon whose
+ * squares touch only its own fog sub-cells, and only for a hex whose every
+ * sub-cell this viewer has revealed: a hex seen in part stays neutral
+ * (docs/design-v1-iso-hex-relief.md D-261030-465). Painted ground stays
+ * square, so a hex wears its stair's swatch or this.
  */
 
 /** The look of a side whose cell has this terrain, or none. `tint` is the cell's map tint when it may take one. */
@@ -34,6 +42,25 @@ export function sideLook(terrain: TerrainId | null, tint: string | null): SideLo
 export function cellLook(fog: FogView, tints: CellTints | null, x: number, y: number, terrain: TerrainId | null): SideLook {
   if (terrain) return sideLook(terrain, null);
   return sideLook(null, tints && fog.cellClear(x, y) ? tints.at(x, y) : null);
+}
+
+/** A hex's side look for this viewer: a stair's swatch, or the hex's map tint where this viewer has revealed all of it, else the neutral tone. */
+export function hexLook(fog: FogView, tints: CellTints | null, grid: HexGrid, cell: GroundCell, terrain: TerrainId | null): SideLook {
+  if (terrain === "stairs") return sideLook("stairs", null);
+  if (!tints) return sideLook(null, null);
+  const subs = hexSubcells(grid, { col: cell.col, row: cell.row });
+  return sideLook(null, subs.every(([sx, sy]) => fog.revealed(sx, sy)) ? tints.hexAt(grid, cell) : null);
+}
+
+/** The sign of a polygon's turning, so its sides' insides face the same way on hex rows and their mirror. */
+function winding(poly: readonly { x: number; y: number }[]): number {
+  let a = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i]!;
+    const q = poly[(i + 1) % poly.length]!;
+    a += p.x * q.y - q.x * p.y;
+  }
+  return a >= 0 ? 1 : -1;
 }
 
 /** A rectangle of image pixels. */
@@ -88,6 +115,75 @@ export class CellTints {
     this.#read = read;
     this.#rect = rect;
     this.#size = size;
+  }
+
+  /**
+   * The tint of a hex: the pixels of the box around its polygon whose
+   * squares lie wholly inside the polygon and touch only the hex's own
+   * fog sub-cells, so nothing of a neighbor's art, revealed or not, comes in.
+   */
+  hexAt(grid: HexGrid, cell: GroundCell): string | null {
+    const key = -1 - ((cell.row + 4096) * 8192 + (cell.col + 4096));
+    if (this.#known.has(key)) return this.#known.get(key)!;
+    const poly = cellPolygon(grid, cell);
+    const xs = poly.map((p) => p.x);
+    const ys = poly.map((p) => p.y);
+    const box = { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+    const kx = this.#size.width / this.#rect.width;
+    const ky = this.#size.height / this.#rect.height;
+    const sx0 = Math.max(0, Math.floor((box.x - this.#rect.x) * kx));
+    const sy0 = Math.max(0, Math.floor((box.y - this.#rect.y) * ky));
+    const sx1 = Math.min(this.#size.width, Math.ceil((box.x + box.w - this.#rect.x) * kx));
+    const sy1 = Math.min(this.#size.height, Math.ceil((box.y + box.h - this.#rect.y) * ky));
+    let tint: string | null = null;
+    if (sx1 > sx0 && sy1 > sy0) {
+      const data = this.#read({ sx: sx0, sy: sy0, sw: sx1 - sx0, sh: sy1 - sy0 });
+      if (data) {
+        // The hex's sub-cells row by row, each row's run of columns: a pixel touching any other sub-cell is left out.
+        const rows = new Map<number, [number, number]>();
+        for (const [sx, sy] of hexSubcells(grid, { col: cell.col, row: cell.row })) {
+          const r = rows.get(sy);
+          rows.set(sy, r ? [Math.min(r[0], sx), Math.max(r[1], sx)] : [sx, sx]);
+        }
+        // The polygon's sides as half-planes, inside where a x + b y + c >= 0.
+        const w0 = winding(poly);
+        const planes = poly.map((p, k) => {
+          const q = poly[(k + 1) % poly.length]!;
+          return { a: -w0 * (q.y - p.y), b: w0 * (q.x - p.x), c: w0 * ((q.y - p.y) * p.x - (q.x - p.x) * p.y) };
+        });
+        const inside = (x: number, y: number) => planes.every((h) => h.a * x + h.b * y + h.c >= 0);
+        const kept: number[] = [];
+        const w = sx1 - sx0;
+        for (let j = 0; j < sy1 - sy0; j++) {
+          const y0 = this.#rect.y + (sy0 + j) / ky;
+          const y1 = y0 + 1 / ky;
+          const fy0 = Math.floor(y0 * FOG_SUBCELLS);
+          const fy1 = Math.ceil(y1 * FOG_SUBCELLS);
+          for (let i = 0; i < w; i++) {
+            const x0 = this.#rect.x + (sx0 + i) / kx;
+            const x1 = x0 + 1 / kx;
+            // A convex polygon holds the square when it holds its four corners.
+            if (!inside(x0, y0) || !inside(x1, y0) || !inside(x1, y1) || !inside(x0, y1)) continue;
+            const fx0 = Math.floor(x0 * FOG_SUBCELLS);
+            const fx1 = Math.ceil(x1 * FOG_SUBCELLS) - 1;
+            let mine = true;
+            for (let sy = fy0; sy < fy1; sy++) {
+              const r = rows.get(sy);
+              if (!r || fx0 < r[0] || fx1 > r[1]) {
+                mine = false;
+                break;
+              }
+            }
+            if (!mine) continue;
+            const at = 4 * (j * w + i);
+            kept.push(data[at]!, data[at + 1]!, data[at + 2]!, data[at + 3]!);
+          }
+        }
+        tint = averageColor(kept);
+      }
+    }
+    this.#known.set(key, tint);
+    return tint;
   }
 
   /** The tint of a cell, or null where no pixel lies wholly inside it. */

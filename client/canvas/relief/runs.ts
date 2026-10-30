@@ -1,5 +1,9 @@
 import { CHUNK_CELLS, FOG_SUBCELLS, type BuildChunk, type WallFeature } from "#shared/model.ts";
+import { isHex, SQUARES, type Grid } from "#shared/rules/grid.ts";
+import type { HexGrid } from "#shared/rules/hex.ts";
 import type { WallSet } from "#shared/rules/walls.ts";
+import type { Point } from "../../lib/camera.ts";
+import { cellAtPoint, cellCenter, cellPolygon, cellsMeeting, neighborsOf, polygonSide, type GroundCell } from "../../lib/groundCells.ts";
 import type { FogView } from "./fogView.ts";
 
 /**
@@ -16,6 +20,12 @@ import type { FogView } from "./fogView.ts";
  * not stand has fog on both sides, where Top-down's line lies under opaque
  * fog, so it is drawn nowhere. Neighboring standing runs of one segment
  * merge within each cell.
+ *
+ * On hexes every wall is also cut at each canonical hex side it crosses,
+ * the scene's or the lattice's past its edge, so each run lies in one hex
+ * or along one side, and stands on that hex's ground
+ * (docs/design-v1-iso-hex-relief.md 6.1). A run past the scene's last
+ * whole hexes has an off-scene host whose ground is 0.
  */
 
 /**
@@ -40,6 +50,12 @@ export type WallPiece = {
   beside: readonly [number, number, number, number] | null;
   /** An automatic wall nobody drew (WallEdge.auto), which stands level with the room's other walls beside raised ground (pieces.ts wallItems). */
   auto: boolean;
+  /**
+   * On hexes, the hex the run lies in, or the two either side of the side
+   * it runs along, the owner first by the lattice's tie order: its bucket
+   * is the owner's whatever the turn, and it sorts with the nearer host.
+   */
+  hosts?: readonly { cell: GroundCell; center: Point }[];
 };
 
 /** What stands for a feature, or null for one that lies flat. A secret door not yet found stands as the wall the players got. */
@@ -54,7 +70,7 @@ type Segment = { id: string; kind: WallKind; ax: number; ay: number; bx: number;
 const EPS = 1e-9;
 
 /** Every standing wall piece of a scene for this viewer. */
-export function wallPieces(walls: WallSet, fog: FogView): WallPiece[] {
+export function wallPieces(walls: WallSet, fog: FogView, grid: Grid = SQUARES): WallPiece[] {
   const segments: Segment[] = [];
   for (const e of walls.edges) {
     const kind = wallKind(e.feature);
@@ -75,8 +91,67 @@ export function wallPieces(walls: WallSet, fog: FogView): WallPiece[] {
   splitCrossings(free);
   segments.push(...free);
   const out: WallPiece[] = [];
-  for (const s of segments) piecesOf(s, fog, out);
+  const hex = isHex(grid) ? grid : null;
+  for (const s of segments) {
+    if (hex) s.cuts.push(...hexSideCuts(hex, s));
+    piecesOf(s, fog, out, hex);
+  }
   return out;
+}
+
+/** Where a segment crosses or touches a canonical hex side, as parameters along it: every side of every hex its box meets, past the scene too. */
+export function hexSideCuts(grid: HexGrid, s: { ax: number; ay: number; bx: number; by: number }): number[] {
+  const dx = s.bx - s.ax;
+  const dy = s.by - s.ay;
+  const len2 = dx * dx + dy * dy;
+  if (len2 < EPS) return [];
+  const box = { x0: Math.min(s.ax, s.bx) - EPS, y0: Math.min(s.ay, s.by) - EPS, x1: Math.max(s.ax, s.bx) + EPS, y1: Math.max(s.ay, s.by) + EPS };
+  const out: number[] = [];
+  const add = (t: number) => {
+    if (t > EPS && t < 1 - EPS) out.push(t);
+  };
+  for (const cell of cellsMeeting(grid, box, null)) {
+    const poly = cellPolygon(grid, cell);
+    for (let k = 0; k < poly.length; k++) {
+      const p = poly[k]!;
+      const q = poly[(k + 1) % poly.length]!;
+      const ex = q.x - p.x;
+      const ey = q.y - p.y;
+      const den = dx * ey - dy * ex;
+      const px = p.x - s.ax;
+      const py = p.y - s.ay;
+      if (Math.abs(den) < 1e-12) {
+        // Along the side: the side's ends cut it, so a wall down one side and on past it parts at the corner.
+        if (Math.abs(px * dy - py * dx) > 1e-9) continue;
+        add((px * dx + py * dy) / len2);
+        add(((q.x - s.ax) * dx + (q.y - s.ay) * dy) / len2);
+        continue;
+      }
+      const t = (px * ey - py * ex) / den;
+      const u = (px * dy - py * dx) / den;
+      if (u < -EPS || u > 1 + EPS) continue;
+      add(t);
+    }
+  }
+  return out;
+}
+
+/** The hexes a run stands in: the canonical polygon that holds its middle, and on a side both hexes beside it, the owner first by the lattice's tie order. */
+export function runHosts(grid: HexGrid, a: Point, b: Point): { cell: GroundCell; center: Point }[] {
+  const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  const host = cellAtPoint(grid, mid);
+  const hosts: GroundCell[] = [host];
+  if (polygonSide(cellPolygon(grid, host), mid, 1e-9) === 0) {
+    for (const n of neighborsOf(grid, host)) {
+      if (polygonSide(cellPolygon(grid, n), mid, 1e-9) === 0 && polygonSide(cellPolygon(grid, n), a, 1e-9) === 0 && polygonSide(cellPolygon(grid, n), b, 1e-9) === 0) {
+        hosts.push(n);
+        break;
+      }
+    }
+  }
+  const lat = (c: GroundCell) => (grid.orient === "rows" ? [c.row, c.col] : [c.col, c.row]);
+  hosts.sort((p, q) => lat(p)[0]! - lat(q)[0]! || lat(p)[1]! - lat(q)[1]!);
+  return hosts.map((cell) => ({ cell, center: cellCenter(grid, cell) }));
 }
 
 /**
@@ -191,7 +266,7 @@ function runStands(fog: FogView, x0: number, y0: number, x1: number, y1: number)
   return fog.revealed(Math.floor(mx), Math.floor(my));
 }
 
-function piecesOf(s: Segment, fog: FogView, out: WallPiece[]): void {
+function piecesOf(s: Segment, fog: FogView, out: WallPiece[], hex: HexGrid | null): void {
   const ts = cutsOf(s);
   const at = (t: number) => ({ x: s.ax + (s.bx - s.ax) * t, y: s.ay + (s.by - s.ay) * t });
   // The open piece: where it starts and the cell it is in.
@@ -201,6 +276,13 @@ function piecesOf(s: Segment, fog: FogView, out: WallPiece[]): void {
     if (start < 0) return;
     const a = at(ts[start]!);
     const b = at(endT);
+    if (hex) {
+      const hosts = runHosts(hex, a, b);
+      const owner = hosts[0]!.cell;
+      out.push({ id: `${s.id}@${start}`, kind: s.kind, ax: a.x, ay: a.y, bx: b.x, by: b.y, cx: owner.col, cy: owner.row, beside: null, auto: s.auto, hosts });
+      start = -1;
+      return;
+    }
     const cx = Math.floor((a.x + b.x) / 2);
     const cy = Math.floor((a.y + b.y) / 2);
     out.push({
@@ -220,8 +302,14 @@ function piecesOf(s: Segment, fog: FogView, out: WallPiece[]): void {
   for (let i = 0; i + 1 < ts.length; i++) {
     const a = at(ts[i]!);
     const b = at(ts[i + 1]!);
-    // A grid edge is one cell's side, so its runs share a cell, and a free wall's run is in the cell that holds its midpoint.
-    const runCell = s.grid ? "" : `${Math.floor((a.x + b.x) / 2)},${Math.floor((a.y + b.y) / 2)}`;
+    // A grid edge is one cell's side, so its runs share a cell, and a free wall's run is in the cell that holds its midpoint. On hexes a run's hosts say where it stands.
+    const runCell = hex
+      ? runHosts(hex, a, b)
+          .map((h) => `${h.cell.col},${h.cell.row}`)
+          .join("|")
+      : s.grid
+        ? ""
+        : `${Math.floor((a.x + b.x) / 2)},${Math.floor((a.y + b.y) / 2)}`;
     const stands = runStands(fog, a.x, a.y, b.x, b.y);
     // Where another free wall crosses, the piece ends, so the split survives the merge.
     const crossed = s.cuts.some((t) => Math.abs(t - ts[i]!) <= EPS);
