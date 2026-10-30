@@ -72,8 +72,9 @@ export type PartySight = {
    * sub-cell whose center lies inside its footprint, the squeezed one while
    * it squeezes, has a level above 0. On a hex scene its footprint is its
    * hexes (docs/design-v1-hex-grids.md HX-D10), so the scene's grid is the
-   * second argument. Projection, drag frames and the "seen" marks all ask
-   * this one question.
+   * second argument. Projection, drag frames and the "seen" marks call
+   * seesCreature, which clips the footprint against walls before asking
+   * seesSubcells, or uses seesToken where no clip is needed.
    */
   seesToken(token: SightProbe, grid: Grid): boolean;
   /** Whether any of these sub-cells has sight above 0, after a caller clips the footprint to its walls. */
@@ -98,9 +99,9 @@ export type VisionRules = {
    * sight alone, which every other viewer has. The union's own source cap
    * and order choose the sources, so each answer lies within `partySight`.
    * Viewers with the same sources may share one answer, and its tiles may
-   * be worked out only when first read: a sweep's moment asks `seesToken`
-   * alone. A scene whose vision is off, or one the state lacks, sees
-   * nothing.
+   * be worked out only when first read: a sweep's moment asks
+   * seesCreature without reading the tiles. A scene whose vision is off,
+   * or one the state lacks, sees nothing.
    */
   holderSight(state: RoomState, sceneId: SceneId, memberId: MemberId | null): PartySight;
   /**

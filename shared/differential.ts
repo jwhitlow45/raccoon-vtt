@@ -6,7 +6,9 @@ import type { Op } from "./protocol.ts";
 import { applyOp } from "./reducer.ts";
 import { moveGroups, walkerFor } from "./rules/attach.ts";
 import { pathThisTurn } from "./rules/path.ts";
-import { findRoute } from "./rules/walk.ts";
+import { findRouteOn } from "./rules/hexWalk.ts";
+import { isHex, sceneGrid, SQUARES } from "./rules/grid.ts";
+import { hexSubcells, sceneHexes } from "./rules/hex.ts";
 import { groupWalkWorld, publicToken } from "./rules/walkWorld.ts";
 import { env } from "./testutil.ts";
 
@@ -26,7 +28,7 @@ import { env } from "./testutil.ts";
  * player whose copy was the same before.
  */
 
-export type Drag = { who: Viewer; tokenId: string; to: { x: number; y: number } };
+export type Drag = { who: Viewer; tokenId: string; to: { x: number; y: number; squeeze?: true } };
 
 export type Pair = {
   name: string;
@@ -99,14 +101,19 @@ export function dragged(state: RoomState, drag: Drag): { route: unknown; op: Op;
   // The world a device's drag searches, with what the token carries, walked as it walks off a holder every player sees (client/features/movement/press.ts worldFor).
   const byAll = (t: { id: string }) => view.tokens[t.id] !== undefined && publicToken(view, view.tokens[t.id]!, { role: drag.who.role });
   const world = groupWalkWorld(view, walkerFor(view, mine, byAll), { role: drag.who.role }, stopsNow(view, mine, drag.who.role));
-  const found = findRoute(world.input, drag.to);
+  const found = findRouteOn(world.input, drag.to);
   const route = found === null || found === "none" ? found : found.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]);
-  const op: Op = { t: "token.move", tokenId: drag.tokenId, x: drag.to.x, y: drag.to.y, ...(Array.isArray(route) ? { route } : {}) };
+  const op: Op = { t: "token.move", tokenId: drag.tokenId, x: drag.to.x, y: drag.to.y, ...(drag.to.squeeze ? { squeeze: true } : {}), ...(Array.isArray(route) ? { route } : {}) };
   const { input } = world;
-  const bounds = state.scenes[mine.sceneId]?.bounds ?? { w: 0, h: 0 };
+  const scene = view.scenes[mine.sceneId];
+  const bounds = scene?.bounds ?? { w: 0, h: 0 };
+  const grid = scene ? sceneGrid(scene) : SQUARES;
   const seen: string[] = [];
   if (input.seen) for (let y = 0; y < bounds.h; y++) for (let x = 0; x < bounds.w; x++) if (input.seen(x, y)) seen.push(`${x},${y}`);
-  const inputs = { counter: input.counter, creatures: input.creatures, areas: input.areas, prone: input.prone, seen: input.seen ? seen : null, spaces: world.spaces, halfSpeed: world.halfSpeed.map((t) => t.id) };
+  // Hex searches read individual fog sub-cells. Equal square masks can hide a difference at a staggered hex's edge.
+  const seenSub = new Set<string>();
+  if (isHex(grid) && input.seenSub) for (const h of sceneHexes(grid, bounds)) for (const [sx, sy] of hexSubcells(grid, h)) if (input.seenSub(sx, sy)) seenSub.add(`${sx},${sy}`);
+  const inputs = { ...(isHex(grid) ? { seenSub: input.seenSub ? [...seenSub].sort() : null } : {}), counter: input.counter, creatures: input.creatures, areas: input.areas, prone: input.prone, seen: input.seen ? seen : null, spaces: world.spaces, halfSpeed: world.halfSpeed.map((t) => t.id) };
   return { route, op, inputs };
 }
 
