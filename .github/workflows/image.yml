@@ -24,8 +24,9 @@
 # release's run, which fails before it pushes anything if the image is
 # broken.
 #
-# Actions are pinned by full SHA. Docker Hub credentials reach only the
-# run steps that log in, including the step that signs the published index.
+# Only actions/checkout, pinned as in ci.yml, runs in the publish job that
+# holds the Docker Hub token. Cosign comes from a checksum-pinned download
+# in a run step and uses Docker's login file after the token is unset.
 name: Image
 
 on:
@@ -360,8 +361,24 @@ jobs:
           fi
           echo "INDEX=$index" >> "$GITHUB_ENV"
           echo "The pushed linux/amd64 image is the one smoke-tested ($pushed): index $index, linux/amd64 $amd64, linux/arm64 $arm64."
+      # Keep the immutable tag before signing, so an outage of the signing
+      # service can resume from this image without another build.
+      - name: Tag the version
+        if: env.MODE == 'build'
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          trap 'docker logout docker.io' EXIT
+          printf '%s' "$DOCKERHUB_TOKEN" | docker login docker.io --username "$DOCKERHUB_USERNAME" --password-stdin
+          docker buildx imagetools create --tag "$IMAGE:$VERSION" "$IMAGE@$INDEX"
+          echo "Tagged $VERSION: $INDEX."
       - name: Install Cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        run: |
+          curl -fsSL --retry 3 --max-time 60 --output "$RUNNER_TEMP/cosign" \
+            https://github.com/sigstore/cosign/releases/download/v3.0.6/cosign-linux-amd64
+          echo "c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74  $RUNNER_TEMP/cosign" | sha256sum -c --quiet -
+          chmod +x "$RUNNER_TEMP/cosign"
       # INDEX comes only from a completed push or a verified published
       # version. Signing it again lets a stopped release resume safely.
       - name: Sign the published index
@@ -370,32 +387,37 @@ jobs:
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
           set -euo pipefail
-          if [[ "$MODE" != build && "$MODE" != resume ]]; then
+          if [[ "${MODE:-}" != build && "${MODE:-}" != resume ]]; then
             echo "::error::No completed image push or verified release to sign."
             exit 1
           fi
-          if ! [[ "$INDEX" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+          if ! [[ "${INDEX:-}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
             echo "::error::The published image digest is missing or invalid."
             exit 1
           fi
           trap 'docker logout docker.io' EXIT
           printf '%s' "$DOCKERHUB_TOKEN" | docker login docker.io --username "$DOCKERHUB_USERNAME" --password-stdin
+          unset DOCKERHUB_TOKEN
           docker buildx imagetools inspect --raw "$IMAGE@$INDEX" > /dev/null
-          cosign sign --yes "$IMAGE@$INDEX"
-      # X.Y.Z first, so a run that stops partway resumes by signing and
-      # tagging. X.Y and latest each move only when Docker Hub has no such
-      # tag or it holds this release or an older one (scripts/release-tags.ts).
-      - name: Tag
+          for attempt in 1 2 3; do
+            if "$RUNNER_TEMP/cosign" sign --yes "$IMAGE@$INDEX"; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::Could not sign the published image after three attempts."
+              exit 1
+            fi
+            sleep $((attempt * 5))
+          done
+      # Floating tags move only after signing succeeds, and only over this
+      # release or older ones (scripts/release-tags.ts).
+      - name: Tag the floating versions
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
           trap 'docker logout docker.io' EXIT
           printf '%s' "$DOCKERHUB_TOKEN" | docker login docker.io --username "$DOCKERHUB_USERNAME" --password-stdin
-          if [ "$MODE" = build ]; then
-            docker buildx imagetools create --tag "$IMAGE:$VERSION" "$IMAGE@$INDEX"
-            echo "Tagged $VERSION: $INDEX."
-          fi
           # As in the check of what Docker Hub holds: a tag's version label and Docker Hub's errors come from Docker Hub.
           plain() { local s=${1//"%"/%25}; s=${s//$'\r'/%0D}; printf '%s' "${s//$'\n'/%0A}"; }
           # The version a tag holds now, or "none" when Docker Hub has no such tag.

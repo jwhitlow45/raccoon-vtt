@@ -214,3 +214,33 @@ describe("GitHub Releases follow successful image publication", () => {
     assert.deepEqual(publishRelease("unreachable"), { status: 1, calls: ["release view"] });
   });
 });
+
+describe("the checksum-pinned Cosign download", () => {
+  for (const matches of [true, false]) {
+    test(`a download whose checksum ${matches ? "matches is installed" : "differs is not executable"}`, () => {
+      const dir = mkdtempSync(path.join(tmpdir(), "raccoon-cosign-install-"));
+      try {
+        writeFileSync(path.join(dir, "curl"), `#!/bin/bash
+[ "$*" = "-fsSL --retry 3 --max-time 60 --output $RUNNER_TEMP/cosign https://github.com/sigstore/cosign/releases/download/v3.0.6/cosign-linux-amd64" ] || exit 9
+printf '#!/bin/bash\\n' > "$RUNNER_TEMP/cosign"
+`);
+        writeFileSync(path.join(dir, "sha256sum"), `#!/bin/bash
+read -r digest file
+[ "$*" = '-c --quiet -' ] || exit 9
+[ "$digest" = c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74 ] || exit 9
+[ "$file" = "$RUNNER_TEMP/cosign" ] || exit 9
+[ "$MATCHES" = true ]
+`);
+        for (const name of ["curl", "sha256sum"]) chmodSync(path.join(dir, name), 0o755);
+        const run = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", stepScript("Install Cosign")], {
+          encoding: "utf8",
+          env: { PATH: `${dir}:${process.env.PATH ?? ""}`, RUNNER_TEMP: dir, MATCHES: String(matches) },
+        });
+        assert.equal(run.status, matches ? 0 : 1, run.stdout + run.stderr);
+        assert.equal(spawnSync("test", ["-x", path.join(dir, "cosign")]).status === 0, matches);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
+});
