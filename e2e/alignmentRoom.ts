@@ -8,6 +8,7 @@ import sharp from "sharp";
 import { chromium, type Browser, type BrowserContext, type ElementHandle, type Locator, type Page, type WebSocketRoute } from "playwright-core";
 import { ddbSheetUrl } from "../shared/ddb/link.ts";
 import { readDdbCharacter } from "../shared/ddb/read.ts";
+import { SKILLS } from "../shared/rules/skills.ts";
 import { loadMonsters, monsterActor, type SrdMonster } from "../shared/srd/monsters.ts";
 import { trapPreset } from "../shared/srd/traps.ts";
 import { barControl, ConsoleWatch, dragCells, expandBar, OpSocket, openSceneGroup, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, ROOT, sceneGroup, sceneGroupFold, Shots, sideTabName, SocketWatch, startServer, tapCell, untilReady, waitFor, wholeInReach, type Server } from "./harness.ts";
@@ -259,6 +260,10 @@ const SOME_SIZES: Record<string, Record<SizesFile, number>> = {
   "dp-card-tabs": { phones: 4, wide: 2 },
   "dp-card-wolf": { phones: 4, wide: 2 },
   "dp-groups-wolf": { phones: 4, wide: 2 },
+  "fl6-skills-wolf": { phones: 4, wide: 2 },
+  "fl6-skills-thorn": { phones: 4, wide: 2 },
+  "fl6-skills-dragon": { phones: 4, wide: 2 },
+  "fl6-skills-several": { phones: 4, wide: 2 },
   // The DM's turn card folds under 600 px wide, so on the upright phones and at 480 x 320 at 130%.
   "cu-turn-folded": { phones: 4, wide: 1 },
   // With the dragon's bar across the column, the turn card folds to its row, or leaves the column where even its row would meet the bar (4.2).
@@ -1090,6 +1095,40 @@ async function openDice(page: Page): Promise<Locator> {
   return sheet;
 }
 
+/** Every skill's name and bonus stay on one line, wholly inside their button, even if its tag needs another line. */
+async function skillLabelScreen(sweep: Sweep, page: Page, host: Locator, creature: string): Promise<void> {
+  const screen = `fl6-skills-${creature}`;
+  const skills = host.locator("[data-panel-group]").filter({ has: page.getByRole("button", { name: "Skills", exact: true }) });
+  await skills.evaluate(async (el) => { await (el as unknown as { ownerDocument: { fonts: { ready: Promise<unknown> } } }).ownerDocument.fonts.ready; });
+  await sweep.measure(page, screen, skills);
+  const lines = await skills.locator("button[aria-label]").evaluateAll((buttons, names) => {
+    type Rect = { top: number; left: number; right: number; width: number };
+    type El = { textContent: string | null; querySelector(selector: string): El | null; getBoundingClientRect(): Rect; ownerDocument: { createRange(): { selectNodeContents(el: El): void; getClientRects(): ArrayLike<Rect> }; defaultView: { getComputedStyle(el: El): { paddingLeft: string; paddingRight: string; borderLeftWidth: string; borderRightWidth: string } } }; currentCSSZoom?: number };
+    const out: string[] = [];
+    if (buttons.length !== names.length) out.push(`found ${buttons.length} skill labels, expected ${names.length}`);
+    for (const name of names) {
+      const button = buttons.find((el) => {
+        const text = (el as unknown as El).textContent;
+        return text === name || text?.startsWith(`${name} `);
+      }) as unknown as El | undefined;
+      if (!button) { out.push(`${name} is missing`); continue; }
+      const label = button.querySelector("span:first-child") ?? button;
+      const range = label.ownerDocument.createRange();
+      range.selectNodeContents(label);
+      const rects = Array.from(range.getClientRects()).filter((r) => r.width > 0);
+      if (rects.length === 0 || rects.some((r) => Math.abs(r.top - rects[0]!.top) > 1)) out.push(`${name} is hidden or wraps`);
+      const box = button.getBoundingClientRect();
+      const css = label.ownerDocument.defaultView.getComputedStyle(button);
+      const zoom = button.currentCSSZoom ?? 1;
+      const left = box.left + (parseFloat(css.paddingLeft) + parseFloat(css.borderLeftWidth)) * zoom;
+      const right = box.right - (parseFloat(css.paddingRight) + parseFloat(css.borderRightWidth)) * zoom;
+      if (rects.some((r) => r.left < left - 1 || r.right > right + 1)) out.push(`${name} runs past its button's content box`);
+    }
+    return out;
+  }, Object.values(SKILLS).map((s) => s.name));
+  await sweep.add(page, screen, lines.map((line) => `${sweep.at} ${screen}: ${line}`));
+}
+
 /** Closes the Dice sheet where it stands over the map, so the map takes taps again. */
 async function closeDiceSheet(page: Page): Promise<void> {
   const sheet = page.locator('dialog[data-rvtt-sheet][aria-label="Dice"]');
@@ -1114,12 +1153,21 @@ async function patDiceScreens(sweep: Sweep, page: Page): Promise<void> {
     await tabs.getByRole("tab", { name: "Thorn", exact: true }).click();
     await host.getByRole("region", { name: "Rolls for Thorn" }).waitFor();
     await sweep.measure(page, "dp-card-tabs", host.locator("[data-dice-card]"));
+    await unfoldAll(host.locator("[data-roll-options]"));
+    const bonus = host.getByRole("textbox", { name: "Bonus", exact: true });
+    const before = await bonus.inputValue();
+    for (const value of ["", "-20", "+30"]) {
+      await bonus.fill(value);
+      await skillLabelScreen(sweep, page, host, "thorn");
+    }
+    await bonus.fill(before);
     await tabs.getByRole("tab", { name: "Wolf", exact: true }).click();
     await host.getByRole("region", { name: "Rolls for Wolf" }).waitFor();
     await host.getByRole("button", { name: /^Bite/ }).first().waitFor();
     await unfoldAll(host.locator("[data-roll-options]"));
     await sweep.measure(page, "dp-card-wolf", host.locator("[data-dice-card]"));
     await sweep.measure(page, "dp-groups-wolf", host.locator("[data-roll-options] [data-panel-group]"));
+    await skillLabelScreen(sweep, page, host, "wolf");
     await tabs.getByRole("tab", { name: "Thorn", exact: true }).click();
     await closeDiceSheet(page);
   } finally {
@@ -1155,6 +1203,7 @@ async function dmDiceScreens(sweep: Sweep, page: Page): Promise<void> {
     await sweep.measure(page, "dp-modes", host.locator("[data-dice-modes]"));
     await sweep.measure(page, "dp-card-dragon", host.locator("[data-dice-card]"));
     await sweep.measure(page, "dp-groups-dragon", host.locator("[data-roll-options] [data-panel-group]"));
+    await skillLabelScreen(sweep, page, host, "dragon");
     await sweep.measure(page, "dp-recent", host.locator("[data-dice-recent]"));
     const field = host.getByLabel("Dice formula", { exact: true });
     await field.fill("1d20+5 Stealth");
@@ -1183,6 +1232,7 @@ async function dmDiceScreens(sweep: Sweep, page: Page): Promise<void> {
     if (!(await showsWithin(rolls.getByRole("heading", { name: /^\d+ selected$/ }), 5_000))) return sweep.missing(page, "dp-several", "the group window's Roll showed no several-selected card");
     await unfoldAll(rolls);
     await sweep.measure(page, "dp-several", rolls);
+    await skillLabelScreen(sweep, page, rolls, "several");
 
     // A group save set up and left open: the notice above the card.
     await rolls.getByRole("button", { name: "Set up a group save", exact: true }).click();
@@ -3088,6 +3138,100 @@ export function sizeTests(names: readonly string[]): void {
       });
     }
   }
+  for (const size of SIZES.filter((s) => names.includes(s.name) && DICE_AT.has(s.name))) {
+    for (const scale of SCALES) {
+      test(`fl6-${size.name}-${scale}. stable shape picker width and confirmation before forgetting a saved room at ${scale * 100}%`, async () => {
+        const sweep = new Sweep(`${size.name}-${scale * 100}`);
+        const page = await dmPageFor(size);
+        page.setDefaultTimeout(10_000);
+        await openAt(page, size, scale);
+        await shapeScrollbarScreen(sweep, page, size, scale);
+        await forgetRoomScreen(sweep, page);
+        assert.deepEqual(sweep.lines, [], "FL-6 screens out of line");
+      });
+    }
+  }
+}
+
+/** Exercise the real filter with classic scrollbars, including on hosts that normally draw overlay scrollbars. */
+async function shapeScrollbarScreen(sweep: Sweep, page: Page, size: Size, scale: number): Promise<void> {
+  const panel = await thornsPage(page);
+  const fold = panel.getByRole("button", { name: "Stat block", exact: true });
+  if (await fold.getAttribute("aria-expanded") === "false") await fold.click();
+  await panel.getByRole("button", { name: /shapes?, take a shape$|^Take a shape$/ }).first().click();
+  const picker = page.getByRole("dialog", { name: "Take a shape", exact: true });
+  await picker.getByRole("button", { name: "Choose known forms", exact: true }).waitFor();
+  const classic = await page.addStyleTag({ content: 'dialog[aria-label="Take a shape"] > section > div::-webkit-scrollbar { width: 16px; height: 16px; }' });
+  try {
+    const search = picker.getByRole("searchbox", { name: "Search creatures" });
+    const body = picker.locator(":scope > section > div").first();
+    const metrics = () => body.evaluate((node) => {
+      const el = node as unknown as { clientWidth: number; offsetWidth: number; clientHeight: number; scrollHeight: number; firstElementChild: { getBoundingClientRect(): { width: number; left: number } } };
+      const content = el.firstElementChild.getBoundingClientRect();
+      return { width: content.width, left: content.left, gutter: el.offsetWidth - el.clientWidth, scrolls: el.scrollHeight > el.clientHeight + 1 };
+    });
+    const shortList = async () => {
+      await search.fill("riding horse");
+      await picker.getByRole("button", { name: /^Riding Horse/ }).first().waitFor();
+      await waitFor("one matching creature", async () => (await picker.getByRole("listitem").count()) === 1 || null);
+    };
+    await shortList();
+    const short = await metrics();
+    if (size.name === "1440x900" && scale === 1) assert.equal(short.scrolls, false, "the short list must not need a scrollbar on desktop");
+    await sweep.measure(page, "fl6-shapes-short", picker);
+    await picker.getByRole("checkbox", { name: "Beasts only" }).uncheck();
+    await picker.getByRole("combobox").selectOption("");
+    await search.fill("");
+    await waitFor("the full creature list", async () => (await picker.getByRole("listitem").count()) > 10 || null);
+    await waitFor("the long creature list scrolls", async () => (await metrics()).scrolls || null);
+    const long = await metrics();
+    assert.ok(long.gutter >= 15, "classic scrollbars must consume real layout space in this check");
+    assert.ok(Math.abs(short.width - long.width) <= LIMIT_PX, `content width changed from ${short.width} to ${long.width}`);
+    assert.ok(Math.abs(short.left - long.left) <= LIMIT_PX, "the content's left edge stays put");
+    await sweep.measure(page, "fl6-shapes-long", picker);
+    await shots.take(page, `alignment-${sweep.at}-fl6-shapes-long`);
+    await shortList();
+    assert.ok(Math.abs((await metrics()).width - short.width) <= LIMIT_PX, "clearing the long list keeps the same width too");
+  } finally {
+    await classic.evaluate((el) => (el as unknown as { remove(): void }).remove());
+    await picker.getByRole("button", { name: "Close Take a shape", exact: true }).click();
+    await picker.waitFor({ state: "detached" });
+  }
+}
+
+/** Forget is local only, and each dismissal leaves the saved entry and sign-in intact. */
+async function forgetRoomScreen(sweep: Sweep, page: Page): Promise<void> {
+  await page.goto(`${server.origin}/`);
+  const opener = page.getByRole("button", { name: `Forget ${run.roomName} on this device`, exact: true });
+  await opener.waitFor();
+  const saved = () => page.evaluate(() => JSON.parse(localStorage.getItem("rvtt.rooms") ?? "[]") as { roomId: string }[]);
+  const before = await saved();
+  const question = page.getByRole("dialog", { name: "Forget this room?", exact: true });
+  for (const dismissal of ["Cancel", "Escape", "Close"] as const) {
+    await opener.focus();
+    await opener.press("Enter");
+    await question.waitFor();
+    assert.deepEqual(await saved(), before, "opening the question changes no saved room");
+    assert.match(await question.innerText(), /only removes it from this device's list\. The room itself stays\./);
+    await sweep.measure(page, "fl6-forget-room", question);
+    if (dismissal === "Escape") await page.keyboard.press("Escape");
+    else await question.getByRole("button", { name: dismissal === "Close" ? "Close Forget this room?" : "Cancel", exact: true }).click();
+    await question.waitFor({ state: "detached" });
+    assert.deepEqual(await saved(), before, `${dismissal} keeps every saved room`);
+    assert.equal(await opener.evaluate((el) => (el as unknown as { ownerDocument: { activeElement: unknown } }).ownerDocument.activeElement === el), true, "dismissal returns focus to Forget");
+  }
+  await opener.click();
+  await question.waitFor();
+  await shots.take(page, `alignment-${sweep.at}-fl6-forget-room`);
+  await question.getByRole("button", { name: "Forget room", exact: true }).click();
+  await question.waitFor({ state: "detached" });
+  await opener.waitFor({ state: "detached" });
+  assert.deepEqual(await saved(), before.filter((r) => r.roomId !== run.roomId), "only the confirmed room leaves this device's list");
+  await page.reload();
+  await page.getByRole("heading", { name: "Join a room", exact: true }).waitFor();
+  assert.equal(await opener.count(), 0, "the room stays forgotten after reload");
+  const me = await page.context().request.get(`${server.origin}/api/rooms/${run.roomId}/me`);
+  assert.equal(me.status(), 200, "forgetting neither deletes the server room nor signs this device out");
 }
 
 /** pl3-b13: the combat controls' screens at the lane rule's smallest screen. */

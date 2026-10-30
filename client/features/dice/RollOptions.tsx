@@ -536,7 +536,8 @@ function OptionGroups(props: Shown) {
           asks.skills,
         )}
       >
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gridAutoRows: "1fr", gap: theme.space(1) }}>
+        {/* Room for Animal Handling, its bonus and the busy mark at the cell's 14 px type. */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 200px), 1fr))", gridAutoRows: "1fr", gap: theme.space(1) }}>
           {SKILL_KEYS.map((s: SkillKey) => {
             const ability: AbilityKey = SKILLS[s].ability;
             if (!numbers) return <D20Cell key={s} ctx={ctx} test={{ kind: "check", ability, skill: s }} bonus={0} unknown={{ typed }} text={typedText(SKILLS[s].name, typed)} />;
@@ -701,7 +702,7 @@ function Grid(props: { label: string; note?: string; children: ReactNode }) {
  * until its line lands. Its result shows in the panel's newest-roll line at the top (the project owner,
  * 2026-10-17: "it should just be in the header"), so a row never grows when a roll lands.
  */
-function OptionCell(props: { text: string; tag?: string | undefined; name: string; row: string; disabled: string | null; onTap(): void; pressed?: boolean; grow?: boolean; fill?: boolean }) {
+function OptionCell(props: { text: string; tag?: string | undefined; name: string; row: string; disabled: string | null; onTap(): void; pressed?: boolean; grow?: boolean; fill?: boolean; nowrap?: boolean }) {
   const { waiting } = useRowResult(props.row);
   return (
     <button
@@ -739,8 +740,8 @@ function OptionCell(props: { text: string; tag?: string | undefined; name: strin
         width: props.grow === false || props.fill ? undefined : "100%",
       }}
     >
-      {/* Its words wrap inside the cell, which grows a line, and never run out of it or end in "…" (the project owner, 2026-10-17). */}
-      <span style={{ minWidth: 0, fontSize: theme.font.body14, fontWeight: theme.weight.strong, textAlign: props.fill ? "center" : "left", overflowWrap: "anywhere" }}>
+      {/* Skills keep their names whole in wider columns. Other options may wrap inside the cell. */}
+      <span style={{ minWidth: 0, fontSize: theme.font.body14, fontWeight: theme.weight.strong, textAlign: props.fill ? "center" : "left", overflowWrap: "anywhere", whiteSpace: props.nowrap ? "nowrap" : undefined }}>
         {waiting ? `${props.text}…` : props.text}
       </span>
       {props.tag ? <span style={{ flex: "none", fontSize: theme.font.tiny, fontWeight: theme.weight.strong, color: theme.color.textMuted, whiteSpace: "nowrap" }}>{props.tag}</span> : null}
@@ -776,6 +777,7 @@ function D20Cell(props: { ctx: Ctx; test: D20Test; bonus: number; unknown?: { ty
   return (
     <OptionCell
       text={props.text}
+      nowrap={test.kind === "check" && test.skill !== undefined}
       tag={tag || undefined}
       name={[label, how, words].filter(Boolean).join(", ")}
       row={row}

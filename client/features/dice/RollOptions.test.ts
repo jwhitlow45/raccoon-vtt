@@ -4,6 +4,7 @@ import { describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
 import type { LogEntry, PcStats, RollRequest, RoomState, UseMark, Viewer } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
+import { SKILLS } from "#shared/rules/skills.ts";
 import { DM, P1, actor, character, customMonster, entry, room, token } from "#shared/testutil.ts";
 import { creatureRolls, type DiceView } from "./creature.ts";
 import { DICE_FOLD_KEYS, diceFoldsSlot } from "./diceFolds.ts";
@@ -48,21 +49,29 @@ function line(tag: string, total: number, label: string, n: number): LogEntry {
   return { id: `${n}:0`, at: "2026-10-17T20:00:00.000Z", kind: "event", data: { type: "dice", tag, by: "p1", to: "all", rolls: [{ formula: "1d20+7", faces: [total - 7], total, label }] } };
 }
 
-function render(viewer: Viewer, landed: boolean, pending = false, requests: RoomState["rolls"] = {}, open = true): string {
+function render(viewer: Viewer, landed: boolean, pending = false, requests: RoomState["rolls"] = {}, open = true, typedBonus?: string): string {
   const state = table();
+  if (typedBonus !== undefined) delete state.characters.thorn!.stats;
   state.rolls = requests;
   const view = projectState(state, viewer, { sceneId: "s1" }) as unknown as RoomState;
   const dice: DiceView = { you: viewer, view, srd: { monsters: null, rolls: null } };
   const creature = { characterId: "thorn" } as const;
   const rolls = creatureRolls(dice, creature);
-  assert.ok(rolls?.numbers, "Thorn's block gives the panel its numbers");
+  assert.ok(rolls);
+  if (typedBonus === undefined) assert.ok(rolls.numbers, "Thorn's block gives the panel its numbers");
   const rapier = rolls.named.find((r) => r.name === "Rapier");
-  assert.ok(rapier);
+  if (typedBonus === undefined) assert.ok(rapier);
   const scope = new RoomScope();
+  if (typedBonus !== undefined) {
+    const options = scope.get(optionSlot);
+    options.setState({ bonus: { "c:thorn": typedBonus } });
+    options.getInitialState = options.getState;
+  }
   // Every group open, as the e2e suites store them (e2e/harness.ts diceFoldsOpen), so these read the cells: a server render reads a phone's starts.
   if (open) for (const key of DICE_FOLD_KEYS) scope.get(diceFoldsSlot).tap(key, true, false);
   const log: LogEntry[] = [];
   if (landed) {
+    assert.ok(rapier);
     const rows = {
       save: [`c:thorn|${JSON.stringify({ kind: "save", ability: "dex" })}`, "Dexterity save"],
       attack: [`c:thorn|${rapier.key}|attack`, "Rapier"],
@@ -100,6 +109,19 @@ function render(viewer: Viewer, landed: boolean, pending = false, requests: Room
     }),
   );
 }
+
+test("skill names keep one line with room for their bonus in equal grid columns", () => {
+  for (const typedBonus of [undefined, "", "-20", "+30"]) {
+    const markup = render(P1, false, false, {}, true, typedBonus);
+    assert.ok(/grid-template-columns:repeat\(auto-fill, minmax\(min\(100%, 200px\), 1fr\)\)/.test(markup), "skill columns leave room for the longest label");
+    for (const { name } of Object.values(SKILLS)) {
+      const label = new RegExp(`<span[^>]*>${name} [^<]*</span>`).exec(markup)?.[0];
+      assert.ok(label, `${name} draws`);
+      assert.match(label, /white-space:nowrap/, `${name} stays on one line`);
+      if (typedBonus !== undefined) assert.ok(label.includes(`d20${typedBonus}`), "a creature without numbers keeps its typed bonus");
+    }
+  }
+});
 
 describe("a roll option's result shows in the header line, never under its button (docs/design-v1-dice-ui.md 4.1)", () => {
   test("before any roll, the options draw and no total is anywhere", () => {
