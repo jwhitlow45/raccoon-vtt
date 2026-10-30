@@ -44,7 +44,7 @@ import { SheetHeader } from "../components/SheetHeader.tsx";
 import { NOTICE_TONES } from "../components/tones.ts";
 import { addsWords, useTooltip } from "../components/Tooltip.tsx";
 import { QuietLoadNotice } from "./QuietLoadNotice.tsx";
-import { keptMapFoot, putToastHosts } from "./toastPlacement.ts";
+import { keptMapFoot, mapToastBox, putToastHosts } from "./toastPlacement.ts";
 import { BlackoutChip } from "./BlackoutChip.tsx";
 import { Loading } from "../components/Loading.tsx";
 import { ScrollStrip } from "../components/ScrollStrip.tsx";
@@ -798,8 +798,8 @@ function RoomPage() {
    * included, centers there, so nothing moves when an alert arrives.
    * Otherwise it spans as before, and the column starts below the notices
    * that last (the offline banner, a layer that did not load, the DM's
-   * frame bar and "Viewing as Pat"), while toasts keep their place, so a
-   * card never jumps under a finger for a toast. A toast that shows while
+   * frame bar and "Viewing as Pat"), and toasts already staying at the top.
+   * They keep their place as a first card arrives. A toast that shows while
    * the column shows a card starts under that card instead (toastLow).
    * "Viewing as Pat" stays in the preview, outside this page, so a blackout
    * and the ended screen keep its Exit: the preview tells this page how
@@ -1019,6 +1019,8 @@ function RoomPage() {
             <QuietLoadNotice />
           </div>
           <Toasts
+            spanning={!besideLane}
+            columnTop={columnNow?.top ?? null}
             low={toastLow}
             edges={toastEdges}
             pane={toastUnderPane}
@@ -1712,6 +1714,8 @@ function Banner() {
  * first render after a blackout, and nothing is fitted until then.
  */
 function Toasts(props: {
+  spanning: boolean;
+  columnTop: number | null;
   low: number | null;
   edges: ToastEdges;
   pane: number | null;
@@ -1790,6 +1794,7 @@ function Toasts(props: {
   const placed = useRef<ToastPlaces>(NO_TOAST_PLACES);
   // The foot of kept map toasts, excluding those still waiting for their card, so only a toast staying above can block the move below (reviews LP18-TO-4 and FU23B-F2).
   const mapFoot = useRef<number | null>(null);
+  const mapMeasured = useRef<{ boxes: { id: number; top: number; bottom: number }[]; clip: { top: number; bottom: number } } | null>(null);
   // A card that comes with its toast is measured a render after it, so the toast counts as new for a moment (review LP18-TO-5).
   const cardMs = cardWaitMs();
   // A toast not drawn yet is new, however long it waited (store.ts toastsLeft).
@@ -1820,7 +1825,11 @@ function Toasts(props: {
   const rose = props.restFloor !== null && (floorWas.current === null || props.restFloor < floorWas.current - 0.5);
   const anew = rose && layerFoot.current !== null && layerFoot.current > props.restFloor! ? new Set(ids) : undefined;
   floorWas.current = props.restFloor;
-  placed.current = nextToastPlaces(placed.current, { ids, pane: props.pane, paneStands: props.paneStands, low: props.low, layer: props.layer !== null, slot: slot !== null, turned, mapFoot: mapFoot.current, recent, overBar, anew, turnStarted });
+  // A toast can age out of CARD_MS on the render that brings the first card.
+  // Wait for that card to clear it before committing a new toast below the card.
+  const mapBefore = props.spanning && mapMeasured.current ? mapToastBox(mapMeasured.current.boxes.filter((b) => ids.includes(b.id)), new Set([...placed.current.awaitCard].filter((id) => recent.has(id))), zoom, mapMeasured.current.clip) : null;
+  const cardSettled = mapBefore?.keptBottom == null || (props.columnTop !== null && props.columnTop + 0.5 >= mapBefore.keptBottom + EDGE);
+  placed.current = nextToastPlaces(placed.current, { ids, pane: props.pane, paneStands: props.paneStands, low: cardSettled ? props.low : null, layer: props.layer !== null, slot: slot !== null, turned, mapFoot: mapFoot.current, recent, overBar, anew, turnStarted });
   const { places } = placed.current;
   useEffect(() => {
     if (slot) return;
@@ -1890,9 +1899,15 @@ function Toasts(props: {
     const notices = stacks.notices.box.current;
     const mapBoxes = overMap.flatMap((t) => {
       const box = hosts.current.get(t.id)?.firstElementChild?.getBoundingClientRect();
-      return box ? [{ id: t.id, bottom: box.bottom }] : [];
+      return box ? [{ id: t.id, top: box.top, bottom: box.bottom }] : [];
     });
     mapFoot.current = keptMapFoot(mapBoxes, placed.current.awaitCard, zoom);
+    mapMeasured.current = notices ? { boxes: mapBoxes, clip: notices.getBoundingClientRect() } : null;
+    // Do not reserve the waiting toast's temporary map position: it moves below
+    // the measured card, and feeding it back into that card would move both again.
+    const mapBox = props.spanning && mapMeasured.current ? mapToastBox(mapBoxes, placed.current.awaitCard, zoom, mapMeasured.current.clip) : null;
+    const wasMap = dockStore.getState().mapToasts;
+    if (mapBox === null ? wasMap !== null : wasMap === null || wasMap.top !== mapBox.top || wasMap.bottom !== mapBox.bottom || wasMap.keptBottom !== mapBox.keptBottom) dockStore.setState({ mapToasts: mapBox });
     // The foot of the toasts over the map, at the top of the notices or in the layer, which the clearing move leaves its token below (barDock.ts clearShift, review LP19-BS-3).
     const layerBox = lowAt !== null ? stacks.layer.box.current : null;
     layerFoot.current = layerBox && low.length > 0 ? layerBox.getBoundingClientRect().bottom / zoom : null;
@@ -1922,6 +1937,7 @@ function Toasts(props: {
     },
     [spanToast],
   );
+  useLayoutEffect(() => () => dockStore.setState({ mapToasts: null }), [dockStore]);
   return (
     <>
       <ToastVoice toasts={toasts} heldSince={heldSince} />

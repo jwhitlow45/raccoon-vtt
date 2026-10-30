@@ -1757,9 +1757,9 @@ export function fitToasts(stack: readonly { id: number; height: number; action: 
   return { drop, scrolls: total > room + 0.5 };
 }
 
-/** The column's top: the lane's, or 8 px under the last lasting notice when the notices span over it. Toasts never move it. */
-export function columnTop(laneTop: number, lastingBottom: number | null): number {
-  return lastingBottom === null ? laneTop : Math.max(laneTop, lastingBottom + EDGE);
+/** The column clears lasting notices and toasts staying above it. Toasts awaiting its card reserve no space. */
+export function columnTop(laneTop: number, lastingBottom: number | null, toastBottom: number | null = null): number {
+  return Math.max(laneTop, lastingBottom === null ? laneTop : lastingBottom + EDGE, toastBottom === null ? laneTop : toastBottom + EDGE);
 }
 
 // ------------------------------------------------------------ the Room's slot
@@ -1819,6 +1819,8 @@ type BarDockState = {
   column: ColumnFacts | null;
   /** The bottom of the lasting notices while they span the map, which the column starts below. */
   notices: number | null;
+  /** Visible map toasts spanning the column, in chrome px. Only keptBottom reserves column space, excluding toasts awaiting its card. */
+  mapToasts: { top: number; bottom: number; keptBottom: number | null } | null;
   /** The bottom of the lasting notices wherever they stand, which the token bar and the tool's options keep clear of. */
   lasting: number | null;
   /** A roll's card in the alerts column was asked for, by its chip or a summary (features/rolls/PlayerRolls.tsx). */
@@ -1903,7 +1905,7 @@ type BarDockState = {
 export const barDockSlot = scopeSlot(() =>
   createStore<BarDockState>(() => {
     forgetLarger();
-    return { chrome: null, typing: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, size: readSize(), finePointer: isFinePointer(), lastHeight: 200, focusFrame: false, expanded: false, expandedHeight: null, expandedFor: null, clearRequest: null, foot: 0, footYields: false, columnCramped: false, columnPaneRow: false, alertsOverlay: false, alertsClose: 0, alertsClosePanel: null, toolPopover: false, heldMode: null, cardAt: null, headerSummary: null, barOpen: false, toastRow: null };
+    return { chrome: null, typing: null, bar: null, column: null, notices: null, mapToasts: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, size: readSize(), finePointer: isFinePointer(), lastHeight: 200, focusFrame: false, expanded: false, expandedHeight: null, expandedFor: null, clearRequest: null, foot: 0, footYields: false, columnCramped: false, columnPaneRow: false, alertsOverlay: false, alertsClose: 0, alertsClosePanel: null, toolPopover: false, heldMode: null, cardAt: null, headerSummary: null, barOpen: false, toastRow: null };
   }),
 );
 

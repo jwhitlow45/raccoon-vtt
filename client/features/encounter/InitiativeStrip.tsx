@@ -500,7 +500,8 @@ type Notice = { id: string; text: string; key?: Effect["key"] };
  * Where even its first card leaves the bar too little, it shows the same
  * summary as the dock in one 44 px row, with its cards hidden as under a
  * sheet, and a tap on the row hides the bar and shows them. It starts
- * below the notices that last when they span the map over it (Room.tsx).
+ * below lasting notices and toasts staying at the notices' top when they
+ * span the map over it (Room.tsx).
  * A map pane drawn as a card keeps left of the lane the same way, and
  * where the lane leaves it no room the same row stands for the cards,
  * whose tap closes the pane (docs/design-v1-look-pass-2.md 2.8).
@@ -587,6 +588,7 @@ function FightAlerts() {
   const typing = useStore(dock, (s) => s.typing);
   const placed = useMemo(() => (chrome ? placedChrome(chrome, typing) : null), [chrome, typing]);
   const lasting = useStore(dock, (s) => s.notices);
+  const mapToasts = useStore(dock, (s) => s.mapToasts);
   const toastRow = useStore(dock, (s) => s.toastRow);
   const bar = useStore(dock, (s) => s.bar);
   const footYields = useStore(dock, (s) => s.footYields);
@@ -595,7 +597,7 @@ function FightAlerts() {
   const roomSummary = useDockSummary("room");
   const rolls = useAlertsSummaryEntry();
   const laneTop = chrome ? chrome.top + EDGE : null;
-  const colTop = laneTop === null ? null : columnTop(laneTop, lasting);
+  const colTop = laneTop === null ? null : columnTop(laneTop, lasting, mapToasts?.keptBottom ?? null);
   const push = laneTop !== null && colTop !== null ? colTop - laneTop : 0;
   // A roll card folded at the screen's foot, for a compact bar or a screen too short for it, needs the row to stand for it, room or not (PlayerRolls.tsx).
   const forFootCard = !folded && footYields && barSummary !== null;
@@ -710,8 +712,8 @@ function FightAlerts() {
       minLeft: (chrome.safe.left + SHADOW_ROOM) * zoom,
       ceiling: header.firstElementChild?.getBoundingClientRect().top ?? 0,
       floor: (height - chrome.controls - theme.space(1)) * zoom,
-      // A lasting notice, and the toast over the top bar's row with a gap either side (D-261024-23).
-      taken: [...(lasting === null ? [] : [{ top: chrome.top * zoom, bottom: (lasting + theme.space(1)) * zoom }]), ...(toastRow === null ? [] : [{ top: toastRow.top - EDGE * zoom, bottom: toastRow.bottom + EDGE * zoom }])],
+      // The raised summary must clear map toasts too, including one waiting for a card that cannot fit yet.
+      taken: [...(lasting === null ? [] : [{ top: chrome.top * zoom, bottom: (lasting + theme.space(1)) * zoom }]), ...(mapToasts === null ? [] : [{ top: (mapToasts.top - EDGE) * zoom, bottom: (mapToasts.bottom + EDGE) * zoom }]), ...(toastRow === null ? [] : [{ top: toastRow.top - EDGE * zoom, bottom: toastRow.bottom + EDGE * zoom }])],
       controls,
       gap: EDGE * zoom,
       minWidth: theme.touch * zoom,

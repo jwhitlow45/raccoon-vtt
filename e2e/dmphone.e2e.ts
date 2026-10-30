@@ -1242,6 +1242,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       await whisperFromPat("Wait here.");
       const kept = dm.locator("[data-toast]").filter({ hasText: "Wait here." }).first();
       await kept.waitFor();
+      const keptBefore = await rectOf(kept);
       await dm.evaluate(() => delete (globalThis as unknown as { rvttToastCardMs?: number }).rvttToastCardMs);
       await ops.send({ t: "token.move", tokenId: walker, x: cell.x, y: cell.y });
       const toast = dm.locator("[data-toast]").filter({ hasText: "Stepstone went off: Scout." }).first();
@@ -1250,10 +1251,16 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       await card.waitFor();
       assert.ok((await rectOf(kept)).bottom < (await rectOf(card)).bottom, "FU39-B: the kept toast must end above the card's foot");
       // Read as both show and again once nothing is moving, so a toast that slid under the card late, or moved again after, is caught.
+      let firstToastTop: number | null = null;
       for (const when of ["as they show", "after 900 ms"]) {
         if (when !== "as they show") await dm.waitForTimeout(900);
         const t = await rectOf(toast);
         const c = await rectOf(card);
+        const k = await rectOf(kept);
+        assert.ok(!intersects(k, c), `${when}, the kept toast ${JSON.stringify(k)} covers its card ${JSON.stringify(c)}`);
+        assert.ok(Math.abs(k.top - keptBefore.top) < 0.5, `${when}, the card moved the toast already being read`);
+        if (firstToastTop === null) firstToastTop = t.top;
+        else assert.ok(Math.abs(t.top - firstToastTop) < 0.5, "the new toast moved again after taking its place below the card");
         assert.ok(!intersects(t, c), `${when}, the trap's toast ${JSON.stringify(t)} covers its card ${JSON.stringify(c)}`);
         assert.ok(Math.abs(t.top - (c.bottom + 8)) < 1.5, `${when}, the toast starts at ${t.top}, not 8 px under the card's foot at ${c.bottom}`);
       }

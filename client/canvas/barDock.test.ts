@@ -747,10 +747,14 @@ describe("the right lane", () => {
     assert.equal(at(moved), 108 + 52, "the bar starts under the row where it is now");
   });
 
-  test("the column starts below lasting notices only, and toasts never move it", () => {
+  test("the column starts below lasting notices and kept map toasts", () => {
     assert.equal(columnTop(60, null), 60);
     assert.equal(columnTop(60, 40), 60);
     assert.equal(columnTop(60, 120), 128);
+    assert.equal(columnTop(60, null, 112), 120);
+    assert.equal(columnTop(60, 120, 112), 128);
+    assert.equal(columnTop(60, 120, 150), 158);
+    assert.equal(columnTop(60, 40, 35), 60);
   });
 
   test("notices center left of the lane from 320 px, and span below that", () => {
