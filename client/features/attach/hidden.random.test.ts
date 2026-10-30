@@ -11,6 +11,8 @@ import { RIDE_ON_YOUR_TURN, canApply, mayMoveToken } from "#shared/permissions.t
 import { applyChanges, inSightOfNonOwners, isPartyMember, ownsToken, projectState, type ProjectedState } from "#shared/project.ts";
 import type { Change, ClientOp, EphEvent, Op, ServerMessage } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
+import type { HistoryScope } from "#shared/undoContract.ts";
+import { undoScope } from "#shared/undoScope.ts";
 import { carriedGroup, getOffSpot, holderOf, seatSpot, walkerFor, withinReach } from "#shared/rules/attach.ts";
 import { isSqueezed } from "#shared/rules/footprint.ts";
 import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY, walkEnd, walkStates, type Walker } from "#shared/rules/movement.ts";
@@ -264,7 +266,7 @@ function deviceCopy(state: RoomState, who: Viewer): RoomState {
 const nearBy = (r: () => number, v: number, by = 3) => Math.max(0, Math.min(24, v + int(r, -by, by)));
 
 /** A step: the same op in both rooms, or each room's own (`opB`) where the DM's device built them apart, or an undo or a redo. */
-type Step = { who: Viewer; op: Op; opB?: Op } | { who: Viewer; restore: "undo" | "redo" };
+type Step = { who: Viewer; op: Op; opB?: Op } | { who: Viewer; restore: "undo" | "redo"; scope?: HistoryScope };
 
 /** The tokens an op names, which no player step may name once moved apart by the reveal. */
 function namedIn(op: Op): string[] {
@@ -287,7 +289,7 @@ function rawStep(r: () => number, state: RoomState, apart: ReadonlySet<string>):
   const encounter = view.encounter;
   const acting = encounter?.activeEntryId ? encounter.entries.find((e) => e.id === encounter.activeEntryId)?.tokenId : undefined;
   const n = r();
-  if (n < 0.12) return { who, restore: chance(r, 0.7) ? "undo" : "redo" };
+  if (n < 0.12) return { who, restore: chance(r, 0.7) ? "undo" : "redo", scope: who.role === "dm" && n < 0.06 ? "setup" : "play" };
   if (n < 0.2) {
     if (who.role === "player" && encounter) return { who, op: { t: "encounter.next", from: { entry: encounter.activeEntryId ?? null, round: encounter.round } } };
     return { who: DM, op: { t: "encounter.next" } };
@@ -778,6 +780,10 @@ type Seen = {
   restores: number;
   restoresCompared: number;
   restoresApart: number;
+  dmPlayRestores: number;
+  dmSetupRestores: number;
+  dmPoseRestores: number;
+  correctionRestores: number;
   parted: number;
   brokenLinks: number;
   chains: number;
@@ -809,7 +815,7 @@ type Seen = {
   rejoined: number;
 };
 
-const ZERO: Seen = { unseen: 0, compared: 0, restores: 0, restoresCompared: 0, restoresApart: 0, parted: 0, brokenLinks: 0, chains: 0, built: 0, builtByPlayers: 0, dmBuiltCompared: 0, dmOneRoom: 0, dmSees: 0, attaches: 0, attachesTaken: 0, getOffs: 0, getOffsTaken: 0, frames: 0, groupCosts: 0, playerPathCosts: 0, hiddenRowCosts: 0, hiddenRiderTurns: 0, trackersApart: 0, everApart: 0, rejoined: 0 };
+const ZERO: Seen = { unseen: 0, compared: 0, restores: 0, restoresCompared: 0, restoresApart: 0, dmPlayRestores: 0, dmSetupRestores: 0, dmPoseRestores: 0, correctionRestores: 0, parted: 0, brokenLinks: 0, chains: 0, built: 0, builtByPlayers: 0, dmBuiltCompared: 0, dmOneRoom: 0, dmSees: 0, attaches: 0, attachesTaken: 0, getOffs: 0, getOffsTaken: 0, frames: 0, groupCosts: 0, playerPathCosts: 0, hiddenRowCosts: 0, hiddenRiderTurns: 0, trackersApart: 0, everApart: 0, rejoined: 0 };
 
 /** One run: its seed and the steps it took. */
 function run(seed: number, steps = 70): Seen {
@@ -834,14 +840,16 @@ function run(seed: number, steps = 70): Seen {
     // a turn that passes onto or off a creature a player owns is never unseen.
     if (b.state.encounter?.activeEntryId !== trial.state.encounter?.activeEntryId && (ownedTurn(b.state) || ownedTurn(trial.state))) return null;
     const before = b.state;
-    const head = b.stacks.peek(DM.memberId, "undo")?.id;
+    const scope = undoScope(op, before) === "setup" ? "setup" : "play";
+    const head = b.stacks.peek(DM.memberId, "undo", scope)?.id;
     assert.equal(b.play(DM, op), "ok", `${where}: the unseen ${op.t}`);
     for (const id of new Set([...Object.keys(before.tokens), ...Object.keys(b.state.tokens)])) if (before.tokens[id] !== b.state.tokens[id]) marks.touched.add(id);
     publish(b, fb);
     // Match the hidden step's history effect. A repeated empty note is a
     // no-effect edit, so its Undo would reach an older visible move.
-    const recorded = b.stacks.peek(DM.memberId, "undo")?.id !== head;
-    assert.equal(a.play(DM, { t: "token.update", tokenId: "lurker", patch: recorded ? { notes: `unseen ${b.seq}` } : {} }), "ok");
+    const recorded = b.stacks.peek(DM.memberId, "undo", scope)?.id !== head;
+    const patch = !recorded ? {} : scope === "setup" ? { notes: `unseen ${b.seq}` } : { rotation: (a.t("lurker").rotation + 15) % 360 };
+    assert.equal(a.play(DM, { t: "token.update", tokenId: "lurker", patch }), "ok");
     publish(a, fa);
     // Nothing reaches a player: no change at all, not even one that leaves their copy as it was.
     for (const f of [...fa, ...fb]) assert.deepEqual(f.changes, [], `${where}: the unseen ${op.t} sends ${f.who.memberId} changes`);
@@ -863,7 +871,7 @@ function run(seed: number, steps = 70): Seen {
   const putsBackApart = (step: Step): { back: boolean; mayPart: Set<string> } => {
     const mayPart = new Set<string>();
     if (!("restore" in step)) return { back: false, mayPart };
-    const tops = [a, b].map((t) => t.stacks.peek(step.who.memberId, step.restore));
+    const tops = [a, b].map((t) => t.stacks.peek(step.who.memberId, step.restore, step.scope));
     const valued = tops.map((top) => new Map((top?.entries ?? []).map((e) => [e.key, e.value])));
     const posed = tops.map((top) => (top?.poses ?? {}) as Record<string, Pose>);
     const loud = (id: string, pose: Pose) => pose.root === true || (pose.silent !== true && ![a.state, b.state].some((s) => underHidden(s, id)));
@@ -895,28 +903,29 @@ function run(seed: number, steps = 70): Seen {
    * put back only by the tracker's own rule in `run`, since the change it
    * restores may be one every player sees by now.
    */
-  const alike = (which: "undo" | "redo"): boolean => {
-    const x = a.stacks.peek(DM.memberId!, which);
-    const y = b.stacks.peek(DM.memberId!, which);
+  const alike = (which: "undo" | "redo", scope: HistoryScope = "play"): boolean => {
+    const x = a.stacks.peek(DM.memberId!, which, scope);
+    const y = b.stacks.peek(DM.memberId!, which, scope);
     const keysOf = (e: NonNullable<typeof x>) => e.entries.map((n) => n.key).sort();
     return x !== null && y !== null && x.label === y.label && isSame(keysOf(x), keysOf(y)) && !keysOf(x).includes(keys.token("lurker"));
   };
   /** The same step in both rooms, compared. Where the DM's answers part the rooms, both go back to before it. */
   const shared = (step: Step, built?: Built["what"], unseenBack = false): void => {
     if (step.who.role === "player" && namedBy(step).some((id) => apart.has(id))) return;
-    if (step.who.role === "dm" && "restore" in step && !unseenBack && !alike(step.restore)) return;
+    if (step.who.role === "dm" && "restore" in step && !unseenBack && !alike(step.restore, step.scope)) return;
     // On a scene of the party's sight, no visible party member gets on a holder some player cannot see (world's note).
     if (start.vision && "op" in step && [step.op, step.opB].some((op) => op?.t === "token.attach" && [a.state, b.state].some((s) => partyOnHidden(s, op.tokenId, op.to)))) return;
     const before = { a: a.state, b: b.state };
+    const dmPose = step.who.role === "dm" && "restore" in step && [a, b].every((table) => (table.stacks.peek(DM.memberId, step.restore, step.scope)?.values?.poseKeys.size ?? 0) > 0);
     const restoring = putsBackApart(step);
     const apartBack = restoring.back;
-    const answer = (t: UndoTable, op: Op | undefined) => ("restore" in step ? (step.restore === "undo" ? t.undo(step.who) : t.redo(step.who)) : t.play(step.who, op!));
+    const answer = (t: UndoTable, op: Op | undefined) => ("restore" in step ? t.restore(step.who, step.restore, step.scope) : t.play(step.who, op!));
     const ra = answer(a, "op" in step ? step.op : undefined);
     publish(a, fa);
     const rb = answer(b, "op" in step ? (step.opB ?? step.op) : undefined);
     publish(b, fb);
     a.seq = b.seq = Math.max(a.seq, b.seq);
-    const label = "restore" in step ? step.restore : step.op.t;
+    const label = "restore" in step ? `${step.scope ?? "play"} ${step.restore}` : step.op.t;
     if (step.who.role === "player") {
       if ("restore" in step && apartBack) seen.restoresApart++;
       else {
@@ -939,6 +948,11 @@ function run(seed: number, steps = 70): Seen {
     // The DM's own answer may read what the DM knows. Where it parts the rooms, both go back to before the step, with the
     // stacks cleared alike, and the run goes on.
     if (step.who.role === "dm" && ra !== rb) return part(before);
+    if (step.who.role === "dm" && "restore" in step && ra === "ok") {
+      seen[step.scope === "setup" ? "dmSetupRestores" : "dmPlayRestores"]++;
+      if (dmPose) seen.dmPoseRestores++;
+      if (a.last?.op.t === "sys.restore" && a.last.op.correction && b.last?.op.t === "sys.restore" && b.last.op.correction) seen.correctionRestores++;
+    }
     // So may an undo or a redo that puts back a token moved apart, whose answer reads where every player sees it stand.
     if (apartBack && ra !== rb) return part(before);
     // A link a step broke on the way, a drag stopped at a wall among them: the passengers its undo must still class by its plan.
@@ -1090,9 +1104,10 @@ function run(seed: number, steps = 70): Seen {
       for (const restore of ["undo", "redo", "undo"] as const) shared({ who, restore });
       // The DM takes a change to the tracker back in both rooms, the neutral edit in room a, so both trackers are alike again.
       if (change?.t.startsWith("encounter.")) {
-        for (let k = locks ? 2 : 1; k > 0; k--) shared({ who: DM, restore: "undo" }, undefined, k === 1);
+        if (locks) shared({ who: DM, restore: "undo", scope: "setup" });
+        shared({ who: DM, restore: "undo", scope: "play" }, undefined, true);
         // Nor does a later redo of the DM's put the change back in room b alone.
-        for (const t of [a, b]) while (t.stacks.popRedo(DM.memberId!)) continue;
+        for (const t of [a, b]) for (const scope of ["play", "setup"] as const) while (t.stacks.popRedo(DM.memberId!, scope)) continue;
         if (!isSame(a.state.encounter, b.state.encounter)) {
           // Where that fails, room b takes room a's tracker, which every player's copy shows alike already: with whose turn it
           // is apart, a move would record its path by each room's own turn.
@@ -1104,7 +1119,8 @@ function run(seed: number, steps = 70): Seen {
     }
     // An undo or a redo now and then by anyone, of whatever step is newest, a device's own steps among them.
     if (roll < 0.45) {
-      shared({ who: pick(r, [DM, P1, P1, P2]), restore: chance(r, 0.6) ? "undo" : "redo" });
+      const who = pick(r, [DM, P1, P1, P2]);
+      shared({ who, restore: chance(r, 0.6) ? "undo" : "redo", scope: who.role === "dm" && i % 2 === 0 ? "setup" : "play" });
       continue;
     }
     if (roll < 0.66) {
@@ -1128,6 +1144,58 @@ function isSame(x: unknown, y: unknown): boolean {
 }
 
 describe("no hidden link or hidden token changes anything a player receives (8.0)", () => {
+  test("the scoped DM harness records both histories, adapts pose and carries correction data through Undo and Redo", () => {
+    const table = new UndoTable(room({ tokens: { thorn: token("thorn", { ownerIds: ["p1"], name: "Thorn" }) } }));
+    const original = table.t("thorn");
+    assert.ok("inline" in original.actor);
+    assert.equal(table.play(DM, { t: "token.move", tokenId: "thorn", x: 5, y: 3 }), "ok");
+    const move = table.stacks.peek(DM.memberId, "undo", "play")!;
+    assert.ok(move.values?.poseKeys.has("token:thorn"));
+    assert.equal(table.play(DM, { t: "token.update", tokenId: "thorn", patch: { name: "Captain", actor: { ac: 19 } } }), "ok");
+    const setup = table.stacks.peek(DM.memberId, "undo", "setup")!;
+    assert.ok(setup.values);
+    assert.equal(setup.values.poseKeys.size, 0);
+    assert.equal(table.stacks.depth(DM.memberId, "play").undo, 1);
+    assert.equal(table.stacks.depth(DM.memberId, "setup").undo, 1);
+    assert.equal(table.undo(DM), "ok");
+    assert.equal(table.t("thorn").x, original.x);
+    assert.equal(table.t("thorn").name, "Captain");
+    assert.deepEqual(table.t("thorn").actor, { inline: { ...original.actor.inline, ac: 19 } });
+    const undone = table.last!.op;
+    assert.ok(undone.t === "sys.restore");
+    assert.equal(undone.scope, "play");
+    assert.equal(undone.correction?.label, move.label);
+    assert.ok(projectState(table.state, P1, { sceneId: null }).log.some((line) => line.data?.type === "correction"));
+    assert.ok(table.stacks.peek(DM.memberId, "redo", "play")!.values?.poseKeys.has("token:thorn"));
+    assert.equal(table.redo(DM), "ok");
+    assert.equal(table.t("thorn").x, 5);
+    assert.equal(table.undo(DM, "setup"), "ok");
+    assert.deepEqual(table.t("thorn").actor, original.actor);
+    assert.equal(table.t("thorn").name, original.name);
+    assert.equal(table.t("thorn").x, 5);
+    assert.equal(table.last!.op.t === "sys.restore" && table.last!.op.scope, "setup");
+    assert.equal(table.redo(DM, "setup"), "ok");
+    assert.equal(table.t("thorn").name, "Captain");
+    const redone = table.last!.op;
+    assert.ok(redone.t === "sys.restore");
+    assert.equal(redone.correction?.label, setup.label);
+  });
+
+  test("the scoped DM harness retains a whole-value conflict until its other-scope prerequisite is undone", () => {
+    const table = new UndoTable(room({ tokens: { thorn: token("thorn", { ownerIds: ["p1"] }) } }));
+    assert.equal(table.play(DM, { t: "actor.hp", target: { tokenId: "thorn" }, change: { kind: "damage", amount: 2 } }), "ok");
+    const head = table.stacks.peek(DM.memberId, "undo", "play")!.id;
+    assert.equal(table.play(DM, { t: "token.update", tokenId: "thorn", patch: { actor: { ac: 19 } } }), "ok");
+    const before = table.state;
+    assert.match(table.undo(DM), /^Undo the setup step first:/);
+    assert.deepEqual(table.state, before);
+    const retained = table.stacks.peek(DM.memberId, "undo", "play")!;
+    assert.equal(retained.id, head);
+    assert.equal(retained.retained?.scope, "setup");
+    assert.equal(table.undo(DM, "setup"), "ok");
+    assert.equal(table.undo(DM), "ok");
+  });
+
   test("random chains, walls, fog and sight, and random steps by the DM and both players built on their own copies, in pairs of rooms that differ only unseen", () => {
     const total: Seen = { ...ZERO };
     // ATTACH_RANDOM_SEEDS=1-2000 sweeps more seeds by hand. Some mutants of the rules here show only past the first hundreds.
@@ -1141,6 +1209,8 @@ describe("no hidden link or hidden token changes anything a player receives (8.0
     const per60 = (to - from + 1) / 60;
     assert.ok(total.unseen > 100 * per60 && total.compared > 800 * per60 && total.restores > 50 * per60 && total.chains > 5 * per60 && total.brokenLinks > 5 * per60, summary);
     assert.ok(total.restoresApart * 20 < total.restoresCompared, summary);
+    assert.ok(total.dmPlayRestores > 0 && total.dmSetupRestores > 0 && total.dmPoseRestores > 0, summary);
+    assert.equal(total.correctionRestores, total.dmPlayRestores + total.dmSetupRestores, summary);
     // And the devices' own steps: player attaches and Get offs the room takes, the DM's ops and frames compared, and turns
     // of a hidden rider on a mount every player sees.
     assert.ok(total.attachesTaken > 25 * per60 && total.getOffsTaken > 40 * per60 && total.dmBuiltCompared > 150 * per60 && total.frames > 600 * per60 && total.groupCosts > 20 * per60 && total.playerPathCosts > 3 * per60 && total.hiddenRowCosts > per60 && total.hiddenRiderTurns > 60 * per60, summary);
