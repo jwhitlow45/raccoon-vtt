@@ -73,6 +73,8 @@ export class Connection {
   memberId: string;
   role: Viewer["role"];
   clientId: string | null = null;
+  /** Negotiated by hello so an older client's strict event schema still accepts its acknowledgments. */
+  ackDetails = false;
   /** A DM's chosen scene. Players follow the room's player scene and ignore this. */
   sceneId: string | null = null;
   held: Map<EntityKey, HeldEntry> | null = null;

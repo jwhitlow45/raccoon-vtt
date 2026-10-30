@@ -3,6 +3,7 @@ import { linesPastStart } from "#shared/logRings.ts";
 import type { Label, LogEntry, RoomState, Stamp, Trap, Viewer } from "#shared/model.ts";
 import { allKeys, changedSightKeys, dependents, diffProjection, hashValue, namedByMemory, perPlayerScene, projectEntity, projectState, sightHolders, stampCells, viewerSceneId, type HeldEntry, type ProjectedState } from "#shared/project.ts";
 import type { Change, RefusalCode } from "#shared/protocol.ts";
+import type { OpAcknowledgment } from "#shared/undoContract.ts";
 import { visionRules, type PartySight } from "#shared/ruleHooks.ts";
 import { labelCells, TILE_CELLS } from "#shared/rules/fog.ts";
 import type { CellRange } from "#shared/rules/footprint.ts";
@@ -30,6 +31,7 @@ export type CommittedBatch = {
   touched: EntityKey[];
   global: boolean;
   acks: Map<ClientKey, number[]>;
+  ackDetails?: Map<ClientKey, OpAcknowledgment[]>;
   rejects: Map<ClientKey, Reject[]>;
   restored: Map<ClientKey, Restored[]>;
   /** Each player client's ops in the batch whose trap step refuses their Undo move (docs/design-v1-traps.md 6.5). */
@@ -313,6 +315,7 @@ export function publishBatch(batch: CommittedBatch, connections: Iterable<Connec
     const key = conn.key;
     const mine = key !== null && current(key) === conn;
     const acks = mine ? batch.acks.get(key) : undefined;
+    const ackDetails = mine && conn.ackDetails ? batch.ackDetails?.get(key) : undefined;
     const rejects = mine ? batch.rejects.get(key) : undefined;
     const restored = mine ? batch.restored.get(key) : undefined;
     const trapped = mine ? batch.trapped?.get(key) : undefined;
@@ -322,12 +325,13 @@ export function publishBatch(batch: CommittedBatch, connections: Iterable<Connec
       history?.(conn, false);
       continue;
     }
-    const msg: { t: "ev"; seq: number; changes: Change[]; acks?: number[]; rejects?: Reject[]; restored?: Restored[]; trapped?: number[]; stamped?: Stamped[]; blocked?: number[] } = {
+    const msg: { t: "ev"; seq: number; changes: Change[]; acks?: number[]; ackDetails?: OpAcknowledgment[]; rejects?: Reject[]; restored?: Restored[]; trapped?: number[]; stamped?: Stamped[]; blocked?: number[] } = {
       t: "ev",
       seq: batch.seq,
       changes: diff.changes,
     };
     if (acks?.length) msg.acks = acks;
+    if (ackDetails?.length) msg.ackDetails = ackDetails;
     if (rejects?.length) msg.rejects = rejects;
     if (restored?.length) msg.restored = restored;
     if (trapped?.length) msg.trapped = trapped;

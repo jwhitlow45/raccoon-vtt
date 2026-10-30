@@ -10,7 +10,7 @@ import { canApply, doorReachPassed, touchLanding, MOVE_PLAYERS_FIRST_BACK, type 
 import { holderOf, linkHolds, onHolder } from "#shared/rules/attach.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
 import { landedElevation } from "#shared/rules/movement.ts";
-import { gridOfToken, inSightOfNonOwners, projectArchivedLog, projectEntity, visibleAssetIds } from "#shared/project.ts";
+import { gridOfToken, hashValue, inSightOfNonOwners, projectArchivedLog, projectEntity, visibleAssetIds } from "#shared/project.ts";
 import { ASK_LOST, clientOpSchema, FORGET_ASK, isPoseOp, isResizeOp, serverOnlyOpSchema, type Op, type OpOf, type RefusalCode, type RestoreEntry, type ServerMessage, type ServerOnlyOp } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { restoreAddedAssets } from "#shared/referencedAssets.ts";
@@ -56,7 +56,7 @@ import { growthBound, measuredFromStored, SizeGuard, touchedScenes } from "./siz
 import { keptFrom, MOVED_SINCE, NOT_NEWEST, TRAPPED_ON_THE_WAY, plannedOn, poseRestore, posesAfter, ridesChanged, UndoStacks, type UndoEntry, type Walk } from "./undo.ts";
 import { describeHpEvent, describeOp, tallyOf } from "./undoLabels.ts";
 import { undoScope } from "#shared/undoScope.ts";
-import type { HistoryDirection, HistoryMessage, HistoryScope, StackHistoryCommand } from "#shared/undoContract.ts";
+import type { HistoryDirection, HistoryMessage, HistoryScope, OpAcknowledgment, StackHistoryCommand } from "#shared/undoContract.ts";
 import { dmHistoryValues, dmPoseRestore } from "./undoDm.ts";
 
 /**
@@ -195,7 +195,7 @@ export type DeletionRun<T> = (state: RoomState, seq: number) => Promise<{ delete
 
 type Command =
   | { t: "op"; conn: Connection; n: number; raw: unknown; group: string | undefined; groupScope: "setup" | undefined; facts: Map<string, AssetFact>; lookup: Lookup | null }
-  | { t: "hello"; conn: Connection; clientId: string; resumeFrom: number; sceneId: string | undefined; stored: number; fresh: boolean }
+  | { t: "hello"; conn: Connection; clientId: string; resumeFrom: number; sceneId: string | undefined; ackDetails: boolean; stored: number; fresh: boolean }
   | { t: "snapshot"; conn: Connection; key: ClientKey }
   | { t: "sys"; op: ServerOnlyOp; resolve: () => void; reject: (err: Error) => void }
   | { t: "read"; run: () => void }
@@ -208,6 +208,7 @@ type Batch = {
   touched: EntityKey[];
   global: boolean;
   acks: Map<ClientKey, number[]>;
+  ackDetails: Map<ClientKey, OpAcknowledgment[]>;
   rejects: Map<ClientKey, Reject[]>;
   /** What each client's undos and redos in the batch took back, for its toast. */
   restored: Map<ClientKey, Restored[]>;
@@ -231,7 +232,7 @@ type Batch = {
   seq: number;
 };
 
-type Reduced = { ok: true; inverse: RestoreEntry[] | null; trapped?: true; trapWrote?: ReadonlySet<string> } | { ok: false; code: RefusalCode; message: string };
+type Reduced = { ok: true; inverse: RestoreEntry[] | null; changed: boolean; trapped?: true; trapWrote?: ReadonlySet<string> } | { ok: false; code: RefusalCode; message: string };
 
 /**
  * The DM's ops that ask before players' remembered map is forgotten
@@ -576,7 +577,7 @@ export class RoomActor {
 
   // Inbound messages. Each one runs its database reads first, then joins the queue.
 
-  async hello(conn: Connection, msg: { clientId: string; resumeFrom: number; sceneId?: string | undefined }): Promise<void> {
+  async hello(conn: Connection, msg: { clientId: string; resumeFrom: number; sceneId?: string | undefined; ackDetails?: true | undefined }): Promise<void> {
     const key = clientKey(conn.sessionId, msg.clientId);
     const fresh = conn.helloCount === 0;
     conn.helloCount++;
@@ -594,7 +595,7 @@ export class RoomActor {
       }
     }
     if (conn.closed) return;
-    this.#enqueue({ t: "hello", conn, clientId: msg.clientId, resumeFrom: msg.resumeFrom, sceneId: msg.sceneId, stored, fresh });
+    this.#enqueue({ t: "hello", conn, clientId: msg.clientId, resumeFrom: msg.resumeFrom, sceneId: msg.sceneId, ackDetails: msg.ackDetails === true, stored, fresh });
   }
 
   /** `group` is the undo group the client sent the op under (design 7.7): ops of one gesture undo as one step. */
@@ -985,6 +986,10 @@ export class RoomActor {
       this.#refuse(key, wm, n, "forbidden", "only the DM may declare a setup gesture with a group");
       return;
     }
+    const lastGroup = this.#groupScopes.get(key);
+    const priorGroup = cmd.group === undefined || lastGroup?.group === cmd.group ? lastGroup : this.#undo.groupScope(viewer.memberId, key, cmd.group);
+    const sameGroup = cmd.group !== undefined && priorGroup?.group === cmd.group;
+    const declaredSetup = cmd.groupScope === "setup" || (sameGroup && priorGroup.declared);
     this.#endAsks(key, cmd.group);
     // The rest of a gesture the DM was asked about goes unmade with it, unless sent with the yes (5.3).
     const refusedGroup = this.#askRefused.get(key);
@@ -1067,6 +1072,7 @@ export class RoomActor {
         wm.staged = n;
         const batch = this.#ensureBatch();
         push(batch.acks, key, n);
+        push(batch.ackDetails, key, { n, scope: "none", changed: false });
         batch.watermarks.set(key, n);
         this.#scheduleCommit();
         return;
@@ -1124,7 +1130,8 @@ export class RoomActor {
     if (tagged) {
       const settled = this.#receipts.find(viewer.memberId, tagged.tag, tagged.part);
       if (settled) {
-        this.#answerFromReceipt(key, wm, n, settled);
+        const scope = undoScope(clientOp, this.#staged.state);
+        this.#answerFromReceipt(key, wm, n, settled, scope === "none" ? "none" : declaredSetup ? "setup" : scope);
         return;
       }
     }
@@ -1210,11 +1217,7 @@ export class RoomActor {
     }
     const before = this.#staged.state;
     const naturalScope = undoScope(op, before);
-    const recordedScope = naturalScope === "none" ? "none" : cmd.groupScope === "setup" ? "setup" : naturalScope;
-    const lastGroup = this.#groupScopes.get(key);
-    const priorGroup = cmd.group === undefined || lastGroup?.group === cmd.group ? lastGroup : this.#undo.groupScope(viewer.memberId, key, cmd.group);
-    const sameGroup = cmd.group !== undefined && priorGroup?.group === cmd.group;
-    const actionScope = sameGroup && priorGroup.declared && naturalScope !== "none" ? "setup" : recordedScope;
+    const actionScope = naturalScope === "none" ? "none" : declaredSetup ? "setup" : naturalScope;
     if (sameGroup && actionScope !== "none" && actionScope !== priorGroup.scope) {
       this.#refuse(key, wm, n, "invalid", "this gesture's undo scope was fixed by its first accepted part");
       return;
@@ -1233,6 +1236,7 @@ export class RoomActor {
     wm.staged = n;
     const batch = this.#ensureBatch();
     push(batch.acks, key, n);
+    push(batch.ackDetails, key, { n, scope: actionScope, changed: reduced.changed });
     if (blocked) push(batch.blocked, key, n);
     // A door a player opened or closed, whether or not it changed, shows as it is to everyone who shares that memory (5.3, MD-O-6).
     if (op.t === "door.set" && viewer.role === "player") batch.doors.push({ sceneId: op.sceneId, door: op.door, memberId: viewer.memberId });
@@ -1335,7 +1339,7 @@ export class RoomActor {
    * refused one with the same refusal. It spends no budget and draws
    * nothing, so any retry with the same tag within 24 hours is safe.
    */
-  #answerFromReceipt(key: ClientKey, wm: Watermark, n: number, receipt: Receipt): void {
+  #answerFromReceipt(key: ClientKey, wm: Watermark, n: number, receipt: Receipt, scope: OpAcknowledgment["scope"]): void {
     if (receipt.state === "refused") {
       this.#refuse(key, wm, n, receipt.code ?? "invalid", receipt.message ?? "refused");
       return;
@@ -1343,6 +1347,7 @@ export class RoomActor {
     wm.staged = n;
     const batch = this.#ensureBatch();
     push(batch.acks, key, n);
+    push(batch.ackDetails, key, { n, scope, changed: false });
     batch.watermarks.set(key, n);
     this.#scheduleCommit();
   }
@@ -1495,6 +1500,7 @@ export class RoomActor {
     wm.staged = n;
     const batch = this.#ensureBatch();
     push(batch.acks, key, n);
+    push(batch.ackDetails, key, { n, scope: "none", changed: false });
     batch.watermarks.set(key, n);
     this.#scheduleCommit();
   }
@@ -1558,6 +1564,13 @@ export class RoomActor {
       ok: true,
       get inverse() {
         return result.inverse;
+      },
+      get changed() {
+        return result.touched.some((key) => {
+          // A player's result cannot disclose hidden trap writes or private log lines.
+          const value = (state: RoomState) => viewer.role === "dm" ? readEntity(state, key) : projectEntity(key, state, viewer, { sceneId: null });
+          return acknowledgmentValueHash(key, value(before)) !== acknowledgmentValueHash(key, value(result.state));
+        });
       },
       ...(result.trapped ? { trapped: true as const } : {}),
       ...(result.trapWrote ? { trapWrote: result.trapWrote } : {}),
@@ -1632,6 +1645,7 @@ export class RoomActor {
   #processHello(cmd: Extract<Command, { t: "hello" }>): void {
     const conn = cmd.conn;
     if (conn.closed) return;
+    conn.ackDetails = cmd.ackDetails;
     if (conn.previewBy !== null) {
       this.#previewHello(conn, cmd);
       return;
@@ -1784,6 +1798,7 @@ export class RoomActor {
         touched: [],
         global: false,
         acks: new Map(),
+        ackDetails: new Map(),
         rejects: new Map(),
         restored: new Map(),
         trapped: new Map(),
@@ -1996,6 +2011,7 @@ export class RoomActor {
         touched: batch.touched,
         global: batch.global,
         acks: batch.acks,
+        ackDetails: batch.ackDetails,
         rejects: batch.rejects,
         restored: batch.restored,
         trapped: batch.trapped,
@@ -2198,6 +2214,14 @@ export class RoomActor {
   #maybeIdle(): void {
     if (!this.#closed && this.idle) this.#onIdle?.(this);
   }
+}
+
+/** Revision and geometry cache bumps alone do not make a save effective. Thumbnail changes still count. */
+function acknowledgmentValueHash(key: EntityKey, value: unknown): string {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return hashValue(value);
+  const { rev: _rev, ...fields } = value as Record<string, unknown>;
+  if (parseKey(key)?.kind === "scene") delete fields.wallsVersion;
+  return hashValue(fields);
 }
 
 function push<T>(map: Map<ClientKey, T[]>, key: ClientKey, value: T): void {

@@ -4,6 +4,14 @@ export type UndoScope = "play" | "setup" | "none";
 export type HistoryScope = Exclude<UndoScope, "none">;
 export type HistoryDirection = "undo" | "redo";
 
+/** The sender's accepted command, classified against its own committed before/after states. */
+export type OpAcknowledgment = {
+  n: number;
+  scope: UndoScope;
+  /** A semantic state change the sender may read. Revisions and geometry cache versions alone do not count. */
+  changed: boolean;
+};
+
 export type HistoryTarget = {
   head: string;
   scope?: HistoryScope;
@@ -106,6 +114,13 @@ const historyDirection = z.enum(["undo", "redo"]);
 const historyText = z.string().max(200);
 const counter = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const commandNumber = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
+
+export const opAcknowledgmentSchema = z.strictObject({
+  n: commandNumber,
+  scope: z.enum(["play", "setup", "none"]),
+  changed: z.boolean(),
+}) satisfies z.ZodType<OpAcknowledgment>;
+
 const absent = z.never().optional();
 const reloadMessage = "Reload to use Undo";
 const targetFields = {

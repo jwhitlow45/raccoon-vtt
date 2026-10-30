@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { historyCommandSchema, historyMessageSchema, restoreHistoryFieldsSchema } from "./undoContract.ts";
+import { historyCommandSchema, historyMessageSchema, opAcknowledgmentSchema, restoreHistoryFieldsSchema } from "./undoContract.ts";
 import { LIMITS, MOST_SIGHT_HOLDERS, serializedBytes } from "./limits.ts";
 import { ATTACH_KINDS } from "./rules/attach.ts";
 import { critBound } from "./dice/crit.ts";
@@ -2874,6 +2874,8 @@ export const clientMessageSchema = z.discriminatedUnion("t", [
     clientId: z.string().min(1).max(64),
     resumeFrom: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
     sceneId: id.optional(),
+    /** Older clients strictly validate events, so acknowledgment details require an explicit opt-in. */
+    ackDetails: z.literal(true).optional(),
   }),
   z.strictObject({
     t: z.literal("op"),
@@ -2928,6 +2930,8 @@ export const serverMessageSchema = z.discriminatedUnion("t", [
     seq: z.number().int().min(0),
     changes: z.array(changeSchema),
     acks: z.array(z.number().int().min(1)).optional(),
+    /** This client's accepted commands. Duplicate transport acknowledgments may lack their original details. */
+    ackDetails: z.array(opAcknowledgmentSchema).optional(),
     rejects: z
       .array(z.strictObject({ n: z.number().int().min(1), code: z.enum(refusalCodes), message: z.string().max(200) }))
       .optional(),
