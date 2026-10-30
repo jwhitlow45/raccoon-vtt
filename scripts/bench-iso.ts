@@ -28,10 +28,11 @@
  *   range, a wall across levels, 40 creatures of mixed sizes and four
  *   areas, with pans at 40 px, 12 px and fit, a local drag, a warm turn
  *   and a 40 ft cube on alternating hex heights coming in: the frame it
- *   lands in, in both views, then each frame until it stands. In
- *   Isometric the pans at 40 px and 12 px are counted too, on an untimed
- *   pan of their own: the canvas's fills, clips, image copies and patterns
- *   and the ground stage's draws, each a frame.
+ *   lands in, in both views, then each frame until it stands and the
+ *   whole time from its sending until it first stands. In Isometric the
+ *   pans at 40 px and 12 px are counted too, on an untimed pan of their
+ *   own: the canvas's fills, clips, image copies and patterns and the
+ *   ground stage's draws, each a frame.
  *
  * Rows: pan (the typical scene at 40 px, the caps at fit and at 40 px, the
  * crowd at 40 px), a local drag (each whole frame), the ringed and aura'd
@@ -990,25 +991,47 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
          * emanation does. The frame it lands in holds what any new area costs
          * either view (the store, the rules' coverage its flat drawing reads,
          * a layout), so it is a row of its own, timed in both. Then each frame
-         * until it stands, Top-down's for as long having nothing to build.
+         * until it stands, Top-down's for as long having nothing to build, and
+         * in Isometric the whole time from the op's sending until the board
+         * first says it stands: one more area standing than the scene's own,
+         * so the cube before it, deleted first, is never read as this one.
          */
         let made: Op | null = null;
         const arrivals: number[] = [];
         const builds: number[] = [];
+        let others = -1;
+        const standing = async () => (await volumesNow(page))?.standing ?? 0;
         const frames2 = await throttled(() =>
           rounds(async () => {
-            if (made) await dm.op({ t: "template.delete", templateId: (made.template as { id: string }).id });
+            if (made) {
+              await dm.op({ t: "template.delete", templateId: (made.template as { id: string }).id });
+              if (view === "isometric") for (const until = Date.now() + 10_000; Date.now() < until && (await standing()) > others; ) await page.waitForTimeout(20);
+            }
+            if (view === "isometric" && others < 0) {
+              await waitStood(page);
+              others = await standing();
+            }
             made = template(dm.sceneId, dm.memberId, HEX_CUBE);
+            const sent = Date.now();
             arrivals.push(...(await timed(page, cdp, 1, () => dm.op(made!), 1)));
             if (view === "topDown") return timed(page, cdp, 3, async () => undefined, 1);
-            const got = await timedUntil(page, cdp, async () => undefined, () => stoodNow(page));
-            builds.push(got.ms);
+            const got = await timedUntil(
+              page,
+              cdp,
+              async () => undefined,
+              async () => {
+                const v = await volumesNow(page);
+                return !!v && !v.waiting && v.standing > others;
+              },
+              1,
+            );
+            builds.push(Date.now() - sent);
             return got.frames;
           }),
         );
         rows.push({ row: hexRow(orient, "a 40 ft cube on alternating hex heights, the frame it lands in, 40 px"), view, ms: stats(arrivals.slice(1)) });
         rows.push({ row: hexRow(orient, "a 40 ft cube on alternating hex heights, each frame while it builds, 40 px"), view, ms: frameStats(frames2) });
-        if (view === "isometric") rows.push({ row: hexRow(orient, "a 40 ft cube on alternating hex heights, until it stands (ms whole, not a frame)"), view, ms: stats(builds.slice(1)) });
+        if (view === "isometric") rows.push({ row: hexRow(orient, "a 40 ft cube on alternating hex heights, from its sending until it stands (ms whole, not a frame)"), view, ms: stats(builds.slice(1)) });
       }
     }
 
