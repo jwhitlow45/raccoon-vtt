@@ -18,9 +18,10 @@ import { actor, applyInView, bar, combatSections, DESK, dm, dmCdp, dmConsole, dm
  * overflow for the longest stats, the short bar on a phone held sideways,
  * and what a player's device shows and holds.
  *
- * Follow-up batch 31's line checks run in a file of their own
- * (tokenpanel-lines.e2e.ts), so the CI shards can run the two side by
- * side. The room and the helpers are e2e/tokenpanelRoom.ts.
+ * The line checks run in tokenpanel-lines.e2e.ts,
+ * tokenpanel-summaries.e2e.ts and tokenpanel-words.e2e.ts, so the CI
+ * shards can run the four files side by side. The room and the helpers
+ * are e2e/tokenpanelRoom.ts.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus ten. The other environment
  * variables are the smoke run's (smoke.e2e.ts).

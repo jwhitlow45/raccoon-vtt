@@ -972,7 +972,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
   });
 
   test("ISO-9. on the narrowest phone the room's menu holds View, and a widening that gives the bar its View button back closes the sheet for good", async () => {
-    // As alignment-icons' iso5-a finds it: the DM at 320 x 568 and 130% folds the View button into the menu (D-261026-12).
+    // As alignment-settings.e2e.ts's iso5-a finds it: the DM at 320 x 568 and 130% folds the View button into the menu (D-261026-12).
     const phoneContext = await browser.newContext({ viewport: { width: 320, height: 568 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, storageState: await dmContext.storageState() });
     try {
       const phone = await phoneContext.newPage();

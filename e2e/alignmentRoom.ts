@@ -89,13 +89,15 @@ import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measure
  * open (docs/design-v1-map-discovery.md 9), beside every other page with
  * the shared radio cards: Room settings, This device and Show a handout.
  *
- * The sweep runs as three files, each with its own server, browsers and
+ * The sweep runs as five files, each with its own server, browsers and
  * room, so the CI shards run them side by side: alignment.e2e.ts has the
  * drawn cases, the upright phones and the scrolling strip,
  * alignment-wide.e2e.ts the sideways phone, the tablet, the desktop and
- * 480 x 320, and alignment-icons.e2e.ts the second icon pass, follow-up
- * batch 30's roots, the app icon's places, follow-up batch 32's roots,
- * This device's Sheet handle, the scene settings page and the view choice.
+ * 480 x 320, and alignment-icons.e2e.ts the second icon pass.
+ * alignment-followups.e2e.ts has follow-up batches 30 and 32, the app
+ * icon's places and This device's Sheet handle. alignment-settings.e2e.ts
+ * has the builder's note and forget question, the scene settings page
+ * and the view choice.
  * This module holds every step, from alignmentFile on, and each file lists
  * the ones it runs, so a step keeps its id whichever file runs it.
  *
@@ -4218,7 +4220,7 @@ async function viewNameWhole(root: Locator, at: string): Promise<string[]> {
   return rects.filter(([, n]) => n !== 1).map(([words, n]) => `${at} iso5-help: "${words}" drawn over ${n} lines`);
 }
 
-/** iso5-a, last in alignment-icons.e2e.ts. */
+/** iso5-a, the last screen check in alignment-settings.e2e.ts, before its console check. */
 export function isoChoiceTests(): void {
   test(`iso5-a. the top bar with the View button, for the DM and for Pat, or the room menu's View row where the bar folds it, the View menu in Top-down and in Isometric, and Scene settings' Suggested view, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px (docs/design-v1-isometric-view.md 8)`, async () => {
     await newDmSession();
