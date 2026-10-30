@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type Ref } from "react";
-import type { RollNumbers } from "#shared/dice/bonus.ts";
-import { ABILITY_KEYS, type AbilityKey, type Character } from "#shared/model.ts";
+import { ABILITY_KEYS, type Character } from "#shared/model.ts";
 import { pcShape } from "#shared/rules/pcStats.ts";
+import { ABILITY_ABBR } from "#shared/rules/skills.ts";
 import { signed } from "#shared/statBlock.ts";
 import { Loading } from "../../components/Loading.tsx";
 import { GROUP_BOX, GROUP_FOLD, Group, Help } from "../../components/Panel.tsx";
@@ -13,7 +13,7 @@ import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { StatBlockView } from "../monsters/StatBlockView.tsx";
 import { pcBlockSummary, takeShapeWords } from "../tokens/creatureKind.ts";
 import { useSrdList } from "../tokens/StatSummary.tsx";
-import { saveUnitsOf } from "../tokens/statSummary.ts";
+import { ProficientTest } from "../dice/ProficientTest.tsx";
 import { Note, SmallButton } from "../tokens/ui.tsx";
 import { useOpenPcStats, useOpenResync } from "./open.ts";
 import { lastSyncedLine, resyncNumber } from "./resync.ts";
@@ -174,19 +174,22 @@ function ShapeBody(props: { character: Character; edits: boolean }) {
       {numbers ? (
         <p data-shape-numbers="" style={{ margin: 0, fontSize: theme.font.body14 }}>
           <span style={{ color: theme.color.textMuted }}>Rolls now: saves </span>
-          {saveUnitsOf(savesOf(numbers)).join(", ")}
-          <span style={{ color: theme.color.textMuted }}>, Perception </span>
-          {signed(numbers.skills.perception ?? numbers.abilities.wis.mod)}
+          {ABILITY_KEYS.map((ability, i) => (
+            <span key={ability}>
+              {i > 0 ? ", " : null}
+              <ProficientTest creature={{ characterId: character.id }} test={{ kind: "save", ability }}>
+                {`${ABILITY_ABBR[ability]} ${signed(numbers.abilities[ability].save)}`}
+              </ProficientTest>
+            </span>
+          ))}
+          {", "}
+          <ProficientTest creature={{ characterId: character.id }} test={{ kind: "check", ability: "wis", skill: "perception" }}>
+            {`Perception ${signed(numbers.skills.perception ?? numbers.abilities.wis.mod)}`}
+          </ProficientTest>
         </p>
       ) : null}
       {end}
       {monster ? <StatBlockView view={monster} source="srd" credit /> : <Note>This character takes the shape of an SRD creature this app does not have.</Note>}
     </>
   );
-}
-
-function savesOf(numbers: RollNumbers): Record<AbilityKey, number> {
-  const saves = {} as Record<AbilityKey, number>;
-  for (const a of ABILITY_KEYS) saves[a] = numbers.abilities[a].save;
-  return saves;
 }

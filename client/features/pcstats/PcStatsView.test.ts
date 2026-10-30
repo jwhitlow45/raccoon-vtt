@@ -20,8 +20,8 @@ describe("a PC block's abilities three across (docs/design-v1-dice-ui.md 6.1)", 
   const markup = renderToStaticMarkup(createElement(PcStatsView, { character: { stats: THORN, level: 5 } }));
   const boxes = [...markup.matchAll(/<div[^>]*><dt[^>]*>(.*?)<\/div>/g)].map((m) => m[1]!);
 
-  test("six boxes in one three-column grid, and no table", () => {
-    assert.match(markup, /<dl data-ability-grid=""[^>]*grid-template-columns:repeat\(3, minmax\(0, 1fr\)\)/);
+  test("six boxes in a grid of at most three columns with room for each save, and no table", () => {
+    assert.match(markup, /<dl data-ability-grid=""[^>]*grid-template-columns:repeat\(auto-fit, minmax\(max\(84px, calc\(\(100% - 8px\) \/ 3\)\), 1fr\)\)/);
     assert.equal(boxes.length, 6);
     assert.doesNotMatch(markup, /<table/);
     assert.match(boxes[1]!, /title="Dexterity"[^>]*>DEX<\/abbr>/);
@@ -29,14 +29,15 @@ describe("a PC block's abilities three across (docs/design-v1-dice-ui.md 6.1)", 
   });
 
   test("a proficient save is bold and named proficient, the others neither", () => {
-    const save = (box: string) => /<dd[^>]*font-weight:(\d+)[^>]*><span[^>]*>Save <\/span>([^<]+)(<span[^>]*>, proficient<\/span>)?<\/dd>/.exec(box);
+    const save = (box: string) => /<dd[^>]*font-weight:(\d+)[^>]*>(.*?)<\/dd>/.exec(box);
     const dex = save(boxes[1]!);
     const str = save(boxes[0]!);
     assert.ok(dex && str);
-    assert.equal(dex[2], "+7", "Dex +4 and proficiency +3");
-    assert.ok(dex[3], "a screen reader hears it is proficient");
+    assert.match(dex[2]!, /Save <\/span>\+7/, "Dex +4 and proficiency +3");
+    assert.match(dex[2]!, /data-proficiency-marker="prof"[^>]*aria-label="Proficient"/, "a screen reader hears it is proficient");
     assert.ok(Number(dex[1]) > Number(str[1]), "bold beside the plain Str save");
-    assert.equal(str[2], "+0");
-    assert.equal(str[3], undefined);
+    assert.match(str[2]!, /Save <\/span>\+0/);
+    assert.match(str[2]!, /data-proficiency-marker="none" aria-hidden="true"/);
+    assert.doesNotMatch(str[2]!, /aria-label="Proficient"/);
   });
 });

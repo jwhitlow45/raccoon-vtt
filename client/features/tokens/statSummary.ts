@@ -1,6 +1,7 @@
 import type { AbilityKey, Actor, CompanionBlock, CustomMonster, HpVisibility, LifeState, StatBlock, TokenKind } from "#shared/model.ts";
 import { ABILITY_KEYS } from "#shared/model.ts";
 import { hpLess } from "#shared/rules/hp.ts";
+import type { Proficiency } from "#shared/rules/proficiency.ts";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
 import { ABILITY_ABBR } from "#shared/rules/skills.ts";
 import { signed, SPEED_WORDS, statBlockFromSrd, statBlockOf } from "#shared/statBlock.ts";
@@ -207,7 +208,7 @@ export type LinkedBlock =
   | { kind: "loading" }
   | { kind: "failed" }
   | { kind: "ready"; block: StatBlock }
-  | { kind: "numbers"; saves: Readonly<Record<AbilityKey, number>>; defenses: readonly DefenseLine[] };
+  | { kind: "numbers"; saves: Readonly<Record<AbilityKey, number>>; proficiency?: Readonly<Record<AbilityKey, Proficiency>>; defenses: readonly DefenseLine[] };
 
 // The SRD's blocks are fixed once the chunk loads, so each is read once a page.
 const srdBlocks = new WeakMap<SrdMonster, StatBlock | null>();

@@ -44,6 +44,8 @@ describe("a monster block's ability table, three across (docs/design-v1-dice-ui.
     const markup = renderToStaticMarkup(createElement(StatBlockView, { view: monsters[0]!, source: "srd" }));
     assert.doesNotMatch(markup, /<table/);
     assert.equal(markup.match(/<dt/g)?.length, 6);
-    assert.match(markup, /Save <\/span>\+3<span[^>]*>, proficient<\/span>/, "the aboleth's Dex save is set apart and named");
+    const dex = markup.split('title="Dexterity"')[1]!.split("</dd></div>")[0]!;
+    assert.match(dex, /data-proficiency-marker="prof"[^>]*aria-label="Proficient"/, "the aboleth's Dex save is set apart and named");
+    assert.match(dex, /Save <\/span>\+3/, "the printed bonus stays with Save");
   });
 });

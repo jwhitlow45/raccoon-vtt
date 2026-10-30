@@ -1,11 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ABILITY_KEYS, type AbilityKey, type Actor, type Character, type Token } from "#shared/model.ts";
-import { pcRollNumbers, type RollNumbers } from "#shared/dice/bonus.ts";
+import { blockRollNumbers, pcRollNumbers, type RollNumbers } from "#shared/dice/bonus.ts";
+import { proficiencyFor, type Proficiency } from "#shared/rules/proficiency.ts";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
 import { AcBadge } from "../../components/AcBadge.tsx";
 import { Button } from "../../components/Button.tsx";
 import { Icon } from "../../components/Icon.tsx";
 import { Loading } from "../../components/Loading.tsx";
+import { ProficiencyLabel } from "../../components/ProficiencyMark.tsx";
 import { Tag } from "../../components/Tag.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
@@ -59,7 +61,10 @@ export function useLinkedBlock(
   if (wild && block.kind === "ready") {
     if (shaped.failed) return { kind: "failed" };
     if (!shaped.numbers) return { kind: "loading" };
-    return { kind: "numbers", saves: savesOf(shaped.numbers), defenses: defenseLines(block.block) };
+    return {
+      kind: "numbers", saves: savesOf(shaped.numbers), defenses: defenseLines(block.block),
+      proficiency: saveProficiencies({ stats: character.stats, monster: { numbers: blockRollNumbers(block.block), cr: block.block.cr }, wildShape: true }),
+    };
   }
   return block;
 }
@@ -70,11 +75,15 @@ function savesOf(numbers: RollNumbers): Record<AbilityKey, number> {
   return saves;
 }
 
+function saveProficiencies(source: Parameters<typeof proficiencyFor>[1]): Record<AbilityKey, Proficiency> {
+  return Object.fromEntries(ABILITY_KEYS.map((ability) => [ability, proficiencyFor({ kind: "save", ability }, source)])) as Record<AbilityKey, Proficiency>;
+}
+
 /** A player character's saves and defense lines from its own stat block, or null without one (docs/design-v1-pc-stats.md 7.4). */
 function pcSummary(character: Character): LinkedBlock | null {
   const numbers = pcRollNumbers(character);
   if (!numbers || character.actor.srdId !== undefined) return null;
-  return { kind: "numbers", saves: savesOf(numbers), defenses: pcDefenseLines(character) };
+  return { kind: "numbers", saves: savesOf(numbers), proficiency: saveProficiencies({ stats: character.stats }), defenses: pcDefenseLines(character) };
 }
 
 function Unit(props: { unit: VitalUnit }) {
@@ -221,12 +230,15 @@ export function SavesLine(props: { block: LinkedBlock }) {
   if (block.kind === "failed") {
     return <SrdLoadFailed what="Saves" inline />;
   }
-  const saves = (block.kind === "numbers" ? saveUnitsOf(block.saves) : saveUnits(block.block)).map((text) => {
+  const proficiencies = block.kind === "numbers" ? block.proficiency : saveProficiencies({ monster: { numbers: blockRollNumbers(block.block), cr: block.block.cr } });
+  const saves = (block.kind === "numbers" ? saveUnitsOf(block.saves) : saveUnits(block.block)).map((text, i) => {
     const [ability, value] = text.split(" ");
     return (
       <span key={ability} style={{ whiteSpace: "nowrap" }}>
-        <span style={{ color: theme.color.textMuted, fontSize: theme.font.tiny, fontWeight: theme.weight.bold, letterSpacing: theme.caps }}>{ability} </span>
-        <span style={{ fontWeight: theme.weight.strong }}>{value}</span>
+        <ProficiencyLabel level={proficiencies?.[ABILITY_KEYS[i]!] ?? "none"}>
+          <span style={{ color: theme.color.textMuted, fontSize: theme.font.tiny, fontWeight: theme.weight.bold, letterSpacing: theme.caps }}>{ability} </span>
+          <span style={{ fontWeight: theme.weight.strong }}>{value}</span>
+        </ProficiencyLabel>
       </span>
     );
   });
