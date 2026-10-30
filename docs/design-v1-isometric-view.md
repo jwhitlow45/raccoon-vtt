@@ -95,7 +95,7 @@ depth(x, y)      = s*x + c*y                // larger is nearer the viewer
 3. In each cell the ray enters at `zIn` and leaves at `zOut`. At or below the cell's drawn ground on entry: the near face, so return the entry point moved 1e-6 into the cell. Ground between the two: the top, so return `toWorld(v, ground)`.
 4. **Bound.** The walk visits at most 2√2·K·Δz + 3 cells, Δz the drawn range in cells, and never more than the scene's w + h: about 150 at 5 ft a cell over −100 to 200 ft, the scene's size at 1 ft. A bound, not a cutoff.
 
-Standees are found first, by Konva's hit canvas. Hex scenes get H3's hex walk (4.4).
+Standees are found first, by Konva's hit canvas. Hex scenes walk their canonical hex polygons, and a press reaches the rules as the hex it showed ([Raised hexes in Isometric](design-v1-iso-hex-relief.md) 7).
 
 ### 4.4 Hex scenes
 

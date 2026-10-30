@@ -416,7 +416,9 @@ Heights are easier to read when you can see them. The isometric view tilts the m
 
 **Tools that work top-down.** Four of your tools need the flat map, so while you use them your device shows Top-down and says why, and Isometric comes back as soon as you pick another tool: the **Map builder** (`B`), **Fog** (`F`), **Line up grid** (`G`) and **Trap** (`X`). Everything else, from Select and the Ruler to Areas and Ping, works in either view.
 
-**Hex scenes.** On a hex scene, Isometric stands the walls, doors and creatures up as it does on squares, but it draws the ground itself flat, raised hexes included. Each creature still stands at its own height, so a goblin on a 10 ft terrace stands 10 ft up, and the heights count for moves, sight and areas exactly as they do in Top-down.
+**Hex scenes.** Isometric works on hex rows and hex columns just as it does on squares. Each raised hex stands as a six-sided block with its three near sides showing, and each hex pit sinks, so a terrace, a sunken hollow or a stair climbing a ledge reads at a glance. A stair keeps its marks on its top, and a wall you draw along a hex side stands on the higher hex beside it. Creatures stand on the hexes they actually cover, so a goblin on a 10 ft terrace stands 10 ft up and an ogre across a ledge stands on its highest hex. Nothing about the game changes with the view: distances, sight and moves count the heights exactly as they do in Top-down, and a tap or a drag lands on the hex whose top or side you touched.
+
+![A hex rows scene in Isometric on the DM's screen: a terrace of raised hexes round a tall middle hex with a wall standing on it, a scout and a goblin 10 ft up on the terrace, a stair hex beside an ogre, a 10 ft sphere at the ledge, and a hollow of sunken hexes whose floors show their own colors.](dm-guide/hex-relief.webp)
 
 **Keys.** With a keyboard, the view has keys of its own:
 
@@ -424,7 +426,7 @@ Heights are easier to read when you can see them. The isometric view tilts the m
 - `Q` turns the map left, and `E` turns it right. In Top-down they say that turning needs the isometric view.
 - The arrow keys move the selection one square by the screen, whichever way the map is turned: Up moves it toward the map's edge that faces up and to the right.
 
-**What players see.** Isometric shows a player nothing more than Top-down does. Under the fog, nothing stands up: a creature, a wall or a label stands only where every bit of the ground under it is revealed to that player, and anything else lies flat under the fog as it always has. On your own device, a creature on ground your map shows as fogged draws dimmed, so you can tell at a glance what your map still hides under fog. On a scene where each player sees for themselves, ground the party has explored counts as revealed for this, just as your map draws it.
+**What players see.** Isometric shows a player nothing more than Top-down does. Under the fog, nothing stands up: a creature, a wall or a label stands only where every bit of the ground under it is revealed to that player, and anything else lies flat under the fog as it always has. Raised ground works by the cell: a square or a hex rises once any part of it is revealed, its top still wearing the fog drawn on it, and ground wholly under fog stays flat. On your own device, a creature on ground your map shows as fogged draws dimmed, so you can tell at a glance what your map still hides under fog. On a scene where each player sees for themselves, ground the party has explored counts as revealed for this, just as your map draws it.
 
 ![The same hall in Isometric, turned once, with the menu closed.](dm-guide/isometric.webp)
 
@@ -1005,6 +1007,8 @@ Every area is a shape in three dimensions, and every creature has a height that 
 The [isometric view](#the-isometric-view) shows each area as the shape it really is. A Fireball rises from the floor as a ball, a Cone aimed upward climbs at its angle, Moonbeam stands as a tall column, and Spirit Guardians wraps its cleric and walks with them. Each shape is see-through, with a bright outline, so you can see at a glance what lies inside it. A bat flying inside a Fireball shows inside the ball, while one flying over it shows above. A shape also reaches down into a pit as far as it really goes. Every creature an area catches wears a ring in the area's color round its feet.
 
 ![The sunken hall in Isometric, turned once: a Fireball round the imp flying 20 ft up, cut off by the hall's wall, Spirit Guardians round Bree and Thorn on the dais, and a Moonbeam standing in the pit beside the goblin.](dm-guide/isometric-areas.webp)
+
+On a hex scene a shape meets the raised hexes along their own sides, so a Fireball beside a terrace is cut off by the terrace's hexes rather than by squares. The distances and who is caught stay exactly the rules' answers.
 
 The shapes show exactly what the rules measure. When the flat shading in Top-down covers a creature's square but the creature isn't in the "In area" list, turn to Isometric: you will usually see that it stands under the Cone or above the Sphere.
 
