@@ -162,6 +162,15 @@ export class LogScanBudget {
     return { turns: { ...this.#turns }, leases: { page: this.#leases.page.size, export: this.#leases.export.size }, waiting: this.#waiting.length, scans: this.#scans.size };
   }
 
+  /** What the budget holds room by room, for tests that check its rules. */
+  get detail(): { turnRooms: string[]; leases: Record<ScanPool, string[]>; waiting: { roomId: string; counted: boolean; background: boolean }[] } {
+    return {
+      turnRooms: [...this.#turnRooms],
+      leases: { page: [...this.#leases.page], export: [...this.#leases.export] },
+      waiting: this.#waiting.map((w) => ({ roomId: w.scan.roomId, counted: w.counted, background: w.scan.background })),
+    };
+  }
+
   /** @internal Waits for the scan's next turn, and its lease with its first. */
   admit(scan: Scan): Promise<void> {
     if (scan.signal.aborted) return Promise.reject(new ScanCancelledError(scan.signal.reason));
@@ -313,6 +322,7 @@ export class Scan {
       return await fn();
     } finally {
       this.#budget.endTurn(this);
+      if (this.#closed) this.#budget.release(this);
     }
   }
 
@@ -320,10 +330,41 @@ export class Scan {
     this.#abort.abort(reason);
   }
 
-  /** Releases the lease and leaves the budget. Idempotent. Close the scan's cursor first. */
+  /** The budget's clock. */
+  now(): number {
+    return this.#budget.options.now();
+  }
+
+  /** Waits `ms` on the budget's timers, holding no turn. Rejects at once if the scan is cancelled. */
+  wait(ms: number): Promise<void> {
+    if (this.signal.aborted) return Promise.reject(new ScanCancelledError(this.signal.reason));
+    const { setTimer, clearTimer } = this.#budget.options;
+    return new Promise<void>((resolve, reject) => {
+      const onAbort = () => {
+        clearTimer(timer);
+        reject(new ScanCancelledError(this.signal.reason));
+      };
+      const timer = setTimer(() => {
+        this.signal.removeEventListener("abort", onAbort);
+        resolve();
+      }, ms);
+      this.signal.addEventListener("abort", onAbort, { once: true });
+    });
+  }
+
+  /**
+   * Releases the lease and leaves the budget. Idempotent. Close the scan's
+   * cursor first. A scan closed while a batch of its own runs is cancelled,
+   * and keeps its turn and lease until that batch ends, since the batch
+   * still holds the connection.
+   */
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
+    if (this.turn) {
+      this.cancel(new Error("scan closed"));
+      return;
+    }
     this.#budget.release(this);
   }
 }

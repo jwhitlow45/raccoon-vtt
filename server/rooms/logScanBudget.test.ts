@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { rng } from "#shared/testutil.ts";
 import { LogScanBudget, ScanBusyError, ScanCancelledError, type Scan, type ScanBudgetOptions } from "./logScanBudget.ts";
 
 /** A clock and timers that move only when told. */
@@ -240,5 +241,104 @@ describe("the archive scan budget", () => {
     await assert.rejects(budget.open({ pool: "page", roomId: "A", memberId: "m1" }).batch(async () => undefined), ScanCancelledError);
     assert.deepEqual(budget.usage.turns, { page: 0, export: 0 });
     assert.equal(budget.usage.waiting, 0);
+  });
+});
+
+describe("the archive scan budget under random events", () => {
+  type Tracked = { scan: Scan; abort: AbortController; state: "idle" | "waiting" | "running" | "closed"; release?: (fail: boolean) => void; settled: Promise<unknown>[] };
+
+  test("turns, leases and waiters stay within their limits, no cancelled scan runs, and everything settles", async () => {
+    // Ten rooms, so the server-wide cap on waiting scans is reached, not only the per-room ones.
+    const rooms = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"];
+    const members = ["m0", "m1", "m2", "m3"];
+    for (let seed = 1; seed <= 100; seed++) {
+      const random = rng(seed);
+      const pick = <T>(xs: readonly T[]): T => xs[Math.floor(random() * xs.length)]!;
+      const clock = new FakeClock();
+      const budget = new LogScanBudget(clock.options());
+      const { turns, leases, maxWaiting, maxWaitingPerRoom, maxBackgroundPerRoom } = budget.options;
+      const scans: Tracked[] = [];
+      const running = new Set<Tracked>();
+      const where = (step: number) => `seed ${seed} step ${step}`;
+      const check = (step: number) => {
+        for (const pool of ["page", "export"] as const) {
+          const mine = [...running].filter((r) => r.scan.pool === pool);
+          assert.ok(mine.length <= turns[pool], `${where(step)}: ${pool} turns`);
+          assert.ok(budget.detail.leases[pool].length <= leases[pool], `${where(step)}: ${pool} leases`);
+          assert.equal(new Set(budget.detail.leases[pool]).size, budget.detail.leases[pool].length, `${where(step)}: one ${pool} lease a room`);
+        }
+        const roomsRunning = [...running].map((r) => r.scan.roomId);
+        assert.equal(new Set(roomsRunning).size, roomsRunning.length, `${where(step)}: one turn a room`);
+        const counted = budget.detail.waiting.filter((w) => w.counted);
+        assert.ok(counted.length <= maxWaiting, `${where(step)}: waiting`);
+        for (const room of rooms) {
+          assert.ok(counted.filter((w) => w.roomId === room && !w.background).length <= maxWaitingPerRoom, `${where(step)}: waiting in ${room}`);
+          assert.ok(counted.filter((w) => w.roomId === room && w.background).length <= maxBackgroundPerRoom, `${where(step)}: background in ${room}`);
+        }
+      };
+      const request = (t: Tracked) => {
+        t.state = "waiting";
+        const done = t.scan
+          .batch(async () => {
+            assert.ok(!t.scan.signal.aborted && t.state !== "closed", `seed ${seed}: a cancelled or closed scan got a turn`);
+            t.state = "running";
+            running.add(t);
+            const fail = await new Promise<boolean>((resolve) => (t.release = resolve));
+            running.delete(t);
+            if (fail) throw new Error("query failed");
+          })
+          .then(
+            () => undefined,
+            (err: unknown) => {
+              if (!(err instanceof ScanBusyError || err instanceof ScanCancelledError || (err instanceof Error && err.message === "query failed"))) throw err;
+            },
+          )
+          .finally(() => {
+            if (t.state !== "closed") t.state = "idle";
+          });
+        t.settled.push(done);
+      };
+      for (let step = 0; step < 200; step++) {
+        const r = random();
+        const live = scans.filter((s) => s.state !== "closed");
+        if (r < 0.3 && live.length < 40) {
+          const abort = new AbortController();
+          const scan = budget.open({ pool: random() < 0.6 ? "page" : "export", roomId: pick(rooms), memberId: pick(members), background: random() < 0.1, signal: abort.signal });
+          const t: Tracked = { scan, abort, state: "idle", settled: [] };
+          scans.push(t);
+          request(t);
+        } else if (r < 0.45) {
+          const idle = live.filter((s) => s.state === "idle");
+          if (idle.length > 0) request(pick(idle));
+        } else if (r < 0.65) {
+          const busy = [...running];
+          if (busy.length > 0) pick(busy).release?.(random() < 0.1);
+        } else if (r < 0.72 && live.length > 0) {
+          const t = pick(live);
+          if (random() < 0.5) t.abort.abort(new Error("gone"));
+          else t.scan.cancel(new Error("deadline"));
+        } else if (r < 0.8 && live.length > 0) {
+          const t = pick(live.filter((s) => s.state !== "running").concat(live.filter((s) => s.state === "running" && random() < 0.2)));
+          if (t) {
+            t.state = "closed";
+            t.scan.close();
+          }
+        } else if (r < 0.83) budget.cancelRoom(pick(rooms));
+        else clock.advance(Math.floor(random() * 1_500));
+        await flush();
+        check(step);
+      }
+      // Wind down: let every running batch finish, cancel and close every scan, and let the timers run out.
+      budget.close();
+      for (const t of running) t.release?.(false);
+      for (const t of scans) {
+        t.state = "closed";
+        t.scan.close();
+      }
+      clock.advance(5_000);
+      await flush();
+      await Promise.all(scans.flatMap((s) => s.settled));
+      assert.deepEqual(budget.usage, { turns: { page: 0, export: 0 }, leases: { page: 0, export: 0 }, waiting: 0, scans: 0 }, `seed ${seed}: all back`);
+    }
   });
 });
