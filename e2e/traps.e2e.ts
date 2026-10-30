@@ -94,6 +94,23 @@ function trap(socket: SocketWatch): Trap | undefined {
   return state(socket)?.traps?.[run.trapId];
 }
 
+/** Force an opened first card beyond the phone column, independent of later cards. */
+async function withTallTrapCard(check: () => Promise<void>): Promise<void> {
+  const note = trap(dmSocket)?.rig?.note ?? null;
+  const tallNote = Array.from({ length: 60 }, (_, i) => `Reset step ${i + 1}`).join("\n");
+  await ops.send({ t: "trap.update", trapId: run.trapId, patch: { rig: { note: tallNote } } });
+  try {
+    await check();
+  } finally {
+    try {
+      const alerts = dm.getByRole("dialog", { name: "Alerts" });
+      if (await alerts.isVisible()) await alerts.getByRole("button", { name: "Close", exact: true }).click();
+    } finally {
+      await ops.send({ t: "trap.update", trapId: run.trapId, patch: { rig: { note } } });
+    }
+  }
+}
+
 function thornHp(): number | null {
   return state(dmSocket)?.characters[run.thornChar]?.actor.hp.cur ?? null;
 }
@@ -526,7 +543,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await shots.take(dm, "traps-fu20b-save-in-reach");
   });
 
-  test("fu20b-r1-2. on a 320 x 568 phone at 130%, where an opened card leaves the column too short for it, the trap cards show over the screen, and Save and damage opens the Dice sheet with focus on its heading, and closing it with a trap still waiting brings no Alerts back (FU20B-ASTRA-1)", async () => {
+  test("fu20b-r1-2. on a 320 x 568 phone at 130%, where an opened card leaves the column too short for it, the trap cards show over the screen, and Save and damage opens the Dice sheet with focus on its heading, and closing it with a trap still waiting brings no Alerts back (FU20B-ASTRA-1)", async () => withTallTrapCard(async () => {
     await dm.setViewportSize({ width: 320, height: 568 });
     await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
     await reopenRoom(dm);
@@ -564,9 +581,9 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await shots.take(dm, "traps-fu20b-r1-phone-after-dice");
     await pickTool(dm, "Select");
     await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
-  });
+  }));
 
-  test("fu20b-r2-2. on a 320 x 568 phone at 130%, with a trap card opened past the column's room, the summary row on the trap pane's edge closes the pane and shows the cards over the screen (FU20B-ASTRA-3)", async () => {
+  test("fu20b-r2-2. on a 320 x 568 phone at 130%, with a trap card opened past the column's room, the summary row on the trap pane's edge closes the pane and shows the cards over the screen (FU20B-ASTRA-3)", async () => withTallTrapCard(async () => {
     await dm.setViewportSize({ width: 320, height: 568 });
     await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
     await reopenRoom(dm);
@@ -595,9 +612,9 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await alerts.waitFor({ state: "detached" });
     await pickTool(dm, "Select");
     await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
-  });
+  }));
 
-  test("fu20b-r2-7. on a 320 x 568 phone at 130%, with a trap card opened past the column's room, the alerts summary on the Panels sheet closes it and shows the cards over the screen (FU20B-OP-11)", async () => {
+  test("fu20b-r2-7. on a 320 x 568 phone at 130%, with a trap card opened past the column's room, the alerts summary on the Panels sheet closes it and shows the cards over the screen (FU20B-OP-11)", async () => withTallTrapCard(async () => {
     await dm.setViewportSize({ width: 320, height: 568 });
     await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
     await reopenRoom(dm);
@@ -625,7 +642,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await alerts.waitFor({ state: "detached" });
     await pickTool(dm, "Select");
     await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
-  });
+  }));
 
   test("fu20b-2. on a DM phone held upright the waiting trap cards fold under the trap's pane, whose header and Close are whole in reach, and come back as it closes (LP13-TR-6)", async () => {
     await dm.setViewportSize(PHONE);

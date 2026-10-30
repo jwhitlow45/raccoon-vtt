@@ -806,7 +806,20 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   await toastScreen(sweep, page, "toast-roll", /Perception/, () => rollFor(patOps, run.ids.thorn));
   await resetThorn();
 
-  // The column full, and a toast under its first card.
+  // One trap card leaves room for a toast below every drawn card, even on
+  // the shortest phone. A full stack is measured separately below.
+  await settleTraps();
+  await waitFor("the settled trap cards to leave", async () => (await page.getByRole("group", { name: /went off$/ }).count()) === 0 ? true : null);
+  await patCrosses();
+  const underCard = toasts(page, /went off/);
+  if (await showsWithin(underCard.first(), 3_000)) {
+    await sweep.add(page, "toast-lane", await toastLaneLines(page, `${sweep.at} toast-under-card`));
+    if ((await toastsUnderCards(page)) > 0) sweep.seen.add("toast-under-card");
+    else if (size.width < size.height && size.width <= 430) await sweep.missing(page, "toast-under-card", "the toast stood under no alert card");
+  } else await sweep.missing(page, "toast-under-card", "no toast for the trip wire");
+  await dismissToasts(page);
+
+  // The full column must also leave every toast clear of its cards.
   await spring(run.traps.door);
   await spring(run.traps.pit);
   await spring(run.traps.pit);
@@ -816,9 +829,6 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   if (await showsWithin(wentOff2.first(), 3_000)) {
     await sweep.measure(page, "toast-column", wentOff2);
     await sweep.add(page, "toast-lane", await toastLaneLines(page, `${sweep.at} toast-lane`));
-    // On an upright phone the toast stands under the column's first card, so the lane check must have met one there.
-    if ((await toastsUnderCards(page)) > 0) sweep.seen.add("toast-under-card");
-    else if (size.width < size.height && size.width <= 430) await sweep.missing(page, "toast-under-card", "the toast stood under no alert card");
   } else await sweep.missing(page, "toast-column", "no toast for the trip wire");
   const column = await markColumn(page);
   if (column) {
@@ -832,17 +842,28 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   }
   await dismissToasts(page);
 
-  // The summary row at the lane's top, where the column stands as one row, and the alerts over the screen it opens.
+  // An opened first card must itself exceed the column. Extra cards no longer
+  // force a summary, so give this card a long note for the summary and overlay cases.
+  const wireNote = dmSocket.state?.traps?.[run.traps.wire]?.rig?.note ?? null;
+  const tallNote = Array.from({ length: 60 }, (_, i) => `Reset step ${i + 1}`).join("\n");
+  await ops.send({ t: "trap.update", trapId: run.traps.wire, patch: { rig: { note: tallNote } } });
   const summary = page.getByRole("button", { name: /Tap to answer\.$|to see them\.$|to see it\.$/ });
-  if (await visible(summary)) {
-    await sweep.measure(page, "alerts-summary", summary.first());
-    await summary.first().click();
-    const overlay = page.getByRole("dialog", { name: "Alerts" });
-    if (await showsWithin(overlay, 2_500)) await sweep.measure(page, "alerts-overlay", overlay);
-    else await sweep.missing(page, "alerts-overlay", "a tap on the summary row showed no alerts");
-    await escapeAll(page);
+  try {
+    if (await showsWithin(summary.first(), 2_500)) {
+      await sweep.measure(page, "alerts-summary", summary.first());
+      await summary.first().click();
+      const overlay = page.getByRole("dialog", { name: "Alerts" });
+      if (await showsWithin(overlay, 2_500)) await sweep.measure(page, "alerts-overlay", overlay);
+      else await sweep.missing(page, "alerts-overlay", "a tap on the summary row showed no alerts");
+    } else await sweep.missing(page, "alerts-summary", "the opened first card's long note did not force a summary");
+    if (!column && !(await visible(summary))) await sweep.missing(page, "alerts-column", "neither the column nor its summary row showed");
+  } finally {
+    try {
+      await escapeAll(page);
+    } finally {
+      await ops.send({ t: "trap.update", trapId: run.traps.wire, patch: { rig: { note: wireNote } } });
+    }
   }
-  if (!column && !(await visible(summary))) await sweep.missing(page, "alerts-column", "neither the column nor its summary row showed");
   // The needle trap's page holds its outcome's fields. Its cone caught no one, so the door trap, which hits the creature that set it off, is set off again for a page that holds Thorn's row, its card new at the column's top.
   if (GROUP_SAVE_AT.has(size.name)) {
     await groupSaveScreen(sweep, page, "group-save", "Poisoned Needle Gauntlet of the Sunless Citadel");
