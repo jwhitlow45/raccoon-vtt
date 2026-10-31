@@ -2,6 +2,7 @@ import type { StoreApi } from "zustand/vanilla";
 import type { RoomState } from "#shared/model.ts";
 import type { SaveOutcomeLedger } from "#shared/saveOutcomeContract.ts";
 import type { RoomView } from "../../../state/types.ts";
+import { realClock, type Clock } from "../../../state/timing.ts";
 import type { RoomViewStore } from "../../../state/view.ts";
 import type { ReceiptTracker } from "../useReceipt.ts";
 import { creatureKey } from "../options.ts";
@@ -19,9 +20,13 @@ export type SaveLifecycleOptions = {
   persist?(roomId: string, draft: SaveDraft | null): boolean;
 };
 
-/** The server's time as this device reckons it: its own clock moved by the offset it learned, or its own clock until it has one. */
-export function serverTime(room: Pick<RoomView, "serverOffset">, now: number = Date.now()): number {
-  return now + (room.serverOffset ?? 0);
+/**
+ * The server's time as this device reckons it: the page's monotonic clock
+ * moved by the offset it learned, which no correction of the device's own
+ * clock moves, or the device's own clock until it has one.
+ */
+export function serverTime(room: Pick<RoomView, "serverOffset">, clock: Pick<Clock, "now" | "elapsed"> = realClock): number {
+  return room.serverOffset === undefined ? clock.now() : clock.elapsed() + room.serverOffset;
 }
 
 export function authorityOf(room: RoomView, page: Page): SaveAuthority {

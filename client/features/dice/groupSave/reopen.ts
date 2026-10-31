@@ -79,6 +79,11 @@ export function sessionOfDraft(draft: SaveDraft): SaveSession {
   return { page, reopen: { ...metadata, check: metadata.tracking || page.apply === "taken" || page.phase === "applying" ? "checking" : null } };
 }
 
+/** The page's bounded announcement history, which every metadata it rebuilds carries on, so a reload never repeats one. */
+function said(reopen: SaveReopen | null): Pick<SaveReopen, "announced"> {
+  return reopen?.announced?.length ? { announced: reopen.announced } : {};
+}
+
 function locked(input: SaveSession, check: "checking" | "unavailable"): SaveSession {
   const reopen = input.reopen;
   const notice = check === "unavailable" ? OUTCOME_UNAVAILABLE : undefined;
@@ -119,12 +124,12 @@ export function reconcileSave(input: SaveSession, authority: SaveAuthority): Sav
     const checkpoint = reopen.beforeApply;
     if (!checkpoint || checkpoint.plan !== attempt || checkpoint.pageId !== page.id) return locked(input, "unavailable");
     const restored = restoreChoices(page.id, checkpoint.choices);
-    if (tracking.revision === 0) return { page: { ...restored, apply: "refused", applySays: receipt.says }, reopen: { check: null, memoryOnly: reopen.memoryOnly } };
+    if (tracking.revision === 0) return { page: { ...restored, apply: "refused", applySays: receipt.says }, reopen: { check: null, memoryOnly: reopen.memoryOnly, ...said(reopen) } };
     const previous = reopen.redoHeld;
     if (!previous) return locked(input, "unavailable");
     return reconcileSave({
       page: { ...restored, apply: "refused", applySays: receipt.says },
-      reopen: { tracking, check: "undone", observed: { revision: tracking.revision, state: "undone" }, beforeApply: { version: 1, pageId: page.id, plan: tracking.plan, choices: previous }, ...(current && current.revision > tracking.revision ? { redoHeld: checkpoint.choices } : {}), memoryOnly: reopen.memoryOnly },
+      reopen: { tracking, check: "undone", observed: { revision: tracking.revision, state: "undone" }, beforeApply: { version: 1, pageId: page.id, plan: tracking.plan, choices: previous }, ...(current && current.revision > tracking.revision ? { redoHeld: checkpoint.choices } : {}), memoryOnly: reopen.memoryOnly, ...said(reopen) },
     }, authority);
   }
   if (!current) {
@@ -188,7 +193,7 @@ export function prepareSave(input: SaveSession, plan: OpOf<"actor.outcome"> & Sa
   if (!step.send.length) return { ...current, send: [], ...(step.error ? { error: step.error } : {}) };
   return {
     page: step.page, send: step.send,
-    reopen: { tracking, beforeApply: beforeApply.data, ...(current.reopen?.beforeApply && tracking.revision > 0 ? { redoHeld: current.reopen.beforeApply.choices } : {}), check: "checking", receipt: { plan: plan.plan, state: "sending" }, memoryOnly: current.reopen?.memoryOnly },
+    reopen: { tracking, beforeApply: beforeApply.data, ...(current.reopen?.beforeApply && tracking.revision > 0 ? { redoHeld: current.reopen.beforeApply.choices } : {}), check: "checking", receipt: { plan: plan.plan, state: "sending" }, memoryOnly: current.reopen?.memoryOnly, ...said(current.reopen) },
   };
 }
 

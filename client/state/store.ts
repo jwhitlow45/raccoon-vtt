@@ -1085,7 +1085,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         if (!("value" in change) || !change.key.startsWith("log:")) continue;
         const at = (change.value as { at?: unknown } | null)?.at;
         const stamped = typeof at === "string" ? Date.parse(at) : Number.NaN;
-        if (Number.isFinite(stamped)) serverOffset = Math.max(serverOffset ?? -Infinity, stamped - clock.now());
+        if (Number.isFinite(stamped)) serverOffset = Math.max(serverOffset ?? -Infinity, stamped - clock.elapsed());
       }
       commit({ confirmed, seq: msg.seq, pending, refused, trapped, toasts, ephemeral, sceneId, forgetAsk, ...(serverOffset === s.serverOffset ? {} : { serverOffset }) });
       const refusedNow = new Map((msg.rejects ?? []).map((r) => [r.n, { code: r.code, message: r.message, text: refusalText(r.code, r.message) }]));

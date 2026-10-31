@@ -9,11 +9,23 @@ import type { Clock } from "./timing.ts";
 /** A clock whose timers fire only when the test advances it, in due order. */
 export class FakeClock implements Clock {
   t = 0;
+  /** How far the monotonic clock is from `t`, which only `jump` moves. */
+  private drift = 0;
   private seq = 0;
   private readonly timers = new Map<number, { at: number; fn: () => void }>();
 
   now(): number {
     return this.t;
+  }
+
+  elapsed(): number {
+    return this.t + this.drift;
+  }
+
+  /** The device's clock set right or wrong by `ms`: the wall clock moves, the monotonic clock does not, and no timer runs. */
+  jump(ms: number): void {
+    this.t += ms;
+    this.drift -= ms;
   }
 
   setTimeout(fn: () => void, ms: number): unknown {

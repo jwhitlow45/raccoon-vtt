@@ -189,6 +189,7 @@ function captureRolls(page: Page, view = VIEW, reopen: SaveReopen | null = null,
   const snapshots: ReturnType<typeof saves.getState>[] = [];
   const controls: { children?: unknown; onClick?(): void; disabled?: boolean }[] = [];
   const buttons: { name: string; source: string; onRoll(override?: import("../rollMode.ts").RollModeOverride): void }[] = [];
+  const fields: { label: string; value?: number; onCommit(value: number | null): void }[] = [];
   function collect(value: unknown): void {
     if (Array.isArray(value)) { value.forEach(collect); return; }
     if (!value || typeof value !== "object" || !("props" in value) || !("type" in value)) return;
@@ -196,6 +197,7 @@ function captureRolls(page: Page, view = VIEW, reopen: SaveReopen | null = null,
     if (typeof element.type === "function" && ["GroupSavePage", "GroupRow", "OutcomePanel"].includes(element.type.name)) collect((element.type as (p: never) => unknown)(element.props as never));
     else if (typeof element.type !== "string" && element.type.name === "GroupRollButton") buttons.push(element.props as never);
     else if (typeof element.type !== "string" && element.type.name === "Button") controls.push(element.props as never);
+    else if (typeof element.type !== "string" && element.type.name === "NumberField") fields.push(element.props as never);
     else collect(element.props.children);
   }
   function Probe() { collect(groupSave.GroupSave({ parent: "Dice", onBack() {} })); return null; }
@@ -203,7 +205,7 @@ function captureRolls(page: Page, view = VIEW, reopen: SaveReopen | null = null,
     store: store as never, actions: { newId: () => "ask", dispatch: (op: import("#shared/protocol.ts").ClientOp) => { snapshots.push(structuredClone(saves.getState())); return sent.push(op); } } as never, ui: { notify() {} } as never, assets: { url: () => "" } as never,
     children: createElement(RoomScopeProvider, { scope, children: createElement(Probe) }),
   }));
-  return { buttons, controls, sent, snapshots, saves, choices, initial };
+  return { buttons, controls, fields, sent, snapshots, saves, choices, initial };
 }
 
 for (const override of ["adv", "dis", "secret", "normal"] as const) test(`group page ${override} callbacks preserve the existing switch and choices`, () => {
@@ -466,7 +468,8 @@ test("a row keeps its total field while the connection is down, so a total being
 
 test("a first Apply on a device whose clock runs ten minutes fast mints its tracking id from the server's time", () => {
   const fast = 10 * 60 * 1000;
-  const ui = captureRolls(damagePage("9 fire"), VIEW, null, { serverOffset: -fast });
+  // The offset is the server's time less the page's monotonic clock (D-261031-170).
+  const ui = captureRolls(damagePage("9 fire"), VIEW, null, { serverOffset: Date.now() - fast - performance.now() });
   const apply = ui.controls.find((control) => typeof control.children === "string" && control.children.startsWith("Apply:"));
   assert.ok(apply?.onClick);
   const now = Date.now();
@@ -487,4 +490,23 @@ test("an Apply the queue let go of with no receipt draws Start over and Discard,
   const checking = drawPage(page, [], "open", { check: "checking" });
   assert.doesNotMatch(checking, />Discard<\/button>/);
   assert.match(checking, /Applying…/);
+});
+
+test("a total committed as the connection drops reaches the page, and Apply after the reconnect uses it", () => {
+  const page: Page = { ...PAGE, source: { kind: "selection", tokenIds: ["g1"] }, phase: "rolled", outcome: { ...PAGE.outcome, damage: "9 fire", onPass: "half" }, rows: groupRows(DICE, ["g1"], PAGE.test, false), states: { "token:g1": { way: "type", typed: 7 } } };
+  const offline = captureRolls(page, VIEW, null, { connection: "closed" });
+  const total = offline.fields.find((field) => field.label === "Guard's total");
+  assert.ok(total, JSON.stringify(offline.fields.map((field) => field.label)));
+  // The field commits as it loses focus, here while the room is offline.
+  total.onCommit(20);
+  const held = offline.saves.getState().page!;
+  assert.equal(held.states["token:g1"]?.typed, 20, "the row keeps the total, though nothing is sent");
+  assert.deepEqual(offline.sent, []);
+  const online = captureRolls(held, VIEW, null, { connection: "open" });
+  const apply = online.controls.find((control) => typeof control.children === "string" && control.children.startsWith("Apply"));
+  assert.ok(apply?.onClick, JSON.stringify(online.controls.map((control) => control.children)));
+  apply.onClick();
+  const outcome = online.sent.find((op) => op.t === "actor.outcome") as import("#shared/protocol.ts").OpOf<"actor.outcome"> | undefined;
+  const guard = outcome?.targets.find((target) => "tokenId" in target.target && target.target.tokenId === "g1");
+  assert.equal(guard?.damage?.save?.result, "pass", JSON.stringify(outcome));
 });

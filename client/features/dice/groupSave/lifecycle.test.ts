@@ -3,6 +3,8 @@ import { test } from "node:test";
 import { createStore } from "zustand/vanilla";
 import type { RollRequest, RoomState } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
+import { applyOp } from "#shared/reducer.ts";
+import { uuidv7 } from "#shared/ids.ts";
 import type { SaveOutcomeLedger, SaveOutcomeRecord } from "#shared/saveOutcomeContract.ts";
 import { DM, room as testRoom, token } from "#shared/testutil.ts";
 import { createRoomStore } from "../../../state/store.ts";
@@ -359,7 +361,7 @@ test("the room learns how far the server's clock is from a fast device's as log 
   clock.t += 2_000;
   room.applyEv({ t: "ev", seq: 2, changes: [line("2:0", stamped + 500)] });
   assert.equal(room.store.getState().serverOffset, -10 * 60 * 1000, "a line the network held up longer reads lower and is not taken");
-  assert.equal(serverTime(room.store.getState(), clock.t), stamped + 2_000);
+  assert.equal(serverTime(room.store.getState(), clock), stamped + 2_000);
   room.dispose();
 });
 
@@ -412,4 +414,50 @@ test("a page locked by its own later Apply never reads Outcome restored, and a r
     again();
     reloaded.room.dispose();
   }
+});
+
+test("after Apply, Undo and a refused second Apply, a reload does not say Outcome undone again", () => {
+  const B = "019a4000-0000-7000-8000-000000000002";
+  const f = fixture();
+  const stop = bindSaveLifecycle(f.options);
+  f.snapshot({ [PLAN]: record("undone", 2, 11) }, 11);
+  assert.ok(f.notices.includes(OUTCOME_UNDONE));
+  const held = f.store.getState();
+  const sent = prepareSave({ page: { ...held.page!, dc: 18 }, reopen: held.reopen }, { t: "actor.outcome", plan: B, targets: [{ target: { tokenId: "g1" }, amount: 3 }] }, authorityOf(f.room.store.getState(), held.page!));
+  f.store.setState({ page: sent.page, reopen: sent.reopen });
+  f.receipts.sending(B, 0);
+  f.receipts.answer(B, 0, "refused", { code: "invalid", message: "This save's outcome changed. Check the save before trying again.", text: "This save's outcome changed. Check the save before trying again." });
+  assert.equal(f.store.getState().reopen?.check, "undone", "the refusal goes back to the undone page");
+  assert.equal(f.store.getState().page!.dc, 18);
+  const draft = structuredClone(f.writes.at(-1)!);
+  stop();
+  f.room.dispose();
+  const reloaded = fixture(sessionOfDraft(draft), { [PLAN]: record("undone", 2, 11) });
+  reloaded.snapshot({ [PLAN]: record("undone", 2, 11) }, 12);
+  const again = bindSaveLifecycle(reloaded.options);
+  assert.equal(reloaded.store.getState().reopen?.notice, OUTCOME_UNDONE);
+  assert.deepEqual(reloaded.notices, [], "nothing said before the reload is said again");
+  again();
+  reloaded.room.dispose();
+});
+
+test("a device ten minutes slow whose clock is then set right still mints a first Apply the server accepts", () => {
+  const stamped = Date.parse("2026-10-31T12:00:00.000Z");
+  const clock = new FakeClock();
+  clock.t = stamped - 10 * 60 * 1000;
+  const room = createRoomStore({ roomId: "room", you: DM, clock, undoNotice: { claim: () => false } });
+  room.setConnection("open");
+  room.applySnapshot({ t: "snapshot", seq: 0, watermark: 0, state: projectState(testRoom(), DM, { sceneId: "s1" }), you: { ...DM, sceneId: "s1" } });
+  const line = (id: string, at: number) => ({ key: `log:${id}`, value: { id, at: new Date(at).toISOString(), kind: "event", text: "Torch lit." } });
+  room.applyEv({ t: "ev", seq: 1, changes: [line("1:0", stamped)] });
+  // The device's clock is set right, ten minutes forward, and two seconds pass before the next line.
+  clock.jump(10 * 60 * 1000);
+  clock.advance(2_000);
+  room.applyEv({ t: "ev", seq: 2, changes: [line("2:0", stamped + 2_000)] });
+  const now = serverTime(room.store.getState(), clock);
+  assert.equal(now, stamped + 2_000, "the reckoning follows the server, not the jump");
+  const id = uuidv7(now);
+  const first = applyOp(testRoom({ tokens: { g1: token("g1") } }), { t: "actor.outcome", plan: id, page: { id, expectRevision: 0 }, label: "Fire", targets: [{ target: { tokenId: "g1" }, amount: 3 }] } as never, DM, { seq: 1, at: new Date(stamped + 2_000).toISOString() });
+  assert.ok(first.ok, first.ok ? "" : first.message);
+  room.dispose();
 });

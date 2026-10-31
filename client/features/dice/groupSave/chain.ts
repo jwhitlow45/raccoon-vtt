@@ -706,4 +706,3 @@ export function markGone(page: Page, viewing: string | null, present: (row: RowB
   }
   return next;
 }
-

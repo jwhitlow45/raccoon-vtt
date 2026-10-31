@@ -214,6 +214,14 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
     return current.reopen?.tracking || current.reopen?.check ? saveEditable(current, authorityOf(roomStore.getState(), current.page)) : true;
   };
   const edit = (next: Page) => { if (editableNow()) update(next); };
+  // A row's own edits (its total, mark and switches) send nothing, so a dropped connection or another scene on screen does not
+  // stop them: a total typed and left as the connection drops still reaches Apply. A save that has applied, or whose outcome
+  // cannot be checked, keeps them out as it keeps every edit.
+  const editRow = (next: Page) => {
+    const current = currentSession();
+    if (current.page.phase === "applying" || current.page.phase === "applied" || current.reopen?.check === "unavailable" || current.reopen?.check === "applied") return;
+    update(next);
+  };
   const lifecycleLocked = !!reopen?.check && reopen.check !== "undone";
   // An Apply the queue has let go of with no answer, and whose status cannot be checked, can only be left (D-261031-141).
   const queued = useRoomView((s) => s.pending?.some((pending) => pending.op.t === "actor.outcome" && pending.op.plan === page.plan?.plan) ?? false);
@@ -620,7 +628,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
           loading={loading && row.bonus === null}
           blocked={blocked ?? (lifecycleLocked ? "Wait for this save's confirmed state." : offScene ? "Go back to the scene first." : null)}
           locked={reopen?.check === "unavailable"}
-          onChange={(next) => edit(page.phase === "setup" ? { ...next, rows: pageRef.current.rows } : next)}
+          onChange={(next) => editRow(page.phase === "setup" ? { ...next, rows: pageRef.current.rows } : next)}
           onDmRoll={(typed, override) => {
             if (!editableNow() || blocked || offScene) return;
             const s = stateOf(page, row);

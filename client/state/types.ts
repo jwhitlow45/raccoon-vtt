@@ -499,10 +499,12 @@ export type RoomView = {
   /** A snapshot has arrived on the current connection. False during reconnect or resync, even while the old view remains visible. */
   confirmedReady?: boolean;
   /**
-   * How far the server's clock is ahead of this device's, in ms, learned
-   * from the times of log lines as they arrive (D-261031-140). The network's
-   * delay makes each reading low, never high, so a time reckoned from it is
-   * never ahead of the server's. Absent until the first line arrives.
+   * The server's time less this page's monotonic clock (Clock.elapsed), in
+   * ms, learned from the times of log lines as they arrive (D-261031-140,
+   * D-261031-170). The network's delay makes each reading low, never high,
+   * so a time reckoned from it is never ahead of the server's. Anchored to
+   * the monotonic clock, it holds through any correction of the device's
+   * own clock. Absent until the first line arrives.
    */
   serverOffset?: number;
   /**
