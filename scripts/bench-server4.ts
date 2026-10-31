@@ -3,12 +3,11 @@
  * section 4.3.6), end to end through the room actor at the caps: each row is
  * one op as a socket sends it, timed from its arrival until the last socket
  * in the room has been sent the batch's frames, history after `ev` included.
- * That covers permissions with the
- * movement test, the reducer and its "seen" marks, the limits step with the
- * split's counting pass and the sight piece cap, the size guard with both
- * reserves, the explore step, the commit (against a database that answers at
- * once, so no I/O is timed) and the fan-out with its narrow sight diff, to a
- * DM and six players.
+ * That covers permissions with the movement test, the reducer and its
+ * "seen" marks, the limits step with the split's counting pass and the
+ * sight piece cap, the size guard with both reserves, the explore step,
+ * the commit (against a database that answers at once, so no I/O is timed)
+ * and the fan-out with its narrow sight diff, to a DM and six players.
  *
  * The scenes are part 4C's (scripts/bench-vision.ts `capRoom`): a 200 x 200
  * dungeon at 6,000 potential sight pieces with crossing free walls, pillars
