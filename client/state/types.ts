@@ -169,7 +169,7 @@ export type PendingOp = {
   groupScope?: "setup";
   /** Told the op's answer once it settles (OpAnswer), with the reason when it was refused. */
   onAnswer?: OnAnswer;
-  /** No toast answers it: the caller says what became of it (DispatchOptions). */
+  /** The caller says what became of it, except retained history blockers (DispatchOptions). */
   quiet?: true;
   /** A gesture's last ask: the ops it holds until it is answered, none once the gesture was cancelled (DispatchOptions). */
   holds?: () => readonly ClientOp[];
@@ -494,6 +494,10 @@ export type RoomView = {
    * (docs/design-v1-pdf-handouts.md 4.1.5). Everything shown reads `view`.
    */
   confirmed?: ProjectedState | null;
+  /** Sequence of confirmed, before this device's pending operations. A player preview leaves it out. */
+  seq?: number;
+  /** A snapshot has arrived on the current connection. False during reconnect or resync, even while the old view remains visible. */
+  confirmedReady?: boolean;
   /**
    * How many snapshots this page has applied, the first included, so code
    * that waits on the next one (an `expired` answer, UnknownCause) can tell

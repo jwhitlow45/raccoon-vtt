@@ -366,21 +366,20 @@ for (const before of [false, true]) for (const quiet of [false, true]) test(`ret
     assert.equal(room.store.getState().toasts.length, 0, "the matching pending command will supply its answer");
   }
   room.applyEv({ t: "ev", seq: 0, changes: [], rejects: [{ n, code: "invalid", message: "could not undo changing AC: redo the play step first: damage" }] });
-  const id = room.store.getState().toasts[0]?.id;
+  const announced = room.store.getState().toasts[0]?.id;
   if (!before) room.applyHistory(retained);
   const notes = room.store.getState().toasts;
-  assert.equal(notes.length, quiet ? 0 : 1);
-  if (!quiet) {
-    assert.equal(notes[0]!.id, id, "adding Review does not create another announcement");
-    assert.equal(notes[0]!.action?.label, "Review step");
-    notes[0]!.action!.run();
-    assert.deepEqual(room.store.getState().historyReview, { scope: "setup", direction: "undo" });
-    room.applyHistory({ ...retained, serial: 2 });
-    assert.equal(room.store.getState().toasts, notes, "unchanged retention keeps the existing notice object");
-    room.ui.dismissToast(id!);
-    room.applyHistory({ ...retained, serial: 3 });
-    assert.equal(room.store.getState().toasts.length, 0, "a dismissed result stays dismissed");
-  }
+  assert.equal(notes.length, 1, "a retained blocker is actionable even when the command is quiet");
+  if (announced !== undefined) assert.equal(notes[0]!.id, announced, "adding Review does not create another announcement");
+  if (quiet) assert.equal(notes[0]!.text, "Redo the play step first: damage.");
+  assert.equal(notes[0]!.action?.label, "Review step");
+  notes[0]!.action!.run();
+  assert.deepEqual(room.store.getState().historyReview, { scope: "setup", direction: "undo" });
+  room.applyHistory({ ...retained, serial: 2 });
+  assert.equal(room.store.getState().toasts, notes, "unchanged retention keeps the existing notice object");
+  room.ui.dismissToast(notes[0]!.id);
+  room.applyHistory({ ...retained, serial: 3 });
+  assert.equal(room.store.getState().toasts.length, 0, "a dismissed result stays dismissed");
   room.dispose();
 });
 
@@ -412,7 +411,7 @@ test("randomized retained answers never duplicate a notice or replace its identi
       room.applyEv({ t: "ev", seq: 0, changes: [], rejects: [{ n, code: "invalid", message: "could not undo changing AC: redo the other step first" }] });
       if (!before) room.applyHistory(retained);
       const notes = room.store.getState().toasts;
-      assert.equal(notes.length, quiet ? 0 : 1, `seed ${seed}, step ${step}: one terminal announcement, none for quiet commands`);
+      assert.equal(notes.length, 1, `seed ${seed}, step ${step}: one retained-blocker announcement, including quiet commands`);
       const identity = notes[0]?.id;
       room.applyEv({ t: "ev", seq: 0, changes: [], rejects: [{ n, code: "invalid", message: "could not undo changing AC: redo the other step first" }] });
       room.applyHistory(retained);
@@ -443,6 +442,29 @@ test("a retained different head is independent of an old refusal and a pending c
   room.applyHistory(different);
   assert.equal(room.store.getState().toasts.length, 1);
   assert.equal(room.store.getState().toasts[0]!.action?.label, "Review step");
+  room.dispose();
+});
+
+test("a quiet retry of the same retained head announces the blocker once more", () => {
+  const room = createRoomStore({ roomId: "R1", you: DM, clock: new FakeClock() });
+  room.setOutbox(new FakeOutbox());
+  room.setConnection("open");
+  room.applySnapshot({ t: "snapshot", seq: 0, state: projectState(testRoom(), DM, { sceneId: "s1" }), you: { ...DM, sceneId: "s1" }, watermark: 0 });
+  room.applyHistory(frame());
+  const identities: number[] = [];
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const n = room.dispatch({ t: "undo", scope: "setup", head: id(1001) }, { quiet: true })!;
+    room.applyEv({ t: "ev", seq: 0, changes: [], rejects: [{ n, code: "invalid", message: "could not undo changing AC: redo damage first" }] });
+    const retained = frame(1, 0, attempt, n);
+    retained.setup!.undo.head!.retained = { scope: "play", direction: "redo", label: "damage", buried: false };
+    room.applyHistory(retained);
+    const notes = room.store.getState().toasts;
+    assert.equal(notes.length, 1);
+    assert.equal(notes[0]!.text, "Redo the play step first: damage.");
+    assert.equal(notes[0]!.action?.label, "Review step");
+    identities.push(notes[0]!.id);
+  }
+  assert.notEqual(identities[0], identities[1], "an explicit retry has its own result");
   room.dispose();
 });
 

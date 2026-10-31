@@ -27,8 +27,8 @@ import { findRolls } from "./logic.ts";
  */
 export type PartState =
   | { state: "sending" }
-  | { state: "committed"; lines: LogEntry[] }
-  | { state: "refused"; code: string; message: string; text: string }
+  | { state: "committed"; lines: LogEntry[]; seq?: number }
+  | { state: "refused"; code: string; message: string; text: string; seq?: number }
   | { state: "checking" }
   | { state: "unknown" };
 
@@ -36,8 +36,12 @@ export type ReceiptState =
   | { state: "sending" }
   | { state: "checking" }
   | { state: "unknown" }
-  | { state: "refused"; code: string; message: string; text: string }
-  | { state: "committed"; lines: LogEntry[]; refused?: { code: string; message: string; text: string } };
+  | { state: "refused"; code: string; message: string; text: string; seq?: number }
+  | { state: "committed"; lines: LogEntry[]; seq?: number; refused?: { code: string; message: string; text: string } };
+
+function committedPart(lines: LogEntry[], seq?: number): Extract<PartState, { state: "committed" }> {
+  return { state: "committed", lines, ...(seq !== undefined ? { seq } : {}) };
+}
 
 /** The words of a part the server refused, as the toast would say them, from a lookup's code and message. */
 function refusedPart(code: string, message: string): PartState {
@@ -55,8 +59,8 @@ export function refusalWords(refusal: Pick<OpRefusal, "text" | "message"> | unde
 }
 
 /** A refused part's words from a live answer, as the server words them, the same as a lookup gives them. */
-function liveRefusal(refusal: OpRefusal | undefined): PartState {
-  return { state: "refused", code: refusal?.code ?? "invalid", message: refusal?.message ?? "", text: refusalWords(refusal) };
+function liveRefusal(refusal: OpRefusal | undefined, seq?: number): PartState {
+  return { state: "refused", code: refusal?.code ?? "invalid", message: refusal?.message ?? "", text: refusalWords(refusal), ...(seq !== undefined ? { seq } : {}) };
 }
 
 type Entry = {
@@ -82,6 +86,8 @@ export type ReceiptEnv = {
   lookup(tag: string): Promise<ReceiptLookup>;
   /** The viewer's live log, where a tag's lines land. */
   log(): readonly LogEntry[];
+  /** The confirmed view's sequence when an answer or covering snapshot lands. */
+  seq?(): number | undefined;
 };
 
 /** One room's receipts as this page knows them. Pure apart from `env`, so its rules are tested without React. */
@@ -133,13 +139,13 @@ export class ReceiptTracker {
   /** The store's answer to a part: taken, refused, or unknown with how it came about. */
   answer(tag: string, part: number, answer: OpAnswer, refusal?: OpRefusal, cause?: UnknownCause): void {
     const entry = this.#entry(tag);
-    if (answer === "taken") entry.parts.set(part, { state: "committed", lines: this.#lines(tag, part) });
-    else if (answer === "refused") entry.parts.set(part, liveRefusal(refusal));
+    if (answer === "taken") entry.parts.set(part, committedPart(this.#lines(tag, part), this.env?.seq?.()));
+    else if (answer === "refused") entry.parts.set(part, liveRefusal(refusal, this.env?.seq?.()));
     else {
       // A snapshot that settled the op is in the view now, so this part's own line, if it committed, is there to find.
       // Another part's line of the same tag says nothing of this one, which may have been refused (W7-SOL-02).
       const lines = cause === "snapshot" ? this.#lines(tag, part) : [];
-      if (lines.length > 0) entry.parts.set(part, { state: "committed", lines });
+      if (lines.length > 0) entry.parts.set(part, committedPart(lines, this.env?.seq?.()));
       else {
         entry.parts.set(part, { state: "checking" });
         this.#changed();
@@ -183,16 +189,20 @@ export class ReceiptTracker {
     }
     const held = new Map((answer?.parts ?? []).map((p) => [p.part, p]));
     for (const [part, state] of entry.parts) {
-      if (state.state !== "checking") continue;
       const found = held.get(part);
+      if (state.state === "committed" && found?.state === "committed") {
+        entry.parts.set(part, committedPart(state.lines, Math.max(state.seq ?? 0, found.seq)));
+        continue;
+      }
+      if (state.state !== "checking") continue;
       if (!found) entry.parts.set(part, { state: "unknown" });
-      else if (found.state === "committed") entry.parts.set(part, { state: "committed", lines: found.lines });
+      else if (found.state === "committed") entry.parts.set(part, committedPart(found.lines, found.seq));
       else entry.parts.set(part, refusedPart(found.code, found.message));
     }
     // Parts this page never sent, such as a group's other batches after a reload.
     for (const [part, found] of held) {
       if (entry.parts.has(part)) continue;
-      entry.parts.set(part, found.state === "committed" ? { state: "committed", lines: found.lines } : refusedPart(found.code, found.message));
+      entry.parts.set(part, found.state === "committed" ? committedPart(found.lines, found.seq) : refusedPart(found.code, found.message));
     }
     this.#changed();
   }
@@ -207,14 +217,22 @@ export class ReceiptTracker {
     if (parts.some((p) => p.state === "unknown")) return { state: "unknown" };
     const committed = parts.filter((p): p is Extract<PartState, { state: "committed" }> => p.state === "committed");
     const refused = parts.find((p): p is Extract<PartState, { state: "refused" }> => p.state === "refused");
-    if (committed.length === 0 && refused) return refused;
+    if (committed.length === 0 && refused) {
+      const sequences = parts.flatMap((part) => part.state === "refused" && part.seq !== undefined ? [part.seq] : []);
+      const { seq: _seq, ...reason } = refused;
+      return { ...reason, ...(sequences.length === parts.length ? { seq: Math.max(...sequences) } : {}) };
+    }
     // What the answers and lookups kept, merged with the live log by entry id, the live entry winning and in log order:
     // the live log may have trimmed some of a group's lines and not others, and a lookup may hold all of them.
     const byId = new Map<string, LogEntry>();
     for (const p of committed) for (const line of p.lines) byId.set(line.id, line);
     for (const line of this.#lines(tag)) byId.set(line.id, line);
     const lines = [...byId.values()].sort((a, b) => compareLogIds(a.id, b.id));
-    return refused ? { state: "committed", lines, refused: { code: refused.code, message: refused.message, text: refused.text } } : { state: "committed", lines };
+    // Cover every committed part before offering one sequence for the group.
+    // Log ids alone cannot establish coverage, especially after pruning.
+    const sequences = committed.flatMap((part) => part.seq === undefined ? [] : [part.seq]);
+    const seq = sequences.length > 0 && sequences.length === committed.length ? Math.max(...sequences) : undefined;
+    return { ...committedPart(lines, seq), ...(refused ? { refused: { code: refused.code, message: refused.message, text: refused.text } } : {}) };
   }
 
   /** A surface shows this tag while mounted. */
@@ -275,7 +293,14 @@ export function useReceipts(): ReceiptTracker {
   const roomId = useRoomView((s) => s.roomId);
   const store = useRoomStore();
   // The log is read from the store when an answer lands, which is before any render shows it.
-  tracker.env ??= { lookup: (tag) => api.getReceipts(roomId, tag), log: () => store.getState().view?.log ?? [] };
+  tracker.env ??= {
+    lookup: (tag) => api.getReceipts(roomId, tag),
+    log: () => store.getState().view?.log ?? [],
+    seq: () => {
+      const state = store.getState();
+      return state.confirmedReady && state.confirmed ? state.seq : undefined;
+    },
+  };
   return tracker;
 }
 

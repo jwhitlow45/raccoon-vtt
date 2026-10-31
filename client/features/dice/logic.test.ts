@@ -178,6 +178,56 @@ describe("a tag's receipt (docs/design-v1-dice.md 8.7)", () => {
     assert.equal(t.state("R")?.state, "refused");
   });
 
+  test("receipt lookups preserve the maximum committed sequence, including parts discovered after reload", async () => {
+    const line = { ...entry(dice({ tag: "sequence" })), id: "999:0" };
+    const t = tracker([line], async () => ({ parts: [
+      { part: 0, state: "committed", seq: 9, lines: [line] },
+      { part: 1, state: "committed", seq: 14, lines: [] },
+      { part: 2, state: "refused", code: "invalid", message: "No roll." },
+    ] }));
+    await t.lookup("sequence");
+    const state = t.state("sequence");
+    assert.equal(state?.state, "committed");
+    assert.ok(state?.state === "committed");
+    assert.equal(state.seq, 14, "lookup sequence wins over unrelated or pruned log ids");
+  });
+
+  test("live and swallowed answers capture the confirmed sequence without inferring it from log ids", () => {
+    const line = { ...entry(dice({ tag: "live", part: 1 })), id: "1000:0" };
+    const t = tracker([line]);
+    let confirmed = 7;
+    t.env!.seq = () => confirmed;
+    t.sending("live", 0);
+    t.sending("live", 1);
+    t.answer("live", 0, "taken");
+    confirmed = 12;
+    t.answer("live", 1, "unknown", undefined, "snapshot");
+    assert.deepEqual(t.state("live"), { state: "committed", lines: [line], seq: 12 });
+    confirmed = 30;
+    assert.deepEqual(t.state("live"), { state: "committed", lines: [line], seq: 12 }, "later room traffic does not rewrite the receipt's coverage");
+    const without = tracker([line]);
+    without.answer("live", 1, "unknown", undefined, "snapshot");
+    assert.deepEqual(without.state("live"), { state: "committed", lines: [line] }, "a log id is never a substitute for confirmed sequence");
+    without.env!.seq = () => 40;
+    without.answer("live", 0, "taken");
+    assert.deepEqual(without.state("live"), { state: "committed", lines: [line] }, "partial sequence knowledge does not claim coverage for every committed part");
+  });
+
+  test("live refusals retain their confirmed sequence while lookup refusals claim none", async () => {
+    const refusal = { code: "invalid" as const, message: "The request changed.", text: "Not saved. The request changed." };
+    const t = tracker();
+    let confirmed = 11;
+    t.env!.seq = () => confirmed;
+    t.answer("refused", 0, "refused", refusal);
+    confirmed = 15;
+    t.answer("refused", 1, "refused", refusal);
+    assert.deepEqual(t.state("refused"), { state: "refused", code: "invalid", message: refusal.message, text: refusal.message, seq: 15 });
+    const reloaded = tracker([], async () => ({ parts: [{ part: 0, state: "refused", code: "invalid", message: refusal.message }] }));
+    reloaded.env!.seq = () => 20;
+    await reloaded.lookup("refused");
+    assert.deepEqual(reloaded.state("refused"), { state: "refused", code: "invalid", message: refusal.message, text: refusal.message });
+  });
+
   test("a group reads as its least settled part, and committed with the refusals of others", () => {
     const t = tracker([entry(dice({ tag: "G" }))]);
     t.sending("G", 0);
@@ -235,6 +285,7 @@ describe("a tag's receipt (docs/design-v1-dice.md 8.7)", () => {
     await t.lookup("G");
     const state = t.state("G");
     assert.ok(state?.state === "committed" && state.refused?.code === "forbidden", "committed beside the refusal of part 1");
+    assert.equal(state.seq, 1, "lookup adds the confirmed sequence to a part already found in the snapshot log");
     assert.deepEqual(state.lines, [first]);
     assert.equal(asked, 1);
   });

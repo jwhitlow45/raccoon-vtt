@@ -5,6 +5,7 @@ import { blockerText, EMPTY_HISTORY, HistoryController, refusalSentence, type Hi
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { uuidv7 } from "#shared/ids.ts";
 import { parseKey } from "#shared/keys.ts";
+import { MAX_OP_AGE_MS } from "#shared/pendingOps.ts";
 import { endSentence } from "#shared/logText.ts";
 import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
 import { applyChanges, projectLogEntry, type ProjectedState } from "#shared/project.ts";
@@ -29,6 +30,7 @@ import { panelById } from "../features/panels.ts";
 import { crossWide, EMPTY_EPHEMERAL, INITIAL_LOCAL, MAX_REFUSED, withoutBelow, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetExpanded, withSheetHidden, withSidePanelHidden, withSplit, withSplitFits, withSwap, type Ended, type LocalUi, type OnAnswer, type OpAnswer, type OpRefusal, type PanelHow, type PendingOp, type RoomView, type Toast, type ToastAction, type ToastDie, type UnknownCause, type You } from "./types.ts";
 
 export type { PendingOp } from "./types.ts";
+export { MAX_OP_AGE_MS } from "#shared/pendingOps.ts";
 
 /**
  * The optimistic client (design section 7.4): `confirmed` is the last
@@ -63,8 +65,6 @@ function editsIn(ops: readonly PendingOp[]): number {
 
 /** An op that has had no answer this long is resent with everything after it (design 7.4). */
 export const OP_ANSWER_MS = 10_000;
-/** Pending ops older than this are dropped on reconnect: the server keeps watermarks much longer, but nobody wants a 12 hour old edit. */
-export const MAX_OP_AGE_MS = 12 * 60 * 60 * 1000;
 const MAX_TOASTS = 3;
 const SETUP_SAVED = "Saved. Undo in Setup history.";
 const TOO_LARGE_TO_UNDO = "This change is too large to undo.";
@@ -188,6 +188,7 @@ export type DispatchOptions = UndoGroupOptions & {
    * an undo, and "Undid moving Thorn." would read as if the teleport had
    * been taken back.
    * Confirmed DM Setup saves still announce where their Undo lives.
+   * Retained history blockers still announce the action needed to proceed.
    */
   quiet?: boolean;
   /**
@@ -494,6 +495,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     ended: null,
     local: initialLocal,
     confirmed: null,
+    confirmedReady: false,
     seq: 0,
     pending: [],
     refused: [],
@@ -554,7 +556,14 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
           const refusal = historyRefusals.get(key);
           if (refusal?.head === head.id) {
             const toasts = get().toasts;
-            if (toasts.some((toast) => toast.id === refusal.toast && !toast.action)) {
+            if (refusal.toast === null) {
+              // A quiet caller has no terminal toast to enrich. The retained
+              // step still needs its blocker and Review action, once per refusal.
+              const text = blockerText(head.retained);
+              const id = ++toastSeq;
+              historyRefusals.set(key, { head: head.id, toast: id });
+              store.setState({ toasts: withToast(toasts.filter((toast) => toast.text !== text), { id, text, tone: "info", action }) });
+            } else if (toasts.some((toast) => toast.id === refusal.toast && !toast.action)) {
               store.setState({ toasts: toasts.map((toast) => toast.id === refusal.toast ? { ...toast, action } : toast) });
             }
             retainedNotices.set(key, signature);
@@ -939,6 +948,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       const accessVersion = s.accessVersion + 1;
       commit({
         confirmed: msg.state as ProjectedState,
+        confirmedReady: true,
         seq: msg.seq,
         pending,
         you,
@@ -1115,6 +1125,9 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
 
     suspend() {
       ready = false;
+      // History invalidation publishes synchronously too. Gate confirmed-state
+      // consumers before that first notification can expose the old snapshot.
+      store.setState({ confirmedReady: false });
       history.suspend();
       sentAt.clear();
       retryTimer.clear();
@@ -1146,7 +1159,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       ready = false;
       retryTimer.clear();
       answerTimer.clear();
-      store.setState({ ended });
+      store.setState({ ended, confirmedReady: false });
       history.suspend();
     },
 

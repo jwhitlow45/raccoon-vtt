@@ -4,12 +4,13 @@ import type { RoomState, Viewer } from "#shared/model.ts";
 import { BLOCK_SAVES_TOO_FAST, checkLimits, LIMITS } from "#shared/limits.ts";
 import { LEDGE_IN_THE_WAY_BACK, WALL_IN_THE_WAY_BACK } from "#shared/permissions.ts";
 import { projectState } from "#shared/project.ts";
+import { MAX_OP_AGE_MS } from "#shared/pendingOps.ts";
 import { FORGET_ASK, type ClientOp, type OpOf, type ServerMessage } from "#shared/protocol.ts";
 import { actor, character, companionBlock, DM, entry, P1, P2, room, template, token } from "#shared/testutil.ts";
 import { LocalServer } from "../dev/localServer.ts";
 import { turnOp } from "../features/encounter/logic.ts";
 import { DRAG_END_HOLD_MS, PREVIEW_IDLE_MS } from "./ephemeral.ts";
-import { createRoomStore, FORGET_UNSURE, MAX_OP_AGE_MS, OP_ANSWER_MS, refusalText, replayPending, type RoomStore } from "./store.ts";
+import { createRoomStore, FORGET_UNSURE, OP_ANSWER_MS, refusalText, replayPending, type RoomStore } from "./store.ts";
 import { applyTestHistory, TEST_HISTORY_HEAD, FakeClock, FakeOutbox } from "./testing.ts";
 import { INITIAL_LOCAL, panelView, sheetOpen, withoutBelow, withPanel, type LocalUi, type OpAnswer, type OpRefusal, type UnknownCause } from "./types.ts";
 
@@ -114,6 +115,29 @@ describe("a predicted shared line keeps only the parts the viewer could read", (
 });
 
 describe("snapshot and acknowledgment", () => {
+  test("confirmed readiness waits for this connection's snapshot and precedes answer callbacks", () => {
+    const s = setup(room());
+    assert.equal(s.state().confirmedReady, false);
+    s.connect();
+    assert.equal(s.state().confirmedReady, true);
+    const prior = s.state().confirmed;
+    const suspended: (boolean | undefined)[] = [];
+    const unsubscribe = s.room.store.subscribe((state) => suspended.push(state.confirmedReady));
+    s.room.suspend();
+    unsubscribe();
+    assert.ok(suspended.length > 0 && suspended.every((ready) => ready === false), "synchronous subscribers never see stale readiness during suspend");
+    s.room.setConnection("open");
+    assert.equal(s.state().confirmed, prior, "the previous view stays available for rendering");
+    assert.equal(s.state().confirmedReady, false, "connection-open alone cannot make the old snapshot current");
+    const observations: { ready: boolean | undefined; seq: number }[] = [];
+    s.room.dispatch(damage("missing", 1), { onAnswer: () => observations.push({ ready: s.state().confirmedReady, seq: s.state().seq }) });
+    s.room.applySnapshot({ t: "snapshot", seq: 12, watermark: 1, state: projectState(room(), DM, { sceneId: "s1" }), you: { ...DM, sceneId: "s1" } });
+    assert.deepEqual(observations, [{ ready: true, seq: 12 }]);
+    s.room.setEnded({ kind: "revoked", code: 4001 });
+    assert.equal(s.state().confirmedReady, false);
+    s.room.dispose();
+  });
+
   test("relative ops count once: before their ev only in pending, after it only in confirmed", () => {
     const s = setup(room({ tokens: { g1: token("g1", { actor: { inline: actor({ hp: { cur: 30, max: 30, temp: 0 } }) } }) } }));
     s.connect();
