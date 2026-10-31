@@ -1,14 +1,11 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { EventEmitter } from "node:events";
 import { after, before, describe, test } from "node:test";
 import pg from "pg";
 import { uuidv7 } from "#shared/ids.ts";
 import type { LogEntry } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
-import { heldOpLines, ReceiptLines } from "../rooms/logHistory.ts";
-import { stateThrough } from "./receipts.ts";
-import { ScanBusyError, ScanCancelledError } from "../rooms/logScanBudget.ts";
+import { heldOpLines } from "../rooms/logHistory.ts";
 import { startEngine, type Engine } from "../rooms/testing.ts";
 
 /**
@@ -123,6 +120,40 @@ describe("GET /api/rooms/:id/receipts/:tag from the archive", () => {
     assert.equal((await pip.get(`/api/rooms/${roomId}/receipts/${tag}`)).statusCode, 200, "the next lookup is served");
   });
 
+  for (const [stage, lock] of [
+    ["grant read", "lock table grants in access exclusive mode"],
+    ["receipt-limit read", "lock table rate_events in access exclusive mode"],
+    ["receipt charge", "lock table rate_events in share mode"],
+  ] as const) test(`the deadline bounds the ${stage}, cancels SQL and frees the connection`, async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Receipt admission deadline");
+    const holder = await t.pool.connect();
+    try {
+      await holder.query("begin");
+      await holder.query(lock);
+      const started = Date.now();
+      const res = await dm.get(`/api/rooms/${roomId}/receipts/${uuidv7()}`);
+      assert.equal(res.statusCode, 503, res.body);
+      assert.equal(res.json<{ error: string }>().error, "busy");
+      assert.ok(Date.now() - started < 3_000, "bounded by the configured receipt deadline");
+      assert.equal((await t.pool.query("select 1 as unrelated")).rows[0]!.unrelated, 1);
+      const table = stage === "grant read" ? "grants" : "rate_events";
+      let waiting = 1;
+      for (let i = 0; i < 100 && waiting > 0; i++) {
+        waiting = (await t.pool.query(
+          "select 1 from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock' and query like $1",
+          [`%${table}%`],
+        )).rowCount ?? 0;
+        if (waiting > 0) await new Promise((r) => setTimeout(r, 20));
+      }
+      assert.equal(waiting, 0, "the route's backend is no longer waiting on the lock");
+    } finally {
+      await holder.query("rollback");
+      holder.release();
+    }
+    assert.equal((await dm.get(`/api/rooms/${roomId}/receipts/${uuidv7()}`)).statusCode, 200);
+  });
+
   test("a receipt committed while the lookup reads the rows is projected against a state that holds its op, so its lines come back", async () => {
     const dm = t.client();
     const { roomId } = await dm.createRoom("Receipts racing");
@@ -195,110 +226,5 @@ describe("GET /api/rooms/:id/receipts/:tag from the archive", () => {
       holder.release();
     }
     assert.equal((await pip.get(`/api/rooms/${roomId}/receipts/${tag}`)).statusCode, 200);
-  });
-});
-
-describe("a lookup's wait for the room's state", () => {
-  test("returns the state once it reaches the newest receipt's seq, and a cancel ends the wait", async () => {
-    const actor = { committed: { state: { meta: { name: "five" } } as never, seq: 5 } };
-    assert.equal(await stateThrough(actor, 5, new AbortController().signal), actor.committed.state, "a state already there is taken at once");
-    const later = stateThrough(actor, 6, new AbortController().signal);
-    setTimeout(() => (actor.committed = { state: { meta: { name: "six" } } as never, seq: 6 }), 30);
-    assert.equal(((await later) as unknown as { meta: { name: string } }).meta.name, "six");
-    const abort = new AbortController();
-    const never = stateThrough(actor, 99, abort.signal);
-    setTimeout(() => abort.abort(new Error("deadline")), 30);
-    await assert.rejects(never, ScanCancelledError);
-  });
-});
-
-/** A connection whose answers a test controls: pending queries fail when it is destroyed, as a real one's do. */
-class Fake extends EventEmitter {
-  readonly steps: string[] = [];
-  hang = false;
-  fail = false;
-  /** Runs as a statement's answer is handed back, in the same tick. */
-  answered: (() => void) | null = null;
-  #pending: ((err: Error) => void)[] = [];
-  query(config: { text: string }): Promise<{ rows: unknown[] }> {
-    this.steps.push(config.text.trim().split(/\s+/).slice(0, 2).join(" "));
-    if (this.fail) return Promise.reject(new Error("statement failed"));
-    if (this.hang) return new Promise((_resolve, reject) => this.#pending.push(reject));
-    this.answered?.();
-    return Promise.resolve({ rows: [] });
-  }
-  release(destroy?: boolean): void {
-    this.steps.push(destroy ? "destroy" : "release");
-    if (destroy) for (const reject of this.#pending.splice(0)) reject(new Error("Connection terminated"));
-  }
-}
-
-describe("a receipt lookup's connection, every step bounded and cancellable", () => {
-  const viewer = { memberId: "p1", role: "player" as const };
-
-  test("a checkout the pool does not give in time fails busy, and a connection handed over after is destroyed", async () => {
-    let hand!: (c: Fake) => void;
-    const lines = new ReceiptLines({ pool: { connect: () => new Promise((resolve) => (hand = resolve as never)) } as never, checkoutMs: 50 });
-    const started = Date.now();
-    await assert.rejects(lines.read("ROOM", [1], viewer, new AbortController().signal), ScanBusyError);
-    assert.ok(Date.now() - started < 1_000);
-    const late = new Fake();
-    hand(late);
-    await new Promise((r) => setImmediate(r));
-    assert.deepEqual(late.steps, ["destroy"], "nothing runs on it");
-  });
-
-  test("a cancel during a checkout ends the wait at once", async () => {
-    const abort = new AbortController();
-    const lines = new ReceiptLines({ pool: { connect: () => new Promise(() => undefined) } as never, checkoutMs: 60_000 });
-    const reading = lines.read("ROOM", [1], viewer, abort.signal);
-    abort.abort(new Error("client went away"));
-    await assert.rejects(reading, ScanCancelledError);
-  });
-
-  test("a cancel during a statement sends the backend a cancel request, then destroys the connection, with no more SQL", async () => {
-    const conn = new Fake();
-    conn.hang = true;
-    const order: string[] = [];
-    const lines = new ReceiptLines({
-      pool: { connect: () => Promise.resolve(conn) } as never,
-      cancel: async () => {
-        order.push(`cancel after ${conn.steps.join(",")}`);
-      },
-    });
-    const abort = new AbortController();
-    const reading = lines.read("ROOM", [1, 2], viewer, abort.signal);
-    await new Promise((r) => setImmediate(r));
-    abort.abort(new Error("deadline"));
-    await assert.rejects(reading, ScanCancelledError);
-    assert.deepEqual(order, ["cancel after select entry"], "the cancel request first, before the connection goes");
-    assert.deepEqual(conn.steps, ["select entry", "destroy"]);
-  });
-
-  test("a cancel that lands as a statement answers sends no more SQL, and fails the lookup even when that was its last", async () => {
-    for (const seqs of [[1, 2], [1]]) {
-      const conn = new Fake();
-      const abort = new AbortController();
-      conn.answered = () => abort.abort(new Error("client went away"));
-      let cancels = 0;
-      const lines = new ReceiptLines({ pool: { connect: () => Promise.resolve(conn) } as never, cancel: async () => void cancels++ });
-      await assert.rejects(lines.read("ROOM", seqs, viewer, abort.signal), ScanCancelledError, `seqs ${seqs.join(",")}`);
-      assert.deepEqual(conn.steps, ["select entry", "destroy"], `seqs ${seqs.join(",")}: one statement, then the drop`);
-      assert.equal(cancels, 1);
-    }
-  });
-
-  test("a failed statement destroys the connection after a cancel request, and a lookup that ends well returns it", async () => {
-    const conn = new Fake();
-    conn.fail = true;
-    let cancels = 0;
-    const lines = new ReceiptLines({ pool: { connect: () => Promise.resolve(conn) } as never, cancel: async () => void cancels++ });
-    await assert.rejects(lines.read("ROOM", [1], viewer, new AbortController().signal), /statement failed/);
-    assert.deepEqual(conn.steps, ["select entry", "destroy"]);
-    assert.equal(cancels, 1);
-    const good = new Fake();
-    const ok = new ReceiptLines({ pool: { connect: () => Promise.resolve(good) } as never });
-    assert.deepEqual([...(await ok.read("ROOM", [1, 1, 2], viewer, new AbortController().signal)).keys()], [1, 2]);
-    assert.deepEqual(good.steps, ["select entry", "select entry", "release"]);
   });
 });

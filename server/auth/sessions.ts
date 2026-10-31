@@ -109,10 +109,10 @@ export class SessionStore {
   }
 
   /** The session the request's cookie names, without side effects. */
-  lookup(req: FastifyRequest): Promise<SessionRow | null> {
+  lookup(req: FastifyRequest, q: Queryable = this.#pool): Promise<SessionRow | null> {
     let found = this.#memo.get(req);
     if (!found) {
-      found = this.#find(req.cookies[this.cookie.name]);
+      found = this.#find(req.cookies[this.cookie.name], q);
       this.#memo.set(req, found);
     }
     return found;
@@ -123,8 +123,8 @@ export class SessionStore {
    * sessions: a display session is renewed by its sockets alone, never by a
    * request.
    */
-  async session(req: FastifyRequest, reply: FastifyReply): Promise<SessionContext | null> {
-    const row = await this.lookup(req);
+  async session(req: FastifyRequest, reply: FastifyReply, q: Queryable = this.#pool): Promise<SessionContext | null> {
+    const row = await this.lookup(req, q);
     if (!row) return null;
     if (row.slide || row.touch) {
       const slide = row.slide;
@@ -132,7 +132,7 @@ export class SessionStore {
       // do it once.
       row.slide = false;
       row.touch = false;
-      await this.#pool.query(
+      await q.query(
         `update sessions set last_seen_at = now(),
            expires_at = case when $2 then now() + make_interval(days => $3) else expires_at end
          where id = $1`,
@@ -209,7 +209,7 @@ export class SessionStore {
     return result.rowCount ?? 0;
   }
 
-  async #find(token: string | undefined): Promise<SessionRow | null> {
+  async #find(token: string | undefined, q: Queryable): Promise<SessionRow | null> {
     if (!isToken(token)) return null;
     const now = this.#now();
     const until = this.#unknown.get(token);
@@ -217,7 +217,7 @@ export class SessionStore {
       if (until > now) return null;
       this.#unknown.delete(token);
     }
-    const { rows } = await this.#pool.query<{ id: string; slide: boolean; touch: boolean }>(
+    const { rows } = await q.query<{ id: string; slide: boolean; touch: boolean }>(
       `select id,
          expires_at < now() + make_interval(days => $2) - interval '1 day' as slide,
          last_seen_at < now() - interval '10 minutes' as touch

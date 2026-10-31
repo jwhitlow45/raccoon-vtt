@@ -2,8 +2,8 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
 import { projectArchivedLog } from "#shared/project.ts";
-import { accessRoutes, type AuthKit, enforce, HttpError, requireGrant, roomParam } from "../auth/http.ts";
-import { ReceiptLines } from "../rooms/logHistory.ts";
+import { accessRoutes, type AuthKit, enforce, HttpError, roomParam } from "../auth/http.ts";
+import { ReceiptLines, receiptWait } from "../rooms/logHistory.ts";
 import { ScanBusyError, ScanCancelledError } from "../rooms/logScanBudget.ts";
 import type { RoomManager } from "../rooms/manager.ts";
 import type { ReceiptRow } from "../rooms/persistence.ts";
@@ -24,13 +24,13 @@ import type { ReceiptRow } from "../rooms/persistence.ts";
  * committed state, captured once, after the receipt rows are read and once
  * it holds each of their ops, so a commit during the lookup never mixes two
  * states and never meets a state older than its op. The rows and the lines
- * are read on one bounded, cancellable connection under the lookup's
- * deadline. Behind the room's grant, and limited per member and room before
- * anything is read.
+ * use bounded, cancellable connections under the lookup's deadline,
+ * released while waiting for the state. Behind the room's grant, and
+ * limited per member and room before anything is read.
  */
 const TAG = z.string().min(1).max(64);
 
-/** How long a whole lookup may read its rows and the archive, and wait for the room's state. */
+/** How long a whole lookup may authorize, charge, read and wait for the room's state. */
 const RECEIPT_DEADLINE_MS = 5_000;
 
 export type ReceiptPart =
@@ -50,39 +50,42 @@ export function registerReceiptRoutes(app: FastifyInstance, kit: AuthKit, deps: 
       const roomId = roomParam(req);
       const tag = TAG.safeParse((req.params as { tag?: unknown }).tag);
       if (!tag.success) throw new HttpError(400, "invalid_query");
-      const grant = await requireGrant(kit, req, reply, roomId);
-      enforce(await kit.limits.receiptLookups(roomId, grant.memberId));
-      await kit.limits.recordReceiptLookup(roomId, grant.memberId);
-      const actor = await deps.manager.acquire(roomId);
-      const viewer: Viewer = { memberId: grant.memberId, role: grant.role };
       const gone = new AbortController();
       const onClose = () => {
         if (!reply.raw.writableFinished) gone.abort(new Error("client went away"));
       };
       reply.raw.on("close", onClose);
       const signal = AbortSignal.any([gone.signal, AbortSignal.timeout(deadlineMs)]);
-      let found: Awaited<ReturnType<ReceiptLines["lookup"]>>;
       try {
+        const grant = await archive.withQueries(signal, async (q) => {
+          const allowed = await kit.auth.grant(req, reply, roomId, q);
+          if (!allowed) throw new HttpError(403, "no_access");
+          enforce(await kit.limits.receiptLookups(roomId, allowed.memberId, q));
+          await kit.limits.recordReceiptLookup(roomId, allowed.memberId, q);
+          return allowed;
+        });
+        const actor = await receiptWait(deps.manager.acquire(roomId), signal);
+        const viewer: Viewer = { memberId: grant.memberId, role: grant.role };
         // The state is taken after the rows are read, once it holds every committed receipt's op (stateThrough).
-        found = await archive.lookup(roomId, viewer, tag.data, signal, (rows) => stateThrough(actor, newestCommitted(rows), signal));
+        const found = await archive.lookup(roomId, viewer, tag.data, signal, (rows) => stateThrough(actor, newestCommitted(rows), signal));
+        const { rows, state, lines } = found;
+        const scene = grant.role === "dm" ? state.meta.playerSceneId : null;
+        const parts: ReceiptPart[] = [];
+        for (const row of rows) {
+          if (row.state === "refused" || row.seq === null) {
+            parts.push({ part: row.part, state: "refused", code: row.code ?? "invalid", message: row.message ?? "" });
+            continue;
+          }
+          parts.push({ part: row.part, state: "committed", seq: row.seq, lines: projectArchivedLog(state, lines.get(row.seq) ?? [], viewer, { sceneId: scene }) });
+        }
+        reply.header("cache-control", "no-store");
+        return { parts };
       } catch (err) {
         if (err instanceof ScanBusyError || err instanceof ScanCancelledError) throw new HttpError(503, "busy", { retryAfter: 1 });
         throw err;
       } finally {
         reply.raw.off("close", onClose);
       }
-      const { rows, state, lines } = found;
-      const scene = grant.role === "dm" ? state.meta.playerSceneId : null;
-      const parts: ReceiptPart[] = [];
-      for (const row of rows) {
-        if (row.state === "refused" || row.seq === null) {
-          parts.push({ part: row.part, state: "refused", code: row.code ?? "invalid", message: row.message ?? "" });
-          continue;
-        }
-        parts.push({ part: row.part, state: "committed", seq: row.seq, lines: projectArchivedLog(state, lines.get(row.seq) ?? [], viewer, { sceneId: scene }) });
-      }
-      reply.header("cache-control", "no-store");
-      return { parts };
     });
   });
 }
@@ -101,11 +104,12 @@ function newestCommitted(rows: readonly ReceiptRow[]): number {
  * drop lines the caller may read, so the lookup waits for the state, and a
  * cancel or the deadline ends the wait as ScanCancelledError (busy).
  */
-export async function stateThrough(actor: { readonly committed: { state: RoomState; seq: number } }, seq: number, signal: AbortSignal): Promise<RoomState> {
+export async function stateThrough(actor: { readonly committed: { state: RoomState; seq: number }; readonly closed?: boolean; readonly replayFailed?: boolean }, seq: number, signal: AbortSignal): Promise<RoomState> {
   for (;;) {
+    if (signal.aborted) throw new ScanCancelledError(signal.reason);
     const committed = actor.committed;
     if (committed.seq >= seq) return committed.state;
-    if (signal.aborted) throw new ScanCancelledError(signal.reason);
+    if (actor.closed || actor.replayFailed) throw new ScanBusyError();
     await new Promise<void>((resolve, reject) => {
       const onAbort = () => {
         clearTimeout(timer);

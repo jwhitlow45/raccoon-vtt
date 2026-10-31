@@ -1,4 +1,5 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
+import type { Queryable } from "./tx.ts";
 
 /**
  * The contract between authentication and everything that needs to know who
@@ -39,8 +40,11 @@ export interface AuthService {
    * cookie it arrives in.
    */
   session(req: FastifyRequest, reply: FastifyReply): Promise<SessionContext | null>;
-  /** The caller's grant for this room at the current epoch, or null. Stale grants are deleted. */
-  grant(req: FastifyRequest, reply: FastifyReply, roomId: string): Promise<GrantContext | null>;
+  /**
+   * The caller's grant at the current epoch, or null. Stale grants are deleted.
+   * A route's optional query context also covers session renewal and stale cleanup.
+   */
+  grant(req: FastifyRequest, reply: FastifyReply, roomId: string, q?: Queryable): Promise<GrantContext | null>;
   /**
    * The display session's grant for this room, from the display cookie only,
    * or null. The session is never slid: only its sockets renew it. A grant

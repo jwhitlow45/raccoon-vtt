@@ -802,7 +802,7 @@ const RECEIPT_CHECKOUT_MS = 1_000;
 const RECEIPT_QUERY_MS = 5_000;
 
 export type ReceiptLinesOptions = {
-  /** The pool the lookup takes its one connection from. */
+  /** The pool the lookup borrows connections from for database work alone. */
   pool: Pick<pg.Pool, "connect">;
   metadata?: HistoryMetadata;
   cancel?: (client: pg.PoolClient) => Promise<void>;
@@ -845,33 +845,25 @@ export class ReceiptLines {
     this.#before = opts.beforeQuery;
   }
 
-  /**
-   * The receipt lookup's reads, on one connection: the caller's receipts of
-   * one tag, then the state they are projected against, which `capture`
-   * takes only once the rows are read, so no receipt is newer than its
-   * state, then the archive's lines of each committed op the state's live
-   * log no longer holds (heldOpLines).
-   */
+  /** Reads receipts before capturing state, borrowing another connection only for missing archive lines. */
   async lookup(roomId: string, viewer: Viewer, tag: string, signal: AbortSignal, capture: (rows: readonly ReceiptRow[]) => Promise<RoomState>): Promise<{ rows: ReceiptRow[]; state: RoomState; lines: Map<number, LogEntry[]> }> {
-    return this.#withConnection(signal, async (q) => {
-      const rows = await readReceipts(q, roomId, viewer.memberId, tag);
-      const state = await capture(rows);
-      const lines = new Map<number, LogEntry[]>();
-      const missing: number[] = [];
-      for (const row of rows) {
-        if (row.state !== "committed" || row.seq === null || lines.has(row.seq)) continue;
-        const held = heldOpLines(state, viewer, row.seq);
-        if (held) lines.set(row.seq, held);
-        else missing.push(row.seq);
-      }
-      for (const [seq, read] of await this.#lines(q, roomId, missing, viewer)) lines.set(seq, read);
-      return { rows, state, lines };
-    });
+    const rows = await this.withQueries(signal, (q) => readReceipts(q, roomId, viewer.memberId, tag));
+    const state = await receiptWait(capture(rows), signal);
+    const lines = new Map<number, LogEntry[]>();
+    const missing = new Set<number>();
+    for (const row of rows) {
+      if (row.state !== "committed" || row.seq === null || lines.has(row.seq)) continue;
+      const held = heldOpLines(state, viewer, row.seq);
+      if (held) lines.set(row.seq, held);
+      else missing.add(row.seq);
+    }
+    if (missing.size > 0) for (const [seq, read] of await this.read(roomId, [...missing], viewer, signal)) lines.set(seq, read);
+    return { rows, state, lines };
   }
 
   /** Each seq's lines from the archive, read on one connection after one completeness check. */
   read(roomId: string, seqs: readonly number[], viewer: Viewer, signal: AbortSignal): Promise<Map<number, LogEntry[]>> {
-    return this.#withConnection(signal, (q) => this.#lines(q, roomId, seqs, viewer));
+    return this.withQueries(signal, (q) => this.#lines(q, roomId, seqs, viewer));
   }
 
   async #lines(q: Queryable, roomId: string, seqs: readonly number[], viewer: Viewer): Promise<Map<number, LogEntry[]>> {
@@ -891,7 +883,8 @@ export class ReceiptLines {
     return out;
   }
 
-  async #withConnection<T>(signal: AbortSignal, fn: (q: Queryable) => Promise<T>): Promise<T> {
+  /** Bounded request-stage SQL, with the same cancellation and release rules as receipt reads. */
+  async withQueries<T>(signal: AbortSignal, fn: (q: Queryable) => Promise<T>): Promise<T> {
     const client = await checkout(this.#pool, signal, this.#checkoutMs);
     let ended = false;
     const onEnd = () => {
@@ -908,7 +901,7 @@ export class ReceiptLines {
     signal.addEventListener("abort", onAbort);
     try {
       if (signal.aborted) throw new ScanCancelledError(signal.reason);
-      const out = await fn(guardedQueries(client, signal, () => dropping !== null, { queryMs: this.#queryMs, before: this.#before }));
+      const out = await receiptWait(fn(guardedQueries(client, signal, () => dropping !== null, { queryMs: this.#queryMs, before: this.#before })), signal);
       // A cancel that landed as the last statement answered fails the lookup too: its answer is not used.
       if (signal.aborted) throw new ScanCancelledError(signal.reason);
       return out;
@@ -924,6 +917,19 @@ export class ReceiptLines {
       else client.release();
     }
   }
+}
+
+/** Stops waiting at cancellation, while observing any late answer or failure from the original work. */
+export function receiptWait<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new ScanCancelledError(signal.reason));
+    work.then(
+      (value) => { signal.removeEventListener("abort", onAbort); resolve(value); },
+      (error: unknown) => { signal.removeEventListener("abort", onAbort); reject(error); },
+    );
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 /** A connection from `pool` within `ms`, or ScanBusyError, or ScanCancelledError at the cancel. One handed over after either is destroyed. */

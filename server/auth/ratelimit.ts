@@ -220,13 +220,13 @@ export class SlowLimits {
    * an op whose answer it lost, so 60 an hour is far more than a session
    * needs.
    */
-  async receiptLookups(roomId: string, memberId: string): Promise<Verdict> {
-    const member = await this.#window(`rcpt:${roomId}:${memberId}`, HOUR);
+  async receiptLookups(roomId: string, memberId: string, q: Queryable = this.#pool): Promise<Verdict> {
+    const member = await this.#window(`rcpt:${roomId}:${memberId}`, HOUR, q);
     return member.n >= LIMITS.receiptLookupsPerHour ? wait(member.oldestExpiresIn) : null;
   }
 
-  async recordReceiptLookup(roomId: string, memberId: string): Promise<void> {
-    await this.#record(this.#pool, [`rcpt:${roomId}:${memberId}`]);
+  async recordReceiptLookup(roomId: string, memberId: string, q: Queryable = this.#pool): Promise<void> {
+    await this.#record(q, [`rcpt:${roomId}:${memberId}`]);
   }
 
   /**
