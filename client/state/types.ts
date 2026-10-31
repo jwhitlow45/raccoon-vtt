@@ -500,11 +500,12 @@ export type RoomView = {
   confirmedReady?: boolean;
   /**
    * The server's time less this page's monotonic clock (Clock.elapsed), in
-   * ms, learned from the times of log lines as they arrive (D-261031-140,
-   * D-261031-170). The network's delay makes each reading low, never high,
+   * ms, learned from the times of log lines as they arrive and from the
+   * `clock` frame sent with every snapshot (D-261031-140, D-261031-170,
+   * D-261031-181). The network's delay makes each reading low, never high,
    * so a time reckoned from it is never ahead of the server's. Anchored to
    * the monotonic clock, it holds through any correction of the device's
-   * own clock. Absent until the first line arrives.
+   * own clock. Absent until the first reading arrives.
    */
   serverOffset?: number;
   /**

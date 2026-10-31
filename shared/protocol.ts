@@ -2971,6 +2971,15 @@ export const serverMessageSchema = z.discriminatedUnion("t", [
    */
   z.strictObject({ t: z.literal("xcard"), at: z.string().max(40) }),
   z.strictObject({ t: z.literal("wait"), ms: z.number().int().min(0) }),
+  /**
+   * The server's time as it sends a snapshot, sent just before it, so a page
+   * re-anchors its reckoning of the server's time on every snapshot, even
+   * one that brings no new log line (D-261031-181). A frame of its own, not
+   * a snapshot field: the snapshot is a strict object, and a page on an
+   * older build would drop every snapshot that carried one. Such a page
+   * drops this frame instead and opens as before.
+   */
+  z.strictObject({ t: z.literal("clock"), at: z.string().max(40) }),
   z.strictObject({ t: z.literal("pong"), k: z.number().int().min(0) }),
   z.strictObject({ t: z.literal("resync"), reason: z.string().max(80) }),
   /**

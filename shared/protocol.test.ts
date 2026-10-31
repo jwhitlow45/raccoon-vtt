@@ -312,6 +312,8 @@ describe("messages", () => {
     ok(serverMessageSchema, { t: "wait", ms: 2000 });
     ok(serverMessageSchema, { t: "presence", online: ["a"] });
     ok(serverMessageSchema, { t: "pong", k: 1 });
+    ok(serverMessageSchema, { t: "clock", at: "2026-10-31T08:00:00.000Z" });
+    bad(serverMessageSchema, { t: "clock", at: "2026-10-31T08:00:00.000Z", seq: 1 });
     ok(serverMessageSchema, { t: "resync", reason: "scene" });
     ok(serverMessageSchema, { t: "eph", from: "m", e: { k: "dragCancel", tokenId: "t" } });
   });

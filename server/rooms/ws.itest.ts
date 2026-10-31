@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { after, before, describe, test } from "node:test";
+import { z } from "zod";
 import { uuidv7 } from "#shared/ids.ts";
 import { LIMITS, serializedBytes } from "#shared/limits.ts";
 import type { RoomState } from "#shared/model.ts";
 import type { ProjectedState } from "#shared/project.ts";
 import { character, companionBlock, customMonster, token } from "#shared/testutil.ts";
-import type { Op } from "#shared/protocol.ts";
+import { serverMessageSchema, type Op } from "#shared/protocol.ts";
 import { sha256 } from "../auth/tokens.ts";
 import { failCommits, startEngine, type Engine } from "./testing.ts";
 
@@ -196,6 +197,30 @@ describe("websocket: hello, ops and acks", () => {
     const s = await t.connect(roomId, dm);
     s.send({ t: "ping", k: 7 });
     assert.deepEqual(await s.next("pong"), { t: "pong", k: 7 });
+    s.close();
+  });
+
+  test("every snapshot comes just after the server's clock, and a page on an older build drops only that frame and opens (D-261031-181)", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Clock");
+    const s = await t.connect(roomId, dm);
+    const frames: Array<{ t?: unknown }> = [];
+    s.ws.on("message", (data) => frames.push(JSON.parse(data.toString()) as { t?: unknown }));
+    const asked = Date.now();
+    await s.snapshot("c1");
+    await s.next("presence");
+    const clock = frames[frames.findIndex((f) => f.t === "snapshot") - 1] as { t?: unknown; at?: string } | undefined;
+    assert.equal(clock?.t, "clock", "the clock frame comes just before the snapshot");
+    const sent = Date.parse(clock.at!);
+    assert.ok(sent >= asked && sent <= Date.now());
+    // An older build's union is today's without the clock frame, since no other member changed. Its socket drops,
+    // with a warning, any frame its union refuses (client/state/socket.ts).
+    const members = serverMessageSchema.options.filter((schema) => schema.shape.t.value !== "clock");
+    const older = z.discriminatedUnion("t", members as unknown as [(typeof members)[number], ...(typeof members)[number][]]);
+    const dropped = frames.filter((frame) => !older.safeParse(frame).success).map((frame) => frame.t);
+    assert.deepEqual(dropped, ["clock"]);
+    assert.ok(older.safeParse(frames.find((f) => f.t === "snapshot")).success, "the older page still opens on the snapshot");
+    assert.ok(frames.every((frame) => serverMessageSchema.safeParse(frame).success), "this build reads every frame");
     s.close();
   });
 });

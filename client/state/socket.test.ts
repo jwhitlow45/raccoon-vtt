@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { FrameBudget } from "#server/rooms/budgets.ts";
+import { uuidv7 } from "#shared/ids.ts";
 import type { RoomState, Viewer } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import type { ClientMessage, ClientOp, ServerMessage } from "#shared/protocol.ts";
+import { applyOp } from "#shared/reducer.ts";
 import { DM, P1, rng, room, token } from "#shared/testutil.ts";
+import { serverTime } from "../features/dice/groupSave/lifecycle.ts";
 import {
   createRoomSocket,
   EPH_PER_SECOND,
@@ -977,4 +980,38 @@ test("every hello requests op details, including scene resync and reconnect", ()
     s.socket.dispose();
     s.room.dispose();
   }
+});
+
+describe("the server's clock across a sleep (D-261031-181)", () => {
+  test("a reconnect after this page's clock stood still for 13 hours re-anchors on the clock frame, with no new log line, and a first Apply is accepted", (t) => {
+    const warn = t.mock.method(console, "warn", () => undefined);
+    const s = setup();
+    const stamped = Date.parse("2026-10-31T08:00:00.000Z");
+    s.clock.t = stamped;
+    s.socket.start();
+    s.connect();
+    s.last().emit({ t: "ev", seq: 1, changes: [{ key: "log:1:0", value: { id: "1:0", at: new Date(stamped).toISOString(), kind: "event", text: "Torch lit." } }] });
+    assert.equal(s.room.store.getState().serverOffset, 0, "the offset is learned from the line");
+    // The device sleeps for 13 hours. Its wall clock moves on, its monotonic clock does not, and the socket is gone.
+    s.clock.jump(13 * 60 * 60 * 1000);
+    s.last().drop(1006);
+    s.clock.advance(10_000);
+    const server = stamped + 13 * 60 * 60 * 1000 + 10_000;
+    s.last().open();
+    s.last().take("hello");
+    s.last().emit({ t: "clock", at: new Date(server).toISOString() });
+    s.last().emit(s.snapshot());
+    assert.equal(s.room.store.getState().connection, "open");
+    const now = serverTime(s.room.store.getState(), s.clock);
+    const id = uuidv7(now);
+    const first = applyOp(room({ tokens: { g1: token("g1") } }), { t: "actor.outcome", plan: id, page: { id, expectRevision: 0 }, label: "Fire", targets: [{ target: { tokenId: "g1" }, amount: 3 }] } as never, DM, { seq: 2, at: new Date(server).toISOString() });
+    assert.ok(first.ok, first.ok ? "" : first.message);
+    assert.equal(now, server, "the reckoning follows the server again");
+    // A clock frame the network held up longer reads lower and never lowers the offset.
+    s.last().emit({ t: "clock", at: new Date(server - 3_000).toISOString() });
+    assert.equal(serverTime(s.room.store.getState(), s.clock), server);
+    assert.equal(warn.mock.callCount(), 0, "this build knows the frame");
+    s.socket.dispose();
+    s.room.dispose();
+  });
 });

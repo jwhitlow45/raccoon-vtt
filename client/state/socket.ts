@@ -658,6 +658,9 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
       case "xcard":
         room.receiveXcard(msg.at);
         return;
+      case "clock":
+        room.receiveClock(msg.at);
+        return;
       case "wait":
         // Only a request still waiting for its snapshot has a deadline to move.
         if (phase === "hello" || sceneInFlight) {

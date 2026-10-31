@@ -330,6 +330,8 @@ export type RoomStore = {
   accessChanged(): void;
   /** The server's `xcard` message: someone tapped the X-card. */
   receiveXcard(at: string): void;
+  /** The server's `clock` message, its time as it sent a snapshot: one more reading of how far its clock is from this page's. */
+  receiveClock(at: string): void;
   /** The socket lost its snapshot (it closed, or the server asked for a resync): hold ops until the next snapshot. */
   suspend(): void;
   setConnection(state: ConnectionState): void;
@@ -478,6 +480,18 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
   const clock = options.clock ?? realClock;
   const random = options.random ?? Math.random;
   const clientId = options.clientId ?? uuidv7();
+
+  /**
+   * Merges one server time, read as it arrives, into the offset
+   * (RoomView.serverOffset). The network only delays a reading, so the
+   * highest is the best, and one sent late never lowers it. While this
+   * page's monotonic clock stands still, as it can through a sleep, the true
+   * offset grows, and the first reading after it takes over (D-261031-181).
+   */
+  const withServerReading = (offset: number | undefined, at: unknown): number | undefined => {
+    const stamped = typeof at === "string" ? Date.parse(at) : Number.NaN;
+    return Number.isFinite(stamped) ? Math.max(offset ?? -Infinity, stamped - clock.elapsed()) : offset;
+  };
 
   const initialLocal: LocalUi = INITIAL_LOCAL;
   const store = createStore<RoomStoreState>()(() => ({
@@ -1079,13 +1093,11 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         ephemeral = EMPTY_EPHEMERAL;
       }
       if (asks.length > 0) forgetAsk = { asks: [...(forgetAsk && !forgetAsk.sending ? forgetAsk.asks : []), ...asks] };
-      // A line this event brings was stamped by the server as it committed. The highest reading is the one the network delayed least.
+      // A line this event brings was stamped by the server as it committed.
       let serverOffset = s.serverOffset;
       for (const change of msg.changes) {
         if (!("value" in change) || !change.key.startsWith("log:")) continue;
-        const at = (change.value as { at?: unknown } | null)?.at;
-        const stamped = typeof at === "string" ? Date.parse(at) : Number.NaN;
-        if (Number.isFinite(stamped)) serverOffset = Math.max(serverOffset ?? -Infinity, stamped - clock.elapsed());
+        serverOffset = withServerReading(serverOffset, (change.value as { at?: unknown } | null)?.at);
       }
       commit({ confirmed, seq: msg.seq, pending, refused, trapped, toasts, ephemeral, sceneId, forgetAsk, ...(serverOffset === s.serverOffset ? {} : { serverOffset }) });
       const refusedNow = new Map((msg.rejects ?? []).map((r) => [r.n, { code: r.code, message: r.message, text: refusalText(r.code, r.message) }]));
@@ -1129,6 +1141,12 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
 
     receiveXcard(at) {
       store.setState({ xcard: { id: (get().xcard?.id ?? 0) + 1, at } });
+    },
+
+    receiveClock(at) {
+      const s = get();
+      const serverOffset = withServerReading(s.serverOffset, at);
+      if (serverOffset !== s.serverOffset) store.setState({ serverOffset });
     },
 
     suspend() {

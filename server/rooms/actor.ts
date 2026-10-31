@@ -1755,6 +1755,9 @@ export class RoomActor {
     }
     const wm = this.#watermarks.get(key);
     const snapshot = buildSnapshot(this.#committed.state, this.#committed.seq, conn, wm?.committed ?? 0);
+    // Ahead of the snapshot, so the page has re-anchored its reckoning of this server's time before anything the
+    // snapshot sets off can mint a first Apply (D-261031-181). Read after the build, so the network is all it trails by.
+    conn.send({ t: "clock", at: new Date(this.#opts.now()).toISOString() });
     const bytes = conn.send(snapshot.message);
     conn.held = snapshot.held;
     this.#sendHistory(conn);
