@@ -35,17 +35,23 @@ for (const [name, path, marker, callback] of [
   assert.equal(closed, 1, "a later unused Escape still closes the host");
 });
 
-test("expanded toast leaves an Escape already used by a popover alone", async (t) => {
+test("expanded toast leaves an Escape already used by a popover alone", async () => {
   const { listenToastEscape } = await import("./toastEscape.ts");
   const saved = { window: globalThis.window, document: globalThis.document };
+  // A recording window over a real EventTarget. Under CI's Node 24, a listener removed through t.mock.method stayed attached.
   const target = new EventTarget();
-  const add = t.mock.method(target, "addEventListener");
-  const remove = t.mock.method(target, "removeEventListener");
-  Object.assign(globalThis, { window: target, document: { querySelectorAll: () => [] } });
+  const added: Parameters<EventTarget["addEventListener"]>[] = [];
+  const removed: Parameters<EventTarget["removeEventListener"]>[] = [];
+  const window = {
+    addEventListener: (...args: Parameters<EventTarget["addEventListener"]>) => (added.push(args), target.addEventListener(...args)),
+    removeEventListener: (...args: Parameters<EventTarget["removeEventListener"]>) => (removed.push(args), target.removeEventListener(...args)),
+  };
+  Object.assign(globalThis, { window, document: { querySelectorAll: () => [] } });
   let closed = 0;
   const stop = listenToastEscape(() => closed++);
   try {
-    const [name, callback, capture] = add.mock.calls[0]!.arguments;
+    assert.equal(added.length, 1);
+    const [name, callback, capture] = added[0]!;
     assert.equal(name, "keydown");
     assert.equal(capture, true, "the production listener runs in capture");
     const used = key("Escape");
@@ -60,8 +66,8 @@ test("expanded toast leaves an Escape already used by a popover alone", async (t
     assert.equal(closed, 1, "a later unused Escape still shrinks the toast");
     assert.equal(unused.defaultPrevented, true, "the room cannot also consume this Escape");
     stop();
-    assert.equal(remove.mock.callCount(), 1, "cleanup removes the listener");
-    assert.deepEqual(remove.mock.calls[0]!.arguments, ["keydown", callback, true]);
+    assert.equal(removed.length, 1, "cleanup removes the listener");
+    assert.deepEqual(removed[0], ["keydown", callback, true]);
     target.dispatchEvent(key("Escape"));
     assert.equal(closed, 1, "cleanup detaches the installed callback");
   } finally {
