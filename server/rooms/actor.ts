@@ -61,7 +61,7 @@ import { undoScope } from "#shared/undoScope.ts";
 import type { HistoryDirection, HistoryMessage, HistoryScope, OpAcknowledgment, StackHistoryCommand } from "#shared/undoContract.ts";
 import { dmHistoryValues, dmPoseRestore } from "./undoDm.ts";
 import { retainedSaveOutcome } from "#shared/saveOutcomes.ts";
-import type { SaveOutcomeTransition } from "#shared/saveOutcomeContract.ts";
+import { SAVE_CANNOT_REOPEN, type SaveOutcomeTransition } from "#shared/saveOutcomeContract.ts";
 
 /**
  * The single writer of one loaded room (design sections 7.2, 7.3, 7.6, 7.7,
@@ -1263,8 +1263,7 @@ export class RoomActor {
     if (admitted) this.#stageReceipt(batch, admitted, { state: "committed", seq: this.#staged.seq });
     if (cmd.group !== undefined && actionScope !== "none" && !trackedOutcome) this.#groupScopes.set(key, { group: cmd.group, scope: actionScope, declared: cmd.groupScope === "setup" || (sameGroup && priorGroup.declared) });
     if (restoredFrom && step) {
-      const unavailable = ". This save can no longer reopen.";
-      push(batch.restored, key, { n, what: saveOutcomeMissing ? step.label.slice(0, 200 - unavailable.length) + unavailable : step.label });
+      push(batch.restored, key, { n, what: saveOutcomeMissing ? step.label.slice(0, 200 - SAVE_CANNOT_REOPEN.length) + SAVE_CANNOT_REOPEN : step.label });
       const inverse = reduced.inverse ?? (op.t === "sys.restore" && op.saveOutcome ? [] : null);
       // A change taken back from the log goes on no stack. Redone, it would come back with no line to say so, and its own line
       // would read as taken back for good. The DM deals it again instead, which the log records.

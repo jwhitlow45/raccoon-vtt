@@ -14,7 +14,7 @@ import { rowLeadsMounts } from "./encounter.ts";
 import { writeHpUndoLine } from "./hpUndo.ts";
 import { forgetExplored } from "./map.ts";
 import { gone, guardHash, invalid, type Tx } from "./tx.ts";
-import { prepareSaveOutcomeRestore, writeSaveOutcome } from "./saveOutcomes.ts";
+import { prepareSaveOutcomeRestore, pruneSaveOutcomes, writeSaveOutcome } from "./saveOutcomes.ts";
 
 export function logChat(tx: Tx, op: OpOf<"log.chat">): void {
   tx.addLog({ kind: "chat", from: tx.actor.memberId, text: op.text });
@@ -139,6 +139,7 @@ export function restore(tx: Tx, op: OpOf<"sys.restore">): void {
     if (!scenesWritten.has(sceneId) && tx.state.scenes[sceneId]) tx.bumpWalls(sceneId);
   }
   if (tracked) writeSaveOutcome(tx, op.saveOutcome!.id, tracked);
+  else pruneSaveOutcomes(tx);
 }
 
 /**

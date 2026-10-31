@@ -10,6 +10,10 @@ export const SAVE_OUTCOME_RECORDS = 200;
 export const SAVE_OUTCOME_RECORD_BYTES = 512;
 export const SAVE_OUTCOME_LEDGER_BYTES = 100 * 1024;
 export const SAVE_DRAFT_BYTES = 512 * 1024;
+/** Ends the sender's own Undo or Redo result when the step still restored game state but its save can no longer reopen. */
+export const SAVE_CANNOT_REOPEN = ". This save can no longer reopen.";
+/** The refusal of a first Apply whose tracking id is from further ahead than the clock lead allows. */
+export const SAVE_CLOCK_AHEAD = "This device's clock is ahead of the server's. Correct it and apply again.";
 
 export type SaveOutcomeState = "applied" | "undone";
 export type SaveOutcomeIdentity = { id: string; plan: string };

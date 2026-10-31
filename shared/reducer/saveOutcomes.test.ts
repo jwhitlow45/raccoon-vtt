@@ -411,3 +411,23 @@ test("op 33/34 history replays unchanged and snapshot 29/30/31 never invents sta
   }
   assert.throws(() => runMigrations({ ...table(), saveOutcomes: {} }, 31, 30, snapshotMigrations), /cannot migrate/);
 });
+
+test("a first Apply minted further ahead than the clock lead allows is refused for the clock, and an old one as unavailable", () => {
+  const ahead = run(table(), outcome(uuidv7(time + 5 * 60 * 1000 + 1)));
+  assert.equal(ahead.ok, false);
+  assert.equal(ahead.ok ? "" : ahead.message, "This device's clock is ahead of the server's. Correct it and apply again.");
+  const old = run(table(), outcome(uuidv7(time - MAX_OP_AGE_MS - 1)));
+  assert.equal(old.ok ? "" : old.message, "This save's outcome cannot be checked. Start a new group save to continue.");
+});
+
+test("a DM's entity-only Undo past a record's retention prunes it as bookkeeping, and inside retention keeps it", () => {
+  const id = uuidv7(time);
+  const applied = accepted(table(), outcome(id));
+  const entityOnly = { t: "sys.restore" as const, entries: applied.inverse!, from: "undo" as const, scope: "play" as const, deps: true as const };
+  const late = new Date(time + SAVE_OUTCOME_RETENTION_MS).toISOString();
+  const pruned = accepted(applied.state, entityOnly, 2, DM, late);
+  assert.equal(ledger(pruned.state)[id], undefined, "the expired record no longer claims a status the restore made untrue");
+  assert.ok(!(pruned.inverse ?? []).some((entry) => entry.key === keys.saveOutcome(id)), "pruning is bookkeeping, never an inverse");
+  const early = new Date(time + SAVE_OUTCOME_RETENTION_MS - 1).toISOString();
+  assert.equal(ledger(accepted(applied.state, entityOnly, 2, DM, early).state)[id]?.state, "applied");
+});
