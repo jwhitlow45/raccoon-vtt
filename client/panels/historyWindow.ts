@@ -69,6 +69,18 @@ export const SAID = {
   noNewer: "No newer messages.",
 } as const;
 
+/**
+ * Whose window it is: what the server projects a page for. A player's
+ * lines, and a previewed player's, depend on the scene on screen (sight,
+ * and who holds what there), so a new scene starts the window over and
+ * drops a page still on its way. A DM reads every line whole on any scene,
+ * so a DM's window stays across scene switches.
+ */
+export function historyKey(viewer: { roomId: string; memberId: string; role: string; sceneId: string | null; previewOf: string | null }): string {
+  const scene = viewer.role === "dm" && viewer.previewOf === null ? "" : (viewer.sceneId ?? "");
+  return [viewer.roomId, viewer.memberId, viewer.role, viewer.previewOf ?? "", scene].join("|");
+}
+
 export function freshHistory(key: string): HistoryState {
   return { key, mode: "live", rows: [], before: null, start: false, after: null, end: false, loading: null, failed: null, unavailable: false, said: "" };
 }
@@ -155,9 +167,13 @@ export class HistoryWindow {
     const s = this.#state;
     // Nothing older held or asked for: the live view alone, as the room sends it.
     if (s.mode !== "live" || (s.rows.length === 0 && s.before === null)) return;
-    if (prev !== main && prev.length > 0 && main.length > 0 && compareLogIds(prev[prev.length - 1]!.id, main[0]!.id) < 0) {
-      // The live log jumped past every line the panel held, as after a long time offline. Lines may lie
-      // between that no page ever read, so the window parts from the live log, and Show newer reads them.
+    // The live log jumped past every line the panel held, as after a long time offline, or came back
+    // from empty beside held rows. Lines may lie between that no page ever read, and a first live line
+    // looks the same whether it follows the held rows or not, so the window parts from the live log,
+    // and Show newer reads on up to it.
+    const jumped = prev.length > 0 && main.length > 0 && compareLogIds(prev[prev.length - 1]!.id, main[0]!.id) < 0;
+    const refilled = prev.length === 0 && main.length > 0 && s.rows.length > 0;
+    if (prev !== main && (jumped || refilled)) {
       this.#beforeMove("live");
       const all = mergeLog(s.rows, prev);
       const rows = all.slice(Math.max(0, all.length - HISTORY_ROWS));
@@ -208,7 +224,8 @@ export class HistoryWindow {
   #ask(dir: Direction, at: string | null, from: HistoryState): void {
     const pending: Pending = { dir, at, abort: new AbortController() };
     this.#pending = pending;
-    this.#set({ ...from, loading: dir, failed: null });
+    // Cleared while the page is on its way, so the same words when it lands are read out again.
+    this.#set({ ...from, loading: dir, failed: null, said: "" });
     const ask: PageAsk = at === null ? {} : dir === "older" ? { before: at } : { after: at };
     let call: Promise<HistoryPage>;
     try {

@@ -24,7 +24,7 @@ import { usePreview } from "../features/dm/previewContext.ts";
 import { ExportLog } from "../features/log/ExportLog.tsx";
 import { TakeBack } from "../features/encounter/HpLog.tsx";
 import type { PanelProps } from "../features/panels.ts";
-import { HistoryWindow, type HistoryState } from "./historyWindow.ts";
+import { historyKey, HistoryWindow, type HistoryState } from "./historyWindow.ts";
 import { logPage, pageErrorText } from "./olderLog.ts";
 import { useUnsavedInput } from "../lib/sheetSwipe.ts";
 import { theme } from "../lib/theme.ts";
@@ -88,16 +88,19 @@ export default function LogPanel(_props: PanelProps) {
   const dm = you?.role === "dm";
   // In "view as a player" the pages are that player's, as the preview's socket gives the rest (docs/design-v1-per-player-vision.md 7.4).
   const viewer = { sceneId: dm && !preview ? sceneId : null, previewOf: preview?.memberId ?? null };
-  // Whose window it is. A page for any other room, viewer, scene or preview never lands in it.
-  const key = [roomId, me, you?.role ?? "", viewer.sceneId ?? "", viewer.previewOf ?? ""].join("|");
+  // Whose window it is. A page for any other room, viewer, projecting scene or preview never lands in it.
+  const key = historyKey({ roomId, memberId: me, role: you?.role ?? "", sceneId, previewOf: viewer.previewOf });
   const asked = useRef({ roomId, viewer });
   asked.current = { roomId, viewer };
 
   const listRef = useRef<HTMLOListElement>(null);
   const atEnd = useRef(true);
   const sentRef = useRef(false);
-  const anchor = useRef<{ id: string; top: number } | null>(null);
+  // The row at the top of the reader's view, and the rows it was taken among: it is put back only once
+  // those rows have changed, since a commit that only drew new live lines can come between.
+  const anchor = useRef<{ id: string; top: number; rows: HistoryState["rows"] } | null>(null);
   const composerRef = useRef<HTMLInputElement>(null);
+  const winRef = useRef<HistoryWindow | null>(null);
   const [win] = useState(
     () =>
       new HistoryWindow({
@@ -106,19 +109,25 @@ export default function LogPanel(_props: PanelProps) {
         // The row at the top of the reader's view stays where it is while rows go in or out around it.
         beforeMove: (why) => {
           if (why === "live" && atEnd.current) return;
-          anchor.current = firstVisibleRow(listRef.current);
+          const row = firstVisibleRow(listRef.current);
+          const rows = winRef.current?.state.rows;
+          anchor.current = row && rows ? { ...row, rows } : null;
         },
       }),
   );
+  winRef.current = win;
   useEffect(() => () => win.dispose(), [win]);
   const [subscribe, snapshot] = useMemo(() => [(listener: () => void) => win.subscribe(listener), () => win.state] as const, [win]);
   const history = useSyncExternalStore(subscribe, snapshot, snapshot);
   useLayoutEffect(() => win.sync(key, mainLog, log.length), [win, key, mainLog, log.length]);
-  const apart = history.mode === "history";
+  // A window kept for another viewer is never drawn, even for the one render before sync starts it over.
+  const mine = history.key === key;
+  const apart = mine && history.mode === "history";
+  const held = mine ? history.rows : EMPTY_LOG;
 
   // Cached revert records may outlive retention. Check the live undo ids,
   // and include loaded take-backs even when they are outside the live tail.
-  const allEntries = useMemo(() => (apart ? history.rows : history.rows.length > 0 ? mergeLog(history.rows, log) : log), [apart, history.rows, log]);
+  const allEntries = useMemo(() => (apart ? held : held.length > 0 ? mergeLog(held, log) : log), [apart, held, log]);
   const undoable = (entry: LogEntry): boolean => canUndoLogLine(names, allEntries, entry, retainedIds);
 
   const entries = useMemo(() => {
@@ -139,20 +148,22 @@ export default function LogPanel(_props: PanelProps) {
     return () => el.removeEventListener("scroll", onScroll);
   }, []);
   useLayoutEffect(() => {
-    const held = anchor.current;
+    const kept = anchor.current;
     const el = scrollParent(listRef.current);
-    if (held) {
+    if (kept) {
+      // The rows have not moved yet: a commit of new live lines came first.
+      if (kept.rows === history.rows) return;
       // Rows went in or out around the reader: hold their place instead of jumping.
       anchor.current = null;
-      const row = listRef.current?.querySelector(`[data-log-id="${CSS.escape(held.id)}"]`);
+      const row = listRef.current?.querySelector(`[data-log-id="${CSS.escape(kept.id)}"]`);
       if (el && row) {
-        el.scrollTop += row.getBoundingClientRect().top - held.top;
+        el.scrollTop += row.getBoundingClientRect().top - kept.top;
         return;
       }
     }
     if (el && (atEnd.current || sentRef.current)) el.scrollTop = el.scrollHeight;
     sentRef.current = false;
-  }, [entries]);
+  }, [entries, history.rows]);
 
   // A button that has nothing left to do goes, and the focus it held moves to what took its place.
   const navigated = useRef<"older" | "newer" | null>(null);
@@ -188,22 +199,20 @@ export default function LogPanel(_props: PanelProps) {
             }}
           />
         ) : null}
-        {/* Export and Chat only wrap together, so on a narrow phone Chat only never stands alone under the rest. */}
-        <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), marginLeft: "auto" }}>
-          <Button
-            size="sm"
-            icon="download"
-            iconOnly="fine"
-            disabled={preview !== null}
-            title={preview ? "Not available while viewing as a player." : "Save the log as a Markdown file."}
-            onClick={() => setExporting(true)}
-          >
-            Export
-          </Button>
-          {/* A filter of what shows, so a checkbox rather than a switch (docs/design-v1-visual.md 3.7). */}
-          <div style={{ flex: "none" }}>
-            <Checkbox label="Chat only" checked={chatOnly} onChange={setChatOnly} />
-          </div>
+        <div style={{ flex: 1 }} />
+        <Button
+          size="sm"
+          icon="download"
+          iconOnly="fine"
+          disabled={preview !== null}
+          title={preview ? "Not available while viewing as a player." : "Save the log as a Markdown file."}
+          onClick={() => setExporting(true)}
+        >
+          Export
+        </Button>
+        {/* A filter of what shows, so a checkbox rather than a switch (docs/design-v1-visual.md 3.7). */}
+        <div style={{ flex: "none" }}>
+          <Checkbox label="Chat only" checked={chatOnly} onChange={setChatOnly} />
         </div>
       </div>
       {entries.length === 0 ? <Empty>No messages yet. Chat, whispers and what happens at the table show here.</Empty> : null}

@@ -4,7 +4,7 @@ import { compareLogIds } from "#shared/keys.ts";
 import { mergeLog } from "#shared/logText.ts";
 import type { LogEntry } from "#shared/model.ts";
 import { ApiError } from "../lib/api.ts";
-import { HISTORY_ROWS, HistoryWindow, type HistoryPage, type HistoryState, type PageAsk } from "./historyWindow.ts";
+import { HISTORY_ROWS, historyKey, HistoryWindow, type HistoryPage, type HistoryState, type PageAsk } from "./historyWindow.ts";
 
 /**
  * The Log panel's history window (docs/design-v1-log-history.md 5.3 and
@@ -53,7 +53,7 @@ const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 describe("the Log panel's history window", () => {
   test("a randomized run of pages, live lines, aborts, late answers and viewer changes keeps every invariant", async () => {
     // What the runs met, so a change that stops them meeting a case fails here rather than passing on nothing.
-    const met = { parted: 0, jumped: 0, late: 0, empty: 0, held: 0, dropped: 0, start: 0, end: 0 };
+    const met = { parted: 0, jumped: 0, refilled: 0, late: 0, empty: 0, held: 0, dropped: 0, start: 0, end: 0 };
     for (let seed = 1; seed <= 60; seed++) {
       const random = rng(seed);
       const pick = <T>(xs: readonly T[]): T => xs[Math.floor(random() * xs.length)]!;
@@ -81,7 +81,9 @@ describe("the Log panel's history window", () => {
         }
       };
       grow(Math.floor(random() * 1800));
-      const liveOf = (v: Viewer) => v.archive.slice(Math.max(0, v.archive.length - v.ring));
+      // An empty live log, as a view that holds none of the archive's lines yet: pages come from the newest.
+      let blank = false;
+      const liveOf = (v: Viewer) => (blank ? [] : v.archive.slice(Math.max(0, v.archive.length - v.ring)));
 
       let viewer = viewers[0]!;
       const calls: Call[] = [];
@@ -158,7 +160,15 @@ describe("the Log panel's history window", () => {
           sync();
           if (was.mode === "live" && win.state.mode === "history") met.jumped++;
           if (was.mode === "live" && win.state.before !== was.before && was.before !== null) met.dropped++;
-        } else if (r < 0.62) {
+        } else if (r < 0.6) {
+          // The live log empties, or fills again from the room's newest lines, which may lie far past what is held.
+          const was = win.state;
+          blank = !blank;
+          what = blank ? "live log empties" : "live log refills";
+          main = liveOf(viewer);
+          sync();
+          if (!blank && was.mode === "live" && was.rows.length > 0 && win.state.mode === "history") met.refilled++;
+        } else if (r < 0.63) {
           what = "trap lines";
           extra = Math.floor(random() * 6);
           sync();
@@ -400,6 +410,102 @@ describe("the Log panel's history window", () => {
     later[1]!.resolve({ entries: [long[200]!, long[790]!], nextBefore: "201:0", nextAfter: "791:0" });
     await flush();
     assert.deepEqual([apart.state.before, apart.state.after, apart.state.rows.length], ["201:0", "759:0", 500]);
+  });
+
+  test("rows held beside an empty live log part from it when live lines come, even a line right after them, and Show newer reads on", async () => {
+    const archive = Array.from({ length: 40 }, (_, i) => line(`${i + 1}:0`));
+    const asks: PageAsk[] = [];
+    const win = new HistoryWindow({ key: "k", fetch: async (ask) => (asks.push(ask), serve(archive.slice(0, 20), ask, 50)) });
+    win.sync("k", [], 0);
+    win.older();
+    await flush();
+    assert.deepEqual([win.state.mode, win.state.rows.length, win.state.start], ["live", 20, true]);
+    // The next line follows the held rows, but the panel cannot tell that from one that skips a stretch.
+    win.sync("k", [archive[20]!], 1);
+    assert.equal(win.state.mode, "history");
+    assert.deepEqual([win.state.after, win.state.end], ["20:0", false]);
+    const far = new HistoryWindow({ key: "k", fetch: async (ask) => (asks.push(ask), serve(archive, ask, 50)) });
+    far.sync("k", [], 0);
+    far.older();
+    await flush();
+    // Rows 1 to 40 held, then a live log of 101 to 110: the window parts and Show newer reads after 40.
+    far.sync("k", Array.from({ length: 10 }, (_, i) => line(`${101 + i}:0`)), 10);
+    assert.equal(far.state.mode, "history");
+    far.newer();
+    await flush();
+    assert.deepEqual(asks[asks.length - 1], { after: "40:0" });
+  });
+
+  test("when live lines push held rows out, the panel is told while the old rows still stand", async () => {
+    const archive = Array.from({ length: 700 }, (_, i) => line(`${i + 1}:0`));
+    const seen: { why: string; first: string | undefined }[] = [];
+    let win!: HistoryWindow;
+    win = new HistoryWindow({ key: "k", fetch: async (ask) => serve(archive, ask, 50), beforeMove: (why) => seen.push({ why, first: win.state.rows[0]?.id }) });
+    let main = archive.slice(200, 400);
+    win.sync("k", main, 200);
+    for (let i = 0; i < 6; i++) {
+      win.older();
+      await flush();
+    }
+    assert.deepEqual([win.state.mode, win.state.rows.length], ["live", 200]);
+    seen.length = 0;
+    main = archive.slice(203, 403);
+    win.sync("k", main, 300);
+    // The rows the anchor is taken for are the ones about to change: the panel holds its row until they have.
+    assert.deepEqual(seen, [{ why: "live", first: "1:0" }]);
+    assert.equal(win.state.rows.length, 200);
+    assert.equal(win.state.rows[0]!.id, "4:0");
+  });
+
+  test("a player's or a preview's window is the scene's, and a DM's stays across scenes", async () => {
+    const at = (role: string, sceneId: string, previewOf: string | null = null) => historyKey({ roomId: "R", memberId: "m", role, sceneId, previewOf });
+    assert.notEqual(at("player", "s1"), at("player", "s2"));
+    assert.notEqual(at("dm", "s1", "p1"), at("dm", "s2", "p1"));
+    assert.equal(at("dm", "s1"), at("dm", "s2"));
+    assert.notEqual(at("dm", "s1"), at("player", "s1"));
+
+    const archive = Array.from({ length: 60 }, (_, i) => line(`${i + 1}:0`));
+    const main = archive.slice(-10);
+    const answers: { resolve(page: HistoryPage): void; signal: AbortSignal; ask: PageAsk }[] = [];
+    const fetch = (ask: PageAsk, signal: AbortSignal) => new Promise<HistoryPage>((resolve) => answers.push({ resolve, signal, ask }));
+    // A player with a page held and another on its way moves to another scene: both go.
+    const player = new HistoryWindow({ key: at("player", "s1"), fetch });
+    player.sync(at("player", "s1"), main, 10);
+    player.older();
+    answers[0]!.resolve(serve(archive, answers[0]!.ask, 10));
+    await flush();
+    player.older();
+    player.sync(at("player", "s2"), main, 10);
+    assert.equal(player.state.rows.length, 0);
+    assert.equal(answers[1]!.signal.aborted, true);
+    answers[1]!.resolve(serve(archive, answers[1]!.ask, 10));
+    await flush();
+    assert.equal(player.state.rows.length, 0, "a page read for the old scene landed on the new one");
+    // A DM's held page and the one on its way both stay.
+    const dm = new HistoryWindow({ key: at("dm", "s1"), fetch });
+    dm.sync(at("dm", "s1"), main, 10);
+    dm.older();
+    answers[2]!.resolve(serve(archive, answers[2]!.ask, 10));
+    await flush();
+    dm.older();
+    dm.sync(at("dm", "s2"), main, 10);
+    assert.equal(answers[3]!.signal.aborted, false);
+    answers[3]!.resolve(serve(archive, answers[3]!.ask, 10));
+    await flush();
+    assert.equal(dm.state.rows.length, 20);
+  });
+
+  test("the same words twice are read out twice", async () => {
+    const archive = Array.from({ length: 300 }, (_, i) => line(`${i + 1}:0`));
+    const said: string[] = [];
+    const win = new HistoryWindow({ key: "k", fetch: async (ask) => serve(archive, ask, 50) });
+    win.subscribe(() => said.push(win.state.said));
+    win.sync("k", archive.slice(-10), 10);
+    win.older();
+    await flush();
+    win.older();
+    await flush();
+    assert.deepEqual(said, ["", "Older messages loaded.", "", "Older messages loaded."]);
   });
 
   test("a failure keeps the rows, and 404 says the server has no archive route", async () => {
