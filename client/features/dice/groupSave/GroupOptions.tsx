@@ -32,7 +32,7 @@ import { attackResults } from "./outcome.ts";
 import { ReplaceConfirm } from "./ReplaceConfirm.tsx";
 import { useAutoInitiativeFor } from "../../encounter/AutoInitiative.tsx";
 import { useStartGroupSave, type StartInput } from "./start.ts";
-import { groupRows, type GroupTest } from "./rows.ts";
+import { d20Of, groupRows, type GroupTest } from "./rows.ts";
 import { quickRollNow } from "./start.ts";
 import { useRollModeMenu } from "../useRollModeMenu.tsx";
 import type { RollModeOverride, RollModeCapability } from "../rollMode.ts";
@@ -96,11 +96,13 @@ export function GroupOptions(props: { tokenIds: readonly string[] }) {
     const taken = override ? panel.peek(creatures) : panel.take(creatures);
     go({ source: { kind: "selection", tokenIds: [...props.tokenIds] }, test, dc, panel: "dice", rollNow: quickRollNow(taken, secretStartIn(room.getState(), creatures), override) });
   };
-  const source = JSON.stringify([props.tokenIds, dc, dice?.view.tokens, dice?.view.characters, dice?.view.encounter, panel.adv, panel.dis, panel.secret]);
   const quickMode = (test: GroupTest): CellMode => {
-    const server = !!dice && groupRows(dice, [...props.tokenIds], test, false).some((r) => !r.skip && r.ways[0] === "server");
+    const rows = dice ? groupRows(dice, [...props.tokenIds], test, false) : [];
+    const server = rows.some((r) => !r.skip && r.ways[0] === "server");
+    const d20 = d20Of(test, false);
+    const source = JSON.stringify([props.tokenIds, dc, test, rows.map((row) => [row, dice && d20 ? presetFor(dice, row.target, d20) : null]), secretStartIn(room.getState(), creatures), panel.adv, panel.dis, panel.secret]);
     return {
-      source: `${source}|${JSON.stringify(test)}`,
+      source,
       capability: { d20: server, visibility: server ? "selectable" : "request", batch: true },
       valid: () => !blocked && room.getState().connection === "open" && JSON.stringify(room.getState().local.selectedIds) === JSON.stringify(props.tokenIds),
       onRoll: (override) => quick(test, override),
@@ -385,7 +387,7 @@ function SharedAttack(props: { name: string; each: Attacker[]; dice: DiceView; b
     );
     set({ damageTag: panel.roll(rolls.map((r) => ({ ...r, modeEligible: false })), override ? { override } : {}) });
   };
-  const source = JSON.stringify([props.name, props.each, state, props.dice.view.tokens, props.dice.view.characters, panel.adv, panel.dis, panel.secret]);
+  const source = JSON.stringify([props.name, props.each, state, props.each.map(({ creature }) => presetFor(props.dice, creature, { kind: "attack" })), secretStartIn(room.getState(), props.each.map((e) => e.creature)), panel.adv, panel.dis, panel.secret]);
   const valid = () => props.blocked === null && room.getState().connection === "open" && receipt?.state !== "sending" && JSON.stringify(room.getState().local.selectedIds) === JSON.stringify(props.each.flatMap((e) => "tokenId" in e.creature ? [e.creature.tokenId] : []));
   const secret = receipt?.state === "committed" && receipt.lines.some((line) => line.data?.type === "dice" && line.data.to === "dm");
   const secretDamage = damage?.state === "committed" && damage.lines.some((line) => line.data?.type === "dice" && line.data.to === "dm");
@@ -405,12 +407,12 @@ function SharedAttack(props: { name: string; each: Attacker[]; dice: DiceView; b
         <NumberField label="Target's AC" value={state.ac ?? undefined} min={1} max={50} nullable placeholder="AC" onCommit={(ac) => set({ ac })} width={72} />
       </div>
       {results.length > 0 ? (
-        <Note><RollResultLine text={plainResults} expanded={detailedResults} /></Note>
+        <Note><RollResultLine text={plainResults} expanded={detailedResults} missing={results.map((r) => informativeRollMode(r.roll, secret && !panel.secret)).filter(Boolean).join(", ")} /></Note>
       ) : null}
       {hits.length > 0 ? (
         <Cell text={`Roll damage for ${hits.length} hit${hits.length === 1 ? "" : "s"}`} name={`Roll damage for ${hits.length} hit${hits.length === 1 ? "" : "s"}`} disabled={props.blocked} busy={damage?.state === "sending"} onTap={rollDamage} mode={{ source: `${source}|damage`, capability: { d20: false, visibility: "selectable", damage: true }, valid: () => valid() && damage?.state !== "sending", onRoll: rollDamage }} />
       ) : null}
-      {total !== null ? <Note><RollResultLine text={`${total} damage. Every HP entry offers it as a chip.`} expanded={`${total} damage${secretDamage && !panel.secret ? ", Secret" : ""}. Every HP entry offers it as a chip.`} /></Note> : null}
+      {total !== null ? <Note><RollResultLine text={`${total} damage. Every HP entry offers it as a chip.`} expanded={`${total} damage${secretDamage && !panel.secret ? ", Secret" : ""}. Every HP entry offers it as a chip.`} missing=" Secret" /></Note> : null}
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { effectName } from "#shared/logText.ts";
 import type { DiceResult, LogEntry, RollChange, RollRequest, RollTarget } from "#shared/model.ts";
 import type { RollPreset } from "#shared/rules/rollReminders.ts";
 import { effectiveRollMode, rollModeSources, type RollModeOverride } from "../dice/rollMode.ts";
+import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { CONDITIONS } from "#shared/srd/conditions.ts";
 
 /**
@@ -375,6 +376,12 @@ export function askKept(gone: Pick<RollChange, "id" | "on"> | undefined, now: Pi
   return gone !== undefined && now.change === undefined && gone.id !== withdrew && now.tag !== undefined && now.tag === gone.on;
 }
 
+/** A sibling answer is not an input to this target's roll. */
+export function requestRollSource(request: RollRequest, target: RollTarget): unknown {
+  const { targets: _targets, ...route } = request;
+  return [route, target];
+}
+
 /** Plain Normal adds no information outside the sticky Dice result. */
 export function informativeRollMode(dice: Pick<DiceResult, "formula" | "mode" | "cancelled">, secret = false): string {
   const mode = dice.mode || dice.cancelled ? effectiveRollMode(dice) : "";
@@ -382,7 +389,7 @@ export function informativeRollMode(dice: Pick<DiceResult, "formula" | "mode" | 
 }
 
 /** Check the parent too: a wider flex item can push its neighbor onto another row. */
-export function fitResultWords(root: HTMLElement, base: HTMLElement, detail: HTMLElement): boolean {
+export function fitResultWords(root: HTMLElement, base: HTMLElement, detail: HTMLElement, missing?: HTMLElement): boolean {
   base.hidden = false;
   detail.hidden = true;
   const parent = root.parentElement ?? root;
@@ -394,35 +401,42 @@ export function fitResultWords(root: HTMLElement, base: HTMLElement, detail: HTM
   const fits = root.getBoundingClientRect().height <= height + 1 && parent.getBoundingClientRect().height <= parentHeight + 1 && parent.scrollWidth <= width + 1;
   base.hidden = fits;
   detail.hidden = !fits;
+  if (missing) missing.hidden = fits;
   return fits;
 }
 
 /** Recheck wrapping when available space or the loaded font changes. */
-export function watchResultWords(root: HTMLElement, base: HTMLElement, detail: HTMLElement): () => void {
-  const measure = () => { fitResultWords(root, base, detail); };
+export function watchResultWords(root: HTMLElement, base: HTMLElement, detail: HTMLElement, missing?: HTMLElement): () => void {
+  const measure = () => { fitResultWords(root, base, detail, missing); };
   measure();
   const observer = new ResizeObserver(measure);
   observer.observe(root.parentElement ?? root);
   document.fonts?.addEventListener("loadingdone", measure);
   return () => {
+    base.hidden = false;
+    detail.hidden = true;
+    if (missing) missing.hidden = false;
     observer.disconnect();
     document.fonts?.removeEventListener("loadingdone", measure);
   };
 }
 
 /** Start compact, then reveal informative words only if they cost no extra line. */
-export function RollResultLine(props: { as?: "span" | "div"; text: string; suffix?: string; expanded?: string; label?: string; children?: ReactNode; style?: CSSProperties }) {
+export function RollResultLine(props: { as?: "span" | "div"; text: string; suffix?: string; expanded?: string; missing?: string; children?: ReactNode; style?: CSSProperties }) {
   const root = useRef<HTMLElement>(null);
   const base = useRef<HTMLSpanElement>(null);
   const detail = useRef<HTMLSpanElement>(null);
+  const missing = useRef<HTMLSpanElement>(null);
   const expanded = props.expanded ?? `${props.text}${props.suffix ?? ""}`;
-  const name = props.label ?? expanded;
+  const additions = props.missing ?? props.suffix ?? expanded.slice(props.text.length);
   const more = expanded !== props.text;
   useLayoutEffect(() => {
-    if (more && root.current && base.current && detail.current) return watchResultWords(root.current, base.current, detail.current);
-  }, [expanded, more, props.children]);
-  return createElement(props.as ?? "span", { ref: root, role: "note", "aria-label": name, style: props.style },
-    createElement("span", { ref: base, "data-roll-result-base": "", "aria-hidden": true }, props.children ?? props.text),
-    more ? createElement("span", { ref: detail, hidden: true, "data-roll-result-detail": "", "aria-hidden": true }, props.expanded ?? [props.children ?? props.text, props.suffix]) : null,
+    if (base.current) base.current.hidden = false;
+    if (more && root.current && base.current && detail.current) return watchResultWords(root.current, base.current, detail.current, missing.current ?? undefined);
+  }, [expanded, additions, more, props.children]);
+  return createElement(props.as ?? "span", { ref: root, style: props.style },
+    createElement("span", { ref: base, "data-roll-result-base": "" }, props.children ?? props.text),
+    more ? createElement("span", { ref: detail, hidden: true, "data-roll-result-detail": "" }, props.children ? [props.children, props.suffix] : expanded) : null,
+    more ? createElement("span", { ref: missing, "data-roll-result-missing": "", style: VISUALLY_HIDDEN }, additions) : null,
   );
 }

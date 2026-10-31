@@ -205,3 +205,21 @@ test("FL-4 design: healing, temporary and set HP entries render the shared slip 
     assert.ok(markup.includes(words));
   }
 });
+
+
+test("a plain HP death-save result keeps the base words without empty mode punctuation", async () => {
+  const { optionSlot } = await import("../dice/optionState.ts");
+  const { receiptsSlot } = await import("../dice/useReceipt.ts");
+  for (const face of [8, 20]) {
+    const view = room({ tokens: { dying: token("dying", { actor: { inline: actor({ life: "dying" }) } }) } });
+    const scope = new RoomScope();
+    const options = scope.get(optionSlot); options.setState({ tags: { "deathSave:dying": "saved" } }); options.getInitialState = options.getState;
+    const receipts = scope.get(receiptsSlot);
+    receipts.env = { lookup: async () => ({ parts: [] }), log: () => [{ id: "2:0", at: "", kind: "event", data: { type: "dice", tag: "saved", by: "dm", to: "dm", rolls: [{ formula: "1d20", faces: [face], total: face }] } }] };
+    receipts.sending("saved", 0); receipts.answer("saved", 0, "taken");
+    const store = createStore(() => ({ view, you: DM, connection: "open", local: { selectedIds: [], multi: false } }));
+    const html = renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, children: createElement(RoomScopeProvider, { scope, children: createElement(DeathSaves, { saves: { ok: 0, fail: 0 }, canEdit: true, target: { tokenId: "dying" }, onChange() {} }) }) }));
+    const status = /role="status"[^>]*>(.*?)<\/span>/.exec(html)?.[1]?.replace(/<[^>]*>/g, "");
+    assert.equal(status, face === 20 ? "20, Natural 20" : "8");
+  }
+});

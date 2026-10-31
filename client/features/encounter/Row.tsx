@@ -750,7 +750,8 @@ function InitiativeRoll(props: { entry: InitEntry; creature: ActorTarget; name: 
     return state.connection === "open" && !!live && JSON.stringify(live) === JSON.stringify(entry);
   };
   const roll = (override?: RollModeOverride) => {
-    if (!numbers || !dice || waiting || blocked || !valid()) return;
+    if (!numbers || !dice || waiting || blocked) return;
+    if (override && !valid()) return;
     if (numbers.initBonus === null) {
       options.setState((s) => ({ focus: s.focus + 1, picked: creatureKey(dice.view, creature) }));
       ui.openPanel("dice");

@@ -21,7 +21,7 @@ import { useHpChips, useMarkChipApplied } from "../dice/hpChips.ts";
 import { defenseSummaryText } from "../dice/damageSummaryLines.ts";
 import { DamageSummary } from "../dice/DamageSummary.tsx";
 import { resultWords, type HpChip } from "../dice/options.ts";
-import { returnedRollMode } from "../rolls/card.ts";
+import { returnedRollMode, RollResultLine } from "../rolls/card.ts";
 import { useDicePanel } from "../dice/useDicePanel.ts";
 import { useRollModeMenu } from "../dice/useRollModeMenu.tsx";
 import type { RollModeOverride } from "../dice/rollMode.ts";
@@ -661,17 +661,19 @@ function DeathRoll(props: { target: ActorTarget; children: ReactNode }) {
     return state.connection === "open" && !!state.view && actorOf(state.view, target)?.life === "dying";
   };
   const roll = (override?: RollModeOverride) => {
-    if (waiting || blocked || !dice || !valid()) return;
+    if (waiting || blocked || !dice) return;
+    if (override && !valid()) return;
     // The preset is read at the tap, from the creature's effects then (presets.ts). While its turn's death save is open, the roll settles it (docs/design-v1-combat-controls.md 2.3).
     option.deathSave(target, presetFor(dice, target, { kind: "deathSave" }), row, openRecord(dice.view.encounter, actorOf(dice.view, target), "deathSave"), override);
   };
   const menu = useRollModeMenu({
-    source: JSON.stringify([target, dice && actorOf(dice.view, target), dice?.view.encounter, waits, blocked, panel.adv, panel.dis, panel.secret]), name: "Death Save",
+    source: JSON.stringify([target, dice && actorOf(dice.view, target), dice && openRecord(dice.view.encounter, actorOf(dice.view, target), "deathSave"), waits, blocked, panel.adv, panel.dis, panel.secret]), name: "Death Save",
     capability: { d20: true, visibility: "creature" }, dm,
     disabled: waiting || !!blocked || !dice, valid,
     fallbackFocus: () => fallback.current,
     onTap: () => roll(), onRoll: roll,
   });
+  const mode = receipt?.state === "committed" && !rolls[0]?.cancelled ? returnedRollMode(receipt.lines) : "";
   const said = blocked
     ? null
     : receipt?.state === "refused"
@@ -679,7 +681,7 @@ function DeathRoll(props: { target: ActorTarget; children: ReactNode }) {
       : receipt?.state === "unknown"
         ? "This may have happened. Check the log."
         : rolls.length > 0
-          ? `${resultWords(rolls, "d20").replace(", normal: Advantage and Disadvantage cancelled", "")}${receipt?.state === "committed" ? `. ${returnedRollMode(receipt.lines)}.` : ""}`
+          ? resultWords(rolls, "d20")
           : null;
   return (
     <>
@@ -708,7 +710,7 @@ function DeathRoll(props: { target: ActorTarget; children: ReactNode }) {
         </span>
       ) : said ? (
         <span role="status" style={{ fontSize: theme.font.small, color: receipt?.state === "refused" ? theme.color.dangerText : theme.color.textMuted, overflowWrap: "anywhere" }}>
-          {said}
+          <RollResultLine text={said} suffix={mode ? `. ${mode}.` : ""} />
         </span>
       ) : null}
     </>

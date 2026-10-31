@@ -31,7 +31,7 @@ import { FieldRow, Note, NumberField, Select, Stepper } from "../../tokens/ui.ts
 import { limitedUses } from "#shared/dice/uses.ts";
 import { abilityOp, actorOf } from "../../combat/logic.ts";
 import { creatureBlock, creatureProficiency, creatureRolls } from "../creature.ts";
-import { creatureKey, holderTarget, markOnRoll, rechargeUseOf, signedText, spendOnStart, spendsFor } from "../options.ts";
+import { creatureKey, holderTarget, markOnRoll, rechargeUseOf, signedText, targetRef, spendOnStart, spendsFor } from "../options.ts";
 import { presetFor } from "../presets.ts";
 import { marksTest } from "../proficiencyPresentation.ts";
 import { useRollSender } from "../send.ts";
@@ -351,7 +351,8 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   };
 
   const rollDamage = (override?: RollModeOverride) => {
-    if (blocked || offScene || page.phase === "applying" || page.phase === "applied" || pageRef.current.damage?.state === "sending") return;
+    if (override && (blocked || offScene)) return;
+    if (page.phase === "applying" || page.phase === "applied" || pageRef.current.damage?.state === "sending") return;
     const { rolls: rollsToSend, to } = groupDamageInvocation(pageRef.current, view, override);
     if (rollsToSend.length === 0) return;
     const tag = uuidv7();
@@ -502,7 +503,13 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
         ))
       : [];
 
-  const rowSource = JSON.stringify([dice.view.tokens, dice.view.characters, dice.view.encounter, dice.view.rolls]);
+  const rollContext = [page.id, page.sceneId, page.phase, page.test, page.spell, page.dc, page.secret, page.fill, page.switches];
+  const rowSources = new Map(rows.map((row) => {
+    const state = stateOf(shown, row);
+    const request = state.asked ? view.rolls[state.asked.rollId] : undefined;
+    const answer = request?.targets.find((target) => JSON.stringify(targetRef(target)) === JSON.stringify(row.askRef));
+    return [row.holder, JSON.stringify([rollContext, row, state, serverRolls([row]), page.dmRolls.filter((r) => r.holder === row.holder), request && [request.id, request.rev, request.test, answer]])];
+  }));
   const hasServerRoll = rows.some((r) => !r.skip && stateOf(shown, r).mark !== "skip" && stateOf(shown, r).way === "server");
   const rowList = (
     <div role="group" aria-label="Creatures" style={{ display: "grid", gap: theme.space(1) }}>
@@ -529,7 +536,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
         <GroupRow
           key={row.holder}
           page={shown}
-          source={rowSource}
+          source={rowSources.get(row.holder)!}
           row={row}
           level={dice && marksTest(pageTest) ? creatureProficiency(dice, row.target, pageTest) : undefined}
           outcome={outcomes.get(row.holder)!}
@@ -614,7 +621,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
           {outcome}
           {rowList}
           {page.test.kind !== "none" ? (
-            <GroupRollButton source={JSON.stringify([page, rows, dice.view.tokens, dice.view.characters, dice.view.encounter, panel.adv, panel.dis, panel.secret])} name={rollWords(shown)} capability={{ d20: hasServerRoll, visibility: hasServerRoll ? "selectable" : "request", batch: true }} valid={() => pageRef.current.phase === "setup" && !offScene} variant="primary" busy={loading} disabled={blocked !== null || offScene || rows.length === 0 || tooMany || bound !== null} onRoll={(override) => startRoll(undefined, override)}>
+            <GroupRollButton source={JSON.stringify([rollContext, rows.map((r) => [r, stateOf(shown, r)]), serverRolls(rows), panel.adv, panel.dis, panel.secret])} name={rollWords(shown)} capability={{ d20: hasServerRoll, visibility: hasServerRoll ? "selectable" : "request", batch: true }} valid={() => pageRef.current.phase === "setup" && !offScene} variant="primary" busy={loading} disabled={blocked !== null || offScene || rows.length === 0 || tooMany || bound !== null} onRoll={(override) => startRoll(undefined, override)}>
               {bound ?? (loading ? "Loading the stat blocks…" : rollWords(shown))}
             </GroupRollButton>
           ) : null}
@@ -792,7 +799,7 @@ function OutcomePanel(props: {
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (hasDice && !frozen && !props.blocked && damageState?.state !== "sending") props.onRoll();
+          if (hasDice && !frozen && damageState?.state !== "sending") props.onRoll();
         }}
         style={{ display: "flex", gap: theme.space(1), marginTop: -theme.space(1) }}
       >
@@ -808,12 +815,12 @@ function OutcomePanel(props: {
           style={{ flex: 1, width: 0 }}
         />
         {hasDice ? (
-          <GroupRollButton type="button" source={JSON.stringify([page, props.view.tokens, props.view.characters])} name="Group damage" capability={{ d20: false, visibility: damageTo({ ...page, secret: true }, props.view) === "dm" ? "selectable" : "creature", damage: true }} valid={() => !frozen && hasDice} size="sm" disabled={frozen || props.blocked} busy={damageState?.state === "sending"} onRoll={props.onRoll}>
+          <GroupRollButton type="button" source={JSON.stringify([page.id, page.sceneId, page.phase, page.outcome.damage, page.fill, page.secret, damageState, damageTo(page, props.view)])} name="Group damage" capability={{ d20: false, visibility: damageTo({ ...page, secret: true }, props.view) === "dm" ? "selectable" : "creature", damage: true }} valid={() => !frozen && hasDice && !props.blocked} size="sm" disabled={frozen} busy={damageState?.state === "sending"} onRoll={props.onRoll}>
             {damageState?.state === "committed" ? "Roll again" : "Roll"}
           </GroupRollButton>
         ) : null}
       </form>
-      {props.parsed && !props.parsed.ok ? <Note tone="error">{props.parsed.error}</Note> : rolledText ? <Note><RollResultLine text={rolledText === "Rolled, Secret" ? "Rolled" : rolledText} expanded={rolledText} /></Note> : null}
+      {props.parsed && !props.parsed.ok ? <Note tone="error">{props.parsed.error}</Note> : rolledText ? <Note><RollResultLine text={rolledText === "Rolled, Secret" ? "Rolled" : rolledText} expanded={rolledText} missing=" Secret" /></Note> : null}
       {summaryParts.length > 0 ? <DamageSummary summary={damageSummary(summaryParts)} /> : null}
       {theirs && !frozen ? (
         <ChipRow label="Rolled by someone else">
@@ -943,9 +950,9 @@ function GroupRow(props: {
   const receipt = useReceipt(s.batch?.tag ?? null);
   const returned = s.answer?.dice ?? s.rolled;
   const secret = receipt?.state === "committed" && receipt.lines.some((line) => line.data?.type === "dice" && line.data.to === "dm");
-  const how = returned?.cancelled ? words.how?.replace(", normal: Advantage and Disadvantage cancelled", "") : words.how;
+  const how = words.how;
   const text = how ?? (s.way === "server" ? serverWords(row, s) : WAY_WORDS[s.way]);
-  const effective = returned ? informativeRollMode({ ...returned, mode: undefined }, secret && !page.secret) : "";
+  const effective = returned ? informativeRollMode({ ...returned, mode: undefined, cancelled: undefined }, secret && !page.secret) : "";
   // A page with No save has no roll, so it is in setup until Apply: its rows' amounts open there too.
   const takes = (!setup || page.test.kind === "none") && !frozen && !s.gone && (outcome.result === "fail" || outcome.result === "pass");
   return (
@@ -1014,7 +1021,7 @@ function GroupRow(props: {
           ) : null}
           {waitingAsk && (row.bonus !== null || typed.typing) ? (
             <GroupRollButton
-              source={JSON.stringify([props.source, page, row, bonusText])} name={`${row.name}'s requested roll`}
+              source={JSON.stringify([props.source, bonusText])} name={`${row.name}'s requested roll`}
               capability={{ d20: true, visibility: "request" }} valid={() => !!waitingAsk && typed.bonus !== null && !frozen}
               onRoll={(override) => typed.bonus !== null && props.onDmRoll(typed.typing ? typed.bonus : undefined, override)}
               size="sm"
@@ -1026,7 +1033,7 @@ function GroupRow(props: {
             </GroupRollButton>
           ) : null}
           {s.status === "notRolled" || s.status === "unknown" ? (
-            <GroupRollButton source={JSON.stringify([props.source, page, row])} name={`${row.name}'s roll`} capability={{ d20: true, visibility: "selectable" }} valid={() => !frozen && !s.gone && (s.status === "notRolled" || s.status === "unknown")} size="sm" disabled={props.blocked !== null || rowBonus(row, s) === null} onRoll={props.onRollAgain}>
+            <GroupRollButton source={props.source} name={`${row.name}'s roll`} capability={{ d20: true, visibility: "selectable" }} valid={() => !frozen && !s.gone && (s.status === "notRolled" || s.status === "unknown")} size="sm" disabled={props.blocked !== null || rowBonus(row, s) === null} onRoll={props.onRollAgain}>
               {s.status === "unknown" ? "Roll again" : "Roll them"}
             </GroupRollButton>
           ) : null}
@@ -1115,8 +1122,7 @@ function GroupRollButton(props: Omit<ButtonProps, "onClick"> & { source: string;
   const room = useRoomStore();
   const viewing = useRoomView((s) => s.sceneId);
   const liveView = useRoomView((s) => s.view);
-  const online = useRoomView((s) => s.connection === "open");
-  const binding = useRollModeMenu({ source: `${viewing}|${source}`, name, capability, dm: true, disabled: button.disabled || button.busy || !online, valid: () => room.getState().connection === "open" && room.getState().sceneId === viewing && room.getState().view === liveView && valid(), onTap: () => onRoll(), onRoll });
+  const binding = useRollModeMenu({ source: `${viewing}|${source}`, name, capability, dm: true, disabled: button.disabled || button.busy, valid: () => room.getState().connection === "open" && room.getState().sceneId === viewing && room.getState().view === liveView && valid(), onTap: () => onRoll(), onRoll });
   return <><Button {...button} {...binding.buttonProps} aria-describedby={binding.describe(button["aria-describedby"])} style={{ ...button.style, ...binding.pressStyle }} />{binding.menu}</>;
 }
 

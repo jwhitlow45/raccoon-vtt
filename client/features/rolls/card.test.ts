@@ -212,7 +212,8 @@ test("result lines retain informative names while starting with compact visible 
   const { renderToStaticMarkup } = await import("react-dom/server");
   for (const suffix of [" (Advantage)", " (Disadvantage)", " (Normal: Advantage and Disadvantage cancelled)", " (Secret)", ""]) {
     const html = renderToStaticMarkup(createElement(RollResultLine, { text: "15 hit", suffix }));
-    assert.ok(html.includes(`role="note" aria-label="15 hit${suffix}"`));
+    assert.doesNotMatch(html, /role="note"|aria-label=|aria-hidden=/);
+    if (suffix) assert.match(html, /data-roll-result-missing=""/);
     assert.match(html, /data-roll-result-base=""[^>]*>15 hit<\/span>/);
     if (suffix) assert.match(html, /hidden="" data-roll-result-detail=""/);
     else assert.doesNotMatch(html, /data-roll-result-detail/);
@@ -266,7 +267,8 @@ test("wrapping follows resizes and font loads, then disconnects both watchers", 
     assert.equal(disconnected, true);
     narrow = true;
     fonts.dispatchEvent(new Event("loadingdone"));
-    assert.equal(detail.hidden, false, "an unmounted result no longer measures fonts");
+    assert.equal(detail.hidden, true, "cleanup restores compact text without measuring fonts");
+    assert.equal(base.hidden, false);
   } finally { Object.assign(globalThis, previous); }
 });
 
@@ -282,7 +284,59 @@ test("card cancellation can move out of visible words without losing formula, ve
 test("an existing marked result name survives without creating visible detail", async () => {
   const { createElement } = await import("react");
   const { renderToStaticMarkup } = await import("react-dom/server");
-  const html = renderToStaticMarkup(createElement(RollResultLine, { text: "DEX: typed 15", label: "DEX, proficient: typed 15" }));
-  assert.match(html, /aria-label="DEX, proficient: typed 15"/);
+  const html = renderToStaticMarkup(createElement(RollResultLine, { text: "DEX: typed 15", children: createElement("span", {}, "DEX, proficient: typed 15") }));
+  assert.match(html, />DEX, proficient: typed 15<\/span>/);
+  assert.doesNotMatch(html, /role="note"|aria-label=|aria-hidden=/);
   assert.doesNotMatch(html, /data-roll-result-detail/);
+});
+
+
+test("mounted result transitions restore compact words and keep each accessible addition once", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { stripTypeScriptTypes } = await import("node:module");
+  const source = readFileSync(new URL("./card.ts", import.meta.url), "utf8");
+  const body = stripTypeScriptTypes(source.slice(source.indexOf("export function RollResultLine("))).replace("export function", "function");
+  const refs: { current: unknown }[] = [];
+  let cursor = 0;
+  let effect: (() => (() => void) | void) | undefined;
+  let cleanup: (() => void) | void = undefined;
+  const nodes = new Map<string, { hidden: boolean; children: unknown[]; props: Record<string, unknown>; parentElement?: unknown; getBoundingClientRect(): { height: number } }>();
+  let narrow = false;
+  const parent = { clientWidth: 200, scrollWidth: 200, getBoundingClientRect: () => ({ height: 20 }) };
+  const make = (_tag: string, props: Record<string, unknown>, ...children: unknown[]) => {
+    const key = ["base", "detail", "missing"].find((k) => `data-roll-result-${k}` in props) ?? "root";
+    let node = nodes.get(key);
+    if (!node) { node = { hidden: !!props.hidden, children, props, parentElement: parent, getBoundingClientRect: () => ({ height: narrow && !nodes.get("detail")?.hidden ? 40 : 20 }) }; nodes.set(key, node); }
+    if (props.hidden !== node.props.hidden) node.hidden = !!props.hidden;
+    node.props = props; node.children = children;
+    const ref = props.ref as { current: unknown } | undefined; if (ref) ref.current = node;
+    return node;
+  };
+  class Observer { observe() {} disconnect() {} }
+  const previous = { ResizeObserver: globalThis.ResizeObserver, document: globalThis.document };
+  Object.assign(globalThis, { ResizeObserver: Observer, document: {} });
+  try {
+    const render = new Function("useRef", "useLayoutEffect", "createElement", "watchResultWords", "VISUALLY_HIDDEN", `${body}\nreturn RollResultLine;`)(
+      (value: unknown) => refs[cursor++] ?? (refs[cursor - 1] = { current: value }),
+      (run: typeof effect) => { effect = run; }, make, watchResultWords, { position: "absolute" },
+    ) as (props: { text: string; suffix?: string }) => void;
+    const commit = (suffix: string) => {
+      cursor = 0; effect = undefined; render({ text: "15 hit", suffix });
+      if (!suffix) for (const key of ["detail", "missing"]) { nodes.delete(key); }
+      cleanup?.(); cleanup = (effect as (() => (() => void) | void) | undefined)?.();
+    };
+    const readable = () => [...nodes.entries()].filter(([key, n]) => key !== "root" && !n.hidden).flatMap(([, n]) => n.children).join("");
+    commit(" (Secret)");
+    assert.equal(nodes.get("base")!.hidden, true);
+    assert.equal(readable(), "15 hit (Secret)", "wide text is readable once");
+    narrow = true; commit(" (Disadvantage)");
+    assert.equal(nodes.get("base")!.hidden, false);
+    assert.equal(readable(), "15 hit (Disadvantage)", "the narrow result keeps only missing words out of flow");
+    narrow = false; commit(" (Advantage)");
+    assert.equal(nodes.get("base")!.hidden, true);
+    commit("");
+    assert.equal(nodes.get("base")!.hidden, false, "removing the detail restores the mounted base");
+    assert.equal(readable(), "15 hit");
+    (cleanup as (() => void) | undefined)?.();
+  } finally { Object.assign(globalThis, previous); }
 });

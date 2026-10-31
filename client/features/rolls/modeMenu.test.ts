@@ -10,7 +10,7 @@ import type { ClientOp } from "#shared/protocol.ts";
 import type { RoomState, RollRequest } from "#shared/model.ts";
 import { EMPTY_PC_STATS } from "#shared/rules/pcStats.ts";
 import { pendingSaves } from "#shared/rules/saveEnds.ts";
-import { actor, character, DM, P1, effect, entry, room } from "#shared/testutil.ts";
+import { actor, character, DM, P1, effect, entry, room, token } from "#shared/testutil.ts";
 import type { UseRollModeMenuOptions } from "../dice/useRollModeMenu.tsx";
 import type { PromptCard } from "../combat/alerts.ts";
 import type { DeathSavePrompt } from "../combat/logic.ts";
@@ -38,6 +38,10 @@ const { DmCard } = await import("./DmDesk.tsx");
 const { SaveEndsCard } = await import("../encounter/SaveEndsCard.tsx");
 const { ConcentrationCard } = await import("../encounter/InitiativeStrip.tsx");
 const { DeathSaveCard } = await import("../combat/DeathSaveCard.tsx");
+const { optionSlot } = await import("../dice/optionState.ts");
+const { receiptsSlot } = await import("../dice/useReceipt.ts");
+const { PreviewContext } = await import("../dm/previewContext.ts");
+const { AutoInitiativeControls } = await import("../encounter/AutoInitiative.tsx");
 const { DeathSaves } = await import("../tokens/HpSection.tsx");
 const { EntryRow } = await import("../encounter/Row.tsx");
 const { RechargeCard } = await import("../encounter/RechargeCard.tsx");
@@ -62,7 +66,7 @@ function player(request: RollRequest, drafts = new Map<string, AnswerDraft>()) {
   return createElement(RollCard, { request, cardRef: createRef<HTMLElement>(), drafts, sheet: false, hidden: false, stand: "toolbar", stickyHeader: false, whole: 0, onMeasure() {}, onFold() {}, onEngage() {}, onFocusWithin() {} });
 }
 function desk(request: RollRequest) { return createElement(DmCard, { request, open: true, toggleRef() {}, onClose() {}, onToggle() {} }); }
-function provide(state: RoomState, child: ReactNode, connection = "open", you = DM) {
+function provide(state: RoomState, child: ReactNode, connection = "open", you = DM, configure?: (scope: InstanceType<typeof RoomScope>) => void) {
   captured = [];
   const scope = new RoomScope();
   const store = createStore(() => ({ view: state, you, roomId: "r1", sceneId: "s1", connection, local: { selectedIds: [], multi: false } }));
@@ -71,6 +75,7 @@ function provide(state: RoomState, child: ReactNode, connection = "open", you = 
   const choices = scope.get(diceChoicesSlot);
   choices.setState({ adv: false, dis: true, secret: true, version: 31 });
   const before = { ...choices.getState() };
+  configure?.(scope);
   const html = renderToStaticMarkup(createElement(RoomProvider, {
     store: store as never, actions: { newId: () => "roll-tag", dispatch: (op: ClientOp, options?: { onAnswer?: OnAnswer }) => { sent.push(op); if (options?.onAnswer) answers.push(options.onAnswer); return sent.length; } } as never,
     ui: {} as never, assets: { url: () => "" } as never,
@@ -295,10 +300,92 @@ test("player and DM results retain informative modes and omit plain Normal", () 
     const f = provide(state, surface(request));
     const text = f.html.replace(/<[^>]*>/g, "");
     const words = mode === "adv" ? "with Advantage" : mode === "dis" ? "with Disadvantage" : mode === "cancelled" ? "Normal: Advantage and Disadvantage cancelled" : "Normal";
-    assert.equal(text.split(words).length - 1, mode === "normal" ? 0 : 1, `${mode} only when informative`);
-    const names = [...f.html.matchAll(/role="note" aria-label="([^"]+)"/g)].map((match) => match[1]!);
-    assert.ok(names.some((name) => mode === "normal" ? !name.includes("Normal") : name.includes(words)), `${mode} in the accessible result name`);
-    if (surface === desk) assert.ok(names.some((name) => name.includes(", proficient")), "the result keeps its proficiency name");
+    if (mode === "normal") assert.doesNotMatch(text, /Normal/);
+    else assert.ok(text.includes(words), `${mode} remains readable`);
+    assert.doesNotMatch(f.html, /role="note"/);
+    if (surface === desk) assert.match(f.html, /aria-label="Proficient"/, "the result keeps its proficiency mark readable");
     assert.doesNotMatch(f.html, /aria-keyshortcuts|Hold, right-click/);
   }
+});
+
+
+test("death-save sources ignore other tracker rows and follow this creature's effects", () => {
+  for (const surface of ["hp", "death"] as const) {
+    const state = fixture();
+    const source = (view: RoomState) => provide(view, surface === "hp" ? hp() : death(view)).menus[0]!.source;
+    const before = source(state);
+    const unrelated = structuredClone(state); unrelated.encounter!.entries.push(entry("other", { value: 12 })); unrelated.encounter!.rev++;
+    assert.equal(source(unrelated), before, surface);
+    unrelated.characters.hero!.actor.effects.push(effect("bane", { key: "baned" }));
+    assert.notEqual(source(unrelated), before, surface);
+  }
+});
+
+test("fight cards fit added mode words while HP retains its base cancellation text", () => {
+  for (const surface of ["save", "concentration", "death", "hp"] as const) {
+    const state = fixture();
+    state.characters.hero!.actor.legendary = { actionsMax: 0, actionsUsed: 0, resistMax: 1, resistUsed: 0 };
+    const deathCard = death(state);
+    deathCard.props.card.prompt.settled = { state: "done", total: 4, outcome: "failure" };
+    const child = surface === "save" ? createElement(SaveEndsCard, { pending: pendingSaves(state)[0]!, onResult() {} }) : surface === "concentration" ? concentration() : surface === "death" ? deathCard : hp();
+    const f = provide(state, child, "open", DM, (scope) => {
+      const row = surface === "save" ? "c:hero|saveEnds:5:0" : surface === "concentration" ? "concentration|1:0" : "deathSave:hero";
+      const options = scope.get(optionSlot); options.setState({ tags: { [row]: "landed" }, since: { [row]: 7 } }); options.getInitialState = options.getState;
+      const tracker = scope.get(receiptsSlot);
+      tracker.env = { lookup: async () => ({ parts: [] }), log: () => [{ id: "8:0", kind: "event", at: "", data: { type: "dice", tag: "landed", by: DM.memberId, to: "dm", rolls: [{ formula: "1d20", faces: [4], total: 4, cancelled: true }] } }] };
+      tracker.sending("landed", 0); tracker.answer("landed", 0, "taken");
+    });
+    if (surface === "hp") {
+      assert.match(f.html, /data-roll-result-base=""[^>]*>4, normal: Advantage and Disadvantage cancelled<\/span>/);
+      assert.doesNotMatch(f.html, /data-roll-result-detail/);
+    } else {
+      assert.match(f.html, /data-roll-result-missing=""[^>]*> Normal: Advantage and Disadvantage cancelled\.<\/span>/, surface);
+      const base = /data-roll-result-base=""[^>]*>(.*?)<\/span>/.exec(f.html)?.[1];
+      assert.ok(base); assert.doesNotMatch(base, /cancelled/); assert.match(base, /4/);
+    }
+  }
+});
+
+test("auto initiative sources ignore unrelated movement and follow the rolled creature's modifier", () => {
+  const state = fixture(); state.tokens.goblin = token("goblin"); state.tokens.other = token("other");
+  state.encounter!.entries.push(entry("eg", { tokenId: "goblin", value: null }));
+  const source = () => provide(state, createElement(AutoInitiativeControls)).menus[0]!.source;
+  const before = source(); state.tokens.other!.x++;
+  assert.equal(source(), before);
+  assert.ok("inline" in state.tokens.goblin!.actor); state.tokens.goblin!.actor.inline.initBonus++;
+  assert.notEqual(source(), before);
+});
+
+
+test("preview blocks request menus while ordinary taps retain the base send path", () => {
+  for (const surface of [player, desk]) {
+    const state = fixture(); const request = ask(); state.rolls.ask = request;
+    const f = provide(state, createElement(PreviewContext.Provider, { value: {} as never, children: surface(request) }));
+    const menu = f.menus[0]!;
+    assert.equal(menu.disabled, false);
+    assert.equal(menu.valid?.(), false);
+    menu.onTap();
+    assert.equal(f.sent.length, 1, "the preview dispatcher retains responsibility for its ordinary refusal");
+  }
+});
+
+test("request sources exclude sibling answers but retain the current target and test", () => {
+  for (const surface of [player, desk]) {
+    const state = fixture(); const request = ask(); request.targets.push({ characterId: "sibling" }); state.rolls.ask = request;
+    const source = () => provide(state, surface(request)).menus[0]!.source;
+    const before = source(); request.targets[1]!.total = 15;
+    assert.equal(source(), before);
+    request.test.choices[0]!.ability = "con";
+    assert.notEqual(source(), before);
+  }
+});
+
+
+test("an ordinary tracker tap keeps its base roll path when menu validation is stale", () => {
+  const state = fixture(); const f = provide(state, tracker(state));
+  const menu = f.menus[0]!;
+  const view = structuredClone(state); view.encounter!.entries[0]!.value = 19; f.store.setState({ view });
+  assert.equal(menu.valid?.(), false);
+  menu.onTap();
+  assert.equal(f.sent[0]?.t, "dice.roll");
 });

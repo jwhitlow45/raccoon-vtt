@@ -1,4 +1,5 @@
 import "../../../components/testing/register.ts";
+import { registerHooks } from "node:module";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
@@ -17,6 +18,14 @@ import { receiptsSlot } from "../useReceipt.ts";
  * kept in a slot by the attack's name, so a fold that unmounts its row, or
  * a selection that changes while the attack stays shared, keeps the hits.
  */
+
+let menuSources: { name: string; source: string }[] = [];
+(globalThis as Record<symbol, unknown>)[Symbol.for("group-options-sources")] = (options: { name: string; source: string }) => menuSources.push(options);
+registerHooks({ load(url, context, next) {
+  const result = next(url, context);
+  if (!url.endsWith("/dice/useRollModeMenu.tsx")) return result;
+  return { ...result, source: String(result.source).replace(/(function useRollModeMenu\(options\) \{)/, '$1\nglobalThis[Symbol.for("group-options-sources")](options);') };
+} });
 
 const panelModule = await import("../useDicePanel.ts");
 const saveStoreModule = await import("./store.ts");
@@ -448,7 +457,7 @@ test("shared result details use returned cancellation, mode and visibility", () 
   data.rolls[1]!.cancelled = true;
   sentAttack(s);
   const html = render(s, ["ta", "tb"]);
-  assert.match(html, /aria-label="15 hit \(Advantage, Secret\), 20 hit \(Normal: Advantage and Disadvantage cancelled, Secret\)"/);
+  assert.match(html, /data-roll-result-detail=""[^>]*>15 hit \(Advantage, Secret\), 20 hit \(Normal: Advantage and Disadvantage cancelled, Secret\)<\/span>/);
   assert.match(html, /20 hit \(Normal: Advantage and Disadvantage cancelled, Secret\)/);
 });
 
@@ -476,7 +485,7 @@ test("ordinary shared results add no plain Normal to their text or name", () => 
   const html = render(s, ["ta", "tb"]);
   assert.match(html, /15 hit, 20 hit/);
   assert.doesNotMatch(html, /hit \(Normal/);
-  assert.match(html, /role="note" aria-label="15 hit, 20 hit"/);
+  assert.match(html, /data-roll-result-base=""[^>]*>15 hit, 20 hit<\/span>/);
 });
 
 
@@ -491,6 +500,19 @@ test("shared results omit Secret when the panel already shows it", () => {
   choices.setState({ secret: true, secretFor: "ta tb" });
   choices.getInitialState = choices.getState;
   const html = render(s, ["ta", "tb"]);
-  assert.match(html, /role="note" aria-label="15 hit \(Advantage\), 20 hit"/);
+  assert.match(html, /data-roll-result-detail=""[^>]*>15 hit \(Advantage\), 20 hit<\/span>/);
   assert.doesNotMatch(html, /Advantage, Secret/);
+});
+
+
+test("group quick-roll and shared-attack sources depend on selected roll inputs only", () => {
+  const s = setup();
+  const sources = () => { menuSources = []; render(s, ["ta", "tb"]); return new Map(menuSources.map((m) => [m.name, m.source])); };
+  const before = sources();
+  s.view.tokens.tc!.x++;
+  assert.deepEqual(sources(), before, "an unselected token moving leaves every source alone");
+  s.view.characters.a!.actor.effects.push({ id: "bane", key: "baned" });
+  const after = sources();
+  assert.notEqual(after.get("DEX save for 2"), before.get("DEX save for 2"));
+  assert.notEqual(after.get("Rapier for 2"), before.get("Rapier for 2"));
 });

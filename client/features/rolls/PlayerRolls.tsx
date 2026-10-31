@@ -45,7 +45,7 @@ import { editsPcStats } from "../tokens/access.ts";
 import { announceTurn } from "../encounter/alerts.ts";
 import { chromeZoom, screenHeight, smallUi, useLayoutSize } from "../device/layout.ts";
 import { uiScale, useUiScale } from "../device/settings.ts";
-import { askedText, askItems, askKept, bestChoice, cardRoll, choiceLabel, KEPT, naturalText, normalResult, rolledText, RollResultLine, parseBonus, rolledDice, rolledNews, verdictText, type AskItem, type RollInputs } from "./card.ts";
+import { askedText, askItems, askKept, bestChoice, cardRoll, choiceLabel, KEPT, naturalText, normalResult, requestRollSource, rolledText, RollResultLine, parseBonus, rolledDice, rolledNews, verdictText, type AskItem, type RollInputs } from "./card.ts";
 import {
   answered,
   answerFlow,
@@ -809,9 +809,9 @@ function CreatureAnswer(props: {
     return state.connection === "open" && !!live && live.rev === request.rev && !!answer && !finalForPlayer(live, answer) && !answered(answer) && flowRef.current.busy === null;
   };
   const tapRoll = (override?: RollModeOverride) => {
-    if (rollBlocked || !liveRoll()) return;
+    if (override && (rollBlocked || !liveRoll())) return;
     const now = cardRoll({ bonus, preset: dice ? presetFor(dice, ref, test, { rolls }) : null, inputs, text, typeTotals, override });
-    if (now.blocked) return;
+    if (override && now.blocked) return;
     if (!now.fields.ok) {
       step({ t: "check", error: now.fields.error });
       return;
@@ -831,12 +831,12 @@ function CreatureAnswer(props: {
   };
 
   const rollMenu = useRollModeMenu({
-    source: JSON.stringify([request, ref, picked, bonus, inputs, text, typeTotals, preset]),
+    source: JSON.stringify([requestRollSource(request, target), ref, picked, bonus, inputs, text, typeTotals, preset]),
     name: `${roll.label} for ${name}`,
     capability: { d20: true, visibility: "request" },
-    disabled: busy !== null || !offers.roll || !!rollBlocked,
+    disabled: busy !== null || !offers.roll,
     dm: useRoomView((s) => s.you?.role === "dm"),
-    valid: liveRoll,
+    valid: () => !rollBlocked && liveRoll(),
     fallbackFocus: () => answerRoot.current?.closest<HTMLElement>("[role='dialog']") ?? null,
     onTap: () => tapRoll(),
     onRoll: tapRoll,

@@ -1,4 +1,5 @@
 import "../../../components/testing/register.ts";
+import { registerHooks } from "node:module";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { theme } from "../../../lib/theme.ts";
@@ -22,6 +23,13 @@ import { groupSaveSlot } from "./store.ts";
 const panelModule = await import("../useDicePanel.ts");
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
+let menuBindings: import("../useRollModeMenu.tsx").UseRollModeMenuOptions[] = [];
+(globalThis as Record<symbol, unknown>)[Symbol.for("group-save-bindings")] = (options: import("../useRollModeMenu.tsx").UseRollModeMenuOptions) => menuBindings.push(options);
+registerHooks({ load(url, context, next) {
+  const result = next(url, context);
+  if (!url.endsWith("/dice/useRollModeMenu.tsx")) return result;
+  return { ...result, source: String(result.source).replace(/(function useRollModeMenu\(options\) \{)/, '$1\nglobalThis[Symbol.for("group-save-bindings")](options);') };
+} });
 const groupSave = await import("./GroupSave.tsx");
 const { OpenGroupSave } = groupSave;
 const { RoomProvider } = await import("../../../state/view.ts");
@@ -32,7 +40,7 @@ function damagePage(damage: string): Page {
   const test = { kind: "none" } as const;
   return { ...newPage({ id: "damage", sceneId: "s1", source: { kind: "selection", tokenIds: ["g1"] }, test, dc: null, secret: false, spell: false, switches: { dcShown: true, resultShown: true }, outcome: { damage, conditions: ["prone"] } }), rows: groupRows(DICE, ["g1"], test, false) };
 }
-function drawPage(page: Page, lines: import("#shared/model.ts").LogEntry[] = []): string {
+function drawPage(page: Page, lines: import("#shared/model.ts").LogEntry[] = [], connection = "open"): string {
   const scope = new RoomScope();
   const saves = scope.get(groupSaveSlot);
   const tags = [...new Set(lines.flatMap((line) => line.data?.type === "dice" && line.data.tag ? [line.data.tag] : []))];
@@ -46,7 +54,7 @@ function drawPage(page: Page, lines: import("#shared/model.ts").LogEntry[] = [])
   }
   saves.setState({ page });
   saves.getInitialState = saves.getState;
-  const store = createStore(() => ({ view: VIEW, roomId: "r1", connection: "open", you: DM, sceneId: "s1", local: { selectedIds: ["g1"], multi: false } }));
+  const store = createStore(() => ({ view: VIEW, roomId: "r1", connection, you: DM, sceneId: "s1", local: { selectedIds: ["g1"], multi: false } }));
   return renderToStaticMarkup(createElement(RoomProvider, {
     store: store as never, actions: { dispatch: () => 1 } as never, ui: {} as never, assets: { url: () => "" } as never,
     children: createElement(RoomScopeProvider, { scope, children: createElement(groupSave.GroupSave, { parent: "Dice", onBack() {} }) }),
@@ -166,7 +174,7 @@ test("one-roll group damage uses safe public labels and preserves the fixed cast
   assert.doesNotMatch(html, /type="submit"/);
 });
 
-function captureRolls(page: Page) {
+function captureRolls(page: Page, view = VIEW) {
   const scope = new RoomScope();
   const saves = scope.get(groupSaveSlot);
   saves.setState({ page });
@@ -175,9 +183,9 @@ function captureRolls(page: Page) {
   const initial = { adv: true, dis: false, secret: true, secretFor: "g1", version: 19, last: null };
   choices.setState(initial);
   choices.getInitialState = choices.getState;
-  const store = createStore(() => ({ view: VIEW, roomId: "r1", connection: "open", you: DM, sceneId: "s1", local: { selectedIds: ["g1"], multi: false } }));
+  const store = createStore(() => ({ view, roomId: "r1", connection: "open", you: DM, sceneId: "s1", local: { selectedIds: ["g1"], multi: false } }));
   const sent: import("#shared/protocol.ts").ClientOp[] = [];
-  const buttons: { name: string; onRoll(override?: import("../rollMode.ts").RollModeOverride): void }[] = [];
+  const buttons: { name: string; source: string; onRoll(override?: import("../rollMode.ts").RollModeOverride): void }[] = [];
   function collect(value: unknown): void {
     if (Array.isArray(value)) { value.forEach(collect); return; }
     if (!value || typeof value !== "object" || !("props" in value) || !("type" in value)) return;
@@ -245,7 +253,7 @@ for (const override of ["normal", "secret"] as const) test(`group damage ${overr
 
 test("group row details name the returned effective mode", () => {
   const base = damagePage("");
-  for (const [fields, words] of [[{ mode: "dis" as const }, "Disadvantage"], [{ cancelled: true as const }, "Normal: Advantage and Disadvantage cancelled"]] as const) {
+  for (const [fields, words] of [[{ mode: "dis" as const }, "Disadvantage"], [{ cancelled: true as const }, "normal: Advantage and Disadvantage cancelled"]] as const) {
     const page: Page = { ...base, phase: "rolled", states: { "token:g1": { way: "server", rolled: { formula: "1d20+4", faces: [12], total: 16, ...fields } } } };
     assert.ok(drawPage(page).replace(/<[^>]*>/g, "").includes(words));
   }
@@ -267,15 +275,15 @@ test("ordinary group rows add no plain Normal to their text or name", () => {
   const page: Page = { ...damagePage(""), phase: "rolled", states: { "token:g1": { way: "server", rolled: { formula: "1d20+4", faces: [12], total: 16 } } } };
   const html = drawPage(page);
   assert.doesNotMatch(html, /Normal/);
-  assert.match(html, /role="note" aria-label="Rolled 16 \(1d20\+4: 12\)"/);
+  assert.match(html, /data-roll-result-base=""[^>]*>Rolled 16 \(1d20\+4: 12\)<\/span>/);
 });
 
 
 test("group result names retain informative cancellation and omit Secret already shown by the page", () => {
   const page: Page = { ...damagePage(""), phase: "rolled", secret: true, states: { "token:g1": { way: "server", rolled: { formula: "1d20+4", faces: [12], total: 16, cancelled: true } } } };
   const html = drawPage(page);
-  assert.match(html, /role="note" aria-label="Rolled 16 \(1d20\+4: 12\), Normal: Advantage and Disadvantage cancelled"/);
-  assert.match(html, /data-roll-result-base=""[^>]*>Rolled 16 \(1d20\+4: 12\)<\/span>/);
+  assert.match(html, /data-roll-result-base=""[^>]*>Rolled 16 \(1d20\+4: 12\), normal: Advantage and Disadvantage cancelled<\/span>/);
+  assert.doesNotMatch(html, /data-roll-result-detail/);
   assert.doesNotMatch(html, /aria-label="Rolled[^"]*Secret/);
 });
 
@@ -284,7 +292,36 @@ test("group row Secret is informative only when it differs from the page switch"
   const dice = { formula: "1d20+4", faces: [12], total: 16 };
   const page: Page = { ...damagePage(""), phase: "rolled", states: { "token:g1": { way: "server", rolled: dice, batch: { tag: "save", part: 0 } } } };
   const line: import("#shared/model.ts").LogEntry = { id: "1:0", kind: "event", at: "now", data: { type: "dice", tag: "save", to: "dm", by: DM.memberId, rolls: [dice] } };
-  assert.match(drawPage(page, [line]), /aria-label="Rolled 16 \(1d20\+4: 12\), Secret"/);
-  assert.match(drawPage({ ...page, secret: true }, [line]), /aria-label="Rolled 16 \(1d20\+4: 12\)"/);
+  assert.match(drawPage(page, [line]), /data-roll-result-missing=""[^>]*>, Secret<\/span>/);
+  assert.match(drawPage({ ...page, secret: true }, [line]), /data-roll-result-base=""[^>]*>Rolled 16 \(1d20\+4: 12\)<\/span>/);
   assert.doesNotMatch(drawPage({ ...page, secret: true }, [line]), /aria-label="Rolled[^"]*Secret/);
+});
+
+
+test("group main, row and damage sources ignore unrelated room and row state", () => {
+  const view = structuredClone(VIEW);
+  view.tokens.other = token("other");
+  const base: Page = { ...PAGE, rows: groupRows(DICE, ["g1"], PAGE.test, false), source: { kind: "selection", tokenIds: ["g1"] }, states: { "token:g1": { way: "server", typedBonus: 4 } } };
+  for (const page of [base, { ...base, phase: "rolled" as const, states: { "token:g1": { way: "server" as const, typedBonus: 4, status: "unknown" as const } } }, damagePage("1d6 fire")]) {
+    const source = (p: Page) => new Map(captureRolls(p, view).buttons.map((b) => [b.name, b.source]));
+    const before = source(page);
+    view.tokens.other!.x++;
+    view.rolls.other = { id: "other", rev: 3, at: "", dcShown: true, resultShown: true, test: { kind: "save", choices: [{ ability: "wis" }] }, targets: [{ tokenId: "other", total: 15 }] };
+    assert.deepEqual(source(page), before, "unrelated movement and request answers do not close the menu");
+    if (page.test.kind !== "none") {
+      view.tokens.g1!.actor = { inline: actor({ effects: [{ id: "bane", key: "baned" }] }) };
+      assert.notDeepEqual(source(page), before, "this row's roll preset changes its source");
+      view.tokens.g1!.actor = structuredClone(VIEW.tokens.g1!.actor);
+    } else assert.notDeepEqual(source({ ...page, outcome: { ...page.outcome, damage: "2d6 fire" } }), before);
+  }
+});
+
+
+test("offline damage retains its enabled base tap and guards only menu picks", () => {
+  menuBindings = [];
+  const html = drawPage(damagePage("1d6 fire"), [], "closed");
+  const menu = menuBindings.find((b) => b.name === "Group damage")!;
+  assert.ok(menu); assert.equal(!!menu.disabled, false); assert.equal(menu.valid?.(), false);
+  const roll = /<button[^>]*aria-keyshortcuts="ContextMenu Shift\+F10"[^>]*>/.exec(html)?.[0];
+  assert.ok(roll); assert.doesNotMatch(roll, /disabled=/);
 });

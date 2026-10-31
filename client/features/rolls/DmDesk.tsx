@@ -6,7 +6,7 @@ import { useStore } from "zustand";
 import type { RollRequest, RollTarget } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { Input } from "../../components/Field.tsx";
-import { MarkedText, ProficiencyLabel, spokenText } from "../../components/ProficiencyMark.tsx";
+import { MarkedText, ProficiencyLabel } from "../../components/ProficiencyMark.tsx";
 import { useAlertsSummary } from "../../components/sheetFocus.ts";
 import { revealAndFocus } from "../../lib/reveal.ts";
 import { theme } from "../../lib/theme.ts";
@@ -30,7 +30,7 @@ import { AskRow } from "./AskRow.tsx";
 import { useRollModeMenu } from "../dice/useRollModeMenu.tsx";
 import type { RollModeOverride } from "../dice/rollMode.ts";
 import { useRollBlocked } from "../dice/useRollOption.ts";
-import { askRowText, bestChoice, dmRoll, knownOrTyped, normalResult, RollResultLine } from "./card.ts";
+import { askRowText, bestChoice, dmRoll, knownOrTyped, normalResult, requestRollSource, RollResultLine } from "./card.ts";
 import {
   allAnsweredIds,
   answered,
@@ -397,7 +397,7 @@ function TargetRow(props: { request: RollRequest; target: RollTarget; levelOf: L
           </strong>
           <ResultBadge result={target.result} wantsMark={wantsMark(request, target)} />
         </span>
-        <RollResultLine text={answerText} suffix={suffix} label={`${spokenText(answerText, answerMarks)}${suffix}`} style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>
+        <RollResultLine text={answerText} suffix={suffix} style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>
           <MarkedText text={answerText} marks={answerMarks} />
         </RollResultLine>
         {answered(target) ? (
@@ -465,7 +465,8 @@ function DmRollButton(props: { request: RollRequest; target: RollTarget; name: s
     return state.connection === "open" && live?.rev === request.rev && !!answer && !answered(answer) && answer.dice === undefined;
   };
   const tap = (override?: RollModeOverride) => {
-    if (busy || blocked || bonus === null || !dice || !rolls || !valid()) return;
+    if (busy || bonus === null || !dice || !rolls) return;
+    if (override && (blocked || !valid())) return;
     // Read again at the tap, so the effects and Magic Resistance then decide (doc 3 3.2).
     const now = dmRoll({ bonus, typed: known === null, preset: presetFor(dice, ref, test, { rolls }), override });
     const tag = actions.newId();
@@ -482,11 +483,11 @@ function DmRollButton(props: { request: RollRequest; target: RollTarget; name: s
     else setBusy(true);
   };
   const menu = useRollModeMenu({
-    source: JSON.stringify([request, ref, choice, known, text, roll, dice ? presetFor(dice, ref, test, { rolls }) : null, rolls]),
+    source: JSON.stringify([requestRollSource(request, target), ref, choice, known, text, roll, dice ? presetFor(dice, ref, test, { rolls }) : null, rolls]),
     name: `${roll.label} for ${name}`,
     capability: { d20: true, visibility: "request" },
-    disabled: busy || !!blocked || waits !== null || !dice || !rolls,
-    dm: true, valid,
+    disabled: busy || waits !== null || !connected,
+    dm: true, valid: () => !blocked && !!dice && !!rolls && valid(),
     fallbackFocus: () => sourceButton.current?.closest("section")?.querySelector<HTMLButtonElement>("button[aria-expanded]") ?? null,
     onTap: () => tap(), onRoll: tap,
   });

@@ -4,6 +4,7 @@ import { useStore } from "zustand";
 import type { Effect, LogEntry } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { Icon } from "../../components/Icon.tsx";
+import { RollResultLine } from "../rolls/card.ts";
 import type { RollModeOverride } from "../dice/rollMode.ts";
 import { ProficiencyLabel } from "../../components/ProficiencyMark.tsx";
 import { askedAlerts, barDockSlot, CARD_MAX, columnFacts, columnRoom, columnTop, DOCK_MIN_WIDTH, EDGE, placedChrome, raisedRow, SHADOW_ROOM, SUMMARY_ROW, type AskedAlerts } from "../../canvas/barDock.ts";
@@ -481,7 +482,7 @@ const unknownDot: CSSProperties = {
 
 // ---------------------------------------------------------------- alerts
 
-type Notice = { id: string; text: string; key?: Effect["key"] };
+type Notice = { id: string; text: string; suffix?: string; key?: Effect["key"] };
 
 /**
  * The column of alert cards under the top bar. On a phone in portrait an
@@ -1152,7 +1153,7 @@ function FightAlerts() {
         </div>
         {timeUp.text ? <AlertLine kind="timeUp" text={timeUp.text} danger lead={<Icon name="timer" size="sm" />} onDismiss={timeUp.dismiss} /> : null}
         {notices.map((n) => (
-          <AlertLine key={n.id} kind="notice" id={n.id} text={n.text} lead={n.key && effectHasArt(n.key) ? <EffectArt effectKey={n.key} size={theme.icon.sm} /> : undefined} onDismiss={() => dismissNotice(n.id)} />
+          <AlertLine key={n.id} kind="notice" id={n.id} text={n.text} suffix={n.suffix} lead={n.key && effectHasArt(n.key) ? <EffectArt effectKey={n.key} size={theme.icon.sm} /> : undefined} onDismiss={() => dismissNotice(n.id)} />
         ))}
         {/* Last, since it lasts the whole turn and gives way: the card above it is the column's real first card, which the bar keeps whole (design 4.6). */}
         {combat.turn && !turnHidden ? (
@@ -1209,7 +1210,7 @@ const OVERLAY_PAD = theme.space(2);
  * (docs/design-v1-look-pass-2.md D27). Focusable from script, not by Tab,
  * so a summary's tap can show it (pages/fold.ts focusAlert).
  */
-function AlertLine(props: { kind: "timeUp" | "notice"; id?: string; text: string; danger?: boolean; lead?: ReactNode; onDismiss(): void }) {
+function AlertLine(props: { kind: "timeUp" | "notice"; id?: string; text: string; suffix?: string; danger?: boolean; lead?: ReactNode; onDismiss(): void }) {
   return (
     <section
       role="group"
@@ -1222,7 +1223,7 @@ function AlertLine(props: { kind: "timeUp" | "notice"; id?: string; text: string
       {/* Its kind before its words: the timer for time up, the effect's own art for one that ended (docs/design-v1-icons-2.md 4). Dismiss is the close every card's header draws, which leaves the words more room than they had. */}
       {props.lead ? <span style={{ flex: "none", display: "grid", placeItems: "center", color: props.danger ? theme.color.dangerText : theme.color.textMuted }}>{props.lead}</span> : null}
       <p role="status" style={{ flex: 1, minWidth: 0, margin: 0, fontSize: theme.font.body14 }}>
-        {props.text}
+        <RollResultLine text={props.text} suffix={props.suffix} />
       </p>
       <Button size="sm" variant="quiet" icon="close" iconOnly="always" aria-label={`Dismiss ${props.text.replace(/[.!]+$/, "")}`} onClick={props.onDismiss} />
     </section>
@@ -1394,7 +1395,7 @@ function useLogAlerts() {
     notices,
     dismissNotice: (id: string) => setNotices((n) => n.filter((x) => x.id !== id)),
     /** A card's roll that decided it, told as a notice since the card goes with it. */
-    notify: (text: string) => setNotices((n) => [...n, { id: `told:${++told.current}`, text }].slice(-MAX_NOTICES)),
+    notify: (text: string, suffix?: string) => setNotices((n) => [...n, { id: `told:${++told.current}`, text, suffix }].slice(-MAX_NOTICES)),
   };
 }
 
@@ -1413,7 +1414,7 @@ function seqOf(entry: LogEntry): number {
  * on a fail, rolled or tapped, until the DM spends a use or accepts it.
  * Without the DC the total shows and Passed or Failed decide.
  */
-export function ConcentrationCard(props: { prompt: ConcentrationPrompt; onDone(): void; onResult(text: string): void }) {
+export function ConcentrationCard(props: { prompt: ConcentrationPrompt; onDone(): void; onResult(text: string, suffix?: string): void }) {
   const { prompt } = props;
   const root = useRef<HTMLElement>(null);
   const dm = useYou().role === "dm";
@@ -1453,7 +1454,7 @@ export function ConcentrationCard(props: { prompt: ConcentrationPrompt; onDone()
     const decided = total >= prompt.dc ? "pass" : left === 0 ? "fail" : null;
     if (decided === null) return;
     // The card goes as the roll decides it, so its result stays a moment as a notice.
-    props.onResult(`${concentrationWords(name, total, decided)}${own.mode ? ` ${own.mode}.` : ""}`);
+    props.onResult(concentrationWords(name, total, decided), own.mode ? ` ${own.mode}.` : undefined);
     if (decided === "pass") props.onDone();
     else end();
   });
@@ -1468,7 +1469,8 @@ export function ConcentrationCard(props: { prompt: ConcentrationPrompt; onDone()
     switch (action) {
       case "roll":
         if (typedRoll.closed) typedRoll.open();
-        else if (bonus !== null && preset && !blocked && !own.waiting && !send.busy && valid()) {
+        else if (bonus !== null && preset) {
+          if (override && (blocked || own.waiting || send.busy || !valid())) return;
           const state = room.getState().view;
           if (state) own.roll([cardRoll(prompt.target, bonus, preset, CONCENTRATION_TEST, chip)], { ...concentrationRollTo(state, dm, prompt), override });
         }
@@ -1511,7 +1513,7 @@ export function ConcentrationCard(props: { prompt: ConcentrationPrompt; onDone()
       </div>
       {model.status || trouble ? (
         <div role="status" style={{ display: "grid", gap: theme.space(1), fontSize: theme.font.body14 }}>
-          {model.status ? <span>{model.status}{own.mode ? ` ${own.mode}.` : ""}</span> : null}
+          {model.status ? <RollResultLine text={model.status} suffix={own.mode ? ` ${own.mode}.` : ""} /> : null}
           {trouble ? <span style={{ color: own.receipt?.state === "refused" ? theme.color.dangerText : theme.color.textMuted }}>{trouble}</span> : null}
         </div>
       ) : null}
@@ -1522,8 +1524,8 @@ export function ConcentrationCard(props: { prompt: ConcentrationPrompt; onDone()
       <CardButtons buttons={model.buttons} busy={send.busy} rollBusy={own.waiting || model.rollLoading} blocked={typedRoll.blocked} rollOpens={typedRoll.closed} onTap={tap} rollMenu={{
         source: JSON.stringify([prompt, bonus, bonusText, chip, preset, model, typedRoll.closed, dice ? concentrationRollTo(dice.view, dm, prompt) : null]),
         name: `Concentration save for ${name}`, capability: { d20: !typedRoll.closed, visibility: "creature" }, dm,
-        disabled: !!typedRoll.blocked || own.waiting || model.rollLoading || send.busy !== null,
-        valid, fallbackFocus: () => root.current,
+        disabled: !!typedRoll.blocked || own.waiting || model.rollLoading,
+        valid: () => send.busy === null && valid(), fallbackFocus: () => root.current,
         onTap: () => tap("roll"), onRoll: (override) => tap("roll", override),
       }} />
     </section>

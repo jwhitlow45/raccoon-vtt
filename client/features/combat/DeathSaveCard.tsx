@@ -1,6 +1,7 @@
 import { useMemo, useRef } from "react";
 import { resolveRollMode, type RollModeOverride } from "../dice/rollMode.ts";
 import { uuidv7 } from "#shared/ids.ts";
+import { RollResultLine } from "../rolls/card.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomStore, useRoomView } from "../../state/view.ts";
 import { alertCard } from "../encounter/alertCard.ts";
@@ -64,7 +65,8 @@ export function DeathSaveCard(props: { card: PromptCard<DeathSavePrompt>; waits:
   };
   const tap = (action: Action, override?: RollModeOverride) => {
     if (action === "roll") {
-      if (props.waits || blocked || !dice || roll.waiting || send.busy || settled || !valid()) return;
+      if (props.waits || blocked || !dice || roll.waiting) return;
+      if (override && (send.busy || settled || !valid())) return;
       // Its preset is read at the tap, from the creature's effects then, with none of the Dice panel's choices (docs/design-v1-roll-options.md 6.3).
       const preset = presetFor(dice, target, { kind: "deathSave" });
       const extra = preset.extra.join("").replace(/^\+/, "");
@@ -73,7 +75,7 @@ export function DeathSaveCard(props: { card: PromptCard<DeathSavePrompt>; waits:
     else props.onDismiss();
   };
   const trouble = rollTrouble(roll.receipt, roll.unsent) ?? send.refusal;
-  const status = settled ? `${deathSaveResult(participant.name, settled)}${roll.mode ? ` ${roll.mode}.` : ""}` : props.waits ? WAITS_FOR_REGENERATION : null;
+  const status = settled ? deathSaveResult(participant.name, settled) : props.waits ? WAITS_FOR_REGENERATION : null;
   return (
     // Focusable from script, not by Tab, so the dock's summary can show it (pages/fold.ts focusAlert).
     <section
@@ -92,15 +94,15 @@ export function DeathSaveCard(props: { card: PromptCard<DeathSavePrompt>; waits:
       {saves && !settled ? <Pips ok={saves.ok} fail={saves.fail} /> : null}
       {status || trouble ? (
         <div role="status" style={{ display: "grid", gap: theme.space(1), fontSize: theme.font.body14 }}>
-          {status ? <span>{status}</span> : null}
+          {status ? <RollResultLine text={status} suffix={settled && roll.mode ? ` ${roll.mode}.` : ""} /> : null}
           {trouble ? <span style={{ color: theme.color.dangerText }}>{trouble}</span> : null}
         </div>
       ) : null}
       <CardButtons buttons={buttons} busy={send.busy} rollBusy={roll.waiting} blocked={props.waits ? WAITS_FOR_REGENERATION : blocked} onTap={tap} rollMenu={{
-        source: JSON.stringify([card, target, props.waits, dice && actorOf(dice.view, target), dice?.view.encounter, blocked]),
+        source: JSON.stringify([card, target, props.waits, dice && actorOf(dice.view, target), dice && openRecord(dice.view.encounter, actorOf(dice.view, target), "deathSave"), blocked]),
         name: `Death Save for ${participant.name}`, capability: { d20: !settled, visibility: "creature" }, dm,
-        disabled: props.waits || !!blocked || !dice || roll.waiting || send.busy !== null,
-        valid, fallbackFocus: () => root.current,
+        disabled: props.waits || !!blocked || !dice || roll.waiting,
+        valid: () => send.busy === null && !settled && valid(), fallbackFocus: () => root.current,
         onTap: () => tap("roll"), onRoll: (override) => tap("roll", override),
       }} />
     </section>
