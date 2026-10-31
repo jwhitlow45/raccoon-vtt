@@ -12,12 +12,12 @@ const NONE = {};
 
 /**
  * How proficient a creature is in a test, for a surface that names tests
- * but reads no creature's rolls of its own: the Log, Recent rolls, a
- * toast, a roll card. One call serves the whole surface, and it hears only
- * the parts of the room a mark reads, so the Log does not draw again for a
- * change elsewhere. It reads the SRD blocks only once another view has
- * loaded them, so a mark never loads a chunk of its own (FL7-R1-12), and a
- * creature whose block has not loaded shows no mark, as one whose source
+ * but reads no creature's rolls of its own: Recent rolls, Dice, and roll
+ * cards. One call serves the whole surface, and it hears only the parts
+ * of the room a mark reads, so unrelated changes do not redraw it. It reads
+ * the SRD blocks only once another view has loaded them, so a mark never
+ * loads a chunk of its own (FL7-R1-12), and a creature whose block has not
+ * loaded shows no mark, as one whose source
  * is unknown does (D-261029-414).
  */
 export function useProficiency(): (creature: ActorTarget, test: D20Test) => Proficiency {
