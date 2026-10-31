@@ -3,7 +3,6 @@ import { ABILITY_KEYS, SKILL_KEYS, type Character, type PcRoll } from "#shared/m
 import { statsDefenses, pcActorNumbers, pcDerived, sortedRolls } from "#shared/rules/pcStats.ts";
 import { ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
 import { signed } from "#shared/statBlock.ts";
-import { proficiencyLines } from "../../lib/proficiencyLines.ts";
 import { theme } from "../../lib/theme.ts";
 import { AbilityGrid } from "../monsters/AbilityGrid.tsx";
 import { defenseLinesOf, rollReading, rollTitle } from "./reading.ts";
@@ -24,11 +23,6 @@ export function PcStatsView(props: { character: Pick<Character, "stats" | "level
   const d = pcDerived(stats, level);
   const actorNumbers = pcActorNumbers(stats, level);
   const skills = SKILL_KEYS.filter((s) => stats.skills[s] !== undefined || (stats.adjust.skills?.[s] ?? 0) !== 0);
-  // The flags are the sheet's own, so a skill adjusted without one is neither, and Jack of All Trades marks nothing (D-261030-539).
-  const lines = proficiencyLines({
-    saves: ABILITY_KEYS.map((ability) => ({ ability, level: stats.saves.includes(ability) ? "prof" : "none" })),
-    skills: skills.map((skill) => ({ skill, level: stats.skills[skill] ?? "none" })),
-  });
   const defenses = defenseLinesOf(statsDefenses(stats));
   const rolls = sortedRolls(stats.rolls);
   const group = (kind: PcRoll["kind"]) => rolls.filter((r) => r.kind === kind);
@@ -39,11 +33,6 @@ export function PcStatsView(props: { character: Pick<Character, "stats" | "level
       </p>
       <AbilityGrid abilities={ABILITY_KEYS.map((a) => ({ key: a, score: String(stats.abilities[a]), mod: signed(d.mods[a]), save: signed(d.saves[a].total), proficient: stats.saves.includes(a) }))} />
       {skills.length > 0 ? <Labeled label="Skills">{skills.map((s) => `${SKILLS[s].name} ${signed(d.skills[s].total)}`).join(", ")}</Labeled> : null}
-      {lines.map((line) => (
-        <Labeled key={line.label} label={line.label}>
-          {line.names.join(", ")}
-        </Labeled>
-      ))}
       {stats.jack ? <Labeled label="Jack of All Trades">{`${signed(Math.floor(d.pb / 2))} to skills with neither`}</Labeled> : null}
       <p style={LINE}>
         <strong>Initiative</strong> {signed(actorNumbers.initBonus)}, <strong>Passive Perception</strong> {actorNumbers.passivePerception}

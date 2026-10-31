@@ -135,7 +135,7 @@ export const theme = {
     dialog: "0 16px 48px rgba(0, 0, 0, 0.5)",
     /** A proficiency mark's 1 px line in its words' own color, just outside a roll in text (components/ProficiencyMark.tsx). */
     mark: "0 0 0 1px currentColor",
-    /** The same line inside a box: a proficient roll button's second line, or the frame of a label that cuts its words. */
+    /** The same line inside a box: a proficient roll button's second line, the frame of a label that cuts its words, or the outline of an ability box whose save is proficient. */
     markInside: "inset 0 0 0 1px currentColor",
     /** Expertise on a roll button: a 2 px band of the button's own `fill` inside its border, then a second line. */
     markDouble: (fill: string) => `inset 0 0 0 2px ${fill}, inset 0 0 0 3px currentColor`,

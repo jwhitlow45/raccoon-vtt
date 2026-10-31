@@ -45,9 +45,10 @@ describe("a monster block's ability table, three across (docs/design-v1-dice-ui.
     const markup = withoutFrames(renderToStaticMarkup(createElement(StatBlockView, { view: monsters[0]!, source: "srd" })));
     assert.doesNotMatch(markup, /<table/);
     assert.equal(markup.match(/<dt/g)?.length, 6);
-    // FL-13 (D-261030-539): the grid marks nothing. The block's Proficiencies line names the save.
+    // FL-15 (D-261030-588): no roll mark in the grid. The box of a proficient save is outlined whole, and no line lists it.
     assert.doesNotMatch(markup, /data-proficiency/, "no mark in the grid");
-    assert.match(markup, /<dd[^>]*font-weight:\d+[^>]*><span[^>]*>Save <\/span>\+3<span[^>]*>, proficient<\/span><\/dd>/, "the aboleth's Dex save stays set apart in bold");
-    assert.match(markup, /<strong>Proficiencies<\/strong> Dexterity saves/);
+    assert.match(markup, /<div data-save-proficient=""[^>]*box-shadow:inset 0 0 0 1px currentColor[^>]*><dt[^>]*><abbr title="Dexterity"/, "the aboleth's Dex box is outlined");
+    assert.match(markup, /<dd style="[^"]*"><span[^>]*>Save <\/span>\+3<span[^>]*>, proficient<\/span><\/dd>/);
+    assert.doesNotMatch(markup, /<strong>(Proficiencies|Expertise)<\/strong>/);
   });
 });

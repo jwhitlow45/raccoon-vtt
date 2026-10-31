@@ -1,18 +1,15 @@
 import { useEffect, useRef, useState, type Ref } from "react";
 import type { RollNumbers } from "#shared/dice/bonus.ts";
-import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Character } from "#shared/model.ts";
+import { ABILITY_KEYS, type AbilityKey, type Character } from "#shared/model.ts";
 import { pcShape } from "#shared/rules/pcStats.ts";
-import { SKILLS } from "#shared/rules/skills.ts";
 import { signed } from "#shared/statBlock.ts";
 import { Loading } from "../../components/Loading.tsx";
 import { GROUP_BOX, GROUP_FOLD, Group, Help } from "../../components/Panel.tsx";
 import { handFocusNow, handFocusOn, pressedControl } from "../../lib/handFocus.ts";
-import { proficiencyLines } from "../../lib/proficiencyLines.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { editsPcStats } from "../tokens/access.ts";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
-import { useProficiency } from "../dice/useProficiency.ts";
 import { StatBlockView } from "../monsters/StatBlockView.tsx";
 import { pcBlockSummary, takeShapeWords } from "../tokens/creatureKind.ts";
 import { useSrdList } from "../tokens/StatSummary.tsx";
@@ -151,14 +148,6 @@ function ShapeBody(props: { character: Character; edits: boolean }) {
   const monster = list?.find((m) => m.srdId === srdId);
   // The numbers its rolls get, read from the SRD table as the server reads them.
   const { numbers } = useCharacterRollNumbers(character.id);
-  const levelOf = useProficiency();
-  const self = { characterId: character.id };
-  const wild = pcShape(character) === "wild";
-  // Only a Wild Shape shows lines, since the druid keeps proficiencies the beast's block lacks (D-261030-581). Another shape lists its creature's own.
-  const lines = !wild ? [] : proficiencyLines({
-    saves: ABILITY_KEYS.map((ability) => ({ ability, level: levelOf(self, { kind: "save", ability }) })),
-    skills: SKILL_KEYS.map((skill) => ({ skill, level: levelOf(self, { kind: "check", ability: SKILLS[skill].ability, skill }) })),
-  });
   const endBox = useRef<HTMLDivElement>(null);
   // End the shape goes with the shape, so focus moves to the group's fold, which reads the section as it now stands, as Make a companion's does.
   const endShape = () => {
@@ -190,16 +179,8 @@ function ShapeBody(props: { character: Character; edits: boolean }) {
           {signed(numbers.skills.perception ?? numbers.abilities.wis.mod)}
         </p>
       ) : null}
-      {/* Wild Shape keeps the druid's own proficiencies beside the beast's, so the creature's block below does not list them all (D-261029-419). Another shape's block lists its own. */}
-      {numbers && wild
-        ? lines.map((line) => (
-            <p key={line.label} data-shape-proficiency="" style={{ margin: 0, fontSize: theme.font.body14 }}>
-              <strong>{line.label}</strong> {line.names.join(", ")}
-            </p>
-          ))
-        : null}
       {end}
-      {monster ? <StatBlockView view={monster} source="srd" credit leaveOutProficiency={wild && numbers !== null} /> : <Note>This character takes the shape of an SRD creature this app does not have.</Note>}
+      {monster ? <StatBlockView view={monster} source="srd" credit /> : <Note>This character takes the shape of an SRD creature this app does not have.</Note>}
     </>
   );
 }

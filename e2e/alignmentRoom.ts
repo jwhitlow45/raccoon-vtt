@@ -16,7 +16,7 @@ import { trapPreset } from "../shared/srd/traps.ts";
 import { barControl, ConsoleWatch, dragCells, expandBar, multiSelect, OpSocket, openSceneGroup, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, ROOT, sceneGroup, sceneGroupFold, Shots, sideTabName, SocketWatch, startServer, tapCell, touchSwipe, untilReady, waitFor, wholeInReach, type Server } from "./harness.ts";
 import { DEFAULT_SNAPSHOT_BUDGET } from "../server/rooms/budgets.ts";
 import { INTER_FILES } from "../client/lib/interFont.ts";
-import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measureAlignment, menuWordLines, pillLines, popoverScrollbarLines, proficiencyHeightLines, proficiencyLines, toastLaneLines, toastsUnderCards, type HeaderPlace, type PillPoint } from "./helpers/alignment.ts";
+import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measureAlignment, menuWordLines, pillLines, popoverScrollbarLines, proficiencyHeightLines, proficiencyLines, saveOutlineLines, toastLaneLines, toastsUnderCards, type HeaderPlace, type PillPoint } from "./helpers/alignment.ts";
 import { measureSpacing, spacingLines, type SpacingFinding } from "./helpers/spacing.ts";
 import { moreMenuFixture } from "./helpers/menuFixture.ts";
 
@@ -3751,12 +3751,28 @@ async function proficiencyScreen(sweep: Sweep, page: Page, screen: string, root:
 
 /**
  * A text surface that is not a roll (D-261030-539): `root` is measured by
- * the sweep and holds no frame, no tint and no unseen proficiency picture.
+ * the sweep and holds no frame, no tint and no unseen proficiency picture,
+ * and no line that lists proficiencies, which FL-15 took out (D-261030-588).
  */
 async function noMarks(sweep: Sweep, page: Page, screen: string, root: Locator, aligned: Locator = root): Promise<void> {
   await root.first().waitFor();
   await sweep.measure(page, `fl13-${screen}`, aligned);
   assert.equal(await root.locator("[data-proficiency-mark], [data-proficiency-label], [data-proficiency-marker]").count(), 0, `fl13: ${sweep.at} ${screen} holds a proficiency mark`);
+  assert.equal(await root.locator("p").filter({ hasText: /^\s*(Proficiencies|Expertise)\b/ }).count(), 0, `fl15: ${sweep.at} ${screen} lists proficiencies in a line`);
+}
+
+/**
+ * FL-15 (D-261030-588): the first six-ability grid in `root` outlines the
+ * boxes of `want`, such as ["DEX", "WIS"], and no others, and every
+ * outline in `root` is the one saveOutlineLines checks, by its style and
+ * by its pixels.
+ */
+async function saveOutlines(sweep: Sweep, page: Page, screen: string, root: Locator, want: readonly string[]): Promise<void> {
+  const grid = root.locator("[data-ability-grid]").first();
+  await grid.waitFor();
+  const outlined = (await grid.locator(":scope > [data-save-proficient] dt").allTextContents()).map((t) => t.trim().toUpperCase());
+  assert.deepEqual(outlined, want, `fl15: ${sweep.at} ${screen} outlines the boxes of its proficient saves`);
+  await sweep.add(page, `fl15-${screen}`, await saveOutlineLines(page, root, `${sweep.at} fl15-${screen}`, want.length > 0));
 }
 
 /**
@@ -3910,13 +3926,11 @@ async function proficiencyToken(sweep: Sweep, page: Page, name: string, at: { x:
   await grid.waitFor();
   assert.equal(await gridColumns(grid), 3, `fl7: ${sweep.at} the ability grid stays three across`);
   await noMarks(sweep, page, `${screen}-block`, panel);
-  // FL-13 (D-261030-539): a block that lists a skill or a save lists it under Skills, in two lines.
-  const lines = panel.locator("[data-ability-grid]").first().locator("xpath=following::p[starts-with(normalize-space(.), 'Proficiencies') or starts-with(normalize-space(.), 'Expertise')]");
-  assert.ok((await lines.count()) > 0, `fl13: ${sweep.at} ${screen}'s block lists proficiencies`);
+  // FL-15 (D-261030-588): the block outlines its proficient saves' boxes, and its Skills line, as printed, shows the rest.
+  await saveOutlines(sweep, page, `${screen}-block`, panel, screen === "dragon" ? ["DEX", "WIS"] : ["STR", "CON"]);
   if (screen === "dragon") {
-    await panel.locator("p").filter({ hasText: /^Expertise Perception$/ }).waitFor();
-    await panel.locator("p").filter({ hasText: /^Proficiencies Dexterity saves, Wisdom saves, Stealth$/ }).waitFor();
-    await panel.locator("p").filter({ hasText: /^Skills Perception/ }).first().scrollIntoViewIfNeeded();
+    await panel.locator("p").filter({ hasText: /^Skills Perception \+11, Stealth \+5$/ }).waitFor();
+    await panel.locator("[data-ability-grid]").first().scrollIntoViewIfNeeded();
     await shot(page, "dragon-block");
   }
 }
@@ -4250,6 +4264,43 @@ export function proficiencyTests(): void {
       await page.close();
     }
   });
+  test("fl15-helper. the outline check finds an outline that is missing, unspoken, outside, thick, in the accent's color, beside a bold save, or moving the words", async () => {
+    const page = await dmContext.newPage();
+    try {
+      // A grid drawn as AbilityGrid.tsx draws it: STR and CON plain, and DEX as each case draws it.
+      const box = (key: string, style: string, opts: { spoken?: boolean; marked?: boolean; bold?: boolean } = {}) =>
+        `<div ${opts.marked ? "data-save-proficient" : ""} style="padding:4px 8px;border-radius:6px;background:#2a2a32;line-height:1.2;${style}"><dt style="font-size:11px;font-weight:700;color:#a7a5ad">${key}</dt><dd style="margin:0;white-space:nowrap"><strong style="font-size:16px">10</strong> <span style="color:#a7a5ad">+0</span></dd><dd style="margin:0;font-size:13px;white-space:nowrap${opts.bold ? ";font-weight:700" : ""}"><span style="color:#a7a5ad">Save </span>+4${opts.spoken ? '<span style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)">, proficient</span>' : ""}</dd></div>`;
+      const grid = (id: string, dex: string) => `<div id="${id}" style="width:330px;margin:0 0 24px"><dl data-ability-grid style="margin:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px">${box("STR", "")}${dex}${box("CON", "")}</dl></div>`;
+      const OUTLINE = "box-shadow:inset 0 0 0 1px currentColor";
+      const cases: [string, string][] = [
+        ["good", box("DEX", OUTLINE, { spoken: true, marked: true })],
+        ["missing", box("DEX", "", { spoken: true, marked: true })],
+        ["unspoken", box("DEX", OUTLINE, { marked: true })],
+        ["outside", box("DEX", "box-shadow:0 0 0 1px currentColor", { spoken: true, marked: true })],
+        ["thick", box("DEX", "box-shadow:inset 0 0 0 2px currentColor", { spoken: true, marked: true })],
+        ["accent", box("DEX", "box-shadow:inset 0 0 0 1px #f7df00", { spoken: true, marked: true })],
+        ["bold", box("DEX", OUTLINE, { spoken: true, marked: true, bold: true })],
+        ["border", box("DEX", "border:1px solid currentColor", { spoken: true, marked: true })],
+      ];
+      for (const scale of SCALES) {
+        // The viewport tag keeps a phone context's page at 1 CSS px to 1 px of the shot, as the app's own does.
+        await page.setContent(`<meta name="viewport" content="width=device-width, initial-scale=1">${INTER_FACE}<div style="background:#1f1f25;color:#f1efe9;font-family:Inter;padding:24px;zoom:${scale}">${cases.map(([id, dex]) => grid(id, dex)).join("")}</div>`);
+        const lines = async (id: string) => (await saveOutlineLines(page, page.locator(`#${id}`), id)).join("\n");
+        assert.equal(await lines("good"), "", `fl15: a 1 px inside line in the text's color passes at ${scale}`);
+        assert.match(await lines("missing"), /hears its save as proficient, but it has no outline/);
+        assert.match(await lines("unspoken"), /does not hear its save as proficient/);
+        assert.match(await lines("outside"), /not a 1 px line inside the box/);
+        assert.match(await lines("outside"), /device pixels outside the box/, "the pixels find a line drawn outside the box");
+        assert.match(await lines("thick"), /line is .* px wide/, "the pixels find a line too wide");
+        assert.match(await lines("accent"), /not a 1 px line inside the box in its text's color/);
+        assert.match(await lines("bold"), /its save is set in weight 700/);
+        assert.match(await lines("border"), /words stand 1\.\d\d px from where a plain box's do/, "a border moves the words in");
+        assert.match(await lines("none-here"), /no outlined ability box/, "a check that finds nothing to check fails");
+      }
+    } finally {
+      await page.close();
+    }
+  });
   test("fl7-a. explicit PC flags, listed monster bonuses and a projected companion block", async () => {
     await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { level: 5, stats: FL7_STATS } });
     await ops.send({ t: "monster.create", monster: { ...FL7_BLOCK, id: FL7.monster, name: "FL7 Monster" } });
@@ -4289,10 +4340,11 @@ export function proficiencyTests(): void {
         const fold = sheet.getByRole("button", { name: "Stat block", exact: true });
         if ((await fold.getAttribute("aria-expanded")) !== "true") await fold.click();
         await sheet.locator("[data-pc-stats]").getByText(/Sleight of Hand \+\d+/).waitFor();
-        await sheet.locator("[data-pc-stats] p").filter({ hasText: /^Expertise Perception, Sleight of Hand$/ }).waitFor();
-        await sheet.locator("[data-pc-stats] p").filter({ hasText: /^Proficiencies Dexterity saves, Constitution saves, Animal Handling, Athletics$/ }).waitFor();
+        // FL-15 (D-261030-588): the Skills line's bonuses show expertise, with no "(expertise)" and no line after it.
+        await sheet.locator("[data-pc-stats] p").filter({ hasText: /^Skills Animal Handling \+5, Athletics \+3, Perception \+8, Sleight of Hand \+8$/ }).waitFor();
         assert.equal(await gridColumns(sheet.locator("[data-pc-stats] [data-ability-grid]")), 3, `fl7: ${sweep.at} the PC's ability grid stays three across`);
         await noMarks(sweep, pat, "pc-sheet", sheet.locator("[data-pc-stats]"));
+        await saveOutlines(sweep, pat, "pc-sheet", sheet.locator("[data-pc-stats]"), ["DEX", "CON"]);
         await sheet.locator("[data-pc-stats]").scrollIntoViewIfNeeded();
         await shot(pat, "pc-sheet");
         await sheet.getByText("Jack of All Trades", { exact: true }).waitFor();
@@ -4300,14 +4352,16 @@ export function proficiencyTests(): void {
         await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { actor: { srdId: "wolf", wildShape: true } } });
         await sheet.locator("[data-shape-numbers]").waitFor();
         await noMarks(sweep, pat, "wild-shape", sheet);
-        await sheet.locator("[data-shape-proficiency]").filter({ hasText: /^Proficiencies .*Dexterity saves/ }).waitFor();
+        // The wolf's block outlines the wolf's own saves, as printed: none. Rolls now gives the numbers the druid rolls with.
+        await saveOutlines(sweep, pat, "wild-shape", sheet, []);
         await sheet.locator("[data-shape-numbers]").scrollIntoViewIfNeeded();
         await shot(pat, "wild-shape");
         await sheet.locator("p").filter({ hasText: /^Skills / }).first().scrollIntoViewIfNeeded();
         await shot(pat, "wild-shape-wolf-block");
         await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { actor: { srdId: "wolf" } } });
-        await waitFor("fl13: Polymorph lists no proficiencies of the character's own", async () => ((await sheet.locator("[data-shape-proficiency]").count()) === 0 ? true : null));
+        await sheet.getByText(/^In the shape of Wolf\./).waitFor();
         await sweep.measure(pat, "fl7-polymorph", sheet);
+        assert.equal(await sheet.locator("p").filter({ hasText: /^\s*(Proficiencies|Expertise)\b/ }).count(), 0, `fl15: ${sweep.at} Polymorph lists no proficiencies in a line`);
         await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { actor: { srdId: null } } });
         await sheet.locator("[data-pc-stats]").waitFor();
 

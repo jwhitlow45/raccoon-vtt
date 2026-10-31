@@ -1,4 +1,5 @@
 import type { Locator, Page } from "playwright-core";
+import sharp from "sharp";
 
 /**
  * The alignment check (docs/design-v1-polish.md 4): what the polish pass
@@ -566,6 +567,196 @@ export async function proficiencyLines(root: Locator, screen: string, required =
     return run();
   });
   return [...(required && measured.count === 0 ? ["no visible proficiency marks were measured"] : []), ...measured.lines].map((line) => `${screen}: ${line}`);
+}
+
+/** How many outlined boxes a screen checks by their pixels, in grid order: two show every side a box can stand on. */
+const OUTLINE_PIXEL_BOXES = 2;
+
+/**
+ * FL-15's outlined ability boxes (D-261030-588) in `root`'s six-ability
+ * grids (client/features/monsters/AbilityGrid.tsx). A box is outlined
+ * exactly when a screen reader hears its save as proficient, and its
+ * outline is a 1 px line in the box's own text color, never the accent's,
+ * drawn inside its rounded edge. No save number is bold, and an outlined
+ * box's words stand where a plain box's do.
+ *
+ * Then the first outlined boxes in sight are shot with their outline and
+ * with it taken off through the CSSOM: the pixels it changes are a ring at
+ * the box's own edge, of one width on all four sides, with nothing changed
+ * inside the ring or outside the box. A taking off that changes no pixel
+ * fails, so it cannot pass by hiding nothing. `required` asks for at least
+ * one outlined box checked by its pixels.
+ */
+export async function saveOutlineLines(page: Page, root: Locator, screen: string, required = true): Promise<string[]> {
+  const styled = await root.evaluateAll((roots) => {
+    type Rect = { top: number; left: number; width: number; height: number };
+    type Css = { color: string; boxShadow: string; fontWeight: string };
+    type El = {
+      textContent: string | null;
+      style: { color: string };
+      children: ArrayLike<El>;
+      querySelector(selector: string): El | null;
+      querySelectorAll(selector: string): ArrayLike<El>;
+      hasAttribute(name: string): boolean;
+      getBoundingClientRect(): Rect;
+      appendChild(node: El): void;
+      remove(): void;
+      ownerDocument: { body: El; createElement(tag: string): El; defaultView: { getComputedStyle(node: El): Css } };
+    };
+    const lines: string[] = [];
+    const grids = (roots as unknown as El[]).flatMap((r) => Array.from(r.querySelectorAll("[data-ability-grid]")));
+    const doc = grids[0]?.ownerDocument;
+    if (!doc) return { outlined: 0, lines };
+    const css = (node: El) => doc.defaultView.getComputedStyle(node);
+    // The accent as the browser resolves it, to compare with the outline's color.
+    const probe = doc.createElement("span");
+    probe.style.color = "var(--rvtt-accent, #f7df00)";
+    doc.body.appendChild(probe);
+    const accent = css(probe).color;
+    probe.remove();
+    const boxes = grids.flatMap((grid) => Array.from(grid.children));
+    const name = (box: El) => box.querySelector("dt")?.textContent?.trim() ?? "?";
+    let outlined = 0;
+    for (const box of boxes) {
+      const style = css(box);
+      const drawn = style.boxShadow !== "none";
+      const spoken = /, proficient/.test(box.textContent ?? "");
+      if (box.hasAttribute("data-save-proficient") !== spoken) lines.push(`${name(box)}: data-save-proficient does not match what a screen reader hears`);
+      if (drawn !== spoken) lines.push(`${name(box)}: ${drawn ? "outlined, but a screen reader does not hear its save as proficient" : "a screen reader hears its save as proficient, but it has no outline"}`);
+      if (drawn) {
+        outlined++;
+        const score = box.querySelector("strong");
+        const text = score ? css(score).color : style.color;
+        if (style.boxShadow !== `${style.color} 0px 0px 0px 1px inset`) lines.push(`${name(box)}: the outline is "${style.boxShadow}", not a 1 px line inside the box in its text's color`);
+        if (style.color !== text) lines.push(`${name(box)}: the outline's color ${style.color} is not the text's ${text}`);
+        if (style.color === accent) lines.push(`${name(box)}: the outline takes the accent's color`);
+      }
+      const saves = Array.from(box.querySelectorAll("dd"));
+      const save = saves[saves.length - 1];
+      if (save && Number(css(save).fontWeight) > 400) lines.push(`${name(box)}: its save is set in weight ${css(save).fontWeight}, so two signs show one fact`);
+    }
+    // Taking no room: an outlined box's words stand where a plain box's do, from its top left corner.
+    const offsets = (box: El) => {
+      const b = box.getBoundingClientRect();
+      return Array.from(box.querySelectorAll("dt, dd")).map((part) => {
+        const r = part.getBoundingClientRect();
+        return [r.top - b.top, r.left - b.left];
+      });
+    };
+    for (const grid of grids) {
+      const all = Array.from(grid.children);
+      const plain = all.find((box) => css(box).boxShadow === "none");
+      if (!plain) continue;
+      const expected = offsets(plain);
+      for (const box of all.filter((b) => b !== plain)) {
+        const moved = Math.max(...offsets(box).flatMap((at, i) => at.map((v, j) => Math.abs(v - (expected[i]?.[j] ?? Number.NaN)))));
+        if (!(moved <= 0.01)) lines.push(`${name(box)}: its words stand ${Number.isNaN(moved) ? "in another order" : `${moved.toFixed(2)} px`} from where a plain box's do`);
+      }
+    }
+    return { outlined, lines };
+  });
+  const lines = [...styled.lines];
+  const boxes = root.locator("[data-ability-grid] > [data-save-proficient]");
+  const dpr = await page.evaluate(() => (globalThis as unknown as { devicePixelRatio: number }).devicePixelRatio);
+  let shot = 0;
+  for (let i = 0; i < (await boxes.count()) && shot < OUTLINE_PIXEL_BOXES; i++) {
+    const box = boxes.nth(i);
+    if (!(await box.isVisible())) continue;
+    await box.evaluate((el) => (el as unknown as { scrollIntoView(o: object): void }).scrollIntoView({ block: "nearest" }));
+    // Shot only where nothing covers it: a sheet's sticky header or foot would hide part of the ring.
+    const at = await box.evaluate((el) => {
+      type El = { contains(n: unknown): boolean; currentCSSZoom?: number; getBoundingClientRect(): { left: number; top: number; width: number; height: number; right: number; bottom: number }; ownerDocument: { elementFromPoint(x: number, y: number): unknown; defaultView: { getComputedStyle(n: unknown): { borderTopLeftRadius: string } } } };
+      const node = el as unknown as El;
+      const r = node.getBoundingClientRect();
+      const zoom = node.currentCSSZoom ?? 1;
+      const margin = 3 * zoom;
+      const points = [[r.left + r.width / 2, r.top + r.height / 2], [r.left + 1, r.top + r.height / 2], [r.right - 1, r.top + r.height / 2], [r.left + r.width / 2, r.top + 1], [r.left + r.width / 2, r.bottom - 1]];
+      const clear = points.every(([x, y]) => node.contains(node.ownerDocument.elementFromPoint(x!, y!)));
+      return { left: r.left, top: r.top, width: r.width, height: r.height, zoom, margin, clear, radius: Number.parseFloat(node.ownerDocument.defaultView.getComputedStyle(node).borderTopLeftRadius) * zoom };
+    });
+    if (!at.clear) continue;
+    // Whole CSS pixels, so the shot starts on a device pixel and the box's edges fall where its rect says.
+    const x = Math.floor(at.left - at.margin);
+    const y = Math.floor(at.top - at.margin);
+    const clip = { x, y, width: Math.ceil(at.left + at.width + at.margin) - x, height: Math.ceil(at.top + at.height + at.margin) - y };
+    const take = async () => {
+      const png = await page.screenshot({ clip, animations: "disabled", caret: "hide" });
+      return sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    };
+    const shown = await take();
+    const was = await box.evaluate((el) => {
+      const node = el as unknown as { style: { boxShadow: string } };
+      const before = node.style.boxShadow;
+      node.style.boxShadow = "none";
+      return before;
+    });
+    let plain: Awaited<ReturnType<typeof take>>;
+    try {
+      plain = await take();
+    } finally {
+      await box.evaluate((el, before) => ((el as unknown as { style: { boxShadow: string } }).style.boxShadow = before), was);
+    }
+    shot++;
+    const { width: w, height: h } = shown.info;
+    const changed = (x: number, y: number) => {
+      const o = (y * w + x) * 4;
+      return Math.max(...[0, 1, 2].map((c) => Math.abs(shown.data[o + c]! - plain.data[o + c]!))) > 16;
+    };
+    const label = `box ${i + 1} (${(await box.locator("dt").textContent())?.trim()})`;
+    // The browser draws a box on whole device pixels, its edges rounded.
+    const edge = { l: Math.round((at.left - x) * dpr), t: Math.round((at.top - y) * dpr), r: Math.round((at.left + at.width - x) * dpr), b: Math.round((at.top + at.height - y) * dpr) };
+    const width = at.zoom * dpr;
+    let any = 0;
+    let outside = 0;
+    let inside = 0;
+    const corner = (at.radius + 1) * dpr;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (!changed(x, y)) continue;
+        any++;
+        if (x < edge.l - 1 || x >= edge.r + 1 || y < edge.t - 1 || y >= edge.b + 1) outside++;
+        const ring = width + 1.5;
+        const inCorner = (x < edge.l + corner || x >= edge.r - corner) && (y < edge.t + corner || y >= edge.b - corner);
+        if (!inCorner && x >= edge.l + ring && x < edge.r - ring && y >= edge.t + ring && y < edge.b - ring) inside++;
+      }
+    }
+    if (any === 0) {
+      lines.push(`${label}: hiding its outline changed no pixel`);
+      continue;
+    }
+    if (outside > 0) lines.push(`${label}: its outline changes ${outside} device pixels outside the box`);
+    if (inside > 0) lines.push(`${label}: its outline changes ${inside} device pixels inside its ring, so something in the box moved`);
+    // Each side's ring, read across the middle of the box: where it starts and how wide it is.
+    const run = (from: number, step: number, count: number, at: (k: number) => boolean) => {
+      let start = -1;
+      for (let k = 0; k < count; k++) if (at(from + k * step)) { start = k; break; }
+      if (start < 0) return null;
+      let length = 0;
+      while (start + length < count && at(from + (start + length) * step)) length++;
+      return { start, length };
+    };
+    const midY = Math.round(h / 2);
+    const midX = Math.round(w / 2);
+    const sides = {
+      left: { ring: run(0, 1, midX, (x) => changed(x, midY)), edge: edge.l },
+      right: { ring: run(w - 1, -1, w - midX, (x) => changed(x, midY)), edge: w - edge.r },
+      top: { ring: run(0, 1, midY, (y) => changed(midX, y)), edge: edge.t },
+      bottom: { ring: run(h - 1, -1, h - midY, (y) => changed(midX, y)), edge: h - edge.b },
+    };
+    const widths: number[] = [];
+    for (const [side, { ring, edge: expected }] of Object.entries(sides)) {
+      if (!ring) {
+        lines.push(`${label}: no outline on its ${side} side`);
+        continue;
+      }
+      widths.push(ring.length);
+      if (Math.abs(ring.start - expected) > 1) lines.push(`${label}: its ${side} line is ${((ring.start - expected) / dpr).toFixed(2)} px from the box's edge`);
+      if (ring.length < Math.floor(width) || ring.length > Math.ceil(width) + 1) lines.push(`${label}: its ${side} line is ${(ring.length / dpr).toFixed(2)} px wide, not ${Number(at.zoom.toFixed(2))} px`);
+    }
+    if (widths.length > 1 && Math.max(...widths) - Math.min(...widths) > 1) lines.push(`${label}: its sides are ${widths.map((v) => (v / dpr).toFixed(2)).join(", ")} px wide, not even`);
+  }
+  if (required && shot === 0) lines.push(styled.outlined === 0 ? "no outlined ability box" : "no outlined ability box could be shot clear of what covers it");
+  return lines.map((line) => `${screen}: ${line}`);
 }
 
 /** The interface's indent step (theme.space(3)), in CSS px: the least a nested list or group is set in to make a column of its own. */

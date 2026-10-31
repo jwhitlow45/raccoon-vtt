@@ -29,16 +29,19 @@ describe("a PC block's abilities three across (docs/design-v1-dice-ui.md 6.1)", 
     assert.match(boxes[1]!, /<strong[^>]*>18<\/strong> <span[^>]*>\+4<\/span>/, "the score and its modifier");
   });
 
-  test("a proficient save is bold and the grid marks nothing (D-261030-539)", () => {
+  test("a proficient save's box is outlined whole, its number plain, and the grid marks nothing else (D-261030-588)", () => {
     assert.doesNotMatch(markup, /data-proficiency/);
-    const save = (box: string) => /<dd[^>]*font-weight:(\d+)[^>]*><span[^>]*>Save <\/span>([^<]+)(?:<span[^>]*>, proficient<\/span>)?<\/dd>/.exec(box);
+    const save = (box: string) => /<dd style="([^"]*)"><span[^>]*>Save <\/span>([^<]+)(?:<span[^>]*>, proficient<\/span>)?<\/dd>/.exec(box);
     const dex = save(boxes[1]!);
     const str = save(boxes[0]!);
     assert.ok(dex && str);
     assert.equal(dex[2], "+7", "Dex +4 and proficiency +3");
     assert.match(boxes[1]!, /\+7<span[^>]*>, proficient<\/span><\/dd>/, "a screen reader hears the proficient save");
     assert.doesNotMatch(boxes[0]!, /proficient/, "and no other");
-    assert.ok(Number(dex[1]) > Number(str[1]), "bold beside the plain Str save");
+    assert.equal(dex[1], str[1], "the proficient save is drawn as the plain Str save is");
+    assert.doesNotMatch(dex[1]!, /font-weight/);
     assert.equal(str[2], "+0");
+    const outlined = [...markup.matchAll(/<div data-save-proficient=""[^>]*><dt[^>]*><abbr[^>]*>(\w+)<\/abbr>/g)].map((m) => m[1]);
+    assert.deepEqual(outlined, ["DEX", "INT"], "Thorn's two proficient saves");
   });
 });

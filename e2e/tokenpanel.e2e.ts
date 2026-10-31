@@ -549,6 +549,22 @@ panelFile(null, () => {
         await noSideScroll(panel, `${size.label}, ${name}'s panel`);
         await speedUnitsWhole(panel, `${size.label}, ${name}'s panel`);
         await shots.take(dm, `tokenpanel-${size.width}x${size.height}-${name.split(" ")[0]!.toLowerCase()}-panel`);
+        if (name === "Adult White Dragon" && size.width === DESK.width) {
+          // FL-15 (D-261030-588): the block outlines its Dex and Wis boxes, in the text's color, and no line lists proficiencies.
+          const fold = panel.getByRole("button", { name: "Stat block", exact: true });
+          const folded = (await fold.getAttribute("aria-expanded")) === "false";
+          if (folded) await fold.click();
+          const outlined = panel.locator("[data-ability-grid] > [data-save-proficient]");
+          await outlined.first().waitFor();
+          assert.deepEqual(await outlined.locator("dt").allTextContents(), ["DEX", "WIS"]);
+          const looks = await outlined.first().evaluate((el) => {
+            const css = (el as unknown as { ownerDocument: { defaultView: { getComputedStyle(n: unknown): { boxShadow: string; color: string } } } }).ownerDocument.defaultView.getComputedStyle(el);
+            return { shadow: css.boxShadow, color: css.color };
+          });
+          assert.equal(looks.shadow, `${looks.color} 0px 0px 0px 1px inset`);
+          assert.equal(await panel.locator("p").filter({ hasText: /^(Proficiencies|Expertise)\b/ }).count(), 0, "no line lists proficiencies");
+          if (folded) await fold.click();
+        }
         // Let go, and on a phone close the sheet first.
         for (let i = 0; i < 3 && (await panel.count()) > 0 && (await panel.getByText("Tap a token to see it here.").count()) === 0; i++) await dm.keyboard.press("Escape");
         await dm.keyboard.press("Escape");
