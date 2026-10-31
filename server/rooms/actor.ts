@@ -60,6 +60,8 @@ import { describeHpEvent, describeOp, tallyOf } from "./undoLabels.ts";
 import { undoScope } from "#shared/undoScope.ts";
 import type { HistoryDirection, HistoryMessage, HistoryScope, OpAcknowledgment, StackHistoryCommand } from "#shared/undoContract.ts";
 import { dmHistoryValues, dmPoseRestore } from "./undoDm.ts";
+import { retainedSaveOutcome } from "#shared/saveOutcomes.ts";
+import type { SaveOutcomeTransition } from "#shared/saveOutcomeContract.ts";
 
 /**
  * The single writer of one loaded room (design sections 7.2, 7.3, 7.6, 7.7,
@@ -977,14 +979,15 @@ export class RoomActor {
     }
     // A page left open across the dragon turtle's rename still names the old id, which nothing would rename once stored.
     const clientOp = withTodaysSrdIds(parsed.data);
+    const trackedOutcome = clientOp.t === "actor.outcome" && clientOp.page !== undefined;
     if (cmd.groupScope !== undefined && (cmd.group === undefined || viewer.role !== "dm")) {
       this.#refuse(key, wm, n, "forbidden", "only the DM may declare a setup gesture with a group");
       return;
     }
     const lastGroup = this.#groupScopes.get(key);
     const priorGroup = cmd.group === undefined || lastGroup?.group === cmd.group ? lastGroup : this.#undo.groupScope(viewer.memberId, key, cmd.group);
-    const sameGroup = cmd.group !== undefined && priorGroup?.group === cmd.group;
-    const declaredSetup = cmd.groupScope === "setup" || (sameGroup && priorGroup.declared);
+    const sameGroup = !trackedOutcome && cmd.group !== undefined && priorGroup?.group === cmd.group;
+    const declaredSetup = !trackedOutcome && (cmd.groupScope === "setup" || (sameGroup && priorGroup.declared));
     this.#endAsks(key, cmd.group);
     // The rest of a gesture the DM was asked about goes unmade with it, unless sent with the yes (5.3).
     const refusedGroup = this.#askRefused.get(key);
@@ -1015,6 +1018,10 @@ export class RoomActor {
     let fromLog = false;
     let historyScope: HistoryScope = "play";
     let historyHead: string | undefined;
+    let saveOutcomeMissing = false;
+    // Lifecycle retention and the stored restore must use the same envelope
+    // time, including an Undo that arrives exactly at the retention limit.
+    const at = new Date(this.#opts.now()).toISOString();
     if (op.t === "undo" && op.log !== undefined) {
       // Taking an HP change back from the log (features section 10): not a
       // step of anyone's stack, but a restore built from the log line and
@@ -1112,13 +1119,26 @@ export class RoomActor {
       const routes = op.t === "redo" && step.routed && step.routes ? { routes: step.routes } : {};
       // A controlled ride the step ended or made shares its turn again when put back on that turn (docs/design-v1-attach.md 8.3).
       const rides = step.poses && step.rides && step.rides.length > 0 ? { rides: step.rides } : {};
-      const checked = checkServerOp({ t: "sys.restore", entries, from: op.t, scope: historyScope, ...(viewer.role === "dm" ? { correction: { label: step.label } } : {}), deps: true, ...(step.teleport ? { teleport: true as const } : {}), ...routes, ...rides, ...(quiet ? { quiet } : {}) });
+      let saveOutcome: SaveOutcomeTransition | undefined;
+      if (step.saveOutcome) {
+        const record = retainedSaveOutcome(this.#staged.state, step.saveOutcome.id, at);
+        if (record) {
+          saveOutcome = { ...step.saveOutcome, expectRevision: record.revision, state: op.t === "undo" ? "undone" : "applied" };
+        } else if (entries.length === 0) {
+          this.#undo.consume(viewer.memberId, op.t, historyScope, historyHead);
+          this.#refuse(key, wm, n, "invalid", `could not ${op.t} ${step.label}: this save can no longer reopen`);
+          return;
+        } else {
+          saveOutcomeMissing = true;
+        }
+      }
+      const checked = checkServerOp({ t: "sys.restore", entries, from: op.t, scope: historyScope, ...(viewer.role === "dm" ? { correction: { label: step.label } } : {}), deps: true, ...(step.teleport ? { teleport: true as const } : {}), ...routes, ...rides, ...(quiet ? { quiet } : {}), ...(saveOutcome ? { saveOutcome } : {}) });
       if (!checked.ok) {
         this.#undo.consume(viewer.memberId, op.t, historyScope, historyHead);
         this.#refuse(key, wm, n, "invalid", checked.message);
         return;
       }
-      if (viewer.role === "dm" && !this.#forgetAnswered(key, wm, n, command as StackHistoryCommand, checked.op as OpOf<"sys.restore">, viewer)) return;
+      if (viewer.role === "dm" && !this.#forgetAnswered(key, wm, n, command as StackHistoryCommand, checked.op as OpOf<"sys.restore">, viewer, at)) return;
       op = checked.op;
     }
     // A tag already settled is answered from its receipt, before anything else is looked at (docs/design-v1-dice.md 4.2).
@@ -1220,7 +1240,7 @@ export class RoomActor {
     }
     // The DM's builder ops ask before players' remembered map is forgotten, unless sent with the yes (5.3).
     const asks = viewer.role === "dm" && ASK_OPS.has(op.t) && (op as { forget?: true }).forget !== true;
-    const reduced = this.#reduce(op, viewer, asks);
+    const reduced = this.#reduce(op, viewer, asks, at);
     if (!reduced.ok && reduced.code === "forget" && cmd.group !== undefined) this.#askRefused.set(key, cmd.group);
     if (!reduced.ok) {
       // A restore that failed says which step it was, so a refused undo is never a riddle.
@@ -1241,20 +1261,22 @@ export class RoomActor {
     if (stamped !== undefined) push(batch.stamped, key, { n, at: stamped });
     batch.watermarks.set(key, n);
     if (admitted) this.#stageReceipt(batch, admitted, { state: "committed", seq: this.#staged.seq });
-    if (cmd.group !== undefined && actionScope !== "none") this.#groupScopes.set(key, { group: cmd.group, scope: actionScope, declared: cmd.groupScope === "setup" || (sameGroup && priorGroup.declared) });
+    if (cmd.group !== undefined && actionScope !== "none" && !trackedOutcome) this.#groupScopes.set(key, { group: cmd.group, scope: actionScope, declared: cmd.groupScope === "setup" || (sameGroup && priorGroup.declared) });
     if (restoredFrom && step) {
-      push(batch.restored, key, { n, what: step.label });
-      const inverse = reduced.inverse;
+      const unavailable = ". This save can no longer reopen.";
+      push(batch.restored, key, { n, what: saveOutcomeMissing ? step.label.slice(0, 200 - unavailable.length) + unavailable : step.label });
+      const inverse = reduced.inverse ?? (op.t === "sys.restore" && op.saveOutcome ? [] : null);
       // A change taken back from the log goes on no stack. Redone, it would come back with no line to say so, and its own line
       // would read as taken back for good. The DM deals it again instead, which the log records.
       if (!fromLog && historyHead !== undefined) this.#undo.consume(viewer.memberId, restoredFrom, historyScope, historyHead);
       if (inverse && !fromLog) this.#undo.pushRestored(viewer.memberId, restoredFrom, inverse, step.label, step.poses ? posesAfter(this.#staged.state, inverse, this.#shows(viewer), keptFrom(step.poses, before)) : undefined, step.origin, step.teleport === true, step, { scope: historyScope, ...(viewer.role === "dm" ? { values: dmHistoryValues(inverse, this.#staged.state, historyScope === "play") } : {}) });
-    } else if (actionScope !== "none" && UndoStacks.records(viewer.role, op, before) && reduced.inverse) {
+    } else if (actionScope !== "none" && UndoStacks.records(viewer.role, op, before) && (reduced.inverse || trackedOutcome)) {
       // Players keep their existing pose and trap rules. DM history independently records eligible token poses and
       // keeps every other inverse, including trap effects, under its original whole-value guard.
       const pose = viewer.role === "player" && (isPoseOp(op) || isResizeOp(op));
       const trapWrote = reduced.trapWrote;
-      const inverse = pose && trapWrote ? reduced.inverse.filter((e) => !trapWrote.has(e.key)) : reduced.inverse;
+      const allEntries = reduced.inverse ?? [];
+      const inverse = pose && trapWrote ? allEntries.filter((e) => !trapWrote.has(e.key)) : allEntries;
       const poses = pose ? posesAfter(this.#staged.state, inverse, this.#shows(viewer), plannedOn(before, op)) : undefined;
       // A teleport's step remembers it, so its redo passes the wall again (docs/design-v1-maps-vision.md 4.1).
       const teleport = op.t === "token.move" && op.teleport !== undefined;
@@ -1262,7 +1284,7 @@ export class RoomActor {
       const walk: Walk | undefined =
         poses && op.t === "token.move" && !teleport ? { tokenId: op.tokenId, route: op.route ?? [[op.x, op.y, 0, 0]], routed: op.route !== undefined } : undefined;
       const rides = poses ? ridesChanged(before, this.#staged.state) : undefined;
-      recording = this.#undo.push(viewer.memberId, inverse, describeOp(clientOp, before, viewer, this.#staged.state), cmd.group, poses, { client: key, n }, tallyOf(clientOp, before, this.#staged.state), teleport, walk, rides, reduced.trapped === true, { scope: viewer.role === "dm" ? actionScope : "play", declared: cmd.groupScope === "setup" || (sameGroup && priorGroup.declared), ...(viewer.role === "dm" ? { values: dmHistoryValues(inverse, this.#staged.state, actionScope === "play") } : {}) });
+      recording = this.#undo.push(viewer.memberId, inverse, describeOp(clientOp, before, viewer, this.#staged.state), trackedOutcome ? undefined : cmd.group, poses, { client: key, n }, tallyOf(clientOp, before, this.#staged.state), teleport, walk, rides, reduced.trapped === true, { scope: viewer.role === "dm" ? actionScope : "play", declared: declaredSetup, ...(op.t === "actor.outcome" && op.page ? { saveOutcome: { id: op.page.id, plan: op.plan } } : {}), ...(viewer.role === "dm" ? { values: dmHistoryValues(inverse, this.#staged.state, actionScope === "play") } : {}) });
     }
     if (conn.ackDetails) push(batch.ackDetails, key, { n, scope: actionScope, changed: reduced.changed, recorded: recording === "recorded", ...(recording === "too-large" ? { tooLarge: true as const } : {}) });
     this.#scheduleCommit();
@@ -1357,7 +1379,7 @@ export class RoomActor {
    * that no longer heads the stack is refused as stale, so it never
    * forgets for another step. True when the op goes on.
    */
-  #forgetAnswered(key: ClientKey, wm: Watermark, n: number, op: StackHistoryCommand, restore: OpOf<"sys.restore">, viewer: Viewer): boolean {
+  #forgetAnswered(key: ClientKey, wm: Watermark, n: number, op: StackHistoryCommand, restore: OpOf<"sys.restore">, viewer: Viewer, at: string): boolean {
     const asked = this.#forgetAsks.get(key);
     let confirmed = false;
     if (op.forget !== undefined) {
@@ -1368,7 +1390,7 @@ export class RoomActor {
         return false;
       }
     }
-    const result = applyOp(this.#staged.state, restore, viewer, { seq: this.#staged.seq + 1, at: new Date(this.#opts.now()).toISOString() });
+    const result = applyOp(this.#staged.state, restore, viewer, { seq: this.#staged.seq + 1, at });
     const over = result.ok && this.#memoryEstimate(result.state, result.touched)?.over;
     if (!over || confirmed) {
       this.#forgetAsks.delete(key);
@@ -1504,9 +1526,8 @@ export class RoomActor {
   }
 
   /** Steps 7 and 8: reduce on the staged state, then check the limits on what came out. `asks` refuses with FORGET_ASK an op that would pass a layer's cap. */
-  #reduce(op: Op, viewer: Viewer, asks = false): Reduced {
+  #reduce(op: Op, viewer: Viewer, asks = false, at = new Date(this.#opts.now()).toISOString()): Reduced {
     const seq = this.#staged.seq + 1;
-    const at = new Date(this.#opts.now()).toISOString();
     const result = applyOp(this.#staged.state, op, viewer, { seq, at });
     if (!result.ok) return result;
     // The limits read the op as it would apply with no trap step: what a trap writes is reserved or counted ahead, so a

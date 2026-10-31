@@ -524,7 +524,9 @@ function everDmMembers(state: RoomState, listed: readonly string[] | undefined):
 
 /** The importer becomes the DM member; every imported member is a player until someone claims otherwise. */
 function finishState(state: RoomState, dm: Member, name: string): RoomState {
-  return { ...state, meta: { ...state.meta, name }, members: { ...state.members, [dm.id]: dm } };
+  // Save drafts and their Undo stacks belong to the original room.
+  const { saveOutcomes: _saveOutcomes, ...rest } = state;
+  return { ...rest, meta: { ...state.meta, name }, members: { ...state.members, [dm.id]: dm } };
 }
 
 async function discardRoom(deps: ImportDeps, roomId: string): Promise<void> {

@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import type pg from "pg";
 import yazl from "yazl";
 import { SNAPSHOT_VERSION } from "#shared/migrate.ts";
+import { saveOutcomeLedgerSchema } from "#shared/saveOutcomeContract.ts";
 import type { RoomState, Viewer } from "#shared/model.ts";
 import { assetCreditSchema, type AssetCredit } from "#shared/protocol.ts";
 import { STARTER_KEY } from "#shared/starter.ts";
@@ -141,6 +142,7 @@ export function buildExportZip(assetDir: string, data: { room: RoomExport; manif
 }
 
 export function roomExport(roomId: string, seq: number, state: RoomState, dmMemberIds: Iterable<string>, now: Date = new Date()): RoomExport {
+  if (state.saveOutcomes !== undefined) saveOutcomeLedgerSchema.parse(state.saveOutcomes);
   // Only members the state still holds: import could not map the others anyway.
   const marked = [...dmMemberIds].filter((id) => state.members[id] !== undefined).sort();
   return {

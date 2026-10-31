@@ -14,6 +14,7 @@ import { randomUUID } from "node:crypto";
 import type { HistoryBlocker, HistoryDirection, HistoryMessage, HistoryScope, ScopeHistory } from "#shared/undoContract.ts";
 import { undoScope } from "#shared/undoScope.ts";
 import { attributesConflict, historyConflicts, mergeDmHistory, type DmHistoryValues } from "./undoDm.ts";
+import type { SaveOutcomeIdentity } from "#shared/saveOutcomeContract.ts";
 
 /**
  * Per-member undo and redo stacks (design 7.7). They hold the inverses the
@@ -84,6 +85,7 @@ export type UndoEntry = {
   id?: string;
   retained?: HistoryBlocker;
   values?: DmHistoryValues;
+  saveOutcome?: SaveOutcomeIdentity;
   entries: RestoreEntry[];
   label: string;
   group?: string;
@@ -134,7 +136,7 @@ export type Origin = { client: string; n: number };
 
 type Stacks = { undo: UndoEntry[]; redo: UndoEntry[] };
 type MemberHistory = { play: Stacks; setup: Stacks; serial: number; latest: UndoEntry | null };
-export type RecordHistory = { scope?: HistoryScope; values?: DmHistoryValues; declared?: boolean };
+export type RecordHistory = { scope?: HistoryScope; values?: DmHistoryValues; declared?: boolean; saveOutcome?: SaveOutcomeIdentity };
 
 export class UndoStacks {
   #members = new Map<string, MemberHistory>();
@@ -156,6 +158,7 @@ export class UndoStacks {
     if (before) return role === "dm" ? undoScope(op, before) !== "none" : onPlayerUndoStack(op);
     if (op.t.startsWith("sys.")) return false;
     if (op.t === "roll.change") return false;
+    if ((op.t === "roll.ask" || op.t === "roll.close") && op.reason === "savePage") return false;
     // A dismissal answers the player, as Keep does, and a withdrawal is the player's own (docs/design-v1-player-save-spell.md 5.6).
     if (op.t === "cast.close") return false;
     if (op.t === "scene.update" && Object.keys(op.patch).every((field) => field === "thumb")) return false;
@@ -189,16 +192,20 @@ export class UndoStacks {
    * origin.
    */
   push(memberId: string, inverse: RestoreEntry[], label: string, group?: string, poses?: Record<string, Pose>, origin?: Origin, tally?: Tally, teleport = false, walk?: Walk, rides?: Ride[], trapped = false, history: RecordHistory = {}): "recorded" | "none" | "too-large" {
-    if (inverse.length === 0) return "none";
+    const saveOutcome = history.saveOutcome;
+    if (inverse.length === 0 && !saveOutcome) return "none";
     // Reducers can write a new revision without changing a value. Compare the
     // entire inverse before recording so a no-effect edit preserves Redo,
     // while an effective edit keeps all its guards for an atomic restore.
-    if (inverse.every((entry) => entry.expectRev === null
+    if (!saveOutcome && inverse.every((entry) => entry.expectRev === null
       ? entry.value === null
       : entry.expectRev === undefined && entry.expectHash !== undefined && guardMatches(entry, entry.value ?? null))) return "none";
+    // The lifecycle remains one Play step even when damage rounds to zero or
+    // a caller supplies a surrounding gesture's group and setup scope.
+    if (saveOutcome) group = undefined;
     label = label.slice(0, 200);
     const member = this.#member(memberId);
-    const s = member[history.scope ?? "play"];
+    const s = member[saveOutcome ? "play" : history.scope ?? "play"];
     member.serial++;
     s.redo = [];
     if (inverse.length > MAX_RESTORE_ENTRIES) {
@@ -207,7 +214,7 @@ export class UndoStacks {
       return "too-large";
     }
     const top = s.undo.at(-1);
-    if (group !== undefined && top?.group === group && member.latest === top && (top.poses === undefined) === (poses === undefined)) {
+    if (group !== undefined && top?.group === group && !top.saveOutcome && member.latest === top && (top.poses === undefined) === (poses === undefined)) {
       const merged = mergeInverses(top.entries, inverse);
       if (merged && merged.length <= MAX_RESTORE_ENTRIES) {
         top.entries = merged;
@@ -245,6 +252,7 @@ export class UndoStacks {
     withRides(entry, rides);
     if (trapped) entry.trapped = true;
     const recorded = withExtras(group !== undefined && tally ? { ...entry, tally } : entry, poses, origin);
+    if (saveOutcome) recorded.saveOutcome = { ...saveOutcome };
     if (group !== undefined) recorded.gesture = { group, ...(origin ? { client: origin.client } : {}), declared: history.declared === true };
     if (history.values) recorded.values = history.values;
     this.#identify(recorded);
@@ -284,10 +292,11 @@ export class UndoStacks {
    * still the one its op made. It carries no group, so nothing sent later
    * merges into a step that was undone and redone.
    */
-  pushRestored(memberId: string, from: "undo" | "redo", inverse: RestoreEntry[], label: string, poses?: Record<string, Pose>, origin?: Origin, teleport = false, walked?: Pick<UndoEntry, "routes" | "routed" | "rides" | "gesture">, history: RecordHistory = {}): void {
+  pushRestored(memberId: string, from: "undo" | "redo", inverse: RestoreEntry[], label: string, poses?: Record<string, Pose>, origin?: Origin, teleport = false, walked?: Pick<UndoEntry, "routes" | "routed" | "rides" | "gesture" | "saveOutcome">, history: RecordHistory = {}): void {
+    const saveOutcome = walked?.saveOutcome ?? history.saveOutcome;
     label = label.slice(0, 200);
     const member = this.#member(memberId);
-    const s = member[history.scope ?? "play"];
+    const s = member[saveOutcome ? "play" : history.scope ?? "play"];
     member.serial++;
     member.latest = null;
     if (inverse.length > MAX_RESTORE_ENTRIES) {
@@ -301,7 +310,8 @@ export class UndoStacks {
     if (walked?.routes) entry.routes = walked.routes;
     if (walked?.routed) entry.routed = true;
     if (walked?.rides) entry.rides = walked.rides;
-    if (walked?.gesture) entry.gesture = walked.gesture;
+    if (walked?.gesture && !saveOutcome) entry.gesture = walked.gesture;
+    if (saveOutcome) entry.saveOutcome = { ...saveOutcome };
     const recorded = withExtras(entry, poses, origin);
     if (history.values) recorded.values = history.values;
     this.#identify(recorded);

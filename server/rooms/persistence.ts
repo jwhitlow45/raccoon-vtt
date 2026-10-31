@@ -5,6 +5,7 @@ import { MAP_DISCOVERY_OP_VERSION, OP_VERSION, SNAPSHOT_VERSION, mapDiscoveryUpg
 import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
 import { opSchema, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
+import { saveOutcomeLedgerSchema } from "#shared/saveOutcomeContract.ts";
 import type { Queryable } from "../auth/tx.ts";
 
 /**
@@ -105,6 +106,7 @@ export async function loadRoom(
   const snapshotSeq = Number(row.seq);
   // The reducer finds a line by its id in each log, so a stored log out of order is put in order before any op meets it.
   let state = logsInIdOrder(migrateSnapshot(row.state, row.schema_version));
+  if (state.saveOutcomes !== undefined) saveOutcomeLedgerSchema.parse(state.saveOutcomes);
   // An import's lines are numbered at seq 0. One made before imports wrote them to the archive has none there, so its
   // lines still in the log are written now, and Show older reaches them once the live log moves past them. An import
   // writes them all in its transaction, so one of them in the archive means they came. An archive that once held
@@ -337,6 +339,7 @@ export async function readWatermark(pool: Pool, roomId: string, key: WatermarkKe
  * members who may read it. Returns the serialized size in UTF-8 bytes.
  */
 export async function writeSnapshot(pool: Pool, roomId: string, seq: number, state: RoomState): Promise<number> {
+  if (state.saveOutcomes !== undefined) saveOutcomeLedgerSchema.parse(state.saveOutcomes);
   const json = JSON.stringify(state);
   await pool.query(
     `insert into room_snapshots (room_id, seq, state, schema_version, written_at) values ($1, $2, $3::jsonb, $4, now())

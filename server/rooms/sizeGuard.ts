@@ -90,6 +90,11 @@ import { keyBytes, MEMORY_CAP, wallLargestBytes } from "./memorySize.ts";
  * shared and DM lines hold undo records, at most MAX_LOG + dmLogLines ids
  * (400). At 25 characters per id plus JSON, this adds less than 12 KiB to
  * a DM snapshot. It never grows stored state or the scene's quota.
+ *
+ * The DM-only save outcome ledger also stays outside these measures,
+ * bounded separately to 100 KiB by its schema and lifecycle writes. A
+ * lifecycle-only Apply or restore must not change player admission or how
+ * much map memory the room retains.
  */
 
 function roomFull(limit: number): LimitCheck {
@@ -1017,7 +1022,7 @@ function trapsMeasure(state: RoomState): number {
 export function measuredStateBytes(state: RoomState): number {
   const memory = state.memory === undefined ? {} : { memory: {} };
   const memoryBy = state.memoryBy === undefined ? {} : { memoryBy: {} };
-  return serializedBytes({ ...state, log: measuredLog(state.log), traps: {}, trapLog: [], trapSeen: [], reminded: undefined, ...memory, ...memoryBy }) + trapsMeasure(state) - privateStateBytes(state) + perPlayerStoredReserve(state);
+  return serializedBytes({ ...state, log: measuredLog(state.log), traps: {}, trapLog: [], trapSeen: [], reminded: undefined, saveOutcomes: undefined, ...memory, ...memoryBy }) + trapsMeasure(state) - privateStateBytes(state) + perPlayerStoredReserve(state);
 }
 
 /**
@@ -1033,7 +1038,8 @@ export function measuredFromStored(bytes: number, state: RoomState): number {
   const roomLog = measuredLog(state.log);
   // The record's field, `,"reminded":{…}`, is its object's bytes less the braces, and the comma before it.
   const reminded = state.reminded === undefined ? 0 : serializedBytes({ reminded: state.reminded }) - 1;
-  const outside = reminded + (roomLog === state.log ? 0 : collectionBytes(state.log) - collectionBytes(roomLog)) + privateStateBytes(state) - perPlayerStoredReserve(state) + memoryStoredBytes(state);
+  const saveOutcomes = state.saveOutcomes === undefined ? 0 : serializedBytes({ saveOutcomes: state.saveOutcomes }) - 1;
+  const outside = reminded + saveOutcomes + (roomLog === state.log ? 0 : collectionBytes(state.log) - collectionBytes(roomLog)) + privateStateBytes(state) - perPlayerStoredReserve(state) + memoryStoredBytes(state);
   if (Object.keys(traps).length === 0 && log.length === 0 && seen.length === 0) return bytes - outside;
   return bytes - outside - (collectionBytes(traps) - 2) - (collectionBytes(log) - 2) - (collectionBytes(seen) - 2) + trapsMeasure(state);
 }
@@ -1167,6 +1173,8 @@ export function growthBound(before: RoomState, after: RoomState, touched: readon
     const next = readEntity(after, key);
     if (next === null || next === undefined) continue;
     const parsed = parseKey(key);
+    // Private lifecycle metadata has its own cap and cannot change player quota answers.
+    if (parsed?.kind === "saveOutcome") continue;
     // A trap's line is held by its log's reserve while the room has a trap.
     if ((parsed?.kind === "trapLog" || parsed?.kind === "trapSeen") && trapped) continue;
     // The log's lines only some viewers or none read ride outside the measures.

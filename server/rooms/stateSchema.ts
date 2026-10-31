@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { correctionLogEventSchema } from "#shared/undoContract.ts";
+import { saveOutcomeLedgerSchema } from "#shared/saveOutcomeContract.ts";
 import { ABILITY_KEYS, CONDITION_KEYS, CRIT_RULES, HEIGHTS_CHARS, MAX_HEIGHT_FT, MIN_HEIGHT_FT, ORDER_REVEALS, ROUGH_CHARS, STAIRS_CHARS, STATUS_KEYS, TURN_FLAGS, type MapPhase, type PhaseGrid, type RoomState, type SceneMap } from "#shared/model.ts";
 import { chunkKey, holderChunkKey } from "#shared/keys.ts";
 import { LIMITS, MOST_SIGHT_HOLDERS, serializedBytes } from "#shared/limits.ts";
@@ -886,6 +887,7 @@ const reminded = z.strictObject({
 });
 
 export const roomStateSchema = z.strictObject({
+  saveOutcomes: saveOutcomeLedgerSchema.optional(),
   meta,
   members: record(member),
   scenes: record(scene),
