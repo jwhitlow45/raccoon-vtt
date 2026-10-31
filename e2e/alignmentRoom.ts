@@ -323,7 +323,7 @@ const SOME_SIZES: Record<string, Record<SizesFile, number>> = {
  * One size's sweep: every line the checks report, a list of the screens
  * measured, and a shot of each screen that reported something.
  */
-class Sweep {
+export class Sweep {
   readonly lines: string[] = [];
   readonly seen = new Set<string>();
   readonly at: string;
@@ -355,13 +355,13 @@ class Sweep {
       if (!opts.optional) await this.missing(page, screen, (await root.count()) === 0 ? "nothing on the page matched it" : "what matched it is hidden");
       return;
     }
-    await this.add(page, screen, [...alignmentLines(await measureAlignment(shown), `${this.at} ${screen}`), ...await damageSummaryAlignment(shown, `${this.at} ${screen}`)]);
+    await this.add(page, screen, [...alignmentLines(await measureAlignment(shown, { optional: opts.optional }), `${this.at} ${screen}`), ...await damageSummaryAlignment(shown, `${this.at} ${screen}`)]);
     if (await shown.locator('[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]').count()) await this.add(page, screen, await menuWordLines(shown, `${this.at} ${screen}`));
     const popovers = shown.and(page.locator("[data-rvtt-popover]")).or(shown.locator("[data-rvtt-popover]"));
     if (await popovers.count()) await this.add(page, screen, await popoverScrollbarLines(popovers, `${this.at} ${screen}`));
     await this.add(page, screen, await proficiencyLines(shown, `${this.at} ${screen}`, false));
     await this.add(page, screen, await proficiencyHeightLines(shown, `${this.at} ${screen}`, false));
-    await this.add(page, screen, spacingLines(await measureSpacing(shown), `${this.at} ${screen}`));
+    await this.add(page, screen, spacingLines(await measureSpacing(shown, { optional: opts.optional }), `${this.at} ${screen}`));
   }
 
   /** The board's pills, as `screen`, with each trap name's pointer it read counted as a screen of its own. */
@@ -3074,6 +3074,19 @@ export function alignmentFile(title: string, steps: () => void): void {
 
 /** pl3-0: the helper on drawn cases, which needs no room. */
 export function helperTest(): void {
+  test("fu41-c-optional-race. optional measurement survives roots disappearing after the visible count", async () => {
+    const absent = { count: async () => 0, or() { return this; } };
+    const vanished = {
+      filter() { return this; }, count: async () => 1,
+      evaluateAll: async (fn: (roots: never[], options: unknown) => unknown, options: unknown) => fn([], options),
+      locator: () => absent, and: () => absent,
+    } as unknown as Locator;
+    const sweep = new Sweep("fu41-c-optional-race", false);
+    const page = { locator: () => absent } as unknown as Page;
+    await sweep.measure(page, "optional", vanished, { optional: true });
+    assert.deepEqual(sweep.lines, []);
+    await assert.rejects(() => sweep.measure(page, "required", vanished), /no roots matched/);
+  });
   test("fu41-c-font. unbundled glyphs fit their frame at 130% while clipped frames still fail", async () => {
     const page = await dmContext.newPage();
     try {
