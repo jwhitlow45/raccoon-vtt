@@ -459,6 +459,19 @@ test("shared result details use returned cancellation, mode and visibility", () 
   const html = render(s, ["ta", "tb"]);
   assert.match(html, /data-roll-result-detail=""[^>]*>15 hit \(Advantage, Secret\), 20 hit \(Normal: Advantage and Disadvantage cancelled, Secret\)<\/span>/);
   assert.match(html, /20 hit \(Normal: Advantage and Disadvantage cancelled, Secret\)/);
+  assert.match(html, /data-roll-result-missing=""[^>]*>; 15 hit \(Advantage, Secret\), 20 hit \(Normal: Advantage and Disadvantage cancelled, Secret\)<\/span>/);
+});
+
+test("shared attack compact words announce a common mode once", () => {
+  const s = setup();
+  const data = s.view.log[0]!.data;
+  assert.ok(data?.type === "dice");
+  data.to = "dm";
+  sentAttack(s);
+  const html = render(s, ["ta", "tb"]);
+  assert.match(html, /data-roll-result-base=""[^>]*>15 hit, 20 hit<\/span>/);
+  assert.match(html, /data-roll-result-missing=""[^>]*>, Secret<\/span>/);
+  assert.doesNotMatch(html, /Secret, Secret/);
 });
 
 test("shared damage details name returned Secret", () => {

@@ -397,7 +397,9 @@ function SharedAttack(props: { name: string; each: Attacker[]; dice: DiceView; b
     const mode = informativeRollMode(r.roll, secret && !panel.secret);
     return `${resultText(r)}${mode ? ` (${mode})` : ""}`;
   }).join(", ");
-  const modeWords = results.map((r) => informativeRollMode(r.roll, secret && !panel.secret)).filter(Boolean).join(", ");
+  const modes = results.map((r) => informativeRollMode(r.roll, secret && !panel.secret));
+  const commonMode = modes[0];
+  const missingModes = modes.every((mode) => mode === commonMode) ? commonMode ? `, ${commonMode}` : "" : `; ${detailedResults}`;
   const total = damage?.state === "committed" ? rollsOf(damage.lines).reduce((a, r) => a + r.total, 0) : null;
   return (
     <div style={{ display: "grid", gap: theme.space(1), borderTop: `${theme.line.border}px solid ${theme.color.border}`, paddingTop: theme.space(1) }}>
@@ -408,7 +410,7 @@ function SharedAttack(props: { name: string; each: Attacker[]; dice: DiceView; b
         <NumberField label="Target's AC" value={state.ac ?? undefined} min={1} max={50} nullable placeholder="AC" onCommit={(ac) => set({ ac })} width={72} />
       </div>
       {results.length > 0 ? (
-        <Note><RollResultLine text={plainResults} expanded={detailedResults} missing={modeWords ? `, ${modeWords}` : ""} /></Note>
+        <Note><RollResultLine text={plainResults} expanded={detailedResults} missing={missingModes} /></Note>
       ) : null}
       {hits.length > 0 ? (
         <Cell text={`Roll damage for ${hits.length} hit${hits.length === 1 ? "" : "s"}`} name={`Roll damage for ${hits.length} hit${hits.length === 1 ? "" : "s"}`} disabled={props.blocked} busy={damage?.state === "sending"} onTap={rollDamage} mode={{ source: `${source}|damage`, capability: { d20: false, visibility: "selectable", damage: true }, valid: () => valid() && damage?.state !== "sending", onRoll: rollDamage }} />
