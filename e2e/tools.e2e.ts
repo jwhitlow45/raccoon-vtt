@@ -544,6 +544,135 @@ describe("raccoon-vtt DM tools run", { timeout: 300_000 }, () => {
     assert.ok(!playerFile.includes(SHADOW), "the player's file names the hidden monster");
   });
 
+  test("logc-1. a player pages back past the live log, 500 rows at most, and comes back to the latest", async () => {
+    await player.getByRole("dialog", { name: "Export the log" }).getByRole("button", { name: /^Close/ }).tap();
+    // More lines than the 200 the room keeps live, at under the room's 60 ops a second.
+    for (let i = 1; i <= 560; i++) {
+      await ops.send({ t: "log.chat", text: `History line ${i}` });
+      if (i % 40 === 0) await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    const sheet = player.locator('dialog[data-rvtt-sheet][aria-label="Log"]');
+    await sheet.getByText("History line 560", { exact: true }).waitFor();
+    const rows = sheet.locator("ol > li");
+    const older = sheet.getByRole("button", { name: "Show older", exact: true });
+    const latest = sheet.getByRole("button", { name: "Back to latest", exact: true });
+    const start = sheet.getByText("This is the start of the log.", { exact: true });
+    const page = /\/api\/rooms\/[0-9A-Z]{8}\/log\?/;
+    const showOlder = async () => {
+      await older.scrollIntoViewIfNeeded();
+      await Promise.all([player.waitForResponse((res) => page.test(res.url()) && res.status() === 200), older.tap()]);
+      await older.or(start).waitFor();
+      const n = await rows.count();
+      assert.ok(n <= 500, `${n} rows drawn`);
+    };
+
+    // The server finds a page busy once: it waits out the Retry-After and asks again, and nothing fails (LOG-OPUS-19).
+    let busy = 1;
+    const asked: string[] = [];
+    playerConsole.allow = [/status of 429 .*\/api\/rooms\/[0-9A-Z]{8}\/log\?/];
+    await player.route(page, (route) => {
+      asked.push(route.request().url());
+      if (busy-- > 0) return route.fulfill({ status: 429, headers: { "retry-after": "1" }, contentType: "application/json", body: JSON.stringify({ error: "busy" }) });
+      return route.continue();
+    });
+    await older.scrollIntoViewIfNeeded();
+    const top = rows.first();
+    const topId = await top.getAttribute("data-log-id");
+    const topY = (await top.boundingBox())!.y;
+    await showOlder();
+    await player.unroute(page);
+    playerConsole.allow = [];
+    assert.equal(asked.length, 2, "one retry after the busy page");
+    assert.equal(asked[0], asked[1]);
+    assert.equal(await sheet.getByRole("alert").count(), 0, "a busy page that the retry answered says nothing failed");
+    await sheet.getByText("History line 311", { exact: true }).waitFor();
+    // The row the reader had at the top stays where it was, and the page went in above it.
+    const held = sheet.locator(`li[data-log-id="${topId}"]`);
+    assert.ok(Math.abs((await held.boundingBox())!.y - topY) <= 2, "the reader's row moved");
+    await shots.take(player, "logc-older-page");
+
+    // Past 500 rows the window parts from the live log: its newest lines go, and Show newer and Back to latest come.
+    for (let i = 0; i < 10 && !(await latest.isVisible()); i++) await showOlder();
+    assert.equal(await latest.isVisible(), true, "the window never parted from the live log");
+    await sheet.getByRole("list", { name: "Log history" }).waitFor();
+    assert.equal(await rows.count(), 500);
+    assert.equal(await sheet.getByText("History line 560", { exact: true }).count(), 0, "the live log's newest lines stay drawn past 500 rows");
+    await sheet.getByRole("button", { name: "Show newer", exact: true }).waitFor();
+    await latest.scrollIntoViewIfNeeded();
+    await shots.take(player, "logc-history-parted");
+    for (let i = 0; i < 10 && (await older.isVisible()); i++) await showOlder();
+    await start.waitFor();
+    await sheet.getByText("History line 1", { exact: true }).waitFor();
+
+    // Show newer reads on from the window's newest row, and the start goes with the oldest rows it pushes out.
+    const newer = sheet.getByRole("button", { name: "Show newer", exact: true });
+    await newer.scrollIntoViewIfNeeded();
+    await Promise.all([player.waitForResponse((res) => page.test(res.url()) && new URL(res.url()).searchParams.has("after")), newer.tap()]);
+    await older.waitFor();
+    assert.ok((await rows.count()) <= 500);
+    assert.equal(await sheet.getByText("History line 1", { exact: true }).count(), 0);
+
+    // Back to latest: the live log again, its newest line drawn, and the composer ready.
+    await latest.scrollIntoViewIfNeeded();
+    await latest.tap();
+    await sheet.getByRole("list", { name: "Log", exact: true }).waitFor();
+    await sheet.getByText("History line 560", { exact: true }).waitFor();
+    const focused = () => (globalThis as unknown as { document: { activeElement: { getAttribute(name: string): string | null } | null } }).document.activeElement?.getAttribute("aria-label") ?? null;
+    assert.equal(await player.evaluate(focused), "Message");
+    await shots.take(player, "logc-back-to-latest");
+  });
+
+  test("logc-2. the export sheet pages older sessions, and a file too large to hold offers the browser's own download", async () => {
+    await openSideTab(dm, "Log");
+    const day = Date.UTC(2026, 8, 1);
+    const sessions = (from: number, to: number) =>
+      Array.from({ length: from - to + 1 }, (_, i) => {
+        const k = from - i;
+        return { firstId: `${k * 10}:0`, lastId: `${k * 10 + 5}:0`, from: new Date(day + k * 86_400_000).toISOString(), to: new Date(day + k * 86_400_000 + 3 * 3_600_000).toISOString(), lines: 12 };
+      });
+    const listed: string[] = [];
+    await dm.route(/\/api\/rooms\/[0-9A-Z]{8}\/log\/sessions/, (route) => {
+      const before = new URL(route.request().url()).searchParams.get("before");
+      listed.push(before ?? "");
+      const body = before === null ? { sessions: sessions(30, 6), lines: 1234, nextSessionsBefore: "60:0" } : { sessions: sessions(5, 1), lines: 1234, nextSessionsBefore: null };
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+    });
+    await dm.getByRole("button", { name: "Export", exact: true }).click();
+    const sheet = dm.getByRole("dialog", { name: "Export the log" });
+    const list = sheet.getByRole("list", { name: "Sessions" });
+    const exports = list.getByRole("button", { name: /^Export / });
+    await list.getByRole("listitem").filter({ hasText: /^Everything, 1,234 lines/ }).waitFor();
+    assert.equal(await exports.count(), 26, "25 sessions and Everything");
+    await sheet.getByRole("button", { name: "Older sessions", exact: true }).click();
+    await waitFor("the older sessions", async () => ((await exports.count()) === 31 ? true : null));
+    assert.equal(await sheet.getByRole("button", { name: "Older sessions", exact: true }).count(), 0, "the last page offers no more");
+    assert.deepEqual(listed, ["", "60:0"]);
+    await shots.take(dm, "logc-export-older-sessions");
+    await dm.unroute(/\/api\/rooms\/[0-9A-Z]{8}\/log\/sessions/);
+
+    // Past 8 MiB the page stops reading and makes no file of it. Download asks the server again, and the browser saves what it sends.
+    let big = true;
+    const file = /\/api\/rooms\/[0-9A-Z]{8}\/log\/export\?/;
+    await dm.route(file, (route) => {
+      if (!big) return route.continue();
+      big = false;
+      return route.fulfill({ status: 200, headers: { "content-type": "text/markdown; charset=utf-8", "content-disposition": 'attachment; filename="big.md"' }, body: `# big\n${"x".repeat(9 * 1024 * 1024)}` });
+    });
+    const everything = list.getByRole("listitem").filter({ hasText: /^Everything, / });
+    await everything.getByRole("button", { name: /^Export Everything/ }).click();
+    await everything.getByText("This file is large. Use Download to save it. Download uses another export request.", { exact: true }).waitFor();
+    await dm.unroute(file);
+    await shots.take(dm, "logc-export-large");
+    const link = everything.getByRole("link", { name: "Download", exact: true });
+    assert.match((await link.getAttribute("href")) ?? "", /^\/api\/rooms\/[0-9A-Z]{8}\/log\/export\?tz=/);
+    const saved = dm.waitForEvent("download");
+    await link.click();
+    const text = await readDownload(await saved);
+    assert.match(text, new RegExp(`^# ${run.roomName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: log`));
+    assert.ok(text.includes("History line 560"), "the browser's own download holds the whole log");
+    await dm.keyboard.press("Escape");
+  });
+
   test("11. nothing hidden reached the player or the display, and no page logged an error", async () => {
     for (const watch of [playerSocket, tvSocket]) {
       assert.ok(!watch.everSaw(run.shadowId), `the hidden monster's id reached the ${watch.label}`);
