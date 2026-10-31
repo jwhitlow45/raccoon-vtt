@@ -317,6 +317,22 @@ export function hexRelief(orient: "rows" | "columns" | "squares") {
 
 /** The 40 ft cube the hex relief rows bring in over the alternating hexes, and the row names. */
 const HEX_CUBE = { shape: "cube", size: 40, origin: { x: 16, y: 26, z: 20 }, yaw: 0 };
+
+/**
+ * A 200 by 200 square scene sunk 100 ft, one pit: at 12 px a cell the
+ * floors by the screen's top show ground from past the ground canvas's top
+ * edge, so a pan repairs many toned cells (docs/design-v1-relief-pan.md
+ * 5.3, review HXPERF2B-OPUS-05, where 1,250 were counted). A smaller scene
+ * fits the screen at 12 px and tones none.
+ */
+function pits(sceneId: string): Built {
+  const deep = cells(0, 0, 200, 200);
+  const ops: Op[] = [{ t: "scene.update", sceneId, patch: { bounds: { w: 200, h: 200 }, fogEnabled: false } }];
+  for (const part of chunked(deep, 2000)) ops.push({ t: "build.height", sceneId, cells: part, height: -100 });
+  const walker = token(sceneId, "Walker", 100.5, 100.5);
+  ops.push({ t: "token.create", token: walker });
+  return { ops, walker: walker.id as string, bounds: { w: 200, h: 200 }, at40: { x: 100, y: 100 } };
+}
 const hexRow = (orient: string, what: string) => `${what}, hex relief ${orient}`;
 
 // ---------------------------------------------------------------- the page
@@ -618,6 +634,9 @@ function countGroundDraws(page: Page): Promise<void> {
 async function canvasCalls(page: Page, cdp: CDPSession, steps: number): Promise<{ fills: number; cuts: number; patterns: number; ground: number; kept: Record<string, number> | null }> {
   await countGroundDraws(page);
   const keptNow = () => page.evaluate(() => (globalThis as unknown as { __rvttIsoHook?: { kept?(): Record<string, number> | null } }).__rvttIsoHook?.kept?.() ?? null);
+  // The painted shares cost the scroll its unions, so they are measured on this untimed pan only (kept.ts KeptRelief.measure).
+  const measure = (on: boolean) => page.evaluate((v) => (globalThis as unknown as { __rvttIsoHook?: { measure?(on: boolean): void } }).__rvttIsoHook?.measure?.(v), on);
+  await measure(true);
   const before = await keptNow();
   await page.evaluate(() => {
     type Proto = Record<string, (...a: unknown[]) => unknown>;
@@ -644,6 +663,7 @@ async function canvasCalls(page: Page, cdp: CDPSession, steps: number): Promise<
     delete g.__benchCanvas;
     return n;
   });
+  await measure(false);
   const ground = await groundDraws(page);
   const per = (v: number) => Math.round((10 * v) / steps) / 10;
   // The kept picture's counts (relief/isoTest.ts kept): absent on a build before it. A pan's two return moves count with the timed ones.
@@ -719,12 +739,14 @@ async function touchDrag(page: Page, cdp: CDPSession, id: string, steps: number,
   return out;
 }
 
-type Room = { roomId: string; name: string };
+type Room = { roomId: string; name: string; password: string };
 
 async function createRoom(page: Page, name: string): Promise<Room> {
   await page.goto(`${new URL(page.url()).origin}/`);
   await page.getByLabel("Room name").fill(name);
   await page.getByLabel("Your name").fill("Dana the DM");
+  // A player joins some rooms (docs/design-v1-relief-pan.md 9), with the password the form offers.
+  const password = await page.getByLabel("Player password").inputValue();
   await page.getByRole("button", { name: "Create room" }).click();
   await page.getByRole("heading", { name: "Save your DM link" }).waitFor();
   const link = (await page.locator("code").first().textContent()) ?? "";
@@ -733,7 +755,18 @@ async function createRoom(page: Page, name: string): Promise<Room> {
   await page.getByLabel("I saved my DM link").check();
   await page.getByRole("button", { name: "Continue to the room" }).click();
   await page.getByRole("status", { name: "Connected" }).first().waitFor();
-  return { roomId: match[1]!.replace("-", ""), name };
+  return { roomId: match[1]!.replace("-", ""), name, password };
+}
+
+/** Joins a room as a player in a context of the player's own, through the join API as e2e/areas.e2e.ts does. Returns the member id. */
+async function joinAs(context: BrowserContext, origin: string, room: Room, name: string): Promise<string> {
+  const headers = { Origin: origin, "content-type": "application/json" };
+  const joined = await context.request.post(`${origin}/api/rooms/${room.roomId}/join`, { headers, data: { password: room.password } });
+  if (!joined.ok()) throw new Error(`joining ${room.roomId} answered ${joined.status()}`);
+  const { ticket } = (await joined.json()) as { ticket: string };
+  const done = await context.request.post(`${origin}/api/rooms/${room.roomId}/join/complete`, { headers, data: { ticket, name, color: "#30a46c" } });
+  if (!done.ok()) throw new Error(`completing the join answered ${done.status()}`);
+  return ((await done.json()) as { member: { id: string } }).member.id;
 }
 
 /** A press held on empty map until it pings (features/pings/hold.ts), then let go. */
@@ -826,6 +859,7 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       ["hexRows", hexRelief("rows")],
       ["hexColumns", hexRelief("columns")],
       ["squares", hexRelief("squares")],
+      ["pits", pits],
     ] as const) {
       const room = await createRoom(page, `Bench iso ${kind} ${stamp}`);
       rooms.push(room);
@@ -1183,6 +1217,156 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       }
     }
 
+    // A scene sunk 100 ft: a pan repairs many toned cells, in rows past a few (kept.ts repairRegions), and counted in Isometric.
+    if (!opts.only || opts.only.some((o) => PITS_ROW.includes(o))) {
+      // No areas stand on this scene, so nothing waits to stand.
+      await open("pits", 12);
+      await frames(page, 30);
+      await addPan(PITS_ROW, () => touchPan(page, cdp, STEPS));
+      if (view === "isometric") {
+        const c = await throttled(() => canvasCalls(page, cdp, STEPS));
+        const count = (what: string, v: number) => rows.push({ row: `${PITS_ROW}: ${what} a frame (calls, not ms)`, view, ms: { median: v, max: v, n: STEPS } });
+        count("fills and strokes", c.fills);
+        if (c.kept) for (const [what, v] of Object.entries(c.kept)) count(what, v);
+      }
+    }
+
+    // About 30 pin labels round the camera with the four area names: the pills the drag and overlay layers slide through a pan (5.8).
+    const pinIds = Array.from({ length: 30 }, (_, i) => `bench-pin-${String(i + 1).padStart(4, "0")}`);
+    const putPins = async (dm: Socket) => {
+      for (const [i, id] of pinIds.entries()) {
+        await dm.op({ t: "pin.put", pin: { id, sceneId: dm.sceneId, x: 8.5 + (i % 6) * 4.5, y: 9.5 + Math.floor(i / 6) * 5, color: "#f7df00", label: `Pin ${i + 1}`, visibility: "all" } });
+      }
+    };
+    const removePins = async (dm: Socket) => {
+      for (const id of pinIds) await dm.op({ t: "pin.remove", pinId: id });
+    };
+    if (!opts.only || opts.only.some((o) => PILLS_ROW.includes(o) || HIDDEN_PILLS_ROW.includes(o))) {
+      const dm = await open("hexRows", 12);
+      await putPins(dm);
+      await frames(page, 30);
+      if (view === "isometric") await waitStood(page);
+      await addPan(PILLS_ROW, () => touchPan(page, cdp, STEPS));
+      if (view === "isometric") {
+        // Back in Top-down with the isometric tree kept and hidden: its pills hear no camera (review HXPERF2B-ASTRA-01).
+        const pills = () => page.evaluate(() => (globalThis as unknown as { __rvttIsoHook?: { kept?(): { pillCommits?: number } | null } }).__rvttIsoHook?.kept?.()?.pillCommits ?? null);
+        await page.evaluate(() => (globalThis as unknown as { __rvttIsoHook?: { pick(p: string): void } }).__rvttIsoHook?.pick("topDown"));
+        await frames(page, 30);
+        const before = await pills();
+        await touchPan(page, cdp, STEPS);
+        const after = await pills();
+        // A build before the lane counts no pills: no row then.
+        if (before !== null && after !== null) {
+          const v = Math.round((100 * (after - before)) / (STEPS + 2)) / 100;
+          rows.push({ row: HIDDEN_PILLS_ROW, view, ms: { median: v, max: v, n: STEPS + 2 } });
+        }
+        await page.evaluate(() => (globalThis as unknown as { __rvttIsoHook?: { pick(p: string): void } }).__rvttIsoHook?.pick("isometric"));
+        await frames(page, 30);
+      }
+      await removePins(dm);
+    }
+
+    // Pat on a phone of her own (design 9): her page's pans with her action bar shown, and a fog tile revealed on her board each step.
+    const patRows = [patBarRow(12), patBarRow(40), PAT_FOG_HEX_ROW, PAT_FOG_GIANT_ROW];
+    if (!opts.only || opts.only.some((o) => patRows.some((r) => r.includes(o)))) {
+      const patContext = await browser.newContext(PHONE);
+      const pat = await patContext.newPage();
+      await pat.goto(`${server.origin}/`);
+      const patCdp = await patContext.newCDPSession(pat);
+      await patCdp.send("Performance.enable", { timeDomain: "timeTicks" });
+      const patThrottled = async <T>(run: () => Promise<T>) => {
+        await patCdp.send("Emulation.setCPUThrottlingRate", { rate: CPU_SLOWDOWN });
+        try {
+          return await run();
+        } finally {
+          await patCdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
+        }
+      };
+      const patPan = async (row: string) => {
+        if (opts.only && !opts.only.some((o) => row.includes(o))) return;
+        const maxes: number[] = [];
+        const all = await patThrottled(async () => {
+          await touchPan(pat, patCdp, STEPS);
+          const out: number[] = [];
+          for (let r = 0; r < ROUNDS; r++) {
+            const got = await touchPan(pat, patCdp, STEPS);
+            maxes.push(Math.max(...got));
+            out.push(...got);
+          }
+          return out;
+        });
+        rows.push({ row, view, ms: { ...stats(all), rounds: maxes } });
+      };
+      /** Opens the room on Pat's page at the scene's saved view, in this run's view. */
+      const patOpen = async (kind: string, zoom: number) => {
+        const { room, scene } = built[kind]!;
+        await startAt(await dmOf(kind), scene.at40, zoom);
+        await openView(patContext, pat, view, room.roomId);
+        if (view === "isometric") await waitStood(pat);
+      };
+      // Bree, Pat's PC, in each room Pat joins, near the camera.
+      const bree: Record<string, string> = {};
+      for (const kind of ["hexRows", "giant"] as const) {
+        const b = built[kind]!;
+        const dm = await dmOf(kind);
+        const patId = await joinAs(patContext, server.origin, b.room, "Pat");
+        const charId = benchId("character");
+        await dm.op({ t: "character.create", character: { id: charId, name: "Bree", size: "medium", ownerIds: [patId], actor: actor() } });
+        const t = token(dm.sceneId, "Bree", b.scene.at40.x - 0.5, b.scene.at40.y + 1.5, { kind: "pc", disposition: "ally", actor: { ref: charId } });
+        await dm.op({ t: "token.create", token: t });
+        bree[kind] = t.id as string;
+      }
+      for (const zoom of [12, 40] as const) {
+        if (opts.only && !opts.only.some((o) => patBarRow(zoom).includes(o))) continue;
+        await patOpen("hexRows", zoom);
+        const p = await tokenPoint(pat, bree.hexRows!);
+        await patCdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ ...p, id: 0 }] });
+        await patCdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+        await frames(pat, 12);
+        await patPan(patBarRow(zoom));
+        await pat.keyboard.press("Escape");
+      }
+      /*
+       * A fog tile revealed each step on Pat's board. An area stands only on
+       * ground Pat has seen, so the scene starts revealed but for the tiles
+       * the steps reveal, which lie off every area's plan: past the four
+       * areas on the 40 by 40 scene, and in the corners the 500 ft
+       * emanation's circle leaves on the 200 by 200 one.
+       */
+      for (const [kind, row, steps] of [
+        ["hexRows", PAT_FOG_HEX_ROW, [[2, 0], [2, 1], [0, 2], [1, 2], [2, 2]]],
+        // Four steps only: each costs seconds on either build.
+        ["giant", PAT_FOG_GIANT_ROW, [[0, 0], [12, 0], [0, 12], [12, 12]]],
+      ] as const) {
+        if (opts.only && !opts.only.some((o) => row.includes(o))) continue;
+        const dm = await dmOf(kind);
+        const b = built[kind]!;
+        const all = { kind: "rect", x: 0, y: 0, w: b.scene.bounds.w, h: b.scene.bounds.h };
+        const tile = ([tx, ty]: readonly [number, number]) => ({ kind: "rect", x: tx * 16, y: ty * 16, w: 16, h: 16 });
+        const reset = () => dm.op({ t: "fog.live", sceneId: dm.sceneId, ops: [{ id: randomUUID(), mode: "reveal", shape: all }, ...steps.map((t) => ({ id: randomUUID(), mode: "hide", shape: tile(t) }))] });
+        await dm.op({ t: "scene.update", sceneId: dm.sceneId, patch: { fogEnabled: true } });
+        await reset();
+        // The 200 by 200 scene's 500 ft emanation, standing on what Pat has seen.
+        const emanation = kind === "giant" ? template(dm.sceneId, dm.memberId, { shape: "emanation", size: 500, origin: { x: 100.5, y: 100.5, z: 0 } }) : null;
+        if (emanation) await dm.op(emanation);
+        await patOpen(kind, 40);
+        const tiles = await patThrottled(() =>
+          rounds(async () => {
+            await reset();
+            await frames(pat, 30);
+            if (view === "isometric") await waitStood(pat);
+            return timed(pat, patCdp, steps.length, async (i) => {
+              await dm.op({ t: "fog.live", sceneId: dm.sceneId, ops: [{ id: randomUUID(), mode: "reveal", shape: tile(steps[i]!) }] });
+            });
+          }),
+        );
+        rows.push({ row, view, ms: stats(tiles) });
+        if (emanation) await dm.op({ t: "template.delete", templateId: (emanation.template as { id: string }).id });
+        await dm.op({ t: "scene.update", sceneId: dm.sceneId, patch: { fogEnabled: false } });
+      }
+      await patContext.close();
+    }
+
     if (view === "isometric") {
       // The cap's first view: the board shown from Top-down with its 200 areas in view, each frame while they stand, nearest the middle first.
       const hook = (call: "turn" | "pick" | "layout", arg?: unknown) =>
@@ -1270,6 +1454,12 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
 }
 
 const BRUSH_ROW = "a brush stroke's step from another device of the DM's, caps, 40 px";
+const PITS_ROW = "pan, 12 px, a 200 by 200 square scene sunk 100 ft";
+const PILLS_ROW = hexRow("rows", "pan, 12 px, with 30 pin labels and the four area names");
+const HIDDEN_PILLS_ROW = hexRow("rows", "pill board views rendered a move, a Top-down pan with the isometric tree hidden, 30 pin labels (calls, not ms)");
+const patBarRow = (zoom: number) => hexRow("rows", `pan, ${zoom} px, on Pat's page with her action bar shown`);
+const PAT_FOG_HEX_ROW = hexRow("rows", "a fog tile revealed each step on Pat's board, the four areas standing, 40 px");
+const PAT_FOG_GIANT_ROW = "a fog tile revealed each step on Pat's board, 200 by 200 hex rows with the 500 ft emanation standing, 40 px";
 const AIM_MOVE_ROW = "a sphere aimed with the Area tool, each move, typical with four areas";
 const AIM_REST_ROW = "a sphere aimed with the Area tool, each frame once the finger rests until its shape stands, typical with four areas";
 export const CAP_FIRST_ROW = "first view, 200 areas, 12 px, each frame while it stands";
