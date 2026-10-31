@@ -1177,6 +1177,15 @@ export const BEHAVIORS: readonly Behavior[] = [
   { id: "setupRedo", input: "Ctrl+Shift+Z (Cmd+Shift+Z on a Mac)", does: "Redo the next setup step", roles: DM, device: "keys", surface: "Setup history" },
   { id: "setupEscape", input: "Escape", does: "Close the sheet and return focus to its opener", roles: DM, device: "keys", surface: "Setup history" },
   { id: "historyDoubleClick", input: "Double click or tap on Undo or Redo", does: "Take back or restore one step. A second tap in the same double-click sequence never takes the following step", roles: EVERYONE, device: "pointer" },
+  // A panel shown as a sheet: lib/backSwipe.ts, from components/Sheet.tsx.
+  {
+    id: "panelSwipeBack",
+    input: "Swipe right in a panel",
+    does: "Go back, as the panel's Back does: to the list of panels, or from a page inside a panel, such as Members, to the panel. Not from something that can still scroll left or drags sideways itself, or from the screen's left edge",
+    roles: EVERYONE,
+    when: "where panels open as sheets, as on a phone",
+    device: "pointer",
+  },
 
   // Every image entry: features/images/pasteRouter.ts, which picks the one a paste lands in (docs/design-v1-paste.md 1.3).
   {

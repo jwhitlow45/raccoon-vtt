@@ -582,7 +582,8 @@ describe("the sheet's rows beside the keys", () => {
       if (b.surface !== undefined) assert.equal(b.device, "keys", `${b.id}: a surface lists only its keys`);
       // The drags of attached tokens (docs/design-v1-attach.md 4.6), which move a group or a mount, and the tap again on a standee, which picks one no plain tap reaches (docs/design-v1-isometric-view.md 6.2).
       // A roll button's hold, which opens its one-roll options where a tap rolls (docs/design-v1-roll-mode-menu.md 7).
-      if (b.device === "pointer") assert.match(b.input, /^(Drag .*(carries|carried|mount)|Tap a standee again$|Double click or tap on Undo or Redo$|Hold a roll button$|Double-tap and hold a roll button with a screen reader$)/, b.id);
+      // The swipe back in a panel, a gesture with no mark of its own on screen (lib/backSwipe.ts).
+      if (b.device === "pointer") assert.match(b.input, /^(Drag .*(carries|carried|mount)|Tap a standee again$|Double click or tap on Undo or Redo$|Hold a roll button$|Double-tap and hold a roll button with a screen reader$|Swipe right in a panel$)/, b.id);
       if (b.device !== "mouse") continue;
       // A mouse row names a key, or a button other than the left one, or the trackpad's pinch, which arrives as Ctrl and the wheel.
       assert.match(b.input, /^(Shift|Ctrl|Space|Right-click|Drag with the right or middle button)/, b.id);
@@ -616,6 +617,7 @@ describe("the sheet's rows beside the keys", () => {
       "Hold a roll button",
       "Double-tap and hold a roll button with a screen reader",
       "Double click or tap on Undo or Redo",
+      "Swipe right in a panel",
     ]);
     assert.deepEqual(inputs("player", DESKTOP, MOUSE_SECTION), [
       "Shift or Ctrl+click a token (Cmd on a Mac)",
