@@ -34,12 +34,13 @@ export function proficiencyMarkdown(lines: readonly ProficiencyLine[]): string {
 }
 
 /** Lines that follow a Skills line in the 2024 block, which a block without one takes their place before. */
-const AFTER_SKILLS = /^\s*(?:\*\*)?(?:Vulnerabilities|Resistances|Immunities|Gear|Senses|Languages|CR|Challenge)(?:\*\*)?\b/i;
+const AFTER_SKILLS = /^\s*(?:\*\*)?(?:(?:Damage |Condition )?(?:Vulnerabilities|Resistances|Immunities)|Gear|Senses|Languages|CR|Challenge)(?:\*\*)?\b/i;
+const SAVES_LINE = /^\s*(?:\*\*)?Saving Throws(?:\*\*)?\s/i;
 const SKILLS_LINE = /^\s*(?:\*\*)?Skills(?:\*\*)?\s/i;
 
 /**
  * A stat block's Markdown with the proficiency lines put after its Skills
- * line, or where one would stand: before the first of the lines that follow
+ * line, or where one would stand: after a Saving Throws line, else before the first of the lines that follow
  * it, else after the ability table, else unchanged. Only added text, so the
  * stored block is never touched.
  */
@@ -48,7 +49,9 @@ export function withProficiencyLines(markdown: string, lines: readonly Proficien
   const rows = markdown.split("\n");
   const skills = rows.findIndex((row) => SKILLS_LINE.test(row));
   const lastTable = rows.reduce((last, row, i) => (row.startsWith("|") ? i : last), -1);
-  const at = skills >= 0 ? skills + 1 : rows.findIndex((row) => AFTER_SKILLS.test(row));
+  // A legacy block writes Saving Throws before Skills, so without Skills the lines follow it.
+  const saves = rows.findIndex((row) => SAVES_LINE.test(row));
+  const at = skills >= 0 ? skills + 1 : saves >= 0 ? saves + 1 : rows.findIndex((row) => AFTER_SKILLS.test(row));
   const insert = at >= 0 ? at : lastTable >= 0 ? lastTable + 1 : -1;
   if (insert < 0) return markdown;
   const head = rows.slice(0, insert);

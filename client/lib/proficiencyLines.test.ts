@@ -72,4 +72,11 @@ describe("where the lines go in a block's Markdown", () => {
     assert.equal(withProficiencyLines(text, lines), "| Wis | 12 | +1 | +6 |\n\n**Proficiencies** Dexterity saves\n\n**Expertise** Perception\n\n### Traits");
     assert.equal(withProficiencyLines(text, []), text);
   });
+
+  test("a legacy block with no Skills line takes them after Saving Throws, and its Damage and Condition lines count as the lines that follow", () => {
+    const legacy = "| STR |\n| 10 (+0) |\n\n**Saving Throws** Dex +5\n\n**Damage Immunities** Fire\n\n**Senses** Darkvision";
+    assert.equal(withProficiencyLines(legacy, lines), "| STR |\n| 10 (+0) |\n\n**Saving Throws** Dex +5\n\n**Proficiencies** Dexterity saves\n\n**Expertise** Perception\n\n**Damage Immunities** Fire\n\n**Senses** Darkvision");
+    const noSaves = "| STR |\n\n**Condition Immunities** Charmed\n\n**Senses** Darkvision";
+    assert.equal(withProficiencyLines(noSaves, lines), "| STR |\n\n**Proficiencies** Dexterity saves\n\n**Expertise** Perception\n\n**Condition Immunities** Charmed\n\n**Senses** Darkvision");
+  });
 });
