@@ -518,6 +518,7 @@ Server to client:
 | `t` | Fields | Meaning |
 | --- | --- | --- |
 | `snapshot` | `seq`, `state`, `you`, `watermark` | Full projected state for this viewer. `watermark` is this client's committed watermark (section 7.2). Since v1 wave 5 `you.role` reads `'display'` on a table display's socket (section 10.2). |
+| `clock` | `at` | The server's time, sent just before every snapshot, so the page re-anchors its reckoning of the server's time on each one (docs/design-v1-undo-scope.md 11.2, D-261031-181). It is a message of its own because `snapshot` is strict: a page on an older build drops `clock` as an unknown message and opens as before. |
 | `ev` | `seq`, `changes`, `acks?`, `rejects?`, `restored?` | Everything one committed batch changed, already projected for this viewer: `{key, value}` upserts and `{key, deleted: true}` removals. `key` names the entity in the one scheme of `shared/keys.ts`, for example `token:<id>`, `fog:<sceneId>:<tx>,<ty>` or `meta`. The copy for the client that sent ops in the batch also lists their `n`s in `acks`, and its terminal refusals in `rejects` as `{n, code, message}`. Its undos and redos that applied are also in `restored` as `{n, what}`, naming what each took back (section 7.7). |
 | `retry` | `n?`, `code` | The op (or, with no `n`, the `scene` request) was not processed and must be resent later: `busy` (queue full or rate limited) or `gap` (an earlier op from this client is missing). |
 | `eph` | `from`, `e` | Someone's ephemeral event, filtered for this viewer. |
