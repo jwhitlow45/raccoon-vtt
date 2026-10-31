@@ -12,7 +12,7 @@ import {
   rollAnswerSchemas,
 } from "#shared/protocol.ts";
 import { DAMAGE_TYPES } from "#shared/rules/damage.ts";
-import { SAVE_DRAFT_BYTES, type SaveOutcomeIdentity } from "#shared/saveOutcomeContract.ts";
+import { SAVE_DRAFT_BYTES, saveOutcomePageSchema, saveRechargeSpendSchema, type SaveOutcomeIdentity } from "#shared/saveOutcomeContract.ts";
 import type { Page, PageCast } from "./chain.ts";
 import type { RowState } from "./rows.ts";
 
@@ -87,7 +87,7 @@ const fill = z.strictObject({
   publicName: text.optional(),
   note: text.optional(),
   from: text,
-  recharge: z.strictObject({ holder, key: combatUseSchemas.useKey }).optional(),
+  recharge: z.strictObject({ holder: z.string().regex(/^[tc]:.{1,64}$/u), key: combatUseSchemas.useKey }).optional(),
   damageType: z.enum(DAMAGE_TYPES).optional(),
   caster: id.optional(),
 }).nullable() satisfies z.ZodType<Page["fill"]>;
@@ -243,14 +243,15 @@ export const saveCheckpointSchema = z.strictObject({
 
 // Use the protocol's complete outcome validator so stored plans gain its new
 // fields and guards when the shared contract is wired into production.
-const outcomePlan = clientOpSchema.options.find((schema) => "shape" in schema && schema.shape.t.value === "actor.outcome")! as z.ZodType<NonNullable<Page["plan"]>>;
+const outcomeShape = clientOpSchema.options.find((schema) => "shape" in schema && schema.shape.t.value === "actor.outcome")! as z.ZodObject;
+const outcomePlan = outcomeShape.safeExtend({ page: saveOutcomePageSchema.optional(), recharge: saveRechargeSpendSchema.optional() }) as unknown as z.ZodType<NonNullable<Page["plan"]>>;
 const page = z.strictObject({
   ...commonFields,
   id,
   phase: z.enum(["setup", "rolled", "applying", "applied"]),
   states: z.record(holder, rowState),
   rolls: z.array(z.strictObject({ tag: id, holders, state: settle, says: text.optional() })).max(SAVE_DRAFT_BYTES),
-  requests: z.array(z.strictObject({ rollId: id, holders, state: z.enum(["sending", "open", "refused", "closed"]), says: text.optional() })).max(SAVE_DRAFT_BYTES),
+  requests: z.array(z.strictObject({ rollId: id, holders, state: z.enum(["sending", "open", "refused", "closed"]), says: text.optional(), selected: holders.optional(), replaces: z.array(id).max(LIMITS.openRollsPerRoom).optional(), dc: dmToolSchemas.rollDc.optional() })).max(SAVE_DRAFT_BYTES),
   dmRolls: z.array(z.strictObject({ tag: id, holder, state: settle, says: text.optional() })).max(SAVE_DRAFT_BYTES),
   damage: z.strictObject({
     tag: id,

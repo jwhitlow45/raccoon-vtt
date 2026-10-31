@@ -3,11 +3,15 @@ import { uuidv7 } from "#shared/ids.ts";
 import type { AdvantageSource } from "#shared/dice/formula.ts";
 import { closeAlertsOverlay } from "../../../canvas/barDock.ts";
 import { useRoomScope } from "../../../state/scope.ts";
-import { useRoomActions, useRoomUi, useRoomView } from "../../../state/view.ts";
+import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../../state/view.ts";
 import { askSwitches } from "../../rolls/logic.ts";
-import { newPage, readDraft, replace, restoredPage, type Fill, type OutcomeForm, type Page, type PageCast, type Source } from "./chain.ts";
+import { newPage, replace, restoredPage, type Fill, type OutcomeForm, type Page, type PageCast, type Source } from "./chain.ts";
+import { readSaveDraft } from "./draftStorage.ts";
+import { bindSaveLifecycle } from "./lifecycle.ts";
+import { sessionOfDraft } from "./reopen.ts";
 import { rollModeSources, rollModeTo, type RollModeOverride } from "../rollMode.ts";
 import type { Taken } from "../useDicePanel.ts";
+import { useReceipts } from "../useReceipt.ts";
 import type { GroupTest } from "./rows.ts";
 import { useGroupSaveStore } from "./store.ts";
 
@@ -21,8 +25,9 @@ import { useGroupSaveStore } from "./store.ts";
 function restoreDraft(store: ReturnType<typeof useGroupSaveStore>, roomId: string): void {
   const now = store.getState();
   if (now.page || now.restored) return;
-  const draft = readDraft(roomId);
-  store.setState({ restored: true, ...(draft ? { page: restoredPage(draft) } : {}) });
+  const draft = readSaveDraft(roomId);
+  const session = draft ? sessionOfDraft(draft) : null;
+  store.setState({ restored: true, ...(session ? { ...session, page: restoredPage(session.page) } : {}) });
 }
 
 /** A reload brings the tab's group save back from its draft, once, for the DM. */
@@ -30,9 +35,14 @@ export function useRestoreGroupSave(): void {
   const store = useGroupSaveStore();
   const roomId = useRoomView((s) => s.roomId);
   const dm = useRoomView((s) => s.you?.role === "dm");
+  const room = useRoomStore();
+  const receipts = useReceipts();
+  const ui = useRoomUi();
   useEffect(() => {
-    if (dm) restoreDraft(store, roomId);
-  }, [dm, roomId, store]);
+    if (!dm) return;
+    restoreDraft(store, roomId);
+    return bindSaveLifecycle({ store, room, receipts, notify: (text) => ui.notify(text, "info") });
+  }, [dm, roomId, store, room, receipts, ui]);
 }
 
 /**
@@ -108,7 +118,7 @@ export function useStartGroupSave(): (input: StartInput, opts?: { replace?: bool
         ...(input.cast ? { cast: input.cast } : {}),
         ...(input.damage ? { damage: input.damage } : {}),
       });
-      store.setState({ page, shownIn: input.panel, restored: false });
+      store.setState({ page, reopen: null, shownIn: input.panel, restored: false });
       ui.openPanel(input.panel);
       // Started from a card in the alerts over the screen, the panel would open behind them, out of reach.
       closeAlertsOverlay(scope, input.panel);

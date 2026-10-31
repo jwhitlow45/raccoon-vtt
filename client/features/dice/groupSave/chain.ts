@@ -6,7 +6,10 @@ import type { AdvantageSource } from "#shared/dice/formula.ts";
 import { dcOnLine } from "#shared/dice/secret.ts";
 import { ANSWERED_MEANWHILE, ASK_CLOSED } from "#shared/permissions.ts";
 import { askOp } from "../../rolls/logic.ts";
-import { MAX_OP_AGE_MS } from "../../../state/store.ts";
+import { MAX_OP_AGE_MS } from "#shared/pendingOps.ts";
+import type { SaveOutcomeFields, SavePageAskFields, SavePageCloseFields } from "#shared/saveOutcomeContract.ts";
+import { settleAskAgain } from "./reroll.ts";
+import { readSaveDraft, writeSaveDraft } from "./draftStorage.ts";
 import { asSave, cutLabel, testLabel, withExtra } from "../options.ts";
 import type { PanelRoll } from "../useDicePanel.ts";
 import { rollsOf } from "../logic.ts";
@@ -120,12 +123,12 @@ export type Page = {
   outcome: OutcomeForm;
   /** Each server roll the page sent, with the rows it rolled. */
   rolls: { tag: string; holders: string[]; state: Settle; says?: string }[];
-  requests: { rollId: string; holders: string[]; state: "sending" | "open" | "refused" | "closed"; says?: string }[];
+  requests: { rollId: string; holders: string[]; state: "sending" | "open" | "refused" | "closed"; says?: string; selected?: string[]; replaces?: string[]; dc?: number }[];
   /** The DM's one tap on an asked row (5.2). */
   dmRolls: { tag: string; holder: string; state: Settle; says?: string }[];
   /** The damage line. `imported` is the caster's own roll an ask brought (castFill), which the page never sent. */
   damage: { tag: string; state: Settle; amounts?: (number | undefined)[]; says?: string; imported?: true } | null;
-  plan: OpOf<"actor.outcome"> | null;
+  plan: (OpOf<"actor.outcome"> & SaveOutcomeFields) | null;
   apply: "idle" | "sending" | "unknown" | "refused" | "taken";
   applySays?: string;
   rolledAt?: string;
@@ -149,8 +152,8 @@ export type PageCast = { ask: CastAsk; who: string; blocked?: string; closing?: 
 
 export type Command =
   | { kind: "dice"; tag: string; rolls: PanelRoll[]; to: "all" | "dm"; dc?: number }
-  | { kind: "op"; op: ClientOp }
-  | { kind: "outcome"; op: OpOf<"actor.outcome"> };
+  | { kind: "op"; op: ClientOp | (OpOf<"roll.ask"> & SavePageAskFields) | (OpOf<"roll.close"> & SavePageCloseFields) }
+  | { kind: "outcome"; op: OpOf<"actor.outcome"> & SaveOutcomeFields };
 
 export type Step = { page: Page; send: Command[]; error?: string };
 
@@ -287,7 +290,7 @@ export function roll(page: Page, input: { rows: RowBase[]; server: readonly Serv
       0,
     );
     if (!made.ok) return { page, send: [], error: made.error };
-    send.push({ kind: "op", op: made.op });
+    send.push({ kind: "op", op: { ...made.op, reason: "savePage" } });
     next = { ...next, requests: [...next.requests, { rollId, holders: chunk.map((r) => r.holder), state: "sending" }] };
     for (const r of chunk) next = withState(next, r.holder, { asked: { rollId, ...(page.dc !== null ? { dc: page.dc } : {}) } }, r);
   }
@@ -298,6 +301,7 @@ export function roll(page: Page, input: { rows: RowBase[]; server: readonly Serv
 export function askAnswered(page: Page, rollId: string, answer: { ok: true } | { ok: false; message: string }): Page {
   const request = page.requests.find((r) => r.rollId === rollId);
   if (!request || request.state !== "sending") return page;
+  if (request.selected) return settleAskAgain(page, rollId, answer);
   if (answer.ok) return { ...page, requests: page.requests.map((r) => (r.rollId === rollId ? { ...r, state: "open" } : r)) };
   let next: Page = { ...page, requests: page.requests.map((r) => (r.rollId === rollId ? { ...r, state: "refused", says: answer.message } : r)) };
   for (const holder of request.holders) {
@@ -318,15 +322,17 @@ export function askAnswered(page: Page, rollId: string, answer: { ok: true } | {
 export function syncRequests(page: Page, rolls: Readonly<Record<string, RollRequest | undefined>>, key: (t: { tokenId?: string; characterId?: string }) => string): Page {
   let next = page;
   for (const request of page.requests) {
+    if (request.state === "closed" || request.state === "refused") continue;
     const live = rolls[request.rollId];
     if (!live) continue;
+    if (request.state === "sending") next = askAnswered(next, request.rollId, { ok: true });
     for (const holder of request.holders) {
       const row = rowOf(page, holder);
       if (!row?.askRef) continue;
       const target = live.targets.find((t) => key(t) === key(row.askRef as { tokenId?: string; characterId?: string }));
       const s = next.states[holder];
-      if (!target || !s) continue;
-      const answered = target.total !== undefined || target.result !== undefined || target.mark !== undefined;
+      if (!target || !s || s.asked?.rollId !== request.rollId) continue;
+      const answered = target.total !== undefined || target.result !== undefined || target.mark !== undefined || target.noRoll === true;
       const dc = live.dc;
       const same = s.answer && JSON.stringify(s.answer) === JSON.stringify(target);
       if (!answered && !s.answer) continue;
@@ -362,7 +368,7 @@ export function rollSettled(page: Page, tag: string, settled: { state: "committe
   }
   for (const holder of sent.holders) {
     const row = rowOf(next, holder);
-    if (!row) continue;
+    if (!row || next.states[holder]?.batch?.tag !== tag) continue;
     const hit = found.get(key(row.target)) ?? (row.askRef ? found.get(key(row.askRef)) : undefined);
     if (hit) next = withState(next, holder, { rolled: hit, status: undefined, says: undefined }, row);
     else if (settled.state === "unknown") next = withState(next, holder, { status: "unknown", says: "This may have happened. Check the log." }, row);
@@ -519,17 +525,17 @@ export function damageSettled(page: Page, tag: string, settled: { state: "commit
  * its receipt's tag. Refused leaves the rows as they were, and Apply
  * builds a new plan next time.
  */
-export function apply(page: Page, plan: OpOf<"actor.outcome">): Step {
+export function apply(page: Page, plan: OpOf<"actor.outcome"> & SaveOutcomeFields): Step {
   if (page.phase !== "rolled" && !(page.phase === "setup" && page.test.kind === "none")) return { page, send: [] };
   if (page.apply === "sending" || page.apply === "unknown" || page.apply === "taken") return { page, send: [] };
   // An ask resolved elsewhere, or closed with an end the page cannot read, is never applied (docs/design-v1-player-save-spell.md 3.3).
   if (page.cast?.blocked) return { page, send: [], error: page.cast.blocked };
   // The plan closes the ask the page holds now, and only that one, so a page that let its ask go closes none.
   const { cast: _built, ...rest } = plan;
-  const op: OpOf<"actor.outcome"> = page.cast ? { ...rest, cast: page.cast.ask.id } : rest;
+  const op: OpOf<"actor.outcome"> & SaveOutcomeFields = page.cast ? { ...rest, cast: page.cast.ask.id } : rest;
   const open = page.requests.filter((r) => r.state === "open" || r.state === "sending").map((r) => r.rollId);
   const send: Command[] = [];
-  if (open.length > 0) send.push({ kind: "op", op: { t: "roll.close", rollIds: open } });
+  if (open.length > 0) send.push({ kind: "op", op: { t: "roll.close", rollIds: open, reason: "savePage" } });
   send.push({ kind: "outcome", op });
   return { page: { ...page, phase: "applying", plan: op, apply: "sending", requests: page.requests.map((r) => (open.includes(r.rollId) ? { ...r, state: "closed" } : r)) }, send };
 }
@@ -587,7 +593,7 @@ export function closeTheAsk(page: Page): Step {
   if (!again && page.phase === "setup" && page.test.kind !== "none") return { page, send: [] };
   const open = page.requests.filter((r) => r.state === "open" || r.state === "sending").map((r) => r.rollId);
   const send: Command[] = [];
-  if (open.length > 0) send.push({ kind: "op", op: { t: "roll.close", rollIds: open } });
+  if (open.length > 0) send.push({ kind: "op", op: { t: "roll.close", rollIds: open, reason: "savePage" } });
   send.push({ kind: "op", op: { t: "cast.close", castId: cast.ask.id, end: "done" } });
   const from = again ? cast.closing! : (page.phase as "setup" | "rolled");
   return {
@@ -662,7 +668,7 @@ export function castEndOf(log: readonly LogEntry[], castId: string): CastEnd | n
 export function discard(page: Page): Command[] {
   if (page.phase === "applying") return [];
   const open = page.requests.filter((r) => r.state === "open" || r.state === "sending").map((r) => r.rollId);
-  return open.length > 0 ? [{ kind: "op", op: { t: "roll.close", rollIds: open } }] : [];
+  return open.length > 0 ? [{ kind: "op", op: { t: "roll.close", rollIds: open, reason: "savePage" } }] : [];
 }
 
 /**
@@ -697,26 +703,11 @@ export function markGone(page: Page, viewing: string | null, present: (row: RowB
 
 // ------------------------------------------------------------ the draft (5.10)
 
-function draftKey(roomId: string): string {
-  return `rvtt.groupSave.${roomId}`;
-}
-
+/** Compatibility for callers that only need the page. Lifecycle metadata stays in the full draft. */
 export function readDraft(roomId: string): Page | null {
-  try {
-    const raw = typeof sessionStorage === "undefined" ? null : sessionStorage.getItem(draftKey(roomId));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Page;
-    return parsed && typeof parsed === "object" && typeof parsed.id === "string" && Array.isArray(parsed.rows) ? parsed : null;
-  } catch {
-    return null;
-  }
+  return readSaveDraft(roomId)?.page ?? null;
 }
 
-export function writeDraft(roomId: string, page: Page | null): void {
-  try {
-    if (page) sessionStorage.setItem(draftKey(roomId), JSON.stringify(page));
-    else sessionStorage.removeItem(draftKey(roomId));
-  } catch {
-    // Storage blocked or full: the page lasts until it closes.
-  }
+export function writeDraft(roomId: string, page: Page | null): boolean {
+  return writeSaveDraft(roomId, page ? { version: 2, page } : null);
 }

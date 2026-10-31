@@ -228,6 +228,7 @@ export function applyWaits(page: Page, dice: DiceView, amounts: PartAmount[] | n
   const tapWaits = page.dmRolls.some((r) => r.state === "sending" && !page.states[r.holder]?.answer);
   if (page.rolls.some((r) => r.state === "sending") || tapWaits) return "Rolling…";
   if (page.damage?.state === "sending") return "Rolling…";
+  if (page.requests.some(request => request.state === "sending")) return "Asking…";
   if (amounts === null) return "Type the damage, or roll it";
   if (amounts.length > MAX_DAMAGE_PARTS) return `Use at most ${MAX_DAMAGE_PARTS} damage parts.`;
   if (amounts.reduce((sum, part) => sum + Math.max(0, part.amount), 0) > 100_000) return "That number is too large.";
@@ -290,6 +291,11 @@ export function buildPlan(page: Page, dice: DiceView, amounts: PartAmount[] | nu
   for (const row of page.rows) {
     if (seen.has(row.holder)) continue;
     seen.add(row.holder);
+    // A retained choice never transfers to another creature that now uses the
+    // token. Deleted or moved creatures are excluded from the new plan.
+    const token = dice.view.tokens[row.tokenId];
+    const holder = token && ("ref" in token.actor ? `character:${token.actor.ref}` : `token:${token.id}`);
+    if (!token || token.sceneId !== page.sceneId || holder !== row.holder) continue;
     const state = stateOf(page, row);
     if (state.gone || state.mark === "skip") continue;
     const outcome = rowOutcome(page, row, dice, amounts);

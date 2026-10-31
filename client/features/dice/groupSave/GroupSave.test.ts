@@ -5,7 +5,7 @@ import { describe, test } from "node:test";
 import { theme } from "../../../lib/theme.ts";
 import { damageSummary } from "../damageSummaryLines.ts";
 import { createStore } from "zustand/vanilla";
-import { actor, apply, DM, room, token } from "#shared/testutil.ts";
+import { actor, apply, customMonster, DM, room, token } from "#shared/testutil.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { clientOpSchema } from "#shared/protocol.ts";
 import { newPage, setAmount, type Page } from "./chain.ts";
@@ -13,6 +13,7 @@ import { amountsOf, buildPlan, rowOutcome } from "./plan.ts";
 import { groupRows } from "./rows.ts";
 import { receiptsSlot } from "../useReceipt.ts";
 import { groupSaveSlot } from "./store.ts";
+import { OUTCOME_UNDONE, OUTCOME_RESTORED, OUTCOME_UNAVAILABLE, SAVE_MEMORY_ONLY, type SaveReopen } from "./reopen.ts";
 
 /*
  * The open group save in the Dice panel (docs/design-v1-dice-pass.md 7.8):
@@ -40,7 +41,7 @@ function damagePage(damage: string): Page {
   const test = { kind: "none" } as const;
   return { ...newPage({ id: "damage", sceneId: "s1", source: { kind: "selection", tokenIds: ["g1"] }, test, dc: null, secret: false, spell: false, switches: { dcShown: true, resultShown: true }, outcome: { damage, conditions: ["prone"] } }), rows: groupRows(DICE, ["g1"], test, false) };
 }
-function drawPage(page: Page, lines: import("#shared/model.ts").LogEntry[] = [], connection = "open"): string {
+function drawPage(page: Page, lines: import("#shared/model.ts").LogEntry[] = [], connection = "open", reopen: SaveReopen | null = null): string {
   const scope = new RoomScope();
   const saves = scope.get(groupSaveSlot);
   const tags = [...new Set(lines.flatMap((line) => line.data?.type === "dice" && line.data.tag ? [line.data.tag] : []))];
@@ -52,7 +53,7 @@ function drawPage(page: Page, lines: import("#shared/model.ts").LogEntry[] = [],
       tracker.answer(tag, 0, "taken");
     }
   }
-  saves.setState({ page });
+  saves.setState({ page, reopen });
   saves.getInitialState = saves.getState;
   const store = createStore(() => ({ view: VIEW, roomId: "r1", connection, you: DM, sceneId: "s1", local: { selectedIds: ["g1"], multi: false } }));
   return renderToStaticMarkup(createElement(RoomProvider, {
@@ -183,8 +184,10 @@ function captureRolls(page: Page, view = VIEW) {
   const initial = { adv: true, dis: false, secret: true, secretFor: "g1", version: 19, last: null };
   choices.setState(initial);
   choices.getInitialState = choices.getState;
-  const store = createStore(() => ({ view, roomId: "r1", connection: "open", you: DM, sceneId: "s1", local: { selectedIds: ["g1"], multi: false } }));
+  const store = createStore(() => ({ view, confirmed: view, confirmedReady: true, seq: 0, pending: [], ended: null, roomId: "r1", connection: "open", you: DM, sceneId: "s1", local: { selectedIds: ["g1"], multi: false } }));
   const sent: import("#shared/protocol.ts").ClientOp[] = [];
+  const snapshots: ReturnType<typeof saves.getState>[] = [];
+  const controls: { children?: unknown; onClick?(): void; disabled?: boolean }[] = [];
   const buttons: { name: string; source: string; onRoll(override?: import("../rollMode.ts").RollModeOverride): void }[] = [];
   function collect(value: unknown): void {
     if (Array.isArray(value)) { value.forEach(collect); return; }
@@ -192,14 +195,15 @@ function captureRolls(page: Page, view = VIEW) {
     const element = value as { type: { name?: string } | string; props: { children?: unknown } };
     if (typeof element.type === "function" && ["GroupSavePage", "GroupRow", "OutcomePanel"].includes(element.type.name)) collect((element.type as (p: never) => unknown)(element.props as never));
     else if (typeof element.type !== "string" && element.type.name === "GroupRollButton") buttons.push(element.props as never);
+    else if (typeof element.type !== "string" && element.type.name === "Button") controls.push(element.props as never);
     else collect(element.props.children);
   }
   function Probe() { collect(groupSave.GroupSave({ parent: "Dice", onBack() {} })); return null; }
   renderToStaticMarkup(createElement(RoomProvider, {
-    store: store as never, actions: { newId: () => "ask", dispatch: (op: import("#shared/protocol.ts").ClientOp) => sent.push(op) } as never, ui: { notify() {} } as never, assets: { url: () => "" } as never,
+    store: store as never, actions: { newId: () => "ask", dispatch: (op: import("#shared/protocol.ts").ClientOp) => { snapshots.push(structuredClone(saves.getState())); return sent.push(op); } } as never, ui: { notify() {} } as never, assets: { url: () => "" } as never,
     children: createElement(RoomScopeProvider, { scope, children: createElement(Probe) }),
   }));
-  return { buttons, sent, saves, choices, initial };
+  return { buttons, controls, sent, snapshots, saves, choices, initial };
 }
 
 for (const override of ["adv", "dis", "secret", "normal"] as const) test(`group page ${override} callbacks preserve the existing switch and choices`, () => {
@@ -340,4 +344,48 @@ test("a group row source ignores its sibling request answer and request bookkeep
   assert.equal(source(), before);
   view.rolls.request!.spell = true;
   assert.notEqual(source(), before, "semantic request fields still invalidate this source");
+});
+
+
+test("reopened and relocked pages use the exact lifecycle words and existing controls", () => {
+  const page = { ...damagePage("9 fire"), phase: "rolled" as const, test: { kind: "save" as const, ability: "dex" as const }, states: { "token:g1": { way: "server" as const, typed: 18 } } };
+  const reopened = drawPage(page, [], "open", { check: "undone", notice: OUTCOME_UNDONE });
+  assert.match(reopened, /Outcome undone\. Change the DC, roll again, or apply again\./);
+  assert.match(reopened, />Roll saves again<\/button>/);
+  assert.match(reopened, />Roll again<\/button>/);
+  assert.match(reopened, />Start over<\/button>/);
+  const restored = drawPage({ ...page, phase: "applied", apply: "taken" }, [], "open", { check: "applied", notice: OUTCOME_RESTORED });
+  assert.match(restored, /Outcome restored\. Undo it before changing this save\./);
+  assert.match(restored, /<fieldset disabled=""/);
+});
+
+test("checking and unverifiable pages lock editing and storage failure retains the page", () => {
+  const page = { ...damagePage("9 fire"), phase: "rolled" as const };
+  const pending = drawPage(page, [], "open", { check: "checking" });
+  assert.match(pending, /data-save-lifecycle="checking"/);
+  assert.match(pending, /<fieldset disabled=""/);
+  const unavailable = drawPage(page, [], "open", { check: "unavailable", notice: OUTCOME_UNAVAILABLE, memoryOnly: true });
+  assert.match(unavailable, /outcome cannot be checked\. Start a new group save to continue\./);
+  assert.ok(unavailable.includes(SAVE_MEMORY_ONLY));
+  assert.match(unavailable, /<fieldset disabled=""/);
+});
+
+
+test("Apply captures before any close, embeds recharge, and blocks a second tap", () => {
+  const view = structuredClone(VIEW);
+  view.monsters.dragon = customMonster("dragon", { actions: [{ name: "Fire Breath (Recharge 5-6)", text: "Dexterity Saving Throw: DC 15. Failure: 9 (2d6 + 2) Fire damage. Success: Half damage." }] });
+  view.tokens.g1!.actor = { inline: actor({ monsterId: "dragon", hp: { cur: 30, max: 30, temp: 0 } }) };
+  const base = damagePage("9 fire");
+  const page: Page = { ...base, fill: { name: "Fire Breath", from: "Fire Breath", recharge: { holder: "t:g1", key: "actions:fire-breath" } }, requests: [{ rollId: "old", holders: ["token:g1"], state: "open" }] };
+  const ui = captureRolls(page, view);
+  const button = ui.controls.find(control => typeof control.children === "string" && control.children.startsWith("Apply:"));
+  assert.ok(button?.onClick);
+  button.onClick();
+  button.onClick();
+  assert.deepEqual(ui.sent.map(op => op.t), ["roll.close", "actor.outcome"]);
+  assert.equal(ui.snapshots[0]?.reopen?.beforeApply?.choices.phase, "setup");
+  assert.equal(ui.snapshots[0]?.reopen?.beforeApply?.choices.requests[0]?.rollId, "old");
+  const outcome = ui.sent[1] as import("#shared/protocol.ts").OpOf<"actor.outcome"> & import("#shared/saveOutcomeContract.ts").SaveOutcomeFields;
+  assert.deepEqual(outcome.page, { id: outcome.plan, expectRevision: 0 });
+  assert.deepEqual(outcome.recharge, { target: { tokenId: "g1" }, use: { kind: "ability", key: "actions:fire-breath", name: "Fire Breath", limit: "recharge", max: 1, min: 5, ifReady: true } });
 });

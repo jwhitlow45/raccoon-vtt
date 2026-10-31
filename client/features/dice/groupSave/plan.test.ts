@@ -22,7 +22,7 @@ const ROWS = groupRows(DICE, ["g1"], { kind: "save", ability: "con" }, false);
 function sunburst(dc: number | null, own: number | null = null): Page {
   const page = newPage({
     id: "p",
-    sceneId: "s",
+    sceneId: "s1",
     source: { kind: "selection", tokenIds: ["g1"] },
     test: { kind: "save", ability: "con" },
     dc,
@@ -57,8 +57,8 @@ describe("creatures gone from the group save", () => {
     const away = markGone(page, "other", () => false);
     assert.equal(stateOf(away, row).gone ?? false, false);
     assert.equal(buildPlan(away, DICE, [], { plan: "p", newId: () => "e" })!.targets.length, 1);
-    assert.equal(stateOf(markGone(page, "s", () => true), row).gone ?? false, false);
-    assert.equal(stateOf(markGone(page, "s", () => false), row).gone, true);
+    assert.equal(stateOf(markGone(page, "s1", () => true), row).gone ?? false, false);
+    assert.equal(stateOf(markGone(page, "s1", () => false), row).gone, true);
   });
 });
 
@@ -77,7 +77,7 @@ describe("the DM's own amount and the outcome's size", () => {
     const tokens = { g1: token("g1", { kind: "monster", name: "Goblin", actor: { inline: actor({ hp: { cur: 30, max: 30, temp: 0 } }) } }), g2: token("g2", { kind: "monster", name: "Hobgoblin", actor: { inline: actor({ hp: { cur: 30, max: 30, temp: 0 } }) } }) };
     const dice: DiceView = { ...DICE, view: room({ tokens }) };
     const rows = groupRows(dice, ["g1", "g2"], { kind: "none" }, false);
-    const setup: Page = { ...newPage({ id: "p", sceneId: "s", source: { kind: "selection", tokenIds: ["g1", "g2"] }, test: { kind: "none" }, dc: null, secret: true, spell: false, switches: { dcShown: true, resultShown: true }, outcome: { damage: "10" } }), rows };
+    const setup: Page = { ...newPage({ id: "p", sceneId: "s1", source: { kind: "selection", tokenIds: ["g1", "g2"] }, test: { kind: "none" }, dc: null, secret: true, spell: false, switches: { dcShown: true, resultShown: true }, outcome: { damage: "10" } }), rows };
     assert.equal(setup.phase, "setup");
     const typed = setAmount(setup, rows[0]!.holder, 4);
     const plan = buildPlan(typed, dice, [{ amount: 10 }], { plan: "p", newId: () => "e" })!;
@@ -91,7 +91,7 @@ describe("the DM's own amount and the outcome's size", () => {
     const dice: DiceView = { ...DICE, view: room({ tokens }) };
     const rows = groupRows(dice, hundred, { kind: "save", ability: "wis" }, false);
     const page: Page = {
-      ...newPage({ id: "p", sceneId: "s", source: { kind: "selection", tokenIds: hundred }, test: { kind: "save", ability: "wis" }, dc: 15, secret: true, spell: true, switches: { dcShown: true, resultShown: true } }),
+      ...newPage({ id: "p", sceneId: "s1", source: { kind: "selection", tokenIds: hundred }, test: { kind: "save", ability: "wis" }, dc: 15, secret: true, spell: true, switches: { dcShown: true, resultShown: true } }),
       fill: { name: "Hypnotic Pattern", from: "" },
       outcome: { damage: "", onPass: "none", conditions: ["charmed", "incapacitated", "prone"], lasts: { mode: "turnEnd", rounds: 10, anchor: "own" }, saveEnds: { ability: "wis", dc: null } },
     };
@@ -115,7 +115,7 @@ describe("the plan's damage types and its quiet", () => {
   const rows = groupRows(dice, ids, { kind: "save", ability: "dex" }, false);
   function page(damage: string, result: "fail" | "pass", secret = true): Page {
     const base: Page = {
-      ...newPage({ id: "p", sceneId: "s", source: { kind: "selection", tokenIds: ids }, test: { kind: "save", ability: "dex" }, dc: 15, secret, spell: false, switches: { dcShown: true, resultShown: true }, outcome: { damage, onPass: "half" } }),
+      ...newPage({ id: "p", sceneId: "s1", source: { kind: "selection", tokenIds: ids }, test: { kind: "save", ability: "dex" }, dc: 15, secret, spell: false, switches: { dcShown: true, resultShown: true }, outcome: { damage, onPass: "half" } }),
       phase: "rolled",
       rows,
     };
@@ -176,7 +176,7 @@ describe("the plan's damage types and its quiet", () => {
     const many: DiceView = { ...DICE, view: room({ tokens: Object.fromEntries(hundred.map((id) => [id, token(id, { kind: "monster", name: "Cultist", actor: { inline: actor() } })])) }) };
     const cultists = groupRows(many, hundred, { kind: "save", ability: "wis" }, false);
     const at = (damage: string): Page => ({
-      ...newPage({ id: "p", sceneId: "s", source: { kind: "selection", tokenIds: hundred }, test: { kind: "save", ability: "wis" }, dc: 15, secret: true, spell: true, switches: { dcShown: true, resultShown: true } }),
+      ...newPage({ id: "p", sceneId: "s1", source: { kind: "selection", tokenIds: hundred }, test: { kind: "save", ability: "wis" }, dc: 15, secret: true, spell: true, switches: { dcShown: true, resultShown: true } }),
       fill: { name: "Prismatic Storm", from: "" },
       outcome: { damage, onPass: "none", conditions: ["charmed", "incapacitated"], lasts: { mode: "turnEnd", rounds: 10, anchor: "own" }, saveEnds: { ability: "wis", dc: null } },
     });
@@ -262,4 +262,20 @@ describe("a player's ask for saves (docs/design-v1-player-save-spell.md 3.3)", (
     const blocked = apply({ ...page, cast: { ...page.cast!, blocked: "Resolved on another device." } }, plan);
     assert.deepEqual([blocked.send, blocked.error], [[], "Resolved on another device."]);
   });
+});
+
+test("reapplication excludes deleted, moved, and reassigned creatures and builds fresh effect ids", () => {
+  const page = sunburst(13);
+  const first = buildPlan(page, DICE, [], { plan: "first", newId: () => "first-effect" })!;
+  const second = buildPlan(page, DICE, [], { plan: "second", newId: () => "second-effect" })!;
+  assert.equal(first.targets[0]?.effects?.[0]?.id, "first-effect");
+  assert.equal(second.targets[0]?.effects?.[0]?.id, "second-effect");
+  for (const change of [
+    (view: typeof DICE.view) => { delete view.tokens.g1; },
+    (view: typeof DICE.view) => { view.tokens.g1!.sceneId = "other"; },
+    (view: typeof DICE.view) => { view.tokens.g1!.actor = { ref: "new-character" }; },
+  ]) {
+    const view = structuredClone(DICE.view); change(view);
+    assert.equal(buildPlan(page, { ...DICE, view }, [], { plan: "replacement", newId: () => "new" }), null);
+  }
 });

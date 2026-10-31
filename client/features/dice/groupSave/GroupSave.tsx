@@ -29,9 +29,9 @@ import { EffectPicker } from "../../tokens/EffectsSection.tsx";
 import { SaveEndsFields, type SaveEndsForm } from "../../tokens/SaveEndsFields.tsx";
 import { FieldRow, Note, NumberField, Select, Stepper } from "../../tokens/ui.tsx";
 import { limitedUses } from "#shared/dice/uses.ts";
-import { abilityOp, actorOf } from "../../combat/logic.ts";
+import { actorOf } from "../../combat/logic.ts";
 import { creatureBlock, creatureProficiency, creatureRolls } from "../creature.ts";
-import { creatureKey, holderTarget, markOnRoll, rechargeUseOf, signedText, targetRef, spendOnStart, spendsFor } from "../options.ts";
+import { creatureKey, holderTarget, markOnRoll, rechargeUseOf, signedText, targetRef, spendsFor } from "../options.ts";
 import { presetFor } from "../presets.ts";
 import { marksTest } from "../proficiencyPresentation.ts";
 import { useRollSender } from "../send.ts";
@@ -42,7 +42,7 @@ import { useReceipt, type ReceiptState } from "../useReceipt.ts";
 import { useRollBlocked } from "../useRollOption.ts";
 import { d20Text, informativeRollMode, RollResultLine, knownOrTyped, parseBonus, requestRollSource } from "../../rolls/card.ts";
 import {
-  apply,
+  newPage,
   applyAgain,
   castEndOf,
   castSeen,
@@ -70,7 +70,6 @@ import {
   syncRequests,
   typeTotal,
   waitingTags,
-  writeDraft,
   type Command,
   type Settled,
   type Page,
@@ -85,6 +84,12 @@ import { actionFill, areaFill, casterActions } from "./fills.ts";
 import { castFill } from "../cast/castStart.ts";
 import { sentAny } from "./start.ts";
 import { parseDamageOverride } from "./damageInput.ts";
+import { Loading } from "../../../components/Loading.tsx";
+import { saveRechargeSpendSchema } from "#shared/saveOutcomeContract.ts";
+import { LIMITS, serializedBytes } from "#shared/limits.ts";
+import { prepareSave, reconcileSave, resumeSaveEdits, saveEditable, SAVE_MEMORY_ONLY, OUTCOME_UNAVAILABLE, type SaveSession } from "./reopen.ts";
+import { authorityOf } from "./lifecycle.ts";
+import { askAgain, rerollSaves } from "./reroll.ts";
 
 export function RowDamageField(props: { name: string; value: number | string | undefined; computed: number | null; summary?: DamageSummaryLines; onChange(value: string | null): void }) {
   const errorId = useId();
@@ -169,9 +174,16 @@ export function GroupSave(props: { parent: "Dice" | "Areas"; onBack(): void; are
 
 function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): void; set(page: Page | null): void; areaIds?: (templateId: string) => string[] }) {
   const { page, set } = props;
+  const groupStore = useGroupSaveStore();
+  const roomStore = useRoomStore();
+  const reopen = useGroupSave(s => s.reopen);
+  const confirmedRoom = () => roomStore.getState().you?.role === "dm" ? roomStore.getState().confirmed as RoomState | null | undefined : null;
+  const currentSession = (): SaveSession => ({ page: groupStore.getState().page ?? pageRef.current, reopen: groupStore.getState().reopen });
   const roomId = useRoomView((s) => s.roomId);
   const viewing = useRoomView((s) => s.sceneId);
   const view = useRoomView((s) => s.view);
+  // The DM projection contains complete actors. Never substitute the predicted view here.
+  const confirmedView = useRoomView((s) => s.you?.role === "dm" ? s.confirmed as RoomState | null | undefined : null);
   const me = useRoomView((s) => s.you?.memberId ?? "");
   const actions = useRoomActions();
   const ui = useRoomUi();
@@ -180,21 +192,30 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   const blocked = useRollBlocked();
   const [error, setError] = useState<string | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [confirmStartOver, setConfirmStartOver] = useState(false);
   const [seenOpen, setSeenOpen] = useState(false);
   const [picking, setPicking] = useState(false);
   const [outcomeOpen, setOutcomeOpen] = useState(page.phase === "setup");
   const pageRef = useRef(page);
   pageRef.current = page;
   const update = (next: Page) => {
-    const prev = pageRef.current;
+    const active = groupStore.getState().page;
+    if (!active || active.id !== next.id) return;
+    const prev = active;
     // A roll belongs to the parts it rolled: new parts drop it, so its amounts never land on parts it did not roll.
     const checked = next.outcome.damage !== prev.outcome.damage && next.damage !== null && next.damage === prev.damage ? { ...next, damage: null } : next;
     pageRef.current = checked;
     set(checked);
   };
 
-  // The draft follows the page (5.10), inside try and catch.
-  useEffect(() => writeDraft(roomId, page), [roomId, page]);
+  const editableNow = () => {
+    const current = currentSession();
+    if (roomStore.getState().connection !== "open" || current.page.phase === "applying" || current.page.phase === "applied") return false;
+    return current.reopen?.tracking || current.reopen?.check ? saveEditable(current, authorityOf(roomStore.getState(), current.page)) : true;
+  };
+  const edit = (next: Page) => { if (editableNow()) update(next); };
+  const lifecycleLocked = !!reopen?.check && reopen.check !== "undone";
+  const frozen = page.phase === "applying" || page.phase === "applied" || lifecycleLocked || blocked !== null;
 
   const selected = useRoomView((s) => s.local.selectedIds);
   const fromSource = sourceIds(page.source, selected, props.areaIds);
@@ -222,20 +243,20 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
 
   // Answers come from the requests in the view (5.3), and creatures that left are marked gone, after the roll.
   useEffect(() => {
-    if (!view || page.phase === "setup") return;
-    let next = syncRequests(pageRef.current, view.rolls, key);
-    next = markGone(next, viewing, (row) => view.tokens[row.tokenId] !== undefined);
+    if (!confirmedView || page.phase === "setup") return;
+    let next = syncRequests(pageRef.current, confirmedView.rolls, t => creatureKey(confirmedView, t));
+    next = markGone(next, viewing, (row) => confirmedView.tokens[row.tokenId] !== undefined);
     if (next !== pageRef.current) update(next);
-  }, [view?.rolls, view?.tokens, viewing, page.phase]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [confirmedView?.rolls, confirmedView?.tokens, viewing, page.phase]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // A player's ask the page holds, as the view holds it (docs/design-v1-player-save-spell.md 3.3): its end, read from its closing line, frees or stops Apply.
   useEffect(() => {
     const cast = pageRef.current.cast;
-    if (!view || !cast) return;
+    if (!confirmedView || !cast) return;
     const id = cast.ask.id;
-    const next = castSeen(pageRef.current, view.casts[id] ? { present: true } : { present: false, end: castEndOf(view.log, id) });
+    const next = castSeen(pageRef.current, confirmedView.casts[id] ? { present: true } : { present: false, end: castEndOf(confirmedView.log, id) });
     if (next !== pageRef.current) update(next);
-  }, [view?.casts, view?.log, page.phase, page.apply, page.cast?.ask.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [confirmedView?.casts, confirmedView?.log, page.phase, page.apply, page.cast?.ask.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const title = pageTitle(shown);
   usePanelHeader({ title, parent: props.parent, onBack: props.onBack });
@@ -247,7 +268,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   }, [ready, page.phase, page.rollNow]);
   if (!view || !dice) return <Note>Loading the creatures…</Note>;
 
-  const offScene = page.sceneId !== viewing;
+  const offScene = page.sceneId !== viewing || !view.scenes[page.sceneId];
   const sceneName = view.scenes[page.sceneId]?.name ?? "another scene";
   const fillType = page.fill?.damageType;
   const amounts = amountsOf(shown, fillType);
@@ -276,13 +297,18 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
       else if (c.kind === "outcome") sendOutcome(c.op);
       else if (c.op.t === "roll.ask") {
         const rollId = c.op.request.id;
-        actions.dispatch(c.op, {
+        const n = actions.dispatch(c.op, {
           quiet: true,
           onAnswer: (answer, refusal) => {
-            if (answer === "taken") update(askAnswered(pageRef.current, rollId, { ok: true }));
-            else if (answer === "refused") update(askAnswered(pageRef.current, rollId, { ok: false, message: refusal?.text ?? refusal?.message ?? "the request was refused" }));
+            const active = groupStore.getState().page;
+            if (!active || active.id !== page.id) return;
+            let next = answer === "taken" ? askAnswered(active, rollId, { ok: true }) : answer === "refused" ? askAnswered(active, rollId, { ok: false, message: refusal?.text ?? refusal?.message ?? "the request was refused" }) : active;
+            const confirmed = confirmedRoom();
+            if (confirmed) next = syncRequests(next, confirmed.rolls, t => creatureKey(confirmed, t));
+            update(next);
           },
         });
+        if (n === null) update(askAnswered(groupStore.getState().page ?? pageRef.current, rollId, { ok: false, message: "Not sent." }));
       } else if (c.op.t === "roll.dice") {
         // The DM's tap on an asked row is settled by its receipt, as the page's other rolls are, so a reload in between settles it too.
         const tag = c.op.tag;
@@ -310,10 +336,10 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   };
 
   // The outcome is tagged by its plan (doc 1 1.2): its receipt settles it, and only the DM's Apply again sends it again.
-  const sendOutcome = (op: OpOf<"actor.outcome">) => {
+  const sendOutcome = (op: NonNullable<Page["plan"]>) => {
     sender.receipts.sending(op.plan, 0);
     const n = actions.dispatch(op, { quiet: true, onAnswer: (answer, refusal, cause) => sender.receipts.answer(op.plan, 0, answer, refusal, cause) });
-    if (n === null) sender.receipts.forget(op.plan, 0);
+    if (n === null) sender.receipts.answer(op.plan, 0, "refused", { code: "invalid", message: "Not sent.", text: "Not sent." });
   };
 
   const serverRolls = (holders: readonly RowBase[]): ServerRoll[] => {
@@ -329,7 +355,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   };
 
   const startRoll = (given?: AdvantageSource[], override?: RollModeOverride) => {
-    if (blocked || offScene || loading) return;
+    if (!editableNow() || blocked || offScene || loading) return;
     if (bound) {
       setError(bound);
       return;
@@ -351,7 +377,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   };
 
   const rollDamage = (override?: RollModeOverride) => {
-    if (override && (blocked || offScene)) return;
+    if (!editableNow() || blocked || offScene) return;
     if (page.phase === "applying" || page.phase === "applied" || pageRef.current.damage?.state === "sending") return;
     const { rolls: rollsToSend, to } = groupDamageInvocation(pageRef.current, view, override);
     if (rollsToSend.length === 0) return;
@@ -360,21 +386,36 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   };
 
   const doApply = () => {
-    const waits = applyWaits(shown, dice, amounts);
-    if (waits) {
-      setError(waits);
-      return;
-    }
-    const plan = buildPlan(shown, dice, amounts, { plan: uuidv7(), newId: actions.newId });
+    const active = currentSession();
+    const authority = authorityOf(roomStore.getState(), active.page);
+    if (!saveEditable(active, authority) || blocked || loading) return;
+    let current = active.page.phase === "setup" ? { ...active.page, rows } : active.page;
+    const confirmed = confirmedRoom();
+    if (!confirmed) return;
+    current = markGone(current, roomStore.getState().sceneId, row => confirmed.tokens[row.tokenId] !== undefined);
+    const currentDice = { ...dice, view: confirmed };
+    const currentAmounts = amountsOf(current, current.fill?.damageType);
+    const waits = applyWaits(current, currentDice, currentAmounts);
+    if (waits) { setError(waits); return; }
+    const plan = buildPlan(current, currentDice, currentAmounts, { plan: uuidv7(), newId: actions.newId });
     if (!plan) {
-      if (page.cast) closeAsk();
+      if (current.cast) closeAsk();
       else setError("Nothing would change.");
       return;
     }
-    const base = page.phase === "setup" ? { ...page, rows, phase: "rolled" as const } : page;
-    // An action filled from a recharge is spent once its outcome goes, where this device shows it ready (docs/design-v1-combat-controls.md 6), and hidden from players with its damage (8).
-    const spend = rechargeSpend(page.fill?.recharge);
-    spendOnStart(() => run(apply(base, plan)), spend ? () => actions.dispatch(abilityOp(spend.target, spend.use, { ifReady: true, quiet: damageTo(page, view) === "dm" }), { quiet: true }) : null);
+    const spend = rechargeSpend(current.fill?.recharge);
+    const recharge = spend ? saveRechargeSpendSchema.safeParse({ target: spend.target, use: { kind: "ability", key: spend.use.key, name: spend.use.name, limit: "recharge", max: 1, min: spend.use.min, ifReady: true }, ...(damageTo(current, confirmed) === "dm" ? { quiet: true } : {}) }) : null;
+    if (recharge && !recharge.success) { setError("This recharge ability could not be checked."); return; }
+    const op = recharge?.success ? { ...plan, recharge: recharge.data } : plan;
+    const step = prepareSave({ ...active, page: current }, op, authority);
+    if (step.error) { setError(step.error); return; }
+    const outcome = step.send.find(command => command.kind === "outcome");
+    if (outcome && serializedBytes(outcome.op) > LIMITS.outcomeOpBytes) { setError("That outcome is too large. Use fewer creatures or conditions."); return; }
+    // Publish the checkpoint synchronously before any request close or outcome.
+    pageRef.current = step.page;
+    groupStore.setState({ page: step.page, reopen: step.reopen });
+    setError(null);
+    send(step.send);
   };
 
   /**
@@ -384,23 +425,25 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
    */
   const rechargeSpend = (from: { holder: string; key: string } | undefined) => {
     const target = from ? holderTarget(from.holder) : null;
-    if (!from || !target || !spendsFor(view, dice.you, target)) return null;
-    const named = creatureRolls(dice, target)?.named.find((r) => r.key === from.key);
-    const block = creatureBlock(dice, target);
-    const use = markOnRoll(named ? rechargeUseOf(named, block ? limitedUses(block) : null) : null, actorOf(view, target)?.uses);
+    const confirmed = confirmedRoom();
+    if (!from || !target || !confirmed || !spendsFor(confirmed, dice.you, target)) return null;
+    const confirmedDice = { ...dice, view: confirmed };
+    const named = creatureRolls(confirmedDice, target)?.named.find((r) => r.key === from.key);
+    const block = creatureBlock(confirmedDice, target);
+    const use = markOnRoll(named ? rechargeUseOf(named, block ? limitedUses(block) : null) : null, actorOf(confirmed, target)?.uses);
     return use ? { target, use } : null;
   };
 
   // Close the ask (3.3): where Apply would change nothing, the ask closes as done, with the page's open requests first.
   const closeAsk = () => {
+    if (!editableNow() && !pageRef.current.cast?.closing || blocked || offScene) return;
     const base = page.phase === "setup" ? { ...pageRef.current, rows } : pageRef.current;
     run(closeTheAsk(base));
   };
 
   const close = () => {
     send(discard(page));
-    writeDraft(roomId, null);
-    set(null);
+    groupStore.setState({ page: null, reopen: null });
     props.onBack();
   };
 
@@ -416,12 +459,38 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
           : null
       : null;
 
+  const doReroll = (holders: string[]) => {
+    if (!editableNow() || blocked || offScene) return;
+    const confirmed = confirmedRoom();
+    if (!confirmed) return;
+    const current = pageRef.current;
+    const ask = askAgain(current, { holders, requests: confirmed.rolls, requestIds: actions.newId });
+    if (ask.error) { setError(ask.error); return; }
+    const saves = rerollSaves(ask.page, { holders, server: serverRolls(rows), tag: uuidv7() });
+    if (saves.error) { setError(saves.error); return; }
+    run({ page: saves.page, send: [...ask.send, ...saves.send] });
+  };
+
+  const startOver = () => {
+    const held = groupStore.getState();
+    const current = held.page;
+    if (!current || current.id !== page.id || blocked) return;
+    if (current.phase === "applying" && (held.reopen?.check !== "unavailable" || roomStore.getState().pending.some(pending => pending.op.t === "actor.outcome" && pending.op.plan === current.plan?.plan))) return;
+    send(discard(current));
+    const source = current.source.kind === "selection" ? { ...current.source, live: true as const } : current.source;
+    const next = newPage({ id: uuidv7(), sceneId: current.sceneId, source, test: current.test, dc: current.dc, secret: current.secret, spell: current.spell, switches: current.switches, fill: current.fill, outcome: current.outcome, ...(current.cast && !current.cast.blocked ? { cast: current.cast } : {}) });
+    pageRef.current = next;
+    groupStore.setState({ page: next, reopen: null });
+    setConfirmStartOver(false);
+    setOutcomeOpen(true);
+  };
+
   // ---- the parts
 
-  const setupControls = page.phase === "setup" ? <TestPicker page={page} onChange={update} /> : null;
+  const setupControls = page.phase === "setup" ? <TestPicker page={page} onChange={edit} /> : null;
   const dcRow = (
     <FieldRow label="DC">
-      <NumberField label="DC" value={page.dc ?? undefined} min={1} max={50} nullable placeholder="None" onCommit={(dc) => update(setDc(pageRef.current, dc))} width={88} />
+      <NumberField label="DC" value={page.dc ?? undefined} min={1} max={50} nullable placeholder="None" onCommit={(dc) => edit(setDc(pageRef.current, dc))} width={88} />
     </FieldRow>
   );
   const anyAsk = rows.some((r) => stateOf(shown, r).way === "ask");
@@ -457,7 +526,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
       open={outcomeOpen || page.phase === "setup"}
       summary={outcomeSummary}
       onOpen={() => setOutcomeOpen(true)}
-      onChange={update}
+      onChange={edit}
       onRoll={rollDamage}
       blocked={blocked !== null || offScene}
       picking={picking}
@@ -541,9 +610,10 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
           level={dice && marksTest(pageTest) ? creatureProficiency(dice, row.target, pageTest) : undefined}
           outcome={outcomes.get(row.holder)!}
           loading={loading && row.bonus === null}
-          blocked={blocked ?? (offScene ? "Go back to the scene first." : null)}
-          onChange={(next) => update(page.phase === "setup" ? { ...next, rows: pageRef.current.rows } : next)}
+          blocked={blocked ?? (lifecycleLocked ? "Wait for this save's confirmed state." : offScene ? "Go back to the scene first." : null)}
+          onChange={(next) => edit(page.phase === "setup" ? { ...next, rows: pageRef.current.rows } : next)}
           onDmRoll={(typed, override) => {
+            if (!editableNow() || blocked || offScene) return;
             const s = stateOf(page, row);
             const d20 = d20Of(page.test, page.spell);
             if (!s.asked || !d20 || !row.askRef) return;
@@ -560,7 +630,12 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
             };
             run(dmRoll(pageRef.current, row.holder, op));
           }}
-          onRollAgain={(override) => run(rollAgain(pageRef.current, { holders: [row.holder], server: serverRolls([row]), tag: uuidv7(), ...(override ? { override } : {}) }))}
+          reopened={reopen?.check === "undone"}
+          onAskAgain={() => doReroll([row.holder])}
+          onRollAgain={(override) => {
+            if (!editableNow() || blocked || offScene) return;
+            run((reopen?.check === "undone" ? rerollSaves : rollAgain)(pageRef.current, { holders: [row.holder], server: serverRolls([row]), tag: uuidv7(), ...(override ? { override } : {}) }));
+          }}
         />
       ))}
     </div>
@@ -591,14 +666,20 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
         ) : null}
       </div>
     ) : (
-      <Button variant="primary" busy={page.apply === "sending"} disabled={blocked !== null || offScene || waits !== null || bound !== null || tooMany || page.cast?.blocked !== undefined} onClick={doApply}>
+      <Button variant="primary" busy={page.apply === "sending"} disabled={frozen || offScene || waits !== null || bound !== null || tooMany || page.cast?.blocked !== undefined} onClick={doApply}>
         {waits ?? bound ?? (words !== NOTHING_TO_APPLY ? words : page.cast ? "Close the ask" : page.source.kind === "trap" ? SETTLE_WORDS : words)}
       </Button>
     );
 
   return (
-    <div style={{ display: "grid", gap: theme.space(3) }}>
-      <Watchers page={page} settle={(tag, receipt) => update(settleTag(pageRef.current, tag, settledOf(receipt), key))} />
+    <div data-save-lifecycle={reopen?.check ?? "draft"} style={{ display: "grid", gap: theme.space(3) }}>
+      <Watchers page={page} settle={(tag, receipt) => { if (groupStore.getState().reopen?.tracking && tag === pageRef.current.plan?.plan) return; update(settleTag(pageRef.current, tag, settledOf(receipt), key)); }} />
+      {reopen?.check === "checking" ? <Loading text="Checking this save's outcome…" /> : null}
+      {reopen?.notice ? <Note tone={reopen.check === "unavailable" ? "error" : "info"}>{reopen.notice}</Note> : null}
+      {reopen?.memoryOnly ? <Note tone="info">{SAVE_MEMORY_ONLY}</Note> : null}
+      {page.requests.filter(request => request.state === "refused" && request.selected && request.says).map(request => <Note key={request.rollId} tone="error">{request.says}</Note>)}
+      {page.requests.some(request => request.state === "sending" && request.selected) ? <Loading text="Asking again…" /> : null}
+      {reopen?.check === "undone" && reopen.redoHeld ? <Button disabled={frozen || offScene} onClick={() => { const active = currentSession(); const next = resumeSaveEdits(active, authorityOf(roomStore.getState(), active.page)); pageRef.current = next.page; groupStore.setState(next); }}>Resume your edits</Button> : null}
       {page.fill ? <Note tone="info">{page.fill.from}</Note> : null}
       {page.fill?.note ? <Note>{page.fill.note}</Note> : null}
       {page.cast?.says && page.damage === null ? <Note>{page.cast.says}</Note> : null}
@@ -612,6 +693,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
           <Note tone="error">{error}</Note>
         </div>
       ) : null}
+      <fieldset disabled={frozen} style={{ border: 0, padding: 0, margin: 0, minWidth: 0, display: "contents" }}>
       {page.phase === "setup" ? (
         <>
           {fillFrom.length > 0 ? <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>{fillFrom}</div> : null}
@@ -633,6 +715,11 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
           {outcome}
         </>
       )}
+      </fieldset>
+      {reopen?.check === "undone" && page.test.kind !== "none" ? <Button busy={page.rolls.some(roll => roll.state === "sending") || page.requests.some(request => request.state === "sending")} disabled={frozen || offScene} onClick={() => doReroll(rows.map(row => row.holder))}>Roll saves again</Button> : null}
+      {(reopen?.check === "undone" || reopen?.check === "unavailable") ? (
+        confirmStartOver ? <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2), alignItems: "center" }}><span>Start over? This replaces these save results.</span><Button onClick={startOver}>Start over</Button><Button onClick={() => setConfirmStartOver(false)}>Keep this save</Button></div> : <Button onClick={() => setConfirmStartOver(true)}>Start over</Button>
+      ) : null}
       {page.phase !== "applying" && page.phase !== "applied" ? (
         confirmDiscard ? (
           <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap", alignItems: "center" }}>
@@ -650,7 +737,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
       {page.phase !== "setup" || page.test.kind === "none" ? (
         <div style={{ ...stickyPaneFoot(theme.space(2), theme.color.surface), paddingTop: theme.space(2), display: "grid", gap: theme.space(1) }}>{applyButton}</div>
       ) : null}
-      {page.apply === "taken" ? <AppliedToast page={page} ui={ui} /> : null}
+      {page.apply === "taken" && !reopen?.tracking ? <AppliedToast page={page} ui={ui} /> : null}
     </div>
   );
 }
@@ -925,11 +1012,13 @@ function GroupRow(props: {
   /** The DM's roll of an asked row, with the bonus typed for a creature with no stat block. */
   onDmRoll(typed?: number, override?: RollModeOverride): void;
   onRollAgain(override?: RollModeOverride): void;
+  reopened?: boolean;
+  onAskAgain(): void;
 }) {
   const { page, row, outcome } = props;
   const s = stateOf(page, row);
   const setup = page.phase === "setup";
-  const frozen = page.phase === "applying" || page.phase === "applied";
+  const frozen = page.phase === "applying" || page.phase === "applied" || props.blocked !== null;
   const words = rowWords(page, row, outcome);
   const details: string[] = [];
   if (s.says) details.push(s.says);
@@ -940,7 +1029,7 @@ function GroupRow(props: {
   if (s.amount !== undefined && outcome.damage && outcome.computed !== null) details.push(`Typed override, worked out ${outcome.computed}`);
   // The control shows the DM's own mark alone: a computed pass or fail is the verdict beside the total, which a DC change judges again.
   const markValue: Mark | null = s.mark ?? null;
-  const waitingAsk = s.asked && !s.answer;
+  const waitingAsk = s.asked && !s.answer && !page.requests.some(request => request.rollId === s.asked?.rollId && (request.state === "closed" || request.state === "refused"));
   const set = (patch: Partial<typeof s>) => props.onChange({ ...page, states: { ...page.states, [row.holder]: { ...s, ...patch } } });
   // The amount opens a field of its own (5.4): what the DM types there wins, and going back takes the worked-out amount again.
   const [editing, setEditing] = useState(false);
@@ -1032,11 +1121,12 @@ function GroupRow(props: {
               {row.bonus !== null ? `Roll ${signedText(row.bonus)}` : typed.bonus !== null ? `Roll ${d20Text(typed.bonus)}` : "Roll d20"}
             </GroupRollButton>
           ) : null}
-          {s.status === "notRolled" || s.status === "unknown" ? (
-            <GroupRollButton source={props.source} name={`${row.name}'s roll`} capability={{ d20: true, visibility: "selectable" }} valid={() => !frozen && !s.gone && (s.status === "notRolled" || s.status === "unknown")} size="sm" disabled={props.blocked !== null || rowBonus(row, s) === null} onRoll={props.onRollAgain}>
-              {s.status === "unknown" ? "Roll again" : "Roll them"}
+          {s.status === "notRolled" || s.status === "unknown" || props.reopened && s.way === "server" && !s.gone && s.mark !== "skip" ? (
+            <GroupRollButton source={props.source} name={`${row.name}'s roll`} capability={{ d20: true, visibility: "selectable" }} valid={() => !frozen && !s.gone && (props.reopened || s.status === "notRolled" || s.status === "unknown") === true} size="sm" busy={page.rolls.some(roll => roll.state === "sending" && roll.holders.includes(row.holder))} disabled={props.blocked !== null || rowBonus(row, s) === null} onRoll={props.onRollAgain}>
+              {props.reopened || s.status === "unknown" ? "Roll again" : "Roll them"}
             </GroupRollButton>
           ) : null}
+          {props.reopened && s.way === "ask" && !s.gone && s.mark !== "skip" ? <Button size="sm" disabled={props.blocked !== null || page.requests.some(request => request.state === "sending")} onClick={props.onAskAgain}>Ask again</Button> : null}
           {s.way === "type" || s.status ? (
             <NumberField label={`${row.name}'s total`} value={s.typed} min={-50} max={100} nullable placeholder="Total" onCommit={(n) => props.onChange(typeTotal(page, row.holder, n))} width={88} />
           ) : null}

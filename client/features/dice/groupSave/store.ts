@@ -2,6 +2,7 @@ import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import { scopeSlot, useScoped } from "../../../state/scope.ts";
 import type { Page } from "./chain.ts";
+import type { SaveReopen } from "./reopen.ts";
 
 /**
  * The one group save of this browser tab (docs/design-v1-roll-options.md
@@ -11,13 +12,14 @@ import type { Page } from "./chain.ts";
  */
 export type GroupSaveState = {
   page: Page | null;
+  reopen: SaveReopen | null;
   /** The panel the page is open in, or null while it waits behind the first page's row. */
   shownIn: "dice" | "areas" | null;
   /** The draft was read back after a reload. */
   restored: boolean;
 };
 
-export const groupSaveSlot = scopeSlot(() => createStore<GroupSaveState>(() => ({ page: null, shownIn: null, restored: false })));
+export const groupSaveSlot = scopeSlot(() => createStore<GroupSaveState>(() => ({ page: null, reopen: null, shownIn: null, restored: false })));
 
 export function useGroupSaveStore() {
   return useScoped(groupSaveSlot);
