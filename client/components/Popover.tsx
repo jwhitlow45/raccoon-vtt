@@ -394,8 +394,7 @@ function OpenPopover(props: PopoverProps) {
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented) return;
-      const at = focusAt(e.target, box, h.anchor.current);
-      if (!escapeCloses({ textField: isTextField(e.target), inside: at === "inside" || at === "anchor", modalOver: modalOver(box) })) return;
+      if (!popoverTakesEscape(e.target, { box, anchor: h.anchor.current })) return;
       // Used, so the room's Escape, the map panes and the shortcuts, which all skip a used key, leave it alone.
       e.preventDefault();
       h.close("escape");
@@ -588,6 +587,21 @@ function focusAnchor(anchor: HTMLElement | null, fallback: (() => HTMLElement | 
 /** Whether a modal dialog is open that the popover is not in. "View as a player" is one, with the preview's own popovers inside. */
 function modalOver(box: Element): boolean {
   return [...document.querySelectorAll('[aria-modal="true"]')].some((dialog) => !dialog.contains(box));
+}
+
+/** Shared with earlier capture listeners so Escape reaches the popover that will consume it. */
+export function popoverTakesEscape(target: unknown, current?: { box: Element; anchor: Element | null }): boolean {
+  const takes = ({ box, anchor }: { box: Element; anchor: Element | null }) => escapeCloses({
+    textField: isTextField(target), inside: within(box, target) || within(anchor, target), modalOver: modalOver(box),
+  });
+  if (current) return takes(current);
+  return [...document.querySelectorAll("[data-rvtt-popover]")].some((box) => {
+    // A menu's controlled id belongs to its child menu, while a dialog's id belongs to the box itself.
+    const anchor = [...document.querySelectorAll("[aria-controls]")].find((el) =>
+      within(el, target) && (el.getAttribute("aria-controls") ?? "").split(/\s+/).some((id) => within(box, document.getElementById(id))),
+    ) ?? null;
+    return takes({ box, anchor });
+  });
 }
 
 const TAB_STOPS = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';

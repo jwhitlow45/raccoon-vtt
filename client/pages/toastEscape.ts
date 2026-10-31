@@ -1,9 +1,10 @@
-type EscapeKey = Pick<KeyboardEvent, "key" | "defaultPrevented" | "preventDefault">;
-type FocusedElement = Pick<Element, "closest">;
+import { popoverTakesEscape } from "../components/Popover.tsx";
 
-/** The focused popover owns Escape before the toast, regardless of listener order. */
-export function toastEscape(event: EscapeKey, focused: FocusedElement | null, shrink: () => void): void {
-  if (event.key !== "Escape" || event.defaultPrevented || focused?.closest("[data-rvtt-popover]") != null) return;
+type EscapeKey = Pick<KeyboardEvent, "key" | "defaultPrevented" | "preventDefault">;
+
+/** A popover that will consume Escape owns it before the toast, regardless of listener order. */
+export function toastEscape(event: EscapeKey, target: unknown, shrink: () => void): void {
+  if (event.key !== "Escape" || event.defaultPrevented || popoverTakesEscape(target)) return;
   event.preventDefault();
   shrink();
 }

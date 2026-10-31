@@ -1784,7 +1784,7 @@ function Toasts(props: {
   useLayoutEffect(() => () => dockStore.setState({ toastRow: null }), [dockStore]);
   useEffect(() => {
     if (wholeToast === undefined) return;
-    const onKey = (e: KeyboardEvent) => toastEscape(e, document.activeElement, shrink);
+    const onKey = (e: KeyboardEvent) => toastEscape(e, e.target, shrink);
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [wholeToast, shrink]);

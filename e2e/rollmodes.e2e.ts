@@ -1881,7 +1881,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
     assert.deepEqual(faults, [], "open menus beside a sibling's answer");
   });
 
-  test("fu41-b-escape. Escape closes a focused menu before an expanded toast in either listener order", async () => {
+  test("fu41-b-escape. Escape closes a focused or pointer-opened menu before an expanded toast", async () => {
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
     await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: run.thorn.id, value: 20 }, { id: randomUUID(), tokenId: run.goblin.id, value: 5 }] });
     await ops.send({ t: "encounter.next" });
@@ -1893,8 +1893,8 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
       await pat.locator(".konvajs-content").first().waitFor();
       await tapCell(pat, BOUNDS, run.thorn);
       await pat.getByRole("dialog", { name: "Thorn actions" }).waitFor();
-      for (const toastFirst of [true, false]) {
-        const text = `FU41 Escape ${toastFirst ? "toast first" : "menu first"}.`;
+      for (const { toastFirst, pointer } of [{ toastFirst: true, pointer: false }, { toastFirst: false, pointer: false }, { toastFirst: true, pointer: true }]) {
+        const text = `FU41 Escape ${pointer ? "pointer" : toastFirst ? "toast first" : "menu first"}.`;
         await ops.send({ t: "log.whisper", to: [run.patId], text });
         const row = pat.locator('[data-toast-form="row"]').filter({ hasText: text });
         const whole = pat.locator('[data-toast-form="whole"]').filter({ hasText: text });
@@ -1904,8 +1904,11 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
           await whole.waitFor();
         }
         const opener = pat.getByRole("navigation", { name: "Tools", exact: true }).locator('button[aria-haspopup="menu"]').first();
-        await opener.focus();
-        await opener.press("Enter");
+        if (pointer) await opener.click();
+        else {
+          await opener.focus();
+          await opener.press("Enter");
+        }
         const menu = pat.getByRole("menu", { name: "Tools", exact: true });
         await menu.waitFor();
         if (!toastFirst) {
@@ -1913,7 +1916,8 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
           await row.getByRole("button").first().dispatchEvent("click");
           await whole.waitFor();
         }
-        await menu.getByRole("menuitem").first().focus();
+        if (pointer) assert.ok(await opener.evaluate((button) => button === button.ownerDocument.activeElement), "a pointer open leaves focus on the anchor");
+        else await menu.getByRole("menuitem").first().focus();
         await pat.keyboard.press("Escape");
         await menu.waitFor({ state: "detached" });
         assert.equal(await whole.count(), 1, "the menu's Escape leaves the expanded toast alone");
