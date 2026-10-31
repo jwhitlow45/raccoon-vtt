@@ -8,7 +8,7 @@ import { chromium, type Browser, type BrowserContext, type CDPSession, type Loca
 import type { LogEvent } from "#shared/model.ts";
 import { loadMonsters, monsterActor } from "#shared/srd/monsters.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
-import { barControl, ConsoleWatch, openPage, openSideTab, OpSocket, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, openPage, openSideTab, OpSocket, resultLine, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * The combat flow (docs/design-v1-combat-flow.md section 8) on the real
@@ -973,7 +973,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     }
   });
 
-  test("5. the tracker's sections run by use, the roll card under Auto initiative, and a player's run Join the fight first", async () => {
+  test("5. the tracker's sections run by use, the roll card under Auto initiative with a mode named only where it adds no line, and a player's run Join the fight first", async () => {
     await setUp(dm, dmCdp, { ...DESK, scale: 1 });
     await openTracker(dm);
     assert.deepEqual(await headings(dm), ["Auto Initiative", "Initiative", "Add to the fight", "Several at once", "HP changes", "Turn timer", "End", "This device"]);
@@ -985,7 +985,33 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     const button = await dm.getByRole("button", { name: /^Auto Initiative \(\d+\)/ }).boundingBox();
     const cardBox = await card.boundingBox();
     assert.ok(button && cardBox && cardBox.y > button.y, "the roll card sits under Auto Initiative's button");
+    // Plain dice name no mode: no "Normal", and no "Secret", since the tracker already says the dice are the DM's (D-261030-583).
+    await card.getByRole("note").first().waitFor();
+    for (const line of await Promise.all((await card.getByRole("note").all()).map(resultLine))) {
+      assert.ok(!line.hasDetail && !/Normal|Secret/.test(`${line.name} ${line.shown}`), `a plain result names no mode: ${JSON.stringify(line)}`);
+    }
     await shots.take(dm, "combat-order-dm");
+    // Advantage from the one-roll menu is named in each result, and shows in its words only where that adds no line, on a computer and on a phone at 130%.
+    for (const view of [{ ...DESK, scale: 1 }, { width: 375, height: 667, scale: 1.3 }]) {
+      if (view.width !== DESK.width) {
+        await setUp(dm, dmCdp, view);
+        await openTracker(dm);
+        const reroll = dm.getByRole("checkbox", { name: "Re-roll monsters that have a value" });
+        if (!(await reroll.isChecked())) await reroll.check();
+      }
+      const auto = dm.getByRole("button", { name: /^Auto Initiative \(\d+\)/ });
+      await auto.evaluate((el) => (el as unknown as { scrollIntoView(o: object): void }).scrollIntoView({ block: "center" }));
+      await auto.focus();
+      await dm.keyboard.press("ContextMenu");
+      await dm.getByRole("menu", { name: "Roll options for Initiative" }).getByRole("menuitem", { name: "Roll with Advantage" }).click();
+      const named = card.getByRole("note", { name: /with Advantage/ });
+      await named.first().waitFor();
+      const lines = await Promise.all((await card.getByRole("note").all()).map(resultLine));
+      assert.ok(lines.length > 0 && lines.every((l) => l.hasDetail && /with Advantage/.test(l.name)), `${view.width} px: each result names Advantage: ${JSON.stringify(lines)}`);
+      for (const line of lines) assert.equal(line.height, line.compactHeight, `${view.width} px: a result's words add no line: ${JSON.stringify(line)}`);
+      await shots.take(dm, `combat-auto-advantage-${view.width}`);
+    }
+    await setUp(dm, dmCdp, { ...DESK, scale: 1 });
     await openTracker(ana);
     assert.deepEqual(await headings(ana), ["Several at once", "HP changes", "This device"], "Bree is in the fight already, so Join the fight is gone");
   });

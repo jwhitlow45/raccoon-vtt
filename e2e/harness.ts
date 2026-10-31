@@ -612,6 +612,40 @@ export class Shots {
   }
 }
 
+/** What a roll's result line shows (resultLine). */
+export type ResultLine = { name: string; shown: string; hasDetail: boolean; showsDetail: boolean; height: number; compactHeight: number; detailHeight: number };
+
+/**
+ * A roll's result line (client/features/rolls/card.ts RollResultLine): its
+ * accessible name, the words it shows, and its parent's height with each of
+ * its two wordings, swapped in place and back within one task. The detailed
+ * words may show only if they cost the parent no height over the compact
+ * ones (D-261030-583), so `height` must equal `compactHeight` either way.
+ */
+export async function resultLine(note: Locator): Promise<ResultLine> {
+  return note.evaluate((el) => {
+    type Box = { hidden: boolean; textContent: string | null };
+    type El = { getAttribute(n: string): string | null; querySelector(s: string): Box | null; parentElement: { getBoundingClientRect(): { height: number } } | null; getBoundingClientRect(): { height: number } };
+    const root = el as unknown as El;
+    const base = root.querySelector("[data-roll-result-base]")!;
+    const detail = root.querySelector("[data-roll-result-detail]");
+    const parent = root.parentElement ?? root;
+    const height = () => parent.getBoundingClientRect().height;
+    const showsDetail = detail !== null && !detail.hidden;
+    const shown = { height: height(), base: base.hidden, detail: detail?.hidden ?? true };
+    const as = (detailed: boolean) => {
+      base.hidden = detailed;
+      if (detail) detail.hidden = !detailed;
+      return height();
+    };
+    const compactHeight = as(false);
+    const detailHeight = detail ? as(true) : compactHeight;
+    base.hidden = shown.base;
+    if (detail) detail.hidden = shown.detail;
+    return { name: root.getAttribute("aria-label") ?? "", shown: (showsDetail ? detail! : base).textContent ?? "", hasDetail: detail !== null, showsDetail, height: shown.height, compactHeight, detailHeight };
+  });
+}
+
 type StageCamera = { x: number; y: number; scale: number };
 
 /** A side panel tab's name: its title, and what its count says when it carries one, "N unread" or the DM panel's "1 upload waiting". */

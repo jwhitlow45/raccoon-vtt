@@ -610,8 +610,8 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await live.locator('button[aria-expanded="false"]:not([aria-haspopup])').first().tap();
     await live.getByRole("button", { name: "Roll +5: fails (Stunned) for Thorn" }).tap();
     await live.getByText(/^rolled \d+ \(1d20\+5: \d+\)(, natural (20|1))?, fails \(Stunned\)/).waitFor();
-    // A d20 result names its mode, Normal here (docs/design-v1-roll-mode-menu.md 4).
-    await c.getByText(/^Rolled \d+ \(1d20\+5: \d+\)\.( Natural (20|1)\.)? Normal\. Fail \(Stunned\)\. Final\./).waitFor();
+    // A plain roll's result adds no "Normal" (D-261030-583).
+    await c.getByText(/^Rolled \d+ \(1d20\+5: \d+\)\.( Natural (20|1)\.)? Fail \(Stunned\)\. Final\./).waitFor();
     await shots.take(dm, "rolls-dm-rolled-for-thorn");
     await closeAll();
 

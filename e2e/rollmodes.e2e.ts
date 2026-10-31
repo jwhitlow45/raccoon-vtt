@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { barControl, ConsoleWatch, diceFoldsOpen, OpSocket, openSideTab, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, Touches, waitFor, type Server, type TouchAt } from "./harness.ts";
+import { barControl, ConsoleWatch, diceFoldsOpen, OpSocket, openSideTab, resultLine, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, Touches, waitFor, type Server, type TouchAt } from "./harness.ts";
 
 /**
  * The one-roll mode menu (docs/design-v1-roll-mode-menu.md), its steps
@@ -368,7 +368,8 @@ function patFamilies(): Family[] {
     { what: "a skill", button: (s) => s.getByRole("button", { name: /^Athletics check/ }), menu: /^Roll options for Athletics check, proficient/, items: D20, hint: HINT.d20, pick: "Roll normally", sends: { t: "dice.roll", mode: null, to: "all" } },
     { what: "Initiative", button: (s) => s.getByRole("button", { name: /^Initiative/ }), menu: /^Roll options for Initiative/, items: D20, hint: HINT.d20, pick: "Roll with Advantage", sends: { t: "dice.roll", mode: "adv", to: "all" } },
     { what: "an attack", button: (s) => s.getByRole("button", { name: "Longsword", exact: true }), menu: /^Roll options for Longsword$/, items: D20, hint: HINT.d20, pick: "Roll with Advantage", sends: { t: "dice.roll", mode: "adv", to: "all" } },
-    { what: "its damage", button: (s) => s.getByRole("button", { name: "Longsword damage", exact: true }), menu: /^Roll options for Longsword damage$/, items: PLAIN, hint: HINT.plain, pick: "Roll secretly", sends: { t: "dice.roll", mode: null, to: "dm" } },
+    // A natural 20 on the attack before it presses Critical Hit, which the damage's name then carries.
+    { what: "its damage", button: (s) => s.getByRole("button", { name: /^Longsword damage(, .+)?$/ }), menu: /^Roll options for Longsword damage(, .+)?$/, items: PLAIN, hint: HINT.plain, pick: "Roll secretly", sends: { t: "dice.roll", mode: null, to: "dm" } },
     { what: "a heal", button: (s) => s.getByRole("button", { name: "Cure Wounds healing", exact: true }), menu: /^Roll options for Cure Wounds healing$/, items: PLAIN, hint: HINT.plain, pick: "Roll normally", sends: { t: "dice.roll", mode: null, to: "all" } },
     { what: "a plain d20", button: (s) => s.getByRole("button", { name: "Luck, 1d20", exact: true }), menu: /^Roll options for Luck, 1d20$/, items: D20, hint: HINT.d20, pick: "Roll with Disadvantage", sends: { t: "dice.roll", mode: "dis", to: "all" } },
     { what: "a plain d8", button: (s) => s.getByRole("button", { name: "Bardic Inspiration, 1d8", exact: true }), menu: /^Roll options for Bardic Inspiration, 1d8$/, items: PLAIN, hint: HINT.plain, pick: "Roll secretly", sends: { t: "dice.roll", mode: null, to: "dm" } },
@@ -873,6 +874,9 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
     assert.deepEqual(sentMode(op), { cancelled: false, ...family.sends });
     assert.equal(op.rollId, id);
     await waitFor("the answer on the request", () => (dmSocket.state?.rolls[id]?.targets[0]?.total !== undefined ? true : null));
+    // Closed, so its card leaves the DM's alert stack, which would stand over the dragon's cell for dpf1-24's tap.
+    await ops.send({ t: "roll.close", rollIds: [id] });
+    await waitFor("the request closed", () => (dmSocket.state?.rolls[id] ? null : true));
   });
 
   test("dpf1-10. the DM's computer: with Ask on, Thorn's save has no menu, and with it off each roll opens by right-click, ContextMenu and Shift+F10, closes by a right-click on its source and by Escape, and Enter still rolls", async () => {
@@ -1104,6 +1108,11 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
       const rowTool = tracker.getByRole("button", { name: "Roll Initiative", exact: true }).first();
       op = await pickFrom(dm, dmSent, rowTool, { what: "the dragon's Roll Initiative", button: () => rowTool, menu: /^Roll options for Initiative$/, items: D20_FIXED, hint: HINT.fixed, help: creature, pick: "Roll with Disadvantage", sends: { t: "dice.roll", mode: "dis", to: "dm" } }, "key");
       await waitFor("the dragon's row set", () => (value("e-dragon") !== null ? true : null));
+      // Its result in Auto Initiative's card names Disadvantage, in its words only where that adds no line (D-261030-583).
+      const results = tracker.getByRole("region", { name: "Auto Initiative results" });
+      const dis = await resultLine(results.getByRole("note", { name: /with Disadvantage/ }).first());
+      assert.ok(dis.hasDetail, `the dragon's result has words for its mode: ${JSON.stringify(dis)}`);
+      assert.equal(dis.height, dis.compactHeight, `the dragon's result adds no line: ${JSON.stringify(dis)}`);
 
       // Auto Initiative with every monster's value set: Re-roll gives it dice to roll again, always secret.
       const reroll = tracker.getByRole("checkbox", { name: "Re-roll monsters that have a value" });
@@ -1111,6 +1120,12 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
       const auto = tracker.getByRole("button", { name: /^Auto Initiative \(\d+\)/ });
       op = await pickFrom(dm, dmSent, auto, { what: "Auto Initiative", button: () => auto, menu: /^Roll options for Initiative$/, items: D20_FIXED, hint: HINT.fixed, help: creature, pick: "Roll normally", sends: { t: "dice.roll", mode: null, to: "dm" } }, "right");
       assert.ok(op.rolls!.every((r) => r.mode === undefined), "Normal on every die of the plan");
+      // Normal is no news, and the tracker already says the dice are the DM's: no "Normal" or "Secret" in the settled results.
+      const plain = await waitFor("Auto's settled results", async () => {
+        const lines = await Promise.all((await results.getByRole("note").all()).map(resultLine));
+        return lines.length > 0 && lines.every((l) => !/Disadvantage/.test(l.name)) ? lines : null;
+      });
+      for (const line of plain) assert.ok(!line.hasDetail && !/Normal|Secret/.test(`${line.name} ${line.shown}`), `a plain result names no mode: ${JSON.stringify(line)}`);
       await reroll.uncheck();
 
       // Pat's own row on his phone: a hold, public as his rolls are.
@@ -1144,6 +1159,10 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
       await bar.waitFor();
       await pickFrom(dm, dmSent, await barControl(bar, "Roll a Death Save"), death, "right");
       await dm.keyboard.press("Escape");
+      // A natural 20 brings Thorn back with 1 HP: he goes down again, so Pat's bar has its Roll too.
+      const actor = () => dmSocket.state?.characters[run.thornChar]?.actor;
+      await waitFor("the DM's death save landed", () => (actor()?.life !== "dying" || (actor()?.deathSaves?.ok ?? 0) + (actor()?.deathSaves?.fail ?? 0) > 0 ? true : null));
+      if (actor()?.life !== "dying") await setDying(true);
 
       await closeMenus(pat);
       await tapCell(pat, BOUNDS, run.thorn);
@@ -1259,6 +1278,10 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
     await attack.locator("xpath=../..").getByLabel("Target's AC").fill("1");
     let op = await pickFrom(dm, dmSent, attack, { what: "the shared attack", button: () => attack, menu: /^Roll options for Scimitar for 2$/, items: D20, hint: HINT.d20, pick: "Roll with Disadvantage", sends: { t: "dice.roll", mode: "dis", to: "dm" } }, "key");
     assert.ok(op.rolls!.length === 2 && op.rolls!.every((r) => r.mode === "dis"), "both attacks with Disadvantage");
+    // The results name Disadvantage, in their words only where that adds no line (D-261030-583).
+    const disResults = await resultLine(group.getByRole("note", { name: /^\d+ (hit|miss|Critical Hit) \(Disadvantage(, Secret)?\), \d+ (hit|miss|Critical Hit) \(Disadvantage(, Secret)?\)$/ }));
+    assert.ok(disResults.hasDetail, `the attacks' results have words for their mode: ${JSON.stringify(disResults)}`);
+    assert.equal(disResults.height, disResults.compactHeight, `the attacks' results add no line: ${JSON.stringify(disResults)}`);
     const hits = group.getByRole("button", { name: /^Roll damage for \d+ hits?$/ });
     // A natural 1 misses whatever the AC, so both may miss: then there is no damage to roll.
     if (await hits.isVisible().catch(() => false)) await pickFrom(dm, dmSent, hits, { what: "the hits' damage", button: () => hits, menu: /^Roll options for Roll damage for \d+ hits?$/, items: PLAIN, hint: HINT.plain, pick: "Roll normally", sends: { t: "dice.roll", mode: null, to: "dm" } }, "right");

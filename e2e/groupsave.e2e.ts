@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import type { DiceRoll, LogEntry, LogEvent } from "#shared/model.ts";
-import { ConsoleWatch, diceFoldsOpen, multiSelect, OpSocket, reopenRoom, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { ConsoleWatch, diceFoldsOpen, multiSelect, OpSocket, reopenRoom, resultLine, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * Roll options and the group save (docs/design-v1-roll-options.md 11), on
@@ -44,6 +44,8 @@ const assetDir = path.join(work, "assets");
 const shots = new Shots(SHOT_DIR === "0" ? null : SHOT_DIR);
 
 const PHONE = { width: 375, height: 667 };
+/** Three shared attacks' results with no mode named. */
+const PLAIN_RESULTS = /^\d+ (hit|miss|Critical Hit)(, \d+ (hit|miss|Critical Hit)){2}$/;
 const HP = 60;
 const DC = 13;
 /** Bree's typed total, a fail against the DC. */
@@ -400,7 +402,8 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
       return r?.targets.some((t) => t.total === BREE_TOTAL) ? true : null;
     });
     // The answer and its verdict read in words beside it, apart from the DM's own mark, which stays unset (W7B-P-11, W7B-P-12).
-    await sheet.getByText(`Asked: typed ${BREE_TOTAL}`).locator("xpath=..").getByText(`Fail vs DC ${DC}`).waitFor();
+    // The row's words are a result line of their own (D-261030-583), so its row is the line's parent.
+    await sheet.getByRole("note", { name: `Asked: typed ${BREE_TOTAL}` }).locator("xpath=..").getByText(`Fail vs DC ${DC}`).waitFor();
     assert.equal(await sheet.getByRole("radiogroup", { name: "Bree: fail, pass or skip" }).getByRole("radio", { checked: true }).count(), 0, "no mark of the DM's");
   });
 
@@ -565,7 +568,7 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     await shots.take(dm, "dp-groupsave-several-card-130");
   });
 
-  test("dp-gs2. Shared attacks keep their hits and Roll damage through a fold before the answer, a fold between Attack and Damage, and each again across a selection change that keeps two or more", async () => {
+  test("dp-gs2. Shared attacks keep their hits and Roll damage through a fold before the answer, a fold between Attack and Damage, and each again across a selection change that keeps two or more, and their results name a mode only where it adds no line", async () => {
     const rolls = await openGroupRolls();
     const fold = rolls.locator("[data-group-fold]", { hasText: "Shared attacks" });
     const attack = (n: number) => rolls.getByRole("button", { name: `Scimitar for ${n}`, exact: true });
@@ -595,8 +598,8 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
       if (hits > 0) await fold.getByText(`Scimitar: ${hits} hit${hits === 1 ? "" : "s"}`, { exact: false }).waitFor();
       await fold.tap();
       await waitFor(`Shared attacks open (${why})`, async () => ((await fold.getAttribute("aria-expanded")) === "true" ? true : null));
-      // Each result may name its returned mode, such as "(Normal)" (docs/design-v1-roll-mode-menu.md 4).
-      await rolls.getByText(/^\d+ (hit|miss|Critical Hit)( \([^)]+\))?(, \d+ (hit|miss|Critical Hit)( \([^)]+\))?){2}$/).waitFor();
+      // Plain rolls add no "Normal", and the DM's secret dice match the panel's Secret, so the line names no mode (D-261030-583).
+      await rolls.getByRole("note", { name: PLAIN_RESULTS }).waitFor();
       if (hits > 0) await rolls.getByRole("button", { name: hitWords(hits), exact: true }).waitFor();
     };
 
@@ -605,24 +608,8 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     let hits = hitsOf(sent);
     await reopened(hits, "before the answer");
     await shots.take(dm, "dp-groupsave-shared-before-answer-130");
-    // The results' mode words add no line on a phone at 130% (docs/design-v1-roll-mode-menu.md 6: no new wrapping).
-    // A clone without them, at the same width, is the line as it was.
-    const lines = await rolls.getByText(/^\d+ (hit|miss|Critical Hit)( \([^)]+\))?(, \d+ (hit|miss|Critical Hit)( \([^)]+\))?){2}$/).evaluate((note) => {
-      type El = { textContent: string | null; parentElement: El; getBoundingClientRect(): { height: number }; cloneNode(deep: boolean): El; remove(): void; appendChild(e: El): void; style: { visibility: string; position: string; width: string } };
-      const el = note as unknown as El;
-      const text = el.textContent ?? "";
-      const bare = el.cloneNode(true);
-      bare.textContent = text.replace(/ \([^)]+\)/g, "");
-      bare.style.visibility = "hidden";
-      bare.style.position = "absolute";
-      bare.style.width = `${(note as unknown as { clientWidth: number }).clientWidth}px`;
-      el.parentElement.appendChild(bare);
-      const out = { text, bareText: bare.textContent, shown: el.getBoundingClientRect().height, bare: bare.getBoundingClientRect().height };
-      bare.remove();
-      return out;
-    });
-    assert.notEqual(lines.bareText, lines.text, `the clone dropped the mode words: ${JSON.stringify(lines)}`);
-    assert.ok(lines.shown <= lines.bare + 0.5, `the mode words wrap the shared attack's results: ${JSON.stringify(lines)}`);
+    const plain = await resultLine(rolls.getByRole("note", { name: PLAIN_RESULTS }));
+    assert.ok(!plain.hasDetail && plain.shown === plain.name, `plain results show their words alone: ${JSON.stringify(plain)}`);
     // Folded between Attack and Damage.
     await fold.tap();
     await reopened(hits, "between Attack and Damage");
@@ -649,7 +636,7 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
       const before = diceLines(dmSocket.state?.log).length;
       await rolls.getByRole("button", { name: hitWords(hits), exact: true }).tap();
       await waitFor("the hits' damage line", () => diceLines(dmSocket.state?.log).slice(before).find((l) => l.rolls.every((r) => r.label?.startsWith(`Scimitar damage for ${hits} hits`))) ?? null);
-      await rolls.getByText(/^\d+ damage(, Secret)?\. Every HP entry offers it as a chip\.$/).waitFor();
+      await rolls.getByRole("note", { name: /^\d+ damage\. Every HP entry offers it as a chip\.$/ }).waitFor();
     }
 
     // Fewer than two selected ends the view of several, and its hits go with it.
@@ -661,6 +648,21 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     await attack(3).waitFor();
     assert.equal(await rolls.getByRole("button", { name: /^Roll damage for/ }).count(), 0, "the old hits are gone");
     assert.equal(await rolls.getByText(/^\d+ (hit|miss|Critical Hit)( \([^)]+\))?,/).count(), 0, "the old results are gone");
+
+    // Disadvantage from the attack's one-roll menu is worth naming, but three of it run onto a second line on this phone at 130%.
+    // The line keeps its compact words, and its accessible name keeps the mode (D-261030-583).
+    const logged = diceLines(dmSocket.state?.log).length;
+    await attack(3).focus();
+    await dm.keyboard.press("ContextMenu");
+    await dm.getByRole("menu", { name: "Roll options for Scimitar for 3" }).getByRole("menuitem", { name: "Roll with Disadvantage" }).tap();
+    const disLine = await waitFor("the attack with Disadvantage", () => diceLines(dmSocket.state?.log).slice(logged).find((l) => l.rolls.length === 3 && l.rolls.every((r) => r.label === "Scimitar")) ?? null);
+    assert.ok(disLine.rolls.every((r) => r.mode === "dis"), "each attack rolled with Disadvantage");
+    // This fresh row has no AC typed, so its results are totals alone.
+    const dis = await resultLine(rolls.getByRole("note", { name: /^\d+ \(Disadvantage\)(, \d+ \(Disadvantage\)){2}$/ }));
+    assert.ok(dis.hasDetail && !dis.showsDetail, `the mode stays in the name on a narrow phone: ${JSON.stringify(dis)}`);
+    assert.match(dis.shown, /^\d+(, \d+){2}$/, "the compact words show");
+    assert.equal(dis.height, dis.compactHeight, "no line added");
+    assert.ok(dis.detailHeight > dis.compactHeight, `the detailed words would have added a line: ${JSON.stringify(dis)}`);
     await diceSheet(dm).getByRole("button", { name: "Close Dice" }).tap();
   });
 
