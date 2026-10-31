@@ -26,7 +26,7 @@ export function RoomsCard(props: { rooms: AdminRoom[]; now: number; onChanged():
   const sorted = sortRooms(props.rooms, sort);
   return (
     <Card title={`Rooms (${props.rooms.length.toLocaleString()})`}>
-      <Help>A room's size is what it takes on disk: every image it holds, so an image two rooms share counts in both, and its whole log. Its storage quota, which can stop uploads and make it read-only, leaves the log out.</Help>
+      <Help>A room's size is what it takes on disk: every image it holds and its whole log. An image two rooms share counts in both. Its storage quota, which can stop uploads and make the room read-only, leaves the log out.</Help>
       <Segmented label="Sort rooms" value={sort} options={SORTS} onChange={setSort} />
       {sorted.length === 0 ? (
         <Empty>No rooms yet. Each room made on this server shows here.</Empty>
