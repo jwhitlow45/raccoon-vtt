@@ -27,12 +27,12 @@ export type LogNames = Pick<RoomState, "members" | "tokens" | "characters" | "ha
 const SOMEONE = "Someone";
 const A_CREATURE = "A creature";
 
-/** Display order within an operation, without changing its storage or paging ids. */
 /** Ends a sentence that may end in a label: a label cut short with "…", or ending in its own mark, takes no second one. */
 export function endSentence(text: string): string {
   return /[.?!…]$/.test(text) ? text : `${text}.`;
 }
 
+/** Display order within an operation, without changing its storage or paging ids. */
 export function displayLog(lines: readonly LogEntry[]): LogEntry[] {
   const out: LogEntry[] = [];
   const seq = (line: LogEntry) => line.id.slice(0, line.id.indexOf(":"));
@@ -743,17 +743,6 @@ export function mergeLog(older: readonly LogEntry[], live: readonly LogEntry[]):
   const liveIds = new Set(live.map((e) => e.id));
   const kept = older.filter((e) => !liveIds.has(e.id));
   return [...kept, ...live].sort((a, b) => compareLogIds(a.id, b.id));
-}
-
-/**
- * Where the next older page starts (design 10.8): where the last page said,
- * else the oldest line of the room log the viewer holds (`mainLog`). Never a
- * trap line: the trap logs reach no archive, and an old trap line as the
- * cursor would skip every room log line between it and the room log's
- * oldest.
- */
-export function olderCursor(mainLog: readonly LogEntry[], nextBefore: string | null | undefined): string | undefined {
-  return nextBefore ?? mainLog[0]?.id;
 }
 
 /**
