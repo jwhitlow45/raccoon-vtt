@@ -15,6 +15,7 @@ import {
   type SightHolders,
   type SightTile,
 } from "./model.ts";
+import type { SaveOutcomeRecord } from "./saveOutcomeContract.ts";
 
 /**
  * One entity key scheme for everything that names an entity outside the
@@ -49,6 +50,7 @@ export type ParsedKey =
   | { kind: "handoutDoc"; id: string }
   | { kind: "companionBlock"; id: string }
   | { kind: "cast"; id: string }
+  | { kind: "saveOutcome"; id: string }
   | { kind: "trap"; id: string }
   | { kind: "log"; id: string }
   | { kind: "trapLog"; id: string }
@@ -100,6 +102,7 @@ export const keys = {
   companionBlock: (id: string): EntityKey => `companionBlock:${id}`,
   /** A player's open ask for saves (RoomState.casts). */
   cast: (id: string): EntityKey => `cast:${id}`,
+  saveOutcome: (id: string): EntityKey => `saveOutcome:${id}`,
   /** A trap (RoomState.traps). */
   trap: (id: string): EntityKey => `trap:${id}`,
   log: (id: string): EntityKey => `log:${id}`,
@@ -269,6 +272,8 @@ export function parseKey(key: EntityKey): ParsedKey | null {
     case "played":
     case "memoryShared":
       return { kind, id: rest };
+    case "saveOutcome":
+      return { kind, id: rest };
     case "fogDraft":
     case "holders":
       return { kind, sceneId: rest };
@@ -357,6 +362,8 @@ export function collectionOf(key: EntityKey): keyof RoomState | null {
       return "companionBlocks";
     case "cast":
       return "casts";
+    case "saveOutcome":
+      return "saveOutcomes";
     case "trap":
       return "traps";
     case "trapLog":
@@ -436,6 +443,8 @@ export function readEntity(state: RoomState, key: EntityKey): unknown {
       return state.companionBlocks[parsed.id] ?? null;
     case "cast":
       return state.casts[parsed.id] ?? null;
+    case "saveOutcome":
+      return state.saveOutcomes?.[parsed.id] ?? null;
     case "trap":
       return state.traps?.[parsed.id] ?? null;
     case "log":
@@ -542,6 +551,9 @@ export function writeEntity(state: RoomState, key: EntityKey, value: unknown): R
       return { ...state, companionBlocks: withEntry(state.companionBlocks, parsed.id, value as RoomState["companionBlocks"][string] | null) };
     case "cast":
       return { ...state, casts: withEntry(state.casts, parsed.id, value as RoomState["casts"][string] | null) };
+    case "saveOutcome":
+      if (value === null && state.saveOutcomes === undefined) return state;
+      return { ...state, saveOutcomes: withEntry(state.saveOutcomes ?? {}, parsed.id, value as SaveOutcomeRecord | null) };
     case "trap":
       return { ...state, traps: withEntry(state.traps, parsed.id, value as RoomState["traps"][string] | null) };
     case "trapLog":

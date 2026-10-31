@@ -157,6 +157,8 @@ export function reads(op: Op, state: RoomState): Reads {
     case "actor.damageMany":
       return of(op.hits.map((hit) => holderRead(state, hit.target, ["hp", "life", "effects"])));
     case "actor.outcome": {
+      // Lifecycle admission and its timestamp come from the committed server envelope.
+      if (op.page !== undefined || op.recharge !== undefined) return NEVER;
       if (op.targets.some((item) => item.damage !== undefined)) return NEVER;
       const r: Read[] = [];
       for (const item of op.targets) {
@@ -374,6 +376,8 @@ export function reads(op: Op, state: RoomState): Reads {
       return NEVER;
     // The targets' creatures, which must be played by a player and, for a token, stand on the player scene.
     case "roll.ask": {
+      // Only acceptance may replace the page's old request references.
+      if (op.replaces !== undefined) return NEVER;
       const r: Read[] = [{ key: keys.meta }];
       for (const t of op.request.targets) r.push("tokenId" in t ? { key: keys.token(t.tokenId) } : { key: keys.character(t.characterId) });
       return of(r);

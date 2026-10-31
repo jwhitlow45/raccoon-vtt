@@ -219,10 +219,17 @@ class Check {
 
 export function canApply(op: Op, actor: Viewer, state: RoomState, deps: PermissionDeps): Decision {
   if (op.t === "roll.answer" && op.tag === undefined) return refuse("invalid", ANSWER_NEEDS_TAG);
+  if (op.t === "sys.restore" && op.entries.some((entry) => entry.key.startsWith("saveOutcome:"))) {
+    return refuse("invalid", "a save outcome requires a lifecycle transition");
+  }
   const check = new Check(state, actor, deps);
   const decision = actor.role === "dm" ? forDm(op, check) : forPlayer(op, check);
   // After the role's checks, so a player who names a hidden effect hears that it is not there, never what it holds.
   if (!decision.ok) return decision;
+  if (op.t === "actor.outcome" && op.recharge !== undefined) {
+    const recharge = canApply({ t: "actor.use", ...op.recharge }, actor, state, deps);
+    if (!recharge.ok) return recharge;
+  }
   const hexed = hexPhaseFits(op, check);
   if (!hexed.ok) return hexed;
   if (actor.role !== "dm" && setsSave(op)) return refuse("forbidden", SAVE_IS_DMS);
@@ -1106,6 +1113,7 @@ function forPlayer(op: Op, c: Check): Decision {
       return op.scope === "setup" || op.discard === true ? refuse("forbidden", "only the DM uses setup history or discards a step") : OK;
 
     case "sys.restore": {
+      if (op.saveOutcome !== undefined) return FORBIDDEN;
       // A player's stack holds only their own drawings and token moves and resizes (design 7.7), so that is all a restore may touch.
       const restoring = restoredTokens(op);
       const quiet = new Set(op.quiet ?? []);

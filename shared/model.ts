@@ -12,6 +12,7 @@
 
 import type { DamageType } from "./rules/damage.ts";
 import type { CorrectionLogEvent } from "./undoContract.ts";
+import type { SaveOutcomeLedger } from "./saveOutcomeContract.ts";
 
 export type MemberId = string;
 export type SceneId = string;
@@ -56,6 +57,8 @@ export const CHUNK_CELLS = 16;
 export const FOG_SUBCELLS = 4;
 
 export type RoomState = {
+  /** DM only. Retained save outcome status, independent of memory-only Undo stacks. */
+  saveOutcomes?: SaveOutcomeLedger;
   meta: RoomMeta;
   members: Record<MemberId, Member>;
   scenes: Record<SceneId, Scene>;

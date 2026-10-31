@@ -108,11 +108,11 @@ export const UNDO_SCOPE_BY_OP = {
   "journal.delete": "setup",
   "pin.put": "setup",
   "pin.remove": "setup",
-  "roll.ask": "play",
+  "roll.ask": "fields",
   "roll.answer": "play",
   "roll.reopen": "play",
   "roll.change": "none",
-  "roll.close": "play",
+  "roll.close": "fields",
   "cast.ask": "none",
   "cast.close": "none",
   "dice.roll": "none",
@@ -169,6 +169,9 @@ function actorScope(patch: ActorPatch, before: Actor | undefined, shape: boolean
 /** Classification never grants permission or decides whether reduction produced an undoable change. */
 export function undoScope(op: Op, before: RoomState): UndoScope {
   switch (op.t) {
+    case "roll.ask":
+    case "roll.close":
+      return op.reason === "savePage" ? "none" : "play";
     case "token.update": {
       if (!onlyFields(op.patch, PLAY_TOKEN_FIELDS)) return "setup";
       if (op.patch.actor === undefined) return "play";

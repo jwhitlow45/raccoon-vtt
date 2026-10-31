@@ -14,6 +14,7 @@ import { rowLeadsMounts } from "./encounter.ts";
 import { writeHpUndoLine } from "./hpUndo.ts";
 import { forgetExplored } from "./map.ts";
 import { gone, guardHash, invalid, type Tx } from "./tx.ts";
+import { prepareSaveOutcomeRestore, writeSaveOutcome } from "./saveOutcomes.ts";
 
 export function logChat(tx: Tx, op: OpOf<"log.chat">): void {
   tx.addLog({ kind: "chat", from: tx.actor.memberId, text: op.text });
@@ -91,11 +92,13 @@ export const CHANGED_SINCE = "it was changed since";
  * matches the entity spelled that way (shared/migrate.ts, op step 9 to 10).
  */
 export function restore(tx: Tx, op: OpOf<"sys.restore">): void {
+  const tracked = prepareSaveOutcomeRestore(tx, op);
   const removed: ParsedKey[] = [];
   const before = new Map<EntityKey, unknown>();
   for (const entry of op.entries) {
     const parsed = parseKey(entry.key);
     if (!parsed) throw invalid(`unknown entity key ${entry.key}`);
+    if (parsed.kind === "saveOutcome") throw invalid("save outcomes are never restored through entity entries");
     if (parsed.kind === "log" || parsed.kind === "trapLog" || parsed.kind === "trapSeen") throw invalid("log entries are never restored");
     const current = tx.read(entry.key);
     before.set(entry.key, current);
@@ -135,6 +138,7 @@ export function restore(tx: Tx, op: OpOf<"sys.restore">): void {
   for (const sceneId of [...wallsMoved].sort()) {
     if (!scenesWritten.has(sceneId) && tx.state.scenes[sceneId]) tx.bumpWalls(sceneId);
   }
+  if (tracked) writeSaveOutcome(tx, op.saveOutcome!.id, tracked);
 }
 
 /**

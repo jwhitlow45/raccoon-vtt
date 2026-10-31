@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { historyCommandSchema, historyMessageSchema, opAcknowledgmentSchema, restoreHistoryFieldsSchema } from "./undoContract.ts";
+import { saveOutcomePageSchema, saveOutcomeTransitionSchema, savePageAskFieldsSchema, savePageCloseFieldsSchema, saveRechargeSpendSchema } from "./saveOutcomeContract.ts";
 import { LIMITS, MOST_SIGHT_HOLDERS, serializedBytes } from "./limits.ts";
 import { ATTACH_KINDS } from "./rules/attach.ts";
 import { critBound } from "./dice/crit.ts";
@@ -901,9 +902,9 @@ const characterExpect = z.strictObject(Object.fromEntries(EXPECT_PARTS.map((part
  * suffixes such as `:hit` never reach it.
  */
 const USE_KEY = /^[a-z][A-Za-z]*:[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const useKey = z.string().max(LIMITS.useKeyChars).regex(USE_KEY, "not an ability key");
+const useKey = saveRechargeSpendSchema.shape.use.shape.key;
 /** An ability's name as printed, bounded as a custom stat block's entry name is (statEntries). */
-const useName = line(LIMITS.useNameChars).min(1);
+const useName = saveRechargeSpendSchema.shape.use.shape.name;
 /** The seq of the op that started a turn, which names its turn record (TurnRecord.id). */
 const turnRecordId = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 /** A prompt of a turn (PromptKey): Regeneration, a death save, or `recharge:` and the key of the ability it recharges. */
@@ -1441,7 +1442,7 @@ const hpChange = z.discriminatedUnion("kind", [
  * Both replay as they were applied.
  */
 const restoreEntry = z.strictObject({
-  key: z.string().min(1).max(200),
+  key: z.string().min(1).max(200).refine((key) => !key.startsWith("saveOutcome:"), { message: "a save outcome requires a lifecycle transition" }),
   value: z.unknown(),
   expectRev: z.number().int().min(0).nullable().optional(),
   expectHash: z.string().regex(/^[0-9a-f]{32}$/).optional(),
@@ -2104,6 +2105,8 @@ const stateClientOps = [
    */
   op("actor.outcome", {
     plan: id,
+    page: saveOutcomePageSchema.optional(),
+    recharge: saveRechargeSpendSchema.optional(),
     label: shortText.optional(),
     /**
      * The player's ask for saves this outcome resolves (docs/design-v1-player-save-spell.md 5.3), closed in the
@@ -2379,7 +2382,7 @@ const stateClientOps = [
   op("pin.put", { pin: pinInput }),
   op("pin.remove", { pinId: id }),
   /** Roll requests (section 3.3). Asking, reopening and closing are the DM's. */
-  op("roll.ask", { request: rollRequestInput }),
+  savePageAskFieldsSchema.safeExtend({ t: z.literal("roll.ask"), request: rollRequestInput }),
   /**
    * A target's answer: a total with the choice rolled, or a save failed
    * without rolling (`result: "fail"`, no total). The DM may also mark a
@@ -2416,6 +2419,7 @@ const stateClientOps = [
    * waits on a target or holds an ask when the op runs, so nothing that arrived after the tap closes unseen.
    */
   op("roll.close", {
+    ...savePageCloseFieldsSchema.shape,
     rollIds: z.array(id).min(1).max(LIMITS.openRollsPerRoom),
     settle: z.enum(["resolved", "dismissed"]).optional(),
     ifSettled: z.literal(true).optional(),
@@ -2476,7 +2480,8 @@ export const serverOnlyOps = [
   op("sys.memberRemove", { memberId: id }),
   op("sys.restore", {
     ...restoreHistoryFieldsSchema.shape,
-    entries: z.array(restoreEntry).min(1).max(MAX_RESTORE_ENTRIES),
+    saveOutcome: saveOutcomeTransitionSchema.optional(),
+    entries: z.array(restoreEntry).max(MAX_RESTORE_ENTRIES),
     /** Which stack the restore came from, so the server can push its inverse on the other one. */
     from: z.enum(["undo", "redo"]),
     /**
@@ -2516,7 +2521,7 @@ export const serverOnlyOps = [
      * permissions read it, and only the server builds a restore.
      */
     quiet: z.array(id).min(1).max(MAX_RESTORE_ENTRIES).optional(),
-  }),
+  }).refine((o) => o.entries.length > 0 || o.saveOutcome !== undefined, { message: "an empty restore requires a save outcome transition" }),
   /**
    * What the party saw this batch that the scene's explored layer lacked
    * (section 4.3.3): each changed tile's new bits, which only ever add. The

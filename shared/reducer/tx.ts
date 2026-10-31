@@ -186,7 +186,7 @@ export class Tx {
       this.order.push(key);
     }
     let next = value;
-    if (next !== null && parsed.kind !== "meta" && parsed.kind !== "encounterHistory" && !isLine(parsed.kind)) {
+    if (next !== null && parsed.kind !== "meta" && parsed.kind !== "encounterHistory" && parsed.kind !== "saveOutcome" && !isLine(parsed.kind)) {
       next = { ...(next as object), rev: (revOf(prev) ?? 0) + 1 };
     }
     switch (parsed.kind) {
@@ -537,7 +537,7 @@ export class Tx {
   inverse(): RestoreEntry[] | null {
     const entries: RestoreEntry[] = [];
     for (const key of this.order) {
-      if (key.startsWith("log:") || key.startsWith("trapLog:") || key.startsWith("trapSeen:") || this.bookkeeping.has(key)) continue;
+      if (key.startsWith("log:") || key.startsWith("trapLog:") || key.startsWith("trapSeen:") || key.startsWith("saveOutcome:") || this.bookkeeping.has(key)) continue;
       const after = readEntity(this.state, key);
       const entry: RestoreEntry = { key, value: this.before.get(key) ?? null };
       if (after === null) entry.expectRev = null;

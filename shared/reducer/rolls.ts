@@ -1,5 +1,6 @@
 import { CANNOT_REROLL, LUCKY_CHANGES_NOTHING, rerollable, rerollFace, withDie, withLucky } from "../dice/roll.ts";
 import { keys } from "../keys.ts";
+import { LIMITS } from "../limits.ts";
 import { answerProvenance } from "../migrate.ts";
 import type { LogEvent, RollAnswer, RollChange, RollRequest, RollTarget } from "../model.ts";
 import { SETTLED_MEANWHILE, fixPending, playersTypeTotals } from "../permissions.ts";
@@ -7,7 +8,9 @@ import { anyPlayer, playersToken } from "../project.ts";
 import type { ActorTarget, OpOf } from "../protocol.ts";
 import { effectEvent } from "../rules/hp.ts";
 import { resultOf } from "../rules/rolls.ts";
-import { Refuse, gone, invalid, type Tx } from "./tx.ts";
+import { Refuse, gone, guardHash, invalid, type Tx } from "./tx.ts";
+import { savePageAskFieldsSchema } from "../saveOutcomeContract.ts";
+import { tracksSaveOutcomes } from "../saveOutcomes.ts";
 
 /**
  * Roll requests (docs/design-v1-dm-tools.md 3.3 and docs/design-v1-roll-request.md).
@@ -40,6 +43,16 @@ export const SAVE_SETTLED = "That save is no longer waiting.";
 export function rollAsk(tx: Tx, op: OpOf<"roll.ask">): void {
   const input = op.request;
   if (tx.state.rolls[input.id]) throw invalid("roll request already exists");
+  if (tracksSaveOutcomes(tx.env.opVersion) && op.replaces !== undefined) {
+    if (tx.actor.role !== "dm") throw new Refuse("forbidden", "only the DM can replace save requests");
+    if (!savePageAskFieldsSchema.safeParse({ reason: op.reason, replaces: op.replaces }).success) throw invalid("the save request replacement is invalid");
+    for (const replacement of op.replaces) {
+      const request = tx.state.rolls[replacement.id];
+      if (!request || guardHash(keys.roll(replacement.id), request) !== replacement.expectHash) throw invalid("The roll request changed. Check its answers and ask again.");
+    }
+    for (const replacement of op.replaces) tx.writeBookkeeping(keys.roll(replacement.id), null);
+    if (Object.keys(tx.state.rolls).length >= LIMITS.openRollsPerRoom) throw new Refuse("quota", "too many open roll requests");
+  }
   const playerScene = tx.state.meta.playerSceneId;
   for (const target of input.targets) {
     if ("tokenId" in target) {

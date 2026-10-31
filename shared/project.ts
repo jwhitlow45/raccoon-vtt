@@ -3709,6 +3709,8 @@ function projectEntityCtx(ctx: Ctx, key: EntityKey): unknown {
       return value ? projectCompanionBlockCtx(ctx, value as CompanionBlock) : null;
     case "cast":
       return value ? projectCastCtx(ctx, value as CastAsk) : null;
+    case "saveOutcome":
+      return ctx.viewer.role === "dm" ? value : null;
     case "trap":
       return value ? projectTrapCtx(ctx, value as Trap) : null;
     case "log":
@@ -3766,6 +3768,7 @@ export function projectState(state: RoomState, viewer: Viewer, opts: ProjectOpts
     handoutDocs: projectMap(state.handoutDocs, (doc) => projectHandoutDocCtx(ctx, doc)),
     companionBlocks: projectMap(state.companionBlocks, (block) => projectCompanionBlockCtx(ctx, block)),
     casts: projectMap(state.casts, (ask) => projectCastCtx(ctx, ask)),
+    ...(viewer.role === "dm" && state.saveOutcomes !== undefined ? { saveOutcomes: state.saveOutcomes } : {}),
     traps: projectMap(state.traps ?? {}, (trap) => projectTrapCtx(ctx, trap)),
     trapLog: viewer.role === "dm" ? (state.trapLog ?? []) : [],
     trapSeen: (state.trapSeen ?? []).map((e) => projectTrapSeenCtx(ctx, e)).filter((e): e is LogEntry => e !== null),
@@ -3873,6 +3876,7 @@ export function allKeys(state: RoomState): EntityKey[] {
   for (const id of Object.keys(state.handoutDocs)) out.push(keys.handoutDoc(id));
   for (const id of Object.keys(state.companionBlocks)) out.push(keys.companionBlock(id));
   for (const id of Object.keys(state.casts ?? {})) out.push(keys.cast(id));
+  for (const id of Object.keys(state.saveOutcomes ?? {})) out.push(keys.saveOutcome(id));
   for (const e of state.log) out.push(keys.log(e.id));
   for (const id of Object.keys(state.traps ?? {})) out.push(keys.trap(id));
   for (const e of state.trapLog ?? []) out.push(keys.trapLog(e.id));
