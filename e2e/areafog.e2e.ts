@@ -497,7 +497,9 @@ describe("raccoon-vtt an area aimed over a player's fog", { timeout: 600_000 }, 
     await viewAs(dm, "topDown");
     await aim(dm);
     // East of the wall's line, clear of its stroke and the grid's lines: cells the wall takes the shading from.
-    const cells = [9.3, 9.55, 9.8].flatMap((x) => [5.3, 5.7, 6.3, 6.7].map((y) => ({ x, y })));
+    // Each lies at least 0.23 cells inside the sphere's outline. At 9.8 a spot stood 0.14 cells in, about a
+    // pixel from the outline's soft edge in Isometric, and read that edge under some rasters and camera phases.
+    const cells = [9.3, 9.5, 9.7].flatMap((x) => [5.3, 5.7, 6.3, 6.7].map((y) => ({ x, y })));
     /** The spots at those cells as the DM's board stands now: closing the area's options moves a fitted board. */
     const spotsNow = async (view: View) => {
       const at = await placement(dm);

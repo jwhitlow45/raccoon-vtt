@@ -2105,17 +2105,42 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
       let over = 0;
       const box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
       const ch = x.info.channels;
+      const w = x.info.width;
+      const h = x.info.height;
+      const off = new Uint8Array(w * h);
+      /*
+       * A color weighed by its pixel's alpha, as it shows over the page. The
+       * read back is not premultiplied, so a pixel all but clear at the
+       * relief's outer edge swings its whole color with one coverage step:
+       * on a software canvas one pixel read 20,118,118 at alpha 13 kept and
+       * clear after a whole repaint, 118/255 apart for 13/255 on screen.
+       */
+      const shown = (data: Buffer, i: number) => {
+        const c = i % ch;
+        return ch < 4 || c === 3 ? data[i]! : Math.round((data[i]! * data[i - c + 3]!) / 255);
+      };
       for (let i = 0; i < x.data.length; i++) {
-        const d = Math.abs(x.data[i]! - y.data[i]!);
+        const d = Math.abs(shown(x.data, i) - shown(y.data, i));
         worst = Math.max(worst, d);
         if (d <= 2) continue;
         over++;
         const px = Math.floor(i / ch);
-        const [cx, cy] = [px % x.info.width, Math.floor(px / x.info.width)];
+        off[px] = 1;
+        const [cx, cy] = [px % w, Math.floor(px / w)];
         box.x0 = Math.min(box.x0, cx);
         box.y0 = Math.min(box.y0, cy);
         box.x1 = Math.max(box.x1, cx);
         box.y1 = Math.max(box.y1, cy);
+      }
+      // The most pixels past 2/255 in any 9 by 9 window: antialiased edges hold at most about 32 where several meet, a stale patch all 81.
+      let densest = 0;
+      for (let py = 0; py < h; py++) {
+        for (let px = 0; px < w; px++) {
+          if (!off[py * w + px]) continue;
+          let n = 0;
+          for (let j = Math.max(0, py - 4); j <= Math.min(h - 1, py + 4); j++) for (let i = Math.max(0, px - 4); i <= Math.min(w - 1, px + 4); i++) n += off[j * w + i]!;
+          densest = Math.max(densest, n);
+        }
       }
       if (worst > 2 && SHOT_DIR !== "0") {
         mkdirSync(SHOT_DIR, { recursive: true });
@@ -2123,12 +2148,35 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
         await sharp(x.data, { raw: x.info }).png().toFile(path.join(SHOT_DIR, `hxperf2-${name}-kept.png`));
         await sharp(y.data, { raw: y.info }).png().toFile(path.join(SHOT_DIR, `hxperf2-${name}-whole.png`));
       }
-      maxDiffs.push(`${what}: ${worst}/255 at most, ${over} channel values past 2/255`);
-      // The GPU antialiases a line a few levels apart when it draws it in a strip and in a whole repaint: up to one antialiased edge pixel in ten thousand may differ by more than 2/255, never a region.
-      assert.ok(over <= x.data.length * 1e-4 && worst <= 64, `${what}: the kept picture differs from a whole repaint by ${worst}/255 in a channel, in ${over} channel values within ${JSON.stringify(box)} of ${x.info.width}x${x.info.height}`);
+      maxDiffs.push(`${what}: ${worst}/255 at most, ${over} channel values past 2/255, at most ${densest} pixels in a 9 by 9 window`);
+      /*
+       * A raster is not exactly the same after a move by whole device
+       * pixels: a coordinate rounds a little differently, and where an edge
+       * lies on the boundary of a supersample, its pixel's coverage moves by
+       * a sixteenth or more (16/255). Linux's software canvas does this on
+       * about a thousand edge pixels of a scroll, everywhere the picture
+       * was copied, not only in its strips (CI run 41171858955: 944 pixels,
+       * 31/255 at most, 22 at most in a 9 by 9 window), the Mac's GPU on a
+       * few. The Mac's software canvas gave the same numbers on that case,
+       * and with the pan stopping short, over every case here at most 6,777
+       * channel values of 5.3 million (1.3 in a thousand), 36/255, and 32
+       * in a window where several edges meet. The Mac's GPU, where the
+       * software canvas matched exactly, drew one top's edge a pixel wider
+       * in the kept picture than in a whole repaint, 67/255 apart where the
+       * edge's two sides lie 110/255 apart. So 2.5 values in a thousand may
+       * differ past 2/255, by 128/255 at most, and at most 48 pixels in a
+       * window: a stale patch the size of a window fills it, and a strip
+       * left clear differs in alpha by 255.
+       */
+      assert.ok(over <= x.data.length * 2.5e-3 && worst <= 128 && densest <= 48, `${what}: the kept picture differs from a whole repaint by ${worst}/255 in a channel, in ${over} channel values within ${JSON.stringify(box)} of ${w}x${h}, at most ${densest} pixels in a 9 by 9 window`);
     };
     const maxDiffs: string[] = [];
-    /** 37 small moves one way and 37 back, each in a frame of its own, with `midway` between the halves. */
+    /**
+     * 37 small moves one way and 27 back, each in a frame of its own, with
+     * `midway` between the halves. The pan stops short of its start: a
+     * stale strip a move leaves travels with the picture, and a pan back to
+     * its start carries every strip of the first half off the canvas.
+     */
     const pan = async (page: Page, how: "touch" | "space" | "middle", midway?: () => Promise<void>) => {
       // On open map left of the middle, clear of the bars: the isometric stage's own box, not the hidden Top-down one's.
       const board = await isoCamera(page);
@@ -2148,7 +2196,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
       };
       for (let i = 1; i <= 37; i++) await move(at(i));
       if (midway) await midway();
-      for (let i = 36; i >= 0; i--) await move(at(i));
+      for (let i = 36; i >= 10; i--) await move(at(i));
       if (cdp) {
         await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
         await cdp.detach();
@@ -2199,8 +2247,8 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
         const after = await kept(page);
         const scrolls = after!.scrolls - before!.scrolls;
         const commits = after!.boardCommits - before!.boardCommits;
-        assert.ok(scrolls >= 40, `${shape}, ${who}: ${scrolls} of 74 moves scrolled`);
-        assert.ok(commits <= 20, `${shape}, ${who}: the board rendered ${commits} times in 74 moves, once a cull step and once at the end`);
+        assert.ok(scrolls >= 34, `${shape}, ${who}: ${scrolls} of 64 moves scrolled`);
+        assert.ok(commits <= 20, `${shape}, ${who}: the board rendered ${commits} times in 64 moves, once a cull step and once at the end`);
         await compare(page, `${shape}, ${who}, after a pan across cull steps`);
       }
 
@@ -2275,6 +2323,163 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await mouse2.close();
     assert.deepEqual(consoles.phone.errors, [], "Pat's 1.5 phone drew without an error");
     assert.deepEqual(consoles.keys.errors, [], "the DM's mouse page drew without an error");
+  });
+
+  test("HXPERF2-2. the height readout on its cell through a pinch at 100% and 130%, a pin label kept in view at the screen's edge through a pan, and no pill of the hidden isometric tree rendered by a Top-down pan", async () => {
+    const sceneId = randomUUID();
+    const pinId = randomUUID();
+    const bounds = { w: 30, h: 30 };
+    await ops.send({ t: "scene.create", scene: { id: sceneId, name: "HXPERF2 chrome", bounds, fogEnabled: false, gridShape: "hexRows" } });
+    await ops.send({ t: "scene.update", sceneId, patch: { blockMovement: false, defaultView: { x: 12, y: 12, zoom: 40 } } });
+    const raised: Record<number, string[]> = { 5: [], 10: [], 15: [] };
+    for (let y = 0; y < bounds.h; y++) for (let x = 0; x < bounds.w; x++) if (hexInScene({ shape: "hex", orient: "rows" }, bounds, { col: x, row: y })) raised[[5, 10, 15][(x + 2 * y) % 3]!]!.push(`${x},${y}`);
+    for (const [height, cells] of Object.entries(raised)) await ops.send({ t: "build.height", sceneId, cells, height: Number(height) });
+    await ops.send({ t: "pin.put", pin: { id: pinId, sceneId, x: 6.5, y: 12.5, color: "#f7df00", label: "Edge pin", visibility: "all" } });
+    const dmState = await dmContext.storageState();
+    const touch = await browser.newContext({ storageState: dmState, viewport: { width: 1280, height: 800 }, hasTouch: true });
+    await touch.addInitScript(HOOK_FLAG);
+    const page = await touch.newPage();
+    consoles.keys.attach(page);
+    const hook = <T,>(fn: string, arg?: unknown) => page.evaluate(([f, a]) => (globalThis as unknown as { __rvttIsoHook: Record<string, (a?: unknown) => unknown> }).__rvttIsoHook[f]!(a) as T, [fn, arg] as const);
+    const frames = (n: number) =>
+      page.evaluate(
+        (k) =>
+          new Promise<void>((r) => {
+            const raf = (globalThis as unknown as { requestAnimationFrame(f: () => void): number }).requestAnimationFrame;
+            let i = 0;
+            const f = () => (++i >= k ? r() : void raf(f));
+            raf(f);
+          }),
+        n,
+      );
+    const open = async (scale: number) => {
+      await page.goto(dm.url());
+      await page.evaluate((v) => localStorage.setItem("rvtt.uiScale", String(v)), scale);
+      await reopenRoom(page);
+      await page.getByRole("status", { name: "Connected" }).first().waitFor();
+      // Panels hidden by the open before come back through the tool bar's Panels button.
+      const panels = page.getByRole("button", { name: "Panels", exact: true });
+      if (!(await page.getByRole("tablist", { name: "Panels" }).isVisible()) && (await panels.isVisible())) await panels.click();
+      await openSideTab(page, "Scenes");
+      await page.getByRole("tabpanel", { name: "Scenes" }).getByRole("button", { name: /^HXPERF2 chrome/ }).first().click();
+      const hide = page.getByRole("button", { name: "Hide panels" });
+      if (await hide.isVisible()) await hide.click();
+      await isoOn(page, 0);
+      await frames(6);
+    };
+    /** A pan by Space with the left button: `moves` moves of (dx, dy) px, each sampled after two frames. */
+    const spacePan = async <T,>(from: { x: number; y: number }, moves: number, dx: number, dy: number, sample: () => Promise<T>): Promise<T[]> => {
+      const out: T[] = [];
+      await page.keyboard.down("Space");
+      await page.mouse.move(from.x, from.y);
+      await page.mouse.down();
+      for (let i = 1; i <= moves; i++) {
+        await page.mouse.move(from.x + i * dx, from.y + i * dy);
+        await frames(2);
+        out.push(await sample());
+      }
+      await page.mouse.up();
+      await page.keyboard.up("Space");
+      return out;
+    };
+    type Counts = { pillCommits: number; boardCommits: number };
+
+    // The hidden tree: a pan in Isometric renders the pills' board view, so the count is live. Back in Top-down the same pan renders none of it (review HXPERF2B-ASTRA-01).
+    await open(1);
+    const board = await isoCamera(page);
+    const from = { x: board.left + 500, y: board.top + 420 };
+    const a = (await hook<Counts>("kept"))!;
+    await spacePan(from, 8, 9, 4, async () => null);
+    const b = (await hook<Counts>("kept"))!;
+    assert.ok(b.pillCommits > a.pillCommits, `a pan in Isometric rendered the pills' board view ${b.pillCommits - a.pillCommits} times`);
+    await hook("pick", "topDown");
+    await untilShown(page, "top-down");
+    await frames(10);
+    const c = (await hook<Counts>("kept"))!;
+    await spacePan(from, 8, 9, 4, async () => null);
+    await frames(4);
+    const d = (await hook<Counts>("kept"))!;
+    assert.equal(d.pillCommits - c.pillCommits, 0, "a Top-down pan rendered the hidden isometric tree's pills");
+
+    // The pin's label at the screen's edge (design 5.8): while its pin is still on the screen but a label centered on it would cross the edge, the label slides and stays on the screen. Past that it follows its pin off, its pointer kept on it (measure/pillPlace.ts slideAlong).
+    await isoOn(page, 0);
+    await frames(6);
+    const pinAt = async () => {
+      const label = await page.evaluate(() => {
+        type Node = { text?(): string; getClientRect(): { x: number; y: number; width: number; height: number }; getStage(): { container(): { getBoundingClientRect(): { left: number; top: number } } } | null; isVisible(): boolean };
+        const konva = (globalThis as unknown as { Konva: { stages: { width(): number; visible(): boolean; find(s: string): Node[] }[] } }).Konva;
+        for (const st of konva.stages.filter((s) => s.width() > 0 && s.visible())) {
+          const t = st.find("Text").find((n) => n.text?.() === "Edge pin" && n.isVisible());
+          if (!t) continue;
+          const r = t.getClientRect();
+          const box = t.getStage()!.container().getBoundingClientRect();
+          return { x: r.x + box.left, w: r.width };
+        }
+        return null;
+      });
+      // The pin's hex stands 5 ft up, a cell.
+      const tip = await isoPoint(page, { x: 6.5, y: 12.5 }, 1);
+      return { label, tip };
+    };
+    // Back from Top-down, the pills mount again once the isometric tree shows.
+    await waitFor("the pin's label shows", async () => ((await pinAt()).label ? true : null));
+    const startPin = await pinAt();
+    const left = (await isoCamera(page)).left;
+    const samples = await spacePan({ x: board.left + 900, y: board.top + 400 }, 90, -8, 0, pinAt);
+    // Its pointer keeps a corner (6 px) inside the body, which keeps 4 px inside the screen: the label can stay whole while its pin stands 10 px in.
+    const edge = samples.filter((p) => p.label && p.tip.x >= left + 10 && p.tip.x - p.label.w / 2 < left);
+    assert.ok(edge.length >= 2, `the pin stood by the screen's left edge in ${edge.length} moves, from ${startPin.tip.x.toFixed(0)} to ${samples.at(-1)!.tip.x.toFixed(0)}`);
+    for (const p of edge) assert.ok(p.label!.x >= left - 1, `the label lies at ${p.label!.x.toFixed(1)}, past the screen's left edge at ${left}, with its pin on the screen at ${p.tip.x.toFixed(1)}`);
+
+    // The readout through a pinch, at each interface size: it stands on its cell under the camera the canvas last drew.
+    for (const scale of [1, 1.3]) {
+      await open(scale);
+      const at = await isoCamera(page);
+      await page.touchscreen.tap(at.left + 600, at.top + 300);
+      await page.locator("[data-rvtt-height-pill]").first().waitFor();
+      const read = () =>
+        page.evaluate(() => {
+          const h = (globalThis as unknown as { __rvttIsoHook: { drawn(): { x: number; y: number; scale: number } | null } }).__rvttIsoHook;
+          const doc = (globalThis as unknown as { document: { querySelector(s: string): { getBoundingClientRect(): { x: number; y: number } } | null } }).document;
+          const r = doc.querySelector("[data-rvtt-height-pill]")?.getBoundingClientRect();
+          return { drawn: h.drawn(), pill: r ? { x: r.x, y: r.y } : null };
+        });
+      const cdp = await touch.newCDPSession(page);
+      const mid = { x: at.left + 640, y: at.top + 380 };
+      const points = (spread: number) => [
+        { x: mid.x - spread, y: mid.y, id: 0 },
+        { x: mid.x + spread, y: mid.y, id: 1 },
+      ];
+      const got = [await read()];
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: points(60) });
+      await frames(2);
+      for (let i = 1; i <= 10; i++) {
+        await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: points(60 + i * 6) });
+        await frames(2);
+        got.push(await read());
+      }
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await frames(4);
+      got.push(await read());
+      await cdp.detach();
+      const ok = got.filter((g): g is { drawn: { x: number; y: number; scale: number }; pill: { x: number; y: number } } => !!g.drawn && !!g.pill);
+      assert.equal(ok.length, got.length, "the readout and the drawn camera read at every sample");
+      const s0 = ok[0]!.drawn.scale;
+      const s1 = ok.at(-1)!.drawn.scale;
+      assert.ok(s1 > s0 * 1.2, `the pinch zoomed from ${s0} to ${s1}`);
+      // On its cell, pill minus the camera's translation is linear in the scale (the cell's view point times the scale, less the pill's own offset): fit it from the first and last samples, and every sample lies on the line.
+      let worst = 0;
+      for (const axis of ["x", "y"] as const) {
+        const first = ok[0]!;
+        const last = ok.at(-1)!;
+        const slope = (last.pill[axis] - last.drawn[axis] - (first.pill[axis] - first.drawn[axis])) / (s1 - s0);
+        for (const g of ok) worst = Math.max(worst, Math.abs(g.pill[axis] - g.drawn[axis] - (first.pill[axis] - first.drawn[axis]) - slope * (g.drawn.scale - s0)));
+      }
+      assert.ok(worst <= 1, `at ${scale * 100}%, the readout strayed ${worst.toFixed(2)} px from its cell through the pinch`);
+      await page.keyboard.press("Escape");
+    }
+    await page.evaluate(() => localStorage.removeItem("rvtt.uiScale"));
+    await touch.close();
   });
 
   test("ISO-12. no page logged an error", () => {
