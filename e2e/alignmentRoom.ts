@@ -6289,16 +6289,29 @@ export function undoScopeAlignmentTests(names: readonly string[]): void {
 /** The short landscape screens the design checks at 130% alone, for controls behind alerts or toasts (docs/design-v1-undo-scope.md 8). */
 const SAVE_LANDSCAPE = new Set(["844x390", "480x320"]);
 
-/** The frames a page's room socket sends that a group save root holds back, by page: one route each, set before the page opens its socket. */
-const pageHolds = new WeakMap<Page, { hold: RegExp | null; held: (() => void)[] }>();
+/**
+ * A group save root's hold on its page's room socket: the frames the page
+ * sends that match `hold` wait in `held`, and while `offline` the socket
+ * is closed and every new one is refused, as a dropped connection is. A
+ * routed socket never drops by setOffline, so the root drops it here.
+ */
+type SocketHold = { hold: RegExp | null; held: (() => void)[]; offline: boolean; open: { page: WebSocketRoute; server: WebSocketRoute } | null };
 
-async function heldFrames(page: Page): Promise<{ hold: RegExp | null; held: (() => void)[] }> {
+/** By page: one route each, set before the page opens its socket. */
+const pageHolds = new WeakMap<Page, SocketHold>();
+
+async function heldFrames(page: Page): Promise<SocketHold> {
   const frames = pageHolds.get(page);
   if (frames) return frames;
-  const made: { hold: RegExp | null; held: (() => void)[] } = { hold: null, held: [] };
+  const made: SocketHold = { hold: null, held: [], offline: false, open: null };
   pageHolds.set(page, made);
   await page.routeWebSocket(/\/ws\?room=/, (socket) => {
+    if (made.offline) {
+      void socket.close();
+      return;
+    }
     const upstream = socket.connectToServer();
+    made.open = { page: socket, server: upstream };
     socket.onMessage((message) => {
       if (made.hold?.test(String(message))) made.held.push(() => upstream.send(message));
       else upstream.send(message);
@@ -6306,6 +6319,9 @@ async function heldFrames(page: Page): Promise<{ hold: RegExp | null; held: (() 
   });
   return made;
 }
+
+/** Saves sweeps run back to back on one DM session: the first of them starts a fresh one, so the reconnect and reload each size spends fit its budget. */
+let saveSweepSession = false;
 
 /**
  * The group save page's lifecycle states (docs/design-v1-undo-scope.md 5
@@ -6323,16 +6339,33 @@ export function undoSaveAlignmentTests(names: readonly string[]): void {
     const size = [...SIZES, COMBAT_SMALL].find((candidate) => candidate.name === name);
     assert.ok(size, `unknown group save alignment size ${name}`);
     for (const scale of SAVE_LANDSCAPE.has(name) ? [1.3] : SCALES) {
-      test(`undo-b-alignment-${name}-${scale}: the group save page checking, reopened, relocked, asking again, refused and unavailable within ${LIMIT_PX} px, with its controls in reach`, async () => {
+      test(`undo-b-alignment-${name}-${scale}: the group save page offline, checking, reopened, relocked, asking again, refused, stranded and unavailable within ${LIMIT_PX} px, with its controls in reach`, async () => {
         const at = `${name}-${Math.round(scale * 100)}`;
         const sweep = new Sweep(`undo-b-${at}`);
-        // The DM's session stays, unlike the Undo history sweep's: a new session per size spent the address's 40 snapshots a minute
-        // across the two sweeps run back to back. Undo and Redo come from the op socket, another of the DM's devices.
+        // One DM session for every size, unlike the Undo history sweep's: a new session per size spent the address's 40 snapshots
+        // a minute across the two sweeps run back to back. Undo and Redo come from the op socket, another of the DM's devices.
+        if (!saveSweepSession) {
+          saveSweepSession = true;
+          await newDmSession();
+        }
         const page = await dmPageFor(size);
         const frames = await heldFrames(page);
         const release = () => {
           frames.hold = null;
           for (const deliver of frames.held.splice(0)) deliver();
+        };
+        const goOffline = async () => {
+          consoles.dm.expectSocketFailures = true;
+          frames.offline = true;
+          const open = frames.open;
+          frames.open = null;
+          await open?.page.close();
+          await open?.server.close();
+        };
+        const goOnline = async () => {
+          frames.offline = false;
+          await page.getByRole("status", { name: "Connected" }).first().waitFor({ timeout: 30_000 });
+          consoles.dm.expectSocketFailures = false;
         };
         await openAt(page, size, scale);
         await settleTraps();
@@ -6377,6 +6410,12 @@ export function undoSaveAlignmentTests(names: readonly string[]): void {
           // Thorn has no stat block, so his save is asked of Pat, who answers by his op socket.
           await host.getByRole("button", { name: "Ask 1 player", exact: true }).click();
           const first = await waitFor("the save asked of Pat", () => thornAsk([]));
+
+          // The connection drops while Pat's answer is awaited: Thorn's row keeps its bonus field and roll, which wait with their reason.
+          await goOffline();
+          await host.locator('button[title="Rolling needs a connection."]').first().waitFor();
+          await state(host, "undo-b-offline", [/^Roll d20$/]);
+          await goOnline();
           await answer(first.id, 5);
           await host.getByText("Asked: typed 5", { exact: true }).waitFor();
           if ((await host.getByRole("group", { name: "Outcome" }).count()) === 0) await host.getByRole("button", { name: "Edit", exact: true }).click();
@@ -6419,6 +6458,22 @@ export function undoSaveAlignmentTests(names: readonly string[]): void {
           await host.getByText(/The roll request changed\. Check its answers and ask again\.$/).waitFor();
           await state(host, "undo-b-refusal", ["Ask again", "Roll saves again"]);
 
+          // Apply again, held back, then a reload before the server hears of it: the queue lets go of it with no receipt, so the
+          // page offers Start over and Discard rather than checking for good (D-261031-141).
+          frames.hold = /"t":"actor\.outcome"/;
+          await host.getByRole("button", { name: /^Apply: / }).click();
+          await lifecycle("checking").waitFor();
+          frames.hold = null;
+          frames.held.splice(0);
+          await openAt(page, size, scale);
+          const dice = await openDice(page);
+          await dice.locator("[data-open-group-save]").getByRole("button", { name: "Open", exact: true }).click();
+          await lifecycle("unavailable").getByText(OUTCOME_UNAVAILABLE, { exact: true }).waitFor();
+          await state(host, "undo-b-stranded", ["Start over", "Discard"]);
+          // Its way out, which the shot from the page's top leaves below the fold on a phone. Centered, as the scroller's foot is under Apply.
+          await host.getByRole("button", { name: "Discard", exact: true }).last().evaluate((el) => el.scrollIntoView({ block: "center" }));
+          await shots.take(page, `undo-b-stranded-actions-${at}`);
+
           // Another copy of the page applies in its place, so this one cannot be checked.
           const ledger = (dmSocket.state as { saveOutcomes?: Record<string, { state: string; revision: number; seq: number }> } | null)?.saveOutcomes ?? {};
           const [id, record] = Object.entries(ledger).filter(([, r]) => r.state === "undone").sort((a, b) => b[1].seq - a[1].seq)[0]!;
@@ -6428,6 +6483,7 @@ export function undoSaveAlignmentTests(names: readonly string[]): void {
           assert.deepEqual(sweep.lines, [], `group save page alignment at ${sweep.at}`);
         } finally {
           release();
+          if (frames.offline) await goOnline();
           // The page goes, then its requests and the springing, so the next size starts from the same room.
           const host = page.locator('dialog[data-rvtt-sheet][aria-label="Dice"]').or(page.getByRole("tabpanel", { name: /Dice/ }));
           const discard = host.getByRole("button", { name: "Discard", exact: true });
