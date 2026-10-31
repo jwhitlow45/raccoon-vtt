@@ -590,7 +590,9 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
 
   test("undo-scope-ready-recharge: one outcome restores both targets, conditions, Resistance and its newly consumed recharge", async () => {
     const use = { kind: "ability", key: BREATH, name: "Fire Breath", limit: "recharge", max: 1, min: 5, ifReady: true };
-    await ops.send({ t: "actor.use", target: { tokenId: run.dragon }, use, back: true });
+    // A give back never carries the Dice panel's ifReady mark (protocol.ts actor.use).
+    const { ifReady: _ready, ...given } = use;
+    await ops.send({ t: "actor.use", target: { tokenId: run.dragon }, use: given, back: true });
     await waitFor("Fire Breath ready before Apply", () => !dragon()?.uses?.[BREATH] || null);
     const beforeDragon = structuredClone(dragon());
     const beforeGoblin = structuredClone(actorOf(deskSocket.state, run.goblin));

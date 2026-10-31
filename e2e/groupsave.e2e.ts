@@ -485,10 +485,12 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     const historical = structuredClone(diceLines(dmSocket.state?.log));
     const sent = dmSocket.sent.length;
     const dc = sheet.getByLabel("DC", { exact: true });
+    // Bree's kept answer is a result line, not a field (step 3), so the new DC judges that line again.
+    const breeAnswer = sheet.locator("[data-roll-result-base]", { hasText: `Asked: typed ${BREE_TOTAL}` }).locator("xpath=../..");
     await dc.fill("1");
     await dc.press("Enter");
+    await breeAnswer.getByText("Pass vs DC 1").waitFor();
     await sheet.getByRole("radiogroup", { name: "Bree: fail, pass or skip" }).getByRole("radio", { name: "Fail", exact: true }).check({ force: true });
-    assert.equal(await sheet.getByLabel("Bree's total", { exact: true }).inputValue(), String(BREE_TOTAL));
     assert.deepEqual(diceLines(dmSocket.state?.log), historical, "editing a DC draws no dice and rewrites no historical DC");
     assert.ok(dmSocket.sent.slice(sent).every((frame) => JSON.parse(frame).t !== "op"), "local edits send no commands");
     await dm.keyboard.press("Control+Shift+z");
@@ -498,7 +500,7 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     await dm.keyboard.press("Control+z");
     await sheet.getByText(OUTCOME_UNDONE, { exact: true }).waitFor();
     await sheet.getByRole("button", { name: "Resume your edits", exact: true }).tap();
-    assert.equal(await dc.inputValue(), "1");
+    await waitFor("the kept DC back", async () => ((await dc.inputValue()) === "1" ? true : null));
     await dc.fill(String(DC));
     await dc.press("Enter");
     await shots.take(dm, "undo-scope-group-save-reopened-130");
@@ -521,8 +523,8 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     await dm.getByRole("status", { name: "Connected" }).first().waitFor();
     await openSaveDice(dm);
     await sheet.waitFor();
-    const open = sheet.getByRole("button", { name: "Open", exact: true }).first();
-    if (await open.isVisible()) await open.tap();
+    // A reload opens the Dice panel on its first page, whose notice of the kept group save opens it (Undo pops no panel open).
+    await sheet.locator("[data-open-group-save]").getByRole("button", { name: "Open", exact: true }).tap();
     await sheet.getByText(OUTCOME_UNDONE, { exact: true }).waitFor();
     assert.equal(saveOutcomes(dmSocket)[applied[0]]?.state, "undone");
     const sent = dmSocket.sent.length;
@@ -574,6 +576,8 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     await sheet.getByRole("button", { name: "Discard", exact: true }).tap();
     await sheet.getByText(/^Discard the /).waitFor();
     await sheet.getByRole("button", { name: "Discard", exact: true }).tap();
+    // Step 6 starts by letting go of the group selected since step 3, which the reload above already dropped, so the goblins are selected again.
+    await selectGoblins([0, 1, 2]);
   });
 
   test("6. the wyrmling's Fire Breath Group save opens on no creature, and the goblins selected after it become its rows (W7B-P-1)", async () => {
@@ -671,8 +675,8 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     await dm.getByRole("status", { name: "Connected" }).first().waitFor();
     await openSaveDice(dm);
     const sheet = diceSheet(dm);
-    const open = sheet.getByRole("button", { name: "Open", exact: true }).first();
-    if (await open.isVisible()) await open.tap();
+    // A reload opens the Dice panel on its first page, whose notice of the kept group save opens it (Undo pops no panel open).
+    await sheet.locator("[data-open-group-save]").getByRole("button", { name: "Open", exact: true }).tap();
     await sheet.getByText(OUTCOME_UNAVAILABLE, { exact: true }).waitFor();
     assert.equal(await sheet.getByRole("button", { name: /^Apply: / }).count(), 0);
     await shots.take(dm, "undo-scope-missing-checkpoint-locked");
@@ -850,7 +854,7 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     if ((await sheet.getByRole("group", { name: "Outcome" }).count()) === 0) await sheet.getByRole("button", { name: "Edit", exact: true }).tap();
     await sheet.getByLabel("Damage", { exact: true }).fill("2 fire");
     await sheet.getByLabel("Damage", { exact: true }).blur();
-    await sheet.getByLabel("On a pass", { exact: true }).selectOption("half");
+    await sheet.getByRole("radiogroup", { name: "On a pass" }).getByRole("radio", { name: "Half", exact: true }).check({ force: true });
     const hp = run.goblins.slice(0, 2).map((goblin) => goblinHp(goblin.id));
     const existing = new Set(Object.keys(saveOutcomes(dmSocket)));
     await dm.evaluate(() => {
@@ -862,7 +866,8 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
       };
     });
     try {
-      await sheet.getByRole("button", { name: /^Apply: / }).tap();
+      // Half of 2 fire, resisted, is 0 for each. Apply keeps its words for a plan that changes no HP and still sends the tracked outcome.
+      await sheet.getByRole("button", { name: "Nothing to apply", exact: true }).tap();
       await sheet.getByText("This save can reopen here until this tab closes.", { exact: true }).waitFor();
       const current = await waitFor("tracked zero-change Apply", () => Object.entries(saveOutcomes(dmSocket)).sort((a, b) => b[1].seq - a[1].seq).find(([id, value]) => !existing.has(id) && value.state === "applied" && value.revision === 1));
       assert.deepEqual(run.goblins.slice(0, 2).map((goblin) => goblinHp(goblin.id)), hp);
