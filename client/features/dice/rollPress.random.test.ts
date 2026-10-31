@@ -41,3 +41,44 @@ test("seeded gesture sequences: single opening, no cancelled hold or release sel
   }
   assert.equal(coverage.size, 7);
 });
+
+test("seeded scroll cancellation preserves mouse and completed touch taps, consumes active touch holds and clears timers", () => {
+  const coverage = new Set<string>();
+  for (let seed = 121; seed <= 200; seed++) {
+    const random = rng(seed);
+    for (let sequence = 0; sequence < 80; sequence++) {
+      let now = 0, nextId = 0, opens = 0;
+      const timers = new Map<number, { at: number; run(): void }>();
+      const press = new RollPress({ open: () => false, show: () => { opens++; }, close() {}, hint() {}, clock: {
+        set(run, ms) { const id = ++nextId; timers.set(id, { at: now + ms, run }); return id; }, clear(id) { timers.delete(id as number); },
+      } });
+      const advance = (ms: number) => {
+        const end = now + ms;
+        while (true) {
+          const next = [...timers].sort((a, b) => a[1].at - b[1].at)[0];
+          if (!next || next[1].at > end) break;
+          now = next[1].at; timers.delete(next[0]); next[1].run();
+        }
+        now = end;
+      };
+      const touch = int(random, 0, 1) === 1;
+      const elapsed = int(random, 0, 650);
+      const released = int(random, 0, 1) === 1;
+      press.down({ id: 1, x: 0, y: 0 }, touch ? "touch" : "mouse");
+      advance(elapsed);
+      const fired = touch && elapsed >= 500;
+      if (released) press.up(1);
+      const before = opens;
+      for (let i = 0; i < int(random, 1, 4); i++) { press.cancel(); advance(int(random, 0, 1000)); }
+      const ownsClick = touch && (!released || fired);
+      coverage.add(`${touch}:${released}:${fired}`);
+      assert.equal(opens, before, `no late hold after cancellation, seed ${seed}`);
+      assert.equal(press.click(1), !ownsClick, `only active or fired touches own their click, seed ${seed}`);
+      assert.equal(press.click(1), true, "one cancelled gesture cannot consume two clicks");
+      assert.equal(timers.size, 0, "no cancelled timer survives");
+      assert.equal(press.activeId, null);
+      press.dispose();
+    }
+  }
+  assert.equal(coverage.size, 6);
+});

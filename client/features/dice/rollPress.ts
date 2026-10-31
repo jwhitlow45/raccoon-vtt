@@ -72,7 +72,7 @@ export class RollPress {
     this.env.releaseTouch?.();
   }
   cancel(): void {
-    if (this.point || this.pending) this.blockedClick = true;
+    if (this.eligible || this.consumed) this.blockedClick = true;
     this.clear();
     this.eligible = false;
     this.point = null;

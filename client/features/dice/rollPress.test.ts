@@ -56,3 +56,20 @@ test("a reader click after a held release clears suppression without a pointerdo
   assert.equal(p.press.click(0, false), true);
   assert.equal(p.press.click(1, false), true);
 });
+
+test("a containing scroll cancels a touch hold without swallowing mouse or released taps", () => {
+  const mouse = probe(); mouse.press.down(point(), "mouse"); mouse.press.cancel();
+  assert.equal(mouse.press.click(1), true, "scroll anchoring during a mouse press cannot swallow its click");
+  const tap = probe(); tap.press.down(point(), "touch"); tap.tick(100); tap.press.up(1); tap.press.cancel();
+  assert.equal(tap.press.click(1), true, "a scroll after touchup cannot turn a short tap into a held press");
+  for (const elapsed of [0, 199, 200, 499, 500]) {
+    const touch = probe(); touch.press.down(point(), "touch"); touch.tick(elapsed); touch.press.cancel(); touch.tick(1000);
+    assert.equal(touch.opens, elapsed === 500 ? 1 : 0);
+    assert.equal(touch.press.click(1), false, "an eligible or fired touch press consumes its trailing click");
+    assert.equal(touch.press.click(1, false), true, "only that touch click is consumed");
+    assert.equal(touch.timers.size, 0);
+    assert.equal(touch.hint, false);
+  }
+  const close = probe(); close.press.context("key"); close.press.down(point(), "mouse"); close.press.cancel();
+  assert.equal(close.press.click(1), false, "cancellation does not erase source dismissal suppression");
+});
