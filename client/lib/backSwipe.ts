@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 import { flushSync } from "react-dom";
 import { effectiveZoom } from "../features/device/layout.ts";
 import { useUiScale } from "../features/device/settings.ts";
@@ -39,13 +39,15 @@ export const SIDEWAYS_ATTR = "data-swipe-sideways";
 export const BACK_SWIPE_ATTR = "data-back-swipe";
 /** On the surface during the slide after a release: the position it ends at, the page's width for a back and 0 for a spring back. */
 export const BACK_TO_ATTR = "data-back-swipe-to";
-/** The page is dimmed by at most this much as it reaches the surface's width, so it reads as leaving. */
-const FADE = 0.4;
+/** Marks the dimming over what Back leads to, drawn under the moving body (components/Sheet.tsx). */
+export const UNDER_DIM_ATTR = "data-back-under-dim";
+/** How much of the scrim dims what lies under the body as the swipe starts. It clears as the body leaves, so the slide out ends on the page Back shows. */
+export const UNDER_DIM = 0.5;
 
 // ------------------------------------------------------------ one touch
 
 export type BackStart = {
-  /** Something under the finger takes sideways drags itself (ownsSideways), or the touch began in the system's edge zone. */
+  /** Something under the finger takes sideways drags itself (ownsSideways), text is selected in the panel, or the touch began in the system's edge zone. */
   owned: boolean;
   /** Fingers on the screen as it started, this one included. */
   fingers: number;
@@ -223,6 +225,8 @@ export type BackHost = {
   reducedMotion(): boolean;
   /** Whether the panel holds unsaved input now. */
   unsaved(): boolean;
+  /** Draws what Back leads to under the page, dimmed, or takes it away. Called on each change only. */
+  under(on: boolean): void;
 };
 
 export class BackSession {
@@ -231,6 +235,7 @@ export class BackSession {
   private begun: BackStart | null = null;
   private watching = false;
   private placed = false;
+  private underShown = false;
   /** The slide under way: its cancel, and whether it ends in a back. */
   private slide: { stop: () => void; back: boolean } | null = null;
 
@@ -248,6 +253,8 @@ export class BackSession {
    * Returns whether the touch is followed.
    */
   begin(s: BackStart): boolean {
+    // A touch whose end never came, as when what it pressed left the page mid-touch, ends in nothing, so it never holds the swipe from every touch after it.
+    if (this.touch.phase !== "idle") this.cancel();
     if (this.slide) {
       const { back } = this.slide;
       this.finish();
@@ -277,6 +284,11 @@ export class BackSession {
     if (step.press) {
       this.host.takePress();
       x = this.touch.claimed(this.host.unsaved());
+    }
+    // Drawn first, so the move's place finds its dimming.
+    if (step.press && !this.underShown) {
+      this.underShown = true;
+      this.host.under(true);
     }
     this.placed = true;
     this.host.place(x, false);
@@ -342,18 +354,29 @@ export class BackSession {
   }
 
   private arrive(back: boolean): void {
-    // A page its owner kept springs back, as the sheet does when its close is kept.
-    if (back && !this.host.back()) {
-      this.settle(false);
-      return;
+    if (back) {
+      // Taken away in the same task as the back, before any paint, so the page Back shows takes the place of its picture with nothing between.
+      this.hideUnder();
+      // A page its owner kept springs back, as the sheet does when its close is kept.
+      if (!this.host.back()) {
+        this.settle(false);
+        return;
+      }
     }
     this.rest();
   }
 
   private rest(): void {
+    this.hideUnder();
     if (!this.placed) return;
     this.placed = false;
     this.host.place(null, false);
+  }
+
+  private hideUnder(): void {
+    if (!this.underShown) return;
+    this.underShown = false;
+    this.host.under(false);
   }
 }
 
@@ -406,6 +429,17 @@ export function inEdgeZone(x: number): boolean {
   return x < EDGE_ZONE_PX;
 }
 
+/**
+ * Whether the followed touch is still on the screen, among a new touch's
+ * `touches`. One that is not ended without its end reaching the surface,
+ * as when what it pressed left the page mid-touch, and is let go.
+ */
+export function stillFollowed(followed: { id: number } | null, touches: ArrayLike<{ identifier: number }>): boolean {
+  if (!followed) return false;
+  for (let i = 0; i < touches.length; i++) if (touches[i]!.identifier === followed.id) return true;
+  return false;
+}
+
 // ------------------------------------------------------------ the hook
 
 export type BackSwipeOptions = {
@@ -418,6 +452,8 @@ export type BackSwipeOptions = {
   /** What it shows: a change ends a drag at once and drops a slide's back. */
   item: string;
   drafts?: DraftRegistry | null;
+  /** Draws what Back leads to under the body, dimmed by an element marked UNDER_DIM_ATTR, or takes it away. */
+  onUnder?(on: boolean): void;
 };
 
 const EASE = "cubic-bezier(0, 0, 0.2, 1)";
@@ -436,6 +472,8 @@ export function useBackSwipe(surface: RefObject<HTMLElement | null>, options: Ba
   const session = useRef<BackSession | null>(null);
   /** The pointer of the claimed touch, whose later events the window stops. */
   const claimed = useRef<number | null>(null);
+  /** Set while an effect stops the session: React renders there itself, so the picture under the body changes without flushSync. */
+  const inEffect = useRef(false);
 
   // On the window from the mount, so it runs before every listener below the window.
   useEffect(() => {
@@ -473,11 +511,9 @@ export function useBackSwipe(surface: RefObject<HTMLElement | null>, options: Ba
       place(x, ease) {
         const page = latest.current.options.page.current;
         if (!page) return;
+        const dim = el.querySelector<HTMLElement>(`[${UNDER_DIM_ATTR}]`);
         if (x === null) {
-          page.style.transform = "";
-          page.style.opacity = "";
-          page.style.transition = "";
-          page.style.willChange = "";
+          for (const name of ["transform", "transition", "will-change", "background", "box-shadow"]) page.style.removeProperty(name);
           el.removeAttribute(BACK_SWIPE_ATTR);
           el.removeAttribute(BACK_TO_ATTR);
           return;
@@ -488,10 +524,17 @@ export function useBackSwipe(surface: RefObject<HTMLElement | null>, options: Ba
           void page.offsetHeight;
           el.setAttribute(BACK_TO_ATTR, String(Math.round(x)));
         }
-        page.style.transition = ease ? `transform ${SLIDE_MS}ms ${EASE}, opacity ${SLIDE_MS}ms ${EASE}` : "none";
+        const transition = ease ? `${SLIDE_MS}ms ${EASE}` : null;
+        page.style.transition = transition ? `transform ${transition}` : "none";
         page.style.willChange = "transform";
+        // Opaque, with a soft edge on its left, so it reads as a page lifted off the one under it.
+        page.style.background = theme.color.surface;
+        page.style.boxShadow = theme.shadow.slide;
         page.style.transform = `translateX(${x / zoom}px)`;
-        page.style.opacity = String(1 - FADE * Math.min(1, width > 0 ? x / width : 0));
+        if (dim) {
+          dim.style.transition = transition ? `opacity ${transition}` : "none";
+          dim.style.opacity = String(UNDER_DIM * (1 - Math.min(1, width > 0 ? x / width : 0)));
+        }
       },
       watch(on) {
         if (on) {
@@ -528,6 +571,13 @@ export function useBackSwipe(surface: RefObject<HTMLElement | null>, options: Ba
         const active = document.activeElement;
         return active !== null && el.contains(active) && values.changed(active as unknown as FieldNode);
       },
+      under(on) {
+        const show = latest.current.options.onUnder;
+        if (!show) return;
+        // Rendered at once: drawn before the next move paints, and gone in the same task as the back that replaces it.
+        if (inEffect.current) show(on);
+        else flushSync(() => show(on));
+      },
     };
     const swipe = new BackSession(host);
     session.current = swipe;
@@ -545,7 +595,8 @@ export function useBackSwipe(surface: RefObject<HTMLElement | null>, options: Ba
 
     const onStart = (e: TouchEvent) => {
       const t = e.changedTouches[0];
-      if (!t || followed) return;
+      if (!t || stillFollowed(followed, e.touches)) return;
+      followed = null;
       // The sheet's own swipe has it, or its slide runs.
       if (el.hasAttribute(SWIPING_ATTR)) return;
       const target = e.target instanceof Element ? e.target : null;
@@ -598,7 +649,9 @@ export function useBackSwipe(surface: RefObject<HTMLElement | null>, options: Ba
     el.addEventListener("gotpointercapture", onCapture, true);
     el.addEventListener("focusin", onFocusIn);
     return () => {
+      inEffect.current = true;
       swipe.dispose();
+      inEffect.current = false;
       el.removeEventListener("touchstart", onStart);
       el.removeEventListener("touchmove", onMove);
       el.removeEventListener("touchend", onEnd);
@@ -618,8 +671,70 @@ export function useBackSwipe(surface: RefObject<HTMLElement | null>, options: Ba
   useLayoutEffect(() => {
     if (shownItem.current === item) return;
     shownItem.current = item;
+    inEffect.current = true;
     session.current?.stop();
+    inEffect.current = false;
   }, [item]);
+}
+
+// ------------------------------------------------------------ what lies under
+
+/** Controls whose press may open a page inside the panel. */
+const PRESSABLE = "button, a[href], [role='button'], [role='link'], [role='menuitem']";
+/** A page that comes this soon after a press keeps the picture that press took. */
+const PICTURE_MS = 1000;
+
+/** A copy of a page's content as a press found it, and how far its body was scrolled. */
+export type PagePicture = { node: DocumentFragment; top: number };
+
+/**
+ * The pictures under a panel's pages inside it (subpages), for a swipe
+ * back to show what Back leads to. Entering a page inside a panel replaces
+ * the page it was opened from, so a press on a control in the body copies
+ * the page as it stands, in the capture phase, before the press's own
+ * handler changes it. A page that comes within PICTURE_MS keeps that copy
+ * as what lies under it, until the panel is back on its first page. A page
+ * opened from outside the panel has none. Returns the picture under the
+ * page shown now.
+ */
+export function usePagePictures(body: RefObject<HTMLElement | null>, page: string | null): () => PagePicture | null {
+  const pressed = useRef<(PagePicture & { at: number }) | null>(null);
+  const under = useRef(new Map<string, PagePicture>());
+  const shown = useRef(page);
+  useEffect(() => {
+    const el = body.current;
+    if (!el) return;
+    const onClick = (e: MouseEvent) => {
+      const control = e.target instanceof Element ? e.target.closest(PRESSABLE) : null;
+      if (!control || !el.contains(control)) return;
+      const node = document.createDocumentFragment();
+      for (const child of el.childNodes) node.appendChild(child.cloneNode(true));
+      pressed.current = { node, top: el.scrollTop, at: performance.now() };
+    };
+    el.addEventListener("click", onClick, true);
+    return () => el.removeEventListener("click", onClick, true);
+  }, [body]);
+  useLayoutEffect(() => {
+    const was = shown.current;
+    shown.current = page;
+    if (was === page) return;
+    const p = pressed.current;
+    pressed.current = null;
+    if (page === null) under.current.clear();
+    else if (p && performance.now() - p.at < PICTURE_MS) under.current.set(page, { node: p.node, top: p.top });
+  }, [page]);
+  return useCallback(() => (shown.current === null ? null : (under.current.get(shown.current) ?? null)), []);
+}
+
+/**
+ * A copy of a picture to draw: no ids, which the page Back shows will
+ * hold again, and no dialogs, which a copy would draw in place.
+ */
+export function pictureCopy(picture: PagePicture): DocumentFragment {
+  const copy = picture.node.cloneNode(true) as DocumentFragment;
+  for (const d of copy.querySelectorAll("dialog")) d.remove();
+  for (const n of copy.querySelectorAll("[id]")) n.removeAttribute("id");
+  return copy;
 }
 
 function touchOf(list: TouchList, id: number): Touch | null {

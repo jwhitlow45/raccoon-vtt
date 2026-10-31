@@ -3,7 +3,7 @@ import { chromeZoom, smallUi } from "../features/device/layout.ts";
 import { useUiScale } from "../features/device/settings.ts";
 import { subpageBack, subpageKey, usePanelScroll, useSubpageFocus, type PanelHeader } from "../features/panels.ts";
 import { bodyHoldsField, useFieldInView, useKeyboardView } from "../lib/keyboardInset.ts";
-import { useBackSwipe } from "../lib/backSwipe.ts";
+import { pictureCopy, UNDER_DIM, UNDER_DIM_ATTR, useBackSwipe, usePagePictures, type PagePicture } from "../lib/backSwipe.ts";
 import { useSheetDialog } from "../lib/modalDialog.ts";
 import { DraftScope, useDraftRegistry, useSheetSwipe } from "../lib/sheetSwipe.ts";
 import { theme } from "../lib/theme.ts";
@@ -57,7 +57,9 @@ export type SheetMode = "bottom" | "side" | "full";
  *
  * Swiped right, in any mode and from anywhere on it, it does what its
  * header's Back does (lib/backSwipe.ts): its body follows the finger
- * under the header, which stays.
+ * under the header, which stays, over what Back leads to, dimmed:
+ * `behind` from the panel's first page (the list of panels), else the
+ * picture of the page a page inside the panel was opened from.
  *
  * Swiped up from its header, or by the Expand sheet button that Tab
  * reaches in its header, it fills the screen (`expanded`, 4.7): the very
@@ -121,6 +123,8 @@ export function Sheet(props: {
   cap?: number;
   /** Whether it took the visible area's whole height to show the field typed in, which leaves the dock no edge to ride. */
   onTall?(tall: boolean): void;
+  /** What Back leads to from the panel's first page, drawn dimmed under the body while a swipe right moves it: the list of panels. Never reached by a press, a key or a screen reader. */
+  behind?: ReactNode;
   children: ReactNode;
 }) {
   const { mode, inset, subpage } = props;
@@ -171,7 +175,9 @@ export function Sheet(props: {
   useFieldInView(bodyRef, useMemo(() => ({ view, tall }), [view, tall]), theme.space(2));
   const back: HeaderBack | null = subpage ? subpageBack(subpage) : props.onBack ? { label: props.backLabel ?? "Back", onBack: props.onBack } : null;
   // A swipe right does what the header's Back does, in every mode a phone shows the sheet in (lib/backSwipe.ts). The body moves under a header that stays, grabber and all, as a phone app's page does under its bar.
-  useBackSwipe(dialogRef, { enabled: shown && back !== null, onBack: () => back?.onBack(), page: pageRef, item, drafts });
+  const [under, setUnder] = useState(false);
+  const picture = usePagePictures(bodyRef, subpage ? subpageKey(subpage) : null);
+  useBackSwipe(dialogRef, { enabled: shown && back !== null, onBack: () => back?.onBack(), page: pageRef, item, drafts, onUnder: setUnder });
   const actionCount = props.actions ? (props.actionCount ?? 0) : 0;
   const stacked = headerStacks({ width: props.headerWidth, buttons: (back ? 1 : 0) + (onHide ? 1 : 0) + 1 + actionCount, actions: actionCount > 0 });
   const insetTop = sheetTop(inset.top, keyboard);
@@ -278,19 +284,50 @@ export function Sheet(props: {
         />
         {mode === "full" || filled ? props.notices : null}
         {/* Every mode keeps this shape, so a change of mode never mounts the panel again. */}
-        <div ref={pageRef} style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-          {/* The 4 px on top hold the focus ring of a first full-width control (2 px out, 2 px wide), which the scrolling body would clip. */}
-          {/* data-pane-body and the padding variables let a sticky header inside meet the scroller's edges in every mode (docs/design-v1-combat-flow.md 3.1). */}
-          <div
-            ref={bodyRef}
-            data-pane-body=""
-            style={{ ...paneBodyPadding(theme.space(1), theme.space(4), theme.space(4)), flex: 1, minHeight: 0, overflowY: "auto", padding: `${theme.space(1)}px ${theme.space(4)}px ${theme.space(4)}px`, overscrollBehavior: "contain" }}
-          >
-            <DraftScope value={drafts}>{props.children}</DraftScope>
+        <div style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+          {under ? <BackUnder picture={subpage ? picture() : null}>{subpage ? null : props.behind}</BackUnder> : null}
+          <div ref={pageRef} style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+            {/* The 4 px on top hold the focus ring of a first full-width control (2 px out, 2 px wide), which the scrolling body would clip. */}
+            {/* data-pane-body and the padding variables let a sticky header inside meet the scroller's edges in every mode (docs/design-v1-combat-flow.md 3.1). */}
+            <div ref={bodyRef} data-pane-body="" style={{ ...BODY_PADDING, flex: 1, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain" }}>
+              <DraftScope value={drafts}>{props.children}</DraftScope>
+            </div>
           </div>
         </div>
       </section>
     </dialog>
+  );
+}
+
+/** The body's padding, as its own and as the variables a sticky header or footer inside reads, shared by what a swipe back draws under it so its picture lands where the page it shows will. */
+const BODY_PADDING: CSSProperties = { ...paneBodyPadding(theme.space(1), theme.space(4), theme.space(4)), padding: `${theme.space(1)}px ${theme.space(4)}px ${theme.space(4)}px` };
+
+/**
+ * What Back leads to, drawn under the body while a swipe right moves it
+ * (lib/backSwipe.ts): the list of panels, or the picture of the page that
+ * a page inside the panel was opened from, scrolled as it was left. Inert
+ * and hidden from screen readers, so no press, key or reader reaches it,
+ * and dimmed by the swipe until the body has left.
+ */
+function BackUnder(props: { picture: PagePicture | null; children: ReactNode }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const pictureRef = useRef<HTMLDivElement>(null);
+  const { picture } = props;
+  useLayoutEffect(() => {
+    const box = pictureRef.current;
+    if (!box || !picture) return;
+    box.replaceChildren(pictureCopy(picture));
+    if (scrollRef.current) scrollRef.current.scrollTop = picture.top;
+    return () => box.replaceChildren();
+  }, [picture]);
+  return (
+    <div inert aria-hidden="true" style={{ position: "absolute", inset: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+      <div ref={scrollRef} style={{ ...BODY_PADDING, flex: 1, minHeight: 0, overflow: "hidden" }}>
+        {/* A picture is a copy of the page's own nodes, put in by hand, so React holds no children here. */}
+        {picture ? <div ref={pictureRef} /> : props.children}
+      </div>
+      <div {...{ [UNDER_DIM_ATTR]: "" }} style={{ position: "absolute", inset: 0, background: theme.color.scrim, opacity: UNDER_DIM, pointerEvents: "none" }} />
+    </div>
   );
 }
 

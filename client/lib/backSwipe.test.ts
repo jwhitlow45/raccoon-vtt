@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { TAP_SLOP_PX } from "./gestures.ts";
 import { REPEAT_DELAY_MS } from "./holdRepeat.ts";
-import { backDistance, backEnd, BackSession, BackSwipe, EDGE_ZONE_PX, inEdgeZone, ownsSideways, SIDEWAYS_ATTR, type BackHost, type BackMove, type BackStart, type SidewaysNode, type SidewaysStyle } from "./backSwipe.ts";
+import { backDistance, backEnd, BackSession, BackSwipe, EDGE_ZONE_PX, inEdgeZone, ownsSideways, SIDEWAYS_ATTR, stillFollowed, type BackHost, type BackMove, type BackStart, type SidewaysNode, type SidewaysStyle } from "./backSwipe.ts";
 import { FLICK_SPEED, SLIDE_MS, UNSAVED_FOLLOW } from "./sheetSwipe.ts";
 
 function start(over: Partial<BackStart> = {}): BackStart {
@@ -201,6 +201,9 @@ class FakePage {
   last: { x: number | null; ease: boolean } | null = null;
   xs: number[] = [];
   eased = 0;
+  /** What Back leads to, drawn under the page. */
+  underOn = false;
+  unders = 0;
   private timers: { at: number; fn: () => void; live: boolean }[] = [];
   private now = 0;
   readonly host: BackHost;
@@ -225,8 +228,15 @@ class FakePage {
         };
       },
       back: () => {
+        assert.equal(this.underOn, false, "Back ran with the picture still under the page");
         this.backs++;
         return !this.keeps;
+      },
+      under: (on) => {
+        assert.notEqual(this.underOn, on, "the picture asked twice");
+        if (on) assert.ok(this.last === null || this.last.x === null || this.last.x >= 0, "the picture came for a page left of its place");
+        this.underOn = on;
+        if (on) this.unders++;
       },
       reducedMotion: () => opts.reduced ?? false,
       unsaved: () => this.unsavedNow,
@@ -255,7 +265,7 @@ class FakePage {
   }
 
   get atRest(): boolean {
-    return this.last === null || this.last.x === null;
+    return (this.last === null || this.last.x === null) && !this.underOn;
   }
 }
 
@@ -365,6 +375,51 @@ describe("3. the session slides, goes back and springs back", () => {
       assert.equal(page.backs, 0, how);
       assert.ok(page.atRest, how);
     }
+  });
+
+  test("what Back leads to shows under the page from the claim, and goes before the back runs, or once a spring back rests", () => {
+    const page = new FakePage();
+    const session = new BackSession(page.host);
+    session.begin(start());
+    session.move(move(5, 0, 30));
+    assert.equal(page.underOn, false, "inside the slop");
+    session.move(move(40, 0, 60));
+    assert.equal(page.underOn, true, "at the claim");
+    for (const dx of ramp(250)) session.move(move(dx, 0, 90));
+    session.end(400);
+    assert.equal(page.underOn, true, "during the slide out");
+    page.tick(SLIDE_MS);
+    assert.equal(page.backs, 1);
+    assert.ok(page.atRest);
+    stroke(session, 100);
+    assert.equal(page.underOn, true, "during the spring back");
+    page.settle();
+    assert.ok(page.atRest);
+    assert.equal(page.unders, 2);
+  });
+
+  test("a touch whose end never came ends in nothing as the next one starts, which is followed", () => {
+    const page = new FakePage();
+    const session = new BackSession(page.host);
+    session.begin(start());
+    for (const dx of ramp(250)) session.move(move(dx, 0, 30));
+    // Its end went to a control that left the page, so it never reached the surface.
+    assert.equal(session.begin(start({ at: 1000 })), true, "the next touch was not followed");
+    assert.ok(page.atRest, "the lost touch left the page off its place");
+    assert.equal(page.pending, false);
+    assert.equal(page.backs, 0);
+    for (const dx of ramp(250)) session.move(move(dx, 0, 1030));
+    session.end(1400);
+    page.settle();
+    assert.equal(page.backs, 1, "the next touch did not swipe back");
+  });
+
+  test("the hook lets go of a followed touch that is no longer on the screen, and keeps one that is", () => {
+    const touches = (...ids: number[]) => ids.map((identifier) => ({ identifier }));
+    assert.equal(stillFollowed(null, touches(1)), false);
+    assert.equal(stillFollowed({ id: 3 }, touches(1, 2)), false);
+    assert.equal(stillFollowed({ id: 3 }, touches()), false);
+    assert.equal(stillFollowed({ id: 2 }, touches(1, 2)), true);
   });
 
   test("the document is watched from a followed press until the last finger lifts", () => {
@@ -491,7 +546,7 @@ describe("5. randomized touches", () => {
   test("the invariants hold after every event of many random sequences", () => {
     const RUNS = 2000;
     // What the sequences reached, so a generator that stopped reaching an end fails rather than passing on nothing.
-    const reached = { backs: 0, flickBacks: 0, rests: 0, taps: 0, claims: 0, kept: 0, cutShort: 0, stoppedSlides: 0, taken: 0, cancels: 0, holds: 0, vertical: 0, owned: 0, scrolls: 0 };
+    const reached = { lostEnds: 0, backs: 0, flickBacks: 0, rests: 0, taps: 0, claims: 0, kept: 0, cutShort: 0, stoppedSlides: 0, taken: 0, cancels: 0, holds: 0, vertical: 0, owned: 0, scrolls: 0 };
     for (let run = 1; run <= RUNS; run++) {
       const rnd = random(run);
       const pick = <T,>(xs: readonly T[]): T => xs[Math.floor(rnd() * xs.length)]!;
@@ -576,8 +631,9 @@ describe("5. randomized touches", () => {
               scrolled = true;
             }
           }
-          // Never left of its place.
+          // Never left of its place, and what lies under shows only while the page is off it.
           for (const x of page.xs) assert.ok(x >= 0, `${where}: shown left of its place at ${x}`);
+          if (page.underOn) assert.ok(page.last !== null && page.last.x !== null, `${where}: the picture showed under a page at rest`);
           page.xs = [];
           if (rnd() < 0.05) page.tick(pick([1, SLIDE_MS / 2, SLIDE_MS]));
           tally();
@@ -588,9 +644,16 @@ describe("5. randomized touches", () => {
         const blocked = s.owned || s.fingers > 1 || firstPast !== "right" || heldFirst || scrolled || spoiled || unsavedAtClaim;
         if (!blocked) mayBack.add(touchNo);
         const lift = at + pick([0, 1, 5, 60]);
-        session.end(lift);
+        // Now and then the lift never reaches the surface: the next touch ends this one in nothing.
+        const lost = rnd() < 0.05;
+        if (lost) {
+          mayBack.delete(touchNo);
+          reached.lostEnds++;
+        } else {
+          session.end(lift);
+          if (session.touch.phase !== "idle") assert.fail(`${where}: the touch was left ${session.touch.phase}`);
+        }
         owner = touchNo;
-        if (session.touch.phase !== "idle") assert.fail(`${where}: the touch was left ${session.touch.phase}`);
         if (rnd() < 0.7) session.lifted();
         tally();
         if (claimedAt === null && firstPast === null && followed) reached.taps++;
@@ -604,6 +667,12 @@ describe("5. randomized touches", () => {
         if (wait > 0) page.tick(wait);
         else if (session.sliding) reached.cutShort++;
         tally();
+      }
+      // A last touch that was lost ends in nothing at the next touch, as it does on the page.
+      if (session.touch.phase !== "idle") {
+        owner = -2;
+        session.begin(start({ owned: true }));
+        session.end(0);
       }
       session.lifted();
       page.settle();

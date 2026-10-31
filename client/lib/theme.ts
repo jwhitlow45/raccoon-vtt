@@ -141,6 +141,8 @@ export const theme = {
     markDouble: (fill: string) => `inset 0 0 0 2px ${fill}, inset 0 0 0 3px currentColor`,
     /** A sticky foot's `fill` carried over the pane's side padding beside it (components/Sheet.tsx `--pane-pad-x`), taking no room. */
     paneSides: (fill: string) => `calc(-1 * var(--pane-pad-x, 0px)) 0 0 ${fill}, var(--pane-pad-x, 0px) 0 0 ${fill}`,
+    /** A page a swipe back slides off the one under it, its soft edge on the left (lib/backSwipe.ts). */
+    slide: "-8px 0 24px rgba(0, 0, 0, 0.45)",
   },
   /**
    * Stacking over the map, lowest first. Dialogs open with showModal and

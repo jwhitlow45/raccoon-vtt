@@ -1070,6 +1070,8 @@ function RoomPage() {
             backRef={backRef}
             closeRef={closeRef}
             titleRef={sheetTitleRef}
+            // The list as All panels leaves it, for a swipe back to show under the panel: no panel open, so it marks the side panel's tab, as the list does then.
+            behind={<PanelPicker panels={panels} current={tabId} badges={badges} badgeLabels={badgeLabels} grouped={role === "dm"} onPick={noPick} />}
           >
             <PanelBody id={mounted.id} shown={sheet !== undefined} selectedTokenId={selectedId} close={() => ui.closePanel()} onHeader={headerOf(mounted.id)} />
           </Sheet>
@@ -2838,6 +2840,9 @@ function panelTile(panelId: string): string {
  * ones for play. The labels are items that span the grid, so it stays one
  * list named "Panels" and its tiles keep their names.
  */
+/** A pick on the list drawn under a panel during its swipe back, which no press reaches. */
+function noPick(): void {}
+
 function PanelPicker(props: { panels: PanelDef[]; current: string; badges: Record<string, number>; badgeLabels: Record<string, string>; grouped: boolean; onPick(id: string): void }) {
   return (
     <ul
