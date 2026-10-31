@@ -103,7 +103,10 @@ async function checkRow(summary: string, label: string): Promise<void> {
     await panel.getByText(summary, { exact: true }).waitFor();
     assert.equal(await textLines(take), 1, `${at}: 4 shapes stays on one line`);
     assert.equal(await panel.getByRole("heading", { name: "Known forms" }).count(), 0, `${at}: no Known forms section`);
-    const row = take.locator(`xpath=ancestor::*[.//button[normalize-space()="Stat block"]][1]`);
+    const group = take.locator("xpath=ancestor::*[@data-panel-group][1]");
+    const row = group.locator(":scope > div").filter({ has: fold });
+    assert.equal(await row.count(), 1, `${at}: one Stat block header is measured`);
+    assert.equal(await row.getByRole("button", { name: "4 shapes, take a shape", exact: true }).count(), 1, `${at}: the measured header holds Take a shape`);
     assert.deepEqual(alignmentLines(await measureAlignment(row), `the folded Stat block row ${label} at ${at}`), [], "out of line by more than 1 px");
     await shots.take(ana, `fu28-forms-${label}-${view.width}-130`);
   }
