@@ -646,7 +646,8 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   const applyButton =
     page.phase === "applied" ? (
       <div style={{ display: "grid", gap: theme.space(1) }}>
-        <Note tone="info">{doneWords}</Note>
+        {/* A page Redo locked again has no plan of its own to name, and an empty line would push Done off its foot's middle. */}
+        {doneWords ? <Note tone="info">{doneWords}</Note> : null}
         <Button variant="primary" onClick={close}>
           Done
         </Button>
@@ -1031,6 +1032,8 @@ function GroupRow(props: {
   const markValue: Mark | null = s.mark ?? null;
   const waitingAsk = s.asked && !s.answer && !page.requests.some(request => request.rollId === s.asked?.rollId && (request.state === "closed" || request.state === "refused"));
   const set = (patch: Partial<typeof s>) => props.onChange({ ...page, states: { ...page.states, [row.holder]: { ...s, ...patch } } });
+  const conditionsAnyway = outcome.skips.length > 0 || (s.conditions === "off" && page.outcome.conditions.length > 0);
+  const switches = outcome.legendaryLeft > 0 || outcome.evasionApplies || outcome.qualified.length > 0 || conditionsAnyway;
   // The amount opens a field of its own (5.4): what the DM types there wins, and going back takes the worked-out amount again.
   const [editing, setEditing] = useState(false);
   // The DM's roll for an asked creature with no stat block takes the bonus typed beside it (knownOrTyped).
@@ -1095,31 +1098,34 @@ function GroupRow(props: {
       {details.length > 0 ? <div style={{ fontSize: theme.font.small, color: theme.color.textMuted, display: "grid", gap: theme.space(1) }}>{details.map((d, i) => <span key={i}>{d}</span>)}</div> : null}
       {!setup && !frozen ? (
         <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1), alignItems: "center" }}>
-          {waitingAsk && typed.typing ? (
-            <Input
-              aria-label={`Bonus for ${row.name}`}
-              value={bonusText}
-              placeholder="+0"
-              enterKeyHint="done"
-              autoComplete="off"
-              maxLength={3}
-              error={typed.error}
-              onChange={(e) => setBonusText(e.target.value)}
-              style={{ width: 64, flex: "none", textAlign: "center" }}
-            />
-          ) : null}
           {waitingAsk && (row.bonus !== null || typed.typing) ? (
-            <GroupRollButton
-              source={JSON.stringify([props.source, bonusText])} name={`${row.name}'s requested roll`}
-              capability={{ d20: true, visibility: "request" }} valid={() => !!waitingAsk && typed.bonus !== null && !frozen}
-              onRoll={(override) => typed.bonus !== null && props.onDmRoll(typed.typing ? typed.bonus : undefined, override)}
-              size="sm"
-              disabled={(props.blocked ?? typed.waits) !== null}
-              title={props.blocked ?? typed.waits ?? undefined}
-              busy={page.dmRolls.some((r) => r.holder === row.holder && r.state === "sending")}
-            >
-              {row.bonus !== null ? `Roll ${signedText(row.bonus)}` : typed.bonus !== null ? `Roll ${d20Text(typed.bonus)}` : "Roll d20"}
-            </GroupRollButton>
+            // The typed bonus and the roll it feeds wrap as one.
+            <div style={{ display: "flex", alignItems: "center", gap: theme.space(1), flex: "none" }}>
+              {typed.typing ? (
+                <Input
+                  aria-label={`Bonus for ${row.name}`}
+                  value={bonusText}
+                  placeholder="+0"
+                  enterKeyHint="done"
+                  autoComplete="off"
+                  maxLength={3}
+                  error={typed.error}
+                  onChange={(e) => setBonusText(e.target.value)}
+                  style={{ width: 64, flex: "none", textAlign: "center" }}
+                />
+              ) : null}
+              <GroupRollButton
+                source={JSON.stringify([props.source, bonusText])} name={`${row.name}'s requested roll`}
+                capability={{ d20: true, visibility: "request" }} valid={() => !!waitingAsk && typed.bonus !== null && !frozen}
+                onRoll={(override) => typed.bonus !== null && props.onDmRoll(typed.typing ? typed.bonus : undefined, override)}
+                size="sm"
+                disabled={(props.blocked ?? typed.waits) !== null}
+                title={props.blocked ?? typed.waits ?? undefined}
+                busy={page.dmRolls.some((r) => r.holder === row.holder && r.state === "sending")}
+              >
+                {row.bonus !== null ? `Roll ${signedText(row.bonus)}` : typed.bonus !== null ? `Roll ${d20Text(typed.bonus)}` : "Roll d20"}
+              </GroupRollButton>
+            </div>
           ) : null}
           {s.status === "notRolled" || s.status === "unknown" || props.reopened && s.way === "server" && !s.gone && s.mark !== "skip" ? (
             <GroupRollButton source={props.source} name={`${row.name}'s roll`} capability={{ d20: true, visibility: "selectable" }} valid={() => !frozen && !s.gone && (props.reopened || s.status === "notRolled" || s.status === "unknown") === true} size="sm" busy={page.rolls.some(roll => roll.state === "sending" && roll.holders.includes(row.holder))} disabled={props.blocked !== null || rowBonus(row, s) === null} onRoll={props.onRollAgain}>
@@ -1130,20 +1136,25 @@ function GroupRow(props: {
           {s.way === "type" || s.status ? (
             <NumberField label={`${row.name}'s total`} value={s.typed} min={-50} max={100} nullable placeholder="Total" onCommit={(n) => props.onChange(typeTotal(page, row.holder, n))} width={88} />
           ) : null}
-          {outcome.legendaryLeft > 0 ? (
-            <Checkbox checked={s.legendary === true} onChange={(legendary) => set({ legendary })} label={`Use Legendary Resistance (${outcome.legendaryLeft} left)`} />
-          ) : null}
-          {outcome.evasionApplies ? <Checkbox checked={outcome.evasion} onChange={(evasion) => set({ evasion })} label="Evasion" /> : null}
-          {outcome.qualified.map((q) => (
-            <Checkbox
-              key={q.key}
-              checked={(s.qualifiedOn ?? []).includes(q.key)}
-              onChange={(on) => set({ qualifiedOn: on ? [...(s.qualifiedOn ?? []), q.key] : (s.qualifiedOn ?? []).filter((k) => k !== q.key) })}
-              label={q.words}
-            />
-          ))}
-          {outcome.skips.length > 0 || (s.conditions === "off" && page.outcome.conditions.length > 0) ? (
-            <Checkbox checked={s.conditions === "on"} onChange={(on) => set({ conditions: on ? "on" : undefined })} label="Give the conditions anyway" />
+          {switches ? (
+            // The row's switches grow to fill a line they wrap onto, so one that wraps reads as a line of its own, not as left behind by the buttons above it.
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1), flex: "1 1 auto" }}>
+              {outcome.legendaryLeft > 0 ? (
+                <Checkbox checked={s.legendary === true} onChange={(legendary) => set({ legendary })} label={`Use Legendary Resistance (${outcome.legendaryLeft} left)`} />
+              ) : null}
+              {outcome.evasionApplies ? <Checkbox checked={outcome.evasion} onChange={(evasion) => set({ evasion })} label="Evasion" /> : null}
+              {outcome.qualified.map((q) => (
+                <Checkbox
+                  key={q.key}
+                  checked={(s.qualifiedOn ?? []).includes(q.key)}
+                  onChange={(on) => set({ qualifiedOn: on ? [...(s.qualifiedOn ?? []), q.key] : (s.qualifiedOn ?? []).filter((k) => k !== q.key) })}
+                  label={q.words}
+                />
+              ))}
+              {conditionsAnyway ? (
+                <Checkbox checked={s.conditions === "on"} onChange={(on) => set({ conditions: on ? "on" : undefined })} label="Give the conditions anyway" />
+              ) : null}
+            </div>
           ) : null}
         </div>
       ) : null}

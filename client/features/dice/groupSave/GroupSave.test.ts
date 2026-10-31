@@ -389,3 +389,15 @@ test("Apply captures before any close, embeds recharge, and blocks a second tap"
   assert.deepEqual(outcome.page, { id: outcome.plan, expectRevision: 0 });
   assert.deepEqual(outcome.recharge, { target: { tokenId: "g1" }, use: { kind: "ability", key: "actions:fire-breath", name: "Fire Breath", limit: "recharge", max: 1, min: 5, ifReady: true } });
 });
+
+test("a page Redo locked again draws Done alone in its foot, with no empty line above it to push it off its middle", () => {
+  const relocked = drawPage({ ...damagePage("9 fire"), phase: "applied", apply: "taken", plan: null }, [], "open", { check: "applied", notice: OUTCOME_RESTORED });
+  assert.match(relocked, new RegExp(`<div style="display:grid;gap:${theme.space(1)}px"><button[^>]*>Done</button></div>`));
+});
+
+test("a reopened row waiting on its ask keeps the typed bonus with its roll, and its switches in a group that fills a line it wraps onto", () => {
+  const page: Page = { ...PAGE, phase: "rolled", outcome: { ...PAGE.outcome, damage: "9 fire", onPass: "half" }, rows: groupRows(DICE, ["g1"], PAGE.test, false).map((row) => ({ ...row, askRef: { tokenId: "g1" }, bonus: null })), states: { "token:g1": { way: "ask", asked: { rollId: "request" } } } };
+  const markup = drawPage(page, [], "open", { check: "undone", notice: OUTCOME_UNDONE });
+  const gap = theme.space(1);
+  assert.match(markup, new RegExp(`<div style="display:flex;align-items:center;gap:${gap}px;flex:none"><input aria-label="Bonus for Guard"[^>]*/><button[^>]*>Roll d20</button></div><button[^>]*>Ask again</button><div style="display:flex;flex-wrap:wrap;align-items:center;gap:${gap}px;flex:1 1 auto"><label[^>]*>(?:(?!</label>).)*Evasion`));
+});
