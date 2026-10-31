@@ -170,7 +170,8 @@ describe("the page and its ask", () => {
     assert.deepEqual(
       step.send.map((c) => (c.kind === "op" ? c.op : null)),
       [
-        { t: "roll.close", rollIds: ["q1"] },
+        // The page's own close records no Undo step (docs/design-v1-undo-scope.md 5.3).
+        { t: "roll.close", rollIds: ["q1"], reason: "savePage" },
         { t: "cast.close", castId: "c1", end: "done" },
       ],
     );
