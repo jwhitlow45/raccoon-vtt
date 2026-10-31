@@ -591,6 +591,30 @@ describe("raccoon-vtt DM tools run", { timeout: 300_000 }, () => {
     assert.ok(Math.abs((await held.boundingBox())!.y - topY) <= 2, "the reader's row moved");
     await shots.take(player, "logc-older-page");
 
+    // Pages fill the window to its 500 rows with the live log still under them.
+    for (let i = 0; i < 8 && (await rows.count()) < 500; i++) await showOlder();
+    await sheet.getByRole("list", { name: "Log", exact: true }).waitFor();
+    assert.equal(await rows.count(), 500);
+
+    // New live lines push the oldest held rows out above the reader, whose row stays where it was (LOGC-OPUS-1).
+    // Chromium's own scroll anchoring would hide a jump, so it is off for this step, set through the CSSOM.
+    const anchoring = (value: string) =>
+      sheet.locator("ol").evaluate((el, v) => {
+        type El = { parentElement: El | null; style: { overflowAnchor: string } };
+        for (let node: El | null = el as unknown as El; node; node = node.parentElement) node.style.overflowAnchor = v;
+      }, value);
+    await anchoring("none");
+    const reading = sheet.locator("li").filter({ has: player.getByText("History line 200", { exact: true }) });
+    await reading.scrollIntoViewIfNeeded();
+    const readingY = (await reading.boundingBox())!.y;
+    for (let i = 561; i <= 563; i++) await ops.send({ t: "log.chat", text: `History line ${i}` });
+    await sheet.getByText("History line 563", { exact: true }).waitFor({ state: "attached" });
+    await sheet.getByText("History line 63", { exact: true }).waitFor({ state: "detached" });
+    assert.equal(await rows.count(), 500);
+    const movedBy = (await reading.boundingBox())!.y - readingY;
+    assert.ok(Math.abs(movedBy) <= 2, `the reader's row moved ${movedBy} px as live lines pushed held rows out`);
+    await anchoring("");
+
     // Past 500 rows the window parts from the live log: its newest lines go, and Show newer and Back to latest come.
     for (let i = 0; i < 10 && !(await latest.isVisible()); i++) await showOlder();
     assert.equal(await latest.isVisible(), true, "the window never parted from the live log");
@@ -600,9 +624,16 @@ describe("raccoon-vtt DM tools run", { timeout: 300_000 }, () => {
     await sheet.getByRole("button", { name: "Show newer", exact: true }).waitFor();
     await latest.scrollIntoViewIfNeeded();
     await shots.take(player, "logc-history-parted");
-    for (let i = 0; i < 10 && (await older.isVisible()); i++) await showOlder();
+    // From the keyboard, so the focus is the button's: once the start replaces Show older, the start's line takes it.
+    const focusedText = () => (globalThis as unknown as { document: { activeElement: { textContent: string | null } | null } }).document.activeElement?.textContent ?? null;
+    for (let i = 0; i < 10 && (await older.isVisible()); i++) {
+      await older.focus();
+      await Promise.all([player.waitForResponse((res) => page.test(res.url()) && res.status() === 200), player.keyboard.press("Enter")]);
+      await older.or(start).waitFor();
+    }
     await start.waitFor();
     await sheet.getByText("History line 1", { exact: true }).waitFor();
+    assert.equal(await player.evaluate(focusedText), "This is the start of the log.");
 
     // Show newer reads on from the window's newest row, and the start goes with the oldest rows it pushes out.
     const newer = sheet.getByRole("button", { name: "Show newer", exact: true });
@@ -611,6 +642,16 @@ describe("raccoon-vtt DM tools run", { timeout: 300_000 }, () => {
     await older.waitFor();
     assert.ok((await rows.count()) <= 500);
     assert.equal(await sheet.getByText("History line 1", { exact: true }).count(), 0);
+    // Read on to the newest: once Show newer has nothing left, Back to latest takes its focus.
+    for (let i = 0; i < 6 && (await newer.isVisible()); i++) {
+      await newer.focus();
+      await Promise.all([player.waitForResponse((res) => page.test(res.url()) && new URL(res.url()).searchParams.has("after")), player.keyboard.press("Enter")]);
+      await newer.or(latest).waitFor();
+      await player.waitForTimeout(300);
+    }
+    await newer.waitFor({ state: "detached" });
+    assert.equal(await player.evaluate(focusedText), "Back to latest");
+    assert.ok((await rows.count()) <= 500);
 
     // Back to latest: the live log again, its newest line drawn, and the composer ready.
     await latest.scrollIntoViewIfNeeded();
@@ -631,9 +672,16 @@ describe("raccoon-vtt DM tools run", { timeout: 300_000 }, () => {
         return { firstId: `${k * 10}:0`, lastId: `${k * 10 + 5}:0`, from: new Date(day + k * 86_400_000).toISOString(), to: new Date(day + k * 86_400_000 + 3 * 3_600_000).toISOString(), lines: 12 };
       });
     const listed: string[] = [];
+    // The first Older sessions fails, as a server error would, and says so in its row, and the next tap reads the page.
+    let failOnce = true;
+    dmConsole.allow = [/status of 500 .*\/api\/rooms\/[0-9A-Z]{8}\/log\/sessions\?before=/];
     await dm.route(/\/api\/rooms\/[0-9A-Z]{8}\/log\/sessions/, (route) => {
       const before = new URL(route.request().url()).searchParams.get("before");
       listed.push(before ?? "");
+      if (before !== null && failOnce) {
+        failOnce = false;
+        return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "internal" }) });
+      }
       const body = before === null ? { sessions: sessions(30, 6), lines: 1234, nextSessionsBefore: "60:0" } : { sessions: sessions(5, 1), lines: 1234, nextSessionsBefore: null };
       return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
     });
@@ -643,10 +691,16 @@ describe("raccoon-vtt DM tools run", { timeout: 300_000 }, () => {
     const exports = list.getByRole("button", { name: /^Export / });
     await list.getByRole("listitem").filter({ hasText: /^Everything, 1,234 lines/ }).waitFor();
     assert.equal(await exports.count(), 26, "25 sessions and Everything");
-    await sheet.getByRole("button", { name: "Older sessions", exact: true }).click();
+    const more = sheet.getByRole("button", { name: "Older sessions", exact: true });
+    await more.click();
+    await sheet.getByRole("alert").filter({ hasText: "The log could not be exported." }).waitFor();
+    assert.equal(await exports.count(), 26, "a failed page adds no sessions");
+    await more.click();
     await waitFor("the older sessions", async () => ((await exports.count()) === 31 ? true : null));
-    assert.equal(await sheet.getByRole("button", { name: "Older sessions", exact: true }).count(), 0, "the last page offers no more");
-    assert.deepEqual(listed, ["", "60:0"]);
+    assert.equal(await more.count(), 0, "the last page offers no more");
+    assert.equal(await sheet.getByRole("alert").count(), 0, "the failure's words go once the page lands");
+    assert.deepEqual(listed, ["", "60:0", "60:0"]);
+    dmConsole.allow = [];
     await shots.take(dm, "logc-export-older-sessions");
     await dm.unroute(/\/api\/rooms\/[0-9A-Z]{8}\/log\/sessions/);
 
@@ -661,6 +715,12 @@ describe("raccoon-vtt DM tools run", { timeout: 300_000 }, () => {
     const everything = list.getByRole("listitem").filter({ hasText: /^Everything, / });
     await everything.getByRole("button", { name: /^Export Everything/ }).click();
     await everything.getByText("This file is large. Use Download to save it. Download uses another export request.", { exact: true }).waitFor();
+    // The note scrolls itself into view, Download whole within the sheet (D-261030-580).
+    const download = everything.getByRole("link", { name: "Download", exact: true });
+    await waitFor("Download in view", async () => {
+      const [box, frame] = [await download.boundingBox(), await sheet.boundingBox()];
+      return box && frame && box.y >= frame.y && box.y + box.height <= frame.y + frame.height + 0.5 ? true : null;
+    }, 3_000);
     await dm.unroute(file);
     await shots.take(dm, "logc-export-large");
     const link = everything.getByRole("link", { name: "Download", exact: true });
