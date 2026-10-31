@@ -833,7 +833,7 @@ function FightAlerts() {
   useEffect(() => {
     if (!overlay) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+      if (e.key !== "Escape" || e.defaultPrevented) return;
       e.stopPropagation();
       closeOverlay();
     };

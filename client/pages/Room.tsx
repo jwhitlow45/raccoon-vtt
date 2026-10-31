@@ -1783,7 +1783,7 @@ function Toasts(props: {
     if (wholeToast === undefined) return;
     // Escape shrinks the whole toast first, and its preventDefault leaves the room's own Escape alone (RoomChrome.tsx useEscape).
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+      if (e.key !== "Escape" || e.defaultPrevented) return;
       e.preventDefault();
       shrink();
     };
