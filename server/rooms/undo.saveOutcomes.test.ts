@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
 import { keys } from "#shared/keys.ts";
+import { LIMITS } from "#shared/limits.ts";
 import type { Actor, RoomState } from "#shared/model.ts";
 import type { SaveOutcomeLedger } from "#shared/saveOutcomeContract.ts";
 import { guardHash } from "#shared/reducer/tx.ts";
-import { customMonster, rng, token } from "#shared/testutil.ts";
+import { opSchema } from "#shared/protocol.ts";
+import { AT, customMonster, rng, token } from "#shared/testutil.ts";
 import { scopeActor, scopeFixture, scopeObserver, until, type ScopeClient } from "./undoScopeTesting.ts";
 import { UndoTable } from "./undoTesting.ts";
 
@@ -219,14 +221,18 @@ test("failed guarded whole Undo and HP log correction never change the applied l
 
 for (const entityful of [false, true]) test(`evicted ${entityful ? "entityful step restores without recreating metadata" : "lifecycle-only step refuses and drops"}`, async (t) => {
   const f = scopeFixture();
-  const h = await scopeActor(t, f.state);
-  const dm = await h.connect(f.dm);
+  // The 200 outcomes below are a co-DM's Applies paced inside the DM roll budget and the room's op rate, which the actor's clock refills.
   let clock = Date.now();
-  const co = await h.connect(f.otherDm, "dm", () => (clock += 100));
+  const h = await scopeActor(t, f.state, { now: () => clock });
+  const dm = await h.connect(f.dm);
+  const co = await h.connect(f.otherDm, "dm", () => clock);
   const first = tracked(f.goblin, undefined, 0, undefined, entityful ? 1 : undefined);
   await dm.apply(first);
   // Other-member outcomes evict status without replacing this member's history head.
-  for (let i = 0; i < 200; i++) await co.apply(tracked(f.goblin));
+  for (let i = 0; i < 200; i++) {
+    clock += LIMITS.dmRollRefillMs;
+    await co.apply(tracked(f.goblin));
+  }
   assert.equal(ledger(h.actor.committed.state)[first.plan], undefined);
   const event = await dm.send({ t: "undo", head: dm.head().id });
   assert.equal(Boolean(event.rejects?.length), !entityful);
@@ -298,4 +304,27 @@ test("UNDO-A-SOL-05: helper and real actor both consume an invalid serialized re
   assert.equal(player.history().play.undo.depth, 0);
   assert.equal(table.stacks.depth(f.player.id).undo, player.history().play.undo.depth, "helper must consume the same unusable head as the actor");
   assert.equal(table.stacks.depth(f.player.id).redo, 0);
+});
+
+test("helper and real actor both record a lifecycle-only outcome and transfer its identity through Undo and Redo", async (t) => {
+  const f = scopeFixture();
+  const table = new UndoTable(f.state);
+  const dmViewer = { memberId: f.dm.id, role: "dm" as const };
+  // The helper's ops carry the fixed test time, so its tracking id is made then.
+  const helperPlan = uuidv7(Date.parse(AT));
+  assert.equal(table.play(dmViewer, opSchema.parse(tracked(f.goblin, helperPlan))), "ok");
+  const h = await scopeActor(t, f.state);
+  const dm = await h.connect(f.dm);
+  const op = tracked(f.goblin);
+  await dm.apply(op);
+  const depths = () => [table.stacks.depth(f.dm.id), { undo: dm.history().play.undo.depth, redo: dm.history().play.redo.depth }];
+  assert.deepEqual(depths(), [{ undo: 1, redo: 0 }, { undo: 1, redo: 0 }], "an outcome with no entity inverse is still one step");
+  for (const from of ["undo", "redo"] as const) {
+    assert.equal(table.restore(dmViewer, from), "ok");
+    await dm.restore("play", from);
+    assert.equal(ledger(table.state)[helperPlan]?.state, ledger(h.actor.committed.state)[op.plan]?.state);
+    assert.equal(table.stacks.peek(f.dm.id, from === "undo" ? "redo" : "undo")?.saveOutcome?.id, helperPlan, "the restored step keeps its identity");
+  }
+  assert.deepEqual(depths(), [{ undo: 1, redo: 0 }, { undo: 1, redo: 0 }]);
+  assert.equal(ledger(table.state)[helperPlan]?.revision, 3);
 });

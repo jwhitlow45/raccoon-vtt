@@ -5,6 +5,8 @@ import { projectEntity } from "#shared/project.ts";
 import { isPoseOp, isResizeOp, serverOnlyOpSchema, type ClientOp, type Op, type RefusalCode } from "#shared/protocol.ts";
 import { applyOp, type Applied } from "#shared/reducer.ts";
 import { CHANGED_SINCE, DEPENDED_ON, PARENT_GONE, restoreReferenceConflicts } from "#shared/reducer/misc.ts";
+import type { SaveOutcomeTransition } from "#shared/saveOutcomeContract.ts";
+import { retainedSaveOutcome } from "#shared/saveOutcomes.ts";
 import { env } from "#shared/testutil.ts";
 import type { HistoryScope } from "#shared/undoContract.ts";
 import { undoScope } from "#shared/undoScope.ts";
@@ -73,15 +75,19 @@ export class UndoTable {
     const r = this.#apply(who, op);
     if (!r.ok) return r.message;
     const scope = undoScope(op, before);
-    if (scope !== "none" && r.inverse && UndoStacks.records(who.role, op, before)) {
+    // A tracked outcome is one step even when it changes no entity, carrying its lifecycle identity (actor.ts).
+    const saveOutcome = op.t === "actor.outcome" && op.page ? { id: op.page.id, plan: op.plan } : undefined;
+    if (scope !== "none" && (r.inverse || saveOutcome) && UndoStacks.records(who.role, op, before)) {
       const pose = who.role === "player" && (isPoseOp(op) || isResizeOp(op));
-      const inverse = pose && r.trapWrote ? r.inverse.filter((entry) => !r.trapWrote!.has(entry.key)) : r.inverse;
+      const all = r.inverse ?? [];
+      const inverse = pose && r.trapWrote ? all.filter((entry) => !r.trapWrote!.has(entry.key)) : all;
       const poses = pose ? posesAfter(this.state, inverse, this.#shows(who), plannedOn(before, op)) : undefined;
       const teleport = op.t === "token.move" && op.teleport !== undefined;
       const walk: Walk | undefined = poses && op.t === "token.move" && !teleport ? { tokenId: op.tokenId, route: op.route ?? [[op.x, op.y, 0, 0]], routed: op.route !== undefined } : undefined;
       const rides = poses ? ridesChanged(before, this.state) : undefined;
       this.stacks.push(who.memberId, inverse, describeOp(op as ClientOp, before, who, this.state), undefined, poses, undefined, undefined, teleport, walk, rides, r.trapped === true, {
         scope: who.role === "dm" ? scope : "play",
+        ...(saveOutcome ? { saveOutcome } : {}),
         ...(who.role === "dm" ? { values: dmHistoryValues(inverse, this.state, scope === "play") } : {}),
       });
     }
@@ -122,6 +128,16 @@ export class UndoTable {
       entries = moved.entries;
       quiet = moved.quiet;
     }
+    // The lifecycle transition names the retained record's revision. Without a record, a lifecycle-only step refuses and drops (actor.ts).
+    let saveOutcome: SaveOutcomeTransition | undefined;
+    if (step.saveOutcome) {
+      const record = retainedSaveOutcome(this.state, step.saveOutcome.id, env(this.seq + 1).at);
+      if (record) saveOutcome = { ...step.saveOutcome, expectRevision: record.revision, state: from === "undo" ? "undone" : "applied" };
+      else if (entries.length === 0) {
+        this.stacks.consume(who.memberId, from, scope, step.id!);
+        return "this save can no longer reopen";
+      }
+    }
     const op: Op = {
       t: "sys.restore",
       entries,
@@ -133,6 +149,7 @@ export class UndoTable {
       ...(from === "redo" && step.routed && step.routes ? { routes: step.routes } : {}),
       ...(step.poses && step.rides && step.rides.length > 0 ? { rides: step.rides } : {}),
       ...(quiet ? { quiet } : {}),
+      ...(saveOutcome ? { saveOutcome } : {}),
     };
     const checked = serverOnlyOpSchema.safeParse(op);
     if (!checked.success) return this.#failed(who, from, scope, step, "invalid", `server op ${op.t} does not validate: ${checked.error.issues[0]?.message ?? "invalid"}`);
@@ -141,9 +158,10 @@ export class UndoTable {
     const r = this.#apply(who, checked.data);
     if (!r.ok) return this.#failed(who, from, scope, step, r.code, r.message);
     this.stacks.consume(who.memberId, from, scope, step.id!);
-    if (r.inverse) this.stacks.pushRestored(who.memberId, from, r.inverse, step.label, step.poses ? posesAfter(this.state, r.inverse, this.#shows(who), keptFrom(step.poses, this.last!.before)) : undefined, step.origin, step.teleport === true, step, {
+    const inverse = r.inverse ?? (saveOutcome ? [] : null);
+    if (inverse) this.stacks.pushRestored(who.memberId, from, inverse, step.label, step.poses ? posesAfter(this.state, inverse, this.#shows(who), keptFrom(step.poses, this.last!.before)) : undefined, step.origin, step.teleport === true, step, {
       scope,
-      ...(who.role === "dm" ? { values: dmHistoryValues(r.inverse, this.state, scope === "play") } : {}),
+      ...(who.role === "dm" ? { values: dmHistoryValues(inverse, this.state, scope === "play") } : {}),
     });
     return "ok";
   }
