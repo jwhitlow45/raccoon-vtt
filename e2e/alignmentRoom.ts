@@ -303,6 +303,12 @@ const SOME_SIZES: Record<string, Record<SizesFile, number>> = {
   "dpf1-menu-hp-death-host": { phones: 4, wide: 4 },
   "dpf1-menu-auto": { phones: 4, wide: 4 },
   "dpf1-menu-auto-host": { phones: 4, wide: 4 },
+  "dpf1-menu-hp-sheet": { phones: 4, wide: 4 },
+  "dpf1-menu-hp-sheet-host": { phones: 4, wide: 4 },
+  "dpf1-menu-hp-bar": { phones: 4, wide: 4 },
+  "dpf1-menu-hp-bar-host": { phones: 4, wide: 4 },
+  "dpf1-menu-tracker": { phones: 4, wide: 4 },
+  "dpf1-menu-tracker-host": { phones: 4, wide: 4 },
   // The DM's turn card folds under 600 px wide, so on the upright phones and at 480 x 320 at 130%.
   "cu-turn-folded": { phones: 4, wide: 1 },
   // With the dragon's bar across the column, the turn card folds to its row, or leaves the column where even its row would meet the bar (4.2).
@@ -1262,6 +1268,14 @@ async function rollMenuScreen(sweep: Sweep, page: Page, screen: string, button: 
     before = box;
     return still || null;
   });
+  /** The scrolled boxes around the button, innermost first. */
+  const scrolls = () => button.evaluate((el) => {
+    type El = { scrollTop: number; parentElement: El | null; tagName: string };
+    const out: string[] = [];
+    for (let n = (el as unknown as El).parentElement; n; n = n.parentElement) if (n.scrollTop) out.push(`${n.tagName}:${n.scrollTop}`);
+    return out.join(" ");
+  });
+  const scrollBefore = await scrolls();
   await button.evaluate((el) => (el as unknown as { focus(o: object): void }).focus({ preventScroll: true }));
   await page.keyboard.press("ContextMenu");
   const menu = page.getByRole("menu", { name });
@@ -1270,7 +1284,12 @@ async function rollMenuScreen(sweep: Sweep, page: Page, screen: string, button: 
     await sweep.measure(page, screen, page.locator("[data-rvtt-popover]").filter({ has: menu }));
     await sweep.measure(page, `${screen}-host`, host);
     const after = JSON.stringify(await button.boundingBox());
-    if (after !== before) await sweep.add(page, screen, [`${sweep.at} ${screen}: the roll button's box changed with its menu open, ${before} to ${after}`]);
+    if (after !== before) {
+      // A scroller that moved under the open menu reads apart from a box that changed, since the fix differs.
+      const scrollAfter = await scrolls();
+      const why = scrollAfter === scrollBefore ? "" : `, a scroller moving under it (scrollTop ${scrollBefore || "none"} to ${scrollAfter || "none"})`;
+      await sweep.add(page, screen, [`${sweep.at} ${screen}: the roll button's box changed with its menu open${why}, ${before} to ${after}`]);
+    }
   } finally {
     await page.keyboard.press("Escape");
     await menu.waitFor({ state: "detached" }).catch(() => undefined);
@@ -1622,6 +1641,9 @@ async function patCombatScreens(sweep: Sweep, page: Page): Promise<void> {
 
   await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { level: 7, resources: THORN_RESOURCES } });
   scope = await thornsPage(page);
+  // Thorn is dying through these screens: HP's Death Save Roll in his page, its menu over HP.
+  const sheetRoll = scope.getByRole("button", { name: "Roll a Death Save", exact: true }).first();
+  await rollMenuScreen(sweep, page, "dpf1-menu-hp-sheet", sheetRoll, /^Roll options for Death Save$/, sheetRoll.locator("xpath=ancestor::section[1]"));
   const section = resourcesSection(scope);
   await section.getByText(LEVEL_UP, { exact: true }).waitFor();
   await section.scrollIntoViewIfNeeded();
@@ -1718,6 +1740,8 @@ async function dmCombatScreens(sweep: Sweep, page: Page): Promise<void> {
 
   const thorn = await selectToken(page, "Thorn", { x: 5, y: 5 });
   if (thorn) {
+    // HP's Death Save Roll in the bar itself, its menu over the bar.
+    await rollMenuScreen(sweep, page, "dpf1-menu-hp-bar", await barControl(thorn, "Roll a Death Save"), /^Roll options for Death Save$/, thorn);
     await (await barControl(thorn, "Details")).click();
     const panel = page.getByRole("tabpanel", { name: sideTabName("Token") }).or(page.getByRole("region", { name: "Token", exact: true }));
     await panel.getByRole("heading", { name: "Thorn" }).first().waitFor();
@@ -1738,6 +1762,9 @@ async function dmCombatScreens(sweep: Sweep, page: Page): Promise<void> {
 
   const { tracker, group } = await rowUses(page, RED_DRAGON);
   await sweep.measure(page, "cu-row-uses", group);
+  // The dragon's value is set, so its row's Roll waits in the options just opened (Row.tsx), its menu over the row.
+  const rowRoll = tracker.getByRole("button", { name: new RegExp(`^Roll [+−-]\\d+ Initiative for ${RED_DRAGON}, replacing \\d+$`) }).first();
+  await rollMenuScreen(sweep, page, "dpf1-menu-tracker", rowRoll, new RegExp(`^Roll options for Roll [+−-]\\d+ Initiative for ${RED_DRAGON}$`), rowRoll.locator("xpath=ancestor::li[1]"));
   // Auto Initiative, its re-roll on so it has dice to roll, then off as it was.
   // Auto Initiative is the tracker's own section, outside the round's.
   const reroll = page.getByRole("checkbox", { name: "Re-roll monsters that have a value" }).filter({ visible: true }).first();
@@ -3888,6 +3915,8 @@ async function proficiencyRequests(sweep: Sweep, page: Page, shot: (page: Page, 
     await proficiencyLevel(dmCard, /^WIS \(Perception\)$/, "expert");
     // The rows under the title keep a 2 px offset from before FL-7 (the name and its line beside Roll and the marks), so the sweep measures the title FL-7 marks.
     await proficiencyScreen(sweep, page, "dm-request", dmCard, toggle);
+    // Thorn still waits: the DM's Roll for him, its menu over the card, marks and all.
+    await rollMenuScreen(sweep, page, "dpf1-menu-dm-request", dmCard.getByRole("button", { name: /^Roll .+ for Thorn/ }).first(), /^Roll options for Roll .+ for Thorn/, dmCard);
     await patOps.send({ t: "roll.dice", tag: randomUUID(), rollId: id, target: { characterId: run.ids.thornChar } });
     await waitFor("fl7: the player's rolled answer", () => dmSocket.state?.rolls[id]?.targets[0]?.dice);
     await dmCard.getByText(/^rolled \d+ \(/).waitFor();
@@ -3988,6 +4017,8 @@ async function proficiencyGroup(sweep: Sweep, page: Page, shot: (page: Page, nam
   const rolled = () => (dmSocket.state?.log ?? []).filter((entry) => entry.data?.type === "dice" && entry.data.rolls.some((roll) => roll.tokenId === FL7.token)).length;
   const before = rolled();
   const start = host.getByRole("button", { name: /^Roll \d+ saves?( and ask \d+ players?)?$|^Ask \d+ players?$/ }).first();
+  // The monster rolls on the server, so the page's Roll has a menu, with the batch help.
+  await rollMenuScreen(sweep, page, "dpf1-menu-group-page", start, /^Roll options for Roll \d+ saves?/, host);
   await start.click();
   await waitFor("fl7: the group's server result lands", () => rolled() > before || null);
   await proficiencyScreen(sweep, page, "group-results", host);
@@ -4015,6 +4046,7 @@ async function proficiencyEncounter(sweep: Sweep, page: Page, shot: (page: Page,
   await proficiencyLevel(card, /^Concentration save$/, "prof");
   await proficiencyScreen(sweep, page, "concentration", card);
   await shot(page, "concentration");
+  await rollMenuScreen(sweep, page, "dpf1-menu-concentration", card.getByRole("button", { name: /^Roll [+−-]\d+/ }).first(), /^Roll options for Concentration save for FL7 Monster$/, card);
   await card.getByRole("button", { name: "Passed", exact: true }).click();
   await ops.send({ t: "actor.effect.remove", target: { tokenId: FL7.token }, effectId: concentration });
   await escapeAll(page);
@@ -4034,6 +4066,7 @@ async function proficiencyEncounter(sweep: Sweep, page: Page, shot: (page: Page,
   await proficiencyLevel(ends, /^Strength save$/, "prof");
   await proficiencyScreen(sweep, page, "save-ends", ends);
   await shot(page, "save-ends");
+  await rollMenuScreen(sweep, page, "dpf1-menu-save-ends", ends.getByRole("button", { name: /^Roll [+−-]\d+/ }).first(), /^Roll options for Strength save.* for FL7 Monster$/, ends);
   await ops.send({ t: "actor.effect.remove", target: { tokenId: FL7.token }, effectId });
   await ops.send({ t: "actor.hp", target: { tokenId: FL7.token }, change: { kind: "heal", amount: 1 } });
   await restartFight();
