@@ -2162,15 +2162,17 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
       await dm.evaluate(() => {
         type Sample = { clones: number; ms: number; elements: number };
         type ProbeNode = { parentElement: { closest(s: string): { querySelectorAll(s: string): { length: number } } | null } | null };
-        type Probe = { document: { querySelector(s: string): { querySelectorAll(s: string): { length: number } } | null }; Node: { prototype: { cloneNode(this: ProbeNode, deep?: boolean): unknown } }; fu41CloneSample?: Sample; fu41RestoreClone?: () => void };
+        type Probe = { Node: { prototype: { cloneNode(this: ProbeNode, deep?: boolean): unknown } }; fu41CloneSample?: Sample; fu41RestoreClone?: () => void };
         const w = globalThis as unknown as Probe;
         const original = w.Node.prototype.cloneNode;
-        w.fu41CloneSample = { clones: 0, ms: 0, elements: w.document.querySelector("dialog[open][data-rvtt-sheet] [data-pane-body]")?.querySelectorAll("*").length ?? 0 };
+        // The element count is taken from the body the capture copies, at its first copy.
+        w.fu41CloneSample = { clones: 0, ms: 0, elements: 0 };
         w.Node.prototype.cloneNode = function(deep) {
-          const inBody = this.parentElement?.closest("[data-pane-body]") != null;
+          const body = this.parentElement?.closest("[data-pane-body]") ?? null;
           const start = performance.now();
           const result = original.call(this, deep);
-          if (inBody && w.fu41CloneSample) {
+          if (body && w.fu41CloneSample) {
+            if (w.fu41CloneSample.clones === 0) w.fu41CloneSample.elements = body.querySelectorAll("*").length;
             w.fu41CloneSample.clones++;
             w.fu41CloneSample.ms += performance.now() - start;
           }
@@ -2190,9 +2192,12 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     };
     await setUp(dm, { width: 390, height: 844, scale: 1 });
     await dmCdp.send("Emulation.setCPUThrottlingRate", { rate: 6 });
+    // Cleanup deletes the page only once it exists, so a failed setup is not hidden behind the delete's refusal.
+    let created = false;
     try {
       const text = Array.from({ length: 8 }, (_, i) => `- Row ${i}: **A long journal entry** with a [reference](https://example.com).`).join("\n");
-      await ops.send({ t: "journal.create", page: { id: pageId, title: "FU41 clone measurement", access: "dm", blocks: Array.from({ length: 40 }, (_, i) => ({ id: randomUUID(), text, ...(i === 0 ? { secret: { revealed: false } } : {}) })) } });
+      await ops.send({ t: "journal.create", page: { id: pageId, title: "FU41 clone measurement", access: "dm", blocks: Array.from({ length: 40 }, (_, i) => ({ id: `fu41block${String(i).padStart(3, "0")}`, text, ...(i === 0 ? { secret: true as const } : {}) })) } });
+      created = true;
       let sheet = await openPanel(dm, "Journal");
       const back = sheet.getByRole("button", { name: /^Back to Journal/ });
       if (await back.count()) await back.click();
@@ -2219,7 +2224,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     } finally {
       await dmCdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
       if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
-      await ops.send({ t: "journal.delete", pageId });
+      if (created) await ops.send({ t: "journal.delete", pageId });
     }
   });
 
