@@ -145,6 +145,18 @@ function spacingInPage(roots: DomElement[], opts: PageOptions): SpacingFinding[]
     for (let n = el.nextElementSibling; n; n = n.nextElementSibling) if (shown(n)) return n;
     return null;
   };
+  const sectionContent = (label: DomElement) => {
+    const next = nextShown(label);
+    if (next) return next;
+    const holder = label.parentElement;
+    // Panels puts each section heading alone in a full-width list item before its content items.
+    if (holder?.tagName === "LI" && holder.children.length === 1 && holder.children[0] === label && holder.parentElement?.matches("ul, ol")) {
+      const item = nextShown(holder);
+      if (item?.children.length === 1 && item.children[0]?.matches("[data-section-label]")) return null;
+      return item;
+    }
+    return null;
+  };
 
   /** The rects of an element's words in document order, each with the element that holds them. */
   function wordRects(el: DomElement): { r: DomRect; el: DomElement }[] {
@@ -261,7 +273,7 @@ function spacingInPage(roots: DomElement[], opts: PageOptions): SpacingFinding[]
     for (const label of within("[data-section-label]", true)) {
       // FoldLabel intentionally unmounts or hides its content while closed.
       if (label.querySelector('button[aria-expanded="false"]')) continue;
-      const next = nextShown(label);
+      const next = sectionContent(label);
       if (!next) { skip("section-label", label, "no shown content follows"); continue; }
       const box = label.getBoundingClientRect();
       const nextTop = next.getBoundingClientRect().top;

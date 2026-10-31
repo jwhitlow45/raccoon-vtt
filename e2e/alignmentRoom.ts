@@ -3523,6 +3523,11 @@ export function helperTest(): void {
         <div class="page" id="settings-padding"><section>${label("Battery", "h4")}${switchRow("Low power")}</section><div class="column" style="padding-top: 16px; border-top: 1px solid #444"><h4 class="label" data-section-label style="padding-bottom: 8px">Saves</h4>${switchRow("Roll for all")}</div><section>${label("Sounds", "h4")}${switchRow("Turn sound")}</section></div>
         <div class="page" id="settings-folds"><section>${foldRow("Fog")}<div class="column">${switchRow("Fog")}</div></section><section>${foldRow("Map detail")}<fieldset><legend>Map images</legend><div class="column">${cards("margin-top: 8px")}</div></fieldset></section><section>${foldRow("Sounds")}${switchRow("Turn sound")}</section></div>
 
+        ${[8, 4].map((gap) => `<ul class="page" id="fu41-c-panel-list-${gap}" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:${gap}px;list-style:none;padding:0">
+          <li style="grid-column:1 / -1">${label("In play")}</li><li><button>Dice</button></li><li><button>Journal</button></li>
+          <li style="grid-column:1 / -1;padding-top:8px">${label("Prepare")}</li><li><button>Characters</button></li><li><button>Scenes</button></li>
+        </ul>`).join("")}
+        <ul class="page" id="fu41-c-empty-panel-group" style="display:grid;gap:8px;list-style:none;padding:0"><li>${label("Empty section")}</li><li>${label("Next section")}</li><li><button>Dice</button></li></ul>
         <div class="page" id="heads-off"><div class="column" style="gap: 4px"><h4 class="plain">Changes</h4><p>What changed in the rules.</p></div><div class="column" style="gap: 8px"><h4 class="plain">Credits</h4><p>Who made the art.</p></div></div>
         <div class="page" id="heads-ruled"><div class="column" style="gap: 4px"><h3 class="plain-h3">Adult Red Dragon</h3><p>Monster, CR 17.</p></div><div class="column" style="gap: 8px"><h3 class="plain-h3" style="padding-bottom: 2px; border-bottom: 1px solid #444">Adult Red Dragon</h3><p>Huge Dragon (Chromatic), Chaotic Evil</p></div></div>
         <div class="page" id="heads-plain-h3"><div class="column" style="gap: 4px"><h3 class="plain-h3">Adult Red Dragon</h3><p>Monster, CR 17.</p></div><div class="column" style="gap: 8px"><h3 class="plain-h3">Adult Red Dragon</h3><p>Huge Dragon (Chromatic), Chaotic Evil</p></div></div>
@@ -3601,6 +3606,14 @@ export function helperTest(): void {
         await fails("#field-far", /label "Code from the DM's screen" sits 12 px over its field, wants 4$/);
         await passes("#field-near");
         pair(await found("#field-near"), "field-label", "Code from the DM's screen");
+
+        await fails("#fu41-c-empty-panel-group", /skipped section-label "Empty section": no shown content follows/);
+        await passes("#fu41-c-panel-list-8");
+        const panelLabels = await found("#fu41-c-panel-list-8");
+        assert.equal(pair(panelLabels, "section-label", "In play").gap, 8);
+        assert.equal(pair(panelLabels, "section-label", "Prepare").gap, 8);
+        await fails("#fu41-c-panel-list-4", /section label "In play" sits 4 px/);
+        await fails("#fu41-c-panel-list-4", /section label "Prepare" sits 4 px/);
 
         // Rule 2 counts layout boxes: a label 8 over a help and over a switch's row passes, though the switch's words stand 16 under it.
         await passes("#label-help");
