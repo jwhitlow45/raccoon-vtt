@@ -45,7 +45,7 @@ import { editsPcStats } from "../tokens/access.ts";
 import { announceTurn } from "../encounter/alerts.ts";
 import { chromeZoom, screenHeight, smallUi, useLayoutSize } from "../device/layout.ts";
 import { uiScale, useUiScale } from "../device/settings.ts";
-import { rollArrival } from "./rollFocus.ts";
+import { answerFocus, rollArrival } from "./rollFocus.ts";
 import { askedText, askItems, askKept, bestChoice, cardRoll, choiceLabel, KEPT, naturalText, normalResult, requestRollSource, rolledText, RollResultLine, parseBonus, rolledDice, verdictText, type AskItem, type RollInputs } from "./card.ts";
 import {
   answered,
@@ -658,8 +658,8 @@ export function RollCard(props: {
     tabIndex: -1,
     hidden: props.hidden,
     onFocus: (e: FocusEvent<HTMLElement>) => {
-      const key = e.target.closest<HTMLElement>("[data-roll-answer-row]")?.dataset.rollAnswerRow;
-      if (key) focusedAnswer.current = { key, node: e.target };
+      const answer = answerFocus(e.target);
+      if (answer) focusedAnswer.current = answer;
       props.onFocusWithin(true);
     },
     onBlur: (e: FocusEvent<HTMLElement>) => {

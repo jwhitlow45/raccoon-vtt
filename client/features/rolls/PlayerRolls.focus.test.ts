@@ -1,9 +1,23 @@
 import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { registerHooks } from "node:module";
 import type { RollRequest, RollTarget } from "#shared/model.ts";
 import { targetKey } from "./logic.ts";
-import { focusRollHeader, rollArrival } from "./rollFocus.ts";
+import { answerFocus, focusRollHeader, rollArrival } from "./rollFocus.ts";
+
+// Replay the card's real result effect after driving the handler returned by its rendered section.
+const effects: (() => void)[] = [];
+const captureEffect = Symbol.for("fu41-roll-focus-effect");
+(globalThis as Record<symbol, unknown>)[captureEffect] = (run: () => void) => effects.push(run);
+registerHooks({ load(url, context, next) {
+  const result = next(url, context);
+  if (!url.endsWith("/rolls/PlayerRolls.tsx")) return result;
+  const source = String(result.source);
+  const captured = source.replaceAll("useEffect(() =>", 'globalThis[Symbol.for("fu41-roll-focus-effect")](() =>');
+  assert.notEqual(source, captured, "capture the real card effect without copying its body");
+  return { ...result, source: captured };
+} });
 
 type FocusNode = { isConnected: boolean; dataset?: { rollAnswerRow: string }; closest(selector?: string): FocusNode | null; contains(node: unknown): boolean };
 function probe() {
@@ -32,8 +46,8 @@ function probe() {
   };
   const focus = (node: FocusNode) => {
     document.activeElement = node;
-    const key = node.closest("[data-roll-answer-row]")?.dataset?.rollAnswerRow;
-    if (key) focusedAnswer.current = { key, node };
+    const answer = answerFocus(node);
+    if (answer) focusedAnswer.current = answer;
   };
   const land = (id: string) => {
     request.targets = request.targets.map((t): RollTarget => t.characterId === id ? { ...t, tag: `${id}-roll`, total: 12, dice: { formula: "1d20", faces: [12], total: 12 } } : t);
@@ -119,4 +133,73 @@ test("each rendered answer row exposes its own focus identity", async () => {
   const card = createElement(RollCard, { request, cardRef: createRef<HTMLElement>(), drafts: new Map(), sheet: false, hidden: false, stand: "toolbar", stickyHeader: false, whole: 0, onMeasure() {}, onFold() {}, onEngage() {}, onFocusWithin() {} });
   const html = renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, assets: { url: () => "" } as never, children: createElement(RoomScopeProvider, { scope: new RoomScope(), children: card }) }));
   assert.deepEqual([...html.matchAll(/data-roll-answer-row="([^"]+)"/g)].map((m) => m[1]), ["c:thorn", "c:ash"]);
+});
+
+test("the rendered card's focus handler records the row used by its real result effect", async () => {
+  const { createElement, createRef } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { createStore } = await import("zustand/vanilla");
+  const { RoomProvider } = await import("../../state/view.ts");
+  const { RoomScope, RoomScopeProvider } = await import("../../state/scope.ts");
+  const { RollCard } = await import("./PlayerRolls.tsx");
+  const { character, DM, room } = await import("#shared/testutil.ts");
+  const state = room({ characters: { thorn: character("thorn"), ash: character("ash") } });
+  const request: RollRequest = { id: "ask", rev: 0, at: "", dcShown: false, resultShown: false, test: { kind: "save", choices: [{ ability: "dex" }] }, targets: [{ characterId: "thorn" }, { characterId: "ash" }] };
+  const store = createStore(() => ({ view: state, you: DM, roomId: "r1", sceneId: "s1", connection: "open", local: { selectedIds: [], multi: false } }));
+  const cardRef = createRef<HTMLElement>();
+  let focuses = 0;
+  let engaged = 0;
+  const within: boolean[] = [];
+  let focusHandler: ((event: { target: FocusNode }) => void) | undefined;
+  let resultEffect: (() => void) | undefined;
+  const wireHeader = (tree: unknown): boolean => {
+    if (Array.isArray(tree)) return tree.some(wireHeader);
+    const props = (tree as { props?: { ref?: { current: unknown }; "aria-label"?: string; children?: unknown } } | null)?.props;
+    if (!props) return false;
+    if (props["aria-label"] === "Fold it into a chip, to answer later" && props.ref) {
+      props.ref.current = { focus: () => focuses++ };
+      return true;
+    }
+    return wireHeader(props.children);
+  };
+  function Probe() {
+    const start = effects.length;
+    const tree = RollCard({ request, cardRef, drafts: new Map(), sheet: false, hidden: false, stand: "toolbar", stickyHeader: false, whole: 0, onMeasure() {}, onFold() {}, onEngage() { engaged++; }, onFocusWithin(inside) { within.push(inside); } });
+    focusHandler = tree.props.onFocus;
+    assert.equal(effects.length - start, 1, "the card supplies its result effect");
+    resultEffect = effects[start];
+    assert.ok(wireHeader(tree), "use the real header button's ref");
+    return tree;
+  }
+  renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, assets: { url: () => "" } as never,
+    children: createElement(RoomScopeProvider, { scope: new RoomScope(), children: createElement(Probe) }) }));
+  assert.ok(focusHandler);
+  assert.ok(resultEffect);
+  const card: FocusNode = { isConnected: true, closest: () => null, contains: () => true };
+  const row: FocusNode = { isConnected: true, dataset: { rollAnswerRow: "c:thorn" }, closest() { return this; }, contains: () => false };
+  const thorn: FocusNode = { isConnected: true, closest: () => row, contains: () => false };
+  const body = { isConnected: true };
+  const document = { body, activeElement: thorn as unknown };
+  const saved = globalThis.document;
+  Object.assign(globalThis, { document });
+  cardRef.current = card as unknown as HTMLElement;
+  try {
+    resultEffect();
+    focusHandler({ target: thorn });
+    const land = (id: string) => {
+      request.targets = request.targets.map((target) => target.characterId === id ? { ...target, tag: id, dice: { formula: "1d20", faces: [12], total: 12 }, total: 12 } : target);
+      resultEffect!();
+    };
+    land("ash");
+    assert.equal(focuses, 0, "a sibling result leaves the focused answer alone");
+    thorn.isConnected = false;
+    document.activeElement = card;
+    focusHandler({ target: card });
+    land("thorn");
+    assert.equal(focuses, 1, "the real handler remembered the removed answer row");
+    assert.equal(engaged, 2);
+    assert.deepEqual(within, [true, true]);
+  } finally {
+    Object.assign(globalThis, { document: saved });
+  }
 });

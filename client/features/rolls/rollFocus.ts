@@ -3,6 +3,14 @@ import { targetKey } from "./logic.ts";
 import { rolledNews } from "./card.ts";
 
 type FocusNode = { readonly isConnected: boolean };
+
+/** Remember the answer row before React replaces its focused control with a result. */
+export function answerFocus<T extends FocusNode & { closest(selector: string): unknown }>(target: T): { key: string; node: T } | null {
+  const row = target.closest("[data-roll-answer-row]") as { dataset?: { rollAnswerRow?: string } } | null;
+  const key = row?.dataset?.rollAnswerRow;
+  return key ? { key, node: target } : null;
+}
+
 export type RollFocus = {
   card: FocusNode | null;
   active: FocusNode | null;
