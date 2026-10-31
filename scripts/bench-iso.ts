@@ -543,6 +543,26 @@ function nodeAt(page: Page, id: string): Promise<{ x: number; y: number }> {
 }
 
 /** The camera of the board on screen, to check that a pan moved it. */
+/** How many pin labels the page shows, Konva text reading "Pin n" on a stage shown, and how many of those lie on its screen. */
+function pinLabels(page: Page): Promise<{ shown: number; onScreen: number }> {
+  return page.evaluate(() => {
+    type Node = { text?(): string; isVisible(): boolean; getClientRect(): { x: number; y: number; width: number; height: number } };
+    type Stage = { width(): number; height(): number; visible(): boolean; find(s: string): Node[] };
+    const konva = (globalThis as unknown as { Konva: { stages: Stage[] } }).Konva;
+    let shown = 0;
+    let onScreen = 0;
+    for (const st of konva.stages.filter((s) => s.width() > 0 && s.visible())) {
+      for (const t of st.find("Text")) {
+        if (!/^Pin \d+$/.test(t.text?.() ?? "") || !t.isVisible()) continue;
+        shown++;
+        const r = t.getClientRect();
+        if (r.x + r.width > 0 && r.y + r.height > 0 && r.x < st.width() && r.y < st.height()) onScreen++;
+      }
+    }
+    return { shown, onScreen };
+  });
+}
+
 function stageAt(page: Page): Promise<{ x: number; y: number }> {
   return page.evaluate(() => {
     type Stage = { width(): number; x(): number; y(): number; listening(): boolean };
@@ -1231,21 +1251,29 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       }
     }
 
-    // About 30 pin labels round the camera with the four area names: the pills the drag and overlay layers slide through a pan (5.8).
+    /*
+     * 30 pin labels round the camera with the four area names: the pills the
+     * drag and overlay layers slide through a pan (5.8). At 40 px, since a
+     * pin shows its label only from 24 px a cell (pins/rules.ts
+     * LABEL_MIN_CELL_PX), and within three cells of the camera's middle, so
+     * most stand on the phone's screen (review HXPERF2B-ASTRA-06).
+     */
     const pinIds = Array.from({ length: 30 }, (_, i) => `bench-pin-${String(i + 1).padStart(4, "0")}`);
-    const putPins = async (dm: Socket) => {
+    const putPins = async (dm: Socket, at: { x: number; y: number }) => {
       for (const [i, id] of pinIds.entries()) {
-        await dm.op({ t: "pin.put", pin: { id, sceneId: dm.sceneId, x: 8.5 + (i % 6) * 4.5, y: 9.5 + Math.floor(i / 6) * 5, color: "#f7df00", label: `Pin ${i + 1}`, visibility: "all" } });
+        await dm.op({ t: "pin.put", pin: { id, sceneId: dm.sceneId, x: at.x - 2.5 + (i % 6) * 1.1, y: at.y - 3 + Math.floor(i / 6) * 1.4, color: "#f7df00", label: `Pin ${i + 1}`, visibility: "all" } });
       }
     };
     const removePins = async (dm: Socket) => {
       for (const id of pinIds) await dm.op({ t: "pin.remove", pinId: id });
     };
     if (!opts.only || opts.only.some((o) => PILLS_ROW.includes(o) || HIDDEN_PILLS_ROW.includes(o))) {
-      const dm = await open("hexRows", 12);
-      await putPins(dm);
+      const dm = await open("hexRows", 40);
+      await putPins(dm, built.hexRows!.scene.at40);
       await frames(page, 30);
       if (view === "isometric") await waitStood(page);
+      const labels = await pinLabels(page);
+      if (labels.shown < pinIds.length || labels.onScreen < 20) throw new Error(`the pins' labels do not show: ${JSON.stringify(labels)}`);
       await addPan(PILLS_ROW, () => touchPan(page, cdp, STEPS));
       if (view === "isometric") {
         // Back in Top-down with the isometric tree kept and hidden: its pills hear no camera (review HXPERF2B-ASTRA-01).
@@ -1455,8 +1483,8 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
 
 const BRUSH_ROW = "a brush stroke's step from another device of the DM's, caps, 40 px";
 const PITS_ROW = "pan, 12 px, a 200 by 200 square scene sunk 100 ft";
-const PILLS_ROW = hexRow("rows", "pan, 12 px, with 30 pin labels and the four area names");
-const HIDDEN_PILLS_ROW = hexRow("rows", "pill board views rendered a move, a Top-down pan with the isometric tree hidden, 30 pin labels (calls, not ms)");
+const PILLS_ROW = hexRow("rows", "pan, 40 px, with 30 pin labels and the four area names");
+const HIDDEN_PILLS_ROW = hexRow("rows", "pill board views rendered a move, a Top-down pan at 40 px with the isometric tree hidden, 30 pin labels (calls, not ms)");
 const patBarRow = (zoom: number) => hexRow("rows", `pan, ${zoom} px, on Pat's page with her action bar shown`);
 const PAT_FOG_HEX_ROW = hexRow("rows", "a fog tile revealed each step on Pat's board, the four areas standing, 40 px");
 const PAT_FOG_GIANT_ROW = "a fog tile revealed each step on Pat's board, 200 by 200 hex rows with the 500 ft emanation standing, 40 px";
