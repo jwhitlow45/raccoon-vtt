@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import sharp from "sharp";
+import { build } from "vite";
 import { chromium, type Browser, type BrowserContext, type ElementHandle, type Locator, type Page, type WebSocketRoute } from "playwright-core";
 import { ddbSheetUrl } from "../shared/ddb/link.ts";
 import { readDdbCharacter } from "../shared/ddb/read.ts";
@@ -2947,6 +2948,11 @@ const CASES = `
     <span style="flex: 1 1 190px; min-width: 0">Speed</span><svg width="16" height="16" viewBox="0 0 16 16" style="flex: none"><rect width="16" height="16" fill="#aaa"/></svg>
   </div>
 </div>
+<div data-case="fu41-c-unnamed-pictures" style="width: 200px">
+  <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">
+    <svg width="16" height="44" viewBox="0 0 16 44" style="flex: none; margin-right: 174px"><rect width="16" height="44" fill="#aaa"/></svg><button style="flex: none; width: 60px">On</button><button style="flex: none; width: 60px">Off</button>
+  </div>
+</div>
 <div data-case="icon-label-alone" style="width: 300px">
   <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">
     <svg width="16" height="16" viewBox="0 0 16 16" style="flex: none"><rect width="16" height="16" fill="#aaa"/></svg><span style="flex: 1 1 240px; min-width: 0">Light</span><button style="flex: none; width: 60px">On</button><button style="flex: none; width: 60px">Off</button>
@@ -3068,6 +3074,35 @@ export function alignmentFile(title: string, steps: () => void): void {
 
 /** pl3-0: the helper on drawn cases, which needs no room. */
 export function helperTest(): void {
+  test("fu41-c-font. unbundled glyphs fit their frame at 130% while clipped frames still fail", async () => {
+    const page = await dmContext.newPage();
+    try {
+      for (const scale of [1, 1.3]) {
+        await page.setContent(`<div id="fallback" style="font:20px/2 monospace;color:#eee;background:#222;padding:20px;zoom:${scale}">${markedUnit("prof", "HMMMM", { style: "padding:4px" })}</div>`);
+        const root = page.locator("#fallback");
+        assert.deepEqual(await proficiencyLines(root, "fu41-c-font"), []);
+        await root.locator("[data-proficiency-mark]").evaluate((node) => {
+          (node as unknown as { style: { cssText: string } }).style.cssText += ";display:inline-block;height:2px;padding:0;text-box:normal";
+        });
+        assert.match((await proficiencyLines(root, "fu41-c-clipped-font")).join("\n"), /crosses its own words/);
+      }
+    } finally {
+      await page.close();
+    }
+  });
+  test("fu41-c-roots. missing selectors fail both measurement helpers unless explicitly optional", async () => {
+    const page = await dmContext.newPage();
+    try {
+      await page.setContent('<div id="present">Measured words</div>');
+      for (const measure of [measureAlignment, measureSpacing]) {
+        await assert.rejects(() => measure(page.locator("#presnet")), /no roots matched/);
+        assert.deepEqual(await measure(page.locator("#presnet"), { optional: true }), []);
+        assert.deepEqual(await measure(page.locator("#present")), []);
+      }
+    } finally {
+      await page.close();
+    }
+  });
   test("fl5-d. radio card groups keep their outer edge, while moved groups, card boxes and contents still fail", async () => {
     const page = await dmContext.newPage();
     try {
@@ -3207,6 +3242,15 @@ export function helperTest(): void {
       // A picture is neither a name nor a control (FU40AC-OPUS-4): one wrapped alone under words is an orphan, and an icon beside a name keeps the name's label check over two buttons.
       await caught("picture-alone", "wrap-orphan");
       await passes("picture-under-name");
+      // The picture's margin wraps the controls, but the picture itself fits beside them. It supplies no name.
+      for (const zoom of [1, 1.3]) {
+        const pictures = page.locator('[data-case="fu41-c-unnamed-pictures"]');
+        await pictures.evaluate((el, z) => { (el as unknown as { style: { zoom: string } }).style.zoom = String(z); }, zoom);
+        const buttons = await pictures.locator("button").all();
+        const picture = (await pictures.locator("svg").boundingBox())!;
+        assert.ok((await buttons[0]!.boundingBox())!.y > picture.y, "fu41-c: controls really wrapped below the unnamed picture");
+        assert.deepEqual((await lines("fu41-c-unnamed-pictures")).filter((line) => line.includes(": wrap-label ")), []);
+      }
       await caught("icon-label-alone", "wrap-label");
       await caught("hint-high", "center");
       await passes("hint-centered");
@@ -3489,6 +3533,20 @@ export function helperTest(): void {
         <div class="flat" id="alone"><section id="alone-root">${label("Show a handout")}<p class="help">Pick an image.</p></section><fieldset class="grid"><legend>Show to</legend>${cards()}</fieldset></div>
         <div class="page" id="inside"><section id="inside-root">${label("Show a handout")}<p class="help">Pick an image.</p></section><fieldset class="grid"><legend>Show to</legend>${cards()}</fieldset></div>`);
 
+        await page.locator("body").evaluate((body) => {
+          (body as unknown as { insertAdjacentHTML(where: string, html: string): void }).insertAdjacentHTML("beforeend", `
+            <div class="page" id="fu41-c-no-name"><div data-card-group aria-label="Unnamed choices"><button>A choice</button></div></div>
+            <div class="page" id="fu41-c-hidden-name"><span id="fu41-hidden" hidden>Hidden choices</span><div data-card-group aria-labelledby="fu41-hidden"><button>A choice</button></div></div>
+            <div class="page" id="fu41-c-empty-cards"><span id="fu41-empty-name">Empty choices</span><div data-card-group aria-labelledby="fu41-empty-name"></div></div>
+            <div class="page" id="fu41-c-no-content"><h4 data-section-label>Stranded label</h4></div>
+            <div class="page" id="fu41-c-missing-field"><div style="display:grid;grid-template-columns:1fr"><label for="fu41-absent">Missing field</label></div></div>
+            <div class="page" id="fu41-c-hidden-field"><div style="display:grid;grid-template-columns:1fr"><label for="fu41-hidden-field">Hidden field</label><input id="fu41-hidden-field" hidden></div></div>
+            <div class="page" id="fu41-c-beside-label"><div style="display:flex;align-items:start"><h4 data-section-label>Beside content</h4><p>Wrong direction</p></div></div>
+            <div class="page" id="fu41-c-hidden-structures"><div hidden><div data-card-group>No name</div><h4 data-section-label>No content</h4></div><h4 data-section-label hidden>Closed section</h4><div data-section-label><h4><button aria-expanded="false">Folded section</button></h4></div><div hidden>Kept content</div></div>
+            <div class="page" id="fu41-c-heading-link"><div class="column" style="gap:4px"><h4 class="plain">Usual heading</h4><p>Usual content.</p></div><div class="column" style="gap:12px"><h4 class="plain"><a href="#credits">Linked heading</a></h4><p>Displaced content.</p></div></div>
+            <div class="page" id="fu41-c-heading-column"><div class="column" style="gap:4px"><h4 class="plain">Usual heading</h4><p>Usual content.</p></div><div class="column" style="gap:12px;position:relative"><h4 class="plain">Displaced heading</h4><p>Displaced content.</p><div style="position:absolute;left:220px;top:0"><button>Other column</button></div></div></div>
+          `);
+        });
         const at = `sp-0 ${scale}`;
         const found = (selector: string) => measureSpacing(page.locator(selector));
         const lines = async (selector: string) => spacingLines(await found(selector), `${at} ${selector}`);
@@ -3504,6 +3562,14 @@ export function helperTest(): void {
           return got;
         };
         const passes = async (selector: string) => assert.deepEqual(await lines(selector), [], `${at} ${selector} must pass`);
+
+        for (const [id, reason] of [["no-name", "no name found"], ["hidden-name", "its name is hidden"], ["empty-cards", "no shown card"], ["no-content", "no shown content follows"], ["missing-field", "no field found"], ["hidden-field", "its field is hidden"], ["beside-label", "the next shown box is not below it"]]) {
+          await fails(`#fu41-c-${id}`, new RegExp(`skipped .*: ${reason}$`));
+        }
+        // Hidden marked structures have no layout gap. Visible structures with hidden names still fail.
+        await passes("#fu41-c-hidden-structures");
+        await fails("#fu41-c-heading-link", /h4 "Linked heading" sits 12 px/);
+        await fails("#fu41-c-heading-column", /h4 "Displaced heading" sits 12 px/);
 
         // Rule 1: a legend is not a grid item, so a fieldset's gap leaves its cards and help on it. Margins under it pass, with a help and without.
         assert.deepEqual(await lines("#cards-bare"), [`${at} #cards-bare: "Map images" sits 0 px over its first card, wants 8`]);
@@ -4833,7 +4899,7 @@ export function fu30Tests(): void {
       for (const size of [{ width: 1440, height: 900 }, { width: 390, height: 844 }, { width: 320, height: 568 }]) for (const zoom of [1, 1.3]) {
         await page.setViewportSize(size);
         await page.goto(`${server.origin}/admin`);
-        // Found by its actions, not its title: the fixture below renames the title, and a locator found by the old one would match nothing, which measureAlignment reads as nothing out of line.
+        // Found by its actions, not its title: the fixture below renames the title, and a locator found by the old one would match nothing, so the measurement must keep the same required root.
         const header = page.locator("header").filter({ has: page.getByRole("button", { name: "Refresh", exact: true }) });
         await header.getByRole("heading", { name: "Server admin", exact: true }).waitFor();
         await page.evaluate(async () => { await (globalThis as unknown as { document: { fonts: { ready: Promise<unknown> } } }).document.fonts.ready; });
@@ -6174,8 +6240,85 @@ export function undoScopeAlignmentTests(names: readonly string[]): void {
   }
 }
 
+/** Keep LogPanel mounted through blackout so Room's pause screen cannot mask a missing key reset. */
+export async function buildLogHistoryFixture(): Promise<string> {
+  const entry = path.join(ROOT, "client/fu41-log-fixture.tsx");
+  const source = `
+import { createElement as h } from "react";
+import { createRoot } from "react-dom/client";
+import { flushSync } from "react-dom";
+import { createStore } from "zustand/vanilla";
+import { RoomProvider } from "./state/view.ts";
+import { RoomScope, RoomScopeProvider } from "./state/scope.ts";
+import { PreviewContext } from "./features/dm/previewContext.ts";
+import LogPanel from "./panels/LogPanel.tsx";
+import { createFixtureState, FIXTURE_IDS } from "./dev/fixture.ts";
+const mode = new URL(location.href).searchParams.get("mode");
+const preview = mode === "preview" ? { memberId: FIXTURE_IDS.thorn, name: "Thorn" } : null;
+const view = createFixtureState({ fog: "off", blackout: false });
+view.log = [];
+view.trapLog = [];
+view.trapSeen = [];
+const sceneId = view.meta.playerSceneId;
+const store = createStore(() => ({ roomId: "FU41LOG1", sceneId, view,
+  you: { memberId: mode === "dm" ? FIXTURE_IDS.dm : FIXTURE_IDS.thorn, role: mode === "dm" ? "dm" : "player" } }));
+const requests = [];
+window.fetch = (url, options) => {
+  if (!String(url).includes("/log?") && !String(url).endsWith("/log")) throw new Error("Unexpected fixture request: " + url);
+  return new Promise(resolve => requests.push({ url: String(url), signal: options.signal, resolve }));
+};
+window.fu41Log = {
+  requests,
+  sceneId,
+  blackout(on) {
+    const s = store.getState();
+    flushSync(() => store.setState({ view: { ...s.view, meta: { ...s.view.meta, view: { ...s.view.meta.view, blackout: on } } } }));
+    if (store.getState().sceneId !== sceneId || store.getState().view.meta.playerSceneId !== sceneId) throw new Error("Fixture changed the scene");
+  },
+  async release(index) {
+    const row = { id: "0:" + (900 - index), at: "2026-10-30T19:00:00Z", kind: "event",
+      data: { type: "hp", change: "damage", amount: 73, left: { cur: 17, max: 90, temp: 0 } } };
+    requests[index].resolve(new Response(JSON.stringify({ entries: [row], nextBefore: row.id, nextAfter: row.id,
+      ...(preview ? { as: preview.memberId } : {}) }), { headers: { "content-type": "application/json" } }));
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  }
+};
+createRoot(document.getElementById("fu41-log-root")).render(
+  h(RoomScopeProvider, { scope: new RoomScope() },
+    h(RoomProvider, { store, actions: { dispatch: () => null }, ui: {} },
+      h(PreviewContext.Provider, { value: preview }, h(LogPanel, {}))))
+);
+`;
+  const built = await build({
+    configFile: path.join(ROOT, "vite.config.ts"),
+    configLoader: "native",
+    logLevel: "error",
+    plugins: [{ name: "fu41-log-fixture", resolveId: (id) => id === entry ? entry : undefined, load: (id) => id === entry ? source : undefined }],
+    build: { write: false, sourcemap: false, minify: false, rollupOptions: { input: entry, output: { format: "iife", codeSplitting: false } } },
+  });
+  const outputs = Array.isArray(built) ? built : [built];
+  const script = outputs.flatMap((output) => "output" in output ? output.output : []).find((output) => output.type === "chunk" && output.isEntry);
+  if (!script || script.type !== "chunk") throw new Error("FU41 log fixture produced no entry");
+  return script.code;
+}
+
+type LogBlackoutFixture = {
+  requests: { url: string; signal: { aborted: boolean } }[];
+  sceneId: string;
+  blackout(on: boolean): void;
+  release(index: number): Promise<void>;
+};
+
 /** The sizes where the sweep measures the Log's history, its export sheet and the admin Rooms card (docs/design-v1-log-history.md 5.4). */
 const LOG_AT = new Set(["390x844", "320x568", "1440x900"]);
+
+/** New tabs inherit the context's original size, even after its room tab was resized. */
+async function openAdminAt(page: Page, size: { width: number; height: number }): Promise<void> {
+  const viewport = { width: size.width, height: size.height };
+  await page.setViewportSize(viewport);
+  assert.deepEqual(page.viewportSize(), viewport, "fu41-c: requested admin viewport before navigation");
+  await page.goto(`${server.origin}/admin`);
+}
 
 /** A page of `archive` by the rules of GET /log (docs/design-v1-log-history.md 2.2): exclusive bounds, oldest first. */
 function archivePage(archive: readonly { id: string }[], q: URLSearchParams): { entries: unknown[]; nextBefore: string | null; nextAfter: string | null } {
@@ -6209,6 +6352,60 @@ function archivePage(archive: readonly { id: string }[], q: URLSearchParams): { 
  * page budget or its hourly export limit.
  */
 export function logHistoryTests(): void {
+  let fixture: Promise<string> | undefined;
+  for (const mode of ["player", "preview", "dm"] as const) {
+    test(`fu41-c-log-${mode}. delayed HP pages cannot cross blackout or resume for players and previews`, async () => {
+      const page = await dmContext.newPage();
+      try {
+        fixture ??= buildLogHistoryFixture();
+        const url = `${server.origin}/fu41-log-fixture?mode=${mode}`;
+        await page.route(url, (route) => route.fulfill({ contentType: "text/html", body: '<meta name="viewport" content="width=device-width, initial-scale=1"><div id="fu41-log-root"></div>' }));
+        await page.goto(url);
+        await page.addScriptTag({ content: await fixture });
+        const older = page.getByRole("button", { name: "Show older", exact: true });
+        const hp = page.locator("[data-log-id]").filter({ hasText: "73 damage" });
+        const request = async (count: number) => {
+          await older.click();
+          await waitFor(`fu41-c ${mode}: page ${count} requested`, async () => (await page.evaluate(() => (globalThis as unknown as { fu41Log: LogBlackoutFixture }).fu41Log.requests.length)) === count || null);
+        };
+        const blackout = (on: boolean) => page.evaluate((value) => (globalThis as unknown as { fu41Log: LogBlackoutFixture }).fu41Log.blackout(value), on);
+        const release = (index: number) => page.evaluate((value) => (globalThis as unknown as { fu41Log: LogBlackoutFixture }).fu41Log.release(value), index);
+        const aborted = (index: number) => page.evaluate((value) => (globalThis as unknown as { fu41Log: LogBlackoutFixture }).fu41Log.requests[value]!.signal.aborted, index);
+        await request(1);
+        const query = new URL(await page.evaluate(() => (globalThis as unknown as { fu41Log: LogBlackoutFixture }).fu41Log.requests[0]!.url), server.origin).searchParams;
+        assert.equal(query.has("sceneId"), mode === "dm", "only a DM's own pages name a scene");
+        assert.equal(query.has("as"), mode === "preview", "preview pages name their player");
+        await blackout(true);
+        assert.equal(await aborted(0), mode !== "dm", "blackout cancels only player and preview pages");
+        await release(0);
+        assert.equal(await hp.count(), mode === "dm" ? 1 : 0, "the pre-blackout answer belongs only to the DM's unchanged window");
+        await request(2);
+        await blackout(false);
+        assert.equal(await aborted(1), mode !== "dm", "resume cancels a page requested during blackout");
+        await release(1);
+        assert.equal(await hp.count(), mode === "dm" ? 2 : 0, "a paused answer cannot repopulate a player's resumed window");
+        await request(3);
+        await release(2);
+        assert.equal(await hp.count(), mode === "dm" ? 3 : 1, "a current answer still renders the HP line");
+        await blackout(true);
+        assert.equal(await hp.count(), mode === "dm" ? 3 : 0, "blackout also resets already loaded player and preview rows");
+      } finally {
+        await page.close();
+      }
+    });
+  }
+  test("fu41-c-admin-viewport. a 320 px admin tab overrides its reused 390 px context", async () => {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    try {
+      const page = await context.newPage();
+      assert.equal(page.viewportSize()?.width, 390, "the context starts at the wider phone size");
+      await page.route(`${server.origin}/admin`, (route) => route.fulfill({ contentType: "text/html", body: '<meta name="viewport" content="width=device-width, initial-scale=1"><p>Admin viewport fixture</p>' }));
+      await openAdminAt(page, { width: 320, height: 568 });
+      assert.equal(await page.evaluate(() => (globalThis as unknown as { innerWidth: number }).innerWidth), 320);
+    } finally {
+      await context.close();
+    }
+  });
   for (const size of SIZES.filter((s) => LOG_AT.has(s.name))) {
     for (const scale of SCALES) {
       const at = `${size.name}${scale === 1 ? "" : "-130"}`;
@@ -6339,7 +6536,7 @@ export function logHistoryTests(): void {
           await admin.route("**/api/admin/rooms", (route) => route.fulfill({ json: { rooms: [
             { id: run.roomId, name: "The Sunless Citadel, with a name long enough to wrap", createdAt: "2026-09-01T19:00:00Z", lastActiveAt: "2026-10-29T22:48:00Z", bytes: 1_234_567_890, images: 42, loaded: true, sockets: 3, pinned: true, readOnly: true },
           ] } }));
-          await admin.goto(`${server.origin}/admin`);
+          await openAdminAt(admin, size);
           const card = admin.locator("section").filter({ has: admin.getByRole("heading", { name: /^Rooms \(\d+\)$/ }) });
           await card.getByText(/^A room's size is what it takes on disk/).waitFor();
           await admin.evaluate(async () => { await (globalThis as unknown as { document: { fonts: { ready: Promise<unknown> } } }).document.fonts.ready; });

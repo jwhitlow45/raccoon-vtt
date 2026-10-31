@@ -115,8 +115,8 @@ import sharp from "sharp";
  * Each check returns readable lines, so a sweep gathers every screen's
  * lines before it fails. None passes by reading nothing: a pill check
  * with no stage or no pill, and a lead check with no group or no word,
- * report that. measureAlignment over a root that matches nothing returns
- * nothing, so its caller requires the root (e2e/alignmentRoom.ts Sweep).
+ * report that. measureAlignment rejects a root that matches nothing,
+ * unless its caller explicitly marks that root optional.
  * With E2E_ALIGN_DEBUG=1 a row's line also gives each part's boxes.
  */
 
@@ -384,7 +384,7 @@ export async function proficiencyLines(root: Locator, screen: string, required =
         // The baseline from the descent the browser rounds to whole pixels as it lays the line out: at the zoomed size, as a zoomed line is laid out (5 px at 16 px and 130%, not 4 px times 1.3).
         context.font = `${look.getPropertyValue("font-style")} ${look.getPropertyValue("font-weight")} ${parseFloat(look.getPropertyValue("font-size")) * zoom}px ${look.getPropertyValue("font-family")}`;
         const baseline = r.bottom - context.measureText(ch).fontBoundingBoxDescent;
-        if (precise) context.font = precise.font;
+        context.font = precise?.font ?? look.font;
         const m = context.measureText(ch);
         const k = (precise?.scale ?? 1) * zoom;
         out.push({ l: r.left - m.actualBoundingBoxLeft * k, r: r.left + m.actualBoundingBoxRight * k, t: baseline - m.actualBoundingBoxAscent * k, b: baseline + m.actualBoundingBoxDescent * k });
@@ -908,7 +908,7 @@ type DomDocument = {
   defaultView: { getComputedStyle(el: DomElement): DomStyle; innerWidth: number; innerHeight: number };
 };
 
-type PageOptions = { limit: number; indent: number; stickyHeader: string; debug: boolean };
+type PageOptions = { limit: number; indent: number; stickyHeader: string; debug: boolean; optional?: boolean };
 
 /** The marks of components/SheetHeader.tsx's sticky header (STICKY_HEADER_ATTR), whose band the frame places. */
 const STICKY_HEADER = "[data-sticky-header]";
@@ -918,6 +918,7 @@ const STICKY_HEADER = "[data-sticky-header]";
  * is one function so evaluate can send it whole.
  */
 function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
+  if (roots.length === 0 && !opts.optional) throw new Error("measureAlignment: no roots matched");
   const LIMIT = opts.limit;
   const INDENT_PX = opts.indent;
   const doc = roots[0]?.ownerDocument;
@@ -1586,9 +1587,9 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
   return findings;
 }
 
-/** The five checks over everything under each element `root` matches. Nothing found when it matches nothing. */
-export async function measureAlignment(root: Locator): Promise<Finding[]> {
-  return root.evaluateAll(measureInPage, { limit: LIMIT_PX, indent: INDENT_PX, stickyHeader: STICKY_HEADER, debug: process.env.E2E_ALIGN_DEBUG === "1" });
+/** The five checks under each matched root. Only an explicitly optional root may be absent. */
+export async function measureAlignment(root: Locator, opts: { optional?: boolean } = {}): Promise<Finding[]> {
+  return root.evaluateAll(measureInPage, { limit: LIMIT_PX, indent: INDENT_PX, stickyHeader: STICKY_HEADER, debug: process.env.E2E_ALIGN_DEBUG === "1", optional: opts.optional });
 }
 
 /** One readable line per finding over the limit, for `screen`. */

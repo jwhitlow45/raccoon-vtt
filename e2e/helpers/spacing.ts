@@ -50,6 +50,8 @@ import { LIMIT_PX } from "./alignment.ts";
  * Gaps are in layout px, as at 100%: what the page draws, through the
  * zoom the element is drawn at. A gap is off when it is more than
  * LIMIT_PX from what its rule wants.
+ * A visible marked group or label that cannot be measured fails with a
+ * named skipped finding. Hidden structures have no gap and are ignored.
  */
 
 export type SpacingRule = "card-name" | "field-label" | "section-label" | "settings" | "headings";
@@ -69,6 +71,8 @@ export type SpacingFinding = {
   /** Rules 3 and 4: how many others in the scroller stand at `want`, and the heading's tag. */
   others?: number;
   tag?: string;
+  /** A required marked structure could not be measured. This always fails. */
+  skipped?: string;
 };
 
 /*
@@ -103,10 +107,11 @@ type DomDocument = {
   defaultView: { getComputedStyle(el: DomElement): DomStyle };
 };
 
-type PageOptions = { limit: number; unit: number };
+type PageOptions = { limit: number; unit: number; optional?: boolean };
 
 /** The four rules over each scroller the roots sit in. One function, so evaluate can send it whole. */
 function spacingInPage(roots: DomElement[], opts: PageOptions): SpacingFinding[] {
+  if (roots.length === 0 && !opts.optional) throw new Error("measureSpacing: no roots matched");
   const doc = roots[0]?.ownerDocument;
   if (!doc) return [];
   const win = doc.defaultView;
@@ -117,6 +122,10 @@ function spacingInPage(roots: DomElement[], opts: PageOptions): SpacingFinding[]
   const round = (n: number) => Math.round(n * 10) / 10 || 0;
   const zoomOf = (el: DomElement) => el.currentCSSZoom ?? 1;
   const words = (node: DomNode | null) => (node?.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 48);
+  const skip = (rule: SpacingRule, el: DomElement, why: string) => out.push({
+    rule, name: el.getAttribute("aria-label") || words(el) || el.getAttribute("id") || el.tagName.toLowerCase(),
+    over: "", gap: 0, want: 0, skipped: why,
+  });
   const kids = (el: DomElement) => Array.from(el.children);
   const drawn = (el: DomElement) => {
     const cs = style(el);
@@ -126,6 +135,11 @@ function spacingInPage(roots: DomElement[], opts: PageOptions): SpacingFinding[]
     if (!drawn(el)) return false;
     const r = el.getBoundingClientRect();
     return r.width > 0.5 && r.height > 0.5;
+  };
+  const required = (el: DomElement) => {
+    // An empty required group can have zero height. Only explicit hiding exempts its structure.
+    for (let node: DomElement | null = el; node; node = node.parentElement) if (!drawn(node)) return false;
+    return true;
   };
   const nextShown = (el: DomElement) => {
     for (let n = el.nextElementSibling; n; n = n.nextElementSibling) if (shown(n)) return n;
@@ -198,16 +212,18 @@ function spacingInPage(roots: DomElement[], opts: PageOptions): SpacingFinding[]
   const FIELD = 'input:not([type="checkbox"]):not([type="radio"]), select, textarea';
 
   for (const scope of scopes.filter((s) => !scopes.some((o) => o !== s && o.contains(s)))) {
-    const within = (selector: string) => [...(scope.matches(selector) ? [scope] : []), ...Array.from(scope.querySelectorAll(selector))].filter(shown);
+    const within = (selector: string, marked = false) => [...(scope.matches(selector) ? [scope] : []), ...Array.from(scope.querySelectorAll(selector))].filter(marked ? required : shown);
 
     // 1. A name over its cards, through the help between them when there is one.
-    for (const group of within("[data-card-group]")) {
+    for (const group of within("[data-card-group]", true)) {
       const name = nameOf(group);
       const first = kids(group).find(shown);
-      if (!name || !shown(name) || !first) continue;
+      if (!name) { skip("card-name", group, "no name found"); continue; }
+      if (!shown(name)) { skip("card-name", name, "its name is hidden"); continue; }
+      if (!first) { skip("card-name", name, "no shown card"); continue; }
       let box: DomElement | null = name;
       while (box && !box.contains(group)) box = box.parentElement;
-      if (!box) continue;
+      if (!box) { skip("card-name", group, "its name and cards have no common container"); continue; }
       const all = Array.from(box.querySelectorAll("*"));
       const between = all.slice(all.indexOf(name) + 1, all.indexOf(group)).filter((el) => !name.contains(el) && !el.contains(group) && shown(el) && wordRects(el).length > 0);
       const helps = between.filter((el) => !between.includes(el.parentElement as DomElement));
@@ -232,20 +248,24 @@ function spacingInPage(roots: DomElement[], opts: PageOptions): SpacingFinding[]
       const columns = grid.getPropertyValue("grid-template-columns").trim();
       if (!grid.display.includes("grid") || (columns !== "none" && columns.split(/\s+/).length !== 1)) continue;
       const field = doc.getElementById(label.getAttribute("for") ?? "");
-      if (!field || !shown(field) || !field.matches(FIELD)) continue;
+      if (!field) { skip("field-label", label, "no field found"); continue; }
+      // Checkbox and radio labels belong to their controls, not the field-gap rule.
+      if (!field.matches(FIELD)) continue;
+      if (!shown(field)) { skip("field-label", label, "its field is hidden"); continue; }
       const gap = (field.getBoundingClientRect().top - label.getBoundingClientRect().bottom) / zoomOf(label);
       out.push({ rule: "field-label", name: words(label), over: "its field", gap: round(gap), want: unit });
     }
 
     // 2 and 3. Section labels, each to what stands under it.
     const settings: { key: string; gap: number; name: string; over: string }[] = [];
-    for (const label of within("[data-section-label]")) {
+    for (const label of within("[data-section-label]", true)) {
+      // FoldLabel intentionally unmounts or hides its content while closed.
+      if (label.querySelector('button[aria-expanded="false"]')) continue;
       const next = nextShown(label);
-      if (!next) continue;
+      if (!next) { skip("section-label", label, "no shown content follows"); continue; }
       const box = label.getBoundingClientRect();
       const nextTop = next.getBoundingClientRect().top;
-      // Beside it in a row, not under it: not its content.
-      if (nextTop < box.top + 1) continue;
+      if (nextTop < box.top + 1) { skip("section-label", label, "the next shown box is not below it"); continue; }
       const cs = style(label);
       const z = zoomOf(label);
       const foot = box.bottom - (num(cs, "padding-bottom") + num(cs, "border-bottom-width")) * z;
@@ -267,9 +287,9 @@ function spacingInPage(roots: DomElement[], opts: PageOptions): SpacingFinding[]
     const heads: { key: string; gap: number; name: string; over: string; tag: string }[] = [];
     for (const h of within("h2, h3, h4")) {
       const cs = style(h);
-      if (cs.textTransform === "uppercase" || h.closest("[data-section-label]") || h.querySelector("[data-section-label]") || h.querySelector(ACTION)) continue;
+      if (cs.textTransform === "uppercase" || h.closest("[data-section-label]") || h.querySelector("[data-section-label]") || h.querySelector("button[aria-expanded]")) continue;
       const box = h.getBoundingClientRect();
-      const mates = h.parentElement ? Array.from(h.parentElement.querySelectorAll(ACTION)) : [];
+      const mates = h.parentElement ? kids(h.parentElement).filter((sibling) => sibling.matches(ACTION)) : [];
       if (mates.some((b) => !h.contains(b) && shown(b) && b.getBoundingClientRect().top < box.bottom && box.top < b.getBoundingClientRect().bottom)) continue;
       const next = nextShown(h);
       if (!next) continue;
@@ -284,20 +304,21 @@ function spacingInPage(roots: DomElement[], opts: PageOptions): SpacingFinding[]
   return out;
 }
 
-/** Every pair the four rules measure in the scrollers `root`'s elements sit in. */
-export async function measureSpacing(root: Locator): Promise<SpacingFinding[]> {
-  return root.evaluateAll(spacingInPage, { limit: LIMIT_PX, unit: theme.space(1) });
+/** Every pair in the roots' scrollers. Only an explicitly optional root may be absent. */
+export async function measureSpacing(root: Locator, opts: { optional?: boolean } = {}): Promise<SpacingFinding[]> {
+  return root.evaluateAll(spacingInPage, { limit: LIMIT_PX, unit: theme.space(1), optional: opts.optional });
 }
 
 /** Whether a measured pair is off its rule's gap. */
 export function spacingOff(f: SpacingFinding): boolean {
-  return Math.abs(f.gap - f.want) > LIMIT_PX;
+  return f.skipped !== undefined || Math.abs(f.gap - f.want) > LIMIT_PX;
 }
 
 /** The lines for what is off, each naming the screen, the pair's words and both numbers. */
 export function spacingLines(findings: readonly SpacingFinding[], screen: string): string[] {
   const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
   return findings.filter(spacingOff).map((f) => {
+    if (f.skipped !== undefined) return `${screen}: skipped ${f.rule} "${f.name}": ${f.skipped}`;
     switch (f.rule) {
       case "card-name":
         return f.help
