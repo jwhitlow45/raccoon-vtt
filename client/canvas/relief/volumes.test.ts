@@ -1,18 +1,19 @@
 import assert from "node:assert/strict";
-import { flatHeights, K, turnAxes, type DrawnHeights } from "../../lib/view.ts";
+import { drawnHeights, flatHeights, K, turnAxes, type DrawnHeights } from "../../lib/view.ts";
 import { SQUARES, type Grid } from "#shared/rules/grid.ts";
 import { cellAtPoint, cellId, cellPolygon, groundSurface, neighborsOf } from "../../lib/groundCells.ts";
 import { drawVolume, pitSweep } from "./drawRelief.ts";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
-import { FOG_SUBCELLS, type FogTile } from "#shared/model.ts";
+import { FOG_SUBCELLS, type BuildChunk, type FogTile } from "#shared/model.ts";
+import { encodeHeights } from "#shared/rules/heights.ts";
 import { tileKey } from "#shared/keys.ts";
 import type { AreaTemplateInput } from "#shared/rules/aoe.ts";
 import { encodeTile, TILE_BYTES, TILE_SUB } from "#shared/rules/fog.ts";
-import { ctxOf } from "../../features/areas/volumeTesting.ts";
+import { ctxOf, mulberry32 } from "../../features/areas/volumeTesting.ts";
 import { FogView } from "./fogView.ts";
 import type { LiveSub } from "./stand.ts";
-import { BoardVolumes, standOf, viewBoxOf, viewKeys, type VolumeEntry, type VolumesNow, type VolumeWorld } from "./volumes.ts";
+import { BoardVolumes, groundChanges, standOf, viewBoxOf, viewKeys, type VolumeEntry, type VolumesNow, type VolumeWorld } from "./volumes.ts";
 
 /*
  * The board's areas standing as their real shapes
@@ -675,5 +676,114 @@ describe("an area that stood, over ground that changed (design 8, review HXR1-AS
     const after = at(heightsOn(ROWS, bounds, { "2,2": 1 }), new FogView(null, "s1", bounds));
     v.sync([{ id: "s", template: ball, ctx: ctxOf(bounds, null), look: LOOK }], { ...after, tiles: {} });
     assert.equal(shows(v.now(0, VIEW, { ...after, tiles: {} })), "s", "the old shape stands meanwhile");
+  });
+});
+
+describe("the ground comparison after a fog change reads only the tiles that changed (docs/design-v1-relief-pan.md 8, D-261030-548)", () => {
+  const SIZE = { w: 40, h: 40 };
+  /** Random heights over the scene's chunks, feet in steps of 5. */
+  function chunksOf(rand: () => number, sceneId: string): Record<string, BuildChunk> {
+    const out: Record<string, BuildChunk> = {};
+    for (let cy = 0; cy * 16 < SIZE.h; cy++) {
+      for (let cx = 0; cx * 16 < SIZE.w; cx++) {
+        const feet = new Int16Array(16 * 16);
+        for (let i = 0; i < feet.length; i++) feet[i] = rand() < 0.4 ? 0 : (Math.floor(rand() * 9) - 3) * 5;
+        out[`${sceneId}:${cx},${cy}`] = { sceneId, cx, cy, rev: 1, cells: {}, edges: {}, heights: encodeHeights(feet) };
+      }
+    }
+    return out;
+  }
+  /** A player's fog with each sub-cell revealed at random, dense or sparse by tile. */
+  function fogOf(rand: () => number): Record<string, FogTile> {
+    const tiles: Record<string, FogTile> = {};
+    for (let ty = 0; ty * 16 < SIZE.h; ty++) {
+      for (let tx = 0; tx * 16 < SIZE.w; tx++) {
+        if (rand() < 0.15) continue;
+        const bits = new Uint8Array(TILE_BYTES);
+        const p = rand();
+        for (let i = 0; i < bits.length * 8; i++) if (rand() < p) bits[i >> 3] = bits[i >> 3]! | (1 << (i & 7));
+        tiles[tileKey("s1", tx, ty)] = { sceneId: "s1", tx, ty, rev: 1, bits: encodeTile(bits) };
+      }
+    }
+    return tiles;
+  }
+  /** The same fog with one tile changed: a reveal over a stretch of its sub-cells, or the tile gone or new. */
+  function revealed(rand: () => number, tiles: Record<string, FogTile>): Record<string, FogTile> {
+    const out = { ...tiles };
+    const tx = Math.floor(rand() * 3);
+    const ty = Math.floor(rand() * 3);
+    const key = tileKey("s1", tx, ty);
+    const roll = rand();
+    if (roll < 0.2) delete out[key];
+    else {
+      const bits = new Uint8Array(TILE_BYTES);
+      const was = out[key];
+      if (was && roll < 0.8) bits.set(Buffer.from(was.bits, "base64").subarray(0, TILE_BYTES));
+      // A reveal along the tile's edge, where a hex's sub-cells reach into the next tile.
+      const x0 = rand() < 0.5 ? 0 : Math.floor(rand() * TILE_SUB);
+      for (let sy = 0; sy < TILE_SUB; sy++) for (let sx = x0; sx < Math.min(TILE_SUB, x0 + 6); sx++) {
+        const i = sy * TILE_SUB + sx;
+        bits[i >> 3] = bits[i >> 3]! | (1 << (i & 7));
+      }
+      out[key] = { sceneId: "s1", tx, ty, rev: 2, bits: encodeTile(bits) };
+    }
+    return out;
+  }
+  const sorted = (boxes: readonly { x0: number; y0: number; x1: number; y1: number }[] | null) => (boxes ? boxes.map((b) => `${b.x0},${b.y0},${b.x1},${b.y1}`).sort() : null);
+
+  for (const grid of [SQUARES, { shape: "hex", orient: "rows" }, { shape: "hex", orient: "columns" }] as Grid[]) {
+    test(`on ${grid.shape === "hex" ? `hex ${grid.orient}` : "squares"}, a fog change's cells by its changed tiles equal the whole pass, on random chunks and fog`, () => {
+      const rand = mulberry32(grid.shape === "hex" ? (grid.orient === "rows" ? 11 : 12) : 13);
+      for (let i = 0; i < 25; i++) {
+        const chunks = chunksOf(rand, "s1");
+        const fog = fogOf(rand);
+        const src = { chunks, sceneId: "s1", bounds: SIZE, grid, fog, stand: true };
+        const was = drawnHeights(src, 5);
+        const now = drawnHeights({ ...src, fog: revealed(rand, fog) }, 5);
+        const whole = groundChanges({ ...was, source: undefined }, { ...now, source: undefined });
+        assert.deepEqual(sorted(groundChanges(was, now)), sorted(whole));
+      }
+    });
+  }
+
+  test("two equal-sized scenes sharing the room's chunk object keep the whole pass: the tiles alone cannot part them", () => {
+    const rand = mulberry32(14);
+    const chunks = { ...chunksOf(rand, "s1"), ...chunksOf(rand, "s2") };
+    const fog = fogOf(rand);
+    const was = drawnHeights({ chunks, sceneId: "s1", bounds: SIZE, grid: SQUARES, fog, stand: true }, 5);
+    const now = drawnHeights({ chunks, sceneId: "s2", bounds: SIZE, grid: SQUARES, fog, stand: true }, 5);
+    const whole = groundChanges({ ...was, source: undefined }, { ...now, source: undefined });
+    assert.ok(whole && whole.length > 0, "the scenes differ");
+    assert.deepEqual(sorted(groundChanges(was, now)), sorted(whole));
+  });
+
+  test("a height edit, new feet a cell or the stand rule changed under the same fog keep the whole pass: only the fog's tiles are compared", () => {
+    const rand = mulberry32(16);
+    const fog = fogOf(rand);
+    const src = { chunks: chunksOf(rand, "s1"), sceneId: "s1", bounds: SIZE, grid: SQUARES, fog, stand: true };
+    const was = drawnHeights(src, 5);
+    for (const [why, now] of [
+      ["a height edit", drawnHeights({ ...src, chunks: chunksOf(rand, "s1") }, 5)],
+      ["new feet a cell", drawnHeights(src, 10)],
+      ["the stand rule", drawnHeights({ ...src, stand: false }, 5)],
+    ] as const) {
+      const whole = groundChanges({ ...was, source: undefined }, { ...now, source: undefined });
+      assert.ok(whole && whole.length > 0, `${why}: the ground differs`);
+      assert.deepEqual(sorted(groundChanges(was, now)), sorted(whole), why);
+    }
+  });
+
+  test("the same fog reads nothing, and a pass over one changed tile reads the cells near it only", () => {
+    const rand = mulberry32(15);
+    const chunks = chunksOf(rand, "s1");
+    const fog = fogOf(rand);
+    const src = { chunks, sceneId: "s1", bounds: SIZE, grid: SQUARES, fog, stand: true };
+    const was = drawnHeights(src, 5);
+    assert.deepEqual(groundChanges(was, drawnHeights(src, 5)), []);
+    const read: string[] = [];
+    const now = drawnHeights({ ...src, fog: revealed(rand, fog) }, 5);
+    const spy = { ...now, atCell: (c: { col: number; row: number }) => (read.push(`${c.col},${c.row}`), now.atCell(c)) };
+    groundChanges(was, spy);
+    assert.ok(read.length > 0 && read.length <= 18 * 18, `read ${read.length} cells, a grown tile's at most`);
   });
 });

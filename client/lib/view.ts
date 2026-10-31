@@ -233,7 +233,12 @@ export type DrawnHeights = GroundSurface & {
   readonly high: number;
   /** The drawn ground of a cell key, in cells of height: `atCell` by its column and row. */
   at(x: number, y: number): number;
+  /** What it was read from, when `drawnHeights` made it: two snapshots of one source but their fog differ only under the fog tiles that differ (relief/volumes.ts groundChanges). */
+  readonly source?: DrawnHeightsSource;
 };
+
+/** The inputs of a `drawnHeights` snapshot, the chunks and the fog by reference. */
+export type DrawnHeightsSource = Readonly<Pick<DrawnSource, "sceneId" | "chunks" | "fog" | "grid" | "bounds" | "stand">> & { readonly feet: number };
 
 /** Flat ground: what a pick reads below the threshold, on a scene without heights, and in tests. */
 export function flatHeights(bounds: { w: number; h: number }, grid: Grid = SQUARES): DrawnHeights {
@@ -246,7 +251,8 @@ export function flatHeights(bounds: { w: number; h: number }, grid: Grid = SQUAR
  * hex's fog test reads its sub-cells.
  */
 export function drawnHeights(src: DrawnSource, feetPerCell: number): DrawnHeights {
-  if (!src.stand) return flatHeights(src.bounds, src.grid);
+  const source: DrawnHeightsSource = { sceneId: src.sceneId, chunks: src.chunks, fog: src.fog, grid: src.grid, bounds: src.bounds, stand: src.stand, feet: feetPerCell };
+  if (!src.stand) return { ...flatHeights(src.bounds, src.grid), source };
   const grid = src.grid;
   let low = 0;
   let high = 0;
@@ -272,7 +278,7 @@ export function drawnHeights(src: DrawnSource, feetPerCell: number): DrawnHeight
     return z;
   };
   const surface = groundSurface(grid, src.bounds, (c) => at(c.col, c.row));
-  return { ...surface, low: low / feetPerCell, high: high / feetPerCell, at: (x, y) => surface.atCell({ col: x, row: y }) };
+  return { ...surface, low: low / feetPerCell, high: high / feetPerCell, at: (x, y) => surface.atCell({ col: x, row: y }), source };
 }
 
 // ---------------------------------------------------------------- picking

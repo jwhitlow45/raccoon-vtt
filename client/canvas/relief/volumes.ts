@@ -1,4 +1,6 @@
-import { CHUNK_CELLS } from "#shared/model.ts";
+import { CHUNK_CELLS, type FogTile } from "#shared/model.ts";
+import type { Grid } from "#shared/rules/grid.ts";
+import { TILE_CELLS } from "#shared/rules/fog.ts";
 import type { AreaContext, AreaTemplateInput } from "#shared/rules/aoe.ts";
 import { bandKey, VolumeCache, type BandDraw, type Volume, type WorldBox } from "../../features/areas/volume.ts";
 import { cellAtPoint, cellId, neighborsOf, type GroundCell } from "../../lib/groundCells.ts";
@@ -206,12 +208,51 @@ export function groundChanges(was: DrawnHeights, now: DrawnHeights): VBox[] | nu
   if (a.shape !== b.shape || (a.shape === "hex" && b.shape === "hex" && a.orient !== b.orient)) return null;
   if (was.bounds.w !== now.bounds.w || was.bounds.h !== now.bounds.h) return null;
   const out: VBox[] = [];
-  for (const c of now.cellsIn({ x0: 0, y0: 0, x1: now.bounds.w, y1: now.bounds.h })) {
-    if (was.atCell(c) === now.atCell(c)) continue;
-    const poly = now.polygon(c);
-    out.push({ x0: Math.min(...poly.map((p) => p.x)), y0: Math.min(...poly.map((p) => p.y)), x1: Math.max(...poly.map((p) => p.x)), y1: Math.max(...poly.map((p) => p.y)) });
+  const seen = new Set<string>();
+  for (const area of changedAreas(was, now)) {
+    for (const c of now.cellsIn(area)) {
+      const key = `${c.col},${c.row}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (was.atCell(c) === now.atCell(c)) continue;
+      const poly = now.polygon(c);
+      out.push({ x0: Math.min(...poly.map((p) => p.x)), y0: Math.min(...poly.map((p) => p.y)), x1: Math.max(...poly.map((p) => p.x)), y1: Math.max(...poly.map((p) => p.y)) });
+    }
   }
   return out;
+}
+
+/**
+ * Where two snapshots' drawn ground can differ, in world cells. When both
+ * come from one scene's chunks, grid, bounds, feet and stand rule, only
+ * their fog can part them, and only under the tiles whose bits differ or
+ * that one side lacks, each grown by a cell, since a hex's sub-cells reach
+ * into the next tile (docs/design-v1-relief-pan.md 8). Otherwise the whole
+ * scene: on a player's board every fog change makes new heights, and a
+ * pass over a 200 by 200 scene costs a phone's frames.
+ */
+function changedAreas(was: DrawnHeights, now: DrawnHeights): VBox[] {
+  const whole = [{ x0: 0, y0: 0, x1: now.bounds.w, y1: now.bounds.h }];
+  const p = was.source;
+  const q = now.source;
+  if (!p || !q || p.sceneId !== q.sceneId || p.chunks !== q.chunks || p.feet !== q.feet || p.stand !== q.stand) return whole;
+  if (p.bounds.w !== q.bounds.w || p.bounds.h !== q.bounds.h || !sameGrid(p.grid, q.grid)) return whole;
+  if (p.fog === q.fog) return [];
+  if (!p.fog || !q.fog) return whole;
+  const prefix = `${q.sceneId}:`;
+  const out: VBox[] = [];
+  const differs = (key: string, tile: FogTile | undefined, other: FogTile | undefined) => {
+    if (!key.startsWith(prefix) || (tile && other && tile.bits === other.bits)) return;
+    const t = (tile ?? other)!;
+    out.push({ x0: t.tx * TILE_CELLS - 1, y0: t.ty * TILE_CELLS - 1, x1: (t.tx + 1) * TILE_CELLS + 1, y1: (t.ty + 1) * TILE_CELLS + 1 });
+  };
+  for (const [key, tile] of Object.entries(q.fog)) differs(key, tile, p.fog[key]);
+  for (const [key, tile] of Object.entries(p.fog)) if (!(key in q.fog)) differs(key, tile, undefined);
+  return out;
+}
+
+function sameGrid(a: Grid, b: Grid): boolean {
+  return a.shape === b.shape && (a.shape !== "hex" || b.shape !== "hex" || a.orient === b.orient);
 }
 
 /**
