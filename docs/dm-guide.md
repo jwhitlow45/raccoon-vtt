@@ -1075,6 +1075,28 @@ Press **Open** to start the group save from it. The page fills itself in from th
 
 If the player withdraws the ask while you have it open, the page says so and carries on as a plain group save. If another of your devices already resolved it, **Apply** stays off with the reason, so a spell never lands twice. **Discard** is the way out.
 
+### Undo a group save and apply it again
+
+Sometimes the mistake only shows after you apply: the DC should have been 15, not 13, or a goblin's save was meant to be asked rather than rolled. The whole Apply is one Play step, so the top bar's **Undo** (`Ctrl+Z`, while you aren't typing in a field) takes all of it back at once: the damage, the conditions, a Legendary Resistance it spent and a recharge use it spent. It also puts back a player's ask that the Apply resolved, and a trap's springing exactly as it was, without the trap going off again. If the page is still on your device, it opens again as it was just before you pressed **Apply**, and says "Outcome undone. Change the DC, roll again, or apply again."
+
+1. Apply the group save.
+2. Press **Undo** (`Ctrl+Z`) in the top bar. The creatures' hit points and conditions come back, and the page reopens with the same rows, results and damage.
+3. Change what was wrong. A new **DC** judges the rolled totals again, while a **Fail**, **Pass** or **Skip** you chose yourself stays as you set it. To roll instead, press **Roll saves again** for every row, or a row's own **Roll again** for a monster or **Ask again** for a player's creature. Rows that passed can roll again too. The damage's **Roll again** rolls the damage afresh.
+4. Read each row's new result.
+5. Press **Apply** again.
+
+Reopening the page never rolls or sends anything by itself. The first rolls stay in the Log with the DC they were made against, and a fresh request reaches the player as "Fireball: save again", in the spell's public name and never a hidden trap's. To change the test, the targets or where the save comes from, press **Start over**, which asks before it replaces the results. The second Apply is a step of its own, so undoing it reopens the page as it was before that second Apply, not the first.
+
+**Redo locks the page again.** Press **Redo** (`Ctrl+Shift+Z`) while the page is open, and the outcome comes back and the page says "Outcome restored. Undo it before changing this save." Anything you changed in the meantime is kept aside, and after the next **Undo** the page offers **Resume your edits** to bring it back.
+
+**Only a whole Undo reopens it.** Taking back one creature's line from the Log's HP changes, or setting a creature's hit points back by hand, leaves the page locked. The rest of the save is still in place, and applying it again could hit everyone twice. Correct what is left by hand, or start a new group save. The page stays locked, too, when **Undo** is refused because something changed since, and the message says what.
+
+**A save that changes nothing still counts.** When every creature passes and resists, 2 fire damage can come to nothing. The button then reads **Nothing to apply**, but pressing it still applies the save: the Log gets its line, and **Undo** can open the page again like any other. Your players hear nothing about that Undo or its Redo, since nothing of theirs changed.
+
+**Asking again.** **Ask again** retires the player's open request and sends the new one in the same step. If the player answers the old request before yours arrives, nothing changes, and the page says "Not saved. The roll request changed. Check its answers and ask again." Read the answer that came in, and press **Ask again** once more if you still want a new roll. The requests and closes the page sends never become Undo steps of their own, so they never stand between you and the step you meant to undo.
+
+**Where the page lives.** The page and the choices it reopens with stay on the device where you applied it, through a reload. When the browser can't keep them, the page says "This save can reopen here until this tab closes." Your other devices see the hit points and any player's ask or trap card come back, but they never invent a page they didn't have. The server remembers whether each Apply is applied or undone for up to 24 hours, for at most 200 saves in a room, and forgets the oldest first. After that, **Undo** still takes the damage back, but the page can't tell what became of its outcome: it says "This save's outcome cannot be checked. Start a new group save to continue." and stays locked. A restart of the server clears your Undo history, but not what it remembers about your saves.
+
 ## Uses and Legendary Actions
 
 Many creatures have something to spend in a fight that you would otherwise count on scrap paper: a dragon's Legendary Actions and Legendary Resistances, a breath weapon that recharges on a 5 or 6, an ability a creature can use only twice a day, a troll's Regeneration, or a barbarian's Rage. The app keeps all of these in one list, called **Uses**. For a monster or a companion it reads them from the stat block (2014 stat blocks included), and for a character the list holds its class resources (see [Class resources and rests](#class-resources-and-rests)).
@@ -1623,7 +1645,7 @@ When your Undo or Redo changes something a player can see, such as their hit poi
 
 ### The HP changes list
 
-**Undo** on a line in the Log or Initiative's **HP changes** takes back that one change, whoever made it, as long as the creature is still as the change left it. That works even when the top bar's Undo would be refused for the same creature, because it checks only that one creature's HP. It has no Redo and no second notice. And it takes back that line only. A condition, another creature hit by the same blow or the note of a damage type stays. To take back a whole group save, with everything it did, use the top bar's **Undo**.
+**Undo** on a line in the Log or Initiative's **HP changes** takes back that one change, whoever made it, as long as the creature is still as the change left it. That works even when the top bar's Undo would be refused for the same creature, because it checks only that one creature's HP. It has no Redo and no second notice. And it takes back that line only. A condition, another creature hit by the same blow or the note of a damage type stays. To take back a whole group save, with everything it did, use the top bar's **Undo**. Only that opens the save's page again (see [Undo a group save and apply it again](#undo-a-group-save-and-apply-it-again)).
 
 ### Re-sync
 

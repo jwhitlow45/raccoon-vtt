@@ -316,7 +316,7 @@ The existing decisions retained here include the 2026-10-19 final-Dismiss rule, 
 
 ## 11. As built
 
-Batch A is built on the integrated undo stack. Its results are not recorded yet. Batch B is not built. Revision 5 retains earlier fixes and addresses round 4 S-1 through S-8, including D-261029-405/406. Document checks are separate from the planned runtime tests above.
+Both batches are built, batch B on top of batch A. Revision 5 retains earlier fixes and addresses round 4 S-1 through S-8, including D-261029-405/406. Document checks are separate from the planned runtime tests above, and the results below are from runs on each batch's integrated tree.
 
 ### 11.1 Batch A
 
@@ -330,9 +330,29 @@ Batch A is built on the integrated undo stack. Its results are not recorded yet.
   - D-261030-441: the one-time notice "Undo now separates play from setup. Earlier undo history was cleared. Setup history is in the menu." is per device, kept in browser storage, with a page-lifetime fallback where storage is unavailable, and shows only within 14 days of the batch A deploy. It is a passing toast with a Setup history button, not a lasting notice, so it never holds a band of the map or pushes later toasts onto it.
   - D-261030-440: the device whose own Undo or Redo produced a correction line announces the result once ("Undid moving Goblin 2."), not also "The DM undid moving Goblin 2." Quiet commands announce nothing extra. Other devices and co-DMs keep the announcement.
   - D-261030-444: an oversized entry, Play or Setup, tells only its sender "This change is too large to undo." and never "Saved. Undo in Setup history." The server's per-op acknowledgment carries whether a step was recorded.
-- **Tests:** TBD by the coordinator.
-- **Screenshots:** TBD by the coordinator.
+- **Tests:** the coordinator's integration run on the final tree passed typecheck, 10876 unit tests, the build, 411 integration tests and these browser files: undo-scope 15, tools 11, scenesetup 9, shortcuts 18, resync 19, attach 26, traps 23, combat 38, reach 5, alignment 28, alignment-wide 23, alignment-icons 12 and smoke 16, with no failures. An oversized Play or Setup step is covered by server and client unit tests alone, since building one in a browser takes more than four minutes.
+- **Screenshots:** the coordinator's, kept outside the repository: a move that keeps a fixed AC, the retained refusal toast and its Setup step, Play Redo's prerequisite, the discard confirmation, Setup history on a phone, waiting for history, both forget questions, and the one-time notice with Setup history at 390 x 844 and 320 x 568.
 
 ### 11.2 Batch B
 
-Not built.
+- **Versions:** op 35 (identity migration 34 to 35) and snapshot 31 (identity migration 30 to 31), as planned. An `actor.outcome` without `page` stays valid and untracked, and an older snapshot gains no ledger.
+- **Deviations from this design:**
+  - D-261030-612: the DM-only ledger is left out of the room's storage quota and map-memory measures, so lifecycle-only activity never changes player admission or kept map memory. It keeps its own 100 KiB cap.
+  - D-261030-613: an Undo or Redo of an expired or evicted record that still restores game state adds "This save can no longer reopen." to its sender's own result, within that result's 200-character bound. No public notice names private page state.
+  - D-261030-614: tracked outcomes, outcomes carrying a recharge use and replacement asks are not predicted on the client. The page waits for the server's answer, with "Checking this save's outcome…" or "Asking again…". Untracked outcomes and ordinary requests are predicted as before.
+  - D-261030-624: the client reads status only from the confirmed snapshot, with its readiness and sequence, through the existing DM alerts restoration hook, so a closed retained draft stays current.
+  - D-261030-625: a pending replacement keeps its selected rows, old request ids and DC through a reload. A restored request missing from both confirmed state and the pending queue becomes an explicit retry that keeps the old answers. Nothing is sent again on its own.
+  - D-261030-626: an attempt whose status cannot be checked stays locked. Start over makes a separate page only once its outcome is no longer pending. A first Apply refused for good gets a fresh tracking identity only after covering state proves it never committed.
+  - D-261030-627: selected rows whose old requests are linked are replaced in one request, or refused unchanged when that would pass the request or target limits.
+  - D-261030-628: Redo keeps newer local edits in memory even past the 512 KiB storage cap, so Resume your edits can bring typed work back. Only Apply's checkpoint must fit the strict stored form.
+  - D-261030-629: while a second Apply is pending, the first Apply's checkpoint is held, so a refusal of the second restores it and keeps the second's edits.
+  - D-261031-030: an Apply that changes no HP keeps its existing words, "Nothing to apply", and still sends the tracked outcome, which Undo can reopen. FEATURES.md and the DM guide say what the button does then.
+  - D-261031-031: "Outcome undone. Change the DC, roll again, or apply again." and "Outcome restored. Undo it before changing this save." are passing toasts, the one announcement, beside the page's own line, which is not a live region.
+  - D-261031-032: Close the ask's automatic request close carries `reason: savePage` and records no step, like the page's other automatic closes.
+  - D-261031-050: a page that Redo locks again has no plan of its own, so it shows the restored line and Done, with no "Applied to" line.
+  - D-261031-051: a reopened row keeps a typed bonus together with its roll, and its switches (Legendary Resistance, Evasion, a qualified defense, Give the conditions anyway) in one group that fills a line it wraps onto, so Ask again never leaves one control alone on a line.
+  - After a Redo of a reopened page with no local edits, the next Undo still offers **Resume your edits**, which brings back the same choices.
+  - A remote Undo on a DM device with the page open can show three toasts at once: the Apply's, "The DM undid applying …" and "Outcome undone. …". At 320 x 568, 844 x 390 and 480 x 320 at 130% they cover the sheet's controls until they pass or are tapped away (UNDOB-FIN-2).
+  - A page whose outcome can no longer be checked keeps an earlier "Not saved. The roll request changed. Check its answers and ask again." line, which asks for a step the locked page no longer offers. The page's disabled fieldset locks its controls, but All fail, All pass, the damage and its Roll again, On a pass and Add a condition keep their enabled look (UNDOB-FIN-3).
+- **Tests:** the final run on the integrated tree passed typecheck, 11617 unit tests, the build, 470 integration tests and these browser files: groupsave 17, rolls 16, savespell 12, traps 24, combatuses 29, reach 5, undo-scope 15, shortcuts 18, alignment 36, alignment-wide 27, alignment-icons 12, alignment-followups 22 and alignment-settings 7, with no failures. The alignment sweeps measure every lifecycle state within 1 px with its controls in reach, at 390 x 844, 320 x 568 and 1440 x 900 at 100% and 130%, and at 844 x 390 and 480 x 320 at 130%. Pat's answers in those sweeps fail the save, since the center check cannot see inside a passed save's "Saved" line under the row's damage (UNDOB-FIN-1).
+- **Screenshots:** each lifecycle state (Apply waiting for its status, reopened, locked again by Redo, Ask again waiting, that request refused, and no longer checkable) at 390 x 844 and 1440 x 900 at 100%, kept outside the repository for the owner, and every state at every measured size in the alignment runs' screenshots.

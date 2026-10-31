@@ -1052,6 +1052,25 @@ terminal "Reload to use Undo" refusal and takes nothing back, and its other
 queued changes that this build still accepts may still arrive. An old page
 shows no Setup history.
 
+The update that lets an undone group save open again
+(docs/design-v1-undo-scope.md, batch B) saves rooms at snapshot version 31
+and stores changes at op version 35, which the builds before it, batch A's
+included, cannot read: they answer "Something went wrong" for every room,
+even a room that holds no group save yet. Back up first. Rooms, backups and
+stored changes from before it take the new versions as they load, through
+identity migration steps (34 to 35 for changes, 30 to 31 for rooms), and an
+older room gains no group save records it never had. There is no database
+table migration and no manual conversion of rooms. The restart that deploys
+it clears every in-memory undo history again. Going back is the same
+restore, and each of the two Undo updates is its own boundary: to return to
+batch A's build, restore the backup taken just before this update, and to
+go back past batch A as well, restore the one taken just before batch A.
+Every room loses what changed after the backup you restore. Reload every
+page left open across the update, table displays included, since no version
+step makes an open page reload. Until it reloads, an old DM page applies a
+group save as before, once, but untracked: its page stays locked, and Undo
+takes the outcome back without ever opening that page again.
+
 Compose rebuilds the image and replaces only the containers that changed. On
 the way down the app closes every WebSocket with code 1012, finishes each
 room's current write and saves a snapshot, so phones reconnect on their own
