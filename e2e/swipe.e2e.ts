@@ -1951,13 +1951,22 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await f.drag(0, { dx: 8 + half - 30 });
     const held = await translateXOf(page);
     assert.ok(Math.abs(held - (half - 30)) < 2, `FL-14: the page stood ${held} px right, not with the finger at ${half - 30}`);
+    // What Back leads to shows under it, dimmed, and out of reach.
+    const under = sheet.locator("[inert]");
+    assert.equal(await under.count(), 1, "FL-14: the list of panels did not show under the moving body");
+    assert.equal(await under.getAttribute("aria-hidden"), "true");
+    assert.ok((await under.locator("li").count()) > 3, "FL-14: what showed under was not the list of panels");
     await shots.take(dm, "fl14-a-following");
     await f.up();
     assert.equal(await pageSettled(page), "rest");
     assert.equal(await list.count(), 0, "FL-14: a short swipe went back");
     assert.deepEqual(await rectOf(sheet), box, "FL-14: the sheet moved");
+    assert.equal(await sheet.locator("[inert]").count(), 0, "FL-14: the list stayed under the panel after the spring back");
     // Past half: back to Panels, focus where All panels puts it.
-    await backSwipe(dmCdp, await leftBodyPoint(sheet), 8 + half + 20);
+    await f.down(await leftBodyPoint(sheet));
+    await f.drag(0, { dx: 8 + half + 20 });
+    await shots.take(dm, "fl14-a-at-release");
+    await f.up();
     await list.waitFor();
     assert.equal(await sheetOf(dm, "Log").count(), 0, "FL-14: the panel stayed after its back swipe");
     assert.equal(await focusedName(dm), byButton, "FL-14: focus differs from All panels'");
@@ -2059,6 +2068,18 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await scroller.evaluate((el) => {
       (el as unknown as { scrollLeft: number }).scrollLeft = 0;
     });
+    // At their left edge a short swipe right from a die is the panel's: it springs back, and the die it started on adds nothing.
+    const formula = sheet.getByLabel("Dice formula");
+    assert.equal(await formula.inputValue(), "", "FL-14: the formula was not empty to start");
+    const pressed = await dm.evaluate((pt) => {
+      const d = globalThis as unknown as { document: { elementFromPoint(x: number, y: number): El | null } };
+      return d.document.elementFromPoint(pt.x, pt.y)?.closest("button")?.getAttribute("aria-label") ?? null;
+    }, { x: row.left + 40, y });
+    assert.match(pressed ?? "", /^Add a d/, "FL-14: the swipe does not start on a die");
+    await backSwipe(dmCdp, { x: row.left + 40, y }, 80);
+    assert.equal(await pageSettled(movingBody(sheet)), "rest");
+    assert.equal(await formula.inputValue(), "", "FL-14: the die under a claimed swipe was pressed");
+    assert.equal(await list.count(), 0, "FL-14: a short swipe from a die went back");
     // At their left edge, a swipe right is the panel's.
     await backSwipe(dmCdp, { x: row.left + 40, y }, 8 + (await rectOf(sheet)).width / 2 + 20);
     await list.waitFor();
@@ -2092,7 +2113,17 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await steadyRect(sheet);
     await sheet.getByRole("button", { name: /^Members/ }).first().click();
     await sheet.getByRole("heading", { name: "Members" }).waitFor();
-    await backSwipe(dmCdp, await leftBodyPoint(sheet), 8 + (await rectOf(sheet)).width / 2 + 20);
+    // Under the moving body, the Menu's first page as Members was opened from it.
+    const f = new Finger(dmCdp, dm);
+    await f.down(await leftBodyPoint(sheet));
+    await f.drag(0, { dx: 8 + (await rectOf(sheet)).width / 2 - 30 });
+    const under = sheet.locator("[inert]");
+    assert.equal(await under.count(), 1, "FL-14: nothing showed under the moving Members page");
+    assert.ok(((await under.textContent()) ?? "").includes("Room settings"), "FL-14: what showed under Members was not Menu's first page");
+    assert.equal(await under.locator("[id]").count(), 0, "FL-14: the picture under kept the page's ids");
+    await shots.take(dm, "fl14-d-subpage-following");
+    await f.drag(0, { dx: 50 });
+    await f.up();
     await waitFor("FL-14: Menu's first page", async () => ((await sheet.getByRole("heading", { name: "Members" }).count()) === 0 ? true : null), 3_000);
     assert.equal(await sheet.count(), 1, "FL-14: a swipe on a subpage left the panel");
     assert.equal(await dm.getByRole("region", { name: "Panels" }).count(), 0, "FL-14: a swipe on a subpage went to Panels");
@@ -2121,6 +2152,35 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     } finally {
       await dm.emulateMedia({ reducedMotion: "no-preference" });
     }
+  });
+
+  test("fl14-e. filled to the whole screen, and on a phone held sideways, a short swipe right springs back and a long one goes back to Panels", async () => {
+    const list = dm.getByRole("region", { name: "Panels" });
+    // Filled by a swipe up: it stays filled through a spring back.
+    await setUp(dm, { width: 375, height: 667, scale: 1 });
+    let sheet = await openPanel(dm, "Log");
+    await fillScreen(sheet, 1, "FL-14 filled");
+    let box = await steadyRect(sheet);
+    await backSwipe(dmCdp, await leftBodyPoint(sheet), 8 + box.width / 2 - 30);
+    assert.equal(await pageSettled(movingBody(sheet)), "rest");
+    assert.equal(await sheet.getAttribute("aria-modal"), "true", "FL-14: a spring back left the filled sheet");
+    assert.equal(await list.count(), 0, "FL-14: a short swipe on the filled sheet went back");
+    await backSwipe(dmCdp, await leftBodyPoint(sheet), 8 + box.width / 2 + 20);
+    await list.waitFor();
+    assert.equal(await sheetOf(dm, "Log").count(), 0, "FL-14: the filled sheet stayed after its back swipe");
+    await list.getByRole("button", { name: "Close Panels" }).click();
+    // Held sideways: the sheet stands on the right, and its own width is what the swipe measures.
+    await setUp(dm, { width: 844, height: 390, scale: 1 });
+    sheet = await openPanel(dm, "Log");
+    box = await steadyRect(sheet);
+    assert.ok(box.left > 844 / 3 && Math.abs(box.right - 844) < 2, `FL-14: the sheet did not stand on the right at 844 x 390: ${box.left} to ${box.right}`);
+    await backSwipe(dmCdp, await leftBodyPoint(sheet), 8 + box.width / 2 - 30);
+    assert.equal(await pageSettled(movingBody(sheet)), "rest");
+    assert.equal(await list.count(), 0, "FL-14: a short swipe on the sideways sheet went back");
+    await backSwipe(dmCdp, await leftBodyPoint(sheet), 8 + box.width / 2 + 20);
+    await list.waitFor();
+    assert.equal(await sheetOf(dm, "Log").count(), 0, "FL-14: the sideways sheet stayed after its back swipe");
+    await list.getByRole("button", { name: "Close Panels" }).click();
   });
 });
 
