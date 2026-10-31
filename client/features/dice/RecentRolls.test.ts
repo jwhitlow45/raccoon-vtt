@@ -43,23 +43,47 @@ function namesOf(state: RoomState): LogNames {
   return { members: state.members, tokens: state.tokens, characters: state.characters, handouts: state.handouts, encounter: state.encounter };
 }
 
-function render(log: LogEntry[], opts: { viewer?: Viewer; folded?: boolean } = {}): string {
+function render(log: LogEntry[], opts: { viewer?: Viewer; folded?: boolean; connection?: string; tapAgain?: () => void } = {}): string {
   const viewer = opts.viewer ?? P1;
   const state = table(log);
   const view = projectState(state, viewer, { sceneId: "s1" }) as unknown as RoomState;
   const scope = new RoomScope();
   if (opts.folded) scope.get(diceFoldsSlot).tap("recent", false, false);
-  const store = createStore(() => ({ view, roomId: "r1", connection: "open", you: viewer, sceneId: "s1", local: { selectedIds: [], multi: false } }));
+  const store = createStore(() => ({ view, roomId: "r1", connection: opts.connection ?? "open", you: viewer, sceneId: "s1", local: { selectedIds: [], multi: false } }));
+  const props = { names: namesOf(view), me: viewer.memberId, open: null, again: opts.tapAgain ?? (() => {}) };
+  function TapProbe() {
+    type Node = { type?: ((props: never) => unknown) & { name: string }; props?: { children?: unknown; end?: unknown; icon?: string; onClick?(e: unknown): void } };
+    const find = (tree: unknown, predicate: (node: Node) => boolean): Node | undefined => {
+      if (Array.isArray(tree)) return tree.map((child) => find(child, predicate)).find(Boolean);
+      const node = tree as Node | null;
+      if (!node?.props) return undefined;
+      return predicate(node) ? node : find(node.props.children, predicate) ?? find(node.props.end, predicate);
+    };
+    const row = find(RecentRolls(props), (node) => node.type?.name === "Row");
+    assert.ok(row?.type);
+    const again = find(row.type(row.props as never), (node) => node.type?.name === "AgainButton");
+    assert.ok(again?.type);
+    const button = find(again.type(again.props as never), (node) => node.props?.icon === "again");
+    assert.ok(button?.props?.onClick);
+    button.props.onClick({ detail: 1 });
+    return null;
+  }
   return renderToStaticMarkup(
     createElement(RoomProvider, {
       store: store as never,
       actions: { dispatch: () => 1 } as never,
       ui: {} as never,
       assets: { url: () => "" } as never,
-      children: createElement(RoomScopeProvider, { scope, children: createElement(RecentRolls, { names: namesOf(view), me: viewer.memberId, open: null, again() {} }) }),
+      children: createElement(RoomScopeProvider, { scope, children: opts.tapAgain ? createElement(TapProbe) : createElement(RecentRolls, props) }),
     }),
   );
 }
+
+test("offline Recent rolls Again still reaches its ordinary handler", () => {
+  let taps = 0;
+  render([entry({ type: "dice", by: "p1", to: "all", rolls: [LONGSWORD] })], { connection: "closed", tapAgain: () => { taps++; } });
+  assert.equal(taps, 1);
+});
 
 describe("Recent rolls' folded line (6.5)", () => {
   const names = namesOf(table([]));

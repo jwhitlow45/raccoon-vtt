@@ -74,7 +74,7 @@ describe("the header line during a throw", () => {
   test("the first render after the commit shows no total, and the live region already says it with its verdict", () => {
     const markup = render(true);
     assert.doesNotMatch(shown(markup), />23</, "no total while the dice fly");
-    assert.match(markup, /<span role="status" aria-live="polite"[^>]*>Rolled 23, Critical Hit, Normal: Longsword\.<\/span>/);
+    assert.match(markup, /<span role="status" aria-live="polite"[^>]*>Rolled 23, Critical Hit: Longsword, Normal\.<\/span>/);
   });
 
   test("Again is live during the throw, and the tray takes no tap and is hidden from a screen reader", () => {

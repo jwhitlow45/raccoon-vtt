@@ -15,6 +15,7 @@ export function RollModeMenu({ handle, name, capability, dm, onPick }: RollModeM
     return () => box?.removeAttribute("data-roll-mode-menu");
   }, [handle.open, handle.box]);
   const items = rollModeItems(capability, dm);
+  if (items.length === 0) return null;
   return (
     <Popover handle={handle} side="above" bound={() => ({ left: 0, top: 0, right: window.innerWidth / uiScale(), bottom: window.innerHeight / uiScale() })}>
       <div data-roll-mode-menu="" onContextMenu={(e) => e.preventDefault()}>

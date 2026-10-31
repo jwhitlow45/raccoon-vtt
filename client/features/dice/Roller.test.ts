@@ -7,6 +7,7 @@ import { projectState } from "#shared/project.ts";
 import { DM, P1, room } from "#shared/testutil.ts";
 import { theme } from "../../lib/theme.ts";
 import { diceChoicesSlot } from "./useDicePanel.ts";
+import { receiptsSlot } from "./useReceipt.ts";
 
 /*
  * The roller's part of the dice pass (docs/design-v1-dice-pass.md 4, 7.4
@@ -30,9 +31,9 @@ function buttons(markup: string): Map<string, string> {
   return new Map([...markup.matchAll(/<button[^>]*aria-label="([^"]+)"[^>]*>/g)].map((m) => [m[1]!, m[0]]));
 }
 
-function inRoom(viewer: Viewer, children: unknown[], scope = new RoomScope()): string {
+function inRoom(viewer: Viewer, children: unknown[], scope = new RoomScope(), connection = "open"): string {
   const view = projectState(room(), viewer, { sceneId: "s1" }) as unknown as RoomState;
-  const store = createStore(() => ({ view, roomId: "r1", connection: "open", you: viewer, sceneId: "s1", local: { selectedIds: [], multi: false } }));
+  const store = createStore(() => ({ view, roomId: "r1", connection, you: viewer, sceneId: "s1", local: { selectedIds: [], multi: false } }));
   return renderToStaticMarkup(
     createElement(RoomProvider, {
       store: store as never,
@@ -146,5 +147,30 @@ test("the discoverability help sits outside the unchanged modes and quick-dice r
 test("the result announcement names returned effective modes and secrecy once", async () => {
   const { spokenResult } = await import("./Roller.tsx");
   const dice = [{ formula: "1d20+5", faces: [10], total: 15, cancelled: true as const }];
-  assert.equal(spokenResult({ total: 15, label: "Dexterity save", sums: null, dice, more: 0 }, null, undefined, true), "Rolled 15, Normal: Advantage and Disadvantage cancelled, Secret: Dexterity save.");
+  assert.equal(spokenResult({ total: 15, label: "Dexterity save", sums: null, dice, more: 0 }, null, undefined, true), "Rolled 15: Dexterity save, Normal: Advantage and Disadvantage cancelled, Secret.");
+  assert.equal(spokenResult({ total: 15, label: "Stealth check", sums: "10 + 5", dice: [{ ...dice[0]!, mode: "adv", cancelled: undefined }], more: 0 }, "Pass"), "Rolled 15 (10 + 5), Pass: Stealth check, Advantage.");
+  assert.equal(spokenResult({ total: 15, label: undefined, sums: null, dice: [{ ...dice[0]!, cancelled: undefined }], more: 0 }, null), "Rolled 15, Normal.");
+});
+
+test("offline sticky Again reaches the existing connection error handler", () => {
+  const scope = new RoomScope();
+  const choices = scope.get(diceChoicesSlot);
+  choices.setState({ last: { tag: "previous", rolls: [{ formula: "1d20+5" }], to: "all" } });
+  choices.getInitialState = choices.getState;
+  scope.get(receiptsSlot).answer("previous", 0, "taken");
+  type Node = { props?: { children?: unknown; icon?: string; onClick?(e: unknown): void } };
+  let click: ((e: unknown) => void) | undefined;
+  const find = (tree: unknown): void => {
+    if (Array.isArray(tree)) { tree.forEach(find); return; }
+    const node = tree as Node | null;
+    if (!node?.props) return;
+    if (node.props.icon === "again") click = node.props.onClick;
+    find(node.props.children);
+  };
+  function Probe() { find(LastResult({ onOpen() {} })); return null; }
+  inRoom(P1, [createElement(Probe)], scope, "closed");
+  assert.ok(click);
+  click({ detail: 1 });
+  assert.ok(choices.getState().last && "error" in choices.getState().last!);
+  assert.equal((choices.getState().last as { error: string }).error, "Rolling needs a connection.");
 });

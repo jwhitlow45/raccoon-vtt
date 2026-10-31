@@ -103,7 +103,7 @@ export function spokenVerdict(roll: DiceRoll, data: LogEntry["data"]): string | 
 /** The live region says the returned mode and visibility with the total once. Proficiency follows its test's name (FL7-SOL-04). */
 export function spokenResult(head: HeaderRoll, verdict: string | null, level?: Proficiency, secret = false): string {
   const label = head.label ? `: ${labelText(head.label)}${level ? spokenProficiency(level) : ""}` : "";
-  return `Rolled ${head.total}${head.sums ? ` (${head.sums})` : ""}${verdict ? `, ${verdict}` : ""}${head.dice[0] && effectiveRollMode(head.dice[0], secret) ? `, ${effectiveRollMode(head.dice[0], secret)}` : ""}${label}.`;
+  return `Rolled ${head.total}${head.sums ? ` (${head.sums})` : ""}${verdict ? `, ${verdict}` : ""}${label}${head.dice[0] && effectiveRollMode(head.dice[0], secret) ? `, ${effectiveRollMode(head.dice[0], secret)}` : ""}.`;
 }
 
 /**
@@ -144,7 +144,7 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
   const again = againOf(last);
   const blocked = useRollBlocked();
   const dm = useRoomView((s) => s.you?.role === "dm");
-  const repeat = useRollModeMenu({ source: JSON.stringify([tag, again]), name: "Again", capability: { d20: !!again && modeRepeat(rolls, "normal", again.to) !== null, visibility: "repeat", repeat: true }, disabled: waiting || blocked !== null, dm,
+  const repeat = useRollModeMenu({ source: JSON.stringify([tag, again]), name: "Again", capability: { d20: !!again && modeRepeat(rolls, "normal", again.to) !== null, visibility: "repeat", repeat: true }, disabled: waiting, valid: () => blocked === null, dm,
     onTap: () => { if (again) panel.again(again.rolls, again.to, throws.origin()); },
     onRoll: (override) => { if (!again) return; const inputs = modeRepeat(rolls, override, again.to); if (inputs) panel.again(inputs, again.to, throws.origin()); },
   });

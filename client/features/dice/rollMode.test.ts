@@ -25,8 +25,8 @@ test("capabilities exclude meaningless fixed rolls and damage modes", () => {
   const items = rollModeItems({ d20: true, visibility: "request" }, false);
   assert.deepEqual(items.map((i) => i.id), ["adv", "dis", "secret", "normal"]);
   assert.equal(items[2]?.disabled, true);
-  assert.equal(items[2]?.description, "Request answers keep the request's visibility.");
-  assert.equal(rollModeItems({ d20: false, visibility: "selectable" }, false)[0]?.description, "You and the DM see the result.");
+  assert.equal(items[2]?.description, "Roll secretly: request answers keep the request's visibility.");
+  assert.equal(rollModeItems({ d20: false, visibility: "selectable" }, false)[0]?.description, "Roll secretly: you and the DM see the result.");
   assert.equal(rollModeHint({ d20: true, visibility: "creature" }), "Hold, right-click or Shift+F10 for Advantage, Disadvantage or Normal.");
 });
 test("returned fields describe the effective result", () => {

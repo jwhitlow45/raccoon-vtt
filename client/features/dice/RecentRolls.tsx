@@ -356,7 +356,7 @@ function AgainButton(props: { row: Extract<RecentRow, { kind: "dice" }>; inputs:
   const throws = useThrows();
   const blocked = useRollBlocked();
   const first = row.rolls[0]!;
-  const menu = useRollModeMenu({ source: JSON.stringify([row.key, row.to, row.rolls]), name: "Again", capability: { d20: modeRepeat(row.rolls, "normal", row.to) !== null, visibility: "repeat", repeat: true }, disabled: blocked !== null, dm: props.dm,
+  const menu = useRollModeMenu({ source: JSON.stringify([row.key, row.to, row.rolls]), name: "Again", capability: { d20: modeRepeat(row.rolls, "normal", row.to) !== null, visibility: "repeat", repeat: true }, valid: () => blocked === null, dm: props.dm,
     onTap: () => props.again(props.inputs, row.to, throws.origin()),
     onRoll: (override) => { const inputs = modeRepeat(row.rolls, override, row.to); if (inputs) props.again(inputs, row.to, throws.origin()); },
   });

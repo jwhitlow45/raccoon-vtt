@@ -4,13 +4,13 @@ import { advantageFields, applyMode, parseFormula, type AdvantageSource } from "
 export type RollModeOverride = "adv" | "dis" | "secret" | "normal";
 export type RollVisibility = "selectable" | "request" | "creature" | "repeat";
 export type RollModeCapability = { d20: boolean; visibility: RollVisibility; damage?: boolean; batch?: boolean; repeat?: boolean };
-export const NORMAL_HELP = "Ignore manual modes for this roll. Creature effects and default visibility still apply.";
-export const REPEAT_HELP = "Repeats the recorded formula with your chosen mode. Current effects are not rebuilt.";
-export const BATCH_HELP = "Applies to server rolls only. Players choose their own modes.";
+export const NORMAL_HELP = "Roll normally: ignores Adv, Dis and Secret pressed for this roll. Conditions still apply.";
+export const REPEAT_HELP = "All repeat choices: use the recorded formula. Current effects are not rebuilt.";
+export const BATCH_HELP = "All choices: apply to server rolls only. Players choose their own modes.";
 export const FIXED_VISIBILITY = {
-  request: "Request answers keep the request's visibility.",
-  creature: "This roll's visibility is set by the creature.",
-  repeat: "This repeat keeps its recorded visibility.",
+  request: "Roll secretly: request answers keep the request's visibility.",
+  creature: "Roll secretly: this roll's visibility is set by the creature.",
+  repeat: "Roll secretly: this repeat keeps its recorded visibility.",
 } as const;
 
 export function acceptsRollMode(formula: string): boolean {
@@ -43,8 +43,8 @@ export function rollModeItems(capability: RollModeCapability, dm: boolean): Roll
   if (!hasRollModeMenu(capability)) return [];
   const items: RollModeItem[] = [];
   if (capability.d20 && !capability.damage) items.push({ id: "adv", title: "Roll with Advantage", kind: "action" }, { id: "dis", title: "Roll with Disadvantage", kind: "action" });
-  items.push({ id: "secret", title: "Roll secretly", kind: "action", disabled: capability.visibility !== "selectable", description: capability.visibility === "selectable" ? dm ? "Hide the dice from players." : "You and the DM see the result." : FIXED_VISIBILITY[capability.visibility] });
-  items.push({ id: "normal", title: "Roll normally", kind: "action", description: capability.repeat ? "Ignore the recorded mode. Formula and visibility stay." : NORMAL_HELP });
+  items.push({ id: "secret", title: "Roll secretly", kind: "action", disabled: capability.visibility !== "selectable", description: capability.visibility === "selectable" ? dm ? "Roll secretly: hide the dice from players." : "Roll secretly: you and the DM see the result." : FIXED_VISIBILITY[capability.visibility] });
+  items.push({ id: "normal", title: "Roll normally", kind: "action", description: capability.repeat ? "Roll normally: ignores the recorded mode and keeps the formula and visibility." : NORMAL_HELP });
   return items;
 }
 

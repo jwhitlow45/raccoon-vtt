@@ -11,11 +11,12 @@ export type UseRollModeMenuOptions = {
   source: string;
   name: string;
   capability: RollModeCapability;
+  /** Only cases where the base tap did nothing, such as native disabled or busy. Ordinary taps call onTap when not disabled and the press allows them. */
   disabled?: boolean;
   dm: boolean;
   onTap(): void;
   onRoll(override: RollModeOverride): void;
-  /** Recheck live targets and route just before dispatch. */
+  /** Guards menu opening and picking only. Ordinary taps still reach their existing handler and error feedback. */
   valid?(): boolean;
   fallbackFocus?(): HTMLElement | null;
 };
@@ -95,7 +96,6 @@ export function useRollModeMenu(options: UseRollModeMenuOptions): RollModeMenuBi
       }
     },
   });
-  const eligible = () => !latest.current.disabled && latest.current.valid?.() !== false;
   const source = options.source;
   const capabilityKey = JSON.stringify(options.capability);
   useLayoutEffect(() => {
@@ -105,13 +105,7 @@ export function useRollModeMenu(options: UseRollModeMenuOptions): RollModeMenuBi
   }, [source, enabled, capabilityKey]);
   useLayoutEffect(() => {
     if (!handle.open) return;
-    const hosts: { node: HTMLElement; zIndex: string }[] = [];
-    for (let node = handle.anchor.current?.parentElement; node && node !== document.body; node = node.parentElement) {
-      if (getComputedStyle(node).position === "static") continue;
-      hosts.push({ node, zIndex: node.style.zIndex });
-      node.style.zIndex = String(theme.z.popover);
-    }
-    return () => { for (const host of hosts) host.node.style.zIndex = host.zIndex; };
+    return raiseRollModeHosts(handle.anchor.current);
   }, [handle.open]);
   useEffect(() => {
     if (!enabled) return;
@@ -163,12 +157,11 @@ export function useRollModeMenu(options: UseRollModeMenuOptions): RollModeMenuBi
       }
       handle.anchorProps.ref(node);
     },
-    onClick: () => { if (eligible() && press().click(0)) latest.current.onTap(); },
+    onClick: (e) => { if (!latest.current.disabled && press().click(e.detail)) latest.current.onTap(); },
   };
   if (enabled) Object.assign(buttonProps, {
     "aria-haspopup": "menu", "aria-expanded": handle.open, "aria-controls": handle.open ? handle.contentId : undefined,
     "aria-keyshortcuts": "ContextMenu Shift+F10", "aria-describedby": describe(), tooltipHold: false,
-    onClick: (e: React.MouseEvent<HTMLButtonElement>) => { if (eligible() && press().click(e.detail)) latest.current.onTap(); },
     onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => {
       press().down({ id: e.pointerId, x: e.clientX, y: e.clientY }, e.pointerType, e.isPrimary, e.button);
       if (e.pointerType === "touch" && press().activeId !== null) { clearTouch(); detach.current = attachConsumedTouch(document, () => press().consumed, touchId.current); }
@@ -184,7 +177,7 @@ export function useRollModeMenu(options: UseRollModeMenuOptions): RollModeMenuBi
       e.preventDefault();
       const native = e.nativeEvent as PointerEvent;
       const touch = native.pointerType === "touch" || (native.pointerType !== "mouse" && press().touchSequence) || (native as PointerEvent & { sourceCapabilities?: { firesTouchEvents?: boolean } }).sourceCapabilities?.firesTouchEvents;
-      const by = touch ? "touch" : e.detail === 0 && e.button === 0 ? "key" : "mouse";
+      const by = touch ? "touch" : !native.pointerType && e.detail === 0 ? "key" : "mouse";
       press().context(by);
     },
     onKeyDown: (e: React.KeyboardEvent<HTMLButtonElement>) => {
@@ -205,4 +198,17 @@ export function useRollModeMenu(options: UseRollModeMenuOptions): RollModeMenuBi
       }
     }} /> : null}</>,
   };
+}
+
+/** Keep higher overlays above the menu and leave later host updates alone. */
+export function raiseRollModeHosts(anchor: HTMLElement | null): () => void {
+  const hosts: { node: HTMLElement; before: string; painted: string }[] = [];
+  for (let node = anchor?.parentElement; node && node !== document.body; node = node.parentElement) {
+    const style = getComputedStyle(node);
+    if (style.position === "static" || style.zIndex !== "auto" && Number(style.zIndex) >= theme.z.popover) continue;
+    const before = node.style.zIndex;
+    node.style.zIndex = String(theme.z.popover);
+    hosts.push({ node, before, painted: node.style.zIndex });
+  }
+  return () => { for (const host of hosts) if (host.node.style.zIndex === host.painted) host.node.style.zIndex = host.before; };
 }
