@@ -458,7 +458,7 @@ describe("the Log panel's history window", () => {
   });
 
   test("a player's or a preview's window is the scene's, and a DM's stays across scenes", async () => {
-    const at = (role: string, sceneId: string, previewOf: string | null = null) => historyKey({ roomId: "R", memberId: "m", role, sceneId, previewOf });
+    const at = (role: string, sceneId: string, previewOf: string | null = null) => historyKey({ roomId: "R", memberId: "m", role, sceneId, previewOf, blackout: false });
     assert.notEqual(at("player", "s1"), at("player", "s2"));
     assert.notEqual(at("dm", "s1", "p1"), at("dm", "s2", "p1"));
     assert.equal(at("dm", "s1"), at("dm", "s2"));
@@ -521,4 +521,112 @@ describe("the Log panel's history window", () => {
     assert.equal(busy.state.failed?.dir, "older");
     assert.equal(busy.state.loading, null);
   });
+});
+
+for (const previewOf of [null, "p1"]) {
+  test(`blackout resets held pages and rejects pre-pause and paused responses: ${previewOf ? "preview" : "player"}`, async () => {
+    const viewer = { roomId: "R", memberId: "m", role: previewOf ? "dm" : "player", sceneId: "s1", previewOf, blackout: false };
+    const at = () => historyKey(viewer);
+    const pending: { signal: AbortSignal; resolve(page: HistoryPage): void }[] = [];
+    const win = new HistoryWindow({ key: at(), fetch: (_ask, signal) => new Promise((resolve) => pending.push({ signal, resolve })) });
+    const main = [line("100:0")];
+    const hp: LogEntry = { id: "1:0", at: "", kind: "event", text: "Thorn loses 4 HP." };
+    const page = { entries: [hp], nextBefore: "1:0" };
+    win.sync(at(), main, main.length);
+    win.older();
+    pending[0]!.resolve(page);
+    await flush();
+    assert.deepEqual(win.state.rows, [hp]);
+    win.older();
+    viewer.blackout = true;
+    win.sync(at(), main, main.length);
+    assert.equal(win.state.rows.length, 0, "blackout clears held HP lines without a scene change");
+    assert.equal(pending[1]!.signal.aborted, true);
+    pending[1]!.resolve(page);
+    await flush();
+    assert.equal(win.state.rows.length, 0, "a page read before blackout was discarded");
+    win.older();
+    viewer.blackout = false;
+    win.sync(at(), main, main.length);
+    assert.equal(pending[2]!.signal.aborted, true);
+    pending[2]!.resolve(page);
+    await flush();
+    assert.equal(win.state.rows.length, 0, "a page read while paused was discarded after resume");
+    win.older();
+    pending[3]!.resolve(page);
+    await flush();
+    assert.deepEqual(win.state.rows, [hp], "fresh pages still load after resume");
+    win.dispose();
+  });
+}
+
+test("a DM's own window and in-flight page survive blackout and resume", async () => {
+  const viewer = { roomId: "R", memberId: "dm", role: "dm", sceneId: "s1", previewOf: null, blackout: false };
+  const key = historyKey(viewer);
+  let resolve!: (page: HistoryPage) => void;
+  let signal!: AbortSignal;
+  const win = new HistoryWindow({ key, fetch: (_ask, s) => { signal = s; return new Promise((r) => { resolve = r; }); } });
+  win.sync(key, [line("100:0")], 1);
+  win.older();
+  for (const blackout of [true, false]) {
+    viewer.blackout = blackout;
+    assert.equal(historyKey(viewer), key);
+    win.sync(historyKey(viewer), [line("100:0")], 1);
+    assert.equal(signal.aborted, false);
+  }
+  resolve({ entries: [line("1:0")], nextBefore: null });
+  await flush();
+  assert.equal(win.state.rows.length, 1);
+  win.dispose();
+});
+
+test("random pause, resume, paging, cancellation and late responses preserve projection identity", async () => {
+  const met = { pause: 0, resume: 0, page: 0, cancel: 0, late: 0, applied: 0 };
+  for (let seed = 1; seed <= 30; seed++) {
+    const random = rng(seed);
+    const viewer = { roomId: "R", memberId: "m", role: seed % 2 ? "player" : "dm", sceneId: "s1", previewOf: seed % 2 ? null : "p1", blackout: false };
+    const calls: { signal: AbortSignal; resolve(page: HistoryPage): void; epoch: number }[] = [];
+    let epoch = 0;
+    const main = [line("1000:0")];
+    const win = new HistoryWindow({ key: historyKey(viewer), fetch: (_ask, signal) => new Promise((resolve) => calls.push({ signal, resolve, epoch })) });
+    win.sync(historyKey(viewer), main, main.length);
+    for (let step = 0; step < 180; step++) {
+      const action = Math.floor(random() * 5);
+      if (action === 0 || action === 1) {
+        const blackout = action === 0;
+        if (blackout !== viewer.blackout) {
+          viewer.blackout = blackout;
+          epoch++;
+          met[blackout ? "pause" : "resume"]++;
+          win.sync(historyKey(viewer), main, main.length);
+          assert.equal(win.state.rows.length, 0, `seed ${seed}: projection transition clears held rows`);
+          assert.ok(calls.every((c) => c.signal.aborted), `seed ${seed}: projection transition cancels every old request`);
+        }
+      } else if (action === 2) {
+        met.page++;
+        win.older();
+      } else if (action === 3) {
+        met.cancel++;
+        win.latest();
+        assert.ok(calls.every((c) => c.signal.aborted), `seed ${seed}: latest cancels the current request`);
+      } else if (calls.length) {
+        const call = calls.splice(Math.floor(random() * calls.length), 1)[0]!;
+        const before = win.state;
+        const stale = call.signal.aborted || call.epoch !== epoch;
+        call.resolve({ entries: [line(`${seed}:${step}`)], nextBefore: null });
+        await flush();
+        if (stale) {
+          met.late++;
+          assert.equal(win.state, before, `seed ${seed}: a stale answer never changes rows, cursors or loading`);
+        } else met.applied++;
+      }
+      assert.equal(win.state.key, historyKey(viewer), `seed ${seed}: the window belongs to the current projection`);
+    }
+    win.dispose();
+    const before = win.state;
+    for (const call of calls) call.resolve({ entries: [line("1:0")], nextBefore: null });
+    await flush();
+    assert.equal(win.state, before, `seed ${seed}: disposal rejects late responses`);
+  }
+  assert.ok(Object.values(met).every((n) => n > 0), JSON.stringify(met));
 });

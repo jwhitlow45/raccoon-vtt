@@ -56,6 +56,7 @@ export default function LogPanel(_props: PanelProps) {
   const roomId = useRoomView((s) => s.roomId);
   const you = useRoomView((s) => s.you);
   const sceneId = useRoomView((s) => s.sceneId);
+  const blackout = useRoomView((s) => s.view?.meta.view.blackout ?? false);
   const mainLog = useRoomView((s) => s.view?.log ?? EMPTY_LOG);
   const hpUndoLogIds = useRoomView((s) => s.view?.meta.hpUndoLogIds);
   // An older server supplies no archive retention, so only its live lines
@@ -86,7 +87,7 @@ export default function LogPanel(_props: PanelProps) {
   // In "view as a player" the pages are that player's, as the preview's socket gives the rest (docs/design-v1-per-player-vision.md 7.4).
   const viewer = { sceneId: dm && !preview ? sceneId : null, previewOf: preview?.memberId ?? null };
   // Whose window it is. A page for any other room, viewer, projecting scene or preview never lands in it.
-  const key = historyKey({ roomId, memberId: me, role: you?.role ?? "", sceneId, previewOf: viewer.previewOf });
+  const key = historyKey({ roomId, memberId: me, role: you?.role ?? "", sceneId, previewOf: viewer.previewOf, blackout });
   const asked = useRef({ roomId, viewer });
   asked.current = { roomId, viewer };
 

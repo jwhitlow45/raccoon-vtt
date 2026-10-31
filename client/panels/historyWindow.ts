@@ -19,8 +19,8 @@ import { ApiError } from "../lib/api.ts";
  *
  * A page applies only when it answers the request still waiting, for the
  * same viewer, from the edge the window still has. Anything else, a late
- * answer after an abort, a reply for another room, viewer, scene or preview,
- * or one from an edge the live log has since moved, is dropped, so a page
+ * answer after an abort, a reply for another room, viewer, scene, preview
+ * or blackout state, or one from an edge the live log has since moved, is dropped, so a page
  * never merges into a window it was not read beside.
  */
 
@@ -36,7 +36,7 @@ export type HistoryPage = { entries: readonly LogEntry[]; nextBefore: string | n
 export type PageAsk = { before?: string; after?: string };
 
 export type HistoryState = {
-  /** Who the window is for: room, member, role, scene and preview. A new one starts over. */
+  /** Who the window is for: room, member, role, scene, preview and blackout. A new one starts over. */
   readonly key: string;
   /** "live": `rows` sit above the live log, which goes on under them. "history": `rows` are the whole window. */
   readonly mode: "live" | "history";
@@ -73,12 +73,15 @@ export const SAID = {
  * Whose window it is: what the server projects a page for. A player's
  * lines, and a previewed player's, depend on the scene on screen (sight,
  * and who holds what there), so a new scene starts the window over and
- * drops a page still on its way. A DM reads every line whole on any scene,
- * so a DM's window stays across scene switches.
+ * drops a page still on its way. Blackout and resume also reset these
+ * projected windows, since pausing changes which HP lines are readable.
+ * A DM reads every line whole, so their own window stays across both.
  */
-export function historyKey(viewer: { roomId: string; memberId: string; role: string; sceneId: string | null; previewOf: string | null }): string {
-  const scene = viewer.role === "dm" && viewer.previewOf === null ? "" : (viewer.sceneId ?? "");
-  return [viewer.roomId, viewer.memberId, viewer.role, viewer.previewOf ?? "", scene].join("|");
+export function historyKey(viewer: { roomId: string; memberId: string; role: string; sceneId: string | null; previewOf: string | null; blackout: boolean }): string {
+  const ownDm = viewer.role === "dm" && viewer.previewOf === null;
+  const scene = ownDm ? "" : (viewer.sceneId ?? "");
+  const blackout = ownDm ? "" : viewer.blackout ? "paused" : "live";
+  return [viewer.roomId, viewer.memberId, viewer.role, viewer.previewOf ?? "", scene, blackout].join("|");
 }
 
 export function freshHistory(key: string): HistoryState {
