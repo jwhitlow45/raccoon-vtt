@@ -9,7 +9,6 @@ import { askOp } from "../../rolls/logic.ts";
 import { MAX_OP_AGE_MS } from "#shared/pendingOps.ts";
 import type { SaveOutcomeFields, SavePageAskFields, SavePageCloseFields } from "#shared/saveOutcomeContract.ts";
 import { settleAskAgain } from "./reroll.ts";
-import { readSaveDraft, writeSaveDraft } from "./draftStorage.ts";
 import { asSave, cutLabel, testLabel, withExtra } from "../options.ts";
 import type { PanelRoll } from "../useDicePanel.ts";
 import { rollsOf } from "../logic.ts";
@@ -318,11 +317,18 @@ export function askAnswered(page: Page, rollId: string, answer: { ok: true } | {
  * it arrives, kept once its request is closed elsewhere. A target the
  * request holds unanswered again, after Reopen, has no answer here either,
  * so its row waits, and the DM's one tap on it may go again (dmRoll).
+ *
+ * A request the page holds as closed still counts while the view holds it
+ * and a row still names it: a reopened page restores its requests as
+ * closed, and an explicit Undo can bring one back, whose new answers the
+ * page must take before Ask again retires it. An applied page's answers
+ * stay as its plan read them.
  */
 export function syncRequests(page: Page, rolls: Readonly<Record<string, RollRequest | undefined>>, key: (t: { tokenId?: string; characterId?: string }) => string): Page {
   let next = page;
+  const settled = page.phase === "applying" || page.phase === "applied";
   for (const request of page.requests) {
-    if (request.state === "closed" || request.state === "refused") continue;
+    if (request.state === "refused" || request.state === "closed" && settled) continue;
     const live = rolls[request.rollId];
     if (!live) continue;
     if (request.state === "sending") next = askAnswered(next, request.rollId, { ok: true });
@@ -701,13 +707,3 @@ export function markGone(page: Page, viewing: string | null, present: (row: RowB
   return next;
 }
 
-// ------------------------------------------------------------ the draft (5.10)
-
-/** Compatibility for callers that only need the page. Lifecycle metadata stays in the full draft. */
-export function readDraft(roomId: string): Page | null {
-  return readSaveDraft(roomId)?.page ?? null;
-}
-
-export function writeDraft(roomId: string, page: Page | null): boolean {
-  return writeSaveDraft(roomId, page ? { version: 2, page } : null);
-}

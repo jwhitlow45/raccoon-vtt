@@ -45,15 +45,28 @@ export type SaveCheckpoint = {
   choices: SaveChoices;
 };
 
+/**
+ * The outcome status a page last read. `restored` marks an applied status
+ * reached from an undone one, by Redo, so the page says "Outcome restored"
+ * for it, and only for it, again after a reload.
+ */
+export type SaveObservation = { revision: number; state: "applied" | "undone"; restored?: true };
+
 export type SaveDraft = {
   version: 2;
   page: Page;
   tracking?: SaveOutcomeIdentity & { revision: number };
   beforeApply?: SaveCheckpoint;
   redoHeld?: SaveChoices;
+  observed?: SaveObservation;
+  /** The last few announcements this page made, so a reload never makes them again. */
+  announced?: string[];
 };
 
 export type SaveOutcomeCheck = "checking" | "applied" | "undone" | "unavailable";
+
+/** How many announcements a draft keeps to stop a reload repeating them. */
+export const SAVE_ANNOUNCED = 8;
 
 export type SaveRerollIntent =
   | { kind: "saves"; holders: string[]; tag: string }
@@ -241,8 +254,8 @@ export const saveCheckpointSchema = z.strictObject({
   choices: saveChoicesSchema,
 }).refine(withinDraftBytes, byteLimit) satisfies z.ZodType<SaveCheckpoint>;
 
-// Use the protocol's complete outcome validator so stored plans gain its new
-// fields and guards when the shared contract is wired into production.
+// The protocol's own outcome validator, so a stored plan meets the same
+// fields and guards as one sent now.
 const outcomeShape = clientOpSchema.options.find((schema) => "shape" in schema && schema.shape.t.value === "actor.outcome")! as z.ZodObject;
 const outcomePlan = outcomeShape.safeExtend({ page: saveOutcomePageSchema.optional(), recharge: saveRechargeSpendSchema.optional() }) as unknown as z.ZodType<NonNullable<Page["plan"]>>;
 const page = z.strictObject({
@@ -275,4 +288,6 @@ export const saveDraftSchema = z.strictObject({
   tracking: z.strictObject({ id: z.uuidv7(), plan: z.uuidv7(), revision: counter }).optional(),
   beforeApply: saveCheckpointSchema.optional(),
   redoHeld: saveChoicesSchema.optional(),
+  observed: z.strictObject({ revision: counter, state: z.enum(["applied", "undone"]), restored: z.literal(true).optional() }).optional(),
+  announced: z.array(z.string().max(1_000)).max(SAVE_ANNOUNCED).optional(),
 }).refine(withinDraftBytes, byteLimit) satisfies z.ZodType<SaveDraft>;

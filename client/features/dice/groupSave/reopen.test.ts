@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { SaveOutcomeLedger, SaveOutcomeRecord } from "#shared/saveOutcomeContract.ts";
-import { newPage, setDc, type Page } from "./chain.ts";
+import { castSeen, closeSettled, closeTheAsk, newPage, setDc, type Page } from "./chain.ts";
+import { castAsk } from "#shared/testutil.ts";
 import { rowResult } from "./rows.ts";
 import { reconcileSave, prepareSave, resumeSaveEdits, OUTCOME_UNDONE, OUTCOME_RESTORED, OUTCOME_UNAVAILABLE } from "./reopen.ts";
 
@@ -199,4 +200,40 @@ test("Redo with no edits since Undo holds nothing to resume, and keeps edits an 
   assert.equal(untouched.reopen?.redoHeld?.dc, 19, "a Redo with nothing new keeps what an earlier Redo set aside");
   const last = reconcileSave(untouched, authority({ [A]: record("undone", 8) }));
   assert.equal(resumeSaveEdits(last, authority({ [A]: record("undone", 8) })).page.dc, 19);
+});
+
+test("an undone record past its retention reads unavailable before the server prunes it, and an Apply refused for it stays locked", () => {
+  const undone = reconcileSave(start(), authority({ [A]: record("undone", 2) }));
+  assert.equal(undone.reopen?.check, "undone");
+  const day = Date.parse("2026-10-31T00:00:00.000Z") + 24 * 60 * 60 * 1000;
+  const expired = reconcileSave(undone, { ...authority({ [A]: record("undone", 2) }), now: day });
+  assert.equal(expired.reopen?.check, "unavailable");
+  assert.equal(expired.reopen?.notice, OUTCOME_UNAVAILABLE);
+  assert.equal(reconcileSave(undone, { ...authority({ [A]: record("undone", 2) }), now: day - 1 }).reopen?.check, "undone");
+  // A device whose clock is behind still learns of the expiry from the server's refusal, and does not go back to editable.
+  const again = prepareSave({ ...undone, page: setDc(undone.page, 18) }, plan(B), authority({ [A]: record("undone", 2) }));
+  const refused = reconcileSave({ ...again, reopen: { ...again.reopen!, receipt: { plan: B, state: "refused", seq: 10, says: OUTCOME_UNAVAILABLE } } }, authority({ [A]: record("undone", 2) }));
+  assert.equal(refused.reopen?.check, "unavailable");
+  assert.equal(refused.page.phase, "applying");
+});
+
+test("a final Close the ask after Undo is its own step: pending, closed and refused, apart from the outcome it reopened from", () => {
+  const undone = reconcileSave(start(), authority({ [A]: record("undone", 2) }));
+  const asked: Page = { ...setDc(undone.page, 19), cast: { ask: castAsk("ask"), who: "Thorn" } };
+  const closing = closeTheAsk(asked);
+  assert.ok(closing.send.some(command => command.kind === "op" && command.op.t === "cast.close"));
+  const sent = reconcileSave({ ...undone, page: closing.page }, authority({ [A]: record("undone", 2) }));
+  assert.equal(sent.page.phase, "applying");
+  assert.equal(sent.page.cast?.closing, "rolled");
+  assert.equal(sent.page.dc, 19, "the close keeps the page as the DM left it");
+  const closed = reconcileSave({ ...sent, page: closeSettled(sent.page, { state: "taken" }) }, authority({ [A]: record("undone", 2) }));
+  assert.equal(closed.page.phase, "applied");
+  assert.equal(closed.page.apply, "taken");
+  assert.equal(closed.page.dc, 19);
+  assert.equal(castSeen(closed.page, { present: false, end: "done" }).cast?.blocked, undefined, "its own close never reads as resolved elsewhere");
+  const back = reconcileSave({ ...sent, page: closeSettled(sent.page, { state: "refused", says: "The ask changed." }) }, authority({ [A]: record("undone", 2) }));
+  assert.equal(back.page.phase, "rolled");
+  assert.equal(back.page.dc, 19);
+  assert.equal(back.page.applySays, "The ask changed.");
+  assert.equal(back.reopen?.check, "undone");
 });

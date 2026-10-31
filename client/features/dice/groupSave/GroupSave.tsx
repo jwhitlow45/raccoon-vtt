@@ -88,7 +88,7 @@ import { Loading } from "../../../components/Loading.tsx";
 import { saveRechargeSpendSchema } from "#shared/saveOutcomeContract.ts";
 import { LIMITS, serializedBytes } from "#shared/limits.ts";
 import { prepareSave, reconcileSave, resumeSaveEdits, saveEditable, SAVE_MEMORY_ONLY, OUTCOME_UNAVAILABLE, type SaveSession } from "./reopen.ts";
-import { authorityOf } from "./lifecycle.ts";
+import { authorityOf, serverTime } from "./lifecycle.ts";
 import { askAgain, rerollSaves } from "./reroll.ts";
 
 export function RowDamageField(props: { name: string; value: number | string | undefined; computed: number | null; summary?: DamageSummaryLines; onChange(value: string | null): void }) {
@@ -215,6 +215,9 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   };
   const edit = (next: Page) => { if (editableNow()) update(next); };
   const lifecycleLocked = !!reopen?.check && reopen.check !== "undone";
+  // An Apply the queue has let go of with no answer, and whose status cannot be checked, can only be left (D-261031-141).
+  const queued = useRoomView((s) => s.pending?.some((pending) => pending.op.t === "actor.outcome" && pending.op.plan === page.plan?.plan) ?? false);
+  const stranded = page.phase === "applying" && reopen?.check === "unavailable" && !queued;
   const frozen = page.phase === "applying" || page.phase === "applied" || lifecycleLocked || blocked !== null;
 
   const selected = useRoomView((s) => s.local.selectedIds);
@@ -224,7 +227,10 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
     const next = followSelection(pageRef.current, selected);
     if (next !== pageRef.current) update(next);
   }, [selected.join(","), page.phase]); // eslint-disable-line react-hooks/exhaustive-deps
-  const ids = page.phase === "setup" ? fromSource : page.rows.map((r) => r.tokenId);
+  // A reopened page keeps the creatures its Apply named, each by the creature it was then, so a token that now stands for
+  // another creature never takes its outcome. Start over is the way to change them, as it is to change the test.
+  const reopened = reopen?.tracking !== undefined;
+  const ids = page.phase === "setup" && !reopened ? fromSource : page.rows.map((r) => r.tokenId);
   const creatures = useMemo<ActorTarget[]>(() => ids.map((tokenId) => ({ tokenId })), [ids.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
   const { dice, loading, failed } = useDiceView(creatures);
   // Apply reads the recharge a fill came from in its creature's block, which loads with the page too, as after a reload (rechargeSpend). The SRD's blocks are one store, so `dice` reads them once loaded.
@@ -234,7 +240,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
     return caster ? [caster] : [];
   }, [rechargeHolder]);
   useDiceView(casters);
-  const live = dice && page.phase === "setup" ? groupRows(dice, fromSource, page.test, page.spell) : page.rows;
+  const live = dice && page.phase === "setup" && !reopened ? groupRows(dice, fromSource, page.test, page.spell) : page.rows;
   const rows = live;
   const tooMany = rows.length > 100;
   const shown: Page = page.phase === "setup" ? { ...page, rows } : page;
@@ -397,7 +403,8 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
     const currentAmounts = amountsOf(current, current.fill?.damageType);
     const waits = applyWaits(current, currentDice, currentAmounts);
     if (waits) { setError(waits); return; }
-    const plan = buildPlan(current, currentDice, currentAmounts, { plan: uuidv7(), newId: actions.newId });
+    // A first Apply's plan is its tracking id, which the server refuses from more than five minutes ahead of its own clock.
+    const plan = buildPlan(current, currentDice, currentAmounts, { plan: uuidv7(serverTime(roomStore.getState())), newId: actions.newId });
     if (!plan) {
       if (current.cast) closeAsk();
       else setError("Nothing would change.");
@@ -487,7 +494,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
 
   // ---- the parts
 
-  const setupControls = page.phase === "setup" ? <TestPicker page={page} onChange={edit} /> : null;
+  const setupControls = page.phase === "setup" && !reopened ? <TestPicker page={page} onChange={edit} /> : null;
   const dcRow = (
     <FieldRow label="DC">
       <NumberField label="DC" value={page.dc ?? undefined} min={1} max={50} nullable placeholder="None" onCommit={(dc) => edit(setDc(pageRef.current, dc))} width={88} />
@@ -612,6 +619,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
           outcome={outcomes.get(row.holder)!}
           loading={loading && row.bonus === null}
           blocked={blocked ?? (lifecycleLocked ? "Wait for this save's confirmed state." : offScene ? "Go back to the scene first." : null)}
+          locked={reopen?.check === "unavailable"}
           onChange={(next) => edit(page.phase === "setup" ? { ...next, rows: pageRef.current.rows } : next)}
           onDmRoll={(typed, override) => {
             if (!editableNow() || blocked || offScene) return;
@@ -642,7 +650,8 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
     </div>
   );
 
-  const waits = page.phase === "applied" ? null : applyWaits(shown, dice, amounts);
+  // A stranded Apply is no longer on its way, so its button waits on nothing: it stays off, under the page's line that says why.
+  const waits = page.phase === "applied" || stranded ? null : applyWaits(shown, dice, amounts);
   const words = applyWords(outcomeList, conditions);
   const applyButton =
     page.phase === "applied" ? (
@@ -668,7 +677,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
         ) : null}
       </div>
     ) : (
-      <Button variant="primary" busy={page.apply === "sending"} disabled={frozen || offScene || waits !== null || bound !== null || tooMany || page.cast?.blocked !== undefined} onClick={doApply}>
+      <Button variant="primary" busy={page.apply === "sending" && !stranded} disabled={frozen || offScene || waits !== null || bound !== null || tooMany || page.cast?.blocked !== undefined} onClick={doApply}>
         {waits ?? bound ?? (words !== NOTHING_TO_APPLY ? words : page.cast ? "Close the ask" : page.source.kind === "trap" ? SETTLE_WORDS : words)}
       </Button>
     );
@@ -723,7 +732,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
       {(reopen?.check === "undone" || reopen?.check === "unavailable") ? (
         confirmStartOver ? <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2), alignItems: "center" }}><span>Start over? This replaces these save results.</span><Button onClick={startOver}>Start over</Button><Button onClick={() => setConfirmStartOver(false)}>Keep this save</Button></div> : <Button onClick={() => setConfirmStartOver(true)}>Start over</Button>
       ) : null}
-      {page.phase !== "applying" && page.phase !== "applied" ? (
+      {page.phase !== "applying" && page.phase !== "applied" || stranded ? (
         confirmDiscard ? (
           <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap", alignItems: "center" }}>
             <span>{`Discard the ${title}?`}</span>
@@ -1012,7 +1021,14 @@ function GroupRow(props: {
   loading: boolean;
   /** How proficient it is in the page's save or skill, which its name carries: the page names the test once for every row (D-261029-415). */
   level?: Proficiency | undefined;
+  /** Why its actions wait, as while the connection is down or the page is off its scene. The row stays, so a total being typed survives. */
   blocked: string | null;
+  /**
+   * The save's outcome cannot be checked, which freezes the row as an
+   * applied page's. A check that only waits, as through a connection's
+   * blip, leaves the row as it is, with its actions waiting.
+   */
+  locked: boolean;
   onChange(page: Page): void;
   /** The DM's roll of an asked row, with the bonus typed for a creature with no stat block. */
   onDmRoll(typed?: number, override?: RollModeOverride): void;
@@ -1023,7 +1039,8 @@ function GroupRow(props: {
   const { page, row, outcome } = props;
   const s = stateOf(page, row);
   const setup = page.phase === "setup";
-  const frozen = page.phase === "applying" || page.phase === "applied" || props.blocked !== null;
+  const frozen = page.phase === "applying" || page.phase === "applied" || props.locked;
+  const waits = props.blocked !== null;
   const words = rowWords(page, row, outcome);
   const details: string[] = [];
   if (s.says) details.push(s.says);
@@ -1068,7 +1085,7 @@ function GroupRow(props: {
             value={markValue}
             options={MARKS}
             onChange={(m) => props.onChange(mark(page, row.holder, s.mark === m ? null : m))}
-            disabled={frozen}
+            disabled={frozen || waits}
             grow
           />
         </div>
@@ -1132,31 +1149,32 @@ function GroupRow(props: {
             </div>
           ) : null}
           {s.status === "notRolled" || s.status === "unknown" || props.reopened && s.way === "server" && !s.gone && s.mark !== "skip" ? (
-            <GroupRollButton source={props.source} name={`${row.name}'s roll`} capability={{ d20: true, visibility: "selectable" }} valid={() => !frozen && !s.gone && (props.reopened || s.status === "notRolled" || s.status === "unknown") === true} size="sm" busy={page.rolls.some(roll => roll.state === "sending" && roll.holders.includes(row.holder))} disabled={props.blocked !== null || rowBonus(row, s) === null} onRoll={props.onRollAgain}>
+            <GroupRollButton source={props.source} name={`${row.name}'s roll`} capability={{ d20: true, visibility: "selectable" }} valid={() => !frozen && !s.gone && (props.reopened || s.status === "notRolled" || s.status === "unknown") === true} size="sm" busy={page.rolls.some(roll => roll.state === "sending" && roll.holders.includes(row.holder))} disabled={props.blocked !== null || rowBonus(row, s) === null} title={props.blocked ?? undefined} onRoll={props.onRollAgain}>
               {props.reopened || s.status === "unknown" ? "Roll again" : "Roll them"}
             </GroupRollButton>
           ) : null}
-          {props.reopened && s.way === "ask" && !s.gone && s.mark !== "skip" ? <Button size="sm" disabled={props.blocked !== null || page.requests.some(request => request.state === "sending")} onClick={props.onAskAgain}>Ask again</Button> : null}
+          {props.reopened && s.way === "ask" && !s.gone && s.mark !== "skip" ? <Button size="sm" disabled={props.blocked !== null || page.requests.some(request => request.state === "sending")} title={props.blocked ?? undefined} onClick={props.onAskAgain}>Ask again</Button> : null}
           {s.way === "type" || s.status ? (
-            <NumberField label={`${row.name}'s total`} value={s.typed} min={-50} max={100} nullable placeholder="Total" onCommit={(n) => props.onChange(typeTotal(page, row.holder, n))} width={88} />
+            <NumberField label={`${row.name}'s total`} value={s.typed} min={-50} max={100} nullable placeholder="Total" onCommit={(n) => props.onChange(typeTotal(page, row.holder, n))} width={88} unavailable={waits} />
           ) : null}
           {switches ? (
             // The row's switches grow to fill a line they wrap onto, so one that wraps reads as a line of its own, not as left behind by the buttons above it.
             <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1), flex: "1 1 auto" }}>
               {outcome.legendaryLeft > 0 ? (
-                <Checkbox checked={s.legendary === true} onChange={(legendary) => set({ legendary })} label={`Use Legendary Resistance (${outcome.legendaryLeft} left)`} />
+                <Checkbox checked={s.legendary === true} onChange={(legendary) => set({ legendary })} label={`Use Legendary Resistance (${outcome.legendaryLeft} left)`} disabled={waits} />
               ) : null}
-              {outcome.evasionApplies ? <Checkbox checked={outcome.evasion} onChange={(evasion) => set({ evasion })} label="Evasion" /> : null}
+              {outcome.evasionApplies ? <Checkbox checked={outcome.evasion} onChange={(evasion) => set({ evasion })} label="Evasion" disabled={waits} /> : null}
               {outcome.qualified.map((q) => (
                 <Checkbox
                   key={q.key}
                   checked={(s.qualifiedOn ?? []).includes(q.key)}
                   onChange={(on) => set({ qualifiedOn: on ? [...(s.qualifiedOn ?? []), q.key] : (s.qualifiedOn ?? []).filter((k) => k !== q.key) })}
                   label={q.words}
+                  disabled={waits}
                 />
               ))}
               {conditionsAnyway ? (
-                <Checkbox checked={s.conditions === "on"} onChange={(on) => set({ conditions: on ? "on" : undefined })} label="Give the conditions anyway" />
+                <Checkbox checked={s.conditions === "on"} onChange={(on) => set({ conditions: on ? "on" : undefined })} label="Give the conditions anyway" disabled={waits} />
               ) : null}
             </div>
           ) : null}

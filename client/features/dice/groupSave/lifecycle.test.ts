@@ -8,15 +8,18 @@ import { DM, room as testRoom, token } from "#shared/testutil.ts";
 import { createRoomStore } from "../../../state/store.ts";
 import { FakeClock } from "../../../state/testing.ts";
 import { ReceiptTracker } from "../useReceipt.ts";
-import { newPage, type Page } from "./chain.ts";
-import { authorityOf, bindSaveLifecycle } from "./lifecycle.ts";
-import { captureChoices, OUTCOME_UNAVAILABLE, OUTCOME_UNDONE, SAVE_MEMORY_ONLY, type SaveSession } from "./reopen.ts";
+import { askAnswered, newPage, type Page } from "./chain.ts";
+import { askAgain } from "./reroll.ts";
+import { authorityOf, bindSaveLifecycle, serverTime } from "./lifecycle.ts";
+import { captureChoices, OUTCOME_RESTORED, OUTCOME_UNAVAILABLE, OUTCOME_UNDONE, prepareSave, SAVE_MEMORY_ONLY, sessionOfDraft, type SaveSession } from "./reopen.ts";
 import type { SaveDraft } from "./reopenContract.ts";
 import type { GroupSaveState } from "./store.ts";
 
 const PLAN = "019a4000-0000-7000-8000-000000000001";
 const APPLIED = "Group save: applied. Undo takes it all back.";
-const record = (state: "applied" | "undone", revision: number, seq = 10): SaveOutcomeRecord => ({ memberId: DM.memberId, plan: PLAN, revision, state, seq, firstAppliedAt: "2026-10-31T00:00:00.000Z" });
+// Retention runs from the first Apply against the server's time, which is this test's clock.
+const FIRST = new Date().toISOString();
+const record = (state: "applied" | "undone", revision: number, seq = 10): SaveOutcomeRecord => ({ memberId: DM.memberId, plan: PLAN, revision, state, seq, firstAppliedAt: FIRST });
 
 function page(): Page {
   return {
@@ -277,4 +280,136 @@ test("live refusal waits for its confirmed sequence before restoring Apply choic
   assert.deepEqual(f.notices, ["The save changed."], "the lifecycle owns its refusal announcement once");
   stop();
   f.room.dispose();
+});
+
+/*
+ * A reopened page restores its requests as closed. An explicit Undo can
+ * bring one back to the room, and a row that still names it must take its
+ * new answers, or Ask again retires it without the answered creature.
+ */
+function restoredAsk(bobFirst?: number) {
+  const room = createRoomStore({ roomId: "room", you: DM, clock: new FakeClock(), undoNotice: { claim: () => false } });
+  const game = testRoom({ tokens: { a: token("a"), b: token("b") } });
+  const request = (alice: number | undefined, bob: number | undefined, rev = 1): RollRequest => ({ id: "old", rev, test: { kind: "save", choices: [{ ability: "dex" }] }, dc: 15, dcShown: true, resultShown: true, at: "2026-10-31T00:00:00.000Z", targets: [{ tokenId: "a", ...(alice === undefined ? {} : { total: alice }) }, { tokenId: "b", ...(bob === undefined ? {} : { total: bob }) }] });
+  const snapshot = (outcomes: SaveOutcomeLedger, rolls: Record<string, RollRequest>, seq: number) => room.applySnapshot({ t: "snapshot", seq, watermark: 0, state: { ...projectState({ ...game, rolls }, DM, { sceneId: "s1" }), saveOutcomes: outcomes }, you: { ...DM, sceneId: "s1" } });
+  const asked = (holder: string, total?: number) => ({ way: "ask" as const, asked: { rollId: "old", dc: 15 }, ...(total === undefined ? {} : { answer: { tokenId: holder.slice(6), total } }) });
+  const before: Page = {
+    ...page(),
+    rows: ["a", "b"].map(id => ({ holder: `token:${id}`, target: { tokenId: id }, tokenId: id, name: id === "a" ? "Alice" : "Bob", ways: ["ask" as const], askRef: { tokenId: id }, bonus: 0, skip: false })),
+    states: { "token:a": asked("token:a", 12), "token:b": asked("token:b", bobFirst) },
+    requests: [{ rollId: "old", holders: ["token:a", "token:b"], state: "open" }],
+  };
+  room.setConnection("open");
+  snapshot({ [PLAN]: record("applied", 1) }, {}, 10);
+  const applied: SaveSession = {
+    page: { ...before, phase: "applied", apply: "taken", plan: { t: "actor.outcome", plan: PLAN, targets: [{ target: { tokenId: "a" }, amount: 3 }] } },
+    reopen: { tracking: { id: PLAN, plan: PLAN, revision: 1 }, beforeApply: { version: 1, pageId: before.id, plan: PLAN, choices: captureChoices(before) }, check: "applied" },
+  };
+  const store = createStore<GroupSaveState>(() => ({ page: applied.page, reopen: applied.reopen, shownIn: null, restored: true }));
+  const receipts = new ReceiptTracker();
+  receipts.env = { lookup: async () => ({ parts: [] }), log: () => [] };
+  const stop = bindSaveLifecycle({ store, room: room.store, receipts, persist: () => true });
+  return { room, store, request, snapshot, stop, bob: () => store.getState().page!.states["token:b"]?.answer?.total };
+}
+
+test("a reopened page takes an unselected creature's answer on a request an explicit Undo brought back", () => {
+  const f = restoredAsk();
+  f.snapshot({ [PLAN]: record("undone", 2, 11) }, { old: f.request(12, undefined) }, 11);
+  assert.equal(f.store.getState().page!.phase, "rolled");
+  assert.equal(f.store.getState().page!.requests[0]!.state, "closed", "the restored request stays closed on the page");
+  f.snapshot({ [PLAN]: record("undone", 2, 11) }, { old: f.request(12, 18, 2) }, 12);
+  assert.equal(f.bob(), 18, "Bob's answer reaches the reopened page");
+  const again = askAgain(f.store.getState().page!, { holders: ["token:a"], requests: f.room.store.getState().confirmed!.rolls, requestIds: () => "fresh" });
+  const op = again.send[0]?.kind === "op" ? again.send[0].op : null;
+  assert.ok(op?.t === "roll.ask");
+  assert.deepEqual(op.request.targets, [{ tokenId: "a" }], "Ask again asks Alice alone, since Bob has answered");
+  f.stop();
+  f.room.dispose();
+});
+
+test("a refused replacement leaves the page following the old request's new answers, and a retry keeps them", () => {
+  const f = restoredAsk(7);
+  f.snapshot({ [PLAN]: record("undone", 2, 11) }, { old: f.request(12, 7) }, 11);
+  const sent = askAgain(f.store.getState().page!, { holders: ["token:a"], requests: f.room.store.getState().confirmed!.rolls, requestIds: () => "fresh" });
+  f.store.setState({ page: sent.page });
+  f.snapshot({ [PLAN]: record("undone", 2, 11) }, { old: f.request(12, 20, 3) }, 12);
+  f.store.setState({ page: askAnswered(f.store.getState().page!, "fresh", { ok: false, message: "The roll request changed. Check its answers and ask again." }) });
+  assert.equal(f.store.getState().page!.requests.find(r => r.rollId === "fresh")?.state, "refused");
+  assert.equal(f.bob(), 20, "the page follows Bob's new answer, not the 7 it restored");
+  const retry = askAgain(f.store.getState().page!, { holders: ["token:a"], requests: f.room.store.getState().confirmed!.rolls, requestIds: () => "retry" });
+  const op = retry.send[0]?.kind === "op" ? retry.send[0].op : null;
+  assert.ok(op?.t === "roll.ask");
+  assert.deepEqual(op.request.targets, [{ tokenId: "a" }]);
+  assert.equal(retry.page.states["token:b"]?.answer?.total, 20);
+  f.stop();
+  f.room.dispose();
+});
+
+test("the room learns how far the server's clock is from a fast device's as log lines arrive, keeping the least delayed reading", () => {
+  const stamped = Date.parse("2026-10-31T00:00:00.000Z");
+  const clock = new FakeClock();
+  clock.t = stamped + 10 * 60 * 1000;
+  const room = createRoomStore({ roomId: "room", you: DM, clock, undoNotice: { claim: () => false } });
+  room.setConnection("open");
+  room.applySnapshot({ t: "snapshot", seq: 0, watermark: 0, state: projectState(testRoom(), DM, { sceneId: "s1" }), you: { ...DM, sceneId: "s1" } });
+  assert.equal(room.store.getState().serverOffset, undefined, "a snapshot's old lines say nothing of the clock");
+  const line = (id: string, at: number) => ({ key: `log:${id}`, value: { id, at: new Date(at).toISOString(), kind: "event", text: "Torch lit." } });
+  room.applyEv({ t: "ev", seq: 1, changes: [line("1:0", stamped)] });
+  assert.equal(room.store.getState().serverOffset, -10 * 60 * 1000);
+  clock.t += 2_000;
+  room.applyEv({ t: "ev", seq: 2, changes: [line("2:0", stamped + 500)] });
+  assert.equal(room.store.getState().serverOffset, -10 * 60 * 1000, "a line the network held up longer reads lower and is not taken");
+  assert.equal(serverTime(room.store.getState(), clock.t), stamped + 2_000);
+  room.dispose();
+});
+
+test("an Apply the queue let go of with no receipt offers Start over and Discard instead of checking for good", async () => {
+  const f = fixture(session(), { [PLAN]: record("undone", 2, 11) });
+  const B = "019a4000-0000-7000-8000-000000000002";
+  f.snapshot({ [PLAN]: record("undone", 2, 11) }, 11);
+  const stop = bindSaveLifecycle(f.options);
+  const undone = f.store.getState();
+  assert.equal(undone.reopen?.check, "undone");
+  const sent = prepareSave({ page: undone.page!, reopen: undone.reopen }, { t: "actor.outcome", plan: B, targets: [{ target: { tokenId: "g1" }, amount: 3 }] }, authorityOf(f.room.store.getState(), undone.page!));
+  f.store.setState({ page: sent.page, reopen: sent.reopen });
+  f.receipts.sending(B, 0);
+  f.room.store.setState({ pending: [{ n: 1, op: sent.page.plan!, at: 0 }] as never });
+  f.receipts.answer(B, 0, "unknown", undefined, "expired");
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(f.store.getState().reopen?.check, "checking", "an attempt still queued may yet be answered");
+  f.room.store.setState({ pending: [] });
+  assert.equal(f.store.getState().reopen?.check, "unavailable");
+  assert.equal(f.store.getState().page!.phase, "applying", "the missing receipt is not taken for a refusal");
+  stop();
+  f.room.dispose();
+});
+
+test("a page locked by its own later Apply never reads Outcome restored, and a reload repeats no announcement", () => {
+  const B = "019a4000-0000-7000-8000-000000000002";
+  const f = fixture();
+  const stop = bindSaveLifecycle(f.options);
+  f.snapshot({ [PLAN]: record("undone", 2, 11) }, 11);
+  assert.equal(f.store.getState().reopen?.notice, OUTCOME_UNDONE);
+  const undoneDraft = structuredClone(f.writes.at(-1)!);
+  const held = f.store.getState();
+  const sent = prepareSave({ page: held.page!, reopen: held.reopen }, { t: "actor.outcome", plan: B, targets: [{ target: { tokenId: "g1" }, amount: 3 }] }, authorityOf(f.room.store.getState(), held.page!));
+  f.store.setState({ page: sent.page, reopen: sent.reopen });
+  f.receipts.sending(B, 0);
+  f.snapshot({ [PLAN]: { ...record("applied", 3, 12), plan: B } }, 12);
+  f.receipts.answer(B, 0, "taken");
+  assert.equal(f.store.getState().page!.phase, "applied");
+  assert.notEqual(f.store.getState().reopen?.notice, OUTCOME_RESTORED);
+  const appliedDraft = structuredClone(f.writes.at(-1)!);
+  stop();
+  f.room.dispose();
+  for (const [draft, ledger, shown] of [[appliedDraft, { [PLAN]: { ...record("applied", 3, 12), plan: B } }, undefined], [undoneDraft, { [PLAN]: record("undone", 2, 11) }, OUTCOME_UNDONE]] as const) {
+    const reloaded = fixture(sessionOfDraft(draft), ledger);
+    reloaded.snapshot(ledger, 12);
+    const again = bindSaveLifecycle(reloaded.options);
+    assert.equal(reloaded.store.getState().reopen?.check, shown ? "undone" : "applied");
+    assert.equal(reloaded.store.getState().reopen?.notice, shown, "the page's own line is as it was");
+    assert.deepEqual(reloaded.notices, [], "the reload announces nothing already said");
+    again();
+    reloaded.room.dispose();
+  }
 });

@@ -1,4 +1,4 @@
-import { saveOutcomeRecordSchema, type SaveOutcomeFields, type SaveOutcomeLedger, type SaveOutcomeState } from "#shared/saveOutcomeContract.ts";
+import { SAVE_OUTCOME_RETENTION_MS, saveOutcomeRecordSchema, type SaveOutcomeFields, type SaveOutcomeLedger } from "#shared/saveOutcomeContract.ts";
 import type { OpOf } from "#shared/protocol.ts";
 import { stableStringify } from "#shared/project.ts";
 import { apply, type Page, type Step } from "./chain.ts";
@@ -12,13 +12,22 @@ export const SAVE_MEMORY_ONLY = "This save can reopen here until this tab closes
 export type SaveReceipt = { plan: string; state: "sending" | "checking" | "unknown" | "committed" | "refused"; seq?: number; says?: string };
 export type SaveReopen = Omit<SaveDraft, "version" | "page"> & {
   check: SaveOutcomeCheck | null;
-  observed?: { revision: number; state: SaveOutcomeState };
   receipt?: SaveReceipt;
   notice?: string;
   memoryOnly?: boolean;
 };
 export type SaveSession = { page: Page; reopen: SaveReopen | null };
-export type SaveAuthority = { ready: boolean; seq: number; memberId: string; ledger: SaveOutcomeLedger; sceneAvailable: boolean };
+export type SaveAuthority = {
+  ready: boolean;
+  seq: number;
+  memberId: string;
+  ledger: SaveOutcomeLedger;
+  sceneAvailable: boolean;
+  /** The server's time as this device reckons it (lifecycle.ts serverTime), against which a record's retention ends. */
+  now?: number;
+  /** Plans of outcomes still in this device's queue, which may yet be answered. */
+  pendingPlans?: ReadonlySet<string>;
+};
 
 function copiedChoices(page: Page): SaveChoices {
   const { id: _id, plan: _plan, apply: _apply, applySays: _says, rollNow: _now, ...fields } = page;
@@ -55,7 +64,14 @@ export function restoreChoices(pageId: string, choices: SaveChoices): Page {
 }
 
 export function draftOf({ page, reopen }: SaveSession): SaveDraft {
-  return { version: 2, page, ...(reopen?.tracking ? { tracking: reopen.tracking } : {}), ...(reopen?.beforeApply ? { beforeApply: reopen.beforeApply } : {}), ...(reopen?.redoHeld ? { redoHeld: reopen.redoHeld } : {}) };
+  return {
+    version: 2, page,
+    ...(reopen?.tracking ? { tracking: reopen.tracking } : {}),
+    ...(reopen?.beforeApply ? { beforeApply: reopen.beforeApply } : {}),
+    ...(reopen?.redoHeld ? { redoHeld: reopen.redoHeld } : {}),
+    ...(reopen?.observed ? { observed: reopen.observed } : {}),
+    ...(reopen?.announced?.length ? { announced: reopen.announced } : {}),
+  };
 }
 
 export function sessionOfDraft(draft: SaveDraft): SaveSession {
@@ -74,9 +90,11 @@ function locked(input: SaveSession, check: "checking" | "unavailable"): SaveSess
 export function reconcileSave(input: SaveSession, authority: SaveAuthority): SaveSession {
   const { page, reopen } = input;
   const tracking = reopen?.tracking;
+  // Close the ask is final and has no outcome to reopen. On a reopened page it
+  // is its own step, apart from the outcome the page reopened from, which it
+  // keeps only to go back to should the close be refused.
+  if (page.cast?.closing) return { page, reopen: reopen?.check ? { ...reopen, check: null, notice: undefined } : reopen };
   if (!tracking) {
-    // Close the ask is final and has no applied outcome to reopen.
-    if (page.cast?.closing) return { page, reopen: reopen?.check ? { ...reopen, check: null, notice: undefined } : reopen };
     if (page.phase === "applied" || page.apply === "taken" || page.phase === "applying") return locked(input, authority.ready ? "unavailable" : "checking");
     return { page, reopen };
   }
@@ -90,9 +108,13 @@ export function reconcileSave(input: SaveSession, authority: SaveAuthority): Sav
   if (raw !== undefined && !current) return locked(input, "unavailable");
   if (current && (current.seq > authority.seq || current.revision < tracking.revision)) return locked(input, "checking");
   if (current && current.memberId !== authority.memberId) return locked(input, "unavailable");
+  // The server forgets a record a day after its first Apply, and refuses it from then, even before a later write prunes it.
+  if (current && authority.now !== undefined && Date.parse(current.firstAppliedAt) + SAVE_OUTCOME_RETENTION_MS <= authority.now) return locked(input, "unavailable");
 
   // A refused replacement leaves the older undone outcome intact. While B is
   // pending, redoHeld temporarily retains A's checkpoint, not a command queue.
+  // A later Apply refused because its record can no longer be checked stays locked: going back would offer the same refusal again.
+  if (attempt && receipt?.state === "refused" && tracking.revision > 0 && receipt.says === OUTCOME_UNAVAILABLE) return locked(input, "unavailable");
   if (attempt && receipt?.state === "refused" && (!current && tracking.revision === 0 || tracking.revision > 0 && current?.plan === tracking.plan && current.revision >= tracking.revision)) {
     const checkpoint = reopen.beforeApply;
     if (!checkpoint || checkpoint.plan !== attempt || checkpoint.pageId !== page.id) return locked(input, "unavailable");
@@ -109,7 +131,12 @@ export function reconcileSave(input: SaveSession, authority: SaveAuthority): Sav
     if (tracking.revision === 0 && attempt && (!receipt || receipt.state === "sending" || receipt.state === "checking")) return locked(input, "checking");
     return locked(input, "unavailable");
   }
-  if (attempt && current.plan === tracking.plan && attempt !== tracking.plan && current.revision === tracking.revision && current.state === "undone") return locked(input, "checking");
+  if (attempt && current.plan === tracking.plan && attempt !== tracking.plan && current.revision === tracking.revision && current.state === "undone") {
+    // Once the queue has let go of the attempt with no receipt, nothing more will say what became of it. The page then offers
+    // Start over and Discard, without taking the missing receipt for a refusal (D-261031-141).
+    const settled = receipt?.state === "unknown" && !authority.pendingPlans?.has(attempt);
+    return locked(input, settled ? "unavailable" : "checking");
+  }
   if (current.plan !== (attempt ?? tracking.plan)) return locked(input, "unavailable");
   if (reopen.observed?.revision === current.revision && reopen.observed.state !== current.state) return locked(input, "unavailable");
   const checkpoint = reopen.beforeApply;
@@ -117,13 +144,16 @@ export function reconcileSave(input: SaveSession, authority: SaveAuthority): Sav
   const nextTracking = { id: tracking.id, plan: current.plan, revision: current.revision };
   const newer = current.revision > tracking.revision;
   const replaceAttempt = attempt !== undefined && attempt !== tracking.plan;
-  const metadata: SaveReopen = { ...reopen, tracking: nextTracking, check: current.state, observed: { revision: current.revision, state: current.state }, ...(replaceAttempt ? { redoHeld: undefined } : {}) };
+  const wasEditable = page.phase === "setup" || page.phase === "rolled";
+  // Redo restores an outcome from undone: an editable page, or a newer applied status read after an undone one. A page locked
+  // by its own later Apply was never undone in between, and keeps no "Outcome restored" line through a reload or reconnect.
+  const restored = current.state === "applied" && !attempt && (wasEditable || (newer ? reopen.observed?.state === "undone" : reopen.observed?.revision === current.revision && reopen.observed.restored === true));
+  const metadata: SaveReopen = { ...reopen, tracking: nextTracking, check: current.state, observed: { revision: current.revision, state: current.state, ...(restored ? { restored: true as const } : {}) }, ...(replaceAttempt ? { redoHeld: undefined } : {}) };
   if (current.state === "undone") {
     if (newer || page.phase === "applying" || page.phase === "applied" || page.apply === "taken") return { page: restoreChoices(page.id, checkpoint.choices), reopen: { ...metadata, notice: OUTCOME_UNDONE } };
     if (reopen.check === "undone" && !newer && reopen.notice !== OUTCOME_UNAVAILABLE) return { page, reopen };
     return { page, reopen: { ...metadata, notice: OUTCOME_UNDONE } };
   }
-  const wasEditable = page.phase === "setup" || page.phase === "rolled";
   let held = metadata.redoHeld;
   if (wasEditable) {
     // New edits can exceed the storage budget. Keep them in memory while the
@@ -134,7 +164,7 @@ export function reconcileSave(input: SaveSession, authority: SaveAuthority): Sav
     if (stableStringify(edits) !== stableStringify(checkpoint.choices)) held = edits;
   }
   if (!newer && reopen.check === "applied" && page.phase === "applied") return { page, reopen };
-  return { page: { ...page, phase: "applied", apply: "taken" }, reopen: { ...metadata, redoHeld: held, notice: wasEditable || current.revision > 1 && !attempt ? OUTCOME_RESTORED : undefined } };
+  return { page: { ...page, phase: "applied", apply: "taken" }, reopen: { ...metadata, redoHeld: held, notice: restored ? OUTCOME_RESTORED : undefined } };
 }
 
 export function saveEditable(input: SaveSession, authority: SaveAuthority): boolean {

@@ -7,7 +7,7 @@ import type { ReceiptTracker } from "../useReceipt.ts";
 import { creatureKey } from "../options.ts";
 import { askAnswered, markGone, syncRequests, type Page } from "./chain.ts";
 import { writeSaveDraft } from "./draftStorage.ts";
-import type { SaveDraft } from "./reopenContract.ts";
+import { SAVE_ANNOUNCED, type SaveDraft } from "./reopenContract.ts";
 import { draftOf, reconcileSave, SAVE_MEMORY_ONLY, type SaveAuthority, type SaveReceipt, type SaveReopen, type SaveSession } from "./reopen.ts";
 import type { GroupSaveState } from "./store.ts";
 
@@ -19,6 +19,11 @@ export type SaveLifecycleOptions = {
   persist?(roomId: string, draft: SaveDraft | null): boolean;
 };
 
+/** The server's time as this device reckons it: its own clock moved by the offset it learned, or its own clock until it has one. */
+export function serverTime(room: Pick<RoomView, "serverOffset">, now: number = Date.now()): number {
+  return now + (room.serverOffset ?? 0);
+}
+
 export function authorityOf(room: RoomView, page: Page): SaveAuthority {
   const confirmed = room.confirmed as (NonNullable<RoomView["confirmed"]> & { saveOutcomes?: SaveOutcomeLedger }) | null | undefined;
   const seq = room.seq;
@@ -28,6 +33,8 @@ export function authorityOf(room: RoomView, page: Page): SaveAuthority {
     memberId: room.you?.memberId ?? "",
     ledger: confirmed?.saveOutcomes ?? {},
     sceneAvailable: room.sceneId === page.sceneId && !!confirmed?.scenes[page.sceneId] && !room.sceneLoad?.requested,
+    now: serverTime(room),
+    pendingPlans: new Set(room.pending?.flatMap(pending => pending.op.t === "actor.outcome" ? [pending.op.plan] : []) ?? []),
   };
 }
 
@@ -56,6 +63,7 @@ export function bindSaveLifecycle(options: SaveLifecycleOptions): () => void {
     const lookedUp = new Set<string>();
     const outcomePlans = new Set<string>();
     const initial = store.getState();
+    for (const key of initial.reopen?.announced ?? []) notices.add(key);
     const restoredRequests = new Set(initial.restored ? initial.page?.requests.filter(request => request.state === "sending").map(request => request.rollId) : []);
     const queuedRequests = new Map<string, number>();
 
@@ -134,6 +142,16 @@ export function bindSaveLifecycle(options: SaveLifecycleOptions): () => void {
             current = { ...current, page };
           }
 
+          // The page's own announcements, chosen before the draft is written, so a reload that restores the draft never makes them again.
+          const said: { key: string; text: string }[] = [];
+          // The receipt as it stood before reconciliation, which drops it once a refusal has restored the choices.
+          if (receipt?.state === "refused" && receipt.says && authority.ready && (receipt.seq === undefined || authority.seq >= receipt.seq)) said.push({ key: JSON.stringify([current.page.id, receipt.plan, "refused"]), text: receipt.says });
+          const tracked = current.reopen?.tracking;
+          if (current.reopen?.notice) said.push({ key: JSON.stringify([current.page.id, tracked?.id, tracked?.plan, tracked?.revision, current.reopen.notice]), text: current.reopen.notice });
+          else if (tracked && current.reopen?.check === "applied") said.push({ key: JSON.stringify([current.page.id, tracked.id, tracked.plan, tracked.revision, "applied"]), text: `${current.page.fill?.name ?? "Group save"}: applied. Undo takes it all back.` });
+          const fresh = said.filter(item => !notices.has(item.key));
+          if (fresh.length > 0 && current.reopen) current = { ...current, reopen: { ...current.reopen, announced: [...(current.reopen.announced ?? []), ...fresh.map(item => item.key)].slice(-SAVE_ANNOUNCED) } };
+
           if (current.page !== savedPage || current.reopen !== savedReopen) {
             const saved = persist(view.roomId, draftOf(current));
             if (!saved && !current.reopen?.memoryOnly) current = { ...current, reopen: { ...current.reopen, check: current.reopen?.check ?? null, memoryOnly: true } };
@@ -142,10 +160,7 @@ export function bindSaveLifecycle(options: SaveLifecycleOptions): () => void {
             savedReopen = current.reopen;
           }
           if (current.page !== held.page || current.reopen !== held.reopen) store.setState(current);
-          if (receipt?.state === "refused" && receipt.says && authority.ready && (receipt.seq === undefined || authority.seq >= receipt.seq)) announce(JSON.stringify([current.page.id, receipt.plan, "refused"]), receipt.says);
-          const tracking = current.reopen?.tracking;
-          if (current.reopen?.notice) announce(JSON.stringify([current.page.id, tracking?.id, tracking?.plan, tracking?.revision, current.reopen.notice]), current.reopen.notice);
-          else if (tracking && current.reopen?.check === "applied") announce(JSON.stringify([current.page.id, tracking.id, tracking.plan, tracking.revision, "applied"]), `${current.page.fill?.name ?? "Group save"}: applied. Undo takes it all back.`);
+          for (const item of fresh) announce(item.key, item.text);
           if (current.reopen?.memoryOnly) announce(`${current.page.id}:memory`, SAVE_MEMORY_ONLY);
         } while (again);
       } finally {

@@ -5,7 +5,7 @@ import { describe, test } from "node:test";
 import { theme } from "../../../lib/theme.ts";
 import { damageSummary } from "../damageSummaryLines.ts";
 import { createStore } from "zustand/vanilla";
-import { actor, apply, customMonster, DM, room, token } from "#shared/testutil.ts";
+import { actor, apply, character, customMonster, DM, room, token } from "#shared/testutil.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { clientOpSchema } from "#shared/protocol.ts";
 import { newPage, setAmount, type Page } from "./chain.ts";
@@ -13,7 +13,7 @@ import { amountsOf, buildPlan, rowOutcome } from "./plan.ts";
 import { groupRows } from "./rows.ts";
 import { receiptsSlot } from "../useReceipt.ts";
 import { groupSaveSlot } from "./store.ts";
-import { OUTCOME_UNDONE, OUTCOME_RESTORED, OUTCOME_UNAVAILABLE, SAVE_MEMORY_ONLY, type SaveReopen } from "./reopen.ts";
+import { captureChoices, OUTCOME_UNDONE, OUTCOME_RESTORED, OUTCOME_UNAVAILABLE, SAVE_MEMORY_ONLY, type SaveReopen } from "./reopen.ts";
 
 /*
  * The open group save in the Dice panel (docs/design-v1-dice-pass.md 7.8):
@@ -175,16 +175,16 @@ test("one-roll group damage uses safe public labels and preserves the fixed cast
   assert.doesNotMatch(html, /type="submit"/);
 });
 
-function captureRolls(page: Page, view = VIEW) {
+function captureRolls(page: Page, view = VIEW, reopen: SaveReopen | null = null, room: Record<string, unknown> = {}) {
   const scope = new RoomScope();
   const saves = scope.get(groupSaveSlot);
-  saves.setState({ page });
+  saves.setState({ page, reopen });
   saves.getInitialState = saves.getState;
   const choices = scope.get(panelModule.diceChoicesSlot);
   const initial = { adv: true, dis: false, secret: true, secretFor: "g1", version: 19, last: null };
   choices.setState(initial);
   choices.getInitialState = choices.getState;
-  const store = createStore(() => ({ view, confirmed: view, confirmedReady: true, seq: 0, pending: [], ended: null, roomId: "r1", connection: "open", you: DM, sceneId: "s1", local: { selectedIds: ["g1"], multi: false } }));
+  const store = createStore(() => ({ view, confirmed: view, confirmedReady: true, seq: 0, pending: [], ended: null, roomId: "r1", connection: "open", you: DM, sceneId: "s1", local: { selectedIds: ["g1"], multi: false }, ...room }));
   const sent: import("#shared/protocol.ts").ClientOp[] = [];
   const snapshots: ReturnType<typeof saves.getState>[] = [];
   const controls: { children?: unknown; onClick?(): void; disabled?: boolean }[] = [];
@@ -429,4 +429,62 @@ test("a page that can no longer be checked draws All fail, All pass, the damage,
   assert.ok(unavailable.damageRoll?.disabled, "the damage's Roll again looks locked");
   assert.match(unavailable.markup, /role="radiogroup" aria-label="On a pass"[^>]*aria-disabled="true"/);
   assert.ok(!unavailable.markup.includes("Add a condition"), "Add a condition goes, as on an applied page");
+});
+
+test("a reopened No save page applies to the creatures its first Apply named, never to another creature its token now stands for", () => {
+  const PLAN_ID = "019a4000-0000-7000-8000-000000000001";
+  const page: Page = damagePage("9 fire");
+  const ledger = { [PLAN_ID]: { memberId: DM.memberId, plan: PLAN_ID, revision: 2, state: "undone" as const, firstAppliedAt: new Date().toISOString(), seq: 0 } };
+  const reopen: SaveReopen = { tracking: { id: PLAN_ID, plan: PLAN_ID, revision: 2 }, check: "undone", observed: { revision: 2, state: "undone" }, beforeApply: { version: 1, pageId: page.id, plan: PLAN_ID, choices: captureChoices(page) } };
+  const repointed = structuredClone(VIEW) as typeof VIEW & { saveOutcomes: typeof ledger };
+  repointed.characters.c1 = character("c1", { name: "Mira", actor: actor({ hp: { cur: 20, max: 20, temp: 0 } }) });
+  repointed.tokens.g1!.actor = { ref: "c1" };
+  repointed.saveOutcomes = ledger;
+  const ui = captureRolls(page, repointed, reopen);
+  assert.match(drawPage(page), /aria-label="What they roll"/);
+  assert.doesNotMatch(drawPage(page, [], "open", reopen), /aria-label="What they roll"/, "the reopened page keeps its test, which Start over changes");
+  const apply = ui.controls.find((control) => typeof control.children === "string" && control.children.startsWith("Apply:"));
+  assert.ok(apply?.onClick, JSON.stringify(ui.controls.map((control) => control.children)));
+  apply.onClick();
+  // The token now stands for Mira, so its row's first creature is gone and nothing goes out. Before, the row was read again
+  // from the token, and Mira took the damage and Prone the Guard was dealt.
+  assert.deepEqual(ui.sent.filter((op) => op.t === "actor.outcome"), []);
+});
+
+test("a row keeps its total field while the connection is down, so a total being typed survives, with its actions waiting", () => {
+  const page: Page = { ...PAGE, phase: "rolled", outcome: { ...PAGE.outcome, damage: "9 fire" }, rows: groupRows(DICE, ["g1"], PAGE.test, false), states: { "token:g1": { way: "type" } } };
+  const online = drawPage(page, [], "open");
+  assert.match(online, /aria-label="Guard&#x27;s total"/);
+  const offline = drawPage(page, [], "closed");
+  assert.match(offline, /<input(?=[^>]*aria-label="Guard&#x27;s total")(?=[^>]*readOnly="")[^>]*>/, "the field stays, read-only until the connection is back");
+  assert.match(offline, /role="radiogroup" aria-label="Guard: fail, pass or skip"[^>]*aria-disabled="true"/);
+  // A reopened page offline only waits to check its outcome, and keeps the field too. One that cannot be checked freezes.
+  const tracking = { id: "019a4000-0000-7000-8000-000000000001", plan: "019a4000-0000-7000-8000-000000000001", revision: 2 };
+  assert.match(drawPage(page, [], "closed", { tracking, check: "checking" }), /aria-label="Guard&#x27;s total"/);
+  assert.doesNotMatch(drawPage(page, [], "open", { tracking, check: "unavailable", notice: OUTCOME_UNAVAILABLE }), /aria-label="Guard&#x27;s total"/);
+});
+
+test("a first Apply on a device whose clock runs ten minutes fast mints its tracking id from the server's time", () => {
+  const fast = 10 * 60 * 1000;
+  const ui = captureRolls(damagePage("9 fire"), VIEW, null, { serverOffset: -fast });
+  const apply = ui.controls.find((control) => typeof control.children === "string" && control.children.startsWith("Apply:"));
+  assert.ok(apply?.onClick);
+  const now = Date.now();
+  apply.onClick();
+  const outcome = ui.sent.find((op) => op.t === "actor.outcome") as (import("#shared/protocol.ts").OpOf<"actor.outcome"> & import("#shared/saveOutcomeContract.ts").SaveOutcomeFields) | undefined;
+  assert.ok(outcome?.page, JSON.stringify(ui.sent));
+  const minted = Number.parseInt(outcome.page.id.replaceAll("-", "").slice(0, 12), 16);
+  assert.ok(Math.abs(minted - (now - fast)) < 5_000, `minted ${minted - now} ms from this device's clock`);
+});
+
+test("an Apply the queue let go of with no receipt draws Start over and Discard, and Discard waits while it is still queued", () => {
+  const plan = { t: "actor.outcome" as const, plan: "019a4000-0000-7000-8000-000000000002", targets: [{ target: { tokenId: "g1" }, amount: 9 }] };
+  const page: Page = { ...damagePage("9 fire"), phase: "applying", apply: "sending", plan };
+  const stranded = drawPage(page, [], "open", { check: "unavailable", notice: OUTCOME_UNAVAILABLE });
+  assert.match(stranded, />Start over<\/button>/);
+  assert.match(stranded, />Discard<\/button>/);
+  assert.doesNotMatch(stranded, /Applying…|aria-busy/, "nothing is on its way any more");
+  const checking = drawPage(page, [], "open", { check: "checking" });
+  assert.doesNotMatch(checking, />Discard<\/button>/);
+  assert.match(checking, /Applying…/);
 });
