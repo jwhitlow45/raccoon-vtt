@@ -40,7 +40,7 @@ import { useDiceView } from "../useDiceView.ts";
 import { SrdLoadFailed } from "../../monsters/SrdLoadFailed.tsx";
 import { useReceipt, type ReceiptState } from "../useReceipt.ts";
 import { useRollBlocked } from "../useRollOption.ts";
-import { d20Text, informativeRollMode, RollResultLine, knownOrTyped, parseBonus } from "../../rolls/card.ts";
+import { d20Text, informativeRollMode, RollResultLine, knownOrTyped, parseBonus, requestRollSource } from "../../rolls/card.ts";
 import {
   apply,
   applyAgain,
@@ -508,7 +508,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
     const state = stateOf(shown, row);
     const request = state.asked ? view.rolls[state.asked.rollId] : undefined;
     const answer = request?.targets.find((target) => JSON.stringify(targetRef(target)) === JSON.stringify(row.askRef));
-    return [row.holder, JSON.stringify([rollContext, row, state, serverRolls([row]), page.dmRolls.filter((r) => r.holder === row.holder), request && [request.id, request.rev, request.test, answer]])];
+    return [row.holder, JSON.stringify([rollContext, row, state, serverRolls([row]), page.dmRolls.filter((r) => r.holder === row.holder), request && answer && requestRollSource(request, answer)])];
   }));
   const hasServerRoll = rows.some((r) => !r.skip && stateOf(shown, r).mark !== "skip" && stateOf(shown, r).way === "server");
   const rowList = (

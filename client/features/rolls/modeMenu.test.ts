@@ -10,7 +10,7 @@ import type { ClientOp } from "#shared/protocol.ts";
 import type { RoomState, RollRequest } from "#shared/model.ts";
 import { EMPTY_PC_STATS } from "#shared/rules/pcStats.ts";
 import { pendingSaves } from "#shared/rules/saveEnds.ts";
-import { actor, character, DM, P1, effect, entry, room, token } from "#shared/testutil.ts";
+import { actor, apply, character, DM, P1, effect, entry, room, token } from "#shared/testutil.ts";
 import type { UseRollModeMenuOptions } from "../dice/useRollModeMenu.tsx";
 import type { PromptCard } from "../combat/alerts.ts";
 import type { DeathSavePrompt } from "../combat/logic.ts";
@@ -46,6 +46,9 @@ const { DeathSaves } = await import("../tokens/HpSection.tsx");
 const { EntryRow } = await import("../encounter/Row.tsx");
 const { RechargeCard } = await import("../encounter/RechargeCard.tsx");
 const { CombatUses } = await import("../combat/CombatUses.tsx");
+const { OptionsList } = await import("../dice/RollOptions.tsx");
+const { creatureRolls } = await import("../dice/creature.ts");
+const { requestRollSource } = await import("./card.ts");
 
 function fixture() {
   const state = room({ characters: { hero: character("hero", {
@@ -369,15 +372,44 @@ test("preview blocks request menus while ordinary taps retain the base send path
   }
 });
 
-test("request sources exclude sibling answers but retain the current target and test", () => {
-  for (const surface of [player, desk]) {
-    const state = fixture(); const request = ask(); request.targets.push({ characterId: "sibling" }); state.rolls.ask = request;
-    const source = () => provide(state, surface(request)).menus[0]!.source;
-    const before = source(); request.targets[1]!.total = 15;
-    assert.equal(source(), before);
-    request.test.choices[0]!.ability = "con";
-    assert.notEqual(source(), before);
+for (const surface of ["player", "dm", "options"] as const) test(`${surface} request sources exclude reducer-written sibling answers but retain the current target and test`, () => {
+  const options = (state: RoomState) => {
+    const dice = { view: state, you: DM, srd: { monsters: null, rolls: null } };
+    return createElement(OptionsList, { dice, rolls: creatureRolls(dice, { characterId: "hero" })!, creature: { characterId: "hero" }, tokenId: undefined, name: "Hero" });
+  };
+  let state = fixture(); const request = ask(); request.targets.push({ characterId: "sibling" }); state.rolls.ask = request;
+  state.characters.sibling = character("sibling");
+  const source = () => {
+    const child = surface === "options" ? options(state) : surface === "player" ? player(state.rolls.ask!) : desk(state.rolls.ask!);
+    const menus = provide(state, child).menus;
+    const menu = menus.find((menu) => surface !== "options" || menu.name.includes("Dexterity save"));
+    assert.ok(menu, menus.map((menu) => menu.name).join(", "));
+    return menu.source;
+  };
+  const before = source();
+  state = apply(state, { t: "roll.answer", rollId: "ask", target: { characterId: "sibling" }, total: 15, tag: "sibling-answer" }, DM, 2);
+  assert.equal(state.rolls.ask!.rev, 2, "the real reducer increments the request revision");
+  assert.deepEqual(state.rolls.ask!.targets[0], request.targets[0]);
+  assert.equal(source(), before, "a reducer-written sibling answer cannot close this target's menu");
+  state.rolls.ask!.at = "new bookkeeping time";
+  assert.equal(source(), before, "envelope time is not a roll input");
+  state.rolls.ask!.test.choices[0]!.ability = "con";
+  assert.notEqual(source(), before, "the request test remains an input");
+});
+
+test("request source retains meaningful request fields and this target's answer", () => {
+  const request = ask();
+  const source = (value: RollRequest) => JSON.stringify(requestRollSource(value, value.targets[0]!));
+  const before = source(request);
+  for (const change of [
+    { id: "different" }, { test: { kind: "save", choices: [{ ability: "con" }] } },
+    { dc: 15 }, { dcShown: true }, { dcHidden: true }, { resultShown: true },
+    { note: "against poison" }, { spell: true }, { cause: "saveEnds" }, { ends: { effect: "fear", occurrence: "5:0" } },
+  ] satisfies Partial<RollRequest>[]) assert.notEqual(source({ ...request, ...change }), before, JSON.stringify(change));
+  for (const change of [{ total: 15 }, { tag: "own-answer" }, { choice: 1 }, { retype: true }] as const) {
+    assert.notEqual(source({ ...request, targets: [{ ...request.targets[0]!, ...change }] }), before, JSON.stringify(change));
   }
+  assert.equal(source({ ...request, rev: 99, at: "changed bookkeeping", targets: [...request.targets, { characterId: "sibling", total: 15 }] }), before);
 });
 
 

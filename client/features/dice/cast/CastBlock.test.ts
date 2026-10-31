@@ -1,5 +1,6 @@
 import "../../../components/testing/register.ts";
 import assert from "node:assert/strict";
+import { registerHooks } from "node:module";
 import { describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
 import type { PcStats, RoomState } from "#shared/model.ts";
@@ -9,6 +10,14 @@ import { creatureRolls } from "../creature.ts";
 import { diceFoldsSlot } from "../diceFolds.ts";
 import { optionSlot } from "../optionState.ts";
 import { castReceiptsSlot, castSendsSlot, type CastSend } from "./cast.ts";
+
+let menuSources: import("../useRollModeMenu.tsx").UseRollModeMenuOptions[] = [];
+(globalThis as Record<symbol, unknown>)[Symbol.for("cast-menu-sources")] = (options: import("../useRollModeMenu.tsx").UseRollModeMenuOptions) => menuSources.push(options);
+registerHooks({ load(url, context, next) {
+  const result = next(url, context);
+  if (!url.endsWith("/dice/useRollModeMenu.tsx")) return result;
+  return { ...result, source: String(result.source).replace(/(function useRollModeMenu\(options\) \{)/, '$1\nglobalThis[Symbol.for("cast-menu-sources")](options);') };
+} });
 
 /*
  * The sends that lead the Dice panel's options (docs/design-v1-player-save-spell.md
@@ -329,4 +338,20 @@ test("cast menu picks reach the damage invocation once before the unchanged ask"
       assert.deepEqual({ ...choices.getState(), last: null }, initial);
     } finally { Object.assign(globalThis, previous); }
   }
+});
+
+test("an area cast source ignores template revision bookkeeping but keeps its shape", () => {
+  const ready = setup({ picked: "c:thorn-c", cast: { spell: "Fireball", area: "a1", sent: "fresh", opened: 1 }, selected: ["g1"] });
+  const source = () => {
+    menuSources = [];
+    draw(ready);
+    const menu = menuSources.find((menu) => menu.capability.damage && JSON.parse(menu.source)[0]?.area === "a1");
+    assert.ok(menu);
+    return menu.source;
+  };
+  const before = source();
+  ready.view.templates.a1!.rev++;
+  assert.equal(source(), before);
+  ready.view.templates.a1!.size++;
+  assert.notEqual(source(), before);
 });

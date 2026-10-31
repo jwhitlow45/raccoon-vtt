@@ -376,9 +376,9 @@ export function askKept(gone: Pick<RollChange, "id" | "on"> | undefined, now: Pi
   return gone !== undefined && now.change === undefined && gone.id !== withdrew && now.tag !== undefined && now.tag === gone.on;
 }
 
-/** A sibling answer is not an input to this target's roll. */
+/** Sibling answers and record bookkeeping are not inputs to this target's roll. */
 export function requestRollSource(request: RollRequest, target: RollTarget): unknown {
-  const { targets: _targets, ...route } = request;
+  const { targets: _targets, rev: _rev, at: _at, ...route } = request;
   return [route, target];
 }
 

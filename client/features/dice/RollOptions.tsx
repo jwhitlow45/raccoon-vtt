@@ -32,7 +32,7 @@ import type { PanelProps } from "../panels.ts";
 import { ImagePreview } from "../images/IconDisk.tsx";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { useOpenPcStats } from "../pcstats/open.ts";
-import { d20Text, parseBonus } from "../rolls/card.ts";
+import { d20Text, parseBonus, requestRollSource } from "../rolls/card.ts";
 import { editsPcStats } from "../tokens/access.ts";
 import { Note, SmallButton } from "../tokens/ui.tsx";
 import { creatureBlock, creatureProficiency, creatureRolls, type CreatureRolls, type DiceView } from "./creature.ts";
@@ -826,6 +826,7 @@ function D20Cell(props: { ctx: Ctx; test: D20Test; bonus: number; unknown?: { ty
   const option = useRollOption("dice");
   const liveRoom = useRoomStore();
   const route = routeOf({ state: ctx.dice.view, creature: ctx.creature, test, dm: ctx.dice.you.role === "dm", played: ctx.played, ask: ctx.ask });
+  const sourceRoute = route.kind === "answer" ? [route.kind, requestRollSource(route.request, route.target), route.choice] : route;
   const tap = props.unknown ? typedTap(route.kind, props.unknown.typed) : { bonus: props.bonus, waits: null };
   // An answer rolls the request's own test, with its `spell`, so the button shows the preset its tap sends.
   const presetOf = (t: D20Test) => presetFor(ctx.dice, ctx.creature, t, { rolls: ctx.rolls });
@@ -846,7 +847,7 @@ function D20Cell(props: { ctx: Ctx; test: D20Test; bonus: number; unknown?: { ty
   return (
     <OptionCell
       mode={route.kind === "ask" ? undefined : { d20: true, visibility: route.kind === "answer" ? "request" : "selectable" }}
-      source={JSON.stringify([row, route, test, tap, preset, ctx.creature, ctx.ask, props.contextVersion])}
+      source={JSON.stringify([row, sourceRoute, test, tap, preset, ctx.creature, ctx.ask, props.contextVersion])}
       valid={() => {
         const now = liveRoom.getState();
         return now.view !== null && now.connection === "open" && JSON.stringify(routeOf({ state: now.view, creature: ctx.creature, test, dm: ctx.dice.you.role === "dm", played: ctx.played, ask: ctx.ask })) === JSON.stringify(route);

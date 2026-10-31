@@ -277,6 +277,7 @@ function CastBlockView(props: Parameters<typeof RowCast>[0] & { spec: CastBlock 
   const group = useRef<HTMLDivElement>(null);
   const caster = casterToken(view, spec.creature, sceneId);
   const template = spec.area ? view.templates[spec.area] : undefined;
+  const { rev: _templateRev, ...templateSource } = template ?? {};
   const named = props.named;
   const level = blockLevel({ level: spellLevel(named, spec.spell), rowSlot: props.rowSlot, picked: spec.slot });
   const slot = level?.value;
@@ -293,7 +294,7 @@ function CastBlockView(props: Parameters<typeof RowCast>[0] & { spec: CastBlock 
   const preset = !spec.area && targets.length === 0 ? areaPresetOf(spec.spell) : undefined;
 
   const rollMenu = useRollModeMenu({
-    source: JSON.stringify([spec, slot, rolls, targets, template, sceneId, props.riders ? [...props.riders] : [], sentPhase, panel.adv, panel.dis, panel.secret]),
+    source: JSON.stringify([spec, slot, rolls, targets, template ? templateSource : null, sceneId, props.riders ? [...props.riders] : [], sentPhase, panel.adv, panel.dis, panel.secret]),
     name: words.first,
     capability: { d20: false, visibility: rolls.length > 0 ? "selectable" : "request", damage: true },
     dm: you.role === "dm", disabled: reason !== null || sentPhase === "sending",

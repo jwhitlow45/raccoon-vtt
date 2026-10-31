@@ -5,7 +5,7 @@ import { describe, test } from "node:test";
 import { theme } from "../../../lib/theme.ts";
 import { damageSummary } from "../damageSummaryLines.ts";
 import { createStore } from "zustand/vanilla";
-import { actor, DM, room, token } from "#shared/testutil.ts";
+import { actor, apply, DM, room, token } from "#shared/testutil.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { clientOpSchema } from "#shared/protocol.ts";
 import { newPage, setAmount, type Page } from "./chain.ts";
@@ -324,4 +324,20 @@ test("offline damage retains its enabled base tap and guards only menu picks", (
   assert.ok(menu); assert.equal(!!menu.disabled, false); assert.equal(menu.valid?.(), false);
   const roll = /<button[^>]*aria-keyshortcuts="ContextMenu Shift\+F10"[^>]*>/.exec(html)?.[0];
   assert.ok(roll); assert.doesNotMatch(roll, /disabled=/);
+});
+
+test("a group row source ignores its sibling request answer and request bookkeeping", () => {
+  let view = structuredClone(VIEW);
+  view.tokens.other = token("other");
+  view.rolls.request = { id: "request", rev: 1, at: "now", dcShown: true, resultShown: true, test: { kind: "save", choices: [{ ability: "dex" }] }, targets: [{ tokenId: "g1" }, { tokenId: "other" }] };
+  const page: Page = { ...PAGE, phase: "rolled", rows: groupRows(DICE, ["g1"], PAGE.test, false).map((row) => ({ ...row, askRef: { tokenId: "g1" }, bonus: 4 })), states: { "token:g1": { way: "ask", asked: { rollId: "request" } } } };
+  const source = () => captureRolls(page, view).buttons.find((button) => button.name === "Guard's requested roll")!.source;
+  const before = source();
+  view = apply(view, { t: "roll.answer", rollId: "request", target: { tokenId: "other" }, total: 15, tag: "sibling-answer" });
+  assert.equal(view.rolls.request!.rev, 2);
+  assert.equal(source(), before);
+  view.rolls.request!.at = "different envelope time";
+  assert.equal(source(), before);
+  view.rolls.request!.spell = true;
+  assert.notEqual(source(), before, "semantic request fields still invalidate this source");
 });
