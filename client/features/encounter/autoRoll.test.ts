@@ -26,6 +26,7 @@ import {
   describeRoll,
   encodePrefs,
   initiativeRolls,
+  initiativeResultWords,
   joinGroups,
   noBonusSet,
   notSet,
@@ -1116,4 +1117,17 @@ for (const override of ["adv", "dis", "normal"] as const) test(`initiative ${ove
   assert.deepEqual(advantageFields(plan.groups[1]!.sources), override === "adv" ? { cancelled: true } : { mode: "dis" });
   assert.equal(initiativeRolls(plan.groups)[2]!.formula, "1d20+2-2");
   assert.deepEqual(rows, before);
+});
+
+
+test("auto result words keep the dice and extras while moving only informative modes", () => {
+  assert.deepEqual(initiativeResultWords({ formula: "1d20+2-2", faces: [12], total: 12 }), { text: "d20 (12) +2 −2 = 12", expanded: "d20 (12) +2 −2 = 12" });
+  assert.deepEqual(initiativeResultWords({ formula: "2d20kh1+2", faces: [10, 10], total: 12, mode: "adv" }), { text: "2d20 (10, 10) keeps 10, +2 = 12", expanded: "2d20 with Advantage (10, 10) keeps 10, +2 = 12" });
+  assert.deepEqual(initiativeResultWords({ formula: "2d20kl1+2", faces: [10, 10], total: 12, mode: "dis" }), { text: "2d20 (10, 10) keeps 10, +2 = 12", expanded: "2d20 with Disadvantage (10, 10) keeps 10, +2 = 12" });
+  assert.deepEqual(initiativeResultWords({ formula: "1d20+2", faces: [10], total: 12, cancelled: true }), { text: "d20 (10) +2 = 12", expanded: "d20 (10) +2 = 12, Normal: Advantage and Disadvantage cancelled" });
+});
+
+
+for (const mode of ["adv", "dis"] as const) test(`auto result ${mode} remains readable when the faces cannot be reconstructed`, () => {
+  assert.deepEqual(initiativeResultWords({ formula: "1d20+2", faces: [], total: 14, mode }), { text: "1d20+2 = 14", expanded: `1d20+2 = 14, ${mode === "adv" ? "Advantage" : "Disadvantage"}` });
 });

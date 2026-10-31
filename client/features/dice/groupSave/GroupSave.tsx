@@ -23,7 +23,7 @@ import { Switch } from "../../../components/Switch.tsx";
 import { theme } from "../../../lib/theme.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../../state/view.ts";
 import { useRollModeMenu } from "../useRollModeMenu.tsx";
-import { effectiveRollMode, rollModeTo, resolveRollMode, type RollModeOverride, type RollModeCapability } from "../rollMode.ts";
+import { rollModeTo, resolveRollMode, type RollModeOverride, type RollModeCapability } from "../rollMode.ts";
 import { usePanelHeader } from "../../panels.ts";
 import { EffectPicker } from "../../tokens/EffectsSection.tsx";
 import { SaveEndsFields, type SaveEndsForm } from "../../tokens/SaveEndsFields.tsx";
@@ -40,7 +40,7 @@ import { useDiceView } from "../useDiceView.ts";
 import { SrdLoadFailed } from "../../monsters/SrdLoadFailed.tsx";
 import { useReceipt, type ReceiptState } from "../useReceipt.ts";
 import { useRollBlocked } from "../useRollOption.ts";
-import { d20Text, knownOrTyped, parseBonus } from "../../rolls/card.ts";
+import { d20Text, informativeRollMode, RollResultLine, knownOrTyped, parseBonus } from "../../rolls/card.ts";
 import {
   apply,
   applyAgain,
@@ -777,7 +777,7 @@ function OutcomePanel(props: {
   }
   const rolledText =
     damageState?.state === "committed" && damageState.amounts
-      ? secretDamage ? "Rolled, Secret" : "Rolled"
+      ? secretDamage && !page.secret ? "Rolled, Secret" : "Rolled"
       : damageState?.state === "sending" ? "Rolling…" : damageState?.state === "refused" ? damageState.says : damageState?.state === "unknown" ? "This may have happened. Check the log." : null;
   const damageParts = amountsOf(page, page.fill?.damageType);
   const summaryParts = damageParts ?? (props.parsed?.ok ? props.parsed.parts : []);
@@ -813,7 +813,7 @@ function OutcomePanel(props: {
           </GroupRollButton>
         ) : null}
       </form>
-      {props.parsed && !props.parsed.ok ? <Note tone="error">{props.parsed.error}</Note> : rolledText ? <Note>{rolledText}</Note> : null}
+      {props.parsed && !props.parsed.ok ? <Note tone="error">{props.parsed.error}</Note> : rolledText ? <Note><RollResultLine text={rolledText === "Rolled, Secret" ? "Rolled" : rolledText} expanded={rolledText} /></Note> : null}
       {summaryParts.length > 0 ? <DamageSummary summary={damageSummary(summaryParts)} /> : null}
       {theirs && !frozen ? (
         <ChipRow label="Rolled by someone else">
@@ -943,7 +943,9 @@ function GroupRow(props: {
   const receipt = useReceipt(s.batch?.tag ?? null);
   const returned = s.answer?.dice ?? s.rolled;
   const secret = receipt?.state === "committed" && receipt.lines.some((line) => line.data?.type === "dice" && line.data.to === "dm");
-  const effective = returned ? effectiveRollMode(returned, secret) : "";
+  const how = returned?.cancelled ? words.how?.replace(", normal: Advantage and Disadvantage cancelled", "") : words.how;
+  const text = how ?? (s.way === "server" ? serverWords(row, s) : WAY_WORDS[s.way]);
+  const effective = returned ? informativeRollMode({ ...returned, mode: undefined }, secret && !page.secret) : "";
   // A page with No save has no roll, so it is in setup until Apply: its rows' amounts open there too.
   const takes = (!setup || page.test.kind === "none") && !frozen && !s.gone && (outcome.result === "fail" || outcome.result === "pass");
   return (
@@ -985,7 +987,7 @@ function GroupRow(props: {
         </>
       ) : (
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
-          <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{words.how ? [words.how, effective].filter(Boolean).join(", ") : s.way === "server" ? serverWords(row, s) : WAY_WORDS[s.way]}</span>
+          <RollResultLine text={text} suffix={effective ? `, ${effective}` : ""} style={{ fontSize: theme.font.small, color: theme.color.textMuted }} />
           {words.verdict ? (
             <span data-verdict="" style={{ fontSize: theme.font.small, color: theme.color.text, border: `${theme.line.border}px solid ${theme.color.controlBorder}`, borderRadius: theme.radius.sm, padding: `0 ${theme.space(1)}px` }}>
               {words.verdict}

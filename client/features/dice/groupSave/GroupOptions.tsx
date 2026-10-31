@@ -27,6 +27,7 @@ import { secretStartIn, useDicePanel, type PanelRoll } from "../useDicePanel.ts"
 import { loadedSrdRolls, useDiceView } from "../useDiceView.ts";
 import { useReceipt, useReceipts, type ReceiptState } from "../useReceipt.ts";
 import { useRollBlocked } from "../useRollOption.ts";
+import { informativeRollMode, RollResultLine } from "../../rolls/card.ts";
 import { attackResults } from "./outcome.ts";
 import { ReplaceConfirm } from "./ReplaceConfirm.tsx";
 import { useAutoInitiativeFor } from "../../encounter/AutoInitiative.tsx";
@@ -34,7 +35,7 @@ import { useStartGroupSave, type StartInput } from "./start.ts";
 import { groupRows, type GroupTest } from "./rows.ts";
 import { quickRollNow } from "./start.ts";
 import { useRollModeMenu } from "../useRollModeMenu.tsx";
-import { effectiveRollMode, type RollModeOverride, type RollModeCapability } from "../rollMode.ts";
+import type { RollModeOverride, RollModeCapability } from "../rollMode.ts";
 
 /**
  * Several selected creatures (docs/design-v1-roll-options.md 4.4): a DC,
@@ -388,6 +389,12 @@ function SharedAttack(props: { name: string; each: Attacker[]; dice: DiceView; b
   const valid = () => props.blocked === null && room.getState().connection === "open" && receipt?.state !== "sending" && JSON.stringify(room.getState().local.selectedIds) === JSON.stringify(props.each.flatMap((e) => "tokenId" in e.creature ? [e.creature.tokenId] : []));
   const secret = receipt?.state === "committed" && receipt.lines.some((line) => line.data?.type === "dice" && line.data.to === "dm");
   const secretDamage = damage?.state === "committed" && damage.lines.some((line) => line.data?.type === "dice" && line.data.to === "dm");
+  const resultText = (r: typeof results[number]) => `${r.roll.total}${r.verdict === "critical" ? " Critical Hit" : r.verdict === "hit" ? " hit" : r.verdict === "miss" ? " miss" : ""}`;
+  const plainResults = results.map(resultText).join(", ");
+  const detailedResults = results.map((r) => {
+    const mode = informativeRollMode(r.roll, secret && !panel.secret);
+    return `${resultText(r)}${mode ? ` (${mode})` : ""}`;
+  }).join(", ");
   const total = damage?.state === "committed" ? rollsOf(damage.lines).reduce((a, r) => a + r.total, 0) : null;
   return (
     <div style={{ display: "grid", gap: theme.space(1), borderTop: `${theme.line.border}px solid ${theme.color.border}`, paddingTop: theme.space(1) }}>
@@ -398,12 +405,12 @@ function SharedAttack(props: { name: string; each: Attacker[]; dice: DiceView; b
         <NumberField label="Target's AC" value={state.ac ?? undefined} min={1} max={50} nullable placeholder="AC" onCommit={(ac) => set({ ac })} width={72} />
       </div>
       {results.length > 0 ? (
-        <Note>{results.map((r) => `${r.roll.total}${r.verdict === "critical" ? " Critical Hit" : r.verdict === "hit" ? " hit" : r.verdict === "miss" ? " miss" : ""} (${effectiveRollMode(r.roll, secret)})`).join(", ")}</Note>
+        <Note><RollResultLine text={plainResults} expanded={detailedResults} /></Note>
       ) : null}
       {hits.length > 0 ? (
         <Cell text={`Roll damage for ${hits.length} hit${hits.length === 1 ? "" : "s"}`} name={`Roll damage for ${hits.length} hit${hits.length === 1 ? "" : "s"}`} disabled={props.blocked} busy={damage?.state === "sending"} onTap={rollDamage} mode={{ source: `${source}|damage`, capability: { d20: false, visibility: "selectable", damage: true }, valid: () => valid() && damage?.state !== "sending", onRoll: rollDamage }} />
       ) : null}
-      {total !== null ? <Note>{`${total} damage${secretDamage ? ", Secret" : ""}. Every HP entry offers it as a chip.`}</Note> : null}
+      {total !== null ? <Note><RollResultLine text={`${total} damage. Every HP entry offers it as a chip.`} expanded={`${total} damage${secretDamage && !panel.secret ? ", Secret" : ""}. Every HP entry offers it as a chip.`} /></Note> : null}
     </div>
   );
 }

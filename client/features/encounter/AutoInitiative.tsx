@@ -15,14 +15,14 @@ import { presetFor } from "../dice/presets.ts";
 import { NEEDS_CONNECTION } from "../dice/send.ts";
 import { useDicePanel } from "../dice/useDicePanel.ts";
 import { useRollModeMenu } from "../dice/useRollModeMenu.tsx";
-import { effectiveRollMode, type RollModeOverride } from "../dice/rollMode.ts";
+import type { RollModeOverride } from "../dice/rollMode.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
 import { useReceipt } from "../dice/useReceipt.ts";
-import { describeRoll, initiativeRolls, MAY_HAVE_HAPPENED, noBonusSet, planPress, rollRows, rowsToRoll, totalsHelp, type RollMode, type RollRow } from "./autoRoll.ts";
+import { initiativeResultWords, initiativeRolls, MAY_HAVE_HAPPENED, noBonusSet, planPress, rollRows, rowsToRoll, totalsHelp, type RollMode, type RollRow } from "./autoRoll.ts";
 import { useAuto, useRollBusy, useShownRoll } from "./autoState.ts";
 import { useRowFacts, useSendAll, useSortedEntries } from "./hooks.ts";
 import { entryActor, entryName } from "./logic.ts";
-import { RollBadge } from "./parts.tsx";
+import { RollResultLine } from "../rolls/card.ts";
 
 /**
  * The DM's auto initiative (features section 10, design 9.4): the controls
@@ -209,8 +209,8 @@ export function AutoInitiativeResult() {
   }
   // Highest first, as the order above lists them. A joined line has no dice of its own.
   const lines = [
-    ...last.rolled.map((group) => ({ rows: group.rows, total: group.total, group })),
-    ...last.joined.map((joined) => ({ rows: joined.rows, total: joined.total, group: null })),
+    ...last.rolled.map((group) => ({ rows: group.rows, total: group.total, group, words: initiativeResultWords(group.roll) })),
+    ...last.joined.map((joined) => ({ rows: joined.rows, total: joined.total, group: null, words: null })),
   ].sort((a, b) => b.total - a.total);
   const count = lines.reduce((n, line) => n + line.rows.length, 0);
   const changed = new Set(last.changed);
@@ -228,23 +228,18 @@ export function AutoInitiativeResult() {
         {dismiss}
       </div>
       <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
-        {lines.map(({ rows, total, group }, i) => (
+        {lines.map(({ rows, total, group, words }, i) => (
           <li key={i} style={{ display: "flex", alignItems: "flex-start", gap: theme.space(2) }}>
             <span style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(0.5) }}>
               <span style={{ fontWeight: theme.weight.strong, overflowWrap: "anywhere" }}>{rows.map((r) => r.name).join(", ")}</span>
-              {group ? (
-                <span style={{ ...note, display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1), fontVariantNumeric: "tabular-nums" }}>
-                  {group.roll.mode ? <RollBadge kind={group.roll.mode} /> : null}
-                  {describeRoll(group.roll)}
-                  <span>{effectiveRollMode(group.roll, true)}</span>
-                </span>
+              {words ? (
+                <RollResultLine text={words.text} expanded={words.expanded} style={{ ...note, fontVariantNumeric: "tabular-nums" }} />
               ) : (
                 <span style={note}>{rows.length === 1 ? "Takes its group's Initiative" : "Take their group's Initiative"}, as identical monsters do.</span>
               )}
               {group?.mixedModifier ? <span style={note}>Their modifiers differ: it adds the one most of them have.</span> : null}
               {group?.mixedExtra ? <span style={note}>Their penalties differ: it adds the one most of them have.</span> : null}
               {group?.mixedAdvantage ? <span style={note}>Their Advantage reminders differ, so one plain d20 was rolled.</span> : null}
-              {group?.roll.cancelled && !group.mixedAdvantage ? <span style={note}>Advantage and Disadvantage cancel, so one plain d20 was rolled.</span> : null}
             </span>
             <span aria-label={`Total ${total}`} style={{ flex: "none", minWidth: 36, textAlign: "right", fontSize: theme.font.title, fontWeight: theme.weight.bold, fontVariantNumeric: "tabular-nums" }}>
               {total}

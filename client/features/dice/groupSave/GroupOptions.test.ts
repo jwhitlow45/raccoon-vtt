@@ -183,7 +183,7 @@ describe("a shared attack's slot, by the attack's name (5.3)", () => {
     const s = setup();
     sentAttack(s);
     const markup = render(s, ["ta", "tb"]);
-    assert.match(markup, /15 hit \(Normal\), 20 hit \(Normal\)/);
+    assert.match(markup, /15 hit, 20 hit/);
     assert.equal(cells(markup).get("Roll damage for 2 hits"), "Roll damage for 2 hits");
   });
 
@@ -192,7 +192,7 @@ describe("a shared attack's slot, by the attack's name (5.3)", () => {
     sentAttack(s);
     const markup = render(s, ["ta", "tb"]);
     assert.ok(cells(markup).has("Dagger for 2"), "both attacks are shared");
-    assert.equal([...markup.matchAll(/15 hit \(Normal\), 20 hit \(Normal\)/g)].length, 1);
+    assert.equal([...markup.matchAll(/data-roll-result-base=""[^>]*>15 hit, 20 hit/g)].length, 1);
     assert.equal([...markup.matchAll(/aria-label="Roll damage for 2 hits"/g)].length, 1);
     // Each row from its attack's button to the next row's line.
     const row = (name: string) => {
@@ -215,7 +215,7 @@ describe("a shared attack's slot, by the attack's name (5.3)", () => {
     assert.match(folded, />(Dagger, Rapier: 2 hits|Rapier: 2 hits, Dagger)<\/span>/, "the folded line names the hits that wait for their damage");
     folds.tap(severalKey("sharedAttacks"), true, false);
     const open = render(s, ["ta", "tb"]);
-    assert.match(open, /15 hit \(Normal\), 20 hit \(Normal\)/);
+    assert.match(open, /15 hit, 20 hit/);
     assert.equal(cells(open).get("Roll damage for 2 hits"), "Roll damage for 2 hits");
   });
 
@@ -225,7 +225,7 @@ describe("a shared attack's slot, by the attack's name (5.3)", () => {
     const markup = render(s, ["ta", "tb", "tc"]);
     const named = cells(markup);
     assert.equal(named.get("Rapier for 3"), "Rapier for 3");
-    assert.match(markup, /15 hit \(Normal\), 20 hit \(Normal\)/);
+    assert.match(markup, /15 hit, 20 hit/);
     assert.equal(named.get("Roll damage for 2 hits"), "Roll damage for 2 hits");
   });
 
@@ -234,7 +234,7 @@ describe("a shared attack's slot, by the attack's name (5.3)", () => {
     sentAttack(s);
     const markup = render(s, ["ta", "tc"]);
     assert.equal(cells(markup).get("Rapier for 2"), "Rapier for 2");
-    assert.match(markup, /15 hit \(Normal\), 20 hit \(Normal\)/);
+    assert.match(markup, /15 hit, 20 hit/);
     assert.equal(cells(markup).get("Roll damage for 2 hits"), "Roll damage for 2 hits");
   });
 
@@ -242,7 +242,7 @@ describe("a shared attack's slot, by the attack's name (5.3)", () => {
     const s = setup([20, 1]);
     sentAttack(s);
     const markup = render(s, ["ta", "tb"]);
-    assert.match(markup, /27 Critical Hit \(Normal\), 8 miss \(Normal\)/);
+    assert.match(markup, /27 Critical Hit, 8 miss/);
     assert.equal(cells(markup).get("Roll damage for 1 hit"), "Roll damage for 1 hit");
     const state = s.scope.get(sharedAttacksSlot).store.getState().byName.Rapier!;
     assert.equal(attackSummary("Rapier", state, (tag) => s.scope.get(receiptsSlot).state(tag)), "Rapier: 1 hit");
@@ -448,7 +448,7 @@ test("shared result details use returned cancellation, mode and visibility", () 
   data.rolls[1]!.cancelled = true;
   sentAttack(s);
   const html = render(s, ["ta", "tb"]);
-  assert.match(html, /15 hit \(Advantage, Secret\)/);
+  assert.match(html, /aria-label="15 hit \(Advantage, Secret\), 20 hit \(Normal: Advantage and Disadvantage cancelled, Secret\)"/);
   assert.match(html, /20 hit \(Normal: Advantage and Disadvantage cancelled, Secret\)/);
 });
 
@@ -463,4 +463,34 @@ test("shared damage details name returned Secret", () => {
   tracker.sending("damage", 0);
   tracker.answer("damage", 0, "taken");
   assert.match(render(s, ["ta", "tb"]), /7 damage, Secret/);
+  const choices = s.scope.get(panelModule.diceChoicesSlot);
+  choices.setState({ secret: true, secretFor: "ta tb" });
+  choices.getInitialState = choices.getState;
+  assert.doesNotMatch(render(s, ["ta", "tb"]), /7 damage, Secret/);
+});
+
+
+test("ordinary shared results add no plain Normal to their text or name", () => {
+  const s = setup();
+  sentAttack(s);
+  const html = render(s, ["ta", "tb"]);
+  assert.match(html, /15 hit, 20 hit/);
+  assert.doesNotMatch(html, /hit \(Normal/);
+  assert.match(html, /role="note" aria-label="15 hit, 20 hit"/);
+});
+
+
+test("shared results omit Secret when the panel already shows it", () => {
+  const s = setup();
+  const data = s.view.log[0]!.data;
+  assert.ok(data?.type === "dice");
+  data.to = "dm";
+  data.rolls[0]!.mode = "adv";
+  sentAttack(s);
+  const choices = s.scope.get(panelModule.diceChoicesSlot);
+  choices.setState({ secret: true, secretFor: "ta tb" });
+  choices.getInitialState = choices.getState;
+  const html = render(s, ["ta", "tb"]);
+  assert.match(html, /role="note" aria-label="15 hit \(Advantage\), 20 hit"/);
+  assert.doesNotMatch(html, /Advantage, Secret/);
 });

@@ -35,11 +35,14 @@ function damagePage(damage: string): Page {
 function drawPage(page: Page, lines: import("#shared/model.ts").LogEntry[] = []): string {
   const scope = new RoomScope();
   const saves = scope.get(groupSaveSlot);
-  if (page.damage && lines.length > 0) {
+  const tags = [...new Set(lines.flatMap((line) => line.data?.type === "dice" && line.data.tag ? [line.data.tag] : []))];
+  if (tags.length > 0) {
     const tracker = scope.get(receiptsSlot);
     tracker.env = { lookup: async () => ({ parts: [] }), log: () => lines };
-    tracker.sending(page.damage.tag, 0);
-    tracker.answer(page.damage.tag, 0, "taken");
+    for (const tag of tags) {
+      tracker.sending(tag, 0);
+      tracker.answer(tag, 0, "taken");
+    }
   }
   saves.setState({ page });
   saves.getInitialState = saves.getState;
@@ -242,7 +245,7 @@ for (const override of ["normal", "secret"] as const) test(`group damage ${overr
 
 test("group row details name the returned effective mode", () => {
   const base = damagePage("");
-  for (const [fields, words] of [[{ mode: "dis" as const }, "Disadvantage"], [{ cancelled: true as const }, "Normal: Advantage and Disadvantage cancelled"], [{}, "Normal"]] as const) {
+  for (const [fields, words] of [[{ mode: "dis" as const }, "Disadvantage"], [{ cancelled: true as const }, "Normal: Advantage and Disadvantage cancelled"]] as const) {
     const page: Page = { ...base, phase: "rolled", states: { "token:g1": { way: "server", rolled: { formula: "1d20+4", faces: [12], total: 16, ...fields } } } };
     assert.ok(drawPage(page).replace(/<[^>]*>/g, "").includes(words));
   }
@@ -255,4 +258,33 @@ test("group damage result names Secret only from its returned envelope", () => {
   assert.ok(line.data?.type === "dice");
   line.data.to = "all";
   assert.doesNotMatch(drawPage(page, [line]), /Rolled, Secret/);
+  line.data.to = "dm";
+  assert.doesNotMatch(drawPage({ ...page, secret: true }, [line]), /Rolled, Secret/);
+});
+
+
+test("ordinary group rows add no plain Normal to their text or name", () => {
+  const page: Page = { ...damagePage(""), phase: "rolled", states: { "token:g1": { way: "server", rolled: { formula: "1d20+4", faces: [12], total: 16 } } } };
+  const html = drawPage(page);
+  assert.doesNotMatch(html, /Normal/);
+  assert.match(html, /role="note" aria-label="Rolled 16 \(1d20\+4: 12\)"/);
+});
+
+
+test("group result names retain informative cancellation and omit Secret already shown by the page", () => {
+  const page: Page = { ...damagePage(""), phase: "rolled", secret: true, states: { "token:g1": { way: "server", rolled: { formula: "1d20+4", faces: [12], total: 16, cancelled: true } } } };
+  const html = drawPage(page);
+  assert.match(html, /role="note" aria-label="Rolled 16 \(1d20\+4: 12\), Normal: Advantage and Disadvantage cancelled"/);
+  assert.match(html, /data-roll-result-base=""[^>]*>Rolled 16 \(1d20\+4: 12\)<\/span>/);
+  assert.doesNotMatch(html, /aria-label="Rolled[^"]*Secret/);
+});
+
+
+test("group row Secret is informative only when it differs from the page switch", () => {
+  const dice = { formula: "1d20+4", faces: [12], total: 16 };
+  const page: Page = { ...damagePage(""), phase: "rolled", states: { "token:g1": { way: "server", rolled: dice, batch: { tag: "save", part: 0 } } } };
+  const line: import("#shared/model.ts").LogEntry = { id: "1:0", kind: "event", at: "now", data: { type: "dice", tag: "save", to: "dm", by: DM.memberId, rolls: [dice] } };
+  assert.match(drawPage(page, [line]), /aria-label="Rolled 16 \(1d20\+4: 12\), Secret"/);
+  assert.match(drawPage({ ...page, secret: true }, [line]), /aria-label="Rolled 16 \(1d20\+4: 12\)"/);
+  assert.doesNotMatch(drawPage({ ...page, secret: true }, [line]), /aria-label="Rolled[^"]*Secret/);
 });

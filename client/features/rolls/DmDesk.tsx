@@ -6,7 +6,7 @@ import { useStore } from "zustand";
 import type { RollRequest, RollTarget } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { Input } from "../../components/Field.tsx";
-import { MarkedText, ProficiencyLabel } from "../../components/ProficiencyMark.tsx";
+import { MarkedText, ProficiencyLabel, spokenText } from "../../components/ProficiencyMark.tsx";
 import { useAlertsSummary } from "../../components/sheetFocus.ts";
 import { revealAndFocus } from "../../lib/reveal.ts";
 import { theme } from "../../lib/theme.ts";
@@ -30,7 +30,7 @@ import { AskRow } from "./AskRow.tsx";
 import { useRollModeMenu } from "../dice/useRollModeMenu.tsx";
 import type { RollModeOverride } from "../dice/rollMode.ts";
 import { useRollBlocked } from "../dice/useRollOption.ts";
-import { askRowText, bestChoice, dmRoll, knownOrTyped, normalResult } from "./card.ts";
+import { askRowText, bestChoice, dmRoll, knownOrTyped, normalResult, RollResultLine } from "./card.ts";
 import {
   allAnsweredIds,
   answered,
@@ -371,6 +371,8 @@ function TargetRow(props: { request: RollRequest; target: RollTarget; levelOf: L
   const nameTest = request.targets.length > 1 ? rowTest(request, target) : null;
   const nameLevel = nameTest ? props.levelOf(ref, nameTest) : "none";
   const answerText = dmAnswerText(target, request.test);
+  const answerMarks = answerChoiceMarks(answerText, request, target, props.levelOf);
+  const suffix = target.dice && normalResult(target.dice) ? `. ${normalResult(target.dice)}.` : "";
   const mark = (result: "pass" | "fail") => {
     if (target.result === result) return;
     actions.dispatch({ t: "roll.answer", rollId: request.id, target: ref, result, tag: actions.newId() });
@@ -395,10 +397,9 @@ function TargetRow(props: { request: RollRequest; target: RollTarget; levelOf: L
           </strong>
           <ResultBadge result={target.result} wantsMark={wantsMark(request, target)} />
         </span>
-        <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>
-          <MarkedText text={answerText} marks={answerChoiceMarks(answerText, request, target, props.levelOf)} />
-          {target.dice && normalResult(target.dice) ? `. ${normalResult(target.dice)}.` : ""}
-        </span>
+        <RollResultLine text={answerText} suffix={suffix} label={`${spokenText(answerText, answerMarks)}${suffix}`} style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>
+          <MarkedText text={answerText} marks={answerMarks} />
+        </RollResultLine>
         {answered(target) ? (
           // It acts in place, so it reads as a quiet button rather than a link's accent (docs/design-v1-visual.md F24).
           <Button

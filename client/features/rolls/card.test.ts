@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { DiceResult, LogEntry, RollTarget } from "#shared/model.ts";
 import { reminderPreset } from "#shared/rules/rollReminders.ts";
-import { askedText, askItems, askKept, askRowText, bestChoice, BONUS_WORDS, cardRoll, dmRoll, choiceLabel, CLEAR_TOTAL, knownOrTyped, NO_INPUTS, parseBonus, rolledDice, rolledNews, rolledText, returnedRollMode, normalResult, TYPE_BONUS, verdictText } from "./card.ts";
+import { askedText, askItems, askKept, askRowText, bestChoice, BONUS_WORDS, cardRoll, dmRoll, choiceLabel, CLEAR_TOTAL, knownOrTyped, NO_INPUTS, parseBonus, rolledDice, rolledNews, rolledText, returnedRollMode, normalResult, informativeRollMode, fitResultWords, watchResultWords, RollResultLine, TYPE_BONUS, verdictText } from "./card.ts";
 
 const DEX = { kind: "save", ability: "dex" } as const;
 const restrained = [{ key: "restrained" as const }];
@@ -81,7 +81,7 @@ describe("a rolled result's words (5.4)", () => {
     assert.equal(rolledText(target), "Rolled 12 (1d20+3+1d4 with Disadvantage: 14 dropped, 6, 3). Fail.");
     assert.equal(rolledNews("Thorn", target), "Thorn rolled 12. Disadvantage. Fail.");
     const twenty: RollTarget = { characterId: "thorn", total: 25, result: "pass", dice: { formula: "1d20+5", faces: [20], total: 25 }, tag: "t2" };
-    assert.equal(rolledText(twenty), "Rolled 25 (1d20+5: 20). Natural 20. Normal. Pass.");
+    assert.equal(rolledText(twenty), "Rolled 25 (1d20+5: 20). Natural 20. Pass.");
     assert.equal(verdictText({ result: "fail", dice: { ...dis, fails: "stunned" } }), "Fail (Stunned)");
     assert.equal(verdictText({ dice: dis }), null, "pass or fail hidden");
   });
@@ -188,10 +188,101 @@ describe("one-roll request modes", () => {
 
 test("returned result modes describe cancellation and Secret without reading the picked action", () => {
   const line: LogEntry = { id: "8:0", at: "", kind: "event", data: { type: "dice", by: "dm", to: "dm", rolls: [{ formula: "1d20+2", faces: [10], total: 12, cancelled: true }] } };
-  assert.equal(returnedRollMode([line]), "Normal: Advantage and Disadvantage cancelled, Secret");
+  assert.equal(returnedRollMode([line]), "Normal: Advantage and Disadvantage cancelled");
   assert.equal(returnedRollMode([]), "");
-  assert.equal(normalResult({ formula: "1d20+2", faces: [10], total: 12 }), "Normal");
+  assert.equal(normalResult({ formula: "1d20+2", faces: [10], total: 12 }), "");
   assert.equal(normalResult({ formula: "2d20kh1+2", faces: [10, 12], total: 14, mode: "adv" }), "");
   assert.match(rolledText({ dice: { formula: "1d20+2", faces: [10], total: 12, cancelled: true } }), /Normal: Advantage and Disadvantage cancelled/);
   assert.equal(rolledNews("Hero", { dice: { formula: "1d20+2", faces: [10], total: 12, cancelled: true } }), "Hero rolled 12. Normal: Advantage and Disadvantage cancelled.");
+});
+
+
+test("result modes never invent Normal and retain only informative visibility", () => {
+  const plain = { formula: "1d20+3", faces: [12], total: 15 };
+  assert.equal(informativeRollMode(plain), "");
+  assert.equal(informativeRollMode(plain, true), "Secret");
+  assert.equal(informativeRollMode({ ...plain, mode: "adv" }), "Advantage");
+  assert.equal(informativeRollMode({ ...plain, mode: "dis" }), "Disadvantage");
+  assert.equal(informativeRollMode({ ...plain, cancelled: true }), "Normal: Advantage and Disadvantage cancelled");
+  assert.equal(rolledNews("Hero", { dice: plain }), "Hero rolled 15.");
+});
+
+test("result lines retain informative names while starting with compact visible words", async () => {
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  for (const suffix of [" (Advantage)", " (Disadvantage)", " (Normal: Advantage and Disadvantage cancelled)", " (Secret)", ""]) {
+    const html = renderToStaticMarkup(createElement(RollResultLine, { text: "15 hit", suffix }));
+    assert.ok(html.includes(`role="note" aria-label="15 hit${suffix}"`));
+    assert.match(html, /data-roll-result-base=""[^>]*>15 hit<\/span>/);
+    if (suffix) assert.match(html, /hidden="" data-roll-result-detail=""/);
+    else assert.doesNotMatch(html, /data-roll-result-detail/);
+  }
+});
+
+test("informative words stay visible only without an added line, sibling row or horizontal overflow", () => {
+  for (const change of ["none", "line", "parent", "width"] as const) {
+    const base = { hidden: false };
+    const detail = { hidden: true };
+    const parent = { clientWidth: 120, get scrollWidth() { return !detail.hidden && change === "width" ? 140 : 120; }, getBoundingClientRect: () => ({ height: !detail.hidden && change === "parent" ? 44 : 22 }) };
+    const root = { parentElement: parent, getBoundingClientRect: () => ({ height: base.hidden && detail.hidden ? 0 : !detail.hidden && change === "line" ? 44 : 22 }) };
+    const fits = fitResultWords(root as unknown as HTMLElement, base as unknown as HTMLElement, detail as unknown as HTMLElement);
+    assert.equal(fits, change === "none");
+    assert.equal(base.hidden, fits);
+    assert.equal(detail.hidden, !fits);
+    // A later wider/narrower layout starts by measuring the original words again.
+    assert.equal(fitResultWords(root as unknown as HTMLElement, base as unknown as HTMLElement, detail as unknown as HTMLElement), fits);
+  }
+});
+
+
+test("wrapping follows resizes and font loads, then disconnects both watchers", () => {
+  const previous = { ResizeObserver: globalThis.ResizeObserver, document: globalThis.document };
+  let resize: (() => void) | undefined;
+  let watched: unknown;
+  let disconnected = false;
+  let narrow = false;
+  const fonts = new EventTarget();
+  const base = { hidden: false };
+  const detail = { hidden: true };
+  const parent = { clientWidth: 120, scrollWidth: 120, getBoundingClientRect: () => ({ height: 22 }) };
+  const root = { parentElement: parent, getBoundingClientRect: () => ({ height: base.hidden && detail.hidden ? 0 : narrow && !detail.hidden ? 44 : 22 }) };
+  class Observer {
+    constructor(run: () => void) { resize = run; }
+    observe(node: unknown) { watched = node; }
+    disconnect() { disconnected = true; }
+  }
+  Object.assign(globalThis, { ResizeObserver: Observer, document: { fonts } });
+  try {
+    const stop = watchResultWords(root as unknown as HTMLElement, base as unknown as HTMLElement, detail as unknown as HTMLElement);
+    assert.equal(watched, parent);
+    assert.equal(detail.hidden, false, "the initial wider layout shows informative words");
+    narrow = true;
+    resize!();
+    assert.equal(detail.hidden, true, "a narrower layout returns to the original line");
+    narrow = false;
+    fonts.dispatchEvent(new Event("loadingdone"));
+    assert.equal(detail.hidden, false, "font changes recheck the available line");
+    stop();
+    assert.equal(disconnected, true);
+    narrow = true;
+    fonts.dispatchEvent(new Event("loadingdone"));
+    assert.equal(detail.hidden, false, "an unmounted result no longer measures fonts");
+  } finally { Object.assign(globalThis, previous); }
+});
+
+test("card cancellation can move out of visible words without losing formula, verdict or news", () => {
+  const dice = { formula: "1d20+5", faces: [20], total: 25, cancelled: true as const };
+  assert.equal(rolledText({ dice, result: "pass" }, false), "Rolled 25 (1d20+5: 20). Natural 20. Pass.");
+  assert.equal(rolledNews("Hero", { dice, result: "pass" }), "Hero rolled 25. Normal: Advantage and Disadvantage cancelled. Pass.");
+  const plain: LogEntry = { id: "8:0", kind: "event", at: "", data: { type: "dice", by: "dm", to: "dm", rolls: [{ ...dice, cancelled: undefined }] } };
+  assert.equal(returnedRollMode([plain]), "", "a fixed card adds neither plain Normal nor redundant Secret");
+});
+
+
+test("an existing marked result name survives without creating visible detail", async () => {
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const html = renderToStaticMarkup(createElement(RollResultLine, { text: "DEX: typed 15", label: "DEX, proficient: typed 15" }));
+  assert.match(html, /aria-label="DEX, proficient: typed 15"/);
+  assert.doesNotMatch(html, /data-roll-result-detail/);
 });

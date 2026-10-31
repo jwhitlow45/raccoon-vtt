@@ -45,7 +45,7 @@ import { editsPcStats } from "../tokens/access.ts";
 import { announceTurn } from "../encounter/alerts.ts";
 import { chromeZoom, screenHeight, smallUi, useLayoutSize } from "../device/layout.ts";
 import { uiScale, useUiScale } from "../device/settings.ts";
-import { askedText, askItems, askKept, bestChoice, cardRoll, choiceLabel, KEPT, naturalText, normalResult, parseBonus, rolledDice, rolledNews, verdictText, type AskItem, type RollInputs } from "./card.ts";
+import { askedText, askItems, askKept, bestChoice, cardRoll, choiceLabel, KEPT, naturalText, normalResult, rolledText, RollResultLine, parseBonus, rolledDice, rolledNews, verdictText, type AskItem, type RollInputs } from "./card.ts";
 import {
   answered,
   answerFlow,
@@ -1243,7 +1243,7 @@ function RolledResult(props: { target: RollTarget }) {
   const natural = naturalText(dice);
   const verdict = verdictText(target);
   return (
-    <div style={{ fontSize: theme.font.body14 }}>
+    <RollResultLine as="div" text={`${rolledText(target, false)} Final.`} suffix={normalResult(dice) ? ` ${normalResult(dice)}.` : ""} style={{ fontSize: theme.font.body14 }}>
       Rolled <strong>{target.total ?? dice.total}</strong> ({shown.formula}
       {shown.faces.length > 0 ? ": " : ""}
       {shown.faces.map((f, i) => (
@@ -1259,9 +1259,9 @@ function RolledResult(props: { target: RollTarget }) {
           )}
         </Fragment>
       ))}
-      ).{natural ? ` ${natural}.` : ""}{normalResult(dice) ? ` ${normalResult(dice)}.` : ""}
+      ).{natural ? ` ${natural}.` : ""}
       {verdict ? ` ${verdict}.` : ""} Final.
-    </div>
+    </RollResultLine>
   );
 }
 

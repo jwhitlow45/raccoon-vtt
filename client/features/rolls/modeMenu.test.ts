@@ -286,16 +286,19 @@ test("Normal on fixed save cards and tracker keeps a DM creature's secret envelo
 });
 
 
-test("player and DM results name each returned mode once in the existing result", () => {
+test("player and DM results retain informative modes and omit plain Normal", () => {
   for (const surface of [player, desk]) for (const mode of ["adv", "dis", "cancelled", "normal"] as const) {
     const state = fixture(); const request = ask();
     const dice = mode === "adv" || mode === "dis" ? { formula: `2d20k${mode === "adv" ? "h" : "l"}1+2`, faces: [10, 12], total: mode === "adv" ? 14 : 12, mode } : { formula: "1d20+2", faces: [10], total: 12, ...(mode === "cancelled" ? { cancelled: true as const } : {}) };
-    request.targets[0] = { characterId: "hero", total: dice.total, dice };
+    request.targets[0] = { characterId: "hero", choice: 0, total: dice.total, dice };
     state.rolls.ask = request;
     const f = provide(state, surface(request));
     const text = f.html.replace(/<[^>]*>/g, "");
     const words = mode === "adv" ? "with Advantage" : mode === "dis" ? "with Disadvantage" : mode === "cancelled" ? "Normal: Advantage and Disadvantage cancelled" : "Normal";
-    assert.equal(text.split(words).length - 1, 1, `${mode} once`);
+    assert.equal(text.split(words).length - 1, mode === "normal" ? 0 : 1, `${mode} only when informative`);
+    const names = [...f.html.matchAll(/role="note" aria-label="([^"]+)"/g)].map((match) => match[1]!);
+    assert.ok(names.some((name) => mode === "normal" ? !name.includes("Normal") : name.includes(words)), `${mode} in the accessible result name`);
+    if (surface === desk) assert.ok(names.some((name) => name.includes(", proficient")), "the result keeps its proficiency name");
     assert.doesNotMatch(f.html, /aria-keyshortcuts|Hold, right-click/);
   }
 });

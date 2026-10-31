@@ -57,7 +57,7 @@ for (const route of ["auto", "row", "selection"] as const) test(`one-roll ${rout
   }
 });
 
-test("auto result details describe returned Normal and Secret", () => {
+function drawResult(roll: import("#shared/model.ts").DiceRoll): string {
   let view = room({ tokens: { g: token("g") } });
   view = apply(view, { t: "encounter.start", entries: [{ id: "e", tokenId: "g" }] });
   view.encounter!.entries[0]!.value = 12;
@@ -65,15 +65,20 @@ test("auto result details describe returned Normal and Secret", () => {
   const store = createStore(() => ({ view, roomId: "r1", connection: "open", you: DM, sceneId: "s1", local: { selectedIds: ["g"], multi: false } }));
   function Probe() {
     const auto = useAuto();
-    auto.store.setState({ last: { mode: "each", groups: [], joined: [], tag: null, rolled: [{ rows: [{ entryId: "e", tokenId: "g", name: "Goblin", modifier: 2, sources: [], extra: [], value: null }], modifier: 2, sources: [], extra: [], mixedAdvantage: false, mixedModifier: false, mixedExtra: false, total: 12, roll: { formula: "1d20+2", faces: [10], total: 12 } }], error: null, changed: [], done: true, sent: [] } });
+    auto.store.setState({ last: { mode: "each", groups: [], joined: [], tag: null, rolled: [{ rows: [{ entryId: "e", tokenId: "g", name: "Goblin", modifier: 2, sources: [], extra: [], value: null }], modifier: 2, sources: [], extra: [], mixedAdvantage: false, mixedModifier: false, mixedExtra: false, total: 12, roll }], error: null, changed: [], done: true, sent: [] } });
     auto.store.getInitialState = auto.store.getState;
     return createElement(AutoInitiativeResult);
   }
-  const html = renderToStaticMarkup(createElement(RoomProvider, {
+  return renderToStaticMarkup(createElement(RoomProvider, {
     store: store as never, actions: { dispatch: () => 1 } as never, ui: {} as never, assets: { url: () => "" } as never,
     children: createElement(RoomScopeProvider, { scope, children: createElement(Probe) }),
   }));
-  assert.match(html.replace(/<[^>]*>/g, ""), /Normal, Secret/);
+}
+
+test("auto result details omit plain Normal and known Secret", () => {
+  const html = drawResult({ formula: "1d20+2", faces: [10], total: 12 });
+  assert.doesNotMatch(html, /Normal|Secret/);
+  assert.match(html, /role="note" aria-label="d20 \(10\) \+2 = 12"/);
 });
 
 test("Auto Initiative offers no menu when every waiting monster joins a kept value", () => {
@@ -90,4 +95,18 @@ test("Auto Initiative offers no menu when every waiting monster joins a kept val
   }));
   assert.match(html, /Auto Initiative \(1\)/);
   assert.doesNotMatch(html, /aria-haspopup="menu"/);
+});
+
+
+for (const mode of ["adv", "dis", "cancelled"] as const) test(`auto result ${mode} preserves informative accessible words without forcing a new row`, () => {
+  const roll = mode === "cancelled" ? { formula: "1d20+2", faces: [10], total: 12, cancelled: true as const } : { formula: `2d20k${mode === "adv" ? "h" : "l"}1+2`, faces: [10, 10], total: 12, mode };
+  const html = drawResult(roll);
+  const name = /role="note" aria-label="([^"]+)"/.exec(html)?.[1];
+  assert.ok(name?.includes(mode === "adv" ? "Advantage" : mode === "dis" ? "Disadvantage" : "Normal: Advantage and Disadvantage cancelled"));
+  assert.doesNotMatch(name!, /Secret/);
+  const base = /data-roll-result-base=""[^>]*>([^<]+)<\/span>/.exec(html)?.[1];
+  assert.ok(base?.includes("= 12"));
+  assert.doesNotMatch(base!, /Advantage|Disadvantage|Normal|Secret/);
+  assert.match(html, /hidden="" data-roll-result-detail=""/);
+  assert.doesNotMatch(html, /Advantage and Disadvantage cancel, so one plain d20/);
 });

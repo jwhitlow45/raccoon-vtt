@@ -5,7 +5,7 @@ import { MAX_ENTRIES_PER_OP, type ClientOp } from "#shared/protocol.ts";
 import { rowGroup } from "#shared/rules/initiative.ts";
 import type { RollPreset } from "#shared/rules/rollReminders.ts";
 import { rollsOf } from "../dice/logic.ts";
-import { rollModeSources, type RollModeOverride } from "../dice/rollMode.ts";
+import { effectiveRollMode, rollModeSources, type RollModeOverride } from "../dice/rollMode.ts";
 import { withExtra } from "../dice/options.ts";
 import type { PanelRoll } from "../dice/useDicePanel.ts";
 import type { ReceiptState } from "../dice/useReceipt.ts";
@@ -518,6 +518,18 @@ export function describeRoll(roll: Pick<DiceResult, "formula" | "faces" | "total
   }
   const parts = [head === null ? null : `${head}${kept && tail.length > 0 ? "," : ""}`, ...tail].filter((p): p is string => p !== null);
   return `${parts.join(" ")} = ${roll.total}`;
+}
+
+/**
+ * The tracker already explains that auto dice stay private. Mode words
+ * expand the result only when they fit without adding a line.
+ */
+export function initiativeResultWords(roll: DiceResult): { text: string; expanded: string } {
+  const description = describeRoll(roll);
+  const text = description.replace(" with Advantage", "").replace(" with Disadvantage", "");
+  const mode = roll.mode || roll.cancelled ? effectiveRollMode(roll) : "";
+  const expanded = mode && !description.includes(mode) ? `${description}, ${mode}` : description;
+  return { text, expanded };
 }
 
 // ---------------------------------------------------------------- the DM's choices on this device

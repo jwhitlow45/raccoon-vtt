@@ -1,3 +1,4 @@
+import { createElement, useLayoutEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { advantageFields, applyMode, d20Formula, formatFormula, formulaRange, parseExtra, parseFormula, type AdvantageMode, type AdvantageSource } from "#shared/dice/formula.ts";
 import { OUT_OF_RANGE } from "#shared/dice/resolve.ts";
 import { naturalOf, rerollable, rerollFace, rolledTerms } from "#shared/dice/roll.ts";
@@ -213,18 +214,18 @@ export function verdictText(target: Pick<RollTarget, "result" | "dice">): string
   return target.result === "pass" ? "Pass" : "Fail";
 }
 
-/** Advantage and Disadvantage already appear beside the formula. */
+/** Advantage and Disadvantage already appear beside the formula. Only cancellation needs a separate detail. */
 export function normalResult(dice: DiceResult): string {
-  return dice.mode ? "" : effectiveRollMode(dice);
+  return dice.cancelled ? effectiveRollMode(dice) : "";
 }
 
-/** The returned envelope supplies Secret, including routes whose visibility is fixed. */
+/** These fixed-route cards already communicate visibility. Keep only informative mode words. */
 export function returnedRollMode(lines: readonly LogEntry[]): string {
   for (const line of lines) {
     if (line.kind !== "event") continue;
     const data = line.data;
-    if (data?.type === "dice" && data.rolls[0]) return effectiveRollMode(data.rolls[0], data.to === "dm");
-    if (data?.type === "roll" && data.dice) return effectiveRollMode(data.dice);
+    if (data?.type === "dice" && data.rolls[0]) return informativeRollMode(data.rolls[0]);
+    if (data?.type === "roll" && data.dice) return informativeRollMode(data.dice);
   }
   return "";
 }
@@ -234,20 +235,20 @@ export function returnedRollMode(lines: readonly LogEntry[]): string {
  * dropped). Pass.", with "Natural 20." where it shows one. The screen draws
  * the same with a dropped die struck through.
  */
-export function rolledText(target: Pick<RollTarget, "total" | "result" | "dice">): string {
+export function rolledText(target: Pick<RollTarget, "total" | "result" | "dice">, withDetail = true): string {
   const dice = target.dice;
   if (!dice) return "";
   const shown = rolledDice(dice);
   const faces = shown.faces.map((f) => (f.dropped ? `${f.face} dropped` : String(f.face))).join(", ");
   const natural = naturalText(dice);
   const verdict = verdictText(target);
-  return `Rolled ${target.total ?? dice.total} (${shown.formula}${faces ? `: ${faces}` : ""}).${natural ? ` ${natural}.` : ""}${normalResult(dice) ? ` ${normalResult(dice)}.` : ""}${verdict ? ` ${verdict}.` : ""}`;
+  return `Rolled ${target.total ?? dice.total} (${shown.formula}${faces ? `: ${faces}` : ""}).${natural ? ` ${natural}.` : ""}${withDetail && normalResult(dice) ? ` ${normalResult(dice)}.` : ""}${verdict ? ` ${verdict}.` : ""}`;
 }
 
 /** The live region includes the returned mode once beside the total and verdict. */
 export function rolledNews(name: string, target: Pick<RollTarget, "total" | "result" | "dice">): string {
   const verdict = verdictText(target);
-  const mode = target.dice ? effectiveRollMode(target.dice) : "";
+  const mode = target.dice ? informativeRollMode(target.dice) : "";
   return `${name} rolled ${target.total ?? target.dice?.total ?? ""}.${mode ? ` ${mode}.` : ""}${verdict ? ` ${verdict}.` : ""}`;
 }
 
@@ -372,4 +373,56 @@ export const KEPT = "The DM kept the roll.";
  */
 export function askKept(gone: Pick<RollChange, "id" | "on"> | undefined, now: Pick<RollTarget, "change" | "tag">, withdrew: string | null): boolean {
   return gone !== undefined && now.change === undefined && gone.id !== withdrew && now.tag !== undefined && now.tag === gone.on;
+}
+
+/** Plain Normal adds no information outside the sticky Dice result. */
+export function informativeRollMode(dice: Pick<DiceResult, "formula" | "mode" | "cancelled">, secret = false): string {
+  const mode = dice.mode || dice.cancelled ? effectiveRollMode(dice) : "";
+  return [mode, secret ? "Secret" : ""].filter(Boolean).join(", ");
+}
+
+/** Check the parent too: a wider flex item can push its neighbor onto another row. */
+export function fitResultWords(root: HTMLElement, base: HTMLElement, detail: HTMLElement): boolean {
+  base.hidden = false;
+  detail.hidden = true;
+  const parent = root.parentElement ?? root;
+  const height = root.getBoundingClientRect().height;
+  const parentHeight = parent.getBoundingClientRect().height;
+  const width = Math.max(parent.clientWidth, parent.scrollWidth);
+  base.hidden = true;
+  detail.hidden = false;
+  const fits = root.getBoundingClientRect().height <= height + 1 && parent.getBoundingClientRect().height <= parentHeight + 1 && parent.scrollWidth <= width + 1;
+  base.hidden = fits;
+  detail.hidden = !fits;
+  return fits;
+}
+
+/** Recheck wrapping when available space or the loaded font changes. */
+export function watchResultWords(root: HTMLElement, base: HTMLElement, detail: HTMLElement): () => void {
+  const measure = () => { fitResultWords(root, base, detail); };
+  measure();
+  const observer = new ResizeObserver(measure);
+  observer.observe(root.parentElement ?? root);
+  document.fonts?.addEventListener("loadingdone", measure);
+  return () => {
+    observer.disconnect();
+    document.fonts?.removeEventListener("loadingdone", measure);
+  };
+}
+
+/** Start compact, then reveal informative words only if they cost no extra line. */
+export function RollResultLine(props: { as?: "span" | "div"; text: string; suffix?: string; expanded?: string; label?: string; children?: ReactNode; style?: CSSProperties }) {
+  const root = useRef<HTMLElement>(null);
+  const base = useRef<HTMLSpanElement>(null);
+  const detail = useRef<HTMLSpanElement>(null);
+  const expanded = props.expanded ?? `${props.text}${props.suffix ?? ""}`;
+  const name = props.label ?? expanded;
+  const more = expanded !== props.text;
+  useLayoutEffect(() => {
+    if (more && root.current && base.current && detail.current) return watchResultWords(root.current, base.current, detail.current);
+  }, [expanded, more, props.children]);
+  return createElement(props.as ?? "span", { ref: root, role: "note", "aria-label": name, style: props.style },
+    createElement("span", { ref: base, "data-roll-result-base": "", "aria-hidden": true }, props.children ?? props.text),
+    more ? createElement("span", { ref: detail, hidden: true, "data-roll-result-detail": "", "aria-hidden": true }, props.expanded ?? [props.children ?? props.text, props.suffix]) : null,
+  );
 }
