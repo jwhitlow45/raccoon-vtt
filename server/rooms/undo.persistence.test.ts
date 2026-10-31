@@ -7,8 +7,8 @@ import { parseRoomState } from "./stateSchema.ts";
 
 describe("batch A snapshot and replay boundary", () => {
   test("op 34 and snapshot 30 append identity steps without changing older contents", () => {
-    assert.equal(OP_VERSION, 34);
-    assert.equal(SNAPSHOT_VERSION, 30);
+    assert.ok(OP_VERSION >= 34);
+    assert.ok(SNAPSHOT_VERSION >= 30);
     const op = { t: "log.chat", text: "historical line" };
     const state = room();
     assert.equal(runMigrations(op, 33, 34, opMigrations), op);

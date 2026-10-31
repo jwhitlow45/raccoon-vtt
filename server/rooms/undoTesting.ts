@@ -135,7 +135,7 @@ export class UndoTable {
       ...(quiet ? { quiet } : {}),
     };
     const checked = serverOnlyOpSchema.safeParse(op);
-    if (!checked.success) return `server op ${op.t} does not validate: ${checked.error.issues[0]?.message ?? "invalid"}`;
+    if (!checked.success) return this.#failed(who, from, scope, step, "invalid", `server op ${op.t} does not validate: ${checked.error.issues[0]?.message ?? "invalid"}`);
     const allowed = canApply(checked.data, who, this.state, deps);
     if (!allowed.ok) return this.#failed(who, from, scope, step, allowed.code, allowed.message);
     const r = this.#apply(who, checked.data);
