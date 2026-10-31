@@ -3577,6 +3577,16 @@ async function proficiencyScreen(sweep: Sweep, page: Page, screen: string, root:
 }
 
 /**
+ * A text surface that is not a roll (D-261030-539): `root` is measured by
+ * the sweep and holds no frame, no tint and no unseen proficiency picture.
+ */
+async function noMarks(sweep: Sweep, page: Page, screen: string, root: Locator, aligned: Locator = root): Promise<void> {
+  await root.first().waitFor();
+  await sweep.measure(page, `fl13-${screen}`, aligned);
+  assert.equal(await root.locator("[data-proficiency-mark], [data-proficiency-label], [data-proficiency-marker]").count(), 0, `fl13: ${sweep.at} ${screen} holds a proficiency mark`);
+}
+
+/**
  * A roll as components/ProficiencyMark.tsx draws it in text, for the helper
  * checks: a unit framing a marked name and its `tail` (a bonus, a comma).
  * `style` adds to the unit's style, `title` replaces the label's tooltip.
@@ -3708,11 +3718,9 @@ async function proficiencyToken(sweep: Sweep, page: Page, name: string, at: { x:
   await expandBar(bar);
   const more = bar.getByRole("button", { name: "More stats", exact: true });
   if (await visible(more)) await more.click();
-  await proficiencyScreen(sweep, page, `${screen}-summary`, bar.locator("[data-saves]"));
+  await noMarks(sweep, page, `${screen}-summary`, bar.locator("[data-saves]"));
   if (screen === "dragon") {
     await sweep.measure(page, "fl7-dragon-bar", bar);
-    await proficiencyLevel(bar.locator("[data-saves]"), /^DEX$/, "prof");
-    await proficiencyLevel(bar.locator("[data-saves]"), /^STR$/, "none");
     if (sweep.at.endsWith("390x844-1")) {
       const tops = await bar.locator("[data-saves] [data-saves-part] > span").evaluateAll((labels) => labels.map((el) => Math.round((el as unknown as { getBoundingClientRect(): { top: number } }).getBoundingClientRect().top)));
       assert.equal(tops.length, 7, "fl7: the dragon bar holds the heading and six saves");
@@ -3728,9 +3736,13 @@ async function proficiencyToken(sweep: Sweep, page: Page, name: string, at: { x:
   const grid = panel.locator("[data-ability-grid]").first();
   await grid.waitFor();
   assert.equal(await gridColumns(grid), 3, `fl7: ${sweep.at} the ability grid stays three across`);
-  await proficiencyScreen(sweep, page, `${screen}-block`, panel);
+  await noMarks(sweep, page, `${screen}-block`, panel);
+  // FL-13 (D-261030-539): a block that lists a skill or a save lists it under Skills, in two lines.
+  const lines = panel.locator("[data-ability-grid]").first().locator("xpath=following::p[starts-with(normalize-space(.), 'Proficiencies') or starts-with(normalize-space(.), 'Expertise')]");
+  assert.ok((await lines.count()) > 0, `fl13: ${sweep.at} ${screen}'s block lists proficiencies`);
   if (screen === "dragon") {
-    await proficiencyLevel(panel, /^Perception$/, "expert");
+    await panel.locator("p").filter({ hasText: /^Expertise Perception$/ }).waitFor();
+    await panel.locator("p").filter({ hasText: /^Proficiencies Dexterity saves, Wisdom saves, Stealth$/ }).waitFor();
     await panel.locator("p").filter({ hasText: /^Skills Perception/ }).first().scrollIntoViewIfNeeded();
     await shot(page, "dragon-block");
   }
@@ -3813,13 +3825,10 @@ async function proficiencyResults(sweep: Sweep, page: Page, shot: (page: Page, n
   await patOps.send({ t: "dice.roll", tag: randomUUID(), to: "all", rolls: [roll] });
   // A natural 20 or 1 adds its verdict after the words, for a screen reader.
   const toast = page.locator("[data-toast]").filter({ hasText: /for Thorn, Perception check\./ }).filter({ visible: true }).last();
-  await proficiencyLevel(toast, /^Perception check$/, "expert");
-  await proficiencyScreen(sweep, page, "toast", toast);
+  await noMarks(sweep, page, "toast", toast);
   await shot(page, "toast-one-roll");
   await patOps.send({ t: "dice.roll", tag: randomUUID(), to: "all", rolls: [roll, roll] });
   const several = page.locator("[data-toast]").filter({ hasText: /rolled 2 Perception checks\./ }).filter({ visible: true }).last();
-  // The mark takes in the word its name ends inside, so its frame never cuts "checks".
-  await proficiencyLevel(several, /^Perception checks$/, "expert");
   assert.match((await several.textContent()) ?? "", /^[^\n]*rolled 2 Perception checks\.( Natural (20|1)\.)?$/, "fl7: the toast's words, no line per roll");
   const lines = await several.evaluate((node) => {
     const range = (node as unknown as { ownerDocument: { createRange(): { selectNodeContents(n: unknown): void; getClientRects(): ArrayLike<{ top: number; width: number }> } } }).ownerDocument.createRange();
@@ -3827,7 +3836,7 @@ async function proficiencyResults(sweep: Sweep, page: Page, shot: (page: Page, n
     return new Set(Array.from(range.getClientRects()).filter((r) => r.width > 1).map((r) => Math.round(r.top))).size;
   });
   if (lines === 1) assert.ok(Math.abs((await heightOf(several)) - 44) <= 1, `fl7: ${sweep.at} a toast of several rolls stays one 44 px row`);
-  await proficiencyScreen(sweep, page, "toast-several", several);
+  await noMarks(sweep, page, "toast-several", several);
   await shot(page, "toast-several-rolls");
   const dice = await openDice(page);
   const recent = dice.locator("[data-dice-recent]");
@@ -3844,9 +3853,10 @@ async function proficiencyResults(sweep: Sweep, page: Page, shot: (page: Page, n
   await proficiencyScreen(sweep, page, "recent-folded", recent);
   await shot(page, "recent-rolls-folded");
   const log = await openPanel(page, "Log");
-  await proficiencyLevel(log, /^Perception check$/, "expert");
-  // The Log's own controls keep a wrap from before FL-7 at 320 px ("Chat only" under Show older and Export), so the sweep measures the lines FL-7 marks.
-  await proficiencyScreen(sweep, page, "log", log, log.locator("li").filter({ has: page.locator("[data-proficiency-label]") }));
+  // The Log's own controls keep a wrap from before FL-7 at 320 px ("Chat only" under Show older and Export), so the sweep measures the lines that name the roll.
+  const rolled = log.locator("li").filter({ hasText: /Perception check/ });
+  await rolled.first().waitFor();
+  await noMarks(sweep, page, "log", log, rolled);
   await shot(page, "log");
   // The toasts stand over the map, where the group save's taps go next. A tap on one closes it, a few tries at most so a toast that will not close fails here, not at the test's timeout (as savespell.e2e.ts dismissToasts).
   const toasts = page.locator("[data-toast]").filter({ visible: true });
@@ -4099,20 +4109,25 @@ export function proficiencyTests(): void {
         const sheet = await thornsPage(pat);
         const fold = sheet.getByRole("button", { name: "Stat block", exact: true });
         if ((await fold.getAttribute("aria-expanded")) !== "true") await fold.click();
-        await sheet.locator("[data-pc-stats]").getByText(/Sleight of Hand \+\d+ \(expertise\)/).waitFor();
-        await proficiencyLevel(sheet.locator("[data-pc-stats]"), /^Sleight of Hand$/, "expert");
+        await sheet.locator("[data-pc-stats]").getByText(/Sleight of Hand \+\d+/).waitFor();
+        await sheet.locator("[data-pc-stats] p").filter({ hasText: /^Expertise Perception, Sleight of Hand$/ }).waitFor();
+        await sheet.locator("[data-pc-stats] p").filter({ hasText: /^Proficiencies Dexterity saves, Constitution saves, Animal Handling, Athletics$/ }).waitFor();
         assert.equal(await gridColumns(sheet.locator("[data-pc-stats] [data-ability-grid]")), 3, `fl7: ${sweep.at} the PC's ability grid stays three across`);
-        await proficiencyScreen(sweep, pat, "pc-sheet", sheet.locator("[data-pc-stats]"));
+        await noMarks(sweep, pat, "pc-sheet", sheet.locator("[data-pc-stats]"));
         await sheet.locator("[data-pc-stats]").scrollIntoViewIfNeeded();
         await shot(pat, "pc-sheet");
         await sheet.getByText("Jack of All Trades", { exact: true }).waitFor();
 
         await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { actor: { srdId: "wolf", wildShape: true } } });
         await sheet.locator("[data-shape-numbers]").waitFor();
-        await proficiencyScreen(sweep, pat, "wild-shape", sheet);
-        await proficiencyLevel(sheet.locator("[data-shape-numbers]"), /^DEX$/, "prof");
+        await noMarks(sweep, pat, "wild-shape", sheet);
+        await sheet.locator("[data-shape-proficiency]").filter({ hasText: /^Proficiencies .*Dexterity saves/ }).waitFor();
+        await sheet.locator("[data-shape-numbers]").scrollIntoViewIfNeeded();
+        await shot(pat, "wild-shape");
+        await sheet.locator("p").filter({ hasText: /^Skills / }).first().scrollIntoViewIfNeeded();
+        await shot(pat, "wild-shape-wolf-block");
         await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { actor: { srdId: "wolf" } } });
-        await waitFor("fl7: Polymorph uses the beast's saving proficiency", async () => (await sheet.locator("[data-shape-numbers] [data-proficiency-label]").filter({ hasText: /^DEX$/ }).getAttribute("data-proficiency-level")) === "none" || null);
+        await waitFor("fl13: Polymorph lists no proficiencies of the character's own", async () => ((await sheet.locator("[data-shape-proficiency]").count()) === 0 ? true : null));
         await sweep.measure(pat, "fl7-polymorph", sheet);
         await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { actor: { srdId: null } } });
         await sheet.locator("[data-pc-stats]").waitFor();
