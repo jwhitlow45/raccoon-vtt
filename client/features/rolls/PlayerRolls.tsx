@@ -45,7 +45,8 @@ import { editsPcStats } from "../tokens/access.ts";
 import { announceTurn } from "../encounter/alerts.ts";
 import { chromeZoom, screenHeight, smallUi, useLayoutSize } from "../device/layout.ts";
 import { uiScale, useUiScale } from "../device/settings.ts";
-import { askedText, askItems, askKept, bestChoice, cardRoll, choiceLabel, KEPT, naturalText, normalResult, requestRollSource, rolledText, RollResultLine, parseBonus, rolledDice, rolledNews, verdictText, type AskItem, type RollInputs } from "./card.ts";
+import { rollArrival } from "./rollFocus.ts";
+import { askedText, askItems, askKept, bestChoice, cardRoll, choiceLabel, KEPT, naturalText, normalResult, requestRollSource, rolledText, RollResultLine, parseBonus, rolledDice, verdictText, type AskItem, type RollInputs } from "./card.ts";
 import {
   answered,
   answerFlow,
@@ -502,19 +503,12 @@ export function RollCard(props: {
   useEffect(() => {
     const before = seen.current;
     seen.current = new Map(request.targets.map((t) => [targetKey(t), t.tag]));
-    if (!before) return;
-    const landed = request.targets.filter((t) => t.dice !== undefined && before.has(targetKey(t)) && before.get(targetKey(t)) !== t.tag);
-    if (landed.length === 0) return;
-    setRolledHere((r) => new Set([...r, ...landed.map(targetKey)]));
-    const list = names.split("|");
-    setNews(landed.map((t) => rolledNews(list[request.targets.indexOf(t)] || "Your creature", t)).join(" "));
+    const arrival = rollArrival(before, request.targets, names, { card: props.cardRef.current, active: document.activeElement, body: document.body, prior: focusedAnswer.current });
+    if (!arrival) return;
+    setRolledHere((r) => new Set([...r, ...arrival.keys]));
+    setNews(arrival.news);
     onEngage();
-    // A sibling's result must leave an unchanged row's control or open menu focused.
-    const card = props.cardRef.current;
-    const active = document.activeElement;
-    const prior = focusedAnswer.current;
-    const leftRow = prior && !prior.node.isConnected && landed.some((target) => targetKey(target) === prior.key);
-    if (card && (active === null || active === document.body || leftRow && (active === card || active === prior.node))) headerButton.current?.focus();
+    if (arrival.focusHeader) headerButton.current?.focus();
   }, [request.targets, names, onEngage, props.cardRef]);
   const sent = (key: string) => {
     if (foldsAfterSend(request, key, rolledHere)) props.onFold();

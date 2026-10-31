@@ -1,19 +1,12 @@
 import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { stripTypeScriptTypes } from "node:module";
 import { test } from "node:test";
 import type { RollRequest, RollTarget } from "#shared/model.ts";
 import { targetKey } from "./logic.ts";
-import { rolledNews } from "./card.ts";
+import { focusRollHeader, rollArrival } from "./rollFocus.ts";
 
 type FocusNode = { isConnected: boolean; dataset?: { rollAnswerRow: string }; closest(selector?: string): FocusNode | null; contains(node: unknown): boolean };
 function probe() {
-  const source = readFileSync(new URL("./PlayerRolls.tsx", import.meta.url), "utf8");
-  const start = source.indexOf("  const { onEngage } = props;", source.indexOf("export function RollCard("));
-  const end = source.indexOf("  const sent =", start);
-  assert.ok(start >= 0 && end > start);
-  const body = stripTypeScriptTypes(source.slice(start, end));
   const card: FocusNode = { isConnected: true, closest: () => null, contains: (node) => node === card || node === thorn || node === ash };
   const row = (key: string): FocusNode => ({ isConnected: true, dataset: { rollAnswerRow: key }, closest() { return this; }, contains: () => false });
   const thorn: FocusNode = { isConnected: true, closest: (selector) => selector === "[data-roll-answer-row]" ? row("c:thorn") : null, contains: () => false };
@@ -25,23 +18,22 @@ function probe() {
   let news = "";
   let rolled = new Set<string>();
   const focusedAnswer: { current: { key: string; node: FocusNode } | null } = { current: null };
-  const props = { cardRef: { current: card }, onEngage: () => engaged++, onFocusWithin() {}, hidden: false };
-  const headerButton = { current: { focus: () => { focuses++; } } };
   const seen = { current: null as Map<string, string | undefined> | null };
   const request: RollRequest = { id: "ask", rev: 0, at: "", dcShown: false, resultShown: false, test: { kind: "save", choices: [{ ability: "dex" }] }, targets: [{ characterId: "thorn" }, { characterId: "ash" }] };
   const render = () => {
-    const effect = new Function("useEffect", "seen", "request", "names", "setRolledHere", "setNews", "props", "document", "headerButton", "targetKey", "rolledNews", "focusedAnswer", body);
-    let run: (() => void) | undefined;
-    effect((next: () => void) => { run = next; }, seen, request, "Thorn|Ash", (next: (value: Set<string>) => Set<string>) => { rolled = next(rolled); }, (text: string) => { news = text; }, props, document, headerButton, targetKey, rolledNews, focusedAnswer);
-    assert.ok(run); run();
+    const before = seen.current;
+    seen.current = new Map(request.targets.map((t) => [targetKey(t), t.tag]));
+    const arrival = rollArrival(before, request.targets, "Thorn|Ash", { card, active: document.activeElement, body: page, prior: focusedAnswer.current });
+    if (!arrival) return;
+    rolled = new Set([...rolled, ...arrival.keys]);
+    news = arrival.news;
+    engaged++;
+    if (arrival.focusHeader) focuses++;
   };
-  const commonStart = source.indexOf("  const common =", end);
-  const commonEnd = source.indexOf("  if (!props.sheet)", commonStart);
-  assert.ok(commonStart >= 0 && commonEnd > commonStart);
-  const common = new Function("props", "focusedAnswer", `${stripTypeScriptTypes(source.slice(commonStart, commonEnd))}\nreturn common;`)(props, focusedAnswer) as { onFocus(e: { target: FocusNode; currentTarget: FocusNode }): void };
   const focus = (node: FocusNode) => {
     document.activeElement = node;
-    common.onFocus({ target: node, currentTarget: card });
+    const key = node.closest("[data-roll-answer-row]")?.dataset?.rollAnswerRow;
+    if (key) focusedAnswer.current = { key, node };
   };
   const land = (id: string) => {
     request.targets = request.targets.map((t): RollTarget => t.characterId === id ? { ...t, tag: `${id}-roll`, total: 12, dice: { formula: "1d20", faces: [12], total: 12 } } : t);
@@ -85,12 +77,32 @@ test("a landed row whose focus fell to the body returns to the header", () => {
   assert.equal(p.focuses, 1);
 });
 
-
 test("a control outside the card keeps focus when a previously focused row lands", () => {
   const p = probe(); p.focus(p.thorn); p.thorn.isConnected = false;
   p.document.activeElement = { isConnected: true, closest: () => null, contains: () => false };
   p.land("thorn");
   assert.equal(p.focuses, 0);
+});
+
+test("opening on an existing result or seeing no new answer neither announces nor engages", () => {
+  const node = { isConnected: true };
+  const focus = { card: node, active: node, body: node, prior: null };
+  const target: RollTarget = { characterId: "thorn", tag: "rolled", total: 12, dice: { formula: "1d20", faces: [12], total: 12 } };
+  assert.equal(rollArrival(null, [target], "Thorn", focus), null);
+  assert.equal(rollArrival(new Map([["c:thorn", "rolled"]]), [target], "Thorn", focus), null);
+  assert.equal(rollArrival(new Map(), [target], "Thorn", focus), null);
+  assert.equal(rollArrival(new Map([["c:thorn", undefined]]), [{ characterId: "thorn" }], "Thorn", focus), null);
+});
+
+test("lost page focus recovers to the card, including a removed control still reported as active", () => {
+  const card = { isConnected: true };
+  const body = { isConnected: true };
+  const removed = { isConnected: false };
+  const focus = { card, active: removed, body, prior: { key: "c:thorn", node: removed } };
+  assert.equal(focusRollHeader(["c:thorn"], focus), true);
+  assert.equal(focusRollHeader(["c:ash"], focus), false);
+  assert.equal(focusRollHeader(["c:thorn"], { ...focus, active: null }), true);
+  assert.equal(focusRollHeader(["c:thorn"], { ...focus, card: null, active: null }), false);
 });
 
 test("each rendered answer row exposes its own focus identity", async () => {
