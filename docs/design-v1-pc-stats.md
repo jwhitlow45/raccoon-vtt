@@ -467,3 +467,7 @@ Changed by docs/design-v1-ddb-resources.md (1.1): the class resources read `acti
 ## As built: FL-13, proficiency in text (D-261030-539)
 
 The PC sheet (7.3) marks nothing. Under its Skills line, or where one would stand when the sheet lists no skills, it lists "Proficiencies" (proficient saves first, "Dexterity saves", then proficient skills) and "Expertise" (expertise skills), each left out when empty, from the sheet's own flags. A skill adjusted without a flag is neither. The Skills line no longer says "(expertise)". In Wild Shape, "Rolls now" is plain text and the same two lines follow it, from the druid's flags and the beast's numbers together (D-261029-419). In Wild Shape the creature's block below leaves out its own pair, so one pair shows (D-261030-581). Polymorph adds no lines of its own, since the creature's block lists its own. The token panel's saves line is plain. Details in docs/design-v1-dice-ui.md.
+
+## As built: FL-15, the outlined ability box (D-261030-588)
+
+The sheet lists no "Proficiencies" or "Expertise" line. In its ability grid, the whole box of an ability whose save the sheet marks proficient is outlined, in place of the bold save number. The Skills line keeps its bonuses, with no "(expertise)". In Wild Shape, "Rolls now" stands alone, and the creature's block below outlines the creature's own proficient saves. Details in docs/design-v1-dice-ui.md.

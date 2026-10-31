@@ -303,3 +303,13 @@ FL-12's borders stay on every roll control and in the rolling UI: the Dice panel
 - **Where they are built.** `client/lib/proficiencyLines.ts` builds the lines and puts them into a block's Markdown. The stored block is never changed. `StatBlockView` reads the levels from the block's own numbers as the dice read them, and `PcStatsView` from the sheet's flags. Jack of All Trades keeps its wording and marks nothing.
 - **A PC's Skills line** no longer ends a skill with "(expertise)". The Expertise line says it.
 - **Text surfaces with no mark now:** the token panel's stat summary (the saves line and the action bar's), a shape's "Rolls now" numbers, the Log and roll toasts. Recent rolls keeps its marks, since it is part of the Dice panel.
+
+## As built: FL-15, the outlined ability box (D-261030-588)
+
+FL-13's two lines are gone. The six-ability grid shows a proficient save instead: in a monster block and a PC sheet, the whole box of an ability whose save is proficient is outlined, name, score, modifier and save together. The outline is FL-12's border, a 1 px line in the text's color, never the accent's, drawn inside the box's rounded edge as a shadow (`theme.shadow.markInside`), so no box, row or grid changes size. It replaces the bold save number, so one sign shows one fact. The hidden ", proficient" stays for screen readers.
+
+- **Which boxes.** A monster block's proficient save is any save that is not its bare modifier, the rule the Dice panel's save buttons read, so the two always agree. A PC sheet's comes from its flags. Text in the older layout, read in the monster editor, is saved as a 2024 block and outlined the same way. A block whose Markdown holds the older six-column table draws it as written, and its Saving Throws line names its saves (D-261030-590).
+- **Skills.** The Skills line's bonuses show proficiency and expertise. The PC sheet's Skills line still has no "(expertise)".
+- **Wild Shape.** "Rolls now" stands alone, with no pair under it. The creature's block outlines the creature's own saves as printed, and "Rolls now" gives the numbers the druid rolls with (D-261030-591).
+- **Removed.** `client/lib/proficiencyLines.ts`, `monsterProficiencyLines` and `StatBlockView`'s `leaveOutProficiency`.
+- **Unchanged.** FL-12's borders on roll controls, the plain token panel and action bar saves, the Log and toasts.

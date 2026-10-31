@@ -611,7 +611,7 @@ This part covers what you use once the dice come out: monsters and encounters, t
 
 ## Monsters
 
-The **Monsters** panel (DM only) holds the 330 monsters of the SRD 5.2.1, along with any your room has added. Use it to look up a stat block or to put monsters on the map.
+The **Monsters** panel (DM only) holds the 330 monsters of the SRD 5.2.1, along with any your room has added. Use it to look up a stat block or to put monsters on the map. In a stat block, an outline around one of the six ability boxes means the creature is proficient in that saving throw.
 
 ![A monster's page in the Monsters panel: the Goblin Warrior's place card, with CR 1/4 on its first line, then How many, Hidden from players and Place 4 on the map, then its token image and credit.](dm-guide/monsters.webp)
 
@@ -1427,7 +1427,7 @@ The **Characters** panel lists the party. A character belongs to the room rather
 
 ![Thorn's page in the Characters panel: his picture, level and quick numbers, Place a token in a row under them, then his stat block with its scores, skills and weapons.](dm-guide/pc-stats.webp)
 
-**Stat blocks.** A character can have a stat block of its own: its level, ability scores, save and skill proficiencies, spellcasting, defenses, and its weapons, spells and other rolls, with riders such as Sneak Attack. A stat block makes the rest of the app smarter about that character. The Dice panel offers its rolls, roll requests know its bonuses, and the group save knows its resistances and Evasion. The block stays between you and the character's own players: only you and those players see it, and only you and they get **Add a stat block**, **Edit**, **Take a shape** and **End the shape**. Other players and the table display never see it. Folded, the **Stat block** row says what it holds, such as "Level 5, PB +3", or "Wild Shape: Brown Bear" while the character is in a shape.
+**Stat blocks.** A character can have a stat block of its own: its level, ability scores, save and skill proficiencies, spellcasting, defenses, and its weapons, spells and other rolls, with riders such as Sneak Attack. As in a monster's, an outlined ability box is a saving throw the character is proficient in. A stat block makes the rest of the app smarter about that character. The Dice panel offers its rolls, roll requests know its bonuses, and the group save knows its resistances and Evasion. The block stays between you and the character's own players: only you and those players see it, and only you and they get **Add a stat block**, **Edit**, **Take a shape** and **End the shape**. Other players and the table display never see it. Folded, the **Stat block** row says what it holds, such as "Level 5, PB +3", or "Wild Shape: Brown Bear" while the character is in a shape.
 
 To fill one in, press **Add a stat block** on the character's page or in its token's panel, then choose where it comes from under **Fill from**:
 

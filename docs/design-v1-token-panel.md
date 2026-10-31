@@ -724,3 +724,7 @@ The order of the token action bar's button rows is this doc's (3.3), since both 
 ## As built: FL-13, proficiency in text (D-261030-539)
 
 The saves line in the bar and under "More stats" (3.3) draws "Saves" and six plain units. FL-12's borders on a proficient save are gone, and `LinkedBlock` no longer carries a proficiency map. The stat block section lists proficiencies in the two lines described in docs/design-v1-dice-ui.md.
+
+## As built: FL-15, the outlined ability box (D-261030-588)
+
+The stat block section lists no proficiencies in text. Its ability grid outlines the box of each proficient save instead (docs/design-v1-dice-ui.md). The saves line stays plain.
