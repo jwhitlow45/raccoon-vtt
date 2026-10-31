@@ -1,3 +1,4 @@
+import "./testing/register.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { mousePans } from "../lib/gestures.ts";
@@ -414,5 +415,111 @@ describe("a press while a popover is open", () => {
     assert.equal(isMapTarget(at(true)), true);
     assert.equal(isMapTarget(at(false)), false);
     assert.equal(isMapTarget(null), false);
+  });
+});
+
+describe("focus stays inside the popover's scroll boundary", () => {
+  async function fixture(scale = 1) {
+    const { focusInView } = await import("./Popover.tsx");
+    const outer = { scrollTop: 278, scrollLeft: 30 };
+    const focus: FocusOptions[] = [];
+    let nativeScrolls = 0;
+    const box = {
+      scrollTop: 100, scrollLeft: 20, clientTop: 1, clientLeft: 1,
+      clientHeight: 100, clientWidth: 200, offsetWidth: 202, currentCSSZoom: scale as number | undefined,
+      getBoundingClientRect: () => ({ top: 200, left: 50, right: 50 + 202 * scale, bottom: 200 + 102 * scale, width: 202 * scale, height: 102 * scale }),
+    };
+    const itemStyle = { scrollMarginTop: "0px", scrollMarginBottom: "0px", scrollMarginLeft: "0px", scrollMarginRight: "0px" };
+    const boxStyle = { scrollPaddingTop: "auto", scrollPaddingBottom: "auto", scrollPaddingLeft: "auto", scrollPaddingRight: "auto" };
+    const control = {
+      top: 120, left: 40, height: 44, width: 100,
+      closest: (): unknown => box,
+      focus: (options: FocusOptions) => focus.push(options),
+      scrollIntoView: () => { nativeScrolls++; outer.scrollTop = 0; outer.scrollLeft = 0; },
+      getBoundingClientRect: () => {
+        const top = 200 + (box.clientTop + control.top - box.scrollTop) * scale;
+        const left = 50 + (box.clientLeft + control.left - box.scrollLeft) * scale;
+        return { top, left, bottom: top + control.height * scale, right: left + control.width * scale };
+      },
+    };
+    return { outer, box, control, itemStyle, boxStyle, focus, get nativeScrolls() { return nativeScrolls; }, run: () => {
+      const previous = globalThis.getComputedStyle;
+      globalThis.getComputedStyle = (node) => (node === control as unknown as HTMLElement ? itemStyle : boxStyle) as CSSStyleDeclaration;
+      try { focusInView(control as unknown as HTMLElement); }
+      finally { globalThis.getComputedStyle = previous; }
+    } };
+  }
+
+  test("focusing an item already in view cannot reset the Dice or sheet scroller", async () => {
+    const f = await fixture();
+    f.run();
+    assert.deepEqual(f.focus, [{ preventScroll: true }]);
+    assert.deepEqual(f.outer, { scrollTop: 278, scrollLeft: 30 });
+    assert.deepEqual([f.box.scrollTop, f.box.scrollLeft], [100, 20]);
+    assert.equal(f.nativeScrolls, 0, "scrollIntoView is allowed to move every ancestor");
+  });
+
+  test("keyboard navigation reveals clipped items by scrolling only the popover, at both interface scales", async () => {
+    for (const scale of [1, 1.3]) {
+      for (const [top, left, expectedTop, expectedLeft] of [
+        [80, 40, 80, 20],
+        [180, 40, 124, 20],
+        [120, 0, 100, 0],
+        [120, 180, 100, 80],
+      ]) {
+        for (const exactZoom of [true, false]) {
+          const f = await fixture(scale);
+          if (!exactZoom) f.box.currentCSSZoom = undefined;
+          f.control.top = top!; f.control.left = left!;
+          f.run(); f.run();
+          assert.ok(Math.abs(f.box.scrollTop - expectedTop!) < 1e-9, `vertical scroll at ${scale}`);
+          assert.ok(Math.abs(f.box.scrollLeft - expectedLeft!) < 1e-9, `horizontal scroll at ${scale}`);
+          assert.deepEqual(f.outer, { scrollTop: 278, scrollLeft: 30 });
+          assert.equal(f.nativeScrolls, 0);
+        }
+      }
+    }
+  });
+
+  test("tracker scroll margins and popover scroll padding keep their nearest-edge spacing", async () => {
+    const above = await fixture(1.3);
+    above.control.top = 90; above.control.left = 25;
+    above.itemStyle.scrollMarginTop = "12px"; above.itemStyle.scrollMarginLeft = "4px";
+    above.boxStyle.scrollPaddingTop = "8px"; above.boxStyle.scrollPaddingLeft = "8px";
+    above.run();
+    assert.ok(Math.abs(above.box.scrollTop - 70) < 1e-9);
+    assert.ok(Math.abs(above.box.scrollLeft - 13) < 1e-9);
+    const below = await fixture(1.3);
+    below.control.top = 180; below.control.left = 180;
+    below.itemStyle.scrollMarginBottom = "6px"; below.itemStyle.scrollMarginRight = "6px";
+    below.boxStyle.scrollPaddingBottom = "10px"; below.boxStyle.scrollPaddingRight = "12px";
+    below.run();
+    assert.ok(Math.abs(below.box.scrollTop - 140) < 1e-9);
+    assert.ok(Math.abs(below.box.scrollLeft - 98) < 1e-9);
+    for (const f of [above, below]) assert.deepEqual(f.outer, { scrollTop: 278, scrollLeft: 30 });
+  });
+
+  test("an oversized item keeps nearest-edge behavior without moving ancestors", async () => {
+    for (const [top, expected] of [[50, 100], [120, 120], [-100, 0]]) {
+      const f = await fixture(); f.control.top = top!; f.control.height = 200;
+      f.run();
+      assert.equal(f.box.scrollTop, expected);
+      assert.deepEqual(f.outer, { scrollTop: 278, scrollLeft: 30 });
+    }
+  });
+
+  test("focus without a popover or before it has room never falls back to a containing scroller", async () => {
+    const f = await fixture(); f.control.top = 300;
+    f.box.clientHeight = 0;
+    f.run();
+    assert.deepEqual([f.box.scrollTop, f.box.scrollLeft], [100, 20]);
+    assert.equal(f.nativeScrolls, 0);
+    f.control.closest = () => null;
+    f.run();
+    assert.equal(f.focus.length, 2);
+    f.control.closest = () => f.control;
+    f.run();
+    assert.equal(f.focus.length, 3, "the empty popover itself can take focus without scrolling");
+    assert.deepEqual(f.outer, { scrollTop: 278, scrollLeft: 30 });
   });
 });

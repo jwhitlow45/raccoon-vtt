@@ -14,6 +14,7 @@ import {
   type RefObject,
 } from "react";
 import { ScrollForMore } from "../canvas/TokenActionBar.tsx";
+import { effectiveZoom } from "../features/device/layout.ts";
 import { subscribeUiScale, uiScale } from "../features/device/settings.ts";
 import { useBackClose } from "../lib/backClose.ts";
 import { followField, readKeyboardView, subscribeKeyboard, visibleSpan } from "../lib/keyboardInset.ts";
@@ -614,8 +615,34 @@ function focusFirstStop(box: HTMLElement): void {
   focusInView(stops[openingStop(stops.map((el) => radioOf(el)?.checked === true))] ?? box);
 }
 
-/** Focus on a control inside a popover, scrolled into the popover's view where its content scrolls. */
+/** Focus after placement and reveal only within the popover. Native scrollIntoView may also move the sheet behind it. */
 export function focusInView(el: HTMLElement): void {
   el.focus({ preventScroll: true });
-  el.scrollIntoView({ block: "nearest", inline: "nearest" });
+  const box = el.closest<HTMLElement>("[data-rvtt-popover]");
+  if (!box || box === el || box.clientHeight <= 0 || box.clientWidth <= 0) return;
+  const bounds = box.getBoundingClientRect();
+  const zoom = effectiveZoom(box, bounds.width);
+  const item = el.getBoundingClientRect();
+  const margin = getComputedStyle(el);
+  const padding = getComputedStyle(box);
+  const px = (value: string) => (Number.parseFloat(value) || 0) * zoom;
+  const top = bounds.top + box.clientTop * zoom;
+  const left = bounds.left + box.clientLeft * zoom;
+  const viewTop = top + px(padding.scrollPaddingTop);
+  const viewBottom = top + box.clientHeight * zoom - px(padding.scrollPaddingBottom);
+  const viewLeft = left + px(padding.scrollPaddingLeft);
+  const viewRight = left + box.clientWidth * zoom - px(padding.scrollPaddingRight);
+  const dy = nearestScroll(item.top - px(margin.scrollMarginTop), item.bottom + px(margin.scrollMarginBottom), viewTop, viewBottom);
+  const dx = nearestScroll(item.left - px(margin.scrollMarginLeft), item.right + px(margin.scrollMarginRight), viewLeft, viewRight);
+  if (dy !== 0) box.scrollTop += dy / zoom;
+  if (dx !== 0) box.scrollLeft += dx / zoom;
+}
+
+/** Match nearest-edge scrolling, including an oversized item that already covers the view. */
+function nearestScroll(start: number, end: number, viewStart: number, viewEnd: number): number {
+  const before = start < viewStart;
+  const after = end > viewEnd;
+  if (before === after) return 0;
+  const fits = end - start <= viewEnd - viewStart;
+  return before === fits ? start - viewStart : end - viewEnd;
 }
