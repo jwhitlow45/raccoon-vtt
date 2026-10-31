@@ -320,3 +320,72 @@ describe("the log metadata worker", () => {
     assert.deepEqual(m.detail.wanted, [], "nothing after stop");
   });
 });
+
+for (const replacement of [null, false] as const) test(`a running worker reconstructs a replaced index before its next backfill: ${replacement}`, async () => {
+  let valid: boolean | null = true;
+  let checks = 0;
+  const { m, steps, outcomes } = rig(database(0, (text) => {
+    if (text.includes("indisvalid")) { checks++; return { rows: valid === null ? [] : [{ valid }] }; }
+    if (text.startsWith("create index")) { valid = true; return { rows: [] }; }
+    if (text.startsWith("drop index")) { valid = null; return { rows: [] }; }
+    if (text.includes("seq is null limit")) assert.equal(valid, true, "index restored before backfill");
+    return undefined;
+  }));
+  m.start();
+  try {
+    await until(() => m.ready, "initial index ready");
+    m.want("FIRST");
+    await until(() => outcomes.some((s) => s.kind === "room" && s.roomId === "FIRST"), "first job complete");
+    valid = replacement;
+    const before = checks;
+    m.want("NEXT");
+    await until(() => outcomes.some((s) => s.kind === "room" && s.roomId === "NEXT"), "next job complete");
+    assert.ok(checks > before, "catalog checked for the later job");
+    assert.equal(valid, true);
+    assert.ok(steps.includes("create index"));
+    assert.equal(steps.includes("drop index"), replacement === false);
+    assert.deepEqual(outcomes.at(-1), { kind: "room", roomId: "NEXT", outcome: "complete" });
+  } finally { await m.stop(); }
+});
+
+test("a missing index refused by the disk guard leaves the room raw without backfill", async () => {
+  let valid = true;
+  let allow = true;
+  let checks = 0;
+  const { m, steps, outcomes } = rig(database(0, (text) => {
+    if (text.includes("indisvalid")) {
+      checks++;
+      if (!valid) allow = false;
+      return { rows: valid ? [{ valid: true }] : [] };
+    }
+    return undefined;
+  }), { guard: async () => allow });
+  m.start();
+  try {
+    await until(() => m.ready, "ready");
+    valid = false;
+    m.want("ROOM");
+    await until(() => outcomes.some((s) => s.kind === "room"), "paused");
+    assert.ok(checks >= 2);
+    assert.equal(m.ready, false);
+    assert.equal(steps.includes("read"), false);
+    assert.equal(steps.includes("create index"), false);
+    assert.deepEqual(outcomes.at(-1), { kind: "room", roomId: "ROOM", outcome: "paused" });
+  } finally { await m.stop(); }
+});
+
+test("shutdown cancels a later catalog validation before any backfill or unlock SQL", async () => {
+  let hang = false;
+  const { m, steps } = rig(database(0, (text) => text.includes("indisvalid") && hang ? "hang" : undefined));
+  m.start();
+  try {
+    await until(() => m.ready, "initial index ready");
+    hang = true;
+    const before = steps.filter((s) => s === "valid?").length;
+    m.want("ROOM");
+    await until(() => steps.filter((s) => s === "valid?").length > before, "later validation started");
+    await m.stop();
+    assert.deepEqual(steps.slice(steps.lastIndexOf("valid?") + 1), ["cancel (leases 0)", "end"]);
+    assert.equal(steps.includes("read"), false);
+  } finally { await m.stop(); }
+});

@@ -306,6 +306,45 @@ describe("the partial index", () => {
     await noLeftovers("after a rebuild");
   });
 
+  test("running workers revalidate a dropped index before later backfills and preserve complete raw reads", async () => {
+    const roomId = await newRoom();
+    const nextRoom = await newRoom();
+    const old = lines(rng(4103), 0, 80);
+    const next = lines(rng(4104), 0, 80);
+    const first = worker();
+    const second = worker();
+    first.m.start();
+    second.m.start();
+    try {
+      await until(() => first.m.ready && second.m.ready, "both workers ready");
+      await legacyInsert(pool, roomId, old.rows);
+      const initial = first.outcome(roomId);
+      first.m.want(roomId);
+      assert.equal(await initial, "complete");
+      first.steps.length = 0;
+      second.steps.length = 0;
+      await dropIndex();
+      await legacyInsert(pool, nextRoom, next.rows);
+      const view = captureView({ state: state(), seq: next.seq }, nextRoom, VIEWERS[1]!);
+      assert.deepEqual((await read(reader(undefined), view, new LogScanBudget())).back, oracle(view.state, next.rows, view.viewer, next.seq));
+      const a = first.outcome(nextRoom);
+      const b = second.outcome(nextRoom);
+      first.m.want(nextRoom);
+      second.m.want(nextRoom);
+      const results = await Promise.all([a, b]);
+      assert.ok(results.includes("complete"));
+      assert.ok(results.every((r) => r === "complete" || r === "locked"));
+      assert.equal(await indexState(), "valid", "the dropped index was reconstructed without restarting either worker");
+      assert.equal(await nulls(nextRoom), 0);
+      assert.equal([...first.steps, ...second.steps].filter((s) => s.kind === "index" && s.action === "create").length, 1, "competing workers rebuild only once");
+      assert.deepEqual((await read(reader(first.m), view, new LogScanBudget())).back, oracle(view.state, next.rows, view.viewer, next.seq));
+    } finally {
+      await first.m.stop();
+      await second.m.stop();
+    }
+    await noLeftovers("after live index reconstruction");
+  });
+
   test("a disk under its floor holds the build back, and the worker builds once there is room", async () => {
     await dropIndex();
     let room = false;

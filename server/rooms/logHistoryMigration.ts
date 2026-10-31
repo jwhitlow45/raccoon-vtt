@@ -214,7 +214,12 @@ export class LogHistoryMigration implements HistoryMetadata {
         await this.#opts.onStep?.({ kind: "room", roomId, outcome: "paused" }, AbortSignal.abort());
         continue;
       }
-      const outcome = await this.#withJob(roomId, (conn, signal) => this.#backfill(conn, roomId, signal)).catch((err: unknown): RoomOutcome => {
+      const outcome = await this.#withJob(roomId, async (conn, signal) => {
+        // DDL can change while this worker is idle. Revalidate under the shared DDL lock before every room.
+        if (!(await this.#ensureIndex(conn, signal))) return "paused";
+        this.#ready = true;
+        return this.#backfill(conn, roomId, signal);
+      }).catch((err: unknown): RoomOutcome => {
         if (err instanceof ScanCancelledError || this.#stopped) return "cancelled";
         if (err instanceof MalformedId) {
           this.#malformed.add(roomId);
@@ -254,6 +259,7 @@ export class LogHistoryMigration implements HistoryMetadata {
     try {
       const valid = await indexValid(conn);
       if (valid === true) return true;
+      this.#ready = false;
       if (!(await archiveAdmitted(this.#opts.guard))) {
         this.#warnDisk({}, "log history index not built: the disk is under its free-space floor");
         return false;
