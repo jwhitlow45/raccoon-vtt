@@ -720,3 +720,7 @@ The project owner answered on 2026-10-15, and design review round 1 settled thre
 9. **A spanning bar's short layout is decided once per screen size**, from the least room any token's bar gets there, not from where the tapped token stands, so Apply sits in the same place on a device and in view (session 1 build review, Q2 and its round 2). Settled by default (3.3).
 
 The order of the token action bar's button rows is this doc's (3.3), since both this doc and docs/design-v1-layout-hierarchy.md had left it to the other.
+
+## As built: FL-13, proficiency in text (D-261030-539)
+
+The saves line in the bar and under "More stats" (3.3) draws "Saves" and six plain units. FL-12's borders on a proficient save are gone, and `LinkedBlock` no longer carries a proficiency map. The stat block section lists proficiencies in the two lines described in docs/design-v1-dice-ui.md.

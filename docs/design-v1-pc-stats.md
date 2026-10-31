@@ -463,3 +463,7 @@ Changed by docs/design-v1-ddb-resources.md (1.1): the class resources read `acti
 | `unreadable`, or pasted text that does not read | "That did not read as a D&D Beyond character. Its format may have changed. Paste its JSON or type the numbers." |
 | `quota_*` | "Too many imports this hour. Try again in 12 minutes, or paste the character's JSON.", the minutes from the answer's Retry-After |
 | `busy` | "Another import is running. Try again in a moment, or paste the character's JSON." |
+
+## As built: FL-13, proficiency in text (D-261030-539)
+
+The PC sheet (7.3) marks nothing. Under its Skills line, or where one would stand when the sheet lists no skills, it lists "Proficiencies" (proficient saves first, "Dexterity saves", then proficient skills) and "Expertise" (expertise skills), each left out when empty, from the sheet's own flags. A skill adjusted without a flag is neither. The Skills line no longer says "(expertise)". In Wild Shape, "Rolls now" is plain text and the same two lines follow it, from the druid's flags and the beast's numbers together (D-261029-419). Polymorph adds no lines of its own, since the creature's block below lists its own. The token panel's saves line is plain. Details in docs/design-v1-dice-ui.md.
