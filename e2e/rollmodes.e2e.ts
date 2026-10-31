@@ -1881,6 +1881,55 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
     assert.deepEqual(faults, [], "open menus beside a sibling's answer");
   });
 
+  test("fu41-b-escape. Escape closes a focused menu before an expanded toast in either listener order", async () => {
+    if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+    await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: run.thorn.id, value: 20 }, { id: randomUUID(), tokenId: run.goblin.id, value: 5 }] });
+    await ops.send({ t: "encounter.next" });
+    try {
+      await pat.setViewportSize({ width: 320, height: 440 });
+      await pat.evaluate(() => (globalThis as unknown as { localStorage: { setItem(key: string, value: string): void } }).localStorage.setItem("rvtt.uiScale", "1.3"));
+      await pat.goto(`${server.origin}/r/${run.roomId}`);
+      await pat.getByRole("status", { name: "Connected" }).first().waitFor();
+      await pat.locator(".konvajs-content").first().waitFor();
+      await tapCell(pat, BOUNDS, run.thorn);
+      await pat.getByRole("dialog", { name: "Thorn actions" }).waitFor();
+      for (const toastFirst of [true, false]) {
+        const text = `FU41 Escape ${toastFirst ? "toast first" : "menu first"}.`;
+        await ops.send({ t: "log.whisper", to: [run.patId], text });
+        const row = pat.locator('[data-toast-form="row"]').filter({ hasText: text });
+        const whole = pat.locator('[data-toast-form="whole"]').filter({ hasText: text });
+        await row.waitFor();
+        if (toastFirst) {
+          await row.getByRole("button").first().click();
+          await whole.waitFor();
+        }
+        const opener = pat.getByRole("navigation", { name: "Tools", exact: true }).locator('button[aria-haspopup="menu"]').first();
+        await opener.focus();
+        await opener.press("Enter");
+        const menu = pat.getByRole("menu", { name: "Tools", exact: true });
+        await menu.waitFor();
+        if (!toastFirst) {
+          // A native click without a pointerdown keeps the menu open while installing the toast's later listener.
+          await row.getByRole("button").first().dispatchEvent("click");
+          await whole.waitFor();
+        }
+        await menu.getByRole("menuitem").first().focus();
+        await pat.keyboard.press("Escape");
+        await menu.waitFor({ state: "detached" });
+        assert.equal(await whole.count(), 1, "the menu's Escape leaves the expanded toast alone");
+        await pat.keyboard.press("Escape");
+        await whole.waitFor({ state: "detached" });
+        await row.waitFor();
+      }
+    } finally {
+      await ops.send({ t: "encounter.end" });
+      await pat.setViewportSize(PHONE);
+      await pat.evaluate(() => (globalThis as unknown as { localStorage: { setItem(key: string, value: string): void } }).localStorage.setItem("rvtt.uiScale", "1"));
+      await pat.goto(`${server.origin}/r/${run.roomId}`);
+      await pat.getByRole("status", { name: "Connected" }).first().waitFor();
+    }
+  });
+
   test("dpf1-13. nothing went wrong in the browsers", () => {
     for (const c of Object.values(consoles)) {
       assert.deepEqual(c.errors, [], `${c.label} logged errors`);

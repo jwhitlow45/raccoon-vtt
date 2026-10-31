@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref, type RefObject } from "react";
 import { createPortal, flushSync } from "react-dom";
+import { toastEscape } from "./toastEscape.ts";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import {
@@ -1783,12 +1784,7 @@ function Toasts(props: {
   useLayoutEffect(() => () => dockStore.setState({ toastRow: null }), [dockStore]);
   useEffect(() => {
     if (wholeToast === undefined) return;
-    // Escape shrinks the whole toast first, and its preventDefault leaves the room's own Escape alone (RoomChrome.tsx useEscape).
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.defaultPrevented) return;
-      e.preventDefault();
-      shrink();
-    };
+    const onKey = (e: KeyboardEvent) => toastEscape(e, document.activeElement, shrink);
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [wholeToast, shrink]);
@@ -2832,6 +2828,9 @@ function panelTile(panelId: string): string {
   return `panel-${panelId}`;
 }
 
+/** A pick on the list drawn under a panel during its swipe back, which no press reaches. */
+function noPick(): void {}
+
 /**
  * Every panel the role has, as large buttons, for the phone's Panels sheet:
  * card rows (components/Row.tsx), the open panel in the pressed look.
@@ -2840,9 +2839,6 @@ function panelTile(panelId: string): string {
  * ones for play. The labels are items that span the grid, so it stays one
  * list named "Panels" and its tiles keep their names.
  */
-/** A pick on the list drawn under a panel during its swipe back, which no press reaches. */
-function noPick(): void {}
-
 function PanelPicker(props: { panels: PanelDef[]; current: string; badges: Record<string, number>; badgeLabels: Record<string, string>; grouped: boolean; onPick(id: string): void }) {
   return (
     <ul
