@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useRef, useSyncExternalStore } from "react";
 import type { BoardPick } from "../canvas/boardPick.ts";
 import { cameraInZoomed } from "../features/device/layout.ts";
 import type { Camera } from "../lib/camera.ts";
@@ -42,9 +42,14 @@ export class LiveCamera {
     this.#applied = applied;
   }
 
-  /** The camera Konva draws with for `c`: the applied one when the board positioned its stages at `c`, else `c`. Presses read it, so a press and the drawing agree. */
+  /**
+   * The camera Konva draws with for `c`: the applied one when the board
+   * positioned its stages at a camera equal to `c`, else `c`. Presses read
+   * it, so a press and the drawing agree. By value, since a write equal to
+   * the camera held keeps the old object (review HXPERF2B-OPUS-03).
+   */
   appliedFor(c: Camera): Camera {
-    return c === this.#appliedFrom && this.#applied ? this.#applied : c;
+    return this.#applied && same(c, this.#appliedFrom) ? this.#applied : c;
   }
 
   get drawn(): Camera | null {
@@ -110,6 +115,34 @@ function same(a: Camera | null, b: Camera | null): boolean {
 
 export const liveCameraSlot = scopeSlot(() => new LiveCamera());
 
+/** The camera, stage and pixel ratio the board last put on its stages (relief/IsoBoard.tsx). */
+export type LastApplied = { camera: Camera | null; stage: unknown; ratio: number };
+
+/**
+ * Whether a board render must put `want` on the stages: only when it, the
+ * stage or the pixel ratio is new since the last apply, as react-konva sets
+ * a prop only when it changes. A render that changes nothing then moves
+ * nothing, and none writes an older camera back (docs/design-v1-relief-pan.md 11).
+ */
+export function needsApply(last: LastApplied, want: Camera, stage: unknown, ratio: number): boolean {
+  return last.camera !== want || last.stage !== stage || last.ratio !== ratio;
+}
+
+/**
+ * Runs `run` once for each new camera written to the slot, and never for a
+ * drawn camera's notice: the DM's camera controller publishes each move
+ * without a render (features/dm/CameraLayer.tsx). Returns the unsubscribe.
+ */
+export function onCameraMove(live: LiveCamera, run: (camera: Camera) => void): () => void {
+  let seen = live.camera;
+  return live.subscribe(() => {
+    const c = live.camera;
+    if (!c || c === seen) return;
+    seen = c;
+    run(c);
+  });
+}
+
 /**
  * What the chrome over the map stands by (Stage.tsx): the camera the board
  * rendered with, whether an isometric board shows, the interface size, and
@@ -121,6 +154,25 @@ export type ChromeCamera = { iso: boolean; rendered: Camera; zoom: number; pickO
 export type ChromeAt = { camera: Camera; raw: Camera; pick: BoardPick };
 
 const NO_SUBSCRIBE = () => () => {};
+
+/** The slot's subscription for a part of a drawing tree: none while the tree is hidden. */
+export function subscribeWhileShown(live: LiveCamera, shown: boolean): (listener: () => void) => () => void {
+  return shown ? live.subscribe : NO_SUBSCRIBE;
+}
+
+/**
+ * The camera written, for a part of a drawing tree that may be hidden
+ * (relief/context.ts useTreeShown). While hidden it subscribes to nothing
+ * and holds the last camera it read, so a Top-down pan never renders the
+ * hidden isometric tree (review HXPERF2B-ASTRA-01).
+ */
+export function useCameraWhileShown(live: LiveCamera, shown: boolean): Camera | null {
+  const held = useRef(live.camera);
+  const get = shown ? live.getCamera : () => held.current;
+  const camera = useSyncExternalStore(subscribeWhileShown(live, shown), get, get);
+  held.current = camera;
+  return camera;
+}
 
 /**
  * The camera for a piece of chrome hung on a map point. In Isometric it is

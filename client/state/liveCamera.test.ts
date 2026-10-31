@@ -4,7 +4,7 @@ import { describe, test } from "node:test";
 import type { Camera } from "../lib/camera.ts";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { chromeCameraOf, liveCameraSlot, LiveCamera, showGestureCamera, useChromeCamera, type CameraFit, type ChromeCamera } from "./liveCamera.ts";
+import { chromeCameraOf, liveCameraSlot, LiveCamera, needsApply, onCameraMove, showGestureCamera, subscribeWhileShown, useChromeCamera, type CameraFit, type ChromeCamera } from "./liveCamera.ts";
 import { RoomScope, RoomScopeProvider } from "./scope.ts";
 
 /*
@@ -87,7 +87,41 @@ describe("the slot's cameras", () => {
     live.write(c);
     live.setApplied(c, at(10.5));
     assert.equal(live.appliedFor(c).x, 10.5);
-    assert.equal(live.appliedFor(at(10.3)).x, 10.3, "a pending camera, not yet applied");
+    assert.equal(live.appliedFor(at(10.4)).x, 10.4, "a pending camera, not yet applied");
+  });
+
+  test("a write equal to the camera held keeps the old object, and a press at it still reads the applied one (review HXPERF2B-OPUS-03)", () => {
+    const live = new LiveCamera();
+    live.write(at(10.3));
+    const again = at(10.3);
+    live.write(again);
+    assert.notEqual(live.camera, again, "the slot kept its own object");
+    live.setApplied(again, at(10.5));
+    assert.equal(live.appliedFor(live.camera!).x, 10.5);
+  });
+
+  test("each new camera written reaches the camera controller once; an equal write, a drawn camera's notice and an unsubscribed listener reach it never", () => {
+    const live = new LiveCamera();
+    const heard: number[] = [];
+    const stop = onCameraMove(live, (c) => heard.push(c.x));
+    live.write(at(1));
+    live.write(at(1));
+    live.setDrawn(at(1));
+    live.write(at(2));
+    stop();
+    live.write(at(3));
+    assert.deepEqual(heard, [1, 2]);
+  });
+
+  test("a part of a hidden drawing tree hears no camera; a shown one hears each (review HXPERF2B-ASTRA-01)", () => {
+    const live = new LiveCamera();
+    let hidden = 0;
+    let shown = 0;
+    subscribeWhileShown(live, false)(() => hidden++);
+    subscribeWhileShown(live, true)(() => shown++);
+    live.write(at(1));
+    live.write(at(2));
+    assert.deepEqual([hidden, shown], [0, 2]);
   });
 });
 
@@ -127,6 +161,20 @@ describe("the chrome's hook (useChromeCamera)", () => {
     const body = src.slice(src.indexOf("export function useChromeCamera"));
     assert.match(body, /useSyncExternalStore\(/);
     assert.doesNotMatch(body, /\buse(State|Effect|LayoutEffect)\b/);
+  });
+});
+
+describe("after a board render, the stages take the camera only when something changed (docs/design-v1-relief-pan.md 11)", () => {
+  test("the same camera, stage and pixel ratio apply nothing; a new camera, even an equal one written anew, a new stage or a new ratio apply it", () => {
+    const camera = at(5);
+    const stage = {};
+    const last = { camera, stage, ratio: 2 };
+    assert.equal(needsApply(last, camera, stage, 2), false, "a render that changed nothing moves nothing");
+    assert.equal(needsApply(last, at(5), stage, 2), true, "a camera written anew");
+    assert.equal(needsApply(last, at(6), stage, 2), true);
+    assert.equal(needsApply(last, camera, {}, 2), true, "a stage made anew");
+    assert.equal(needsApply(last, camera, stage, 1.5), true, "a new pixel ratio");
+    assert.equal(needsApply({ camera: null, stage: null, ratio: 0 }, camera, stage, 2), true, "the first render");
   });
 });
 

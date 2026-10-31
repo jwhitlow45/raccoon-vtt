@@ -13,8 +13,9 @@
 import type { Grid } from "#shared/rules/grid.ts";
 import { hexInScene } from "#shared/rules/hex.ts";
 import type { BandPart } from "../../features/areas/volume.ts";
-import { screenToView, type Camera } from "../../lib/camera.ts";
+import type { Camera } from "../../lib/camera.ts";
 import { isometric, toView, type Turn } from "../../lib/view.ts";
+import { cullFit, cullOf, type Cull } from "./cull.ts";
 import { ReliefIndex, type DrawPiece, type Item, type StandeeIn, type VolumePiece } from "./buckets.ts";
 import { drawRun, NO_AREA_PITS, runPaintedBox, standeePaintedBox, type DrawContext } from "./drawRelief.ts";
 import { keptHost, onDeviceGrid } from "./kept.ts";
@@ -589,7 +590,11 @@ export class KeptRig {
         this.#drawItem(this.canvas.g, item);
       },
     });
-    this.scheduler.keep(this.#host);
+    // The tests read what each scroll painted. The rig's canvases are a few cells across, where one toned column covers half the
+    // canvas, so it scrolls past the production limit to keep exercising repairs: the limit has its own unit (kept.test.ts).
+    const kept = this.scheduler.keep(this.#host);
+    kept.measure = true;
+    kept.maxShare = Infinity;
     this.layout();
     this.mark("relief");
   }
@@ -622,12 +627,8 @@ export class KeptRig {
   }
 
   /** The cull box at the camera, in the board's steps. */
-  cull(cam: Camera = this.camera): { key: string; box: VBox; view: VBox } {
-    const step = RIG_STEP_PX / cam.scale;
-    const tl = screenToView(cam, { x: 0, y: 0 });
-    const br = screenToView(cam, { x: this.size.width, y: this.size.height });
-    const box = { x0: (Math.floor(tl.x / step) - 1) * step, y0: (Math.floor(tl.y / step) - 1) * step, x1: (Math.ceil(br.x / step) + 1) * step, y1: (Math.ceil(br.y / step) + 1) * step };
-    return { box, key: `${box.x0},${box.y0},${box.x1},${box.y1}`, view: { x0: tl.x, y0: tl.y, x1: br.x, y1: br.y } };
+  cull(cam: Camera = this.camera): Cull {
+    return cullOf(cam, this.size, RIG_STEP_PX);
   }
 
   #standeeShapes(): Map<string, Shape> {
@@ -728,11 +729,7 @@ export class KeptRig {
       this.scheduler.mark("ground");
       this.scheduler.mark("relief");
     });
-    const now = this.cull();
-    if (now.key === this.rendered.key) return "inside";
-    const v = now.view;
-    const b = this.rendered.box;
-    return v.x0 >= b.x0 && v.y0 >= b.y0 && v.x1 <= b.x1 && v.y1 <= b.y1 ? "step" : "out";
+    return cullFit(this.rendered, this.camera, this.size, RIG_STEP_PX);
   }
 
   /** The board's render commits: the layout again, and react-konva's marks on the relief. */

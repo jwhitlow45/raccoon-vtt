@@ -33,7 +33,7 @@ export type DrawPlan =
   | { kind: "scroll"; dx: number; dy: number; bands: VBox[] };
 
 /** Why a draw repaints whole, for the tests and the bench. */
-export type WholeWhy = "probe" | "first" | "content" | "view" | "off-grid" | "jump";
+export type WholeWhy = "probe" | "first" | "content" | "view" | "off-grid" | "jump" | "repair";
 
 /** How far a whole device pixel may be off before a move counts as off the grid: float rounding of `round(x·r)/r`, never a real fraction. */
 const GRID_EPSILON = 1e-6;
@@ -107,6 +107,32 @@ export function onCanvas(b: VBox, w: number, h: number): VBox | null {
 export function meetsAny(b: VBox, regions: readonly VBox[]): boolean {
   for (const r of regions) if (meets(b, r)) return true;
   return false;
+}
+
+/** Past this many repair boxes a scroll repairs whole rows instead, so its clip and its box tests stay few (review HXPERF2B-OPUS-05). */
+export const MAX_REPAIR_BOXES = 32;
+
+/** A scroll whose regions would cover more than this share of the canvas repaints whole instead, which costs no more. */
+export const MAX_SCROLL_SHARE = 0.5;
+
+/**
+ * The regions a scroll repairs toned cells through: the boxes themselves
+ * when they are few, else rows the canvas's width covering every box, their
+ * spans joined, and one row from the first to the last when even those are
+ * too many: the bands of 5.3 by another road. A row holds every pixel of
+ * the boxes it covers, so the repair stays exact, only wider.
+ */
+export function repairRegions(boxes: readonly VBox[], width: number): VBox[] {
+  if (boxes.length <= MAX_REPAIR_BOXES) return [...boxes];
+  const spans = boxes.map((b) => [b.y0, b.y1] as const).sort((p, q) => p[0] - q[0]);
+  const rows: VBox[] = [];
+  for (const [y0, y1] of spans) {
+    const last = rows.at(-1);
+    if (last && y0 <= last.y1) last.y1 = Math.max(last.y1, y1);
+    else rows.push({ x0: 0, y0, x1: width, y1 });
+  }
+  if (rows.length <= MAX_REPAIR_BOXES) return rows;
+  return [{ x0: 0, y0: rows[0]!.y0, x1: width, y1: rows.at(-1)!.y1 }];
 }
 
 /** The pixels a set of boxes covers, overlaps counted once: what a scroll paints, for the bench. */
@@ -213,6 +239,15 @@ export class KeptRelief {
   #toned: VBox[] = [];
   #probe: "pending" | "ok" | "off" = "pending";
   readonly stats: KeptStats = emptyStats();
+  /**
+   * Whether a scroll measures the share of the canvas it paints into
+   * `stats`. Off in production and in timed bench frames: the unions cost
+   * more than the scroll (review HXPERF2B-ASTRA-02). The tests and the
+   * bench's untimed counts turn it on.
+   */
+  measure = false;
+  /** The share of the canvas past which a scroll repaints whole instead (MAX_SCROLL_SHARE). */
+  maxShare = MAX_SCROLL_SHARE;
 
   /** Whether scrolling is on: the probe passed. False before it has run and after a wrong read. */
   get scrolling(): boolean {
@@ -246,7 +281,25 @@ export class KeptRelief {
       return { kind: "whole", why: "first" };
     }
     this.probeOn(c);
-    const plan = planDraw(this.#at, d.at, d.clean, this.scrolling);
+    let plan = planDraw(this.#at, d.at, d.clean, this.scrolling);
+    let scroll: { now: VBox[]; repair: VBox[]; regions: VBox[] } | null = null;
+    if (plan.kind === "scroll") {
+      const now = d.tonedNow();
+      const boxes: VBox[] = [];
+      for (const b of this.#toned) {
+        const r = onCanvas(moved(b, plan.dx, plan.dy), c.width, c.height);
+        if (r) boxes.push(r);
+      }
+      for (const b of now) {
+        const r = onCanvas(b, c.width, c.height);
+        if (r) boxes.push(r);
+      }
+      const repair = repairRegions(boxes, c.width);
+      const regions = [...plan.bands, ...repair];
+      // A scroll never costs more than the whole draw it stands in for. The regions are at most MAX_REPAIR_BOXES and two bands, so their union is cheap.
+      if (unionArea(regions) > this.maxShare * c.width * c.height) plan = { kind: "whole", why: "repair" };
+      else scroll = { now, repair, regions };
+    }
     if (plan.kind === "whole") {
       const toned: VBox[] = [];
       d.whole(toned);
@@ -254,26 +307,19 @@ export class KeptRelief {
       this.stats.whole++;
       this.stats.why[plan.why] = (this.stats.why[plan.why] ?? 0) + 1;
     } else {
-      const now = d.tonedNow();
-      const repair: VBox[] = [];
-      for (const b of this.#toned) {
-        const r = onCanvas(moved(b, plan.dx, plan.dy), c.width, c.height);
-        if (r) repair.push(r);
-      }
-      for (const b of now) {
-        const r = onCanvas(b, c.width, c.height);
-        if (r) repair.push(r);
-      }
-      const regions = [...plan.bands, ...repair];
+      // Set whenever the plan stayed a scroll.
+      const { now, repair, regions } = scroll!;
       scrollCanvas(c, plan.dx, plan.dy, regions);
       d.regions(regions);
       c.g.restore();
       this.#toned = now;
-      const area = c.width * c.height;
       this.stats.scrolls++;
-      this.stats.bands += unionArea(plan.bands) / area;
-      this.stats.repair += unionArea(repair) / area;
-      this.stats.union += unionArea(regions) / area;
+      if (this.measure) {
+        const area = c.width * c.height;
+        this.stats.bands += unionArea(plan.bands) / area;
+        this.stats.repair += unionArea(repair) / area;
+        this.stats.union += unionArea(regions) / area;
+      }
     }
     this.stats.toned += this.#toned.length;
     this.#at = d.at;

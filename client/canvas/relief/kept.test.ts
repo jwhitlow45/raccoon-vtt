@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { sceneGrid } from "#shared/rules/grid.ts";
-import { bandsOf, drawChildrenMeeting, KeptRelief, onDeviceGrid, planDraw, probeSelfCopy, type KeptAt } from "./kept.ts";
+import { bandsOf, drawChildrenMeeting, KeptRelief, MAX_REPAIR_BOXES, onDeviceGrid, planDraw, probeSelfCopy, repairRegions, type KeptAt } from "./kept.ts";
+import type { VBox } from "./pieces.ts";
 import { installPath2D, KeptRig, TestCanvas, type RigScene } from "./keptTesting.ts";
 
 /*
@@ -310,5 +311,67 @@ describe("a scroll's regions, each tested on its own (5.2)", () => {
     };
     assert.equal(fillsWith([{ x0: 0, y0: 0, x1: 2, y1: 90 }, { x0: 0, y0: 0, x1: 120, y1: 2 }]), 0);
     assert.ok(fillsWith([{ x0: 0, y0: 0, x1: 120, y1: 90 }]) > 0, "the whole canvas draws it");
+  });
+});
+
+describe("a scroll's cost stays bounded (reviews HXPERF2B-ASTRA-02 and HXPERF2B-OPUS-05)", () => {
+  /** A kept picture already drawn once at AT, its probe passed, then a camera-only move by `dx` device pixels with `toned` boxes now. */
+  function scrollWith(toned: VBox[], measure: boolean): { kept: KeptRelief; plan: ReturnType<KeptRelief["draw"]>; regions: VBox[] } {
+    const kept = new KeptRelief();
+    kept.measure = measure;
+    const c = new TestCanvas(200, 100);
+    const canvas = { g: c.g, width: c.width, height: c.height, ratio: 2 };
+    let regions: VBox[] = [];
+    const draw = (at: KeptAt, now: VBox[]) => kept.draw(canvas, { at, clean: true, whole: () => {}, tonedNow: () => now, regions: (r) => (regions = [...r]) });
+    draw(AT, []);
+    const plan = draw({ ...AT, x: AT.x + 1 }, toned);
+    return { kept, plan, regions };
+  }
+  /** `n` small toned boxes scattered over the canvas's top rows. */
+  const scattered = (n: number): VBox[] => Array.from({ length: n }, (_, i) => ({ x0: (i * 37) % 190, y0: (i * 7) % 30, x1: ((i * 37) % 190) + 6, y1: ((i * 7) % 30) + 3 }));
+
+  test("a production scroll measures nothing: the unions are taken only when a test or the bench turns measuring on", () => {
+    const off = scrollWith(scattered(10), false);
+    assert.equal(off.plan.kind, "scroll");
+    assert.deepEqual([off.kept.stats.bands, off.kept.stats.repair, off.kept.stats.union], [0, 0, 0]);
+    const on = scrollWith(scattered(10), true);
+    assert.ok(on.kept.stats.bands > 0 && on.kept.stats.repair > 0 && on.kept.stats.union > 0);
+  });
+
+  test(`past ${MAX_REPAIR_BOXES} toned boxes a scroll repairs rows the canvas's width, few, that hold every box`, () => {
+    const boxes = scattered(200);
+    const { plan, regions } = scrollWith(boxes, false);
+    assert.equal(plan.kind, "scroll");
+    assert.ok(regions.length <= MAX_REPAIR_BOXES + 2, `${regions.length} regions`);
+    for (const b of boxes) {
+      const held = regions.some((r) => r.x0 <= b.x0 && r.y0 <= b.y0 && r.x1 >= b.x1 && r.y1 >= b.y1);
+      assert.ok(held, `the box ${JSON.stringify(b)} lies in one region`);
+    }
+    // Rows too many to keep become one, from the first to the last.
+    const rows = Array.from({ length: 40 }, (_, i) => ({ x0: 0, y0: i * 2, x1: 4, y1: i * 2 + 1 }));
+    assert.deepEqual(repairRegions(rows, 200), [{ x0: 0, y0: 0, x1: 200, y1: 79 }]);
+    assert.deepEqual(repairRegions(rows.slice(0, 3), 200), rows.slice(0, 3), "a few boxes stay themselves");
+  });
+
+  test("a scroll that would paint more than half the canvas repaints whole instead", () => {
+    const tall = Array.from({ length: 40 }, (_, i) => ({ x0: i * 5, y0: 0, x1: i * 5 + 4, y1: 80 }));
+    const { kept, plan } = scrollWith(tall, false);
+    assert.deepEqual(plan, { kind: "whole", why: "repair" });
+    assert.equal(kept.stats.why.repair, 1);
+  });
+
+  test("a checkerboard of pits along the screen's top, 78 toned cells, scrolls through rows and equals a whole draw", () => {
+    const ground = new Map<string, number>();
+    for (let y = 0; y < 60; y++) for (let x = 0; x < 60; x++) ground.set(`${x},${y}`, (x + y) % 2 === 0 ? -1 : 0);
+    const r = new KeptRig({ grid: sceneGrid({}), w: 60, h: 60, ground }, { width: 300, height: 160, ratio: 2, camera: { x: 150, y: -100, scale: 4 }, margin: 0 });
+    r.frame();
+    assert.ok(r.tonedNow().length > MAX_REPAIR_BOXES, `${r.tonedNow().length} toned cells`);
+    for (const [dx, dy] of [[0, 1.5], [1, 0.5], [0, -2], [-1.5, -1]] as const) {
+      const fit = r.pan(dx, dy);
+      if (fit !== "inside") r.commit();
+      r.frame();
+      assert.deepEqual(r.canvas.diff(r.whole()), [], `after a pan by ${dx},${dy}`);
+    }
+    assert.ok(r.scheduler.kept!.stats.scrolls >= 3, "the pans scrolled");
   });
 });

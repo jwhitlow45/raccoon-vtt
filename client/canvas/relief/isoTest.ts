@@ -30,17 +30,19 @@ export type Hook = {
   pixels?(): string | null;
   /** The camera the canvas last drew. */
   drawn?(): Camera | null;
+  /** Turns on or off the kept picture's measure of what each scroll paints (kept.ts KeptRelief.measure), for untimed counts only. */
+  measure?(on: boolean): void;
 };
 
-/** What the bench and the tests count of a board's frames: the kept picture's draws and painted shares, background slices, and board and map renders. */
-export type KeptCounts = KeptStats & { probe: string; frames: number; draws: number; cameraGroundDraws: number; slices: number; slicesInWhole: number; boardCommits: number; mapCommits: number };
+/** What the bench and the tests count of a board's frames: the kept picture's draws and painted shares, background slices, and board, map and pill provider renders. */
+export type KeptCounts = KeptStats & { probe: string; frames: number; draws: number; cameraGroundDraws: number; slices: number; slicesInWhole: number; boardCommits: number; mapCommits: number; pillCommits: number };
 
 /** A mounted board's kept picture, as the hook reads it. */
-export type KeptReport = { counts(): Omit<KeptCounts, "boardCommits" | "mapCommits"> | null; repaint(): void; pixels(): string | null; drawn(): Camera | null };
+export type KeptReport = { counts(): Omit<KeptCounts, "boardCommits" | "mapCommits" | "pillCommits"> | null; repaint(): void; pixels(): string | null; drawn(): Camera | null; measure(on: boolean): void };
 
 const keptBoards: KeptReport[] = [];
-/** Commits of the isometric board and of the map stage, counted only with the test flag. */
-const commits = { board: 0, map: 0 };
+/** Commits of the isometric board, of the map stage and of the isometric pills' board view, counted only with the test flag. */
+const commits = { board: 0, map: 0, pills: 0 };
 
 /** Registers a board's kept picture for the hook while it is mounted, with the test flag only. */
 export function useKeptReport(report: () => KeptReport): void {
@@ -55,8 +57,12 @@ export function useKeptReport(report: () => KeptReport): void {
   }, [on]);
 }
 
-/** Counts a commit of the board or the map stage, with the test flag only: a pan inside a cull step commits neither (docs/design-v1-relief-pan.md 6). */
-export function useCommitCount(which: "board" | "map"): void {
+/**
+ * Counts a commit of the board, the map stage or the pills' board view, with
+ * the test flag only: a pan inside a cull step commits neither of the first
+ * two (docs/design-v1-relief-pan.md 6), and a Top-down pan never the third.
+ */
+export function useCommitCount(which: "board" | "map" | "pills"): void {
   const on = flagged();
   useLayoutEffect(() => {
     if (on) commits[which]++;
@@ -158,11 +164,12 @@ export function useIsoTestHook(key: string, sceneId: string, memory?: StoreApi<S
       },
       kept: () => {
         const c = keptBoards.at(-1)?.counts();
-        return c ? { ...c, boardCommits: commits.board, mapCommits: commits.map } : null;
+        return c ? { ...c, boardCommits: commits.board, mapCommits: commits.map, pillCommits: commits.pills } : null;
       },
       repaint: () => keptBoards.at(-1)?.repaint(),
       pixels: () => keptBoards.at(-1)?.pixels() ?? null,
       drawn: () => keptBoards.at(-1)?.drawn() ?? null,
+      measure: (on: boolean) => keptBoards.at(-1)?.measure(on),
     });
   }, [on, key, sceneId, memory]);
 }

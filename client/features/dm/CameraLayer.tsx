@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { liveCameraSlot } from "../../state/liveCamera.ts";
+import { liveCameraSlot, onCameraMove } from "../../state/liveCamera.ts";
 import type { ControllerProps } from "../layers.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
@@ -90,16 +90,14 @@ export function CameraController(props: ControllerProps) {
   const publishRef = useRef(publish);
   publishRef.current = publish;
   useEffect(() => publishRef.current());
-  useEffect(() => {
-    let seen = camera.camera;
-    return camera.subscribe(() => {
-      const c = camera.camera;
-      if (!c || c === seen) return;
-      seen = c;
-      liveRef.current = { ...liveRef.current, camera: c };
-      publishRef.current();
-    });
-  }, [camera]);
+  useEffect(
+    () =>
+      onCameraMove(camera, (c) => {
+        liveRef.current = { ...liveRef.current, camera: c };
+        publishRef.current();
+      }),
+    [camera],
+  );
 
   // `send` reads the latest focus when it runs, so it is not a dependency.
   useEffect(() => {
