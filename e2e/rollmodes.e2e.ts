@@ -228,7 +228,7 @@ const HINT = {
   plain: "Hold, right-click or Shift+F10 for Secret or Normal.",
 } as const;
 
-const NORMAL_HELP = "Roll normally: ignores Adv, Dis and Secret pressed for this roll. Conditions still apply.";
+const NORMAL_HELP = "Roll normally: ignores Adv, Dis and Secret pressed for this roll. Conditions and usual visibility still apply.";
 
 async function itemsOf(menu: Locator): Promise<Item[]> {
   await menu.waitFor();
@@ -1337,7 +1337,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
     // The results name Disadvantage: shown where that adds no line, else kept for screen readers alone (D-261030-584).
     const disResults = await resultLine(group, /^\d+ (hit|miss|Critical Hit)\b.*Disadvantage/);
     assert.ok(disResults.hasDetail, `the attacks' results have words for their mode: ${JSON.stringify(disResults)}`);
-    assert.match(disResults.showsDetail ? disResults.shown : disResults.missing, disResults.showsDetail ? /^\d+ (hit|miss|Critical Hit) \(Disadvantage(, Secret)?\), \d+ (hit|miss|Critical Hit) \(Disadvantage(, Secret)?\)$/ : /^\W*Disadvantage(, Secret)?, Disadvantage(, Secret)?\W*$/, `the attacks' modes: ${JSON.stringify(disResults)}`);
+    assert.match(disResults.showsDetail ? disResults.shown : disResults.missing, disResults.showsDetail ? /^\d+ (hit|miss|Critical Hit) \(Disadvantage(, Secret)?\), \d+ (hit|miss|Critical Hit) \(Disadvantage(, Secret)?\)$/ : /^, Disadvantage(, Secret)?$/, `the attacks' modes, a shared one said once: ${JSON.stringify(disResults)}`);
     assert.equal(disResults.height, disResults.compactHeight, `the attacks' results add no line: ${JSON.stringify(disResults)}`);
 
     // Rolled secretly from the menu with the panel's Secret off, so each result names Secret, then the panel's Secret turned on,
@@ -1418,8 +1418,9 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
     }
   });
 
-  test("dpf1-25b. offline, a plain tap on either Again says a roll needs a connection", async () => {
+  test("dpf1-25b. offline, either Again's open menu closes, and a plain tap on it says a roll needs a connection", async () => {
     // Said in the newest roll's line (DPF1B-OPUS-02). That line then holds the words, not the roll, so each Again has a roll of its own.
+    // A menu open as the connection goes closes, since none of its picks could roll (DPF1-ASTRA-06).
     const panel = await dmDiceFor(run.thorn, "Thorn");
     const field = panel.getByLabel("Dice formula", { exact: true });
     const last = panel.locator("[data-dice-last]");
@@ -1430,10 +1431,15 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
       await oneRoll(dmSent, from, `a roll for ${which}`);
       const again = which === "the sticky Again" ? last.getByRole("button", { name: "Again" }) : panel.locator("[data-dice-recent]").getByRole("button", { name: /^Roll again: 1d20\+1 Offline/ }).first();
       await again.waitFor();
+      await middle(again);
+      await again.click({ button: "right" });
+      const againMenu = rollMenu(dm, /^Roll options for Again$/);
+      await againMenu.waitFor();
       consoles.dm.expectSocketFailures = true;
       await dmContext.setOffline(true);
       try {
         await waitFor("the DM offline", async () => ((await dm.getByRole("status", { name: "Connected" }).count()) === 0 ? true : null));
+        await againMenu.waitFor({ state: "detached", timeout: 3_000 }).catch(() => assert.fail(`${which}'s open menu stays open offline`));
         await middle(again);
         from = dmSent.ops.length;
         await again.click();
@@ -1582,6 +1588,85 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
     if (closed.size) console.log(`dpf1-26: closed as their roll settled, so nothing to measure: ${[...closed].join(", ")}`);
   });
 
+  test("dpf1-26b. on the DM's phone at 390 x 844 and 320 x 568, at 100% and 130%, a save-ends save failed with Legendary Resistance left stays on its card with its result, and the mode the menu added adds no line", async () => {
+    // The dragon's Frightened ends on a Strength save it cannot make, so each roll fails, and with Legendary Resistance left
+    // the card waits on Use Legendary Resistance or Accept failure (saveCards.ts landedOp), its settled result in view.
+    const turnTo = async (entryId: string) => {
+      for (let i = 0; i < 4 && dmSocket.state?.encounter?.activeEntryId !== entryId; i++) {
+        const e = dmSocket.state!.encounter!;
+        await ops.send({ t: "encounter.next", from: { entry: e.activeEntryId, round: e.round } });
+        await waitFor("the turn moved", () => (dmSocket.state?.encounter?.activeEntryId !== e.activeEntryId || dmSocket.state?.encounter?.round !== e.round ? true : null));
+      }
+    };
+    const faults: string[] = [];
+    const room = new URL(dm.url()).pathname;
+    await ops.send({ t: "token.update", tokenId: run.dragon.id, patch: { actor: { legendary: { resistMax: 3, resistUsed: 0, actionsMax: 3, actionsUsed: 0 } } } });
+    await waitFor("the dragon's Legendary Resistance", () => {
+      const ref = dmSocket.state?.tokens[run.dragon.id]?.actor;
+      return ref && "inline" in ref && ref.inline.legendary?.resistMax === 3 ? true : null;
+    });
+    for (const size of [{ width: 390, height: 844 }, { width: 320, height: 568 }]) {
+      for (const scale of [1, 1.3]) {
+        const at = `${size.width}x${size.height} at ${scale * 100}%`;
+        const context = await browser.newContext({ viewport: size, deviceScaleFactor: 2, isMobile: true, hasTouch: true, reducedMotion: "reduce" });
+        const fear = randomUUID();
+        try {
+          await ops.send({ t: "encounter.start", entries: [{ id: "e-dragon", tokenId: run.dragon.id, value: 20 }, { id: "e-goblin", tokenId: run.goblin.id, value: 15 }] });
+          await waitFor("the fight", () => (dmSocket.state?.encounter?.entries.length === 2 ? true : null));
+          await turnTo("e-dragon");
+          await ops.send({ t: "actor.effect.add", target: { tokenId: run.dragon.id }, effect: { id: fear, key: "frightened", save: { ability: "str", dc: 30 } } });
+          await context.addCookies(await dmContext.cookies(server.origin));
+          await context.addInitScript((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
+          const page = await context.newPage();
+          const cdp = await context.newCDPSession(page);
+          await page.goto(`${server.origin}${room}`);
+          await page.getByRole("status", { name: "Connected" }).first().waitFor();
+          await page.locator(".konvajs-content").first().waitFor();
+          // The dragon's turn ends: its save, on a card the phone may fold behind its summary.
+          await turnTo("e-goblin");
+          const ends = page.locator('[data-alert-id^="saveEnds:"]').filter({ visible: true }).first();
+          if (!(await ends.isVisible().catch(() => false))) {
+            const summary = page.getByRole("button", { name: /Tap to answer\.$|to see them\.$|to see it\.$/ }).first();
+            await summary.waitFor({ timeout: 5_000 }).catch(() => undefined);
+            if (await summary.isVisible().catch(() => false)) await summary.tap();
+          }
+          await ends.waitFor();
+          const roll = ends.getByRole("button", { name: /^Roll [+−-]\d+/ }).first();
+          await middle(roll);
+          await hold(cdp, roll);
+          const menu = page.getByRole("menu", { name: /^Roll options/ });
+          await menu.waitFor();
+          await menu.getByRole("menuitem", { name: "Roll with Advantage" }).tap();
+          await menu.waitFor({ state: "detached" });
+          const failed = () => resultLines(ends).then((lines) => lines.find((l) => /^Rolled \d+: a fail\./.test(l.readable)) ?? null);
+          await waitFor(`${at} the failed save's result`, failed).catch(async (err: Error) => {
+            await shots.take(page, `dpf1-26b-${size.width}-${scale * 100}-missing`);
+            throw new Error(`${at}: ${err.message}, results ${JSON.stringify(await resultLines(ends).catch(() => []))}`);
+          });
+          // Still pending after its roll landed: the card, its result and both choices stay.
+          await sleep(QUIET_MS);
+          await ends.getByRole("button", { name: /^Use Legendary Resistance \(\d+ left\)$/ }).waitFor({ timeout: 2_000 });
+          await ends.getByRole("button", { name: "Accept failure", exact: true }).waitFor({ timeout: 2_000 });
+          const line = await failed();
+          if (!line) faults.push(`${at}: the failed save's result went from its waiting card`);
+          else {
+            if (!/^Rolled \d+: a fail\. Advantage\.$/.test(line.readable)) faults.push(`${at}: the result's words: ${JSON.stringify(line)}`);
+            if (!line.hasDetail) faults.push(`${at}: no added words to fit: ${JSON.stringify(line)}`);
+            else if (line.height > line.compactHeight + 1) faults.push(`${at}: the added mode adds a line: ${JSON.stringify(line)}`);
+          }
+          if (size.width === 320 && scale === 1.3) await shots.take(page, "dpf1-26b-320-130");
+        } finally {
+          await context.close();
+          await ops.send({ t: "actor.effect.remove", target: { tokenId: run.dragon.id }, effectId: fear }).catch((err: Error) => {
+            if (!/gone/.test(err.message)) throw err;
+          });
+          if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+        }
+      }
+    }
+    assert.deepEqual(faults, [], "a failed save's result while Legendary Resistance is left");
+  });
+
   test("dpf1-14. on a phone at 320 x 568 and 390 x 844, at 100% and 130%, Recent rolls shows no mode word on a plain d20 row, and a cancelled row's words take no room (design 4, 6: one result location, no new wrapping)", async () => {
     const faults: string[] = [];
     for (const size of [{ width: 320, height: 568 }, { width: 390, height: 844 }]) {
@@ -1633,6 +1718,112 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
       }
     }
     assert.deepEqual(faults, [], "Recent rolls' mode words take room");
+  });
+
+  test("dpf1-27. a waiting request Roll keeps its menu open while a sibling row is answered: the DM's live card as another player answers, and Pat's Dice and card as his other creature is answered from his other device", async () => {
+    // A request's revision and its other rows are bookkeeping to one row's roll, so their change leaves that roll's menu be (DPF1-ASTRA-05).
+    // A player gets only their own rows, with rev 0 (shared/project.ts projectRollCtx), so another player's answer reaches Pat as nothing.
+    // On his page the sibling is his own second creature, answered from his other device.
+    const breeContext = await browser.newContext();
+    let breeOps: OpSocket | null = null;
+    let patOps: OpSocket | null = null;
+    const wren = randomUUID();
+    const ash = randomUUID();
+    const asks: string[] = [];
+    const cookieOf = async (context: BrowserContext) => (await context.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
+    const help = ["Roll secretly: request answers keep the request's visibility.", NORMAL_HELP];
+    /** Asks a DEX save of Thorn and `sibling`, and waits until `page`'s state has it. */
+    const ask = async (sibling: string, socket: SocketWatch) => {
+      const id = randomUUID();
+      asks.push(id);
+      await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: false, resultShown: true, targets: [{ characterId: run.thornChar }, { characterId: sibling }] } });
+      await waitFor("the ask", () => socket.state?.rolls[id]);
+      return id;
+    };
+    const faults: string[] = [];
+    /** With `menu` open on `page`, `answer` lands on the sibling's row: the menu stays, sends nothing, and its pick answers Thorn's row once. */
+    const answeredBeside = async (page: Page, sent: OpsSent, socket: SocketWatch, id: string, sibling: string, menu: Locator, family: Family, answer: () => Promise<unknown>, from: number) => {
+      const before = JSON.stringify(socket.state?.rolls[id]);
+      await answer();
+      await waitFor(`the sibling's answer on ${family.what}'s page`, () => (socket.state?.rolls[id]?.targets.find((t) => t.characterId === sibling)?.total !== undefined ? true : null));
+      assert.notEqual(JSON.stringify(socket.state?.rolls[id]), before, "the answer changed the request the menu came from");
+      await sleep(QUIET_MS);
+      await noRoll(sent, from, `${family.what}'s open menu while a sibling was answered`);
+      // Noted and closed, so the surfaces after it are still tried.
+      if (!(await menu.isVisible())) {
+        faults.push(`${family.what}: a sibling's answer closed the menu, focus now on ${await focusedName(page)}`);
+        await ops.send({ t: "roll.close", rollIds: [id] });
+        await waitFor("the request closed", () => (dmSocket.state?.rolls[id] ? null : true));
+        return;
+      }
+      await menu.getByRole("menuitem", { name: family.pick }).click();
+      const op = await oneRoll(sent, from, `${family.pick} on ${family.what}`);
+      assert.deepEqual(sentMode(op), { cancelled: false, ...family.sends }, `${family.what}: ${family.pick}`);
+      assert.equal(op.rollId, id);
+      await waitFor("Thorn's answer", () => (dmSocket.state?.rolls[id]?.targets.find((t) => t.characterId === run.thornChar)?.total !== undefined ? true : null));
+      await menu.waitFor({ state: "detached" });
+      await ops.send({ t: "roll.close", rollIds: [id] });
+      await waitFor("the request closed", () => (dmSocket.state?.rolls[id] ? null : true));
+    };
+    try {
+      const breeId = await join(breeContext, "Bree", "#3e63dd");
+      breeOps = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie: await cookieOf(breeContext) });
+      patOps = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie: await cookieOf(patContext) });
+      await ops.send({ t: "character.create", character: { id: wren, name: "Wren", size: "medium", ownerIds: [breeId], actor: actor(), level: 3, stats: THORN_STATS } });
+      await ops.send({ t: "character.create", character: { id: ash, name: "Ash", size: "medium", ownerIds: [run.patId], actor: actor(), level: 3, stats: THORN_STATS } });
+      await waitFor("Ash on Pat's page", () => patSocket.state?.characters[ash]);
+
+      // The DM's live card: Thorn's row still waits as Bree answers Wren's.
+      let id = await ask(wren, dmSocket);
+      const live = dm.getByRole("group", { name: /^Roll request: DEX save/ }).filter({ visible: true }).first();
+      await live.waitFor();
+      const dmRoll = live.getByRole("button", { name: /^Roll \+1 for Thorn$/ });
+      // The card's own fold, never the Roll: a roll with a menu says aria-expanded too.
+      if (!(await dmRoll.isVisible())) await live.locator('button[aria-expanded="false"]:not([aria-haspopup])').first().click();
+      const dmFamily: Family = { what: "the DM's live request card", button: () => dmRoll, menu: /^Roll options for Roll \+1 for Thorn$/, items: D20_FIXED, hint: HINT.fixed, help, pick: "Roll normally", sends: { t: "roll.dice", mode: null, to: null } };
+      await middle(dmRoll);
+      let from = dmSent.ops.length;
+      await dmRoll.click({ button: "right" });
+      let menu = await opened(dm, dmRoll, dmFamily);
+      await answeredBeside(dm, dmSent, dmSocket, id, wren, menu, dmFamily, () => breeOps!.send({ t: "roll.dice", tag: randomUUID(), rollId: id, target: { characterId: wren } }), from);
+
+      // Pat's Dice and his card: Ash's row answered from his other device.
+      for (const where of ["Dice", "card"] as const) {
+        id = await ask(ash, patSocket);
+        let button: Locator;
+        let family: Family;
+        if (where === "Dice") {
+          // Ash gives Pat a tab per creature.
+          const sheet = await openDiceSheet(pat);
+          await sheet.getByRole("tab", { name: /Thorn$/ }).first().click();
+          await sheet.getByRole("region", { name: "Rolls for Thorn" }).waitFor();
+          button = sheet.getByRole("button", { name: /^Dexterity save, answers the DM's request/ });
+          family = { what: "Pat's answer in Dice", button: () => button, menu: /^Roll options for Dexterity save, answers the DM's request/, items: D20_FIXED, hint: HINT.fixed, help, pick: "Roll with Advantage", sends: { t: "roll.dice", mode: "adv", to: null } };
+        } else {
+          await closeMenus(pat);
+          const card = pat.getByRole("dialog", { name: "The DM asks for a roll" });
+          if (!(await card.isVisible())) await pat.getByRole("button", { name: /^Roll asked/ }).first().tap();
+          button = card.getByRole("button", { name: "Roll +1 for Thorn", exact: true });
+          family = { what: "Pat's request card", button: () => button, menu: /^Roll options for Roll \+1 for Thorn$/, items: D20_FIXED, hint: HINT.fixed, help, pick: "Roll with Disadvantage", sends: { t: "roll.dice", mode: "dis", to: null } };
+        }
+        await button.waitFor();
+        await middle(button);
+        from = patSent.ops.length;
+        await hold(patCdp, button);
+        menu = await opened(pat, button, family);
+        const answerId = id;
+        await answeredBeside(pat, patSent, patSocket, answerId, ash, menu, family, () => patOps!.send({ t: "roll.dice", tag: randomUUID(), rollId: answerId, target: { characterId: ash } }), from);
+      }
+    } finally {
+      const open = asks.filter((id) => dmSocket.state?.rolls[id]);
+      if (open.length) await ops.send({ t: "roll.close", rollIds: open });
+      for (const character of [wren, ash]) if (dmSocket.state?.characters[character]) await ops.send({ t: "character.delete", characterId: character });
+      breeOps?.close();
+      patOps?.close();
+      await breeContext.close();
+      await closeMenus(pat);
+    }
+    assert.deepEqual(faults, [], "open menus beside a sibling's answer");
   });
 
   test("dpf1-13. nothing went wrong in the browsers", () => {

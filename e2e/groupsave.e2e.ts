@@ -661,9 +661,32 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     const dis = await resultLine(rolls, /^\d+(, \d+){2}\W*Disadvantage/);
     assert.ok(dis.hasDetail && !dis.showsDetail, `the mode is kept for screen readers alone on a narrow phone: ${JSON.stringify(dis)}`);
     assert.match(dis.shown, /^\d+(, \d+){2}$/, "the compact words show");
-    assert.match(dis.readable, /^\d+(, \d+){2}\W+Disadvantage, Disadvantage, Disadvantage\W*$/, `a reader hears the totals, then each mode, apart: ${JSON.stringify(dis)}`);
+    assert.match(dis.readable, /^\d+(, \d+){2}, Disadvantage$/, `a reader hears the totals, then the mode they share, once: ${JSON.stringify(dis)}`);
     assert.equal(dis.height, dis.compactHeight, "no line added");
     assert.ok(dis.detailHeight > dis.compactHeight, `the detailed words would have added a line: ${JSON.stringify(dis)}`);
+
+    // Two goblins Poisoned and one not: their modes differ, so a reader hears each total with its own mode, after the shown words.
+    // An AC makes each result a verdict too, so the detailed words still need a second line here.
+    const poisons = run.goblins.slice(0, 2).map((g) => ({ token: g.id, effect: randomUUID() }));
+    try {
+      for (const p of poisons) await ops.send({ t: "actor.effect.add", target: { tokenId: p.token }, effect: { id: p.effect, key: "poisoned" } });
+      const fresh = attack(3).locator("xpath=../..").getByLabel("Target's AC");
+      await fresh.fill("1");
+      await fresh.press("Enter");
+      const before = diceLines(dmSocket.state?.log).length;
+      await attack(3).tap();
+      const mixedLine = await waitFor("the attack with mixed modes", () => diceLines(dmSocket.state?.log).slice(before).find((l) => l.rolls.length === 3 && l.rolls.every((r) => r.label === "Scimitar")) ?? null);
+      const poisoned = new Set<string>(poisons.map((p) => p.token));
+      assert.deepEqual(mixedLine.rolls.map((r) => r.mode === "dis"), mixedLine.rolls.map((r) => poisoned.has(r.tokenId!)), `only the Poisoned goblins rolled with Disadvantage: ${JSON.stringify(mixedLine.rolls.map((r) => [r.tokenId, r.mode]))}`);
+      const mixed = await resultLine(rolls, new RegExp(`^${mixedLine.rolls.map((r) => `${r.total} (hit|miss|Critical Hit)`).join(", ")}\\b`));
+      assert.ok(mixed.hasDetail && !mixed.showsDetail, `the modes are kept for screen readers alone on a narrow phone: ${JSON.stringify(mixed)}`);
+      const parts = mixed.shown.split(", ");
+      const detailed = parts.map((part, i) => (mixedLine.rolls[i]!.mode === "dis" ? `${part} (Disadvantage)` : part)).join(", ");
+      assert.equal(mixed.readable, `${mixed.shown}; ${detailed}`, `a reader hears each total with its own mode: ${JSON.stringify(mixed)}`);
+      assert.equal(mixed.height, mixed.compactHeight, "no line added");
+    } finally {
+      for (const p of poisons) await ops.send({ t: "actor.effect.remove", target: { tokenId: p.token }, effectId: p.effect }).catch(() => undefined);
+    }
     await diceSheet(dm).getByRole("button", { name: "Close Dice" }).tap();
   });
 
