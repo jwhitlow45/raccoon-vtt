@@ -1099,7 +1099,7 @@ Reopening the page never rolls or sends anything by itself. The first rolls stay
 
 **When the page can't find out.** If this device loses an Apply before the server answers, as a reload at just that moment can, the page has no way to learn what became of it. Rather than wait forever, it says "This save's outcome cannot be checked. Start a new group save to continue." and offers **Start over** and **Discard**. Check the creatures' hit points before you apply again. And if this device's clock runs well ahead of the server's, the page uses the server's time once it has heard from it. Before then, a first **Apply** more than five minutes ahead says "This device's clock is ahead of the server's. Correct it and apply again."
 
-**When the connection drops.** The rows stay as they are while the room is offline or you are looking at another scene. Their rolls and **Ask again** wait, and say why, so a total you were typing is still there when the connection comes back.
+**When the connection drops.** The rows stay as they are while the room is offline or you are looking at another scene. Their rolls and **Ask again** wait, and say why. A total you were typing when it dropped is kept, and **Apply** uses it once the connection comes back.
 
 ## Uses and Legendary Actions
 
