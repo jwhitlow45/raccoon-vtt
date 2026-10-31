@@ -788,6 +788,7 @@ Each creature needs an Initiative value before the fight can sort them. There ar
 - **Type it.** A row's box reads **Set** until it has a value. Tap it, type the number, and press Enter.
 - **Roll one row.** **Roll +2** on a row rolls that creature's Initiative on the server. Players roll for their own rows, and you roll for the rows no player plays. Where a row is too narrow for the button, the roll waits in the row's **⋯** instead. Once a row has a value, its **⋯** offers "Roll again, replaces 17", so a stray tap can never reorder the fight.
 - **Roll all the monsters.** **Auto Initiative (N)** rolls for every monster that still has no value. Above it, under **Auto Initiative**, you choose how monsters share rolls: **By creature** (identical monsters share one roll, which is the default), **One each** or **All at once**. **Re-roll monsters that have a value** rolls them all again. The dice show to you alone, and players see each visible monster's total once its place in the order is theirs to see.
+- **One roll with Advantage, or in secret.** A row's **Roll** has the one-roll menu ([Dice](#dice)): hold it, right-click it, or press `Shift+F10` on it. **Auto Initiative** and a monster's **Roll Initiative**, in its **⋯** beside its modifier, have it too, for Advantage, Disadvantage or Normal on the dice they roll, and their dice always stay with you. Auto Initiative applies your pick before it groups the monsters, so creatures that now roll differently never share a die.
 - **Type a batch.** **Type several values** opens one box per row, for initiatives rolled at the table. Enter moves you to the next box.
 - **Skip the rolls.** **Monsters use Initiative scores** gives monsters 10 plus their Dexterity modifier instead of a roll.
 
@@ -858,7 +859,7 @@ On a scene where each player sees for themselves, the order also follows each pl
 
 Every roll in the app happens on the server, so everyone sees the same result and nobody can fake one. Players who prefer real dice can still roll at the table and type their totals wherever the app asks for one, unless you turn off **Players may type their roll totals** in Room settings. The **Dice** panel is open to everyone.
 
-![The Dice panel with the Goblin Boss selected: its last roll at the top with Again, the formula field and quick dice, Adv and Dis joined under Next roll beside Secret, the notice "Fireball's save: applied." with Open, and the boss's card with Initiative above its open Saves and checks.](dm-guide/dice.webp)
+![The Dice panel with the Goblin Boss selected: its last roll at the top with Again, the formula field and quick dice, Adv and Dis under Next roll beside Secret, the line "Hold or right-click a roll button for one-roll options. Keyboard: Shift+F10." and the boss's card above its Saves and checks.](dm-guide/dice.webp)
 
 **Typing a roll.** Type a formula in the field and press **Roll** or Enter. A few examples of what it understands:
 
@@ -872,7 +873,19 @@ The line under the field reads back the roll and its range before you roll it ("
 
 Under the quick dice sits the **Next roll** row. **Adv** and **Dis** are joined into one control, because a roll takes one or the other, never both, and **Secret** stands on its own beside them, since it decides who sees the roll rather than how it is rolled. On a narrow phone with a larger interface size, Secret moves to a line of its own under the other two. All three apply to the next roll only, then turn themselves off. A secret roll shows in full to the DMs, while the other players read only "Dana rolled in secret." Your rolls for monsters start secret: with a monster selected, even a formula you type starts secret. With nothing selected, or a character selected, it starts in the open.
 
+**One roll, another way.** Sometimes you want a single roll with Advantage, or a single roll in secret, without touching Next roll. Hold any roll button for half a second, right-click it with a mouse, or focus it and press `Shift+F10` or the `ContextMenu` key, and a short menu offers **Roll with Advantage**, **Roll with Disadvantage**, **Roll secretly** and **Roll normally**. Nothing rolls until you pick, and your pick rolls once, for that roll alone. The Adv, Dis and Secret you pressed under Next roll stay exactly as they were, waiting for your next ordinary roll. A plain tap, or `Enter` on the focused button, still rolls as it always did, so the menu is a shortcut and Next roll stays the way to do the same thing in plain sight. The line under Next roll reminds everyone: "Hold or right-click a roll button for one-roll options. Keyboard: Shift+F10."
+
+![The Goblin Boss's Dexterity check right-clicked: its menu over the boss's saves, with "Hide the dice from players." and "Ignore manual modes for this roll. Creature effects and default visibility still apply." above Roll with Advantage, Roll with Disadvantage, Roll secretly and Roll normally.](dm-guide/dice-roll-menu.webp)
+
+- **Roll with Advantage** and **Roll with Disadvantage** replace any Advantage or Disadvantage you pressed or typed for this roll. The creature's own still count: a Restrained monster's Dexterity save picked with Advantage cancels to a normal roll, and the result says so.
+- **Roll secretly** hides the dice from players, as Secret does. A player who picks it still sees their own roll, and so do you.
+- **Roll normally** sets aside what you pressed or typed, and keeps the creature's effects and the roll's usual visibility, so a monster's roll stays secret even if you had turned Secret off.
+
+Damage, healing and other rolls with no d20 offer only **Roll secretly** and **Roll normally**. Where a roll's visibility is already settled, such as an answer to a request, a death save or **Again**, **Roll secretly** shows but can't be picked, and the menu says why. Inside the menu, the arrow keys, `Home` and `End` move between the choices, `Enter` rolls, and `Escape` closes it and puts you back on the button. A second press, right-click or hold on the same button closes it too, without rolling. With a screen reader, double-tap and hold the button to open the menu, and a plain double-tap still rolls.
+
 The newest roll stays at the top of the panel with its dice, and **Again** rolls it once more. This line is the one place in the panel where a result appears, even for a roll you made from a creature's roll options further down, so the panel never grows under your finger as rolls land. An answer you send to a request and a Death Saving Throw show there too, without Again, since neither can be sent again as it was. On a narrow screen the line keeps the total and Again whole, shows as many dice as fit, and counts the rest as "+2". Tap the line to see the whole roll in Recent rolls. **Recent rolls** lists the rolls in the log, newest first, at the foot of the panel. Like the other groups in the panel, it folds away with a tap on its name, and while it is folded its row still names your newest roll, such as "Thorn 20 Longsword". Tapping the newest roll at the top opens the list again for the moment and scrolls to that roll, without changing how your device remembers it. Other people's rolls pop up as short notices while your Dice panel isn't on screen. To turn those off, open the Menu, then **This device**, and turn off **Show others' rolls as they happen**.
+
+**Again** has the menu too, for a d20 roll: it repeats the formula you rolled with the mode you pick, without working out the creature's effects again, and keeps the roll's visibility. A repeat others can see is labelled "Repeated roll". A repeat of a roll with no d20, such as damage, has no menu.
 
 **Dice you can watch.** When you roll from the Dice panel, the dice tumble out of the button or field you used and land in a band just under the newest roll, about a second after the server answers. The total appears as they land. The server has already decided the roll by then, so the dice only show what happened: they never change it, and everyone else reads your result in the log straight away. A Natural 20, or a Critical Hit, rings in your color as the die lands, and a Natural 1 is ringed in red. A big roll shows two rows of dice and counts the rest on a "+9" disc.
 
@@ -909,6 +922,8 @@ Your players see the same panel for their own creatures. A player with more than
 
 For a creature a player plays, **Ask Thorn to roll** (on by default) changes what a tap on a save or check does: instead of rolling it yourself, it opens [Request a roll](#asking-for-rolls) for that player. Turn it off when you would rather roll for them.
 
+Every roll in a creature's options has the one-roll menu, from a save to a weapon's damage and **Initiative**. Two don't: **Recharge**, whose one roll has nothing to choose, and a save or check that asks the player while **Ask Thorn to roll** is on.
+
 ### Several creatures
 
 With several tokens selected, the Dice panel offers rolls for the whole group. Its card shows up to three of their pictures, how many you have selected ("4 selected") and their names, and holds what acts on all of them together: an optional **DC**, **Initiative for the 4 in the fight**, and **Set up a group save** for when you want to fill in the save yourself.
@@ -922,6 +937,8 @@ Under the card, the rolls fold into groups, as they do for one creature:
 A shared attack keeps its result while you work. You can fold the group between the attack and its damage, or select another creature or let one go, and as long as two or more stay selected and they all still have that attack, the hits and **Roll damage** are waiting when you come back. While the group is folded, its row reminds you of them ("Scimitar: 2 hits"). Selecting fewer than two clears them, and so does selecting creatures that don't share the attack, even if you go back to ones that do.
 
 A group save or check opens the [group save](#the-group-save) page, where monsters roll on the server and players are asked to roll. If you step back from that page, the panel shows a notice above the card that says how far it got, such as "Fire Breath's save: 2 waiting." or "Fireball's save: applied.", with **Open** to return to it. The notice stays until you close the page, with **Discard** or, once it is applied, **Done**.
+
+The one-roll menu works on these rolls too. On a save, a check or a shared attack, a pick applies to the monsters' dice the server rolls in that tap, and the menu says so: "Applies to server rolls only. Players choose their own modes." A player you ask still rolls their own way. **Roll damage for 2 hits** offers **Roll secretly** and **Roll normally**. **Initiative for the 4 in the fight** keeps its dice to you alone, so its menu offers Advantage, Disadvantage and Normal.
 
 ## Asking for rolls
 
@@ -945,7 +962,7 @@ Then set up the request:
 
 Each player gets a card with the question and rolls it with their bonus (conditions and Bless included), or types a total where typed totals are allowed. Your own live card, at the right of the map, counts the answers as they come in ("2 of 4 answered: 1 pass, 1 fail") and shows each roll. From it you can:
 
-- **Roll +5** for a player who is still waiting, such as one who stepped away from the table. Your roll never replaces an answer that arrived first.
+- **Roll +5** for a player who is still waiting, such as one who stepped away from the table. Your roll never replaces an answer that arrived first. Hold it, right-click it or press `Shift+F10` on it to roll with Advantage, Disadvantage or normally. The answer keeps the request's visibility, so **Roll secretly** shows but can't be picked. Your players have the same menu on their card's **Roll**.
 - Mark **Pass** or **Fail** yourself, for a roll with no DC or to overrule one.
 - Answer a player's ask, such as "Asks to reroll (Heroic Inspiration)", with **Allow** or **Keep**.
 - **Reopen for one more answer**, **Close**, or **Close all answered**.
@@ -1040,8 +1057,8 @@ When you start it from an area, the page fills itself in from the spell and its 
 1. Check **What they roll** (**Save**, **Check** or **No save**), the **Ability** and the **DC**. **Hide the monsters' rolls from players** is on by default. **What players see** sums up on one line whether players see the DC and the pass or fail, just as it does in Request a roll. Open it to change either. **Against a spell** gives creatures with Magic Resistance their Advantage.
 2. Check the damage (`8d6 Fire`). **On a pass** is **Half** or **None**. **On a fail** can add up to three conditions, with how long they last and an optional save at the end of each turn.
 3. Check the rows. Each creature in the area has one. Monsters roll on the server. Players' creatures are asked, so the player rolls on their own device, or you can press **Roll +3** for them. To change how a single row rolls, pick **Ask**, **Server** or **Type** (you type the total), or **Fails**, which is offered when a condition such as Stunned fails the roll outright. To decide a row yourself, pick **Fail**, **Pass** or **Skip**.
-4. Press the roll button ("Roll 4 saves", or "Roll 2 saves and ask 2 players"). Each row shows its roll and result ("Fail vs DC 15"), along with its defenses: resistances and immunities from its stat block, **Evasion**, and **Use Legendary Resistance (2 left)** for a legendary monster that failed.
-5. In **Damage**, press **Roll** to roll the dice, type amounts such as `28 fire + 14 radiant`, or take a player's roll from **Rolled by someone else**. Once the saves are rolled, the damage folds into one line, and **Edit** opens it again. Each row shows the damage it takes after its save and defenses.
+4. Press the roll button ("Roll 4 saves", or "Roll 2 saves and ask 2 players"). Each row shows its roll and result ("Fail vs DC 15"), along with its defenses: resistances and immunities from its stat block, **Evasion**, and **Use Legendary Resistance (2 left)** for a legendary monster that failed. Hold the button, right-click it or press `Shift+F10` on it for one roll with Advantage, Disadvantage, in secret or normally. The pick rolls the monsters this time only and never moves **Hide the monsters' rolls from players**, except on a page the pick itself just opened from **Saves for 4**, whose switch starts as the dice it sent. The players you ask still roll their own way.
+5. In **Damage**, press **Roll** to roll the dice, type amounts such as `28 fire + 14 radiant`, or take a player's roll from **Rolled by someone else**. Once the saves are rolled, the damage folds into one line, and **Edit** opens it again. Each row shows the damage it takes after its save and defenses. The damage **Roll** has the one-roll menu with **Roll secretly** and **Roll normally**, except for a player's spell, whose damage stays in the open.
 6. Press **Apply** ("Apply: 4 take damage"). Temporary HP and Concentration saves are handled for you, and the app confirms: "Applied to 4. Undo takes it all back." Press **Done** to close the page.
 
 Tap a row's damage amount to change what that creature takes. A plain number is the final amount, with `0` preventing its damage. Typed damage such as `11 cold + 3 radiant` replaces that amount and applies the creature's defenses, without applying its save or Evasion again. **Back to 7**, where 7 is the worked-out amount, restores the shared damage and save choices. Clearing the field does the same. If the entry cannot be read, the field explains why and **Apply** waits for you to correct it.
@@ -1117,6 +1134,8 @@ These cards wait for an answer:
 - **Legendary Resistance**: when a monster with uses left fails a roll on a Concentration or save-ends card, the card offers **Use Legendary Resistance (2 left)** or **Accept failure**.
 - **A roll request** you sent, which counts the answers as they come in (see [Asking for rolls](#asking-for-rolls)).
 - **A trap went off**: "Hidden Pit went off", with who set it off and who it hits, **Save and damage** and **Dismiss**. It comes in and out of fights alike, and stays until you settle it. See [Traps](#traps).
+
+The **Roll** on a Concentration, save-ends or death save card has the one-roll menu for Advantage, Disadvantage or Normal: hold it, right-click it, or press `Shift+F10` on it. Who sees those dice is set by the creature, so **Roll secretly** shows but can't be picked. A recharge card's **Roll** has no menu, since its one roll has nothing to choose.
 
 ### A creature's turn
 
@@ -1805,6 +1824,7 @@ These are the keys a DM uses most:
 - `I` switches between Top-down and Isometric, `Q` turns the isometric view left and `E` turns it right.
 - `W` turns full screen on or off, where the browser allows it.
 - Escape closes the newest pop-up, sheet or action bar.
+- `Shift+F10` or the `ContextMenu` key, on a focused roll button, opens its one-roll menu. With a mouse, right-click the button, and on a phone hold it.
 
 ![The shortcut list's Toolbar section: The tool's key, for the tool in use, shows its hidden options and goes to its next main choice, such as Area's next shape, and with Shift on a letter key goes back one.](dm-guide/shortcuts-toolbar.webp)
 
