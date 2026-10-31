@@ -277,6 +277,32 @@ const SOME_SIZES: Record<string, Record<SizesFile, number>> = {
   "fl6-skills-thorn": { phones: 4, wide: 2 },
   "fl6-skills-dragon": { phones: 4, wide: 2 },
   "fl6-skills-several": { phones: 4, wide: 2 },
+  // The one-roll menus open, and the host of each with its menu open (docs/design-v1-roll-mode-menu.md 6), at the three dice sizes at 100% and 130%.
+  "dpf1-menu-formula": { phones: 4, wide: 2 },
+  "dpf1-menu-formula-host": { phones: 4, wide: 2 },
+  "dpf1-menu-again": { phones: 4, wide: 2 },
+  "dpf1-menu-again-host": { phones: 4, wide: 2 },
+  "dpf1-menu-save": { phones: 4, wide: 2 },
+  "dpf1-menu-save-host": { phones: 4, wide: 2 },
+  "dpf1-menu-damage": { phones: 4, wide: 2 },
+  "dpf1-menu-damage-host": { phones: 4, wide: 2 },
+  "dpf1-menu-death": { phones: 4, wide: 2 },
+  "dpf1-menu-death-host": { phones: 4, wide: 2 },
+  "dpf1-menu-dragon-attack": { phones: 4, wide: 2 },
+  "dpf1-menu-dragon-attack-host": { phones: 4, wide: 2 },
+  "dpf1-menu-recent": { phones: 4, wide: 2 },
+  "dpf1-menu-recent-host": { phones: 4, wide: 2 },
+  // Lanes B and C: several selected and Pat's ask card at the dice and phone sizes, and the fight's at the combat sizes (COMBAT_AT).
+  "dpf1-menu-several": { phones: 4, wide: 2 },
+  "dpf1-menu-several-host": { phones: 4, wide: 2 },
+  "dpf1-menu-request": { phones: 4, wide: 0 },
+  "dpf1-menu-request-host": { phones: 4, wide: 0 },
+  "dpf1-menu-death-card": { phones: 4, wide: 4 },
+  "dpf1-menu-death-card-host": { phones: 4, wide: 4 },
+  "dpf1-menu-hp-death": { phones: 4, wide: 4 },
+  "dpf1-menu-hp-death-host": { phones: 4, wide: 4 },
+  "dpf1-menu-auto": { phones: 4, wide: 4 },
+  "dpf1-menu-auto-host": { phones: 4, wide: 4 },
   // The DM's turn card folds under 600 px wide, so on the upright phones and at 480 x 320 at 130%.
   "cu-turn-folded": { phones: 4, wide: 1 },
   // With the dragon's bar across the column, the turn card folds to its row, or leaves the column where even its row would meet the bar (4.2).
@@ -1218,6 +1244,40 @@ async function closeDiceSheet(page: Page): Promise<void> {
 }
 
 /**
+ * A roll button's one-roll menu, opened by its ContextMenu key with the
+ * button settled in its scroller's middle, so no scroll moves it under the
+ * menu, measured as `screen`: the popover, then `host` with the menu
+ * open as `screen`-host, whose proficiency borders and rows must hold. The
+ * button keeps its box to the pixel while its menu is open, and Escape
+ * closes it. Docs/design-v1-roll-mode-menu.md 6.
+ */
+async function rollMenuScreen(sweep: Sweep, page: Page, screen: string, button: Locator, name: RegExp, host: Locator): Promise<void> {
+  if (!(await showsWithin(button, 4_000))) return sweep.missing(page, screen, "its roll button never showed");
+  await button.evaluate((el) => (el as unknown as { scrollIntoView(o: object): void }).scrollIntoView({ block: "center" }));
+  let before = "";
+  await waitFor(`${screen}'s button to settle`, async () => {
+    await page.waitForTimeout(120);
+    const box = JSON.stringify(await button.boundingBox());
+    const still = box === before;
+    before = box;
+    return still || null;
+  });
+  await button.evaluate((el) => (el as unknown as { focus(o: object): void }).focus({ preventScroll: true }));
+  await page.keyboard.press("ContextMenu");
+  const menu = page.getByRole("menu", { name });
+  if (!(await showsWithin(menu, 3_000))) return sweep.missing(page, screen, "ContextMenu opened no menu");
+  try {
+    await sweep.measure(page, screen, page.locator("[data-rvtt-popover]").filter({ has: menu }));
+    await sweep.measure(page, `${screen}-host`, host);
+    const after = JSON.stringify(await button.boundingBox());
+    if (after !== before) await sweep.add(page, screen, [`${sweep.at} ${screen}: the roll button's box changed with its menu open, ${before} to ${after}`]);
+  } finally {
+    await page.keyboard.press("Escape");
+    await menu.waitFor({ state: "detached" }).catch(() => undefined);
+  }
+}
+
+/**
  * The dice pass's roots on Pat's page (docs/design-v1-dice-pass.md 11.3):
  * his creatures' tabs across the card, Thorn's wolf picked, its card, and
  * every group of its options unfolded. The wolf joins Pat's creatures for
@@ -1248,7 +1308,27 @@ async function patDiceScreens(sweep: Sweep, page: Page): Promise<void> {
     await sweep.measure(page, "dp-card-wolf", host.locator("[data-dice-card]"));
     await sweep.measure(page, "dp-groups-wolf", host.locator("[data-roll-options] [data-panel-group]"));
     await skillLabelScreen(sweep, page, host, "wolf");
+    // The one-roll menus over the wolf's options, its save's with its proficiency border, and its damage's with no d20 choice.
+    const groups = host.locator("[data-roll-options] [data-panel-group]");
+    await rollMenuScreen(sweep, page, "dpf1-menu-save", host.getByRole("button", { name: /^Dexterity save/ }).first(), /^Roll options for Dexterity save/, groups);
+    await rollMenuScreen(sweep, page, "dpf1-menu-damage", host.getByRole("button", { name: /^Bite damage/ }).first(), /^Roll options for Bite damage/, groups);
+    // The formula's Roll, and the sticky line's Again with its fixed visibility and the repeat's longer help.
+    const field = host.getByLabel("Dice formula", { exact: true });
+    await field.fill("1d20+3");
+    await rollMenuScreen(sweep, page, "dpf1-menu-formula", host.getByRole("button", { name: "Roll", exact: true }), /^Roll options for Dice formula$/, host.locator("[data-dice-modes]").locator("xpath=.."));
+    await field.press("Enter");
+    const again = host.locator("[data-dice-last]").getByRole("button", { name: "Again", exact: true });
+    await rollMenuScreen(sweep, page, "dpf1-menu-again", again, /^Roll options for Again$/, host.locator("[data-dice-last]"));
     await tabs.getByRole("tab", { name: "Thorn", exact: true }).click();
+    // Thorn dying, his Death Save with Secret shown off for the creature's reason.
+    await ops.send({ t: "actor.hp", target: { characterId: run.ids.thornChar }, change: { kind: "damage", amount: 30 } });
+    try {
+      await waitFor("Thorn dying", () => (dmSocket.state?.characters[run.ids.thornChar]?.actor.life === "dying" ? true : null));
+      await rollMenuScreen(sweep, page, "dpf1-menu-death", host.getByRole("button", { name: /^Death Save/ }), /^Roll options for Death Save/, host.locator("[data-dice-card]"));
+    } finally {
+      await ops.send({ t: "actor.hp", target: { characterId: run.ids.thornChar }, change: { kind: "heal", amount: 30 } });
+      await waitFor("Thorn up again", () => (dmSocket.state?.characters[run.ids.thornChar]?.actor.life === "alive" ? true : null));
+    }
     await closeDiceSheet(page);
   } finally {
     await ops.send({ t: "token.delete", tokenId: run.ids.wolf });
@@ -1290,6 +1370,9 @@ async function dmDiceScreens(sweep: Sweep, page: Page): Promise<void> {
     await field.press("Enter");
     await host.locator('[data-dice-last] [aria-label="Show this roll in Recent rolls"]').waitFor();
     await sweep.measure(page, "dp-last", host.locator("[data-dice-last]"));
+    // The one-roll menus on the DM's side: the dragon's attack, and Recent rolls' Again of the roll just made.
+    await rollMenuScreen(sweep, page, "dpf1-menu-dragon-attack", host.getByRole("button", { name: /^Rend/ }).first(), /^Roll options for Rend/, host.locator("[data-roll-options] [data-panel-group]"));
+    await rollMenuScreen(sweep, page, "dpf1-menu-recent", host.locator("[data-dice-recent]").getByRole("button", { name: /^Roll again: 1d20\+5 Stealth/ }).first(), /^Roll options for Again$/, host.locator("[data-dice-recent]"));
 
     // Three selected: the dragon, still selected with its window open, the goblin and the kobold. A second tap on the dragon would let it go.
     await closeDiceSheet(page);
@@ -1313,6 +1396,7 @@ async function dmDiceScreens(sweep: Sweep, page: Page): Promise<void> {
     await unfoldAll(rolls);
     await sweep.measure(page, "dp-several", rolls);
     await skillLabelScreen(sweep, page, rolls, "several");
+    await rollMenuScreen(sweep, page, "dpf1-menu-several", rolls.getByRole("button", { name: /^DEX save for \d+$/ }).first(), /^Roll options for DEX save for \d+$/, rolls);
 
     // A group save set up and left open: the notice above the card.
     await rolls.getByRole("button", { name: "Set up a group save", exact: true }).click();
@@ -1589,8 +1673,10 @@ async function patCombatScreens(sweep: Sweep, page: Page): Promise<void> {
 
   // His turn's cards: the death save, and the turn's menu with a pool's amount field open. On a phone the turn card stands folded until Show.
   const save = await alertCard(page, "Death save for Thorn");
-  if (save) await sweep.measure(page, "cu-death-save", save);
-  else await sweep.missing(page, "cu-death-save", "Thorn's turn at 0 HP showed Pat no death save card");
+  if (save) {
+    await sweep.measure(page, "cu-death-save", save);
+    await rollMenuScreen(sweep, page, "dpf1-menu-death-card", save.getByRole("button", { name: "Roll", exact: true }), /^Roll options for Death Save for Thorn$/, save);
+  } else await sweep.missing(page, "cu-death-save", "Thorn's turn at 0 HP showed Pat no death save card");
   let turn = await alertCard(page, "Thorn's turn");
   if (turn && (await turn.getAttribute("data-turn-folded")) !== null) {
     await turn.getByRole("button", { name: "Show Thorn's turn" }).click();
@@ -1639,6 +1725,9 @@ async function dmCombatScreens(sweep: Sweep, page: Page): Promise<void> {
     await sweep.measure(page, "creature-header", panel.locator("[data-creature-header]").first());
     const combat = panel.getByRole("button", { name: "Combat", exact: true });
     if ((await combat.getAttribute("aria-expanded")) === "false") await combat.click();
+    // Thorn at 0 HP: HP's Death Save Roll in the panel, its menu over the Combat group.
+    const deathRoll = panel.getByRole("button", { name: "Roll a Death Save", exact: true }).first();
+    await rollMenuScreen(sweep, page, "dpf1-menu-hp-death", deathRoll, /^Roll options for Death Save$/, deathRoll.locator("xpath=ancestor::*[@data-panel-group][1]"));
     const section = resourcesSection(panel);
     await section.getByText(LEVEL_UP, { exact: true }).waitFor();
     await section.scrollIntoViewIfNeeded();
@@ -1649,6 +1738,15 @@ async function dmCombatScreens(sweep: Sweep, page: Page): Promise<void> {
 
   const { tracker, group } = await rowUses(page, RED_DRAGON);
   await sweep.measure(page, "cu-row-uses", group);
+  // Auto Initiative, its re-roll on so it has dice to roll, then off as it was.
+  // Auto Initiative is the tracker's own section, outside the round's.
+  const reroll = page.getByRole("checkbox", { name: "Re-roll monsters that have a value" }).filter({ visible: true }).first();
+  if (await showsWithin(reroll, 3_000)) {
+    await reroll.check();
+    const auto = page.getByRole("button", { name: /^Auto Initiative \(\d+\)/ }).filter({ visible: true }).first();
+    await rollMenuScreen(sweep, page, "dpf1-menu-auto", auto, /^Roll options for Initiative$/, auto.locator("xpath=ancestor::section[1]"));
+    await reroll.uncheck();
+  } else await sweep.missing(page, "dpf1-menu-auto", "the tracker showed no Re-roll monsters that have a value");
   // In lair waits for the server while the page is offline, busy, and takes the lair's counts once it is back.
   const lair = tracker.getByRole("switch", { name: /^In lair/ });
   // It is busy too while the dragon's block loads, and drops a tap then: the busy state measured would be the load's, and nothing would reach the server.
@@ -1956,8 +2054,12 @@ async function askScreen(sweep: Sweep, page: Page): Promise<void> {
   const id = randomUUID();
   await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "dex" }] }, dc: 14, dcShown: true, resultShown: true, targets: [{ characterId: run.ids.thornChar }] } });
   const card = await playerRequestCard(page);
-  if (card) await sweep.measure(page, "pat-ask", card);
-  else await sweep.missing(page, "pat-ask", "the DM's ask showed no card");
+  if (card) {
+    await sweep.measure(page, "pat-ask", card);
+    // Thorn has no stat block: his Roll waits for a bonus, then offers the one-roll menu with Secret shown off for the request.
+    await card.getByLabel("Your bonus for Thorn").fill("+2");
+    await rollMenuScreen(sweep, page, "dpf1-menu-request", card.getByRole("button", { name: /^Roll d20\+2 for Thorn$/ }), /^Roll options for Roll d20\+2 for Thorn$/, card);
+  } else await sweep.missing(page, "pat-ask", "the DM's ask showed no card");
   await ops.send({ t: "roll.close", rollIds: [id] });
   await page.locator('[aria-label="The DM asks for a roll"]').first().waitFor({ state: "detached" });
 }
