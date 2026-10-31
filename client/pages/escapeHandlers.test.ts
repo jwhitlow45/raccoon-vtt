@@ -38,14 +38,15 @@ for (const [name, path, marker, callback] of [
 test("expanded toast leaves an Escape already used by a popover alone", async () => {
   const { listenToastEscape } = await import("./toastEscape.ts");
   const saved = { window: globalThis.window, document: globalThis.document };
-  // A recording window over a real EventTarget. Under CI's Node 24, a listener removed through t.mock.method stayed attached.
-  const target = new EventTarget();
+  // A recording window that keeps its own listeners: on CI's Node 24, a capture listener removed from a real EventTarget stayed attached.
+  const listening = new Set<(event: Event) => void>();
   const added: Parameters<EventTarget["addEventListener"]>[] = [];
   const removed: Parameters<EventTarget["removeEventListener"]>[] = [];
   const window = {
-    addEventListener: (...args: Parameters<EventTarget["addEventListener"]>) => (added.push(args), target.addEventListener(...args)),
-    removeEventListener: (...args: Parameters<EventTarget["removeEventListener"]>) => (removed.push(args), target.removeEventListener(...args)),
+    addEventListener: (...args: Parameters<EventTarget["addEventListener"]>) => (added.push(args), listening.add(args[1] as (event: Event) => void)),
+    removeEventListener: (...args: Parameters<EventTarget["removeEventListener"]>) => (removed.push(args), listening.delete(args[1] as (event: Event) => void)),
   };
+  const target = { dispatchEvent: (event: Event) => { for (const listener of [...listening]) listener(event); } };
   Object.assign(globalThis, { window, document: { querySelectorAll: () => [] } });
   let closed = 0;
   const stop = listenToastEscape(() => closed++);
