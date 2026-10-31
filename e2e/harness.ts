@@ -405,6 +405,8 @@ export class ConsoleWatch {
       const text = msg.text();
       const line = `${text} (${msg.location().url})`;
       if (this.expectSocketFailures && /WebSocket connection to .* failed|ERR_INTERNET_DISCONNECTED|ERR_CONNECTION_REFUSED/.test(text)) return;
+      // Chromium's GPU process reports its own driver stalls through the page's console, on CI runners without a GPU. They say nothing about the page.
+      if (type === "warning" && /GL Driver Message \(OpenGL, Performance,/.test(text)) return;
       if (this.allow.some((re) => re.test(line))) return;
       (type === "error" ? this.errors : this.warnings).push(line);
     });
