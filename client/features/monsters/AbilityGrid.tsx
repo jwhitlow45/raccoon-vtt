@@ -1,4 +1,5 @@
 import { ABILITY_ABBR, ABILITY_NAMES } from "#shared/rules/skills.ts";
+import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { theme } from "../../lib/theme.ts";
 import type { AbilityBox } from "./abilityTable.ts";
 
@@ -24,6 +25,8 @@ export function AbilityGrid(props: { abilities: readonly AbilityBox[] }) {
           <dd style={{ margin: 0, fontSize: theme.font.small, whiteSpace: "nowrap", fontWeight: a.proficient ? theme.weight.bold : theme.weight.regular }}>
             <span style={{ color: theme.color.textMuted, fontWeight: theme.weight.regular }}>Save </span>
             {a.save}
+            {/* Not a visible mark: a screen reader still hears a proficient save as one. */}
+            {a.proficient ? <span style={VISUALLY_HIDDEN}>, proficient</span> : null}
           </dd>
         </div>
       ))}

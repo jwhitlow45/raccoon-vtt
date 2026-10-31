@@ -31,11 +31,13 @@ describe("a PC block's abilities three across (docs/design-v1-dice-ui.md 6.1)", 
 
   test("a proficient save is bold and the grid marks nothing (D-261030-539)", () => {
     assert.doesNotMatch(markup, /data-proficiency/);
-    const save = (box: string) => /<dd[^>]*font-weight:(\d+)[^>]*><span[^>]*>Save <\/span>([^<]+)<\/dd>/.exec(box);
+    const save = (box: string) => /<dd[^>]*font-weight:(\d+)[^>]*><span[^>]*>Save <\/span>([^<]+)(?:<span[^>]*>, proficient<\/span>)?<\/dd>/.exec(box);
     const dex = save(boxes[1]!);
     const str = save(boxes[0]!);
     assert.ok(dex && str);
     assert.equal(dex[2], "+7", "Dex +4 and proficiency +3");
+    assert.match(boxes[1]!, /\+7<span[^>]*>, proficient<\/span><\/dd>/, "a screen reader hears the proficient save");
+    assert.doesNotMatch(boxes[0]!, /proficient/, "and no other");
     assert.ok(Number(dex[1]) > Number(str[1]), "bold beside the plain Str save");
     assert.equal(str[2], "+0");
   });

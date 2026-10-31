@@ -362,8 +362,8 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     await view.locator("p").filter({ hasText: /^Proficiencies Dexterity saves$/ }).waitFor();
     await view.locator("p").filter({ hasText: /^Expertise Stealth$/ }).waitFor();
     await view.getByText("Initiative").waitFor();
-    // The Dex box of the six across: its score, its modifier, and its save named as proficient (docs/design-v1-dice-ui.md 6.1).
-    assert.match((await view.textContent()) ?? "", /DEX16 \+3Save \+6/);
+    // The Dex box of the six across: its score, its modifier, and its save, which a screen reader hears as proficient (docs/design-v1-dice-ui.md 6.1).
+    assert.match((await view.textContent()) ?? "", /DEX16 \+3Save \+6, proficient/);
     assert.equal(await panel.locator('[data-proficiency-level="prof"], [data-proficiency-level="expert"], [data-proficiency-mark]').count(), 0, "no frame or picture marks the sheet or the saves line");
     assert.match(await savesLine(ana), /DEX \+6/);
     await shots.take(ana, "pcstats-panel");

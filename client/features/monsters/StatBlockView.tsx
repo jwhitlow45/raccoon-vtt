@@ -19,8 +19,8 @@ export const SRD_CREDIT = "Stat blocks from the System Reference Document 5.2.1 
  * monster it lists, and what the token panel shows for a token linked to
  * one (docs/design-v1-dm-tools.md 3.6). Nothing in it rolls.
  */
-export function StatBlockView(props: { view: StatBlockMonster; source: "srd" | "room"; credit?: boolean }) {
-  const text = useMemo(() => withProficiencyLines(props.view.statBlock, monsterProficiencyLines(props.view)), [props.view]);
+export function StatBlockView(props: { view: StatBlockMonster; source: "srd" | "room"; credit?: boolean; leaveOutProficiency?: boolean }) {
+  const text = useMemo(() => withProficiencyLines(props.view.statBlock, props.leaveOutProficiency ? [] : monsterProficiencyLines(props.view)), [props.view, props.leaveOutProficiency]);
   const split = useMemo(() => splitAbilityTable(text), [text]);
   return (
     <div style={{ display: "grid", gap: theme.space(2) }}>

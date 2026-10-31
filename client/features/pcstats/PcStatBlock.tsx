@@ -153,7 +153,9 @@ function ShapeBody(props: { character: Character; edits: boolean }) {
   const { numbers } = useCharacterRollNumbers(character.id);
   const levelOf = useProficiency();
   const self = { characterId: character.id };
-  const lines = proficiencyLines({
+  const wild = pcShape(character) === "wild";
+  // Only a Wild Shape shows lines, since the druid keeps proficiencies the beast's block lacks (D-261030-581). Another shape lists its creature's own.
+  const lines = !wild ? [] : proficiencyLines({
     saves: ABILITY_KEYS.map((ability) => ({ ability, level: levelOf(self, { kind: "save", ability }) })),
     skills: SKILL_KEYS.map((skill) => ({ skill, level: levelOf(self, { kind: "check", ability: SKILLS[skill].ability, skill }) })),
   });
@@ -189,7 +191,7 @@ function ShapeBody(props: { character: Character; edits: boolean }) {
         </p>
       ) : null}
       {/* Wild Shape keeps the druid's own proficiencies beside the beast's, so the creature's block below does not list them all (D-261029-419). Another shape's block lists its own. */}
-      {numbers && pcShape(character) === "wild"
+      {numbers && wild
         ? lines.map((line) => (
             <p key={line.label} data-shape-proficiency="" style={{ margin: 0, fontSize: theme.font.body14 }}>
               <strong>{line.label}</strong> {line.names.join(", ")}
@@ -197,7 +199,7 @@ function ShapeBody(props: { character: Character; edits: boolean }) {
           ))
         : null}
       {end}
-      {monster ? <StatBlockView view={monster} source="srd" credit /> : <Note>This character takes the shape of an SRD creature this app does not have.</Note>}
+      {monster ? <StatBlockView view={monster} source="srd" credit leaveOutProficiency={wild && numbers !== null} /> : <Note>This character takes the shape of an SRD creature this app does not have.</Note>}
     </>
   );
 }

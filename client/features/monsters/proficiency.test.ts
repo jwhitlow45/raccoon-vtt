@@ -115,7 +115,7 @@ test("fl13: a summary save marks nothing", () => {
 test("fl13: the ability grid marks nothing and keeps a proficient save bold", () => {
   const markup = renderToStaticMarkup(createElement(AbilityGrid, { abilities: [{ key: "dex", score: "10", mod: "+0", save: "+4", proficient: true }] }));
   assert.equal(hasMarks(markup), false);
-  assert.match(markup, /font-weight:\d+[^>]*><span[^>]*>Save <\/span>\+4/);
+  assert.match(markup, /font-weight:\d+[^>]*><span[^>]*>Save <\/span>\+4<span[^>]*>, proficient<\/span>/);
 });
 
 test("fl13: every SRD stat block draws its Markdown with only the two lines added", async () => {
@@ -135,4 +135,13 @@ test("fl13: every SRD stat block draws its Markdown with only the two lines adde
     assert.equal(text.replace(/\n\n\*\*(Proficiencies|Expertise)\*\* [^\n]*/g, ""), monster.statBlock, monster.srdId);
     if (monster.srdId === "adult-white-dragon") assert.deepEqual(lines, [{ label: "Proficiencies", names: ["Dexterity saves", "Wisdom saves", "Stealth"] }, { label: "Expertise", names: ["Perception"] }]);
   }
+});
+
+test("fl13: a block inside a Wild Shape can leave its own lines out, so one pair shows (D-261030-581)", async () => {
+  const dragon = (await loadMonsters()).find((m) => m.srdId === "adult-white-dragon")!;
+  const own = paragraphs(renderToStaticMarkup(createElement(StatBlockView, { view: dragon, source: "srd" })));
+  const left = paragraphs(renderToStaticMarkup(createElement(StatBlockView, { view: dragon, source: "srd", leaveOutProficiency: true })));
+  assert.ok(own.some((l) => l.startsWith("Proficiencies")));
+  assert.equal(left.some((l) => /^(Proficiencies|Expertise)/.test(l)), false);
+  assert.ok(left.some((l) => l.startsWith("Skills")), "the rest of the block is as it was");
 });
