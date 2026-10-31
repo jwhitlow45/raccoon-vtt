@@ -2229,12 +2229,14 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
       const sheet = await openPanel(dm, "Menu");
       await steadyRect(sheet);
       await sheet.locator("[data-pane-body]").evaluate((body, hasForm) => {
-        type Native = { value: string; checked: boolean };
+        type Native = { value: string; checked: boolean; selectedIndex: number; options: ArrayLike<{ selected: boolean }> };
         type Fixture = { insertAdjacentHTML(at: string, html: string): void; querySelector(s: string): Native | null };
         const el = body as unknown as Fixture;
-        el.insertAdjacentHTML("beforeend", `<div data-fu41-controls><input data-fu41-radio type="radio" name="fu41-native-choice" ${hasForm ? 'form="fu41-native-form"' : ""}><select name="fu41-select" form="fu41-native-form"><option value="one">One</option><option value="two">Two</option></select><textarea name="fu41-notes" form="fu41-native-form"></textarea></div>`);
+        el.insertAdjacentHTML("beforeend", `<div data-fu41-controls><input data-fu41-radio type="radio" name="fu41-native-choice" ${hasForm ? 'form="fu41-native-form"' : ""}><select data-fu41-single name="fu41-select" form="fu41-native-form"><option value="one">One</option><option value="two">Two</option></select><select data-fu41-multiple multiple name="fu41-multiple" form="fu41-native-form"><option value="one">One</option><option value="two">Two</option><option value="three">Three</option></select><select data-fu41-none name="fu41-none" form="fu41-native-form"><option value="one">One</option><option value="two">Two</option></select><textarea name="fu41-notes" form="fu41-native-form"></textarea></div>`);
         el.querySelector("[data-fu41-controls] input")!.checked = true;
-        el.querySelector("[data-fu41-controls] select")!.value = "two";
+        el.querySelector("[data-fu41-controls] [data-fu41-single]")!.value = "two";
+        Array.from(el.querySelector("[data-fu41-controls] [data-fu41-multiple]")!.options).forEach((option, index) => { option.selected = index !== 1; });
+        el.querySelector("[data-fu41-controls] [data-fu41-none]")!.selectedIndex = -1;
         el.querySelector("[data-fu41-controls] textarea")!.value = "Typed words";
       }, explicitForm);
       await sheet.getByRole("button", { name: /^Members/ }).first().click();
@@ -2254,7 +2256,9 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
         const under = sheet.locator("[inert]");
         await under.waitFor();
         assert.equal(await under.locator("[data-fu41-radio]").isChecked(), true, "the picture keeps the checked appearance");
-        assert.equal(await under.locator("select").inputValue(), "two");
+        assert.equal(await under.locator("[data-fu41-single]").inputValue(), "two");
+        assert.deepEqual(await under.locator("[data-fu41-multiple] option").evaluateAll((options) => options.map((option) => (option as unknown as { selected: boolean }).selected)), [true, false, true]);
+        assert.equal(await under.locator("[data-fu41-none]").evaluate((select) => (select as unknown as { selectedIndex: number }).selectedIndex), -1);
         assert.equal(await under.locator("textarea").inputValue(), "Typed words");
         assert.equal(await under.locator("input[name], input[form], select[name], select[form], textarea[name], textarea[form]").count(), 0);
         assert.deepEqual(await dm.locator("input[data-fu41-live]").evaluateAll((els) => els.map((el) => (el as unknown as { checked: boolean }).checked)), [true, true], "attaching the checked picture leaves both native live groups selected");

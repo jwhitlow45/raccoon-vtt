@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { TAP_SLOP_PX } from "./gestures.ts";
 import { REPEAT_DELAY_MS } from "./holdRepeat.ts";
-import { backDistance, backEnd, BackSession, BackSwipe, EDGE_ZONE_PX, inEdgeZone, ownsSideways, pictureCopy, SIDEWAYS_ATTR, stillFollowed, type BackHost, type BackMove, type BackStart, type SidewaysNode, type SidewaysStyle } from "./backSwipe.ts";
+import { backDistance, backEnd, BackSession, BackSwipe, EDGE_ZONE_PX, inEdgeZone, ownsSideways, capturePagePicture, copyPageNode, pictureCopy, SIDEWAYS_ATTR, stillFollowed, type BackHost, type BackMove, type BackStart, type SidewaysNode, type SidewaysStyle } from "./backSwipe.ts";
 import { FLICK_SPEED, SLIDE_MS, UNSAVED_FOLLOW } from "./sheetSwipe.ts";
 
 function start(over: Partial<BackStart> = {}): BackStart {
@@ -707,41 +707,56 @@ describe("5. randomized touches", () => {
   });
 });
 
-/** A detached picture fixture. The browser suite also checks native radio-group behavior. */
+/** A detached picture fixture. Native clones keep option defaults, not current selection. */
 function controlPicture() {
   class Part {
     readonly attrs: Map<string, string>;
     removed = false;
-    readonly tag: string;
-    readonly value: string;
+    readonly localName: string;
     readonly checked: boolean;
-    constructor(tag: string, attrs: Record<string, string>, value = "", checked = false) {
-      this.tag = tag;
-      this.value = value;
+    readonly options: { value: string; defaultSelected: boolean; selected: boolean }[];
+    private currentValue: string;
+    constructor(tag: string, attrs: Record<string, string>, value = "", checked = false, options: { value: string; defaultSelected: boolean; selected: boolean }[] = []) {
+      this.localName = tag;
+      this.currentValue = value;
       this.checked = checked;
+      this.options = options;
       this.attrs = new Map(Object.entries(attrs));
     }
+    get multiple() { return this.attrs.has("multiple"); }
+    get selectedIndex() { return this.options.findIndex((o) => o.selected); }
+    set selectedIndex(index: number) { this.options.forEach((o, i) => { o.selected = i === index; }); }
+    get value() { return this.localName === "select" ? this.options.find((o) => o.selected)?.value ?? "" : this.currentValue; }
     removeAttribute(key: string) { this.attrs.delete(key); }
     remove() { this.removed = true; }
-    cloneNode() { return new Part(this.tag, Object.fromEntries(this.attrs), this.value, this.checked); }
+    querySelectorAll() { return []; }
+    cloneNode() {
+      const options = this.options.map((o) => ({ ...o, selected: o.defaultSelected }));
+      if (this.localName === "select" && !this.multiple && !options.some((o) => o.selected) && options[0]) options[0].selected = true;
+      return new Part(this.localName, Object.fromEntries(this.attrs), this.currentValue, this.checked, options);
+    }
   }
   class Picture {
     readonly parts: Part[];
     constructor(parts: Part[]) { this.parts = parts; }
     cloneNode() { return new Picture(this.parts.map((p) => p.cloneNode())); }
+    appendChild(part: Part) { this.parts.push(part); }
     querySelectorAll(selector: string) {
       const selectors = selector.split(",").map((s) => s.trim());
-      return this.parts.filter((p) => !p.removed && selectors.some((s) => s.startsWith("[") ? p.attrs.has(s.slice(1, -1)) : s === p.tag));
+      return this.parts.filter((p) => !p.removed && selectors.some((s) => s.startsWith("[") ? p.attrs.has(s.slice(1, -1)) : s === p.localName));
     }
   }
+  const choices = (selected: number[]) => ["one", "two", "three"].map((value, i) => ({ value, defaultSelected: false, selected: selected.includes(i) }));
   const source = new Picture([
     new Part("input", { id: "radio", type: "radio", name: "live-choice", form: "live-form" }, "answer", true),
     new Part("input", { type: "checkbox", name: "toggle", form: "live-form" }, "yes", true),
-    new Part("select", { id: "select", name: "selection", form: "live-form" }, "chosen"),
+    new Part("select", { id: "select", name: "selection", form: "live-form" }, "", false, choices([1])),
     new Part("textarea", { id: "notes", name: "notes", form: "live-form" }, "Typed words"),
     new Part("dialog", { id: "dialog" }),
   ]);
-  return { source, copy: () => pictureCopy({ node: source as unknown as DocumentFragment, top: 12 }) as unknown as Picture };
+  const multiple = new Part("select", { multiple: "" }, "", false, choices([0, 2]));
+  const none = new Part("select", {}, "", false, choices([]));
+  return { source, multiple, none, Picture, copy: () => pictureCopy({ node: source as unknown as DocumentFragment, top: 12 }) as unknown as Picture };
 }
 
 for (const attr of ["name", "form"]) {
@@ -752,8 +767,38 @@ for (const attr of ["name", "form"]) {
     assert.equal(controls.length, 4);
     assert.ok(controls.every((p) => !p.attrs.has(attr)), `copied controls kept ${attr}`);
     assert.ok(source.querySelectorAll("input, select, textarea").every((p) => p.attrs.has(attr)), "the original picture stays unchanged");
-    assert.deepEqual(controls.map((p) => [p.value, p.checked]), [["answer", true], ["yes", true], ["chosen", false], ["Typed words", false]]);
+    assert.deepEqual(controls.map((p) => [p.value, p.checked]), [["answer", true], ["yes", true], ["two", false], ["Typed words", false]]);
     assert.equal(shown.querySelectorAll("[id]").length, 0);
     assert.equal(shown.querySelectorAll("dialog").length, 0);
   });
 }
+
+test("page pictures retain multiple selections and an explicitly unselected single select", () => {
+  const { multiple, none, Picture } = controlPicture();
+  const source = new Picture([multiple, none]);
+  const copy = pictureCopy({ node: source as unknown as DocumentFragment, top: 0 }) as unknown as InstanceType<typeof Picture>;
+  assert.deepEqual(copy.parts[0]!.options.map((o) => o.selected), [true, false, true]);
+  assert.equal(copy.parts[1]!.selectedIndex, -1);
+});
+
+test("page captures retain selection when the captured node is itself a select", () => {
+  const { source, multiple, none } = controlPicture();
+  for (const select of [...source.querySelectorAll("select"), multiple, none]) {
+    const captured = copyPageNode(select as unknown as HTMLSelectElement) as unknown as typeof select;
+    const drawn = copyPageNode(captured as unknown as HTMLSelectElement) as unknown as typeof select;
+    assert.equal(captured.selectedIndex, select.selectedIndex);
+    assert.deepEqual(drawn.options.map((o) => o.selected), select.options.map((o) => o.selected));
+  }
+});
+
+test("capturing a page before navigation and drawing it both retain current select choices", () => {
+  const { source, multiple, none, Picture } = controlPicture();
+  source.parts.push(multiple, none);
+  const body = { childNodes: source.parts, scrollTop: 12, ownerDocument: { createDocumentFragment: () => new Picture([]) } };
+  const captured = capturePagePicture(body as unknown as HTMLElement);
+  assert.equal(captured.top, 12);
+  const expected = source.querySelectorAll("select").map((select) => select.options.map((o) => o.selected));
+  assert.deepEqual((captured.node as unknown as InstanceType<typeof Picture>).querySelectorAll("select").map((select) => select.options.map((o) => o.selected)), expected);
+  const shown = pictureCopy(captured) as unknown as InstanceType<typeof Picture>;
+  assert.deepEqual(shown.querySelectorAll("select").map((select) => select.options.map((o) => o.selected)), expected);
+});

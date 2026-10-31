@@ -707,9 +707,7 @@ export function usePagePictures(body: RefObject<HTMLElement | null>, page: strin
     const onClick = (e: MouseEvent) => {
       const control = e.target instanceof Element ? e.target.closest(PRESSABLE) : null;
       if (!control || !el.contains(control)) return;
-      const node = document.createDocumentFragment();
-      for (const child of el.childNodes) node.appendChild(child.cloneNode(true));
-      pressed.current = { node, top: el.scrollTop, at: performance.now() };
+      pressed.current = { ...capturePagePicture(el), at: performance.now() };
     };
     el.addEventListener("click", onClick, true);
     return () => el.removeEventListener("click", onClick, true);
@@ -726,19 +724,43 @@ export function usePagePictures(body: RefObject<HTMLElement | null>, page: strin
   return useCallback(() => (shown.current === null ? null : (under.current.get(shown.current) ?? null)), []);
 }
 
+/** Capture before the navigation handler replaces this page and its current control state. */
+export function capturePagePicture(body: HTMLElement): PagePicture {
+  const node = body.ownerDocument.createDocumentFragment();
+  for (const child of body.childNodes) node.appendChild(copyPageNode(child));
+  return { node, top: body.scrollTop };
+}
+
 /**
  * A copy of a picture to draw: no ids, which the page Back shows will
  * hold again, and no dialogs, which a copy would draw in place. Copied
  * controls keep their appearance without joining live forms or radio groups.
  */
 export function pictureCopy(picture: PagePicture): DocumentFragment {
-  const copy = picture.node.cloneNode(true) as DocumentFragment;
+  const copy = copyPageNode(picture.node);
   for (const d of copy.querySelectorAll("dialog")) d.remove();
   for (const n of copy.querySelectorAll("[id]")) n.removeAttribute("id");
   for (const control of copy.querySelectorAll("input, select, textarea")) {
     control.removeAttribute("name");
     control.removeAttribute("form");
   }
+  return copy;
+}
+
+/** Native option clones retain selected attributes instead of the choice currently shown. */
+export function copyPageNode<T extends Node>(node: T): T {
+  const copy = node.cloneNode(true) as T;
+  const selects = (root: Node) => {
+    const parent = root as Node & { localName?: string; querySelectorAll?(selector: string): NodeListOf<HTMLSelectElement> };
+    return [...(parent.localName === "select" ? [parent as HTMLSelectElement] : []), ...Array.from(parent.querySelectorAll?.("select") ?? [])];
+  };
+  const originals = selects(node);
+  const copies = selects(copy);
+  originals.forEach((select, index) => {
+    const cloned = copies[index]!;
+    if (select.multiple) Array.from(select.options).forEach((option, i) => { cloned.options[i]!.selected = option.selected; });
+    else cloned.selectedIndex = select.selectedIndex;
+  });
   return copy;
 }
 
