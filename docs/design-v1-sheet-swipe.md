@@ -225,6 +225,8 @@ As built (the pull, FL-8):
 - **The roll card** (docs/design-v1-visual.md 3.3.1): a swipe is Later. Its folding rules hold.
 - **The wave 5 designs** this does not change: the tool options row is not drawn under a shown sheet (`Room.tsx:490`), the side panel's tabs are 900 px up only, and the token window never swipes (section 3).
 
+As built (panel Back pictures, FU41): a copied page keeps its controls' values and checked appearance but removes their `name` and `form` attributes. Drawing the copy beside the live page therefore leaves the live radio groups and form ownership unchanged. Clone timing remains a separate measurement task. No capture optimization is claimed here.
+
 ## 8. Edge cases
 
 ### 8.1 By size
