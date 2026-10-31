@@ -26,7 +26,7 @@ export function RoomsCard(props: { rooms: AdminRoom[]; now: number; onChanged():
   const sorted = sortRooms(props.rooms, sort);
   return (
     <Card title={`Rooms (${props.rooms.length.toLocaleString()})`}>
-      <Help>A room's size counts every image it holds, so an image two rooms share counts in both.</Help>
+      <Help>A room's size is what it takes on disk: every image it holds, so an image two rooms share counts in both, and its whole log. Its storage quota, which can stop uploads and make it read-only, leaves the log out.</Help>
       <Segmented label="Sort rooms" value={sort} options={SORTS} onChange={setSort} />
       {sorted.length === 0 ? (
         <Empty>No rooms yet. Each room made on this server shows here.</Empty>
@@ -86,6 +86,13 @@ function RoomRow(props: { room: AdminRoom; now: number; onChanged(): void; onSig
       <Help>
         {status}. Active {ago(room.lastActiveAt, props.now)}, created {day(room.createdAt)}.
       </Help>
+      {/* On a line of their own: beside the 44 px buttons a tag stood half their height, and wrapped alone under them on a phone. */}
+      {room.pinned || room.readOnly ? (
+        <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
+          {room.pinned ? <Tag>Pinned</Tag> : null}
+          {room.readOnly ? <Tag tone="warning">Read-only: at its quota</Tag> : null}
+        </div>
+      ) : null}
       {confirming ? (
         <form onSubmit={submitDelete} style={{ display: "grid", gap: theme.space(2) }}>
           <Field
@@ -122,8 +129,6 @@ function RoomRow(props: { room: AdminRoom; now: number; onChanged(): void; onSig
           <Button variant="danger" size="sm" disabled={busy !== null} onClick={() => setConfirming(true)}>
             Delete
           </Button>
-          {room.pinned ? <Tag>Pinned</Tag> : null}
-          {room.readOnly ? <Tag tone="warning">Read-only: at its quota</Tag> : null}
         </div>
       )}
       <ErrorText>{error}</ErrorText>

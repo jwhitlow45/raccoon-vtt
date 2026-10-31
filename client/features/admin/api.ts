@@ -12,7 +12,12 @@ export type AdminRoom = {
   name: string;
   createdAt: string;
   lastActiveAt: string;
-  /** The quota's own sum: an image two rooms share counts in both. */
+  /**
+   * The room's size on disk: what its storage quota counts, an image two
+   * rooms share counted in each, plus its log archive, which the quota
+   * leaves out. So a room can show more than its quota and still take
+   * uploads.
+   */
   bytes: number;
   images: number;
   loaded: boolean;
