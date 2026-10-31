@@ -230,6 +230,19 @@ export type KeptDraw = {
 };
 
 /**
+ * What the self-copy probe found, kept for every relief canvas that shares
+ * it. A copy onto itself is the browser's own behavior, so one answer holds
+ * for the page, and a board mounted again (a stage-key remount, the round
+ * trip to the map builder) skips the probe's readback, which waits on the
+ * GPU (review HXPERF2B-OPUS-06). Empty until a probe answers: a 0 by 0 draw
+ * or a thrown readback leaves the probe to the next draw with a size.
+ */
+export type ProbeMemo = { answer: "ok" | "off" | null };
+
+/** The page's own probe answer, which every kept picture shares unless a test hands it another. */
+export const PAGE_PROBE: ProbeMemo = { answer: null };
+
+/**
  * The relief's picture as kept between draws. One per relief canvas: the
  * scheduler (scheduler.ts) makes it with the layer and drives it from the
  * layer's `drawScene`.
@@ -238,6 +251,7 @@ export class KeptRelief {
   #at: KeptAt | null = null;
   #toned: VBox[] = [];
   #probe: "pending" | "ok" | "off" = "pending";
+  readonly #memo: ProbeMemo;
   readonly stats: KeptStats = emptyStats();
   /**
    * Whether a scroll measures the share of the canvas it paints into
@@ -248,6 +262,10 @@ export class KeptRelief {
   measure = false;
   /** The share of the canvas past which a scroll repaints whole instead (MAX_SCROLL_SHARE). */
   maxShare = MAX_SCROLL_SHARE;
+
+  constructor(memo: ProbeMemo = PAGE_PROBE) {
+    this.#memo = memo;
+  }
 
   /** Whether scrolling is on: the probe passed. False before it has run and after a wrong read. */
   get scrolling(): boolean {
@@ -265,11 +283,19 @@ export class KeptRelief {
     this.#toned = [];
   }
 
-  /** Runs the probe when it still waits, on a canvas with room for it. Its paint and clear spoil the corner it used, so the draw after it repaints whole. */
+  /**
+   * Runs the probe when it still waits, on a canvas with room for it,
+   * unless the page has its answer already. Its paint and clear spoil the
+   * corner it used, so the draw after it repaints whole.
+   */
   probeOn(c: KeptCanvas): void {
     if (this.#probe !== "pending" || c.width < 3 || c.height < 2) return;
+    if (this.#memo.answer) {
+      this.#probe = this.#memo.answer;
+      return;
+    }
     const read = probeSelfCopy(c.g);
-    if (read !== "again") this.#probe = read;
+    if (read !== "again") this.#probe = this.#memo.answer = read;
     this.forget();
   }
 

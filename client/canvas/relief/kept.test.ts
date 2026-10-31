@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { sceneGrid } from "#shared/rules/grid.ts";
-import { bandsOf, drawChildrenMeeting, KeptRelief, MAX_REPAIR_BOXES, onDeviceGrid, planDraw, probeSelfCopy, repairRegions, type KeptAt } from "./kept.ts";
+import { bandsOf, drawChildrenMeeting, KeptRelief, MAX_REPAIR_BOXES, onDeviceGrid, planDraw, probeSelfCopy, repairRegions, type KeptAt, type ProbeMemo } from "./kept.ts";
 import type { VBox } from "./pieces.ts";
 import { installPath2D, KeptRig, TestCanvas, type RigScene } from "./keptTesting.ts";
 
@@ -100,7 +100,7 @@ describe("the self-copy probe (D-261030-537)", () => {
   });
 
   test("it runs at the first draw with a size, before anything paints; a 0 by 0 draw or a thrown readback means probe again, and only a wrong read turns scrolling off for good", () => {
-    const kept = new KeptRelief();
+    const kept = new KeptRelief({ answer: null });
     const order: string[] = [];
     const draw = (c: TestCanvas, at: KeptAt) =>
       kept.draw({ g: c.g, width: c.width, height: c.height, ratio: 2 }, {
@@ -134,7 +134,7 @@ describe("the self-copy probe (D-261030-537)", () => {
     assert.equal(order[before], "whole", "and the draw it ran in repaints whole, since the probe's corner is spoilt");
     assert.equal(draw(c, { ...AT, width: 20, height: 10, x: AT.x + 1 }).kind, "scroll");
 
-    const off = new KeptRelief();
+    const off = new KeptRelief({ answer: null });
     const wrong = new TestCanvas(20, 10);
     wrong.brokenCopy = true;
     const plans: string[] = [];
@@ -144,6 +144,43 @@ describe("the self-copy probe (D-261030-537)", () => {
     }
     assert.equal(off.probe, "off");
     assert.deepEqual(plans, ["probe", "probe", "probe"], "every draw after a wrong read repaints whole, today's behavior");
+  });
+
+  test("the page keeps the answer: a board mounted again takes it without a readback, and a thrown readback leaves it to the next probe (review HXPERF2B-OPUS-06)", () => {
+    const memo: ProbeMemo = { answer: null };
+    /** A kept picture's first two draws on a fresh canvas, a pixel apart: what each did and how many readbacks they took. */
+    const mount = (setup: (c: TestCanvas) => void = () => {}) => {
+      const kept = new KeptRelief(memo);
+      const c = new TestCanvas(20, 10);
+      setup(c);
+      let reads = 0;
+      const getImageData = c.g.getImageData.bind(c.g);
+      c.g.getImageData = (...a: Parameters<typeof getImageData>) => {
+        reads++;
+        return getImageData(...a);
+      };
+      const plans = [0, 1].map((i) => {
+        const plan = kept.draw({ g: c.g, width: 20, height: 10, ratio: 2 }, { at: { ...AT, width: 20, height: 10, x: AT.x + i }, clean: true, whole: () => {}, tonedNow: () => [], regions: () => {} });
+        return plan.kind === "whole" ? plan.why : plan.kind;
+      });
+      return { kept, reads, plans };
+    };
+    const tainted = mount((c) => (c.throwOnRead = true));
+    assert.equal(tainted.kept.probe, "pending");
+    assert.equal(memo.answer, null, "a thrown readback answers nothing");
+    const first = mount();
+    assert.equal(first.reads, 1, "so the next board probes");
+    assert.deepEqual(first.plans, ["first", "scroll"]);
+    assert.equal(memo.answer, "ok");
+    const again = mount();
+    assert.equal(again.reads, 0, "a board mounted again reads nothing back");
+    assert.equal(again.kept.probe, "ok");
+    assert.deepEqual(again.plans, ["first", "scroll"], "and scrolls from its second draw");
+    const offMemo: ProbeMemo = { answer: "off" };
+    const off = new KeptRelief(offMemo);
+    const c = new TestCanvas(20, 10);
+    off.draw({ g: c.g, width: 20, height: 10, ratio: 2 }, { at: { ...AT, width: 20, height: 10 }, clean: true, whole: () => {}, tonedNow: () => [], regions: () => {} });
+    assert.equal(off.probe, "off", "a wrong read holds for the page too");
   });
 });
 
@@ -317,7 +354,7 @@ describe("a scroll's regions, each tested on its own (5.2)", () => {
 describe("a scroll's cost stays bounded (reviews HXPERF2B-ASTRA-02 and HXPERF2B-OPUS-05)", () => {
   /** A kept picture already drawn once at AT, its probe passed, then a camera-only move by `dx` device pixels with `toned` boxes now. */
   function scrollWith(toned: VBox[], measure: boolean): { kept: KeptRelief; plan: ReturnType<KeptRelief["draw"]>; regions: VBox[] } {
-    const kept = new KeptRelief();
+    const kept = new KeptRelief({ answer: null });
     kept.measure = measure;
     const c = new TestCanvas(200, 100);
     const canvas = { g: c.g, width: c.width, height: c.height, ratio: 2 };
