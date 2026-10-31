@@ -1,3 +1,4 @@
+import "../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
@@ -20,7 +21,6 @@ function key(value: string): KeyboardEvent {
 
 for (const [name, path, marker, callback] of [
   ["alerts overlay", "../features/encounter/InitiativeStrip.tsx", "if (!overlay) return;", "closeOverlay"],
-  ["expanded toast", "./Room.tsx", "if (wholeToast === undefined) return;", "shrink"],
 ] as const) test(`${name} leaves an Escape already used by a popover alone`, () => {
   let closed = 0;
   const handler = escapeHandler(path, marker, callback, () => closed++);
@@ -33,4 +33,39 @@ for (const [name, path, marker, callback] of [
   assert.equal(closed, 0);
   handler(key("Escape"));
   assert.equal(closed, 1, "a later unused Escape still closes the host");
+});
+
+test("expanded toast leaves an Escape already used by a popover alone", async (t) => {
+  const { listenToastEscape } = await import("./toastEscape.ts");
+  const saved = { window: globalThis.window, document: globalThis.document };
+  const target = new EventTarget();
+  const add = t.mock.method(target, "addEventListener");
+  const remove = t.mock.method(target, "removeEventListener");
+  Object.assign(globalThis, { window: target, document: { querySelectorAll: () => [] } });
+  let closed = 0;
+  const stop = listenToastEscape(() => closed++);
+  try {
+    const [name, callback, capture] = add.mock.calls[0]!.arguments;
+    assert.equal(name, "keydown");
+    assert.equal(capture, true, "the production listener runs in capture");
+    const used = key("Escape");
+    used.preventDefault();
+    target.dispatchEvent(used);
+    assert.equal(closed, 0, "the toast stays expanded after the popover consumes Escape");
+    assert.equal(used.cancelBubble, false);
+    target.dispatchEvent(key("Enter"));
+    assert.equal(closed, 0);
+    const unused = key("Escape");
+    target.dispatchEvent(unused);
+    assert.equal(closed, 1, "a later unused Escape still shrinks the toast");
+    assert.equal(unused.defaultPrevented, true, "the room cannot also consume this Escape");
+    stop();
+    assert.equal(remove.mock.callCount(), 1, "cleanup removes the listener");
+    assert.deepEqual(remove.mock.calls[0]!.arguments, ["keydown", callback, true]);
+    target.dispatchEvent(key("Escape"));
+    assert.equal(closed, 1, "cleanup detaches the installed callback");
+  } finally {
+    stop();
+    Object.assign(globalThis, saved);
+  }
 });

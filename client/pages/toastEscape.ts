@@ -8,3 +8,10 @@ export function toastEscape(event: EscapeKey, target: unknown, shrink: () => voi
   event.preventDefault();
   shrink();
 }
+
+/** Capture runs before the room's Escape listener, while the shared predicate preserves popover ownership. */
+export function listenToastEscape(shrink: () => void): () => void {
+  const onKey = (event: KeyboardEvent) => toastEscape(event, event.target, shrink);
+  window.addEventListener("keydown", onKey, true);
+  return () => window.removeEventListener("keydown", onKey, true);
+}

@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref, type RefObject } from "react";
 import { createPortal, flushSync } from "react-dom";
-import { toastEscape } from "./toastEscape.ts";
+import { listenToastEscape } from "./toastEscape.ts";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import {
@@ -1784,9 +1784,7 @@ function Toasts(props: {
   useLayoutEffect(() => () => dockStore.setState({ toastRow: null }), [dockStore]);
   useEffect(() => {
     if (wholeToast === undefined) return;
-    const onKey = (e: KeyboardEvent) => toastEscape(e, e.target, shrink);
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
+    return listenToastEscape(shrink);
   }, [wholeToast, shrink]);
   const upright = width <= height;
   const turn = useRef({ upright, at: -Infinity });
