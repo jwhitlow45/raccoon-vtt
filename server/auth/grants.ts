@@ -34,7 +34,7 @@ type GrantJoinRow = { member_id: string; role: Role; epoch: number; player_epoch
  * request in hand.
  */
 export async function checkGrant(
-  pool: pg.Pool,
+  pool: Queryable,
   gateway: RoomGateway,
   sessionId: string,
   roomId: string,

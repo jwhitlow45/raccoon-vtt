@@ -47,8 +47,7 @@ export async function setupAuth(
       const id = parseRoomId(roomId);
       if (!id) return null;
       const session = await sessions.session(req, reply, q);
-      // The grant helper only calls query, but its legacy signature requires a pool.
-      return session ? checkGrant(q as pg.Pool, gateway, session.sessionId, id) : null;
+      return session ? checkGrant(q, gateway, session.sessionId, id) : null;
     },
     async displayGrant(req, roomId) {
       const id = parseRoomId(roomId);
