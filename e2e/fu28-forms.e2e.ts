@@ -104,7 +104,8 @@ async function checkRow(summary: string, label: string): Promise<void> {
     assert.equal(await textLines(take), 1, `${at}: 4 shapes stays on one line`);
     assert.equal(await panel.getByRole("heading", { name: "Known forms" }).count(), 0, `${at}: no Known forms section`);
     const group = take.locator("xpath=ancestor::*[@data-panel-group][1]");
-    const row = group.locator(":scope > div").filter({ has: fold });
+    // A filter's inner locator is matched inside each candidate, so it starts from the page, not from the panel.
+    const row = group.locator(":scope > div").filter({ has: ana.getByRole("button", { name: "Stat block", exact: true }) });
     assert.equal(await row.count(), 1, `${at}: one Stat block header is measured`);
     assert.equal(await row.getByRole("button", { name: "4 shapes, take a shape", exact: true }).count(), 1, `${at}: the measured header holds Take a shape`);
     assert.deepEqual(alignmentLines(await measureAlignment(row), `the folded Stat block row ${label} at ${at}`), [], "out of line by more than 1 px");
