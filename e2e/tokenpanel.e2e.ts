@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import type { Locator, Page } from "playwright-core";
 import { INTER_FAMILY } from "../client/lib/interFont.ts";
-import { alignmentLines, measureAlignment, proficiencyHeightLines, proficiencyLines } from "./helpers/alignment.ts";
+import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { barControl, expandBar, multiSelect, openSideTab, pagePoint, waitFor, wholeInReach } from "./harness.ts";
 import { assetRow, chooseStarterWork, starterCounts, starterWork } from "./starterPick.ts";
 import { actor, applyInView, bar, combatSections, DESK, dm, dmCdp, dmConsole, dmContext, dmSocket, type El, failSrdData, familyOf, fieldBeforeModes, fitMap, focused, foldedSummary, footprintRect, groupIn, hpPairSideBySide, inside, labelUnderFade, LONG_IMMUNITIES, mapBadges, mapLocks, noSideScroll, openGroup, ops, panelFile, panelOf, player, playerCdp, playerContext, playerSocket, rectOf, resize, ringsCompact, ringsFull, run, sectionIn, server, settle, setUp, SHEET, shots, speedUnitsWhole, steadyAboveSize, stepperRows, storedFolds, tapToken, tokenPanel, type View } from "./tokenpanelRoom.ts";
@@ -531,10 +531,9 @@ panelFile(null, () => {
         await speedUnitsWhole(b, `${size.label}, ${name}'s bar`);
         await noSideScroll(b, `${size.label}, ${name}'s bar opened`);
         if (name === "Adult White Dragon") {
-          // FL-12 (D-261030-527): the dragon's listed saves are framed, which adds no height and keeps "Saves" and its six saves where they were.
+          // FL-13 (D-261030-539): the saves line marks nothing, and keeps "Saves" and its six saves where they were.
           await b.locator("[data-saves]").waitFor();
-          assert.deepEqual(await proficiencyHeightLines(b, `${size.label}, dragon bar`), [], "marks add no height to the dragon bar");
-          assert.deepEqual(await proficiencyLines(b, `${size.label}, dragon bar`), [], "each mark is the border its level takes");
+          assert.equal(await b.locator("[data-proficiency-mark], [data-proficiency-label]").count(), 0, "no mark in the dragon bar");
           if (size.width === 390) {
             const boxes = await Promise.all((await b.locator("[data-saves] [data-saves-part] > span").all()).map(rectOf));
             assert.equal(boxes.length, 7);

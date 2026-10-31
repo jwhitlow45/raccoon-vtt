@@ -1,13 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ABILITY_KEYS, type AbilityKey, type Actor, type Character, type Token } from "#shared/model.ts";
-import { blockRollNumbers, pcRollNumbers, type RollNumbers } from "#shared/dice/bonus.ts";
-import { proficiencyFor, type Proficiency, type ProficiencySource } from "#shared/rules/proficiency.ts";
+import { pcRollNumbers, type RollNumbers } from "#shared/dice/bonus.ts";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
 import { AcBadge } from "../../components/AcBadge.tsx";
 import { Button } from "../../components/Button.tsx";
 import { Icon } from "../../components/Icon.tsx";
 import { Loading } from "../../components/Loading.tsx";
-import { ProficiencyLabel, ProficiencyUnit } from "../../components/ProficiencyMark.tsx";
 import { Tag } from "../../components/Tag.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
@@ -61,9 +59,7 @@ export function useLinkedBlock(
   if (wild && block.kind === "ready") {
     if (shaped.failed) return { kind: "failed" };
     if (!shaped.numbers) return { kind: "loading" };
-    // Wild Shape keeps the druid's own proficiencies beside the beast's (D-261029-419).
-    const proficiency = saveProficiencies({ ...(character?.stats ? { stats: character.stats } : {}), monster: { numbers: blockRollNumbers(block.block), cr: block.block.cr }, wildShape: true });
-    return { kind: "numbers", saves: savesOf(shaped.numbers), proficiency, defenses: defenseLines(block.block) };
+    return { kind: "numbers", saves: savesOf(shaped.numbers), defenses: defenseLines(block.block) };
   }
   return block;
 }
@@ -74,17 +70,11 @@ function savesOf(numbers: RollNumbers): Record<AbilityKey, number> {
   return saves;
 }
 
-function saveProficiencies(source: ProficiencySource): Record<AbilityKey, Proficiency> {
-  const out = {} as Record<AbilityKey, Proficiency>;
-  for (const key of ABILITY_KEYS) out[key] = proficiencyFor({ kind: "save", ability: key }, source);
-  return out;
-}
-
 /** A player character's saves and defense lines from its own stat block, or null without one (docs/design-v1-pc-stats.md 7.4). */
 function pcSummary(character: Character): LinkedBlock | null {
   const numbers = pcRollNumbers(character);
   if (!numbers || !character.stats || character.actor.srdId !== undefined) return null;
-  return { kind: "numbers", saves: savesOf(numbers), proficiency: saveProficiencies({ stats: character.stats }), defenses: pcDefenseLines(character) };
+  return { kind: "numbers", saves: savesOf(numbers), defenses: pcDefenseLines(character) };
 }
 
 function Unit(props: { unit: VitalUnit }) {
@@ -231,23 +221,12 @@ export function SavesLine(props: { block: LinkedBlock }) {
   if (block.kind === "failed") {
     return <SrdLoadFailed what="Saves" inline />;
   }
-  // A monster's listed saves, or a character's own flags, mark each ability where its save is proficient.
-  const proficiency = block.kind === "numbers" ? block.proficiency : saveProficiencies({ monster: { numbers: blockRollNumbers(block.block), cr: block.block.cr } });
-  const saves = (block.kind === "numbers" ? saveUnitsOf(block.saves) : saveUnits(block.block)).map((text, i) => {
+  const saves = (block.kind === "numbers" ? saveUnitsOf(block.saves) : saveUnits(block.block)).map((text) => {
     const [ability, value] = text.split(" ");
-    const level = proficiency?.[ABILITY_KEYS[i]!] ?? "none";
-    const unit = (
-      <>
-        <span style={{ color: theme.color.textMuted, fontSize: theme.font.tiny, fontWeight: theme.weight.bold, letterSpacing: theme.caps }}>
-          <ProficiencyLabel level={level} bare>{ability}</ProficiencyLabel>{" "}
-        </span>
-        <span style={{ fontWeight: theme.weight.strong }}>{value}</span>
-      </>
-    );
-    // A proficient save is framed whole, "DEX +5", which takes no room from the line (D-261030-527).
     return (
       <span key={ability} style={{ whiteSpace: "nowrap" }}>
-        {level === "none" ? unit : <ProficiencyUnit level={level}>{unit}</ProficiencyUnit>}
+        <span style={{ color: theme.color.textMuted, fontSize: theme.font.tiny, fontWeight: theme.weight.bold, letterSpacing: theme.caps }}>{ability} </span>
+        <span style={{ fontWeight: theme.weight.strong }}>{value}</span>
       </span>
     );
   });

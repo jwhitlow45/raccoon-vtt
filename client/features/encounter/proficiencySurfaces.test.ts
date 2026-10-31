@@ -68,16 +68,12 @@ test("fl7: concentration reads Constitution save proficiency, not a skill flag",
   assert.doesNotMatch(render(noSave, card), /aria-label="Proficient"/);
 });
 
-test("fl7: Log roll answers retain their words and show the creature's skill expertise", () => {
+test("fl13: Log roll answers retain their words and mark nothing, even for a skill the creature has expertise in (D-261030-539)", () => {
   const state = fixture();
   state.log = [{ id: "1:0", at: "2026-10-29T12:00:00.000Z", kind: "event", data: {
     type: "roll", test: { kind: "check", choices: [{ ability: "wis", skill: "perception" }] }, characterId: "hero", total: 19,
   } }];
   const markup = render(state, createElement(LogPanel, {} as never));
-  assert.match(markup, /aria-label="Expertise"/);
-  assert.match(markup, /Perception/);
-  assert.match(markup, /19/);
-  assert.match(markup, /Hero/);
-  delete state.characters.hero;
-  assert.doesNotMatch(render(state, createElement(LogPanel, {} as never)), /aria-label="Expertise"/);
+  assert.doesNotMatch(markup, /data-proficiency|aria-label="Expertise"|title="Expertise"/);
+  assert.match(markup, /Hero rolled 19 on a Wisdom \(Perception\) check\./);
 });

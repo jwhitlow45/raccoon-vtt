@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type FormEvent, type Ref } from "react";
 import type { LogEntry } from "#shared/model.ts";
-import { displayLog } from "#shared/logText.ts";
+import { describeEvent, displayLog } from "#shared/logText.ts";
 import { MAX_CHAT } from "#shared/protocol.ts";
 import { Button } from "../components/Button.tsx";
 import { Checkbox } from "../components/Checkbox.tsx";
@@ -18,8 +18,6 @@ import {
   type LogNames,
 } from "../features/log/format.ts";
 import { canUndoLogLine } from "../features/encounter/hpLog.ts";
-import { ProficientEvent, type LevelOf } from "../features/dice/ProficientEvent.tsx";
-import { useProficiency } from "../features/dice/useProficiency.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { ExportLog } from "../features/log/ExportLog.tsx";
 import { TakeBack } from "../features/encounter/HpLog.tsx";
@@ -78,7 +76,6 @@ export default function LogPanel(_props: PanelProps) {
     [members, tokens, characters, handouts, encounter, traps],
   );
   const me = you?.memberId ?? "";
-  const levelOf = useProficiency();
   const loaded = useRoomView((s) => s.view != null);
 
   const [chatOnly, setChatOnly] = useState(false);
@@ -221,7 +218,7 @@ export default function LogPanel(_props: PanelProps) {
       {entries.length === 0 ? <Empty>No messages yet. Chat, whispers and what happens at the table show here.</Empty> : null}
       <ol ref={listRef} aria-label={apart ? "Log history" : "Log"} style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: theme.space(2) }}>
         {entries.map((entry) => (
-          <EntryRow key={entry.id} entry={entry} names={names} levelOf={levelOf} me={me} dm={dm} canUndo={dm && undoable(entry)} />
+          <EntryRow key={entry.id} entry={entry} names={names} me={me} dm={dm} canUndo={dm && undoable(entry)} />
         ))}
       </ol>
       {apart ? (
@@ -329,14 +326,14 @@ function time(at: string): string {
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-function EntryRow(props: { entry: LogEntry; names: LogNames; levelOf: LevelOf; me: string; dm: boolean; canUndo: boolean }) {
+function EntryRow(props: { entry: LogEntry; names: LogNames; me: string; dm: boolean; canUndo: boolean }) {
   const { entry, names, me } = props;
   if (entry.kind === "event") {
     if (!entry.data) return null;
     return (
       <li data-log-id={entry.id} style={{ display: "flex", alignItems: "center", gap: theme.space(2), color: theme.color.textMuted, fontSize: theme.font.small, lineHeight: theme.leading.body }}>
         {/* A name with no break in it, such as an 80-letter one, wraps anywhere rather than run past a narrow panel, as a chat line does. A line of several rolls puts each on its own line. */}
-        <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere", whiteSpace: "pre-line" }}><ProficientEvent data={entry.data} names={names} dm={props.dm} levelOf={props.levelOf} /></span>
+        <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere", whiteSpace: "pre-line" }}>{describeEvent(entry.data, names, props.dm)}</span>
         {/* The DM takes an HP change back from the log (features section 10). */}
         {props.canUndo ? <TakeBack logId={entry.id} /> : null}
         <time dateTime={entry.at} style={{ flex: "none", fontVariantNumeric: "tabular-nums" }}>

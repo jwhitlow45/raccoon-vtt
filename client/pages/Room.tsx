@@ -63,8 +63,6 @@ import { useJournalUnread } from "../features/journal/store.ts";
 import { useLogUnread } from "../features/log/useLogUnread.ts";
 import { D20Icon } from "../features/dice/throw/D20Icon.tsx";
 import { useRollToasts } from "../features/dice/useRollToasts.ts";
-import { toastMarks } from "../features/dice/proficiencyPresentation.ts";
-import { useProficiency } from "../features/dice/useProficiency.ts";
 import { PhaseMenu } from "../features/phases/PhaseMenu.tsx";
 import { FrameViewBar } from "../features/scenes/FrameView.tsx";
 import { barInset, chromeZoom, layoutWidth, smallUi, useLayoutSize } from "../features/device/layout.ts";
@@ -75,7 +73,6 @@ import { Icon } from "../components/Icon.tsx";
 import { IconButton } from "../components/IconButton.tsx";
 import { Menu, type MenuItem, type MenuSection } from "../components/Menu.tsx";
 import { Popover, usePopover, type PopoverHandle } from "../components/Popover.tsx";
-import { MarkedText, spokenText } from "../components/ProficiencyMark.tsx";
 import { popoverSlot } from "../components/popoverRules.ts";
 import { toolbarSlot, toolChanged, toolVoiceSlot, tuckEvent } from "../state/toolbar.ts";
 import { useDropHpDraftsOnSelect } from "../features/tokens/hpDraft.ts";
@@ -1740,12 +1737,6 @@ function Toasts(props: {
   const toasts = useRoomView((s) => s.toasts);
   const heldSince = useRoomView((s) => s.buildHeldSince);
   const ui = useRoomUi();
-  const levelOf = useProficiency();
-  // A roll toast keeps its words and marks the test it names, and its row's name says so (FL7-R1-08).
-  const marked = (t: Toast) => {
-    const marks = t.rolls ? toastMarks(t.text, t.rolls, levelOf) : [];
-    return marks.length > 0 ? { words: <MarkedText text={t.text} marks={marks} />, spoken: spokenText(t.text, marks) } : {};
-  };
   const slot = useModalSlot("toasts");
   const zoom = useUiScale();
   const { width, height } = useLayoutSize();
@@ -1967,7 +1958,6 @@ function Toasts(props: {
       {drawn.map((t) => createPortal(
         <ToastNote
           toast={t}
-          {...marked(t)}
           form={t.id === rowToast?.id ? (wholeToast ? "whole" : "row") : "stack"}
           onDismiss={() => ui.dismissToast(t.id)}
           onWhole={() => {
@@ -1990,7 +1980,7 @@ function Toasts(props: {
         : null}
       {slot && inSheet.length > 0
         ? createPortal(
-            inSheet.map((t) => <ToastNote key={t.id} toast={t} {...marked(t)} onDismiss={() => ui.dismissToast(t.id)} />),
+            inSheet.map((t) => <ToastNote key={t.id} toast={t} onDismiss={() => ui.dismissToast(t.id)} />),
             slot,
           )
         : null}
@@ -2190,7 +2180,7 @@ function ToastStack(props: { stack: ReturnType<typeof useToastStack>; style: CSS
  * right end, its words whole and the row's full height. Whole: the stack's
  * form with a 44 px Close at its top right, which shrinks it back.
  */
-function ToastNote(props: { toast: Toast; words?: ReactNode; spoken?: string; onDismiss(): void; form?: "stack" | "row" | "whole"; onWhole?(): void; onShrink?(): void }) {
+function ToastNote(props: { toast: Toast; onDismiss(): void; form?: "stack" | "row" | "whole"; onWhole?(): void; onShrink?(): void }) {
   const t = props.toast;
   const form = props.form ?? "stack";
   const tone = NOTICE_TONES[t.tone === "error" ? "danger" : "info"];
@@ -2231,8 +2221,8 @@ function ToastNote(props: { toast: Toast; words?: ReactNode; spoken?: string; on
             ? { ...look, display: "flex", alignItems: "center", flexWrap: "wrap", gap: theme.space(2), padding: `${theme.space(1)}px ${whole ? theme.touch : theme.space(2)}px ${theme.space(1)}px ${theme.space(3)}px` }
             : { display: "contents" }}
       >
-        <button type="button" data-toast={boxed ? undefined : ""} aria-label={row ? (props.spoken ?? t.text) : undefined} onClick={row ? props.onWhole : props.onDismiss} style={wordsStyle}>
-          {!row && !action && t.die ? <ToastD20 die={t.die} text={props.words ?? t.text} /> : (props.words ?? t.text)}
+        <button type="button" data-toast={boxed ? undefined : ""} aria-label={row ? t.text : undefined} onClick={row ? props.onWhole : props.onDismiss} style={wordsStyle}>
+          {!row && !action && t.die ? <ToastD20 die={t.die} text={t.text} /> : t.text}
         </button>
         {action ? (
           <Button

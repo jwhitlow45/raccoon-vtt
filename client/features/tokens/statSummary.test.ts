@@ -336,8 +336,8 @@ describe("the summary lines' parts, so no unit stands alone on a line (D-261024-
     const saves = { str: 8, dex: 6, con: 7, int: 3, wis: 7, cha: 6 };
     const line = renderToStaticMarkup(createElement(SavesLine, { block: { kind: "numbers", saves, defenses: [] } }));
     assert.equal(partOf(line, ">Saves<"), "part 1");
-    for (const ability of ["STR", "DEX", "CON"]) assert.equal(partOf(line, `>${ability}<`), "part 1", ability);
-    for (const ability of ["INT", "WIS", "CHA"]) assert.equal(partOf(line, `>${ability}<`), "part 2", ability);
+    for (const ability of ["STR", "DEX", "CON"]) assert.equal(partOf(line, `>${ability} <`), "part 1", ability);
+    for (const ability of ["INT", "WIS", "CHA"]) assert.equal(partOf(line, `>${ability} <`), "part 2", ability);
   });
 });
 
