@@ -154,7 +154,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
       assert.ok(titles.includes(surface), `${surface} in ${titles.join(", ")}`);
     }
     // Request a roll's fields send it (docs/design-v1-roll-request.md 8).
-    assert.deepEqual(await inputs(sheet, "Roll requests"), ["Enter"]);
+    assert.deepEqual(await inputs(sheet, "Roll requests"), ["Enter", "ContextMenu, Shift+F10", "Up, Down, Home, End"]);
     assert.equal(await sheet.getByRole("region").count(), 0, "headings, not landmarks");
 
     const keys = await inputs(sheet, "Keys");
@@ -167,8 +167,11 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
       "Space+drag",
       "Ctrl+wheel, or a pinch on a trackpad",
       "Ctrl+wheel, or a pinch on a trackpad",
+      "Right-click a roll button",
     ]);
-    assert.deepEqual(await inputs(sheet, "Initiative"), ["Enter", "Escape", "Enter"], "the DM types several values");
+    assert.deepEqual(await inputs(sheet, "Initiative"), ["Enter", "Escape", "Enter", "ContextMenu, Shift+F10", "Up, Down, Home, End"], "the DM types several values");
+    // dpf1: a roll button's one-roll options by its keys, after the panel's own (docs/design-v1-roll-mode-menu.md 7).
+    assert.deepEqual((await inputs(sheet, "Dice")).slice(-2), ["ContextMenu, Shift+F10", "Up, Down, Home, End"]);
     await shots.take(dm, "shortcuts-dm-computer");
     await sheet.getByRole("heading", { name: "Mouse with keys", exact: true }).scrollIntoViewIfNeeded();
     await shots.take(dm, "shortcuts-dm-computer-mouse");
@@ -189,13 +192,17 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     assert.ok(!titles.includes("Mouse with keys"), titles.join(", "));
     assert.ok(!titles.includes("Label, pin and light panes"), "the panes are the DM's");
     // A player's roll card: Enter sends a typed total, or rolls from the Bonus or Extra dice field (docs/design-v1-roll-request.md 8).
-    assert.deepEqual(await inputs(sheet, "Roll requests"), ["Enter", "Enter"]);
+    assert.deepEqual(await inputs(sheet, "Roll requests"), ["Enter", "Enter", "ContextMenu, Shift+F10", "Up, Down, Home, End"]);
 
     const keys = await inputs(sheet, "Keys");
     for (const k of ["Ctrl+Z", "V", "N", "Escape"]) assert.ok(keys.includes(k), `${k} in ${keys.join(", ")}`);
     for (const k of ["T", "H", "/", "Ctrl+V (Cmd+V on a Mac)"]) assert.ok(!keys.includes(k), `the DM's ${k} is not a player's`);
     assert.deepEqual(await inputs(sheet, "Android"), ["Back button"]);
-    assert.deepEqual(await inputs(sheet, "Initiative"), ["Enter", "Escape"], "only the DM types several values");
+    // dpf1: a phone's hold and a reader's double-tap and hold open a roll's one-roll options, and its keys are listed too.
+    const pointer = await inputs(sheet, "Mouse and touch");
+    for (const row of ["Hold a roll button", "Double-tap and hold a roll button with a screen reader"]) assert.ok(pointer.includes(row), `${row} in ${pointer.join(", ")}`);
+    assert.deepEqual((await inputs(sheet, "Dice")).slice(-2), ["ContextMenu, Shift+F10", "Up, Down, Home, End"]);
+    assert.deepEqual(await inputs(sheet, "Initiative"), ["Enter", "Escape", "ContextMenu, Shift+F10", "Up, Down, Home, End"], "only the DM types several values");
     assert.deepEqual(await inputs(sheet, "Handout viewer"), ["+, -", "0", "Arrow keys", "Page Down, Page Up", "Space, Shift+Space", "Home, End"]);
     await shots.take(player, "shortcuts-player-android");
     await sheet.getByRole("heading", { name: "Android", exact: true }).scrollIntoViewIfNeeded();

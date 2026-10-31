@@ -581,7 +581,8 @@ describe("the sheet's rows beside the keys", () => {
     for (const b of BEHAVIORS) {
       if (b.surface !== undefined) assert.equal(b.device, "keys", `${b.id}: a surface lists only its keys`);
       // The drags of attached tokens (docs/design-v1-attach.md 4.6), which move a group or a mount, and the tap again on a standee, which picks one no plain tap reaches (docs/design-v1-isometric-view.md 6.2).
-      if (b.device === "pointer") assert.match(b.input, /^(Drag .*(carries|carried|mount)|Tap a standee again$|Double click or tap on Undo or Redo$)/, b.id);
+      // A roll button's hold, which opens its one-roll options where a tap rolls (docs/design-v1-roll-mode-menu.md 7).
+      if (b.device === "pointer") assert.match(b.input, /^(Drag .*(carries|carried|mount)|Tap a standee again$|Double click or tap on Undo or Redo$|Hold a roll button$|Double-tap and hold a roll button with a screen reader$)/, b.id);
       if (b.device !== "mouse") continue;
       // A mouse row names a key, or a button other than the left one, or the trackpad's pinch, which arrives as Ctrl and the wheel.
       assert.match(b.input, /^(Shift|Ctrl|Space|Right-click|Drag with the right or middle button)/, b.id);
@@ -607,7 +608,15 @@ describe("the sheet's rows beside the keys", () => {
       assert.deepEqual(titles(role, ANDROID).slice(0, 3), ["Keys", POINTER_SECTION, "Android"], role);
       assert.deepEqual(titles(role, { mouse: true, android: true }).slice(0, 4), ["Keys", MOUSE_SECTION, POINTER_SECTION, "Android"], role);
     }
-    assert.deepEqual(inputs("player", IPHONE, POINTER_SECTION), ["Drag a token that carries others", "Drag the rider of a controlled mount", "Drag any other carried token", "Tap a standee again", "Double click or tap on Undo or Redo"]);
+    assert.deepEqual(inputs("player", IPHONE, POINTER_SECTION), [
+      "Drag a token that carries others",
+      "Drag the rider of a controlled mount",
+      "Drag any other carried token",
+      "Tap a standee again",
+      "Hold a roll button",
+      "Double-tap and hold a roll button with a screen reader",
+      "Double click or tap on Undo or Redo",
+    ]);
     assert.deepEqual(inputs("player", DESKTOP, MOUSE_SECTION), [
       "Shift or Ctrl+click a token (Cmd on a Mac)",
       "Shift or Ctrl+drag on empty map (Cmd on a Mac)",
@@ -616,8 +625,37 @@ describe("the sheet's rows beside the keys", () => {
       "Space+drag",
       "Ctrl+wheel, or a pinch on a trackpad",
       "Ctrl+wheel, or a pinch on a trackpad",
+      "Right-click a roll button",
     ]);
     assert.deepEqual(inputs("player", ANDROID, "Android"), ["Back button"]);
+  });
+
+  test("a roll button's one-roll options: right-click with a mouse, a hold and a reader's double-tap and hold anywhere, and the keys in Dice, the same for the DM and players (docs/design-v1-roll-mode-menu.md 7)", () => {
+    for (const role of ROLES) {
+      assert.ok(inputs(role, DESKTOP, MOUSE_SECTION).includes("Right-click a roll button"), role);
+      assert.ok(!inputs(role, IPHONE, MOUSE_SECTION).includes("Right-click a roll button"), `${role}: no mouse row on a phone`);
+      for (const device of [DESKTOP, IPHONE, ANDROID]) {
+        const pointer = inputs(role, device, POINTER_SECTION);
+        assert.ok(pointer.includes("Hold a roll button") && pointer.includes("Double-tap and hold a roll button with a screen reader"), `${role} ${JSON.stringify(device)}`);
+        for (const surface of ["Dice", "Initiative", "Roll requests", "Token and character fields"]) {
+          assert.deepEqual(inputs(role, device, surface).slice(-2), ["ContextMenu, Shift+F10", "Up, Down, Home, End"], `${role} ${JSON.stringify(device)}: ${surface}'s keys after its others`);
+        }
+        const keys = section(role, device, "Keys")!.rows;
+        assert.deepEqual(keys.slice(-2).map((r) => [r.input, r.when]), [["ContextMenu, Shift+F10", "on a fight card's focused Roll"], ["Up, Down, Home, End", "in a fight card's roll options"]], `${role}: the fight cards have no surface, so their keys close Keys`);
+      }
+    }
+    // One wording for every place, so the sheet says the same thing wherever a roll offers them.
+    const rows = BEHAVIORS.filter((b) => b.input === "ContextMenu, Shift+F10" || (b.input === "Up, Down, Home, End" && !!b.when?.endsWith("roll options")));
+    assert.equal(rows.length, 10);
+    assert.equal(new Set(rows.filter((b) => b.input === "ContextMenu, Shift+F10").map((b) => b.does)).size, 1);
+    assert.equal(new Set(rows.filter((b) => b.input !== "ContextMenu, Shift+F10").map((b) => b.does)).size, 1);
+    const row = (id: string) => BEHAVIORS.find((b) => b.id === id)!;
+    // The keys the roll button names in aria-keyshortcuts (useRollModeMenu.tsx), in the sheet's words.
+    assert.equal(row("diceRollOptions").input.split(", ").join(" "), "ContextMenu Shift+F10");
+    assert.equal(row("diceRollOptions").when, "on a focused roll button");
+    assert.match(row("rollOptionsHold").does, /half a second, without rolling/);
+    assert.match(row("rollOptionsReader").does, /A plain double-tap still rolls$/);
+    assert.match(row("rollOptionsRight").does, /Right-click it again to close them$/);
   });
 
   test("the sections come in order, Keys, the mouse, the drags, Android, then each surface, and an empty one is left out", () => {
@@ -633,11 +671,11 @@ describe("the sheet's rows beside the keys", () => {
     assert.ok(!titles("player", IPHONE).includes("Label, pin and light panes"), "the panes are the DM's");
   });
 
-  test("Keys holds the key table and then Escape, written as keys, and a surface's keys show on every device", () => {
+  test("Keys holds the key table, then Escape and the fight cards' roll keys, written as keys, and a surface's keys show on every device", () => {
     const keys = section("player", IPHONE, "Keys")!;
     assert.deepEqual(
       keys.rows.map((r) => r.id),
-      [...shortcutsFor("player").map((s) => s.id), "escape"],
+      [...shortcutsFor("player").map((s) => s.id), "escape", "cardRollOptions", "cardRollOptionsKeys"],
     );
     assert.ok(keys.rows.every((r) => r.keys));
     assert.ok(keys.intro?.startsWith("On any device with a keyboard."));
@@ -712,13 +750,14 @@ describe("the sheet's rows beside the keys", () => {
   });
 
   test("each role sees its own rows", () => {
-    assert.deepEqual(inputs("dm", IPHONE, "Initiative"), ["Enter", "Escape", "Enter"]);
-    assert.deepEqual(inputs("player", IPHONE, "Initiative"), ["Enter", "Escape"], "only the DM types several values");
+    const rollKeys = ["ContextMenu, Shift+F10", "Up, Down, Home, End"];
+    assert.deepEqual(inputs("dm", IPHONE, "Initiative"), ["Enter", "Escape", "Enter", ...rollKeys]);
+    assert.deepEqual(inputs("player", IPHONE, "Initiative"), ["Enter", "Escape", ...rollKeys], "only the DM types several values");
     assert.deepEqual(inputs("player", IPHONE, "Dialogs"), ["Escape", "Tab, Shift+Tab"]);
     assert.deepEqual(inputs("player", IPHONE, "Adding an image"), ["Ctrl+V (Cmd+V on a Mac)"]);
     assert.deepEqual(inputs("dm", IPHONE, "Adding an image"), ["Ctrl+V (Cmd+V on a Mac)"]);
-    // A paste over the map is the DM's alone, in Keys after Escape.
-    assert.deepEqual(section("dm", IPHONE, "Keys")!.rows.slice(-2).map((r) => r.id), ["escape", "roomPaste"]);
+    // A paste over the map is the DM's alone, in Keys after Escape, and before the fight cards' roll keys.
+    assert.deepEqual(section("dm", IPHONE, "Keys")!.rows.slice(-4).map((r) => r.id), ["escape", "roomPaste", "cardRollOptions", "cardRollOptionsKeys"]);
     assert.ok(!section("player", IPHONE, "Keys")!.rows.some((r) => r.id === "roomPaste"));
   });
 

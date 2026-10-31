@@ -890,6 +890,27 @@ export const BEHAVIORS: readonly Behavior[] = [
   },
   ...(isoOffered ? VIEW_BEHAVIORS : []),
 
+  // A roll button's one-roll options (docs/design-v1-roll-mode-menu.md 3): features/dice/useRollModeMenu.tsx and rollPress.ts. The keys are each surface's own, below.
+  {
+    id: "rollOptionsRight",
+    input: "Right-click a roll button",
+    does: "Open its one-roll options, such as Advantage or Secret, without rolling. Right-click it again to close them",
+    roles: EVERYONE,
+    device: "mouse",
+  },
+  { id: "rollOptionsHold", input: "Hold a roll button", does: "Open its one-roll options after half a second, without rolling. Tap a choice to roll once that way", roles: EVERYONE, device: "pointer" },
+  { id: "rollOptionsReader", input: "Double-tap and hold a roll button with a screen reader", does: "Open its one-roll options. A plain double-tap still rolls", roles: EVERYONE, device: "pointer" },
+  // The fight's cards have no surface of their own: features/encounter/CardRoll.tsx for concentration, save-ends and death-save cards.
+  {
+    id: "cardRollOptions",
+    input: "ContextMenu, Shift+F10",
+    does: "Open the roll's one-roll options, the first choice focused. Enter and Space still roll as before",
+    roles: EVERYONE,
+    when: "on a fight card's focused Roll",
+    device: "keys",
+  },
+  { id: "cardRollOptionsKeys", input: "Up, Down, Home, End", does: "Move through the choices. Enter or Space rolls once that way, Escape closes them back on the roll button, and Tab closes them and moves on", roles: EVERYONE, when: "in a fight card's roll options", device: "keys" },
+
   // The toolbar: state/shortcuts.ts toolShortcut, components/Menu.tsx in Setup and the tool menu (pages/Room.tsx Toolbar).
   // Keys are drawn whole on one line in the sheet, so a row's key stays short and its condition goes in `when`.
   {
@@ -1031,6 +1052,25 @@ export const BEHAVIORS: readonly Behavior[] = [
     device: "keys",
     surface: "Initiative",
   },
+  // A roll's one-roll options in the tracker: features/encounter/Row.tsx and AutoInitiative.tsx.
+  {
+    id: "initRollOptions",
+    input: "ContextMenu, Shift+F10",
+    does: "Open the roll's one-roll options, the first choice focused. Enter and Space still roll as before",
+    roles: EVERYONE,
+    when: "on a focused Roll or Auto Initiative",
+    device: "keys",
+    surface: "Initiative",
+  },
+  {
+    id: "initRollOptionsKeys",
+    input: "Up, Down, Home, End",
+    does: "Move through the choices. Enter or Space rolls once that way, Escape closes them back on the roll button, and Tab closes them and moves on",
+    roles: EVERYONE,
+    when: "in roll options",
+    device: "keys",
+    surface: "Initiative",
+  },
 
   // The Dice panel's formula field: features/dice/Roller.tsx. The field's own keys, so the room's shortcuts stand aside there.
   { id: "diceEnter", input: "Enter", does: "Roll what the field holds", roles: EVERYONE, when: "in the Dice panel's formula field", device: "keys", surface: "Dice" },
@@ -1057,16 +1097,73 @@ export const BEHAVIORS: readonly Behavior[] = [
   { id: "groupDamageEnter", input: "Enter", does: "Roll the parts, or take the typed numbers", roles: DM, when: "in the group save's damage field", device: "keys", surface: "Dice" },
   // A player's creature tabs: features/dice/RollOptions.tsx CreatureTabs, lib/a11y.ts tabKeyIndex (docs/design-v1-dice-pass.md 6.6).
   { id: "diceTabs", input: "Left, Right, Home, End", does: "Pick another creature to roll for", roles: EVERYONE, when: "in the Dice panel's creature tabs", device: "keys", surface: "Dice" },
+  // A roll button's one-roll options: features/dice/useRollModeMenu.tsx, components/Menu.tsx and menuKeys.ts for its list (docs/design-v1-roll-mode-menu.md 3.3).
+  {
+    id: "diceRollOptions",
+    input: "ContextMenu, Shift+F10",
+    does: "Open the roll's one-roll options, the first choice focused. Enter and Space still roll as before",
+    roles: EVERYONE,
+    when: "on a focused roll button",
+    device: "keys",
+    surface: "Dice",
+  },
+  {
+    id: "diceRollOptionsKeys",
+    input: "Up, Down, Home, End",
+    does: "Move through the choices. Enter or Space rolls once that way, Escape closes them back on the roll button, and Tab closes them and moves on",
+    roles: EVERYONE,
+    when: "in roll options",
+    device: "keys",
+    surface: "Dice",
+  },
 
   // Request a roll's fields: features/rolls/RequestSheet.tsx, one form whose submit is Send (docs/design-v1-roll-request.md 8).
   { id: "rollAskEnter", input: "Enter", does: "Send the request", roles: DM, when: "in Request a roll's DC or note field", device: "keys", surface: "Roll requests" },
   // The player's roll card: features/rolls/PlayerRolls.tsx. Send always took Enter in the Total field, and the sheet now lists it.
   { id: "rollCardSend", input: "Enter", does: "Send the total you typed", roles: PLAYER, when: "in a roll card's Total field", device: "keys", surface: "Roll requests" },
   { id: "rollCardRoll", input: "Enter", does: "Roll, with the bonus and extra dice you typed", roles: PLAYER, when: "in a roll card's Bonus or Extra dice field", device: "keys", surface: "Roll requests" },
+  // A request's Roll, the player's card and the DM's waiting row: features/rolls/PlayerRolls.tsx and DmDesk.tsx.
+  {
+    id: "rollCardRollOptions",
+    input: "ContextMenu, Shift+F10",
+    does: "Open the roll's one-roll options, the first choice focused. Enter and Space still roll as before",
+    roles: EVERYONE,
+    when: "on a request's focused Roll",
+    device: "keys",
+    surface: "Roll requests",
+  },
+  {
+    id: "rollCardRollOptionsKeys",
+    input: "Up, Down, Home, End",
+    does: "Move through the choices. Enter or Space rolls once that way, Escape closes them back on the roll button, and Tab closes them and moves on",
+    roles: EVERYONE,
+    when: "in roll options",
+    device: "keys",
+    surface: "Roll requests",
+  },
 
   // The token's and characters' one-line fields: features/tokens/ui.tsx TextField and NumberField.
   { id: "fieldEnter", input: "Enter", does: "Save the field and leave it", roles: EVERYONE, when: "in a one-line field", device: "keys", surface: "Token and character fields" },
   { id: "fieldEscape", input: "Escape", does: "Drop what you typed and leave the field", roles: EVERYONE, when: "in a one-line field", device: "keys", surface: "Token and character fields" },
+  // HP's Death Save Roll, in the token's bar and panel and the character sheet: features/tokens/HpSection.tsx.
+  {
+    id: "fieldRollOptions",
+    input: "ContextMenu, Shift+F10",
+    does: "Open the roll's one-roll options, the first choice focused. Enter and Space still roll as before",
+    roles: EVERYONE,
+    when: "on a focused Death Save Roll in HP",
+    device: "keys",
+    surface: "Token and character fields",
+  },
+  {
+    id: "fieldRollOptionsKeys",
+    input: "Up, Down, Home, End",
+    does: "Move through the choices. Enter or Space rolls once that way, Escape closes them back on the roll button, and Tab closes them and moves on",
+    roles: EVERYONE,
+    when: "in roll options",
+    device: "keys",
+    surface: "Token and character fields",
+  },
 
   // The map panes: features/builder/LabelPane.tsx, features/pins/PinPane.tsx, features/lights/LightPane.tsx.
   { id: "paneEnter", input: "Enter", does: "Finish the text, as Done does, or save a light's name", roles: DM, device: "keys", surface: "Label, pin and light panes" },

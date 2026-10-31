@@ -582,6 +582,8 @@ On any device with a keyboard. They do nothing while you type in a field or a di
 | ? | Show the shortcuts | everyone |
 | Escape | Close an open pop-up first, then a sheet, else the token's action bar, else let go of the selection and end Multi-select. While the token's panel shows one token, the bar closes and keeps it. While the panel is open, a group whose bar is hidden stays until Done. A field outside the pop-up keeps its Escape | everyone |
 | Ctrl+V (Cmd+V on a Mac) | Use a copied image as a new scene, the selected token's picture, a stamp or a handout | DM, with nothing open that takes it |
+| ContextMenu, Shift+F10 | Open the roll's one-roll options, the first choice focused. Enter and Space still roll as before | everyone, on a fight card's focused Roll |
+| Up, Down, Home, End | Move through the choices. Enter or Space rolls once that way, Escape closes them back on the roll button, and Tab closes them and moves on | everyone, in a fight card's roll options |
 
 ### Mouse with keys
 
@@ -594,6 +596,7 @@ On any device with a keyboard. They do nothing while you type in a field or a di
 | Space+drag | Move the map | everyone, with any tool, while nothing has focus or the map does |
 | Ctrl+wheel, or a pinch on a trackpad | Zoom in or out at the pointer, faster than the wheel alone | everyone, with any tool |
 | Ctrl+wheel, or a pinch on a trackpad | Zoom the picture or the pages in or out at the pointer, down to a whole page | everyone, in the handout viewer |
+| Right-click a roll button | Open its one-roll options, such as Advantage or Secret, without rolling. Right-click it again to close them | everyone |
 
 ### Mouse and touch
 
@@ -605,6 +608,8 @@ On any device. A token that carries others, such as a rider's mount or a holder 
 | Drag the rider of a controlled mount | Move the mount, the rider riding. So does a drag of a rider that covers its whole mount | everyone, with the Select tool |
 | Drag any other carried token | Move it alone, from nearer its holder's edge than its middle. Dropped on its holder, or within 5 ft of the creature dragging it, it stays attached, and anywhere else it comes loose | everyone, with the Select tool |
 | Tap a standee again | Pick the one behind it, in isometric | everyone |
+| Hold a roll button | Open its one-roll options after half a second, without rolling. Tap a choice to roll once that way | everyone |
+| Double-tap and hold a roll button with a screen reader | Open its one-roll options. A plain double-tap still rolls | everyone |
 | Double click or tap on Undo or Redo | Take back or restore one step. A second tap in the same double-click sequence never takes the following step | everyone |
 
 ### Android
@@ -686,6 +691,8 @@ Where the action bar opens as a window: on a screen 600 px or wider, or a phone 
 | Enter | Save the Initiative you typed | everyone, in a row's Initiative box |
 | Escape | Drop the Initiative you typed | everyone, in a row's Initiative box |
 | Enter | Go to the next box, and save after the last | DM, while typing several values |
+| ContextMenu, Shift+F10 | Open the roll's one-roll options, the first choice focused. Enter and Space still roll as before | everyone, on a focused Roll or Auto Initiative |
+| Up, Down, Home, End | Move through the choices. Enter or Space rolls once that way, Escape closes them back on the roll button, and Tab closes them and moves on | everyone, in roll options |
 
 ### Dice
 
@@ -696,6 +703,8 @@ Where the action bar opens as a window: on a screen 600 px or wider, or a phone 
 | Any tap or key | Show the result at once, then do its own job | everyone, in the Dice panel while your dice are in the air |
 | Enter | Roll the parts, or take the typed numbers | DM, in the group save's damage field |
 | Left, Right, Home, End | Pick another creature to roll for | everyone, in the Dice panel's creature tabs |
+| ContextMenu, Shift+F10 | Open the roll's one-roll options, the first choice focused. Enter and Space still roll as before | everyone, on a focused roll button |
+| Up, Down, Home, End | Move through the choices. Enter or Space rolls once that way, Escape closes them back on the roll button, and Tab closes them and moves on | everyone, in roll options |
 
 ### Roll requests
 
@@ -704,6 +713,8 @@ Where the action bar opens as a window: on a screen 600 px or wider, or a phone 
 | Enter | Send the request | DM, in Request a roll's DC or note field |
 | Enter | Send the total you typed | players, in a roll card's Total field |
 | Enter | Roll, with the bonus and extra dice you typed | players, in a roll card's Bonus or Extra dice field |
+| ContextMenu, Shift+F10 | Open the roll's one-roll options, the first choice focused. Enter and Space still roll as before | everyone, on a request's focused Roll |
+| Up, Down, Home, End | Move through the choices. Enter or Space rolls once that way, Escape closes them back on the roll button, and Tab closes them and moves on | everyone, in roll options |
 
 ### Token and character fields
 
@@ -711,6 +722,8 @@ Where the action bar opens as a window: on a screen 600 px or wider, or a phone 
 | --- | --- | --- |
 | Enter | Save the field and leave it | everyone, in a one-line field |
 | Escape | Drop what you typed and leave the field | everyone, in a one-line field |
+| ContextMenu, Shift+F10 | Open the roll's one-roll options, the first choice focused. Enter and Space still roll as before | everyone, on a focused Death Save Roll in HP |
+| Up, Down, Home, End | Move through the choices. Enter or Space rolls once that way, Escape closes them back on the roll button, and Tab closes them and moves on | everyone, in roll options |
 
 ### Label, pin and light panes
 
