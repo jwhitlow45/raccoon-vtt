@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { barControl, ConsoleWatch, diceFoldsOpen, OpSocket, openSideTab, reopenRoom, resultLine, resultLines, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, Touches, waitFor, type ResultLine, type Server, type TouchAt } from "./harness.ts";
+import { barControl, ConsoleWatch, diceFoldsOpen, OpSocket, openSideTab, pickTool, reopenRoom, resultLine, resultLines, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, Touches, waitFor, type ResultLine, type Server, type TouchAt } from "./harness.ts";
 
 /**
  * The one-roll mode menu (docs/design-v1-roll-mode-menu.md), its steps
@@ -1885,31 +1885,37 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
     await ops.send({ t: "encounter.start", entries: [{ id: randomUUID(), tokenId: run.thorn.id, value: 20 }, { id: randomUUID(), tokenId: run.goblin.id, value: 5 }] });
     await ops.send({ t: "encounter.next" });
+    let whisperer: OpSocket | null = null;
     try {
-      await pat.setViewportSize({ width: 320, height: 440 });
-      await pat.evaluate(() => (globalThis as unknown as { localStorage: { setItem(key: string, value: string): void } }).localStorage.setItem("rvtt.uiScale", "1.3"));
-      await pat.goto(`${server.origin}/r/${run.roomId}`);
-      await pat.getByRole("status", { name: "Connected" }).first().waitFor();
-      await pat.locator(".konvajs-content").first().waitFor();
-      await tapCell(pat, BOUNDS, run.thorn);
-      await pat.getByRole("dialog", { name: "Thorn actions" }).waitFor();
+      const dmId = await waitFor("the DM member", () => dmSocket.you?.memberId ?? null);
+      const cookie = (await patContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
+      whisperer = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
+      await dm.setViewportSize({ width: 320, height: 440 });
+      await dm.evaluate(() => (globalThis as unknown as { localStorage: { setItem(key: string, value: string): void } }).localStorage.setItem("rvtt.uiScale", "1.3"));
+      await dm.goto(`${server.origin}/r/${run.roomId}`);
+      await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+      await dm.locator(".konvajs-content").first().waitFor();
+      await pickTool(dm, "Select");
+      await tapCell(dm, BOUNDS, run.thorn);
+      await dm.getByRole("dialog", { name: "Thorn actions" }).waitFor();
       for (const { toastFirst, pointer } of [{ toastFirst: true, pointer: false }, { toastFirst: false, pointer: false }, { toastFirst: true, pointer: true }]) {
         const text = `FU41 Escape ${pointer ? "pointer" : toastFirst ? "toast first" : "menu first"}.`;
-        await ops.send({ t: "log.whisper", to: [run.patId], text });
-        const row = pat.locator('[data-toast-form="row"]').filter({ hasText: text });
-        const whole = pat.locator('[data-toast-form="whole"]').filter({ hasText: text });
+        await whisperer.send({ t: "log.whisper", to: [dmId], text });
+        const row = dm.locator('[data-toast-form="row"]').filter({ hasText: text });
+        const whole = dm.locator('[data-toast-form="whole"]').filter({ hasText: text });
         await row.waitFor();
         if (toastFirst) {
           await row.getByRole("button").first().click();
           await whole.waitFor();
         }
-        const opener = pat.getByRole("navigation", { name: "Tools", exact: true }).locator('button[aria-haspopup="menu"]').first();
+        // A player has no toolbar menu here. The DM's grouped toolbar always offers Setup tools.
+        const opener = dm.getByRole("navigation", { name: "Tools", exact: true }).getByRole("button", { name: "Setup tools", exact: true });
         if (pointer) await opener.click();
         else {
           await opener.focus();
           await opener.press("Enter");
         }
-        const menu = pat.getByRole("menu", { name: "Tools", exact: true });
+        const menu = dm.getByRole("menu", { name: "Setup tools", exact: true });
         await menu.waitFor();
         if (!toastFirst) {
           // A native click without a pointerdown keeps the menu open while installing the toast's later listener.
@@ -1917,20 +1923,21 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
           await whole.waitFor();
         }
         if (pointer) assert.ok(await opener.evaluate((button) => button === button.ownerDocument.activeElement), "a pointer open leaves focus on the anchor");
-        else await menu.getByRole("menuitem").first().focus();
-        await pat.keyboard.press("Escape");
+        else await menu.getByRole("menuitemradio").first().focus();
+        await dm.keyboard.press("Escape");
         await menu.waitFor({ state: "detached" });
         assert.equal(await whole.count(), 1, "the menu's Escape leaves the expanded toast alone");
-        await pat.keyboard.press("Escape");
+        await dm.keyboard.press("Escape");
         await whole.waitFor({ state: "detached" });
         await row.waitFor();
       }
     } finally {
+      whisperer?.close();
       await ops.send({ t: "encounter.end" });
-      await pat.setViewportSize(PHONE);
-      await pat.evaluate(() => (globalThis as unknown as { localStorage: { setItem(key: string, value: string): void } }).localStorage.setItem("rvtt.uiScale", "1"));
-      await pat.goto(`${server.origin}/r/${run.roomId}`);
-      await pat.getByRole("status", { name: "Connected" }).first().waitFor();
+      await dm.setViewportSize(COMPUTER);
+      await dm.evaluate(() => (globalThis as unknown as { localStorage: { setItem(key: string, value: string): void } }).localStorage.setItem("rvtt.uiScale", "1"));
+      await dm.goto(`${server.origin}/r/${run.roomId}`);
+      await dm.getByRole("status", { name: "Connected" }).first().waitFor();
     }
   });
 
