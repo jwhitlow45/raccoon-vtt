@@ -257,7 +257,7 @@ function shownMark(state: RoomState, field: MarkField, id: string, sceneId: stri
 const changes = new WeakMap<RoomState, { after: readonly unknown[]; sig: string; changed: Changed }[]>();
 
 function changedOnce(before: RoomState, after: RoomState, scene: Scene, touch: SceneTouch, held?: Held): Changed {
-  // Estimates omit unheld elements. The map step still needs its complete answer, even when explore replaces the layers.
+  // Filtered estimates omit unheld elements. The map step still needs its complete answer, even when explore replaces the layers.
   const deps = [after.buildChunks, after.scenes, after.labels, after.stamps, held ? after : null];
   const sig = JSON.stringify([scene.id, [...touch.chunks].sort(), touch.scene, touch.marks.map((m) => `${m.field}|${m.id}`).sort()]);
   let kept = changes.get(before);

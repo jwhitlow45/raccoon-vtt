@@ -174,7 +174,11 @@ function batch(state: RoomState, ops: readonly Op[], seq: number): RoomState {
   const run = (op: Op, by: Viewer) => {
     const r = applyOp(s, op, by, env(n++));
     if (!r.ok) return false;
-    if (by === DM) for (const [key, bytes] of memoryGrowth(s, r.state, r.touched)) estimates.set(key, (estimates.get(key) ?? 0) + bytes);
+    if (by === DM) {
+      const growth = memoryGrowth(s, r.state, r.touched);
+      assert.deepEqual(memoryGrowth(s, r.state, r.touched, true), growth, "full and filtered growth agree before replacing the batch state");
+      for (const [key, bytes] of growth) estimates.set(key, (estimates.get(key) ?? 0) + bytes);
+    }
     touched.push(...r.touched);
     s = r.state;
     return true;
