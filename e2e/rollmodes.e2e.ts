@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { barControl, ConsoleWatch, diceFoldsOpen, OpSocket, openSideTab, reopenRoom, resultLine, resultLines, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, Touches, waitFor, type Server, type TouchAt } from "./harness.ts";
+import { barControl, ConsoleWatch, diceFoldsOpen, OpSocket, openSideTab, reopenRoom, resultLine, resultLines, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, Touches, waitFor, type ResultLine, type Server, type TouchAt } from "./harness.ts";
 
 /**
  * The one-roll mode menu (docs/design-v1-roll-mode-menu.md), its steps
@@ -1199,8 +1199,16 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
       await dm.keyboard.press("Escape");
       // A natural 20 brings Thorn back with 1 HP: he goes down again, so Pat's bar has its Roll too.
       const actor = () => dmSocket.state?.characters[run.thornChar]?.actor;
+      /** Thorn dying with no saves yet, whatever the last roll left: back from the dead too, which a heal is not. */
+      const freshDying = async () => {
+        const target = { characterId: run.thornChar };
+        if (actor()?.life !== "alive") await ops.send({ t: "actor.life", target, life: "alive" });
+        await ops.send({ t: "actor.hp", target, change: { kind: "set", cur: 30 } });
+        await waitFor("Thorn whole", () => (actor()?.life === "alive" && actor()?.hp.cur === 30 ? true : null));
+        await setDying(true);
+      };
       await waitFor("the DM's death save landed", () => (actor()?.life !== "dying" || (actor()?.deathSaves?.ok ?? 0) + (actor()?.deathSaves?.fail ?? 0) > 0 ? true : null));
-      if (actor()?.life !== "dying") await setDying(true);
+      if (actor()?.life !== "dying") await freshDying();
 
       await closeMenus(pat);
       await tapCell(pat, BOUNDS, run.thorn);
@@ -1212,23 +1220,36 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
 
       // A plain roll, a tap with no menu, reads its result alone: no mode and no stray ". ." (DPF1B-OPUS-01).
       await waitFor("Pat's death save landed", () => (actor()?.life !== "dying" || (actor()?.deathSaves?.ok ?? 0) + (actor()?.deathSaves?.fail ?? 0) > 0 ? true : null));
-      if (actor()?.life !== "dying") await setDying(true);
-      await dm.keyboard.press("Escape");
-      await tapCell(dm, BOUNDS, run.thorn);
-      await bar.waitFor();
-      const plainRoll = await barControl(bar, "Roll a Death Save");
-      await middle(plainRoll);
-      const from = dmSent.ops.length;
-      await plainRoll.click();
-      await oneRoll(dmSent, from, "a plain death save");
-      const plain = await waitFor("the plain death save's words", async () => {
-        const lines = await resultLines(bar);
-        return lines.length === 1 && !/Advantage/.test(lines[0]!.readable) && /\d/.test(lines[0]!.readable) ? lines[0]! : null;
-      });
+      if (actor()?.life !== "dying") await freshDying();
+      // From no saves yet, so the earlier fails cannot add up to his death, and again if a natural 20 brings him back,
+      // since HP's death save row and its result go with his dying.
+      let plain: ResultLine | null = null;
+      for (let tries = 0; tries < 3 && !plain; tries++) {
+        await freshDying();
+        await dm.keyboard.press("Escape");
+        await tapCell(dm, BOUNDS, run.thorn);
+        await bar.waitFor();
+        const plainRoll = await barControl(bar, "Roll a Death Save");
+        await middle(plainRoll);
+        const from = dmSent.ops.length;
+        await plainRoll.click();
+        await oneRoll(dmSent, from, "a plain death save");
+        const settled = await waitFor("the plain death save's words", async () => {
+          if (actor()?.life !== "dying") return "revived" as const;
+          const lines = await resultLines(bar);
+          return lines.length === 1 && !/Advantage/.test(lines[0]!.readable) && /\d/.test(lines[0]!.readable) ? lines[0]! : null;
+        });
+        if (settled !== "revived") plain = settled;
+      }
+      assert.ok(plain, "a plain death save that left Thorn dying, in three tries");
       assert.ok(!plain.hasDetail && !/\.\s*\.|Normal|Secret/.test(plain.readable), `a plain death save reads its words alone: ${JSON.stringify(plain)}`);
       await dm.keyboard.press("Escape");
     } finally {
-      await setDying(false);
+      // Up and whole for the tests after, from the dead too.
+      const target = { characterId: run.thornChar };
+      if (dmSocket.state?.characters[run.thornChar]?.actor.life === "dead") await ops.send({ t: "actor.life", target, life: "alive" });
+      await ops.send({ t: "actor.hp", target, change: { kind: "set", cur: 30 } });
+      await waitFor("Thorn up again", () => (dmSocket.state?.characters[run.thornChar]?.actor.life === "alive" ? true : null));
     }
   });
 
@@ -1236,6 +1257,9 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
     await ops.send({ t: "encounter.start", entries: [{ id: "e-thorn", tokenId: run.thorn.id, value: 20 }, { id: "e-goblin", tokenId: run.goblin.id, value: 15 }, { id: "e-dragon", tokenId: run.dragon.id, value: 10 }] });
     await waitFor("the fight", () => (dmSocket.state?.encounter?.entries.length === 3 ? true : null));
     const creature = ["Roll secretly: this roll's visibility is set by the creature.", NORMAL_HELP];
+    // Taken off after: a failed save leaves the goblin Frightened, and each later end of its turn would bring a save-ends card of its own.
+    const hex = randomUUID();
+    const fear = randomUUID();
     const turnTo = async (entryId: string) => {
       for (let i = 0; i < 6 && dmSocket.state?.encounter?.activeEntryId !== entryId; i++) {
         const e = dmSocket.state!.encounter!;
@@ -1258,7 +1282,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
       await setDying(false);
 
       // The goblin concentrating, then hurt: the DM's concentration card.
-      await ops.send({ t: "actor.effect.add", target: { tokenId: run.goblin.id }, effect: { id: randomUUID(), key: "concentrating", spell: "Hex" } });
+      await ops.send({ t: "actor.effect.add", target: { tokenId: run.goblin.id }, effect: { id: hex, key: "concentrating", spell: "Hex" } });
       await ops.send({ t: "actor.hp", target: { tokenId: run.goblin.id }, change: { kind: "damage", amount: 1 } });
       const conc = dm.getByRole("group", { name: "Concentration save for Goblin" }).filter({ visible: true }).first();
       await conc.waitFor();
@@ -1266,7 +1290,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
 
       // Frightened with a save that ends it, then the goblin's turn ends: the DM's save-ends card.
       await turnTo("e-goblin");
-      await ops.send({ t: "actor.effect.add", target: { tokenId: run.goblin.id }, effect: { id: randomUUID(), key: "frightened", save: { ability: "str", dc: 14 } } });
+      await ops.send({ t: "actor.effect.add", target: { tokenId: run.goblin.id }, effect: { id: fear, key: "frightened", save: { ability: "str", dc: 14 } } });
       await turnTo("e-dragon");
       const ends = dm.locator('[data-alert-id^="saveEnds:"]').filter({ visible: true }).first();
       await ends.waitFor();
@@ -1299,6 +1323,12 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
     } finally {
       await ops.send({ t: "encounter.end" });
       if (dmSocket.state?.characters[run.thornChar]?.actor.life === "dying") await setDying(false);
+      // A save or a broken concentration may have ended either already.
+      for (const effectId of [hex, fear]) {
+        await ops.send({ t: "actor.effect.remove", target: { tokenId: run.goblin.id }, effectId }).catch((err: Error) => {
+          if (!/gone|not here/.test(err.message)) throw err;
+        });
+      }
     }
   });
 
@@ -1591,15 +1621,32 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
   test("dpf1-26b. on the DM's phone at 390 x 844 and 320 x 568, at 100% and 130%, a save-ends save failed with Legendary Resistance left stays on its card with its result, and the mode the menu added adds no line", async () => {
     // The dragon's Frightened ends on a Strength save it cannot make, so each roll fails, and with Legendary Resistance left
     // the card waits on Use Legendary Resistance or Accept failure (saveCards.ts landedOp), its settled result in view.
+    // An op's answer comes before the DM's page hears of it, so each fight has entry ids of its own and waits for its end to land:
+    // the last fight's late end can then neither pass for the next one's start nor take it away mid-turn.
+    let fights = 0;
+    const startFight = async () => {
+      fights += 1;
+      const ids = { dragon: `e-dragon-${fights}`, goblin: `e-goblin-${fights}` };
+      await ops.send({ t: "encounter.start", entries: [{ id: ids.dragon, tokenId: run.dragon.id, value: 20 }, { id: ids.goblin, tokenId: run.goblin.id, value: 15 }] });
+      await waitFor("the fight", () => (dmSocket.state?.encounter?.entries.some((e) => e.id === ids.dragon) ? true : null));
+      return ids;
+    };
+    const endFight = async () => {
+      if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+      await waitFor("the fight over", () => (dmSocket.state?.encounter ? null : true));
+    };
     const turnTo = async (entryId: string) => {
-      for (let i = 0; i < 4 && dmSocket.state?.encounter?.activeEntryId !== entryId; i++) {
-        const e = dmSocket.state!.encounter!;
+      for (let i = 0; i < 4; i++) {
+        const e = await waitFor("a fight on the DM's page", () => dmSocket.state?.encounter ?? null);
+        if (e.activeEntryId === entryId) return;
         await ops.send({ t: "encounter.next", from: { entry: e.activeEntryId, round: e.round } });
         await waitFor("the turn moved", () => (dmSocket.state?.encounter?.activeEntryId !== e.activeEntryId || dmSocket.state?.encounter?.round !== e.round ? true : null));
       }
+      assert.equal(dmSocket.state?.encounter?.activeEntryId, entryId, `the turn reached ${entryId}`);
     };
     const faults: string[] = [];
     const room = new URL(dm.url()).pathname;
+    await endFight();
     await ops.send({ t: "token.update", tokenId: run.dragon.id, patch: { actor: { legendary: { resistMax: 3, resistUsed: 0, actionsMax: 3, actionsUsed: 0 } } } });
     await waitFor("the dragon's Legendary Resistance", () => {
       const ref = dmSocket.state?.tokens[run.dragon.id]?.actor;
@@ -1611,20 +1658,22 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
         const context = await browser.newContext({ viewport: size, deviceScaleFactor: 2, isMobile: true, hasTouch: true, reducedMotion: "reduce" });
         const fear = randomUUID();
         try {
-          await ops.send({ t: "encounter.start", entries: [{ id: "e-dragon", tokenId: run.dragon.id, value: 20 }, { id: "e-goblin", tokenId: run.goblin.id, value: 15 }] });
-          await waitFor("the fight", () => (dmSocket.state?.encounter?.entries.length === 2 ? true : null));
-          await turnTo("e-dragon");
+          const entries = await startFight();
+          await turnTo(entries.dragon);
           await ops.send({ t: "actor.effect.add", target: { tokenId: run.dragon.id }, effect: { id: fear, key: "frightened", save: { ability: "str", dc: 30 } } });
           await context.addCookies(await dmContext.cookies(server.origin));
           await context.addInitScript((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
           const page = await context.newPage();
           const cdp = await context.newCDPSession(page);
+          const phoneSent = new OpsSent();
+          phoneSent.attach(page);
           await page.goto(`${server.origin}${room}`);
           await page.getByRole("status", { name: "Connected" }).first().waitFor();
           await page.locator(".konvajs-content").first().waitFor();
           // The dragon's turn ends: its save, on a card the phone may fold behind its summary.
-          await turnTo("e-goblin");
-          const ends = page.locator('[data-alert-id^="saveEnds:"]').filter({ visible: true }).first();
+          await turnTo(entries.goblin);
+          // The dragon's own card, by name: another creature's pending save would stand first.
+          const ends = page.locator('[data-alert-id^="saveEnds:"]').filter({ visible: true }).filter({ has: page.getByText("Dragon ended its turn Frightened.", { exact: true }) }).first();
           if (!(await ends.isVisible().catch(() => false))) {
             const summary = page.getByRole("button", { name: /Tap to answer\.$|to see them\.$|to see it\.$/ }).first();
             await summary.waitFor({ timeout: 5_000 }).catch(() => undefined);
@@ -1633,11 +1682,17 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
           await ends.waitFor();
           const roll = ends.getByRole("button", { name: /^Roll [+−-]\d+/ }).first();
           await middle(roll);
+          const from = phoneSent.ops.length;
           await hold(cdp, roll);
-          const menu = page.getByRole("menu", { name: /^Roll options/ });
+          const menu = page.getByRole("menu", { name: /^Roll options for Strength save, DC 30, ends it\. for Dragon$/ });
           await menu.waitFor();
           await menu.getByRole("menuitem", { name: "Roll with Advantage" }).tap();
           await menu.waitFor({ state: "detached" });
+          // The roll is sent and lands before the card is read, so a card without its result is the card's doing.
+          const sent = await waitFor(`${at} the pick's roll sent`, () => phoneSent.rolls(from)[0] ?? null, 5_000);
+          assert.equal(phoneSent.rolls(from).length, 1, `${at}: the pick sent one roll`);
+          assert.equal(sentMode(sent).mode, "adv", `${at}: the pick rolled with Advantage`);
+          await waitFor(`${at} the roll landed`, () => dmSocket.state?.log.some((e) => e.data?.type === "dice" && e.data.tag === sent.tag) || null);
           const failed = () => resultLines(ends).then((lines) => lines.find((l) => /^Rolled \d+: a fail\./.test(l.readable)) ?? null);
           await waitFor(`${at} the failed save's result`, failed).catch(async (err: Error) => {
             await shots.take(page, `dpf1-26b-${size.width}-${scale * 100}-missing`);
@@ -1660,7 +1715,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
           await ops.send({ t: "actor.effect.remove", target: { tokenId: run.dragon.id }, effectId: fear }).catch((err: Error) => {
             if (!/gone/.test(err.message)) throw err;
           });
-          if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+          await endFight();
         }
       }
     }
