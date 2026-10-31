@@ -401,3 +401,32 @@ test("a reopened row waiting on its ask keeps the typed bonus with its roll, and
   const gap = theme.space(1);
   assert.match(markup, new RegExp(`<div style="display:flex;align-items:center;gap:${gap}px;flex:none"><input aria-label="Bonus for Guard"[^>]*/><button[^>]*>Roll d20</button></div><button[^>]*>Ask again</button><div style="display:flex;flex-wrap:wrap;align-items:center;gap:${gap}px;flex:1 1 auto"><label[^>]*>(?:(?!</label>).)*Evasion`));
 });
+
+test("a page that can no longer be checked drops a refused request's note, which asks for steps the page no longer offers", () => {
+  const says = "Not saved. The roll request changed. Check its answers and ask again.";
+  const page: Page = { ...damagePage("9 fire"), phase: "rolled", test: { kind: "save", ability: "dex" }, requests: [{ rollId: "again", holders: ["token:g1"], state: "refused", says, selected: ["token:g1"] }] };
+  assert.ok(drawPage(page, [], "open", { check: "undone", notice: OUTCOME_UNDONE }).includes(says), "a reopened page still says why its request was not saved");
+  assert.ok(!drawPage(page, [], "open", { check: "unavailable", notice: OUTCOME_UNAVAILABLE }).includes(says));
+});
+
+test("a page that can no longer be checked draws All fail, All pass, the damage, its Roll again, On a pass and Add a condition locked, as an applied page does", () => {
+  // A damage-only page reopens in setup, so its outcome is open without a tap on Edit.
+  const page: Page = { ...damagePage("1d6 fire"), damage: { tag: "damage", state: "committed", amounts: [4] } };
+  const draw = (reopen: SaveReopen) => {
+    menuBindings = [];
+    const markup = drawPage(page, [], "open", reopen);
+    return { markup, damageRoll: menuBindings.find((binding) => binding.name === "Group damage") };
+  };
+  const locked = (markup: string, name: string) => new RegExp(`<button(?=[^>]*disabled="")[^>]*>${name}</button>`).test(markup);
+  const reopened = draw({ check: "undone", notice: OUTCOME_UNDONE });
+  assert.match(reopened.markup, />All fail<\/button>/);
+  assert.equal(locked(reopened.markup, "All fail"), false);
+  assert.ok(reopened.damageRoll && !reopened.damageRoll.disabled, "the reopened damage rolls again");
+  assert.ok(reopened.markup.includes("Add a condition"));
+  const unavailable = draw({ check: "unavailable", notice: OUTCOME_UNAVAILABLE });
+  assert.ok(locked(unavailable.markup, "All fail") && locked(unavailable.markup, "All pass"), "All fail and All pass look locked");
+  assert.match(unavailable.markup, /<input(?=[^>]*value="1d6 fire")(?=[^>]*disabled="")[^>]*>/, "the damage field looks locked");
+  assert.ok(unavailable.damageRoll?.disabled, "the damage's Roll again looks locked");
+  assert.match(unavailable.markup, /role="radiogroup" aria-label="On a pass"[^>]*aria-disabled="true"/);
+  assert.ok(!unavailable.markup.includes("Add a condition"), "Add a condition goes, as on an applied page");
+});

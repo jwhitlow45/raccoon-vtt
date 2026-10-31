@@ -185,3 +185,18 @@ test("the final Close the ask has no reopen status or lifecycle proof", () => {
   assert.equal(result.reopen?.check, null);
   assert.equal(result.reopen?.tracking, undefined);
 });
+
+test("Redo with no edits since Undo holds nothing to resume, and keeps edits an earlier Redo set aside", () => {
+  const undone = reconcileSave(start(), authority({ [A]: record("undone", 2) }));
+  const redone = reconcileSave(undone, authority({ [A]: record("applied", 3) }));
+  assert.equal(redone.reopen?.notice, OUTCOME_RESTORED);
+  assert.equal(redone.reopen?.redoHeld, undefined, "a page as Undo left it has no edits for Resume your edits");
+  const back = reconcileSave(redone, authority({ [A]: record("undone", 4) }));
+  assert.equal(back.reopen?.redoHeld, undefined);
+  const edited = reconcileSave({ ...back, page: setDc(back.page, 19) }, authority({ [A]: record("applied", 5) }));
+  assert.equal(edited.reopen?.redoHeld?.dc, 19);
+  const untouched = reconcileSave(reconcileSave(edited, authority({ [A]: record("undone", 6) })), authority({ [A]: record("applied", 7) }));
+  assert.equal(untouched.reopen?.redoHeld?.dc, 19, "a Redo with nothing new keeps what an earlier Redo set aside");
+  const last = reconcileSave(untouched, authority({ [A]: record("undone", 8) }));
+  assert.equal(resumeSaveEdits(last, authority({ [A]: record("undone", 8) })).page.dc, 19);
+});

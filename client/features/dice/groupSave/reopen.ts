@@ -1,5 +1,6 @@
 import { saveOutcomeRecordSchema, type SaveOutcomeFields, type SaveOutcomeLedger, type SaveOutcomeState } from "#shared/saveOutcomeContract.ts";
 import type { OpOf } from "#shared/protocol.ts";
+import { stableStringify } from "#shared/project.ts";
 import { apply, type Page, type Step } from "./chain.ts";
 import { saveChoicesSchema, saveCheckpointSchema, type SaveChoices, type SaveDraft, type SaveOutcomeCheck } from "./reopenContract.ts";
 
@@ -126,8 +127,11 @@ export function reconcileSave(input: SaveSession, authority: SaveAuthority): Sav
   let held = metadata.redoHeld;
   if (wasEditable) {
     // New edits can exceed the storage budget. Keep them in memory while the
-    // draft writer reports that they cannot survive this tab closing.
-    held = copiedChoices(page);
+    // draft writer reports that they cannot survive this tab closing. A page
+    // still as Undo left it has no new edits, so Resume your edits is not
+    // offered for nothing, and edits an earlier Redo set aside stay held.
+    const edits = copiedChoices(page);
+    if (stableStringify(edits) !== stableStringify(checkpoint.choices)) held = edits;
   }
   if (!newer && reopen.check === "applied" && page.phase === "applied") return { page, reopen };
   return { page: { ...page, phase: "applied", apply: "taken" }, reopen: { ...metadata, redoHeld: held, notice: wasEditable || current.revision > 1 && !attempt ? OUTCOME_RESTORED : undefined } };

@@ -529,6 +529,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
       onChange={edit}
       onRoll={rollDamage}
       blocked={blocked !== null || offScene}
+      locked={lifecycleLocked}
       picking={picking}
       setPicking={setPicking}
       parsed={parsedParts}
@@ -591,10 +592,10 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
         <span style={{ fontWeight: theme.weight.strong, flex: "999 1 0%", fontVariantNumeric: "tabular-nums" }}>{page.phase === "setup" && page.test.kind !== "none" ? creatureCount(rows.length) : count}</span>
         <span style={{ flex: "1 1 auto", display: "flex", gap: theme.space(2) }}>
-          <Button size="sm" style={{ flex: "1 1 auto" }} disabled={page.phase === "applying" || page.phase === "applied"} onClick={() => update(rows.reduce((p, r) => (stateOf(p, r).mark === "skip" && r.skip ? p : mark(p, r.holder, "fail")), { ...pageRef.current, rows } as Page))}>
+          <Button size="sm" style={{ flex: "1 1 auto" }} disabled={page.phase === "applying" || page.phase === "applied" || lifecycleLocked} onClick={() => update(rows.reduce((p, r) => (stateOf(p, r).mark === "skip" && r.skip ? p : mark(p, r.holder, "fail")), { ...pageRef.current, rows } as Page))}>
             All fail
           </Button>
-          <Button size="sm" style={{ flex: "1 1 auto" }} disabled={page.phase === "applying" || page.phase === "applied"} onClick={() => update(rows.reduce((p, r) => (stateOf(p, r).mark === "skip" && r.skip ? p : mark(p, r.holder, "pass")), { ...pageRef.current, rows } as Page))}>
+          <Button size="sm" style={{ flex: "1 1 auto" }} disabled={page.phase === "applying" || page.phase === "applied" || lifecycleLocked} onClick={() => update(rows.reduce((p, r) => (stateOf(p, r).mark === "skip" && r.skip ? p : mark(p, r.holder, "pass")), { ...pageRef.current, rows } as Page))}>
             All pass
           </Button>
         </span>
@@ -678,7 +679,8 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
       {reopen?.check === "checking" ? <Loading text="Checking this save's outcome…" /> : null}
       {reopen?.notice ? <Note tone={reopen.check === "unavailable" ? "error" : "info"}>{reopen.notice}</Note> : null}
       {reopen?.memoryOnly ? <Note tone="info">{SAVE_MEMORY_ONLY}</Note> : null}
-      {page.requests.filter(request => request.state === "refused" && request.selected && request.says).map(request => <Note key={request.rollId} tone="error">{request.says}</Note>)}
+      {/* A page that can no longer be checked offers none of the steps a refused request asks for. */}
+      {reopen?.check !== "unavailable" ? page.requests.filter(request => request.state === "refused" && request.selected && request.says).map(request => <Note key={request.rollId} tone="error">{request.says}</Note>) : null}
       {page.requests.some(request => request.state === "sending" && request.selected) ? <Loading text="Asking again…" /> : null}
       {reopen?.check === "undone" && reopen.redoHeld ? <Button disabled={frozen || offScene} onClick={() => { const active = currentSession(); const next = resumeSaveEdits(active, authorityOf(roomStore.getState(), active.page)); pageRef.current = next.page; groupStore.setState(next); }}>Resume your edits</Button> : null}
       {page.fill ? <Note tone="info">{page.fill.from}</Note> : null}
@@ -841,6 +843,8 @@ function OutcomePanel(props: {
   onChange(page: Page): void;
   onRoll(override?: RollModeOverride): void;
   blocked: boolean;
+  /** A save whose outcome is checking or cannot be checked: its disabled fieldset already stops these controls, and they should look stopped as on an applied page. */
+  locked: boolean;
   picking: boolean;
   setPicking(v: boolean): void;
   parsed: ReturnType<typeof parseParts> | null;
@@ -855,7 +859,7 @@ function OutcomePanel(props: {
   // Read from the page each render, so the form follows a fill, a DC typed later and a reload, never a copy taken once.
   const saveEnds = page.outcome.saveEnds;
   const save: SaveEndsForm = { on: saveEnds !== null, ability: saveEnds?.ability ?? (page.test.kind === "none" ? "wis" : page.test.ability), dc: saveEnds?.dc ?? null, spell: page.spell };
-  const frozen = page.phase === "applying" || page.phase === "applied";
+  const frozen = page.phase === "applying" || page.phase === "applied" || props.locked;
   const setOutcome = (patch: Partial<Page["outcome"]>) => props.onChange({ ...page, outcome: { ...page.outcome, ...patch } });
   const damageState = page.damage;
   const damageReceipt = useReceipt(damageState?.tag ?? null);
