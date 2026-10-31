@@ -489,12 +489,12 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
       new RegExp(`^GET /api/assets/${saved?.pages[0]?.assetId}/thumb$`),
       /^GET \/assets\/pdfjs-[\w-]+\.js$/,
       /^GET \/assets\/(pdf\.)?worker-[\w-]+\.js$/,
-      /^GET \/pdfjs\/6\.3\.289\/(jbig2|openjpeg)_nowasm_fallback\.js$/,
+      /^GET \/pdfjs\/6\.4\.299\/(jbig2|openjpeg)_nowasm_fallback\.js$/,
       /^PUT \/api\/rooms\/\w+\/assets\?kind=handout$/,
     ];
     const strays = requests.filter((r) => !r.url.startsWith(`${server.origin}/`) || !allowed.some((a) => a.test(`${r.method} ${r.url.slice(server.origin.length)}`)));
     assert.deepEqual(strays, [], "a request during the upload that is none of the reader's, the decoders' or the pages'");
-    for (const name of ["jbig2_nowasm_fallback.js", "openjpeg_nowasm_fallback.js"]) assert.ok(requests.some((r) => r.url.endsWith(`/pdfjs/6.3.289/${name}`)), `${name} was never loaded`);
+    for (const name of ["jbig2_nowasm_fallback.js", "openjpeg_nowasm_fallback.js"]) assert.ok(requests.some((r) => r.url.endsWith(`/pdfjs/6.4.299/${name}`)), `${name} was never loaded`);
     const violations = await dm.evaluate(() => (globalThis as unknown as { rvttCsp: string[] }).rvttCsp);
     assert.deepEqual(violations, [], "a content security policy violation");
 
@@ -567,7 +567,7 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     assert.equal(await dm.evaluate(() => "pdfjsWorker" in globalThis), false, "pdf.js set up its fallback worker on the page's thread");
 
     // A decoder blocked: the job stops when the file opens, not partway.
-    const decoder = /\/pdfjs\/6\.3\.289\/openjpeg_nowasm_fallback\.js$/;
+    const decoder = /\/pdfjs\/6\.4\.299\/openjpeg_nowasm_fallback\.js$/;
     asked.length = 0;
     await dm.route(decoder, (route) => route.abort("blockedbyclient"));
     await pickFile(letter);

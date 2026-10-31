@@ -14,7 +14,7 @@ describe("PDF_OPTIONS (docs/design-v1-pdf-handouts.md 4.2.4)", () => {
       useWasm: false,
       enableXfa: false,
       verbosity: 1,
-      wasmUrl: "/pdfjs/6.3.289/",
+      wasmUrl: "/pdfjs/6.4.299/",
       maxImageSize: 40_000_000,
       canvasMaxAreaInBytes: 2048 * 2048 * 4,
       stopAtErrors: false,

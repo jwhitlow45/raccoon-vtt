@@ -6,7 +6,7 @@
  */
 
 /** The pinned pdf.js. Its decoders ship in a folder named by it, so a new pin is a new URL (vite.config.ts). */
-export const PDFJS_VERSION = "6.3.289";
+export const PDFJS_VERSION = "6.4.299";
 
 /** Where the app serves the two plain JavaScript image decoders, from its own origin (4.2.4). */
 export const PDFJS_FOLDER = `/pdfjs/${PDFJS_VERSION}/`;
