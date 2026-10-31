@@ -61,7 +61,7 @@ test("each capability's rendered help names its choice and keeps fixed reasons b
     }[visibility];
     assert.deepEqual(lines, [
       `Roll secretly: ${secret}`,
-      repeat ? "Roll normally: ignores the recorded mode and keeps the formula and visibility." : "Roll normally: ignores Adv, Dis and Secret pressed for this roll. Conditions still apply.",
+      repeat ? "Roll normally: ignores the recorded mode and keeps the formula and visibility." : "Roll normally: ignores Adv, Dis and Secret pressed for this roll. Conditions and usual visibility still apply.",
       ...(repeat ? ["All repeat choices: use the recorded formula. Current effects are not rebuilt."] : []),
       ...(batch ? ["All choices: apply to server rolls only. Players choose their own modes."] : []),
     ], JSON.stringify(capability));

@@ -4,7 +4,7 @@ import { advantageFields, applyMode, parseFormula, type AdvantageSource } from "
 export type RollModeOverride = "adv" | "dis" | "secret" | "normal";
 export type RollVisibility = "selectable" | "request" | "creature" | "repeat";
 export type RollModeCapability = { d20: boolean; visibility: RollVisibility; damage?: boolean; batch?: boolean; repeat?: boolean };
-export const NORMAL_HELP = "Roll normally: ignores Adv, Dis and Secret pressed for this roll. Conditions still apply.";
+export const NORMAL_HELP = "Roll normally: ignores Adv, Dis and Secret pressed for this roll. Conditions and usual visibility still apply.";
 export const REPEAT_HELP = "All repeat choices: use the recorded formula. Current effects are not rebuilt.";
 export const BATCH_HELP = "All choices: apply to server rolls only. Players choose their own modes.";
 export const FIXED_VISIBILITY = {
