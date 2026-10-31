@@ -6,6 +6,9 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import type { DiceRoll, LogEntry, LogEvent } from "#shared/model.ts";
+import { uuidv7 } from "#shared/ids.ts";
+import { blockOf, customMonster } from "#shared/testutil.ts";
+import { OUTCOME_RESTORED, OUTCOME_UNDONE, OUTCOME_UNAVAILABLE, assertPrivateOutcome, openSaveDice, saveOutcomes } from "./helpers/saveOutcomes.ts";
 import { ConsoleWatch, diceFoldsOpen, multiSelect, OpSocket, reopenRoom, resultLine, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
@@ -471,6 +474,108 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     await waitFor(`Bree back at ${HP}`, () => (breeHp() === HP ? true : null));
   });
 
+  test("undo-scope-reopen: exact choices return, DC rejudges totals, Redo relocks and retains local edits", async () => {
+    const sheet = diceSheet(dm);
+    await sheet.getByText(OUTCOME_UNDONE, { exact: true }).waitFor();
+    const record = Object.entries(saveOutcomes(dmSocket)).find(([, value]) => value.state === "undone");
+    assert.ok(record, "whole Undo publishes the retained outcome");
+    const [id, status] = record;
+    assert.equal(status.revision, 2);
+    assertPrivateOutcome(playerSocket, id, status.plan);
+    const historical = structuredClone(diceLines(dmSocket.state?.log));
+    const sent = dmSocket.sent.length;
+    const dc = sheet.getByLabel("DC", { exact: true });
+    await dc.fill("1");
+    await dc.press("Enter");
+    await sheet.getByRole("radiogroup", { name: "Bree: fail, pass or skip" }).getByRole("radio", { name: "Fail", exact: true }).check({ force: true });
+    assert.equal(await sheet.getByLabel("Bree's total", { exact: true }).inputValue(), String(BREE_TOTAL));
+    assert.deepEqual(diceLines(dmSocket.state?.log), historical, "editing a DC draws no dice and rewrites no historical DC");
+    assert.ok(dmSocket.sent.slice(sent).every((frame) => JSON.parse(frame).t !== "op"), "local edits send no commands");
+    await dm.keyboard.press("Control+Shift+z");
+    await sheet.getByText(OUTCOME_RESTORED, { exact: true }).waitFor();
+    assert.equal(await sheet.getByRole("button", { name: /^Apply: / }).count(), 0);
+    assert.equal(saveOutcomes(dmSocket)[id]?.revision, 3);
+    await dm.keyboard.press("Control+z");
+    await sheet.getByText(OUTCOME_UNDONE, { exact: true }).waitFor();
+    await sheet.getByRole("button", { name: "Resume your edits", exact: true }).tap();
+    assert.equal(await dc.inputValue(), "1");
+    await dc.fill(String(DC));
+    await dc.press("Enter");
+    await shots.take(dm, "undo-scope-group-save-reopened-130");
+  });
+
+  test("undo-scope-offline: another device undoes while this page is offline, reload checks status, and a new device invents no choices", async () => {
+    const sheet = diceSheet(dm);
+    await sheet.getByRole("button", { name: /^Apply: / }).tap();
+    await sheet.getByText("Applied to 4. Undo takes it all back.", { exact: true }).waitFor();
+    const applied = Object.entries(saveOutcomes(dmSocket)).find(([, value]) => value.state === "applied");
+    assert.ok(applied);
+    await dmContext.setOffline(true);
+    try {
+      await ops.step("undo");
+      assert.equal(await sheet.getByRole("button", { name: /^Apply: / }).count(), 0, "offline cached receipts cannot unlock");
+    } finally {
+      await dmContext.setOffline(false);
+    }
+    await reopenRoom(dm);
+    await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+    await openSaveDice(dm);
+    await sheet.waitFor();
+    const open = sheet.getByRole("button", { name: "Open", exact: true }).first();
+    if (await open.isVisible()) await open.tap();
+    await sheet.getByText(OUTCOME_UNDONE, { exact: true }).waitFor();
+    assert.equal(saveOutcomes(dmSocket)[applied[0]]?.state, "undone");
+    const sent = dmSocket.sent.length;
+    const thirdContext = await browser.newContext({ viewport: PHONE, storageState: await dmContext.storageState(), isMobile: true, hasTouch: true });
+    try {
+      const third = await thirdContext.newPage();
+      await third.goto(`${server.origin}/r/${run.roomId}`);
+      await third.getByRole("status", { name: "Connected" }).first().waitFor();
+      await openSaveDice(third);
+      assert.equal(await diceSheet(third).getByText(OUTCOME_UNDONE, { exact: true }).count(), 0);
+      assert.equal(await diceSheet(third).getByRole("button", { name: /^Apply: / }).count(), 0, "status alone never manufactures a draft");
+    } finally {
+      await thirdContext.close();
+    }
+    assert.ok(dmSocket.sent.slice(sent).every((frame) => JSON.parse(frame).t !== "op"), "reconciliation sends no automatic command");
+    await shots.take(dm, "undo-scope-offline-reload-reopened");
+  });
+
+  test("undo-scope-reapply: each Apply gets a new plan and checkpoint, and explicit server/player/damage rerolls keep old Log facts", async () => {
+    const sheet = diceSheet(dm);
+    const before = Object.entries(saveOutcomes(dmSocket)).find(([, value]) => value.state === "undone");
+    assert.ok(before);
+    await sheet.getByRole("button", { name: /^Apply: / }).tap();
+    await sheet.getByText("Applied to 4. Undo takes it all back.", { exact: true }).waitFor();
+    const next = saveOutcomes(dmSocket)[before[0]];
+    assert.ok(next);
+    assert.notEqual(next.plan, before[1].plan);
+    assert.equal(next.revision, before[1].revision + 1);
+    await dm.keyboard.press("Control+z");
+    await sheet.getByText(OUTCOME_UNDONE, { exact: true }).waitFor();
+    const oldLines = structuredClone(diceLines(dmSocket.state?.log));
+    await sheet.getByRole("button", { name: "Roll saves again", exact: true }).tap();
+    await waitFor("fresh server save tags", () => diceLines(dmSocket.state?.log).length > oldLines.length || null);
+    const fresh = diceLines(dmSocket.state?.log).slice(oldLines.length);
+    assert.ok(fresh.every((line) => !oldLines.some((old) => old.tag === line.tag)), "rerolls use fresh tags");
+    assert.deepEqual(diceLines(dmSocket.state?.log).slice(0, oldLines.length), oldLines);
+    const asks = await waitFor("one new Bree request", () => Object.values(dmSocket.state?.rolls ?? {}).filter((ask) => ask.targets.some((target) => target.characterId === run.bree.characterId)).length === 1 ? Object.values(dmSocket.state!.rolls) : null);
+    assert.ok(asks.every((ask) => /save again/.test(ask.note ?? "")));
+    const card = player.locator('[aria-label="The DM asks for a roll"]').first();
+    await card.getByLabel("Total Bree rolled").fill(String(BREE_TOTAL));
+    await card.getByLabel("Total Bree rolled").press("Enter");
+    await waitFor("Bree's fresh answer", () => Object.values(dmSocket.state?.rolls ?? {}).some((ask) => ask.targets.some((target) => target.total === BREE_TOTAL)) || null);
+    const outcome = sheet.getByRole("group", { name: "Outcome" });
+    if ((await outcome.count()) === 0) await sheet.getByRole("button", { name: "Edit", exact: true }).tap();
+    const logged = diceLines(dmSocket.state?.log).length;
+    await outcome.getByRole("button", { name: "Roll again", exact: true }).tap();
+    await waitFor("explicit damage reroll", () => diceLines(dmSocket.state?.log).length > logged || null);
+    // Discard closes page-owned asks without applying this new random result to later fixtures.
+    await sheet.getByRole("button", { name: "Discard", exact: true }).tap();
+    await sheet.getByText(/^Discard the /).waitFor();
+    await sheet.getByRole("button", { name: "Discard", exact: true }).tap();
+  });
+
   test("6. the wyrmling's Fire Breath Group save opens on no creature, and the goblins selected after it become its rows (W7B-P-1)", async () => {
     // The applied page and the group of four from the steps before give way first.
     if (await diceSheet(dm).isVisible()) await diceSheet(dm).getByRole("button", { name: "Close Dice" }).tap();
@@ -530,7 +635,47 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     await sheet.getByText("Applied to 3. Undo takes it all back.").waitFor();
     await waitFor(`${one.name} at ${HP - 5}`, () => (goblinHp(one.id) === HP - 5 ? true : null));
     for (const g of run.goblins.slice(1)) await waitFor(`${g.name} at ${HP - 10}`, () => (goblinHp(g.id) === HP - 10 ? true : null));
+    const source = dmSocket.state!.tokens[run.dragon.id]!.actor;
+    assert.ok("inline" in source);
+    assert.equal(source.inline.uses?.["actions:fire-breath"]?.used, 1, "Apply embeds the recharge spend in its one outcome");
     await shots.take(dm, "groupsave-no-save-own-amount-130");
+  });
+
+  test("undo-scope-partial: an HP Log correction and refused whole Undo leave the page locked", async () => {
+    const sheet = diceSheet(dm);
+    const record = Object.entries(saveOutcomes(dmSocket)).find(([, value]) => value.state === "applied");
+    assert.ok(record);
+    const hpLine = dmSocket.state?.log.findLast((line) => line.data?.type === "hp" && line.data.tokenId === run.goblins[0]!.id);
+    assert.ok(hpLine);
+    await ops.send({ t: "undo", log: hpLine.id });
+    await waitFor("HP correction restores just the one target", () => goblinHp(run.goblins[0]!.id) === HP || null);
+    assert.equal(await sheet.getByText("Applied to 3. Undo takes it all back.", { exact: true }).count(), 1);
+    assert.equal(await sheet.getByRole("button", { name: /^Apply: / }).count(), 0);
+    await assert.rejects(ops.step("undo"), /changed|since/i);
+    assert.equal(saveOutcomes(dmSocket)[record[0]]?.state, "applied");
+    assert.equal(saveOutcomes(dmSocket)[record[0]]?.revision, record[1].revision);
+    assert.equal(await sheet.getByText(OUTCOME_UNDONE, { exact: true }).count(), 0);
+    await shots.take(dm, "undo-scope-partial-correction-locked");
+  });
+
+  test("undo-scope-missing-checkpoint: a retained applied draft without its checkpoint stays locked after reload", async () => {
+    await dm.evaluate((roomId) => {
+      const key = `rvtt.groupSave.${roomId}`;
+      const raw = sessionStorage.getItem(key);
+      if (!raw) throw new Error("expected an applied draft");
+      const draft = JSON.parse(raw) as { beforeApply?: unknown };
+      delete draft.beforeApply;
+      sessionStorage.setItem(key, JSON.stringify(draft));
+    }, run.roomId);
+    await reopenRoom(dm);
+    await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+    await openSaveDice(dm);
+    const sheet = diceSheet(dm);
+    const open = sheet.getByRole("button", { name: "Open", exact: true }).first();
+    if (await open.isVisible()) await open.tap();
+    await sheet.getByText(OUTCOME_UNAVAILABLE, { exact: true }).waitFor();
+    assert.equal(await sheet.getByRole("button", { name: /^Apply: / }).count(), 0);
+    await shots.take(dm, "undo-scope-missing-checkpoint-locked");
     await sheet.getByRole("button", { name: "Done", exact: true }).tap();
     await sheet.getByRole("button", { name: "Close Dice" }).tap();
   });
@@ -688,6 +833,53 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
       for (const p of poisons) await ops.send({ t: "actor.effect.remove", target: { tokenId: p.token }, effectId: p.effect }).catch(() => undefined);
     }
     await diceSheet(dm).getByRole("button", { name: "Close Dice" }).tap();
+  });
+
+  test("undo-scope-zero: 2 fire, pass and resistance changes no entity, local storage failure retains memory, and Undo/Redo reopen/relock without player notices", async () => {
+    const resistant = uuidv7();
+    await ops.send({ t: "monster.create", monster: { id: resistant, ...blockOf(customMonster(resistant, { resistances: "Fire" })) } });
+    for (const goblin of run.goblins.slice(0, 2)) await ops.send({ t: "token.update", tokenId: goblin.id, patch: { actor: { monsterId: resistant } } });
+    await selectGoblins([0, 1]);
+    const rolls = await openGroupRolls();
+    await rolls.getByRole("button", { name: "DEX save for 2", exact: true }).tap();
+    const sheet = diceSheet(dm);
+    const creatures = sheet.getByRole("group", { name: "Creatures" });
+    for (const goblin of run.goblins.slice(0, 2)) {
+      await creatures.getByRole("radiogroup", { name: `${goblin.name}: fail, pass or skip` }).getByRole("radio", { name: "Pass", exact: true }).check({ force: true });
+    }
+    if ((await sheet.getByRole("group", { name: "Outcome" }).count()) === 0) await sheet.getByRole("button", { name: "Edit", exact: true }).tap();
+    await sheet.getByLabel("Damage", { exact: true }).fill("2 fire");
+    await sheet.getByLabel("Damage", { exact: true }).blur();
+    await sheet.getByLabel("On a pass", { exact: true }).selectOption("half");
+    const hp = run.goblins.slice(0, 2).map((goblin) => goblinHp(goblin.id));
+    const existing = new Set(Object.keys(saveOutcomes(dmSocket)));
+    await dm.evaluate(() => {
+      const original = Storage.prototype.setItem;
+      (globalThis as unknown as { restoreSaveStorage: () => void }).restoreSaveStorage = () => { Storage.prototype.setItem = original; };
+      Storage.prototype.setItem = function(key: string, value: string) {
+        if (key.startsWith("rvtt.groupSave.")) throw new Error("simulated session storage failure");
+        original.call(this, key, value);
+      };
+    });
+    try {
+      await sheet.getByRole("button", { name: /^Apply: / }).tap();
+      await sheet.getByText("This save can reopen here until this tab closes.", { exact: true }).waitFor();
+      const current = await waitFor("tracked zero-change Apply", () => Object.entries(saveOutcomes(dmSocket)).sort((a, b) => b[1].seq - a[1].seq).find(([id, value]) => !existing.has(id) && value.state === "applied" && value.revision === 1));
+      assert.deepEqual(run.goblins.slice(0, 2).map((goblin) => goblinHp(goblin.id)), hp);
+      const playerBefore = structuredClone(playerSocket.state);
+      await ops.step("undo");
+      await sheet.getByText(OUTCOME_UNDONE, { exact: true }).waitFor();
+      assert.equal(saveOutcomes(dmSocket)[current[0]]?.state, "undone");
+      assert.deepEqual(playerSocket.state, playerBefore, "lifecycle-only Undo writes no player notice or counter");
+      await ops.step("redo");
+      await sheet.getByText(OUTCOME_RESTORED, { exact: true }).waitFor();
+      assert.equal(saveOutcomes(dmSocket)[current[0]]?.revision, 3);
+      assert.deepEqual(playerSocket.state, playerBefore);
+      assertPrivateOutcome(playerSocket, current[0], current[1].plan);
+      await shots.take(dm, "undo-scope-zero-relocked-memory-only");
+    } finally {
+      await dm.evaluate(() => (globalThis as unknown as { restoreSaveStorage: () => void }).restoreSaveStorage());
+    }
   });
 
   test("8. nothing went wrong in the browsers", () => {

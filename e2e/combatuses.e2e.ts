@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { uuidv7 } from "#shared/ids.ts";
+import { assertPrivateOutcome, saveOutcomes } from "./helpers/saveOutcomes.ts";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -565,6 +567,48 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     const tracker = phone.locator("[data-round-section]").first();
     await tracker.getByText("Fire Breath used", { exact: true }).first().waitFor();
     await closeSheets(phone);
+  });
+
+  test("undo-scope-recharge: an already-used embedded recharge stays spent after whole Undo on both DM devices", async () => {
+    const id = uuidv7();
+    const previous = structuredClone(dragon()?.uses?.[BREATH]);
+    assert.ok(previous);
+    const hp = actorOf(deskSocket.state, run.goblin)!.hp.cur;
+    await ops.send({ t: "actor.outcome", label: "Fire Breath", plan: id, page: { id, expectRevision: 0 }, recharge: { target: { tokenId: run.dragon }, use: { kind: "ability", key: BREATH, name: "Fire Breath", limit: "recharge", max: 1, min: 5, ifReady: true } }, targets: [{ target: { tokenId: run.goblin }, amount: 1 }] });
+    await waitFor("tracked outcome on both DM devices", () => saveOutcomes(deskSocket)[id]?.state === "applied" && saveOutcomes(phoneSocket)[id]?.state === "applied" || null);
+    assert.deepEqual(dragon()?.uses?.[BREATH], previous);
+    await ops.step("undo");
+    await waitFor("whole outcome undone on both devices", () => saveOutcomes(deskSocket)[id]?.state === "undone" && saveOutcomes(phoneSocket)[id]?.state === "undone" || null);
+    assert.equal(actorOf(deskSocket.state, run.goblin)!.hp.cur, hp);
+    assert.deepEqual(dragon()?.uses?.[BREATH], previous, "Undo returns only a use this outcome spent");
+    assertPrivateOutcome(patSocket, id);
+    const group = await rowUses(phone, DRAGON);
+    await group.locator("[data-use-row=ability]").filter({ hasText: "Fire Breath" }).getByText(", Used", { exact: true }).waitFor();
+    await shots.take(phone, "undo-scope-recharge-already-used");
+    await closeSheets(phone);
+  });
+
+  test("undo-scope-ready-recharge: one outcome restores both targets, conditions, Resistance and its newly consumed recharge", async () => {
+    const use = { kind: "ability", key: BREATH, name: "Fire Breath", limit: "recharge", max: 1, min: 5, ifReady: true };
+    await ops.send({ t: "actor.use", target: { tokenId: run.dragon }, use, back: true });
+    await waitFor("Fire Breath ready before Apply", () => !dragon()?.uses?.[BREATH] || null);
+    const beforeDragon = structuredClone(dragon());
+    const beforeGoblin = structuredClone(actorOf(deskSocket.state, run.goblin));
+    const id = uuidv7();
+    await ops.send({ t: "actor.outcome", label: "Fire Breath", plan: id, page: { id, expectRevision: 0 }, recharge: { target: { tokenId: run.dragon }, use }, targets: [
+      { target: { tokenId: run.dragon }, amount: 1, resist: true, effects: [{ id: uuidv7(), key: "frightened" }] },
+      { target: { tokenId: run.goblin }, amount: 1, effects: [{ id: uuidv7(), key: "frightened" }] },
+    ] });
+    await waitFor("recharge and Resistance committed together", () => dragon()?.uses?.[BREATH]?.used === 1 && dragon()?.legendary?.resistUsed === beforeDragon!.legendary!.resistUsed + 1 || null);
+    assert.ok(actorOf(deskSocket.state, run.goblin)?.effects.some((effect) => effect.key === "frightened"));
+    await ops.step("undo");
+    await waitFor("whole lifecycle undone", () => saveOutcomes(deskSocket)[id]?.state === "undone" || null);
+    assert.deepEqual(dragon(), beforeDragon);
+    assert.deepEqual(actorOf(deskSocket.state, run.goblin), beforeGoblin);
+    assertPrivateOutcome(patSocket, id);
+    // Return the fixture to the used breath that the next recharge-turn step expects.
+    await ops.send({ t: "actor.use", target: { tokenId: run.dragon }, use });
+    await waitFor("the original used-breath fixture restored", () => dragon()?.uses?.[BREATH]?.used === 1 || null);
   });
 
   test("ic2-bar-2. the bar's play row leads Uses with its icon and Conditions keeps its words alone, on no more lines than without the icon, and the strip's Uses keeps its words alone, at 1280 x 800 at 85% to 115%, on phones at 100% and 130% and on a phone held sideways (docs/design-v1-icons-2.md 8)", async () => {

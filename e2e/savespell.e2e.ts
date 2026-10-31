@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { OUTCOME_RESTORED, OUTCOME_UNDONE, assertPrivateOutcome, saveOutcomes } from "./helpers/saveOutcomes.ts";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -403,6 +404,27 @@ describe("raccoon-vtt a player's save spell", { timeout: 600_000 }, () => {
     await dice.getByText(/asked the DM for saves\. Waiting\./i).waitFor({ state: "detached" });
     await shots.take(pat, "savespell-resolved");
     await closeSheet(pat, "Dice");
+  });
+
+  test("undo-scope-cast: whole Undo restores the exact player's ask and retained choices, and Redo closes it once", async () => {
+    const areas = sheet(dm, "Areas");
+    const record = Object.entries(saveOutcomes(dmSocket)).find(([, value]) => value.state === "applied");
+    assert.ok(record);
+    const originalRolls = structuredClone(diceLines(dmSocket.state?.log));
+    await ops.step("undo");
+    await areas.getByText(OUTCOME_UNDONE, { exact: true }).waitFor();
+    await waitFor("the original Fireball ask waiting again", () => Object.values(dmSocket.state?.casts ?? {}).find((ask) => ask.spell === "Fireball"));
+    const castId = Object.keys(dmSocket.state!.casts)[0]!;
+    await waitFor("the authorized caster sees the restored ask", () => patSocket.state?.casts[castId]);
+    assert.equal(saveOutcomes(dmSocket)[record[0]]?.state, "undone");
+    assert.deepEqual(diceLines(dmSocket.state?.log), originalRolls, "reopening draws no dice");
+    assertPrivateOutcome(patSocket, record[0], record[1].plan);
+    await shots.take(dm, "undo-scope-restored-cast-page");
+    await ops.step("redo");
+    await areas.getByText(OUTCOME_RESTORED, { exact: true }).waitFor();
+    await waitFor("the same cast resolved again", () => !dmSocket.state?.casts[castId] || null);
+    assert.equal(saveOutcomes(dmSocket)[record[0]]?.revision, 3);
+    assert.equal(await areas.getByRole("button", { name: /^Apply: / }).count(), 0);
     await areas.getByRole("button", { name: "Done", exact: true }).tap();
     await closeSheet(dm, "Areas");
   });

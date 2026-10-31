@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { uuidv7 } from "#shared/ids.ts";
+import { keys } from "#shared/keys.ts";
+import { guardHash } from "#shared/reducer/tx.ts";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -677,6 +680,42 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await c.waitFor();
     assert.equal(await focused(player), "card");
     await pickTool(player, "Select");
+    await closeAll();
+  });
+
+  test("undo-scope-replacement: an unselected answer survives Close/Undo Close and stale Ask again, then explicit retry leaves one card", async () => {
+    await closeAll();
+    const bob = uuidv7();
+    const owners = dmSocket.state!.characters[run.thornCharId]!.ownerIds;
+    await ops.send({ t: "character.create", character: { id: bob, name: "Bob", size: "medium", ownerIds: owners, actor: actor() } });
+    const old = uuidv7();
+    const request = { id: old, test: { kind: "save", choices: [{ ability: "dex" }] }, dc: 13, dcShown: true, resultShown: true, note: "Fireball", targets: [{ characterId: run.thornCharId }, { characterId: bob }] };
+    await ops.send({ t: "roll.ask", reason: "savePage", request });
+    run.open.push(old);
+    await waitFor("two-row request", () => dmSocket.state?.rolls[old]);
+    const original = dmSocket.state!.rolls[old]!;
+    const fresh = uuidv7();
+    const replacement = { t: "roll.ask", reason: "savePage", replaces: [{ id: old, expectHash: guardHash(keys.roll(old), original) }], request: { ...request, id: fresh, note: "Fireball: save again", targets: [{ characterId: run.thornCharId }, { characterId: bob }] } };
+    const card = player.locator('[aria-label="The DM asks for a roll"]').filter({ has: player.getByLabel("Total Bob rolled") });
+    await card.getByLabel("Total Bob rolled").fill("18");
+    await card.getByLabel("Total Bob rolled").press("Enter");
+    await waitFor("Bob answered", () => dmSocket.state?.rolls[old]?.targets.find((target) => target.characterId === bob)?.total === 18 || null);
+    await ops.send({ t: "roll.close", rollIds: [old] });
+    await ops.step("undo");
+    await waitFor("request restored at its original revision", () => dmSocket.state?.rolls[old]?.rev === original.rev || null);
+    await assert.rejects(ops.send(replacement), /changed|since|request/i);
+    assert.equal(dmSocket.state!.rolls[old]!.targets.find((target) => target.characterId === bob)?.total, 18);
+    assert.equal(dmSocket.state!.rolls[fresh], undefined);
+    const current = dmSocket.state!.rolls[old]!;
+    await ops.send({ ...replacement, replaces: [{ id: old, expectHash: guardHash(keys.roll(old), current) }], request: { ...replacement.request, targets: [{ characterId: run.thornCharId }] } });
+    run.open.push(fresh);
+    await waitFor("only one fresh card for Thorn", () => {
+      const requests = Object.values(playerSocket.state?.rolls ?? {});
+      return !requests.some((r) => r.id === old) && requests.filter((r) => r.targets.some((target) => target.characterId === run.thornCharId)).length === 1 || null;
+    });
+    assert.equal(dmSocket.state!.rolls[fresh]!.targets.length, 1);
+    assert.ok(dmSocket.state!.log.some((line) => line.data?.type === "roll" && line.data.characterId === bob && line.data.total === 18));
+    await shots.take(player, "undo-scope-replacement-one-card");
     await closeAll();
   });
 

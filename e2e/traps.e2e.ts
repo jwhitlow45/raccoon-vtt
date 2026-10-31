@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { OUTCOME_RESTORED, OUTCOME_UNDONE, assertPrivateOutcome, saveOutcomes } from "./helpers/saveOutcomes.ts";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -473,6 +474,27 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await card.waitFor({ state: "detached" });
     assert.equal(trap(dmSocket)?.found, false, "still unfound");
     assert.equal(patHeardOfTrap(), false, "a frame to Pat named the unfound trap");
+  });
+
+  test("undo-scope-trap: whole Undo restores the same occurrence without rerunning its pit, and Redo relocks", async () => {
+    const record = Object.entries(saveOutcomes(dmSocket)).find(([, value]) => value.state === "applied");
+    assert.ok(record);
+    const position = { x: token(dmSocket, run.thorn)?.x, y: token(dmSocket, run.thorn)?.y, elevation: token(dmSocket, run.thorn)?.elevation };
+    const springings = state(dmSocket)?.trapLog.map((line) => line.id);
+    await ops.step("undo");
+    await dm.getByText(OUTCOME_UNDONE, { exact: true }).waitFor();
+    const due = await waitFor("the exact old occurrence", () => trap(dmSocket)?.rig?.due?.[0]);
+    assert.ok(springings?.includes(due.id));
+    assert.equal(thornHp(), HP);
+    assert.deepEqual({ x: token(dmSocket, run.thorn)?.x, y: token(dmSocket, run.thorn)?.y, elevation: token(dmSocket, run.thorn)?.elevation }, position);
+    assert.deepEqual(state(dmSocket)?.trapLog.map((line) => line.id), springings, "Undo never springs the trap again");
+    assertPrivateOutcome(patSocket, record[0], record[1].plan);
+    assert.equal(patHeardOfTrap(), false);
+    await shots.take(dm, "undo-scope-trap-reopened");
+    await ops.step("redo");
+    await dm.getByText(OUTCOME_RESTORED, { exact: true }).waitFor();
+    await waitFor("the occurrence settled again", () => !trap(dmSocket)?.rig?.due || null);
+    assert.equal(saveOutcomes(dmSocket)[record[0]]?.revision, 3);
   });
 
   test("tr-5. the DM marks the pit found in its pane, and Pat's map shows it by name, never its rig", async () => {

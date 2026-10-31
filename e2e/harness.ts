@@ -327,6 +327,8 @@ export class SocketWatch {
   you: { memberId: string; role: "dm" | "player"; sceneId: string | null } | null = null;
   /** Every frame the page received on a room socket, as text. */
   readonly received: string[] = [];
+  /** Commands let browser tests distinguish reconciliation from an automatic resend. */
+  readonly sent: string[] = [];
   /** Payload sizes of every snapshot, in bytes of JSON. */
   readonly snapshotBytes: number[] = [];
   /** Response headers of each room socket's handshake, lowercased. */
@@ -345,6 +347,7 @@ export class SocketWatch {
       if (!ws.url().includes("/ws?room=") || /[?&]as=(?!display)/.test(ws.url())) return;
       this.sockets++;
       ws.on("framereceived", ({ payload }) => this.receive(typeof payload === "string" ? payload : payload.toString("utf8")));
+      ws.on("framesent", ({ payload }) => this.sent.push(typeof payload === "string" ? payload : payload.toString("utf8")));
       ws.on("close", () => this.closes++);
     });
     // Playwright's WebSocket object has no headers, so the handshake comes
@@ -909,6 +912,7 @@ export class OpSocket {
   private end(why: string): void {
     this.gone ??= why;
     for (const [n, w] of [...this.waiting]) w.reject(new Error(`op ${n} got no answer: ${this.gone}`));
+    for (const wake of [...this.historyWaiters]) wake();
   }
 
   static async open(input: { origin: string; roomId: string; cookie: string }): Promise<OpSocket> {
@@ -945,6 +949,12 @@ export class OpSocket {
     const covered = this.next - 1;
     const summary = await new Promise<HistoryMessage>((resolve, reject) => {
       const check = () => {
+        if (this.gone) {
+          clearTimeout(timer);
+          this.historyWaiters.delete(check);
+          reject(new Error(this.gone));
+          return;
+        }
         if (!this.history || this.history.watermark < covered) return;
         clearTimeout(timer);
         this.historyWaiters.delete(check);
@@ -984,6 +994,7 @@ export class OpSocket {
   }
 
   close(): void {
+    this.end("the op socket closed locally");
     this.ws.close(1000);
   }
 }
