@@ -100,7 +100,7 @@ const ISO_TEST_FLAG = "__rvttIsoTest";
 
 type View = "topDown" | "isometric";
 /** A row's median and largest frame, and for a build's frames every one, as the gate holds each (section 6). */
-type Ms = { median: number; max: number; n: number; frames?: number[] };
+type Ms = { median: number; max: number; n: number; frames?: number[]; rounds?: number[] };
 export type BenchRow = { row: string; view: View; ms: Ms };
 
 function stats(times: readonly number[]): Ms {
@@ -276,23 +276,26 @@ function giant(sceneId: string): Built {
 
 /**
  * A fully raised 40 by 40 hex scene on one orientation
- * (docs/design-v1-iso-hex-relief.md 9): its 1,778 hexes all off the
+ * (docs/design-v1-iso-hex-relief.md 9), or the same on squares
+ * (docs/design-v1-relief-pan.md 9): its 1,778 hexes all off the
  * ground, a flat-topped 10 ft terrace over its west third, hexes
  * alternating 5 ft and 15 ft over the middle so every side shows, a
  * mixed field of pits, and a seeded field from -100 ft to 200 ft in the
  * east. On it, a wall across several levels, 40 creatures of mixed sizes
  * and the four areas of the area design's cost section.
  */
-export function hexRelief(orient: "rows" | "columns") {
+export function hexRelief(orient: "rows" | "columns" | "squares") {
   return (sceneId: string, dmId: string): Built => {
-    const G = { shape: "hex", orient } as const;
+    const G = orient === "squares" ? null : ({ shape: "hex", orient } as const);
     const bounds = { w: 40, h: 40 };
-    const ops: Op[] = [{ t: "scene.update", sceneId, patch: { bounds, fogEnabled: false, gridShape: orient === "rows" ? "hexRows" : "hexColumns" } }];
-    let seed = orient === "rows" ? 0x40 : 0x41;
+    const ops: Op[] = [{ t: "scene.update", sceneId, patch: { bounds, fogEnabled: false, ...(G ? { gridShape: orient === "rows" ? "hexRows" : "hexColumns" } : {}) } }];
+    let seed = orient === "rows" ? 0x40 : orient === "columns" ? 0x41 : 0x42;
     const rand = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
     const byFeet = new Map<number, string[]>();
-    for (const h of sceneHexes(G, bounds)) {
-      const c = hexCenter(G, h);
+    // On squares the same rule over every square, by its middle (docs/design-v1-relief-pan.md 9).
+    const cellsOf = G ? sceneHexes(G, bounds) : cells(0, 0, bounds.w, bounds.h).map((k) => ({ col: Number(k.split(",")[0]), row: Number(k.split(",")[1]) }));
+    for (const h of cellsOf) {
+      const c = G ? hexCenter(G, h) : { x: h.col + 0.5, y: h.row + 0.5 };
       const feet = c.x < 13 ? 10 : c.x < 26 ? ((h.col + h.row) % 2 === 0 ? 5 : 15) : c.y < 14 ? -5 * (1 + Math.floor(rand() * 4)) : 5 * (Math.floor(rand() * 61) - 20) || 5;
       byFeet.set(feet, [...(byFeet.get(feet) ?? []), `${h.col},${h.row}`]);
     }
@@ -412,6 +415,50 @@ async function timed(page: Page, cdp: CDPSession, steps: number, act: (i: number
   return out;
 }
 
+type Timer = (page: Page, cdp: CDPSession, steps: number, act: (i: number) => Promise<void>) => Promise<number[]>;
+
+/** What a frame did, read from the test hook (relief/isoTest.ts), which a build before the kept picture lacks. */
+export type FrameParts = { ms: number; whole: boolean; sliced: boolean; rendered: boolean };
+
+type HookCounts = { whole: number; slices: number; boardCommits: number };
+
+function hookCounts(page: Page): Promise<HookCounts | null> {
+  return page.evaluate(() => (globalThis as unknown as { __rvttIsoHook?: { kept?(): HookCounts | null } }).__rvttIsoHook?.kept?.() ?? null);
+}
+
+/**
+ * Like `timed`, but each frame after a step on its own, with what it did.
+ * Background work runs in the frames after a move, so a move's frames
+ * summed would hold several slices against one frame's budget. The hook is
+ * read between frames, outside the busy time counted.
+ */
+function timedEachFrame(parts: FrameParts[], settleFrames = 4): Timer {
+  return async (page, cdp, steps, act) => {
+    const out: number[] = [];
+    let counts = await hookCounts(page);
+    for (let i = 0; i < steps; i++) {
+      let last = await busy(cdp);
+      await act(i);
+      for (let f = 0; f < settleFrames; f++) {
+        await frames(page, 1);
+        const ms = (await busy(cdp)) - last;
+        out.push(ms);
+        const next = await hookCounts(page);
+        if (counts && next) parts.push({ ms, whole: next.whole > counts.whole, sliced: next.slices > counts.slices, rendered: next.boardCommits > counts.boardCommits });
+        counts = next;
+        last = await busy(cdp);
+      }
+    }
+    return out;
+  };
+}
+
+/** The parts of the frames past `over` ms: how many there were, and how many of them repainted whole, ran a background slice or rendered the board. */
+export function partsPast(parts: readonly FrameParts[], over: number): { frames: number; whole: number; sliced: number; rendered: number; slicedAll: number } {
+  const past = parts.filter((p) => p.ms > over);
+  return { frames: past.length, whole: past.filter((p) => p.whole).length, sliced: past.filter((p) => p.sliced).length, rendered: past.filter((p) => p.rendered).length, slicedAll: parts.filter((p) => p.sliced).length };
+}
+
 /**
  * The main thread's busy time of each frame from `act` on until `done`
  * holds, and how long that took: a build's frames and none of the idle
@@ -504,14 +551,31 @@ function startAt(dm: Socket, world: { x: number; y: number }, zoom: number | "fi
   return dm.op({ t: "scene.update", sceneId: dm.sceneId, patch: { defaultView: zoom === "fit" ? null : { x: world.x, y: world.y, zoom } } });
 }
 
-async function touchPan(page: Page, cdp: CDPSession, steps: number): Promise<number[]> {
+/** The first point down the canvas's left edge, from its middle outward, where a press meets only the canvas and no shape that listens. The middle if none is clear. */
+function emptySpot(page: Page, box: { x: number; y: number; width: number; height: number }): Promise<{ x: number; y: number }> {
+  return page.evaluate((b) => {
+    type Stage = { width(): number; listening(): boolean; getIntersection(p: { x: number; y: number }): unknown };
+    const konva = (globalThis as unknown as { Konva: { stages: Stage[] } }).Konva;
+    const doc = (globalThis as unknown as { document: { elementFromPoint(x: number, y: number): { tagName: string } | null } }).document;
+    const stage = konva.stages.find((s) => s.width() > 0 && s.listening());
+    for (const f of [0.45, 0.35, 0.55, 0.25, 0.65, 0.15, 0.75]) {
+      const p = { x: b.x + 30, y: b.y + b.height * f };
+      if (doc.elementFromPoint(p.x, p.y)?.tagName !== "CANVAS") continue;
+      if (stage && stage.getIntersection({ x: p.x - b.x, y: p.y - b.y })) continue;
+      return p;
+    }
+    return { x: b.x + 30, y: b.y + b.height * 0.45 };
+  }, box);
+}
+
+async function touchPan(page: Page, cdp: CDPSession, steps: number, time: Timer = timed): Promise<number[]> {
   const box = await boardBox(page);
-  // An empty spot on screen: the middle of the canvas's left edge, with no token under it at every camera here.
-  const start = { x: box.x + 30, y: box.y + box.height * 0.45 };
+  // An empty spot by the canvas's left edge, so the press pans rather than picks a creature, as one does at fit in Isometric on the hex fixtures.
+  const start = await emptySpot(page, box);
   const before = await stageAt(page);
   await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ ...start, id: 0 }] });
   await frames(page, 2);
-  const out = await timed(page, cdp, steps, (i) => cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: start.x + (i + 1) * 9, y: start.y + (i + 1) * 4, id: 0 }] }).then(() => {}));
+  const out = await time(page, cdp, steps, (i) => cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: start.x + (i + 1) * 9, y: start.y + (i + 1) * 4, id: 0 }] }).then(() => {}));
   const moved = await stageAt(page);
   // Back where it started, so every round, and the rows after, see the same camera.
   await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ ...start, id: 0 }] });
@@ -551,8 +615,10 @@ function countGroundDraws(page: Page): Promise<void> {
  * the patterns it makes, and the ground stage's draws. The counting comes
  * off again before the next timed row, so it slows none.
  */
-async function canvasCalls(page: Page, cdp: CDPSession, steps: number): Promise<{ fills: number; cuts: number; patterns: number; ground: number }> {
+async function canvasCalls(page: Page, cdp: CDPSession, steps: number): Promise<{ fills: number; cuts: number; patterns: number; ground: number; kept: Record<string, number> | null }> {
   await countGroundDraws(page);
+  const keptNow = () => page.evaluate(() => (globalThis as unknown as { __rvttIsoHook?: { kept?(): Record<string, number> | null } }).__rvttIsoHook?.kept?.() ?? null);
+  const before = await keptNow();
   await page.evaluate(() => {
     type Proto = Record<string, (...a: unknown[]) => unknown>;
     const g = globalThis as unknown as { CanvasRenderingContext2D: { prototype: Proto }; __benchCanvas?: { n: Record<string, number>; kept: Proto } };
@@ -580,7 +646,26 @@ async function canvasCalls(page: Page, cdp: CDPSession, steps: number): Promise<
   });
   const ground = await groundDraws(page);
   const per = (v: number) => Math.round((10 * v) / steps) / 10;
-  return { fills: per(n.fill! + n.stroke!), cuts: per(n.clip! + n.drawImage!), patterns: per(n.createPattern!), ground: per(ground) };
+  // The kept picture's counts (relief/isoTest.ts kept): absent on a build before it. A pan's two return moves count with the timed ones.
+  const after = await keptNow();
+  let kept: Record<string, number> | null = null;
+  if (before && after) {
+    const moves = steps + 2;
+    const d = (k: string) => (after[k] ?? 0) - (before[k] ?? 0);
+    const scrolls = Math.max(1, d("scrolls"));
+    const share = (k: string) => Math.round((1000 * d(k)) / scrolls) / 10;
+    kept = {
+      "whole repaints": Math.round((100 * d("whole")) / moves) / 100,
+      "scroll strips, % of the canvas": share("bands"),
+      "ground-edge repair, % of the canvas": share("repair"),
+      "strips and repair together, % of the canvas": share("union"),
+      "toned boxes": Math.round((10 * d("toned")) / Math.max(1, d("whole") + d("scrolls"))) / 10,
+      "board renders": Math.round((100 * d("boardCommits")) / moves) / 100,
+      "map stage renders": Math.round((100 * d("mapCommits")) / moves) / 100,
+      "slices in a frame that repainted whole": d("slicesInWhole"),
+    };
+  }
+  return { fills: per(n.fill! + n.stroke!), cuts: per(n.clip! + n.drawImage!), patterns: per(n.createPattern!), ground: per(ground), kept };
 }
 
 function groundDraws(page: Page): Promise<number> {
@@ -740,6 +825,7 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       ["giant", giant],
       ["hexRows", hexRelief("rows")],
       ["hexColumns", hexRelief("columns")],
+      ["squares", hexRelief("squares")],
     ] as const) {
       const room = await createRoom(page, `Bench iso ${kind} ${stamp}`);
       rooms.push(room);
@@ -790,6 +876,22 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       const all: number[] = [];
       for (let r = 0; r < ROUNDS; r++) all.push(...(await run()));
       return all;
+    };
+    /** A pan row: its moves, and each counted round's largest move, which the largest-move gate pairs with Top-down's (D-261030-538). */
+    const addPan = async (row: string, run: () => Promise<number[]>) => {
+      if (opts.only && !opts.only.some((o) => row.includes(o))) return;
+      const maxes: number[] = [];
+      const all = await throttled(async () => {
+        await run();
+        const out: number[] = [];
+        for (let r = 0; r < ROUNDS; r++) {
+          const got = await run();
+          maxes.push(Math.max(...got));
+          out.push(...got);
+        }
+        return out;
+      });
+      rows.push({ row, view, ms: { ...stats(all), rounds: maxes } });
     };
     const throttled = async <T>(run: () => Promise<T>) => {
       await cdp.send("Emulation.setCPUThrottlingRate", { rate: CPU_SLOWDOWN });
@@ -874,6 +976,9 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       const { scene } = built.caps!;
       await open("caps", "fit");
       await add("pan, caps, fit", () => throttled(() => rounds(() => touchPan(page, cdp, STEPS))));
+      // The caps at 12 px, its largest move reported, not gated (D-261030-538).
+      await open("caps", 12);
+      await addPan("pan, caps, 12 px", () => touchPan(page, cdp, STEPS));
       await open("caps", 40);
       await add("pan, caps, 40 px", () => throttled(() => rounds(() => touchPan(page, cdp, STEPS))));
       await select(page, scene.group!);
@@ -953,21 +1058,61 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       if (view === "isometric") rows.push({ row: GIANT_STOOD_ROW, view, ms: stats(builds.slice(1)) });
     }
 
-    // The fully raised hex scenes, each orientation: pans at the zooms around the threshold and at fit, a local drag, and in Isometric a turn and a 40 ft cube coming in.
-    for (const orient of ["rows", "columns"] as const) {
-      const kind = orient === "rows" ? "hexRows" : "hexColumns";
+    // The fully raised scenes, each hex orientation and squares: pans at the zooms around the threshold and at fit, a local drag, and in Isometric a turn and a 40 ft cube coming in.
+    for (const orient of ["rows", "columns", "squares"] as const) {
+      const kind = orient === "rows" ? "hexRows" : orient === "columns" ? "hexColumns" : "squares";
       const { scene } = built[kind]!;
-      for (const zoom of [40, 12, "fit"] as const) {
+      for (const zoom of [40, 12, "fit", 24, 23] as const) {
+        // 23 and 24 px are Low power's: heights lie flat below 24 px a cell there and stand from it. The page reloads with the setting on.
+        const low = zoom === 23 || zoom === 24;
+        await page.evaluate((on) => (on ? localStorage.setItem("rvtt.lowPower", "on") : localStorage.removeItem("rvtt.lowPower")), low);
         await open(kind, zoom);
-        const pan = hexRow(orient, `pan, ${zoom === "fit" ? "fit" : `${zoom} px`}`);
-        await add(pan, () => throttled(() => rounds(() => touchPan(page, cdp, STEPS))));
-        if (view === "isometric" && zoom !== "fit" && (!opts.only || opts.only.some((o) => pan.includes(o)))) {
+        const pan = hexRow(orient, `pan, ${zoom === "fit" ? "fit" : `${zoom} px`}${low ? ` in Low power, ${zoom === 24 ? "standing" : "flat"}` : ""}`);
+        await addPan(pan, () => touchPan(page, cdp, STEPS));
+        if (view === "isometric" && (zoom === 40 || zoom === 12) && (!opts.only || opts.only.some((o) => pan.includes(o)))) {
           const c = await throttled(() => canvasCalls(page, cdp, STEPS));
           const count = (what: string, v: number) => rows.push({ row: hexRow(orient, `pan, ${zoom} px, ${what} a frame (calls, not ms)`), view, ms: { median: v, max: v, n: STEPS } });
           count("fills and strokes", c.fills);
           count("clips and image copies", c.cuts);
           count("patterns made", c.patterns);
           count("ground stage draws", c.ground);
+          if (c.kept) for (const [what, v] of Object.entries(c.kept)) count(what, v);
+        }
+      }
+      await page.evaluate(() => localStorage.removeItem("rvtt.lowPower"));
+      if (orient === "rows") {
+        // With the walker's action bar showing, as the DM's page shows it: the bar renders with the camera the canvas last drew, each move.
+        for (const zoom of [12, 40] as const) {
+          await open(kind, zoom);
+          const p = await tokenPoint(page, scene.walker);
+          await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ ...p, id: 0 }] });
+          await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+          await frames(page, 12);
+          await addPan(hexRow(orient, `pan, ${zoom} px, with the walker's action bar shown`), () => touchPan(page, cdp, STEPS));
+          await page.keyboard.press("Escape");
+        }
+        // Across two cull steps among the four areas, each step restarting their build: every frame held, as a build's frames are, and the slow ones named by what they did.
+        const building = hexRow(orient, "pan across two cull steps among the four areas, 40 px, each frame held");
+        if (!opts.only || opts.only.some((o) => building.includes(o))) {
+          await open(kind, 40);
+          if (view === "isometric") await waitStood(page);
+          const parts: FrameParts[] = [];
+          const all = await throttled(async () => {
+            await touchPan(page, cdp, 40);
+            const out: number[] = [];
+            for (let r = 0; r < ROUNDS; r++) out.push(...(await touchPan(page, cdp, 40, timedEachFrame(parts))));
+            return out;
+          });
+          rows.push({ row: building, view, ms: frameStats(all) });
+          if (view === "isometric" && parts.length > 0) {
+            const p = partsPast(parts, 16);
+            const counted = (what: string, n: number) => rows.push({ row: `${building}: ${what} (calls, not ms)`, view, ms: { median: n, max: n, n: parts.length } });
+            counted("frames past 16 ms", p.frames);
+            counted("of those, frames that repainted whole", p.whole);
+            counted("of those, frames that ran a background slice", p.sliced);
+            counted("of those, frames that rendered the board", p.rendered);
+            counted("frames that ran a background slice, of every frame", p.slicedAll);
+          }
         }
       }
       const dm = await open(kind, 40);
@@ -1103,6 +1248,13 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
         await frames(page, 30);
       }
       await add(MAP_ROW, () => throttled(() => rounds(() => mapSwaps(page, cdp, built.caps!.dm, capsMap!))));
+      // The page's live heap after a forced collection, the caps shown in Isometric and then hidden, beside the map row's largest step (D-261030-546).
+      if (!opts.only || opts.only.some((o) => MAP_ROW.includes(o))) {
+        await cdp.send("HeapProfiler.collectGarbage");
+        const heap = (await cdp.send("Runtime.getHeapUsage")) as { usedSize: number };
+        const mb = Math.round(heap.usedSize / 1e5) / 10;
+        rows.push({ row: "live heap after a forced collection, caps shown in Isometric then hidden (MB, not ms)", view, ms: { median: mb, max: mb, n: 1 } });
+      }
     }
     return rows;
   } finally {
@@ -1236,11 +1388,31 @@ async function select(page: Page, ids: readonly string[]): Promise<void> {
 
 // ---------------------------------------------------------------- reports
 
+/**
+ * The largest-move gate (D-261030-538 as applied, review HXPERF2-ASTRA-09):
+ * on the 40 by 40 fixtures each round's largest Isometric move against
+ * max(16 ms, 1.75 times the same round's largest Top-down move), a row
+ * missing when at least two of three pairs do. The caps report theirs.
+ * Says the medians and the worst move apart, with the verdict.
+ */
+export function largestGate(row: string, iso: Ms, topDown: Ms | undefined): string {
+  if (!iso.rounds) return "";
+  const median = (v: readonly number[]) => [...v].sort((a, b) => a - b)[Math.floor(v.length / 2)] ?? 0;
+  const raw = `largest moves ${iso.rounds.map((v) => v.toFixed(1)).join(", ")} (median ${median(iso.rounds).toFixed(1)}, worst ${iso.max.toFixed(1)})`;
+  if (!topDown?.rounds) return `${raw}, no Top-down match`;
+  const tds = topDown.rounds;
+  const budgets = iso.rounds.map((v, i) => Math.max(16, 1.75 * (tds[i] ?? 0)));
+  const misses = iso.rounds.filter((v, i) => v > budgets[i]!).length;
+  const gated = /hex relief|squares/.test(row) && !row.includes("caps");
+  const verdict = !gated ? "reported" : misses >= 2 ? `OVER in ${misses} of ${iso.rounds.length} pairs` : `ok in ${iso.rounds.length - misses} of ${iso.rounds.length} pairs`;
+  return `${raw}; Top-down ${tds.map((v) => v.toFixed(1)).join(", ")}; budgets ${budgets.map((b) => b.toFixed(1)).join(", ")}: ${verdict}`;
+}
+
 /** Section 11's gates: every frame at most max(16 ms, 1.75 times Top-down's same frame), a turn at the caps at most 150 ms whole. */
 export function gate(row: string, ms: Ms, topDown: number | undefined): string {
   const iso = ms.median;
   if (row.startsWith("turn")) return iso <= 150 ? "ok" : "OVER 150 ms";
-  if (row.includes("(ms whole, not a frame)") || row.includes("(calls, not ms)")) return "(reported, no gate)";
+  if (row.includes("(ms whole, not a frame)") || row.includes("(calls, not ms)") || row.includes("(MB, not ms)")) return "(reported, no gate)";
   if (row.startsWith("ground stage draws")) return iso === 0 ? "ok (none)" : `OVER: ${iso} ground draws`;
   // A build's every frame is held, not its median: most of a build's frames are short slices, and the gate is on each frame.
   if (ms.frames) {
@@ -1256,13 +1428,14 @@ export function gate(row: string, ms: Ms, topDown: number | undefined): string {
 }
 
 export function formatReport(sets: readonly BenchRow[][]): string {
-  const lines = ["row | view | ms (median / max, n) | gate", "--- | --- | --- | ---"];
-  const topDown = new Map<string, number>();
-  for (const set of sets) for (const r of set) if (r.view === "topDown") topDown.set(r.row, r.ms.median);
+  const lines = ["row | view | ms (median / max, n) | gate | largest move", "--- | --- | --- | --- | ---"];
+  const topDown = new Map<string, Ms>();
+  for (const set of sets) for (const r of set) if (r.view === "topDown") topDown.set(r.row, r.ms);
   for (const set of sets) {
     for (const r of set) {
-      const g = r.view === "isometric" ? gate(r.row, r.ms, topDown.get(r.row)) : "";
-      lines.push(`${r.row} | ${r.view} | ${r.ms.median.toFixed(1)} / ${r.ms.max.toFixed(1)}, ${r.ms.n} | ${g}`);
+      const g = r.view === "isometric" ? gate(r.row, r.ms, topDown.get(r.row)?.median) : "";
+      const l = r.view === "isometric" ? largestGate(r.row, r.ms, topDown.get(r.row)) : r.ms.rounds ? `largest moves ${r.ms.rounds.map((v) => v.toFixed(1)).join(", ")}` : "";
+      lines.push(`${r.row} | ${r.view} | ${r.ms.median.toFixed(1)} / ${r.ms.max.toFixed(1)}, ${r.ms.n} | ${g} | ${l}`);
     }
   }
   return lines.join("\n");
