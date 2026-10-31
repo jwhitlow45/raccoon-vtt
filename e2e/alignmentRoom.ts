@@ -1,5 +1,6 @@
 import { UndoWire, setupHistory } from "./helpers/undoScope.ts";
 import { damageSummaryAlignment } from "./helpers/damageSummary.ts";
+import { OUTCOME_RESTORED, OUTCOME_UNAVAILABLE, OUTCOME_UNDONE } from "./helpers/saveOutcomes.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -10,6 +11,7 @@ import sharp from "sharp";
 import { build } from "vite";
 import { chromium, type Browser, type BrowserContext, type ElementHandle, type Locator, type Page, type WebSocketRoute } from "playwright-core";
 import { ddbSheetUrl } from "../shared/ddb/link.ts";
+import { uuidv7 } from "../shared/ids.ts";
 import { readDdbCharacter } from "../shared/ddb/read.ts";
 import { SKILLS } from "../shared/rules/skills.ts";
 import { loadMonsters, monsterActor, type SrdMonster } from "../shared/srd/monsters.ts";
@@ -84,6 +86,13 @@ import { moreMenuFixture } from "./helpers/menuFixture.ts";
  * at some sizes are counted over each file's sizes, and pl3-c fails when
  * one showed at fewer sizes than the polish pass found, so no check passes
  * by measuring nothing.
+ *
+ * The group save page's lifecycle (docs/design-v1-undo-scope.md 8) is
+ * measured at 390 x 844, 320 x 568 and 1440 x 900 at 100% and 130%, and at
+ * 844 x 390 and 480 x 320 at 130%: Apply waiting for its status, the page
+ * reopened by Undo, locked again by Redo, Ask again waiting, that request
+ * refused, and the page that can no longer be checked, each with its
+ * controls whole in reach once its passing toasts are gone.
  *
  * The DM's page runs in a touch context for the phone and tablet sizes and
  * a mouse context for the desktop, one at a time, beside Pat's touch
@@ -2046,13 +2055,13 @@ async function requestScreen(sweep: Sweep, page: Page, pane: Locator): Promise<v
 }
 
 /**
- * The group save page a trap card's Save and damage opens, from the
+ * Opens the group save page a trap card's Save and damage opens, from the
  * trap's card in the column or over the screen: the Dice sheet on a
- * phone, the Dice tab panel on a computer. Discard closes it again, and
- * the card's springing waits on for settleTraps. `trap` is the trap's
- * name, which starts the card's name and the page's first line.
+ * phone, the Dice tab panel on a computer. `trap` is the trap's name,
+ * which starts the card's name and the page's first line. Returns the
+ * page's host, or why it did not open.
  */
-async function groupSaveScreen(sweep: Sweep, page: Page, screen: string, trap: string): Promise<void> {
+async function openTrapSave(page: Page, trap: string): Promise<Locator | string> {
   const name = new RegExp(`^${trap} went off`);
   // The card in the column, or over the screen where the column's summary row stands in for its cards.
   const findCard = async (): Promise<Locator | null> => {
@@ -2083,10 +2092,21 @@ async function groupSaveScreen(sweep: Sweep, page: Page, screen: string, trap: s
     await opened?.dispose();
     card = await findCard();
   }
-  if (!card) return sweep.missing(page, screen, `no card showed for ${trap}'s springing`);
+  if (!card) return `no card showed for ${trap}'s springing`;
   await card.getByRole("button", { name: "Save and damage", exact: true }).click();
   const host = page.locator('dialog[data-rvtt-sheet][aria-label="Dice"]').or(page.getByRole("tabpanel", { name: /Dice/ }));
-  if (!(await showsWithin(host.getByText(new RegExp(`^From ${trap}`)).first(), 4_000))) return sweep.missing(page, screen, "Save and damage opened no group save page");
+  if (!(await showsWithin(host.getByText(new RegExp(`^From ${trap}`)).first(), 4_000))) return "Save and damage opened no group save page";
+  return host;
+}
+
+/**
+ * The group save page a trap card's Save and damage opens (openTrapSave).
+ * Discard closes it again, and the card's springing waits on for
+ * settleTraps.
+ */
+async function groupSaveScreen(sweep: Sweep, page: Page, screen: string, trap: string): Promise<void> {
+  const host = await openTrapSave(page, trap);
+  if (typeof host === "string") return sweep.missing(page, screen, host);
   if (screen === "group-save-row") {
     // FL-3: measure the expanded typed override, which the closed row never exposed to the sweep.
     await host.getByRole("radiogroup", { name: "What they roll" }).getByRole("radio", { name: "No save" }).check({ force: true });
@@ -6259,6 +6279,165 @@ export function undoScopeAlignmentTests(names: readonly string[]): void {
           hold = false;
           for (const deliver of held.splice(0)) deliver();
           wire.close();
+          sweep.tally();
+        }
+      });
+    }
+  }
+}
+
+/** The short landscape screens the design checks at 130% alone, for controls behind alerts or toasts (docs/design-v1-undo-scope.md 8). */
+const SAVE_LANDSCAPE = new Set(["844x390", "480x320"]);
+
+/** The frames a page's room socket sends that a group save root holds back, by page: one route each, set before the page opens its socket. */
+const pageHolds = new WeakMap<Page, { hold: RegExp | null; held: (() => void)[] }>();
+
+async function heldFrames(page: Page): Promise<{ hold: RegExp | null; held: (() => void)[] }> {
+  const frames = pageHolds.get(page);
+  if (frames) return frames;
+  const made: { hold: RegExp | null; held: (() => void)[] } = { hold: null, held: [] };
+  pageHolds.set(page, made);
+  await page.routeWebSocket(/\/ws\?room=/, (socket) => {
+    const upstream = socket.connectToServer();
+    socket.onMessage((message) => {
+      if (made.hold?.test(String(message))) made.held.push(() => upstream.send(message));
+      else upstream.send(message);
+    });
+  });
+  return made;
+}
+
+/**
+ * The group save page's lifecycle states (docs/design-v1-undo-scope.md 5
+ * and 8), on a Scything Door springing whose save Pat answers for Thorn:
+ * Apply waiting for its confirmed status, reopened by Undo from another of
+ * the DM's devices, relocked by Redo, Ask again waiting for the server,
+ * that replacement refused once Pat answered the request it replaces, and
+ * unavailable once another copy of the page applied in its place. The page
+ * holds back its own frames where a state would otherwise pass before it is
+ * measured. Each state's controls must be whole in reach, toasts and alerts
+ * included, and each state is shot.
+ */
+export function undoSaveAlignmentTests(names: readonly string[]): void {
+  for (const name of names) {
+    const size = [...SIZES, COMBAT_SMALL].find((candidate) => candidate.name === name);
+    assert.ok(size, `unknown group save alignment size ${name}`);
+    for (const scale of SAVE_LANDSCAPE.has(name) ? [1.3] : SCALES) {
+      test(`undo-b-alignment-${name}-${scale}: the group save page checking, reopened, relocked, asking again, refused and unavailable within ${LIMIT_PX} px, with its controls in reach`, async () => {
+        const at = `${name}-${Math.round(scale * 100)}`;
+        const sweep = new Sweep(`undo-b-${at}`);
+        // The DM's session stays, unlike the Undo history sweep's: a new session per size spent the address's 40 snapshots a minute
+        // across the two sweeps run back to back. Undo and Redo come from the op socket, another of the DM's devices.
+        const page = await dmPageFor(size);
+        const frames = await heldFrames(page);
+        const release = () => {
+          frames.hold = null;
+          for (const deliver of frames.held.splice(0)) deliver();
+        };
+        await openAt(page, size, scale);
+        await settleTraps();
+        const isThorn = (target: { characterId?: string; tokenId?: string }) => target.characterId === run.ids.thornChar || target.tokenId === run.ids.thorn;
+        const thornAsk = (but: readonly string[]) => Object.values(dmSocket.state?.rolls ?? {}).find((ask) => !but.includes(ask.id) && ask.targets.some(isThorn)) ?? null;
+        const answer = async (rollId: string, total: number) => {
+          const target = dmSocket.state!.rolls[rollId]!.targets.find(isThorn)!;
+          await patOps.send({ t: "roll.answer", rollId, target: target.characterId ? { characterId: target.characterId } : { tokenId: target.tokenId! }, total, tag: randomUUID() });
+          await waitFor(`Pat's ${total} on the DM's copy`, () => dmSocket.state?.rolls[rollId]?.targets.some((t) => t.total === total) || null);
+        };
+        /**
+         * Measures the page as `screen` with its spinner still, as reduced motion draws it, then checks `controls` are whole in reach
+         * and shoots it once the state's passing toasts are tapped away, as a person does or as their 5 s run out.
+         */
+        const state = async (host: Locator, screen: string, controls: readonly (string | RegExp)[]) => {
+          await page.emulateMedia({ reducedMotion: "reduce" });
+          await sweep.measure(page, screen, host);
+          await page.emulateMedia({ reducedMotion: null });
+          await dismissToasts(page);
+          for (const control of controls) {
+            const button = host.getByRole("button", { name: control, exact: typeof control === "string" }).last();
+            // In reach where some scroll of the page shows it whole: the sticky foot under Apply covers the scroller's last band, and on a short screen that band is most of it.
+            let reached = false;
+            for (const block of ["nearest", "center", "start"] as const) {
+              await button.evaluate((el, at) => el.scrollIntoView({ block: at }), block);
+              if ((reached = await wholeInReach(button))) break;
+            }
+            if (!reached) sweep.lines.push(`${sweep.at} ${screen}: ${control} is not whole in reach`);
+          }
+          // Shot from the page's top, where its state's line stands.
+          await host.locator("[data-save-lifecycle]").evaluate((el) => el.scrollIntoView({ block: "start" }));
+          await shots.take(page, `${screen}-${at}`);
+        };
+        try {
+          await spring(run.traps.door);
+          const host = await openTrapSave(page, "Scything Door");
+          if (typeof host === "string") {
+            await sweep.missing(page, "undo-b-checking", host);
+            assert.fail(sweep.lines.join("\n"));
+          }
+          const lifecycle = (check: string) => host.locator(`[data-save-lifecycle="${check}"]`);
+          // Thorn has no stat block, so his save is asked of Pat, who answers by his op socket.
+          await host.getByRole("button", { name: "Ask 1 player", exact: true }).click();
+          const first = await waitFor("the save asked of Pat", () => thornAsk([]));
+          await answer(first.id, 5);
+          await host.getByText("Asked: typed 5", { exact: true }).waitFor();
+          if ((await host.getByRole("group", { name: "Outcome" }).count()) === 0) await host.getByRole("button", { name: "Edit", exact: true }).click();
+          await host.getByLabel("Damage", { exact: true }).press("Enter");
+          const apply = host.getByRole("button", { name: /^Apply: / });
+          await apply.waitFor();
+
+          // Apply's outcome held back: the page waits for its confirmed status.
+          frames.hold = /"t":"actor\.outcome"/;
+          await apply.click();
+          await lifecycle("checking").getByText("Checking this save's outcome…", { exact: true }).waitFor();
+          await state(host, "undo-b-checking", []);
+          release();
+          await lifecycle("applied").waitFor();
+
+          // Undo from another of the DM's devices reopens the page.
+          await ops.step("undo");
+          await lifecycle("undone").getByText(OUTCOME_UNDONE, { exact: true }).waitFor();
+          await state(host, "undo-b-reopened", ["Roll saves again", "Start over", /^Apply: /]);
+
+          // Redo relocks it.
+          await ops.step("redo");
+          await lifecycle("applied").getByText(OUTCOME_RESTORED, { exact: true }).waitFor();
+          await state(host, "undo-b-relocked", ["Done"]);
+
+          // Undo again, then Ask again twice: the second replaces the first's request, held back while Pat answers that request.
+          await ops.step("undo");
+          await lifecycle("undone").getByText(OUTCOME_UNDONE, { exact: true }).waitFor();
+          const askAgain = host.getByRole("button", { name: "Ask again", exact: true });
+          await askAgain.click();
+          const again = await waitFor("Pat asked again", () => thornAsk([first.id]));
+          await host.getByText("Asking again…", { exact: true }).waitFor({ state: "hidden" });
+          frames.hold = /"replaces":\[/;
+          await askAgain.click();
+          await host.getByText("Asking again…", { exact: true }).waitFor();
+          await state(host, "undo-b-pending", ["Roll saves again"]);
+          // A failing answer: a passed save would add a Saved line under the row's damage, a slip the sweep reads only in part (UNDOB-FIN-1).
+          await answer(again.id, 3);
+          release();
+          await host.getByText(/The roll request changed\. Check its answers and ask again\.$/).waitFor();
+          await state(host, "undo-b-refusal", ["Ask again", "Roll saves again"]);
+
+          // Another copy of the page applies in its place, so this one cannot be checked.
+          const ledger = (dmSocket.state as { saveOutcomes?: Record<string, { state: string; revision: number; seq: number }> } | null)?.saveOutcomes ?? {};
+          const [id, record] = Object.entries(ledger).filter(([, r]) => r.state === "undone").sort((a, b) => b[1].seq - a[1].seq)[0]!;
+          await ops.send({ t: "actor.outcome", label: "Scything Door", plan: uuidv7(), page: { id, expectRevision: record.revision }, targets: [{ target: { tokenId: run.ids.thorn } }] });
+          await lifecycle("unavailable").getByText(OUTCOME_UNAVAILABLE, { exact: true }).waitFor();
+          await state(host, "undo-b-unavailable", ["Start over"]);
+          assert.deepEqual(sweep.lines, [], `group save page alignment at ${sweep.at}`);
+        } finally {
+          release();
+          // The page goes, then its requests and the springing, so the next size starts from the same room.
+          const host = page.locator('dialog[data-rvtt-sheet][aria-label="Dice"]').or(page.getByRole("tabpanel", { name: /Dice/ }));
+          const discard = host.getByRole("button", { name: "Discard", exact: true });
+          if (await visible(discard)) {
+            await discard.first().click();
+            if (await visible(discard)) await discard.first().click();
+          }
+          const open = Object.keys(dmSocket.state?.rolls ?? {});
+          if (open.length > 0) await ops.send({ t: "roll.close", rollIds: open });
+          await settleTraps();
           sweep.tally();
         }
       });
