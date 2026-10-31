@@ -10,8 +10,8 @@ import type { Op } from "./protocol.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 30;
-export const OP_VERSION = 34;
+export const SNAPSHOT_VERSION = 31;
+export const OP_VERSION = 35;
 
 export type MigrationStep = {
   from: number;
@@ -211,6 +211,8 @@ export const snapshotMigrations: MigrationStep[] = [
   { from: 28, to: 29, apply: (state) => state },
   // Correction events extend the closed log union. Older readers must refuse even with no replay tail.
   { from: 29, to: 30, apply: (state) => state },
+  // Save outcome status is optional. Older readers must refuse this boundary even without a ledger.
+  { from: 30, to: 31, apply: (state) => state },
 ];
 
 /**
@@ -948,6 +950,8 @@ export const opMigrations: MigrationStep[] = [
   },
   // Scoped restores add correction notices. Replay gates them on the original stored version.
   { from: 33, to: 34, apply: (op) => op },
+  // Save lifecycle, page request replacement and embedded recharge keep older replay behavior intact.
+  { from: 34, to: 35, apply: (op) => op },
 ];
 
 /** Historical restores keep their original log entries and numbering. */
