@@ -499,6 +499,13 @@ export type RoomView = {
   /** A snapshot has arrived on the current connection. False during reconnect or resync, even while the old view remains visible. */
   confirmedReady?: boolean;
   /**
+   * How far the server's clock is ahead of this device's, in ms, learned
+   * from the times of log lines as they arrive (D-261031-140). The network's
+   * delay makes each reading low, never high, so a time reckoned from it is
+   * never ahead of the server's. Absent until the first line arrives.
+   */
+  serverOffset?: number;
+  /**
    * How many snapshots this page has applied, the first included, so code
    * that waits on the next one (an `expired` answer, UnknownCause) can tell
    * when it is in. A player preview, which applies none, leaves it out.

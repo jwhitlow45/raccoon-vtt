@@ -1,9 +1,16 @@
 import { compareLogIds } from "#shared/keys.ts";
 import { describeEvent, type LogNames } from "#shared/logText.ts";
 import type { LogEntry } from "#shared/model.ts";
+import { SAVE_CANNOT_REOPEN } from "#shared/saveOutcomeContract.ts";
 import type { CorrectionLogEvent } from "#shared/undoContract.ts";
 
-export type OwnCorrection = Pick<CorrectionLogEvent, "from" | "scope" | "label">;
+/** `cut` marks a label the server may have shortened to fit a note after it, so it matches as the start of the correction's label. */
+export type OwnCorrection = Pick<CorrectionLogEvent, "from" | "scope" | "label"> & { cut?: true };
+
+/** The correction an own Undo or Redo result names: its label without the note that its save can no longer reopen. */
+export function ownCorrection(from: OwnCorrection["from"], scope: OwnCorrection["scope"], what: string): OwnCorrection {
+  return what.endsWith(SAVE_CANNOT_REOPEN) ? { from, scope, label: what.slice(0, -SAVE_CANNOT_REOPEN.length), cut: true } : { from, scope, label: what };
+}
 
 /** Snapshots seed the cursor silently, so reconnect and archive reads never repeat a notice. */
 export class CorrectionAnnouncements {
@@ -23,7 +30,7 @@ export class CorrectionAnnouncements {
     return fresh.flatMap((line) => {
       const data = line.data;
       if (data?.type !== "correction") return [];
-      const index = remaining.findIndex((match) => match.from === data.from && match.scope === data.scope && match.label === data.label);
+      const index = remaining.findIndex((match) => match.from === data.from && match.scope === data.scope && (match.label === data.label || match.cut === true && match.label !== undefined && data.label?.startsWith(match.label) === true));
       if (index >= 0) {
         remaining.splice(index, 1);
         return [];

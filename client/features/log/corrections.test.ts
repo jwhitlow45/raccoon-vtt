@@ -144,3 +144,22 @@ test("a restored label for a different command cannot silence a correction", () 
   assert.equal(store.store.getState().toasts.filter((t) => t.logged).length, 1);
   store.dispose();
 });
+
+test("an own Undo whose save can no longer reopen announces its result once, not also as another device's correction", () => {
+  const store = createRoomStore({ roomId: "R1", you: DM, clock: new FakeClock() });
+  store.setOutbox(new FakeOutbox());
+  store.setConnection("open");
+  store.applySnapshot({ t: "snapshot", seq: 0, state: projectState(room(), DM, { sceneId: "s1" }), you: { ...DM, sceneId: "s1" }, watermark: 0 });
+  const n = store.dispatch({ t: "undo", head })!;
+  const long = `applying ${"Fireball ".repeat(24).trim()}`;
+  for (const [i, label] of ["applying Fireball", long].entries()) {
+    const own: LogEntry = { ...line(`${i + 1}:0`), data: { type: "correction", from: "undo", scope: "play", label } };
+    const what = label.slice(0, 200 - ". This save can no longer reopen.".length) + ". This save can no longer reopen.";
+    const sent = i === 0 ? n : store.dispatch({ t: "undo", head })!;
+    store.applyEv({ t: "ev", seq: i + 1, acks: [sent], restored: [{ n: sent, what }], changes: [{ key: `log:${i + 1}:0`, value: own }] });
+  }
+  const texts = store.store.getState().toasts.map((t) => t.text);
+  assert.equal(texts.length, 2, JSON.stringify(texts));
+  assert.ok(texts.every((text) => text.startsWith("Undid applying Fireball") && text.includes("This save can no longer reopen.")), JSON.stringify(texts));
+  store.dispose();
+});

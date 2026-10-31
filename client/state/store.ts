@@ -1,4 +1,4 @@
-import { CorrectionAnnouncements, type OwnCorrection } from "../features/log/corrections.ts";
+import { CorrectionAnnouncements, ownCorrection, type OwnCorrection } from "../features/log/corrections.ts";
 import { UNDO_NOTICE, undoNotice, type UndoNotice } from "./historyNotice.ts";
 import { historyCommandSchema, type HistoryDirection, type HistoryMessage, type UndoGroupOptions } from "#shared/undoContract.ts";
 import { blockerText, EMPTY_HISTORY, HistoryController, refusalSentence, type HistoryActivation, type HistoryCommand } from "./history.ts";
@@ -988,7 +988,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       const ownCorrections: OwnCorrection[] = accepted.flatMap(({ n, op }) => {
         const restored = msg.restored?.find((r) => r.n === n);
         return restored && (op.t === "undo" || op.t === "redo") && !op.log && !op.discard
-          ? [{ from: op.t, scope: op.scope ?? "play", label: restored.what }]
+          ? [ownCorrection(op.t, op.scope ?? "play", restored.what)]
           : [];
       });
       const ownDetails = (msg.ackDetails ?? []).filter((detail) => accepted.some((p) => p.n === detail.n));
@@ -1079,7 +1079,15 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         ephemeral = EMPTY_EPHEMERAL;
       }
       if (asks.length > 0) forgetAsk = { asks: [...(forgetAsk && !forgetAsk.sending ? forgetAsk.asks : []), ...asks] };
-      commit({ confirmed, seq: msg.seq, pending, refused, trapped, toasts, ephemeral, sceneId, forgetAsk });
+      // A line this event brings was stamped by the server as it committed. The highest reading is the one the network delayed least.
+      let serverOffset = s.serverOffset;
+      for (const change of msg.changes) {
+        if (!("value" in change) || !change.key.startsWith("log:")) continue;
+        const at = (change.value as { at?: unknown } | null)?.at;
+        const stamped = typeof at === "string" ? Date.parse(at) : Number.NaN;
+        if (Number.isFinite(stamped)) serverOffset = Math.max(serverOffset ?? -Infinity, stamped - clock.now());
+      }
+      commit({ confirmed, seq: msg.seq, pending, refused, trapped, toasts, ephemeral, sceneId, forgetAsk, ...(serverOffset === s.serverOffset ? {} : { serverOffset }) });
       const refusedNow = new Map((msg.rejects ?? []).map((r) => [r.n, { code: r.code, message: r.message, text: refusalText(r.code, r.message) }]));
       tell(
         s.pending.filter((p) => settled.has(p.n)),
