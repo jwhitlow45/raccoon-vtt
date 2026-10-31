@@ -44,7 +44,7 @@ describe("the Log panel's older pages", () => {
     assert.equal(OLDER_LOG_FAILED, "Could not load older messages.");
   });
 
-  test("a DM's own pages follow the scene on screen, ask as no one and need no answer", async () => {
+  test("a DM's own pages name the scene on screen, ask as no one and need no answer", async () => {
     await withServer({}, async (urls) => {
       await logPage("ABCD2345", { before: "9:0" }, { sceneId: "s1", previewOf: null });
       await logPage("ABCD2345", { after: "9:0" }, { sceneId: "s1", previewOf: null });

@@ -27,8 +27,9 @@ export type PageOptions = { signal?: AbortSignal; sleep?: (ms: number, signal?: 
 
 /**
  * One page of the Log panel's history: older than `before`, newer than
- * `after`, or the newest with neither. A DM's pages follow the scene on
- * screen (`sceneId`). In "view as a player" (`previewOf`,
+ * `after`, or the newest with neither. A DM's pages name the scene on
+ * screen (`sceneId`), as the route asks, though the server reads every
+ * line whole to a DM, on any scene. In "view as a player" (`previewOf`,
  * docs/design-v1-per-player-vision.md 7.4, D-261026-10) the page is asked
  * for as that player and taken only when the server says it answered as
  * that player, as the preview's socket takes only that player's snapshot:

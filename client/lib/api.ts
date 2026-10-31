@@ -700,7 +700,6 @@ export function displayAssetUrl(roomId: string, assetId: AssetId, variant: Asset
   return `${room(roomId)}/display/assets/${encodeURIComponent(assetId)}/${variant}`;
 }
 
-/** A plain GET the browser downloads, so the zip streams to disk instead of into memory. */
 /** The log export's address, for the browser's own download of a file too large to read here. Each visit is another export. */
 export function logExportUrl(roomId: string, range: LogRange, tz: string): string {
   const q = new URLSearchParams();
@@ -712,6 +711,7 @@ export function logExportUrl(roomId: string, range: LogRange, tz: string): strin
   return `${room(roomId)}/log/export?${q.toString()}`;
 }
 
+/** A plain GET the browser downloads, so the zip streams to disk instead of into memory. */
 export function exportUrl(roomId: string): string {
   return `${room(roomId)}/export`;
 }
