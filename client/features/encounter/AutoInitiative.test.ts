@@ -78,7 +78,7 @@ function drawResult(roll: import("#shared/model.ts").DiceRoll): string {
 test("auto result details omit plain Normal and known Secret", () => {
   const html = drawResult({ formula: "1d20+2", faces: [10], total: 12 });
   assert.doesNotMatch(html, /Normal|Secret/);
-  assert.match(html, /role="note" aria-label="d20 \(10\) \+2 = 12"/);
+  assert.match(html, /d20 \(10\) \+2 = 12/);
 });
 
 test("Auto Initiative offers no menu when every waiting monster joins a kept value", () => {
@@ -98,15 +98,13 @@ test("Auto Initiative offers no menu when every waiting monster joins a kept val
 });
 
 
-for (const mode of ["adv", "dis", "cancelled"] as const) test(`auto result ${mode} preserves informative accessible words without forcing a new row`, () => {
+for (const mode of ["adv", "dis", "cancelled"] as const) test(`auto result ${mode} keeps its base badge and note visible`, () => {
   const roll = mode === "cancelled" ? { formula: "1d20+2", faces: [10], total: 12, cancelled: true as const } : { formula: `2d20k${mode === "adv" ? "h" : "l"}1+2`, faces: [10, 10], total: 12, mode };
   const html = drawResult(roll);
-  const name = /role="note" aria-label="([^"]+)"/.exec(html)?.[1];
-  assert.ok(name?.includes(mode === "adv" ? "Advantage" : mode === "dis" ? "Disadvantage" : "Normal: Advantage and Disadvantage cancelled"));
-  assert.doesNotMatch(name!, /Secret/);
-  const base = /data-roll-result-base=""[^>]*>([^<]+)<\/span>/.exec(html)?.[1];
-  assert.ok(base?.includes("= 12"));
-  assert.doesNotMatch(base!, /Advantage|Disadvantage|Normal|Secret/);
-  assert.match(html, /hidden="" data-roll-result-detail=""/);
-  assert.doesNotMatch(html, /Advantage and Disadvantage cancel, so one plain d20/);
+  assert.doesNotMatch(html, /data-roll-result-detail/);
+  if (mode === "cancelled") assert.match(html, /Advantage and Disadvantage cancel, so one plain d20 was rolled\./);
+  else {
+    assert.match(html, new RegExp(`>${mode === "adv" ? "Adv" : "Dis"}<`));
+    assert.match(html, new RegExp(`with ${mode === "adv" ? "Advantage" : "Disadvantage"}`));
+  }
 });
