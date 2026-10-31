@@ -185,7 +185,7 @@ export function useRollModeMenu(options: UseRollModeMenuOptions): RollModeMenuBi
     },
   });
   return {
-    buttonProps, describe, open: handle.open, pressStyle: enabled ? { WebkitTouchCallout: "none", userSelect: "none" } : {},
+    buttonProps, describe, open: handle.open, pressStyle: enabled ? { WebkitTouchCallout: "none", WebkitUserSelect: "none", userSelect: "none" } : {},
     menu: <>{enabled && hint ? <span hidden id={hintId}>{hint}</span> : null}{enabled ? <RollModeMenu handle={handle} name={options.name} capability={options.capability} dm={options.dm} onPick={(override) => {
       const at = latest.current;
       if (openedSource.current !== at.source) return;

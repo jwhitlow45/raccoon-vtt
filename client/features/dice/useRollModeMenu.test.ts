@@ -27,10 +27,12 @@ test("eligible source retains its name, description, role and dimensions without
   assert.match(html, /aria-haspopup="menu" aria-expanded="false"/);
   assert.match(html, /Hold, right-click or Shift\+F10 for Advantage, Disadvantage or Normal/);
   assert.doesNotMatch(html, /min-width|padding|tooltipHold/);
+  // iOS Safari reads only the prefixed property, so a long press would select the button's words without it.
+  assert.match(html, /-webkit-touch-callout:none;-webkit-user-select:none;user-select:none/);
 });
 test("excluded and disabled sources receive no menu attributes or hint", () => {
   for (const html of [render({ d20: false, visibility: "creature" }), render({ d20: true, visibility: "selectable" }, true)]) {
-    assert.doesNotMatch(html, /aria-haspopup|aria-expanded|aria-keyshortcuts|Hold, right-click/);
+    assert.doesNotMatch(html, /aria-haspopup|aria-expanded|aria-keyshortcuts|Hold, right-click|user-select/);
     assert.match(html, /aria-describedby="proficiency-help"/);
   }
 });
