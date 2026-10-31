@@ -47,6 +47,7 @@ The app does a lot, and you don't need most of it on day one. Read the [Quick st
   - [Companions](#companions)
   - [Ping, Look here and pins](#ping-look-here-and-pins)
   - [The table display](#the-table-display)
+  - [The Log and its history](#the-log-and-its-history)
   - [Room settings for fights and maps](#room-settings-for-fights-and-maps)
   - [Undo, Redo and Setup history](#undo-redo-and-setup-history)
 - Scenarios
@@ -1502,6 +1503,16 @@ If your group plays around a table, a TV can show the players' view of the map, 
 ![Add a TV in the DM panel: the code to type on the TV, how long it lasts, and its QR code.](dm-guide/table-display.webp)
 
 The display shows the players' scene the way the players see it: fog, party vision, tokens, shared areas, drawings, pings and rulers, and handouts shown to everyone. On a scene where each player sees for themselves, it shows only what the creatures that share sight with the party see (see [Sight for each player](#sight-for-each-player)). It shows no panels, chat or Initiative strip, unless you tap the display and turn on **Show whose turn it is**. To have the display show what your own screen shows, turn on **Show my view on the table display** in the DM panel, then tap the display and pick **Follow the DM**. The display's menu also has its own **View**, so the TV can show the map in Isometric while your screen stays Top-down, or the other way round (see [The isometric view](#the-isometric-view)). A room can have up to 4 displays.
+
+## The Log and its history
+
+The **Log** keeps everything said and done at the table: chat, whispers, rolls, HP changes, conditions and turns. It opens on the newest lines and follows new ones as they come in while you read at the bottom. The room keeps every line for as long as the room exists, so last month's session is still there.
+
+**Reading back.** Press **Show older** at the top of the Log to bring in the lines before the ones you see. The line you were reading stays where it was, and the older ones go in above it. Keep pressing to go further back, until the Log says "This is the start of the log." To keep a phone quick, the Log holds at most 500 lines at once. Once you go back further than that, the newest lines give way and two buttons appear under the list: **Show newer** reads forward again from where you are, and **Back to latest** returns you to the live Log with the message field ready. Sending a message also takes you back to the latest. Your players read back the same way, and see only what their own Log may show.
+
+**Saving a session.** **Export** at the top of the Log lists your evenings at the table, the newest first, with the time each began and ended and how many lines it holds. A gap of more than 4 hours starts a new evening. The newest 25 show first, and **Older sessions**, under them, adds 25 more. **Everything** saves the whole Log. Each evening's **Export** saves a Markdown file you can open in any text editor or notes app. On a phone it opens the share sheet, so you can save it to Files or send it on. A very long file, over 8 MiB, says "This file is large. Use Download to save it." **Download** then saves it through your browser, which asks the server for it again. Opening the list, each Older sessions and each export or download count toward 10 an hour for each person.
+
+**What a backup carries.** **Download a backup**, in Room settings, saves the whole room to take to another server, but only the Log's newest lines go with it. Export the evenings you want to keep before you move a room. On your own server, its nightly backups keep the whole Log.
 
 ## Room settings for fights and maps
 

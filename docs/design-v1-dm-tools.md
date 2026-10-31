@@ -532,18 +532,18 @@ The request: "Session log export."
 - 7:43 PM Goblin 2 takes 7 damage (3/7 left).
 ```
 
-**Why on the server.** The room keeps up to 10,000 lines, and the client reads older pages 100 at a time, so a client-built export would take a hundred requests. Its names would also be thin: the DM's view holds the tokens of one scene only, so lines about creatures on other scenes would read "A creature". So the server renders the export.
+**Why on the server.** The room keeps every line it archives (docs/design-v1-log-history.md 3.1), and the client reads older pages 50 at a time and holds at most 500 rows, so a client-built export would take a page request for every 50 lines. Its names would also be thin: the DM's view holds the tokens of one scene only, so lines about creatures on other scenes would read "A creature". So the server renders the export.
 
-**Project first, then count.** Sessions found from the raw `room_log` would tell a player when hidden things happened: a session made only of whispers between others or a hidden monster's HP lines, a line count that includes them, or two evenings joined by hidden lines between them. The live-play fix to older log pages (`openvtt-lp3int/server/http/log.ts`) closed the same channel for paging. So the server first projects every stored row for the caller, then finds sessions, times and counts among what remains:
+**Project first, then count.** Sessions found from the raw `room_log` would tell a player when hidden things happened: a session made only of whispers between others or a hidden monster's HP lines, a line count that includes them, or two evenings joined by hidden lines between them. The live-play fix to older log pages (`openvtt-lp3int/server/http/log.ts`) closed the same channel for paging. So the server first projects every stored row for the caller, in bounded batches against one captured state, then finds sessions, times and counts among what remains (docs/design-v1-log-history.md 2 and 4):
 
 - A player's rows are projected as `GET /log` projects them (`actor.projectLog` against the committed state), so a player's listing and file hold only what their Log panel shows: never a whisper to someone else, never a line about a creature they could not see.
 - A DM's rows keep every line but whispers the DM is not party to, with names from the whole room's state, every scene's tokens included, since the DM's scene-scoped projection would drop lines about creatures on other scenes. A DM's file marks the lines the Log panel marks as hidden from players.
-- The projected rows are cached per room seq, member and role, so opening the sheet and then exporting projects once. The role is part of the key because one member can hold a DM grant on one device and a player grant on another (`server/http/dm.ts` keeps the player grants), and a DM's rows must never reach that member's player device.
+- The session list is folded once per room state, member and role and kept as summaries only, never the lines, and the file streams in a second pass. The role is part of the key because one member can hold a DM grant on one device and a player grant on another (`server/http/dm.ts` keeps the player grants), and a DM's rows must never reach that member's player device.
 
 **Routes.**
 
-- `GET /api/rooms/:id/log/sessions` (any grant) answers the caller's sessions.
-- `GET /api/rooms/:id/log/export?from=&to=&tz=` (any grant) streams the file for one session or all. It renders with the text functions of the Log panel, which move from `client/features/log/format.ts` to `shared/logText.ts` so both use one wording. `tz` is the device's IANA time zone, at most 64 characters, accepted when `new Intl.DateTimeFormat('en-US', { timeZone: tz })` constructs without a `RangeError`, so `UTC`, which `Intl.supportedValuesOf('timeZone')` does not list, works.
+- `GET /api/rooms/:id/log/sessions?before=&limit=` (any grant) answers the caller's sessions, newest first, 25 a page by default, each with its first and last line ids, with `lines`, the whole readable log's count, and `nextSessionsBefore`, the oldest session's first id when there are more.
+- `GET /api/rooms/:id/log/export?fromId=&toId=&tz=` (any grant) streams the file for one session, by its first and last ids, both inclusive, or for all with neither. The older `from` and `to` times still filter for older clients, never with ids. A file that fails after its first chunk ends without its last, so it never saves cut short. The sheet reads at most 8 MiB of it, and past that offers Download, the browser's own download of the same export. It renders with the text functions of the Log panel, which move from `client/features/log/format.ts` to `shared/logText.ts` so both use one wording. `tz` is the device's IANA time zone, at most 64 characters, accepted when `new Intl.DateTimeFormat('en-US', { timeZone: tz })` constructs without a `RangeError`, so `UTC`, which `Intl.supportedValuesOf('timeZone')` does not list, works.
 - Limits (section 2.4): every listing and every export request counts against one limit of 10 an hour per member per room, cached or not, with one export at a time per room and a loose per-address cap. A cache hit costs the same as a miss, since the cache key moves with the room seq, which hidden ops move too: if only misses were charged, a player could count hidden activity by when they ran out.
 
 **Model, ops.** None.
@@ -880,10 +880,10 @@ Two files are touched by two parts, each through a seam: `TokenNode.tsx` belongs
 - The outliner lists up to about 5,000 rows, windowed, with an index rebuilt on change.
 - Low power cuts canvas pixels by about four on a phone and stops three animation loops.
 - Icons cost a device about 1.4 KB each, fetched once and cached for good, plus the index once per device.
-- The log listing projects at most the 10,000 stored lines once per room seq and member, and caches the result, so a listing and its export cost one projection.
+- The log listing folds the caller's whole projected archive once per room state, member and role, in bounded batches, and keeps the summaries, at most eight lists within 1 MiB (docs/design-v1-log-history.md 4.1).
 - Cleanup runs once a day per room, as one step on the room's queue for a loaded room (a query and a delete), and a folder walk once a week.
 - Backups run `pg_dump` once a night in their own container with its own CPU and memory limits, list the dump's images, and copy only the files they lack.
-- The log export renders at most 10,000 lines, one at a time per room.
+- The log export streams in bounded batches, one at a time per room, within 30 s (docs/design-v1-log-history.md 4.2).
 
 ## 6. Testing
 
