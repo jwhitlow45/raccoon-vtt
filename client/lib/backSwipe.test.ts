@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { TAP_SLOP_PX } from "./gestures.ts";
 import { REPEAT_DELAY_MS } from "./holdRepeat.ts";
-import { backDistance, backEnd, BackSession, BackSwipe, EDGE_ZONE_PX, inEdgeZone, ownsSideways, SIDEWAYS_ATTR, stillFollowed, type BackHost, type BackMove, type BackStart, type SidewaysNode, type SidewaysStyle } from "./backSwipe.ts";
+import { backDistance, backEnd, BackSession, BackSwipe, EDGE_ZONE_PX, inEdgeZone, ownsSideways, pictureCopy, SIDEWAYS_ATTR, stillFollowed, type BackHost, type BackMove, type BackStart, type SidewaysNode, type SidewaysStyle } from "./backSwipe.ts";
 import { FLICK_SPEED, SLIDE_MS, UNSAVED_FOLLOW } from "./sheetSwipe.ts";
 
 function start(over: Partial<BackStart> = {}): BackStart {
@@ -706,3 +706,54 @@ describe("5. randomized touches", () => {
     for (const [name, n] of Object.entries(reached)) assert.ok(n > 0, `the sequences never reached ${name}`);
   });
 });
+
+/** A detached picture fixture. The browser suite also checks native radio-group behavior. */
+function controlPicture() {
+  class Part {
+    readonly attrs: Map<string, string>;
+    removed = false;
+    readonly tag: string;
+    readonly value: string;
+    readonly checked: boolean;
+    constructor(tag: string, attrs: Record<string, string>, value = "", checked = false) {
+      this.tag = tag;
+      this.value = value;
+      this.checked = checked;
+      this.attrs = new Map(Object.entries(attrs));
+    }
+    removeAttribute(key: string) { this.attrs.delete(key); }
+    remove() { this.removed = true; }
+    cloneNode() { return new Part(this.tag, Object.fromEntries(this.attrs), this.value, this.checked); }
+  }
+  class Picture {
+    readonly parts: Part[];
+    constructor(parts: Part[]) { this.parts = parts; }
+    cloneNode() { return new Picture(this.parts.map((p) => p.cloneNode())); }
+    querySelectorAll(selector: string) {
+      const selectors = selector.split(",").map((s) => s.trim());
+      return this.parts.filter((p) => !p.removed && selectors.some((s) => s.startsWith("[") ? p.attrs.has(s.slice(1, -1)) : s === p.tag));
+    }
+  }
+  const source = new Picture([
+    new Part("input", { id: "radio", type: "radio", name: "live-choice", form: "live-form" }, "answer", true),
+    new Part("input", { type: "checkbox", name: "toggle", form: "live-form" }, "yes", true),
+    new Part("select", { id: "select", name: "selection", form: "live-form" }, "chosen"),
+    new Part("textarea", { id: "notes", name: "notes", form: "live-form" }, "Typed words"),
+    new Part("dialog", { id: "dialog" }),
+  ]);
+  return { source, copy: () => pictureCopy({ node: source as unknown as DocumentFragment, top: 12 }) as unknown as Picture };
+}
+
+for (const attr of ["name", "form"]) {
+  test(`page pictures detach copied controls from live ${attr} ownership`, () => {
+    const { source, copy } = controlPicture();
+    const shown = copy();
+    const controls = shown.querySelectorAll("input, select, textarea");
+    assert.equal(controls.length, 4);
+    assert.ok(controls.every((p) => !p.attrs.has(attr)), `copied controls kept ${attr}`);
+    assert.ok(source.querySelectorAll("input, select, textarea").every((p) => p.attrs.has(attr)), "the original picture stays unchanged");
+    assert.deepEqual(controls.map((p) => [p.value, p.checked]), [["answer", true], ["yes", true], ["chosen", false], ["Typed words", false]]);
+    assert.equal(shown.querySelectorAll("[id]").length, 0);
+    assert.equal(shown.querySelectorAll("dialog").length, 0);
+  });
+}

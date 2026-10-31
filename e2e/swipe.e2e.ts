@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, afterEach, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
+import { LIMITS } from "../shared/limits.ts";
 import { GRABBER_DESIGNS, grabberRoom, type GrabberId } from "../client/components/grabberDesigns.ts";
 import { barControl, ConsoleWatch, OpSocket, openSceneGroup, pagePoint, pickOption, pickTool, readCamera, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
@@ -2151,6 +2152,120 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
       await dm.getByRole("region", { name: "Panels" }).getByRole("button", { name: "Close Panels" }).click();
     } finally {
       await dm.emulateMedia({ reducedMotion: "no-preference" });
+    }
+  });
+
+  test("fu41-b-clone. measure capture copies on a long Journal page and a full Initiative list", { skip: process.env.FU41_CLONE_MEASURE !== "1", timeout: 180_000 }, async () => {
+    const pageId = randomUUID();
+    const records: { action: string; clones: number; ms: number; elements: number }[] = [];
+    const measure = async (action: string, press: () => Promise<unknown>) => {
+      await dm.evaluate(() => {
+        type Sample = { clones: number; ms: number; elements: number };
+        type ProbeNode = { parentElement: { closest(s: string): { querySelectorAll(s: string): { length: number } } | null } | null };
+        type Probe = { document: { querySelector(s: string): { querySelectorAll(s: string): { length: number } } | null }; Node: { prototype: { cloneNode(this: ProbeNode, deep?: boolean): unknown } }; fu41CloneSample?: Sample; fu41RestoreClone?: () => void };
+        const w = globalThis as unknown as Probe;
+        const original = w.Node.prototype.cloneNode;
+        w.fu41CloneSample = { clones: 0, ms: 0, elements: w.document.querySelector("dialog[open][data-rvtt-sheet] [data-pane-body]")?.querySelectorAll("*").length ?? 0 };
+        w.Node.prototype.cloneNode = function(deep) {
+          const inBody = this.parentElement?.closest("[data-pane-body]") != null;
+          const start = performance.now();
+          const result = original.call(this, deep);
+          if (inBody && w.fu41CloneSample) {
+            w.fu41CloneSample.clones++;
+            w.fu41CloneSample.ms += performance.now() - start;
+          }
+          return result;
+        };
+        w.fu41RestoreClone = () => { w.Node.prototype.cloneNode = original; };
+      });
+      try {
+        await press();
+        const sample = await dm.evaluate(() => (globalThis as unknown as { fu41CloneSample: { clones: number; ms: number; elements: number } }).fu41CloneSample);
+        assert.ok(sample.elements > 0, `${action}: no panel body was measured`);
+        assert.ok(sample.clones > 0, `${action}: the capture copy was not observed`);
+        records.push({ action, ...sample });
+      } finally {
+        await dm.evaluate(() => (globalThis as unknown as { fu41RestoreClone(): void }).fu41RestoreClone());
+      }
+    };
+    await setUp(dm, { width: 390, height: 844, scale: 1 });
+    await dmCdp.send("Emulation.setCPUThrottlingRate", { rate: 6 });
+    try {
+      const text = Array.from({ length: 8 }, (_, i) => `- Row ${i}: **A long journal entry** with a [reference](https://example.com).`).join("\n");
+      await ops.send({ t: "journal.create", page: { id: pageId, title: "FU41 clone measurement", access: "dm", blocks: Array.from({ length: 40 }, (_, i) => ({ id: randomUUID(), text, ...(i === 0 ? { secret: { revealed: false } } : {}) })) } });
+      let sheet = await openPanel(dm, "Journal");
+      const back = sheet.getByRole("button", { name: /^Back to Journal/ });
+      if (await back.count()) await back.click();
+      await measure("journal.list.open", () => sheet.getByRole("button", { name: /^FU41 clone measurement/ }).click());
+      await sheet.getByRole("button", { name: "Reveal", exact: true }).waitFor();
+      await measure("journal.long.reveal", () => sheet.getByRole("button", { name: "Reveal", exact: true }).click());
+      await sheet.getByRole("button", { name: "Hide", exact: true }).waitFor();
+      await measure("journal.long.edit.keyboard", () => sheet.getByRole("button", { name: "Edit", exact: true }).press("Enter"));
+      await dm.getByRole("button", { name: "Cancel", exact: true }).click();
+      await sheet.getByRole("button", { name: "Close Journal" }).click();
+      const entries = Array.from({ length: LIMITS.encounterRows }, (_, i) => ({ id: randomUUID(), label: `FU41 row ${i + 1}`, value: 10 }));
+      if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+      await ops.send({ t: "encounter.start", entries: entries.slice(0, 100) });
+      for (let i = 100; i < entries.length; i += 100) await ops.send({ t: "encounter.add", entries: entries.slice(i, i + 100) });
+      await waitFor("the full Initiative list", () => dmSocket.state?.encounter?.entries.length === LIMITS.encounterRows || null);
+      sheet = await openPanel(dm, "Initiative");
+      await waitFor("every rendered Initiative row", async () => await sheet.locator("[data-entry-row]").count() === LIMITS.encounterRows || null, 60_000);
+      const options = sheet.getByRole("button", { name: "FU41 row 1 options", exact: true });
+      await measure("initiative.full.rowOptions", () => options.click());
+      await options.click();
+      await measure("initiative.full.typeValues.keyboard", () => sheet.getByRole("button", { name: "Type several values", exact: true }).press("Enter"));
+      console.log(`fu41-b-clone ${JSON.stringify({ cpu: "Chromium CDP 6x CPU slowdown", viewport: "390x844", scale: 1, journalBlocks: 40, initiativeRows: LIMITS.encounterRows, records })}`);
+      await sheet.getByRole("button", { name: "Close Initiative" }).click();
+    } finally {
+      await dmCdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
+      if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+      await ops.send({ t: "journal.delete", pageId });
+    }
+  });
+
+  test("fu41-b-radio. a swipe picture preserves native control values without changing a live radio group", async () => {
+    for (const explicitForm of [false, true]) {
+      await setUp(dm, { width: 375, height: 667, scale: 1 });
+      const sheet = await openPanel(dm, "Menu");
+      await steadyRect(sheet);
+      await sheet.locator("[data-pane-body]").evaluate((body, hasForm) => {
+        type Native = { value: string; checked: boolean };
+        type Fixture = { insertAdjacentHTML(at: string, html: string): void; querySelector(s: string): Native | null };
+        const el = body as unknown as Fixture;
+        el.insertAdjacentHTML("beforeend", `<div data-fu41-controls><input data-fu41-radio type="radio" name="fu41-native-choice" ${hasForm ? 'form="fu41-native-form"' : ""}><select name="fu41-select" form="fu41-native-form"><option value="one">One</option><option value="two">Two</option></select><textarea name="fu41-notes" form="fu41-native-form"></textarea></div>`);
+        el.querySelector("[data-fu41-controls] input")!.checked = true;
+        el.querySelector("[data-fu41-controls] select")!.value = "two";
+        el.querySelector("[data-fu41-controls] textarea")!.value = "Typed words";
+      }, explicitForm);
+      await sheet.getByRole("button", { name: /^Members/ }).first().click();
+      await sheet.getByRole("heading", { name: "Members" }).waitFor();
+      await dm.evaluate(() => {
+        type Native = { checked: boolean; remove(): void };
+        type Fixture = { body: { insertAdjacentHTML(at: string, html: string): void }; querySelector(s: string): Native | null; querySelectorAll(s: string): ArrayLike<Native> };
+        const doc = (globalThis as unknown as { document: Fixture }).document;
+        for (const el of Array.from(doc.querySelectorAll("[data-fu41-controls]"))) el.remove();
+        doc.body.insertAdjacentHTML("beforeend", '<form id="fu41-native-form" data-fu41-live></form><input data-fu41-live type="radio" name="fu41-native-choice"><input data-fu41-live type="radio" name="fu41-native-choice" form="fu41-native-form">');
+        for (const el of Array.from(doc.querySelectorAll("input[data-fu41-live]"))) el.checked = true;
+      });
+      const finger = new Finger(dmCdp, dm);
+      try {
+        await finger.down(await leftBodyPoint(sheet));
+        await finger.drag(0, { dx: 50 });
+        const under = sheet.locator("[inert]");
+        await under.waitFor();
+        assert.equal(await under.locator("[data-fu41-radio]").isChecked(), true, "the picture keeps the checked appearance");
+        assert.equal(await under.locator("select").inputValue(), "two");
+        assert.equal(await under.locator("textarea").inputValue(), "Typed words");
+        assert.equal(await under.locator("input[name], input[form], select[name], select[form], textarea[name], textarea[form]").count(), 0);
+        assert.deepEqual(await dm.locator("input[data-fu41-live]").evaluateAll((els) => els.map((el) => (el as unknown as { checked: boolean }).checked)), [true, true], "attaching the checked picture leaves both native live groups selected");
+      } finally {
+        await finger.up();
+        await dm.evaluate(() => {
+          const doc = (globalThis as unknown as { document: { querySelectorAll(s: string): ArrayLike<{ remove(): void }> } }).document;
+          for (const el of Array.from(doc.querySelectorAll("[data-fu41-live], [data-fu41-controls]"))) el.remove();
+        });
+        await sheet.getByRole("button", { name: "Close Menu" }).click();
+      }
     }
   });
 
