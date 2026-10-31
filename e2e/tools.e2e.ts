@@ -613,6 +613,18 @@ describe("raccoon-vtt DM tools run", { timeout: 300_000 }, () => {
     assert.equal(await rows.count(), 500);
     const movedBy = (await reading.boundingBox())!.y - readingY;
     assert.ok(Math.abs(movedBy) <= 2, `the reader's row moved ${movedBy} px as live lines pushed held rows out`);
+
+    // Sending from there shows the sent line, which a later live line keeps in view (LOGC-OPUS-11).
+    const shown = async (text: string) => {
+      const [box, foot] = [await sheet.locator("li").filter({ has: player.getByText(text, { exact: true }) }).boundingBox(), await sheet.locator("form").boundingBox()];
+      return box && foot && box.y >= 0 && box.y + box.height <= foot.y + 1 ? true : null;
+    };
+    await sheet.getByRole("textbox", { name: "Message" }).fill("Pat reads back, then answers.");
+    await sheet.getByRole("button", { name: "Send", exact: true }).tap();
+    await waitFor("the sent line in view", () => shown("Pat reads back, then answers."), 5_000);
+    await ops.send({ t: "log.chat", text: "History line 564" });
+    await waitFor("the next live line in view", () => shown("History line 564"), 5_000);
+    assert.ok(await shown("Pat reads back, then answers."), "a later live line took the sent line out of view");
     await anchoring("");
 
     // Past 500 rows the window parts from the live log: its newest lines go, and Show newer and Back to latest come.

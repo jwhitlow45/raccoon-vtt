@@ -107,8 +107,9 @@ export default function LogPanel(_props: PanelProps) {
         key,
         fetch: (ask, signal) => logPage(asked.current.roomId, ask, asked.current.viewer, { signal }),
         // The row at the top of the reader's view stays where it is while rows go in or out around it.
+        // New live lines leave a reader at the end, or one who just sent, to follow them to the bottom instead.
         beforeMove: (why) => {
-          if (why === "live" && atEnd.current) return;
+          if (why === "live" && (atEnd.current || sentRef.current)) return;
           const row = firstVisibleRow(listRef.current);
           const rows = winRef.current?.state.rows;
           anchor.current = row && rows ? { ...row, rows } : null;
@@ -158,6 +159,8 @@ export default function LogPanel(_props: PanelProps) {
       const row = listRef.current?.querySelector(`[data-log-id="${CSS.escape(kept.id)}"]`);
       if (el && row) {
         el.scrollTop += row.getBoundingClientRect().top - kept.top;
+        // A send the held place outranked never scrolls the reader down at a later line.
+        sentRef.current = false;
         return;
       }
     }
