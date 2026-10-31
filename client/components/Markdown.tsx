@@ -36,9 +36,8 @@ export function Markdown(props: { text: string; style?: CSSProperties; journal?:
 }
 
 /**
- * Draws a run of plain text in place of its words alone: a stat block
- * marks the skills and saves its Skills and Saving Throws lines list
- * (monsters/StatBlockView.tsx). `lead` is the bold words before the run in
+ * Draws a run of plain text in place of its words alone, for a page that
+ * decorates a block's words (no caller marks proficiency since FL-13). `lead` is the bold words before the run in
  * its paragraph, such as "Skills", or null. Without it every run is its
  * words, so the markup is the same as ever.
  */
