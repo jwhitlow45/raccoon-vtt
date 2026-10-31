@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { OUTCOME_RESTORED, OUTCOME_UNDONE, assertPrivateOutcome, saveOutcomes } from "./helpers/saveOutcomes.ts";
+import { OUTCOME_RESTORED, OUTCOME_UNDONE, assertPrivateOutcome, dismissRedoToasts, saveOutcomes } from "./helpers/saveOutcomes.ts";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -481,8 +481,10 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     assert.ok(record);
     const position = { x: token(dmSocket, run.thorn)?.x, y: token(dmSocket, run.thorn)?.y, elevation: token(dmSocket, run.thorn)?.elevation };
     const springings = state(dmSocket)?.trapLog.map((line) => line.id);
+    // The page's own line, not the toast or the live region that speaks the same words once.
+    const page = dm.getByRole("tabpanel", { name: "Dice" });
     await ops.step("undo");
-    await dm.getByText(OUTCOME_UNDONE, { exact: true }).waitFor();
+    await page.getByText(OUTCOME_UNDONE, { exact: true }).waitFor();
     const due = await waitFor("the exact old occurrence", () => trap(dmSocket)?.rig?.due?.[0]);
     assert.ok(springings?.includes(due.id));
     assert.equal(thornHp(), HP);
@@ -491,10 +493,14 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     assertPrivateOutcome(patSocket, record[0], record[1].plan);
     assert.equal(patHeardOfTrap(), false);
     await shots.take(dm, "undo-scope-trap-reopened");
+    const linesBefore = [state(patSocket)?.log.length ?? 0, state(dmSocket)?.log.length ?? 0];
     await ops.step("redo");
-    await dm.getByText(OUTCOME_RESTORED, { exact: true }).waitFor();
+    await page.getByText(OUTCOME_RESTORED, { exact: true }).waitFor();
     await waitFor("the occurrence settled again", () => !trap(dmSocket)?.rig?.due || null);
     assert.equal(saveOutcomes(dmSocket)[record[0]]?.revision, 3);
+    // Undo and Redo each tell Pat about Thorn (design 4.2), and the DM too. Those toasts stand over the map where the next step taps.
+    await dismissRedoToasts(pat, patSocket, linesBefore[0]!);
+    await dismissRedoToasts(dm, dmSocket, linesBefore[1]!);
   });
 
   test("tr-5. the DM marks the pit found in its pane, and Pat's map shows it by name, never its rig", async () => {

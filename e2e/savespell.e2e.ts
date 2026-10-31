@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { OUTCOME_RESTORED, OUTCOME_UNDONE, assertPrivateOutcome, saveOutcomes } from "./helpers/saveOutcomes.ts";
+import { OUTCOME_RESTORED, OUTCOME_UNDONE, assertPrivateOutcome, dismissRedoToasts, saveOutcomes } from "./helpers/saveOutcomes.ts";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -420,6 +420,7 @@ describe("raccoon-vtt a player's save spell", { timeout: 600_000 }, () => {
     assert.deepEqual(diceLines(dmSocket.state?.log), originalRolls, "reopening draws no dice");
     assertPrivateOutcome(patSocket, record[0], record[1].plan);
     await shots.take(dm, "undo-scope-restored-cast-page");
+    const linesBefore = [patSocket.state?.log.length ?? 0, dmSocket.state?.log.length ?? 0];
     await ops.step("redo");
     await areas.getByText(OUTCOME_RESTORED, { exact: true }).waitFor();
     await waitFor("the same cast resolved again", () => !dmSocket.state?.casts[castId] || null);
@@ -427,6 +428,9 @@ describe("raccoon-vtt a player's save spell", { timeout: 600_000 }, () => {
     assert.equal(await areas.getByRole("button", { name: /^Apply: / }).count(), 0);
     await areas.getByRole("button", { name: "Done", exact: true }).tap();
     await closeSheet(dm, "Areas");
+    // Undo and Redo each tell Bree's player (design 4.2), and the DM too. Those toasts stand over the map where the next step taps.
+    await dismissRedoToasts(pat, patSocket, linesBefore[0]!);
+    await dismissRedoToasts(dm, dmSocket, linesBefore[1]!);
   });
 
   test("ss-5. Hold Person at level 3 from its row with two goblins selected, then Dismiss and its toast", async () => {
@@ -491,6 +495,8 @@ describe("raccoon-vtt a player's save spell", { timeout: 600_000 }, () => {
 
   test("ss-7. the DM's phone reloads with an ask's group save open: the card stays away until Discard", async () => {
     await pickTool(pat, "Select");
+    // ss-5's and ss-6's notes can still stand over Thorn's cell, by how long those steps took, as in ss-7b.
+    await dismissToasts(pat);
     await tapCell(pat, BOUNDS, run.thorn);
     await multiSelect(pat.getByRole("dialog", { name: "Thorn actions" }));
     for (const g of run.goblins) await tapCell(pat, BOUNDS, g);
