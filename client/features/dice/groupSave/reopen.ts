@@ -169,7 +169,11 @@ export function reconcileSave(input: SaveSession, authority: SaveAuthority): Sav
     if (stableStringify(edits) !== stableStringify(checkpoint.choices)) held = edits;
   }
   if (!newer && reopen.check === "applied" && page.phase === "applied") return { page, reopen };
-  return { page: { ...page, phase: "applied", apply: "taken" }, reopen: { ...metadata, redoHeld: held, notice: restored ? OUTCOME_RESTORED : undefined } };
+  // A page relocked from editable shows the confirmed outcome's own choices, whatever it was edited to meanwhile, and the
+  // edits live on only in redoHeld (D-261031-180). An applying page could not be edited, so it shows them already, with
+  // the plan that says what it applied.
+  const shown = wasEditable ? restoreChoices(page.id, checkpoint.choices) : page;
+  return { page: { ...shown, phase: "applied", apply: "taken" }, reopen: { ...metadata, redoHeld: held, notice: restored ? OUTCOME_RESTORED : undefined } };
 }
 
 export function saveEditable(input: SaveSession, authority: SaveAuthority): boolean {

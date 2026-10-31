@@ -496,6 +496,8 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     await dm.keyboard.press("Control+Shift+z");
     await sheet.getByText(OUTCOME_RESTORED, { exact: true }).waitFor();
     assert.equal(await sheet.getByRole("button", { name: /^Apply: / }).count(), 0);
+    // The locked page shows the DC Redo restored, not the edit kept aside (D-261031-180).
+    await waitFor("the restored DC on the locked page", async () => ((await dc.inputValue()) === String(DC) ? true : null));
     assert.equal(saveOutcomes(dmSocket)[id]?.revision, 3);
     await dm.keyboard.press("Control+z");
     await sheet.getByText(OUTCOME_UNDONE, { exact: true }).waitFor();

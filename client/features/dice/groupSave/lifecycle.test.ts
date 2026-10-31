@@ -13,7 +13,7 @@ import { ReceiptTracker } from "../useReceipt.ts";
 import { askAnswered, newPage, type Page } from "./chain.ts";
 import { askAgain } from "./reroll.ts";
 import { authorityOf, bindSaveLifecycle, serverTime } from "./lifecycle.ts";
-import { captureChoices, OUTCOME_RESTORED, OUTCOME_UNAVAILABLE, OUTCOME_UNDONE, prepareSave, SAVE_MEMORY_ONLY, sessionOfDraft, type SaveSession } from "./reopen.ts";
+import { captureChoices, OUTCOME_RESTORED, OUTCOME_UNAVAILABLE, OUTCOME_UNDONE, prepareSave, resumeSaveEdits, SAVE_MEMORY_ONLY, sessionOfDraft, type SaveSession } from "./reopen.ts";
 import type { SaveDraft } from "./reopenContract.ts";
 import type { GroupSaveState } from "./store.ts";
 
@@ -460,4 +460,52 @@ test("a device ten minutes slow whose clock is then set right still mints a firs
   const first = applyOp(testRoom({ tokens: { g1: token("g1") } }), { t: "actor.outcome", plan: id, page: { id, expectRevision: 0 }, label: "Fire", targets: [{ target: { tokenId: "g1" }, amount: 3 }] } as never, DM, { seq: 1, at: new Date(stamped + 2_000).toISOString() });
   assert.ok(first.ok, first.ok ? "" : first.message);
   room.dispose();
+});
+
+test("a Redo confirmed while the check waits relocks the page on the applied choices, and the edits made meanwhile come back by Resume after an Undo", () => {
+  const f = fixture();
+  const stop = bindSaveLifecycle(f.options);
+  f.snapshot({ [PLAN]: record("undone", 2, 11) }, 11);
+  assert.equal(f.store.getState().reopen?.check, "undone");
+  // The connection blips, so the check waits, and the DM changes the total meanwhile.
+  f.room.suspend();
+  assert.equal(f.store.getState().reopen?.check, "checking");
+  const edited = f.store.getState().page!;
+  f.store.setState({ page: { ...edited, states: { "token:g1": { way: "type", typed: 20 } } } });
+  f.snapshot({ [PLAN]: record("applied", 3, 12) }, 12);
+  const relocked = f.store.getState();
+  assert.equal(relocked.page!.phase, "applied");
+  assert.deepEqual(relocked.page!.states, { "token:g1": { way: "type", typed: 14 } }, "the locked page shows what was applied");
+  assert.equal(relocked.page!.plan, null);
+  assert.equal(relocked.reopen?.redoHeld?.states["token:g1"]?.typed, 20, "the edits are held apart");
+  assert.equal(f.writes.at(-1)!.page.states["token:g1"]?.typed, 14, "a reload shows what was applied too");
+  f.snapshot({ [PLAN]: record("undone", 4, 13) }, 13);
+  const undone = f.store.getState();
+  assert.equal(undone.page!.phase, "rolled");
+  assert.equal(undone.page!.states["token:g1"]?.typed, 14);
+  const resumed = resumeSaveEdits({ page: undone.page!, reopen: undone.reopen }, authorityOf(f.room.store.getState(), undone.page!));
+  assert.equal(resumed.page.states["token:g1"]?.typed, 20, "Resume your edits brings them back");
+  assert.equal(resumed.reopen?.redoHeld, undefined);
+  stop();
+  f.room.dispose();
+});
+
+test("a later Apply refused because Redo restored the earlier outcome relocks the page on that outcome's choices and holds the refused ones", () => {
+  const B = "019a4000-0000-7000-8000-000000000002";
+  const f = fixture();
+  const stop = bindSaveLifecycle(f.options);
+  f.snapshot({ [PLAN]: record("undone", 2, 11) }, 11);
+  const held = f.store.getState();
+  const sent = prepareSave({ page: { ...held.page!, dc: 18 }, reopen: held.reopen }, { t: "actor.outcome", plan: B, targets: [{ target: { tokenId: "g1" }, amount: 3 }] }, authorityOf(f.room.store.getState(), held.page!));
+  f.store.setState({ page: sent.page, reopen: sent.reopen });
+  f.receipts.sending(B, 0);
+  // Another DM device redoes the first outcome before this one's second Apply arrives, so the second is refused.
+  f.snapshot({ [PLAN]: record("applied", 3, 12) }, 12);
+  f.receipts.answer(B, 0, "refused", { code: "invalid", message: "This save's outcome changed. Check the save before trying again.", text: "This save's outcome changed. Check the save before trying again." });
+  const relocked = f.store.getState();
+  assert.equal(relocked.page!.phase, "applied");
+  assert.equal(relocked.page!.dc, 15, "the locked page shows the outcome Redo restored");
+  assert.equal(relocked.reopen?.redoHeld?.dc, 18, "the refused choices are held for Resume your edits");
+  stop();
+  f.room.dispose();
 });
