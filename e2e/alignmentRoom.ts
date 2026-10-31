@@ -1254,20 +1254,15 @@ async function closeDiceSheet(page: Page): Promise<void> {
  * button settled in its scroller's middle, so no scroll moves it under the
  * menu, measured as `screen`: the popover, then `host` with the menu
  * open as `screen`-host, whose proficiency borders and rows must hold. The
- * button keeps its box to the pixel while its menu is open, and Escape
- * closes it. Docs/design-v1-roll-mode-menu.md 6.
+ * button keeps its box to the pixel as its menu opens, by ContextMenu and
+ * again by Shift+F10, and Escape closes it. Docs/design-v1-roll-mode-menu.md 6.
+ *
+ * The box is read before the measures: their hide-and-compare can let a
+ * scroller at its far end fall back while marks are off, which is the
+ * sweep's doing, not the menu's.
  */
 async function rollMenuScreen(sweep: Sweep, page: Page, screen: string, button: Locator, name: RegExp, host: Locator): Promise<void> {
   if (!(await showsWithin(button, 4_000))) return sweep.missing(page, screen, "its roll button never showed");
-  await button.evaluate((el) => (el as unknown as { scrollIntoView(o: object): void }).scrollIntoView({ block: "center" }));
-  let before = "";
-  await waitFor(`${screen}'s button to settle`, async () => {
-    await page.waitForTimeout(120);
-    const box = JSON.stringify(await button.boundingBox());
-    const still = box === before;
-    before = box;
-    return still || null;
-  });
   /** The scrolled boxes around the button, innermost first. */
   const scrolls = () => button.evaluate((el) => {
     type El = { scrollTop: number; parentElement: El | null; tagName: string };
@@ -1275,24 +1270,51 @@ async function rollMenuScreen(sweep: Sweep, page: Page, screen: string, button: 
     for (let n = (el as unknown as El).parentElement; n; n = n.parentElement) if (n.scrollTop) out.push(`${n.tagName}:${n.scrollTop}`);
     return out.join(" ");
   });
-  const scrollBefore = await scrolls();
-  await button.evaluate((el) => (el as unknown as { focus(o: object): void }).focus({ preventScroll: true }));
-  await page.keyboard.press("ContextMenu");
+  const frames = () => page.evaluate(() => {
+    const raf = (globalThis as unknown as { requestAnimationFrame(f: () => void): number }).requestAnimationFrame;
+    return new Promise<void>((done) => raf(() => raf(() => done())));
+  });
   const menu = page.getByRole("menu", { name });
-  if (!(await showsWithin(menu, 3_000))) return sweep.missing(page, screen, "ContextMenu opened no menu");
-  try {
-    await sweep.measure(page, screen, page.locator("[data-rvtt-popover]").filter({ has: menu }));
-    await sweep.measure(page, `${screen}-host`, host);
+  /** Opens the menu by `key` on the settled button, and adds a line if the button moved as it opened. False if no menu opened. */
+  const open = async (key: string): Promise<boolean> => {
+    await button.evaluate((el) => (el as unknown as { scrollIntoView(o: object): void }).scrollIntoView({ block: "center" }));
+    let before = "";
+    await waitFor(`${screen}'s button to settle`, async () => {
+      await page.waitForTimeout(120);
+      const box = JSON.stringify(await button.boundingBox());
+      const still = box === before;
+      before = box;
+      return still || null;
+    });
+    const scrollBefore = await scrolls();
+    await button.evaluate((el) => (el as unknown as { focus(o: object): void }).focus({ preventScroll: true }));
+    await page.keyboard.press(key);
+    if (!(await showsWithin(menu, 3_000))) return false;
+    await frames();
     const after = JSON.stringify(await button.boundingBox());
     if (after !== before) {
-      // A scroller that moved under the open menu reads apart from a box that changed, since the fix differs.
+      // A scroller that moved under the opening menu reads apart from a box that changed, since the fix differs.
       const scrollAfter = await scrolls();
       const why = scrollAfter === scrollBefore ? "" : `, a scroller moving under it (scrollTop ${scrollBefore || "none"} to ${scrollAfter || "none"})`;
-      await sweep.add(page, screen, [`${sweep.at} ${screen}: the roll button's box changed with its menu open${why}, ${before} to ${after}`]);
+      await sweep.add(page, screen, [`${sweep.at} ${screen}: the roll button's box changed as ${key} opened its menu${why}, ${before} to ${after}`]);
     }
-  } finally {
+    return true;
+  };
+  const close = async () => {
     await page.keyboard.press("Escape");
     await menu.waitFor({ state: "detached" }).catch(() => undefined);
+  };
+  try {
+    if (!(await open("ContextMenu"))) return sweep.missing(page, screen, "ContextMenu opened no menu");
+    await sweep.measure(page, screen, page.locator("[data-rvtt-popover]").filter({ has: menu }));
+    await sweep.measure(page, `${screen}-host`, host);
+  } finally {
+    await close();
+  }
+  try {
+    if (!(await open("Shift+F10"))) await sweep.add(page, screen, [`${sweep.at} ${screen}: Shift+F10 opened no menu`]);
+  } finally {
+    await close();
   }
 }
 

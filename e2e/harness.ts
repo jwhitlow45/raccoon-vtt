@@ -614,38 +614,63 @@ export class Shots {
   }
 }
 
-/** What a roll's result line shows (resultLine). */
-export type ResultLine = { name: string; shown: string; hasDetail: boolean; showsDetail: boolean; height: number; compactHeight: number; detailHeight: number };
+/** What a roll's result line shows and reads (resultLines). */
+export type ResultLine = { readable: string; shown: string; missing: string; visible: boolean; hasDetail: boolean; showsDetail: boolean; height: number; compactHeight: number; detailHeight: number };
 
 /**
- * A roll's result line (client/features/rolls/card.ts RollResultLine): its
- * accessible name, the words it shows, and its parent's height with each of
- * its two wordings, swapped in place and back within one task. The detailed
- * words may show only if they cost the parent no height over the compact
- * ones (D-261030-583), so `height` must equal `compactHeight` either way.
+ * Every roll result line in `scope` (client/features/rolls/card.ts
+ * RollResultLine): the words it shows, the added words it keeps for screen
+ * readers alone when they do not fit, both as one text in reading order,
+ * and its parent's height with each wording, swapped in place and back
+ * within one task. The detailed words may show only if they cost the
+ * parent no height over the compact ones (D-261030-584), so `height` must
+ * equal `compactHeight` either way.
  */
-export async function resultLine(note: Locator): Promise<ResultLine> {
-  return note.evaluate((el) => {
-    type Box = { hidden: boolean; textContent: string | null };
-    type El = { getAttribute(n: string): string | null; querySelector(s: string): Box | null; parentElement: { getBoundingClientRect(): { height: number } } | null; getBoundingClientRect(): { height: number } };
-    const root = el as unknown as El;
-    const base = root.querySelector("[data-roll-result-base]")!;
-    const detail = root.querySelector("[data-roll-result-detail]");
-    const parent = root.parentElement ?? root;
-    const height = () => parent.getBoundingClientRect().height;
-    const showsDetail = detail !== null && !detail.hidden;
-    const shown = { height: height(), base: base.hidden, detail: detail?.hidden ?? true };
-    const as = (detailed: boolean) => {
-      base.hidden = detailed;
-      if (detail) detail.hidden = !detailed;
-      return height();
-    };
-    const compactHeight = as(false);
-    const detailHeight = detail ? as(true) : compactHeight;
-    base.hidden = shown.base;
-    if (detail) detail.hidden = shown.detail;
-    return { name: root.getAttribute("aria-label") ?? "", shown: (showsDetail ? detail! : base).textContent ?? "", hasDetail: detail !== null, showsDetail, height: shown.height, compactHeight, detailHeight };
-  });
+export async function resultLines(scope: Locator): Promise<ResultLine[]> {
+  return scope.locator("[data-roll-result-base]").evaluateAll((bases) =>
+    bases.map((node) => {
+      type Box = { hidden: boolean; textContent: string | null; parentElement: Box | null; querySelector(s: string): Box | null; getBoundingClientRect(): { height: number } };
+      const base = node as unknown as Box;
+      const root = base.parentElement!;
+      const detail = root.querySelector(":scope > [data-roll-result-detail]");
+      const missing = root.querySelector(":scope > [data-roll-result-missing]");
+      const parent = root.parentElement ?? root;
+      const height = () => parent.getBoundingClientRect().height;
+      const was = { base: base.hidden, detail: detail?.hidden ?? true, missing: missing?.hidden ?? true, height: height() };
+      const as = (detailed: boolean) => {
+        base.hidden = detailed;
+        if (detail) detail.hidden = !detailed;
+        if (missing) missing.hidden = detailed;
+        return height();
+      };
+      const compactHeight = as(false);
+      const detailHeight = detail ? as(true) : compactHeight;
+      base.hidden = was.base;
+      if (detail) detail.hidden = was.detail;
+      if (missing) missing.hidden = was.missing;
+      const showsDetail = detail !== null && !was.detail;
+      const shown = (showsDetail ? detail!.textContent : base.textContent) ?? "";
+      const kept = missing && !was.missing ? (missing.textContent ?? "") : "";
+      // Neither wording shown is a result gone from view, however its words read.
+      const visible = showsDetail || !was.base;
+      return { readable: visible ? shown + kept : kept, shown: visible ? shown : "", missing: kept, visible, hasDetail: detail !== null, showsDetail, height: was.height, compactHeight, detailHeight };
+    }),
+  );
+}
+
+/** The one result line in `scope` whose readable words match `words`, waited for. */
+export async function resultLine(scope: Locator, words: RegExp): Promise<ResultLine> {
+  let seen: ResultLine[] = [];
+  try {
+    return await waitFor(`a result reading ${words}`, async () => {
+      seen = await resultLines(scope);
+      const found = seen.filter((line) => words.test(line.readable));
+      assert.ok(found.length <= 1, `two results read ${words}: ${JSON.stringify(found)}`);
+      return found[0] ?? null;
+    });
+  } catch (err) {
+    throw new Error(`${(err as Error).message}, results: ${JSON.stringify(seen)}`);
+  }
 }
 
 type StageCamera = { x: number; y: number; scale: number };

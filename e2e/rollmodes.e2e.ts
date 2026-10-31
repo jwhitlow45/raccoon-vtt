@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { barControl, ConsoleWatch, diceFoldsOpen, OpSocket, openSideTab, resultLine, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, Touches, waitFor, type Server, type TouchAt } from "./harness.ts";
+import { barControl, ConsoleWatch, diceFoldsOpen, OpSocket, openSideTab, reopenRoom, resultLine, resultLines, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, Touches, waitFor, type Server, type TouchAt } from "./harness.ts";
 
 /**
  * The one-roll mode menu (docs/design-v1-roll-mode-menu.md), its steps
@@ -228,7 +228,7 @@ const HINT = {
   plain: "Hold, right-click or Shift+F10 for Secret or Normal.",
 } as const;
 
-const NORMAL_HELP = "Ignore manual modes for this roll. Creature effects and default visibility still apply.";
+const NORMAL_HELP = "Roll normally: ignores Adv, Dis and Secret pressed for this roll. Conditions still apply.";
 
 async function itemsOf(menu: Locator): Promise<Item[]> {
   await menu.waitFor();
@@ -317,6 +317,30 @@ function liftClick(control: Locator): Promise<void> {
   });
 }
 
+/**
+ * A Mac's Ctrl+click on `control`, as its browser sends it: a left press
+ * with Ctrl, its contextmenu from the mouse, the lift, and the click Safari
+ * adds. Whether the page prevented the contextmenu comes back.
+ */
+function ctrlClick(control: Locator): Promise<boolean> {
+  return control.evaluate((el) => {
+    type Target = { dispatchEvent(e: unknown): boolean; getBoundingClientRect(): { left: number; top: number; width: number; height: number } };
+    const g = globalThis as unknown as { PointerEvent: new (type: string, init: Record<string, unknown>) => { defaultPrevented: boolean }; MouseEvent: new (type: string, init: Record<string, unknown>) => unknown };
+    const target = el as unknown as Target;
+    const box = target.getBoundingClientRect();
+    const at = { bubbles: true, cancelable: true, composed: true, ctrlKey: true, button: 0, clientX: box.left + box.width / 2, clientY: box.top + box.height / 2 };
+    const pointer = { ...at, pointerType: "mouse", pointerId: 1, isPrimary: true };
+    target.dispatchEvent(new g.PointerEvent("pointerdown", { ...pointer, buttons: 1 }));
+    target.dispatchEvent(new g.MouseEvent("mousedown", { ...at, buttons: 1, detail: 1 }));
+    const menu = new g.PointerEvent("contextmenu", { ...pointer, buttons: 1, detail: 0 });
+    target.dispatchEvent(menu);
+    target.dispatchEvent(new g.PointerEvent("pointerup", { ...pointer, buttons: 0 }));
+    target.dispatchEvent(new g.MouseEvent("mouseup", { ...at, buttons: 0, detail: 1 }));
+    target.dispatchEvent(new g.MouseEvent("click", { ...at, buttons: 0, detail: 1 }));
+    return menu.defaultPrevented;
+  });
+}
+
 /** Counts every contextmenu event that reaches the window, and whether the page prevented it, so a step sees the browser's own too. */
 async function watchContextMenus(page: Page): Promise<void> {
   await page.evaluate(() => {
@@ -361,7 +385,7 @@ type Family = {
 
 /** Thorn's controls as Pat rolls them: his own creature, so every roll starts public. */
 function patFamilies(): Family[] {
-  const player = ["You and the DM see the result.", NORMAL_HELP];
+  const player = ["Roll secretly: you and the DM see the result.", NORMAL_HELP];
   return [
     { what: "a save", button: (s) => s.getByRole("button", { name: /^Wisdom save/ }), menu: /^Roll options for Wisdom save/, items: D20, hint: HINT.d20, help: player, pick: "Roll with Disadvantage", sends: { t: "dice.roll", mode: "dis", to: "all" } },
     { what: "an ability check", button: (s) => s.getByRole("button", { name: /^Strength check/ }), menu: /^Roll options for Strength check/, items: D20, hint: HINT.d20, pick: "Roll secretly", sends: { t: "dice.roll", mode: null, to: "dm" } },
@@ -382,14 +406,14 @@ const DEATH_SAVE: Family = {
   menu: /^Roll options for Death Save/,
   items: D20_FIXED,
   hint: HINT.fixed,
-  help: ["This roll's visibility is set by the creature.", NORMAL_HELP],
+  help: ["Roll secretly: this roll's visibility is set by the creature.", NORMAL_HELP],
   pick: "Roll with Advantage",
   sends: { t: "actor.deathRoll", mode: "adv", to: null },
 };
 
 /** The sticky line's Again and Recent rolls' Again for a public d20 roll: the recorded visibility, and the recorded formula. */
 function againFamilies(formula: string): Family[] {
-  const help = ["This repeat keeps its recorded visibility.", "Ignore the recorded mode. Formula and visibility stay.", "Repeats the recorded formula with your chosen mode. Current effects are not rebuilt."];
+  const help = ["Roll secretly: this repeat keeps its recorded visibility.", "Roll normally: ignores the recorded mode and keeps the formula and visibility.", "All repeat choices: use the recorded formula. Current effects are not rebuilt."];
   const escaped = formula.replace(/[+]/g, "\\+");
   return [
     { what: "the sticky line's Again", button: (s) => s.locator("[data-dice-last]").getByRole("button", { name: "Again", exact: true }), menu: /^Roll options for Again$/, items: D20_FIXED, hint: HINT.fixed, help, pick: "Roll with Disadvantage", sends: { t: "dice.roll", mode: "dis", to: "all" } },
@@ -545,7 +569,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
     assert.deepEqual(before, { adv: false, dis: true, secret: false });
     await sheet.getByLabel("Dice formula", { exact: true }).fill("1d20+3");
     const roll = sheet.getByRole("button", { name: "Roll", exact: true });
-    const family: Family = { what: "the formula's Roll", button: () => roll, menu: /^Roll options for Dice formula$/, items: D20, hint: HINT.d20, help: ["You and the DM see the result.", NORMAL_HELP], pick: "Roll with Advantage", sends: { t: "dice.roll", mode: "adv", to: "all" } };
+    const family: Family = { what: "the formula's Roll", button: () => roll, menu: /^Roll options for Dice formula$/, items: D20, hint: HINT.d20, help: ["Roll secretly: you and the DM see the result.", NORMAL_HELP], pick: "Roll with Advantage", sends: { t: "dice.roll", mode: "adv", to: "all" } };
     await sourceAria(roll, family);
     const from = patSent.ops.length;
     const at = await middle(roll);
@@ -859,7 +883,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
       menu: /^Roll options for Dexterity save, answers the DM's request/,
       items: D20_FIXED,
       hint: HINT.fixed,
-      help: ["Request answers keep the request's visibility.", NORMAL_HELP],
+      help: ["Roll secretly: request answers keep the request's visibility.", NORMAL_HELP],
       pick: "Roll with Advantage",
       sends: { t: "roll.dice", mode: "adv", to: null },
     };
@@ -879,7 +903,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
     await waitFor("the request closed", () => (dmSocket.state?.rolls[id] ? null : true));
   });
 
-  test("dpf1-10. the DM's computer: with Ask on, Thorn's save has no menu, and with it off each roll opens by right-click, ContextMenu and Shift+F10, closes by a right-click on its source and by Escape, and Enter still rolls", async () => {
+  test("dpf1-10. the DM's computer: with Ask on, Thorn's save has no menu, and with it off each roll opens by right-click, ContextMenu and Shift+F10, closes by a right-click on its source and by Escape, Enter still rolls, and a Mac's Ctrl+click opens as a right-click does", async () => {
     const panel = await dmDiceFor(run.thorn, "Thorn");
     await watchContextMenus(dm);
     const ask = panel.getByRole("switch", { name: "Ask Thorn to roll saves and checks" });
@@ -899,7 +923,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
     await ask.click();
     assert.equal(await ask.getAttribute("aria-checked"), "false");
 
-    const dmHelp = ["Hide the dice from players.", NORMAL_HELP];
+    const dmHelp = ["Roll secretly: hide the dice from players.", NORMAL_HELP];
     for (const family of patFamilies()) {
       const button = family.button(panel);
       const f = { ...family, help: family.help ? dmHelp : undefined };
@@ -939,6 +963,22 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
       await dm.keyboard.press("Enter");
       await oneRoll(dmSent, from, `Enter on ${f.what}`);
     }
+
+    // A Mac's Ctrl+click: a left button's contextmenu from a mouse, which opens the menu as a right-click does, focus kept on the source,
+    // and the click some browsers send after it closes nothing (DPF1B-OPUS-09). Dispatched, since only a Mac's browser turns the press into a contextmenu.
+    const save = patFamilies()[0]!;
+    const source = save.button(panel);
+    await middle(source);
+    from = dmSent.ops.length;
+    const prevented = await ctrlClick(source);
+    assert.ok(prevented, "the Ctrl+click's contextmenu keeps the browser's menu away");
+    const ctrlMenu = await opened(dm, source, { ...save, help: save.help ? dmHelp : undefined });
+    assert.ok(await isFocused(source), `a Ctrl+click opens as a mouse does, focus kept on the source: ${await focusedName(dm)}`);
+    await sleep(300);
+    assert.ok(await ctrlMenu.isVisible(), "the click after the Ctrl+click closes nothing");
+    await noRoll(dmSent, from, "a Ctrl+click and its click");
+    await dm.keyboard.press("Escape");
+    await ctrlMenu.waitFor({ state: "detached" });
     await ask.click();
     assert.equal(await ask.getAttribute("aria-checked"), "true");
   });
@@ -1061,7 +1101,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
     const first = randomUUID();
     await ops.send({ t: "roll.ask", request: { id: first, test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: false, resultShown: true, targets: [{ characterId: run.thornChar }] } });
     await waitFor("the ask on Pat's page", () => patSocket.state?.rolls[first]);
-    const fixed = (what: string, menu: RegExp, pick: string, mode: string | null): Family => ({ what, button: () => pat.locator("x"), menu, items: D20_FIXED, hint: HINT.fixed, help: ["Request answers keep the request's visibility.", NORMAL_HELP], pick, sends: { t: "roll.dice", mode, to: null } });
+    const fixed = (what: string, menu: RegExp, pick: string, mode: string | null): Family => ({ what, button: () => pat.locator("x"), menu, items: D20_FIXED, hint: HINT.fixed, help: ["Roll secretly: request answers keep the request's visibility.", NORMAL_HELP], pick, sends: { t: "roll.dice", mode, to: null } });
     const card = pat.getByRole("dialog", { name: "The DM asks for a roll" });
     if (!(await card.isVisible())) await pat.getByRole("button", { name: /^Roll asked/ }).first().tap();
     const roll = card.getByRole("button", { name: "Roll +1 for Thorn", exact: true });
@@ -1093,11 +1133,11 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
       const value = (entryId: string) => dmSocket.state?.encounter?.entries.find((e) => e.id === entryId)?.value ?? null;
       await openSideTab(dm, "Initiative");
       const tracker = dm.getByRole("tabpanel", { name: sideTabName("Initiative") });
-      const creature = ["This roll's visibility is set by the creature.", NORMAL_HELP];
+      const creature = ["Roll secretly: this roll's visibility is set by the creature.", NORMAL_HELP];
       // The goblin's own Roll, beside its value box or in its options.
       const rowRoll = tracker.getByRole("button", { name: /^Roll [+−-]\d+ Initiative for Goblin$/ }).first();
       if (!(await rowRoll.isVisible())) await tracker.getByRole("button", { name: "Goblin options" }).click();
-      let op = await pickFrom(dm, dmSent, rowRoll, { what: "the goblin's row Roll", button: () => rowRoll, menu: /^Roll options for Roll [+−-]\d+ Initiative for Goblin$/, items: D20, hint: HINT.d20, help: ["Hide the dice from players.", NORMAL_HELP], pick: "Roll with Advantage", sends: { t: "dice.roll", mode: "adv", to: "dm" } }, "right");
+      let op = await pickFrom(dm, dmSent, rowRoll, { what: "the goblin's row Roll", button: () => rowRoll, menu: /^Roll options for Roll [+−-]\d+ Initiative for Goblin$/, items: D20, hint: HINT.d20, help: ["Roll secretly: hide the dice from players.", NORMAL_HELP], pick: "Roll with Advantage", sends: { t: "dice.roll", mode: "adv", to: "dm" } }, "right");
       const line = await waitFor("the goblin's initiative line", () => dmSocket.state?.log.find((e) => e.data?.type === "dice" && e.data.tag === op.tag)?.data ?? null);
       const total = line.type === "dice" ? line.rolls[0]!.total : null;
       await waitFor(`the goblin's row set to ${total}`, () => (value("e-goblin") === total ? true : null));
@@ -1108,11 +1148,9 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
       const rowTool = tracker.getByRole("button", { name: "Roll Initiative", exact: true }).first();
       op = await pickFrom(dm, dmSent, rowTool, { what: "the dragon's Roll Initiative", button: () => rowTool, menu: /^Roll options for Initiative$/, items: D20_FIXED, hint: HINT.fixed, help: creature, pick: "Roll with Disadvantage", sends: { t: "dice.roll", mode: "dis", to: "dm" } }, "key");
       await waitFor("the dragon's row set", () => (value("e-dragon") !== null ? true : null));
-      // Its result in Auto Initiative's card names Disadvantage, in its words only where that adds no line (D-261030-583).
+      // Its result in Auto Initiative's card keeps the badge it always had, Dis, and says no more (D-261030-584).
       const results = tracker.getByRole("region", { name: "Auto Initiative results" });
-      const dis = await resultLine(results.getByRole("note", { name: /with Disadvantage/ }).first());
-      assert.ok(dis.hasDetail, `the dragon's result has words for its mode: ${JSON.stringify(dis)}`);
-      assert.equal(dis.height, dis.compactHeight, `the dragon's result adds no line: ${JSON.stringify(dis)}`);
+      await results.getByText("Dis", { exact: true }).first().waitFor();
 
       // Auto Initiative with every monster's value set: Re-roll gives it dice to roll again, always secret.
       const reroll = tracker.getByRole("checkbox", { name: "Re-roll monsters that have a value" });
@@ -1120,12 +1158,12 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
       const auto = tracker.getByRole("button", { name: /^Auto Initiative \(\d+\)/ });
       op = await pickFrom(dm, dmSent, auto, { what: "Auto Initiative", button: () => auto, menu: /^Roll options for Initiative$/, items: D20_FIXED, hint: HINT.fixed, help: creature, pick: "Roll normally", sends: { t: "dice.roll", mode: null, to: "dm" } }, "right");
       assert.ok(op.rolls!.every((r) => r.mode === undefined), "Normal on every die of the plan");
-      // Normal is no news, and the tracker already says the dice are the DM's: no "Normal" or "Secret" in the settled results.
+      // Normal is no news, and the tracker already says the dice are the DM's: the settled results read as before DP-F1, with no badge, "Normal" or "Secret".
       const plain = await waitFor("Auto's settled results", async () => {
-        const lines = await Promise.all((await results.getByRole("note").all()).map(resultLine));
-        return lines.length > 0 && lines.every((l) => !/Disadvantage/.test(l.name)) ? lines : null;
+        const text = (await results.innerText().catch(() => "")) ?? "";
+        return /Total|\d/.test(text) && !/\bDis\b/.test(text) ? text : null;
       });
-      for (const line of plain) assert.ok(!line.hasDetail && !/Normal|Secret/.test(`${line.name} ${line.shown}`), `a plain result names no mode: ${JSON.stringify(line)}`);
+      assert.ok(!/\b(Adv|Dis|Normal|Secret)\b/.test(plain), `a plain result names no mode: ${plain}`);
       await reroll.uncheck();
 
       // Pat's own row on his phone: a hold, public as his rolls are.
@@ -1139,7 +1177,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
       })();
       const mine = pTracker.getByRole("button", { name: /^Roll [+−-]\d+ Initiative for Thorn$/ }).first();
       if (!(await mine.isVisible())) await pTracker.getByRole("button", { name: "Thorn options" }).tap();
-      await pickFrom(pat, patSent, mine, { what: "Pat's row Roll", button: () => mine, menu: /^Roll options for Roll [+−-]\d+ Initiative for Thorn$/, items: D20, hint: HINT.d20, help: ["You and the DM see the result.", NORMAL_HELP], pick: "Roll with Disadvantage", sends: { t: "dice.roll", mode: "dis", to: "all" } }, "hold");
+      await pickFrom(pat, patSent, mine, { what: "Pat's row Roll", button: () => mine, menu: /^Roll options for Roll [+−-]\d+ Initiative for Thorn$/, items: D20, hint: HINT.d20, help: ["Roll secretly: you and the DM see the result.", NORMAL_HELP], pick: "Roll with Disadvantage", sends: { t: "dice.roll", mode: "dis", to: "all" } }, "hold");
       await waitFor("Thorn's row set", () => (value("e-thorn") !== null ? true : null));
       await shots.take(pat, "dpf1-21-pat-tracker");
       await pat.keyboard.press("Escape");
@@ -1152,7 +1190,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
   test("dpf1-22. HP's Death Save Roll in the DM's token window and Pat's token bar: Secret shown off for the creature, Advantage sends the death roll", async () => {
     await setDying(true);
     try {
-      const death: Family = { what: "HP's Death Save Roll", button: () => dm.locator("x"), menu: /^Roll options for Death Save$/, items: D20_FIXED, hint: HINT.fixed, help: ["This roll's visibility is set by the creature.", NORMAL_HELP], pick: "Roll with Advantage", sends: { t: "actor.deathRoll", mode: "adv", to: null } };
+      const death: Family = { what: "HP's Death Save Roll", button: () => dm.locator("x"), menu: /^Roll options for Death Save$/, items: D20_FIXED, hint: HINT.fixed, help: ["Roll secretly: this roll's visibility is set by the creature.", NORMAL_HELP], pick: "Roll with Advantage", sends: { t: "actor.deathRoll", mode: "adv", to: null } };
       await dm.keyboard.press("Escape");
       await tapCell(dm, BOUNDS, run.thorn);
       const bar = dm.getByRole("dialog", { name: "Thorn actions" });
@@ -1171,6 +1209,24 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
       await pickFrom(pat, patSent, await barControl(patBar, "Roll a Death Save"), { ...death, sends: { ...death.sends, mode: "dis" }, pick: "Roll with Disadvantage" }, "hold");
       await shots.take(pat, "dpf1-22-pat-hp-death-save");
       await pat.keyboard.press("Escape");
+
+      // A plain roll, a tap with no menu, reads its result alone: no mode and no stray ". ." (DPF1B-OPUS-01).
+      await waitFor("Pat's death save landed", () => (actor()?.life !== "dying" || (actor()?.deathSaves?.ok ?? 0) + (actor()?.deathSaves?.fail ?? 0) > 0 ? true : null));
+      if (actor()?.life !== "dying") await setDying(true);
+      await dm.keyboard.press("Escape");
+      await tapCell(dm, BOUNDS, run.thorn);
+      await bar.waitFor();
+      const plainRoll = await barControl(bar, "Roll a Death Save");
+      await middle(plainRoll);
+      const from = dmSent.ops.length;
+      await plainRoll.click();
+      await oneRoll(dmSent, from, "a plain death save");
+      const plain = await waitFor("the plain death save's words", async () => {
+        const lines = await resultLines(bar);
+        return lines.length === 1 && !/Advantage/.test(lines[0]!.readable) && /\d/.test(lines[0]!.readable) ? lines[0]! : null;
+      });
+      assert.ok(!plain.hasDetail && !/\.\s*\.|Normal|Secret/.test(plain.readable), `a plain death save reads its words alone: ${JSON.stringify(plain)}`);
+      await dm.keyboard.press("Escape");
     } finally {
       await setDying(false);
     }
@@ -1179,7 +1235,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
   test("dpf1-23. a fight's cards: Thorn's turn death save, the goblin's concentration and its save-ends each open a menu with Secret shown off, and the recharge card and Uses' recharge have none", async () => {
     await ops.send({ t: "encounter.start", entries: [{ id: "e-thorn", tokenId: run.thorn.id, value: 20 }, { id: "e-goblin", tokenId: run.goblin.id, value: 15 }, { id: "e-dragon", tokenId: run.dragon.id, value: 10 }] });
     await waitFor("the fight", () => (dmSocket.state?.encounter?.entries.length === 3 ? true : null));
-    const creature = ["This roll's visibility is set by the creature.", NORMAL_HELP];
+    const creature = ["Roll secretly: this roll's visibility is set by the creature.", NORMAL_HELP];
     const turnTo = async (entryId: string) => {
       for (let i = 0; i < 6 && dmSocket.state?.encounter?.activeEntryId !== entryId; i++) {
         const e = dmSocket.state!.encounter!;
@@ -1264,7 +1320,7 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
       await panel.getByText(/^Discard the .*\?$/).waitFor({ state: "detached" });
     };
     const buttonsOf = async (scope: Locator) => JSON.stringify(await scope.getByRole("button").evaluateAll((els) => els.map((e) => e.getAttribute("aria-label") ?? (e as unknown as { innerText: string }).innerText)));
-    const batch = ["Hide the dice from players.", NORMAL_HELP, "Applies to server rolls only. Players choose their own modes."];
+    const batch = ["Roll secretly: hide the dice from players.", NORMAL_HELP, "All choices: apply to server rolls only. Players choose their own modes."];
     await selectGoblins();
     await openSideTab(dm, "Dice");
     const group = dmDice().locator('section[aria-label="Group rolls"]');
@@ -1278,10 +1334,26 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
     await attack.locator("xpath=../..").getByLabel("Target's AC").fill("1");
     let op = await pickFrom(dm, dmSent, attack, { what: "the shared attack", button: () => attack, menu: /^Roll options for Scimitar for 2$/, items: D20, hint: HINT.d20, pick: "Roll with Disadvantage", sends: { t: "dice.roll", mode: "dis", to: "dm" } }, "key");
     assert.ok(op.rolls!.length === 2 && op.rolls!.every((r) => r.mode === "dis"), "both attacks with Disadvantage");
-    // The results name Disadvantage, in their words only where that adds no line (D-261030-583).
-    const disResults = await resultLine(group.getByRole("note", { name: /^\d+ (hit|miss|Critical Hit) \(Disadvantage(, Secret)?\), \d+ (hit|miss|Critical Hit) \(Disadvantage(, Secret)?\)$/ }));
+    // The results name Disadvantage: shown where that adds no line, else kept for screen readers alone (D-261030-584).
+    const disResults = await resultLine(group, /^\d+ (hit|miss|Critical Hit)\b.*Disadvantage/);
     assert.ok(disResults.hasDetail, `the attacks' results have words for their mode: ${JSON.stringify(disResults)}`);
+    assert.match(disResults.showsDetail ? disResults.shown : disResults.missing, disResults.showsDetail ? /^\d+ (hit|miss|Critical Hit) \(Disadvantage(, Secret)?\), \d+ (hit|miss|Critical Hit) \(Disadvantage(, Secret)?\)$/ : /^\W*Disadvantage(, Secret)?, Disadvantage(, Secret)?\W*$/, `the attacks' modes: ${JSON.stringify(disResults)}`);
     assert.equal(disResults.height, disResults.compactHeight, `the attacks' results add no line: ${JSON.stringify(disResults)}`);
+
+    // Rolled secretly from the menu with the panel's Secret off, so each result names Secret, then the panel's Secret turned on,
+    // which makes the word no news: the results stay in view, now without it (DPF1BUILD-ASTRA-01).
+    const secret = dmDice().getByRole("group", { name: "For the next roll" }).getByRole("button", { name: /^(Hide from players|Only the DM sees it)$/ });
+    const setSecret = async (on: boolean) => {
+      if (((await secret.getAttribute("aria-pressed")) === "true") !== on) await secret.click();
+      await waitFor(`the panel's Secret ${on ? "on" : "off"}`, async () => (((await secret.getAttribute("aria-pressed")) === "true") === on ? true : null));
+    };
+    await setSecret(false);
+    await pickFrom(dm, dmSent, attack, { what: "the shared attack, secretly", button: () => attack, menu: /^Roll options for Scimitar for 2$/, items: D20, hint: HINT.d20, pick: "Roll secretly", sends: { t: "dice.roll", mode: null, to: "dm" } }, "right");
+    const named = await resultLine(group, /^\d+ (hit|miss|Critical Hit)\b.*Secret/);
+    assert.ok(named.hasDetail, `the secret results name Secret: ${JSON.stringify(named)}`);
+    await setSecret(true);
+    const plain = await waitFor("the results without Secret", async () => (await resultLines(group)).find((l) => !/Secret/.test(l.readable) && /\d+ (hit|miss|Critical Hit)/.test(`${l.shown}${l.readable}`)) ?? null).catch(async () => resultLines(group));
+    assert.ok(!Array.isArray(plain) && plain.visible && !plain.hasDetail && /^\d+ (hit|miss|Critical Hit), \d+ (hit|miss|Critical Hit)$/.test(plain.readable), `the results stay in view with the panel's Secret on: ${JSON.stringify(plain)}`);
     const hits = group.getByRole("button", { name: /^Roll damage for \d+ hits?$/ });
     // A natural 1 misses whatever the AC, so both may miss: then there is no damage to roll.
     if (await hits.isVisible().catch(() => false)) await pickFrom(dm, dmSent, hits, { what: "the hits' damage", button: () => hits, menu: /^Roll options for Roll damage for \d+ hits?$/, items: PLAIN, hint: HINT.plain, pick: "Roll normally", sends: { t: "dice.roll", mode: null, to: "dm" } }, "right");
@@ -1314,6 +1386,200 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
     await pickFrom(dm, dmSent, main, { what: "the group save page's Roll", button: () => main, menu: /^Roll options for Roll 2 saves$/, items: D20, hint: HINT.d20, help: batch, pick: "Roll normally", sends: { t: "dice.roll", mode: null, to: "dm" } }, "key");
     await discardPage();
     await dm.keyboard.press("Escape");
+  });
+
+  test("dpf1-25. an open menu stays open as an unrelated change lands", async () => {
+    // Thorn dying: HP's Death Save menu in the DM's window stays open as another fight row changes (DPF1B-OPUS-03).
+    // Its source once took in the whole fight. A request can only ask creatures players play, and Thorn is the only one here.
+    try {
+      await ops.send({ t: "encounter.start", entries: [{ id: "e-thorn", tokenId: run.thorn.id, value: 20 }, { id: "e-goblin", tokenId: run.goblin.id, value: 15 }] });
+      await waitFor("the fight", () => (dmSocket.state?.encounter?.entries.length === 2 ? true : null));
+      await setDying(true);
+      await dm.keyboard.press("Escape");
+      await tapCell(dm, BOUNDS, run.thorn);
+      const bar = dm.getByRole("dialog", { name: "Thorn actions" });
+      await bar.waitFor();
+      const death = await barControl(bar, "Roll a Death Save");
+      await middle(death);
+      const from = dmSent.ops.length;
+      await death.click({ button: "right" });
+      const deathMenu = rollMenu(dm, /^Roll options for Death Save$/);
+      await deathMenu.waitFor();
+      await ops.send({ t: "encounter.setValues", values: [{ entryId: "e-goblin", value: 3 }] });
+      await waitFor("the goblin's new value", () => (dmSocket.state?.encounter?.entries.find((e) => e.id === "e-goblin")?.value === 3 ? true : null));
+      await sleep(QUIET_MS);
+      assert.ok(await deathMenu.isVisible(), "another row's value leaves the death save's menu open");
+      await noRoll(dmSent, from, "the open death save menu while the fight changed");
+      await dm.keyboard.press("Escape");
+      await deathMenu.waitFor({ state: "detached" });
+    } finally {
+      if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+      if (dmSocket.state?.characters[run.thornChar]?.actor.life === "dying") await setDying(false);
+    }
+  });
+
+  test("dpf1-25b. offline, a plain tap on either Again says a roll needs a connection", async () => {
+    // Said in the newest roll's line (DPF1B-OPUS-02). That line then holds the words, not the roll, so each Again has a roll of its own.
+    const panel = await dmDiceFor(run.thorn, "Thorn");
+    const field = panel.getByLabel("Dice formula", { exact: true });
+    const last = panel.locator("[data-dice-last]");
+    for (const which of ["the sticky Again", "Recent rolls' Again"] as const) {
+      let from = dmSent.ops.length;
+      await field.fill("1d20+1 Offline");
+      await field.press("Enter");
+      await oneRoll(dmSent, from, `a roll for ${which}`);
+      const again = which === "the sticky Again" ? last.getByRole("button", { name: "Again" }) : panel.locator("[data-dice-recent]").getByRole("button", { name: /^Roll again: 1d20\+1 Offline/ }).first();
+      await again.waitFor();
+      consoles.dm.expectSocketFailures = true;
+      await dmContext.setOffline(true);
+      try {
+        await waitFor("the DM offline", async () => ((await dm.getByRole("status", { name: "Connected" }).count()) === 0 ? true : null));
+        await middle(again);
+        from = dmSent.ops.length;
+        await again.click();
+        await last.getByRole("alert").filter({ hasText: "Rolling needs a connection." }).waitFor({ timeout: 5_000 }).catch(() => assert.fail(`${which}'s tap offline says nothing`));
+        await noRoll(dmSent, from, `${which} offline`);
+      } finally {
+        await dmContext.setOffline(false);
+        await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+        consoles.dm.expectSocketFailures = false;
+      }
+    }
+  });
+
+  test("dpf1-26. on a phone at 390 x 844 and 320 x 568, at 100% and 130%, the death save card's and HP's settled result add no line for the mode the menu added, and a concentration card closes as it settles (D-261030-584)", async () => {
+    const turnTo = async (entryId: string) => {
+      for (let i = 0; i < 4 && dmSocket.state?.encounter?.activeEntryId !== entryId; i++) {
+        const e = dmSocket.state!.encounter!;
+        await ops.send({ t: "encounter.next", from: { entry: e.activeEntryId, round: e.round } });
+        await waitFor("the turn moved", () => (dmSocket.state?.encounter?.activeEntryId !== e.activeEntryId || dmSocket.state?.encounter?.round !== e.round ? true : null));
+      }
+    };
+    const faults: string[] = [];
+    const closed = new Set<string>();
+    /** Thorn up and whole again, whatever the last roll left: a natural 20 brings him back, three fails or a hit at 0 kill him. */
+    const freshThorn = async () => {
+      const target = { characterId: run.thornChar };
+      if (dmSocket.state?.characters[run.thornChar]?.actor.life !== "alive") await ops.send({ t: "actor.life", target, life: "alive" });
+      await ops.send({ t: "actor.hp", target, change: { kind: "set", cur: 30 } });
+      await waitFor("Thorn whole", () => {
+        const a = dmSocket.state?.characters[run.thornChar]?.actor;
+        return a?.life === "alive" && a.hp.cur === 30 ? true : null;
+      });
+    };
+    try {
+      for (const size of [{ width: 390, height: 844 }, { width: 320, height: 568 }]) {
+        for (const scale of [1, 1.3]) {
+          const at = `${size.width}x${size.height} at ${scale * 100}%`;
+          const context = await browser.newContext({ viewport: size, deviceScaleFactor: 2, isMobile: true, hasTouch: true, reducedMotion: "reduce" });
+          try {
+            // A fight of its own each time, since a turn takes one death save.
+            await ops.send({ t: "encounter.start", entries: [{ id: "e-thorn", tokenId: run.thorn.id, value: 20 }, { id: "e-goblin", tokenId: run.goblin.id, value: 15 }] });
+            await waitFor("the fight", () => (dmSocket.state?.encounter?.entries.length === 2 ? true : null));
+            await freshThorn();
+            await context.addCookies(await patContext.cookies(server.origin));
+            await context.addInitScript((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
+            const page = await context.newPage();
+            const cdp = await context.newCDPSession(page);
+            await page.goto(`${server.origin}/r/${run.roomId}`);
+            await page.getByRole("status", { name: "Connected" }).first().waitFor();
+            await page.locator(".konvajs-content").first().waitFor();
+            /** A card for Pat, opened from its summary where the phone folds the cards. */
+            const card = async (name: string | RegExp) => {
+              const found = page.getByRole("group", { name }).filter({ visible: true }).first();
+              if (!(await found.isVisible().catch(() => false))) {
+                const summary = page.getByRole("button", { name: /Tap to answer\.$|to see them\.$|to see it\.$/ }).first();
+                if (await summary.isVisible().catch(() => false)) await summary.tap();
+              }
+              await found.waitFor();
+              return found;
+            };
+            /** Holds `button`, picks Advantage, and checks the result `scope` settles to: the added mode is read, and shown only if it costs no line. */
+            const settle = async (what: string, scope: Locator, button: Locator): Promise<"revived" | void> => {
+              await middle(button);
+              await hold(cdp, button);
+              const menu = page.getByRole("menu", { name: /^Roll options/ });
+              await menu.waitFor();
+              await menu.getByRole("menuitem", { name: "Roll with Advantage" }).tap();
+              await menu.waitFor({ state: "detached" });
+              // A card its roll settles may close at once, with no settled result left to measure.
+              const settled = await waitFor(`${at} ${what} settled`, async () => {
+                const line = (await resultLines(scope)).find((l) => /Advantage/.test(l.readable));
+                if (line) return line;
+                // A natural 20 brings Thorn back with 1 HP, and HP's death save row goes with his dying.
+                if (what === "HP's death save" && dmSocket.state?.characters[run.thornChar]?.actor.life !== "dying") return "revived" as const;
+                return (await scope.isVisible().catch(() => false)) ? null : "closed";
+              }).catch(async (err: Error) => {
+                await shots.take(page, `dpf1-26-${what.replace(/\W+/g, "-")}-missing`);
+                throw new Error(`${at} ${what}: ${err.message}, results ${JSON.stringify(await resultLines(scope).catch(() => []))}`);
+              });
+              if (settled === "revived") return settled;
+              if (settled === "closed") {
+                closed.add(what);
+                return;
+              }
+              const line = settled;
+              if (!line.hasDetail) faults.push(`${at} ${what}: no added words to fit: ${JSON.stringify(line)}`);
+              else if (line.height > line.compactHeight + 1) faults.push(`${at} ${what}: the added mode adds a line: ${JSON.stringify(line)}`);
+            };
+
+            // Concentration on a Hex, broken into by damage.
+            const hex = randomUUID();
+            await ops.send({ t: "actor.effect.add", target: { characterId: run.thornChar }, effect: { id: hex, key: "concentrating", spell: "Hex" } });
+            await ops.send({ t: "actor.hp", target: { characterId: run.thornChar }, change: { kind: "damage", amount: 1 } });
+            const concentration = await card("Concentration save for Thorn");
+            await settle("the concentration card", concentration, concentration.getByRole("button", { name: /^Roll [+−-]\d+/ }).first());
+            // A failed save may have ended the concentration already, which the server says is gone.
+            await ops.send({ t: "actor.effect.remove", target: { characterId: run.thornChar }, effectId: hex }).catch((err: Error) => {
+              if (!/gone/.test(err.message)) throw err;
+            });
+            await ops.send({ t: "actor.hp", target: { characterId: run.thornChar }, change: { kind: "heal", amount: 1 } });
+
+            // A save-ends card is the DM's alone and goes as its roll lands, its result a passing notice (SaveEndsCard.tsx), so it has no settled result here.
+            await turnTo("e-goblin");
+
+            // Dying as his turn starts: the death save card.
+            await freshThorn();
+            await setDying(true);
+            await turnTo("e-thorn");
+            const death = await card("Death save for Thorn");
+            await settle("the death save card", death, death.getByRole("button", { name: "Roll", exact: true }));
+            await setDying(false);
+
+            // HP's Death Save in his token's bar, out of the fight, since his turn has had its death save.
+            await ops.send({ t: "encounter.end" });
+            await waitFor("the fight over", () => (dmSocket.state?.encounter ? null : true));
+            for (let tries = 0; tries < 3; tries++) {
+              await freshThorn();
+              await setDying(true);
+              await page.keyboard.press("Escape");
+              await tapCell(page, BOUNDS, run.thorn);
+              const bar = page.getByRole("dialog", { name: "Thorn actions" });
+              await bar.waitFor();
+              const deathRoll = await barControl(bar, "Roll a Death Save");
+              if (!(await deathRoll.isVisible().catch(() => false))) {
+                await shots.take(page, "dpf1-26-hp-roll-missing");
+                const actorNow = dmSocket.state?.characters[run.thornChar]?.actor;
+                throw new Error(`${at}: no Death Save Roll in Thorn's bar (${await bar.getAttribute("data-bar-state")}), Thorn ${actorNow?.life} at ${JSON.stringify(actorNow?.hp)}: ${await bar.getByRole("button").evaluateAll((els) => els.map((e) => e.getAttribute("aria-label") ?? (e as unknown as { innerText: string }).innerText).join(" | "))}`);
+              }
+              if ((await settle("HP's death save", bar, deathRoll)) !== "revived") break;
+            }
+            await freshThorn();
+            if (size.width === 320 && scale === 1.3) await shots.take(page, "dpf1-26-hp-320-130");
+          } finally {
+            await context.close();
+            if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+          }
+        }
+      }
+    } finally {
+      await freshThorn();
+    }
+    assert.deepEqual(faults, [], "the menu's added mode words on settled results");
+    // The death save card and HP keep their settled result, so those two are always measured. The concentration card goes as its roll lands.
+    assert.ok(!closed.has("the death save card") && !closed.has("HP's death save"), `settled results measured: closed at once were ${[...closed].join(", ")}`);
+    assert.ok(closed.has("the concentration card"), "a concentration card that stays would have its settled result measured here");
+    if (closed.size) console.log(`dpf1-26: closed as their roll settled, so nothing to measure: ${[...closed].join(", ")}`);
   });
 
   test("dpf1-14. on a phone at 320 x 568 and 390 x 844, at 100% and 130%, Recent rolls shows no mode word on a plain d20 row, and a cancelled row's words take no room (design 4, 6: one result location, no new wrapping)", async () => {

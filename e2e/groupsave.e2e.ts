@@ -402,8 +402,8 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
       return r?.targets.some((t) => t.total === BREE_TOTAL) ? true : null;
     });
     // The answer and its verdict read in words beside it, apart from the DM's own mark, which stays unset (W7B-P-11, W7B-P-12).
-    // The row's words are a result line of their own (D-261030-583), so its row is the line's parent.
-    await sheet.getByRole("note", { name: `Asked: typed ${BREE_TOTAL}` }).locator("xpath=..").getByText(`Fail vs DC ${DC}`).waitFor();
+    // The row's words are a result line of their own (D-261030-584), so its row is the line's parent.
+    await sheet.locator("[data-roll-result-base]", { hasText: `Asked: typed ${BREE_TOTAL}` }).locator("xpath=../..").getByText(`Fail vs DC ${DC}`).waitFor();
     assert.equal(await sheet.getByRole("radiogroup", { name: "Bree: fail, pass or skip" }).getByRole("radio", { checked: true }).count(), 0, "no mark of the DM's");
   });
 
@@ -599,7 +599,7 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
       await fold.tap();
       await waitFor(`Shared attacks open (${why})`, async () => ((await fold.getAttribute("aria-expanded")) === "true" ? true : null));
       // Plain rolls add no "Normal", and the DM's secret dice match the panel's Secret, so the line names no mode (D-261030-583).
-      await rolls.getByRole("note", { name: PLAIN_RESULTS }).waitFor();
+      await resultLine(rolls, PLAIN_RESULTS);
       if (hits > 0) await rolls.getByRole("button", { name: hitWords(hits), exact: true }).waitFor();
     };
 
@@ -608,8 +608,8 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     let hits = hitsOf(sent);
     await reopened(hits, "before the answer");
     await shots.take(dm, "dp-groupsave-shared-before-answer-130");
-    const plain = await resultLine(rolls.getByRole("note", { name: PLAIN_RESULTS }));
-    assert.ok(!plain.hasDetail && plain.shown === plain.name, `plain results show their words alone: ${JSON.stringify(plain)}`);
+    const plain = await resultLine(rolls, PLAIN_RESULTS);
+    assert.ok(!plain.hasDetail && plain.readable === plain.shown, `plain results show their words alone: ${JSON.stringify(plain)}`);
     // Folded between Attack and Damage.
     await fold.tap();
     await reopened(hits, "between Attack and Damage");
@@ -636,7 +636,7 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
       const before = diceLines(dmSocket.state?.log).length;
       await rolls.getByRole("button", { name: hitWords(hits), exact: true }).tap();
       await waitFor("the hits' damage line", () => diceLines(dmSocket.state?.log).slice(before).find((l) => l.rolls.every((r) => r.label?.startsWith(`Scimitar damage for ${hits} hits`))) ?? null);
-      await rolls.getByRole("note", { name: /^\d+ damage\. Every HP entry offers it as a chip\.$/ }).waitFor();
+      await resultLine(rolls, /^\d+ damage\. Every HP entry offers it as a chip\.$/);
     }
 
     // Fewer than two selected ends the view of several, and its hits go with it.
@@ -658,9 +658,10 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     const disLine = await waitFor("the attack with Disadvantage", () => diceLines(dmSocket.state?.log).slice(logged).find((l) => l.rolls.length === 3 && l.rolls.every((r) => r.label === "Scimitar")) ?? null);
     assert.ok(disLine.rolls.every((r) => r.mode === "dis"), "each attack rolled with Disadvantage");
     // This fresh row has no AC typed, so its results are totals alone.
-    const dis = await resultLine(rolls.getByRole("note", { name: /^\d+ \(Disadvantage\)(, \d+ \(Disadvantage\)){2}$/ }));
-    assert.ok(dis.hasDetail && !dis.showsDetail, `the mode stays in the name on a narrow phone: ${JSON.stringify(dis)}`);
+    const dis = await resultLine(rolls, /^\d+(, \d+){2}\W*Disadvantage/);
+    assert.ok(dis.hasDetail && !dis.showsDetail, `the mode is kept for screen readers alone on a narrow phone: ${JSON.stringify(dis)}`);
     assert.match(dis.shown, /^\d+(, \d+){2}$/, "the compact words show");
+    assert.match(dis.readable, /^\d+(, \d+){2}\W+Disadvantage, Disadvantage, Disadvantage\W*$/, `a reader hears the totals, then each mode, apart: ${JSON.stringify(dis)}`);
     assert.equal(dis.height, dis.compactHeight, "no line added");
     assert.ok(dis.detailHeight > dis.compactHeight, `the detailed words would have added a line: ${JSON.stringify(dis)}`);
     await diceSheet(dm).getByRole("button", { name: "Close Dice" }).tap();
