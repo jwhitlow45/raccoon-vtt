@@ -1255,13 +1255,18 @@ async function closeDiceSheet(page: Page): Promise<void> {
  * menu, measured as `screen`: the popover, then `host` with the menu
  * open as `screen`-host, whose proficiency borders and rows must hold. The
  * button keeps its box to the pixel as its menu opens, by ContextMenu and
- * again by Shift+F10, and Escape closes it. Docs/design-v1-roll-mode-menu.md 6.
+ * again by Shift+F10, and each Escape closes the menu alone, focus back on
+ * the button. Docs/design-v1-roll-mode-menu.md 6.
  *
  * The box is read before the measures: their hide-and-compare can let a
  * scroller at its far end fall back while marks are off, which is the
  * sweep's doing, not the menu's.
+ *
+ * `reshow` brings back a host that an Escape took away with the menu, so
+ * Shift+F10 is still measured once that is noted: the alerts a phone opens
+ * from their summary row, for one.
  */
-async function rollMenuScreen(sweep: Sweep, page: Page, screen: string, button: Locator, name: RegExp, host: Locator): Promise<void> {
+async function rollMenuScreen(sweep: Sweep, page: Page, screen: string, button: Locator, name: RegExp, host: Locator, reshow?: () => Promise<unknown>): Promise<void> {
   if (!(await showsWithin(button, 4_000))) return sweep.missing(page, screen, "its roll button never showed");
   /** The scrolled boxes around the button, innermost first. */
   const scrolls = () => button.evaluate((el) => {
@@ -1300,21 +1305,38 @@ async function rollMenuScreen(sweep: Sweep, page: Page, screen: string, button: 
     }
     return true;
   };
-  const close = async () => {
+  const focused = () => page.evaluate(() => {
+    type El = { tagName: string; getAttribute(n: string): string | null; textContent: string | null };
+    const el = (globalThis as unknown as { document: { activeElement: El | null } }).document.activeElement;
+    return el ? `${el.tagName} "${el.getAttribute("aria-label") ?? el.textContent?.trim().slice(0, 60) ?? ""}"` : "nothing";
+  });
+  /** Escape on an open menu: the menu goes, and nothing else does, so focus is back on the button. */
+  const close = async (key: string, shown: boolean) => {
     await page.keyboard.press("Escape");
     await menu.waitFor({ state: "detached" }).catch(() => undefined);
+    if (!shown) return;
+    const back = await waitFor(`${screen}'s button to take focus back`, () => button.evaluate((el) => el === (el as unknown as { ownerDocument: { activeElement: unknown } }).ownerDocument.activeElement || null, undefined, { timeout: 500 }).catch(() => null), 1_500).catch(() => false);
+    if (back) return;
+    const gone = (await visible(button)) ? "" : ", and the button went from view";
+    await sweep.add(page, screen, [`${sweep.at} ${screen}: the Escape that closed ${key}'s menu closed more than the menu: focus went to ${await focused()}${gone}`]);
   };
+  let shown = false;
   try {
-    if (!(await open("ContextMenu"))) return sweep.missing(page, screen, "ContextMenu opened no menu");
+    shown = await open("ContextMenu");
+    if (!shown) return sweep.missing(page, screen, "ContextMenu opened no menu");
     await sweep.measure(page, screen, page.locator("[data-rvtt-popover]").filter({ has: menu }));
     await sweep.measure(page, `${screen}-host`, host);
   } finally {
-    await close();
+    await close("ContextMenu", shown);
   }
+  if (reshow && !(await visible(button))) await reshow();
+  if (!(await showsWithin(button, 2_000))) return sweep.add(page, screen, [`${sweep.at} ${screen}: the roll button never came back for Shift+F10`]);
+  shown = false;
   try {
-    if (!(await open("Shift+F10"))) await sweep.add(page, screen, [`${sweep.at} ${screen}: Shift+F10 opened no menu`]);
+    shown = await open("Shift+F10");
+    if (!shown) await sweep.add(page, screen, [`${sweep.at} ${screen}: Shift+F10 opened no menu`]);
   } finally {
-    await close();
+    await close("Shift+F10", shown);
   }
 }
 
@@ -1719,7 +1741,7 @@ async function patCombatScreens(sweep: Sweep, page: Page): Promise<void> {
   const save = await alertCard(page, "Death save for Thorn");
   if (save) {
     await sweep.measure(page, "cu-death-save", save);
-    await rollMenuScreen(sweep, page, "dpf1-menu-death-card", save.getByRole("button", { name: "Roll", exact: true }), /^Roll options for Death Save for Thorn$/, save);
+    await rollMenuScreen(sweep, page, "dpf1-menu-death-card", save.getByRole("button", { name: "Roll", exact: true }), /^Roll options for Death Save for Thorn$/, save, () => alertCard(page, "Death save for Thorn"));
   } else await sweep.missing(page, "cu-death-save", "Thorn's turn at 0 HP showed Pat no death save card");
   let turn = await alertCard(page, "Thorn's turn");
   if (turn && (await turn.getAttribute("data-turn-folded")) !== null) {
@@ -2107,7 +2129,7 @@ async function askScreen(sweep: Sweep, page: Page): Promise<void> {
     await sweep.measure(page, "pat-ask", card);
     // Thorn has no stat block: his Roll waits for a bonus, then offers the one-roll menu with Secret shown off for the request.
     await card.getByLabel("Your bonus for Thorn").fill("+2");
-    await rollMenuScreen(sweep, page, "dpf1-menu-request", card.getByRole("button", { name: /^Roll d20\+2 for Thorn$/ }), /^Roll options for Roll d20\+2 for Thorn$/, card);
+    await rollMenuScreen(sweep, page, "dpf1-menu-request", card.getByRole("button", { name: /^Roll d20\+2 for Thorn$/ }), /^Roll options for Roll d20\+2 for Thorn$/, card, () => playerRequestCard(page));
   } else await sweep.missing(page, "pat-ask", "the DM's ask showed no card");
   await ops.send({ t: "roll.close", rollIds: [id] });
   await page.locator('[aria-label="The DM asks for a roll"]').first().waitFor({ state: "detached" });
@@ -3938,7 +3960,7 @@ async function proficiencyRequests(sweep: Sweep, page: Page, shot: (page: Page, 
     // The rows under the title keep a 2 px offset from before FL-7 (the name and its line beside Roll and the marks), so the sweep measures the title FL-7 marks.
     await proficiencyScreen(sweep, page, "dm-request", dmCard, toggle);
     // Thorn still waits: the DM's Roll for him, its menu over the card, marks and all.
-    await rollMenuScreen(sweep, page, "dpf1-menu-dm-request", dmCard.getByRole("button", { name: /^Roll .+ for Thorn/ }).first(), /^Roll options for Roll .+ for Thorn/, dmCard);
+    await rollMenuScreen(sweep, page, "dpf1-menu-dm-request", dmCard.getByRole("button", { name: /^Roll .+ for Thorn/ }).first(), /^Roll options for Roll .+ for Thorn/, dmCard, () => alertCard(page, title));
     await patOps.send({ t: "roll.dice", tag: randomUUID(), rollId: id, target: { characterId: run.ids.thornChar } });
     await waitFor("fl7: the player's rolled answer", () => dmSocket.state?.rolls[id]?.targets[0]?.dice);
     await dmCard.getByText(/^rolled \d+ \(/).waitFor();
@@ -4068,7 +4090,7 @@ async function proficiencyEncounter(sweep: Sweep, page: Page, shot: (page: Page,
   await proficiencyLevel(card, /^Concentration save$/, "prof");
   await proficiencyScreen(sweep, page, "concentration", card);
   await shot(page, "concentration");
-  await rollMenuScreen(sweep, page, "dpf1-menu-concentration", card.getByRole("button", { name: /^Roll [+−-]\d+/ }).first(), /^Roll options for Concentration save for FL7 Monster$/, card);
+  await rollMenuScreen(sweep, page, "dpf1-menu-concentration", card.getByRole("button", { name: /^Roll [+−-]\d+/ }).first(), /^Roll options for Concentration save for FL7 Monster$/, card, () => alertCard(page, "Concentration save for FL7 Monster"));
   await card.getByRole("button", { name: "Passed", exact: true }).click();
   await ops.send({ t: "actor.effect.remove", target: { tokenId: FL7.token }, effectId: concentration });
   await escapeAll(page);
@@ -4088,7 +4110,7 @@ async function proficiencyEncounter(sweep: Sweep, page: Page, shot: (page: Page,
   await proficiencyLevel(ends, /^Strength save$/, "prof");
   await proficiencyScreen(sweep, page, "save-ends", ends);
   await shot(page, "save-ends");
-  await rollMenuScreen(sweep, page, "dpf1-menu-save-ends", ends.getByRole("button", { name: /^Roll [+−-]\d+/ }).first(), /^Roll options for Strength save.* for FL7 Monster$/, ends);
+  await rollMenuScreen(sweep, page, "dpf1-menu-save-ends", ends.getByRole("button", { name: /^Roll [+−-]\d+/ }).first(), /^Roll options for Strength save.* for FL7 Monster$/, ends, () => alertCard(page, title));
   await ops.send({ t: "actor.effect.remove", target: { tokenId: FL7.token }, effectId });
   await ops.send({ t: "actor.hp", target: { tokenId: FL7.token }, change: { kind: "heal", amount: 1 } });
   await restartFight();
