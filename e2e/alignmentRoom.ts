@@ -5925,3 +5925,186 @@ export function undoScopeAlignmentTests(names: readonly string[]): void {
     }
   }
 }
+
+/** The sizes where the sweep measures the Log's history, its export sheet and the admin Rooms card (docs/design-v1-log-history.md 5.4). */
+const LOG_AT = new Set(["390x844", "320x568", "1440x900"]);
+
+/** A page of `archive` by the rules of GET /log (docs/design-v1-log-history.md 2.2): exclusive bounds, oldest first. */
+function archivePage(archive: readonly { id: string }[], q: URLSearchParams): { entries: unknown[]; nextBefore: string | null; nextAfter: string | null } {
+  const limit = Number(q.get("limit") ?? 50);
+  const index = (id: string) => archive.findIndex((e) => e.id === id);
+  const before = q.get("before");
+  const after = q.get("after");
+  const forward = after !== null;
+  // The archive's ids all sort before the live log's, so a bound the archive lacks reads as past its end.
+  const got = forward
+    ? archive.slice(index(after) + 1, index(after) + 1 + limit)
+    : (() => {
+        const end = before === null || index(before) === -1 ? archive.length : index(before);
+        return archive.slice(Math.max(0, end - limit), end);
+      })();
+  if (got.length === 0) return { entries: [], nextBefore: null, nextAfter: null };
+  const full = got.length === limit;
+  const lo = got[0]!.id;
+  const hi = got[got.length - 1]!.id;
+  return forward ? { entries: got, nextBefore: lo, nextAfter: full ? hi : null } : { entries: got, nextBefore: full ? lo : null, nextAfter: hi };
+}
+
+/**
+ * logc: the Log's history and its export (docs/design-v1-log-history.md
+ * 5.4). The live Log, a page on its way, a window parted from the live log
+ * with Show newer and Back to latest, a newer page that failed, the export
+ * sheet finding its sessions, with Older sessions and a file too large to
+ * hold, and the admin Rooms card's size hint, at the phone and computer
+ * sizes at 100% and 130%. The page's own routes answer the archive, the
+ * sessions, the file and the admin lists, so no step spends the room's
+ * page budget or its hourly export limit.
+ */
+export function logHistoryTests(): void {
+  for (const size of SIZES.filter((s) => LOG_AT.has(s.name))) {
+    for (const scale of SCALES) {
+      const at = `${size.name}${scale === 1 ? "" : "-130"}`;
+      test(`logc-${at}. the Log's history, its export sheet and the admin Rooms card within ${LIMIT_PX} px`, async () => {
+        const sweep = new Sweep(`logc-${at}`);
+        const page = await dmPageFor(size);
+        page.setDefaultTimeout(10_000);
+        await openAt(page, size, scale);
+        const from = await waitFor("the DM's member id", () => dmSocket.you?.memberId ?? null);
+        const archive = Array.from({ length: 900 }, (_, i) => ({
+          id: `0:${i}`,
+          at: new Date(Date.UTC(2026, 9, 1, 19) + i * 60_000).toISOString(),
+          kind: "chat",
+          from,
+          text: i % 9 === 0 ? `A line from the archive long enough to wrap on a phone, as the party argued over the map again, ${i}` : `Archived line ${i}`,
+        }));
+        let hold = false;
+        let fail = false;
+        const held: (() => void)[] = [];
+        const release = () => {
+          hold = false;
+          for (const deliver of held.splice(0)) deliver();
+        };
+        const pages = /\/api\/rooms\/[0-9A-Z]{8}\/log\?/;
+        const listing = /\/api\/rooms\/[0-9A-Z]{8}\/log\/sessions/;
+        const file = /\/api\/rooms\/[0-9A-Z]{8}\/log\/export\?/;
+        await page.route(pages, async (route) => {
+          if (fail) return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "internal" }) });
+          const body = archivePage(archive, new URL(route.request().url()).searchParams);
+          if (hold) await new Promise<void>((resolve) => held.push(resolve));
+          return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+        });
+        const day = Date.UTC(2026, 8, 1);
+        const sessions = (newest: number, oldest: number) =>
+          Array.from({ length: newest - oldest + 1 }, (_, i) => {
+            const k = newest - i;
+            return { firstId: `${k * 10}:0`, lastId: `${k * 10 + 5}:0`, from: new Date(day + k * 86_400_000 + 19 * 3_600_000).toISOString(), to: new Date(day + k * 86_400_000 + 22 * 3_600_000 + 48 * 60_000).toISOString(), lines: 412 + k };
+          });
+        await page.route(listing, async (route) => {
+          const before = new URL(route.request().url()).searchParams.get("before");
+          if (hold) await new Promise<void>((resolve) => held.push(resolve));
+          const body = before === null ? { sessions: sessions(30, 6), lines: 12_345, nextSessionsBefore: "60:0" } : { sessions: sessions(5, 1), lines: 12_345, nextSessionsBefore: null };
+          return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+        });
+        await page.route(file, (route) =>
+          route.fulfill({ status: 200, headers: { "content-type": "text/markdown; charset=utf-8", "content-disposition": 'attachment; filename="big.md"' }, body: `# big\n${"x".repeat(9 * 1024 * 1024)}` }),
+        );
+        try {
+          const log = await openPanel(page, "Log");
+          // The Log's header keeps its wrap from before this work at 320 px, and at 390 px at 130% (Chat only under
+          // Show older and Export, D-261030-580), so the sweep measures what this work drew: the list, Show older or
+          // its Loading…, and the row under a parted window with Show newer, Back to latest and a failure's words.
+          // The room's own live log may be empty, an empty list drawing nothing: the live screen's list is measured where it shows.
+          const logParts = async (screen: string) => {
+            await sweep.measure(page, `${screen}-list`, log.getByRole("list", { name: /^Log( history)?$/ }), { optional: screen === "log-live" });
+            await sweep.measure(page, `${screen}-older`, log.getByRole("button", { name: /^(Show older|Loading…)$/ }), { optional: true });
+            await sweep.measure(page, `${screen}-newer`, log.getByRole("button", { name: "Back to latest", exact: true }).locator(".."), { optional: true });
+          };
+          await logParts("log-live");
+          const older = log.getByRole("button", { name: "Show older", exact: true });
+          const latest = log.getByRole("button", { name: "Back to latest", exact: true });
+
+          // A page on its way: Show older says Loading… and the rows stay. A turning spinner is measured still, as reduced motion draws it.
+          hold = true;
+          await older.click();
+          await log.getByRole("button", { name: "Loading…", exact: true }).waitFor();
+          await page.emulateMedia({ reducedMotion: "reduce" });
+          await logParts("log-older-loading");
+          await page.emulateMedia({ reducedMotion: null });
+          release();
+          await older.waitFor();
+          for (let i = 0; i < 14 && !(await visible(latest)); i++) {
+            await older.click();
+            await older.waitFor();
+          }
+          await log.getByRole("list", { name: "Log history" }).waitFor();
+          await logParts("log-history");
+          await shots.take(page, `logc-${at}-log-history`);
+          // A newer page that fails, which the browser reports as a failed load.
+          consoles.dm.allow = [/status of 500 .*\/api\/rooms\/[0-9A-Z]{8}\/log\?after=/];
+          fail = true;
+          await log.getByRole("button", { name: "Show newer", exact: true }).click();
+          await log.getByRole("alert").filter({ hasText: "Could not load newer messages." }).waitFor();
+          await logParts("log-history-failed");
+          fail = false;
+          consoles.dm.allow = [];
+          await latest.click();
+          await log.getByRole("list", { name: "Log", exact: true }).waitFor();
+
+          // The export sheet: finding the sessions, 25 of them with Older sessions, then the file too large to hold.
+          hold = true;
+          await log.getByRole("button", { name: "Export", exact: true }).click();
+          const sheet = page.getByRole("dialog", { name: "Export the log" });
+          await sheet.getByText("Finding the sessions…", { exact: true }).waitFor();
+          await page.emulateMedia({ reducedMotion: "reduce" });
+          await sweep.measure(page, "log-export-finding", sheet);
+          await page.emulateMedia({ reducedMotion: null });
+          release();
+          const more = sheet.getByRole("button", { name: "Older sessions", exact: true });
+          await more.waitFor();
+          await sweep.measure(page, "log-export-sessions", sheet);
+          await more.click();
+          await more.waitFor({ state: "detached" });
+          const everything = sheet.getByRole("listitem").filter({ hasText: /^Everything, / });
+          await everything.getByRole("button", { name: /^Export Everything/ }).click();
+          await everything.getByText("This file is large. Use Download to save it. Download uses another export request.", { exact: true }).waitFor();
+          await sweep.measure(page, "log-export-large", sheet);
+          await shots.take(page, `logc-${at}-log-export-large`);
+          await escapeAll(page);
+          await sheet.waitFor({ state: "detached" });
+        } finally {
+          release();
+          fail = false;
+          consoles.dm.allow = [];
+          await page.unroute(pages);
+          await page.unroute(listing);
+          await page.unroute(file);
+        }
+
+        // The admin Rooms card: its size hint, and a room whose long name, size and tags wrap.
+        const admin = await page.context().newPage();
+        try {
+          await admin.route("**/api/admin/storage", (route) => route.fulfill({ json: {
+            volume: null, databaseBytes: 0, images: { count: 0, bytes: 0 },
+            cleanup: { waiting: { count: 0, bytes: 0 }, trash: { files: 0, bytes: 0 } },
+            backup: { last: null, lastGood: null, warning: null },
+          } }));
+          await admin.route("**/api/admin/rooms", (route) => route.fulfill({ json: { rooms: [
+            { id: run.roomId, name: "The Sunless Citadel, with a name long enough to wrap", createdAt: "2026-09-01T19:00:00Z", lastActiveAt: "2026-10-29T22:48:00Z", bytes: 1_234_567_890, images: 42, loaded: true, sockets: 3, pinned: true, readOnly: true },
+          ] } }));
+          await admin.goto(`${server.origin}/admin`);
+          const card = admin.locator("section").filter({ has: admin.getByRole("heading", { name: /^Rooms \(\d+\)$/ }) });
+          await card.getByText(/^A room's size is what it takes on disk/).waitFor();
+          await admin.evaluate(async () => { await (globalThis as unknown as { document: { fonts: { ready: Promise<unknown> } } }).document.fonts.ready; });
+          // The admin page takes no interface size of its own, so 130% is drawn as the room's chrome draws it, by zoom.
+          if (scale !== 1) await card.evaluate((el, z) => { (el as unknown as { style: { zoom: string } }).style.zoom = String(z); }, scale);
+          await sweep.measure(admin, "admin-rooms", card);
+          await shots.take(admin, `logc-${at}-admin-rooms`);
+        } finally {
+          await admin.close();
+          sweep.tally();
+        }
+        assert.deepEqual(sweep.lines, [], `the Log's history at ${at}:\n${sweep.lines.join("\n")}`);
+      });
+    }
+  }
+}
