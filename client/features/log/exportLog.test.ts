@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { ApiError, dispositionFileName, FileCutShortError } from "../../lib/api.ts";
-import { everythingLabel, EXPORT_LIMIT_NOTE, exportErrorText, LARGE_FILE_NOTE, sessionKey, sessionLabel, sessionRange, withOlderSessions } from "./exportLog.ts";
+import { everythingLabel, EXPORT_LIMIT_NOTE, exportErrorText, LARGE_FILE_NOTE, sessionKey, sessionLabel, sessionRange, whileOpen, withOlderAnswer, withOlderSessions, type SessionList } from "./exportLog.ts";
 
 const now = new Date("2026-10-20T12:00:00Z");
 const opts = { locale: "en-US", timeZone: "America/Chicago", now };
@@ -31,18 +31,53 @@ describe("the log export sheet", () => {
   });
 
   test("sessions whose clock ran back keep apart by their ids, label by their times, and export by their ids", () => {
-    // 10:00, then 16:00, then a clock set back to 09:00: three evenings, the last labeled before the first.
+    // One day in Chicago: an evening from 10:00, one from 16:00, then a clock set back to 09:00. The newest
+    // session by id is labeled earliest, and a fourth repeats its times exactly.
     const sessions = [
-      { firstId: "300:0", lastId: "340:2", from: "2026-10-16T14:00:00Z", to: "2026-10-16T15:00:00Z", lines: 41 },
+      { firstId: "300:0", lastId: "340:2", from: "2026-10-15T14:00:00Z", to: "2026-10-15T15:00:00Z", lines: 41 },
       { firstId: "200:0", lastId: "250:0", from: "2026-10-15T21:00:00Z", to: "2026-10-15T22:00:00Z", lines: 51 },
       { firstId: "100:0", lastId: "150:0", from: "2026-10-15T15:00:00Z", to: "2026-10-15T16:00:00Z", lines: 51 },
-      { firstId: "90:0", lastId: "95:0", from: "2026-10-16T14:00:00Z", to: "2026-10-16T15:00:00Z", lines: 41 },
+      { firstId: "90:0", lastId: "95:0", from: "2026-10-15T14:00:00Z", to: "2026-10-15T15:00:00Z", lines: 41 },
     ];
-    const keys = sessions.map(sessionKey);
-    assert.equal(new Set(keys).size, 4, "two sessions with one time range keep two keys");
-    assert.equal(sessionLabel(sessions[0]!, opts), sessionLabel(sessions[3]!, opts));
-    assert.deepEqual(sessionRange(sessions[3]!), { fromId: "90:0", toId: "95:0" });
-    assert.equal(sessionLabel(sessions[0]!, opts), "Friday, October 16, 9:00 AM to 10:00 AM, 41 lines");
+    const labels = sessions.map((s) => sessionLabel(s, opts));
+    assert.deepEqual(labels.slice(0, 3), [
+      "Thursday, October 15, 9:00 AM to 10:00 AM, 41 lines",
+      "Thursday, October 15, 4:00 PM to 5:00 PM, 51 lines",
+      "Thursday, October 15, 10:00 AM to 11:00 AM, 51 lines",
+    ]);
+    assert.equal(new Set(sessions.map(sessionKey)).size, 4, "two sessions with one time range keep two keys");
+    assert.equal(labels[0], labels[3]);
+    assert.deepEqual(sessions.map(sessionRange), [
+      { fromId: "300:0", toId: "340:2" },
+      { fromId: "200:0", toId: "250:0" },
+      { fromId: "100:0", toId: "150:0" },
+      { fromId: "90:0", toId: "95:0" },
+    ]);
+  });
+
+  test("an Older sessions answer lands only on the list it was asked for, and a failure says so in place", () => {
+    const s = (id: number) => ({ firstId: `${id}:0`, lastId: `${id}:9`, from: "2026-10-15T14:00:00Z", to: "2026-10-15T15:00:00Z", lines: 10 });
+    const list: SessionList = { kind: "ready", sessions: [s(300), s(200)], lines: 20, next: "200:0", more: { kind: "busy" } };
+    const landed = withOlderAnswer(list, "200:0", { sessions: [s(100)], lines: 31, nextSessionsBefore: null });
+    assert.deepEqual(landed.kind === "ready" ? [landed.sessions.map(sessionKey), landed.lines, landed.next, landed.more.kind] : null, [["300:0|300:9", "200:0|200:9", "100:0|100:9"], 31, null, "idle"]);
+    // Asked before 200:0, answered after the list moved on: nothing changes.
+    const moved: SessionList = { ...list, next: "100:0" };
+    assert.equal(withOlderAnswer(moved, "200:0", { sessions: [s(50)], lines: 40, nextSessionsBefore: null }), moved);
+    assert.equal(withOlderAnswer(moved, "200:0", { failed: "x" }), moved);
+    const failed = withOlderAnswer(list, "200:0", { failed: "The log could not be exported. Try again." });
+    assert.deepEqual(failed.kind === "ready" ? [failed.sessions.length, failed.next, failed.more] : null, [2, "200:0", { kind: "error", message: "The log could not be exported. Try again." }]);
+  });
+
+  test("the sheet is open again after StrictMode's setup, cleanup and setup", () => {
+    const open = { current: false };
+    let closed = 0;
+    const close = () => closed++;
+    const cleanup = whileOpen(open, close);
+    assert.equal(open.current, true);
+    cleanup();
+    assert.deepEqual([open.current, closed], [false, 1]);
+    whileOpen(open, close);
+    assert.equal(open.current, true, "an answer after the second setup would be dropped");
   });
 
   test("an older page of sessions goes after the held ones, each once", () => {

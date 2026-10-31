@@ -5,14 +5,23 @@ import { ErrorText } from "../../components/Field.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { buttonLook } from "../../components/looks.ts";
 import { Help } from "../../components/Panel.tsx";
-import { api, FileTooLargeError, logExportUrl, type LogRange, type LogSession } from "../../lib/api.ts";
+import { api, FileTooLargeError, logExportUrl, type LogRange } from "../../lib/api.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
 import { prefersShare, shareFile } from "../mapexport/save.ts";
-import { deviceTimeZone, everythingLabel, EXPORT_LIMIT_NOTE, exportErrorText, LARGE_FILE_NOTE, sessionKey, sessionLabel, sessionRange, withOlderSessions } from "./exportLog.ts";
-
-type More = { kind: "idle" } | { kind: "busy" } | { kind: "error"; message: string };
-type List = { kind: "loading" } | { kind: "ready"; sessions: LogSession[]; lines: number; next: string | null; more: More } | { kind: "error"; message: string };
+import {
+  deviceTimeZone,
+  everythingLabel,
+  EXPORT_LIMIT_NOTE,
+  exportErrorText,
+  LARGE_FILE_NOTE,
+  sessionKey,
+  sessionLabel,
+  sessionRange,
+  whileOpen,
+  withOlderAnswer,
+  type SessionList,
+} from "./exportLog.ts";
 type Made = { file: File; url: string; share: boolean };
 type Export =
   | { kind: "idle" }
@@ -40,13 +49,14 @@ type Export =
  */
 export function ExportLog(props: { onClose(): void }) {
   const roomId = useRoomView((s) => s.roomId);
-  const [list, setList] = useState<List>({ kind: "loading" });
+  const [list, setList] = useState<SessionList>({ kind: "loading" });
   const [job, setJob] = useState<Export>({ kind: "idle" });
   const [shareFailed, setShareFailed] = useState(false);
   const [sharing, setSharing] = useState(false);
   const urlRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const openRef = useRef(true);
+  const largeRef = useRef<HTMLDivElement>(null);
   const tz = deviceTimeZone();
   const ids = useId();
 
@@ -67,26 +77,25 @@ export function ExportLog(props: { onClose(): void }) {
     setList({ ...list, more: { kind: "busy" } });
     try {
       const res = await api.logSessions(roomId, { before });
-      if (!openRef.current) return;
-      setList((now) =>
-        now.kind === "ready" && now.next === before
-          ? { kind: "ready", sessions: withOlderSessions(now.sessions, res.sessions), lines: res.lines, next: res.nextSessionsBefore ?? null, more: { kind: "idle" } }
-          : now,
-      );
+      if (openRef.current) setList((now) => withOlderAnswer(now, before, res));
     } catch (err) {
-      if (!openRef.current) return;
-      setList((now) => (now.kind === "ready" ? { ...now, more: { kind: "error", message: exportErrorText(err) } } : now));
+      if (openRef.current) setList((now) => withOlderAnswer(now, before, { failed: exportErrorText(err) }));
     }
   };
 
   useEffect(
-    () => () => {
-      openRef.current = false;
-      abortRef.current?.abort();
-      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
-    },
+    () =>
+      whileOpen(openRef, () => {
+        abortRef.current?.abort();
+        if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+      }),
     [],
   );
+
+  // The note and its Download can open below the sheet's fold on a phone, so they scroll into view.
+  useEffect(() => {
+    if (job.kind === "large") largeRef.current?.scrollIntoView({ block: "nearest" });
+  }, [job]);
 
   const run = async (key: string, range: LogRange) => {
     if (job.kind === "busy") return;
@@ -151,7 +160,7 @@ export function ExportLog(props: { onClose(): void }) {
         {mine && job.kind === "busy" ? <Loading text="Preparing the log…" /> : null}
         {mine && job.kind === "error" ? <ErrorText>{job.message}</ErrorText> : null}
         {mine && job.kind === "large" ? (
-          <div style={{ display: "grid", gap: theme.space(1), justifyItems: "start" }}>
+          <div ref={largeRef} style={{ display: "grid", gap: theme.space(1), justifyItems: "start" }}>
             <Help>{LARGE_FILE_NOTE}</Help>
             {/* The browser's own download streams the file to disk, and the server names it. */}
             <a href={job.href} download style={linkButton}>

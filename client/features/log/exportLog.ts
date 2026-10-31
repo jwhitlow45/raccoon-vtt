@@ -53,6 +53,37 @@ export function withOlderSessions(held: readonly LogSession[], page: readonly Lo
   return [...held, ...page.filter((s) => !keys.has(sessionKey(s)))];
 }
 
+export type MoreSessions = { kind: "idle" } | { kind: "busy" } | { kind: "error"; message: string };
+export type SessionList =
+  | { kind: "loading" }
+  | { kind: "ready"; sessions: LogSession[]; lines: number; next: string | null; more: MoreSessions }
+  | { kind: "error"; message: string };
+
+/**
+ * The sheet's list once an Older sessions answer for the page before
+ * `before` lands: `answer` is the page, or the failure's words. An answer
+ * for a list that has moved on since it was asked changes nothing.
+ */
+export function withOlderAnswer(list: SessionList, before: string, answer: { sessions: LogSession[]; lines: number; nextSessionsBefore: string | null } | { failed: string }): SessionList {
+  if (list.kind !== "ready" || list.next !== before) return list;
+  if ("failed" in answer) return { ...list, more: { kind: "error", message: answer.failed } };
+  return { kind: "ready", sessions: withOlderSessions(list.sessions, answer.sessions), lines: answer.lines, next: answer.nextSessionsBefore ?? null, more: { kind: "idle" } };
+}
+
+/**
+ * The sheet's open flag for the answers it waits on: set at every setup,
+ * and cleared with `close` at cleanup. Development's StrictMode runs
+ * setup, cleanup and setup again, and an open flag cleared only at cleanup
+ * would drop every later answer.
+ */
+export function whileOpen(open: { current: boolean }, close: () => void): () => void {
+  open.current = true;
+  return () => {
+    open.current = false;
+    close();
+  };
+}
+
 /** "Everything, 2,104 lines": `total` counts every line of the log this viewer may read, on every page of sessions. */
 export function everythingLabel(total: number, locale?: string): string {
   return `Everything, ${lines(total, locale)}`;
