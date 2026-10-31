@@ -493,6 +493,7 @@ export function RollCard(props: {
    * answer it opened on is no news.
    */
   const seen = useRef<Map<string, string | undefined> | null>(null);
+  const focusedAnswer = useRef<{ key: string; node: HTMLElement } | null>(null);
   const [rolledHere, setRolledHere] = useState<ReadonlySet<string>>(() => new Set());
   const [news, setNews] = useState("");
   const headerButton = useRef<HTMLButtonElement>(null);
@@ -508,10 +509,12 @@ export function RollCard(props: {
     const list = names.split("|");
     setNews(landed.map((t) => rolledNews(list[request.targets.indexOf(t)] || "Your creature", t)).join(" "));
     onEngage();
-    // The roll row gave way to the result, so focus that was in it goes to the header's button rather than falling to the page.
+    // A sibling's result must leave an unchanged row's control or open menu focused.
     const card = props.cardRef.current;
     const active = document.activeElement;
-    if (card && (active === null || active === document.body || card.contains(active))) headerButton.current?.focus();
+    const prior = focusedAnswer.current;
+    const leftRow = prior && !prior.node.isConnected && landed.some((target) => targetKey(target) === prior.key);
+    if (card && (active === null || active === document.body || leftRow && (active === card || active === prior.node))) headerButton.current?.focus();
   }, [request.targets, names, onEngage, props.cardRef]);
   const sent = (key: string) => {
     if (foldsAfterSend(request, key, rolledHere)) props.onFold();
@@ -660,7 +663,11 @@ export function RollCard(props: {
     "aria-label": "The DM asks for a roll",
     tabIndex: -1,
     hidden: props.hidden,
-    onFocus: () => props.onFocusWithin(true),
+    onFocus: (e: FocusEvent<HTMLElement>) => {
+      const key = e.target.closest<HTMLElement>("[data-roll-answer-row]")?.dataset.rollAnswerRow;
+      if (key) focusedAnswer.current = { key, node: e.target };
+      props.onFocusWithin(true);
+    },
     onBlur: (e: FocusEvent<HTMLElement>) => {
       if (!e.currentTarget.contains(e.relatedTarget as Node | null)) props.onFocusWithin(false);
     },
@@ -930,6 +937,7 @@ function CreatureAnswer(props: {
   return (
     <div
       ref={answerRoot}
+      data-roll-answer-row={tkey}
       style={{
         display: "grid",
         gap: theme.space(2),
