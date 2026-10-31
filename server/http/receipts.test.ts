@@ -6,8 +6,7 @@ import { rng } from "#shared/testutil.ts";
 import { setupAuth } from "../auth/plugin.ts";
 import { loadConfig } from "../config.ts";
 import { ReceiptLines } from "../rooms/logHistory.ts";
-import { registerReceiptRoutes } from "./receipts.ts";
-import { stateThrough } from "./receipts.ts";
+import { registerReceiptRoutes, stateThrough } from "./receipts.ts";
 import { ScanBusyError, ScanCancelledError } from "../rooms/logScanBudget.ts";
 
 for (const property of ["closed", "replayFailed"] as const) test(`a behind actor that is ${property} answers busy promptly`, async () => {
@@ -34,25 +33,33 @@ test("actor closure while waiting answers busy, and cancellation rejects a caugh
 });
 
 // Exercise the real auth and limit services without a database or a listening socket.
-async function routeRig(stage = "", opts: { slide?: boolean; stale?: boolean; limited?: boolean } = {}) {
+async function routeRig(stage = "", opts: { slide?: boolean; stale?: boolean; limited?: boolean; noGrant?: boolean; noSession?: boolean } = {}) {
   const app = Fastify();
-  const stats = { cancels: 0, destroyed: 0, active: 0, unbounded: 0, closed: 0 };
+  const stats = { cancels: 0, destroyed: 0, active: 0, unbounded: 0, closed: 0, created: 0, checkouts: 0, reused: 0 };
   const sql: { text: string; bounded: boolean; values?: unknown[] }[] = [];
   const stalled = (text: string) => stage === "grant" ? text.includes("from grants g") : stage === "limit" ? text.includes("from rate_events") : stage === "charge" && text.startsWith("insert into rate_events");
-  const answer = (text: string) => ({ rows: text.includes("from sessions") ? [{ id: "session", slide: opts.slide ?? false, touch: opts.slide ?? false }] : text.includes("from grants g") ? [{ member_id: "p1", role: "player", epoch: 1, player_epoch: opts.stale ? 2 : 1, dm_epoch: 1 }] : text.includes("from rate_events") ? [{ n: opts.limited ? 60 : 0, oldest_expires_in: 45 }] : [] });
+  const answer = (text: string) => {
+    if (text.includes("from sessions")) return { rows: opts.noSession ? [] : [{ id: "session", slide: opts.slide ?? false, touch: opts.slide ?? false }] };
+    if (text.includes("from grants g")) return { rows: opts.noGrant ? [] : [{ member_id: "p1", role: "player", epoch: 1, player_epoch: opts.stale ? 2 : 1, dm_epoch: 1 }] };
+    if (text.includes("from rate_events")) return { rows: [{ n: opts.limited ? 60 : 0, oldest_expires_in: 45 }] };
+    return { rows: [] };
+  };
+  const idle: Client[] = [];
   class Client extends EventEmitter {
     pending: ((error: Error) => void) | null = null;
-    releases = 0;
+    checkedOut = false;
     async query(config: { text: string; values?: unknown[] }) {
-      assert.equal(this.releases, 0, "no SQL after cancellation");
+      assert.equal(this.checkedOut, true, "no SQL after cancellation");
       sql.push({ text: config.text, bounded: true, values: config.values });
       if (stalled(config.text)) return new Promise((_resolve, reject) => { this.pending = reject; });
       return answer(config.text);
     }
     release(drop?: boolean) {
-      assert.equal(++this.releases, 1, "release once");
+      assert.equal(this.checkedOut, true, "release once per checkout");
+      this.checkedOut = false;
       stats.active--;
       if (drop) { stats.destroyed++; this.pending?.(new Error("connection terminated")); }
+      else idle.push(this);
     }
   }
   const pool = {
@@ -61,14 +68,22 @@ async function routeRig(stage = "", opts: { slide?: boolean; stale?: boolean; li
       if (stalled(text)) { stats.unbounded++; await new Promise((r) => setTimeout(r, 300)); }
       return answer(text);
     },
-    async connect() { stats.active++; return new Client(); },
+    async connect() {
+      stats.checkouts++;
+      let client = idle.pop();
+      if (client) stats.reused++;
+      else { client = new Client(); stats.created++; }
+      client.checkedOut = true;
+      stats.active++;
+      return client;
+    },
   };
   const config = loadConfig({ NODE_ENV: "test", DATABASE_URL: "postgres://localhost/test" });
   const kit = await setupAuth(app, { config, pool: pool as never, gateway: { closeSockets: () => { stats.closed++; } } as never });
   const lines = new ReceiptLines({ pool: pool as never, cancel: async () => { stats.cancels++; } });
   await registerReceiptRoutes(app, kit, { manager: { acquire: async () => ({ committed: { state: {} as never, seq: 0 } }) } as never, options: { lines, deadlineMs: 25 } });
   await app.ready();
-  return { app, stats, sql, pool, request: () => app.inject({ method: "GET", url: "/api/rooms/ABCDEFGH/receipts/tag", headers: { cookie: `rvtt=${"a".repeat(43)}` } }) };
+  return { app, stats, sql, pool, request: (cookie = true) => app.inject({ method: "GET", url: "/api/rooms/ABCDEFGH/receipts/tag", headers: cookie ? { cookie: `rvtt=${"a".repeat(43)}` } : {} }) };
 }
 
 for (const stage of ["grant", "limit", "charge"] as const) test(`the receipt deadline cancels the route's ${stage} SQL`, async () => {
@@ -111,6 +126,38 @@ test("bounded admission preserves session renewal, stale-grant cleanup and recei
   }
 });
 
+for (const refusal of ["missing grant", "stale grant", "rate limit"] as const) test(`a ${refusal} refusal releases a reusable connection without cancellation`, async () => {
+  const r = await routeRig("", { noGrant: refusal === "missing grant", stale: refusal === "stale grant", limited: refusal === "rate limit" });
+  try {
+    for (let i = 0; i < 2; i++) {
+      const response = await r.request();
+      assert.equal(response.statusCode, refusal === "rate limit" ? 429 : 403, response.body);
+      assert.deepEqual(response.json(), { error: refusal === "rate limit" ? "rate_limited" : "no_access" });
+      if (refusal === "rate limit") assert.equal(response.headers["retry-after"], "45");
+      assert.equal(r.stats.active, 0, "the refusal released its checkout");
+      assert.equal(r.stats.cancels, 0, "an expected refusal never cancels a healthy backend");
+      assert.equal(r.stats.destroyed, 0, "an expected refusal never destroys a healthy connection");
+    }
+    assert.equal(r.stats.checkouts, 2);
+    assert.equal(r.stats.created, 1, "both refusals use the same healthy connection");
+    assert.equal(r.stats.reused, 1);
+    assert.equal(r.sql.some((q) => q.text.startsWith("insert into rate_events")), false, "a refused lookup is not charged");
+  } finally { await r.app.close(); }
+});
+
+for (const cookie of [false, true]) test(`a request without a live session refuses before checkout, cookie=${cookie}`, async () => {
+  const r = await routeRig("", { noSession: true });
+  try {
+    const response = await r.request(cookie);
+    assert.equal(response.statusCode, 403, response.body);
+    assert.deepEqual(response.json(), { error: "no_access" });
+    assert.equal(r.stats.checkouts, 0);
+    assert.equal(r.stats.cancels, 0);
+    assert.equal(r.stats.destroyed, 0);
+    assert.equal(r.sql.filter((q) => q.text.includes("from sessions")).length, cookie ? 1 : 0, "only the request limiter's existing session lookup runs");
+  } finally { await r.app.close(); }
+});
+
 describe("a lookup's wait for the room's state", () => {
   test("returns the state once it reaches the newest receipt's seq, and a cancel ends the wait", async () => {
     const actor = { committed: { state: { meta: { name: "five" } } as never, seq: 5 } };
@@ -124,8 +171,6 @@ describe("a lookup's wait for the room's state", () => {
     await assert.rejects(never, ScanCancelledError);
   });
 });
-
-
 
 test("random actor capture, close, replay failure, cancellation and late progress never return a behind state", async () => {
   const random = rng(4105);

@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
 import { projectArchivedLog } from "#shared/project.ts";
-import { accessRoutes, type AuthKit, enforce, HttpError, roomParam } from "../auth/http.ts";
+import { accessRoutes, type AuthKit, HttpError, roomParam } from "../auth/http.ts";
 import { ReceiptLines, receiptWait } from "../rooms/logHistory.ts";
 import { ScanBusyError, ScanCancelledError } from "../rooms/logScanBudget.ts";
 import type { RoomManager } from "../rooms/manager.ts";
@@ -57,13 +57,17 @@ export function registerReceiptRoutes(app: FastifyInstance, kit: AuthKit, deps: 
       reply.raw.on("close", onClose);
       const signal = AbortSignal.any([gone.signal, AbortSignal.timeout(deadlineMs)]);
       try {
+        // The request limiter already resolved this memo, including cookie-less requests.
+        if (!(await receiptWait(kit.sessions.lookup(req), signal))) throw new HttpError(403, "no_access");
         const grant = await archive.withQueries(signal, async (q) => {
           const allowed = await kit.auth.grant(req, reply, roomId, q);
-          if (!allowed) throw new HttpError(403, "no_access");
-          enforce(await kit.limits.receiptLookups(roomId, allowed.memberId, q));
+          if (!allowed) return new HttpError(403, "no_access");
+          const retryAfter = await kit.limits.receiptLookups(roomId, allowed.memberId, q);
+          if (retryAfter !== null) return new HttpError(429, "rate_limited", { retryAfter });
           await kit.limits.recordReceiptLookup(roomId, allowed.memberId, q);
           return allowed;
         });
+        if (grant instanceof HttpError) throw grant;
         const actor = await receiptWait(deps.manager.acquire(roomId), signal);
         const viewer: Viewer = { memberId: grant.memberId, role: grant.role };
         // The state is taken after the rows are read, once it holds every committed receipt's op (stateThrough).
