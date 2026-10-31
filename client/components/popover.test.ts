@@ -418,6 +418,73 @@ describe("a press while a popover is open", () => {
   });
 });
 
+test("natural measurement keeps a focused popover at its placed position", async () => {
+  const { measurePopoverContent } = await import("./Popover.tsx");
+  const inner = { scrollTop: 278 };
+  const writes: string[] = [];
+  const style = new Proxy({ top: "400px", left: "80px" } as Record<string, string>, { set(target, key: string, value: string) {
+    writes.push(key);
+    if ((key === "top" || key === "left") && value === "0px") inner.scrollTop = 0;
+    target[key] = value;
+    return true;
+  } });
+  const bounds = { width: 280, height: 400 } as DOMRect;
+  const box = { style, getBoundingClientRect() { assert.equal(style.width, "max-content"); return bounds; } };
+  let fitted = false;
+  assert.equal(measurePopoverContent(box as unknown as HTMLElement, 300, 80, () => { fitted = true; }), bounds);
+  assert.equal(fitted, true);
+  assert.equal(inner.scrollTop, 278);
+  assert.equal(style.top, "400px");
+  assert.equal(style.left, "80px");
+  assert.deepEqual(writes, ["height", "width", "maxWidth", "minWidth"]);
+});
+
+test("keyboard opening keeps pre-mount ancestor offsets through placement and focus, pointer opening leaves them alone", async () => {
+  const { createElement } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { RoomScopeProvider } = await import("../state/scope.ts");
+  const { usePopover, withPopoverOpeningScroll } = await import("./Popover.tsx");
+  const previous = { window: globalThis.window, document: globalThis.document, Node: globalThis.Node };
+  class FakeNode {}
+  Object.assign(globalThis, { window: new EventTarget(), document: { activeElement: null, body: null }, Node: FakeNode });
+  try {
+    for (const tagName of ["DIV", "DIALOG"]) for (const scale of [1, 1.3]) {
+      const outer = { isConnected: true, scrollTop: 314 * scale, scrollLeft: 8, parentElement: null };
+      const inner = { tagName, isConnected: true, scrollTop: 74 * scale, scrollLeft: 30, parentElement: outer };
+      const gone = { isConnected: false, scrollTop: 119, scrollLeft: 0, parentElement: inner };
+      let handle: ReturnType<typeof usePopover> | undefined;
+      function Probe() { handle = usePopover({ kind: "menu" }); return null; }
+      renderToStaticMarkup(createElement(RoomScopeProvider, { scope: new RoomScope(), children: createElement(Probe) }));
+      handle!.anchor.current = { parentElement: gone, focus() {} } as unknown as HTMLElement;
+      handle!.show({ by: "key", from: "first" });
+      inner.scrollTop = 0; gone.scrollTop = 0;
+      withPopoverOpeningScroll(handle!, () => {
+        assert.equal(inner.scrollTop, 74 * scale, "placement sees the source at its pre-mount position");
+        assert.equal(outer.scrollTop, 314 * scale);
+        inner.scrollTop = 0; outer.scrollLeft = 0;
+      });
+      assert.equal(inner.scrollTop, 74 * scale, "focus cannot reset the nearest scroller");
+      assert.equal(outer.scrollLeft, 8);
+      assert.equal(gone.scrollTop, 0, "disconnected ancestors are never written");
+      inner.scrollTop = 31;
+      withPopoverOpeningScroll(handle!, () => {});
+      assert.equal(inner.scrollTop, 31, "the snapshot is consumed once");
+      handle!.show({ by: "key", from: "first" });
+      handle!.show({ by: "pointer", from: "first" });
+      withPopoverOpeningScroll(handle!, () => { inner.scrollTop = 45; });
+      assert.equal(inner.scrollTop, 45, "a pointer opening cannot restore a keyboard snapshot");
+      handle!.show({ by: "key", from: "first" });
+      assert.throws(() => withPopoverOpeningScroll(handle!, () => { inner.scrollTop = 0; throw new Error("placement"); }), /placement/);
+      assert.equal(inner.scrollTop, 45, "cleanup also restores after a failed placement");
+      handle!.show({ by: "key", from: "first" });
+      handle!.close("anchor");
+      inner.scrollTop = 60;
+      withPopoverOpeningScroll(handle!, () => {});
+      assert.equal(inner.scrollTop, 60, "closing drops an unused opening snapshot");
+    }
+  } finally { Object.assign(globalThis, previous); }
+});
+
 describe("focus stays inside the popover's scroll boundary", () => {
   async function fixture(scale = 1) {
     const { focusInView } = await import("./Popover.tsx");

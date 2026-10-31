@@ -110,6 +110,7 @@ export type PopoverHandle = {
 };
 
 const POINTER_OPEN: OpenHow = { by: "pointer", from: "first" };
+const openingScroll = new WeakMap<PopoverHandle["anchor"], () => void>();
 
 export function usePopover(options: {
   kind: PopoverKind;
@@ -143,6 +144,7 @@ export function usePopover(options: {
         // Focus moves before the popover goes, so it never falls to the page on the way.
         if (focusOnClose(reason, focusAt(document.activeElement, box.current, anchor.current)) === "anchor") focusAnchor(leaving.current ? null : anchor.current, latest.current.fallbackFocus);
         room.release(key);
+        openingScroll.delete(anchor);
         latest.current.onClose?.(reason);
       },
     }),
@@ -153,6 +155,8 @@ export function usePopover(options: {
     (h: OpenHow) => {
       attachRoom(room);
       how.current = h;
+      if (h.by === "key") openingScroll.set(anchor, preservePopoverScroll(anchor.current));
+      else openingScroll.delete(anchor);
       room.open(entry);
       if (openFocus(h) === "anchor") anchor.current?.focus({ preventScroll: true });
     },
@@ -336,9 +340,7 @@ function OpenPopover(props: PopoverProps) {
       const widest = Math.max(0, next.bound.right - next.bound.left - 2 * margin);
       const scrolled = box.scrollTop;
       // The content's natural size, wrapped at the widest the bound allows and at least the anchor's width.
-      Object.assign(box.style, { left: "0px", top: "0px", height: "auto", width: "max-content", maxWidth: `${widest}px`, minWidth: `${Math.min(a.width / scale, widest)}px` });
-      fitContent.current?.(Math.max(0, widest - 2 * (POPOVER_PAD + theme.line.border)));
-      const natural = box.getBoundingClientRect();
+      const natural = measurePopoverContent(box, widest, Math.min(a.width / scale, widest), () => fitContent.current?.(Math.max(0, widest - 2 * (POPOVER_PAD + theme.line.border))));
       const at = popoverPlace({
         ...next,
         side: p.side,
@@ -368,8 +370,10 @@ function OpenPopover(props: PopoverProps) {
       if (menuFocus.current) menuFocus.current(from);
       else if (box) focusFirstStop(box);
     };
-    place(true);
-    if (openFocus(h.how) === "inside") h.focusInside.current(h.how.from);
+    withPopoverOpeningScroll(h, () => {
+      place(true);
+      if (openFocus(h.how) === "inside") h.focusInside.current?.(h.how.from);
+    });
     return () => {
       h.focusInside.current = null;
     };
@@ -613,6 +617,35 @@ function controlsIn(root: HTMLElement): HTMLElement[] {
 function focusFirstStop(box: HTMLElement): void {
   const stops = tabStopsIn(box);
   focusInView(stops[openingStop(stops.map((el) => radioOf(el)?.checked === true))] ?? box);
+}
+
+/** Natural size does not depend on position. Moving a focused box to the viewport origin can move its enclosing scroller. */
+export function measurePopoverContent(box: HTMLElement, widest: number, minimum: number, fit: () => void): DOMRect {
+  Object.assign(box.style, { height: "auto", width: "max-content", maxWidth: `${widest}px`, minWidth: `${minimum}px` });
+  fit();
+  return box.getBoundingClientRect();
+}
+
+/** Keyboard opening owns no scroll outside its menu, including overflow-hidden hosts and sheet dialogs. */
+export function preservePopoverScroll(anchor: HTMLElement | null): () => void {
+  const saved: { node: HTMLElement; top: number; left: number }[] = [];
+  for (let node = anchor?.parentElement; node; node = node.parentElement) saved.push({ node, top: node.scrollTop, left: node.scrollLeft });
+  return () => {
+    for (const { node, top, left } of saved) {
+      if (!node.isConnected) continue;
+      if (node.scrollTop !== top) node.scrollTop = top;
+      if (node.scrollLeft !== left) node.scrollLeft = left;
+    }
+  };
+}
+
+/** Restore before measuring and after focusing, using the offsets from before the menu mounted. */
+export function withPopoverOpeningScroll(handle: PopoverHandle, run: () => void): void {
+  const restore = openingScroll.get(handle.anchor);
+  openingScroll.delete(handle.anchor);
+  restore?.();
+  try { run(); }
+  finally { restore?.(); }
 }
 
 /** Focus after placement and reveal only within the popover. Native scrollIntoView may also move the sheet behind it. */
