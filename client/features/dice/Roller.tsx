@@ -144,7 +144,7 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
   const again = againOf(last);
   const blocked = useRollBlocked();
   const dm = useRoomView((s) => s.you?.role === "dm");
-  const repeat = useRollModeMenu({ source: JSON.stringify([tag, again]), name: "Again", capability: { d20: !!again && modeRepeat(rolls, "normal", again.to) !== null, visibility: "repeat", repeat: true }, disabled: waiting, valid: () => blocked === null, dm,
+  const repeat = useRollModeMenu({ source: JSON.stringify([tag, again, blocked]), name: "Again", capability: { d20: !!again && modeRepeat(rolls, "normal", again.to) !== null, visibility: "repeat", repeat: true }, disabled: waiting, valid: () => blocked === null, dm,
     onTap: () => { if (again) panel.again(again.rolls, again.to, throws.origin()); },
     onRoll: (override) => { if (!again) return; const inputs = modeRepeat(rolls, override, again.to); if (inputs) panel.again(inputs, again.to, throws.origin()); },
   });
