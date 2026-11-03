@@ -106,6 +106,7 @@ export type IconName =
   | "outliner"
   | "library"
   | "timer"
+  | "time"
   | "statBlock"
   | "notes"
   | "position"
@@ -182,6 +183,7 @@ export const LUCIDE: Partial<Record<IconName, LucideIcon>> = {
   outliner: "list-tree",
   library: "library",
   timer: "timer",
+  time: "calendar-clock",
   statBlock: "file-text",
   notes: "sticky-note",
   position: "compass",
@@ -538,6 +540,13 @@ const SHAPES: Record<IconName, ReactNode> = {
     <g {...STROKE}>
       <path d="M10 2h4M12 14l3-3" />
       <circle cx="12" cy="14" r="8" />
+    </g>
+  ),
+  // Lucide calendar-clock: the Time panel, and the top bar's date and time.
+  time: (
+    <g {...STROKE}>
+      <path d="M16 14v2.2l1.6 1M16 2v4M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5M3 10h5M8 2v4" />
+      <circle cx="16" cy="16" r="6" />
     </g>
   ),
   // The Token panel's and a character's page's groups (docs/design/design-v1-icons-2.md 5), one per group, before its name. Combat takes the fight's swords and Owners the members' two people.
