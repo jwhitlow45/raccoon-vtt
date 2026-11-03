@@ -41,9 +41,16 @@ export class DungeonPreviews {
     this.#spawn = spawn;
   }
 
-  /** Starts the worker ahead of the first preview, as the dialog opens, so its load overlaps the dialog's own. */
+  /**
+   * Starts the worker ahead of the first preview, as the dialog opens, so its load overlaps the dialog's own.
+   * A worker the page cannot start is left for the first preview, which answers it as the bug error.
+   */
   warm(): void {
-    this.#ensure();
+    try {
+      this.#ensure();
+    } catch {
+      // The dialog's open must not throw. The preview says it could not be made.
+    }
   }
 
   preview(settings: DungeonSettings, seed: Seed, scene: SceneInput): Promise<Preview> {
@@ -97,7 +104,16 @@ export class DungeonPreviews {
     const request = this.#waiting;
     this.#waiting = null;
     this.#drawing = request;
-    this.#ensure().postMessage(request.message);
+    try {
+      this.#ensure().postMessage(request.message);
+    } catch {
+      // A worker that cannot start, or a message it cannot take, answers as a bug, and the next request tries a fresh worker.
+      this.#worker?.terminate();
+      this.#worker = null;
+      this.#drawing = null;
+      if (request.id === this.#next) request.resolve({ ok: false, error: "bug" });
+      this.#pump();
+    }
   }
 }
 

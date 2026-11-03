@@ -109,6 +109,37 @@ test("DG-B: a worker that dies answers its newest request as a bug, and a newer 
   assert.deepEqual(h.settled.at(-1), { n: 3, preview: fit(4) });
 });
 
+test("DG-R1-08: a worker the page cannot start, or a message it cannot take, answers as a bug, and the next preview tries a fresh one", async () => {
+  let failing = 2;
+  const workers: FakeWorker[] = [];
+  const previews = new DungeonPreviews(() => {
+    if (failing-- > 0) throw new Error("no worker");
+    const w = new FakeWorker();
+    workers.push(w);
+    return w;
+  });
+  assert.doesNotThrow(() => previews.warm(), "the dialog's open never throws");
+  const ask = () => previews.preview(DEFAULT_SETTINGS, "1K7QH2MXA9F3TWQ5", dialogScene(twoRooms()));
+  assert.deepEqual(await ask(), { ok: false, error: "bug" }, "a start that throws answers the bug error");
+  const later = ask();
+  assert.equal(workers.length, 1, "the next preview starts a fresh worker");
+  workers[0]!.answer(workers[0]!.sent[0]!.id, fit(1));
+  assert.deepEqual(await later, fit(1));
+
+  // A message the worker cannot take throws from postMessage: the bug error, that worker ended, and the next preview draws.
+  const refusing = new FakeWorker();
+  refusing.postMessage = () => {
+    throw new Error("DataCloneError");
+  };
+  const spawned: FakeWorker[] = [refusing, new FakeWorker()];
+  const next = new DungeonPreviews(() => spawned.shift()!);
+  const ask2 = () => next.preview(DEFAULT_SETTINGS, "1K7QH2MXA9F3TWQ5", dialogScene(twoRooms()));
+  assert.deepEqual(await ask2(), { ok: false, error: "bug" });
+  assert.ok(refusing.ended);
+  void ask2();
+  assert.equal(spawned.length, 0, "a fresh worker draws the next");
+});
+
 type Step = { k: "ask" } | { k: "answer" } | { k: "stray" } | { k: "crash" } | { k: "close" };
 
 /** An answer that names the ask it was drawn for, so a test sees which ask's answer settled which promise. */
