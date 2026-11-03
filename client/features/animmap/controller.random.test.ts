@@ -676,6 +676,9 @@ test("a board that falls behind steps down to the still for the page, frees its 
 
 test("a healthy board on Moving plays, draws about 30 a second, and pauses when hidden", async () => {
   const { world, dm, run } = single([{ fps: 60, ms: 2000 }], { hz: 60 }, VIDEO_B);
+  // React's useSyncExternalStore takes the board's subscribe unbound.
+  const { subscribe } = dm.board;
+  subscribe(() => {})();
   await settle(world);
   await run(1000);
   assert.equal(dm.board.state, "playing");

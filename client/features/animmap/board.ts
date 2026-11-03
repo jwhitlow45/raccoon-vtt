@@ -295,10 +295,11 @@ export class AnimMapBoard {
     return this.#state;
   }
 
-  subscribe(listener: () => void): () => void {
+  /** An arrow, so React's useSyncExternalStore can take it unbound. */
+  readonly subscribe = (listener: () => void): (() => void) => {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
-  }
+  };
 
   /** The playback rule for any video, as this board would apply it now, for the judge the Map image row and the Library viewer ask. */
   judge(video: MapVideo, answer: Decodable): Playback {
