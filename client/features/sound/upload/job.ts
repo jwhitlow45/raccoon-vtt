@@ -1,5 +1,6 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { SOUND_LIMITS } from "#shared/limits.ts";
+import type { OpOf } from "#shared/protocol.ts";
 import type { SoundId, SoundUse } from "#shared/sound.ts";
 import type { AssetRow, ProgressUploadOptions } from "../../../lib/api.ts";
 import type { Prepared, ReadOutcome, ReadStep } from "./read.ts";
@@ -30,7 +31,8 @@ export type QueueState = { rows: Row[] };
 /** What became of `sound.create`: taken, refused with the store's words, or not heard, when the room state says. */
 export type CreateAnswer = { t: "taken" } | { t: "refused"; text: string } | { t: "unknown" };
 
-export type SoundCreate = { id: SoundId; assetId: string; name: string; use: SoundUse; ms: number; level?: number };
+/** The protocol's own op, so the queue never sends a shape the room does not take. */
+export type SoundCreate = Omit<OpOf<"sound.create">, "t">;
 
 export type QueueDeps = {
   prepare(input: { file: File; use: SoundUse; signal: AbortSignal; onStep(step: ReadStep): void }): Promise<ReadOutcome>;

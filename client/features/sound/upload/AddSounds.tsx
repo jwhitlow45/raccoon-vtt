@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import { useStore } from "zustand";
-import type { ClientOp } from "#shared/protocol.ts";
 import type { SoundId, SoundUse } from "#shared/sound.ts";
 import { Button } from "../../../components/Button.tsx";
 import { Spinner, useDelayed } from "../../../components/Loading.tsx";
@@ -56,7 +55,7 @@ function liveDeps(roomId: string, actions: RoomActions, store: RoomViewStore, pr
 /** `sound.create` (design 6.2), whose answer the row waits for. */
 function createSound(actions: RoomActions, op: SoundCreate): Promise<CreateAnswer> {
   return new Promise((resolve) => {
-    const n = actions.dispatch({ t: "sound.create", ...op } as unknown as ClientOp, {
+    const n = actions.dispatch({ t: "sound.create", ...op }, {
       onAnswer: (answer, refusal) => resolve(answer === "taken" ? { t: "taken" } : answer === "refused" ? { t: "refused", text: refusal?.text ?? "the room refused it." } : { t: "unknown" }),
     });
     if (n === null) resolve({ t: "refused", text: "this app could not send it." });
