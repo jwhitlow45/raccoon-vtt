@@ -32,7 +32,9 @@ import { RoomProvider, useAssets, useRoomView, type AssetSource } from "../../st
 import { closedSlot, closedStorageKey, closeHandout, loadClosed } from "../handouts/closed.ts";
 import { nextPopup, pageName, showingKey } from "../handouts/handouts.ts";
 import { useXCard, XCardHost } from "../xcard/XCardHost.tsx";
-import { UI_SCALES, uiScaleLabel, useUiScale, useWeatherMode, WEATHER_MODE_WORDS, WEATHER_MODES } from "../device/settings.ts";
+import { UI_SCALES, uiScaleLabel, useAnimatedMaps, useUiScale, useWeatherMode, WEATHER_MODE_WORDS, WEATHER_MODES } from "../device/settings.ts";
+import { useServerAnimatedMaps } from "../animmap/status.ts";
+import { ANIMATED_MAPS_CHOICES, ANIMATED_MAPS_LABEL, ANIMATED_MAPS_WORDS } from "../animmap/words.ts";
 import { choiceOf, choiceWords, isoOffered, pickOf, TURN_LEFT, TURN_LEFT_DESCRIPTION, TURN_RIGHT, TURN_RIGHT_DESCRIPTION, VIEW_CHOICES, VIEW_GROUP } from "../view/choice.ts";
 import { displayViewKey } from "../view/store.ts";
 import { SuggestionHelp, useViewChoice, useViewVoice, ViewVoice, type ViewChoiceState } from "../view/ViewMenu.tsx";
@@ -58,7 +60,19 @@ import {
   type DisplayPaging,
   type Overlay,
 } from "./logic.ts";
-import { chooseDisplayUiScale, chooseDisplayWeather, forgetDisplayRoom, readDisplayMode, readDisplayTurn, rememberedDisplayRoom, saveDisplayChoices, useDisplayTextSize, useDisplayWeather } from "./remember.ts";
+import {
+  chooseDisplayAnimatedMaps,
+  chooseDisplayUiScale,
+  chooseDisplayWeather,
+  forgetDisplayRoom,
+  readDisplayMode,
+  readDisplayTurn,
+  rememberedDisplayRoom,
+  saveDisplayChoices,
+  useDisplayAnimatedMaps,
+  useDisplayTextSize,
+  useDisplayWeather,
+} from "./remember.ts";
 import { TV_BUTTON_HEIGHT, TV_HANDOUT_SCRIM, TV_TEXT } from "./tvType.ts";
 
 /**
@@ -88,6 +102,7 @@ export default function DisplayRoom(props: { roomId: string; memberId: string })
   const [live, setLive] = useState<Live | null>(null);
   useDisplayTextSize();
   useDisplayWeather();
+  useDisplayAnimatedMaps();
   useEffect(() => {
     // A display's projection is a player's who owns nothing, so its store holds the player role (state/store.ts).
     const room = createRoomStore({ roomId, you: { memberId, role: "player" } });
@@ -916,6 +931,7 @@ function DisplayMenu(props: {
       </MenuButton>
       <TextSize onTouch={props.onTouch} />
       <WeatherRow onTouch={props.onTouch} />
+      <AnimatedMapsRow onTouch={props.onTouch} />
       {fullscreenSupported() ? (
         <MenuButton
           role="menuitem"
@@ -1056,6 +1072,31 @@ function WeatherRow(props: { onTouch(): void }) {
           }}
         >
           {WEATHER_MODE_WORDS[m]}
+        </MenuButton>
+      ))}
+    </div>
+  );
+}
+
+/** One row: animated maps moving or still, for this display only (docs/design/design-v1-animated-maps.md 4.4). Hidden while the server's switch is off. */
+function AnimatedMapsRow(props: { onTouch(): void }) {
+  const choice = useAnimatedMaps();
+  if (!useServerAnimatedMaps()) return null;
+  return (
+    <div role="group" aria-label={ANIMATED_MAPS_LABEL} style={{ display: "grid", gridTemplateColumns: "auto repeat(2, minmax(0, 1fr))", alignItems: "center", gap: theme.space(2) }}>
+      <span style={{ padding: `0 ${theme.space(1)}px`, fontSize: TV_TEXT.small, fontWeight: theme.weight.bold }}>{ANIMATED_MAPS_LABEL}</span>
+      {ANIMATED_MAPS_CHOICES.map((c) => (
+        <MenuButton
+          key={c}
+          role="menuitemradio"
+          checked={choice === c}
+          compact
+          onClick={() => {
+            chooseDisplayAnimatedMaps(c);
+            props.onTouch();
+          }}
+        >
+          {ANIMATED_MAPS_WORDS[c]}
         </MenuButton>
       ))}
     </div>

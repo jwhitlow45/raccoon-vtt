@@ -36,3 +36,19 @@ test("a display's weather is its own, apart from a member's in the same browser,
   restoreWeatherMode();
   assert.equal(weatherMode(), "still", "closing the display gives the member's back");
 });
+
+test("a display's animated maps are its own, apart from a member's in the same browser, and go back when it closes", async () => {
+  const { animatedMaps, restoreAnimatedMaps, setAnimatedMaps } = await import("../device/settings.ts");
+  const { chooseDisplayAnimatedMaps, readDisplayAnimatedMaps } = await import("./remember.ts");
+  setAnimatedMaps("still");
+  assert.equal(readDisplayAnimatedMaps(), "moving", "a display with no choice of its own moves");
+  chooseDisplayAnimatedMaps("still");
+  chooseDisplayAnimatedMaps("moving");
+  assert.equal(stored.get("rvtt.displayAnimatedMaps"), "moving");
+  assert.equal(stored.get("rvtt.animatedMaps"), "still", "the member's setting is unchanged");
+  assert.equal(animatedMaps(), "moving", "the display's page shows its own");
+  stored.set("rvtt.displayAnimatedMaps", "sideways");
+  assert.equal(readDisplayAnimatedMaps(), "moving", "an unknown choice reads as moving");
+  restoreAnimatedMaps();
+  assert.equal(animatedMaps(), "still", "closing the display gives the member's back");
+});

@@ -1,6 +1,19 @@
 import { useLayoutEffect } from "react";
 import { formatRoomId } from "../../lib/roomId.ts";
-import { applyUiScale, applyWeatherMode, parseUiScale, parseWeatherMode, restoreUiScale, restoreWeatherMode, type UiScale, type WeatherMode } from "../device/settings.ts";
+import {
+  applyAnimatedMaps,
+  applyUiScale,
+  applyWeatherMode,
+  parseAnimatedMaps,
+  parseUiScale,
+  parseWeatherMode,
+  restoreAnimatedMaps,
+  restoreUiScale,
+  restoreWeatherMode,
+  type UiScale,
+  type WeatherMode,
+} from "../device/settings.ts";
+import type { AnimatedMapsChoice } from "../animmap/words.ts";
 
 /** A display's own page for its room, `/display/K7QH-2MXA`. */
 export function displayPath(roomId: string): string {
@@ -132,6 +145,39 @@ export function useDisplayWeather(): void {
   useLayoutEffect(() => {
     applyWeatherMode(readDisplayWeather());
     return () => restoreWeatherMode();
+  }, []);
+}
+
+/**
+ * The display menu's Animated maps (docs/design/design-v1-animated-maps.md
+ * 4.4), kept apart from the device's own `rvtt.animatedMaps` for the same
+ * reason as its weather.
+ */
+const ANIMATED_MAPS_KEY = "rvtt.displayAnimatedMaps";
+
+export function readDisplayAnimatedMaps(): AnimatedMapsChoice {
+  try {
+    return parseAnimatedMaps(localStorage.getItem(ANIMATED_MAPS_KEY));
+  } catch {
+    return "moving";
+  }
+}
+
+/** The display menu's Animated maps: kept under the display's own key, and taken on this page only. */
+export function chooseDisplayAnimatedMaps(choice: AnimatedMapsChoice): void {
+  try {
+    localStorage.setItem(ANIMATED_MAPS_KEY, choice);
+  } catch {
+    // The choice lasts until the page closes.
+  }
+  applyAnimatedMaps(choice);
+}
+
+/** The display's own Animated maps for this page, given back when it closes, as useDisplayWeather does. */
+export function useDisplayAnimatedMaps(): void {
+  useLayoutEffect(() => {
+    applyAnimatedMaps(readDisplayAnimatedMaps());
+    return () => restoreAnimatedMaps();
   }, []);
 }
 
