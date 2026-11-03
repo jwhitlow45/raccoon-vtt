@@ -367,10 +367,19 @@ export function roomSoundOnFor(choice: RoomSoundChoice, role: "dm" | "player"): 
 export const ROOM_SOUND_KEY = "rvtt.roomSound";
 const roomSoundSetting = setting<RoomSoundChoice>(ROOM_SOUND_KEY, parseRoomSound, (c) => c ?? "off");
 
-export const roomSoundChoice = roomSoundSetting.get;
+export function roomSoundChoice(): RoomSoundChoice {
+  followOtherWindows();
+  return roomSoundSetting.get();
+}
 export const setRoomSoundChoice = roomSoundSetting.set;
-export const useRoomSoundChoice = roomSoundSetting.use;
-export const subscribeRoomSound = roomSoundSetting.subscribe;
+export function useRoomSoundChoice(): RoomSoundChoice {
+  followOtherWindows();
+  return roomSoundSetting.use();
+}
+export function subscribeRoomSound(listener: () => void): () => void {
+  followOtherWindows();
+  return roomSoundSetting.subscribe(listener);
+}
 
 /** "Music", "Background" and "Effects" on this device, 0 to 100, squared into the gain. */
 export type SoundMix = { readonly music: number; readonly loops: number; readonly effects: number };
@@ -394,18 +403,34 @@ export function parseSoundMix(raw: string | null): SoundMix {
 export const SOUND_MIX_KEY = "rvtt.soundMix";
 const soundMixSetting = setting<SoundMix>(SOUND_MIX_KEY, parseSoundMix, (m) => JSON.stringify({ music: m.music, loops: m.loops, effects: m.effects }));
 
-export const soundMix = soundMixSetting.get;
+export function soundMix(): SoundMix {
+  followOtherWindows();
+  return soundMixSetting.get();
+}
 export const setSoundMix = soundMixSetting.set;
-export const useSoundMix = soundMixSetting.use;
-export const subscribeSoundMix = soundMixSetting.subscribe;
+export function useSoundMix(): SoundMix {
+  followOtherWindows();
+  return soundMixSetting.use();
+}
+export function subscribeSoundMix(listener: () => void): () => void {
+  followOtherWindows();
+  return soundMixSetting.subscribe(listener);
+}
+
+let followingOtherWindows = false;
 
 /*
  * Another window of the app that changes either writes storage, and the
  * browser tells this one with a `storage` event, so its engine and its
  * switches follow, as the theme's do (lib/scheme.ts). A null key means
- * that window cleared storage, which puts the defaults back.
+ * that window cleared storage, which puts the defaults back. The listener
+ * goes on at the first read rather than at import, so a page or a test
+ * that imports these settings and never reads them adds none, and
+ * lib/scheme.ts's count of its own listener holds.
  */
-if (typeof window !== "undefined") {
+function followOtherWindows(): void {
+  if (followingOtherWindows || typeof window === "undefined") return;
+  followingOtherWindows = true;
   window.addEventListener("storage", (event) => {
     if (event.key === ROOM_SOUND_KEY || event.key === null) roomSoundSetting.adopt(event.key === null ? null : event.newValue);
     if (event.key === SOUND_MIX_KEY || event.key === null) soundMixSetting.adopt(event.key === null ? null : event.newValue);

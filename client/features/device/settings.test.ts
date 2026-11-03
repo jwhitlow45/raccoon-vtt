@@ -279,6 +279,8 @@ test("room sound and the mix follow another window's change, and a cleared stora
   try {
     const s = await loadPage();
     const storageEvent = (key: string | null, newValue: string | null) => Object.assign(new Event("storage"), { key, newValue });
+    // The page follows other windows from its first read.
+    assert.equal(s.roomSoundChoice(), null);
     events.dispatchEvent(storageEvent("rvtt.roomSound", "on"));
     assert.equal(s.roomSoundChoice(), "on");
     events.dispatchEvent(storageEvent("rvtt.soundMix", '{"music":5,"loops":5,"effects":5}'));
