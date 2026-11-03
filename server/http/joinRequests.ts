@@ -428,17 +428,20 @@ export async function registerJoinRequestRoutes(app: FastifyInstance, kit: AuthK
       const roomId = roomParam(req);
       const grant = await requireGrant(kit, req, reply, roomId, "dm");
       const { ids } = parseBody(TurnAwayBody, req.body);
-      for (const turned of store.turnAway(roomId, ids)) {
-        req.log.info({ roomId, requestId: turned.id, outcome: "turned_away", by: grant.memberId }, "join request answered");
-        // Mirrored in the database, so a restart forgets no hold. The turn
-        // away is done and holds in memory either way, so a failed write is
-        // logged and owed, retried by the sweep, and the DM still hears 204.
-        try {
-          await kit.limits.recordTurnAway(roomId, turned.sessionId, turned.ipKey, turned.endedAt ?? store.now(), () => store.now());
-        } catch (err) {
-          req.log.warn({ err, roomId, requestId: turned.id }, "join request hold not saved yet");
-          store.oweHold(turned);
-        }
+      const turned = store.turnAway(roomId, ids);
+      for (const r of turned) req.log.info({ roomId, requestId: r.id, outcome: "turned_away", by: grant.memberId }, "join request answered");
+      // Mirrored in the database, so a restart forgets no hold, in one
+      // bounded write for them all. The turn away is done and holds in
+      // memory either way, so a failed write is logged and owed, retried by
+      // the sweep, and the DM still hears 204.
+      try {
+        await kit.limits.recordTurnAways(
+          turned.map((r) => ({ roomId, sessionId: r.sessionId, ipKey: r.ipKey, at: r.endedAt ?? store.now() })),
+          () => store.now(),
+        );
+      } catch (err) {
+        req.log.warn({ err, roomId, requests: turned.length }, "join request holds not saved yet");
+        for (const r of turned) store.oweHold(r);
       }
       return reply.code(204).send();
     });

@@ -700,6 +700,35 @@ describe("join requests: asking, waiting and a DM's answer", () => {
     }
   });
 
+  test("Turn away all on a stalled pool answers 204 within one write's bound, not one per request, and the sweep saves every hold once it is back (JBO3-01)", { timeout: 30_000 }, async () => {
+    const { dm, roomId } = await k.room("ask");
+    const phones = Array.from({ length: 10 }, () => t.client());
+    const ids: string[] = [];
+    for (const phone of phones) ids.push(await k.asked(phone, roomId));
+    // A transaction's checkout never comes. pool.query's callback form still works, so the DM's grant is read.
+    const connect = t.pool.connect;
+    (t.pool as { connect: unknown }).connect = function (this: pg.Pool, cb?: unknown) {
+      if (cb === undefined) return new Promise<never>(() => undefined);
+      return (connect as (cb: unknown) => unknown).call(this, cb);
+    };
+    try {
+      const started = Date.now();
+      const turned = await dm.post(`/api/rooms/${roomId}/join-requests/turn-away`, { ids });
+      const took = Date.now() - started;
+      assert.equal(turned.statusCode, 204, turned.body);
+      // One checkout's bound is 2 s. One write per request would wait 20 s.
+      assert.ok(took < 5_000, `answered in ${took} ms`);
+      assert.equal(t.app.joinRequests.owedHolds, 10, "every hold owed");
+    } finally {
+      (t.pool as { connect: unknown }).connect = connect;
+    }
+    for (let i = 0; i < 100 && t.app.joinRequests.owedHolds > 0; i++) await new Promise((r) => setTimeout(r, 50));
+    assert.equal(t.app.joinRequests.owedHolds, 0, "saved once the pool came back");
+    const devices = await Promise.all(phones.map(async (p) => `askno:${roomId}:${(await k.askRow(p.token))?.id}`));
+    const { rows } = await t.pool.query<{ n: number }>("select count(*)::int as n from rate_events where key = any($1::text[])", [devices]);
+    assert.equal(rows[0]?.n, 10);
+  });
+
   test("a transaction hook wraps each pooled client once, and after its undo none of it runs and every client has its own query back (JB-ASTRA-12)", async () => {
     const connect = t.pool.connect;
     const borrowed = new Set<pg.PoolClient>();

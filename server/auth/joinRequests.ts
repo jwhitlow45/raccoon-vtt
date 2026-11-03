@@ -484,13 +484,14 @@ export class JoinRequests {
   }
 
   /**
-   * The sweep's part for holds: saves each one owed, dated `hold.at`, its
-   * turn away. One that fails stays owed, and one past its 15 minutes is
-   * dropped, since it holds nothing any more. One run at a time: a sweep
-   * while one runs gets that run, so a stalled database never piles up
-   * saves of the same hold.
+   * The sweep's part for holds: saves every one owed in one call, each
+   * dated `hold.at`, its turn away, so a stalled database costs one bounded
+   * wait however many are owed. A failed save leaves them all owed, and one
+   * past its 15 minutes is dropped, since it holds nothing any more. One
+   * run at a time: a sweep while one runs gets that run, so a stalled
+   * database never piles up saves of the same hold.
    */
-  retryHolds(save: (hold: OwedHold) => Promise<void>, failed: (err: unknown, hold: OwedHold) => void): Promise<void> {
+  retryHolds(save: (holds: OwedHold[]) => Promise<void>, failed: (err: unknown, holds: OwedHold[]) => void): Promise<void> {
     if (!this.#retrying) {
       // Cleared in a later turn, after it is stored: a run with nothing to save ends at once.
       const run: Promise<void> = this.#retryOwed(save, failed).finally(() => {
@@ -501,19 +502,23 @@ export class JoinRequests {
     return this.#retrying;
   }
 
-  async #retryOwed(save: (hold: OwedHold) => Promise<void>, failed: (err: unknown, hold: OwedHold) => void): Promise<void> {
-    for (const [k, hold] of [...this.#owedHolds]) {
-      if (this.#now() - hold.at >= TURN_AWAY_HOLD_MS) {
-        this.#owedHolds.delete(k);
-        continue;
-      }
-      try {
-        await save(hold);
-        if (this.#owedHolds.get(k) === hold) this.#owedHolds.delete(k);
-      } catch (err) {
-        failed(err, hold);
-      }
+  async #retryOwed(save: (holds: OwedHold[]) => Promise<void>, failed: (err: unknown, holds: OwedHold[]) => void): Promise<void> {
+    const now = this.#now();
+    const due: Array<[string, OwedHold]> = [];
+    for (const [k, hold] of this.#owedHolds) {
+      if (now - hold.at >= TURN_AWAY_HOLD_MS) this.#owedHolds.delete(k);
+      else due.push([k, hold]);
     }
+    if (due.length === 0) return;
+    const holds = due.map(([, hold]) => hold);
+    try {
+      await save(holds);
+    } catch (err) {
+      failed(err, holds);
+      return;
+    }
+    // One owed again meanwhile, by a newer turn away of the device, is that one's to save.
+    for (const [k, hold] of due) if (this.#owedHolds.get(k) === hold) this.#owedHolds.delete(k);
   }
 
   /** The room switched to With the password, and that has committed: every live request ends as closed. */

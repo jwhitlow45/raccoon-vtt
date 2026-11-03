@@ -11,6 +11,9 @@ import { withTx, type Queryable } from "./tx.ts";
 /** A turn away's write: its pool checkout and its statement. */
 const TURN_AWAY_WRITE = { checkoutMs: 2_000, statementMs: 5_000 };
 
+/** A turned-away device's hold in a room, dated to its turn away. */
+export type TurnAwayHold = { readonly roomId: string; readonly sessionId: string; readonly ipKey: string; readonly at: number };
+
 /**
  * Rate limits (design section 10.3), in two layers.
  *
@@ -378,28 +381,37 @@ export class SlowLimits {
   }
 
   /**
-   * A DM turned this device away here: its own hold, and its address's,
-   * which only adds a Turnstile check. Dated to the turn away, `at` on the
-   * `now` clock, so a write that comes late, after a slow checkout or as
-   * the sweep's retry, ends the hold when it would have. The row is still
-   * stamped on the database's clock, as every other one is: the age is
-   * measured on ours and taken off the statement's own time. A session's
-   * creation is compared with the address's hold, so a stamp from our
-   * clock running ahead would date a session made after the turn away as
-   * older, and let it skip the check. The checkout and the statement are
-   * bounded, so a stalled pool costs a retry, not a wait.
+   * DMs turned these devices away: each one's own hold, and its address's,
+   * which only adds a Turnstile check. Each is dated to its turn away, `at`
+   * on the `now` clock, so a write that comes late, after a slow checkout
+   * or as the sweep's retry, ends the hold when it would have. The rows are
+   * still stamped on the database's clock, as every other one is: the age
+   * is measured on ours and taken off the statement's own time. A
+   * session's creation is compared with the address's hold, so a stamp
+   * from our clock running ahead would date a session made after the turn
+   * away as older, and let it skip the check. One statement for them all,
+   * with its checkout and itself bounded, so a stalled pool costs one
+   * bounded wait and a retry, however many were turned away.
    */
-  async recordTurnAway(roomId: string, deviceId: string, ip: string, at: number, now: () => number): Promise<void> {
+  async recordTurnAways(holds: readonly TurnAwayHold[], now: () => number): Promise<void> {
+    if (holds.length === 0) return;
     await withTx(
       this.#pool,
       async (tx) => {
         await tx.query(`set local statement_timeout = '${TURN_AWAY_WRITE.statementMs}ms'`);
         // Measured as late as it can be, just before the statement it is taken off.
-        const age = Math.max(0, now() - at) / 1000;
-        await tx.query("insert into rate_events (key, at) select unnest($1::text[]), statement_timestamp() - make_interval(secs => $2)", [
-          [`askno:${roomId}:${deviceId}`, `asknoip:${roomId}:${ip}`],
-          age,
-        ]);
+        const sent = now();
+        const keys: string[] = [];
+        const ages: number[] = [];
+        for (const hold of holds) {
+          const age = Math.max(0, sent - hold.at) / 1000;
+          keys.push(`askno:${hold.roomId}:${hold.sessionId}`, `asknoip:${hold.roomId}:${hold.ipKey}`);
+          ages.push(age, age);
+        }
+        await tx.query(
+          "insert into rate_events (key, at) select k, statement_timestamp() - make_interval(secs => age) from unnest($1::text[], $2::float8[]) as t(k, age)",
+          [keys, ages],
+        );
       },
       { checkoutMs: TURN_AWAY_WRITE.checkoutMs },
     );

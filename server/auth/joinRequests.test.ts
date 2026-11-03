@@ -380,11 +380,11 @@ describe("join requests: waiting", () => {
     const saved: number[] = [];
     let fail = true;
     const failures: unknown[] = [];
-    const save = async (hold: OwedHold) => {
+    const save = async (holds: OwedHold[]) => {
       if (fail) throw new Error("down");
       // However long the write waits for a connection, the date it saves is the turn away's.
       time.advance(5_000);
-      saved.push(hold.at);
+      saved.push(...holds.map((h) => h.at));
     };
     await store.retryHolds(save, (err) => failures.push(err));
     assert.equal(failures.length, 1);
@@ -404,7 +404,7 @@ describe("join requests: waiting", () => {
     assert.equal(store.owedHolds, 0);
   });
 
-  test("hold retries run one at a time: a sweep while one runs gets that run, and saves no hold twice (JR-SOL-05)", async () => {
+  test("hold retries run one at a time, every owed hold in one save: a sweep while one runs gets that run, and saves no hold twice (JR-SOL-05, JBO3-01)", async () => {
     const { store, asked } = setup();
     for (const id of ["s1", "s2"]) {
       const [turned] = store.turnAway(ROOM, [asked(id).id]);
@@ -413,28 +413,34 @@ describe("join requests: waiting", () => {
     }
     let release!: () => void;
     const stalled = new Promise<void>((r) => (release = r));
-    const saves: string[] = [];
-    const save = async (hold: OwedHold) => {
-      saves.push(hold.sessionId);
+    const saves: string[][] = [];
+    const save = async (holds: OwedHold[]) => {
+      saves.push(holds.map((h) => h.sessionId));
       await stalled;
     };
     const first = store.retryHolds(save, () => undefined);
     const second = store.retryHolds(save, () => undefined);
     assert.equal(second, first, "the same run");
     await Promise.resolve();
-    assert.deepEqual(saves, ["s1"], "one save at a time, the second waiting on the first");
+    assert.deepEqual(saves, [["s1", "s2"]], "one save for every hold owed, so a stalled database costs one wait");
+    // Owed again while that save runs: a newer turn away's, which this save does not cover.
+    const [again] = store.turnAway(ROOM, [asked("s4").id]);
+    assert.ok(again);
+    store.oweHold(again);
     release();
     await second;
-    assert.deepEqual(saves, ["s1", "s2"]);
+    assert.equal(store.owedHolds, 1, "only the hold owed since");
+    await store.retryHolds(save, () => undefined);
+    assert.deepEqual(saves, [["s1", "s2"], ["s4"]], "a new run once that one ended");
     assert.equal(store.owedHolds, 0);
     await store.retryHolds(save, () => undefined);
-    assert.deepEqual(saves, ["s1", "s2"], "a new run once that one ended, with nothing left owed");
+    assert.equal(saves.length, 2, "nothing left owed, nothing saved");
     // That run had nothing to save. It ended too, so a hold owed since is saved by the next.
     const [later] = store.turnAway(ROOM, [asked("s3").id]);
     assert.ok(later);
     store.oweHold(later);
     await store.retryHolds(save, () => undefined);
-    assert.deepEqual(saves, ["s1", "s2", "s3"]);
+    assert.deepEqual(saves, [["s1", "s2"], ["s4"], ["s3"]]);
   });
 
   test("a turned-away device is held 15 minutes in that room only", () => {
