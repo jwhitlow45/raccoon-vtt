@@ -38,6 +38,9 @@ and for how to use it, the [DM guide](../dm-guide.md).
 - [design-v1-pdf-handouts.md](design-v1-pdf-handouts.md): PDF handouts.
 - [design-v1-movement.md](design-v1-movement.md): movement that walks around
   walls and counts difficult terrain.
+- [design-v1-snap-off.md](design-v1-snap-off.md): dropping a token between
+  squares for one drag, drawn off its square while every rule still counts it
+  in the square.
 - [design-v1-heights-readout.md](design-v1-heights-readout.md): how players
   see the height of raised ground.
 - [design-v1-per-player-vision.md](design-v1-per-player-vision.md): each

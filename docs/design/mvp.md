@@ -161,7 +161,7 @@ Tiers:
 
 - Square grid, 5 ft per square. Scale and unit can be changed. A scene's grid may instead be hex rows or hex columns (see v1, hex grids).
 - Diagonal rule set per room: every diagonal 5 ft (the 2024 rule, default), 5-10-5, or Euclidean.
-- Tokens snap to the grid. Odd-size tokens snap to square centers and even-size tokens to grid intersections. Snap can be turned off for a drag (not built yet).
+- Tokens snap to the grid. Odd-size tokens snap to square centers and even-size tokens to grid intersections. Snap can be turned off for a drag: hold Alt (Option on a Mac) or tap Place freely in the token bar, and the token is drawn up to 3/8 of a square off its square while every rule still counts it in the square (built, docs/design/design-v1-snap-off.md).
 - Ruler:
   - Drag to measure.
   - Tap to add waypoints.

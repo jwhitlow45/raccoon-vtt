@@ -723,6 +723,17 @@ This build writes a new player's member before signing the device in, so a
 server stopped between the two leaves a member nobody plays, which the DM can
 remove.
 
+The update that lets a token be drawn between squares
+(docs/design/design-v1-snap-off.md) saves rooms at snapshot version 34 and
+stores changes at op version 44, which the builds before it cannot read. Back
+up the database just before the update, and reload every page left open across
+it, table displays included, since no version step makes an open page reload.
+Rooms, backups and stored changes from before it take the new versions as they
+load, through identity migration steps, and there is no database table
+migration. An older build refuses a version 34 snapshot or a version 44 op, so
+going back needs that backup: follow Restore under Backups with the backup
+taken just before the update. Every room loses what changed after that backup.
+
 Compose rebuilds the image and replaces only the containers that changed. On
 the way down the app closes every WebSocket with code 1012, finishes each
 room's current write and saves a snapshot, so phones reconnect on their own
