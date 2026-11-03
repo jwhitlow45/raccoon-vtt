@@ -204,10 +204,11 @@ describe("a shared attack's slot, by the attack's name (5.3)", () => {
     assert.ok(cells(markup).has("Dagger for 2"), "both attacks are shared");
     assert.equal([...markup.matchAll(/data-roll-result-base=""[^>]*>15 hit, 20 hit/g)].length, 1);
     assert.equal([...markup.matchAll(/aria-label="Roll damage for 2 hits"/g)].length, 1);
-    // Each row from its attack's button to the next row's line.
+    // Each row is its attack's own group, up to the next attack's group.
     const row = (name: string) => {
-      const at = markup.indexOf(`aria-label="${name} for 2"`);
-      const next = markup.indexOf("border-top:1px", at);
+      const at = markup.indexOf(`role="group" aria-label="${name} for 2"`);
+      assert.ok(at >= 0, `${name} has its own group`);
+      const next = markup.indexOf('role="group" aria-label="', at + 1);
       return markup.slice(at, next < 0 ? undefined : next);
     };
     assert.match(row("Rapier"), /Roll damage for 2 hits/);

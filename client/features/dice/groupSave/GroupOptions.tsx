@@ -430,7 +430,8 @@ function SharedAttack(props: { name: string; each: Attacker[]; dice: DiceView; b
   const total = damage?.state === "committed" ? rollsOf(damage.lines).reduce((a, r) => a + r.total, 0) : null;
   const note = sharedAttackNote(props.each, props.dice);
   return (
-    <div style={{ display: "grid", gap: theme.space(1), borderTop: `${theme.line.border}px solid ${theme.color.border}`, paddingTop: theme.space(1) }}>
+    // Named for the attack alone, as its button's name grows with what bears on it. Every shared attack has a Target's AC field, and this says whose.
+    <div role="group" aria-label={`${props.name} for ${n}`} style={{ display: "grid", gap: theme.space(1), borderTop: `${theme.line.border}px solid ${theme.color.border}`, paddingTop: theme.space(1) }}>
       <div style={{ display: "flex", gap: theme.space(2), alignItems: "center", flexWrap: "wrap" }}>
         <div style={{ flex: "1 1 auto", display: "grid" }}>
           <Cell text={`${props.name} for ${n}`} name={[`${props.name} for ${n}`, note].filter(Boolean).join(", ")} disabled={props.blocked} busy={receipt?.state === "sending"} onTap={attack} mode={{ source: `${source}|attack`, capability: { d20: true, visibility: "selectable", manual: presses }, valid, onRoll: attack }} />
