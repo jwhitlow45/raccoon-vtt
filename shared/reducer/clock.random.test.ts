@@ -21,8 +21,9 @@ import { DM, P1, chance, character, env, int, pick, rng, room, token } from "../
  * 3. A clock line is shared exactly when the clock is shown as its op
  *    leaves it, and no player ever holds a line written while it was hidden.
  * 4. A DM's undo or redo through the correction gate with a clock before and
- *    after whose date text changes writes exactly one clock line, and every
- *    other restore writes none, an undone fight's end included.
+ *    after whose stored time and date text both change writes exactly one
+ *    clock line, and every other restore writes none, an undone fight's end
+ *    included.
  * 5. A Long Rest's stamp is the current time when the rest applied.
  */
 
@@ -151,7 +152,7 @@ test("the clock keeps its invariants over random play, undo and redo", () => {
         restoreLines += lines.length;
         const gated = who.role === "dm" && restoreOf?.gate === true;
         const fightChanged = (before.encounter === null) !== (state.encounter === null);
-        const dateChanged = before.clock && state.clock ? lineDate(clockNow(before.clock, before.encounter), before.clock.calendar) !== lineDate(clockNow(state.clock, state.encounter), state.clock.calendar) : false;
+        const dateChanged = before.clock && state.clock && before.clock.t !== state.clock.t ? lineDate(clockNow(before.clock, before.encounter), before.clock.calendar) !== lineDate(clockNow(state.clock, state.encounter), state.clock.calendar) : false;
         assert.equal(lines.length, gated && !fightChanged && dateChanged ? 1 : 0, `seed ${seed} step ${i}: restore lines`);
       }
       if (op.t === "encounter.end" && before.clock && fightSeconds(before.encounter, true) > 0) ends++;

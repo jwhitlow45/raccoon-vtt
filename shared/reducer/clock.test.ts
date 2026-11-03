@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { CLOCK_TOO_FAR, DAY_SECONDS, clockNow, nextDawn } from "../calendar.ts";
+import { CLOCK_TOO_FAR, DAY_SECONDS, clockNow, lineDate, nextDawn } from "../calendar.ts";
 import { keys } from "../keys.ts";
 import { LIMITS } from "../limits.ts";
 import { lineAudience } from "../logRings.ts";
@@ -171,6 +171,19 @@ describe("Undo and Redo of a clock change (4.7, 6.3)", () => {
   test("an undo whose date text does not change writes none", () => {
     const step = run(withClock(22 * H), { t: "clock.advance", by: 20 });
     assert.deepEqual(texts(restore(step.state, step.inverse!, "undo", 3).log), []);
+  });
+
+  test("an undo of a Next that crosses a minute writes none, since the stored time stays as it was (CALB-O-01)", () => {
+    const next = run(withClock(8 * H, {}, { encounter: fight(10, "e2") }), { t: "encounter.next" });
+    assert.equal(next.state.encounter!.round, 11);
+    assert.notEqual(lineDate(clockNow(next.state.clock!, next.state.encounter), DAYS), lineDate(8 * H + 54, DAYS), "the round crosses 8:01 AM");
+    assert.deepEqual(texts(restore(next.state, next.inverse!, "undo", 3).log), []);
+  });
+
+  test("Undo setup of a calendar rename writes none, as the rename wrote none (CALB-O-01)", () => {
+    const renamed = run(withClock(0, { calendar: MONTHS }), { t: "clock.update", calendar: { ...MONTHS, months: MONTHS.months.map((m, i) => (i === 0 ? { ...m, name: "Deepwinter" } : m)) } });
+    assert.deepEqual(texts(renamed.log), []);
+    assert.deepEqual(texts(restore(renamed.state, renamed.inverse!, "undo", 3, { scope: "setup" }).log), []);
   });
 
   test("an undo while hidden is the DM's line", () => {
