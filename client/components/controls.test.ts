@@ -235,27 +235,32 @@ describe("Switch", () => {
   }
 });
 
-// The tones are tokens, CSS variables, so each check reads the color the token shows in dark.
-describe("tones", () => {
-  const dark = (token: string) => tokenValue(token, "dark");
-  for (const [tone, colors] of Object.entries(TAG_TONES)) {
-    test(`a ${tone} tag's text reads at 4.5:1 on its bg fill`, () => {
-      const ratio = contrast(dark(colors.text), PALETTES.dark.bg);
-      assert.ok(ratio >= 4.5, `${tone}: ${dark(colors.text)} on ${PALETTES.dark.bg} reads ${ratio.toFixed(2)}`);
-    });
-  }
+// The tones are tokens, CSS variables, so each check reads the color the token shows in each scheme.
+for (const scheme of SCHEMES) {
+  describe(`tones, ${scheme}`, () => {
+    const value = (token: string) => tokenValue(token, scheme);
+    const bg = PALETTES[scheme].bg;
+    for (const [tone, colors] of Object.entries(TAG_TONES)) {
+      test(`a ${tone} tag's text reads at 4.5:1 on its bg fill`, () => {
+        const ratio = contrast(value(colors.text), bg);
+        assert.ok(ratio >= 4.5, `${tone}: ${value(colors.text)} on ${bg} reads ${ratio.toFixed(2)}`);
+      });
+    }
 
-  for (const [tone, colors] of Object.entries(NOTICE_TONES)) {
-    test(`a ${tone} notice's text reads at 4.5:1 on its fill`, () => {
-      assert.ok(contrast(dark(colors.text), dark(colors.fill)) >= 4.5, `${dark(colors.text)} on ${dark(colors.fill)}`);
-    });
-  }
+    for (const [tone, colors] of Object.entries(NOTICE_TONES)) {
+      test(`a ${tone} notice's text reads at 4.5:1 on its fill`, () => {
+        const ratio = contrast(value(colors.text), value(colors.fill));
+        assert.ok(ratio >= 4.5, `${tone}: ${value(colors.text)} on ${value(colors.fill)} reads ${ratio.toFixed(2)}`);
+      });
+    }
 
-  test("the highlight notice's focus ring reads on cream, where the accent would not", () => {
-    assert.ok(contrast(dark(NOTICE_TONES.highlight.focus!), dark(NOTICE_TONES.highlight.fill)) >= 3);
-    assert.ok(contrast(theme.color.crest, dark(NOTICE_TONES.highlight.fill)) < 3);
+    test("the highlight notice's focus ring reads on cream, where the accent would not", () => {
+      const fill = value(NOTICE_TONES.highlight.fill);
+      assert.ok(contrast(value(NOTICE_TONES.highlight.focus!), fill) >= 3);
+      assert.ok(contrast(theme.color.crest, fill) < 3);
+    });
   });
-});
+}
 
 describe("three even choices that wrap (docs/design/design-v1-design-pass.md 4.2)", () => {
   const three = [
