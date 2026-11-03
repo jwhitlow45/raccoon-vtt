@@ -8,7 +8,8 @@ import { hexCenter, hexInScene } from "#shared/rules/hex.ts";
 import { deriveWalls, indexBuild } from "#shared/rules/walls.ts";
 import { useBoardView } from "../../../canvas/boardView.ts";
 import { measurePill } from "../../../canvas/measureText.ts";
-import { theme } from "../../../lib/theme.ts";
+import { boardTheme, theme } from "../../../lib/theme.ts";
+import { useAccent } from "../../../state/accent.ts";
 import { useRoomView } from "../../../state/view.ts";
 import type { LayerProps } from "../../layers.ts";
 import { clipRect, parseCellKey, rectBetween } from "../cells.ts";
@@ -88,7 +89,7 @@ function HeightMarks(props: LayerProps) {
           perfectDrawEnabled={false}
           sceneFunc={(ctx) => {
             const g = ctx._context;
-            if (scale >= MARK_MIN_SCALE) for (const c of unsettled) drawMark(g, "?", c.x, c.y, scale, markPx, theme.color.accentSoft);
+            if (scale >= MARK_MIN_SCALE) for (const c of unsettled) drawMark(g, "?", c.x, c.y, scale, markPx, boardTheme.color.accentSoft);
             drawPills(g, pills, scale, view);
           }}
         />
@@ -100,6 +101,8 @@ function HeightMarks(props: LayerProps) {
 /** The stroke or area being painted, in a wash that says what it does: lighter to raise, darker to lower, red to clear, the accent for stairs. */
 function Preview(props: Pick<HeightState, "unsent" | "area" | "paint" | "height" | "stairs"> & { clearing?: boolean; bounds: { w: number; h: number }; scale: number }) {
   const { unsent, area, bounds } = props;
+  // The resolved accent: `theme.color.accent` is a CSS variable, which a canvas ignores.
+  const accent = useAccent().accent;
   const area2 = area ? clipRect(rectBetween(area.a, area.b), bounds) : null;
   if (unsent.length === 0 && !area2) return null;
   const clearing = props.clearing ?? (props.paint === "height" ? props.height === 0 : props.stairs === "remove");
@@ -112,7 +115,7 @@ function Preview(props: Pick<HeightState, "unsent" | "area" | "paint" | "height"
       : props.height > 0
         ? "rgba(255, 255, 255, 0.4)"
         : "rgba(0, 0, 0, 0.45)";
-  const edge = clearing ? theme.color.danger : theme.color.accent;
+  const edge = clearing ? boardTheme.color.danger : accent;
   return (
     <Shape
       listening={false}
