@@ -149,6 +149,23 @@ async function dismissToasts(page: Page): Promise<void> {
   }
 }
 
+/**
+ * Taps away only the notes over a cell, so a tap on it reaches the map. The
+ * step before can leave two notes over the map's top, and Thorn's bar pans
+ * the map to hold Thorn's cell under the second (ss-6 after ss-5). The rest
+ * stay, since HF-41's check in ss-6 counts notes standing at once.
+ */
+async function clearNotesOver(page: Page, cell: { x: number; y: number }): Promise<void> {
+  const p = await pagePoint(page, BOUNDS, { x: cell.x + 0.5, y: cell.y + 0.5 });
+  for (let i = 0; i < 8; i++) {
+    const notes = page.locator("button[data-toast], div[data-toast] > button").filter({ visible: true });
+    const boxes = await notes.evaluateAll((els) => els.map((el) => el.getBoundingClientRect()).map((r) => ({ left: r.left, top: r.top, right: r.right, bottom: r.bottom })));
+    const over = boxes.findIndex((b) => p.x >= b.left && p.x <= b.right && p.y >= b.top && p.y <= b.bottom);
+    if (over < 0) return;
+    await notes.nth(over).tap({ timeout: 1000 }).catch(() => {});
+  }
+}
+
 function areaOptions(page: Page): Locator {
   return page.getByRole("toolbar", { name: "Area options" });
 }
@@ -195,6 +212,7 @@ async function tapWorld(page: Page, world: { x: number; y: number }): Promise<vo
 async function placeFireball(at: { x: number; y: number }): Promise<AreaTemplate> {
   // Pat plays two creatures, so Thorn selected first is the one the area casts from.
   await pickTool(pat, "Select");
+  await clearNotesOver(pat, run.thorn);
   await tapCell(pat, BOUNDS, run.thorn);
   await pat.getByRole("dialog", { name: "Thorn actions" }).waitFor();
   await pickTool(pat, "Area");
