@@ -69,8 +69,15 @@ async function setWeather(sceneId: string, weather: Weather): Promise<void> {
   await ops.send({ t: "scene.update", sceneId, patch: { weather } });
 }
 
-/** What a page's weather canvas says, the one in the View as a player dialog or the room's own, or null when none is mounted. */
-type Probe = { key: string; ticks: number; cameraDraws: number; index: number; layers: number; ratio: number; shown: boolean; width: number };
+/**
+ * What a page's weather canvas says, the one in the View as a player dialog
+ * or the room's own, or null when none is mounted. `drawn` says it has drawn
+ * once, so its ticks are the room's: a canvas mounted anew reads 0 until its
+ * first draw, and a count across that draw read the room's whole count as
+ * ticks, which a weather held still passed (wx-5 on CI). `level` is the
+ * step-down's (mode.ts).
+ */
+type Probe = { key: string; ticks: number; cameraDraws: number; index: number; layers: number; ratio: number; shown: boolean; width: number; drawn: boolean; level: string };
 
 function probe(page: Page, where: "room" | "preview" = "room"): Promise<Probe | null> {
   return page.evaluate((inPreview) => {
@@ -82,10 +89,10 @@ function probe(page: Page, where: "room" | "preview" = "room"): Promise<Probe | 
       const layers = stage.getLayers();
       const index = layers.findIndex((l) => (l.getCanvas()._canvas as { dataset: Record<string, string> }).dataset.weather !== undefined);
       if (index < 0) continue;
-      const canvas = layers[index]!.getCanvas()._canvas as { dataset: Record<string, string>; weatherTicks?: number; weatherCameraDraws?: number };
+      const canvas = layers[index]!.getCanvas()._canvas as { dataset: Record<string, string>; weatherTicks?: number; weatherCameraDraws?: number; weatherLevel?: string };
       // The hidden tree keeps its layer mounted, unregistered: the one that shows is the one asked for.
       if (!stage.visible() || stage.width() === 0) continue;
-      return { key: canvas.dataset.weather!, ticks: canvas.weatherTicks ?? 0, cameraDraws: canvas.weatherCameraDraws ?? 0, index, layers: layers.length, ratio: layers[index]!.getCanvas().getPixelRatio(), shown: true, width: stage.width() };
+      return { key: canvas.dataset.weather!, ticks: canvas.weatherTicks ?? 0, cameraDraws: canvas.weatherCameraDraws ?? 0, index, layers: layers.length, ratio: layers[index]!.getCanvas().getPixelRatio(), shown: true, width: stage.width(), drawn: canvas.weatherTicks !== undefined, level: canvas.weatherLevel ?? "" };
     }
     return null;
   }, where === "preview");
@@ -99,8 +106,25 @@ function weatherCanvases(page: Page): Promise<number> {
 async function shown(page: Page, key: string, where: "room" | "preview" = "room"): Promise<Probe> {
   return waitFor(`${key} on the page`, async () => {
     const p = await probe(page, where);
-    return p && p.key === key ? p : null;
+    return p && p.key === key && p.drawn ? p : null;
   });
+}
+
+/**
+ * The page's weather moving at its full step, for a step that counts its
+ * ticks. The step-down (mode.ts) only goes down until the page reloads, and
+ * where the canvas has no GPU it halves the weather about 5 s after it
+ * starts and holds it still about 10 s after (the weather design note 6.3).
+ * So on a CI runner a page that has moved since the first steps holds still,
+ * as it should, and its ticks could never come back. A page stepped down is
+ * opened again, which leaves a step at least two windows before it holds still.
+ */
+async function moving(page: Page, key = "rain heavy strong"): Promise<void> {
+  if ((await shown(page, key)).level === "full") return;
+  await page.reload();
+  await page.locator(".konvajs-content").first().waitFor();
+  const fresh = await shown(page, key);
+  assert.equal(fresh.level, "full", "a page opened again starts at the full step");
 }
 
 /** Ticks over `ms`, read from the canvas. */
@@ -315,6 +339,7 @@ describe("weather over the map", { concurrency: false }, () => {
   });
 
   test("wx-3. reduced motion keeps it still: no ticks, a draw only on a camera change", async () => {
+    await moving(pat);
     await pat.emulateMedia({ reducedMotion: "reduce" });
     try {
       await sleep(300);
@@ -334,6 +359,7 @@ describe("weather over the map", { concurrency: false }, () => {
   });
 
   test("wx-4. This device: Still draws on camera changes only, Off mounts no canvas, Low power keeps it still", async () => {
+    await moving(dm);
     await chooseWeather(dm, "Still");
     await sleep(300);
     const still = await ticksOver(dm, 1000);
@@ -393,6 +419,8 @@ describe("weather over the map", { concurrency: false }, () => {
   });
 
   test("wx-5. a hidden page, a sheet over the whole screen and View as a player stop the covered board's ticks, and they come back", async () => {
+    await moving(pat);
+    await moving(dm);
     // A hidden page mounts no layer.
     await setVisibility(pat, "hidden");
     await waitFor("no weather canvas on a hidden page", async () => ((await weatherCanvases(pat)) === 0 ? true : null));
@@ -432,8 +460,14 @@ describe("weather over the map", { concurrency: false }, () => {
     await waitFor("the DM's ticks after the preview", async () => ((await ticksOver(dm, 300)).ticks > 0 ? true : null));
   });
 
-  test("wx-6. Isometric: the main stage's second layer, clipped to the ground's outline, at its stage's camera", async () => {
+  test("wx-6. Isometric: the main stage's second layer, clipped to the ground's outline, at its stage's camera", async (t) => {
+    await moving(dm);
     await viewAs(dm, "isometric", 0);
+    // Top-down again when a check here fails: the room's view is stored, and wx-9's new pages would open in Isometric.
+    let back = false;
+    t.after(async () => {
+      if (!back) await viewAs(dm, "topDown");
+    });
     const iso = await shown(dm, "rain heavy strong");
     assert.equal(iso.index, 1, "relief, weather, drag, upright");
     assert.equal(iso.layers, 4);
@@ -462,6 +496,7 @@ describe("weather over the map", { concurrency: false }, () => {
     await shots.take(dm, "wx-6-dm-iso-heavy-rain");
     // Back to Top-down: the same field, the third layer again.
     await viewAs(dm, "topDown");
+    back = true;
     const top = await shown(dm, "rain heavy strong");
     assert.equal(top.index, 2);
     await waitFor("Top-down ticks after the switch", async () => ((await ticksOver(dm, 300)).ticks > 0 ? true : null));
