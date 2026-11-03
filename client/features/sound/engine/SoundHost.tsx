@@ -54,6 +54,14 @@ function Host() {
   roomName.current = useRoomView((s) => s.view?.meta.name ?? "");
   const wanted = !!playing && (playing.music !== null || Object.keys(playing.loops).length > 0 || playing.effects.length > 0 || (playing.dmEffects?.length ?? 0) > 0);
 
+  // The page's load as effects count it (5.4): its first confirmed state, which comes before the engine loads.
+  const loadAt = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    if (loadAt.current !== null || playing === undefined) return;
+    const offset = store.getState().serverOffset;
+    loadAt.current = offset === undefined ? Date.now() : performance.now() + offset;
+  }, [playing, store]);
+
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
@@ -80,6 +88,7 @@ function Host() {
           time: soundTimeLink(store),
           fallbackOffset: () => store.getState().serverOffset,
           setOn: (next) => (display ? chooseDisplaySound(next) : setRoomSoundChoice(next ? "on" : "off")),
+          loadAt: () => loadAt.current,
         });
         engine.current.update(inputRef.current);
       },

@@ -15,7 +15,7 @@ const MB = 1024 * 1024;
 
 type Started = { id: string | null; asset: string | null; builtin: string | null; at: number; offset: number; stopped: boolean; end: () => void };
 
-function harness(options: { budget?: number; ignoreAbort?: boolean } = {}) {
+function harness(options: { budget?: number; ignoreAbort?: boolean; loadAt?: (now: number) => number } = {}) {
   const w = {
     now: 1_000_000,
     started: [] as Started[],
@@ -51,7 +51,7 @@ function harness(options: { budget?: number; ignoreAbort?: boolean } = {}) {
       };
     },
   };
-  const player = new EffectPlayer(env, { ...(options.budget !== undefined ? { budget: options.budget } : {}) });
+  const player = new EffectPlayer(env, { ...(options.budget !== undefined ? { budget: options.budget } : {}), ...(options.loadAt ? { loadAt: options.loadAt(w.now) } : {}) });
   const finish = async (assetId: string) => {
     const d = w.decodes.find((x) => x.assetId === assetId && !x.signal.aborted);
     assert.ok(d, `a decode of ${assetId} is in flight`);
@@ -178,6 +178,30 @@ describe("effects on a page", () => {
     const { gong: _g, ...rest } = SOUNDS;
     player.see([], rest);
     assert.ok(load.signal.aborted);
+  });
+
+  test("the effect whose fire loads the engine plays: its first look counts from the page's load, not its own", async () => {
+    // The page loaded the room a minute ago, and the engine only now, for a Crash fired 1.2 s back (its chunk took that long).
+    const { w, player } = harness({ loadAt: (now) => now - 60_000 });
+    const crash = { id: "c", builtin: "crash" as const, at: w.now - 1_200 + LEAD_MS };
+    const before = [fired("t", "thunder", w.now - 70_000 + LEAD_MS), fired("g", "gong", w.now - 63_000 + LEAD_MS)];
+    player.see([...before, crash], SOUNDS);
+    // The handoff makes the page the one that plays a moment later.
+    w.now += 100;
+    player.setActive(true);
+    assert.deepEqual(w.started.map((s) => [s.builtin, s.offset]), [["crash", 0]], "whole, 0.9 s late");
+    assert.equal(w.decodes.length, 0, "the effects from before the load are over, and none joins");
+  });
+
+  test("an effect seen while the page is quiet after its first look joins when the page begins to play", () => {
+    const { w, player } = harness({ loadAt: (now) => now - 60_000 });
+    player.see([], SOUNDS);
+    w.now += 1_000;
+    const crash = { id: "c", builtin: "crash" as const, at: w.now + LEAD_MS };
+    player.see([crash], SOUNDS);
+    w.now += 900;
+    player.setActive(true);
+    assert.equal(w.started.length, 0, "a Crash under a second long has no 3 s left to join with");
   });
 
   test("a reconnect's cleared store withdraws nothing: the next snapshot's list goes on", async () => {

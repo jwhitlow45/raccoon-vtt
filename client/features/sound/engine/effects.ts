@@ -5,15 +5,17 @@ import { builtinMs } from "./builtins.ts";
 /**
  * Effects on this page (docs/design/design-v1-music.md 5.4). Each entry of
  * the projected list starts at its `at` on the context's clock, once at
- * most. In the page's first look at the list, or when the page begins to
- * play (Play here, a handoff, a tap), an entry starts only with 3 seconds
- * or more left to sound, partway in. Later an entry starts only if it was
- * fired after the page loaded the room and was never withdrawn from this
- * page's list: so one that comes back after Undo, Redo or a change of use,
- * or one fired before the load that the page sees only later, never
- * starts. Ready late by up to a second, it plays whole, late. Later than
- * that it starts partway in with 3 seconds or more left, else it is
- * skipped.
+ * most. One fired before the page loaded the room, or one seen while the
+ * page was quiet and then begins to play (Play here, a handoff, a tap),
+ * starts only with 3 seconds or more left to sound, partway in. The load is
+ * the page's own, which SoundHost passes, not the lazy engine's first look,
+ * so the effect whose fire loads the engine counts as fired after it. Later
+ * an entry starts only if it was fired after the page loaded the room and
+ * was never withdrawn from this page's list: so one that comes back after
+ * Undo, Redo or a change of use, or one fired before the load that the page
+ * sees only later, never starts. Ready late by up to a second, it plays
+ * whole, late. Later than that it starts partway in with 3 seconds or more
+ * left, else it is skipped.
  *
  * Each load and each voice belongs to its entry, and is cancelled when that
  * entry leaves the list (stopped, or past the list's cap) or its sound
@@ -70,8 +72,10 @@ export class EffectPlayer {
   readonly #env: EffectEnv;
   readonly #budget: number;
   readonly #atOnce: number;
-  /** Server time of the page's first look at a list, or null before it. */
-  #loadAt: number | null = null;
+  /** Server time the page loaded the room, as its caller knows it, or else of this player's first look at a list. */
+  #loadAt: number | null;
+  readonly #loadKnown: boolean;
+  #looked = false;
   /** The entries of the last confirmed list. */
   #held = new Map<string, FiredEffect>();
   readonly #seen = new Map<string, Seen>();
@@ -91,8 +95,11 @@ export class EffectPlayer {
   #playing: Playing[] = [];
   #sounds: Readonly<Record<SoundId, EffectSound>> = {};
 
-  constructor(env: EffectEnv, options: { budget?: number; atOnce?: number } = {}) {
+  /** `loadAt`: when the page first held the room's confirmed state, in server ms, which the engine loaded later. */
+  constructor(env: EffectEnv, options: { budget?: number; atOnce?: number; loadAt?: number } = {}) {
     this.#env = env;
+    this.#loadAt = options.loadAt ?? null;
+    this.#loadKnown = options.loadAt !== undefined;
     this.#budget = options.budget ?? SOUND_LIMITS.effectsDecodedBytes;
     this.#atOnce = options.atOnce ?? SOUND_LIMITS.effectsAtOnce;
   }
@@ -124,17 +131,21 @@ export class EffectPlayer {
     // withdrawal too. Both run before the new sounds are taken: an entry's old sound names the load to abort.
     for (const e of list) if (e.soundId !== undefined && !Object.hasOwn(sounds, e.soundId)) this.#cancel(e.id);
     this.#sounds = sounds;
-    const first = this.#loadAt === null;
-    if (first) this.#loadAt = now;
+    const first = !this.#looked;
+    this.#looked = true;
+    const loadAt = (this.#loadAt ??= now);
     for (const e of list) {
       if (this.#seen.has(e.id) || this.#done.has(e.id)) continue;
-      const firedAfter = !first && e.at - LEAD_MS >= (this.#loadAt ?? now) - LOAD_SLACK_MS;
+      // The first look holds what played at the load, unless the page told when it loaded: the engine loads only once
+      // something plays, often for the very effect it then sees first.
+      const firedAfter = (!first || this.#loadKnown) && e.at - LEAD_MS >= loadAt - LOAD_SLACK_MS;
       if (!first && !firedAfter) {
         // Fired before the load and seen only now, as after a change of use: never here.
         this.#done.add(e.id);
         continue;
       }
-      this.#seen.set(e.id, { entry: e, kind: firedAfter && this.#active ? "fired" : "join" });
+      // Seen while this page is quiet, it joins later, unless it is in the engine's first look, which came before the page could play.
+      this.#seen.set(e.id, { entry: e, kind: firedAfter && (this.#active || first) ? "fired" : "join" });
     }
     this.#held = next;
     for (const id of this.#seen.keys()) if (!next.has(id)) this.#seen.delete(id);

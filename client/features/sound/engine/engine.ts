@@ -48,6 +48,8 @@ export type EngineDeps = {
   fallbackOffset(): number | undefined;
   /** The media session's play and pause. */
   setOn(on: boolean): void;
+  /** When the page first held the room's confirmed state, in server ms, before this lazy engine loaded, or null. */
+  loadAt(): number | null;
 };
 
 /** A display plays at full volume: the TV's remote sets it (4.5). */
@@ -162,16 +164,20 @@ export class SoundEngine {
       },
     });
     setMusicRetry(() => this.#voices?.retry());
-    this.#effects = new EffectPlayer({
-      serverNow: () => this.#serverNow(),
-      decode: async (assetId, signal) => {
-        const res = await fetch(this.#deps.url(assetId), { signal, credentials: "same-origin" });
-        if (!res.ok) throw new Error(`effect ${res.status}`);
-        const buffer = await ctx.decodeAudioData(await res.arrayBuffer());
-        return { buffer, bytes: buffer.length * buffer.numberOfChannels * 4 };
+    const loadAt = this.#deps.loadAt();
+    this.#effects = new EffectPlayer(
+      {
+        serverNow: () => this.#serverNow(),
+        decode: async (assetId, signal) => {
+          const res = await fetch(this.#deps.url(assetId), { signal, credentials: "same-origin" });
+          if (!res.ok) throw new Error(`effect ${res.status}`);
+          const buffer = await ctx.decodeAudioData(await res.arrayBuffer());
+          return { buffer, bytes: buffer.length * buffer.numberOfChannels * 4 };
+        },
+        play: (what, at, offsetMs, level, id) => this.#playEffect(ctx, what, at, offsetMs, level, id),
       },
-      play: (what, at, offsetMs, level, id) => this.#playEffect(ctx, what, at, offsetMs, level, id),
-    });
+      loadAt === null ? {} : { loadAt },
+    );
 
     const page = randomId();
     let channel: BroadcastChannel | null = null;
