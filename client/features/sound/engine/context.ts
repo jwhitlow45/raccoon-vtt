@@ -16,12 +16,13 @@ import { armAudioUnlock, onActivation, type Activation, type UnlockableContext }
  * itself, and answers true once every play resolved, so a refusal keeps it
  * listening. Both listen for the same events, so one gesture does both.
  *
- * A bless swaps an element's source for silence, and nothing puts a voice's
- * source back. So an unlocked pool is never blessed again until `rearm`
- * says the context was lost, as a remounted SoundHost's new listener would
- * otherwise do at its first gesture, and a bless leaves alone every element
- * a sound holds (`holdWith`): one playing was let play already, and one
- * loaded ahead would start on silence.
+ * A bless swaps an element's source for silence. So an unlocked pool is
+ * never blessed again until `rearm` says the context was lost, as a
+ * remounted SoundHost's new listener or a `pageshow` would otherwise do at
+ * the next gesture, and a bless leaves the source of every element a sound
+ * holds (`holdWith`) alone: one playing was let play already, and one
+ * loaded ahead would start on silence. Voices' check puts back a voice
+ * whose element lost its source anyway.
  */
 
 /** 2 for music, 8 for loops crossing their loop points, 1 for Listen here. */
@@ -34,6 +35,7 @@ export const SILENCE_URL = "/sounds/silence.mp3";
 export interface PoolElement {
   src: string;
   muted: boolean;
+  readonly paused: boolean;
   play(): Promise<void> | undefined;
   pause(): void;
 }
@@ -55,9 +57,11 @@ export interface SoundUnlock {
   blessed(): boolean;
   /**
    * Plays silence on every pooled element no sound holds, synchronously,
-   * answering a promise of true once every play resolved. A blessed pool
-   * answers true and plays nothing, and a call while one is in flight
-   * returns that one and plays nothing again. Call it from a gesture.
+   * answering a promise of true once every play resolved or was cut short
+   * by a new source. A held element that is not sounding plays and pauses
+   * at once, on its own source. A blessed pool answers true and plays
+   * nothing, and a call while one is in flight returns that one and plays
+   * nothing again. Call it from a gesture.
    */
   blessPool(): Promise<boolean>;
   /** Names the elements a sound holds (a voice, Listen here), which a bless leaves alone. Returns the cleanup. */
@@ -66,6 +70,15 @@ export interface SoundUnlock {
   arm(wanted: () => boolean): () => void;
   /** Listens again for the pool, as after the context or the audio session left `running` or `active`. */
   rearm(): void;
+}
+
+/**
+ * A play() a new source or a pause cut short still ran inside the gesture,
+ * which is what lets the element play later, so it counts as blessed. Only
+ * a refusal, NotAllowedError, keeps the pool listening.
+ */
+function superseded(err: unknown): void {
+  if ((err as { name?: unknown } | null)?.name !== "AbortError") throw err;
 }
 
 export function createSoundUnlock(deps: SoundUnlockDeps): SoundUnlock {
@@ -88,16 +101,26 @@ export function createSoundUnlock(deps: SoundUnlockDeps): SoundUnlock {
     if (isBlessed) return Promise.resolve(true);
     if (blessing) return blessing;
     const plays: Promise<unknown>[] = [];
-    for (const el of pool()) {
-      if (held(el)) continue;
-      // Each play starts here, inside the gesture: a later one would not count.
-      el.muted = false;
-      el.src = SILENCE_URL;
+    // Each play starts here, inside the gesture: a later one would not count.
+    const play = (el: PoolElement) => {
       try {
-        plays.push(Promise.resolve(el.play()));
+        plays.push(Promise.resolve(el.play()).catch(superseded));
       } catch (err) {
         plays.push(Promise.reject(err));
       }
+    };
+    for (const el of pool()) {
+      if (held(el)) {
+        // Its source stays. One not sounding (loaded ahead, or refused before) is let play all the same, its voice's own play coming later.
+        if (el.paused) {
+          play(el);
+          el.pause();
+        }
+        continue;
+      }
+      el.muted = false;
+      el.src = SILENCE_URL;
+      play(el);
     }
     const done = Promise.all(plays).then(
       () => {

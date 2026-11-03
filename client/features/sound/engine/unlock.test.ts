@@ -88,6 +88,96 @@ function harness() {
 
 const flush = () => new Promise((r) => setImmediate(r));
 
+/**
+ * An element as the HTML spec and Safari have it: it may play only once a
+ * play() ran inside a gesture (`refuse` turns one down there too), a new
+ * source or a pause rejects a pending play() with AbortError and pauses it,
+ * and its end pauses it.
+ */
+type SpecElement = PoolElement & { paused: boolean; ended: boolean; allowed: boolean; refuse: boolean; plays: number; loaded(): void; end(): void };
+
+let inGesture = false;
+
+function specElement(): SpecElement {
+  let pending: { resolve(): void; reject(e: unknown): void } | null = null;
+  let src = "";
+  const abort = () => {
+    const p = pending;
+    pending = null;
+    p?.reject(new DOMException("The play() request was interrupted.", "AbortError"));
+  };
+  const el: SpecElement & Record<string, unknown> = {
+    get src() {
+      return src;
+    },
+    set src(next: string) {
+      src = next;
+      el.ended = false;
+      el.paused = true;
+      abort();
+    },
+    muted: true,
+    paused: true,
+    ended: false,
+    allowed: false,
+    refuse: false,
+    plays: 0,
+    currentTime: 0,
+    playbackRate: 1,
+    readyState: 4,
+    volume: 1,
+    play() {
+      el.plays++;
+      if (inGesture && !el.refuse) el.allowed = true;
+      if (!el.allowed) return Promise.reject(new DOMException("not allowed", "NotAllowedError"));
+      el.paused = false;
+      el.ended = false;
+      return new Promise<void>((resolve, reject) => {
+        pending = { resolve, reject };
+      });
+    },
+    pause() {
+      el.paused = true;
+      abort();
+    },
+    loaded() {
+      const p = pending;
+      pending = null;
+      p?.resolve();
+    },
+    end() {
+      el.paused = true;
+      el.ended = true;
+    },
+  };
+  return el;
+}
+
+/** The pool on spec elements, Voices on it with music playing from `now`, and a tap that is a gesture while it runs. */
+function specHarness() {
+  const target = new EventTarget();
+  const els: SpecElement[] = [];
+  const ctx = context();
+  const unlock = createSoundUnlock({ makeContext: () => ctx, makeElement: () => (els.push(specElement()), els.at(-1)!), target });
+  const tap = () => {
+    inGesture = true;
+    try {
+      target.dispatchEvent(Object.assign(new Event("pointerup"), { pointerType: "touch" }));
+    } finally {
+      inGesture = false;
+    }
+  };
+  const clock = { now: 1_000_000 };
+  // Where a file is read from now, which a loop's blob changes while its pass plays on.
+  const where = { prefix: "/api/assets/" };
+  const url = (assetId: string) => where.prefix + assetId;
+  const voices = new Voices({ ctx: graph(), unlock, output: { music: node(), loop: node() }, serverNow: () => clock.now, latencyMs: () => 0, url });
+  const sounds = { tavern: { ms: 60_000, use: "music" as const, assetId: "a-tavern" } };
+  const playing: Playing = { rev: 1, music: { run: "r", repeat: "all", fade: 5, now: { soundId: "tavern", at: clock.now - 10_000 } }, loops: {}, effects: [], volume: { music: 100, effects: 100 } };
+  const play = () => voices.update(planVoices(playing, sounds, clock.now), () => 300);
+  return { target, els, unlock, tap, clock, where, voices, play, track: url("a-tavern") };
+}
+
 /** Enough of a gain node and an audio context for Voices, which only connects and schedules. */
 function node(): AudioNode {
   const gain = { value: 0, cancelScheduledValues() {}, setValueAtTime() {}, linearRampToValueAtTime() {} };
@@ -277,6 +367,88 @@ describe("the room sound's unlock", () => {
     } finally {
       g.Audio = before;
     }
+  });
+
+  test("the first tap's race: music that takes an element before its silence loads leaves the pool blessed, and the next tap touches nothing", async () => {
+    const h = specHarness();
+    h.unlock.arm(() => true);
+    h.tap();
+    // The context ran at once and the music took element 0, whose bless play() its new source superseded.
+    h.play();
+    assert.equal(h.els[0]!.src, h.track);
+    for (const el of h.els) el.loaded();
+    await flush();
+    assert.equal(h.unlock.blessed(), true, "the play() inside the gesture unlocked element 0 all the same");
+    const plays = h.els.map((el) => el.plays);
+    h.tap();
+    assert.deepEqual(h.els.map((el) => el.plays), plays, "the next tap plays nothing");
+    assert.equal(h.els[0]!.src, h.track);
+    assert.equal(h.els[0]!.paused, false);
+  });
+
+  test("pageshow listens again, but a blessed pool's next tap still touches nothing", async () => {
+    const h = specHarness();
+    h.unlock.arm(() => true);
+    h.tap();
+    for (const el of h.els) el.loaded();
+    await flush();
+    h.play();
+    const plays = h.els.map((el) => el.plays);
+    h.target.dispatchEvent(new Event("pageshow"));
+    h.tap();
+    assert.deepEqual(h.els.map((el) => el.plays), plays);
+    assert.equal(h.els[0]!.src, h.track);
+  });
+
+  test("a voice whose element a bless refused plays once a later tap lets it, without its source ever going", async () => {
+    const h = specHarness();
+    h.els[0]!.refuse = true;
+    h.unlock.arm(() => true);
+    h.tap();
+    for (const el of h.els) el.loaded();
+    await flush();
+    assert.equal(h.unlock.blessed(), false, "element 0 was refused");
+    h.play();
+    h.voices.check(false);
+    assert.equal(h.els[0]!.paused, true, "its play is refused outside a gesture");
+    h.els[0]!.refuse = false;
+    h.tap();
+    assert.equal(h.els[0]!.src, h.track, "the bless keeps a held element's source");
+    for (const el of h.els) el.loaded();
+    await flush();
+    assert.equal(h.unlock.blessed(), true);
+    h.voices.check(false);
+    assert.equal(h.els[0]!.paused, false, "the check plays it again, and now it may");
+    assert.equal(h.els[0]!.src, h.track);
+  });
+
+  test("the check puts back a voice whose source was swapped or whose element stopped short of its end", async () => {
+    const h = specHarness();
+    h.unlock.arm(() => true);
+    h.tap();
+    for (const el of h.els) el.loaded();
+    await flush();
+    h.play();
+    const el = h.els[0]!;
+    h.where.prefix = "blob:";
+    h.voices.check(false);
+    assert.equal(el.src, h.track, "a newer source for the same file waits for the next start");
+    // Silence put in its place, as a bless did before it knew which elements voices hold: it plays its tenth of a second and ends.
+    el.src = SILENCE_URL;
+    el.end();
+    h.clock.now += 1_000;
+    h.voices.check(false);
+    assert.equal(el.src, h.track);
+    assert.equal(el.paused, false);
+    el.end();
+    h.clock.now += 1_000;
+    h.voices.check(false);
+    assert.equal(el.paused, false, "ended 12 s into a 60 s track, it plays again");
+    // At its own end nothing is put back.
+    h.clock.now += 47_800;
+    el.end();
+    h.voices.check(false);
+    assert.equal(el.paused, true);
   });
 
   test("a TV browser without Web Audio or createMediaElementSource cannot mix, so the display shows its can't-play line", () => {

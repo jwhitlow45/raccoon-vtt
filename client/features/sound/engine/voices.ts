@@ -31,6 +31,8 @@ export const JOIN_FADE_MS = SHORT_FADE_MS;
 export const BLACKOUT_FADE_MS = 1_000;
 /** How far ahead each envelope is scheduled on the audio clock, renewed with every check. */
 const HORIZON_MS = 2_500;
+/** An element that stops this close to its voice's end is ending, not stopped short. */
+const HEAL_END_MS = 500;
 
 export type Channel = "music" | "loop";
 
@@ -202,6 +204,8 @@ type Live = {
   leaving: boolean;
   failed: boolean;
   dueSince: number | null;
+  /** The source it plays, which a loop's blob replaces only at its next pass. */
+  url: string;
 };
 
 /** One `MediaElementAudioSourceNode` per element, made once: an element can have only one. */
@@ -282,6 +286,7 @@ export class Voices {
         continue;
       }
       this.#envelope(v);
+      if (this.#heal(v, t)) continue;
       if (!v.playing || v.el.paused || v.el.readyState < 2) continue;
       if (forced) v.drift.force();
       const action = v.drift.check(performance.now(), v.el.currentTime * 1000, this.#aim(v.plan, t));
@@ -305,7 +310,8 @@ export class Voices {
     for (const v of this.#live.values()) {
       if (!v.failed || v.leaving) continue;
       v.failed = false;
-      v.el.src = this.#env.url(v.plan.assetId, v.plan.channel);
+      v.url = this.#env.url(v.plan.assetId, v.plan.channel);
+      v.el.src = v.url;
       this.#place(v);
     }
     this.#reportMusic();
@@ -355,7 +361,8 @@ export class Voices {
     fade.gain.value = 0;
     mix.gain.value = mixGain(plan);
     source.connect(fade).connect(env).connect(mix).connect(this.#env.output[plan.channel]);
-    const v: Live = { plan, index, el, fade, env, mix, drift: new Drift(), playing: false, startTimer: null, leaving: false, failed: false, dueSince: null };
+    const url = this.#env.url(plan.assetId, plan.channel);
+    const v: Live = { plan, index, el, fade, env, mix, drift: new Drift(), playing: false, startTimer: null, leaving: false, failed: false, dueSince: null, url };
     this.#live.set(plan.key, v);
     el.onerror = () => {
       v.failed = true;
@@ -363,12 +370,28 @@ export class Voices {
     };
     el.onplaying = () => this.#reportMusic();
     el.onwaiting = () => this.#reportMusic();
-    const url = this.#env.url(plan.assetId, plan.channel);
     if (!el.src.endsWith(url)) el.src = url;
     el.loop = false;
     el.playbackRate = 1;
     this.#envelope(v);
     this.#place(v);
+  }
+
+  /**
+   * Puts back a voice whose element lost it: its source swapped (silence
+   * from a bless, say), or stopped while the voice plays and short of its
+   * end (that silence ended, or a play the browser refused). True when it
+   * placed the voice again.
+   */
+  #heal(v: Live, t: number): boolean {
+    if (v.failed) return false;
+    const swapped = !v.el.src.endsWith(v.url);
+    const aim = this.#aim(v.plan, t);
+    const stopped = v.playing && v.el.paused && aim >= 0 && aim < v.plan.lengthMs - HEAL_END_MS;
+    if (!swapped && !stopped) return false;
+    if (swapped) v.el.src = v.url;
+    this.#place(v);
+    return true;
   }
 
   /** Puts the element at its place: now with a short fade in, or paused at 0 until its start. */
