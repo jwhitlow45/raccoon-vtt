@@ -1517,7 +1517,7 @@ Each request shows the name and color the newcomer chose and how long ago they a
 - **Turn away** says no. The newcomer's page tells them, and that device can't ask your room again for 15 minutes.
 - **Turn away all** appears when two or more are waiting. It turns away only the requests you can see when you press it, so someone who asks a moment later is never turned away unseen. There is no Let in all on purpose: one careless tap should never let a crowd in.
 
-Letting someone in usually takes a moment. While it runs, the request stays in the section with its buttons switched off, on your device and on every other DM device, so two DMs never answer the same person. If it takes longer than usual, the row says "Still letting Quinn in…" and finishes on its own. If it can't happen, the row says why, for example that the room already holds its 50 members, and the request goes on waiting so you can answer it again. Once a co-DM's answer is done, the request leaves your list.
+Letting someone in usually takes a moment. While it runs, the request stays in the section with its buttons switched off, on your device and on every other DM device, so two DMs never answer the same person. If it takes longer than usual, the row says "Still letting Quinn in…" and finishes on its own. If it can't happen, the row says why on every DM device, for example that the room already holds its 50 members, and the request goes on waiting so you can answer it again. Once a co-DM's answer is done, the request leaves your list.
 
 You can also ignore a request entirely: it ends by itself after 10 minutes, and the newcomer can't tell whether anyone saw it.
 
