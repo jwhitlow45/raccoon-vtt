@@ -85,6 +85,8 @@ export type PanelDef = {
   group: PanelGroup;
   /** What the panel is about, where that comes from outside it: "selection", the selected token (panelSubject). */
   subject?: "selection";
+  /** Listed for a player only while their view holds the room's clock (panelsFor). The DM always has it. */
+  needsClock: boolean;
   /** The DM guide's section on this panel, a heading's anchor in docs/dm-guide.md, for the DM's Guide link at its foot (panels/Panels.tsx). */
   guide?: string;
   Component: ComponentType<PanelProps>;
@@ -98,6 +100,7 @@ function panel(def: {
   group: PanelGroup;
   dmOnly?: boolean;
   narrowOnly?: boolean;
+  needsClock?: boolean;
   subject?: "selection";
   guide?: string;
   load: () => Promise<{ default: ComponentType<PanelProps> }>;
@@ -112,6 +115,7 @@ function panel(def: {
     group: def.group,
     dmOnly,
     narrowOnly: def.narrowOnly ?? false,
+    needsClock: def.needsClock ?? false,
     ...(def.subject ? { subject: def.subject } : null),
     ...(def.guide ? { guide: def.guide } : null),
     Component,
@@ -132,6 +136,8 @@ export const PANELS: readonly PanelDef[] = [
   panel({ id: "scenes", title: "Scenes", icon: "scenes", order: 24, group: "play", dmOnly: true, guide: "scenes", load: () => import("../panels/ScenesPanel.tsx") }),
   panel({ id: "library", title: "Library", icon: "library", order: 48, group: "prepare", load: () => import("../panels/LibraryPanel.tsx") }),
   panel({ id: "areas", title: "Areas", icon: "areas", order: 20, group: "play", guide: "areas", load: () => import("./areas/AreasPanel.tsx") }),
+  // No `guide` yet: the outline test needs the DM guide's Time heading to exist first, so it is added with that section.
+  panel({ id: "time", title: "Time", icon: "time", order: 21, group: "play", needsClock: true, load: () => import("./clock/TimePanel.tsx") }),
   panel({ id: "log", title: "Log", icon: "log", order: 16, group: "play", load: () => import("../panels/LogPanel.tsx") }),
   panel({ id: "journal", title: "Journal", icon: "journal", order: 18, group: "play", load: () => import("./journal/JournalPanel.tsx") }),
   panel({ id: "characters", title: "Characters", icon: "characters", order: 44, group: "prepare", guide: "characters-and-their-stat-blocks", load: () => import("./tokens/CharactersPanel.tsx") }),
@@ -144,8 +150,15 @@ export const PANELS: readonly PanelDef[] = [
   panel({ id: "menu", title: "Menu", icon: "more", order: 90, group: "room", load: () => import("../panels/MenuPanel.tsx") }),
 ];
 
-export function panelsFor(role: "dm" | "player", wide = false): PanelDef[] {
-  return PANELS.filter((p) => (!p.dmOnly || role === "dm") && !(wide && p.narrowOnly)).sort((a, b) => a.order - b.order);
+/**
+ * The panels a role is offered. `clock` is whether the viewer's room has a
+ * clock they receive: Time is the DM's always, and a player's only then
+ * (docs/design/design-v1-calendar.md 4.4). A player whose Time panel is open
+ * when sharing stops keeps it open (pages/Room.tsx), so this only decides
+ * what is listed.
+ */
+export function panelsFor(role: "dm" | "player", wide = false, opts: { clock?: boolean } = {}): PanelDef[] {
+  return PANELS.filter((p) => (!p.dmOnly || role === "dm") && !(wide && p.narrowOnly) && !(p.needsClock && role === "player" && !opts.clock)).sort((a, b) => a.order - b.order);
 }
 
 /** The labels of a DM's groups of panels (docs/design/design-v1-layout-hierarchy.md M3). Menu, the room's own, follows a plain line instead. */
