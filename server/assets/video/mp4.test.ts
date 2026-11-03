@@ -568,10 +568,28 @@ describe("the presentation interval comes from the composition times (round 2: A
     await refused(mp4File({ tracks: [late] }), "video_length");
   });
 
-  test("a 2 s file whose frames show from 533 ms to 2533 ms, with no edit list, is video_layout", async () => {
-    // Every frame 8192 ticks (533.33 ms at 15360) late: no frame at the start, and frames past the end.
+  test("with no edit list, a first composition time within the allowance stands in for the edit (D-261102-732)", async () => {
+    // Every frame 8192 ticks (533.33 ms at 15360) late, sixteen frames, as an implicit edit would start it: the media's own 2 s.
     const samples = Array.from({ length: 60 }, () => ({ size: 30, delta: 512, cts: 8192 }));
+    assert.equal((await checkVideoBytes(mp4File({ tracks: [defaultVideoTrack({ samples })] }))).facts.durationMs, 2000);
+    // One tick past the allowance is refused.
+    await refused(mp4File({ tracks: [defaultVideoTrack({ samples: samples.map((x) => ({ ...x, cts: 8193 })) })] }), "video_layout");
+  });
+
+  test("a 30 fps file with two B-frames and no edit list, its first frame 66 ms in, is accepted at the media's length", async () => {
+    // Decode order I0 P3 B1 B2 P6 B4 B5 and so on, shown two frames (1024 ticks) late, as x264's B-pyramid does.
+    const shown = (i: number) => (i === 0 || i > 57 ? i : i % 3 === 1 ? i + 2 : i - 1);
+    const samples = Array.from({ length: 60 }, (_, i) => ({ size: 30, delta: 512, cts: 512 * (shown(i) - i) + 1024 }));
+    const { facts } = await checkVideoBytes(mp4File({ tracks: [defaultVideoTrack({ samples })] }));
+    assert.equal(facts.durationMs, 2000);
+    assert.equal(facts.fps, 30);
+  });
+
+  test("a first composition time past the fixed second is not taken as an implicit edit", async () => {
+    // 2 fps, so sixteen frames are 8 s, every frame 1.5 s late: past the second, so it is a gap at the start.
+    const samples = Array.from({ length: 6 }, () => ({ size: 30, delta: 7680, cts: 23_040 }));
     await refused(mp4File({ tracks: [defaultVideoTrack({ samples })] }), "video_layout");
+    await checkVideoBytes(mp4File({ tracks: [defaultVideoTrack({ samples: samples.map((x) => ({ ...x, cts: 7680 })) })] }));
   });
 
   test("an edit list that starts where the composition times start passes, and one that leaves a gap at the start is video_layout", async () => {
@@ -584,6 +602,8 @@ describe("the presentation interval comes from the composition times (round 2: A
     // The first sample decodes for 8192 ticks and shows at 7680: nothing shows before 500 ms.
     const samples = Array.from({ length: 60 }, (_, i) => ({ size: 30, delta: i === 0 ? 8192 : 512, cts: i === 0 ? 7680 : 0 }));
     await refused(mp4File({ tracks: [defaultVideoTrack({ samples })] }), "video_layout");
+    // An edit list that says the media starts at 0 keeps the gap, though its segment is the media's whole 2.5 s.
+    await refused(mp4File({ tracks: [defaultVideoTrack({ samples, edits: [{ segment: 2500, mediaTime: 0 }] })] }), "video_layout");
     await checkVideoBytes(mp4File({ tracks: [defaultVideoTrack({ samples: samples.map((x, i) => (i === 0 ? { ...x, cts: 0 } : x)) })] }));
   });
 

@@ -1,6 +1,6 @@
 import { VIDEO_LIMITS } from "#shared/limits.ts";
 import type { ParsedVideo } from "./check.ts";
-import { Bits, OPUS_HZ, av1CodecString, opusHead, peakInOneSecond, timelineToleranceMs } from "./records.ts";
+import { Bits, OPUS_HZ, TIMELINE_SLACK_MS, av1CodecString, opusHead, peakInOneSecond, timelineToleranceMs } from "./records.ts";
 import { Edits, Tally, refuse, type Budget, type Range, type Source } from "./window.ts";
 
 /**
@@ -817,7 +817,12 @@ function timing(moov: Moov, track: Track, movieTimescale: number, cap: number, c
   const scale = track.timescale!;
   const media = dts / scale;
   const edit = track.edit;
-  const from = edit?.mediaTime ?? 0;
+  // Some writers leave out the edit a B-frame file needs, so its first frame
+  // shows a frame or two in. With no edit list, that first composition time
+  // stands in for the edit's media time (D-261102-732), but only up to the
+  // fixed slack: the offset rule already holds it within the reorder
+  // allowance, and that allowance grows with the file's own sample length.
+  const from = edit ? edit.mediaTime : first <= (TIMELINE_SLACK_MS / 1000) * scale ? first : 0;
   const seconds = edit ? edit.segment / movieTimescale : media;
   return { times, seconds, start: (first - from) / scale, end: (last - from) / scale, media, reorder, frame: typical / scale };
 }
