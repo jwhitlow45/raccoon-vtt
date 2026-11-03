@@ -193,7 +193,11 @@ One rounding per pointer move, one addition per drawn token, and a pass over the
 | 1/8 jitter on a 3/8-nudged token | Nothing moves | stageHooks drag test |
 | Drag a forward rider of a controlled mount | Mount moves by the pointer delta | stageHooks drag test |
 | Alt-drag a +3/8-nudged token at x=3 by +0.25 | Ghost shows box 4 throughout, lands at 4 with nudge -3/8 | stageHooks drag test |
-| Held preview and cancel, pressed token and lead with different nudges | Each node at its own drawn spot while held and after the cancel | stageHooks drag test, Stage cancel test |
+| Held preview and cancel, pressed token and lead with different nudges | Each node at its own drawn spot while held and after the cancel | stageHooks drag test for the hold. Gap: no test drives Stage.tsx `putBack` on a cancel |
+| A player's Alt-drop past a wall, with and without a nudge | The move to the wall carries no `drawnAt`, and the note's `drawnAt` is the finger's rounding | `free.drag.test.ts`, with a node that moves as Konva's does (SNAPBUILD-ASTRA-01) |
+| A nudged token's drag, ordinary and free, at fractional points | Its route, its outline's spot and another device's aura and ruler aim at the same box | `free.drag.test.ts`, `server/rooms/ephemeral.test.ts` for the frame's `free` (SNAPBUILD-ASTRA-02) |
+| The outline mid-drag at fractional points | On the box the drop would count it in, ordinary and free, never under the pointer | `client/lib/scene.drawn.test.ts`, e2e so-3 reads its place (SNAPBUILD-ASTRA-03) |
+| Alt let go just after a drop | The first Alt keyup within 1 s is prevented, later ones are not | `free.test.ts` (D-261102-537) |
 | Ordinary lone drag of a nudged token to another box | No `drawnAt`, nudge cleared | free unit |
 | Iso grip on a nudged token | No jump at grab | isoDrag unit |
 | Tap a mount's middle under a forward rider | Picks the mount | groups unit |
@@ -206,7 +210,7 @@ One rounding per pointer move, one addition per drawn token, and a pass over the
 | Replay of ops stored at 41 | Same state | migrate test, differential suite |
 | Player's copy | Nudge only on tokens it receives | project test |
 | Frames of a nudged hidden token | Withheld as its rules spot | `server/rooms/ephemeral.test.ts` |
-| Outline during drag, ruler, area preview, shared ruler | Shown, and on the TV for the shared ruler | e2e |
+| Outline during drag, ruler, area preview, shared ruler | Shown, and on the TV for the shared ruler | e2e/snapoff.e2e.ts: so-3 (selected, and its place mid-drag in both modes), so-4 (this device's ruler), snapfix-1 (Sam's shared ruler on the DM's page), and the Isometric step in e2e/iso.e2e.ts (selected). Gaps: no test of the outline under an area preview (`useAimedCatches`) or on the TV |
 | Shortcut sheet and FEATURES.md | Agree | existing sheet test |
 | Random op sequences with `drawnAt` | Rules blind (below) | `shared/nudge.random.test.ts` |
 
@@ -248,10 +252,10 @@ Shared and server:
 
 Client drawing:
 
-- scene.ts's `drawnAt(g, token)` shares a name with boardPick.ts's `drawnAt`, the drawn ground height, so Stage.tsx imports the new one under another name.
-- tokenShadow.ts and RemoteDrags.tsx did not change. `tokenLift` compares rules spots, local drag spots are rules spots, and a ghost draws at its frame, which is already a drawn spot.
+- The drawn spot has one formula, rules/nudge.ts `drawnSpot`, which takes a null grid too. scene.ts's `drawnAt` calls it, and so do free.ts's kept placements and the drag's held node. Stage.tsx and boardPick.ts import `drawnSpot` itself, since boardPick.ts has its own `drawnAt`, the drawn ground height (SB-OPUS-06).
+- tokenShadow.ts did not change: `tokenLift` compares rules spots, and local drag spots are rules spots. A ghost draws at its frame, which is already a drawn spot, and every reader of a frame takes the token through scene.ts `framedToken`: an ordinary drag's point less the nudge, a free drag's point and a drop's end as they are, so another device's ghost, aura and ruler aim at the box the dragging device's own drag does. `dragMove` gains `free: true` for that, an ephemeral field with no op version, which a page loaded before it drops until it reloads (SNAPBUILD-ASTRA-02, SB-OPUS-02).
 - `coversHolder`, `dragLead` and `drawsInset` stay on rules boxes, since they decide who a drag moves (D-261102-586). Only the press holes and the tethers read drawn boxes. A drag link's tether ends at each token's drawn middle (D-261102-589).
-- The outline is a dashed Rect in the selection ring's accent color, as wide and dashed as the ring, drawn inside the token's node at minus the nudge. In Isometric it is lifted to the drawn ground under the token, never the standee's raised base (D-261102-587). Heights while moving read the rules cells (D-261102-588).
+- The outline is a dashed Rect in the selection ring's accent color, as wide and dashed as the ring, drawn beside the token's node, not inside it, on the rules box. While this device drags the token it stands on the box the drop would count it in, which the canvas writes per box crossed (state/localDrags.ts), so the art moves with the pointer and the outline stays on the grid (SNAPBUILD-ASTRA-03). In Isometric it is lifted to the drawn ground under the token's stored spot, never the standee's raised base (D-261102-587). Heights while moving read the rules cells (D-261102-588).
 - The count of Rule E at the tree it was built on is the same as the design's: 99 lines in 36 files.
 
 Client input:
@@ -261,10 +265,13 @@ Client input:
 - A drag pressed on a rider that moves its mount is never free, with Alt held or Place freely on. The mount keeps its own placement (D-261102-591). Place freely shows by `canDragToken` (client/canvas/dragRights.ts), not Stage's wider `canDrag` (D-261102-590).
 - The bar's anchor still reads the stored spot, at most 3/8 square from the drawn one, as a camera target.
 - free.ts rounds and holds a free drop through the shared `freeDrawnAt`, so the client and the server share one rounding and bound, with a test that they agree on random releases. The first build kept its own copy of the math (D-261102-594).
-- "Placed between squares." goes through the polite toast announcer.
+- "Placed between squares." is spoken by the board's polite status, the one a tool's key speaks in (state/toolbar.ts `sayTool`), with no toast (D-261102-536).
+- A free drop held at a wall is let go where the finger was, the last frame's own point, not at the hold the preview moved the node back to (SNAPBUILD-ASTRA-01).
+- Alt's keyup is prevented while a drag is live and, the first one, within 1 s after a drag let go with Alt held, any drag with Alt and not only a free one, since a hex or group drag with Alt held opens the menu bar the same way (D-261102-537).
 
 Screen readers and checks:
 
 - The board is a picture with no element per token, so a token's accessible name is its bar's: "Bree actions, placed between squares" for a nudged token, "Bree actions" otherwise.
-- The alignment room measures the bar's play row of a placed goblin with Snap to grid and with Place freely pressed. The outline is canvas, which no DOM check reads, so e2e/snapoff.e2e.ts and the Isometric step read its place from the board instead.
+- The alignment room measures the bar's play row of the placed pack mule with Snap to grid and with Place freely pressed. The outline is canvas, which no DOM check reads, so e2e/snapoff.e2e.ts and the Isometric step read its place from the board instead.
 - The keyboard e2e file's step is a hardware arrow key on a placed token, since that file's other steps are about the on-screen keyboard.
+- The DM guide's picture, docs/dm-guide/between-squares.webp, comes from scripts/guide-snapoff.ts in a "Guide examples" room on map art, as the guide's other pictures do (SB-OPUS-05).
