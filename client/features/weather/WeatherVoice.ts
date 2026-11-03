@@ -1,6 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { weatherParts, type SceneWeather } from "#shared/weather.ts";
-import { useRoomScope } from "../../state/scope.ts";
+import { scopeSlot, useRoomScope } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
 import { sayJoined } from "../view/choice.ts";
 
@@ -33,7 +33,22 @@ export function weatherSaid(before: WeatherSeen | null, after: WeatherSeen): str
   return `Weather here: ${now}.`;
 }
 
-/** Says the weather of the scene on screen, from the Room page's view button, beside the view's own voice. */
+/**
+ * What the status last said of the weather, one per Room page, a table
+ * display's and View as a player's included. It outlives the component that
+ * speaks, so a View button that remounts, as the top bar folding or a phone
+ * turning makes it, does not say the weather again.
+ */
+export const weatherSeenSlot = scopeSlot<{ seen: WeatherSeen | null }>(() => ({ seen: null }));
+
+/** The line for what the page shows now, if any, remembered in `memory` for the next. */
+export function sayNext(memory: { seen: WeatherSeen | null }, now: WeatherSeen): string | null {
+  const said = weatherSaid(memory.seen, now);
+  memory.seen = now;
+  return said;
+}
+
+/** Says the weather of the scene on screen, beside the view's own voice: the Room page's View button and the table display each run it. */
 export function useWeatherVoice(): void {
   const scope = useRoomScope();
   const sceneId = useRoomView((s) => s.sceneId);
@@ -42,13 +57,10 @@ export function useWeatherVoice(): void {
     const scene = s.sceneId ? s.view?.scenes[s.sceneId] : undefined;
     return scene ? weatherParts(scene.weather).join("\n") : null;
   });
-  const before = useRef<WeatherSeen | null>(null);
   useEffect(() => {
     // No scene yet, or none the viewer holds: nothing to say, and the next one is an arrival.
     if (sceneId === null || names === null) return;
-    const now: WeatherSeen = { sceneId, parts: names === "" ? [] : names.split("\n") };
-    const said = weatherSaid(before.current, now);
-    before.current = now;
+    const said = sayNext(scope.get(weatherSeenSlot), { sceneId, parts: names === "" ? [] : names.split("\n") });
     if (said) sayJoined(scope, "weather", said);
   }, [scope, sceneId, names]);
 }

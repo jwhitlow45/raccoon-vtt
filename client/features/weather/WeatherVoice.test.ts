@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { seenOf, weatherSaid } from "./WeatherVoice.ts";
+import { RoomScope } from "../../state/scope.ts";
+import { sayNext, seenOf, weatherSaid, weatherSeenSlot } from "./WeatherVoice.ts";
 
 /** What the polite status says of the weather (docs/design/design-v1-weather.md 4.2). */
 describe("weatherSaid", () => {
@@ -29,5 +30,18 @@ describe("weatherSaid", () => {
     assert.equal(weatherSaid(clear, seenOf("s2", undefined)), null);
     assert.equal(weatherSaid(rain, seenOf("s1", { kind: "rain", heavy: true, wind: "strong", toward: 270 })), null);
     assert.equal(weatherSaid(rain, seenOf("s1", { kind: "rain", heavy: true, wind: "strong", rules: false })), null);
+  });
+});
+
+describe("what the status remembers, one per Room page", () => {
+  test("a View button that mounts again in the same page says nothing again, and another page says it for itself", () => {
+    const rain = seenOf("s1", { kind: "rain", heavy: true, wind: "strong" });
+    const page = new RoomScope();
+    assert.equal(sayNext(page.get(weatherSeenSlot), rain), "Weather here: Heavy rain, Strong wind.");
+    // The button mounts again: its effect runs again with the same scene and weather.
+    assert.equal(sayNext(page.get(weatherSeenSlot), rain), null);
+    assert.equal(sayNext(page.get(weatherSeenSlot), seenOf("s1", undefined)), "The weather here is clear now.");
+    const preview = new RoomScope();
+    assert.equal(sayNext(preview.get(weatherSeenSlot), rain), "Weather here: Heavy rain, Strong wind.", "View as a player has a page of its own");
   });
 });
