@@ -42,6 +42,18 @@ function limitScene(op: Op): string | null {
   return "sceneId" in op && typeof op.sceneId === "string" ? op.sceneId : null;
 }
 
+/**
+ * The walls the sight cap counts, read as if the scene had vision on. The
+ * dialog sets Players see on the scene only at Make (it may turn vision on
+ * there), so the preview holds the dungeon to the cap whatever is chosen.
+ */
+function seenWithVision(state: RoomState, sceneId: string): ReturnType<typeof withPitsCounted> {
+  const counted = withPitsCounted(state, sceneId);
+  const scene = counted.scenes[sceneId];
+  if (!scene || scene.vision?.on === true) return counted;
+  return { ...counted, scenes: { ...counted.scenes, [sceneId]: { ...scene, vision: { ...scene.vision, on: true, light: scene.vision?.light ?? "bright" } } } };
+}
+
 /** Scenes whose walls version the op moved, as the server's `wallsMoved`. */
 function wallsMoved(before: RoomState, after: RoomState): string[] {
   if (before.scenes === after.scenes) return [];
@@ -52,7 +64,7 @@ function wallsMoved(before: RoomState, after: RoomState): string[] {
  * One op on the room, parsed as `dispatch` parses it, applied as the DM, and
  * checked as `#reduce` checks it: the limits on the op without its trap
  * step, the split's counting pass on every scene whose walls or pits moved,
- * and the sight cap on those and the op's own scene.
+ * and the sight cap on those and the op's own scene, as if vision were on.
  */
 export function landOp(room: RoomState, raw: ClientOp, seq: number): { ok: true; room: RoomState } | { ok: false; why: string } {
   const parsed = clientOpSchema.safeParse(raw);
@@ -72,7 +84,7 @@ export function landOp(room: RoomState, raw: ClientOp, seq: number): { ok: true;
     if (!split.ok) return { ok: false, why: `${op.t} over the split: ${split.message}` };
   }
   for (const sceneId of new Set([...(own ? [own] : []), ...moved])) {
-    const sight = sightPiecesCheck(withPitsCounted(measured.state, sceneId), sceneId, withPitsCounted(room, sceneId));
+    const sight = sightPiecesCheck(seenWithVision(measured.state, sceneId), sceneId, seenWithVision(room, sceneId));
     if (!sight.ok) return { ok: false, why: `${op.t} over the sight cap: ${sight.message}` };
   }
   return { ok: true, room: result.state };

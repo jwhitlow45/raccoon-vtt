@@ -77,14 +77,17 @@ function speckled(n: number): DungeonPlan {
   return { ...twoRooms(), w: 100, h: 100, paint: { stone: cells }, doors: [], heights: [], stairs: [], traps: [] };
 }
 
-test("DG-B: the sight cap is checked on each prefix, and only a scene with vision on has one", () => {
+test("DG-B: the sight cap is checked on each prefix, as if vision were on, since Players see is set only at Make", () => {
   const plan = speckled(2_000);
   const scene = previewScene(dialogScene(plan), plan);
-  const lit = landAll(scratchRoom(), buildOps(plan, { ...scene, vision: { on: true, light: "bright" } }));
-  assert.ok(!lit.ok);
-  assert.equal(lit.at, 1);
-  assert.match(lit.why, /over the sight cap: This scene has 8,000 wall pieces/);
-  assert.ok(landAll(scratchRoom(), buildOps(plan, scene)).ok, "no vision, no cap");
+  for (const vision of [undefined, { on: true, light: "dark" as const }, { on: false, light: "bright" as const }]) {
+    const landed = landAll(scratchRoom(), buildOps(plan, { ...scene, ...(vision ? { vision } : {}) }));
+    assert.ok(!landed.ok, JSON.stringify(vision));
+    assert.equal(landed.at, 1);
+    assert.match(landed.why, /over the sight cap: This scene has 8,000 wall pieces/);
+  }
+  const under = speckled(1_500);
+  assert.ok(landAll(scratchRoom(), buildOps(under, previewScene(dialogScene(under), under))).ok, "6,000 pieces is at the cap, not over it");
 });
 
 test("DG-B: the room's limits are checked on each prefix", () => {
