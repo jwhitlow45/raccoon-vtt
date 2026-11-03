@@ -218,6 +218,9 @@ export class Voices {
   readonly #live = new Map<string, Live>();
   /** Elements leaving, with the time they are free again. */
   readonly #busyUntil = new Map<number, number>();
+  /** The last plan, and the timer that starts what of it waited for an element. */
+  #plans: readonly VoicePlan[] = [];
+  #whenFree: ReturnType<typeof setTimeout> | null = null;
   #music: MusicState = "none";
   #disposed = false;
 
@@ -250,6 +253,7 @@ export class Voices {
 
   /** Takes a new plan: voices that stay keep their elements, new ones start, and the rest fade out. */
   update(plans: readonly VoicePlan[], leaveMs: (plan: VoicePlan) => number): void {
+    this.#plans = plans;
     const wanted = new Map(plans.map((p) => [p.key, p]));
     const t = this.#env.serverNow();
     for (const [key, v] of this.#live) {
@@ -320,6 +324,7 @@ export class Voices {
   dispose(): void {
     this.#disposed = true;
     this.#unhold();
+    if (this.#whenFree) clearTimeout(this.#whenFree);
     for (const v of this.#live.values()) this.#release(v);
     this.#live.clear();
   }
@@ -345,8 +350,7 @@ export class Voices {
 
   #start(plan: VoicePlan): void {
     const index = this.#freeElement(plan.channel);
-    // Every element of the channel is busy, as while two loops cross with a third waiting: the next check tries again.
-    if (index === null) return;
+    if (index === null) return this.#startWhenFree();
     const { ctx } = this.#env;
     const el = this.#elements[index]!;
     let source = sources.get(el);
@@ -392,6 +396,28 @@ export class Voices {
     if (swapped) v.el.src = v.url;
     this.#place(v);
     return true;
+  }
+
+  /**
+   * Every element of a channel is busy. One fading out, as both music
+   * elements after a Skip during a crossfade, is free in a moment: the plan
+   * waiting for it starts then, not at the next check a second later. Two
+   * loops crossing with a third waiting leave none fading, and the next
+   * check tries again.
+   */
+  #startWhenFree(): void {
+    if (this.#whenFree || this.#disposed || this.#busyUntil.size === 0) return;
+    const free = Math.min(...this.#busyUntil.values());
+    this.#whenFree = setTimeout(
+      () => {
+        this.#whenFree = null;
+        if (this.#disposed) return;
+        const t = this.#env.serverNow();
+        for (const plan of this.#plans) if (!this.#live.has(plan.key) && t < plan.startAt + plan.lengthMs) this.#start(plan);
+        this.#reportMusic();
+      },
+      Math.max(0, free - performance.now()) + 1,
+    );
   }
 
   /** Puts the element at its place: now with a short fade in, or paused at 0 until its start. */

@@ -5,7 +5,7 @@ import { projectState } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { LOOP_FADE_IN_MS, SHORT_FADE_MS, STOP_FADE_MS, type Playing, type Sound } from "#shared/sound.ts";
 import { AT, DM, P1, room } from "#shared/testutil.ts";
-import { BLACKOUT_FADE_MS, gainAt, leaveMs, LOOKAHEAD_MS, mixGain, planVoices } from "./voices.ts";
+import { BLACKOUT_FADE_MS, gainAt, leaveMs, LOOKAHEAD_MS, mixGain, planVoices, Voices } from "./voices.ts";
 
 /*
  * The voices a page plays at a server time (docs/design/design-v1-music.md
@@ -170,5 +170,71 @@ describe("the voices at a time", () => {
     assert.equal(gainAt(env, 50), 0);
     assert.equal(gainAt([], 5), 1);
     assert.equal(mixGain({ level: -60, volume: 100, channel: "music" }), 10 ** (-60 / 200));
+  });
+});
+
+/** An audio param that keeps what was scheduled on it, and a context and pool enough for Voices. */
+type Event = { kind: "cancel" | "set" | "ramp"; value: number; at: number };
+function param() {
+  const events: Event[] = [];
+  return {
+    value: 1,
+    events,
+    cancelScheduledValues(at: number) {
+      events.push({ kind: "cancel", value: NaN, at });
+    },
+    setValueAtTime(value: number, at: number) {
+      events.push({ kind: "set", value, at });
+    },
+    linearRampToValueAtTime(value: number, at: number) {
+      events.push({ kind: "ramp", value, at });
+    },
+  };
+}
+
+function rig(t: { now: number }) {
+  const gains: { gain: ReturnType<typeof param> }[] = [];
+  const node = () => {
+    const n = { gain: param(), connect: (to: unknown) => to, disconnect() {} };
+    gains.push(n);
+    return n;
+  };
+  const ctx = { currentTime: 0, createGain: node, createMediaElementSource: () => ({ connect: (to: unknown) => to, disconnect() {} }) } as unknown as AudioContext;
+  const pool = Array.from({ length: 11 }, () => ({ src: "", muted: false, paused: true, currentTime: 0, playbackRate: 1, readyState: 4, play() { this.paused = false; return Promise.resolve(); }, pause() { this.paused = true; } }));
+  const unlock = { pool: () => pool, holdWith: () => () => {} };
+  const output = { music: node(), loop: node() } as unknown as Record<"music" | "loop", AudioNode>;
+  gains.length = 0;
+  const voices = new Voices({ ctx, unlock, output, serverNow: () => t.now, latencyMs: () => 0, url: (assetId) => `/api/assets/${assetId}` });
+  return { voices, pool, gains };
+}
+
+describe("the voices on the pool", () => {
+  test("a track that finds both music elements fading out, as after a Skip in a crossfade, starts once the first is free, not at the next check", async () => {
+    const t = { now: T };
+    const { voices, pool } = rig(t);
+    const crossing: Playing = { ...quiet, music: { run: "r1", repeat: "all", fade: 5, now: { soundId: "tavern", at: T - 57_000 }, next: { soundId: "road", at: T - 2_000 } } };
+    voices.update(planVoices(crossing, SOUNDS, t.now), () => SHORT_FADE_MS);
+    assert.equal(voices.snapshot().length, 2, "both tracks sound");
+    const skipped: Playing = { ...quiet, music: { run: "r2", repeat: "all", fade: 5, now: { soundId: "road", at: T } } };
+    voices.update(planVoices(skipped, SOUNDS, t.now), () => SHORT_FADE_MS);
+    assert.deepEqual(voices.snapshot(), [], "both elements fade out first");
+    await new Promise((r) => setTimeout(r, SHORT_FADE_MS + 150));
+    assert.deepEqual(voices.snapshot().map((v) => v.key), [`m:road:${T}:0`]);
+    assert.ok(pool.slice(0, 2).some((el) => el.src === "/api/assets/a-road" && !el.paused));
+    voices.dispose();
+  });
+
+  test("a pass that ends while it waits for an element never starts", async () => {
+    const t = { now: T };
+    const { voices } = rig(t);
+    const crossing: Playing = { ...quiet, music: { run: "r1", repeat: "all", fade: 5, now: { soundId: "tavern", at: T - 57_000 }, next: { soundId: "road", at: T - 2_000 } } };
+    voices.update(planVoices(crossing, SOUNDS, t.now), () => SHORT_FADE_MS);
+    // A run whose 40 s track has 0.1 s left, which is over by the time an element is free.
+    const ending: Playing = { ...quiet, music: { run: "r2", repeat: "off", fade: 0, now: { soundId: "road", at: T - 39_900 } } };
+    voices.update(planVoices(ending, SOUNDS, t.now), () => SHORT_FADE_MS);
+    t.now += 200;
+    await new Promise((r) => setTimeout(r, SHORT_FADE_MS + 150));
+    assert.deepEqual(voices.snapshot(), []);
+    voices.dispose();
   });
 });
