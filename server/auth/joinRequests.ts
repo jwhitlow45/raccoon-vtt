@@ -76,6 +76,9 @@ export type Refusal = {
 
 export type HeldWait = { answer: Promise<WaitState>; release(): void };
 
+/** A turn-away hold whose copy in the database did not save: retried until it does or the hold lapses. */
+export type OwedHold = { readonly roomId: string; readonly sessionId: string; readonly ipKey: string; readonly at: number };
+
 export type Timers = { set(fn: () => void, ms: number): unknown; clear(handle: unknown): void };
 
 export type JoinRequestOptions = {
@@ -121,6 +124,8 @@ export class JoinRequests {
   /** Devices that got in by a join, a DM claim or a let-in, by `room|session`, since when. */
   #marks = new Map<string, number>();
   #waits = new Map<string, Waiter>();
+  /** Turn-away holds still to save to the database, by `room|session`. */
+  #owedHolds = new Map<string, OwedHold>();
   #pendingSignals = new Set<string>();
   #closing = false;
 
@@ -427,6 +432,39 @@ export class JoinRequests {
       turned.push(r);
     }
     return turned;
+  }
+
+  /**
+   * A turned-away device's hold could not be saved: it holds here in memory
+   * meanwhile, and `retryHolds` saves it, dated back to the turn away.
+   */
+  oweHold(r: JoinRequest): void {
+    this.#owedHolds.set(key(r.roomId, r.sessionId), { roomId: r.roomId, sessionId: r.sessionId, ipKey: r.ipKey, at: r.endedAt ?? this.#now() });
+  }
+
+  get owedHolds(): number {
+    return this.#owedHolds.size;
+  }
+
+  /**
+   * The sweep's part for holds: saves each one owed, with how long ago its
+   * turn away was. One that fails stays owed, and one past its 15 minutes
+   * is dropped, since it holds nothing any more.
+   */
+  async retryHolds(save: (hold: OwedHold, secondsAgo: number) => Promise<void>, failed: (err: unknown, hold: OwedHold) => void): Promise<void> {
+    for (const [k, hold] of [...this.#owedHolds]) {
+      const ago = this.#now() - hold.at;
+      if (ago >= TURN_AWAY_HOLD_MS) {
+        this.#owedHolds.delete(k);
+        continue;
+      }
+      try {
+        await save(hold, ago / 1000);
+        if (this.#owedHolds.get(k) === hold) this.#owedHolds.delete(k);
+      } catch (err) {
+        failed(err, hold);
+      }
+    }
   }
 
   /** The room switched to With the password, and that has committed: every live request ends as closed. */

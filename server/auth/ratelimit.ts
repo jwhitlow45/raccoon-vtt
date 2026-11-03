@@ -374,9 +374,16 @@ export class SlowLimits {
     return room.n >= ASK_CHALLENGE_PER_ROOM_HOUR;
   }
 
-  /** A DM turned this device away here: its own hold, and its address's, which only adds a Turnstile check. */
-  async recordTurnAway(roomId: string, deviceId: string, ip: string, q: Queryable = this.#pool): Promise<void> {
-    await this.#record(q, [`askno:${roomId}:${deviceId}`, `asknoip:${roomId}:${ip}`]);
+  /**
+   * A DM turned this device away here: its own hold, and its address's,
+   * which only adds a Turnstile check. `secondsAgo` dates a retried write
+   * back to the turn away itself, so the hold ends when it would have.
+   */
+  async recordTurnAway(roomId: string, deviceId: string, ip: string, q: Queryable = this.#pool, secondsAgo = 0): Promise<void> {
+    await q.query("insert into rate_events (key, at) select unnest($1::text[]), now() - make_interval(secs => $2)", [
+      [`askno:${roomId}:${deviceId}`, `asknoip:${roomId}:${ip}`],
+      Math.max(0, secondsAgo),
+    ]);
   }
 
   /** A let-in, which gives its address one ask back in the room. */

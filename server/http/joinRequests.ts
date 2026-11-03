@@ -405,9 +405,16 @@ export async function registerJoinRequestRoutes(app: FastifyInstance, kit: AuthK
       const grant = await requireGrant(kit, req, reply, roomId, "dm");
       const { ids } = parseBody(TurnAwayBody, req.body);
       for (const turned of store.turnAway(roomId, ids)) {
-        // Mirrored in the database, so a restart forgets no hold.
-        await kit.limits.recordTurnAway(roomId, turned.sessionId, turned.ipKey);
         req.log.info({ roomId, requestId: turned.id, outcome: "turned_away", by: grant.memberId }, "join request answered");
+        // Mirrored in the database, so a restart forgets no hold. The turn
+        // away is done and holds in memory either way, so a failed write is
+        // logged and owed, retried by the sweep, and the DM still hears 204.
+        try {
+          await kit.limits.recordTurnAway(roomId, turned.sessionId, turned.ipKey);
+        } catch (err) {
+          req.log.warn({ err, roomId, requestId: turned.id }, "join request hold not saved yet");
+          store.oweHold(turned);
+        }
       }
       return reply.code(204).send();
     });

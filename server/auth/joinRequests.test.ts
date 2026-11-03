@@ -278,6 +278,38 @@ describe("join requests: waiting", () => {
     assert.equal(store.mine(ROOM, "s1"), null);
   });
 
+  test("a hold that did not save is retried dated back to its turn away, stays owed while saving fails, and lapses with the hold (JR-SOL-03)", async () => {
+    const { time, store, asked } = setup();
+    const r = asked("s1");
+    const [turned] = store.turnAway(ROOM, [r.id]);
+    assert.ok(turned);
+    store.oweHold(turned);
+    time.advance(60_000);
+    const saved: number[] = [];
+    let fail = true;
+    const failures: unknown[] = [];
+    const save = async (_hold: unknown, ago: number) => {
+      if (fail) throw new Error("down");
+      saved.push(ago);
+    };
+    await store.retryHolds(save, (err) => failures.push(err));
+    assert.equal(failures.length, 1);
+    assert.equal(store.owedHolds, 1, "still owed");
+    fail = false;
+    time.advance(30_000);
+    await store.retryHolds(save, (err) => failures.push(err));
+    assert.deepEqual(saved, [90], "dated 90 s back, to the turn away");
+    assert.equal(store.owedHolds, 0);
+    const late = asked("s2");
+    const [again] = store.turnAway(ROOM, [late.id]);
+    assert.ok(again);
+    store.oweHold(again);
+    time.advance(TURN_AWAY_HOLD_MS);
+    await store.retryHolds(save, () => undefined);
+    assert.deepEqual(saved, [90], "a hold past its 15 minutes holds nothing, so it is dropped unsaved");
+    assert.equal(store.owedHolds, 0);
+  });
+
   test("a turned-away device is held 15 minutes in that room only", () => {
     const { time, store, ask, asked } = setup();
     const r = asked("s1");

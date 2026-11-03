@@ -575,6 +575,41 @@ describe("join requests: asking, waiting and a DM's answer", () => {
     assert.equal(k.error(await away.delete(`/api/rooms/${roomId}/join-requests/${second}`)), "request_answered");
   });
 
+  test("a turn away whose hold fails to save still answers 204, holds in memory, and is saved by the sweep dated to the turn away (JR-SOL-03)", async () => {
+    const { dm, roomId } = await k.room("ask");
+    const phone = t.client();
+    const id = await k.asked(phone, roomId);
+    const query = t.pool.query.bind(t.pool);
+    const at = Date.now();
+    let failed = 0;
+    // The hold's write fails for 2.5 s, the sweep's retries too, so the saved hold's date tells a retry dated back from one dated now.
+    (t.pool as { query: unknown }).query = async (text: unknown, values?: unknown) => {
+      const keys = Array.isArray(values) ? values[0] : undefined;
+      if (Date.now() - at < 2_500 && typeof text === "string" && text.startsWith("insert into rate_events") && Array.isArray(keys) && String(keys[0]).startsWith("askno:")) {
+        failed++;
+        throw new Error("the database went away");
+      }
+      return query(text as string, values as unknown[]);
+    };
+    try {
+      const turned = await dm.post(`/api/rooms/${roomId}/join-requests/turn-away`, { ids: [id] });
+      assert.equal(turned.statusCode, 204, turned.body);
+      assert.equal(k.error(await phone.post(`/api/rooms/${roomId}/join-requests`, { name: "Quinn", color: "#3e8ef7" })), "asked_recently", "held in memory meanwhile");
+      const deviceId = (await k.askRow(phone.token))?.id;
+      let rows: Array<{ ago: number }> = [];
+      for (let i = 0; i < 100 && rows.length === 0; i++) {
+        await new Promise((r) => setTimeout(r, 50));
+        rows = (await query<{ ago: number }>("select extract(epoch from now() - at)::float8 as ago from rate_events where key = $1", [`askno:${roomId}:${deviceId}`])).rows;
+      }
+      assert.ok(failed > 1, "the sweep's retries failed too, and the hold stayed owed");
+      assert.equal(rows.length, 1, "the sweep saved the owed hold once the database came back");
+      assert.ok(Math.abs((rows[0]?.ago ?? 0) - (Date.now() - at) / 1000) < 1, `dated to the turn away, so it ends when it would have: ${rows[0]?.ago} s ago`);
+      assert.equal(t.app.joinRequests.owedHolds, 0);
+    } finally {
+      (t.pool as { query: unknown }).query = query;
+    }
+  });
+
   test("cancel ends the request, and a cancelled request is gone to its own device", async () => {
     const { dm, roomId } = await k.room("ask");
     const phone = t.client();
