@@ -76,9 +76,16 @@ describe("weather's rules over every weather and every d20 test", () => {
       const patchy = w.kind === "fog" && t.kind === "check" && t.skill === "perception";
       assert.deepEqual(preset.notes.map((n) => n.key), patchy ? ["patchy-fog"] : []);
     });
-    // The seed that found patchy fog's reminder, then fresh ones.
-    fc.assert(property, { seed: 504556466, numRuns: 2_000 });
+    // The seeds that found patchy fog's reminder, then fresh ones.
+    for (const seed of [504556466, 2006840017]) fc.assert(property, { seed, numRuns: 2_000 });
     fc.assert(property, { numRuns: 2_000 });
+  });
+
+  test("patchy fog on a Perception check: its one note and no Disadvantage, whatever ability the check names", () => {
+    const note = { key: "patchy-fog", text: "Patchy fog: Lightly Obscured. Disadvantage on Perception checks that rely on sight." };
+    for (const ability of ["wis", "str"] as const) assert.deepEqual(weatherPreset({ kind: "fog" }, { kind: "check", ability, skill: "perception" }), { sources: [], notes: [note] }, ability);
+    assert.deepEqual(weatherPreset({ kind: "fog" }, { kind: "check", ability: "wis" }), { sources: [], notes: [] }, "a plain Wisdom check is no Perception check");
+    assert.deepEqual(weatherPreset({ kind: "fog", rules: false }, { kind: "check", ability: "wis", skill: "perception" }), { sources: [], notes: [] }, "and the switch off drops it");
   });
 
   test("with conditions, weather only adds to what the effects give, after them", () => {
