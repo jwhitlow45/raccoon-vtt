@@ -3,7 +3,8 @@ import type pg from "pg";
 import type { Member } from "#shared/model.ts";
 import type { JoinMode } from "#shared/protocol.ts";
 import { RoomFullError, RoomNotFoundError, type RoomGateway } from "../rooms/gateway.ts";
-import { formerDms, putGrant, revokeGrants, type RevokeBounds, type RevokeResult } from "./grants.ts";
+import { bounded } from "./bounded.ts";
+import { formerDms, putGrant, relabelOwed, revokeGrants, type RevokeBounds, type RevokeResult } from "./grants.ts";
 import { HttpError } from "./http.ts";
 import { CheckoutTimeout, CommitOutcomeUnknown, withTx } from "./tx.ts";
 
@@ -34,8 +35,8 @@ import { CheckoutTimeout, CommitOutcomeUnknown, withTx } from "./tx.ts";
 export const MEMBER_ANSWER_MS = 5_000;
 /** The grant transaction's pool checkout. */
 export const GRANT_CHECKOUT_MS = 2_000;
-/** A kick's revoke: it waits on the room row lock that a grant being written holds. */
-export const KICK_BOUNDS: RevokeBounds = { checkoutMs: 2_000, lockMs: 2_000, statementMs: 5_000 };
+/** A kick's revoke: it waits on the room row lock that a grant being written holds. Its relabels take `memberMs`. */
+export const KICK_BOUNDS: Omit<RevokeBounds, "relabelMs"> = { checkoutMs: 2_000, lockMs: 2_000, statementMs: 5_000 };
 /**
  * A join's route, from `begin` to its grant's check: the session and
  * roster reads, a password's hash, a cold room's member step. A route past
@@ -96,7 +97,7 @@ export type AdmitPlan = {
 };
 
 export type AdmissionsOptions = {
-  /** Each actor call's bound: a member's removal, and reading the member back after its grant. */
+  /** Each actor call's bound: a member's removal, reading the member back after its grant, and a relabel after a revoke. */
   memberMs?: number;
   /** Every pool checkout: the grant's, the read-back's and the undo's revokes. */
   checkoutMs?: number;
@@ -123,13 +124,16 @@ export class Admissions {
   #inFlight = new Map<string, Set<string>>();
   /** Members whose removal after a rolled-back grant did not land, retried by the sweep. */
   #owed = new Map<string, { roomId: string; memberId: string }>();
-  /** Undos running now, which the answer never waits for. */
-  #undoing = new Set<Promise<void>>();
+  /** Undos running now, which the answer never waits for, each with its room. */
+  #undoing = new Map<Promise<void>, string>();
   /** Grants given up because their member was removed, whose revoke did not land, retried by the sweep. */
   #owedRevokes = new Map<string, { roomId: string; sessionId: string; memberId: string; epoch: number }>();
-  /** Attempts whose commit outcome could not be read back yet, each a follow-up that answers true once settled. */
-  #unreconciled = new Set<() => Promise<boolean>>();
-  #following: Promise<void> | null = null;
+  /** Members a bounded revoke left with their old label, retried by the sweep. */
+  #owedRelabels = new Map<string, { roomId: string; memberId: string }>();
+  /** Attempts whose commit outcome could not be read back yet, each a follow-up that answers true once settled, with its room. */
+  #unreconciled = new Map<() => Promise<boolean>, string>();
+  /** Each room's follow-up running now, so a stalled room holds up only its own. */
+  #following = new Map<string, Promise<void>>();
   /** Orders admissions and kicks: every `begin` and every kick takes the next number. */
   #sequence = 0;
   /** Each member's latest kick, by `room|member`: its number, and when, for forgetting it. */
@@ -150,9 +154,19 @@ export class Admissions {
     return this.#inFlight.get(roomId) ?? EMPTY;
   }
 
-  /** What is still to do after the answers: undos running or owed, revokes owed, and outcomes not read back. */
+  /** What is still to do after the answers: undos running or owed, revokes and relabels owed, and outcomes not read back. */
   get followUps(): number {
-    return this.#undoing.size + this.#owed.size + this.#owedRevokes.size + this.#unreconciled.size;
+    return this.#undoing.size + this.#owed.size + this.#owedRevokes.size + this.#owedRelabels.size + this.#unreconciled.size;
+  }
+
+  /** A relabel's bound, for Kick and Remove's revoke. */
+  get relabelMs(): number {
+    return this.#memberMs;
+  }
+
+  /** Relabels a bounded revoke left owed (`RevokeResult.unlabeled`), for the sweep to retry. */
+  oweRelabels(roomId: string, memberIds: readonly string[]): void {
+    for (const memberId of memberIds) this.#owedRelabels.set(`${roomId}|${memberId}`, { roomId, memberId });
   }
 
   /** Marks where a join's route starts, before it reads anything about the member it names (`AdmitPlan.begun`). */
@@ -219,26 +233,50 @@ export class Admissions {
     return answered.finally(() => clearTimeout(timer));
   }
 
-  /** The sweep's part: undos still running, owed removals and revokes, then outcomes still to read back. One run at a time. */
+  /**
+   * The sweep's part, room by room: undos still running, owed removals,
+   * revokes and relabels, then outcomes still to read back. One run per
+   * room at a time, and rooms apart, so a room whose actor or rows stall
+   * holds up no other room's follow-ups. Every step is bounded, and one
+   * that does not land stays owed for the next sweep. Answers once every
+   * room's run, already going or started now, has ended.
+   */
   followUp(): Promise<void> {
-    this.#following ??= (async () => {
-      try {
-        await Promise.all([...this.#undoing]);
-        for (const { roomId, memberId } of [...this.#owed.values()]) await this.#undo(roomId, memberId);
-        for (const [key, owed] of [...this.#owedRevokes]) if (await this.#giveUp(owed)) this.#owedRevokes.delete(key);
-        for (const next of [...this.#unreconciled]) {
-          if (await next().catch(() => false)) this.#unreconciled.delete(next);
-        }
-      } finally {
-        this.#following = null;
-      }
-    })();
-    return this.#following;
+    const rooms = new Set<string>([
+      ...this.#undoing.values(),
+      ...[...this.#owed.values()].map((o) => o.roomId),
+      ...[...this.#owedRevokes.values()].map((o) => o.roomId),
+      ...[...this.#owedRelabels.values()].map((o) => o.roomId),
+      ...this.#unreconciled.values(),
+    ]);
+    for (const roomId of rooms) {
+      if (this.#following.has(roomId)) continue;
+      const run = this.#followRoom(roomId).finally(() => this.#following.delete(roomId));
+      this.#following.set(roomId, run);
+    }
+    return Promise.all([...this.#following.values()]).then(() => undefined);
   }
 
-  /** A revoke inside a join's own steps: bounded like the grant's transaction, so no step waits on a stalled pool. */
+  async #followRoom(roomId: string): Promise<void> {
+    await Promise.all([...this.#undoing].flatMap(([running, room]) => (room === roomId ? [running] : [])));
+    for (const owed of [...this.#owed.values()]) if (owed.roomId === roomId) await this.#undo(roomId, owed.memberId);
+    for (const [key, owed] of [...this.#owedRevokes]) if (owed.roomId === roomId && (await this.#giveUp(owed))) this.#owedRevokes.delete(key);
+    for (const [key, owed] of [...this.#owedRelabels]) {
+      if (owed.roomId !== roomId) continue;
+      const done = await relabelOwed({ pool: this.#pool, gateway: this.#gateway }, roomId, owed.memberId, this.#revokeBounds()).catch((err: unknown) => {
+        this.#log?.warn({ err, roomId }, "a member's label could not be set back yet");
+        return false;
+      });
+      if (done && this.#owedRelabels.get(key) === owed) this.#owedRelabels.delete(key);
+    }
+    for (const [next, room] of [...this.#unreconciled]) {
+      if (room === roomId && (await next().catch(() => false))) this.#unreconciled.delete(next);
+    }
+  }
+
+  /** A revoke inside a join's own steps: bounded like the grant's transaction, so no step waits on a stalled pool or actor. */
   #revokeBounds(): RevokeBounds {
-    return { checkoutMs: this.#checkoutMs, lockMs: 2_000, statementMs: 2_000 };
+    return { checkoutMs: this.#checkoutMs, lockMs: 2_000, statementMs: 2_000, relabelMs: this.#memberMs };
   }
 
   async #attempt(plan: AdmitPlan, begun: Begun, settle: (outcome: AdmitOutcome) => void): Promise<AdmitOutcome | typeof FOLLOWING> {
@@ -356,12 +394,12 @@ export class Admissions {
     // Followed up by the sweep until the read goes through, which settles
     // it. The member stays in flight meanwhile, and the caller hears
     // pending now rather than waiting on the sweep.
-    this.#unreconciled.add(async () => {
+    this.#unreconciled.set(async () => {
       const later = await decide(await this.#reconcile(plan.roomId, plan.sessionId, memberId, playerEpoch));
       if (!later) return false;
       settle(later);
       return true;
-    });
+    }, plan.roomId);
     return FOLLOWING;
   }
 
@@ -403,6 +441,7 @@ export class Admissions {
     const deps = { pool: this.#pool, gateway: this.#gateway };
     try {
       // Every step bounded, and one past its bound is owed like a failed one.
+      // A relabel left owed is moot: the member comes off.
       await revokeGrants(deps, roomId, { by: "member", memberId }, undefined, this.#revokeBounds());
       await bounded(this.#gateway.removeMember(roomId, memberId), this.#memberMs);
       await revokeGrants(deps, roomId, { by: "member", memberId }, undefined, this.#revokeBounds());
@@ -417,10 +456,10 @@ export class Admissions {
     this.#land(roomId, memberId);
   }
 
-  /** An undo behind a refusal already answered. `followUp` waits for it, so the sweep and the tests see it through. */
+  /** An undo behind a refusal already answered. Its room's follow-up waits for it, so the sweep and the tests see it through. */
   #undoLater(roomId: string, memberId: string): void {
     const running: Promise<void> = this.#undo(roomId, memberId).finally(() => this.#undoing.delete(running));
-    this.#undoing.add(running);
+    this.#undoing.set(running, roomId);
   }
 
   /** Gives up exactly one grant. False when the revoke did not land in its bounds. */
@@ -455,20 +494,24 @@ export class Admissions {
  * none, and the revoke takes the room row lock, which an admission past
  * that check holds until its grant commits, so the delete sees that grant.
  * A revoke that gets no connection or lock in time answers busy: the kick
- * is not done, and the DM tries again.
+ * is not done, and the DM tries again. A relabel past its bound leaves the
+ * kick done and the label owed.
  */
 export async function revokeMember(deps: { pool: pg.Pool; gateway: RoomGateway; admissions: Admissions }, roomId: string, memberId: string): Promise<RevokeResult> {
   deps.admissions.kicked(roomId, memberId);
   try {
-    return await revokeGrants(
+    const result = await revokeGrants(
       deps,
       roomId,
       { by: "member", memberId },
       async (tx) => {
         await tx.query("select 1 from rooms where id = $1 for update", [roomId]);
       },
-      KICK_BOUNDS,
+      { ...KICK_BOUNDS, relabelMs: deps.admissions.relabelMs },
     );
+    // The kick is done once its grants are gone. A label the room's actor did not take in time is set back by the sweep.
+    deps.admissions.oweRelabels(roomId, result.unlabeled);
+    return result;
   } catch (err) {
     if (err instanceof CheckoutTimeout || timedOutInDb(err)) throw new HttpError(503, "busy", { retryAfter: 2 });
     throw err;
@@ -485,22 +528,6 @@ const EMPTY: ReadonlySet<string> = new Set();
 
 function memberOf(who: AdmitWho): string {
   return who.kind === "new" ? who.member.id : who.memberId;
-}
-
-class TimedOut extends Error {
-  constructor() {
-    super("timed out");
-    this.name = "TimedOut";
-  }
-}
-
-async function bounded<T>(work: Promise<T>, ms: number): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    return await Promise.race([work, new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new TimedOut()), ms)))]);
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 function asError(err: unknown): Error {

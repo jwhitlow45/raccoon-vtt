@@ -390,12 +390,13 @@ function result(rows: Record<string, unknown>[]): pg.QueryResult {
 }
 
 /**
- * A room gateway over an in-memory roster. `addMember` and `removeMember`
- * go through `hold`, so a test can delay, fail or count each call.
+ * A room gateway over an in-memory roster. `addMember`, `removeMember` and
+ * `setMemberKind` go through `hold`, so a test can delay, fail or count
+ * each call.
  */
 export class FakeRoomGateway implements RoomGateway {
   members = new Map<string, Map<string, Member>>();
-  hold: (call: "add" | "remove", roomId: string, memberId: string) => Promise<void> | void = () => undefined;
+  hold: (call: "add" | "remove" | "kind", roomId: string, memberId: string) => Promise<void> | void = () => undefined;
   calls: string[] = [];
   closed: Array<{ roomId: string; filter: SocketFilter; code: number }> = [];
   signals: string[] = [];
@@ -415,6 +416,7 @@ export class FakeRoomGateway implements RoomGateway {
     room.set(member.id, member);
   }
   async setMemberKind(roomId: string, memberId: string, kind: Member["kind"]): Promise<void> {
+    await this.hold("kind", roomId, memberId);
     const m = this.room(roomId).get(memberId);
     if (m) this.room(roomId).set(memberId, { ...m, kind });
   }

@@ -286,6 +286,66 @@ describe("admitPlayer", () => {
     assert.equal(admissions.followUps, 0);
   });
 
+  test("a relabel the room's actor keeps past its bound leaves the kick done and the label owed, set back by the sweep unless the member is a DM again", { timeout: 5_000 }, async () => {
+    const { db, gateway, admissions } = setup();
+    const kick = (memberId: string) => revokeMember({ pool: db.pool, gateway, admissions }, ROOM, memberId);
+    const dmGrant = (memberId: string) => db.tables.grants.set(`s-${memberId}|${ROOM}`, { session_id: `s-${memberId}`, room_id: ROOM, member_id: memberId, role: "dm", epoch: 5 });
+    for (const id of ["dee", "eve"]) {
+      gateway.room(ROOM).set(id, member(id, "dm"));
+      dmGrant(id);
+    }
+    let stall = true;
+    // Never opened: a relabel the actor keeps for good.
+    const stalled = gate();
+    gateway.hold = async (call) => {
+      if (call === "kind" && stall) await stalled.wait;
+    };
+    const started = Date.now();
+    const kicked = await kick("dee");
+    assert.ok(Date.now() - started < 500, "the kick answers within the relabel's bound");
+    assert.deepEqual(kicked.unlabeled, ["dee"]);
+    assert.equal(db.grant("s-dee", ROOM), undefined, "the kick is done");
+    await kick("eve");
+    assert.equal(admissions.followUps, 2, "both labels are owed");
+    await admissions.followUp();
+    assert.equal(admissions.followUps, 2, "still owed while the actor stalls, and the sweep's run ended anyway");
+    // Claimed back as a DM meanwhile: the label it has now is right.
+    dmGrant("eve");
+    stall = false;
+    await admissions.followUp();
+    assert.equal(admissions.followUps, 0);
+    assert.equal(gateway.room(ROOM).get("dee")?.kind, "player");
+    assert.equal(gateway.room(ROOM).get("eve")?.kind, "dm");
+  });
+
+  test("a room whose relabels stall holds up no other room's follow-ups, and its own run ends within its bounds", { timeout: 5_000 }, async () => {
+    const OTHER = "ROOMBBBB";
+    const { db, gateway, admissions, plan } = setup({ memberMs: 300 });
+    db.addRoom(OTHER, { player_epoch: 1, dm_epoch: 1 });
+    const refused = { locked: () => Promise.reject(new HttpError(403, "stale_ticket")) };
+    // The other room's removal fails once, so its undo is owed to the sweep.
+    let otherFails = 1;
+    gateway.hold = async (call, roomId) => {
+      if (call === "remove" && roomId === OTHER && otherFails-- > 0) throw new Error("actor busy");
+      if (call === "kind" && roomId === ROOM) await gate().wait;
+    };
+    await admissions.admit(plan({ kind: "new", member: member("q2") }, { roomId: OTHER, ...refused }));
+    for (let i = 0; i < 50 && !gateway.calls.includes("remove q2"); i++) await sleep(2);
+    await sleep(5);
+    assert.equal(gateway.room(OTHER).has("q2"), true, "the other room's removal is owed");
+    // This room's undo is running now, stuck in its relabels.
+    await admissions.admit(plan({ kind: "new", member: member("q1") }, refused));
+    const started = Date.now();
+    const all = admissions.followUp();
+    for (let i = 0; i < 100 && gateway.room(OTHER).has("q2"); i++) await sleep(2);
+    assert.equal(gateway.room(OTHER).has("q2"), false, "the other room's owed removal lands");
+    assert.ok(Date.now() - started < 200, `without waiting on this room's relabels: ${Date.now() - started} ms`);
+    assert.equal(gateway.room(ROOM).has("q1"), true, "this room's undo is still in its first relabel");
+    await all;
+    assert.equal(gateway.room(ROOM).has("q1"), false, "a relabel past its bound is moot for an undo: the member comes off");
+    assert.equal(admissions.followUps, 0);
+  });
+
   test("a member the DM removed just after the commit gives up exactly that grant", async () => {
     const { db, gateway, admissions, plan } = setup();
     gateway.room(ROOM).set("pip", member("pip"));

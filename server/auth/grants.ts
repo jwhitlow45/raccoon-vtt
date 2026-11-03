@@ -1,5 +1,6 @@
 import type pg from "pg";
 import { CLOSE_GRANT_REVOKED, type RoomGateway } from "../rooms/gateway.ts";
+import { bounded } from "./bounded.ts";
 import type { DisplayGrantContext, GrantContext } from "./types.ts";
 import { withTx, type Queryable } from "./tx.ts";
 
@@ -167,16 +168,22 @@ export type GrantSelector =
 
 export type RevokeResult = {
   removed: Array<{ sessionId: string; memberId: string; role: GrantRole }>;
-  /** Members whose `kind` went back to 'player' because no DM grant is left. */
+  /** Members whose `kind` goes back to 'player' because no DM grant is left. */
   demoted: string[];
+  /** Of those, the ones whose relabel did not land within `relabelMs`: still owed, for the caller to retry. Empty without bounds. */
+  unlabeled: string[];
 };
 
 /**
  * Bounds for a revoke that must answer in time (a join's undo, a kick):
  * the pool checkout, and the lock and statement timeouts inside it. A
  * revoke past them throws, and its caller treats the revoke as not done.
+ * `relabelMs` bounds the room actor's relabels after the commit, which
+ * never fail the revoke: one past it is answered as still owed.
  */
-export type RevokeBounds = { checkoutMs: number; lockMs: number; statementMs: number };
+export type RevokeBounds = { checkoutMs: number; lockMs: number; statementMs: number; relabelMs: number };
+
+const STILL_DM = "select distinct member_id from grants where room_id = $1 and role = 'dm' and member_id = any($2::text[])";
 
 /**
  * The one way grants are removed: kick, DM device revoke, remove DM, DM link
@@ -221,10 +228,7 @@ export async function revokeGrants(
     if (selector.by === "member") candidates.add(selector.memberId);
     let demoted: string[] = [];
     if (candidates.size > 0) {
-      const still = await tx.query<{ member_id: string }>(
-        "select distinct member_id from grants where room_id = $1 and role = 'dm' and member_id = any($2::text[])",
-        [roomId, [...candidates]],
-      );
+      const still = await tx.query<{ member_id: string }>(STILL_DM, [roomId, [...candidates]]);
       const stillDm = new Set(still.rows.map((r) => r.member_id));
       demoted = [...candidates].filter((m) => !stillDm.has(m));
     }
@@ -239,8 +243,42 @@ export async function revokeGrants(
   // other DMs' panels show without polling. Presence alone misses one whose
   // member is still online on another device.
   if (result.removed.some((r) => r.role === "dm" || r.role === "display")) deps.gateway.accessChanged(roomId);
-  for (const memberId of result.demoted) await deps.gateway.setMemberKind(roomId, memberId, "player");
-  return { removed: result.removed, demoted: result.demoted };
+  const unlabeled = await relabel(deps.gateway, roomId, result.demoted, bounds?.relabelMs);
+  return { removed: result.removed, demoted: result.demoted, unlabeled };
+}
+
+/**
+ * Sets each member's `kind` back to 'player', and answers the ones still
+ * owed. Within `ms` when given, all at once: the label is cosmetic, so a
+ * room actor that stalls or fails leaves it owed rather than holding up
+ * what waits on the revoke. Without a bound, a failure throws.
+ */
+async function relabel(gateway: RoomGateway, roomId: string, memberIds: readonly string[], ms: number | undefined): Promise<string[]> {
+  if (ms === undefined) {
+    for (const memberId of memberIds) await gateway.setMemberKind(roomId, memberId, "player");
+    return [];
+  }
+  const results = await Promise.allSettled(memberIds.map((memberId) => bounded(gateway.setMemberKind(roomId, memberId, "player"), ms)));
+  return memberIds.filter((_, i) => results[i]?.status === "rejected");
+}
+
+/**
+ * A relabel a bounded revoke left owed: the member goes back to 'player'
+ * unless it holds a DM grant again since. False when the relabel did not
+ * land within `relabelMs`, and a read past its bounds throws, so either
+ * way it stays owed.
+ */
+export async function relabelOwed(deps: { pool: pg.Pool; gateway: RoomGateway }, roomId: string, memberId: string, bounds: RevokeBounds): Promise<boolean> {
+  const still = await withTx(
+    deps.pool,
+    async (tx) => {
+      await tx.query(`set local statement_timeout = '${Math.ceil(bounds.statementMs)}ms'`);
+      return tx.query<{ member_id: string }>(STILL_DM, [roomId, [memberId]]);
+    },
+    { checkoutMs: bounds.checkoutMs },
+  );
+  if (still.rows.length > 0) return true;
+  return (await relabel(deps.gateway, roomId, [memberId], bounds.relabelMs)).length === 0;
 }
 
 function rolesOf(role: Roles): GrantRole[] {
