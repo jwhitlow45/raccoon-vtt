@@ -1,6 +1,7 @@
 /* Only what inline styles cannot express: the interface font's faces, the
-   base document, native controls drawn dark and in the page's font, the
-   hidden attribute, focus rings, the tap flash and the disclosure marker,
+   base document, native controls drawn in the page's scheme and font, the
+   hidden attribute, focus rings and their halo on the board, the tap flash
+   and the disclosure marker,
    selection, an off field's placeholder, an off select's full strength,
    the loading spinner's turn and delay, the "Your turn" notice's
    keyframes, the interface size's two rules, the room focus keeps under
@@ -33,7 +34,10 @@
 }
 
 /* Native checkboxes, radios, selects, date fields and scrollbars draw for
-   a dark page. Without it an unchecked box is a white square. */
+   a dark page. Without it an unchecked box is a white square. Dark is the
+   boot default: lib/scheme.ts sets the device's scheme on the root before
+   the first render, and a subtree that keeps the dark look (lib/theme.ts
+   BOARD_SCOPE) sets its own. */
 :root {
   color-scheme: dark;
 }
@@ -43,8 +47,8 @@ body,
 #root {
   margin: 0;
   height: 100dvh;
-  background: #16161a;
-  color: #f1efe9;
+  background: var(--rvtt-bg, #16161a);
+  color: var(--rvtt-text, #f1efe9);
   font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   -webkit-text-size-adjust: 100%;
 }
@@ -107,19 +111,21 @@ dialog[data-rvtt-sheet]:not([open]) {
 }
 
 /* The accent's variables follow the viewer's member color in a room
-   (lib/accent.ts, set by pages/RoomChrome.tsx), the crest yellow elsewhere.
-   The ring is the accent, unless a container on a light fill sets
-   --rvtt-focus (the highlight Notice sets it to ink, 15.3:1 on cream,
-   where the yellow accent would read 1.1:1). */
+   (lib/accent.ts, set by pages/RoomChrome.tsx), the scheme's crest accent
+   elsewhere (lib/scheme.ts sets the base). The ring is the accent, unless
+   a container sets --rvtt-focus: the highlight Notice sets it to ink,
+   15.3:1 on cream, where the yellow accent would read 1.1:1, and what
+   keeps the dark look or floats on the board sets the accent resolved for
+   dark (lib/theme.ts BOARD_SCOPE and ON_BOARD_STYLE). */
 :focus-visible {
-  outline: 2px solid var(--rvtt-focus, var(--rvtt-accent, #f7df00));
+  outline: 2px solid var(--rvtt-focus, var(--rvtt-accent, var(--rvtt-base-accent, #f7df00)));
   outline-offset: 2px;
 }
 
 /* A choice's native radio lies unseen over its option (components/
    Segmented.tsx, Swatches.tsx), so the ring goes on the option. */
 .rvtt-choice:has(> input:focus-visible) {
-  outline: 2px solid var(--rvtt-focus, var(--rvtt-accent, #f7df00));
+  outline: 2px solid var(--rvtt-focus, var(--rvtt-accent, var(--rvtt-base-accent, #f7df00)));
   outline-offset: 2px;
 }
 
@@ -131,8 +137,28 @@ dialog[data-rvtt-sheet]:not([open]) {
   outline: none;
 }
 [data-pill-focus]:focus-visible > [data-pill] {
-  outline: 2px solid var(--rvtt-focus, var(--rvtt-accent, #f7df00));
+  outline: 2px solid var(--rvtt-focus, var(--rvtt-accent, var(--rvtt-base-accent, #f7df00)));
   outline-offset: 2px;
+}
+
+/* A ring that falls on the board (lib/theme.ts ON_BOARD), where a zoomed
+   or panned map can put any art under it, is two-tone in both schemes
+   (docs/design/design-v1-light-theme.md 6.4): the accent outline lies on a
+   fixed dark halo 6 px out (theme.ts ringHalo), and the halo stands on the
+   art. The accent is the one resolved for dark, so it reads on the halo.
+   The map's focus target draws its ring inside the map's edge, so its halo
+   is inset. The halo takes the place of an element's own shadow while it
+   shows focus. */
+[data-rvtt-on-board]:focus-visible,
+[data-pill-focus][data-rvtt-on-board]:focus-visible > [data-pill],
+.rvtt-choice[data-rvtt-on-board]:has(> input:focus-visible) {
+  box-shadow: 0 0 0 6px rgba(13, 13, 18, 0.9) !important;
+}
+[data-pill-focus][data-rvtt-on-board]:focus-visible {
+  box-shadow: none !important;
+}
+[data-rvtt-on-board][data-rvtt-ring]:focus-visible {
+  box-shadow: inset 0 0 0 6px rgba(13, 13, 18, 0.9) !important;
 }
 
 /* While a pointer was last (lib/inputModality.ts), focus the app moves
@@ -142,8 +168,12 @@ dialog[data-rvtt-sheet]:not([open]) {
    other controls: iOS keeps focus on one after its picker closes, and its
    ring would stay on the page. A key press brings every ring back at
    once. The choice and pill rings follow, each in a rule of its own, so a
-   browser that cannot read one of them still reads the rest. */
-[data-rvtt-input="pointer"] :focus-visible:not(textarea, [contenteditable]:not([contenteditable="false"]), input:not([type="button"], [type="checkbox"], [type="color"], [type="file"], [type="image"], [type="radio"], [type="range"], [type="reset"], [type="submit"])) {
+   browser that cannot read one of them still reads the rest. A ring's
+   halo on the board goes with it, or a dark frame would stay with no ring
+   inside. The map's focus target keeps both (data-rvtt-ring): it takes
+   focus from script only, when what had it went away, and nothing else
+   would show that focus went to the map. */
+[data-rvtt-input="pointer"] :focus-visible:not(textarea, [contenteditable]:not([contenteditable="false"]), input:not([type="button"], [type="checkbox"], [type="color"], [type="file"], [type="image"], [type="radio"], [type="range"], [type="reset"], [type="submit"]), [data-rvtt-on-board][data-rvtt-ring]) {
   outline: none;
 }
 [data-rvtt-input="pointer"] .rvtt-choice:has(> input:focus-visible) {
@@ -151,6 +181,11 @@ dialog[data-rvtt-sheet]:not([open]) {
 }
 [data-rvtt-input="pointer"] [data-pill-focus]:focus-visible > [data-pill] {
   outline: none;
+}
+[data-rvtt-input="pointer"] [data-rvtt-on-board]:not([data-rvtt-ring]):focus-visible,
+[data-rvtt-input="pointer"] [data-pill-focus][data-rvtt-on-board]:focus-visible > [data-pill],
+[data-rvtt-input="pointer"] .rvtt-choice[data-rvtt-on-board]:has(> input:focus-visible) {
+  box-shadow: none !important;
 }
 
 /* Some elements take focus from script only as a place to land, to say
@@ -182,14 +217,19 @@ summary::-webkit-details-marker {
 }
 
 ::selection {
-  background: var(--rvtt-selection, #f7df0066);
+  background: var(--rvtt-selection, var(--rvtt-base-selection, #f7df0066));
 }
 
 /* A field that is off draws its hint in theme.ts textDisabled, as it draws
    its value. The browser's own placeholder gray stays the same when a field
-   is off, and an inline style cannot reach the placeholder. */
+   is off, and an inline style cannot reach the placeholder. The first rule
+   is dark's value, and the second reads the scheme once lib/scheme.ts has
+   marked the root, so a subtree that keeps the dark look keeps it too. */
 :is(input, textarea):is(:disabled, [aria-disabled="true"])::placeholder {
   color: #7c7a84;
+}
+:root[data-rvtt-scheme] :is(input, textarea):is(:disabled, [aria-disabled="true"])::placeholder {
+  color: var(--rvtt-text-disabled, #7c7a84);
 }
 
 /* A select that is off keeps full strength. Chrome's own stylesheet fades
@@ -254,7 +294,7 @@ select:disabled {
   margin: 0;
   display: grid;
   place-items: center;
-  color: #a7a5ad;
+  color: var(--rvtt-text-muted, #a7a5ad);
   font-size: 14px;
   animation: rvtt-appear 1ms 300ms both;
 }
@@ -492,7 +532,7 @@ select:disabled {
    Its focus look follows the rings, so not while a pointer was last. */
 [data-resize-handle]:hover,
 :root:not([data-rvtt-input="pointer"]) [data-resize-handle]:focus-visible {
-  color: var(--rvtt-accent, #f7df00) !important;
+  color: var(--rvtt-accent, var(--rvtt-base-accent, #f7df00)) !important;
 }
 
 /* Forced colors would draw the sheet grabber (components/SheetGrabber.tsx)
