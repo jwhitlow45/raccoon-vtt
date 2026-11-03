@@ -3,6 +3,7 @@ import { UNDO_NOTICE, undoNotice, type UndoNotice } from "./historyNotice.ts";
 import { historyCommandSchema, type HistoryDirection, type HistoryMessage, type UndoGroupOptions } from "#shared/undoContract.ts";
 import { blockerText, EMPTY_HISTORY, HistoryController, refusalSentence, type HistoryActivation, type HistoryCommand } from "./history.ts";
 import { createStore, type StoreApi } from "zustand/vanilla";
+import { scopeSlot } from "./scope.ts";
 import { uuidv7 } from "#shared/ids.ts";
 import { parseKey } from "#shared/keys.ts";
 import { MAX_OP_AGE_MS } from "#shared/pendingOps.ts";
@@ -30,6 +31,24 @@ import { panelById } from "../features/panels.ts";
 import { crossWide, EMPTY_EPHEMERAL, INITIAL_LOCAL, MAX_REFUSED, withoutBelow, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetExpanded, withSheetHidden, withSidePanelHidden, withSplit, withSplitFits, withSwap, type Ended, type LocalUi, type OnAnswer, type OpAnswer, type OpRefusal, type PanelHow, type PendingOp, type RoomView, type Toast, type ToastAction, type ToastDie, type UnknownCause, type You } from "./types.ts";
 
 export type { PendingOp } from "./types.ts";
+
+/**
+ * The token bar's Place freely (docs/design/design-v1-snap-off.md 4): the
+ * token whose next drag drops between squares, or null. Per device and never
+ * stored, so it lives beside the room's local state in the Room's scope, and
+ * the canvas (canvas/Stage.tsx) turns it off after that drag, a drag of
+ * another token, a cancel, a tool change, a selection change and a scene
+ * change.
+ */
+export const placeFreelySlot = scopeSlot(() => createStore<{ tokenId: string | null }>(() => ({ tokenId: null })));
+
+/**
+ * The line this device's own drag label adds for snap off, or null: "Placing
+ * freely" while the drag drops between squares, else why Alt does nothing
+ * there (features/movement/free.ts). The canvas writes it, and the ruler
+ * layer draws it under the drag's label.
+ */
+export const dragLineSlot = scopeSlot(() => createStore<{ line: string | null }>(() => ({ line: null })));
 export { MAX_OP_AGE_MS } from "#shared/pendingOps.ts";
 
 /**

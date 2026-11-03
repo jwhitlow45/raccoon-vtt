@@ -16,6 +16,8 @@ export type BarButtonId =
   | "light"
   | "attach"
   | "detach"
+  | "placeFreely"
+  | "snapToGrid"
   | "multiSelect"
   | "roll"
   | "uses"
@@ -52,6 +54,10 @@ export type BarButtonInput = {
    * held, and "no" for none. Left out, none.
    */
   uses?: "yes" | "loading" | "no";
+  /** The viewer may drag the token now, on a square scene, so its next drag may drop between squares (docs/design/design-v1-snap-off.md 4). Left out, no. */
+  placeFreely?: boolean;
+  /** The token is drawn between squares, and the viewer is the DM or an owner who may move it. Left out, no. */
+  snapToGrid?: boolean;
 };
 
 /**
@@ -88,6 +94,9 @@ export function barButtons(input: BarButtonInput): { passing: BarButtonId[]; pla
   if ((dm || owner) && input.uses !== undefined && input.uses !== "no") play.push("uses");
   if ((dm || owner) && input.light) play.push("light");
   play.push(...input.attach);
+  // Last, outside the strip (REST_PLAY) and the passing line, so nothing that shows there moves (docs/design/design-v1-snap-off.md 4).
+  if (input.placeFreely) play.push("placeFreely");
+  if (input.snapToGrid) play.push("snapToGrid");
   const less: BarButtonId[] = [];
   if (dm) less.push("locked", "duplicate", "delete");
   // The DM keeps Delete and gets no second button.

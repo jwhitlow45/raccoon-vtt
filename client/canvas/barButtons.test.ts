@@ -10,6 +10,16 @@ const DM: BarButtonInput = { ...NOTHING, dm: true };
 const OWNER: BarButtonInput = { ...NOTHING, owner: true };
 
 describe("the bar's rows", () => {
+  test("Place freely and Snap to grid end the play row, after Attach, and never reach the strip or the passing line (docs/design/design-v1-snap-off.md 4)", () => {
+    const placing = { ...OWNER, attach: ["attach"] as const, placeFreely: true, snapToGrid: true, undoMove: true };
+    const rows = barButtons(placing);
+    assert.deepEqual(rows.play, ["conditions", "multiSelect", "roll", "attach", "placeFreely", "snapToGrid"]);
+    assert.deepEqual(rows.passing, ["undoMove"]);
+    const strip = restButtons({ ...placing, lead: true });
+    assert.ok(!strip.includes("placeFreely") && !strip.includes("snapToGrid"), strip.join());
+    assert.deepEqual(barButtons({ ...NOTHING, placeFreely: true }).play, ["multiSelect", "placeFreely"], "a player who may move any token");
+  });
+
   test("Uses after Roll for the DM and an owner on a creature with combat uses, held while its block loads (docs/design/design-v1-combat-controls.md 6)", () => {
     assert.deepEqual(barButtons({ ...DM, uses: "yes", light: true }).play, ["conditions", "hidden", "multiSelect", "roll", "uses", "light"]);
     assert.deepEqual(barButtons({ ...OWNER, uses: "loading" }).play, ["conditions", "multiSelect", "roll", "uses"]);

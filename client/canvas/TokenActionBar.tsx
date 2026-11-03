@@ -5,6 +5,7 @@ import { CONDITION_KEYS, STATUS_KEYS, type Actor, type Effect, type Token } from
 import { stopFootprint } from "#shared/rules/footprint.ts";
 import { hpLess, shownLife } from "#shared/rules/hp.ts";
 import { reshapeLeg } from "#shared/rules/path.ts";
+import { isHex, sceneGrid } from "#shared/rules/grid.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { Button, ButtonGhost } from "../components/Button.tsx";
 import { RETURN_RANK, useSheetReturnFocus } from "../components/sheetFocus.ts";
@@ -76,6 +77,7 @@ import { effectChip, elevationBadge } from "../lib/tokenView.ts";
 import { dockSlot, foldsUnderSheet, sideSheetRoom, usePublishBar } from "../pages/fold.ts";
 import { dispatchGesture } from "../state/actions.ts";
 import { useRoomScope, useScoped } from "../state/scope.ts";
+import { placeFreelySlot } from "../state/store.ts";
 import { useKeyHints, withKey } from "../state/shortcuts.ts";
 import { sheetOpen } from "../state/types.ts";
 import {
@@ -200,6 +202,8 @@ export function TokenActionBar(props: {
   /** The map's size in the chrome's own pixels. */
   viewport: Size;
   fullAccess: boolean;
+  /** The viewer may drag the token now (dragRights.ts), so it may drop between squares. */
+  drags?: boolean;
   onDetails(): void;
   onClose(): void;
   /** How far the token's top stands above `anchor` as drawn, in the chrome's pixels (barDock.ts clearShift's `tokenHeight`). */
@@ -218,13 +222,13 @@ export function TokenActionBar(props: {
       label={`${displayName(token)} actions`}
       dock={{ text: displayName(token), show: `Show ${displayName(token)} actions`, closeLabel: "Close", close: props.onClose }}
     >
-      <TokenBarBody token={token} fullAccess={props.fullAccess} onDetails={props.onDetails} onClose={props.onClose} />
+      <TokenBarBody token={token} fullAccess={props.fullAccess} drags={props.drags === true} onDetails={props.onDetails} onClose={props.onClose} />
     </BarFrame>
   );
 }
 
 /** The single token's bar inside its frame, which tells it whether it is short and whether it docks. */
-function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(): void; onClose(): void }) {
+function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boolean; onDetails(): void; onClose(): void }) {
   const { token } = props;
   const frame = useContext(FrameContext);
   const actions = useRoomActions();
@@ -253,6 +257,8 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
   const attachSlots = useAttachSlots(token);
   const detach = useDetach(token, attachSlots.includes("detach"));
   const detachNoteId = useId();
+  const placing = useScoped(placeFreelySlot);
+  const placingThis = useStore(placing, (s) => s.tokenId === token.id);
 
   const access = useMemo(
     () =>
@@ -310,6 +316,9 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
     companion: isCompanion(token),
     attach: attachSlots,
     uses: usesPresence,
+    // Snap off for a drag, on square scenes only (docs/design/design-v1-snap-off.md 4). A locked token's placement changes only by the DM.
+    placeFreely: props.drags && scene !== undefined && !isHex(sceneGrid(scene)),
+    snapToGrid: token.nudge !== undefined && (access.dm || (access.owner && !token.locked)),
   };
   const rows = barButtons(buttonInput);
   const lead = access.hp !== "none" && !noHp;
@@ -367,6 +376,20 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
         return <AttachButton key={id} token={token} onOpen={frame.raiseAttach} />;
       case "detach":
         return <DetachButton key={id} token={token} detach={detach} noteId={detachNoteId} />;
+      // For the next drag of this token alone, then it turns itself off (canvas/Stage.tsx).
+      case "placeFreely":
+        return (
+          <BarButton key={id} pressed={placingThis} onClick={() => placing.setState({ tokenId: placingThis ? null : token.id })}>
+            Place freely
+          </BarButton>
+        );
+      // Not a move: nothing walks or pays, so it is a token update, which Undo move takes back.
+      case "snapToGrid":
+        return (
+          <BarButton key={id} onClick={() => actions.dispatch({ t: "token.update", tokenId: token.id, patch: { drawnAt: null } })}>
+            Snap to grid
+          </BarButton>
+        );
       case "multiSelect":
         return (
           <BarButton key={id} ref={multiToggle.ref} pressed={multi} onClick={multiToggle.toggle}>
