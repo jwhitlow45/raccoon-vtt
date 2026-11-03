@@ -514,4 +514,85 @@ describe("synced music and sound", { concurrency: false }, () => {
     });
     assert.deepEqual(lines, [], "This device's Sounds out of line");
   });
+
+  test("sn-9. the ask, the display's two cards and its Sound row at three sizes and two scales, within 1 px", async () => {
+    await playTrack(run.ids.tavern, 0, "all");
+    await soundSays(dm, /^playing music/, 5_000);
+    const lines: string[] = [];
+    const sized = async (page: Page, size: (typeof SIZES)[number], key: string, scale: number) => {
+      await page.setViewportSize({ width: size.width, height: size.height });
+      await page.evaluate(([k, s]) => localStorage.setItem(k as string, String(s)), [key, scale] as const);
+      await page.reload();
+    };
+
+    // Eve has no choice yet, so each load asks again.
+    const eveContext = await browser.newContext({ viewport: PHONE });
+    try {
+      await eveContext.addInitScript(SOUND_TEST_FLAG);
+      await eveContext.addInitScript(roomSoundScript(null));
+      await join(eveContext, "Eve", "#14b8a6");
+      const eve = await eveContext.newPage();
+      await openRoom(eve);
+      for (const size of SIZES) {
+        for (const scale of [1, 1.3]) {
+          await sized(eve, size, "rvtt.uiScale", scale);
+          const ask = eve.getByRole("status").filter({ hasText: "The DM is playing sound for the room." });
+          await ask.waitFor();
+          lines.push(...alignmentLines(await measureAlignment(ask), `the ask ${size.name} ${scale * 100}%`));
+        }
+      }
+    } finally {
+      await eveContext.close();
+    }
+
+    // Two displays: one with an iPhone's autoplay rules waits for a tap, one without the mixer can't play.
+    const display = async (script: string) => {
+      const c = await browser.newContext({ viewport: TV });
+      await c.addInitScript(SOUND_TEST_FLAG);
+      await c.addInitScript(script);
+      const res = await dmContext.request.post(`${server.origin}/api/rooms/${run.roomId}/display/code`, { headers: { Origin: server.origin } });
+      assert.equal(res.status(), 201, await res.text());
+      const { code } = (await res.json()) as { code: string };
+      const tv = await c.newPage();
+      await tv.goto(`${server.origin}/display`);
+      await tv.getByLabel("Code from the DM's screen").fill(code);
+      await tv.getByRole("button", { name: "Connect" }).click();
+      // Paired once the code's form goes, so a reload comes back to the room.
+      await tv.getByLabel("Code from the DM's screen").waitFor({ state: "detached" });
+      return { c, tv };
+    };
+    const NO_MIXER = "delete AudioContext.prototype.createMediaElementSource;";
+    const waiting = await display(IPHONE_AUDIO);
+    const cannot = await display(NO_MIXER);
+    try {
+      for (const size of SIZES) {
+        for (const scale of [1, 1.3]) {
+          const where = `${size.name} ${scale * 100}%`;
+          await sized(cannot.tv, size, "rvtt.displayUiScale", scale);
+          const cannotCard = cannot.tv.locator("[data-display-sound-card]");
+          await cannotCard.filter({ hasText: "This TV's browser can't play the room's sound." }).waitFor();
+          lines.push(...alignmentLines(await measureAlignment(cannotCard), `the display's can't-play card ${where}`));
+
+          await sized(waiting.tv, size, "rvtt.displayUiScale", scale);
+          const tapCard = waiting.tv.locator("[data-display-sound-card]");
+          await tapCard.filter({ hasText: "Tap or press a key for sound." }).waitFor({ timeout: 10_000 });
+          lines.push(...alignmentLines(await measureAlignment(tapCard), `the display's tap card ${where}`));
+          if (size.name === "1440x900" && scale === 1) await shots.take(waiting.tv, "sn-9-display-tap-card");
+          // The tap that opens the menu unlocks the sound, and the card goes.
+          await waiting.tv.mouse.click(size.width / 2, size.height / 3);
+          await soundSays(waiting.tv, /^playing music/, 8_000);
+          assert.equal(await tapCard.count(), 0, `the tap card goes once the sound plays, ${where}`);
+          const row = waiting.tv.getByRole("menu", { name: "Table display" }).getByRole("group", { name: "Sound" });
+          await row.waitFor();
+          lines.push(...alignmentLines(await measureAlignment(row), `the display's Sound row ${where}`));
+        }
+      }
+    } finally {
+      for (const d of [waiting, cannot]) {
+        await d.c.request.delete(`${server.origin}/api/display/session`, { headers: { Origin: server.origin } });
+        await d.c.close();
+      }
+    }
+    assert.deepEqual(lines, [], "out of line");
+  });
 });
