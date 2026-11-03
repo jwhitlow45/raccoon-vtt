@@ -875,7 +875,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
     await compass.getByRole("radio", { name: "Toward the left" }).check();
     await waitFor("the wind toward the left", () => (weatherOf(run.arenaId)?.toward === 270 ? true : null));
     assert.deepEqual(weatherOf(run.arenaId), { kind: "rain", heavy: true, wind: "strong", toward: 270 });
-    await what.getByText(/^Disadvantage on ranged attack rolls with weapons\./).waitFor();
+    await what.getByText(/Attacks with a ranged weapon here roll with Disadvantage/).waitFor();
     // The guide's picture of the fold (docs/dm-guide/weather-settings.webp): its label at the top of the panel.
     await fold.evaluate((el) => el.scrollIntoView({ block: "start" }));
     await shots.take(dm, "wx-ui-1-fold-open");
