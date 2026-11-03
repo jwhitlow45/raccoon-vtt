@@ -32,7 +32,7 @@ import { RoomProvider, useAssets, useRoomView, type AssetSource } from "../../st
 import { closedSlot, closedStorageKey, closeHandout, loadClosed } from "../handouts/closed.ts";
 import { nextPopup, pageName, showingKey } from "../handouts/handouts.ts";
 import { useXCard, XCardHost } from "../xcard/XCardHost.tsx";
-import { UI_SCALES, uiScaleLabel, useUiScale } from "../device/settings.ts";
+import { UI_SCALES, uiScaleLabel, useUiScale, useWeatherMode, WEATHER_MODE_WORDS, WEATHER_MODES } from "../device/settings.ts";
 import { choiceOf, choiceWords, isoOffered, pickOf, TURN_LEFT, TURN_LEFT_DESCRIPTION, TURN_RIGHT, TURN_RIGHT_DESCRIPTION, VIEW_CHOICES, VIEW_GROUP } from "../view/choice.ts";
 import { displayViewKey } from "../view/store.ts";
 import { SuggestionHelp, useViewChoice, useViewVoice, ViewVoice, type ViewChoiceState } from "../view/ViewMenu.tsx";
@@ -57,7 +57,7 @@ import {
   type DisplayPaging,
   type Overlay,
 } from "./logic.ts";
-import { chooseDisplayUiScale, forgetDisplayRoom, readDisplayMode, readDisplayTurn, rememberedDisplayRoom, saveDisplayChoices, useDisplayTextSize } from "./remember.ts";
+import { chooseDisplayUiScale, chooseDisplayWeather, forgetDisplayRoom, readDisplayMode, readDisplayTurn, rememberedDisplayRoom, saveDisplayChoices, useDisplayTextSize, useDisplayWeather } from "./remember.ts";
 import { TV_BUTTON_HEIGHT, TV_HANDOUT_SCRIM, TV_TEXT } from "./tvType.ts";
 
 /**
@@ -86,6 +86,7 @@ export default function DisplayRoom(props: { roomId: string; memberId: string })
   const { roomId, memberId } = props;
   const [live, setLive] = useState<Live | null>(null);
   useDisplayTextSize();
+  useDisplayWeather();
   useEffect(() => {
     // A display's projection is a player's who owns nothing, so its store holds the player role (state/store.ts).
     const room = createRoomStore({ roomId, you: { memberId, role: "player" } });
@@ -911,6 +912,7 @@ function DisplayMenu(props: {
         Show whose turn it is: {props.showTurn ? "on" : "off"}
       </MenuButton>
       <TextSize onTouch={props.onTouch} />
+      <WeatherRow onTouch={props.onTouch} />
       {fullscreenSupported() ? (
         <MenuButton
           role="menuitem"
@@ -1027,6 +1029,30 @@ function TextSize(props: { onTouch(): void }) {
           }}
         >
           {uiScaleLabel(s)}
+        </MenuButton>
+      ))}
+    </div>
+  );
+}
+
+/** One row: weather on the map moving, still or off, for this display only (docs/design/design-v1-weather.md 4.3). */
+function WeatherRow(props: { onTouch(): void }) {
+  const mode = useWeatherMode();
+  return (
+    <div role="group" aria-label="Weather" style={{ display: "grid", gridTemplateColumns: "auto repeat(3, minmax(0, 1fr))", alignItems: "center", gap: theme.space(2) }}>
+      <span style={{ padding: `0 ${theme.space(1)}px`, fontSize: TV_TEXT.small, fontWeight: theme.weight.bold }}>Weather</span>
+      {WEATHER_MODES.map((m) => (
+        <MenuButton
+          key={m}
+          role="menuitemradio"
+          checked={mode === m}
+          compact
+          onClick={() => {
+            chooseDisplayWeather(m);
+            props.onTouch();
+          }}
+        >
+          {WEATHER_MODE_WORDS[m]}
         </MenuButton>
       ))}
     </div>

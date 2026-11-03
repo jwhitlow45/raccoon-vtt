@@ -15,6 +15,7 @@ import { keySuffix, keyText, setShortcutSheet, useKeyHint, useShortcutKeys } fro
 import { setSoundOn, useSoundOn } from "../encounter/alerts.ts";
 import { setSoundEnabled, usePingSound } from "../pings/feedback.ts";
 import { diceLoader } from "../dice/throw/hooks.ts";
+import { useWeatherStillReason, WEATHER_CARDS } from "../weather/store.ts";
 import { DiceSetPicker } from "./DiceSetPicker.tsx";
 import {
   setLowPower,
@@ -23,6 +24,7 @@ import {
   setRollToasts,
   setSheetHandle,
   setUiScale,
+  setWeatherMode,
   UI_SCALES,
   uiScaleLabel,
   useLowPower,
@@ -31,6 +33,7 @@ import {
   useRollToastsOn,
   useSheetHandle,
   useUiScale,
+  useWeatherMode,
   type UiScale,
 } from "./settings.ts";
 
@@ -77,6 +80,8 @@ export default function ThisDevice() {
   const sheetKey = useKeyHint("sheet");
   const handle = useSheetHandle();
   const handleHelp = useId();
+  const weather = useWeatherMode();
+  const weatherStill = useWeatherStillReason();
   return (
     <div style={{ display: "grid" }}>
       <Section label="Interface size" divider={false}>
@@ -97,7 +102,7 @@ export default function ThisDevice() {
       <Section label="Battery">
         <Switch
           label="Low power"
-          help="Draws the map at a lower resolution, skips small animations and shows rolls without dice, to save battery on long sessions. Text on the map looks softer."
+          help="Draws the map at a lower resolution, skips small animations, keeps weather still and shows rolls without dice, to save battery on long sessions. Text on the map looks softer."
           checked={lowPower}
           onChange={setLowPower}
         />
@@ -115,6 +120,19 @@ export default function ThisDevice() {
               { value: "full", label: "Full size", help: "Sharper on a large screen. A big map can be too much for a phone." },
             ]}
             onChange={setMapDetail}
+          />
+        </div>
+      </Section>
+      <Section label="Weather">
+        {/* In a settings row's padding, as Map detail's cards stand. */}
+        <div style={{ padding: `${theme.space(2)}px 0` }}>
+          <RadioCards
+            legend="Weather on the map"
+            // Only while Moving is chosen: Still and Off already keep it still.
+            help={weather === "moving" && weatherStill ? weatherStill : undefined}
+            value={weather}
+            options={WEATHER_CARDS}
+            onChange={setWeatherMode}
           />
         </div>
       </Section>
