@@ -129,12 +129,11 @@ import { OptionsFrameContext, type OptionsFrame } from "../features/measure/cont
 import type { Rect } from "../components/popoverPlace.ts";
 import { Badge, FindButton, FitButton, FullscreenButton, HistoryLoading, PauseScreen, Stacked, UndoButtons, useAccentVars, useEscape, useNoPageZoom, usePreloadAndReopen, useRoomTitle, ViewButton } from "./RoomChrome.tsx";
 import { DockHeaderActions, DockRow, FoldStatus, SAFE_PROBE_STYLE, useDockSummary, useLayoutHeight, useSafeAreas, type DockActions } from "./RoomDock.tsx";
+import { MAP_FOCUS_ATTRS, MAP_FOCUS_STYLE, MAP_GROUND, memberDotStyle, SCENE_GATE_STYLE, toolGround, toolOnBoard } from "./onBoard.ts";
 
 const { topBar: TOP_BAR, toolbar: TOOLBAR } = theme.layout;
 /** "Viewing as Pat" at its widest, in window pixels (features/dm/PlayerPreview.tsx). */
 const PREVIEW_NOTICE_MAX = theme.layout.notice;
-/** Over the whole map, drawing nothing but its focus ring, inside the map's edge. */
-const MAP_FOCUS_STYLE: CSSProperties = { position: "absolute", inset: 0, pointerEvents: "none", outlineOffset: -2 };
 
 /**
  * An element's height as drawn, kept up to date. The bars over the map
@@ -1003,10 +1002,10 @@ function RoomPage() {
       <div ref={safe.probe} aria-hidden style={SAFE_PROBE_STYLE} />
       <BarWidthProbe zoom={zoom} />
       {/* The map's chrome pads for the right safe area only where the map reaches that edge: not beside the side panel, which holds it (theme.safe.mapRight). */}
-      <div style={{ position: "relative", flex: 1, minWidth: 0, ["--rvtt-map-safe-right" as string]: sideShown ? "0px" : theme.safe.right }}>
+      <div style={{ position: "relative", flex: 1, minWidth: 0, background: MAP_GROUND, ["--rvtt-map-safe-right" as string]: sideShown ? "0px" : theme.safe.right }}>
         <MapArea gate={gate} role={role} actionBar={actionBar} insets={insets} paneInsets={paneInsets} onSelect={select} onOpenDetails={openDetails} tokenPanelShown={tokenPanelShown} onHideBar={hideBar} />
         {/* The map's focus target (mapFocus.ts): after the map, so its ring draws over it, and before the bars, so Tab from it goes on to them. Taps pass through it. Unlike other places focus lands, it keeps its ring under keys (data-rvtt-ring, globals.css). */}
-        <div ref={mapFocusRef} tabIndex={-1} role="img" aria-label="Map" data-rvtt-ring="" style={MAP_FOCUS_STYLE} />
+        <div ref={mapFocusRef} tabIndex={-1} role="img" aria-label="Map" {...MAP_FOCUS_ATTRS} style={MAP_FOCUS_STYLE} />
         <TopBar
           ref={topBarRef}
           zoom={zoom}
@@ -1350,7 +1349,6 @@ function MapArea(props: {
     );
   }
   // Fail closed: until the gate opens, nothing from any scene is drawn.
-  // Black, not the theme's background, so a blackout and a load look alike.
   const message =
     gate.kind === "blackout"
       ? "The DM has paused the game."
@@ -1359,23 +1357,7 @@ function MapArea(props: {
           ? "Create a scene to get started."
           : "Waiting for the DM to pick a scene."
         : "Loading the scene…";
-  return (
-    <div
-      style={{
-        position: "absolute",
-        inset: 0,
-        background: theme.color.stage,
-        display: "grid",
-        placeItems: "center",
-        color: theme.color.textMuted,
-        fontSize: theme.font.body14,
-        padding: theme.space(6),
-        textAlign: "center",
-      }}
-    >
-      {gate.kind === "wait" ? <Loading text={message} /> : message}
-    </div>
-  );
+  return <div style={SCENE_GATE_STYLE}>{gate.kind === "wait" ? <Loading text={message} /> : message}</div>;
 }
 
 /**
@@ -1617,7 +1599,7 @@ const CHIP_PX = 28;
 
 /** The member's color, as the dot in a chip. */
 function ChipDot(props: { color: string }) {
-  return <span aria-hidden style={{ flex: "none", width: 8, height: 8, borderRadius: theme.radius.round, background: props.color }} />;
+  return <span aria-hidden style={memberDotStyle(props.color, 8)} />;
 }
 
 /**
@@ -2727,11 +2709,14 @@ function ToolButton(props: {
   const expanded = popup ? undefined : props.expanded;
   const name = withKey(props.label, props.keys ?? null);
   const tooltip = useTooltip(name, { describes: addsWords(name, props.label) });
+  const chosen = props.active || popup?.open === true;
+  const onBoard = toolOnBoard(props.floating === true);
   return (
     <>
       <button
         ref={ref}
         type="button"
+        {...onBoard.attrs}
         data-active={props.active}
         aria-pressed={expanded === undefined && !popup ? props.active : undefined}
         aria-expanded={expanded}
@@ -2751,14 +2736,15 @@ function ToolButton(props: {
           boxSizing: "border-box",
           minHeight: theme.touch,
           borderRadius: theme.radius.md,
-          border: `${theme.line.border}px solid ${props.active || popup?.open ? theme.color.accent : props.floating ? theme.color.border : "transparent"}`,
-          background: props.active || popup?.open ? theme.color.accentTint : props.floating ? theme.color.overlay : "transparent",
-          color: props.active || popup?.open ? theme.color.accent : theme.color.text,
+          border: `${theme.line.border}px solid ${chosen ? theme.color.accent : props.floating ? theme.color.border : "transparent"}`,
+          background: toolGround(chosen, props.floating === true),
+          color: chosen ? theme.color.accent : theme.color.text,
           fontSize: theme.font.small,
           fontWeight: theme.weight.strong,
           cursor: "pointer",
           pointerEvents: "auto",
           ...sizeStyle(props.size),
+          ...onBoard.style,
         }}
       >
         {props.children}
