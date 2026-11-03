@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { ApiError } from "../lib/api.ts";
-import { joinRefusal, joinSend, LINK_REFUSED, minutes, resumesWaiting } from "./joinChallenge.ts";
+import { ApiError, type ApiErrorCodeOrNetwork } from "../lib/api.ts";
+import { askRefusal, joinRefusal, joinSend, LINK_REFUSED, minutes, resumesWaiting } from "./joinChallenge.ts";
 
 describe("a refused password step", () => {
   test("turnstile_required shows the check and sends again once it is solved, with no error", () => {
@@ -100,5 +100,43 @@ describe("minutes", () => {
     assert.equal(minutes(null), "a few minutes");
     assert.equal(minutes(1_000), "a minute");
     assert.equal(minutes(61_000), "2 minutes");
+  });
+});
+
+describe("a password step in a room that switched to Only by asking", () => {
+  test("asks_only is no wrong password: it reads the mode again and says nothing", () => {
+    const refusal = joinRefusal(new ApiError(403, "Refused.", "asks_only", null), true);
+    assert.deepEqual(refusal, { error: null, challenged: false, resend: false, wrongPassword: false, modeChanged: true });
+  });
+});
+
+describe("a refused ask", () => {
+  const refuse = (status: number, code: ApiErrorCodeOrNetwork, retryAfterMs: number | null = null) =>
+    askRefusal(new ApiError(status, "Refused.", code, retryAfterMs));
+
+  test("each refusal says what the design says", () => {
+    assert.equal(refuse(429, "asks_full").error, "Several people are waiting for the DM already. Try again in a few minutes.");
+    assert.equal(refuse(429, "asked_recently", 12 * 60_000).error, "The DM said no a few minutes ago. Ask again in 12 minutes.");
+    assert.equal(refuse(429, "rate_limited", 40 * 60_000).error, "Too many requests from here. Try again in 40 minutes.");
+    assert.equal(refuse(503, "busy").error, "The server is busy. Try again in a moment.");
+    assert.equal(refuse(429, "rate_limited", null).error, "Too many requests from here. Try again in a few minutes.");
+    assert.equal(askRefusal(new Error("x")).error, "Something went wrong. Try again.");
+  });
+
+  test("turnstile_required shows the check and sends the same ask again once it is solved", () => {
+    assert.deepEqual(refuse(403, "turnstile_required"), { error: null, challenged: true, resend: true, modeChanged: false, alreadyHere: null });
+    const failed = refuse(403, "turnstile_failed");
+    assert.equal(failed.challenged, true);
+    assert.equal(failed.resend, false);
+    assert.equal(failed.error, "The human check did not pass. Try again.");
+    assert.match(refuse(503, "turnstile_unavailable").error ?? "", /not answering/);
+  });
+
+  test("a changed mode reads the room again with no error, and being in already or being decided asks the server", () => {
+    assert.equal(refuse(403, "asks_off").modeChanged, true);
+    assert.equal(refuse(403, "asks_only").modeChanged, true);
+    assert.equal(refuse(403, "asks_off").error, null);
+    assert.equal(refuse(409, "already_in").alreadyHere, "in");
+    assert.equal(refuse(409, "request_deciding").alreadyHere, "deciding");
   });
 });
