@@ -6299,6 +6299,10 @@ export function sceneSettingsTests(): void {
         const detail = menu.locator("section").filter({ has: page.getByRole("heading", { name: "Map detail", exact: true }) }).last();
         await detail.scrollIntoViewIfNeeded();
         await sweep.measure(page, "this-device-map-detail", detail);
+        // This device's Weather section (docs/design/design-v1-weather.md 12): its three cards, with the still reason's help under the group.
+        const weatherCards = menu.locator("section").filter({ has: page.getByRole("heading", { name: "Weather", exact: true }) }).last();
+        await weatherCards.scrollIntoViewIfNeeded();
+        await sweep.measure(page, "this-device-weather", weatherCards);
         await back.click();
         await closeSheets(page);
         // The DM panel's handout form, whose Show to is the same cards.
