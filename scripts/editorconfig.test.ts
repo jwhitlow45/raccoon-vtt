@@ -19,7 +19,7 @@ const ROOT = fileURLToPath(new URL("..", import.meta.url));
 type Rule = "utf-8" | "lf" | "final newline" | "space indent" | "no trailing whitespace";
 
 /** File types that hold no text. Any other file is read as text, so a new binary type needs adding here. */
-const BINARY = /\.(mp4|pdf|png|webm|webp|woff2)$/;
+const BINARY = /\.(mp3|mp4|pdf|png|wav|webm|webp|woff2)$/;
 
 /** Files that keep one rule broken, each for the reason given. */
 const EXEMPT = new Map<string, Rule>([

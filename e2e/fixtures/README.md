@@ -60,3 +60,19 @@ fonttools varLib.instancer SpaceGrotesk-VariableFont_wght.ttf wght=500 --static 
 `embedded-font.png` is Chrome's screenshot of the same box at twice its CSS size, the reference the stored page's text box is compared with. `fontBoxDistance` brings both to 240 x 60 gray pixels. The same words in Helvetica or Arial are about 37 gray levels away on average, so a page drawn in a stand-in font fails.
 
 Space Grotesk is copyright 2020 The Space Grotesk Project Authors (https://github.com/floriankarsten/space-grotesk) and licensed under the SIL Open Font License 1.1 (https://openfontlicense.org). The license allows embedding the font in documents. The PDF holds only the subset of glyphs its words use.
+
+## Sound files: sound-*.wav and sound-*.mp3
+
+For `e2e/soundupload.e2e.ts` (docs/design/design-v1-sound.md 12). Each is a tone written from scratch by `e2e/fixtures/sounds.ts`, never a recording, and the MP3s come from the encoder the app ships (`@breezystack/lamejs`). The same run writes the same bytes.
+
+```sh
+node e2e/fixtures/sounds.ts
+```
+
+- `sound-tone.wav`: 1 s of a 1 kHz tone at -20 dBFS, 16-bit stereo at 44.1 kHz. The upload reads it straight from its PCM and converts it.
+- `sound-surround.wav`: 0.3 s of a tone on all six channels of 5.1, 24-bit at 48 kHz. Mixed to stereo, then converted at 48 kHz.
+- `sound-vbr.mp3`: two whole 1-second streams back to back, at 128 and then 160 kbps, so its bitrate changes. Converted.
+- `sound-tagged.mp3`: 2 s at 128 kbps between an ID3v2 tag of 4,096 bytes and an ID3v1 tag. Copied, without either tag.
+- `sound-tagged-320.mp3`: 1 s at 320 kbps with the same tags, past the bitrates the room keeps. Converted.
+
+The long files the steps need, a 30-second effect, a 15-minute track, a 10-minute WAV and a 48 kHz MP3 of several minutes, would take hundreds of megabytes here, so the e2e file writes them to a temporary folder with the same script's functions each time it runs.
