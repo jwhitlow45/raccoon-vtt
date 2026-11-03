@@ -647,7 +647,8 @@ Built in v1 wave 7 (docs/design/design-v1-dice.md), at the project owner's reque
 
 **MVP**
 
-- Dark theme by default. In a room, buttons and other accented controls take your own member color, made lighter or darker when needed so they stay readable and never look like the turn highlight or a disabled button. Elsewhere the accent is the crest's yellow. The crest's orange stays in the logo only. Optional light theme (not built yet).
+- Dark theme by default. In a room, buttons and other accented controls take your own member color, made lighter or darker when needed so they stay readable and never look like the turn highlight or a disabled button. Elsewhere the accent is the crest's yellow. The crest's orange stays in the logo only. Optional light theme.
+  - Built in the light theme (docs/design/design-v1-light-theme.md). Menu, This device, Theme: Dark (the default), Light or Auto, kept on the device. The map, the fog, the dice tray, the pause screen and the table display stay dark in both, and member colors are made lighter or darker against the light page's own surfaces.
 - Every image that ships with the app (builder textures, condition icons, generic tokens) comes from an openly licensed source and is credited in the app. No AI-generated art.
   - Built in v1 wave 3. The map stamps too: CC0 and CC BY 3.0 sprites from OpenGameArt, and CC0 Poly Haven models rendered from above by a committed script, each source credited on the About page and in `CREDITS.md`.
   - Built in v1 wave 5. The 4,180 token icons too, from game-icons.net at a pinned version, CC BY 3.0 and a few CC0, with every author credited on the About page and in `CREDITS.md`, and each icon's author and license shown where it is picked.

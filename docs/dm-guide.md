@@ -84,6 +84,10 @@ When you type on a phone, whatever you are typing in rises to sit just above the
 
 ![This device on a phone, Sheet handle: the choice Ringed tail in a menu, and under it a strip that previews the handle at the top edge of a sheet.](dm-guide/sheet-handle.webp)
 
+**A light page, if you prefer one.** In **This device**, **Theme** picks **Dark** (the default), **Light** or **Auto** for this device, and the map stays dark in all three. Auto follows the light or dark setting of the phone or computer itself and changes with it. The choice is yours alone: each player picks their own, and the table display always stays dark. The fog, the dice as they roll and the pause screen keep their dark look too, so the map reads the same on every device at the table. A guide open in another tab turns with the room.
+
+![This device on a computer in the light theme: under Interface size, the Theme section's help and its three choices, Dark, Light and Auto, with Light chosen, beside the dark map.](dm-guide/theme.webp)
+
 **The toolbar** holds eleven tools. On a computer, each one has a key:
 
 - **Select** (`V`), **Ruler** (`R`), **Area** (`A`), **Fog** (`F`), **Draw** (`D`) and **Ping** (`P`).
