@@ -126,6 +126,11 @@ function veilOf(kind: WeatherKind, heavy: boolean): Look["veil"] {
   return null;
 }
 
+/** Whether two looks draw the same: the same kind, strength and wind, blowing the same way. The roll rules draw nothing. */
+export function sameLook(a: Look | null, b: Look | null): boolean {
+  return a === b || (a !== null && b !== null && a.key === b.key && a.toward === b.toward);
+}
+
 /** The look of a weather, or null when nothing draws (no weather, or clear and calm). */
 export function lookOf(w: WeatherLook | null | undefined): Look | null {
   if (!w) return null;

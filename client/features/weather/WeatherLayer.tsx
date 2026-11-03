@@ -5,7 +5,7 @@ import { useStore } from "zustand";
 import { useTreeShown } from "../../canvas/relief/context.ts";
 import { cameraOfStage } from "../../lib/camera.ts";
 import { drawWeather, sceneClip } from "./draw.ts";
-import { createField, resizeField, setFieldView, setHalf, stepField, type Field } from "./sim.ts";
+import { createField, resizeField, setFieldLook, setFieldView, setHalf, stepField, type Field } from "./sim.ts";
 import { WeatherTextures } from "./textures.ts";
 import type { WeatherLayerProps } from "./WeatherController.tsx";
 
@@ -39,6 +39,7 @@ function makeCanvas(width: number, height: number): HTMLCanvasElement {
 export default function WeatherLayer(props: WeatherLayerProps) {
   const { room } = props;
   const key = useStore(room.state, (s) => s.key);
+  const toward = useStore(room.state, (s) => s.toward);
   const level = useStore(room.state, (s) => s.level);
   const shown = useTreeShown();
   const layerRef = useRef<Konva.Layer>(null);
@@ -53,10 +54,10 @@ export default function WeatherLayer(props: WeatherLayerProps) {
       if (!look) return null;
       const { view, width, height } = live.current;
       let field = room.field;
-      if (!field || field.look !== look) {
+      if (!field || field.look.key !== look.key) {
         field = createField(look, { width, height, view, half: room.mode.half });
         room.field = field;
-      }
+      } else if (field.look !== look) setFieldLook(field, look);
       if (field.view !== view) setFieldView(field, view);
       if (field.width !== width || field.height !== height) resizeField(field, width, height, stage ? cameraOfStage(stage) : { x: 0, y: 0 });
       if (field.half !== room.mode.half) setHalf(field, room.mode.half);
@@ -82,9 +83,9 @@ export default function WeatherLayer(props: WeatherLayerProps) {
     const canvas = layer.getCanvas()._canvas;
     if (key) canvas.dataset.weather = key;
     else delete canvas.dataset.weather;
-    // A new look, view or size draws once, as a camera draw: the field holds still until a tick.
+    // A new look, a turned wind, a view or a size draws once, as a camera draw: the field holds still until a tick, and a layer held still draws no tick at all.
     layer.batchDraw();
-  }, [key, props.view, props.width, props.height]);
+  }, [key, toward, props.view, props.width, props.height]);
 
   useLayoutEffect(() => {
     // From the room, since a layer held still draws no more ticks to say so.

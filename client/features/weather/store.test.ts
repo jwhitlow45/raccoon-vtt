@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { TOP_DOWN } from "../../lib/view.ts";
 import { lookOf } from "./looks.ts";
 import { rng } from "#shared/testutil.ts";
 import { TICK_MS } from "./mode.ts";
+import { createField, motionOf } from "./sim.ts";
 import { WeatherRoom, weatherStillReason, type Frames, type WeatherTarget } from "./store.ts";
 
 /**
@@ -133,6 +135,42 @@ describe("the weather clock", () => {
     assert.equal(released, 1, "a clear scene releases the textures");
     assert.equal(room.state.getState().mounted, false);
     assert.equal(room.state.getState().key, null);
+  });
+
+  test("a scene edit that leaves the weather as it was keeps its look and particles and says nothing", () => {
+    const { room } = setup();
+    room.setLook(RAIN);
+    const field = createField(RAIN!, { width: 390, height: 844, view: TOP_DOWN });
+    room.field = field;
+    let published = 0;
+    room.state.subscribe(() => published++);
+    // Every scene edit elsewhere comes as a new weather object, so as a new look of the same weather.
+    room.setLook(lookOf({ kind: "rain", heavy: true, wind: "strong" }));
+    room.setLook(lookOf({ kind: "rain", heavy: true, wind: "strong", toward: 135 }));
+    assert.equal(room.look, RAIN, "the look it had");
+    assert.equal(room.field, field, "and the particles it had");
+    assert.equal(published, 0);
+  });
+
+  test("the same weather blowing another way keeps its particles, turns them, and tells the layer to draw, moving or still", () => {
+    for (const setting of ["moving", "still"] as const) {
+      const { room, target } = setup();
+      room.input({ setting });
+      room.setLook(RAIN);
+      room.register(target("top"));
+      const field = createField(RAIN!, { width: 390, height: 844, view: TOP_DOWN });
+      room.field = field;
+      const x = [...field.x];
+      const shown: (number | null)[] = [];
+      room.state.subscribe((s) => shown.push(s.toward));
+      const west = lookOf({ kind: "rain", heavy: true, wind: "strong", toward: 270 })!;
+      room.setLook(west);
+      assert.equal(room.field, field, setting);
+      assert.deepEqual([...field.x], x);
+      assert.deepEqual({ x: field.vx, y: field.vy }, motionOf(west, TOP_DOWN));
+      assert.deepEqual(shown, [270], `${setting}: one change, the new direction`);
+      assert.equal(room.state.getState().key, "rain heavy strong");
+    }
   });
 
   test("Off releases the textures and mounts nothing", () => {

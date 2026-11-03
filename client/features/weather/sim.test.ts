@@ -3,7 +3,7 @@ import { test } from "node:test";
 import fc from "fast-check";
 import { isometric, TOP_DOWN } from "../../lib/view.ts";
 import { lookOf, type Look } from "./looks.ts";
-import { createField, motionOf, particleCount, resizeField, setFieldView, setHalf, spotOf, stepField, STEP_CLAMP_MS, WRAP_MARGIN, type Field } from "./sim.ts";
+import { createField, motionOf, particleCount, resizeField, setFieldLook, setFieldView, setHalf, spotOf, stepField, STEP_CLAMP_MS, WRAP_MARGIN, type Field } from "./sim.ts";
 
 const HEAVY_RAIN = lookOf({ kind: "rain", heavy: true, wind: "strong" })!;
 const SNOW = lookOf({ kind: "snow" })!;
@@ -190,4 +190,26 @@ test("fog's sheets drift along the wind, slowly", () => {
   const x1 = f.sheets[2]!;
   for (let k = 0; k < 30; k++) stepField(f, 33.3333333);
   assert.ok(Math.abs(f.sheets[0]! - x0 - 3) < 1e-6 && Math.abs(f.sheets[2]! - x1 - 8) < 1e-6);
+});
+
+test("the same weather blowing another way keeps every particle and moves them, and fog's sheets, along the new direction", () => {
+  for (const view of [TOP_DOWN, isometric(1)]) {
+    for (const w of [{ kind: "snow", wind: "strong" }, { kind: "fog", wind: "moderate" }] as const) {
+      const east = lookOf({ ...w, toward: 90 })!;
+      const west = lookOf({ ...w, toward: 270 })!;
+      const field = createField(east, { width: 390, height: 844, view, seed: 4 });
+      stepField(field, 40);
+      const x = [...field.x];
+      const y = [...field.y];
+      setFieldLook(field, west);
+      assert.deepEqual([...field.x], x, "the particles stay where they are");
+      assert.deepEqual([...field.y], y);
+      assert.deepEqual({ x: field.vx, y: field.vy }, motionOf(west, view), "and move along the new wind");
+      const sheet = field.sheets[0];
+      stepField(field, 40);
+      if (sheet !== undefined && view === TOP_DOWN) assert.ok(field.sheets[0]! < sheet, `${w.kind}: the sheets drift west now`);
+    }
+  }
+  const rain = createField(lookOf({ kind: "rain", wind: "strong" })!, { width: 100, height: 100, view: TOP_DOWN });
+  assert.throws(() => setFieldLook(rain, lookOf({ kind: "rain", heavy: true, wind: "strong" })!), /cannot draw/, "a new strength makes particles of its own");
 });

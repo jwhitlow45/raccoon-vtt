@@ -4,9 +4,9 @@ import { createStore, type StoreApi } from "zustand/vanilla";
 import type { RadioCardOption } from "../../components/RadioCards.tsx";
 import { scopeSlot, useScopedIfAny } from "../../state/scope.ts";
 import { useLowPower, WEATHER_MODE_WORDS, type WeatherMode as WeatherSettingValue } from "../device/settings.ts";
-import type { Look } from "./looks.ts";
+import { sameLook, type Look } from "./looks.ts";
 import { WeatherMode, type ModeInput, type StepLevel } from "./mode.ts";
-import type { Field } from "./sim.ts";
+import { setFieldLook, type Field } from "./sim.ts";
 import type { TextureSource } from "./textures.ts";
 
 /**
@@ -45,6 +45,8 @@ export type WeatherShown = {
   level: StepLevel;
   /** The look's key, "rain heavy strong", or null for none. */
   key: string | null;
+  /** Where its wind blows, degrees clockwise from the map's top, so a layer held still draws a turned wind again. Null for none. */
+  toward: number | null;
 };
 
 const IDLE: ModeInput = {
@@ -105,10 +107,20 @@ export class WeatherRoom {
     this.#settle();
   }
 
-  /** A new look, or none: a new look drops the field, so the layer makes one for it. */
+  /**
+   * The scene's look, or none. A scene edit elsewhere sends the whole scene,
+   * so an equal look comes often: it keeps the look and the field as they
+   * are. The same weather blowing another way keeps the particles and turns
+   * their motion. A new kind, strength or wind drops the field, so the layer
+   * makes one for it.
+   */
   setLook(look: Look | null): void {
-    if ((look?.key ?? null) === (this.look?.key ?? null)) {
+    if (sameLook(look, this.look)) return;
+    if (look && this.look && look.key === this.look.key) {
       this.look = look;
+      if (this.field) setFieldLook(this.field, look);
+      this.#lookChanged = true;
+      this.#settle();
       return;
     }
     this.look = look;
@@ -162,7 +174,8 @@ export class WeatherRoom {
 
   #shown(): WeatherShown {
     const m = this.mode;
-    return { mounted: m.mounted, effective: m.effective, looping: m.looping, level: m.level, key: m.mounted ? (this.look?.key ?? null) : null };
+    const look = m.mounted ? this.look : null;
+    return { mounted: m.mounted, effective: m.effective, looping: m.looping, level: m.level, key: look?.key ?? null, toward: look?.toward ?? null };
   }
 
   /** Publishes what changed and starts or stops the loop to match. Each frame calls it, so it builds nothing unless the mode moved. */
@@ -172,7 +185,7 @@ export class WeatherRoom {
       this.#lookChanged = false;
       const next = this.#shown();
       const was = this.state.getState();
-      if (next.mounted !== was.mounted || next.effective !== was.effective || next.looping !== was.looping || next.level !== was.level || next.key !== was.key) this.state.setState(next, true);
+      if (next.mounted !== was.mounted || next.effective !== was.effective || next.looping !== was.looping || next.level !== was.level || next.key !== was.key || next.toward !== was.toward) this.state.setState(next, true);
       if (this.mode.input.setting === "off") this.releaseTextures();
     }
     const loop = this.mode.looping;
@@ -372,7 +385,7 @@ export function weatherStillReason(input: { reducedMotion: boolean; lowPower: bo
   return null;
 }
 
-const NO_ROOM = createStore<WeatherShown>(() => ({ mounted: false, effective: "off", looping: false, level: "full", key: null }));
+const NO_ROOM = createStore<WeatherShown>(() => ({ mounted: false, effective: "off", looping: false, level: "full", key: null, toward: null }));
 
 /** This device's help line under its cards: it reads the room's step-down where a room is open. */
 export function useWeatherStillReason(): string | null {

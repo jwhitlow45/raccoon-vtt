@@ -369,6 +369,29 @@ describe("weather over the map", { concurrency: false }, () => {
     await waitFor("the DM's ticks after Low power", async () => ((await ticksOver(dm, 300)).ticks > 0 ? true : null));
   });
 
+  test("wxfix-1. held still, a scene edit that leaves the weather as it was draws nothing, and a turned wind draws once", async () => {
+    await chooseWeather(dm, "Still");
+    await sleep(300);
+    const before = await probe(dm);
+    assert.ok(before);
+    // The same weather sent again comes back as a new scene object, as any scene edit does.
+    await setWeather(run.sceneId, { kind: "rain", heavy: true, wind: "strong" });
+    await sleep(600);
+    const same = await probe(dm);
+    assert.ok(same);
+    assert.equal(same.cameraDraws, before.cameraDraws, "nothing to draw again");
+    await setWeather(run.sceneId, { kind: "rain", heavy: true, wind: "strong", toward: 270 });
+    const turned = await waitFor("a draw for the turned wind", async () => {
+      const p = await probe(dm);
+      return p && p.cameraDraws > same.cameraDraws ? p : null;
+    });
+    assert.equal(turned.key, "rain heavy strong");
+    assert.equal(turned.ticks, before.ticks, "still: no ticks");
+    await setWeather(run.sceneId, { kind: "rain", heavy: true, wind: "strong" });
+    await chooseWeather(dm, "Moving");
+    await waitFor("the DM's ticks again", async () => ((await ticksOver(dm, 300)).ticks > 0 ? true : null));
+  });
+
   test("wx-5. a hidden page, a sheet over the whole screen and View as a player stop the covered board's ticks, and they come back", async () => {
     // A hidden page mounts no layer.
     await setVisibility(pat, "hidden");

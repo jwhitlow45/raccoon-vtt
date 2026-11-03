@@ -17,7 +17,8 @@ export const STEP_CLAMP_MS = 50;
 export const WRAP_MARGIN = 64;
 
 export type Field = {
-  readonly look: Look;
+  /** What it draws. Only a look of the same key replaces it (setFieldLook), so the particles it made still fit. */
+  look: Look;
   view: View;
   /** The screen in CSS px. */
   width: number;
@@ -237,6 +238,19 @@ export function resizeField(field: Field, width: number, height: number, pan: Po
   for (let i = kept; i < count; i++) makeParticle(field, i);
   field.count = count;
   field.active = activeOf(count, field.half);
+}
+
+/**
+ * The same weather blowing another way: the particles stay where they are
+ * and move along the new direction from the next step. Only a look of the
+ * same key, since a new kind, strength or wind makes particles of its own.
+ */
+export function setFieldLook(field: Field, look: Look): void {
+  if (look.key !== field.look.key) throw new Error(`a field of ${field.look.key} cannot draw ${look.key}`);
+  field.look = look;
+  const m = motionOf(look, field.view);
+  field.vx = m.x;
+  field.vy = m.y;
 }
 
 /** Top-down or Isometric at a turn: the wind's direction on screen changes, the particles stay. */

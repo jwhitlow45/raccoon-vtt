@@ -27,7 +27,7 @@ import { useCoveredByPreview, usePageVisible, useReducedMotion, weatherSlot, typ
 export function WeatherController(props: ControllerProps) {
   const room = useScoped(weatherSlot);
   const weather = props.scene.weather;
-  // The model keeps one object per weather until it changes, so this reruns only on a change.
+  // A scene edit anywhere sends the whole scene, so this is a new weather object each time. The room keeps its look and particles while they draw the same (store.ts setLook).
   const look = useMemo(() => lookOf(weather), [weather]);
   const setting = useWeatherMode();
   const reducedMotion = useReducedMotion();
