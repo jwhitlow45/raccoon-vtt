@@ -1,6 +1,6 @@
 import type { FastifyBaseLogger } from "fastify";
 import { keys, parseKey, readEntity, type EntityKey } from "#shared/keys.ts";
-import { BLOCK_SAVES_TOO_FAST, BLOCKS_AT_QUOTA, BLOCKS_ROOM_TOO_FULL, checkLimits, LIMITS, ROLLING_TOO_FAST, type LimitCheck } from "#shared/limits.ts";
+import { BLOCK_SAVES_TOO_FAST, BLOCKS_AT_QUOTA, BLOCKS_ROOM_TOO_FULL, checkLimits, LIMITS, ROLLING_TOO_FAST, SOUND_LIMITS, type LimitCheck } from "#shared/limits.ts";
 import { serverDraw, type Draw } from "#shared/dice/roll.ts";
 import { withTodaysSrdIds } from "#shared/migrate.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
@@ -62,6 +62,8 @@ import { undoScope } from "#shared/undoScope.ts";
 import type { HistoryDirection, HistoryMessage, HistoryScope, OpAcknowledgment, StackHistoryCommand } from "#shared/undoContract.ts";
 import { dmHistoryValues, dmPoseRestore } from "./undoDm.ts";
 import { retainedSaveOutcome } from "#shared/saveOutcomes.ts";
+import { soundDue, soundStep, type Playing } from "#shared/sound.ts";
+import { isPlayingRefusal } from "#shared/reducer/sound.ts";
 import { SAVE_CANNOT_REOPEN, type SaveOutcomeTransition } from "#shared/saveOutcomeContract.ts";
 
 /**
@@ -110,6 +112,13 @@ export type ActorOptions = {
    * (shared/permissions.ts PermissionDeps.animatedMaps).
    */
   animatedMaps: boolean;
+  /**
+   * The server's ROOM_SOUND switch (server/config.ts roomSoundOn). Off, no op
+   * may add, edit or play a sound file (shared/permissions.ts
+   * PermissionDeps.roomSound), the server's tick never runs, and a room
+   * loads with any sound that names a file stopped.
+   */
+  roomSound: boolean;
 };
 
 export const DEFAULT_ACTOR_OPTIONS: ActorOptions = {
@@ -131,6 +140,7 @@ export const DEFAULT_ACTOR_OPTIONS: ActorOptions = {
   memoryGrowth,
   archiveGuard: ARCHIVE_ALWAYS,
   animatedMaps: false,
+  roomSound: false,
 };
 
 export type ActorDeps = {
@@ -221,7 +231,9 @@ type Command =
   | { t: "snapshot"; conn: Connection; key: ClientKey }
   | { t: "sys"; op: ServerOnlyOp; resolve: () => void; reject: (err: Error) => void }
   | { t: "read"; run: () => void }
-  | { t: "step"; run: DeletionRun<unknown>; resolve: (value: unknown) => void; reject: (err: Error) => void };
+  | { t: "step"; run: DeletionRun<unknown>; resolve: (value: unknown) => void; reject: (err: Error) => void }
+  /** The server's music tick (docs/design/design-v1-sound.md 6.4), computed when the queue reaches it, never before. */
+  | { t: "soundTick" };
 
 type Batch = {
   history?: Map<string, HistoryMessage>;
@@ -297,7 +309,34 @@ const DELETIONS = new Set<Op["t"]>([
   "companionBlock.delete",
   // A player's Withdraw and the DM's Dismiss of an ask for saves free a waiting ask (docs/design/design-v1-player-save-spell.md 5.4).
   "cast.close",
+  // A full room can always fall silent and free a sound's space (docs/design/design-v1-sound.md 6.2). Quieter volumes pass
+  // through quietensSound, and the server's tick is its own command.
+  "music.stop",
+  "music.pause",
+  "loop.stop",
+  "sound.stopAll",
+  "sound.delete",
+  "playlist.delete",
 ]);
+
+/**
+ * A volume op that only turns sound down, which a room at its quota still
+ * accepts beside DELETIONS (docs/design/design-v1-sound.md 6.2): every value
+ * it sets is at most the current one, so nothing grows and a full room can
+ * still quieten what plays.
+ */
+function quietensSound(op: Op, state: RoomState): boolean {
+  const playing = state.playing;
+  if (op.t === "sound.mix") {
+    const volume = playing?.volume ?? { music: 100, effects: 100 };
+    return (op.music === undefined || op.music <= volume.music) && (op.effects === undefined || op.effects <= volume.effects);
+  }
+  if (op.t === "loop.set") {
+    const loop = playing && Object.hasOwn(playing.loops, op.id) ? playing.loops[op.id] : undefined;
+    return loop !== undefined && op.volume <= loop.volume;
+  }
+  return false;
+}
 
 /**
  * A companion stat block's ops, which a player's save budget counts and the size refusals word for blocks, and every op
@@ -432,6 +471,19 @@ export class RoomActor {
   #deleted = new Map<string, number>();
   /** A deletion step's statement in flight: the queue waits for it. */
   #stepRunning: Promise<void> | null = null;
+  /**
+   * The server's music tick (docs/design/design-v1-sound.md 6.4): the timer
+   * that queues the next `soundTick`, when a member socket was last open
+   * (the room's last commit at load, MUS-OPUS-16), and a refused step's
+   * back-off: the `playing` rev it was refused at and until when, so a step
+   * that keeps failing ticks once a minute at most, and logs once a run.
+   */
+  #soundTimer: NodeJS.Timeout | null = null;
+  #soundTimerAt: number | null = null;
+  #lastMemberAt: number;
+  #soundBackoff: { rev: number; until: number } | null = null;
+  /** The run whose refused step was logged last, so a step that keeps failing logs once a run. */
+  #soundRefusedRun: string | null | undefined = undefined;
 
   private constructor(deps: ActorDeps, loaded: { state: RoomState; seq: number; snapshotSeq: number; replayFailed: boolean; stateBytes: number }, receipts: readonly ReceiptRow[]) {
     this.roomId = deps.info.roomId;
@@ -448,6 +500,7 @@ export class RoomActor {
     this.#onIdle = deps.onIdle;
     this.loadedAt = this.#opts.now();
     this.lastOpAt = this.loadedAt;
+    this.#lastMemberAt = deps.info.lastActiveAt ?? this.loadedAt;
     this.#committed = { state: loaded.state, seq: loaded.seq };
     this.#staged = this.#committed;
     this.#snapshotSeq = loaded.snapshotSeq;
@@ -494,6 +547,9 @@ export class RoomActor {
     const actor = new RoomActor({ ...deps, info }, loaded, receipts);
     await actor.reconcileKinds();
     if (actor.#opsSinceSnapshot >= actor.#opts.snapshotOps) actor.#scheduleSnapshot();
+    // A room loaded long after its last commit starts silent, one loaded soon after catches up, and with the switch off
+    // nothing that names a file plays (docs/design/design-v1-sound.md 6.4). Its tick runs once now, sockets or none.
+    if (!actor.replayFailed && soundOf(actor.#staged.state) !== null) actor.#enqueue({ t: "soundTick" });
     return actor;
   }
 
@@ -549,7 +605,19 @@ export class RoomActor {
     if (this.#closed) return false;
     this.#connections.add(conn);
     this.#broadcastPresence(conn);
+    if (!conn.display) this.#lastMemberAt = this.#opts.now();
+    this.#armSoundTick();
     return true;
+  }
+
+  /** When the next music tick is due, in the actor's clock, or null for none: for its tests. */
+  get soundTickAt(): number | null {
+    return this.#soundTimerAt;
+  }
+
+  /** The server's clock, the one every op's time reads, for the `time` frame (docs/design/design-v1-sound.md 5.1). */
+  serverTime(): number {
+    return this.#opts.now();
   }
 
   detach(conn: Connection): void {
@@ -568,6 +636,9 @@ export class RoomActor {
     }
     cancelPreviews(conn, this.#connections);
     this.#broadcastPresence();
+    // The members rule counts from the last member socket's close (6.4), and no tick runs in a room nobody is in.
+    if (!conn.display) this.#lastMemberAt = this.#opts.now();
+    this.#armSoundTick();
     this.#maybeIdle();
     // A socket makes no HTTP request in its whole life, so the session's last
     // sight (the DM devices list) is stamped when it goes, not when it came.
@@ -897,6 +968,7 @@ export class RoomActor {
     this.#closing ??= (async () => {
       this.#closed = true;
       if (this.#recheckTimer) clearInterval(this.#recheckTimer);
+      this.#clearSoundTimer();
       if (this.#snapshotTimer) clearTimeout(this.#snapshotTimer);
       for (const d of this.#delayed.values()) d.cancel();
       this.#delayed.clear();
@@ -1026,6 +1098,8 @@ export class RoomActor {
         return cmd.run();
       case "step":
         return this.#runStep(cmd);
+      case "soundTick":
+        return this.#processSoundTick();
     }
   }
 
@@ -1280,7 +1354,7 @@ export class RoomActor {
       this.#refuse(key, wm, n, "quota", "the room could not be fully loaded and is read-only");
       return;
     }
-    if (this.readOnly && !DELETIONS.has(op.t) && !removesPcStats(op)) {
+    if (this.readOnly && !DELETIONS.has(op.t) && !removesPcStats(op) && !quietensSound(op, this.#staged.state)) {
       this.#refuse(key, wm, n, "quota", isBlockSave(op) ? BLOCKS_AT_QUOTA : "the room is full: it is at its storage quota, so only deletions are accepted");
       return;
     }
@@ -1423,7 +1497,9 @@ export class RoomActor {
       const verb = blocker.direction === "undo" ? "Undo" : "Redo";
       return blocker.buried ? `${verb} the ${blocker.scope} steps through ${blocker.label} first` : `${verb} the ${blocker.scope} step first: ${blocker.label}`;
     }
-    if (step.id) this.#undo.consume(viewer.memberId, direction, scope, step.id);
+    // A sound playing under the use the step would take from it (docs/design/design-v1-sound.md 6.6) keeps the step, so
+    // once the DM stops it the same Undo works.
+    if (step.id && !isPlayingRefusal(reason)) this.#undo.consume(viewer.memberId, direction, scope, step.id);
     return reason;
   }
 
@@ -1741,6 +1817,7 @@ export class RoomActor {
         if (!fact || fact.roomId !== this.roomId || fact.kind !== kind) return false;
         // A video row whose facts did not check filled nothing, so the op still holds the client's numbers (withAssetSizes).
         if (kind === "video" && fact.video === undefined) return false;
+        if (kind === "sound" && fact.audio === undefined) return false;
         if (viewer.role === "dm") return true;
         if (fact.uploaders.includes(memberId)) return true;
         return this.#stagedVisibleAssets(memberId).has(fact.id);
@@ -1752,6 +1829,7 @@ export class RoomActor {
         return fact !== undefined && fact.roomId === this.roomId && fact.kind === kind;
       },
       animatedMaps: this.#opts.animatedMaps,
+      roomSound: this.#opts.roomSound,
     };
   }
 
@@ -2230,6 +2308,8 @@ export class RoomActor {
     }
     // After the owed snapshots, so a device that just took one on a scene this batch deleted is sent back too.
     this.#resyncOrphanedDms();
+    // Every commit places the next tick (6.4). One that changed what plays moved its rev, which lifts a refused step's back-off.
+    this.#armSoundTick();
     if (batch.ops.length > 0) this.#scheduleSnapshot();
     // The queue waited for this commit and resumes now.
     this.#inFlight = null;
@@ -2437,6 +2517,119 @@ export class RoomActor {
   #maybeIdle(): void {
     if (!this.#closed && this.idle) this.#onIdle?.(this);
   }
+
+  // The server moves the music on (docs/design/design-v1-sound.md 6.4).
+
+  /** Whether a member's socket is open: a table display alone keeps the music going only until the members rule stops it. */
+  #membersHere(): boolean {
+    for (const conn of this.#connections) if (!conn.closed && !conn.display) return true;
+    return false;
+  }
+
+  #clearSoundTimer(): void {
+    if (this.#soundTimer) clearTimeout(this.#soundTimer);
+    this.#soundTimer = null;
+    this.#soundTimerAt = null;
+  }
+
+  /**
+   * Places the timer for the next `soundTick`: the schedule's due time, or
+   * when the members rule stops the sound, held back while a refused step
+   * waits out its minute. Only while a socket is open, a display's
+   * included, so an empty room keeps no timer, and never with the switch
+   * off. Called after each commit, at load and as sockets come and go.
+   */
+  #armSoundTick(): void {
+    if (this.#closed || this.replayFailed || !this.#opts.roomSound || this.#connections.size === 0) {
+      this.#clearSoundTimer();
+      return;
+    }
+    const playing = soundOf(this.#staged.state);
+    if (playing === null) {
+      this.#clearSoundTimer();
+      return;
+    }
+    let due = soundDue(playing, soundsOfState(this.#staged.state));
+    if (!this.#membersHere()) {
+      const gone = this.#lastMemberAt + SOUND_LIMITS.membersGoneMs;
+      due = due === null ? gone : Math.min(due, gone);
+    }
+    if (due !== null && this.#soundBackoff && this.#soundBackoff.rev === playing.rev) due = Math.max(due, this.#soundBackoff.until);
+    if (due === null) {
+      this.#clearSoundTimer();
+      return;
+    }
+    this.#clearSoundTimer();
+    this.#soundTimerAt = due;
+    this.#soundTimer = setTimeout(() => {
+      this.#soundTimer = null;
+      this.#soundTimerAt = null;
+      if (!this.#closed) this.#enqueue({ t: "soundTick" });
+    }, Math.max(0, due - this.#opts.now()));
+    this.#soundTimer.unref?.();
+  }
+
+  /**
+   * The tick, as the queue reaches it (D-261102-466): computed from the
+   * staged state and the clock now, so a Play, Skip or Stop queued before it
+   * always wins and replay never recomputes, and stored as the `sys.sound`
+   * it worked out, with the rev it read as `from`. It stops the music, the
+   * loops and the effects 15 minutes after the last member socket closed,
+   * and anything that names a file while the server's switch is off. A
+   * refused step logs once a run and waits for a commit to `playing` or a
+   * minute (MUS-OPUS-42).
+   */
+  #processSoundTick(): void {
+    if (this.#closed || this.replayFailed) return;
+    const state = this.#staged.state;
+    const playing = soundOf(state);
+    if (playing === null) return;
+    const now = this.#opts.now();
+    if (this.#soundBackoff && this.#soundBackoff.rev === playing.rev && now < this.#soundBackoff.until) {
+      this.#armSoundTick();
+      return;
+    }
+    let op: ServerOnlyOp;
+    const silent = !this.#opts.roomSound || (!this.#membersHere() && now >= this.#lastMemberAt + SOUND_LIMITS.membersGoneMs);
+    if (silent) {
+      // With the switch off only the built-in effects may sound, and they are past by the time anyone could hear them again.
+      op = { t: "sys.sound", from: playing.rev, music: null, loops: {}, effects: [] };
+    } else {
+      const step = soundStep(playing, soundsOfState(state), now);
+      if (!step.changed) {
+        this.#armSoundTick();
+        return;
+      }
+      // The stored run is the DM's whole one, with its order and place, which checkServerOp holds to the schema below.
+      op = { t: "sys.sound", from: playing.rev, music: step.music as OpOf<"sys.sound">["music"] };
+    }
+    const checked = checkServerOp(op);
+    const reduced = checked.ok ? this.#reduce(checked.op, SERVER_ACTOR) : { ok: false as const, code: "invalid" as const, message: checked.message };
+    if (!reduced.ok) {
+      const run = playing.music?.run ?? null;
+      if (this.#soundRefusedRun !== run) this.#log.warn({ roomId: this.roomId, code: reduced.code, message: reduced.message }, "the music's step was refused");
+      this.#soundRefusedRun = run;
+      this.#soundBackoff = { rev: playing.rev, until: now + SOUND_LIMITS.tickBackoffMs };
+      this.#armSoundTick();
+      return;
+    }
+    this.#soundBackoff = null;
+    this.#soundRefusedRun = undefined;
+    this.#ensureBatch();
+    this.#scheduleCommit();
+  }
+}
+
+/** What plays in a state, or null when nothing does: no music, no loops and no effects in either list. */
+function soundOf(state: RoomState): Playing | null {
+  const playing = state.playing;
+  if (!playing) return null;
+  if (playing.music === null && Object.keys(playing.loops).length === 0 && playing.effects.length === 0 && (playing.dmEffects ?? []).length === 0) return null;
+  return playing;
+}
+
+function soundsOfState(state: RoomState): NonNullable<RoomState["sounds"]> {
+  return state.sounds ?? {};
 }
 
 /** Revision and geometry cache bumps alone do not make a save effective. Thumbnail changes still count. */
@@ -2616,6 +2809,11 @@ async function recheckQuotaOnLoad(deps: ActorDeps, quotaBytes: number): Promise<
  * 9.2), so players' devices judge playback by what the server checked.
  */
 function withAssetSizes(op: Op, facts: Map<string, AssetFact>): Op {
+  // A sound's length is the one its file's frames give, which every device schedules by (docs/design/design-v1-sound.md 4.2).
+  if (op.t === "sound.create") {
+    const fact = facts.get(op.assetId.toLowerCase());
+    return fact && fact.kind === "sound" && fact.audio ? { ...op, ms: fact.audio.ms } : op;
+  }
   // A handout's page sizes lay out the viewer before any image loads (docs/design/design-v1-pdf-handouts.md 3.1).
   if (op.t === "handout.show" && "pages" in op.handout) return { ...op, handout: { ...op.handout, pages: pagesWithSizes(op.handout.pages, facts) } };
   if (op.t === "handoutDoc.create") return { ...op, doc: { ...op.doc, pages: pagesWithSizes(op.doc.pages, facts) } };

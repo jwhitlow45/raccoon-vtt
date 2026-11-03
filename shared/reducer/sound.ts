@@ -71,6 +71,11 @@ export function playingAsRefusal(name: string, use: SoundUse): string {
   return `Stop ${name} first. It is playing as ${use === "loop" ? "background" : use === "music" ? "music" : "an effect"}.`;
 }
 
+/** Whether a refusal is playingAsRefusal's, which the undo stack answers by keeping the step for after the stop. */
+export function isPlayingRefusal(reason: string): boolean {
+  return reason.startsWith("Stop ") && /first\. It is playing as (background|music|an effect)\.$/.test(reason);
+}
+
 /** Room volumes start at full: each device's own sliders, 80% at first, set what it hears (4.4). */
 const SILENCE: Playing = { rev: 0, music: null, loops: {}, effects: [], volume: { music: 100, effects: 100 } };
 

@@ -8,7 +8,7 @@ import { AssetError } from "./assets/errors.ts";
 import { uploadedAssetIds } from "./assets/store.ts";
 import type { PasswordHasher } from "./auth/passwords.ts";
 import { setupAuth, type AccessOptions } from "./auth/plugin.ts";
-import { animatedMapsOn, type Config } from "./config.ts";
+import { animatedMapsOn, roomSoundOn, type Config } from "./config.ts";
 import { registerAdminRoutes } from "./http/admin.ts";
 import { registerAssetRoutes, type AssetRouteOptions } from "./http/assets.ts";
 import { registerDisplayRoutes } from "./http/display.ts";
@@ -118,6 +118,7 @@ export async function buildApp({ config, pool, gateway, hasher, access, rooms, w
         // The archive shares the asset volume's floor. The asset service is registered below, before any room loads.
         archiveGuard: () => app.assets.archiveDiskOk(),
         animatedMaps: animatedMapsOn(config),
+        roomSound: roomSoundOn(config),
         ...rooms?.actor,
       },
     },

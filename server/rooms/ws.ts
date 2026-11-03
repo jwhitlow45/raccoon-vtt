@@ -211,18 +211,23 @@ export async function registerWebSocket(app: FastifyInstance, deps: { manager: R
       };
 
       const dispatch = (room: RoomActor, msg: ClientMessage): void => {
-        // A table display and a preview send nothing but `hello` and `ping`. Only a hostile client would.
-        if (conn.display && msg.t !== "hello" && msg.t !== "ping") {
+        // A table display and a preview send nothing but `hello`, `ping` and `time`. Only a hostile client would.
+        if (conn.display && msg.t !== "hello" && msg.t !== "ping" && msg.t !== "time") {
           conn.close(CLOSE.authFailure, "a table display sends nothing");
           return;
         }
-        if (conn.previewBy !== null && msg.t !== "hello" && msg.t !== "ping") {
+        if (conn.previewBy !== null && msg.t !== "hello" && msg.t !== "ping" && msg.t !== "time") {
           conn.close(CLOSE.authFailure, "a preview sends nothing");
           return;
         }
         switch (msg.t) {
           case "ping":
             conn.send({ t: "pong", k: msg.k });
+            return;
+          // A device measuring the server's time for synced sound (docs/design/design-v1-sound.md 5.1), answered at once
+          // from the clock every op's time reads. A display plays sound too, so it asks as members do.
+          case "time":
+            conn.send({ t: "time", k: msg.k, at: room.serverTime() });
             return;
           case "hello":
             if (!conn.helloAllowed || conn.helloPending) {

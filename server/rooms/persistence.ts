@@ -1,8 +1,8 @@
 import type pg from "pg";
-import { LIMITS, serializedBytes } from "#shared/limits.ts";
+import { LIMITS, SOUND_LIMITS, serializedBytes } from "#shared/limits.ts";
 import { dmNumbered, logsInIdOrder, whisperParties } from "#shared/logRings.ts";
 import { MAP_DISCOVERY_OP_VERSION, OP_VERSION, SNAPSHOT_VERSION, mapDiscoveryUpgrade, migrateOp, migrateSnapshot, needsMapDiscoveryUpgrade, opMigrations, type MigrationStep } from "#shared/migrate.ts";
-import type { LogEntry, RoomState, VideoFacts, Viewer } from "#shared/model.ts";
+import type { LogEntry, RoomState, SoundFacts, VideoFacts, Viewer } from "#shared/model.ts";
 import { checkedVideoFacts, opSchema, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { saveOutcomeLedgerSchema } from "#shared/saveOutcomeContract.ts";
@@ -46,15 +46,22 @@ export async function archiveAdmitted(guard: ArchiveGuard): Promise<boolean> {
   }
 }
 
-export type RoomInfo = { roomId: string; pinned: boolean; createdIp: string | null; readOnly: boolean };
+/**
+ * `lastActiveAt` is the room's last commit in ms since 1970, which the
+ * sound's members rule counts from at load (docs/design/design-v1-sound.md
+ * 6.4). Absent counts from the load.
+ */
+export type RoomInfo = { roomId: string; pinned: boolean; createdIp: string | null; readOnly: boolean; lastActiveAt?: number };
 
 export async function roomInfo(pool: Pool, roomId: string): Promise<RoomInfo | null> {
-  const { rows } = await pool.query<{ pinned: boolean; created_ip: string | null; read_only: boolean }>(
-    "select pinned, created_ip, read_only from rooms where id = $1",
+  const { rows } = await pool.query<{ pinned: boolean; created_ip: string | null; read_only: boolean; last_active_at: Date | string | null }>(
+    "select pinned, created_ip, read_only, last_active_at from rooms where id = $1",
     [roomId],
   );
   const row = rows[0];
-  return row ? { roomId, pinned: row.pinned, createdIp: row.created_ip, readOnly: row.read_only } : null;
+  if (!row) return null;
+  const active = row.last_active_at === null ? NaN : new Date(row.last_active_at).getTime();
+  return { roomId, pinned: row.pinned, createdIp: row.created_ip, readOnly: row.read_only, ...(Number.isFinite(active) ? { lastActiveAt: active } : {}) };
 }
 
 export type LoadedRoom = {
@@ -686,10 +693,10 @@ export async function readLogEntries(client: Queryable, roomId: string, ids: rea
  * which `withAssetSizes` copies over every field of a map's `video` but its id.
  * Absent for an image.
  */
-export type AssetFact = { id: string; roomId: string; kind: "map" | "token" | "handout" | "thumb" | "video"; width: number; height: number; uploaders: string[]; video?: VideoFacts };
+export type AssetFact = { id: string; roomId: string; kind: "map" | "token" | "handout" | "thumb" | "video" | "sound"; width: number; height: number; uploaders: string[]; video?: VideoFacts; audio?: SoundFacts };
 
 /** An asset row as loadAssetFacts reads it. */
-export type AssetFactRow = { id: string; room_id: string; kind: AssetFact["kind"]; width: number; height: number; uploaders: string[] | null; media?: unknown; video?: unknown };
+export type AssetFactRow = { id: string; room_id: string; kind: AssetFact["kind"]; width: number; height: number; uploaders: string[] | null; media?: unknown; video?: unknown; audio?: unknown };
 
 /**
  * The rows behind the asset ids an op names, for the reference checks in
@@ -704,7 +711,7 @@ export async function loadAssetFacts(pool: Queryable, ids: readonly string[]): P
   const { rows } = await pool.query<AssetFactRow>(
     `select a.id, a.room_id, a.kind, a.width, a.height,
        array(select u.member_id from asset_uploaders u where u.asset_id = a.id) as uploaders,
-       to_jsonb(a) -> 'media' as media, to_jsonb(a) -> 'video' as video
+       to_jsonb(a) -> 'media' as media, to_jsonb(a) -> 'video' as video, to_jsonb(a) -> 'audio' as audio
      from assets a where a.id = any($1::uuid[])`,
     [ids],
   );
@@ -721,10 +728,33 @@ export async function loadAssetFacts(pool: Queryable, ids: readonly string[]): P
  */
 export function assetFactOf(r: AssetFactRow): AssetFact {
   const fact: AssetFact = { id: r.id, roomId: r.room_id, kind: r.kind, width: r.width, height: r.height, uploaders: r.uploaders ?? [] };
+  if (r.kind === "sound") {
+    const audio = checkedAudioFacts(r.media, r.audio);
+    if (audio !== undefined) fact.audio = audio;
+    return fact;
+  }
   if (r.kind !== "video" || r.video === null || typeof r.video !== "object") return fact;
   const video = checkedVideoFacts({ ...r.video, widthPx: r.width, heightPx: r.height, container: r.media ?? (r.video as { container?: unknown }).container });
   if (video !== undefined) fact.video = video;
   return fact;
+}
+
+/**
+ * A sound row's `audio` column (docs/design/design-v1-sound.md 7.2), held to
+ * the frame walk's bounds: an MP3 whose length, channels and bitrate a
+ * stored file may have. A row whose facts do not check gets none, so the
+ * actor refuses it as it refuses a missing row, and no unchecked length
+ * reaches the schedule. SN-B's store.ts soundFactsOfRow holds the same
+ * rule for the intake and serving.
+ */
+function checkedAudioFacts(media: unknown, audio: unknown): SoundFacts | undefined {
+  if (media !== "mp3" || audio === null || typeof audio !== "object") return undefined;
+  const { ms, channels, kbps, ...rest } = audio as Record<string, unknown>;
+  if (Object.keys(rest).length > 0) return undefined;
+  if (typeof ms !== "number" || !Number.isInteger(ms) || ms < SOUND_LIMITS.fileMinMs || ms > SOUND_LIMITS.fileMaxMs) return undefined;
+  if (channels !== 1 && channels !== 2) return undefined;
+  if (typeof kbps !== "number" || !Number.isInteger(kbps) || kbps < SOUND_LIMITS.minKbps || kbps > SOUND_LIMITS.maxKbps) return undefined;
+  return { ms, channels, kbps };
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
