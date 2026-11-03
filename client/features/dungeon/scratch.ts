@@ -7,6 +7,7 @@ import { pitsMoved, withPitsCounted } from "#shared/rules/pitCount.ts";
 import { splitCheck } from "#shared/rules/walls.ts";
 import type { LevelBand } from "#shared/srd/traps.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
+import { theme } from "../../lib/theme.ts";
 import type { SceneInput } from "../scenes/create.ts";
 import type { Preview, Summary } from "./client.ts";
 import { buildOps, SCENE_PLACEHOLDER, trapOps } from "./ops.ts";
@@ -24,7 +25,8 @@ import { MIN_ROOMS, type DungeonSettings } from "./settings.ts";
  * runs them, and a refusal there ends as partial.
  */
 
-const DM: Member = { id: "scratch-dm", rev: 1, name: "DM", color: "#000000", kind: "dm", createdAt: "2026-01-01T00:00:00.000Z" };
+// The scratch room's only member. Nothing draws its color, so any token's will do.
+const DM: Member = { id: "scratch-dm", rev: 1, name: "DM", color: theme.color.text, kind: "dm", createdAt: "2026-01-01T00:00:00.000Z" };
 const AS_DM: Viewer = { memberId: DM.id, role: "dm" };
 const AT = DM.createdAt;
 
