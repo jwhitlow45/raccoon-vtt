@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Calendar } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
-import { amountBy, calendarSummary, chipName, chipText, composeDraft, DAY_FROM_ONE, draftDate, firstDay, keptSeconds, reconcileDate, restNote, setAt, stepName, STEPS, timeSeconds, timeValue, toDawn, weekdayLine } from "./words.ts";
+import { amountBy, calendarSummary, chipName, chipText, composeDraft, DAY_FROM_ONE, draftDate, firstDay, keptSeconds, reconcileDate, remapMonth, restNote, setAt, stepName, STEPS, timeSeconds, timeValue, toDawn, weekdayLine } from "./words.ts";
 
 const DAY = 86_400;
 const H = 3_600;
@@ -86,6 +86,20 @@ describe("the date fields", () => {
     assert.deepEqual(reconcileDate(draft, two), { ...draft, month: "" });
     assert.deepEqual(composeDraft(reconcileDate(draft, two), two), { ok: false, field: "month", reason: "Pick a month." });
     assert.equal(reconcileDate(draft, DAYS), draft);
+  });
+
+  test("a month changed elsewhere is followed by its name, and cleared where that is in doubt (ASTRA-04, round 2)", () => {
+    const cal = (...names: string[]): Extract<Calendar, { kind: "months" }> => ({ kind: "months", months: names.map((name) => ({ name, days: 30 })) });
+    const may = { day: "6", month: "1", year: "1204", time: "08:00" };
+    const spring = cal("April", "May", "June");
+    assert.equal(remapMonth(may, spring, cal("April", "June")).month, "", "May removed from the middle: never June");
+    assert.equal(remapMonth(may, spring, cal("May", "June")).month, "0", "an earlier month removed");
+    assert.equal(remapMonth(may, spring, cal("June", "April", "May")).month, "2", "reordered");
+    assert.equal(remapMonth(may, spring, cal("April", "Maia", "June")).month, "", "renamed");
+    assert.equal(remapMonth(may, spring, cal("April", "May", "May")).month, "", "doubled");
+    assert.equal(remapMonth(may, cal("May", "May", "June"), cal("May", "June")).month, "", "a name the old calendar held twice");
+    assert.equal(remapMonth(may, spring, { ...spring, era: "AF" }), may, "the months unchanged");
+    assert.equal(remapMonth(may, spring, DAYS), may, "a kind change is not its to follow");
   });
 
   test("Day count refuses a day under 1 (CALB-O-06)", () => {

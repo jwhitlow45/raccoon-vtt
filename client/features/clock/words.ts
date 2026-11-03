@@ -154,6 +154,25 @@ export function reconcileDate(draft: DateDraft, calendar: Calendar): DateDraft {
   return Number.isInteger(month) && month >= 0 && month < calendar.months.length ? draft : { ...draft, month: "" };
 }
 
+/**
+ * A draft's month after its calendar's months changed elsewhere (ASTRA-04,
+ * round 2): the month it named by its name, wherever that month now is. A
+ * name the old calendar held twice, or the new holds other than once (the
+ * month removed, renamed or doubled), leaves no telling which month the DM
+ * meant, so it reads as none and Set asks for a choice. An index alone is
+ * no identity: removing an earlier month or reordering would move the draft
+ * to another month without a word.
+ */
+export function remapMonth(draft: DateDraft, before: Calendar, after: Calendar): DateDraft {
+  if (before.kind !== "months" || after.kind !== "months" || draft.month === "") return draft;
+  const name = before.months[whole(draft.month)]?.name;
+  const once = (months: readonly { name: string }[]) => months.flatMap((m, i) => (m.name === name ? [i] : []));
+  const was = name === undefined ? [] : once(before.months);
+  const now = name === undefined ? [] : once(after.months);
+  const month = was.length === 1 && now.length === 1 ? String(now[0]) : "";
+  return month === draft.month ? draft : { ...draft, month };
+}
+
 /** Day count names days from 1. composeDate takes any whole day, so a moment before Day 1 still reads back. */
 export const DAY_FROM_ONE = "Pick a day from 1.";
 

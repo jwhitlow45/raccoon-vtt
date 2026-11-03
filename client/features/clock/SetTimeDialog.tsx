@@ -6,7 +6,8 @@ import { Dialog, DiscardQuestion } from "../../components/Dialog.tsx";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { DateFieldsEditor } from "./DateFieldsEditor.tsx";
 import { DISCARD, useDiscard } from "./useDiscard.ts";
-import { composeDraft, draftDate, keptSeconds, reconcileDate, setAt } from "./words.ts";
+import { sameCalendar } from "./calendarDraft.ts";
+import { composeDraft, draftDate, keptSeconds, reconcileDate, remapMonth, setAt } from "./words.ts";
 
 /**
  * Set the date and time (docs/design/design-v1-calendar.md 4.3): the fields of
@@ -22,21 +23,31 @@ export function SetTimeDialog(props: { clock: RoomClock; opener: RefObject<HTMLE
   const actions = useRoomActions();
   const encounter = useRoomView((s) => s.view?.encounter ?? null);
   const now = clockNow(clock, encounter);
-  const [opened, setOpened] = useState(() => ({ kind: clock.calendar.kind, start: draftDate(now, clock.calendar) }));
-  const [edited, setDraft] = useState(opened.start);
+  // The calendar the fields were made against, so a change from another device is followed by month, not by place.
+  const [opened, setOpened] = useState(() => ({ calendar: clock.calendar, start: draftDate(now, clock.calendar) }));
+  const [kept, setDraft] = useState(opened.start);
   const [tried, setTried] = useState(false);
-  // Another DM changed the kind while Set was open: the fields would name another calendar's parts, so they start again from the current time.
-  if (opened.kind !== clock.calendar.kind) {
-    const start = draftDate(now, clock.calendar);
-    setOpened({ kind: clock.calendar.kind, start });
-    setDraft(start);
+  let base = opened;
+  let edited = kept;
+  if (!sameCalendar(opened.calendar, clock.calendar)) {
+    if (opened.calendar.kind !== clock.calendar.kind) {
+      // Another DM changed the kind: the fields would name another calendar's parts, so they start again from the current time.
+      const start = draftDate(now, clock.calendar);
+      base = { calendar: clock.calendar, start };
+      edited = start;
+    } else {
+      // Another DM changed the months: each draft keeps the month it named, or none where that is in doubt (ASTRA-04).
+      base = { calendar: clock.calendar, start: remapMonth(opened.start, opened.calendar, clock.calendar) };
+      edited = remapMonth(kept, opened.calendar, clock.calendar);
+    }
+    setOpened(base);
+    setDraft(edited);
   }
-  // A month another DM removed while Set was open reads as none (ASTRA-04).
-  const start = reconcileDate(opened.start, clock.calendar);
+  const start = reconcileDate(base.start, clock.calendar);
   const draft = reconcileDate(edited, clock.calendar);
   const dirty = JSON.stringify(draft) !== JSON.stringify(start);
   const composed = composeDraft(draft, clock.calendar, keptSeconds(draft, now));
-  const { armed, leave } = useDiscard(dirty, props.onClose, edited);
+  const { armed, leave } = useDiscard(dirty, props.onClose, kept);
 
   const set = () => {
     setTried(true);

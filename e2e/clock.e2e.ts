@@ -532,6 +532,31 @@ describe("the room clock's Time panel", () => {
     await ops.send({ t: "clock.update", calendar: clock.calendar });
   });
 
+  test("cf-3b. Set follows a month another DM moves, and never lands on the month after one another DM removes (ASTRA-04, round 2)", async () => {
+    const before = dmSocket.state!.clock!.calendar;
+    const months = (...names: string[]) => ({ kind: "months" as const, months: names.map((name) => ({ name, days: 30 })) });
+    await ops.send({ t: "clock.update", calendar: months("April", "May", "June") });
+    const panel = await timePanel();
+    await panel.locator("[data-clock-calendar]").filter({ hasText: /^3 months$/ }).waitFor();
+    await panel.getByRole("button", { name: "Set the date and time…", exact: true }).click();
+    const set = dm.getByRole("dialog", { name: "Set the date and time", exact: true });
+    const month = set.getByLabel("Month", { exact: true });
+    await month.selectOption("1");
+    await set.getByLabel("Day", { exact: true }).fill("6");
+    await ops.send({ t: "clock.update", calendar: months("June", "April", "May") });
+    await waitFor("May followed to its new place", async () => ((await month.inputValue()) === "2" ? true : null));
+    await ops.send({ t: "clock.update", calendar: months("June", "April") });
+    await waitFor("May gone from Set", async () => ((await month.inputValue()) === "" ? true : null));
+    const t = dmSocket.state!.clock!.t;
+    await set.getByRole("button", { name: "Set", exact: true }).click();
+    await monthError(set, "Pick a month.");
+    assert.equal(dmSocket.state!.clock!.t, t, "nothing was sent");
+    await dm.keyboard.press("Escape");
+    await dm.keyboard.press("Escape");
+    await set.waitFor({ state: "detached" });
+    await ops.send({ t: "clock.update", calendar: before });
+  });
+
   test("cf-4. an armed Stop and an open dialog go with their clock when another device stops it and starts another, or stops it and Undo brings it back (ASTRA-07)", async () => {
     const panel = await timePanel();
     const stop = panel.getByRole("button", { name: "Stop the clock", exact: true });
