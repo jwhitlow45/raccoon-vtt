@@ -1500,7 +1500,7 @@ The choice takes effect at once on every DM device. Switching back to With the p
 
 ### What the newcomer sees
 
-A newcomer who asks types a name, picks a color and presses **Ask to join**. Their page then says **Waiting for the DM** and stays there until you answer. They can lock the phone, reload the page or open the link in another tab, and the request keeps its place for 10 minutes. If nobody answers in that time, the page says so and offers to ask again. Until you let them in, they learn nothing about the room: not who is playing, which colors are taken, or even whether you are online.
+A newcomer who asks types a name, picks a color and presses **Ask to join**. Their page then says **Waiting for the DM** and stays there until you answer. They can lock the phone, reload the page or open the link in another tab, and the request keeps its place for 10 minutes. If nobody answers in that time, the page says so and offers to ask again. Until you answer, they learn nothing about the room: not who is playing, which colors are taken, or even whether you are online.
 
 ![The ask card on a phone: the room's name and ID at the top, then Ask to join with its help line, Your name filled in with Quinn, the ten colors with purple picked, and the Ask to join and Back buttons.](dm-guide/ask-to-join.webp)
 
@@ -1517,7 +1517,9 @@ Each request shows the name and color the newcomer chose and how long ago they a
 - **Turn away** says no. The newcomer's page tells them, and that device can't ask your room again for 15 minutes.
 - **Turn away all** appears when two or more are waiting. It turns away only the requests you can see when you press it, so someone who asks a moment later is never turned away unseen. There is no Let in all on purpose: one careless tap should never let a crowd in.
 
-If a co-DM answers first, the request simply leaves your list. You can also ignore a request entirely: it ends by itself after 10 minutes, and the newcomer can't tell whether anyone saw it.
+Letting someone in usually takes a moment. While it runs, the request stays in the section with its buttons switched off, on your device and on every other DM device, so two DMs never answer the same person. If it takes longer than usual, the row says "Still letting Quinn in…" and finishes on its own. If it can't happen, the row says why, for example that the room already holds its 50 members, and the request goes on waiting so you can answer it again. Once a co-DM's answer is done, the request leaves your list.
+
+You can also ignore a request entirely: it ends by itself after 10 minutes, and the newcomer can't tell whether anyone saw it.
 
 ### Limits, and when asking stops working
 
