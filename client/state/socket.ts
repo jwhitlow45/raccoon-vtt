@@ -655,6 +655,9 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
       case "access":
         room.accessChanged();
         return;
+      case "joinRequests":
+        room.joinRequestsChanged();
+        return;
       case "xcard":
         room.receiveXcard(msg.at);
         return;

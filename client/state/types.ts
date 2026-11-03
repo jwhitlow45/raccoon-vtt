@@ -527,6 +527,14 @@ export type RoomView = {
    * server again when it moves.
    */
   accessVersion: number;
+  /**
+   * Counts the server's `joinRequests` signals, sent to DM sockets when a
+   * request is made, answered or ends (design 5.3), and every snapshot,
+   * since a signal sent while this device held none never arrives. Apart
+   * from `accessVersion`, so a burst of asks never makes the player link and
+   * the devices list fetch again.
+   */
+  joinRequestsVersion: number;
   ephemeral: Ephemeral;
   /**
    * Entity keys (shared/keys.ts) that a pending op cannot predict and waits

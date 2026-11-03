@@ -33,6 +33,7 @@ function source() {
     connection: "open",
     online: [thorn],
     accessVersion: 0,
+    joinRequestsVersion: 0,
     ephemeral: EMPTY_EPHEMERAL,
     busy: {},
     toasts: [],

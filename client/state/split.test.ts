@@ -214,6 +214,7 @@ describe("the store and the preview", () => {
       connection: "open",
       online: [],
       accessVersion: 0,
+      joinRequestsVersion: 0,
       ephemeral: EMPTY_EPHEMERAL,
       busy: {},
       toasts: [],

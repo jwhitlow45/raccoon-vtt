@@ -151,6 +151,7 @@ export function createPreview(source: PreviewSource, memberId: string, options: 
     you: { memberId, role: "player" },
     // A player never gets the signal.
     accessVersion: 0,
+    joinRequestsVersion: 0,
     busy: {},
     toasts: [],
     ended: null,

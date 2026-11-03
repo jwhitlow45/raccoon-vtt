@@ -328,6 +328,8 @@ export type RoomStore = {
   setPresence(online: string[], displays?: number): void;
   /** The server's `access` signal: what DM views show about getting in changed. */
   accessChanged(): void;
+  /** The server's `joinRequests` signal: a join request was made, answered or ended (design 5.3). */
+  joinRequestsChanged(): void;
   /** The server's `xcard` message: someone tapped the X-card. */
   receiveXcard(at: string): void;
   /** The server's `clock` message, its time as it sent a snapshot: one more reading of how far its clock is from this page's. */
@@ -502,6 +504,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     connection: "connecting",
     online: [],
     accessVersion: 0,
+    joinRequestsVersion: 0,
     snapshots: 0,
     ephemeral: EMPTY_EPHEMERAL,
     busy: EMPTY_BUSY,
@@ -960,6 +963,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       // missed in any of them, so each snapshot counts as one and the DM views
       // ask again.
       const accessVersion = s.accessVersion + 1;
+      const joinRequestsVersion = s.joinRequestsVersion + 1;
       commit({
         confirmed: msg.state as ProjectedState,
         confirmedReady: true,
@@ -969,6 +973,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         sceneId,
         ephemeral,
         accessVersion,
+        joinRequestsVersion,
         snapshots: (s.snapshots ?? 0) + 1,
         ...askSettled(lost, pending),
       });
@@ -1137,6 +1142,10 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
 
     accessChanged() {
       store.setState({ accessVersion: get().accessVersion + 1 });
+    },
+
+    joinRequestsChanged() {
+      store.setState({ joinRequestsVersion: get().joinRequestsVersion + 1 });
     },
 
     receiveXcard(at) {

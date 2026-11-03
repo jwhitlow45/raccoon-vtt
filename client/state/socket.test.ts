@@ -926,6 +926,28 @@ describe("the access signal", () => {
   });
 });
 
+describe("the join requests signal", () => {
+  test("each one counts up apart from the access signal, and every snapshot counts as one", () => {
+    const s = setup();
+    s.socket.start();
+    const version = () => s.room.store.getState().joinRequestsVersion;
+    assert.equal(version(), 0);
+    s.connect();
+    assert.equal(version(), 1, "the first snapshot");
+    s.last().emit({ t: "joinRequests" });
+    s.last().emit({ t: "joinRequests" });
+    assert.equal(version(), 3);
+    assert.equal(s.room.store.getState().accessVersion, 1, "a request never makes the player link fetch again");
+    s.last().emit({ t: "access" });
+    assert.equal(version(), 3, "and an access signal never makes the requests list fetch again");
+    // A signal missed while offline is covered by the reconnect's snapshot.
+    s.last().drop(1006);
+    s.clock.advance(10_000);
+    s.connect();
+    assert.equal(version(), 4);
+  });
+});
+
 test("history waits for this connection's snapshot, rejects retired socket callbacks, and keeps captured heads on retry", () => {
   const s = setup();
   const head = "00000000-0000-4000-8000-000000000001";
