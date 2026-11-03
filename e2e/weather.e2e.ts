@@ -474,7 +474,7 @@ describe("weather over the map", { concurrency: false }, () => {
     await shown(dm, "rain heavy strong");
   });
 
-  test("wx-8. the table display draws it, and its menu's Off leaves a member's setting in the same browser alone", async () => {
+  test("wx-8. the table display draws it and says it in its polite status, and its menu's Off leaves a member's setting in the same browser alone", async () => {
     const tvContext = await browser.newContext({ viewport: TV, storageState: await dmContext.storageState() });
     try {
       const tv = await tvContext.newPage();
@@ -488,6 +488,12 @@ describe("weather over the map", { concurrency: false }, () => {
       await tv.locator(".konvajs-content").first().waitFor();
       await shown(tv, "rain heavy strong");
       await shots.take(tv, "wx-8-display-heavy-rain");
+      // A screen reader at the table hears the weather in the display's polite status, as in a member's room.
+      await setWeather(run.sceneId, { kind: "snow" });
+      await tv.locator("[data-rvtt-view-status]").filter({ hasText: "Weather here: Light snow." }).first().waitFor({ state: "attached" });
+      await setWeather(run.sceneId, { kind: "rain", heavy: true, wind: "strong" });
+      await tv.locator("[data-rvtt-view-status]").filter({ hasText: "Weather here: Heavy rain, Strong wind." }).first().waitFor({ state: "attached" });
+      await shown(tv, "rain heavy strong");
       await tv.evaluate(() => localStorage.setItem("rvtt.weather", "still"));
       await tv.mouse.click(TV.width / 2, TV.height / 2);
       const menu = tv.getByRole("menu", { name: "Table display" });

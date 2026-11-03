@@ -36,6 +36,7 @@ import { UI_SCALES, uiScaleLabel, useUiScale, useWeatherMode, WEATHER_MODE_WORDS
 import { choiceOf, choiceWords, isoOffered, pickOf, TURN_LEFT, TURN_LEFT_DESCRIPTION, TURN_RIGHT, TURN_RIGHT_DESCRIPTION, VIEW_CHOICES, VIEW_GROUP } from "../view/choice.ts";
 import { displayViewKey } from "../view/store.ts";
 import { SuggestionHelp, useViewChoice, useViewVoice, ViewVoice, type ViewChoiceState } from "../view/ViewMenu.tsx";
+import { useWeatherVoice } from "../weather/WeatherVoice.ts";
 import {
   BAR_BUTTONS,
   barFirstFocus,
@@ -143,6 +144,8 @@ function DisplayTable(props: { roomId: string }) {
   const suggested = useRoomView((s) => (s.sceneId ? s.view?.scenes[s.sceneId]?.suggestedView : undefined));
   const viewChoice = useViewChoice({ key: displayViewKey(props.roomId), sceneId, suggested });
   useViewVoice(viewChoice);
+  // The display's polite status speaks the weather too, for a screen reader at the table (docs/design/design-v1-weather.md 4.2).
+  useWeatherVoice();
 
   // A handout takes every tap and key, and its bar takes the menu's place, so a menu open when one comes up goes.
   const showing = handout.current ? showingKey(handout.current) : null;
