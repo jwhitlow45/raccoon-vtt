@@ -15,7 +15,7 @@ import type { FreeWall, RoomState } from "#shared/model.ts";
 import { apply, AT, room, scene, token, trap } from "#shared/testutil.ts";
 import { sightPieces, tooManySightPieces } from "#shared/visionLimits.ts";
 import { MANIFEST_VERSION, type ExportManifest, type ManifestAsset } from "./exportRoom.ts";
-import { assertWithinLimits, entryToFile, IMPORT_LIMITS, InflatedCounter } from "./importRoom.ts";
+import { assertWithinLimits, entryToFile, IMPORT_LIMITS, InflatedCounter, inflatedLimit } from "./importRoom.ts";
 import { MEMORY_CAP } from "./memorySize.ts";
 import { SizeGuard } from "./sizeGuard.ts";
 
@@ -57,6 +57,16 @@ describe("import entries", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("the inflated cap (docs/design/design-v1-animated-maps.md 6.3)", () => {
+  test("is the room's quota plus room.json's and the manifest's caps, so a server's larger quota imports a full room", () => {
+    const quota = 4 * 1024 * 1024 * 1024;
+    assert.equal(inflatedLimit(quota), quota + IMPORT_LIMITS.roomJsonBytes + IMPORT_LIMITS.manifestBytes);
+    const counter = new InflatedCounter(inflatedLimit(quota));
+    counter.add(inflatedLimit(quota));
+    assert.throws(() => counter.add(1), (err: unknown) => err instanceof HttpError && err.status === 413 && err.code === "import_too_large");
   });
 });
 

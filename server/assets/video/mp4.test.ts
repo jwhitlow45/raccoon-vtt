@@ -201,6 +201,8 @@ describe("refusals", () => {
 
   test("an edited timeline is video_layout (AM-ASTRA-08)", async () => {
     await refused(mp4File({ tracks: [defaultVideoTrack({ edits: [{ segment: 1000, mediaTime: 0 }, { segment: 1000, mediaTime: 15360 }] })] }), "video_layout");
+    // Two edits, the first covering the media, under an mvhd of the media's length: only the edit count refuses it.
+    await refused(mp4File({ movieDuration: 2000, tracks: [defaultVideoTrack({ edits: [{ segment: 2000, mediaTime: 0 }, { segment: 1000, mediaTime: 0 }] })] }), "video_layout");
     await refused(mp4File({ tracks: [defaultVideoTrack({ edits: [{ segment: 500, mediaTime: -1 }] })] }), "video_layout");
     await refused(mp4File({ tracks: [defaultVideoTrack({ edits: [{ segment: 1000, mediaTime: 0, rate: 0x20000 }] })] }), "video_layout");
     // One edit that stops a second before the media does.
@@ -309,7 +311,8 @@ describe("esds is accepted only in a bounded subset (AM-ASTRA-21, AMR-4, AMQ-3, 
   });
 
   test("channel configuration 0, which brings a program configuration element and its comment, is video_sound", async () => {
-    await refused(soundWith(esdsBytes({ asc: Buffer.from([0x11, 0x80, 0x00]) })), "video_sound");
+    // AAC-LC at 48 kHz with channel configuration 0 and nothing after it, so only the channel rule refuses it.
+    await refused(soundWith(esdsBytes({ asc: Buffer.from([0x11, 0x80]) })), "video_sound");
   });
 
   test("an explicit SBR-present extension is video_sound", async () => {

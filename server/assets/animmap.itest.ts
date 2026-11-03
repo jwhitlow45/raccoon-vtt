@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import yauzl from "yauzl";
+import yazl from "yazl";
 import { VIDEO_LIMITS } from "#shared/limits.ts";
 import type { MapVideo, RoomState, VideoFacts } from "#shared/model.ts";
 import type { ProjectedState } from "#shared/project.ts";
@@ -81,6 +82,15 @@ async function unzip(buf: Buffer): Promise<Map<string, Buffer>> {
     out.set(entry.fileName, Buffer.concat(chunks));
   }
   return out;
+}
+
+async function zipOf(files: Map<string, Buffer>): Promise<Buffer> {
+  const zip = new yazl.ZipFile();
+  for (const [name, data] of files) zip.addBuffer(data, name);
+  zip.end();
+  const chunks: Buffer[] = [];
+  for await (const c of zip.outputStream as AsyncIterable<Buffer>) chunks.push(c);
+  return Buffer.concat(chunks);
 }
 
 async function storedState(t: Engine, roomId: string): Promise<RoomState> {
@@ -313,7 +323,9 @@ describe("animated maps with the switch on", () => {
     await mkdir(join(t.assetDir, hex.slice(0, 2)), { recursive: true });
     await writeFile(path, Buffer.alloc(100));
     // A video's name with an image's extension is no file this server made, so it stays.
-    const wrong = join(t.assetDir, hex.slice(0, 2), `${hex}-video-full-v1.webp`);
+    const other = sha(Buffer.from(randomUUID()));
+    await mkdir(join(t.assetDir, other.slice(0, 2)), { recursive: true });
+    const wrong = join(t.assetDir, other.slice(0, 2), `${other}-video-full-v1.webp`);
     await writeFile(wrong, Buffer.alloc(10));
     const moved = await sweepOrphanFiles(t.pool, t.assetDir, Date.now() + 3 * 24 * 3600_000);
     assert.ok(moved >= 1);
@@ -337,9 +349,14 @@ describe("animated maps with the switch on", () => {
     assert.ok(stored, "the video's entry");
     assert.equal(stored.includes(SECRETS.title), false);
 
+    // The file's own facts are untrusted: a hand-edited room.json claims another rate, length and codec.
+    const room = JSON.parse(files.get("room.json")!.toString()) as { state: RoomState };
+    const scene = Object.values(room.state.scenes).find((sc) => sc.map?.video)!;
+    scene.map!.video = { ...scene.map!.video!, fps: 1, durationMs: 600_000, kbps: 1, video: "vp8" };
+    files.set("room.json", Buffer.from(JSON.stringify(room)));
     const importer = t.client();
     const form = Buffer.from(JSON.stringify({ playerPassword: "owlbear-druid-wand", dmName: "Importer" })).toString("base64url");
-    const imported = await importer.request("POST", "/api/rooms/import", undefined, { "content-type": "application/zip", "x-import-form": form }, exported.rawPayload);
+    const imported = await importer.request("POST", "/api/rooms/import", undefined, { "content-type": "application/zip", "x-import-form": form }, await zipOf(files));
     assert.equal(imported.statusCode, 201, imported.body);
     const newRoom = imported.json<{ roomId: string }>().roomId;
     t.track(newRoom);
@@ -391,14 +408,8 @@ describe("animated maps with the switch on", () => {
     const files = await unzip((await dm.get(`/api/rooms/${roomId}/export`)).rawPayload);
     // The entry swapped for a file the check refuses.
     files.set(`assets/${sha(bytes)}-video-full.webm`, webmFile({ durationMs: null }));
-    const yazl = (await import("yazl")).default;
-    const zip = new yazl.ZipFile();
-    for (const [name, data] of files) zip.addBuffer(data, name);
-    zip.end();
-    const chunks: Buffer[] = [];
-    for await (const c of zip.outputStream as AsyncIterable<Buffer>) chunks.push(c);
     const zipPath = join(scratch, "tampered.zip");
-    await writeFile(zipPath, Buffer.concat(chunks));
+    await writeFile(zipPath, await zipOf(files));
     const room = await importRoom({ pool: t.pool, assets: t.app.assets, gateway: t.app.gateway, log: quietLog }, zipPath, { playerPwHash: "x", dmName: "Importer", dmColor: "#3e8ef7", createdIp: null });
     t.track(room.roomId);
     assert.equal((await t.pool.query("select 1 from assets where room_id = $1 and kind = 'video'", [room.roomId])).rowCount, 0);
