@@ -48,6 +48,7 @@ The app does a lot, and you don't need most of it on day one. Read the [Quick st
   - [Companions](#companions)
   - [Ping, Look here and pins](#ping-look-here-and-pins)
   - [The table display](#the-table-display)
+  - [Time and the calendar](#time-and-the-calendar)
   - [The Log and its history](#the-log-and-its-history)
   - [Room settings for fights and maps](#room-settings-for-fights-and-maps)
   - [Undo, Redo and Setup history](#undo-redo-and-setup-history)
@@ -98,7 +99,7 @@ When you pick a tool, its options appear in a row just above the toolbar, and an
 
 These are the panels a DM uses most for maps and fights:
 
-- Under **In play**: **Token**, **Initiative**, **Dice**, **Log**, **Journal**, **Areas**, **DM** and **Scenes**. On a phone, **Party** is here too.
+- Under **In play**: **Token**, **Initiative**, **Dice**, **Log**, **Journal**, **Areas**, **Time**, **DM** and **Scenes**. On a phone, **Party** is here too.
 - Under **Prepare**: **Monsters**, **Encounters**, **Characters**, **Outliner** and **Library**.
 
 ## Quick start
@@ -1568,7 +1569,7 @@ Each resource then shows its name with its count: for Rage's 3, three pips at th
 
 A character from D&D Beyond doesn't need its resources typed in at all. The D&D Beyond import and [Re-sync from D&D Beyond](#re-sync-from-dd-beyond) bring in the limited uses of its classes, species and feats, each with its count, the rest that brings it back, and the uses already spent there. Magic items' charges and spells stay out.
 
-**Rests.** The **Rest** section of the Combat group has **Short Rest** and **Long Rest**. A Short Rest asks for the HP the player rolled on their Hit Point Dice. A Long Rest restores all HP, ends Temporary HP, removes one Exhaustion level and resets Legendary Resistance. Each rest also gives back the class resources and abilities that come back on it: a Short Rest brings back one use of Rage, say, and a Long Rest all of them. Once you pick a rest, it tells you what it will give back before you finish it ("A Short Rest also restores one Rage."). **Long Rest for the party**, at the foot of the **Characters** list, rests everyone at once and restores every class resource too. Spell slots are tracked on the players' own sheets, not here.
+**Rests.** The **Rest** section of the Combat group has **Short Rest** and **Long Rest**. A Short Rest asks for the HP the player rolled on their Hit Point Dice. A Long Rest restores all HP, ends Temporary HP, removes one Exhaustion level and resets Legendary Resistance. Each rest also gives back the class resources and abilities that come back on it: a Short Rest brings back one use of Rage, say, and a Long Rest all of them. Once you pick a rest, it tells you what it will give back before you finish it ("A Short Rest also restores one Rage."). **Long Rest for the party**, at the foot of the **Characters** list, rests everyone at once and restores every class resource too. While the room has a clock, it can also move the clock on 8 hours (see [Time and the calendar](#time-and-the-calendar)). Spell slots are tracked on the players' own sheets, not here.
 
 ### Re-sync from D&D Beyond
 
@@ -1635,6 +1636,86 @@ If your group plays around a table, a TV can show the players' view of the map, 
 
 The display shows the players' scene the way the players see it: fog, party vision, tokens, shared areas, drawings, pings and rulers, and handouts shown to everyone. On a scene where each player sees for themselves, it shows only what the creatures that share sight with the party see (see [Sight for each player](#sight-for-each-player)). It shows no panels, chat or Initiative strip, unless you tap the display and turn on **Show whose turn it is**. To have the display show what your own screen shows, turn on **Show my view on the table display** in the DM panel, then tap the display and pick **Follow the DM**. The display's menu also has its own **View**, so the TV can show the map in Isometric while your screen stays Top-down, or the other way round (see [The isometric view](#the-isometric-view)). A room can have up to 4 displays.
 
+## Time and the calendar
+
+The **Time** panel keeps the in-game date and time. It is there for the moments a game leans on it: a journey that takes three days, a Long Rest that ends at dawn, or a player asking how long ago the heist was. It is under **In play**, and it stays off until you start it.
+
+The clock never runs on its own. It moves when you move it, when the party takes a Long Rest with the clock box ticked, and when a fight ends. So it always reads what you have told the table, and nothing drifts while you take a break.
+
+### Starting the clock
+
+1. Open **Time**. With no clock yet, the panel is a short form.
+1. Under **Calendar**, pick **Day count** for plain "Day 1, Day 2" dates, or **Months** for a calendar of your own with named months, a week and years. **Months** opens the Calendar dialog, described under [Your own calendar](#your-own-calendar). Its **Save** keeps your calendar on this form, and nothing is sent yet.
+1. Under **It is now**, set the date and the time. A new clock starts at Day 1, 8:00 AM.
+1. Choose whether players see it with **Players see the date and time**, on by default. Off, they get no date, time or time lines at all.
+1. Press **Start the clock**.
+
+Nothing reaches the table before that last press. A clock you start hidden never shows a player anything, not even the line in the Log that says it started.
+
+![The Time panel on a computer, with a Months clock running: Thursday, Deepwinter 4, 1204 AF at 6:10 AM, Dawn, the four steps and Other amount, Set the date and time, the Players see the date and time switch, Calendar and Stop.](dm-guide/time-panel.webp)
+
+### Moving the clock on
+
+With the clock running, the panel's top shows the date, the time and the part of the day. The parts are fixed: Dawn from 6 to 7 AM, Morning until noon, Afternoon until 6 PM, Dusk from 6 to 7 PM and Night until 6 AM. Under it, **Move the clock on** has four buttons:
+
+- **10 minutes**, **1 hour** and **8 hours** move it on by that much.
+- **To dawn** moves it to the next 6:00 AM. At exactly 6:00 AM it goes to the next morning's.
+
+**Other amount…** opens a row for a number and a unit, **Minutes**, **Hours** or **Days**, and **Move on** sends it. A single step can be up to 100 years.
+
+Each step applies at once on every device. A Short Rest never moves the clock on its own, so tap **1 hour** yourself when the party takes one. There is no step backward. If you tapped **8 hours** by mistake, press **Undo** in the top bar, which takes the step back. To turn the clock back on purpose, use **Set the date and time**.
+
+On a computer, a small chip in the top bar shows the date and time, such as "Deepwinter 4, 6:10 AM", from 900 px of screen width. It opens the Time panel when you tap it. It is the first thing to leave the bar when the bar runs out of room. On a phone, open Time from **Panels**.
+
+### Setting the date and time
+
+**Set the date and time…** opens a dialog with the fields of your calendar. A Day count clock has a **Day** field. A Months clock has **Month**, **Day** and **Year**, and reads the weekday under them ("A Thursday."). **Time** is the phone's own time picker. If a day is past the end of its month, the dialog stays open and says so, such as "Pick a day from 1 to 30." Press **Set** to send it, or **Cancel** to leave. This is also how you turn the clock back.
+
+### Who sees it
+
+**Players see the date and time** is the switch in the **Sharing** group. While it is on, your players get:
+
+- the Time panel, which shows the date, the time and the part of the day and nothing else,
+- the chip in the top bar from 900 px,
+- each clock line in the **Log**, and a short toast for each change while their Log and Time panel are closed. The device that made the change gets no toast.
+
+Turn it off, and the Time panel leaves their list and nothing more of the clock reaches them. A player who had the panel open keeps it open, reading "The DM isn't sharing the date and time now.", until they close it. The lines a player already read stay in their Log, even after a reload. Turn it on again, and they get the clock as it stands, without the lines written while it was hidden.
+
+### Your own calendar
+
+The app ships no calendar, since the calendars of published settings are not open content. You type in yours. **Calendar…** in the panel opens the dialog, and a Months clock's summary sits beside the button, such as "12 months, 7-day week".
+
+- **Day count** and **Months** are the two kinds. With a clock running, changing the kind sets **Today in this calendar** to the first day (of year 1, for Months), keeping the time of day.
+- **Months** lists one row per month with a **Name** and its **Days**, and **Move up**, **Move down** and **Remove** for each. **Add a month** adds one at the end. A new calendar starts with twelve months, "Month 1" to "Month 12", of 30 days each. A calendar has up to 24 months of 1 to 400 days, and a year of up to 1,000 days. A month of 1 day shows by its name alone, as a festival day does.
+- **Day names** takes the names of the week in order, split by commas. Leave it empty for no week, so dates carry no weekday. There can be up to 14.
+- **After the year** takes words that follow the year, such as an era's initials. Leave it empty for none.
+- "A year is 360 days." counts the year as you edit the rows. Years count from 0, and there are no leap days.
+- **Today in this calendar** shows the clock's current moment read through the calendar as you have edited it. Change it if the new calendar should put today on another date.
+
+![The Calendar dialog scrolled down to its end: Day names, After the year, the length of a year, and Today in this calendar with a Thursday read under its date.](dm-guide/time-calendar.webp)
+
+**Save** sends the new calendar. Renaming months or days writes no line, and old lines keep the names they were written with. If you moved today's date, one line says so. **Cancel** or a swipe asks "Discard changes?" when you have changed something.
+
+### Fights and Long Rests
+
+A fight moves the clock too. A round is about 6 seconds of game time, so the clock adds 6 seconds a round, and **End the fight** keeps them: the round you ended in counts whole. While the fight runs, the panel and chip read the time with the rounds so far added, which you see once ten rounds make a minute. Under the date the panel says "In a fight, the clock adds 6 seconds a round when it ends." A fight you never started, with no **Start** pressed, adds nothing. If you start or set the clock in the middle of a fight, it reads the time you typed, and only the rounds after that count.
+
+**Long Rest for the party**, in the **Characters** panel, has a checkbox while a clock runs: **Move the clock on 8 hours**, ticked each time. **Finish the Long Rest** then moves the clock on first and rests everyone, so each character's rest ends at the new time. One **Undo** takes the whole rest back, as long as nothing else changed in between. A Long Rest of one character, from its own **Rest** section, never moves the clock, since two players resting would move it twice.
+
+The app remembers when each character's last Long Rest ended, and shows only you. When you open the party's rest, or choose a Long Rest for one character, a note says so for each character who has one: "Bree finished a Long Rest at Day 4, 6:00 AM. The rules let the next start from Day 4, 10:00 PM." The rules ask for 16 hours between Long Rests. The note is only a note. It never stops a rest. Once the time has come it goes away, a little later for a rest that did not move the clock, since the app records when such a rest was finished but not when it began.
+
+### The Log and the journal
+
+Each change to the clock writes a line to the Log with the date as it read then, such as "8 hours pass. It is now Day 4, 6:00 AM.", "8 hours pass in a Long Rest. It is now Day 4, 6:00 AM." or "The DM sets the date and time: Thursday, Deepwinter 4, 1204 AF, 6:00 AM." A fight's seconds, the switch and **Stop the clock** write none. Your own **Undo** and **Redo** of a clock change write one, "The DM undid a clock change. It is now Day 3, 10:00 PM.", unless it took back the end of a fight.
+
+In the **Journal**, **Add the date**, beside **Add a secret**, adds a heading such as "Day 4, 6:00 AM" to the page while a clock runs, which suits a session's notes.
+
+### Stopping the clock
+
+**Stop the clock**, at the foot of the panel, takes a second tap ("Tap again to stop the clock"). The date and time go. **Undo setup** in **Setup history** brings the clock back, with what it held.
+
+Starting, stopping, the calendar and the switch are setup, and moving or setting the time is play, so **Undo** in the top bar takes back a step and **Undo setup** takes back the others. One thing to know: the clock guards itself as a whole. If you change the calendar and then move the clock on, **Undo setup** can no longer take the calendar back, because the step after it is in the way. Open **Calendar…** and change it back yourself. The other way round works the same: after a calendar save, **Undo** refuses a step from before it, and **Set the date and time** puts the time right.
+
 ## The Log and its history
 
 The **Log** keeps everything said and done at the table: chat, whispers, rolls, HP changes, conditions and turns. It opens on the newest lines and follows new ones as they come in while you read at the bottom. The room keeps every line for as long as the room exists, so last month's session is still there.
@@ -1678,11 +1759,11 @@ The server uses whichever rule is set at the moment of the roll, and each roll s
 
 Every DM taps the wrong token now and then, so the app keeps two histories of your changes. They are kept apart on purpose. What happens at the table can be taken back with one tap in the middle of a fight. A change to what a creature or a scene *is* is a different kind of mistake. The app makes you ask for that one deliberately, so you can't undo a stat block by reaching for the button that takes back a hit.
 
-**Play** is the history of the table and the board. The top bar's **Undo** (`Ctrl+Z`) and **Redo** (`Ctrl+Shift+Z`) work on it, with Cmd in place of Ctrl on a Mac. So do the **Undo** and **Redo** buttons in the map builder's row and the Draw tool. Play takes back damage, healing, death saves, rests and conditions, turns and the fight itself, moves, facing and size, carrying and dragging, taking or ending a shape, doors, fog, drawings, areas, everything the builder paints, tokens you place or remove (a whole encounter dropped on the map too), a group save's Apply, a secret or a handout you showed, and switching a scene to another of its prepared phases. A change belongs to the same history in the middle of a fight and on the night before, because starting a fight doesn't change what a change is.
+**Play** is the history of the table and the board. The top bar's **Undo** (`Ctrl+Z`) and **Redo** (`Ctrl+Shift+Z`) work on it, with Cmd in place of Ctrl on a Mac. So do the **Undo** and **Redo** buttons in the map builder's row and the Draw tool. Play takes back damage, healing, death saves, rests and conditions, turns and the fight itself, moves, facing and size, carrying and dragging, taking or ending a shape, doors, fog, drawings, areas, everything the builder paints, tokens you place or remove (a whole encounter dropped on the map too), a group save's Apply, a secret or a handout you showed, moving or setting the clock, and switching a scene to another of its prepared phases. A change belongs to the same history in the middle of a fight and on the night before, because starting a fight doesn't change what a change is.
 
 Rest the pointer on a button, and it names the step it would take, such as "Undo your last play or board change: moving Goblin 2". After you press it, the app says what happened once: "Undid moving Goblin 2." Redo says "Redid" the same way. Your other devices and a co-DM hear "The DM undid moving Goblin 2." instead. If Play has nothing to undo, the button does nothing, and the app never reaches into Setup to find something else.
 
-**Setup history** is the history of what things are. Open the Menu and choose **Setup history**. It holds the saved definitions and settings: stat blocks and character sheets (known forms, resources and level included), companions' stat blocks, monsters in your library, saved encounters, a scene's settings, map, grid and sight, the room's settings, journal pages and pins, your library of handouts, and a trap's name, area and rig. Creating or deleting any of these counts too.
+**Setup history** is the history of what things are. Open the Menu and choose **Setup history**. It holds the saved definitions and settings: stat blocks and character sheets (known forms, resources and level included), companions' stat blocks, monsters in your library, saved encounters, a scene's settings, map, grid and sight, the room's settings, journal pages and pins, your library of handouts, a trap's name, area and rig, and the clock's start, stop, calendar and sharing switch. Creating or deleting any of these counts too.
 
 The sheet shows the next step to take back, with **Undo setup** beside it, and the next step to put back, with **Redo setup** beside that. While the sheet has focus, and you aren't typing in a text field, `Ctrl+Z` is **Undo setup** and `Ctrl+Shift+Z` is **Redo setup** (Cmd on a Mac). `Escape` closes the sheet and returns you to the button that opened it. When you save in one of those editors, the app tells you where the change went: "Saved. Undo in Setup history." Each history sheet shows only the result of its own last Undo or Redo, never the other history's. Setup history isn't a backup and doesn't list old versions. It takes back the last thing you saved, then the one before it, and so on. A save too big to keep as a step says "This change is too large to undo." and doesn't promise Setup history.
 
