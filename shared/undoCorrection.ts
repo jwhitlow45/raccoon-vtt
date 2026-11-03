@@ -8,7 +8,7 @@ import type { CorrectionLogEvent, HistoryDirection, HistoryScope } from "./undoC
 import { ownEntry } from "./records.ts";
 
 const ACTOR_FIELDS = ["hp", "hpLabel", "hpBar", "life", "ac", "speeds", "initBonus", "initScore", "passivePerception", "senses", "creatureType", "cr", "xp", "srdId", "blockId", "wildShape", "effects", "deathSaves", "legendary", "uses", "hurt"];
-const POSE_FIELDS = ["sceneId", "x", "y", "elevation", "rotation", "size", "w", "h", "squeeze", "path", "attached"];
+const POSE_FIELDS = ["sceneId", "x", "y", "elevation", "rotation", "size", "w", "h", "squeeze", "nudge", "path", "attached"];
 type Value = Record<string, unknown>;
 
 function object(value: unknown): Value {

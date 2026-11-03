@@ -245,3 +245,14 @@ describe("correction audiences stay private after persistence and ownership chan
     assert.ok(replay.log.every((line) => line.at === AT));
   });
 });
+
+describe("a correction of where a token is drawn (docs/design/design-v1-snap-off.md 5.5)", () => {
+  test("a DM's undo that changes only a placement between squares tells the owner, as a change of its place does", () => {
+    const state = fixture();
+    const placed = { ...state.tokens.bree!, nudge: { x: 2, y: -1 } };
+    expectNotice(restore(state, [{ key: "token:bree", value: placed }]), "undo");
+    const after = restore(state, [{ key: "token:bree", value: placed }]).state;
+    const { nudge: _n, ...plain } = after.tokens.bree!;
+    expectNotice(restore(after, [{ key: "token:bree", value: plain }], "redo", 3), "redo");
+  });
+});

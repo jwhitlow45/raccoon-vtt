@@ -28,8 +28,11 @@ import type { SaveOutcomeIdentity } from "#shared/saveOutcomeContract.ts";
  */
 export const UNDO_DEPTH = 50;
 
-/** The fields a move sets: a squeeze too, which stops a token in a narrow opening (docs/design/design-v1-maps-vision.md 4.1). */
-type Place = Pick<Token, "x" | "y" | "elevation" | "rotation" | "squeeze">;
+/**
+ * The fields a move sets: a squeeze too, which stops a token in a narrow opening (docs/design/design-v1-maps-vision.md 4.1),
+ * and where it is drawn in its box after a drop between squares (docs/design/design-v1-snap-off.md 5.5).
+ */
+type Place = Pick<Token, "x" | "y" | "elevation" | "rotation" | "squeeze" | "nudge">;
 
 /**
  * Where a token stands: its scene and its place there, the path of its
@@ -474,6 +477,7 @@ function withExtras(entry: UndoEntry, poses: Record<string, Pose> | undefined, o
 function placeOf(token: Place): Place {
   const place: Place = { x: token.x, y: token.y, elevation: token.elevation, rotation: token.rotation };
   if (token.squeeze) place.squeeze = true;
+  if (token.nudge) place.nudge = { x: token.nudge.x, y: token.nudge.y };
   return place;
 }
 
@@ -496,6 +500,8 @@ function samePose(a: Pose, b: Pose, path = true): boolean {
     a.elevation === b.elevation &&
     a.rotation === b.rotation &&
     a.squeeze === b.squeeze &&
+    a.nudge?.x === b.nudge?.x &&
+    a.nudge?.y === b.nudge?.y &&
     a.size === b.size &&
     a.w === b.w &&
     a.h === b.h &&
@@ -685,7 +691,9 @@ export function poseRestore(state: RoomState, step: UndoEntry & { poses: Record<
  * displacement the step gave it, its own holder's actual move, from
  * wherever it sits now, so a visible torch on an invisible holder floats
  * back as it floated out. Its path goes back with it only where it still
- * stands as the step left it. Null when it has nothing to take back.
+ * stands as the step left it. Null when it has nothing to take back. It
+ * keeps the nudge it has now, which the reducer's pass keeps only where it
+ * still holds (docs/design/design-v1-snap-off.md 5.5).
  */
 function quietlyBack(current: Token, before: Token | null | undefined, left: Pose | undefined, shows: Shows): Token | null {
   if (!before || !left || before.sceneId !== left.sceneId || current.sceneId !== left.sceneId) return null;
@@ -707,10 +715,11 @@ function quietlyBack(current: Token, before: Token | null | undefined, left: Pos
  * The token as it is now, back where it stood before, at the size it had,
  * with the path it had there: the leg the move added, or the resize's stop,
  * goes with it. So does a squeeze: undoing a move into a corridor takes it
- * off, and undoing one out of it puts it back.
+ * off, and undoing one out of it puts it back. So does where it was drawn
+ * in its box: undoing a drop between squares from a square leaves none.
  */
 function putBack(current: Token, before: Token, exists: (tokenId: string) => boolean): Token {
-  const { path: _path, squeeze: _squeeze, w: _w, h: _h, attached: _attached, ...rest } = current;
+  const { path: _path, squeeze: _squeeze, nudge: _nudge, w: _w, h: _h, attached: _attached, ...rest } = current;
   const out: Token = { ...rest, ...placeOf(before), ...sizeOf(before) };
   if (before.path) out.path = before.path;
   // The link goes back with the seat (docs/design/design-v1-attach.md 8.3). One to a holder the player cannot see now comes back

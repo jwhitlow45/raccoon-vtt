@@ -5,7 +5,7 @@ import type { RestoreEntry } from "#shared/protocol.ts";
 import { guardMatches } from "#shared/reducer/misc.ts";
 import { guardHash } from "#shared/reducer/tx.ts";
 
-const POSE_FIELDS = ["sceneId", "x", "y", "elevation", "rotation", "size", "w", "h", "squeeze", "path", "attached"] as const;
+const POSE_FIELDS = ["sceneId", "x", "y", "elevation", "rotation", "size", "w", "h", "squeeze", "nudge", "path", "attached"] as const;
 const POSE_KEYS = new Set<string>(POSE_FIELDS);
 
 /** After-values belong to the action that created this entry, including an Undo that created a Redo entry. */

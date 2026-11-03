@@ -786,3 +786,66 @@ describe("the party's Long Rest and the clock (docs/design/design-v1-calendar.md
     assert.equal(table.undo(DM), "ok", "the step itself undoes");
   });
 });
+
+describe("placements between squares on undo and redo (docs/design/design-v1-snap-off.md 5.5)", () => {
+  const owl = (over: Partial<Token> = {}) => token("owl", { kind: "npc", name: "Owl", ownerIds: ["p1"], x: 3, y: 3, ...over });
+  const table = (over: Partial<Token> = {}) => new UndoTable(room({ members: { dm1: member("dm1", "dm"), p1: member("p1") }, tokens: { owl: owl(over) } }));
+  const spot = (t: Token) => [t.x, t.y, t.nudge ?? null];
+
+  test("a player's free move from a square undoes to the square with no nudge, and redoes with it", () => {
+    const t = table();
+    assert.equal(t.play(P1, { t: "token.move", tokenId: "owl", x: 5, y: 3, drawnAt: { x: 5.375, y: 3 } }), "ok");
+    assert.deepEqual(spot(t.t("owl")), [5, 3, { x: 3, y: 0 }]);
+    assert.equal(t.undo(P1), "ok");
+    assert.deepEqual(spot(t.t("owl")), [3, 3, null]);
+    assert.equal(t.redo(P1), "ok");
+    assert.deepEqual(spot(t.t("owl")), [5, 3, { x: 3, y: 0 }]);
+  });
+
+  test("an ordinary move off a placement undoes to the placement", () => {
+    const t = table({ nudge: { x: -2, y: 1 } });
+    assert.equal(t.play(P1, { t: "token.move", tokenId: "owl", x: 6, y: 3 }), "ok");
+    assert.deepEqual(spot(t.t("owl")), [6, 3, null]);
+    assert.equal(t.undo(P1), "ok");
+    assert.deepEqual(spot(t.t("owl")), [3, 3, { x: -2, y: 1 }]);
+  });
+
+  test("a placement in place and Snap to grid are steps Undo move takes back", () => {
+    const t = table();
+    assert.equal(t.play(P1, { t: "token.update", tokenId: "owl", patch: { drawnAt: { x: 3.25, y: 2.875 } } }), "ok");
+    assert.deepEqual(spot(t.t("owl")), [3, 3, { x: 2, y: -1 }]);
+    assert.equal(t.play(P1, { t: "token.update", tokenId: "owl", patch: { drawnAt: null } }), "ok");
+    assert.deepEqual(spot(t.t("owl")), [3, 3, null]);
+    assert.equal(t.undo(P1), "ok", "Snap to grid's");
+    assert.deepEqual(spot(t.t("owl")), [3, 3, { x: 2, y: -1 }]);
+    assert.equal(t.undo(P1), "ok", "the placement's");
+    assert.deepEqual(spot(t.t("owl")), [3, 3, null]);
+  });
+
+  test("a placement changed since, by the DM's Snap to grid, refuses the player's undo of the move as a move since does", () => {
+    const t = table();
+    assert.equal(t.play(P1, { t: "token.move", tokenId: "owl", x: 5, y: 3, drawnAt: { x: 5.375, y: 3 } }), "ok");
+    assert.equal(t.play(DM, { t: "token.update", tokenId: "owl", patch: { drawnAt: null } }), "ok");
+    assert.equal(t.undo(P1), MOVED_SINCE);
+    assert.deepEqual(spot(t.t("owl")), [5, 3, null]);
+  });
+
+  test("a player's undo that would change a locked token's placement is refused, and the DM's lock holds it", () => {
+    const t = table();
+    assert.equal(t.play(P1, { t: "token.update", tokenId: "owl", patch: { drawnAt: { x: 3.25, y: 3 } } }), "ok");
+    assert.equal(t.play(DM, { t: "token.update", tokenId: "owl", patch: { locked: true } }), "ok");
+    assert.notEqual(t.undo(P1), "ok");
+    assert.deepEqual(spot(t.t("owl")), [3, 3, { x: 2, y: 0 }]);
+  });
+
+  test("the DM's switch to hexes takes the scene's placements, and its undo and redo give them back and take them again", () => {
+    const t = table({ nudge: { x: 3, y: -3 } });
+    assert.equal(t.play(DM, { t: "scene.update", sceneId: "s1", patch: { gridShape: "hexRows" } }), "ok");
+    assert.equal(t.t("owl").nudge, undefined);
+    assert.equal(t.undo(DM, "setup"), "ok");
+    assert.equal(t.state.scenes.s1!.gridShape, undefined);
+    assert.deepEqual(t.t("owl").nudge, { x: 3, y: -3 });
+    assert.equal(t.redo(DM, "setup"), "ok");
+    assert.equal(t.t("owl").nudge, undefined);
+  });
+});

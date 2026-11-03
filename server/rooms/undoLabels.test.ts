@@ -345,3 +345,12 @@ describe("the clock's undo labels (docs/design/design-v1-calendar.md 6.5)", () =
     assert.equal(describeOp({ t: "clock.update", shown: true }, s), "turning on Players see the date and time");
   });
 });
+
+describe("placements between squares (docs/design/design-v1-snap-off.md 5.5)", () => {
+  test("name a placement in place and Snap to grid, and a free move as a move", () => {
+    const s = room({ tokens: { bree: token("bree", { name: "Bree", kind: "pc" }) } });
+    assert.equal(describeOp({ t: "token.update", tokenId: "bree", patch: { drawnAt: { x: 3.25, y: 3 } } }, s), "placing Bree between squares");
+    assert.equal(describeOp({ t: "token.update", tokenId: "bree", patch: { drawnAt: null } }, s), "snapping Bree to the grid");
+    assert.equal(describeOp({ t: "token.move", tokenId: "bree", x: 4, y: 3, drawnAt: { x: 4.25, y: 3 } }, s), "moving Bree");
+  });
+});

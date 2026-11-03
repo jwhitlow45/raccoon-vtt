@@ -91,6 +91,8 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
         return `resizing ${token(op.tokenId)} to ${sizeWords(op.patch, t, t ? gridOfToken(before, t) : SQUARES)}`;
       }
       const only = Object.keys(op.patch).length === 1;
+      // A drop between squares on the token's own box, or Snap to grid (docs/design/design-v1-snap-off.md 5.5).
+      if (only && op.patch.drawnAt !== undefined) return op.patch.drawnAt ? `placing ${token(op.tokenId)} between squares` : `snapping ${token(op.tokenId)} to the grid`;
       if (only && op.patch.light !== undefined) {
         const lit = (l: { bright: number; dim: number } | null | undefined) => !!l && (l.bright > 0 || l.dim > 0);
         if (!lit(op.patch.light)) return `putting out the light of ${token(op.tokenId)}`;
