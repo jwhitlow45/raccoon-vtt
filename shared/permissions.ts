@@ -47,6 +47,7 @@ import { turnUnderWay } from "./rules/path.ts";
 import { entryMatchesAnchor } from "./rules/durations.ts";
 import { EXHAUSTION_MAX_LEVEL, levelFits } from "./srd/conditions.ts";
 import { ownEntry } from "./records.ts";
+import { lengthAs } from "./sound.ts";
 
 /**
  * Who may do what (design sections 8.1 and 8.2). The DM may do everything a
@@ -265,7 +266,7 @@ function decide(op: Op, actor: Viewer, state: RoomState, deps: PermissionDeps, s
   const decision = actor.role === "dm" ? forDm(op, check) : forPlayer(op, check);
   // After the role's checks, so a player who names a hidden effect hears that it is not there, never what it holds.
   if (!decision.ok) return decision;
-  if (deps.roomSound === false && namesSoundFile(op)) return refuse("invalid", SOUND_OFF);
+  if (deps.roomSound === false && namesSoundFile(op, state)) return refuse("invalid", SOUND_OFF);
   if (op.t === "actor.outcome" && op.recharge !== undefined) {
     const recharge = canApply({ t: "actor.use", ...op.recharge }, actor, state, deps);
     if (!recharge.ok) return recharge;
@@ -776,12 +777,13 @@ function mapVideosUsable(c: Check, places: readonly { widthPx: number; heightPx:
 /**
  * The ops that add, edit or play a sound file, which the server's switch
  * refuses while off (docs/design/design-v1-sound.md 6.2). Stops, a pause,
- * deletes, volumes, a playlist's delete, a scene's sound removed and the
- * built-in effects still pass, so a room can always fall silent and free
- * its space. While the switch is off nothing that names a file plays,
- * since the actor stops it as the room loads.
+ * deletes, volumes, a playlist's delete, a scene's sound removed, a scene's
+ * sound that starts no file and the built-in effects still pass, so a room
+ * can always fall silent and free its space. While the switch is off
+ * nothing that names a file plays, since the actor stops it as the room
+ * loads.
  */
-function namesSoundFile(op: Op): boolean {
+function namesSoundFile(op: Op, state: RoomState): boolean {
   switch (op.t) {
     case "sound.create":
     case "sound.update":
@@ -792,8 +794,9 @@ function namesSoundFile(op: Op): boolean {
     case "music.skip":
     case "music.set":
     case "loop.start":
-    case "sound.scene":
       return true;
+    case "sound.scene":
+      return sceneSoundStartsFile(op, state);
     case "effect.fire":
       return op.soundId !== undefined;
     case "scene.update":
@@ -801,6 +804,27 @@ function namesSoundFile(op: Op): boolean {
     default:
       return false;
   }
+}
+
+/**
+ * Whether a scene's sound would start a sound file (4.6), held to what
+ * reducer/sound.ts soundScene does: its music, unless it asks for none or
+ * names a playlist with no tracks, and each background sound of the scene
+ * that is still one and is not playing already. A scene with no sound, or a
+ * move's sound once the players left that scene, starts nothing, so with
+ * the switch off a Move players to a silent scene still sends it
+ * (MUS-R1-06). Music the scene shares with a run that plays on counts as
+ * starting one, since it never plays while the switch is off.
+ */
+function sceneSoundStartsFile(op: OpOf<"sound.scene">, state: RoomState): boolean {
+  const wanted = ownEntry(state.scenes, op.sceneId)?.sound;
+  if (!wanted || (op.onMove === true && state.meta.playerSceneId !== op.sceneId)) return false;
+  if (wanted.music !== null) {
+    const listed = wanted.music.playlistId === undefined ? undefined : ownEntry(state.playlists ?? {}, wanted.music.playlistId);
+    if (!(op.order.length === 0 && listed !== undefined && listed.sounds.length === 0)) return true;
+  }
+  const playing = Object.values(state.playing?.loops ?? {});
+  return wanted.loops.some((want) => lengthAs(state.sounds, want.soundId, "loop") !== undefined && !playing.some((loop) => loop.soundId === want.soundId));
 }
 
 /** The refusal of a page private to a DM, who reads every page anyway (docs/design/design-v1-dm-tools.md 3.7). */
