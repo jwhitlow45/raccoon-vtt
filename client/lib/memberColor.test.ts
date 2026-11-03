@@ -103,3 +103,34 @@ describe("the picker's note on button colors", () => {
     assert.equal(buttonNote("#1b1f3a"), "Buttons use a lighter shade so they stay readable.");
   });
 });
+
+describe("the picker's note on button colors, per scheme (the light theme, section 6.3)", () => {
+  test("an orange member reads that buttons stay yellow on dark and use the crest's darker shade on light", () => {
+    assert.equal(buttonNote("#f38400", "dark"), "Buttons stay yellow.");
+    assert.equal(buttonNote("#f38400", "light"), "Buttons use the crest's darker shade so they stay readable.");
+  });
+
+  test("a color the accent cannot use reads the same way per scheme", () => {
+    assert.equal(buttonNote("#5a463680", "light"), "Buttons use the crest's darker shade so they stay readable.");
+  });
+
+  test("the crest's own yellow is moved on light like any color: darker, with no crest words", () => {
+    assert.equal(buttonNote(YELLOW, "dark"), null);
+    assert.equal(buttonNote(YELLOW, "light"), "Buttons use a darker shade so they stay readable.");
+  });
+
+  test("a color moves the way the scheme needs: purple lighter on dark and darker on light", () => {
+    assert.equal(buttonNote(PURPLE, "dark"), "Buttons use a lighter shade so they stay readable.");
+    assert.equal(buttonNote(PURPLE, "light"), "Buttons use a darker shade so they stay readable.");
+  });
+
+  test("a color that reads on the page as it is gets no note", () => {
+    assert.equal(buttonNote("#1b1f3a", "light"), null);
+    assert.equal(buttonNote("#E5E5E5", "dark"), null);
+  });
+
+  test("scheme defaults to dark", () => {
+    assert.equal(buttonNote("#f38400"), buttonNote("#f38400", "dark"));
+  });
+});
+

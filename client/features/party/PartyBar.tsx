@@ -22,6 +22,7 @@ import { hpLine, lifeWord, partyEntries, type PartyEntry } from "./party.ts";
 const LABEL_COLOR: Record<PartyEntry["label"], string> = {
   Healthy: theme.color.success,
   Bloodied: theme.color.warning,
+  // The meter's fill, never words: `danger` is too weak as small text on a light page, and the word takes `dangerText` (Entry).
   Dying: theme.color.danger,
   Dead: theme.color.textMuted,
 };
@@ -231,7 +232,7 @@ export function Entry(props: { entry: PartyEntry; onFrame(): void }) {
           </span>
         </span>
         {life ? (
-          <span data-disabled-look="readonly" style={{ fontSize: theme.font.small, fontWeight: theme.weight.bold, color: entry.life === "stable" ? theme.color.warning : entry.life === "dead" ? theme.color.textMuted : theme.color.danger }}>{life}</span>
+          <span data-disabled-look="readonly" style={{ fontSize: theme.font.small, fontWeight: theme.weight.bold, color: entry.life === "stable" ? theme.color.warning : entry.life === "dead" ? theme.color.textMuted : theme.color.dangerText }}>{life}</span>
         ) : (
           <span aria-hidden style={{ height: 4, borderRadius: theme.radius.xs, background: theme.color.border, overflow: "hidden" }}>
             <span style={{ display: "block", width: `${Math.round(entry.fraction * 100)}%`, height: "100%", background: color }} />

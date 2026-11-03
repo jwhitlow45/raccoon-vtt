@@ -107,9 +107,9 @@ describe("the side panel's party bar", () => {
 });
 
 describe("a party member's row", () => {
-  const rowOf = (life: "alive" | "dead", max = 24, effects: Effect[] = []) => {
+  const rowOf = (life: "alive" | "dead" | "dying" | "stable", max = 24, effects: Effect[] = []) => {
     const state = room({
-      characters: { ayla: character("ayla", { name: "Ayla", ownerIds: ["p1"], actor: actor({ ac: 15, passivePerception: 13, life, effects, hp: { cur: life === "dead" || max === 0 ? 0 : 18, max, temp: 0 } }) }) },
+      characters: { ayla: character("ayla", { name: "Ayla", ownerIds: ["p1"], actor: actor({ ac: 15, passivePerception: 13, life, effects, hp: { cur: life !== "alive" || max === 0 ? 0 : 18, max, temp: 0 } }) }) },
       tokens: { a1: token("a1", { kind: "pc", sceneId: "s1", actor: { ref: "ayla" } }) },
     });
     const [entry] = partyEntries(state, "s1");
@@ -145,6 +145,15 @@ describe("a party member's row", () => {
     assert.ok(portrait, "the dead member's portrait draws its initials");
     assert.equal(portrait[1], ' data-disabled-look="readonly"', "the faded portrait carries the readonly mark");
     assert.match(portrait[2]!, /opacity:0\.45/);
+  });
+
+  // `danger` is for outlines, stripes and fills. As 13 px words it read 3.6:1 in dark and is weaker still on a light page (the light theme, section 6.1).
+  test("draws the Dying word in dangerText, never in danger, and keeps the meter's fill in danger", () => {
+    const dying = rowOf("dying");
+    assert.match(dying, new RegExp(`color:${tokenPattern(theme.color.dangerText)}[^>]*>Dying</span>`));
+    assert.doesNotMatch(dying, new RegExp(`color:${tokenPattern(theme.color.danger)}[^>]*>Dying</span>`));
+    assert.match(rowOf("stable"), new RegExp(`color:${tokenPattern(theme.color.warning)}[^>]*>Stable</span>`));
+    assert.match(rowOf("dead"), new RegExp(`color:${tokenPattern(theme.color.textMuted)}[^>]*>Dead</span>`));
   });
 
   test("shows AC on the shield and Passive Perception as PP", () => {

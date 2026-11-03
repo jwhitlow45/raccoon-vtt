@@ -1,5 +1,5 @@
 import { accentFor, luminance } from "./accent.ts";
-import { MEMBER_COLOR_NAMES, MEMBER_COLORS, theme } from "./theme.ts";
+import { MEMBER_COLOR_NAMES, MEMBER_COLORS, theme, type Scheme } from "./theme.ts";
 
 /**
  * Who uses which member color, for the swatches on the join page and in the
@@ -97,13 +97,16 @@ export function memberSwatches(users: { players: readonly Named[]; dmColors?: re
 
 /**
  * What the color picker's preview says when buttons do not wear the picked
- * color as it is (lib/accent.ts), or null when they do.
+ * color as it is (lib/accent.ts), or null when they do. It follows the
+ * scheme the page shows, since the accent does.
  */
-export function buttonNote(color: string): string | null {
-  const accent = accentFor(color).accent;
+export function buttonNote(color: string, scheme: Scheme = "dark"): string | null {
+  const accent = accentFor(color, scheme).accent;
   if (accent === color.toLowerCase()) return null;
-  // The crest orange (question 1 of the design, docs/design/design-v1-visual.md 6.3), or a color the accent cannot use.
-  if (accent === theme.color.crest) return "Buttons stay yellow.";
+  // The crest orange (question 1 of the design, docs/design/design-v1-visual.md 6.3), or a color the accent cannot use. The crest's own yellow is no such case: on light it is moved like any color.
+  if (accent === accentFor(null, scheme).accent && color.toLowerCase() !== theme.color.crest) {
+    return scheme === "dark" ? "Buttons stay yellow." : "Buttons use the crest's darker shade so they stay readable.";
+  }
   return luminance(accent) > luminance(color) ? "Buttons use a lighter shade so they stay readable." : "Buttons use a darker shade so they stay readable.";
 }
 

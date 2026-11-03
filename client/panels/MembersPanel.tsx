@@ -12,7 +12,8 @@ import { Swatches } from "../components/Swatches.tsx";
 import { Tag } from "../components/Tag.tsx";
 import { accentFor } from "../lib/accent.ts";
 import { buttonNote, memberSwatches } from "../lib/memberColor.ts";
-import { theme } from "../lib/theme.ts";
+import { useScheme } from "../lib/scheme.ts";
+import { theme, type Scheme } from "../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../state/view.ts";
 import { memberRow } from "./memberRow.ts";
 
@@ -157,6 +158,8 @@ function ColorPicker(props: { id: string; member: Member; others: readonly Membe
   const box = useRef<HTMLDivElement>(null);
   const labelId = useId();
   const color = props.member.color;
+  // The sample follows the page's scheme as it changes, since the accent does.
+  const scheme = useScheme();
   const options = useMemo(() => memberSwatches({ players: props.others, current: color }), [props.others, color]);
 
   // A phone sheet is at most 60% of the screen, and under a lower row the picker would open out of sight.
@@ -192,7 +195,7 @@ function ColorPicker(props: { id: string; member: Member; others: readonly Membe
           }}
         />
       </div>
-      <ColorPreview color={color} />
+      <ColorPreview color={color} scheme={scheme} />
       <div style={{ display: "flex", alignItems: "flex-end", gap: theme.space(3) }}>
         <Help style={{ flex: 1, minWidth: 0 }}>Your pings, laser, rulers and buttons change now. Drawings, pins and areas you already made keep their color.</Help>
         <Button size="sm" onClick={props.onDone}>
@@ -204,15 +207,15 @@ function ColorPicker(props: { id: string; member: Member; others: readonly Membe
 }
 
 /**
- * The button color beside the map color. The accent lightens a color that
- * would not read on the dark surfaces (lib/accent.ts), and the crest orange
- * stays yellow, so without this a member could not tell why their buttons
- * and their pings differ. The sample is a picture of a button, hidden from
- * screen readers, and the note under it says the same in words.
+ * The button color beside the map color. The accent moves a color that
+ * would not read on the page's surfaces (lib/accent.ts), and the crest orange
+ * takes the crest's accent, so without this a member could not tell why
+ * their buttons and their pings differ. The sample is a picture of a button,
+ * hidden from screen readers, and the note under it says the same in words.
  */
-function ColorPreview(props: { color: string }) {
-  const shown = accentFor(props.color);
-  const note = buttonNote(props.color);
+export function ColorPreview(props: { color: string; scheme: Scheme }) {
+  const shown = accentFor(props.color, props.scheme);
+  const note = buttonNote(props.color, props.scheme);
   const label = { fontSize: theme.font.small, color: theme.color.textMuted };
   return (
     <div style={{ display: "grid", gap: theme.space(1) }}>
