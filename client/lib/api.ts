@@ -1,6 +1,6 @@
 import { isApiErrorCode, type ApiErrorCode } from "#shared/apiErrors.ts";
 import type { AssetId, BuildChunk, FogTile, Label, LogEntry, Member, MemberId, Scene, Stamp } from "#shared/model.ts";
-import type { AssetCredit, SearchResult, SearchSource } from "#shared/protocol.ts";
+import type { AssetCredit, JoinMode, SearchResult, SearchSource } from "#shared/protocol.ts";
 
 /**
  * Typed helpers for the HTTP routes in design section 10.8.
@@ -28,6 +28,41 @@ export type Me = {
   /** The room's name as created, sent by GET /me (not by a join or claim answer). */
   roomName?: string;
 };
+export type { JoinMode };
+/** What anyone with the room's ID may read: its name and how new devices join. */
+export type RoomInfo = { roomId: string; name: string; joinMode: JoinMode };
+/**
+ * Join requests (docs/design/design-v1-join-requests.md 5.2). A requester
+ * learns only its own request's state, never anything about the room. A
+ * request a DM is letting in reads as `waiting` until its outcome is known.
+ */
+export type JoinRequestState = "waiting" | "in" | "turned_away" | "expired" | "closed";
+/** The caller's live request in the room, or its ending kept for 2 minutes. */
+export type MyJoinRequest = { requestId: string; state: JoinRequestState; name: string; color: string; expiresAt: string };
+export type AskInput = { name: string; color: string; turnstileToken?: string };
+export type AskAnswer = { requestId: string; expiresAt: string };
+/**
+ * One held wait's answer, always naming its request. `superseded`: a newer
+ * wait on the same request took over, so this page stops asking. `in`
+ * carries the same shape as getMe.
+ */
+export type JoinWaitAnswer =
+  | { requestId: string; state: "waiting" }
+  | { requestId: string; state: "in"; me: Me & { roomId: string; memberId: MemberId } }
+  | { requestId: string; state: "superseded" }
+  | { requestId: string; state: "turned_away" | "expired" | "closed" };
+/** A waiting request as DM devices see it. Never the requester's address, device or token. */
+export type JoinRequestRow = { id: string; name: string; color: string; askedAt: string };
+/**
+ * The DM's list. `players`: the members a requester may be let in as, never
+ * a former DM. `challenged`: the room passed 20 asks this hour, so asks need
+ * Turnstile and the toasts go quiet.
+ */
+export type JoinRequestList = { mode: JoinMode; challenged: boolean; requests: JoinRequestRow[]; players: MemberSummary[] };
+/** Someone new (always the default), or carrying on as a listed player. */
+export type LetInAs = { kind: "new" } | { kind: "member"; memberId: MemberId };
+/** `pending`: the server answered 202, still finishing, and the `joinRequests` signal settles the row. */
+export type LetInAnswer = { memberId: MemberId; pending?: true };
 export type AssetKind = "map" | "token" | "handout" | "thumb";
 export type AssetVariant = "full" | "mobile" | "thumb";
 export type AssetRow = {
@@ -459,8 +494,8 @@ export const api = {
   createRoom: (input: { name: string; playerPassword: string; dmName: string; turnstileToken?: string }) =>
     request<{ roomId: string; dmLink: string }>("POST", "/api/rooms", { json: input }),
 
-  /** The room's name only, for the join page. */
-  getRoom: (roomId: string) => request<{ name: string }>("GET", room(roomId)),
+  /** The room's name and join mode, for the join page. */
+  getRoom: (roomId: string) => request<RoomInfo>("GET", room(roomId)),
 
   /** The DM only: a scene as players get it (PlayerSceneView). */
   getPlayerView: (roomId: string, sceneId: string, signal?: AbortSignal) => request<PlayerSceneView>("GET", `${room(roomId)}/scenes/${encodeURIComponent(sceneId)}/player-view`, { signal }),
@@ -478,11 +513,50 @@ export const api = {
       json: { password, ...(turnstileToken ? { turnstileToken } : {}) },
     }),
 
-  /** Step 2: continue as an existing player, or become a new one. */
+  /**
+   * Step 2: continue as an existing player, or become a new one. `busy`
+   * (503) means the outcome is still settling: ask getMe, and try again
+   * after a moment if this device is not in yet. `asks_only` (403): the
+   * room switched to Only by asking.
+   */
   completeJoin: (
     roomId: string,
     input: { ticket: string; memberId: MemberId } | { ticket: string; name: string; color: string },
   ) => request<Me>("POST", `${room(roomId)}/join/complete`, { json: input }),
+
+  /** The caller's own request in the room, read only. `request_gone` (404) when it has none. */
+  getMyJoinRequest: (roomId: string, signal?: AbortSignal) =>
+    request<MyJoinRequest>("GET", `${room(roomId)}/join-requests/mine`, { signal }),
+
+  /** Asks a DM to let this device in. Sets the room cookie when the device had no session. */
+  askToJoin: (roomId: string, input: AskInput) =>
+    request<AskAnswer>("POST", `${room(roomId)}/join-requests`, {
+      json: { name: input.name, color: input.color, ...(input.turnstileToken ? { turnstileToken: input.turnstileToken } : {}) },
+    }),
+
+  /** Holds up to 25 s for the request's next state. */
+  waitForJoinRequest: (roomId: string, requestId: string, signal?: AbortSignal) =>
+    request<JoinWaitAnswer>("POST", `${room(roomId)}/join-requests/${encodeURIComponent(requestId)}/wait`, { json: {}, signal }),
+
+  /** Cancel: `request_deciding` (409) while a DM's let-in is committing. */
+  cancelJoinRequest: (roomId: string, requestId: string) =>
+    request<void>("DELETE", `${room(roomId)}/join-requests/${encodeURIComponent(requestId)}`),
+
+  /** The DM only. */
+  listJoinRequests: (roomId: string, signal?: AbortSignal) =>
+    request<JoinRequestList>("GET", `${room(roomId)}/join-requests`, { signal }),
+
+  /** The DM only. */
+  letIn: (roomId: string, requestId: string, as: LetInAs) =>
+    request<LetInAnswer>("POST", `${room(roomId)}/join-requests/${encodeURIComponent(requestId)}/let-in`, { json: { as } }),
+
+  /** The DM only: 1 to 50 of this room's requests. Any no longer waiting are skipped. */
+  turnAway: (roomId: string, ids: readonly string[]) =>
+    request<void>("POST", `${room(roomId)}/join-requests/turn-away`, { json: { ids } }),
+
+  /** The DM only. Setting the mode already set answers the same. */
+  setJoinMode: (roomId: string, mode: JoinMode) =>
+    request<{ mode: JoinMode }>("POST", `${room(roomId)}/join-mode`, { json: { mode } }),
 
   /**
    * `name` (someone new) or `memberId` (a current DM member, "This is me")

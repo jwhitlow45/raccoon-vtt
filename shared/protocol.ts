@@ -2998,8 +2998,24 @@ export const serverMessageSchema = z.discriminatedUnion("t", [
    * (design 10.2).
    */
   z.strictObject({ t: z.literal("access") }),
+  /**
+   * DM sockets only, never a View as preview: the room's join requests
+   * changed (an ask, an answer, an ending, or the join mode), so the DM
+   * devices fetch the list again (docs/design/design-v1-join-requests.md 5.3).
+   * Apart from `access`, so a burst of asks never refetches the devices list
+   * and the player link. A page on an older build drops it, as it drops `clock`.
+   */
+  z.strictObject({ t: z.literal("joinRequests") }),
 ]);
 export type ServerMessage = z.infer<typeof serverMessageSchema>;
+
+/**
+ * How new devices join a room (docs/design/design-v1-join-requests.md 2.1):
+ * with the player password, with the password or by asking a DM, or only by
+ * asking. Server data on the room row, like the password, never room state.
+ */
+export const JOIN_MODES = ["password", "ask", "ask_only"] as const;
+export type JoinMode = (typeof JOIN_MODES)[number];
 
 // Image search results and credits (wave 5, docs/design/design-v1-dm-tools.md 3.13).
 
