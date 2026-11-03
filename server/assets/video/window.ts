@@ -209,6 +209,11 @@ export class Edits {
    * one it could reach into.
    */
   assertOutsideMedia(budget?: Budget): void {
+    this.#outsideMedia(budget);
+  }
+
+  /** The guard, answering the media's joined stretches for the writer's own check. */
+  #outsideMedia(budget: Budget | undefined): Range[] {
     const media = joined(this.protected, budget);
     const touched = this.touched().sort((a, b) => a.start - b.start);
     let next = 0;
@@ -219,6 +224,7 @@ export class Edits {
       const p = media[next];
       if (p && p.start < t.end) throw new EditIntoMediaError(`a video edit at ${t.start} to ${t.end} reaches into media data at ${p.start} to ${p.end}`);
     }
+    return media;
   }
 
   /** The edits applied to a copy of `bytes`, for tests: zeroes first, then the headers that rename what they cleared. */
@@ -254,14 +260,26 @@ export class Edits {
    * each other go out together: the bytes between them are read first and
    * written back as they were. A stretch longer than a window is all
    * edits, so it is written a window at a time with nothing read.
+   *
+   * A batch never reaches across media data, though its bytes would come
+   * back the same: the check never writes inside the media, and each write
+   * is held to that before it runs (AMBUILD-SOL-007). `opener` stands in
+   * for `open` in a test that records where the writes land.
    */
-  async applyToFile(path: string, budget?: Budget): Promise<void> {
-    this.assertOutsideMedia(budget);
+  async applyToFile(path: string, budget?: Budget, opener: (path: string, flags: string) => Promise<FileHandle> = open): Promise<void> {
+    const media = this.#outsideMedia(budget);
     const writes = this.#sortedWrites(budget);
     const zeroes = joined(this.zeroes, budget);
     const stretches = joined(this.touched(), budget);
     const painter = new Painter(zeroes, writes);
-    const handle = await open(path, "r+");
+    // Two cursors, since each is asked in rising order: the gaps a batch would cover, and the writes themselves.
+    const between = new MediaCursor(media);
+    const written = new MediaCursor(media);
+    const handle = await opener(path, "r+");
+    const write = async (buf: Buffer, at: number) => {
+      if (written.meets(at, at + buf.length)) throw new EditIntoMediaError(`a video write at ${at} to ${at + buf.length} reaches into media data`);
+      await handle.write(buf, 0, buf.length, at);
+    };
     try {
       let i = 0;
       while (i < stretches.length) {
@@ -272,26 +290,46 @@ export class Edits {
             budget?.check();
             const buf = Buffer.alloc(Math.min(WINDOW_BYTES, first.end - at));
             painter.paint(buf, at);
-            await handle.write(buf, 0, buf.length, at);
+            await write(buf, at);
           }
           i++;
           continue;
         }
         let last = i;
-        while (last + 1 < stretches.length && stretches[last + 1]!.end - first.start <= WINDOW_BYTES) last++;
+        while (last + 1 < stretches.length && stretches[last + 1]!.end - first.start <= WINDOW_BYTES && !between.meets(stretches[last]!.end, stretches[last + 1]!.start)) last++;
         const buf = Buffer.alloc(stretches[last]!.end - first.start);
         if (last > i) {
           const { bytesRead } = await handle.read(buf, 0, buf.length, first.start);
           if (bytesRead !== buf.length) throw refuse("bad_video");
         }
         painter.paint(buf, first.start);
-        await handle.write(buf, 0, buf.length, first.start);
+        await write(buf, first.start);
         i = last + 1;
       }
       await handle.sync();
     } finally {
       await handle.close();
     }
+  }
+}
+
+/**
+ * Whether a span meets the media's sorted, disjoint stretches. The writer
+ * asks in rising order, so a stretch is passed over once it ends before
+ * the span asked about.
+ */
+class MediaCursor {
+  readonly #media: readonly Range[];
+  #at = 0;
+
+  constructor(media: readonly Range[]) {
+    this.#media = media;
+  }
+
+  meets(start: number, end: number): boolean {
+    while (this.#at < this.#media.length && this.#media[this.#at]!.end <= start) this.#at++;
+    const m = this.#media[this.#at];
+    return m !== undefined && m.start < end;
   }
 }
 

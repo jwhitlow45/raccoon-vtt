@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
+import { mkdtemp, open, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import fc from "fast-check";
 import { runSettings } from "#shared/propertyTestutil.ts";
 import { AssetError } from "../errors.ts";
+import { checkVideoBytes } from "./check.ts";
+import { bx, mp4File } from "./videoTestutil.ts";
 import { Budget, BufferSource, EditIntoMediaError, Edits, FileWindow, Tally, WINDOW_BYTES } from "./window.ts";
 
 /** The header check's reads and edits (docs/design/design-v1-animated-maps.md 10). */
@@ -209,4 +211,61 @@ test("a spent budget and a count past its cap refuse with their codes", () => {
   const frames = new Tally(2, "video_fps");
   frames.add(2);
   assert.throws(() => frames.add(), (err: unknown) => err instanceof AssetError && err.code === "video_fps");
+});
+
+/** A file handle that records where each write lands, standing in for `open` (AMBUILD-SOL-007). */
+function recording(spans: Array<{ start: number; end: number }>) {
+  return async (path: string, flags: string) => {
+    const handle = await open(path, flags);
+    const write = handle.write.bind(handle) as (buf: Buffer, offset: number, length: number, position: number) => Promise<unknown>;
+    return Object.assign(handle, {
+      write: (buf: Buffer, offset: number, length: number, position: number) => {
+        spans.push({ start: position, end: position + length });
+        return write(buf, offset, length, position);
+      },
+    }) as typeof handle;
+  };
+}
+
+const crosses = (spans: ReadonlyArray<{ start: number; end: number }>, media: ReadonlyArray<{ start: number; end: number }>) =>
+  spans.filter((s) => media.some((m) => s.start < m.end && m.start < s.end));
+
+test("no write the edits make spans media data, though edits lie on both sides of it within a window (AMBUILD-SOL-007)", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "rvtt-window-"));
+  try {
+    // The reviewer's shape: ftyp's minor version before a small mdat, and padding after it, all inside one window.
+    const bytes = mp4File({ afterMdat: [bx("free", Buffer.from("free box after the media"))] });
+    const { edits } = await checkVideoBytes(bytes);
+    const path = join(dir, "v.mp4");
+    await writeFile(path, bytes);
+    const spans: Array<{ start: number; end: number }> = [];
+    await edits.applyToFile(path, undefined, recording(spans));
+    assert.ok(spans.length >= 2, `the writes were recorded: ${JSON.stringify(spans)}`);
+    assert.deepEqual(crosses(spans, edits.protected), []);
+    assert.ok((await readFile(path)).equals(edits.applyTo(bytes)));
+
+    // Any layout of edits and media ranges a window apart or less.
+    const piece = fc.record({ kind: fc.constantFrom("zero", "write", "media", "gap"), length: fc.integer({ min: 1, max: 900 }) });
+    await fc.assert(
+      fc.asyncProperty(fc.array(piece, { minLength: 1, maxLength: 40 }), async (pieces) => {
+        const e = new Edits();
+        let at = 0;
+        for (const [i, p] of pieces.entries()) {
+          if (p.kind === "zero") e.zero(at, at + p.length);
+          else if (p.kind === "write") e.put(at, Buffer.alloc(Math.min(p.length, 9), 0x40 + (i % 60)));
+          else if (p.kind === "media") e.protect(at, at + p.length);
+          at += p.length;
+        }
+        const original = Buffer.alloc(at, 0x33);
+        await writeFile(path, original);
+        const seen: Array<{ start: number; end: number }> = [];
+        await e.applyToFile(path, undefined, recording(seen));
+        assert.deepEqual(crosses(seen, e.protected), []);
+        assert.ok((await readFile(path)).equals(e.applyTo(original)));
+      }),
+      { seed, numRuns: runs ?? 200 },
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
