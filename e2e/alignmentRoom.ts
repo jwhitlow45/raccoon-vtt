@@ -19,7 +19,7 @@ import { trapPreset } from "../shared/srd/traps.ts";
 import { barControl, ConsoleWatch, dragCells, expandBar, multiSelect, OpSocket, openSceneGroup, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, ROOT, sceneGroup, sceneGroupFold, Shots, sideTabName, SocketWatch, startServer, tapCell, touchSwipe, untilReady, waitFor, wholeInReach, type Server } from "./harness.ts";
 import { DEFAULT_SNAPSHOT_BUDGET } from "../server/rooms/budgets.ts";
 import { INTER_FILES } from "../client/lib/interFont.ts";
-import { theme } from "../client/lib/theme.ts";
+import { PALETTES, theme } from "../client/lib/theme.ts";
 import { alignmentLines, containmentLines, disabledLookLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measureAlignment, menuWordLines, pillLines, popoverScrollbarLines, proficiencyHeightLines, proficiencyLines, rollingGridLines, rollRowLines, saveOutlineLines, toastLaneLines, toastsUnderCards, type HeaderPlace, type PillPoint } from "./helpers/alignment.ts";
 import { measureSpacing, spacingLines, type SpacingFinding } from "./helpers/spacing.ts";
 import { moreMenuFixture } from "./helpers/menuFixture.ts";
@@ -3203,8 +3203,8 @@ export function helperTest(): void {
   });
   test("lk1-disabled-look. an off control with bright or faded words fails, a select the browser's own sheet fades included, and a checkbox or radio whose label draws bright, hidden under it or not, while dim words, wordless controls, dim labels, a field's heading, the two marks and a readonly mark on a state inside a control pass", async () => {
     const page = await dmContext.newPage();
-    const dim = theme.color.textDisabled;
-    const bright = theme.color.text;
+    const dim = PALETTES.dark.textDisabled;
+    const bright = PALETTES.dark.text;
     try {
       await page.setContent(`<div id="look" style="font:14px/20px sans-serif;background:#222">
         <button disabled style="color:${dim}">Roll</button>

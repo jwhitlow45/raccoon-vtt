@@ -5,6 +5,7 @@ import { createStore } from "zustand/vanilla";
 import { DM, character, room } from "#shared/testutil.ts";
 import type { ReactElement, ReactNode } from "react";
 import { theme } from "../lib/theme.ts";
+import { tokenPattern } from "../components/testing/tokenPattern.ts";
 
 const { createElement, isValidElement, cloneElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
@@ -56,7 +57,7 @@ function heldIn(node: ReactNode): HeldElement | null {
   return heldIn((node.props as { children?: ReactNode }).children);
 }
 
-const dim = new RegExp(`color:${theme.color.textDisabled}`, "i");
+const dim = new RegExp(`color:${tokenPattern(theme.color.textDisabled)}`, "i");
 
 /** The group a site draws, with `held` as the site set it and then forced on. */
 function groupOf(tree: ReactNode): { free: string; held: string } {
@@ -250,14 +251,14 @@ describe("the dice set picker, with Roll animation off, is a held group", () => 
       const { DiceSetPicker } = await import("./device/DiceSetPicker.tsx");
       assert.equal(heldIn(drawn(DiceSetPicker as never, {} as never, inRoom))?.props.held, true);
       assert.match(off, /^<fieldset disabled=""/);
-      assert.match(off, new RegExp(`<legend[^>]*color:${theme.color.textDisabled}`, "i"));
+      assert.match(off, new RegExp(`<legend[^>]*color:${tokenPattern(theme.color.textDisabled)}`, "i"));
       // The radios are native, so the fieldset stops them. The tiles keep their own look inside it (tileStyle).
-      assert.match(off, new RegExp(`<label[^>]*border:${theme.line.strong}px solid ${theme.color.textDisabled}`, "i"));
+      assert.match(off, new RegExp(`<label[^>]*border:${theme.line.strong}px solid ${tokenPattern(theme.color.textDisabled)}`, "i"));
       setRollAnimation(true);
       const on = await drawPicker();
       assert.doesNotMatch(on, /^<fieldset disabled=""/);
       assert.equal(heldIn(drawn(DiceSetPicker as never, {} as never, inRoom))?.props.held, false);
-      assert.doesNotMatch(on, new RegExp(`<legend[^>]*color:${theme.color.textDisabled}`, "i"));
+      assert.doesNotMatch(on, new RegExp(`<legend[^>]*color:${tokenPattern(theme.color.textDisabled)}`, "i"));
     } finally {
       setRollAnimation(true);
     }

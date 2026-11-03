@@ -10,7 +10,7 @@ import { boardSizes } from "../../../lib/boardScale.ts";
 import { labelStyle, overlaps, placeLabels, type Box, type LabelInput, type Obstacle } from "../../../lib/boardText.ts";
 import type { ViewToken } from "../../../lib/scene.ts";
 import { DECOR_MIN_PX } from "../../../lib/tokenView.ts";
-import { theme } from "../../../lib/theme.ts";
+import { boardTheme, theme } from "../../../lib/theme.ts";
 import { drawMark, drawPills, heightTextSizes, placeHeightPills, type MarkCanvas, type PlacedPill } from "./boardText.ts";
 import { heightRegions, type HeightRegion } from "./regions.ts";
 
@@ -186,7 +186,7 @@ describe("height mode's board text", () => {
         const { markPx } = heightTextSizes(cellPx, ui);
         assert.equal(markPx, boardSizes(cellPx, ui).chipTextPx);
         const drawn = recorder();
-        drawMark(drawn.g, "?", 1.5, 1.5, cellPx, markPx, theme.color.accentSoft);
+        drawMark(drawn.g, "?", 1.5, 1.5, cellPx, markPx, boardTheme.color.accentSoft);
         assert.equal(drawn.texts[0]!.font, `700 ${markPx}px ${theme.font.body}`);
       }
     }

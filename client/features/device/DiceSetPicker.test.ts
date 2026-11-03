@@ -75,7 +75,8 @@ describe("the dice legend's gaps", () => {
         const fieldset = styleOf(markup, /^<fieldset/);
         assert.ok(fieldset !== null && !/(^|;)(row-)?gap:/.test(fieldset), `the fieldset sets no gap: ${fieldset}`);
         assert.match(markup, /^<fieldset[^>]*><legend[^>]*>Dice<\/legend><div style="display:grid;min-width:0">/, "one column under the legend");
-        const help = styleOf(markup, /<p/);
+        // A whole <p> tag: the d20 preview's <polygon> carries a style too.
+        const help = styleOf(markup, /<p\b/);
         if (on) assert.equal(help, null, "no help while the switch is on");
         else assert.match(help ?? "", new RegExp(`margin-top:${theme.space(1)}px`), "the help stands space(1) under the legend");
         assert.match(styleOf(markup, /<div data-card-group=""/) ?? "", new RegExp(`margin-top:${theme.space(2)}px`), `the tiles stand space(2) under ${on ? "the legend" : "the help"}`);

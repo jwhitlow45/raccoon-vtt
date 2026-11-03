@@ -2,6 +2,7 @@ import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { theme } from "../../lib/theme.ts";
+import { tokenPattern } from "../../components/testing/tokenPattern.ts";
 
 const { createElement: h } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
@@ -29,15 +30,15 @@ describe("a held group stops the Scenes panel's controls (LOCKED-LOOK)", () => {
       const off = held(true, draw());
       assert.doesNotMatch(free, /<(select|input)[^>]*\sdisabled=""/, "free, it is live");
       assert.match(off, /<(select|input)[^>]*\sdisabled=""/, "held, it is natively off");
-      if (name === "ColorInput") assert.match(off, new RegExp(`solid ${theme.color.border}`, "i"));
-      else assert.match(off, new RegExp(`color:${theme.color.textDisabled}`, "i"));
+      if (name === "ColorInput") assert.match(off, new RegExp(`solid ${tokenPattern(theme.color.border)}`, "i"));
+      else assert.match(off, new RegExp(`color:${tokenPattern(theme.color.textDisabled)}`, "i"));
     });
   }
 
   test("a slider dims its value and its track too", () => {
     const off = held(true, controls.Slider());
-    assert.equal(off.match(new RegExp(`(?<!-)color:${theme.color.textDisabled}`, "gi"))?.length, 2, "label and value");
-    assert.match(off, new RegExp(`accent-color:${theme.color.textDisabled}`, "i"));
-    assert.doesNotMatch(held(false, controls.Slider()), new RegExp(`color:${theme.color.textDisabled}`, "i"));
+    assert.equal(off.match(new RegExp(`(?<!-)color:${tokenPattern(theme.color.textDisabled)}`, "gi"))?.length, 2, "label and value");
+    assert.match(off, new RegExp(`accent-color:${tokenPattern(theme.color.textDisabled)}`, "i"));
+    assert.doesNotMatch(held(false, controls.Slider()), new RegExp(`color:${tokenPattern(theme.color.textDisabled)}`, "i"));
   });
 });

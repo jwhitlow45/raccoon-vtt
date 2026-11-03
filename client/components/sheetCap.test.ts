@@ -34,7 +34,7 @@ describe("the sheet's height cap", () => {
 
   test("the CSS says the same: a 120 px floor, 60% of the screen, and the larger of the gap and the reserve", () => {
     const css = sheetMaxHeight({ top: 52, bottom: 60 });
-    assert.match(css, /^max\(120px, min\(calc\(60dvh \/ var\(--rvtt-ui, 1\)\), calc\(100% - env\(safe-area-inset-top, 0px\) - env\(safe-area-inset-bottom, 0px\) - 136px\)\)\)$/);
+    assert.match(css, /^max\(120px, min\(calc\(60dvh \/ var\(--rvtt-ui, 1\)\), calc\(100% - var\(--rvtt-safe-top, env\(safe-area-inset-top, 0px\)\) - env\(safe-area-inset-bottom, 0px\) - 136px\)\)\)$/);
     assert.match(sheetMaxHeight({ top: 52, bottom: 60 }, 56), / - 168px\)\)\)$/);
     assert.match(sheetMaxHeight({ top: 52, bottom: 60 }, 8), / - 136px\)\)\)$/);
   });

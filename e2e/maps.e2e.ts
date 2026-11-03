@@ -10,7 +10,7 @@ import { drawMap } from "../client/features/grid/synthetic.ts";
 import { uvttFile } from "../client/features/uvtt/synthetic.ts";
 import { STARTER_STAMPS } from "#shared/starterStamps.ts";
 import { retainedGrid, starterMapScene } from "../client/features/starter/mapScene.ts";
-import { theme } from "../client/lib/theme.ts";
+import { PALETTES } from "../client/lib/theme.ts";
 import { ConsoleWatch, dragWorld, openSceneGroup, openSideTab, pickOption, pickTool, pressOption, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { undoSetup } from "./helpers/undoScope.ts";
@@ -502,7 +502,7 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     const keep = await upload(drawn);
     await waitFor("the found grid on the scene", () => gridIs(keep, DRAWN) || null, 15_000);
     await dm.getByText("Found a grid of 70 px squares.").first().waitFor();
-    assert.equal(await lineTone("Found a grid of 70 px squares."), rgb(theme.color.success), "a grid applied is not in the success green");
+    assert.equal(await lineTone("Found a grid of 70 px squares."), rgb(PALETTES.dark.success), "a grid applied is not in the success green");
     await shots.take(dm, "maps-gd-found-on-upload");
 
     // Use default puts the first guess back.
@@ -524,7 +524,7 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     await openSideTab(dm, "Scenes");
     await dm.getByRole("tabpanel", { name: "Scenes" }).getByRole("button", { name: "Find the grid", exact: true }).click();
     await dm.getByText("No grid found.", { exact: false }).first().waitFor({ timeout: 15_000 });
-    assert.equal(await lineTone("No grid found."), rgb(theme.color.warning), "a search that found nothing is not in the warning tone");
+    assert.equal(await lineTone("No grid found."), rgb(PALETTES.dark.warning), "a search that found nothing is not in the warning tone");
     assert.ok(gridIs(field, GUESS), "finding no grid changes nothing");
     await shots.take(dm, "maps-gd-no-grid");
 

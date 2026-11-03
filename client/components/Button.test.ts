@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { theme } from "../lib/theme.ts";
 import { buttonLook, choiceLook, type ButtonVariant } from "./looks.ts";
+import { tokenPattern } from "./testing/tokenPattern.ts";
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
@@ -33,7 +34,7 @@ describe("Button", () => {
   test("a disabled pressed button keeps its place with a dim outline and no tint", () => {
     const look = buttonLook("secondary", { disabled: true, pressed: true });
     assert.equal(look.background, "transparent");
-    assert.match(String(look.border), new RegExp(theme.color.textDisabled));
+    assert.match(String(look.border), new RegExp(tokenPattern(theme.color.textDisabled)));
   });
 
   test("a disclosure says open in aria-expanded with the chosen look, never in aria-pressed", () => {

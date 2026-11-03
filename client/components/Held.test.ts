@@ -2,7 +2,8 @@ import "./testing/register.ts";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
-import { theme } from "../lib/theme.ts";
+import { PALETTES, theme } from "../lib/theme.ts";
+import { tokenPattern } from "./testing/tokenPattern.ts";
 
 const { createElement: h } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
@@ -45,8 +46,8 @@ const controls = {
   NumberField: () => h(NumberField, { label: "Bonus", value: 2, min: -10, max: 20, onCommit: nothing }),
 };
 const held = (on: boolean, child: ReturnType<typeof h>) => h(Held, { held: on, children: child });
-const dim = new RegExp(`color:${theme.color.textDisabled}`, "i");
-const bright = new RegExp(`color:${theme.color.text}[;"]`, "i");
+const dim = new RegExp(`color:${tokenPattern(theme.color.textDisabled)}`, "i");
+const bright = new RegExp(`color:${tokenPattern(theme.color.text)}[;"]`, "i");
 
 describe("a held group gives every shared control the disabled look (LOCKED-LOOK)", () => {
   for (const [name, draw] of Object.entries(controls)) {
@@ -81,7 +82,7 @@ describe("a held group gives every shared control the disabled look (LOCKED-LOOK
     const css = readFileSync(new URL("../globals.css", import.meta.url), "utf8");
     const rule = /:is\(input, textarea\):is\(:disabled, \[aria-disabled="true"\]\)::placeholder \{\s*color: (#[0-9a-f]{6});\s*\}/.exec(css);
     assert.ok(rule, "globals.css dims an off field's placeholder");
-    assert.equal(rule[1], theme.color.textDisabled);
+    assert.equal(rule[1], PALETTES.dark.textDisabled);
   });
 
   test("an off select keeps full strength, where Chrome's own stylesheet fades it to 0.7 (LP29-A-LOOK-1)", () => {

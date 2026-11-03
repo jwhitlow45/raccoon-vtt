@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { createStore } from "zustand/vanilla";
 import { actor, character, room } from "#shared/testutil.ts";
 import { theme } from "../../lib/theme.ts";
+import { tokenPattern } from "../../components/testing/tokenPattern.ts";
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
@@ -26,7 +27,7 @@ test("a disabled From square greys its portrait at full opacity, inside the dim 
   const face = /data-rvtt-from="disabled"[^>]*><span style="([^"]*)"/.exec(markup)?.[1] ?? "";
   assert.match(face, /filter:grayscale\(1\)/);
   assert.doesNotMatch(face, /opacity:0\.\d/, "no fade");
-  assert.match(markup, new RegExp(`outline:2px solid ${theme.color.textDisabled}`, "i"), "the portrait's ring is the dim outline");
+  assert.match(markup, new RegExp(`outline:2px solid ${tokenPattern(theme.color.textDisabled)}`, "i"), "the portrait's ring is the dim outline");
   // Every word in an off control is textDisabled, the initials of a portrait with no picture too (LOOK1-OPUS-08).
-  assert.match(markup, new RegExp(`color:${theme.color.textDisabled}[^"]*">As</span>`, "i"), "the initials draw the disabled color");
+  assert.match(markup, new RegExp(`color:${tokenPattern(theme.color.textDisabled)}[^"]*">As</span>`, "i"), "the initials draw the disabled color");
 });

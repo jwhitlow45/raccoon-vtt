@@ -6,6 +6,7 @@ import type { Effect } from "#shared/model.ts";
 import { actor, character, effect, room, token } from "#shared/testutil.ts";
 import { theme } from "../../lib/theme.ts";
 import { partyEntries } from "./party.ts";
+import { tokenPattern } from "../../components/testing/tokenPattern.ts";
 
 /*
  * The folded party bar's pills are buttons that frame a character's token.
@@ -127,16 +128,16 @@ describe("a party member's row", () => {
     const markup = renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, children: createElement(RoomScopeProvider, { scope: new RoomScope(), children: createElement(Entry, { entry, onFrame: () => {} }) }) }));
     const button = /<button[^>]*>/.exec(markup)?.[0] ?? "";
     assert.match(button, /\sdisabled=""/);
-    assert.match(button, new RegExp(`color:${theme.color.textDisabled}`, "i"));
-    assert.match(markup, new RegExp(`color:${theme.color.textDisabled}[^>]*>Not on this scene`, "i"));
-    assert.match(markup, new RegExp(`PP <span style="color:${theme.color.textDisabled}`, "i"), "the Passive Perception figure dims with its label");
+    assert.match(button, new RegExp(`color:${tokenPattern(theme.color.textDisabled)}`, "i"));
+    assert.match(markup, new RegExp(`color:${tokenPattern(theme.color.textDisabled)}[^>]*>Not on this scene`, "i"));
+    assert.match(markup, new RegExp(`PP <span style="color:${tokenPattern(theme.color.textDisabled)}`, "i"), "the Passive Perception figure dims with its label");
     // The portrait's initials are words in the off row too (LOOK1-OPUS-08).
-    assert.match(markup, new RegExp(`color:${theme.color.textDisabled}[^"]*">Br</span>`, "i"), "the portrait's initials draw the disabled color");
+    assert.match(markup, new RegExp(`color:${tokenPattern(theme.color.textDisabled)}[^"]*">Br</span>`, "i"), "the portrait's initials draw the disabled color");
   });
 
   test("a row on the scene keeps its portrait's initials bright, and a dead member's faded portrait says it shows a state (LOOK1-OPUS-08)", () => {
     const alive = rowOf("alive");
-    assert.match(alive, new RegExp(`color:${theme.color.text}[^"]*">Ay</span>`, "i"), "a live row's initials keep the text color");
+    assert.match(alive, new RegExp(`color:${tokenPattern(theme.color.text)}[^"]*">Ay</span>`, "i"), "a live row's initials keep the text color");
     assert.doesNotMatch(alive, /data-disabled-look="readonly"[^>]*>Ay</, "a live portrait carries no mark");
     const dead = rowOf("dead");
     // The fade is the dead state, which the disabled-look check would read as an off control faded inside, so the faded box carries the readonly mark itself.

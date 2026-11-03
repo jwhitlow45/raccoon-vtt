@@ -8,7 +8,7 @@ import { chromium, type Browser, type BrowserContext, type Locator, type Page } 
 import type { DiceRoll, LogEntry, LogEvent } from "#shared/model.ts";
 import { uuidv7 } from "#shared/ids.ts";
 import { blockOf, customMonster } from "#shared/testutil.ts";
-import { theme } from "../client/lib/theme.ts";
+import { PALETTES } from "../client/lib/theme.ts";
 import { alignmentLines, disabledLookLines, measureAlignment } from "./helpers/alignment.ts";
 import { OUTCOME_RESTORED, OUTCOME_UNDONE, OUTCOME_UNAVAILABLE, assertPrivateOutcome, openSaveDice, saveOutcomes } from "./helpers/saveOutcomes.ts";
 import { ConsoleWatch, diceFoldsOpen, multiSelect, OpSocket, openSideTab, reopenRoom, resultLine, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
@@ -1031,7 +1031,7 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     await menu.waitFor();
     const rows = menu.getByRole("menuitem");
     assert.ok((await rows.count()) >= 1, "the menu has its choices");
-    const off = hexToRgb(theme.color.textDisabled);
+    const off = hexToRgb(PALETTES.dark.textDisabled);
     /** What the rows show: each one's aria-disabled and the color of its words. */
     const rowLook = () => rows.evaluateAll((els) => els.map((el) => ({ ariaDisabled: el.getAttribute("aria-disabled"), color: (globalThis as unknown as { getComputedStyle(e: unknown): { color: string } }).getComputedStyle(el).color })));
     assert.ok((await rowLook()).some((row) => row.ariaDisabled !== "true"), "while online, the menu's choices are live");

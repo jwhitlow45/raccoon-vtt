@@ -5,6 +5,7 @@ import { createStore } from "zustand/vanilla";
 import type { LogEntry, TrapDue } from "#shared/model.ts";
 import { room, token, trap } from "#shared/testutil.ts";
 import { theme } from "../../lib/theme.ts";
+import { tokenPattern } from "../../components/testing/tokenPattern.ts";
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
@@ -39,14 +40,14 @@ function holder(markup: string, text: string): string {
 describe("the trap card's lines", () => {
   test("what it did reads plainly, and what it could not do as an error line", () => {
     const markup = card(due("12:0"));
-    assert.doesNotMatch(holder(markup, "Showed Imp."), new RegExp(theme.color.dangerText));
+    assert.doesNotMatch(holder(markup, "Showed Imp."), new RegExp(tokenPattern(theme.color.dangerText)));
     const failed = holder(markup, "Could not put out a light: it was deleted.");
     assert.match(failed, /^<p/, "an error line, as the card's other error is");
-    assert.match(failed, new RegExp(theme.color.dangerText));
+    assert.match(failed, new RegExp(tokenPattern(theme.color.dangerText)));
   });
 
   test("a springing out of the players' sight is a warning, not muted help", () => {
     const markup = card(due("15:1", { by: ["imp"], hits: ["imp"], hidden: true }));
-    assert.match(holder(markup, "Imp set it off, out of the players&#x27; sight. The trap is still armed for them."), new RegExp(theme.color.warning));
+    assert.match(holder(markup, "Imp set it off, out of the players&#x27; sight. The trap is still armed for them."), new RegExp(tokenPattern(theme.color.warning)));
   });
 });

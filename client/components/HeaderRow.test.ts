@@ -14,6 +14,7 @@ import { describe, test } from "node:test";
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { headerRow, PillButton, PILL_HEIGHT, PILL_INSET } = await import("./HeaderRow.tsx");
+const { theme } = await import("../lib/theme.ts");
 
 describe("a header row", () => {
   test("is 45 px: 44 px of targets and the rule at its foot, with no padding above or below", () => {
@@ -22,14 +23,14 @@ describe("a header row", () => {
       assert.equal(row.minHeight, 45);
       assert.equal(row.boxSizing, "border-box");
       assert.equal(row.padding, "0 8px", "8 px at the sides, none above or below");
-      assert.equal(row.borderBottom, "1px solid #3a3a44");
+      assert.equal(row.borderBottom, `1px solid ${theme.color.border}`);
       assert.equal(row.borderTop, undefined);
     }
   });
 
   test("a pane's own header is a raised band, the party line and a subpage's header the panel's surface", () => {
-    assert.equal(headerRow(true).background, "#2a2a32");
-    assert.equal(headerRow(false).background, "#1f1f25");
+    assert.equal(headerRow(true).background, theme.color.surfaceRaised);
+    assert.equal(headerRow(false).background, theme.color.surface);
   });
 });
 

@@ -10,6 +10,7 @@ import { creatureRolls } from "../creature.ts";
 import { diceFoldsSlot } from "../diceFolds.ts";
 import { optionSlot } from "../optionState.ts";
 import { castReceiptsSlot, castSendsSlot, type CastSend } from "./cast.ts";
+import { tokenPattern } from "../../../components/testing/tokenPattern.ts";
 
 let menuSources: import("../useRollModeMenu.tsx").UseRollModeMenuOptions[] = [];
 (globalThis as Record<symbol, unknown>)[Symbol.for("cast-menu-sources")] = (options: import("../useRollModeMenu.tsx").UseRollModeMenuOptions) => menuSources.push(options);
@@ -247,7 +248,7 @@ describe("Ask for saves in its row (docs/design/design-v1-dice-pass.md 7.3)", ()
     const markup = render({ picked: "c:thorn-c", cast: null });
     const button = /<button[^>]*aria-label="Ask the DM for saves against Hold Person"[^>]*>/.exec(markup)?.[0];
     assert.ok(button, "the row's Ask for saves");
-    assert.match(button, new RegExp(`border:${theme.line.border}px solid ${theme.color.controlBorder}`));
+    assert.match(button, new RegExp(`border:${theme.line.border}px solid ${tokenPattern(theme.color.controlBorder)}`));
   });
 });
 

@@ -6,6 +6,10 @@ import { theme } from "../../../lib/theme.ts";
  * toasts show it in the app's neutral colors with the kept face, and the
  * dice set picker in a set's colors wherever the dice cannot be drawn. No
  * three.js, so it costs nothing where the dice never load.
+ *
+ * Its colors go in `style`, not in SVG attributes: a toast passes the
+ * app's tokens, which are CSS variables, and a variable is surest in a
+ * style.
  */
 
 /** The hexagon's corners, pointed top, in a 48 unit box. */
@@ -42,17 +46,17 @@ export function D20Icon(props: { size: number; text: string; body: string; edge:
   const { size, text } = props;
   return (
     <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 48 48" style={{ display: "block", flex: "none" }}>
-      <polygon points={points(HEX)} fill={props.body} stroke={props.outline ?? props.edge} strokeWidth={props.outline ? 3 : 1.5} strokeLinejoin="round" />
+      <polygon points={points(HEX)} style={{ fill: props.body, stroke: props.outline ?? props.edge }} strokeWidth={props.outline ? 3 : 1.5} strokeLinejoin="round" />
       {SPOKES.map(([f, h], i) => (
-        <line key={i} x1={FACE[f]![0]} y1={FACE[f]![1]} x2={HEX[h]![0]} y2={HEX[h]![1]} stroke={props.edge} strokeWidth={1} />
+        <line key={i} x1={FACE[f]![0]} y1={FACE[f]![1]} x2={HEX[h]![0]} y2={HEX[h]![1]} style={{ stroke: props.edge }} strokeWidth={1} />
       ))}
-      <polygon points={points(FACE)} fill={props.body} stroke={props.edge} strokeWidth={1.25} strokeLinejoin="round" />
+      <polygon points={points(FACE)} style={{ fill: props.body, stroke: props.edge }} strokeWidth={1.25} strokeLinejoin="round" />
       <text
         x={24}
         y={26}
         textAnchor="middle"
         dominantBaseline="middle"
-        fill={props.ink}
+        style={{ fill: props.ink }}
         fontFamily={theme.font.body}
         fontWeight={theme.weight.bold}
         // Two digits draw a little smaller to stay inside the face.

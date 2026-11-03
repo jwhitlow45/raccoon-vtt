@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import { accentFor, contrast } from "../lib/accent.ts";
-import { MEMBER_COLORS, theme } from "../lib/theme.ts";
+import { MEMBER_COLORS, PALETTES, SCHEMES, theme } from "../lib/theme.ts";
 import { NOTICE_TONES, TAG_TONES } from "./tones.ts";
+import { tokenPattern, tokenValue } from "./testing/tokenPattern.ts";
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
@@ -137,7 +138,7 @@ describe("disabled controls swap colors and never fade", () => {
       const markup = html(element);
       // The radios lie unseen over their options at opacity 0, which is not a fade.
       assert.doesNotMatch(markup.replace(/opacity:0;/g, ""), /opacity/, `${name} fades by opacity`);
-      assert.match(markup, new RegExp(theme.color.textDisabled), `${name} uses the disabled color`);
+      assert.match(markup, new RegExp(tokenPattern(theme.color.textDisabled)), `${name} uses the disabled color`);
     });
   }
 });
@@ -149,7 +150,7 @@ describe("Checkbox", () => {
     assert.match(input, /aria-disabled="true"/);
     assert.doesNotMatch(input, /\sdisabled=""/, "a native disabled drops it from the focus order");
     assert.match(input, /aria-describedby="[^"]+"/);
-    assert.match(markup, new RegExp(theme.color.textDisabled), "it looks unavailable");
+    assert.match(markup, new RegExp(tokenPattern(theme.color.textDisabled)), "it looks unavailable");
   });
 
   test("a plain checkbox has no aria-disabled", () => {
@@ -226,28 +227,33 @@ describe("Switch", () => {
     }
   });
 
-  test("the off track's outline reads at 3:1 on every surface it sits on", () => {
-    for (const surface of [theme.color.bg, theme.color.surface, theme.color.surfaceRaised]) assert.ok(contrast(theme.color.controlBorder, surface) >= 3);
-  });
+  for (const scheme of SCHEMES) {
+    test(`the off track's outline reads at 3:1 on every surface it sits on, ${scheme}`, () => {
+      const p = PALETTES[scheme];
+      for (const surface of [p.bg, p.surface, p.surfaceRaised]) assert.ok(contrast(p.controlBorder, surface) >= 3, `${p.controlBorder} on ${surface}`);
+    });
+  }
 });
 
+// The tones are tokens, CSS variables, so each check reads the color the token shows in dark.
 describe("tones", () => {
+  const dark = (token: string) => tokenValue(token, "dark");
   for (const [tone, colors] of Object.entries(TAG_TONES)) {
     test(`a ${tone} tag's text reads at 4.5:1 on its bg fill`, () => {
-      const ratio = contrast(colors.text, theme.color.bg);
-      assert.ok(ratio >= 4.5, `${tone}: ${colors.text} on ${theme.color.bg} reads ${ratio.toFixed(2)}`);
+      const ratio = contrast(dark(colors.text), PALETTES.dark.bg);
+      assert.ok(ratio >= 4.5, `${tone}: ${dark(colors.text)} on ${PALETTES.dark.bg} reads ${ratio.toFixed(2)}`);
     });
   }
 
   for (const [tone, colors] of Object.entries(NOTICE_TONES)) {
     test(`a ${tone} notice's text reads at 4.5:1 on its fill`, () => {
-      assert.ok(contrast(colors.text, colors.fill) >= 4.5);
+      assert.ok(contrast(dark(colors.text), dark(colors.fill)) >= 4.5, `${dark(colors.text)} on ${dark(colors.fill)}`);
     });
   }
 
   test("the highlight notice's focus ring reads on cream, where the accent would not", () => {
-    assert.ok(contrast(NOTICE_TONES.highlight.focus!, NOTICE_TONES.highlight.fill) >= 3);
-    assert.ok(contrast(theme.color.crest, NOTICE_TONES.highlight.fill) < 3);
+    assert.ok(contrast(dark(NOTICE_TONES.highlight.focus!), dark(NOTICE_TONES.highlight.fill)) >= 3);
+    assert.ok(contrast(theme.color.crest, dark(NOTICE_TONES.highlight.fill)) < 3);
   });
 });
 
@@ -448,19 +454,19 @@ describe("a Segmented option with its own chosen look", () => {
 
   test("draws its look only while chosen, and the accent's look is gone from it", () => {
     const chosen = render("damage");
-    assert.match(chosen, new RegExp(theme.color.danger));
+    assert.match(chosen, new RegExp(tokenPattern(theme.color.danger)));
     assert.match(chosen, new RegExp(escape(theme.color.dangerTint)));
     // The other option is at rest, so nothing in the group wears the accent's chosen look.
     assert.doesNotMatch(chosen, new RegExp(escape(theme.color.accentTint)));
     const other = render("heal");
-    assert.doesNotMatch(other, new RegExp(theme.color.danger));
+    assert.doesNotMatch(other, new RegExp(tokenPattern(theme.color.danger)));
     assert.match(other, new RegExp(escape(theme.color.accentTint)), "an option with no look of its own keeps the accent's");
   });
 
   test("a disabled chosen option keeps the disabled look", () => {
     const markup = render("damage", true);
-    assert.doesNotMatch(markup, new RegExp(theme.color.danger));
-    assert.match(markup, new RegExp(`border:${theme.line.border}px solid ${theme.color.textDisabled}`));
+    assert.doesNotMatch(markup, new RegExp(tokenPattern(theme.color.danger)));
+    assert.match(markup, new RegExp(`border:${theme.line.border}px solid ${tokenPattern(theme.color.textDisabled)}`));
   });
 });
 

@@ -21,6 +21,7 @@ const { renderToStaticMarkup } = await import("react-dom/server");
 const { PaneHeader, SheetHeader } = await import("./SheetHeader.tsx");
 const { GRABBER_DESIGNS, grabberRoom, HOLD_SHARE, parseGrabber, STRETCH_X, STRETCH_Y } = await import("./grabberDesigns.ts");
 const { setSheetHandle } = await import("../features/device/settings.ts");
+const { theme } = await import("../lib/theme.ts");
 
 const grabbers = (markup: string) => [...markup.matchAll(/<svg[^>]*data-sheet-grabber[^>]*>/g)].map((m) => m[0]);
 const styleOf = (tag: string) => /style="([^"]*)"/.exec(tag)?.[1] ?? "";
@@ -53,7 +54,7 @@ describe("the sheet grabber", () => {
     assert.match(pill, /height="4"/);
     assert.match(style, /left:50%/);
     assert.match(style, /margin-left:-18px/);
-    assert.ok(style.includes(`color:color-mix(in srgb, var(--rvtt-grabber-held, #76747f) calc(100% * (${HOLD_SHARE} + var(--rvtt-grabber-pull, 0) * ${1 - HOLD_SHARE})), #76747f)`), style);
+    assert.ok(style.includes(`color:color-mix(in srgb, var(--rvtt-grabber-held, ${theme.color.controlBorder}) calc(100% * (${HOLD_SHARE} + var(--rvtt-grabber-pull, 0) * ${1 - HOLD_SHARE})), ${theme.color.controlBorder})`), style);
     assert.ok(style.includes(`transform:scale(calc(1 + var(--rvtt-grabber-stretch, 0) * ${STRETCH_X}), calc(1 - var(--rvtt-grabber-stretch, 0) * ${STRETCH_Y}))`), style);
     assert.deepEqual([HOLD_SHARE, STRETCH_X, STRETCH_Y], [0.3, 0.4, 0.25], "the held look the design names (4.8)");
     assert.match(style, /transform-origin:center/);

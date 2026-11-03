@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { theme } from "../../lib/theme.ts";
 import type { CreaturePicture } from "../tokens/CreatureHeader.tsx";
+import { tokenPattern } from "../../components/testing/tokenPattern.ts";
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
@@ -29,7 +30,7 @@ describe("the creature card", () => {
     assert.equal(DICE_CARD, "[data-dice-card]");
     const markup = card({ name: "Thorn" });
     assert.match(markup, /^<div data-dice-card=""/);
-    assert.match(markup, new RegExp(`padding:${theme.space(3)}px;background:${theme.color.bg};border:1px solid ${theme.color.border};border-radius:${theme.radius.md}px`));
+    assert.match(markup, new RegExp(`padding:${theme.space(3)}px;background:${tokenPattern(theme.color.bg)};border:1px solid ${tokenPattern(theme.color.border)};border-radius:${theme.radius.md}px`));
   });
 
   test("one creature: its picture at 48 px, then its name as the h3 and the kind line, then the body", () => {
@@ -56,8 +57,8 @@ describe("the creature card", () => {
       name: "Wolf",
       line: { kind: "Companion of Thorn", size: "Medium (5 ft)", companionOf: "Thorn" },
     });
-    assert.match(markup, new RegExp(`outline:${theme.line.strong}px solid ${theme.color.bg}`));
-    assert.doesNotMatch(markup, new RegExp(theme.color.surface), "never the panel's surface, which the card does not wear");
+    assert.match(markup, new RegExp(`outline:${theme.line.strong}px solid ${tokenPattern(theme.color.bg)}`));
+    assert.doesNotMatch(markup, new RegExp(tokenPattern(theme.color.surface)), "never the panel's surface, which the card does not wear");
     assert.match(markup, /<span>Companion of Thorn<\/span> · <span style="white-space:nowrap">Medium \(5 ft\)<\/span>/);
   });
 
@@ -71,7 +72,7 @@ describe("the creature card", () => {
     assert.equal(CARD_PICTURES, 3);
     assert.deepEqual(widths(markup), [32, 32, 32]);
     assert.equal([...markup.matchAll(/margin-left:-8px/g)].length, 2);
-    assert.equal([...markup.matchAll(new RegExp(`outline:${theme.line.strong}px solid ${theme.color.bg}`, "g"))].length, 2, "each overlapping picture parted from the one under it");
+    assert.equal([...markup.matchAll(new RegExp(`outline:${theme.line.strong}px solid ${tokenPattern(theme.color.bg)}`, "g"))].length, 2, "each overlapping picture parted from the one under it");
     assert.ok(!markup.includes(">X<"), "no badge among several");
     assert.match(markup, /<h3[^>]*>4 selected<\/h3>/);
     assert.match(markup, /<p data-kind-line=""[^>]*>Goblin 1, Goblin 2, Owlbear, Goblin 3<\/p>/);

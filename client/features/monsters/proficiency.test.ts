@@ -11,6 +11,7 @@ import { castTable, DM, room } from "#shared/testutil.ts";
 import { createStore } from "zustand/vanilla";
 import type { RoomState } from "#shared/model.ts";
 import { theme } from "../../lib/theme.ts";
+import { tokenPattern } from "../../components/testing/tokenPattern.ts";
 import { splitAbilityTable } from "./abilityTable.ts";
 
 const { createElement } = await import("react");
@@ -233,7 +234,7 @@ test("sbr: each box keeps the text box's look and puts its three lines in marked
   const c = theme.color;
   for (const b of [str!, dex!]) {
     assert.match(b.tag, /type="button"/);
-    assert.match(b.tag, new RegExp(`padding:4px 8px;border-radius:${theme.radius.sm}px;background:${c.surfaceRaised};line-height:1.2`), "FL-15's padding, radius, fill and leading");
+    assert.match(b.tag, new RegExp(`padding:4px 8px;border-radius:${theme.radius.sm}px;background:${tokenPattern(c.surfaceRaised)};line-height:1.2`), "FL-15's padding, radius, fill and leading");
     assert.match(b.tag, /display:block/);
     assert.match(b.tag, /width:100%/);
     assert.match(b.tag, /text-align:left/);

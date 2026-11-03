@@ -14,6 +14,7 @@ import { groupRows } from "./rows.ts";
 import { receiptsSlot } from "../useReceipt.ts";
 import { groupSaveSlot } from "./store.ts";
 import { captureChoices, OUTCOME_UNDONE, OUTCOME_RESTORED, OUTCOME_UNAVAILABLE, SAVE_MEMORY_ONLY, type SaveReopen } from "./reopen.ts";
+import { tokenPattern } from "../../../components/testing/tokenPattern.ts";
 
 /*
  * The open group save in the Dice panel (docs/design/design-v1-dice-pass.md 7.8):
@@ -361,7 +362,7 @@ test("offline, the damage Roll is held with the page, and its menu picks stay gu
   assert.ok(menu); assert.equal(!!menu.disabled, false); assert.equal(menu.valid?.(), false);
   const roll = /<button[^>]*aria-keyshortcuts="ContextMenu Shift\+F10"[^>]*>/.exec(html)?.[0];
   assert.ok(roll); assert.match(roll, /disabled=""/);
-  assert.match(roll, new RegExp(`color:${theme.color.textDisabled}`, "i"), "the Roll draws the disabled color");
+  assert.match(roll, new RegExp(`color:${tokenPattern(theme.color.textDisabled)}`, "i"), "the Roll draws the disabled color");
 });
 
 test("a group row source ignores its sibling request answer and request bookkeeping", () => {

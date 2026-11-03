@@ -1,6 +1,6 @@
 import type { Locator, Page } from "playwright-core";
 import sharp from "sharp";
-import { theme } from "../../client/lib/theme.ts";
+import { PALETTES, theme } from "../../client/lib/theme.ts";
 
 /**
  * The alignment check (docs/design/design-v1-polish.md 4): what the polish pass
@@ -1634,9 +1634,9 @@ export function alignmentLines(findings: readonly Finding[], screen: string): st
   return findings.filter((f) => Math.abs(f.offset) > LIMIT_PX).map((f) => `${screen}: ${f.check} ${f.offset} px, ${f.role} "${f.name}": ${f.what}${f.detail ? ` (${f.detail})` : ""}`);
 }
 
-/** `theme.color.textDisabled` as getComputedStyle writes it. */
+/** Dark's `textDisabled` as getComputedStyle writes it. */
 const TEXT_DISABLED = (() => {
-  const hex = theme.color.textDisabled.replace("#", "");
+  const hex = PALETTES.dark.textDisabled.replace("#", "");
   const [r, g, b] = [0, 2, 4].map((i) => Number.parseInt(hex.slice(i, i + 2), 16));
   return `rgb(${r}, ${g}, ${b})`;
 })();

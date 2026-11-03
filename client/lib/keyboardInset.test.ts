@@ -167,7 +167,7 @@ describe("the sheet's cap with the keyboard open (components/sheetCap.ts)", () =
     assert.equal(sheetCap({ ...PHONE, keyboard: null }), sheetCap(PHONE));
     assert.equal(sheetMaxHeight({ top: 52, bottom: 60 }, 0, null), sheetMaxHeight({ top: 52, bottom: 60 }));
     assert.equal(sheetFoot(60, null), "calc(env(safe-area-inset-bottom, 0px) + 60px)");
-    assert.equal(sheetTop(52, null), "calc(env(safe-area-inset-top, 0px) + 52px)");
+    assert.equal(sheetTop(52, null), "calc(var(--rvtt-safe-top, env(safe-area-inset-top, 0px)) + 52px)");
   });
 
   test("its foot stands on the keyboard, and it fits between the bars' gap and the keyboard", () => {
@@ -209,10 +209,10 @@ describe("the sheet's cap with the keyboard open (components/sheetCap.ts)", () =
   test("the CSS says the same: the 120 px floor and the 60% share, with the larger of the bars and the visible top, and of the toolbar and the keyboard", () => {
     const keyboard = { top: 120, inset: 180 };
     assert.equal(sheetFoot(60, keyboard), "max(calc(env(safe-area-inset-bottom, 0px) + 60px), 180px)");
-    assert.equal(sheetTop(52, keyboard), "max(calc(env(safe-area-inset-top, 0px) + 52px), 120px)");
+    assert.equal(sheetTop(52, keyboard), "max(calc(var(--rvtt-safe-top, env(safe-area-inset-top, 0px)) + 52px), 120px)");
     assert.equal(
       sheetMaxHeight({ top: 52, bottom: 60 }, 56, keyboard),
-      "max(120px, min(calc(60dvh / var(--rvtt-ui, 1)), calc(100% - max(calc(env(safe-area-inset-top, 0px) + 52px), 120px) - max(calc(env(safe-area-inset-bottom, 0px) + 60px), 180px) - 56px)))",
+      "max(120px, min(calc(60dvh / var(--rvtt-ui, 1)), calc(100% - max(calc(var(--rvtt-safe-top, env(safe-area-inset-top, 0px)) + 52px), 120px) - max(calc(env(safe-area-inset-bottom, 0px) + 60px), 180px) - 56px)))",
     );
     assert.match(sheetMaxHeight({ top: 52, bottom: 60 }, 8, keyboard), / - 24px\)\)\)$/, "a reserve under the gap keeps the gap");
   });

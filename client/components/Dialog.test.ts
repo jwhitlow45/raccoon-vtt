@@ -1,6 +1,7 @@
 import "./testing/register.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { tokenPattern } from "./testing/tokenPattern.ts";
 
 /*
  * Escape in the journal's or the monster's editor with unsaved changes
@@ -75,7 +76,7 @@ describe("a dialog opened inside a held group", () => {
       // The portal's content, drawn where the opener is: inside the held group, as React's context reaches it.
       const markup = renderToStaticMarkup(createElement(Held, { held: true, children: portal.children }));
       assert.match(markup, />Save</);
-      assert.doesNotMatch(markup, new RegExp(`color:${theme.color.textDisabled}`, "i"));
+      assert.doesNotMatch(markup, new RegExp(`color:${tokenPattern(theme.color.textDisabled)}`, "i"));
       assert.doesNotMatch(markup.replace(/^<fieldset disabled=""[^>]*>/, ""), /<button[^>]*\sdisabled=""/);
     } finally {
       Object.assign(globalThis, previous);

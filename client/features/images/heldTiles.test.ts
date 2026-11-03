@@ -4,6 +4,7 @@ import { describe, test } from "node:test";
 import type { AssetRow, SearchResult } from "../../lib/api.ts";
 import { theme } from "../../lib/theme.ts";
 import type { IconEntry } from "./icons.ts";
+import { tokenPattern } from "../../components/testing/tokenPattern.ts";
 
 const { createElement: h } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
@@ -27,7 +28,7 @@ const store = createStore(() => ({ roomId: "tile-room", view: null, you: { membe
 const assets = { url: (id: string, variant: string) => `/a/${id}/${variant}` };
 const inRoom = (child: ReturnType<typeof h>) => h(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, assets, children: child });
 const draw = (child: ReturnType<typeof h>, held: boolean) => renderToStaticMarkup(inRoom(h(Held, { held, children: child })));
-const dim = new RegExp(`color:${theme.color.textDisabled}`, "i");
+const dim = new RegExp(`color:${tokenPattern(theme.color.textDisabled)}`, "i");
 const gray = /filter:grayscale\(1\)/;
 const result: SearchResult = { title: "Cave", source: "openverse", thumbnail: "https://x/t.jpg", original: "https://x/o.jpg", credit: { license: "by", licenseVersion: "4.0", landingUrl: "https://x", attribution: "Cave" } };
 const map: AssetRow = { id: "m1", kind: "map", width: 100, height: 100, variants: ["full", "thumb"] };
@@ -65,11 +66,11 @@ describe("a held group stops every picture tile", () => {
   test("an icon tile's ink and chosen outline take the dim colors", () => {
     const chosen = draw(tiles["a chosen icon tile"]() as never, true);
     assert.match(chosen, dim);
-    assert.match(chosen, new RegExp(`solid ${theme.color.textDisabled}`, "i"), "the chosen one keeps a dim outline");
-    assert.match(draw(tiles["an icon tile"]() as never, true), new RegExp(`solid ${theme.color.border}`, "i"), "an unchosen one the quiet outline");
+    assert.match(chosen, new RegExp(`solid ${tokenPattern(theme.color.textDisabled)}`, "i"), "the chosen one keeps a dim outline");
+    assert.match(draw(tiles["an icon tile"]() as never, true), new RegExp(`solid ${tokenPattern(theme.color.border)}`, "i"), "an unchosen one the quiet outline");
     assert.doesNotMatch(chosen, new RegExp(`solid ${theme.color.accent.replace(/[()]/g, "\\$&")}`), "no accent outline");
     assert.doesNotMatch(chosen, /background:var\(--rvtt-accent-tint|accentTint/i);
-    assert.match(draw(tiles["an icon tile"]() as never, false), new RegExp(`color:${theme.color.text}`, "i"));
+    assert.match(draw(tiles["an icon tile"]() as never, false), new RegExp(`color:${tokenPattern(theme.color.text)}`, "i"));
   });
 
   test("a tile's own disabled still dims with no group", () => {

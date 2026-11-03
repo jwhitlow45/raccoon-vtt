@@ -1,6 +1,7 @@
 import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { tokenPattern } from "../../components/testing/tokenPattern.ts";
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
@@ -178,7 +179,7 @@ describe("a held group stops the options kit's choices (LOCKED-LOOK)", () => {
     ValueChip: () => createElement(ValueChip, { label: "Drawing tool", kind: "choice", value: "free", options: [{ key: "free", words: "Pen" }], children: "tiles" }),
     "a measuring copy of ValueChip": () => createElement(MeasuringContext.Provider, { value: true }, createElement(ValueChip, { label: "Drawing tool", kind: "choice", value: "free", options: [{ key: "free", words: "Pen" }], children: "tiles" })),
   };
-  const dim = new RegExp(`color:${theme.color.textDisabled}`, "i");
+  const dim = new RegExp(`color:${tokenPattern(theme.color.textDisabled)}`, "i");
   for (const [name, draw] of Object.entries(kit)) {
     test(name, () => {
       const free = inRoom(draw());
@@ -192,8 +193,8 @@ describe("a held group stops the options kit's choices (LOCKED-LOOK)", () => {
 
   test("a row's detail takes the dim color too", () => {
     const held = inRoom(createElement(Held, { held: true, children: kit.ChoiceRows() }));
-    assert.match(held, new RegExp(`color:${theme.color.textDisabled}"> Blocks`, "i"));
-    assert.doesNotMatch(held, new RegExp(`color:${theme.color.textMuted}`, "i"));
+    assert.match(held, new RegExp(`color:${tokenPattern(theme.color.textDisabled)}"> Blocks`, "i"));
+    assert.doesNotMatch(held, new RegExp(`color:${tokenPattern(theme.color.textMuted)}`, "i"));
   });
 
   test("the chosen row and tile keep a dim outline, not the accent tint", () => {

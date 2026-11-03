@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { contrast } from "../../../lib/accent.ts";
-import { theme } from "../../../lib/theme.ts";
+import { boardTheme, theme } from "../../../lib/theme.ts";
 import { DEFAULT_DICE_SET, DICE_SETS, diceSet, parseDiceSet } from "./sets.ts";
 
 /**
@@ -15,7 +15,8 @@ describe("the dice sets", () => {
       assert.ok(contrast(set.ink, set.body) >= 7, `${set.name}: result ${contrast(set.ink, set.body).toFixed(1)}:1`);
       const faint = contrast(set.faint, set.body);
       assert.ok(faint >= 1.8 && faint <= 3, `${set.name}: faint ${faint.toFixed(1)}:1`);
-      assert.ok(contrast(set.edge, theme.color.surface) >= 4.5, `${set.name}: edge ${contrast(set.edge, theme.color.surface).toFixed(1)}:1 on the scrim`);
+      // The tray keeps the dark look in either theme, so the dark surface.
+      assert.ok(contrast(set.edge, boardTheme.color.surface) >= 4.5, `${set.name}: edge ${contrast(set.edge, boardTheme.color.surface).toFixed(1)}:1 on the scrim`);
     }
   });
 

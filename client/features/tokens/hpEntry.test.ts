@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
 import { theme } from "../../lib/theme.ts";
+import { tokenPattern } from "../../components/testing/tokenPattern.ts";
 
 /*
  * The HP entry's modes were four buttons with role="radio": four Tab stops
@@ -104,8 +105,8 @@ describe("the HP entry's modes are native radios", () => {
     // Only the modes: the Apply button after them is the accent's own.
     const all = render("all");
     const markup = all.slice(all.indexOf('role="radiogroup"'), all.indexOf('aria-label="HP change"'));
-    assert.match(markup, new RegExp(`border:${theme.line.border}px solid ${theme.color.danger}`));
-    assert.doesNotMatch(markup, new RegExp(escape(`border:${theme.line.border}px solid ${theme.color.accent}`)));
+    assert.match(markup, new RegExp(`border:${theme.line.border}px solid ${tokenPattern(theme.color.danger)}`));
+    assert.doesNotMatch(markup, new RegExp(escape(`border:${theme.line.border}px solid ${tokenPattern(theme.color.accent)}`)));
   });
 
   test("a player who may only damage or heal sees those two", () => {

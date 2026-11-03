@@ -429,9 +429,9 @@ function modeColor(mode: HpMode): string {
   }
 }
 
-/** The chosen mode's faint fill. Set takes the accent's own tint: the accent is a CSS variable, so no alpha can be appended to it. */
+/** The chosen mode's faint fill, its color at 20%. Set takes the accent's own tint. The colors are CSS variables, so no alpha can be appended to their hex. */
 function modeFill(mode: HpMode): string {
-  return mode === "set" ? theme.color.accentTint : `${modeColor(mode)}33`;
+  return mode === "set" ? theme.color.accentTint : `color-mix(in srgb, ${modeColor(mode)} 20%, transparent)`;
 }
 
 /** The chosen mode in its own color rather than the accent: red for damage and green for healing carry meaning (docs/design/design-v1-visual.md 2.3). */

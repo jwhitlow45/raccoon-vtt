@@ -283,22 +283,44 @@ export function statusBand(scale: number): string {
   return `inset 0 calc(${theme.safe.top} / ${scale}) 0 0 var(--rvtt-status-band, transparent)`;
 }
 
+/**
+ * Each palette color as the DOM reads it: its custom property, with the
+ * dark value as the fallback, so a unit test's render, the boot page and
+ * any page before lib/scheme.ts runs still draw dark.
+ */
+function paletteRefs(): { [K in keyof Palette]: string } {
+  const refs = {} as { [K in keyof Palette]: string };
+  for (const key of Object.keys(PALETTES.dark) as (keyof Palette)[]) refs[key] = `var(${colorVar(key)}, ${PALETTES.dark[key]})`;
+  return refs;
+}
+
+function shadowRef(key: keyof Shadows): string {
+  return `var(${shadowVar(key)}, ${SHADOWS.dark[key]})`;
+}
+
 export const theme = {
+  /**
+   * DOM styles only. The colors that differ by scheme are CSS variables
+   * (`paletteVars`), so a switch restyles the page with no re-render. What
+   * draws on a canvas reads `boardTheme.color`, which a test holds every
+   * Konva file to (client/canvas/boardColors.test.ts).
+   */
   color: {
-    ...PALETTES.dark,
+    ...paletteRefs(),
     ...FIXED,
     /**
      * Filled buttons, the chosen option, the focus ring and the selected
-     * tool: the viewing member's own color in a room, the crest yellow
-     * elsewhere (lib/accent.ts sets the variables). These four are CSS
-     * variables, so they work in DOM styles only. What draws on the board
-     * takes the resolved colors from `useAccent()` (state/accent.ts).
+     * tool: the viewing member's own color in a room, the scheme's crest
+     * accent elsewhere (lib/accent.ts gives the values, pages/RoomChrome.tsx
+     * and lib/scheme.ts set them). These are CSS variables, so they work in
+     * DOM styles only. What draws on the board takes the resolved colors
+     * from `useAccent()` (state/accent.ts).
      */
-    accent: "var(--rvtt-accent, #f7df00)",
+    accent: "var(--rvtt-accent, var(--rvtt-base-accent, #f7df00))",
     /** Text and icons on an accent fill, dark or light by the accent. */
-    onAccent: "var(--rvtt-on-accent, #1a1206)",
+    onAccent: "var(--rvtt-on-accent, var(--rvtt-base-on-accent, #1a1206))",
     /** The faint fill behind a pressed or chosen control that wears the accent border. */
-    accentTint: "var(--rvtt-accent-tint, rgba(247, 223, 0, 0.14))",
+    accentTint: "var(--rvtt-accent-tint, var(--rvtt-base-accent-tint, rgba(247, 223, 0, 0.14)))",
   },
   /**
    * The dark halo of a focus ring that falls on the board (`ON_BOARD`):
@@ -342,13 +364,13 @@ export const theme = {
     /** The connection dot's dark rim. */
     rim: "0 0 0 2px rgba(0, 0, 0, 0.35)",
     /** Notices floating over the map. */
-    float: "0 4px 16px rgba(0, 0, 0, 0.4)",
+    float: shadowRef("float"),
     /** Panes on the map: the token action bar, the label, pin and light panes, the door card. */
-    pane: "0 8px 24px rgba(0, 0, 0, 0.45)",
+    pane: shadowRef("pane"),
     /** Sheets rising from the bottom. */
-    sheet: "0 -8px 32px rgba(0, 0, 0, 0.45)",
+    sheet: shadowRef("sheet"),
     /** Dialogs, the handout and the X-card. */
-    dialog: "0 16px 48px rgba(0, 0, 0, 0.5)",
+    dialog: shadowRef("dialog"),
     /** A proficiency mark's 1 px line in its words' own color, just outside a roll in text (components/ProficiencyMark.tsx). */
     mark: "0 0 0 1px currentColor",
     /** The same line inside a box: a proficient roll button's second line, the frame of a label that cuts its words, or the outline of an ability box whose save is proficient. */
@@ -358,7 +380,7 @@ export const theme = {
     /** A sticky foot's `fill` carried over the pane's side padding beside it (components/Sheet.tsx `--pane-pad-x`), taking no room. */
     paneSides: (fill: string) => `calc(-1 * var(--pane-pad-x, 0px)) 0 0 ${fill}, var(--pane-pad-x, 0px) 0 0 ${fill}`,
     /** A page a swipe back slides off the one under it, its soft edge on the left (lib/backSwipe.ts). */
-    slide: "-8px 0 24px rgba(0, 0, 0, 0.45)",
+    slide: shadowRef("slide"),
   },
   /**
    * Stacking over the map, lowest first. Dialogs open with showModal and
@@ -447,7 +469,12 @@ export const theme = {
    * viewport-fit=cover, so the map runs under them and the UI keeps clear.
    */
   safe: {
-    top: "env(safe-area-inset-top, 0px)",
+    /**
+     * Nothing in the app sets `--rvtt-safe-top`. It lets an e2e test stand
+     * in a notch, which Chromium cannot emulate, to check the iPhone
+     * home-screen app's status strip (`statusBand`).
+     */
+    top: "var(--rvtt-safe-top, env(safe-area-inset-top, 0px))",
     right: "env(safe-area-inset-right, 0px)",
     bottom: "env(safe-area-inset-bottom, 0px)",
     left: "env(safe-area-inset-left, 0px)",

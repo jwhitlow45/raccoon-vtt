@@ -98,7 +98,8 @@ describe("the header line during a throw", () => {
     assert.match(dice, /data-dice-tray/);
     assert.doesNotMatch(dice, /opacity:0\.92/, "the Dice panel's tray stays empty for a block roll");
     assert.match(block, /opacity:0\.92/, "the scrim");
-    assert.match(block, /box-shadow:calc\(-1 \* var\(--pane-pad-x, 0px\)\) 0 0 [^,]+, var\(--pane-pad-x, 0px\) 0 0 /, "paneSides");
+    // The fill is a token, a CSS variable with a comma of its own.
+    assert.match(block, /box-shadow:calc\(-1 \* var\(--pane-pad-x, 0px\)\) 0 0 .+?, var\(--pane-pad-x, 0px\) 0 0 /, "paneSides");
   });
 
   test("with the dice off, the same commit shows its total at once", () => {
