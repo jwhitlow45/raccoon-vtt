@@ -10,6 +10,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import type { MapVideo } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { Dialog, DIALOG_PHONE_MAX } from "../../components/Dialog.tsx";
 import { IconButton } from "../../components/IconButton.tsx";
@@ -18,6 +19,10 @@ import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
 import { useSurfaceKeyHint, withKey } from "../../state/shortcuts.ts";
+import { FilmStrip } from "../animmap/MapVideoRow.tsx";
+import { leaseDecoder } from "../animmap/status.ts";
+import { useVideoPlayback } from "../animmap/useVideoPlayback.ts";
+import { STILL_HERE, stillReasonText } from "../animmap/words.ts";
 import { useLayoutSize } from "../device/layout.ts";
 import { SHORT_LANDSCAPE_MAX } from "../encounter/band.ts";
 import { pageMemorySlot, rememberedPage, rememberPage } from "./pageMemory.ts";
@@ -70,6 +75,13 @@ export type ViewerPage = {
   alt: string;
   width?: number;
   height?: number;
+  /**
+   * A video page (docs/design/design-v1-animated-maps.md 4.6): `src` is the
+   * video, which plays muted and looping under the device's playback rule.
+   * Otherwise the page shows `still`, a still a scene shows for it, or a film
+   * strip with why it stays still. Its size is the video's.
+   */
+  video?: { video: MapVideo; still: string | null };
 };
 
 const NO_SIZES: readonly (PageSize | undefined)[] = [];
@@ -278,6 +290,8 @@ export function HandoutViewer(props: {
   // One page keeps today's message over the whole stage. Several fail each in its own box (5.4, 5.8).
   const first = props.pages[0];
   const failedWhole = count === 1 && first !== undefined && loads.get(first.src) === "failed";
+  // Why a video page with no still to show stays still, said over the stage in stage pixels so it reads at any zoom.
+  const [videoNote, setVideoNote] = useState<string | null>(null);
 
   // ---------------------------------------------------------------- another showing (5.1)
 
@@ -605,9 +619,17 @@ export function HandoutViewer(props: {
               attempt={tries.get(p.src) ?? 0}
               onSize={(img) => loadedSize(i, img)}
               onSettle={(how) => settle(p.src, how)}
+              onNote={setVideoNote}
             />
           ))}
         </div>
+        {videoNote && !failedWhole ? (
+          <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", padding: theme.space(4), pointerEvents: "none" }}>
+            <p style={{ margin: 0, maxWidth: "100%", padding: `${theme.space(2)}px ${theme.space(3)}px`, borderRadius: theme.radius.md, background: theme.color.overlay, color: theme.color.text, fontSize: theme.font.body14, lineHeight: theme.leading.body, textAlign: "center", overflowWrap: "anywhere" }}>
+              {videoNote}
+            </p>
+          </div>
+        ) : null}
         {rects && state.stage ? (
           <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
             {rects.map((r, i) => {
@@ -726,6 +748,24 @@ function PageImage(props: {
   attempt: number;
   onSize(img: HTMLImageElement): void;
   onSettle(how: "loaded" | "failed"): void;
+  onNote(note: string | null): void;
+}) {
+  const { page, box } = props;
+  if (page.video) return <PageVideo page={page} box={box} attempt={props.attempt} onSettle={props.onSettle} onNote={props.onNote} />;
+  return <PageStill {...props} />;
+}
+
+function PageStill(props: {
+  page: ViewerPage;
+  box: Rect | undefined;
+  placeholder: boolean;
+  mounted: boolean;
+  soon: boolean;
+  loaded: boolean;
+  failed: boolean;
+  attempt: number;
+  onSize(img: HTMLImageElement): void;
+  onSettle(how: "loaded" | "failed"): void;
 }) {
   const { page, box } = props;
   const [slow, setSlow] = useState(false);
@@ -767,6 +807,118 @@ function PageImage(props: {
         />
       ) : null}
     </>
+  );
+}
+
+/** The parts of a `<video>` the viewer's lease touches, so a test can stand in for one. */
+export type LeasedVideo = { muted: boolean; src: string; setAttribute(name: string, value: string): void; removeAttribute(name: string): void; load(): void; pause(): void; play(): Promise<void> };
+
+/**
+ * Sets the viewer's video playing once the window's one decoder is its
+ * own, and clears its `src` when another owner asks or the page closes.
+ * Returns the clean-up. Exported for its test.
+ */
+export function holdViewerVideo(el: LeasedVideo, src: string, lease: typeof leaseDecoder = leaseDecoder): () => void {
+  // Muted as a property and an attribute before any source, as the board's element is.
+  el.muted = true;
+  el.setAttribute("muted", "");
+  const clear = () => {
+    el.pause();
+    el.removeAttribute("src");
+    el.load();
+  };
+  const held = lease("viewer", {
+    onGrant: () => {
+      el.src = src;
+      // A refused play() leaves the first frame showing, which is the still.
+      void el.play().catch(() => undefined);
+    },
+    onYield: (mine) => {
+      clear();
+      mine.release();
+    },
+  });
+  return () => {
+    clear();
+    held.release();
+  };
+}
+
+/**
+ * A video page (docs/design/design-v1-animated-maps.md 4.6). It asks the
+ * device's playback rule first, and plays only when that says moving. Its
+ * element takes the window's one decoder from status.ts: the board's
+ * element frees its `src` before this one sets its own, and a later owner
+ * that asks makes this one clear its `src` and let go. Closing the viewer
+ * clears it too, so the board plays again.
+ */
+function PageVideo(props: { page: ViewerPage; box: Rect | undefined; attempt: number; onSettle(how: "loaded" | "failed"): void; onNote(note: string | null): void }) {
+  const { page, box } = props;
+  const media = page.video!;
+  // The callbacks come new with each render of the viewer, so the effects read them here rather than rerun on them.
+  const calls = useRef({ onSettle: props.onSettle, onNote: props.onNote });
+  calls.current = { onSettle: props.onSettle, onNote: props.onNote };
+  const onSettle = (how: "loaded" | "failed") => calls.current.onSettle(how);
+  const playback = useVideoPlayback(media.video);
+  const ref = useRef<HTMLVideoElement>(null);
+  const plays = playback?.play === true;
+  const place: CSSProperties = { position: "absolute", display: "block", left: box?.left ?? 0, top: box?.top ?? 0, width: box?.width, height: box?.height, maxWidth: "none" };
+
+  const note = playback && !playback.play && media.still === null ? `${STILL_HERE} ${stillReasonText(playback.reason, media.video)}` : null;
+  useEffect(() => {
+    calls.current.onNote(note);
+    // A film strip has nothing to load.
+    if (note !== null) calls.current.onSettle("loaded");
+    return () => calls.current.onNote(null);
+  }, [note]);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!plays || !el) return;
+    return holdViewerVideo(el, page.src);
+  }, [plays, page.src, props.attempt]);
+
+  if (playback === null) return null;
+  if (plays) {
+    return (
+      <video
+        ref={ref}
+        role="img"
+        aria-label={page.alt}
+        muted
+        loop
+        playsInline
+        disablePictureInPicture
+        preload="auto"
+        onLoadedData={() => onSettle("loaded")}
+        onError={(e) => {
+          // A source cleared on purpose fires no error worth showing.
+          if (e.currentTarget.getAttribute("src")) onSettle("failed");
+        }}
+        style={{ ...place, objectFit: "fill" }}
+      />
+    );
+  }
+  if (media.still) {
+    return (
+      <img
+        src={media.still}
+        alt={page.alt}
+        draggable={false}
+        decoding="async"
+        onLoad={() => onSettle("loaded")}
+        onError={() => onSettle("failed")}
+        ref={(img) => {
+          if (img?.complete && img.naturalWidth > 0) onSettle("loaded");
+        }}
+        style={{ ...place, userSelect: "none", WebkitUserSelect: "none" }}
+      />
+    );
+  }
+  return (
+    <span role="img" aria-label={page.alt} style={{ ...place }}>
+      <FilmStrip />
+    </span>
   );
 }
 

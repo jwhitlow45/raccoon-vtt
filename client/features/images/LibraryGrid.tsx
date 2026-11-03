@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { useStore } from "zustand";
 import { handoutPages } from "#shared/handouts.ts";
 import { imageAssetId } from "#shared/imageRef.ts";
-import type { Handout, HandoutDoc } from "#shared/model.ts";
+import type { Handout, HandoutDoc, MapVideo, Scene } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { Empty } from "../../components/Empty.tsx";
 import { useHeld } from "../../components/Held.tsx";
@@ -14,6 +14,8 @@ import type { AssetKind, AssetRow, AssetVariant } from "../../lib/api.ts";
 import { theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
 import { useAssets, useRoomActions, useRoomStore, useRoomView, type AssetSource } from "../../state/view.ts";
+import { FilmStrip } from "../animmap/MapVideoRow.tsx";
+import { videoLength } from "../animmap/words.ts";
 import { HandoutViewer, type ViewerPage } from "../handouts/HandoutViewer.tsx";
 import { pageCountText, pageName } from "../handouts/handouts.ts";
 import { formatBytes } from "../settings/backup.ts";
@@ -202,6 +204,11 @@ const SECTIONS: { kind: AssetKind; heading: string }[] = [
   { kind: "token", heading: "Token images" },
 ];
 
+/** A video lists among the maps (docs/design/design-v1-animated-maps.md 4.6). */
+function inSection(row: Pick<AssetRow, "kind">, kind: AssetKind): boolean {
+  return row.kind === kind || (kind === "map" && row.kind === "video");
+}
+
 /**
  * The DM's library: every image by kind with its status, and the means to
  * delete those nothing uses. The bulk delete sits at the foot under "Clean
@@ -219,6 +226,7 @@ function ManagedLibrary(props: { roomId: string; library: LibraryState; unlisted
   const handouts = useRoomView((s) => s.view?.handouts);
   const handoutDocs = useRoomView((s) => s.view?.handoutDocs);
   const docs = useMemo(() => docsNewestFirst(handoutDocs), [handoutDocs]);
+  const scenes = useRoomView((s) => s.view?.scenes);
   const uploading = useStore(useScoped(uploadingSlot), (s) => s.ids);
   const deletes = useDocDeletes(props.roomId);
   // The pages of a document being deleted go with it, so they are not listed loose, or offered to Clean up, meanwhile.
@@ -247,13 +255,16 @@ function ManagedLibrary(props: { roomId: string; library: LibraryState; unlisted
   const shown = Object.values(handouts ?? {});
   const imageTileOf = (id: string, row: AssetRow | undefined): Tile => {
     const isUploading = uploading.has(id);
+    const video = row?.kind === "video" && row.video ? ({ assetId: id, ...row.video } satisfies MapVideo) : null;
     return {
       key: `image:${id}`,
       thumbId: id,
-      tag: null,
+      // A video has no thumbnail of its own (D-261102-456): a film strip with its length in the corner.
+      tag: video ? videoLength(video.durationMs) : null,
+      ...(video ? { film: true } : null),
       ...imageTile(row, { uploading: isUploading, dm: true }),
       view: (close) => ({
-        ...imageView(id, row, shown, assets),
+        ...(video ? videoView(video, stillOfVideo(scenes, id), assets) : imageView(id, row, shown, assets)),
         details: <ImageDetails row={row} status={imageStatus(row, isUploading)} />,
         // As the card offered it: an image nothing uses, and not a running upload's page, which the upload may still save.
         actions:
@@ -315,7 +326,7 @@ function ManagedLibrary(props: { roomId: string; library: LibraryState; unlisted
           id: section.kind,
           heading: section.heading,
           label: `${section.heading} in this room`,
-          tiles: apart.own.filter((r) => r.kind === section.kind).map((row) => imageTileOf(row.id, row)),
+          tiles: apart.own.filter((r) => inSection(r, section.kind)).map((row) => imageTileOf(row.id, row)),
         }))
       : [{ id: "unlisted", label: "Token images in this room", tiles: props.unlisted.map((id) => imageTileOf(id, undefined)) }]),
     ...(apart
@@ -331,7 +342,7 @@ function ManagedLibrary(props: { roomId: string; library: LibraryState; unlisted
             id: `starter-${section.kind}`,
             heading: section.heading,
             label: `${section.heading} from starter packs`,
-            tiles: apart.starter.filter((r) => r.kind === section.kind).map((row) => imageTileOf(row.id, row)),
+            tiles: apart.starter.filter((r) => inSection(r, section.kind)).map((row) => imageTileOf(row.id, row)),
             starter: true,
           })),
         ]
@@ -396,7 +407,7 @@ type TileView = { title: string; pages: ViewerPage[]; details?: ReactNode; actio
  * `status`, the DM's, in the bottom right. `view` is asked only for the
  * tile open, with a way to close it once its Delete has run.
  */
-type Tile = { key: string; thumbId: string; label: string; tag: string | null; status: string | null; view(close: () => void): TileView };
+type Tile = { key: string; thumbId: string; label: string; tag: string | null; status: string | null; film?: true; view(close: () => void): TileView };
 
 /** `starter` puts a section in the starter picks' fold, after the room's own (docs/design/design-v1-starter-art.md 5). */
 type LibrarySection = { id: string; heading?: string; label: string; tiles: readonly Tile[]; after?: ReactNode; keep?: boolean; starter?: boolean };
@@ -489,7 +500,7 @@ function TileLibrary(props: { sections: readonly LibrarySection[]; before?: Reac
                 }}
                 style={tileStyle}
               >
-                <Thumb id={tile.thumbId} />
+                {tile.film ? <FilmStrip /> : <Thumb id={tile.thumbId} />}
               </button>
               <TileMarks tag={tile.tag} status={tile.status} />
             </li>
@@ -625,8 +636,10 @@ function Mark(props: { end?: boolean; children: ReactNode }) {
 
 /** What the image is: its tile's name, and its viewer's title unless a handout shows it under one. */
 function kindName(row: AssetRow | undefined): string {
-  return row?.kind === "map" ? "Map" : row?.kind === "handout" ? "Handout" : "Token image";
+  return row?.kind === "map" ? "Map" : row?.kind === "video" ? VIDEO_KIND : row?.kind === "handout" ? "Handout" : "Token image";
 }
+
+const VIDEO_KIND = "Animated map";
 
 /** The DM's status of an image: a running PDF upload's page on this device first, which the upload may still save (section 4.1.2). */
 function imageStatus(row: AssetRow | undefined, uploading: boolean): string | null {
@@ -648,8 +661,10 @@ export function docTile(doc: Pick<HandoutDoc, "title" | "pages">, showing: boole
 }
 
 /** The viewer's line for an image: its size once the list has it, then the DM's status. */
-export function imageDetails(row: Pick<AssetRow, "width" | "height" | "bytes"> | undefined, status: string | null): string | null {
-  const size = row ? `${row.width} × ${row.height} px${typeof row.bytes === "number" ? `, ${formatBytes(row.bytes)}` : ""}.` : null;
+export function imageDetails(row: Pick<AssetRow, "width" | "height" | "bytes" | "video"> | undefined, status: string | null): string | null {
+  // A video's line names its length between its size and the bytes it takes (docs/design/design-v1-animated-maps.md 4.6).
+  const length = row?.video ? `, ${videoLength(row.video.durationMs)}` : "";
+  const size = row ? `${row.width} × ${row.height} px${length}${typeof row.bytes === "number" ? `, ${formatBytes(row.bytes)}` : ""}.` : null;
   const parts = [size, status ? `${status}.` : null].filter((p) => p !== null);
   return parts.length > 0 ? parts.join(" ") : null;
 }
@@ -667,6 +682,32 @@ function ImageDetails(props: { row: AssetRow | undefined; status: string | null 
       {props.row?.credit ? <CreditLine credit={props.row.credit} stored={props.row} /> : null}
     </>
   );
+}
+
+/**
+ * A video in the viewer (docs/design/design-v1-animated-maps.md 4.6): it plays
+ * there under the device's playback rule, and otherwise shows `still`, the
+ * still of the first scene or phase that names it, or a film strip.
+ */
+function videoView(video: MapVideo, still: string | null, assets: AssetSource): TileView {
+  const title = VIDEO_KIND;
+  return {
+    title,
+    pages: [{ src: assets.url(video.assetId, "full"), alt: title, width: video.widthPx, height: video.heightPx, video: { video, still: still ? assets.url(still, "full") : null } }],
+  };
+}
+
+/** The still a scene shows for a video: the first scene, by its order, whose map or one of whose phases names it. */
+export function stillOfVideo(scenes: Readonly<Record<string, Scene | undefined>> | undefined, videoId: string): string | null {
+  const ordered = Object.values(scenes ?? {})
+    .filter((s): s is Scene => s !== undefined)
+    .sort((a, b) => a.order - b.order || (a.id < b.id ? -1 : 1));
+  for (const scene of ordered) {
+    if (scene.map?.video?.assetId === videoId) return scene.map.assetId;
+    const phase = scene.phases?.find((p) => p.video?.assetId === videoId);
+    if (phase) return phase.assetId;
+  }
+  return null;
 }
 
 function imageView(id: string, row: AssetRow | undefined, handouts: readonly Handout[], assets: AssetSource): TileView {

@@ -201,6 +201,8 @@ export function MapExport(props: { scene: Scene }) {
           />
         </SettingRow>
       </div>
+      {/* Export draws the still, as every reader of the map's pixels does (docs/design/design-v1-animated-maps.md 9.3). */}
+      {scene.map?.video ? <Help>An animated map exports its still image.</Help> : null}
       {size.pxPerCell < size.requested ? (
         <Note>
           Lowered to {size.pxPerCell} px per {words.cell}, so the image stays within 16.7 million pixels, the most an iPhone can draw. It will be {size.width} × {size.height} px.
