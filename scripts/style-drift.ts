@@ -375,6 +375,8 @@ const ART_FILES = [
   "client/features/builder/heights/boardText.ts",
   "client/features/vision/SightOverlay.tsx",
   "client/features/mapexport/render.ts",
+  "client/features/weather/looks.ts",
+  "client/features/weather/textures.ts",
 ];
 
 export const ALLOWLIST: readonly AllowEntry[] = [
