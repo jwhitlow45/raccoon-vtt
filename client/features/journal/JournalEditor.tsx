@@ -12,7 +12,8 @@ import { Notice } from "../../components/Notice.tsx";
 import { Help, Note } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { theme } from "../../lib/theme.ts";
-import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
+import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
+import { dateHeading } from "../clock/ties.ts";
 import { ConfirmButton } from "../tokens/ui.tsx";
 import { draftDirty, draftOf, emptyDraft, moveBlock, newBlockId, saveAnswer, saveDraft, sizeNote, type PageDraft } from "./draft.ts";
 import { closedAnswerText, editDraft, pendingCloseText, saveAnswered, saveNotSent, saveSent, saveState } from "./pendingSave.ts";
@@ -37,6 +38,8 @@ type AccessMode = "dm" | "all" | "member";
 export function JournalEditor(props: { page: JournalPage | null; folders: readonly string[]; onClose(): void; onSaved(pageId: string): void }) {
   const actions = useRoomActions();
   const ui = useRoomUi();
+  const store = useRoomStore();
+  const clocked = useRoomView((s) => !!s.view?.clock);
   const members = useRoomView((s) => s.view?.members ?? EMPTY_MEMBERS);
   const initial = useMemo(() => (props.page ? draftOf(props.page) : emptyDraft()), [props.page]);
   // The draft locks while a save is pending (pendingSave.ts), so nothing typed then is lost when the acknowledgment closes the editor.
@@ -257,6 +260,22 @@ export function JournalEditor(props: { page: JournalPage | null; folders: readon
               <Button size="sm" icon="plus" disabled={full} onClick={() => setDraft((d) => ({ ...d, blocks: [...d.blocks, { id: newBlockId(), text: "", secret: true }] }))}>
                 Add a secret
               </Button>
+              {clocked ? (
+                // Read when pressed, so the editor does not redraw at every clock change. The date is the clock's at this moment, as the Log would write it.
+                <Button
+                  size="sm"
+                  icon="plus"
+                  disabled={full}
+                  onClick={() => {
+                    const view = store.getState().view;
+                    if (!view?.clock) return;
+                    const text = dateHeading(view.clock, view.encounter);
+                    setDraft((d) => ({ ...d, blocks: [...d.blocks, { id: newBlockId(), text, secret: false }] }));
+                  }}
+                >
+                  Add the date
+                </Button>
+              ) : null}
             </div>
             {full ? <Help>A page holds at most {LIMITS.journalBlocksPerPage} blocks.</Help> : null}
             {size ? (

@@ -1,10 +1,12 @@
 import { useState } from "react";
+import { clockNow } from "#shared/calendar.ts";
 import type { Actor, ClassResource } from "#shared/model.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
 import { Segmented } from "../../components/Segmented.tsx";
 import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
+import { restNote } from "../clock/words.ts";
 import { restBackText } from "../resources/logic.ts";
 import { MAX_HP_AMOUNT } from "./hpInput.ts";
 import { FieldRow, Note, NumberField, Section, SmallButton } from "./ui.tsx";
@@ -30,6 +32,11 @@ const KINDS: { value: Kind; label: string }[] = [
  *
  * A character's class resources come back with the rest, so a chosen rest
  * names those it restores (docs/design/design-v1-combat-controls.md 7.2).
+ *
+ * A rest of one creature never moves the room's clock, since two players
+ * resting would move it twice. With a clock running, the DM's Long Rest
+ * says when the character last finished one and the earliest next start
+ * (docs/design/design-v1-calendar.md 4.5). The stamp is the DM's alone.
  */
 export function RestSection(props: { actor: Pick<Actor, "hp" | "life"> | undefined; target: ActorTarget; resources?: readonly ClassResource[] }) {
   const actions = useRoomActions();
@@ -42,6 +49,16 @@ export function RestSection(props: { actor: Pick<Actor, "hp" | "life"> | undefin
   const fighting = useRoomView((s) => !!s.view?.encounter);
   const back = kind ? restBackText(props.resources, kind) : null;
   const tracked = (props.resources?.length ?? 0) > 0;
+  const note = useRoomView((s) => {
+    const clock = s.view?.clock;
+    if (!clock || s.you?.role !== "dm" || kind !== "long") return null;
+    const target = props.target;
+    const token = "tokenId" in target ? s.view?.tokens[target.tokenId] : undefined;
+    const characterId = "characterId" in target ? target.characterId : token?.actor && "ref" in token.actor ? token.actor.ref : undefined;
+    const character = characterId === undefined ? undefined : s.view?.characters[characterId];
+    if (!character) return null;
+    return restNote({ name: character.name, stamp: character.longRest, clockId: clock.id, now: clockNow(clock, s.view?.encounter), calendar: clock.calendar, movesClock: false });
+  });
 
   const finish = () => {
     if (kind === "short") actions.dispatch({ t: "actor.rest", target: props.target, kind, ...(heal !== null && heal > 0 ? { heal } : {}) });
@@ -70,6 +87,7 @@ export function RestSection(props: { actor: Pick<Actor, "hp" | "life"> | undefin
         <>
           <Note>{`All HP back, Temporary HP gone, one less Exhaustion level, and Legendary Resistance reset. Spell slots and ${tracked ? "other " : ""}features are on your sheet.`}</Note>
           {back ? <Note tone="info">{back}</Note> : null}
+          {note ? <Note tone="info">{note}</Note> : null}
         </>
       ) : null}
       {canRest && kind ? (

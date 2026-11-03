@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState, type RefObject } from "react";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
+import { clockNow } from "#shared/calendar.ts";
 import type { Character, CreatureSize, Member } from "#shared/model.ts";
 import { usePanelHeader, type PanelClose, type PanelProps } from "../panels.ts";
 import { Button } from "../../components/Button.tsx";
@@ -20,6 +21,8 @@ import type { OpAnswer } from "../../state/types.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { ImageField, type ImageRef } from "../images/ImageField.tsx";
 import { ImagePreview } from "../images/IconDisk.tsx";
+import { partyRestOps } from "../clock/ties.ts";
+import { restNote } from "../clock/words.ts";
 import { partyRestBackText } from "../resources/logic.ts";
 import { ownsCharacter } from "./access.ts";
 import { CharacterPage, myToken, SIZE_OPTIONS } from "./CharacterCard.tsx";
@@ -248,13 +251,30 @@ function useDeleteHandOff(root: RefObject<HTMLDivElement | null>, mine: readonly
  * rest per character, sent as one gesture so one undo takes them all back.
  * A character at 0 HP cannot start a rest (shared/rules/rest.ts) and is
  * left as it is.
+ *
+ * While the room has a clock, the rest moves it on 8 hours first, unless the
+ * DM unticks that, so each character's stamp marks the rest's end
+ * (docs/design/design-v1-calendar.md 4.5). The advance is the gesture's first op
+ * and there is no op of its own for the party. The card also says when each
+ * character last finished a Long Rest and the earliest next start the rules
+ * give, as a note and never a block.
  */
 function PartyLongRest(props: { characters: Character[] }) {
   const actions = useRoomActions();
   const [asking, setAsking] = useState(false);
+  const clock = useRoomView((s) => s.view?.clock);
+  const encounter = useRoomView((s) => s.view?.encounter);
+  const [moves, setMoves] = useState(true);
+  const moveClock = clock != null && moves;
   const resting = props.characters.filter((c) => c.actor.life === "alive" && c.actor.hp.cur >= 1);
   const left = props.characters.length - resting.length;
   const back = partyRestBackText(resting);
+  const notes = clock
+    ? props.characters.flatMap((c) => {
+        const note = restNote({ name: c.name, stamp: c.longRest, clockId: clock.id, now: clockNow(clock, encounter), calendar: clock.calendar, movesClock: moveClock });
+        return note === null ? [] : [note];
+      })
+    : [];
   if (!asking) {
     return (
       <Button size="sm" disabled={resting.length === 0} onClick={() => setAsking(true)}>
@@ -278,19 +298,30 @@ function PartyLongRest(props: { characters: Character[] }) {
         {back ? ` ${back}` : ""}
         {left > 0 ? ` ${left === 1 ? "1 character at 0 HP stays" : `${left} characters at 0 HP stay`} as they are.` : ""}
       </Help>
+      {clock ? <Checkbox label="Move the clock on 8 hours" checked={moves} onChange={setMoves} /> : null}
+      {notes.map((note) => (
+        <Help key={note}>{note}</Help>
+      ))}
       <div style={{ display: "flex", gap: theme.space(2) }}>
         <Button
           variant="primary"
           size="sm"
           style={{ flex: 1 }}
           onClick={() => {
-            dispatchGesture(actions, resting.map((c) => ({ t: "actor.rest", target: { characterId: c.id }, kind: "long" })));
+            dispatchGesture(actions, partyRestOps(resting.map((c) => c.id), moveClock));
             setAsking(false);
+            setMoves(true);
           }}
         >
           Finish the Long Rest
         </Button>
-        <Button size="sm" onClick={() => setAsking(false)}>
+        <Button
+          size="sm"
+          onClick={() => {
+            setAsking(false);
+            setMoves(true);
+          }}
+        >
           Cancel
         </Button>
       </div>
