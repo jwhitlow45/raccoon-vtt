@@ -215,9 +215,8 @@ export type RoomState = {
   /**
    * DM only, but a player's and a display's projection keep the sounds that
    * sound now, cut to their playback fields (docs/design/design-v1-sound.md
-   * 6.5): the room's sound library, `keys.sound(id)`. Every stored state
-   * holds it (the snapshot step fills it empty), and a reader takes absent
-   * as empty.
+   * 6.5): the room's sound library, `keys.sound(id)`. A stored state may
+   * lack it (rooms from before sound), and a reader takes absent as empty.
    */
   sounds?: Record<SoundId, Sound>;
   /** DM only, never projected: the room's playlists, `keys.playlist(id)`. Stored as `sounds` is. */
