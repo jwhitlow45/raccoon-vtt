@@ -21,8 +21,9 @@ import { Tag } from "../components/Tag.tsx";
 import { Modal } from "../features/images/Modal.tsx";
 import { PanelHeaderHost, usePanelHeader, type PanelHeader } from "../features/panels.ts";
 import { SheetDialog } from "../features/tokens/SheetDialog.tsx";
-import { accentFor, accentVars } from "../lib/accent.ts";
-import { MEMBER_COLORS, theme } from "../lib/theme.ts";
+import { accentFor, accentVars, boardAccentVars } from "../lib/accent.ts";
+import { holdScheme, scheme as pageScheme } from "../lib/scheme.ts";
+import { MEMBER_COLORS, theme, type Scheme } from "../lib/theme.ts";
 
 /**
  * Every shared component in every state, at `/dev/kit` in development only
@@ -36,7 +37,13 @@ import { MEMBER_COLORS, theme } from "../lib/theme.ts";
  * does (pages/RoomChrome.tsx useAccentVars), so dialogs portaled to the
  * body follow it too.
  *
- * `?accent=blue` or `?accent=white` opens the page in that accent.
+ * The theme switch beside it shows the page in either scheme, for this
+ * page only (lib/scheme.ts `holdScheme`), so the device's own Theme is
+ * left as it was. The accent follows the scheme, as a room's does.
+ *
+ * `?accent=blue` or `?accent=white` opens the page in that accent, and
+ * `?theme=light` or `?theme=dark` in that scheme. With neither theme, the
+ * page opens in the device's own.
  */
 
 const ACCENTS = { yellow: "#f7df00", blue: "#3e8ef7", white: "#e5e5e5" } as const;
@@ -47,9 +54,17 @@ function initialAccent(): AccentName {
   return asked === "blue" || asked === "white" ? asked : "yellow";
 }
 
+function initialScheme(): Scheme {
+  const asked = new URLSearchParams(location.search).get("theme");
+  return asked === "light" || asked === "dark" ? asked : pageScheme();
+}
+
 export default function Kit() {
   const [accent, setAccent] = useState<AccentName>(initialAccent);
-  const vars = useMemo(() => accentVars(accentFor(ACCENTS[accent])), [accent]);
+  const [scheme, setScheme] = useState<Scheme>(initialScheme);
+  // Before the accent's variables below, so the page's palette and its accent change in one paint.
+  useLayoutEffect(() => holdScheme(scheme), [scheme]);
+  const vars = useMemo(() => ({ ...accentVars(accentFor(ACCENTS[accent], scheme)), ...boardAccentVars(accentFor(ACCENTS[accent], "dark")) }), [accent, scheme]);
   useLayoutEffect(() => {
     const style = document.documentElement.style;
     for (const [name, value] of Object.entries(vars)) style.setProperty(name, value);
@@ -81,6 +96,15 @@ export default function Kit() {
               { value: "white", label: "White" },
             ]}
             onChange={setAccent}
+          />
+          <Segmented<Scheme>
+            label="Theme"
+            value={scheme}
+            options={[
+              { value: "dark", label: "Dark" },
+              { value: "light", label: "Light" },
+            ]}
+            onChange={setScheme}
           />
         </header>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 360px), 1fr))", gap: theme.space(4), alignItems: "start" }}>
