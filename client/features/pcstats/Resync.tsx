@@ -5,7 +5,7 @@ import type { Character } from "#shared/model.ts";
 import { expectOf } from "#shared/permissions.ts";
 import type { ExpectPart } from "#shared/protocol.ts";
 import type { PcFill } from "#shared/rules/pcFill.ts";
-import { defaultTicks, planSync, recordFits, syncPatch, syncResult, undoSync, type SyncPlan } from "#shared/rules/pcSync.ts";
+import { defaultTicks, leavesAsIs, planSync, recordFits, syncPatch, syncResult, undoSync, type SyncPlan } from "#shared/rules/pcSync.ts";
 import { Button } from "../../components/Button.tsx";
 import { Dialog, PINNED_FOOT } from "../../components/Dialog.tsx";
 import { Loading } from "../../components/Loading.tsx";
@@ -378,7 +378,8 @@ export function ResyncDialog(props: { characterId: string; onClose(): void }) {
             onBulk={(ticks) => send({ t: "bulk", ticks })}
             name={who}
             character={plan.input.character as Character}
-            nothingNew={nothing}
+            // A weapon's range refreshed from D&D Beyond is no news, though Apply writes it.
+            nothingNew={nothing || leavesAsIs(plan, result)}
             disabled={applying}
             firstRef={first}
             labelId={labelId}

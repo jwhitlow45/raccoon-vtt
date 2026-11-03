@@ -610,6 +610,54 @@ describe("each roll's case (2.4)", () => {
   });
 });
 
+describe("a weapon's range from D&D Beyond on a re-sync (docs/design/design-v1-weather.md 2.1)", () => {
+  const oathbow = (over: Partial<PcRoll> = {}): PcRoll => ({ id: "x", name: "Oathbow", kind: "weapon", ability: "dex", attack: { prof: true, bonus: 0 }, dice: [{ formula: "1d8", mod: true, type: "piercing" }], ...over });
+  const spear = (over: Partial<PcRoll> = {}): PcRoll => ({ id: "x", name: "Spear of Night", kind: "weapon", ability: "str", attack: { prof: true, bonus: 0 }, dice: [{ formula: "1d6", mod: true, type: "piercing" }], ...over });
+  const ddb = (...rolls: PcRoll[]) => fillOf({ ...empty(), rolls: read(rolls) });
+  const by = (c: SyncCharacter, name: string) => c.stats!.rolls.find((r) => r.name === name);
+
+  test("a weapon imported before ranges were read takes D&D Beyond's, with a sync record, its entry and the review unchanged", () => {
+    // Synced by a build that read no range.
+    const first = synced(ddb(oathbow(), longsword()));
+    assert.equal(by(first, "Oathbow")!.range, undefined);
+    const p = plan(first, ddb(oathbow({ range: "ranged" }), longsword()));
+    assert.deepEqual(p.items, [], "nothing to review");
+    const result = syncResult(p, defaultTicks(p));
+    assert.equal(leavesAsIs(p, result), true, "the review says nothing new");
+    const after = applied(first, p);
+    assert.equal(by(after, "Oathbow")!.range, "ranged");
+    assert.equal(by(after, "Oathbow")!.id, by(first, "Oathbow")!.id);
+    assert.deepEqual(after.ddbSync!.rolls, first.ddbSync!.rolls, "the same entries, so the old hashes still hold");
+    assert.equal(by(after, "Longsword")!.range, undefined);
+    assert.equal(syncPatch(after, syncResult(plan(after, ddb(oathbow({ range: "ranged" }), longsword())), new Set())), null, "and the next re-sync has nothing to send");
+  });
+
+  test("an import with no sync record takes it too", () => {
+    const stats: PcStats = { ...empty(), rolls: [oathbow({ id: "own-1", ddb: true })] };
+    const c = bree(stats);
+    assert.equal(c.ddbSync, undefined);
+    const p = plan(c, ddb(oathbow({ range: "ranged" })));
+    assert.deepEqual(p.items, []);
+    assert.equal(by(applied(c, p), "Oathbow")!.range, "ranged");
+  });
+
+  test("a change of range alone comes in, either way, and a weapon D&D Beyond no longer ranges drops it", () => {
+    const first = synced(ddb(spear({ range: "either" })));
+    assert.equal(by(first, "Spear of Night")!.range, "either");
+    assert.equal(by(applied(first, plan(first, ddb(spear({ range: "ranged" })))), "Spear of Night")!.range, "ranged");
+    assert.equal(by(applied(first, plan(first, ddb(spear()))), "Spear of Night")!.range, undefined);
+  });
+
+  test("a roll the player edited keeps their edit and gains no range", () => {
+    const first = synced(ddb(oathbow()));
+    const edited: SyncCharacter = { ...first, stats: { ...first.stats!, rolls: first.stats!.rolls.map((r) => (r.name === "Oathbow" ? { ...r, attack: { prof: true, bonus: 2 } } : r)) } };
+    const p = plan(edited, ddb(oathbow({ range: "ranged" })));
+    const after = applied(edited, p);
+    assert.deepEqual(by(after, "Oathbow")!.attack, { prof: true, bonus: 2 });
+    assert.equal(by(after, "Oathbow")!.range, undefined);
+  });
+});
+
 describe("the review's checks (3.3)", () => {
   test("the losses warning: a lower level, the spellcasting ability gone, and six or more proficiencies at least half of those synced", () => {
     const skilled = { ...empty(), spellAbility: "wis" as const, skills: { arcana: "prof", history: "prof", nature: "prof", religion: "prof", insight: "prof", medicine: "prof", perception: "expert" } as PcStats["skills"] };

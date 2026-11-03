@@ -179,7 +179,12 @@ export type SyncPlan = {
 
 export type SyncLosses = { level?: { from: number; to: number }; spellAbility?: true; proficiencies?: number; defenses?: number; rolls?: number; resources?: number };
 
-type RollSlot = { roll: PcRoll; entry?: { k: string; h: string }; item?: RollItem };
+/**
+ * `range` is D&D Beyond's word on a linked, untouched roll's weapon when it
+ * differs from the block's (null for none): it comes in with no item, since
+ * it is outside `h` and no one reviews it.
+ */
+type RollSlot = { roll: PcRoll; entry?: { k: string; h: string }; item?: RollItem; range?: PcRoll["range"] | null };
 
 type RollPlan = {
   /** The block's rolls in order, each with its entry after the sync and its item when it has one. */
@@ -656,6 +661,8 @@ function planRolls(input: SyncInput, source: SyncSource, noBase: SyncSection): R
       if (!touched && theirs.h !== entry.h) slot.item = { type: "roll", id, group: "Rolls", section: "changes", case: "update", mine: slot.roll, theirs, conflict: false };
       else if (touched && theirs.h === entry.h) slot.item = { type: "roll", id, group: "Rolls", section: "kept", case: "edited", mine: slot.roll, theirs, conflict: false };
       else if (touched && theirs.h !== content) slot.item = { type: "roll", id, group: "Rolls", section: "kept", case: "conflict", mine: slot.roll, theirs, conflict: true };
+      // Untouched and the same there: a weapon imported before ranges were read, or whose range alone changed, takes D&D Beyond's now (docs/design/design-v1-weather.md 2.1).
+      else if (!touched && (slot.roll.range ?? null) !== (theirs.roll.range ?? null)) slot.range = theirs.roll.range ?? null;
     } else if (readWhole(fill, letterOf(entry.k))) {
       const id = `roll:${entry.k}`;
       slot.item = touched
@@ -725,6 +732,16 @@ function planRolls(input: SyncInput, source: SyncSource, noBase: SyncSection): R
   const order = new Map(reads.map((r, i) => [r.k, i]));
   extra.sort((a, b) => order.get(a.theirs!.k)! - order.get(b.theirs!.k)!);
   return { slots, extra, orphans, gone, unlinked };
+}
+
+function withRange(roll: PcRoll, range: PcRoll["range"] | null): PcRoll {
+  const { range: _old, ...rest } = roll;
+  return range === null ? rest : { ...rest, range };
+}
+
+/** A block with no weapon's range, which only D&D Beyond sets, for asking whether anyone has something to review. */
+function rangeless(stats: PcStats): PcStats {
+  return stats.rolls.some((r) => r.range !== undefined) ? { ...stats, rolls: stats.rolls.map((r) => withRange(r, null)) } : stats;
 }
 
 /** D&D Beyond's roll where the block's was, keeping its id, and what a pass takes while it still has a save (2.4). */
@@ -857,7 +874,7 @@ export function syncResult(plan: SyncPlan, ticks: ReadonlySet<string>): SyncResu
   for (const slot of plan.rolls.slots) {
     const item = slot.item;
     if (!item) {
-      rolls.push(slot.roll);
+      rolls.push(slot.range === undefined ? slot.roll : withRange(slot.roll, slot.range));
       if (slot.entry) entries.push([hash12(slot.roll.id), slot.entry]);
       continue;
     }
@@ -1061,13 +1078,15 @@ export function sameRecord(a: Omit<DdbSync, "at"> & { at?: string }, b: (Omit<Dd
 /**
  * Whether a review's result leaves the block, the level, the fields beside
  * it and the record as they are, so the review says it has nothing new
- * (3.3). The dialog asks `syncPatch` for null, which is the same test.
+ * (3.3). A weapon's range refreshed from D&D Beyond is not news here, though
+ * `syncPatch` still sends it, so Apply writes it.
  */
 export function leavesAsIs(plan: SyncPlan, result: SyncResult): boolean {
   const { input } = plan;
   return (
     input.stats !== undefined &&
-    same(result.stats, input.stats) &&
+    // A weapon's range D&D Beyond refreshes is no news: Apply still writes it.
+    same(rangeless(result.stats), rangeless(input.stats)) &&
     result.level === input.level &&
     Object.keys(result.also).length === 0 &&
     sameRecord(result.record, input.character.ddbSync) &&
