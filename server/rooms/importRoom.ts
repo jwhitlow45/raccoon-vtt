@@ -13,14 +13,15 @@ import { sightPiecesCheck } from "#shared/visionLimits.ts";
 import { mapDiscoveryUpgrade, migrateSnapshot, needsMapDiscoveryUpgrade } from "#shared/migrate.ts";
 import { assetCreditSchema } from "#shared/protocol.ts";
 import { STARTER_KEY, type FoundWork, type StarterKind } from "#shared/starter.ts";
-import type { Member, RoomState } from "#shared/model.ts";
+import type { Member, RoomState, VideoFacts } from "#shared/model.ts";
 import { withPitsCounted } from "#shared/rules/pitCount.ts";
 import { splitCheck } from "#shared/rules/walls.ts";
+import { animatedMapsOn } from "../config.ts";
 import { isAssetError } from "../assets/errors.ts";
 import { KINDS, isAssetKind, type AssetKind } from "../assets/kinds.ts";
 import type { AssetService } from "../assets/service.ts";
 import { StarterWorkError, isStarterKind, workForKind, type StarterCatalog } from "../assets/starter.ts";
-import { deleteUnreferencedFiles, roomFileKeys } from "../assets/store.ts";
+import { deleteUnreferencedFiles, isVideoContainer, roomFileKeys } from "../assets/store.ts";
 import { tempFile } from "../assets/upload.ts";
 import { markDmMembers } from "../auth/grants.ts";
 import { HttpError } from "../auth/http.ts";
@@ -32,7 +33,7 @@ import { warnArchiveSkipped, type Logger } from "./actor.ts";
 import { EXPORT_FORMAT, EXPORT_FORMAT_VERSION, assetFileName } from "./exportRoom.ts";
 import type { RoomGateway } from "./gateway.ts";
 import { archiveAdmitted, archiveLines } from "./persistence.ts";
-import { lastLineSeq, remapState, type ImportedAsset } from "./remap.ts";
+import { lastLineSeq, refillMapVideos, remapState, type ImportedAsset } from "./remap.ts";
 import { layerCharge, MEMORY_CAP } from "./memorySize.ts";
 import { checkWholeScenes, measuredStateBytes, MEMORY_FULL, memoryCapOf, memoryReserved, memoryReserves, sharesRoom } from "./sizeGuard.ts";
 import { parseRoomState } from "./stateSchema.ts";
@@ -48,7 +49,10 @@ import { parseRoomState } from "./stateSchema.ts";
  *   image is re-processed by the asset pipeline, which decides its kind's
  *   dimensions and variants and refuses anything that is not an image. A
  *   starter mark counts only where this server's own catalog has that work
- *   with the same bytes, and then the image comes from the shipped file;
+ *   with the same bytes, and then the image comes from the shipped file.
+ *   Each video goes through the same header check as an upload, and is
+ *   skipped while the server's switch is off, which leaves its map's still
+ *   (docs/design/design-v1-animated-maps.md 9.3);
  * - every id is remapped, uploaders included.
  *
  * The room row is written first so asset rows have something to reference,
@@ -68,7 +72,6 @@ export const IMPORT_LIMITS = {
   entries: 10_000,
   /** Assets the manifest may list. */
   assets: 5_000,
-  inflatedBytes: 1024 * 1024 * 1024,
   roomJsonBytes: 2 * LIMITS.stateBytes,
   manifestBytes: 2 * 1024 * 1024,
   /**
@@ -110,6 +113,8 @@ const manifestSchema = z.object({
         credit: z.unknown().optional(),
         // Manifest version 2. Checked on its own below too, against this server's catalog.
         starter: z.unknown().optional(),
+        // A video's container, which names its entry. The check reads the real one from the bytes.
+        media: z.unknown().optional(),
       }),
     )
     .max(IMPORT_LIMITS.assets),
@@ -124,11 +129,28 @@ const roomJsonSchema = z.object({
   dmMemberIds: z.array(z.string().min(1).max(64)).max(LIMITS.membersPerRoom).optional(),
 });
 
+/**
+ * The most a file may inflate to: the room's quota, which bounds the assets
+ * it can hold, plus room.json's and the manifest's caps
+ * (docs/design/design-v1-animated-maps.md 6.3). Derived from ROOM_QUOTA_MB,
+ * so the CLI's import, which has no body cap, takes a full room, where a
+ * fixed 1 GiB refused one on a server with a larger quota.
+ */
+export function inflatedLimit(quotaBytes: number): number {
+  return quotaBytes + IMPORT_LIMITS.roomJsonBytes + IMPORT_LIMITS.manifestBytes;
+}
+
 export class InflatedCounter {
   total = 0;
+  readonly limit: number;
+
+  constructor(limit: number = inflatedLimit(1024 * 1024 * 1024)) {
+    this.limit = limit;
+  }
+
   add(bytes: number): void {
     this.total += bytes;
-    if (this.total > IMPORT_LIMITS.inflatedBytes) throw new HttpError(413, "import_too_large");
+    if (this.total > this.limit) throw new HttpError(413, "import_too_large");
   }
 }
 
@@ -200,7 +222,7 @@ export async function importRoom(deps: ImportDeps, zipPath: string, form: Import
       if (err instanceof HttpError) throw err;
       throw new HttpError(400, "bad_zip");
     }
-    const counter = new InflatedCounter();
+    const counter = new InflatedCounter(inflatedLimit(deps.assets.quota.quotaBytes));
     const roomEntry = entries.get("room.json");
     if (!roomEntry) throw new HttpError(400, "missing_room_json");
     const roomJson = parseJson(await readEntry(zip, roomEntry, IMPORT_LIMITS.roomJsonBytes, counter), "room.json");
@@ -252,9 +274,12 @@ export async function importRoom(deps: ImportDeps, zipPath: string, form: Import
       // Members get their new ids first, because asset uploader rows are written during image processing.
       const memberIds = new Map(Object.keys(parsed.state.members).map((id) => [id, uuidv7()]));
       const assetIds = await importImages(deps, zip, entries, manifest, roomId, counter, memberIds);
+      // Each video's facts from the row its header check just made, by its new id: the file's own are never trusted.
+      const videoFacts = new Map([...assetIds.values()].flatMap((a) => (a.video ? [[a.id, a.video] as const] : [])));
       // The remap carries the file's memory and marks under the new ids, and a file from before map discovery then takes
-      // the upgrade step, so every scene it brings is marked played (docs/design/design-v1-map-discovery.md 5.5).
-      const remapped = finishState(withDiscoveryUpgrade(remapState(parsed.state, { assets: assetIds, memberIds }), header.data.schemaVersion), dmMember, roomName);
+      // the upgrade step, so every scene it brings is marked played (docs/design/design-v1-map-discovery.md 5.5). The
+      // refill then overwrites every map's and phase's video from its row (docs/design/design-v1-animated-maps.md 9.3).
+      const remapped = finishState(withDiscoveryUpgrade(refillMapVideos(remapState(parsed.state, { assets: assetIds, memberIds }), videoFacts), header.data.schemaVersion), dmMember, roomName);
       // The log's rings hold here as in any room, each ring its own newest (shared/logRings.ts), and the archive takes
       // the whole log, so Show older and a session's export reach every imported line.
       const state = { ...remapped, log: ringed(remapped.log, remapped.members) };
@@ -370,7 +395,10 @@ export function assertWithinLimits(state: RoomState): void {
  * back of the processing queue, under its kind's size cap, with quota
  * reserved and the free-disk guard checked before each one. Returns old
  * asset id to the new asset and its kind for everything that went through,
- * so the remap can hold each reference to the kind it takes.
+ * so the remap can hold each reference to the kind it takes. A video's
+ * entry carries its new row's facts too, for the refill, which overwrites
+ * every map's and phase's video facts from the rows the import made
+ * (remap.ts refillMapVideos): the file's own are untrusted.
  *
  * A starter pick whose work this server ships with the same bytes comes
  * from the shipped file instead, as a pick here would
@@ -385,11 +413,14 @@ async function importImages(
   roomId: string,
   counter: InflatedCounter,
   memberIds: ReadonlyMap<string, string>,
-): Promise<Map<string, ImportedAsset>> {
-  const out = new Map<string, ImportedAsset>();
+): Promise<Map<string, ImportedAsset & { video?: VideoFacts }>> {
+  const out = new Map<string, ImportedAsset & { video?: VideoFacts }>();
+  const videosOn = animatedMapsOn(deps.assets.config);
   for (const asset of manifest.assets) {
     if (out.has(asset.id) || !isAssetKind(asset.kind)) continue;
     const kind = asset.kind;
+    // While the switch is off every video is skipped unread, and its map keeps the still (D-261102-510).
+    if (kind === "video" && (!videosOn || !isVideoContainer(asset.media))) continue;
     const sha = asset.sha256.toLowerCase();
     // Uploaders are old member ids from the manifest: only members the room knows are kept, under their new ids.
     // Every imported member is a player here, and a player can upload no DM-only kind, so such an asset keeps
@@ -400,7 +431,7 @@ async function importImages(
           const mapped = memberIds.get(m);
           return mapped === undefined ? [] : [mapped];
         });
-    const entry = entries.get(assetFileName(sha, kind, "full"));
+    const entry = entries.get(assetFileName(sha, kind, "full", kind === "video" && isVideoContainer(asset.media) ? asset.media : null));
     const name = entry?.fileName ?? asset.id;
     const shipped = shippedWork(deps.assets.starter, asset.starter, sha, kind);
     const imported =
@@ -421,7 +452,7 @@ async function importImages(
  * than its reservation and no longer fit (quota.ts commitReservation):
  * skipping that image would make a room whose scenes lost their art.
  */
-async function skippingRefusals(deps: ImportDeps, roomId: string, name: string, run: () => Promise<ImportedAsset | null>): Promise<ImportedAsset | null> {
+async function skippingRefusals<T extends ImportedAsset>(deps: ImportDeps, roomId: string, name: string, run: () => Promise<T | null>): Promise<T | null> {
   try {
     return await run();
   } catch (err) {
@@ -472,9 +503,18 @@ async function importShipped(
 }
 
 /**
- * An image from the zip, as an upload of the room's, counted in its quota.
- * The quota is reserved before the image's own steps, outside the skip, so
- * a room over its quota refuses the import, as it did before starter picks.
+ * An image or a video from the zip, as an upload of the room's, counted in
+ * its quota. The quota is reserved before the asset's own steps, outside
+ * the skip, so a room over its quota refuses the import, as it did before
+ * starter picks.
+ *
+ * The reservation is the entry's checked size, not the kind's cap
+ * (docs/design/design-v1-animated-maps.md 9.3, AM-ASTRA-22, AMQ-4): a 64 MiB
+ * reservation for a 1 MiB video would refuse a near-full room's backup. The
+ * size the central directory claims is untrusted, so an entry over its
+ * kind's cap is skipped unread, the stream is cut at the claimed size, and
+ * the commit's second look still holds the quota when an image's variants
+ * come out bigger. No headroom applies: an import needs only the quota.
  */
 async function importFromZip(
   deps: ImportDeps,
@@ -483,14 +523,19 @@ async function importFromZip(
   roomId: string,
   counter: InflatedCounter,
   asset: { kind: AssetKind; uploaders: readonly string[]; credit: unknown },
-): Promise<ImportedAsset | null> {
+): Promise<(ImportedAsset & { video?: VideoFacts }) | null> {
   const cap = KINDS[asset.kind].maxUploadBytes;
+  const size = entry.uncompressedSize;
+  if (!Number.isSafeInteger(size) || size > cap) {
+    deps.log.warn({ roomId, entry: entry.fileName }, "import skipped an entry over its kind's size cap");
+    return null;
+  }
   await deps.assets.assertFreeDisk();
-  const reservation = await deps.assets.quota.reserve(roomId, cap);
+  const reservation = await deps.assets.quota.reserve(roomId, size);
   const path = tempFile(deps.assets.tmpDir, "intake");
   try {
     return await skippingRefusals(deps, roomId, entry.fileName, async () => {
-      const digest = await entryToFile(zip, entry, path, cap, counter);
+      const digest = await entryToFile(zip, entry, path, size, counter);
       const result = await deps.assets.ingest({
         roomId,
         uploaderIds: asset.uploaders,
@@ -508,7 +553,7 @@ async function importFromZip(
         if (credit.success) await deps.pool.query("update assets set credit = $2 where id = $1", [result.id, JSON.stringify(credit.data)]);
         else deps.log.warn({ roomId, entry: entry.fileName }, "import left out an image's credit it could not read");
       }
-      return { id: result.id, kind: result.kind };
+      return { id: result.id, kind: result.kind, ...(result.video ? { video: result.video } : {}) };
     });
   } finally {
     reservation.release();

@@ -912,9 +912,10 @@ describe("a starter pick in a room export and import (docs/design/design-v1-star
   const roomsNamed = async (engine: Engine) => (await engine.pool.query<{ n: string }>("select count(*) as n from rooms where name = $1", ["Starter source"])).rows[0]?.n;
 
   test("an import whose images do not fit the room's quota is refused whole, and its room is removed", async () => {
-    // Each zip image reserves its kind's whole size cap, which a 1 MiB quota never has room for.
-    const small = await startEngine({ env: { ROOM_QUOTA_MB: "1" }, assets: { starter: { packs: fixture.packs, root: fixture.root } } });
+    // Each zip image reserves its entry's size (docs/design/design-v1-animated-maps.md 9.3), which a 100-byte quota never has room for.
+    const small = await startEngine({ assets: { starter: { packs: fixture.packs, root: fixture.root } } });
     try {
+      (small.app.assets as unknown as { quota: RoomQuota }).quota = new RoomQuota(100, (roomId) => roomStoredBytes(small.pool, roomId));
       const before = await roomsNamed(small);
       const res = await importAllFromZip(small);
       assert.equal(res.statusCode, 413, res.body);

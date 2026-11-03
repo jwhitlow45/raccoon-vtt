@@ -3,17 +3,18 @@ import type pg from "pg";
 import yazl from "yazl";
 import { SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import { saveOutcomeLedgerSchema } from "#shared/saveOutcomeContract.ts";
-import type { RoomState, Viewer } from "#shared/model.ts";
+import type { RoomState, VideoContainer, Viewer } from "#shared/model.ts";
 import { assetCreditSchema, type AssetCredit } from "#shared/protocol.ts";
 import { STARTER_KEY } from "#shared/starter.ts";
 import { isAssetKind, isVariant, type AssetKind, type Variant } from "../assets/kinds.ts";
-import { variantPath } from "../assets/store.ts";
+import { isVideoContainer, variantPath } from "../assets/store.ts";
 
 /**
  * The room export file (design 16.4): `room.json` with the committed state,
- * `assets.json` with a manifest, and every image variant under `assets/`.
- * Only the log is filtered: whispers the exporting DM may not read are left
- * out. Import treats the manifest as untrusted and re-processes each image.
+ * `assets.json` with a manifest, and every image variant and video under
+ * `assets/`. Only the log is filtered: whispers the exporting DM may not
+ * read are left out. Import treats the manifest as untrusted and
+ * re-processes each image and checks each video again.
  */
 export const EXPORT_FORMAT = "raccoon-vtt-room";
 export const EXPORT_FORMAT_VERSION = 1;
@@ -22,6 +23,10 @@ export const EXPORT_FORMAT_VERSION = 1;
  * reads 1 and 2 alike, a version 1 asset being an upload. A server from
  * before 2 ignores the field it does not know, and drops only the credit
  * of a pick, whose `changes` its strict credit schema refuses.
+ *
+ * The `video` kind and its `media`, the container its file is named by
+ * (docs/design/design-v1-animated-maps.md 9.3), need no new version: a
+ * server that does not know the kind skips it, so its import keeps the stills.
  */
 export const MANIFEST_VERSION = 2;
 
@@ -37,6 +42,8 @@ export type ManifestAsset = {
   credit?: AssetCredit;
   /** A starter pick's work key. The import keeps it only where its own catalog has that work with these bytes. */
   starter?: string;
+  /** A video's container, which names its file: `assets/<sha256>-video-full.webm` or `.mp4`. */
+  media?: VideoContainer;
 };
 
 export type ExportManifest = { formatVersion: number; assets: ManifestAsset[] };
@@ -58,8 +65,9 @@ export type RoomExport = {
   dmMemberIds: string[];
 };
 
-export function assetFileName(sha256: string, kind: AssetKind, variant: Variant): string {
-  return `assets/${sha256}-${kind}-${variant}.webp`;
+/** An entry's name: WebP for an image, and a video's own container (D-261102-454). */
+export function assetFileName(sha256: string, kind: AssetKind, variant: Variant, media?: VideoContainer | null): string {
+  return `assets/${sha256}-${kind}-${variant}.${kind === "video" && media ? media : "webp"}`;
 }
 
 /**
@@ -85,17 +93,18 @@ type AssetRow = {
   uploaders: string[] | null;
   credit: unknown;
   starter: string | null;
+  media: string | null;
 };
 
 export async function roomManifest(pool: pg.Pool, roomId: string): Promise<{ manifest: ExportManifest; rows: AssetRow[] }> {
   const { rows } = await pool.query<AssetRow>(
-    `select a.id, a.sha256, a.kind, a.pipeline, a.width, a.height, a.variants, a.credit, a.starter,
+    `select a.id, a.sha256, a.kind, a.pipeline, a.width, a.height, a.variants, a.credit, a.starter, a.media,
        array(select u.member_id from asset_uploaders u where u.asset_id = a.id order by u.member_id) as uploaders
      from assets a where a.room_id = $1 order by a.created_at, a.id`,
     [roomId],
   );
   const assets: ManifestAsset[] = rows
-    .filter((r) => isAssetKind(r.kind))
+    .filter((r) => isAssetKind(r.kind) && (r.kind !== "video" || isVideoContainer(r.media)))
     .map((r) => {
       const asset: ManifestAsset = {
         id: r.id,
@@ -110,6 +119,7 @@ export async function roomManifest(pool: pg.Pool, roomId: string): Promise<{ man
       const credit = assetCreditSchema.safeParse(r.credit);
       if (r.credit !== null && credit.success) asset.credit = credit.data;
       if (r.starter !== null && STARTER_KEY.test(r.starter)) asset.starter = r.starter;
+      if (r.kind === "video" && isVideoContainer(r.media)) asset.media = r.media;
       return asset;
     });
   return { manifest: { formatVersion: MANIFEST_VERSION, assets }, rows };
@@ -128,13 +138,15 @@ export function buildExportZip(assetDir: string, data: { room: RoomExport; manif
   zip.addBuffer(Buffer.from(JSON.stringify(data.manifest)), "assets.json", { mtime });
   for (const row of data.rows) {
     if (!isAssetKind(row.kind)) continue;
+    const media = row.kind === "video" ? row.media : null;
+    if (row.kind === "video" && !isVideoContainer(media)) continue;
     const hex = row.sha256.toString("hex");
     for (const variant of row.variants) {
       if (!isVariant(variant)) continue;
-      const path = variantPath(assetDir, hex, row.kind, variant, row.pipeline);
+      const path = variantPath(assetDir, hex, row.kind, variant, row.pipeline, isVideoContainer(media) ? media : null);
       if (!existsSync(path)) continue;
-      // Already WebP: compressing again only costs CPU.
-      zip.addFile(path, assetFileName(hex, row.kind, variant), { compress: false, mtime });
+      // Already WebP, WebM or MP4: compressing again only costs CPU.
+      zip.addFile(path, assetFileName(hex, row.kind, variant, isVideoContainer(media) ? media : null), { compress: false, mtime });
     }
   }
   zip.end();
