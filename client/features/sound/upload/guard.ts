@@ -104,17 +104,19 @@ export function mpegFrameAt(b: Uint8Array, at: number): MpegFrame | null {
   return { mpeg1, layer, kbps, rateHz, channels, bytes, samples, crc: (b[at + 1]! & 1) === 0, emphasis: (b[at + 3]! & 3) !== 0 };
 }
 
-/** A Xing, Info or VBRI frame's count of the frames after it, or null. */
-function vbrFrames(b: Uint8Array, at: number, frame: MpegFrame): number | null {
+/** The most bytes mpegFrameAt gives a frame: Layer II's size at 160 kbps and 8 kHz, which it reads leniently, padded. */
+const MAX_FRAME_BYTES = 2881;
+
+/** Whether a frame is a Xing, Info or VBRI frame, which carries the encoder's counts and no audio. */
+function isTagFrame(b: Uint8Array, at: number, frame: MpegFrame): boolean {
   const side = frame.mpeg1 ? (frame.channels === 1 ? 17 : 32) : frame.channels === 1 ? 9 : 17;
-  const xing = at + 4 + side;
-  const tag = fourcc(b, xing);
-  if ((tag === "Xing" || tag === "Info") && xing + 12 <= b.length) {
-    const flags = view(b).getUint32(xing + 4);
-    return (flags & 1) !== 0 ? view(b).getUint32(xing + 8) : null;
-  }
-  if (fourcc(b, at + 36) === "VBRI" && at + 54 <= b.length) return view(b).getUint32(at + 50);
-  return null;
+  const tag = fourcc(b, at + 4 + side);
+  return tag === "Xing" || tag === "Info" || fourcc(b, at + 36) === "VBRI";
+}
+
+/** The top bitrate of a frame's version and layer, so a file's bytes over it are the least it can play. */
+function topKbps(frame: MpegFrame): number {
+  return Math.max(...(frame.mpeg1 ? KBPS_V1 : KBPS_V2)[frame.layer]);
 }
 
 /**
@@ -136,48 +138,62 @@ function firstFrame(head: Uint8Array): { at: number; frame: MpegFrame } | null {
 }
 
 /**
- * An MPEG file's length by walking its frame headers to the end, leniently,
- * in windows: a VBR file without a Xing frame says its length nowhere else.
- * It stops at the first byte that starts no frame, where tags begin.
+ * An MPEG file's length from its own frames, walked leniently to the end in
+ * windows, each frame at its own rate. A Xing or VBRI frame's count is only
+ * what the file says, and a decoder decodes every frame there is, so the
+ * count is never read: a whole decode is budgeted by this length
+ * (MUS-SOL-02). A decoder also looks on past a byte that starts no frame,
+ * such as junk or a tag between two streams, so the walk does too, and
+ * takes a frame found there only when the next header follows it at its
+ * end with the same version, layer and rate. The rate and channels are the
+ * most any frame has, since a decoder makes the file's audio at those.
  */
-async function walkFrames(source: ByteSource, at: number): Promise<number> {
-  let samples = 0;
-  let rate = 0;
-  let windowStart = -1;
+async function walkFrames(source: ByteSource, from: number, first: MpegFrame): Promise<{ ms: number; rateHz: number; channels: 1 | 2 }> {
+  let ms = 0;
+  let rateHz = first.rateHz;
+  let channels = first.channels;
+  let at = from;
+  let synced = true;
+  let windowStart = 0;
   let window: Uint8Array = new Uint8Array(0);
-  for (;;) {
-    if (at + 4 > source.size) break;
-    if (at < windowStart || at + 4 > windowStart + window.length) {
+  while (at + 4 <= source.size) {
+    const windowEnd = windowStart + window.length;
+    // The window holds a whole frame and the next one's header, for the check after a byte that started none.
+    if (at < windowStart || at + 4 > windowEnd || (at + MAX_FRAME_BYTES + 4 > windowEnd && windowEnd < source.size)) {
       windowStart = at;
       window = await source.read(at, at + HEAD_BYTES);
     }
     const frame = mpegFrameAt(window, at - windowStart);
-    if (!frame) break;
-    samples += frame.samples;
-    rate = frame.rateHz;
-    at += frame.bytes;
+    const next = frame ? at + frame.bytes : 0;
+    const after = frame && !synced && next + 4 <= source.size ? mpegFrameAt(window, next - windowStart) : null;
+    if (frame && (synced || next + 4 > source.size || (after && after.mpeg1 === frame.mpeg1 && after.layer === frame.layer && after.rateHz === frame.rateHz))) {
+      ms += (frame.samples * 1000) / frame.rateHz;
+      rateHz = Math.max(rateHz, frame.rateHz);
+      if (frame.channels === 2) channels = 2;
+      at = next;
+      synced = true;
+    } else {
+      at++;
+      synced = false;
+    }
   }
-  return rate > 0 ? (samples / rate) * 1000 : 0;
+  return { ms, rateHz, channels };
 }
 
 async function probeMpeg(source: ByteSource, head: Uint8Array): Promise<Probe | null> {
   const found = firstFrame(head);
   if (!found) return null;
   const { at, frame } = found;
-  const counted = vbrFrames(head, at, frame);
-  let ms: number;
-  if (counted !== null) ms = ((counted * frame.samples) / frame.rateHz) * 1000;
-  else {
-    // A first frame's bitrate times the file's size bounds a constant bitrate file, which most are. A file that
-    // seems over four times the longest use is refused unwalked, so a 200 MB file is never read for its length.
-    const guess = ((source.size - at) * 8) / frame.kbps;
-    ms = guess > 4 * SOUND_LIMITS.fileMaxMs ? guess : await walkFrames(source, at);
-  }
+  const audio = isTagFrame(head, at, frame) ? at + frame.bytes : at;
+  // The file's bytes over its version and layer's top bitrate are the least it can play. A file over four times the
+  // longest use even so is refused unwalked, so a 200 MB file is never read for its length.
+  const least = ((source.size - audio) * 8) / topKbps(frame);
+  const walked = least > 4 * SOUND_LIMITS.fileMaxMs ? { ms: least, rateHz: frame.rateHz, channels: frame.channels } : await walkFrames(source, audio, frame);
   return {
     container: "mp3",
-    channels: frame.channels,
-    rateHz: frame.rateHz,
-    ms,
+    channels: walked.channels,
+    rateHz: walked.rateHz,
+    ms: walked.ms,
     framed: true,
     // The server's walk refuses CRC and emphasis frames (D-261102-690), so such a file is planned for the encoder at once.
     copyCandidate:

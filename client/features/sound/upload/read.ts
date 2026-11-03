@@ -77,7 +77,8 @@ async function prepare(input: { file: File; use: SoundUse; signal: AbortSignal; 
         return { blob, level: levelOf(measured), ms: copy.facts.ms, copied: true };
       }
     }
-    // Not the one form the room keeps, or a piece that would not decode: the whole file, under the budget.
+    // Not the one form the room keeps, or a piece that would not decode: the whole file, under the budget. Its length is
+    // the probe's count of the real frames, never a count the copy check refused (MUS-SOL-02).
     return await encodeWhole({ ...input, probe, ms: plan.ms, budget, bytes });
   }
   if (plan.path === "wavPieces") return await encodeWav({ ...input, wav: probe.wav! });

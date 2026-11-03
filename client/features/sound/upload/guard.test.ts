@@ -1,14 +1,19 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { framesFor, silentFrames, withTagFrame } from "#shared/audio/mp3Testutil.ts";
 import { SOUND_LIMITS } from "#shared/limits.ts";
 import { bytesSource } from "./bytes.ts";
-import { decodeBudget, lengthRefusal, planRead, probeFile, readEsds, wholeDecodeBytes, type Probe } from "./guard.ts";
+import { copyable } from "./copy.ts";
+import { decodeBudget, lengthRefusal, planRead, probeFile, readEsds, wholeDecodeBytes, wholeDecodeFits, type Probe } from "./guard.ts";
+import { prepareSound } from "./read.ts";
 import { adtsFile, aiffHeader, concat, esdsBox, flacHeader, id3v1, id3v2, m4aFile, mp3AtKbps, mp3Of, oggFile, toneSamples, wavFile, wavHeader, webmFile } from "./sounds.testutil.ts";
 
 const probe = (bytes: Uint8Array) => probeFile(bytesSource(bytes));
 const MB = 1024 * 1024;
 const PHONE = decodeBudget({ touch: true, finePointer: false });
 const COMPUTER = decodeBudget({ touch: false, finePointer: true });
+/** A length summed frame by frame, against one worked out whole. */
+const near = (ms: number | null, want: number) => assert.ok(ms !== null && Math.abs(ms - want) < 1e-6, `${ms} for ${want}`);
 
 describe("the guard reads each header's channels, rate and length", () => {
   test("WAV, plain and extensible, with an odd chunk before its data", async () => {
@@ -136,6 +141,59 @@ describe("the guard's rules before decoding", () => {
     assert.equal(planRead({ probe: at22, ms: 900_000, fileBytes: 190 * MB, use: "music", budget: PHONE }).ok, false);
     const mp3: Probe = { container: "mp3", channels: 2, rateHz: 44_100, ms: 900_050, framed: true, copyCandidate: true, wav: null };
     assert.deepEqual(planRead({ probe: mp3, ms: 900_050, fileBytes: 14 * MB, use: "music", budget: PHONE }), { ok: true, path: "mp3Pieces", ms: 900_050 });
+  });
+
+  test("an MP3's length is its frames', never what an Info frame declares, so a 15-minute file declaring 30 s is too big for a phone (MUS-SOL-02)", async () => {
+    const frames = silentFrames(framesFor(900_000));
+    const lying = withTagFrame(frames, { frames: framesFor(30_000) });
+    const p = await probe(lying);
+    near(p.ms, (framesFor(900_000) * 1152 * 1000) / 44_100);
+    assert.equal(copyable(lying).ok, false, "the copy check refuses the count");
+    assert.equal(wholeDecodeFits({ fileBytes: lying.length, ms: p.ms!, channels: 2, rateHz: 44_100, budget: PHONE }), false);
+    assert.equal(wholeDecodeFits({ fileBytes: lying.length, ms: p.ms!, channels: 2, rateHz: 44_100, budget: COMPUTER }), true);
+    // The fallback after the refused copy budgets by that length, before any decoder sees the file.
+    const outcome = await prepareSound({ file: new File([lying as Uint8Array<ArrayBuffer>], "long.mp3"), use: "music", signal: new AbortController().signal, onStep: () => {}, budget: PHONE });
+    assert.deepEqual(outcome, { ok: false, why: { t: "tooBigToRead" } });
+  });
+
+  test("an MP3's frames past junk or a tag between two streams count, and a stray sync in junk does not (MUS-SOL-02)", async () => {
+    const head = silentFrames(framesFor(30_000));
+    const rest = silentFrames(framesFor(870_000));
+    const whole = ((framesFor(30_000) + framesFor(870_000)) * 1152 * 1000) / 44_100;
+    for (const between of [new Uint8Array([0]), new Uint8Array([0xff, 0xfb]), id3v2("Second side", 4096)]) {
+      const p = await probe(concat([head, between, rest]));
+      near(p.ms, whole);
+      assert.equal(wholeDecodeFits({ fileBytes: head.length + rest.length, ms: p.ms!, channels: 2, rateHz: 44_100, budget: PHONE }), false);
+    }
+    // A megabyte of noise, as cover art in a tag at the end: a lone header that seems to start a frame there is not one.
+    let seed = 7;
+    const noise = Uint8Array.from({ length: MB }, () => {
+      seed = (seed * 1_103_515_245 + 12_345) >>> 0;
+      return seed >>> 24;
+    });
+    const short = await probe(concat([silentFrames(framesFor(3000)), noise, id3v1("Rain")]));
+    near(short.ms, (framesFor(3000) * 1152 * 1000) / 44_100);
+    // Two headers in junk, end to end, of two versions: no decoder takes the first for a stream's frame.
+    const pair = concat([silentFrames(1), new Uint8Array([0xff, 0xf3, 0x90, 0x44]), new Uint8Array(400)]);
+    const paired = await probe(concat([silentFrames(framesFor(3000)), new Uint8Array([0]), pair, new Uint8Array(1000)]));
+    near(paired.ms, (framesFor(3000) * 1152 * 1000) / 44_100);
+  });
+
+  test("a variable bitrate MP3 that starts at 64 kbps is walked for its length, not refused by its first frame's rate", async () => {
+    const vbr = concat([silentFrames(40, { kbps: 64 }), silentFrames(framesFor(780_000), { kbps: 320 })]);
+    const p = await probe(vbr);
+    assert.ok(Math.abs(p.ms! - 780_000) < 1100, `${p.ms}`);
+    assert.equal(lengthRefusal("music", p.ms!, true), null);
+  });
+
+  test("an MP3's rate and channels for the budget are the most any of its frames has", async () => {
+    const mixed = concat([silentFrames(framesFor(30_000), { mode: 3, kbps: 64 }), silentFrames(framesFor(300_000, 48_000), { rateHz: 48_000 })]);
+    const p = await probe(mixed);
+    assert.deepEqual([p.channels, p.rateHz], [2, 48_000]);
+    near(p.ms, (framesFor(30_000) * 1152 * 1000) / 44_100 + (framesFor(300_000, 48_000) * 1152 * 1000) / 48_000);
+    // By the first frame's mono at 44.1 kHz it would fit a phone, and a decoder makes stereo at 48 kHz.
+    assert.equal(wholeDecodeFits({ fileBytes: mixed.length, ms: p.ms!, channels: 1, rateHz: 44_100, budget: PHONE }), true);
+    assert.equal(wholeDecodeFits({ fileBytes: mixed.length, ms: p.ms!, channels: p.channels!, rateHz: p.rateHz, budget: PHONE }), false);
   });
 
   test("an unknown length is refused, a media element's length takes the allowance", () => {
