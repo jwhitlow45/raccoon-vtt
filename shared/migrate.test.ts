@@ -1742,6 +1742,28 @@ describe("op version 45 and snapshot 35, animated maps (docs/design/design-v1-an
   });
 });
 
+describe("op version 46 and snapshot 36, synced music and sound (docs/design/design-v1-sound.md 6.7)", () => {
+  test("keeps stored operations and snapshots unchanged through the identity steps, a room without sound included", () => {
+    assert.ok(OP_VERSION >= 46);
+    assert.ok(SNAPSHOT_VERSION >= 36);
+    const op = { t: "scene.update", sceneId: "s1", patch: { name: "Forest road" } };
+    assert.equal(runMigrations(op, 45, 46, opMigrations), op);
+    assert.equal(migrateOp(op, 45), op);
+    const setting = { t: "room.update", settings: { soundNames: true } };
+    assert.equal(migrateOp(setting, 46), setting);
+    // Absent reads as an empty library and silence everywhere, so an older room needs nothing filled in.
+    const state = room();
+    assert.equal(runMigrations(state, 35, 36, snapshotMigrations), state);
+    assert.equal(migrateSnapshot(state, 35), state);
+  });
+
+  test("a build at 45 and 35 refuses a room from this one, so it never sends players what the DM keeps", () => {
+    const op = { t: "music.stop" };
+    assert.throws(() => runMigrations(op, 46, 45, opMigrations), /down/);
+    assert.throws(() => runMigrations(room(), 36, 35, snapshotMigrations), /down/);
+  });
+});
+
 describe("the map discovery upgrade step (docs/design/design-v1-map-discovery.md 5.5, ASTRA-31)", () => {
   const scenes = {
     s1: scene("s1", { fogEnabled: true, vision: { on: true, light: "dark" } }),

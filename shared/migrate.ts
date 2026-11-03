@@ -11,8 +11,8 @@ import { ownEntry } from "./records.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 35;
-export const OP_VERSION = 45;
+export const SNAPSHOT_VERSION = 36;
+export const OP_VERSION = 46;
 
 export type MigrationStep = {
   from: number;
@@ -230,6 +230,11 @@ export const snapshotMigrations: MigrationStep[] = [
   // reads as a still map, so a v34 room is a v35 room as it is. The number moves so that an older build, whose strict
   // state schema refuses the field, refuses a v35 snapshot instead of loading it.
   { from: 34, to: 35, apply: (state) => state },
+  // Synced music and sound (docs/design/design-v1-sound.md 6.7): the room's `sounds`, `playlists` and `playing`, a scene's
+  // `sound` and the `soundNames` setting are optional, and absent reads as an empty library and silence, so a v35 room is
+  // a v36 room as it is. The number moves so that an older build, whose strict state schema refuses them, refuses a v36
+  // snapshot instead of loading it and sending players what the DM keeps.
+  { from: 35, to: 36, apply: (state) => state },
   // No step moves a square trip wire's imported 1/64 ends onto half cells (FU43-DATA-01). A snapshot migrates before its
   // stored ops replay, so a moved end would change what a stored walk springs and what a stored restore's guard matches.
   // The rules take such a wire as it stands instead (server/rooms/squareWires.legacy.test.ts).
@@ -1135,6 +1140,21 @@ export const opMigrations: MigrationStep[] = [
     // older build refuses.
     from: 44,
     to: 45,
+    apply: (op) => op,
+  },
+  {
+    // Synced music and sound (docs/design/design-v1-sound.md 6.7): the
+    // library, playlist and playback ops are new, and `scene.update`'s
+    // `sound` and `room.update`'s `soundNames` are new optional fields, so
+    // no stored op changes shape and the step is the identity. No stored op
+    // names a sound, so replay runs no new branch.
+    // Deploy: back up the database just before, and reload open pages,
+    // table displays included: an old page's strict schemas drop the new
+    // fields and ops. Rollback needs the backup for a room with version 46
+    // ops after its last snapshot or a v36 snapshot, which an older build
+    // refuses.
+    from: 45,
+    to: 46,
     apply: (op) => op,
   },
 ];
