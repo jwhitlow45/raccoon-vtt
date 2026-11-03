@@ -5,7 +5,8 @@ import { describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
 import type { LogEntry, PcStats, RoomState } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
-import { actor, character, DM, room, token } from "#shared/testutil.ts";
+import { actor, character, DM, room, scene, token } from "#shared/testutil.ts";
+import type { NamedRoll } from "#shared/dice/bonus.ts";
 import { theme } from "../../../lib/theme.ts";
 import type { DiceView } from "../creature.ts";
 import { diceFoldsSlot, severalKey } from "../diceFolds.ts";
@@ -33,7 +34,7 @@ const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { RoomProvider } = await import("../../../state/view.ts");
 const { RoomScope, RoomScopeProvider } = await import("../../../state/scope.ts");
-const { attackSummary, GroupOptions, keepShared, NO_ATTACK, patchShared, sharedAttacksOf, sharedAttacksSlot, unsentAc, watchSelection } = await import("./GroupOptions.tsx");
+const { attackPanelRolls, attackSummary, GroupOptions, keepShared, NO_ATTACK, patchShared, sharedAttacksOf, sharedAttacksSlot, unsentAc, watchSelection } = await import("./GroupOptions.tsx");
 
 const STATS: PcStats = {
   abilities: { str: 10, dex: 18, con: 12, int: 10, wis: 12, cha: 10 },
@@ -582,4 +583,30 @@ test("a shared attack's hit damage judges Secret by its hits' creatures, also on
   const changed = capabilities(["tb", "td"]);
   assert.ok(changed.damage);
   assert.equal(offersNormal(changed.damage), true, "Thorn's kept hit, judged by Thorn, not by the new selection");
+});
+
+describe("a shared attack in weather (docs/design/design-v1-weather.md 2.1)", () => {
+  const named = (name: string, over: Partial<NamedRoll>): NamedRoll => ({ key: name, name, section: "actions", attack: 4, damage: [], ...over });
+  const goblins = (weather: RoomState["scenes"][string]["weather"]): DiceView => {
+    const state = room();
+    state.scenes.s1 = scene("s1", weather ? { weather } : {});
+    for (const id of ["g1", "g2", "g3"]) state.tokens[id] = token(id, { kind: "monster", name: "Goblin Warrior", actor: { inline: actor() } });
+    return { you: DM, view: state, sceneId: "s1", srd: { monsters: null, rolls: null } };
+  };
+  const bows = (names: readonly NamedRoll[]) => names.map((n, i) => ({ creature: { tokenId: `g${i + 1}` }, named: n }));
+  const shortbow = named("Shortbow", { range: "ranged", weapon: true });
+
+  test("three Goblin Warriors' Shortbows in strong wind each take its Disadvantage", () => {
+    const rolls = attackPanelRolls(bows([shortbow, shortbow, shortbow]), goblins({ kind: "clear", wind: "strong" }));
+    assert.deepEqual(rolls.map((r) => r.sources), Array(3).fill([{ kind: "dis", from: "strong-wind" }]));
+  });
+
+  test("each creature's attack carries its own test: a Scimitar and a spell attack take nothing", () => {
+    const rolls = attackPanelRolls(bows([shortbow, named("Scimitar", { range: "melee", weapon: true }), named("Force Bolt", { range: "ranged", spell: true })]), goblins({ kind: "clear", wind: "strong" }));
+    assert.deepEqual(rolls.map((r) => r.sources?.length), [1, 0, 0]);
+  });
+
+  test("no weather, no source", () => {
+    assert.deepEqual(attackPanelRolls(bows([shortbow]), goblins(undefined))[0]!.sources, []);
+  });
 });

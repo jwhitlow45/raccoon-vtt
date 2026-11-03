@@ -3,6 +3,7 @@ import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import type { NamedRoll } from "#shared/dice/bonus.ts";
 import { d20Formula, type AdvantageSource } from "#shared/dice/formula.ts";
+import { attackTest } from "#shared/dice/named.ts";
 import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type SkillKey } from "#shared/model.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
 import { ABILITY_ABBR as ABILITY_SHORT } from "#shared/rules/skills.ts";
@@ -236,6 +237,19 @@ function QuickGrid(props: { label: string; n: number; kind: "save" | "check"; di
 
 type Attacker = { creature: ActorTarget; named: NamedRoll };
 
+/**
+ * A shared attack's roll for each attacker. Each takes the preset of its own
+ * attack as that creature rolls it (attackTest), so strong wind's
+ * Disadvantage lands on the ones making a ranged weapon attack
+ * (docs/design/design-v1-weather.md 2.1).
+ */
+export function attackPanelRolls(each: readonly Attacker[], dice: DiceView): PanelRoll[] {
+  return each.map(({ creature, named }) => {
+    const preset = presetFor(dice, creature, attackTest(named));
+    return { formula: withExtra(d20Formula(named.attack ?? 0), preset.extra), label: cutLabel(named.name), creature, sources: [...preset.sources] as AdvantageSource[], ...(named.critOn ? { critOn: named.critOn } : {}) };
+  });
+}
+
 /** An attack every selected block has by name, with each creature's own roll of it. */
 export type SharedAttackRow = { name: string; each: Attacker[] };
 
@@ -376,10 +390,7 @@ function SharedAttack(props: { name: string; each: Attacker[]; dice: DiceView; b
   const damagePresses = useRollPresses(hits.map(({ each }) => each.creature));
   const n = props.each.length;
   const attack = (override?: RollModeOverride) => {
-    const rolls: PanelRoll[] = props.each.map(({ creature, named }) => {
-      const preset = presetFor(props.dice, creature, { kind: "attack" });
-      return { formula: withExtra(d20Formula(named.attack ?? 0), preset.extra), label: cutLabel(named.name), creature, sources: [...preset.sources] as AdvantageSource[], ...(named.critOn ? { critOn: named.critOn } : {}) };
-    });
+    const rolls = attackPanelRolls(props.each, props.dice);
     const ac = state.ac;
     set({ damageTag: null });
     const tag = panel.roll(rolls, { ...(ac !== null ? { ac } : {}), ...(override ? { override } : {}) });
@@ -393,7 +404,7 @@ function SharedAttack(props: { name: string; each: Attacker[]; dice: DiceView; b
     );
     set({ damageTag: panel.roll(rolls.map((r) => ({ ...r, modeEligible: false })), override ? { override } : {}) });
   };
-  const source = JSON.stringify([props.name, props.each, state, props.each.map(({ creature }) => presetFor(props.dice, creature, { kind: "attack" })), secretStartIn(room.getState(), props.each.map((e) => e.creature)), panel.adv, panel.dis, panel.secret]);
+  const source = JSON.stringify([props.name, props.each, state, props.each.map(({ creature, named }) => presetFor(props.dice, creature, attackTest(named))), secretStartIn(room.getState(), props.each.map((e) => e.creature)), panel.adv, panel.dis, panel.secret]);
   const valid = () => props.blocked === null && room.getState().connection === "open" && receipt?.state !== "sending" && JSON.stringify(room.getState().local.selectedIds) === JSON.stringify(props.each.flatMap((e) => "tokenId" in e.creature ? [e.creature.tokenId] : []));
   const secret = receipt?.state === "committed" && receipt.lines.some((line) => line.data?.type === "dice" && line.data.to === "dm");
   const secretDamage = damage?.state === "committed" && damage.lines.some((line) => line.data?.type === "dice" && line.data.to === "dm");

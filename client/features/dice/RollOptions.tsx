@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { bonusFor, type D20Test, type NamedRoll } from "#shared/dice/bonus.ts";
+import { attackTest } from "#shared/dice/named.ts";
 import { critRuleOf } from "#shared/dice/crit.ts";
 import { limitedUses, type LimitedUse } from "#shared/dice/uses.ts";
 import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Actor, type RoomState, type SkillKey } from "#shared/model.ts";
@@ -1113,7 +1114,7 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
           <D20Cell
             ctx={ctx}
             contextVersion={JSON.stringify([crit, [...on], slot])}
-            test={named.section === "spells" ? { kind: "attack", spell: true } : { kind: "attack" }}
+            test={attackTest(named)}
             bonus={named.attack}
             text="Attack"
             label={named.name}
