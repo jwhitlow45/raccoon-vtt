@@ -46,6 +46,31 @@ export function snapPosition(g: Grid, x: number, y: number, size: { w: number; h
 }
 
 /**
+ * Where a token is drawn (docs/design/design-v1-snap-off.md 6.1): its stored
+ * top-left moved by its nudge, in eighths of a square. Only drawing reads
+ * this. Every rule reads the stored spot. On hexes it is the stored spot,
+ * since a nudge is only valid on squares. A caller with no grid at hand
+ * passes null and trusts the server's one pass (rules/nudge.ts keepNudges),
+ * which keeps no nudge on a hex scene.
+ */
+export function drawnAt(g: Pick<Grid, "shape"> | null, token: Pick<Token, "x" | "y" | "nudge">): { x: number; y: number } {
+  const n = token.nudge;
+  if (!n || g?.shape === "hex") return { x: token.x, y: token.y };
+  return { x: token.x + n.x / 8, y: token.y + n.y / 8 };
+}
+
+/**
+ * A drawn point back in rules coordinates: the point less the token's
+ * nudge. A dragged node sits at the drawn spot, so every rules read of a
+ * node goes through here (design 6.3).
+ */
+export function rulesSpot(token: Pick<Token, "nudge">, p: { x: number; y: number }): { x: number; y: number } {
+  const n = token.nudge;
+  if (!n) return { x: p.x, y: p.y };
+  return { x: p.x - n.x / 8, y: p.y - n.y / 8 };
+}
+
+/**
  * The outline round a creature's hexes on a hex scene, the selected token's
  * outline (docs/design/design-v1-hex-grids.md 3, "a hex outline when selected"):
  * one closed loop of points in cells, `[x0, y0, x1, y1, ...]`, clockwise on
