@@ -144,6 +144,7 @@ export class JoinRequests {
   /** Turn-away holds still to save to the database, by `room|session`. */
   #owedHolds = new Map<string, OwedHold>();
   #pendingSignals = new Set<string>();
+  #retrying: Promise<void> | null = null;
   #closing = false;
 
   constructor(options: JoinRequestOptions = {}) {
@@ -471,7 +472,7 @@ export class JoinRequests {
 
   /**
    * A turned-away device's hold could not be saved: it holds here in memory
-   * meanwhile, and `retryHolds` saves it, dated back to the turn away.
+   * meanwhile, and `retryHolds` saves it, dated to the turn away.
    */
   oweHold(r: JoinRequest): void {
     this.#owedHolds.set(key(r.roomId, r.sessionId), { roomId: r.roomId, sessionId: r.sessionId, ipKey: r.ipKey, at: r.endedAt ?? this.#now() });
@@ -482,19 +483,31 @@ export class JoinRequests {
   }
 
   /**
-   * The sweep's part for holds: saves each one owed, with how long ago its
-   * turn away was. One that fails stays owed, and one past its 15 minutes
-   * is dropped, since it holds nothing any more.
+   * The sweep's part for holds: saves each one owed, dated `hold.at`, its
+   * turn away. One that fails stays owed, and one past its 15 minutes is
+   * dropped, since it holds nothing any more. One run at a time: a sweep
+   * while one runs gets that run, so a stalled database never piles up
+   * saves of the same hold.
    */
-  async retryHolds(save: (hold: OwedHold, secondsAgo: number) => Promise<void>, failed: (err: unknown, hold: OwedHold) => void): Promise<void> {
+  retryHolds(save: (hold: OwedHold) => Promise<void>, failed: (err: unknown, hold: OwedHold) => void): Promise<void> {
+    if (!this.#retrying) {
+      // Cleared in a later turn, after it is stored: a run with nothing to save ends at once.
+      const run: Promise<void> = this.#retryOwed(save, failed).finally(() => {
+        if (this.#retrying === run) this.#retrying = null;
+      });
+      this.#retrying = run;
+    }
+    return this.#retrying;
+  }
+
+  async #retryOwed(save: (hold: OwedHold) => Promise<void>, failed: (err: unknown, hold: OwedHold) => void): Promise<void> {
     for (const [k, hold] of [...this.#owedHolds]) {
-      const ago = this.#now() - hold.at;
-      if (ago >= TURN_AWAY_HOLD_MS) {
+      if (this.#now() - hold.at >= TURN_AWAY_HOLD_MS) {
         this.#owedHolds.delete(k);
         continue;
       }
       try {
-        await save(hold, ago / 1000);
+        await save(hold);
         if (this.#owedHolds.get(k) === hold) this.#owedHolds.delete(k);
       } catch (err) {
         failed(err, hold);

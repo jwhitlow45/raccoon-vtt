@@ -3,8 +3,10 @@ import { test } from "node:test";
 import fastifyCookie from "@fastify/cookie";
 import Fastify, { type FastifyRequest } from "fastify";
 import { loadConfig } from "../config.ts";
-import { registerRequestLimits } from "./ratelimit.ts";
+import type pg from "pg";
+import { registerRequestLimits, SlowLimits } from "./ratelimit.ts";
 import type { SessionStore } from "./sessions.ts";
+import { CheckoutTimeout } from "./tx.ts";
 
 /**
  * The request limiter's keying, against a fake session store, so no database
@@ -78,4 +80,12 @@ test("a table display's own routes count against its display session, and no oth
   // Anywhere else a display session is no session: the request counts against its address.
   assert.equal(await hammer(app, "/api/thing", 125, display), 5);
   await app.close();
+});
+
+test("a turn away's write gives up on a pool that never hands out a connection, so the sweep's run ends and retries later (JR-SOL-05)", { timeout: 5_000 }, async () => {
+  const stalled = { connect: () => new Promise<never>(() => undefined) } as unknown as pg.Pool;
+  const limits = new SlowLimits(stalled, { ROOMS_PER_IP_PER_DAY: 10, ROOMS_PER_DAY: 100 });
+  const started = Date.now();
+  await assert.rejects(limits.recordTurnAway("ROOMAAAA", "device", "203.0.113.0", Date.now()), CheckoutTimeout);
+  assert.ok(Date.now() - started < 3_000, "within its checkout bound");
 });

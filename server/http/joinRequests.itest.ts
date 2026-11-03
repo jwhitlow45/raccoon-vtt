@@ -115,6 +115,35 @@ function pauseTxStatement(pool: pg.Pool, match: (sql: string) => boolean): { rea
   return { reached, go, restore: () => ((pool as { connect: unknown }).connect = connect) };
 }
 
+/**
+ * Runs `before` ahead of every statement on a transaction's own client,
+ * which may delay it or throw to fail it. Both connect() forms keep
+ * working, as pauseTxStatement's do. Returns the undo.
+ */
+function beforeTxStatement(pool: pg.Pool, before: (sql: string, values: unknown[][] | undefined) => Promise<void> | void): () => void {
+  const connect = pool.connect.bind(pool) as () => Promise<pg.PoolClient>;
+  const patched = (cb?: (err: Error | undefined, client?: pg.PoolClient, done?: () => void) => void) => {
+    const wrapped = connect().then((client) => {
+      const query = client.query.bind(client) as (...args: unknown[]) => unknown;
+      (client as { query: unknown }).query = (...args: unknown[]) => {
+        if (typeof args[0] !== "string") return query(...args);
+        return (async () => {
+          await before(args[0] as string, args[1] as unknown[][] | undefined);
+          return query(...args);
+        })();
+      };
+      return client;
+    });
+    if (cb) {
+      wrapped.then((client) => cb(undefined, client, () => client.release()), (err: Error) => cb(err));
+      return undefined;
+    }
+    return wrapped;
+  };
+  (pool as { connect: unknown }).connect = patched;
+  return () => ((pool as { connect: unknown }).connect = connect);
+}
+
 /** The next grant transaction commits and loses its COMMIT's answer (testing.ts loseNextCommit). */
 function loseGrantCommit(pool: pg.Pool, meanwhile: () => Promise<void>): () => void {
   return loseNextCommit(pool, (sql) => sql.includes("insert into grants"), meanwhile);
@@ -648,18 +677,15 @@ describe("join requests: asking, waiting and a DM's answer", () => {
     const { dm, roomId } = await k.room("ask");
     const phone = t.client();
     const id = await k.asked(phone, roomId);
-    const query = t.pool.query.bind(t.pool);
     const at = Date.now();
     let failed = 0;
     // The hold's write fails for 2.5 s, the sweep's retries too, so the saved hold's date tells a retry dated back from one dated now.
-    (t.pool as { query: unknown }).query = async (text: unknown, values?: unknown) => {
-      const keys = Array.isArray(values) ? values[0] : undefined;
-      if (Date.now() - at < 2_500 && typeof text === "string" && text.startsWith("insert into rate_events") && Array.isArray(keys) && String(keys[0]).startsWith("askno:")) {
+    const restore = beforeTxStatement(t.pool, (sql, values) => {
+      if (Date.now() - at < 2_500 && sql.startsWith("insert into rate_events") && String(values?.[0]?.[0]).startsWith("askno:")) {
         failed++;
         throw new Error("the database went away");
       }
-      return query(text as string, values as unknown[]);
-    };
+    });
     try {
       const turned = await dm.post(`/api/rooms/${roomId}/join-requests/turn-away`, { ids: [id] });
       assert.equal(turned.statusCode, 204, turned.body);
@@ -668,14 +694,35 @@ describe("join requests: asking, waiting and a DM's answer", () => {
       let rows: Array<{ ago: number }> = [];
       for (let i = 0; i < 100 && rows.length === 0; i++) {
         await new Promise((r) => setTimeout(r, 50));
-        rows = (await query<{ ago: number }>("select extract(epoch from now() - at)::float8 as ago from rate_events where key = $1", [`askno:${roomId}:${deviceId}`])).rows;
+        rows = (await t.pool.query<{ ago: number }>("select extract(epoch from now() - at)::float8 as ago from rate_events where key = $1", [`askno:${roomId}:${deviceId}`])).rows;
       }
       assert.ok(failed > 1, "the sweep's retries failed too, and the hold stayed owed");
       assert.equal(rows.length, 1, "the sweep saved the owed hold once the database came back");
       assert.ok(Math.abs((rows[0]?.ago ?? 0) - (Date.now() - at) / 1000) < 1, `dated to the turn away, so it ends when it would have: ${rows[0]?.ago} s ago`);
       assert.equal(t.app.joinRequests.owedHolds, 0);
     } finally {
-      (t.pool as { query: unknown }).query = query;
+      restore();
+    }
+  });
+
+  test("a turn away's hold is dated to the turn away, however long its write waits (JB-ASTRA-09)", async () => {
+    const { dm, roomId } = await k.room("ask");
+    const phone = t.client();
+    const id = await k.asked(phone, roomId);
+    const restore = beforeTxStatement(t.pool, async (sql, values) => {
+      if (sql.startsWith("insert into rate_events") && String(values?.[0]?.[0]).startsWith("askno:")) await new Promise((r) => setTimeout(r, 1_500));
+    });
+    try {
+      const at = Date.now();
+      const turned = await dm.post(`/api/rooms/${roomId}/join-requests/turn-away`, { ids: [id] });
+      assert.equal(turned.statusCode, 204, turned.body);
+      const deviceId = (await k.askRow(phone.token))?.id;
+      const { rows } = await t.pool.query<{ ago: number }>("select extract(epoch from now() - at)::float8 as ago from rate_events where key = $1", [`askno:${roomId}:${deviceId}`]);
+      const elapsed = (Date.now() - at) / 1000;
+      assert.ok(elapsed >= 1.5, "the write waited");
+      assert.ok(Math.abs((rows[0]?.ago ?? 0) - elapsed) < 0.5, `dated to the turn away, not to the write: ${rows[0]?.ago} s ago, ${elapsed} s since`);
+    } finally {
+      restore();
     }
   });
 

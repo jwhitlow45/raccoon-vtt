@@ -6,7 +6,10 @@ import type { Config } from "../config.ts";
 import { clientIp } from "./clientIp.ts";
 import { ipKey } from "./ipKey.ts";
 import type { SessionStore } from "./sessions.ts";
-import type { Queryable } from "./tx.ts";
+import { withTx, type Queryable } from "./tx.ts";
+
+/** A turn away's write: its pool checkout and its statement. */
+const TURN_AWAY_WRITE = { checkoutMs: 2_000, statementMs: 5_000 };
 
 /**
  * Rate limits (design section 10.3), in two layers.
@@ -376,14 +379,25 @@ export class SlowLimits {
 
   /**
    * A DM turned this device away here: its own hold, and its address's,
-   * which only adds a Turnstile check. `secondsAgo` dates a retried write
-   * back to the turn away itself, so the hold ends when it would have.
+   * which only adds a Turnstile check. Dated `at`, the turn away itself in
+   * ms since the epoch, so a write that comes late, after a slow checkout
+   * or as the sweep's retry, ends the hold when it would have. These are
+   * the only rows stamped by this server's clock: a skew from the
+   * database's moves the hold's end by that much. The checkout and the
+   * statement are bounded, so a stalled pool costs a retry, not a wait.
    */
-  async recordTurnAway(roomId: string, deviceId: string, ip: string, q: Queryable = this.#pool, secondsAgo = 0): Promise<void> {
-    await q.query("insert into rate_events (key, at) select unnest($1::text[]), now() - make_interval(secs => $2)", [
-      [`askno:${roomId}:${deviceId}`, `asknoip:${roomId}:${ip}`],
-      Math.max(0, secondsAgo),
-    ]);
+  async recordTurnAway(roomId: string, deviceId: string, ip: string, at: number): Promise<void> {
+    await withTx(
+      this.#pool,
+      async (tx) => {
+        await tx.query(`set local statement_timeout = '${TURN_AWAY_WRITE.statementMs}ms'`);
+        await tx.query("insert into rate_events (key, at) select unnest($1::text[]), $2::timestamptz", [
+          [`askno:${roomId}:${deviceId}`, `asknoip:${roomId}:${ip}`],
+          new Date(at),
+        ]);
+      },
+      { checkoutMs: TURN_AWAY_WRITE.checkoutMs },
+    );
   }
 
   /** A let-in, which gives its address one ask back in the room. */
@@ -399,7 +413,8 @@ export class SlowLimits {
 
   async #window(key: string, seconds: number, q: Queryable = this.#pool): Promise<WindowState> {
     // Ages are computed by Postgres against its own clock, the same clock
-    // that stamped the rows, so app and database clock skew cannot matter.
+    // that stamped the rows, so app and database clock skew cannot matter
+    // (but for a turn away's, see recordTurnAway).
     const { rows } = await q.query<{ n: number; oldest_expires_in: number | null; since_newest: number | null }>(
       `select count(*)::int as n,
          extract(epoch from min(at) + make_interval(secs => $2) - now())::float8 as oldest_expires_in,

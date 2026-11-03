@@ -9,6 +9,7 @@ import {
   REQUEST_LIFE_MS,
   TURN_AWAY_HOLD_MS,
   WAIT_HOLD_MS,
+  type OwedHold,
   type Refusal,
   type Reservation,
   type Timers,
@@ -344,19 +345,24 @@ describe("join requests: waiting", () => {
     assert.equal(store.mine(ROOM, "s1"), null);
   });
 
-  test("a hold that did not save is retried dated back to its turn away, stays owed while saving fails, and lapses with the hold (JR-SOL-03)", async () => {
+  test("a hold that did not save is retried dated to its turn away, stays owed while saving fails, and lapses with the hold (JR-SOL-03, JR-SOL-04)", async () => {
     const { time, store, asked } = setup();
     const r = asked("s1");
+    const turnedAt = time.now;
     const [turned] = store.turnAway(ROOM, [r.id]);
     assert.ok(turned);
+    // Its first write failed only after a slow wait: the hold is still the turn away's.
+    time.advance(2_000);
     store.oweHold(turned);
     time.advance(60_000);
     const saved: number[] = [];
     let fail = true;
     const failures: unknown[] = [];
-    const save = async (_hold: unknown, ago: number) => {
+    const save = async (hold: OwedHold) => {
       if (fail) throw new Error("down");
-      saved.push(ago);
+      // However long the write waits for a connection, the date it saves is the turn away's.
+      time.advance(5_000);
+      saved.push(hold.at);
     };
     await store.retryHolds(save, (err) => failures.push(err));
     assert.equal(failures.length, 1);
@@ -364,7 +370,7 @@ describe("join requests: waiting", () => {
     fail = false;
     time.advance(30_000);
     await store.retryHolds(save, (err) => failures.push(err));
-    assert.deepEqual(saved, [90], "dated 90 s back, to the turn away");
+    assert.deepEqual(saved, [turnedAt], "dated to the turn away, not to the save");
     assert.equal(store.owedHolds, 0);
     const late = asked("s2");
     const [again] = store.turnAway(ROOM, [late.id]);
@@ -372,8 +378,41 @@ describe("join requests: waiting", () => {
     store.oweHold(again);
     time.advance(TURN_AWAY_HOLD_MS);
     await store.retryHolds(save, () => undefined);
-    assert.deepEqual(saved, [90], "a hold past its 15 minutes holds nothing, so it is dropped unsaved");
+    assert.deepEqual(saved, [turnedAt], "a hold past its 15 minutes holds nothing, so it is dropped unsaved");
     assert.equal(store.owedHolds, 0);
+  });
+
+  test("hold retries run one at a time: a sweep while one runs gets that run, and saves no hold twice (JR-SOL-05)", async () => {
+    const { store, asked } = setup();
+    for (const id of ["s1", "s2"]) {
+      const [turned] = store.turnAway(ROOM, [asked(id).id]);
+      assert.ok(turned);
+      store.oweHold(turned);
+    }
+    let release!: () => void;
+    const stalled = new Promise<void>((r) => (release = r));
+    const saves: string[] = [];
+    const save = async (hold: OwedHold) => {
+      saves.push(hold.sessionId);
+      await stalled;
+    };
+    const first = store.retryHolds(save, () => undefined);
+    const second = store.retryHolds(save, () => undefined);
+    assert.equal(second, first, "the same run");
+    await Promise.resolve();
+    assert.deepEqual(saves, ["s1"], "one save at a time, the second waiting on the first");
+    release();
+    await second;
+    assert.deepEqual(saves, ["s1", "s2"]);
+    assert.equal(store.owedHolds, 0);
+    await store.retryHolds(save, () => undefined);
+    assert.deepEqual(saves, ["s1", "s2"], "a new run once that one ended, with nothing left owed");
+    // That run had nothing to save. It ended too, so a hold owed since is saved by the next.
+    const [later] = store.turnAway(ROOM, [asked("s3").id]);
+    assert.ok(later);
+    store.oweHold(later);
+    await store.retryHolds(save, () => undefined);
+    assert.deepEqual(saves, ["s1", "s2", "s3"]);
   });
 
   test("a turned-away device is held 15 minutes in that room only", () => {

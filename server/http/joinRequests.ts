@@ -434,7 +434,7 @@ export async function registerJoinRequestRoutes(app: FastifyInstance, kit: AuthK
         // away is done and holds in memory either way, so a failed write is
         // logged and owed, retried by the sweep, and the DM still hears 204.
         try {
-          await kit.limits.recordTurnAway(roomId, turned.sessionId, turned.ipKey);
+          await kit.limits.recordTurnAway(roomId, turned.sessionId, turned.ipKey, turned.endedAt ?? store.now());
         } catch (err) {
           req.log.warn({ err, roomId, requestId: turned.id }, "join request hold not saved yet");
           store.oweHold(turned);
