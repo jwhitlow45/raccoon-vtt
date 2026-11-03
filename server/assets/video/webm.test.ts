@@ -590,7 +590,7 @@ describe("the timeline must be the one the Duration says (AMBUILD-ASTRA-03, AMBU
   });
 });
 
-describe("the timeline is held to the cap and the Duration by a bounded tolerance, never a file's own number (round 2: AMBUILD-ASTRA-03, AMBUILD-SOL-005)", () => {
+describe("the timeline is held to the cap and the Duration by a bounded tolerance, never a file's own number (round 2: AMBUILD-ASTRA-03, AMBUILD-SOL-005, AMBUILD-ASTRA-07)", () => {
   const withDefault = (ns: number) => (t: Ebml[]) => trackOf(t).kids!.push(uint(I.DefaultDuration, ns));
   const oneFrame = (blockMs: number) => (t: Ebml[]) => {
     const cluster = findEbml(segmentOf(t), I.Cluster);
@@ -616,5 +616,29 @@ describe("the timeline is held to the cap and the Duration by a bounded toleranc
     await checkVideoBytes(tree({ frameMs, durationMs: 6967 }, withDefault(5e9)));
     await refused(tree({ frameMs, durationMs: 2001 }, withDefault(5e9)), "video_unfinished");
     await refused(tree({ frameMs, durationMs: 11_000 }, withDefault(5e9)), "video_layout");
+  });
+
+  test("a one-frame file whose CueDuration is its BlockDuration is accepted (AMBUILD-ASTRA-07)", async () => {
+    const bytes = tree({ frameMs: [0], durationMs: 2000 }, (t) => {
+      oneFrame(2000)(t);
+      findEbml(segmentOf(t), I.Cues, I.CuePoint, I.CueTrackPositions).kids!.push(uint(0xb2, 2000));
+    });
+    assert.equal((await checkVideoBytes(bytes)).facts.durationMs, 2000);
+    // A Cue's time is still a block's time: one inside the last frame's length but past its start is refused.
+    await refused(
+      tree({ frameMs: [0], durationMs: 2000 }, (t) => {
+        oneFrame(2000)(t);
+        findEbml(segmentOf(t), I.Cues, I.CuePoint, I.CueTime).data = uint(I.CueTime, 1000).data;
+      }),
+      "bad_video",
+    );
+    // A CueDuration past the timeline's end is still refused.
+    await refused(
+      tree({ frameMs: [0], durationMs: 2000 }, (t) => {
+        oneFrame(2000)(t);
+        findEbml(segmentOf(t), I.Cues, I.CuePoint, I.CueTrackPositions).kids!.push(uint(0xb2, 5000));
+      }),
+      "bad_video",
+    );
   });
 });

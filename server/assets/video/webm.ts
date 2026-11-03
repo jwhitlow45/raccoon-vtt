@@ -497,7 +497,7 @@ async function parseSegment(walk: Walk, segment: El): Promise<ParsedVideo> {
   if (sound && soundEnd > videoEnd.end + tolerance) throw refuse("video_layout");
   const endNs = Math.max(videoEnd.end, invisibleEnd, soundEnd);
   checkTimeline({ declaredNs: duration * scale, clusterNs: lastClusterTimestamp * scale, endNs, toleranceNs: tolerance });
-  checkCues(cueEntries, { tracks, clusters, lastTicks, segmentBytes: segment.end - segment.dataStart });
+  checkCues(cueEntries, { tracks, clusters, lastTicks, endTicks: Math.ceil(endNs / scale), segmentBytes: segment.end - segment.dataStart });
 
   return {
     container: "webm",
@@ -703,14 +703,16 @@ async function cuePositions(walk: Walk, el: El, time: number): Promise<CueEntry>
  * place in the Cluster is only bounded, since a muxer may count it from
  * before or after a CRC-32 at the Cluster's start.
  */
-function checkCues(entries: readonly CueEntry[], file: { tracks: readonly Track[]; clusters: ReadonlyMap<number, ClusterAt>; lastTicks: number; segmentBytes: number }): void {
+function checkCues(entries: readonly CueEntry[], file: { tracks: readonly Track[]; clusters: ReadonlyMap<number, ClusterAt>; lastTicks: number; endTicks: number; segmentBytes: number }): void {
   for (const cue of entries) {
     const cluster = file.clusters.get(cue.cluster);
     if (!cluster || !file.tracks.some((t) => t.number === cue.track)) throw refuse("bad_video");
     if (cue.relative !== undefined && cue.relative >= cluster.bytes) throw refuse("bad_video");
     if (cue.blockNumber !== undefined && (cue.blockNumber < 1 || cue.blockNumber > cluster.blocks)) throw refuse("bad_video");
     if (cue.codecState !== undefined && cue.codecState > file.segmentBytes) throw refuse("bad_video");
-    for (const t of [cue.time, cue.duration ?? 0, ...cue.refTimes]) if (t > file.lastTicks) throw refuse("bad_video");
+    // A Cue's times are block times, and its CueDuration is a block's length (AMBUILD-ASTRA-07): it ends no later than the timeline does.
+    for (const t of [cue.time, ...cue.refTimes]) if (t > file.lastTicks) throw refuse("bad_video");
+    if (cue.time + (cue.duration ?? 0) > file.endTicks) throw refuse("bad_video");
   }
 }
 
