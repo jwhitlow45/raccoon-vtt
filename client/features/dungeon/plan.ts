@@ -84,7 +84,7 @@ export function planDungeon(input: DungeonSettings, seed: Seed, budget: number =
   const rng = seedStream(seed);
   const trace: PlanTrace = { retried: [], failed: [], dropped: [], skipped: [], stubFailed: false, treeLeft: budget, loopsLeft: budget, budgetLeft: budget };
 
-  // Steps 1 to 3: rooms, the entrance, the tree and the extra ways round.
+  // Steps 1 to 3: rooms, the entrance, the tree and the extra ways around.
   const rects = placeRooms(rng, s);
   const board = new Board(W, H, rects);
   const entrance = rects.length > 0 ? chooseEntrance(rects, W, H) : { room: -1, side: "w" as Side };

@@ -178,7 +178,7 @@ export function treeLinks(rooms: readonly Rect[], entrance: number): Link[] {
 }
 
 /**
- * Extra ways round: up to `count` of the shortest links not in the tree
+ * Extra ways around: up to `count` of the shortest links not in the tree
  * whose way round the tree is at least twice as long, so each one saves a
  * real walk back. `fits` says whether one more still fits the door cap.
  */

@@ -31,7 +31,7 @@ export type DungeonSettings = {
   corridors: CorridorStyle;
   /** Corridors and doorways 2 squares across, with double doors. */
   wide: boolean;
-  /** Extra ways round: loop links beside the tree. */
+  /** Extra ways around: loop links beside the tree. */
   loops: boolean;
   theme: Theme;
   heights: HeightsChoice;

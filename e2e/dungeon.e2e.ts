@@ -615,7 +615,7 @@ describe("dungeon generator", { concurrency: false }, () => {
       // DG-R1-02, DGBUILD-ASTRA-3: every choice is held while the send waits, the number fields too, so none draws a preview the queued ops are not.
       for (const name of ["Across", "Down", "Rooms", "Seed"]) assert.equal(await dialog.getByRole("textbox", { name, exact: true }).isDisabled(), true, `${name} held`);
       for (const name of ["Crypt", "Small", "Dense", "Winding", "Wide"]) assert.equal(await dialog.getByRole("radio", { name, exact: true }).first().isDisabled(), true, `${name} held`);
-      assert.equal(await dialog.getByRole("switch", { name: "Extra ways round" }).isDisabled(), true, "Extra ways round held");
+      assert.equal(await dialog.getByRole("switch", { name: "Extra ways around" }).isDisabled(), true, "Extra ways around held");
       assert.equal(await dialog.getByRole("button", { name: "Reroll", exact: true }).isDisabled(), true, "Reroll held");
       assert.equal(await dialog.getByRole("button", { name: "Copy seed", exact: true }).isDisabled(), false, "Copy seed stays");
       await dialog.getByRole("button", { name: "Hide", exact: true }).click();

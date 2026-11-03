@@ -317,7 +317,7 @@ export function GenerateDialog(props: {
           ]}
           help={WIDE_HELP}
         />
-        <Switch label="Extra ways round" help={LOOPS_HELP} checked={choices.loops} onChange={(loops) => set({ loops })} />
+        <Switch label="Extra ways around" help={LOOPS_HELP} checked={choices.loops} onChange={(loops) => set({ loops })} />
         <Choice<Choices["heights"]>
           name="Heights"
           value={choices.heights}
