@@ -9,7 +9,7 @@ import type { Insets, Size } from "../../../lib/camera.ts";
 import { useChromeCamera, type ChromeCamera } from "../../../state/liveCamera.ts";
 import { groundAnchor } from "../../../canvas/anchors.ts";
 import { drawnAt } from "../../../canvas/boardPick.ts";
-import { theme } from "../../../lib/theme.ts";
+import { BOARD_SCOPE, theme } from "../../../lib/theme.ts";
 import { useScoped } from "../../../state/scope.ts";
 import { TOAST_MS } from "../../../state/store.ts";
 import { useIsDisplay, useRoomView } from "../../../state/view.ts";
@@ -105,12 +105,24 @@ function ReadoutPill(props: { words: ReadoutWords; cell: { x: number; y: number 
   const anchor = groundAnchor(camera, pick, middle, drawnAt(pick, middle));
   const place = readoutPlace({ anchor, viewport: props.viewport, insets: props.insets, width, height: BODY_HEIGHT });
   if (!place) return null;
+  return <PillShape words={words} width={width} place={place} />;
+}
+
+/**
+ * The pill as drawn at its place. It lies on the board, so it keeps the
+ * board's dark look in either scheme (docs/design/design-v1-light-theme.md
+ * 6.4): the dark palette is in scope under it, and its fill is a style, not
+ * an SVG attribute, which would not read the variable.
+ */
+export function PillShape(props: { words: ReadoutWords; width: number; place: NonNullable<ReturnType<typeof readoutPlace>> }) {
+  const { words, width, place } = props;
   const bodyTop = place.pointer?.side === "up" ? POINTER_PX : 0;
   return (
     <div
       aria-hidden
       data-rvtt-height-pill=""
       style={{
+        ...BOARD_SCOPE,
         position: "absolute",
         left: place.left,
         top: place.top,
@@ -122,7 +134,7 @@ function ReadoutPill(props: { words: ReadoutWords; cell: { x: number; y: number 
       }}
     >
       <svg width={width} height={BODY_HEIGHT + POINTER_PX} style={{ position: "absolute", inset: 0, overflow: "visible" }}>
-        <path d={pillOutline(width, BODY_HEIGHT, place.pointer)} fill={theme.color.overlay} stroke={words.edge === "raised" ? RAISED_EDGE : LOWERED_EDGE} strokeWidth={EDGE_PX} />
+        <path d={pillOutline(width, BODY_HEIGHT, place.pointer)} style={{ fill: theme.color.overlay }} stroke={words.edge === "raised" ? RAISED_EDGE : LOWERED_EDGE} strokeWidth={EDGE_PX} />
       </svg>
       <span
         style={{
