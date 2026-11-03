@@ -58,6 +58,25 @@ export function id3v2Size(b: Uint8Array, at = 0): number {
   return 10 + syncsafe + footer;
 }
 
+/** Where a file's own header starts, past a leading ID3v2 tag, and the file read from there. */
+type Start = { at: number; bytes: Uint8Array };
+
+/**
+ * The file past a leading ID3v2 tag, where an MP3's, a raw AAC's or a
+ * FLAC's own header is. Cover art makes a tag larger than the head the
+ * probe reads, so the window is read again from the tag's end
+ * (MUS-SOL-03). A tag is skipped only within SOUND_LIMITS.id3v2MaxBytes,
+ * the bound the copy check holds it to: past it, nothing is read and the
+ * file's channels are unknown.
+ */
+async function pastId3v2(source: ByteSource, head: Uint8Array): Promise<Start> {
+  const size = id3v2Size(head);
+  if (size === 0) return { at: 0, bytes: head };
+  // A read past the file's end is empty, so a tag that runs past it leaves nothing to read too.
+  if (size > SOUND_LIMITS.id3v2MaxBytes) return { at: size, bytes: new Uint8Array(0) };
+  return { at: size, bytes: await source.read(size, size + HEAD_BYTES) };
+}
+
 // ---------------------------------------------------------------- MPEG audio frames
 
 /** An MPEG audio frame header, MPEG-1, 2 or 2.5, any layer, read leniently: the strict walk is mp3.ts's. */
@@ -120,19 +139,18 @@ function topKbps(frame: MpegFrame): number {
 }
 
 /**
- * The first frame of an MPEG audio file past an ID3v2 tag, confirmed by a
- * second frame header right after it, so a stray 0xFF byte in a tag or
- * junk is not taken for one.
+ * The first frame of an MPEG audio file in the window past its ID3v2 tag,
+ * confirmed by a second frame header right after it, so a stray 0xFF byte
+ * in junk is not taken for one.
  */
-function firstFrame(head: Uint8Array): { at: number; frame: MpegFrame } | null {
-  const start = id3v2Size(head);
-  const limit = Math.min(head.length - 4, start + 64 * 1024);
-  for (let at = start; at < limit; at++) {
-    const frame = mpegFrameAt(head, at);
+function firstFrame(bytes: Uint8Array): { at: number; frame: MpegFrame } | null {
+  const limit = Math.min(bytes.length - 4, 64 * 1024);
+  for (let at = 0; at < limit; at++) {
+    const frame = mpegFrameAt(bytes, at);
     if (!frame) continue;
     const next = at + frame.bytes;
     // A file of one frame has nothing after it to confirm, and is too short to keep anyway.
-    if (next + 4 > head.length || mpegFrameAt(head, next)) return { at, frame };
+    if (next + 4 > bytes.length || mpegFrameAt(bytes, next)) return { at, frame };
   }
   return null;
 }
@@ -180,11 +198,12 @@ async function walkFrames(source: ByteSource, from: number, first: MpegFrame): P
   return { ms, rateHz, channels };
 }
 
-async function probeMpeg(source: ByteSource, head: Uint8Array): Promise<Probe | null> {
-  const found = firstFrame(head);
+async function probeMpeg(source: ByteSource, start: Start): Promise<Probe | null> {
+  const found = firstFrame(start.bytes);
   if (!found) return null;
-  const { at, frame } = found;
-  const audio = isTagFrame(head, at, frame) ? at + frame.bytes : at;
+  const { frame } = found;
+  const at = start.at + found.at;
+  const audio = isTagFrame(start.bytes, found.at, frame) ? at + frame.bytes : at;
   // The file's bytes over its version and layer's top bitrate are the least it can play. A file over four times the
   // longest use even so is refused unwalked, so a 200 MB file is never read for its length.
   const least = ((source.size - audio) * 8) / topKbps(frame);
@@ -220,13 +239,12 @@ function adtsAt(b: Uint8Array, at: number): { rateHz: number; config: number; by
 /** Channels of an AAC channel configuration (ISO 14496-3 table 1.19). 0 is set in the stream's own element, which this does not read. */
 const AAC_CHANNELS: Record<number, number> = { 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 8, 11: 7, 12: 8, 13: 24, 14: 8 };
 
-async function probeAdts(source: ByteSource, head: Uint8Array): Promise<Probe | null> {
-  const start = id3v2Size(head);
-  const first = adtsAt(head, start);
+async function probeAdts(source: ByteSource, start: Start): Promise<Probe | null> {
+  const first = adtsAt(start.bytes, 0);
   if (!first) return null;
   // HE-AAC signals its core rate in ADTS and decodes at twice it, so a low core rate counts double for the budget.
   const rateHz = first.rateHz <= 24_000 ? first.rateHz * 2 : first.rateHz;
-  let at = start;
+  let at = start.at;
   let samples = 0;
   let windowStart = -1;
   let window: Uint8Array = new Uint8Array(0);
@@ -286,12 +304,12 @@ async function probeAiff(source: ByteSource, head: Uint8Array): Promise<Probe | 
   return { container: "aiff", channels: null, rateHz: null, ms: null, framed: false, copyCandidate: false, wav: null };
 }
 
+/** `head` is the file past its ID3v2 tag. */
 function probeFlac(head: Uint8Array): Probe | null {
-  const at = id3v2Size(head);
-  if (fourcc(head, at) !== "fLaC") return null;
+  if (fourcc(head, 0) !== "fLaC") return null;
   // STREAMINFO is always the first metadata block: a 4-byte block header, then 34 bytes.
-  const info = at + 8;
-  if (info + 18 > head.length || (head[at + 4]! & 0x7f) !== 0) return { container: "flac", channels: null, rateHz: null, ms: null, framed: false, copyCandidate: false, wav: null };
+  const info = 8;
+  if (info + 18 > head.length || (head[4]! & 0x7f) !== 0) return { container: "flac", channels: null, rateHz: null, ms: null, framed: false, copyCandidate: false, wav: null };
   const rateHz = (head[info + 10]! << 12) | (head[info + 11]! << 4) | (head[info + 12]! >> 4);
   const channels = ((head[info + 12]! >> 1) & 7) + 1;
   const total = (head[info + 13]! & 0x0f) * 2 ** 32 + view(head).getUint32(info + 14);
@@ -629,11 +647,12 @@ export async function probeFile(source: ByteSource): Promise<Probe> {
   const wav = await readWavFormat(source);
   if (wav) return { container: "wav", channels: wav.channels, rateHz: wav.rateHz, ms: (wav.frames / wav.rateHz) * 1000, framed: false, copyCandidate: false, wav };
   if (fourcc(head, 0) === "RIFF") return { container: "wav", channels: null, rateHz: null, ms: null, framed: false, copyCandidate: false, wav: null };
-  const known = (await probeAiff(source, head)) ?? probeFlac(head) ?? (await probeOgg(source, head)) ?? (await probeMp4(source, head));
+  const start = await pastId3v2(source, head);
+  const known = (await probeAiff(source, head)) ?? probeFlac(start.bytes) ?? (await probeOgg(source, head)) ?? (await probeMp4(source, head));
   if (known) return known;
   const webm = readWebm(head);
   if (webm) return { container: "webm", ...webm, framed: false, copyCandidate: false, wav: null };
-  return (await probeAdts(source, head)) ?? (await probeMpeg(source, head)) ?? { container: "other", channels: null, rateHz: null, ms: null, framed: false, copyCandidate: false, wav: null };
+  return (await probeAdts(source, start)) ?? (await probeMpeg(source, start)) ?? { container: "other", channels: null, rateHz: null, ms: null, framed: false, copyCandidate: false, wav: null };
 }
 
 /**

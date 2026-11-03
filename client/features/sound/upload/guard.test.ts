@@ -12,6 +12,13 @@ const probe = (bytes: Uint8Array) => probeFile(bytesSource(bytes));
 const MB = 1024 * 1024;
 const PHONE = decodeBudget({ touch: true, finePointer: false });
 const COMPUTER = decodeBudget({ touch: false, finePointer: true });
+/** An ID3v2.3 tag of `total` bytes in all, its body zeros, as padding around cover art leaves one. */
+function largeId3v2(total: number): Uint8Array {
+  const out = new Uint8Array(total);
+  const n = total - 10;
+  out.set([0x49, 0x44, 0x33, 3, 0, 0, (n >> 21) & 0x7f, (n >> 14) & 0x7f, (n >> 7) & 0x7f, n & 0x7f]);
+  return out;
+}
 /** A length summed frame by frame, against one worked out whole. */
 const near = (ms: number | null, want: number) => assert.ok(ms !== null && Math.abs(ms - want) < 1e-6, `${ms} for ${want}`);
 
@@ -95,6 +102,29 @@ describe("the guard reads each header's channels, rate and length", () => {
     assert.equal(fast.copyCandidate, false);
     const mono = await probe(mp3Of(toneSamples({ seconds: 1, rateHz: 48_000, channels: 1, tone: null }), 48_000));
     assert.deepEqual([mono.channels, mono.rateHz, mono.copyCandidate], [1, 48_000, true]);
+  });
+
+  test("an MP3, a FLAC and a raw AAC behind an ID3v2 tag larger than the head the probe reads, as cover art makes one (MUS-SOL-03)", async () => {
+    // Two frames' bytes inside the tag, which no decoder reads as audio, since it skips the tag by its size.
+    const cover = largeId3v2(512 * 1024);
+    cover.set(silentFrames(2), 1000);
+    const mp3 = concat([cover, mp3Of(toneSamples({ seconds: 3, rateHz: 44_100, channels: 2, tone: { hz: 440, dbfs: -12 } }), 44_100)]);
+    const p = await probe(mp3);
+    assert.deepEqual([p.container, p.channels, p.rateHz, p.copyCandidate], ["mp3", 2, 44_100, true]);
+    const copy = copyable(mp3);
+    assert.ok(copy.ok, "the copy check takes it too");
+    near(p.ms, (copy.facts.frames * 1152 * 1000) / 44_100);
+    assert.deepEqual(planRead({ probe: p, ms: p.ms, fileBytes: mp3.length, use: "loop", budget: PHONE }), { ok: true, path: "mp3Pieces", ms: p.ms });
+    const flac = await probe(concat([cover, flacHeader({ channels: 6, rateHz: 96_000, totalSamples: 96_000 * 360 })]));
+    assert.deepEqual([flac.container, flac.channels, flac.rateHz, flac.ms], ["flac", 6, 96_000, 360_000]);
+    const aac = await probe(concat([cover, adtsFile({ rateIndex: 4, channelConfig: 2, frames: 431 })]));
+    assert.deepEqual([aac.container, aac.channels, aac.rateHz], ["aac", 2, 44_100]);
+    assert.equal(Math.round(aac.ms!), Math.round(((431 * 1024) / 44_100) * 1000));
+    // Up to the bound the copy check holds a tag to, and no further.
+    const most = await probe(concat([largeId3v2(SOUND_LIMITS.id3v2MaxBytes), mp3.subarray(cover.length)]));
+    assert.equal(most.channels, 2);
+    const over = await probe(concat([largeId3v2(SOUND_LIMITS.id3v2MaxBytes + 1), mp3.subarray(cover.length)]));
+    assert.deepEqual([over.container, over.channels], ["other", null]);
   });
 
   test("anything else has no channels", async () => {
