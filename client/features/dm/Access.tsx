@@ -15,6 +15,7 @@ import { useUnsavedInput, useUnsavedSince } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
 import { ConfirmAction, SecretLink } from "./controls.tsx";
+import { ASK_ONLY_LINK_NOTE, useJoinMode } from "./JoinRequests.tsx";
 import { absoluteLink, deviceSeenText, inviteCountdown, inviteUsed, passwordProblem, weakPasswordText } from "./invite.ts";
 import { PlayerLinkShare } from "./PlayerLinkShare.tsx";
 import { createPlayerLinkLoader, type LinkState } from "./playerLinkLoader.ts";
@@ -128,6 +129,7 @@ export function MemberActions(props: { memberId: string; name: string; kind: "dm
 export function PlayerLinkSection(props: { main?: boolean }) {
   const roomId = useRoomView((s) => s.roomId);
   const accessVersion = useRoomView((s) => s.accessVersion);
+  const askOnly = useJoinMode() === "ask_only";
   const [state, setState] = useState<LinkState>({ kind: "hidden" });
   const [loader] = useState(() =>
     createPlayerLinkLoader({ fetch: async () => (await api.getPlayerLink(roomId)).playerLink, describe: errorText, onChange: setState }),
@@ -168,6 +170,7 @@ export function PlayerLinkSection(props: { main?: boolean }) {
           {state.kind === "loading" ? "Loading…" : "Show the player link"}
         </Button>
       )}
+      {askOnly ? <Help>{ASK_ONLY_LINK_NOTE}</Help> : null}
       {state.kind === "error" ? <ErrorText>{state.message}</ErrorText> : null}
     </Section>
   );

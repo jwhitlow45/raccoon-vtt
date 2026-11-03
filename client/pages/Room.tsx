@@ -88,6 +88,8 @@ import { toastsLeft } from "../state/store.ts";
 import { sidePanelKeysSlot, splitKeysSlot, useKeyHint, useKeyHints, useShortcuts, withKey, type KeyHint } from "../state/shortcuts.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { ViewAsHost } from "../features/dm/PlayerPreview.tsx";
+import { useJoinRequestsRoom } from "../features/dm/JoinRequests.tsx";
+import { dmBadgeLabel, panelsButtonLabel } from "../features/dm/joinRequests.ts";
 import { usePasteRouter } from "../features/images/pasteRouter.ts";
 import { RoomPasteHost } from "../features/images/RoomPaste.tsx";
 import { ShortcutSheetHost } from "../features/device/ShortcutSheet.tsx";
@@ -125,9 +127,6 @@ import { OptionsFrameContext, type OptionsFrame } from "../features/measure/cont
 import type { Rect } from "../components/popoverPlace.ts";
 import { Badge, FindButton, FitButton, FullscreenButton, HistoryLoading, PauseScreen, Stacked, UndoButtons, useAccentVars, useEscape, useNoPageZoom, usePreloadAndReopen, useRoomTitle, ViewButton } from "./RoomChrome.tsx";
 import { DockHeaderActions, DockRow, FoldStatus, SAFE_PROBE_STYLE, useDockSummary, useLayoutHeight, useSafeAreas, type DockActions } from "./RoomDock.tsx";
-
-/** What the DM panel's count says while a PDF upload waits on the DM. */
-const UPLOAD_WAITING = "1 upload waiting";
 
 const { topBar: TOP_BAR, toolbar: TOOLBAR } = theme.layout;
 /** "Viewing as Pat" at its widest, in window pixels (features/dm/PlayerPreview.tsx). */
@@ -498,9 +497,11 @@ function RoomPage() {
   const journalUnread = useJournalUnread();
   // A PDF upload waiting on the DM badges the DM panel, and on a phone the Panels button too (docs/design/design-v1-pdf-handouts.md 4.1.1).
   const uploadWaiting = useJobWaiting() && role === "dm" ? 1 : 0;
-  const badges: Record<string, number> = { log: unread, journal: journalUnread, dm: uploadWaiting };
-  const badgeLabels: Record<string, string> = { dm: UPLOAD_WAITING };
-  const panelsLabel = [unread + journalUnread > 0 ? `${unread + journalUnread} unread` : "", uploadWaiting ? UPLOAD_WAITING : ""].filter(Boolean).join(", ");
+  // Join requests waiting on the DM badge the same places (docs/design/design-v1-join-requests.md 2.3).
+  const joinWaiting = useJoinRequestsRoom();
+  const badges: Record<string, number> = { log: unread, journal: journalUnread, dm: uploadWaiting + joinWaiting };
+  const badgeLabels: Record<string, string> = { dm: dmBadgeLabel(uploadWaiting, joinWaiting) };
+  const panelsLabel = panelsButtonLabel(unread + journalUnread, uploadWaiting, joinWaiting);
   usePdfJobRoom();
   // The phone sheet that lists every panel, in the room's local state (state/types.ts sheetOpen), so
   // what floats over the map steps aside for it as for a panel. Opening a panel from anywhere takes its place.
@@ -1169,7 +1170,7 @@ function RoomPage() {
           panelsOpen={sheet !== undefined || pickerOpen}
           hiddenSheet={mounted && !sheet ? mounted.title : null}
           onPanels={togglePanels}
-          unread={unread + journalUnread + uploadWaiting}
+          unread={unread + journalUnread + uploadWaiting + joinWaiting}
           unreadLabel={panelsLabel}
           panelsRef={panelsRef}
           sideHidden={wide && sidePanelHidden}

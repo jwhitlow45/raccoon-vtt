@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { Member } from "#shared/model.ts";
 import { DeleteRoom, DmDevices, MemberActions, PlayerPassword } from "../features/dm/Access.tsx";
+import { JoiningSetting } from "../features/dm/JoinRequests.tsx";
 import { usePreview } from "../features/dm/previewContext.ts";
 import type { PanelProps } from "../features/panels.ts";
 import { Button } from "../components/Button.tsx";
@@ -126,6 +127,7 @@ export default function MembersPanel(_props: PanelProps) {
       </div>
       {dm ? (
         <>
+          <JoiningSetting />
           <PlayerPassword />
           <DmDevices />
           <DeleteRoom />

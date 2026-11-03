@@ -5,14 +5,11 @@
  * retrying fetch of the list. Kept apart from the components so they run
  * under plain Node in the tests.
  */
+import type { JoinMode, JoinRequestList, JoinRequestRow, MemberSummary } from "../../lib/api.ts";
 import type { Clock } from "../../state/timing.ts";
 
-export type JoinMode = "password" | "ask" | "ask_only";
-
-export type JoinRequestRow = { id: string; name: string; color: string; askedAt: string };
-export type CarryOnPlayer = { id: string; name: string; color: string };
-/** `GET /api/rooms/:id/join-requests`: all a DM device may know about requests. */
-export type JoinRequestList = { mode: JoinMode; challenged: boolean; requests: JoinRequestRow[]; players: CarryOnPlayer[] };
+export type { JoinMode, JoinRequestList, JoinRequestRow };
+type CarryOnPlayer = MemberSummary;
 
 /** "Asked just now" or "Asked 3 min ago". */
 export function askedText(askedAt: string, now: number): string {
