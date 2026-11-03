@@ -19,8 +19,8 @@ import type { AuthService } from "./types.ts";
 
 const HOUR_MS = 3_600_000;
 
-/** Timings of the join paths, for tests. */
-export type AccessOptions = { admissions?: AdmissionsOptions; joinRequests?: JoinRequestOptions };
+/** Timings of the join paths, for tests. `sweepMs` runs the join sweep and its follow-ups that often. */
+export type AccessOptions = { admissions?: AdmissionsOptions; joinRequests?: JoinRequestOptions; sweepMs?: number };
 
 /**
  * Sets up authentication on the app: the cookie parser, the per-request rate
@@ -98,7 +98,7 @@ export async function setupAuth(
   const sweep = setInterval(() => {
     joinRequests.sweep();
     void admissions.followUp().catch((err: unknown) => app.log.warn({ err }, "join follow-up failed"));
-  }, SWEEP_MS);
+  }, deps.access?.sweepMs ?? SWEEP_MS);
   sweep.unref();
   // Before the server waits out its open requests: a held wait answers at
   // once, so closing never sits out a 25 s hold (as the socket layer's

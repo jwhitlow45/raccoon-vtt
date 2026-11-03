@@ -53,7 +53,7 @@ export type AdmitOutcome =
   /** The commit may or may not have landed, and reading it back could not tell. The member stays. */
   | { kind: "unknown"; memberId: string };
 
-/** `pending`: the member has not landed within the bound. The attempt goes on and settles later. */
+/** `pending`: the outcome is not known within the answer's bound, in whatever phase. The attempt goes on and settles later. */
 export type AdmitAnswer = AdmitOutcome | { kind: "pending"; memberId: string };
 
 export type AdmitPlan = {
@@ -84,11 +84,18 @@ export type AdmitPlan = {
 };
 
 export type AdmissionsOptions = {
+  /** Each actor call's bound: a member's removal, and reading the member back after its grant. */
   memberMs?: number;
+  /** Every pool checkout: the grant's, the read-back's and the undo's revokes. */
   checkoutMs?: number;
+  /** The answer's bound, from the attempt's start, in every phase. `memberMs` when unset. */
+  answerMs?: number;
 };
 
 type Reconciled = "committed" | "not" | "unreachable";
+
+/** What an attempt returns when its outcome waits on the sweep: the caller hears pending at once, and the follow-up settles it. */
+const FOLLOWING = Symbol("following");
 
 export class Admissions {
   #pool: pg.Pool;
@@ -96,10 +103,15 @@ export class Admissions {
   #log: FastifyBaseLogger | undefined;
   #memberMs: number;
   #checkoutMs: number;
+  #answerMs: number;
   /** Members being added for a join, by room. */
   #inFlight = new Map<string, Set<string>>();
   /** Members whose removal after a rolled-back grant did not land, retried by the sweep. */
   #owed = new Map<string, { roomId: string; memberId: string }>();
+  /** Undos running now, which the answer never waits for. */
+  #undoing = new Set<Promise<void>>();
+  /** Grants given up because their member was removed, whose revoke did not land, retried by the sweep. */
+  #owedRevokes = new Map<string, { roomId: string; sessionId: string; memberId: string; epoch: number }>();
   /** Attempts whose commit outcome could not be read back yet, each a follow-up that answers true once settled. */
   #unreconciled = new Set<() => Promise<boolean>>();
   #following: Promise<void> | null = null;
@@ -114,6 +126,7 @@ export class Admissions {
     this.#log = deps.log;
     this.#memberMs = deps.options?.memberMs ?? MEMBER_ANSWER_MS;
     this.#checkoutMs = deps.options?.checkoutMs ?? GRANT_CHECKOUT_MS;
+    this.#answerMs = deps.options?.answerMs ?? this.#memberMs;
   }
 
   /** The room's members in flight, for "continue as" and the DM's carry-on list to leave out. */
@@ -121,9 +134,9 @@ export class Admissions {
     return this.#inFlight.get(roomId) ?? EMPTY;
   }
 
-  /** What the sweep still has to do: removals owed and outcomes not read back. */
+  /** What is still to do after the answers: undos running or owed, revokes owed, and outcomes not read back. */
   get followUps(): number {
-    return this.#owed.size + this.#unreconciled.size;
+    return this.#undoing.size + this.#owed.size + this.#owedRevokes.size + this.#unreconciled.size;
   }
 
   /** Marks where a join's route starts, before it reads anything about the member it names (`AdmitPlan.begun`). */
@@ -149,38 +162,44 @@ export class Admissions {
   }
 
   /**
-   * Runs one attempt. The answer comes once the outcome is known, or as
-   * `pending` once a new member has taken `memberMs` without landing.
-   * `plan.settled` hears the outcome either way, before the answer.
+   * Runs one attempt. The answer is its outcome once known, or `pending`
+   * once `answerMs` has passed since the start, in whichever phase it is:
+   * the member, the grant, the read-back after a lost COMMIT, or giving a
+   * grant up. An outcome that waits on the sweep answers `pending` at once.
+   * The attempt goes on either way, and `plan.settled` hears its outcome
+   * once, before the answer when the answer is that outcome.
    */
   admit(plan: AdmitPlan): Promise<AdmitAnswer> {
-    let landed = plan.who.kind !== "new";
-    const begun = plan.begun ?? this.begin();
-    const outcome = this.#attempt(plan, begun, () => (landed = true))
-      .catch((err: unknown): AdmitOutcome => ({ kind: "refused", error: asError(err) }))
-      .then((o) => {
-        try {
-          plan.settled(o);
-        } catch (err) {
-          this.#log?.error({ err, roomId: plan.roomId }, "join settlement failed");
-        }
-        return o;
-      });
-    if (landed) return outcome;
     const memberId = memberOf(plan.who);
-    let timer: NodeJS.Timeout | undefined;
-    const bound = new Promise<AdmitAnswer>((resolve) => {
-      // A member that landed in time is followed to the end: the grant's own steps are bounded.
-      timer = setTimeout(() => resolve(landed ? outcome : { kind: "pending", memberId }), this.#memberMs);
-    });
-    return Promise.race([outcome, bound]).finally(() => clearTimeout(timer));
+    const begun = plan.begun ?? this.begin();
+    let answer!: (a: AdmitAnswer) => void;
+    const answered = new Promise<AdmitAnswer>((resolve) => (answer = resolve));
+    let done = false;
+    const settle = (outcome: AdmitOutcome) => {
+      if (done) return;
+      done = true;
+      try {
+        plan.settled(outcome);
+      } catch (err) {
+        this.#log?.error({ err, roomId: plan.roomId }, "join settlement failed");
+      }
+      answer(outcome);
+    };
+    const timer = setTimeout(() => answer({ kind: "pending", memberId }), this.#answerMs);
+    this.#attempt(plan, begun, settle).then(
+      (result) => (result === FOLLOWING ? answer({ kind: "pending", memberId }) : settle(result)),
+      (err: unknown) => settle({ kind: "refused", error: asError(err) }),
+    );
+    return answered.finally(() => clearTimeout(timer));
   }
 
-  /** The sweep's part: owed removals, then outcomes still to read back. One run at a time. */
+  /** The sweep's part: undos still running, owed removals and revokes, then outcomes still to read back. One run at a time. */
   followUp(): Promise<void> {
     this.#following ??= (async () => {
       try {
+        await Promise.all([...this.#undoing]);
         for (const { roomId, memberId } of [...this.#owed.values()]) await this.#undo(roomId, memberId);
+        for (const [key, owed] of [...this.#owedRevokes]) if (await this.#giveUp(owed)) this.#owedRevokes.delete(key);
         for (const next of [...this.#unreconciled]) {
           if (await next().catch(() => false)) this.#unreconciled.delete(next);
         }
@@ -191,7 +210,12 @@ export class Admissions {
     return this.#following;
   }
 
-  async #attempt(plan: AdmitPlan, begun: number, onLanded: () => void): Promise<AdmitOutcome> {
+  /** A revoke inside a join's own steps: bounded like the grant's transaction, so no step waits on a stalled pool. */
+  #revokeBounds(): RevokeBounds {
+    return { checkoutMs: this.#checkoutMs, lockMs: 2_000, statementMs: 2_000 };
+  }
+
+  async #attempt(plan: AdmitPlan, begun: number, settle: (outcome: AdmitOutcome) => void): Promise<AdmitOutcome | typeof FOLLOWING> {
     const { roomId, who } = plan;
     const memberId = memberOf(who);
     if (who.kind === "new") {
@@ -202,15 +226,13 @@ export class Admissions {
         // failed member op.
         await this.#gateway.addMember(roomId, who.member);
       } catch (err) {
-        onLanded();
         // A full, missing, read-only or unloadable room wrote nothing. Any
         // other failure may have left the member behind, so it comes off
         // again, which does nothing when it never arrived.
         if (err instanceof RoomFullError || err instanceof RoomNotFoundError || err instanceof HttpError) this.#land(roomId, memberId);
-        else await this.#undo(roomId, memberId);
+        else this.#undoLater(roomId, memberId);
         return refused(err, this.#log);
       }
-      onLanded();
     }
 
     const attempt = { playerEpoch: 0 };
@@ -237,9 +259,11 @@ export class Admissions {
         { checkoutMs: this.#checkoutMs },
       );
     } catch (err) {
-      if (err instanceof CommitOutcomeUnknown) return this.#unknownCommit(plan, memberId, attempt.playerEpoch);
-      // Nothing was committed: the failure came before COMMIT was sent.
-      if (who.kind === "new") await this.#undo(roomId, memberId);
+      if (err instanceof CommitOutcomeUnknown) return this.#unknownCommit(plan, memberId, attempt.playerEpoch, settle);
+      // Nothing was committed: the failure came before COMMIT was sent. The
+      // refusal is known now, so it is answered now, and the member comes
+      // off behind it, in flight until it has.
+      if (who.kind === "new") this.#undoLater(roomId, memberId);
       return refused(err, this.#log);
     }
     return this.#committed(plan, memberId, attempt.playerEpoch);
@@ -261,7 +285,7 @@ export class Admissions {
     const { roomId, sessionId, who } = plan;
     let member: Member | null;
     try {
-      member = await this.#gateway.getMember(roomId, memberId);
+      member = await bounded(this.#gateway.getMember(roomId, memberId), this.#memberMs);
     } catch (err) {
       // The grant stands. Without a read, the member this attempt added is the best answer.
       this.#log?.warn({ err, roomId }, "join committed, but its member could not be read back");
@@ -271,12 +295,10 @@ export class Admissions {
     if (!member) {
       // The DM removed the member while the grant was being written. A
       // grant must never outlive its member, so this exact one is given up:
-      // a newer grant on the session is left alone.
-      try {
-        await revokeGrants({ pool: this.#pool, gateway: this.#gateway }, roomId, { by: "exact", sessionId, memberId, role: "player", epoch: playerEpoch });
-      } catch (err) {
-        this.#log?.warn({ err, roomId }, "a grant whose member was removed could not be given up");
-      }
+      // a newer grant on the session is left alone. A revoke that does not
+      // land is owed, as an undo's is.
+      const owed = { roomId, sessionId, memberId, epoch: playerEpoch };
+      if (!(await this.#giveUp(owed))) this.#owedRevokes.set(`${roomId}|${sessionId}|${memberId}|${playerEpoch}`, owed);
       this.#land(roomId, memberId);
       return { kind: "refused", error: new HttpError(409, "member_removed") };
     }
@@ -292,7 +314,7 @@ export class Admissions {
    * device's own DM link may have upgraded it since. Anything else stays
    * unknown for good, since a grant that committed may have been kicked.
    */
-  async #unknownCommit(plan: AdmitPlan, memberId: string, playerEpoch: number): Promise<AdmitOutcome> {
+  async #unknownCommit(plan: AdmitPlan, memberId: string, playerEpoch: number, settle: (outcome: AdmitOutcome) => void): Promise<AdmitOutcome | typeof FOLLOWING> {
     this.#log?.warn({ roomId: plan.roomId }, "join outcome unknown");
     const decide = async (found: Reconciled): Promise<AdmitOutcome | null> => {
       plan.maybeCommitted?.();
@@ -305,16 +327,16 @@ export class Admissions {
     };
     const first = await decide(await this.#reconcile(plan.roomId, plan.sessionId, memberId, playerEpoch));
     if (first) return first;
-    // Followed up by the sweep until the read goes through. The member
-    // stays in flight meanwhile, and nothing settles.
-    return new Promise<AdmitOutcome>((resolve) => {
-      this.#unreconciled.add(async () => {
-        const later = await decide(await this.#reconcile(plan.roomId, plan.sessionId, memberId, playerEpoch));
-        if (!later) return false;
-        resolve(later);
-        return true;
-      });
+    // Followed up by the sweep until the read goes through, which settles
+    // it. The member stays in flight meanwhile, and the caller hears
+    // pending now rather than waiting on the sweep.
+    this.#unreconciled.add(async () => {
+      const later = await decide(await this.#reconcile(plan.roomId, plan.sessionId, memberId, playerEpoch));
+      if (!later) return false;
+      settle(later);
+      return true;
     });
+    return FOLLOWING;
   }
 
   async #reconcile(roomId: string, sessionId: string, memberId: string, playerEpoch: number): Promise<Reconciled> {
@@ -354,9 +376,10 @@ export class Admissions {
     const key = `${roomId}|${memberId}`;
     const deps = { pool: this.#pool, gateway: this.#gateway };
     try {
-      await revokeGrants(deps, roomId, { by: "member", memberId });
+      // Every step bounded, and one past its bound is owed like a failed one.
+      await revokeGrants(deps, roomId, { by: "member", memberId }, undefined, this.#revokeBounds());
       await bounded(this.#gateway.removeMember(roomId, memberId), this.#memberMs);
-      await revokeGrants(deps, roomId, { by: "member", memberId });
+      await revokeGrants(deps, roomId, { by: "member", memberId }, undefined, this.#revokeBounds());
     } catch (err) {
       if (!(err instanceof RoomNotFoundError)) {
         this.#owed.set(key, { roomId, memberId });
@@ -366,6 +389,23 @@ export class Admissions {
     }
     this.#owed.delete(key);
     this.#land(roomId, memberId);
+  }
+
+  /** An undo behind a refusal already answered. `followUp` waits for it, so the sweep and the tests see it through. */
+  #undoLater(roomId: string, memberId: string): void {
+    const running: Promise<void> = this.#undo(roomId, memberId).finally(() => this.#undoing.delete(running));
+    this.#undoing.add(running);
+  }
+
+  /** Gives up exactly one grant. False when the revoke did not land in its bounds. */
+  async #giveUp(owed: { roomId: string; sessionId: string; memberId: string; epoch: number }): Promise<boolean> {
+    try {
+      await revokeGrants({ pool: this.#pool, gateway: this.#gateway }, owed.roomId, { by: "exact", sessionId: owed.sessionId, memberId: owed.memberId, role: "player", epoch: owed.epoch }, undefined, this.#revokeBounds());
+      return true;
+    } catch (err) {
+      this.#log?.warn({ err, roomId: owed.roomId }, "a grant whose member was removed could not be given up yet");
+      return false;
+    }
   }
 
   #fly(roomId: string, memberId: string): void {

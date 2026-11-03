@@ -245,6 +245,8 @@ describe("joining as a player", () => {
     assert.equal(res.statusCode, 403);
     assert.equal(res.json<{ error: string }>().error, "stale_ticket");
     assert.equal((await c.me(roomId)).status, 403);
+    // The refusal is answered at once, and its member comes off right behind it.
+    for (let i = 0; i < 50 && (await memberKinds(roomId)).Late !== undefined; i++) await new Promise((r) => setTimeout(r, 20));
     assert.equal((await memberKinds(roomId)).Late, undefined);
   });
 
@@ -402,6 +404,7 @@ describe("join/complete through admitPlayer: the member first, the grant second"
     } finally {
       t.gateway.addMember = addMember;
     }
+    for (let i = 0; i < 50 && (await memberNames(roomId)).length > 1; i++) await new Promise((r) => setTimeout(r, 20));
     assert.deepEqual(await memberNames(roomId), ["Dungeon Master"]);
     assert.equal((await phone.me(roomId)).status, 403);
   });

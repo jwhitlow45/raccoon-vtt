@@ -360,6 +360,8 @@ async function runAdmissions(faults: Fault[]): Promise<void> {
         if (f.removedByDm && (f.grant === "ok" || f.grant === "loseApplied")) gateway.room(ROOM).delete(id);
       }
     };
+    const started = Date.now();
+    let answeredIn: number | null = null;
     const outcome = admissions.admit({
       roomId: ROOM,
       sessionId: session,
@@ -369,12 +371,15 @@ async function runAdmissions(faults: Fault[]): Promise<void> {
       },
       settled: (o) => settled.push(o),
     });
+    void outcome.then(() => (answeredIn = Date.now() - started));
     if (f.member === "slow" || f.member === "slowRefused") {
       assert.equal((await outcome).kind, "pending");
       assert.equal(settled.length, 0, "nothing settles while the member is out");
       release();
     }
     await sleep(15);
+    // 5 ms is the answer's bound. Whatever phase the attempt is in, and before any sweep, the caller has heard.
+    assert.notEqual(answeredIn, null, "ANSWER-BOUNDED: answered before any follow-up ran");
     if (down && commitSent) assert.equal(settled.length, 0, "NO-RESTORE-WHILE-UNKNOWN");
     down = false;
     for (let i = 0; i < 40 && (settled.length === 0 || admissions.followUps > 0); i++) {

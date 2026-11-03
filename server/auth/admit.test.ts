@@ -12,11 +12,13 @@ function member(id: string, kind: Member["kind"] = "player"): Member {
   return { id, rev: 1, name: id, color: "#123456", kind, createdAt: "2026-11-02T10:00:00.000Z" };
 }
 
-function setup(options: { memberMs?: number; checkoutMs?: number } = {}) {
+function setup(options: { memberMs?: number; checkoutMs?: number; answerMs?: number } = {}) {
   const db = new FakeAccessDb();
   db.addRoom(ROOM, { player_epoch: 3, dm_epoch: 5 });
   const gateway = new FakeRoomGateway();
-  const admissions = new Admissions({ pool: db.pool, gateway, options: { memberMs: options.memberMs ?? 40, checkoutMs: options.checkoutMs ?? 40 } });
+  // The answer's bound is past the checkout's unless a test says otherwise, so a refused checkout is answered as busy.
+  const answerMs = options.answerMs ?? options.memberMs ?? 200;
+  const admissions = new Admissions({ pool: db.pool, gateway, options: { memberMs: options.memberMs ?? 40, checkoutMs: options.checkoutMs ?? 40, answerMs } });
   const settled: AdmitOutcome[] = [];
   const plan = (who: AdmitWho, over: Partial<AdmitPlan> = {}): AdmitPlan => ({
     roomId: ROOM,
@@ -68,6 +70,8 @@ describe("admitPlayer", () => {
     );
     assert.equal(answer.kind, "refused");
     assert.equal(answer.kind === "refused" && answer.error instanceof HttpError && answer.error.code, "stale_ticket");
+    // The refusal is answered at once, and the member comes off behind it.
+    await admissions.followUp();
     assert.deepEqual(gateway.calls, ["add q1", "remove q1"]);
     const revokes = db.statements.filter((s) => s.startsWith("delete from grants where room_id = $1 and member_id = $2"));
     assert.equal(revokes.length, 2, "revoked before and after the removal");
@@ -84,6 +88,7 @@ describe("admitPlayer", () => {
     };
     const failed = await admissions.admit(plan({ kind: "new", member: member("q1") }));
     assert.equal(failed.kind === "refused" && failed.error instanceof HttpError && failed.error.code, "busy");
+    await admissions.followUp();
     assert.equal(gateway.room(ROOM).has("q1"), false);
 
     db.before = () => undefined;
@@ -98,6 +103,7 @@ describe("admitPlayer", () => {
     const timedOut = await admissions.admit(plan({ kind: "new", member: member("q2") }));
     stalled.open();
     assert.equal(timedOut.kind === "refused" && timedOut.error instanceof HttpError && timedOut.error.code, "busy");
+    await admissions.followUp();
     assert.equal(gateway.room(ROOM).has("q2"), false);
     assert.equal(db.grant(SESSION, ROOM), undefined);
   });
@@ -155,22 +161,23 @@ describe("admitPlayer", () => {
     assert.equal(answer.kind, "in");
   });
 
-  test("a reconcile that cannot read is followed up by the sweep, with nothing settled meanwhile", async () => {
-    const { db, gateway, admissions, settled, plan } = setup();
+  test("a reconcile that cannot read answers pending at once and is settled by the sweep, with nothing settled meanwhile", async () => {
+    const { db, gateway, admissions, settled, plan } = setup({ answerMs: 5_000 });
     db.loseCommit = "applied";
     let down = true;
     db.connecting = () => {
       if (down && db.statements.includes("commit")) throw new Error("no connection");
     };
-    const answer = admissions.admit(plan({ kind: "new", member: member("q1") }));
-    await sleep(80);
+    const started = Date.now();
+    const answer = await admissions.admit(plan({ kind: "new", member: member("q1") }));
+    assert.deepEqual(answer, { kind: "pending", memberId: "q1" }, "the caller never waits on the sweep");
+    assert.ok(Date.now() - started < 1_000, "long before the answer's bound");
     assert.equal(settled.length, 0, "NO-RESTORE-WHILE-UNKNOWN");
     assert.equal(admissions.inFlight(ROOM).has("q1"), true);
     await admissions.followUp();
     assert.equal(settled.length, 0);
     down = false;
     await admissions.followUp();
-    assert.equal((await answer).kind, "in");
     assert.deepEqual(settled.map((o) => o.kind), ["in"]);
     assert.equal(admissions.followUps, 0);
     assert.equal(gateway.room(ROOM).has("q1"), true);
@@ -204,6 +211,60 @@ describe("admitPlayer", () => {
     assert.equal(settled[0]?.kind, "refused");
     assert.equal(db.grant(SESSION, ROOM), undefined);
     assert.equal(admissions.inFlight(ROOM).size, 0);
+  });
+
+  test("past the member, every phase answers within the bound: a stalled grant checkout, a carry-on's, and a read-back after the commit", { timeout: 5_000 }, async () => {
+    // A checkout bound longer than the answer's: the grant's own refusal would come too late.
+    const { db, gateway, admissions, settled, plan } = setup({ checkoutMs: 400, answerMs: 40 });
+    const stalled = gate();
+    db.connecting = () => stalled.wait;
+    for (const who of [{ kind: "new", member: member("q1") }, { kind: "member", memberId: "pip" }] as const) {
+      if (who.kind === "member") gateway.room(ROOM).set("pip", member("pip"));
+      const started = Date.now();
+      const answer = await admissions.admit(plan(who));
+      assert.equal(answer.kind, "pending", `${who.kind}: ANSWER-BOUNDED`);
+      assert.ok(Date.now() - started < 300, `${who.kind}: answered in ${Date.now() - started} ms`);
+    }
+    for (let i = 0; i < 40 && settled.length < 2; i++) await sleep(25);
+    assert.deepEqual(settled.map(codeOf), ["busy", "busy"], "each settles once its checkout gives up");
+    stalled.open();
+    await admissions.followUp();
+    assert.equal(gateway.room(ROOM).has("q1"), false);
+
+    // The member read back after the commit hangs: the answer still comes, and the attempt settles as in on its own bound.
+    const late = setup({ answerMs: 40 });
+    const hang = gate();
+    late.gateway.getMember = async (roomId, memberId) => {
+      if (memberId === "q2") await hang.wait;
+      return late.gateway.room(roomId).get(memberId) ?? null;
+    };
+    const answer = await late.admissions.admit(late.plan({ kind: "new", member: member("q2") }));
+    assert.ok(answer.kind === "pending" || answer.kind === "in", answer.kind);
+    for (let i = 0; i < 20 && late.settled.length === 0; i++) await sleep(10);
+    assert.deepEqual(late.settled.map((o) => o.kind), ["in"], "the grant stands without the read");
+    hang.open();
+  });
+
+  test("an undo whose revokes get no connection answers the refusal at once and is owed, the member in flight until it comes off", { timeout: 5_000 }, async () => {
+    const { db, gateway, admissions, plan } = setup({ checkoutMs: 40, answerMs: 2_000 });
+    const stalled = gate();
+    // The grant's transaction is refused under the lock. Every connection after it stalls.
+    let connections = 0;
+    db.connecting = async () => {
+      if (++connections > 1) await stalled.wait;
+    };
+    const started = Date.now();
+    const answer = await admissions.admit(plan({ kind: "new", member: member("q1") }, { locked: () => Promise.reject(new HttpError(403, "stale_ticket")) }));
+    assert.equal(codeOf(answer), "stale_ticket");
+    assert.ok(Date.now() - started < 30, "the refusal never waits for the undo");
+    await admissions.followUp();
+    assert.equal(gateway.room(ROOM).has("q1"), true, "the revoke timed out, so the removal is owed");
+    assert.equal(admissions.inFlight(ROOM).has("q1"), true, "IN-FLIGHT-UNCLAIMED");
+    assert.equal(admissions.followUps, 1);
+    stalled.open();
+    await admissions.followUp();
+    assert.equal(gateway.room(ROOM).has("q1"), false);
+    assert.equal(admissions.followUps, 0);
   });
 
   test("a removal that does not land is owed and retried by the sweep, the member in flight until it lands", async () => {
@@ -313,6 +374,7 @@ describe("admitPlayer", () => {
     db.tables.grants.set(`${SESSION}|${ROOM}`, { session_id: SESSION, room_id: ROOM, member_id: "me", role: "player", epoch: 3 });
     const again = await admissions.admit(plan({ kind: "new", member: member("q1") }));
     assert.equal(again.kind === "refused" && again.error instanceof HttpError && again.error.code, "already_in");
+    await admissions.followUp();
     assert.equal(gateway.room(ROOM).has("q1"), false);
   });
 });

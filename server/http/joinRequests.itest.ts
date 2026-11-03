@@ -118,7 +118,8 @@ describe("join requests: asking, waiting and a DM's answer", () => {
   let t: TestApp;
   let k: ReturnType<typeof kit>;
   before(async () => {
-    t = await startTestApp({ access: { admissions: { memberMs: 300, checkoutMs: 300 } } });
+    // The answer's bound past the checkout's, so a refused checkout is answered as busy, and a quick sweep for the follow-ups.
+    t = await startTestApp({ access: { admissions: { memberMs: 300, checkoutMs: 300, answerMs: 1_000 }, sweepMs: 100 } });
     k = kit(t);
   });
   after(() => t.close());
@@ -518,7 +519,7 @@ describe("join requests: asking, waiting and a DM's answer", () => {
     assert.equal(k.error(await held), "request_gone");
   });
 
-  test("the pool exhausted at the grant's checkout is busy, with the member removed and the request back to waiting", async () => {
+  test("the pool exhausted at the grant's checkout is busy within its bound, the undo owed until the pool comes back", async () => {
     const { dm, roomId } = await k.room("ask");
     const id = await k.asked(t.client(), roomId);
     const addMember = t.gateway.addMember;
@@ -526,12 +527,8 @@ describe("join requests: asking, waiting and a DM's answer", () => {
     t.gateway.addMember = async (room, member) => {
       await addMember.call(t.gateway, room, member);
       // Every connection taken once the member is in, as a stalled database
-      // would, and given back after the grant's 300 ms checkout bound, so the
-      // undo that follows can run.
+      // would, and kept past the answer: the undo's revokes get none either.
       while (held.length < 10) held.push(await t.pool.connect());
-      setTimeout(() => {
-        for (const c of held) c.release();
-      }, 600);
     };
     let res;
     const started = Date.now();
@@ -540,11 +537,20 @@ describe("join requests: asking, waiting and a DM's answer", () => {
     } finally {
       t.gateway.addMember = addMember;
     }
-    assert.ok(Date.now() - started >= 300, "it waited out the checkout bound");
-    assert.equal(res.statusCode, 503, res.body);
-    assert.equal(k.error(res), "busy");
-    for (let i = 0; i < 50 && (await k.members(roomId)).length > 1; i++) await new Promise((r) => setTimeout(r, 20));
-    assert.deepEqual(await k.members(roomId), ["Dungeon Master"]);
+    const took = Date.now() - started;
+    try {
+      assert.equal(res.statusCode, 503, res.body);
+      assert.equal(k.error(res), "busy");
+      assert.ok(took >= 300 && took < 900, `answered after the 300 ms checkout bound and before the 1 s answer bound, in ${took} ms`);
+      // Still no connection: the removal is owed, and its member is kept from every claim meanwhile.
+      await new Promise((r) => setTimeout(r, 400));
+      const { rows } = await held[0]!.query<{ state: RoomState }>("select state from room_snapshots where room_id = $1", [roomId]);
+      assert.equal(Object.keys(rows[0]?.state.members ?? {}).length, 2, "the undo waits for the pool, never the answer for the undo");
+    } finally {
+      for (const c of held) c.release();
+    }
+    for (let i = 0; i < 100 && (await k.members(roomId)).length > 1; i++) await new Promise((r) => setTimeout(r, 20));
+    assert.deepEqual(await k.members(roomId), ["Dungeon Master"], "the sweep lands the owed removal once the pool is back");
     assert.deepEqual((await k.list(dm, roomId)).requests.map((r) => r.id), [id]);
   });
 
