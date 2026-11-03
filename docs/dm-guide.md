@@ -556,7 +556,8 @@ You set it in the scene's settings, in a fold named **Weather** inside **What pl
 **What it does to rolls.** The rules in the SRD give a few clear effects, and the app applies the ones that need no judgment from you:
 
 - Heavy rain, heavy snow and a sandstorm give Disadvantage on Wisdom (Perception) checks. A creature's roll option shows it ("Dis: Heavy rain"), the roller can change it as they can for a condition, and a roll request's card lists it.
-- Strong wind gives Disadvantage on an attack the app knows is made with a ranged weapon, such as a Shortbow or a character's Longbow. A thrown weapon, or a ranged attack the app cannot tell is a weapon (a spell-like Force Bolt, say), only gets a reminder, so you decide.
+- Strong wind gives Disadvantage on an attack the app knows is made with a ranged weapon, such as a Shortbow or a character's Longbow. A weapon a player imported from D&D Beyond counts by what D&D Beyond says it is, so a magic bow with a name of its own still counts. A thrown weapon, or a ranged attack the app cannot tell is a weapon (a spell-like Force Bolt, say), only gets a reminder, so you decide. A character's weapon the app cannot place, such as a Longsword, gets the same reminder, since it cannot tell how the weapon was used.
+- You see all of this on the Dice panel before anyone rolls. A bow's Attack button shows Dis, and the line under the creature's attacks says why ("Longbow Dis: Strong wind") along with any reminder, such as the one for a thrown Javelin. When you roll one attack for several creatures at once, the same words appear under it.
 - Patchy fog and heavy fog only remind. Seeing through fog depends on what a creature is trying to see, which is a call for you.
 
 Only creatures whose token stands on that scene are in its weather. A character with no token there rolls as usual. When the party is indoors on a stormy scene, turn off **Weather rules on rolls**: the weather still shows, and rolls ignore it.

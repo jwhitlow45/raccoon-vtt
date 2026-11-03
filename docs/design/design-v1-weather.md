@@ -1,6 +1,6 @@
 # raccoon-vtt: weather over the map
 
-Status: built (2026-11-02). Draft 3, revised after design review rounds 1 and 2, whose findings the "Design review" section at the end sums up. Decisions D-261102-125 to D-261102-134 (section 14). The "As built" section at the end says where the build went its own way, and the numbers in sections 9.4 and 10 are the design's, so read them with it.
+Status: built (2026-11-02). Draft 3, revised after design review rounds 1 and 2, whose findings the "Design review" section at the end sums up. Decisions D-261102-125 to D-261102-134 (section 13). The "As built" section at the end says where the build went its own way, and the numbers in sections 9.4 and 10 are the design's, so read them with it.
 
 Asked for in docs/design/mvp.md section 11, Later: "Weather overlays." The project owner's order for the Later list (D-261102-007) puts weather fourth, after snap off, join requests and the calendar, and before the light theme.
 
@@ -12,7 +12,7 @@ Asked for in docs/design/mvp.md section 11, Later: "Weather overlays." The proje
 - **Cheap by design.** Particles in screen space at 1 device pixel per CSS pixel, 30 ticks a second owned by one controller, counted by the screen's area and capped. It stops whenever nobody can see it.
 - **Every device decides how it looks.** This device, Weather: Moving (the default), Still or Off, and the same three in the table display's tap menu. Reduced motion and Low power keep it still, and a device that cannot keep up steps itself down to half the particles, then to still.
 - **Nothing new reaches a player** but the weather of the scene they are on, which names nothing of the map.
-- **Versions:** the next free op and snapshot versions, 41 and 32 today, both identity steps, so an older build refuses a room that may hold weather (section 9.4).
+- **Versions:** the next free op and snapshot versions, both identity steps, so an older build refuses a room that may hold weather (section 9.4). As built they are 43 and 33.
 
 ## 2. The rules (SRD 5.2.1)
 
@@ -35,11 +35,11 @@ What the app does with them (D-261102-125, D-261102-132):
 | Heavy fog (Fog, Heavy) | Heavily Obscured | Unchanged | Note on Perception checks and attack rolls: "Heavy fog: Heavily Obscured. A creature trying to see something in it has the Blinded condition." |
 | Light rain, Light snow, Falling leaves, Ash, Blowing sand, Moderate wind, Calm | None | Unchanged | Nothing |
 
-- **Why sight stays as it is.** Lightly Obscured ground is visible ground with Disadvantage, as the app's sight already treats Dim Light. Heavy fog over a whole scene would, by the rule, black out the map for every player but a creature with Blindsight. A DM uses heavy fog as an area (Fog Cloud) far more than as a scene's weather, and hides what the party cannot see with the tools that exist. A sight distance cap is a later choice (section 15).
+- **Why sight stays as it is.** Lightly Obscured ground is visible ground with Disadvantage, as the app's sight already treats Dim Light. Heavy fog over a whole scene would, by the rule, black out the map for every player but a creature with Blindsight. A DM uses heavy fog as an area (Fog Cloud) far more than as a scene's weather, and hides what the party cannot see with the tools that exist. A sight distance cap is a later choice (section 14).
 - **Why presets, not only notes.** The roll reminders' rule (shared/rules/rollReminders.ts) presets a roll only where it holds without a judgment the app cannot make. "All Wisdom (Perception) checks" needs none, and "ranged attack rolls with weapons" needs none once the app knows the weapon (2.1). Patchy fog's "that rely on sight" and heavy fog's "trying to see something" need one, so they remind only.
 - **Fog and strong wind refuse each other**, since strong wind "disperses fog". A sandstorm is a strong wind, so Sand, Heavy needs Strong. The schema refuses both mixes and the picker never offers them.
 - **Which creatures.** A creature is in the weather when its token stands on that scene: a token target's own scene, or for a character the scene of its token on the players' scene, else on the viewer's scene. A creature with no token there gets nothing. For an indoor scene the DM turns off "Weather rules on rolls" (4.1), or picks a light kind, and the roller can still change any preset, as with a condition's.
-- **The words are the SRD's.** `scripts/srd-import.ts` adds Obscured Areas, Heavy Precipitation, Strong Wind and the two weapon lists to `shared/srd/rules-text.json` under a new `environment` key, and every rule's `quotes` must be found there, as the reminder rules' are. The Obscured Areas paragraph holds two em dashes, which `assertNoEmDash` refuses, so WX-A adds two `EM_DASH_FIXES` entries: `"Lightly Obscured area\u2014such as an area with Dim Light, patchy fog, or moderate foliage\u2014you have"` becomes `"Lightly Obscured area, such as an area with Dim Light, patchy fog, or moderate foliage, you have"`, and `"Heavily Obscured area\u2014such as an area with Darkness, heavy fog, or dense foliage\u2014is opaque"` becomes `"Heavily Obscured area, such as an area with Darkness, heavy fog, or dense foliage, is opaque"`. Each entry matches the paragraph as the import joins its lines, and the quotes above are the rewritten words.
+- **The words are the SRD's.** `scripts/srd-import.ts` adds Obscured Areas, Heavy Precipitation, Strong Wind and the two weapon lists to `shared/srd/rules-text.json` under a new `environment` key, and every rule's `quotes` must be found there, as the reminder rules' are. The Obscured Areas paragraph holds two em dashes, which `assertNoEmDash` refuses, so the import adds two `EM_DASH_FIXES` entries: `"Lightly Obscured area\u2014such as an area with Dim Light, patchy fog, or moderate foliage\u2014you have"` becomes `"Lightly Obscured area, such as an area with Dim Light, patchy fog, or moderate foliage, you have"`, and `"Heavily Obscured area\u2014such as an area with Darkness, heavy fog, or dense foliage\u2014is opaque"` becomes `"Heavily Obscured area, such as an area with Darkness, heavy fog, or dense foliage, is opaque"`. Each entry matches the paragraph as the import joins its lines, and the quotes above are the rewritten words.
 
 ### 2.1 Which attacks are with a ranged weapon
 
@@ -55,7 +55,7 @@ Today every attack test is `{ kind: "attack" }` or `{ kind: "attack", spell: tru
 
 - **Foundry VTT** sets one weather effect per scene in the scene's settings, drawn over the map as particles and shaders, and can keep it out from under roofs. It is a look only. Each player can turn effects down on their own client.
 - **Owlbear Rodeo's weather extension** attaches an effect to a map, with a type, a direction, a speed and a density.
-- Taken from them: one per scene, set where the scene is set, a direction, and a per-device way down. Left out: masks and roofs (section 15), free sliders for speed and density, and lightning, since a flash over the whole map risks photosensitive seizures (WCAG 2.3.1).
+- Taken from them: one per scene, set where the scene is set, a direction, and a per-device way down. Left out: masks and roofs (section 14), free sliders for speed and density, and lightning, since a flash over the whole map risks photosensitive seizures (WCAG 2.3.1).
 
 ## 4. What the DM and players see and do
 
@@ -116,7 +116,7 @@ On the DM's device, weather hides while the Builder, Fog, Line up grid or Traps 
 
 **Top-down** (D-261102-128). The stage's layers become map, board, **weather**, tokens, overlay. Weather lies over the map image and everything the board layer draws, and under every token body, the party's sight, the fog, and the token decor on the overlay layer. So the fog hides it from players where they have not explored, the darkness dims it where they cannot see, and no token's name, chips, badge or HP bar sits under it. Konva warns past five layers on a stage (`MAX_LAYERS_NUMBER`), so this is the stage's last spare one, and a test holds the count.
 
-The board layer's own text does lie under it: area names, trap pills, map labels and the DM's drawn text. Areas' and traps' pills already publish their boxes (TemplateLayer.tsx and TrapLayer.tsx through `usePublishPills`), so a later build could mask the weather around them, but map labels and drawn text publish none, and a mask is extra work on every tick. Masking is deferred (section 15): they stay under the rain, and the shot pass checks them. With each kind at Heavy and Still, an area name and a trap pill read at 4.5:1 or better against their own backing, measured from pixels, and a kind that misses lowers its veil until it passes. In Isometric those names stand upright, above the weather.
+The board layer's own text does lie under it: area names, trap pills, map labels and the DM's drawn text. Areas' and traps' pills already publish their boxes (TemplateLayer.tsx and TrapLayer.tsx through `usePublishPills`), so a later build could mask the weather around them, but map labels and drawn text publish none, and a mask is extra work on every tick. Masking is deferred (section 14): they stay under the rain, and the shot pass checks them. With each kind at Heavy and Still, an area name and a trap pill read at 4.5:1 or better against their own backing, measured from pixels, and a kind that misses lowers its veil until it passes. In Isometric those names stand upright, above the weather.
 
 **Isometric.** The ground stage keeps its one layer. The main stage becomes relief, **weather**, drag, upright. Rain falls down the screen in front of the ground, raised ground and standees, and under the drag layer's moving marks, ruler readings and other members' drags, and the upright layer's names, chips, labels, pins and silhouettes. It lies over the ground's fog too, the DM's included, clipped to the scene's ground outline (the bounds through the view's turn and squash), so it falls over black where a player has not explored. That shows nothing: it is the same rain everywhere inside a shape players already hold. A standee this device drags rises into the drag layer, above the rain, until it drops. Raised ground at the map's far edge rises past the outline, so its tops above that edge get no rain. That seam is accepted and recorded, since growing the clip by the relief's height would draw rain past the map.
 
@@ -202,7 +202,7 @@ A 2 s warm-up comes before the first window and again after every start, every r
 
 ### 9.1 State
 
-In a new `shared/weather.ts`, the contract the other lanes start from:
+In a new `shared/weather.ts`, the contract the rest of the build reads:
 
 ```ts
 export const WEATHER_KINDS = ["clear", "rain", "snow", "fog", "leaves", "ash", "sand"] as const;
@@ -253,13 +253,13 @@ export function weatherName(w: SceneWeather): string;
 
 ## 10. Files
 
-**Shared and server (WX-A).** `shared/weather.ts` (new), `shared/model.ts`, `shared/protocol.ts`, `shared/reducer/room.ts`, `shared/project.ts` (`SCENE_FOR_PLAYERS.weather: "copied"`, with "It names a look and its rules, nothing of the map", and `projectSceneCtx`), `shared/migrate.ts`, `shared/undoScope.ts`, `server/rooms/undoLabels.ts`, `server/rooms/stateSchema.ts` and the import's normalizing, `shared/rules/weather.ts` (new: `weatherRules`, the presets and notes, each with `quotes`), `shared/rules/rollReminders.ts` (`reminderPreset` and `rollReminders` take an optional weather, and a reminder's key may be a weather rule's), `shared/dice/bonus.ts` (`D20Test` and `NamedRoll` of 2.1), `shared/dice/named.ts` (range and weapon, `rangedOf` moved in, `attackTest`), `shared/rules/pcStats.ts`, `client/features/pcstats/fromBlock.ts` (reads the moved helper), `scripts/srd-import.ts` (the `environment` entries, the weapon lists and the two `EM_DASH_FIXES`), `shared/srd/rules-text.json` and `shared/srd/rules-text.ts`.
+**Shared and server.** `shared/weather.ts` (new), `shared/model.ts`, `shared/protocol.ts`, `shared/reducer/room.ts`, `shared/project.ts` (`SCENE_FOR_PLAYERS.weather: "copied"`, with "It names a look and its rules, nothing of the map", and `projectSceneCtx`), `shared/migrate.ts`, `shared/undoScope.ts`, `server/rooms/undoLabels.ts`, `server/rooms/stateSchema.ts` and the import's normalizing, `shared/rules/weather.ts` (new: `weatherRules`, the presets and notes, each with `quotes`), `shared/rules/rollReminders.ts` (`reminderPreset` and `rollReminders` take an optional weather, and a reminder's key may be a weather rule's), `shared/dice/bonus.ts` (`D20Test` and `NamedRoll` of 2.1), `shared/dice/named.ts` (range and weapon, `rangedOf` moved in, `attackTest`), `shared/rules/pcStats.ts`, `client/features/pcstats/fromBlock.ts` (reads the moved helper), `scripts/srd-import.ts` (the `environment` entries, the weapon lists and the two `EM_DASH_FIXES`), `shared/srd/rules-text.json` and `shared/srd/rules-text.ts`.
 
-**The drawing core (WX-B).** All new, in `client/features/weather/`: `looks.ts` (5.3 as data), `sim.ts` (the field: counts by area and caps, seeded spots, the step, the wrap with the pan, a resize that keeps the first particles, half density), `draw.ts` (each kind into a 2D context, reading the field only), `textures.ts` (the noise sheet and the leaf atlas, made in code), `mode.ts` (the mode of 5.2, the tick gate and the step-down of 6.3 with its warm-ups, as one pure state machine).
+**The drawing core.** All new, in `client/features/weather/`: `looks.ts` (5.3 as data), `sim.ts` (the field: counts by area and caps, seeded spots, the step, the wrap with the pan, a resize that keeps the first particles, half density), `draw.ts` (each kind into a 2D context, reading the field only), `textures.ts` (the noise sheet and the leaf atlas, made in code), `mode.ts` (the mode of 5.2, the tick gate and the step-down of 6.3 with its warm-ups, as one pure state machine).
 
-**The board and the devices (WX-C).** `client/features/weather/WeatherController.tsx`, `WeatherLayer.tsx` and `store.ts` (new), one mount line each in `client/canvas/Stage.tsx` and `client/canvas/relief/IsoBoard.tsx`, the controller's line and the five-layer comment in `client/features/layers.ts`, the covered-room signal in `client/features/dm/PlayerPreview.tsx`, `client/features/device/settings.ts` (`rvtt.weather`), `client/features/device/ThisDevice.tsx`, the display's menu in `client/features/display/DisplayRoom.tsx` and `remember.ts`, `scripts/bench-weather.ts` (new), `e2e/weather.e2e.ts` (new, E2E_PORT + 33, the first free offset today).
+**The board and the devices.** `client/features/weather/WeatherController.tsx`, `WeatherLayer.tsx` and `store.ts` (new), one mount line each in `client/canvas/Stage.tsx` and `client/canvas/relief/IsoBoard.tsx`, the controller's line and the five-layer comment in `client/features/layers.ts`, the covered-room signal in `client/features/dm/PlayerPreview.tsx`, `client/features/device/settings.ts` (`rvtt.weather`), `client/features/device/ThisDevice.tsx`, the display's menu in `client/features/display/DisplayRoom.tsx` and `remember.ts`, `scripts/bench-weather.ts` (new), `e2e/weather.e2e.ts` (new, E2E_PORT + 33, the first free offset today).
 
-**The DM's controls and rolls (WX-D).** `client/features/weather/WeatherSettings.tsx` (new, the fold), `client/features/weather/WeatherVoice.tsx` (new, the status lines), `client/features/view/choice.ts` (`sayJoined`), `client/features/weather/forCreature.ts` (new, 2's "which creatures"), `client/components/Icon.tsx` (`windToward`, drawn for the app, so no credit changes), `client/features/vision/VisionSettings.tsx` (the fold's mount), `client/features/scenes/sceneSummary.ts`, `client/features/dice/presets.ts`, `client/features/dice/RollOptions.tsx` and `client/features/dice/groupSave/GroupOptions.tsx` (`attackTest`), `client/features/dice/options.ts` and `client/features/rolls/card.ts` (the sources' names), `client/features/rolls/PlayerRolls.tsx` (a request's reminders), steps in `e2e/scenesetup.e2e.ts` and `e2e/dice.e2e.ts`, roots in `e2e/alignmentRoom.ts`, and the docs commit: FEATURES.md (a "Weather" section after Fog and vision, This device's line, Low power's, the table display's menu), `docs/dm-guide.md` (a short Weather section in guide prose, with a screenshot), `docs/design/design.md` 14.2 (five layers, and the one loop at rest) and its quote of Low power's help, this note and its README line.
+**The DM's controls and rolls.** `client/features/weather/WeatherSettings.tsx` (new, the fold), `client/features/weather/WeatherVoice.ts` (new, the status lines), `client/features/view/choice.ts` (`sayJoined`), `client/features/weather/forCreature.ts` (new, 2's "which creatures"), `client/components/Icon.tsx` (`windToward`, drawn for the app, so no credit changes), `client/features/vision/VisionSettings.tsx` (the fold's mount), `client/features/scenes/sceneSummary.ts`, `client/features/dice/presets.ts`, `client/features/dice/RollOptions.tsx` and `client/features/dice/groupSave/GroupOptions.tsx` (`attackTest`), `client/features/dice/options.ts` and `client/features/rolls/card.ts` (the sources' names), `client/features/rolls/PlayerRolls.tsx` (a request's reminders), steps in `e2e/scenesetup.e2e.ts` and `e2e/dice.e2e.ts`, roots in `e2e/alignmentRoom.ts`, and the docs: FEATURES.md (a "Weather" section after Fog and vision, This device's line, Low power's, the table display's menu), `docs/dm-guide.md` (a short Weather section in guide prose, with a screenshot), `docs/design/design.md` 14.2 (five layers, and the one loop at rest) and its quote of Low power's help, this note and its README line.
 
 ## 11. Cases
 
@@ -323,7 +323,7 @@ export function weatherName(w: SceneWeather): string;
   - Liveness: with Moving, the map shown and a weather, a tick comes within 100 ms.
 - A controller test with a real Konva stage and the isometric scheduler: ticks call `draw()` in their own frame, never `batchDraw()`. A camera change on either stage, and one after switching views, runs the sceneFunc once, through the stage's own `batchDraw`, with the stage's camera, counts it as a camera draw, and makes no extra `draw()`.
 - `forCreature.test.ts`, `settings.test.ts` (`parseWeatherMode`), display `remember.test.ts` (its weather apart from the member's), `choice.test.ts` (`sayJoined`, with the view's line first and the weather's first), `WeatherSettings` render tests (every `buildWeather` rule of 4.1, Wind under Clear, disabled winds and their help, the compass's names, the switch), `sceneSummary.test.ts`.
-- Mutation check per lane: remove the fog and wind refusal, the weapon signal, the projection's copy, the 30 ms gate, the read-only sceneFunc, the step clamp, the warm-up restart and the step-down's one-way rule, and say which test fails.
+- Mutation check: remove the fog and wind refusal, the weapon signal, the projection's copy, the 30 ms gate, the read-only sceneFunc, the step clamp, the warm-up restart and the step-down's one-way rule, and say which test fails.
 
 **Integration** (`server/rooms/weather.itest.ts`): the DM's weather reaches a player on that scene and not one elsewhere, a player's `scene.update` is refused, a stored version 40 op then a version 41 op replay, a backup round trip keeps it in its stored form, and an import of an impossible weather is refused.
 
@@ -331,20 +331,7 @@ export function weatherName(w: SceneWeather): string;
 
 **Bench:** `scripts/bench-weather.ts`, each kind heavy with strong wind and none, Top-down and Isometric, at rest, panning and dragging, gated by 6.1.
 
-## 13. Lane plan
-
-WX-A's first commit is the contract: `shared/weather.ts`, `Scene.weather`, and the new `D20Test` and `NamedRoll` fields. WX-B's first commit is its API (`looks`, `sim`, `draw` and `mode` signatures that draw nothing yet). The other lanes start from those.
-
-| Lane | What | Files | Size |
-|---|---|---|---|
-| WX-A | Model, ops, reducer, projection, versions, undo, the rules, the weapon signal and their SRD text | section 10, shared and server | M |
-| WX-B | The field, the kinds, the textures, the mode, tick gate and step-down, all pure | section 10, drawing core | M |
-| WX-C | The layer, the controller and its timing, the stage mounts, the preview signal, This device, the display's menu, the bench, weather.e2e | section 10, board and devices | M |
-| WX-D | The fold, the status, presets and attack tests on the client, the icon, UI e2e, alignment roots, the docs | section 10, controls and rolls | M |
-
-The files are disjoint. WX-C stacks on WX-B and WX-D on WX-C before their e2e runs, since the steps need the canvas and its hooks. One review for the stack. FEATURES.md and the DM guide are WX-D's last commit alone, and WX-C's report lists its This device and display words for it.
-
-## 14. Decisions
+## 13. Decisions
 
 - **D-261102-125** Weather never changes sight. It is a look, plus roll presets and notes. Rejected: a sight distance cap for heavy fog (no SRD rule gives a distance, it changes what the server sends each player, so it needs op gating, golden fixtures and per-player vision work), and a look with no rules at all (the SRD gives two clear ones).
 - **D-261102-126** One weather per scene, on the scene. Rejected: areas or masks of weather (a mask over unexplored rooms would send players their shapes, and a client-derived one is a project of its own), weather per map phase (later), one weather for the whole room (scenes are different places).
@@ -357,13 +344,7 @@ The files are disjoint. WX-C stacks on WX-B and WX-D on WX-C before their e2e ru
 - **D-261102-133** The next free op and snapshot versions as identity steps, or one shared bump. Rejected: no bump (an older build would meet a field its strict schemas refuse and fail on the room instead of refusing it cleanly).
 - **D-261102-134** Players learn of weather by seeing it, by their rolls and by the polite status, joined with the view's line when both come. Duplicate copies it, Like and the copy sheet do not, new scenes start clear. Rejected: a log line or a toast on every change (the DM may adjust it several times while setting a mood), a second live region (two lines at once would talk over each other), copying it with Use these settings.
 
-Look hardest at:
-1. The two placements (D-261102-128): under the creatures in Top-down with board text under the rain, in front of them in Isometric, and rain over the ground fog in Isometric.
-2. The one loop at rest (design.md 14.2's "no animation loop at rest"), Moving by default on phones, and the step-down's thresholds, which no phone has checked yet.
-3. The weapon signal of 2.1, which leaves monsters' unnamed bows to a note.
-4. The version pair, which other Later-list builds may share.
-
-## 15. Later
+## 14. Later
 
 - Weather kept out of built rooms, read from the build each device already holds.
 - Weather masked around area and trap pills in Top-down, from the boxes `usePublishPills` already publishes.
@@ -375,38 +356,42 @@ Look hardest at:
 
 ## As built
 
-Where the build went its own way, by lane.
+Where the build went its own way, by part.
 
-**Model, ops and rules (WX-A).**
+**Model, ops and rules.**
 - The versions are OP_VERSION 43 and SNAPSHOT_VERSION 33, after the calendar's 42 and 32, both identity steps (9.4 says 41 and 32).
 - The Play label reads "changing the weather of the scene Forest road", the form every scene label uses.
 - The rules lines for heavy snow, a sandstorm and patchy fog, and the form with "Weather rules on rolls" off, are the build's words. Heavy rain's, heavy fog's and strong wind's are section 4.1's.
 - The SRD bows not named for a weapon (Great Bow, Bone Bow, Enchanting Bow, Necrotic Bow) only remind, as 2.1 accepts.
 - `server/rooms/remap.ts` holds the import's one line of normalizing.
+- A weapon imported from D&D Beyond keeps D&D Beyond's own word on its range on its roll (`PcRoll.range`, ranged or either, in the same version step), so a magic bow named for itself counts for strong wind. A roll the player edits goes by its name again, and the range is outside re-sync's hash, so a roll imported before it was read is no change. D&D Beyond's 2014 names such as "Crossbow, Light" read as the SRD's Light Crossbow.
 
-**The drawing core and the board (WX-B and WX-C).**
+**The drawing core and the board.**
 - Konva is 10.9.0, not 10.7.1. `setPixelRatio` and the 0 by 0 hit canvas hold.
 - The controller's clock is tested in Node with hand-run frames (`store.test.ts`), and the real Konva stage is tested in the browser (`weather.e2e.ts` wx-1 and wx-6), since Node has no canvas.
-- A full-screen sheet is a signal of the bar dock (`sheetFull`), and each layer registration counts as a remount for the step-down's warm-up.
+- A full-screen sheet is a signal of the bar dock (`sheetFull`), and each layer registration counts as a remount for the step-down's warm-up. The mode has no input for a frozen map tree or a closed room: neither has a layer registered, which `layer` already says.
+- A scene edit anywhere sends the whole scene, so the room keeps its look and its particles while the weather draws the same. The same weather blowing another way keeps the particles, turns their motion, and redraws a layer held still once.
 - This device's help line sits under the group's name, where the radio cards put help, and shows only while Moving is chosen. The table display keeps its choice under its own key, apart from the member's.
-- wx-9's contrast check reads each pill's words from the screen, held still, on a 2x page where the words draw whole. At 1x a blurred Snare read 4.02:1 once on sand. Every heavy kind passes at 2x.
-- **The step-down (6.3) counts each tick's whole frame, paint included.** The sceneFunc itself took 0.1 ms on a canvas with no GPU, and the cost landed in painting and compositing after it. Each loop frame posts a message task that runs after paint. A tick's cost is its frame minus the median of the recent frames with no tick, and the room keeps the median of the last 15 ticks once it has 5, so one long task elsewhere cannot step a GPU device down. A tick reports `max(sceneMs, frameCost x SLOW_DRAW_MS / 2)` to the mode, so section 6.1's 2 ms a tick (60 ms a second) meets the mode's 4 ms line. On a software canvas every kind steps to Still within about 8 seconds. On a GPU at 4 times slowdown no kind steps down, and rest costs 13 to 51 ms a second over no weather, within the budget of 60.
-- The bench (`scripts/bench-weather.ts`, 3x phone, processor slowed 4 times, and `--software` for a canvas with no GPU) holds 6.1's gates, with pan and drag frames within 0.1 ms of none.
+- wx-9's contrast check reads each pill's words from the screen, held still, at 2x and at 1x, and first with no weather, so a failure says whether the words or the weather lost the contrast. With no weather they read about 13:1 at both. A sandstorm read 4.2:1 at 1x and 4.5:1 at 2x, so its haze is 24% and its noise sheet 14%, under 5.3's 30% and 20%, and it now reads 5.4:1 or better at both. Every other heavy kind reads 8:1 or better.
+- **The step-down (6.3) also judges what each tick adds to its whole frame, paint included.** On a canvas with no GPU the sceneFunc took 0.1 ms and the cost landed in painting after it, so each loop frame is timed from its start to a message task that runs after its paint, and a measure that comes back after the next frame has started counts nothing. A tick's cost is its frame less the mean of the frames on either side of it that have no tick, each within one and a half frames of it, and a tick with no such neighbour says nothing. So a pan, a drag, the dice or the isometric board's background work, which the frames beside the tick pay too, cancels out within a frame. At 33 frames a second or fewer every frame ticks, so the loop holds one tick in eight, which leaves a frame to measure against and shows the particles one frame longer. A window steps down when the median of its ticks' costs is over 2 ms, section 6.1's 60 ms a second at 30 ticks, beside 6.3's 4 ms draw and 50 ms gap. With the 2 s warm-up and 3 s windows, a particle kind halves about 5 s after it starts and holds still about 10 s after, and fog and veils hold still at about 5 s.
+- The bench (`scripts/bench-weather.ts`, 3x phone, processor slowed 4 times, and `--software` for a canvas with no GPU) reads each kind's rest once the step-down has settled, held still or two windows past its last step, and the level a fresh page is left at after 11 s of panning. With a GPU no kind steps down, panned or not, ticks add 0.1 to 0.8 ms to their frames, rest costs 13 to 51 ms a second over no weather, and pan and drag frames stay within 0.1 ms of none. With no GPU every kind holds still in both views, its ticks having added 1.7 to 8.6 ms to their frames, and rest is then within 0.2 ms a second of none. Its Isometric pan read 33.4 ms at the 95th percentile with rain and 16.8 with none, one frame's step that earlier software runs showed with no weather too, so that one gate line is not held without a GPU.
 
-**The controls and rolls (WX-D).**
+**The controls and rolls.**
 - `buildWeather` lives in `client/features/weather/buildWeather.ts`, apart from the fold's component, so its rules test as plain functions. A pick the weather cannot hold (Strong in fog, Calm or Moderate in a sandstorm) changes nothing, since the fold disables those.
 - A new kind always starts light, so a sandstorm or heavy fog is a pick of its own, and Clear drops the strength. Wind and direction carry over.
 - Calm needs no code to forget the direction: the stored weather keeps `toward` only with a wind, and the picker is rebuilt from it.
 - The compass is nine 44 px cells, the centre one holding the small square, so a row of it is as tall as its buttons.
 - The folded What players see summary names the weather after the light, before Sight.
-- The status speaks through the View button's voice (`useWeatherVoice` beside `useViewVoice`), joined by `sayJoined` within 500 ms of a view line, the view's line first in either order. A change of the wind's direction or of the rules switch names nothing new, so it says nothing.
+- The status speaks through the View button's voice (`useWeatherVoice` beside `useViewVoice`), joined by `sayJoined` within 500 ms of a view line, the view's line first in either order. A change of the wind's direction or of the rules switch names nothing new, so it says nothing. What it last said is the Room page's (`weatherSeenSlot`), so a View button that mounts again says nothing again. The table display speaks the weather in its own polite status too.
+- The wind's forced reason ("The wind is moderate now: strong wind disperses fog.") shows only while the scene holds the weather that pick sent, so an Undo or a co-DM's change takes it away.
 - `presetFor` reads the weather of the scene the creature stands on (`forCreature.ts`), for which `DiceView` gained the viewer's scene. A request's card passes the same weather to `rollReminders`.
 - `options.ts` and `card.ts` name a weather source through `WEATHER_RULE_NAMES`, as "Dis: Heavy rain".
+- 4.2's notes show on the Dice panel. Every reminder a roll's preset holds, a condition's or the weather's, joins the name of its option (Initiative and the death save included), and a group of attacks says under its label what bears on them all, what only some weapons bring ("Longbow Dis: Strong wind") and each reminder once. An attack's button shows the Disadvantage its own weapon brings, where it showed none before, since the group's label no longer says every weapon's preset. A shared attack for several creatures says its attackers' preset words and reminders under it.
 - A shared attack's rolls are built by `attackPanelRolls`, so each creature's attack takes its own test.
 
 ## Design review
 
-Two rounds of design review, by Claude and Codex reviewers, changed this note before the build, and every finding was adopted:
+Two rounds of design review changed this note before the build, and every finding was adopted:
 - 2.1: a positive ranged weapon signal on `NamedRoll` and `D20Test`, from the entry's text and the SRD's weapon names, with notes for every other ranged attack. `NamedRoll` gains `spell`, and the character's path is `namedRollOf`.
 - 4.1 and 4.2: Clear with a wind is a weather of its own, and the fold's open state is the component's. `sayJoined` puts the view's line and the weather's in one announcement.
 - 5.1 and 5.2: the board's own text stays under the rain with a measured contrast check, the controller alone steps the field and calls `draw()`, one camera source serves both views, View as a player stops the covered room's loop, and the lazy chunk is a `retryableLazy` inside the quiet failure report.
