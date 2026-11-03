@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -6,7 +7,7 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import type { LogEntry } from "#shared/model.ts";
 import { ConsoleWatch, openSideTab, OpSocket, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
-import { undoSetup } from "./helpers/undoScope.ts";
+import { playControl, undoSetup } from "./helpers/undoScope.ts";
 
 /**
  * The in-game clock's Time panel (docs/design/design-v1-calendar.md 4), on the
@@ -21,8 +22,14 @@ import { undoSetup } from "./helpers/undoScope.ts";
  *   gives Pat the clock as it is and none of the lines written while it
  *   was hidden.
  * - ck-7: Stop the clock takes a second tap, and Undo setup brings it back.
- * Pat's own Time panel, the toast, the party rest card and the top bar chip
- * are the second part of this file, after the top bar's lane.
+ * - ck-2b: Pat's toast for a step while his Log and Time panel are closed,
+ *   and none for the DM's own device.
+ * - ck-3: the party's Long Rest moves the clock 8 hours first, each stamp
+ *   marks its end and never reaches Pat, the card's note gives the next
+ *   start, and one Undo takes the rest back.
+ * - ck-5: Pat's Time panel, open when sharing stops, says so until closed.
+ * - ck-6: the top bar chip on a computer opens the Time panel and never
+ *   overflows Pat's row.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus forty, one file after
  * another. The other environment variables are the smoke run's
@@ -49,7 +56,7 @@ const patSocket = new SocketWatch("pat");
 const dmConsole = new ConsoleWatch("dm");
 const patConsole = new ConsoleWatch("pat");
 
-const run = { roomId: "", roomName: `E2E clock ${new Date().toISOString().slice(0, 19)}`, patId: "" };
+const run = { roomId: "", roomName: `E2E clock ${new Date().toISOString().slice(0, 19)}`, patId: "", thorn: randomUUID(), bree: randomUUID() };
 
 const DESK = { width: 1440, height: 900 };
 const PHONE = { width: 390, height: 844 };
@@ -333,6 +340,106 @@ describe("the room clock's Time panel", () => {
     await waitFor("the clock back", () => (dmSocket.state?.clock?.id === id && dmSocket.state.clock.t === t ? true : null));
     await waitFor("the clock back in Pat's copy", () => (patSocket.state?.clock?.t === t ? true : null));
     assert.equal(patSocket.state!.clock!.id, id);
+  });
+
+  test("ck-2b. Pat gets a toast for a step while his Log and Time panel are closed, and the DM's own device gets none", async () => {
+    const panel = await timePanel();
+    const before = clockLines(patSocket).length;
+    await panel.getByRole("group", { name: "Move the clock on" }).getByRole("button", { name: "Move the clock on 1 hour", exact: true }).click();
+    await waitFor("the new line in Pat's copy", () => (clockLines(patSocket).length === before + 1 ? true : null));
+    await pat.getByText(/^1 hour passes\. It is now /).first().waitFor();
+    assert.equal(await dm.getByText(/^1 hour passes\. It is now /).count(), 0, "the DM's own device shows no toast for its own step");
+  });
+
+  test("ck-3. the party's Long Rest moves the clock 8 hours first, stamps each character's end for the DM alone, and one Undo takes it all back", async () => {
+    const actor = { hp: { cur: 20, max: 45, temp: 0 }, life: "alive", ac: 15, speeds: { walk: 30 }, initBonus: 1, passivePerception: 11, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
+    await ops.send({ t: "character.create", character: { id: run.thorn, name: "Thorn", size: "medium", ownerIds: [run.patId], actor, level: 5 } });
+    await ops.send({ t: "character.create", character: { id: run.bree, name: "Bree", size: "medium", ownerIds: [run.patId], actor, level: 5 } });
+    await waitFor("both characters", () => (dmSocket.state?.characters[run.bree] ? true : null));
+    await openSideTab(dm, "Characters");
+    const panel = dm.getByRole("tabpanel", { name: "Characters" });
+    const clockId = dmSocket.state!.clock!.id;
+    const t0 = dmSocket.state!.clock!.t;
+
+    await panel.getByRole("button", { name: "Long Rest for the party", exact: true }).click();
+    const box = panel.getByRole("checkbox", { name: "Move the clock on 8 hours", exact: true });
+    assert.equal(await box.isChecked(), true, "ticked by default");
+    assert.equal(await panel.getByText(/finished a Long Rest at /).count(), 0, "no stamp yet, no note");
+    await panel.getByRole("button", { name: "Finish the Long Rest", exact: true }).click();
+    await clockT(dmSocket, t0 + 8 * HOUR);
+    await waitFor("both stamps", () => (dmSocket.state?.characters[run.thorn]?.longRest && dmSocket.state.characters[run.bree]?.longRest ? true : null));
+    for (const id of [run.thorn, run.bree]) assert.deepEqual(dmSocket.state!.characters[id]!.longRest, { at: t0 + 8 * HOUR, clock: clockId }, "the stamp marks the rest's end");
+    assert.equal(patSocket.state?.characters[run.thorn]?.longRest, undefined, "a stamp never reaches the owner");
+    assert.equal(patSocket.everSaw(`"longRest":{`), false, "no frame Pat got holds a stamp (the line's own why: longRest is a different key)");
+
+    // Six hours later the card names the last finish and the earliest next start, and the rest still goes through.
+    await ops.send({ t: "clock.advance", by: 6 * HOUR });
+    await panel.getByRole("button", { name: "Long Rest for the party", exact: true }).click();
+    const notes = panel.getByText(/finished a Long Rest at .* The rules let the next start from /);
+    await notes.first().waitFor();
+    assert.equal(await notes.count(), 2, "one line a character");
+    await shots.take(dm, "ck-3-rest-card");
+    await box.uncheck();
+    await panel.getByRole("button", { name: "Finish the Long Rest", exact: true }).click();
+    await waitFor("both rests recorded without a clock step", () => (dmSocket.state?.characters[run.thorn]?.longRest?.at === t0 + 14 * HOUR ? true : null));
+    assert.equal(dmSocket.state!.clock!.t, t0 + 14 * HOUR, "unticked, the clock stays where it was");
+
+    // The ticked rest again, then Undo takes the clock and both stamps back in one step.
+    await panel.getByRole("button", { name: "Long Rest for the party", exact: true }).click();
+    await panel.getByRole("checkbox", { name: "Move the clock on 8 hours", exact: true }).waitFor();
+    await panel.getByRole("button", { name: "Finish the Long Rest", exact: true }).click();
+    await clockT(dmSocket, t0 + 22 * HOUR);
+    await waitFor("the new stamps", () => (dmSocket.state?.characters[run.thorn]?.longRest?.at === t0 + 22 * HOUR ? true : null));
+    await playControl(dm, "undo").click();
+    await clockT(dmSocket, t0 + 14 * HOUR);
+    await waitFor("the stamps back", () => (dmSocket.state?.characters[run.thorn]?.longRest?.at === t0 + 14 * HOUR && dmSocket.state.characters[run.bree]?.longRest?.at === t0 + 14 * HOUR ? true : null));
+  });
+
+  test("ck-5. Pat's Time panel, open when the DM stops sharing, says so until he closes it, and leaves his list", async () => {
+    const panels = pat.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ });
+    const list = pat.getByRole("region", { name: "Panels" });
+    const sheet = pat.locator('dialog[data-rvtt-sheet][aria-label="Time"]');
+    await panels.click();
+    await list.getByRole("button", { name: /^Time/ }).click();
+    await sheet.locator("[data-clock-date]").waitFor();
+    assert.equal(await sheet.getByRole("button").filter({ hasText: /minutes|hour|dawn|Set the date|Calendar|Stop/ }).count(), 0, "a player has none of the DM's controls");
+    await shots.take(pat, "ck-5-pat-time");
+    const panel = await timePanel();
+    await panel.getByRole("switch", { name: "Players see the date and time" }).click();
+    await sheet.getByText("The DM isn't sharing the date and time now.", { exact: true }).waitFor();
+    await sheet.getByRole("button", { name: /^Close / }).first().click();
+    await sheet.waitFor({ state: "detached" });
+    await panels.click();
+    assert.equal(await list.getByRole("button", { name: /^Time/ }).count(), 0, "Time is not in his list while nothing is shared");
+    await pat.keyboard.press("Escape");
+    await panel.getByRole("switch", { name: "Players see the date and time" }).click();
+    await panels.click();
+    await list.getByRole("button", { name: /^Time/ }).waitFor();
+    await pat.keyboard.press("Escape");
+  });
+
+  test("ck-6. on a computer the chip opens the Time panel, and a long date never overflows Pat's top bar", async () => {
+    await pat.setViewportSize({ width: 1024, height: 768 });
+    await pat.goto(`${server.origin}/r/${run.roomId}`);
+    await pat.getByRole("status", { name: "Connected" }).first().waitFor();
+    const chip = pat.getByRole("button", { name: /^Time: / });
+    await chip.waitFor();
+    assert.match((await chip.innerText()).trim(), /, \d+:\d\d [AP]M$/);
+    await chip.click();
+    await pat.getByRole("tabpanel", { name: "Time" }).locator("[data-clock-date]").waitFor();
+    const overflows = () => pat.locator("header").first().evaluate((el) => el.scrollWidth - el.clientWidth);
+    assert.ok((await overflows()) <= 1, "the row does not overflow with the chip");
+    // A long month name and era: the row still checks, and the chip leaves when it would overflow.
+    const long = "Longest-month-name-here1";
+    await ops.send({ t: "clock.update", calendar: { kind: "months", months: [{ name: long, days: 30 }, { name: "Second", days: 30 }], week: ["Moonday"], era: "Era words 12" }, at: 8 * HOUR });
+    await waitFor("the long calendar in Pat's copy", () => (patSocket.state?.clock?.calendar.kind === "months" ? true : null));
+    for (const width of [1024, 960, 900]) {
+      await pat.setViewportSize({ width, height: 768 });
+      await pat.waitForTimeout(300);
+      assert.ok((await overflows()) <= 1, `Pat's row overflows by ${await overflows()} px at ${width}`);
+    }
+    await shots.take(pat, "ck-6-long-date");
+    await pat.setViewportSize(PHONE);
   });
 
   test("ck-8. neither page logged an error", () => {

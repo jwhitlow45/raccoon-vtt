@@ -5971,8 +5971,25 @@ async function clockScreens(sweep: Sweep, page: Page): Promise<void> {
   await panel.getByRole("button", { name: "Move on", exact: true }).click();
   await panel.getByRole("alert").first().waitFor();
   await sweep.measure(page, "ck-time", panel);
+  // The top bar's chip shows from 900 px up and never below, so it is measured at the desk only (CAL-12).
+  await sweep.measure(page, "ck-chip", page.getByRole("button", { name: /^Time: / }), { optional: true });
 
-  await panel.getByRole("button", { name: "Set the date and time…", exact: true }).click();
+  // The party's Long Rest card with its checkbox and, once Thorn has a stamp, its note.
+  await ops.send({ t: "actor.rest", target: { characterId: run.ids.thornChar }, kind: "long" });
+  await closeSheets(page);
+  await escapeAll(page);
+  const characters = await openPanel(page, "Characters");
+  await characters.getByRole("button", { name: "Long Rest for the party", exact: true }).click();
+  await characters.getByRole("checkbox", { name: "Move the clock on 8 hours", exact: true }).waitFor();
+  await characters.getByText(/finished a Long Rest at /).first().waitFor();
+  // The card alone: the panel's own New character row is another lane's screen.
+  await sweep.measure(page, "ck-rest-card", characters.getByRole("checkbox", { name: "Move the clock on 8 hours", exact: true }).locator("xpath=ancestor::div[.//button[normalize-space()='Finish the Long Rest']][1]"));
+  await characters.getByRole("button", { name: "Cancel", exact: true }).click();
+  await closeSheets(page);
+  await escapeAll(page);
+  const clockPanel = await openPanel(page, "Time");
+
+  await clockPanel.getByRole("button", { name: "Set the date and time…", exact: true }).click();
   const set = page.getByRole("dialog", { name: "Set the date and time", exact: true });
   await set.waitFor();
   await sweep.measure(page, "ck-set", set);
@@ -5994,6 +6011,14 @@ async function clockScreens(sweep: Sweep, page: Page): Promise<void> {
   await ops.send({ t: "clock.stop" });
 }
 
+/** Pat's Time panel at one size: the date and the part of the day, and nothing of the DM's controls. */
+async function patClockScreens(sweep: Sweep, page: Page): Promise<void> {
+  const panel = await openPanel(page, "Time");
+  await panel.locator("[data-clock-date]").waitFor();
+  await sweep.measure(page, "ck-pat-time", panel);
+  await sweep.measure(page, "ck-pat-chip", page.getByRole("button", { name: /^Time: / }), { optional: true });
+}
+
 /** The calendar build's roots, which the sizes' sweep never reaches (docs/design/design-v1-calendar.md 9, 11). */
 export function clockTests(): void {
   test(`ck-a. the Time panel with and without a clock, Set the date and time and the Calendar dialog with 12 months, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
@@ -6012,6 +6037,24 @@ export function clockTests(): void {
       if (dmSocket.state?.clock) await ops.send({ t: "clock.stop" }).catch(() => {});
     }
     assert.deepEqual(lines, [], "the Time panel or its dialogs out of line");
+  });
+
+  test(`ck-b. Pat's Time panel and his top bar's chip, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
+    const lines: string[] = [];
+    try {
+      await ops.send({ t: "clock.start", id: randomUUID(), at: 8 * 3_600, shown: true, calendar: { kind: "days" } });
+      for (const at of FU30_AT) {
+        const sweep = new Sweep(atName(at));
+        pat.setDefaultTimeout(10_000);
+        await openAt(pat, at.size, at.scale);
+        await patClockScreens(sweep, pat);
+        lines.push(...sweep.lines);
+      }
+    } finally {
+      await pat.goto("about:blank").catch(() => {});
+      if (dmSocket.state?.clock) await ops.send({ t: "clock.stop" }).catch(() => {});
+    }
+    assert.deepEqual(lines, [], "Pat's Time panel or the chip out of line");
   });
 }
 
