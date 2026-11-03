@@ -69,8 +69,9 @@ export type PanelProps = {
  * ones a table reaches for in play, the ones that run the table, the ones for
  * preparing, and the room's own Menu. The groups keep to the order's ranges:
  * play 10 to 20, table 30 to 39, prepare 40 to 48, and Menu 90. Time and Sound
- * sit at 34 and 36 until Ambiance takes 34 (panel-groups design, section 3).
- * A player's list is not grouped, so Time and Sound still follow Areas.
+ * sit at 34 and 36 for now: Ambiance will take 34, and they move then
+ * (panel-groups design, section 3). A player's list is not grouped, so Time
+ * and Sound still follow Areas, and tabGroup keeps a player's tab row as it was.
  */
 export type PanelGroup = "play" | "table" | "prepare" | "room";
 
@@ -183,10 +184,19 @@ export function panelsFor(role: "dm" | "player", wide = false, opts: PanelsForOp
 /** The labels of a DM's groups of panels (docs/design/design-v1-layout-hierarchy.md M3). Menu, the room's own, follows a plain line instead. */
 const GROUP_LABELS: Partial<Record<PanelGroup, string>> = { play: "In play", table: "Run the table", prepare: "Prepare" };
 
+/**
+ * The group whose gaps a panel's tab follows in the side panel's row. Run the
+ * table is a DM's group: in a player's ungrouped row Time and Sound keep In
+ * play's gaps, as before that group, so a player's row does not change.
+ */
+export function tabGroup(p: PanelDef, grouped: boolean): PanelGroup {
+  return !grouped && p.group === "table" ? "play" : p.group;
+}
+
 export type PanelSection = {
   /** The group, or "all" for a list with no groups. */
   key: PanelGroup | "all";
-  /** "In play" or "Prepare" over the section's panels. */
+  /** "In play", "Run the table" or "Prepare" over the section's panels. */
   label?: string;
   /** A plain line before the section, as before Menu. */
   line: boolean;

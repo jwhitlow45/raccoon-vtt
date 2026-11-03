@@ -43,7 +43,7 @@ The SRD names no calendar. Published settings' calendars are not SRD content, so
 
 ### 4.1 Starting the clock
 
-The DM opens **Time** (a new panel, "In play" group, after Areas). With no clock it reads:
+The DM opens **Time** (a new panel, "In play" group, after Areas, and in a DM's "Run the table" group since the panel groups change). With no clock it reads:
 
 - "Keep the in-game date and time. You move it on as time passes. A Long Rest for the party and each fight move it too."
 - **Calendar**, two radio cards: **Day count** ("Day 1, Day 2 and on.") and **Months** ("Months, weekdays and years with names you choose."). Months opens the Calendar dialog (4.3), whose Save only keeps the calendar as a draft on this form, named beside the card ("12 months, 7-day week", with Change). Nothing is sent until Start the clock.

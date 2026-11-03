@@ -7,7 +7,7 @@ import { PRESSED } from "../components/looks.ts";
 import { Menu, type MenuItem, type MenuSection } from "../components/Menu.tsx";
 import { Popover, usePopover, type Rect } from "../components/Popover.tsx";
 import { IconButton } from "../components/IconButton.tsx";
-import { panelSections, type PanelDef } from "../features/panels.ts";
+import { panelSections, tabGroup, type PanelDef } from "../features/panels.ts";
 import { tabKeyIndex, VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import { isCoarsePointer } from "../lib/device.ts";
 import { theme } from "../lib/theme.ts";
@@ -123,7 +123,7 @@ export function SideTabs(props: {
   badges: Record<string, number>;
   /** What a panel's count says to a screen reader where it is not "N unread", such as the DM panel's "1 upload waiting". */
   badgeLabels: Record<string, string>;
-  /** A DM's menu groups its panels under In play and Prepare, as the phone's list does. */
+  /** A DM's menu groups its panels under In play, Run the table and Prepare, as the phone's list does. */
   grouped: boolean;
   onTab(id: string): void;
   onHide(): void;
@@ -159,8 +159,8 @@ export function SideTabs(props: {
   const belowDescribedId = useId();
   const below = props.split.below;
   const [layout, setLayout] = useState<Layout | null>(null);
-  const latest = useRef({ tabs, zoom: props.zoom });
-  latest.current = { tabs, zoom: props.zoom };
+  const latest = useRef({ tabs, zoom: props.zoom, grouped: props.grouped });
+  latest.current = { tabs, zoom: props.zoom, grouped: props.grouped };
   /** A focused tab went into More with the last fit, so focus moves to More once it is drawn. */
   const focusMore = useRef(false);
 
@@ -177,7 +177,7 @@ export function SideTabs(props: {
   const refit = useCallback(() => {
     const list = listRef.current;
     const row = measureRef.current;
-    const { tabs: panels, zoom } = latest.current;
+    const { tabs: panels, zoom, grouped } = latest.current;
     let next: Layout | null = null;
     if (list && row) {
       const width = (el: Element | null) => (el ? el.getBoundingClientRect().width / zoom : 0);
@@ -186,7 +186,7 @@ export function SideTabs(props: {
       const more = [...row.querySelectorAll("[data-more]")].map(width);
       const moreRest = width(row.querySelector("[data-more-rest]"));
       const room = width(list);
-      const tabsOf = (at: number[]) => panels.map((p, i) => ({ rest: at[i] ?? 0, more: more[i] ?? 0, group: p.group }));
+      const tabsOf = (at: number[]) => panels.map((p, i) => ({ rest: at[i] ?? 0, more: more[i] ?? 0, group: tabGroup(p, grouped) }));
       // Each panel's icon before its name where the row then holds as many tabs as the names alone, else the icons alone (docs/design/design-v1-icons-2.md 3.1).
       const withNames: TabWidths = { tabs: tabsOf(named), moreRest, room };
       const look = pickLook({ tabs: tabsOf(rest), moreRest, room }, withNames);
@@ -351,7 +351,8 @@ export function SideTabs(props: {
           {row.map((p, i) => {
             const chosen = p.id === tab;
             const marked = p.id === below;
-            const opensGroup = i > 0 && row[i - 1]?.group !== p.group;
+            const before = row[i - 1];
+            const opensGroup = before !== undefined && tabGroup(before, props.grouped) !== tabGroup(p, props.grouped);
             const look = tabLook(chosen);
             return (
               <PanelTab

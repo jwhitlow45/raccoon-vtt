@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { headerSink, PanelScrollKeeper, panelOffered, panelSections, PANELS, panelsFor, panelSubject, RESTORE_WAIT_MS, restoreStep, scrollOf, type PanelHeader, type PanelScroll, type PanelSection } from "./panels.ts";
+import { headerSink, PanelScrollKeeper, panelOffered, panelSections, PANELS, panelsFor, panelSubject, RESTORE_WAIT_MS, restoreStep, scrollOf, tabGroup, type PanelHeader, type PanelScroll, type PanelSection } from "./panels.ts";
 
 describe("the panels' order and groups (docs/design/design-v1-layout-hierarchy.md M3)", () => {
   const titles = (role: "dm" | "player", wide: boolean) => panelsFor(role, wide).map((p) => p.title);
   const groups = (role: "dm" | "player", wide: boolean) => panelsFor(role, wide).map((p) => p.group);
 
-  test("a DM's phone: the in-play panels first, then those for preparing, then Menu", () => {
+  test("a DM's phone: the in-play panels first, then those that run the table, then those for preparing, then Menu", () => {
     assert.deepEqual(titles("dm", false), ["Token", "Initiative", "Party", "Dice", "Log", "Journal", "Areas", "DM", "Scenes", "Time", "Sound", "Monsters", "Encounters", "Characters", "Outliner", "Library", "Menu"]);
     assert.deepEqual(groups("dm", false), ["play", "play", "play", "play", "play", "play", "play", "table", "table", "table", "table", "prepare", "prepare", "prepare", "prepare", "prepare", "room"]);
   });
@@ -63,10 +63,25 @@ describe("the panels' order and groups (docs/design/design-v1-layout-hierarchy.m
  * (docs/design/design-v1-panel-tabs.md 4.1), over the whole list and over each
  * slice the tab row's fit can leave in More.
  */
+describe("the groups a tab row's gaps follow", () => {
+  test("a player's ungrouped row keeps Time and Sound in In play's gaps, as before Run the table", () => {
+    const player = panelsFor("player", true, { clock: true, sound: true });
+    assert.deepEqual(player.map((p) => [p.title, tabGroup(p, false)]), [
+      ["Token", "play"], ["Initiative", "play"], ["Dice", "play"], ["Log", "play"], ["Journal", "play"], ["Areas", "play"],
+      ["Time", "play"], ["Sound", "play"], ["Characters", "prepare"], ["Library", "prepare"], ["Menu", "room"],
+    ]);
+  });
+
+  test("a DM's grouped row gaps Run the table off from In play and Prepare", () => {
+    const dm = panelsFor("dm", true).filter((p) => p.group === "table");
+    assert.deepEqual(dm.map((p) => [p.title, tabGroup(p, true)]), [["DM", "table"], ["Scenes", "table"], ["Time", "table"], ["Sound", "table"]]);
+  });
+});
+
 describe("the panels in sections", () => {
   const shape = (sections: PanelSection[]) => sections.map((s) => [s.label ?? (s.line ? "---" : ""), s.panels.map((p) => p.title)]);
 
-  test("a DM's whole phone list: In play and Prepare over their panels, and Menu after a line", () => {
+  test("a DM's whole phone list: In play, Run the table and Prepare over their panels, and Menu after a line", () => {
     assert.deepEqual(shape(panelSections(panelsFor("dm", false), true)), [
       ["In play", ["Token", "Initiative", "Party", "Dice", "Log", "Journal", "Areas"]],
       ["Run the table", ["DM", "Scenes", "Time", "Sound"]],

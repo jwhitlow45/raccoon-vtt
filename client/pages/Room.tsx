@@ -2602,7 +2602,7 @@ function noPick(): void {}
 /**
  * Every panel the role has, as large buttons, for the phone's Panels sheet:
  * card rows (components/Row.tsx), the open panel in the pressed look.
- * `grouped` labels a DM's groups, "In play" and "Prepare", with Menu after
+ * `grouped` labels a DM's groups, "In play", "Run the table" and "Prepare", with Menu after
  * a plain divider, so a DM finds a panel for preparing without reading the
  * ones for play. The labels are items that span the grid, so it stays one
  * list named "Panels" and its tiles keep their names.
