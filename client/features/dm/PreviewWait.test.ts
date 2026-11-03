@@ -13,6 +13,8 @@ import { describe, test } from "node:test";
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { PreviewWait } = await import("./PreviewWait.tsx");
+const { BOARD_SCOPE, theme } = await import("../../lib/theme.ts");
+const { tokenPattern } = await import("../../components/testing/tokenPattern.ts");
 
 const draw = (failed: boolean, zoom = 1) => renderToStaticMarkup(createElement(PreviewWait, { name: "Ana", failed, zoom, onRetry: () => undefined }));
 /** The status, its attributes and what it holds: it holds no element of its own, so its end is the first close after its start. */
@@ -43,4 +45,16 @@ describe("the preview's wait", () => {
     assert.doesNotMatch(/<div data-preview-wait="failed" style="([^"]*)"/.exec(html)?.[1] ?? "", /zoom/);
     assert.doesNotMatch(draw(true), /zoom/, "nothing at 100%");
   });
+
+  for (const failed of [false, true]) {
+    test(`${failed ? "the failure" : "the wait"} keeps the dark palette and the dark accent on the black stage, its text and Try again's ring included (D-261102-364)`, () => {
+      const root = new RegExp(`<div data-preview-wait="${failed ? "failed" : "loading"}" style="([^"]*)"`).exec(draw(failed))?.[1] ?? "";
+      for (const [name, value] of Object.entries(BOARD_SCOPE)) {
+        const property = name.startsWith("--") ? name : name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+        assert.match(root, new RegExp(`(^|;)${tokenPattern(property)}:${tokenPattern(value)}(;|$)`), property);
+      }
+      // Set under the scope: the color it would inherit is the page's, worked out before the scope.
+      assert.match(root, new RegExp(`(^|;)color:${tokenPattern(theme.color.text)}(;|$)`));
+    });
+  }
 });

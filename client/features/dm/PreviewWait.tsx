@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef } from "react";
 import { LoadFailed } from "../../components/LoadFailed.tsx";
 import { Loading } from "../../components/Loading.tsx";
-import { theme } from "../../lib/theme.ts";
+import { BOARD_SCOPE, theme } from "../../lib/theme.ts";
 import { chromeZoom } from "../device/layout.ts";
 
 /**
@@ -18,6 +18,11 @@ import { chromeZoom } from "../device/layout.ts";
  * waits out its delay. Once the view lands the wait goes, and the dialog
  * takes focus back from the status, so focus stays inside the preview
  * rather than fall to the page.
+ *
+ * It lies on the preview's black stage, so it keeps the dark palette and
+ * the dark accent in either scheme, Try again's fill and focus ring
+ * included (D-261102-364). Its text color is set under that scope, since
+ * the one it would inherit is the page's.
  */
 export function PreviewWait(props: { name: string; failed: boolean; zoom: number; onRetry(): void }) {
   const status = useRef<HTMLDivElement>(null);
@@ -28,7 +33,7 @@ export function PreviewWait(props: { name: string; failed: boolean; zoom: number
     };
   }, []);
   return (
-    <div data-preview-wait={props.failed ? "failed" : "loading"} style={{ position: "fixed", inset: 0, display: "grid", placeItems: "center", padding: theme.space(4), fontFamily: theme.font.body }}>
+    <div data-preview-wait={props.failed ? "failed" : "loading"} style={{ ...BOARD_SCOPE, position: "fixed", inset: 0, display: "grid", placeItems: "center", padding: theme.space(4), fontFamily: theme.font.body, color: theme.color.text }}>
       <div style={{ ...chromeZoom(props.zoom), display: "grid", justifyItems: "center", maxWidth: 420, minWidth: 0, fontSize: theme.font.body14, lineHeight: theme.leading.body, overflowWrap: "anywhere" }}>
         <div ref={status} role="status" tabIndex={-1} style={{ minWidth: 0 }}>
           {props.failed ? null : <Loading live={false} text={`Loading what ${props.name} sees…`} />}
