@@ -79,7 +79,7 @@ export function Join(props: {
 
   // A device with a live request goes straight to its waiting card, in any
   // tab or after a reload, so the lookup comes before any card (design 2.2).
-  const lookup = useMine(roomId, mode !== "password");
+  const lookup = useMine(roomId, mode === "ask" || mode === "ask_only");
   // In With the password, or by asking, the ask card replaces the password
   // card only when the player taps Ask to join, or a request is waiting.
   const [view, setView] = useState<"password" | "ask">("password");
