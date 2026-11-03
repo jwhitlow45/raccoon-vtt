@@ -17,7 +17,7 @@ import { sceneRowDetail } from "./sceneSummary.ts";
 import { thumbSources } from "./thumbnail.ts";
 import { sightOf } from "#shared/keys.ts";
 import { moveWarning } from "../vision/moveWarning.ts";
-import { useServerRoomSound } from "../sound/engine/store.ts";
+import { useServerRoomSoundState } from "../sound/engine/store.ts";
 import { send } from "../sound/panel/ops.ts";
 import { playlistsOf, soundsOf } from "../sound/panel/state.ts";
 import { moveSoundOp } from "./moveSound.ts";
@@ -60,7 +60,7 @@ export function SceneList(props: { scenes: Scene[]; viewingId: string | null; pl
   const sight = useRoomView((s) => (s.view ? sightOf(s.view) : undefined));
   const sounds = useRoomView((s) => soundsOf(s.view));
   const playlists = useRoomView((s) => playlistsOf(s.view));
-  const serverSound = useServerRoomSound();
+  const serverSound = useServerRoomSoundState();
   const warningFor = (scene: Scene) => moveWarning({ scene, viewing: scene.id === viewingId, sight });
 
   const movePlayers = (scene: Scene) => {
