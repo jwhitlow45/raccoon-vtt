@@ -3,6 +3,7 @@ import type Konva from "konva";
 import { useStore } from "zustand";
 import type { AssetId } from "#shared/model.ts";
 import { useSceneLoading } from "../../canvas/SceneLoading.tsx";
+import { theme } from "../../lib/theme.ts";
 import { dockSlot } from "../../pages/fold.ts";
 import { useScoped, useScopedIfAny } from "../../state/scope.ts";
 import { useAssets, useRoomView } from "../../state/view.ts";
@@ -59,8 +60,8 @@ export function AnimMapController(props: ControllerProps) {
   return null;
 }
 
-/** The board's ground behind the canvas (lib/theme.ts bg). The light theme keeps it for the board, so the rebase onto it reads boardTheme.color.bg here. */
-const BOARD_GROUND = "#16161a";
+/** The board's ground behind the canvas, #16161a. The light theme keeps it for the board, so the rebase onto it reads boardTheme.color.bg here. */
+const BOARD_GROUND = theme.color.bg;
 
 /**
  * The board's video in the page (5.2): an `aria-hidden` box at the board's
