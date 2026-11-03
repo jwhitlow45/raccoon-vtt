@@ -7274,7 +7274,7 @@ export function joinRequestAlignmentTests(names: readonly string[]): void {
           await dismissToasts(page);
           const patRow = panel.getByRole("group", { name: "Join request from Pat" });
           await patRow.getByRole("combobox", { name: "Let Pat in as" }).selectOption({ label: "Pat" });
-          await patRow.getByText(/^This device will be Pat:/).waitFor();
+          await patRow.getByText(/^Their device becomes Pat,/).waitFor();
           await sweep.measure(page, "jr-section-three", sectionOf(panel, "Join requests"));
           // The server's 202 for a let-in still settling, without letting anyone in.
           await page.route(/\/join-requests\/[A-Za-z0-9_-]+\/let-in$/, (route) => route.fulfill({ status: 202, json: { memberId: "pending", pending: true } }));

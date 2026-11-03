@@ -299,7 +299,7 @@ function PasswordStep(props: {
         ) : null}
         {/* Not disabled while waiting: a check that errors out must not leave the player stuck. */}
         <Button type="submit" variant="primary" busy={busy} disabled={password === ""}>
-          {busy ? "Checking…" : waiting ? "Waiting for the check…" : "Next"}
+          {busy ? "Checking…" : waiting ? "Checking you're human…" : "Next"}
         </Button>
       </form>
     </Card>

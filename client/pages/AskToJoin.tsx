@@ -276,7 +276,7 @@ export function AskToJoin(props: {
             ) : null}
             <ErrorText>{error}</ErrorText>
             <Button type="submit" variant="primary" busy={state.kind === "asking"}>
-              {state.kind === "asking" ? "Asking…" : resend ? "Waiting for the check…" : "Ask to join"}
+              {state.kind === "asking" ? "Asking…" : resend ? "Checking you're human…" : "Ask to join"}
             </Button>
             {props.mode === "ask" && props.onBack ? (
               <Button onClick={props.onBack} disabled={state.kind === "asking"}>

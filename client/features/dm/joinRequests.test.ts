@@ -70,7 +70,7 @@ describe("ages and words", () => {
     const quinn = { name: "Quinn" };
     assert.equal(
       carryOnNote(quinn, false, false),
-      "This device will be Quinn: Quinn's characters, tokens and whispers. Only pick Quinn if you know it is them.",
+      "Their device becomes Quinn, with Quinn's characters, tokens and whispers. Pick Quinn only if you know it is them.",
     );
     assert.match(carryOnNote(quinn, true, false), / Quinn is online now\.$/);
     assert.match(carryOnNote(quinn, false, true), / The name they typed matches Quinn\.$/);

@@ -319,9 +319,9 @@ describe("raccoon-vtt join requests", { timeout: 600_000 }, () => {
     assert.deepEqual(await as.locator("option").allTextContents(), ["Someone new", "Pat", "Quinn"]);
     // A matching name alone changes nothing: Someone new stays picked and no note shows.
     assert.equal(await as.inputValue(), "");
-    assert.equal(await row.getByText(/This device will be/).count(), 0);
+    assert.equal(await row.getByText(/Their device becomes/).count(), 0);
     await as.selectOption({ label: "Pat" });
-    const note = "This device will be Pat: Pat's characters, tokens and whispers. Only pick Pat if you know it is them. Pat is online now. The name they typed matches Pat.";
+    const note = "Their device becomes Pat, with Pat's characters, tokens and whispers. Pick Pat only if you know it is them. Pat is online now. The name they typed matches Pat.";
     await row.getByText(note, { exact: true }).waitFor();
     assert.equal(await as.getAttribute("aria-describedby"), await row.getByText(note, { exact: true }).getAttribute("id"));
     await shots.take(dm, "carry-on-note");

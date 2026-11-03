@@ -94,7 +94,7 @@ export function carryOnPlayers(listed: readonly CarryOnPlayer[], members: Readon
 
 /** Shown whenever "Let in as" names a player, so a DM never hands over a player's seat without reading what it holds. */
 export function carryOnNote(player: Pick<CarryOnPlayer, "name">, online: boolean, typedMatches: boolean): string {
-  const base = `This device will be ${player.name}: ${player.name}'s characters, tokens and whispers. Only pick ${player.name} if you know it is them.`;
+  const base = `Their device becomes ${player.name}, with ${player.name}'s characters, tokens and whispers. Pick ${player.name} only if you know it is them.`;
   const parts = [base];
   if (online) parts.push(`${player.name} is online now.`);
   if (typedMatches) parts.push(`The name they typed matches ${player.name}.`);
@@ -188,7 +188,7 @@ export const JOIN_MODE_OPTIONS: readonly { value: JoinMode; label: string; help:
   {
     value: "ask_only",
     label: "Only by asking",
-    help: "Every new device asks, and a DM lets it in. The password and the player link stop letting anyone new in. Devices already in stay in, and a kicked player stays out. If asking stops working, switch to With the password, or by asking, and share the player link.",
+    help: "Every new device asks, and a DM lets it in. The password and the player link no longer let anyone new in. Devices already in stay in, and a kicked player stays out. If asking stops working, switch to With the password, or by asking, and share the player link.",
   },
 ];
 
