@@ -82,13 +82,13 @@ import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/v
 import { droppedIntoFog, intoFogText, refusedDragText, watchDrop } from "./dragNotes.ts";
 import { barChrome, barCover, barDockSlot, clearAnchor, DOCK_MIN_WIDTH, keepsOpening, largerEach, pastBars, restingBar, stripSqueezed, type BarSubject } from "./barDock.ts";
 import { footAnchor, headAnchor } from "./anchors.ts";
-import { holdViewStill, openSceneCamera } from "./sceneCamera.ts";
+import { holdViewStill } from "./sceneCamera.ts";
 import { boardPickFor, boardPickSlot, drawnAt, DrawnHeightsMemo, drawnRing, groundMapOf, heldPoint, liftIn, nudgeStep, pressAt, ringCenter, standsFor, tokenBase, viewGround, type BoardPick } from "./boardPick.ts";
 import { DRAG_GROUND, liftToDragLayer, returnHome, type Home } from "./dragLayer.ts";
 import { emptyTap, putAway } from "./emptyTap.ts";
 import { dragBound, dragGround, dragPlan } from "./isoDrag.ts";
 import { canDragToken, movesOthers } from "./dragRights.ts";
-import { fitSlot } from "./fitSlot.ts";
+import { fitSlot, openFramed } from "./fitSlot.ts";
 import { FogShape } from "./FogShape.tsx";
 import { MapLayer, SharedMapImage } from "./layers/MapLayer.tsx";
 import { createEasedDrags, RemoteDragClock, RemoteDrags } from "./RemoteDrags.tsx";
@@ -414,10 +414,11 @@ export function MapStage(props: {
   const viewSeenRef = useRef(shown);
   insetsRef.current = insets;
   useLayoutEffect(() => {
-    openSceneCamera({
+    // A dialog's one-shot frame (fitSlot.ts) is taken on every new scene, so a scene with a saved view also drops one meant for another.
+    openFramed(scope.get(fitSlot), {
       size, scene, shown: shownRef, viewSeen: viewSeenRef, cameraScene: cameraSceneRef, pendingCam: pendingCamRef, fitted: fittedRef, cam: camRef,
       groundUnder: (at, zoom) => groundUnderRef.current(at, zoom),
-      fit: () => fitScene(size!, scene, insetsRef.current, shownRef.current, null, NO_INSETS, liftRef.current),
+      fit: (frame) => fitScene(size!, scene, insetsRef.current, shownRef.current, frame, NO_INSETS, liftRef.current),
       setCam,
     });
   }, [size, scene]);

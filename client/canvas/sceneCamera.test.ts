@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { room, scene } from "#shared/testutil.ts";
-import { cameraForView, NO_INSETS, viewToScreen, type Camera } from "../lib/camera.ts";
+import { cameraForView, NO_INSETS, viewToScreen, type Camera, type Rect, type Size } from "../lib/camera.ts";
+import { RoomScope } from "../state/scope.ts";
 import { isometric, TOP_DOWN, toView, type View } from "../lib/view.ts";
 import { boardPickFor, DrawnHeightsMemo } from "./boardPick.ts";
+import { fitSlot, openFramed } from "./fitSlot.ts";
 import { holdViewStill, openSceneCamera } from "./sceneCamera.ts";
 
 // Run the scene and view effects in their real commit order (the scene's
@@ -65,4 +67,70 @@ test("FU40-B ISOA-5: turning inside the same scene still holds its center and zo
   assert.equal(cam.scale, 40);
   assert.equal(cameras.length, 1, "the same-scene turn applies its camera");
   assert.equal(fittedRef.current, null, "the turned camera is no longer the fit");
+});
+
+/**
+ * Stage's opening effect as it runs on each commit of a size or a scene
+ * (fitSlot.ts `openFramed`), with a fit that records what it was asked to
+ * frame.
+ */
+function canvas(scope: RoomScope) {
+  const cameraScene = { current: null as string | null };
+  const framed: (Rect | null)[] = [];
+  const cameras: Camera[] = [];
+  const open = (size: Size | null, s: ReturnType<typeof scene>) => {
+    openFramed(scope.get(fitSlot), {
+      size, scene: s, shown: { current: TOP_DOWN }, viewSeen: { current: TOP_DOWN }, cameraScene, pendingCam: { current: null }, fitted: { current: null }, cam: { current: null },
+      groundUnder: () => 0,
+      fit: (frame) => {
+        framed.push(frame);
+        return { cam: { x: 0, y: 0, scale: 10 } };
+      },
+      setCam: (c) => cameras.push(c),
+    });
+  };
+  return { open, framed, cameras };
+}
+
+const ENTRANCE = { x: 2, y: 20, width: 14, height: 13 };
+const SIZE = { width: 920, height: 800 };
+
+test("DG-C DG-OPUS-27: a canvas sized late frames the entrance once its size comes, and only once", () => {
+  const scope = new RoomScope();
+  const crypt = scene("crypt", { bounds: { w: 50, h: 50 } });
+  const c = canvas(scope);
+  scope.get(fitSlot).frameOnOpen = { sceneId: crypt.id, rect: ENTRANCE };
+  c.open(null, crypt);
+  assert.deepEqual(c.framed, [], "no size, no opening");
+  c.open(SIZE, crypt);
+  assert.deepEqual(c.framed, [ENTRANCE]);
+  c.open({ width: 600, height: 800 }, crypt);
+  assert.deepEqual(c.framed, [ENTRANCE], "a new size on the open scene is not a new opening");
+  assert.equal(scope.get(fitSlot).frameOnOpen, null);
+});
+
+test("DG-C DG-OPUS-27: a scene with a saved view opening first drops the request, so the new scene opens on a plain fit", () => {
+  const scope = new RoomScope();
+  const crypt = scene("crypt", { bounds: { w: 50, h: 50 } });
+  const arena = scene("arena", { bounds: { w: 20, h: 20 }, defaultView: { x: 10, y: 10, zoom: 40 } });
+  const c = canvas(scope);
+  c.open(SIZE, scene("start", { bounds: { w: 30, h: 20 } }));
+  scope.get(fitSlot).frameOnOpen = { sceneId: crypt.id, rect: ENTRANCE };
+  c.open(SIZE, arena);
+  assert.equal(scope.get(fitSlot).frameOnOpen, null, "taken by the saved view's opening, which never fits");
+  c.open(SIZE, crypt);
+  assert.deepEqual(c.framed, [null, null], "the start scene and the generated one both fit whole");
+});
+
+test("DG-C DG-OPUS-27: View as a player, its own scope, opens the same scene on a plain fit and leaves the DM's request", () => {
+  const dm = new RoomScope();
+  const preview = new RoomScope();
+  const crypt = scene("crypt", { bounds: { w: 50, h: 50 } });
+  dm.get(fitSlot).frameOnOpen = { sceneId: crypt.id, rect: ENTRANCE };
+  const player = canvas(preview);
+  player.open(SIZE, crypt);
+  assert.deepEqual(player.framed, [null]);
+  const own = canvas(dm);
+  own.open(SIZE, crypt);
+  assert.deepEqual(own.framed, [ENTRANCE]);
 });
