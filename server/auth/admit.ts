@@ -3,9 +3,9 @@ import type pg from "pg";
 import type { Member } from "#shared/model.ts";
 import type { JoinMode } from "#shared/protocol.ts";
 import { RoomFullError, RoomNotFoundError, type RoomGateway } from "../rooms/gateway.ts";
-import { formerDms, putGrant, revokeGrants } from "./grants.ts";
+import { formerDms, putGrant, revokeGrants, type RevokeBounds, type RevokeResult } from "./grants.ts";
 import { HttpError } from "./http.ts";
-import { CommitOutcomeUnknown, withTx } from "./tx.ts";
+import { CheckoutTimeout, CommitOutcomeUnknown, withTx } from "./tx.ts";
 
 /**
  * Letting a new or returning player in: the one path that writes a player
@@ -20,12 +20,26 @@ import { CommitOutcomeUnknown, withTx } from "./tx.ts";
  * that stays unknown keeps it, as a member nobody plays, which the DM
  * removes. Every step is bounded, and an answer that cannot wait for a slow
  * room says so while the attempt goes on.
+ *
+ * A kick is ordered against every admission naming its member that began
+ * before it: one that has not reached its grant's check writes no grant,
+ * and one past the check holds the room row lock, which the kick's revoke
+ * waits for before it deletes. So a kick never answers while a grant from
+ * before it can still land.
  */
 
 /** How long a caller waits for a new member to land, the room's load included, before it answers that the join is still settling. */
 export const MEMBER_ANSWER_MS = 5_000;
 /** The grant transaction's pool checkout. */
 export const GRANT_CHECKOUT_MS = 2_000;
+/** A kick's revoke: it waits on the room row lock that a grant being written holds. */
+export const KICK_BOUNDS: RevokeBounds = { checkoutMs: 2_000, lockMs: 2_000, statementMs: 5_000 };
+/**
+ * How long a kick is remembered against admissions that began before it.
+ * Every admission reaches its grant's check well within this: a carry-on
+ * has no member step, and a new member can be kicked only once it landed.
+ */
+const KICK_MEMORY_MS = 2 * 60_000;
 
 export type LockedRoom = { join_mode: JoinMode; player_epoch: number; dm_epoch: number };
 
@@ -47,6 +61,12 @@ export type AdmitPlan = {
   /** The session the grant goes on: the caller's own for a join, the requester's for a let-in. */
   sessionId: string;
   who: AdmitWho;
+  /**
+   * From `Admissions.begin()` when the caller's route started, before its
+   * own checks of the member, so a kick that lands after that writes no
+   * grant. Taken when `admit` is called if missing.
+   */
+  begun?: number;
   /**
    * The caller's checks and writes under the room row lock, in the grant's
    * transaction, before the grant: the mode, a stale ticket, promoting an
@@ -83,6 +103,10 @@ export class Admissions {
   /** Attempts whose commit outcome could not be read back yet, each a follow-up that answers true once settled. */
   #unreconciled = new Set<() => Promise<boolean>>();
   #following: Promise<void> | null = null;
+  /** Orders admissions and kicks: every `begin` and every kick takes the next number. */
+  #sequence = 0;
+  /** Each member's latest kick, by `room|member`: its number, and when, for forgetting it. */
+  #kicks = new Map<string, { seq: number; at: number }>();
 
   constructor(deps: { pool: pg.Pool; gateway: RoomGateway; log?: FastifyBaseLogger | undefined; options?: AdmissionsOptions | undefined }) {
     this.#pool = deps.pool;
@@ -102,6 +126,28 @@ export class Admissions {
     return this.#owed.size + this.#unreconciled.size;
   }
 
+  /** Marks where a join's route starts, before it reads anything about the member it names (`AdmitPlan.begun`). */
+  begin(): number {
+    return ++this.#sequence;
+  }
+
+  /**
+   * A DM kicks or removes the member: every admission naming it that began
+   * before now is refused at its grant's check. Call it before revoking
+   * (`revokeMember`), so the revoke's room lock orders it after any
+   * admission already past that check.
+   */
+  kicked(roomId: string, memberId: string): void {
+    const now = Date.now();
+    for (const [k, kick] of this.#kicks) if (now - kick.at > KICK_MEMORY_MS) this.#kicks.delete(k);
+    this.#kicks.set(`${roomId}|${memberId}`, { seq: ++this.#sequence, at: now });
+  }
+
+  #kickedSince(roomId: string, memberId: string, begun: number): boolean {
+    const kick = this.#kicks.get(`${roomId}|${memberId}`);
+    return kick !== undefined && kick.seq > begun;
+  }
+
   /**
    * Runs one attempt. The answer comes once the outcome is known, or as
    * `pending` once a new member has taken `memberMs` without landing.
@@ -109,7 +155,8 @@ export class Admissions {
    */
   admit(plan: AdmitPlan): Promise<AdmitAnswer> {
     let landed = plan.who.kind !== "new";
-    const outcome = this.#attempt(plan, () => (landed = true))
+    const begun = plan.begun ?? this.begin();
+    const outcome = this.#attempt(plan, begun, () => (landed = true))
       .catch((err: unknown): AdmitOutcome => ({ kind: "refused", error: asError(err) }))
       .then((o) => {
         try {
@@ -144,7 +191,7 @@ export class Admissions {
     return this.#following;
   }
 
-  async #attempt(plan: AdmitPlan, onLanded: () => void): Promise<AdmitOutcome> {
+  async #attempt(plan: AdmitPlan, begun: number, onLanded: () => void): Promise<AdmitOutcome> {
     const { roomId, who } = plan;
     const memberId = memberOf(who);
     if (who.kind === "new") {
@@ -181,6 +228,10 @@ export class Admissions {
           // Under the room lock, which a DM claim also takes, so a member
           // that became a DM a moment ago cannot slip through.
           if (who.kind === "member" && (await formerDms(tx, roomId)).has(memberId)) throw new HttpError(403, "not_a_player");
+          // Last, with nothing awaited before the write: a kick from after
+          // this check waits on the room lock held here, and deletes the
+          // grant once it commits.
+          if (this.#kickedSince(roomId, memberId, begun)) throw new HttpError(409, "member_removed");
           await putGrant(tx, { sessionId: plan.sessionId, roomId, memberId, role: "player", epoch: room.player_epoch });
         },
         { checkoutMs: this.#checkoutMs },
@@ -329,6 +380,39 @@ export class Admissions {
     set.delete(memberId);
     if (set.size === 0) this.#inFlight.delete(roomId);
   }
+}
+
+/**
+ * Kick and Remove's revoke (server/http/members.ts): every grant the member
+ * holds here, ordered after each admission naming it. The kick is marked
+ * first, so an admission that has not reached its grant's check writes
+ * none, and the revoke takes the room row lock, which an admission past
+ * that check holds until its grant commits, so the delete sees that grant.
+ * A revoke that gets no connection or lock in time answers busy: the kick
+ * is not done, and the DM tries again.
+ */
+export async function revokeMember(deps: { pool: pg.Pool; gateway: RoomGateway; admissions: Admissions }, roomId: string, memberId: string): Promise<RevokeResult> {
+  deps.admissions.kicked(roomId, memberId);
+  try {
+    return await revokeGrants(
+      deps,
+      roomId,
+      { by: "member", memberId },
+      async (tx) => {
+        await tx.query("select 1 from rooms where id = $1 for update", [roomId]);
+      },
+      KICK_BOUNDS,
+    );
+  } catch (err) {
+    if (err instanceof CheckoutTimeout || timedOutInDb(err)) throw new HttpError(503, "busy", { retryAfter: 2 });
+    throw err;
+  }
+}
+
+/** Postgres's lock timeout (55P03) or statement timeout (57014). */
+function timedOutInDb(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null)?.code;
+  return code === "55P03" || code === "57014";
 }
 
 const EMPTY: ReadonlySet<string> = new Set();

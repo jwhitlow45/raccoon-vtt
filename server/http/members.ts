@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { revokeGrants } from "../auth/grants.ts";
+import { revokeMember } from "../auth/admit.ts";
 import { accessErrors, type AuthKit, HttpError, requireGrant, roomParam } from "../auth/http.ts";
 
 const MemberParam = z.string().min(1).max(64);
@@ -22,6 +22,10 @@ const MemberParam = z.string().min(1).max(64);
  * committed after it finds the member gone and gives itself up, exactly that
  * grant and no other (server/auth/admit.ts). A join that rolls back takes
  * its new member off the same way: revoke, remove, revoke again.
+ *
+ * Both revoke through `revokeMember`, which orders the kick after every
+ * admission naming the member that began before it, so a grant from such
+ * an admission is either never written or deleted before the kick answers.
  */
 export async function registerMemberRoutes(app: FastifyInstance, kit: AuthKit): Promise<void> {
   await app.register(async (r) => {
@@ -33,7 +37,7 @@ export async function registerMemberRoutes(app: FastifyInstance, kit: AuthKit): 
       if (!target.success) throw new HttpError(404, "member_not_found");
       if (target.data === grant.memberId) throw new HttpError(400, "cannot_kick_self");
       if (!(await kit.gateway.getMember(roomId, target.data))) throw new HttpError(404, "member_not_found");
-      await revokeGrants(kit, roomId, { by: "member", memberId: target.data });
+      await revokeMember(kit, roomId, target.data);
       return reply.code(204).send();
     });
 
@@ -44,9 +48,9 @@ export async function registerMemberRoutes(app: FastifyInstance, kit: AuthKit): 
       if (!target.success) throw new HttpError(404, "member_not_found");
       if (target.data === grant.memberId) throw new HttpError(400, "cannot_remove_self");
       if (!(await kit.gateway.getMember(roomId, target.data))) throw new HttpError(404, "member_not_found");
-      await revokeGrants(kit, roomId, { by: "member", memberId: target.data });
+      await revokeMember(kit, roomId, target.data);
       await kit.gateway.removeMember(roomId, target.data);
-      await revokeGrants(kit, roomId, { by: "member", memberId: target.data });
+      await revokeMember(kit, roomId, target.data);
       return reply.code(204).send();
     });
   });

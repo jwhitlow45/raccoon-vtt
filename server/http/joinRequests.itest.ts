@@ -74,6 +74,41 @@ function pauseQuery(pool: pg.Pool, match: (sql: string) => boolean): { reached: 
   return { reached, go, restore: () => ((pool as { query: unknown }).query = original) };
 }
 
+/**
+ * Pauses the first statement matching `match` on a transaction's own client
+ * (pool.query's are paused by pauseQuery above) until `go` is called. Both
+ * connect() forms keep working, as loseNextCommit's do.
+ */
+function pauseTxStatement(pool: pg.Pool, match: (sql: string) => boolean): { reached: Promise<void>; go: () => void; restore: () => void } {
+  const connect = pool.connect.bind(pool) as () => Promise<pg.PoolClient>;
+  let armed = true;
+  let reach!: () => void;
+  const reached = new Promise<void>((r) => (reach = r));
+  let go!: () => void;
+  const gate = new Promise<void>((r) => (go = r));
+  const patched = (cb?: (err: Error | undefined, client?: pg.PoolClient, done?: () => void) => void) => {
+    const wrapped = connect().then((client) => {
+      const query = client.query.bind(client) as (...args: unknown[]) => unknown;
+      (client as { query: unknown }).query = (...args: unknown[]) => {
+        if (armed && typeof args[0] === "string" && match(args[0])) {
+          armed = false;
+          reach();
+          return gate.then(() => query(...args));
+        }
+        return query(...args);
+      };
+      return client;
+    });
+    if (cb) {
+      wrapped.then((client) => cb(undefined, client, () => client.release()), (err: Error) => cb(err));
+      return undefined;
+    }
+    return wrapped;
+  };
+  (pool as { connect: unknown }).connect = patched;
+  return { reached, go, restore: () => ((pool as { connect: unknown }).connect = connect) };
+}
+
 /** The next grant transaction commits and loses its COMMIT's answer (testing.ts loseNextCommit). */
 function loseGrantCommit(pool: pg.Pool, meanwhile: () => Promise<void>): () => void {
   return loseNextCommit(pool, (sql) => sql.includes("insert into grants"), meanwhile);
@@ -331,6 +366,56 @@ describe("join requests: asking, waiting and a DM's answer", () => {
     }
     assert.deepEqual(await k.members(roomId), ["Dungeon Master"]);
     assert.deepEqual((await k.list(dm, roomId)).requests.map((r) => r.id), [id]);
+  });
+
+  test("a kick between a let-in's new member and its grant answers first, and the kicked device never gets in", async () => {
+    const { dm, roomId } = await k.room("ask_only");
+    const phone = t.client();
+    const id = await k.asked(phone, roomId);
+    const addMember = t.gateway.addMember;
+    let kicked: number | undefined;
+    t.gateway.addMember = async (room, member) => {
+      await addMember.call(t.gateway, room, member);
+      // The DM reads "Quinn joins the room." and kicks at once, before the grant is written.
+      kicked = (await dm.delete(`/api/rooms/${room}/members/${member.id}/grants`)).statusCode;
+    };
+    let res;
+    try {
+      res = await k.letIn(dm, roomId, id);
+    } finally {
+      t.gateway.addMember = addMember;
+    }
+    assert.equal(kicked, 204);
+    assert.equal(res.statusCode, 409, res.body);
+    assert.equal(k.error(res), "member_removed");
+    assert.equal((await phone.me(roomId)).status, 403, "KICK-ORDERED: no grant landed after the kick answered");
+    for (let i = 0; i < 50 && (await k.members(roomId)).length > 1; i++) await new Promise((r) => setTimeout(r, 20));
+    assert.deepEqual(await k.members(roomId), ["Dungeon Master"], "its grant was never written, so its member comes off");
+    assert.deepEqual((await k.list(dm, roomId)).requests.map((r) => r.id), [id], "and the request waits for the DM again");
+  });
+
+  test("a kick while a carry-on let-in's grant is being written waits for that grant, then deletes it", async () => {
+    const { dm, roomId } = await k.room("ask");
+    const pipId = await t.client().join(roomId, "Pip");
+    const phone = t.client();
+    const id = await k.asked(phone, roomId, "Pip");
+    const pause = pauseTxStatement(t.pool, (sql) => sql.includes("insert into grants"));
+    const order: string[] = [];
+    try {
+      const letIn = k.letIn(dm, roomId, id, { kind: "member", memberId: pipId }).then((r) => (order.push("let-in"), r));
+      await pause.reached;
+      const kick = dm.delete(`/api/rooms/${roomId}/members/${pipId}/grants`).then((r) => (order.push("kick"), r));
+      await new Promise((r) => setTimeout(r, 150));
+      assert.deepEqual(order, [], "the kick waits on the room lock the grant holds");
+      pause.go();
+      const [granted, revoked] = await Promise.all([letIn, kick]);
+      assert.equal(granted.statusCode, 200, granted.body);
+      assert.equal(revoked.statusCode, 204, revoked.body);
+    } finally {
+      pause.go();
+      pause.restore();
+    }
+    assert.equal((await phone.me(roomId)).status, 403, "KICK-ORDERED: the grant committed first and the kick deleted it");
   });
 
   test("a member in flight is absent from continue-as and the carry-on list, and refused as not_a_player", async () => {

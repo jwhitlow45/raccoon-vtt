@@ -172,6 +172,13 @@ export type RevokeResult = {
 };
 
 /**
+ * Bounds for a revoke that must answer in time (a join's undo, a kick):
+ * the pool checkout, and the lock and statement timeouts inside it. A
+ * revoke past them throws, and its caller treats the revoke as not done.
+ */
+export type RevokeBounds = { checkoutMs: number; lockMs: number; statementMs: number };
+
+/**
  * The one way grants are removed: kick, DM device revoke, remove DM, DM link
  * replacement and password change all come here (design section 10.2).
  *
@@ -189,8 +196,10 @@ export async function revokeGrants(
   roomId: string,
   selector: GrantSelector,
   before?: (tx: pg.PoolClient) => Promise<void>,
+  bounds?: RevokeBounds,
 ): Promise<RevokeResult> {
   const result = await withTx(deps.pool, async (tx) => {
+    if (bounds) await tx.query(`set local lock_timeout = '${Math.ceil(bounds.lockMs)}ms'; set local statement_timeout = '${Math.ceil(bounds.statementMs)}ms'`);
     if (before) await before(tx);
     const { rows } = await tx.query<{ session_id: string; member_id: string; role: GrantRole }>(
       ...deleteStatement(roomId, selector),
@@ -220,7 +229,7 @@ export async function revokeGrants(
       demoted = [...candidates].filter((m) => !stillDm.has(m));
     }
     return { removed, sessionIds, demoted };
-  });
+  }, bounds ? { checkoutMs: bounds.checkoutMs } : {});
 
   // Sockets first: losing the label update is cosmetic, an open socket is not.
   if (result.sessionIds.length > 0) {

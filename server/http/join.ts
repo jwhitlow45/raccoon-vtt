@@ -92,6 +92,8 @@ export async function registerJoinRoutes(app: FastifyInstance, kit: AuthKit): Pr
     });
 
     r.post("/api/rooms/:id/join/complete", async (req, reply) => {
+      // Before the roster is read: a kick of the picked member from here on refuses this join's grant.
+      const begun = kit.admissions.begin();
       const roomId = roomParam(req);
       const body = parseBody(CompleteBody, req.body);
       const { sessionId } = await requireSession(kit, req, reply);
@@ -140,6 +142,7 @@ export async function registerJoinRoutes(app: FastifyInstance, kit: AuthKit): Pr
         roomId,
         sessionId,
         who,
+        begun,
         // The epoch is checked under the room row lock, in the transaction
         // that writes the grant, so a password change cannot slip in between.
         async locked(_tx, room) {

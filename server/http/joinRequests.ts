@@ -315,6 +315,8 @@ export async function registerJoinRequestRoutes(app: FastifyInstance, kit: AuthK
     });
 
     r.post("/api/rooms/:id/join-requests/:requestId/let-in", async (req, reply) => {
+      // Before the carry-on pick is checked: a kick of that member from here on refuses this let-in's grant.
+      const begun = kit.admissions.begin();
       const roomId = roomParam(req);
       const grant = await requireGrant(kit, req, reply, roomId, "dm");
       const requestId = requestParam(req);
@@ -350,6 +352,7 @@ export async function registerJoinRequestRoutes(app: FastifyInstance, kit: AuthK
         // request, which is the DM's: the DM's own session is untouched.
         sessionId: request.sessionId,
         who,
+        begun,
         async locked(tx, room) {
           if (room.join_mode === "password") throw new AsksClosed();
           const promoted = await kit.askSessions.promote(tx, request.sessionId);

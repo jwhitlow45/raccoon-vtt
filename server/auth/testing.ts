@@ -210,9 +210,31 @@ function copyTables(t: FakeTables): FakeTables {
 }
 
 /**
+ * A COMMIT applies only what its transaction changed from the copy it
+ * started on, as Postgres does, so a transaction that began before another
+ * one committed never undoes that one's rows.
+ */
+function applyChanges(into: FakeTables, base: FakeTables, tx: FakeTables): void {
+  for (const name of ["rooms", "grants"] as const) {
+    const target = into[name] as Map<string, unknown>;
+    const was = base[name] as Map<string, unknown>;
+    const now = tx[name] as Map<string, unknown>;
+    for (const k of was.keys()) if (!now.has(k)) target.delete(k);
+    for (const [k, v] of now) if (JSON.stringify(was.get(k)) !== JSON.stringify(v)) target.set(k, v);
+  }
+  for (const k of base.dmMembers) if (!tx.dmMembers.has(k)) into.dmMembers.delete(k);
+  for (const k of tx.dmMembers) into.dmMembers.add(k);
+}
+
+/** A room row locked with `for update`: the only lock these statements take, held to the transaction's end. */
+const ROOM_LOCK = /^select .* from rooms where id = \$1 for update$/;
+
+/**
  * The tables a join attempt reads and writes, in memory, answering only the
  * statements admission and revokeGrants send. A transaction works on a copy
- * that replaces the tables at COMMIT. No locks: tests drive the order.
+ * that replaces the tables at COMMIT. The one lock is the room row's, as
+ * Postgres holds it: a second transaction waits for it, then reads what the
+ * first committed, as a read-committed statement does after a lock wait.
  */
 export class FakeAccessDb {
   tables: FakeTables = { rooms: new Map(), grants: new Map(), dmMembers: new Set() };
@@ -232,12 +254,33 @@ export class FakeAccessDb {
     return this.tables.grants.get(`${sessionId}|${roomId}`);
   }
 
+  #roomLocks = new Map<string, Promise<void>>();
+
+  async #lockRoom(roomId: string): Promise<() => void> {
+    const before = this.#roomLocks.get(roomId) ?? Promise.resolve();
+    let release!: () => void;
+    const mine = new Promise<void>((r) => (release = r));
+    const tail = before.then(() => mine);
+    this.#roomLocks.set(roomId, tail);
+    await before;
+    return () => {
+      release();
+      if (this.#roomLocks.get(roomId) === tail) this.#roomLocks.delete(roomId);
+    };
+  }
+
   get pool(): pg.Pool {
     const db = this;
     return {
       async connect() {
         await db.connecting();
         let tx: FakeTables | null = null;
+        let base: FakeTables | null = null;
+        let wrote = false;
+        const locks: Array<() => void> = [];
+        const unlock = () => {
+          for (const release of locks.splice(0)) release();
+        };
         return {
           async query(text: string, values: unknown[] = []) {
             const sql = text.replace(/\s+/g, " ").trim();
@@ -245,24 +288,41 @@ export class FakeAccessDb {
             await db.before(sql);
             if (sql === "begin") {
               tx = copyTables(db.tables);
+              base = copyTables(tx);
+              wrote = false;
               return result([]);
             }
             if (sql === "commit") {
               const lose = db.loseCommit;
               db.loseCommit = null;
-              if (lose === "applied" && tx) db.tables = tx;
-              if (lose) throw new Error("connection lost during commit");
-              if (tx) db.tables = tx;
-              tx = null;
-              return result([]);
+              try {
+                if (lose !== "dropped" && tx && base) applyChanges(db.tables, base, tx);
+                if (lose) throw new Error("connection lost during commit");
+                tx = null;
+                return result([]);
+              } finally {
+                unlock();
+              }
             }
             if (sql === "rollback") {
               tx = null;
+              unlock();
               return result([]);
             }
+            if (tx && ROOM_LOCK.test(sql)) {
+              locks.push(await db.#lockRoom(String(values[0])));
+              // What another transaction committed while this one waited.
+              if (!wrote) {
+                tx = copyTables(db.tables);
+                base = copyTables(tx);
+              }
+            }
+            if (!sql.startsWith("select") && !sql.startsWith("set local")) wrote = true;
             return db.run(sql, values, tx ?? db.tables);
           },
-          release() {},
+          release() {
+            unlock();
+          },
         };
       },
       query(text: string, values: unknown[] = []) {
@@ -281,6 +341,9 @@ export class FakeAccessDb {
     if (sql.startsWith("select dm_epoch from rooms")) {
       const room = t.rooms.get(s(0));
       return Promise.resolve(result(room ? [{ dm_epoch: room.dm_epoch }] : []));
+    }
+    if (sql === "select 1 from rooms where id = $1 for update") {
+      return Promise.resolve(result(t.rooms.has(s(0)) ? [{ "?column?": 1 }] : []));
     }
     if (sql.startsWith("select role, member_id, epoch from grants where session_id = $1 and room_id = $2")) {
       const g = t.grants.get(`${s(0)}|${s(1)}`);

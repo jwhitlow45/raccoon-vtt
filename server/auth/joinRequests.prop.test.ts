@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import fc from "fast-check";
 import type { Member } from "#shared/model.ts";
 import { runSettings } from "#shared/propertyTestutil.ts";
-import { Admissions, type AdmitOutcome } from "./admit.ts";
+import { Admissions, revokeMember, type AdmitOutcome } from "./admit.ts";
 import { RoomFullError } from "../rooms/gateway.ts";
 import { HttpError } from "./http.ts";
 import {
@@ -283,6 +283,8 @@ type Fault = {
   reconcileDown: boolean;
   removedByDm: boolean;
   removalFailures: number;
+  /** A DM kicks the new member: just before its grant's check, or while its grant is being written. */
+  kick: "none" | "beforeCheck" | "duringGrant";
 };
 
 const fault: fc.Arbitrary<Fault> = fc.record({
@@ -291,6 +293,7 @@ const fault: fc.Arbitrary<Fault> = fc.record({
   reconcileDown: fc.boolean(),
   removedByDm: fc.boolean(),
   removalFailures: fc.nat({ max: 2 }),
+  kick: fc.constantFrom("none", "none", "beforeCheck", "duringGrant"),
 });
 
 const ROOM = "ROOMAAAA";
@@ -309,6 +312,10 @@ async function runAdmissions(faults: Fault[]): Promise<void> {
     const id = `m${n}`;
     const session = `s${n}`;
     const lost = f.grant === "loseApplied" || f.grant === "loseDropped";
+    // Kicks are drawn against a grant that commits cleanly, so each has one expected end.
+    const kick = f.grant === "ok" && !f.removedByDm ? f.kick : "none";
+    let kicked: Promise<unknown> | null = null;
+    const kickNow = () => (kicked ??= revokeMember({ pool: db.pool, gateway, admissions }, ROOM, id));
     let removalFailures = f.removalFailures;
     let commitSent = false;
     // Only the read-back after a lost COMMIT is ever cut off here.
@@ -335,11 +342,15 @@ async function runAdmissions(faults: Fault[]): Promise<void> {
     db.connecting = () => {
       if (commitSent && down) throw new Error("no connection");
     };
-    db.before = (sql) => {
+    db.before = async (sql) => {
+      // The room lock is not taken yet, so the kick runs to its end first.
+      if (kick === "beforeCheck" && sql.startsWith("select join_mode, player_epoch")) await kickNow();
       if (sql.startsWith("insert into grants")) {
         assert.equal(gateway.room(ROOM).has(id), true, "MEMBER-FIRST");
         assert.equal(admissions.inFlight(ROOM).has(id), true, "IN-FLIGHT-UNCLAIMED");
         if (f.grant === "statement") throw new Error("statement timeout");
+        // Past the check, holding the room lock: the kick waits for this grant's commit.
+        if (kick === "duringGrant") void kickNow();
       }
       // The grant transaction's own COMMIT: its last statement wrote the grant.
       if (sql === "commit" && db.statements.at(-2)?.startsWith("insert into grants")) {
@@ -373,6 +384,7 @@ async function runAdmissions(faults: Fault[]): Promise<void> {
     assert.equal(settled.length, 1, "DECIDING-ENDS: settled exactly once");
     const o = settled[0];
     assert.ok(o);
+    if (kicked) await kicked;
     const grant = db.grant(session, ROOM);
     const present = gateway.room(ROOM).has(id);
     const landed = f.member === "land" || f.member === "slow";
@@ -381,6 +393,11 @@ async function runAdmissions(faults: Fault[]): Promise<void> {
       assert.equal(o.kind, "refused");
       assert.equal(grant, undefined);
       assert.equal(present, false);
+    } else if (kick !== "none") {
+      assert.equal(grant, undefined, "KICK-ORDERED: no grant outlives a kick that answered");
+      // Kicked before its check, the grant is never written and the new member comes off. Kicked after it, the grant committed first.
+      assert.equal(o.kind, kick === "beforeCheck" ? "refused" : "in");
+      assert.equal(present, kick !== "beforeCheck");
     } else if (f.grant === "loseDropped") {
       assert.equal(o.kind, "unknown", "UNKNOWN-ENDS");
       assert.equal(present, true, "UNDO-ONLY-ON-ROLLBACK: an unknown outcome removes no member");

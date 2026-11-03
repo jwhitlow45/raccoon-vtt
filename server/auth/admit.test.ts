@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Member } from "#shared/model.ts";
-import { Admissions, type AdmitOutcome, type AdmitPlan, type AdmitWho } from "./admit.ts";
+import { Admissions, revokeMember, type AdmitAnswer, type AdmitOutcome, type AdmitPlan, type AdmitWho } from "./admit.ts";
 import { HttpError } from "./http.ts";
 import { FakeAccessDb, FakeRoomGateway } from "./testing.ts";
 
@@ -30,6 +30,7 @@ function setup(options: { memberMs?: number; checkoutMs?: number } = {}) {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const codeOf = (a: AdmitAnswer) => (a.kind === "refused" && a.error instanceof HttpError ? a.error.code : a.kind);
 function gate(): { wait: Promise<void>; open: () => void } {
   let open!: () => void;
   const wait = new Promise<void>((r) => (open = r));
@@ -234,6 +235,71 @@ describe("admitPlayer", () => {
     assert.equal(answer.kind === "refused" && answer.error instanceof HttpError && answer.error.code, "member_removed");
     assert.equal(db.grant(SESSION, ROOM), undefined);
     assert.ok(db.statements.some((s) => s.includes("and session_id = $2 and member_id = $3 and role = $4 and epoch = $5")), "matched on session, member, role and epoch");
+  });
+
+  test("a kick between a new member and its grant answers first, and the admission writes no grant (JR-SOL-01's order)", async () => {
+    const { db, gateway, admissions, settled, plan } = setup();
+    const held = gate();
+    const atGrant = gate();
+    let first = true;
+    db.connecting = async () => {
+      // The admission's grant transaction is the first connection: the kick's comes while it waits.
+      if (!first) return;
+      first = false;
+      atGrant.open();
+      await held.wait;
+    };
+    const answer = admissions.admit(plan({ kind: "new", member: member("q1") }));
+    await atGrant.wait;
+    assert.equal(gateway.room(ROOM).has("q1"), true, "the member is on the roster, so a DM can kick it");
+    const kick = await revokeMember({ pool: db.pool, gateway, admissions }, ROOM, "q1");
+    assert.deepEqual(kick.removed, [], "no grant yet to revoke");
+    held.open();
+    assert.equal(codeOf(await answer), "member_removed");
+    assert.equal(db.grant(SESSION, ROOM), undefined, "KICK-ORDERED: no grant lands after the kick answered");
+    assert.deepEqual(settled.map((o) => o.kind), ["refused"]);
+    for (let i = 0; i < 20 && gateway.room(ROOM).has("q1"); i++) await sleep(5);
+    assert.equal(gateway.room(ROOM).has("q1"), false, "a grant never written is a rollback: the member comes off");
+  });
+
+  test("a kick while a grant is being written waits on the room lock for its commit, then deletes it", async () => {
+    const { db, gateway, admissions, plan } = setup();
+    gateway.room(ROOM).set("pip", member("pip"));
+    const held = gate();
+    const atInsert = gate();
+    db.before = async (sql) => {
+      if (!sql.startsWith("insert into grants")) return;
+      atInsert.open();
+      await held.wait;
+    };
+    const answer = admissions.admit(plan({ kind: "member", memberId: "pip" }));
+    await atInsert.wait;
+    let kickAnswered = false;
+    const kick = revokeMember({ pool: db.pool, gateway, admissions }, ROOM, "pip").then((r) => {
+      kickAnswered = true;
+      return r;
+    });
+    await sleep(30);
+    assert.equal(kickAnswered, false, "the kick waits for the grant holding the room lock");
+    held.open();
+    assert.equal((await answer).kind, "in", "the grant was past its check, so it commits");
+    assert.deepEqual((await kick).removed.map((r) => r.sessionId), [SESSION], "and the kick deletes it");
+    assert.equal(db.grant(SESSION, ROOM), undefined, "KICK-ORDERED");
+  });
+
+  test("a carry-on whose route began before a kick of its member is refused, and one begun after it is a new decision", async () => {
+    const { db, gateway, admissions, plan } = setup();
+    gateway.room(ROOM).set("pip", member("pip"));
+    // join/complete and let-in take `begun` before they read the roster.
+    const begun = admissions.begin();
+    await revokeMember({ pool: db.pool, gateway, admissions }, ROOM, "pip");
+    const stale = await admissions.admit(plan({ kind: "member", memberId: "pip" }, { begun }));
+    assert.equal(codeOf(stale), "member_removed");
+    assert.equal(db.grant(SESSION, ROOM), undefined);
+    assert.equal(gateway.room(ROOM).has("pip"), true, "a carry-on adds no member, so none comes off");
+    // A kick of another member, or one from before the route began, refuses nothing.
+    await revokeMember({ pool: db.pool, gateway, admissions }, ROOM, "someone-else");
+    assert.equal((await admissions.admit(plan({ kind: "member", memberId: "pip" }))).kind, "in");
   });
 
   test("a carry-on pick of a former DM and a device already in are refused under the lock", async () => {
