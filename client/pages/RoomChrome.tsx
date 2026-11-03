@@ -19,14 +19,14 @@ import { useRoomViewChoice, useViewVoice, ViewMenuBody, ViewSheetDialog, ViewVoi
 import { XCardButton } from "../features/xcard/XCardButton.tsx";
 import type { Turn } from "../lib/view.ts";
 import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
-import { accentVars } from "../lib/accent.ts";
+import { accentVars, boardAccentVars, type Accent } from "../lib/accent.ts";
 import { escapeTarget } from "../lib/escape.ts";
 import { toggleFullscreen, useFullscreen } from "../lib/fullscreen.ts";
 import { takeReopen } from "../lib/reopen.ts";
 import { preloadLazies } from "../lib/retryableLazy.ts";
-import { theme } from "../lib/theme.ts";
+import { BOARD_SCOPE, theme } from "../lib/theme.ts";
 import { APP_TITLE, roomTitle } from "../lib/title.ts";
-import { useAccent } from "../state/accent.ts";
+import { useAccent, useSchemeAccent } from "../state/accent.ts";
 import { barDismiss, dismissal } from "../state/selection.ts";
 import { useScoped } from "../state/scope.ts";
 import { useKeyHint, withKey, type KeyHint } from "../state/shortcuts.ts";
@@ -65,13 +65,19 @@ export function useRoomTitle(): void {
  * the document too, for sheets and dialogs portaled to the body and for the
  * focus ring and selection in globals.css. A preview keeps them to its own
  * page, so the DM's room behind it keeps the DM's color. Leaving the room
- * puts the crest yellow back. A layout effect, so the first paint already
- * has the color.
+ * puts the scheme's crest accent back (lib/scheme.ts). A layout effect, so
+ * the first paint already has the color.
+ *
+ * Two accents (docs/design/design-v1-light-theme.md 6.3): the one for the
+ * page's scheme, and the same color resolved for dark, which what keeps
+ * the dark look and every ring on the board read (lib/theme.ts
+ * BOARD_SCOPE and ON_BOARD_STYLE). In dark the two are the same.
  */
 export function useAccentVars(): CSSProperties {
-  const accent = useAccent();
+  const accent = useSchemeAccent();
+  const board = useAccent();
   const preview = usePreview() !== null;
-  const vars = useMemo(() => accentVars(accent), [accent]);
+  const vars = useMemo(() => roomAccentVars(accent, board), [accent, board]);
   useLayoutEffect(() => {
     if (preview) return;
     const style = document.documentElement.style;
@@ -81,6 +87,11 @@ export function useAccentVars(): CSSProperties {
     };
   }, [vars, preview]);
   return vars as CSSProperties;
+}
+
+/** The room's accent variables: the scheme's family, then the board's. */
+export function roomAccentVars(accent: Accent, board: Accent): Record<string, string> {
+  return { ...accentVars(accent), ...boardAccentVars(board) };
 }
 
 /**
@@ -197,7 +208,10 @@ export function PauseScreen() {
   }, [toasts, ui]);
   return (
     <div
+      data-rvtt-pause-screen=""
       style={{
+        // Dark in both schemes, on the black stage, its X-card and its focus rings in the accent resolved for dark (D-261102-364): a light theme's muted text would read 2.8:1 on black.
+        ...BOARD_SCOPE,
         position: "fixed",
         inset: 0,
         height: "100dvh",
