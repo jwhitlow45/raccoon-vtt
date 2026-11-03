@@ -3,7 +3,8 @@ import { describe, test } from "node:test";
 import fc from "fast-check";
 import { holds } from "../propertyTestutil.ts";
 import { room, scene, token } from "../testutil.ts";
-import { footprintRect, snapStep, type PlacedToken } from "./footprint.ts";
+import { footprintRect, placedOnHex, snapStep, type PlacedToken } from "./footprint.ts";
+import type { HexGrid } from "./hex.ts";
 import { SQUARES, gridOfShape, type Grid } from "./grid.ts";
 import { drawnSpot, freeDrawnAt, nudgeAt, nudgeBound, nudgeable, nudgesToJudge, nudgeValid } from "./nudge.ts";
 
@@ -59,6 +60,12 @@ describe("a drop between squares (docs/design/design-v1-snap-off.md 5.1, 6.4 and
   test("only on squares, unsqueezed, on the token's own snapped spot", () => {
     const at = { x: 3.25, y: 3 };
     assert.equal(nudgeAt(HEX, placed(), at), undefined, "a hex scene keeps creatures on a hex");
+    // One standing on its hex, where a hex scene's box is its stored box, still takes none.
+    const onHex = placed({ ...placedOnHex(HEX as HexGrid, placed(), { col: 3, row: 2 }) });
+    assert.deepEqual([footprintRect(HEX, onHex).x, footprintRect(HEX, onHex).y], [onHex.x, onHex.y]);
+    assert.equal(nudgeable(HEX, onHex), false);
+    assert.equal(nudgeAt(HEX, onHex, { x: onHex.x + 0.125, y: onHex.y }), undefined);
+    assert.equal(nudgeValid(HEX, { ...onHex, nudge: { x: 1, y: 0 } }), false);
     assert.equal(nudgeAt(SQUARES, placed({ x: 3.5 }), { x: 3.625, y: 3 }), undefined, "a Medium creature held half off its square");
     assert.equal(nudgeAt(SQUARES, placed({ size: "large", squeeze: true }), at), undefined, "squeezed");
     assert.deepEqual(nudgeAt(SQUARES, placed({ size: "medium", squeeze: true }), at), { x: 2, y: 0 }, "a flag a Medium creature cannot squeeze by is no squeeze");

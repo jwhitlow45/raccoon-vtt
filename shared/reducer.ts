@@ -95,6 +95,7 @@ import {
   drawingClear,
   drawingCreate,
   drawingDelete,
+  keepNudges,
   templateCreate,
   templateDelete,
   templateUpdate,
@@ -187,6 +188,9 @@ function applyOnce(state: RoomState, op: Op, actor: Viewer, env: Env): ApplyResu
     if (traps?.wrote && dispatched) trapWrote = new Set(tx.touched().filter((key) => !dispatched.has(key)));
     if (plan && op.t === "sys.restore") capRestoredDues(tx, state.traps);
     remindAfter(tx, state, moved);
+    // Last of the op's own writes, after the trap step, so every token the op left anywhere is judged where it ends, and a
+    // correction line reads it so (docs/design/design-v1-snap-off.md 5.3).
+    keepNudges(tx, state);
     if (writesUndoCorrections(env.opVersion) && op.t === "sys.restore" && op.correction && op.scope && op.undid === undefined && actor.role === "dm") {
       tx.addCorrection({ type: "correction", from: op.from, scope: op.scope, label: op.correction.label }, correctionViews(state, tx.state, tx.touched(), op.from, op.scope, env));
       // The clock line follows the same gate, so a player's restore writes none (docs/design/design-v1-calendar.md 6.3).

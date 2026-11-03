@@ -12,6 +12,7 @@ import { planMove, type MovedToken } from "../rules/moveLeg.ts";
 import { holderOf, linkHolds, walkerFor } from "../rules/attach.ts";
 import { dismountSplit } from "../rules/dismount.ts";
 import { walkFrom } from "../rules/movement.ts";
+import { nudgeAt, nudgesToJudge, nudgeValid, withNudge } from "../rules/nudge.ts";
 import { deleteCharacterBlocks } from "./companionBlocks.ts";
 import {
   BLOCK_LINKS,
@@ -248,7 +249,17 @@ export function tokenUpdate(tx: Tx, op: OpOf<"token.update">): void {
   if (p.partyVision === true) next.partyVision = true;
   else if (p.partyVision === false) delete next.partyVision;
   // A squeeze is where the token stood, at its size: a new size, scene or place leaves it standing full size (section 4.1).
-  if (SQUEEZE_FIELDS.some((field) => p[field] !== undefined)) delete next.squeeze;
+  // So does a placement between squares, drawn in the box it had (docs/design/design-v1-snap-off.md 5.3).
+  if (SQUEEZE_FIELDS.some((field) => p[field] !== undefined)) {
+    delete next.squeeze;
+    delete next.nudge;
+  }
+  // The patch is `drawnAt` alone (protocol.ts), from the token's own spot: a drop between squares on its own box, or Snap to grid.
+  if (p.drawnAt !== undefined) {
+    const nudge = nudgeAt(gridOfToken(tx.state, next), next, p.drawnAt);
+    if (nudge) next.nudge = nudge;
+    else delete next.nudge;
+  }
   updateCompanion(tx, token, next, p);
   const judged = judgedIn(tx, [next, ...along.map((c) => c.next)]);
   tx.write(keys.token(token.id), walkedOwn(tx, token, next, judged));
@@ -362,7 +373,7 @@ export function tokenDelete(tx: Tx, op: OpOf<"token.delete">): void {
   deleteToken(tx, op.tokenId);
 }
 
-/** The fields of a token.update that clear a squeeze: its size, its scene and its place. */
+/** The fields of a token.update that clear a squeeze and a placement between squares: its size, its scene and its place. */
 const SQUEEZE_FIELDS = ["size", "w", "h", "sceneId", "x", "y"] as const;
 
 type Move = Omit<OpOf<"token.move">, "t">;
@@ -373,6 +384,11 @@ type Move = Omit<OpOf<"token.move">, "t">;
  * squeeze is real. A teleport's leg on the turn's path does not count, and
  * the DM's log says what it passed, whoever moved it and whether or not a
  * fight is on. Both flags are in the stored op, so replay does the same.
+ *
+ * A token a move names keeps a placement between squares only when it
+ * lands where it was aimed, which `drawnAt` within the bound of the landing
+ * says (docs/design/design-v1-snap-off.md 5.3). A move without one, or one a
+ * wall, a touch or a trap cut short, puts it back on the grid.
  */
 function movedToken(tx: Tx, move: Move): { move: Move; token: Token; next: Token } {
   const token = tx.token(move.tokenId);
@@ -381,7 +397,23 @@ function movedToken(tx: Tx, move: Move): { move: Move; token: Token; next: Token
   if (move.rotation !== undefined) next.rotation = move.rotation;
   if (move.squeeze) next.squeeze = true;
   else delete next.squeeze;
-  return { move, token, next };
+  return { move, token, next: withNudge(next, nudgeAt(gridOfToken(tx.state, next), next, move.drawnAt)) };
+}
+
+/**
+ * The one pass over placements between squares (docs/design/design-v1-snap-off.md
+ * 5.3), at the end of every op: a token the op wrote, or one standing on a
+ * scene whose grid shape the op changed, loses a nudge that no longer holds
+ * where it ends, as a carried, seated, restored or duplicated token, or one
+ * on a scene gone to hexes. A valid one stays, so a restore onto squares
+ * gives back what was there. It writes only tokens the op touched, and those
+ * of a reshaped scene, so their nudges go back with the op's undo.
+ */
+export function keepNudges(tx: Tx, before: RoomState): void {
+  for (const id of nudgesToJudge(before, tx.state, tx.touched())) {
+    const token = tx.token(id);
+    if (!nudgeValid(gridOfToken(tx.state, token), token)) tx.write(keys.token(id), withNudge(token, undefined));
+  }
 }
 
 /**
