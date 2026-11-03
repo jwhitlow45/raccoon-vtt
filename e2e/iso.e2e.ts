@@ -2593,6 +2593,85 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await touch.close();
   });
 
+  test("SO-ISO. a token placed between squares stands where it is drawn in Isometric, its dashed outline lies on the ground under the box the rules count it in, and an Alt-drag of a standee places it", async () => {
+    const sceneId = randomUUID();
+    const marker = randomUUID();
+    await ops.send({ t: "scene.create", scene: { id: sceneId, name: "Snap off", bounds: { w: 16, h: 14 }, fogEnabled: false } });
+    await ops.send({ t: "scene.update", sceneId, patch: { defaultView: { x: 8, y: 7, zoom: 40 } } });
+    const actor = { hp: { cur: 9, max: 9, temp: 0 }, life: "alive", ac: 13, speeds: { walk: 30 }, initBonus: 0, passivePerception: 10, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
+    await ops.send({ t: "token.create", token: { id: marker, sceneId, kind: "monster", name: "Marker", size: "medium", x: 8, y: 7, disposition: "hostile", visibility: "all", actor: { inline: actor } } });
+    await dm.bringToFront();
+    await openSideTab(dm, "Scenes");
+    await dm.getByRole("tabpanel", { name: "Scenes" }).getByRole("button", { name: /^Snap off/ }).first().click();
+    await waitFor("the marker on the DM's board", () =>
+      dm.evaluate((id) => !!(globalThis as unknown as { Konva: { stages: { width(): number; findOne(s: string): unknown }[] } }).Konva.stages.find((s) => s.width() > 0 && s.findOne(`#${id}`)) || null, marker),
+    );
+    await isoOn(dm, 0);
+    const home = await standeeAt(dm, marker);
+    // Placed 3/8 square east and 1/8 south of its box: the standee moves by what the ground's projection moves that point.
+    const ground = await isoPoint(dm, { x: 8.5, y: 7.5 }, 0);
+    const moved = await isoPoint(dm, { x: 8.5 + 3 / 8, y: 7.5 + 1 / 8 }, 0);
+    await ops.send({ t: "token.update", tokenId: marker, patch: { drawnAt: { x: 8 + 3 / 8, y: 7 + 1 / 8 } } });
+    const now = await waitFor("the standee drawn off its box", async () => {
+      const at = await standeeAt(dm, marker);
+      return Math.abs(at.x - home.x) > 1 || Math.abs(at.y - home.y) > 1 ? at : null;
+    });
+    await waitFor("the standee still", async () => {
+      const a = await standeeAt(dm, marker);
+      await dm.waitForTimeout(150);
+      const b = await standeeAt(dm, marker);
+      return Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 ? true : null;
+    });
+    const settled = await standeeAt(dm, marker);
+    assert.ok(Math.abs(settled.x - home.x - (moved.x - ground.x)) <= 1.5 && Math.abs(settled.y - home.y - (moved.y - ground.y)) <= 1.5, `the standee moved ${JSON.stringify({ x: settled.x - home.x, y: settled.y - home.y })} for ${JSON.stringify({ x: moved.x - ground.x, y: moved.y - ground.y })}`);
+    assert.ok(now);
+    // Selected, its box shows as a dashed outline on the ground: its middle is the middle of the box the rules count it in.
+    await dm.mouse.click(settled.x, settled.y);
+    await dm.getByRole("dialog", { name: "Marker actions, placed between squares", exact: true }).waitFor();
+    const outline = await waitFor("the outline on the ground", () =>
+      dm.evaluate(() => {
+        type N = { find(s: string): N[]; isVisible(): boolean; getClientRect(o?: { skipStroke?: boolean }): { x: number; y: number; width: number; height: number } };
+        const konva = (globalThis as unknown as { Konva: { stages: (N & { width(): number; listening(): boolean; container(): { getBoundingClientRect(): { left: number; top: number } } })[] } }).Konva;
+        for (const stage of konva.stages) {
+          if (stage.width() <= 0 || !stage.listening()) continue;
+          const found = stage.find(".rulesOutline").filter((n) => n.isVisible());
+          if (found.length === 0) continue;
+          const box = stage.container().getBoundingClientRect();
+          const r = found[0]!.getClientRect({ skipStroke: true });
+          return { x: box.left + r.x + r.width / 2, y: box.top + r.y + r.height / 2 };
+        }
+        return null;
+      }),
+    );
+    const boxMiddle = await isoPoint(dm, { x: 8.5, y: 7.5 }, 0);
+    assert.ok(Math.abs(outline.x - boxMiddle.x) <= 2 && Math.abs(outline.y - boxMiddle.y) <= 2, `the outline's middle ${JSON.stringify(outline)} against the rules box's ${JSON.stringify(boxMiddle)}`);
+    await shots.take(dm, "so-iso-placed-outline");
+    await dm.getByRole("dialog", { name: /actions/ }).getByRole("button", { name: "Close", exact: true }).click();
+    // An Alt-drag of the standee two squares along the ground places it: its box is a square under the release, and the nudge is whole eighths.
+    const from = await standeeAt(dm, marker);
+    // The pointer moves as the ring's middle does on the ground: from the drawn middle (8 3/8 + 1/2, 7 1/8 + 1/2) to a quarter off the middle of the box at (11, 7), up and to the right.
+    const startMid = await isoPoint(dm, { x: 8 + 3 / 8 + 0.5, y: 7 + 1 / 8 + 0.5 }, 0);
+    const endMid = await isoPoint(dm, { x: 11.75, y: 7.25 }, 0);
+    const aim = { x: from.x + endMid.x - startMid.x, y: from.y + endMid.y - startMid.y };
+    await dm.keyboard.down("Alt");
+    try {
+      await dm.mouse.move(from.x, from.y);
+      await dm.mouse.down();
+      await dm.mouse.move(from.x + (aim.x - from.x) * 0.1, from.y + (aim.y - from.y) * 0.1, { steps: 3 });
+      await dm.mouse.move(aim.x, aim.y, { steps: 12 });
+      await dm.mouse.up();
+    } finally {
+      await dm.keyboard.up("Alt");
+    }
+    const placed = await waitFor("the marker placed by the Alt-drag", () => {
+      const t = dmSocket.state?.tokens[marker];
+      return t && t.nudge && t.x !== 8 ? t : null;
+    });
+    assert.equal(Number.isInteger(placed.x) && Number.isInteger(placed.y), true, "a square's spot");
+    assert.ok(Math.abs(placed.nudge!.x) <= 3 && Math.abs(placed.nudge!.y) <= 3, "within 3/8");
+    assert.deepEqual([placed.x, placed.y, placed.nudge], [11, 7, { x: 2, y: -2 }], "the box under the release, drawn a quarter square off");
+  });
+
   test("ISO-12. no page logged an error", () => {
     for (const c of Object.values(consoles)) assert.deepEqual(c.errors, [], `${c.label}'s page`);
   });
