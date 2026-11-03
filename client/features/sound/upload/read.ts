@@ -2,7 +2,7 @@ import { walkMp3 } from "#shared/audio/mp3.ts";
 import { SOUND_LIMITS, soundUseFits } from "#shared/limits.ts";
 import type { SoundUse } from "#shared/sound.ts";
 import { blobSource } from "./bytes.ts";
-import { copiedFile, copyable } from "./copy.ts";
+import { copiedFile, copyable, type CopyCheck } from "./copy.ts";
 import type { FromWorker, ToWorker } from "./encode.ts";
 import { lengthRefusal, planRead, probeFile, thisDeviceBudget, wholeDecodeFits, type Probe } from "./guard.ts";
 import { levelOf } from "./loudness.ts";
@@ -71,7 +71,7 @@ async function prepare(input: { file: File; use: SoundUse; signal: AbortSignal; 
     const copy = copyable(bytes);
     if (copy.ok) {
       if (!soundUseFits(use, copy.facts.ms)) throw new Refused(lengthRefusal(use, copy.facts.ms, true) ?? { t: "tooLong" });
-      const measured = await measureMp3(bytes, copy.facts, signal);
+      const measured = await measureMp3(copy, signal);
       if (measured) {
         const blob = copiedFile(copy.bytes);
         return { blob, level: levelOf(measured), ms: copy.facts.ms, copied: true };
@@ -86,7 +86,9 @@ async function prepare(input: { file: File; use: SoundUse; signal: AbortSignal; 
 
 // ---------------------------------------------------------------- the three reads
 
-async function measureMp3(bytes: Uint8Array, facts: Parameters<typeof mp3Pieces>[0] & { channels: 1 | 2 }, signal: AbortSignal): Promise<{ lufs: number; peak: number } | null> {
+/** The copy's own frames in pieces: its offsets count from the first of them, past every tag, so they are taken together. */
+async function measureMp3(copy: Extract<CopyCheck, { ok: true }>, signal: AbortSignal): Promise<{ lufs: number; peak: number } | null> {
+  const { bytes, facts } = copy;
   const context = new OfflineAudioContext(1, 1, OUTPUT_RATE);
   const worker = new EncodeWorker(signal);
   try {

@@ -6,6 +6,8 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
+import { withTagFrame } from "../shared/audio/mp3Testutil.ts";
+import { concat, id3v2, mp3Of, toneSamples } from "../client/features/sound/upload/sounds.testutil.ts";
 import { committed, longMp3At48, toneWav, wavOfChannels } from "./fixtures/sounds.ts";
 import { ConsoleWatch, OpSocket, openSideTab, ROOT, Shots, sleep, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
@@ -253,6 +255,26 @@ describe("adding sounds", { concurrency: false }, () => {
     assert.equal(tagged.size, taggedBytes - 4096 - 128, "the copy is the frames alone, both tags gone");
     assert.equal(tagged.workers, 1, "a copied file is measured in the worker, never encoded");
     assert.deepEqual(consoleWatch.errors, []);
+  });
+
+  test("su-1b. an Info and LAME frame is dropped with the tags and the file still measured in pieces, and an emphasis file is converted", async () => {
+    const frames = mp3Of(toneSamples({ seconds: 75, rateHz: 44_100, channels: 2, tone: { hz: 1000, dbfs: -20 } }), 44_100);
+    const tagged = written("info-frame.mp3", concat([id3v2("Info frame", 64 * 1024), withTagFrame(frames)]));
+    const emphasis = frames.slice();
+    for (let at = 0; at + 4 <= emphasis.length && emphasis[at] === 0xff; ) {
+      emphasis[at + 3]! |= 1;
+      const padded = (emphasis[at + 2]! >> 1) & 1;
+      at += Math.floor((144_000 * 128) / 44_100) + padded;
+    }
+    const [info, flagged] = await prepareAll([tagged, written("emphasis.mp3", emphasis)], "music");
+    assert.ok(info?.ok, JSON.stringify(info));
+    assert.deepEqual([info.copied, info.size, info.decodes, info.walk?.stripped], [true, frames.length, 2, 0]);
+    assert.ok(flagged?.ok, JSON.stringify(flagged));
+    assert.deepEqual([flagged.copied, flagged.decodes, flagged.walk?.kbps], [false, 1, 128]);
+    // The same audio measured in pieces past every tag and decoded whole reads the same. The encoder's own copy of a
+    // 1 kHz tone at -20 dBFS decodes about 0.4 dB under its source, so the level is near +2.4 dB.
+    assert.ok(Math.abs(info.level! - flagged.level!) <= 1, `pieces ${info.level}, whole ${flagged.level}`);
+    assert.ok(Math.abs(info.level! - 22) <= 4, `the level ${info.level}`);
   });
 
   test("su-2. a 48 kHz MP3 in 60-second pieces: each piece's pre-roll of 10,584 samples dropped lines up with a whole decode", async () => {

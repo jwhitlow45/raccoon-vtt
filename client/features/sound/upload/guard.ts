@@ -61,7 +61,7 @@ export function id3v2Size(b: Uint8Array, at = 0): number {
 // ---------------------------------------------------------------- MPEG audio frames
 
 /** An MPEG audio frame header, MPEG-1, 2 or 2.5, any layer, read leniently: the strict walk is mp3.ts's. */
-export type MpegFrame = { mpeg1: boolean; layer: 1 | 2 | 3; kbps: number; rateHz: number; channels: 1 | 2; bytes: number; samples: number };
+export type MpegFrame = { mpeg1: boolean; layer: 1 | 2 | 3; kbps: number; rateHz: number; channels: 1 | 2; bytes: number; samples: number; crc: boolean; emphasis: boolean };
 
 const KBPS_V1: Record<1 | 2 | 3, readonly number[]> = {
   1: [0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448],
@@ -100,7 +100,8 @@ export function mpegFrameAt(b: Uint8Array, at: number): MpegFrame | null {
     bytes = Math.floor((144_000 * kbps) / rateHz) + padding;
     samples = 1152;
   }
-  return { mpeg1, layer, kbps, rateHz, channels, bytes, samples };
+  // The protection bit is 0 when a CRC follows the header.
+  return { mpeg1, layer, kbps, rateHz, channels, bytes, samples, crc: (b[at + 1]! & 1) === 0, emphasis: (b[at + 3]! & 3) !== 0 };
 }
 
 /** A Xing, Info or VBRI frame's count of the frames after it, or null. */
@@ -178,7 +179,9 @@ async function probeMpeg(source: ByteSource, head: Uint8Array): Promise<Probe | 
     rateHz: frame.rateHz,
     ms,
     framed: true,
-    copyCandidate: frame.mpeg1 && frame.layer === 3 && (frame.rateHz === 44_100 || frame.rateHz === 48_000) && frame.kbps >= SOUND_LIMITS.minKbps && frame.kbps <= SOUND_LIMITS.maxKbps,
+    // The server's walk refuses CRC and emphasis frames (D-261102-690), so such a file is planned for the encoder at once.
+    copyCandidate:
+      frame.mpeg1 && frame.layer === 3 && !frame.crc && !frame.emphasis && (frame.rateHz === 44_100 || frame.rateHz === 48_000) && frame.kbps >= SOUND_LIMITS.minKbps && frame.kbps <= SOUND_LIMITS.maxKbps,
     wav: null,
   };
 }
