@@ -48,8 +48,8 @@ export function dropGrid(state: Pick<BuildState, "scenes">, token: Pick<DropToke
   return scene ? sceneGrid(scene) : SQUARES;
 }
 
-/** The token fields a drop reads. */
-export type DropToken = Pick<Token, "id" | "sceneId" | "size" | "x" | "y" | "elevation"> & Partial<Pick<Token, "w" | "h" | "squeeze" | "name" | "number">>;
+/** The token fields a drop reads, and where it is drawn in its box (free.ts). */
+export type DropToken = Pick<Token, "id" | "sceneId" | "size" | "x" | "y" | "elevation"> & Partial<Pick<Token, "w" | "h" | "squeeze" | "nudge" | "name" | "number">>;
 
 /**
  * A press planned from where the board last drew the token, read again
@@ -180,8 +180,13 @@ export function walkStart<T extends DropToken & Walker>(state: Pick<BuildState, 
   return elevation === walking.elevation ? walking : { ...walking, elevation };
 }
 
-/** One token's landing, as a move op carries it. `elevation` only when the landing changes it, `squeeze` only when it squeezes, `route` only for a walk that is not the straight leg. */
-export type Landed = { tokenId: string; x: number; y: number; elevation?: number; squeeze?: true; route?: OpOf<"token.move">["route"] };
+/**
+ * One token's landing, as a move op carries it. `elevation` only when the
+ * landing changes it, `squeeze` only when it squeezes, `route` only for a
+ * walk that is not the straight leg, and `drawnAt` only where the token is
+ * drawn between squares after it (free.ts, docs/design/design-v1-snap-off.md 6.4).
+ */
+export type Landed = { tokenId: string; x: number; y: number; elevation?: number; squeeze?: true; route?: OpOf<"token.move">["route"]; drawnAt?: Point };
 
 /**
  * What stopped a walk as a player hears of it: a wall or a ledge, or
@@ -211,6 +216,8 @@ export type Stop = {
   capped?: true;
   /** The creature the walker drags beside it that cannot follow where the walker alone would go, by the name players see (docs/design/design-v1-attach.md 4.2). */
   follower?: string;
+  /** Where a free drop let the token go between squares, which "Teleport here" lands it at (free.ts). */
+  drawnAt?: Point;
 };
 
 export type DropPlan = {
@@ -951,7 +958,7 @@ export function cutForWalkers(state: DropView, lead: DropToken, plan: DropPlan, 
 /**
  * The ops for a plan's moves: one `token.move` for a lone token, which may
  * squeeze, else `token.moveMany` in batches the protocol takes, which never
- * squeezes.
+ * squeezes. Each carries its landing's `drawnAt`.
  */
 export function moveOpsOf(moves: readonly Landed[]): ClientOp[] {
   if (moves.length === 0) return [];

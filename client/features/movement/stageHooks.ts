@@ -8,7 +8,7 @@ import { routeLegCheck, routeWorld, routeWorldUnits } from "#shared/rules/hexWal
 import type { PublicWorld } from "#shared/rules/walkWorld.ts";
 import { isHex } from "#shared/rules/grid.ts";
 import { walkersCut, walkersFor, walkersOfGroup } from "../attach/walk.ts";
-import { snapPosition } from "../../lib/scene.ts";
+import { drawnAt, rulesSpot, snapPosition } from "../../lib/scene.ts";
 import type { OpAnswer } from "../../state/types.ts";
 import { useRoomScope, type RoomScope } from "../../state/scope.ts";
 import type { RoomUi } from "../../state/store.ts";
@@ -16,6 +16,7 @@ import type { RoomActions } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, type RoomViewStore } from "../../state/view.ts";
 import { cutForWalkers, dropGrid, dropMode, dropView, goesStraight, keyStep, namedFollower, planGroup, planLands, planOne, planWalk, pressedAim, previewView, routeLanding, routeTarget, sameCut, samePose, type Aim, type DropPlan, type DropToken, type DropView, type Found, type Point, type Pose, type Role, type Stop, type WalkersCut } from "./drop.ts";
 import { frameFields as routeFrame, groupReading, walkPreview } from "./preview.ts";
+import { freeDrop, type FreeDrop } from "./free.ts";
 import { pressPlan, worldFor } from "./press.ts";
 import { RouteDrag, type RouteAnswer } from "./routeDrag.ts";
 import { BOARD_WORK } from "./boardWork.ts";
@@ -26,8 +27,22 @@ import { holdSlot, routeSlot, sameHold, stopNoteSlot, type DragRoute, type Hold 
 /** Where a drag's preview is held, and what holds it. */
 type Hold = { at: Point; blocker: Stop["blocker"] };
 
-/** The part of a Konva node a drag reads and moves. */
+/**
+ * The part of a Konva node a drag reads and moves. The node sits where the
+ * token is drawn, which a placement between squares moves off its stored
+ * spot (docs/design/design-v1-snap-off.md 6.3), so every read here goes
+ * back to rules coordinates by `rulesSpot` and every write comes out by
+ * `drawnAt` of the token at that spot.
+ */
 type DragNode = { x(): number; y(): number; position(p: Point): void };
+
+/**
+ * How a drop is let go (docs/design/design-v1-snap-off.md 6.4): `free` while
+ * Alt is held or the token bar's Place freely is on, and `inPlace` where the
+ * viewer may change where the lead is drawn without a move, the DM or an
+ * owner who may move it.
+ */
+export type Release = { free: boolean; inPlace: boolean };
 
 /**
  * What the map canvas (client/canvas/Stage.tsx) asks of walls, ledges and
@@ -50,7 +65,7 @@ export type DragStops = {
    * creature the token drags beside it would meet one
    * (docs/design/design-v1-attach.md 4.2).
    */
-  frame(node: DragNode, token: DropToken): void;
+  frame(node: DragNode, token: DropToken, free?: boolean): void;
   /** What a frame sends others besides where the token is: the route's corners and the leg's cost (6.5), and where a cut walk lands. */
   frameFields(tokenId: string): { x?: number; y?: number; path?: number[]; ft?: number };
   /** What a group drag's frame of one of its named tokens at `at` sends besides where it is: the leg's cost, as its label reads it (review AT-ASTRA-15). */
@@ -68,7 +83,7 @@ export type DragStops = {
    * The drop: `land` hears its plan once its route is known, at once when
    * it is, else when the search settles, the token waiting at the ghost.
    */
-  drop(node: DragNode, token: DropToken, group: readonly DropToken[], land: (plan: DropPlan) => void): void;
+  drop(node: DragNode, token: DropToken, group: readonly DropToken[], land: (plan: DropPlan, free: Omit<FreeDrop, "plan">) => void, release?: Release): void;
   /**
    * Sends the plan's moves, and says what stopped any of them (send.ts).
    * `onAnswer` hears what became of each op sent (OpAnswer). Returns the
@@ -160,9 +175,19 @@ export function dragStops(deps: DragDeps): DragStops {
   const routes = scope.get(routeSlot);
   /** Where the finger is, before a hold moved the preview back to the wall: the drop's own spot, with the pressed token's middle when it sits on the lead. */
   let raw: ({ tokenId: string } & Aim) | null = null;
+  /** The node's own point that `raw` was aimed from, and whether that frame was free, so a drop whose free state changed since aims again from it (SNAP-OPUS4-02). */
+  let rawFrom: { node: Point; free: boolean } | null = null;
   /** The token the drag was pressed on, when a mount it sits on leads the drag. */
   let pressedOn: { leadId: string; token: DropToken } | null = null;
   const aimAt = (view: DropView, token: DropToken, at: Point): { tokenId: string } & Aim => ({ tokenId: token.id, ...pressedAim(view, token, pressedOn?.leadId === token.id ? pressedOn.token : null, at) });
+  /**
+   * A node's point as a drop reads it: in rules coordinates, or for a free
+   * drag the drawn point itself, so the ghost, the route's target and the
+   * plan all read the box under where the token is drawn (SNAP-OPUS3-01).
+   */
+  const ruled = (token: DropToken, at: Point, free: boolean): Point => (free ? { x: at.x, y: at.y } : rulesSpot(token, at));
+  /** A rules spot written to the node: where the token is drawn there, with its nudge. */
+  const drawnThere = (token: DropToken, at: Point): Point => drawnAt(null, { x: at.x, y: at.y, ...(token.nudge ? { nudge: token.nudge } : {}) });
   /** The lone drag's search, its world and what the world was built from. */
   let walk: Walk | null = null;
   /*
@@ -235,6 +260,7 @@ export function dragStops(deps: DragDeps): DragStops {
       waiting.live = false;
     }
     raw = null;
+    rawFrom = null;
     pressedOn = null;
     memo = null;
     walkMemo = null;
@@ -304,7 +330,7 @@ export function dragStops(deps: DragDeps): DragStops {
     if (!raw || raw.tokenId !== token.id || !goesStraight(view, token, target, answer, view.meta.settings.feetPerCell)) {
       // The walk itself is clear: the preview, its line and its label stop where a creature it drags would meet a wall.
       const cut = raw?.tokenId === token.id && mode === "walk" && answer.kind !== "searching" ? walkersHold(view, token, target, answer.kind === "route" ? answer.route : null) : null;
-      if (cut) node.position(cut.at);
+      if (cut) node.position(drawnThere(token, cut.at));
       holdAt(null, cut);
       setHold(cut ? { tokenId: token.id, at: cut.at, blocker: cut.blocker } : null);
       if (w) goStraight(w, null);
@@ -326,7 +352,7 @@ export function dragStops(deps: DragDeps): DragStops {
     const taken = checked ? routeLanding(view, token, memo.lands, checked.pieces, view.meta.settings.feetPerCell) : null;
     const cut = mode === "walk" ? walkersHold(view, token, memo.lands, taken && !taken.cut ? checked : null) : null;
     const stop: Hold | null = cut ?? memo.stop;
-    if (stop) node.position(stop.at);
+    if (stop) node.position(drawnThere(token, stop.at));
     holdAt(memo.lands, cut);
     // No way the creatures it drags can follow: the hold says so, and the drop's note names the one left behind (drop.ts namedFollower).
     const noWay = answer.kind === "none" && answer.follower !== undefined;
@@ -398,10 +424,12 @@ export function dragStops(deps: DragDeps): DragStops {
       const s = notes.getState();
       if (s.note?.tokenId === tokenId && !s.busy) notes.setState({ note: null });
     },
-    frame(node, token) {
+    frame(node, token, free = false) {
       // The preview always follows the finger, its time counted against the frame's budget all the same.
       work.within(() => {
-        raw = { tokenId: token.id, x: node.x(), y: node.y() };
+        const at = { x: node.x(), y: node.y() };
+        rawFrom = { node: at, free };
+        raw = { tokenId: token.id, ...ruled(token, at, free) };
         const view = seenView(store.getState().view);
         if (!view) {
           setHold(null);
@@ -430,10 +458,11 @@ export function dragStops(deps: DragDeps): DragStops {
       const view = seenView(store.getState().view);
       const full = view?.tokens[token.id];
       if (!view || !full) return {};
-      return { ft: groupReading(view, full, snapPosition(dropGrid(view, full), at.x, at.y, footprintSize(full)), role).dragFt };
+      const spot = rulesSpot(full, at);
+      return { ft: groupReading(view, full, snapPosition(dropGrid(view, full), spot.x, spot.y, footprintSize(full)), role).dragFt };
     },
     press(node, drawn, drawnGroup) {
-      const asked = raw?.tokenId === drawn.id ? { x: raw.x, y: raw.y } : { x: node.x(), y: node.y() };
+      const asked = raw?.tokenId === drawn.id ? { x: raw.x, y: raw.y } : rulesSpot(drawn, { x: node.x(), y: node.y() });
       // A drop still waiting lands first, and the press steps on from where it put the token.
       reset(true);
       later((budget) => {
@@ -441,22 +470,34 @@ export function dragStops(deps: DragDeps): DragStops {
         if (view) send(pressPlan(view, drawn, asked, drawnGroup, role, budget));
       });
     },
-    drop(node, token, group, land) {
+    drop(node, token, group, land, release = { free: false, inPlace: false }) {
       // A drop's work, its time counted against the frame's budget, and its landing queued as route work when the budget is spent.
       work.within(() => {
-        const spot = raw?.tokenId === token.id ? raw : null;
+        const free = release.free && group.length <= 1;
+        // The last frame aimed by the free state it had then: a drop let go with Alt pressed or released since aims again from that frame's node point (SNAP-OPUS4-02).
+        const from = rawFrom && rawFrom.free !== free && raw?.tokenId === token.id ? rawFrom.node : null;
+        const spot = raw?.tokenId === token.id && !from ? raw : null;
+        // Where the lead was let go, drawn: what a free drop places it at, and an ordinary one measures its jitter from.
+        const letGo = from ?? { x: node.x(), y: node.y() };
+        const pressedId = pressedOn?.leadId === token.id ? pressedOn.token.id : token.id;
         const view = seenView(store.getState().view);
         if (!view) {
           reset();
-          land(NOTHING);
+          land(NOTHING, { place: null, placed: false });
           return;
         }
-        const at: Aim = spot ?? aimAt(view, token, { x: node.x(), y: node.y() });
+        const at: Aim = spot ?? aimAt(view, token, ruled(token, letGo, free));
         const mode = dropMode(role, view.scenes[token.sceneId]);
+        const lead = view.tokens[token.id] ?? token;
+        const placed = (now: DropView, plan: DropPlan) => {
+          const named = group.map((t) => now.tokens[t.id] ?? t);
+          const out = freeDrop({ grid: dropGrid(now, token), lead: now.tokens[token.id] ?? lead, pressedId, named: named.length > 0 ? named : [lead], plan, release: letGo, free, inPlace: release.inPlace });
+          land(out.plan, { place: out.place, placed: out.placed });
+        };
         const w = group.length > 1 ? null : walkFor(view, token);
         if (!w) {
           reset();
-          land(group.length > 1 ? planGroup(view, group, at.x - token.x, at.y - token.y, mode, walkersOfGroup(view, group, role)) : planOne(view, token, at, mode));
+          placed(view, group.length > 1 ? planGroup(view, group, at.x - token.x, at.y - token.y, mode, walkersOfGroup(view, group, role)) : planOne(view, token, at, mode));
           return;
         }
         const target = routeTarget(view, token, at);
@@ -482,7 +523,7 @@ export function dragStops(deps: DragDeps): DragStops {
               : undefined;
             const nowMode = dropMode(role, now.scenes[token.sceneId]);
             const searched = found(answer);
-            land(namedFollower(now, cutForWalkers(now, token, planWalk(now, token, at, nowMode, searched, now.meta.settings.feetPerCell, account), walkersFor(now, token.id, role), nowMode), searched));
+            placed(now, namedFollower(now, cutForWalkers(now, token, planWalk(now, token, at, nowMode, searched, now.meta.settings.feetPerCell, account), walkersFor(now, token.id, role), nowMode), searched));
           });
         });
         // Still searching: the drop waits at the ghost, which says so.

@@ -33,12 +33,14 @@ export function teleportRefusedText(locked: boolean): string {
  * lands by the drop rule (section 4.1, Squeezing), so a Large creature sent
  * into a 5 ft corridor lands on the half-cell spot where it fits, squeezed,
  * found as its drop would find it (drop.ts `squeezedSpot`), and it writes
- * the ground there like any landing (section 4.2).
+ * the ground there like any landing (section 4.2). After a free drop it
+ * carries where the token was let go (free.ts), which the token keeps where
+ * the teleport lands on the ghost (docs/design/design-v1-snap-off.md 6.4).
  */
-export function teleportMove(state: DropView, token: DropToken, note: Pick<Stop, "ghost" | "aim" | "blocker">): Landed & { teleport: Stop["blocker"] } {
+export function teleportMove(state: DropView, token: DropToken, note: Pick<Stop, "ghost" | "aim" | "blocker" | "drawnAt">): Landed & { teleport: Stop["blocker"] } {
   const squeezed = squeezedSpot(state, token, note.aim, "teleport");
   const land = squeezed ?? landing(state, walkerOf(state, token), { ...note.ghost, elevation: dropLanding(state, token, note.ghost) }, "teleport");
-  return { ...landed(state, token, { x: land.x, y: land.y, squeeze: land.squeeze }), teleport: note.blocker };
+  return { ...landed(state, token, { x: land.x, y: land.y, squeeze: land.squeeze }), teleport: note.blocker, ...(note.drawnAt && !land.squeeze ? { drawnAt: note.drawnAt } : {}) };
 }
 
 export type TeleportDeps = {

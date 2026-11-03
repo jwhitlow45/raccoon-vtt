@@ -5,7 +5,8 @@ import { walkerFor } from "#shared/rules/attach.ts";
 import { groupWalkWorld, type PublicWorld } from "#shared/rules/walkWorld.ts";
 import { pathNow } from "../measure/movement.ts";
 import { walkersFor, walkersOfGroup } from "../attach/walk.ts";
-import { cutForWalkers, dropMode, dropView, planGroup, planOne, planPress, rebased, type DropPlan, type DropToken, type Point, type Role } from "./drop.ts";
+import { keepPlacements } from "./free.ts";
+import { cutForWalkers, dropGrid, dropMode, dropView, planGroup, planOne, planPress, rebased, type DropPlan, type DropToken, type Point, type Role } from "./drop.ts";
 
 /**
  * The public world for a walk by this token as this device sees the room
@@ -34,12 +35,14 @@ export function pressPlan(copy: RoomState, drawn: DropToken, asked: Point, drawn
   const view = dropView(copy, role);
   const { token, at } = rebased(view.tokens, drawn, asked);
   const group = drawnGroup.map((t) => rebased(view.tokens, t, t).token);
+  // An arrow step keeps each token's placement between squares, alone or in a group (docs/design/design-v1-snap-off.md 6.5).
+  const keep = (plan: DropPlan) => keepPlacements(dropGrid(view, token), plan, group.length > 0 ? group : [token]);
   const mode = dropMode(role, view.scenes[token.sceneId]);
-  if (group.length > 1) return planGroup(view, group, at.x - token.x, at.y - token.y, mode, walkersOfGroup(view, group, role));
+  if (group.length > 1) return keep(planGroup(view, group, at.x - token.x, at.y - token.y, mode, walkersOfGroup(view, group, role)));
   const full = view.tokens[token.id];
-  if (!full) return planOne(view, token, at, mode);
+  if (!full) return keep(planOne(view, token, at, mode));
   const world = routeWorld(worldFor(view, full, role).input);
   budget.charge(routeWorldUnits(world));
   // A holder's press stops where a creature it drags beside it would meet a wall (docs/design/design-v1-attach.md 4.2).
-  return cutForWalkers(view, token, planPress(view, world, token, at, mode, view.meta.settings.feetPerCell, (units) => budget.charge(units)), walkersFor(view, token.id, role), mode);
+  return keep(cutForWalkers(view, token, planPress(view, world, token, at, mode, view.meta.settings.feetPerCell, (units) => budget.charge(units)), walkersFor(view, token.id, role), mode));
 }
