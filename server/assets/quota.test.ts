@@ -54,6 +54,30 @@ describe("RoomQuota", () => {
     await again.commit(300, async () => undefined);
   });
 
+  test("a video's commit checks its headroom again, even at its reserved size (AMBUILD-SOL-004)", async () => {
+    // The reviewer's interleaving: a video reserves 600 with 320 of headroom, an image reserves and stores 400 meanwhile.
+    const store = fakeStore();
+    const quota = new RoomQuota(1000, store.read);
+    const video = await quota.reserve("R", 600, { headroom: 320 });
+    const image = await quota.reserve("R", 400);
+    await image.commit(400, async () => void store.stored.set("R", 400));
+    let wrote = false;
+    await assert.rejects(video.commit(600, async () => void (wrote = true)), quota413);
+    assert.equal(wrote, false);
+    video.release();
+    assert.equal(quota.reservedBytes("R"), 0);
+    // The room's own writes during a long upload count the same.
+    store.stored.set("R", 600);
+    const later = await quota.reserve("R", 300, { headroom: 100 });
+    store.stored.set("R", 650);
+    await assert.rejects(later.commit(300, async () => undefined), quota413);
+    later.release();
+    // With the headroom still free, it commits.
+    store.stored.set("R", 600);
+    const fits = await quota.reserve("R", 300, { headroom: 100 });
+    await fits.commit(300, async () => undefined);
+  });
+
   test("concurrent reservations cannot overshoot", async () => {
     const store = fakeStore();
     const quota = new RoomQuota(1000, store.read);
