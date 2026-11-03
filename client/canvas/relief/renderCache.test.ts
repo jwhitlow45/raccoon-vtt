@@ -67,4 +67,15 @@ describe("the isometric board's render caches (FU39-B)", () => {
       assert.deepEqual([...first], ["sphere|a", "cube|b"], "published membership is never mutated");
     }
   });
+
+  test("a nudge cuts the press area where the token is drawn, and a new nudge lays out a new one (snap-off 6.2)", () => {
+    const a = token("a", { x: 2, y: 3 });
+    const first = flatPressTokens(new Map(), [a], 0, flat, flat);
+    const nudged = flatPressTokens(first, [{ ...a, nudge: { x: 3, y: 0 } }], 0, flat, flat);
+    assert.notEqual(nudged.get("a"), first.get("a"), "the cache key takes the nudge");
+    // Drawn from 2.375 it crosses into the next column, so its press area is two pieces from the node's corner.
+    assert.deepEqual(nudged.get("a")!.press.map((c) => [c.x, c.w]), [[0, 0.625], [0.625, 0.375]]);
+    const stepped = flatPressTokens(nudged, [{ ...a, nudge: { x: 3, y: 0 } }], 0, flat, flat);
+    assert.equal(stepped.get("a"), nudged.get("a"), "the same nudge keeps it");
+  });
 });

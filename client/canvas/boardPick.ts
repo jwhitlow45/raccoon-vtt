@@ -1,8 +1,8 @@
-import { DEFAULT_SETTINGS, type BuildChunk, type RoomState, type Scene } from "#shared/model.ts";
+import { DEFAULT_SETTINGS, type BuildChunk, type RoomState, type Scene, type Token } from "#shared/model.ts";
 import type { FootprintToken } from "#shared/rules/footprint.ts";
 import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import { screenToView, viewToScreen, type Camera, type GroundMap, type Insets, type Point, type Size } from "../lib/camera.ts";
-import { footprint, type ViewToken } from "../lib/scene.ts";
+import { drawnAt as drawnSpot, footprint, type ViewToken } from "../lib/scene.ts";
 import { cellsMeeting, footprintCells, ruleBoundPoint } from "../lib/groundCells.ts";
 import { arrowStep, drawnBase, drawnFootprintGround, drawnHeights, flatHeights, heightsStand, pickWalk, standScale, TOP_DOWN, toView, toWorld, type DrawnHeights, type DrawnSource, type PickHit, type PickSource, type View } from "../lib/view.ts";
 import { scopeSlot, type RoomScope } from "../state/scope.ts";
@@ -155,10 +155,15 @@ export function groundIn(pick: Pick<BoardPick, "view" | "src" | "feetPerCell">, 
   return drawnFootprintGround(pick.src, cellsMeeting(pick.src.grid, box, null)) / pick.feetPerCell;
 }
 
-/** Where a token's ring's center shows on screen: its footprint's middle where its ring draws (`tokenBase`). */
-export function ringCenter(pick: Pick<BoardPick, "view" | "grid" | "camera" | "src" | "feetPerCell" | "canvasHeight">, token: FootprintToken, stands = true): Point {
+/**
+ * Where a token's ring's center shows on screen: its drawn box's middle
+ * (docs/design/design-v1-snap-off.md 6.2) where its ring draws, at the base
+ * its rules footprint gives (`tokenBase`).
+ */
+export function ringCenter(pick: Pick<BoardPick, "view" | "grid" | "camera" | "src" | "feetPerCell" | "canvasHeight">, token: FootprintToken & Partial<Pick<Token, "nudge">>, stands = true): Point {
   const fp = footprint(token);
-  return screenAt(pick, { x: token.x + fp.w / 2, y: token.y + fp.h / 2 }, tokenBase(pick, token, stands));
+  const at = drawnSpot(pick.grid, token);
+  return screenAt(pick, { x: at.x + fp.w / 2, y: at.y + fp.h / 2 }, tokenBase(pick, token, stands));
 }
 
 /** The highest drawn ground inside a world rectangle, in cells, at least 0: how far a fit raises its box's top (docs/design/design-v1-isometric-view.md 4.2). */

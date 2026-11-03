@@ -5,7 +5,8 @@ import type { Ground } from "#shared/rules/held.ts";
 import type { SegmentIndex } from "#shared/rules/segments.ts";
 import { clipFootprint } from "#shared/rules/vision.ts";
 import type { Footprint } from "../../features/areas/volume.ts";
-import { footprint, type ViewToken } from "../../lib/scene.ts";
+import { footprintCells, type GroundCell } from "../../lib/groundCells.ts";
+import { drawnAt, footprint, rulesSpot, type ViewToken } from "../../lib/scene.ts";
 import { pillReach } from "../../features/measure/pillPlace.ts";
 import { dragTagPill } from "../dragTag.ts";
 import type { CellBox, FogView } from "./fogView.ts";
@@ -38,7 +39,7 @@ export function boxStands(fog: FogView, box: CellBox): boolean {
   return fog.boxClear(box);
 }
 
-type BoxToken = Pick<ViewToken, "x" | "y" | "size" | "w" | "h" | "squeeze" | "rotation" | "kind">;
+type BoxToken = Pick<ViewToken, "x" | "y" | "size" | "w" | "h" | "squeeze" | "rotation" | "kind" | "nudge">;
 
 /**
  * The two boxes a token covers in Top-down: the body as it is drawn,
@@ -47,16 +48,35 @@ type BoxToken = Pick<ViewToken, "x" | "y" | "size" | "w" | "h" | "squeeze" | "ro
  * and squeezed while it squeezes). Testing both fails closed whichever of
  * the two a later change draws. On hexes the second is the box around the
  * fog sub-cells of its hexes (`subcellBox(footprintSubcells(...))`).
+ *
+ * A nudged token is drawn off its stored spot (docs/design/design-v1-snap-off.md
+ * 6.2), so the body is at the drawn spot and the footprint at the stored
+ * one. `at` is a drawn point, a ghost's frame, whose rules spot is
+ * `rulesSpot` of it. Without `at` both read the token as it stands.
  */
-export function tokenBoxes(g: Grid, token: BoxToken, at: { x: number; y: number } = token): [CellBox, CellBox] {
-  const body = turnedBody(at, footprint(token), token.rotation, token.kind === "object");
-  if (g.shape === "hex") return [body, subcellBox(footprintSubcells(g, { ...token, x: at.x, y: at.y }))];
-  const rule = footprintRect(g, { ...token, x: at.x, y: at.y });
+export function tokenBoxes(g: Grid, token: BoxToken, at?: { x: number; y: number }): [CellBox, CellBox] {
+  const drawn = at ?? drawnAt(g, token);
+  const spot = at ? rulesSpot(token, at) : token;
+  const body = turnedBody(drawn, footprint(token), token.rotation, token.kind === "object");
+  if (g.shape === "hex") return [body, subcellBox(footprintSubcells(g, { ...token, x: spot.x, y: spot.y }))];
+  const rule = footprintRect(g, { ...token, x: spot.x, y: spot.y });
   return [body, { x0: rule.x, y0: rule.y, x1: rule.x + rule.w, y1: rule.y + rule.h }];
 }
 
+/**
+ * Where a standee stands (docs/design/design-v1-snap-off.md 6.2): its art
+ * on its drawn box, and its base on the ground under the cells of its rules
+ * footprint, so a nudge that leans over a ledge never stands it on the
+ * ledge it is not on.
+ */
+export function standeeFooting(g: Grid, token: Pick<ViewToken, "x" | "y" | "size" | "w" | "h" | "squeeze" | "nudge">): { box: { x: number; y: number; w: number; h: number }; cells: GroundCell[] } {
+  const fp = footprint(token);
+  const at = drawnAt(g, token);
+  return { box: { x: at.x, y: at.y, w: fp.w, h: fp.h }, cells: footprintCells(g, token) };
+}
+
 /** One box around both of a token's boxes, for a flat ghost's clip and the DM's dimming. */
-export function tokenBox(g: Grid, token: BoxToken, at: { x: number; y: number } = token): CellBox {
+export function tokenBox(g: Grid, token: BoxToken, at?: { x: number; y: number }): CellBox {
   const [body, rule] = tokenBoxes(g, token, at);
   return { x0: Math.min(body.x0, rule.x0), y0: Math.min(body.y0, rule.y0), x1: Math.max(body.x1, rule.x1), y1: Math.max(body.y1, rule.y1) };
 }
@@ -98,10 +118,11 @@ export function dimmedForDm(fog: FogView | null, g: Grid, token: BoxToken, clip:
  * Whether both of a token's boxes stand: on hexes its drawn body and every
  * fog sub-cell inside its hexes, each one as the server reads it.
  */
-function tokenStands(fog: FogView, g: Grid, token: BoxToken, at: { x: number; y: number } = token): boolean {
+function tokenStands(fog: FogView, g: Grid, token: BoxToken, at?: { x: number; y: number }): boolean {
   if (g.shape === "hex") {
     const [body] = tokenBoxes(g, token, at);
-    return boxStands(fog, body) && footprintSubcells(g, { ...token, x: at.x, y: at.y }).every(([sx, sy]) => fog.revealed(sx, sy));
+    const spot = at ? rulesSpot(token, at) : token;
+    return boxStands(fog, body) && footprintSubcells(g, { ...token, x: spot.x, y: spot.y }).every(([sx, sy]) => fog.revealed(sx, sy));
   }
   const [body, rule] = tokenBoxes(g, token, at);
   return boxStands(fog, body) && boxStands(fog, rule);

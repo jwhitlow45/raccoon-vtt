@@ -3,7 +3,7 @@ import type { Actor, Character } from "#shared/model.ts";
 import { hpLess } from "#shared/rules/hp.ts";
 import { boardSizes } from "../lib/boardScale.ts";
 import { focusLines, focusStyle, labelStyle, linesSize, placeLabels, showsNumberBadge, type Box, type LabelInput, type LabelLine, type Obstacle, type PlacedLabel } from "../lib/boardText.ts";
-import { footprint, type ViewToken } from "../lib/scene.ts";
+import { drawnAt, footprint, type ViewToken } from "../lib/scene.ts";
 import { DECOR_MIN_PX, healthState, hpDisplay, type HpDisplay } from "../lib/tokenView.ts";
 import { pillReach } from "../features/measure/Pill.tsx";
 import type { PillSpec } from "./boardView.ts";
@@ -140,8 +140,10 @@ export function layoutBoardText(input: Omit<BoardTextInput, "plateIds">, kept: M
     const widthPx = fp.w * scale;
     const heightPx = fp.h * scale;
     const at = place?.(t);
-    const ox = (at ? at.x : t.x) * scale;
-    const oy = (at ? at.y : t.y) * scale;
+    // Top-down lays decor out where the token is drawn (docs/design/design-v1-snap-off.md 6.2).
+    const drawn = at ?? drawnAt(null, t);
+    const ox = drawn.x * scale;
+    const oy = drawn.y * scale;
     const box: Box = { x0: ox, y0: oy, x1: ox + widthPx, y1: oy + heightPx };
     obstacles.push({ box, owner: t.id, kind: "body" });
     // A standee's ring lies under its frame, where no other label may land and its own goes below it.

@@ -1,17 +1,22 @@
 import { isHex, SQUARES, type Grid } from "#shared/rules/grid.ts";
-import { footprint, type ViewToken } from "../../lib/scene.ts";
+import { drawnAt, footprint, type ViewToken } from "../../lib/scene.ts";
 import type { Turn } from "../../lib/view.ts";
 import { pressCells } from "../isoPlace.ts";
 import type { IsoToken } from "../TokenNode.tsx";
 
 const NO_RINGS: readonly string[] = [];
 
-/** A flat creature's press area on the drawn ground, kept while its geometry stays the same. */
+/**
+ * A flat creature's press area on the drawn ground, kept while its geometry
+ * stays the same. The pieces are cut where the token is drawn, a nudged one
+ * off its stored spot (docs/design/design-v1-snap-off.md 6.2), so a nudge
+ * that moves it over other cells' ground lays out a new press area.
+ */
 export function flatPressTokens(previous: ReadonlyMap<string, IsoToken>, tokens: readonly ViewToken[], turn: Turn, ground: (token: ViewToken) => number, groundAt: (x: number, y: number) => number, grid: Grid = SQUARES): Map<string, IsoToken> {
   const next = new Map<string, IsoToken>();
   for (const t of tokens) {
     const base = ground(t);
-    const fresh: IsoToken = { turn, base, ground: base, drawn: base, capped: false, rise: 0, inset: 1, pits: [], dim: false, pressOnly: true, press: pressCells({ x: t.x, y: t.y }, footprint(t), groundAt, isHex(grid)) };
+    const fresh: IsoToken = { turn, base, ground: base, drawn: base, capped: false, rise: 0, inset: 1, pits: [], dim: false, pressOnly: true, press: pressCells(drawnAt(grid, t), footprint(t), groundAt, isHex(grid)) };
     const old = previous.get(t.id);
     next.set(t.id, old && sameIso(old, fresh) ? old : fresh);
   }

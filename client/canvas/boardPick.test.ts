@@ -77,6 +77,14 @@ describe("the board's pick (docs/design/design-v1-isometric-view.md 6.1)", () =>
     assert.equal(tokenBase({ ...pick, view: TOP_DOWN }, flier), 0);
   });
 
+  test("a nudged token's ring centers on its drawn box, at the base its rules box gives (docs/design/design-v1-snap-off.md 6.2)", () => {
+    const state = heightsRoom({ "6,6": 10, "7,6": 10 });
+    const pick = pickFor(state, "dm", CAM);
+    const onTop = { size: "large" as const, x: 6, y: 5, elevation: 10, nudge: { x: -3, y: 2 } };
+    assert.equal(tokenBase(pick, onTop), 2);
+    assert.deepEqual(ringCenter(pick, onTop), screenAt(pick, { x: 6.625, y: 6.25 }, 2));
+  });
+
   test("a cell off the scene and every cell in Top-down draw at 0", () => {
     const state = heightsRoom({ "0,0": 20 });
     const pick = pickFor(state, "dm", CAM);

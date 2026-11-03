@@ -3,7 +3,8 @@ import { createContext } from "react";
 import type { MeasureText } from "#shared/rules/labels.ts";
 import { LABEL_INK, labelInkBox, labelShape } from "../../features/builder/labelShape.ts";
 import type { Box } from "../../lib/boardText.ts";
-import { footprint, type ViewToken } from "../../lib/scene.ts";
+import type { Grid } from "#shared/rules/grid.ts";
+import { drawnAt, footprint, type ViewToken } from "../../lib/scene.ts";
 import { toView, type View } from "../../lib/view.ts";
 import type { PillSpec } from "../boardView.ts";
 import type { VBox } from "./pieces.ts";
@@ -21,7 +22,11 @@ export function tokenLayoutPills(pills: Readonly<Record<string, readonly PillSpe
 
 /** Actual frames, rings, marks and placed text, in the same view units as standing names. */
 export function isoTokenBoxes(tokens: readonly ViewToken[], text: ReadonlyMap<string, TokenText>, scale: number, place: (t: ViewToken) => { x: number; y: number; ring?: Box }): Box[] {
-  const placed = tokens.map((t) => ({ ...t, ...place(t) }));
+  // Already where the decor lays out, so the nudge, which `place` has read, is left off.
+  const placed = tokens.map((t) => {
+    const { nudge: _read, ...rest } = t;
+    return { ...rest, ...place(t) };
+  });
   // Isometric names clear TokenNode's px/4 stroke. Keep this padding out
   // of the shared layout used by Top-down height pills and light captions.
   const ink = new Map([...text].map(([id, block]) => {
@@ -107,11 +112,12 @@ export function isoNamePill(candidates: readonly PillSpec[], layout: IsoNames, s
  * its footprint's middle at the drawn ground under it (relief/standee.ts,
  * 5.2).
  */
-export function decorPlace(view: View, t: ViewToken, standee: { frame: VBox; ring: VBox } | undefined, ground = 0): { x: number; y: number; ring?: VBox } {
+export function decorPlace(view: View, g: Grid, t: ViewToken, standee: { frame: VBox; ring: VBox } | undefined, ground = 0): { x: number; y: number; ring?: VBox } {
   if (standee) return { x: standee.frame.x0, y: standee.frame.y0, ring: standee.ring };
   const fp = footprint(t);
-  // On the drawn ground under it (`ground`, cells), where the ground stage lays its picture.
-  const c = toView(view, { x: t.x + fp.w / 2, y: t.y + fp.h / 2 }, ground);
+  // On the drawn ground under it (`ground`, cells), where the ground stage lays its picture, at its drawn spot (docs/design/design-v1-snap-off.md 6.2).
+  const at = drawnAt(g, t);
+  const c = toView(view, { x: at.x + fp.w / 2, y: at.y + fp.h / 2 }, ground);
   return { x: c.x - fp.w / 2, y: c.y - fp.h / 2 };
 }
 

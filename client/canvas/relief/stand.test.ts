@@ -13,7 +13,7 @@ import { footprint, type ViewToken } from "../../lib/scene.ts";
 import { FogView, type CellBox } from "./fogView.ts";
 import { pillReach } from "../../features/measure/pillPlace.ts";
 import { dragTagPill } from "../dragTag.ts";
-import { boxStands, creatureStands, dimmedForDm, ghostStands, ghostTagStands, lineStands, splitTokens, strokeSubcells, tokenBox, tokenBoxes } from "./stand.ts";
+import { boxStands, creatureStands, dimmedForDm, ghostStands, ghostTagStands, lineStands, splitTokens, standeeFooting, strokeSubcells, tokenBox, tokenBoxes } from "./stand.ts";
 import { withExplored } from "../../features/vision/exploredFog.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
 import { readFileSync } from "node:fs";
@@ -999,4 +999,61 @@ test("ISO34-TETHER-COST: band enumeration matches exhaustive closed-square cover
     assert.deepEqual(first, want.slice(0, stop));
     assert.ok(early <= checked);
   }
+});
+
+describe("a nudged token's two boxes (docs/design/design-v1-snap-off.md 6.2)", () => {
+  // A Medium goblin stored on cell (4, 4), drawn 3/8 of a square to the right.
+  const goblin = makeToken("g", { x: 4, y: 4, nudge: { x: 3, y: 0 } }) as ViewToken;
+
+  test("the body is drawn at the nudge and the rules box stays on the stored cell", () => {
+    assert.deepEqual(tokenBoxes(SQUARES, goblin), [
+      { x0: 4.375, y0: 4, x1: 5.375, y1: 5 },
+      { x0: 4, y0: 4, x1: 5, y1: 5 },
+    ]);
+    assert.deepEqual(tokenBox(SQUARES, goblin), { x0: 4, y0: 4, x1: 5.375, y1: 5 });
+  });
+
+  test("it stands only where the drawn body and the rules box are both revealed, for a player and on the TV", () => {
+    assert.equal(creatureStands(fogOf([[4, 4, 5, 5]]), SQUARES, goblin, false), false, "its art leans into the fogged cell beside it");
+    assert.equal(creatureStands(fogOf([[4, 4, 5, 5]]), SQUARES, { ...goblin, nudge: undefined } as ViewToken, false), true, "unnudged it fits its cell");
+    assert.equal(creatureStands(fogOf([[5, 4, 6, 5]]), SQUARES, goblin, false), false, "the cell the rules count it in is fogged");
+    assert.equal(creatureStands(fogOf([[4, 4, 6, 5]]), SQUARES, goblin, false), true);
+    // An object turned a right angle draws its turned box from the drawn spot.
+    const plank = makeToken("plank", { kind: "object", size: "custom", w: 2, h: 1, x: 4, y: 4, rotation: 90, nudge: { x: 0, y: 3 } }) as ViewToken;
+    assert.deepEqual(tokenBoxes(SQUARES, plank)[0], { x0: 4.5, y0: 3.875, x1: 5.5, y1: 5.875 });
+    assert.equal(creatureStands(fogOf([[4, 4, 6, 5]]), SQUARES, plank, false), false);
+    assert.equal(creatureStands(fogOf([[4, 3, 6, 6]]), SQUARES, plank, false), true);
+  });
+
+  test("a ghost's frame is a drawn point, so its rules box is the frame less the nudge", () => {
+    // At 4.6 the frame alone would snap to cell 5. Less 3/8 it is cell 4, where the rules put the token drawn there.
+    const [body, rule] = tokenBoxes(SQUARES, goblin, { x: 4.6, y: 4 });
+    assert.deepEqual(body, { x0: 4.6, y0: 4, x1: 5.6, y1: 5 });
+    assert.deepEqual(rule, { x0: 4, y0: 4, x1: 5, y1: 5 });
+    assert.equal(ghostStands(fogOf([[4, 4, 5, 5]]), SQUARES, goblin, { x: 4.375, y: 4 }), false);
+    assert.equal(ghostStands(fogOf([[4, 4, 6, 5]]), SQUARES, goblin, { x: 4.375, y: 4 }), true);
+  });
+
+  test("the DM's dimming reads both boxes", () => {
+    assert.equal(dimmedForDm(fogOf([[5, 4, 6, 5]]), SQUARES, goblin, null), false, "its drawn body shows on revealed ground");
+    assert.equal(dimmedForDm(fogOf([[5, 4, 6, 5]]), SQUARES, { ...goblin, nudge: undefined } as ViewToken, null), true);
+  });
+
+  test("the rules box is read at the stored spot, so a nudge that reached a squeezed token by mistake moves only the art", () => {
+    // A squeeze's box is never snapped, so this is where reading the rules box at the drawn spot would show.
+    const squeezed = makeToken("ogre", { size: "large", x: 2, y: 2, squeeze: true, nudge: { x: 3, y: 3 } }) as ViewToken;
+    assert.deepEqual(tokenBoxes(SQUARES, squeezed)[1], { x0: 2.5, y0: 2.5, x1: 3.5, y1: 3.5 });
+    const { cells } = standeeFooting(SQUARES, squeezed);
+    const stored = footprintRect(SQUARES, squeezed);
+    assert.deepEqual(stored, { x: 2.5, y: 2.5, w: 1, h: 1 });
+    assert.deepEqual(cells.map((c) => `${c.col},${c.row}`).sort(), ["2,2", "2,3", "3,2", "3,3"]);
+  });
+
+  test("a standee's art stands on its drawn box and its base reads the ground of its rules cells", () => {
+    const large = makeToken("ogre", { size: "large", x: 2, y: 6, nudge: { x: -3, y: 2 } }) as ViewToken;
+    const { box, cells } = standeeFooting(SQUARES, large);
+    assert.deepEqual(box, { x: 1.625, y: 6.25, w: 2, h: 2 });
+    // Its drawn box overhangs column 1 and row 8, a ledge the ogre is not on.
+    assert.deepEqual(cells.map((c) => `${c.col},${c.row}`).sort(), ["2,6", "2,7", "3,6", "3,7"]);
+  });
 });

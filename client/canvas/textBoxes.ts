@@ -1,5 +1,5 @@
 import type { Box } from "../lib/boardText.ts";
-import type { ViewToken } from "../lib/scene.ts";
+import { drawnAt, type ViewToken } from "../lib/scene.ts";
 import type { PlacedLines, TokenText } from "./useBoardText.ts";
 
 /**
@@ -33,14 +33,17 @@ export function plateBounds(block: Pick<PlacedLines, "x" | "y" | "width" | "heig
  * useBoardText places them in. A plate counts with its padding and
  * outline, as drawn. The marks draw over what sits under the decor, so a
  * height pill that kept off the names alone could still lie half under an
- * elevation badge ("↑25" over "↑25 ft") and read as neither.
+ * elevation badge ("↑25" over "↑25 ft") and read as neither. Each from
+ * where its token is drawn (docs/design/design-v1-snap-off.md 6.2), as its
+ * decor draws there.
  */
 export function placedTextBoxes(tokens: readonly ViewToken[], text: ReadonlyMap<string, TokenText>, scale: number): Box[] {
   const out: Box[] = [];
   for (const t of tokens) {
     const placed = text.get(t.id);
-    const ox = t.x * scale;
-    const oy = t.y * scale;
+    const at = drawnAt(null, t);
+    const ox = at.x * scale;
+    const oy = at.y * scale;
     for (const m of placed?.marks?.boxes ?? []) out.push({ x0: ox + m.x0, y0: oy + m.y0, x1: ox + m.x1, y1: oy + m.y1 });
     if (placed?.plate) {
       const b = plateBounds(placed.plate);

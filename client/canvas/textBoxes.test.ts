@@ -68,3 +68,11 @@ describe("the text boxes the layers under the decor keep clear of", () => {
     assert.deepEqual(placedTextBoxes([token], small, 40), [{ x0: 70, y0: 170, x1: 130, y1: 190 }]);
   });
 });
+
+describe("text boxes of a nudged token (docs/design/design-v1-snap-off.md 6.2)", () => {
+  test("sit where the token is drawn, as its decor draws there", () => {
+    const nudged = { id: "t", x: 2, y: 3, nudge: { x: 2, y: -2 } } as unknown as ViewToken;
+    const [box] = placedTextBoxes([nudged], text("label"), 40);
+    assert.deepEqual(box, { x0: 90 - 10, y0: 110 + 50, x1: 90 + 50, y1: 110 + 70 });
+  });
+});

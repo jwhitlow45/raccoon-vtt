@@ -25,7 +25,7 @@ import type { SightMode } from "../../features/vision/sightMode.ts";
 import type { AssetVariant } from "../../lib/api.ts";
 import { cameraOfStage, NO_INSETS, screenToView, type Camera, type Size } from "../../lib/camera.ts";
 import { BOARD_DISPOSITION_RING } from "../../lib/tokenView.ts";
-import { footprint, type ViewToken } from "../../lib/scene.ts";
+import { footprint, rulesSpot, type ViewToken } from "../../lib/scene.ts";
 import { boardTheme, theme } from "../../lib/theme.ts";
 import { footprintCells } from "../../lib/groundCells.ts";
 import { drawnBase, drawnFootprintGround, drawnHeights, groundGroups, heightsStand, isometric, K, toView, type DrawnSource, type Turn } from "../../lib/view.ts";
@@ -58,13 +58,13 @@ import { keptHost, onDeviceGrid, screenBox } from "./kept.ts";
 import { liveCameraSlot, needsApply, useCameraWhileShown, type LastApplied } from "../../state/liveCamera.ts";
 import { cullFit, cullOf } from "./cull.ts";
 import { previewLanding, seenChunks } from "./seenChunks.ts";
-import { dimmedForDm, ghostStands, ghostTagStands, ringsAtBase, splitTokens, tokenBox } from "./stand.ts";
+import { dimmedForDm, ghostStands, ghostTagStands, ringsAtBase, splitTokens, standeeFooting, tokenBox } from "./stand.ts";
 import { BoardVolumes, type VolumeEntry, type VolumeWorld } from "./volumes.ts";
 import { useCommitCount, useKeptReport, useLayoutReport } from "./isoTest.ts";
 import { ON_GROUND, standeeShape, type Seat } from "./standee.ts";
 import { hexBoxGround } from "../isoPlace.ts";
 import { COVER_INSET, drawsInset } from "../../features/attach/groups.ts";
-import { isHex, sceneGrid } from "#shared/rules/grid.ts";
+import { isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import { flatPressTokens, keepRingPairs, sameIso } from "./renderCache.ts";
 
 /**
@@ -241,8 +241,8 @@ function IsoBoardImpl(props: IsoBoardProps) {
     const standingIds = new Set(standing.map((t) => t.id));
     const all = Object.fromEntries(props.tokens.map((t) => [t.id, t]));
     return standing.map((t): Standing => {
-      const fp = footprint(t);
-      const cells = footprintCells(grid, t);
+      // The art stands where it is drawn and sorts by that ground point, on the base its rules box's ground gives (stand.ts standeeFooting).
+      const { box, cells } = standeeFooting(grid, t);
       const base = drawnBase(src, cells, t.elevation) / feet;
       const ground = drawnFootprintGround(src, cells) / feet;
       const link = t.attached;
@@ -250,11 +250,11 @@ function IsoBoardImpl(props: IsoBoardProps) {
       const holderToken = holder ? byId.get(holder) : undefined;
       // One seat, read by the drawing (TokenNode.tsx Standee) and by every box below, so they agree.
       const seat: Seat = holderToken ? { rise: footprint(holderToken).h / 2, inset: drawsInset(grid, all, t) ? COVER_INSET : 1 } : ON_GROUND;
-      const shape = standeeShape(turn, { x: t.x, y: t.y, w: fp.w, h: fp.h }, base, ground, cam.scale, size.height, seat);
+      const shape = standeeShape(turn, box, base, ground, cam.scale, size.height, seat);
       return {
         id: t.id,
-        x: t.x + fp.w / 2,
-        y: t.y + fp.h / 2,
+        x: box.x + box.w / 2,
+        y: box.y + box.h / 2,
         cells,
         base,
         holder,
@@ -613,7 +613,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
   // A creature lying flat lays out on the drawn ground under it, where the ground stage copies its picture up a seen column.
   const flatGround = useCallback((t: ViewToken) => drawnFootprintGround(src, footprintCells(grid, t)) / feet, [src, grid, feet]);
   const flatIsoOf = useMemo(() => (flatCache.current = flatPressTokens(flatCache.current, flat, turn, flatGround, groundAt, grid)), [flat, turn, flatGround, groundAt, grid]);
-  const placeOf = useCallback((t: ViewToken) => decorPlace(isometric(turn), t, frames.get(t.id), flatGround(t)), [turn, frames, flatGround]);
+  const placeOf = useCallback((t: ViewToken) => decorPlace(isometric(turn), grid, t, frames.get(t.id), flatGround(t)), [turn, grid, frames, flatGround]);
   const publishedPills = useTreeShownStore(useScoped(boardPillsSlot), (s) => s.pills);
   // Area and trap names read this layout. They cannot also be its inputs.
   const fixedPillsKey = JSON.stringify(tokenLayoutPills(publishedPills));
@@ -653,11 +653,13 @@ function IsoBoardImpl(props: IsoBoardProps) {
   const ghostOf = useCallback(
     (t: ViewToken, at: { x: number; y: number }, name: string): IsoGhost => {
       const fp = footprint(t);
-      const cells = footprintCells(grid, { ...t, x: at.x, y: at.y, squeeze: undefined });
+      // A frame is the drawn spot (docs/design/design-v1-snap-off.md 5.6), so the ground and landing read its rules spot.
+      const spot = rulesSpot(t, at);
+      const cells = footprintCells(grid, { ...t, x: spot.x, y: spot.y, squeeze: undefined });
       // It previews where the drop would land it there, on the ground this viewer has seen, as this device's own drag does (4.3).
       const room = store.getState().view;
       const seen = seenChunks({ chunks, sceneId: scene.id, bounds: { w, h }, fog: props.viewerFog });
-      const landing = room ? previewLanding(room, props.role, seen, t, at) : t.elevation;
+      const landing = room ? previewLanding(room, props.role, seen, t, spot) : t.elevation;
       const base = drawnBase(src, cells, landing) / feet;
       const ground = drawnFootprintGround(src, cells) / feet;
       if (ghostStands(fog, grid, t, at)) {
@@ -771,7 +773,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
               props.decorTokens
                 .filter((t) => part !== "plate" || !!isoText.get(t.id)?.plate)
                 .flatMap((t) => {
-                  const at = decorAt(t, byStandee, view, cull, props.keepIds, flatGround);
+                  const at = decorAt(t, byStandee, view, grid, cull, props.keepIds, flatGround);
                   return at ? [props.renderDecor(t, part, at, isoText.get(t.id))] : [];
                 }),
             )}
@@ -921,12 +923,13 @@ function decorAt(
   t: ViewToken,
   standees: ReadonlyMap<string, Standing>,
   view: ReturnType<typeof isometric>,
+  grid: Grid,
   cull: VBox,
   keep: ReadonlySet<string>,
   flatGround: (t: ViewToken) => number,
 ): { x: number; y: number } | null {
   const s = standees.get(t.id);
-  const at = decorPlace(view, t, s, s ? 0 : flatGround(t));
+  const at = decorPlace(view, grid, t, s, s ? 0 : flatGround(t));
   if (s) return s.keep || meets(s.bounds, cull) ? at : null;
   // A creature lying flat draws its decor above the fog, as Top-down's decor already is (5.2): every token a player holds is partly in sight.
   const fp = footprint(t);

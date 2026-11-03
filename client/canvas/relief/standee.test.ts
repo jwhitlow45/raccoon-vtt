@@ -142,10 +142,12 @@ describe("standees", () => {
   test("the board lays decor out on the frame and draws silhouettes from the seated art", () => {
     const board = readFileSync(new URL("./IsoBoard.tsx", import.meta.url), "utf8");
     // The decor and the label layout both place a standee's decor by its frame (isoText.ts decorPlace).
-    assert.match(board, /const at = decorPlace\(view, t, s, s \? 0 : flatGround\(t\)\);/);
+    assert.match(board, /const at = decorPlace\(view, grid, t, s, s \? 0 : flatGround\(t\)\);/);
     const text = readFileSync(new URL("./isoText.ts", import.meta.url), "utf8");
     assert.match(text, /if \(standee\) return \{ x: standee\.frame\.x0, y: standee\.frame\.y0, ring: standee\.ring \};/);
-    assert.match(board, /standeeShape\(turn, \{ x: t\.x, y: t\.y, w: fp\.w, h: fp\.h \}, base, ground, cam\.scale, size\.height, seat\)/);
+    // Its box is the drawn one (stand.ts standeeFooting, docs/design/design-v1-snap-off.md 6.2).
+    assert.match(board, /const \{ box, cells \} = standeeFooting\(grid, t\);/);
+    assert.match(board, /standeeShape\(turn, box, base, ground, cam\.scale, size\.height, seat\)/);
     assert.match(board, /rise: seat\.rise,\n\s+inset: seat\.inset,/);
     const node = readFileSync(new URL("../TokenNode.tsx", import.meta.url), "utf8");
     assert.match(node, /standeeParts\(iso\.turn, iso\.drawn, iso\.ground, \{ w, h \}, iso\)/);

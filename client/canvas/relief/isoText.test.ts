@@ -59,7 +59,7 @@ describe("token labels in Isometric lay out in view space (docs/design/design-v1
     const tokens = crowd();
     for (const turn of [0, 1, 2, 3] as Turn[]) {
       const standees = standeesOf(tokens, turn);
-      const place = (t: ViewToken) => decorPlace(isometric(turn), t, standees.get(t.id));
+      const place = (t: ViewToken) => decorPlace(isometric(turn), SQUARES, t, standees.get(t.id));
       const text = layout(tokens, place);
       let named = 0;
       for (const t of tokens) {
@@ -81,7 +81,7 @@ describe("token labels in Isometric lay out in view space (docs/design/design-v1
   test("a name below its standee hangs below the ring, not over it", () => {
     const [goblin] = crowd();
     const s = standeeShape(0, { x: goblin!.x, y: goblin!.y, w: 1, h: 1 }, 0, 0, SCALE, 900);
-    const place = () => decorPlace(isometric(0), goblin!, s);
+    const place = () => decorPlace(isometric(0), SQUARES, goblin!, s);
     const text = layout([goblin!], place).get(goblin!.id)!;
     assert.ok(text.label && text.label.y >= text.heightPx, "the lone goblin's name shows below it");
     const top = s.frame.y0 * SCALE + text.label.y;
@@ -95,12 +95,12 @@ describe("token labels in Isometric lay out in view space (docs/design/design-v1
     const b = token("b", { x: 9, y: 9, name: "", actor: { inline: { ...actor(), hp: { cur: 0, max: 0, temp: 0 } } } }) as ViewToken;
     const sa = standeeShape(0, { x: a!.x, y: a!.y, w: 1, h: 1 }, 0, 0, SCALE, 900);
     // Where a's name would hang alone: below its ring.
-    const alone = layout([a!], () => decorPlace(isometric(0), a!, sa)).get(a!.id)!.label!;
+    const alone = layout([a!], () => decorPlace(isometric(0), SQUARES, a!, sa)).get(a!.id)!.label!;
     const top = sa.frame.y0 + alone.y / SCALE;
     // b stands above that, its frame 20 px clear of the name, more than the gap a name keeps, and the lower half of a wide ring across it.
     const at = { x: sa.base.x, y: top - 20 / SCALE };
     const sb = { frame: { x0: at.x - 0.5, x1: at.x + 0.5, y0: at.y - 1, y1: at.y }, ring: { x0: at.x - 1, x1: at.x + 1, y0: at.y - 0.5, y1: at.y + 0.5 } };
-    const place = (t: ViewToken) => decorPlace(isometric(0), t, t.id === b.id ? sb : sa);
+    const place = (t: ViewToken) => decorPlace(isometric(0), SQUARES, t, t.id === b.id ? sb : sa);
     const label = layout([a!, b], place).get(a!.id)!.label;
     assert.ok(label, "a's name still shows");
     const box = { x0: sa.frame.x0 * SCALE + label.x, y0: sa.frame.y0 * SCALE + label.y, x1: sa.frame.x0 * SCALE + label.x + label.width, y1: sa.frame.y0 * SCALE + label.y + label.height };
@@ -110,9 +110,9 @@ describe("token labels in Isometric lay out in view space (docs/design/design-v1
   test("a creature lying flat lays its decor out on a box its size on its footprint's middle, at the drawn ground under it", () => {
     const t = token("flat", { x: 3, y: 2, size: "large" }) as ViewToken;
     const c = toView(isometric(1), { x: 4, y: 3 });
-    assert.deepEqual(decorPlace(isometric(1), t, undefined), { x: c.x - 1, y: c.y - 1 });
+    assert.deepEqual(decorPlace(isometric(1), SQUARES, t, undefined), { x: c.x - 1, y: c.y - 1 });
     const up = toView(isometric(1), { x: 4, y: 3 }, 2);
-    assert.deepEqual(decorPlace(isometric(1), t, undefined, 2), { x: up.x - 1, y: up.y - 1 }, "up a seen 10 ft column, with its picture");
+    assert.deepEqual(decorPlace(isometric(1), SQUARES, t, undefined, 2), { x: up.x - 1, y: up.y - 1 }, "up a seen 10 ft column, with its picture");
   });
 
   test("a map label that stands keeps its ink round the block on its anchor, one lying flat its ink box seen through the view", () => {
@@ -167,7 +167,7 @@ test("ISO34-LABELS: area and trap names avoid the raised token's actual label at
     const view = isometric(turn);
     const t = token("raised", { x: 6, y: 6, name: "Raised goblin" }) as ViewToken;
     const shape = standeeShape(turn, { x: t.x, y: t.y, w: 1, h: 1 }, 4, 0, SCALE, 900);
-    const place = () => decorPlace(view, t, shape);
+    const place = () => decorPlace(view, SQUARES, t, shape);
     const text = layout([t], place);
     const label = text.get(t.id)!.label!;
     const at = place();
@@ -221,7 +221,7 @@ test("ISO34-LABELS: real area and trap candidates clear the raised name's halo b
   for (const turn of [0, 1, 2, 3] as Turn[]) {
     const view = isometric(turn);
     const ground = (x: number, y: number) => x >= 8 && x < 12 && y >= 4 && y < 8 ? 2 : 0;
-    const place = (t: ViewToken) => decorPlace(view, t, standeeShape(turn, { x: t.x, y: t.y, w: t.size === "large" ? 2 : 1, h: t.size === "large" ? 2 : 1 }, t.elevation / 5, ground(t.x, t.y), scale, 900));
+    const place = (t: ViewToken) => decorPlace(view, SQUARES, t, standeeShape(turn, { x: t.x, y: t.y, w: t.size === "large" ? 2 : 1, h: t.size === "large" ? 2 : 1 }, t.elevation / 5, ground(t.x, t.y), scale, 900));
     const laid = layoutBoardText({ tokens, scale, characters: undefined, role: "dm", ownsToken: () => true, activeTokenId: null, selectedId: null, pills: [], mapLabels: [], lockShown: () => false, fontEpoch: 0, place }, kept);
     kept = laid.placed;
     const text = laid.out;
@@ -294,4 +294,32 @@ test("ISO34-LABELS: crowded names move past successive token boxes only where th
     const far = above ? { ...first, y0: first.y0 - 3 } : { ...first, y1: first.y1 + 3 };
     assert.equal(isoNamePill([original], { ...names, boxes: [far] }, scale), original, "a name cannot move more than two extra view units from its shape");
   }
+});
+
+describe("a nudged token's decor and text lay out where it is drawn (docs/design/design-v1-snap-off.md 6.2)", () => {
+  const nudged = token("n", { x: 3, y: 2, nudge: { x: 2, y: -3 } }) as ViewToken;
+
+  test("a flat creature's decor sits on its drawn box's middle, and a hex scene draws the stored spot", () => {
+    const c = toView(isometric(1), { x: 3.75, y: 2.125 });
+    assert.deepEqual(decorPlace(isometric(1), SQUARES, nudged, undefined), { x: c.x - 0.5, y: c.y - 0.5 });
+    const stored = toView(isometric(1), { x: 3.5, y: 2.5 });
+    assert.deepEqual(decorPlace(isometric(1), { shape: "hex", orient: "rows" }, nudged, undefined), { x: stored.x - 0.5, y: stored.y - 0.5 });
+  });
+
+  test("Top-down lays a nudged token's text out at its drawn spot", () => {
+    const laid = layoutBoardText(
+      { tokens: [nudged], scale: SCALE, characters: undefined, role: "dm", ownsToken: () => true, activeTokenId: null, selectedId: null, pills: [], mapLabels: [], lockShown: () => false, fontEpoch: 0 },
+      undefined,
+    );
+    assert.equal(laid.meta.get("n")!.ox, 3.25 * SCALE);
+    assert.equal(laid.meta.get("n")!.oy, 1.625 * SCALE);
+  });
+
+  test("the isometric boxes read the nudge once, through the place they are given", () => {
+    const label = { x: 0, y: 0, width: 40, height: 10, lines: [] };
+    const text = new Map([[nudged.id, { label, plate: null, marks: null } as unknown as TokenText]]);
+    const boxes = isoTokenBoxes([nudged], text, 40, () => ({ x: 2, y: 3 }));
+    assert.deepEqual(boxes[0], { x0: 2, y0: 3, x1: 3, y1: 4 });
+    assert.deepEqual(boxes[1], { x0: 2, y0: 3, x1: 3, y1: 3.25 });
+  });
 });
