@@ -163,6 +163,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
       "Shift or Ctrl+click a token (Cmd on a Mac)",
       "Shift or Ctrl+drag on empty map (Cmd on a Mac)",
       "Right-click a token",
+      "Alt+drag a token (Option on a Mac)",
       "Drag with the right or middle button",
       "Space+drag",
       "Ctrl+wheel, or a pinch on a trackpad",
