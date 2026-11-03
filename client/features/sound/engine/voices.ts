@@ -111,7 +111,8 @@ function withNext(at: number, lengthMs: number, crossingMs: number | null, t: nu
     if (at - t <= LOOKAHEAD_MS) out.push({ k: 0, startAt: at });
     return out;
   }
-  if (crossingMs === null) return out;
+  // Two passes sounding is a crossing: the next one loads once the older is done, so a sound never needs more than its two elements.
+  if (crossingMs === null || out.length > 1) return out;
   const later = occurrencesAt(at, lengthMs, crossingMs, t + LOOKAHEAD_MS).at(-1);
   if (later && !out.some((o) => o.k === later.k)) out.push({ k: later.k, startAt: later.startAt });
   return out;
@@ -196,6 +197,7 @@ export class Voices {
   /** Elements leaving, with the time they are free again. */
   readonly #busyUntil = new Map<number, number>();
   #music: MusicState = "none";
+  #disposed = false;
 
   constructor(env: VoicesEnv) {
     this.#env = env;
@@ -224,6 +226,7 @@ export class Voices {
   /** Takes a new plan: voices that stay keep their elements, new ones start, and the rest fade out. */
   update(plans: readonly VoicePlan[], leaveMs: (plan: VoicePlan) => number): void {
     const wanted = new Map(plans.map((p) => [p.key, p]));
+    const t = this.#env.serverNow();
     for (const [key, v] of this.#live) {
       if (v.leaving) continue;
       const plan = wanted.get(key);
@@ -232,6 +235,9 @@ export class Voices {
         v.plan = plan;
         if (volumeChanged) this.#ramp(v.mix.gain, mixGain(plan), SHORT_FADE_MS);
         this.#envelope(v);
+      } else if (t >= v.plan.startAt + v.plan.lengthMs) {
+        // A pass that ended by itself is silent already, and its element is free for the next.
+        this.#release(v);
       } else {
         this.#leave(v, leaveMs(v.plan));
       }
@@ -285,6 +291,7 @@ export class Voices {
   }
 
   dispose(): void {
+    this.#disposed = true;
     for (const v of this.#live.values()) this.#release(v);
     this.#live.clear();
   }
@@ -457,6 +464,7 @@ export class Voices {
   }
 
   #reportMusic(): void {
+    if (this.#disposed) return;
     const t = this.#env.serverNow();
     let state: MusicState = "none";
     for (const v of this.#live.values()) {

@@ -17,10 +17,13 @@ import { builtinMs } from "./builtins.ts";
  *
  * Each load and each voice belongs to its entry, and is cancelled when that
  * entry leaves the list: stopped, deleted, given another use, or past the
- * list's cap. The engine-wide generation is for Stop all, Room sound off, a
- * blackout and disposal, which cancel every load and voice, so a fetch or
- * a decode that finishes late never starts a sound. Decoded effects, the
- * playing ones included, take at most 48 MB, one decode in flight.
+ * list's cap. Stop all, Room sound off, a blackout and disposal cancel
+ * every load and voice at once, the design's engine-wide generation: each
+ * waiting entry is done for good and the decode in flight is aborted, so a
+ * fetch or a decode that finishes late never starts a sound. Decoded
+ * effects, the playing ones included, take at most 48 MB, one decode in
+ * flight, and six play at once at most: a seventh stops the one closest to
+ * its end.
  */
 
 /** Ready this late or less, an effect plays whole. */
@@ -60,7 +63,7 @@ type Seen = {
 };
 
 type Cached = { bytes: number; buffer: unknown; lastPlayed: number; playing: number };
-type Playing = { id: string; voice: EffectVoice; assetId: string | null; startedAt: number };
+type Playing = { id: string; voice: EffectVoice; assetId: string | null; startedAt: number; endsAt: number };
 
 export class EffectPlayer {
   readonly #env: EffectEnv;
@@ -71,11 +74,14 @@ export class EffectPlayer {
   /** The entries of the last confirmed list. */
   #held = new Map<string, FiredEffect>();
   readonly #seen = new Map<string, Seen>();
-  readonly #withdrawn = new Set<string>();
-  /** Started, skipped or cancelled: never started again. */
+  /**
+   * Started, skipped, or withdrawn from this page's list: never started
+   * again here, so an entry that comes back after Undo, Redo or a change of
+   * use stays quiet. Withdrawals come only from confirmed lists (see), never
+   * from a reconnect's cleared store.
+   */
   readonly #done = new Set<string>();
   #active = false;
-  #generation = 0;
   readonly #cache = new Map<string, Cached>();
   /** The asset decoding now, its own abort, and the entries waiting on loads, in the order they came. */
   #decoding: string | null = null;
@@ -112,14 +118,12 @@ export class EffectPlayer {
     const list = effects ?? [];
     const next = new Map(list.map((e) => [e.id, e]));
     for (const id of this.#held.keys()) {
-      if (next.has(id)) continue;
-      this.#withdrawn.add(id);
-      this.#cancel(id);
+      if (!next.has(id)) this.#cancel(id);
     }
     const first = this.#loadAt === null;
     if (first) this.#loadAt = now;
     for (const e of list) {
-      if (this.#seen.has(e.id) || this.#withdrawn.has(e.id)) continue;
+      if (this.#seen.has(e.id) || this.#done.has(e.id)) continue;
       const firedAfter = !first && e.at - LEAD_MS >= (this.#loadAt ?? now) - LOAD_SLACK_MS;
       if (!first && !firedAfter) {
         // Fired before the load and seen only now, as after a change of use: never here.
@@ -154,7 +158,6 @@ export class EffectPlayer {
 
   /** Stop all, Room sound off, a blackout, disposal: every load and voice goes, and a late decode starts nothing. */
   stopAll(): void {
-    this.#generation++;
     this.#decodeAbort?.abort();
     this.#decodeAbort = null;
     this.#decoding = null;
@@ -225,13 +228,13 @@ export class EffectPlayer {
       return this.#nextDecode();
     }
     const assetId = sound.assetId;
-    const generation = this.#generation;
     const abort = new AbortController();
     this.#decoding = assetId;
     this.#decodeAbort = abort;
     this.#env.decode(assetId, abort.signal).then(
       (decoded) => {
-        if (generation !== this.#generation || abort.signal.aborted) return;
+        // Aborted by Stop all or its entry leaving: a decode already under way finishes anyway, and starts nothing.
+        if (abort.signal.aborted) return;
         this.#decoding = null;
         this.#decodeAbort = null;
         this.#store(assetId, decoded);
@@ -239,7 +242,7 @@ export class EffectPlayer {
         this.#nextDecode();
       },
       () => {
-        if (generation !== this.#generation || this.#decodeAbort !== abort) return;
+        if (this.#decodeAbort !== abort) return;
         this.#decoding = null;
         this.#decodeAbort = null;
         // The entries that waited on it are skipped: an effect that failed to load is never retried late.
@@ -297,11 +300,12 @@ export class EffectPlayer {
       else if (ms - late >= PARTWAY_LEFT_MS) offset = late;
       else return;
     }
-    while (this.#playing.length >= this.#atOnce) this.#stopVoice(this.#playing[0]!);
+    // At six, the one closest to its end gives way, so a run of short effects never cuts a long one (5.4's Thunder).
+    while (this.#playing.length >= this.#atOnce) this.#stopVoice(this.#playing.reduce((a, b) => (b.endsAt < a.endsAt ? b : a)));
     const level = e.soundId ? (this.#sounds[e.soundId]?.level ?? 0) : 0;
     const at = Math.max(e.at, now);
     const voice = this.#env.play(what, at, offset, level, e.id);
-    const playing: Playing = { id: e.id, voice, assetId, startedAt: at };
+    const playing: Playing = { id: e.id, voice, assetId, startedAt: at, endsAt: at + ms - offset };
     this.#playing.push(playing);
     if (assetId) {
       const cached = this.#cache.get(assetId);

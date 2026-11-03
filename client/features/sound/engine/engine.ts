@@ -474,6 +474,8 @@ export class SoundEngine {
   }
 
   #report(): void {
+    // A voice's late look at its music can come after the engine went: it says nothing then.
+    if (this.#disposed) return;
     const handoff = this.#handoff;
     const ctx = this.#ctx;
     let here: SoundHere;

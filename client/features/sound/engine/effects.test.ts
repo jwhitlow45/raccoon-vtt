@@ -15,7 +15,7 @@ const MB = 1024 * 1024;
 
 type Started = { id: string | null; asset: string | null; builtin: string | null; at: number; offset: number; stopped: boolean; end: () => void };
 
-function harness(options: { budget?: number } = {}) {
+function harness(options: { budget?: number; ignoreAbort?: boolean } = {}) {
   const w = {
     now: 1_000_000,
     started: [] as Started[],
@@ -27,7 +27,8 @@ function harness(options: { budget?: number } = {}) {
     decode: (assetId, signal) =>
       new Promise<DecodedEffect>((resolve, reject) => {
         w.decodes.push({ assetId, signal, resolve, reject });
-        signal.addEventListener("abort", () => reject(new Error("aborted")));
+        // A fetch rejects on its abort, but a decodeAudioData already under way finishes regardless.
+        if (!options.ignoreAbort) signal.addEventListener("abort", () => reject(new Error("aborted")));
       }),
     play: (what, at, offset) => {
       const s: Started = {
@@ -50,7 +51,7 @@ function harness(options: { budget?: number } = {}) {
       };
     },
   };
-  const player = new EffectPlayer(env, options);
+  const player = new EffectPlayer(env, { ...(options.budget !== undefined ? { budget: options.budget } : {}) });
   const finish = async (assetId: string) => {
     const d = w.decodes.find((x) => x.assetId === assetId && !x.signal.aborted);
     assert.ok(d, `a decode of ${assetId} is in flight`);
@@ -220,6 +221,40 @@ describe("effects on a page", () => {
     assert.equal(w.started.length, 3);
   });
 
+  test("a decode that finishes after Stop all, as decodeAudioData does whatever the abort, starts nothing", async () => {
+    const { w, player } = harness({ ignoreAbort: true });
+    player.setActive(true);
+    player.see([], SOUNDS);
+    w.now += 1_000;
+    const at = w.now + LEAD_MS;
+    player.see([fired("t", "thunder", at)], SOUNDS);
+    const pending = w.decodes.find((d) => d.assetId === "a-thunder")!;
+    player.stopAll();
+    // The list still holds the entry, as when Room sound went off here while the DM's list goes on.
+    pending.resolve({ buffer: "a-thunder", bytes: MB });
+    await new Promise((r) => setImmediate(r));
+    assert.equal(w.started.length, 0);
+  });
+
+  test("one decode in flight, across a Stop all whose old decode finishes after a new one began", async () => {
+    const { w, player } = harness({ ignoreAbort: true });
+    player.setActive(true);
+    player.see([], SOUNDS);
+    w.now += 1_000;
+    let at = w.now + LEAD_MS;
+    player.see([fired("t", "thunder", at)], SOUNDS);
+    const old = w.decodes.find((d) => d.assetId === "a-thunder")!;
+    player.stopAll();
+    w.now += 100;
+    at = w.now + LEAD_MS;
+    player.see([fired("t", "thunder", at - 100), fired("g", "gong", at), fired("b", "bell", at)], SOUNDS);
+    assert.deepEqual(w.decodes.filter((d) => d !== old).map((d) => d.assetId), ["a-gong"], "the gong's decode, alone");
+    old.resolve({ buffer: "a-thunder", bytes: MB });
+    await new Promise((r) => setImmediate(r));
+    assert.deepEqual(w.decodes.filter((d) => d !== old).map((d) => d.assetId), ["a-gong"], "the old decode's end starts no second one");
+    assert.equal(w.started.length, 0);
+  });
+
   test("decoded effects keep to the budget: the least recently played cached ones go first, then the oldest playing one", async () => {
     const { w, player, finish } = harness({ budget: 30 * MB });
     w.bytes.set("a-thunder", 12 * MB);
@@ -253,19 +288,23 @@ describe("effects on a page", () => {
     assert.ok(player.cachedBytes <= 30 * MB);
   });
 
-  test("six play at once at most: a seventh stops the oldest", async () => {
-    const { w, player } = harness();
+  test("six play at once at most: a seventh stops the one closest to its end, so a long effect plays on", async () => {
+    const { w, player, finish } = harness();
     player.setActive(true);
     player.see([], SOUNDS);
     w.now += 1_000;
-    const list: FiredEffect[] = [];
-    for (let i = 0; i < 7; i++) {
-      list.push({ id: `r${i}`, builtin: "rumble", at: w.now + LEAD_MS + i });
+    const list: FiredEffect[] = [fired("t", "thunder", w.now + LEAD_MS)];
+    player.see([...list], SOUNDS);
+    await finish("a-thunder");
+    for (let i = 0; i < 6; i++) {
+      w.now += 200;
+      list.push({ id: `r${i}`, builtin: "rumble", at: w.now + LEAD_MS });
       player.see([...list], SOUNDS);
     }
     assert.equal(w.started.length, 7);
-    assert.ok(w.started[0]!.stopped);
     assert.equal(player.voices, 6);
+    assert.ok(!w.started[0]!.stopped, "Thunder plays on");
+    assert.ok(w.started[1]!.stopped, "the first rumble, closest to its end, gave way");
   });
 
   test("a page that is not playing starts nothing, and on starting plays only what still has 3 s left", async () => {
