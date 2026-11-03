@@ -1737,6 +1737,28 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
       const jav = rolls.getByRole("button", { name: /^Javelin(?! damage)/ });
       assert.equal(await names(jav), `Javelin, ${WIND_NOTE}`, "a thrown weapon names the reminder, with no preset");
       await rolls.getByText(`Longbow Dis: Strong wind. ${WIND_NOTE}`, { exact: true }).waitFor();
+      // The weapons' line and the bow's tag in line on a phone, at 100% and 130%.
+      const lines: string[] = [];
+      for (const scale of [1, 1.3]) {
+        await player.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
+        await player.goto(`${server.origin}/r/${run.roomId}`);
+        await player.getByRole("status", { name: "Connected" }).first().waitFor();
+        await openDicePhone(player);
+        for (const size of [{ width: 390, height: 844 }, { width: 320, height: 568 }]) {
+          await player.setViewportSize(size);
+          await sleep(200);
+          const weapons = rolls.getByRole("group", { name: "Actions", exact: true });
+          await bow.scrollIntoViewIfNeeded();
+          await sleep(200);
+          lines.push(...alignmentLines(await measureAlignment(weapons), `weapons in strong wind ${size.width}x${size.height} ${Math.round(scale * 100)}%`));
+        }
+      }
+      await player.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+      await player.setViewportSize({ width: 390, height: 844 });
+      await player.goto(`${server.origin}/r/${run.roomId}`);
+      await player.getByRole("status", { name: "Connected" }).first().waitFor();
+      await openDicePhone(player);
+      assert.deepEqual(lines, [], "the weapons' line and the bow's tag out of line");
 
       const before = diceLines(playerSocket.state?.log).length;
       await perception.tap();
