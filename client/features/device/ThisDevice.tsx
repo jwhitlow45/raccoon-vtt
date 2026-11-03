@@ -24,7 +24,10 @@ import {
   setRollToasts,
   setSheetHandle,
   setUiScale,
+  setThemeChoice,
   setWeatherMode,
+  THEME_CHOICE_WORDS,
+  THEME_CHOICES,
   UI_SCALES,
   uiScaleLabel,
   useLowPower,
@@ -32,8 +35,10 @@ import {
   useRollAnimation,
   useRollToastsOn,
   useSheetHandle,
+  useThemeChoice,
   useUiScale,
   useWeatherMode,
+  type ThemeChoice,
   type UiScale,
 } from "./settings.ts";
 
@@ -82,12 +87,15 @@ export default function ThisDevice() {
   const handleHelp = useId();
   const weather = useWeatherMode();
   const weatherStill = useWeatherStillReason();
+  const themeChoice = useThemeChoice();
+  const themeHelp = useId();
   return (
     <div style={{ display: "grid" }}>
       <Section label="Interface size" divider={false}>
         <Help>The bars, panels and the names and marks on tokens. The map keeps its own zoom: pinch or use the wheel.</Help>
         <Segmented<UiScale> label="Interface size" grow value={scale} options={UI_SCALES.map((s) => ({ value: s, label: uiScaleLabel(s) }))} onChange={setUiScale} />
       </Section>
+      <ThemeSection value={themeChoice} helpId={themeHelp} />
       {/* Where the browser can, so not on iPhone Safari (lib/fullscreen.ts). Here too, since a phone's top bar has no room for the button and a touch screen may have no keyboard. */}
       {fullscreenSupported() ? (
         <Section label="Screen">
@@ -182,6 +190,41 @@ export default function ThisDevice() {
         <SheetHandlePreview id={handle} />
       </Section>
     </div>
+  );
+}
+
+/**
+ * The Menu's This device row's detail (panels/MenuPanel.tsx), without
+ * full screen where the browser has none. "theme" comes early, so the no-break space that holds "sheet
+ * handle" together still ends the line: at 390 px and 130% "handle."
+ * never wraps onto a line alone.
+ */
+export function deviceDetail(fullscreen: boolean): string {
+  return `Interface size, theme, ${fullscreen ? "full screen, " : ""}low power, map detail, weather, sounds, roll animation, shortcuts and sheet\u00a0handle.`;
+}
+
+/** The Theme section's help, which is also the row's description. */
+export const THEME_HELP = "Auto follows this device's own light or dark setting. The map, the fog, the dice tray and the table display stay dark in both.";
+
+/**
+ * Theme (docs/design/design-v1-light-theme.md 4.1): Dark, Light or Auto,
+ * in the Interface size row's component, so the three share one row as
+ * its four do. A pick recolors the page at once (lib/scheme.ts), and
+ * every other open window of the app follows it.
+ */
+export function ThemeSection(props: { value: ThemeChoice; helpId: string }) {
+  return (
+    <Section label="Theme">
+      <Help id={props.helpId}>{THEME_HELP}</Help>
+      <Segmented<ThemeChoice>
+        label="Theme"
+        grow
+        describedBy={props.helpId}
+        value={props.value}
+        options={THEME_CHOICES.map((c) => ({ value: c, label: THEME_CHOICE_WORDS[c] }))}
+        onChange={setThemeChoice}
+      />
+    </Section>
   );
 }
 

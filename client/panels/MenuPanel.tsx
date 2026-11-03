@@ -3,7 +3,7 @@ import { useStore } from "zustand";
 import { Button } from "../components/Button.tsx";
 import { Icon, type IconName } from "../components/Icon.tsx";
 import { Row } from "../components/Row.tsx";
-import ThisDevice from "../features/device/ThisDevice.tsx";
+import ThisDevice, { deviceDetail } from "../features/device/ThisDevice.tsx";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { GUIDE_PATH } from "../features/guide/guide.ts";
 import { useJobActive } from "../features/handouts/pdf/live.ts";
@@ -96,7 +96,7 @@ export default function MenuPanel(props: PanelProps) {
         icon="device"
         title="This device"
         // A no-break space holds "sheet handle" together, so at 390 px and 130% "handle." never wraps onto a line alone.
-        detail={fullscreenSupported() ? "Interface size, full screen, low power, map detail, weather, sounds, roll animation, shortcuts and sheet\u00a0handle." : "Interface size, low power, map detail, weather, sounds, roll animation, shortcuts and sheet\u00a0handle."}
+        detail={deviceDetail(fullscreenSupported())}
         page="device"
         onClick={() => setPage("device")}
       />
