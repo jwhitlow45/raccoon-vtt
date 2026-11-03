@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { createInitialState } from "#shared/initial.ts";
+import { SOUND_LIMITS } from "#shared/limits.ts";
 import { OP_VERSION, SNAPSHOT_VERSION, opMigrations, type MigrationStep } from "#shared/migrate.ts";
 import type { LogEntry, Member, RoomState, Viewer } from "#shared/model.ts";
 import type { Op, RestoreEntry } from "#shared/protocol.ts";
@@ -370,6 +371,26 @@ describe("asset ids an op names", () => {
     assert.deepEqual(assetIdsOf({ t: "scene.update", sceneId: "s", patch: { thumb: a.toUpperCase(), phases: [{ id: "p", name: "Day", assetId: b, widthPx: 1, heightPx: 1 }] } }), [a, b]);
     assert.deepEqual(assetIdsOf({ t: "build.stamps", sceneId: "s", put: [{ id: "st", art: { assetId: c } }] }), [c]);
     assert.deepEqual(assetIdsOf({ t: "scene.update", sceneId: "s", patch: { thumb: "not-a-uuid" } }), []);
+  });
+});
+
+describe("a sound row's facts (docs/design/design-v1-sound.md 7.2)", () => {
+  const SOUND_ID = "0193a0f0-0000-7000-8000-00000000000b";
+  const base: AssetFactRow = { id: SOUND_ID, room_id: "ROOM", kind: "sound", width: 0, height: 0, uploaders: null, media: "mp3", video: null, audio: { ms: 3_000, channels: 2, kbps: 128 } };
+
+  test("come from the audio column, by the one rule the intake and serving read it by", () => {
+    assert.deepEqual(assetFactOf(base), { id: SOUND_ID, roomId: "ROOM", kind: "sound", width: 0, height: 0, uploaders: [], audio: { ms: 3_000, channels: 2, kbps: 128 } });
+    assert.deepEqual(assetFactOf({ ...base, audio: { ms: 900_000, channels: 1, kbps: 64 } }).audio, { ms: 900_000, channels: 1, kbps: 64 });
+  });
+
+  test("a sound row whose facts the intake would not write gets none, so the actor refuses it", () => {
+    const facts = base.audio as object;
+    for (const audio of [null, "x", { ...facts, kbps: 65 }, { ...facts, kbps: 128.5 }, { ...facts, ms: SOUND_LIMITS.fileMinMs - 1 }, { ...facts, ms: SOUND_LIMITS.fileMaxMs + 1 }, { ...facts, ms: 3_000.5 }, { ...facts, channels: 6 }, { ...facts, title: "Rain" }, { ms: 3_000 }]) {
+      assert.equal(assetFactOf({ ...base, audio }).audio, undefined, JSON.stringify(audio));
+    }
+    assert.equal(assetFactOf({ ...base, media: "webm" }).audio, undefined);
+    assert.equal(assetFactOf({ ...base, media: undefined }).audio, undefined);
+    assert.equal("audio" in assetFactOf({ ...base, kind: "map", media: null }), false);
   });
 });
 

@@ -1,11 +1,12 @@
 import type pg from "pg";
-import { LIMITS, SOUND_LIMITS, serializedBytes } from "#shared/limits.ts";
+import { LIMITS, serializedBytes } from "#shared/limits.ts";
 import { dmNumbered, logsInIdOrder, whisperParties } from "#shared/logRings.ts";
 import { MAP_DISCOVERY_OP_VERSION, OP_VERSION, SNAPSHOT_VERSION, mapDiscoveryUpgrade, migrateOp, migrateSnapshot, needsMapDiscoveryUpgrade, opMigrations, type MigrationStep } from "#shared/migrate.ts";
 import type { LogEntry, RoomState, SoundFacts, VideoFacts, Viewer } from "#shared/model.ts";
 import { checkedVideoFacts, opSchema, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { saveOutcomeLedgerSchema } from "#shared/saveOutcomeContract.ts";
+import { soundFactsOfRow, type AssetMedia } from "../assets/store.ts";
 import { CommitOutcomeUnknown, type Queryable } from "../auth/tx.ts";
 
 /**
@@ -722,14 +723,17 @@ export async function loadAssetFacts(pool: Queryable, ids: readonly string[]): P
 /**
  * One row's fact. A video's facts are its `media` column, its size and its
  * `video` column's JSON (docs/design/design-v1-animated-maps.md 9.1), held
- * to the protocol's bounds. A video row whose facts do not check gets none,
- * so the actor refuses it as it refuses a missing row, and no unchecked
- * number reaches a map.
+ * to the protocol's bounds. A sound's are its `audio` column
+ * (docs/design/design-v1-sound.md 7.2), read by the rule the intake writes
+ * it by and serving reads it by (store.ts soundFactsOfRow), so a row means
+ * the same to every reader. A row whose facts do not check gets none, so
+ * the actor refuses it as it refuses a missing row, and no unchecked number
+ * reaches a map or the schedule.
  */
 export function assetFactOf(r: AssetFactRow): AssetFact {
   const fact: AssetFact = { id: r.id, roomId: r.room_id, kind: r.kind, width: r.width, height: r.height, uploaders: r.uploaders ?? [] };
   if (r.kind === "sound") {
-    const audio = checkedAudioFacts(r.media, r.audio);
+    const audio = soundFactsOfRow({ kind: r.kind, media: (r.media ?? null) as AssetMedia | null, audio: r.audio ?? null });
     if (audio !== undefined) fact.audio = audio;
     return fact;
   }
@@ -737,24 +741,6 @@ export function assetFactOf(r: AssetFactRow): AssetFact {
   const video = checkedVideoFacts({ ...r.video, widthPx: r.width, heightPx: r.height, container: r.media ?? (r.video as { container?: unknown }).container });
   if (video !== undefined) fact.video = video;
   return fact;
-}
-
-/**
- * A sound row's `audio` column (docs/design/design-v1-sound.md 7.2), held to
- * the frame walk's bounds: an MP3 whose length, channels and bitrate a
- * stored file may have. A row whose facts do not check gets none, so the
- * actor refuses it as it refuses a missing row, and no unchecked length
- * reaches the schedule. SN-B's store.ts soundFactsOfRow holds the same
- * rule for the intake and serving.
- */
-function checkedAudioFacts(media: unknown, audio: unknown): SoundFacts | undefined {
-  if (media !== "mp3" || audio === null || typeof audio !== "object") return undefined;
-  const { ms, channels, kbps, ...rest } = audio as Record<string, unknown>;
-  if (Object.keys(rest).length > 0) return undefined;
-  if (typeof ms !== "number" || !Number.isInteger(ms) || ms < SOUND_LIMITS.fileMinMs || ms > SOUND_LIMITS.fileMaxMs) return undefined;
-  if (channels !== 1 && channels !== 2) return undefined;
-  if (typeof kbps !== "number" || !Number.isInteger(kbps) || kbps < SOUND_LIMITS.minKbps || kbps > SOUND_LIMITS.maxKbps) return undefined;
-  return { ms, channels, kbps };
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
