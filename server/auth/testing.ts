@@ -383,3 +383,42 @@ export class FakeRoomGateway implements RoomGateway {
     return this.room(roomId).get(memberId) ?? null;
   }
 }
+
+/**
+ * Makes the pool's next transaction whose statements match `writes` commit
+ * and then lose the COMMIT's answer, as a connection that drops just after
+ * Postgres applied it. `meanwhile` runs between the two. Both the promise and
+ * the callback form of connect() keep working, since pool.query itself
+ * takes the callback form. Returns the undo.
+ */
+export function loseNextCommit(pool: pg.Pool, writes: (sql: string) => boolean, meanwhile: () => Promise<void> = async () => undefined): () => void {
+  const connect = pool.connect.bind(pool) as () => Promise<pg.PoolClient>;
+  let armed = true;
+  const patched = (cb?: (err: Error | undefined, client?: pg.PoolClient, done?: () => void) => void) => {
+    const wrapped = connect().then((client) => {
+      const query = client.query.bind(client) as (...args: unknown[]) => unknown;
+      let wrote = false;
+      (client as { query: unknown }).query = (...args: unknown[]) => {
+        const text = args[0];
+        if (typeof text === "string" && writes(text)) wrote = true;
+        if (armed && wrote && text === "commit") {
+          armed = false;
+          return (async () => {
+            await query("commit");
+            await meanwhile();
+            throw new Error("connection lost during commit");
+          })();
+        }
+        return query(...args);
+      };
+      return client;
+    });
+    if (cb) {
+      wrapped.then((client) => cb(undefined, client, () => client.release()), (err: Error) => cb(err));
+      return undefined;
+    }
+    return wrapped;
+  };
+  (pool as { connect: unknown }).connect = patched;
+  return () => ((pool as { connect: unknown }).connect = connect);
+}

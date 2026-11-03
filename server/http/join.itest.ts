@@ -7,7 +7,7 @@ import type { RoomState } from "#shared/model.ts";
 import { ipKey } from "../auth/ipKey.ts";
 import { randomToken, sha256 } from "../auth/tokens.ts";
 import { PasswordHasher } from "../auth/passwords.ts";
-import { startTestApp, type TestApp, type TestClient } from "../auth/testing.ts";
+import { loseNextCommit, startTestApp, type TestApp, type TestClient } from "../auth/testing.ts";
 import { setTurnstileDispatcherForTests } from "../auth/turnstile.ts";
 import { RoomFullError } from "../rooms/gateway.ts";
 
@@ -783,6 +783,25 @@ describe("ask tokens are adopted by every path that makes a room session", () =>
     assert.equal((await sessionOf(token))?.id, id);
     assert.equal(await askRows(id), 0);
     assert.equal((await phone.me(roomId)).role, "player");
+  });
+
+  test("a password join whose COMMIT answer is lost still authenticates the adopted session at once", async () => {
+    const { roomId } = await t.client().createRoom();
+    const phone = t.client();
+    const id = await askToken(phone);
+    // Warm the unknown cache with the token's miss.
+    assert.equal((await phone.me(roomId)).status, 403);
+    const restore = loseNextCommit(t.pool, (sql) => sql.includes("insert into sessions"));
+    try {
+      const res = await phone.post(`/api/rooms/${roomId}/join`, { password: PASSWORD });
+      assert.equal(res.statusCode, 500);
+    } finally {
+      restore();
+    }
+    assert.equal((await sessionOf(phone.token))?.id, id, "the promotion landed");
+    // A ticket check, not no_session: the after-commit callbacks ran on the unknown outcome too.
+    const next = await phone.post(`/api/rooms/${roomId}/join/complete`, { ticket: randomToken(), name: "Quinn", color: "#112233" });
+    assert.equal(next.json<{ error: string }>().error, "bad_ticket");
   });
 
   test("a DM link adopts the token and then rotates it, keeping the id", async () => {

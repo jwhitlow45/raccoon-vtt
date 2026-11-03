@@ -5,7 +5,7 @@ import { MockAgent } from "undici";
 import type { RoomState } from "#shared/model.ts";
 import type { JoinMode } from "#shared/protocol.ts";
 import { ipKey } from "../auth/ipKey.ts";
-import { randomIp, startTestApp, type TestApp, type TestClient } from "../auth/testing.ts";
+import { loseNextCommit, randomIp, startTestApp, type TestApp, type TestClient } from "../auth/testing.ts";
 import { randomToken, sha256 } from "../auth/tokens.ts";
 import { setTurnstileDispatcherForTests } from "../auth/turnstile.ts";
 
@@ -74,43 +74,9 @@ function pauseQuery(pool: pg.Pool, match: (sql: string) => boolean): { reached: 
   return { reached, go, restore: () => ((pool as { query: unknown }).query = original) };
 }
 
-/**
- * A pool whose next transaction that writes a grant commits, runs `meanwhile`,
- * and then loses the COMMIT's answer, as a connection that drops just after
- * Postgres applied it. Promise and callback callers of connect() both work,
- * since pool.query itself takes the callback form.
- */
+/** The next grant transaction commits and loses its COMMIT's answer (testing.ts loseNextCommit). */
 function loseGrantCommit(pool: pg.Pool, meanwhile: () => Promise<void>): () => void {
-  const connect = pool.connect.bind(pool) as () => Promise<pg.PoolClient>;
-  let armed = true;
-  const patched = (cb?: (err: Error | undefined, client?: pg.PoolClient, done?: () => void) => void) => {
-    const wrapped = connect().then((client) => {
-      const query = client.query.bind(client) as (...args: unknown[]) => unknown;
-      let wroteGrant = false;
-      // Every other call passes through as it came, callback form included.
-      (client as { query: unknown }).query = (...args: unknown[]) => {
-        const text = args[0];
-        if (typeof text === "string" && text.includes("insert into grants")) wroteGrant = true;
-        if (armed && wroteGrant && text === "commit") {
-          armed = false;
-          return (async () => {
-            await query("commit");
-            await meanwhile();
-            throw new Error("connection lost during commit");
-          })();
-        }
-        return query(...args);
-      };
-      return client;
-    });
-    if (cb) {
-      wrapped.then((client) => cb(undefined, client, () => client.release()), (err: Error) => cb(err));
-      return undefined;
-    }
-    return wrapped;
-  };
-  (pool as { connect: unknown }).connect = patched;
-  return () => ((pool as { connect: unknown }).connect = connect);
+  return loseNextCommit(pool, (sql) => sql.includes("insert into grants"), meanwhile);
 }
 
 describe("join requests: asking, waiting and a DM's answer", () => {
@@ -598,8 +564,17 @@ describe("join requests: modes", () => {
     const coDm = t.client();
     await coDm.post(`/api/rooms/${roomId}/dm`, { key: dmKey, name: "Mara" });
     const real = (await hashes(roomId))?.player_pw_hash;
-    const answers = await Promise.all([dm, coDm, dm].map((c) => c.post(`/api/rooms/${roomId}/join-mode`, { mode: "ask_only" })));
+    const signal = t.gateway.joinRequestsChanged;
+    let signals = 0;
+    t.gateway.joinRequestsChanged = () => void signals++;
+    let answers;
+    try {
+      answers = await Promise.all([dm, coDm, dm].map((c) => c.post(`/api/rooms/${roomId}/join-mode`, { mode: "ask_only" })));
+    } finally {
+      t.gateway.joinRequestsChanged = signal;
+    }
     for (const a of answers) assert.deepEqual(a.json(), { mode: "ask_only" });
+    assert.equal(signals, 1, "one transition signals, the identical switches do not");
     assert.deepEqual(await hashes(roomId), { join_mode: "ask_only", player_pw_hash: "ask-only", player_pw_hash_held: real });
     await k.setMode(dm, roomId, "ask");
     assert.deepEqual(await hashes(roomId), { join_mode: "ask", player_pw_hash: real, player_pw_hash_held: null });
