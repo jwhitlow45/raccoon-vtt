@@ -226,7 +226,33 @@ describe("walkMp3: the leading tag frame", () => {
     const misplaced = stream.slice();
     for (let i = 0; i < 4; i++) misplaced[21 + i] = "Xing".charCodeAt(i);
     refused(walkMp3(misplaced), "sound_type", /other channel mode/);
-    refused(walkMp3(withTagFrame(withTagFrame(stream))), "sound_type", /second tag frame/);
+    refused(walkMp3(withTagFrame(withTagFrame(stream))), "sound_type", /only the first frame/);
+  });
+
+  test("a tag frame anywhere after the first, with private text or not, in either mode (MUS-SOL-01)", () => {
+    const plant = (bytes: Uint8Array, at: number, text: string) => {
+      const out = bytes.slice();
+      for (let i = 0; i < text.length; i++) out[at + i] = text.charCodeAt(i);
+      return out;
+    };
+    for (const mode of [1, 3] as const) {
+      const audio = silentFrames(20, { mode });
+      // A whole LAME-made file after 20 frames of audio: its Info frame's fields hold a name past its own.
+      const tagged = withTagFrame(silentFrames(20, { mode }), { lame: { name: "LAMEAlice" } });
+      const late = concat(audio, plant(tagged, 300, "Alice Example alice@example.test"));
+      refused(walkMp3(late), "sound_type", new RegExp(`tag frame at byte ${audio.length}`));
+      for (const name of ["Xing", "Info"] as const) refused(walkMp3(concat(audio, withTagFrame(audio, { name }))), "sound_type", /only the first frame/);
+      // The last frame too, and one with a leading tag frame before it.
+      refused(walkMp3(concat(audio, withTagFrame(silentFrames(1, { mode })).subarray(0, frameBytes(128, 44_100, false)))), "sound_type", /only the first frame/);
+      refused(walkMp3(withTagFrame(concat(audio, withTagFrame(audio)))), "sound_type", /only the first frame/);
+    }
+    for (const mode of [1, 3] as const) {
+      const stream = silentFrames(40, { mode });
+      const at = facts(walkMp3(stream)).offsets[25]!;
+      refused(walkMp3(plant(stream, at + 36, "VBRI")), "sound_type", new RegExp(`tag frame at byte ${at}`));
+      // The other mode's place names no tag frame in a later frame: its bytes are side information or audio there.
+      facts(walkMp3(plant(stream, at + (mode === 3 ? 36 : 21), "Info")));
+    }
   });
 });
 

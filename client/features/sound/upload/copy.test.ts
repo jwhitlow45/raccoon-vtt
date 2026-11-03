@@ -68,6 +68,16 @@ describe("which MP3s are copied as they are", () => {
     assert.ok(again.ok && again.stripped === 0);
   });
 
+  test("an Info and LAME frame holding private text after the first frame is never copied (MUS-SOL-01)", () => {
+    const frames = mp3Of(tone(44_100, 2, 1), 44_100);
+    const late = withTagFrame(frames, { lame: { name: "LAMEAlice" } });
+    const text = "Alice Example alice@example.test";
+    for (let i = 0; i < text.length; i++) late[300 + i] = text.charCodeAt(i);
+    const check = copyable(concat([id3v2("Rain", 2048), frames, late]));
+    assert.equal(check.ok, false);
+    assert.match(check.ok ? "" : check.why, /only the first frame/);
+  });
+
   test("CRC and emphasis frames go to the encoder, planned so before the file is read whole", async () => {
     const frames = mp3Of(tone(44_100, 2, 2), 44_100);
     const crc = everyHeader(frames, (b, at) => (b[at + 1]! &= 0xfe));

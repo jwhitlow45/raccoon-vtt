@@ -67,6 +67,19 @@ const FIXED_BITS = 0xffff_fcc3;
 
 const TICK_FRAMES = 4096;
 
+/**
+ * Where a tag frame's name sits in an MPEG-1 Layer III frame: past the
+ * header and the side information, 17 bytes of it for mono and 32 for two
+ * channels. VBRI's sits 32 bytes past the header in either mode.
+ */
+const MONO_NAME = 4 + 17;
+const STEREO_NAME = 4 + 32;
+const VBRI_NAME = 4 + 32;
+/** The names as big-endian words, so the walk reads each frame's place once. */
+const XING = 0x5869_6e67;
+const INFO = 0x496e_666f;
+const VBRI = 0x5642_5249;
+
 /** The bytes of a Layer III frame with this header, padding included. */
 export function frameBytes(kbps: number, rateHz: number, padded: boolean): number {
   return Math.floor((144_000 * kbps) / rateHz) + (padded ? 1 : 0);
@@ -123,8 +136,9 @@ function headerProblem(h: number): string | null {
 /**
  * Takes a file that is MPEG-1 Layer III from its first byte to its last,
  * at 44.1 or 48 kHz, every frame at one bitrate from 64 to 192 kbps and one
- * channel mode, with at most one Xing, Info or LAME frame first, ending on a
- * frame boundary, with no tag and no other byte.
+ * channel mode, with at most one Xing, Info or LAME frame first and no
+ * frame after it named as one, ending on a frame boundary, with no tag and
+ * no other byte.
  *
  * Padding, private, copyright, original and mode extension bits may differ
  * from frame to frame, since encoders set them frame by frame. A LAME frame
@@ -152,11 +166,7 @@ export function walkMp3(bytes: Uint8Array, opts: WalkOptions = {}): Mp3Walk {
   const tag = tagFrameAt(bytes, 0, frameBytes(kbps, rateHz, ((first >>> 9) & 1) === 1), mono);
   if (!tag.ok) return tag;
   let at = tag.frame ? tag.frame.bytes : 0;
-  // At most one tag frame: a second one's fields would be served as audio no check had read.
-  if (tag.frame && at + 4 <= length && (u32(bytes, at) & FIXED_BITS) === fixed) {
-    const second = tagFrameAt(bytes, at, frameBytes(kbps, rateHz, ((u32(bytes, at) >>> 9) & 1) === 1), mono);
-    if (!second.ok || second.frame) return refuse("sound_type", "a second tag frame");
-  }
+  const name = mono ? MONO_NAME : STEREO_NAME;
   let frames = 0;
   while (at < length) {
     if (frames % TICK_FRAMES === 0) opts.tick?.();
@@ -167,6 +177,11 @@ export function walkMp3(bytes: Uint8Array, opts: WalkOptions = {}): Mp3Walk {
     }
     const size = frameBytes(kbps, rateHz, ((h >>> 9) & 1) === 1);
     if (at + size > length) return refuse("sound_type", `the last frame is cut ${at + size - length} bytes short`);
+    // Only the first frame may be a tag frame: a later one's fields would be stored and served as audio no check read.
+    // Every frame is at least 192 bytes, so both places lie inside it.
+    const named = u32(bytes, at + name);
+    const vbri = name === VBRI_NAME ? named : u32(bytes, at + VBRI_NAME);
+    if (named === XING || named === INFO || vbri === VBRI) return refuse("sound_type", `a tag frame at byte ${at}, where only the first frame may be one`);
     if (frames < offsets.length) offsets[frames] = at;
     frames++;
     at += size;
@@ -206,10 +221,10 @@ const ENCODER_NAME = /^(LAME|Lavc|Lavf)[0-9a-z. ]{0,5}\0*$/;
  * length or a seek table this walk never checked.
  */
 function tagFrameAt(bytes: Uint8Array, start: number, frameSize: number, mono: boolean): { ok: true; frame: TagFrame | null } | Mp3Refusal {
-  const name = start + 4 + (mono ? 17 : 32);
-  const otherName = start + 4 + (mono ? 32 : 17);
+  const name = start + (mono ? MONO_NAME : STEREO_NAME);
+  const otherName = start + (mono ? STEREO_NAME : MONO_NAME);
   const size = start + frameSize;
-  if (ascii(bytes, start + 4 + 32, "VBRI")) return refuse("sound_type", "a VBRI frame");
+  if (ascii(bytes, start + VBRI_NAME, "VBRI")) return refuse("sound_type", "a VBRI frame");
   if (ascii(bytes, otherName, "Xing") || ascii(bytes, otherName, "Info")) return refuse("sound_type", "a tag frame's name at the other channel mode's place");
   if (!ascii(bytes, name, "Xing") && !ascii(bytes, name, "Info")) return { ok: true, frame: null };
   if (size > bytes.length) return refuse("sound_type", "a tag frame cut short");
