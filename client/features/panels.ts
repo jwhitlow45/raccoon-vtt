@@ -66,11 +66,13 @@ export type PanelProps = {
 
 /**
  * Which group a panel is in (docs/design/design-v1-layout-hierarchy.md M3): the
- * ones a table reaches for in play, the ones for preparing, and the room's
- * own Menu. The groups keep to the order's ranges: play 10 to 24, prepare
- * 40 to 48, and Menu last.
+ * ones a table reaches for in play, the ones that run the table, the ones for
+ * preparing, and the room's own Menu. The groups keep to the order's ranges:
+ * play 10 to 20, table 30 to 39, prepare 40 to 48, and Menu 90. Time and Sound
+ * sit at 34 and 36 until Ambiance takes 34 (panel-groups design, section 3).
+ * A player's list is not grouped, so Time and Sound still follow Areas.
  */
-export type PanelGroup = "play" | "prepare" | "room";
+export type PanelGroup = "play" | "table" | "prepare" | "room";
 
 export type PanelDef = {
   id: string;
@@ -137,10 +139,10 @@ export const PANELS: readonly PanelDef[] = [
   panel({ id: "token", title: "Token", icon: "token", order: 10, group: "play", subject: "selection", guide: "tokens", load: () => import("../panels/TokenPanel.tsx") }),
   panel({ id: "tracker", title: "Initiative", icon: "combat", order: 12, group: "play", guide: "initiative", load: () => import("../panels/TrackerPanel.tsx") }),
   panel({ id: "dice", title: "Dice", icon: "dice", order: 15, group: "play", subject: "selection", guide: "dice", load: () => import("./dice/DicePanel.tsx") }),
-  panel({ id: "scenes", title: "Scenes", icon: "scenes", order: 24, group: "play", dmOnly: true, guide: "scenes", load: () => import("../panels/ScenesPanel.tsx") }),
+  panel({ id: "scenes", title: "Scenes", icon: "scenes", order: 32, group: "table", dmOnly: true, guide: "scenes", load: () => import("../panels/ScenesPanel.tsx") }),
   panel({ id: "library", title: "Library", icon: "library", order: 48, group: "prepare", load: () => import("../panels/LibraryPanel.tsx") }),
   panel({ id: "areas", title: "Areas", icon: "areas", order: 20, group: "play", guide: "areas", load: () => import("./areas/AreasPanel.tsx") }),
-  panel({ id: "time", title: "Time", icon: "time", order: 21, group: "play", needsClock: true, guide: "time-and-the-calendar", load: () => import("./clock/TimePanel.tsx") }),
+  panel({ id: "time", title: "Time", icon: "time", order: 34, group: "table", needsClock: true, guide: "time-and-the-calendar", load: () => import("./clock/TimePanel.tsx") }),
   panel({ id: "log", title: "Log", icon: "log", order: 16, group: "play", load: () => import("../panels/LogPanel.tsx") }),
   panel({ id: "journal", title: "Journal", icon: "journal", order: 18, group: "play", load: () => import("./journal/JournalPanel.tsx") }),
   panel({ id: "characters", title: "Characters", icon: "characters", order: 44, group: "prepare", guide: "characters-and-their-stat-blocks", load: () => import("./tokens/CharactersPanel.tsx") }),
@@ -148,8 +150,8 @@ export const PANELS: readonly PanelDef[] = [
   panel({ id: "encounters", title: "Encounters", icon: "encounters", order: 42, group: "prepare", dmOnly: true, guide: "encounters", load: () => import("./encounters/EncountersPanel.tsx") }),
   // From 900 px up the party bar sits atop the side panel instead (features/party/PartyDock.tsx).
   panel({ id: "party", title: "Party", icon: "group", order: 14, group: "play", dmOnly: true, narrowOnly: true, load: () => import("./party/PartyPanel.tsx") }),
-  panel({ id: "dm", title: "DM", icon: "dm", order: 22, group: "play", dmOnly: true, guide: "dm-panel", load: () => import("../panels/DmPanel.tsx") }),
-  panel({ id: "sound", title: "Sound", icon: "music", order: 23, group: "play", needsSound: true, guide: "music-and-sound", load: () => import("./sound/panel/SoundPanel.tsx") }),
+  panel({ id: "dm", title: "DM", icon: "dm", order: 30, group: "table", dmOnly: true, guide: "dm-panel", load: () => import("../panels/DmPanel.tsx") }),
+  panel({ id: "sound", title: "Sound", icon: "music", order: 36, group: "table", needsSound: true, guide: "music-and-sound", load: () => import("./sound/panel/SoundPanel.tsx") }),
   panel({ id: "outliner", title: "Outliner", icon: "outliner", order: 46, group: "prepare", dmOnly: true, guide: "outliner", load: () => import("./outliner/OutlinerPanel.tsx") }),
   panel({ id: "menu", title: "Menu", icon: "more", order: 90, group: "room", load: () => import("../panels/MenuPanel.tsx") }),
 ];
@@ -179,7 +181,7 @@ export function panelsFor(role: "dm" | "player", wide = false, opts: PanelsForOp
 }
 
 /** The labels of a DM's groups of panels (docs/design/design-v1-layout-hierarchy.md M3). Menu, the room's own, follows a plain line instead. */
-const GROUP_LABELS: Partial<Record<PanelGroup, string>> = { play: "In play", prepare: "Prepare" };
+const GROUP_LABELS: Partial<Record<PanelGroup, string>> = { play: "In play", table: "Run the table", prepare: "Prepare" };
 
 export type PanelSection = {
   /** The group, or "all" for a list with no groups. */

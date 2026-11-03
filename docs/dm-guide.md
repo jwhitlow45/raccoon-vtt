@@ -74,7 +74,7 @@ The screen has three main parts: the **map** in the middle, the **toolbar** unde
 
 ![The DM's screen on a computer: the map, the toolbar under it, and the side panel on the right with the party bar above the panels' icon tabs.](dm-guide/screen-computer.webp)
 
-**On a computer** (a window 900 px wide or more), the panels are tabs in a side panel on the right. Each tab shows its panel's icon, and its name when you point at it or reach it with the keyboard: the person in a circle is Token, the crossed swords Initiative, the d20 Dice and the scroll the Log. The tabs you use most come first, as many as fit, and **More** lists the rest, grouped under **In play** and **Prepare**, each with its icon. A panel you open from More shows its icon on More, with its name beside it where there is room. On a tablet, or a phone held sideways, the panel's name also shows above it whenever the tabs show its icon alone. When you want more room for the map, press **Hide panels**, the last button in the row of tabs (or the `S` key), and bring the side panel back with **Panels** in the toolbar. **Two panels**, at the top of the More list, splits the side panel so you can see two panels at once, which is handy for keeping Initiative open above a token's stats.
+**On a computer** (a window 900 px wide or more), the panels are tabs in a side panel on the right. Each tab shows its panel's icon, and its name when you point at it or reach it with the keyboard: the person in a circle is Token, the crossed swords Initiative, the d20 Dice and the scroll the Log. The tabs you use most come first, as many as fit, and **More** lists the rest, grouped under **In play**, **Run the table** and **Prepare**, each with its icon. A panel you open from More shows its icon on More, with its name beside it where there is room. On a tablet, or a phone held sideways, the panel's name also shows above it whenever the tabs show its icon alone. When you want more room for the map, press **Hide panels**, the last button in the row of tabs (or the `S` key), and bring the side panel back with **Panels** in the toolbar. **Two panels**, at the top of the More list, splits the side panel so you can see two panels at once, which is handy for keeping Initiative open above a token's stats.
 
 Above the tabs sits the party bar, which shows your players' characters with their HP. Tap a character there to jump to its token. A character with no token on the scene you are viewing reads "Not on this scene" and turns gray, though its HP bar, its AC and its conditions keep their colors, so you can still check on it. Press **Party** to fold the bar down to a single line: the characters' names and HP in a strip that scrolls sideways when they don't all fit, followed by **Ask** for [asking the party for a roll](#asking-for-rolls).
 
@@ -107,7 +107,8 @@ When you pick a tool, its options appear in a row just above the toolbar, and an
 
 These are the panels a DM uses most for maps and fights:
 
-- Under **In play**: **Token**, **Initiative**, **Dice**, **Log**, **Journal**, **Areas**, **Time**, **DM** and **Scenes**. On a phone, **Party** is here too.
+- Under **In play**: **Token**, **Initiative**, **Dice**, **Log**, **Journal** and **Areas**. On a phone, **Party** is here too.
+- Under **Run the table**: **DM**, **Scenes**, **Time** and **Sound**.
 - Under **Prepare**: **Monsters**, **Encounters**, **Characters**, **Outliner** and **Library**.
 
 ## Quick start
@@ -1761,7 +1762,7 @@ To keep a backup small, untick **Include sounds** under **Room settings**, **Bac
 
 ## Time and the calendar
 
-The **Time** panel keeps the in-game date and time. It is there for the moments a game leans on it: a journey that takes three days, a Long Rest that ends at dawn, or a player asking how long ago the heist was. It is under **In play**, and it stays off until you start it.
+The **Time** panel keeps the in-game date and time. It is there for the moments a game leans on it: a journey that takes three days, a Long Rest that ends at dawn, or a player asking how long ago the heist was. It is under **Run the table**, and it stays off until you start it.
 
 The clock never runs on its own. It moves when you move it, when the party takes a Long Rest with the clock box ticked, and when a fight ends. So it always reads what you have told the table, and nothing drifts while you take a break.
 

@@ -57,11 +57,11 @@ const run = {
 };
 
 // A DM always has Time and Sound. A player gets them only once the room keeps time or plays sound, which this room never does.
-const DM_PANELS = ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "Time", "DM", "Sound", "Scenes", "Monsters", "Encounters", "Characters", "Outliner", "Library", "Menu"];
+const DM_PANELS = ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "DM", "Scenes", "Time", "Sound", "Monsters", "Encounters", "Characters", "Outliner", "Library", "Menu"];
 const PLAYER_PANELS = ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "Characters", "Library", "Menu"];
 // "Two panels" heads each menu, a checkbox this shape does not list, then the line under it (docs/design/design-v1-split-panel.md 6).
 // The Log is in the row since the tabs draw their icons alone (docs/design/design-v1-icons-2.md 6).
-const DM_MENU = ["---", "#In play", "Journal", "Areas", "Time", "DM", "Sound", "Scenes", "#Prepare", "Monsters", "Encounters", "Characters", "Outliner", "Library", "---", "Menu"];
+const DM_MENU = ["---", "#In play", "Journal", "Areas", "#Run the table", "DM", "Scenes", "Time", "Sound", "#Prepare", "Monsters", "Encounters", "Characters", "Outliner", "Library", "---", "Menu"];
 const PLAYER_MENU = ["---", "Journal", "Areas", "Characters", "Library", "Menu"];
 /** The row's tabs in today's side panel, its icons alone (docs/design/design-v1-icons-2.md 6). */
 const ROW = ["Token", "Initiative", "Dice", "Log"];

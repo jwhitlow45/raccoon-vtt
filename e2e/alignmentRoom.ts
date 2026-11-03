@@ -767,6 +767,8 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
     const menu = page.getByRole("menu", { name: "More panels" });
     await menu.waitFor();
     await sweep.measure(page, "fl5-more-panels", page.locator("[data-rvtt-popover]").filter({ has: menu }));
+    // The Run the table label (panel-groups design 3) is measured whole with the menu's other labels, and it must be there.
+    await menu.getByText("Run the table", { exact: true }).waitFor();
     await page.keyboard.press("Escape");
   }
 
@@ -2940,6 +2942,9 @@ async function ic2Screens(sweep: Sweep, page: Page, size: Size, scale: number): 
     await list.waitFor();
     // Each row of places, its icon leading (3.1), apart from the list's own labels.
     await sweep.measure(page, "ic2-panel-list", list.locator("li:has(button)"));
+    // The phone's whole list, labels included: In play, Run the table and Prepare each sit the same distance over their rows.
+    await list.getByText("Run the table", { exact: true }).waitFor();
+    await sweep.measure(page, "pg-panel-list", list);
     await escapeAll(page);
     await closeSheets(page);
   }
