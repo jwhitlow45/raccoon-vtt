@@ -1,6 +1,6 @@
 import type { Token } from "#shared/model.ts";
 import type { Grid } from "#shared/rules/grid.ts";
-import { footprint, frameAim, snapPosition } from "../../lib/scene.ts";
+import { atDragSpot, footprint, frameAim, snapPosition } from "../../lib/scene.ts";
 
 /**
  * Tokens where they are being dragged to, for what follows a token: an aura
@@ -15,24 +15,37 @@ import { footprint, frameAim, snapPosition } from "../../lib/scene.ts";
  * spot changes.
  */
 
-export type Spot = { x: number; y: number };
-type Placed = Pick<Token, "x" | "y" | "size" | "w" | "h">;
+/** A spot, with the squeeze its landing has where the drag knows it (state/localDrags.ts DragSpot). */
+export type Spot = { x: number; y: number; squeeze?: boolean };
+type Placed = Pick<Token, "x" | "y" | "size" | "w" | "h" | "squeeze">;
 
-/** The spot each drag would drop its token on, from where it aims in rules coordinates, snapped on its scene's grid (`gridOf`), leaving out drags that would not move it. */
+/**
+ * The spot each drag would drop its token on, from where it aims in rules
+ * coordinates, snapped on its scene's grid (`gridOf`), leaving out drags
+ * that would not move it. A drag that names its landing's squeeze is a lone
+ * drag's planned landing, already a spot the drop lands on, and a squeezed
+ * one is half a cell off the grid, so it is kept as it is, never snapped
+ * again (SNAPBUILD-ASTRA-04).
+ */
 export function dragSpots<T extends Placed>(
   tokens: Readonly<Record<string, T | undefined>>,
-  drags: Iterable<{ tokenId: string; x: number; y: number }>,
+  drags: Iterable<{ tokenId: string; x: number; y: number; squeeze?: boolean }>,
   gridOf: (token: T) => Grid,
 ): Map<string, Spot> {
   const spots = new Map<string, Spot>();
   for (const d of drags) {
     const t = tokens[d.tokenId];
     if (!t || !Number.isFinite(d.x) || !Number.isFinite(d.y)) continue;
-    const at = snapPosition(gridOf(t), d.x, d.y, footprint(t));
-    if (at.x !== t.x || at.y !== t.y) spots.set(d.tokenId, at);
+    const at: Spot = d.squeeze === undefined ? snapPosition(gridOf(t), d.x, d.y, footprint(t)) : { x: d.x, y: d.y, squeeze: d.squeeze };
+    if (!standsAt(t, at)) spots.set(d.tokenId, at);
     else spots.delete(d.tokenId);
   }
   return spots;
+}
+
+/** Whether a token at a spot is where it stands now, squeezed as it is. */
+function standsAt(t: Pick<Token, "x" | "y" | "squeeze">, s: Spot): boolean {
+  return t.x === s.x && t.y === s.y && (s.squeeze === undefined || s.squeeze === (t.squeeze === true));
 }
 
 /**
@@ -57,7 +70,7 @@ export function frameSpots<T extends Placed & Pick<Token, "nudge">>(
 export function spotsKey(spots: ReadonlyMap<string, Spot>): string {
   return [...spots]
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([id, s]) => `${id}:${s.x},${s.y}`)
+    .map(([id, s]) => `${id}:${s.x},${s.y}${s.squeeze === undefined ? "" : s.squeeze ? ",s" : ",u"}`)
     .join(";");
 }
 
@@ -66,25 +79,25 @@ export function parseSpotsKey(key: string): Map<string, Spot> {
   if (!key) return spots;
   for (const part of key.split(";")) {
     const colon = part.lastIndexOf(":");
-    const [xs, ys] = part.slice(colon + 1).split(",");
+    const [xs, ys, squeezed] = part.slice(colon + 1).split(",");
     const x = Number(xs);
     const y = Number(ys);
-    if (colon > 0 && Number.isFinite(x) && Number.isFinite(y)) spots.set(part.slice(0, colon), { x, y });
+    if (colon > 0 && Number.isFinite(x) && Number.isFinite(y)) spots.set(part.slice(0, colon), squeezed === undefined ? { x, y } : { x, y, squeeze: squeezed === "s" });
   }
   return spots;
 }
 
-/** The tokens with each spot applied. The same map back when nothing moves, so caches keyed on it hold. */
-export function withSpots<T extends { x: number; y: number }>(
+/** The tokens with each spot applied, squeezed where its landing is (lib/scene.ts atDragSpot). The same map back when nothing moves, so caches keyed on it hold. */
+export function withSpots<T extends Pick<Token, "x" | "y" | "squeeze">>(
   tokens: Readonly<Record<string, T | undefined>>,
   spots: ReadonlyMap<string, Spot>,
 ): Readonly<Record<string, T | undefined>> {
   let out: Record<string, T | undefined> | null = null;
   for (const [id, s] of spots) {
     const t = tokens[id];
-    if (!t || (t.x === s.x && t.y === s.y)) continue;
+    if (!t || standsAt(t, s)) continue;
     out ??= { ...tokens };
-    out[id] = { ...t, x: s.x, y: s.y };
+    out[id] = atDragSpot(t, s);
   }
   return out ?? tokens;
 }

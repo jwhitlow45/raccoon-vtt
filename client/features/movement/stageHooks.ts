@@ -10,6 +10,7 @@ import { isHex } from "#shared/rules/grid.ts";
 import { drawnSpot } from "#shared/rules/nudge.ts";
 import { walkersCut, walkersFor, walkersOfGroup } from "../attach/walk.ts";
 import { dragAim, rulesSpot, snapPosition } from "../../lib/scene.ts";
+import { localDragSlot } from "../../state/localDrags.ts";
 import type { OpAnswer } from "../../state/types.ts";
 import { useRoomScope, type RoomScope } from "../../state/scope.ts";
 import type { RoomUi } from "../../state/store.ts";
@@ -174,6 +175,7 @@ export function dragStops(deps: DragDeps): DragStops {
   const holds = scope.get(holdSlot);
   const notes = scope.get(stopNoteSlot);
   const routes = scope.get(routeSlot);
+  const drags = scope.get(localDragSlot);
   /** Where the finger is, before a hold moved the preview back to the wall: the drop's own spot, with the pressed token's middle when it sits on the lead. */
   let raw: ({ tokenId: string } & Aim) | null = null;
   /** The node's own point that `raw` was aimed from, and whether that frame was free, so a drop whose free state changed since aims again from it (SNAP-OPUS4-02). */
@@ -219,6 +221,19 @@ export function dragStops(deps: DragDeps): DragStops {
   };
   const setRoute = (next: DragRoute | null) => {
     if (routes.getState().route !== next) routes.setState({ route: next });
+  };
+  /**
+   * The lead's landing for what follows it (state/localDrags.ts): where its
+   * line ends, squeezed or not, so its rules outline, its aura and the
+   * "In area" lists read the box the drop lands it in, not the box under
+   * the pointer with the squeeze it has now (SNAPBUILD-ASTRA-04).
+   */
+  const setLanding = (tokenId: string, to: Pose) => {
+    const spots = drags.getState().spots;
+    const was = spots[tokenId];
+    const squeeze = to.squeeze === true;
+    if (was && was.x === to.x && was.y === to.y && was.squeeze === squeeze) return;
+    drags.setState({ spots: { ...spots, [tokenId]: { x: to.x, y: to.y, squeeze } } });
   };
   /**
    * Clears the drag's search and preview. A new drag or a key press first
@@ -279,7 +294,9 @@ export function dragStops(deps: DragDeps): DragStops {
     if (!view || !target || walk !== w) return;
     const answer = w.drag.answer;
     const straight = w.straight?.pieces ? { to: w.straight.to, pieces: w.straight.pieces } : null;
-    setRoute({ tokenId: w.token.id, ...walkPreview({ view, token: w.token, target, answer, held: w.held, walkers: w.walkers, world: w.world, role, straight }), searching: answer.kind === "searching", waiting: w.waiting });
+    const route: DragRoute = { tokenId: w.token.id, ...walkPreview({ view, token: w.token, target, answer, held: w.held, walkers: w.walkers, world: w.world, role, straight }), searching: answer.kind === "searching", waiting: w.waiting };
+    setRoute(route);
+    setLanding(route.tokenId, { ...route.to, ...(route.squeeze ? { squeeze: true } : {}) });
   };
 
   /** The straight walk to `to` checked for what it walks over, or none wanted (null). */

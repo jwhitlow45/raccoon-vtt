@@ -40,6 +40,8 @@ export type DragRoute = {
   tokenId: string;
   /** Where the drop would land. */
   to: Point;
+  /** The drop squeezes it in at `to`. */
+  squeeze?: true;
   /** The walk is cut short of the finger's spot, after 64 pieces: `to` is where it lands. */
   cut: boolean;
   /** The route's corners, none for the straight leg. */

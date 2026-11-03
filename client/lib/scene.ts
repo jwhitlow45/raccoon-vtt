@@ -104,17 +104,30 @@ export function frameAim(token: Pick<Token, "nudge">, frame: { x: number; y: num
 }
 
 /**
+ * A token at a drag's spot (state/localDrags.ts DragSpot): there, squeezed
+ * as the spot's landing is where it says, else as the token is. A lone
+ * drag's lead may land squeezed half a cell off the grid, or out of a
+ * squeeze, so whatever reads its box mid-drag reads the landing's, not the
+ * stored one (SNAPBUILD-ASTRA-04).
+ */
+export function atDragSpot<T extends Pick<Token, "x" | "y" | "squeeze">>(token: T, spot: { x: number; y: number; squeeze?: boolean }): T {
+  if (spot.squeeze === undefined) return { ...token, x: spot.x, y: spot.y };
+  const { squeeze: _stored, ...rest } = token;
+  return (spot.squeeze ? { ...rest, x: spot.x, y: spot.y, squeeze: true } : { ...rest, x: spot.x, y: spot.y }) as T;
+}
+
+/**
  * The dashed outline of a nudged token's rules box (docs/design/design-v1-snap-off.md
  * section 4, "Where it counts"): the box every rule counts it in, on the
  * board, in cells. While this device drags it, `spot` is where the drop
- * would count it (state/localDrags.ts), so the outline stands on the grid
- * apart from the art under the pointer (SNAPBUILD-ASTRA-03). Null for a
- * token with no nudge and on hexes, where the rules box is where it is
- * drawn.
+ * would land it (state/localDrags.ts), so the outline stands on the grid
+ * apart from the art under the pointer (SNAPBUILD-ASTRA-03), squeezed where
+ * the landing squeezes (`atDragSpot`). Null for a token with no nudge and on
+ * hexes, where the rules box is where it is drawn.
  */
-export function rulesOutline(g: Grid, token: PlacedToken & Pick<Token, "nudge">, spot?: { x: number; y: number }): { x: number; y: number; w: number; h: number } | null {
+export function rulesOutline(g: Grid, token: PlacedToken & Pick<Token, "nudge">, spot?: { x: number; y: number; squeeze?: boolean }): { x: number; y: number; w: number; h: number } | null {
   if (!token.nudge || g.shape === "hex") return null;
-  const r = footprintRect(g, spot ? { ...token, x: spot.x, y: spot.y } : token);
+  const r = footprintRect(g, spot ? atDragSpot(token, spot) : token);
   return { x: r.x, y: r.y, w: r.w, h: r.h };
 }
 

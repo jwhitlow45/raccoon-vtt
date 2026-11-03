@@ -98,6 +98,13 @@ describe("token shadows", () => {
     // A drop where it already stands is no move.
     assert.equal(tokenLift(c, token(6, 3, 30), { x: 6, y: 3 }), 20);
   });
+
+  test("a lone drag's landing that squeezes reads the ground under the one square it squeezes into (SNAPBUILD-ASTRA-04)", () => {
+    // A Large flier at 30 ft landing at (5.5, 2.5) squeezes onto (6, 3) alone, beside a 20 ft rock at (7, 4) its full box there would cover.
+    const c = chunks({ "7,4": 20, "6,3": 10 });
+    assert.equal(tokenLift(c, token(1, 1, 30, "large"), { x: 5.5, y: 2.5, squeeze: true }), 20, "over the 10 ft square it squeezes into");
+    assert.equal(tokenLift(c, token(1, 1, 30, "large"), { x: 5.5, y: 2.5 }), 10, "a spot that names no squeeze lands at full size, over the rock");
+  });
 });
 
 describe("a dragged token's shadow lands as the drop does (review AT-O-23)", () => {

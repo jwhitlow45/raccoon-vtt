@@ -2,9 +2,14 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { ClientOp, Op } from "#shared/protocol.ts";
 import type { RoomState, Token } from "#shared/model.ts";
+import { footprintRect } from "#shared/rules/footprint.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 import { WorkBudget } from "#shared/rules/walk.ts";
 import { token } from "#shared/testutil.ts";
+import { rulesOutline } from "../../lib/scene.ts";
+import { localDragSlot } from "../../state/localDrags.ts";
 import { RoomScope } from "../../state/scope.ts";
+import { dragSpots, withSpots } from "../areas/liveTokens.ts";
 import type { DropPlan } from "./drop.ts";
 import { RouteWork, type Frames, type RouteJob } from "./routeWork.ts";
 import { dragStops, type DragDeps } from "./stageHooks.ts";
@@ -154,15 +159,19 @@ describe("the drag's stops", () => {
     }
   });
 
-  test("a straight drop that lands squeezed reads, while it is dragged, the cost its move records (review ASTRA-18)", () => {
+  /** A Large ogre on its turn whose straight drop at (10.9, 3.1) squeezes it in at (10.5, 3.5), between a ledge and a pit. */
+  const squeezeWorld = (extra: Partial<Token> = {}) => {
     const base = world({ heights: { "10,3": 1, "12,4": 10 }, edges: { "10,9,n": { kind: "wall" } } });
     const chunk = base.buildChunks["s1:0,0"]!;
     base.buildChunks["s1:0,0"] = { ...chunk, cells: { ...chunk.cells, "11,5": "pit", "9,7": "pit", "13,7": "pit", "12,9": "pit" } };
     base.meta = { ...base.meta, settings: { ...base.meta.settings, diagonal: "five" } };
-    const ogre = token("ogre", { size: "large", x: 10, y: 6, elevation: 0, kind: "pc", ownerIds: ["p1"], disposition: "ally" });
-    base.tokens.ogre = ogre;
+    base.tokens.ogre = token("ogre", { size: "large", x: 10, y: 6, elevation: 0, kind: "pc", ownerIds: ["p1"], disposition: "ally", ...extra });
     const view = onTurn(base, "ogre");
-    const mover = view.tokens.ogre!;
+    return { view, mover: view.tokens.ogre! };
+  };
+
+  test("a straight drop that lands squeezed reads, while it is dragged, the cost its move records (review ASTRA-18)", () => {
+    const { view, mover } = squeezeWorld();
     const b = board(view);
     b.frames.frame();
     b.stops.start(mover.id);
@@ -183,6 +192,41 @@ describe("the drag's stops", () => {
     const cost = recordedCost(view, b.sent.at(-1) as Op, "ogre");
     assert.deepEqual([route.read.dragFt, ft], [cost, cost], "the label and the frame read what the move records");
   });
+
+  /*
+   * Placed 2/8 right of its spot, the ogre is drawn at its rules spot plus
+   * 0.25. An ordinary drag with the node at 11.15 and a free one at 10.9
+   * both aim at (10.9, 3.1), and both drops squeeze it in at (10.5, 3.5),
+   * where it holds the square (11, 4) alone. While it is dragged, what
+   * follows it reads that landing, never the box (11, 3) under the pointer
+   * at its full size (SNAPBUILD-ASTRA-04).
+   */
+  for (const [mode, x, free] of [
+    ["an ordinary", 11.15, false],
+    ["a free", 10.9, true],
+  ] as const) {
+    test(`${mode} drag of a placed token into a squeeze shows its outline on the squares the drop lands it in (SNAPBUILD-ASTRA-04)`, () => {
+      const { view, mover } = squeezeWorld({ nudge: { x: 2, y: 0 } });
+      const b = board(view);
+      b.frames.frame();
+      b.stops.start(mover.id);
+      const finger = { x: () => x, y: () => 3.1, position: () => {} };
+      for (let k = 0; k < 50; k++) {
+        b.stops.frame(finger, mover, free);
+        b.frames.frame();
+      }
+      const spot = b.scope.get(localDragSlot).getState().spots.ogre;
+      assert.deepEqual(spot, { x: 10.5, y: 3.5, squeeze: true }, "the spot is the landing, squeezed, half a cell off the grid");
+      assert.deepEqual(rulesOutline(SQUARES, mover, spot), { x: 11, y: 4, w: 1, h: 1 }, "the outline holds the one square it squeezes into");
+      const live = withSpots(view.tokens, dragSpots(view.tokens, [{ tokenId: "ogre", ...spot! }], () => SQUARES)).ogre!;
+      assert.deepEqual(footprintRect(SQUARES, live), { x: 11, y: 4, w: 1, h: 1 }, "an aura and the In area lists read the same square");
+      let landed: DropPlan | null = null;
+      b.stops.drop(finger, mover, [mover], (plan) => (landed = plan), { free, inPlace: true });
+      for (let k = 0; k < 50 && !landed; k++) b.frames.frame();
+      const plan = landed as DropPlan | null;
+      assert.deepEqual([plan?.moves[0]?.x, plan?.moves[0]?.y, plan?.moves[0]?.squeeze], [10.5, 3.5, true], "the drop lands where the outline stood");
+    });
+  }
 
   test("a press waiting for its frame sends once, in the next frame, and a new drag first sends it", () => {
     const hero = thorn({ x: 2, y: 2 });

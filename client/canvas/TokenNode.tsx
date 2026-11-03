@@ -235,9 +235,11 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
 
 /**
  * The rules box of a nudged token on the board, when asked for (scene.ts
- * rulesOutline). While this device drags it, the box the drop would count
- * it in, which the canvas writes as the token crosses into another box
- * (state/localDrags.ts), so it re-renders per box crossed, not per frame.
+ * rulesOutline). While this device drags it, the box the drop would land
+ * it in, which the drag writes as its landing changes (state/localDrags.ts):
+ * a lone drag's planned landing, squeezed where it squeezes and half a cell
+ * off the grid there (SNAPBUILD-ASTRA-04). So it re-renders per box
+ * crossed, not per frame.
  */
 function useRulesOutline(shown: boolean, gridShape: GridShape | undefined, token: ViewToken): { x: number; y: number; w: number; h: number } | null {
   const { x, y, size, w, h, squeeze, nudge } = token;
@@ -249,11 +251,12 @@ function useRulesOutline(shown: boolean, gridShape: GridShape | undefined, token
   const spot = useStore(useScoped(localDragSlot), (s) => (read && tree ? s.spots[token.id] : undefined));
   const sx = spot?.x;
   const sy = spot?.y;
+  const sq = spot?.squeeze;
   return useMemo(() => {
     if (!shown || nx === undefined || ny === undefined) return null;
-    const live = sx !== undefined && sy !== undefined ? { x: sx, y: sy } : undefined;
+    const live = sx !== undefined && sy !== undefined ? { x: sx, y: sy, ...(sq === undefined ? {} : { squeeze: sq }) } : undefined;
     return rulesOutline(gridOfShape(gridShape), { x, y, size, w, h, squeeze, nudge: { x: nx, y: ny } }, live);
-  }, [shown, gridShape, x, y, size, w, h, squeeze, nx, ny, sx, sy]);
+  }, [shown, gridShape, x, y, size, w, h, squeeze, nx, ny, sx, sy, sq]);
 }
 
 /** The Konva id of a token's rules outline, beside its node. */

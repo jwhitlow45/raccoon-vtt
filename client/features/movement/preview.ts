@@ -131,7 +131,7 @@ export function dismountOf(view: RoomState, token: Token, at: RoutePoint, role: 
  * holder's walk held where a creature it drags would meet a wall
  * (`walkers`, docs/design/design-v1-attach.md 4.2) is drawn and read to there.
  */
-export function walkPreview(input: { view: DropView; token: Token; target: Point & { squeeze?: boolean }; answer: RouteAnswer; held: Pose | null; walkers?: WalkersCut | null; world: PublicWorld | null; role: Role; straight?: { to: Pose; pieces: readonly RoutePiece[] } | null }): Pick<DragRoute, "to" | "cut" | "corners" | "read" | "endsIn"> {
+export function walkPreview(input: { view: DropView; token: Token; target: Point & { squeeze?: boolean }; answer: RouteAnswer; held: Pose | null; walkers?: WalkersCut | null; world: PublicWorld | null; role: Role; straight?: { to: Pose; pieces: readonly RoutePiece[] } | null }): Pick<DragRoute, "to" | "squeeze" | "cut" | "corners" | "read" | "endsIn"> {
   const { view, token, answer, world, role } = input;
   const fpc = view.meta.settings.feetPerCell;
   const walk = answer.kind === "route" ? routeLanding(view, token, input.target, answer.route.pieces, fpc) : null;
@@ -197,6 +197,8 @@ export function walkPreview(input: { view: DropView; token: Token; target: Point
   });
   return {
     to: { x: to.x, y: to.y },
+    // For what reads the box it lands in mid-drag (state/localDrags.ts, SNAPBUILD-ASTRA-04).
+    ...(to.squeeze === true ? { squeeze: true as const } : {}),
     cut: walk?.cut === true,
     corners: pieces ? points.slice(1, -1).map((p) => ({ x: p.x, y: p.y })) : [],
     read,

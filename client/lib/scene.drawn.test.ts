@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import fc from "fast-check";
 import { SQUARES, type Grid } from "#shared/rules/grid.ts";
-import { actionsName, dragAim, drawnAt, footprint, rulesOutline, rulesSpot, snapPosition } from "./scene.ts";
+import { actionsName, atDragSpot, dragAim, drawnAt, footprint, rulesOutline, rulesSpot, snapPosition } from "./scene.ts";
 
 const HEX: Grid = { shape: "hex", orient: "rows" };
 
@@ -81,6 +81,24 @@ describe("the rules outline mid-drag (SNAPBUILD-ASTRA-03)", () => {
       for (const box of [live(at, false)!, live(at, true)!]) assert.ok(Number.isInteger(box.x) && Number.isInteger(box.y), "on the grid, not under the pointer");
     });
   }
+});
+
+describe("the rules outline at a lone drag's landing (SNAPBUILD-ASTRA-04)", () => {
+  test("a landing that squeezes outlines the squeezed box, and one that names no squeeze the token's own", () => {
+    const ogre = { size: "large" as const, x: 10, y: 6, nudge: { x: 2, y: 0 } };
+    assert.deepEqual(rulesOutline(SQUARES, ogre, { x: 10.5, y: 3.5, squeeze: true }), { x: 11, y: 4, w: 1, h: 1 });
+    assert.deepEqual(rulesOutline(SQUARES, ogre, { x: 11, y: 3, squeeze: false }), { x: 11, y: 3, w: 2, h: 2 });
+    assert.deepEqual(rulesOutline(SQUARES, ogre, { x: 11, y: 3 }), { x: 11, y: 3, w: 2, h: 2 });
+  });
+});
+
+describe("a token at a drag's spot (SNAPBUILD-ASTRA-04)", () => {
+  test("squeezed as the spot says, else as the token is", () => {
+    const squeezed = { x: 4.5, y: 4.5, squeeze: true as const, size: "large" as const };
+    assert.deepEqual(atDragSpot(squeezed, { x: 6, y: 4, squeeze: false }), { x: 6, y: 4, size: "large" });
+    assert.deepEqual(atDragSpot(squeezed, { x: 6.5, y: 4.5 }), { x: 6.5, y: 4.5, squeeze: true, size: "large" });
+    assert.deepEqual(atDragSpot({ x: 1, y: 1, size: "large" as const }, { x: 6.5, y: 4.5, squeeze: true }), { x: 6.5, y: 4.5, squeeze: true, size: "large" });
+  });
 });
 
 describe("a token's accessible name (snap-off section 4)", () => {

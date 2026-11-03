@@ -1702,8 +1702,10 @@ export function MapStage(props: {
         // A free drag's frames say so, so every device reads the box the drop counts it in as this one does (SNAPBUILD-ASTRA-02).
         actions.sendEph(moveFrame(token.id, { x: node.x(), y: node.y() }, free, fieldsOf(token, node.x(), node.y())));
         // What follows a token reads the box it counts in: under where it is drawn for a free drag, else back in rules coordinates.
+        // A lone drag's lead lands where its plan does, squeezed or not, which the drag's stops write as its line ends (SNAPBUILD-ASTRA-04).
+        const planned = lone ? drag.lead.id : null;
         const here = dragAim(token, { x: node.x(), y: node.y() }, free);
-        setSpot(token, here.x, here.y);
+        if (token.id !== planned) setSpot(token, here.x, here.y);
         if (drag.followers.length === 0) return;
         // Every follower moves by the pressed node's offset from where it was drawn, each from where it is drawn itself.
         const grid = sceneGrid(sceneRef.current);
@@ -1719,7 +1721,7 @@ export function MapStage(props: {
           const layer = f.node.getLayer();
           if (layer) layers.add(layer);
           actions.sendEph(moveFrame(f.token.id, { x, y }, false, fieldsOf(f.token, x, y)));
-          setSpot(f.token, f.token.x + dx, f.token.y + dy);
+          if (f.token.id !== planned) setSpot(f.token, f.token.x + dx, f.token.y + dy);
         }
         for (const layer of layers) layer.batchDraw();
       },

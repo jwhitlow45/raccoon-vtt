@@ -69,9 +69,9 @@ type Lifted = PlacedToken & { sceneId: SceneId; elevation: number };
  * a fogged platform therefore sees its shadow fall as onto level ground,
  * while the drop the server stores lands it on the platform.
  */
-export function tokenLift(chunks: Chunks, token: Lifted, at?: { x: number; y: number }, landing?: number): number {
+export function tokenLift(chunks: Chunks, token: Lifted, at?: { x: number; y: number; squeeze?: boolean }, landing?: number): number {
   if (!at || (at.x === token.x && at.y === token.y)) return Math.max(0, token.elevation - footprintGround(chunks, token));
-  // A move without the squeeze flag clears it, so the landing is judged at full size, as the drop judges it.
-  const there = footprintGround(chunks, { ...token, x: at.x, y: at.y, squeeze: undefined });
+  // A move without the squeeze flag clears it, so the landing is judged at full size, as the drop judges it, or squeezed where a lone drag's landing squeezes (SNAPBUILD-ASTRA-04).
+  const there = footprintGround(chunks, { ...token, x: at.x, y: at.y, squeeze: at.squeeze === true ? true : undefined });
   return Math.max(0, (landing ?? landedElevation(chunks, token, at)) - there);
 }

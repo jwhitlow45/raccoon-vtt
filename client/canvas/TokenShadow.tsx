@@ -27,9 +27,9 @@ const NO_BOUNDS = { w: 0, h: 0 };
  *
  * `at` is where a ghost of another member's drag is drawn, read back in
  * rules coordinates (docs/design/design-v1-snap-off.md 6.2). This device's
- * own drag is read from the cell its token is over (state/localDrags.ts),
- * already a rules spot, so the shadow says what height the token would
- * land at.
+ * own drag is read from where it would land (state/localDrags.ts), already
+ * a rules spot, squeezed where a lone drag's landing squeezes, so the
+ * shadow says what height the token would land at.
  *
  * A player reads only the ground they have seen (relief/seenChunks.ts), as
  * the height readout does, so a shadow never tracks heights under the fog.
@@ -43,6 +43,7 @@ export const TokenShadow = memo(function TokenShadow(props: { token: ViewToken; 
   const at = props.at ? rulesSpot(token, props.at) : spot;
   const ax = at?.x;
   const ay = at?.y;
+  const squeezed = !props.at && spot?.squeeze === true;
   // Only a token being dragged reads the room, for the drop's landing: by its holder while it sits on one every player sees.
   const view = useRoomView((s) => (ax === undefined ? null : s.view));
   const role = useRoomView((s) => s.you?.role ?? "player");
@@ -51,11 +52,11 @@ export const TokenShadow = memo(function TokenShadow(props: { token: ViewToken; 
   const bounds = useRoomView((s) => s.view?.scenes[token.sceneId]?.bounds ?? NO_BOUNDS);
   const lift = useMemo(() => {
     const ground = seenChunks({ chunks, sceneId: token.sceneId, bounds, fog: tiles });
-    const spotAt = ax === undefined || ay === undefined ? undefined : { x: ax, y: ay };
+    const spotAt = ax === undefined || ay === undefined ? undefined : { x: ax, y: ay, ...(squeezed ? { squeeze: true } : {}) };
     const landing = spotAt && view ? previewLanding(view, role, ground, token, spotAt) : undefined;
     return tokenLift(ground, token, spotAt, landing);
     // The fields that place the token, not the token itself, so a change of its HP reads no ground. The room only while dragged.
-  }, [chunks, tiles, bounds, token.sceneId, token.x, token.y, token.size, token.w, token.h, token.squeeze, token.elevation, ax, ay, view, role]);
+  }, [chunks, tiles, bounds, token.sceneId, token.x, token.y, token.size, token.w, token.h, token.squeeze, token.elevation, ax, ay, squeezed, view, role]);
   const shape = shadowShape(lift, { w, h });
   if (!shape) return null;
   return (

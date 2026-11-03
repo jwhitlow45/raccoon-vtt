@@ -42,6 +42,33 @@ describe("tokens where they are being dragged", () => {
   });
 });
 
+describe("a lone drag's planned landing (SNAPBUILD-ASTRA-04)", () => {
+  const tokens = { ogre: tok(10, 6, "large"), squeezed: { ...tok(4, 4, "large"), squeeze: true as const } };
+
+  test("a landing that names its squeeze is kept as it is, half a cell off the grid, and never snapped again", () => {
+    assert.deepEqual(dragSpots(tokens, [{ tokenId: "ogre", x: 10.5, y: 3.5, squeeze: true }], squares).get("ogre"), { x: 10.5, y: 3.5, squeeze: true });
+    assert.deepEqual(dragSpots(tokens, [{ tokenId: "ogre", x: 10.5, y: 3.5 }], squares).get("ogre"), { x: 11, y: 4 }, "a spot that names none is the cell under it");
+  });
+
+  test("a squeezed token whose landing leaves the squeeze on its own spot moves, and one that keeps it does not", () => {
+    assert.deepEqual(dragSpots(tokens, [{ tokenId: "squeezed", x: 4, y: 4, squeeze: false }], squares).get("squeezed"), { x: 4, y: 4, squeeze: false });
+    assert.equal(dragSpots(tokens, [{ tokenId: "squeezed", x: 4, y: 4, squeeze: true }], squares).size, 0);
+  });
+
+  test("the key carries the squeeze both ways, and the tokens take it", () => {
+    const spots = new Map([
+      ["ogre", { x: 10.5, y: 3.5, squeeze: true }],
+      ["squeezed", { x: 6, y: 4, squeeze: false }],
+      ["a", { x: 4, y: 2 }],
+    ]);
+    assert.deepEqual(parseSpotsKey(spotsKey(spots)), spots);
+    const moved = withSpots(tokens, spots);
+    assert.deepEqual(moved.ogre, { x: 10.5, y: 3.5, size: "large", squeeze: true });
+    assert.deepEqual(moved.squeezed, { x: 6, y: 4, size: "large" }, "out of its squeeze");
+    assert.equal(withSpots(tokens, new Map([["squeezed", { x: 4, y: 4, squeeze: true }]])), tokens, "where it stands, squeezed as it is");
+  });
+});
+
 describe("tokens where they are being dragged on a hex scene (docs/design/design-v1-hex-grids.md HX-D11)", () => {
   test("a drag counts at the hex anchor its scene's drop would snap it to", () => {
     for (const orient of ["rows", "columns"] as const) {
