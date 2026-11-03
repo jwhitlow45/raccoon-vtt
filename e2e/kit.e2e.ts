@@ -4,6 +4,8 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type Locator, type Page } from "playwright-core";
 import { accentFor } from "../client/lib/accent.ts";
+import { theme } from "../client/lib/theme.ts";
+import { sweepContrast } from "./helpers/contrast.ts";
 import { ConsoleWatch, ROOT, Shots, sleep } from "./harness.ts";
 
 /**
@@ -15,7 +17,9 @@ import { ConsoleWatch, ROOT, Shots, sleep } from "./harness.ts";
  * display is neither seen nor reached by Tab, a panel's subpage titles
  * the sheet with its own back button and moves focus in and out of it,
  * the sheet keeps room for the dock, a dialog's focus trap treats a radio
- * group as one stop, and a moved row keeps its focus.
+ * group as one stop, and a moved row keeps its focus. The focus ring and
+ * notice checks run once more in the light theme, through the kit's own
+ * Theme switch (docs/design/design-v1-light-theme.md 13).
  *
  * The kit page exists only in development builds, so this run serves it
  * with Vite's dev server instead of the production build the other runs
@@ -494,11 +498,47 @@ describe("raccoon-vtt shared components on the kit page", { timeout: 180_000 }, 
       await page.getByRole("radiogroup", { name: "Accent" }).getByRole("radio", { name }).check();
       await focusCard("Buttons");
       await page.keyboard.press("Tab");
-      const { accent } = accentFor(hex);
+      const { accent } = accentFor(hex, "dark");
       assert.equal((await outline(page.getByRole("button", { name: "Create room" }))).color, rgb(accent));
       await shots.take(page, `kit-${name.toLowerCase()}`);
     }
     assert.deepEqual(consoleWatch.errors, []);
     assert.deepEqual(consoleWatch.warnings, []);
+  });
+
+  test("22. in the light theme the focus ring is each accent resolved for light, ink on a highlight notice, and every notice's words read on its fill", async () => {
+    const root = () => page.evaluate(() => (globalThis as unknown as { document: { documentElement: { getAttribute(n: string): string | null } } }).document.documentElement.getAttribute("data-rvtt-scheme"));
+    const stored = () => page.evaluate(() => (globalThis as unknown as { localStorage: { getItem(k: string): string | null } }).localStorage.getItem("rvtt.theme"));
+    const before = await stored();
+    await page.getByRole("radiogroup", { name: "Theme" }).getByRole("radio", { name: "Light", exact: true }).check();
+    assert.equal(await root(), "light");
+    for (const [name, hex] of [["Yellow", "#f7df00"], ["Blue", "#3e8ef7"], ["White", "#e5e5e5"]] as const) {
+      await page.getByRole("radiogroup", { name: "Accent" }).getByRole("radio", { name }).check();
+      await focusCard("Buttons");
+      await page.keyboard.press("Tab");
+      const { accent } = accentFor(hex, "light");
+      assert.notEqual(accent, accentFor(hex, "dark").accent, `${name} resolves apart on light`);
+      assert.deepEqual(await outline(page.getByRole("button", { name: "Create room" })), { style: "solid", width: "2px", color: rgb(accent) }, name);
+      await shots.take(page, `kit-light-${name.toLowerCase()}`);
+    }
+    await page.getByRole("radiogroup", { name: "Accent" }).getByRole("radio", { name: "Yellow" }).check();
+
+    await focusCard("Notices and empty states");
+    await page.keyboard.press("Tab");
+    const exit = page.getByRole("button", { name: "Exit preview" });
+    assert.equal((await focused()).name, "Exit preview");
+    assert.deepEqual(await outline(exit), { style: "solid", width: "2px", color: INK }, "ink on the cream, as in dark");
+    const highlight = page.getByText("You are viewing as Pat.").locator("..");
+    const fill = await highlight.evaluate((el) => (globalThis as unknown as { getComputedStyle(el: unknown): { backgroundColor: string } }).getComputedStyle(el).backgroundColor);
+    assert.equal(fill, rgb(theme.color.highlightFill), "the highlight keeps its cream on a light page");
+    const sweep = await sweepContrast(page.locator('section[aria-label="Notices and empty states"]'), "the kit's notices in light");
+    assert.ok(sweep.measured.filter((m) => m.kind === "text").length >= 6, `measured ${sweep.measured.length}`);
+    assert.deepEqual(sweep.failures, []);
+    await shots.take(page, "kit-light-notices");
+
+    await page.getByRole("radiogroup", { name: "Theme" }).getByRole("radio", { name: "Dark", exact: true }).check();
+    assert.equal(await root(), "dark");
+    assert.equal(await stored(), before, "the kit's switch holds the page alone and leaves the device's Theme as it was");
+    assert.deepEqual(consoleWatch.errors, []);
   });
 });
