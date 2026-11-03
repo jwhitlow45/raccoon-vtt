@@ -142,6 +142,8 @@ export type WebmOptions = {
   /** Frames per Cluster. Default: one Cluster per second. */
   clusterMs?: number;
   trackVintLength?: number;
+  /** Each frame's payload in bytes after its header, for a file of a given size. Default: 64 for the key frame and 32 for the rest. */
+  frameBytes?: number;
 };
 
 /**
@@ -189,7 +191,7 @@ export function webmTree(o: WebmOptions = {}): Ebml[] {
   type Item = { ms: number; node: (cluster: number) => Ebml };
   const items: Item[] = frames.map((ms, i) => ({
     ms,
-    node: (cluster) => simpleBlock(1, toTicks(ms) - cluster, i === 0 ? 0x80 : 0, i === 0 ? vp9Key(64, i + 1) : vp9Inter(32, i + 1), o.trackVintLength ?? 1),
+    node: (cluster) => simpleBlock(1, toTicks(ms) - cluster, i === 0 ? 0x80 : 0, i === 0 ? vp9Key(o.frameBytes ?? 64, i + 1) : vp9Inter(o.frameBytes ?? 32, i + 1), o.trackVintLength ?? 1),
   }));
   for (const [i, b] of (sound?.blocks ?? []).entries()) {
     const tocs = b.tocs ?? [OPUS_20MS];
