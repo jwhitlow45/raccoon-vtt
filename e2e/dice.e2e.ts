@@ -1782,7 +1782,8 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     const FOG = "Patchy fog: Lightly Obscured. Disadvantage on Perception checks that rely on sight.";
     const CHECKS = "Frightened: Disadvantage on ability checks while the source of fear is within line of sight.";
     const INITIATIVE = "Frightened: Disadvantage on Initiative, a Dexterity check, while the source of fear is within line of sight.";
-    const at = { x: 3, y: 3 };
+    // Clear of the Large Aboleth test 16 leaves at (2,2): the board draws tokens of one layer in id order, so a tap on both picks either.
+    const at = { x: 5, y: 3 };
     const tokenId = randomUUID();
     const effectId = randomUUID();
     const group = (rolls: Locator, name: string) => rolls.locator("[data-panel-group]").filter({ has: rolls.page().getByRole("button", { name, exact: true }) });
