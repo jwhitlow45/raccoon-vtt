@@ -740,6 +740,9 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
       assert.deepEqual(weatherOf(run.arenaId), { kind: "rain", heavy: true, wind: "strong", toward: 270 });
       await what.getByText(/Attacks with a ranged weapon here roll with Disadvantage/).waitFor();
       // The guide's picture of the fold (docs/dm-guide/weather-settings.webp): its label at the top of the panel.
+      // Earlier steps' toasts and the scene's loading notice are gone by then.
+      await dm.getByText(/^Loading Arena/).waitFor({ state: "detached", timeout: 30_000 });
+      await dm.getByText(/^(Sewer was deleted|Saved\. Undo in Setup history)/).first().waitFor({ state: "detached", timeout: 30_000 }).catch(() => undefined);
       await fold.evaluate((el) => el.scrollIntoView({ block: "start" }));
       await shots.take(dm, "wx-ui-1-fold-open");
 
