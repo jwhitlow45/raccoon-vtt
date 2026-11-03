@@ -259,13 +259,13 @@ Many map images come with a grid already drawn on them. Lining up the grid makes
 This section is about squares. On a hex scene the box and a few of the options differ, and the last paragraphs of [Hex grids](#hex-grids) cover them.
 
 1. Pick **Line up grid** in the toolbar (behind **Setup** on a phone), or press **Line up the grid** in the scene's **Map image and grid** settings. When you create a map scene whose file name doesn't give its size, the tool opens on its own.
-2. Drag a box over 3 by 3 squares of the art. To adjust it, drag inside the box to move it, or drag a corner to resize it. You can also tap elsewhere on the map to move the box to the squares you tapped. As you work, the app draws the grid the box would make across the whole map, so you can check that it lines up everywhere, not just inside the box.
+2. Drag a box over 3 by 3 squares of the art. To adjust it, drag inside the box to move it, or drag a corner to resize it. You can also tap elsewhere on the map to move the box to the squares you tapped. As you work, the app draws the grid the box would make across the whole map, so you can check that it lines up everywhere, not just inside the box. While the tool is open, the app hides its own grid lines, so the only lines on the map are the ones drawn in the art and the grid your box would make. They come back as soon as you pick another tool, and your players' view doesn't change at all.
 3. For the last pixel of accuracy, use **Nudge**. It moves the box, or makes its squares smaller or larger, one pixel at a time.
 4. Press **Apply**. The app saves the grid and confirms it with a message such as "Grid saved at 70 px per square."
 
 **Apply** only becomes available when there is something to save: either the box differs from the grid the scene already has, or **Resize scene** (below) would change the scene's size. A new scene starts with the app's guess already saved and sized to fit, so if that guess lines up with the art, there is nothing to apply: just pick another tool and carry on.
 
-Two more options wait under **⋯**. **Resize scene** (on by default) makes Apply also resize the scene to the squares the map covers. **Grid lines** turns the app's own grid lines on or off. Turn them off for art that has a grid of its own. Tokens and rulers still follow the squares either way.
+Two more options wait under **⋯**. **Resize scene** (on by default) makes Apply also resize the scene to the squares the map covers. **Grid lines** turns the app's own grid lines on or off. Turn them off for art that has a grid of its own. Tokens and rulers still follow the squares either way. Since the lines stay hidden while you line up the grid, you'll see the effect of this switch once you pick another tool.
 
 **Counting the squares instead.** If the art's squares run all the way to the edges of the image, you can skip the box and simply type the count. In the scene's **Map image and grid** settings, under **Or count the squares**, enter how many squares the image has across and down, then press **Apply**.
 
