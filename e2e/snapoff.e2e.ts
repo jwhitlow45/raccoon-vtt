@@ -511,6 +511,20 @@ describe("raccoon-vtt snap off", { timeout: 600_000 }, () => {
     await shots.take(dm, "so-dm-reloaded");
   });
 
+  test("so-guide. two creatures a square apart, each placed toward the other, read as the rules count them, and the picture for the DM guide shows the goblin selected with its outline", async () => {
+    await closeBars(dm);
+    await ops.send({ t: "token.move", tokenId: run.goblin, x: 4, y: 3 });
+    await ops.send({ t: "token.move", tokenId: run.bree, x: 6, y: 3 });
+    await ops.send({ t: "token.update", tokenId: run.goblin, patch: { drawnAt: { x: 4.375, y: 3 } } });
+    await ops.send({ t: "token.update", tokenId: run.bree, patch: { drawnAt: { x: 5.625, y: 3 } } });
+    await waitFor("both placed toward each other", () => (token(dmSocket, run.goblin)?.nudge?.x === 3 && token(dmSocket, run.bree)?.nudge?.x === -3 ? true : null));
+    await select(dm, "Goblin", { x: 4, y: 3 }, true);
+    const rect = await waitFor("the goblin's outline", () => outlineOf(dm, run.goblin));
+    await assertOutlineOn(dm, rect, { x: 4, y: 3 }, 1, "the guide picture");
+    await waitFor("the toasts gone", async () => ((await dm.locator("[data-toast]").filter({ visible: true }).count()) === 0 ? true : null), 12_000);
+    await shots.take(dm, "so-guide-between-squares");
+  });
+
   test("so-13. no page logged an error", () => {
     for (const c of Object.values(consoles)) assert.deepEqual(c.errors, [], `${c.label}'s page`);
   });
