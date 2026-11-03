@@ -1,6 +1,7 @@
 import type { ClientOp } from "#shared/protocol.ts";
-import { footprintSize, isSqueezed, snapStep } from "#shared/rules/footprint.ts";
+import { footprintSize, isSqueezed } from "#shared/rules/footprint.ts";
 import { isHex, type Grid } from "#shared/rules/grid.ts";
+import { freeDrawnAt } from "#shared/rules/nudge.ts";
 import { drawnAt, snapPosition } from "../../lib/scene.ts";
 import type { DropPlan, DropToken, Landed, Point } from "./drop.ts";
 
@@ -19,21 +20,14 @@ export const HEX_KEEPS = "Hex scenes keep creatures on a hex.";
 export const GROUP_KEEPS = "A group keeps to the grid.";
 export const PLACED_TEXT = "Placed between squares.";
 
-/** How far a token may be drawn from its box on each axis, in cells: 3/8 of a square, 1/8 for one that snaps to half squares (5.1), under half a snap step so the box it snaps back to is always its own. */
-export function nudgeBound(token: DropToken): number {
-  return snapStep(token) / 2 - 1 / 8;
-}
-
 /**
  * Where a token landing at `landing` is drawn for a release at `release`:
- * the release on the 1/8 lattice, held within the bound of the landing on
- * each axis. Null where that is the landing itself, so nothing is drawn off
- * the grid.
+ * the shared rounding and clamp of rules/nudge.ts, so the client aims at
+ * exactly the point the reducer will keep. Null where that is the landing
+ * itself, so nothing is drawn off the grid.
  */
 export function placement(token: DropToken, landing: Point, release: Point): Point | null {
-  const bound = nudgeBound(token);
-  const on = (v: number, at: number) => Math.min(at + bound, Math.max(at - bound, Math.round(v * 8) / 8)) + 0;
-  const at = { x: on(release.x, landing.x), y: on(release.y, landing.y) };
+  const at = freeDrawnAt({ ...token, x: landing.x, y: landing.y }, release);
   return at.x === landing.x && at.y === landing.y ? null : at;
 }
 

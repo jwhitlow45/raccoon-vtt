@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import fc from "fast-check";
 import type { Token } from "#shared/model.ts";
+import { footprintRect } from "#shared/rules/footprint.ts";
 import { SQUARES, sceneGrid } from "#shared/rules/grid.ts";
+import { freeDrawnAt, nudgeAt, nudgeBound } from "#shared/rules/nudge.ts";
+import { holds } from "#shared/propertyTestutil.ts";
 import { token } from "#shared/testutil.ts";
 import { moveOpsOf, type DropPlan, type Landed, type Stop } from "./drop.ts";
-import { freeDrop, keepPlacements, leadNode, nudgeBound, placement, type FreeInput } from "./free.ts";
+import { freeDrop, keepPlacements, leadNode, placement, type FreeInput } from "./free.ts";
 import { teleportMove } from "./teleport.ts";
 import { seenRoom, thorn, world } from "./testing.ts";
 
@@ -34,16 +38,44 @@ describe("placement", () => {
 
   test("a token that snaps to half squares is held within 1/8", () => {
     const tiny = token("t", { size: "tiny" });
-    assert.equal(nudgeBound(tiny), 1 / 8);
+    assert.equal(nudgeBound(tiny), 1, "one eighth, counted in eighths");
     assert.deepEqual(placement(tiny, { x: 3.5, y: 3 }, { x: 3.8, y: 2.7 }), { x: 3.625, y: 2.875 });
   });
 
   test("every bound is under half a snap step, so the drawn box snaps back to its own", () => {
     for (const size of ["tiny", "small", "medium", "large", "huge", "gargantuan"] as const) {
       const t = token("t", { size });
-      assert.ok(nudgeBound(t) < (size === "tiny" ? 0.25 : 0.5), size);
+      assert.ok(nudgeBound(t) / 8 < (size === "tiny" ? 0.25 : 0.5), size);
     }
-    assert.equal(nudgeBound(token("c", { size: "custom", w: 1.75, h: 1.75 })), 3 / 8);
+    assert.equal(nudgeBound(token("c", { size: "custom", w: 1.75, h: 1.75 })), 3);
+  });
+
+  // The client aims and the reducer judges. One rounding and clamp, shared, means a
+  // release the client sends is a release the reducer keeps.
+  test("the client's placement and the server's nudge agree on random releases", () => {
+    const sizes = fc.oneof(
+      fc.constantFrom("tiny", "small", "medium", "large", "huge", "gargantuan").map((size) => ({ size }) as Pick<Token, "size" | "w" | "h">),
+      fc.record({ size: fc.constant("custom" as const), w: fc.integer({ min: 2, max: 40 }).map((n) => n / 4), h: fc.integer({ min: 2, max: 40 }).map((n) => n / 4) }),
+    );
+    const coord = fc.double({ min: -50, max: 50, noNaN: true });
+    holds(
+      fc.property(sizes, coord, coord, (size, rx, ry) => {
+        const release = { x: rx, y: ry };
+        const lead = token("m", { ...size, x: 1, y: 1 });
+        const box = footprintRect(SQUARES, { ...lead, ...release });
+        const landing = { x: box.x, y: box.y };
+        const at = placement(lead, landing, release);
+        const landed = { ...lead, ...landing };
+        const shared = freeDrawnAt(landed, release);
+        if (!at) return shared.x === landing.x && shared.y === landing.y && nudgeAt(SQUARES, landed, shared) === undefined;
+        if (at.x !== shared.x || at.y !== shared.y) return false;
+        const nudge = nudgeAt(SQUARES, landed, at);
+        // The reducer keeps exactly the nudge the client drew, and the drawn box snaps back to the landing.
+        const back = footprintRect(SQUARES, { ...lead, ...at });
+        return nudge !== undefined && nudge.x === (at.x - landing.x) * 8 && nudge.y === (at.y - landing.y) * 8 && back.x === landing.x && back.y === landing.y;
+      }),
+      2_000,
+    );
   });
 });
 
