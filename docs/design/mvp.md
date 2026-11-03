@@ -638,6 +638,8 @@ Built in v1 wave 7 (docs/design/design-v1-dice.md), at the project owner's reque
 
 - Ambient music and sound effects, synced.
 - In-game calendar and time of day.
+  - Phase C1 is built (docs/design/design-v1-calendar.md). The Time panel keeps a room clock that only the DM moves, by 10 minutes, 1 hour, 8 hours, to dawn or any amount, or sets outright. It reads as a Day count or as the DM's own Months calendar, with up to 24 named months, a week of named days and words after the year. A fight adds 6 seconds a round when it ends, and the party's Long Rest moves the clock 8 hours. Each character's last Long Rest is stamped for the DM, whose rest cards give the earliest next start the rules allow. Each change writes a Log line and a toast, the journal gains "Add the date", and a chip in the top bar shows the time from 900 px. "Players see the date and time" turns all of it off for players.
+  - Still to come: phase C2, spells and effects that run out as the clock moves, and phase C3, scene light that follows the time of day, opt-in for each scene.
 
 ## 17. Look, feel and accessibility
 

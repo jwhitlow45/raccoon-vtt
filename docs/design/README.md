@@ -136,6 +136,9 @@ and for how to use it, the [DM guide](../dm-guide.md).
   in one row.
 - [design-v1-tool-cycle.md](design-v1-tool-cycle.md): pressing a tool's key
   again to move through its main choice.
+- [design-v1-calendar.md](design-v1-calendar.md): the in-game calendar and
+  time of day, with the Time panel in the side panel and a chip in the top
+  bar.
 
 ## The look
 
