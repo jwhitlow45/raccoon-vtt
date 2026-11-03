@@ -261,7 +261,7 @@ function startedRun(tx: Tx, from: { playlistId?: string; soundId?: SoundId }, or
   if (from.playlistId !== undefined) {
     const playlist = playlistOf(tx, from.playlistId);
     const listed = new Set(playlist.sounds);
-    if (order.length !== playlist.sounds.length || !order.every((id) => listed.has(id))) throw invalid(SOUND_WORDS.orderChanged);
+    if (order.length !== playlist.sounds.length || new Set(order).size !== order.length || !order.every((id) => listed.has(id))) throw invalid(SOUND_WORDS.orderChanged);
   } else if (order.length !== 1 || order[0] !== from.soundId) {
     throw invalid("one track plays alone");
   }
@@ -424,7 +424,10 @@ export function soundStopAll(tx: Tx): void {
 export function sysSound(tx: Tx, op: OpOf<"sys.sound">): void {
   const playing = playingOf(tx.state);
   if (op.from !== playing.rev) throw invalid("the sound changed since this step was worked out");
-  if (op.music !== null) checkTracks(tx.state, op.music.order);
+  if (op.music !== null) {
+    checkTracks(tx.state, op.music.order);
+    if (op.music.next !== undefined && !op.music.order.includes(op.music.next.soundId)) throw invalid("the next track lies in the order");
+  }
   let next: Playing = { ...playing, music: op.music };
   if (op.loops !== undefined) next = { ...next, loops: {} };
   if (op.effects !== undefined) next = withLists(next, [], []);

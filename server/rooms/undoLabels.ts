@@ -655,10 +655,10 @@ function erasingLabel(e: Erased): string {
   return took.length === 1 ? took[0]! : "erasing";
 }
 
-/** "the scene Cave", or "a scene" when it has no name to give. */
 /** A use as its undo phrase says it: "using Rain as background". */
 const USE_WORDS = { music: "music", loop: "background", effect: "an effect" } as const;
 
+/** "the scene Cave", or "a scene" when it has no name to give. */
 function the(kind: string, name: string | undefined): string {
   const n = quoted(name, "");
   return n ? `the ${kind} ${n}` : `a ${kind}`;
