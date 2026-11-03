@@ -15,7 +15,9 @@ import { writeHpUndoLine } from "./hpUndo.ts";
 import { forgetExplored } from "./map.ts";
 import { gone, guardHash, invalid, type Tx } from "./tx.ts";
 import { prepareSaveOutcomeRestore, pruneSaveOutcomes, writeSaveOutcome } from "./saveOutcomes.ts";
+import { playingAsRefusal, playingOf } from "./sound.ts";
 import { ownEntry } from "../records.ts";
+import type { Playing, Playlist, Sound, SoundId, SoundUse } from "../sound.ts";
 
 export function logChat(tx: Tx, op: OpOf<"log.chat">): void {
   tx.addLog({ kind: "chat", from: tx.actor.memberId, text: op.text });
@@ -295,6 +297,9 @@ export function restoreReferenceConflicts(state: RoomState, entries: readonly Re
       if (parsed && referencesOf(parsed, after(key)).some((ref) => removed.has(ref))) conflicts.add(key);
     }
   }
+  const holders = () => [...new Set([...allKeys(state), ...restored.keys()])].filter(namesSoundsInPlaces);
+  const typed = mistypedSounds(entries, (key) => readEntity(state, key), after, holders);
+  for (const key of [...typed.parents, ...typed.dependents]) conflicts.add(key);
   return [...conflicts];
 }
 
@@ -384,12 +389,131 @@ function checkReferences(tx: Tx, entries: RestoreEntry[], before: Map<EntityKey,
     const tokenUses = Object.values(s.tokens).some((t) => named(t.attached?.to));
     if (entryUses || templateUses || tokenUses) throw invalid(DEPENDED_ON);
   }
+  soundReferencesHold(tx, entries, before, removed);
 }
 
 /**
- * The entity keys of the scenes, characters, tokens and journal pages an
- * entity refers to, a companion block's character among them. The scans in
- * checkReferences look for the same references, so the two change together.
+ * A restore's sound references hold both ways (docs/design/design-v1-sound.md
+ * 6.6), on the state after its writes. A sound's use is part of what a
+ * reference needs: a playlist plays music, and a scene's sound plays music
+ * and background sounds, so naming a sound of another use is as broken as
+ * naming one that is gone.
+ *
+ * A restore that gives a sound another use while the live run or a loop
+ * plays it under its use now is refused in the panel's words, as the
+ * sound's own update is (6.3), so the DM knows to stop it first. Effect
+ * entries are history and never block. `playing` is only read here: no
+ * Setup step writes it (D-261102-471), so no restore puts it back.
+ */
+function soundReferencesHold(tx: Tx, entries: RestoreEntry[], before: Map<EntityKey, unknown>, removed: ParsedKey[]): void {
+  const s = tx.state;
+  const playing = playingOf(s);
+  for (const entry of entries) {
+    const parsed = parseKey(entry.key);
+    if (parsed?.kind !== "sound") continue;
+    const was = before.get(entry.key) as Sound | null | undefined;
+    const now = tx.read(entry.key) as Sound | null;
+    if (!was || !now || was.use === now.use) continue;
+    if (soundPlaces({ kind: "playing" }, playing).some((p) => p.soundId === parsed.id && p.use === was.use)) throw invalid(playingAsRefusal(was.name ?? "it", was.use));
+  }
+  const holders = () => [...Object.keys(s.playlists ?? {}).map(keys.playlist), ...Object.keys(s.scenes).map(keys.scene)];
+  const typed = mistypedSounds(entries, (key) => before.get(key) ?? null, (key) => tx.read(key), holders);
+  if (typed.parents.length > 0) throw invalid(PARENT_GONE);
+  // A playlist is named by scenes' sounds, and a sound by playlists, scenes' sounds and the live run, never by a run's
+  // label or an effect entry, which referencesOf leaves out.
+  const gone = new Set(removed.flatMap((p) => (p.kind === "sound" ? [keys.sound(p.id)] : p.kind === "playlist" ? [keys.playlist(p.id)] : [])));
+  if (gone.size > 0) {
+    for (const key of [...holders(), keys.playing]) {
+      if (referencesOf(parseKey(key)!, tx.read(key)).some((ref) => gone.has(ref))) throw invalid(DEPENDED_ON);
+    }
+  }
+  if (typed.dependents.length > 0) throw invalid(DEPENDED_ON);
+}
+
+/** A sound named in a place, with the use the place takes. */
+type SoundPlace = { soundId: SoundId; use: SoundUse };
+
+/**
+ * The sounds an entity names, each with the use its place takes: a
+ * playlist's tracks and a scene's one track are music, a scene's loops
+ * background, and the live run's tracks and loops the same. A fired
+ * effect names none: it is history (6.3).
+ */
+function soundPlaces(parsed: ParsedKey, value: unknown): SoundPlace[] {
+  if (value === null || typeof value !== "object") return [];
+  const music = (soundId: SoundId): SoundPlace => ({ soundId, use: "music" });
+  const loop = (soundId: SoundId): SoundPlace => ({ soundId, use: "loop" });
+  switch (parsed.kind) {
+    case "playlist":
+      return ((value as Partial<Playlist>).sounds ?? []).map(music);
+    case "scene": {
+      const sound = (value as Partial<Scene>).sound;
+      if (!sound) return [];
+      return [...(sound.music?.soundId !== undefined ? [music(sound.music.soundId)] : []), ...sound.loops.map((l) => loop(l.soundId))];
+    }
+    case "playing": {
+      const { music: run, loops } = value as Partial<Playing>;
+      const tracks = run ? new Set([...(run.order ?? []), run.now.soundId, ...(run.next ? [run.next.soundId] : [])]) : [];
+      return [...[...tracks].map(music), ...Object.values(loops ?? {}).map((l) => loop(l.soundId))];
+    }
+    default:
+      return [];
+  }
+}
+
+/** A playlist or a scene: the Setup places that must not name a sound under a use it no longer has. The live run is checked apart, in the panel's words. */
+function namesSoundsInPlaces(key: EntityKey): boolean {
+  const kind = parseKey(key)?.kind;
+  return kind === "playlist" || kind === "scene";
+}
+
+/**
+ * The typed half of the sound references on the state after a restore,
+ * which `after` reads: `parents`, the sounds a restored entity names under
+ * a use they do not have, and `dependents`, the playlists and scenes among
+ * `holders` that name a sound the restore gives another use under one it
+ * no longer has. So an undo of a use change that also puts back the
+ * scenes it took the sound out of passes, and one that leaves them behind
+ * is refused. A sound that is gone is presence's to refuse (referencesOf).
+ */
+function mistypedSounds(
+  entries: readonly RestoreEntry[],
+  before: (key: EntityKey) => unknown,
+  after: (key: EntityKey) => unknown,
+  holders: () => Iterable<EntityKey>,
+): { parents: EntityKey[]; dependents: EntityKey[] } {
+  const useAfter = (soundId: SoundId) => (after(keys.sound(soundId)) as Sound | null)?.use;
+  const parents = new Set<EntityKey>();
+  for (const entry of entries) {
+    const parsed = parseKey(entry.key);
+    if (!parsed || entry.value == null) continue;
+    for (const place of soundPlaces(parsed, after(entry.key))) {
+      const use = useAfter(place.soundId);
+      if (use !== undefined && use !== place.use) parents.add(keys.sound(place.soundId));
+    }
+  }
+  const changed = new Map<SoundId, SoundUse>();
+  for (const entry of entries) {
+    if (parseKey(entry.key)?.kind !== "sound") continue;
+    const was = before(entry.key) as Sound | null;
+    const now = after(entry.key) as Sound | null;
+    if (was && now && was.use !== now.use) changed.set(now.id, now.use);
+  }
+  const dependents: EntityKey[] = [];
+  if (changed.size > 0) {
+    for (const key of holders()) {
+      const misplaced = soundPlaces(parseKey(key)!, after(key)).some((p) => changed.has(p.soundId) && changed.get(p.soundId) !== p.use);
+      if (misplaced) dependents.push(key);
+    }
+  }
+  return { parents: [...parents], dependents };
+}
+
+/**
+ * The entity keys of the scenes, characters, tokens, journal pages, sounds
+ * and playlists an entity refers to, a companion block's character among
+ * them. The scans in checkReferences look for the same references, so the
+ * two change together.
  */
 function referencesOf(parsed: ParsedKey, value: unknown): EntityKey[] {
   if (value === null || typeof value !== "object") return [];
@@ -422,6 +546,13 @@ function referencesOf(parsed: ParsedKey, value: unknown): EntityKey[] {
       if (row.tokenId !== undefined) refs.push(keys.token(row.tokenId));
     }
   }
+  // A playlist names its tracks, a scene's sound its playlist and sounds, and the live run its tracks and loops
+  // (docs/design/design-v1-sound.md 6.6). soundReferencesHold checks the use each place takes.
+  if (parsed.kind === "scene") {
+    const playlistId = (value as Partial<Scene>).sound?.music?.playlistId;
+    if (playlistId !== undefined) refs.push(keys.playlist(playlistId));
+  }
+  for (const place of soundPlaces(parsed, value)) refs.push(keys.sound(place.soundId));
   return refs;
 }
 

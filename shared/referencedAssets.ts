@@ -82,6 +82,10 @@ export function entityAssetRefs(key: EntityKey, value: unknown): AssetRef[] {
     case "handoutDoc":
       pages(v.pages);
       break;
+    // A sound of the library is a `sound` row, which cleanup keeps while the library names it (docs/design/design-v1-sound.md 7.3).
+    case "sound":
+      if (typeof v.assetId === "string") out.push({ assetId: v.assetId, kind: "sound" });
+      break;
     // A stamp players remember still shows its art after the stamp changed or went, so cleanup keeps the image.
     case "memory":
     case "memoryBy":
@@ -108,6 +112,7 @@ const IMAGE_COLLECTIONS = [
   ["companionBlocks", "companionBlock"],
   ["memory", "memory"],
   ["memoryBy", "memoryBy"],
+  ["sounds", "sound"],
 ] as const satisfies readonly (readonly [keyof RoomState, string])[];
 
 /** Every asset id the state names, whatever kind its place takes. A thumbnail of a scene counts as used while the scene names it. */
