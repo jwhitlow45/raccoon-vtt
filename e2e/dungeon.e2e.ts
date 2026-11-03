@@ -45,7 +45,6 @@ const SEED_TYPED = "lk7q h2mx a9f3 twq5";
 const OTHER_VERSION = "2K7Q-H2MX-A9F3-TWQ5";
 /** Main-thread limits under the 4x slowdown (design section 8). */
 const TASK_LIMIT_MS = 100;
-const MAKE_LIMIT_MS = 300;
 
 let server: Server;
 let browser: Browser;
@@ -130,6 +129,47 @@ async function previewImg(dialog: Locator): Promise<Locator> {
 
 async function seedField(dialog: Locator): Promise<Locator> {
   return dialog.getByRole("textbox", { name: "Seed", exact: true });
+}
+
+/**
+ * Holds or fails the page's canvas encoding, which the preview's picture
+ * waits on after the worker has answered: "hold" queues each encode until
+ * `releaseEncodes`, "fail" answers it with no image, "pass" lets it run.
+ * The dialog sends nothing while open, so no other picture is drawn then.
+ */
+async function encodes(page: Page, mode: "hold" | "fail" | "pass"): Promise<void> {
+  await page.evaluate((m) => {
+    type Cb = (blob: Blob | null) => void;
+    type Proto = { toBlob(this: unknown, cb: Cb, ...rest: unknown[]): void };
+    const g = globalThis as unknown as { __dgEncode?: { mode: string; held: (() => void)[] }; HTMLCanvasElement: { prototype: Proto } };
+    if (!g.__dgEncode) {
+      const gate = { mode: "pass", held: [] as (() => void)[] };
+      g.__dgEncode = gate;
+      const proto = g.HTMLCanvasElement.prototype;
+      const own = proto.toBlob;
+      proto.toBlob = function (this: unknown, cb: Cb, ...rest: unknown[]) {
+        if (gate.mode === "fail") return void cb(null);
+        if (gate.mode === "hold") return void gate.held.push(() => own.call(this, cb, ...rest));
+        own.call(this, cb, ...rest);
+      };
+    }
+    g.__dgEncode.mode = m;
+  }, mode);
+}
+
+/** How many encodes wait on the hold, each one a picture whose answer is in. */
+function heldEncodes(page: Page): Promise<number> {
+  return page.evaluate(() => (globalThis as unknown as { __dgEncode?: { held: unknown[] } }).__dgEncode?.held.length ?? 0);
+}
+
+/** Lets every held encode run, and later ones pass. */
+async function releaseEncodes(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const gate = (globalThis as unknown as { __dgEncode?: { mode: string; held: (() => void)[] } }).__dgEncode;
+    if (!gate) return;
+    gate.mode = "pass";
+    for (const run of gate.held.splice(0)) run();
+  });
 }
 
 /** The ops this page sent since `from`, as the frames carry them. */
@@ -320,6 +360,60 @@ describe("dungeon generator", { concurrency: false }, () => {
     await seed.fill(SEED);
     assert.equal(await statusText(dialog), first);
     assert.equal(await make.isDisabled(), false);
+
+    // DG-R1-09: Copy seed copies the seed as read, in its usual form, not the text as typed.
+    await seed.fill(SEED_TYPED);
+    await waitFor("the typed seed's status", async () => ((await statusText(dialog)) === first ? true : null));
+    await dialog.getByRole("button", { name: "Copy seed", exact: true }).click();
+    const copied = await waitFor("the copied seed", () => dm.evaluate(() => (globalThis as unknown as { navigator: { clipboard: { readText(): Promise<string> } } }).navigator.clipboard.readText()).then((t) => (t ? t : null)));
+    assert.equal(copied, SEED);
+    await seed.fill(SEED);
+    await statusText(dialog);
+  });
+
+  test("DGFIX-1. Make waits for the picture: answered previews still drawing keep Make off with Drawing the dungeon on, a newer answer mid-drawing too, and a picture that fails says so", async () => {
+    const dialog = dialogOf(dm);
+    const make = dialog.getByRole("button", { name: "Make the scene", exact: true });
+    const reroll = dialog.getByRole("button", { name: "Reroll", exact: true });
+    const drawing = dialog.getByText("Drawing the dungeon…", { exact: true });
+    const status = dialog.locator("footer [aria-live=polite]");
+    await statusText(dialog);
+    const was = await (await previewImg(dialog)).getAttribute("alt");
+    await encodes(dm, "hold");
+    try {
+      await reroll.click();
+      await waitFor("the first answer's picture held", async () => ((await heldEncodes(dm)) >= 1 ? true : null));
+      await drawing.waitFor();
+      assert.equal(await make.isDisabled(), true, "answered, its picture not in: Make off");
+      assert.equal(await status.count(), 0, "no status line for a dungeon not shown");
+      assert.equal(await (await previewImg(dialog)).getAttribute("alt"), was, "the old picture stays while the new one draws");
+      // A newer answer arrives while the first is still drawing.
+      await reroll.click();
+      await waitFor("the newer answer's picture held", async () => ((await heldEncodes(dm)) >= 2 ? true : null));
+      assert.equal(await make.isDisabled(), true, "a newer answer mid-drawing: Make still off");
+      assert.equal(await drawing.isVisible(), true, "and still drawing");
+      await shots.take(dm, "DGFIX-1-drawing-held");
+    } finally {
+      await releaseEncodes(dm);
+    }
+    await statusText(dialog);
+    await waitFor("Make on once the newest picture shows", async () => ((await make.isDisabled()) ? null : true));
+    assert.equal(await drawing.count(), 0, "the indicator goes once the picture is in");
+
+    await encodes(dm, "fail");
+    try {
+      await reroll.click();
+      await dialog.getByText("This device could not draw the preview, so Make is off. Reroll or change a choice to try again.", { exact: true }).waitFor();
+      assert.equal(await make.isDisabled(), true, "a failed picture: Make off");
+      assert.equal(await dialog.getByRole("img", { name: /^Preview of the dungeon/ }).count(), 0, "no older picture stands for it");
+      assert.equal(await drawing.count(), 0, "nothing still drawing");
+      await shots.take(dm, "DGFIX-1-picture-failed");
+    } finally {
+      await encodes(dm, "pass");
+    }
+    await reroll.click();
+    await statusText(dialog);
+    await waitFor("Make back on", async () => ((await make.isDisabled()) ? null : true));
   });
 
   test("DG-3. quick choice changes then Cancel while drawing send nothing, and the dialog opens again on the same choices with a new seed", async () => {
@@ -467,6 +561,8 @@ describe("dungeon generator", { concurrency: false }, () => {
     await form.getByLabel("Scene name").fill("Second dungeon");
     await form.getByRole("button", { name: "Generate a dungeon", exact: true }).click();
     const dialog = dialogOf(dm);
+    // Custom, so Across and Down show and are checked held with Rooms.
+    await dialog.getByRole("radio", { name: "Custom", exact: true }).check();
     await (await seedField(dialog)).fill(SEED);
     await statusText(dialog);
     const sent = dmSocket.sent.length;
@@ -476,8 +572,17 @@ describe("dungeon generator", { concurrency: false }, () => {
       await dialog.getByRole("button", { name: "Make the scene", exact: true }).click();
       await dialog.getByText("Waiting for the server…").first().waitFor({ timeout: 15_000 });
       await shots.take(dm, "DG-8-waiting");
+      // DG-R1-02, DGBUILD-ASTRA-3: every choice is held while the send waits, the number fields too, so none draws a preview the queued ops are not.
+      for (const name of ["Across", "Down", "Rooms", "Seed"]) assert.equal(await dialog.getByRole("textbox", { name, exact: true }).isDisabled(), true, `${name} held`);
+      for (const name of ["Crypt", "Small", "Dense", "Winding", "Wide"]) assert.equal(await dialog.getByRole("radio", { name, exact: true }).first().isDisabled(), true, `${name} held`);
+      assert.equal(await dialog.getByRole("switch", { name: "Extra ways round" }).isDisabled(), true, "Extra ways round held");
+      assert.equal(await dialog.getByRole("button", { name: "Reroll", exact: true }).isDisabled(), true, "Reroll held");
+      assert.equal(await dialog.getByRole("button", { name: "Copy seed", exact: true }).isDisabled(), false, "Copy seed stays");
       await dialog.getByRole("button", { name: "Hide", exact: true }).click();
       await dialog.waitFor({ state: "detached" });
+      // DG-R1-10: a dungeon is on its way, so New scene starts over and a Create there makes no second scene.
+      const name = newSceneForm(await scenesPanel(dm)).getByLabel("Scene name");
+      assert.ok((await name.count()) === 0 || (await name.inputValue()) === "", "the form starts over once a hidden Make is sent");
       await dmCdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
       await watchLongTasks(dm);
       // scene.create is predicted, so the panel lists the scene while its build waits in the queue.
@@ -520,21 +625,32 @@ describe("dungeon generator", { concurrency: false }, () => {
       return now !== was ? now : null;
     }, 60_000);
     const { makeMs, dispatchMs, tasks } = await makeMeasured(dialog);
-    run.measured.push(`Make at 4x, the largest choices (${status}): the dispatch task ${dispatchMs} ms, ${makeMs} ms of main-thread tasks from the press to the dialog closing (the answers and the new scene's first drawing included), long tasks ${JSON.stringify(tasks)} (design limits ${TASK_LIMIT_MS} ms for the dispatch task, ${MAKE_LIMIT_MS} ms for Make's own work)`);
+    run.measured.push(`Make at 4x, the largest choices (${status}): the dispatch task ${dispatchMs} ms, ${makeMs} ms of main-thread tasks from the press to the dialog closing (the answers and the new scene's first drawing included), long tasks ${JSON.stringify(tasks)} (the dispatch task is held to the design's ${TASK_LIMIT_MS} ms. The span to the dialog closing also holds the new scene's first drawing, so it is reported, not held to the 300 ms of Make's own work)`);
     assert.ok(dispatchMs <= TASK_LIMIT_MS, `Make's dispatch task took ${dispatchMs} ms at 4x`);
     await shots.take(dm, "DG-8b-largest");
   });
 
   test("DG-9. the dialog within 1 px at the desktop and the phone", async () => {
+    // Only a DM opens the dialog, so the phone is a second page of the DM's, loaded at a phone's width.
+    const phone = await dmContext.newPage();
     const lines: string[] = [];
-    for (const page of [dm]) {
-      const form = newSceneForm(await scenesPanel(page));
-      if ((await form.getByRole("button", { name: "Generate a dungeon", exact: true }).count()) === 0) await form.getByRole("radio", { name: "Builder", exact: true }).click();
-      await form.getByRole("button", { name: "Generate a dungeon", exact: true }).click();
-      const dialog = dialogOf(page);
-      await previewImg(dialog);
-      lines.push(...alignmentLines(await measureAlignment(dialog), "DG-9 dialog"));
-      await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    try {
+      await phone.setViewportSize(PHONE);
+      await phone.goto(dm.url());
+      await phone.getByRole("status", { name: "Connected" }).first().waitFor();
+      for (const [label, page] of [["desktop", dm], ["phone", phone]] as const) {
+        const form = newSceneForm(await scenesPanel(page));
+        if ((await form.getByRole("button", { name: "Generate a dungeon", exact: true }).count()) === 0) await form.getByRole("radio", { name: "Builder", exact: true }).click();
+        await form.getByRole("button", { name: "Generate a dungeon", exact: true }).click();
+        const dialog = dialogOf(page);
+        await previewImg(dialog);
+        lines.push(...alignmentLines(await measureAlignment(dialog), `DG-9 dialog, ${label}`));
+        await shots.take(page, `DG-9-${label}`);
+        await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+        await dialog.waitFor({ state: "detached" });
+      }
+    } finally {
+      await phone.close();
     }
     assert.deepEqual(lines, []);
   });
