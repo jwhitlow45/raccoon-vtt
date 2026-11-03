@@ -96,11 +96,15 @@ export function useReadableMap(drawn: DrawnMap | null): DrawnMap | null {
 export const MapContent = memo(function MapContent(props: { scene: Scene; variant: AssetVariant; report: boolean; onDrawn?: (drawn: DrawnMap | null) => void }) {
   const { scene, variant } = props;
   const { w, h } = scene.bounds;
+  // Lining up the grid means finding the lines drawn in the map's art, and
+  // the app's lines over them hide those. Only the DM has the tool. The
+  // scene's setting is left alone, so the lines come back when it closes.
+  const aligning = useRoomView((s) => s.local.tool === "grid");
   return (
     <>
       <Rect x={0} y={0} width={w} height={h} fill={scene.background || "#2b2b31"} />
       {scene.map ? <MapImage sceneId={scene.id} map={scene.map} phases={scene.phases} variant={variant} sceneName={scene.name} report={props.report} onDrawn={props.onDrawn} /> : null}
-      {scene.grid?.show ? <Grid scene={scene} /> : null}
+      {scene.grid?.show && !aligning ? <Grid scene={scene} /> : null}
     </>
   );
 }, (a, b) => a.report === b.report && a.onDrawn === b.onDrawn && sameMapInputs(a, b));
@@ -210,6 +214,7 @@ function Grid(props: { scene: Scene }) {
   const grid = sceneGrid(props.scene);
   return (
     <Shape
+      name="sceneGrid"
       stroke={color || "#ffffff"}
       strokeWidth={lineWidth > 0 ? lineWidth : 1}
       strokeScaleEnabled={false}

@@ -574,6 +574,37 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     await shots.take(dm, "maps-uip3-box-after-switch");
   });
 
+  test("gridhide-a. Line up grid hides the scene's own grid lines while it is open, they come back as it closes, and nothing is sent", async () => {
+    // uip3-a left Line up grid open on the Universal VTT scene, which keeps the app's Grid lines on.
+    const gridOptions = dm.getByRole("toolbar", { name: "Line up grid options" });
+    await gridOptions.waitFor();
+    assert.equal(sceneOf(dmSocket.state, run.sceneId)?.grid.show, true, "the scene's Grid lines are on");
+    /** The app's grid lines (MapLayer.tsx Grid) on every stage of the page, Top-down's and the isometric ground's alike. */
+    const appLines = (page: Page) =>
+      page.evaluate(() => {
+        const konva = (globalThis as unknown as { Konva?: { stages: { find(selector: string): unknown[] }[] } }).Konva;
+        return (konva?.stages ?? []).reduce((n, stage) => n + stage.find(".sceneGrid").length, 0);
+      });
+    const sentBefore = dmSocket.sent.length;
+    assert.equal(await appLines(dm), 0, "the app's lines draw over the art while lining up");
+    assert.ok(await gridBox(dm), "the tool's own box and lines draw");
+    assert.ok((await appLines(player)) > 0, "the player's board lost its lines");
+    await shots.take(dm, "gridhide-a-open-no-app-lines");
+
+    await pickTool(dm, "Select");
+    await gridOptions.waitFor({ state: "detached" });
+    await waitFor("the scene's lines back once the tool closes", async () => (await appLines(dm)) > 0);
+    await shots.take(dm, "gridhide-a-closed-lines-back");
+
+    await pickTool(dm, "Line up grid");
+    await gridOptions.waitFor();
+    await waitFor("the lines gone again as the tool opens", async () => (await appLines(dm)) === 0);
+    assert.ok((await appLines(player)) > 0, "the player's board lost its lines");
+    // The lines are the DM's own board: no op went out, and the setting stands.
+    assert.deepEqual(dmSocket.sent.slice(sentBefore).filter((frame) => JSON.parse(frame).t === "op"), [], "hiding the lines sent an op");
+    assert.equal(sceneOf(dmSocket.state, run.sceneId)?.grid.show, true, "the scene's Grid lines setting changed");
+  });
+
   test("LP24-B-FIND-1. new art of another shape on a scene with map phases is refused, and the grid found on it opens nothing", async () => {
     // The imported scene holds two phases (test 5) and its players (test 4). A drawn map of 70 px squares, 1400 by 1000,
     // is not its 500 by 400 map's shape, so the scene refuses it. Its sure grid must not land in Line up grid as an offer.

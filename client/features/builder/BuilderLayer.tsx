@@ -76,13 +76,16 @@ const BuildBoard = memo(function BuildBoard(props: {
     const flat = paths.drawing.symbols.pillar.filter((c) => !boxStands(iso.fog, { x0: c.x, y0: c.y, x1: c.x + 1, y1: c.y + 1 }));
     return pillarPaths(flat, () => new Path2D());
   }, [iso, paths]);
+  // The floor's copy of the grid stays off while the DM lines up the grid, as the map layer's does (MapLayer.tsx MapContent).
+  const aligning = useRoomView((s) => s.local.tool === "grid");
+  const drawnGrid = useMemo(() => (aligning ? { ...grid, show: false } : grid), [aligning, grid]);
 
   if (chunks.length === 0 && labels.length === 0 && !stamps) return null;
   return (
     <Shape
       listening={false}
       perfectDrawEnabled={false}
-      sceneFunc={(ctx) => drawBuild(ctx._context, paths, { role, scale, grid, textures, labels: flatLabels, underWalls: stamps ?? undefined, standing })}
+      sceneFunc={(ctx) => drawBuild(ctx._context, paths, { role, scale, grid: drawnGrid, textures, labels: flatLabels, underWalls: stamps ?? undefined, standing })}
     />
   );
 });
