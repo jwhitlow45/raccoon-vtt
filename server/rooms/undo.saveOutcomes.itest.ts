@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import yauzl from "yauzl";
 import { uuidv7 } from "#shared/ids.ts";
+import { SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import type { RoomState } from "#shared/model.ts";
 import type { SaveOutcomeLedger } from "#shared/saveOutcomeContract.ts";
 import { actor } from "#shared/testutil.ts";
@@ -155,7 +156,7 @@ test("undo-scope-save: export retains status, new-room import drops it and playe
   const response = await device.request("GET", `/api/rooms/${roomId}/export`);
   assert.equal(response.statusCode, 200, response.body);
   const contents = await exported(response.rawPayload);
-  assert.equal(contents.schemaVersion, 31);
+  assert.equal(contents.schemaVersion, SNAPSHOT_VERSION);
   assert.equal(records(contents.state)[id]?.state, "applied");
   const importer = engine.client();
   const imported = await importer.request("POST", "/api/rooms/import", undefined, {
