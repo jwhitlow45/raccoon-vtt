@@ -4,6 +4,7 @@ import { Card, Page } from "./components/Field.tsx";
 import { LoadBoundary, LoadFailureNotice } from "./components/LoadBoundary.tsx";
 import { Loading } from "./components/Loading.tsx";
 import { StatusBand } from "./components/StatusBand.tsx";
+import { DisplayHold } from "./features/display/DisplayHold.tsx";
 import { parseFragment, type FragmentSecret } from "./lib/links.ts";
 import { navigate, useLocation } from "./lib/navigation.ts";
 import { linkState, subscribeLinkState } from "./lib/playerLink.ts";
@@ -103,12 +104,15 @@ function Routes() {
         <NotFound />
       );
     case "display":
+      // The dark hold outside the lazy boundary, so the frames while the pages load are dark too.
       return (
-        <LoadBoundary fallback={(f) => <LoadFailureNotice {...f} subject="The table display" />}>
-          <Suspense fallback={null}>
-            <DisplayPages roomId={route.roomId} badId={route.badId === true} hash={hash} />
-          </Suspense>
-        </LoadBoundary>
+        <DisplayHold>
+          <LoadBoundary fallback={(f) => <LoadFailureNotice {...f} subject="The table display" />}>
+            <Suspense fallback={null}>
+              <DisplayPages roomId={route.roomId} badId={route.badId === true} hash={hash} />
+            </Suspense>
+          </LoadBoundary>
+        </DisplayHold>
       );
     case "admin":
       return (

@@ -124,6 +124,28 @@ export function holdScheme(scheme: Scheme): () => void {
   };
 }
 
+/** The hold `holdAtBoot` took, until the page's own takes over. */
+let bootRelease: (() => void) | null = null;
+
+/**
+ * Holds a scheme from before the first render, for a page that keeps one
+ * look and whose own code loads after it, as the table display's pages
+ * are a lazy chunk: client/main.tsx takes it on that page's path, so the
+ * device's scheme never paints a frame there. The page's own hold
+ * (`holdForPage`) lets it go once it stands.
+ */
+export function holdAtBoot(held: Scheme): void {
+  bootRelease ??= holdScheme(held);
+}
+
+/** A page's own hold, which takes over from the boot hold. Returns its release. */
+export function holdForPage(held: Scheme): () => void {
+  const release = holdScheme(held);
+  bootRelease?.();
+  bootRelease = null;
+  return release;
+}
+
 /** The scheme the page shows now. Dark before `startScheme`, as the tokens' fallbacks are. */
 export function scheme(): Scheme {
   return current;

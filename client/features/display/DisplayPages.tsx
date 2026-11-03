@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
+import { Suspense, useEffect, useRef, useState, type FormEvent } from "react";
 import { Button } from "../../components/Button.tsx";
 import { Card, ErrorText, Page } from "../../components/Field.tsx";
 import { LoadBoundary, LoadFailureNotice } from "../../components/LoadBoundary.tsx";
@@ -7,7 +7,6 @@ import { api, ApiError, type DisplayMe } from "../../lib/api.ts";
 import { navigate, replaceUrl } from "../../lib/navigation.ts";
 import { once } from "../../lib/once.ts";
 import { retryableLazy } from "../../lib/retryableLazy.ts";
-import { holdScheme } from "../../lib/scheme.ts";
 import { theme } from "../../lib/theme.ts";
 import { codeFromHash, formatDisplayCode, normalizeDisplayCode } from "./logic.ts";
 import { displayPath, rememberDisplayRoom } from "./remember.ts";
@@ -18,20 +17,16 @@ import { TV_BUTTON_HEIGHT, TV_CODE_FIELD_HEIGHT, TV_TEXT } from "./tvType.ts";
  * where a TV takes the code the DM's screen shows, and `/display/:roomId`,
  * the room drawn for the table. They load only on a device that opens
  * them. The room's canvas, the largest download, loads after the display
- * is known to be paired.
+ * is known to be paired. They draw dark whatever this device chose, held
+ * by App's route outside this lazy chunk (DisplayHold.tsx), so a light
+ * page never flashes on the TV while the chunk loads.
  */
 
 const DisplayRoom = retryableLazy(() => import("./DisplayRoom.tsx"));
 
 export default function DisplayPages(props: { roomId: string | null; badId?: boolean; hash: string }) {
-  // The table shows the board's dark look whatever this device chose (D-261102-364), and before paint, so a light page never flashes on the TV. Letting go gives back the device's latest choice, a change made in another window meanwhile included.
-  useLayoutEffect(holdDark, []);
   if (props.roomId) return <DisplayRoute key={props.roomId} roomId={props.roomId} />;
   return <CodePage hash={props.hash} badId={props.badId === true} />;
-}
-
-function holdDark(): () => void {
-  return holdScheme("dark");
 }
 
 /** What a refused code says, for the people at the table. */

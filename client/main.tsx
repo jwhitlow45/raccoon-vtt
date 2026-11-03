@@ -3,7 +3,8 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
 import { startInputModality } from "./lib/inputModality.ts";
 import { captureLinkPassword } from "./lib/playerLink.ts";
-import { startScheme } from "./lib/scheme.ts";
+import { parseRoute } from "./lib/router.ts";
+import { holdAtBoot, startScheme } from "./lib/scheme.ts";
 import "./globals.css";
 
 // A player link's password leaves the address bar before the app renders
@@ -19,7 +20,10 @@ window.addEventListener("popstate", capture);
 startInputModality();
 
 // The device's Theme colors the page before the first render, so a light
-// device never paints one frame of the dark app (lib/scheme.ts).
+// device never paints one frame of the dark app (lib/scheme.ts). The table
+// display keeps dark from the first frame, before its lazy pages and their
+// own hold arrive (features/display/DisplayHold.tsx).
+if (parseRoute(location.pathname, { dev: import.meta.env.DEV }).name === "display") holdAtBoot("dark");
 startScheme();
 
 createRoot(document.getElementById("root")!).render(
