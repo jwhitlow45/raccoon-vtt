@@ -25,6 +25,7 @@ The app does a lot, and you don't need most of it on day one. Read the [Quick st
   - [Light and party vision](#light-and-party-vision)
   - [Weather](#weather)
   - [Fog](#fog)
+  - [Generating a dungeon](#generating-a-dungeon)
   - [Map phases, imports and exports](#map-phases-imports-and-exports)
 - Running fights
   - [Monsters](#monsters)
@@ -138,6 +139,7 @@ None of the parts below is needed to run a good session. Each one is there for t
 - **The map builder.** A map image is all you need. Build a map when you want walls, doors and heights that the app knows about, so they can block movement and sight.
 - **Party vision and light.** Fog that you reveal by hand works perfectly well on its own. Party vision goes a step further: the app works out everything the party's creatures can see, by their senses and the light, and shows that shared view to every player. It needs walls to block that sight, so it pairs with a built or imported map. Sight for each player goes one step further again, for a table that enjoys keeping secrets from one another, and most tables never need it.
 - **The isometric view and hex grids.** The flat map from above is all you need, on squares. Isometric is there for the maps where height matters, and hexes for the maps drawn on them.
+- **The dungeon generator.** Drawing your own maps, or using a starter map, works as well as it ever did. The generator is there for the night you need a dungeon quickly, and everything it makes you can still change by hand.
 - **Encounters.** Placing monsters straight from the Monsters panel works fine. Encounters let you prepare fights ahead of time and check them against the XP budget.
 - **Roll requests, the group save and roll options.** Your players can roll their own dice and tell you the total.
 - **Uses and class resources.** You can count a dragon's Legendary Actions or a barbarian's Rage on paper, as you always have. The cards that come up at the start of a turn only ask: nothing happens unless someone answers them.
@@ -169,7 +171,7 @@ Under **New scene**, pick the kind of scene you want:
 
 - **Battle mat**: a blank grid with a background color. On squares, set **Squares across** and **Squares down** (30 × 20 by default, up to 200 each). On hexes, the same numbers are **Across** and **Down** under **Size in 5 ft steps**, with the distance taken from your room's setting. They measure the scene's width and height, and the line below tells you how many whole hexes fit inside.
 - **Map image**: pick an image (JPEG, PNG, WebP, GIF or AVIF, up to 32 MB) and press **Upload and create**. If you leave the name blank, the scene takes its name from the file. The scene is sized to the whole squares the image covers. To reuse an image already in the room, choose it under **Or use a map already in this room** instead, or press **From starter packs** to start from one of the maps that come with the app (see [Starter art](#starter-art)).
-- **Builder**: an empty 40 × 30 scene that opens the map builder straight away.
+- **Builder**: an empty 40 × 30 scene that opens the map builder straight away. A Builder scene can also start from a generated dungeon (see [Generating a dungeon](#generating-a-dungeon)).
 - **From a Universal VTT file**: see [Map phases, imports and exports](#map-phases-imports-and-exports).
 
 A map's file name can tell the app its scale. Name the file `crypt_30x20.jpg`, for example, and a square scene comes out 30 by 20 squares. A hex scene reads the same name as 30 hexes across and 20 down, but only when the image is cut to the edge of that many hexes, with no margin around them. For hex rows, that means the map is 30 and a half hexes wide, since every other row stands half a hex out, and hex columns work the same way turned on their side. If the counts don't fit your scene's grid, the name sets no scale. A map with extra margin around its hexes is better lined up with **Line up grid** (`G`). Without a usable size in the name, the app guesses about 30 squares along the image's long side and opens **Line up grid** so you can correct the guess, check a grid the app found, or fit one yourself.
@@ -314,7 +316,7 @@ A scene won't change shape while it holds something laid out on its own cells, w
 
 **Building and moving on hexes.** Everything you build on squares works on hexes too, hex by hex, except painted ground. In the builder, **Walls/doors** draws wall lines from corner to corner, which [Walls and doors](#walls-and-doors) describes. **Difficult ground**, **Erase** and **Heights/stairs** work by whole hexes, and a stair points up toward one of its hex's six sides (see [Heights and stairs](#heights-and-stairs)). Lights, stamps and labels go anywhere, as they do on squares. While **Walls and ledges block players' moves** is on, creatures walk around walls and use stairs to cross ledges. They can squeeze through narrow corridors, ride, carry and drag, and set off traps drawn in hexes, pits included. The **Walking** ruler counts hexes, and **Builder room** in the Fog tool reveals a room closed in by wall lines. Each of these has a few lines for hexes in its own section.
 
-**What stays square.** A few things stay on squares for good: painted ground and rooms, pillars, automatic walls, **Or count the squares**, the Universal VTT import and the `WxH` file name of an export. Wherever you would reach for one of them on a hex scene, the app says so in plain words. In the builder, the line above the options reads "On hexes the builder draws wall lines, paints heights and stairs, marks difficult ground, and places lights, stamps and labels. Painted ground needs squares." If a map needs those, make it on squares.
+**What stays square.** A few things stay on squares for good: painted ground and rooms, pillars, automatic walls, **Or count the squares**, the Universal VTT import, **Generate a dungeon** and the `WxH` file name of an export. Wherever you would reach for one of them on a hex scene, the app says so in plain words. In the builder, the line above the options reads "On hexes the builder draws wall lines, paints heights and stairs, marks difficult ground, and places lights, stamps and labels. Painted ground needs squares." If a map needs those, make it on squares.
 
 **Lining up a hex map.** The box in **Line up grid** is made for hexes. Drag a box over 3 hexes across, which holds 7 hexes, and fine-tune it by its corners. The box keeps the shape of 7 hexes as you drag, resize or nudge it. The app draws the hexes it would make across the whole map, so you can check that they line up everywhere. The option reads **px per hex**, and **Or count the squares** gives way to a line saying counting works on squares, so use the box. **Find the grid** works on a hex scene as on any other: it looks for squares and hexes alike, and when it finds the other shape it can change the scene's shape to match, as [Lining up the grid](#lining-up-the-grid) describes.
 
@@ -610,6 +612,48 @@ In the map builder, a rectangle room or a shape is asked about as a whole before
 **Deleting an image.** If you delete an image from the Library that no stamp on any map uses any more, but that players' maps still show from before, it disappears from their maps too.
 
 **Exporting what players see.** The player view of **Export as image** on a scene with fog on draws what the players' maps hold now, which the app asks the server for: only the ground they have discovered, as they remember it. That works even after you clear the build, since the players may still remember it, and when they have seen none of the scene the app says so instead of making an empty image.
+
+## Generating a dungeon
+
+When you need a dungeon and don't have an evening to paint one, the app can draw it for you. You pick a few choices, look at a preview, and press a button. A whole Builder scene appears, with rooms, corridors, doors, stairs and a few traps. It is an ordinary Builder scene, so you can reshape anything in it with the map builder afterward. Think of it as a floor plan to start from. It places no monsters, treasure, lights or furniture, because those depend on your story.
+
+**Starting.** Open **Scenes**, then **New scene**, and pick **Builder**. Under the row with **Create**, a line reads "Or start from a generated dungeon", with the **Generate a dungeon** button under it. The name you typed and your **Players see** choice come along into the dialog, so set them first if you want to. Generated dungeons are made on squares for now, so the button is off while the form's **Grid** is a hex shape, and a line under it says to pick **Squares**.
+
+![The Generate a dungeon dialog on its default choices: the preview at the left with the entrance room ringed in white, Theme, Size, Rooms, Density, Corridors and Corridor width on the right, and "12 rooms, 29 doors (4 locked), 2 traps." beside Cancel and Make the scene.](dm-guide/dungeon-generator.webp)
+
+**The choices.** Each one redraws the preview a moment after you change it.
+
+- **Theme** is **Dungeon** or **Crypt**. A Dungeon has stone and wood rooms, rubble in some corridors, a few pits, and about one door in seven locked. A Crypt is all stone, its larger rooms have a ring of pillars, and about one door in four is locked.
+- **Size** is **Small**, **Medium** or **Large**, which are 30, 50 and 80 squares on a side, or **Custom**, where you type how many squares **Across** and **Down**, from 20 to 100. The line under the choice says what that comes to in feet.
+- **Rooms** is how many rooms you want. The line under it says how many the size can hold, which is one for every 90 squares of the map, and no more than 40. It starts at 6, 12 or 20 for the three sizes, and a number you type stays when you change the size, unless the new size holds fewer.
+- **Density** is **Sparse**, **Normal** or **Dense**, which sets how much of the map the rooms fill. Sparse makes smaller rooms with plenty of rock between them, and Dense makes larger rooms packed closer together.
+- **Corridors** are **Straight**, **Bending** or **Winding**. Straight corridors run long and straight, Bending ones bend now and then, and Winding ones meander.
+- **Corridor width** is **Narrow** or **Wide**. A Wide corridor and its doorways are 2 squares across, with double doors, so Large creatures can walk through without squeezing once the doors are open.
+- **Extra ways round** adds loops, so the way back is not always the way you came in.
+- **Heights** is **Flat** or **Some**. With Some, a few rooms are raised or sunk by 5 or 10 feet, and you reach each one by a straight flight of stairs from its doors.
+- **Traps** is **None**, **Few** or **Some**. When it is not None, **Party level** picks how strong they are: 1 to 4, 5 to 10, 11 to 16 or 17 to 20. The generator uses four of the SRD's example traps: the Hidden Pit, the Spiked Pit, the Falling Net and the Poisoned Needle. They start hidden, never sit in the entrance room, and players see one only once they find it.
+
+Whatever you choose, a room 6 squares across and down or larger may have a dais, a platform 5 feet up with a stair onto it, so you can have raised ground even with **Heights** on **Flat**.
+
+**The preview.** The picture shows exactly what **Make the scene** will build, drawn the way Export as image draws a DM view. A trap's zone is hatched in red, and a white ring marks the entrance room. Under the choices, a line counts the rooms, doors and traps, such as "12 rooms, 29 doors (4 locked), 2 traps." If the size can't hold all the rooms you asked for, it says so, for example "Fit 9 of 12 rooms. A larger size or fewer rooms fits them all." When not even two rooms fit, the dialog says so and turns **Make the scene** off until you pick a larger size, fewer rooms or Sparse.
+
+**Reroll and the seed.** **Reroll**, in the corner of the preview, draws another dungeon from the same choices. Every dungeon comes from a seed, a code of 16 letters and digits such as `1K7Q-H2MX-A9F3-TWQ5`, shown in the **Seed** field at the bottom of the choices. The same seed with the same choices makes the same dungeon again on this version of the app, so press **Copy seed** to keep one you like, or to share it with another DM. You can type a seed in as well. Capitals, spaces and dashes don't matter. A seed from another version of the generator says that it makes a different dungeon now. The dialog remembers your last choices for the room, but never the seed, and the seed is never saved in the scene, so copy it before you make the scene if you will want it later.
+
+**Making the scene.** Press **Make the scene**. The foot counts the dungeon's pieces as the server takes them ("Making the dungeon… 18 of 30"), and **Cancel** becomes **Hide**, which lets you close the dialog while it finishes. When it is done, the app opens the new scene on your screen with the **Map builder** picked, zoomed on the entrance room so you can see where the party comes in. Only your screen is framed that way. The scene stores no starting view, so every other device opens it as it would open any Builder scene, and players never learn where the entrance is from it.
+
+![The new scene, opened on the entrance room: a door in its north wall opens on a corridor that leads out to the edge of the map, a second door in the south wall leads further in, and a pit lies in the room's corner. The Scenes panel shows Players see on Explore.](dm-guide/dungeon-generator-made.webp)
+
+If the connection is down when you press it, the foot says "Waiting for the server…", and the dungeon is sent when you are back online.
+
+**What players see.** Make the scene is a new scene, and it starts on the **Players see** choice the form had. Nothing of it reaches a player while the players are on another scene. On **Explore** or **Reveal by hand**, they get only the ground the party has seen or you have revealed once you move them there. A locked door reads as closed to them, and they see a trap only once they find it. If the form's choice leaves fog off, such as **Everything**, a line above the dialog's foot warns you that "Players see this scene without fog, so every room shows at once", so you can change your mind before you make it. The **Fog** tool's **Builder room** shape works well on a generated dungeon, since every doorway has a closed or locked door that stops it, so one tap reveals exactly one room.
+
+**Editing it.** Every builder mode edits a generated dungeon, **Fog** reveals it, and **Duplicate** and **Export as image** work as on any scene. All of its walls are automatic, which is why no wall in it is drawn: the walls appear around the floor on their own, and that way a player's map never shows a wall that gives away a room they have not found yet. Add monsters, lights, stamps and labels as you would on a map you built yourself.
+
+**Taking it back.** The whole dungeon goes in as one step in **Setup history**, so one **Undo setup** usually takes all of it back, and **Redo setup** puts it back. The app tells you where to find it: "Saved. Undo in Setup history." Sometimes it takes more than one step. That happens when you used another device as the same DM while the dungeon was being sent, when a co-DM's edit on the new scene stops the steps from merging, or when the server was restarted, which empties the histories.
+
+**Delete** in the scene's menu in the **Scenes** panel is the sure way back, since it takes away the scene and everything in it however many steps it made. The one rule is that **Delete** is refused for the scene the players are on, and **Undo setup** is refused just the same when it would take that scene away. If you moved the players to the new scene, move them to another scene first, then use either one.
+
+If the connection drops during **Make the scene**, the app opens the new scene and compares it with the preview. When everything arrived, it says the dungeon is complete. When it cannot confirm that, it says so, and **Delete** in the scene's menu removes the scene once the players are on another scene. If the server refuses part of the dungeon, which only happens when the room is close to its limits, the scene may be missing rooms, doors or traps, and the dialog says so with the same two ways back.
 
 ## Map phases, imports and exports
 

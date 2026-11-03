@@ -21,7 +21,7 @@ are the ones [mvp.md](docs/design/mvp.md) lists today:
 - Join requests that the DM approves.
 - Several floors in one scene.
 - Animated maps.
-- A dungeon generator.
+- A dungeon generator. Its first version is built, with the Dungeon and Crypt themes on squares. More themes, lights, a DM key, hexes and adding a wing to an existing scene come next.
 - Weather overlays.
 - Ambient music and sound effects, kept in sync for everyone.
 - An in-game calendar and time of day.

@@ -57,6 +57,8 @@ and for how to use it, the [DM guide](../dm-guide.md).
   ground's picture smooth while the board pans.
 - [design-v1-area-from-character.md](design-v1-area-from-character.md): a
   player's area of effect placed from their own character.
+- [design-v1-dungeon-generator.md](design-v1-dungeon-generator.md): making a
+  whole dungeon from a few choices and a seed, as a Builder scene.
 
 ## Tokens and characters
 

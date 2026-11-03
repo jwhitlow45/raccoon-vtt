@@ -152,6 +152,8 @@ Tiers:
 - Several floors in one scene.
 - Animated maps (webm).
 - Dungeon generator.
+  - Phase 1 is built (docs/design/design-v1-dungeon-generator.md). New scene's Builder form offers Generate a dungeon, which makes a whole Builder scene on squares: Dungeon and Crypt themes, rooms and corridors, doors, stairs to raised and sunk rooms, and four of the SRD's example traps, with a preview, Reroll and a seed. It lands as ordinary builder changes in one Setup step, so it adds no op and no stored field.
+  - Still Later: more themes (Cave, Mine and Sewer), lights, dressing from the stamps, a DM key of numbered rooms, more traps, secret doors and secret rooms, and per-room edits in the preview (phase 2), then hexes and adding a wing to an existing scene (phase 3).
 
 ## 4. Grid and measurement
 
