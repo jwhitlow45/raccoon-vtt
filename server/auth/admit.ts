@@ -1,6 +1,7 @@
 import type { FastifyBaseLogger } from "fastify";
 import type pg from "pg";
 import type { Member } from "#shared/model.ts";
+import type { JoinMode } from "#shared/protocol.ts";
 import { RoomFullError, RoomNotFoundError, type RoomGateway } from "../rooms/gateway.ts";
 import { formerDms, putGrant, revokeGrants } from "./grants.ts";
 import { HttpError } from "./http.ts";
@@ -26,7 +27,7 @@ export const MEMBER_ANSWER_MS = 5_000;
 /** The grant transaction's pool checkout. */
 export const GRANT_CHECKOUT_MS = 2_000;
 
-export type LockedRoom = { player_epoch: number; dm_epoch: number };
+export type LockedRoom = { join_mode: JoinMode; player_epoch: number; dm_epoch: number };
 
 export type AdmitWho = { kind: "new"; member: Member } | { kind: "member"; memberId: string };
 
@@ -171,7 +172,7 @@ export class Admissions {
         this.#pool,
         async (tx) => {
           await tx.query("set local lock_timeout = '2s'; set local statement_timeout = '5s'");
-          const { rows } = await tx.query<LockedRoom>("select player_epoch, dm_epoch from rooms where id = $1 for update", [roomId]);
+          const { rows } = await tx.query<LockedRoom>("select join_mode, player_epoch, dm_epoch from rooms where id = $1 for update", [roomId]);
           const room = rows[0];
           if (!room) throw new HttpError(404, "room_not_found");
           attempt.playerEpoch = room.player_epoch;

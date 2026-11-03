@@ -2,6 +2,7 @@ import { statfs } from "node:fs/promises";
 import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import { z } from "zod";
 import { playerLink } from "#shared/playerLink.ts";
+import type { JoinMode } from "#shared/protocol.ts";
 import type { Config } from "../config.ts";
 import { deleteUnreferencedFiles, roomFileKeys } from "../assets/store.ts";
 import { putGrant, revokeGrants } from "../auth/grants.ts";
@@ -120,10 +121,11 @@ export async function registerRoomRoutes(app: FastifyInstance, kit: AuthKit): Pr
 
     r.get("/api/rooms/:id", async (req) => {
       const roomId = roomParam(req);
-      const { rows } = await kit.pool.query<{ name: string }>("select name from rooms where id = $1", [roomId]);
+      const { rows } = await kit.pool.query<{ name: string; join_mode: JoinMode }>("select name, join_mode from rooms where id = $1", [roomId]);
       const room = rows[0];
       if (!room) throw new HttpError(404, "room_not_found");
-      return { roomId, name: room.name };
+      // The join mode is as public as the name: the join page shows its cards by it.
+      return { roomId, name: room.name, joinMode: room.join_mode };
     });
 
     // The room's name comes along for the Home page's list of this device's
@@ -171,10 +173,17 @@ export async function registerRoomRoutes(app: FastifyInstance, kit: AuthKit): Pr
       if (problem) throw new HttpError(400, "weak_password", { extra: { reason: problem } });
       const hash = await kit.hasher.hash(password);
       await revokeGrants(kit, roomId, { by: "role", role: ["player", "display"] }, async (tx) => {
-        await tx.query("update rooms set player_pw_hash = $2, player_epoch = player_epoch + 1 where id = $1", [
-          roomId,
-          hash,
-        ]);
+        // One statement in every mode: in Only by asking the new hash waits
+        // in the held column and the sentinel stays, so the change lets
+        // nobody in by password (docs/design/design-v1-join-requests.md 5.2).
+        await tx.query(
+          `update rooms set
+             player_pw_hash = case when join_mode = 'ask_only' then player_pw_hash else $2 end,
+             player_pw_hash_held = case when join_mode = 'ask_only' then $2 else player_pw_hash_held end,
+             player_epoch = player_epoch + 1
+           where id = $1`,
+          [roomId, hash],
+        );
         await storePlayerPassword(tx, kit.config.roomSecretKey, roomId, password);
       });
       kit.tickets.dropRoom(roomId);

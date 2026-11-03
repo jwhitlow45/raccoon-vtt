@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { after, before, describe, test } from "node:test";
 import { MockAgent } from "undici";
 import type { RoomState } from "#shared/model.ts";
 import { ipKey } from "../auth/ipKey.ts";
+import { randomToken, sha256 } from "../auth/tokens.ts";
 import { PasswordHasher } from "../auth/passwords.ts";
 import { startTestApp, type TestApp, type TestClient } from "../auth/testing.ts";
 import { setTurnstileDispatcherForTests } from "../auth/turnstile.ts";
@@ -618,5 +621,201 @@ describe("the join challenge without Turnstile configured", () => {
     assert.equal((await t.client().post(`/api/rooms/${roomId}/join`, { password: PASSWORD })).statusCode, 200);
     const wrong = await t.client().post(`/api/rooms/${roomId}/join`, { password: "wrong-guess" });
     assert.deepEqual(wrong.json(), { error: "bad_password" });
+  });
+});
+
+describe("Only by asking keeps the password from letting anyone new in, on this build and an older one", () => {
+  let t: TestApp;
+  let hasher: CountingHasher;
+  before(async () => {
+    hasher = new CountingHasher();
+    t = await startTestApp({ hasher });
+  });
+  after(() => t.close());
+
+  /** The mode switch's own statement (server/http/joinRequests.ts), for rooms set up before its route runs. */
+  async function askOnly(roomId: string): Promise<void> {
+    await t.pool.query("update rooms set join_mode = 'ask_only', player_pw_hash_held = player_pw_hash, player_pw_hash = 'ask-only' where id = $1", [roomId]);
+  }
+
+  async function hashes(roomId: string): Promise<{ hash: string; held: string | null; epoch: number }> {
+    const { rows } = await t.pool.query<{ player_pw_hash: string; player_pw_hash_held: string | null; player_epoch: number }>(
+      "select player_pw_hash, player_pw_hash_held, player_epoch from rooms where id = $1",
+      [roomId],
+    );
+    const row = rows[0];
+    assert.ok(row);
+    return { hash: row.player_pw_hash, held: row.player_pw_hash_held, epoch: row.player_epoch };
+  }
+
+  test("the room says its join mode to anyone with its ID", async () => {
+    const { roomId } = await t.client().createRoom("Tuesday");
+    const res = await t.client().get(`/api/rooms/${roomId}`);
+    assert.deepEqual(res.json(), { roomId, name: "Tuesday", joinMode: "password" });
+    await askOnly(roomId);
+    assert.equal((await t.client().get(`/api/rooms/${roomId}`)).json<{ joinMode: string }>().joinMode, "ask_only");
+  });
+
+  test("the right password is refused with asks_only before the limits and the hash, and counts nothing", async () => {
+    const { roomId } = await t.client().createRoom();
+    await askOnly(roomId);
+    const phone = t.client();
+    const before = hasher.verifies;
+    const res = await phone.post(`/api/rooms/${roomId}/join`, { password: PASSWORD });
+    assert.equal(res.statusCode, 403);
+    assert.equal(res.json<{ error: string }>().error, "asks_only");
+    assert.equal(hasher.verifies, before, "nothing hashed");
+    assert.equal(phone.token, undefined, "no session minted");
+    const counted = await t.pool.query("select 1 from rate_events where key like $1", [`%${roomId}%`]);
+    assert.equal(counted.rowCount, 0);
+  });
+
+  test("a ticket minted before the switch, and one minted by a check in flight during it, are refused by join/complete", async () => {
+    const { roomId } = await t.client().createRoom();
+    const early = t.client();
+    const earlyTicket = (await early.post(`/api/rooms/${roomId}/join`, { password: PASSWORD })).json<{ ticket: string }>().ticket;
+    // The switch lands while this device's password is being checked.
+    const during = t.client();
+    const verify = hasher.verify.bind(hasher);
+    hasher.verify = async (phc, password) => {
+      const ok = await verify(phc, password);
+      await askOnly(roomId);
+      return ok;
+    };
+    let duringTicket: string;
+    try {
+      duringTicket = (await during.post(`/api/rooms/${roomId}/join`, { password: PASSWORD })).json<{ ticket: string }>().ticket;
+    } finally {
+      hasher.verify = verify;
+    }
+    for (const [c, ticket] of [[early, earlyTicket], [during, duringTicket]] as const) {
+      const res = await c.post(`/api/rooms/${roomId}/join/complete`, { ticket, name: "Quinn", color: "#112233" });
+      assert.equal(res.statusCode, 403, res.body);
+      assert.equal(res.json<{ error: string }>().error, "asks_only");
+      assert.equal((await c.me(roomId)).status, 403);
+    }
+  });
+
+  test("a password change in each mode is one statement: the new hash in the right column, the epoch bumped once", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom();
+    const start = await hashes(roomId);
+    assert.equal((await dm.post(`/api/rooms/${roomId}/password`, { password: "badger-lantern-quill" })).statusCode, 204);
+    const open = await hashes(roomId);
+    assert.notEqual(open.hash, start.hash);
+    assert.equal(open.held, null);
+    assert.equal(open.epoch, start.epoch + 1);
+
+    await askOnly(roomId);
+    assert.equal((await dm.post(`/api/rooms/${roomId}/password`, { password: "heron-saddle-crypt" })).statusCode, 204);
+    const closed = await hashes(roomId);
+    assert.equal(closed.hash, "ask-only", "the sentinel stays");
+    assert.ok(closed.held?.startsWith("$argon2id$"));
+    assert.notEqual(closed.held, open.hash);
+    assert.equal(closed.epoch, open.epoch + 1);
+    assert.equal(await new PasswordHasher().verify(closed.held ?? "", "heron-saddle-crypt"), true);
+  });
+
+  test("an older build refuses the right password, opens again after its own password change, and the boot statement closes it", async () => {
+    const { roomId } = await t.client().createRoom();
+    await askOnly(roomId);
+    const older = new PasswordHasher();
+    // The older build's join query and hash check, verbatim.
+    const check = async (password: string) => {
+      const { rows } = await t.pool.query<{ player_pw_hash: string }>("select player_pw_hash, player_epoch from rooms where id = $1", [roomId]);
+      return older.verify(rows[0]?.player_pw_hash ?? "", password);
+    };
+    assert.equal(await check(PASSWORD), false);
+    // The older build's password change.
+    await t.pool.query("update rooms set player_pw_hash = $2, player_epoch = player_epoch + 1 where id = $1", [roomId, await older.hash("otter-bridge-flint")]);
+    assert.equal(await check("otter-bridge-flint"), true);
+    // The whole schema file, as every boot runs it.
+    await t.pool.query(await readFile(new URL("../../db/schema.sql", import.meta.url), "utf8"));
+    assert.equal(await check("otter-bridge-flint"), false);
+    const after = await hashes(roomId);
+    assert.equal(after.hash, "ask-only");
+    assert.equal(await older.verify(after.held ?? "", "otter-bridge-flint"), true, "the password an older build wrote is kept");
+  });
+});
+
+describe("ask tokens are adopted by every path that makes a room session", () => {
+  let t: TestApp;
+  before(async () => {
+    t = await startTestApp();
+  });
+  after(() => t.close());
+
+  /** An ask token as an admitted ask leaves it: a row in ask_sessions, its token in the room cookie. */
+  async function askToken(c: TestClient): Promise<string> {
+    const token = randomToken();
+    const id = randomUUID();
+    await t.pool.query("insert into ask_sessions (id, token_hash, expires_at) values ($1, $2, now() + interval '1 hour')", [id, sha256(token)]);
+    c.token = token;
+    return id;
+  }
+
+  async function sessionOf(token: string | undefined): Promise<{ id: string; user_agent: string | null } | undefined> {
+    const { rows } = await t.pool.query<{ id: string; user_agent: string | null }>("select id, user_agent from sessions where token_hash = $1", [sha256(token ?? "")]);
+    return rows[0];
+  }
+
+  async function askRows(id: string): Promise<number> {
+    return (await t.pool.query("select 1 from ask_sessions where id = $1", [id])).rowCount ?? 0;
+  }
+
+  test("an older build's session lookup and this build's limiter read an ask token as no session", async () => {
+    const c = t.client();
+    await askToken(c);
+    const older = await t.pool.query("select id from sessions where token_hash = $1 and expires_at > now()", [sha256(c.token ?? "")]);
+    assert.equal(older.rowCount, 0);
+    assert.equal((await c.post(`/api/rooms/ABCDEFGH/join/complete`, { ticket: randomToken(), name: "Quinn", color: "#112233" })).json<{ error: string }>().error, "no_session");
+  });
+
+  test("a password join adopts the token: the same id and cookie, no second session", async () => {
+    const { roomId } = await t.client().createRoom();
+    const phone = t.client();
+    const id = await askToken(phone);
+    const token = phone.token;
+    // Warm the unknown cache with the token's miss first.
+    assert.equal((await phone.me(roomId)).status, 403);
+    await phone.join(roomId, "Quinn");
+    assert.equal(phone.token, token, "the cookie is unchanged");
+    assert.equal((await sessionOf(token))?.id, id);
+    assert.equal(await askRows(id), 0);
+    assert.equal((await phone.me(roomId)).role, "player");
+  });
+
+  test("a DM link adopts the token and then rotates it, keeping the id", async () => {
+    const { roomId, dmKey } = await t.client().createRoom();
+    const laptop = t.client();
+    const id = await askToken(laptop);
+    const token = laptop.token;
+    const res = await laptop.post(`/api/rooms/${roomId}/dm`, { key: dmKey, name: "Bram" });
+    assert.equal(res.statusCode, 200, res.body);
+    assert.notEqual(laptop.token, token, "a DM claim always rotates");
+    assert.equal((await sessionOf(laptop.token))?.id, id);
+    assert.equal(await sessionOf(token), undefined);
+    assert.equal(await askRows(id), 0);
+  });
+
+  test("a new room adopts the token", async () => {
+    const c = t.client();
+    const id = await askToken(c);
+    const { roomId } = await c.createRoom();
+    assert.equal((await sessionOf(c.token))?.id, id);
+    assert.equal((await c.me(roomId)).role, "dm");
+  });
+
+  test("a display session in the room cookie never counts as a room session to adoption", async () => {
+    const { roomId } = await t.client().createRoom();
+    const display = randomToken();
+    const displayId = randomUUID();
+    await t.pool.query("insert into sessions (id, token_hash, expires_at, purpose) values ($1, $2, now() + interval '1 day', 'display')", [displayId, sha256(display)]);
+    const c = t.client();
+    c.token = display;
+    await c.join(roomId, "Quinn");
+    assert.notEqual(c.token, display, "a fresh room session, never the display's");
+    assert.notEqual((await sessionOf(c.token))?.id, displayId);
+    await t.pool.query("delete from sessions where id = $1", [displayId]);
   });
 });

@@ -4,6 +4,7 @@ import type pg from "pg";
 import type { Config } from "../config.ts";
 import type { RoomGateway } from "../rooms/gateway.ts";
 import { Admissions, type AdmissionsOptions } from "./admit.ts";
+import { AskSessions } from "./askSessions.ts";
 import { clientIp } from "./clientIp.ts";
 import { checkDisplayGrant, checkGrant } from "./grants.ts";
 import { ipKey } from "./ipKey.ts";
@@ -41,6 +42,10 @@ export async function setupAuth(
 
   await app.register(fastifyCookie);
   const sessions = new SessionStore(pool, cookie);
+  // Ask tokens share the room cookie, and every path that makes a room
+  // session adopts one (docs/design/design-v1-join-requests.md 5.1).
+  const askSessions = new AskSessions(pool, sessions);
+  sessions.adoptAskTokens(askSessions);
   // Table displays (docs/design/design-v1-dm-tools.md 3.1): a second store on a
   // second cookie, which only the display routes and the `as=display`
   // socket read.
@@ -68,12 +73,14 @@ export async function setupAuth(
   const trust = config.TRUST_CF_CONNECTING_IP === "1";
 
   // Slow-limit rows, expired sessions (display sessions too, by the same
-  // statement), spent invites and display codes, hourly (design section
-  // 16.3). Unref'd so the timer never keeps a test process alive.
+  // statement) and ask tokens, spent invites and display codes, hourly
+  // (design section 16.3). Unref'd so the timer never keeps a test process
+  // alive.
   const timer = setInterval(() => {
     void Promise.all([
       limits.prune(),
       sessions.cleanup(),
+      askSessions.cleanup(),
       pool.query("delete from dm_invites where expires_at < now()"),
       pool.query("delete from display_codes where expires_at < now()"),
     ]).catch((err: unknown) => app.log.warn({ err }, "auth cleanup failed"));
@@ -95,6 +102,7 @@ export async function setupAuth(
     auth,
     sessions,
     displaySessions,
+    askSessions,
     hasher: deps.hasher ?? new PasswordHasher(),
     limits,
     tickets: new JoinTickets(),

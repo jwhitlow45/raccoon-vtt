@@ -7,6 +7,7 @@ import { applySchema } from "../db.ts";
 import type { Member } from "#shared/model.ts";
 import { DirectGateway, MAX_MEMBERS, RoomFullError, rosterOf, type RoomGateway, type RosterEntry, type SocketFilter } from "../rooms/gateway.ts";
 import { ipKey } from "./ipKey.ts";
+import { sha256 } from "./tokens.ts";
 import type { PasswordHasher } from "./passwords.ts";
 import type { AccessOptions } from "./plugin.ts";
 
@@ -64,6 +65,9 @@ export async function startTestApp(
   const userAgent = `raccoon-itest/${randomBytes(6).toString("hex")}`;
   const rooms = new Set<string>();
   const ips = new Set<string>();
+  // A session promoted from an ask token has no user agent until its next
+  // request, so cookies are cleaned up by their hashes too.
+  const tokens = new Set<string>();
 
   return {
     app,
@@ -72,7 +76,7 @@ export async function startTestApp(
     config,
     client(ip = randomIp()) {
       ips.add(ip);
-      return new TestClient(app, ip, userAgent, (roomId) => rooms.add(roomId));
+      return new TestClient(app, ip, userAgent, (roomId) => rooms.add(roomId), (token) => tokens.add(token));
     },
     track: (roomId) => rooms.add(roomId),
     async close() {
@@ -81,6 +85,9 @@ export async function startTestApp(
       const fragments = [...roomIds, ...[...ips].map(ipKey)];
       await pool.query("delete from rooms where id = any($1::text[])", [roomIds]);
       await pool.query("delete from sessions where user_agent = $1", [userAgent]);
+      const hashes = [...tokens].map((token) => sha256(token));
+      await pool.query("delete from sessions where token_hash = any($1::bytea[])", [hashes]);
+      await pool.query("delete from ask_sessions where token_hash = any($1::bytea[])", [hashes]);
       if (fragments.length > 0) {
         await pool.query(
           "delete from rate_events where exists (select 1 from unnest($1::text[]) f where position(f in key) > 0)",
@@ -103,12 +110,14 @@ export class TestClient {
   #app: FastifyInstance;
   #userAgent: string;
   #track: (roomId: string) => void;
+  #seen: (token: string) => void;
 
-  constructor(app: FastifyInstance, ip: string, userAgent: string, track: (roomId: string) => void) {
+  constructor(app: FastifyInstance, ip: string, userAgent: string, track: (roomId: string) => void, seen: (token: string) => void = () => undefined) {
     this.#app = app;
     this.ip = ip;
     this.#userAgent = userAgent;
     this.#track = track;
+    this.#seen = seen;
   }
 
   async request(
@@ -131,7 +140,10 @@ export class TestClient {
       ...(body ? { payload: JSON.stringify(body) } : {}),
     });
     const cookie = res.cookies.find((c) => c.name === "rvtt");
-    if (cookie) this.token = cookie.value;
+    if (cookie) {
+      this.token = cookie.value;
+      this.#seen(cookie.value);
+    }
     return res;
   }
 

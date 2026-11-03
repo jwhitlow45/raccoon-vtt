@@ -114,7 +114,11 @@ async function becomeDm(
     const room = rows[0];
     if (!room) throw new HttpError(404, "room_not_found");
     await consume(tx, room);
-    const row = current ? await kit.sessions.rotate(tx, req, current.id) : await kit.sessions.create(tx, req);
+    let row = current ? await kit.sessions.rotate(tx, req, current.id) : await kit.sessions.create(tx, req);
+    // A session adopted from the device's ask token keeps its id, so the
+    // device's waiting requests follow it, and gets a new token, as every
+    // DM claim does.
+    if (row.adopted) row = await kit.sessions.rotate(tx, req, row.id);
     await putGrant(tx, { sessionId: row.id, roomId, memberId, role: "dm", epoch: room.dm_epoch });
     await kit.limits.recordSuccess(tx, ip, roomId);
     return row;

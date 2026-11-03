@@ -109,14 +109,14 @@ describe("rooms", () => {
     assert.equal((await dm.me(second)).role, "dm");
   });
 
-  test("GET room returns the name only, for either id form", async () => {
+  test("GET room returns the name and join mode only, for either id form", async () => {
     const dm = t.client();
     const { roomId } = await dm.createRoom("Lost Mine");
     const anon = t.client();
     for (const id of [roomId, `${roomId.slice(0, 4)}-${roomId.slice(4)}`, roomId.toLowerCase()]) {
       const res = await anon.get(`/api/rooms/${id}`);
       assert.equal(res.statusCode, 200);
-      assert.deepEqual(res.json(), { roomId, name: "Lost Mine" });
+      assert.deepEqual(res.json(), { roomId, name: "Lost Mine", joinMode: "password" });
     }
     assert.equal((await anon.get("/api/rooms/ZZZZZZZZ")).statusCode, 404);
     assert.equal((await anon.get("/api/rooms/not-an-id")).statusCode, 404);

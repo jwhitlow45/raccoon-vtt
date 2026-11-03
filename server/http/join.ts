@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import type { JoinMode } from "#shared/protocol.ts";
 import type { AdmitWho } from "../auth/admit.ts";
 import { checkGrant } from "../auth/grants.ts";
 import {
@@ -47,12 +48,15 @@ export async function registerJoinRoutes(app: FastifyInstance, kit: AuthKit): Pr
     r.post("/api/rooms/:id/join", async (req, reply) => {
       const roomId = roomParam(req);
       const { password, turnstileToken } = parseBody(JoinBody, req.body);
-      const { rows } = await kit.pool.query<{ player_pw_hash: string; player_epoch: number }>(
-        "select player_pw_hash, player_epoch from rooms where id = $1",
+      const { rows } = await kit.pool.query<{ player_pw_hash: string; player_epoch: number; join_mode: JoinMode }>(
+        "select player_pw_hash, player_epoch, join_mode from rooms where id = $1",
         [roomId],
       );
       const room = rows[0];
       if (!room) throw new HttpError(404, "room_not_found");
+      // Only by asking: the password lets nobody new in, so it is refused
+      // before the limits and the hash, and counts for nothing.
+      if (room.join_mode === "ask_only") throw new HttpError(403, "asks_only");
 
       const ip = kit.ip(req);
       enforce(await kit.limits.failures(roomId, ip));
@@ -139,6 +143,9 @@ export async function registerJoinRoutes(app: FastifyInstance, kit: AuthKit): Pr
         // The epoch is checked under the room row lock, in the transaction
         // that writes the grant, so a password change cannot slip in between.
         async locked(_tx, room) {
+          // A ticket minted before the switch to Only by asking, or by a
+          // check that was in flight during it, is refused here.
+          if (room.join_mode === "ask_only") throw new HttpError(403, "asks_only");
           if (room.player_epoch !== ticket.playerEpoch) throw new HttpError(403, "stale_ticket");
         },
         settled(outcome) {

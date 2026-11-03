@@ -280,3 +280,29 @@ create index if not exists room_log_access_source on room_log_access (id, room_i
 -- here, and for one imported before imports kept seqs, whose imported lines
 -- are all at seq 0.
 alter table rooms add column if not exists imported_seq bigint;
+-- Join requests (docs/design/design-v1-join-requests.md 5.1). How new devices
+-- join: with the player password, with it or by asking a DM, or only by
+-- asking. Access data beside player_pw_hash, never room state or an export.
+alter table rooms add column if not exists join_mode text not null default 'password'
+  check (join_mode in ('password', 'ask', 'ask_only'));
+-- In Only by asking, the real hash waits here and player_pw_hash holds the
+-- sentinel 'ask-only', which is no PHC string, so every build's password
+-- check, an older one's too, reads every password as wrong. Null otherwise.
+alter table rooms add column if not exists player_pw_hash_held text;
+-- An older build changing the password of an Only by asking room writes a
+-- real hash over the sentinel. Coming forward keeps that password and
+-- closes password joins again.
+update rooms set player_pw_hash_held = player_pw_hash, player_pw_hash = 'ask-only'
+  where join_mode = 'ask_only' and player_pw_hash <> 'ask-only';
+-- Ask tokens: the identity of a device with no room session that asked to
+-- join, made only once its ask was admitted, alive an hour after its latest
+-- ask. Never in sessions, so the request limiter and older builds read one
+-- as an unknown cookie. Promotion moves the row into sessions with the same
+-- id and token hash (server/auth/askSessions.ts). The hourly cleanup
+-- deletes expired rows.
+create table if not exists ask_sessions (
+  id uuid primary key,
+  token_hash bytea not null unique,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null
+);

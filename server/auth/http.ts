@@ -6,6 +6,7 @@ import { textSchemas } from "#shared/protocol.ts";
 import type { Config } from "../config.ts";
 import { RoomFullError, RoomNotFoundError, type RoomGateway } from "../rooms/gateway.ts";
 import type { Admissions } from "./admit.ts";
+import type { AskSessions } from "./askSessions.ts";
 import type { Role } from "./grants.ts";
 import { BusyError, type PasswordHasher } from "./passwords.ts";
 import type { SlowLimits, Verdict } from "./ratelimit.ts";
@@ -26,6 +27,8 @@ export type AuthKit = {
   sessions: SessionStore;
   /** Table displays' sessions, on their own cookie (docs/design/design-v1-dm-tools.md 3.1). */
   displaySessions: SessionStore;
+  /** Ask tokens: the identity of a device with no session that asked to join (docs/design/design-v1-join-requests.md 5.1). */
+  askSessions: AskSessions;
   hasher: PasswordHasher;
   limits: SlowLimits;
   tickets: JoinTickets;

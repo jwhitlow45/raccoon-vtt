@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type pg from "pg";
 import type { Config } from "../config.ts";
+import type { AskSessions } from "./askSessions.ts";
 import type { SessionContext } from "./types.ts";
 import { isToken, randomToken, sha256 } from "./tokens.ts";
-import type { Queryable } from "./tx.ts";
+import { inTx, type Queryable } from "./tx.ts";
 
 /**
  * Device sessions (design section 10.2). A session is an opaque token in a
@@ -73,6 +74,14 @@ export type SessionRow = {
   slide: boolean;
   /** `last_seen_at` is more than 10 minutes old. */
   touch: boolean;
+  /**
+   * The row has no user agent: a session promoted from an ask token by a
+   * DM's let-in, whose request was the DM's. The session's own next
+   * request fills it in.
+   */
+  noUserAgent: boolean;
+  /** create() adopted the device's ask token, or found it promoted a moment ago, rather than minting. */
+  adopted?: true;
 };
 
 const USER_AGENT_MAX = 256;
@@ -80,6 +89,8 @@ const USER_AGENT_MAX = 256;
 /** How long a cookie value that named no session is answered from memory. */
 const UNKNOWN_TTL_MS = 60_000;
 const UNKNOWN_MAX = 10_000;
+/** Promotion stamps kept, so a lookup in flight across a promotion's commit never caches its miss. */
+const PROMOTED_MAX = 10_000;
 
 export class SessionStore {
   readonly cookie: CookieSettings;
@@ -91,14 +102,20 @@ export class SessionStore {
   // `auth.session()` call the route makes.
   #memo = new WeakMap<FastifyRequest, Promise<SessionRow | null>>();
   /**
-   * Cookie values that named no live session a moment ago. The rate limiter
-   * looks up every token-shaped cookie before it can count the request, so
-   * a client sending an invented one would otherwise cost a query on every
-   * request, even once its IP is over the limit. Remembering the miss is
-   * safe: a token is only ever handed out after its row is written, so one
-   * that is unknown now never becomes valid later.
+   * Hashes of cookie values that named no live session a moment ago, keyed
+   * by the sha256 #find computes anyway. The rate limiter looks up every
+   * token-shaped cookie before it can count the request, so a client
+   * sending an invented one would otherwise cost a query on every request,
+   * even once its IP is over the limit. Remembering the miss is safe
+   * because a token turns valid later only through promotion from an ask
+   * token (server/auth/askSessions.ts), which clears its hash here as it
+   * commits and stamps it, and a lookup that started before the stamp does
+   * not cache its miss.
    */
   #unknown = new Map<string, number>();
+  #promoted = new Map<string, number>();
+  #stamp = 0;
+  #asks: AskSessions | null = null;
 
   constructor(pool: Pick<pg.Pool, "query">, cookie: CookieSettings, now: () => number = Date.now, purpose: SessionPurpose = "room") {
     this.#pool = pool;
@@ -106,6 +123,28 @@ export class SessionStore {
     this.#now = now;
     this.purpose = purpose;
     this.#days = purpose === "display" ? DISPLAY_SESSION_DAYS : SESSION_DAYS;
+  }
+
+  /** Room sessions only: create() adopts the device's ask token from these, rather than minting a second identity. */
+  adoptAskTokens(asks: AskSessions): void {
+    if (this.purpose === "room") this.#asks = asks;
+  }
+
+  /**
+   * An ask token's hash just became a session's, or may have. Idempotent,
+   * and run by the promotion's after-commit callback and again by any
+   * reconciliation, so every request authenticated after the commit reads
+   * the database.
+   */
+  promoted(hash: Buffer): void {
+    const key = hash.toString("hex");
+    this.#unknown.delete(key);
+    this.#promoted.delete(key);
+    this.#promoted.set(key, ++this.#stamp);
+    for (const old of this.#promoted.keys()) {
+      if (this.#promoted.size <= PROMOTED_MAX) break;
+      this.#promoted.delete(old);
+    }
   }
 
   /** The session the request's cookie names, without side effects. */
@@ -126,6 +165,12 @@ export class SessionStore {
   async session(req: FastifyRequest, reply: FastifyReply, q: Queryable = this.#pool): Promise<SessionContext | null> {
     const row = await this.lookup(req, q);
     if (!row) return null;
+    if (row.noUserAgent) {
+      // Apart from the slide and touch writes, and only from the session's own request.
+      row.noUserAgent = false;
+      const ua = userAgent(req);
+      if (ua !== null) await q.query("update sessions set user_agent = $2 where id = $1 and user_agent is null", [row.id, ua]);
+    }
     if (row.slide || row.touch) {
       const slide = row.slide;
       // Clear the flags before the write, so concurrent calls in one request
@@ -146,8 +191,18 @@ export class SessionStore {
   /**
    * Inserts a new session and remembers it for the rest of the request. The
    * caller sets the cookie once its transaction commits.
+   *
+   * A room session made inside a transaction adopts the device's ask token
+   * first (docs/design/design-v1-join-requests.md 5.1): the same id and
+   * token, so the cookie stays as it is and the device's waiting requests
+   * keep following it. A display session never does.
    */
   async create(q: Queryable, req: FastifyRequest): Promise<SessionRow> {
+    const adopted = this.#asks && inTx(q) ? await this.#adopt(q, this.#asks, req) : null;
+    if (adopted) {
+      this.#memo.set(req, Promise.resolve(adopted));
+      return adopted;
+    }
     const token = randomToken();
     const id = randomUUID();
     await q.query(
@@ -155,9 +210,26 @@ export class SessionStore {
        values ($1, $2, $3, now() + make_interval(days => $4), $5)`,
       [id, sha256(token), userAgent(req), this.#days, this.purpose],
     );
-    const row: SessionRow = { id, token, slide: false, touch: false };
+    const row: SessionRow = { id, token, slide: false, touch: false, noUserAgent: false };
     this.#memo.set(req, Promise.resolve(row));
     return row;
+  }
+
+  /**
+   * The ask token in the room cookie, made a session. One read over both
+   * tables finds where the cookie's hash lives now: already a session (a
+   * let-in promoted it a moment ago, after this request's lookup missed),
+   * a live ask token, which is promoted under its row lock, or neither.
+   */
+  async #adopt(tx: Queryable, asks: AskSessions, req: FastifyRequest): Promise<SessionRow | null> {
+    const token = req.cookies[this.cookie.name];
+    if (!isToken(token)) return null;
+    const found = await asks.identify(tx, token);
+    if (found.sessionId) return { id: found.sessionId, token, slide: false, touch: false, noUserAgent: false, adopted: true };
+    if (!found.askId) return null;
+    const promoted = await asks.promote(tx, found.askId, userAgent(req));
+    if (promoted === "gone") return null;
+    return { id: found.askId, token, slide: false, touch: false, noUserAgent: false, adopted: true };
   }
 
   /** The request's session, or a new one inserted with `q`. */
@@ -179,7 +251,7 @@ export class SessionStore {
       [sessionId, sha256(token), SESSION_DAYS],
     );
     if (result.rowCount !== 1) throw new Error("session vanished during rotation");
-    const row: SessionRow = { id: sessionId, token, slide: false, touch: false };
+    const row: SessionRow = { id: sessionId, token, slide: false, touch: false, noUserAgent: false };
     this.#memo.set(req, Promise.resolve(row));
     return row;
   }
@@ -211,34 +283,40 @@ export class SessionStore {
 
   async #find(token: string | undefined, q: Queryable): Promise<SessionRow | null> {
     if (!isToken(token)) return null;
+    const hash = sha256(token);
+    const key = hash.toString("hex");
     const now = this.#now();
-    const until = this.#unknown.get(token);
+    const until = this.#unknown.get(key);
     if (until !== undefined) {
       if (until > now) return null;
-      this.#unknown.delete(token);
+      this.#unknown.delete(key);
     }
-    const { rows } = await q.query<{ id: string; slide: boolean; touch: boolean }>(
+    const started = this.#stamp;
+    const { rows } = await q.query<{ id: string; slide: boolean; touch: boolean; no_ua: boolean }>(
       `select id,
          expires_at < now() + make_interval(days => $2) - interval '1 day' as slide,
-         last_seen_at < now() - interval '10 minutes' as touch
+         last_seen_at < now() - interval '10 minutes' as touch,
+         user_agent is null as no_ua
        from sessions where token_hash = $1 and expires_at > now() and purpose = $3`,
-      [sha256(token), this.#days, this.purpose],
+      [hash, this.#days, this.purpose],
     );
     const row = rows[0];
     if (!row) {
-      this.#rememberUnknown(token, now);
+      // A promotion stamped since this lookup began may have committed
+      // after its query read the table, so its miss proves nothing.
+      if ((this.#promoted.get(key) ?? 0) <= started) this.#rememberUnknown(key, now);
       return null;
     }
-    return { id: row.id, token, slide: row.slide, touch: row.touch };
+    return { id: row.id, token, slide: row.slide, touch: row.touch, noUserAgent: this.purpose === "room" && row.no_ua };
   }
 
-  #rememberUnknown(token: string, now: number): void {
+  #rememberUnknown(key: string, now: number): void {
     // Oldest first, because a Map keeps insertion order.
     for (const [old, until] of this.#unknown) {
       if (this.#unknown.size < UNKNOWN_MAX && until > now) break;
       this.#unknown.delete(old);
     }
-    this.#unknown.set(token, now + UNKNOWN_TTL_MS);
+    this.#unknown.set(key, now + UNKNOWN_TTL_MS);
   }
 }
 
