@@ -57,6 +57,8 @@ import { useJobWaiting, usePdfJobRoom } from "../features/handouts/pdf/live.ts";
 import { useJournalUnread } from "../features/journal/store.ts";
 import { useLogUnread } from "../features/log/useLogUnread.ts";
 import { useRollToasts } from "../features/dice/useRollToasts.ts";
+import { ClockChip, useClockChipText } from "../features/clock/ClockChip.tsx";
+import { useClockToasts } from "../features/clock/useClockToasts.ts";
 import { PhaseMenu } from "../features/phases/PhaseMenu.tsx";
 import { FrameViewBar } from "../features/scenes/FrameView.tsx";
 import { barInset, chromeZoom, layoutWidth, smallUi, useLayoutSize } from "../features/device/layout.ts";
@@ -405,7 +407,10 @@ function RoomPage() {
   const topInset = useTopBars();
   const placement = useTurnPlacement();
   const fight = useRoomView((s) => !!s.view?.encounter);
-  const panels = panelsFor(role, wide);
+  // The Time panel is listed while the viewer's view holds a clock, and stays while it is open after the DM stops sharing, until it is closed (docs/design/design-v1-calendar.md 4.4).
+  const hasClock = useRoomView((s) => !!s.view?.clock);
+  const timeOpen = wide ? tab === "time" || below === "time" : panel === "time";
+  const panels = panelsFor(role, wide, { clock: hasClock || timeOpen });
   const tools = useRoomView(useShallow((s) => toolsFor(role, s)));
   const tool = activeTool(toolId, role);
   // The keyboard (state/shortcuts.ts) and pasted images (features/images/pasteRouter.ts). A "view as a player" preview answers no key and takes no paste.
@@ -494,6 +499,8 @@ function RoomPage() {
   const unread = useLogUnread(wide ? sideShows("log") : sheet?.id === "log");
   // Others' rolls as toasts while the Dice panel is not on screen (docs/design/design-v1-dice.md 8.5).
   useRollToasts(wide ? sideShows("dice") : sheet?.id === "dice");
+  // Clock lines as toasts while neither the Log nor the Time panel is on screen (docs/design/design-v1-calendar.md 4.7).
+  useClockToasts(wide ? sideShows("log") || sideShows("time") : sheet?.id === "log" || sheet?.id === "time");
   const journalUnread = useJournalUnread();
   // A PDF upload waiting on the DM badges the DM panel, and on a phone the Panels button too (docs/design/design-v1-pdf-handouts.md 4.1.1).
   const uploadWaiting = useJobWaiting() && role === "dm" ? 1 : 0;
@@ -591,7 +598,7 @@ function RoomPage() {
   const saveSplit = useRef<(() => void) | null>(null);
   useLayoutEffect(() => {
     if (splitStored.current !== null || splitRole === null) return;
-    const has = new Set(panelsFor(splitRole, true).map((p) => p.id));
+    const has = new Set(panelsFor(splitRole, true, { clock: true }).map((p) => p.id));
     const entry = readSplit(splitRole, (id) => has.has(id));
     splitStored.current = entry;
     shareRef.current = entry.share;
@@ -1010,6 +1017,10 @@ function RoomPage() {
           // In the bar a player's chip shows only its dot, so the strip has room: from 900 px up below 1,100 px as before, and on a phone while the strip is there.
           chipDot={wide ? width < theme.layout.chipNameMinWidth : placement === "bar" && fight}
           openSheet={openSheet}
+          openTime={() => {
+            focusNext.current = { kind: "panel", id: "time" };
+            ui.openPanel("time", { pane: "top" });
+          }}
         />
         <div
           {...smallUi(zoom)}
@@ -1405,7 +1416,13 @@ function MapArea(props: {
  * so the check runs when the row's size changes (the window), when the
  * strip's size changes (whose turn, "Your turn" and End turn, the timer),
  * and when the bar's other content changes (the room name, the blackout
- * pill, the scene's phases).
+ * pill, the scene's phases, the clock chip's text).
+ *
+ * From 900 px up, while the viewer has a clock, its chip sits before Undo
+ * and is the first step: the strip never moves to the band there, so the
+ * chip leaves before the blackout notice folds, for a player's row too,
+ * which checks whenever the chip shows (docs/design/design-v1-calendar.md
+ * 4.8). It comes back once the layout is wider than where it overflowed.
  */
 function TopBar(props: {
   ref?: Ref<HTMLElement>;
@@ -1416,6 +1433,7 @@ function TopBar(props: {
   placement: TurnPlacement;
   chipDot: boolean;
   openSheet(): OpenSheet | null;
+  openTime(): void;
 }) {
   const name = useRoomView((s) => s.view?.meta.name ?? "");
   const role = useRoomView((s) => s.you?.role);
@@ -1458,10 +1476,14 @@ function TopBar(props: {
   const [fullscreenOffUpTo, setFullscreenOffUpTo] = useState(0);
   const fullscreen = !props.compact && fullscreenSupported() && width > fullscreenOffUpTo;
   const phases = useRoomView((s) => (s.sceneId ? (s.view?.scenes[s.sceneId]?.phases?.length ?? 0) : 0));
+  // From 900 px up the clock's chip is the first thing to give way, and comes back once the row has room (docs/design/design-v1-calendar.md 4.8). A phone's bar has none.
+  const clockText = useClockChipText();
+  const [chipOffUpTo, setChipOffUpTo] = useState(0);
+  const chip = !props.compact && clockText !== null && width > chipOffUpTo;
   // From 900 px up the strip sits in the bar whatever it holds, so only a phone's bar records it.
   const measured = props.placement === "bar" && props.compact;
   // A phone's row, a DM's row from 900 px up, which holds Undo, Redo and the Phase menu, any row that holds Full screen, and once Isometric is offered every row, which holds the View button.
-  const checks = props.compact || role === "dm" || fullscreen || isoOffered;
+  const checks = props.compact || role === "dm" || fullscreen || isoOffered || chip;
   const check = useCallback(() => {
     const row = rowRef.current;
     if (!checks || !row) return;
@@ -1472,6 +1494,7 @@ function TopBar(props: {
     if (overflow <= 0) return;
     // The strip leaves first. Once it is in the band, this runs again with the row it left. Then the blackout notice folds into the DM chip's place, or the chip loses its name, then on a phone the gaps' room and then the View button, which the room's menu still reaches, then Full screen, which the Menu and a key still reach, then the Phase menu, and from 900 px up the gaps' room and the View button last.
     if (measured) recordOverflow(layoutWidth(), overflow);
+    else if (chip) setChipOffUpTo(layoutWidth());
     else if (role === "dm" && blackout && !blackoutShort) setBlackoutShortUpTo(layoutWidth());
     else if (role === "dm" && !dmDot) setDmDotUpTo(layoutWidth());
     else if (isoOffered && props.compact && !tight) setTightUpTo(layoutWidth());
@@ -1480,7 +1503,7 @@ function TopBar(props: {
     else if (phaseMenu) setPhaseOffUpTo(layoutWidth());
     else if (isoOffered && !props.compact && !tight) setWideTightUpTo(layoutWidth());
     else if (isoOffered && !props.compact && props.canFit && !viewFolded) setWideFoldUpTo(layoutWidth());
-  }, [checks, measured, recordOverflow, role, blackout, blackoutShort, dmDot, props.compact, props.canFit, tight, viewFolded, fullscreen, phaseMenu]);
+  }, [checks, measured, chip, recordOverflow, role, blackout, blackoutShort, dmDot, props.compact, props.canFit, tight, viewFolded, fullscreen, phaseMenu]);
   useLayoutEffect(() => {
     const row = rowRef.current;
     if (!checks || !row) return;
@@ -1489,7 +1512,7 @@ function TopBar(props: {
     if (strip) observer.observe(strip);
     return () => observer.disconnect();
   }, [checks, strip, check]);
-  useLayoutEffect(check, [check, name, blackout, role, activeEntryId, round, notice, phases]);
+  useLayoutEffect(check, [check, name, blackout, role, activeEntryId, round, notice, phases, clockText]);
   return (
     <header
       ref={props.ref}
@@ -1541,6 +1564,7 @@ function TopBar(props: {
         {role && !blackoutShort ? <YouChip dm={role === "dm"} dot={role === "dm" ? dmDot : props.chipDot} /> : null}
         {role === "dm" && blackout ? <BlackoutChip compact={blackoutShort} /> : null}
         <div style={{ flex: 1 }} />
+        {chip ? <ClockChip onOpen={props.openTime} /> : null}
         {/* Once Isometric is offered, View or Fit always follows them on a scene, so they keep their whole width. */}
         {props.undo ? <UndoButtons tuck={!(isoOffered && props.canFit)} /> : null}
         {phaseMenu ? <PhaseMenu /> : null}
