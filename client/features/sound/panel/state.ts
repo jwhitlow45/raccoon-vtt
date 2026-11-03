@@ -105,7 +105,7 @@ export type MusicShown = {
   crossingInto: string | null;
 };
 
-/** Where the music is at `t`, from the run alone, the timeline helpers SN-A owns placing Repeat one's passes. */
+/** Where the music is at `t`, from the run alone, shared/sound.ts's timeline helpers placing Repeat one's passes. */
 export function musicShown(music: MusicRun, sounds: Sounds, playlists: Playlists, t: number): MusicShown | null {
   const paused = music.paused !== undefined;
   const track = paused ? music.now : playingAt(music, t);

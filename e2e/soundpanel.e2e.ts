@@ -11,8 +11,8 @@ import { ConsoleWatch, openSideTab, OpSocket, Shots, sideTabName, SocketWatch, s
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 
 /**
- * The Sound panel (docs/design/design-v1-music.md 4.1, 4.3 and 4.6, lane
- * SN-D), on the real server serving the production build with ROOM_SOUND
+ * The Sound panel (docs/design/design-v1-music.md 4.1, 4.3 and 4.6), on
+ * the real server serving the production build with ROOM_SOUND
  * on. Dana the DM is at a desk and Pat on a phone. Sounds are made of
  * frames of silence (shared/audio/mp3Testutil.ts), so no step needs an
  * encoder, and the browsers start with autoplay allowed, since what plays

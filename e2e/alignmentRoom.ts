@@ -1398,7 +1398,7 @@ async function soundScreens(sweep: Sweep, page: Page, size: Size, scale: number)
     await page.getByRole("button", { name: /^Back to Sound/ }).first().click();
     await panel.getByRole("heading", { name: "Music", exact: true }).waitFor();
 
-    // An upload in progress under Add music (lane SN-E's rows), held on its percent by a slow upload, then cancelled.
+    // An upload in progress under Add music (sound/upload/AddSounds.tsx's rows), held on its percent by a slow upload, then cancelled.
     const music = panel.locator('[data-add-sounds="music"]');
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("Network.enable");
@@ -1415,7 +1415,7 @@ async function soundScreens(sweep: Sweep, page: Page, size: Size, scale: number)
       await cdp.detach();
     }
 
-    // A refused file on its row under Add effects (lane SN-E's rows), then dismissed.
+    // A refused file on its row under Add effects (sound/upload/AddSounds.tsx's rows), then dismissed.
     const adds = panel.locator('[data-add-sounds="effect"]');
     await adds.locator('input[type="file"]').setInputFiles({ name: "Broken.wav", mimeType: "audio/wav", buffer: Buffer.from("not a sound at all") });
     const refused = adds.locator('[data-sound-row="refused"]');
@@ -1424,7 +1424,7 @@ async function soundScreens(sweep: Sweep, page: Page, size: Size, scale: number)
     await sweep.measure(page, "sound-upload-refused", adds);
     await refused.getByRole("button", { name: /^Dismiss/ }).click();
 
-    // This device's Sounds, Room sound on and off (lane SN-C's controls).
+    // This device's Sounds, Room sound on and off (device/ThisDevice.tsx's controls).
     const menu = await openMenu(page);
     const menuBack = page.getByRole("button", { name: /^Back to Menu/ });
     if (await visible(menuBack)) await menuBack.click();
@@ -1439,7 +1439,7 @@ async function soundScreens(sweep: Sweep, page: Page, size: Size, scale: number)
     await roomSound.click();
     if (await visible(menuBack)) await menuBack.click();
 
-    // Room settings' Backup with Include sounds, which shows once the room's storage names its sounds (lane SN-B's).
+    // Room settings' Backup with Include sounds, which shows once the room's storage names its sounds (settings/ExportSection.tsx).
     await menu.getByRole("button", { name: /^Room settings/ }).click();
     const backup = soundSection(menu, "Backup");
     await backup.getByRole("checkbox", { name: "Include sounds" }).waitFor({ timeout: 15_000 });
@@ -1448,7 +1448,7 @@ async function soundScreens(sweep: Sweep, page: Page, size: Size, scale: number)
     if (await visible(menuBack)) await menuBack.click();
     await escapeAll(page);
 
-    // Home's import card saying how many sounds a backup left out (lane SN-B's), the server's answer routed.
+    // Home's import card saying how many sounds a backup left out (settings/ImportRoomCard.tsx), the server's answer routed.
     await page.route("**/api/rooms/import", (route) => route.fulfill({ json: { roomId: run.roomId, dmLink: `${server.origin}/r/${run.roomId}`, soundsLeftOut: 2 } }));
     try {
       await page.goto(`${server.origin}/`);
@@ -1491,7 +1491,7 @@ async function patSoundScreens(sweep: Sweep, page: Page): Promise<void> {
   await soundPlaying();
   try {
     await escapeAll(page);
-    // The ask (lane SN-C's toast), left unanswered so the next size's load asks again.
+    // The ask (sound/engine/useSoundAsk.ts's toast), left unanswered so the next size's load asks again.
     const ask = page.getByText("The DM is playing sound for the room.", { exact: true }).locator("xpath=ancestor::*[.//button][1]");
     await ask.waitFor({ timeout: 15_000 });
     await sweep.measure(page, "sound-ask", ask);

@@ -19,7 +19,7 @@ export const SOUND_TEST_FLAG = "globalThis.__rvttSoundTest = true;";
  * a user activation and lets a page that was tapped before keep playing
  * after a reload, where the HTML spec and Safari count only pointerup,
  * touchend, click and keys, and each page load starts locked. So here, as
- * lane audiounlock's rolls.e2e.ts does for the turn chime, an AudioContext
+ * rolls.e2e.ts does for the turn chime, an AudioContext
  * reads "suspended" until a resume() runs inside an event the spec counts,
  * a resume() outside one stays pending, and an audio element refuses to
  * play until it has played once inside such an event, which is what the

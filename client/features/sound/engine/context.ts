@@ -6,7 +6,7 @@ import { armAudioUnlock, onActivation, type Activation, type UnlockableContext }
  * must be made or resumed inside the first gesture the browser counts as an
  * activation, which can come before the engine has loaded.
  *
- * The context is armed by lane audiounlock's `armAudioUnlock`, which creates
+ * The context is armed by lib/activation.ts's `armAudioUnlock`, which creates
  * or resumes it inside the gesture and listens again whenever it leaves
  * `running`. The element pool is armed by `onActivation(blessPool)`: while
  * this page wants no sound the attempt answers false and touches nothing,

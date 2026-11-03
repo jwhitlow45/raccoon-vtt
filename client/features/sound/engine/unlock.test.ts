@@ -5,7 +5,7 @@ import { createSoundUnlock, LISTEN_ELEMENT, mixerSupported, POOL_SIZE, SILENCE_U
 import { planVoices, Voices } from "./voices.ts";
 
 /*
- * The room sound's unlock on lane audiounlock's helper (lib/activation.ts,
+ * The room sound's unlock on the shared activation helper (lib/activation.ts,
  * docs/design/design-v1-music.md 5.5 and 12): the pool's attempt answers
  * false and plays nothing with Room sound off, answers true only once every
  * play resolved, a blessing in flight is the one a second call gets, the

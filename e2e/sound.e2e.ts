@@ -10,7 +10,7 @@ import { addSound, errors, inStep, IPHONE_AUDIO, musicVoice, roomSoundScript, SO
 
 /**
  * Synced music and sound on every device (docs/design/design-v1-music.md 5
- * and 12), lane SN-C's steps sn-1 to sn-7: sync and a late join with the
+ * and 12), steps sn-1 to sn-7: sync and a late join with the
  * ask, a crossfade and a pause, what a player's socket carries, a blackout,
  * effects and Stop all, a touch phone's ask and its tap after a reload, and
  * one page per browser with the table display. The sounds are silence
