@@ -3663,7 +3663,8 @@ function projectEventCtx(ctx: Ctx, data: LogEvent, copy = false): LogEvent | nul
       return ctx.paused ? null : data;
     case "clock":
       // A player keeps every clock line that reached them, after sharing goes off or the clock stops too (docs/design/design-v1-calendar.md 6.4).
-      return data;
+      // Behind a blackout they wait with the clock, as encounter lines do: a time skip set up there is news when the game resumes.
+      return ctx.paused ? null : data;
     case "handout": {
       const handout = ownEntry(ctx.state.handouts, data.handoutId);
       return handout && projectHandoutCtx(ctx, handout) ? data : null;
@@ -4052,12 +4053,15 @@ function projectEntityCtx(ctx: Ctx, key: EntityKey): unknown {
  * shown, and nothing of it otherwise. Rev 0, so its number never tells how
  * often a hidden clock moved. A running fight's seconds come from the
  * round, which every player already gets, so a shown clock read with them
- * tells nothing more.
+ * tells nothing more. Behind a blackout a player gets none, as they get no
+ * encounter: the clock read without the fight's rounds would show the wrong
+ * time, and a blackout's global re-projection brings both back together.
  */
 function projectClockCtx(ctx: Ctx): ProjectedClock | null {
   const clock = ctx.state.clock;
   if (!clock) return null;
   if (ctx.viewer.role === "dm") return clock;
+  if (ctx.paused) return null;
   return clock.shown ? { id: clock.id, rev: 0, t: clock.t, calendar: clock.calendar } : null;
 }
 

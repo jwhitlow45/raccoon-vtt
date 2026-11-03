@@ -11,8 +11,8 @@ import { startEngine, type Engine, type Socket } from "./testing.ts";
  * The room's clock over the real socket and Postgres
  * (docs/design/design-v1-calendar.md 6.4): while the DM hides it, no frame a
  * player or a table display receives holds the clock, its calendar or a line
- * about it, and what reached a player while it was shown is still theirs
- * after a restart.
+ * about it, nor while a blackout is up, and what reached a player while it
+ * was shown is still theirs after a restart.
  */
 const MONTHS = { kind: "months" as const, months: [{ name: "Deepwinter", days: 30 }, { name: "Frostmoot", days: 1 }], week: ["Moonday", "Starday"], era: "Ashen Age" };
 const SECRETS = ["Deepwinter", "Frostmoot", "Moonday", "Starday", "Ashen Age", "\"clock\"", "clock:", "longRest"];
@@ -86,5 +86,41 @@ describe("the room's clock on the server", () => {
     assert.ok(!("clock" in reloaded));
     const lines = reloaded.log.filter((l) => l.data?.type === "clock");
     assert.deepEqual(lines.map((l) => l.id), [line.key.slice("log:".length)], "the one line written while shown, and none of the hidden ones");
+  });
+
+  test("behind a blackout a shown clock and its lines never cross a player's or a display's socket, and come back when it ends (ASTRA-06)", async () => {
+    const dmClient = t.client();
+    const { roomId } = await dmClient.createRoom("Blackout clock");
+    const playerClient = t.client();
+    await playerClient.join(roomId, "Pip");
+    const dm = await t.connect(roomId, dmClient);
+    const player = await t.connect(roomId, playerClient);
+    await dm.snapshot("dm");
+    await player.snapshot("p");
+    const tv = t.client();
+    const code = (await dmClient.post(`/api/rooms/${roomId}/display/code`)).json<{ code: string }>().code;
+    assert.equal((await tv.post("/api/display/redeem", { code: formatDisplayCode(code) })).statusCode, 200);
+    const display = await t.connectDisplay(roomId, tv);
+    await display.snapshot("tv");
+
+    await dm.apply({ t: "view.blackout", blackout: true });
+    const playerFrames = wire(player);
+    const displayFrames = wire(display);
+    await dm.apply({ t: "clock.start", id: uuidv7(), at: 8 * 3_600, shown: true, calendar: MONTHS });
+    await dm.apply({ t: "clock.advance", by: 3 * 86_400 });
+    await dm.apply({ t: "log.chat", text: "fence" });
+    await player.next("ev", (m) => m.changes.some((c) => "value" in c && (c.value as LogEntry | null)?.text === "fence"));
+    assert.deepEqual(leaks(playerFrames), [], "nothing of the clock reaches a player behind a blackout");
+    assert.deepEqual(leaks(displayFrames), [], "nor a table display");
+    const paused = (await (await t.connect(roomId, playerClient)).snapshot("p2")).state as ProjectedState;
+    assert.ok(!("clock" in paused), "a reload behind the blackout holds no clock");
+    assert.deepEqual(paused.log.filter((l) => l.data?.type === "clock"), []);
+
+    await dm.apply({ t: "view.blackout", blackout: false });
+    const back = await player.next("ev", (m) => m.changes.some((c) => c.key === "clock"));
+    const clock = back.changes.find((c) => c.key === "clock");
+    assert.equal(clock && "value" in clock ? (clock.value as { t: number }).t : null, 8 * 3_600 + 3 * 86_400, "the clock comes back as it is now");
+    const lines = back.changes.filter((c) => c.key.startsWith("log:") && "value" in c && (c.value as LogEntry | null)?.data?.type === "clock");
+    assert.equal(lines.length, 2, "with the start line and the step's");
   });
 });

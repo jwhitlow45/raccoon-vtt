@@ -5,7 +5,8 @@ import type { Calendar, LogEntry, RoomState, Viewer } from "./model.ts";
 import { allKeys, projectArchivedLog, projectEntity, projectState } from "./project.ts";
 import type { Op } from "./protocol.ts";
 import { applyOp } from "./reducer.ts";
-import { DM, P1, P2, character, env, room, token } from "./testutil.ts";
+import { clockNow } from "./calendar.ts";
+import { DM, P1, P2, character, entry, env, room, token } from "./testutil.ts";
 
 /** The clock's projection and its lines (docs/design/design-v1-calendar.md 6.4). */
 const DISPLAY: Viewer = { memberId: "display:abcdefghijkl", role: "player" };
@@ -95,5 +96,54 @@ describe("the clock reaches the DM whole and players only while shown (6.4)", ()
   test("a room with no clock projects as it always did, and a global re-projection covers the clock's key", () => {
     for (const who of [DM, ...PLAYERS]) assert.ok(!("clock" in seen(base(), who)));
     assert.ok(allKeys(base()).includes(keys.clock));
+  });
+});
+
+describe("behind a blackout (ASTRA-06, CALB-O-05, D-261102-429)", () => {
+  /** A shown clock at 8:00 AM stored, in round 11 of a fight: the current time is 60 s past it. */
+  function inFight(): RoomState {
+    const state = step(base(), { t: "clock.start", id: "c1", at: 8 * 3_600, shown: true, calendar: MONTHS }, 1);
+    return { ...state, encounter: { rev: 1, round: 11, activeEntryId: "e2", entries: [entry("e1", { tokenId: "bree", value: 15 }), entry("e2", { tokenId: "bree", value: 5, tieOrder: 1 })] } };
+  }
+
+  test("players and a table display get no clock and no clock line, by snapshot, by key or from the archive", () => {
+    let state = step(inFight(), { t: "view.blackout", blackout: true }, 2);
+    state = step(state, { t: "clock.advance", by: 3 * 86_400 }, 3);
+    for (const who of PLAYERS) {
+      const view = seen(state, who);
+      assert.ok(!("clock" in view), who.memberId);
+      assert.equal(projectEntity(keys.clock, state, who, { sceneId: "s1" }), null, who.memberId);
+      assert.deepEqual(clockLines(view.log), [], who.memberId);
+      assert.deepEqual(clockLines(projectArchivedLog(state, state.log, who, { sceneId: "s1" })), [], who.memberId);
+      for (const line of state.log) assert.equal(projectEntity(keys.log(line.id), state, who, { sceneId: "s1" }), null, `${who.memberId} ${line.id}`);
+      assert.ok(!JSON.stringify(view).includes("Deepwinter"), who.memberId);
+    }
+    assert.ok(seen(state, DM).clock, "the DM keeps the clock");
+    assert.deepEqual(clockLines(seen(state, DM).log), ["1:0", "3:0"]);
+  });
+
+  test("when it ends the clock comes back at the fight's time with every line, and a round after it reaches the clock", () => {
+    let state = step(inFight(), { t: "view.blackout", blackout: true }, 2);
+    state = step(state, { t: "clock.advance", by: 600 }, 3);
+    const lifted = applyOp(state, { t: "view.blackout", blackout: false }, DM, env(4));
+    assert.ok(lifted.ok);
+    assert.ok(lifted.global, "a blackout's end re-projects every key, the clock's and the encounter's together");
+    state = lifted.state;
+    const dmNow = clockNow(state.clock!, state.encounter);
+    assert.equal(dmNow, 8 * 3_600 + 600 + 60);
+    for (const who of PLAYERS) {
+      const view = seen(state, who);
+      assert.equal(clockNow(view.clock!, view.encounter), dmNow, `${who.memberId} reads the DM's time, the fight's seconds included`);
+    }
+    for (const who of MEMBERS) assert.deepEqual(clockLines(seen(state, who).log), ["1:0", "3:0"], who.memberId);
+    const next = applyOp(state, { t: "encounter.next" }, DM, env(5));
+    assert.ok(next.ok);
+    assert.ok(next.touched.includes(keys.encounter), "the round's change reaches players by the encounter's key");
+    for (const who of PLAYERS) {
+      const encounter = projectEntity(keys.encounter, next.state, who, { sceneId: "s1" }) as RoomState["encounter"];
+      const clock = projectEntity(keys.clock, next.state, who, { sceneId: "s1" }) as RoomState["clock"];
+      assert.equal(clockNow(clock!, encounter), clockNow(next.state.clock!, next.state.encounter), who.memberId);
+      assert.equal(clockNow(clock!, encounter), dmNow + 6);
+    }
   });
 });
