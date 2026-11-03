@@ -6,7 +6,7 @@ import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
 import { opSchema, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { saveOutcomeLedgerSchema } from "#shared/saveOutcomeContract.ts";
-import type { Queryable } from "../auth/tx.ts";
+import { CommitOutcomeUnknown, type Queryable } from "../auth/tx.ts";
 
 /**
  * Everything the room engine reads from or writes to Postgres (design
@@ -210,13 +210,10 @@ export type BatchWrite = {
   archive?: boolean;
 };
 
-/** The error thrown when the COMMIT itself failed, so the outcome must be read back before any retry. */
-export class CommitOutcomeUnknown extends Error {
-  constructor(cause: unknown) {
-    super("commit outcome unknown", { cause });
-    this.name = "CommitOutcomeUnknown";
-  }
-}
+// One class for every commit whose answer was lost, the room's batches and
+// the access routes' transactions alike. Re-exported so the room engine
+// keeps importing it from here.
+export { CommitOutcomeUnknown };
 
 /**
  * Writes one batch in one transaction (design 7.2): the op rows, the log rows

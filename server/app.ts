@@ -7,7 +7,7 @@ import { registerCleanup, type CleanupOptions } from "./assets/cleanup.ts";
 import { AssetError } from "./assets/errors.ts";
 import { uploadedAssetIds } from "./assets/store.ts";
 import type { PasswordHasher } from "./auth/passwords.ts";
-import { setupAuth } from "./auth/plugin.ts";
+import { setupAuth, type AccessOptions } from "./auth/plugin.ts";
 import type { Config } from "./config.ts";
 import { registerAdminRoutes } from "./http/admin.ts";
 import { registerAssetRoutes, type AssetRouteOptions } from "./http/assets.ts";
@@ -40,6 +40,8 @@ export type AppDeps = {
   gateway?: RoomGateway;
   /** Tests pass their own to control the argon2 queue. */
   hasher?: PasswordHasher;
+  /** The join paths' bounds and lifetimes, for tests (docs/design/design-v1-join-requests.md). */
+  access?: AccessOptions;
   /** Room engine limits and timings, for tests. */
   rooms?: Partial<ManagerOptions>;
   ws?: WsOptions;
@@ -76,7 +78,7 @@ const LOG_METADATA_CONNECT_MS = 5_000;
  * server/rooms/*). Add the registration here, one line per module, after
  * setupAuth: the rate limiter only covers routes registered after it.
  */
-export async function buildApp({ config, pool, gateway, hasher, rooms, ws, export: exportOptions, cleanup, ddb, assets, log }: AppDeps): Promise<FastifyInstance> {
+export async function buildApp({ config, pool, gateway, hasher, access, rooms, ws, export: exportOptions, cleanup, ddb, assets, log }: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({
     logger: config.NODE_ENV === "test" ? false : { level: config.production ? "info" : "debug" },
     // cloudflared keeps idle origin connections for 90 s. A shorter Node
@@ -127,7 +129,7 @@ export async function buildApp({ config, pool, gateway, hasher, rooms, ws, expor
 
   const roomGateway = gateway ?? manager.gateway;
   app.decorate("gateway", roomGateway);
-  const kit = await setupAuth(app, { config, pool, gateway: roomGateway, hasher });
+  const kit = await setupAuth(app, { config, pool, gateway: roomGateway, hasher, access });
 
   await registerRoomRoutes(app, kit);
   await registerJoinRoutes(app, kit);

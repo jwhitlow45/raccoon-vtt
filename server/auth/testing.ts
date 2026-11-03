@@ -4,9 +4,11 @@ import pg from "pg";
 import { buildApp } from "../app.ts";
 import { loadConfig, type Config } from "../config.ts";
 import { applySchema } from "../db.ts";
-import { DirectGateway } from "../rooms/gateway.ts";
+import type { Member } from "#shared/model.ts";
+import { DirectGateway, MAX_MEMBERS, RoomFullError, rosterOf, type RoomGateway, type RosterEntry, type SocketFilter } from "../rooms/gateway.ts";
 import { ipKey } from "./ipKey.ts";
 import type { PasswordHasher } from "./passwords.ts";
+import type { AccessOptions } from "./plugin.ts";
 
 /**
  * Integration test kit: an app on the shared development Postgres, clients
@@ -48,7 +50,7 @@ export type TestApp = {
 };
 
 export async function startTestApp(
-  opts: { env?: Record<string, string>; hasher?: PasswordHasher } = {},
+  opts: { env?: Record<string, string>; hasher?: PasswordHasher; access?: AccessOptions } = {},
 ): Promise<TestApp> {
   const config = testConfig(opts.env);
   const pool = new pg.Pool({ connectionString: config.DATABASE_URL, max: 10 });
@@ -56,7 +58,7 @@ export async function startTestApp(
   const { rows } = await pool.query<{ now: Date }>("select now()");
   const startedAt = rows[0]?.now ?? new Date();
   const gateway = new DirectGateway(pool);
-  const app = await buildApp({ config, pool, gateway, hasher: opts.hasher });
+  const app = await buildApp({ config, pool, gateway, hasher: opts.hasher, access: opts.access });
   await app.ready();
 
   const userAgent = `raccoon-itest/${randomBytes(6).toString("hex")}`;
@@ -172,5 +174,200 @@ export class TestClient {
     const res = await this.get(`/api/rooms/${roomId}/me`);
     if (res.statusCode !== 200) return { status: res.statusCode };
     return { status: 200, ...res.json<{ role: string; memberId: string }>() };
+  }
+}
+
+// Fakes for the join paths' unit and property tests
+// (docs/design/design-v1-join-requests.md 10): an in-memory stand-in for the
+// few tables admission touches, and a room gateway whose member calls can
+// be held, failed or slowed.
+
+type GrantRow = { session_id: string; room_id: string; member_id: string; role: string; epoch: number };
+type FakeTables = {
+  rooms: Map<string, { player_epoch: number; dm_epoch: number; join_mode: string }>;
+  grants: Map<string, GrantRow>;
+  dmMembers: Set<string>;
+};
+
+function copyTables(t: FakeTables): FakeTables {
+  return {
+    rooms: new Map([...t.rooms].map(([k, v]) => [k, { ...v }])),
+    grants: new Map([...t.grants].map(([k, v]) => [k, { ...v }])),
+    dmMembers: new Set(t.dmMembers),
+  };
+}
+
+/**
+ * The tables a join attempt reads and writes, in memory, answering only the
+ * statements admission and revokeGrants send. A transaction works on a copy
+ * that replaces the tables at COMMIT. No locks: tests drive the order.
+ */
+export class FakeAccessDb {
+  tables: FakeTables = { rooms: new Map(), grants: new Map(), dmMembers: new Set() };
+  /** Runs before every statement. Throw to fail it, or await to hold it. */
+  before: (sql: string) => Promise<void> | void = () => undefined;
+  /** The next COMMIT's answer is lost: "applied" commits first, "dropped" does not. */
+  loseCommit: "applied" | "dropped" | null = null;
+  /** Runs before a connection is handed out. */
+  connecting: () => Promise<void> | void = () => undefined;
+  statements: string[] = [];
+
+  addRoom(roomId: string, epochs: { player_epoch?: number; dm_epoch?: number; join_mode?: string } = {}): void {
+    this.tables.rooms.set(roomId, { player_epoch: epochs.player_epoch ?? 1, dm_epoch: epochs.dm_epoch ?? 1, join_mode: epochs.join_mode ?? "password" });
+  }
+
+  grant(sessionId: string, roomId: string): GrantRow | undefined {
+    return this.tables.grants.get(`${sessionId}|${roomId}`);
+  }
+
+  get pool(): pg.Pool {
+    const db = this;
+    return {
+      async connect() {
+        await db.connecting();
+        let tx: FakeTables | null = null;
+        return {
+          async query(text: string, values: unknown[] = []) {
+            const sql = text.replace(/\s+/g, " ").trim();
+            db.statements.push(sql);
+            await db.before(sql);
+            if (sql === "begin") {
+              tx = copyTables(db.tables);
+              return result([]);
+            }
+            if (sql === "commit") {
+              const lose = db.loseCommit;
+              db.loseCommit = null;
+              if (lose === "applied" && tx) db.tables = tx;
+              if (lose) throw new Error("connection lost during commit");
+              if (tx) db.tables = tx;
+              tx = null;
+              return result([]);
+            }
+            if (sql === "rollback") {
+              tx = null;
+              return result([]);
+            }
+            return db.run(sql, values, tx ?? db.tables);
+          },
+          release() {},
+        };
+      },
+      query(text: string, values: unknown[] = []) {
+        return db.run(text.replace(/\s+/g, " ").trim(), values, db.tables);
+      },
+    } as unknown as pg.Pool;
+  }
+
+  run(sql: string, v: unknown[], t: FakeTables): Promise<pg.QueryResult> {
+    const s = (i: number) => String(v[i]);
+    if (sql.startsWith("set local")) return Promise.resolve(result([]));
+    if (sql.startsWith("select player_epoch, dm_epoch") || sql.startsWith("select join_mode, player_epoch, dm_epoch")) {
+      const room = t.rooms.get(s(0));
+      return Promise.resolve(result(room ? [{ ...room }] : []));
+    }
+    if (sql.startsWith("select dm_epoch from rooms")) {
+      const room = t.rooms.get(s(0));
+      return Promise.resolve(result(room ? [{ dm_epoch: room.dm_epoch }] : []));
+    }
+    if (sql.startsWith("select role, member_id, epoch from grants where session_id = $1 and room_id = $2")) {
+      const g = t.grants.get(`${s(0)}|${s(1)}`);
+      const rows = g && (!sql.includes("role in") || g.role === "dm" || g.role === "player") ? [{ role: g.role, member_id: g.member_id, epoch: g.epoch }] : [];
+      return Promise.resolve(result(rows));
+    }
+    if (sql.startsWith("select member_id from room_dm_members")) {
+      return Promise.resolve(result([...t.dmMembers].filter((k) => k.startsWith(`${s(0)}|`)).map((k) => ({ member_id: k.slice(s(0).length + 1) }))));
+    }
+    if (sql.startsWith("insert into grants")) {
+      t.grants.set(`${s(0)}|${s(1)}`, { session_id: s(0), room_id: s(1), member_id: s(2), role: s(3), epoch: Number(v[4]) });
+      return Promise.resolve(result([]));
+    }
+    if (sql.startsWith("insert into room_dm_members")) {
+      for (const m of v[1] as string[]) t.dmMembers.add(`${s(0)}|${m}`);
+      return Promise.resolve(result([]));
+    }
+    if (sql.startsWith("delete from grants")) {
+      const removed: GrantRow[] = [];
+      for (const [k, g] of t.grants) {
+        if (g.room_id !== s(0)) continue;
+        let hit = false;
+        if (sql.includes("and session_id = $2 and member_id = $3")) hit = g.session_id === s(1) && g.member_id === s(2) && g.role === s(3) && g.epoch === Number(v[4]);
+        else if (sql.includes("and member_id = $2")) hit = g.member_id === s(1) && (!sql.includes("role = any") || (v[2] as string[]).includes(g.role));
+        else if (sql.includes("and session_id = $2")) hit = g.session_id === s(1) && (!sql.includes("role = any") || (v[2] as string[]).includes(g.role));
+        if (hit) {
+          removed.push(g);
+          t.grants.delete(k);
+        }
+      }
+      return Promise.resolve(result(removed.map((g) => ({ session_id: g.session_id, member_id: g.member_id, role: g.role }))));
+    }
+    if (sql.startsWith("delete from dm_invites") || sql.startsWith("delete from display_codes")) return Promise.resolve(result([]));
+    if (sql.startsWith("select distinct member_id from grants")) {
+      const ids = new Set(v[1] as string[]);
+      return Promise.resolve(result([...t.grants.values()].filter((g) => g.room_id === s(0) && g.role === "dm" && ids.has(g.member_id)).map((g) => ({ member_id: g.member_id }))));
+    }
+    return Promise.reject(new Error(`FakeAccessDb does not know: ${sql}`));
+  }
+}
+
+function result(rows: Record<string, unknown>[]): pg.QueryResult {
+  return { rows, rowCount: rows.length, command: "", oid: 0, fields: [] } as pg.QueryResult;
+}
+
+/**
+ * A room gateway over an in-memory roster. `addMember` and `removeMember`
+ * go through `hold`, so a test can delay, fail or count each call.
+ */
+export class FakeRoomGateway implements RoomGateway {
+  members = new Map<string, Map<string, Member>>();
+  hold: (call: "add" | "remove", roomId: string, memberId: string) => Promise<void> | void = () => undefined;
+  calls: string[] = [];
+  closed: Array<{ roomId: string; filter: SocketFilter; code: number }> = [];
+  signals: string[] = [];
+
+  room(roomId: string): Map<string, Member> {
+    let m = this.members.get(roomId);
+    if (!m) this.members.set(roomId, (m = new Map()));
+    return m;
+  }
+
+  async createRoom(): Promise<void> {}
+  async addMember(roomId: string, member: Member): Promise<void> {
+    this.calls.push(`add ${member.id}`);
+    await this.hold("add", roomId, member.id);
+    const room = this.room(roomId);
+    if (!room.has(member.id) && room.size >= MAX_MEMBERS) throw new RoomFullError();
+    room.set(member.id, member);
+  }
+  async setMemberKind(roomId: string, memberId: string, kind: Member["kind"]): Promise<void> {
+    const m = this.room(roomId).get(memberId);
+    if (m) this.room(roomId).set(memberId, { ...m, kind });
+  }
+  async removeMember(roomId: string, memberId: string): Promise<void> {
+    this.calls.push(`remove ${memberId}`);
+    await this.hold("remove", roomId, memberId);
+    this.room(roomId).delete(memberId);
+  }
+  closeSockets(roomId: string, filter: SocketFilter, code: number): void {
+    this.closed.push({ roomId, filter, code });
+  }
+  accessChanged(): void {}
+  joinRequestsChanged(roomId: string): void {
+    this.signals.push(roomId);
+  }
+  openSessions(): ReadonlySet<string> {
+    return new Set();
+  }
+  async deleteRoom(roomId: string): Promise<boolean> {
+    return this.members.delete(roomId);
+  }
+  async playerRoster(roomId: string): Promise<RosterEntry[] | null> {
+    return rosterOf(Object.fromEntries(this.room(roomId)), "player");
+  }
+  async dmRoster(roomId: string): Promise<RosterEntry[] | null> {
+    return rosterOf(Object.fromEntries(this.room(roomId)), "dm");
+  }
+  async getMember(roomId: string, memberId: string): Promise<Member | null> {
+    return this.room(roomId).get(memberId) ?? null;
   }
 }

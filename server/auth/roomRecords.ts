@@ -2,10 +2,11 @@ import type pg from "pg";
 import { uuidv7 } from "#shared/ids.ts";
 import { createInitialState } from "#shared/initial.ts";
 import type { Member } from "#shared/model.ts";
-import { RoomNotFoundError, type RoomGateway } from "../rooms/gateway.ts";
+import { RoomNotFoundError, type RoomGateway, type RosterEntry } from "../rooms/gateway.ts";
+import { formerDms } from "./grants.ts";
 import { newRoomId } from "./roomId.ts";
 import { randomToken, sha256 } from "./tokens.ts";
-import { withTx } from "./tx.ts";
+import { withTx, type Queryable } from "./tx.ts";
 
 /**
  * Creating a room and replacing its DM key: the parts shared by the HTTP
@@ -69,4 +70,21 @@ export async function replaceDmKey(tx: pg.PoolClient, roomId: string): Promise<{
   if (!row) throw new RoomNotFoundError(roomId);
   await tx.query("delete from dm_invites where room_id = $1 and used_at is null", [roomId]);
   return { key, epoch: row.dm_epoch };
+}
+
+/**
+ * The players a device may continue as, and a DM may let a requester in
+ * as: player members that were never a DM, in join order. A member still
+ * being added for a join (`inFlight`) is left out, so no other device can
+ * claim it before its own grant is written
+ * (docs/design/design-v1-join-requests.md 5.1).
+ */
+export async function continuable(
+  deps: { pool: Queryable; gateway: RoomGateway },
+  roomId: string,
+  inFlight: ReadonlySet<string> = new Set(),
+): Promise<RosterEntry[]> {
+  const roster = (await deps.gateway.playerRoster(roomId)) ?? [];
+  const dms = await formerDms(deps.pool, roomId);
+  return roster.filter((m) => !dms.has(m.id) && !inFlight.has(m.id));
 }

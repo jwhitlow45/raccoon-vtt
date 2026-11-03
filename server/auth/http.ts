@@ -5,6 +5,7 @@ import type { ApiErrorCode } from "#shared/apiErrors.ts";
 import { textSchemas } from "#shared/protocol.ts";
 import type { Config } from "../config.ts";
 import { RoomFullError, RoomNotFoundError, type RoomGateway } from "../rooms/gateway.ts";
+import type { Admissions } from "./admit.ts";
 import type { Role } from "./grants.ts";
 import { BusyError, type PasswordHasher } from "./passwords.ts";
 import type { SlowLimits, Verdict } from "./ratelimit.ts";
@@ -28,6 +29,8 @@ export type AuthKit = {
   hasher: PasswordHasher;
   limits: SlowLimits;
   tickets: JoinTickets;
+  /** Every join's member and grant, in that order (server/auth/admit.ts). */
+  admissions: Admissions;
   /** The caller's address as limits count it: clientIp(), then ipKey(). */
   ip(req: FastifyRequest): string;
   /** The caller's own address, from clientIp(), for Turnstile. */

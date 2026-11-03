@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import type pg from "pg";
 import type { Config } from "../config.ts";
 import type { RoomGateway } from "../rooms/gateway.ts";
+import { Admissions, type AdmissionsOptions } from "./admit.ts";
 import { clientIp } from "./clientIp.ts";
 import { checkDisplayGrant, checkGrant } from "./grants.ts";
 import { ipKey } from "./ipKey.ts";
@@ -15,6 +16,11 @@ import { JoinTickets } from "./tickets.ts";
 import type { AuthService } from "./types.ts";
 
 const HOUR_MS = 3_600_000;
+/** How often owed member removals and unknown join outcomes are followed up. */
+const FOLLOW_UP_MS = 15_000;
+
+/** Timings of the join paths, for tests. */
+export type AccessOptions = { admissions?: AdmissionsOptions };
 
 /**
  * Sets up authentication on the app: the cookie parser, the per-request rate
@@ -25,7 +31,7 @@ const HOUR_MS = 3_600_000;
  */
 export async function setupAuth(
   app: FastifyInstance,
-  deps: { config: Config; pool: pg.Pool; gateway: RoomGateway; hasher?: PasswordHasher },
+  deps: { config: Config; pool: pg.Pool; gateway: RoomGateway; hasher?: PasswordHasher | undefined; access?: AccessOptions | undefined },
 ): Promise<AuthKit> {
   const { config, pool, gateway } = deps;
   const cookie = cookieSettings(config);
@@ -75,6 +81,13 @@ export async function setupAuth(
   timer.unref();
   app.addHook("onClose", async () => clearInterval(timer));
 
+  const admissions = new Admissions({ pool, gateway, log: app.log, options: deps.access?.admissions });
+  const followUps = setInterval(() => {
+    void admissions.followUp().catch((err: unknown) => app.log.warn({ err }, "join follow-up failed"));
+  }, FOLLOW_UP_MS);
+  followUps.unref();
+  app.addHook("onClose", async () => clearInterval(followUps));
+
   return {
     config,
     pool,
@@ -85,6 +98,7 @@ export async function setupAuth(
     hasher: deps.hasher ?? new PasswordHasher(),
     limits,
     tickets: new JoinTickets(),
+    admissions,
     ip: (req) => ipKey(clientIp(req, trust)),
     clientIp: (req) => clientIp(req, trust),
   };

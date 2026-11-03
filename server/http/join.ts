@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { checkGrant, formerDms, putGrant, revokeGrants } from "../auth/grants.ts";
+import type { AdmitWho } from "../auth/admit.ts";
+import { checkGrant } from "../auth/grants.ts";
 import {
   accessErrors,
   type AuthKit,
@@ -14,10 +15,9 @@ import {
   roomParam,
   Token,
 } from "../auth/http.ts";
-import { newMember } from "../auth/roomRecords.ts";
+import { continuable, newMember } from "../auth/roomRecords.ts";
 import { turnstileEnabled, verifyTurnstile } from "../auth/turnstile.ts";
 import { withTx } from "../auth/tx.ts";
-import { RoomFullError, type RosterEntry } from "../rooms/gateway.ts";
 
 /**
  * Joining as a player, in two steps so the roster is never shown before the
@@ -26,7 +26,9 @@ import { RoomFullError, type RosterEntry } from "../rooms/gateway.ts";
  * 1. `join` checks the password and returns a join ticket, the player
  *    roster and the DMs' current colors.
  * 2. `join/complete` spends the ticket to continue as a listed player or to
- *    become a new one, and writes the player grant.
+ *    become a new one. A new player's member is added first and its grant
+ *    written second (server/auth/admit.ts), so a failure in between leaves
+ *    an unused member, never a grant without one.
  *
  * Once a room has seen many wrong passwords in an hour, step 1 also needs a
  * solved Turnstile check (design 10.3). Without TURNSTILE_SECRET there is no
@@ -81,7 +83,7 @@ export async function registerJoinRoutes(app: FastifyInstance, kit: AuthKit): Pr
       // The epoch read before the hash: if the password changed meanwhile,
       // this ticket is already dead, which is the safe answer.
       const ticket = kit.tickets.mint(roomId, session.row.id, room.player_epoch);
-      const [players, dmColors] = await Promise.all([continuable(kit, roomId), currentDmColors(kit, roomId)]);
+      const [players, dmColors] = await Promise.all([continuable(kit, roomId, kit.admissions.inFlight(roomId)), currentDmColors(kit, roomId)]);
       return { ticket, players, dmColors };
     });
 
@@ -96,83 +98,63 @@ export async function registerJoinRoutes(app: FastifyInstance, kit: AuthKit): Pr
       if (!peeked || peeked.roomId !== roomId || peeked.sessionId !== sessionId) {
         throw new HttpError(403, "bad_ticket");
       }
+      // An earlier try with this ticket is still settling. The page asks
+      // GET /me, and tries again in a moment if the device is not in yet.
+      if (peeked.reserved) throw new HttpError(503, "busy", { retryAfter: 1 });
 
       // A DM device that joined as a player would lose its DM grant without
       // the DM cleanup. It can sign out as a DM device first.
       const current = await checkGrant(kit.pool, kit.gateway, sessionId, roomId);
       if (current?.role === "dm") throw new HttpError(409, "already_dm");
+      // Another tab of this device finished first.
+      if (current && (await kit.gateway.getMember(roomId, current.memberId))) throw new HttpError(409, "already_in");
 
-      let memberId: string;
-      let created: ReturnType<typeof newMember> | undefined;
+      let who: AdmitWho;
       if ("memberId" in body) {
         // Only player members that were never a DM can be continued. A
         // member that is no longer in the room was most likely removed by
         // the DM while this device's roster was open: the join page says so
         // and offers joining as someone new, with the ticket still unused.
-        const roster = await continuable(kit, roomId);
+        const roster = await continuable(kit, roomId, kit.admissions.inFlight(roomId));
         if (!roster.some((m) => m.id === body.memberId)) {
           if (!(await kit.gateway.getMember(roomId, body.memberId))) throw new HttpError(409, "member_removed");
           throw new HttpError(403, "not_a_player");
         }
-        memberId = body.memberId;
+        who = { kind: "member", memberId: body.memberId };
       } else {
-        created = newMember(body.name, body.color, "player");
-        memberId = created.id;
+        who = { kind: "new", member: newMember(body.name, body.color, "player") };
       }
 
-      const ticket = kit.tickets.take(body.ticket);
+      const ticket = kit.tickets.reserve(body.ticket);
+      if (ticket === "reserved") throw new HttpError(503, "busy", { retryAfter: 1 });
       if (!ticket) throw new HttpError(403, "bad_ticket");
 
-      // The epoch is checked under the room row lock, in the transaction that
-      // writes the grant, so a password change cannot slip in between.
-      await withTx(kit.pool, async (tx) => {
-        const { rows } = await tx.query<{ player_epoch: number }>(
-          "select player_epoch from rooms where id = $1 for update",
-          [roomId],
-        );
-        const room = rows[0];
-        if (!room) throw new HttpError(404, "room_not_found");
-        if (room.player_epoch !== ticket.playerEpoch) throw new HttpError(403, "stale_ticket");
-        // Again under the room lock, which a DM claim also takes, so a
-        // member that became a DM a moment ago cannot slip through.
-        if (!created && (await formerDms(tx, roomId)).has(memberId)) throw new HttpError(403, "not_a_player");
-        await putGrant(tx, { sessionId, roomId, memberId, role: "player", epoch: room.player_epoch });
+      // A new player's member is written before its grant (server/auth/admit.ts).
+      // The ticket stays reserved until the attempt settles: spent once the
+      // grant commits, back for another try once it is known to have failed.
+      const answer = await kit.admissions.admit({
+        roomId,
+        sessionId,
+        who,
+        // The epoch is checked under the room row lock, in the transaction
+        // that writes the grant, so a password change cannot slip in between.
+        async locked(_tx, room) {
+          if (room.player_epoch !== ticket.playerEpoch) throw new HttpError(403, "stale_ticket");
+        },
+        settled(outcome) {
+          if (outcome.kind === "in") kit.tickets.spend(body.ticket);
+          else kit.tickets.release(body.ticket);
+        },
       });
-
-      if (created) {
-        // The member is added after the grant commits, so a grant that lost a
-        // race never leaves an orphan in the roster. The caller cannot
-        // connect before this response, so nothing sees the gap.
-        try {
-          await kit.gateway.addMember(roomId, created);
-        } catch (err) {
-          await revokeGrants(kit, roomId, { by: "session", sessionId, role: "player" });
-          if (err instanceof RoomFullError) kit.tickets.restore(body.ticket, ticket);
-          throw err;
-        }
-      }
+      // Still settling, or settled without a way to tell whether the grant
+      // landed: GET /me says whether the device is in.
+      if (answer.kind === "pending" || answer.kind === "unknown") throw new HttpError(503, "busy", { retryAfter: 2 });
+      if (answer.kind === "refused") throw answer.error;
       // The same shape as GET /api/rooms/:id/me, because the join page
       // hands this answer straight to the room as the caller's member.
-      const member = (await kit.gateway.getMember(roomId, memberId)) ?? created ?? null;
-      if (!member) {
-        // The DM removed this member while the grant was being written. A
-        // grant must never outlive its member, so this one is given up. The
-        // ticket goes back, as with a full room: the password was right, so
-        // the device may still join as someone new without typing it again.
-        await revokeGrants(kit, roomId, { by: "session", sessionId, role: "player" });
-        kit.tickets.restore(body.ticket, ticket);
-        throw new HttpError(409, "member_removed");
-      }
-      return { roomId, memberId, role: "player", member };
+      return { roomId, memberId: answer.memberId, role: "player", member: answer.member };
     });
   });
-}
-
-/** The players a joining device may continue as: player members that were never a DM, in join order. */
-async function continuable(kit: AuthKit, roomId: string): Promise<RosterEntry[]> {
-  const roster = (await kit.gateway.playerRoster(roomId)) ?? [];
-  const dms = await formerDms(kit.pool, roomId);
-  return roster.filter((m) => !dms.has(m.id));
 }
 
 /**

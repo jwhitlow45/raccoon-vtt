@@ -157,7 +157,13 @@ type Roles = GrantRole | readonly GrantRole[];
 export type GrantSelector =
   | { by: "session"; sessionId: string; role?: Roles }
   | { by: "member"; memberId: string; role?: Roles }
-  | { by: "role"; role: Roles; exceptSessionId?: string };
+  | { by: "role"; role: Roles; exceptSessionId?: string }
+  /**
+   * One grant, matched on everything it holds, so a grant written since by
+   * another join on the same session survives (docs/design/design-v1-join-requests.md
+   * 5.2, the check after a join's commit).
+   */
+  | { by: "exact"; sessionId: string; memberId: string; role: GrantRole; epoch: number };
 
 export type RevokeResult = {
   removed: Array<{ sessionId: string; memberId: string; role: GrantRole }>;
@@ -250,5 +256,10 @@ function deleteStatement(roomId: string, s: GrantSelector): [string, unknown[]] 
             [roomId, rolesOf(s.role), s.exceptSessionId],
           ]
         : [`delete from grants where room_id = $1 and role = any($2::text[]) ${returning}`, [roomId, rolesOf(s.role)]];
+    case "exact":
+      return [
+        `delete from grants where room_id = $1 and session_id = $2 and member_id = $3 and role = $4 and epoch = $5 ${returning}`,
+        [roomId, s.sessionId, s.memberId, s.role, s.epoch],
+      ];
   }
 }

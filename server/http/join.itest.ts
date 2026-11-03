@@ -4,8 +4,9 @@ import { MockAgent } from "undici";
 import type { RoomState } from "#shared/model.ts";
 import { ipKey } from "../auth/ipKey.ts";
 import { PasswordHasher } from "../auth/passwords.ts";
-import { startTestApp, type TestApp } from "../auth/testing.ts";
+import { startTestApp, type TestApp, type TestClient } from "../auth/testing.ts";
 import { setTurnstileDispatcherForTests } from "../auth/turnstile.ts";
+import { RoomFullError } from "../rooms/gateway.ts";
 
 const PASSWORD = "owlbear-druid-wand";
 
@@ -285,6 +286,135 @@ describe("joining as a player", () => {
       const res = await c.post(`/api/rooms/${roomId}/join/complete`, body);
       assert.equal(res.statusCode, 400, JSON.stringify(body));
     }
+  });
+});
+
+describe("join/complete through admitPlayer: the member first, the grant second", () => {
+  let t: TestApp;
+  before(async () => {
+    t = await startTestApp({ access: { admissions: { memberMs: 100 } } });
+  });
+  after(() => t.close());
+
+  async function ticketFor(c: TestClient, roomId: string): Promise<string> {
+    const res = await c.post(`/api/rooms/${roomId}/join`, { password: PASSWORD });
+    assert.equal(res.statusCode, 200, res.body);
+    return res.json<{ ticket: string }>().ticket;
+  }
+
+  async function memberNames(roomId: string): Promise<string[]> {
+    const { rows } = await t.pool.query<{ state: RoomState }>("select state from room_snapshots where room_id = $1", [roomId]);
+    return Object.values(rows[0]?.state.members ?? {}).map((m) => m.name).sort();
+  }
+
+  test("between the steps the member is in the roster and no grant exists yet", async () => {
+    const { roomId } = await t.client().createRoom();
+    const phone = t.client();
+    const ticket = await ticketFor(phone, roomId);
+    const addMember = t.gateway.addMember;
+    let seen: { names: string[]; grants: number } | undefined;
+    t.gateway.addMember = async (room, member) => {
+      await addMember.call(t.gateway, room, member);
+      const grants = await t.pool.query("select 1 from grants g join sessions s on s.id = g.session_id where g.room_id = $1 and g.role = 'player'", [room]);
+      seen = { names: await memberNames(room), grants: grants.rowCount ?? 0 };
+    };
+    try {
+      const done = await phone.post(`/api/rooms/${roomId}/join/complete`, { ticket, name: "Quinn", color: "#112233" });
+      assert.equal(done.statusCode, 200, done.body);
+    } finally {
+      t.gateway.addMember = addMember;
+    }
+    assert.deepEqual(seen, { names: ["Dungeon Master", "Quinn"], grants: 0 });
+    assert.equal((await phone.me(roomId)).role, "player");
+  });
+
+  test("a member that has not landed within the bound answers busy with its ticket reserved, then GET /me enters", async () => {
+    const { roomId } = await t.client().createRoom();
+    const phone = t.client();
+    const ticket = await ticketFor(phone, roomId);
+    const addMember = t.gateway.addMember;
+    let land!: () => void;
+    const landed = new Promise<void>((r) => (land = r));
+    t.gateway.addMember = async (room, member) => {
+      await landed;
+      await addMember.call(t.gateway, room, member);
+    };
+    try {
+      const first = await phone.post(`/api/rooms/${roomId}/join/complete`, { ticket, name: "Quinn", color: "#112233" });
+      assert.equal(first.statusCode, 503, first.body);
+      assert.equal(first.json<{ error: string }>().error, "busy");
+      // TICKET-RESERVED: a retry with it is told to wait, never bad_ticket, and nobody else can use it.
+      const retry = await phone.post(`/api/rooms/${roomId}/join/complete`, { ticket, name: "Quinn", color: "#112233" });
+      assert.equal(retry.statusCode, 503);
+      assert.equal((await phone.me(roomId)).status, 403);
+      land();
+      for (let i = 0; i < 50 && (await phone.me(roomId)).status !== 200; i++) await new Promise((r) => setTimeout(r, 20));
+    } finally {
+      t.gateway.addMember = addMember;
+    }
+    assert.equal((await phone.me(roomId)).role, "player");
+    assert.deepEqual(await memberNames(roomId), ["Dungeon Master", "Quinn"]);
+    // The ticket was spent by the join that went through.
+    const spent = await phone.post(`/api/rooms/${roomId}/join/complete`, { ticket, name: "Again", color: "#112233" });
+    assert.equal(spent.json<{ error: string }>().error, "bad_ticket");
+  });
+
+  test("a member op that fails after the bound gives the ticket back, and the retry joins", async () => {
+    const { roomId } = await t.client().createRoom();
+    const phone = t.client();
+    const ticket = await ticketFor(phone, roomId);
+    const addMember = t.gateway.addMember;
+    let fail!: () => void;
+    const failed = new Promise<void>((r) => (fail = r));
+    t.gateway.addMember = async () => {
+      await failed;
+      throw new RoomFullError();
+    };
+    try {
+      assert.equal((await phone.post(`/api/rooms/${roomId}/join/complete`, { ticket, name: "Quinn", color: "#112233" })).statusCode, 503);
+      fail();
+      await new Promise((r) => setTimeout(r, 20));
+    } finally {
+      t.gateway.addMember = addMember;
+    }
+    const retry = await phone.post(`/api/rooms/${roomId}/join/complete`, { ticket, name: "Quinn", color: "#112233" });
+    assert.equal(retry.statusCode, 200, retry.body);
+    assert.deepEqual(await memberNames(roomId), ["Dungeon Master", "Quinn"]);
+  });
+
+  test("a grant refused under the lock takes its new member back off and keeps the ticket", async () => {
+    const owner = t.client();
+    const { roomId } = await owner.createRoom();
+    const phone = t.client();
+    const ticket = await ticketFor(phone, roomId);
+    // The password changes between the member and the grant.
+    const addMember = t.gateway.addMember;
+    t.gateway.addMember = async (room, member) => {
+      await addMember.call(t.gateway, room, member);
+      await t.pool.query("update rooms set player_epoch = player_epoch + 1 where id = $1", [room]);
+    };
+    try {
+      const res = await phone.post(`/api/rooms/${roomId}/join/complete`, { ticket, name: "Quinn", color: "#112233" });
+      assert.equal(res.json<{ error: string }>().error, "stale_ticket");
+    } finally {
+      t.gateway.addMember = addMember;
+    }
+    assert.deepEqual(await memberNames(roomId), ["Dungeon Master"]);
+    assert.equal((await phone.me(roomId)).status, 403);
+  });
+
+  test("a device already in answers already_in, and a password join writes exactly the rate events /join did", async () => {
+    const { roomId } = await t.client().createRoom();
+    const phone = t.client();
+    const ticket = await ticketFor(phone, roomId);
+    const count = async () => (await t.pool.query("select key from rate_events where key = any($1::text[])", [[`ok:ip:${ipKey(phone.ip)}`, `ok:room:${roomId}`]])).rowCount;
+    assert.equal(await count(), 2);
+    assert.equal((await phone.post(`/api/rooms/${roomId}/join/complete`, { ticket, name: "Quinn", color: "#112233" })).statusCode, 200);
+    assert.equal(await count(), 2, "join/complete records nothing more");
+    const second = await ticketFor(phone, roomId);
+    const again = await phone.post(`/api/rooms/${roomId}/join/complete`, { ticket: second, name: "Twin", color: "#112233" });
+    assert.equal(again.statusCode, 409);
+    assert.equal(again.json<{ error: string }>().error, "already_in");
   });
 });
 

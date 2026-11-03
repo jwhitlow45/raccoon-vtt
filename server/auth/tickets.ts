@@ -10,6 +10,11 @@ import { randomToken } from "./tokens.ts";
  * process. Each one is bound to the room, the session and the room's
  * `player_epoch` when the password was checked, so it is useless in another
  * room, from another device, or after the DM changes the password.
+ *
+ * A ticket is reserved while a join it started is still settling
+ * (docs/design/design-v1-join-requests.md 5.2): nobody can use it then, and
+ * it is spent once the join commits, or comes back once the join is known
+ * to have failed, so the device may try again without the password.
  */
 export const TICKET_TTL_MS = 5 * 60_000;
 
@@ -20,8 +25,10 @@ export type JoinTicket = {
   expiresAt: number;
 };
 
+type Entry = { ticket: JoinTicket; reserved: boolean };
+
 export class JoinTickets {
-  #tickets = new Map<string, JoinTicket>();
+  #tickets = new Map<string, Entry>();
   #now: () => number;
 
   constructor(now: () => number = () => Date.now()) {
@@ -35,42 +42,60 @@ export class JoinTickets {
   mint(roomId: string, sessionId: string, playerEpoch: number): string {
     this.#sweep();
     const token = randomToken();
-    this.#tickets.set(token, { roomId, sessionId, playerEpoch, expiresAt: this.#now() + TICKET_TTL_MS });
+    this.#tickets.set(token, { ticket: { roomId, sessionId, playerEpoch, expiresAt: this.#now() + TICKET_TTL_MS }, reserved: false });
     return token;
   }
 
-  /** The live ticket, without using it up. */
-  peek(token: string): JoinTicket | undefined {
-    const ticket = this.#tickets.get(token);
-    if (ticket && ticket.expiresAt <= this.#now()) {
-      this.#tickets.delete(token);
-      return undefined;
-    }
-    return ticket;
+  /** The live ticket, without using it up, and whether a join holds it. */
+  peek(token: string): (JoinTicket & { reserved: boolean }) | undefined {
+    const entry = this.#live(token);
+    return entry ? { ...entry.ticket, reserved: entry.reserved } : undefined;
   }
 
   /**
-   * Removes the ticket and returns it. Synchronous, so of two requests
-   * racing with the same ticket exactly one gets it.
+   * Reserves the ticket for one join attempt. Synchronous, so of two
+   * requests racing with the same ticket exactly one gets it, and the other
+   * learns that it is held rather than gone.
    */
-  take(token: string): JoinTicket | undefined {
-    const ticket = this.peek(token);
-    if (ticket) this.#tickets.delete(token);
-    return ticket;
+  reserve(token: string): JoinTicket | "reserved" | undefined {
+    const entry = this.#live(token);
+    if (!entry) return undefined;
+    if (entry.reserved) return "reserved";
+    entry.reserved = true;
+    return entry.ticket;
   }
 
-  /** Puts back a ticket taken by a request that then failed for an unrelated reason. */
-  restore(token: string, ticket: JoinTicket): void {
-    if (ticket.expiresAt > this.#now()) this.#tickets.set(token, ticket);
+  /** The attempt committed: the ticket is used up. */
+  spend(token: string): void {
+    this.#tickets.delete(token);
   }
 
-  /** Drops every ticket for a room, after its password changes. */
+  /**
+   * The attempt is known to have failed: the ticket may be used again, if
+   * its 5 minutes are not up. A ticket dropped meanwhile (a password change,
+   * Only by asking) stays dropped.
+   */
+  release(token: string): void {
+    const entry = this.#live(token);
+    if (entry) entry.reserved = false;
+  }
+
+  /** Drops every ticket for a room, reserved ones too, after its password changes or it switches to Only by asking. */
   dropRoom(roomId: string): void {
-    for (const [token, ticket] of this.#tickets) if (ticket.roomId === roomId) this.#tickets.delete(token);
+    for (const [token, entry] of this.#tickets) if (entry.ticket.roomId === roomId) this.#tickets.delete(token);
+  }
+
+  #live(token: string): Entry | undefined {
+    const entry = this.#tickets.get(token);
+    if (entry && entry.ticket.expiresAt <= this.#now()) {
+      this.#tickets.delete(token);
+      return undefined;
+    }
+    return entry;
   }
 
   #sweep(): void {
     const now = this.#now();
-    for (const [token, ticket] of this.#tickets) if (ticket.expiresAt <= now) this.#tickets.delete(token);
+    for (const [token, entry] of this.#tickets) if (entry.ticket.expiresAt <= now) this.#tickets.delete(token);
   }
 }

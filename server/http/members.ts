@@ -16,10 +16,12 @@ const MemberParam = z.string().min(1).max(64);
  * Removing (S-15) is a kick that also takes the member off the roster, so a
  * leaked password cannot fill the roster with junk for good. A member that
  * still holds a grant must never be removed, so the kick comes first. A
- * device could still continue as the member between the kick and the
- * removal, so its grants are swept once more after: a grant committed before
- * that sweep is deleted by it, and one committed after it finds the member
- * gone and gives itself up (server/http/join.ts).
+ * device could still continue as the member, or a DM let a requester in as
+ * it, between the kick and the removal, so its grants are swept once more
+ * after: a grant committed before that sweep is deleted by it, and one
+ * committed after it finds the member gone and gives itself up, exactly that
+ * grant and no other (server/auth/admit.ts). A join that rolls back takes
+ * its new member off the same way: revoke, remove, revoke again.
  */
 export async function registerMemberRoutes(app: FastifyInstance, kit: AuthKit): Promise<void> {
   await app.register(async (r) => {

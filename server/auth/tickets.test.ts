@@ -9,10 +9,11 @@ describe("join tickets", () => {
     assert.match(token, /^[A-Za-z0-9_-]{43}$/);
     assert.deepEqual(
       { ...tickets.peek(token), expiresAt: 0 },
-      { roomId: "ROOMAAAA", sessionId: "session-1", playerEpoch: 3, expiresAt: 0 },
+      { roomId: "ROOMAAAA", sessionId: "session-1", playerEpoch: 3, expiresAt: 0, reserved: false },
     );
-    assert.ok(tickets.take(token));
-    assert.equal(tickets.take(token), undefined);
+    assert.ok(typeof tickets.reserve(token) === "object");
+    tickets.spend(token);
+    assert.equal(tickets.reserve(token), undefined);
   });
 
   test("expire after 5 minutes", () => {
@@ -26,18 +27,32 @@ describe("join tickets", () => {
     assert.equal(tickets.size, 0);
   });
 
-  test("restore puts back a live ticket only", () => {
+  test("a reserved ticket is held: nobody else reserves it, and peeking says so", () => {
+    const tickets = new JoinTickets();
+    const token = tickets.mint("ROOMAAAA", "s", 1);
+    assert.equal(typeof tickets.reserve(token), "object");
+    assert.equal(tickets.reserve(token), "reserved");
+    assert.equal(tickets.peek(token)?.reserved, true);
+  });
+
+  test("release puts back a reserved ticket only while it is live and not dropped", () => {
     let now = 0;
     const tickets = new JoinTickets(() => now);
     const token = tickets.mint("ROOMAAAA", "s", 1);
-    const ticket = tickets.take(token);
-    assert.ok(ticket);
-    tickets.restore(token, ticket);
-    assert.ok(tickets.peek(token));
-    tickets.take(token);
+    tickets.reserve(token);
+    tickets.release(token);
+    assert.equal(tickets.peek(token)?.reserved, false);
+    tickets.reserve(token);
     now += TICKET_TTL_MS;
-    tickets.restore(token, ticket);
+    tickets.release(token);
     assert.equal(tickets.peek(token), undefined);
+
+    now = 0;
+    const dropped = tickets.mint("ROOMAAAA", "s", 1);
+    tickets.reserve(dropped);
+    tickets.dropRoom("ROOMAAAA");
+    tickets.release(dropped);
+    assert.equal(tickets.peek(dropped), undefined);
   });
 
   test("dropRoom kills a room's tickets and no others", () => {
