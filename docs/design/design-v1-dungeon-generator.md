@@ -1,13 +1,13 @@
 # The dungeon generator: design draft 2.1 (2026-11-02)
 
-Status: built, phase 1 (2026-11-02). Draft 2.1 passed design review in round 3, and the build followed it except where **As built** says otherwise. The Round 1, Round 2 and Round 3 sections at the end list each finding and what changed. From [mvp.md](mvp.md) section 3, Later: "Dungeon generator." The project owner set the Later order on 2026-11-02 (D-261102-007): the generator comes right after the easy items. Code was cited from the tree before this feature, with OP_VERSION 41 and SNAPSHOT_VERSION 31, and the build leaves both as they are. Decisions are D-261102-370 to D-261102-389 (section 16) with D-261102-022 to 024, and the build's own guesses are in As built.
+Status: built, phase 1 (2026-11-02). Draft 2.1 passed design review in round 3, and the build followed it except where **As built** says otherwise. The Round 1, Round 2 and Round 3 sections at the end list each finding and what changed, and Build review round 1 the fixes after the build. From [mvp.md](mvp.md) section 3, Later: "Dungeon generator." The project owner set the Later order on 2026-11-02 (D-261102-007): the generator comes right after the easy items. Code was cited from the tree before this feature, at OP_VERSION 41 and SNAPSHOT_VERSION 31. The generator adds no op or snapshot version of its own: it ships at whatever versions the app is on. Decisions are D-261102-370 to D-261102-389 (section 16) with D-261102-022 to 024, and the build's own guesses are in As built.
 
 ## Summary
 
 - **What it makes.** A new Builder scene holding a whole dungeon in the builder's own data: painted floor rooms and corridors with only automatic walls, closed and locked doors, heights reached by stair runs, pits, rubble, pillars and daises, and four of the SRD's example traps. Sight, fog, Reveal room, walking distance, the walls rule, Isometric, Export as image and room backups work on it unchanged.
 - **Where.** Scenes, New scene, Builder: "Generate a dungeon" opens a dialog with the choices, a preview drawn from exactly what will land, Reroll, and Make the scene.
 - **How it lands.** At most 60 ordinary ops (`scene.create`, `build.paint`, `build.edge` for doors, `build.height`, `build.stairs`, `trap.create`) in one Setup undo group, the Universal VTT import's path. Usually one Undo setup takes it back, and the scene's Delete always does once the players are on another scene.
-- **Replay and versions.** The stored ops hold the result, so the generator never replays and may change freely. No new state, op or field: OP_VERSION stays 41 and SNAPSHOT_VERSION 31, in every phase.
+- **Replay and versions.** The stored ops hold the result, so the generator never replays and may change freely. No new state, op or field, so the generator takes no OP_VERSION or SNAPSHOT_VERSION step in any phase.
 - **Privacy.** It runs on the DM's device. The seed lives only in the open dialog, never stored or sent. Every wall is automatic, so no drawn edge marks a hidden room's side. No starting view is stored. Players receive the build only as map discovery allows. The seed's 75 random bits drive a ChaCha20 stream, so neither guessing nor the rooms seen give a player the rest.
 - **Phase 1 is one batch:** squares, Dungeon and Crypt, no secret doors, four lanes (L, M, M, S) after a contract commit. Phase 2 adds themes, lights, dressing, a DM key, more traps and secret doors (after SECRET-DOOR-DRAWN-EDGE). Phase 3 adds hexes and generating into an existing scene.
 
@@ -61,7 +61,7 @@ Scenes, New scene, Kind of scene **Builder** shows, after its Create row, "Or st
 - **Extra ways round**: a switch, on ("Adds loops, so the way back is not always the way in.").
 - **Heights**: Flat, Some ("Raises or sinks a few rooms, with stairs to them.").
 - **Traps**: None, Few, Some, and while not None **Party level**: 1–4, 5–10, 11–16, 17–20 ("Example traps from the SRD. Players see one only once it is found.").
-- **Seed**: a text field holding a code such as `1K7Q-H2MX-A9F3-TWQ5`, and **Copy seed**.
+- **Seed**: a text field holding a code such as `1K7Q-H2MX-A9F3-TWQ5`, and **Copy seed**, which copies the seed as read, in that form, whatever case or spacing was typed.
 - **The foot**: the status "12 rooms, 18 doors (3 locked), 4 traps.", then **Cancel** and **Make the scene**.
 - Where the form's Players see leaves fog off (Everything, or Like a scene without fog, read as `playersSeeFields(pick).fogEnabled`), a line above the foot: "Players see this scene without fog, so every room shows at once. Explore or Reveal by hand keeps rooms dark until found."
 
@@ -71,25 +71,26 @@ It opens on this device's last choices for the room (localStorage, in try and ca
 
 - A changed choice or seed draws a new preview after 150 ms of quiet. **Reroll** puts a new seed in the field. Only the newest answer shows (a request counter), and closing drops any late one.
 - The picture is the DM view drawn by the map export's renderer from the room a scratch reducer made of the very ops Make sends (5.5), with trap zones hatched in the trap red and a ring on the entrance.
-- "Drawing the dungeon…" after about 200 ms. Make is off while drawing, while the seed is invalid, and when fewer than 2 rooms fit.
+- "Drawing the dungeon…" after about 200 ms. Make is off while drawing, while the seed is invalid, and when fewer than 2 rooms fit. Drawing lasts until the new answer's own picture is on screen, not only until the worker answers, so Make never sends a dungeon other than the one shown (as built, DG-R1-01). A seed that stops reading drops a preview still drawing, so its answer never replaces the one kept.
+- A picture this device cannot draw empties the box and keeps Make off: "This device could not draw the preview, so Make is off. Reroll or change a choice to try again." (as built, D-261102-600).
 - Fewer fit than asked: "Fit 14 of 16 rooms. A larger size or fewer rooms fits them all." Under 2: "Could not fit two rooms. Try a larger size, fewer rooms or Sparse." A plan the scratch run refuses: "This dungeon could not be made. Reroll for another."
 - A seed is read case-blind, spaces and dashes ignored, O as 0, I and L as 1. A bad one: "A seed is 16 letters and digits, like 1K7Q-H2MX-A9F3-TWQ5.", and the old preview stays. Another version's: "This seed is from another version of the generator, so it makes a different dungeon now."
 - Nothing is sent or enters the room's state before Make. Per-room edits wait for phase 2.
 
 ### 4.4 Make the scene
 
-- The ops get fresh ids (5.5) and are all dispatched in one task, in one group with `groupScope: "setup"`, so no other op of this device falls inside the group and a DM who switches apps mid-send leaves nothing half queued. The foot counts the answers as they come: "Making the dungeon… 18 of 30". Cancel becomes **Hide**, Make shows busy and refuses a second tap. Offline: "Waiting for the server…", and the queue sends on reconnect.
+- The ops get fresh ids (5.5) and are all dispatched in one task, in one group with `groupScope: "setup"`, so no other op of this device falls inside the group and a DM who switches apps mid-send leaves nothing half queued. The foot counts the answers as they come: "Making the dungeon… 18 of 30". Cancel becomes **Hide**, Make shows busy and refuses a second tap. Every choice, Reroll and the seed are held while it sends, and after a partial or unconfirmed outcome, so nothing draws a preview the sent ops are not (Copy seed stays). Offline: "Waiting for the server…", and the queue sends on reconnect. Once a Make may have made a scene, closing the dialog starts New scene's form over, as its Create does, so a later Create makes no second scene with the typed name.
 - The outcome mirrors the import's (`ImportOutcome`, D-261102-388):
   - **complete**: every op taken. The dialog closes and the scene opens. Hidden, a toast: "Made Crypt."
-  - **complete, checked**: answers were lost, none refused, and the stored scene's chunks and traps match the scratch room (5.5). "The connection dropped while making Crypt, but it is complete. Undo setup in Setup history takes it back."
+  - **complete, checked**: answers were lost, none refused, and the stored scene's chunks and traps match the scratch room (5.5). "The connection dropped while making Crypt, but it is complete. Undo setup in Setup history usually takes it back, and Delete in the scene's menu always does, once the players are on another scene."
   - **none**: `scene.create` refused, or no scene after lost answers. "The server refused the dungeon, so no scene was made." or "The connection dropped, and no scene was made. Try again."
-  - **partial**: a refusal after `scene.create` (the room's size or memory guard, which only the server reads). "The server refused part of Crypt, so it may be missing rooms, doors or traps. Use Undo setup in Setup history, or Delete it from the scene's menu once the players are on another scene."
+  - **partial**: a refusal after `scene.create` (the room's size or memory guard, which only the server reads). "The server refused part of Crypt, so it may be missing rooms, doors or traps. Once the players are on another scene, Undo setup in Setup history or Delete in the scene's menu takes it back."
   - **unconfirmed**: answers lost and the scene not found whole within `CHECK_MS`. "The connection dropped while making Crypt, and it could not be confirmed complete. To start again, Delete it from the scene's menu once the players are on another scene."
   - Any of these adds "Open it from the Scenes panel." when the scene is not on screen. A DM who moved on is not pulled away (the import's `movedOn`).
 
 ### 4.5 After it lands
 
-- **The camera.** On the creating device only, the scene opens framed on the entrance room grown by 4 squares (D-261102-387). Before it switches scenes, the dialog leaves a one-shot `frameOnOpen = { sceneId, rect }` in its own room scope's `fitSlot`. Stage.tsx's opening `fit` calls `takeFrame(scene.id)`, which returns the rectangle only for that scene and clears the request either way, and passes it to `fitScene` as its target, so the zoom is the one `fitScene` gives that rectangle. `openSceneCamera` calls `fit` only once the canvas has a size and the scene is new to it, so a late size still frames the entrance, another scene opening first drops the request, and "View as a player", in its own scope, never sees it. `openSceneCamera` itself is unchanged. Nothing is stored: the scene has no starting view, so every other device opens it as any Builder scene.
+- **The camera.** On the creating device only, the scene opens framed on the entrance room grown by 4 squares (D-261102-387). Before it switches scenes, the dialog leaves a one-shot `frameOnOpen = { sceneId, rect }` in its own room scope's `fitSlot`. Stage.tsx's opening `fit` calls `takeFrame(scene.id)`, which returns the rectangle only for that scene and clears the request either way, and passes it to `fitScene` as its target, so the zoom is the one `fitScene` gives that rectangle. `openSceneCamera` calls `fit` only once the canvas has a size and the scene is new to it, so a late size still frames the entrance, another scene opening first drops the request, and "View as a player", in its own scope, never sees it. `openSceneCamera` itself is unchanged. (As built, Stage calls `openFramed`, which takes the request before it chooses between the scene's saved view and a fit, since `openSceneCamera` skips `fit` for a saved view: see As built, DG-OPUS-27.) Nothing is stored: the scene has no starting view, so every other device opens it as any Builder scene.
 - It is a Builder scene like any other: every builder mode edits it, Fog reveals it, and Delete and Duplicate work from its menu.
 - **Undo.** Usually one Undo setup takes it all back ("adding the scene Crypt"), and Redo setup brings it back. It splits into more steps when another device of the same DM records a step during the send, when someone else's edit on the new scene stops the merge, or after a partial result, and a server restart empties history. After play-scope builder edits the existing rule answers "Undo the play step first: …". Undo setup is refused for the players' scene, as Delete is, so a DM who moved the players there moves them to another scene first, for either. In every case the scene's Delete removes the whole dungeon once the players are on another scene, and the guide says so.
 - Traps sit armed and hidden, and go off only once this is the players' scene.
@@ -133,7 +134,7 @@ It opens on this device's last choices for the room (localStorage, in try and ca
 ### 5.4 The budget and failures
 
 - One budget of 400,000 search expansions for the whole dungeon, spent in step 6's order.
-- A tree link that finds no path, gets no doorway, or meets an empty budget is first retried once with each of its raised or sunk end rooms made flat. Flattening turns that room's runs into flat corridor squares at 0 ft, so corridors already routed to its far landings still connect. If it fails again, it drops the room it would join and every room whose tree path to the entrance runs through it, with their links and runs. A failed loop link is skipped.
+- A tree link whose search finds no path is first retried once with each of its raised or sunk end rooms made flat. A link with no doorway at an end, or one that meets an empty budget, is not retried, since a flat room gives it neither (as built, DG-R1-07). Flattening turns that room's runs into flat corridor squares at 0 ft, so corridors already routed to its far landings still connect. If it fails again, it drops the room it would join and every room whose tree path to the entrance runs through it, with their links and runs. A failed loop link is skipped.
 - A doorway whose corridor is never built goes, with its door and run: the dropped link's end on the kept room, a skipped loop link's two ends, and a failed entrance stub's doorway, which leaves the entrance without stairs out. No door ever opens onto rock.
 - The fitted count is the rooms kept, read after the drops. Under 2 is the preview error.
 - `generate` takes a budget only tests pass, so each branch is tested. A fit-rate floor guards the drops: with the default choices at each size preset, every asked room fits in at least 95% of 200 seeds.
@@ -152,7 +153,7 @@ It opens on this device's last choices for the room (localStorage, in try and ca
 - **State:** none new. The dungeon is `scenes`, `buildChunks` and `traps` entries.
 - **Ops:** six existing DM-only ops, refused for anyone else by today's rules. No field is added.
 - **Undo:** as 4.5. Its restore names about 60 keys at the largest, far under `MAX_RESTORE_ENTRIES`.
-- **Versions and replay:** OP_VERSION 41 and SNAPSHOT_VERSION 31 stay. Stored ops hold every cell, edge, height and trap, so replay never runs the generator. An older build reads these rooms unchanged.
+- **Versions and replay:** the generator takes no OP_VERSION or SNAPSHOT_VERSION step. Stored ops hold every cell, edge, height and trap, so replay never runs the generator. An older build reads these rooms unchanged.
 - **Room export and import, Duplicate, Export as image:** unchanged.
 
 ## 7. Privacy
@@ -225,6 +226,7 @@ export type Preview = { ok: true, plan: DungeonPlan, ops: ClientOp[], room: Room
 export function preview(settings: DungeonSettings, seed: Seed, scene: SceneInput): Promise<Preview>
 export type DungeonOutcome = { k: "complete", checked: boolean } | { k: "none", lost: boolean } | { k: "partial" } | { k: "unconfirmed" }
 export function sendDungeon(made: { ops: ClientOp[], sceneId: string, room: RoomState }, actions: RoomActions, onAnswered: (n: number, of: number) => void): Promise<DungeonOutcome>
+// as built: a fourth argument, { store, shown }, to compare and open the scene (D-261102-418)
 ```
 
 The server test imports no client module: DG-B's `ops.fixture.test.ts` writes `server/rooms/dungeon.fixture.json` (the ops of two fixed seeds, Medium default and the largest choices, placeholder ids) under `UPDATE_FIXTURES=1`, and fails on every other run when the fixture differs from today's output.
@@ -282,6 +284,9 @@ The server test imports no client module: DG-B's `ops.fixture.test.ts` writes `s
 | Players on Explore later | No unseen room, locked doors closed, no unfound trap | dungeon.itest.ts |
 | Fog left off by the form's choice (Everything, Like) | The warning line | words.test.ts, dungeon.e2e.ts |
 | Quick choice changes, dialog closed while drawing | Newest preview only, nothing sent | client.test.ts, dungeon.e2e.ts |
+| An answer in while its picture draws, a newer answer mid-drawing, a picture that fails | Make off and drawing until that answer's picture shows, the error and Make off on a failure | flow.test.ts, dungeon.e2e.ts |
+| A seed made invalid while a preview draws | Its answer dropped, the kept preview stays | flow.test.ts |
+| Make sending offline, or ended partial or unconfirmed | Every choice held, Across, Down and Rooms included, Copy seed on, the form starts over once hidden | dungeon.e2e.ts |
 | Backup round trip, Duplicate, Export as image | As any Builder scene | dungeon.itest.ts, existing tests |
 | Admission parity | The largest fixture all taken through the actor | dungeon.itest.ts |
 | The dialog and the form at every size | Within 1 px | alignment, alignment-wide, scenesetup |
@@ -336,14 +341,13 @@ Phase 1, one batch, after the easy Later items. DG-A's first commit is the contr
 
 1. D-261102-371 and 8: 60 ops in one task, sent unpredicted, and the DM opening the scene mid-send. Do the 100 ms and 300 ms targets hold at 4×?
 2. D-261102-380 and 382: the halo, the runs, the flat retry and the 95% fit floor. Do Dense Wide dungeons with heights reach it?
-3. D-261102-387: `takeFrame` inside Stage.tsx's opening `fit`, with `openSceneCamera` unchanged.
+3. D-261102-387: the frame request taken as Stage opens a scene, with `openSceneCamera` unchanged (as built, `openFramed` takes it before the saved view or a fit is chosen, DG-OPUS-27).
 4. D-261102-378: the worker's size with the reducer, zod and the checks.
 5. D-261102-384: whether sight pieces leave the margin at 100 × 100 Winding Wide.
 
 ## As built
-## As built
 
-Phase 1 is built: the generator, its landing, the dialog and the camera frame. It stands on the version numbers it started from (OP_VERSION 41, SNAPSHOT_VERSION 31), adds no op and no stored field, and changes nothing in `shared/` or on the server. Section 10's contract was written first, as planned, and the three code lanes (the generator, the landing, the dialog) each built on it. The build's own guesses are D-261102-410 to D-261102-427. Each is listed here with the option it rejected.
+Phase 1 is built: the generator, its landing, the dialog and the camera frame. It takes no version step, adds no op and no stored field, and changes nothing in `shared/` or on the server. Section 10's contract was written first, as planned, and the three code lanes (the generator, the landing, the dialog) each built on it. The build's own guesses are D-261102-410 to D-261102-427. Each is listed here with the option it rejected.
 
 ### The generator (`client/features/dungeon/`, section 5)
 
@@ -355,6 +359,8 @@ Phase 1 is built: the generator, its landing, the dialog and the camera frame. I
 - **Smaller readings (D-261102-415).** The entrance's always-closed door is its stub's door, and its other doors draw as any. Traps stand 6 squares apart between their zones' middles, a kind drawn evenly among those with a spot left and then a spot. A pit trap keeps off a doorway's inside square. Rubble keeps off flattened runs too. The stream's nonce holds the generator's version, not the seed's first character. A doorway line runs straight in to the room middle's row or column and then along it, as wide as the doorway.
 - **Contract extras.** `settings.ts` also exports the caps, `DEFAULT_SETTINGS`, `SIZE_SIDES`, `roomCap`, `clampRooms`, `defaultRooms` and `clampSettings`, and `seed.ts` adds `formatSeed`, `versionChar` and `seedKey`, since the dialog and the device's remembered choices need them.
 - **No trap mirror.** `traps/rules.ts` and `shared/srd/traps.ts` import only modules that are safe in a worker, so section 9's mirror with a parity test was not needed. A pit's size is read from `trapPreset`.
+- **The flat retry (DG-R1-07, D-261102-604).** `routeLink` says why a link failed: no path, an empty budget or no doorway. Only no path is retried flat. The fix moved none of the twelve golden plans and none of 4,000 random plans with Heights on Some against the code before it, so `GENERATOR_VERSION` stays 1. Rejected: bumping it, which would call every seed so far another version's for a change no plan showed.
+- **The golden fixture (DG-R1-04).** `UPDATE_FIXTURES=1` refuses to rewrite when a plan pinned under the same name, settings and seed changed hash at the same version, so a rewrite cannot stand in for the bump. New cases and a bumped version are written.
 - **Raised rooms.** With Heights on Some, about 8%, 14% and 20% of kept rooms are raised or sunk at Small, Medium and Large, a quarter chosen, less the runs that do not fit.
 
 ### The landing (section 5.5 and 4.4)
@@ -366,6 +372,7 @@ Phase 1 is built: the generator, its landing, the dialog and the camera frame. I
 - **The foot's door count (D-261102-416).** `Summary.doors` counts doorways, so a Wide doorway's two door edges are one double door, and `locked` counts locked doorways. Counting edges would make a Wide dungeon of 12 rooms read "58 doors".
 - **The fixture (D-261102-421).** `server/rooms/dungeon.fixture.json` holds Medium on the defaults and the largest choices (100 by 100, 40 rooms, Dense, Winding, Wide, loops, Heights Some, Traps Some, Dungeon), with their seeds, settings, room rectangles and entrance beside the ops, so the integration test can reveal one room and stand a party in the entrance.
 - **Large creatures unsqueezed.** `walkSqueezes` in `shared/rules/route.ts` no longer reads geometry on squares, so it cannot tell. The test proves a Large creature fits by a whole-square walk with its full footprint through the movement rules' `legStop`, and the drag's `findRoute` must reach the same spot. Walks start over a doorway's inside square, because a corner of a Crypt entrance can be boxed in by its pillar ring.
+- **A worker the page cannot start (DG-R1-08).** A throw from starting the worker or posting to it answers the request as the bug error and clears the drawing slot, so the next preview tries a fresh worker, and `warmPreviews` never throws in the dialog's open.
 - **`handPlans.ts`** holds the hand-written plans the landing tests use. It is not a test file.
 
 ### The dialog and the camera (sections 4.2 to 4.7 and 11)
@@ -377,6 +384,11 @@ Phase 1 is built: the generator, its landing, the dialog and the camera frame. I
 - **After a failed Make (D-261102-426).** After "none" Make stays on, to try again with fresh ids. After "partial" or "unconfirmed" the foot offers Close only, since a scene exists and a second Make would make a second dungeon. The outcome's sentence shows at the top of the choices.
 - **Small words and focus (D-261102-427).** Copy seed shows no message, since the design's exact words have none. The fog warning is pinned above the foot (it stays in view while the choices scroll), and the foot's buttons grow, so a Make that wraps fills its line. The choices are kept per room under one key and focus opens on Theme's chosen option.
 - **The frame (D-261102-387, DG-OPUS-27).** The one-shot request lives in `fitSlot.frameOnOpen`, with `takeFrame`, `openingFrame` and `openFramed`. Stage calls `openFramed`, which takes the request every time a sized canvas opens a new scene, before it chooses between the scene's saved view and a fit, and then runs the unchanged `openSceneCamera`. Taking the frame inside `fit` alone would have left it pending for a scene with a saved view. A refit keeps the frame as the fit's target. `sceneCamera.ts` is unchanged.
+- **Make waits for the picture (DG-R1-01, DGBUILD-ASTRA-1).** The worker answers before the picture is drawn (textures load and the image encodes after), so Make and the status line once turned to a new answer while the old dungeon still showed. `flow.ts` holds the preview's state as a pure reducer: Make sends the newest request's answer only once `DungeonPreview` reports that very answer's picture on screen, and "Drawing the dungeon…" stays until then. A seed that stops reading takes a request number, so a preview still drawing is dropped (DGBUILD-ASTRA-2).
+- **A picture that fails (D-261102-600).** The box empties and the choices say "This device could not draw the preview, so Make is off. Reroll or change a choice to try again." Rejected: keeping the old picture (an older dungeon would stand for this one), the generator's "This dungeon could not be made." (the dungeon is sound, the device could not draw it).
+- **Held choices (DG-R1-02, DGBUILD-ASTRA-3, D-261102-601).** One `Held` group holds Theme through Party level, Across, Down and Rooms included, while Make sends and after a partial or unconfirmed outcome, with Reroll and the seed field. Copy seed stays on. Rejected: a `disabled` prop on the shared `NumberInput` (outside the generator's files, and `Held` is the app's way to stop a group), holding Copy seed too (copying changes nothing, and is useful after a partial Make).
+- **The form after a Make (DG-R1-10, D-261102-602).** The dialog closes with whether a Make may have made a scene (sent, and not ended in none), and New scene's form then starts over as its Create does. Rejected: starting over at Make (the form holds the dialog, so it would close it mid-send), only on a complete outcome (a hidden dialog has none yet when it closes).
+- **Copy seed (DG-R1-09)** copies the seed as read, in its four groups, not the text as typed.
 - **`remembered.ts`** reuses `settings.ts` (`clampSettings`, `defaultRooms` and the caps) rather than keeping copies.
 
 ### Measured
@@ -398,13 +410,14 @@ The design left these to the build, and only the ones it gives a limit could fai
 | Make's main-thread work at 4× | 300 ms | the press to the dialog closing read 133 to 166 ms on an unloaded run |
 
 - **The worker at 4×.** Chrome's CPU slowdown does not reach a dedicated worker (the times at 1× and 4× matched), so the 4× numbers were taken by running the same code on the page's thread under the slowdown.
+- **The 300 ms limit is reported, not asserted (D-261102-603, DG-R1-12).** The e2e holds Make's dispatch task to 100 ms and logs the span from the press to the dialog closing, since that span holds the new scene's first drawing as well as Make's own work. Rejected: asserting the span against 300 ms (it measures more than the limit names, and a loaded machine fails it).
 - **The 300 ms limit is met (D-261102-531).** The dispatch task stays under 50 ms with the largest choices. The long tasks of 55 to 121 ms seen while the dialog closes are the new scene's first drawing, the app's existing cost of opening any scene, not the generator's. Rejected: holding the build for a trace that separates the two, since the dispatch, the part the generator controls, passes by a wide margin.
 - **A DM who hides the dialog and opens the scene mid-send.** The long tasks there were 51 to 98 ms, under 100, so Hide stays available online and the fallback in section 8 (Hide only while the send waits offline) was not needed.
 - **Mutation checks.** The new rules were each put back wrong to see a test fail: 45 changes to the generator (44 caught, one equivalent, since stairs open only onto their own far landing, a dead end the search never takes), 39 to the landing (the survivors were checks another check already covers) and the dialog's and the frame's rules, all caught.
 
 ### Tests
 
-Unit tests sit beside each file in `client/features/dungeon/`: the ChaCha20 stream against the RFC 8439 vector and OpenSSL across block edges, the seed, settings, layout, heights (the eight height and width fixtures at every facing), corridors, trap spots, plan properties with the fit floor, twelve golden plans, ops, the scratch room, the client, the send (including a randomized test of answers, order, input refusals, a moved-on DM and a short scene), the worker, the caps, the remembered choices and the words. `landed.prop.test.ts` runs 40 random settings and 24 default plans through every prefix of their ops, with walks, no corridor ledge, stairs facing up with both axis edges linked, daises walked onto and Reveal room exact. `server/rooms/dungeon.itest.ts` holds 12 cases through the real actor (parity and replay, players on another scene, Undo setup and Redo setup as one step, another device splitting it, a co-DM moving the players, a restart, a fogged scene, one revealed room, Duplicate and backup, and a size refusal partway). `e2e/dungeon.e2e.ts` (prefix `DG`) covers the dialog and Make on a desktop and a phone, and the alignment sweeps gained the dialog and New scene's Builder form.
+Unit tests sit beside each file in `client/features/dungeon/`: the ChaCha20 stream against the RFC 8439 vector and OpenSSL across block edges, the seed, settings, layout, heights (the eight height and width fixtures at every facing), corridors, trap spots, plan properties with the fit floor, twelve golden plans, ops, the scratch room, the client, the send (including a randomized test of answers, order, input refusals, a moved-on DM and a short scene), the worker, the caps, the remembered choices and the words. `landed.prop.test.ts` runs 40 random settings and 24 default plans through every prefix of their ops, with walks, no corridor ledge, stairs facing up with both axis edges linked, daises walked onto and Reveal room exact. `server/rooms/dungeon.itest.ts` holds 12 cases through the real actor (parity and replay, players on another scene, Undo setup and Redo setup as one step, another device splitting it, a co-DM moving the players, a restart, a fogged scene, one revealed room, Duplicate and backup, and a size refusal partway). `flow.test.ts` walks the preview's state through random requests, late answers, bad seeds, pictures and failed pictures, with Make held to the newest answer on screen. The integration test also lands the fixture's ops with the shared reducer alone and compares the result with the DM's snapshot. `e2e/dungeon.e2e.ts` (prefix `DG`, and `DGFIX` for the build review's steps) covers the dialog and Make on a desktop and a phone, holds the picture's encoding to show Make off while an answered preview draws, a newer answer arriving mid-drawing included, and fails it to show the error, and the alignment sweeps gained the dialog and New scene's Builder form.
 
 ## Round 1
 
@@ -461,3 +474,21 @@ The design passed review in round 3, with two build notes that the text above no
 
 - **DG-OPUS-27**, also DG-ASTRA-16 (the frame stays pending): Stage takes the frame request every time a sized canvas opens a new scene, before it chooses between the scene's saved view and a fit, and passes the rectangle to the fit. `openSceneCamera` skips `fit` for a scene with a saved view, so taking the frame inside `fit` alone would leave it pending. The cancellation test opens an intervening scene that has a saved view (4.5, As built).
 - **DG-OPUS-28** (Undo setup and the players' scene): Undo setup is refused for the players' scene as Delete is, so 4.5 and the guide tell the DM to move the players to another scene first, for both.
+
+## Build review round 1
+
+Astra held one P2 and Opus reached consensus with twelve P3s. All are adopted.
+
+- **DGBUILD-ASTRA-1**, also **DG-R1-01** (Make on before the picture): Make and the status line wait for the answer's own picture, the indicator stays until it lands, and a failed picture keeps Make off with its words (4.3, `flow.ts`).
+- **DGBUILD-ASTRA-2** (a bad seed and a preview still drawing): the bad seed takes a request number, so the late answer is dropped.
+- **DGBUILD-ASTRA-3**, with **DG-R1-02** (choices live during Make and after a partial one): one held group over the choices, Reroll and the seed field held too.
+- **DGBUILD-ASTRA-4**, with **DG-R1-05** (stale build claims): no version claims, the frame described as built, one As built heading, and FEATURES.md's squares named the current limit.
+- **DG-R1-03** (Undo setup promised): the checked and partial sentences say Undo setup usually works and both ways need the players elsewhere (4.4), and the integration test shows Undo setup refused for the players' scene.
+- **DG-R1-04** (a rewrite hides a moved plan): `UPDATE_FIXTURES=1` refuses it at the same version.
+- **DG-R1-06** (DG-9 at the phone): a second page of the DM's, loaded at 390 × 844, since a desktop page narrowed live does not open the Panels sheet the same way (D-261102-605).
+- **DG-R1-07** (the flat retry): only no path retries flat (5.4).
+- **DG-R1-08** (a worker that cannot start): the bug error, a fresh worker next.
+- **DG-R1-09** (Copy seed): the seed in its usual form.
+- **DG-R1-10** (a second empty scene after Hide): the form starts over.
+- **DG-R1-11** (snapshot and reducer parity): the integration test compares them.
+- **DG-R1-12** (the 300 ms only logged): reported, not asserted, with the dispatch task's 100 ms still held.
