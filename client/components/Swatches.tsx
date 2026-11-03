@@ -1,5 +1,6 @@
 import { useId, type CSSProperties } from "react";
 import { contrast } from "../lib/accent.ts";
+import { MARK_RING } from "../lib/memberColor.ts";
 import { MEMBER_COLOR_NAMES, theme } from "../lib/theme.ts";
 import { useHeld } from "./Held.tsx";
 import { useMeasuring } from "./measuring.ts";
@@ -102,7 +103,7 @@ export function Swatches(props: {
                 background: chosen ? theme.color.bg : "transparent",
               }}
             >
-              <span style={{ display: "block", width: 28, height: 28, borderRadius: theme.radius.round, background: option.color, boxSizing: "border-box", border: `${theme.line.border}px solid ${theme.color.border}` }} />
+              <span style={{ display: "block", width: 28, height: 28, borderRadius: theme.radius.round, background: option.color, boxShadow: MARK_RING }} />
               {option.badge ? (
                 <span
                   style={{
@@ -116,6 +117,8 @@ export function Swatches(props: {
                     padding: `0 ${theme.space(0.5)}px`,
                     borderRadius: theme.radius.pill,
                     background: option.color,
+                    // The ring is inside the page-colored border, so a white badge keeps an edge on a light page too.
+                    boxShadow: MARK_RING,
                     border: `${theme.line.border}px solid ${disabled ? theme.color.textDisabled : theme.color.bg}`,
                     color: disabled ? theme.color.textDisabled : inkOn(option.color),
                     fontSize: theme.font.tiny,

@@ -1,4 +1,5 @@
 import { Children, isValidElement, useId, type CSSProperties, type ReactNode, type Ref } from "react";
+import { MARK_RING } from "../lib/memberColor.ts";
 import { theme } from "../lib/theme.ts";
 import { Icon } from "./Icon.tsx";
 
@@ -198,10 +199,10 @@ export function RowChevron(props: { open: boolean }) {
   return <Icon name={props.open ? "chevronDown" : "chevronRight"} size="md" style={{ color: theme.color.textMuted }} />;
 }
 
-/** A row's leading dot, in a member's or a disposition's color. */
+/** A row's leading dot, in a member's color, with the ring every such mark wears (lib/memberColor.ts). */
 export function RowDot(props: { color: string; size?: number }) {
   const size = props.size ?? 20;
-  return <span aria-hidden style={{ display: "block", width: size, height: size, borderRadius: theme.radius.round, background: props.color }} />;
+  return <span aria-hidden style={{ display: "block", width: size, height: size, borderRadius: theme.radius.round, background: props.color, boxShadow: MARK_RING }} />;
 }
 
 /**

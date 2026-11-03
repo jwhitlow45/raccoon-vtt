@@ -11,6 +11,14 @@ import { MEMBER_COLOR_NAMES, MEMBER_COLORS, theme } from "./theme.ts";
 
 type Named = { name: string; color: string };
 
+/**
+ * The 1 px ring a mark in a member's color wears (docs/design/design-v1-light-theme.md
+ * 6.3): the mark keeps the member's own color, and the ring keeps a white or
+ * yellow one from vanishing on a light page. An inset box-shadow, so no box
+ * grows and nothing around it moves.
+ */
+export const MARK_RING = `inset 0 0 0 ${theme.line.border}px ${theme.color.markRing}`;
+
 function same(a: string, b: string): boolean {
   return a.toLowerCase() === b.toLowerCase();
 }
