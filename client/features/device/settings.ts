@@ -246,3 +246,30 @@ const sheetHandleSetting = setting<GrabberId>("rvtt.sheetHandle", parseGrabber, 
 export const sheetHandle = sheetHandleSetting.get;
 export const setSheetHandle = sheetHandleSetting.set;
 export const useSheetHandle = sheetHandleSetting.use;
+
+// ---------------------------------------------------------------- weather
+
+/**
+ * "Weather on the map" (docs/design/design-v1-weather.md 4.3): Moving, the
+ * default, Still or Off. Reduced motion, Low power and a device that could
+ * not keep up keep it still whatever this says (features/weather/store.ts).
+ */
+export const WEATHER_MODES = ["moving", "still", "off"] as const;
+export type WeatherMode = (typeof WEATHER_MODES)[number];
+
+/** Each choice's name, in This device's cards and the table display's menu. */
+export const WEATHER_MODE_WORDS: Readonly<Record<WeatherMode, string>> = { moving: "Moving", still: "Still", off: "Off" };
+
+export function parseWeatherMode(raw: string | null): WeatherMode {
+  return raw === "still" || raw === "off" ? raw : "moving";
+}
+
+const weatherModeSetting = setting<WeatherMode>("rvtt.weather", parseWeatherMode, (m) => m);
+
+export const weatherMode = weatherModeSetting.get;
+export const setWeatherMode = weatherModeSetting.set;
+export const useWeatherMode = weatherModeSetting.use;
+export const subscribeWeatherMode = weatherModeSetting.subscribe;
+/** A table display's own choice, for its page only, as its text size takes `applyUiScale` (features/display/remember.ts). */
+export const applyWeatherMode = weatherModeSetting.apply;
+export const restoreWeatherMode = weatherModeSetting.restore;

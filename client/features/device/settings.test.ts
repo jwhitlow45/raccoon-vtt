@@ -137,3 +137,31 @@ test("with storage blocked, the sheet handle reads as the tail and a choice last
   assert.equal(s.sheetHandle(), "rune");
   assert.equal(stored.has("rvtt.sheetHandle"), false);
 });
+
+/*
+ * Weather on the map (docs/design/design-v1-weather.md 4.3): Moving until
+ * chosen, and anything this version does not know reads as Moving. A table
+ * display's own choice is for its page only, as its text size is.
+ */
+
+test("weather reads moving, still or off, and anything else as moving", async () => {
+  reset({ writes: true, reads: true });
+  const s = await loadPage();
+  assert.equal(s.weatherMode(), "moving");
+  for (const raw of ["still", "off", "moving"]) assert.equal(s.parseWeatherMode(raw), raw);
+  for (const raw of [null, "", "Still", "OFF", "none", "moving;"]) assert.equal(s.parseWeatherMode(raw), "moving", String(raw));
+  s.setWeatherMode("off");
+  assert.equal(stored.get("rvtt.weather"), "off");
+  assert.equal((await loadPage()).weatherMode(), "off");
+});
+
+test("a table display's weather lasts for its page and gives the device's own back", async () => {
+  reset({ writes: true, reads: true });
+  stored.set("rvtt.weather", "still");
+  const s = await loadPage();
+  s.applyWeatherMode("off");
+  assert.equal(s.weatherMode(), "off");
+  assert.equal(stored.get("rvtt.weather"), "still", "the member's choice is not touched");
+  s.restoreWeatherMode();
+  assert.equal(s.weatherMode(), "still");
+});

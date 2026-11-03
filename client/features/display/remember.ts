@@ -1,6 +1,6 @@
 import { useLayoutEffect } from "react";
 import { formatRoomId } from "../../lib/roomId.ts";
-import { applyUiScale, parseUiScale, restoreUiScale, type UiScale } from "../device/settings.ts";
+import { applyUiScale, applyWeatherMode, parseUiScale, parseWeatherMode, restoreUiScale, restoreWeatherMode, type UiScale, type WeatherMode } from "../device/settings.ts";
 
 /** A display's own page for its room, `/display/K7QH-2MXA`. */
 export function displayPath(roomId: string): string {
@@ -99,6 +99,39 @@ export function useDisplayTextSize(): void {
   useLayoutEffect(() => {
     applyUiScale(readDisplayUiScale());
     return () => restoreUiScale();
+  }, []);
+}
+
+/**
+ * The display menu's Weather (docs/design/design-v1-weather.md 4.3), kept
+ * apart from the device's own `rvtt.weather` for the same reason as the
+ * text size: the display may be a window of a member's own browser.
+ */
+const WEATHER_KEY = "rvtt.displayWeather";
+
+export function readDisplayWeather(): WeatherMode {
+  try {
+    return parseWeatherMode(localStorage.getItem(WEATHER_KEY));
+  } catch {
+    return "moving";
+  }
+}
+
+/** The display menu's Weather: kept under the display's own key, and taken on this page only. */
+export function chooseDisplayWeather(mode: WeatherMode): void {
+  try {
+    localStorage.setItem(WEATHER_KEY, mode);
+  } catch {
+    // The choice lasts until the page closes.
+  }
+  applyWeatherMode(mode);
+}
+
+/** The display's own weather for this page, given back when it closes, as useDisplayTextSize does for the text size. */
+export function useDisplayWeather(): void {
+  useLayoutEffect(() => {
+    applyWeatherMode(readDisplayWeather());
+    return () => restoreWeatherMode();
   }, []);
 }
 
