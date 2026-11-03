@@ -607,3 +607,48 @@ describe("websocket: the access signal", () => {
     playerSocket.close();
   });
 });
+
+describe("websocket: the joinRequests signal (docs/design/design-v1-join-requests.md 5.3)", () => {
+  let t: Engine;
+  before(async () => {
+    t = await startEngine();
+  });
+  after(() => t.close());
+
+  test("reaches DM sockets with a snapshot only: never a player, a table display, a View as preview, or a DM socket still waiting for its snapshot", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Knock knock");
+    const player = t.client();
+    const pipId = await player.join(roomId, "Pip");
+    const code = (await dm.post(`/api/rooms/${roomId}/display/code`)).json<{ code: string }>().code;
+    const tv = t.client();
+    assert.equal((await tv.post("/api/display/redeem", { code })).statusCode, 200);
+
+    const dmSocket = await t.connect(roomId, dm);
+    const playerSocket = await t.connect(roomId, player);
+    const displaySocket = await t.connectDisplay(roomId, tv);
+    const { Socket } = await import("./testing.ts");
+    const preview = await Socket.open(`${t.url}/ws?room=${roomId}&as=${encodeURIComponent(pipId)}`, {
+      origin: t.config.publicOrigin,
+      cookie: `rvtt=${dm.token}`,
+      "cf-connecting-ip": dm.ip,
+      "user-agent": "joinrequests-itest",
+    });
+    await dmSocket.snapshot("dm");
+    await playerSocket.snapshot("player");
+    await displaySocket.snapshot("display");
+    await preview.snapshot("preview");
+    // A second DM socket that has not said hello holds no snapshot yet.
+    const early = await t.connect(roomId, dm);
+
+    t.app.gateway.joinRequestsChanged(roomId);
+    assert.ok(await dmSocket.next("joinRequests"));
+    assert.equal(await playerSocket.maybe("joinRequests"), null);
+    assert.equal(await displaySocket.maybe("joinRequests"), null);
+    assert.equal(await preview.maybe("joinRequests"), null);
+    assert.equal(await early.maybe("joinRequests"), null);
+    // Apart from access: a burst of asks never makes the devices list fetch again.
+    assert.equal(await dmSocket.maybe("access"), null);
+    for (const s of [dmSocket, playerSocket, displaySocket, preview, early]) s.close();
+  });
+});

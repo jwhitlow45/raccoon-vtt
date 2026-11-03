@@ -67,6 +67,12 @@ export interface RoomGateway {
    * is there.
    */
   accessChanged(roomId: string): void;
+  /**
+   * Tells the room's DM sockets, never a display or a View as preview,
+   * that its join requests changed (docs/design/design-v1-join-requests.md
+   * 5.3). A no-op when the room is not loaded.
+   */
+  joinRequestsChanged(roomId: string): void;
   /** Sessions with a socket open in the room now. Empty when the room is not loaded. */
   openSessions(roomId: string): ReadonlySet<string>;
   /** Closes the room's sockets with 4009 and deletes it. False when it did not exist. */
@@ -145,6 +151,10 @@ export class DirectGateway implements RoomGateway {
   }
 
   accessChanged(_roomId: string): void {
+    // With no actor there are no sockets to tell.
+  }
+
+  joinRequestsChanged(_roomId: string): void {
     // With no actor there are no sockets to tell.
   }
 

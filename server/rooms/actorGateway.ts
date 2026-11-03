@@ -67,6 +67,10 @@ export class ActorGateway implements RoomGateway {
     this.#manager.get(roomId)?.notifyAccess();
   }
 
+  joinRequestsChanged(roomId: string): void {
+    this.#manager.get(roomId)?.notifyJoinRequests();
+  }
+
   openSessions(roomId: string): ReadonlySet<string> {
     return this.#manager.get(roomId)?.openSessionIds() ?? new Set();
   }

@@ -591,6 +591,17 @@ export class RoomActor {
     }
   }
 
+  /**
+   * The `joinRequests` signal (docs/design/design-v1-join-requests.md 5.3)
+   * to every DM socket that has its snapshot, never a table display or a
+   * View as preview, which must learn nothing about who is asking.
+   */
+  notifyJoinRequests(): void {
+    for (const conn of this.#connections) {
+      if (!conn.closed && conn.role === "dm" && conn.held !== null && !conn.display && conn.previewBy === null) conn.send({ t: "joinRequests" });
+    }
+  }
+
   closeSockets(filter: SocketFilter, code: number): void {
     for (const conn of this.#connections) {
       if ("all" in filter || filter.sessionIds.includes(conn.sessionId)) conn.close(code);
