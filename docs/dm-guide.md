@@ -27,6 +27,7 @@ The app does a lot, and you don't need most of it on day one. Read the [Quick st
   - [Fog](#fog)
   - [Generating a dungeon](#generating-a-dungeon)
   - [Map phases, imports and exports](#map-phases-imports-and-exports)
+  - [Animated maps](#animated-maps)
 - Running fights
   - [Monsters](#monsters)
   - [Encounters](#encounters)
@@ -685,6 +686,24 @@ Press **Create scene** to make it, and keep the page open until the walls have b
 ![Export as image in the scene's settings: Pixels per square, Player view or DM view, and Grid.](dm-guide/export.webp)
 
 **Exporting a map.** **Export as image**, in the scene's settings, saves the map image and the build as a PNG file, without tokens, drawings or fog. Choose how many **Pixels per square** to draw, 50, 70 or 100, then the **Player view** or the **DM view**, and whether to include the **Grid**. On a hex scene the same choices read **Pixels per hex** and **Hex lines**. The player view draws secret doors that haven't been found as plain walls, and leaves out DM-only stamps and lock marks. On a scene with fog on, it draws only what the players' maps hold (see [What players' maps hold](#what-players-maps-hold)), and needs a connection to the server. Press **Make image**, then **Download**. The file name carries the grid size, such as `crypt-30x20-70px.png`, so this app and other VTTs can set the scale when you import the image later. A hex scene's file is named like `crypt-hex-70px.png` instead, since a size in squares would mislead.
+
+## Animated maps
+
+Many map makers sell their battle maps as short looping videos: water that ripples, torches that flicker, a portal that swirls. You can use one as a scene's map, and it moves on everyone's screen under the tokens, the fog and the weather. This only works if whoever runs your server has turned animated maps on. Until then the pickers take images only.
+
+Pick the video wherever you would pick a map image: **Map image** under **New scene**, the **Map image** row of a scene's **Map image and grid**, or **Add a phase**. A WebM or MP4 file works, up to 64 MB and 10 minutes long. If a pack offers both, the MP4 (H.264) plays on the most devices.
+
+Your device first reads the video's first frame, which becomes the map's still. Then it uploads the video and the still, and the button shows each step with its percent ("Uploading the video… 42%"). The grid is looked for on the still, just as for an image, and a name like `crypt_30x20.webm` sets the scale. **Cancel** stops the upload at any step.
+
+![The Map image row of an animated map: "A 640 × 360 px video, 0:02, looping. Its first frame is the still." and "Moving on this device.", its buttons with Use the still only, and the Map phases list with Day marked Video.](dm-guide/animated-map.webp)
+
+Some devices can't read a video's first frame, such as an iPhone before iOS 17.4 with a WebM file. The form then asks you to **Pick a still image** for it, such as the picture that came with the map. It has to be the video's shape. On an iPhone in Low Power Mode, **Try again** usually works, since a tap lets the video open.
+
+**On each device.** The row under the map's size tells you what your own device does: "Moving on this device.", or "Still on this device:" and why. Every device decides for itself and shows the still when it should: when its **Animated maps** setting in **Menu**, **This device** is **Still**, in Low power, with reduced motion, in Isometric, while you use the Builder, Fog, Line up grid or Traps tool, when it can't play the file smoothly, and on Phone size map detail for a video larger than 1920 × 1080 or faster than 30 frames a second. A device that the video slows down stops it until the page reloads. The table display's menu has its own Animated maps choice. No sound ever plays, and devices don't keep in step with one another, which a looping map never needs.
+
+**Use the still only**, under the row's buttons, keeps the still as a plain map and drops the video. It is one step in **Setup history**, so **Undo setup** brings the video back. Each map phase can be a video or a still, and the phase list shows "Video" after a video phase's name. Players only ever get the video of the phase showing.
+
+Your **Library** lists each video among the maps as a film strip with its length. Tap it to watch it large, see its size and how much space it takes, and delete one that nothing uses. A video counts toward your room's storage, and Export as image, thumbnails and Isometric all use the still.
 
 # Running fights
 

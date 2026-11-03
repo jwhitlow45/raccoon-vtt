@@ -37,7 +37,11 @@ the code meets each one, and section 10 of the design has the detail.
    address for image imports.
 6. **Uploaded and imported files are treated as hostile.** Images are
    checked by their contents, decoded only by a short list of image
-   loaders, re-encoded and stripped of metadata. Room imports are
+   loaders, re-encoded and stripped of metadata. An animated map's video,
+   where the server's owner allows them, is never re-encoded. The server
+   reads only its headers, keeps what an allowlist names and zeroes the rest
+   in place, padding included. Nothing inside the media data is ever
+   written, and nothing is decoded on the server. Room imports are
    validated and bounded before anything is kept, and the changes an
    imported map or character turns into are checked like any other.
 7. **Browsers get the usual protections.** A strict Content Security
@@ -72,6 +76,14 @@ you rely on the app.
 - **Limits are not a shield against a large flood.** They bound what each
   address, session and room can spend, but a large attack from many
   addresses needs help from the front end, such as Cloudflare.
+- **A video reaches players' decoders.** An animated map's video is not
+  re-encoded, so a DM could send players' browsers bytes aimed at their
+  video decoder, which images never reach. Browsers decode media in a
+  sandboxed process, the DM is already trusted with the players, and a
+  player who sets Animated maps to Still downloads no video. Text inside a
+  video's own frames, such as H.264 user data, and an MP4's timecode track
+  are left as they are, since the server never writes inside the media
+  data. Animated maps are off unless the server's owner turns them on.
 - **Only the latest release is fixed.** Older releases do not receive
   security fixes, so keep your server updated
   ([Updating](self-hosting.md#updating)).
@@ -173,7 +185,7 @@ for a web app like this one.
 | Logging failures (A09) | The server logs every request and every admin sign-in, failed sign-in, pin and deletion. Request logs carry the method, path and address but no headers or bodies, and secrets travel in bodies, cookies and URL fragments, so they stay out of the logs. |
 | Server-side request forgery (A10, CWE-918) | Outbound requests go only through the egress proxy. Image imports are `https` on port 443 only, with every redirect checked again and private, loopback and reserved addresses refused ([fetchPublic.ts](../server/assets/fetchPublic.ts)). |
 | Cross-site request forgery (CWE-352) and WebSocket hijacking (CWE-1385) | Every request that changes anything must come from the site itself, by `Sec-Fetch-Site` or an exact Origin. The WebSocket upgrade needs an exact Origin match. No CORS headers are sent. |
-| Unrestricted upload (CWE-434) | Images are recognized by their bytes, never their names, and SVG is always refused. Each is re-encoded to WebP and stored under a name made from its hash, so no file name a user sends ever reaches the disk ([process.ts](../server/assets/process.ts), [store.ts](../server/assets/store.ts)). |
+| Unrestricted upload (CWE-434) | Images are recognized by their bytes, never their names, and SVG is always refused. Each is re-encoded to WebP and stored under a name made from its hash, so no file name a user sends ever reaches the disk ([process.ts](../server/assets/process.ts), [store.ts](../server/assets/store.ts)). A video is taken only as WebM or MP4 with `kind=video`, recognized by its bytes, checked by a bounded header parser with no decoder, served under the type its row records, and stored by hash like an image ([server/assets/video](../server/assets/video)). |
 | Resource exhaustion (CWE-400) | Body limits on every route, room limits on every kind of content (design section 10.5), a bounded queue for password hashing, socket caps, and counted entries and bytes when a zip is read ([importRoom.ts](../server/rooms/importRoom.ts)). |
 | Input validation (CWE-20) | Every message and op is checked against a zod schema with explicit bounds before it is used ([protocol.ts](../shared/protocol.ts)). The same schemas type the client, so the two never drift apart. |
 

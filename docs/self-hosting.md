@@ -100,6 +100,11 @@ Then open `.env` in an editor and fill in:
   challenge: once a room sees 20 wrong passwords in an hour, joining it with
   the password needs the check too, instead of anyone being locked out.
   Without the keys there is no check anywhere.
+- `ANIMATED_MAPS`: optional, `1` lets a DM use a WebM or MP4 video as an
+  animated map. Unset or `0`, the server refuses video uploads, serves no
+  video and every map shows its still. Read
+  [If you use Cloudflare](#6-if-you-use-cloudflare) before you turn it on
+  behind Cloudflare.
 
 To get the Turnstile keys, open the Cloudflare dashboard, then Turnstile,
 then Add widget:
@@ -265,6 +270,16 @@ These zone settings keep Cloudflare from breaking the app (design section
 - Caching, Configuration: Browser Cache TTL set to "Respect Existing Headers".
 - Security, WAF: no challenge or managed-challenge rule that matches `/api/*`
   or `/ws`. A challenge breaks the WebSocket and every API call.
+
+Animated maps serve each map's video, up to 64 MB, through the same
+hostname. Cloudflare's
+[Service-Specific Terms](https://www.cloudflare.com/service-specific-terms-application-services/)
+say that a plan below Enterprise may serve video and other large files
+through its CDN only with Cloudflare's paid services for them, and that
+Cloudflare may limit a site that does otherwise. The limit would fall on
+the whole site, not only on the videos, so `ANIMATED_MAPS` is off unless
+you set it to `1`. Turn it on behind Cloudflare only if you accept that,
+or if you serve the site another way.
 
 ### 7. Check it and make your group's room
 
