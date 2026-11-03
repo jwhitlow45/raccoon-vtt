@@ -61,15 +61,22 @@ export function accentFor(color: string | null | undefined, scheme: Scheme = "da
 /**
  * A member's name or other words in their own color (the Log, recent
  * rolls): the member's color where it reads as text on the scheme's
- * surfaces, else the nearest that does, by the accent's search. Only the
- * contrast counts, since words are not a control that could pass for the
- * turn highlight or a disabled one, and orange stays orange, since the
- * name is the member's and not the interface's.
+ * surfaces and stays apart from `accentSoft`, else the nearest that does,
+ * by the accent's search. `accentSoft` colors words beside the names, the
+ * turn's text and the Log's whisper label, so a name in it would read as
+ * one of them (review LTB-4: orange came within 4.2 of it on light).
+ * Muted text does not count, since words are not a control that could
+ * pass for a disabled one, and orange stays orange, since the name is the
+ * member's and not the interface's.
  */
 export function memberInk(color: string | null | undefined, scheme: Scheme = "dark"): string {
   const picked = color && HEX.test(color) ? color.toLowerCase() : null;
   if (!picked) return PALETTES[scheme].text;
-  return readsAsText(picked, scheme) ? picked : nearestFit(picked, scheme, readsAsText, PALETTES[scheme].text);
+  return fitsInk(picked, scheme) ? picked : nearestFit(picked, scheme, fitsInk, PALETTES[scheme].text);
+}
+
+function fitsInk(hex: string, scheme: Scheme): boolean {
+  return readsAsText(hex, scheme) && cie76(hex, PALETTES[scheme].accentSoft) >= MIN_APART;
 }
 
 /**

@@ -246,6 +246,19 @@ describe("a member's name in their own color", () => {
       { numRuns: 2000, seed: 20261102 },
     );
   });
+
+  test("orange on light steps clear of the turn's text and the whisper label, which it read as at 4.2 apart (review LTB-4)", () => {
+    const ink = memberInk("#f38400", "light");
+    const soft = PALETTES.light.accentSoft;
+    assert.ok(distance(ink, soft) >= 20, `${ink} is ${distance(ink, soft).toFixed(1)} from ${soft}`);
+  });
+
+  test("any color stays 20 apart from the scheme's accentSoft, the words beside a name (fast-check)", () => {
+    fc.assert(
+      fc.property(anyColor, fc.constantFrom(...SCHEMES), (color, scheme) => distance(memberInk(color, scheme), PALETTES[scheme].accentSoft) >= 20),
+      { numRuns: 2000, seed: 20261103 },
+    );
+  });
 });
 
 describe("the accent's variables", () => {
