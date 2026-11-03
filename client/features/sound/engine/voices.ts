@@ -117,9 +117,12 @@ function withNext(at: number, lengthMs: number, crossingMs: number | null, t: nu
     return out;
   }
   // Two passes sounding is a crossing: the next one loads once the older is done, so a sound never needs more than its two elements.
-  if (crossingMs === null || out.length > 1) return out;
-  const later = occurrencesAt(at, lengthMs, crossingMs, t + LOOKAHEAD_MS).at(-1);
-  if (later && !out.some((o) => o.k === later.k)) out.push({ k: later.k, startAt: later.startAt });
+  if (crossingMs === null || out.length !== 1) return out;
+  // The pass right after the one sounding, never a later one: a loop shorter than the lookahead would skip a pass already
+  // loaded ahead, and Voices would cancel it and start it late. The period is occurrencesAt's, the crossing held to half.
+  const current = out[0]!;
+  const nextAt = current.startAt + lengthMs - Math.min(Math.max(0, crossingMs), Math.floor(lengthMs / 2));
+  if (nextAt - t <= LOOKAHEAD_MS) out.push({ k: current.k + 1, startAt: nextAt });
   return out;
 }
 
