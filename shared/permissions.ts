@@ -922,6 +922,9 @@ function forPlayer(op: Op, c: Check): Decision {
       const token = c.visibleToken(op.tokenId);
       if (!token) return GONE;
       if (!ownsToken(c.state, c.actor, token)) return NOT_YOURS;
+      // Where an owned token is drawn in its box is where it stands as a move leaves it, so a lock refuses it
+      // (docs/design/design-v1-snap-off.md 5.4). The protocol keeps the patch to `drawnAt` alone, so no other field rides past the lock.
+      if (op.patch.drawnAt !== undefined) return moveCheck(c, token.id);
       if (token.companion) return companionUpdateCheck(c, token, token.companion, op.patch);
       if (op.patch.size !== undefined) return resizeCheck(c, token, op.patch);
       for (const field of Object.keys(op.patch)) {
@@ -1758,10 +1761,11 @@ export function movesAnyToken(settings: Partial<Pick<RoomSettings, "playersMoveA
 
 /**
  * The fields a move sets, which a player's undo of a move may put back: its
- * turn's path goes back with the position, and a squeeze with the place it
- * was squeezed in (docs/design/design-v1-maps-vision.md 4.1).
+ * turn's path goes back with the position, a squeeze with the place it
+ * was squeezed in (docs/design/design-v1-maps-vision.md 4.1), and where it
+ * was drawn in its box (docs/design/design-v1-snap-off.md 5.4).
  */
-const POSE_FIELDS = ["x", "y", "elevation", "rotation", "path", "squeeze", "attached", "rev"] as const;
+const POSE_FIELDS = ["x", "y", "elevation", "rotation", "path", "squeeze", "nudge", "attached", "rev"] as const;
 
 function withoutPose(token: Token, also: readonly string[] = []): string {
   const rest: Record<string, unknown> = { ...token };
@@ -1779,7 +1783,9 @@ function withoutPose(token: Token, also: readonly string[] = []): string {
  * facing, which an owner may change on a locked token too (owners'
  * token.update, OWNER_TOKEN_FIELDS). Such an undo by an owner takes the
  * owner's rights, so a change they could make they can also take back. A
- * player who moves the token without owning it still needs it unlocked.
+ * player who moves the token without owning it still needs it unlocked,
+ * and so does an owner whose undo changes where it is drawn in its box,
+ * which on a locked token only the DM changes (docs/design/design-v1-snap-off.md 5.4).
  */
 function restoreMoveCheck(c: Check, tokenId: string, value: unknown): Decision {
   const current = ownEntry(c.state.tokens, tokenId);
@@ -1793,11 +1799,16 @@ function restoreMoveCheck(c: Check, tokenId: string, value: unknown): Decision {
   // Only a link the player sees counts, so a hidden steed never changes the answer (8.0).
   const shownTo = (t: Token) => (t.attached && c.visibleToken(t.attached.to) ? t.attached.to : undefined);
   const linkChanges = restored !== null && shownTo(restored) !== shownTo(current);
+  const ownInPlace = inPlace && ownsToken(c.state, c.actor, token) && (sameNudge(restored, current) || moveCheck(c, tokenId).ok);
   const may =
-    (inPlace && ownsToken(c.state, c.actor, token)) || viaHolder(c, current, restored) || (linkChanges && ownsToken(c.state, c.actor, token)) ? OK : namedMoveCheck(c, tokenId, restored ?? undefined);
+    ownInPlace || viaHolder(c, current, restored) || (linkChanges && ownsToken(c.state, c.actor, token)) ? OK : namedMoveCheck(c, tokenId, restored ?? undefined);
   if (!may.ok) return may;
   if (!restored) return FORBIDDEN;
   return withoutPose(restored) === withoutPose(current) ? OK : refuse("forbidden", "an undo of yours only moves tokens back");
+}
+
+function sameNudge(a: Pick<Token, "nudge">, b: Pick<Token, "nudge">): boolean {
+  return a.nudge?.x === b.nudge?.x && a.nudge?.y === b.nudge?.y;
 }
 
 /** The tokens a restore writes, with the values it puts back. */
