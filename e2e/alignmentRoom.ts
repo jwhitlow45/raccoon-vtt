@@ -5955,7 +5955,7 @@ async function builderScreens(sweep: Sweep, page: Page): Promise<void> {
  * date and time, and the Calendar dialog with 12 months. The sweep's room
  * has no clock, so each size starts one by op and stops it after.
  */
-async function clockScreens(sweep: Sweep, page: Page): Promise<void> {
+async function clockScreens(sweep: Sweep, page: Page, desk: boolean): Promise<void> {
   if (dmSocket.state?.clock) await ops.send({ t: "clock.stop" });
   await closeSheets(page);
   await escapeAll(page);
@@ -5971,8 +5971,9 @@ async function clockScreens(sweep: Sweep, page: Page): Promise<void> {
   await panel.getByRole("button", { name: "Move on", exact: true }).click();
   await panel.getByRole("alert").first().waitFor();
   await sweep.measure(page, "ck-time", panel);
-  // The top bar's chip shows from 900 px up and never below, so it is measured at the desk only (CAL-12).
-  await sweep.measure(page, "ck-chip", page.getByRole("button", { name: /^Time: / }), { optional: true });
+  // The top bar's chip shows from 900 px up and never below (CAL-12). At the desk it must show, so a chip gone missing there fails (CALB-O-10).
+  if (desk) await sweep.measure(page, "ck-chip", page.getByRole("button", { name: /^Time: / }));
+  else if ((await page.getByRole("button", { name: /^Time: / }).count()) > 0) sweep.lines.push(`${sweep.at} ck-chip: the chip shows below 900 px`);
 
   // The party's Long Rest card with its checkbox and, once Thorn has a stamp, its note.
   await ops.send({ t: "actor.rest", target: { characterId: run.ids.thornChar }, kind: "long" });
@@ -6012,11 +6013,12 @@ async function clockScreens(sweep: Sweep, page: Page): Promise<void> {
 }
 
 /** Pat's Time panel at one size: the date and the part of the day, and nothing of the DM's controls. */
-async function patClockScreens(sweep: Sweep, page: Page): Promise<void> {
+async function patClockScreens(sweep: Sweep, page: Page, desk: boolean): Promise<void> {
   const panel = await openPanel(page, "Time");
   await panel.locator("[data-clock-date]").waitFor();
   await sweep.measure(page, "ck-pat-time", panel);
-  await sweep.measure(page, "ck-pat-chip", page.getByRole("button", { name: /^Time: / }), { optional: true });
+  if (desk) await sweep.measure(page, "ck-pat-chip", page.getByRole("button", { name: /^Time: / }));
+  else if ((await page.getByRole("button", { name: /^Time: / }).count()) > 0) sweep.lines.push(`${sweep.at} ck-pat-chip: the chip shows below 900 px`);
 }
 
 /** The calendar build's roots, which the sizes' sweep never reaches (docs/design/design-v1-calendar.md 9, 11). */
@@ -6030,7 +6032,7 @@ export function clockTests(): void {
         page.setDefaultTimeout(10_000);
         await openAt(page, at.size, at.scale);
         await waitFor("the DM's snapshot", () => dmSocket.state);
-        await clockScreens(sweep, page);
+        await clockScreens(sweep, page, at.size.width === 1440);
         lines.push(...sweep.lines);
       }
     } finally {
@@ -6047,7 +6049,7 @@ export function clockTests(): void {
         const sweep = new Sweep(atName(at));
         pat.setDefaultTimeout(10_000);
         await openAt(pat, at.size, at.scale);
-        await patClockScreens(sweep, pat);
+        await patClockScreens(sweep, pat, at.size.width === 1440);
         lines.push(...sweep.lines);
       }
     } finally {

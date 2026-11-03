@@ -30,6 +30,11 @@ import { playControl, undoSetup } from "./helpers/undoScope.ts";
  * - ck-5: Pat's Time panel, open when sharing stops, says so until closed.
  * - ck-6: the top bar chip on a computer opens the Time panel and never
  *   overflows Pat's row.
+ * - cf-1 to cf-6, the calendar review's fixes: a clock's seconds kept by
+ *   Set and a rename, Today and Set following the calendar, the discard
+ *   question said aloud, the running controls going with their clock, the
+ *   DM's 1024 px row with a blackout and a long name, and Pat's chip coming
+ *   back once its date is short.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus forty, one file after
  * another. The other environment variables are the smoke run's
@@ -79,6 +84,13 @@ function clockLines(socket: SocketWatch): { date: string; by?: number; why?: str
 async function reads(panel: Locator, date: string, time: string): Promise<void> {
   await panel.locator("[data-clock-date]").filter({ hasText: new RegExp(`^${date}$`) }).waitFor();
   await panel.locator("[data-clock-time]").filter({ hasText: new RegExp(`^${time}$`) }).waitFor();
+}
+
+/** Waits for the Month select's error to read `text`, linked to it by aria-describedby. */
+async function monthError(root: Locator, text: string): Promise<void> {
+  const select = root.getByLabel("Month", { exact: true });
+  await waitFor(`the month's error "${text}"`, () => select.evaluate((el, want) => (el.ownerDocument.getElementById(el.getAttribute("aria-describedby") ?? "")?.textContent === want && el.getAttribute("aria-invalid") === "true" ? true : null), text));
+  await root.getByRole("alert").filter({ hasText: new RegExp(`^${text.replace(".", "\\.")}$`) }).first().waitFor();
 }
 
 async function clockT(socket: SocketWatch, want: number): Promise<void> {
@@ -440,6 +452,173 @@ describe("the room clock's Time panel", () => {
     }
     await shots.take(pat, "ck-6-long-date");
     await pat.setViewportSize(PHONE);
+  });
+
+  test("cf-1. Set left as it opened and a calendar rename keep a clock's seconds and write no line (CALB-O-02, ASTRA-01)", async () => {
+    // A 3-round fight's 18 seconds past 8:00 AM, which the fields show as 08:00.
+    const at = 8 * HOUR + 18;
+    await ops.send({ t: "clock.set", at });
+    await clockT(dmSocket, at);
+    const before = clockLines(dmSocket).length;
+    const panel = await timePanel();
+    await panel.getByRole("button", { name: "Set the date and time…", exact: true }).click();
+    const set = dm.getByRole("dialog", { name: "Set the date and time", exact: true });
+    assert.equal(await set.getByLabel("Time", { exact: true }).inputValue(), "08:00");
+    await set.getByRole("button", { name: "Set", exact: true }).click();
+    await set.waitFor({ state: "detached" });
+    await panel.getByRole("button", { name: "Calendar…", exact: true }).click();
+    const calendar = dm.getByRole("dialog", { name: "Calendar", exact: true });
+    await calendar.getByRole("textbox", { name: "Month 2 name", exact: true }).fill("Thaw");
+    await calendar.getByRole("button", { name: "Save", exact: true }).click();
+    await calendar.waitFor({ state: "detached" });
+    await waitFor("the rename in the DM's copy", () => (dmSocket.state?.clock?.calendar.kind === "months" && dmSocket.state.clock.calendar.months[1]?.name === "Thaw" ? true : null));
+    // A step after them, so whatever they sent has arrived before the count.
+    await panel.getByRole("group", { name: "Move the clock on" }).getByRole("button", { name: "Move the clock on 10 minutes", exact: true }).click();
+    await clockT(dmSocket, at + 600);
+    assert.deepEqual(clockLines(dmSocket).slice(before).map((l) => l.by), [600], "the step's line alone: Set and the rename wrote none");
+  });
+
+  test("cf-2. Calendar's Today follows a new kind and a removed month, names the month it lacks, and says its discard question aloud (ASTRA-04, ASTRA-08)", async () => {
+    const panel = await timePanel();
+    const t = dmSocket.state!.clock!.t;
+    await panel.getByRole("button", { name: "Calendar…", exact: true }).click();
+    const calendar = dm.getByRole("dialog", { name: "Calendar", exact: true });
+    // Today's fields are the dialog's only Day, Month and Time: the month rows' fields are named for their months.
+    const today = calendar;
+    // A new kind starts Today again from the first day, whatever was typed in it.
+    await today.getByLabel("Day", { exact: true }).fill("9");
+    await calendar.getByRole("radio", { name: "Day count" }).click();
+    await waitFor("Today on Day 1", async () => ((await today.getByLabel("Day", { exact: true }).inputValue()) === "1" ? true : null));
+    await calendar.getByRole("radio", { name: "Months" }).click();
+    // Today in Thaw with its time edited, then Thaw removed: the month reads as none, and Save names it.
+    await today.getByLabel("Month", { exact: true }).selectOption("1");
+    await today.getByLabel("Time", { exact: true }).fill("09:00");
+    await calendar.getByRole("button", { name: "Remove Thaw", exact: true }).click();
+    assert.equal(await today.getByLabel("Month", { exact: true }).inputValue(), "");
+    await today.getByRole("option", { name: "Pick a month" }).waitFor({ state: "attached" });
+    await calendar.getByRole("button", { name: "Save", exact: true }).click();
+    await monthError(today, "Pick a month.");
+    await shots.take(dm, "cf-2-month-error");
+    // Escape asks aloud before it discards, and a second Escape leaves.
+    await dm.keyboard.press("Escape");
+    await calendar.getByRole("alert").filter({ hasText: "Throw away your changes?" }).waitFor();
+    await shots.take(dm, "cf-2-discard-question");
+    await dm.keyboard.press("Escape");
+    await calendar.waitFor({ state: "detached" });
+    assert.equal(dmSocket.state!.clock!.t, t, "nothing was sent");
+    assert.equal(dmSocket.state!.clock!.calendar.kind === "months" && dmSocket.state!.clock!.calendar.months.length, 2);
+  });
+
+  test("cf-3. a month another DM removes while Set is open reads as none, and Set names it (ASTRA-04)", async () => {
+    const panel = await timePanel();
+    await panel.getByRole("button", { name: "Set the date and time…", exact: true }).click();
+    const set = dm.getByRole("dialog", { name: "Set the date and time", exact: true });
+    await set.getByLabel("Month", { exact: true }).selectOption("1");
+    const clock = dmSocket.state!.clock!;
+    assert.equal(clock.calendar.kind, "months");
+    if (clock.calendar.kind !== "months") return;
+    await ops.send({ t: "clock.update", calendar: { ...clock.calendar, months: clock.calendar.months.slice(0, 1) } });
+    await waitFor("the month gone from Set", async () => ((await set.getByLabel("Month", { exact: true }).inputValue()) === "" ? true : null));
+    await set.getByRole("button", { name: "Set", exact: true }).click();
+    await monthError(set, "Pick a month.");
+    await shots.take(dm, "cf-3-set-month-gone");
+    await set.getByLabel("Month", { exact: true }).selectOption("0");
+    await set.getByLabel("Day", { exact: true }).fill("2");
+    await dm.keyboard.press("Escape");
+    await set.getByRole("alert").filter({ hasText: "Throw away your changes?" }).waitFor();
+    await shots.take(dm, "cf-3-set-discard-question");
+    await dm.keyboard.press("Escape");
+    await set.waitFor({ state: "detached" });
+    await ops.send({ t: "clock.update", calendar: clock.calendar });
+  });
+
+  test("cf-4. an armed Stop and an open dialog go with their clock when another device stops it and starts another, or stops it and Undo brings it back (ASTRA-07)", async () => {
+    const panel = await timePanel();
+    const stop = panel.getByRole("button", { name: "Stop the clock", exact: true });
+    await stop.click();
+    await panel.getByRole("button", { name: "Tap again to stop the clock", exact: true }).waitFor();
+    await ops.send({ t: "clock.stop" });
+    await panel.getByRole("button", { name: "Start the clock", exact: true }).waitFor();
+    await ops.send({ t: "clock.start", id: randomUUID(), at: 8 * HOUR, shown: true, calendar: { kind: "days" } });
+    await stop.waitFor();
+    assert.equal(await panel.getByRole("button", { name: "Tap again to stop the clock", exact: true }).count(), 0, "a new clock's Stop is not armed");
+
+    // Stop armed, then another device stops the clock and Undo setup brings the same clock back.
+    const id = dmSocket.state!.clock!.id;
+    await stop.click();
+    await panel.getByRole("button", { name: "Tap again to stop the clock", exact: true }).waitFor();
+    await ops.send({ t: "clock.stop" });
+    await panel.getByRole("button", { name: "Start the clock", exact: true }).waitFor();
+    await undoSetup(dm);
+    await waitFor("the clock back", () => (dmSocket.state?.clock?.id === id ? true : null));
+    const again = await timePanel();
+    await again.getByRole("button", { name: "Stop the clock", exact: true }).waitFor();
+    assert.equal(await again.getByRole("button", { name: "Tap again to stop the clock", exact: true }).count(), 0, "the clock Undo brought back finds Stop unarmed");
+
+    // A dialog open when another device stops the clock goes with it, and never opens again on the clock that comes back.
+    await again.getByRole("button", { name: "Set the date and time…", exact: true }).click();
+    const set = dm.getByRole("dialog", { name: "Set the date and time", exact: true });
+    await set.waitFor();
+    await ops.send({ t: "clock.stop" });
+    await set.waitFor({ state: "detached" });
+    await undoSetup(dm);
+    await waitFor("the clock back", () => (dmSocket.state?.clock?.id === id ? true : null));
+    await (await timePanel()).getByRole("button", { name: "Stop the clock", exact: true }).waitFor();
+    assert.equal(await set.count(), 0, "no dialog opens on the clock that came back");
+  });
+
+  test("cf-5. the DM's top bar at 1024 px with a blackout and a long room name: the chip leaves first and the rest of the row is as it is without a clock (CALB-O-10)", async () => {
+    const long = `${run.roomName} and the long road to the Sunless Citadel beyond`.slice(0, 80);
+    await ops.send({ t: "room.update", name: long });
+    await ops.send({ t: "view.blackout", blackout: true });
+    await dm.setViewportSize({ width: 1024, height: 768 });
+    const row = async () => {
+      await dm.reload();
+      await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+      await dm.waitForTimeout(300);
+      const header = dm.locator("header").first();
+      const overflow = await header.evaluate((el) => el.scrollWidth - el.clientWidth);
+      const chip = await dm.getByRole("button", { name: /^Time: / }).count();
+      const rest = await header.evaluate((el) => {
+        const copy = el.cloneNode(true) as typeof el;
+        for (const b of copy.querySelectorAll("button")) if ((b.getAttribute("aria-label") ?? "").startsWith("Time: ")) b.remove();
+        return copy.innerText.replace(/\s+/g, " ").trim();
+      });
+      return { overflow, chip, rest };
+    };
+    try {
+      const withClock = await row();
+      await ops.send({ t: "clock.stop" });
+      await waitFor("no clock", () => (dmSocket.state?.clock == null ? true : null));
+      const without = await row();
+      await shots.take(dm, "cf-5-dm-1024-blackout");
+      assert.ok(withClock.overflow <= 1 && without.overflow <= 1, `the row overflows: ${withClock.overflow} px with the clock, ${without.overflow} px without`);
+      assert.equal(withClock.rest, without.rest, "the rest of the row reads as it does without a clock");
+      assert.equal(withClock.chip, 0, "the long name leaves no room, and the chip is what leaves");
+      await undoSetup(dm);
+      await waitFor("the clock back", () => (dmSocket.state?.clock ? true : null));
+    } finally {
+      await ops.send({ t: "view.blackout", blackout: false });
+      await dm.setViewportSize(DESK);
+    }
+  });
+
+  test("cf-6. Pat's chip, gone for a long date, comes back at the same width once the date is short (CALB-O-09)", async () => {
+    await ops.send({ t: "clock.update", calendar: { kind: "months", months: [{ name: "Longest-month-name-here1", days: 30 }], week: ["Moonday"], era: "Era words 12" } });
+    await pat.setViewportSize({ width: 900, height: 768 });
+    await pat.goto(`${server.origin}/r/${run.roomId}`);
+    await pat.getByRole("status", { name: "Connected" }).first().waitFor();
+    await waitFor("the long calendar in Pat's copy", () => (patSocket.state?.clock?.calendar.kind === "months" ? true : null));
+    const chip = pat.getByRole("button", { name: /^Time: / });
+    await pat.waitForTimeout(300);
+    assert.equal(await chip.count(), 0, "the long date leaves no room at 900 px beside the long name");
+    await ops.send({ t: "clock.update", calendar: { kind: "days" } });
+    await chip.waitFor();
+    const overflow = await pat.locator("header").first().evaluate((el) => el.scrollWidth - el.clientWidth);
+    assert.ok(overflow <= 1, `Pat's row overflows by ${overflow} px`);
+    await shots.take(pat, "cf-6-chip-back");
+    await pat.setViewportSize(PHONE);
+    await ops.send({ t: "room.update", name: run.roomName });
   });
 
   test("ck-8. neither page logged an error", () => {
