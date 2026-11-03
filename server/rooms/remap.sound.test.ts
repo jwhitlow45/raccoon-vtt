@@ -3,7 +3,8 @@ import { describe, test } from "node:test";
 import type { RoomState, SoundFacts } from "#shared/model.ts";
 import type { Sound } from "#shared/sound.ts";
 import { room } from "#shared/testutil.ts";
-import { refillSoundFacts, remapState, withoutSound, type ImportedAsset } from "./remap.ts";
+import { withoutSound } from "./exportRoom.ts";
+import { refillSoundFacts, remapState, type ImportedAsset } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
 
 /**
@@ -178,7 +179,21 @@ describe("refillSoundFacts (6.7, MSOL-33, MUS-OPUS-53)", () => {
   });
 
   test("leaves out a sound whose row's facts do not check, and counts it", () => {
-    const bad: unknown[] = [facts(60_000.5), facts(199), facts(15 * 60_000 + 1_001), facts(60_000, { channels: 4 as 1 }), facts(60_000, { kbps: 63 }), facts(60_000, { kbps: 193 }), { ms: "60000", channels: 2, kbps: 128 }, { ms: 60_000, channels: 2, kbps: "128" }, null, "facts"];
+    // A bitrate no MP3 frame has, and a field the column never holds, fail the intake's own rule too (MUS-R1-07).
+    const bad: unknown[] = [
+      facts(60_000.5),
+      facts(199),
+      facts(15 * 60_000 + 1_001),
+      facts(60_000, { channels: 4 as 1 }),
+      facts(60_000, { kbps: 63 }),
+      facts(60_000, { kbps: 193 }),
+      facts(60_000, { kbps: 100 }),
+      { ...facts(60_000), title: "Night" },
+      { ms: "60000", channels: 2, kbps: 128 },
+      { ms: 60_000, channels: 2, kbps: "128" },
+      null,
+      "facts",
+    ];
     for (const row of bad) {
       const real = rows();
       real.set("A-m1-2", row as SoundFacts);
@@ -191,13 +206,13 @@ describe("refillSoundFacts (6.7, MSOL-33, MUS-OPUS-53)", () => {
   });
 });
 
-describe("withoutSound (6.7)", () => {
-  test("leaves nothing about sound, and the room still parses", () => {
+describe("withoutSound (6.7), the export's, which the import uses", () => {
+  test("leaves no sound, playlist, what plays, scene sound or names switch, and the room still parses", () => {
     const state = withoutSound(remapped());
-    for (const field of ["sounds", "playlists", "playing"]) assert.equal(field in state, false, field);
+    assert.deepEqual([state.sounds, state.playlists, state.playing], [{}, {}, null]);
     assert.equal("soundNames" in state.meta.settings, false);
     for (const scene of Object.values(state.scenes)) assert.equal("sound" in scene, false, scene.id);
-    assert.doesNotMatch(JSON.stringify(state), /"(sounds|playlists|playing|soundNames|sound)":/, "no other trace");
+    assert.doesNotMatch(JSON.stringify(state), /"(soundNames|sound)":/, "no other trace");
     parses(state);
     // The rest of the room is as it was.
     const { sounds: _s, playlists: _p, playing: _pl, ...rest } = remapped();

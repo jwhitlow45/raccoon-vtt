@@ -56,9 +56,10 @@ import { linkOf, relinked } from "#shared/reducer/uses.ts";
 import { withPcActors, withShapeRules } from "#shared/rules/pcStats.ts";
 import { phaseMap, withPhaseLight } from "#shared/reducer/phases.ts";
 import { normalWeather } from "#shared/weather.ts";
-import { SOUND_LIMITS, soundUseFits, stillFitsVideo } from "#shared/limits.ts";
+import { soundUseFits, stillFitsVideo } from "#shared/limits.ts";
 import { checkedVideoFacts } from "#shared/protocol.ts";
 import type { AssetKind } from "../assets/kinds.ts";
+import { SOUND_MEDIA, soundFactsOfRow } from "../assets/store.ts";
 
 /**
  * Gives every entity of an imported room a fresh id and rewrites every
@@ -848,37 +849,25 @@ function sceneSoundUnder(sound: SceneSound, sounds: IdMap, playlists: IdMap): Sc
 }
 
 /**
- * A row's sound facts when they are what the server's frame walk keeps
- * (docs/design/design-v1-sound.md 7.1), read as untrusted, as
- * checkedVideoFacts reads a video's: the column is jsonb.
- */
-function checkedSoundFacts(value: unknown): SoundFacts | undefined {
-  if (value === null || typeof value !== "object") return undefined;
-  const { ms, channels, kbps } = value as Record<string, unknown>;
-  if (typeof ms !== "number" || !Number.isInteger(ms) || ms < SOUND_LIMITS.fileMinMs || ms > SOUND_LIMITS.fileMaxMs) return undefined;
-  if (channels !== 1 && channels !== 2) return undefined;
-  if (typeof kbps !== "number" || !(kbps >= SOUND_LIMITS.minKbps && kbps <= SOUND_LIMITS.maxKbps)) return undefined;
-  return { ms, channels, kbps };
-}
-
-/**
  * Each sound's length from its file's row, after the id remap
  * (docs/design/design-v1-sound.md 6.7, MSOL-33). The import's own frame
  * walk made the rows, so a file's lengths are never trusted, as
  * sound.create's `ms` comes from the row and never from the client (4.2).
- * `facts` is keyed by the new asset id. A sound with no row there, whose
- * row's facts do not check, or whose length does not fit its use with 4.2's
- * allowance (soundUseFits, the rule its ops are held to) is left out with
- * its places in playlists and scene sounds, as deleting it would leave
- * them, and `left` counts those sounds for the import's answer
- * (soundsLeftOut). It runs after the remap, which leaves nothing playing.
+ * `facts` is keyed by the new asset id and read as untrusted, by the one
+ * rule for the audio column (store.ts soundFactsOfRow). A sound with no
+ * row there, whose row's facts do not check, or whose length does not fit
+ * its use with 4.2's allowance (soundUseFits, the rule its ops are held
+ * to) is left out with its places in playlists and scene sounds, as
+ * deleting it would leave them, and `left` counts those sounds for the
+ * import's answer (soundsLeftOut). It runs after the remap, which leaves
+ * nothing playing.
  */
 export function refillSoundFacts(state: RoomState, facts: ReadonlyMap<string, SoundFacts>): { state: RoomState; left: number } {
   if (!state.sounds) return { state, left: 0 };
   const kept: Record<string, Sound> = {};
   let left = 0;
   for (const [id, sound] of Object.entries(state.sounds)) {
-    const row = checkedSoundFacts(facts.get(sound.assetId) ?? facts.get(sound.assetId.toLowerCase()));
+    const row = soundFactsOfRow({ kind: "sound", media: SOUND_MEDIA, audio: facts.get(sound.assetId) ?? facts.get(sound.assetId.toLowerCase()) ?? null });
     if (row === undefined || !soundUseFits(sound.use, row.ms)) left++;
     else kept[id] = { ...sound, ms: row.ms };
   }
@@ -892,24 +881,6 @@ export function refillSoundFacts(state: RoomState, facts: ReadonlyMap<string, So
   }
   for (const [id, scene] of Object.entries(state.scenes)) next.scenes[id] = scene.sound ? { ...scene, sound: sceneSoundUnder(scene.sound, keptSounds, allPlaylists) } : scene;
   return { state: next, left };
-}
-
-/**
- * The state with nothing about sound (docs/design/design-v1-sound.md 6.7):
- * no library, playlists, what plays, scene sounds or names switch, for a
- * backup made without its sounds and for an import while the server's
- * switch is off, whose files never come in. Traps keep their built-in
- * sounds, which no file plays.
- */
-export function withoutSound(state: RoomState): RoomState {
-  const { sounds: _sounds, playlists: _playlists, playing: _playing, ...rest } = state;
-  const { soundNames: _names, ...settings } = state.meta.settings;
-  const scenes: Record<string, Scene> = {};
-  for (const [id, scene] of Object.entries(state.scenes)) {
-    const { sound: _sound, ...silent } = scene;
-    scenes[id] = scene.sound === undefined ? scene : silent;
-  }
-  return { ...rest, meta: { ...state.meta, settings }, scenes };
 }
 
 /** The kinds of entry a chunk of memory holds (MemoryEntries). */
