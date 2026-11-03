@@ -6,7 +6,7 @@ import { useBackClose } from "../lib/backClose.ts";
 import { bodyHoldsField, useFieldInView, useKeyboardView } from "../lib/keyboardInset.ts";
 import { useModalDialog } from "../lib/modalDialog.ts";
 import { DraftScope, useDraftRegistry, useSheetSwipe } from "../lib/sheetSwipe.ts";
-import { theme } from "../lib/theme.ts";
+import { statusBand, theme } from "../lib/theme.ts";
 import { RowHintScope } from "./Field.tsx";
 import { HeldScope } from "./Held.tsx";
 import { SheetGrabber } from "./SheetGrabber.tsx";
@@ -100,11 +100,15 @@ function widthPx(width: DialogWidth): number {
   return typeof width === "number" ? width : theme.layout.dialog[width];
 }
 
+/** Whether the card takes the whole screen at a layout width, its ground reaching the screen's top. */
+export function fillsScreen(layoutPx: number, props: Pick<DialogProps, "phone" | "full">): boolean {
+  return props.full === true || (layoutPx < DIALOG_PHONE_MAX && props.phone !== "sheet");
+}
+
 /** The card's shape at a layout width: a sheet from the bottom, the whole screen, or a card in the middle. */
 export function dialogCard(layoutPx: number, props: Pick<DialogProps, "phone" | "width" | "full">): { card: CSSProperties; bottom: boolean } {
   const phone = layoutPx < DIALOG_PHONE_MAX;
-  const sheet = props.phone === "sheet";
-  if (props.full || (phone && !sheet)) {
+  if (fillsScreen(layoutPx, props)) {
     return {
       card: {
         width: "100%",
@@ -133,6 +137,7 @@ export function dialogCard(layoutPx: number, props: Pick<DialogProps, "phone" | 
       bottom: true,
     };
   }
+  const sheet = props.phone === "sheet";
   return {
     card: {
       width: `min(${widthPx(props.width ?? "md")}px, calc(100% - ${theme.space(8)}px))`,
@@ -180,7 +185,8 @@ export function dialogCard(layoutPx: number, props: Pick<DialogProps, "phone" | 
 export function Dialog(props: DialogProps) {
   const { onClose, header = true } = props;
   // On the server's render, with no window, the computer's card.
-  const { card: cardStyle, bottom } = dialogCard(typeof window === "undefined" ? DIALOG_PHONE_MAX : layoutWidth(), props);
+  const layoutPx = typeof window === "undefined" ? DIALOG_PHONE_MAX : layoutWidth();
+  const { card: cardStyle, bottom } = dialogCard(layoutPx, props);
   const dialog = useRef<HTMLDialogElement>(null);
   const detailId = useId();
   useBackClose(props.backClose === true, onClose);
@@ -191,6 +197,8 @@ export function Dialog(props: DialogProps) {
   const drafts = useDraftRegistry();
   const deviceScale = useUiScale();
   const scale = props.zoom === false ? 1 : deviceScale;
+  // A whole-screen card covers its backdrop's status strip, so it draws its own over its shadow, inside its top padding. Both are tokens.
+  const cardShadow = fillsScreen(layoutPx, props) ? `${statusBand(scale)}, ${theme.shadow.dialog}` : theme.shadow.dialog;
   const view = useKeyboardView();
   // Decided once the body has laid out over the keyboard, and kept until it closes, so nothing moves under a finger on its way to Add.
   const [cramped, setCramped] = useState(false);
@@ -232,6 +240,8 @@ export function Dialog(props: DialogProps) {
           alignItems: bottom ? "flex-end" : "center",
           justifyContent: "center",
           background: props.scrim ?? theme.color.scrim,
+          // The iPhone home-screen app's black strip under its status bar on a light page, which App's own strip cannot rise over the top layer to draw. Every backdrop reaches the screen's top.
+          boxShadow: statusBand(scale),
           fontFamily: theme.font.body,
           color: theme.color.text,
           outline: "none",
@@ -245,9 +255,9 @@ export function Dialog(props: DialogProps) {
             flexDirection: "column",
             background: theme.color.surface,
             border: `${theme.line.border}px solid ${theme.color.border}`,
-            boxShadow: theme.shadow.dialog,
             overflow: "hidden",
             ...cardStyle,
+            boxShadow: cardShadow,
             ...(tight ? { alignSelf: "stretch", height: "auto", maxHeight: "none" } : null),
           }}
         >

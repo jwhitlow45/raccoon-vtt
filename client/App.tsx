@@ -3,6 +3,7 @@ import { Button } from "./components/Button.tsx";
 import { Card, Page } from "./components/Field.tsx";
 import { LoadBoundary, LoadFailureNotice } from "./components/LoadBoundary.tsx";
 import { Loading } from "./components/Loading.tsx";
+import { StatusBand } from "./components/StatusBand.tsx";
 import { parseFragment, type FragmentSecret } from "./lib/links.ts";
 import { navigate, useLocation } from "./lib/navigation.ts";
 import { linkState, subscribeLinkState } from "./lib/playerLink.ts";
@@ -40,8 +41,20 @@ type ClaimTarget = { roomId: string; fragment: FragmentSecret };
  * (main.tsx), and waits in lib/playerLink.ts for the room's page. Each new
  * link starts that page over, so a link opened into a join page that is
  * already showing is used too.
+ *
+ * The iPhone home-screen app's status band (components/StatusBand.tsx)
+ * stands over every page.
  */
 export function App() {
+  return (
+    <>
+      <StatusBand />
+      <Routes />
+    </>
+  );
+}
+
+function Routes() {
   const { pathname, hash } = useLocation();
   const link = useSyncExternalStore(subscribeLinkState, linkState);
   const route = parseRoute(pathname, { dev: import.meta.env.DEV });
