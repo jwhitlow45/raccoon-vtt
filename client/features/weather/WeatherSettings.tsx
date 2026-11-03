@@ -122,7 +122,7 @@ function WeatherBody(props: { picker: Picker; weather: SceneWeather | undefined;
       {weatherHasRules(weather) ? (
         <Switch
           label="Weather rules on rolls"
-          help="Rolls here follow the rules below. Turn it off where the party is indoors: the weather still shows."
+          help="Rolls in this scene follow the rules below. Turn it off when the party is indoors. The weather still shows."
           checked={picker.rules}
           onChange={(on) => change({ rules: on })}
         />

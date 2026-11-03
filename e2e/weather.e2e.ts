@@ -630,7 +630,7 @@ describe("weather over the map", { concurrency: false }, () => {
           const menu = await openThisDevice(page);
           const section = menu.locator("section").filter({ has: page.getByRole("heading", { name: "Weather", exact: true }) }).last();
           await section.scrollIntoViewIfNeeded();
-          await section.getByText("Reduced motion is on for this device, so weather stays still.", { exact: true }).waitFor();
+          await section.getByText("Reduced motion keeps weather still.", { exact: true }).waitFor();
           const at = `this device weather ${size.width}x${size.height} ${Math.round(scale * 100)}%`;
           lines.push(...alignmentLines(await measureAlignment(section), at));
           await shots.take(page, `wx-11-${size.width}-${Math.round(scale * 100)}`);

@@ -377,7 +377,7 @@ export const WEATHER_CARDS: readonly RadioCardOption<WeatherSettingValue>[] = [
   { value: "off", label: WEATHER_MODE_WORDS.off, help: "No weather on this device. Rolls still follow it." },
 ];
 
-export const STILL_REDUCED = "Reduced motion is on for this device, so weather stays still.";
+export const STILL_REDUCED = "Reduced motion keeps weather still.";
 export const STILL_LOW_POWER = "Low power keeps weather still.";
 export const STILL_SLOW = "Weather was slowing the map, so it stays still until you reload.";
 

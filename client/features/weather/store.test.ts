@@ -187,7 +187,7 @@ describe("the weather clock", () => {
 
 describe("This device's line on what keeps the weather still", () => {
   test("reduced motion first, then Low power, then a device that could not keep up", () => {
-    assert.equal(weatherStillReason({ reducedMotion: true, lowPower: true, level: "still" }), "Reduced motion is on for this device, so weather stays still.");
+    assert.equal(weatherStillReason({ reducedMotion: true, lowPower: true, level: "still" }), "Reduced motion keeps weather still.");
     assert.equal(weatherStillReason({ reducedMotion: false, lowPower: true, level: "still" }), "Low power keeps weather still.");
     assert.equal(weatherStillReason({ reducedMotion: false, lowPower: false, level: "still" }), "Weather was slowing the map, so it stays still until you reload.");
     assert.equal(weatherStillReason({ reducedMotion: false, lowPower: false, level: "half" }), null, "half the particles still move");
