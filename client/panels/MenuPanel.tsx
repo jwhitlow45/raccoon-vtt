@@ -96,7 +96,7 @@ export default function MenuPanel(props: PanelProps) {
         icon="device"
         title="This device"
         // A no-break space holds "sheet handle" together, so at 390 px and 130% "handle." never wraps onto a line alone.
-        detail={fullscreenSupported() ? "Interface size, full screen, low power, map detail, sounds, shortcuts and sheet\u00a0handle." : "Interface size, low power, map detail, sounds, shortcuts and sheet\u00a0handle."}
+        detail={fullscreenSupported() ? "Interface size, full screen, low power, map detail, weather, sounds, roll animation, shortcuts and sheet\u00a0handle." : "Interface size, low power, map detail, weather, sounds, roll animation, shortcuts and sheet\u00a0handle."}
         page="device"
         onClick={() => setPage("device")}
       />
