@@ -182,9 +182,10 @@ test("fog's sheets scale with the zoom, within half and twice", () => {
   const scaleAt = (zoom: number) => {
     const { g, calls } = recorder();
     drawWeather(g, f, { camera: { x: 0, y: 0, scale: zoom }, clip: null }, textures);
-    return calls.filter((c) => c.name === "setTransform" && c.args[0] !== 1).map((c) => c.args[0]);
+    // Each sheet's own size, divided out, leaves the zoom's part.
+    return calls.filter((c) => c.name === "setTransform" && c.args.join() !== "1,0,0,1,0,0").map((c, j) => +(c.args[0]! / f.look.sheets[j]!.scale).toFixed(9));
   };
-  assert.deepEqual(scaleAt(SHEET_SCALE_AT), []);
+  assert.deepEqual(scaleAt(SHEET_SCALE_AT), [1, 1]);
   assert.deepEqual(scaleAt(SHEET_SCALE_AT * 1.5), [1.5, 1.5]);
   assert.deepEqual(scaleAt(SHEET_SCALE_AT * 10), [2, 2]);
   assert.deepEqual(scaleAt(4), [0.5, 0.5]);

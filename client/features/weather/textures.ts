@@ -25,10 +25,10 @@ function hash01(seed: number, a: number, b: number, c: number): number {
 
 /** Lattice cells across the sheet per octave, and each one's weight. Every count divides the size, so the lattice wraps and the sheet tiles. */
 const OCTAVES: readonly (readonly [number, number])[] = [
-  [4, 0.5],
-  [8, 0.27],
-  [16, 0.15],
-  [32, 0.08],
+  [2, 0.45],
+  [4, 0.28],
+  [8, 0.17],
+  [16, 0.1],
 ];
 
 /** A tiling noise sheet's alpha, 0 to 255, row by row: the same seed gives the same sheet. */

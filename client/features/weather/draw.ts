@@ -95,10 +95,11 @@ export function drawWeather(g: CanvasRenderingContext2D, field: Field, frame: Dr
   }
 
   if (look.sheets.length && textures) {
-    const scale = Math.min(2, Math.max(0.5, camera.scale / SHEET_SCALE_AT));
-    const period = NOISE_SIZE * scale;
+    const zoom = Math.min(2, Math.max(0.5, camera.scale / SHEET_SCALE_AT));
     for (let j = 0; j < look.sheets.length; j++) {
       const sheet = look.sheets[j]!;
+      const scale = zoom * sheet.scale;
+      const period = NOISE_SIZE * scale;
       const image = textures.noise(sheet.color);
       const pattern = image && patternOf(g, image);
       if (!pattern) continue;
@@ -181,8 +182,9 @@ export function drawWeather(g: CanvasRenderingContext2D, field: Field, frame: Dr
           if (mx < left || mx > right || my < top || my > bottom) continue;
           const turn = phase[i]! + Math.PI * 2 * spin[i]! * seconds;
           // The leaf also tumbles: its width narrows and widens as it turns over, slower than it spins.
-          const flip = 0.35 + 0.65 * Math.abs(Math.cos(turn * 0.6));
-          const k = size[i]! / LEAF_CELL;
+          const flip = 0.5 + 0.5 * Math.abs(Math.cos(turn * 0.6));
+          // The atlas draws each leaf 20 px long in its 24 px cell, so a leaf of `size` is that long on screen.
+          const k = size[i]! / (LEAF_CELL - 4);
           const cos = Math.cos(turn) * k;
           const sin = Math.sin(turn) * k;
           g.setTransform(cos * flip, sin * flip, -sin, cos, mx, my);

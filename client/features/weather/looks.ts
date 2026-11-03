@@ -53,8 +53,12 @@ export type Particles = {
   splashEvery: number;
 };
 
-/** A tiling noise sheet drawn over the screen, drifting along the wind. */
-export type Sheet = { color: string; alpha: number; speed: number };
+/**
+ * A tiling noise sheet drawn over the screen, drifting along the wind.
+ * `scale` is its size on screen against its pixels at the middle zoom: two
+ * sheets at sizes that do not divide each other hide each one's repeat.
+ */
+export type Sheet = { color: string; alpha: number; speed: number; scale: number };
 
 export type Look = {
   /** "rain heavy strong": kind, strength and wind, for the canvas's `data-weather`. */
@@ -105,8 +109,11 @@ function particlesOf(kind: WeatherKind, heavy: boolean, wind: 0 | 1 | 2): Partic
 }
 
 function sheetsOf(kind: WeatherKind, heavy: boolean): readonly Sheet[] {
-  if (kind === "fog") return heavy ? [{ color: FOG, alpha: 0.35, speed: 3 }, { color: FOG, alpha: 0.25, speed: 8 }] : [{ color: FOG, alpha: 0.18, speed: 3 }, { color: FOG, alpha: 0.12, speed: 8 }];
-  if (kind === "sand" && heavy) return [{ color: SAND, alpha: 0.2, speed: 160 }];
+  if (kind === "fog") {
+    const [a, b] = heavy ? [0.35, 0.25] : [0.18, 0.12];
+    return [{ color: FOG, alpha: a, speed: 3, scale: 2 }, { color: FOG, alpha: b, speed: 8, scale: 3.3 }];
+  }
+  if (kind === "sand" && heavy) return [{ color: SAND, alpha: 0.2, speed: 160, scale: 2.5 }];
   return [];
 }
 
