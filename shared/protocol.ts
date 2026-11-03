@@ -126,6 +126,16 @@ const longText = z.string().max(MAX_CHAT).regex(MULTI_LINE, "control characters 
 const color = z.string().regex(/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/);
 /** A world coordinate in cells. Scenes are at most 200 cells wide, with some room to park things outside. */
 const coord = z.number().min(-1_000).max(1_000);
+/**
+ * Where a token is drawn after a drop between squares, absolute, in cells on
+ * the 1/8 lattice its nudge counts in (docs/design/design-v1-snap-off.md 5.2).
+ * Absolute, so a landing that a wall, a touch or a trap rewrote is beyond
+ * the nudge's bound from it and the reducer drops it (rules/nudge.ts).
+ */
+const drawnPoint = z.strictObject({
+  x: coord.refine((v) => Number.isInteger(v * 8), { message: "not on the 1/8 cell lattice" }),
+  y: coord.refine((v) => Number.isInteger(v * 8), { message: "not on the 1/8 cell lattice" }),
+});
 /** A table display's view of the DM's camera, in cells or view units (the `view` event). */
 const viewSize = z.number().min(0.01).max(2_000);
 const feet = z.number().int().min(-100_000).max(100_000);
@@ -588,6 +598,13 @@ const tokenPatch = z.strictObject({
   /** A `shared` companion's own Reaction spent or not, alone of everything about it (3.6.8). */
   companionReaction: z.boolean().optional(),
   actor: actorPatch.optional(),
+  /**
+   * Where the token stays drawn in its box (Token.nudge), or null to put it
+   * back on the grid: a drop between squares on its own box, or Snap to grid.
+   * Always the patch's only field (the `token.update` refine below), so its
+   * one permission rule, an owner's move check, judges it whole.
+   */
+  drawnAt: drawnPoint.nullable().optional(),
 });
 
 /** A character's level, as the XP budget table counts them. */
@@ -1260,7 +1277,12 @@ const entryPatch = z.strictObject({
  */
 const lairCounts = z.strictObject({ actionsMax: legendaryCount, resistMax: legendaryCount, xp: z.number().int().min(0).max(1_000_000).optional() });
 
-const moveFields = { tokenId: id, x: coord, y: coord, elevation: feet.optional(), rotation: degrees.optional() };
+/**
+ * `drawnAt` is where the mover let the token go between squares, or where a
+ * placement it keeps should stay drawn (Token.nudge). The token keeps it
+ * only when the move lands where it was aimed (shared/rules/nudge.ts).
+ */
+const moveFields = { tokenId: id, x: coord, y: coord, elevation: feet.optional(), rotation: degrees.optional(), drawnAt: drawnPoint.optional() };
 
 /**
  * A walk's straight pieces from where the token stands, each piece's end in
@@ -2093,7 +2115,10 @@ const stateClientOps = [
     include: z.strictObject({ creatures: z.boolean(), characters: z.boolean(), fog: z.boolean(), drawings: z.boolean() }),
   }),
   op("token.create", { token: tokenInput }),
-  op("token.update", { tokenId: id, patch: tokenPatch }),
+  // For both roles and for replay, so no mixed patch reaches a branch of the permission check that skips the move check.
+  op("token.update", { tokenId: id, patch: tokenPatch }).refine((o) => o.patch.drawnAt === undefined || Object.keys(o.patch).length === 1, {
+    message: "a placement between squares is sent alone",
+  }),
   op("token.delete", { tokenId: id }),
   /**
    * `squeeze` stops the token squeezed in a narrow opening (Token.squeeze),
@@ -2676,7 +2701,8 @@ export type OpOf<T extends OpType> = Extract<Op, { t: T }>;
 
 /**
  * Whether an op only moves tokens: a move, a token update of nothing but
- * elevation and facing, or marking whether the last move counts. A
+ * elevation and facing or of where it is drawn in its box, or marking
+ * whether the last move counts. A
  * player's undo takes such a step back as a move (server/rooms/undo.ts),
  * which puts back the path of the turn with the position, and the token
  * bar offers to take it back after one, so an owner's own height or facing
@@ -2687,6 +2713,8 @@ export function isPoseOp(op: Op): op is OpOf<"token.move" | "token.moveMany" | "
   if (op.t === "token.move" || op.t === "token.moveMany" || op.t === "token.countLeg" || op.t === "token.attach" || op.t === "token.detach") return true;
   if (op.t !== "token.update") return false;
   const fields = Object.keys(op.patch);
+  // A drop between squares on the token's own box, or Snap to grid, is where it stands as a move leaves it (docs/design/design-v1-snap-off.md 5.2).
+  if (fields.length === 1 && fields[0] === "drawnAt") return true;
   return fields.length > 0 && fields.every((field) => field === "elevation" || field === "rotation");
 }
 

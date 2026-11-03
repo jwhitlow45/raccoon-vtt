@@ -1693,6 +1693,29 @@ describe("op version 43 and snapshot 33, weather (docs/design/design-v1-weather.
   });
 });
 
+describe("op version 44 and snapshot 34, snap off for a drag (docs/design/design-v1-snap-off.md 5.7)", () => {
+  test("keeps stored operations and snapshots unchanged through the identity steps, a drop between squares included", () => {
+    assert.ok(OP_VERSION >= 44);
+    assert.ok(SNAPSHOT_VERSION >= 34);
+    const op = { t: "token.move", tokenId: "t1", x: 3, y: 3 };
+    assert.equal(runMigrations(op, 43, 44, opMigrations), op);
+    assert.equal(migrateOp(op, 43), op);
+    const free = { t: "token.move", tokenId: "t1", x: 3, y: 3, drawnAt: { x: 3.375, y: 2.625 } };
+    assert.equal(migrateOp(free, 44), free);
+    const inPlace = { t: "token.update", tokenId: "t1", patch: { drawnAt: null } };
+    assert.equal(migrateOp(inPlace, 44), inPlace);
+    const state = room({ tokens: { t1: token("t1", { x: 3, y: 3, nudge: { x: 3, y: -3 } }) } });
+    assert.equal(runMigrations(state, 33, 34, snapshotMigrations), state);
+    assert.equal(migrateSnapshot(state, 33), state);
+  });
+
+  test("a build at 43 and 33 refuses a room from this one, so it never drops a nudge unseen", () => {
+    const op = { t: "token.move", tokenId: "t1", x: 3, y: 3, drawnAt: { x: 3.375, y: 3 } };
+    assert.throws(() => runMigrations(op, 44, 43, opMigrations), /down/);
+    assert.throws(() => runMigrations(room(), 34, 33, snapshotMigrations), /down/);
+  });
+});
+
 describe("the map discovery upgrade step (docs/design/design-v1-map-discovery.md 5.5, ASTRA-31)", () => {
   const scenes = {
     s1: scene("s1", { fogEnabled: true, vision: { on: true, light: "dark" } }),

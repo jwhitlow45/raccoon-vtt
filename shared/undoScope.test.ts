@@ -48,7 +48,7 @@ describe("undo classifier inventory", () => {
   }
 
   const tokenFields = {
-    sceneId: ["s2", "play"], x: [4, "play"], y: [4, "play"], elevation: [5, "play"], rotation: [90, "play"], size: ["large", "play"], w: [2, "play"], h: [2, "play"], visibility: ["dm", "play"], light: [{ bright: 10, dim: 20 }, "play"], companionReaction: [true, "play"], actor: [{ hp: { cur: 3 } }, "play"],
+    sceneId: ["s2", "play"], x: [4, "play"], y: [4, "play"], elevation: [5, "play"], rotation: [90, "play"], size: ["large", "play"], w: [2, "play"], h: [2, "play"], visibility: ["dm", "play"], light: [{ bright: 10, dim: 20 }, "play"], companionReaction: [true, "play"], actor: [{ hp: { cur: 3 } }, "play"], drawnAt: [{ x: 3.375, y: 3 }, "play"],
     kind: ["npc", "setup"], name: ["Captain", "setup"], publicName: ["Unknown figure", "setup"], nameHidden: [true, "setup"], image: [null, "setup"], height: [10, "setup"], disposition: ["ally", "setup"], fogExempt: [true, "setup"], locked: [true, "setup"], layer: ["object", "setup"], ownerIds: [["p1"], "setup"], hpVisibility: ["exact", "setup"], number: [2, "setup"], notes: ["Private definition", "setup"], altImages: [null, "setup"], rangeRings: [[10], "setup"], partyVision: [false, "setup"], companion: [null, "setup"],
   } satisfies Record<keyof OpOf<"token.update">["patch"], readonly [unknown, UndoScope]>;
 

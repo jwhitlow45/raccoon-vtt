@@ -55,6 +55,7 @@ const TOKEN_SAMPLES: { [K in keyof TokenPatch]-?: TokenPatch[K] } = {
   companion: { of: "hero", turn: "shared" },
   companionReaction: true,
   actor: { ac: 15 },
+  drawnAt: { x: 4.125, y: 4 },
 };
 
 const ACTOR_SAMPLES: { [K in keyof ActorPatch]-?: ActorPatch[K] } = {
@@ -113,8 +114,9 @@ describe("token access mirrors the server's permissions", () => {
       for (const viewer of [DM, P1, P2]) {
         const access = tokenAccess({ role: viewer.role, memberId: viewer.memberId, view: state, token: state.tokens[tokenId]! });
         for (const field of Object.keys(TOKEN_SAMPLES) as (keyof TokenPatch)[]) {
-          // A size is no field an owner edits but a resize, judged by its own rule (shared/rules/resize.ts).
-          if (field === "actor" || field === "size") continue;
+          // A size is no field an owner edits but a resize, judged by its own rule (shared/rules/resize.ts). Where a token
+          // is drawn is no field either but a drop, judged as a move (docs/design/design-v1-snap-off.md 5.4).
+          if (field === "actor" || field === "size" || field === "drawnAt") continue;
           const patch = { [field]: TOKEN_SAMPLES[field] } as TokenPatch;
           const allowed = canApply({ t: "token.update", tokenId, patch }, viewer, state, deps).ok;
           assert.equal(access.canEditToken(field), allowed, `${viewer.memberId} ${field} on ${tokenId}`);

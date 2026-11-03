@@ -11,8 +11,8 @@ import { ownEntry } from "./records.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 33;
-export const OP_VERSION = 43;
+export const SNAPSHOT_VERSION = 34;
+export const OP_VERSION = 44;
 
 export type MigrationStep = {
   from: number;
@@ -222,6 +222,10 @@ export const snapshotMigrations: MigrationStep[] = [
   // so a v32 room is a v33 room as it is. The number moves so that an older build, whose strict state schema refuses
   // the field, refuses a v33 snapshot instead of loading it.
   { from: 32, to: 33, apply: (state) => state },
+  // Snap off for a drag (docs/design/design-v1-snap-off.md 5.7): a token's `nudge` is optional, and absent reads as drawn on its
+  // spot, so a v33 room is a v34 room as it is. The number moves so that an older build, whose strict state schema refuses
+  // the field, refuses a v34 snapshot instead of loading it.
+  { from: 33, to: 34, apply: (state) => state },
   // No step moves a square trip wire's imported 1/64 ends onto half cells (FU43-DATA-01). A snapshot migrates before its
   // stored ops replay, so a moved end would change what a stored walk springs and what a stored restore's guard matches.
   // The rules take such a wire as it stands instead (server/rooms/squareWires.legacy.test.ts).
@@ -1096,6 +1100,21 @@ export const opMigrations: MigrationStep[] = [
     // older build refuses.
     from: 42,
     to: 43,
+    apply: (op) => op,
+  },
+  {
+    // Snap off for a drag (docs/design/design-v1-snap-off.md 5.7): a move
+    // and each move of a group may carry `drawnAt`, and a token update's
+    // patch may be `drawnAt` alone, new optional fields, so no stored op
+    // changes shape and the step is the identity. No stored op carries one
+    // and no stored token has a nudge, so replay runs no new branch.
+    // Deploy: back up the database just before, and reload open pages,
+    // table displays included: an old page drops the field from its view
+    // and draws the token on its square. Rollback needs the backup for a
+    // room with version 44 ops after its last snapshot or a v34 snapshot,
+    // which an older build refuses.
+    from: 43,
+    to: 44,
     apply: (op) => op,
   },
 ];

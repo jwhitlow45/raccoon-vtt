@@ -138,7 +138,7 @@ export const UNDO_SCOPE_BY_OP = {
 } as const satisfies Record<Op["t"], UndoScope | "fields">;
 
 const PLAY_TOKEN_FIELDS = new Set([
-  "sceneId", "x", "y", "elevation", "rotation", "size", "w", "h", "visibility", "light", "companionReaction", "actor",
+  "sceneId", "x", "y", "elevation", "rotation", "size", "w", "h", "visibility", "light", "companionReaction", "actor", "drawnAt",
 ] satisfies (keyof TokenPatch)[]);
 const PLAY_TOKEN_GROUP_FIELDS = new Set(["visibility", "size", "w", "h", "light"] satisfies (keyof TokenGroupPatch)[]);
 const HP_FIELDS = new Set(["cur", "temp"]);

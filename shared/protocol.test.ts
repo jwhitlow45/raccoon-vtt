@@ -4,6 +4,8 @@ import {
   MAX_EPH_BYTES,
   clientMessageSchema,
   clientOpSchema,
+  isPoseOp,
+  onPlayerUndoStack,
   opSchema,
   serverMessageSchema,
   serverOnlyOpSchema,
@@ -699,5 +701,41 @@ describe("walking routes (docs/design/design-v1-movement.md 6)", () => {
     ok(serverOnlyOpSchema, { ...restore, routes: { t1: [[[2, 0, 0, 0], [4, 2, 1, 0]], [[5, 2, 0, 0]]] } });
     bad(serverOnlyOpSchema, { ...restore, routes: { t1: [] } });
     bad(clientOpSchema, { ...restore, routes: { t1: [[[2, 0, 0, 0]]] } });
+  });
+});
+
+describe("snap off for a drag (docs/design/design-v1-snap-off.md 5.2)", () => {
+  test("a move and each move of a group may carry where it was let go, on the 1/8 lattice alone", () => {
+    ok(clientOpSchema, { t: "token.move", tokenId: "t1", x: 3, y: 3, drawnAt: { x: 3.375, y: 2.625 } });
+    ok(clientOpSchema, { t: "token.move", tokenId: "t1", x: -2, y: 0, drawnAt: { x: -2.125, y: 0 } });
+    ok(clientOpSchema, { t: "token.moveMany", moves: [{ tokenId: "t1", x: 3, y: 3, drawnAt: { x: 3.25, y: 3 } }, { tokenId: "t2", x: 4, y: 3 }] });
+    bad(clientOpSchema, { t: "token.move", tokenId: "t1", x: 3, y: 3, drawnAt: { x: 3.3, y: 3 } });
+    bad(clientOpSchema, { t: "token.move", tokenId: "t1", x: 3, y: 3, drawnAt: { x: 3, y: 3.0625 } });
+    bad(clientOpSchema, { t: "token.moveMany", moves: [{ tokenId: "t1", x: 3, y: 3, drawnAt: { x: 3.1, y: 3 } }] });
+    bad(clientOpSchema, { t: "token.move", tokenId: "t1", x: 3, y: 3, drawnAt: { x: 3.25 } });
+    bad(clientOpSchema, { t: "token.move", tokenId: "t1", x: 3, y: 3, drawnAt: { x: 3.25, y: 3, z: 0 } });
+    bad(clientOpSchema, { t: "token.move", tokenId: "t1", x: 3, y: 3, drawnAt: null });
+    bad(clientOpSchema, { t: "token.move", tokenId: "t1", x: 3, y: 3, drawnAt: { x: 5000, y: 3 } });
+  });
+
+  test("a token update's placement is sent alone, for both roles and replay, and null puts it back on the grid", () => {
+    ok(clientOpSchema, { t: "token.update", tokenId: "t1", patch: { drawnAt: { x: 3.375, y: 3 } } });
+    ok(clientOpSchema, { t: "token.update", tokenId: "t1", patch: { drawnAt: null } });
+    ok(opSchema, { t: "token.update", tokenId: "t1", patch: { drawnAt: null } });
+    bad(clientOpSchema, { t: "token.update", tokenId: "t1", patch: { drawnAt: { x: 3.3, y: 3 } } });
+    for (const other of [{ rotation: 90 }, { elevation: 5 }, { x: 4 }, { name: "Bree" }, { locked: false }, { size: "large" }]) {
+      bad(clientOpSchema, { t: "token.update", tokenId: "t1", patch: { drawnAt: { x: 3.375, y: 3 }, ...other } });
+      bad(opSchema, { t: "token.update", tokenId: "t1", patch: { drawnAt: null, ...other } });
+      ok(clientOpSchema, { t: "token.update", tokenId: "t1", patch: other });
+    }
+  });
+
+  test("an update of only where the token is drawn undoes as a move, and one beside it never parses", () => {
+    assert.equal(isPoseOp({ t: "token.update", tokenId: "t1", patch: { drawnAt: { x: 3.375, y: 3 } } }), true);
+    assert.equal(isPoseOp({ t: "token.update", tokenId: "t1", patch: { drawnAt: null } }), true);
+    assert.equal(onPlayerUndoStack({ t: "token.update", tokenId: "t1", patch: { drawnAt: null } }), true);
+    assert.equal(isPoseOp({ t: "token.update", tokenId: "t1", patch: { rotation: 90 } }), true);
+    assert.equal(isPoseOp({ t: "token.update", tokenId: "t1", patch: { name: "Bree" } }), false);
+    assert.equal(isPoseOp({ t: "token.update", tokenId: "t1", patch: {} }), false);
   });
 });

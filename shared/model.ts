@@ -1012,6 +1012,18 @@ export type Token = {
    * does an edit of its size, scene or position.
    */
   squeeze?: true;
+  /**
+   * Where in its box the token is drawn, after a drop between squares
+   * (docs/design/design-v1-snap-off.md 5.1): whole eighths of a square off
+   * its stored spot, each -3 to 3 (-1 to 1 for a token that snaps to half
+   * squares), never both 0. Drawing alone reads it. Every rule, route,
+   * check and projection test reads the stored spot, which stays on the
+   * grid, so the rules box is always the box the token would snap to from
+   * where it is drawn. Valid only on a square scene, on an unsqueezed token
+   * standing on its own snapped spot (rules/nudge.ts nudgeValid), and every
+   * op ends with a pass that drops one that is not. Part of its pose.
+   */
+  nudge?: { x: number; y: number };
   /** A light the creature carries, at its eye (section 4.3.8). The DM and its owners set it, and only they receive it. */
   light?: TokenLight;
   /** DM only: a creature the DM runs that lends the party its sight and is always shown to players (section 4.3.2). */
