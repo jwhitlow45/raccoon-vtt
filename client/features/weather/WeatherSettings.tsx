@@ -164,7 +164,7 @@ function Compass(props: { value: number; onChange(toward: number): void }) {
               onChange={() => props.onChange(c.toward)}
               style={{ position: "absolute", inset: 0, width: "100%", height: "100%", margin: 0, opacity: 0, cursor: "inherit" }}
             />
-            <Icon name="windToward" style={{ transform: `rotate(${c.toward}deg)` }} />
+            <Icon name="windToward" style={{ transform: `rotate(${c.toward}deg)`, pointerEvents: "none" }} />
           </label>
         );
       })}
