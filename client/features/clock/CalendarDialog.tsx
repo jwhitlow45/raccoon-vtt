@@ -3,7 +3,7 @@ import { clockNow } from "#shared/calendar.ts";
 import { LIMITS } from "#shared/limits.ts";
 import type { Calendar, RoomClock } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
-import { Dialog } from "../../components/Dialog.tsx";
+import { Dialog, DiscardQuestion } from "../../components/Dialog.tsx";
 import { ErrorText, Field, Input } from "../../components/Field.tsx";
 import { Help, Section } from "../../components/Panel.tsx";
 import { IconButton } from "../../components/IconButton.tsx";
@@ -107,7 +107,7 @@ export function CalendarDialog(props: {
       width="md"
       phone="fill"
       backClose
-      status={error ? <ErrorText>{error}</ErrorText> : undefined}
+      status={armed ? <DiscardQuestion /> : error ? <ErrorText>{error}</ErrorText> : undefined}
       footer={
         <>
           <Button variant={armed ? "danger" : "secondary"} armed={armed} onClick={leave} style={{ flex: "1 1 auto" }}>

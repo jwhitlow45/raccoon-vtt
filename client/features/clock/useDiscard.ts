@@ -6,7 +6,9 @@ export const DISCARD = "Discard changes?";
 /**
  * Leaving a dialog with changes asks first, as the new character form does:
  * the first Cancel, Escape or backdrop tap turns Cancel into "Discard
- * changes?" and the next leaves. Any edit in between disarms it. The swipe
+ * changes?" and the next leaves, while the dialog's status line asks it
+ * aloud (DiscardQuestion), since a second Escape must never discard unheard.
+ * Any edit in between disarms it. The swipe
  * that closes a phone sheet springs back while changes are unsaved.
  * `edits` are the draft's parts, each compared by identity.
  */

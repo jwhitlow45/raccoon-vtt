@@ -2,7 +2,7 @@ import { useState, type RefObject } from "react";
 import { clockNow } from "#shared/calendar.ts";
 import type { RoomClock } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
-import { Dialog } from "../../components/Dialog.tsx";
+import { Dialog, DiscardQuestion } from "../../components/Dialog.tsx";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { DateFieldsEditor } from "./DateFieldsEditor.tsx";
 import { DISCARD, useDiscard } from "./useDiscard.ts";
@@ -54,6 +54,7 @@ export function SetTimeDialog(props: { clock: RoomClock; opener: RefObject<HTMLE
       width="sm"
       phone="sheet"
       backClose
+      status={armed ? <DiscardQuestion /> : undefined}
       footer={
         <>
           <Button variant={armed ? "danger" : "secondary"} armed={armed} onClick={leave} style={{ flex: "1 1 auto" }}>
