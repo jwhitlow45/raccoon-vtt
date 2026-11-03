@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { MAX_NAME } from "#shared/protocol.ts";
 import { ApiError } from "../../../lib/api.ts";
-import { OUT_OF_STORAGE, refusalWords, soundNameOf, stepWords, uploadRefusal } from "./words.ts";
+import { OUT_OF_STORAGE, PICK_CAPPED, refusalWords, soundNameOf, stepWords, uploadRefusal } from "./words.ts";
 
 test("a sound's name is its file's, less the extension, with each _ a space", () => {
   assert.equal(soundNameOf("Rain.wav"), "Rain");
@@ -36,6 +36,7 @@ test("the steps and the refusals in the design's words", () => {
   assert.equal(refusalWords("Rain.caf", { t: "channelsUnknown" }), "Rain.caf: this app can't tell how many channels it has. Make it an MP3 or WAV first.");
   assert.equal(refusalWords("Big.wav", { t: "fileTooLarge" }), "Big.wav is over 200 MB.");
   assert.equal(refusalWords("Any.wav", { t: "outOfStorage" }), OUT_OF_STORAGE);
+  assert.equal(PICK_CAPPED, "Only 20 files at a time: the first 20 are in the queue.");
 });
 
 test("the upload's refusals: storage stops the batch, the rest are the image upload's words after the name", () => {

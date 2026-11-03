@@ -1,3 +1,4 @@
+import { SOUND_LIMITS } from "#shared/limits.ts";
 import { MAX_NAME } from "#shared/protocol.ts";
 import type { SoundUse } from "#shared/sound.ts";
 import { ApiError } from "../../../lib/api.ts";
@@ -15,6 +16,9 @@ export const ADD_LABEL: Readonly<Record<SoundUse, string>> = {
   loop: "Add background sounds…",
   effect: "Add effects…",
 };
+
+/** Under the Add button after a pick past SOUND_LIMITS.pickFiles. */
+export const PICK_CAPPED = `Only ${SOUND_LIMITS.pickFiles} files at a time: the first ${SOUND_LIMITS.pickFiles} are in the queue.`;
 
 /** The queue's list, named for its section, since the panel shows three. */
 export const FILES_LABEL: Readonly<Record<SoundUse, string>> = {

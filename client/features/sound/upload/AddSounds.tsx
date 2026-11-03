@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 import { useStore } from "zustand";
 import type { ClientOp } from "#shared/protocol.ts";
 import type { SoundId, SoundUse } from "#shared/sound.ts";
@@ -10,7 +10,7 @@ import { scopeSlot, useScoped } from "../../../state/scope.ts";
 import type { RoomActions, RoomViewStore } from "../../../state/view.ts";
 import { useRoomActions, useRoomStore, useRoomView } from "../../../state/view.ts";
 import { SoundQueue, type CreateAnswer, type QueueDeps, type Row, type SoundCreate } from "./job.ts";
-import { ADD_LABEL, addedWords, cancelLabel, dismissLabel, filesLabel, stepWords } from "./words.ts";
+import { ADD_LABEL, addedWords, cancelLabel, dismissLabel, filesLabel, PICK_CAPPED, stepWords } from "./words.ts";
 
 /**
  * An Add button of the Sound panel and its queue of files
@@ -76,6 +76,7 @@ export function AddSounds(props: AddSoundsProps): ReactElement {
   });
   const rows = useStore(queue.store, (s) => s.rows);
   const input = useRef<HTMLInputElement>(null);
+  const [capped, setCapped] = useState(false);
   const mine = rows.filter((row) => row.use === props.use);
 
   return (
@@ -94,9 +95,14 @@ export function AddSounds(props: AddSoundsProps): ReactElement {
           const files = Array.from(e.currentTarget.files ?? []);
           // Cleared, so the same file can be picked again after a refusal.
           e.currentTarget.value = "";
-          if (files.length > 0) queue.add(files, props.use);
+          if (files.length > 0) setCapped(queue.add(files, props.use) > 0);
         }}
       />
+      {capped ? (
+        <p role="status" style={{ margin: 0, fontSize: theme.font.body14, lineHeight: theme.leading.body, color: theme.color.textMuted }}>
+          {PICK_CAPPED}
+        </p>
+      ) : null}
       {mine.length > 0 ? (
         <ul aria-label={filesLabel(props.use)} style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: theme.space(1) }}>
           {mine.map((row) => (
