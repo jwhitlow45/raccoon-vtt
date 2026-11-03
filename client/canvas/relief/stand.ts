@@ -6,7 +6,8 @@ import type { SegmentIndex } from "#shared/rules/segments.ts";
 import { clipFootprint } from "#shared/rules/vision.ts";
 import type { Footprint } from "../../features/areas/volume.ts";
 import { footprintCells, type GroundCell } from "../../lib/groundCells.ts";
-import { drawnAt, footprint, rulesSpot, type ViewToken } from "../../lib/scene.ts";
+import { atDragSpot, drawnAt, footprint, rulesSpot, type ViewToken } from "../../lib/scene.ts";
+import type { DragSpot } from "../../state/localDrags.ts";
 import { pillReach } from "../../features/measure/pillPlace.ts";
 import { dragTagPill } from "../dragTag.ts";
 import type { CellBox, FogView } from "./fogView.ts";
@@ -73,6 +74,18 @@ export function standeeFooting(g: Grid, token: Pick<ViewToken, "x" | "y" | "size
   const fp = footprint(token);
   const at = drawnAt(g, token);
   return { box: { x: at.x, y: at.y, w: fp.w, h: fp.h }, cells: footprintCells(g, token) };
+}
+
+/**
+ * The cells under a standee this device drags, at its drag's spot
+ * (state/localDrags.ts), whose ground its base, its decor and its rules
+ * outline stand on. A spot that names no squeeze reads the full footprint,
+ * as a drop that clears the squeeze lands it. A lone drag's landing that
+ * squeezes reads the one cell it squeezes into, as `standeeFooting` does
+ * once it lands, so a higher neighbor never lifts it (SNAPBUILD-ASTRA-05).
+ */
+export function dragFootingCells(g: Grid, token: Pick<ViewToken, "x" | "y" | "size" | "w" | "h" | "squeeze">, spot: DragSpot): GroundCell[] {
+  return footprintCells(g, spot.squeeze === undefined ? { ...token, x: spot.x, y: spot.y, squeeze: undefined } : atDragSpot(token, spot));
 }
 
 /** One box around both of a token's boxes, for a flat ghost's clip and the DM's dimming. */

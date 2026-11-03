@@ -6,7 +6,9 @@ import { footprintRect } from "#shared/rules/footprint.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
 import { WorkBudget } from "#shared/rules/walk.ts";
 import { token } from "#shared/testutil.ts";
+import { dragFootingCells } from "../../canvas/relief/stand.ts";
 import { rulesOutline } from "../../lib/scene.ts";
+import { drawnFootprintGround, type DrawnSource } from "../../lib/view.ts";
 import { localDragSlot } from "../../state/localDrags.ts";
 import { RoomScope } from "../../state/scope.ts";
 import { dragSpots, withSpots } from "../areas/liveTokens.ts";
@@ -220,6 +222,10 @@ describe("the drag's stops", () => {
       assert.deepEqual(rulesOutline(SQUARES, mover, spot), { x: 11, y: 4, w: 1, h: 1 }, "the outline holds the one square it squeezes into");
       const live = withSpots(view.tokens, dragSpots(view.tokens, [{ tokenId: "ogre", ...spot! }], () => SQUARES)).ogre!;
       assert.deepEqual(footprintRect(SQUARES, live), { x: 11, y: 4, w: 1, h: 1 }, "an aura and the In area lists read the same square");
+      // In Isometric its base, its decor and its outline stand on that square's ground, 0 ft, not on the 10 ft at (12, 4) its full box there would cover (SNAPBUILD-ASTRA-05).
+      const src: DrawnSource = { chunks: view.buildChunks, sceneId: "s1", bounds: { w: 30, h: 30 }, grid: SQUARES, fog: null, stand: true };
+      assert.equal(drawnFootprintGround(src, [{ col: 12, row: 4 }]), 10, "the neighbor is higher");
+      assert.equal(drawnFootprintGround(src, dragFootingCells(SQUARES, mover, spot!)), 0, "the ground under the square it squeezes into");
       let landed: DropPlan | null = null;
       b.stops.drop(finger, mover, [mover], (plan) => (landed = plan), { free, inPlace: true });
       for (let k = 0; k < 50 && !landed; k++) b.frames.frame();

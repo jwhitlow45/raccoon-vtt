@@ -13,7 +13,7 @@ import { footprint, type ViewToken } from "../../lib/scene.ts";
 import { FogView, type CellBox } from "./fogView.ts";
 import { pillReach } from "../../features/measure/pillPlace.ts";
 import { dragTagPill } from "../dragTag.ts";
-import { boxStands, creatureStands, dimmedForDm, ghostStands, ghostTagStands, lineStands, splitTokens, standeeFooting, strokeSubcells, tokenBox, tokenBoxes } from "./stand.ts";
+import { boxStands, creatureStands, dimmedForDm, dragFootingCells, ghostStands, ghostTagStands, lineStands, splitTokens, standeeFooting, strokeSubcells, tokenBox, tokenBoxes } from "./stand.ts";
 import { withExplored } from "../../features/vision/exploredFog.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
 import { readFileSync } from "node:fs";
@@ -1055,5 +1055,24 @@ describe("a nudged token's two boxes (docs/design/design-v1-snap-off.md 6.2)", (
     assert.deepEqual(box, { x: 1.625, y: 6.25, w: 2, h: 2 });
     // Its drawn box overhangs column 1 and row 8, a ledge the ogre is not on.
     assert.deepEqual(cells.map((c) => `${c.col},${c.row}`).sort(), ["2,6", "2,7", "3,6", "3,7"]);
+  });
+});
+
+describe("the cells under a dragged standee (SNAPBUILD-ASTRA-05)", () => {
+  test("full size where the spot names no squeeze, the one square a landing squeezes into where it does", () => {
+    const ogre = { x: 10, y: 6, size: "large" as const };
+    const squeezed = { ...ogre, x: 4.5, y: 4.5, squeeze: true as const };
+    const keys = (cells: readonly { col: number; row: number }[]) => cells.map((c) => `${c.col},${c.row}`).sort();
+    assert.deepEqual(keys(dragFootingCells(SQUARES, ogre, { x: 10.5, y: 3.5, squeeze: true })), ["11,4"]);
+    assert.deepEqual(keys(dragFootingCells(SQUARES, ogre, { x: 11, y: 3 })), ["11,3", "11,4", "12,3", "12,4"]);
+    assert.deepEqual(keys(dragFootingCells(SQUARES, squeezed, { x: 6, y: 4 })), ["6,4", "6,5", "7,4", "7,5"], "a spot with no squeeze lands at full size, as before");
+    assert.deepEqual(keys(dragFootingCells(SQUARES, squeezed, { x: 6, y: 4, squeeze: false })), ["6,4", "6,5", "7,4", "7,5"]);
+  });
+
+  test("the board's dragged standee reads its cells through it, so its base, decor and outline take the landing's squeeze", () => {
+    const board = readFileSync(new URL("./IsoBoard.tsx", import.meta.url), "utf8");
+    const moved = board.slice(board.indexOf("const movedIso = useCallback("), board.indexOf("const isoCache = useRef("));
+    assert.match(moved, /const cells = dragFootingCells\(grid, t, spot\);/);
+    assert.doesNotMatch(moved, /squeeze: undefined/, "no full-size footprint of its own");
   });
 });

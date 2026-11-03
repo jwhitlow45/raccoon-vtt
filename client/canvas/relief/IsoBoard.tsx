@@ -31,7 +31,7 @@ import { footprintCells } from "../../lib/groundCells.ts";
 import { drawnBase, drawnFootprintGround, drawnHeights, groundGroups, heightsStand, isometric, K, toView, type DrawnSource, type Turn } from "../../lib/view.ts";
 import { useStore } from "zustand";
 import { seenSeat, dropView } from "../../features/movement/drop.ts";
-import { localDragSlot } from "../../state/localDrags.ts";
+import { localDragSlot, type DragSpot } from "../../state/localDrags.ts";
 import { useScoped } from "../../state/scope.ts";
 import { useRoomStore } from "../../state/view.ts";
 import { DRAG_GROUND } from "../dragLayer.ts";
@@ -58,7 +58,7 @@ import { keptHost, onDeviceGrid, screenBox } from "./kept.ts";
 import { liveCameraSlot, needsApply, useCameraWhileShown, type LastApplied } from "../../state/liveCamera.ts";
 import { cullFit, cullOf } from "./cull.ts";
 import { previewLanding, seenChunks } from "./seenChunks.ts";
-import { dimmedForDm, ghostStands, ghostTagStands, ringsAtBase, splitTokens, standeeFooting, tokenBox } from "./stand.ts";
+import { dimmedForDm, dragFootingCells, ghostStands, ghostTagStands, ringsAtBase, splitTokens, standeeFooting, tokenBox } from "./stand.ts";
 import { BoardVolumes, type VolumeEntry, type VolumeWorld } from "./volumes.ts";
 import { useCommitCount, useKeptReport, useLayoutReport } from "./isoTest.ts";
 import { ON_GROUND, standeeShape, type Seat } from "./standee.ts";
@@ -390,7 +390,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
   const store = useRoomStore();
   const spots = useStore(useScoped(localDragSlot), (st) => (hidden ? NO_SPOTS : st.spots));
   const movedIso = useCallback(
-    (t: ViewToken, spot: { x: number; y: number }, seat: Seat): Pick<IsoToken, "base" | "ground" | "drawn" | "capped" | "rise" | "inset"> => {
+    (t: ViewToken, spot: DragSpot, seat: Seat): Pick<IsoToken, "base" | "ground" | "drawn" | "capped" | "rise" | "inset"> => {
       const room = store.getState().view;
       const seen = seenChunks({ chunks, sceneId: scene.id, bounds: { w, h }, fog: props.viewerFog });
       const landingOf = (tok: ViewToken, at: { x: number; y: number }) => (room ? previewLanding(room, props.role, seen, tok, at) : tok.elevation);
@@ -403,7 +403,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
       const seated = holder !== undefined && (riding || (room !== null && seenSeat(dropView(room, props.role), t)?.keptAt(spot) === true));
       const kept = seated ? seat : ON_GROUND;
       const fp = footprint(t);
-      const cells = footprintCells(grid, { ...t, x: spot.x, y: spot.y, squeeze: undefined });
+      const cells = dragFootingCells(grid, t, spot);
       const base = drawnBase(src, cells, landing) / feet;
       const ground = drawnFootprintGround(src, cells) / feet;
       const shape = standeeShape(turn, { x: spot.x, y: spot.y, w: fp.w, h: fp.h }, base, ground, cam.scale, size.height, kept);
