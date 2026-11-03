@@ -1665,11 +1665,13 @@ With the clock running, the panel's top shows the date, the time and the part of
 
 Each step applies at once on every device. A Short Rest never moves the clock on its own, so tap **1 hour** yourself when the party takes one. There is no step backward. If you tapped **8 hours** by mistake, press **Undo** in the top bar, which takes the step back. To turn the clock back on purpose, use **Set the date and time**.
 
-On a computer, a small chip in the top bar shows the date and time, such as "Deepwinter 4, 6:10 AM", from 900 px of screen width. It opens the Time panel when you tap it. It is the first thing to leave the bar when the bar runs out of room. On a phone, open Time from **Panels**.
+On a computer, a small chip in the top bar shows the date and time, such as "Deepwinter 4, 6:10 AM", from 900 px of screen width. It opens the Time panel when you tap it. It is the first thing to leave the bar when the bar runs out of room, and it comes back once the window is wider or the date is shorter. On a phone, open Time from **Panels**.
 
 ### Setting the date and time
 
 **Set the date and time…** opens a dialog with the fields of your calendar. A Day count clock has a **Day** field. A Months clock has **Month**, **Day** and **Year**, and reads the weekday under them ("A Thursday."). **Time** is the phone's own time picker. If a day is past the end of its month, the dialog stays open and says so, such as "Pick a day from 1 to 30." Press **Set** to send it, or **Cancel** to leave. This is also how you turn the clock back.
+
+Set only sends what you changed. Press **Set** without touching a field and the clock stays exactly where it was. Change only the date and the clock keeps its seconds, such as the 18 seconds a three-round fight added. If another DM removes the month you picked while the dialog is open, the **Month** field reads "Pick a month" until you choose another.
 
 ### Who sees it
 
@@ -1679,22 +1681,24 @@ On a computer, a small chip in the top bar shows the date and time, such as "Dee
 - the chip in the top bar from 900 px,
 - each clock line in the **Log**, and a short toast for each change while their Log and Time panel are closed. The device that made the change gets no toast.
 
-Turn it off, and the Time panel leaves their list and nothing more of the clock reaches them. A player who had the panel open keeps it open, reading "The DM isn't sharing the date and time now.", until they close it. The lines a player already read stay in their Log, even after a reload. Turn it on again, and they get the clock as it stands, without the lines written while it was hidden.
+Turn it off, and the Time panel leaves their list and nothing more of the clock reaches them. A blackout holds the clock back too, as it does the fight: while the pause screen is up, players get no date, time or clock lines, and when you lift it they get the clock as it stands, a running fight's seconds included, with the lines written meanwhile. A player who had the panel open keeps it open, reading "The DM isn't sharing the date and time now.", until they close it. The lines a player already read stay in their Log, even after a reload. Turn it on again, and they get the clock as it stands, without the lines written while it was hidden.
 
 ### Your own calendar
 
 The app ships no calendar, since the calendars of published settings are not open content. You type in yours. **Calendar…** in the panel opens the dialog, and a Months clock's summary sits beside the button, such as "12 months, 7-day week".
 
-- **Day count** and **Months** are the two kinds. With a clock running, changing the kind sets **Today in this calendar** to the first day (of year 1, for Months), keeping the time of day.
+- **Day count** and **Months** are the two kinds. With a clock running, changing the kind sets **Today in this calendar** to the first day (of year 1, for Months), keeping the time of day, even if you had typed another date there.
 - **Months** lists one row per month with a **Name** and its **Days**, and **Move up**, **Move down** and **Remove** for each. **Add a month** adds one at the end. A new calendar starts with twelve months, "Month 1" to "Month 12", of 30 days each. A calendar has up to 24 months of 1 to 400 days, and a year of up to 1,000 days. A month of 1 day shows by its name alone, as a festival day does.
 - **Day names** takes the names of the week in order, split by commas. Leave it empty for no week, so dates carry no weekday. There can be up to 14.
 - **After the year** takes words that follow the year, such as an era's initials. Leave it empty for none.
 - "A year is 360 days." counts the year as you edit the rows. Years count from 0, and there are no leap days.
-- **Today in this calendar** shows the clock's current moment read through the calendar as you have edited it. Change it if the new calendar should put today on another date.
+- **Today in this calendar** shows the clock's current moment read through the calendar as you have edited it. Change it if the new calendar should put today on another date. A date you typed keeps its month as you move rows, and if you remove that month, the **Month** field asks you to pick another.
 
 ![The Calendar dialog scrolled down to its end: Day names, After the year, the length of a year, and Today in this calendar with a Thursday read under its date.](dm-guide/time-calendar.webp)
 
-**Save** sends the new calendar. Renaming months or days writes no line, and old lines keep the names they were written with. If you moved today's date, one line says so. **Cancel** or a swipe asks "Discard changes?" when you have changed something.
+**Save** sends the new calendar. Renaming months or days writes no line, and old lines keep the names they were written with. The clock only moves when you changed **Today in this calendar** or the kind, and then one line says so. **Cancel**, **Escape** or a swipe asks "Discard changes?" when you have changed something, and a screen reader hears the question.
+
+Before the clock starts, **Change** beside your Months calendar opens the same dialog. Saving it keeps the date you picked on the form, and says so under the field if a shorter month no longer has that day. Choosing **Day count** there keeps your Months calendar, so picking **Months** again brings it back.
 
 ### Fights and Long Rests
 
@@ -1706,7 +1710,7 @@ The app remembers when each character's last Long Rest ended, and shows only you
 
 ### The Log and the journal
 
-Each change to the clock writes a line to the Log with the date as it read then, such as "8 hours pass. It is now Day 4, 6:00 AM.", "8 hours pass in a Long Rest. It is now Day 4, 6:00 AM." or "The DM sets the date and time: Thursday, Deepwinter 4, 1204 AF, 6:00 AM." A fight's seconds, the switch and **Stop the clock** write none. Your own **Undo** and **Redo** of a clock change write one, "The DM undid a clock change. It is now Day 3, 10:00 PM.", unless it took back the end of a fight.
+Each change to the clock writes a line to the Log with the date as it read then, such as "8 hours pass. It is now Day 4, 6:00 AM.", "8 hours pass in a Long Rest. It is now Day 4, 6:00 AM." or "The DM sets the date and time: Thursday, Deepwinter 4, 1204 AF, 6:00 AM." A fight's seconds, the switch and **Stop the clock** write none. Your own **Undo** and **Redo** of a clock change write one, "The DM undid a clock change. It is now Day 3, 10:00 PM.", unless it took back the end of a fight. Undoing something that never moved the clock's time, such as **Next** in a fight or a month's new name, writes none, even when the time shown changes with it.
 
 In the **Journal**, **Add the date**, beside **Add a secret**, adds a heading such as "Day 4, 6:00 AM" to the page while a clock runs, which suits a session's notes.
 
@@ -1714,7 +1718,7 @@ In the **Journal**, **Add the date**, beside **Add a secret**, adds a heading su
 
 **Stop the clock**, at the foot of the panel, takes a second tap ("Tap again to stop the clock"). The date and time go. **Undo setup** in **Setup history** brings the clock back, with what it held.
 
-Starting, stopping, the calendar and the switch are setup, and moving or setting the time is play, so **Undo** in the top bar takes back a step and **Undo setup** takes back the others. One thing to know: the clock guards itself as a whole. If you change the calendar and then move the clock on, **Undo setup** can no longer take the calendar back, because the step after it is in the way. Open **Calendar…** and change it back yourself. The other way round works the same: after a calendar save, **Undo** refuses a step from before it, and **Set the date and time** puts the time right.
+Starting, stopping, the calendar and the switch are setup, and moving or setting the time is play, so **Undo** in the top bar takes back a step and **Undo setup** takes back the others. One thing to know: the clock guards itself as a whole. If you change the calendar and then move the clock on, **Undo setup** refuses to take the calendar back and says "Undo the play step first", because the step after it is in the way. Undo that step first, or open **Calendar…** and change it back yourself. The other way round works the same: after a calendar save, **Undo** refuses a step from before it, and **Set the date and time** puts the time right.
 
 ## The Log and its history
 
