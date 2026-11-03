@@ -10,7 +10,13 @@ import { EBML_ID as I, encodeVint } from "./webm.ts";
 
 // WebM ------------------------------------------------------------------------
 
-export type Ebml = { id: number; data?: Buffer; kids?: Ebml[]; unknownSize?: boolean; sizeLength?: number };
+/**
+ * One element. `at` makes it a four-byte position: the place of that element
+ * from its Segment's data, which the writer fills in as it encodes, so a
+ * test may add elements anywhere and the SeekHead and Cues still point
+ * where they should.
+ */
+export type Ebml = { id: number; data?: Buffer; kids?: Ebml[]; unknownSize?: boolean; sizeLength?: number; at?: Ebml };
 
 export const el = (id: number, ...kids: Ebml[]): Ebml => ({ id, kids });
 export const bin = (id: number, data: Buffer): Ebml => ({ id, data });
@@ -60,7 +66,35 @@ export function encodeEbml(node: Ebml): Buffer {
   return Buffer.concat([idBytes(node.id), size, payload]);
 }
 
+/** An element's encoded length, without encoding it. */
+function ebmlLength(node: Ebml): number {
+  const payload = node.data ? node.data.length : (node.kids ?? []).reduce((n, k) => n + ebmlLength(k), 0);
+  return idBytes(node.id).length + (node.unknownSize ? 8 : sizeBytes(payload, node.sizeLength).length) + payload;
+}
+
+/** Fills every position below each Segment with its element's place from the Segment's data. */
+function placePositions(top: Ebml[]): void {
+  for (const segment of top.filter((n) => n.id === I.Segment)) {
+    const places = new Map<Ebml, number>();
+    let offset = 0;
+    for (const kid of segment.kids ?? []) {
+      places.set(kid, offset);
+      offset += ebmlLength(kid);
+    }
+    const fill = (node: Ebml) => {
+      if (node.at) {
+        const place = places.get(node.at);
+        if (place === undefined) throw new Error("a position names an element outside its Segment's children");
+        node.data = fixed4(place);
+      }
+      for (const kid of node.kids ?? []) fill(kid);
+    };
+    fill(segment);
+  }
+}
+
 export function encodeWebm(top: Ebml[]): Buffer {
+  placePositions(top);
   return Buffer.concat(top.map(encodeEbml));
 }
 
@@ -218,19 +252,16 @@ export function webmTree(o: WebmOptions = {}): Ebml[] {
 
   const info = el(I.Info, uint(I.TimestampScale, scale), ...(durationMs === null ? [] : [float(I.Duration, toTicks(durationMs))]), str(I.MuxingApp, "raccoon test writer"), str(I.WritingApp, "raccoon test writer"));
   const trackList = el(I.Tracks, ...tracks);
-  // Positions are written in four bytes each, so a second pass can fill them without moving anything.
-  const at = (id: number, position: number) => el(I.Seek, bin(I.SeekID, idBytes(id)), { id: I.SeekPosition, data: fixed4(position) });
-  const seekHead = (info: number, tracks: number, cues: number) => el(I.SeekHead, at(I.Info, info), at(I.Tracks, tracks), at(I.Cues, cues));
-  const sizes = [seekHead(0, 0, 0), info, trackList, ...clusters].map((n) => encodeEbml(n).length);
-  const offsets = sizes.map((_, i) => sizes.slice(0, i).reduce((a, b) => a + b, 0));
   const cues = el(
     I.Cues,
-    ...clusters.map((c, i) => el(I.CuePoint, { id: I.CueTime, data: fixed4(findEbml(c, I.Timestamp).data!.readUIntBE(0, findEbml(c, I.Timestamp).data!.length)) }, el(0xb7, uint(0xf7, 1), { id: 0xf1, data: fixed4(offsets[3 + i]!) }))),
+    ...clusters.map((c) => el(I.CuePoint, { id: I.CueTime, data: fixed4(findEbml(c, I.Timestamp).data!.readUIntBE(0, findEbml(c, I.Timestamp).data!.length)) }, el(0xb7, uint(0xf7, 1), { id: 0xf1, data: fixed4(0), at: c }))),
   );
-  const cuesAt = sizes.reduce((a, b) => a + b, 0);
+  // Positions are four bytes each, filled in as the tree is encoded (placePositions).
+  const at = (target: Ebml) => el(I.Seek, bin(I.SeekID, idBytes(target.id)), { id: I.SeekPosition, data: fixed4(0), at: target });
+  const seekHead = el(I.SeekHead, at(info), at(trackList), at(cues));
   return [
     el(I.EBML, uint(I.EBMLVersion, 1), uint(I.EBMLReadVersion, 1), uint(I.EBMLMaxIDLength, 4), uint(I.EBMLMaxSizeLength, 8), str(I.DocType, "webm"), uint(I.DocTypeVersion, 4), uint(I.DocTypeReadVersion, 2)),
-    el(I.Segment, seekHead(offsets[1]!, offsets[2]!, cuesAt), info, trackList, ...clusters, cues),
+    el(I.Segment, seekHead, info, trackList, ...clusters, cues),
   ];
 }
 

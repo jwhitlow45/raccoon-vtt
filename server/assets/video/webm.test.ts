@@ -435,3 +435,113 @@ describe("the sound's length (AMR-3, AMQ-5, AM-ASTRA-28, AM-ASTRA-31)", () => {
     await refused(bytes, "video_layout");
   });
 });
+
+describe("every kept value is read, checked and kept once (AMBUILD-ASTRA-02, AMBUILD-SOL-002, AMBUILD-SOL-006)", () => {
+  const PRIVATE = "PRIVATE TITLE Alice Example alice@example.test";
+  /** Text short enough to read as a whole number, so only a range or a place can refuse it. */
+  const SHORT = Buffer.from("Alice!");
+  const cuePoint = (t: Ebml[]) => findEbml(segmentOf(t), I.Cues, I.CuePoint);
+  const cuePositions = (t: Ebml[]) => findEbml(cuePoint(t), I.CueTrackPositions);
+  const firstCluster = (t: Ebml[]) => findEbml(segmentOf(t), I.Cluster);
+
+  test("a Cue's time holding text is refused, long or short", async () => {
+    await refused(tree({}, (t) => (findEbml(cuePoint(t), I.CueTime).data = Buffer.from(PRIVATE))), "bad_video");
+    await refused(tree({}, (t) => (findEbml(cuePoint(t), I.CueTime).data = SHORT)), "bad_video");
+  });
+
+  test("a Cue must name a track the file has, a Cluster where one starts and a place and block inside it", async () => {
+    await refused(tree({}, (t) => (findEbml(cuePositions(t), 0xf7).data = SHORT)), "bad_video");
+    await refused(tree({}, (t) => (findEbml(cuePositions(t), 0xf1).at = findEbml(segmentOf(t), I.Tracks))), "bad_video");
+    await refused(tree({}, (t) => cuePositions(t).kids!.push({ id: 0xf0, data: SHORT })), "bad_video");
+    await refused(tree({}, (t) => cuePositions(t).kids!.push(uint(0x5378, 0))), "bad_video");
+    await refused(tree({}, (t) => cuePositions(t).kids!.push(uint(0xb2, 2 ** 40))), "bad_video");
+    await refused(tree({}, (t) => cuePositions(t).kids!.push(el(I.CueReference, { id: 0x96, data: SHORT }))), "bad_video");
+    // In bounds, each is kept.
+    const fine = tree({}, (t) => cuePositions(t).kids!.push(uint(0xf0, 3), uint(0x5378, 1), uint(0xb2, 33), el(I.CueReference, uint(0x96, 0))));
+    const { zeroed } = await checkVideoBytes(fine);
+    assert.ok(zeroed.includes(encodeEbml(uint(0x5378, 1))));
+  });
+
+  test("an element off the Cues' lists becomes a Void, its text gone", async () => {
+    const bytes = tree({}, (t) => cuePositions(t).kids!.push(str(0x5ab4, PRIVATE)));
+    assert.ok(bytes.includes(PRIVATE));
+    assert.equal((await checkVideoBytes(bytes)).zeroed.includes(PRIVATE), false);
+  });
+
+  test("a second CodecPrivate, the first holding text, is refused (AMBUILD-SOL-006)", async () => {
+    const valid = Buffer.from([1, 1, 0]);
+    await refused(tree({ codecPrivate: valid }, (t) => trackOf(t).kids!.splice(4, 0, bin(I.CodecPrivate, Buffer.from(PRIVATE)))), "bad_video");
+  });
+
+  test("a second copy of any element its parent holds once is refused", async () => {
+    const twice: Array<[string, (t: Ebml[]) => void]> = [
+      ["DocType", (t) => findEbml(t, I.EBML).kids!.push(str(I.DocType, PRIVATE))],
+      ["TimestampScale", (t) => findEbml(segmentOf(t), I.Info).kids!.push(uint(I.TimestampScale, 1_000_000))],
+      ["Duration", (t) => findEbml(segmentOf(t), I.Info).kids!.push(float(I.Duration, 2001))],
+      ["TrackNumber", (t) => trackOf(t).kids!.push(uint(I.TrackNumber, 1))],
+      ["Video", (t) => trackOf(t).kids!.push(el(I.Video, uint(I.PixelWidth, 1280), uint(I.PixelHeight, 720)))],
+      ["PixelWidth", (t) => videoOf(t).kids!.push(uint(I.PixelWidth, 1280))],
+      ["a Colour number", (t) => videoOf(t).kids!.push(el(I.Colour, uint(0x55b1, 1), uint(0x55b1, 2)))],
+      ["a Cluster's Timestamp", (t) => firstCluster(t).kids!.push(uint(I.Timestamp, 0))],
+      ["SeekID", (t) => findEbml(segmentOf(t), I.SeekHead, I.Seek).kids!.unshift(bin(I.SeekID, Buffer.from("Alic")))],
+      ["SeekPosition", (t) => findEbml(segmentOf(t), I.SeekHead, I.Seek).kids!.push({ id: I.SeekPosition, data: SHORT })],
+      ["CueTime", (t) => cuePoint(t).kids!.push({ id: I.CueTime, data: Buffer.from([0]) })],
+      ["CueTrack", (t) => cuePositions(t).kids!.push(uint(0xf7, 1))],
+      ["Cues", (t) => segmentOf(t).kids!.push(findEbml(segmentOf(t), I.Cues))],
+      ["BlockDuration", (t) => firstCluster(t).kids!.push(el(I.BlockGroup, block(1, 500, 0, Buffer.from([0x86, 0])), uint(I.BlockDuration, 1), uint(I.BlockDuration, 2)))],
+    ];
+    for (const [name, change] of twice) {
+      await assert.rejects(checkVideoBytes(tree({}, change)), (err: unknown) => err instanceof AssetError && err.code === "bad_video", name);
+    }
+  });
+
+  test("a second Info is refused even when the first had no TimestampScale", async () => {
+    await refused(
+      tree({}, (t) => {
+        const seg = segmentOf(t);
+        const info = findEbml(seg, I.Info);
+        seg.kids!.splice(seg.kids!.indexOf(info), 0, el(I.Info, str(I.MuxingApp, "")));
+      }),
+      "bad_video",
+    );
+  });
+
+  test("a SeekHead entry must point where its element is", async () => {
+    await refused(tree({}, (t) => (findEbml(segmentOf(t), I.SeekHead, I.Seek, I.SeekPosition).at = findEbml(segmentOf(t), I.Tracks))), "bad_video");
+    await refused(tree({}, (t) => (findEbml(segmentOf(t), I.SeekHead, I.Seek, I.SeekPosition).data = SHORT)), "bad_video");
+  });
+
+  test("numbers with a range refuse text in them: the flags, the header's versions, Colour, MasteringMetadata, DefaultDuration and the Audio's channels", async () => {
+    await refused(tree({}, (t) => trackOf(t).kids!.push({ id: I.FlagDefault, data: Buffer.from("Al") })), "bad_video");
+    await refused(tree({}, (t) => (findEbml(t, I.EBML, I.EBMLVersion).data = Buffer.from([2]))), "bad_video");
+    await refused(tree({}, (t) => (findEbml(t, I.EBML, I.DocTypeVersion).data = SHORT)), "bad_video");
+    await refused(tree({}, (t) => videoOf(t).kids!.push(el(I.Colour, { id: 0x55bc, data: SHORT }))), "bad_video");
+    await refused(tree({}, (t) => videoOf(t).kids!.push(el(I.Colour, el(I.MasteringMetadata, float(0x55d9, -1))))), "bad_video");
+    await refused(tree({}, (t) => trackOf(t).kids!.push(uint(I.DefaultDuration, 0))), "bad_video");
+    await refused(tree({}, (t) => videoOf(t).kids!.push({ id: I.FlagInterlaced, data: SHORT })), "bad_video");
+    const sound = { blocks: soundBlocks(2000) };
+    await refused(tree({ sound }, (t) => findEbml(allEbml(segmentOf(t), I.TrackEntry)[1]!, I.Audio, I.Channels).data = Buffer.from([1])), "video_sound");
+  });
+
+  test("a Cluster's PrevSize goes, its number with it", async () => {
+    const bytes = tree({}, (t) => allEbml(segmentOf(t), I.Cluster)[1]!.kids!.splice(1, 0, { id: I.PrevSize, data: SHORT }));
+    assert.ok(bytes.includes(SHORT));
+    assert.equal((await checkVideoBytes(bytes)).zeroed.includes(SHORT), false);
+  });
+
+  test("a block's reserved flag bits, a third ReferenceBlock and one farther than any timeline are refused", async () => {
+    await refused(
+      tree({}, (t) => {
+        const b = allEbml(segmentOf(t), I.SimpleBlock)[2]!;
+        b.data = Buffer.from(b.data!);
+        b.data[3]! |= 0x20;
+      }),
+      "bad_video",
+    );
+    await refused(tree({}, (t) => firstCluster(t).kids!.push(el(I.BlockGroup, block(1, 500, 0x10, Buffer.from([0x86, 0]))))), "bad_video");
+    const refs = (...distances: number[]) => (t: Ebml[]) => firstCluster(t).kids!.push(el(I.BlockGroup, block(1, 500, 0, Buffer.from([0x86, 0])), ...distances.map((d) => sint(I.ReferenceBlock, d))));
+    await checkVideoBytes(tree({}, refs(-33, 33)));
+    await refused(tree({}, refs(-33, -66, 33)), "bad_video");
+    await refused(tree({}, refs(2 ** 40)), "bad_video");
+  });
+});

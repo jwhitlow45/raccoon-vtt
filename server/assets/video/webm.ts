@@ -114,22 +114,36 @@ const I = EBML_ID;
 
 type El = { id: number; start: number; dataStart: number; end: number; idLength: number; sizeLength: number };
 
-type Leaf = "uint" | "int" | "float" | "zeroString";
+/**
+ * How a master kept whole from KEPT reads each child: a number checked by
+ * its type and range, or a master read the same way. Each is allowed once
+ * unless `many`, as the format allows it (AMBUILD-SOL-006).
+ */
+type Rule = { leaf: "uint" | "float"; min?: number; max?: number } | { master: true; many?: boolean };
 
-/** Leaves kept by type in each master the walk keeps whole: anything else there becomes a Void. */
 const UINT_FLAGS = [I.FlagEnabled, I.FlagDefault, I.FlagForced, I.FlagHearingImpaired, I.FlagVisualImpaired, I.FlagTextDescriptions, I.FlagOriginal, I.FlagCommentary, I.FlagLacing];
+/** Colour's numbers: code points, bit counts, siting and the light levels, none past 16 bits. */
 const COLOUR_UINTS = [0x55b1, 0x55b2, 0x55b3, 0x55b4, 0x55b5, 0x55b6, 0x55b7, 0x55b8, 0x55b9, I.TransferCharacteristics, 0x55bb, 0x55bc, 0x55bd];
 const MASTERING_FLOATS = [0x55d1, 0x55d2, 0x55d3, 0x55d4, 0x55d5, 0x55d6, 0x55d7, 0x55d8, 0x55d9, 0x55da];
 
-const KEPT: Record<number, Record<number, Leaf | "master">> = {
-  [I.EBML]: { [I.EBMLVersion]: "uint", [I.EBMLReadVersion]: "uint", [I.EBMLMaxIDLength]: "uint", [I.EBMLMaxSizeLength]: "uint", [I.DocTypeVersion]: "uint", [I.DocTypeReadVersion]: "uint" },
-  [I.Colour]: { ...Object.fromEntries(COLOUR_UINTS.map((id) => [id, "uint" as const])), [I.MasteringMetadata]: "master" },
-  [I.MasteringMetadata]: Object.fromEntries(MASTERING_FLOATS.map((id) => [id, "float" as const])),
-  [I.Cues]: { [I.CuePoint]: "master" },
-  [I.CuePoint]: { [I.CueTime]: "uint", [I.CueTrackPositions]: "master" },
-  [I.CueTrackPositions]: { 0xf7: "uint", 0xf1: "uint", 0xf0: "uint", 0xb2: "uint", 0x5378: "uint", 0xea: "uint", [I.CueReference]: "master" },
-  [I.CueReference]: { 0x96: "uint" },
+const KEPT: Record<number, Record<number, Rule>> = {
+  [I.Colour]: { ...Object.fromEntries(COLOUR_UINTS.map((id) => [id, { leaf: "uint", max: 0xffff } as const])), [I.MasteringMetadata]: { master: true } },
+  [I.MasteringMetadata]: Object.fromEntries(MASTERING_FLOATS.map((id) => [id, { leaf: "float", min: 0 } as const])),
 };
+
+/**
+ * Refuses a second copy of an element its parent may hold once, so the
+ * check never vouches for one copy while a browser reads another, and no
+ * copy it did not read is kept (AMBUILD-SOL-006).
+ */
+class Once {
+  readonly #seen = new Set<number>();
+
+  take(id: number): void {
+    if (this.#seen.has(id)) throw refuse("bad_video");
+    this.#seen.add(id);
+  }
+}
 
 /** The Segment children a SeekHead entry may point at: the ones this check keeps. */
 const SEEKABLE = new Set<number>([I.SeekHead, I.Info, I.Tracks, I.Cues, I.Cluster]);
@@ -146,6 +160,8 @@ type Track = {
   transfer?: number;
   alpha?: number;
   channels?: number;
+  /** The Audio element's Channels, which must match OpusHead's. */
+  declaredChannels?: number;
   codecPrivateTooLong?: boolean;
 };
 
@@ -240,21 +256,40 @@ class Walk {
   }
 
   /**
-   * A master kept whole from KEPT: its listed leaves checked by type, Voids
-   * padded, everything else made Void. `seen` hears each number kept.
+   * A master kept whole from KEPT: each listed child read and checked by
+   * its rule whether or not anyone hears its value, Voids padded,
+   * everything else made Void. `seen` hears each number kept.
+   * (AMBUILD-ASTRA-02: a value read only for `seen` went unchecked.)
    */
   async keepMaster(el: El, depth: number, seen?: (id: number, value: number) => void): Promise<void> {
     const allowed = KEPT[el.id] ?? {};
+    const once = new Once();
     for await (const child of this.children(el.dataStart, el.end, depth + 1)) {
       const rule = allowed[child.id];
-      if (child.id === I.Void) this.zeroPayload(child);
-      else if (rule === "master") await this.keepMaster(child, depth + 1, seen);
-      else if (rule === "uint") seen?.(child.id, await this.uint(child));
-      else if (rule === "int") seen?.(child.id, await this.int(child));
-      else if (rule === "float") seen?.(child.id, await this.float(child));
-      else if (rule === "zeroString") this.zeroPayload(child);
-      else this.void(child);
+      if (child.id === I.Void) {
+        this.zeroPayload(child);
+        continue;
+      }
+      if (!rule) {
+        this.void(child);
+        continue;
+      }
+      if (!("master" in rule && rule.many)) once.take(child.id);
+      if ("master" in rule) {
+        await this.keepMaster(child, depth + 1, seen);
+        continue;
+      }
+      const value = rule.leaf === "uint" ? await this.uint(child) : await this.float(child);
+      if ((rule.min !== undefined && value < rule.min) || (rule.max !== undefined && value > rule.max)) throw refuse("bad_video");
+      seen?.(child.id, value);
     }
+  }
+
+  /** A uint that must lie in `[min, max]`. */
+  async uintIn(el: El, min: number, max: number): Promise<number> {
+    const value = await this.uint(el);
+    if (value < min || value > max) throw refuse("bad_video");
+    return value;
   }
 }
 
@@ -285,53 +320,100 @@ export async function parseWebm(src: Source, budget: Budget): Promise<ParsedVide
   return parseSegment(walk, segment);
 }
 
+const EBML_HEADER_KEPT = new Set<number>([I.EBMLVersion, I.EBMLReadVersion, I.EBMLMaxIDLength, I.EBMLMaxSizeLength, I.DocType, I.DocTypeVersion, I.DocTypeReadVersion]);
+
 async function ebmlHeader(walk: Walk, el: El): Promise<void> {
   let docType = "matroska";
+  const once = new Once();
   for await (const child of walk.children(el.dataStart, el.end, 2)) {
-    if (child.id === I.DocType) docType = await walk.string(child);
-    else if (child.id === I.EBMLReadVersion && (await walk.uint(child)) !== 1) throw refuse("bad_video");
-    else if (child.id === I.EBMLMaxIDLength && (await walk.uint(child)) > 4) throw refuse("bad_video");
-    else if (child.id === I.EBMLMaxSizeLength && (await walk.uint(child)) > 8) throw refuse("bad_video");
-    else if (child.id === I.DocTypeReadVersion && (await walk.uint(child)) > 4) throw refuse("bad_video");
-    else if (child.id === I.Void) walk.zeroPayload(child);
-    else if (KEPT[I.EBML]![child.id]) await walk.uint(child);
-    else walk.void(child);
+    const id = child.id;
+    if (id === I.Void) {
+      walk.zeroPayload(child);
+      continue;
+    }
+    if (!EBML_HEADER_KEPT.has(id)) {
+      walk.void(child);
+      continue;
+    }
+    once.take(id);
+    // Only "webm" passes, with nothing but the zero padding a string may end with.
+    if (id === I.DocType) docType = await walk.string(child);
+    else if (id === I.EBMLVersion || id === I.EBMLReadVersion) await walk.uintIn(child, 1, 1);
+    else if (id === I.EBMLMaxIDLength) await walk.uintIn(child, 1, 4);
+    else if (id === I.EBMLMaxSizeLength) await walk.uintIn(child, 1, 8);
+    else await walk.uintIn(child, 1, 4); // DocTypeVersion and DocTypeReadVersion: WebM is at most version 4
   }
   if (docType !== "webm") throw refuse("video_type");
 }
 
 type BlockTiming = { duration?: number; discardPadding?: number };
 
+/** Where a SeekHead entry points, checked once the walk knows every element's place. */
+type SeekEntry = { target: number; position: number };
+
+/** One CueTrackPositions with its CuePoint's time, checked once the walk knows every Cluster and block. */
+type CueEntry = { time: number; track: number; cluster: number; relative?: number; blockNumber?: number; duration?: number; codecState?: number; refTimes: number[] };
+
+/** A Cluster as the Cues may point at it: its data's length and how many blocks it holds. */
+type ClusterAt = { bytes: number; blocks: number };
+
+/** The most ReferenceBlocks a BlockGroup holds: a B-frame names one frame before it and one after. */
+const MAX_REFERENCES = 2;
+
 async function parseSegment(walk: Walk, segment: El): Promise<ParsedVideo> {
   let scale: number | undefined;
   let duration: number | undefined;
   let tracks: Track[] | undefined;
+  let sawInfo = false;
+  let sawCues = false;
+  let seekHeads = 0;
   const videoFrames = new Tally(VIDEO_LIMITS.parseVideoFrameHeaders, "video_fps");
   const soundFrames = new Tally(VIDEO_LIMITS.parseSoundFrameHeaders);
   const frameTimes: number[] = [];
   let soundEnd = -Infinity;
   let lastClusterTimestamp = 0;
+  /** The latest block's timestamp in the Segment's ticks, which no Cue may pass. */
+  let lastTicks = 0;
   let firstVideoHead: Buffer | undefined;
+  const seeks: SeekEntry[] = [];
+  const cueEntries: CueEntry[] = [];
+  /** Each Segment child's id by its place from the Segment's data, as SeekPosition and CueClusterPosition count. */
+  const placed = new Map<number, number>();
+  const clusters = new Map<number, ClusterAt>();
 
   for await (const el of walk.children(segment.dataStart, segment.end, 2)) {
+    placed.set(el.start - segment.dataStart, el.id);
     if (el.id === I.Void) walk.zeroPayload(el);
-    else if (el.id === I.SeekHead) await seekHead(walk, el);
-    else if (el.id === I.Info) {
-      if (scale !== undefined) throw refuse("bad_video");
+    else if (el.id === I.SeekHead) {
+      // The format allows a second SeekHead, which the first points at.
+      if (++seekHeads > 2) throw refuse("bad_video");
+      await seekHead(walk, el, seeks);
+    } else if (el.id === I.Info) {
+      if (sawInfo) throw refuse("bad_video");
+      sawInfo = true;
       ({ scale, duration } = await info(walk, el));
     } else if (el.id === I.Tracks) {
       if (tracks) throw refuse("bad_video");
       tracks = await trackList(walk, el);
-    } else if (el.id === I.Cues) await walk.keepMaster(el, 2);
-    else if (el.id === I.Cluster) {
+    } else if (el.id === I.Cues) {
+      if (sawCues) throw refuse("bad_video");
+      sawCues = true;
+      await cues(walk, el, cueEntries);
+    } else if (el.id === I.Cluster) {
       // Blocks are read by their track, in Info's time scale, so both come first, as every muxer writes them.
       if (scale === undefined || !tracks) throw refuse("bad_video");
       const known = { scale, tracks };
+      // A ReferenceBlock names another block by its distance in ticks, which no timeline under the cap exceeds.
+      const farthest = Math.ceil((VIDEO_LIMITS.maxDurationMs * 1e6) / scale);
+      const at: ClusterAt = { bytes: el.end - el.dataStart, blocks: 0 };
+      clusters.set(el.start - segment.dataStart, at);
       let timestamp: number | undefined;
-      const block = async (b: El, timing: BlockTiming) => {
+      const once = new Once();
+      const block = async (b: El, timing: BlockTiming, simple: boolean) => {
         if (timestamp === undefined) throw refuse("bad_video");
-        const read = await blockHeader(walk, b, known.tracks);
+        const read = await blockHeader(walk, b, known.tracks, simple);
         walk.edits.protect(b.dataStart, b.end);
+        lastTicks = Math.max(lastTicks, timestamp + read.relative);
         const time = (timestamp + read.relative) * known.scale;
         if (read.track.type === 1) {
           videoFrames.add();
@@ -348,28 +430,43 @@ async function parseSegment(walk: Walk, segment: El): Promise<ParsedVideo> {
       };
       for await (const child of walk.children(el.dataStart, el.end, 3)) {
         if (child.id === I.Timestamp) {
+          once.take(child.id);
           timestamp = await walk.uint(child);
           lastClusterTimestamp = timestamp;
-        } else if (child.id === I.SimpleBlock) await block(child, {});
-        else if (child.id === I.BlockGroup) {
+        } else if (child.id === I.SimpleBlock) {
+          at.blocks++;
+          await block(child, {}, true);
+        } else if (child.id === I.BlockGroup) {
+          at.blocks++;
           let inner: El | undefined;
+          let references = 0;
           const timing: BlockTiming = {};
+          const inGroup = new Once();
           for await (const g of walk.children(child.dataStart, child.end, 4)) {
             if (g.id === I.Block) {
-              if (inner) throw refuse("bad_video");
+              inGroup.take(g.id);
               inner = g;
-            } else if (g.id === I.BlockDuration) timing.duration = await walk.uint(g);
-            else if (g.id === I.ReferenceBlock) await walk.int(g);
-            else if (g.id === I.DiscardPadding) timing.discardPadding = await walk.int(g);
-            else if (g.id === I.BlockAdditions) throw refuse("video_alpha");
+            } else if (g.id === I.BlockDuration) {
+              inGroup.take(g.id);
+              timing.duration = await walk.uint(g);
+            } else if (g.id === I.ReferenceBlock) {
+              if (++references > MAX_REFERENCES) throw refuse("bad_video");
+              const distance = await walk.int(g);
+              if (Math.abs(distance) > farthest) throw refuse("bad_video");
+            } else if (g.id === I.DiscardPadding) {
+              inGroup.take(g.id);
+              timing.discardPadding = await walk.int(g);
+              // Padding trims part of one packet, and an Opus packet is at most 120 ms.
+              if (Math.abs(timing.discardPadding) > 120_000_000) throw refuse("bad_video");
+            } else if (g.id === I.BlockAdditions) throw refuse("video_alpha");
             else if (g.id === I.Void) walk.zeroPayload(g);
             else walk.void(g);
           }
           if (!inner) throw refuse("bad_video");
-          await block(inner, timing);
-        } else if (child.id === I.PrevSize) await walk.uint(child);
-        else if (child.id === I.EncryptedBlock) throw refuse("bad_video");
+          await block(inner, timing, false);
+        } else if (child.id === I.EncryptedBlock) throw refuse("bad_video");
         else if (child.id === I.Void) walk.zeroPayload(child);
+        // PrevSize goes too: it only helps play backwards, and a free number in every Cluster is room for text.
         else walk.void(child);
       }
     } else walk.void(el); // Tags, Attachments, Chapters, CRC-32 and anything unknown
@@ -382,6 +479,9 @@ async function parseSegment(walk: Walk, segment: El): Promise<ParsedVideo> {
   if (frameTimes.length === 0) throw refuse("bad_video");
   // A Duration the Clusters run past says less than the file holds.
   if (lastClusterTimestamp > duration) throw refuse("video_unfinished");
+  // Each SeekHead entry must point at the element it names.
+  for (const seek of seeks) if (placed.get(seek.position) !== seek.target) throw refuse("bad_video");
+  checkCues(cueEntries, { tracks, clusters, lastTicks, segmentBytes: segment.end - segment.dataStart });
 
   const fps = peakInOneSecond(frameTimes, 1e9);
   const first = Math.min(...frameTimes);
@@ -403,7 +503,7 @@ async function parseSegment(walk: Walk, segment: El): Promise<ParsedVideo> {
   };
 }
 
-async function seekHead(walk: Walk, el: El): Promise<void> {
+async function seekHead(walk: Walk, el: El, seeks: SeekEntry[]): Promise<void> {
   for await (const seek of walk.children(el.dataStart, el.end, 3)) {
     if (seek.id === I.Void) {
       walk.zeroPayload(seek);
@@ -414,12 +514,18 @@ async function seekHead(walk: Walk, el: El): Promise<void> {
       continue;
     }
     let target: number | undefined;
+    let position: El | undefined;
     const kids: El[] = [];
+    const once = new Once();
     for await (const child of walk.children(seek.dataStart, seek.end, 4)) kids.push(child);
     for (const child of kids) {
       if (child.id === I.SeekID) {
+        once.take(child.id);
         const id = await walk.bytes(child, 4);
         target = id.reduce((v, b) => v * 256 + b, 0);
+      } else if (child.id === I.SeekPosition) {
+        once.take(child.id);
+        position = child;
       }
     }
     // An entry pointing at an element this check drops would point at a Void, so it goes with it.
@@ -427,10 +533,11 @@ async function seekHead(walk: Walk, el: El): Promise<void> {
       walk.void(seek);
       continue;
     }
+    if (!position) throw refuse("bad_video");
+    seeks.push({ target, position: await walk.uint(position) });
     for (const child of kids) {
-      if (child.id === I.SeekID) continue;
-      if (child.id === I.SeekPosition) await walk.uint(child);
-      else if (child.id === I.Void) walk.zeroPayload(child);
+      if (child.id === I.SeekID || child.id === I.SeekPosition) continue;
+      if (child.id === I.Void) walk.zeroPayload(child);
       else walk.void(child);
     }
   }
@@ -439,18 +546,113 @@ async function seekHead(walk: Walk, el: El): Promise<void> {
 async function info(walk: Walk, el: El): Promise<{ scale: number | undefined; duration: number | undefined }> {
   let scale: number | undefined;
   let duration: number | undefined;
+  const once = new Once();
   for await (const child of walk.children(el.dataStart, el.end, 3)) {
     if (child.id === I.TimestampScale) {
+      once.take(child.id);
       scale = await walk.uint(child);
       if (scale <= 0) throw refuse("bad_video");
     } else if (child.id === I.Duration) {
+      once.take(child.id);
       duration = await walk.float(child);
       if (duration <= 0) throw refuse("bad_video");
-    } else if (child.id === I.MuxingApp || child.id === I.WritingApp) walk.zeroPayload(child);
-    else if (child.id === I.Void) walk.zeroPayload(child);
+    } else if (child.id === I.MuxingApp || child.id === I.WritingApp) {
+      once.take(child.id);
+      walk.zeroPayload(child);
+    } else if (child.id === I.Void) walk.zeroPayload(child);
     else walk.void(child); // Title, DateUTC, SegmentUUID, SegmentFilename, CRC-32 and the rest
   }
   return { scale, duration };
+}
+
+const CUE_TRACK = 0xf7;
+const CUE_CLUSTER_POSITION = 0xf1;
+const CUE_RELATIVE_POSITION = 0xf0;
+const CUE_DURATION = 0xb2;
+const CUE_BLOCK_NUMBER = 0x5378;
+const CUE_CODEC_STATE = 0xea;
+const CUE_REF_TIME = 0x96;
+
+/**
+ * The Cues, read into their entries, each number once where the format
+ * allows one (AMBUILD-ASTRA-02). They may come before the Clusters, so
+ * what they point at is checked after the walk (checkCues).
+ */
+async function cues(walk: Walk, el: El, out: CueEntry[]): Promise<void> {
+  for await (const point of walk.children(el.dataStart, el.end, 3)) {
+    if (point.id === I.Void) {
+      walk.zeroPayload(point);
+      continue;
+    }
+    if (point.id !== I.CuePoint) {
+      walk.void(point);
+      continue;
+    }
+    let time: number | undefined;
+    const positions: El[] = [];
+    const once = new Once();
+    for await (const child of walk.children(point.dataStart, point.end, 4)) {
+      if (child.id === I.CueTime) {
+        once.take(child.id);
+        time = await walk.uint(child);
+      } else if (child.id === I.CueTrackPositions) positions.push(child);
+      else if (child.id === I.Void) walk.zeroPayload(child);
+      else walk.void(child);
+    }
+    if (time === undefined || positions.length === 0) throw refuse("bad_video");
+    for (const p of positions) out.push(await cuePositions(walk, p, time));
+  }
+}
+
+async function cuePositions(walk: Walk, el: El, time: number): Promise<CueEntry> {
+  const entry: Partial<CueEntry> & { refTimes: number[] } = { time, refTimes: [] };
+  const once = new Once();
+  for await (const child of walk.children(el.dataStart, el.end, 5)) {
+    const id = child.id;
+    if (id === I.Void) walk.zeroPayload(child);
+    else if (id === I.CueReference) {
+      let refTime: number | undefined;
+      const inRef = new Once();
+      for await (const r of walk.children(child.dataStart, child.end, 6)) {
+        if (r.id === CUE_REF_TIME) {
+          inRef.take(r.id);
+          refTime = await walk.uint(r);
+        } else if (r.id === I.Void) walk.zeroPayload(r);
+        else walk.void(r);
+      }
+      if (refTime === undefined) throw refuse("bad_video");
+      entry.refTimes.push(refTime);
+    } else if (id === CUE_TRACK || id === CUE_CLUSTER_POSITION || id === CUE_RELATIVE_POSITION || id === CUE_DURATION || id === CUE_BLOCK_NUMBER || id === CUE_CODEC_STATE) {
+      once.take(id);
+      const value = await walk.uint(child);
+      if (id === CUE_TRACK) entry.track = value;
+      else if (id === CUE_CLUSTER_POSITION) entry.cluster = value;
+      else if (id === CUE_RELATIVE_POSITION) entry.relative = value;
+      else if (id === CUE_DURATION) entry.duration = value;
+      else if (id === CUE_BLOCK_NUMBER) entry.blockNumber = value;
+      else entry.codecState = value;
+    } else walk.void(child);
+  }
+  if (entry.track === undefined || entry.cluster === undefined) throw refuse("bad_video");
+  return entry as CueEntry;
+}
+
+/**
+ * Every Cue names a track the file has, a Cluster where one starts, a place
+ * and a block number inside it, and times inside the file's own: a Cue's
+ * numbers say where the file's parts are, so they hold nothing else. The
+ * place in the Cluster is only bounded, since a muxer may count it from
+ * before or after a CRC-32 at the Cluster's start.
+ */
+function checkCues(entries: readonly CueEntry[], file: { tracks: readonly Track[]; clusters: ReadonlyMap<number, ClusterAt>; lastTicks: number; segmentBytes: number }): void {
+  for (const cue of entries) {
+    const cluster = file.clusters.get(cue.cluster);
+    if (!cluster || !file.tracks.some((t) => t.number === cue.track)) throw refuse("bad_video");
+    if (cue.relative !== undefined && cue.relative >= cluster.bytes) throw refuse("bad_video");
+    if (cue.blockNumber !== undefined && (cue.blockNumber < 1 || cue.blockNumber > cluster.blocks)) throw refuse("bad_video");
+    if (cue.codecState !== undefined && cue.codecState > file.segmentBytes) throw refuse("bad_video");
+    for (const t of [cue.time, cue.duration ?? 0, ...cue.refTimes]) if (t > file.lastTicks) throw refuse("bad_video");
+  }
 }
 
 async function trackList(walk: Walk, el: El): Promise<Track[]> {
@@ -474,6 +676,8 @@ async function trackList(walk: Walk, el: El): Promise<Track[]> {
     if (track.type === 2) {
       if (!track.codecPrivate) throw refuse("video_sound");
       track.channels = opusHead(track.codecPrivate, "webm").channels;
+      // The Audio element's own count, where given, says the same.
+      if (track.declaredChannels !== undefined && track.declaredChannels !== track.channels) throw refuse("video_sound");
     }
     if (track.codecId === "V_VP8" && track.codecPrivate) throw refuse("bad_video");
     if (track.codecId === "V_AV1" && !track.codecPrivate) throw refuse("bad_video");
@@ -481,9 +685,19 @@ async function trackList(walk: Walk, el: El): Promise<Track[]> {
   return tracks;
 }
 
+/** A TrackEntry's children the check reads, each allowed once. */
+const TRACK_KEPT = new Set<number>([I.TrackNumber, I.TrackUID, I.TrackType, ...UINT_FLAGS, I.DefaultDuration, I.CodecID, I.CodecPrivate, I.CodecDelay, I.SeekPreRoll, I.ContentEncodings, I.Video, I.Audio]);
+
+/** A time in nanoseconds no file under the length cap needs more than. */
+const LONGEST_NS = VIDEO_LIMITS.maxDurationMs * 1e6;
+
 async function trackEntry(walk: Walk, el: El): Promise<Track> {
   const kids: El[] = [];
-  for await (const child of walk.children(el.dataStart, el.end, 4)) kids.push(child);
+  const once = new Once();
+  for await (const child of walk.children(el.dataStart, el.end, 4)) {
+    if (TRACK_KEPT.has(child.id)) once.take(child.id);
+    kids.push(child);
+  }
   const track: Track = { number: 0, type: 0, codecId: "", codecDelay: 0 };
   // CodecID first, so a Vorbis track is refused as Vorbis whatever the size of its CodecPrivate (AMR-6).
   for (const child of kids) {
@@ -494,9 +708,11 @@ async function trackEntry(walk: Walk, el: El): Promise<Track> {
     const id = child.id;
     if (id === I.TrackType || id === I.CodecID) continue;
     if (id === I.TrackNumber) track.number = await walk.uint(child);
-    else if (id === I.TrackUID || UINT_FLAGS.includes(id as (typeof UINT_FLAGS)[number]) || id === I.SeekPreRoll) await walk.uint(child);
-    else if (id === I.DefaultDuration) track.defaultDuration = await walk.uint(child);
-    else if (id === I.CodecDelay) track.codecDelay = await walk.uint(child);
+    else if (id === I.TrackUID) await walk.uint(child);
+    else if (UINT_FLAGS.includes(id as (typeof UINT_FLAGS)[number])) await walk.uintIn(child, 0, 1);
+    else if (id === I.SeekPreRoll) await walk.uintIn(child, 0, LONGEST_NS);
+    else if (id === I.DefaultDuration) track.defaultDuration = await walk.uintIn(child, 1, LONGEST_NS);
+    else if (id === I.CodecDelay) track.codecDelay = await walk.uintIn(child, 0, LONGEST_NS);
     else if (id === I.CodecPrivate) {
       // Vorbis's comment header is free text, never read: the track is refused once the tracks are counted.
       if (track.codecId === "A_VORBIS") continue;
@@ -504,7 +720,7 @@ async function trackEntry(walk: Walk, el: El): Promise<Track> {
       else track.codecPrivate = await walk.bytes(child);
     } else if (id === I.ContentEncodings) throw refuse("bad_video");
     else if (id === I.Video && track.type === 1) await videoSettings(walk, child, track);
-    else if (id === I.Audio && track.type === 2) await audioSettings(walk, child);
+    else if (id === I.Audio && track.type === 2) await audioSettings(walk, child, track);
     else if (id === I.Void) walk.zeroPayload(child);
     else walk.void(child); // Name, Language, CodecName, AttachmentLink, CRC-32 and the rest
   }
@@ -513,18 +729,22 @@ async function trackEntry(walk: Walk, el: El): Promise<Track> {
   return track;
 }
 
+const VIDEO_KEPT = new Set<number>([I.PixelWidth, I.PixelHeight, I.DisplayWidth, I.DisplayHeight, I.DisplayUnit, I.FlagInterlaced, I.AlphaMode, I.PixelCropBottom, I.PixelCropTop, I.PixelCropLeft, I.PixelCropRight, I.Colour]);
+
 async function videoSettings(walk: Walk, el: El, track: Track): Promise<void> {
   let displayWidth: number | undefined;
   let displayHeight: number | undefined;
   let unit = 0;
+  const once = new Once();
   for await (const child of walk.children(el.dataStart, el.end, 5)) {
     const id = child.id;
+    if (VIDEO_KEPT.has(id)) once.take(id);
     if (id === I.PixelWidth) track.width = await walk.uint(child);
     else if (id === I.PixelHeight) track.height = await walk.uint(child);
     else if (id === I.DisplayWidth) displayWidth = await walk.uint(child);
     else if (id === I.DisplayHeight) displayHeight = await walk.uint(child);
     else if (id === I.DisplayUnit) unit = await walk.uint(child);
-    else if (id === I.FlagInterlaced) await walk.uint(child);
+    else if (id === I.FlagInterlaced) await walk.uintIn(child, 0, 2);
     else if (id === I.AlphaMode) track.alpha = await walk.uint(child);
     else if (id === I.PixelCropBottom || id === I.PixelCropTop || id === I.PixelCropLeft || id === I.PixelCropRight) {
       if ((await walk.uint(child)) !== 0) throw refuse("video_geometry");
@@ -537,17 +757,23 @@ async function videoSettings(walk: Walk, el: El, track: Track): Promise<void> {
     else walk.void(child);
   }
   if (track.alpha === 1) throw refuse("video_alpha");
+  if (track.alpha !== undefined && track.alpha > 1) throw refuse("bad_video");
   if (track.transfer === 16 || track.transfer === 18) throw refuse("video_hdr");
   if (unit !== 0) throw refuse("video_geometry");
   if ((displayWidth !== undefined && displayWidth !== track.width) || (displayHeight !== undefined && displayHeight !== track.height)) throw refuse("video_geometry");
 }
 
-async function audioSettings(walk: Walk, el: El): Promise<void> {
+const AUDIO_KEPT = new Set<number>([I.SamplingFrequency, I.OutputSamplingFrequency, I.Channels, I.BitDepth]);
+
+async function audioSettings(walk: Walk, el: El, track: Track): Promise<void> {
+  const once = new Once();
   for await (const child of walk.children(el.dataStart, el.end, 5)) {
     const id = child.id;
+    if (AUDIO_KEPT.has(id)) once.take(id);
     if (id === I.SamplingFrequency || id === I.OutputSamplingFrequency) {
       if ((await walk.float(child)) <= 0) throw refuse("bad_video");
-    } else if (id === I.Channels || id === I.BitDepth) await walk.uint(child);
+    } else if (id === I.Channels) track.declaredChannels = await walk.uintIn(child, 1, 255);
+    else if (id === I.BitDepth) await walk.uintIn(child, 1, 64);
     else if (id === I.Void) walk.zeroPayload(child);
     else walk.void(child);
   }
@@ -555,8 +781,11 @@ async function audioSettings(walk: Walk, el: El): Promise<void> {
 
 type BlockRead = { track: Track; relative: number; invisible: boolean; lacing: number; headerLength: number; payloadStart: number };
 
+/** The flag bits the format reserves, which must be clear: a SimpleBlock's three after the key frame bit, and a Block's top four and its last. */
+const RESERVED_FLAGS = { simple: 0x70, group: 0xf1 } as const;
+
 /** A block's own header: the track as a VINT of up to 8 bytes, the 2-byte relative timestamp and the flags (AMN-13). */
-async function blockHeader(walk: Walk, el: El, tracks: readonly Track[]): Promise<BlockRead> {
+async function blockHeader(walk: Walk, el: El, tracks: readonly Track[], simple: boolean): Promise<BlockRead> {
   const head = await walk.src.read(el.dataStart, Math.min(11, el.end - el.dataStart));
   const length = vintLength(head[0]);
   if (length > 8 || length + 3 > head.length) throw refuse("bad_video");
@@ -565,6 +794,7 @@ async function blockHeader(walk: Walk, el: El, tracks: readonly Track[]): Promis
   if (!track) throw refuse("bad_video");
   const relative = head.readInt16BE(length);
   const flags = head[length + 2]!;
+  if (flags & RESERVED_FLAGS[simple ? "simple" : "group"]) throw refuse("bad_video");
   return { track, relative, invisible: (flags & 0x08) !== 0, lacing: (flags >> 1) & 3, headerLength: length + 3, payloadStart: el.dataStart + length + 3 };
 }
 
