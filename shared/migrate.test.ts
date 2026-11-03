@@ -1716,6 +1716,32 @@ describe("op version 44 and snapshot 34, snap off for a drag (docs/design/design
   });
 });
 
+describe("op version 45 and snapshot 35, animated maps (docs/design/design-v1-animated-maps.md 9.4)", () => {
+  const video = { assetId: "v1", widthPx: 1920, heightPx: 1080, container: "webm", video: "vp09.00.40.08", fps: 30, durationMs: 2000, kbps: 800 } as const;
+  const map = { assetId: "a1", widthPx: 1920, heightPx: 1080, cellPx: 64, originPx: { x: 0, y: 0 } };
+
+  test("keeps stored operations and snapshots unchanged through the identity steps, a map's video included", () => {
+    assert.ok(OP_VERSION >= 45);
+    assert.ok(SNAPSHOT_VERSION >= 35);
+    const op = { t: "scene.setMap", sceneId: "s1", map };
+    assert.equal(runMigrations(op, 44, 45, opMigrations), op);
+    assert.equal(migrateOp(op, 44), op);
+    const moving = { t: "scene.setMap", sceneId: "s1", map: { ...map, video } };
+    assert.equal(migrateOp(moving, 45), moving);
+    const phases = { t: "scene.update", sceneId: "s1", patch: { phases: [{ id: "p1", name: "Day", ...map, video }] } };
+    assert.equal(migrateOp(phases, 45), phases);
+    const state = room({ scenes: { s1: scene("s1", { map: { ...map, video } }) } });
+    assert.equal(runMigrations(state, 34, 35, snapshotMigrations), state);
+    assert.equal(migrateSnapshot(state, 34), state);
+  });
+
+  test("a build at 44 and 34 refuses a room from this one, so it never drops a video unseen", () => {
+    const op = { t: "scene.setMap", sceneId: "s1", map: { ...map, video } };
+    assert.throws(() => runMigrations(op, 45, 44, opMigrations), /down/);
+    assert.throws(() => runMigrations(room(), 35, 34, snapshotMigrations), /down/);
+  });
+});
+
 describe("the map discovery upgrade step (docs/design/design-v1-map-discovery.md 5.5, ASTRA-31)", () => {
   const scenes = {
     s1: scene("s1", { fogEnabled: true, vision: { on: true, light: "dark" } }),

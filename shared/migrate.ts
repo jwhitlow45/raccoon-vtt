@@ -11,8 +11,8 @@ import { ownEntry } from "./records.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 34;
-export const OP_VERSION = 44;
+export const SNAPSHOT_VERSION = 35;
+export const OP_VERSION = 45;
 
 export type MigrationStep = {
   from: number;
@@ -226,6 +226,10 @@ export const snapshotMigrations: MigrationStep[] = [
   // spot, so a v33 room is a v34 room as it is. The number moves so that an older build, whose strict state schema refuses
   // the field, refuses a v34 snapshot instead of loading it.
   { from: 33, to: 34, apply: (state) => state },
+  // Animated maps (docs/design/design-v1-animated-maps.md 9.4): a map's and a phase's `video` are optional, and absent
+  // reads as a still map, so a v34 room is a v35 room as it is. The number moves so that an older build, whose strict
+  // state schema refuses the field, refuses a v35 snapshot instead of loading it.
+  { from: 34, to: 35, apply: (state) => state },
   // No step moves a square trip wire's imported 1/64 ends onto half cells (FU43-DATA-01). A snapshot migrates before its
   // stored ops replay, so a moved end would change what a stored walk springs and what a stored restore's guard matches.
   // The rules take such a wire as it stands instead (server/rooms/squareWires.legacy.test.ts).
@@ -1115,6 +1119,22 @@ export const opMigrations: MigrationStep[] = [
     // which an older build refuses.
     from: 43,
     to: 44,
+    apply: (op) => op,
+  },
+  {
+    // Animated maps (docs/design/design-v1-animated-maps.md 9.4): a
+    // `scene.setMap`'s and a `scene.create`'s map, and each phase of a
+    // `scene.update`, may carry `video`, a new optional field, so no stored
+    // op changes shape and the step is the identity. Nothing the reducer
+    // writes on its own changes, and no stored op names a video, so replay
+    // runs no new branch.
+    // Deploy: back up the database just before, and reload open pages,
+    // table displays included: an old page drops the field from its view
+    // and draws the still. Rollback needs the backup for a room with
+    // version 45 ops after its last snapshot or a v35 snapshot, which an
+    // older build refuses.
+    from: 44,
+    to: 45,
     apply: (op) => op,
   },
 ];
