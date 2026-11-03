@@ -5,6 +5,7 @@ import {
   answerErrorText,
   askedText,
   carryOnNote,
+  carryOnPlayers,
   createJoinRequestsLoader,
   createJoinToaster,
   dmBadgeLabel,
@@ -12,6 +13,7 @@ import {
   joinToastText,
   nextAgeTickMs,
   panelsButtonLabel,
+  rosterKey,
   rowBusy,
   rowBusyText,
   typedNameMatch,
@@ -108,6 +110,29 @@ describe("ages and words", () => {
     assert.equal(rowBusy("still", deciding), "still", "this device's 202, before the list marks it pending");
     assert.equal(rowBusy("turning", waiting), "turning");
     assert.deepEqual(waitingRows([waiting, { ...row("b", "Pat"), deciding: true }]).map((r) => r.id), ["a"], "only waiting rows count, toast or are turned away");
+  });
+
+  test("the carry-on list follows the roster: a join, a rename, a removal and a DM upgrade each fetch it again, and names and kinds show at once (JB-ASTRA-05)", () => {
+    const pat = { id: "p1", name: "Pat", color: "#30a46c", kind: "player" as const };
+    const sam = { id: "p2", name: "Sam", color: "#e5484d", kind: "player" as const };
+    const dana = { id: "d1", name: "Dana", color: "#ffc53d", kind: "dm" as const };
+    const room = { p1: pat, p2: sam, d1: dana };
+    const key = rosterKey(room);
+    assert.equal(rosterKey({ ...room }), key, "the same roster is no change");
+    assert.equal(rosterKey({ d1: dana, p2: sam, p1: pat }), key, "order is no change");
+    const changes = {
+      join: { ...room, p3: { id: "p3", name: "Wren", color: "#fff", kind: "player" as const } },
+      rename: { ...room, p1: { ...pat, name: "Patricia" } },
+      removal: { p2: sam, d1: dana },
+      upgrade: { ...room, p2: { ...sam, kind: "dm" as const } },
+    };
+    for (const [what, members] of Object.entries(changes)) assert.notEqual(rosterKey(members), key, `${what} fetches the list again`);
+
+    const listed = [{ id: "p1", name: "Pat", color: "#30a46c" }, { id: "p2", name: "Sam", color: "#e5484d" }];
+    assert.deepEqual(carryOnPlayers(listed, changes.rename).map((p) => p.name), ["Patricia", "Sam"], "the name the room knows now");
+    assert.deepEqual(carryOnPlayers(listed, changes.removal).map((p) => p.id), ["p2"], "a removed player is never offered");
+    assert.deepEqual(carryOnPlayers(listed, changes.upgrade).map((p) => p.id), ["p1"], "nor one who is a DM now");
+    assert.deepEqual(carryOnPlayers(listed, undefined), listed, "before the snapshot, the server's list");
   });
 
   test("toast words name the newest and count the rest", () => {

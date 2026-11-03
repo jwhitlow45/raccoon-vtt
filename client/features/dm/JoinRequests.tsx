@@ -19,11 +19,13 @@ import {
   answerErrorText,
   askedText,
   carryOnNote,
+  carryOnPlayers,
   createJoinRequestsLoader,
   createJoinToaster,
   JOIN_MODE_ERRORS,
   JOIN_MODE_OPTIONS,
   nextAgeTickMs,
+  rosterKey,
   rowBusy,
   rowBusyText,
   typedNameMatch,
@@ -89,6 +91,8 @@ export function useJoinRequestsRoom(): number {
   const roomId = useRoomView((s) => s.roomId);
   const dm = useRoomView((s) => s.you?.role === "dm");
   const version = useRoomView((s) => s.joinRequestsVersion);
+  // Who may be carried on changes with the roster, which sends no join request signal.
+  const roster = useRoomView((s) => rosterKey(s.view?.members));
   const preview = usePreview() !== null;
   const ui = useRoomUi();
   const viewAs = useScoped(viewAsSlot);
@@ -125,7 +129,7 @@ export function useJoinRequestsRoom(): number {
 
   useEffect(() => {
     if (active) hub.refresh();
-  }, [active, version, hub]);
+  }, [active, version, roster, hub]);
 
   // Leaving View as a player lets the toasts held back show.
   useEffect(() => {
@@ -224,6 +228,7 @@ export function JoinRequestsSection() {
   const hub = useScoped(joinRequestsSlot);
   const state = useStore(hub.store);
   const online = useRoomView((s) => s.online);
+  const members = useRoomView((s) => s.view?.members);
   const requests = state.kind === "shown" ? state.list.requests : [];
   const now = useNow(requests);
   const panelFocus = useScoped(panelFocusSlot);
@@ -254,6 +259,7 @@ export function JoinRequestsSection() {
   if (state.kind !== "shown" || requests.length === 0) return null;
   const { list } = state;
   const onlineSet = new Set(online);
+  const players = carryOnPlayers(list.players, members);
   // A request being let in is no one Turn away all may turn away.
   const waiting = waitingRows(requests);
   return (
@@ -263,7 +269,7 @@ export function JoinRequestsSection() {
           <RequestRow
             key={r.id}
             request={r}
-            players={list.players}
+            players={players}
             online={onlineSet}
             now={now}
             listed={state}

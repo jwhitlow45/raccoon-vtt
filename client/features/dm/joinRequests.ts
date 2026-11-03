@@ -5,6 +5,7 @@
  * retrying fetch of the list. Kept apart from the components so they run
  * under plain Node in the tests.
  */
+import type { Member } from "#shared/model.ts";
 import type { JoinMode, JoinRequestList, JoinRequestRow, MemberSummary } from "../../lib/api.ts";
 import type { Clock } from "../../state/timing.ts";
 
@@ -62,6 +63,33 @@ export function typedNameMatch(typed: string, players: readonly CarryOnPlayer[])
   const key = foldName(typed);
   if (key === "") return null;
   return players.find((p) => foldName(p.name) === key) ?? null;
+}
+
+/**
+ * What the carry-on list hangs on: who is in the room, as whom, and as what
+ * kind. A password join, a rename, a removal or a player gaining DM rights
+ * changes it, and the list is fetched again, since only the join request
+ * signal would otherwise refresh it.
+ */
+export function rosterKey(members: Readonly<Record<string, Pick<Member, "id" | "name" | "kind">>> | undefined): string {
+  if (!members) return "";
+  return Object.values(members)
+    .map((m) => `${m.id}\u0000${m.kind}\u0000${m.name}`)
+    .sort()
+    .join("\u0001");
+}
+
+/**
+ * "Let in as" between the list's fetches: the server's players, under the
+ * names the room knows now, without any since removed or made a DM. The
+ * fetch that follows a roster change adds a player who just joined.
+ */
+export function carryOnPlayers(listed: readonly CarryOnPlayer[], members: Readonly<Record<string, Pick<Member, "id" | "name" | "color" | "kind">>> | undefined): CarryOnPlayer[] {
+  if (!members) return [...listed];
+  return listed.flatMap((p) => {
+    const now = members[p.id];
+    return now && now.kind === "player" ? [{ id: p.id, name: now.name, color: now.color }] : [];
+  });
 }
 
 /** Shown whenever "Let in as" names a player, so a DM never hands over a player's seat without reading what it holds. */
