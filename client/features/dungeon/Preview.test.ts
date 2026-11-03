@@ -33,3 +33,9 @@ test("the corner that holds Reroll puts the whole dark palette and the dark acce
   // Set under the scope: the color it would inherit is the page's, worked out before the scope.
   assert.ok(declares(corner, "color", theme.color.text), corner);
 });
+
+test("Reroll itself wears the board's two-tone ring, whose dark halo stands between its ring and the picture's stone (review LTA-1)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const dialog = readFileSync(new URL("./GenerateDialog.tsx", import.meta.url), "utf8");
+  assert.match(dialog, /<Button size="sm" \{\.\.\.ON_BOARD\} style=\{ON_BOARD_STYLE\}.*>\n\s*Reroll/);
+});

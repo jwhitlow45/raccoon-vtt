@@ -43,6 +43,8 @@ const BOUNDS = { w: 24, h: 16 };
 const PAT_COLOR = "#30a46c";
 /** The DM's color: the crest, so the light accent is the dark olive gold. */
 const DM_COLOR = "#f7df00";
+/** A blue member, whose accent resolved for dark (#64a6ff) reads 2.6:1 on the dungeon preview's stone without a halo (review LTA-1). */
+const BLUE = "#3e8ef7";
 
 /**
  * The canvas net (lt-0): every color setter of the 2D context records a
@@ -90,6 +92,9 @@ let patOps: OpSocket;
 let heldPreview: WebSocketRoute | null = null;
 const dmSocket = new SocketWatch("dm");
 const patSocket = new SocketWatch("pat");
+/** Reroll's ring over the picture fails lt-3 in dark too, since the halo that fixes it is the same in both schemes (review LTA-1). */
+const rerollRing: string[] = [];
+
 const consoles = { dm: new ConsoleWatch("dm"), dmPhone: new ConsoleWatch("dm phone"), pat: new ConsoleWatch("pat") };
 
 const run = {
@@ -556,9 +561,10 @@ describe("the light theme", { concurrency: false }, () => {
     // Light's findings fail the step, after the dark pass and the white art have run, so one run lists all of them.
     const halo = await whiteArtHalo();
     assert.ok(light);
-    for (const part of ["top bar", "toolbar", "tool options", "token window", "toast", "chosen tool", "map ring", "map after a pointer", "rings", "open rings", "dungeon dialog", "dungeon ring"]) assert.ok((light.counts.get(part) ?? 0) > 0, `the sweep measured nothing in the ${part}`);
+    for (const part of ["top bar", "toolbar", "tool options", "token window", "toast", "chosen tool", "map ring", "map after a pointer", "rings", "open rings", "dungeon dialog", "dungeon ring", "dungeon ring on stone"]) assert.ok((light.counts.get(part) ?? 0) > 0, `the sweep measured nothing in the ${part}`);
     for (const line of light.failures) t.diagnostic(`light: ${line}`);
     assert.deepEqual([...light.failures, ...halo], [], "under its contrast in the light theme");
+    assert.deepEqual(rerollRing.filter((line) => line.includes(" dark")), [], "Reroll's ring over the picture in the dark theme");
   });
 
   test("lt-4. the dark screens in a light browser: the pause screen and its X-card, the scene gate, the preview's waiting and failed screens and the tray mid-throw draw only dark colors, and their rings are the dark accent", async () => {
@@ -1164,42 +1170,98 @@ async function setModality(page: Page, mode: "pointer" | "keys"): Promise<void> 
 
 /**
  * The dungeon generator's dialog (review LTB-1): its words, and Reroll's
- * ring in the preview's corner, where it stands on the board's dark
- * ground or the dark picture in either scheme. The ring sweep leaves out
- * what lies over the picture, an image, so the ring is also measured on
- * the preview's own ground, which the picture is drawn in the look of.
+ * ring in the preview's corner, where it stands on the board's dark ground
+ * or the picture in either scheme. The ring sweep leaves out what lies over
+ * the picture, an image, so the ring is measured on the pixels the page
+ * paints beside its line (review LTA-1), with a blue member's accent, whose
+ * dark shade reads 2.6:1 on the generated stone, and a dungeon rerolled
+ * until stone lies under the ring.
  */
 async function dungeonDialog(page: Page, at: string, kind: "computer" | "phone", scheme: "dark" | "light", found: { failures: string[]; counts: Map<string, number> }): Promise<void> {
-  const panel = await openPanel(page, "Scenes");
-  const form = panel.getByRole("heading", { name: "New scene", exact: true }).locator("xpath=ancestor::*[self::section or @data-panel-group][1]");
-  await form.getByRole("radio", { name: "Builder", exact: true }).click();
-  await form.getByRole("button", { name: "Generate a dungeon", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Generate a dungeon" });
-  await dialog.getByRole("img", { name: /^Preview of the dungeon/ }).waitFor({ timeout: 30_000 });
-  await dialog.locator("footer [aria-live=polite]").waitFor({ timeout: 30_000 });
-  const reroll = dialog.getByRole("button", { name: "Reroll", exact: true });
-  await waitFor("Reroll on", async () => ((await reroll.isEnabled()) ? true : null));
-  keep(await sweepContrast(dialog, `${at} dungeon dialog`), found, "dungeon dialog");
-  await page.keyboard.press("Shift");
-  await setModality(page, "keys");
-  await reroll.focus();
-  keep(await sweepRing(page, `${at} the dungeon preview's Reroll`), found, "dungeon ring");
-  const ring = await reroll.evaluate((el) => {
-    type E = { parentElement: E | null };
-    const g = globalThis as unknown as { getComputedStyle(e: unknown): { outlineStyle: string; outlineColor: string; backgroundColor: string } };
-    const own = g.getComputedStyle(el);
-    // The preview's box: the first ground under the button's corner slot.
-    let box = (el as E).parentElement;
-    while (box && g.getComputedStyle(box).backgroundColor === "rgba(0, 0, 0, 0)") box = box.parentElement;
-    return { style: own.outlineStyle, color: own.outlineColor, ground: box ? g.getComputedStyle(box).backgroundColor : "none" };
-  });
-  const least = ring.style === "none" ? 0 : ratio(parseColor(ring.color), parseColor(ring.ground));
-  if (least < 3) found.failures.push(`${at}: the dungeon preview's Reroll ring ${ring.color} reads ${least.toFixed(2)}:1 on the preview's ground ${ring.ground}, under 3:1`);
-  found.counts.set("dungeon ring", (found.counts.get("dungeon ring") ?? 0) + 1);
-  await shots.take(page, `lt-3-${kind}-${scheme}-dungeon-reroll-ring`);
-  await page.keyboard.press("Escape");
-  await dialog.waitFor({ state: "detached" });
-  await closeSheets(page);
+  const dmId = dmSocket.you!.memberId;
+  await ops.send({ t: "member.update", memberId: dmId, color: BLUE });
+  try {
+    const panel = await openPanel(page, "Scenes");
+    const form = panel.getByRole("heading", { name: "New scene", exact: true }).locator("xpath=ancestor::*[self::section or @data-panel-group][1]");
+    await form.getByRole("radio", { name: "Builder", exact: true }).click();
+    await form.getByRole("button", { name: "Generate a dungeon", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Generate a dungeon" });
+    const picture = dialog.getByRole("img", { name: /^Preview of the dungeon/ });
+    await picture.waitFor({ timeout: 30_000 });
+    await dialog.locator("footer [aria-live=polite]").waitFor({ timeout: 30_000 });
+    const reroll = dialog.getByRole("button", { name: "Reroll", exact: true });
+    await waitFor("Reroll on", async () => ((await reroll.isEnabled()) ? true : null));
+    keep(await sweepContrast(dialog, `${at} dungeon dialog`), found, "dungeon dialog");
+    const accent = accentFor(BLUE, "dark").accent;
+    const tooLow = (p: [number, number, number]) => ratio(parseColor(accent), parseColor(`rgb(${p.join(", ")})`)) < 3;
+
+    // A dungeon with stone under the ring's line, where the accent alone would read under 3:1.
+    let points: { x: number; y: number }[] = [];
+    for (let tries = 0; tries < 30; tries++) {
+      await page.evaluate(() => (globalThis as unknown as { document: { activeElement: { blur?(): void } | null } }).document.activeElement?.blur?.());
+      points = await ringPoints(reroll);
+      const bare = await pagePixels(page, points);
+      if (bare.some(tooLow)) break;
+      points = [];
+      const before = await picture.getAttribute("src");
+      await reroll.click();
+      await waitFor("the next picture", async () => ((await picture.getAttribute("src")) !== before && (await reroll.isEnabled()) ? true : null), 30_000);
+    }
+    assert.ok(points.length > 0, `${at}: no dungeon put stone under Reroll's ring in 30 rerolls`);
+
+    await page.keyboard.press("Shift");
+    await setModality(page, "keys");
+    await reroll.focus();
+    keep(await sweepRing(page, `${at} the dungeon preview's Reroll`), found, "dungeon ring");
+    const ring = await reroll.evaluate((el) => (globalThis as unknown as { getComputedStyle(e: unknown): { outlineColor: string; outlineStyle: string } }).getComputedStyle(el));
+    if (ring.outlineStyle === "none") found.failures.push(`${at}: the dungeon preview's Reroll shows no ring under keys`);
+    let least = Number.POSITIVE_INFINITY;
+    let worst = "";
+    for (const p of await pagePixels(page, points)) {
+      const r = ratio(parseColor(ring.outlineColor), parseColor(`rgb(${p.join(", ")})`));
+      if (r < least) [least, worst] = [r, `rgb(${p.join(", ")})`];
+    }
+    if (least < 3) {
+      const line = `${at}: the dungeon preview's Reroll ring ${ring.outlineColor} reads ${least.toFixed(2)}:1 beside its line on the picture (${worst}), under 3:1`;
+      found.failures.push(line);
+      rerollRing.push(line);
+    }
+    found.counts.set("dungeon ring on stone", (found.counts.get("dungeon ring on stone") ?? 0) + points.length);
+    await shots.take(page, `lt-3-${kind}-${scheme}-dungeon-reroll-ring`);
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "detached" });
+    await closeSheets(page);
+  } finally {
+    await ops.send({ t: "member.update", memberId: dmId, color: DM_COLOR });
+  }
+}
+
+/**
+ * The points beside a control's ring line, where the ground its ring must
+ * read on lies: 1 px out from its edge, inside the ring's 2 px offset, and
+ * 5 px out, past the 2 px line (globals.css), along the middle half of each
+ * side, clear of the rounded corners.
+ */
+async function ringPoints(control: Locator): Promise<{ x: number; y: number }[]> {
+  const b = (await control.boundingBox())!;
+  const points: { x: number; y: number }[] = [];
+  for (const d of [1, 5]) {
+    for (let t = 0.25; t <= 0.75; t += 0.05) {
+      points.push({ x: b.x + b.width * t, y: b.y - d }, { x: b.x + b.width * t, y: b.y + b.height + d - 1 });
+      points.push({ x: b.x - d, y: b.y + b.height * t }, { x: b.x + b.width + d - 1, y: b.y + b.height * t });
+    }
+  }
+  return points.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) }));
+}
+
+/** What the page paints at each point, read from one screenshot at the device's pixel ratio. */
+async function pagePixels(page: Page, points: { x: number; y: number }[]): Promise<[number, number, number][]> {
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+  const clip = { x: Math.min(...xs), y: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs) + 1, height: Math.max(...ys) - Math.min(...ys) + 1 };
+  const shot = await pixels(page, clip);
+  const scale = shot.width / clip.width;
+  return points.map((p) => shot.at((p.x - clip.x) * scale + scale / 2 - 0.5, (p.y - clip.y) * scale + scale / 2 - 0.5));
 }
 
 /**

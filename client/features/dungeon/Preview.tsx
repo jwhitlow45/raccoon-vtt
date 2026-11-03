@@ -132,7 +132,11 @@ export function DungeonPreview(props: {
  * dark ground or the dark picture in either scheme, so what it holds takes
  * the dark look and the accent resolved for dark, its ring included (review
  * LTB-1: the light accent's ring read 2.5:1 there). Its text color is set
- * under the scope, as the inherited one is the page's.
+ * under the scope, as the inherited one is the page's. The picture's stone
+ * can lie under the ring too, where even the dark accent can read under
+ * 3:1 (review LTA-1: a blue member's 2.6:1), so the control there spreads
+ * `ON_BOARD` for the dark halo under its ring, as GenerateDialog's Reroll
+ * does.
  */
 export const CORNER_SLOT = { ...BOARD_SCOPE, position: "absolute", right: theme.space(2), bottom: theme.space(2), color: theme.color.text } as CSSProperties;
 

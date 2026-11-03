@@ -10,7 +10,7 @@ import { Segmented } from "../../components/Segmented.tsx";
 import { Switch } from "../../components/Switch.tsx";
 import { fitSlot, grownWithin } from "../../canvas/fitSlot.ts";
 import { uiScale } from "../device/settings.ts";
-import { theme } from "../../lib/theme.ts";
+import { ON_BOARD, ON_BOARD_STYLE, theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { BAND_NAMES } from "../traps/rules.ts";
@@ -215,7 +215,7 @@ export function GenerateDialog(props: {
     <span aria-live="polite">{statusLine(current.summary)}</span>
   ) : null;
 
-  // Reroll stands in the preview's corner, so the preview and the choices each keep one left edge.
+  // Reroll stands in the preview's corner, so the preview and the choices each keep one left edge. Its ring can fall on the picture's stone, so it is the board's two-tone ring (Preview.tsx CORNER_SLOT).
   const previewBox = (
     <DungeonPreview
       drawn={flow.shown?.drawn ?? null}
@@ -225,7 +225,7 @@ export function GenerateDialog(props: {
       onPictured={(drawn) => step({ k: "pictured", drawn })}
       onPictureFailed={(drawn) => step({ k: "pictureFailed", drawn })}
     >
-      <Button size="sm" disabled={locked} onClick={() => setSeedText(formatSeed(newSeed()))}>
+      <Button size="sm" {...ON_BOARD} style={ON_BOARD_STYLE} disabled={locked} onClick={() => setSeedText(formatSeed(newSeed()))}>
         Reroll
       </Button>
     </DungeonPreview>
