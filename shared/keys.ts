@@ -631,13 +631,18 @@ export function writeEntity(state: RoomState, key: EntityKey, value: unknown): R
       return { ...state, playedScenes: withEntry(state.playedScenes ?? {}, parsed.id, value as SceneMark | null) };
     case "memoryShared":
       return { ...state, memoryShared: withEntry(state.memoryShared ?? {}, parsed.id, value as SceneMark | null) };
-    // A room from before sound has neither collection, which reads as empty (docs/design/design-v1-sound.md 6.7).
+    // A room from before sound has neither collection, which reads as empty (docs/design/design-v1-sound.md 6.7). A
+    // projection holds each field only while it holds something (project.ts soundFields), so a change that empties one
+    // takes it away, and a device's copy built from changes matches a fresh snapshot.
     case "sound":
-      return { ...state, sounds: withEntry(state.sounds ?? {}, parsed.id, value as Sound | null) };
+      return withField(state, "sounds", withEntry(state.sounds ?? {}, parsed.id, value as Sound | null));
     case "playlist":
-      return { ...state, playlists: withEntry(state.playlists ?? {}, parsed.id, value as Playlist | null) };
-    case "playing":
-      return { ...state, playing: (value as Playing | null) ?? null };
+      return withField(state, "playlists", withEntry(state.playlists ?? {}, parsed.id, value as Playlist | null));
+    case "playing": {
+      if (value !== null) return { ...state, playing: value as Playing };
+      const { playing: _playing, ...rest } = state;
+      return rest;
+    }
     case "log":
       return { ...state, log: withLine(state.log, parsed.id, value as LogEntry | null) };
     case "encounter":
@@ -654,6 +659,14 @@ export function writeEntity(state: RoomState, key: EntityKey, value: unknown): R
       if (value === null) throw new Error("the room meta cannot be removed");
       return { ...state, meta: value as RoomMeta };
   }
+}
+
+/** A state with the library or the playlists replaced, and without the field once it is empty. */
+function withField(state: RoomState, field: "sounds" | "playlists", map: Record<string, unknown>): RoomState {
+  const out = { ...state } as Record<string, unknown>;
+  if (Object.keys(map).length === 0) delete out[field];
+  else out[field] = map;
+  return out as RoomState;
 }
 
 /** A projection with one of per-player vision's maps (ViewMaps, `holders`) replaced, and without it once it is empty. */
