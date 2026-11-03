@@ -22,10 +22,12 @@ import { hpLine, lifeWord, partyEntries, type PartyEntry } from "./party.ts";
 const LABEL_COLOR: Record<PartyEntry["label"], string> = {
   Healthy: theme.color.success,
   Bloodied: theme.color.warning,
-  // The meter's fill, never words: `danger` is too weak as small text on a light page, and the word takes `dangerText` (Entry).
   Dying: theme.color.danger,
   Dead: theme.color.textMuted,
 };
+
+// `danger` is for outlines, stripes and fills. As small words it is too weak on a light page, so the folded pill's words take `dangerText`.
+const LABEL_TEXT: Record<PartyEntry["label"], string> = { ...LABEL_COLOR, Dying: theme.color.dangerText };
 
 const FOLD_KEY = "rvtt.partyFolded";
 
@@ -180,7 +182,7 @@ export function FoldedParty(props: { entries: readonly PartyEntry[]; onFrame(ent
             style={{ ...pill, cursor: e.tokenId ? "pointer" : "default" }}
           >
             <strong style={{ maxWidth: CHIP_NAME_MAX, overflow: "hidden", textOverflow: "ellipsis", color: e.tokenId ? theme.color.text : theme.color.textDisabled }}>{e.character.name}</strong>
-            <span data-disabled-look="readonly" style={{ color: LABEL_COLOR[e.label], fontVariantNumeric: "tabular-nums" }}>{lifeWord(e.life) ?? hpLine(e.hp)}</span>
+            <span data-disabled-look="readonly" style={{ color: LABEL_TEXT[e.label], fontVariantNumeric: "tabular-nums" }}>{lifeWord(e.life) ?? hpLine(e.hp)}</span>
             <Pill look={{ background: theme.color.surfaceRaised, border: `${theme.line.border}px solid ${theme.color.border}` }} />
           </button>
         </div>

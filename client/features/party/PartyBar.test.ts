@@ -120,6 +120,17 @@ describe("a party member's row", () => {
     return renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, children: createElement(RoomScopeProvider, { scope: new RoomScope(), children: row }) }));
   };
 
+  test("the folded pill's Dying word takes dangerText", () => {
+    const state = room({
+      characters: { ayla: character("ayla", { name: "Ayla", ownerIds: ["p1"], actor: actor({ life: "dying", hp: { cur: 0, max: 24, temp: 0 } }) }) },
+      tokens: { a1: token("a1", { kind: "pc", sceneId: "s1", actor: { ref: "ayla" } }) },
+    });
+    const entries = partyEntries(state, "s1");
+    assert.equal(entries[0]?.label, "Dying");
+    const markup = renderToStaticMarkup(createElement(FoldedParty, { entries, onFrame: () => {} }));
+    assert.match(markup, new RegExp(`color:${tokenPattern(theme.color.dangerText)}[^>]*>Dying</span>`));
+  });
+
   test("a row for a character off the scene is disabled and draws its words in the disabled color", () => {
     const state = room({ characters: { bram: character("bram", { name: "Bram", ownerIds: ["p1"], actor: actor({ passivePerception: 11 }) }) }, tokens: {} });
     const [entry] = partyEntries(state, "s1");
