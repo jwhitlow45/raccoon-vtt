@@ -570,6 +570,70 @@ describe("raccoon-vtt snap off", { timeout: 600_000 }, () => {
     await shots.take(dm, "so-guide-between-squares");
   });
 
+  /*
+   * Lane snapfix2's step (snapfix2-): a Large ogre placed 2/8 right of its
+   * spot, dragged into a corridor one square wide, squeezes in at (9.5, 5.5),
+   * where it holds the square (10, 6) alone. Parked mid-drag, ordinary and
+   * with Alt, its outline stands on that square, never on the 2 x 2 box
+   * under the pointer (SNAPBUILD-ASTRA-04). Each goes back and drops on its
+   * own box, which keeps the placement.
+   */
+  test("snapfix2-1. a placed ogre dragged into a corridor one square wide shows its outline on the one square it squeezes into, ordinary or with Alt (SNAPBUILD-ASTRA-04)", async () => {
+    await closeBars(dm);
+    const ogre = randomUUID();
+    // The rock runs from x 6 to 14 but for a corridor along row 6, so the tokens there move out of it first.
+    await ops.send({ t: "token.move", tokenId: run.bree, x: 0, y: 0 });
+    await ops.send({ t: "token.move", tokenId: run.sam, x: 0, y: 10 });
+    await ops.send({ t: "token.move", tokenId: run.imp, x: 15, y: 0 });
+    const walls = (
+      [
+        [6, 0, 6, 6],
+        [6, 7, 6, 12],
+        [14, 0, 14, 6],
+        [14, 7, 14, 12],
+        [6, 6, 14, 6],
+        [6, 7, 14, 7],
+      ] as const
+    ).map(([ax, ay, bx, by], i) => ({ id: `sfix2w${String(i).padStart(6, "0")}`, a: [ax, ay] as [number, number], b: [bx, by] as [number, number], f: { kind: "wall" as const } }));
+    await ops.send({ t: "build.walls", sceneId: run.sceneId, put: walls });
+    await ops.send(tokenOp(ogre, { kind: "monster", name: "Ogre", size: "large", x: 2, y: 5, disposition: "hostile" }));
+    await ops.send({ t: "token.update", tokenId: ogre, patch: { drawnAt: { x: 2.25, y: 5 } } });
+    await waitFor("the ogre placed 2/8 right", () => (token(dmSocket, ogre)?.nudge?.x === 2 ? true : null));
+    await waitFor("the corridor's walls in the DM's copy", () => (Object.values((dmSocket.state as RoomState | null)?.buildChunks ?? {}).reduce((n, c) => n + (c?.sceneId === run.sceneId ? (c.walls?.length ?? 0) : 0), 0) === walls.length ? true : null));
+    await waitFor("the ogre drawn placed", async () => ((await nodeOf(dm, ogre))?.at.x === 2.25 ? true : null));
+    // Pressed on its drawn middle. The ordinary drag's node sits 0.25 right of the box it aims at, the free drag's on it.
+    const a = await pagePoint(dm, BOUNDS, { x: 3.25, y: 6 });
+    const misplaced: unknown[] = [];
+    for (const [alt, to, what] of [
+      [false, { x: 10.65, y: 6.4 }, "ordinary"],
+      [true, { x: 10.4, y: 6.4 }, "alt"],
+    ] as const) {
+      const b = await pagePoint(dm, BOUNDS, to);
+      if (alt) await dm.keyboard.down("Alt");
+      try {
+        await dm.mouse.move(a.x, a.y);
+        await dm.mouse.down();
+        await dm.mouse.move(b.x, b.y, { steps: 16 });
+        try {
+          await waitFor(`the ${what} drag's node in the corridor`, async () => (((await nodeOf(dm, ogre))?.at.x ?? 0) > 9 ? true : null));
+          // The landing is planned on the drag's frames, so the outline is read once they settle.
+          await dm.waitForTimeout(400);
+          await shots.take(dm, `snapfix2-ogre-outline-squeezed-${what}-drag`);
+          const during = await waitFor(`the outline while the ${what} drag is parked`, () => outlineOf(dm, ogre));
+          await assertOutlineOn(dm, during, { x: 10, y: 6 }, 1, `mid ${what} drag into the squeeze`).catch((err: unknown) => misplaced.push(err));
+        } finally {
+          await dm.mouse.move(a.x, a.y, { steps: 16 });
+          await dm.mouse.up();
+        }
+      } finally {
+        if (alt) await dm.keyboard.up("Alt");
+      }
+      await waitFor("the ogre back on its box", () => (token(dmSocket, ogre)?.x === 2 && token(dmSocket, ogre)?.squeeze === undefined ? true : null));
+      await closeBars(dm);
+    }
+    if (misplaced.length > 0) throw misplaced[0];
+  });
+
   test("so-13. no page logged an error", () => {
     for (const c of Object.values(consoles)) assert.deepEqual(c.errors, [], `${c.label}'s page`);
   });
