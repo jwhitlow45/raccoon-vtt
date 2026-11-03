@@ -49,6 +49,7 @@ Tiers:
 **Later**
 
 - Join requests that the DM approves.
+  - Built after v0.3.0 (docs/design/design-v1-join-requests.md). Members, Joining sets how new players get in: With the password (every room starts here), With the password, or by asking, or Only by asking. A newcomer without the password asks with a name and a color and waits, and any DM device lets them in, as someone new or as a player who joined before, or turns them away. A request ends after 10 minutes, a turned-away device waits 15 minutes before asking again, and per-address limits keep a public room ID from becoming a spam channel. In Only by asking a kicked player stays out.
 
 ## 2. Devices, sync and connection
 

@@ -174,6 +174,9 @@ header against it exactly. Whatever serves the site must:
   WebSocket upgrades passed through.
 - Keep the `Origin` header as the browser sent it. Most proxies do by
   default.
+- Allow a response at least 30 seconds to arrive. A newcomer waiting for a
+  DM to let them in holds a request open for up to 25 seconds. Cloudflare
+  allows 125 seconds, and nginx 60 by default.
 
 Run the proxy or tunnel as a container that joins `raccoon-edge`. A proxy
 installed on the host itself cannot reach the app: it publishes no port,
@@ -701,6 +704,24 @@ server's answer moves the tokens where they go. Going back is the same as for
 op version 36 above: stop the server cleanly first so every room saves a
 snapshot, then rebuild the commit you ran before, or restore the backup taken
 just before the update if the server stopped without saving.
+
+The update that adds join requests (docs/design/design-v1-join-requests.md)
+changes no op or snapshot version. It adds two columns to `rooms`
+(`join_mode` and `player_pw_hash_held`) and the `ask_sessions` table, which
+the app creates on its own at start, and which older builds leave alone. A
+newcomer's page holds its wait open for up to 25 seconds, so a reverse proxy's
+response (read) timeout must be longer than that. Cloudflare allows 125
+seconds, and nginx 60 by default. Going back needs no restore. An older build
+checks player passwords against the room's usual column, which in a room set
+to Only by asking holds a marker that no password matches, so in such a room
+nobody new joins by password, and nobody can ask either. Devices already in
+stay in. The DM can open password joins again on the older build by changing
+the player password there. Coming forward again closes them at start and keeps
+that new password for when the room leaves Only by asking. A newcomer's ask
+cookie is an unknown cookie to an older build, so it gains nothing there.
+This build writes a new player's member before signing the device in, so a
+server stopped between the two leaves a member nobody plays, which the DM can
+remove.
 
 Compose rebuilds the image and replaces only the containers that changed. On
 the way down the app closes every WebSocket with code 1012, finishes each

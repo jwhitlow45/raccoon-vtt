@@ -43,6 +43,7 @@ The app does a lot, and you don't need most of it on day one. Read the [Quick st
 - Deeper tools
   - [Outliner](#outliner)
   - [DM panel](#dm-panel)
+  - [Letting players in by request](#letting-players-in-by-request)
   - [Characters and their stat blocks](#characters-and-their-stat-blocks)
   - [Companions](#companions)
   - [Ping, Look here and pins](#ping-look-here-and-pins)
@@ -1463,6 +1464,7 @@ The **DM** panel holds the tools that act on your players' screens.
   - **Bring everyone here**: moves every player's map to what you see right now, once.
   - **Black out players' screens**: players see only black and "The DM has paused the game." Use it for a break, or to set up a reveal out of sight. While it is on, your top bar reads "Players see black".
 - **Check their view**: **View as a player** and **Party sight**, described just below.
+- **Join requests**: shows at the top of the panel only while someone is asking to join. See [Letting players in by request](#letting-players-in-by-request).
 - **Player link**: **Show the player link** shows the link and its QR code, for players at the table to scan.
 - **Table display**: see [The table display](#the-table-display).
 
@@ -1481,6 +1483,47 @@ The other way is the DM panel's **Check their view**, for a player who has no to
 While you look, a line at the top reads "Viewing as Ana. Nothing here is saved. Whispers between players are not shown." Until their view arrives, it says it is loading. If it can't load, it says so, and **Try again** asks for their view once more. The whispers players send each other stay private, so you can look in without reading the notes they passed. **Exit**, or Escape, brings you back to the button you pressed.
 
 **Party sight**, under View as a player in the DM panel, does something different. On a scene with party vision it shades what the party can't see on your own map, so you keep working with everything in view and still know at a glance what lies in the dark for them.
+
+## Letting players in by request
+
+Most tables never need this: you share the player link, and everyone who has it walks straight in. But sometimes a friend turns up without the link, a player is on a new phone and can't find the password, or you'd simply rather decide for yourself who joins. For those moments a room can let people ask to join, and you let them in with a tap.
+
+### Choosing how new players join
+
+Open the **Menu**, choose **Members**, and look for **Joining** near the top. It has three choices:
+
+- **With the password** is how every room starts. The password and the player link let new devices in, and nobody can ask.
+- **With the password, or by asking** keeps the password and the link working, and adds a way in for anyone who doesn't have them. On the join page, under the usual password card, a card titled **No password?** offers **Ask to join**.
+- **Only by asking** makes every new device ask. The password and the player link stop letting anyone new in, and the player link now opens the join page, where the newcomer asks. Devices that are already in stay in, and a player you kick stays out, which makes this the mode to pick when you want a kick to stick without changing the password.
+
+The choice takes effect at once on every DM device. Switching back to With the password ends any request that is still waiting, and the newcomer's page tells them that requests are off and shows the password card instead.
+
+### What the newcomer sees
+
+A newcomer who asks types a name, picks a color and presses **Ask to join**. Their page then says **Waiting for the DM** and stays there until you answer. They can lock the phone, reload the page or open the link in another tab, and the request keeps its place for 10 minutes. If nobody answers in that time, the page says so and offers to ask again. Until you let them in, they learn nothing about the room: not who is playing, which colors are taken, or even whether you are online.
+
+![The ask card on a phone: the room's name and ID at the top, then Ask to join with its help line, Your name filled in with Quinn, the ten colors with purple picked, and the Ask to join and Back buttons.](dm-guide/ask-to-join.webp)
+
+### Answering a request
+
+When someone asks, every DM device shows a toast such as "Quinn asks to join." with a **Review** button, and the DM tab (on a phone, the Panels button) shows a count. Review opens the DM panel, where a **Join requests** section sits at the top for as long as anyone is waiting. If you weren't in the room when they asked, a toast tells you who is waiting as soon as you open it.
+
+![The Join requests section at the top of the DM panel on a computer: Quinn with a purple dot and "Asked just now", Let in as set to Someone new, and the Let in and Turn away buttons.](dm-guide/join-requests.webp)
+
+Each request shows the name and color the newcomer chose and how long ago they asked. Under it are your choices:
+
+- **Let in** adds them to the room. By default they come in as **Someone new**, a new player with the name and color they typed, and everyone's Log reads "Quinn joins the room." just as it does for any other join.
+- **Let in as** is there for a player you already know who is on a new phone. Pick their name instead of Someone new, and the device carries on as that player. Because this hands over that player's characters, tokens and whispers, the panel spells it out ("This device will be Pat: Pat's characters, tokens and whispers. Only pick Pat if you know it is them.") and says whether Pat is online right now. If the newcomer typed a name that matches a player's, the panel mentions it, but it never picks the player for you, because anyone can type any name. Players who were ever DMs aren't offered.
+- **Turn away** says no. The newcomer's page tells them, and that device can't ask your room again for 15 minutes.
+- **Turn away all** appears when two or more are waiting. It turns away only the requests you can see when you press it, so someone who asks a moment later is never turned away unseen. There is no Let in all on purpose: one careless tap should never let a crowd in.
+
+If a co-DM answers first, the request simply leaves your list. You can also ignore a request entirely: it ends by itself after 10 minutes, and the newcomer can't tell whether anyone saw it.
+
+### Limits, and when asking stops working
+
+Asking has limits so that a stranger who knows your room's ID can't flood you with requests. At most 8 requests wait at once from one address and 50 in a room, and one address can ask 30 times an hour in your room (asks you let in don't count). After 20 asks in an hour, every newcomer has to pass a quick human check, if the server owner turned it on, and your devices stop toasting each request and tell you so once.
+
+If asking ever stops working for your table, switch Joining to **With the password, or by asking** and share the player link. A room you bring in from a backup file starts With the password, as a new room does, because the file doesn't carry the Joining setting.
 
 ## Characters and their stat blocks
 

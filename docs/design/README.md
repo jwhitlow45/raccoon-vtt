@@ -24,6 +24,8 @@ and for how to use it, the [DM guide](../dm-guide.md).
   notes and safety tools, image sources, device settings and stat blocks.
 - [design-v1-log-history.md](design-v1-log-history.md): keeping the room's
   log history, and reading back older lines.
+- [design-v1-join-requests.md](design-v1-join-requests.md): join requests
+  the DM approves, and the three ways new players can join a room.
 
 ## Maps and the board
 
