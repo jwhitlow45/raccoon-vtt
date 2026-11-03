@@ -107,6 +107,54 @@ function pdfjsDecoders(): Plugin {
   };
 }
 
+const LAMEJS = new URL("./node_modules/@breezystack/lamejs/", import.meta.url);
+const SOUND_LICENSES = new URL("./client/features/sound/upload/licenses/", import.meta.url);
+
+/**
+ * The MP3 encoder's license (docs/design/design-v1-sound.md 7.4).
+ * `@breezystack/lamejs` is LGPL-3.0, and its package's LICENSE is only a
+ * short note, so the full LGPL-3.0 and the GPL-3.0 it builds on are
+ * committed beside the upload's code and written beside the encoder's
+ * chunk, with a banner on the chunk naming the package, its version, its
+ * license and its source. The library must stay a chunk of its own, so
+ * whoever gets the app can swap in a changed library, which the AGPL
+ * source and docs/development.md let them rebuild with. A build that
+ * merged it with other code fails here rather than ship that way.
+ *
+ * The encoder loads inside the encode worker, which Vite bundles apart
+ * from the page, so this plugin goes in `worker.plugins`.
+ */
+export function lameLicense(): Plugin {
+  const pkg = JSON.parse(readFileSync(new URL("package.json", LAMEJS), "utf8")) as { name: string; version: string; license: string };
+  const files: Record<string, URL> = {
+    [`lamejs-${pkg.version}-LGPL-3.0.txt`]: new URL("LGPL-3.0.txt", SOUND_LICENSES),
+    [`lamejs-${pkg.version}-GPL-3.0.txt`]: new URL("GPL-3.0.txt", SOUND_LICENSES),
+    [`lamejs-${pkg.version}-LICENSE.txt`]: new URL("LICENSE", LAMEJS),
+  };
+  const banner = `/*! @license ${pkg.name} ${pkg.version}, ${pkg.license}. Source: https://github.com/shijinyu/lamejs and https://www.npmjs.com/package/${pkg.name}/v/${pkg.version}. License texts beside this file: ${Object.keys(files).join(", ")}. */\n`;
+  const isLame = (id: string) => id.includes("/@breezystack/lamejs/") || id.includes("/@breezystack+lamejs@");
+  return {
+    name: "raccoon:lame-license",
+    apply: "build",
+    generateBundle(_options, bundle) {
+      for (const file of Object.values(bundle)) {
+        if (file.type !== "chunk" || !file.moduleIds.some(isLame)) continue;
+        if (!file.moduleIds.every(isLame)) this.error(`${pkg.name} must stay a chunk of its own, but ${file.fileName} holds other modules too`);
+        file.code = banner + file.code;
+        // The banner is one line, so the map's lines all move down by one.
+        const map = bundle[`${file.fileName}.map`];
+        if (map?.type === "asset" && typeof map.source === "string") {
+          const parsed = JSON.parse(map.source) as { mappings: string };
+          parsed.mappings = `;${parsed.mappings}`;
+          map.source = JSON.stringify(parsed);
+        }
+        const folder = file.fileName.slice(0, file.fileName.lastIndexOf("/") + 1);
+        for (const [name, source] of Object.entries(files)) this.emitFile({ type: "asset", fileName: `${folder}${name}`, source: readFileSync(source) });
+      }
+    },
+  };
+}
+
 /**
  * The SPA lives in client/, but public/ and the build output sit at the repo
  * root, where the server and the Dockerfile expect them. Vite resolves both
@@ -133,9 +181,17 @@ export default defineConfig({
   /*
    * Workers as ES modules, so a worker can load code by `import()`: the PDF
    * reader's worker loads its decoders and pdf.js only once it runs
-   * (client/features/handouts/pdf/worker.ts).
+   * (client/features/handouts/pdf/worker.ts), and the sound encode worker
+   * its MP3 encoder, a chunk of its own with its license (`lameLicense`).
    */
-  worker: { format: "es" },
+  worker: { format: "es", plugins: () => [lameLicense()] },
+  /*
+   * The encoder loads only inside the encode worker, by `import()`, where
+   * the dev server first meets it mid-session, bundles it then and reloads
+   * the page, which loses a DM's file in the middle of converting it. So it
+   * is bundled when the dev server starts.
+   */
+  optimizeDeps: { include: ["@breezystack/lamejs"] },
   resolve: {
     /*
      * react-konva's main entry imports all of Konva, Transformer and filters
