@@ -70,7 +70,7 @@ describe("a floating toolbar button", () => {
 });
 
 describe("the map's focus target", () => {
-  test("keeps its ring after a pointer and takes the two-tone ring in its inset form", () => {
+  test("keeps its ring under keys (data-rvtt-ring) and takes the two-tone ring in its inset form", () => {
     assert.equal(MAP_FOCUS_ATTRS["data-rvtt-ring"], "");
     assert.equal(MAP_FOCUS_ATTRS["data-rvtt-on-board"], "");
     assert.equal(MAP_FOCUS_STYLE.outlineOffset, -2, "inside the map's edge");

@@ -36,9 +36,11 @@ export function toolOnBoard(floating: boolean): { attrs: Record<string, string>;
 
 /**
  * The map's focus target (pages/mapFocus.ts): over the whole map, drawing
- * nothing but its ring, inside the map's edge. It keeps its ring after a
- * pointer too (data-rvtt-ring, globals.css), and the ring is the two-tone
- * one in its inset form, since the map's own art lies under it.
+ * nothing but its ring, inside the map's edge. Under keys it keeps its
+ * ring where other places focus lands draw none (data-rvtt-ring,
+ * globals.css), and after a pointer it draws neither ring nor halo
+ * (D-261102-538). The ring is the two-tone one in its inset form, since
+ * the map's own art lies under it.
  */
 export const MAP_FOCUS_ATTRS = { ...ON_BOARD, "data-rvtt-ring": "" } as const;
 export const MAP_FOCUS_STYLE = { position: "absolute", inset: 0, pointerEvents: "none", outlineOffset: -2, ...ON_BOARD_STYLE } as CSSProperties;

@@ -69,12 +69,15 @@ describe("a ring on the board (ON_BOARD) is two-tone", () => {
     assert.ok(rule("[data-rvtt-on-board][data-rvtt-ring]:focus-visible").includes(`box-shadow: inset ${halo};`));
   });
 
-  test("after a pointer the halo goes where the ring goes, and the map's focus target keeps both", () => {
-    const off = rule('[data-rvtt-input="pointer"] [data-rvtt-on-board]:not([data-rvtt-ring]):focus-visible,\n[data-rvtt-input="pointer"] [data-pill-focus][data-rvtt-on-board]:focus-visible > [data-pill],\n[data-rvtt-input="pointer"] .rvtt-choice[data-rvtt-on-board]:has(> input:focus-visible)');
+  test("after a pointer the halo goes where the ring goes, the map's focus target's included (D-261102-538)", () => {
+    const off = rule('[data-rvtt-input="pointer"] [data-rvtt-on-board]:focus-visible,\n[data-rvtt-input="pointer"] [data-pill-focus][data-rvtt-on-board]:focus-visible > [data-pill],\n[data-rvtt-input="pointer"] .rvtt-choice[data-rvtt-on-board]:has(> input:focus-visible)');
     assert.match(off, /box-shadow: none !important;/);
+    // Later than the inset halo's rule and as specific, so it wins on the map's focus target.
+    assert.ok(css.indexOf('\n[data-rvtt-input="pointer"] [data-rvtt-on-board]:focus-visible,') > css.indexOf("\n[data-rvtt-on-board][data-rvtt-ring]:focus-visible {"));
     const outlineOff = /\n\[data-rvtt-input="pointer"\] :focus-visible:not\(([^{]*)\) \{\s*outline: none;/.exec(css);
     assert.ok(outlineOff, "the pointer rule");
-    assert.ok(outlineOff[1]!.endsWith(", [data-rvtt-on-board][data-rvtt-ring]"), outlineOff[1]);
+    assert.doesNotMatch(outlineOff[1]!, /data-rvtt-ring|data-rvtt-on-board/, "no ring kept after a pointer");
+    assert.doesNotMatch(css, /:not\(\[data-rvtt-ring\]\)/, "no halo kept after a pointer");
   });
 });
 
