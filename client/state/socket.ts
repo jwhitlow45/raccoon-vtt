@@ -246,6 +246,36 @@ function keepsAlive(e: EphEvent): boolean {
   return e.k === "dragStart" || e.k === "dragMove" || e.k === "ruler" || e.k === "aoe";
 }
 
+/**
+ * The room sound's time frames (docs/design/design-v1-music.md 5.1): the
+ * engine sends `{ t: "time", k }` and the server answers `{ t: "time", k,
+ * at }` with its own `Date.now()`, as it answers a ping. Not the pong:
+ * older pages' strict schema would drop a pong with a time and reconnect.
+ * The sound engine finds its room's link by the room's store, which is all
+ * a page under RoomProvider holds of it.
+ */
+export type SoundTimeLink = {
+  /** Sends a time frame, false while the socket is not open. */
+  send(k: number): boolean;
+  /** Each answer as it arrives. Returns the unsubscribe. */
+  listen(fn: (k: number, at: number) => void): () => void;
+};
+
+const soundTimeLinks = new WeakMap<object, SoundTimeLink>();
+
+/** The time link of the socket that feeds this room store, or null. */
+export function soundTimeLink(store: object): SoundTimeLink | null {
+  return soundTimeLinks.get(store) ?? null;
+}
+
+/** A time answer: the shape is checked here, before the protocol's schema, so the link needs nothing of it. */
+function timeAnswer(json: unknown): { k: number; at: number } | null {
+  if (!json || typeof json !== "object") return null;
+  const m = json as { t?: unknown; k?: unknown; at?: unknown };
+  if (m.t !== "time" || typeof m.k !== "number" || !Number.isSafeInteger(m.k) || typeof m.at !== "number" || !Number.isFinite(m.at)) return null;
+  return { k: m.k, at: m.at };
+}
+
 export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
   const { room, url } = options;
   const clock = options.clock ?? realClock;
@@ -298,6 +328,26 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
 
   const role = () => room.store.getState().you?.role ?? "player";
   const previewOf = options.previewOf;
+
+  const timeListeners = new Set<(k: number, at: number) => void>();
+  soundTimeLinks.set(room.store, {
+    send(k) {
+      // A preview plays nothing, so it measures nothing.
+      if (!ws || ws.readyState !== OPEN || phase !== "open" || previewOf !== undefined) return false;
+      const data = JSON.stringify({ t: "time", k });
+      budget.force(utf8.encode(data).length);
+      try {
+        ws.send(data);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    listen(fn) {
+      timeListeners.add(fn);
+      return () => timeListeners.delete(fn);
+    },
+  });
 
   function setConnection(state: "connecting" | "open" | "reconnecting" | "offline"): void {
     room.setConnection(state);
@@ -605,6 +655,11 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
     } catch {
       return;
     }
+    const time = timeAnswer(json);
+    if (time) {
+      for (const fn of [...timeListeners]) fn(time.k, time.at);
+      return;
+    }
     if (json && typeof json === "object" && "t" in json && json.t === "history") {
       const history = historyMessageSchema.safeParse(json);
       if (history.success && phase === "open" && previewOf === undefined) room.applyHistory(history.data);
@@ -770,6 +825,8 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
       const socket = ws;
       detach();
       phase = "disposed";
+      soundTimeLinks.delete(room.store);
+      timeListeners.clear();
       reconnectTimer.clear();
       ephDelay.clear();
       keepAliveTimer.clear();

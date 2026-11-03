@@ -53,6 +53,9 @@ import type { OpenSheet } from "../features/find/findToken.ts";
 import { HandoutPopup } from "../features/handouts/HandoutPopup.tsx";
 import { EditorHost } from "../features/monsters/EditorHost.tsx";
 import { PcStatsHost } from "../features/pcstats/PcStatsEditor.tsx";
+import { SoundHost } from "../features/sound/engine/SoundHost.tsx";
+import { ASK_TEXT, useSoundAsk } from "../features/sound/engine/useSoundAsk.ts";
+import { Notice } from "../components/Notice.tsx";
 import { useJobWaiting, usePdfJobRoom } from "../features/handouts/pdf/live.ts";
 import { useJournalUnread } from "../features/journal/store.ts";
 import { useLogUnread } from "../features/log/useLogUnread.ts";
@@ -295,6 +298,8 @@ export function Room() {
       {/* Beside the page rather than in it, so an open stat block editor keeps its draft through whatever the page shows. */}
       <EditorHost />
       <PcStatsHost />
+      {/* Above the blackout and scene gates, so the DM's page plays on behind a blackout and nothing stops for a scene change (docs/design/design-v1-music.md 9). */}
+      <SoundHost />
     </RoomScopeProvider>
   );
 }
@@ -409,7 +414,10 @@ function RoomPage() {
   // The Time panel is listed while the viewer's view holds a clock, and stays while it is open after the DM stops sharing, until it is closed (docs/design/design-v1-calendar.md 4.4).
   const hasClock = useRoomView((s) => !!s.view?.clock);
   const timeOpen = wide ? tab === "time" || below === "time" : panel === "time";
-  const panels = panelsFor(role, wide, { clock: hasClock || timeOpen });
+  // The Sound panel likewise, while the room plays music or a background sound this viewer receives (docs/design/design-v1-music.md 4.1). Effects show nowhere.
+  const hasSound = useRoomView((s) => !!s.view?.playing && (s.view.playing.music !== null || Object.keys(s.view.playing.loops).length > 0));
+  const soundOpen = wide ? tab === "sound" || below === "sound" : panel === "sound";
+  const panels = panelsFor(role, wide, { clock: hasClock || timeOpen, sound: hasSound || soundOpen });
   const tools = useRoomView(useShallow((s) => toolsFor(role, s)));
   const tool = activeTool(toolId, role);
   // The keyboard (state/shortcuts.ts) and pasted images (features/images/pasteRouter.ts). A "view as a player" preview answers no key and takes no paste.
@@ -597,7 +605,7 @@ function RoomPage() {
   const saveSplit = useRef<(() => void) | null>(null);
   useLayoutEffect(() => {
     if (splitStored.current !== null || splitRole === null) return;
-    const has = new Set(panelsFor(splitRole, true, { clock: true }).map((p) => p.id));
+    const has = new Set(panelsFor(splitRole, true, { clock: true, sound: true }).map((p) => p.id));
     const entry = readSplit(splitRole, (id) => has.has(id));
     splitStored.current = entry;
     shareRef.current = entry.share;
@@ -1041,6 +1049,7 @@ function RoomPage() {
             <Banner />
             {role === "dm" ? <FrameViewBar /> : null}
             <QuietLoadNotice />
+            <SoundAskNotice />
             <HistoryLoading />
           </div>
           <Toasts
@@ -3144,5 +3153,36 @@ function SidePane(props: {
         {props.children}
       </div>
     </div>
+  );
+}
+
+/**
+ * The ask (docs/design/design-v1-music.md 4.4): on a player's device with
+ * no choice, the first time there is something to hear. Play here's own
+ * click turns Room sound on and unlocks the audio inside that click.
+ * Unanswered, it passes after a while and is not asked again in this page
+ * load. Inside a very short sheet while one shows (pages/modalSlot.tsx),
+ * with the room's other lasting notices.
+ */
+function SoundAskNotice() {
+  const ask = useSoundAsk();
+  const slot = useModalSlot("quiet");
+  if (!ask.asking) return null;
+  return inModal(
+    <Notice float role="status" style={{ pointerEvents: "auto", width: "100%", maxWidth: theme.layout.notice }}>
+      {/* Its words and its two buttons share a line where they fit, and the buttons go under the words where they do not. */}
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
+        <span style={{ flex: "1 1 14em", minWidth: 0 }}>{ASK_TEXT}</span>
+        <span style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
+          <Button size="sm" variant="primary" onClick={ask.playHere}>
+            Play here
+          </Button>
+          <Button size="sm" onClick={ask.notHere}>
+            Not on this device
+          </Button>
+        </span>
+      </div>
+    </Notice>,
+    slot,
   );
 }
