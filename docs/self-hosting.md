@@ -105,6 +105,12 @@ Then open `.env` in an editor and fill in:
   video and every map shows its still. Read
   [If you use Cloudflare](#6-if-you-use-cloudflare) before you turn it on
   behind Cloudflare.
+- `ROOM_SOUND`: optional, `1` lets a DM add music, background sounds and
+  effects as MP3 files the room keeps and plays on every device. Unset or
+  `0`, the server refuses sound uploads, serves no sound and refuses ops
+  that name a sound file, and the Sound panel keeps only its built-in
+  effects. Read [If you use Cloudflare](#6-if-you-use-cloudflare) before you
+  turn it on behind Cloudflare.
 
 To get the Turnstile keys, open the Cloudflare dashboard, then Turnstile,
 then Add widget:
@@ -280,6 +286,11 @@ Cloudflare may limit a site that does otherwise. The limit would fall on
 the whole site, not only on the videos, so `ANIMATED_MAPS` is off unless
 you set it to `1`. Turn it on behind Cloudflare only if you accept that,
 or if you serve the site another way.
+
+Room sound serves each sound as an MP3 of up to 24 MB, streamed in pieces
+as it plays, through the same hostname, and music uses about 60 MB an hour
+on each device that plays it. The same terms may count that as large files,
+so `ROOM_SOUND` is off unless you set it to `1`, for the same reason.
 
 ### 7. Check it and make your group's room
 

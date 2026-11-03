@@ -251,6 +251,20 @@ range that excludes it, such as 7010 to 7039 with `E2E_PORT=7010`, then
 port 7000 and must be skipped. Lane briefs should reserve those whole
 ranges too.
 
+## Rebuilding with a changed MP3 encoder
+
+The browser encodes a DM's sound files with `@breezystack/lamejs`, which is
+under the GNU Lesser General Public License v3.0. The build keeps it in a
+chunk of its own and puts its license texts beside that chunk
+(`client/features/sound/upload/licenses/`), so anyone who gets the app can
+swap in a changed copy of the library. To do so, point the dependency at
+your copy in `package.json` (a `file:` path or your own published version),
+run `pnpm install`, then `pnpm build`. The build writes the library as
+`assets/lamejs-<hash>.js`, and the encode worker loads that file, so the
+new build uses your copy. The encoder runs only in the DM's browser, when a
+file is not already a suitable MP3, and `pnpm test` checks that its output
+still passes the server's frame check.
+
 ## Building for another architecture
 
 The server builds its own image, for its own CPU architecture. This is

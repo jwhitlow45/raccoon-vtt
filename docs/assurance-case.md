@@ -47,7 +47,10 @@ the code meets each one, and section 10 of the design has the detail.
    presentation timeline, held to the ten-minute cap whatever the file's
    durations say. The check runs in
    a worker thread with a 5 second budget and is ended at its deadline, so
-   a crafted file cannot stall the server for the other rooms. Room imports are
+   a crafted file cannot stall the server for the other rooms. A sound file,
+   where the server's owner allows them, must be a constant bitrate MP3 from
+   its first byte to its last, with no tag and no other byte, which the
+   server checks by walking its frame headers and never decodes. Room imports are
    validated and bounded before anything is kept, and the changes an
    imported map or character turns into are checked like any other.
 7. **Browsers get the usual protections.** A strict Content Security
@@ -90,6 +93,14 @@ you rely on the app.
   video's own frames, such as H.264 user data, and an MP4's timecode track
   are left as they are, since the server never writes inside the media
   data. Animated maps are off unless the server's owner turns them on.
+- **A sound reaches players' decoders too.** The server walks a sound's
+  MP3 frame headers and decodes nothing, so a crafted frame inside an
+  otherwise valid file can still reach the audio decoder of a player's
+  browser, inside its media sandbox, and only in the room of the DM who
+  added it. A sound is served as `audio/mpeg` with a fixed type and never
+  runs as a page. A player hears only what plays now, and a device with
+  Room sound off plays none. Room sound is off unless the server's
+  owner turns it on.
 - **Only the latest release is fixed.** Older releases do not receive
   security fixes, so keep your server updated
   ([Updating](self-hosting.md#updating)).

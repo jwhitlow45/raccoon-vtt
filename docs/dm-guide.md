@@ -51,6 +51,7 @@ The app does a lot, and you don't need most of it on day one. Read the [Quick st
   - [Companions](#companions)
   - [Ping, Look here and pins](#ping-look-here-and-pins)
   - [The table display](#the-table-display)
+  - [Music and sound](#music-and-sound)
   - [Time and the calendar](#time-and-the-calendar)
   - [The Log and its history](#the-log-and-its-history)
   - [Room settings for fights and maps](#room-settings-for-fights-and-maps)
@@ -1735,6 +1736,28 @@ If your group plays around a table, a TV can show the players' view of the map, 
 ![Add a TV in the DM panel: the code to type on the TV, how long it lasts, and its QR code.](dm-guide/table-display.webp)
 
 The display shows the players' scene the way the players see it: fog, party vision, tokens, shared areas, drawings, pings and rulers, and handouts shown to everyone. On a scene where each player sees for themselves, it shows only what the creatures that share sight with the party see (see [Sight for each player](#sight-for-each-player)). It shows no panels, chat or Initiative strip, unless you tap the display and turn on **Show whose turn it is**. To have the display show what your own screen shows, turn on **Show my view on the table display** in the DM panel, then tap the display and pick **Follow the DM**. The display's menu also has its own **View**, so the TV can show the map in Isometric while your screen stays Top-down, or the other way round (see [The isometric view](#the-isometric-view)). A room can have up to 4 displays.
+
+## Music and sound
+
+A tavern's chatter under the talk, rain on the windows during the night watch, a fanfare as the king enters: sound sets a mood your words then carry. The **Sound** panel, in play after the DM panel, runs it for the whole room, and every device that plays it is at the same moment of the track. Your own files need the server's switch, which whoever runs your server turns on. Until then the panel says so, and the five built-in effects still work, since each device makes them itself.
+
+**Three kinds of sound.** **Music** plays one playlist or one track at a time, with repeat, shuffle and a crossfade between tracks. **Background** sounds loop under it, up to four at once, each at its own volume: rain, a crowd, a fire. **Effects** play once with a tap: thunder, a door slamming, a dragon's roar. Each section has its own Add button: **Add music**, **Add background sounds** or **Add effects**. Pick one or more files, and your browser reads each one, evens out how loud it is, and turns it into an MP3 for the room, so a quiet recording and a loud one play at about the same level. Each file shows its progress, and you can cancel any of them. If a file can't be added, its row says why. Music runs 30 seconds to 15 minutes, a background sound 2 seconds or more, and an effect 30 seconds at most. On a phone, add long files that aren't MP3 or WAV from a computer instead: a phone has memory for only about three minutes of a FLAC or similar file at once.
+
+![The Sound panel while a playlist and two background sounds play: Now playing with the track's time and its buttons, a volume for everyone for the music, each background sound and the effects, Stop all sound, and the scene's own sound.](dm-guide/sound-panel.webp)
+
+**Now playing** shows the track, where it is, and its buttons: Pause, Skip, Stop and Repeat. Music moves on by itself: the server starts each next track on time for everyone, even when your device is asleep. When no player or DM device has been in the room for 15 minutes, its sound stops, and a table display alone does not keep it going. Under them sit the volumes for everyone, one for the music, one for each background sound with its own Stop, and one for effects. **Stop all sound** silences everything, effects included. A playlist's page orders its tracks, adds more from the room's music, and sets Shuffle, Repeat and Crossfade. A change to a playlist that is playing takes effect from its next start.
+
+Changes to your library, playlists and scenes' sounds are in **Setup history**. If a change of use won't undo because the sound is playing, stop it, then press Undo again.
+
+**A scene's own sound.** When the mood fits a place, tap **Use what's playing** under Now playing: the scene you are looking at keeps the music and background sounds as they are now, volumes included. **Use silence** keeps silence instead. From then on, **Move players here** in the Scenes panel plays that scene's sound as the party arrives, and a playlist that is already playing simply carries on. **Play it** plays it without a move.
+
+**What your players hear and see.** Each player's phone asks once, the first time there is something to hear, whether to play the room's sound. At one table, play it from one device, such as the table display, so the sound doesn't echo. Each device sets its own volumes under **Menu**, **This device**, **Sounds**. Players never see your library, your playlists or what comes next. With **Players see what is playing** on, their Sound panel names the music and background sounds playing now, and otherwise it only says that something plays. During a blackout players and the table display hear nothing, while your own device plays on.
+
+One thing to watch: if a laptop shows the table display in a window (**Open on this device**) and sends its sound to the TV, through an HDMI cable for one, your players hear your device's sound from the TV during a blackout too. A laptop playing on its own speakers is heard only at your seat.
+
+If the table needs a moment, the X-card's card gives you **Stop the sound** beside Pause the game.
+
+To keep a backup small, untick **Include sounds** under **Room settings**, **Backup**. The room comes back without your music, background sounds and effects, and the built-in effects still play.
 
 ## Time and the calendar
 

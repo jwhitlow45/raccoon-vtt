@@ -2187,6 +2187,8 @@ begin
       add constraint assets_kind_check check (kind in ('map', 'token', 'handout', 'thumb'));
   end if;
 end $$;
+-- Later kinds join the check the same way: 'video' for animated maps (docs/design/design-v1-animated-maps.md 9),
+-- and 'sound' for the room's MP3s (docs/design/design-v1-music.md 7.2), whose rows add `audio jsonb` (ms, channels, kbps).
 -- v1 wave 5 (docs/design/design-v1-dm-tools.md 2.3), each step idempotent as the thumb kind's was.
 -- A session's purpose: 'display' for a table display's (section 10.2), 'room' for every other row.
 alter table sessions add column if not exists purpose text not null default 'room' check (purpose in ('room', 'display'));

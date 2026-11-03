@@ -175,3 +175,7 @@ and for how to use it, the [DM guide](../dm-guide.md).
   loop over a map's still, off until the server's owner turns it on, with
   a header check that zeroes metadata in place and each device's choice of
   Moving or Still.
+- [design-v1-music.md](design-v1-music.md): synced music, background
+  sounds and effects the DM plays from the Sound panel, off until the
+  server's owner turns it on, with a frame check that decodes nothing and
+  each device's choice to play.
