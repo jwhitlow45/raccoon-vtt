@@ -243,42 +243,92 @@ export async function revokeGrants(
   // other DMs' panels show without polling. Presence alone misses one whose
   // member is still online on another device.
   if (result.removed.some((r) => r.role === "dm" || r.role === "display")) deps.gateway.accessChanged(roomId);
-  const unlabeled = await relabel(deps.gateway, roomId, result.demoted, bounds?.relabelMs);
+  const unlabeled = await relabel(deps, roomId, result.demoted, new Set(), bounds);
   return { removed: result.removed, demoted: result.demoted, unlabeled };
 }
 
+/** Times a relabel without bounds sets a member again whose grants changed under it, before it leaves the label as it is. */
+const RELABEL_PASSES = 3;
+
 /**
- * Sets each member's `kind` back to 'player', and answers the ones still
- * owed. Within `ms` when given, all at once: the label is cosmetic, so a
- * room actor that stalls or fails leaves it owed rather than holding up
- * what waits on the revoke. Without a bound, a failure throws.
+ * Sets each member's `kind` to what its grants said in a read just before,
+ * 'dm' for those in `dm` and 'player' for the rest, and answers the ones
+ * still owed. A DM claim commits its grant and then sets 'dm' itself, so a
+ * claim landing between that read and this relabel can set its label
+ * first, and this one would overwrite it (and a revoke's 'player' the same
+ * way). So the grants are read again once the labels have landed, and a
+ * member whose answer changed meanwhile is set again: up to three times
+ * without bounds, and with bounds it is left owed, for the sweep to repeat
+ * this until a read before and one after agree.
+ *
+ * With bounds, all at once, each within `relabelMs`: the label is
+ * cosmetic, so a room actor that stalls or fails leaves it owed rather
+ * than holding up what waits on the revoke. Without, a failure throws.
  */
-async function relabel(gateway: RoomGateway, roomId: string, memberIds: readonly string[], ms: number | undefined): Promise<string[]> {
+async function relabel(
+  deps: { pool: pg.Pool; gateway: RoomGateway },
+  roomId: string,
+  memberIds: readonly string[],
+  dm: ReadonlySet<string>,
+  bounds: RevokeBounds | undefined,
+): Promise<string[]> {
+  let pending = [...memberIds];
+  let holders = dm;
+  for (let pass = 1; pending.length > 0; pass++) {
+    const failed = await setKinds(deps.gateway, roomId, pending, holders, bounds?.relabelMs);
+    const landed = pending.filter((m) => !failed.includes(m));
+    let after: Set<string>;
+    try {
+      after = await dmHolders(deps.pool, roomId, landed, bounds);
+    } catch (err) {
+      if (!bounds) throw err;
+      return pending;
+    }
+    const changed = landed.filter((m) => after.has(m) !== holders.has(m));
+    if (bounds) return [...failed, ...changed];
+    if (pass === RELABEL_PASSES) return [];
+    pending = changed;
+    holders = after;
+  }
+  return [];
+}
+
+async function setKinds(gateway: RoomGateway, roomId: string, memberIds: readonly string[], dm: ReadonlySet<string>, ms: number | undefined): Promise<string[]> {
+  const kind = (memberId: string) => (dm.has(memberId) ? "dm" : "player");
   if (ms === undefined) {
-    for (const memberId of memberIds) await gateway.setMemberKind(roomId, memberId, "player");
+    for (const memberId of memberIds) await gateway.setMemberKind(roomId, memberId, kind(memberId));
     return [];
   }
-  const results = await Promise.allSettled(memberIds.map((memberId) => bounded(gateway.setMemberKind(roomId, memberId, "player"), ms)));
+  const results = await Promise.allSettled(memberIds.map((memberId) => bounded(gateway.setMemberKind(roomId, memberId, kind(memberId)), ms)));
   return memberIds.filter((_, i) => results[i]?.status === "rejected");
 }
 
+/** Which of these members hold a DM grant in the room now. With bounds, within its checkout and statement bounds. */
+async function dmHolders(pool: pg.Pool, roomId: string, memberIds: readonly string[], bounds: RevokeBounds | undefined): Promise<Set<string>> {
+  if (memberIds.length === 0) return new Set();
+  const read = bounds
+    ? await withTx(
+        pool,
+        async (tx) => {
+          await tx.query(`set local statement_timeout = '${Math.ceil(bounds.statementMs)}ms'`);
+          return tx.query<{ member_id: string }>(STILL_DM, [roomId, memberIds]);
+        },
+        { checkoutMs: bounds.checkoutMs },
+      )
+    : await pool.query<{ member_id: string }>(STILL_DM, [roomId, memberIds]);
+  return new Set(read.rows.map((r) => r.member_id));
+}
+
 /**
- * A relabel a bounded revoke left owed: the member goes back to 'player'
- * unless it holds a DM grant again since. False when the relabel did not
- * land within `relabelMs`, and a read past its bounds throws, so either
- * way it stays owed.
+ * A relabel a bounded revoke left owed: the member's label set to what its
+ * grants say now, 'player', or 'dm' again if it holds a DM grant since.
+ * False when the relabel did not land within `relabelMs` or the grants
+ * changed under it, and a read past its bounds throws, so either way it
+ * stays owed.
  */
 export async function relabelOwed(deps: { pool: pg.Pool; gateway: RoomGateway }, roomId: string, memberId: string, bounds: RevokeBounds): Promise<boolean> {
-  const still = await withTx(
-    deps.pool,
-    async (tx) => {
-      await tx.query(`set local statement_timeout = '${Math.ceil(bounds.statementMs)}ms'`);
-      return tx.query<{ member_id: string }>(STILL_DM, [roomId, [memberId]]);
-    },
-    { checkoutMs: bounds.checkoutMs },
-  );
-  if (still.rows.length > 0) return true;
-  return (await relabel(deps.gateway, roomId, [memberId], bounds.relabelMs)).length === 0;
+  const dm = await dmHolders(deps.pool, roomId, [memberId], bounds);
+  return (await relabel(deps, roomId, [memberId], dm, bounds)).length === 0;
 }
 
 function rolesOf(role: Roles): GrantRole[] {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Member } from "#shared/model.ts";
 import { ADMISSION_ROUTE_MS, Admissions, KICK_MEMORY_MS, revokeMember, type AdmitAnswer, type AdmitOutcome, type AdmitPlan, type AdmitWho } from "./admit.ts";
+import { revokeGrants } from "./grants.ts";
 import { HttpError } from "./http.ts";
 import { FakeAccessDb, FakeRoomGateway } from "./testing.ts";
 
@@ -328,6 +329,59 @@ describe("admitPlayer", () => {
     assert.equal(admissions.followUps, 0);
     assert.equal(gateway.room(ROOM).get("dee")?.kind, "player");
     assert.equal(gateway.room(ROOM).get("eve")?.kind, "dm");
+  });
+
+  test("a DM claim landing between a relabel's read and its label is never overwritten: the relabel reads again and keeps the label owed until they agree (JB-ASTRA-10)", { timeout: 5_000 }, async () => {
+    const { db, gateway, admissions } = setup();
+    const deps = { pool: db.pool, gateway, admissions };
+    const label = (id: string) => gateway.room(ROOM).get(id)?.kind;
+    const claim = (memberId: string) => {
+      // What a DM claim does: its grant commits, then its own 'dm' label lands.
+      db.tables.grants.set(`s2-${memberId}|${ROOM}`, { session_id: `s2-${memberId}`, room_id: ROOM, member_id: memberId, role: "dm", epoch: 5 });
+      const m = gateway.room(ROOM).get(memberId);
+      if (m) gateway.room(ROOM).set(memberId, { ...m, kind: "dm" });
+    };
+    for (const id of ["dee", "eve", "fay"]) {
+      gateway.room(ROOM).set(id, member(id, "dm"));
+      db.tables.grants.set(`s-${id}|${ROOM}`, { session_id: `s-${id}`, room_id: ROOM, member_id: id, role: "dm", epoch: 5 });
+    }
+    // Each relabel meets the claim this test lines up for its member, just before it lands.
+    const lined = new Set<string>();
+    let stall = false;
+    gateway.hold = async (call, _roomId, memberId) => {
+      if (call !== "kind") return;
+      if (stall) await gate().wait;
+      if (lined.delete(memberId)) claim(memberId);
+    };
+
+    // A kick's own relabel.
+    lined.add("dee");
+    const kicked = await revokeMember(deps, ROOM, "dee");
+    assert.deepEqual(kicked.unlabeled, ["dee"], "the grants changed under the relabel, so the label is owed");
+    assert.equal(label("dee"), "player", "for now overwritten");
+    assert.equal(admissions.followUps, 1);
+    await admissions.followUp();
+    assert.equal(label("dee"), "dm", "set to what the grants say");
+    assert.equal(admissions.followUps, 0);
+
+    // The sweep's retry of an owed relabel.
+    stall = true;
+    const second = await revokeMember(deps, ROOM, "eve");
+    assert.deepEqual(second.unlabeled, ["eve"]);
+    stall = false;
+    lined.add("eve");
+    await admissions.followUp();
+    assert.equal(label("eve"), "player");
+    assert.equal(admissions.followUps, 1, "still owed: the claim landed between the retry's read and its label");
+    await admissions.followUp();
+    assert.equal(label("eve"), "dm");
+    assert.equal(admissions.followUps, 0, "owed until the grants and the label agree");
+
+    // A revoke with no bounds sets it again at once.
+    lined.add("fay");
+    const unbounded = await revokeGrants({ pool: db.pool, gateway }, ROOM, { by: "member", memberId: "fay" });
+    assert.deepEqual(unbounded.unlabeled, []);
+    assert.equal(label("fay"), "dm");
   });
 
   test("a room whose relabels stall holds up no other room's follow-ups, and its own run ends within its bounds", { timeout: 5_000 }, async () => {
