@@ -144,6 +144,8 @@ export type WebmOptions = {
   trackVintLength?: number;
   /** Each frame's payload in bytes after its header, for a file of a given size. Default: 64 for the key frame and 32 for the rest. */
   frameBytes?: number;
+  /** Real frames, a recording's, in place of the synthetic ones `frameMs` makes. */
+  frames?: Array<{ ms: number; key: boolean; data: Buffer }>;
 };
 
 /**
@@ -155,7 +157,7 @@ export function webmTree(o: WebmOptions = {}): Ebml[] {
   const width = o.width ?? 640;
   const height = o.height ?? 360;
   const scale = o.scale ?? 1_000_000;
-  const frames = o.frameMs ?? Array.from({ length: 60 }, (_, i) => Math.round((i * 1000) / 30));
+  const frames = o.frames?.map((f) => f.ms) ?? o.frameMs ?? Array.from({ length: 60 }, (_, i) => Math.round((i * 1000) / 30));
   const frameGap = frames.length > 1 ? frames[frames.length - 1]! - frames[frames.length - 2]! : 33;
   const durationMs = o.durationMs === undefined ? frames[frames.length - 1]! + frameGap : o.durationMs;
   const toTicks = (ms: number) => Math.round((ms * 1e6) / scale);
@@ -189,10 +191,12 @@ export function webmTree(o: WebmOptions = {}): Ebml[] {
   }
 
   type Item = { ms: number; node: (cluster: number) => Ebml };
-  const items: Item[] = frames.map((ms, i) => ({
-    ms,
-    node: (cluster) => simpleBlock(1, toTicks(ms) - cluster, i === 0 ? 0x80 : 0, i === 0 ? vp9Key(o.frameBytes ?? 64, i + 1) : vp9Inter(o.frameBytes ?? 32, i + 1), o.trackVintLength ?? 1),
-  }));
+  const items: Item[] = frames.map((ms, i) => {
+    const real = o.frames?.[i];
+    const key = real ? real.key : i === 0;
+    const data = real ? real.data : i === 0 ? vp9Key(o.frameBytes ?? 64, i + 1) : vp9Inter(o.frameBytes ?? 32, i + 1);
+    return { ms, node: (cluster) => simpleBlock(1, toTicks(ms) - cluster, key ? 0x80 : 0, data, o.trackVintLength ?? 1) };
+  });
   for (const [i, b] of (sound?.blocks ?? []).entries()) {
     const tocs = b.tocs ?? [OPUS_20MS];
     const frame = Buffer.concat(tocs.map((t, k) => Buffer.concat([Buffer.from([t]), filler(3, 1000 + i * 8 + k)])));
@@ -213,10 +217,27 @@ export function webmTree(o: WebmOptions = {}): Ebml[] {
   if (current) clusters.push(el(I.Cluster, ...current.kids));
 
   const info = el(I.Info, uint(I.TimestampScale, scale), ...(durationMs === null ? [] : [float(I.Duration, toTicks(durationMs))]), str(I.MuxingApp, "raccoon test writer"), str(I.WritingApp, "raccoon test writer"));
+  const trackList = el(I.Tracks, ...tracks);
+  // Positions are written in four bytes each, so a second pass can fill them without moving anything.
+  const at = (id: number, position: number) => el(I.Seek, bin(I.SeekID, idBytes(id)), { id: I.SeekPosition, data: fixed4(position) });
+  const seekHead = (info: number, tracks: number, cues: number) => el(I.SeekHead, at(I.Info, info), at(I.Tracks, tracks), at(I.Cues, cues));
+  const sizes = [seekHead(0, 0, 0), info, trackList, ...clusters].map((n) => encodeEbml(n).length);
+  const offsets = sizes.map((_, i) => sizes.slice(0, i).reduce((a, b) => a + b, 0));
+  const cues = el(
+    I.Cues,
+    ...clusters.map((c, i) => el(I.CuePoint, { id: I.CueTime, data: fixed4(findEbml(c, I.Timestamp).data!.readUIntBE(0, findEbml(c, I.Timestamp).data!.length)) }, el(0xb7, uint(0xf7, 1), { id: 0xf1, data: fixed4(offsets[3 + i]!) }))),
+  );
+  const cuesAt = sizes.reduce((a, b) => a + b, 0);
   return [
     el(I.EBML, uint(I.EBMLVersion, 1), uint(I.EBMLReadVersion, 1), uint(I.EBMLMaxIDLength, 4), uint(I.EBMLMaxSizeLength, 8), str(I.DocType, "webm"), uint(I.DocTypeVersion, 4), uint(I.DocTypeReadVersion, 2)),
-    el(I.Segment, el(I.SeekHead, el(I.Seek, bin(I.SeekID, Buffer.from([0x15, 0x49, 0xa9, 0x66])), uint(I.SeekPosition, 0))), info, el(I.Tracks, ...tracks), ...clusters, el(I.Cues, el(I.CuePoint, uint(I.CueTime, 0), el(0xb7, uint(0xf7, 1), uint(0xf1, 0))))),
+    el(I.Segment, seekHead(offsets[1]!, offsets[2]!, cuesAt), info, trackList, ...clusters, cues),
   ];
+}
+
+function fixed4(value: number): Buffer {
+  const b = Buffer.alloc(4);
+  b.writeUInt32BE(value);
+  return b;
 }
 
 export function webmFile(o: WebmOptions = {}): Buffer {
@@ -368,7 +389,7 @@ export function audioEntry(type: string, channels: number, hz: number, ...kids: 
   return bx(type, fields(Buffer.alloc(6), [2, 1], [2, 0], [2, 0], [4, 0], [2, channels], [2, 16], [2, 0], [2, 0], [4, hz * 0x10000]), ...kids);
 }
 
-export type Mp4Sample = { size: number; delta: number; cts?: number; bytes?: Buffer };
+export type Mp4Sample = { size: number; delta: number; cts?: number; bytes?: Buffer; key?: boolean };
 
 export type Mp4Track = {
   handler: string;
@@ -449,6 +470,10 @@ function trakBox(t: Mp4Track, id: number, movieTimescale: number, chunkOffsets: 
     undefined,
     bx("stsd", Buffer.concat([full(0), fields([4, 1])]), t.entry),
     bx("stts", Buffer.concat([full(0), fields([4, stts.length]), ...stts.map(([n, d]) => fields([4, n], [4, d]))])),
+    // Sync samples, when any sample is not one: a recording's inter frames.
+    ...(t.samples.some((x) => x.key === false)
+      ? [bx("stss", Buffer.concat([full(0), fields([4, t.samples.filter((x) => x.key !== false).length]), ...t.samples.flatMap((x, i) => (x.key !== false ? [fields([4, i + 1])] : []))]))]
+      : []),
     ...(hasCts ? [bx("ctts", Buffer.concat([full(0), fields([4, t.samples.length]), ...t.samples.map((s) => fields([4, 1], [4, s.cts ?? 0]))]))] : []),
     bx("stsc", Buffer.concat([full(0), ...(() => {
       const whole = Math.floor(t.samples.length / per);
@@ -530,4 +555,261 @@ export function appleLocationMeta(text: string = SECRETS.location): Box {
     bx("keys", Buffer.concat([full(0), fields([4, 1], [4, 8 + key.length]), Buffer.from("mdta", "latin1"), Buffer.from(key, "latin1")])),
     bx("ilst", undefined, { type: "\u0000\u0000\u0000\u0001", kids: [bx("data", Buffer.concat([fields([4, 1], [4, 0]), Buffer.from(text, "latin1")]))] }),
   );
+}
+
+// Recordings ------------------------------------------------------------------
+
+/** One EBML header at `at`: an unknown size, as a recording writes it, reads as Infinity. */
+function ebmlHead(bytes: Buffer, at: number): { id: number; dataStart: number; end: number } {
+  const idLength = Math.clz32(bytes[at]!) - 23;
+  let id = 0;
+  for (let i = 0; i < idLength; i++) id = id * 256 + bytes[at + i]!;
+  const sizeAt = at + idLength;
+  const sizeLength = Math.clz32(bytes[sizeAt]!) - 23;
+  let size = bytes[sizeAt]! & (0xff >> sizeLength);
+  let unknown = size === 0xff >> sizeLength;
+  for (let i = 1; i < sizeLength; i++) {
+    size = size * 256 + bytes[sizeAt + i]!;
+    unknown &&= bytes[sizeAt + i] === 0xff;
+  }
+  const dataStart = sizeAt + sizeLength;
+  return { id, dataStart, end: unknown ? Infinity : dataStart + size };
+}
+
+function ebmlKids(bytes: Buffer, start: number, end: number): Array<{ id: number; dataStart: number; end: number }> {
+  const out = [];
+  for (let at = start; at < end; ) {
+    const h = ebmlHead(bytes, at);
+    out.push(h);
+    at = h.end;
+  }
+  return out;
+}
+
+const uintOf = (bytes: Buffer, h: { dataStart: number; end: number }) => bytes.subarray(h.dataStart, h.end).reduce((v, b) => v * 256 + b, 0);
+
+export type Recording = { codecId: string; codecPrivate?: Buffer; width: number; height: number; frames: Array<{ ms: number; key: boolean; data: Buffer }> };
+
+/**
+ * The video frames of a browser's WebM recording. Chrome's MediaRecorder
+ * writes the Segment and each Cluster with an unknown size, and no Duration
+ * or Cues, which the server refuses as unfinished, so the walk steps into
+ * both and reads each block where it lies.
+ */
+export function readWebmRecording(bytes: Buffer): Recording {
+  let scale = 1_000_000;
+  let track: { number: number; codecId: string; codecPrivate?: Buffer; width: number; height: number } | undefined;
+  let clusterTimestamp = 0;
+  const frames: Recording["frames"] = [];
+  for (let at = 0; at < bytes.length; ) {
+    const h = ebmlHead(bytes, at);
+    if (h.id === I.Segment || h.id === I.Cluster) {
+      at = h.dataStart;
+      continue;
+    }
+    if (h.end === Infinity) throw new Error(`an unknown size on 0x${h.id.toString(16)}`);
+    if (h.id === I.Info) {
+      for (const k of ebmlKids(bytes, h.dataStart, h.end)) if (k.id === I.TimestampScale) scale = uintOf(bytes, k);
+    } else if (h.id === I.Tracks) {
+      for (const entry of ebmlKids(bytes, h.dataStart, h.end)) {
+        const t = { number: 0, type: 0, codecId: "", codecPrivate: undefined as Buffer | undefined, width: 0, height: 0 };
+        for (const k of ebmlKids(bytes, entry.dataStart, entry.end)) {
+          if (k.id === I.TrackNumber) t.number = uintOf(bytes, k);
+          else if (k.id === I.TrackType) t.type = uintOf(bytes, k);
+          else if (k.id === I.CodecID) t.codecId = bytes.subarray(k.dataStart, k.end).toString("latin1");
+          else if (k.id === I.CodecPrivate) t.codecPrivate = Buffer.from(bytes.subarray(k.dataStart, k.end));
+          else if (k.id === I.Video) {
+            for (const v of ebmlKids(bytes, k.dataStart, k.end)) {
+              if (v.id === I.PixelWidth) t.width = uintOf(bytes, v);
+              else if (v.id === I.PixelHeight) t.height = uintOf(bytes, v);
+            }
+          }
+        }
+        if (t.type === 1 && !track) track = t;
+      }
+    } else if (h.id === I.Timestamp) {
+      clusterTimestamp = uintOf(bytes, h);
+    } else if ((h.id === I.SimpleBlock || h.id === I.BlockGroup) && track) {
+      // A BlockGroup's Block is a key frame when no ReferenceBlock names an earlier one.
+      const kids = h.id === I.BlockGroup ? ebmlKids(bytes, h.dataStart, h.end) : [];
+      const b = h.id === I.SimpleBlock ? h : kids.find((k) => k.id === I.Block);
+      if (kids.some((k) => k.id === I.BlockAdditions)) throw new Error("the recording has block additions, such as an alpha plane");
+      if (b) {
+        const length = Math.clz32(bytes[b.dataStart]!) - 23;
+        const number = bytes[b.dataStart]! & (0xff >> length);
+        if (number === track.number) {
+          const relative = bytes.readInt16BE(b.dataStart + length);
+          const flags = bytes[b.dataStart + length + 2]!;
+          const key = h.id === I.SimpleBlock ? (flags & 0x80) !== 0 : !kids.some((k) => k.id === I.ReferenceBlock);
+          frames.push({ ms: ((clusterTimestamp + relative) * scale) / 1e6, key, data: Buffer.from(bytes.subarray(b.dataStart + length + 3, b.end)) });
+        }
+      }
+    }
+    at = h.end;
+  }
+  if (!track) throw new Error("the recording has no video track");
+  return { codecId: track.codecId, ...(track.codecPrivate ? { codecPrivate: track.codecPrivate } : {}), width: track.width, height: track.height, frames };
+}
+
+type RawBox = { type: string; start: number; payload: number; end: number };
+
+function rawBoxes(bytes: Buffer, start: number, end: number): RawBox[] {
+  const out: RawBox[] = [];
+  for (let at = start; at + 8 <= end; ) {
+    let size = bytes.readUInt32BE(at);
+    let payload = at + 8;
+    if (size === 1) {
+      size = Number(bytes.readBigUInt64BE(at + 8));
+      payload = at + 16;
+    } else if (size === 0) size = end - at;
+    out.push({ type: bytes.subarray(at + 4, at + 8).toString("latin1"), start: at, payload, end: at + size });
+    at += size;
+  }
+  return out;
+}
+
+const child = (bytes: Buffer, box: RawBox, ...path: string[]): RawBox => {
+  let found = box;
+  for (const type of path) {
+    const next = rawBoxes(bytes, found.payload, found.end).find((b) => b.type === type);
+    if (!next) throw new Error(`no ${type} in ${found.type}`);
+    found = next;
+  }
+  return found;
+};
+
+export type Mp4Recording = { entry: Box; timescale: number; width: number; height: number; samples: Array<Required<Pick<Mp4Sample, "size" | "delta" | "bytes" | "key">> & { cts: number }> };
+
+/**
+ * The video samples of a browser's MP4 recording, or of a plain MP4 such as
+ * a fixture. Chrome's MediaRecorder writes a fragmented MP4, which the
+ * server refuses, so each fragment's `trun` is read for its samples' sizes,
+ * durations, offsets and sync flags, against the defaults in `tfhd` and
+ * `trex`. A plain file's come from its sample tables.
+ */
+export function readMp4Recording(bytes: Buffer): Mp4Recording {
+  const top = rawBoxes(bytes, 0, bytes.length);
+  const moov = top.find((b) => b.type === "moov");
+  if (!moov) throw new Error("no moov");
+  const trak = rawBoxes(bytes, moov.payload, moov.end)
+    .filter((b) => b.type === "trak")
+    .find((t) => bytes.subarray(child(bytes, t, "mdia", "hdlr").payload + 8, child(bytes, t, "mdia", "hdlr").payload + 12).toString("latin1") === "vide");
+  if (!trak) throw new Error("no video track");
+  const tkhd = child(bytes, trak, "tkhd");
+  const trackId = bytes.readUInt32BE(tkhd.payload + (bytes[tkhd.payload] === 1 ? 20 : 12));
+  const mdhd = child(bytes, trak, "mdia", "mdhd");
+  const timescale = bytes.readUInt32BE(mdhd.payload + (bytes[mdhd.payload] === 1 ? 20 : 12));
+  const stsd = child(bytes, trak, "mdia", "minf", "stbl", "stsd");
+  const entryBox = rawBoxes(bytes, stsd.payload + 8, stsd.end)[0]!;
+  const entry: Box = { type: entryBox.type, head: Buffer.from(bytes.subarray(entryBox.payload, entryBox.end)) };
+  const width = entry.head!.readUInt16BE(24);
+  const height = entry.head!.readUInt16BE(26);
+  let defaults = { duration: 0, size: 0, flags: 0 };
+  const mvex = rawBoxes(bytes, moov.payload, moov.end).find((b) => b.type === "mvex");
+  for (const trex of mvex ? rawBoxes(bytes, mvex.payload, mvex.end).filter((b) => b.type === "trex") : []) {
+    if (bytes.readUInt32BE(trex.payload + 4) === trackId) defaults = { duration: bytes.readUInt32BE(trex.payload + 12), size: bytes.readUInt32BE(trex.payload + 16), flags: bytes.readUInt32BE(trex.payload + 20) };
+  }
+  const samples: Mp4Recording["samples"] = [];
+  if (!top.some((b) => b.type === "moof")) return { entry, timescale, width, height, samples: plainSamples(bytes, child(bytes, trak, "mdia", "minf", "stbl")) };
+  for (const moof of top.filter((b) => b.type === "moof")) {
+    for (const traf of rawBoxes(bytes, moof.payload, moof.end).filter((b) => b.type === "traf")) {
+      const tfhd = child(bytes, traf, "tfhd");
+      const tfFlags = bytes.readUIntBE(tfhd.payload + 1, 3);
+      if (bytes.readUInt32BE(tfhd.payload + 4) !== trackId) continue;
+      let at = tfhd.payload + 8;
+      let base = moof.start;
+      if (tfFlags & 0x1) {
+        base = Number(bytes.readBigUInt64BE(at));
+        at += 8;
+      }
+      if (tfFlags & 0x2) at += 4;
+      const own = { ...defaults };
+      if (tfFlags & 0x8) (own.duration = bytes.readUInt32BE(at)), (at += 4);
+      if (tfFlags & 0x10) (own.size = bytes.readUInt32BE(at)), (at += 4);
+      if (tfFlags & 0x20) (own.flags = bytes.readUInt32BE(at)), (at += 4);
+      for (const trun of rawBoxes(bytes, traf.payload, traf.end).filter((b) => b.type === "trun")) {
+        const version = bytes[trun.payload]!;
+        const flags = bytes.readUIntBE(trun.payload + 1, 3);
+        const count = bytes.readUInt32BE(trun.payload + 4);
+        let p = trun.payload + 8;
+        let offset = base;
+        if (flags & 0x1) (offset = base + bytes.readInt32BE(p)), (p += 4);
+        let first: number | undefined;
+        if (flags & 0x4) (first = bytes.readUInt32BE(p)), (p += 4);
+        for (let i = 0; i < count; i++) {
+          let duration = own.duration;
+          let size = own.size;
+          let sampleFlags = i === 0 && first !== undefined ? first : own.flags;
+          let cts = 0;
+          if (flags & 0x100) (duration = bytes.readUInt32BE(p)), (p += 4);
+          if (flags & 0x200) (size = bytes.readUInt32BE(p)), (p += 4);
+          if (flags & 0x400) (sampleFlags = bytes.readUInt32BE(p)), (p += 4);
+          if (flags & 0x800) (cts = version === 1 ? bytes.readInt32BE(p) : bytes.readUInt32BE(p)), (p += 4);
+          samples.push({ size, delta: duration, cts, bytes: Buffer.from(bytes.subarray(offset, offset + size)), key: (sampleFlags & 0x10000) === 0 });
+          offset += size;
+        }
+      }
+    }
+  }
+  return { entry, timescale, width, height, samples };
+}
+
+function plainSamples(bytes: Buffer, stbl: RawBox): Mp4Recording["samples"] {
+  const table = (type: string) => rawBoxes(bytes, stbl.payload, stbl.end).find((b) => b.type === type);
+  const u32 = (box: RawBox, i: number) => bytes.readUInt32BE(box.payload + 4 + i * 4);
+  const stsz = table("stsz")!;
+  const count = u32(stsz, 1);
+  const sizes = Array.from({ length: count }, (_, i) => (u32(stsz, 0) || u32(stsz, 2 + i)));
+  const deltas: number[] = [];
+  const stts = table("stts")!;
+  for (let e = 0; e < u32(stts, 0); e++) for (let k = 0; k < u32(stts, 1 + e * 2); k++) deltas.push(u32(stts, 2 + e * 2));
+  const offsets: number[] = new Array<number>(count).fill(0);
+  const ctts = table("ctts");
+  if (ctts) {
+    let i = 0;
+    for (let e = 0; e < u32(ctts, 0); e++) for (let k = 0; k < u32(ctts, 1 + e * 2); k++) offsets[i++] = u32(ctts, 2 + e * 2);
+  }
+  const stss = table("stss");
+  const sync = stss ? new Set(Array.from({ length: u32(stss, 0) }, (_, i) => u32(stss, 1 + i))) : null;
+  const stco = table("stco")!;
+  const stsc = table("stsc")!;
+  const runs = Array.from({ length: u32(stsc, 0) }, (_, i) => [u32(stsc, 1 + i * 3), u32(stsc, 2 + i * 3)] as const);
+  const out: Mp4Recording["samples"] = [];
+  let sample = 0;
+  for (let chunk = 1; chunk <= u32(stco, 0); chunk++) {
+    const per = [...runs].reverse().find(([firstChunk]) => firstChunk <= chunk)![1];
+    let at = u32(stco, chunk);
+    for (let k = 0; k < per && sample < count; k++, sample++) {
+      out.push({ size: sizes[sample]!, delta: deltas[sample]!, cts: offsets[sample]!, bytes: Buffer.from(bytes.subarray(at, at + sizes[sample]!)), key: sync ? sync.has(sample + 1) : true });
+      at += sizes[sample]!;
+    }
+  }
+  return out;
+}
+
+/**
+ * A real WebM, such as e2e/fixtures/map-loop.webm, rebuilt with every kind
+ * of identifying text 7 names added (a Title, DateUTC, Tags, CRC-32
+ * elements, a Void and a track name holding text), for the check to clear.
+ */
+export function webmWithSecretsFrom(bytes: Buffer): Buffer {
+  const rec = readWebmRecording(bytes);
+  const last = rec.frames.at(-1)!.ms;
+  return encodeWebm(webmWithSecrets({ width: rec.width, height: rec.height, codec: rec.codecId, ...(rec.codecPrivate ? { codecPrivate: rec.codecPrivate } : {}), frames: rec.frames, durationMs: Math.ceil(last / 1000) * 1000 }));
+}
+
+/**
+ * A real MP4, such as e2e/fixtures/map-loop.mp4, rebuilt with a phone's
+ * location atoms, a handler name, a compressor name and padding holding text.
+ */
+export function mp4WithSecretsFrom(bytes: Buffer): Buffer {
+  const rec = readMp4Recording(bytes);
+  const head = Buffer.from(rec.entry.head!);
+  head[42] = SECRETS.compressor.length;
+  head.write(SECRETS.compressor, 43, "latin1");
+  return mp4File({
+    tracks: [{ handler: "vide", entry: { type: rec.entry.type, head }, timescale: rec.timescale, samples: rec.samples, handlerName: SECRETS.handler, extraTrak: [locationUdta(), appleLocationMeta()] }],
+    beforeMoov: [bx("free", Buffer.from(SECRETS.free))],
+    inMoov: [locationUdta(), appleLocationMeta()],
+  });
 }

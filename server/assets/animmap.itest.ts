@@ -17,7 +17,7 @@ import { sweepOrphanFiles } from "./cleanup.ts";
 import { roomStoredBytes } from "./quota.ts";
 import { variantPath } from "./store.ts";
 import { solid } from "./testImages.ts";
-import { SECRETS, defaultSoundTrack, defaultVideoTrack, encodeWebm, locationUdta, mp4File, webmFile, webmWithSecrets, appleLocationMeta, bx } from "./video/videoTestutil.ts";
+import { SECRETS, appleLocationMeta, bx, defaultSoundTrack, defaultVideoTrack, encodeWebm, locationUdta, mp4File, mp4WithSecretsFrom, webmFile, webmWithSecrets, webmWithSecretsFrom } from "./video/videoTestutil.ts";
 
 /**
  * Animated maps on the server (docs/design/design-v1-animated-maps.md 12,
@@ -28,6 +28,7 @@ import { SECRETS, defaultSoundTrack, defaultVideoTrack, encodeWebm, locationUdta
  */
 
 const MiB = 1024 * 1024;
+const FIXTURES = new URL("../../e2e/fixtures/", import.meta.url);
 const sha = (b: Buffer) => createHash("sha256").update(b).digest("hex");
 
 type Uploaded = { id: string; kind: string; width: number; height: number; variants: string[]; video?: VideoFacts; created?: boolean };
@@ -144,6 +145,23 @@ describe("animated maps with the switch on", () => {
     assert.equal(res.rawPayload.length, bytes.length);
     for (const secret of [SECRETS.location, SECRETS.free, "com.apple.quicktime.location.ISO6709"]) assert.equal(res.rawPayload.includes(secret), false, secret);
     assert.ok(bytes.includes(SECRETS.location));
+  });
+
+  test("the e2e fixtures, rebuilt with a phone's location and an editor's text, are stored and served with none of it", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom();
+    for (const [file, type, rebuild] of [["map-loop.webm", "video/webm", webmWithSecretsFrom], ["map-loop.mp4", "video/mp4", mp4WithSecretsFrom]] as const) {
+      const plain = await readFile(new URL(file, FIXTURES));
+      const plainFacts = (await uploaded(dm, roomId, plain, { type })).video!;
+      assert.deepEqual({ w: plainFacts.widthPx, h: plainFacts.heightPx, fps: plainFacts.fps, ms: plainFacts.durationMs }, { w: 640, h: 360, fps: 30, ms: 2000 }, file);
+      const bytes = rebuild(plain);
+      const secrets = Object.values(SECRETS).filter((x) => bytes.includes(x));
+      assert.ok(secrets.length >= 4, `${file} carries ${secrets.length} secrets`);
+      const video = await uploaded(dm, roomId, bytes, { type });
+      const served = (await read(dm, video.id)).rawPayload;
+      assert.equal(served.length, bytes.length);
+      for (const secret of secrets) assert.equal(served.includes(secret), false, `${file}: ${secret}`);
+    }
   });
 
   test("the upload pairs video types with the video kind, before a byte is read", async () => {

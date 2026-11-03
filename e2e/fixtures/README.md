@@ -1,8 +1,22 @@
-# PDF fixtures
+# Fixtures
 
-Files for `e2e/pdf.e2e.ts` (docs/design/design-v1-pdf-handouts.md 11.3) that `e2e/pdfFixture.ts` cannot write. Each is one page. Every file here was made for these tests and is under the project's license, the GNU AGPL v3.0, apart from the font noted below.
+Files the e2e tests read that no test can write as it runs. Every file here was made for these tests and is under the project's license, the GNU AGPL v3.0, apart from the font noted below.
 
-## password.pdf
+## Animated map videos: map-loop.webm and map-loop.mp4
+
+For `e2e/animmap.e2e.ts` (docs/design/design-v1-animated-maps.md 12): a VP9 WebM and an H.264 MP4, each 640 x 360, 2 s long at 30 frames a second, with no sound. Both show the same test pattern, drawn on a canvas: seven color bars, a white square that crosses a dark band below them, and each frame's number. Chrome's MediaRecorder recorded the canvas, and `scripts/video-fixtures.ts` rebuilt each recording as a plain file with the server's own test writer (`server/assets/video/videoTestutil.ts`), since a recording is not one: its WebM is written as it streams and its MP4 is fragmented, both of which the server refuses. The rebuild keeps every frame as Chrome encoded it and times the first 60 from the first key frame at exactly 30 a second. The script then checks that each file passes the server's header check and plays and loops in Chrome, and that a copy with identifying text added still plays once the check has cleared it.
+
+```sh
+node scripts/video-fixtures.ts
+```
+
+It needs Google Chrome, which Playwright launches as the `chrome` channel. A new run records new frames, so the files' bytes change while what they show stays the same.
+
+## PDF fixtures
+
+Files for `e2e/pdf.e2e.ts` (docs/design/design-v1-pdf-handouts.md 11.3) that `e2e/pdfFixture.ts` cannot write. Each is one page.
+
+### password.pdf
 
 One Letter page from `pdfOf([LETTER], "Locked letter")` in `e2e/pdfFixture.ts`, encrypted with qpdf 12.2.0. The password is `raccoon`. The upload must refuse it without uploading anything.
 
@@ -10,7 +24,7 @@ One Letter page from `pdfOf([LETTER], "Locked letter")` in `e2e/pdfFixture.ts`, 
 qpdf --encrypt --user-password=raccoon --owner-password=raccoon --bits=256 -- plain.pdf password.pdf
 ```
 
-## The scanner fixtures: jbig2.pdf, ccitt.pdf and jpx.pdf
+### The scanner fixtures: jbig2.pdf, ccitt.pdf and jpx.pdf
 
 Each holds one 600 x 600 image: white, with a black rectangle from x 150 to 300 and y 120 to 420, counted from the top-left corner. `shapeProblem` in `e2e/pdfFixture.ts` checks it as fractions of the page: a quarter to half of the width, a fifth to seven tenths of the height. The image was written by a few lines of Python as `shape.pbm` (PBM, 1 bit) and `shape.pgm` (PGM, 8 bit gray), then compressed by each scanner codec:
 
@@ -35,7 +49,7 @@ Each holds one 600 x 600 image: white, with a black rectangle from x 150 to 300 
   img2pdf -o jpx.pdf shape.jp2
   ```
 
-## embedded-font.pdf and embedded-font.png
+### embedded-font.pdf and embedded-font.png
 
 A 6 x 3 inch page with "Quick&Raggy" in Space Grotesk at weight 500, 72 px on 120 px lines, in a 480 x 120 px box 48 px from the page's top-left corner (CSS pixels, 576 x 288 to the page). Chrome printed it from HTML with Playwright's `page.pdf()`, which embeds the font as a TrueType subset (`CIDFontType2` with `FontFile2`). Chrome embeds a variable font's other weights as Type 3 glyph drawings, so the font was first made static with fontTools 4.67.0:
 
