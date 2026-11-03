@@ -25,6 +25,7 @@ import {
   JOIN_MODE_ERRORS,
   JOIN_MODE_OPTIONS,
   nextAgeTickMs,
+  ownAnswerOver,
   rosterKey,
   rowBusy,
   rowBusyText,
@@ -34,7 +35,7 @@ import {
   type JoinRequestList,
   type JoinRequestRow,
   type JoinRequestsState,
-  type RowBusy,
+  type OwnAnswer,
 } from "./joinRequests.ts";
 
 /**
@@ -336,10 +337,11 @@ function RequestRow(props: {
   const { request } = props;
   const roomId = useRoomView((s) => s.roomId);
   const [as, setAs] = useState("");
-  const [busy, setBusy] = useState<RowBusy | null>(null);
+  const [own, setOwn] = useState<OwnAnswer<JoinRequestsState> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const busyRef = useRef(false);
-  const stillAt = useRef<JoinRequestsState | null>(null);
+  // The list on screen now, for an answer that comes back after newer lists did.
+  const listedNow = useRef(props.listed);
   const selectId = useId();
   const noteId = useId();
   const player = as === "" ? null : (props.players.find((p) => p.id === as) ?? null);
@@ -348,18 +350,19 @@ function RequestRow(props: {
   const hinted = typedNameMatch(request.name, props.players);
   const note = player ? carryOnNote(player, props.online.has(player.id), hinted?.id === player.id) : null;
 
-  // This device's answer holds the row busy until a newer list shows the let-in over: the row gone, or waiting again with no let-in running.
   useEffect(() => {
-    if (stillAt.current !== null && props.listed !== stillAt.current && !request.deciding) {
-      stillAt.current = null;
-      setBusy(null);
-    }
-  }, [props.listed, request.deciding]);
+    listedNow.current = props.listed;
+  }, [props.listed]);
+  // This device's answer holds the row busy until the lists show the let-in over: the row gone, or waiting again with no let-in running.
+  // Checked whenever the answer or the list changes, since the list that settles a 202 can arrive before it.
+  useEffect(() => {
+    if (own && ownAnswerOver(own, props.listed, request.deciding === true)) setOwn(null);
+  }, [own, props.listed, request.deciding]);
 
   const run = async (kind: "letting" | "turning") => {
     if (busyRef.current) return;
     busyRef.current = true;
-    setBusy(kind);
+    setOwn({ busy: kind, sent: props.listed, heard: "none", finalAt: null });
     setError(null);
     try {
       if (kind === "turning") {
@@ -369,26 +372,27 @@ function RequestRow(props: {
         const answer = await api.letIn(roomId, request.id, target);
         // A 202 means the grant is still being written. The signal that settles it brings the next list, so none is asked for here.
         if (answer.pending) {
-          stillAt.current = props.listed;
-          setBusy("still");
+          setOwn((o) => o && { ...o, busy: "still", heard: "pending" });
           return;
         }
       }
       // The row stays busy until the next list replaces it, so it never flashes idle between the answer and its leaving.
-      stillAt.current = props.listed;
+      setOwn((o) => o && { ...o, heard: "final", finalAt: listedNow.current });
       props.onAnswered();
     } catch (err) {
       setError(answerErrorText(err instanceof ApiError ? err.code : undefined, request.name));
       props.onRefused();
-      setBusy(null);
+      setOwn(null);
     } finally {
       busyRef.current = false;
     }
   };
 
   // The list keeps a request on screen while any DM device lets it in, so this row stays, with its words, until the let-in settles.
-  const shown = rowBusy(busy, request);
+  const shown = rowBusy(own?.busy ?? null, request);
   const disabled = shown !== null;
+  // A let-in that failed after its 202, or on another DM device, says why from the list.
+  const refusal = error ?? (request.refused && shown === null ? answerErrorText(request.refused, request.name) : null);
   return (
     <div
       role="group"
@@ -435,7 +439,7 @@ function RequestRow(props: {
             {shown === "turning" ? rowBusyText("turning", request.name) : "Turn away"}
           </Button>
         </div>
-        <ErrorText>{error}</ErrorText>
+        <ErrorText>{refusal}</ErrorText>
       </div>
     </div>
   );

@@ -9,6 +9,7 @@ import { accessErrors, type AuthKit, Color, HttpError, Name, parseBody, requireG
 import { ADMISSION_DEADLINE_MS, isEnding, type JoinRequest, type Refusal } from "../auth/joinRequests.ts";
 import { ASK_CHALLENGE_PER_ROOM_HOUR, type AskCounts } from "../auth/ratelimit.ts";
 import { continuable, newMember } from "../auth/roomRecords.ts";
+import { RoomFullError } from "../rooms/gateway.ts";
 import { isToken } from "../auth/tokens.ts";
 import { turnstileEnabled, verifyTurnstile } from "../auth/turnstile.ts";
 import { withTx } from "../auth/tx.ts";
@@ -336,15 +337,19 @@ export async function registerJoinRequestRoutes(app: FastifyInstance, kit: AuthK
       return {
         mode: room.join_mode,
         challenged,
-        // Never the requester's address, device or token. A request being let in says so, and whether its let-in answered 202.
-        requests: store.list(roomId).map((x) => ({
-          id: x.id,
-          name: x.name,
-          color: x.color,
-          askedAt: new Date(x.askedAt).toISOString(),
-          ...(x.state === "deciding" ? { deciding: true } : {}),
-          ...(x.pending ? { pending: true } : {}),
-        })),
+        // Never the requester's address, device or token. A request being let in says so, and whether its let-in answered 202, and one whose let-in failed says why for a while.
+        requests: store.list(roomId).map((x) => {
+          const refused = store.refusal(x);
+          return {
+            id: x.id,
+            name: x.name,
+            color: x.color,
+            askedAt: new Date(x.askedAt).toISOString(),
+            ...(x.state === "deciding" ? { deciding: true } : {}),
+            ...(x.pending ? { pending: true } : {}),
+            ...(refused ? { refused } : {}),
+          };
+        }),
         players,
       };
     });
@@ -375,7 +380,7 @@ export async function registerJoinRequestRoutes(app: FastifyInstance, kit: AuthK
         }
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
-        store.settle(request.id, settlementOf({ kind: "refused", error }));
+        store.settle(request.id, settlementOf({ kind: "refused", error }), refusalCode(error));
         throw answerFor(error, store.get(request.id));
       }
 
@@ -403,7 +408,7 @@ export async function registerJoinRequestRoutes(app: FastifyInstance, kit: AuthK
           if (promotedHash) kit.sessions.promoted(promotedHash);
         },
         settled(outcome) {
-          store.settle(request.id, settlementOf(outcome));
+          store.settle(request.id, settlementOf(outcome), outcome.kind === "refused" ? refusalCode(outcome.error) : undefined);
           req.log.info(
             { roomId, requestId: request.id, outcome: outcome.kind, by: grant.memberId, as: who.kind === "new" ? "new" : "existing" },
             "join request answered",
@@ -475,6 +480,13 @@ function settlementOf(outcome: AdmitOutcome): "in" | "gone" | "closed" | "failed
   if (err instanceof AsksClosed) return "closed";
   if (err instanceof HttpError && (err.code === "already_in" || err.code === "room_not_found")) return "gone";
   return "failed";
+}
+
+/** The code a refused let-in answers with (joinRequestErrors), for the DM list to say why. */
+function refusalCode(err: Error): ApiErrorCode {
+  if (err instanceof HttpError) return err.code;
+  if (err instanceof RoomFullError) return "room_full";
+  return "busy";
 }
 
 /**

@@ -55,8 +55,9 @@ export type JoinWaitAnswer =
  * A live request as DM devices see it. Never the requester's address,
  * device or token. `deciding`: a DM's let-in is running, so the row shows
  * busy and counts for nothing. `pending`: that let-in answered 202.
+ * `refused`: why the last let-in failed, for a minute after it did.
  */
-export type JoinRequestRow = { id: string; name: string; color: string; askedAt: string; deciding?: true; pending?: true };
+export type JoinRequestRow = { id: string; name: string; color: string; askedAt: string; deciding?: true; pending?: true; refused?: ApiErrorCode };
 /**
  * The DM's list. `players`: the members a requester may be let in as, never
  * a former DM. `challenged`: the room passed 20 asks this hour, so asks need

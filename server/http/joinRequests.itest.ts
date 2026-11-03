@@ -14,7 +14,7 @@ const PASSWORD = "owlbear-druid-wand";
 type List = {
   mode: JoinMode;
   challenged: boolean;
-  requests: Array<{ id: string; name: string; color: string; askedAt: string; deciding?: true; pending?: true }>;
+  requests: Array<{ id: string; name: string; color: string; askedAt: string; deciding?: true; pending?: true; refused?: string }>;
   players: Array<{ id: string; name: string; color: string }>;
 };
 
@@ -402,6 +402,46 @@ describe("join requests: asking, waiting and a DM's answer", () => {
     assert.deepEqual((await k.list(dm, roomId)).requests.map((r) => r.id), [id]);
   });
 
+  test("a let-in that fails after its 202, or on another DM device, says why on the DM list, until the next let-in (JBO2-02)", async () => {
+    const { dm, roomId } = await k.room("ask");
+    const id = await k.asked(t.client(), roomId);
+    const addMember = t.gateway.addMember;
+    let refuse!: () => void;
+    const refused = new Promise<void>((r) => (refuse = r));
+    t.gateway.addMember = async () => {
+      await refused;
+      const { RoomFullError } = await import("../rooms/gateway.ts");
+      throw new RoomFullError();
+    };
+    try {
+      const pending = await k.letIn(dm, roomId, id);
+      assert.equal(pending.statusCode, 202, pending.body);
+      refuse();
+      let rows: List["requests"] = [];
+      for (let i = 0; i < 50; i++) {
+        rows = (await k.list(dm, roomId)).requests;
+        if (rows[0]?.refused) break;
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      assert.deepEqual(rows.map((r) => [r.id, r.deciding, r.pending, r.refused]), [[id, undefined, undefined, "room_full"]], "waiting again, and why");
+      // The next let-in clears it while it runs.
+      let hold!: () => void;
+      const held = new Promise<void>((r) => (hold = r));
+      t.gateway.addMember = async (room, member) => {
+        await held;
+        return addMember.call(t.gateway, room, member);
+      };
+      const again = k.letIn(dm, roomId, id);
+      for (let i = 0; i < 50 && !(await k.list(dm, roomId)).requests[0]?.deciding; i++) await new Promise((r) => setTimeout(r, 10));
+      assert.deepEqual((await k.list(dm, roomId)).requests.map((r) => [r.deciding, r.refused]), [[true, undefined]]);
+      hold();
+      assert.ok([200, 202].includes((await again).statusCode));
+    } finally {
+      refuse();
+      t.gateway.addMember = addMember;
+    }
+  });
+
   test("a kick between a let-in's new member and its grant answers first, and the kicked device never gets in", async () => {
     const { dm, roomId } = await k.room("ask_only");
     const phone = t.client();
@@ -466,7 +506,7 @@ describe("join requests: asking, waiting and a DM's answer", () => {
     assert.equal(full.statusCode, 409, full.body);
     assert.equal(k.error(full), "room_full");
     const back = (await k.list(dm, roomId)).requests;
-    assert.deepEqual(back.map((r) => [r.id, Object.keys(r).sort()]), [[id, ["askedAt", "color", "id", "name"]]], "waiting again, with no let-in flags");
+    assert.deepEqual(back.map((r) => [r.id, Object.keys(r).sort(), r.refused]), [[id, ["askedAt", "color", "id", "name", "refused"], "room_full"]], "waiting again, with no let-in flags, and why for every DM device");
 
     assert.equal((await dm.delete(`/api/rooms/${roomId}/members/${fillers[0]!.id}`)).statusCode, 204);
     const addMember = t.gateway.addMember;

@@ -666,6 +666,46 @@ describe("raccoon-vtt join requests", { timeout: 600_000 }, () => {
     await iris.context.close();
   });
 
+  test("jf-3. a 202 that comes after the list that settled its let-in leaves the row answerable, and the list says why (JB-ASTRA-08, JBO2-02)", async () => {
+    // The room is still full from jf-2, so the server refuses this let-in at once. The DM's page hears it only as a 202 held back
+    // until the list that settled it has come, as when a let-in fails after its 202 and that list wins the race.
+    const juno = await device("juno");
+    await ask(juno.page, "Juno", { url: roomUrl() });
+    const row = requestRow(dm, "Juno");
+    await row.waitFor();
+    await dismissToasts(dm);
+    const LET_IN = "**/join-requests/*/let-in";
+    const settledList = dm.waitForResponse(async (res) => {
+      if (res.request().method() !== "GET" || !new URL(res.url()).pathname.endsWith("/join-requests")) return false;
+      const list = (await res.json().catch(() => null)) as { requests?: Array<{ name: string; deciding?: true; refused?: string }> } | null;
+      return list?.requests?.some((r) => r.name === "Juno" && !r.deciding && r.refused === "room_full") === true;
+    });
+    let refusedWith = 0;
+    await dm.route(LET_IN, async (route) => {
+      const answer = await route.fetch();
+      refusedWith = answer.status();
+      await settledList;
+      // Time for the page to read that list and draw it, so the 202 lands after it.
+      await dm.waitForTimeout(500);
+      await route.fulfill({ status: 202, json: { memberId: "late", pending: true } });
+    });
+    try {
+      await row.getByRole("button", { name: "Let Juno in" }).click();
+      await settledList;
+      await dm.waitForTimeout(1_500);
+      await shots.take(dm, "jf-late-202");
+      assert.equal(refusedWith, 409, "the server refused it, the room being full");
+      assert.equal(await row.getByText("Still letting Juno in…", { exact: true }).count(), 0, "not stuck on Still letting");
+      assert.equal(await row.getByRole("button", { name: "Let Juno in" }).isDisabled(), false, "and the row can answer again");
+      await row.getByText("The room is full: it holds 50 members. Remove a member first.", { exact: true }).waitFor({ timeout: 2_000 });
+    } finally {
+      await dm.unroute(LET_IN);
+    }
+    await juno.page.getByRole("button", { name: "Cancel" }).click();
+    await row.waitFor({ state: "detached" });
+    await juno.context.close();
+  });
+
   test("jr-13. no page logged an error", () => {
     for (const w of watches) assert.deepEqual(w.errors, [], `${w.label}'s page logged errors`);
   });

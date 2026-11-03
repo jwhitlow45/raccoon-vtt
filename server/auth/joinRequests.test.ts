@@ -5,6 +5,7 @@ import {
   ENDED_KEEP_MS,
   GENERATION_KEEP_MS,
   JoinRequests,
+  REFUSAL_SHOWN_MS,
   REQUEST_LIFE_MS,
   TURN_AWAY_HOLD_MS,
   WAIT_HOLD_MS,
@@ -278,6 +279,27 @@ describe("join requests: waiting", () => {
     assert.equal(store.get(r.id)?.state, "waiting");
     assert.equal(store.get(r.id)?.pending, undefined);
     assert.deepEqual(store.list(ROOM).map((x) => x.id), [r.id]);
+  });
+
+  test("a failed let-in says why on the DM list for a minute, and the next let-in or an ending clears it (JBO2-02)", () => {
+    const { time, store, asked } = setup();
+    const r = asked("s1");
+    store.take(ROOM, r.id);
+    store.markPending(r.id);
+    store.settle(r.id, "failed", "room_full");
+    assert.equal(store.refusal(r), "room_full", "a let-in that failed after its 202 had no refusal to answer");
+    store.take(ROOM, r.id);
+    assert.equal(store.refusal(r), null, "a let-in running again says nothing old");
+    store.settle(r.id, "failed", "busy");
+    time.advance(REFUSAL_SHOWN_MS - 1);
+    assert.equal(store.refusal(r), "busy");
+    time.advance(1);
+    assert.equal(store.refusal(r), null, "only for a while");
+    store.take(ROOM, r.id);
+    store.settle(r.id, "failed", "member_removed");
+    store.turnAway(ROOM, [r.id]);
+    assert.equal(store.refusal(r), null, "an ended request says nothing");
+    assert.equal(r.refused, undefined);
   });
 
   test("a request being let in stays on the DM list, marked, and a 202 marks it pending and tells the DMs (JBO1-01)", async () => {

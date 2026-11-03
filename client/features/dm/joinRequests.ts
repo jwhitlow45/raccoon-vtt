@@ -121,6 +121,27 @@ export function rowBusy(own: RowBusy | null, row: Pick<JoinRequestRow, "deciding
   return null;
 }
 
+/**
+ * This device's own answer on a row. `sent`: the list on screen when it
+ * went out. `heard`: what its HTTP answer said, `pending` for a 202 and
+ * `final` for let in or turned away. `finalAt`: the list on screen when a
+ * final answer came.
+ */
+export type OwnAnswer<L> = { busy: RowBusy; sent: L; heard: "none" | "pending" | "final"; finalAt: L | null };
+
+/**
+ * Whether this device's answer is over, so the row shows only what the
+ * list says. A 202 is over once a list newer than the one it went out
+ * from shows no let-in running, whichever came first, that list or the
+ * 202. A final answer is over at the next list after it, which no longer
+ * has the row. One still out is never over: a refusal ends it itself.
+ */
+export function ownAnswerOver<L>(own: OwnAnswer<L>, latest: L, deciding: boolean): boolean {
+  if (own.heard === "pending") return latest !== own.sent && !deciding;
+  if (own.heard === "final") return latest !== own.finalAt;
+  return false;
+}
+
 export function rowBusyText(busy: RowBusy, name: string): string {
   if (busy === "letting") return "Letting in…";
   if (busy === "turning") return "Turning away…";

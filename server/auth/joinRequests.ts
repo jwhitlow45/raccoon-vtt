@@ -1,3 +1,4 @@
+import type { ApiErrorCode } from "#shared/apiErrors.ts";
 import { randomToken } from "./tokens.ts";
 
 /**
@@ -32,6 +33,8 @@ export const GOT_IN_MARK_MS = 60_000;
  */
 export const GENERATION_KEEP_MS = 2 * ADMISSION_DEADLINE_MS;
 export const TURN_AWAY_HOLD_MS = 15 * 60_000;
+/** How long the DM list says why a let-in failed, on every DM device's row. */
+export const REFUSAL_SHOWN_MS = 60_000;
 // Waiting at once, memory bounds all three: a table of about 8 phones per
 // address, 50 places a room, 500 on the server.
 export const WAITING_PER_ADDRESS_ROOM = 8;
@@ -58,6 +61,8 @@ export type JoinRequest = {
   endAfter?: Ending | undefined;
   /** The let-in answered 202: its outcome is still being followed. The DM list shows it. */
   pending?: boolean | undefined;
+  /** Why the last let-in failed and when, for the DM list (`refusal`) while waiting. The next let-in's outcome replaces it. */
+  refused?: { code: ApiErrorCode; at: number } | undefined;
   endedAt?: number | undefined;
 };
 
@@ -221,6 +226,15 @@ export class JoinRequests {
 
   expiresAt(r: JoinRequest): number {
     return r.askedAt + this.#lifeMs;
+  }
+
+  /**
+   * Why the request's last let-in failed, while the DM list still says so:
+   * every DM device's row shows it, also the tapping one's after a 202,
+   * which had no refusal to hear.
+   */
+  refusal(r: JoinRequest): ApiErrorCode | null {
+    return r.state === "waiting" && r.refused && this.#now() - r.refused.at < REFUSAL_SHOWN_MS ? r.refused.code : null;
   }
 
   // ------------------------------------------------------------ the ask
@@ -402,9 +416,10 @@ export class JoinRequests {
    * the device is in already, its session and token are both gone, or the
    * commit's outcome stayed unknown. `failed`: nothing was granted, so the
    * request takes the ending recorded meanwhile, or the one the room or the
-   * clock calls for, or goes back to waiting with its place.
+   * clock calls for, or goes back to waiting with its place, and with
+   * `refused`, why, for the DM list.
    */
-  settle(id: string, outcome: "in" | "gone" | "closed" | "failed"): void {
+  settle(id: string, outcome: "in" | "gone" | "closed" | "failed", refused?: ApiErrorCode): void {
     const r = this.#requests.get(id);
     if (r?.state !== "deciding") return;
     if (outcome === "closed") {
@@ -436,6 +451,7 @@ export class JoinRequests {
     }
     r.state = "waiting";
     r.pending = undefined;
+    r.refused = refused ? { code: refused, at: this.#now() } : undefined;
     this.#changed(r.roomId);
   }
 
@@ -554,6 +570,7 @@ export class JoinRequests {
     r.endedAt = this.#now();
     r.endAfter = undefined;
     r.pending = undefined;
+    r.refused = undefined;
     const deviceKey = key(r.roomId, r.sessionId);
     if (this.#live.get(deviceKey) === r.id) this.#live.delete(deviceKey);
     this.#waits.get(r.id)?.finish(heard(ending));

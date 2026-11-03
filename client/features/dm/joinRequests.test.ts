@@ -12,6 +12,7 @@ import {
   JOIN_FLOOD_TEXT,
   joinToastText,
   nextAgeTickMs,
+  ownAnswerOver,
   panelsButtonLabel,
   rosterKey,
   rowBusy,
@@ -21,6 +22,8 @@ import {
   waitingRows,
   type JoinRequestList,
   type JoinRequestRow,
+  type OwnAnswer,
+  type RowBusy,
 } from "./joinRequests.ts";
 
 const T0 = Date.parse("2026-11-02T12:00:00.000Z");
@@ -111,6 +114,28 @@ describe("ages and words", () => {
     assert.equal(rowBusy("still", deciding), "still", "this device's 202, before the list marks it pending");
     assert.equal(rowBusy("turning", waiting), "turning");
     assert.deepEqual(waitingRows([waiting, { ...row("b", "Pat"), deciding: true }]).map((r) => r.id), ["a"], "only waiting rows count, toast or are turned away");
+  });
+
+  test("a 202 and the list that settles it, in either order, never leave the row stuck on Still letting (JB-ASTRA-08)", () => {
+    // RequestRow's own answer, step by step: a tap, lists arriving, the HTTP answer, and its effect checking after each.
+    type Step = { list: "deciding" | "pending" | "waiting" } | { answer: "202" | "final" };
+    const play = (steps: Step[]): RowBusy | null => {
+      let latest: { deciding: boolean } = { deciding: false };
+      let own: OwnAnswer<object> | null = { busy: "letting", sent: latest, heard: "none", finalAt: null };
+      for (const step of steps) {
+        if ("list" in step) latest = { deciding: step.list !== "waiting" };
+        else if (own) own = step.answer === "202" ? { ...own, busy: "still", heard: "pending" } : { ...own, heard: "final", finalAt: latest };
+        if (own && ownAnswerOver(own, latest, latest.deciding)) own = null;
+      }
+      return own?.busy ?? null;
+    };
+    assert.equal(play([{ list: "deciding" }, { answer: "202" }, { list: "pending" }]), "still", "the let-in is still running");
+    assert.equal(play([{ list: "deciding" }, { answer: "202" }, { list: "pending" }, { list: "waiting" }]), null, "202 first, then the list that settles it");
+    assert.equal(play([{ list: "deciding" }, { list: "pending" }, { list: "waiting" }, { answer: "202" }]), null, "the settling list first, then the 202");
+    assert.equal(play([{ answer: "202" }]), "still", "no newer list yet: still letting in");
+    assert.equal(play([{ list: "deciding" }, { answer: "final" }]), "letting", "let in: busy until the next list, which drops the row");
+    assert.equal(play([{ list: "deciding" }, { answer: "final" }, { list: "waiting" }]), null);
+    assert.equal(play([{ list: "waiting" }]), "letting", "no answer yet: nothing but a refusal ends this device's own answer");
   });
 
   test("the carry-on list follows the roster: a join, a rename, a removal and a DM upgrade each fetch it again, and names and kinds show at once (JB-ASTRA-05)", () => {
