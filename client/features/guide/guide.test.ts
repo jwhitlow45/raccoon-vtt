@@ -84,7 +84,7 @@ describe("the DM guide's page", () => {
     const linked = PANELS.filter((p) => p.guide !== undefined);
     assert.deepEqual(
       linked.map((p) => p.id).sort(),
-      ["areas", "characters", "dice", "dm", "encounters", "monsters", "outliner", "scenes", "token", "tracker"],
+      ["areas", "characters", "dice", "dm", "encounters", "monsters", "outliner", "scenes", "time", "token", "tracker"],
     );
     for (const p of linked) assert.ok(IDS.has(p.guide!), `${p.id}: #${p.guide}`);
     assert.ok(IDS.has("quick-start"), "the empty states' link");
