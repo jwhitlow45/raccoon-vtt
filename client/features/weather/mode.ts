@@ -88,6 +88,10 @@ export class WeatherMode {
   #gaps: number[] = [];
   #draws: number[] = [];
   #costs: number[] = [];
+  /** The loop held a tick in the window being judged (`frame`'s hold), so its frame costs were measured two ticks to each held frame. */
+  #held = false;
+  /** The window before the one being judged read slow by its frame costs. */
+  #slowCostBefore = false;
   /** The next draw is the tick's: set by a ticking frame, spent by `drew`, cleared by the next frame. */
   #tickDraw = false;
   #tickInWindow = false;
@@ -140,7 +144,10 @@ export class WeatherMode {
     if (!this.#looping) return null;
     const last = this.#lastTick;
     if (last !== null && now - last < TICK_MS) return null;
-    if (hold) return null;
+    if (hold) {
+      if (this.#windowAt !== null) this.#held = true;
+      return null;
+    }
     if (last !== null && now - last >= STALL_MS) {
       // A stall is a pause the page never announced, a map decoding or a tab coming back: its window is dropped, as a pause's is.
       this.#restart(now);
@@ -239,6 +246,7 @@ export class WeatherMode {
 
   #restart(now: number): void {
     this.#warmUntil = now + WARMUP_MS;
+    this.#slowCostBefore = false;
     this.#close();
   }
 
@@ -247,6 +255,7 @@ export class WeatherMode {
     this.#gaps = [];
     this.#draws = [];
     this.#costs = [];
+    this.#held = false;
   }
 
   #close(): void {
@@ -257,20 +266,29 @@ export class WeatherMode {
     this.#tickInWindow = false;
   }
 
-  /** A full window: too slow steps down once, and the next window opens here either way. */
+  /**
+   * A full window: too slow steps down once, and the next window opens here either way.
+   *
+   * The frame costs count by their median, since each holds whatever else that frame and its neighbours did (store.ts), and a median sees through it.
+   * Where the loop held ticks, at 33 frames a second or fewer, every two ticks were measured against one held frame, so a board whose frames
+   * vary by several ms can read one window slow by chance (WXB-R2-1). There it takes two windows in a row, so a slow canvas halves a window
+   * later. A step's own slow window counts toward the next level's two, so it holds still the usual 5 s after it halves.
+   */
   #judge(now: number): void {
-    // The frame costs by their median, since each holds whatever else that frame and its neighbours did (store.ts), and a median sees through it.
+    const slowCost = this.#costs.length >= MIN_FRAME_COSTS && median(this.#costs) > SLOW_FRAME_MS;
     const slow =
       (this.#gaps.length > 0 && median(this.#gaps) > SLOW_GAP_MS) ||
       (this.#draws.length > 0 && p95(this.#draws) > SLOW_DRAW_MS) ||
-      (this.#costs.length >= MIN_FRAME_COSTS && median(this.#costs) > SLOW_FRAME_MS);
+      (slowCost && (!this.#held || this.#slowCostBefore));
     if (slow) {
       const next = this.#input.particles && this.#level === "full" ? "half" : "still";
       this.#level = LEVELS[Math.max(LEVELS.indexOf(this.#level), LEVELS.indexOf(next))]!;
       this.#restart(now);
+      this.#slowCostBefore = slowCost;
       this.#settle(now);
       return;
     }
+    this.#slowCostBefore = slowCost;
     this.#open(now);
   }
 }

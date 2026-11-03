@@ -283,13 +283,16 @@ const NEIGHBOUR_FRAMES = 1.5;
 /**
  * Ticks in a row before the loop holds one (mode.ts `frame`'s hold). At 33
  * frames a second or fewer every frame ticks, so no frame shows the board
- * without the weather. Holding one in eight there, about four a second,
- * gives each hold two ticks to measure and a 3 s window about 20, enough
- * that a board whose frames vary by a few ms never reads as the weather's.
- * A held frame shows the particles one frame longer, which rain and snow
- * hide, and it never happens at 60 or 120 Hz, where ticks skip frames.
+ * without the weather. Holding one in four there, about seven a second,
+ * gives each hold two ticks to measure and a 3 s window about 45. One in
+ * eight left a board whose frames vary by up to 8 ms stepping down healthy
+ * phones within minutes, and with two slow windows in a row (mode.ts) one
+ * in four keeps them moving (WXB-R2-1). A held frame shows the particles one
+ * frame longer, which rain and snow hide, and its step is clamped (sim.ts
+ * STEP_CLAMP_MS), so they move about an eighth slower there. It never
+ * happens at 60 or 120 Hz, where ticks skip frames.
  */
-export const SAMPLE_AFTER = 7;
+export const SAMPLE_AFTER = 3;
 
 function median(values: readonly number[]): number {
   if (values.length === 0) return 0;

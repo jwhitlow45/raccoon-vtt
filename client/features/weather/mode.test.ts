@@ -179,6 +179,50 @@ test("a window whose ticks add more than 2 ms to their frames by the median step
   assert.equal(spiky.level, "full");
 });
 
+test("where the loop holds ticks, a window slow by its frame costs steps down only with the one before it slow too, and a step's window counts toward the next level", () => {
+  /** A 30 Hz screen from 0, holding one tick in four as store.ts does there while `holds`, each tick adding `cost` ms to its frame. */
+  const screen = (holds: boolean | ((at: number) => boolean), cost: (tickAt: number) => number) => {
+    const mode = new WeatherMode(SHOWN, 0);
+    let now = 0;
+    let n = 0;
+    return {
+      mode,
+      to(until: number) {
+        for (; now < until; now += 1000 / 30) {
+          const holding = typeof holds === "boolean" ? holds : holds(now);
+          if (mode.frame(now, holding && ++n % 4 === 0) === null) continue;
+          mode.drew(0.1);
+          mode.added(cost(now), now);
+        }
+        return mode.level;
+      },
+    };
+  };
+  const first = WARMUP_MS;
+  const second = WARMUP_MS + WINDOW_MS;
+  // Only the first window reads slow.
+  const once = (at: number) => (at >= first && at < second ? SLOW_FRAME_MS + 1 : 0.3);
+  assert.equal(screen(true, once).to(20_000), "full", "one slow window where ticks are held");
+  assert.equal(screen(false, once).to(second + 100), "half", "and with no held tick it is enough");
+  // A window opens and is judged at a tick, so up to a few frames after its time.
+  const slow = screen(true, () => SLOW_FRAME_MS + 1);
+  assert.equal(slow.to(second + WINDOW_MS - 100), "full");
+  assert.equal(slow.to(second + WINDOW_MS + 300), "half", "two in a row");
+  const halved = second + WINDOW_MS;
+  assert.equal(slow.to(halved + WARMUP_MS + WINDOW_MS - 100), "half");
+  assert.equal(slow.to(halved + WARMUP_MS + WINDOW_MS + 300), "still", "the next level's first window, with the step's");
+
+  // A scene load starts afresh: the slow window before it is no first of two.
+  const SLOW = SLOW_FRAME_MS + 1;
+  const reloaded = screen(true, (at) => (at < second || at >= second + 600 ? SLOW : 0.3));
+  reloaded.to(second + 300);
+  reloaded.mode.sceneLoaded(second + 300);
+  assert.equal(reloaded.to(second + 300 + WARMUP_MS + WINDOW_MS + 300), "full", "one slow window since the load");
+  // A window with no held tick, after windows that had them, needs only itself.
+  const unheld = screen((at) => at < second, (at) => (at < second ? 0.3 : SLOW));
+  assert.equal(unheld.to(second + WINDOW_MS + 300), "half");
+});
+
 test("a window with too few frame costs says nothing by them", () => {
   // One tick in 25 reports, all slow: about 3.6 a window, under the minimum.
   assert.ok((WINDOW_MS / 1000) * (30 / 25) < MIN_FRAME_COSTS);

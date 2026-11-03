@@ -297,12 +297,22 @@ describe("what a tick adds to its frame, which the sceneFunc's own timing cannot
     }
   });
 
-  test("a 30 Hz screen, where every frame would tick, holds one tick in eight to measure against, and keeps about 26 ticks a second", () => {
+  test("a 30 Hz screen, where every frame would tick, holds one tick in four to measure against, and keeps about 22 ticks a second", () => {
     const r = run({ hz: 30, seconds: 10, tick: 0.3, board: steady });
-    assert.ok(r.ticks >= 255 && r.ticks <= 270, `${r.ticks} ticks in 10 s`);
+    assert.ok(r.ticks >= 220 && r.ticks <= 230, `${r.ticks} ticks in 10 s`);
     assert.ok(r.frameCost > 0.2 && r.frameCost < 0.4, `measured ${r.frameCost}`);
     const busy = run({ hz: 30, seconds: 10, tick: 3, board: () => 9 });
     assert.ok(busy.frameCost > 2.5 && busy.frameCost < 3.5, `a busy board's ticks measured ${busy.frameCost}, not its 9 ms`);
+  });
+
+  test("a 30 Hz screen whose board is noisy keeps a healthy canvas moving for five minutes: up to 8 ms more in any frame, or a 12 ms task in three frames of ten", () => {
+    // Each held frame is the measure of the two ticks beside it, so one held at its lowest makes both read high (WXB-R2-1: holding one in eight, half of 60 such phones held still).
+    for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) {
+      const r0 = rng(seed);
+      assert.equal(run({ hz: 30, seconds: 300, tick: 0.3, board: () => 0.5 + r0() * 8 }).level, "full", `seed ${seed}, jitter`);
+      assert.equal(run({ hz: 30, seconds: 300, tick: 0.5, board: () => 0.5 + (r0() < 0.3 ? 12 : 0) }).level, "full", `seed ${seed}, tasks`);
+      assert.equal(run({ hz: 30, seconds: 20, tick: 3, board: () => 0.5 + r0() * 8 }).level, "still", `seed ${seed}, jitter, no GPU`);
+    }
   });
 
   test("a canvas with no GPU, whose ticks add 3 ms of paint (90 ms a second, over 6.1's 60), steps down to half and then holds still, at 30, 60 and 120 Hz, panned or not", () => {
