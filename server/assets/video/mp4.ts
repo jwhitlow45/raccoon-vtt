@@ -759,6 +759,9 @@ export function insideMdat(mdats: readonly Range[], at: number, end: number): bo
 /** The most frames a decoder may hold back to present out of order: H.264's largest decoded picture buffer. */
 const MAX_REORDER_FRAMES = 16;
 
+/** The most frames a B-frame file with no edit list may start in: a b-pyramid delays two or three, and more is a gap at the start (D-261102-732). */
+const MAX_IMPLICIT_DELAY_FRAMES = 4;
+
 /**
  * A track's samples on its presentation timeline, in seconds from where the
  * track starts to play: `seconds` is the length the durations give (the
@@ -819,10 +822,12 @@ function timing(moov: Moov, track: Track, movieTimescale: number, cap: number, c
   const edit = track.edit;
   // Some writers leave out the edit a B-frame file needs, so its first frame
   // shows a frame or two in. With no edit list, that first composition time
-  // stands in for the edit's media time (D-261102-732), but only up to the
-  // fixed slack: the offset rule already holds it within the reorder
-  // allowance, and that allowance grows with the file's own sample length.
-  const from = edit ? edit.mediaTime : first <= (TIMELINE_SLACK_MS / 1000) * scale ? first : 0;
+  // stands in for the edit's media time (D-261102-732), up to four typical
+  // frames and never past the fixed slack, since a typical frame is the
+  // file's own number. The reorder allowance would bound nothing: the offset
+  // rule already holds the first composition time within it.
+  const implicitLimit = Math.min(MAX_IMPLICIT_DELAY_FRAMES * typical, (TIMELINE_SLACK_MS / 1000) * scale);
+  const from = edit ? edit.mediaTime : first <= implicitLimit ? first : 0;
   const seconds = edit ? edit.segment / movieTimescale : media;
   return { times, seconds, start: (first - from) / scale, end: (last - from) / scale, media, reorder, frame: typical / scale };
 }
