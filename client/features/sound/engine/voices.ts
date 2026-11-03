@@ -357,7 +357,7 @@ export class Voices {
     v.startTimer = null;
     const ctxNow = this.#env.ctx.currentTime;
     if (aim < 0) {
-      // Loaded ahead at position 0, paused; a timer starts it, and the drift check corrects any lateness.
+      // Loaded ahead at position 0 and paused. A timer starts it, and the drift check corrects any lateness.
       v.el.pause();
       try {
         v.el.currentTime = 0;

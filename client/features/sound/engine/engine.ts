@@ -322,7 +322,7 @@ export class SoundEngine {
       })();
       this.#blobs.set(assetId, load);
     }
-    // Until the blob is in, the file streams by Range; the next pass takes the blob.
+    // Until the blob is in, the file streams by Range. The next pass takes the blob.
     return direct;
   }
 
