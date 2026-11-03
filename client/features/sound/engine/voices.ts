@@ -307,8 +307,16 @@ export class Voices {
     this.#reportMusic();
   }
 
-  /** Every voice at once, as for Room sound off, a handoff or the engine going: each fades over `ms`. */
+  /**
+   * Every voice at once, as for Room sound off, a handoff or the engine
+   * going: each fades over `ms`. The plan goes too, with the start that
+   * waited for an element (a Skip in a crossfade): it would otherwise start
+   * on a page that stopped, fetching and decoding under the lease's
+   * silence. The engine gives a plan again once this page plays.
+   */
   stopAll(ms: number): void {
+    this.#plans = [];
+    this.#cancelWhenFree();
     for (const v of this.#live.values()) if (!v.leaving) this.#leave(v, ms);
     this.#reportMusic();
   }
@@ -328,7 +336,7 @@ export class Voices {
   dispose(): void {
     this.#disposed = true;
     this.#unhold();
-    if (this.#whenFree) clearTimeout(this.#whenFree);
+    this.#cancelWhenFree();
     for (const v of this.#live.values()) this.#release(v);
     this.#live.clear();
   }
@@ -422,6 +430,11 @@ export class Voices {
       },
       Math.max(0, free - performance.now()) + 1,
     );
+  }
+
+  #cancelWhenFree(): void {
+    if (this.#whenFree) clearTimeout(this.#whenFree);
+    this.#whenFree = null;
   }
 
   /** Puts the element at its place: now with a short fade in, or paused at 0 until its start. */

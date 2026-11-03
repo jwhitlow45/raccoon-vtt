@@ -201,7 +201,7 @@ function rig(t: { now: number }) {
     return n;
   };
   const ctx = { currentTime: 0, createGain: node, createMediaElementSource: () => ({ connect: (to: unknown) => to, disconnect() {} }) } as unknown as AudioContext;
-  const pool = Array.from({ length: 11 }, () => ({ src: "", muted: false, paused: true, currentTime: 0, playbackRate: 1, readyState: 4, play() { this.paused = false; return Promise.resolve(); }, pause() { this.paused = true; } }));
+  const pool = Array.from({ length: 11 }, () => ({ src: "", muted: false, paused: true, currentTime: 0, playbackRate: 1, readyState: 4, plays: 0, play() { this.plays++; this.paused = false; return Promise.resolve(); }, pause() { this.paused = true; } }));
   const unlock = { pool: () => pool, holdWith: () => () => {} };
   const output = { music: node(), loop: node() } as unknown as Record<"music" | "loop", AudioNode>;
   gains.length = 0;
@@ -224,6 +224,30 @@ describe("the voices on the pool", () => {
     assert.ok(pool.slice(0, 2).some((el) => el.src === "/api/assets/a-road" && !el.paused));
     voices.dispose();
   });
+
+  // The engine stops this way when Room sound goes off and when another page takes the sound, and a display's blackout too.
+  for (const [how, stop] of [
+    ["a stop", (voices: Voices) => voices.stopAll(SHORT_FADE_MS)],
+    ["a blackout's empty plan", (voices: Voices) => voices.update([], () => BLACKOUT_FADE_MS)],
+  ] as const) {
+    test(`${how} while a track waits for an element, as Room sound off or another page taking the sound during a Skip in a crossfade, starts nothing later`, async () => {
+      const t = { now: T };
+      const { voices, pool } = rig(t);
+      const crossing: Playing = { ...quiet, music: { run: "r1", repeat: "all", fade: 5, now: { soundId: "tavern", at: T - 57_000 }, next: { soundId: "road", at: T - 2_000 } } };
+      voices.update(planVoices(crossing, SOUNDS, t.now), () => SHORT_FADE_MS);
+      const skipped: Playing = { ...quiet, music: { run: "r2", repeat: "all", fade: 5, now: { soundId: "road", at: T } } };
+      voices.update(planVoices(skipped, SOUNDS, t.now), () => SHORT_FADE_MS);
+      const plays = pool.reduce((n, el) => n + el.plays, 0);
+      stop(voices);
+      await new Promise((r) => setTimeout(r, SHORT_FADE_MS + 150));
+      assert.deepEqual(voices.snapshot(), [], "nothing sounds");
+      assert.equal(pool.reduce((n, el) => n + el.plays, 0), plays, "no element was played after the stop");
+      assert.ok(pool.every((el) => el.paused));
+      voices.update(planVoices(skipped, SOUNDS, t.now), () => SHORT_FADE_MS);
+      assert.deepEqual(voices.snapshot().map((v) => v.key), [`m:road:${T}:0`], "the page playing again starts the track at once");
+      voices.dispose();
+    });
+  }
 
   test("a pass that ends while it waits for an element never starts", async () => {
     const t = { now: T };
