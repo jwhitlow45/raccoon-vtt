@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import fc from "fast-check";
 import { SQUARES, type Grid } from "#shared/rules/grid.ts";
-import { drawnAt, footprint, rulesOutline, rulesSpot, snapPosition } from "./scene.ts";
+import { actionsName, drawnAt, footprint, rulesOutline, rulesSpot, snapPosition } from "./scene.ts";
 
 const HEX: Grid = { shape: "hex", orient: "rows" };
 
@@ -52,5 +52,14 @@ describe("the rules outline (snap-off section 4)", () => {
     assert.deepEqual(rulesOutline(SQUARES, { size: "large", x: 2, y: 6, nudge: { x: -1, y: 2 } }), { x: 0.125, y: -0.25, w: 2, h: 2 });
     assert.equal(rulesOutline(SQUARES, { size: "medium", x: 3, y: 3 }), null);
     assert.equal(rulesOutline(HEX, { size: "medium", x: 3, y: 3, nudge: { x: 1, y: 0 } }), null);
+  });
+});
+
+describe("a token's accessible name (snap-off section 4)", () => {
+  test("a token drawn between squares says so at the end, and one on its square does not", () => {
+    assert.equal(actionsName({ name: "Bree" }), "Bree actions");
+    assert.equal(actionsName({ name: "Goblin", number: 2 }), "Goblin 2 actions");
+    assert.equal(actionsName({ name: "Bree", nudge: { x: 3, y: 0 } }), "Bree actions, placed between squares");
+    assert.equal(actionsName({ name: "Goblin", number: 2, nudge: { x: -1, y: 1 } }), "Goblin 2 actions, placed between squares");
   });
 });

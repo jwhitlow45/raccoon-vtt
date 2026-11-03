@@ -273,3 +273,13 @@ export function drawsAboveFog(
 export function displayName(token: Pick<Token, "name" | "number">): string {
   return token.number === undefined ? token.name : `${token.name} ${token.number}`;
 }
+
+/**
+ * What a screen reader calls a token's actions: the bar is the board's
+ * accessible face of a token, since the board itself is a picture. A token
+ * drawn between squares says so (docs/design/design-v1-snap-off.md section 4),
+ * because its picture sits off the square its rules count.
+ */
+export function actionsName(token: Pick<Token, "name" | "number" | "nudge">): string {
+  return `${displayName(token)} actions${token.nudge ? ", placed between squares" : ""}`;
+}

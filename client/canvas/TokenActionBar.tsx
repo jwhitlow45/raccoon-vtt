@@ -71,7 +71,7 @@ import { handFocusOn } from "../lib/handFocus.ts";
 import { bodyHoldsField, useTypingWithin } from "../lib/keyboardInset.ts";
 import type { Point, Size } from "../lib/camera.ts";
 import { TAP_SLOP_PX } from "../lib/gestures.ts";
-import { displayName, footprint, type ViewToken } from "../lib/scene.ts";
+import { actionsName, displayName, footprint, type ViewToken } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
 import { effectChip, elevationBadge } from "../lib/tokenView.ts";
 import { dockSlot, foldsUnderSheet, sideSheetRoom, usePublishBar } from "../pages/fold.ts";
@@ -219,7 +219,7 @@ export function TokenActionBar(props: {
       tokenHeight={props.tokenHeight}
       opening={token.id}
       onShift={props.onShift}
-      label={`${displayName(token)} actions`}
+      label={actionsName(token)}
       dock={{ text: displayName(token), show: `Show ${displayName(token)} actions`, closeLabel: "Close", close: props.onClose }}
     >
       <TokenBarBody token={token} fullAccess={props.fullAccess} drags={props.drags === true} onDetails={props.onDetails} onClose={props.onClose} />
