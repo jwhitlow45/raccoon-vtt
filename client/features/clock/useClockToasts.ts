@@ -1,38 +1,121 @@
 import { useEffect, useRef } from "react";
 import { clockText } from "#shared/logText.ts";
 import type { LogEntry } from "#shared/model.ts";
+import type { ScopeHistory } from "#shared/undoContract.ts";
 import { arrivals } from "../areas/reminders.ts";
 import { useConfirmedSeq } from "../encounter/hooks.ts";
+import type { RoomView } from "../../state/types.ts";
 import { useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 
-/** How long an op this device sent can still claim the clock line it wrote. */
-export const OWN_MS = 15_000;
+type Kind = "step" | "history";
 
-type Own = { kind: "step" | "history"; at: number };
+/** An op this device sent that writes a clock line, by its `n`, until the server settles it. */
+export type Claim = { n: number; kind: Kind };
 
-/** What a pending op writes a clock line as: a step or Set, or an Undo or Redo (whose line carries `from`). Null for any other op. */
-export function ownKindOf(op: { t: string }): Own["kind"] | null {
-  if (op.t.startsWith("clock.")) return "step";
-  if (op.t === "undo" || op.t === "redo") return "history";
-  return null;
+/**
+ * The history labels of a step that moves the clock (server/rooms/undoLabels.ts
+ * describeOp): a step, Set, a calendar save and the party's Long Rest. Only
+ * their Undo or Redo can write the DM's "undid a clock change" line.
+ */
+const CLOCK_STEP = /^(moving the clock on |setting the date and time$|changing the calendar$|the party's Long Rest$)/;
+
+type SentOp = { t: string; at?: number; head?: string; scope?: "play" | "setup"; of?: number };
+
+/**
+ * What a sent op writes a clock line as, or null for an op that writes none
+ * (ASTRA-05). Stop, the sharing switch and a calendar save without a time
+ * write none. An undo or redo writes one only when the step it names, the
+ * head of its stack as this device last heard it, moved the clock. One that
+ * names a step by `of` is not claimed, since the device holds only heads.
+ */
+export function ownKindOf(op: SentOp, history: { play: ScopeHistory; setup?: ScopeHistory } | null | undefined): Kind | null {
+  switch (op.t) {
+    case "clock.start":
+    case "clock.set":
+    case "clock.advance":
+      return "step";
+    case "clock.update":
+      return op.at !== undefined ? "step" : null;
+    case "undo":
+    case "redo": {
+      if (op.of !== undefined || op.head === undefined) return null;
+      const head = history?.[op.scope ?? "play"]?.[op.t].head;
+      return head?.id === op.head && CLOCK_STEP.test(head.label) ? "history" : null;
+    }
+    default:
+      return null;
+  }
+}
+
+function kindOf(entry: LogEntry): Kind {
+  return entry.data?.type === "clock" && entry.data.from !== undefined ? "history" : "step";
 }
 
 /**
- * A clock line that arrived, minus those this device caused. A line has no
- * author, so a device remembers the ops it sent, and the first line of the
- * same kind within `OWN_MS` is its own (4.7: "The DM device that made the
- * change does not" toast). An op the server refused leaves a claim that
- * lapses on its own.
+ * The clock lines this device's own ops wrote (ASTRA-05). A line names no
+ * author and the server's answer names no line, so a claim is matched only
+ * against the clock lines that arrived in the same update as its answer: a
+ * batch's lines and its acks travel in one `ev`, and a snapshot that ends
+ * an op unanswered carries its line if it wrote one. A refused op, and one
+ * whose update held no line of its kind, gives its claim up there. Two
+ * same-kind lines in one batch, one this device's and one another's, are
+ * the one case left to chance.
  */
-export function unclaimed(fresh: readonly LogEntry[], own: Own[], now: number): LogEntry[] {
-  for (let i = own.length - 1; i >= 0; i--) if (now - own[i]!.at > OWN_MS) own.splice(i, 1);
-  return fresh.filter((entry) => {
-    const kind = entry.data?.type === "clock" && entry.data.from !== undefined ? "history" : "step";
-    const i = own.findIndex((o) => o.kind === kind);
-    if (i < 0) return true;
-    own.splice(i, 1);
-    return false;
-  });
+export function settleClaims(claims: readonly Claim[], pending: ReadonlySet<number>, refused: ReadonlySet<number>, arrived: readonly LogEntry[]): { mine: string[]; left: Claim[] } {
+  const pool = arrived.slice();
+  const mine: string[] = [];
+  const left: Claim[] = [];
+  for (const claim of claims) {
+    if (pending.has(claim.n)) {
+      left.push(claim);
+      continue;
+    }
+    if (refused.has(claim.n)) continue;
+    const i = pool.findIndex((entry) => kindOf(entry) === claim.kind);
+    if (i < 0) continue;
+    mine.push(pool[i]!.id);
+    pool.splice(i, 1);
+  }
+  return { mine, left };
+}
+
+type Watched = Pick<RoomView, "pending" | "refused" | "confirmed" | "history">;
+
+function clockLinesAdded(was: readonly LogEntry[] | undefined, now: readonly LogEntry[] | undefined): LogEntry[] {
+  if (!now || now === was) return [];
+  const before = new Set((was ?? []).map((e) => e.id));
+  return now.filter((e) => e.data?.type === "clock" && !before.has(e.id));
+}
+
+/**
+ * Follows the store for the clock lines this device's ops wrote: claims an
+ * op as it is sent, and settles it in the update that answers it.
+ */
+export function ownLineWatcher(): { update(s: Watched, prev: Watched): void; take(id: string): boolean } {
+  let claims: Claim[] = [];
+  let lastN = 0;
+  const mine = new Set<string>();
+  return {
+    update(s, prev) {
+      if (s.pending !== prev.pending) {
+        for (const p of s.pending) {
+          if (p.n <= lastN) continue;
+          lastN = p.n;
+          const kind = ownKindOf(p.op as SentOp, s.history?.summary);
+          if (kind !== null) claims.push({ n: p.n, kind });
+        }
+      }
+      if (claims.length === 0) return;
+      const pending = new Set(s.pending.map((p) => p.n));
+      if (claims.every((c) => pending.has(c.n))) return;
+      const settled = settleClaims(claims, pending, new Set(s.refused ?? []), clockLinesAdded(prev.confirmed?.log, s.confirmed?.log));
+      claims = settled.left;
+      for (const id of settled.mine) mine.add(id);
+    },
+    take(id) {
+      return mine.delete(id);
+    },
+  };
 }
 
 /**
@@ -47,29 +130,20 @@ export function useClockToasts(hidden: boolean): void {
   const ui = useRoomUi();
   const store = useRoomStore();
   const seen = useRef<Set<string> | null>(null);
-  const own = useRef<Own[]>([]);
-  const lastN = useRef(0);
-  // Ops are noted as they are sent, since a toast waits for the server's confirmation of its line, long after the op left `pending`.
+  const own = useRef<ReturnType<typeof ownLineWatcher> | null>(null);
+  // Followed as the store changes, since an op's answer and its line arrive in one update, long before the toast's effect runs.
   useEffect(() => {
-    const note = (pending: readonly { n: number; op: { t: string } }[]) => {
-      for (const p of pending) {
-        if (p.n <= lastN.current) continue;
-        lastN.current = p.n;
-        const kind = ownKindOf(p.op);
-        if (kind !== null) own.current.push({ kind, at: Date.now() });
-      }
-    };
-    note(store.getState().pending);
-    return store.subscribe((s, prev) => {
-      if (s.pending !== prev.pending) note(s.pending);
-    });
+    const watcher = ownLineWatcher();
+    own.current = watcher;
+    const first = store.getState();
+    watcher.update(first, { ...first, pending: [] });
+    return store.subscribe((s, prev) => watcher.update(s, prev));
   }, [store]);
   useEffect(() => {
     if (!log) return;
     const { seen: next, fresh } = arrivals(seen.current, log, confirmedSeq);
     seen.current = next;
-    const lines = fresh.filter((e) => e.kind === "event" && e.data?.type === "clock");
-    const shown = unclaimed(lines, own.current, Date.now());
+    const shown = fresh.filter((e) => e.kind === "event" && e.data?.type === "clock" && !own.current?.take(e.id));
     if (hidden) return;
     for (const entry of shown) if (entry.data?.type === "clock") ui.notify(clockText(entry.data), "info", undefined, undefined, true);
   }, [log, confirmedSeq, hidden, ui]);
