@@ -369,9 +369,8 @@ async function parseSegment(walk: Walk, segment: El): Promise<ParsedVideo> {
   let seekHeads = 0;
   const videoFrames = new Tally(VIDEO_LIMITS.parseVideoFrameHeaders, "video_fps");
   const soundFrames = new Tally(VIDEO_LIMITS.parseSoundFrameHeaders);
-  const frameTimes: number[] = [];
-  /** The shown frames a BlockDuration times, in ns: that frame's own end, whatever DefaultDuration says. */
-  const timed = new Map<number, number>();
+  /** The shown frames, each with its own BlockDuration where it has one, in ns (AMBUILD-ASTRA-08): a duration belongs to its block, not to its time. */
+  const frames: Frame[] = [];
   let soundEnd = -Infinity;
   /** The latest invisible block, in ns: it lies on the timeline though it shows nothing. */
   let invisibleEnd = -Infinity;
@@ -428,8 +427,7 @@ async function parseSegment(walk: Walk, segment: El): Promise<ParsedVideo> {
             invisibleEnd = Math.max(invisibleEnd, time);
             return;
           }
-          frameTimes.push(time);
-          if (timing.duration !== undefined) timed.set(time, Math.max(timed.get(time) ?? 0, timing.duration * known.scale));
+          frames.push({ time, own: timing.duration === undefined ? undefined : timing.duration * known.scale });
           if (!firstVideoHead) firstVideoHead = await walk.src.read(read.payloadStart, Math.min(16, b.end - read.payloadStart));
         } else {
           const samples = await soundSamples(walk, b, read, soundFrames);
@@ -486,17 +484,19 @@ async function parseSegment(walk: Walk, segment: El): Promise<ParsedVideo> {
   if (!tracks) throw refuse("bad_video");
   const video = tracks.find((t) => t.type === 1)!;
   const sound = tracks.find((t) => t.type === 2);
-  if (frameTimes.length === 0) throw refuse("bad_video");
+  if (frames.length === 0) throw refuse("bad_video");
   // Each SeekHead entry must point at the element it names.
   for (const seek of seeks) if (placed.get(seek.position) !== seek.target) throw refuse("bad_video");
 
-  const fps = peakInOneSecond(frameTimes, 1e9);
-  const videoEnd = framesEnd(frameTimes, timed, video.defaultDuration);
+  const fps = peakInOneSecond(frames.map((f) => f.time), 1e9);
+  const videoEnd = framesEnd(frames, video.defaultDuration);
   const tolerance = timelineToleranceMs((video.defaultDuration ?? videoEnd.gap) / 1e6) * 1e6;
   // Sound may end up to a frame or 50 ms after the picture (AMN-4, AMR-3): AAC and Opus pad their last packet.
   if (sound && soundEnd > videoEnd.end + tolerance) throw refuse("video_layout");
   const endNs = Math.max(videoEnd.end, invisibleEnd, soundEnd);
   checkTimeline({ declaredNs: duration * scale, clusterNs: lastClusterTimestamp * scale, endNs, toleranceNs: tolerance });
+  // Two shown frames at one time: a browser shows only one of them, so the file is not the one its frames say (D-261102-740).
+  if (videoEnd.repeated) throw refuse("video_layout");
   checkCues(cueEntries, { tracks, clusters, lastTicks, endTicks: Math.ceil(endNs / scale), segmentBytes: segment.end - segment.dataStart });
 
   return {
@@ -511,29 +511,34 @@ async function parseSegment(walk: Walk, segment: El): Promise<ParsedVideo> {
   };
 }
 
+type Frame = { time: number; own: number | undefined };
+
 /**
  * Where the shown frames end, in ns, with the gap a frame takes where the
- * file says none. A frame's BlockDuration is its own end, then the track's
+ * file says none, and whether two frames share a time. A frame's
+ * BlockDuration is its own end, then the track's
  * DefaultDuration, and the last frame without either lasts the larger of
  * the average gap and the gap before it, as a variable rate's last frame
  * and a muxer's Duration count it. A DefaultDuration far longer than the
  * frames' spacing still ends the frames where it says, so a Duration or a
  * cap it would pass is refused rather than trusted.
  */
-function framesEnd(times: readonly number[], timed: ReadonlyMap<number, number>, defaultDuration: number | undefined): { end: number; gap: number } {
-  const sorted = [...times].sort((a, b) => a - b);
-  const first = sorted[0]!;
-  const last = sorted[sorted.length - 1]!;
+function framesEnd(frames: readonly Frame[], defaultDuration: number | undefined): { end: number; gap: number; repeated: boolean } {
+  const sorted = [...frames].sort((a, b) => a.time - b.time);
+  const first = sorted[0]!.time;
+  const last = sorted[sorted.length - 1]!.time;
   const gap = sorted.length > 1 ? (last - first) / (sorted.length - 1) : 0;
-  const lastGap = sorted.length > 1 ? last - sorted[sorted.length - 2]! : 0;
+  const lastGap = sorted.length > 1 ? last - sorted[sorted.length - 2]!.time : 0;
   let end = -Infinity;
-  for (const [i, t] of sorted.entries()) {
-    const own = timed.get(t);
-    if (own !== undefined) end = Math.max(end, t + own);
-    else if (defaultDuration !== undefined) end = Math.max(end, t + defaultDuration);
-    else if (i === sorted.length - 1) end = Math.max(end, t + Math.max(gap, lastGap));
+  let repeated = false;
+  for (const [i, f] of sorted.entries()) {
+    if (i > 0 && f.time === sorted[i - 1]!.time) repeated = true;
+    const own = f.own;
+    if (own !== undefined) end = Math.max(end, f.time + own);
+    else if (defaultDuration !== undefined) end = Math.max(end, f.time + defaultDuration);
+    else if (i === sorted.length - 1) end = Math.max(end, f.time + Math.max(gap, lastGap));
   }
-  return { end: Math.max(end, last), gap };
+  return { end: Math.max(end, last), gap, repeated };
 }
 
 /**

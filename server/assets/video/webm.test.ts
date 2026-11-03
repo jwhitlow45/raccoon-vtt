@@ -539,7 +539,8 @@ describe("every kept value is read, checked and kept once (AMBUILD-ASTRA-02, AMB
       "bad_video",
     );
     await refused(tree({}, (t) => firstCluster(t).kids!.push(el(I.BlockGroup, block(1, 500, 0x10, Buffer.from([0x86, 0]))))), "bad_video");
-    const refs = (...distances: number[]) => (t: Ebml[]) => firstCluster(t).kids!.push(el(I.BlockGroup, block(1, 500, 0, Buffer.from([0x86, 0])), ...distances.map((d) => sint(I.ReferenceBlock, d))));
+    // At 510 ms, between two frames: a second frame at a frame's own time is refused (D-261102-740).
+    const refs = (...distances: number[]) => (t: Ebml[]) => firstCluster(t).kids!.push(el(I.BlockGroup, block(1, 510, 0, Buffer.from([0x86, 0])), ...distances.map((d) => sint(I.ReferenceBlock, d))));
     await checkVideoBytes(tree({}, refs(-33, 33)));
     await refused(tree({}, refs(-33, -66, 33)), "bad_video");
     await refused(tree({}, refs(2 ** 40)), "bad_video");
@@ -640,5 +641,33 @@ describe("the timeline is held to the cap and the Duration by a bounded toleranc
       }),
       "bad_video",
     );
+  });
+});
+
+describe("a BlockDuration belongs to its own block, and two shown frames never share a time (round 3: AMBUILD-ASTRA-08, D-261102-740)", () => {
+  const firstCluster = (t: Ebml[]) => findEbml(segmentOf(t), I.Cluster);
+  // Seconds as ticks: frames at 0 and 300 s, each said by DefaultDuration to last 600 s, and a Duration of 600 s.
+  const astra = (blockGroup: "before" | "after" | "none") =>
+    tree({ scale: 1e9, frameMs: [0, 300_000], clusterMs: 1e9, durationMs: 600_000 }, (t) => {
+      trackOf(t).kids!.push(uint(I.DefaultDuration, 600e9));
+      if (blockGroup === "none") return;
+      const cluster = firstCluster(t);
+      const timed = el(I.BlockGroup, block(1, 300, 0, Buffer.from([0x86, 0])), uint(I.BlockDuration, 300));
+      const second = cluster.kids!.findIndex((k) => k.id === I.SimpleBlock && k.data!.readInt16BE(1) === 300);
+      assert.ok(second > 0);
+      cluster.kids!.splice(blockGroup === "before" ? second : second + 1, 0, timed);
+    });
+
+  test("another block's BlockDuration at the same time does not shorten a frame DefaultDuration times", async () => {
+    // The untimed frame at 300 s still ends at 900 s, past the cap, in either order.
+    await refused(astra("none"), "video_length");
+    await refused(astra("before"), "video_length");
+    await refused(astra("after"), "video_length");
+  });
+
+  test("a second shown frame at a frame's own time is video_layout, and an invisible one there is kept", async () => {
+    const at500 = (flags: number) => (t: Ebml[]) => firstCluster(t).kids!.push({ id: I.SimpleBlock, data: Buffer.from([0x81, 0x01, 0xf4, flags, 0x86, 0]) });
+    await refused(tree({}, at500(0x00)), "video_layout");
+    await checkVideoBytes(tree({}, at500(0x08)));
   });
 });
