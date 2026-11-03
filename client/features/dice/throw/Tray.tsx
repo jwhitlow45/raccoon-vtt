@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { theme } from "../../../lib/theme.ts";
+import { BOARD_SCOPE, theme } from "../../../lib/theme.ts";
 import { useAccent } from "../../../state/accent.ts";
 import { effectiveZoom } from "../../device/layout.ts";
 import { TRAY_PX } from "./layout.ts";
@@ -14,6 +14,12 @@ import { useThrows, useThrowView, useTrayHost } from "./useThrows.ts";
  * the pane. The scrim behind the band and the rings and "+N" disc over it
  * are HTML, faded by CSS on the compositor. None of it takes a tap: taps
  * pass through to the panel.
+ *
+ * The whole tray keeps the board's dark look in either scheme
+ * (docs/design/design-v1-light-theme.md 6.4, D-261102-363): its root puts
+ * the dark palette and the dark accent in scope, so the scrim, the rings
+ * and the "+N" disc are dark on a light pane too, and every dice set keeps
+ * the edges it was chosen with.
  *
  * The tray's layout is in screen px, and the pane is zoomed by the
  * interface size, so every place here is a screen px over the zoom.
@@ -77,7 +83,7 @@ export function Tray(props: { host?: ThrowHost | null }) {
       aria-hidden="true"
       data-dice-tray=""
       // Under the header line's border, as wide as the line, and no taller than nothing: what it holds overflows down into the pane.
-      style={{ position: "absolute", left: 0, right: 0, top: `calc(100% + ${theme.line.border}px)`, height: 0, pointerEvents: "none" }}
+      style={{ ...BOARD_SCOPE, position: "absolute", left: 0, right: 0, top: `calc(100% + ${theme.line.border}px)`, height: 0, pointerEvents: "none" }}
     >
       {shown ? <Scrim key={`scrim-${shown.id}`} shown={shown} now={store.now()} /> : null}
       <div ref={slot} />
