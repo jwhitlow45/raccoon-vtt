@@ -146,7 +146,10 @@ function Compass(props: { value: number; onChange(toward: number): void }) {
       aria-label="Wind blows toward"
       style={{ display: "grid", gridTemplateColumns: `repeat(3, ${theme.touch}px)`, gridTemplateRows: `repeat(3, ${theme.touch}px)`, gap: theme.space(1), flex: "none" }}
     >
-      <span aria-hidden style={{ gridRow: 2, gridColumn: 2, placeSelf: "center", width: 20, height: 20, border: `${theme.line.border}px solid ${theme.color.controlBorder}`, borderRadius: theme.radius.sm }} />
+      {/* A cell as tall as the buttons around it, so the row is level whatever its box, with the square centered in it. */}
+      <span aria-hidden style={{ gridRow: 2, gridColumn: 2, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <span style={{ width: 20, height: 20, border: `${theme.line.border}px solid ${theme.color.controlBorder}`, borderRadius: theme.radius.sm }} />
+      </span>
       {COMPASS.map((c) => {
         const chosen = c.toward === props.value;
         return (
