@@ -1,0 +1,125 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { groundAt } from "#shared/rules/heights.ts";
+import { markIn } from "#shared/rules/heights.ts";
+import { dialogScene, twoRooms } from "./handPlans.ts";
+import { buildOps, SCENE_PLACEHOLDER } from "./ops.ts";
+import { landAll, landDungeon, previewOf, previewScene, scratchRoom } from "./scratch.ts";
+import { DEFAULT_SETTINGS } from "./settings.ts";
+import type { DungeonPlan } from "./plan.ts";
+
+const SEED = "1K7QH2MXA9F3TWQ5";
+
+function chunkOf(room: ReturnType<typeof scratchRoom>, x: number, y: number) {
+  return room.buildChunks[`${SCENE_PLACEHOLDER}:${Math.floor(x / 16)},${Math.floor(y / 16)}`];
+}
+
+test("DG-B: a plan lands whole in a room holding only its scene, traps armed and unfound", () => {
+  const plan = twoRooms();
+  const landed = landDungeon(plan, previewScene(dialogScene(plan), plan), "1-4");
+  assert.ok(landed.ok, landed.ok ? "" : landed.why);
+  const room = landed.room;
+  assert.deepEqual(Object.keys(room.scenes), [SCENE_PLACEHOLDER]);
+  assert.equal(room.meta.playerSceneId, null);
+  const scene = room.scenes[SCENE_PLACEHOLDER]!;
+  assert.deepEqual(scene.bounds, { w: 30, h: 30 });
+  assert.equal(scene.defaultView, undefined);
+  assert.equal(chunkOf(room, 3, 3)?.cells["3,3"], "stone");
+  assert.equal(chunkOf(room, 16, 4)?.cells["16,4"], "wood");
+  assert.equal(chunkOf(room, 10, 5)?.cells["10,5"], "rubble");
+  assert.deepEqual(chunkOf(room, 15, 5)?.edges["15,5,w"], { kind: "door", state: "locked", secret: false, discovered: false });
+  assert.equal(groundAt(room.buildChunks, SCENE_PLACEHOLDER, 16, 4), 5);
+  assert.equal(groundAt(room.buildChunks, SCENE_PLACEHOLDER, 14, 5), 5, "the near landing at the room's height");
+  assert.equal(groundAt(room.buildChunks, SCENE_PLACEHOLDER, 13, 5), 0, "the stair at the foot of the run");
+  assert.equal(markIn(chunkOf(room, 13, 5)!, 13, 5), "e");
+  const traps = Object.values(room.traps);
+  assert.deepEqual(traps.map((t) => [t.name, t.state, t.found, t.sceneId]), [["Hidden Pit", "armed", false, SCENE_PLACEHOLDER], ["Poisoned Needle", "armed", false, SCENE_PLACEHOLDER]]);
+  assert.equal(traps[0]?.rig?.pit?.floor, -5, "the pit's floor 10 ft under the raised room's ground, read from the landed chunks");
+  assert.equal(landed.ops.length, 10);
+});
+
+test("DG-B: a preview's scene is the dialog's under the placeholder id, square, on the plan's whole size", () => {
+  const plan = twoRooms();
+  const scene = previewScene({ ...dialogScene({ w: 12, h: 12 }), gridShape: "hexRows", defaultView: { x: 1, y: 1, zoom: 2 } }, plan);
+  assert.equal(scene.id, SCENE_PLACEHOLDER);
+  assert.deepEqual(scene.bounds, { w: 30, h: 30 });
+  assert.equal("gridShape" in scene, false);
+  assert.equal("defaultView" in scene, false);
+  assert.equal(scene.name, "Crypt");
+  assert.equal(scene.fogEnabled, true);
+});
+
+test("DG-B: a refusal names the op it stopped at, and nothing after it lands", () => {
+  const plan = twoRooms();
+  plan.traps = [{ preset: "hidden-pit", zone: { cells: [{ x: 29, y: 29, w: 2, h: 2 }] } }];
+  const landed = landDungeon(plan, previewScene(dialogScene(plan), plan), "1-4");
+  assert.ok(!landed.ok);
+  assert.match(landed.why, /^op 8: trap.create refused: a trap's squares lie inside its scene/);
+  const noDoor = twoRooms();
+  noDoor.traps = [{ preset: "poisoned-needle", zone: { door: { edge: "20,20,w" } } }];
+  const refused = landDungeon(noDoor, previewScene(dialogScene(noDoor), noDoor), "1-4");
+  assert.ok(!refused.ok);
+  assert.match(refused.why, /^op 8: trap.create refused/);
+});
+
+test("DG-B: an op that does not parse is a bug, named as such", () => {
+  const plan = twoRooms();
+  plan.heights = [{ ft: 500, cells: ["16,4"] }];
+  const landed = landDungeon(plan, previewScene(dialogScene(plan), plan), "1-4");
+  assert.ok(!landed.ok);
+  assert.match(landed.why, /build.height does not parse/);
+});
+
+/** Lone squares two apart: every side of each is an automatic wall, and no two walls touch. */
+function speckled(n: number): DungeonPlan {
+  const cells: string[] = [];
+  for (let y = 0; y < 100 && cells.length < n; y += 2) for (let x = 0; x < 100 && cells.length < n; x += 2) cells.push(`${x},${y}`);
+  return { ...twoRooms(), w: 100, h: 100, paint: { stone: cells }, doors: [], heights: [], stairs: [], traps: [] };
+}
+
+test("DG-B: the sight cap is checked on each prefix, and only a scene with vision on has one", () => {
+  const plan = speckled(2_000);
+  const scene = previewScene(dialogScene(plan), plan);
+  const lit = landAll(scratchRoom(), buildOps(plan, { ...scene, vision: { on: true, light: "bright" } }));
+  assert.ok(!lit.ok);
+  assert.equal(lit.at, 1);
+  assert.match(lit.why, /over the sight cap: This scene has 8,000 wall pieces/);
+  assert.ok(landAll(scratchRoom(), buildOps(plan, scene)).ok, "no vision, no cap");
+});
+
+test("DG-B: the room's limits are checked on each prefix", () => {
+  const plan = twoRooms();
+  const pillars: string[] = [];
+  for (let y = 0; y < 60 && pillars.length < 1_001; y += 2) for (let x = 0; x < 60 && pillars.length < 1_001; x++) pillars.push(`${x},${y}`);
+  const many = { ...plan, w: 60, h: 60, paint: { pillar: pillars }, doors: [], heights: [], stairs: [], traps: [] };
+  const landed = landAll(scratchRoom(), buildOps(many, previewScene(dialogScene(many), many)));
+  assert.ok(!landed.ok);
+  assert.match(landed.why, /build.paint over a limit: this scene can hold at most 1,000 pillars/);
+});
+
+test("DG-B: a preview is the plan, its ops, the room they make and the foot's counts, and a dungeon under two rooms is the fit error", () => {
+  const plan = twoRooms();
+  const made = previewOf(DEFAULT_SETTINGS, SEED, dialogScene(plan), () => plan);
+  assert.ok(made.ok);
+  assert.equal(made.plan, plan);
+  assert.deepEqual(made.summary, { rooms: 2, asked: 2, doors: 3, locked: 1, traps: 2 });
+  assert.equal(made.ops.length, 10);
+  assert.deepEqual(Object.keys(made.room.scenes), [SCENE_PLACEHOLDER]);
+  const one = { ...plan, rooms: plan.rooms.slice(0, 1) };
+  assert.deepEqual(previewOf(DEFAULT_SETTINGS, SEED, dialogScene(plan), () => one), { ok: false, error: "fit" });
+});
+
+test("DG-B: a generator that throws, or a plan the scratch room refuses, is the bug error", () => {
+  const quiet = console.error;
+  const logged: unknown[] = [];
+  console.error = (...args: unknown[]) => void logged.push(args);
+  try {
+    const plan = twoRooms();
+    assert.deepEqual(previewOf(DEFAULT_SETTINGS, SEED, dialogScene(plan), () => { throw new Error("boom"); }), { ok: false, error: "bug" });
+    const bad = { ...plan, traps: [{ preset: "hidden-pit", zone: { cells: [{ x: 40, y: 40, w: 2, h: 2 }] } }] };
+    assert.deepEqual(previewOf(DEFAULT_SETTINGS, SEED, dialogScene(plan), () => bad), { ok: false, error: "bug" });
+    assert.equal(logged.length, 2, "each bug is logged for the console");
+  } finally {
+    console.error = quiet;
+  }
+});
