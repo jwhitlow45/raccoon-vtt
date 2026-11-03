@@ -370,9 +370,11 @@ async function parseSegment(walk: Walk, segment: El): Promise<ParsedVideo> {
   const videoFrames = new Tally(VIDEO_LIMITS.parseVideoFrameHeaders, "video_fps");
   const soundFrames = new Tally(VIDEO_LIMITS.parseSoundFrameHeaders);
   const frameTimes: number[] = [];
+  /** The shown frames a BlockDuration times, in ns: that frame's own end, whatever DefaultDuration says. */
+  const timed = new Map<number, number>();
   let soundEnd = -Infinity;
-  /** Where frames a BlockDuration times end, and where invisible frames lie, in ns: the timeline beyond the shown frames' starts. */
-  let timedEnd = -Infinity;
+  /** The latest invisible block, in ns: it lies on the timeline though it shows nothing. */
+  let invisibleEnd = -Infinity;
   let lastClusterTimestamp = 0;
   /** The latest block's timestamp in the Segment's ticks, which no Cue may pass. */
   let lastTicks = 0;
@@ -423,11 +425,11 @@ async function parseSegment(walk: Walk, segment: El): Promise<ParsedVideo> {
           videoFrames.add();
           if (read.lacing !== 0) throw refuse("bad_video");
           if (read.invisible) {
-            timedEnd = Math.max(timedEnd, time);
+            invisibleEnd = Math.max(invisibleEnd, time);
             return;
           }
           frameTimes.push(time);
-          if (timing.duration !== undefined) timedEnd = Math.max(timedEnd, time + timing.duration * known.scale);
+          if (timing.duration !== undefined) timed.set(time, Math.max(timed.get(time) ?? 0, timing.duration * known.scale));
           if (!firstVideoHead) firstVideoHead = await walk.src.read(read.payloadStart, Math.min(16, b.end - read.payloadStart));
         } else {
           const samples = await soundSamples(walk, b, read, soundFrames);
@@ -487,19 +489,15 @@ async function parseSegment(walk: Walk, segment: El): Promise<ParsedVideo> {
   if (frameTimes.length === 0) throw refuse("bad_video");
   // Each SeekHead entry must point at the element it names.
   for (const seek of seeks) if (placed.get(seek.position) !== seek.target) throw refuse("bad_video");
-  checkCues(cueEntries, { tracks, clusters, lastTicks, segmentBytes: segment.end - segment.dataStart });
 
   const fps = peakInOneSecond(frameTimes, 1e9);
-  const first = Math.min(...frameTimes);
-  const last = Math.max(...frameTimes);
-  const frame = video.defaultDuration ?? (frameTimes.length > 1 ? (last - first) / (frameTimes.length - 1) : 0);
+  const videoEnd = framesEnd(frameTimes, timed, video.defaultDuration);
+  const tolerance = timelineTolerance(video.defaultDuration ?? videoEnd.gap);
   // Sound may end up to a frame or 50 ms after the picture (AMN-4, AMR-3): AAC and Opus pad their last packet.
-  const tolerance = Math.max(frame, VIDEO_LIMITS.soundOverrunMs * 1e6);
-  if (sound && soundEnd > last + frame + tolerance) throw refuse("video_layout");
-  // A variable rate's last frame lasts about as long as the gap before it, which a muxer's Duration counts.
-  const beforeLast = frameTimes.reduce((m, t) => (t < last && t > m ? t : m), -Infinity);
-  const lastFrame = video.defaultDuration ?? Math.max(frame, Number.isFinite(beforeLast) ? last - beforeLast : 0);
-  checkTimeline({ declaredNs: duration * scale, clusterNs: lastClusterTimestamp * scale, endNs: Math.max(last + lastFrame, timedEnd, soundEnd), toleranceNs: Math.max(tolerance, lastFrame) });
+  if (sound && soundEnd > videoEnd.end + tolerance) throw refuse("video_layout");
+  const endNs = Math.max(videoEnd.end, invisibleEnd, soundEnd);
+  checkTimeline({ declaredNs: duration * scale, clusterNs: lastClusterTimestamp * scale, endNs, toleranceNs: tolerance });
+  checkCues(cueEntries, { tracks, clusters, lastTicks, segmentBytes: segment.end - segment.dataStart });
 
   return {
     container: "webm",
@@ -513,16 +511,51 @@ async function parseSegment(walk: Walk, segment: El): Promise<ParsedVideo> {
   };
 }
 
+/** The most the Duration and the timeline may differ by, whatever frame length a file claims: no file's own number may widen it (round 2 of the build review). */
+const TIMELINE_SLACK_NS = 1e9;
+
+/** A frame's length or 50 ms, the larger, but never past the fixed slack. */
+function timelineTolerance(frameNs: number): number {
+  return Math.min(Math.max(frameNs, VIDEO_LIMITS.soundOverrunMs * 1e6), TIMELINE_SLACK_NS);
+}
+
+/**
+ * Where the shown frames end, in ns, with the gap a frame takes where the
+ * file says none. A frame's BlockDuration is its own end, then the track's
+ * DefaultDuration, and the last frame without either lasts the larger of
+ * the average gap and the gap before it, as a variable rate's last frame
+ * and a muxer's Duration count it. A DefaultDuration far longer than the
+ * frames' spacing still ends the frames where it says, so a Duration or a
+ * cap it would pass is refused rather than trusted.
+ */
+function framesEnd(times: readonly number[], timed: ReadonlyMap<number, number>, defaultDuration: number | undefined): { end: number; gap: number } {
+  const sorted = [...times].sort((a, b) => a - b);
+  const first = sorted[0]!;
+  const last = sorted[sorted.length - 1]!;
+  const gap = sorted.length > 1 ? (last - first) / (sorted.length - 1) : 0;
+  const lastGap = sorted.length > 1 ? last - sorted[sorted.length - 2]! : 0;
+  let end = -Infinity;
+  for (const [i, t] of sorted.entries()) {
+    const own = timed.get(t);
+    if (own !== undefined) end = Math.max(end, t + own);
+    else if (defaultDuration !== undefined) end = Math.max(end, t + defaultDuration);
+    else if (i === sorted.length - 1) end = Math.max(end, t + Math.max(gap, lastGap));
+  }
+  return { end: Math.max(end, last), gap };
+}
+
 /**
  * The presentation timeline against the Duration and the length cap
- * (AMBUILD-ASTRA-03, AMBUILD-SOL-005): the last frame's end, every
- * BlockDuration and every invisible block, and the sound's end. A Duration
- * the timeline runs past says less than the file holds. One the timeline
- * falls short of by more than a frame or 50 ms is an edited timeline, a
- * gap the player would hold. Either way the facts would not say what plays.
- * Since the two must agree, the Duration's cap holds the timeline to it too.
+ * (AMBUILD-ASTRA-03, AMBUILD-SOL-005): the shown frames' ends, every
+ * invisible block and the sound's end. The cap holds the timeline first and
+ * on its own, whatever the Duration says, so a file that runs past it is
+ * too long rather than unfinished. A Duration the timeline runs past says
+ * less than the file holds. One the timeline falls short of is an edited
+ * timeline, a gap the player would hold. The tolerance is never more than
+ * TIMELINE_SLACK_NS.
  */
 function checkTimeline(t: { declaredNs: number; clusterNs: number; endNs: number; toleranceNs: number }): void {
+  if (Math.max(t.endNs, t.clusterNs) > VIDEO_LIMITS.maxDurationMs * 1e6 + t.toleranceNs) throw refuse("video_length");
   if (t.declaredNs < t.clusterNs || t.declaredNs < t.endNs - t.toleranceNs) throw refuse("video_unfinished");
   const declaredMs = Math.round(t.declaredNs / 1e6);
   if (declaredMs < VIDEO_LIMITS.minDurationMs || declaredMs > VIDEO_LIMITS.maxDurationMs) throw refuse("video_length");

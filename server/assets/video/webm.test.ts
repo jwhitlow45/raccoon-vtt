@@ -550,10 +550,13 @@ describe("the timeline must be the one the Duration says (AMBUILD-ASTRA-03, AMBU
   test("frames running past a short Duration in one Cluster are refused, and at their real length past the cap too", async () => {
     // Seconds as ticks, so 602 frames a second apart fit one Cluster's relative times.
     const frameMs = Array.from({ length: 602 }, (_, i) => i * 1000);
-    await refused(webmFile({ scale: 1e9, frameMs, clusterMs: 1e9, durationMs: 1000 }), "video_unfinished");
+    // A timeline past the cap is too long whatever the Duration says (round 2).
+    await refused(webmFile({ scale: 1e9, frameMs, clusterMs: 1e9, durationMs: 1000 }), "video_length");
     await refused(webmFile({ scale: 1e9, frameMs, clusterMs: 1e9 }), "video_length");
     // The reviewers' pair: frames at 0 and 610 s, said to last a second.
-    await refused(webmFile({ scale: 1e8, frameMs: [0, 610_000], clusterMs: 1e9, durationMs: 1000 }), "video_unfinished");
+    await refused(webmFile({ scale: 1e8, frameMs: [0, 610_000], clusterMs: 1e9, durationMs: 1000 }), "video_length");
+    // Frames to 4 s said to last 1 s stay unfinished.
+    await refused(webmFile({ frameMs: [0, 1000, 2000, 3000, 4000], durationMs: 1000 }), "video_unfinished");
   });
 
   test("an invisible block or a frame's BlockDuration past the Duration is refused", async () => {
@@ -584,5 +587,34 @@ describe("the timeline must be the one the Duration says (AMBUILD-ASTRA-03, AMBU
     // 1 s at 30 fps, then frames 500 ms apart, the Duration counting the last one's 500 ms.
     const frameMs = [...Array.from({ length: 30 }, (_, i) => Math.round((i * 1000) / 30)), 1000, 1500, 2000];
     await checkVideoBytes(webmFile({ frameMs, durationMs: 2500 }));
+  });
+});
+
+describe("the timeline is held to the cap and the Duration by a bounded tolerance, never a file's own number (round 2: AMBUILD-ASTRA-03, AMBUILD-SOL-005)", () => {
+  const withDefault = (ns: number) => (t: Ebml[]) => trackOf(t).kids!.push(uint(I.DefaultDuration, ns));
+  const oneFrame = (blockMs: number) => (t: Ebml[]) => {
+    const cluster = findEbml(segmentOf(t), I.Cluster);
+    cluster.kids = [findEbml(cluster, I.Timestamp), el(I.BlockGroup, block(1, 0, 0, Buffer.from([0x82, 0x49, 0x83, 0x42, 0x00, 1, 2])), uint(I.BlockDuration, blockMs))];
+    segmentOf(t).kids = segmentOf(t).kids!.filter((k) => k.id !== I.Cluster || k === cluster);
+    findEbml(segmentOf(t), I.Cues).kids = [el(I.CuePoint, uint(I.CueTime, 0), el(I.CueTrackPositions, uint(0xf7, 1), { id: 0xf1, data: Buffer.alloc(4), at: cluster }))];
+  };
+
+  test("a DefaultDuration of ten minutes cannot carry the last frame past a one-second Duration", async () => {
+    await refused(tree({ frameMs: [0, 1000], durationMs: 1000 }, withDefault(600e9)), "video_unfinished");
+  });
+
+  test("an explicit BlockDuration ends its frame, whatever DefaultDuration says, and the cap holds the timeline on its own", async () => {
+    // One frame lasting 20 minutes, said to last 10 by both DefaultDuration and the Duration.
+    await refused(tree({ frameMs: [0], durationMs: 600_000 }, (t) => (withDefault(600e9)(t), oneFrame(1_200_000)(t))), "video_length");
+    // A short BlockDuration wins over a long DefaultDuration for its frame.
+    await checkVideoBytes(tree({ frameMs: [0], durationMs: 2000 }, (t) => (withDefault(600e9)(t), oneFrame(2000)(t))));
+  });
+
+  test("the Duration and the timeline agree within a second at most, whatever frame length the file claims", async () => {
+    // Frames to 1967 ms, each said to last 5 s: the timeline ends at 6967 ms, and a 5 s frame no longer widens the tolerance to 5 s.
+    const frameMs = Array.from({ length: 60 }, (_, i) => Math.round((i * 1000) / 30));
+    await checkVideoBytes(tree({ frameMs, durationMs: 6967 }, withDefault(5e9)));
+    await refused(tree({ frameMs, durationMs: 2001 }, withDefault(5e9)), "video_unfinished");
+    await refused(tree({ frameMs, durationMs: 11_000 }, withDefault(5e9)), "video_layout");
   });
 });
