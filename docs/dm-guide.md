@@ -636,7 +636,7 @@ When you need a dungeon and don't have an evening to paint one, the app can draw
 - **Density** is **Sparse**, **Normal** or **Dense**, which sets how much of the map the rooms fill. Sparse makes smaller rooms with plenty of rock between them, and Dense makes larger rooms packed closer together.
 - **Corridors** are **Straight**, **Bending** or **Winding**. Straight corridors run long and straight, Bending ones bend now and then, and Winding ones meander.
 - **Corridor width** is **Narrow** or **Wide**. A Wide corridor and its doorways are 2 squares across, with double doors, so Large creatures can walk through without squeezing once the doors are open.
-- **Extra ways round** adds loops, so the way back is not always the way you came in.
+- **Extra ways around** adds loops, so the way back is not always the way you came in.
 - **Heights** is **Flat** or **Some**. With Some, a few rooms are raised or sunk by 5 or 10 feet, and you reach each one by a straight flight of stairs from its doors.
 - **Traps** is **None**, **Few** or **Some**. When it is not None, **Party level** picks how strong they are: 1 to 4, 5 to 10, 11 to 16 or 17 to 20. The generator uses four of the SRD's example traps: the Hidden Pit, the Spiked Pit, the Falling Net and the Poisoned Needle. They start hidden, never sit in the entrance room, and players see one only once they find it.
 
@@ -1597,7 +1597,7 @@ Open the **Menu**, choose **Members**, and look for **Joining** near the top. It
 
 - **With the password** is how every room starts. The password and the player link let new devices in, and nobody can ask.
 - **With the password, or by asking** keeps the password and the link working, and adds a way in for anyone who doesn't have them. On the join page, under the usual password card, a card titled **No password?** offers **Ask to join**.
-- **Only by asking** makes every new device ask. The password and the player link stop letting anyone new in, and the player link now opens the join page, where the newcomer asks. Devices that are already in stay in, and a player you kick stays out, which makes this the mode to pick when you want a kick to stick without changing the password.
+- **Only by asking** makes every new device ask. The password and the player link no longer let anyone new in, and the player link now opens the join page, where the newcomer asks. Devices that are already in stay in, and a player you kick stays out, which makes this the mode to pick when you want a kick to stick without changing the password.
 
 The choice takes effect at once on every DM device. Switching back to With the password ends any request that is still waiting, and the newcomer's page tells them that requests are off and shows the password card instead.
 
@@ -1616,7 +1616,7 @@ When someone asks, every DM device shows a toast such as "Quinn asks to join." w
 Each request shows the name and color the newcomer chose and how long ago they asked. Under it are your choices:
 
 - **Let in** adds them to the room. By default they come in as **Someone new**, a new player with the name and color they typed, and everyone's Log reads "Quinn joins the room." just as it does for any other join.
-- **Let in as** is there for a player you already know who is on a new phone. Pick their name instead of Someone new, and the device carries on as that player. Because this hands over that player's characters, tokens and whispers, the panel spells it out ("This device will be Pat: Pat's characters, tokens and whispers. Only pick Pat if you know it is them.") and says whether Pat is online right now. If the newcomer typed a name that matches a player's, the panel mentions it, but it never picks the player for you, because anyone can type any name. Players who were ever DMs aren't offered.
+- **Let in as** is there for a player you already know who is on a new phone. Pick their name instead of Someone new, and the device carries on as that player. Because this hands over that player's characters, tokens and whispers, the panel spells it out ("Their device becomes Pat, with Pat's characters, tokens and whispers. Pick Pat only if you know it is them.") and says whether Pat is online right now. If the newcomer typed a name that matches a player's, the panel mentions it, but it never picks the player for you, because anyone can type any name. Players who were ever DMs aren't offered.
 - **Turn away** says no. The newcomer's page tells them, and that device can't ask your room again for 15 minutes.
 - **Turn away all** appears when two or more are waiting. It turns away only the requests you can see when you press it, so someone who asks a moment later is never turned away unseen. There is no Let in all on purpose: one careless tap should never let a crowd in.
 
@@ -1752,7 +1752,7 @@ Changes to your library, playlists and scenes' sounds are in **Setup history**. 
 
 **A scene's own sound.** When the mood fits a place, tap **Use what's playing** under Now playing: the scene you are looking at keeps the music and background sounds as they are now, volumes included. **Use silence** keeps silence instead. From then on, **Move players here** in the Scenes panel plays that scene's sound as the party arrives, and a playlist that is already playing simply carries on. **Play it** plays it without a move.
 
-**What your players hear and see.** Each player's phone asks once, the first time there is something to hear, whether to play the room's sound. At one table, play it from one device, such as the table display, so the sound doesn't echo. Each device sets its own volumes under **Menu**, **This device**, **Sounds**. Players never see your library, your playlists or what comes next. With **Players see what is playing** on, their Sound panel names the music and background sounds playing now, and otherwise it only says that something plays. During a blackout players and the table display hear nothing, while your own device plays on.
+**What your players hear and see.** Each player's phone asks once, the first time there is something to hear, whether to play the room's sound. If everyone sits at one table, turn sound on for one device only, such as the table display, so the sound doesn't echo. Each device sets its own volumes under **Menu**, **This device**, **Sounds**. Players never see your library, your playlists or what comes next. With **Players see what is playing** on, their Sound panel names the music and background sounds playing now, and otherwise it only says that something plays. During a blackout players and the table display hear nothing, while your own device plays on.
 
 One thing to watch: if a laptop shows the table display in a window (**Open on this device**) and sends its sound to the TV, through an HDMI cable for one, your players hear your device's sound from the TV during a blackout too. A laptop playing on its own speakers is heard only at your seat.
 
@@ -1771,7 +1771,7 @@ The clock never runs on its own. It moves when you move it, when the party takes
 1. Open **Time**. With no clock yet, the panel is a short form.
 1. Under **Calendar**, pick **Day count** for plain "Day 1, Day 2" dates, or **Months** for a calendar of your own with named months, a week and years. **Months** opens the Calendar dialog, described under [Your own calendar](#your-own-calendar). Its **Save** keeps your calendar on this form, and nothing is sent yet.
 1. Under **It is now**, set the date and the time. A new clock starts at Day 1, 8:00 AM.
-1. Choose whether players see it with **Players see the date and time**, on by default. Off, they get no date, time or time lines at all.
+1. Choose whether players see it with **Players see the date and time**, on by default. Off, they see no date or time anywhere, not even in the Log.
 1. Press **Start the clock**.
 
 Nothing reaches the table before that last press. A clock you start hidden never shows a player anything, not even the line in the Log that says it started.
@@ -1812,7 +1812,7 @@ Turn it off, and the Time panel leaves their list and nothing more of the clock 
 The app ships no calendar, since the calendars of published settings are not open content. You type in yours. **Calendar…** in the panel opens the dialog, and a Months clock's summary sits beside the button, such as "12 months, 7-day week".
 
 - **Day count** and **Months** are the two kinds. With a clock running, changing the kind sets **Today in this calendar** to the first day (of year 1, for Months), keeping the time of day, even if you had typed another date there.
-- **Months** lists one row per month with a **Name** and its **Days**, and **Move up**, **Move down** and **Remove** for each. **Add a month** adds one at the end. A new calendar starts with twelve months, "Month 1" to "Month 12", of 30 days each. A calendar has up to 24 months of 1 to 400 days, and a year of up to 1,000 days. A month of 1 day shows by its name alone, as a festival day does.
+- **Months** lists one row per month with a **Name** and its **Days**, and **Move up**, **Move down** and **Remove** for each. **Add a month** adds one at the end. A new calendar starts with twelve months, "Month 1" to "Month 12", of 30 days each. A calendar has up to 24 months of 1 to 400 days, and a year of up to 1,000 days. A 1-day month, such as a festival day, shows by its name alone.
 - **Day names** takes the names of the week in order, split by commas. Leave it empty for no week, so dates carry no weekday. There can be up to 14.
 - **After the year** takes words that follow the year, such as an era's initials. Leave it empty for none.
 - "A year is 360 days." counts the year as you edit the rows. Years count from 0, and there are no leap days.
@@ -1826,7 +1826,7 @@ Before the clock starts, **Change** beside your Months calendar opens the same d
 
 ### Fights and Long Rests
 
-A fight moves the clock too. A round is about 6 seconds of game time, so the clock adds 6 seconds a round, and **End the fight** keeps them: the round you ended in counts whole. While the fight runs, the panel and chip read the time with the rounds so far added, which you see once ten rounds make a minute. Under the date the panel says "In a fight, the clock adds 6 seconds a round when it ends." A fight you never started, with no **Start** pressed, adds nothing. If you start or set the clock in the middle of a fight, it reads the time you typed, and only the rounds after that count.
+A fight moves the clock too. A round is about 6 seconds of game time, so the clock adds 6 seconds a round, and **End the fight** keeps them: the round you ended in counts whole. While the fight runs, the panel and chip read the time with the rounds so far added, which you see once ten rounds make a minute. Under the date the panel says "When the fight ends, the clock moves on 6 seconds for each round." A fight you never started, with no **Start** pressed, adds nothing. If you start or set the clock in the middle of a fight, it reads the time you typed, and only the rounds after that count.
 
 **Long Rest for the party**, in the **Characters** panel, has a checkbox while a clock runs: **Move the clock on 8 hours**, ticked each time. **Finish the Long Rest** then moves the clock on first and rests everyone, so each character's rest ends at the new time. One **Undo** takes the whole rest back, as long as nothing else changed in between. A Long Rest of one character, from its own **Rest** section, never moves the clock, since two players resting would move it twice.
 
@@ -1840,7 +1840,7 @@ In the **Journal**, **Add the date**, beside **Add a secret**, adds a heading su
 
 ### Stopping the clock
 
-**Stop the clock**, at the foot of the panel, takes a second tap ("Tap again to stop the clock"). The date and time go. **Undo setup** in **Setup history** brings the clock back, with what it held.
+**Stop the clock**, at the foot of the panel, takes a second tap ("Tap again to stop the clock"). The date and time are removed for everyone. **Undo setup** in **Setup history** brings the clock back, with what it held.
 
 Starting, stopping, the calendar and the switch are setup, and moving or setting the time is play, so **Undo** in the top bar takes back a step and **Undo setup** takes back the others. One thing to know: the clock guards itself as a whole. If you change the calendar and then move the clock on, **Undo setup** refuses to take the calendar back and says "Undo the play step first", because the step after it is in the way. Undo that step first, or open **Calendar…** and change it back yourself. The other way round works the same: after a calendar save, **Undo** refuses a step from before it, and **Set the date and time** puts the time right.
 
