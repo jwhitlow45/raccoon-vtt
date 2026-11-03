@@ -1,7 +1,7 @@
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type CSSProperties, type ReactNode } from "react";
 import type { RoomState, Trap } from "#shared/model.ts";
 import { Loading } from "../../components/Loading.tsx";
-import { boardTheme, theme } from "../../lib/theme.ts";
+import { BOARD_SCOPE, boardTheme, theme } from "../../lib/theme.ts";
 import { findDoor } from "../doors/doors.ts";
 import { exportContent } from "../mapexport/content.ts";
 import { renderMapPng } from "../mapexport/render.ts";
@@ -24,6 +24,7 @@ const LONG_SIDE_PX = 800;
  * The picture, its ground and the marks over it keep the board's dark look
  * in either theme, as the map does, and the marks are SVG presentation
  * attributes, which cannot read a CSS variable, so they take `boardTheme`.
+ * What stands in its corner keeps the dark look too (`CORNER_SLOT`).
  *
  * The previous picture stays while the next one draws, so a choice that
  * changes nothing much never flashes the box empty. The dialog hears when
@@ -116,7 +117,7 @@ export function DungeonPreview(props: {
           </svg>
         </div>
       ) : null}
-      {props.children ? <div style={{ position: "absolute", right: theme.space(2), bottom: theme.space(2) }}>{props.children}</div> : null}
+      {props.children ? <div style={CORNER_SLOT}>{props.children}</div> : null}
       {props.drawing ? (
         <div style={{ position: "absolute", left: theme.space(2), bottom: theme.space(2), padding: `${theme.space(1)}px ${theme.space(2)}px`, borderRadius: theme.radius.sm, background: theme.color.surface }}>
           <Loading text={DRAWING} />
@@ -125,6 +126,15 @@ export function DungeonPreview(props: {
     </div>
   );
 }
+
+/**
+ * The corner slot, where the dialog puts Reroll. It stands on the board's
+ * dark ground or the dark picture in either scheme, so what it holds takes
+ * the dark look and the accent resolved for dark, its ring included (review
+ * LTB-1: the light accent's ring read 2.5:1 there). Its text color is set
+ * under the scope, as the inherited one is the page's.
+ */
+export const CORNER_SLOT = { ...BOARD_SCOPE, position: "absolute", right: theme.space(2), bottom: theme.space(2), color: theme.color.text } as CSSProperties;
 
 /** The scene's shape inside the preview's box, as large as fits. */
 export function fitBox(w: number, h: number, boxW: number, boxH: number): { width: number; height: number } {
