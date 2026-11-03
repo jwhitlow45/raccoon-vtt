@@ -7,14 +7,17 @@ import type { Camera } from "../../lib/camera.ts";
 import { drawWeather, sceneClip } from "./draw.ts";
 import { createField, resizeField, setFieldView, setHalf, stepField, type Field } from "./sim.ts";
 import { WeatherTextures } from "./textures.ts";
+import { tickCostForMode } from "./store.ts";
 import type { WeatherLayerProps } from "./WeatherController.tsx";
 
 /**
  * The test hooks on the weather's canvas (docs/design/design-v1-weather.md
- * 12, e2e): ticks and camera draws as plain properties, so nothing writes an
- * attribute 30 times a second. `data-weather` is set only on a change.
+ * 12, e2e and the bench): ticks, camera draws, the step-down's level and
+ * what a tick adds to its frame, as plain properties, so nothing writes an
+ * attribute 30 times a second.
+ * `data-weather` is set only on a change.
  */
-export type WeatherCanvas = HTMLCanvasElement & { weatherTicks?: number; weatherCameraDraws?: number };
+export type WeatherCanvas = HTMLCanvasElement & { weatherTicks?: number; weatherCameraDraws?: number; weatherLevel?: string; weatherFrameCost?: number };
 
 function makeCanvas(width: number, height: number): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
@@ -41,11 +44,14 @@ function cameraOf(stage: Konva.Stage): Camera {
 export default function WeatherLayer(props: WeatherLayerProps) {
   const { room } = props;
   const key = useStore(room.state, (s) => s.key);
+  const level = useStore(room.state, (s) => s.level);
   const shown = useTreeShown();
   const layerRef = useRef<Konva.Layer>(null);
   // The sceneFunc and the tick read the newest props without being made anew, so the shape's props never change and react-konva never draws it for a render.
   const live = useRef(props);
   live.current = props;
+  // Set around a tick's own draw, so only a tick reports its frame's cost (store.ts tickCostForMode).
+  const ticking = useRef(false);
 
   /** The room's field for this layer's look, view and size, made or brought up to date. */
   const fieldNow = useCallback(
@@ -87,6 +93,12 @@ export default function WeatherLayer(props: WeatherLayerProps) {
     layer.batchDraw();
   }, [key, props.view, props.width, props.height]);
 
+  useLayoutEffect(() => {
+    // From the room, since a layer held still draws no more ticks to say so.
+    const canvas = layerRef.current?.getCanvas()._canvas as WeatherCanvas | undefined;
+    if (canvas) canvas.weatherLevel = level;
+  }, [level]);
+
   useEffect(() => {
     if (!shown) return;
     return room.register({
@@ -96,7 +108,12 @@ export default function WeatherLayer(props: WeatherLayerProps) {
         if (!layer || !field) return;
         stepField(field, ms);
         // At once, in this frame: batchDraw would wait a frame and gate a 60 Hz clock down to 20 (5.2).
-        layer.draw();
+        ticking.current = true;
+        try {
+          layer.draw();
+        } finally {
+          ticking.current = false;
+        }
       },
     });
   }, [room, shown, fieldNow]);
@@ -115,10 +132,12 @@ export default function WeatherLayer(props: WeatherLayerProps) {
       g.setTransform(1, 0, 0, 1, 0, 0);
       drawWeather(g, field, { camera, clip: sceneClip(live.current.view, live.current.bounds, camera) }, room.textures);
       g.restore();
-      room.mode.drew(performance.now() - start);
+      const ms = performance.now() - start;
+      room.mode.drew(ticking.current ? tickCostForMode(ms, room.frameCost) : ms);
       const canvas = layer.getCanvas()._canvas as WeatherCanvas;
       canvas.weatherTicks = room.mode.ticks;
       canvas.weatherCameraDraws = room.mode.cameraDraws;
+      canvas.weatherFrameCost = room.frameCost;
     },
     [room, fieldNow],
   );

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { lookOf } from "./looks.ts";
-import { TICK_MS } from "./mode.ts";
-import { WeatherRoom, weatherStillReason, type Frames, type WeatherTarget } from "./store.ts";
+import { SLOW_DRAW_MS, TICK_MS } from "./mode.ts";
+import { TICK_BUDGET_MS, tickCostForMode, WeatherRoom, weatherStillReason, type Frames, type WeatherTarget } from "./store.ts";
 
 /**
  * The room's weather clock (docs/design/design-v1-weather.md 5.2): one loop
@@ -153,5 +153,68 @@ describe("This device's line on what keeps the weather still", () => {
     assert.equal(weatherStillReason({ reducedMotion: false, lowPower: false, level: "still" }), "Weather was slowing the map, so it stays still until you reload.");
     assert.equal(weatherStillReason({ reducedMotion: false, lowPower: false, level: "half" }), null, "half the particles still move");
     assert.equal(weatherStillReason({ reducedMotion: false, lowPower: false, level: "full" }), null);
+  });
+});
+
+describe("what a tick adds to its frame, which the sceneFunc's own timing cannot see", () => {
+  /**
+   * A 60 Hz screen whose board spends `board` ms of every frame, and whose
+   * weather tick adds `tick` ms: the draw and, on a canvas without a GPU,
+   * its paint. The layer's tick reports as WeatherLayer.tsx does.
+   */
+  function run(input: { board: number; tick: number; seconds: number; strayEvery?: number }) {
+    let n = 0;
+    const frames = new HandFrames();
+    let now = 0;
+    const room = new WeatherRoom(
+      frames,
+      () => now,
+      (after) => {
+        // Now and then a long task of something else's, a chunk's parse, runs before the measure's message.
+        now += input.board + (input.strayEvery && ++n % input.strayEvery === 0 ? 60 : 0);
+        after();
+      },
+    );
+    room.setLook(RAIN);
+    let most = 0;
+    room.register({
+      tick() {
+        now += input.tick;
+        most = Math.max(most, room.frameCost);
+        room.mode.drew(tickCostForMode(0.1, room.frameCost));
+      },
+    });
+    const end = input.seconds * 1000;
+    let at = 0;
+    while (at < end) {
+      at += 16.7;
+      now = Math.max(now, at);
+      frames.run(now);
+    }
+    return { room, most };
+  }
+
+  test("a canvas with no GPU, whose ticks add 3 ms of paint (90 ms a second, over 6.1's 60), steps down to half and then holds still", () => {
+    const { room } = run({ board: 1, tick: 3, seconds: 12 });
+    assert.ok(room.frameCost > 2.5 && room.frameCost < 3.5, `${room.frameCost}`);
+    assert.equal(room.state.getState().level, "still");
+    assert.equal(room.state.getState().effective, "still");
+  });
+
+  test("a GPU canvas whose ticks add half a millisecond keeps moving, however busy the board is in every frame and however often something else's long task runs", () => {
+    for (const board of [0.5, 9]) {
+      const { room, most } = run({ board, tick: 0.5, seconds: 12 });
+      assert.ok(most < 0.6, `board ${board}: ${most}`);
+      assert.equal(room.state.getState().level, "full", `board ${board}`);
+    }
+    // A long task every fifth frame slows the frames themselves, which the mode judges by their gaps. The cost a tick adds stays its own.
+    const { most } = run({ board: 0.5, tick: 0.5, seconds: 12, strayEvery: 5 });
+    assert.ok(most < 0.6, `a stray task every fifth frame: ${most}`);
+  });
+
+  test("the budget's 2 ms a tick meets the mode's line, and the sceneFunc's own time counts when it is the larger", () => {
+    assert.equal(tickCostForMode(0.1, TICK_BUDGET_MS), SLOW_DRAW_MS);
+    assert.equal(tickCostForMode(5, 0), 5);
+    assert.ok(tickCostForMode(0.1, 1) < SLOW_DRAW_MS);
   });
 });

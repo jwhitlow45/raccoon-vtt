@@ -5,7 +5,7 @@ import type { RadioCardOption } from "../../components/RadioCards.tsx";
 import { scopeSlot, useScopedIfAny } from "../../state/scope.ts";
 import { useLowPower, WEATHER_MODE_WORDS, type WeatherMode as WeatherSettingValue } from "../device/settings.ts";
 import type { Look } from "./looks.ts";
-import { WeatherMode, type ModeInput, type StepLevel } from "./mode.ts";
+import { SLOW_DRAW_MS, WeatherMode, type ModeInput, type StepLevel } from "./mode.ts";
 import type { Field } from "./sim.ts";
 import type { TextureSource } from "./textures.ts";
 
@@ -71,16 +71,28 @@ export class WeatherRoom {
   /** The particles, made by the layer for the look and kept across a view switch. Null when the look changes. */
   field: Field | null = null;
   textures: OwnedTextures | null = null;
+  /**
+   * What a tick adds to its frame on the main thread, in ms, the median of
+   * recent ticks (#run): the draw, and where the 2D canvas has no GPU, its
+   * raster and paint, which no timing inside the sceneFunc sees.
+   */
+  frameCost = 0;
   readonly #frames: Frames;
   readonly #now: () => number;
+  readonly #afterFrame: AfterFrame;
+  /** The main thread's time from a frame's start to after its paint, in frames with no tick. */
+  readonly #baseline: number[] = [];
+  /** What recent ticks added to their frames. */
+  readonly #added: number[] = [];
   readonly #targets: WeatherTarget[] = [];
   #frame: number | null = null;
   #version = -1;
   #lookChanged = false;
 
-  constructor(frames: Frames = BROWSER_FRAMES, now: () => number = () => performance.now()) {
+  constructor(frames: Frames = BROWSER_FRAMES, now: () => number = () => performance.now(), afterFrame?: AfterFrame) {
     this.#frames = frames;
     this.#now = now;
+    this.#afterFrame = afterFrame ?? (typeof window === "undefined" ? (run) => run() : browserAfterFrame());
     this.mode = new WeatherMode(IDLE, now());
     this.state = createStore<WeatherShown>(() => this.#shown());
     this.#version = this.mode.version;
@@ -101,6 +113,7 @@ export class WeatherRoom {
     this.look = look;
     this.field = null;
     this.#lookChanged = true;
+    this.#resetCost();
     if (!look) this.releaseTextures();
     this.mode.update({ weather: look !== null, particles: look?.particles != null }, this.#now());
     // A new look makes its textures on its first draws, a stall the step-down must not judge (mode.ts lookChanged).
@@ -120,6 +133,7 @@ export class WeatherRoom {
    */
   register(target: WeatherTarget): () => void {
     this.#targets.push(target);
+    this.#resetCost();
     this.mode.remounted(this.#now());
     this.mode.update({ layer: true }, this.#now());
     this.#settle();
@@ -170,10 +184,69 @@ export class WeatherRoom {
 
   readonly #run = (time: number): void => {
     this.#frame = null;
+    const start = this.#now();
     const ms = this.mode.frame(time);
+    const ticked = ms !== null && this.#targets.length > 0;
     if (ms !== null) this.#targets[this.#targets.length - 1]?.tick(ms);
     this.#settle();
+    // The whole frame on the main thread, its paint included: a tick's frame less the board's own frames is what the weather adds.
+    this.#afterFrame(() => {
+      const spent = this.#now() - start;
+      const into = ticked ? this.#added : this.#baseline;
+      into.push(ticked ? Math.max(0, spent - median(this.#baseline)) : spent);
+      if (into.length > COST_FRAMES) into.shift();
+      // A median, so a few frames that something else slowed move nothing, and a cost every tick pays moves it within half a second.
+      if (ticked && this.#added.length >= MIN_TICKS) this.frameCost = median(this.#added);
+    });
   };
+
+  /** A new look, layer or stage starts its cost afresh, as the step-down's warm-up does. */
+  #resetCost(): void {
+    this.frameCost = 0;
+    this.#baseline.length = 0;
+    this.#added.length = 0;
+  }
+}
+
+/** 6.1's budget, 60 ms a second over none, at 30 ticks a second. */
+export const TICK_BUDGET_MS = 2;
+
+/**
+ * The cost a tick's draw reports to the mode (mode.ts `drew`). Its
+ * step-down line is SLOW_DRAW_MS for the draw inside the sceneFunc, which
+ * on a GPU canvas is all the weather costs the main thread. A 2D canvas
+ * with no GPU rasters at paint, after the sceneFunc, and a software
+ * canvas cost 60 to 230 ms a second at 4x slowdown, over budget, while its
+ * sceneFunc stayed under 0.1 ms and never stepped down (bench --software).
+ * So the frame's cost counts too, scaled so that the budget's 2 ms a tick
+ * meets the mode's line, and only the larger of the two counts.
+ */
+export function tickCostForMode(sceneMs: number, frameCost: number): number {
+  return Math.max(sceneMs, (frameCost * SLOW_DRAW_MS) / TICK_BUDGET_MS);
+}
+
+/** How a task after the frame's rendering is asked for: a message, which runs after paint and before the next frame. */
+export type AfterFrame = (run: () => void) => void;
+
+function browserAfterFrame(): AfterFrame {
+  if (typeof MessageChannel === "undefined") return (run) => setTimeout(run, 0);
+  const channel = new MessageChannel();
+  const queue: (() => void)[] = [];
+  channel.port1.onmessage = () => queue.shift()?.();
+  return (run) => {
+    queue.push(run);
+    channel.port2.postMessage(null);
+  };
+}
+
+/** The frames a tick's cost is judged against (the board's own work in frames with no tick), and the ticks its cost is the median of. */
+const COST_FRAMES = 15;
+/** Ticks measured before their median counts, so the first few, one of them slowed, say nothing alone. */
+const MIN_TICKS = 5;
+function median(values: readonly number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)]!;
 }
 
 /** One per Room page, so View as a player keeps a clock of its own. */
