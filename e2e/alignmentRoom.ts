@@ -9,7 +9,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import sharp from "sharp";
 import { build } from "vite";
-import { chromium, type Browser, type BrowserContext, type ElementHandle, type Locator, type Page, type WebSocketRoute } from "playwright-core";
+import { chromium, request as playwrightRequest, type APIRequestContext, type Browser, type BrowserContext, type ElementHandle, type Locator, type Page, type Route, type WebSocketRoute } from "playwright-core";
 import { ddbSheetUrl } from "../shared/ddb/link.ts";
 import { uuidv7 } from "../shared/ids.ts";
 import { readDdbCharacter } from "../shared/ddb/read.ts";
@@ -6657,6 +6657,160 @@ export function undoScopeAlignmentTests(names: readonly string[]): void {
           hold = false;
           for (const deliver of held.splice(0)) deliver();
           wire.close();
+          sweep.tally();
+        }
+      });
+    }
+  }
+}
+
+/**
+ * Join requests (docs/design/design-v1-join-requests.md 10, Alignment): the
+ * DM panel's Join requests section with one row, with three rows and the
+ * carry-on note, and with a row still being let in, the Members page's
+ * Joining section, and on a newcomer's page the No password? card, the ask
+ * card, the waiting card and each outcome card. Every root is a card or a
+ * section, never the page's `main`, whose header stands apart from the
+ * cards on purpose.
+ *
+ * Three asks a size come from API contexts for the DM's rows, then cancel,
+ * so a file's sizes stay under one address's 30 asks an hour in its room
+ * and the room's 20 before toasts quiet (design 4.3). The newcomer's page is
+ * Pat's, its cookies set aside, and its ask and waits are answered by the
+ * test, so each outcome shows on demand without asking the server again.
+ */
+const JOIN_SCREENS = ["jr-section-one", "jr-section-three", "jr-section-pending", "jr-joining", "jr-no-password", "jr-ask-card", "jr-waiting", "jr-other-tab", "jr-turned-away", "jr-expired", "jr-ended", "jr-closed"];
+/** A request id of the server's shape, for the newcomer's answered ask. */
+const ANSWERED_REQUEST = "jdAlignmentRequestjdAlignmentRequestjdAlign";
+
+/** A Card or a Section by its heading's words, never an outer section holding it. */
+function sectionOf(scope: Page | Locator, heading: string): Locator {
+  return scope.getByRole("heading", { name: heading, exact: true }).locator("xpath=ancestor::section[1]");
+}
+
+export function joinRequestAlignmentTests(names: readonly string[]): void {
+  for (const name of names) {
+    const size = SIZES.find((candidate) => candidate.name === name);
+    assert.ok(size, `unknown join request alignment size ${name}`);
+    for (const scale of SCALES) {
+      test(`jd-align-${name}-${scale}: the join request section, Joining, and the newcomer's cards within ${LIMIT_PX} px`, async () => {
+        const sweep = new Sweep(`jd-${name}-${scale}`);
+        const askers: APIRequestContext[] = [];
+        const patCookies = await patContext.cookies();
+        try {
+          await newDmSession();
+          const headers = { Origin: server.origin };
+          const mode = await dmContext.request.post(`${server.origin}/api/rooms/${run.roomId}/join-mode`, { headers, data: { mode: "ask" } });
+          assert.ok(mode.ok(), `the join mode answered ${mode.status()}`);
+          const page = await dmPageFor(size);
+          page.setDefaultTimeout(10_000);
+          await openAt(page, size, scale);
+          await waitFor("the DM's snapshot", () => dmSocket.state);
+          const panel = await openPanelOf(page, "DM");
+
+          const asks: { context: APIRequestContext; requestId: string }[] = [];
+          const askAs = async (who: string, color: string) => {
+            const context = await playwrightRequest.newContext({ extraHTTPHeaders: headers });
+            askers.push(context);
+            const res = await context.post(`${server.origin}/api/rooms/${run.roomId}/join-requests`, { data: { name: who, color } });
+            assert.equal(res.status(), 201, `${who}'s ask answered ${res.status()}`);
+            asks.push({ context, requestId: ((await res.json()) as { requestId: string }).requestId });
+            await panel.getByRole("group", { name: `Join request from ${who}` }).waitFor();
+          };
+          await askAs("Quinn", "#8e4ec6");
+          await dismissToasts(page);
+          await sweep.measure(page, "jr-section-one", sectionOf(panel, "Join requests"));
+          await askAs("Rowan Ashdown of the Western Marches", "#e5484d");
+          await askAs("Pat", "#3e8ef7");
+          await dismissToasts(page);
+          const patRow = panel.getByRole("group", { name: "Join request from Pat" });
+          await patRow.getByRole("combobox", { name: "Let Pat in as" }).selectOption({ label: "Pat" });
+          await patRow.getByText(/^This device will be Pat:/).waitFor();
+          await sweep.measure(page, "jr-section-three", sectionOf(panel, "Join requests"));
+          // The server's 202 for a let-in still settling, without letting anyone in.
+          await page.route(/\/join-requests\/[A-Za-z0-9_-]+\/let-in$/, (route) => route.fulfill({ status: 202, json: { memberId: "pending", pending: true } }));
+          try {
+            await panel.getByRole("button", { name: "Let Quinn in" }).click();
+            await panel.getByText("Still letting Quinn in…", { exact: true }).waitFor();
+            // Its button's turning spinner is measured still, as reduced motion draws it.
+            await page.emulateMedia({ reducedMotion: "reduce" });
+            await sweep.measure(page, "jr-section-pending", sectionOf(panel, "Join requests"));
+          } finally {
+            await page.emulateMedia({ reducedMotion: null });
+            await page.unroute(/\/join-requests\/[A-Za-z0-9_-]+\/let-in$/);
+          }
+          for (const a of asks) await a.context.delete(`${server.origin}/api/rooms/${run.roomId}/join-requests/${a.requestId}`);
+          await sectionOf(panel, "Join requests").waitFor({ state: "detached" });
+
+          const menu = await openMenu(page);
+          await menu.getByRole("button", { name: "Members" }).click();
+          await sectionOf(menu, "Joining").getByRole("group", { name: "How new players join" }).waitFor();
+          await sweep.measure(page, "jr-joining", sectionOf(menu, "Joining"));
+          await escapeAll(page);
+          await closeSheets(page);
+
+          // The newcomer, on Pat's page with its cookies set aside. A newcomer's GET /me is 403, and the ended card's wait is 404 request_gone. Chrome logs both, and so it does Home's check of the rooms it knows, which may still be out as the cookies go.
+          consoles.pat.allow = [/status of 403 .*\/api\/rooms\/[0-9A-Z]{8}\/me\)$/, /status of 404 .*\/join-requests\/[A-Za-z0-9_-]+\/wait\)$/];
+          await pat.goto(`${server.origin}/`);
+          await patContext.clearCookies();
+          await pat.setViewportSize({ width: size.width, height: size.height });
+          await pat.evaluate((s) => localStorage.setItem("rvtt.uiScale", s), String(scale));
+          const held: Route[] = [];
+          await pat.route(/\/join-requests$/, (route) =>
+            route.request().method() === "POST" ? route.fulfill({ status: 201, json: { requestId: ANSWERED_REQUEST, expiresAt: new Date(Date.now() + 600_000).toISOString() } }) : route.continue(),
+          );
+          await pat.route(/\/join-requests\/[A-Za-z0-9_-]+\/wait$/, (route) => void held.push(route));
+          const answerWait = async (status: number, json: unknown) => (await waitFor("a held wait", () => held.shift() ?? null)).fulfill({ status, json });
+          const measureCard = async (screen: string, heading: string) => {
+            await sectionOf(pat, heading).waitFor();
+            await sweep.measure(pat, screen, sectionOf(pat, heading));
+          };
+          const askOnCard = async () => {
+            await pat.getByLabel("Your name").fill("Quinn");
+            await pat.getByRole("button", { name: "Ask to join" }).click();
+            await pat.getByRole("heading", { name: "Waiting for the DM" }).waitFor();
+          };
+          try {
+            await pat.goto(`${server.origin}/r/${run.roomId}`);
+            await measureCard("jr-no-password", "No password?");
+            await pat.getByRole("button", { name: "Ask to join" }).click();
+            await measureCard("jr-ask-card", "Ask to join");
+            // The waiting line's turning spinner moves its box by up to a pixel, so it is measured still, as reduced motion draws it.
+            await pat.emulateMedia({ reducedMotion: "reduce" });
+            await askOnCard();
+            await measureCard("jr-waiting", "Waiting for the DM");
+            await answerWait(200, { state: "superseded" });
+            await measureCard("jr-other-tab", "Waiting in another tab");
+            await pat.getByRole("button", { name: "Wait here" }).click();
+            await answerWait(200, { state: "turned_away" });
+            await measureCard("jr-turned-away", "The DM said no");
+            await pat.getByRole("button", { name: "Back" }).click();
+            await pat.getByRole("button", { name: "Ask to join" }).click();
+            await askOnCard();
+            await answerWait(200, { state: "expired" });
+            await measureCard("jr-expired", "No answer yet");
+            await pat.getByRole("button", { name: "Ask again" }).click();
+            await askOnCard();
+            await answerWait(404, { error: "request_gone" });
+            await measureCard("jr-ended", "Request ended");
+            await pat.getByRole("button", { name: "Ask again" }).click();
+            await askOnCard();
+            await answerWait(200, { state: "closed" });
+            await measureCard("jr-closed", "Requests are off");
+          } finally {
+            await pat.emulateMedia({ reducedMotion: null });
+            await pat.unrouteAll({ behavior: "ignoreErrors" });
+          }
+          const missing = JOIN_SCREENS.filter((s) => !sweep.seen.has(s));
+          assert.deepEqual(missing, [], `join request screens never measured at ${sweep.at}`);
+          assert.deepEqual(sweep.lines, [], `join request alignment at ${sweep.at}`);
+        } finally {
+          for (const c of askers) await c.dispose();
+          await pat.goto("about:blank").catch(() => {});
+          consoles.pat.allow = [];
+          await patContext.clearCookies();
+          await patContext.addCookies(patCookies);
+          await dmContext.request.post(`${server.origin}/api/rooms/${run.roomId}/join-mode`, { headers: { Origin: server.origin }, data: { mode: "password" } }).catch(() => {});
           sweep.tally();
         }
       });

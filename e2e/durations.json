@@ -1,11 +1,11 @@
 {
   "defaultSeconds": 60,
   "seconds": {
-    "alignment": 220,
+    "alignment": 235,
     "alignment-followups": 180,
     "alignment-icons": 80,
     "alignment-settings": 130,
-    "alignment-wide": 252,
+    "alignment-wide": 261,
     "areafog": 88,
     "areas": 33,
     "attach": 50,
@@ -33,6 +33,7 @@
     "guide": 14,
     "hex": 38,
     "iso": 55,
+    "joinrequests": 35,
     "keyboard": 150,
     "kit": 7,
     "layout": 143,

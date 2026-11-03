@@ -1,4 +1,4 @@
-import { undoSaveAlignmentTests, undoScopeAlignmentTests, alignmentFile, helperTest, noErrorsTest, restScrollsTest, roomTest, sizeTests, someSizesTest } from "./alignmentRoom.ts";
+import { undoSaveAlignmentTests, undoScopeAlignmentTests, alignmentFile, helperTest, joinRequestAlignmentTests, noErrorsTest, restScrollsTest, roomTest, sizeTests, someSizesTest } from "./alignmentRoom.ts";
 
 /**
  * The alignment sweep (e2e/alignmentRoom.ts says what it measures): the
@@ -16,5 +16,6 @@ alignmentFile("the upright phones", () => {
   someSizesTest("phones");
   undoScopeAlignmentTests(["390x844", "320x568"]);
   undoSaveAlignmentTests(["390x844", "320x568"]);
+  joinRequestAlignmentTests(["390x844", "320x568"]);
   noErrorsTest();
 });
