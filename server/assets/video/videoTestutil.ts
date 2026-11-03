@@ -134,6 +134,19 @@ export function vp9Inter(fill = 32, seed = 2): Buffer {
   return Buffer.concat([Buffer.from([0x86, 0x00]), filler(fill, seed)]);
 }
 
+/** A VP8 key frame's first bytes (RFC 6386 9.1): a frame tag with show_frame set, the start code and the size, then filler. */
+export function vp8Key(fill = 64, seed = 1, width = 640, height = 360): Buffer {
+  const size = Buffer.alloc(4);
+  size.writeUInt16LE(width, 0);
+  size.writeUInt16LE(height, 2);
+  return Buffer.concat([Buffer.from([0x10, 0x02, 0x00, 0x9d, 0x01, 0x2a]), size, filler(fill, seed)]);
+}
+
+/** A VP8 inter frame's tag, shown unless `shown` is false, as an alt-ref is, then filler. */
+export function vp8Inter(fill = 32, seed = 2, shown = true): Buffer {
+  return Buffer.concat([Buffer.from([shown ? 0x11 : 0x01, 0x02, 0x00]), filler(fill, seed)]);
+}
+
 /** Bytes that look like media data, a fixed pattern from `seed`. */
 export function filler(n: number, seed = 1): Buffer {
   const out = Buffer.alloc(n);
@@ -228,7 +241,9 @@ export function webmTree(o: WebmOptions = {}): Ebml[] {
   const items: Item[] = frames.map((ms, i) => {
     const real = o.frames?.[i];
     const key = real ? real.key : i === 0;
-    const data = real ? real.data : i === 0 ? vp9Key(o.frameBytes ?? 64, i + 1) : vp9Inter(o.frameBytes ?? 32, i + 1);
+    const vp8 = o.codec === "V_VP8";
+    const synthetic = i === 0 ? (vp8 ? vp8Key(o.frameBytes ?? 64, i + 1, width, height) : vp9Key(o.frameBytes ?? 64, i + 1)) : vp8 ? vp8Inter(o.frameBytes ?? 32, i + 1) : vp9Inter(o.frameBytes ?? 32, i + 1);
+    const data = real ? real.data : synthetic;
     return { ms, node: (cluster) => simpleBlock(1, toTicks(ms) - cluster, key ? 0x80 : 0, data, o.trackVintLength ?? 1) };
   });
   for (const [i, b] of (sound?.blocks ?? []).entries()) {

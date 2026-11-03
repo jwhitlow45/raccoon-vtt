@@ -423,7 +423,7 @@ async function parseSegment(walk: Walk, segment: El): Promise<ParsedVideo> {
         if (read.track.type === 1) {
           videoFrames.add();
           if (read.lacing !== 0) throw refuse("bad_video");
-          if (read.invisible) {
+          if (read.invisible || (read.track.codecId === "V_VP8" && !(await vp8Shown(walk, b, read.payloadStart)))) {
             invisibleEnd = Math.max(invisibleEnd, time);
             return;
           }
@@ -835,6 +835,20 @@ async function audioSettings(walk: Walk, el: El, track: Track): Promise<void> {
     else if (id === I.Void) walk.zeroPayload(child);
     else walk.void(child);
   }
+}
+
+/**
+ * Whether a VP8 frame shows: bit 4 of its frame tag, show_frame (RFC 6386
+ * 9.1). FFmpeg never sets Matroska's invisible flag, so a VP8 alt-ref is a
+ * plain block at its neighbor's time, known only by this bit (D-261102-740).
+ * VP9 and AV1 need no such read: FFmpeg packs a hidden VP9 frame into a
+ * superframe with the next shown one, and an AV1 Block is one temporal
+ * unit, which presents one frame.
+ */
+async function vp8Shown(walk: Walk, b: El, payloadStart: number): Promise<boolean> {
+  if (payloadStart >= b.end) throw refuse("bad_video");
+  const tag = await walk.src.read(payloadStart, 1);
+  return (tag[0]! & 0x10) !== 0;
 }
 
 type BlockRead = { track: Track; relative: number; invisible: boolean; lacing: number; headerLength: number; payloadStart: number };

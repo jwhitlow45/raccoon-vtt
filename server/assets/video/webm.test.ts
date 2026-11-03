@@ -19,6 +19,7 @@ import {
   sint,
   str,
   uint,
+  vp8Inter,
   webmFile,
   webmTree,
   webmWithSecrets,
@@ -669,5 +670,41 @@ describe("a BlockDuration belongs to its own block, and two shown frames never s
     const at500 = (flags: number) => (t: Ebml[]) => firstCluster(t).kids!.push({ id: I.SimpleBlock, data: Buffer.from([0x81, 0x01, 0xf4, flags, 0x86, 0]) });
     await refused(tree({}, at500(0x00)), "video_layout");
     await checkVideoBytes(tree({}, at500(0x08)));
+  });
+});
+
+describe("a VP8 frame with show_frame clear is hidden, as FFmpeg's alt-refs are (round 4: AMBUILD-OPUS-R4-01, D-261102-740)", () => {
+  const firstCluster = (t: Ebml[]) => findEbml(segmentOf(t), I.Cluster);
+  const clusterMs = (c: Ebml) => findEbml(c, I.Timestamp).data!.reduce((v, x) => v * 256 + x, 0);
+  // An unflagged SimpleBlock of track 1 at `ms`, in the Cluster that holds that time.
+  const vp8At = (ms: number, frame: Buffer) => (t: Ebml[]) => {
+    const cluster = allEbml(segmentOf(t), I.Cluster).findLast((c) => clusterMs(c) <= ms)!;
+    const head = Buffer.alloc(3);
+    head.writeInt16BE(ms - clusterMs(cluster), 0);
+    cluster.kids!.push({ id: I.SimpleBlock, data: Buffer.concat([Buffer.from([0x81]), head, frame]) });
+  };
+
+  test("an unflagged VP8 block with show_frame clear at a shown frame's time is accepted and not counted", async () => {
+    const { facts } = await checkVideoBytes(tree({ codec: "V_VP8" }, vp8At(500, vp8Inter(8, 9, false))));
+    assert.equal(facts.fps, 30);
+    // The same block shown is a second frame at that time.
+    await refused(tree({ codec: "V_VP8" }, vp8At(500, vp8Inter(8, 9, true))), "video_layout");
+  });
+
+  test("a 60 fps VP8 with four alt-refs in one second passes the frame rate cap", async () => {
+    const frameMs = Array.from({ length: 120 }, (_, i) => Math.round((i * 1000) / 60));
+    const bytes = tree({ codec: "V_VP8", frameMs }, (t) => {
+      for (const i of [10, 20, 30, 40]) vp8At(frameMs[i]!, vp8Inter(8, 100 + i, false))(t);
+    });
+    assert.equal((await checkVideoBytes(bytes)).facts.fps, 60);
+  });
+
+  test("a VP8 block with no frame tag is bad_video", async () => {
+    await refused(tree({ codec: "V_VP8" }, vp8At(510, Buffer.alloc(0))), "bad_video");
+  });
+
+  test("a VP9 block is never read for VP8's show_frame bit: its hidden frames come inside a superframe", async () => {
+    // 0x86 is a VP9 inter frame's first byte, bit 4 clear: at a shown frame's time it is a second shown frame.
+    await refused(tree({}, (t) => firstCluster(t).kids!.push({ id: I.SimpleBlock, data: Buffer.from([0x81, 0x01, 0xf4, 0x00, 0x86, 0]) })), "video_layout");
   });
 });
