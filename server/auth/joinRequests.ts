@@ -290,8 +290,9 @@ export class JoinRequests {
     const { roomId } = reservation;
     const now = this.#now();
     if (now - reservation.startedAt > ADMISSION_DEADLINE_MS) return refuse({ ok: false, code: "busy" });
+    // Bumped since it was read. A room's number only grows, and one pruned meanwhile reads 0, which is no bump.
     const generation = this.#generations.get(roomId);
-    if ((generation?.n ?? 0) !== reservation.generation) {
+    if ((generation?.n ?? 0) > reservation.generation) {
       return refuse({ ok: false, code: generation?.reason === "deleted" ? "room_not_found" : "asks_off" });
     }
     const deviceKey = key(roomId, input.sessionId);
@@ -442,7 +443,7 @@ export class JoinRequests {
       return;
     }
     const generation = this.#generations.get(r.roomId);
-    if ((generation?.n ?? 0) !== r.generation) {
+    if ((generation?.n ?? 0) > r.generation) {
       this.#end(r, generation?.reason === "deleted" ? "gone" : "closed");
       return;
     }

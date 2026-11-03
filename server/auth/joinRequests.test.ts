@@ -189,6 +189,28 @@ describe("join requests: the ask", () => {
     assert.notEqual(store.generation(ROOM), bumped);
   });
 
+  test("an ask that read a generation forgotten before it reserved is admitted, and its let-in that fails waits again: a prune is no bump (JBO2-01)", () => {
+    const { time, store, admit } = setup();
+    store.closeRoom(ROOM);
+    time.advance(GENERATION_KEEP_MS);
+    const read = store.generation(ROOM);
+    assert.notEqual(read, 0);
+    store.sweep();
+    assert.equal(store.generation(ROOM), 0, "forgotten between the read and the reserve");
+    const place = store.reserve(ROOM, "203.0.113.9", time.now, read);
+    assert.ok("id" in place);
+    const out = admit(place, "s9");
+    assert.ok(out.ok, JSON.stringify(out));
+    store.take(ROOM, out.request.id);
+    store.settle(out.request.id, "failed");
+    assert.equal(store.get(out.request.id)?.state, "waiting", "the room still takes asks");
+    // A bump since the read still refuses, however old the read.
+    store.closeRoom(ROOM);
+    const after = store.reserve(ROOM, "203.0.113.10", time.now, read);
+    assert.ok("id" in after);
+    assert.equal(code(admit(after, "s10")), "asks_off");
+  });
+
   test("the caps: 8 waiting per address per room, 50 per room, 500 on the server, places reserved counted", () => {
     const { store, ask, asked } = setup();
     for (let i = 0; i < 7; i++) asked(`a${i}`);
