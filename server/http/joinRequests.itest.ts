@@ -125,9 +125,11 @@ function loseGrantCommit(pool: pg.Pool, meanwhile: () => Promise<void>): () => v
 describe("join requests: asking, waiting and a DM's answer", () => {
   let t: TestApp;
   let k: ReturnType<typeof kit>;
+  /** Moves the join requests store's clock on, for what lapses by time. */
+  let later = 0;
   before(async () => {
     // The answer's bound past the checkout's, so a refused checkout is answered as busy, and a quick sweep for the follow-ups.
-    t = await startTestApp({ access: { admissions: { memberMs: 300, checkoutMs: 300, answerMs: 1_000 }, sweepMs: 100 } });
+    t = await startTestApp({ access: { admissions: { memberMs: 300, checkoutMs: 300, answerMs: 1_000 }, sweepMs: 100, joinRequests: { now: () => Date.now() + later } } });
     k = kit(t);
   });
   after(() => t.close());
@@ -441,6 +443,38 @@ describe("join requests: asking, waiting and a DM's answer", () => {
     } finally {
       refuse();
       t.gateway.addMember = addMember;
+    }
+  });
+
+  test("a refusal's words lapse on a DM list already on screen: the sweep tells the DMs, and the list they fetch then has none (JB-ASTRA-11)", async () => {
+    const { dm, roomId } = await k.room("ask");
+    const id = await k.asked(t.client(), roomId);
+    const addMember = t.gateway.addMember;
+    const signal = t.gateway.joinRequestsChanged;
+    const signals: string[] = [];
+    t.gateway.joinRequestsChanged = (room) => {
+      signals.push(room);
+      signal.call(t.gateway, room);
+    };
+    t.gateway.addMember = async () => {
+      const { RoomFullError } = await import("../rooms/gateway.ts");
+      throw new RoomFullError();
+    };
+    try {
+      assert.equal(k.error(await k.letIn(dm, roomId, id)), "room_full");
+      // What a DM page drew and keeps until it hears a signal.
+      const shown = await k.list(dm, roomId);
+      assert.deepEqual(shown.requests.map((r) => r.refused), ["room_full"]);
+      await new Promise((r) => setTimeout(r, 300));
+      signals.length = 0;
+      later = 61_000;
+      for (let i = 0; i < 50 && !signals.includes(roomId); i++) await new Promise((r) => setTimeout(r, 20));
+      assert.ok(signals.includes(roomId), "every DM page is told, so it fetches the list again");
+      assert.deepEqual((await k.list(dm, roomId)).requests.map((r) => [r.id, r.refused]), [[id, undefined]], "and that list has no words");
+    } finally {
+      later = 0;
+      t.gateway.addMember = addMember;
+      t.gateway.joinRequestsChanged = signal;
     }
   });
 

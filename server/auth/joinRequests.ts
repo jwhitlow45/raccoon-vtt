@@ -535,11 +535,19 @@ export class JoinRequests {
 
   /**
    * Every 15 s: ends what has expired, drops records ended more than 2
-   * minutes ago, and forgets lapsed marks, holds and generations.
+   * minutes ago, clears refusals past their minute, and forgets lapsed
+   * marks, holds and generations.
    */
   sweep(): void {
     this.#expireDue();
     const now = this.#now();
+    // A DM page fetches its list only on a signal, so one already open keeps a refusal's words until it hears that they lapsed.
+    for (const r of this.#requests.values()) {
+      if (r.refused && now - r.refused.at >= REFUSAL_SHOWN_MS) {
+        r.refused = undefined;
+        this.#changed(r.roomId);
+      }
+    }
     for (const [id, r] of this.#requests) if (r.endedAt !== undefined && now - r.endedAt >= ENDED_KEEP_MS) this.#requests.delete(id);
     for (const [k, at] of this.#marks) if (now - at >= GOT_IN_MARK_MS) this.#marks.delete(k);
     for (const [k, until] of this.#holds) if (until <= now) this.#holds.delete(k);

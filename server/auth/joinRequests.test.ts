@@ -325,6 +325,32 @@ describe("join requests: waiting", () => {
     assert.equal(r.refused, undefined);
   });
 
+  test("the sweep clears a refusal past its minute and tells the DMs, so a list already on screen loses its words (JB-ASTRA-11)", async () => {
+    const { time, store, asked } = setup();
+    const signals: string[] = [];
+    store.onChange((room) => signals.push(room));
+    const r = asked("s1");
+    const quiet = asked("s2", { room: OTHER });
+    store.take(ROOM, r.id);
+    store.settle(r.id, "failed", "room_full");
+    await Promise.resolve();
+    signals.length = 0;
+    time.advance(REFUSAL_SHOWN_MS - 1);
+    store.sweep();
+    await Promise.resolve();
+    assert.deepEqual(signals, [], "still shown, nothing to tell");
+    assert.equal(r.refused?.code, "room_full");
+    time.advance(1);
+    store.sweep();
+    await Promise.resolve();
+    assert.equal(r.refused, undefined, "cleared, so no list drawn from here on says it");
+    assert.deepEqual(signals, [ROOM], "only the room whose list changed");
+    store.sweep();
+    await Promise.resolve();
+    assert.deepEqual(signals, [ROOM], "once");
+    assert.equal(store.get(quiet.id)?.state, "waiting");
+  });
+
   test("a request being let in stays on the DM list, marked, and a 202 marks it pending and tells the DMs (JBO1-01)", async () => {
     const { store, asked } = setup();
     const signals: string[] = [];
