@@ -328,7 +328,7 @@ describe("the Sound panel", { concurrency: false }, () => {
 
   test("sp-6. a scene's sound: saved from what plays, started by Move players, silence saved, and Clear", async () => {
     const panel = await soundPanel();
-    // The DM shows Forest road on their own screen; the players stay in the Tavern.
+    // The DM shows Forest road on their own screen. The players stay in the Tavern.
     await openSideTab(dm, "Scenes");
     const scenes = dm.getByRole("tabpanel", { name: sideTabName("Scenes") });
     await scenes.getByRole("button", { name: /^Forest road/ }).first().click();
