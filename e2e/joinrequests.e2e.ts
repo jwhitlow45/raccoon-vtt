@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
+import pg from "pg";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import { ConsoleWatch, openSideTab, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
@@ -16,7 +17,11 @@ import { ConsoleWatch, openSideTab, Shots, SocketWatch, startServer, waitFor, ty
  * another room asks there, Only by asking keeps a kicked player out of the
  * player link, the switch to With the password ends a waiting request,
  * two DM devices answer one request at once, and an unanswered request
- * expires on a second server started with a short request life.
+ * expires on a second server started with a short request life. Then the
+ * review's fixes (lane joinfix, labels jf-): a request found on load that
+ * Back leaves, "Requests are off" once requests are on again, the carry-on
+ * list after a password join, a let-in held up in the database, and a room
+ * that is really full.
  *
  * Every ask comes from 127.0.0.1, so the file stays well under one
  * address's 30 asks an hour in a room and a room's 20 asks before it
@@ -24,7 +29,9 @@ import { ConsoleWatch, openSideTab, Shots, SocketWatch, startServer, waitFor, ty
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus forty, and the expiry's
  * server on plus forty-one. The other environment variables are the smoke
- * run's (smoke.e2e.ts).
+ * run's (smoke.e2e.ts). The main server trusts CF-Connecting-IP, so the
+ * full room's 45 players join from addresses of their own, and every other
+ * call, which sends no such header, counts from 127.0.0.1 as before.
  */
 
 const PORT = Number(process.env.E2E_PORT ?? 3100) + 40;
@@ -68,6 +75,8 @@ const run = {
 };
 let pat: Device;
 let quinn: Device;
+/** Fern's phone, kept from jr-10's "Requests are off" for jr-11. */
+let fern: Device;
 
 function roomUrl(roomId = run.roomId, origin = server.origin): string {
   return `${origin}/r/${roomId.slice(0, 4)}-${roomId.slice(4)}`;
@@ -181,7 +190,12 @@ function membersNamed(name: string): number {
 
 describe("raccoon-vtt join requests", { timeout: 600_000 }, () => {
   before(async () => {
-    server = await startServer({ port: PORT, assetDir: path.join(work, "assets"), databaseUrl: DATABASE_URL });
+    process.env.TRUST_CF_CONNECTING_IP = "1";
+    try {
+      server = await startServer({ port: PORT, assetDir: path.join(work, "assets"), databaseUrl: DATABASE_URL });
+    } finally {
+      delete process.env.TRUST_CF_CONNECTING_IP;
+    }
     browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1" });
     dmContext = await browser.newContext(DESKTOP);
     dmContext.setDefaultTimeout(10_000);
@@ -335,8 +349,17 @@ describe("raccoon-vtt join requests", { timeout: 600_000 }, () => {
     await row.waitFor({ state: "detached" });
     await shots.take(rook.page, "turned-away");
 
-    // Back leads to the password card, and asking again is refused with the hold's own time.
+    // jf-a (JBO1-11): a reload finds the kept ending, and Back spends it, so Ask to join opens a fresh ask card.
+    await rook.page.reload();
+    await rook.page.getByRole("heading", { name: "The DM said no" }).waitFor();
     await rook.page.getByRole("button", { name: "Back" }).click();
+    await rook.page.getByRole("heading", { name: "Join the game" }).waitFor();
+    await rook.page.getByRole("button", { name: "Ask to join" }).click();
+    await rook.page.getByRole("heading", { name: "Ask to join" }).waitFor();
+    assert.equal(await rook.page.getByRole("heading", { name: "The DM said no" }).count(), 0, "a fresh ask card, not the spent request's");
+    await rook.page.getByRole("button", { name: "Back" }).click();
+
+    // Back leads to the password card, and asking again is refused with the hold's own time.
     await rook.page.getByRole("heading", { name: "Join the game" }).waitFor();
     // The refusal is a 429 on the ask, which Chrome logs.
     rook.watch.allow = [ME_403, /status of 429 .*\/api\/rooms\/[0-9A-Z]{8}\/join-requests\)$/];
@@ -455,7 +478,7 @@ describe("raccoon-vtt join requests", { timeout: 600_000 }, () => {
   });
 
   test("jr-10. the switch to With the password ends a waiting request, and the page shows the password card", async () => {
-    const fern = await device("fern");
+    fern = await device("fern");
     await fern.page.goto(roomUrl());
     // Only by asking shows the ask card alone.
     await ask(fern.page, "Fern", { viaNoPassword: false });
@@ -472,14 +495,31 @@ describe("raccoon-vtt join requests", { timeout: 600_000 }, () => {
     assert.deepEqual([off.status, off.body.error], [403, "asks_off"]);
     // The password works again.
     assert.equal((await call(fern.context, "POST", `/api/rooms/${run.roomId}/join`, { password: run.password })).status, 200);
-    await fern.context.close();
   });
 
   test("jr-11. a co-DM's phone that opens the room hears of the waiting request once, and when two DM devices let it in at once exactly one does", async () => {
     await pickMode(dm, "With the password, or by asking");
+
+    // jf-b (JBO1-03): requests are on again, and Fern's page finds its kept "Requests are off", which now offers Ask again.
+    await fern.page.reload();
+    const closedCard = fern.page.getByRole("heading", { name: "Requests are off" }).locator("xpath=ancestor::section[1]");
+    await closedCard.waitFor();
+    await shots.take(fern.page, "jf-closed-ask-again");
+    await closedCard.getByRole("button", { name: "Ask again" }).click();
+    await fern.page.getByRole("heading", { name: "Ask to join" }).waitFor();
+    await fern.context.close();
+
     const sage = await device("sage");
     await ask(sage.page, "Sage", { url: roomUrl() });
     await requestRow(dm, "Sage").waitFor();
+
+    // jf-c (JB-ASTRA-05): a password join while Sage waits reaches "Let Sage in as" with no join request signal.
+    const juniper = await device("juniper");
+    const joined = await call(juniper.context, "POST", `/api/rooms/${run.roomId}/join`, { password: run.password });
+    assert.equal((await call(juniper.context, "POST", `/api/rooms/${run.roomId}/join/complete`, { ticket: joined.body.ticket, name: "Juniper", color: "#3e8ef7" })).status, 200);
+    const sageAs = requestRow(dm, "Sage").getByRole("combobox", { name: "Let Sage in as" });
+    await waitFor("Juniper in Let Sage in as", async () => ((await sageAs.locator("option").allTextContents()).includes("Juniper") ? true : null));
+    await juniper.context.close();
 
     const coDm = await device("co-DM phone");
     // The DM link asks GET /me first, and a claim without a choice is answered 409 with the DM members to pick from.
@@ -556,6 +596,74 @@ describe("raccoon-vtt join requests", { timeout: 600_000 }, () => {
       await host.context.close();
       await short.stop();
     }
+  });
+
+  test("jf-1. a let-in held up in the database keeps its row on the DM's section, busy, then says Still letting them in (JBO1-01)", async () => {
+    const hazel = await device("hazel");
+    await ask(hazel.page, "Hazel", { url: roomUrl() });
+    const row = requestRow(dm, "Hazel");
+    await row.waitFor();
+    await dismissToasts(dm);
+    // The member's op cannot commit while this holds the room's row, as a stalled database would.
+    const holder = new pg.Client({ connectionString: DATABASE_URL });
+    await holder.connect();
+    try {
+      await holder.query("begin");
+      await holder.query("select 1 from rooms where id = $1 for update", [run.roomId]);
+      await row.getByRole("button", { name: "Let Hazel in" }).click();
+      // The take signals the DMs at once, and the row stays through that fetch. Each shot comes before its checks, so the run before this fix shows what was wrong.
+      await dm.waitForTimeout(1_000);
+      await shots.take(dm, "jf-letting-in");
+      assert.equal(await row.count(), 1, "the row stays while the let-in runs");
+      await row.getByText("Letting in…", { exact: true }).waitFor();
+      // Past the 5 s answer bound the let-in answers 202, and the row says so.
+      await dm.waitForTimeout(5_500);
+      await shots.take(dm, "jf-still-letting");
+      await row.getByText("Still letting Hazel in…", { exact: true }).waitFor();
+      assert.equal(await row.getByRole("button", { name: "Turn Hazel away" }).isDisabled(), true, "the row refuses a second answer");
+    } finally {
+      await holder.query("rollback").catch(() => {});
+      await holder.end();
+    }
+    await hazel.page.getByRole("status", { name: "Connected" }).first().waitFor({ timeout: 20_000 });
+    await row.waitFor({ state: "detached" });
+    await hazel.context.close();
+  });
+
+  test("jf-2. a let-in into a room that is really full keeps the row, says why, and never toasts the request again (JBO1-01)", async () => {
+    // Fill the room to its 50 members with password joins, each from an address of its own.
+    const members = () => Object.keys(dmSocket.state?.members ?? {}).length;
+    for (let n = 1; members() < 50 && n <= 60; n++) {
+      const ip = `198.51.100.${n}`;
+      const headers = { Origin: server.origin, "content-type": "application/json", "cf-connecting-ip": ip };
+      const first = await fetch(`${server.origin}/api/rooms/${run.roomId}/join`, { method: "POST", headers, body: JSON.stringify({ password: run.password }) });
+      assert.equal(first.status, 200, `join ${n}: ${first.status}`);
+      const cookie = (first.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+      const { ticket } = (await first.json()) as { ticket: string };
+      const done = await fetch(`${server.origin}/api/rooms/${run.roomId}/join/complete`, { method: "POST", headers: { ...headers, cookie }, body: JSON.stringify({ ticket, name: `Filler ${n}`, color: "#30a46c" }) });
+      assert.equal(done.status, 200, `join/complete ${n}: ${done.status}`);
+      await waitFor(`member ${n} on the DM's roster`, () => (membersNamed(`Filler ${n}`) === 1 ? true : null));
+    }
+    assert.equal(members(), 50);
+    const iris = await device("iris");
+    await ask(iris.page, "Iris", { url: roomUrl() });
+    const row = requestRow(dm, "Iris");
+    await row.waitFor();
+    await dismissToasts(dm);
+    // The refusal is a 409 on the let-in, which Chrome logs.
+    dmConsole.allow = [/status of 409 .*\/join-requests\/[A-Za-z0-9_-]+\/let-in\)$/];
+    await row.getByRole("button", { name: "Let Iris in" }).click();
+    const words = row.getByText("The room is full: it holds 50 members. Remove a member first.", { exact: true });
+    // The request is waiting again, and every fetch since has kept the row and its words.
+    await dm.waitForTimeout(1_500);
+    await shots.take(dm, "jf-room-full");
+    assert.equal(await words.isVisible(), true, "the words outlive the list's fetches");
+    assert.equal(await row.getByRole("button", { name: "Let Iris in" }).isDisabled(), false, "and the row can answer again");
+    assert.equal(await dm.locator("[data-toast]").filter({ hasText: "Iris" }).count(), 0, "a request back from a failed let-in is not news");
+    dmConsole.allow = [];
+    await iris.page.getByRole("button", { name: "Cancel" }).click();
+    await row.waitFor({ state: "detached" });
+    await iris.context.close();
   });
 
   test("jr-13. no page logged an error", () => {
