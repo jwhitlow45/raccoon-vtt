@@ -123,6 +123,35 @@ const SUCCESSES_PER_ROOM_HOUR = 60;
  */
 const JOIN_CHALLENGE_FAILURES_PER_HOUR = 20;
 
+/**
+ * Join requests (docs/design/design-v1-join-requests.md 4.3). Asks per
+ * address: 30 an hour in a room, less the let-ins there, so a table that
+ * gets in never runs short, and 60 an hour across rooms. 20 asks in a
+ * sliding hour from every address make each further ask in the room need a
+ * solved Turnstile check, never a refusal, since a stranger with a room ID
+ * must not be able to close its asks (decision 9). A turn-away holds the
+ * device 15 minutes, and has its address pass Turnstile meanwhile unless
+ * it asks with a real session older than the hold.
+ */
+const ASKS_PER_ADDRESS_ROOM_HOUR = 30;
+const ASKS_PER_ADDRESS_HOUR = 60;
+export const ASK_CHALLENGE_PER_ROOM_HOUR = 20;
+const TURN_AWAY_HOLD_SECONDS = 15 * 60;
+
+/** An ask's reads, all in one statement so admission can repeat it under its locks. */
+export type AskCounts = {
+  /** Seconds until this address may ask again, when it is over one of its own hourly counts. */
+  limited: Verdict;
+  /** The room's asks in the last hour, from every address. */
+  roomAsks: number;
+  /** When the room last turned away a device at this address, within 15 minutes. */
+  addressHeldAt: Date | null;
+  /** Seconds left on this device's own hold in the room, from the database, which outlives a restart. */
+  deviceHeld: Verdict;
+  /** When the asking device's room session was made, for a device that asks with one. */
+  sessionCreatedAt: Date | null;
+};
+
 type WindowState = { n: number; oldestExpiresIn: number; sinceNewest: number };
 
 export class SlowLimits {
@@ -281,6 +310,78 @@ export class SlowLimits {
 
   async recordSuccess(q: Queryable, ip: string, roomId: string): Promise<void> {
     await this.#record(q, [`ok:ip:${ip}`, `ok:room:${roomId}`]);
+  }
+
+  /**
+   * The ask's counts for an address, a room and a device (its session or
+   * ask token id, null for a device with neither yet), and the session's
+   * age when it asks with a real one.
+   */
+  async asks(q: Queryable, roomId: string, ip: string, deviceId: string | null, sessionId: string | null): Promise<AskCounts> {
+    const { rows } = await q.query<{
+      here: number;
+      here_oldest: number | null;
+      let_ins: number;
+      address: number;
+      address_oldest: number | null;
+      room: number;
+      address_held: Date | null;
+      device_held: number | null;
+      session_created: Date | null;
+    }>(
+      `select
+         (select count(*)::int from rate_events where key = $1 and at > now() - interval '1 hour') as here,
+         (select extract(epoch from min(at) + interval '1 hour' - now())::float8 from rate_events where key = $1 and at > now() - interval '1 hour') as here_oldest,
+         (select count(*)::int from rate_events where key = $2 and at > now() - interval '1 hour') as let_ins,
+         (select count(*)::int from rate_events where key = $3 and at > now() - interval '1 hour') as address,
+         (select extract(epoch from min(at) + interval '1 hour' - now())::float8 from rate_events where key = $3 and at > now() - interval '1 hour') as address_oldest,
+         (select count(*)::int from rate_events where key = $4 and at > now() - interval '1 hour') as room,
+         (select max(at) from rate_events where key = $5 and at > now() - make_interval(secs => $8)) as address_held,
+         (select extract(epoch from max(at) + make_interval(secs => $8) - now())::float8 from rate_events where key = $6 and at > now() - make_interval(secs => $8)) as device_held,
+         (select created_at from sessions where id = $7::uuid and purpose = 'room') as session_created`,
+      [
+        `ask:${roomId}:${ip}`,
+        `askin:${roomId}:${ip}`,
+        `ask:ip:${ip}`,
+        `ask:room:${roomId}`,
+        `asknoip:${roomId}:${ip}`,
+        deviceId === null ? "" : `askno:${roomId}:${deviceId}`,
+        sessionId,
+        TURN_AWAY_HOLD_SECONDS,
+      ],
+    );
+    const row = rows[0];
+    let limited: Verdict = null;
+    if (row && row.here - row.let_ins >= ASKS_PER_ADDRESS_ROOM_HOUR) limited = wait(row.here_oldest ?? 0);
+    else if (row && row.address >= ASKS_PER_ADDRESS_HOUR) limited = wait(row.address_oldest ?? 0);
+    return {
+      limited,
+      roomAsks: row?.room ?? 0,
+      addressHeldAt: row?.address_held ?? null,
+      deviceHeld: row?.device_held != null && row.device_held > 0 ? wait(row.device_held) : null,
+      sessionCreatedAt: row?.session_created ?? null,
+    };
+  }
+
+  /** One admitted ask, for its address in the room and everywhere, and for the room's challenge. */
+  async recordAsk(tx: Queryable, roomId: string, ip: string): Promise<void> {
+    await this.#record(tx, [`ask:${roomId}:${ip}`, `ask:ip:${ip}`, `ask:room:${roomId}`]);
+  }
+
+  /** Whether asks in this room need Turnstile now, and the DM's toasts go quiet. */
+  async askChallenged(roomId: string, q: Queryable = this.#pool): Promise<boolean> {
+    const room = await this.#window(`ask:room:${roomId}`, HOUR, q);
+    return room.n >= ASK_CHALLENGE_PER_ROOM_HOUR;
+  }
+
+  /** A DM turned this device away here: its own hold, and its address's, which only adds a Turnstile check. */
+  async recordTurnAway(roomId: string, deviceId: string, ip: string, q: Queryable = this.#pool): Promise<void> {
+    await this.#record(q, [`askno:${roomId}:${deviceId}`, `asknoip:${roomId}:${ip}`]);
+  }
+
+  /** A let-in, which gives its address one ask back in the room. */
+  async recordLetIn(tx: Queryable, roomId: string, ip: string): Promise<void> {
+    await this.#record(tx, [`askin:${roomId}:${ip}`]);
   }
 
   /** Every window above is at most a day long, so older rows count for nothing. */
