@@ -4,7 +4,7 @@ import { uuidv7 } from "./ids.ts";
 import type { LogEntry, MoveAnyToken, RoomState } from "./model.ts";
 import { canApply, MOVE_PLAYERS_FIRST, movesAnyToken, NO_ROOM_TO_GROW_BACK, PLAYED_WITH_OTHERS, WALL_IN_THE_WAY, WALL_IN_THE_WAY_BACK, type AssetKind, type PermissionDeps } from "./permissions.ts";
 import { projectState } from "./project.ts";
-import { isPoseOp, isResizeOp, onPlayerUndoStack, type Op, type OpOf, type RestoreEntry } from "./protocol.ts";
+import { clientOpSchema, isPoseOp, isResizeOp, onPlayerUndoStack, type Op, type OpOf, type RestoreEntry } from "./protocol.ts";
 import { NO_ROOM_TO_GROW, OWNER_SIZES, RESIZE_KEEPS_PLACE, resizeSpot } from "./rules/resize.ts";
 import { DM, P1, P2, actor, apply, blockOf, character, customMonster, drawing, entry, imageRef, reveal, room, template, token } from "./testutil.ts";
 
@@ -1178,5 +1178,28 @@ describe("a player's undo or redo of a resize (restorePoseCheck)", () => {
     assert.equal(answer(restore(medium, "bear", { x: 6 }, "redo"), medium), WALL_IN_THE_WAY_BACK, "a move's redo meets the wall as a move, in a restore's words");
     medium.tokens.bear!.locked = true;
     assert.equal(answer(restore(medium, "bear", { elevation: 20 }), medium), "ok", "an owner's undo in place on a locked token, as before");
+  });
+});
+
+describe("the room's clock (docs/design/design-v1-calendar.md 6.2)", () => {
+  const ops: Op[] = [
+    { t: "clock.start", id: "c1", at: 0, shown: true, calendar: { kind: "days" } },
+    { t: "clock.stop" },
+    { t: "clock.update", shown: false },
+    { t: "clock.set", at: 3_600 },
+    { t: "clock.advance", by: 600 },
+  ];
+
+  test("is the DM's to keep: every clock op passes for the DM and is forbidden to a player", () => {
+    const state = { ...setup(), clock: { id: "c1", rev: 1, t: 0, shown: true, calendar: { kind: "days" as const } } };
+    for (const op of ops) {
+      assert.equal(code(op, DM, state), "ok", op.t);
+      assert.equal(code(op, P1, state), "forbidden", op.t);
+    }
+  });
+
+  test("no client patch writes a character's Long Rest stamp", () => {
+    const patched = { t: "character.update", characterId: "c1", patch: { longRest: { at: 0, clock: "c1" } } };
+    assert.equal(clientOpSchema.safeParse(patched).success, false);
   });
 });

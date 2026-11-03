@@ -8,6 +8,7 @@ import type {
   LogEntry,
   LogEvent,
   LineParts,
+  RoomClock,
   RoomMeta,
   RoomState,
   Scene,
@@ -216,6 +217,11 @@ export class Tx {
         break;
       case "encounterHistory":
         this.state.encounterHistory = (next as RoomState["encounterHistory"]) ?? [];
+        break;
+      case "clock":
+        // No clock is no field (keys.ts writeEntity), so an undone start leaves the room as it was.
+        if (next === null) delete this.state.clock;
+        else this.state.clock = next as RoomClock;
         break;
       case "log":
       case "trapLog":
@@ -734,6 +740,7 @@ function mapIdOf(parsed: NonNullable<ReturnType<typeof parseKey>>): string {
       return parsed.sceneId;
     case "encounter":
     case "encounterHistory":
+    case "clock":
     case "meta":
       throw new Error("singleton");
     default:

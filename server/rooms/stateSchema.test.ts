@@ -735,3 +735,53 @@ describe("roomStateSchema, a player's asks for saves (docs/design/design-v1-play
     assert.equal(parseRoomState(room({ log: [line({ spell: "" }) as never] })).ok, false);
   });
 });
+
+describe("the room's clock in a backup (docs/design/design-v1-calendar.md 6.6)", () => {
+  const months = { kind: "months" as const, months: [{ name: "Deepwinter", days: 30 }, { name: "Midwinter", days: 1 }], week: ["Moonday", "Tuesday"], era: "AF" };
+  function played(): ReturnType<typeof room> {
+    let state = room({ characters: { bree: character("bree", { name: "Bree" }) } });
+    state = apply(state, { t: "clock.start", id: "clock-1", at: 8 * 3_600, shown: false, calendar: months }, DM, 1);
+    state = apply(state, { t: "clock.advance", by: 8 * 3_600, why: "longRest" }, DM, 2);
+    // The stamp a Long Rest writes (shared/reducer/actors.ts).
+    state.characters.bree = { ...state.characters.bree!, longRest: { at: 16 * 3_600, clock: "clock-1" } };
+    return state;
+  }
+
+  test("export and import bring back the clock, its calendar, the stamps and the lines whole", () => {
+    const state = played();
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(state)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    const out = remapState(parsed.state, { assets: new Map() });
+    assert.deepEqual(out.clock, state.clock);
+    const [rested] = Object.values(out.characters);
+    assert.deepEqual(rested!.longRest, { at: 16 * 3_600, clock: "clock-1" });
+    assert.deepEqual(out.log.filter((l) => l.data?.type === "clock").map((l) => l.data), state.log.filter((l) => l.data?.type === "clock").map((l) => l.data));
+  });
+
+  test("a backup from before the clock, or with a null one, imports with none", () => {
+    for (const clock of [undefined, null]) {
+      const parsed = parseRoomState({ ...JSON.parse(JSON.stringify(room())), ...(clock === null ? { clock } : {}) });
+      assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+      assert.ok(!("clock" in remapState(parsed.state, { assets: new Map() })));
+    }
+  });
+
+  test("the clock, a stamp and a line are held to the bounds their ops keep", () => {
+    const good = JSON.parse(JSON.stringify(played()));
+    const broken = (edit: (s: typeof good) => void) => {
+      const s = JSON.parse(JSON.stringify(good));
+      edit(s);
+      return parseRoomState(s).ok;
+    };
+    assert.equal(broken(() => {}), true);
+    assert.equal(broken((s) => (s.clock.t = LIMITS.clockSecondsMax + 1)), false);
+    assert.equal(broken((s) => (s.clock.t = 1.5)), false);
+    assert.equal(broken((s) => (s.clock.calendar.months = Array.from({ length: LIMITS.calendarMonths + 1 }, (_, i) => ({ name: `M${i}`, days: 1 })))), false);
+    assert.equal(broken((s) => (s.clock.calendar.months = [{ name: "Long", days: LIMITS.calendarMonthDays }, { name: "Longer", days: LIMITS.calendarMonthDays }, { name: "Last", days: LIMITS.calendarMonthDays }])), false);
+    assert.equal(broken((s) => (s.clock.calendar.week = ["Bad‮name"])), false);
+    assert.equal(broken((s) => (s.clock.extra = true)), false);
+    assert.equal(broken((s) => (Object.values(s.characters as Record<string, { longRest: { at: number } }>)[0]!.longRest.at = -LIMITS.clockSecondsMax - 1)), false);
+    assert.equal(broken((s) => (s.log.find((l: { data?: { type: string } }) => l.data?.type === "clock").data.date = "x".repeat(LIMITS.clockDateChars + 1))), false);
+    assert.equal(broken((s) => (s.log.find((l: { data?: { type: string } }) => l.data?.type === "clock").data.why = "fight")), false);
+  });
+});

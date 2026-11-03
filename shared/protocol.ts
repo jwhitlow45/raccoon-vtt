@@ -1943,6 +1943,8 @@ const calendar = z.discriminatedUnion("kind", [
 ]);
 const clockTime = z.number().int().min(-LIMITS.clockSecondsMax).max(LIMITS.clockSecondsMax);
 const clockStep = z.number().int().min(1).max(LIMITS.clockStepMax);
+/** A clock line's stored date (shared/calendar.ts lineDate), made of the calendar's names and numbers alone. */
+const clockDate = z.string().min(1).max(LIMITS.clockDateChars).regex(NAME_CHARS, "names cannot hold control or text direction characters");
 
 // The builder's ops a gesture of several may send, which a `build.ask` carries (docs/design/design-v1-map-discovery.md 5.3).
 const buildPaintOp = op("build.paint", { sceneId: id, terrain, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), forget });
@@ -2851,7 +2853,7 @@ export const rollAnswerSchemas = { rollChange };
 /** A player's ask for saves, so the stored-state schema checks imported asks by the same bounds (docs/design/design-v1-player-save-spell.md 5.7). */
 export const castSchemas = { castInput, castEnd, castRolled };
 /** The clock's shapes, so the stored-state schema checks imported clocks by the same bounds (docs/design/design-v1-calendar.md 6.6). */
-export const clockSchemas = { calendar, calendarName, clockTime, clockStep };
+export const clockSchemas = { calendar, calendarName, clockTime, clockStep, clockDate };
 /** A trap's fields, so the stored-state schema checks imported traps by the same bounds (docs/design/design-v1-traps.md 6.2). */
 export const trapSchemas = { plainId, trapName, trapZone, trapRigInput, trapDue, cellRects, trapMessage: trapLine(LIMITS.trapMessageChars) };
 /** A handout's pages and audience, so the stored-state schema checks imports by the same bounds (docs/design/design-v1-pdf-handouts.md 3.3). */

@@ -385,3 +385,32 @@ describe("SizeGuard's room-level part (docs/design/design-v1-dm-tools.md 2.4)", 
     assert.equal(checkWholeScenes(withPage, limit).ok, false);
   });
 });
+
+describe("the room's clock (docs/design/design-v1-calendar.md 6.7)", () => {
+  const months = { kind: "months" as const, months: Array.from({ length: 24 }, (_, i) => ({ name: `Month of the ${i} moons`.slice(0, 24), days: 40 })), week: Array.from({ length: 14 }, (_, i) => `Weekday ${i}`), era: "Age of Ash" };
+
+  test("counts in the room-level part every DM projection holds, exactly, hidden or shown", () => {
+    for (const shown of [true, false]) {
+      const next = applied(room(), { t: "clock.start", id: "c1", at: 8 * 3_600, shown, calendar: months }).state;
+      assert.ok(next.clock);
+      for (const sceneId of ["s1", "s2"]) {
+        const bytes = projectionBytes(projectState({ ...next, log: [...measuredLog(next.log)], sight: {} } as unknown as RoomState, DM, { sceneId }));
+        assert.equal(new SizeGuard({ sceneLimit: bytes }).check(next, [sceneId], 0).ok, true, `${sceneId} shown ${shown}`);
+        assert.equal(new SizeGuard({ sceneLimit: bytes - 1 }).check(next, [sceneId], 0).ok, false, `${sceneId} shown ${shown}`);
+      }
+    }
+  });
+
+  test("the bound covers a start, a step and an undone stop, field and all, and the clock stays far under its 1.5 KB", () => {
+    const start = applied(room(), { t: "clock.start", id: "c1", at: 0, shown: true, calendar: months });
+    assert.ok(start.growth >= serializedBytes(start.state) - serializedBytes(room()));
+    assert.ok(serializedBytes(start.state.clock) < 1_536, `${serializedBytes(start.state.clock)} bytes`);
+    const step = applied(start.state, { t: "clock.advance", by: 9 * 365 * 86_400 }, 2);
+    assert.ok(step.growth >= serializedBytes(step.state) - serializedBytes(start.state));
+    const stop = applyOp(step.state, { t: "clock.stop" }, DM, { seq: 3, at: "2026-10-12T00:00:00.000Z" });
+    assert.ok(stop.ok);
+    const back = applyOp(stop.state, { t: "sys.restore", entries: stop.inverse!, from: "undo" }, DM, { seq: 4, at: "2026-10-12T00:00:00.000Z" });
+    assert.ok(back.ok);
+    assert.ok(growthBound(stop.state, back.state, back.touched) >= serializedBytes(back.state) - serializedBytes(stop.state));
+  });
+});

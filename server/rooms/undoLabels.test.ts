@@ -329,3 +329,19 @@ describe("undo step labels for traps (docs/design/design-v1-traps.md 6.5)", () =
     assert.equal(describeOp({ t: "actor.outcome", plan: "p1", label: "Falling Net", trap: { trapId: "pit", due: "3:0" }, targets: [] }, s), "settling Falling Net");
   });
 });
+
+describe("the clock's undo labels (docs/design/design-v1-calendar.md 6.5)", () => {
+  test("play steps name the step, the party's rest by its advance, and setup steps what changed", () => {
+    const s = state();
+    assert.equal(describeOp({ t: "clock.advance", by: 8 * 3_600 }, s), "moving the clock on 8 hours");
+    assert.equal(describeOp({ t: "clock.advance", by: 2 * 86_400 + 600 }, s), "moving the clock on 2 days and 10 minutes");
+    assert.equal(describeOp({ t: "clock.advance", by: 8 * 3_600, why: "longRest" }, s), "the party's Long Rest");
+    assert.equal(describeOp({ t: "clock.set", at: 0 }, s), "setting the date and time");
+    assert.equal(describeOp({ t: "clock.start", id: "c1", at: 0, shown: true, calendar: { kind: "days" } }, s), "starting the clock");
+    assert.equal(describeOp({ t: "clock.stop" }, s), "stopping the clock");
+    assert.equal(describeOp({ t: "clock.update", calendar: { kind: "days" }, at: 0 }, s), "changing the calendar");
+    assert.equal(describeOp({ t: "clock.update", at: 0 }, s), "setting the date and time");
+    assert.equal(describeOp({ t: "clock.update", shown: false }, s), "turning off Players see the date and time");
+    assert.equal(describeOp({ t: "clock.update", shown: true }, s), "turning on Players see the date and time");
+  });
+});

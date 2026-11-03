@@ -347,3 +347,51 @@ describe("companion ops (docs/design/design-v1-combat-flow.md 4.6)", () => {
     assert.ok(!("never" in prev) && prev.keys.some((k) => k.key === "token:ws"));
   });
 });
+
+describe("the room's clock (docs/design/design-v1-calendar.md 6.3, CAL-1)", () => {
+  const clock = (shown: boolean) => ({ id: "k1", rev: 1, t: 0, shown, calendar: { kind: "days" as const } });
+  /** Whether the viewer's own copy predicts the op, read from that copy as a device reads it (client/state/store.ts). */
+  const readsClock = (op: Parameters<typeof reads>[0], state: ReturnType<typeof setup>) => {
+    const r = reads(op, state);
+    return !("never" in r) && r.keys.some((k) => k.key === "clock");
+  };
+  const predicts = (op: Parameters<typeof reads>[0], state: ReturnType<typeof setup>, viewer = DM) => {
+    const projected = projectState(state, viewer, { sceneId: "s1" });
+    return satisfies(reads(op, projected as unknown as ReturnType<typeof setup>), projected, viewer, { sceneId: "s1" });
+  };
+
+  test("a DM's rest and fight's end predict in a room with no clock, and read the clock where there is one", () => {
+    // A fight whose rows all stand on the DM's scene, so the DM's copy holds the whole fight.
+    const here = () => {
+      const s = setup();
+      s.encounter = { ...s.encounter!, entries: s.encounter!.entries.filter((e) => e.tokenId !== "far") };
+      return s;
+    };
+    const state = here();
+    const rest = { t: "actor.rest" as const, target: { characterId: "c1" }, kind: "long" as const };
+    assert.ok(predicts(rest, state));
+    assert.ok(predicts({ t: "encounter.end" }, state));
+    assert.ok(!readsClock(rest, state));
+    const timed = { ...here(), clock: clock(true) };
+    assert.ok(readsClock(rest, timed));
+    assert.ok(readsClock({ t: "encounter.end" }, timed));
+    assert.ok(predicts(rest, timed));
+    assert.ok(predicts({ t: "encounter.end" }, timed));
+  });
+
+  test("a player's own rest predicts with the clock hidden and with it shared", () => {
+    const rest = { t: "actor.rest" as const, target: { characterId: "c1" }, kind: "long" as const };
+    for (const shown of [false, true]) assert.ok(predicts(rest, { ...setup(), clock: clock(shown) }, P1), `shown ${shown}`);
+  });
+
+  test("a start reads nothing, and the other clock ops read the clock and the fight", () => {
+    assert.deepEqual(reads({ t: "clock.start", id: "k1", at: 0, shown: true, calendar: { kind: "days" } }, setup()), { keys: [], complete: [] });
+    const timed = { ...setup(), clock: clock(false) };
+    for (const op of [{ t: "clock.stop" as const }, { t: "clock.set" as const, at: 0 }, { t: "clock.advance" as const, by: 60 }, { t: "clock.update" as const, shown: true }]) {
+      assert.deepEqual(reads(op, timed), { keys: [{ key: "clock" }, { key: "encounter" }], complete: [] }, op.t);
+      assert.ok(predicts(op, timed), op.t);
+    }
+    const calm = { ...timed, encounter: null };
+    assert.deepEqual(reads({ t: "clock.set", at: 0 }, calm), { keys: [{ key: "clock" }], complete: [] });
+  });
+});

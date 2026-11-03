@@ -1,5 +1,6 @@
+import { clockNow, lineDate } from "./calendar.ts";
 import { parseKey, readEntity } from "./keys.ts";
-import type { Character, CorrectionWitness, LineParts, LogEvent, PcRoll, RoomState, Token, Viewer } from "./model.ts";
+import type { Character, ClockLogEvent, CorrectionWitness, LineParts, LogEvent, PcRoll, RoomState, Token, Viewer } from "./model.ts";
 import { ownsCharacter, ownsToken, projectEntityForOp, stableStringify } from "./project.ts";
 import type { Env } from "./reducer/tx.ts";
 import { unknownOnPass } from "./rules/pcStats.ts";
@@ -123,4 +124,23 @@ export function projectCorrection(state: RoomState, viewer: Viewer, data: Correc
   if (eligible.length === 0) return null;
   const name = data.name && eligible.some((w) => w.name === data.name) ? data.name : undefined;
   return { type: "correction", from: data.from, scope: data.scope, ...(name ? { name } : {}) };
+}
+
+/**
+ * The clock line of the DM's Undo or Redo (docs/design/design-v1-calendar.md
+ * 4.7, 6.3), beside the correction lines and under their gate (reducer.ts):
+ * only with a clock before and after, and only when the current time's date
+ * text reads differently after, so players never keep a line for time that
+ * no longer passed. An undo or redo that brings back or ends a fight writes
+ * none, though the fight's seconds move the time: the DM took back the
+ * fight's end, not a clock change. Its audience is the clock's after the
+ * restore (project.ts lineReader).
+ */
+export function clockCorrection(before: RoomState, after: RoomState, from: HistoryDirection): ClockLogEvent | null {
+  const was = before.clock;
+  const now = after.clock;
+  if (!was || !now) return null;
+  if ((before.encounter === null) !== (after.encounter === null)) return null;
+  const date = lineDate(clockNow(now, after.encounter), now.calendar);
+  return date === lineDate(clockNow(was, before.encounter), was.calendar) ? null : { type: "clock", date, from };
 }

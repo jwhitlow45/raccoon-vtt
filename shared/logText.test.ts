@@ -71,3 +71,30 @@ describe("merged log order and trimmed lines", () => {
   });
 });
 
+
+describe("clock lines (docs/design/design-v1-calendar.md 4.7)", () => {
+  const read = (data: Extract<LogEvent, { type: "clock" }>) => describeEvent(data, room());
+
+  test("read each change from the date it stored, with the step's span", () => {
+    assert.equal(read({ type: "clock", date: "Day 4, 6:00 AM", by: 8 * 3_600 }), "8 hours pass. It is now Day 4, 6:00 AM.");
+    assert.equal(read({ type: "clock", date: "Day 4, 6:00 AM", by: 3_600 }), "1 hour passes. It is now Day 4, 6:00 AM.");
+    assert.equal(read({ type: "clock", date: "Day 4, 6:00 AM", by: 2 * 86_400 + 3 * 3_600 }), "2 days and 3 hours pass. It is now Day 4, 6:00 AM.");
+    assert.equal(read({ type: "clock", date: "Day 4, 6:00 AM", by: 86_400 }), "1 day passes. It is now Day 4, 6:00 AM.");
+    assert.equal(read({ type: "clock", date: "Day 4, 6:00 AM", by: 30 }), "Less than a minute passes. It is now Day 4, 6:00 AM.");
+    assert.equal(read({ type: "clock", date: "Day 4, 6:00 AM", by: 8 * 3_600, why: "longRest" }), "8 hours pass in a Long Rest. It is now Day 4, 6:00 AM.");
+    assert.equal(read({ type: "clock", date: "Tuesday, Deepwinter 3, 1204 AF, 6:00 AM", why: "set" }), "The DM sets the date and time: Tuesday, Deepwinter 3, 1204 AF, 6:00 AM.");
+    assert.equal(read({ type: "clock", date: "Day 1, 8:00 AM", why: "start" }), "The DM starts the clock: Day 1, 8:00 AM.");
+  });
+
+  test("Undo and Redo name no step, only the date after", () => {
+    assert.equal(read({ type: "clock", date: "Day 3, 10:00 PM", from: "undo" }), "The DM undid a clock change. It is now Day 3, 10:00 PM.");
+    assert.equal(read({ type: "clock", date: "Day 4, 6:00 AM", from: "redo" }), "The DM redid a clock change. It is now Day 4, 6:00 AM.");
+  });
+
+  test("a month renamed later leaves the line as it was written", () => {
+    // The line holds its date as text: no calendar is read when it is shown, so a rename cannot reach it.
+    const line = { type: "clock" as const, date: "Deepwinter 3, 1204 AF, 6:00 AM", why: "set" as const };
+    const renamed = room({ clock: { id: "c1", rev: 2, t: 0, shown: true, calendar: { kind: "months", months: [{ name: "Thaw", days: 30 }] } } });
+    assert.equal(describeEvent(line, renamed), "The DM sets the date and time: Deepwinter 3, 1204 AF, 6:00 AM.");
+  });
+});

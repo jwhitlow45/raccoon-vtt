@@ -9,6 +9,7 @@ import {
   type FreeWall,
   type LogEntry,
   type MemoryChunk,
+  type RoomClock,
   type RoomMeta,
   type RoomState,
   type SceneMark,
@@ -74,6 +75,8 @@ export type ParsedKey =
   | { kind: "memoryShared"; id: string }
   | { kind: "encounter" }
   | { kind: "encounterHistory" }
+  /** The room's clock (RoomState.clock, docs/design/design-v1-calendar.md 6.1), a singleton like the encounter. */
+  | { kind: "clock" }
   | { kind: "meta" };
 
 export type EntityKind = ParsedKey["kind"];
@@ -141,6 +144,7 @@ export const keys = {
   memoryShared: (sceneId: string): EntityKey => `memoryShared:${sceneId}`,
   encounter: "encounter" as EntityKey,
   encounterHistory: "encounterHistory" as EntityKey,
+  clock: "clock" as EntityKey,
   meta: "meta" as EntityKey,
 };
 
@@ -240,7 +244,7 @@ const GRID_RE = /^(-?\d+),(-?\d+)$/;
 export function parseKey(key: EntityKey): ParsedKey | null {
   const colon = key.indexOf(":");
   if (colon < 0) {
-    if (key === "encounter" || key === "encounterHistory" || key === "meta") return { kind: key };
+    if (key === "encounter" || key === "encounterHistory" || key === "clock" || key === "meta") return { kind: key };
     return null;
   }
   const kind = key.slice(0, colon);
@@ -484,6 +488,8 @@ export function readEntity(state: RoomState, key: EntityKey): unknown {
       return state.encounter;
     case "encounterHistory":
       return state.encounterHistory;
+    case "clock":
+      return state.clock ?? null;
     case "meta":
       return state.meta;
   }
@@ -501,7 +507,7 @@ function withEntry<T>(map: Record<string, T>, id: string, value: T | null): Reco
  * mutated: only the top-level object and the one collection are copied.
  *
  * Removing a singleton empties it: the encounter becomes null, the history
- * becomes an empty list. Removing the meta is refused, because a room always
+ * becomes an empty list, and the clock's field goes. Removing the meta is refused, because a room always
  * has one. Log entries are kept in order and capped by the caller.
  */
 export function writeEntity(state: RoomState, key: EntityKey, value: unknown): RoomState {
@@ -607,6 +613,12 @@ export function writeEntity(state: RoomState, key: EntityKey, value: unknown): R
       return { ...state, encounter: (value as Encounter | null) ?? null };
     case "encounterHistory":
       return { ...state, encounterHistory: (value as EncounterSnapshot[] | null) ?? [] };
+    case "clock": {
+      // No clock is no field, as in a room from before it, so stopping one and its undo leave the room as it was.
+      if (value !== null) return { ...state, clock: value as RoomClock };
+      const { clock: _clock, ...rest } = state;
+      return rest;
+    }
     case "meta":
       if (value === null) throw new Error("the room meta cannot be removed");
       return { ...state, meta: value as RoomMeta };

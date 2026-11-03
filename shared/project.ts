@@ -38,6 +38,7 @@ import {
   type RememberedWall,
   type RollRequest,
   type RollTarget,
+  type RoomClock,
   type RoomMeta,
   type RoomState,
   type SavedEncounter,
@@ -148,7 +149,14 @@ export type ProjectedEncounter = Omit<Encounter, "entries"> & { entries: Project
  */
 export type ProjectedTrap = Omit<Trap, "state" | "found"> & Partial<Pick<Trap, "state" | "found">> & { disarmed?: true };
 
-export type ProjectedState = Omit<RoomState, "meta" | "tokens" | "characters" | "templates" | "encounter" | "traps" | "holders" | "exploredBy"> & {
+/**
+ * The room's clock as a viewer gets it (docs/design/design-v1-calendar.md 6.4):
+ * the DM's whole, a player's and a table display's without the sharing
+ * switch, which they get only while it is on, and with rev 0.
+ */
+export type ProjectedClock = Omit<RoomClock, "shown"> & { shown?: boolean };
+
+export type ProjectedState = Omit<RoomState, "meta" | "tokens" | "characters" | "templates" | "encounter" | "traps" | "holders" | "exploredBy" | "clock"> & {
   meta: RoomMeta & {
     /** DM only, never stored. Retained HP undo records, including lines outside the live projection. */
     hpUndoLogIds?: string[];
@@ -179,6 +187,8 @@ export type ProjectedState = Omit<RoomState, "meta" | "tokens" | "characters" | 
   holders?: Record<string, SightHolders>;
   /** Never in a projection: a holder's layer reaches them only merged into their fog. Here so a projection still reads as a room. */
   exploredBy?: Record<string, ExploredTile>;
+  /** The room's clock, while the viewer gets one (projectClockCtx). Absent otherwise. */
+  clock?: ProjectedClock;
 };
 
 export type HpAccess = "exact" | "bar" | "label" | "none";
@@ -1401,8 +1411,12 @@ function ownersStopsCtx(ctx: Ctx, token: Token, stops: readonly PathStop[]): Pat
 
 export function projectCharacter(state: RoomState, viewer: Viewer, character: Character): ProjectedCharacter {
   if (viewer.role === "dm") return character;
-  // Rev 0 for players, as on their tokens (projectTokenCtx).
-  if (ownsCharacter(viewer, character)) return { ...character, rev: 0, actor: projectActorOwner(character.actor) };
+  // Rev 0 for players, as on their tokens (projectTokenCtx). The last Long Rest's stamp is the DM's, the owners' copy
+  // included, so no clock change ever re-projects a character (docs/design/design-v1-calendar.md 6.4).
+  if (ownsCharacter(viewer, character)) {
+    const { longRest: _longRest, ...owned } = character;
+    return { ...owned, rev: 0, actor: projectActorOwner(character.actor) };
+  }
   const out: ProjectedCharacter = {
     id: character.id,
     rev: 0,
@@ -3435,6 +3449,9 @@ export function lineReader(state: RoomState, opVersion?: number): (entry: Pick<L
   return (entry) => {
     if (entry.kind !== "event" || !entry.data) return { audience: "shared" };
     const data = entry.data;
+    // A clock line's audience is frozen as the op leaves the clock (docs/design/design-v1-calendar.md 6.4): shared while it
+    // is shown, the DM's otherwise. Read later, it reaches whoever it reached then (projectEventCtx).
+    if (data.type === "clock") return state.clock?.shown === true ? { audience: "shared" } : { audience: "dm" };
     const read = (ctx: Ctx): Read => ({ id: ctx.viewer.memberId, ctx, view: projectEventCtx(ctx, data) });
     const reads = players.map(read);
     const readers = reads.filter((r) => r.view !== null);
@@ -4022,9 +4039,26 @@ function projectEntityCtx(ctx: Ctx, key: EntityKey): unknown {
       return projectEncounterCtx(ctx);
     case "encounterHistory":
       return projectHistoryCtx(ctx);
+    case "clock":
+      return projectClockCtx(ctx);
     case "meta":
       return projectMetaCtx(ctx);
   }
+}
+
+/**
+ * The room's clock (docs/design/design-v1-calendar.md 6.4): the DM's whole. A
+ * player and a table display get its id, time and calendar while it is
+ * shown, and nothing of it otherwise. Rev 0, so its number never tells how
+ * often a hidden clock moved. A running fight's seconds come from the
+ * round, which every player already gets, so a shown clock read with them
+ * tells nothing more.
+ */
+function projectClockCtx(ctx: Ctx): ProjectedClock | null {
+  const clock = ctx.state.clock;
+  if (!clock) return null;
+  if (ctx.viewer.role === "dm") return clock;
+  return clock.shown ? { id: clock.id, rev: 0, t: clock.t, calendar: clock.calendar } : null;
 }
 
 function projectMap<T, P>(map: Record<string, T>, project: (value: T) => P | null): Record<string, P> {
@@ -4077,7 +4111,14 @@ function projectStateCtx(ctx: Ctx): ProjectedState {
     trapSeen: (state.trapSeen ?? []).map((e) => projectTrapSeenCtx(ctx, e)).filter((e): e is LogEntry => e !== null),
     sight: sightTilesCtx(ctx),
     ...perPlayerMapsCtx(ctx),
+    ...clockField(ctx),
   };
+}
+
+/** The clock as a field only while the viewer gets one, so a room without it projects as it always did (keys.ts writeEntity). */
+function clockField(ctx: Ctx): Pick<ProjectedState, "clock"> {
+  const clock = projectClockCtx(ctx);
+  return clock ? { clock } : {};
 }
 
 /**
@@ -4138,7 +4179,7 @@ function projectFogTilesCtx(ctx: Ctx): Record<string, FogTile> {
 
 /** Every entity key a projection may hold, so a global re-projection can be compared with a held map. */
 export function allKeys(state: RoomState): EntityKey[] {
-  const out: EntityKey[] = [keys.meta, keys.encounter, keys.encounterHistory];
+  const out: EntityKey[] = [keys.meta, keys.encounter, keys.encounterHistory, keys.clock];
   for (const id of Object.keys(state.members)) out.push(keys.member(id));
   for (const id of Object.keys(state.scenes)) out.push(keys.scene(id));
   for (const c of Object.values(state.buildChunks)) out.push(keys.chunk(c.sceneId, c.cx, c.cy));

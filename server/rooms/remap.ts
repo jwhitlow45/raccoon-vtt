@@ -259,6 +259,9 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     trapSeen: [],
     // No record of the running turn's reminders (RoomState.reminded): it belongs to that turn, and names old member ids.
   };
+  // The clock holds no id but its own, and each character's stamp names that one, so both come through as they are
+  // (docs/design/design-v1-calendar.md 6.6). No clock stays no field.
+  if (state.clock) out.clock = state.clock;
 
   const moveAny = state.meta.settings.playersMoveAny;
   if (Array.isArray(moveAny)) out.meta = { ...out.meta, settings: { ...out.meta.settings, playersMoveAny: memberList(moveAny) } };

@@ -11,6 +11,7 @@ import {
   MAX_ALT_IMAGES,
   MAX_RESTORE_ENTRIES,
   castSchemas,
+  clockSchemas,
   trapSchemas,
   TRAP_SOUNDS,
   diceSchemas,
@@ -401,7 +402,12 @@ const character = z.strictObject({
     .max(LIMITS.resourcesPerCharacter)
     .refine((list) => new Set(list.map((r) => r.id)).size === list.length, { message: "a resource is listed twice" })
     .optional(),
+  // Backups from before the clock have no stamp (docs/design/design-v1-calendar.md 6.6).
+  longRest: z.strictObject({ at: clockSchemas.clockTime, clock: id }).optional(),
 });
+
+/** The room's clock (docs/design/design-v1-calendar.md 6.1), by the bounds its ops keep. */
+const roomClock = z.strictObject({ id, rev, t: clockSchemas.clockTime, shown: z.boolean(), calendar: clockSchemas.calendar });
 
 const areaFeet = z.number().min(5).max(1_000);
 const template = z.strictObject({
@@ -726,6 +732,13 @@ const logEvent = z.discriminatedUnion("type", [
     hidden: z.literal(true).optional(),
   }),
   z.strictObject({ type: z.literal("encounter"), action: z.enum(["start", "end"]) }),
+  z.strictObject({
+    type: z.literal("clock"),
+    date: clockSchemas.clockDate,
+    by: clockSchemas.clockStep.optional(),
+    why: z.enum(["longRest", "set", "start"]).optional(),
+    from: z.enum(["undo", "redo"]).optional(),
+  }),
   z.strictObject({ type: z.literal("handout"), handoutId: id }),
   z.strictObject({ type: z.literal("member"), memberId: id, action: z.enum(["join", "kick", "dm", "undm", "remove"]) }),
   z.strictObject({ type: z.literal("teleport"), tokenId: id, past: z.enum(["wall", "ledge", "unknown"]) }),
@@ -937,6 +950,8 @@ export const roomStateSchema = z.strictObject({
   memoryBy: memoryChunks("holder").default({}),
   playedScenes: sceneMarks.default({}),
   memoryShared: shareMarks.default({}),
+  // The in-game clock. Backups from before it have none, and absent and null both read as none (docs/design/design-v1-calendar.md 6.6).
+  clock: roomClock.nullable().optional(),
 });
 
 /**

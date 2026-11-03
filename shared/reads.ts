@@ -61,6 +61,16 @@ function endsReads(state: RoomState, rollIds: readonly string[]): Read[] {
   return out;
 }
 
+/**
+ * The room's clock as a read, only where the view holds one: `satisfies`
+ * fails on any read key that is null, so a rest or a fight's end in a room
+ * without a clock, or by a player the DM hides it from, still predicts
+ * (docs/design/design-v1-calendar.md 6.3, CAL-1).
+ */
+function clockRead(state: RoomState): Read[] {
+  return state.clock ? [{ key: keys.clock }] : [];
+}
+
 export function reads(op: Op, state: RoomState): Reads {
   switch (op.t) {
     case "undo":
@@ -81,12 +91,6 @@ export function reads(op: Op, state: RoomState): Reads {
     case "actor.rechargeRoll":
     // An ask reads its damage roll's lines from the log, which only the server holds whole (docs/design/design-v1-player-save-spell.md 5.6).
     case "cast.ask":
-    // The room's clock (docs/design/design-v1-calendar.md 6.2) waits for the server until its key exists.
-    case "clock.start":
-    case "clock.stop":
-    case "clock.update":
-    case "clock.set":
-    case "clock.advance":
       return NEVER;
 
     case "room.update":
@@ -189,8 +193,10 @@ export function reads(op: Op, state: RoomState): Reads {
     case "actor.prompt":
       return of([holderRead(state, op.target, ["turnRecord"]), { key: keys.encounter }]);
     case "actor.life":
-    case "actor.rest":
       return of([holderRead(state, op.target, ["hp", "life", "effects"])]);
+    // A Long Rest stamps its character by the clock, read only where the view holds one (docs/design/design-v1-calendar.md 6.3).
+    case "actor.rest":
+      return of([holderRead(state, op.target, ["hp", "life", "effects"]), ...clockRead(state)]);
     case "actor.effect.add":
     case "actor.effect.update": {
       const r: Read[] = [holderRead(state, op.target, ["effects"])];
@@ -295,7 +301,9 @@ export function reads(op: Op, state: RoomState): Reads {
       }
       return of(r, ["encounter"]);
     }
+    // A fight's end adds its rounds to the clock, read only where the view holds one (docs/design/design-v1-calendar.md 6.3).
     case "encounter.end":
+      return of(clockRead(state), ["encounter"]);
     case "encounter.remove":
     case "encounter.setValue":
     case "encounter.setValues":
@@ -311,6 +319,15 @@ export function reads(op: Op, state: RoomState): Reads {
       return of([{ key: keys.encounterHistory }, ...saved.map((id) => ({ key: keys.token(id) }))], ["encounter"]);
     }
 
+    // The room's clock (docs/design/design-v1-calendar.md 6.3): a start reads nothing, so it predicts at once, and the other
+    // ops read the clock and the fight its time counts, where the view holds one.
+    case "clock.start":
+      return of([]);
+    case "clock.stop":
+    case "clock.update":
+    case "clock.set":
+    case "clock.advance":
+      return of([{ key: keys.clock }, ...(state.encounter ? [{ key: keys.encounter }] : [])]);
     case "log.chat":
       return of([]);
     case "log.whisper":

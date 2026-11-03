@@ -480,6 +480,9 @@ export function roomLevelBytes(state: RoomState): number {
     else if (name === "encounterHistory") bytes += fieldBytes(name) + collectionBytes(state.encounterHistory) - historyLists(state.encounterHistory).extra + historyLists(state.encounterHistory).count * widestListExtra(state.members);
     else bytes += fieldBytes(name) + (name === "meta" ? valueBytes(state[name]) : collectionBytes(state[name] ?? (name === "trapLog" || name === "trapSeen" ? [] : {})));
   }
+  // The clock is the one room-level field a room may lack (docs/design/design-v1-calendar.md 6.7): there, it adds its
+  // field, its value and the comma before it, as a DM's projection holds it.
+  if (state.clock) bytes += 1 + fieldBytes("clock") + valueBytes(state.clock);
   return bytes;
 }
 
@@ -1222,7 +1225,8 @@ function pitGrowth(trap: Trap): number {
  * would undercount it, while the explored layer's reserve counts the
  * escaped key (shared/limits.ts): an explore must take off the guard's
  * bound exactly what it takes off the reserve. A log entry is an array
- * element and adds only its comma, and the singletons are always there.
+ * element and adds only its comma, and the singletons are always there,
+ * the clock aside.
  */
 function entryKeyBytes(key: EntityKey): number {
   const parsed = parseKey(key);
@@ -1232,6 +1236,9 @@ function entryKeyBytes(key: EntityKey): number {
     case "encounter":
     case "encounterHistory":
       return 0;
+    // The clock's field comes and goes with it.
+    case "clock":
+      return jsonKeyBytes("clock");
     case "log":
     case "trapLog":
     case "trapSeen":

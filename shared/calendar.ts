@@ -48,7 +48,7 @@ export type ClockDate = {
 export function dateOf(t: number, calendar: Calendar): ClockDate {
   // Adding 0 turns a -0 into 0, so a moment at the first midnight reads the same however it was reached.
   const dayIndex = Math.floor(t / DAY_SECONDS) + 0;
-  const time = Math.floor(t) - dayIndex * DAY_SECONDS;
+  const time = Math.floor(t) - dayIndex * DAY_SECONDS + 0;
   if (calendar.kind === "days") return { dayIndex, time, day: dayIndex + 1 };
   const total = Math.max(1, yearDays(calendar.months));
   const year = Math.floor(dayIndex / total) + 0;
