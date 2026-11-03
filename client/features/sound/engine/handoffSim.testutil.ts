@@ -1,0 +1,470 @@
+import { chance, int, pick, rng } from "#shared/testutil.ts";
+import { Handoff, LAPSE_MS, TAKEOVER_MS, type HandoffAudio, type HandoffPost, type LockApi, type PageKind } from "./handoff.ts";
+
+/*
+ * A browser's pages of one room for handoff.random.test.ts: a world of fake
+ * time runs every page's timers, the channel's posts and the lock manager's
+ * grants as tasks on each page's main thread, which a stall holds back and
+ * a freeze stops, while each page's audio renders on by its own clock.
+ * HANDOFF_TRACE=1 prints what happens, for a failing seed.
+ */
+
+type Task = { at: number; seq: number; page: number; run: () => void; grant?: true };
+
+type Gate = { on: boolean; until: number };
+
+export class SimPage {
+  readonly id: number;
+  readonly name: string;
+  readonly kind: PageKind;
+  handoff!: Handoff;
+  stalledUntil = 0;
+  frozen = false;
+  gone: "closed" | "crashed" | null = null;
+  /** The context really running, and whether the page has heard so. */
+  running = true;
+  seenRunning = true;
+  enabled = true;
+  shown = false;
+  audioTime = 0;
+  gate: Gate = { on: false, until: Infinity };
+  /** The lease's deadline in this page's audio time, or null. */
+  lease: number | null = null;
+  heard = new Set<string>();
+  /** When the page last processed a post from each peer, for the lease check. */
+  heardAt = new Map<string, number>();
+  /** Tasks held while frozen. */
+  held: Task[] = [];
+  holdsLock = false;
+  freezing: Task | null = null;
+  constructor(id: number, kind: PageKind) {
+    this.id = id;
+    this.kind = kind;
+    this.name = `p${String(id).padStart(2, "0")}`;
+  }
+  eligible(): boolean {
+    return this.enabled && this.seenRunning;
+  }
+  audible(): boolean {
+    if (this.gone || !this.running || !this.gate.on) return false;
+    if (this.audioTime >= this.gate.until) return false;
+    if (this.lease !== null && this.audioTime >= this.lease) return false;
+    return true;
+  }
+}
+
+type Request = { page: SimPage; signal: AbortSignal; granted: (release: () => void) => void };
+
+export class World {
+  now = 1_000_000;
+  seq = 0;
+  tasks: Task[] = [];
+  pages: SimPage[] = [];
+  failures: string[] = [];
+  readonly locks: boolean;
+  readonly r: () => number;
+  holder: SimPage | null = null;
+  queue: Request[] = [];
+  /** Peers each page heard while they owned unarmed and then crashed: their claims may keep the rest quiet. */
+  keptClaims = new Set<string>();
+  /** A fixed delay for every post, for a test that needs one order. */
+  delay: number | null = null;
+
+  constructor(locks: boolean, r: () => number) {
+    this.locks = locks;
+    this.r = r;
+  }
+
+  fail(why: string): void {
+    if (this.failures.length < 5) this.failures.push(`t=${this.now - 1_000_000}: ${why}`);
+    this.log(`FAIL ${why}`);
+  }
+
+  /** HANDOFF_TRACE=1 prints what happens, for a failing seed. */
+  log(what: string): void {
+    if (process.env.HANDOFF_TRACE) console.log(`${String(this.now - 1_000_000).padStart(7)} ${what}`);
+  }
+
+  later(page: SimPage, ms: number, run: () => void): Task {
+    const task = { at: this.now + Math.max(0, ms), seq: this.seq++, page: page.id, run };
+    this.tasks.push(task);
+    return task;
+  }
+
+  /** Advances time to `until`, running every task due, checking between. */
+  runUntil(until: number): void {
+    for (;;) {
+      let next: Task | null = null;
+      for (const t of this.tasks) if (next === null || t.at < next.at || (t.at === next.at && t.seq < next.seq)) next = t;
+      const stepTo = Math.min(next?.at ?? Infinity, until, this.now + 50);
+      this.advance(stepTo);
+      if (next && next.at <= this.now) {
+        this.tasks.splice(this.tasks.indexOf(next), 1);
+        this.runTask(next);
+        this.check();
+        continue;
+      }
+      this.check();
+      if (this.now >= until) return;
+    }
+  }
+
+  advance(to: number): void {
+    const dt = to - this.now;
+    if (dt <= 0) return;
+    for (const p of this.pages) if (!p.gone && p.running) p.audioTime += dt;
+    this.now = to;
+  }
+
+  runTask(task: Task): void {
+    const page = this.pages[task.page]!;
+    if (page.gone) return;
+    if (page.frozen) {
+      page.held.push(task);
+      return;
+    }
+    if (page.stalledUntil > this.now) {
+      task.at = page.stalledUntil;
+      this.tasks.push(task);
+      return;
+    }
+    task.run();
+  }
+
+  check(): void {
+    const sounding = this.pages.filter((p) => p.audible());
+    if (this.locks) for (const p of sounding) if (!p.holdsLock) this.fail(`${p.name} sounds without the lock`);
+    if (sounding.length > 1) {
+      for (let i = 0; i < sounding.length; i++) {
+        for (let j = i + 1; j < sounding.length; j++) {
+          const a = sounding[i]!;
+          const b = sounding[j]!;
+          const excused = !this.locks && ((!a.heard.has(b.name) && b.stalledUntil > this.now - 1_000) || (!b.heard.has(a.name) && a.stalledUntil > this.now - 1_000));
+          if (!excused) this.fail(`${a.name} and ${b.name} sound at once`);
+        }
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------- the browser's parts
+
+  /** When the last post from one page to another lands: a channel keeps each sender's posts in order. */
+  #lastDelivery = new Map<string, number>();
+
+  post(from: SimPage, msg: HandoffPost): void {
+    for (const to of this.pages) {
+      if (to === from || to.gone) continue;
+      const pair = `${from.id}>${to.id}`;
+      const at = Math.max(this.now + (this.delay ?? int(this.r, 0, 15)), this.#lastDelivery.get(pair) ?? 0);
+      this.#lastDelivery.set(pair, at);
+      this.later(to, at - this.now, () => {
+        this.log(`${to.name} <- ${msg.page} ${msg.bye ? "bye" : `${msg.owns ? "owns " : ""}${msg.wants ? "wants " : ""}${msg.armed ? "armed " : ""}${msg.eligible ? "eligible" : "ineligible"} shown@${msg.shownAt - 1_000_000}`}`);
+        to.heard.add(msg.page);
+        to.heardAt.set(msg.page, this.now);
+        to.handoff.receive(msg);
+      });
+    }
+  }
+
+  lockApi(page: SimPage): LockApi {
+    return {
+      request: (_name, signal, granted) => {
+        if (signal.aborted) return;
+        const request = { page, signal, granted };
+        this.queue.push(request);
+        signal.addEventListener("abort", () => {
+          const at = this.queue.indexOf(request);
+          if (at >= 0) this.queue.splice(at, 1);
+        });
+        this.grant();
+      },
+    };
+  }
+
+  grant(): void {
+    if (this.holder !== null) return;
+    const next = this.queue.shift();
+    if (!next) return;
+    const page = next.page;
+    this.holder = page;
+    page.holdsLock = true;
+    let released = false;
+    // The grant runs as a task on the page's main thread, which a stall holds back while the lock is held already.
+    const task = this.later(page, 0, () => {
+      next.granted(() => {
+        if (released) return;
+        released = true;
+        this.freeLock(page);
+      });
+    });
+    task.grant = true;
+  }
+
+  freeLock(page: SimPage): void {
+    if (this.holder !== page) return;
+    this.holder = null;
+    page.holdsLock = false;
+    this.grant();
+  }
+
+  audio(page: SimPage): HandoffAudio {
+    return {
+      play: () => {
+        this.log(`${page.name} PLAY`);
+        page.gate = { on: true, until: Infinity };
+        page.lease = null;
+      },
+      fadeOut: (ms) => {
+        this.log(`${page.name} fade`);
+        if (page.gate.on) page.gate = { on: true, until: Math.min(page.gate.until, page.audioTime + ms) };
+        page.lease = null;
+      },
+      hold: () => {
+        if (page.gate.on) this.log(`${page.name} HOLD`);
+        page.gate = { on: false, until: Infinity };
+        page.lease = null;
+      },
+      lease: (ms) => {
+        if (ms !== null) {
+          let other = false;
+          for (const [peer, at] of page.heardAt) if (this.now - at < LAPSE_MS + 50 && peer !== page.name) other = true;
+          if (!other) this.fail(`${page.name} armed its lease with no other page heard`);
+        }
+        page.lease = ms === null ? null : page.audioTime + ms;
+      },
+    };
+  }
+
+  open(kind: PageKind, shown: boolean): SimPage {
+    const page = new SimPage(this.pages.length, kind);
+    this.log(`${page.name} opens ${kind} ${shown ? "shown" : "hidden"}`);
+    this.pages.push(page);
+    page.shown = shown;
+    page.handoff = new Handoff({
+      room: "R",
+      page: page.name,
+      kind,
+      now: () => this.now,
+      setTimer: (ms, fn) => this.later(page, ms, fn),
+      clearTimer: (handle) => {
+        const at = this.tasks.indexOf(handle as Task);
+        if (at >= 0) this.tasks.splice(at, 1);
+        const held = page.held.indexOf(handle as Task);
+        if (held >= 0) page.held.splice(held, 1);
+      },
+      post: (msg) => this.post(page, msg),
+      locks: this.locks ? this.lockApi(page) : null,
+      audio: this.audio(page),
+    });
+    page.handoff.start(shown);
+    page.handoff.setEligible(page.eligible());
+    return page;
+  }
+
+  // ---------------------------------------------------------------- what happens to pages
+
+  onPage(page: SimPage, run: () => void): void {
+    this.later(page, 0, run);
+  }
+
+  close(page: SimPage): void {
+    this.onPage(page, () => {
+      this.log(`${page.name} closes`);
+      page.handoff.close();
+      page.gone = "closed";
+      this.dropLock(page);
+    });
+  }
+
+  crash(page: SimPage): void {
+    if (page.gone) return;
+    this.log(`${page.name} crashes`);
+    if (!this.locks && page.gate.on) {
+      // Without Web Locks a crashed owner's last post decides: unarmed, others that heard it keep its claim.
+      if (!page.handoff.armed) this.keptClaims.add(page.name);
+    }
+    page.gone = "crashed";
+    this.tasks = this.tasks.filter((t) => t.page !== page.id);
+    this.dropLock(page);
+  }
+
+  dropLock(page: SimPage): void {
+    this.queue = this.queue.filter((q) => q.page !== page);
+    this.freeLock(page);
+  }
+
+  stall(page: SimPage, ms: number): void {
+    this.log(`${page.name} stalls ${ms}`);
+    page.stalledUntil = Math.max(page.stalledUntil, this.now + ms);
+  }
+
+  freeze(page: SimPage): void {
+    const task = this.later(page, 0, () => {
+      page.freezing = null;
+      // A grant queued before the freeze runs before it, so the freeze can let that lock go too.
+      for (const grant of this.tasks.filter((t) => t.page === page.id && t.grant)) {
+        this.tasks.splice(this.tasks.indexOf(grant), 1);
+        grant.run();
+      }
+      this.log(`${page.name} freezes`);
+      page.handoff.freeze();
+      page.frozen = true;
+    });
+    page.freezing = task;
+  }
+
+  thaw(page: SimPage): void {
+    if (page.freezing) {
+      // A freeze still queued behind a stall, or held by an earlier freeze, never comes.
+      for (const list of [this.tasks, page.held]) {
+        const at = list.indexOf(page.freezing);
+        if (at >= 0) list.splice(at, 1);
+      }
+      page.freezing = null;
+    }
+    if (!page.frozen || page.gone) return;
+    page.frozen = false;
+    this.log(`${page.name} thaws`);
+    this.later(page, 0, () => page.handoff.resume());
+    for (const t of page.held.splice(0)) {
+      t.at = this.now;
+      this.tasks.push(t);
+    }
+  }
+
+  show(page: SimPage, shown: boolean): void {
+    this.onPage(page, () => {
+      this.log(`${page.name} ${shown ? "shown" : "hidden"}`);
+      page.shown = shown;
+      page.handoff.setShown(shown);
+    });
+  }
+
+  enable(page: SimPage, on: boolean): void {
+    this.onPage(page, () => {
+      this.log(`${page.name} ${on ? "enabled" : "disabled"}`);
+      page.enabled = on;
+      page.handoff.setEligible(page.eligible());
+    });
+  }
+
+  /** The context leaves `running`: the audio stops at once, and the page hears of it as a task. */
+  suspend(page: SimPage): void {
+    if (!page.running) return;
+    page.running = false;
+    this.log(`${page.name} context stops`);
+    this.onPage(page, () => {
+      page.seenRunning = false;
+      page.handoff.contextLeft();
+    });
+  }
+
+  /** The context runs again by itself: rendering resumes at once, before the page hears of it. */
+  recover(page: SimPage): void {
+    if (page.running) return;
+    page.running = true;
+    this.log(`${page.name} context runs`);
+    this.later(page, int(this.r, 0, 400), () => {
+      if (!page.running) return;
+      page.seenRunning = true;
+      page.handoff.setEligible(page.eligible());
+    });
+  }
+
+  live(): SimPage[] {
+    return this.pages.filter((p) => !p.gone);
+  }
+}
+
+export function settleAndCheck(world: World, label: string): SimPage | null {
+  // Every stall over, then long enough for a lapse, a takeover by time, a listen window and a claim.
+  const stalls = Math.max(world.now, ...world.pages.map((p) => p.stalledUntil));
+  world.runUntil(stalls + LAPSE_MS + TAKEOVER_MS + 4_000);
+  const live = world.live().filter((p) => !p.frozen);
+  const eligible = live.filter((p) => p.eligible());
+  const sounding = world.pages.filter((p) => p.audible());
+  const quietAllowed = !world.locks && live.some((p) => [...world.keptClaims].some((c) => p.heard.has(c)));
+  if (eligible.length === 0) {
+    if (sounding.length > 0) world.fail(`${label}: ${sounding[0]!.name} sounds with no page eligible`);
+    return null;
+  }
+  if (sounding.length === 0) {
+    if (!quietAllowed) world.fail(`${label}: no page sounds, ${eligible.length} eligible`);
+    return null;
+  }
+  if (sounding.length > 1) world.fail(`${label}: ${sounding.length} pages sound`);
+  const owner = sounding[0]!;
+  if (eligible.some((p) => p.kind === "display") && owner.kind !== "display" && !quietAllowed) world.fail(`${label}: ${owner.name}, a member, sounds beside an eligible display`);
+  return owner;
+}
+
+type Step = "open" | "close" | "crash" | "stall" | "freeze" | "thaw" | "show" | "hide" | "enable" | "disable" | "suspend" | "recover" | "wait";
+const STEPS: readonly Step[] = ["open", "close", "crash", "stall", "freeze", "thaw", "show", "hide", "enable", "disable", "suspend", "recover", "wait", "wait", "show", "hide"];
+
+export function randomRun(seed: number, locks: boolean): string[] {
+  const r = rng(seed);
+  const world = new World(locks, r);
+  world.open(chance(r, 0.2) ? "display" : "member", chance(r, 0.7));
+  const steps = int(r, 4, 40);
+  for (let i = 0; i < steps; i++) {
+    const live = world.live();
+    const step = live.length === 0 ? "open" : pick(r, STEPS);
+    const page = live.length > 0 ? pick(r, live) : null;
+    switch (step) {
+      case "open":
+        if (world.pages.length < 6) world.open(chance(r, 0.25) ? "display" : "member", chance(r, 0.6));
+        break;
+      case "close":
+        if (page) world.close(page);
+        break;
+      case "crash":
+        if (page && chance(r, 0.5)) world.crash(page);
+        break;
+      case "stall":
+        if (page) world.stall(page, pick(r, [300, 1_500, 4_000, 6_500, 8_000, 12_000, 31_000]));
+        break;
+      case "freeze":
+        if (page) world.freeze(page);
+        break;
+      case "thaw":
+        for (const p of live) if (p.frozen && chance(r, 0.7)) world.thaw(p);
+        break;
+      case "show":
+      case "hide":
+        if (page) world.show(page, step === "show");
+        break;
+      case "enable":
+      case "disable":
+        if (page) world.enable(page, step === "enable");
+        break;
+      case "suspend":
+        if (page && page.stalledUntil <= world.now) world.suspend(page);
+        break;
+      case "recover":
+        if (page) world.recover(page);
+        break;
+      case "wait":
+        break;
+    }
+    world.runUntil(world.now + pick(r, [10, 100, 400, 1_000, 2_100, 5_000, 7_500]));
+    if (chance(r, 0.15)) {
+      // A quiet stretch: everything thawed and running, then settled, then tab switches alone.
+      for (const p of world.live()) world.thaw(p);
+      for (const p of world.live()) world.recover(p);
+      const owner = settleAndCheck(world, "settled");
+      if (owner) {
+        for (let k = 0; k < 6; k++) {
+          const p = pick(r, world.live());
+          world.show(p, !p.shown);
+          world.runUntil(world.now + pick(r, [50, 500, 2_500]));
+          if (!owner.audible()) world.fail(`${owner.name} stopped through tab switches`);
+        }
+      }
+    }
+  }
+  for (const p of world.live()) world.thaw(p);
+  for (const p of world.live()) world.recover(p);
+  settleAndCheck(world, "at the end");
+  return world.failures;
+}
+
