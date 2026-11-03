@@ -362,6 +362,24 @@ describe("raccoon-vtt snap off", { timeout: 600_000 }, () => {
     await deselect(dm);
   });
 
+  test("snapfix-1. a ruler Sam starts on the goblin is shared, and outlines its box on the DM's page too (SB-OPUS-04)", async () => {
+    await waitFor("no outline on the DM's page first", async () => ((await outlineOf(dm, run.goblin)) === null ? true : null), 5_000);
+    await pickTool(sam, "Ruler");
+    const a = await pagePoint(sam, BOUNDS, { x: 11.75, y: 5.25 });
+    const b = await pagePoint(sam, BOUNDS, { x: 14.5, y: 7.5 });
+    await sam.mouse.move(a.x, a.y);
+    await sam.mouse.down();
+    await sam.mouse.move(b.x, b.y, { steps: 10 });
+    try {
+      const rect = await waitFor("the outline under Sam's ruler on the DM's page", () => outlineOf(dm, run.goblin));
+      await assertOutlineOn(dm, rect, { x: 11, y: 5 }, 1, "Sam's shared ruler");
+    } finally {
+      await sam.mouse.up();
+    }
+    await pickTool(sam, "Select");
+    await waitFor("no outline once the ruler is gone", async () => ((await outlineOf(dm, run.goblin)) === null ? true : null), 8_000);
+  });
+
   test("so-5. a drag of the placed goblin let go within 1/8 of where it is drawn keeps its placement and sends nothing, and one let go a quarter square off, on its own box, puts it back on the grid", async () => {
     await closeBars(dm);
     const before = token(dmSocket, run.goblin)!;
@@ -538,7 +556,7 @@ describe("raccoon-vtt snap off", { timeout: 600_000 }, () => {
     await shots.take(dm, "so-dm-reloaded");
   });
 
-  test("so-guide. two creatures a square apart, each placed toward the other, read as the rules count them, and the picture for the DM guide shows the goblin selected with its outline", async () => {
+  test("so-guide. two creatures a square apart, each placed toward the other, read as the rules count them, the goblin selected with its outline (the guide's own picture is scripts/guide-snapoff.ts)", async () => {
     await closeBars(dm);
     await ops.send({ t: "token.move", tokenId: run.goblin, x: 4, y: 3 });
     await ops.send({ t: "token.move", tokenId: run.bree, x: 6, y: 3 });
