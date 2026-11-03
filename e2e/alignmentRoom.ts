@@ -6141,40 +6141,61 @@ export function fu32Tests(): void {
  * This device's Sheet handle (docs/design/design-v1-sheet-swipe.md 4.8): the
  * Menu's This device row, whose detail names it among the page's settings,
  * and the section with its help, the select and the preview under it, at
- * FU30_AT's sizes. Neither was in a sweep before (GRAB-ALIGN).
+ * FU30_AT's sizes. Neither was in a sweep before (GRAB-ALIGN). This device's
+ * Theme section with it (docs/design/design-v1-light-theme.md 4.1 and 13):
+ * its three options on one row with the help under them, and the whole
+ * step once more in the light theme, since its colors are its own.
  */
 export function grabberTests(): void {
-  test(`grab-e. the Menu's This device row, its detail whole with no word alone on its last line, and This device's Sheet handle section, its help, select and preview, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px (docs/design/design-v1-sheet-swipe.md 4.8)`, async () => {
+  test(`grab-e. the Menu's This device row, its detail whole with no word alone on its last line, This device's Theme section, its help and three options, and its Sheet handle section, its help, select and preview, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, dark then light, within ${LIMIT_PX} px (docs/design/design-v1-sheet-swipe.md 4.8, design-v1-light-theme.md 4.1)`, async () => {
     const lines: string[] = [];
-    for (const at of FU30_AT) {
-      const sweep = new Sweep(atName(at));
-      const page = await dmPageFor(at.size);
-      page.setDefaultTimeout(10_000);
-      await openAt(page, at.size, at.scale);
-      const menu = await openMenu(page);
-      const choice = menu.getByRole("combobox", { name: "Sheet handle" });
-      // The Menu may open on another of its pages, as the last step left it.
-      const back = menu.getByRole("button", { name: /^Back to Menu/ });
-      if (await visible(back)) await back.click();
-      const row = menu.getByRole("button", { name: /^This device/ });
-      await row.scrollIntoViewIfNeeded();
-      await sweep.measure(page, "grab-menu-row", row);
-      const detail = await detailLines(row, "handle.");
-      if (!detail.found) sweep.lines.push(`${sweep.at} grab-menu-row: the detail does not end "sheet handle."`);
-      if (detail.cut) sweep.lines.push(`${sweep.at} grab-menu-row: the detail is cut (${detail.cut})`);
-      if (detail.alone) sweep.lines.push(`${sweep.at} grab-menu-row: "${detail.alone}" stands alone on the detail's last line of ${detail.lines}`);
-      await shots.take(page, `alignment-grab-${sweep.at}-menu-row`);
-      await row.click();
-      await choice.scrollIntoViewIfNeeded();
-      // The innermost section holding its heading: the panel around it is a section too.
-      await sweep.measure(page, "grab-sheet-handle", menu.locator("section").filter({ has: page.getByRole("heading", { name: "Sheet handle", exact: true }) }).last());
-      await shots.take(page, `alignment-grab-${sweep.at}-sheet-handle`);
-      if (await visible(back)) await back.click();
-      await closeSheets(page);
-      await escapeAll(page);
-      lines.push(...sweep.lines);
+    try {
+      for (const scheme of ["dark", "light"] as const) {
+        for (const at of FU30_AT) {
+          const sweep = new Sweep(`${atName(at)} ${scheme}`);
+          const page = await dmPageFor(at.size);
+          page.setDefaultTimeout(10_000);
+          await openAt(page, at.size, at.scale, { "rvtt.theme": scheme });
+          const drawn = await page.evaluate(() => (globalThis as unknown as { document: { documentElement: { getAttribute(n: string): string | null } } }).document.documentElement.getAttribute("data-rvtt-scheme"));
+          if (drawn !== scheme) sweep.lines.push(`${sweep.at}: the page is ${drawn}`);
+          const menu = await openMenu(page);
+          const choice = menu.getByRole("combobox", { name: "Sheet handle" });
+          // The Menu may open on another of its pages, as the last step left it.
+          const back = menu.getByRole("button", { name: /^Back to Menu/ });
+          if (await visible(back)) await back.click();
+          const row = menu.getByRole("button", { name: /^This device/ });
+          await row.scrollIntoViewIfNeeded();
+          await sweep.measure(page, "grab-menu-row", row);
+          const detail = await detailLines(row, "handle.");
+          if (!detail.found) sweep.lines.push(`${sweep.at} grab-menu-row: the detail does not end "sheet handle."`);
+          if (detail.cut) sweep.lines.push(`${sweep.at} grab-menu-row: the detail is cut (${detail.cut})`);
+          if (detail.alone) sweep.lines.push(`${sweep.at} grab-menu-row: "${detail.alone}" stands alone on the detail's last line of ${detail.lines}`);
+          await shots.take(page, `alignment-grab-${sweep.at.replace(/ /g, "-")}-menu-row`);
+          await row.click();
+          // The innermost section holding its heading: the panel around it is a section too.
+          const section = (heading: string) => menu.locator("section").filter({ has: page.getByRole("heading", { name: heading, exact: true }) }).last();
+          const themeGroup = menu.getByRole("radiogroup", { name: "Theme" });
+          await themeGroup.scrollIntoViewIfNeeded();
+          await sweep.measure(page, "grab-theme", section("Theme"));
+          // Three options on one row, at 320 x 568 at 130% too (4.1).
+          const tops = await themeGroup.locator(".rvtt-choice").evaluateAll((els) => els.map((e) => Math.round((e as unknown as { getBoundingClientRect(): { top: number } }).getBoundingClientRect().top)));
+          if (tops.length !== 3 || new Set(tops).size !== 1) sweep.lines.push(`${sweep.at} grab-theme: the options stand on ${new Set(tops).size} rows (${tops.join(", ")})`);
+          if (!(await themeGroup.getByRole("radio", { name: scheme === "dark" ? "Dark" : "Light", exact: true }).isChecked())) sweep.lines.push(`${sweep.at} grab-theme: ${scheme} is not the chosen option`);
+          await shots.take(page, `alignment-grab-${sweep.at.replace(/ /g, "-")}-theme`);
+          await choice.scrollIntoViewIfNeeded();
+          await sweep.measure(page, "grab-sheet-handle", section("Sheet handle"));
+          await shots.take(page, `alignment-grab-${sweep.at.replace(/ /g, "-")}-sheet-handle`);
+          if (await visible(back)) await back.click();
+          await closeSheets(page);
+          await escapeAll(page);
+          lines.push(...sweep.lines);
+        }
+      }
+    } finally {
+      // The steps after this one draw in the default dark.
+      if (dm && !dm.isClosed()) await dm.evaluate(() => localStorage.setItem("rvtt.theme", "dark"));
     }
-    assert.deepEqual(lines, [], "the This device row or the Sheet handle section out of line");
+    assert.deepEqual(lines, [], "the This device row, the Theme section or the Sheet handle section out of line");
   });
 }
 
