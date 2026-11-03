@@ -87,6 +87,8 @@ export type PanelDef = {
   subject?: "selection";
   /** Listed for a player only while their view holds the room's clock (panelsFor). The DM always has it. */
   needsClock: boolean;
+  /** Listed for a player only while the room plays something they receive (panelsFor). The DM always has it. */
+  needsSound: boolean;
   /** The DM guide's section on this panel, a heading's anchor in docs/dm-guide.md, for the DM's Guide link at its foot (panels/Panels.tsx). */
   guide?: string;
   Component: ComponentType<PanelProps>;
@@ -101,6 +103,7 @@ function panel(def: {
   dmOnly?: boolean;
   narrowOnly?: boolean;
   needsClock?: boolean;
+  needsSound?: boolean;
   subject?: "selection";
   guide?: string;
   load: () => Promise<{ default: ComponentType<PanelProps> }>;
@@ -116,6 +119,7 @@ function panel(def: {
     dmOnly,
     narrowOnly: def.narrowOnly ?? false,
     needsClock: def.needsClock ?? false,
+    needsSound: def.needsSound ?? false,
     ...(def.subject ? { subject: def.subject } : null),
     ...(def.guide ? { guide: def.guide } : null),
     Component,
@@ -150,14 +154,27 @@ export const PANELS: readonly PanelDef[] = [
 ];
 
 /**
- * The panels a role is offered. `clock` is whether the viewer's room has a
- * clock they receive: Time is the DM's always, and a player's only then
- * (docs/design/design-v1-calendar.md 4.4). A player whose Time panel is open
- * when sharing stops keeps it open (pages/Room.tsx), so this only decides
- * what is listed.
+ * What a player's view holds that some panels wait for. `clock`: the room's
+ * clock, so Time is listed (docs/design/design-v1-calendar.md 4.4). `sound`:
+ * something playing that they receive, so Sound is listed
+ * (docs/design/design-v1-sound.md 4.1, D-261102-462). The DM has both panels
+ * always. A player whose Time or Sound panel is open when it stops keeps it
+ * open (pages/Room.tsx), so these only decide what is listed.
  */
-export function panelsFor(role: "dm" | "player", wide = false, opts: { clock?: boolean } = {}): PanelDef[] {
-  return PANELS.filter((p) => (!p.dmOnly || role === "dm") && !(wide && p.narrowOnly) && !(p.needsClock && role === "player" && !opts.clock)).sort((a, b) => a.order - b.order);
+export type PanelsForOptions = { clock?: boolean; sound?: boolean };
+
+/** Whether a role is offered a panel (panelsFor). */
+export function panelOffered(p: PanelDef, role: "dm" | "player", wide = false, opts: PanelsForOptions = {}): boolean {
+  if (p.dmOnly && role !== "dm") return false;
+  if (wide && p.narrowOnly) return false;
+  if (role === "player" && p.needsClock && !opts.clock) return false;
+  if (role === "player" && p.needsSound && !opts.sound) return false;
+  return true;
+}
+
+/** The panels a role is offered, in the registry's order. */
+export function panelsFor(role: "dm" | "player", wide = false, opts: PanelsForOptions = {}): PanelDef[] {
+  return PANELS.filter((p) => panelOffered(p, role, wide, opts)).sort((a, b) => a.order - b.order);
 }
 
 /** The labels of a DM's groups of panels (docs/design/design-v1-layout-hierarchy.md M3). Menu, the room's own, follows a plain line instead. */

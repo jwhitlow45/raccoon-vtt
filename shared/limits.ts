@@ -2,6 +2,7 @@ import { roomHandoutPages } from "./handouts.ts";
 import { isWritable } from "./writable.ts";
 import { CHUNK_CELLS, HEIGHTS_CHARS, type BuildChunk, type CompanionBlock, type CustomMonster, type JournalPage, type RoomState, type Token } from "./model.ts";
 import { ownEntry } from "./records.ts";
+import type { SoundUse } from "./sound.ts";
 
 /**
  * Room limits (design section 10.5). Open room creation means every room is
@@ -599,6 +600,91 @@ export function phoneSizeAllows(video: { widthPx: number; heightPx: number; fps:
   const long = Math.max(video.widthPx, video.heightPx);
   const short = Math.min(video.widthPx, video.heightPx);
   return long <= VIDEO_LIMITS.phoneLongSidePx && short <= VIDEO_LIMITS.phoneShortSidePx && video.fps <= VIDEO_LIMITS.phoneFramesInASecond;
+}
+
+/**
+ * Synced music and sound (docs/design/design-v1-sound.md 8, D-261102-464 and
+ * D-261102-466). The server checks a file by walking its MP3 frames and
+ * decodes nothing. The reading caps bind the DM's tab before it decodes.
+ */
+export const SOUND_LIMITS = {
+  /** 15 minutes at 192 kbps is 20.6 MiB. */
+  fileBytes: 24 * MiB,
+  /** As for videos: a live upload leaves this much of the quota free, and an import needs only the quota. */
+  quotaHeadroomBytes: 32 * MiB,
+  /** How long the whole upload body may take: 24 MiB at 32 KiB a second, with room to spare. */
+  uploadDeadlineMs: 15 * 60_000,
+  /** A stored file: MPEG-1 Layer III at one of these rates and one bitrate within these. */
+  ratesHz: [44_100, 48_000] as readonly number[],
+  minKbps: 64,
+  maxKbps: 192,
+  /** A stored file's length, frames times 1152 over the rate: the shortest effect to the longest track with its allowance. */
+  fileMinMs: 200,
+  fileMaxMs: 15 * 60_000 + 1_000,
+  /**
+   * Each use's lengths. Music's 30 s floor keeps a track longer than two
+   * crossfades and the reveal (6.4), and a loop's 2 s its crossing.
+   */
+  use: {
+    music: { minMs: 30_000, maxMs: 15 * 60_000 },
+    loop: { minMs: 2_000, maxMs: 15 * 60_000 },
+    effect: { minMs: 200, maxMs: 30_000 },
+  },
+  /**
+   * How far the encoded length may run past a use's upper cap: frame
+   * rounding and the encoder's delay and padding lengthen a file by up to
+   * about 100 ms, and never shorten it, so no lower cap has one.
+   */
+  encodeAllowanceMs: 100,
+  /** The client strips at most one ID3v2 tag this large at the start, and at most this many tags at the end (7.1). */
+  id3v2MaxBytes: 16 * MiB,
+  endTagsMax: 3,
+  /** Sound uploads in an hour, by session and by room. */
+  hourlyPerSession: 120,
+  hourlyPerRoom: 240,
+  /** The library: about 60 KB of DM-only state, and 120 KB of playlists at the worst. */
+  soundsPerRoom: 300,
+  playlistsPerRoom: 30,
+  playlistTracks: 100,
+  /** Loops at once, beside one music run. */
+  loops: 4,
+  /** Each effect list keeps its newest `effectsKept` and, past those, the entries still sounding, `effectsListed` at most. */
+  effectsKept: 8,
+  effectsListed: 16,
+  /** A device plays this many effects at once, from at most this much decoded audio. */
+  effectsAtOnce: 6,
+  effectsDecodedBytes: 48 * MiB,
+  /** A loop this small plays from a blob of its whole file, since Safari's media cache may not keep range answers. */
+  blobLoopBytes: 5 * MiB,
+  /** A track is revealed to players at most this long before it starts, and at least the shorter. */
+  revealMaxMs: 20_000,
+  revealMinMs: 10_000,
+  /** A room with no member socket open this long stops its sound. */
+  membersGoneMs: 15 * 60_000,
+  /** A refused tick waits for a commit to `playing`, or this long. */
+  tickBackoffMs: 60_000,
+  /** The storage line's numbers are recomputed at most this often. */
+  storageRecheckMs: 10_000,
+  /** An Add button takes this many files a pick. */
+  pickFiles: 20,
+  /** The DM's tab refuses a larger file unread, and a whole decode past the device's budget (4.2). */
+  readFileBytes: 200 * MiB,
+  decodeBudgetComputerBytes: 800 * MiB,
+  decodeBudgetTouchBytes: 150 * MiB,
+  /** A rate the header does not give counts as this for the budget. */
+  unknownRateHz: 96_000,
+  /** The channel counts a file may have: mono and stereo kept, 4 and 6 mixed to stereo. */
+  channels: [1, 2, 4, 6] as readonly number[],
+  /** Loudness is evened to this, within the level's bounds, never so high that the peak passes `peakDbfs`. */
+  targetLufs: -18,
+  peakDbfs: -1,
+} as const;
+
+/** Whether a sound of this encoded length may have this use: within the use's lengths, with the encoding allowance past the upper cap only. */
+export function soundUseFits(use: SoundUse, ms: number): boolean {
+  const range = SOUND_LIMITS.use[use];
+  // NaN and both infinities fail one comparison or the other.
+  return ms >= range.minMs && ms <= range.maxMs + SOUND_LIMITS.encodeAllowanceMs;
 }
 
 export type LimitCheck = { ok: true } | { ok: false; code: "quota"; message: string };

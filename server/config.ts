@@ -62,11 +62,23 @@ const Env = z.object({
    * server's owner opts in.
    */
   ANIMATED_MAPS: emptyAsUnset(z.enum(["0", "1"]).default("0")),
+  /**
+   * Sound files (docs/design/design-v1-sound.md 1, D-261102-513), off unless
+   * "1". Music streams to every device that plays it, about 60 MB an hour
+   * each, through the server's CDN, so the server's owner opts in. Off, the
+   * built-in effects still play, since each device makes them.
+   */
+  ROOM_SOUND: emptyAsUnset(z.enum(["0", "1"]).default("0")),
 });
 
 /** Whether the server takes, serves and lets ops add videos. Off, every map shows its still. */
 export function animatedMapsOn(config: Pick<Config, "ANIMATED_MAPS">): boolean {
   return config.ANIMATED_MAPS === "1";
+}
+
+/** Whether the server takes, serves and lets ops name sound files. Off, only the built-in effects play. */
+export function roomSoundOn(config: Pick<Config, "ROOM_SOUND">): boolean {
+  return config.ROOM_SOUND === "1";
 }
 
 export type Config = z.infer<typeof Env> & {

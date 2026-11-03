@@ -1,5 +1,5 @@
 import { isApiErrorCode, type ApiErrorCode } from "#shared/apiErrors.ts";
-import type { AssetId, BuildChunk, FogTile, Label, LogEntry, Member, MemberId, Scene, Stamp, VideoFacts } from "#shared/model.ts";
+import type { AssetId, BuildChunk, FogTile, Label, LogEntry, Member, MemberId, Scene, SoundFacts, Stamp, VideoFacts } from "#shared/model.ts";
 import type { AssetCredit, JoinMode, SearchResult, SearchSource } from "#shared/protocol.ts";
 
 /**
@@ -68,7 +68,7 @@ export type JoinRequestList = { mode: JoinMode; challenged: boolean; requests: J
 export type LetInAs = { kind: "new" } | { kind: "member"; memberId: MemberId };
 /** `pending`: the server answered 202, still finishing, and the `joinRequests` signal settles the row. */
 export type LetInAnswer = { memberId: MemberId; pending?: true };
-export type AssetKind = "map" | "token" | "handout" | "thumb" | "video";
+export type AssetKind = "map" | "token" | "handout" | "thumb" | "video" | "sound";
 export type AssetVariant = "full" | "mobile" | "thumb";
 export type AssetRow = {
   id: AssetId;
@@ -101,13 +101,28 @@ export type AssetRow = {
   sha256?: string;
   /** A video's facts from the server's header check (docs/design/design-v1-animated-maps.md 9.1). Absent for an image. */
   video?: VideoFacts;
+  /**
+   * A sound's facts from the server's frame walk (docs/design/design-v1-sound.md
+   * 7.2). Present exactly for kind `sound`, whose `width` and `height` are 0
+   * and whose one variant is `full`.
+   */
+  audio?: SoundFacts;
 };
 /**
  * GET /api/config. `animatedMaps` is the server owner's ANIMATED_MAPS switch
  * (docs/design/design-v1-animated-maps.md 1): off, the pickers take images
- * only and every map shows its still.
+ * only and every map shows its still. `roomSound` is the ROOM_SOUND switch
+ * (docs/design/design-v1-sound.md 1): off, the server takes and serves no
+ * sound file, and only the built-in effects play.
  */
-export type ServerConfig = { turnstileSiteKey: string | null; searchEnabled: boolean; animatedMaps: boolean };
+export type ServerConfig = { turnstileSiteKey: string | null; searchEnabled: boolean; animatedMaps: boolean; roomSound: boolean };
+/**
+ * POST /api/rooms/import's answer. `soundsLeftOut`: the sounds the import
+ * dropped, with their places in playlists and scene sounds, because a
+ * file failed the check or its length did not fit its use
+ * (docs/design/design-v1-sound.md 6.7). Absent is none.
+ */
+export type ImportRoomAnswer = { roomId: string; dmLink: string; soundsLeftOut?: number };
 /** The server's own shape, which sends the original's size only when the search service gave it. */
 export type { SearchResult, SearchSource };
 /** Who a device with no member in the room becomes on a DM claim (design 10.2). */
@@ -757,7 +772,7 @@ export const api = {
   importRoom: (file: Blob, form: ImportForm, options: RetryOptions = {}) =>
     retryOn503(
       () =>
-        request<{ roomId: string; dmLink: string }>("POST", "/api/rooms/import", {
+        request<ImportRoomAnswer>("POST", "/api/rooms/import", {
           body: file,
           contentType: "application/zip",
           headers: { "x-import-form": importFormHeader(form) },

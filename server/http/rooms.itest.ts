@@ -365,9 +365,19 @@ describe("HTTP hardening", () => {
     assert.deepEqual(res.json(), { status: "ok" });
   });
 
-  test("the Turnstile site key is null when Turnstile is off, and animated maps are off by default", async () => {
+  test("the Turnstile site key is null when Turnstile is off, and animated maps and sound files are off by default", async () => {
     const res = await t.app.inject({ method: "GET", url: "/api/config" });
-    assert.deepEqual(res.json(), { turnstileSiteKey: null, searchEnabled: true, animatedMaps: false });
+    assert.deepEqual(res.json(), { turnstileSiteKey: null, searchEnabled: true, animatedMaps: false, roomSound: false });
+  });
+
+  test("the config says sound files are on when the server's owner turns them on", async () => {
+    const on = await startTestApp({ env: { ROOM_SOUND: "1" } });
+    try {
+      const res = await on.app.inject({ method: "GET", url: "/api/config" });
+      assert.deepEqual(res.json(), { turnstileSiteKey: null, searchEnabled: true, animatedMaps: false, roomSound: true });
+    } finally {
+      await on.close();
+    }
   });
 
   test("the config says animated maps are on when the server's owner turns them on", async () => {
@@ -417,7 +427,7 @@ describe("Turnstile", () => {
       assert.equal(res.statusCode, 403);
       assert.equal(res.json<{ error: string }>().error, "turnstile_failed");
       assert.match(String(res.headers["content-security-policy"]), /script-src 'self' https:\/\/challenges\.cloudflare\.com/);
-      assert.deepEqual((await c.get("/api/config")).json(), { turnstileSiteKey: "site-key", searchEnabled: true, animatedMaps: false });
+      assert.deepEqual((await c.get("/api/config")).json(), { turnstileSiteKey: "site-key", searchEnabled: true, animatedMaps: false, roomSound: false });
     } finally {
       await t.close();
     }

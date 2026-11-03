@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { animatedMapsOn, checkDatabaseDisk, loadConfig } from "./config.ts";
+import { animatedMapsOn, checkDatabaseDisk, loadConfig, roomSoundOn } from "./config.ts";
 
 const base = { NODE_ENV: "test", DATABASE_URL: "postgres://x@localhost/x" };
 
@@ -50,6 +50,15 @@ describe("loadConfig", () => {
     assert.equal(animatedMapsOn(loadConfig({ ...base, ANIMATED_MAPS: "0" })), false);
     assert.equal(animatedMapsOn(loadConfig({ ...base, ANIMATED_MAPS: "1" })), true);
     for (const value of ["true", "yes", "on", "2"]) assert.throws(() => loadConfig({ ...base, ANIMATED_MAPS: value }), /ANIMATED_MAPS/, value);
+  });
+
+  test("sound files are off unless ROOM_SOUND is 1, and an empty value is off (D-261102-513)", () => {
+    assert.equal(roomSoundOn(loadConfig(base)), false);
+    assert.equal(roomSoundOn(loadConfig({ ...base, ROOM_SOUND: "" })), false);
+    assert.equal(roomSoundOn(loadConfig({ ...base, ROOM_SOUND: "0" })), false);
+    assert.equal(roomSoundOn(loadConfig({ ...base, ROOM_SOUND: "1" })), true);
+    assert.equal(animatedMapsOn(loadConfig({ ...base, ROOM_SOUND: "1" })), false, "the two switches are apart");
+    for (const value of ["true", "yes", "on", "2"]) assert.throws(() => loadConfig({ ...base, ROOM_SOUND: value }), /ROOM_SOUND/, value);
   });
 });
 

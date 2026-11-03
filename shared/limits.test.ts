@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { roomHandoutPages } from "./handouts.ts";
-import { HANDOUT_PAGES_FULL, LIMITS, SHOWING_COUNTS_AGAIN, VIDEO_LIMITS, checkLimits, phoneSizeAllows, serializedBytes, stillFitsVideo, utf8Bytes } from "./limits.ts";
+import { HANDOUT_PAGES_FULL, LIMITS, SHOWING_COUNTS_AGAIN, SOUND_LIMITS, VIDEO_LIMITS, checkLimits, phoneSizeAllows, serializedBytes, soundUseFits, stillFitsVideo, utf8Bytes } from "./limits.ts";
 import type { CompanionBlock, EdgeFeature, FreeWall, RoomState } from "./model.ts";
+import { FADES } from "./sound.ts";
 import { actor, character, companionBlock, customMonster, drawing, entry, room, srdImage, token } from "./testutil.ts";
 
 describe("checkLimits", () => {
@@ -329,5 +330,46 @@ describe("animated map limits (docs/design/design-v1-animated-maps.md 6.3)", () 
     assert.equal(phoneSizeAllows({ widthPx: 1080, heightPx: 1921, fps: 30 }), false);
     assert.equal(phoneSizeAllows({ widthPx: 1500, heightPx: 1500, fps: 30 }), false);
     assert.equal(phoneSizeAllows({ widthPx: 3840, heightPx: 2160, fps: 30 }), false);
+  });
+});
+
+describe("sound lengths by use (docs/design/design-v1-sound.md 4.2, D-261102-464)", () => {
+  test("each use takes its lengths, with 100 ms over the upper cap and nothing under the lower one", () => {
+    const cases: [Parameters<typeof soundUseFits>[0], number, boolean][] = [
+      ["music", 29_999, false],
+      ["music", 30_000, true],
+      ["music", 15 * 60_000, true],
+      ["music", 15 * 60_000 + 100, true],
+      ["music", 15 * 60_000 + 101, false],
+      ["loop", 1_999, false],
+      ["loop", 2_000, true],
+      ["loop", 15 * 60_000 + 100, true],
+      ["loop", 15 * 60_000 + 101, false],
+      ["effect", 199, false],
+      ["effect", 200, true],
+      ["effect", 30_000, true],
+      ["effect", 30_100, true],
+      ["effect", 30_101, false],
+    ];
+    for (const [use, ms, fits] of cases) assert.equal(soundUseFits(use, ms), fits, `${use} ${ms}`);
+  });
+
+  test("a length that is not a number fits no use", () => {
+    for (const ms of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      for (const use of ["music", "loop", "effect"] as const) assert.equal(soundUseFits(use, ms), false, `${use} ${ms}`);
+    }
+  });
+
+  test("a stored file spans every use, and the longest track at the top bitrate fits the file cap", () => {
+    assert.equal(SOUND_LIMITS.fileMinMs, SOUND_LIMITS.use.effect.minMs);
+    assert.ok(SOUND_LIMITS.fileMaxMs >= SOUND_LIMITS.use.music.maxMs + SOUND_LIMITS.encodeAllowanceMs);
+    assert.ok(SOUND_LIMITS.fileMaxMs >= SOUND_LIMITS.use.loop.maxMs + SOUND_LIMITS.encodeAllowanceMs);
+    const bytes = (SOUND_LIMITS.fileMaxMs / 1000) * ((SOUND_LIMITS.maxKbps * 1000) / 8);
+    assert.ok(bytes <= SOUND_LIMITS.fileBytes, `${bytes} bytes`);
+  });
+
+  test("a track outlasts two crossfades and the reveal, so every reveal comes 10 to 20 s before its start (6.4)", () => {
+    const longestFadeMs = Math.max(...FADES) * 1000;
+    assert.ok(SOUND_LIMITS.use.music.minMs >= 2 * longestFadeMs + SOUND_LIMITS.revealMinMs);
   });
 });

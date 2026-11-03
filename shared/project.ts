@@ -2892,6 +2892,7 @@ export const SCENE_FOR_PLAYERS = {
   suggestedView: "copied",
   // Players' devices draw it and their rolls follow it (docs/design/design-v1-weather.md 7). It names a look and its rules, nothing of the map.
   weather: "copied",
+  sound: "dm: the playlist and loops the scene starts, which players hear only once they play (docs/design/design-v1-sound.md 6.5)",
 } as const satisfies Record<keyof Scene, PlayerField>;
 
 /** A scene as a player gets it: an allowlist, field by field as SCENE_FOR_PLAYERS rules. */

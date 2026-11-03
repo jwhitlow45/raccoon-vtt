@@ -14,6 +14,7 @@ import type { DamageType } from "./rules/damage.ts";
 import type { CorrectionLogEvent } from "./undoContract.ts";
 import type { SaveOutcomeLedger } from "./saveOutcomeContract.ts";
 import type { SceneWeather } from "./weather.ts";
+import type { Playing, Playlist, PlaylistId, SceneSound, Sound, SoundId } from "./sound.ts";
 
 export type MemberId = string;
 export type SceneId = string;
@@ -211,6 +212,22 @@ export type RoomState = {
    * only `{ id, rev: 0, t, calendar }` while it is shown (6.4).
    */
   clock?: RoomClock | null;
+  /**
+   * DM only, but a player's and a display's projection keep the sounds that
+   * sound now, cut to their playback fields (docs/design/design-v1-sound.md
+   * 6.5): the room's sound library, `keys.sound(id)`. Every stored state
+   * holds it (the snapshot step fills it empty), and a reader takes absent
+   * as empty.
+   */
+  sounds?: Record<SoundId, Sound>;
+  /** DM only, never projected: the room's playlists, `keys.playlist(id)`. Stored as `sounds` is. */
+  playlists?: Record<PlaylistId, Playlist>;
+  /**
+   * What plays now, the singleton `keys.playing`. No Setup op writes it
+   * (D-261102-471). Absent and null are both silence. Players and displays
+   * get null behind a blackout.
+   */
+  playing?: Playing | null;
 };
 
 /** One month of a Months calendar: its name and its length in days. */
@@ -464,6 +481,12 @@ export type RoomSettings = {
    * `scene.create` carries its own fields, so replay never depends on it.
    */
   newScenePlayers?: ScenePreset;
+  /**
+   * Players see what is playing (docs/design/design-v1-sound.md 4.1): the
+   * names of the music and background sounds playing now. Absent is off,
+   * where players only hear them.
+   */
+  soundNames?: true;
 };
 
 /** The 2024 defaults. See design section 6 for what each one means. */
@@ -577,6 +600,12 @@ export type Scene = {
    * of every scene from before it, and null in a patch removes it.
    */
   weather?: SceneWeather;
+  /**
+   * DM only. The sound "Move the players here" and Play it start
+   * (docs/design/design-v1-sound.md 4.6). An empty one is silence. Absent
+   * is no sound of its own, and null in a patch removes it.
+   */
+  sound?: SceneSound;
 };
 
 /**
@@ -690,6 +719,18 @@ export type VideoFacts = {
   /** The sound track's channels and sample rate, for Media Capabilities' audio configuration. Present exactly when `audio` is. */
   audioChannels?: number;
   audioHz?: number;
+};
+
+/**
+ * What the server's frame walk learns of a sound file
+ * (docs/design/design-v1-sound.md 7.1), kept on its asset row as the
+ * `audio` column. `ms` is frames times 1152 over the rate, the length
+ * every device schedules by.
+ */
+export type SoundFacts = {
+  ms: number;
+  channels: 1 | 2;
+  kbps: number;
 };
 
 /**

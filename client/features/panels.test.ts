@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { headerSink, PanelScrollKeeper, panelSections, panelsFor, panelSubject, RESTORE_WAIT_MS, restoreStep, scrollOf, type PanelHeader, type PanelScroll, type PanelSection } from "./panels.ts";
+import { headerSink, PanelScrollKeeper, panelOffered, panelSections, PANELS, panelsFor, panelSubject, RESTORE_WAIT_MS, restoreStep, scrollOf, type PanelHeader, type PanelScroll, type PanelSection } from "./panels.ts";
 
 describe("the panels' order and groups (docs/design/design-v1-layout-hierarchy.md M3)", () => {
   const titles = (role: "dm" | "player", wide: boolean) => panelsFor(role, wide).map((p) => p.title);
@@ -30,6 +30,19 @@ describe("the panels' order and groups (docs/design/design-v1-layout-hierarchy.m
       assert.deepEqual(panelsFor("player", wide, { clock: true }).map((p) => p.title), ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "Time", "Characters", "Library", "Menu"]);
       assert.ok(panelsFor("dm", wide, { clock: false }).some((p) => p.title === "Time"));
     }
+  });
+
+  test("a panel that needs sound is a player's only while their view plays something, and the DM's always (D-261102-462)", () => {
+    const sound = { ...PANELS.find((p) => p.id === "log")!, id: "sound", title: "Sound", needsSound: true };
+    for (const wide of [false, true]) {
+      assert.equal(panelOffered(sound, "player", wide), false);
+      assert.equal(panelOffered(sound, "player", wide, { sound: false, clock: true }), false);
+      assert.equal(panelOffered(sound, "player", wide, { sound: true }), true);
+      assert.equal(panelOffered(sound, "dm", wide), true);
+      assert.equal(panelOffered(sound, "dm", wide, { sound: false }), true);
+    }
+    const time = PANELS.find((p) => p.id === "time")!;
+    assert.equal(panelOffered(time, "player", false, { sound: true }), false, "sound lists no panel that needs a clock");
   });
 
   test("the groups keep to the order's ranges, and Initiative stays the side panel's default", () => {
