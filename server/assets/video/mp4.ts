@@ -606,14 +606,15 @@ function groupDescriptions(moov: Moov, box: Box, kind: (typeof SAMPLE_GROUPS)[st
     at += 4;
     return v;
   };
-  const defaultLength = version === 1 ? u32() : kind.bytes;
+  // Versions 1 and 2 both say a default length, and per-entry lengths where it is 0 (AMBUILD-SOL-008). Version 2 adds the default index.
+  const defaultLength = version >= 1 ? u32() : kind.bytes;
   const defaultIndex = version === 2 ? u32() : 0;
   const count = u32();
   if (defaultLength !== 0 && defaultLength !== kind.bytes) throw refuse("bad_video");
   if (defaultIndex > count) throw refuse("bad_video");
   for (let i = 0; i < count; i++) {
     if ((i & 1023) === 0) moov.budget.check();
-    const length = version === 1 && defaultLength === 0 ? u32() : kind.bytes;
+    const length = version >= 1 && defaultLength === 0 ? u32() : kind.bytes;
     if (length !== kind.bytes || at + length > body.length) throw refuse("bad_video");
     if (!kind.check(body.subarray(at, at + length))) throw refuse("bad_video");
     at += length;

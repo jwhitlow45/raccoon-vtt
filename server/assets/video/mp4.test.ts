@@ -550,3 +550,15 @@ describe("each track's durations and composition times match its samples (AMBUIL
     await refused(mp4File({ tracks: [defaultVideoTrack({ extraStbl: [cslg] })] }), "bad_video");
   });
 });
+
+describe("sample groups of every version (round 2: AMBUILD-SOL-008)", () => {
+  test("sgpd version 2 reads its default length and its per-entry lengths as version 1 does (AMBUILD-SOL-008)", async () => {
+    const full = (version: number, flags = 0) => fields([1, version], [3, flags]);
+    const sbgp = bx("sbgp", Buffer.concat([full(0), Buffer.from("roll"), fields([4, 1], [4, 60], [4, 1])]));
+    // The reviewer's AAC roll group: default_length 2, default index 0, one 2-byte description.
+    const fixed = bx("sgpd", Buffer.concat([full(2), Buffer.from("roll"), fields([4, 2], [4, 0], [4, 1]), Buffer.from([0xff, 0xff])]));
+    await checkVideoBytes(mp4File({ tracks: [defaultVideoTrack({ extraStbl: [fixed, sbgp] })] }));
+    const perEntry = bx("sgpd", Buffer.concat([full(2), Buffer.from("roll"), fields([4, 0], [4, 0], [4, 1], [4, 2]), Buffer.from([0xff, 0xff])]));
+    await checkVideoBytes(mp4File({ tracks: [defaultVideoTrack({ extraStbl: [perEntry, sbgp] })] }));
+  });
+});
