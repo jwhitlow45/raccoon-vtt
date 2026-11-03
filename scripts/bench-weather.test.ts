@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { weatherProblem, type SceneWeather } from "../shared/weather.ts";
 import { WARMUP_MS, WINDOW_MS } from "../client/features/weather/mode.ts";
-import { gateFailures, HEAVIEST, p95, stepDownSettled, type Row } from "./bench-weather.ts";
+import { gateFailures, gestureOverages, HEAVIEST, p95, stepDownSettled, type Row } from "./bench-weather.ts";
 
 /*
  * The weather bench's gates (docs/design/design-v1-weather.md 6.1): rest
- * busy time at most 60 ms a second over no weather for every kind, a pan's
- * and a drag's 95th percentile frame at most 2 ms over none, and no ticks
- * at rest for Still and Off.
+ * busy time at most 60 ms a second over no weather for every kind, no ticks
+ * at rest for Still and Off, and, with a GPU, a pan's and a drag's 95th
+ * percentile frame at most 2 ms over none.
  */
 
 function rows(view: Row["view"], over: { rest?: number; pan?: number; drag?: number; stillTicks?: number }): Row[] {
@@ -51,6 +51,16 @@ describe("the weather bench's gates", () => {
     assert.deepEqual(gateFailures(panned(0)), []);
     assert.deepEqual(gateFailures(panned(1)), ["topDown level after pans, rain: half"]);
     assert.deepEqual(gateFailures(panned(2), { software: true }), []);
+  });
+
+  test("without a GPU a pan's and a drag's frames are information, and what the step-down leaves at rest still gates", () => {
+    // A software Isometric pan's 95th percentile, 16.7 ms with no weather and 33.4 ms with it, as one run read them (WXB-R2-5).
+    const flipped = rows("isometric", { pan: 16.7, drag: 3 });
+    assert.deepEqual(gateFailures(flipped, { software: true }), []);
+    assert.deepEqual(gestureOverages(flipped), ["isometric pan: p95 16.7 ms over none", "isometric drag: p95 3.0 ms over none"], "said, not gated");
+    assert.deepEqual(gateFailures(flipped), ["isometric pan: p95 16.7 ms over none", "isometric drag: p95 3.0 ms over none"], "with a GPU they gate");
+    assert.deepEqual(gateFailures(rows("topDown", { rest: 61, pan: 16.7 }), { software: true }), ["topDown rest, rain: 61.0 ms/s over none"]);
+    assert.deepEqual(gateFailures(rows("topDown", { stillTicks: 2, pan: 16.7 }), { software: true }), ["topDown ticks, rain still: 2 ticks at rest"]);
   });
 });
 

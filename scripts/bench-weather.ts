@@ -24,8 +24,8 @@
  *   it leaves.
  *
  * Gates (6.1): rest busy at most 60 ms a second over none for every kind,
- * a pan's and a drag's 95th percentile frame at most 2 ms over none, no
- * ticks at rest for Still and Off, and, with a GPU, all the particles still
+ * no ticks at rest for Still and Off, and, with a GPU, a pan's and a drag's
+ * 95th percentile frame at most 2 ms over none and all the particles still
  * there after the pans, since a pan is the board's work and never the
  * weather's. It exits 1 when one fails.
  *
@@ -99,20 +99,43 @@ export function stepDownSettled(levels: readonly { at: number; level: number }[]
   return now - changed >= WARMUP_MS + 2 * WINDOW_MS + 500;
 }
 
-/** The gates' failures over a run's rows, in words. With a GPU, a pan must never step the weather down. */
+const VIEWS = ["topDown", "isometric"] as const;
+
+function rowValue(rows: readonly Row[], row: string, view: View): number | undefined {
+  return rows.find((r) => r.row === row && r.view === view)?.value;
+}
+
+/** Each pan's and drag's 95th percentile frame that is more than its budget over none's, in words. */
+export function gestureOverages(rows: readonly Row[]): string[] {
+  const out: string[] = [];
+  for (const view of VIEWS) {
+    for (const gesture of ["pan", "drag"]) {
+      const base = rowValue(rows, `${gesture}, none`, view);
+      const rain = rowValue(rows, `${gesture}, rain`, view);
+      if (base !== undefined && rain !== undefined && rain - base > FRAME_BUDGET_MS) out.push(`${view} ${gesture}: p95 ${(rain - base).toFixed(1)} ms over none`);
+    }
+  }
+  return out;
+}
+
+/**
+ * The gates' failures over a run's rows, in words. With a GPU, a pan must
+ * never step the weather down. Without one the gestures are information
+ * only: a software canvas's frame takes one vsync or two as its raster
+ * happens to fall, so a pan's 95th percentile flips between 16.7 and 33.4 ms
+ * with no weather as with it, and says nothing of the weather's own cost.
+ * That run gates what the step-down leaves at rest.
+ */
 export function gateFailures(rows: readonly Row[], options: { software?: boolean } = {}): string[] {
   const out: string[] = [];
-  const at = (row: string, view: View) => rows.find((r) => r.row === row && r.view === view)?.value;
-  for (const view of ["topDown", "isometric"] as const) {
+  const at = (row: string, view: View) => rowValue(rows, row, view);
+  const gestures = options.software ? [] : gestureOverages(rows);
+  for (const view of VIEWS) {
     const none = at("rest, none", view);
     for (const r of rows.filter((x) => x.view === view && x.row.startsWith("rest, ") && x.unit === "ms/s" && x.row !== "rest, none")) {
       if (none !== undefined && r.value - none > REST_BUDGET_MS_PER_S) out.push(`${view} ${r.row}: ${(r.value - none).toFixed(1)} ms/s over none`);
     }
-    for (const gesture of ["pan", "drag"]) {
-      const base = at(`${gesture}, none`, view);
-      const rain = at(`${gesture}, rain`, view);
-      if (base !== undefined && rain !== undefined && rain - base > FRAME_BUDGET_MS) out.push(`${view} ${gesture}: p95 ${(rain - base).toFixed(1)} ms over none`);
-    }
+    out.push(...gestures.filter((line) => line.startsWith(`${view} `)));
     for (const r of rows.filter((x) => x.view === view && x.unit === "ticks")) if (r.value !== 0) out.push(`${view} ${r.row}: ${r.value} ticks at rest`);
     const panned = at("level after pans, rain", view);
     if (!options.software && panned !== undefined && panned !== 0) out.push(`${view} level after pans, rain: ${LEVELS[panned]}`);
@@ -377,6 +400,7 @@ async function main(): Promise<void> {
   }
   if (values.out) writeFileSync(values.out, `${JSON.stringify(rows, null, 2)}\n`);
   const failures = gateFailures(rows, { software: values.software === true });
+  if (values.software) for (const line of gestureOverages(rows)) console.log(`information, not gated without a GPU: ${line}`);
   for (const f of failures) console.error(`over budget: ${f}`);
   if (failures.length > 0) process.exitCode = 1;
 }
