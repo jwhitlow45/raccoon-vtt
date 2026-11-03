@@ -20,11 +20,43 @@ import { mp4File, mp4WithSecretsFrom, readMp4Recording, readWebmRecording, webmF
  * a copy with identifying text added and then cleared by the check.
  */
 
+/**
+ * The few browser globals the page code below uses. The server's type
+ * program has no DOM library, so the page code reads them from globalThis
+ * through this shape, as the e2e tests do.
+ */
+type Canvas = {
+  width: number;
+  height: number;
+  getContext(kind: "2d", options: { alpha: boolean }): Paint | null;
+  captureStream(fps: number): unknown;
+};
+type Paint = { fillStyle: string; font: string; fillRect(x: number, y: number, w: number, h: number): void; fillText(text: string, x: number, y: number): void };
+type Video = {
+  muted: boolean;
+  loop: boolean;
+  playsInline: boolean;
+  src: string;
+  readonly currentTime: number;
+  readonly duration: number;
+  readonly videoWidth: number;
+  play(): Promise<void>;
+  pause(): void;
+  remove(): void;
+  addEventListener(type: "timeupdate", listener: () => void): void;
+};
+type Recorder = { ondataavailable: (e: { data: Blob }) => void; onstop: () => void; start(): void; stop(): void };
+type Browser = {
+  document: { body: { append(el: Canvas | Video): void }; createElement(tag: "canvas"): Canvas; createElement(tag: "video"): Video };
+  MediaRecorder: new (stream: unknown, options: { mimeType: string; videoBitsPerSecond: number }) => Recorder;
+};
+
 const OUT = fileURLToPath(new URL("../e2e/fixtures/", import.meta.url));
 const SECONDS = 2;
 
 async function record(page: Page, mimeType: string): Promise<Buffer> {
   const base64 = await page.evaluate(async (mime) => {
+    const { document, MediaRecorder } = globalThis as unknown as Browser;
     const canvas = document.createElement("canvas");
     canvas.width = 640;
     canvas.height = 360;
@@ -54,7 +86,7 @@ async function record(page: Page, mimeType: string): Promise<Buffer> {
     const timer = setInterval(draw, 1000 / 30);
     recorder.start();
     await new Promise((r) => setTimeout(r, 2700));
-    const stopped = new Promise((r) => (recorder.onstop = r));
+    const stopped = new Promise<void>((r) => (recorder.onstop = r));
     recorder.stop();
     await stopped;
     clearInterval(timer);
@@ -96,6 +128,7 @@ function plainMp4(recorded: Buffer): Buffer {
 async function plays(page: Page, bytes: Buffer, type: string): Promise<{ duration: number; looped: boolean; width: number }> {
   return page.evaluate(
     async ({ base64, type }) => {
+      const { document } = globalThis as unknown as Browser;
       const raw = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
       const video = document.createElement("video");
       video.muted = true;
