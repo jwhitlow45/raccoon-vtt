@@ -3,7 +3,9 @@ import { correctionLogEventSchema } from "#shared/undoContract.ts";
 import { saveOutcomeLedgerSchema } from "#shared/saveOutcomeContract.ts";
 import { ABILITY_KEYS, CONDITION_KEYS, CRIT_RULES, HEIGHTS_CHARS, MAX_HEIGHT_FT, MIN_HEIGHT_FT, ORDER_REVEALS, ROUGH_CHARS, STAIRS_CHARS, STATUS_KEYS, TURN_FLAGS, type MapPhase, type MapVideo, type PhaseGrid, type RoomState, type SceneMap } from "#shared/model.ts";
 import { chunkKey, holderChunkKey } from "#shared/keys.ts";
-import { LIMITS, MOST_SIGHT_HOLDERS, serializedBytes } from "#shared/limits.ts";
+import { LIMITS, MOST_SIGHT_HOLDERS, SOUND_LIMITS, serializedBytes, soundUseFits } from "#shared/limits.ts";
+import { namesPrototypeMember } from "#shared/records.ts";
+import { lengthAs, type SoundUse } from "#shared/sound.ts";
 import { ATTACH_KINDS } from "#shared/rules/attach.ts";
 import { DAMAGE_TYPES } from "#shared/rules/damage.ts";
 import { nudgeValid } from "#shared/rules/nudge.ts";
@@ -42,6 +44,9 @@ import {
   handoutSchemas,
   mapSchemas,
   memorySchemas,
+  musicRunSchema,
+  sceneSoundSchema,
+  soundSchemas,
   savedEncounterFieldsForImport,
   srdIdSchema,
   statBlockFieldsForImport,
@@ -107,6 +112,8 @@ const settings = z.strictObject({
   newScenes: mapSchemas.gridShape.optional(),
   // Backups from before map discovery have none, which reads as each kind's old default (docs/design/design-v1-map-discovery.md 8.2).
   newScenePlayers: memorySchemas.scenePreset.optional(),
+  // Backups from before sound have none, which reads as off (docs/design/design-v1-sound.md 4.1).
+  soundNames: z.literal(true).optional(),
 });
 
 const meta = z.strictObject({
@@ -171,6 +178,8 @@ const scene = z
     suggestedView: z.literal("isometric").optional(),
     // Backups from before weather have none, which reads as clear and calm (docs/design/design-v1-weather.md 9.3).
     weather: sceneWeatherSchema.optional(),
+    // Backups from before sound have none, which reads as no sound of its own. What it names is parseRoomState's to check.
+    sound: sceneSoundSchema.optional(),
   })
   .refine(
     (s) =>
@@ -436,6 +445,46 @@ const character = z.strictObject({
 
 /** The room's clock (docs/design/design-v1-calendar.md 6.1), by the bounds its ops keep. */
 const roomClock = z.strictObject({ id, rev, t: clockSchemas.clockTime, shown: z.boolean(), calendar: clockSchemas.calendar });
+
+/*
+ * Synced music and sound (docs/design/design-v1-sound.md 6.1, 6.3 and 8), by
+ * the bounds its ops keep. checkLimits counts none of these collections, so
+ * their caps are held here. What a playlist, a scene or what plays names is
+ * checked against the room's sounds in parseRoomState (soundProblem).
+ */
+const { soundUse, soundRepeat, soundFade, soundLevel, soundLength, soundVolume, playingId, playlistSounds, soundAtSchema, firedEffectSchema } = soundSchemas;
+
+/** A stored sound always has its name: only a projection leaves it out (6.5). Its length fits its use with 4.2's allowance, as sound.create and sound.update hold it. */
+const sound = z
+  .strictObject({ id, rev, name, assetId: id, ms: soundLength, use: soundUse, level: soundLevel.optional() })
+  .refine((s) => soundUseFits(s.use, s.ms), { message: "a sound's length does not fit its use", path: ["ms"] });
+const playlist = z.strictObject({ id, rev, name, sounds: playlistSounds, shuffle: z.literal(true).optional(), repeat: soundRepeat, fade: soundFade });
+
+/** Entities each under its own id, as Tx files them, at most `max`. */
+function byOwnId<T extends z.ZodType<{ id: string }>>(value: T, max: number, what: string) {
+  return z
+    .record(z.string().min(1).max(120), value)
+    .refine((entries) => Object.keys(entries).length <= max, `at most ${max} ${what}`)
+    .superRefine((entries, ctx) => {
+      for (const [key, entry] of Object.entries(entries)) if (key !== (entry as { id: string }).id) ctx.addIssue({ code: "custom", path: [key], message: "an entry under another id" });
+    });
+}
+
+/**
+ * Loops by their ids. A loop's id is no entity's, so no Tx check stands
+ * between it and a key like "constructor", which the server's and the
+ * clients' maps keyed by loop id would read as Object.prototype's member.
+ * The reducer refuses one (loop.start), and so does this.
+ */
+const loopKey = playingId.refine((key) => !namesPrototypeMember(key), "that id is reserved");
+const playing = z.strictObject({
+  rev,
+  music: musicRunSchema.nullable(),
+  loops: z.record(loopKey, soundAtSchema.extend({ volume: soundVolume })).refine((loops) => Object.keys(loops).length <= SOUND_LIMITS.loops, `at most ${SOUND_LIMITS.loops} background sounds play at once`),
+  effects: z.array(firedEffectSchema).max(SOUND_LIMITS.effectsListed),
+  dmEffects: z.array(firedEffectSchema).max(SOUND_LIMITS.effectsListed).optional(),
+  volume: z.strictObject({ music: soundVolume, effects: soundVolume }),
+});
 
 const areaFeet = z.number().min(5).max(1_000);
 const template = z.strictObject({
@@ -980,7 +1029,61 @@ export const roomStateSchema = z.strictObject({
   memoryShared: shareMarks.default({}),
   // The in-game clock. Backups from before it have none, and absent and null both read as none (docs/design/design-v1-calendar.md 6.6).
   clock: roomClock.nullable().optional(),
+  // Synced music and sound. Backups from before it have none, which reads as an empty library and silence, and absent and
+  // null `playing` both read as silence (docs/design/design-v1-sound.md 6.7).
+  sounds: byOwnId(sound, SOUND_LIMITS.soundsPerRoom, "sounds").optional(),
+  playlists: byOwnId(playlist, SOUND_LIMITS.playlistsPerRoom, "playlists").optional(),
+  playing: playing.nullable().optional(),
 });
+
+const SOUND_WANTED: Record<SoundUse, string> = { music: "not a music sound of the room", loop: "not a background sound of the room", effect: "not an effect of the room" };
+
+/** Ids of a record in a fixed order, so the same file always gets the same first refusal. */
+function sortedKeys(record: Readonly<Record<string, unknown>> | undefined): string[] {
+  return Object.keys(record ?? {}).sort();
+}
+
+/**
+ * What names a sound or a playlist names one the room holds, under the use
+ * it plays as, as every op leaves a room (docs/design/design-v1-sound.md 6.3
+ * and 6.6): a playlist's tracks and a scene's one track are music, a scene's
+ * playlist exists, a scene's background sounds and the playing loops are
+ * Background, and the live run's order and `next` are music. An effect
+ * entry is history and may name any sound, present or not, and a run's
+ * playlist is a label that may name a deleted one, whose tracks the run's
+ * order is never compared with, since a run keeps the order it started with.
+ * Otherwise an imported room would play a gap or a sound as the wrong kind,
+ * or refuse its own next tick.
+ */
+function soundProblem(state: RoomState): string | null {
+  const sounds = state.sounds ?? {};
+  const named = (path: string, soundId: string, use: SoundUse) => (lengthAs(sounds, soundId, use) === undefined ? `${path}: ${SOUND_WANTED[use]}` : null);
+  const first = (problems: (string | null)[]) => problems.find((p) => p !== null) ?? null;
+  for (const id of sortedKeys(state.playlists)) {
+    const problem = first(state.playlists![id]!.sounds.map((soundId, i) => named(`playlists.${id}.sounds.${i}`, soundId, "music")));
+    if (problem) return problem;
+  }
+  for (const id of sortedKeys(state.scenes)) {
+    const sound = state.scenes[id]!.sound;
+    if (!sound) continue;
+    const music = sound.music;
+    if (music?.playlistId !== undefined && !Object.hasOwn(state.playlists ?? {}, music.playlistId)) return `scenes.${id}.sound.music.playlistId: not a playlist of the room`;
+    const problem = first([
+      music?.soundId === undefined ? null : named(`scenes.${id}.sound.music.soundId`, music.soundId, "music"),
+      ...sound.loops.map((loop, i) => named(`scenes.${id}.sound.loops.${i}.soundId`, loop.soundId, "loop")),
+    ]);
+    if (problem) return problem;
+  }
+  const playing = state.playing;
+  if (!playing) return null;
+  const run = playing.music;
+  return first([
+    // `now` is the order's track at the run's index (musicRunSchema), so the order answers for it.
+    ...(run?.order ?? []).map((soundId, i) => named(`playing.music.order.${i}`, soundId, "music")),
+    run?.next ? named("playing.music.next.soundId", run.next.soundId, "music") : null,
+    ...sortedKeys(playing.loops).map((id) => named(`playing.loops.${id}.soundId`, playing.loops[id]!.soundId, "loop")),
+  ]);
+}
 
 const NUDGE_PLACE = "a token is drawn between squares only on a square scene, standing unsqueezed on its own square, at most 3/8 of a square off it (1/8 for one that snaps to half squares)";
 
@@ -1038,6 +1141,8 @@ export function parseRoomState(value: unknown, now = Date.now()): { ok: true; st
     const scene = state.scenes[token.sceneId];
     if (token.nudge && (!scene || !nudgeValid(sceneGrid(scene), token))) return { ok: false, message: `tokens.${token.id}.nudge: ${NUDGE_PLACE}` };
   }
+  const sound = soundProblem(state);
+  if (sound) return { ok: false, message: sound };
   for (const character of Object.values(state.characters)) {
     if (character.ddbSync && syncAtAhead(character.ddbSync.at, now)) character.ddbSync = { ...character.ddbSync, at: new Date(now).toISOString() };
   }

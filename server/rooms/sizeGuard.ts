@@ -483,6 +483,14 @@ export function roomLevelBytes(state: RoomState): number {
   // The clock is the one room-level field a room may lack (docs/design/design-v1-calendar.md 6.7): there, it adds its
   // field, its value and the comma before it, as a DM's projection holds it.
   if (state.clock) bytes += 1 + fieldBytes("clock") + valueBytes(state.clock);
+  // A DM's projection holds the library, the playlists and what plays only while each holds something, so a room without
+  // sound projects as it always did (shared/project.ts soundFields, docs/design/design-v1-sound.md 6.3). An empty record
+  // is its two braces.
+  if (state.playing) bytes += 1 + fieldBytes("playing") + valueBytes(state.playing);
+  for (const name of ["sounds", "playlists"] as const) {
+    const entries = collectionBytes(state[name] ?? {});
+    if (entries > 2) bytes += 1 + fieldBytes(name) + entries;
+  }
   return bytes;
 }
 
@@ -1241,6 +1249,11 @@ function entryKeyBytes(key: EntityKey): number {
       return jsonKeyBytes("clock");
     case "playing":
       return jsonKeyBytes("playing");
+    // A room from before sound has neither record, so its first entry brings the record's field and braces too.
+    case "sound":
+      return jsonKeyBytes(parsed.id) + jsonKeyBytes("sounds") + 2;
+    case "playlist":
+      return jsonKeyBytes(parsed.id) + jsonKeyBytes("playlists") + 2;
     case "log":
     case "trapLog":
     case "trapSeen":

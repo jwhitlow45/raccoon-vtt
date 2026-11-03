@@ -43,10 +43,12 @@ import type {
   TrapAction,
   TrapDue,
   TrapRig,
+  SoundFacts,
   Token,
   TurnUses,
   VideoFacts,
 } from "#shared/model.ts";
+import type { Playlist, SceneSound, Sound } from "#shared/sound.ts";
 import { normalizeCompanionState } from "#shared/reducer/companions.ts";
 import { keepsMemory } from "#shared/reducer/memory.ts";
 import { pausedAnchorForEntry } from "#shared/rules/durations.ts";
@@ -54,7 +56,7 @@ import { linkOf, relinked } from "#shared/reducer/uses.ts";
 import { withPcActors, withShapeRules } from "#shared/rules/pcStats.ts";
 import { phaseMap, withPhaseLight } from "#shared/reducer/phases.ts";
 import { normalWeather } from "#shared/weather.ts";
-import { stillFitsVideo } from "#shared/limits.ts";
+import { SOUND_LIMITS, soundUseFits, stillFitsVideo } from "#shared/limits.ts";
 import { checkedVideoFacts } from "#shared/protocol.ts";
 import type { AssetKind } from "../assets/kinds.ts";
 
@@ -123,7 +125,12 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
   const monsters = new Ids(newId);
   const pages = new Ids(newId);
   const blocks = new Ids(newId);
+  const sounds = new Ids(newId);
+  const playlists = new Ids(newId);
   members.assign(Object.keys(state.members));
+  // Before the scenes, whose sound names both (docs/design/design-v1-sound.md 6.7).
+  sounds.assign(Object.keys(state.sounds ?? {}));
+  playlists.assign(Object.keys(state.playlists ?? {}));
   // Before the actors, which name the room monster a token was placed from (Actor.monsterId).
   monsters.assign(Object.keys(state.monsters));
   pages.assign(Object.keys(state.journal));
@@ -140,7 +147,7 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
   const liveDrawing = (d: Drawing) => scenes.has(d.sceneId) && (d.anchors ?? []).every((id) => id === null || tokens.has(id));
   drawings.assign(Object.values(state.drawings).filter(liveDrawing).map((d) => d.id));
   // The new id of an asset, only where its reference takes that kind.
-  const asset = (id: string, kind: AssetKind): string | undefined => {
+  const asset = (id: string, kind: AssetKind | "sound"): string | undefined => {
     const imported = opts.assets.get(id);
     return imported?.kind === kind ? imported.id : undefined;
   };
@@ -267,6 +274,30 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
   // The clock holds no id but its own, and each character's stamp names that one, so both come through as they are
   // (docs/design/design-v1-calendar.md 6.6). No clock stays no field.
   if (state.clock) out.clock = state.clock;
+  /*
+   * The library and the playlists come under new ids, each sound's file under
+   * its new row's id (docs/design/design-v1-sound.md 6.7). A sound whose file
+   * did not come through as a sound stays, with an id no row has, so
+   * refillSoundFacts leaves it out with its places and counts it in the
+   * import's answer, and no sound ever names the old room's file. What played
+   * belongs to a moment of play: an imported room starts silent
+   * (D-261102-475). A room from before sound stays without the fields.
+   */
+  if (state.sounds) {
+    out.sounds = {};
+    for (const s of Object.values(state.sounds)) {
+      const next: Sound = { ...s, id: sounds.of(s.id), assetId: asset(s.assetId, "sound") ?? newId() };
+      out.sounds[next.id] = next;
+    }
+  }
+  if (state.playlists) {
+    out.playlists = {};
+    for (const p of Object.values(state.playlists)) {
+      const next: Playlist = { ...p, id: playlists.of(p.id), sounds: p.sounds.filter((id) => sounds.has(id)).map((id) => sounds.of(id)) };
+      out.playlists[next.id] = next;
+    }
+  }
+  if (state.playing !== undefined) out.playing = null;
 
   const moveAny = state.meta.settings.playersMoveAny;
   if (Array.isArray(moveAny)) out.meta = { ...out.meta, settings: { ...out.meta.settings, playersMoveAny: memberList(moveAny) } };
@@ -280,6 +311,7 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     const next: Scene = { ...s, id: scenes.of(s.id) };
     // A hand-made backup may spell a weather longhand, and the room keeps one stored form (docs/design/design-v1-weather.md 9.3).
     if (s.weather !== undefined) next.weather = normalWeather(s.weather);
+    if (s.sound) next.sound = sceneSoundUnder(s.sound, sounds, playlists);
     if (s.map) {
       const mapped = asset(s.map.assetId, "map");
       if (mapped) next.map = withVideo({ ...s.map, assetId: mapped }, videoUnder(s.map.video, (id) => asset(id, "video")));
@@ -797,6 +829,87 @@ export function refillMapVideos(state: RoomState, facts: ReadonlyMap<string, Vid
     else scenes[id] = scene;
   }
   return { ...state, scenes };
+}
+
+type IdMap = { has(id: string): boolean; of(id: string): string };
+
+/**
+ * A scene's sound under the ids `sounds` and `playlists` give. A playlist or
+ * a track that is not there leaves the scene's music silent, and a
+ * background sound that is not there goes, as deleting either would leave
+ * the scene (shared/reducer/sound.ts).
+ */
+function sceneSoundUnder(sound: SceneSound, sounds: IdMap, playlists: IdMap): SceneSound {
+  const was = sound.music;
+  let music: SceneSound["music"] = null;
+  if (was?.playlistId !== undefined) music = playlists.has(was.playlistId) ? { ...was, playlistId: playlists.of(was.playlistId) } : null;
+  else if (was?.soundId !== undefined) music = sounds.has(was.soundId) ? { ...was, soundId: sounds.of(was.soundId) } : null;
+  return { music, loops: sound.loops.filter((l) => sounds.has(l.soundId)).map((l) => ({ ...l, soundId: sounds.of(l.soundId) })) };
+}
+
+/**
+ * A row's sound facts when they are what the server's frame walk keeps
+ * (docs/design/design-v1-sound.md 7.1), read as untrusted, as
+ * checkedVideoFacts reads a video's: the column is jsonb.
+ */
+function checkedSoundFacts(value: unknown): SoundFacts | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  const { ms, channels, kbps } = value as Record<string, unknown>;
+  if (typeof ms !== "number" || !Number.isInteger(ms) || ms < SOUND_LIMITS.fileMinMs || ms > SOUND_LIMITS.fileMaxMs) return undefined;
+  if (channels !== 1 && channels !== 2) return undefined;
+  if (typeof kbps !== "number" || !(kbps >= SOUND_LIMITS.minKbps && kbps <= SOUND_LIMITS.maxKbps)) return undefined;
+  return { ms, channels, kbps };
+}
+
+/**
+ * Each sound's length from its file's row, after the id remap
+ * (docs/design/design-v1-sound.md 6.7, MSOL-33). The import's own frame
+ * walk made the rows, so a file's lengths are never trusted, as
+ * sound.create's `ms` comes from the row and never from the client (4.2).
+ * `facts` is keyed by the new asset id. A sound with no row there, whose
+ * row's facts do not check, or whose length does not fit its use with 4.2's
+ * allowance (soundUseFits, the rule its ops are held to) is left out with
+ * its places in playlists and scene sounds, as deleting it would leave
+ * them, and `left` counts those sounds for the import's answer
+ * (soundsLeftOut). It runs after the remap, which leaves nothing playing.
+ */
+export function refillSoundFacts(state: RoomState, facts: ReadonlyMap<string, SoundFacts>): { state: RoomState; left: number } {
+  if (!state.sounds) return { state, left: 0 };
+  const kept: Record<string, Sound> = {};
+  let left = 0;
+  for (const [id, sound] of Object.entries(state.sounds)) {
+    const row = checkedSoundFacts(facts.get(sound.assetId) ?? facts.get(sound.assetId.toLowerCase()));
+    if (row === undefined || !soundUseFits(sound.use, row.ms)) left++;
+    else kept[id] = { ...sound, ms: row.ms };
+  }
+  const same = (has: (id: string) => boolean): IdMap => ({ has, of: (id) => id });
+  const keptSounds = same((id) => Object.hasOwn(kept, id));
+  const allPlaylists = same((id) => Object.hasOwn(state.playlists ?? {}, id));
+  const next: RoomState = { ...state, sounds: kept, scenes: {} };
+  if (state.playlists) {
+    next.playlists = {};
+    for (const [id, p] of Object.entries(state.playlists)) next.playlists[id] = { ...p, sounds: p.sounds.filter((s) => keptSounds.has(s)) };
+  }
+  for (const [id, scene] of Object.entries(state.scenes)) next.scenes[id] = scene.sound ? { ...scene, sound: sceneSoundUnder(scene.sound, keptSounds, allPlaylists) } : scene;
+  return { state: next, left };
+}
+
+/**
+ * The state with nothing about sound (docs/design/design-v1-sound.md 6.7):
+ * no library, playlists, what plays, scene sounds or names switch, for a
+ * backup made without its sounds and for an import while the server's
+ * switch is off, whose files never come in. Traps keep their built-in
+ * sounds, which no file plays.
+ */
+export function withoutSound(state: RoomState): RoomState {
+  const { sounds: _sounds, playlists: _playlists, playing: _playing, ...rest } = state;
+  const { soundNames: _names, ...settings } = state.meta.settings;
+  const scenes: Record<string, Scene> = {};
+  for (const [id, scene] of Object.entries(state.scenes)) {
+    const { sound: _sound, ...silent } = scene;
+    scenes[id] = scene.sound === undefined ? scene : silent;
+  }
+  return { ...rest, meta: { ...state.meta, settings }, scenes };
 }
 
 /** The kinds of entry a chunk of memory holds (MemoryEntries). */
