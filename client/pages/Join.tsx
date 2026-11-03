@@ -83,6 +83,8 @@ export function Join(props: {
   // In With the password, or by asking, the ask card replaces the password
   // card only when the player taps Ask to join, or a request is waiting.
   const [view, setView] = useState<"password" | "ask">("password");
+  // Once the player leaves the request's card with Back, it is spent: the ask card that follows starts fresh.
+  const [spent, setSpent] = useState(false);
   useEffect(() => {
     if (lookup.kind === "done" && lookup.mine) setView("ask");
   }, [lookup]);
@@ -94,9 +96,12 @@ export function Join(props: {
       <AskToJoin
         roomId={roomId}
         mode={shown}
-        mine={lookup.mine}
+        mine={spent ? null : lookup.mine}
         linkOpened={props.link !== null}
-        onBack={() => setView("password")}
+        onBack={() => {
+          setSpent(true);
+          setView("password");
+        }}
         onJoined={props.onJoined}
         onModeChanged={props.onRefreshMode}
         onClosed={() => {
