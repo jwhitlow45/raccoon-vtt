@@ -8,7 +8,7 @@ import { chromium, type Browser, type BrowserContext, type Locator, type Page, t
 import sharp from "sharp";
 import { accentFor } from "../client/lib/accent.ts";
 import { PALETTES } from "../client/lib/theme.ts";
-import { lightOnly, normal, partColors, sweepContrast, sweepRing, type Sweep } from "./helpers/contrast.ts";
+import { lightOnly, normal, parseColor, partColors, ratio, sweepContrast, sweepRing, type Sweep } from "./helpers/contrast.ts";
 import { ConsoleWatch, OpSocket, openSideTab, pagePoint, pickOption, pickTool, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
@@ -556,7 +556,7 @@ describe("the light theme", { concurrency: false }, () => {
     // Light's findings fail the step, after the dark pass and the white art have run, so one run lists all of them.
     const halo = await whiteArtHalo();
     assert.ok(light);
-    for (const part of ["top bar", "toolbar", "tool options", "token window", "toast", "chosen tool", "map ring"]) assert.ok((light.counts.get(part) ?? 0) > 0, `the sweep measured nothing in the ${part}`);
+    for (const part of ["top bar", "toolbar", "tool options", "token window", "toast", "chosen tool", "map ring", "map after a pointer", "rings", "open rings", "dungeon dialog", "dungeon ring"]) assert.ok((light.counts.get(part) ?? 0) > 0, `the sweep measured nothing in the ${part}`);
     for (const line of light.failures) t.diagnostic(`light: ${line}`);
     assert.deepEqual([...light.failures, ...halo], [], "under its contrast in the light theme");
   });
@@ -668,9 +668,27 @@ describe("the light theme", { concurrency: false }, () => {
           g.history.pushState(null, "", p);
           g.dispatchEvent(new g.PopStateEvent("popstate"));
         }, to);
+      // The display's own code held back, so the frames before it loads show: none may be light once the room has gone (review LTB-2).
+      await page.route(/\/assets\/DisplayPages-[^/]*\.js$/, async (route) => {
+        await sleep(1_000);
+        await route.continue();
+      });
+      await page.evaluate(() => {
+        const g = globalThis as unknown as { __rvttFrames: string[]; requestAnimationFrame(f: () => void): void; document: { documentElement: { dataset: Record<string, string | undefined> }; querySelector(s: string): unknown } };
+        g.__rvttFrames = [];
+        const tick = () => {
+          if (g.document.querySelector("[data-rvtt-topbar]") === null) g.__rvttFrames.push(g.document.documentElement.dataset.rvttScheme ?? "dark");
+          if (g.__rvttFrames.length < 600) g.requestAnimationFrame(tick);
+        };
+        g.requestAnimationFrame(tick);
+      });
       await go("/display");
       await page.getByLabel("Code from the DM's screen").waitFor();
       await untilScheme(page, "dark", "the display");
+      const frames = await page.evaluate(() => (globalThis as unknown as { __rvttFrames: string[] }).__rvttFrames.splice(0));
+      assert.ok(frames.length > 20, `frames while the display's code loaded: ${frames.length}`);
+      assert.deepEqual([...new Set(frames)], ["dark"], "every frame from the room's going to the display's code is dark");
+      await page.unrouteAll();
       await shots.take(page, "lt-5-display-dark-on-light-device");
       await page.goBack();
       await page.getByRole("status", { name: "Connected" }).first().waitFor();
@@ -696,6 +714,32 @@ describe("the light theme", { concurrency: false }, () => {
       await untilScheme(page, "light", "the room, with the other tab's choice");
     } finally {
       await page.close();
+    }
+
+    // A fresh load of the display on a light device: dark from the first frame, while its code is still on the way.
+    const fresh = await dmContext.newPage();
+    try {
+      await fresh.addInitScript(() => {
+        const g = globalThis as unknown as { __rvttFrames: string[]; requestAnimationFrame(f: () => void): void; document: { documentElement: { dataset: Record<string, string | undefined> } } };
+        g.__rvttFrames = [];
+        const tick = () => {
+          g.__rvttFrames.push(g.document.documentElement.dataset.rvttScheme ?? "dark");
+          if (g.__rvttFrames.length < 600) g.requestAnimationFrame(tick);
+        };
+        g.requestAnimationFrame(tick);
+      });
+      await fresh.route(/\/assets\/DisplayPages-[^/]*\.js$/, async (route) => {
+        await sleep(1_000);
+        await route.continue();
+      });
+      await fresh.goto(`${server.origin}/display`);
+      await fresh.getByLabel("Code from the DM's screen").waitFor();
+      assert.equal(await fresh.evaluate(() => localStorage.getItem("rvtt.theme")), "light");
+      const frames = await fresh.evaluate(() => (globalThis as unknown as { __rvttFrames: string[] }).__rvttFrames.splice(0));
+      assert.ok(frames.length > 20, `frames while the display's code loaded: ${frames.length}`);
+      assert.deepEqual([...new Set(frames)], ["dark"], "every frame of a fresh load is dark");
+    } finally {
+      await fresh.close();
     }
   });
 
@@ -957,6 +1001,15 @@ async function sweepRoom(page: Page, size: { width: number; height: number }, sc
   const window = await tokenWindow(page, "Thorn", { x: 5, y: 5 });
   await sweep("token window", window);
   await shots.take(page, `lt-3-${kind}-${scheme}-token-window`);
+  if (kind === "computer") {
+    // Rings by keys once with chrome floating on the board, the token window and Select's options row (review LTB-7).
+    await window.getByRole("button", { name: "Multi-select", exact: true }).click();
+    const options = page.getByRole("toolbar", { name: "Select options" });
+    await options.waitFor();
+    await ringsByKeys(page, `${at} open`, found, [window, options]);
+    await window.getByRole("button", { name: "Multi-select", exact: true }).click();
+    await options.waitFor({ state: "detached" });
+  }
   await page.keyboard.press("Escape");
 
   // A toast: Pat's whisper to the DM.
@@ -1006,6 +1059,8 @@ async function sweepRoom(page: Page, size: { width: number; height: number }, sc
   await back.click();
   await closeSheets(page);
 
+  await dungeonDialog(page, at, kind, scheme, found);
+
   // The token panel and a stat block.
   const guard = await tokenWindow(page, "Guard captain", { x: 12, y: 5 });
   const details = guard.getByRole("button", { name: "Details", exact: true });
@@ -1041,17 +1096,35 @@ async function sweepRoom(page: Page, size: { width: number; height: number }, sc
  * Tabs from the map's focus target through what follows it on the map's
  * column, as a keyboard user would, and measures each ring against the
  * ground behind its line: the halo where it has one, else what lies there,
- * over both board grounds when that is the board.
+ * over both board grounds when that is the board. Dialogs are left out,
+ * except the floating chrome in `open`, whose rings are counted apart.
+ *
+ * First a pointer: the map's target then draws neither ring nor halo
+ * (D-261102-538), as a script focus after a tap must not frame the map.
  */
-async function ringsByKeys(page: Page, at: string, found: { failures: string[]; counts: Map<string, number> }): Promise<void> {
-  await closeSheets(page);
+async function ringsByKeys(page: Page, at: string, found: { failures: string[]; counts: Map<string, number> }, open: Locator[] = []): Promise<void> {
+  if (open.length === 0) await closeSheets(page);
   const map = page.locator('[role="img"][aria-label="Map"][data-rvtt-ring]');
-  // A key first, so the page is in keys mode, then focus onto the map's target.
+  const look = () =>
+    map.evaluate((el) => {
+      const s = (globalThis as unknown as { getComputedStyle(e: unknown): { outlineStyle: string; boxShadow: string } }).getComputedStyle(el);
+      return { visible: (el as { matches(q: string): boolean }).matches(":focus-visible"), outline: s.outlineStyle, shadow: s.boxShadow };
+    });
+  // A real key first, so the browser counts the next script focus as visible, as iOS Safari may after a tap.
   await page.keyboard.press("Shift");
+  await setModality(page, "pointer");
   await map.focus();
+  const afterPointer = await look();
+  assert.ok(afterPointer.visible, "the map's target matches :focus-visible, so the pointer rule is what hides its ring");
+  if (afterPointer.outline !== "none" || afterPointer.shadow !== "none") found.failures.push(`${at}: after a pointer the map's focus target draws outline ${afterPointer.outline}, shadow ${afterPointer.shadow}`);
+  found.counts.set("map after a pointer", (found.counts.get("map after a pointer") ?? 0) + 1);
+  await setModality(page, "keys");
+  const byKeys = await look();
+  if (byKeys.outline === "none" || !byKeys.shadow.includes("inset")) found.failures.push(`${at}: under keys the map's focus target draws outline ${byKeys.outline}, shadow ${byKeys.shadow}`);
   const mapRing = await sweepRing(page, `${at} map ring`);
   keep(mapRing, found, "map ring");
   const column = map.locator("..");
+  const roots = await Promise.all(open.map((l) => l.first().elementHandle()));
   const seen = new Set<string>();
   for (let i = 0; i < 60; i++) {
     await page.keyboard.press("Tab");
@@ -1063,10 +1136,70 @@ async function ringsByKeys(page: Page, at: string, found: { failures: string[]; 
     // Focus left the page's elements (the body, or the browser's own chrome), or came round again.
     if (!where || seen.has(where.key)) break;
     seen.add(where.key);
-    const inColumn = await page.locator(":focus").evaluate((el, col) => (col as { contains(e: unknown): boolean }).contains(el), await column.elementHandle());
+    const focused = page.locator(":focus");
+    const inOpen = await focused.evaluate((el, rs) => (rs as { contains(e: unknown): boolean }[]).some((r) => r.contains(el)), roots);
+    if (inOpen) {
+      keep(await sweepRing(page, `${at} ring`), found, "open rings");
+      continue;
+    }
+    const inColumn = await focused.evaluate((el, col) => (col as { contains(e: unknown): boolean }).contains(el), await column.elementHandle());
     if (!inColumn || where.dialog) continue;
     keep(await sweepRing(page, `${at} ring`), found, "rings");
   }
+}
+
+/**
+ * Puts the page in pointer or keys mode (lib/inputModality.ts) by an event
+ * on the window, which the app's own handlers on the document never hear,
+ * so nothing on the page acts on it. A real Shift press would not do: a
+ * bare modifier leaves the mode as it was, and a phone starts as a pointer.
+ */
+async function setModality(page: Page, mode: "pointer" | "keys"): Promise<void> {
+  await page.evaluate((m) => {
+    const g = globalThis as unknown as { dispatchEvent(e: unknown): void; PointerEvent: new (t: string) => unknown; KeyboardEvent: new (t: string, i: object) => unknown };
+    g.dispatchEvent(m === "pointer" ? new g.PointerEvent("pointerdown") : new g.KeyboardEvent("keydown", { key: "Unidentified" }));
+  }, mode);
+  await waitFor(`${mode} mode`, () => page.evaluate((m) => ((globalThis as unknown as { document: { documentElement: { getAttribute(n: string): string | null } } }).document.documentElement.getAttribute("data-rvtt-input") === m ? true : null), mode));
+}
+
+/**
+ * The dungeon generator's dialog (review LTB-1): its words, and Reroll's
+ * ring in the preview's corner, where it stands on the board's dark
+ * ground or the dark picture in either scheme. The ring sweep leaves out
+ * what lies over the picture, an image, so the ring is also measured on
+ * the preview's own ground, which the picture is drawn in the look of.
+ */
+async function dungeonDialog(page: Page, at: string, kind: "computer" | "phone", scheme: "dark" | "light", found: { failures: string[]; counts: Map<string, number> }): Promise<void> {
+  const panel = await openPanel(page, "Scenes");
+  const form = panel.getByRole("heading", { name: "New scene", exact: true }).locator("xpath=ancestor::*[self::section or @data-panel-group][1]");
+  await form.getByRole("radio", { name: "Builder", exact: true }).click();
+  await form.getByRole("button", { name: "Generate a dungeon", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Generate a dungeon" });
+  await dialog.getByRole("img", { name: /^Preview of the dungeon/ }).waitFor({ timeout: 30_000 });
+  await dialog.locator("footer [aria-live=polite]").waitFor({ timeout: 30_000 });
+  const reroll = dialog.getByRole("button", { name: "Reroll", exact: true });
+  await waitFor("Reroll on", async () => ((await reroll.isEnabled()) ? true : null));
+  keep(await sweepContrast(dialog, `${at} dungeon dialog`), found, "dungeon dialog");
+  await page.keyboard.press("Shift");
+  await setModality(page, "keys");
+  await reroll.focus();
+  keep(await sweepRing(page, `${at} the dungeon preview's Reroll`), found, "dungeon ring");
+  const ring = await reroll.evaluate((el) => {
+    type E = { parentElement: E | null };
+    const g = globalThis as unknown as { getComputedStyle(e: unknown): { outlineStyle: string; outlineColor: string; backgroundColor: string } };
+    const own = g.getComputedStyle(el);
+    // The preview's box: the first ground under the button's corner slot.
+    let box = (el as E).parentElement;
+    while (box && g.getComputedStyle(box).backgroundColor === "rgba(0, 0, 0, 0)") box = box.parentElement;
+    return { style: own.outlineStyle, color: own.outlineColor, ground: box ? g.getComputedStyle(box).backgroundColor : "none" };
+  });
+  const least = ring.style === "none" ? 0 : ratio(parseColor(ring.color), parseColor(ring.ground));
+  if (least < 3) found.failures.push(`${at}: the dungeon preview's Reroll ring ${ring.color} reads ${least.toFixed(2)}:1 on the preview's ground ${ring.ground}, under 3:1`);
+  found.counts.set("dungeon ring", (found.counts.get("dungeon ring") ?? 0) + 1);
+  await shots.take(page, `lt-3-${kind}-${scheme}-dungeon-reroll-ring`);
+  await page.keyboard.press("Escape");
+  await dialog.waitFor({ state: "detached" });
+  await closeSheets(page);
 }
 
 /**
