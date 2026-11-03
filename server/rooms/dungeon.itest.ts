@@ -3,11 +3,11 @@ import { readFileSync } from "node:fs";
 import { after, before, describe, test } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
 import { createInitialState } from "#shared/initial.ts";
-import type { RoomState, Trap } from "#shared/model.ts";
+import type { Member, RoomState, Trap } from "#shared/model.ts";
 import { stableStringify, type ProjectedState } from "#shared/project.ts";
-import type { Op, ServerMessage } from "#shared/protocol.ts";
+import { clientOpSchema, type Op, type ServerMessage } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { MOVE_PLAYERS_FIRST } from "#shared/permissions.ts";
+import { MOVE_PLAYERS_FIRST, MOVE_PLAYERS_FIRST_BACK } from "#shared/permissions.ts";
 import { loadRoom } from "./persistence.ts";
 import { projectedSceneBytes } from "./sizeGuard.ts";
 import { startEngine, type Engine, type Socket, type TestClient } from "./testing.ts";
@@ -85,6 +85,24 @@ function contents(state: Pick<RoomState, "buildChunks" | "scenes"> & { traps?: R
   return stableStringify({ scene: state.scenes[sceneId] ? true : false, chunks, traps });
 }
 
+/**
+ * The ops landed by the shared reducer alone, as the DM, on a fresh room:
+ * what a client's own reducer makes of them, as the preview's scratch room
+ * does, with no actor between.
+ */
+function reducerLanding(ops: readonly Op[], each?: (state: RoomState) => void): RoomState {
+  const dm: Member = { id: uuidv7(), rev: 1, name: "DM", color: "#ffffff", kind: "dm", createdAt: "2026-01-01T00:00:00.000Z" };
+  let state = createInitialState({ roomName: "Landing", dm, now: dm.createdAt });
+  for (const [i, raw] of ops.entries()) {
+    const op = clientOpSchema.parse(raw) as Op;
+    const r = applyOp(state, op, { memberId: dm.id, role: "dm" }, { seq: i + 1, at: dm.createdAt });
+    assert.ok(r.ok, `${op.t} refused by the reducer: ${r.ok ? "" : r.message}`);
+    state = r.state;
+    each?.(state);
+  }
+  return state;
+}
+
 const cellsOf = (state: Pick<RoomState, "buildChunks">, sceneId: string): string[] => Object.values(state.buildChunks).filter((c) => c.sceneId === sceneId).flatMap((c) => Object.keys(c.cells));
 const inRect = (key: string, r: Rect): boolean => {
   const [x, y] = key.split(",").map(Number) as [number, number];
@@ -148,7 +166,10 @@ describe("a generated dungeon on the server", () => {
       assert.equal(Object.values(live.traps).filter((x) => x.sceneId === m.sceneId).length, d.trapIds.length);
       assert.ok(Object.values(live.traps).every((x) => x.state === "armed" && !x.found));
       // The DM's view of the scene is what was stored.
-      assert.equal(contents(await stored(t, tb, m.sceneId, `dm-check-${d.name}`), m.sceneId), contents(live, m.sceneId));
+      const dmSnapshot = await stored(t, tb, m.sceneId, `dm-check-${d.name}`);
+      assert.equal(contents(dmSnapshot, m.sceneId), contents(live, m.sceneId));
+      // DG-R1-11: and what the client's reducer lands of the same ops under the same fresh ids.
+      assert.equal(contents(reducerLanding(m.ops), m.sceneId), contents(dmSnapshot, m.sceneId), `${d.name}: the snapshot is the reducer's landing`);
       const seen = JSON.stringify(watcher.received);
       assert.ok(!seen.includes(m.sceneId), `${d.name}: no message to a player names the new scene`);
       for (const id of m.trapIds) assert.ok(!seen.includes(id));
@@ -257,6 +278,9 @@ describe("a generated dungeon on the server", () => {
     assert.deepEqual(refused, []);
     const rejected = await tb.dmSocket.apply({ t: "scene.delete", sceneId: m.sceneId });
     assert.equal(rejected.rejects?.[0]?.message, MOVE_PLAYERS_FIRST);
+    // DG-R1-03: Undo setup is refused there too, as the outcome's words say.
+    const undo = await tb.dmSocket.step("undo", "setup");
+    assert.ok(undo.rejects?.[0]?.message.includes(MOVE_PLAYERS_FIRST_BACK), `undo refused: ${JSON.stringify(undo.rejects)}`);
     assert.equal((await coSocket.apply({ t: "room.setPlayerScene", sceneId: tb.mat })).rejects, undefined);
     await deleteAll(tb.dmSocket, tb, m.sceneId);
     coSocket.close();
@@ -370,16 +394,9 @@ describe("a generated dungeon refused partway", () => {
   let t: Engine;
   // The scene's projected bytes after the build's first paint and at the end, by the shared reducer, so the limit falls between them.
   const bytes = (() => {
-    const dm = { id: "dm", rev: 1, name: "DM", color: "#000000", kind: "dm" as const, createdAt: "2026-01-01T00:00:00.000Z" };
-    let state = createInitialState({ roomName: "Measure", dm });
     const m = made(LARGEST);
     const out: number[] = [];
-    for (const [i, op] of m.ops.entries()) {
-      const r = applyOp(state, op, { memberId: dm.id, role: "dm" }, { seq: i + 1, at: dm.createdAt });
-      assert.ok(r.ok);
-      state = r.state;
-      out.push(projectedSceneBytes(state, m.sceneId));
-    }
+    reducerLanding(m.ops, (state) => out.push(projectedSceneBytes(state, m.sceneId)));
     return out;
   })();
   before(async () => {
