@@ -1,16 +1,22 @@
 import pg from "pg";
 import { withTimeout } from "./e2e-shard-plan.ts";
 
-const CLEAR = "delete from rate_events where key like 'ok:%' or key like 'create:%'";
+/**
+ * The counted keys' prefixes: successful joins, room creations, and join
+ * requests (asks, let-ins and turn-away holds, server/auth/ratelimit.ts).
+ */
+export const JOIN_COUNT_PREFIXES: readonly string[] = ["ok:", "create:", "ask"];
+
+export const CLEAR = `delete from rate_events where ${JOIN_COUNT_PREFIXES.map((p) => `key like '${p}%'`).join(" or ")}`;
 
 /**
- * The server counts successful joins and room creations per address in
- * Postgres (server/auth/ratelimit.ts), and every e2e file joins from
- * 127.0.0.1. One file stays under the hourly limits, but a shard's files
- * together can pass them, so scripts/e2e-shard.ts clears the counts before
- * each run, as the full check on a laptop does. A fresh database has no
- * table until the first server applies the schema, and then there is
- * nothing to clear.
+ * The server counts successful joins, room creations and asks to join per
+ * address in Postgres (server/auth/ratelimit.ts), and every e2e file joins
+ * and asks from 127.0.0.1. One file stays under the hourly limits, but a
+ * shard's files together can pass them, so scripts/e2e-shard.ts clears the
+ * counts before each run, as the full check on a laptop does. A fresh
+ * database has no table until the first server applies the schema, and
+ * then there is nothing to clear.
  *
  * A database that stops answering would otherwise hold the shard, so the
  * cleanup gets `seconds` in all and says whether it finished: pg gives up

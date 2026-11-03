@@ -7,7 +7,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import pg from "pg";
-import { clearWith } from "./e2e-join-counts.ts";
+import { CLEAR, clearWith } from "./e2e-join-counts.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
@@ -138,5 +138,11 @@ describe("the shard script ends once it has reported", () => {
     } finally {
       await db.close();
     }
+  });
+});
+
+describe("what the clear deletes", () => {
+  test("the join, creation and ask counts, so one file's asks never refuse the next file's (ASK-COUNTS-CLEAR)", () => {
+    assert.equal(CLEAR, "delete from rate_events where key like 'ok:%' or key like 'create:%' or key like 'ask%'");
   });
 });
