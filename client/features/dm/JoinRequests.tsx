@@ -294,7 +294,8 @@ function TurnAwayAll(props: { ids: string[]; onAnswered(ids: string[]): void; on
       await api.turnAway(roomId, ids);
       props.onAnswered(ids);
     } catch (err) {
-      setError(answerErrorText(err instanceof ApiError ? err.code : undefined, "They"));
+      // Turn away skips what no longer waits, so the only refusals left are the server's own.
+      setError(answerErrorText(err instanceof ApiError && err.code === "busy" ? "busy" : undefined, ""));
       props.onRefused();
     } finally {
       busyRef.current = false;
