@@ -45,6 +45,12 @@ describe("weatherFor", () => {
     assert.equal(weatherFor({ view }, { characterId: "pat" }, null), undefined);
   });
 
+  test("a character with a token on both takes the players' scene before the viewer's", () => {
+    const view = table();
+    view.tokens.patElsewhere = token("patElsewhere", { sceneId: "cellar", kind: "pc", actor: { ref: "pat" } });
+    assert.deepEqual(weatherFor({ view }, { characterId: "pat" }, "cellar"), RAIN);
+  });
+
   test("a creature with no token there gets nothing", () => {
     assert.equal(weatherFor({ view: table() }, { characterId: "lone" }, "forest"), undefined);
     assert.equal(weatherFor({ view: table() }, { tokenId: "gone" }, "forest"), undefined);

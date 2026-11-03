@@ -7,7 +7,9 @@ import type { ActorTarget } from "#shared/protocol.ts";
 import { actor, character, companionBlock, customMonster, effect, entry, room, scene, token } from "#shared/testutil.ts";
 import type { SceneWeather } from "#shared/weather.ts";
 import { creatureRolls, srdNeeds, type DiceView } from "./creature.ts";
+import { presetLine } from "./options.ts";
 import { presetFor } from "./presets.ts";
+import { sourceName as cardSourceName } from "../rolls/card.ts";
 
 /**
  * Every d20 path in the app and the test it rolls (docs/design/design-v1-roll-options.md
@@ -166,6 +168,13 @@ describe("the weather of the scene a creature stands on (docs/design/design-v1-w
   test("heavy rain presets Disadvantage on the lurker's Perception check, beside its conditions' sources, and names it", () => {
     const preset = presetFor(inWeather({ kind: "rain", heavy: true }), LURK, perception);
     assert.deepEqual(keys(preset.sources), ["dis:poisoned", "dis:heavy-rain"]);
+  });
+
+  test("a weather source is named as a condition's is, on the option's second line and in a reading", () => {
+    const preset = presetFor(inWeather({ kind: "rain", heavy: true }), { characterId: "bree" }, perception);
+    assert.equal(presetLine(preset), "Dis: Heavy rain");
+    assert.equal(cardSourceName({ kind: "dis", from: "heavy-rain" }), "Heavy rain");
+    assert.equal(cardSourceName({ kind: "dis", from: "strong-wind" }), "Strong wind");
   });
 
   test("strong wind presets a ranged weapon attack and only reminds on one not known to be", () => {
