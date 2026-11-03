@@ -1332,6 +1332,8 @@ function projectPlayerToken(ctx: Ctx, token: Token): ProjectedToken {
   // A squeeze changes the footprint every rule reads, so everyone who sees the creature gets it. Its light does not
   // reach them: they see only its effect (docs/design/design-v1-maps-vision.md 4.3.5).
   if (token.squeeze) out.squeeze = true;
+  // Where in its box a token they see is drawn says nothing the token itself does not (docs/design/design-v1-snap-off.md 5.6).
+  if (token.nudge) out.nudge = token.nudge;
   if (playersToken(ctx.state, token)) {
     out.party = true;
     // A party member's companion is no secret at the table. One of a character no player plays reaches players as a

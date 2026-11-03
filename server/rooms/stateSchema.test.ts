@@ -785,3 +785,46 @@ describe("the room's clock in a backup (docs/design/design-v1-calendar.md 6.6)",
     assert.equal(broken((s) => (s.log.find((l: { data?: { type: string } }) => l.data?.type === "clock").data.why = "fight")), false);
   });
 });
+
+describe("placements between squares in a backup (docs/design/design-v1-snap-off.md 5.7)", () => {
+  function placed(): ReturnType<typeof room> {
+    return room({
+      tokens: {
+        bree: token("bree", { name: "Bree", x: 3, y: 3, nudge: { x: 3, y: -3 } }),
+        cat: token("cat", { name: "Cat", size: "tiny", x: 1.5, y: 2, nudge: { x: -1, y: 0 } }),
+        gob: token("gob", { name: "Goblin", x: 6, y: 3 }),
+      },
+    });
+  }
+
+  test("export and import bring back each nudge as it was", () => {
+    const state = placed();
+    const parsed = parseRoomState(JSON.parse(JSON.stringify(state)));
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    const out = remapState(parsed.state, { assets: new Map() });
+    const byName = (name: string) => Object.values(out.tokens).find((t) => t.name === name);
+    assert.deepEqual(byName("Bree")!.nudge, { x: 3, y: -3 });
+    assert.deepEqual(byName("Cat")!.nudge, { x: -1, y: 0 });
+    assert.equal(byName("Goblin")!.nudge, undefined);
+  });
+
+  test("one past its bound, off its lattice, at nothing, or where no op leaves one is refused", () => {
+    const broken = (edit: (s: ReturnType<typeof placed>) => void) => {
+      const s = JSON.parse(JSON.stringify(placed()));
+      edit(s);
+      return parseRoomState(s);
+    };
+    assert.equal(broken(() => {}).ok, true);
+    assert.equal(broken((s) => (s.tokens.bree!.nudge = { x: 4, y: 0 })).ok, false);
+    assert.equal(broken((s) => (s.tokens.bree!.nudge = { x: 1.5, y: 0 })).ok, false);
+    assert.equal(broken((s) => (s.tokens.bree!.nudge = { x: 0, y: 0 })).ok, false);
+    assert.equal(broken((s) => ((s.tokens.bree!.nudge as object as Record<string, number>).z = 1)).ok, false);
+    assert.equal(broken((s) => (s.tokens.cat!.nudge = { x: 2, y: 0 })).ok, false, "past a Tiny creature's 1/8");
+    const offSquare = broken((s) => (s.tokens.bree!.x = 3.5));
+    assert.equal(offSquare.ok, false);
+    assert.match(offSquare.ok ? "" : offSquare.message, /^tokens\.bree\.nudge: /);
+    const words = (r: ReturnType<typeof broken>) => (r.ok ? "" : r.message);
+    assert.match(words(broken((s) => (s.scenes.s1!.gridShape = "hexRows"))), /^tokens\.bree\.nudge: /, "on a hex scene");
+    assert.match(words(broken((s) => (s.tokens.bree = { ...s.tokens.bree!, size: "large", squeeze: true }))), /^tokens\.bree\.nudge: /, "squeezed");
+  });
+});

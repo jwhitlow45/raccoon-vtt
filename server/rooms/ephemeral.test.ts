@@ -253,6 +253,29 @@ describe("drag previews on vision scenes (docs/design/design-v1-maps-vision.md 4
     assert.deepEqual(t.p1.got.at(-1), { k: "dragMove", tokenId: "gob", x: 13, y: 14 });
   });
 
+  test("a frame at a placed token's drawn spot is judged by its rules box, so it reaches a player exactly when the token there would (docs/design/design-v1-snap-off.md 5.6)", () => {
+    const state = corridor();
+    let withheld = 0;
+    let shown = 0;
+    for (let x = 14; x <= 19; x++) {
+      const rules = { ...state.tokens.gob!, x, y: 13 };
+      const hidden = withheldFromViewer(state, P1, rules);
+      if (hidden) withheld++;
+      else shown++;
+      for (let n = -3; n <= 3; n++) {
+        if (n === 0) continue;
+        const placed = { ...rules, nudge: { x: n, y: -n } };
+        const s = { ...state, tokens: { ...state.tokens, gob: placed } };
+        const t = table(s);
+        t.send(t.dm.conn, { k: "dragStart", tokenId: "gob", x: x + n / 8, y: 13 - n / 8 });
+        t.send(t.dm.conn, { k: "dragEnd", tokenId: "gob", x: x + n / 8, y: 13 - n / 8 });
+        const frames = t.p1.got.filter((e) => e.k === "dragStart" || e.k === "dragEnd");
+        assert.equal(frames.length === 0, hidden, `at ${x} drawn ${n}/8 off`);
+      }
+    }
+    assert.ok(withheld > 0 && shown > 0, "the sweep crosses the edge of sight");
+  });
+
   test("a creature revealed on its turn out of the party's sight sends players nothing until it stands in sight", () => {
     const state = corridor();
     state.tokens.lurker = token("lurker", { x: 25, y: 13, fogExemptAuto: true });

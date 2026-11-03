@@ -6,6 +6,7 @@ import { chunkKey, holderChunkKey } from "#shared/keys.ts";
 import { LIMITS, MOST_SIGHT_HOLDERS, serializedBytes } from "#shared/limits.ts";
 import { ATTACH_KINDS } from "#shared/rules/attach.ts";
 import { DAMAGE_TYPES } from "#shared/rules/damage.ts";
+import { nudgeValid } from "#shared/rules/nudge.ts";
 import { withLevelInRange } from "#shared/srd/conditions.ts";
 import { sceneWeatherSchema } from "#shared/weather.ts";
 import {
@@ -341,6 +342,9 @@ const pathStop = z.strictObject({
   carried: z.literal(true).optional(),
 });
 
+/** Eighths of a square, at most 3/8 off a token's spot (rules/nudge.ts nudgeBound). */
+const nudgeEighths = z.number().int().min(-3).max(3);
+
 const token = z.strictObject({
   id,
   rev,
@@ -381,6 +385,12 @@ const token = z.strictObject({
   companion: z.strictObject({ of: id, turn: z.enum(["own", "shared", "none"]), reactionUsed: z.literal(true).optional() }).optional(),
   // Backups from before attached tokens have none (docs/design/design-v1-attach.md 8.1).
   attached: z.strictObject({ to: id, kind: z.enum(ATTACH_KINDS), steer: z.literal(true).optional() }).optional(),
+  // Backups from before snap off have none (docs/design/design-v1-snap-off.md 5.7). The bound for its size and where it may
+  // stand are the room's to check (parseRoomState), since they read its scene.
+  nudge: z
+    .strictObject({ x: nudgeEighths, y: nudgeEighths })
+    .refine((n) => n.x !== 0 || n.y !== 0, { message: "a token drawn between squares is drawn off its spot" })
+    .optional(),
 });
 
 const character = z.strictObject({
@@ -957,6 +967,8 @@ export const roomStateSchema = z.strictObject({
   clock: roomClock.nullable().optional(),
 });
 
+const NUDGE_PLACE = "a token is drawn between squares only on a square scene, standing unsqueezed on its own square, at most 3/8 of a square off it (1/8 for one that snaps to half squares)";
+
 /**
  * The stored state an import's room.json holds, checked whole. A sync
  * record whose `at` is more than a day past the import's time takes the
@@ -1004,6 +1016,12 @@ export function parseRoomState(value: unknown, now = Date.now()): { ok: true; st
       const ways = Object.values(chunk.upDir ?? {}).every((d) => (hex ? HEX_WAYS : SQUARE_WAYS).test(d));
       if (!marks || !ways) return { ok: false, message: `${layer}.${key}.${marks ? "upDir" : "up"}: ${STAIR_FACINGS}` };
     }
+  }
+  // A token is drawn between squares only where every op leaves one (docs/design/design-v1-snap-off.md 5.1): on a square
+  // scene, unsqueezed, on its own snapped spot, within the bound for its size. A backup made by hand can break that.
+  for (const token of Object.values(state.tokens).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
+    const scene = state.scenes[token.sceneId];
+    if (token.nudge && (!scene || !nudgeValid(sceneGrid(scene), token))) return { ok: false, message: `tokens.${token.id}.nudge: ${NUDGE_PLACE}` };
   }
   for (const character of Object.values(state.characters)) {
     if (character.ddbSync && syncAtAhead(character.ddbSync.at, now)) character.ddbSync = { ...character.ddbSync, at: new Date(now).toISOString() };
