@@ -1702,6 +1702,47 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     }
   });
 
+  test("wx-ui-3. weather presets Disadvantage on Thorn's rolls only once his token stands on the weathered scene: heavy rain on Perception, strong wind on a ranged weapon and not a melee one, nothing with Weather rules on rolls off, and a roll sent with it rolls two dice", async () => {
+    await player.setViewportSize({ width: 390, height: 844 });
+    const sceneId = dmSocket.state!.meta.playerSceneId!;
+    const weatherOn = (id: string) => playerSocket.state?.scenes[id]?.weather;
+    const longbow = { id: "r-longbow", name: "Longbow", kind: "weapon", ability: "dex", attack: { prof: true, bonus: 0 }, dice: [{ formula: "1d8", type: "piercing", mod: true }] };
+    await ops!.send({ t: "character.update", characterId: run.thornId, patch: { stats: { ...THORN_STATS, rolls: [...THORN_STATS.rolls, longbow] } } });
+    const tokenId = randomUUID();
+    try {
+      await openDicePhone(player);
+      const rolls = thornRolls(player);
+      const perception = rolls.getByRole("button", { name: /^Perception/ });
+      const bow = rolls.getByRole("button", { name: /^Longbow(?! damage)/ });
+      const sword = rolls.getByRole("button", { name: /^Longsword(?! damage)/ });
+      await ops!.send({ t: "scene.update", sceneId, patch: { weather: { kind: "rain", heavy: true, wind: "strong" } } });
+      await waitFor("the weather on Pat's phone", () => weatherOn(sceneId)?.kind === "rain" || null);
+      await sleep(300);
+      assert.doesNotMatch((await perception.getAttribute("aria-label")) ?? (await perception.innerText()), /Heavy rain/, "Thorn has no token on the scene, so the rain does not bear on him");
+
+      await ops!.send({ t: "token.create", token: { id: tokenId, sceneId, kind: "pc", name: "Thorn", size: "medium", x: 3, y: 3, visibility: "all", disposition: "ally", actor: { ref: run.thornId } } });
+      await waitFor("Thorn's token on Pat's phone", () => playerSocket.state?.tokens[tokenId] ?? null);
+      await waitFor("Perception names heavy rain", async () => (/Dis: Heavy rain/.test((await perception.getAttribute("aria-label")) ?? "") ? true : null));
+      const names = async (button: Locator) => (await button.getAttribute("aria-label")) ?? (await button.innerText());
+      assert.match(await names(bow), /Dis: Strong wind/, "a ranged weapon takes strong wind's Disadvantage");
+      assert.doesNotMatch(await names(sword), /Strong wind/, "a melee weapon does not");
+      await shots.take(player, "wx-ui-3-heavy-rain-strong-wind");
+
+      const before = diceLines(playerSocket.state?.log).length;
+      await perception.tap();
+      const sent = await waitFor("Perception's roll", () => diceLines(playerSocket.state?.log).slice(before).find((l) => /Perception/.test(l.data.rolls[0]?.label ?? ""))?.data ?? null);
+      assert.equal(sent.rolls[0]?.mode, "dis", "heavy rain's Disadvantage rolled two dice");
+      assert.equal(sent.rolls[0]?.faces.length, 2);
+
+      await ops!.send({ t: "scene.update", sceneId, patch: { weather: { kind: "rain", heavy: true, wind: "strong", rules: false } } });
+      await waitFor("Perception without the rule", async () => (!/Dis: Heavy rain/.test(await names(perception)) && !/Dis: Strong wind/.test(await names(bow)) ? true : null));
+    } finally {
+      await ops!.send({ t: "scene.update", sceneId, patch: { weather: null } });
+      await ops!.send({ t: "token.delete", tokenId }).catch(() => undefined);
+      await ops!.send({ t: "character.update", characterId: run.thornId, patch: { stats: THORN_STATS } });
+    }
+  });
+
   test("dpf1-d2. Again's menu repeats a secret roll's formula with the chosen mode, still secret and with its label", async () => {
     await player.emulateMedia({ reducedMotion: "reduce" });
     try {

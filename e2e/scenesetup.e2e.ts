@@ -9,7 +9,7 @@ import sharp from "sharp";
 import type { RoomState, Scene } from "#shared/model.ts";
 import { ConsoleWatch, OpSocket, openSideTab, pickOption, pickTool, reopenRoom, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
-import { setupHistory } from "./helpers/undoScope.ts";
+import { historyOf, playControl, setupHistory } from "./helpers/undoScope.ts";
 import { chooseStarterWork, starterWork } from "./starterPick.ts";
 
 /**
@@ -844,6 +844,102 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
       }
     }
     assert.deepEqual(lines, []);
+    assert.deepEqual(consoles.flatMap((c) => c.errors), []);
+  });
+
+  /** Arena's weather as the DM's socket holds it. */
+  const weatherOf = (id: string) => sceneOf(id)?.weather;
+
+  test("wx-ui-1. the Weather fold sets rain, wind and its direction, shows the rules, and one Undo in Play puts the old weather back, named for the scene", async () => {
+    await view(run.arenaId);
+    const panel = await scenesPanel(dm);
+    const what = section(panel, "What players see");
+    const fold = what.getByRole("button", { name: "Weather", exact: true });
+    assert.equal(weatherOf(run.arenaId), undefined, "Arena starts clear");
+    assert.equal(await fold.getAttribute("aria-expanded"), "false", "a clear scene folds it");
+    await what.getByText("Clear", { exact: true }).first().waitFor();
+    await fold.click();
+    const kind = what.getByRole("combobox", { name: "Weather", exact: true });
+    await kind.selectOption({ label: "Rain" });
+    await waitFor("light rain", () => (weatherOf(run.arenaId)?.kind === "rain" ? true : null));
+    await what.getByRole("radiogroup", { name: "Strength" }).getByRole("radio", { name: "Heavy", exact: true }).check();
+    await waitFor("heavy rain", () => (weatherOf(run.arenaId)?.heavy === true ? true : null));
+    await what.getByText("Perception checks here roll with Disadvantage.").waitFor();
+    assert.equal(await what.getByRole("switch", { name: "Weather rules on rolls", exact: true }).getAttribute("aria-checked"), "true");
+    assert.equal(await what.getByRole("radiogroup", { name: "Wind blows toward" }).count(), 0, "calm has no compass");
+    await what.getByRole("radiogroup", { name: "Wind", exact: true }).getByRole("radio", { name: "Strong", exact: true }).check();
+    const compass = what.getByRole("radiogroup", { name: "Wind blows toward" });
+    await compass.waitFor();
+    assert.equal(await compass.getByRole("radio", { name: "Toward the bottom right" }).isChecked(), true, "a wind starts toward the bottom right");
+    assert.equal(await compass.getByRole("radio").count(), 8);
+    await compass.getByRole("radio", { name: "Toward the left" }).check();
+    await waitFor("the wind toward the left", () => (weatherOf(run.arenaId)?.toward === 270 ? true : null));
+    assert.deepEqual(weatherOf(run.arenaId), { kind: "rain", heavy: true, wind: "strong", toward: 270 });
+    await what.getByText(/^Disadvantage on ranged attack rolls with weapons\./).waitFor();
+    await shots.take(dm, "wx-ui-1-fold-open");
+
+    // Folded, the fold names the weather beside its label, and the group's summary does too once the group folds.
+    await fold.click();
+    await what.getByText("Heavy rain · Strong wind", { exact: true }).waitFor();
+
+    // The newest Play step is the last pick, named for the scene, and one Undo puts the wind back where it was.
+    const head = historyOf(dmSocket)?.play.undo.head;
+    assert.equal(head?.label, "changing the weather of Arena");
+    await playControl(dm, "undo").click();
+    await waitFor("the direction undone", () => (weatherOf(run.arenaId)?.toward === undefined ? true : null));
+    assert.deepEqual(weatherOf(run.arenaId), { kind: "rain", heavy: true, wind: "strong" });
+
+    // Clear keeps the wind, and Clear with Calm stores nothing.
+    await fold.click();
+    await kind.selectOption({ label: "Clear" });
+    await waitFor("a clear day with wind", () => (weatherOf(run.arenaId)?.kind === "clear" ? true : null));
+    assert.deepEqual(weatherOf(run.arenaId), { kind: "clear", wind: "strong" });
+    assert.equal(await what.getByRole("radiogroup", { name: "Strength" }).count(), 0, "a clear day has no strength");
+    await what.getByRole("radiogroup", { name: "Wind", exact: true }).getByRole("radio", { name: "Calm", exact: true }).check();
+    await waitFor("no weather", () => (weatherOf(run.arenaId) === undefined ? true : null));
+    assert.deepEqual(consoles.flatMap((c) => c.errors), []);
+  });
+
+  test("wx-ui-2. fog drops a strong wind and says why, a sandstorm raises it, Strong is off in fog, and Weather rules on rolls off keeps the look", async () => {
+    await view(run.arenaId);
+    const panel = await scenesPanel(dm);
+    const what = section(panel, "What players see");
+    const fold = what.getByRole("button", { name: "Weather", exact: true });
+    const kind = what.getByRole("combobox", { name: "Weather", exact: true });
+    const wind = what.getByRole("radiogroup", { name: "Wind", exact: true });
+    const strength = what.getByRole("radiogroup", { name: "Strength" });
+    await ops.send({ t: "scene.update", sceneId: run.arenaId, patch: { weather: { kind: "rain", wind: "strong" } } });
+    await waitFor("light rain in strong wind", () => (weatherOf(run.arenaId)?.wind === "strong" ? true : null));
+    assert.equal(await fold.getAttribute("aria-expanded"), "true", "a scene with weather opens it");
+
+    await kind.selectOption({ label: "Fog" });
+    await waitFor("fog", () => (weatherOf(run.arenaId)?.kind === "fog" ? true : null));
+    assert.deepEqual(weatherOf(run.arenaId), { kind: "fog", wind: "moderate" });
+    await what.getByText("The wind is moderate now: strong wind disperses fog.").waitFor();
+    assert.equal(await wind.getByRole("radio", { name: "Strong", exact: true }).isDisabled(), true, "strong wind disperses fog");
+    await strength.getByRole("radio", { name: "Heavy", exact: true }).check();
+    await what.getByText(/^Heavily Obscured: a creature trying to see something in it has the Blinded condition\./).waitFor();
+    await shots.take(dm, "wx-ui-2-heavy-fog");
+
+    await kind.selectOption({ label: "Sand" });
+    await waitFor("sand", () => (weatherOf(run.arenaId)?.kind === "sand" ? true : null));
+    await strength.getByRole("radio", { name: "Sandstorm", exact: true }).check();
+    await waitFor("a sandstorm", () => (weatherOf(run.arenaId)?.heavy === true ? true : null));
+    assert.deepEqual(weatherOf(run.arenaId), { kind: "sand", heavy: true, wind: "strong" });
+    await what.getByText("The wind is strong now: a sandstorm is a strong wind.").waitFor();
+    assert.equal(await wind.getByRole("radio", { name: "Calm", exact: true }).isDisabled(), true);
+    assert.equal(await wind.getByRole("radio", { name: "Moderate", exact: true }).isDisabled(), true);
+
+    // Weather rules on rolls off keeps the look, and stays off as the kind changes.
+    const rules = what.getByRole("switch", { name: "Weather rules on rolls", exact: true });
+    await rules.click();
+    await waitFor("rules off", () => (weatherOf(run.arenaId)?.rules === false ? true : null));
+    await what.getByText(/Rolls here ignore it\.$/).waitFor();
+    await kind.selectOption({ label: "Snow" });
+    await waitFor("snow", () => (weatherOf(run.arenaId)?.kind === "snow" ? true : null));
+    assert.deepEqual(weatherOf(run.arenaId), { kind: "snow", wind: "strong", rules: false });
+    await ops.send({ t: "scene.update", sceneId: run.arenaId, patch: { weather: null } });
+    await waitFor("Arena clear again", () => (weatherOf(run.arenaId) === undefined ? true : null));
     assert.deepEqual(consoles.flatMap((c) => c.errors), []);
   });
 

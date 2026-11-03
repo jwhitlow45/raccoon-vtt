@@ -6245,6 +6245,28 @@ export function sceneSettingsTests(): void {
         await shots.take(page, `alignment-${sweep.at}-scene-settings-folded`);
         for (const group of SCENE_GROUP_NAMES) await openSceneGroup(panel, group);
         await sweep.measure(page, "scene-settings-open", panel);
+        // The Weather fold (docs/design/design-v1-weather.md 12): folded, then open on a clear day with a strong wind, on heavy rain with its compass and switch, and on heavy fog's note.
+        const what = sceneGroup(panel, "What players see");
+        const weather = what.getByRole("heading", { name: "Weather", exact: true }).locator("xpath=ancestor::section[1]");
+        const weatherFold = what.getByRole("button", { name: "Weather", exact: true });
+        await weather.scrollIntoViewIfNeeded();
+        await sweep.measure(page, "weather-folded", weather);
+        try {
+          for (const [label, patch] of [
+            ["weather-clear-wind", { kind: "clear", wind: "strong" }],
+            ["weather-heavy-rain", { kind: "rain", heavy: true, wind: "strong", toward: 270 }],
+            ["weather-heavy-fog", { kind: "fog", heavy: true, wind: "moderate" }],
+          ] as const) {
+            await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { weather: patch } });
+            await waitFor(`${label} open`, async () => ((await weatherFold.getAttribute("aria-expanded")) === "true" ? true : null));
+            await weather.getByRole("combobox", { name: "Weather", exact: true }).waitFor();
+            await weather.scrollIntoViewIfNeeded();
+            await sweep.measure(page, label, weather);
+            await shots.take(page, `alignment-${sweep.at}-${label}`);
+          }
+        } finally {
+          await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { weather: null } });
+        }
         // The players are on this scene, so its map image asks first, with the first map's fog choice.
         const map = sceneGroup(panel, "Map image and grid");
         await map.getByRole("button", { name: "Add a map image" }).click();
