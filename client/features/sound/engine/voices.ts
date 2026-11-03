@@ -1,5 +1,6 @@
 import { SOUND_LIMITS } from "#shared/limits.ts";
 import {
+  crossEndAt,
   LOOP_FADE_IN_MS,
   loopCrossingMs,
   occurrencesAt,
@@ -8,7 +9,6 @@ import {
   type MusicRun,
   type Playing,
   type Sound,
-  type SoundAt,
   type SoundId,
 } from "#shared/sound.ts";
 import type { SoundUnlock } from "./context.ts";
@@ -71,11 +71,6 @@ type Lengths = Readonly<Record<SoundId, Pick<Sound, "ms" | "use" | "assetId" | "
 function soundAs(sounds: Lengths, soundId: SoundId, use: Sound["use"]) {
   const s = Object.hasOwn(sounds, soundId) ? sounds[soundId] : undefined;
   return s && s.use === use && s.ms > 0 ? s : undefined;
-}
-
-/** When a revealed crossfade ends: `next.at` plus the fade, or sooner when the outgoing track ends first. */
-function crossEnd(now: SoundAt, nowMs: number, next: SoundAt, fadeMs: number): number {
-  return Math.min(next.at + fadeMs, Math.max(next.at, now.at + nowMs));
 }
 
 /**
@@ -142,14 +137,14 @@ function musicVoices(music: MusicRun, sounds: Lengths, t: number): VoicePlan[] {
       else envelope.push([o.startAt, 1]);
       if (repeats && crossing! > 0) envelope.push([o.startAt + now.ms - crossing!, 1], [o.startAt + now.ms, 0]);
       if (music.next && next) {
-        const end = crossEnd(music.now, now.ms, music.next, fade);
+        const end = crossEndAt(music.now, now.ms, music.next, fade);
         envelope.push([music.next.at, 1], [end, 0]);
       }
       out.push(voice("music", `m:${music.now.soundId}:${music.now.at}:${o.k}`, music.now.soundId, now, o.startAt, envelope, 100));
     }
   }
   if (music.next && next) {
-    const end = now ? crossEnd(music.now, now.ms, music.next, fade) : music.next.at;
+    const end = now ? crossEndAt(music.now, now.ms, music.next, fade) : music.next.at;
     const sounding = occurrencesAt(music.next.at, next.ms, null, t).length > 0 || music.next.at > t;
     if (sounding) {
       const envelope: EnvelopePoint[] = end > music.next.at ? [[music.next.at, 0], [end, 1]] : [[music.next.at, 1]];
