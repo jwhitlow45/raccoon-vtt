@@ -1,5 +1,5 @@
 import { VIDEO_LIMITS } from "#shared/limits.ts";
-import { OPUS_HZ, av1CodecString, opusHead, opusPacketSamples, peakInOneSecond, vp9CodecPrivate, vp9CodecString, vp9KeyFrame, vp9Level, type Vp9Facts } from "./records.ts";
+import { OPUS_HZ, av1CodecString, opusHead, opusPacketSamples, peakInOneSecond, timelineToleranceMs, vp9CodecPrivate, vp9CodecString, vp9KeyFrame, vp9Level, type Vp9Facts } from "./records.ts";
 import { Edits, Tally, refuse, type Budget, type Source } from "./window.ts";
 import type { ParsedVideo } from "./check.ts";
 
@@ -492,7 +492,7 @@ async function parseSegment(walk: Walk, segment: El): Promise<ParsedVideo> {
 
   const fps = peakInOneSecond(frameTimes, 1e9);
   const videoEnd = framesEnd(frameTimes, timed, video.defaultDuration);
-  const tolerance = timelineTolerance(video.defaultDuration ?? videoEnd.gap);
+  const tolerance = timelineToleranceMs((video.defaultDuration ?? videoEnd.gap) / 1e6) * 1e6;
   // Sound may end up to a frame or 50 ms after the picture (AMN-4, AMR-3): AAC and Opus pad their last packet.
   if (sound && soundEnd > videoEnd.end + tolerance) throw refuse("video_layout");
   const endNs = Math.max(videoEnd.end, invisibleEnd, soundEnd);
@@ -509,14 +509,6 @@ async function parseSegment(walk: Walk, segment: El): Promise<ParsedVideo> {
     durationMs: Math.round((duration * scale) / 1e6),
     edits: walk.edits,
   };
-}
-
-/** The most the Duration and the timeline may differ by, whatever frame length a file claims: no file's own number may widen it (round 2 of the build review). */
-const TIMELINE_SLACK_NS = 1e9;
-
-/** A frame's length or 50 ms, the larger, but never past the fixed slack. */
-function timelineTolerance(frameNs: number): number {
-  return Math.min(Math.max(frameNs, VIDEO_LIMITS.soundOverrunMs * 1e6), TIMELINE_SLACK_NS);
 }
 
 /**
@@ -552,7 +544,7 @@ function framesEnd(times: readonly number[], timed: ReadonlyMap<number, number>,
  * too long rather than unfinished. A Duration the timeline runs past says
  * less than the file holds. One the timeline falls short of is an edited
  * timeline, a gap the player would hold. The tolerance is never more than
- * TIMELINE_SLACK_NS.
+ * TIMELINE_SLACK_MS.
  */
 function checkTimeline(t: { declaredNs: number; clusterNs: number; endNs: number; toleranceNs: number }): void {
   if (Math.max(t.endNs, t.clusterNs) > VIDEO_LIMITS.maxDurationMs * 1e6 + t.toleranceNs) throw refuse("video_length");

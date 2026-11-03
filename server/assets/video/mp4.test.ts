@@ -562,3 +562,35 @@ describe("sample groups of every version (round 2: AMBUILD-SOL-008)", () => {
     await checkVideoBytes(mp4File({ tracks: [defaultVideoTrack({ extraStbl: [perEntry, sbgp] })] }));
   });
 });
+describe("the presentation interval comes from the composition times (round 2: AMBUILD-ASTRA-03, AMBUILD-SOL-009)", () => {
+  test("one long sample shown 100 minutes late is past the cap, however its durations read", async () => {
+    const late: Mp4Track = { ...defaultVideoTrack(), timescale: 1000, samples: [{ size: 30, delta: 600_000, cts: 6_000_000 }] };
+    await refused(mp4File({ tracks: [late] }), "video_length");
+  });
+
+  test("a 2 s file whose frames show from 533 ms to 2533 ms, with no edit list, is video_layout", async () => {
+    // Every frame 8192 ticks (533.33 ms at 15360) late: no frame at the start, and frames past the end.
+    const samples = Array.from({ length: 60 }, () => ({ size: 30, delta: 512, cts: 8192 }));
+    await refused(mp4File({ tracks: [defaultVideoTrack({ samples })] }), "video_layout");
+  });
+
+  test("an edit list that starts where the composition times start passes, and one that leaves a gap at the start is video_layout", async () => {
+    const samples = Array.from({ length: 60 }, () => ({ size: 30, delta: 512, cts: 8192 }));
+    await checkVideoBytes(mp4File({ tracks: [defaultVideoTrack({ samples, edits: [{ segment: 2000, mediaTime: 8192 }] })] }));
+    await refused(mp4File({ tracks: [defaultVideoTrack({ samples, edits: [{ segment: 2000, mediaTime: 0 }] })] }), "video_layout");
+  });
+
+  test("a first frame shown 500 ms late is a gap at the start, though the last frame ends where the durations say", async () => {
+    // The first sample decodes for 8192 ticks and shows at 7680: nothing shows before 500 ms.
+    const samples = Array.from({ length: 60 }, (_, i) => ({ size: 30, delta: i === 0 ? 8192 : 512, cts: i === 0 ? 7680 : 0 }));
+    await refused(mp4File({ tracks: [defaultVideoTrack({ samples })] }), "video_layout");
+    await checkVideoBytes(mp4File({ tracks: [defaultVideoTrack({ samples: samples.map((x, i) => (i === 0 ? { ...x, cts: 0 } : x)) })] }));
+  });
+
+  test("the reorder allowance is sixteen typical frames, so one long last frame does not widen it", async () => {
+    // 59 frames of 512 ticks and a last one of a second: sixteen typical frames are 8192 ticks, not sixteen seconds.
+    const samples = (offset: number) => Array.from({ length: 60 }, (_, i) => ({ size: 30, delta: i === 59 ? 15360 : 512, cts: i === 10 ? offset : 0 }));
+    await checkVideoBytes(mp4File({ tracks: [defaultVideoTrack({ samples: samples(8192) })] }));
+    await refused(mp4File({ tracks: [defaultVideoTrack({ samples: samples(9000) })] }), "video_layout");
+  });
+});

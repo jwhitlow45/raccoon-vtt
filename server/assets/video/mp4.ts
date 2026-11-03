@@ -1,6 +1,6 @@
 import { VIDEO_LIMITS } from "#shared/limits.ts";
 import type { ParsedVideo } from "./check.ts";
-import { Bits, OPUS_HZ, av1CodecString, opusHead, peakInOneSecond } from "./records.ts";
+import { Bits, OPUS_HZ, av1CodecString, opusHead, peakInOneSecond, timelineToleranceMs } from "./records.ts";
 import { Edits, Tally, refuse, type Budget, type Range, type Source } from "./window.ts";
 
 /**
@@ -315,17 +315,13 @@ function parseMoov(moov: Moov, box: Box, mdats: readonly Range[]): ParsedVideo {
   const frames = v.times.length;
   if (frames === 0) throw refuse("bad_video");
   const videoSeconds = v.seconds;
-  const frame = videoSeconds / frames;
-  const tolerance = Math.max(frame, VIDEO_LIMITS.soundOverrunMs / 1000);
-  const covers = (t: { seconds: number; remaining: number | null }) => {
-    if (t.remaining !== null && Math.abs(t.seconds - t.remaining) > tolerance) throw refuse("video_layout");
-  };
-  covers(v);
+  const tolerance = timelineToleranceMs(v.frame * 1000) / 1000;
+  presents(v, tolerance);
   trackDurations(video, v, movieTimescale, tolerance);
   let longest = videoSeconds;
   if (sound) {
     const s = timing(moov, sound, movieTimescale, VIDEO_LIMITS.parseSoundFrameHeaders, "bad_video");
-    covers(s);
+    presents(s, tolerance);
     trackDurations(sound, s, movieTimescale, tolerance);
     if (s.seconds > videoSeconds + tolerance) throw refuse("video_layout");
     longest = Math.max(longest, s.seconds);
@@ -764,30 +760,41 @@ export function insideMdat(mdats: readonly Range[], at: number, end: number): bo
 const MAX_REORDER_FRAMES = 16;
 
 /**
- * A track's sample times and presentation length. The length is the edit's
- * segment where an edit list plays the media, else the media's own, and
- * `remaining` is what the media holds from the edit's start, which the
- * caller checks the segment covers (AM-ASTRA-08). A composition offset may
- * present a sample later or earlier than it decodes, but by no more than a
- * decoder can reorder, and never before the start (AMBUILD-ASTRA-03): so no
- * frame shows outside the timeline the durations say.
+ * A track's samples on its presentation timeline, in seconds from where the
+ * track starts to play: `seconds` is the length the durations give (the
+ * edit's segment where an edit list plays the media, else the media's own),
+ * and `start` and `end` are where the first sample shows and the last one
+ * ends, from the composition times with the edit's media time taken off.
  */
-function timing(moov: Moov, track: Track, movieTimescale: number, cap: number, code: "video_fps" | "bad_video"): { times: number[]; seconds: number; remaining: number | null; media: number; reorder: number } {
+type Timing = { times: number[]; seconds: number; start: number; end: number; media: number; reorder: number; frame: number };
+
+/**
+ * A track's sample times and presentation interval. A composition offset
+ * may present a sample later or earlier than it decodes, but by no more
+ * than a decoder can reorder, counted in the track's typical frame, and
+ * never before the media's start (AMBUILD-ASTRA-03). The typical frame is
+ * the most common sample duration, so one long sample cannot raise the
+ * allowance for every offset (AMBUILD-SOL-009).
+ */
+function timing(moov: Moov, track: Track, movieTimescale: number, cap: number, code: "video_fps" | "bad_video"): Timing {
   const tally = new Tally(cap, code);
   const times: number[] = [];
+  const deltas: number[] = [];
+  const counts = new Map<number, number>();
   let dts = 0;
-  let longest = 0;
   for (const [count, delta] of track.stts!) {
     tally.add(count);
-    if (count > 0) longest = Math.max(longest, delta);
+    if (count > 0 && delta > 0) counts.set(delta, (counts.get(delta) ?? 0) + count);
     for (let i = 0; i < count; i++) {
       if ((times.length & 1023) === 0) moov.budget.check();
       times.push(dts);
+      deltas.push(delta);
       dts += delta;
     }
   }
   if (!Number.isSafeInteger(dts) || times.length !== track.sizes!.length) throw refuse("bad_video");
-  const reorder = MAX_REORDER_FRAMES * longest;
+  const typical = mostCommon(counts);
+  const reorder = MAX_REORDER_FRAMES * typical;
   if (track.ctts) {
     let i = 0;
     for (const [count, offset] of track.ctts) {
@@ -801,11 +808,39 @@ function timing(moov: Moov, track: Track, movieTimescale: number, cap: number, c
     }
     if (i !== times.length) throw refuse("bad_video");
   }
+  let first = times.length > 0 ? Infinity : 0;
+  let last = 0;
+  for (const [i, t] of times.entries()) {
+    first = Math.min(first, t);
+    last = Math.max(last, t + deltas[i]!);
+  }
   const scale = track.timescale!;
   const media = dts / scale;
   const edit = track.edit;
-  if (!edit) return { times, seconds: media, remaining: null, media, reorder };
-  return { times, seconds: edit.segment / movieTimescale, remaining: (dts - edit.mediaTime) / scale, media, reorder };
+  const from = edit?.mediaTime ?? 0;
+  const seconds = edit ? edit.segment / movieTimescale : media;
+  return { times, seconds, start: (first - from) / scale, end: (last - from) / scale, media, reorder, frame: typical / scale };
+}
+
+/** The sample duration most samples have, the shorter on a tie. */
+function mostCommon(counts: ReadonlyMap<number, number>): number {
+  let best = 0;
+  let most = 0;
+  for (const [delta, count] of counts) if (count > most || (count === most && delta < best)) (best = delta), (most = count);
+  return best;
+}
+
+/**
+ * A track's presentation interval against the cap and its durations
+ * (AMBUILD-ASTRA-03, AMBUILD-SOL-009). The cap holds where the last sample
+ * actually ends, whatever the durations say. The first sample must show at
+ * the start, and the last must end where the durations do, within the
+ * bounded tolerance: a gap at either end is an edited timeline, and an
+ * edit's segment must be what its media holds (AM-ASTRA-08).
+ */
+function presents(t: Timing, tolerance: number): void {
+  if (t.end > VIDEO_LIMITS.maxDurationMs / 1000 + tolerance) throw refuse("video_length");
+  if (t.start > tolerance || Math.abs(t.seconds - t.end) > tolerance) throw refuse("video_layout");
 }
 
 /**

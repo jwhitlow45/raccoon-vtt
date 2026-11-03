@@ -1,3 +1,4 @@
+import { VIDEO_LIMITS } from "#shared/limits.ts";
 import { refuse } from "./window.ts";
 
 /**
@@ -58,6 +59,20 @@ export function peakInOneSecond(times: readonly number[], perSecond: number): nu
     peak = Math.max(peak, last - first + 1);
   }
   return peak;
+}
+
+/** The most a file's durations and its timeline may differ by, in ms: no number in the file widens it past this (round 2 of the build review). */
+export const TIMELINE_SLACK_MS = 1000;
+
+/**
+ * How far a container's durations and its presentation timeline may differ,
+ * in ms: a frame's length or the sound's 50 ms overrun, the larger, but
+ * never more than TIMELINE_SLACK_MS. The frame length is the file's own
+ * number, so the fixed bound is what keeps a ten-minute frame from
+ * excusing a ten-minute gap (AMBUILD-ASTRA-03, AMBUILD-SOL-005).
+ */
+export function timelineToleranceMs(frameMs: number): number {
+  return Math.min(Math.max(frameMs, VIDEO_LIMITS.soundOverrunMs), TIMELINE_SLACK_MS);
 }
 
 /**
