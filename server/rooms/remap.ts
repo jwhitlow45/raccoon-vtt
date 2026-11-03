@@ -37,6 +37,7 @@ import type {
   Stamp,
   Light,
   MapPhase,
+  MapVideo,
   Pin,
   Trap,
   TrapAction,
@@ -44,6 +45,7 @@ import type {
   TrapRig,
   Token,
   TurnUses,
+  VideoFacts,
 } from "#shared/model.ts";
 import { normalizeCompanionState } from "#shared/reducer/companions.ts";
 import { keepsMemory } from "#shared/reducer/memory.ts";
@@ -52,6 +54,8 @@ import { linkOf, relinked } from "#shared/reducer/uses.ts";
 import { withPcActors, withShapeRules } from "#shared/rules/pcStats.ts";
 import { phaseMap, withPhaseLight } from "#shared/reducer/phases.ts";
 import { normalWeather } from "#shared/weather.ts";
+import { stillFitsVideo } from "#shared/limits.ts";
+import { checkedVideoFacts } from "#shared/protocol.ts";
 import type { AssetKind } from "../assets/kinds.ts";
 
 /**
@@ -278,7 +282,7 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     if (s.weather !== undefined) next.weather = normalWeather(s.weather);
     if (s.map) {
       const mapped = asset(s.map.assetId, "map");
-      if (mapped) next.map = { ...s.map, assetId: mapped };
+      if (mapped) next.map = withVideo({ ...s.map, assetId: mapped }, videoUnder(s.map.video, (id) => asset(id, "video")));
       else delete next.map;
     }
     if (s.thumb !== undefined) {
@@ -286,7 +290,7 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
       if (mapped) next.thumb = mapped;
       else delete next.thumb;
     }
-    if (s.phases) out.scenes[next.id] = withPhaseImages(next, s.phases, (id) => asset(id, "map"));
+    if (s.phases) out.scenes[next.id] = withPhaseImages(next, s.phases, (id) => asset(id, "map"), (id) => asset(id, "video"));
     else out.scenes[next.id] = next;
   }
   // New ids for stamps and lights, as for labels. A stamp of an image that did not come through goes with it.
@@ -734,17 +738,65 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
  * went, the scene switches to the first one left, on the reference grid and
  * with its light level as any switch (withPhaseLight), and when none is
  * left the scene has neither phases nor a map.
+ *
+ * A phase whose video did not come through stays, as a still
+ * (docs/design/design-v1-animated-maps.md 9.3). The map's video is always
+ * the surviving active phase's, since players receive the map and never
+ * the phases.
  */
-function withPhaseImages(scene: Scene, phases: readonly MapPhase[], asset: (id: string) => string | undefined): Scene {
+function withPhaseImages(scene: Scene, phases: readonly MapPhase[], asset: (id: string) => string | undefined, videoAsset: (id: string) => string | undefined): Scene {
   const kept = phases.flatMap((p) => {
     const mapped = asset(p.assetId);
-    return mapped ? [{ ...p, assetId: mapped }] : [];
+    return mapped ? [withVideo({ ...p, assetId: mapped }, videoUnder(p.video, videoAsset))] : [];
   });
   const { phases: _phases, phaseId: _phaseId, phaseGrid, map: _map, ...rest } = scene;
   const active = kept.find((p) => p.id === scene.phaseId) ?? kept[0];
   if (!active || !phaseGrid) return rest;
-  const next: Scene = { ...rest, phases: kept, phaseId: active.id, phaseGrid, map: active.id === scene.phaseId && scene.map ? scene.map : phaseMap(phaseGrid, active) };
+  const map = active.id === scene.phaseId && scene.map ? withVideo(scene.map, active.video) : phaseMap(phaseGrid, active);
+  const next: Scene = { ...rest, phases: kept, phaseId: active.id, phaseGrid, map };
   return active.id === scene.phaseId ? next : withPhaseLight(next, active);
+}
+
+/** A video under its imported row's new id, or none when its row did not come through as a video. */
+function videoUnder(video: MapVideo | undefined, asset: (id: string) => string | undefined): MapVideo | undefined {
+  if (video === undefined) return undefined;
+  const mapped = asset(video.assetId);
+  return mapped === undefined ? undefined : { ...video, assetId: mapped };
+}
+
+/** A map or a phase with this video over its still, or as a still without one. */
+function withVideo<T extends { video?: MapVideo }>(place: T, video: MapVideo | undefined): T {
+  const { video: _old, ...still } = place;
+  return (video === undefined ? still : { ...still, video }) as T;
+}
+
+/**
+ * Each map's and phase's video facts from its asset row, after the id
+ * remap (docs/design/design-v1-animated-maps.md 9.3). The import's own
+ * header check made the rows, so a file's facts are never trusted, as an
+ * op's are not (server/rooms/actor.ts withAssetSizes). `facts` is keyed by
+ * the new asset id. A video with no row there, or one its still no longer
+ * fits (`stillFitsVideo`, the rule every op is held to), is dropped and
+ * leaves its still as a plain map. Then the shown map takes the surviving
+ * active phase's video, so the map and the showing phase agree as every
+ * op leaves them (stateSchema.ts phasesFitTheirGrid).
+ */
+export function refillMapVideos(state: RoomState, facts: ReadonlyMap<string, VideoFacts>): RoomState {
+  const refilled = (place: { widthPx: number; heightPx: number; video?: MapVideo }): MapVideo | undefined => {
+    if (place.video === undefined) return undefined;
+    const row = checkedVideoFacts(facts.get(place.video.assetId) ?? facts.get(place.video.assetId.toLowerCase()));
+    return row !== undefined && stillFitsVideo(place, row) ? { assetId: place.video.assetId, ...row } : undefined;
+  };
+  const scenes: Record<string, Scene> = {};
+  for (const [id, scene] of Object.entries(state.scenes)) {
+    if (scene.phases) {
+      const phases = scene.phases.map((p) => withVideo(p, refilled(p)));
+      const active = phases.find((p) => p.id === scene.phaseId);
+      scenes[id] = { ...scene, phases, ...(scene.map ? { map: withVideo(scene.map, active?.video) } : {}) };
+    } else if (scene.map) scenes[id] = { ...scene, map: withVideo(scene.map, refilled(scene.map)) };
+    else scenes[id] = scene;
+  }
+  return { ...state, scenes };
 }
 
 /** The kinds of entry a chunk of memory holds (MemoryEntries). */

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { correctionLogEventSchema } from "#shared/undoContract.ts";
 import { saveOutcomeLedgerSchema } from "#shared/saveOutcomeContract.ts";
-import { ABILITY_KEYS, CONDITION_KEYS, CRIT_RULES, HEIGHTS_CHARS, MAX_HEIGHT_FT, MIN_HEIGHT_FT, ORDER_REVEALS, ROUGH_CHARS, STAIRS_CHARS, STATUS_KEYS, TURN_FLAGS, type MapPhase, type PhaseGrid, type RoomState, type SceneMap } from "#shared/model.ts";
+import { ABILITY_KEYS, CONDITION_KEYS, CRIT_RULES, HEIGHTS_CHARS, MAX_HEIGHT_FT, MIN_HEIGHT_FT, ORDER_REVEALS, ROUGH_CHARS, STAIRS_CHARS, STATUS_KEYS, TURN_FLAGS, type MapPhase, type MapVideo, type PhaseGrid, type RoomState, type SceneMap } from "#shared/model.ts";
 import { chunkKey, holderChunkKey } from "#shared/keys.ts";
 import { LIMITS, MOST_SIGHT_HOLDERS, serializedBytes } from "#shared/limits.ts";
 import { ATTACH_KINDS } from "#shared/rules/attach.ts";
@@ -144,6 +144,8 @@ const scene = z
         heightPx: z.number().int().min(1).max(16_384),
         cellPx: z.number().min(1).max(16_384),
         originPx: z.strictObject({ x: z.number().min(-100_000).max(100_000), y: z.number().min(-100_000).max(100_000) }),
+        // Backups from before animated maps have none, which reads as a still map (docs/design/design-v1-animated-maps.md 9.1).
+        video: mapSchemas.mapVideo.optional(),
       })
       .optional(),
     grid: z.strictObject({ show: z.boolean(), color, opacity: z.number().min(0).max(1), lineWidth: z.number().min(0).max(10) }),
@@ -193,8 +195,21 @@ function phasesFitTheirGrid(s: { map?: SceneMap | undefined; phases?: MapPhase[]
     map.heightPx === expected.heightPx &&
     map.cellPx === expected.cellPx &&
     map.originPx.x === expected.originPx.x &&
-    map.originPx.y === expected.originPx.y
+    map.originPx.y === expected.originPx.y &&
+    sameVideo(map.video, expected.video)
   );
+}
+
+/**
+ * The map's video is the showing phase's, in presence, id and every fact
+ * (docs/design/design-v1-animated-maps.md 9.1), since players receive the
+ * map and never the phases: a file whose map named another phase's video
+ * would send players a video the DM is not showing.
+ */
+function sameVideo(a: MapVideo | undefined, b: MapVideo | undefined): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  const fields = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof MapVideo>;
+  return [...fields].every((field) => a[field] === b[field]);
 }
 
 const terrain = z.enum(["stone", "wood", "grass", "dirt", "cave", "water", "difficult", "rubble", "pit", "pillar", "stairs"]);
