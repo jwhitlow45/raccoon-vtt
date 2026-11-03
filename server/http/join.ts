@@ -149,8 +149,14 @@ export async function registerJoinRoutes(app: FastifyInstance, kit: AuthKit): Pr
           if (room.player_epoch !== ticket.playerEpoch) throw new HttpError(403, "stale_ticket");
         },
         settled(outcome) {
-          if (outcome.kind === "in") kit.tickets.spend(body.ticket);
-          else kit.tickets.release(body.ticket);
+          if (outcome.kind === "in") {
+            kit.tickets.spend(body.ticket);
+            // The device got in another way than asking: its request here
+            // ends, and every ask it began before now is refused.
+            kit.joinRequests.gotIn(roomId, sessionId);
+          } else {
+            kit.tickets.release(body.ticket);
+          }
         },
       });
       // Still settling, or settled without a way to tell whether the grant

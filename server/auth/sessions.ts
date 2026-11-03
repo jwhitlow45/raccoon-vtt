@@ -228,7 +228,7 @@ export class SessionStore {
     if (found.sessionId) return { id: found.sessionId, token, slide: false, touch: false, noUserAgent: false, adopted: true };
     if (!found.askId) return null;
     const promoted = await asks.promote(tx, found.askId, userAgent(req));
-    if (promoted === "gone") return null;
+    if (promoted.state === "gone") return null;
     return { id: found.askId, token, slide: false, touch: false, noUserAgent: false, adopted: true };
   }
 

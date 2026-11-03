@@ -126,6 +126,9 @@ async function becomeDm(
   // The old token died with the commit, so the new cookie goes out whatever
   // happens next.
   kit.sessions.setCookie(reply, session.token);
+  // A DM claim gets the device in: its join request here ends, and every
+  // ask it began before now is refused (docs/design/design-v1-join-requests.md 5.1).
+  kit.joinRequests.gotIn(roomId, session.id);
 
   if (created) {
     try {

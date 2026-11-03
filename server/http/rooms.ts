@@ -61,6 +61,10 @@ export async function diskHasRoom(config: Pick<Config, "ASSET_DIR">): Promise<bo
 export async function deleteRoomAndFiles(app: FastifyInstance, roomId: string, log: FastifyBaseLogger): Promise<boolean> {
   const fileKeys = await roomFileKeys(app.pool, roomId);
   const deleted = await app.gateway.deleteRoom(roomId);
+  // Again once the row is gone (the room manager's onDelete did it as the
+  // delete began), so an ask admitted in between finds its room's
+  // generation moved (docs/design/design-v1-join-requests.md 5.2).
+  if (app.hasDecorator("joinRequests")) app.joinRequests.dropRoom(roomId);
   if (app.hasDecorator("assets")) {
     await deleteUnreferencedFiles(app.pool, app.assets.assetDir, fileKeys).catch((err: unknown) => {
       log.warn({ err, roomId }, "room deleted, but its unreferenced image files were not all removed");

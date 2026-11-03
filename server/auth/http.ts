@@ -7,6 +7,7 @@ import type { Config } from "../config.ts";
 import { RoomFullError, RoomNotFoundError, type RoomGateway } from "../rooms/gateway.ts";
 import type { Admissions } from "./admit.ts";
 import type { AskSessions } from "./askSessions.ts";
+import type { JoinRequests } from "./joinRequests.ts";
 import type { Role } from "./grants.ts";
 import { BusyError, type PasswordHasher } from "./passwords.ts";
 import type { SlowLimits, Verdict } from "./ratelimit.ts";
@@ -34,6 +35,8 @@ export type AuthKit = {
   tickets: JoinTickets;
   /** Every join's member and grant, in that order (server/auth/admit.ts). */
   admissions: Admissions;
+  /** Join requests a DM answers (docs/design/design-v1-join-requests.md 5.1). */
+  joinRequests: JoinRequests;
   /** The caller's address as limits count it: clientIp(), then ipKey(). */
   ip(req: FastifyRequest): string;
   /** The caller's own address, from clientIp(), for Turnstile. */

@@ -137,6 +137,14 @@ export class JoinRequests {
     return this.#lifeMs;
   }
 
+  /** The store's clock, which an ask's deadline is measured on. */
+  now(): number {
+    return this.#now();
+  }
+
+  /** The admission locks, per address and per room, taken in that order (5.2, the ask's step 6). */
+  readonly locks = new KeyedLocks();
+
   /** The DMs' signal (shared/protocol.ts `joinRequests`), sent once per room per turn of the event loop. */
   onChange(signal: (roomId: string) => void): void {
     this.#signal = signal;
@@ -368,9 +376,14 @@ export class JoinRequests {
    * request takes the ending recorded meanwhile, or the one the room or the
    * clock calls for, or goes back to waiting with its place.
    */
-  settle(id: string, outcome: "in" | "gone" | "failed"): void {
+  settle(id: string, outcome: "in" | "gone" | "closed" | "failed"): void {
     const r = this.#requests.get(id);
     if (r?.state !== "deciding") return;
+    if (outcome === "closed") {
+      // The let-in found the room With the password under its lock.
+      this.#end(r, r.endAfter ?? "closed");
+      return;
+    }
     if (outcome === "in") {
       this.#end(r, "in");
       this.#marks.set(key(r.roomId, r.sessionId), this.#now());
@@ -492,10 +505,51 @@ export class JoinRequests {
   }
 }
 
+/**
+ * In-memory locks by key, so a waiting ask holds no pooled connection
+ * (D-261102-109 rejected Postgres advisory locks for that). They live in the
+ * one server process, as room actors do.
+ */
+export class KeyedLocks {
+  #tails = new Map<string, Promise<void>>();
+
+  /** Takes every key in the order given, and answers the one release for all of them. */
+  async acquire(keys: readonly string[]): Promise<() => void> {
+    const releases: Array<() => void> = [];
+    for (const k of keys) releases.push(await this.#one(k));
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      for (const release of releases.reverse()) release();
+    };
+  }
+
+  async #one(k: string): Promise<() => void> {
+    const before = this.#tails.get(k) ?? Promise.resolve();
+    let release!: () => void;
+    const mine = new Promise<void>((r) => (release = r));
+    const tail = before.then(() => mine);
+    this.#tails.set(k, tail);
+    await before;
+    return () => {
+      release();
+      if (this.#tails.get(k) === tail) this.#tails.delete(k);
+    };
+  }
+}
+
 function key(roomId: string, sessionId: string): string {
   return `${roomId}|${sessionId}`;
 }
 
 function settled(state: WaitState): HeldWait {
   return { answer: Promise.resolve(state), release: () => undefined };
+}
+
+declare module "fastify" {
+  interface FastifyInstance {
+    /** For the room deletion path, which both the DM's route and the admin page take (server/http/rooms.ts). */
+    joinRequests: JoinRequests;
+  }
 }

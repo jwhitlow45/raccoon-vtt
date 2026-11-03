@@ -15,6 +15,7 @@ import { registerDisplayRoutes } from "./http/display.ts";
 import { registerDmRoutes } from "./http/dm.ts";
 import { registerExportRoutes, type ExportOptions } from "./http/export.ts";
 import { registerJoinRoutes } from "./http/join.ts";
+import { registerJoinRequestRoutes } from "./http/joinRequests.ts";
 import { registerLogRoutes, type LogRouteOptions } from "./http/log.ts";
 import { watchPoolErrors } from "./db.ts";
 import { LogScanBudget } from "./rooms/logScanBudget.ts";
@@ -133,6 +134,7 @@ export async function buildApp({ config, pool, gateway, hasher, access, rooms, w
 
   await registerRoomRoutes(app, kit);
   await registerJoinRoutes(app, kit);
+  await registerJoinRequestRoutes(app, kit);
   await registerDmRoutes(app, kit);
   await registerMemberRoutes(app, kit);
   await registerAssetRoutes(app, assets);
@@ -177,6 +179,9 @@ export async function buildApp({ config, pool, gateway, hasher, access, rooms, w
   });
   app.decorate("logMigration", logMigration);
   manager.onDelete((roomId) => logMigration.cancelRoom(roomId));
+  // As a delete starts, so an ask that slips in before the row goes finds the
+  // generation moved. deleteRoomAndFiles drops them again after the row is gone.
+  manager.onDelete((roomId) => kit.joinRequests.dropRoom(roomId));
   // Started by server/main.ts once the server listens. Stopped first on close: its job's connection is gone before the pools end.
   app.addHook("preClose", async () => logMigration.stop());
   await registerLogRoutes(app, kit, { manager, options: { ...logOptions, budget, pool: scanPool, history: { ...logOptions.history, metadata: logMigration } } });

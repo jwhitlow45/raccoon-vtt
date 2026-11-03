@@ -53,6 +53,8 @@ const Env = z.object({
    */
   OPENVERSE_CLIENT_ID: emptyAsUnset(z.string().max(200).optional()),
   OPENVERSE_CLIENT_SECRET: emptyAsUnset(z.string().max(500).optional()),
+  /** A join request's life in seconds, for end-to-end tests only: production always keeps the 10 minutes. */
+  JOIN_REQUEST_LIFE_S: emptyAsUnset(z.coerce.number().int().min(5).max(600).optional()),
 });
 
 export type Config = z.infer<typeof Env> & {

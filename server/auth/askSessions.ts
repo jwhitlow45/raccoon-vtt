@@ -98,9 +98,10 @@ export class AskSessions {
    * this id is the one to use. `"gone"`: neither is left.
    *
    * Once the transaction commits, or may have, the token's hash leaves the
-   * session store's unknown-token cache.
+   * session store's unknown-token cache. `hash` lets a caller whose commit
+   * answer was lost clear it again as it reads the outcome back.
    */
-  async promote(tx: Queryable, id: string, userAgent: string | null = null): Promise<"promoted" | "session" | "gone"> {
+  async promote(tx: Queryable, id: string, userAgent: string | null = null): Promise<{ state: "promoted" | "session" | "gone"; hash?: Buffer }> {
     const { rows } = await tx.query<{ token_hash: Buffer }>("select token_hash from ask_sessions where id = $1 and expires_at > now() for update", [id]);
     const row = rows[0];
     if (row) {
@@ -112,10 +113,20 @@ export class AskSessions {
       await tx.query("delete from ask_sessions where id = $1", [id]);
       const hash = row.token_hash;
       afterCommit(tx, () => this.#sessions.promoted(hash));
-      return "promoted";
+      return { state: "promoted", hash };
     }
     const session = await tx.query("select 1 from sessions where id = $1 and purpose = 'room' and expires_at > now()", [id]);
-    return session.rowCount === 1 ? "session" : "gone";
+    return { state: session.rowCount === 1 ? "session" : "gone" };
+  }
+
+  /** Whether the id is still a live room session or ask token: a let-in's cheap check before it adds a member. */
+  async live(q: Queryable, id: string): Promise<boolean> {
+    const { rows } = await q.query<{ live: boolean }>(
+      `select exists (select 1 from sessions where id = $1 and purpose = 'room' and expires_at > now())
+           or exists (select 1 from ask_sessions where id = $1 and expires_at > now()) as live`,
+      [id],
+    );
+    return rows[0]?.live === true;
   }
 
   /** The hourly cleanup's part. */
