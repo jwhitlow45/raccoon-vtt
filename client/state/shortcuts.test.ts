@@ -584,10 +584,11 @@ describe("the sheet's rows beside the keys", () => {
       // A roll button's hold, which opens its one-roll options where a tap rolls (docs/design/design-v1-roll-mode-menu.md 7).
       // An ability box's tap and a roll's hold in its list, which open rolls and options a tap on a roll would not (docs/design/design-v1-stat-block-rolls.md 3.3 and 5.1).
       // The swipe back in a panel, a gesture with no mark of its own on screen (lib/backSwipe.ts).
-      if (b.device === "pointer") assert.match(b.input, /^(Drag .*(carries|carried|mount)|Tap a standee again$|Double click or tap on Undo or Redo$|Hold a roll button$|Double-tap and hold a roll button with a screen reader$|Tap, click, hold or right-click an ability box in a stat block$|Hold or right-click a roll in an ability's rolls$|Swipe right in a panel$)/, b.id);
+      // The token bar's Place freely, the touch twin of Alt+drag, which drops one drag between squares (docs/design/design-v1-snap-off.md 4).
+      if (b.device === "pointer") assert.match(b.input, /^(Drag .*(carries|carried|mount)|Place freely, then drag the token$|Tap a standee again$|Double click or tap on Undo or Redo$|Hold a roll button$|Double-tap and hold a roll button with a screen reader$|Tap, click, hold or right-click an ability box in a stat block$|Hold or right-click a roll in an ability's rolls$|Swipe right in a panel$)/, b.id);
       if (b.device !== "mouse") continue;
       // A mouse row names a key, or a button other than the left one, or the trackpad's pinch, which arrives as Ctrl and the wheel.
-      assert.match(b.input, /^(Shift|Ctrl|Space|Right-click|Drag with the right or middle button)/, b.id);
+      assert.match(b.input, /^(Shift|Ctrl|Alt|Space|Right-click|Drag with the right or middle button)/, b.id);
     }
   });
 
@@ -614,6 +615,7 @@ describe("the sheet's rows beside the keys", () => {
       "Drag a token that carries others",
       "Drag the rider of a controlled mount",
       "Drag any other carried token",
+      "Place freely, then drag the token",
       "Tap a standee again",
       "Hold a roll button",
       "Double-tap and hold a roll button with a screen reader",
@@ -626,6 +628,7 @@ describe("the sheet's rows beside the keys", () => {
       "Shift or Ctrl+click a token (Cmd on a Mac)",
       "Shift or Ctrl+drag on empty map (Cmd on a Mac)",
       "Right-click a token",
+      "Alt+drag a token (Option on a Mac)",
       "Drag with the right or middle button",
       "Space+drag",
       "Ctrl+wheel, or a pinch on a trackpad",

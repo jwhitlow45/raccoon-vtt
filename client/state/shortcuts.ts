@@ -841,6 +841,15 @@ export const BEHAVIORS: readonly Behavior[] = [
     when: "with Multi-select off",
     device: "mouse",
   },
+  // Snap off for a drag (docs/design/design-v1-snap-off.md 4): canvas/Stage.tsx reads Alt on every pointer move and at the drop, features/movement/free.ts.
+  {
+    id: "altDrag",
+    input: "Alt+drag a token (Option on a Mac)",
+    does: "Place it between squares, where you drop it",
+    roles: EVERYONE,
+    when: "on a square scene, on a token you may move",
+    device: "mouse",
+  },
   { id: "buttonPan", input: "Drag with the right or middle button", does: "Move the map", roles: EVERYONE, when: "with any tool", device: "mouse" },
   // pages/mapFocus.ts spaceMovesMap.
   { id: "spacePan", input: "Space+drag", does: "Move the map", roles: EVERYONE, when: "with any tool, while nothing has focus or the map does", device: "mouse" },
@@ -888,6 +897,8 @@ export const BEHAVIORS: readonly Behavior[] = [
     when: "with the Select tool",
     device: "pointer",
   },
+  // The token bar's one-drag toggle (docs/design/design-v1-snap-off.md 4): canvas/TokenActionBar.tsx and the placeFreelySlot in state/store.ts.
+  { id: "placeFreely", input: "Place freely, then drag the token", does: "The same, for one drag", roles: EVERYONE, when: "from the token's bar, on a square scene", device: "pointer" },
   ...(isoOffered ? VIEW_BEHAVIORS : []),
 
   // A roll button's one-roll options (docs/design/design-v1-roll-mode-menu.md 3): features/dice/useRollModeMenu.tsx and rollPress.ts. The keys are each surface's own, below.
