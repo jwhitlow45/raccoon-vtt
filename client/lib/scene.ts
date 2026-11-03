@@ -1,5 +1,5 @@
 import { SIZE_CELLS, type Character, type Member, type RoomState, type Scene, type SceneMap, type Token } from "#shared/model.ts";
-import { occupiedHexes, sizeCategory, type PlacedToken } from "#shared/rules/footprint.ts";
+import { footprintRect, occupiedHexes, sizeCategory, type PlacedToken } from "#shared/rules/footprint.ts";
 import type { Grid } from "#shared/rules/grid.ts";
 import { HEX_R, hexAt, hexCenter, hexDistance, hexKey, hexNeighbors, snapAnchor, type Hex, type HexGrid } from "#shared/rules/hex.ts";
 import type { Rect } from "./camera.ts";
@@ -68,6 +68,19 @@ export function rulesSpot(token: Pick<Token, "nudge">, p: { x: number; y: number
   const n = token.nudge;
   if (!n) return { x: p.x, y: p.y };
   return { x: p.x - n.x / 8, y: p.y - n.y / 8 };
+}
+
+/**
+ * The dashed outline of a nudged token's rules box (docs/design/design-v1-snap-off.md
+ * section 4, "Where it counts"): the box every rule counts it in, from its
+ * drawn top-left, in cells, the space of its node. Null for a token with no
+ * nudge and on hexes, where the rules box is where it is drawn.
+ */
+export function rulesOutline(g: Grid, token: PlacedToken & Pick<Token, "nudge">): { x: number; y: number; w: number; h: number } | null {
+  if (!token.nudge || g.shape === "hex") return null;
+  const r = footprintRect(g, token);
+  const at = drawnAt(g, token);
+  return { x: r.x - at.x, y: r.y - at.y, w: r.w, h: r.h };
 }
 
 /**

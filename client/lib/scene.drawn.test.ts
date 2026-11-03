@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import fc from "fast-check";
 import { SQUARES, type Grid } from "#shared/rules/grid.ts";
-import { drawnAt, footprint, rulesSpot, snapPosition } from "./scene.ts";
+import { drawnAt, footprint, rulesOutline, rulesSpot, snapPosition } from "./scene.ts";
 
 const HEX: Grid = { shape: "hex", orient: "rows" };
 
@@ -43,5 +43,14 @@ describe("drawn and rules spots (snap-off 6.1)", () => {
         assert.deepEqual(rulesSpot(token, drawn), { x: token.x, y: token.y });
       }),
     );
+  });
+});
+
+describe("the rules outline (snap-off section 4)", () => {
+  test("a nudged token's rules box from its drawn top-left, and none unnudged or on hexes", () => {
+    assert.deepEqual(rulesOutline(SQUARES, { size: "medium", x: 3, y: 3, nudge: { x: 3, y: -3 } }), { x: -0.375, y: 0.375, w: 1, h: 1 });
+    assert.deepEqual(rulesOutline(SQUARES, { size: "large", x: 2, y: 6, nudge: { x: -1, y: 2 } }), { x: 0.125, y: -0.25, w: 2, h: 2 });
+    assert.equal(rulesOutline(SQUARES, { size: "medium", x: 3, y: 3 }), null);
+    assert.equal(rulesOutline(HEX, { size: "medium", x: 3, y: 3, nudge: { x: 1, y: 0 } }), null);
   });
 });

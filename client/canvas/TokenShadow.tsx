@@ -2,7 +2,7 @@ import { memo, useMemo } from "react";
 import { Circle } from "react-konva";
 import { useStore } from "zustand";
 import type { BuildChunk, FogTile } from "#shared/model.ts";
-import type { ViewToken } from "../lib/scene.ts";
+import { rulesSpot, type ViewToken } from "../lib/scene.ts";
 import { localDragSlot } from "../state/localDrags.ts";
 import { useScoped } from "../state/scope.ts";
 import { useRoomView } from "../state/view.ts";
@@ -25,9 +25,11 @@ const NO_BOUNDS = { w: 0, h: 0 };
  * canvas, and every token body drawn after it lands on top. Every shadow is
  * then under every body, and over the map, which is on a layer below.
  *
- * `at` is where a ghost of another member's drag stands. This device's own
- * drag is read from the cell its token is over (state/localDrags.ts), so the
- * shadow says what height the token would land at.
+ * `at` is where a ghost of another member's drag is drawn, read back in
+ * rules coordinates (docs/design/design-v1-snap-off.md 6.2). This device's
+ * own drag is read from the cell its token is over (state/localDrags.ts),
+ * already a rules spot, so the shadow says what height the token would
+ * land at.
  *
  * A player reads only the ground they have seen (relief/seenChunks.ts), as
  * the height readout does, so a shadow never tracks heights under the fog.
@@ -38,7 +40,7 @@ export const TokenShadow = memo(function TokenShadow(props: { token: ViewToken; 
   // In a hidden tree (relief/context.ts) a drag's cell is never read, so the drag does no landing search there.
   const shown = useTreeShown();
   const spot = useStore(useScoped(localDragSlot), (s) => (shown ? s.spots[token.id] : undefined));
-  const at = props.at ?? spot;
+  const at = props.at ? rulesSpot(token, props.at) : spot;
   const ax = at?.x;
   const ay = at?.y;
   // Only a token being dragged reads the room, for the drop's landing: by its holder while it sits on one every player sees.

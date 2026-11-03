@@ -7,7 +7,7 @@ import { shownLife } from "#shared/rules/hp.ts";
 import { boardSizes } from "../lib/boardScale.ts";
 import { isAppleDevice } from "../lib/device.ts";
 import { lineHeight, type LabelLine } from "../lib/boardText.ts";
-import { displayName, footprint, hexFootprintOutline, type ViewToken } from "../lib/scene.ts";
+import { displayName, drawnAt, footprint, hexFootprintOutline, rulesOutline, type ViewToken } from "../lib/scene.ts";
 import { gridOfShape } from "#shared/rules/grid.ts";
 import { boardTheme, theme } from "../lib/theme.ts";
 import { BOARD_DISPOSITION_RING, cropSourceRect, DECOR_MIN_PX, effectChip, effectCount, initials, type Chip } from "../lib/tokenView.ts";
@@ -121,6 +121,13 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
   holes?: readonly CellBox[] | null;
   /** On the isometric view's relief: a standee or a press area. Absent in Top-down and on the ground stage. */
   iso?: IsoToken | null;
+  /**
+   * Draw the dashed outline of the box the rules count a nudged token in
+   * (docs/design/design-v1-snap-off.md section 4): Stage asks while it is
+   * selected, dragged, measured or under an area preview. Nothing draws
+   * for a token with no nudge.
+   */
+  rulesOutline?: boolean;
 }) {
   const { token, scale, selected, active, draggable, holes } = props;
   const iso = props.iso ?? null;
@@ -131,6 +138,9 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
   const name = displayName(token);
   const gridShape = useRoomView((s) => s.view?.scenes[token.sceneId]?.gridShape);
   const hexes = useSelectedHexes(gridShape, token, selected);
+  // The node sits where the token is drawn, its stored spot moved by its nudge (snap-off 6.2), so its picture, decor and hit area move together.
+  const at = drawnAt(gridOfShape(gridShape), token);
+  const rules = useRulesOutline(props.rulesOutline === true, gridShape, token);
   /*
    * A drag moves the node by hand, and a drop puts it where the plan lands
    * it (Stage.tsx landDrop). react-konva then sets only the coordinates
@@ -142,18 +152,18 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
   const groupRef = useRef<Konva.Group>(null);
   useLayoutEffect(() => {
     const node = groupRef.current;
-    if (!node || node.isDragging() || (node.x() === token.x && node.y() === token.y)) return;
-    node.position({ x: token.x, y: token.y });
+    if (!node || node.isDragging() || (node.x() === at.x && node.y() === at.y)) return;
+    node.position({ x: at.x, y: at.y });
     node.getLayer()?.batchDraw();
-  }, [token.x, token.y]);
+  }, [at.x, at.y]);
 
   return (
     <Group
       ref={groupRef}
       id={token.id}
       name="token"
-      x={token.x}
-      y={token.y}
+      x={at.x}
+      y={at.y}
       draggable={draggable}
       opacity={iso?.dim ? theme.relief.hiddenOpacity : token.visibility === "dm" ? 0.5 : 1}
       clipFunc={iso && iso.pits.length > 0 ? (ctx) => clipToOpenings(ctx, iso, token) : undefined}
@@ -209,10 +219,49 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
       ) : (
         <TokenFace token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} name={name} active={active} selected={selected} hexes={hexes} />
       )}
+      {rules ? <RulesOutline box={rules} scale={scale} ground={iso ? liftInPlane(iso.turn, iso.ground) : null} /> : null}
       {props.decor && !iso ? <DecorParts token={token} effects={actor?.effects ?? []} scale={scale} text={props.text} lockMark={props.lockMark} part="all" /> : null}
     </Group>
   );
 });
+
+/** The rules box of a nudged token, from its drawn top-left, when asked for (scene.ts rulesOutline). */
+function useRulesOutline(shown: boolean, gridShape: GridShape | undefined, token: ViewToken): { x: number; y: number; w: number; h: number } | null {
+  const { x, y, size, w, h, squeeze, nudge } = token;
+  const nx = nudge?.x;
+  const ny = nudge?.y;
+  return useMemo(() => {
+    if (!shown || nx === undefined || ny === undefined) return null;
+    return rulesOutline(gridOfShape(gridShape), { x, y, size, w, h, squeeze, nudge: { x: nx, y: ny } });
+  }, [shown, gridShape, x, y, size, w, h, squeeze, nx, ny]);
+}
+
+/**
+ * The dashed box the rules count a nudged token in, in the selection's
+ * color, as dashed and as wide as the selection's ring. In the isometric
+ * view it lies on the drawn ground under the token (`ground`, the lift in
+ * the ground plane), never on the standee's raised base.
+ */
+function RulesOutline(props: { box: { x: number; y: number; w: number; h: number }; scale: number; ground: { x: number; y: number } | null }) {
+  const { accent } = useAccent();
+  const { box, scale } = props;
+  const k = boardSizes(scale).ringPx / 3;
+  return (
+    <Rect
+      name="rulesOutline"
+      x={box.x + (props.ground?.x ?? 0)}
+      y={box.y + (props.ground?.y ?? 0)}
+      width={box.w}
+      height={box.h}
+      stroke={accent}
+      strokeWidth={Math.max(2, 2 * k)}
+      strokeScaleEnabled={false}
+      dash={[(6 * Math.max(1, k)) / scale, (4 * Math.max(1, k)) / scale]}
+      listening={false}
+      perfectDrawEnabled={false}
+    />
+  );
+}
 
 /** A flat creature's press area on the isometric relief: its footprint, on the hit canvas alone, over its picture on the ground stage below (5.2). */
 function FootprintPress(props: { rects: readonly { x: number; y: number; w: number; h: number }[] }) {
@@ -365,8 +414,11 @@ export const TokenDecor = memo(function TokenDecor(props: DecorProps & {
   const { token } = props;
   const character = useRoomView((s) => ("ref" in token.actor ? s.view?.characters[token.actor.ref] : undefined));
   const effects = ("inline" in token.actor ? token.actor.inline.effects : character?.actor.effects) ?? NO_EFFECTS;
+  const gridShape = useRoomView((s) => s.view?.scenes[token.sceneId]?.gridShape);
+  // On its token's drawn spot (snap-off 6.2), as useBoardText laid it out.
+  const at = drawnAt(gridOfShape(gridShape), token);
   return (
-    <Group x={props.atX ?? token.x} y={props.atY ?? token.y} opacity={token.visibility === "dm" ? 0.5 : 1} listening={false}>
+    <Group x={props.atX ?? at.x} y={props.atY ?? at.y} opacity={token.visibility === "dm" ? 0.5 : 1} listening={false}>
       <DecorParts {...props} effects={effects} />
     </Group>
   );
