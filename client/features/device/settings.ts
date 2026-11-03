@@ -343,3 +343,71 @@ export const subscribeAnimatedMaps = animatedMapsSetting.subscribe;
 /** A table display's own choice, for its page only, as its weather takes `applyWeatherMode` (features/display/remember.ts). */
 export const applyAnimatedMaps = animatedMapsSetting.apply;
 export const restoreAnimatedMaps = animatedMapsSetting.restore;
+
+// ---------------------------------------------------------------- room sound
+
+/**
+ * "Room sound" (docs/design/design-v1-music.md 4.4): whether this device
+ * plays the music, background sounds and effects the DM plays. "on",
+ * "off", or null until a choice: a DM device takes null as on, and a
+ * player's asks the first time there is something to hear. A table display
+ * keeps its own (features/display/remember.ts).
+ */
+export type RoomSoundChoice = "on" | "off" | null;
+
+export function parseRoomSound(raw: string | null): RoomSoundChoice {
+  return raw === "on" || raw === "off" ? raw : null;
+}
+
+/** Whether a choice means sound for a role: null is on for a DM, off for a player until asked. */
+export function roomSoundOnFor(choice: RoomSoundChoice, role: "dm" | "player"): boolean {
+  return choice === "on" || (choice === null && role === "dm");
+}
+
+export const ROOM_SOUND_KEY = "rvtt.roomSound";
+const roomSoundSetting = setting<RoomSoundChoice>(ROOM_SOUND_KEY, parseRoomSound, (c) => c ?? "off");
+
+export const roomSoundChoice = roomSoundSetting.get;
+export const setRoomSoundChoice = roomSoundSetting.set;
+export const useRoomSoundChoice = roomSoundSetting.use;
+export const subscribeRoomSound = roomSoundSetting.subscribe;
+
+/** "Music", "Background" and "Effects" on this device, 0 to 100, squared into the gain. */
+export type SoundMix = { readonly music: number; readonly loops: number; readonly effects: number };
+export const SOUND_MIX_DEFAULT: SoundMix = { music: 80, loops: 80, effects: 80 };
+
+function mixPart(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.min(100, Math.max(0, Math.round(value))) : fallback;
+}
+
+export function parseSoundMix(raw: string | null): SoundMix {
+  if (raw === null) return SOUND_MIX_DEFAULT;
+  try {
+    const v = JSON.parse(raw) as Partial<Record<keyof SoundMix, unknown>> | null;
+    if (!v || typeof v !== "object") return SOUND_MIX_DEFAULT;
+    return { music: mixPart(v.music, 80), loops: mixPart(v.loops, 80), effects: mixPart(v.effects, 80) };
+  } catch {
+    return SOUND_MIX_DEFAULT;
+  }
+}
+
+export const SOUND_MIX_KEY = "rvtt.soundMix";
+const soundMixSetting = setting<SoundMix>(SOUND_MIX_KEY, parseSoundMix, (m) => JSON.stringify({ music: m.music, loops: m.loops, effects: m.effects }));
+
+export const soundMix = soundMixSetting.get;
+export const setSoundMix = soundMixSetting.set;
+export const useSoundMix = soundMixSetting.use;
+export const subscribeSoundMix = soundMixSetting.subscribe;
+
+/*
+ * Another window of the app that changes either writes storage, and the
+ * browser tells this one with a `storage` event, so its engine and its
+ * switches follow, as the theme's do (lib/scheme.ts). A null key means
+ * that window cleared storage, which puts the defaults back.
+ */
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (event) => {
+    if (event.key === ROOM_SOUND_KEY || event.key === null) roomSoundSetting.adopt(event.key === null ? null : event.newValue);
+    if (event.key === SOUND_MIX_KEY || event.key === null) soundMixSetting.adopt(event.key === null ? null : event.newValue);
+  });
+}

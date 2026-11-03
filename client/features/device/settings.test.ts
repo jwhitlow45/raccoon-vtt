@@ -236,3 +236,57 @@ test("a table display's animated maps last for its page and give the device's ow
   s.restoreAnimatedMaps();
   assert.equal(s.animatedMaps(), "still");
 });
+
+/*
+ * Room sound (docs/design/design-v1-music.md 4.4): "on", "off", or no
+ * choice, which is on for a DM device and asks on a player's. The mix is
+ * this device's Music, Background and Effects, 80% at first, each 0 to
+ * 100, and a broken stored mix reads as the default.
+ */
+
+test("room sound is on, off or not chosen, and no choice is on for a DM only", async () => {
+  reset({ writes: true, reads: true });
+  const s = await loadPage();
+  assert.equal(s.roomSoundChoice(), null);
+  for (const raw of [null, "", "On", "yes", "true"]) assert.equal(s.parseRoomSound(raw), null, String(raw));
+  assert.equal(s.parseRoomSound("on"), "on");
+  assert.equal(s.parseRoomSound("off"), "off");
+  assert.equal(s.roomSoundOnFor(null, "dm"), true);
+  assert.equal(s.roomSoundOnFor(null, "player"), false);
+  assert.equal(s.roomSoundOnFor("off", "dm"), false);
+  assert.equal(s.roomSoundOnFor("on", "player"), true);
+  s.setRoomSoundChoice("off");
+  assert.equal(stored.get("rvtt.roomSound"), "off");
+  assert.equal((await loadPage()).roomSoundChoice(), "off");
+});
+
+test("the sound mix is 80% at first, kept 0 to 100, and a broken one reads as the default", async () => {
+  reset({ writes: true, reads: true });
+  const s = await loadPage();
+  assert.deepEqual(s.soundMix(), { music: 80, loops: 80, effects: 80 });
+  assert.deepEqual(s.parseSoundMix('{"music":10,"loops":250,"effects":-4}'), { music: 10, loops: 100, effects: 0 });
+  assert.deepEqual(s.parseSoundMix('{"music":"loud"}'), { music: 80, loops: 80, effects: 80 });
+  for (const raw of ["", "{", "null", "[]", "7"]) assert.deepEqual(s.parseSoundMix(raw), { music: 80, loops: 80, effects: 80 }, raw);
+  s.setSoundMix({ music: 35, loops: 60, effects: 100 });
+  assert.equal(stored.get("rvtt.soundMix"), '{"music":35,"loops":60,"effects":100}');
+  assert.deepEqual((await loadPage()).soundMix(), { music: 35, loops: 60, effects: 100 });
+});
+
+test("room sound and the mix follow another window's change, and a cleared storage gives the defaults back", async () => {
+  reset({ writes: true, reads: true });
+  const events = new EventTarget();
+  Object.assign(globalThis, { window: events });
+  try {
+    const s = await loadPage();
+    const storageEvent = (key: string | null, newValue: string | null) => Object.assign(new Event("storage"), { key, newValue });
+    events.dispatchEvent(storageEvent("rvtt.roomSound", "on"));
+    assert.equal(s.roomSoundChoice(), "on");
+    events.dispatchEvent(storageEvent("rvtt.soundMix", '{"music":5,"loops":5,"effects":5}'));
+    assert.deepEqual(s.soundMix(), { music: 5, loops: 5, effects: 5 });
+    events.dispatchEvent(storageEvent(null, null));
+    assert.equal(s.roomSoundChoice(), null);
+    assert.deepEqual(s.soundMix(), { music: 80, loops: 80, effects: 80 });
+  } finally {
+    delete (globalThis as { window?: unknown }).window;
+  }
+});

@@ -10,6 +10,7 @@ import {
   restoreAnimatedMaps,
   restoreUiScale,
   restoreWeatherMode,
+  setting,
   type UiScale,
   type WeatherMode,
 } from "../device/settings.ts";
@@ -189,3 +190,22 @@ export function saveDisplayChoices(choices: { mode: "follow" | "fit"; turn: bool
     // The choices last until the page closes.
   }
 }
+
+/**
+ * The display menu's Sound (docs/design/design-v1-music.md 4.5): On or Off,
+ * on at first, kept apart from a member's Room sound for the same reason
+ * as its weather. A display plays at full volume, since the TV's remote
+ * sets it.
+ */
+export const DISPLAY_SOUND_KEY = "rvtt.displaySound";
+
+export function parseDisplaySound(raw: string | null): boolean {
+  return raw !== "off";
+}
+
+const displaySoundSetting = setting<boolean>(DISPLAY_SOUND_KEY, parseDisplaySound, (on) => (on ? "on" : "off"));
+
+export const displaySound = displaySoundSetting.get;
+export const chooseDisplaySound = displaySoundSetting.set;
+export const useDisplaySound = displaySoundSetting.use;
+export const subscribeDisplaySound = displaySoundSetting.subscribe;

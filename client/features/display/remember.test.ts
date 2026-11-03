@@ -52,3 +52,18 @@ test("a display's animated maps are its own, apart from a member's in the same b
   restoreAnimatedMaps();
   assert.equal(animatedMaps(), "still", "closing the display gives the member's back");
 });
+
+test("a display's sound is its own, on at first, apart from a member's Room sound in the same browser", async () => {
+  const { roomSoundChoice, setRoomSoundChoice } = await import("../device/settings.ts");
+  const { chooseDisplaySound, displaySound, parseDisplaySound } = await import("./remember.ts");
+  setRoomSoundChoice("off");
+  assert.equal(displaySound(), true, "a display with no choice of its own plays");
+  chooseDisplaySound(false);
+  assert.equal(stored.get("rvtt.displaySound"), "off");
+  assert.equal(roomSoundChoice(), "off", "the member's setting is its own");
+  chooseDisplaySound(true);
+  assert.equal(stored.get("rvtt.roomSound"), "off");
+  assert.equal(displaySound(), true);
+  for (const raw of [null, "", "on", "sideways"]) assert.equal(parseDisplaySound(raw), true, String(raw));
+  assert.equal(parseDisplaySound("off"), false);
+});
