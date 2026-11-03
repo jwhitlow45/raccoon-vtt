@@ -389,7 +389,7 @@ describe("join requests: asking, waiting and a DM's answer", () => {
     for (const [c, r] of [[stranger, roomId], [t.client(), roomId], [phone, other.roomId]] as const) {
       assert.equal(k.error(await k.wait(c, r, id)), "request_gone");
       assert.equal(k.error(await c.delete(`/api/rooms/${r}/join-requests/${id}`)), "request_gone");
-      assert.equal((await c.get(`/api/rooms/${r}/join-requests/mine`)).statusCode, 404);
+      assert.equal((await c.get(`/api/rooms/${r}/join-requests/mine`)).statusCode, 204, "nothing, and no error, for a device with no request here");
     }
     assert.equal((await k.letIn(other.dm, other.roomId, id)).statusCode, 404);
     await dm.post(`/api/rooms/${roomId}/join-requests/turn-away`, { ids: [id] });
@@ -403,7 +403,7 @@ describe("join requests: asking, waiting and a DM's answer", () => {
     const held = k.wait(phone, roomId, id);
     assert.equal((await phone.delete(`/api/rooms/${roomId}/join-requests/${id}`)).statusCode, 204);
     assert.equal(k.error(await held), "request_gone");
-    assert.equal((await phone.get(`/api/rooms/${roomId}/join-requests/mine`)).statusCode, 404);
+    assert.equal((await phone.get(`/api/rooms/${roomId}/join-requests/mine`)).statusCode, 204);
     assert.equal((await k.list(dm, roomId)).requests.length, 0);
   });
 

@@ -209,7 +209,7 @@ export function AskToJoin(props: {
           // A request of this device is being decided: wait on that one.
           dispatch({ type: "askFailed" });
           void api.getMyJoinRequest(roomId).then(
-            (found) => dispatch({ type: "found", requestId: found.requestId, name: found.name, state: found.state }),
+            (found) => (found ? dispatch({ type: "found", requestId: found.requestId, name: found.name, state: found.state }) : setError("Something went wrong. Try again.")),
             () => setError("Something went wrong. Try again."),
           );
         } else dispatch({ type: "askFailed" });

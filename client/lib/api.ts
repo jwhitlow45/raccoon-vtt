@@ -524,9 +524,9 @@ export const api = {
     input: { ticket: string; memberId: MemberId } | { ticket: string; name: string; color: string },
   ) => request<Me>("POST", `${room(roomId)}/join/complete`, { json: input }),
 
-  /** The caller's own request in the room, read only. `request_gone` (404) when it has none. */
-  getMyJoinRequest: (roomId: string, signal?: AbortSignal) =>
-    request<MyJoinRequest>("GET", `${room(roomId)}/join-requests/mine`, { signal }),
+  /** The caller's own request in the room, read only. Null (204) when it has none. */
+  getMyJoinRequest: async (roomId: string, signal?: AbortSignal): Promise<MyJoinRequest | null> =>
+    (await request<MyJoinRequest | undefined>("GET", `${room(roomId)}/join-requests/mine`, { signal })) ?? null,
 
   /** Asks a DM to let this device in. Sets the room cookie when the device had no session. */
   askToJoin: (roomId: string, input: AskInput) =>

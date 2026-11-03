@@ -143,8 +143,10 @@ export async function registerJoinRequestRoutes(app: FastifyInstance, kit: AuthK
       const roomId = roomParam(req);
       const device = await deviceOf(req);
       const mine = device ? store.mine(roomId, device.id) : null;
-      if (!mine) throw new HttpError(404, "request_gone");
       reply.header("cache-control", "no-store");
+      // Most devices that open the join page hold no request, so that is a
+      // plain empty answer, not an error the browser logs on every visit.
+      if (!mine) return reply.code(204).send();
       return seen(mine);
     });
 
