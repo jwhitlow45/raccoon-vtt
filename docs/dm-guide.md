@@ -1671,7 +1671,7 @@ On a computer, a small chip in the top bar shows the date and time, such as "Dee
 
 **Set the date and time…** opens a dialog with the fields of your calendar. A Day count clock has a **Day** field. A Months clock has **Month**, **Day** and **Year**, and reads the weekday under them ("A Thursday."). **Time** is the phone's own time picker. If a day is past the end of its month, the dialog stays open and says so, such as "Pick a day from 1 to 30." Press **Set** to send it, or **Cancel** to leave. This is also how you turn the clock back.
 
-Set only sends what you changed. Press **Set** without touching a field and the clock stays exactly where it was. Change only the date and the clock keeps its seconds, such as the 18 seconds a three-round fight added. If another DM removes the month you picked while the dialog is open, the **Month** field reads "Pick a month" until you choose another.
+Set only sends what you changed. Press **Set** without touching a field and the clock stays exactly where it was. Change only the date and the clock keeps its seconds, such as the 18 seconds a three-round fight added. If another DM moves the month you picked while the dialog is open, the field follows it. If they remove or rename it, the **Month** field reads "Pick a month" until you choose another.
 
 ### Who sees it
 
@@ -1681,7 +1681,7 @@ Set only sends what you changed. Press **Set** without touching a field and the 
 - the chip in the top bar from 900 px,
 - each clock line in the **Log**, and a short toast for each change while their Log and Time panel are closed. The device that made the change gets no toast.
 
-Turn it off, and the Time panel leaves their list and nothing more of the clock reaches them. A blackout holds the clock back too, as it does the fight: while the pause screen is up, players get no date, time or clock lines, and when you lift it they get the clock as it stands, a running fight's seconds included, with the lines written meanwhile. A player who had the panel open keeps it open, reading "The DM isn't sharing the date and time now.", until they close it. The lines a player already read stay in their Log, even after a reload. Turn it on again, and they get the clock as it stands, without the lines written while it was hidden.
+Turn it off, and the Time panel leaves their list and nothing more of the clock reaches them. A blackout holds the clock back too, as it does the fight: while the pause screen is up, players get no date, time or clock lines, and when you lift it they get the clock as it stands, a running fight's seconds included, with the lines written meanwhile. A line written while the clock was shared reaches them at the lift even if you turned sharing off in between, since what players may read of a line is settled when it is written. A player who had the panel open keeps it open, reading "The DM isn't sharing the date and time now.", until they close it. The lines a player already read stay in their Log, even after a reload. Turn it on again, and they get the clock as it stands, without the lines written while it was hidden.
 
 ### Your own calendar
 
