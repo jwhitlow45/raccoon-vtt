@@ -24,6 +24,8 @@ import { TakeBack } from "../features/encounter/HpLog.tsx";
 import type { PanelProps } from "../features/panels.ts";
 import { historyKey, HistoryWindow, type HistoryState } from "./historyWindow.ts";
 import { logPage, pageErrorText } from "./olderLog.ts";
+import { memberInk } from "../lib/accent.ts";
+import { useScheme } from "../lib/scheme.ts";
 import { useUnsavedInput } from "../lib/sheetSwipe.ts";
 import { theme } from "../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../state/view.ts";
@@ -329,6 +331,7 @@ function time(at: string): string {
 
 function EntryRow(props: { entry: LogEntry; names: LogNames; me: string; dm: boolean; canUndo: boolean }) {
   const { entry, names, me } = props;
+  const scheme = useScheme();
   if (entry.kind === "event") {
     if (!entry.data) return null;
     return (
@@ -361,7 +364,7 @@ function EntryRow(props: { entry: LogEntry; names: LogNames; me: string; dm: boo
         </span>
       ) : null}
       <span style={{ display: "flex", alignItems: "baseline", gap: theme.space(2) }}>
-        <strong style={{ color: from?.color ?? theme.color.text }}>{memberName(names, entry.from)}</strong>
+        <strong style={{ color: memberInk(from?.color, scheme) }}>{memberName(names, entry.from)}</strong>
         <time dateTime={entry.at} style={{ color: theme.color.textMuted, fontSize: theme.font.small, fontVariantNumeric: "tabular-nums" }}>
           {time(entry.at)}
         </time>

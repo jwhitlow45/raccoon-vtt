@@ -8,6 +8,8 @@ import { Empty } from "../../components/Empty.tsx";
 import { IconButton } from "../../components/IconButton.tsx";
 import { Group } from "../../components/Panel.tsx";
 import { MarkedText, ProficiencyLabel } from "../../components/ProficiencyMark.tsx";
+import { memberInk } from "../../lib/accent.ts";
+import { useScheme } from "../../lib/scheme.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomUi, useRoomView } from "../../state/view.ts";
 import { usePanelHere } from "../panels.ts";
@@ -255,6 +257,7 @@ function LastGrows(props: { children: ReactNode[] }) {
 function Row(props: { row: RecentRow; names: LogNames; levelOf: LevelOf; me: string; dm: boolean; open: boolean; again(rolls: DiceRollInput[], to: "all" | "dm", origin: ThrowOrigin): void }) {
   const { row, names } = props;
   const [all, setAll] = useState(props.open);
+  const scheme = useScheme();
   // The sticky line's tap brings its row into view clear of that line by the line's own height (DicePanel.tsx revealUnderLine).
   const base: CSSProperties = { display: "grid", gap: theme.space(1), padding: `${theme.space(2)}px 0`, borderTop: `${theme.line.border}px solid ${theme.color.border}` };
   if (row.kind === "bare") {
@@ -286,7 +289,7 @@ function Row(props: { row: RecentRow; names: LogNames; levelOf: LevelOf; me: str
   const single = row.rolls.length === 1;
   const who = (
     <span style={{ display: "inline-flex", gap: theme.space(2), fontSize: theme.font.small }}>
-      <span style={{ fontWeight: theme.weight.strong, color: member?.color ?? theme.color.text }}>{memberName(names, row.by)}</span>
+      <span style={{ fontWeight: theme.weight.strong, color: memberInk(member?.color, scheme) }}>{memberName(names, row.by)}</span>
       {row.to === "dm" ? <span style={{ color: theme.color.textMuted }}>Secret</span> : null}
       {single ? null : <span style={{ color: theme.color.textMuted }}>{row.rolls.length} rolls</span>}
     </span>

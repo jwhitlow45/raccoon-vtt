@@ -6,6 +6,7 @@ import type { LogNames } from "#shared/logText.ts";
 import type { DiceRoll, LogEntry, LogEvent, RoomState, Viewer } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import { character, member, P1, room, token } from "#shared/testutil.ts";
+import { memberInk } from "../../lib/accent.ts";
 import { theme } from "../../lib/theme.ts";
 import { diceFoldsSlot } from "./diceFolds.ts";
 import { recentRolls } from "./logic.ts";
@@ -31,9 +32,9 @@ function entry(data: LogEvent): LogEntry {
 const LONGSWORD: DiceRoll = { formula: "1d20+6", faces: [14], total: 20, label: "Longsword", characterId: "thorn" };
 const FREE: DiceRoll = { formula: "2d6+3", faces: [4, 6], total: 13 };
 
-function table(log: LogEntry[]): RoomState {
+function table(log: LogEntry[], p1Color?: string): RoomState {
   const state = room({ characters: { thorn: character("thorn", { name: "Thorn", ownerIds: ["p1"] }) }, log });
-  state.members.p1 = { ...member("p1"), name: "Pat" };
+  state.members.p1 = { ...member("p1"), name: "Pat", ...(p1Color ? { color: p1Color } : {}) };
   state.members.p2 = { ...member("p2"), name: "Bree" };
   state.tokens.gob = token("gob", { name: "Goblin 1" });
   return state;
@@ -43,9 +44,9 @@ function namesOf(state: RoomState): LogNames {
   return { members: state.members, tokens: state.tokens, characters: state.characters, handouts: state.handouts, encounter: state.encounter };
 }
 
-function render(log: LogEntry[], opts: { viewer?: Viewer; folded?: boolean; connection?: string; tapAgain?: () => void } = {}): string {
+function render(log: LogEntry[], opts: { viewer?: Viewer; folded?: boolean; connection?: string; tapAgain?: () => void; p1Color?: string } = {}): string {
   const viewer = opts.viewer ?? P1;
-  const state = table(log);
+  const state = table(log, opts.p1Color);
   const view = projectState(state, viewer, { sceneId: "s1" }) as unknown as RoomState;
   const scope = new RoomScope();
   if (opts.folded) scope.get(diceFoldsSlot).tap("recent", false, false);
@@ -153,6 +154,25 @@ describe("Recent rolls folds as a group (6.1 to 6.3)", () => {
   test("with no rolls the empty line shows, and folded there is no description", () => {
     assert.match(render([]), /No rolls yet/);
     assert.doesNotMatch(render([], { folded: true }), /aria-describedby/);
+  });
+});
+
+describe("a roller's name in their member color (the light theme, section 6.3)", () => {
+  const NAVY = "#1a237e";
+  const rolled = () => [entry({ type: "dice", by: "p1", to: "all", rolls: [FREE, FREE] })];
+
+  test("a color that cannot be read as text is moved until it can, and the raw color is not used", () => {
+    assert.notEqual(memberInk(NAVY, "dark"), NAVY);
+    const markup = render(rolled(), { p1Color: NAVY });
+    assert.match(markup, new RegExp(`color:${memberInk(NAVY, "dark")}[^>]*>Pat</span>`, "i"));
+    assert.doesNotMatch(markup, new RegExp(`color:${NAVY}`, "i"));
+  });
+
+  test("a color that already reads is kept, and orange stays orange rather than the crest's yellow", () => {
+    assert.match(render(rolled(), { p1Color: "#e5e5e5" }), /color:#e5e5e5[^>]*>Pat<\/span>/i);
+    const orange = memberInk("#f38400", "dark");
+    assert.notEqual(orange, "#f7df00");
+    assert.match(render(rolled(), { p1Color: "#f38400" }), new RegExp(`color:${orange}[^>]*>Pat</span>`, "i"));
   });
 });
 
