@@ -475,10 +475,15 @@ export function dragStops(deps: DragDeps): DragStops {
       work.within(() => {
         const free = release.free && group.length <= 1;
         // The last frame aimed by the free state it had then: a drop let go with Alt pressed or released since aims again from that frame's node point (SNAP-OPUS4-02).
-        const from = rawFrom && rawFrom.free !== free && raw?.tokenId === token.id ? rawFrom.node : null;
+        const finger = raw?.tokenId === token.id && rawFrom ? rawFrom.node : null;
+        const from = finger && rawFrom?.free !== free ? finger : null;
         const spot = raw?.tokenId === token.id && !from ? raw : null;
-        // Where the lead was let go, drawn: what a free drop places it at, and an ordinary one measures its jitter from.
-        const letGo = from ?? { x: node.x(), y: node.y() };
+        /*
+         * Where the lead was let go, drawn: what a free drop places it at, and an ordinary one measures its jitter from.
+         * The last frame's own point, since a preview held at a wall has moved the node back there and Konva leaves it
+         * at the drop (SNAPBUILD-ASTRA-01). A drag with no frame, a group's, reads the node.
+         */
+        const letGo = finger ?? { x: node.x(), y: node.y() };
         const pressedId = pressedOn?.leadId === token.id ? pressedOn.token.id : token.id;
         const view = seenView(store.getState().view);
         if (!view) {
