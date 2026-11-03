@@ -414,6 +414,13 @@ The build review's first round, the engine and the panel (lane musfix-a):
 - **The server's switch** is unknown until `/api/config` answers. Meanwhile the DM's panel shows the shared loading line, "Checking for sound files…", never the off line. A failed read says "Couldn't check whether this server offers sound files. The built-in effects still work." with Try again (D-261102-741).
 - **TVs** (5.5, D-261102-742). A display checks for Web Audio and `createMediaElementSource` only, not for three elements playing together. The blessing plays a tenth of a second of silence, so most elements have ended by the time it settles, and a count of elements sounding then would turn away a TV that works. A TV that plays only one element at a time is not told apart, and the live play review checks a TV at the table.
 
+The build review's second round and the integration on the whole stack (lane musint):
+
+- **A refused play** (5.5, D-261102-737). A voice whose play the browser refuses for want of a gesture (NotAllowedError) is not placed again at each check, which seeked, fetched a range again and blinked "Loading the music…" once a second. It waits for the next gesture, and a listener on the page's gestures places it again inside that gesture. A voice placed again, by the check or by a gesture, keeps the time it first became due, so the loading line never turns back to playing for the indicator's 200 ms. A play asked in the same task is no stop for the check right after it, and a drift seek that a newer placement overtook does nothing.
+- **A stop** (5.3, D-261102-738). Stop all on this page, as Room sound off, another page taking the sound or a display's blackout call it, drops the plan and the start that waited for an element, so a Skip during a crossfade starts nothing on a page that stopped. A randomized test of plans, ticks, stops, refusals and gestures holds both rules.
+- **Move players** (4.6, D-261102-744 as amended) sends the scene's sound unless the server said its switch is off. Before `/api/config` answers, or after its read failed, the server decides.
+- **Reading in pieces** (4.2). Only a constant bitrate MP3 at 44.1 or 48 kHz is copied and read in pieces. A 32 kHz one is decoded whole and converted, and the feature list and the guide say so.
+
 ## Design review
 
 Five rounds of design review, by Claude and Codex reviewers, shaped this note. What they changed, in brief:
