@@ -479,12 +479,15 @@ describe("synced music and sound", { concurrency: false }, () => {
     assert.deepEqual(alignmentLines(await measureAlignment(row), "the display's Sound row 1280x720"), []);
     await shots.take(tv, "sn-7-display-menu-sound");
     await tv.keyboard.press("Escape");
-    // Its window locked: a frozen page lets the lock go (MUS-OPUS-76), and a DM's tab plays.
-    const cdp = await dmContext.newCDPSession(tv);
-    await cdp.send("Page.setWebLifecycleState", { state: "frozen" });
+    // Its window locked: a frozen page lets the lock go (MUS-OPUS-76), and a DM's tab plays. Headless Chrome's
+    // Page.setWebLifecycleState "frozen" neither fires `freeze` nor stops a page's timers (checked), so the page gets
+    // the two Page Lifecycle events themselves.
+    await tv.evaluate(() => (globalThis as unknown as { document: EventTarget }).document.dispatchEvent(new Event("freeze")));
     await waitFor("a DM tab to play", async () => ((await soundProbe(dm)).state?.owns || (await soundProbe(second)).state?.owns ? true : null), 10_000);
-    await cdp.send("Page.setWebLifecycleState", { state: "active" });
+    assert.ok(!(await soundProbe(tv)).state?.owns, "the frozen display plays nothing");
+    await tv.evaluate(() => (globalThis as unknown as { document: EventTarget }).document.dispatchEvent(new Event("resume")));
     await waitFor("the display to take it back", async () => ((await soundProbe(tv)).state?.owns ? true : null), 10_000);
+    await waitFor("the DM's tabs to go quiet again", async () => (!(await soundProbe(dm)).state?.owns && !(await soundProbe(second)).state?.owns ? true : null), 5_000);
     await tv.close();
     await second.close();
   });
