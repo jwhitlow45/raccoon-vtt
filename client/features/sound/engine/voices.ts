@@ -11,6 +11,7 @@ import {
   type SoundAt,
   type SoundId,
 } from "#shared/sound.ts";
+import type { SoundUnlock } from "./context.ts";
 import { Drift, SEEK_FADE_MS } from "./drift.ts";
 
 /**
@@ -178,7 +179,8 @@ export function leaveMs(playing: Playing | null | undefined, channel: Channel): 
 /** What the voices need of the page: the server's time, the latency to the speaker, and where a file is. */
 export interface VoicesEnv {
   ctx: AudioContext;
-  elements: readonly HTMLAudioElement[];
+  /** The page's pool: its elements, and the bless told which of them a voice holds. */
+  unlock: Pick<SoundUnlock, "pool" | "holdWith">;
   /** Each channel's gain, which the engine sets from the device's and the room's volumes. */
   output: Record<Channel, AudioNode>;
   serverNow(): number;
@@ -212,6 +214,8 @@ const sources = new WeakMap<HTMLAudioElement, MediaElementAudioSourceNode>();
 
 export class Voices {
   readonly #env: VoicesEnv;
+  readonly #elements: readonly HTMLAudioElement[];
+  readonly #unhold: () => void;
   readonly #live = new Map<string, Live>();
   /** Elements leaving, with the time they are free again. */
   readonly #busyUntil = new Map<number, number>();
@@ -220,6 +224,9 @@ export class Voices {
 
   constructor(env: VoicesEnv) {
     this.#env = env;
+    this.#elements = env.unlock.pool() as readonly HTMLAudioElement[];
+    // A voice, sounding, fading out or loaded ahead, keeps its element's source through a bless, which would set silence.
+    this.#unhold = env.unlock.holdWith((el) => [...this.#live.values()].some((v) => v.el === el));
   }
 
   /** What each sounding voice is doing, for the test hook. */
@@ -311,6 +318,7 @@ export class Voices {
 
   dispose(): void {
     this.#disposed = true;
+    this.#unhold();
     for (const v of this.#live.values()) this.#release(v);
     this.#live.clear();
   }
@@ -339,7 +347,7 @@ export class Voices {
     // Every element of the channel is busy, as while two loops cross with a third waiting: the next check tries again.
     if (index === null) return;
     const { ctx } = this.#env;
-    const el = this.#env.elements[index]!;
+    const el = this.#elements[index]!;
     let source = sources.get(el);
     if (!source) {
       source = ctx.createMediaElementSource(el);

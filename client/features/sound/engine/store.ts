@@ -172,6 +172,7 @@ export function firedAfter(e: FiredEffect, loadAt: number): boolean {
 
 type Listening = { readonly soundId: string | null; readonly busy: boolean };
 const listeningValue = new Value<Listening>({ soundId: null, busy: false });
+let listenHeld: (() => void) | null = null;
 
 export function useListening(): Listening {
   return useSyncExternalStore(listeningValue.subscribe, listeningValue.get, listeningValue.get);
@@ -185,6 +186,8 @@ export function useListening(): Listening {
 export function listenHere(sound: { soundId: string; url: string; level?: number }): void {
   const el = soundUnlock().pool()[LISTEN_ELEMENT] as HTMLAudioElement | undefined;
   if (!el) return;
+  // While it sounds its element keeps the sound through a bless, as a voice's does.
+  listenHeld ??= soundUnlock().holdWith((held) => held === el && listeningValue.get().soundId !== null);
   el.onplaying = () => listeningValue.set({ soundId: sound.soundId, busy: false });
   el.onended = () => listeningValue.set({ soundId: null, busy: false });
   el.onerror = () => listeningValue.set({ soundId: null, busy: false });

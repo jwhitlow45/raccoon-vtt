@@ -149,10 +149,9 @@ export class SoundEngine {
     this.#gains = { music, loop, effects, master, lease };
     this.#mix();
 
-    const elements = soundUnlock().pool() as HTMLAudioElement[];
     this.#voices = new Voices({
       ctx,
-      elements,
+      unlock: soundUnlock(),
       output: { music, loop },
       serverNow: () => this.#serverNow(),
       latencyMs: () => this.#latencyMs(),
@@ -434,11 +433,10 @@ export class SoundEngine {
     const late = this.#lastCheck.perf > 0 && perf - this.#lastCheck.perf > STALLED_MS;
     if (ctx && this.#active && this.#lastCheck.perf > 0) {
       const audio = (ctx.currentTime - this.#lastCheck.ctx) * 1000;
-      // The audio clock stood still while the page's ran: an interruption the context may not have told of yet (4.4).
-      if (ctx.state === "running" && perf - this.#lastCheck.perf - audio > CLOCK_STALL_MS) {
-        this.#handoff?.contextLeft();
-        soundUnlock().rearm();
-      }
+      // The audio clock stood still while the page's ran: an interruption the context may not have told of yet (4.4). The
+      // page gives the sound up, but the pool is unlocked still: the context says running, and a real interruption's own
+      // statechange rearms it (watchAudio).
+      if (ctx.state === "running" && perf - this.#lastCheck.perf - audio > CLOCK_STALL_MS) this.#handoff?.contextLeft();
     }
     this.#lastCheck = { perf, ctx: ctx?.currentTime ?? 0 };
     // The plan moves with time (a loop's next pass, the next track's start), so it is read again before the check.

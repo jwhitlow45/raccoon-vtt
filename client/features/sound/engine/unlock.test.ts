@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { createSoundUnlock, mixerSupported, POOL_SIZE, SILENCE_URL, watchAudio, type PoolElement } from "./context.ts";
+import type { Playing } from "#shared/sound.ts";
+import { createSoundUnlock, LISTEN_ELEMENT, mixerSupported, POOL_SIZE, SILENCE_URL, watchAudio, type PoolElement } from "./context.ts";
+import { planVoices, Voices } from "./voices.ts";
 
 /*
  * The room sound's unlock on lane audiounlock's helper (lib/activation.ts,
@@ -11,21 +13,30 @@ import { createSoundUnlock, mixerSupported, POOL_SIZE, SILENCE_URL, watchAudio, 
  * `running` or `active`, and Play here's own call in its click blesses.
  */
 
-type Fake = PoolElement & { plays: number; settle(ok: boolean): void };
+/** A pooled element, with what Voices and Listen here set on it as well. */
+type Fake = PoolElement & { plays: number; paused: boolean; currentTime: number; settle(ok: boolean): void };
 
 function element(): Fake {
   let pending: { resolve(): void; reject(e: unknown): void } | null = null;
-  const el: Fake = {
+  const el: Fake & Record<string, unknown> = {
     src: "",
     muted: true,
     plays: 0,
+    paused: true,
+    currentTime: 0,
+    playbackRate: 1,
+    readyState: 4,
+    volume: 1,
     play() {
       el.plays++;
+      el.paused = false;
       return new Promise<void>((resolve, reject) => {
         pending = { resolve, reject };
       });
     },
-    pause() {},
+    pause() {
+      el.paused = true;
+    },
     settle(ok) {
       if (ok) pending?.resolve();
       else pending?.reject(new DOMException("not allowed", "NotAllowedError"));
@@ -76,6 +87,16 @@ function harness() {
 }
 
 const flush = () => new Promise((r) => setImmediate(r));
+
+/** Enough of a gain node and an audio context for Voices, which only connects and schedules. */
+function node(): AudioNode {
+  const gain = { value: 0, cancelScheduledValues() {}, setValueAtTime() {}, linearRampToValueAtTime() {} };
+  return { gain, connect: (to: unknown) => to, disconnect() {} } as unknown as AudioNode;
+}
+
+function graph(): AudioContext {
+  return { currentTime: 0, createGain: node, createMediaElementSource: node } as unknown as AudioContext;
+}
 
 describe("the room sound's unlock", () => {
   test("with Room sound off a tap touches nothing: no element plays and no context is made", () => {
@@ -180,6 +201,82 @@ describe("the room sound's unlock", () => {
     assert.ok(h.els.every((el) => el.plays === 3), "listening again after the session was interrupted");
     assert.ok(changed >= 4);
     stop();
+  });
+
+  test("a remounted SoundHost's gesture leaves an unlocked pool alone, and a bless after a real loss leaves the elements voices hold", async () => {
+    const h = harness();
+    const unarm = h.unlock.arm(() => true);
+    h.tap();
+    for (const el of h.els) el.settle(true);
+    await flush();
+    const now = 1_000_000;
+    const voices = new Voices({ ctx: graph(), unlock: h.unlock, output: { music: node(), loop: node() }, serverNow: () => now, latencyMs: () => 0, url: (assetId) => `/api/assets/${assetId}` });
+    const sounds = { tavern: { ms: 60_000, use: "music" as const, assetId: "a-tavern" }, rain: { ms: 10_000, use: "loop" as const, assetId: "a-rain" } };
+    const playing: Playing = {
+      rev: 1,
+      music: { run: "r", repeat: "all", fade: 5, now: { soundId: "tavern", at: now - 10_000 } },
+      loops: { a: { soundId: "rain", at: now - 1_000, volume: 70 } },
+      effects: [],
+      volume: { music: 100, effects: 100 },
+    };
+    voices.update(planVoices(playing, sounds, now), () => 300);
+    const sources = () => h.els.map((el) => el.src);
+    const plays = () => h.els.map((el) => el.plays);
+    const playingSources = sources();
+    assert.deepEqual([playingSources[0], playingSources[2]], ["/api/assets/a-tavern", "/api/assets/a-rain"]);
+    const playsBefore = plays();
+
+    // SoundHost remounts: its listener goes, a new one comes, and the next tap counts as a gesture.
+    unarm();
+    h.unlock.arm(() => true);
+    h.tap();
+    assert.deepEqual(sources(), playingSources, "the music and the loop keep their sources");
+    assert.deepEqual(plays(), playsBefore, "and nothing plays silence");
+
+    // The context was really lost: the next tap blesses, but not the two elements the voices hold.
+    h.unlock.rearm();
+    h.tap();
+    assert.deepEqual([h.els[0]!.src, h.els[2]!.src], ["/api/assets/a-tavern", "/api/assets/a-rain"]);
+    assert.deepEqual([h.els[0]!.plays, h.els[2]!.plays], [playsBefore[0], playsBefore[2]]);
+    assert.ok(h.els.every((el, i) => i === 0 || i === 2 || (el.src === SILENCE_URL && el.plays === playsBefore[i]! + 1)), "every free element is blessed");
+    for (const el of h.els) el.settle(true);
+    await flush();
+    assert.equal(h.unlock.blessed(), true);
+    voices.update(planVoices(playing, sounds, now), () => 300);
+    assert.deepEqual([h.els[0]!.src, h.els[2]!.src], ["/api/assets/a-tavern", "/api/assets/a-rain"]);
+
+    // Once the voices go their elements are free for the next bless.
+    voices.dispose();
+    h.unlock.rearm();
+    h.tap();
+    assert.ok(h.els.every((el) => el.src === SILENCE_URL));
+  });
+
+  test("Listen here's element keeps its sound through a bless, and is blessed again once it stops", async () => {
+    const g = globalThis as Record<string, unknown>;
+    const before = g.Audio;
+    g.Audio = function Audio() {
+      return element();
+    };
+    try {
+      const { soundUnlock } = await import("./context.ts");
+      const { listenHere, stopListening } = await import("./store.ts");
+      listenHere({ soundId: "rain", url: "/api/assets/a-rain" });
+      const pool = soundUnlock().pool() as Fake[];
+      const listening = pool[LISTEN_ELEMENT]!;
+      const done = soundUnlock().blessPool();
+      assert.equal(listening.src, "/api/assets/a-rain");
+      assert.equal(listening.plays, 1, "only Listen here's own play");
+      assert.ok(pool.every((el) => el === listening || el.src === SILENCE_URL));
+      for (const el of pool) el.settle(true);
+      assert.equal(await done, true);
+      stopListening();
+      soundUnlock().rearm();
+      void soundUnlock().blessPool();
+      assert.equal(listening.src, SILENCE_URL);
+    } finally {
+      g.Audio = before;
+    }
   });
 
   test("a TV browser without Web Audio or createMediaElementSource cannot mix, so the display shows its can't-play line", () => {

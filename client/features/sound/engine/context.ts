@@ -15,6 +15,13 @@ import { armAudioUnlock, onActivation, type Activation, type UnlockableContext }
  * synchronously inside the gesture, so the browser lets each play later by
  * itself, and answers true once every play resolved, so a refusal keeps it
  * listening. Both listen for the same events, so one gesture does both.
+ *
+ * A bless swaps an element's source for silence, and nothing puts a voice's
+ * source back. So an unlocked pool is never blessed again until `rearm`
+ * says the context was lost, as a remounted SoundHost's new listener would
+ * otherwise do at its first gesture, and a bless leaves alone every element
+ * a sound holds (`holdWith`): one playing was let play already, and one
+ * loaded ahead would start on silence.
  */
 
 /** 2 for music, 8 for loops crossing their loop points, 1 for Listen here. */
@@ -47,11 +54,14 @@ export interface SoundUnlock {
   /** Whether every pooled element has played once inside a gesture. */
   blessed(): boolean;
   /**
-   * Plays silence on every pooled element, synchronously, answering a
-   * promise of true once every play resolved. A call while one is in flight
+   * Plays silence on every pooled element no sound holds, synchronously,
+   * answering a promise of true once every play resolved. A blessed pool
+   * answers true and plays nothing, and a call while one is in flight
    * returns that one and plays nothing again. Call it from a gesture.
    */
   blessPool(): Promise<boolean>;
+  /** Names the elements a sound holds (a voice, Listen here), which a bless leaves alone. Returns the cleanup. */
+  holdWith(holds: (el: PoolElement) => boolean): () => void;
   /** Arms both unlocks, `wanted` read at each gesture. Returns the cleanup. */
   arm(wanted: () => boolean): () => void;
   /** Listens again for the pool, as after the context or the audio session left `running` or `active`. */
@@ -64,6 +74,8 @@ export function createSoundUnlock(deps: SoundUnlockDeps): SoundUnlock {
   let blessing: Promise<boolean> | null = null;
   let isBlessed = false;
   let poolActivation: Activation | null = null;
+  const holders = new Set<(el: PoolElement) => boolean>();
+  const held = (el: PoolElement) => [...holders].some((holds) => holds(el));
   const makeContext = () => {
     context ??= deps.makeContext();
     return context;
@@ -73,9 +85,11 @@ export function createSoundUnlock(deps: SoundUnlockDeps): SoundUnlock {
     return elements;
   };
   const blessPool = (): Promise<boolean> => {
+    if (isBlessed) return Promise.resolve(true);
     if (blessing) return blessing;
     const plays: Promise<unknown>[] = [];
     for (const el of pool()) {
+      if (held(el)) continue;
       // Each play starts here, inside the gesture: a later one would not count.
       el.muted = false;
       el.src = SILENCE_URL;
@@ -104,6 +118,12 @@ export function createSoundUnlock(deps: SoundUnlockDeps): SoundUnlock {
     pool,
     blessed: () => isBlessed,
     blessPool,
+    holdWith(holds) {
+      holders.add(holds);
+      return () => {
+        holders.delete(holds);
+      };
+    },
     arm(wanted) {
       const stopContext = armAudioUnlock({ context: makeContext, wanted, target: deps.target });
       poolActivation?.stop();
