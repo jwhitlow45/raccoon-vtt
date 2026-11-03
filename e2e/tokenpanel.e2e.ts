@@ -61,10 +61,13 @@ panelFile(null, () => {
     // By name, since Hidden, Locked and Duplicate show their icon alone to a mouse (docs/design/design-v1-icons.md 4).
     const names = async (row: string) => goblin.locator(`[data-bar-row="${row}"] button`).evaluateAll((els) => els.map((el) => (el.getAttribute("aria-label") ?? el.textContent ?? "").trim()));
     // Roll opens the Dice panel's options for the goblin (docs/design/design-v1-roll-options.md 4.5), and Attach its list of what it can ride, carry or drag (docs/design/design-v1-attach.md 4.1).
-    assert.deepEqual(await names("play"), ["Conditions", "Hidden", "Multi-select", "Roll", "Attach"]);
+    // Place freely ends the play row on a square scene, and Snap to grid joins it only while a token stands between squares, which this one does not (docs/design/design-v1-snap-off.md 4).
+    assert.deepEqual(await names("play"), ["Conditions", "Hidden", "Multi-select", "Roll", "Attach", "Place freely"]);
     assert.deepEqual(await names("less"), ["Locked", "Duplicate", "Delete"]);
     const multiSelect = await rectOf(goblin.getByRole("button", { name: "Multi-select", exact: true }));
     assert.ok(Math.abs(multiSelect.top - (await rectOf(goblin.getByRole("button", { name: "Conditions", exact: true }))).top) < 1, "Multi-select left Conditions' line");
+    const roll = await rectOf(goblin.getByRole("button", { name: "Roll", exact: true }));
+    assert.ok(roll.top >= multiSelect.bottom && Math.abs((await rectOf(goblin.getByRole("button", { name: "Place freely", exact: true }))).top - roll.top) < 1, "Place freely left Roll's line, so the play row took a third");
     const locked = await rectOf(goblin.getByRole("button", { name: "Locked", exact: true }));
     assert.ok(locked.top >= multiSelect.bottom, "Locked starts a line of its own");
     assert.ok(Math.abs(locked.left - (await rectOf(goblin.locator('[data-bar-row="less"]'))).left) < 1);
