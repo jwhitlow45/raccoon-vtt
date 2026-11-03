@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { describe, test } from "node:test";
+import { describe, mock, test } from "node:test";
 import type { Op } from "#shared/protocol.ts";
 import { projectState } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { LOOP_FADE_IN_MS, SHORT_FADE_MS, STOP_FADE_MS, type Playing, type Sound } from "#shared/sound.ts";
 import { AT, DM, P1, room } from "#shared/testutil.ts";
-import { BLACKOUT_FADE_MS, gainAt, leaveMs, LOOKAHEAD_MS, mixGain, planVoices, Voices } from "./voices.ts";
+import { BLACKOUT_FADE_MS, gainAt, leaveMs, LOOKAHEAD_MS, mixGain, planVoices, Voices, type MusicState } from "./voices.ts";
 
 /*
  * The voices a page plays at a server time (docs/design/design-v1-music.md
@@ -193,7 +193,40 @@ function param() {
   };
 }
 
-function rig(t: { now: number }) {
+/** A pooled element that counts its plays and seeks, and refuses a play with the error `refuse` names for its source, if any. */
+function element(refuse: (src: string) => string | null) {
+  let at = 0;
+  return {
+    src: "",
+    muted: false,
+    paused: true,
+    playbackRate: 1,
+    readyState: 4,
+    plays: 0,
+    seeks: 0,
+    onplaying: null as (() => void) | null,
+    onerror: null as (() => void) | null,
+    get currentTime() {
+      return at;
+    },
+    set currentTime(value: number) {
+      at = value;
+      this.seeks++;
+    },
+    play() {
+      this.plays++;
+      const refusal = refuse(this.src);
+      if (refusal !== null) return Promise.reject(new DOMException("refused", refusal));
+      this.paused = false;
+      return Promise.resolve();
+    },
+    pause() {
+      this.paused = true;
+    },
+  };
+}
+
+function rig(t: { now: number }, opts: { refuse?: (src: string) => string | null; gestures?: EventTarget; onMusic?: (state: MusicState) => void } = {}) {
   const gains: { gain: ReturnType<typeof param> }[] = [];
   const node = () => {
     const n = { gain: param(), connect: (to: unknown) => to, disconnect() {} };
@@ -201,11 +234,11 @@ function rig(t: { now: number }) {
     return n;
   };
   const ctx = { currentTime: 0, createGain: node, createMediaElementSource: () => ({ connect: (to: unknown) => to, disconnect() {} }) } as unknown as AudioContext;
-  const pool = Array.from({ length: 11 }, () => ({ src: "", muted: false, paused: true, currentTime: 0, playbackRate: 1, readyState: 4, plays: 0, play() { this.plays++; this.paused = false; return Promise.resolve(); }, pause() { this.paused = true; } }));
+  const pool = Array.from({ length: 11 }, () => element(opts.refuse ?? (() => null)));
   const unlock = { pool: () => pool, holdWith: () => () => {} };
   const output = { music: node(), loop: node() } as unknown as Record<"music" | "loop", AudioNode>;
   gains.length = 0;
-  const voices = new Voices({ ctx, unlock, output, serverNow: () => t.now, latencyMs: () => 0, url: (assetId) => `/api/assets/${assetId}` });
+  const voices = new Voices({ ctx, unlock, output, serverNow: () => t.now, latencyMs: () => 0, url: (assetId) => `/api/assets/${assetId}`, gestures: opts.gestures, onMusic: opts.onMusic });
   return { voices, pool, gains, ctx: ctx as unknown as { currentTime: number } };
 }
 
@@ -284,6 +317,192 @@ describe("the voices on the pool", () => {
     const ramp = after()[1]!;
     assert.ok(ramp.kind === "ramp" && ramp.value === 1 && Math.abs(ramp.at - SHORT_FADE_MS / 1000) < 1e-9, "the check keeps the ramp, never a step to 1");
     assert.ok(after().every((e) => e.kind !== "set" || e.value === 0.4));
+    voices.dispose();
+  });
+
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const playingTavern: Playing = { ...quiet, music: { run: "r1", repeat: "all", fade: 5, now: { soundId: "tavern", at: T - 10_000 } } };
+
+  test("a track whose play the browser refuses until a gesture stays loading across checks, is not sought or played again, and plays inside the next gesture", async () => {
+    const t = { now: T };
+    const states: MusicState[] = [];
+    const gestures = new EventTarget();
+    let allowed = false;
+    const { voices, pool } = rig(t, { refuse: () => (allowed ? null : "NotAllowedError"), gestures, onMusic: (s) => states.push(s) });
+    voices.update(planVoices(playingTavern, SOUNDS, t.now), () => SHORT_FADE_MS);
+    const el = pool.find((e) => e.src === "/api/assets/a-tavern")!;
+    await wait(250);
+    assert.deepEqual(states, ["playing", "loading"], "past the indicator's 200 ms it loads");
+    const tried = { plays: el.plays, seeks: el.seeks };
+    for (let i = 0; i < 2; i++) {
+      t.now += 1_000;
+      voices.check(false);
+      await wait(250);
+    }
+    assert.deepEqual(states, ["playing", "loading"], "two checks later it still loads, never back to playing for a moment");
+    assert.deepEqual({ plays: el.plays, seeks: el.seeks }, tried, "no play and no seek, so no range is fetched again");
+    // A gesture the browser still refuses the play in, as a key it does not count would be, leaves it waiting for the next.
+    gestures.dispatchEvent(new Event("click"));
+    assert.equal(el.plays, tried.plays + 1, "placed again inside the gesture");
+    await wait(10);
+    voices.check(false);
+    assert.equal(el.plays, tried.plays + 1);
+    assert.deepEqual(states, ["playing", "loading"]);
+    allowed = true;
+    gestures.dispatchEvent(new Event("click"));
+    assert.equal(el.plays, tried.plays + 2, "and again inside the next");
+    assert.ok(!el.paused);
+    assert.equal(states.at(-1), "playing");
+    await wait(10);
+    el.paused = true;
+    t.now += 1_000;
+    voices.check(false);
+    assert.equal(el.plays, tried.plays + 3, "once it played, a stop short of its end is put back at the check");
+    voices.dispose();
+  });
+
+  test("a gesture places only the refused voice again, never one already sounding", async () => {
+    const t = { now: T };
+    const gestures = new EventTarget();
+    const withRain: Playing = { ...playingTavern, loops: { l1: { soundId: "rain", at: T - 2_000, volume: 100 } } };
+    const { voices, pool } = rig(t, { refuse: (src) => (src.endsWith("a-tavern") ? "NotAllowedError" : null), gestures });
+    voices.update(planVoices(withRain, SOUNDS, t.now), () => SHORT_FADE_MS);
+    await wait(10);
+    const rain = pool.find((e) => e.src === "/api/assets/a-rain")!;
+    const tavern = pool.find((e) => e.src === "/api/assets/a-tavern")!;
+    const before = { rain: rain.seeks, tavern: tavern.plays };
+    gestures.dispatchEvent(new Event("click"));
+    assert.equal(tavern.plays, before.tavern + 1);
+    assert.equal(rain.seeks, before.rain, "the background sound plays on untouched");
+    voices.dispose();
+  });
+
+  test("a refused track that stops before the next gesture is not played by it", async () => {
+    const t = { now: T };
+    const gestures = new EventTarget();
+    let allowed = false;
+    const { voices, pool } = rig(t, { refuse: () => (allowed ? null : "NotAllowedError"), gestures });
+    voices.update(planVoices(playingTavern, SOUNDS, t.now), () => SHORT_FADE_MS);
+    await wait(10);
+    const plays = pool.reduce((n, e) => n + e.plays, 0);
+    voices.stopAll(SHORT_FADE_MS);
+    allowed = true;
+    gestures.dispatchEvent(new Event("click"));
+    assert.equal(pool.reduce((n, e) => n + e.plays, 0), plays);
+    assert.ok(pool.every((e) => e.paused));
+    voices.dispose();
+  });
+
+  test("a refusal that answers an older play, after Try again started a newer one, leaves the voice to be put back", async () => {
+    const t = { now: T };
+    const { voices, pool } = rig(t, { gestures: new EventTarget() });
+    voices.update(planVoices(playingTavern, SOUNDS, t.now), () => SHORT_FADE_MS);
+    const el = pool.find((e) => e.src === "/api/assets/a-tavern")!;
+    await wait(10);
+    const play = el.play;
+    let refuseOlder = (_err: unknown) => {};
+    // The next play hangs, as one waiting for data does, and is refused only after a later one plays.
+    el.play = function () {
+      this.plays++;
+      this.paused = false;
+      el.play = play;
+      return new Promise<void>((_ok, no) => {
+        refuseOlder = no;
+      });
+    };
+    el.paused = true;
+    t.now += 1_000;
+    voices.check(false);
+    el.onerror?.();
+    voices.retry();
+    assert.ok(!el.paused, "the newer play sounds");
+    refuseOlder(new DOMException("refused", "NotAllowedError"));
+    await wait(10);
+    el.paused = true;
+    const plays = el.plays;
+    t.now += 1_000;
+    voices.check(false);
+    assert.equal(el.plays, plays + 1, "stopped again, it is put back at the check");
+    voices.dispose();
+  });
+
+  test("a track the tick's plan read starts is not put back by the same tick's check before its play is answered", () => {
+    const t = { now: T };
+    const { voices, pool } = rig(t, { refuse: () => "NotAllowedError", gestures: new EventTarget() });
+    voices.update(planVoices(playingTavern, SOUNDS, t.now), () => SHORT_FADE_MS);
+    voices.check(false);
+    const el = pool.find((e) => e.src === "/api/assets/a-tavern")!;
+    assert.deepEqual({ plays: el.plays, seeks: el.seeks }, { plays: 1, seeks: 1 });
+    voices.dispose();
+  });
+
+  test("a drift seek that a placement overtook does nothing, so the element is not sought twice or dipped", async () => {
+    mock.timers.enable({ apis: ["setTimeout"] });
+    let clock = 0;
+    const now = mock.method(performance, "now", () => clock);
+    try {
+      const t = { now: T };
+      const { voices, pool } = rig(t, { gestures: new EventTarget() });
+      voices.update(planVoices(playingTavern, SOUNDS, t.now), () => SHORT_FADE_MS);
+      const el = pool.find((e) => e.src === "/api/assets/a-tavern")!;
+      // Its play answered.
+      for (let i = 0; i < 3; i++) await Promise.resolve();
+      // A second later the element has not moved, 1 s behind: the check seeks, fading out first.
+      clock += 1_000;
+      t.now += 1_000;
+      voices.check(false);
+      const seeks = el.seeks;
+      // Before the seek's fade is out the element stops, and the next check puts it back in place.
+      el.paused = true;
+      voices.check(false);
+      assert.equal(el.seeks, seeks + 1);
+      clock += 200;
+      mock.timers.tick(200);
+      assert.equal(el.seeks, seeks + 1, "the overtaken seek moved nothing");
+      voices.dispose();
+    } finally {
+      now.mock.restore();
+      mock.timers.reset();
+    }
+  });
+
+  test("a track whose play keeps failing otherwise is placed again at each check but stays loading, its due time kept", async () => {
+    const t = { now: T };
+    const states: MusicState[] = [];
+    const { voices, pool } = rig(t, { refuse: () => "AbortError", gestures: new EventTarget(), onMusic: (s) => states.push(s) });
+    voices.update(planVoices(playingTavern, SOUNDS, t.now), () => SHORT_FADE_MS);
+    const el = pool.find((e) => e.src === "/api/assets/a-tavern")!;
+    await wait(250);
+    const plays = el.plays;
+    for (let i = 0; i < 2; i++) {
+      t.now += 1_000;
+      voices.check(false);
+      await wait(250);
+    }
+    assert.equal(el.plays, plays + 2, "each check tries it again");
+    assert.deepEqual(states, ["playing", "loading"]);
+    voices.dispose();
+  });
+
+  test("a track that sounded and then stopped short, which the line already calls loading, stays loading when it is placed again", async () => {
+    const t = { now: T };
+    const states: MusicState[] = [];
+    const { voices, pool } = rig(t, { gestures: new EventTarget(), onMusic: (s) => states.push(s) });
+    voices.update(planVoices(playingTavern, SOUNDS, t.now), () => SHORT_FADE_MS);
+    const el = pool.find((e) => e.src === "/api/assets/a-tavern")!;
+    await wait(250);
+    assert.deepEqual(states, ["playing"]);
+    // The element stops and has to load again. The engine's tick reads the plan, which reports, before its check.
+    el.paused = true;
+    el.readyState = 1;
+    t.now += 1_000;
+    voices.update(planVoices(playingTavern, SOUNDS, t.now), () => SHORT_FADE_MS);
+    voices.check(false);
+    await wait(250);
+    assert.deepEqual(states, ["playing", "loading"], "loading once, never back to playing for a moment");
+    el.readyState = 4;
+    el.onplaying?.();
+    assert.deepEqual(states, ["playing", "loading", "playing"]);
     voices.dispose();
   });
 });

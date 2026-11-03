@@ -162,6 +162,7 @@ export class SoundEngine {
         this.#music = state;
         this.#report();
       },
+      gestures: window,
     });
     setMusicRetry(() => this.#voices?.retry());
     const loadAt = this.#deps.loadAt();

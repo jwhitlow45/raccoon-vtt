@@ -11,6 +11,7 @@ import {
   type Sound,
   type SoundId,
 } from "#shared/sound.ts";
+import { onActivation, type Activation } from "../../../lib/activation.ts";
 import type { SoundUnlock } from "./context.ts";
 import { Drift, SEEK_FADE_MS } from "./drift.ts";
 
@@ -186,6 +187,8 @@ export interface VoicesEnv {
   url(assetId: string, channel: Channel): string;
   /** Told when the music's state changes, for the Sound panel's lines. */
   onMusic?(state: MusicState): void;
+  /** Where gestures arrive (the window), for a voice whose play the browser refused until one. */
+  gestures?: EventTarget;
 }
 
 export type MusicState = "none" | "loading" | "failed" | "playing";
@@ -203,7 +206,16 @@ type Live = {
   startTimer: ReturnType<typeof setTimeout> | null;
   leaving: boolean;
   failed: boolean;
+  /** Since when it has been due to sound, the shared indicator's 200 ms counted from it. */
   dueSince: number | null;
+  /** Its last play was refused for want of a gesture, so it waits for the next one. */
+  refused: boolean;
+  /** Its plays so far, so a late answer to an older one is not taken for the newest. */
+  plays: number;
+  /** Its newest play was asked in this task. A refusal, answered before the task ends, leaves the element paused till then, which is no stop. */
+  asking: boolean;
+  /** Its placements so far, so a seek one overtook does nothing. */
+  places: number;
   /** Until this server time the envelope ramps from where it was to the plan, after a new plan moved its gain. */
   smoothUntil: number;
   /** The source it plays, which a loop's blob replaces only at its next pass. */
@@ -225,6 +237,7 @@ export class Voices {
   #whenFree: ReturnType<typeof setTimeout> | null = null;
   #music: MusicState = "none";
   #disposed = false;
+  #gesture: Activation | null = null;
 
   constructor(env: VoicesEnv) {
     this.#env = env;
@@ -336,6 +349,8 @@ export class Voices {
   dispose(): void {
     this.#disposed = true;
     this.#unhold();
+    this.#gesture?.stop();
+    this.#gesture = null;
     this.#cancelWhenFree();
     for (const v of this.#live.values()) this.#release(v);
     this.#live.clear();
@@ -378,7 +393,7 @@ export class Voices {
     mix.gain.value = mixGain(plan);
     source.connect(fade).connect(env).connect(mix).connect(this.#env.output[plan.channel]);
     const url = this.#env.url(plan.assetId, plan.channel);
-    const v: Live = { plan, index, el, fade, env, mix, drift: new Drift(), playing: false, startTimer: null, leaving: false, failed: false, dueSince: null, url, smoothUntil: 0 };
+    const v: Live = { plan, index, el, fade, env, mix, drift: new Drift(), playing: false, startTimer: null, leaving: false, failed: false, dueSince: null, refused: false, plays: 0, asking: false, places: 0, url, smoothUntil: 0 };
     this.#live.set(plan.key, v);
     el.onerror = () => {
       v.failed = true;
@@ -400,13 +415,13 @@ export class Voices {
    * placed the voice again.
    */
   #heal(v: Live, t: number): boolean {
-    if (v.failed) return false;
+    if (v.failed || v.refused) return false;
     const swapped = !v.el.src.endsWith(v.url);
     const aim = this.#aim(v.plan, t);
-    const stopped = v.playing && v.el.paused && aim >= 0 && aim < v.plan.lengthMs - HEAL_END_MS;
+    const stopped = v.playing && !v.asking && v.el.paused && aim >= 0 && aim < v.plan.lengthMs - HEAL_END_MS;
     if (!swapped && !stopped) return false;
     if (swapped) v.el.src = v.url;
-    this.#place(v);
+    this.#place(v, v.dueSince ?? performance.now());
     return true;
   }
 
@@ -437,12 +452,20 @@ export class Voices {
     this.#whenFree = null;
   }
 
-  /** Puts the element at its place: now with a short fade in, or paused at 0 until its start. */
-  #place(v: Live): void {
+  /**
+   * Puts the element at its place: now with a short fade in, or paused at
+   * 0 until its start. `due` is when it became due to sound: a voice placed
+   * again keeps its own, so one that keeps failing to start stays loading,
+   * never back to playing for the indicator's 200 ms at each check, and one
+   * that stopped short, which the line may already call loading, does too.
+   */
+  #place(v: Live, due = performance.now()): void {
     const t = this.#env.serverNow();
     const aim = this.#aim(v.plan, t);
     if (v.startTimer) clearTimeout(v.startTimer);
     v.startTimer = null;
+    v.refused = false;
+    v.places++;
     const ctxNow = this.#env.ctx.currentTime;
     if (aim < 0) {
       // Loaded ahead at position 0 and paused. A timer starts it, and the drift check corrects any lateness.
@@ -460,7 +483,7 @@ export class Voices {
         if (v.leaving) return;
         v.playing = true;
         v.dueSince = performance.now();
-        void v.el.play().catch(() => {});
+        this.#play(v);
         v.drift.sought(performance.now());
         this.#reportSoon();
       }, -aim);
@@ -475,10 +498,44 @@ export class Voices {
     v.fade.gain.setValueAtTime(0, ctxNow);
     v.fade.gain.linearRampToValueAtTime(1, ctxNow + JOIN_FADE_MS / 1000);
     v.playing = true;
-    v.dueSince = performance.now();
+    v.dueSince = due;
     v.drift.sought(performance.now());
-    void v.el.play().catch(() => {});
+    this.#play(v);
     this.#reportSoon();
+  }
+
+  /**
+   * A play the browser refuses for want of a gesture (NotAllowedError) is
+   * not tried again at each check, which would seek, fetch a range again
+   * and never start. The voice waits for the next gesture, and is placed
+   * again inside it, so the browser counts the play as the user's.
+   */
+  #play(v: Live): void {
+    const n = ++v.plays;
+    v.asking = true;
+    void v.el.play().catch((err: unknown) => {
+      if ((err as { name?: unknown } | null)?.name !== "NotAllowedError" || n !== v.plays) return;
+      v.refused = true;
+      this.#awaitGesture();
+    });
+    // Queued after a refusal's answer, which a play the browser turns down already holds. A play it takes may start late, and a
+    // check meanwhile may still find it stopped and put it back.
+    queueMicrotask(() => {
+      v.asking = false;
+    });
+  }
+
+  #awaitGesture(): void {
+    const target = this.#env.gestures;
+    if (!target || this.#disposed) return;
+    if (this.#gesture) this.#gesture.rearm();
+    else this.#gesture = onActivation(() => this.#placeRefused(), target);
+  }
+
+  #placeRefused(): boolean {
+    for (const v of this.#live.values()) if (v.refused && !v.leaving) this.#place(v, v.dueSince ?? performance.now());
+    this.#reportMusic();
+    return true;
   }
 
   /** Music that has not started within 200 ms says it is loading: one look then, as well as at each check. */
@@ -492,8 +549,10 @@ export class Voices {
     p.cancelScheduledValues(ctxNow);
     p.setValueAtTime(p.value, ctxNow);
     p.linearRampToValueAtTime(0, ctxNow + SEEK_FADE_MS / 1000);
+    const places = v.places;
     setTimeout(() => {
-      if (v.leaving) return;
+      // A placement since put the element where it belongs and faded it in: seeking it again would dip it, or seek a refused one.
+      if (v.leaving || v.places !== places) return;
       try {
         v.el.currentTime = this.#aim(v.plan, this.#env.serverNow()) / 1000;
       } catch {

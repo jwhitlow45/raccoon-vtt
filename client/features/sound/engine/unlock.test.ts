@@ -171,7 +171,7 @@ function specHarness() {
   // Where a file is read from now, which a loop's blob changes while its pass plays on.
   const where = { prefix: "/api/assets/" };
   const url = (assetId: string) => where.prefix + assetId;
-  const voices = new Voices({ ctx: graph(), unlock, output: { music: node(), loop: node() }, serverNow: () => clock.now, latencyMs: () => 0, url });
+  const voices = new Voices({ ctx: graph(), unlock, output: { music: node(), loop: node() }, serverNow: () => clock.now, latencyMs: () => 0, url, gestures: target });
   const sounds = { tavern: { ms: 60_000, use: "music" as const, assetId: "a-tavern" } };
   const playing: Playing = { rev: 1, music: { run: "r", repeat: "all", fade: 5, now: { soundId: "tavern", at: clock.now - 10_000 } }, loops: {}, effects: [], volume: { music: 100, effects: 100 } };
   const play = () => voices.update(planVoices(playing, sounds, clock.now), () => 300);
@@ -409,16 +409,22 @@ describe("the room sound's unlock", () => {
     await flush();
     assert.equal(h.unlock.blessed(), false, "element 0 was refused");
     h.play();
+    await flush();
     h.voices.check(false);
     assert.equal(h.els[0]!.paused, true, "its play is refused outside a gesture");
+    const plays = h.els[0]!.plays;
+    h.clock.now += 1_000;
+    h.voices.check(false);
+    assert.equal(h.els[0]!.plays, plays, "and not asked again until a gesture");
     h.els[0]!.refuse = false;
     h.tap();
     assert.equal(h.els[0]!.src, h.track, "the bless keeps a held element's source");
+    assert.equal(h.els[0]!.paused, false, "the tap places it again, and now it may play");
     for (const el of h.els) el.loaded();
     await flush();
     assert.equal(h.unlock.blessed(), true);
     h.voices.check(false);
-    assert.equal(h.els[0]!.paused, false, "the check plays it again, and now it may");
+    assert.equal(h.els[0]!.paused, false);
     assert.equal(h.els[0]!.src, h.track);
   });
 
@@ -431,22 +437,27 @@ describe("the room sound's unlock", () => {
     h.play();
     const el = h.els[0]!;
     h.where.prefix = "blob:";
+    // Checks come a second apart, each after the last task's promises are answered.
+    await flush();
     h.voices.check(false);
     assert.equal(el.src, h.track, "a newer source for the same file waits for the next start");
     // Silence put in its place, as a bless did before it knew which elements voices hold: it plays its tenth of a second and ends.
     el.src = SILENCE_URL;
     el.end();
     h.clock.now += 1_000;
+    await flush();
     h.voices.check(false);
     assert.equal(el.src, h.track);
     assert.equal(el.paused, false);
     el.end();
     h.clock.now += 1_000;
+    await flush();
     h.voices.check(false);
     assert.equal(el.paused, false, "ended 12 s into a 60 s track, it plays again");
     // At its own end nothing is put back.
     h.clock.now += 47_800;
     el.end();
+    await flush();
     h.voices.check(false);
     assert.equal(el.paused, true);
   });
