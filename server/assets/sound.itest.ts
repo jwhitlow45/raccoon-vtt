@@ -176,6 +176,8 @@ describe("sound files with the switch on", () => {
       [concat(good, new Uint8Array([0])), 415, "sound_type"],
       [good.subarray(0, good.length - 1), 415, "sound_type"],
       [new TextEncoder().encode("<svg onload=alert(1)>"), 415, "sound_type"],
+      // An Info and LAME frame after the first frame, its fields holding text (MUS-SOL-01).
+      [concat(good, withTagFrame(good, { lame: { name: "LAMEAlice" } })), 415, "sound_type"],
       [silentFrames(framesFor(16 * 60_000), { kbps: 64 }), 422, "sound_length"],
       [silentFrames(5), 422, "sound_length"],
     ];
