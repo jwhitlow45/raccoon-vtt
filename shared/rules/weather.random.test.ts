@@ -11,7 +11,7 @@ import { weatherPreset } from "./weather.ts";
  * Every weather by every d20 test (docs/design/design-v1-weather.md 12): weather
  * adds only Disadvantage, only to Perception checks and to ranged attacks
  * with `weapon`, never to saves, death saves, Initiative, spell attacks or
- * "either", and a light kind adds nothing.
+ * "either", and a light kind adds no Disadvantage, only patchy fog's note.
  */
 
 const weather: fc.Arbitrary<SceneWeather> = fc
@@ -31,7 +31,8 @@ const ability = fc.constantFrom(...ABILITY_KEYS);
 const test20: fc.Arbitrary<D20Test> = fc.oneof(
   fc.record({ kind: fc.constant("save" as const), ability, cause: fc.constantFrom("concentration" as const, "saveEnds" as const), spell: fc.constant(true as const) }, { requiredKeys: ["kind", "ability"] }),
   fc.constant({ kind: "deathSave" as const }),
-  fc.record({ kind: fc.constant("check" as const), ability, skill: fc.constantFrom(...SKILL_KEYS) }, { requiredKeys: ["kind", "ability"] }),
+  // Perception most of the time, since it is the check weather's rules name.
+  fc.record({ kind: fc.constant("check" as const), ability, skill: fc.oneof({ arbitrary: fc.constant("perception" as const), weight: 3 }, { arbitrary: fc.constantFrom(...SKILL_KEYS), weight: 1 }) }, { requiredKeys: ["kind", "ability"] }),
   fc.constant({ kind: "initiative" as const }),
   fc.record(
     { kind: fc.constant("attack" as const), range: fc.constantFrom("melee" as const, "ranged" as const, "either" as const), spell: fc.constant(true as const), weapon: fc.constant(true as const) },
@@ -65,14 +66,19 @@ describe("weather's rules over every weather and every d20 test", () => {
     );
   });
 
-  test("a light kind with no strong wind, or the switch off, adds nothing at all", () => {
-    fc.assert(
-      fc.property(weather, test20, (w, t) => {
-        if (w.rules !== false && (w.heavy === true || w.wind === "strong")) return;
-        assert.deepEqual(weatherPreset(w, t), { sources: [], notes: [] });
-      }),
-      { numRuns: 2_000 },
-    );
+  test("a light kind with no strong wind adds no Disadvantage and no note but patchy fog's on Perception, and the switch off adds nothing at all", () => {
+    const property = fc.property(weather, test20, (w, t) => {
+      const preset = weatherPreset(w, t);
+      if (w.rules === false) return assert.deepEqual(preset, { sources: [], notes: [] });
+      if (w.heavy === true || w.wind === "strong") return;
+      assert.deepEqual(preset.sources, [], "no Disadvantage from a light kind");
+      // "that rely on sight" needs a call only the table makes, so patchy fog reminds Perception checks and presets nothing.
+      const patchy = w.kind === "fog" && t.kind === "check" && t.skill === "perception";
+      assert.deepEqual(preset.notes.map((n) => n.key), patchy ? ["patchy-fog"] : []);
+    });
+    // The seed that found patchy fog's reminder, then fresh ones.
+    fc.assert(property, { seed: 504556466, numRuns: 2_000 });
+    fc.assert(property, { numRuns: 2_000 });
   });
 
   test("with conditions, weather only adds to what the effects give, after them", () => {
