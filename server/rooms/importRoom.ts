@@ -33,7 +33,7 @@ import { warnArchiveSkipped, type Logger } from "./actor.ts";
 import { EXPORT_FORMAT, EXPORT_FORMAT_VERSION, assetFileName, withoutSound } from "./exportRoom.ts";
 import type { RoomGateway } from "./gateway.ts";
 import { archiveAdmitted, archiveLines } from "./persistence.ts";
-import { lastLineSeq, refillMapVideos, remapState, type ImportedAsset } from "./remap.ts";
+import { lastLineSeq, refillMapVideos, refillSoundFacts, remapState, type ImportedAsset } from "./remap.ts";
 import { layerCharge, MEMORY_CAP } from "./memorySize.ts";
 import { checkWholeScenes, measuredStateBytes, MEMORY_FULL, memoryCapOf, memoryReserved, memoryReserves, sharesRoom } from "./sizeGuard.ts";
 import { parseRoomState } from "./stateSchema.ts";
@@ -290,12 +290,16 @@ export async function importRoom(deps: ImportDeps, zipPath: string, form: Import
       // Members get their new ids first, because asset uploader rows are written during image processing.
       const memberIds = new Map(Object.keys(parsed.state.members).map((id) => [id, uuidv7()]));
       const assetIds = await importImages(deps, zip, entries, manifest, roomId, counter, memberIds);
-      // Each video's facts from the row its header check just made, by its new id: the file's own are never trusted.
+      // Each video's and each sound's facts from the row its check just made, by its new id: the file's own are never trusted.
       const videoFacts = new Map([...assetIds.values()].flatMap((a) => (a.video ? [[a.id, a.video] as const] : [])));
+      const soundFacts = new Map([...assetIds.values()].flatMap((a) => (a.audio ? [[a.id, a.audio] as const] : [])));
       // The remap carries the file's memory and marks under the new ids, and a file from before map discovery then takes
       // the upgrade step, so every scene it brings is marked played (docs/design/design-v1-map-discovery.md 5.5). The
-      // refill then overwrites every map's and phase's video from its row (docs/design/design-v1-animated-maps.md 9.3).
-      const remapped = finishState(withDiscoveryUpgrade(refillMapVideos(remapState(incoming, { assets: assetIds, memberIds }), videoFacts), header.data.schemaVersion), dmMember, roomName);
+      // refills then overwrite every map's and phase's video from its row (docs/design/design-v1-animated-maps.md 9.3), and
+      // every sound's length from its row (docs/design/design-v1-sound.md 6.7). The sound refill always runs after the remap,
+      // which gives a sound whose file did not come through an id no row has, so the refill leaves it out with its places.
+      const refilled = refillSoundFacts(refillMapVideos(remapState(incoming, { assets: assetIds, memberIds }), videoFacts), soundFacts);
+      const remapped = finishState(withDiscoveryUpgrade(refilled.state, header.data.schemaVersion), dmMember, roomName);
       // The log's rings hold here as in any room, each ring its own newest (shared/logRings.ts), and the archive takes
       // the whole log, so Show older and a session's export reach every imported line.
       const state = { ...remapped, log: ringed(remapped.log, remapped.members) };

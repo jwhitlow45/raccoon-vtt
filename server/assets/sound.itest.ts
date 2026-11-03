@@ -6,7 +6,8 @@ import { after, before, describe, test } from "node:test";
 import yauzl from "yauzl";
 import yazl from "yazl";
 import { SOUND_LIMITS } from "#shared/limits.ts";
-import type { SoundFacts } from "#shared/model.ts";
+import type { RoomState, SoundFacts } from "#shared/model.ts";
+import type { ProjectedState } from "#shared/project.ts";
 import { concat, framesFor, id3v1, id3v2, silentFrames, withTagFrame } from "#shared/audio/mp3Testutil.ts";
 import { formatDisplayCode } from "../auth/displaySessions.ts";
 import type { ExportManifest } from "../rooms/exportRoom.ts";
@@ -210,6 +211,39 @@ describe("sound files with the switch on", () => {
     assert.equal((await read(other, s.id)).statusCode, 404);
   });
 
+  test("a player and a table display read a sound by ranges while what plays names it, and not before or after", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom();
+    const bytes = sound(3_000, 71);
+    const s = await uploaded(dm, roomId, bytes);
+    const socket = await t.connect(roomId, dm);
+    await socket.snapshot("dm");
+    assert.equal((await socket.apply({ t: "sound.create", id: "rain", assetId: s.id, name: "Rain", use: "loop", ms: s.audio!.ms })).rejects, undefined);
+    const player = t.client();
+    await player.join(roomId);
+    const minted = await dm.post(`/api/rooms/${roomId}/display/code`);
+    const tv = t.client();
+    assert.equal((await tv.post("/api/display/redeem", { code: formatDisplayCode(minted.json<{ code: string }>().code) })).statusCode, 200);
+    const shown = (headers: Record<string, string>) => tv.request("GET", `/api/rooms/${roomId}/display/assets/${s.id}/full`, undefined, headers);
+    assert.equal((await read(player, s.id, { range: "bytes=0-99" })).statusCode, 404, "in the library only");
+    assert.equal((await shown({ range: "bytes=0-99" })).statusCode, 404);
+
+    assert.equal((await socket.apply({ t: "loop.start", id: "loop1", soundId: "rain", volume: 70 })).rejects, undefined);
+    const part = await read(player, s.id, { range: "bytes=100-299" });
+    assert.equal(part.statusCode, 206, part.body);
+    assert.equal(part.headers["content-type"], "audio/mpeg");
+    assert.equal(part.headers["content-range"], `bytes 100-299/${bytes.length}`);
+    assert.ok(part.rawPayload.equals(Buffer.from(bytes.subarray(100, 300))));
+    const onScreen = await shown({ range: "bytes=0-99" });
+    assert.equal(onScreen.statusCode, 206, onScreen.body);
+    assert.ok(onScreen.rawPayload.equals(Buffer.from(bytes.subarray(0, 100))));
+
+    assert.equal((await socket.apply({ t: "loop.stop", id: "loop1" })).rejects, undefined);
+    assert.equal((await read(player, s.id, { range: "bytes=0-99" })).statusCode, 404, "stopped, it is the library's again");
+    assert.equal((await shown({ range: "bytes=0-99" })).statusCode, 404);
+    socket.close();
+  });
+
   test("the storage line: the DM's alone, read again after an upload or a delete, and a delete sends the file to the trash as .mp3", async () => {
     const dm = t.client();
     const { roomId } = await dm.createRoom();
@@ -324,6 +358,46 @@ describe("sound files with the switch on", () => {
     assert.equal(into.soundsLeftOut, undefined, "a room with no sounds in its state leaves none out");
     const { rows } = await t.pool.query<{ media: string; audio: unknown; bytes: string }>("select media, audio, bytes from assets where room_id = $1 and kind = 'sound'", [into.roomId]);
     assert.deepEqual(rows.map((r) => ({ ...r, bytes: Number(r.bytes) })), [{ media: "mp3", audio: s.audio, bytes: bytes.length }]);
+  });
+
+  test("a backup's sounds come back with their rows' lengths, and one whose file is missing or too short for its use is left out with its places and counted", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom();
+    const files = { rain: sound(3_000, 81), wind: sound(3_000, 82), boom: sound(10_000, 83) };
+    const rows = { rain: await uploaded(dm, roomId, files.rain), wind: await uploaded(dm, roomId, files.wind), boom: await uploaded(dm, roomId, files.boom) };
+    const socket = await t.connect(roomId, dm);
+    const sceneId = ((await socket.snapshot("dm")).state as ProjectedState).meta.playerSceneId!;
+    for (const [id, use] of [["rain", "loop"], ["wind", "loop"], ["boom", "effect"]] as const) {
+      assert.equal((await socket.apply({ t: "sound.create", id, assetId: rows[id].id, name: id, use, ms: rows[id].audio!.ms })).rejects, undefined, id);
+    }
+    const places = { music: null, loops: [{ soundId: "rain", volume: 40 }, { soundId: "wind", volume: 50 }] };
+    assert.equal((await socket.apply({ t: "scene.update", sceneId, patch: { sound: places } })).rejects, undefined);
+    assert.equal((await socket.apply({ t: "loop.start", id: "loop1", soundId: "rain", volume: 70 })).rejects, undefined);
+    socket.close();
+    await socket.waitClosed();
+
+    const zip = await unzip((await dm.get(`/api/rooms/${roomId}/export`)).rawPayload);
+    zip.delete(`assets/${sha(files.wind)}-sound-full.mp3`);
+    // A hand-edited room.json: a minute of music for a 10 s file, and another length for Rain. The rows' walks decide both.
+    const room = JSON.parse(zip.get("room.json")!.toString()) as { state: RoomState };
+    const sounds = room.state.sounds!;
+    sounds.boom = { ...sounds.boom!, use: "music", ms: 60_000 };
+    sounds.rain = { ...sounds.rain!, ms: 2_500 };
+    zip.set("room.json", Buffer.from(JSON.stringify(room)));
+    const into = await imported(t, await zipOf(zip));
+    assert.equal(into.soundsLeftOut, 2, "Wind's file and Boom's use, each once");
+
+    const { rows: stored } = await t.pool.query<{ state: RoomState }>("select state from room_snapshots where room_id = $1", [into.roomId]);
+    const state = stored[0]!.state;
+    const { rows: rain } = await t.pool.query<{ id: string }>("select id::text as id from assets where room_id = $1 and sha256 = $2", [into.roomId, Buffer.from(sha(files.rain), "hex")]);
+    const kept = Object.values(state.sounds ?? {});
+    assert.deepEqual(
+      kept.map((s) => ({ name: s.name, use: s.use, ms: s.ms, assetId: s.assetId })),
+      [{ name: "rain", use: "loop", ms: rows.rain.audio!.ms, assetId: rain[0]!.id }],
+    );
+    const scene = Object.values(state.scenes).find((s) => s.sound !== undefined);
+    assert.deepEqual(scene?.sound, { music: null, loops: [{ soundId: kept[0]!.id, volume: 40 }] }, "Wind's place goes with it");
+    assert.equal(state.playing, null, "the room starts silent");
   });
 
   test("Include sounds off, the backup holds no sound file and nothing about sound, and its images still go", async () => {
