@@ -26,7 +26,8 @@ export function AcBadge(props: { ac: number; size?: AcBadgeSize; readonly?: bool
       style={{ position: "relative", display: "inline-grid", placeItems: "center", flex: "none", width: box.width, height: box.height, verticalAlign: "middle" }}
     >
       <svg aria-hidden width={box.width} height={box.height} viewBox={VIEW_BOX} preserveAspectRatio="none" style={{ position: "absolute", inset: 0 }}>
-        <path d={SHIELD_PATH} fill={theme.color.surfaceRaised} stroke={theme.color.text} strokeWidth={1} vectorEffect="non-scaling-stroke" />
+        {/* In style, not attributes: a presentation attribute does not resolve `var(...)`, so the scheme's colors would not reach it. */}
+        <path d={SHIELD_PATH} style={{ fill: theme.color.surfaceRaised, stroke: theme.color.text }} strokeWidth={1} vectorEffect="non-scaling-stroke" />
       </svg>
       {/* A little above the middle, where the shield is widest. */}
       <span

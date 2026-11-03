@@ -1,6 +1,8 @@
 import "./testing/register.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { theme } from "../lib/theme.ts";
+import { tokenPattern } from "./testing/tokenPattern.ts";
 import { acBadgeBox, SHIELD_PATH } from "./acBadge.ts";
 
 const { createElement } = await import("react");
@@ -58,5 +60,13 @@ describe("AcBadge", () => {
   test("keeps the party bar's shield outline, stretched from its own bounds to fill the box", () => {
     assert.equal(SHIELD_PATH, "M12 2 4 5v6c0 5.2 3.4 9.8 8 11 4.6-1.2 8-5.8 8-11V5z");
     assert.match(renderToStaticMarkup(createElement(AcBadge, { ac: 100 })), /viewBox="3\.5 1\.5 17 21" preserveAspectRatio="none"/);
+  });
+
+  test("colors the shield in style, since a presentation attribute does not resolve a variable (the light theme, section 6.2)", () => {
+    const markup = renderToStaticMarkup(createElement(AcBadge, { ac: 15, size: "sm" }));
+    const path = /<path[^>]*>/.exec(markup)?.[0] ?? "";
+    assert.doesNotMatch(path, /\s(fill|stroke)=/, "no fill or stroke attribute");
+    assert.match(path, new RegExp(`style="[^"]*fill:${tokenPattern(theme.color.surfaceRaised)}`));
+    assert.match(path, new RegExp(`style="[^"]*stroke:${tokenPattern(theme.color.text)}`));
   });
 });
