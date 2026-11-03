@@ -4,7 +4,8 @@ import { testOf, type D20Test } from "#shared/dice/bonus.ts";
 import { resolveAdvantage } from "#shared/dice/formula.ts";
 import type { RollRequest, RoomState } from "#shared/model.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
-import { actor, character, companionBlock, customMonster, effect, entry, room, token } from "#shared/testutil.ts";
+import { actor, character, companionBlock, customMonster, effect, entry, room, scene, token } from "#shared/testutil.ts";
+import type { SceneWeather } from "#shared/weather.ts";
 import { creatureRolls, srdNeeds, type DiceView } from "./creature.ts";
 import { presetFor } from "./presets.ts";
 
@@ -149,5 +150,47 @@ describe("which SRD chunks a creature waits on", () => {
     // A player reads no block on a monster they do not play, so only its numbers wait.
     assert.deepEqual(srdNeeds({ you: { memberId: "p1", role: "player" }, view: s }, { tokenId: "gob" }), { monsters: false, rolls: true });
     assert.deepEqual(srdNeeds(dm, { tokenId: "gone" }), { monsters: false, rolls: false });
+  });
+});
+
+describe("the weather of the scene a creature stands on (docs/design/design-v1-weather.md 2)", () => {
+  const inWeather = (weather: SceneWeather, viewerScene: string | null = "s1"): DiceView => {
+    const s = state();
+    s.scenes.s1 = scene("s1", { weather });
+    s.meta.playerSceneId = "s1";
+    return { ...DM_VIEW(s), sceneId: viewerScene };
+  };
+  const perception: D20Test = { kind: "check", ability: "wis", skill: "perception" };
+  const keys = (sources: { kind: string; from: string }[]) => sources.map((x) => `${x.kind}:${x.from}`);
+
+  test("heavy rain presets Disadvantage on the lurker's Perception check, beside its conditions' sources, and names it", () => {
+    const preset = presetFor(inWeather({ kind: "rain", heavy: true }), LURK, perception);
+    assert.deepEqual(keys(preset.sources), ["dis:poisoned", "dis:heavy-rain"]);
+  });
+
+  test("strong wind presets a ranged weapon attack and only reminds on one not known to be", () => {
+    const wind = inWeather({ kind: "clear", wind: "strong" });
+    assert.deepEqual(keys(presetFor(wind, LURK, { kind: "attack", range: "ranged", weapon: true }).sources).filter((k) => k.endsWith("strong-wind")), ["dis:strong-wind"]);
+    const maybe = presetFor(wind, LURK, { kind: "attack", range: "ranged" });
+    assert.ok(!keys(maybe.sources).includes("dis:strong-wind"));
+    assert.deepEqual(maybe.notes.map((n) => n.key).filter((k) => k === "strong-wind"), ["strong-wind"]);
+    assert.ok(!keys(presetFor(wind, LURK, { kind: "attack" }).sources).includes("dis:strong-wind"), "the bare d20 says nothing");
+  });
+
+  test("a creature on another scene, a scene without weather and weather with its rules off add nothing", () => {
+    const s = state();
+    s.scenes.s1 = scene("s1");
+    s.scenes.s2 = scene("s2", { weather: { kind: "rain", heavy: true } });
+    s.tokens.lurk!.sceneId = "s1";
+    assert.ok(!keys(presetFor({ ...DM_VIEW(s), sceneId: "s2" }, LURK, perception).sources).includes("dis:heavy-rain"));
+    assert.ok(!keys(presetFor(inWeather({ kind: "rain", heavy: true, rules: false }), LURK, perception).sources).includes("dis:heavy-rain"));
+  });
+
+  test("a character takes the weather of its token on the players' scene", () => {
+    const s = state();
+    s.scenes.s1 = scene("s1", { weather: { kind: "snow", heavy: true } });
+    s.meta.playerSceneId = "s1";
+    const preset = presetFor({ ...DM_VIEW(s), sceneId: "s1" }, { characterId: "bree" }, perception);
+    assert.deepEqual(keys(preset.sources), ["dis:heavy-snow"]);
   });
 });

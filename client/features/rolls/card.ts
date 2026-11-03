@@ -6,6 +6,7 @@ import { LIMITS } from "#shared/limits.ts";
 import { effectName } from "#shared/logText.ts";
 import type { DiceResult, LogEntry, RollChange, RollRequest, RollTarget } from "#shared/model.ts";
 import type { RollPreset } from "#shared/rules/rollReminders.ts";
+import { isWeatherRuleKey, WEATHER_RULE_NAMES } from "#shared/rules/weather.ts";
 import { effectiveRollMode, rollModeSources, type RollModeOverride } from "../dice/rollMode.ts";
 import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { CONDITIONS } from "#shared/srd/conditions.ts";
@@ -61,12 +62,12 @@ export function knownOrTyped(known: number | null, text: string, loaded: boolean
   return { bonus, typing, waits, error: typed?.ok === false };
 }
 
-/** A source's name in a reading: "Restrained", "Magic Resistance", or "Advantage" for the one the player pressed. */
+/** A source's name in a reading: "Restrained", "Magic Resistance", "Heavy rain", or "Advantage" for the one the player pressed. */
 export function sourceName(source: AdvantageSource): string {
   if (source.from === "pressed") return source.kind === "adv" ? "Advantage" : "Disadvantage";
   if (source.from === "magic-resistance") return "Magic Resistance";
   if (source.from === "tracker") return "the tracker's mark";
-  return effectName(source.from);
+  return isWeatherRuleKey(source.from) ? WEATHER_RULE_NAMES[source.from] : effectName(source.from);
 }
 
 /**

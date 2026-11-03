@@ -3,6 +3,7 @@ import type { Actor } from "#shared/model.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
 import { findEntryFor } from "#shared/rules/durations.ts";
 import { reminderPreset, type RollPreset } from "#shared/rules/rollReminders.ts";
+import { weatherFor } from "../weather/forCreature.ts";
 import { creatureRolls, type CreatureRolls, type DiceView } from "./creature.ts";
 
 /**
@@ -10,7 +11,8 @@ import { creatureRolls, type CreatureRolls, type DiceView } from "./creature.ts"
  * 3.2): the option buttons, doc 4's card and live card, the group save's
  * rows, the save-ends and concentration cards, death saves, and initiative,
  * single, from the tracker and auto. Each reads it here, at the tap, from
- * the creature's effects in the viewer's view and its Magic Resistance then,
+ * the creature's effects in the viewer's view, the weather of the scene it
+ * stands on (weather/forCreature.ts) and its Magic Resistance then,
  * and combines its sources with its own once, as it builds the op
  * (docs/design/design-v1-dice.md 3.3).
  */
@@ -33,5 +35,6 @@ function actorOf(dice: DiceView, creature: ActorTarget): Actor | undefined {
 export function presetFor(dice: DiceView, creature: ActorTarget, test: D20Test, ctx: { rolls?: CreatureRolls | null } = {}): RollPreset {
   const rolls = ctx.rolls !== undefined ? ctx.rolls : creatureRolls(dice, creature);
   const mark = test.kind === "initiative" ? findEntryFor(dice.view, creature)?.advantage : undefined;
-  return reminderPreset(actorOf(dice, creature)?.effects ?? [], test, { magicResistance: rolls?.magicResistance ?? false, ...(mark ? { mark } : {}) });
+  const weather = weatherFor(dice, creature, dice.sceneId);
+  return reminderPreset(actorOf(dice, creature)?.effects ?? [], test, { magicResistance: rolls?.magicResistance ?? false, ...(mark ? { mark } : {}), ...(weather ? { weather } : {}) });
 }

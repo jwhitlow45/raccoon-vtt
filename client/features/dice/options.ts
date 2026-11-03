@@ -9,6 +9,7 @@ import type { ActorTarget, ClientOp } from "#shared/protocol.ts";
 import { ABILITY_KEYS, SKILL_KEYS, type SkillKey, type CharacterId, type CritRule, type DiceRoll, type InitEntry, type LogEntry, type LogEvent, type RollRequest, type RollTarget, type RoomState, type TokenId, type UseMark } from "#shared/model.ts";
 import { findEntryFor } from "#shared/rules/durations.ts";
 import type { RollPreset } from "#shared/rules/rollReminders.ts";
+import { isWeatherRuleKey, WEATHER_RULE_NAMES } from "#shared/rules/weather.ts";
 import { ABILITY_ABBR, ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
 import type { Proficiency } from "#shared/rules/proficiency.ts";
 import { critSums, effectName } from "#shared/logText.ts";
@@ -60,9 +61,9 @@ export function signedText(n: number): string {
 
 const SOURCE_NAMES: Record<string, string> = { "magic-resistance": "Magic Resistance", tracker: "the tracker" };
 
-/** A preset source's key as a button names it: "Restrained", "Magic Resistance". */
+/** A preset source's key as a button names it: "Restrained", "Magic Resistance", "Heavy rain". */
 export function sourceName(from: string): string {
-  return SOURCE_NAMES[from] ?? effectName(from);
+  return SOURCE_NAMES[from] ?? (isWeatherRuleKey(from) ? WEATHER_RULE_NAMES[from] : effectName(from));
 }
 
 /**

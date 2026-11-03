@@ -38,6 +38,7 @@ import { useRollModeMenu } from "../dice/useRollModeMenu.tsx";
 import type { RollModeOverride } from "../dice/rollMode.ts";
 import { useRollBlocked } from "../dice/useRollOption.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
+import { weatherFor } from "../weather/forCreature.ts";
 import { useProficiency } from "../dice/useProficiency.ts";
 import { refusalWords } from "../dice/useReceipt.ts";
 import { useOpenPcStats } from "../pcstats/open.ts";
@@ -819,7 +820,8 @@ function CreatureAnswer(props: {
     setFlow(next);
     return next;
   };
-  const reminders = rollReminders(effects, request.test, two ? choice : undefined);
+  const weather = dice ? weatherFor(dice, ref, dice.sceneId) : undefined;
+  const reminders = rollReminders(effects, request.test, two ? choice : undefined, weather);
   const final = finalForPlayer(request, target);
   const picked = two ? choice : 0;
   const test = testOf(request, picked);

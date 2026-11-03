@@ -63,6 +63,7 @@ function targetKey(creature: ActorTarget): string {
 export function useDiceView(creatures: readonly ActorTarget[]): { dice: DiceView | null; loading: boolean; failed: boolean } {
   const you = useRoomView((s) => s.you);
   const view = useRoomView((s) => s.view);
+  const sceneId = useRoomView((s) => s.sceneId);
   const key = creatures.map(targetKey).join(",");
   const needs = useMemo(() => {
     const out = { monsters: false, rolls: false };
@@ -80,7 +81,7 @@ export function useDiceView(creatures: readonly ActorTarget[]): { dice: DiceView
   const blocks = useSrdBlocks(needs.monsters, key);
   const monsters = { value: blocks.list, failed: blocks.failed };
   const rolls = useRollsChunk(needs.rolls);
-  const dice = useMemo(() => (you && view ? { you, view, srd: { monsters: monsters.value, rolls: rolls.value } } : null), [you, view, monsters.value, rolls.value]);
+  const dice = useMemo(() => (you && view ? { you, view, sceneId, srd: { monsters: monsters.value, rolls: rolls.value } } : null), [you, view, sceneId, monsters.value, rolls.value]);
   const waits = (need: boolean, chunk: { value: unknown; failed: boolean }) => need && chunk.value === null && !chunk.failed;
   return { dice, loading: waits(needs.monsters, monsters) || waits(needs.rolls, rolls), failed: (needs.monsters && monsters.failed) || (needs.rolls && rolls.failed) };
 }

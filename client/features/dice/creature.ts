@@ -43,6 +43,8 @@ export type DiceView = {
   you: You;
   view: RoomState;
   srd: { monsters: readonly SrdMonster[] | null; rolls: SrdRolls | null };
+  /** The scene the viewer is on, which a character with no token on the players' scene takes its weather from (weather/forCreature.ts). */
+  sceneId?: string | null;
 };
 
 // A room monster's or a companion's block becomes its Markdown view once per version, so blockActions' cache holds across renders.
