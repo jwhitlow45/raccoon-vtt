@@ -3,7 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { Layer, Shape } from "react-konva";
 import { useStore } from "zustand";
 import { useTreeShown } from "../../canvas/relief/context.ts";
-import type { Camera } from "../../lib/camera.ts";
+import { cameraOfStage } from "../../lib/camera.ts";
 import { drawWeather, sceneClip } from "./draw.ts";
 import { createField, resizeField, setFieldView, setHalf, stepField, type Field } from "./sim.ts";
 import { WeatherTextures } from "./textures.ts";
@@ -24,10 +24,6 @@ function makeCanvas(width: number, height: number): HTMLCanvasElement {
   canvas.width = width;
   canvas.height = height;
   return canvas;
-}
-
-function cameraOf(stage: Konva.Stage): Camera {
-  return { x: stage.x(), y: stage.y(), scale: stage.scaleX() };
 }
 
 /**
@@ -65,7 +61,7 @@ export default function WeatherLayer(props: WeatherLayerProps) {
         room.field = field;
       }
       if (field.view !== view) setFieldView(field, view);
-      if (field.width !== width || field.height !== height) resizeField(field, width, height, stage ? { x: stage.x(), y: stage.y() } : { x: 0, y: 0 });
+      if (field.width !== width || field.height !== height) resizeField(field, width, height, stage ? cameraOfStage(stage) : { x: 0, y: 0 });
       if (field.half !== room.mode.half) setHalf(field, room.mode.half);
       return field;
     },
@@ -126,7 +122,7 @@ export default function WeatherLayer(props: WeatherLayerProps) {
       const field = fieldNow(stage);
       if (!field) return;
       const start = performance.now();
-      const camera = cameraOf(stage);
+      const camera = cameraOfStage(stage);
       const g = ctx._context;
       g.save();
       g.setTransform(1, 0, 0, 1, 0, 0);
