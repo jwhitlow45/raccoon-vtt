@@ -83,6 +83,44 @@ export function presetLine(preset: RollPreset): string {
   return parts.join(". ");
 }
 
+/**
+ * The reminders a roll's presets give beside their sources, each said
+ * once, in their order: a condition's that needs the table's call ("Blinded:
+ * automatically fail any ability check that requires sight.") and the
+ * weather's ("Strong wind: Disadvantage on ranged attack rolls with
+ * weapons."). Each is a sentence of its own.
+ */
+export function presetNotes(presets: readonly RollPreset[]): string[] {
+  return [...new Set(presets.flatMap((p) => p.notes.map((n) => n.text)))];
+}
+
+/** Words joined as sentences: a full stop between two only where the first has none of its own. */
+export function joinSentences(parts: readonly string[]): string {
+  return parts.filter(Boolean).reduce((out, part) => (out === "" ? part : `${out}${out.endsWith(".") ? " " : ". "}${part}`), "");
+}
+
+/**
+ * An attacks group's line: what bears on every attack, `bare`'s, said once
+ * ("Attacks Dis: Restrained"), then what only some attacks bring, by their
+ * names ("Longbow, Shortbow Dis: Strong wind"), then their reminders, each
+ * once. Empty when nothing bears on them.
+ */
+export function attacksLine(bare: RollPreset, attacks: readonly { name: string; preset: RollPreset }[]): string {
+  const all = presetLine(bare);
+  const own = new Map<string, string[]>();
+  for (const a of attacks) {
+    const extra = a.preset.sources.filter((s) => !bare.sources.some((b) => b.kind === s.kind && b.from === s.from));
+    const words = presetLine({ sources: extra, extra: [], notes: [] });
+    if (words && !own.get(words)?.includes(a.name)) own.set(words, [...(own.get(words) ?? []), a.name]);
+  }
+  return joinSentences([all ? `Attacks ${all}` : "", ...[...own].map(([words, names]) => `${names.join(", ")} ${words}`), ...presetNotes(attacks.map((a) => a.preset))]);
+}
+
+/** A preset as a roll option's name says it: its sources, extras and fail, then its notes ("Dis: Restrained. Grappled: Disadvantage on ..."). */
+export function presetWords(preset: RollPreset): string {
+  return joinSentences([presetLine(preset), ...presetNotes([preset])]);
+}
+
 /** A formula with the preset's extra terms after it, "1d20+2" with "-2" and "+1d4" as "1d20+2-2+1d4", canonical. */
 export function withExtra(formula: string, extra: readonly string[]): string {
   if (extra.length === 0) return formula;

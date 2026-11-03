@@ -1707,7 +1707,8 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     const sceneId = dmSocket.state!.meta.playerSceneId!;
     const weatherOn = (id: string) => playerSocket.state?.scenes[id]?.weather;
     const longbow = { id: "r-longbow", name: "Longbow", kind: "weapon", ability: "dex", attack: { prof: true, bonus: 0 }, dice: [{ formula: "1d8", type: "piercing", mod: true }] };
-    await ops!.send({ t: "character.update", characterId: run.thornId, patch: { stats: { ...THORN_STATS, rolls: [...THORN_STATS.rolls, longbow] } } });
+    const javelin = { id: "r-javelin", name: "Javelin", kind: "weapon", ability: "str", attack: { prof: true, bonus: 0 }, dice: [{ formula: "1d6", type: "piercing", mod: true }] };
+    await ops!.send({ t: "character.update", characterId: run.thornId, patch: { stats: { ...THORN_STATS, rolls: [...THORN_STATS.rolls, longbow, javelin] } } });
     const tokenId = randomUUID();
     try {
       await openDicePhone(player);
@@ -1724,9 +1725,18 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
       await waitFor("Thorn's token on Pat's phone", () => playerSocket.state?.tokens[tokenId] ?? null);
       await waitFor("Perception names heavy rain", async () => (/Dis: Heavy rain/.test((await perception.getAttribute("aria-label")) ?? "") ? true : null));
       const names = async (button: Locator) => (await button.getAttribute("aria-label")) ?? (await button.innerText());
-      assert.match(await names(bow), /Dis: Strong wind/, "a ranged weapon takes strong wind's Disadvantage");
-      assert.doesNotMatch(await names(sword), /Strong wind/, "a melee weapon does not");
       await shots.take(player, "wx-ui-3-heavy-rain-strong-wind");
+      // A thrown weapon's reminder and the bow's own Disadvantage, where the weapons' group shows them (WXB-3).
+      await bow.scrollIntoViewIfNeeded();
+      await sleep(200);
+      await shots.take(player, "wxfix-dice-strong-wind");
+      const WIND_NOTE = "Strong wind: Disadvantage on ranged attack rolls with weapons.";
+      assert.match(await names(bow), /Dis: Strong wind/, "a ranged weapon takes strong wind's Disadvantage");
+      assert.match(await bow.innerText(), /Dis/, "and shows it on its button");
+      assert.doesNotMatch(await names(sword), /Dis: Strong wind/, "a melee weapon does not");
+      const jav = rolls.getByRole("button", { name: /^Javelin(?! damage)/ });
+      assert.equal(await names(jav), `Javelin, ${WIND_NOTE}`, "a thrown weapon names the reminder, with no preset");
+      await rolls.getByText(`Longbow Dis: Strong wind. ${WIND_NOTE}`, { exact: true }).waitFor();
 
       const before = diceLines(playerSocket.state?.log).length;
       await perception.tap();

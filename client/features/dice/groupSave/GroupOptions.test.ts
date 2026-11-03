@@ -34,7 +34,7 @@ const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { RoomProvider } = await import("../../../state/view.ts");
 const { RoomScope, RoomScopeProvider } = await import("../../../state/scope.ts");
-const { attackPanelRolls, attackSummary, GroupOptions, keepShared, NO_ATTACK, patchShared, sharedAttacksOf, sharedAttacksSlot, unsentAc, watchSelection } = await import("./GroupOptions.tsx");
+const { attackPanelRolls, attackSummary, GroupOptions, keepShared, NO_ATTACK, patchShared, sharedAttackNote, sharedAttacksOf, sharedAttacksSlot, unsentAc, watchSelection } = await import("./GroupOptions.tsx");
 
 const STATS: PcStats = {
   abilities: { str: 10, dex: 18, con: 12, int: 10, wis: 12, cha: 10 },
@@ -608,5 +608,33 @@ describe("a shared attack in weather (docs/design/design-v1-weather.md 2.1)", ()
 
   test("no weather, no source", () => {
     assert.deepEqual(attackPanelRolls(bows([shortbow]), goblins(undefined))[0]!.sources, []);
+  });
+
+  test("drawn under the attack it bears on, and in its name", () => {
+    const state = table();
+    state.scenes.s1 = scene("s1", { weather: { kind: "clear", wind: "strong" } });
+    const view = projectState(state, DM, { sceneId: "s1" }) as unknown as RoomState;
+    const scope = new RoomScope();
+    scope.get(diceFoldsSlot).tap(severalKey("sharedAttacks"), true, false);
+    const store = createStore(() => ({ view, roomId: "r1", connection: "open", you: DM, sceneId: "s1", local: { selectedIds: ["ta", "tb"], multi: false } }));
+    const html = renderToStaticMarkup(
+      createElement(RoomProvider, {
+        store: store as never,
+        actions: { dispatch: () => 1 } as never,
+        ui: {} as never,
+        assets: { url: () => "" } as never,
+        children: createElement(RoomScopeProvider, { scope, children: createElement(GroupOptions, { tokenIds: ["ta", "tb"] }) }),
+      }),
+    );
+    const words = "Strong wind: Disadvantage on ranged attack rolls with weapons.";
+    assert.match(html, new RegExp(`aria-label="Rapier for 2, ${words.replace(".", "\\.")}"`));
+    assert.match(html, new RegExp(`<p[^>]*>${words.replace(".", "\\.")}</p>`));
+  });
+
+  test("the shared attack's note says the preset once for three Shortbows, a thrown weapon's reminder, and nothing in calm air", () => {
+    assert.equal(sharedAttackNote(bows([shortbow, shortbow, shortbow]), goblins({ kind: "clear", wind: "strong" })), "Dis: Strong wind");
+    const javelin = named("Javelin", { range: "either", weapon: true });
+    assert.equal(sharedAttackNote(bows([javelin, javelin]), goblins({ kind: "clear", wind: "strong" })), "Strong wind: Disadvantage on ranged attack rolls with weapons.");
+    assert.equal(sharedAttackNote(bows([shortbow, shortbow]), goblins(undefined)), "");
   });
 });

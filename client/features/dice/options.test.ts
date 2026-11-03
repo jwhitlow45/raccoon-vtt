@@ -38,6 +38,10 @@ import {
   openForAsks,
   playerCreatures,
   presetLine,
+  presetNotes,
+  presetWords,
+  attacksLine,
+  joinSentences,
   rechargeUseOf,
   resultWords,
   routedTest,
@@ -673,5 +677,33 @@ describe("what waits in a creature's groups (docs/design/design-v1-dice-pass.md 
       ["monster.saves", ["r1"], undefined],
       ["monster.spells", ["open:1"], ["k1"]],
     ]);
+  });
+});
+
+describe("a preset's reminders beside its sources (docs/design/design-v1-weather.md 4.2)", () => {
+  const WIND = { key: "strong-wind", text: "Strong wind: Disadvantage on ranged attack rolls with weapons." } as const;
+  const SCARED = { key: "frightened", text: "Frightened: Disadvantage on attack rolls while the source of fear is within line of sight." } as const;
+  const none = { sources: [], extra: [], notes: [] };
+
+  test("the notes, each once in their order, and sentences joined with one full stop", () => {
+    assert.deepEqual(presetNotes([{ ...none, notes: [WIND, SCARED] }, { ...none, notes: [WIND] }]), [WIND.text, SCARED.text]);
+    assert.equal(joinSentences(["Attacks Dis: Restrained", WIND.text, "", "Multiattack. It makes two attacks."]), `Attacks Dis: Restrained. ${WIND.text} Multiattack. It makes two attacks.`);
+    assert.equal(presetWords({ sources: [{ kind: "dis", from: "restrained" }], extra: [], notes: [SCARED] }), `Dis: Restrained. ${SCARED.text}`);
+    assert.equal(presetWords({ ...none, notes: [WIND] }), WIND.text);
+    assert.equal(presetWords(none), "");
+  });
+
+  test("an attacks line says what bears on all once, what only some weapons bring by their names, and the notes once", () => {
+    const restrained = { kind: "dis", from: "restrained" } as const;
+    const wind = { kind: "dis", from: "strong-wind" } as const;
+    const bare = { ...none, sources: [restrained] };
+    const line = attacksLine(bare, [
+      { name: "Longbow", preset: { ...none, sources: [restrained, wind] } },
+      { name: "Shortbow", preset: { ...none, sources: [restrained, wind] } },
+      { name: "Javelin", preset: { ...none, sources: [restrained], notes: [WIND] } },
+      { name: "Scimitar", preset: bare },
+    ]);
+    assert.equal(line, `Attacks Dis: Restrained. Longbow, Shortbow Dis: Strong wind. ${WIND.text}`);
+    assert.equal(attacksLine(none, [{ name: "Scimitar", preset: none }]), "");
   });
 });

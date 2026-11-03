@@ -9,7 +9,7 @@ import type { ActorTarget } from "#shared/protocol.ts";
 import { ABILITY_ABBR as ABILITY_SHORT } from "#shared/rules/skills.ts";
 import { SKILLS } from "#shared/rules/skills.ts";
 import { loadedMonsters } from "#shared/srd/monsters.ts";
-import { Group, sectionLabelLook } from "../../../components/Panel.tsx";
+import { Group, Help, sectionLabelLook } from "../../../components/Panel.tsx";
 import { displayName } from "../../../lib/scene.ts";
 import { useUnsavedInput } from "../../../lib/sheetSwipe.ts";
 import { theme } from "../../../lib/theme.ts";
@@ -22,7 +22,7 @@ import { creatureLook } from "../creatureLook.ts";
 import { creatureRolls, type DiceView } from "../creature.ts";
 import { severalKey, useDiceFolds } from "../diceFolds.ts";
 import { rollsOf } from "../logic.ts";
-import { cutLabel, damageRolls, withExtra } from "../options.ts";
+import { cutLabel, damageRolls, groupNote, joinSentences, presetNotes, withExtra } from "../options.ts";
 import { presetFor } from "../presets.ts";
 import { secretStartIn, useDicePanel, useRollPresses, type PanelRoll } from "../useDicePanel.ts";
 import { loadedSrdRolls, useDiceView } from "../useDiceView.ts";
@@ -250,6 +250,16 @@ export function attackPanelRolls(each: readonly Attacker[], dice: DiceView): Pan
   });
 }
 
+/**
+ * What bears on a shared attack, said once under it: each attacker's
+ * preset words ("Dis: Strong wind" for three Shortbows in strong wind) and
+ * their reminders, each once. Empty when nothing does.
+ */
+export function sharedAttackNote(each: readonly Attacker[], dice: DiceView): string {
+  const presets = each.map(({ creature, named }) => presetFor(dice, creature, attackTest(named)));
+  return joinSentences([groupNote(presets), ...presetNotes(presets)]);
+}
+
 /** An attack every selected block has by name, with each creature's own roll of it. */
 export type SharedAttackRow = { name: string; each: Attacker[] };
 
@@ -418,14 +428,16 @@ function SharedAttack(props: { name: string; each: Attacker[]; dice: DiceView; b
   const commonMode = modes[0];
   const missingModes = modes.every((mode) => mode === commonMode) ? commonMode ? `, ${commonMode}` : "" : `; ${detailedResults}`;
   const total = damage?.state === "committed" ? rollsOf(damage.lines).reduce((a, r) => a + r.total, 0) : null;
+  const note = sharedAttackNote(props.each, props.dice);
   return (
     <div style={{ display: "grid", gap: theme.space(1), borderTop: `${theme.line.border}px solid ${theme.color.border}`, paddingTop: theme.space(1) }}>
       <div style={{ display: "flex", gap: theme.space(2), alignItems: "center", flexWrap: "wrap" }}>
         <div style={{ flex: "1 1 auto", display: "grid" }}>
-          <Cell text={`${props.name} for ${n}`} name={`${props.name} for ${n}`} disabled={props.blocked} busy={receipt?.state === "sending"} onTap={attack} mode={{ source: `${source}|attack`, capability: { d20: true, visibility: "selectable", manual: presses }, valid, onRoll: attack }} />
+          <Cell text={`${props.name} for ${n}`} name={[`${props.name} for ${n}`, note].filter(Boolean).join(", ")} disabled={props.blocked} busy={receipt?.state === "sending"} onTap={attack} mode={{ source: `${source}|attack`, capability: { d20: true, visibility: "selectable", manual: presses }, valid, onRoll: attack }} />
         </div>
         <NumberField label="Target's AC" value={state.ac ?? undefined} min={1} max={50} nullable placeholder="AC" onCommit={(ac) => set({ ac })} width={72} />
       </div>
+      {note ? <Help>{note}</Help> : null}
       {results.length > 0 ? (
         <Note><RollResultLine text={plainResults} expanded={detailedResults} missing={missingModes} /></Note>
       ) : null}

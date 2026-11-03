@@ -3,7 +3,8 @@ import { withoutFrames } from "../../components/testing/proficiencyMarkup.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
-import type { LogEntry, PcStats, RollRequest, RoomState, UseMark, Viewer } from "#shared/model.ts";
+import type { Effect, LogEntry, PcRoll, PcStats, RollRequest, RoomState, UseMark, Viewer } from "#shared/model.ts";
+import type { SceneWeather } from "#shared/weather.ts";
 import { projectState } from "#shared/project.ts";
 import { SKILLS } from "#shared/rules/skills.ts";
 import { DM, P1, actor, character, customMonster, entry, room, token } from "#shared/testutil.ts";
@@ -64,13 +65,15 @@ function line(tag: string, total: number, label: string, n: number): LogEntry {
   return { id: `${n}:0`, at: "2026-10-17T20:00:00.000Z", kind: "event", data: { type: "dice", tag, by: "p1", to: "all", rolls: [{ formula: "1d20+7", faces: [total - 7], total, label }] } };
 }
 
-function render(viewer: Viewer, landed: boolean, pending = false, requests: RoomState["rolls"] = {}, open = true, typedBonus?: string, extraRolls: PcStats["rolls"] = []): string {
+function render(viewer: Viewer, landed: boolean, pending = false, requests: RoomState["rolls"] = {}, open = true, typedBonus?: string, extraRolls: PcStats["rolls"] = [], weather?: SceneWeather, effects: Effect[] = []): string {
   const state = table();
+  if (weather) state.scenes.s1 = { ...state.scenes.s1!, weather };
+  if (effects.length) state.characters.thorn = { ...state.characters.thorn!, actor: { ...state.characters.thorn!.actor, effects, ...(effects.some((e) => e.key === "unconscious") ? { life: "dying" as const } : {}) } };
   if (extraRolls.length) state.characters.thorn!.stats = { ...THORN, rolls: [...THORN.rolls, ...extraRolls] };
   if (typedBonus !== undefined) delete state.characters.thorn!.stats;
   state.rolls = requests;
   const view = projectState(state, viewer, { sceneId: "s1" }) as unknown as RoomState;
-  const dice: DiceView = { you: viewer, view, srd: { monsters: null, rolls: null } };
+  const dice: DiceView = { you: viewer, view, sceneId: "s1", srd: { monsters: null, rolls: null } };
   const creature = { characterId: "thorn" } as const;
   const rolls = creatureRolls(dice, creature);
   assert.ok(rolls);
@@ -493,4 +496,40 @@ test("actual single-creature rolls register menus without changing proficiency n
   const busy = render(P1, true, true);
   const pending = /<button[^>]*aria-label="Dexterity save[^>]*>/.exec(busy)?.[0];
   assert.ok(pending); assert.doesNotMatch(pending, /aria-haspopup/);
+});
+
+describe("what weather and conditions remind a roll of, on the Dice panel (docs/design/design-v1-weather.md 4.2)", () => {
+  const bow: PcRoll = { id: "r-bow", name: "Longbow", kind: "weapon", ability: "dex", attack: { prof: true, bonus: 0 }, dice: [{ formula: "1d8", mod: true, type: "piercing" }] };
+  const javelin: PcRoll = { id: "r-jav", name: "Javelin", kind: "weapon", ability: "str", attack: { prof: true, bonus: 0 }, dice: [{ formula: "1d6", mod: true, type: "piercing" }] };
+  const WIND_NOTE = "Strong wind: Disadvantage on ranged attack rolls with weapons.";
+  const buttonOf = (html: string, name: RegExp) => [...html.matchAll(/<button[^>]*aria-label="([^"]*)"[^>]*>(.*?)<\/button>/g)].find((m) => name.test(m[1]!));
+
+  test("in strong wind a bow shows its own Disadvantage, a thrown weapon names the note, and the attacks' line says both once", () => {
+    const html = render(P1, false, false, {}, true, undefined, [bow, javelin], { kind: "clear", wind: "strong" });
+    const longbow = buttonOf(html, /^Longbow/);
+    assert.ok(longbow, "the Longbow's attack");
+    assert.equal(longbow[1], "Longbow, Dis: Strong wind");
+    assert.match(longbow[2]!, />Dis</, "its tag shows the Disadvantage its own weapon brings");
+    const jav = buttonOf(html, /^Javelin(?! damage)/);
+    assert.ok(jav);
+    assert.equal(jav[1], `Javelin, ${WIND_NOTE}`, "the note in the thrown weapon's name");
+    assert.doesNotMatch(jav[2]!, />Dis</, "and no preset");
+    // A character's weapon names no way it was used unless its name is one of the SRD's (2.1), so the Rapier reminds too.
+    assert.equal(buttonOf(html, /^Rapier(?! damage)/)?.[1], `Rapier, ${WIND_NOTE}`);
+    const line = /<p[^>]*>(Longbow Dis: Strong wind[^<]*)<\/p>/.exec(html)?.[1];
+    assert.equal(line, `Longbow Dis: Strong wind. ${WIND_NOTE}`, "the attacks' line");
+  });
+
+  test("patchy fog's reminder joins Perception's name, and a condition's reminders join every roll they bear on", () => {
+    const fog = render(P1, false, false, {}, true, undefined, [], { kind: "fog" });
+    assert.equal(buttonOf(fog, /^Perception/)?.[1], "Perception check, Patchy fog: Lightly Obscured. Disadvantage on Perception checks that rely on sight.");
+    assert.equal(buttonOf(fog, /^Stealth/)?.[1], "Stealth check");
+    const scared = render(P1, false, false, {}, true, undefined, [], undefined, [{ id: "e1", key: "frightened" }]);
+    assert.equal(buttonOf(scared, /^Stealth/)?.[1], "Stealth check, Frightened: Disadvantage on ability checks while the source of fear is within line of sight.");
+    assert.equal(buttonOf(scared, /^Rapier(?! damage)/)?.[1], "Rapier, Frightened: Disadvantage on attack rolls while the source of fear is within line of sight.");
+    assert.match(scared, /<p[^>]*>Frightened: Disadvantage on attack rolls while the source of fear is within line of sight\.<\/p>/, "the attacks' line says it once");
+    assert.match(buttonOf(scared, /^Initiative/)?.[1] ?? "", /Frightened: Disadvantage on Initiative/, "and Initiative's name");
+    const dying = render(P1, false, false, {}, true, undefined, [], undefined, [{ id: "e1", key: "unconscious" }, { id: "e2", key: "heroic-inspiration" }]);
+    assert.match(buttonOf(dying, /^Death Save/)?.[1] ?? "", /Heroic Inspiration: you can spend it to reroll any die immediately after rolling it\./, "and a death save's");
+  });
 });

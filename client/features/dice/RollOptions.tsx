@@ -63,8 +63,10 @@ import {
   noNumbersNote,
   openForAsks,
   playerCreatures,
-  presetLine,
+  attacksLine,
+  joinSentences,
   presetTag,
+  presetWords,
   rechargeUseOf,
   riderToggleName,
   riderText,
@@ -537,8 +539,10 @@ function OptionGroups(props: Shown) {
   const checkNote = [asksNote, noteOf(checkTests)].filter(Boolean).join(". ");
   const saveCommon = commonTags(saveTests.map(presetOf));
   const checkCommon = commonTags(checkTests.map(presetOf));
-  const attackNote = presetLine(presetOf({ kind: "attack" }));
-  const spellNote = presetLine(presetOf({ kind: "attack", spell: true }));
+  // An attacks group says what bears on all its attacks, what only some weapons bring (strong wind's on a bow), and their reminders.
+  const attacksOf = (rolls: readonly NamedRoll[]) => rolls.filter((r) => r.attack !== undefined).map((r) => ({ name: r.name, preset: presetOf(attackTest(r)) }));
+  const spellAttack = presetOf({ kind: "attack", spell: true });
+  const spellNote = attacksLine(spellAttack, [...(numbers?.spellAttack !== undefined ? [{ name: "Spell attack", preset: spellAttack }] : []), ...attacksOf(spells)]);
   const sharedNote = [...new Set([saveNote, checkNote].flatMap((n) => n.split(". ")).filter(Boolean))].join(". ");
 
   return (
@@ -602,7 +606,8 @@ function OptionGroups(props: Shown) {
         const these = named.filter((r) => r.section === section);
         const multiattack = section === "actions" ? rolls.multiattack : null;
         if (these.length === 0 && multiattack === null) return null;
-        const note = [these.some((r) => r.attack !== undefined) && attackNote ? `Attacks ${attackNote}` : "", multiattack !== null ? `Multiattack. ${multiattack}` : ""].filter(Boolean).join(". ");
+        const attacks = attacksOf(these);
+        const note = joinSentences([attacks.length > 0 ? attacksLine(presetOf({ kind: "attack" }), attacks) : "", multiattack !== null ? `Multiattack. ${multiattack}` : ""]);
         return (
           <Group key={section} label={title} {...groupFold(section)} summary={foldSummary({ group: "rows", rows: these.map((r) => ({ name: r.name, used: markOf(ctx.marks, r.key, "recharge") !== undefined })) }, asks[section])}>
             <div role="group" aria-label={title} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)" }}>
@@ -618,7 +623,7 @@ function OptionGroups(props: Shown) {
         <Group label="Spells" {...groupFold("spells")} summary={foldSummary({ group: "spells", dc: numbers?.spellDc, attack: numbers?.spellAttack, count: spells.length }, asks.spells)}>
           <div role="group" aria-label="Spells" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)" }}>
             {numbers?.spellDc !== undefined || spellNote ? (
-              <Help style={{ paddingBottom: theme.space(2) }}>{[numbers?.spellDc !== undefined ? `Save DC ${numbers.spellDc}` : "", spellNote ? `Attacks ${spellNote}` : ""].filter(Boolean).join(". ")}</Help>
+              <Help style={{ paddingBottom: theme.space(2) }}>{joinSentences([numbers?.spellDc !== undefined ? `Save DC ${numbers.spellDc}` : "", spellNote])}</Help>
             ) : null}
             {numbers?.spellAttack !== undefined ? (
               <div style={{ ...ROW, gridTemplateColumns: "repeat(3, minmax(0, 1fr))", display: "grid", gap: theme.space(1) }}>
@@ -843,10 +848,10 @@ function D20Cell(props: { ctx: Ctx; test: D20Test; bonus: number; unknown?: { ty
   const landed = useRowResult(row);
   useActOnce(landed.tag, landed.rolls, (rolls) => props.onLanded?.(critical(rolls[0])));
   const label = props.label ?? testLabel(test);
-  const words = presetLine(preset);
+  const words = presetWords(preset);
   const how = route.kind === "answer" ? "answers the DM's request" : route.kind === "ask" ? "asks the player" : "";
-  // An attack's preset is the same for every weapon, so its group's label says it and the button stays one word.
-  const said = test.kind === "attack" ? presetTag(preset).split(" ") : (props.common ?? []);
+  // What bears on every attack of its group, a condition's, its group's line says, so the button shows only what its own weapon brings, as strong wind's Disadvantage on a bow.
+  const said = test.kind === "attack" ? presetTag(presetOf(test.spell ? { kind: "attack", spell: true } : { kind: "attack" })).split(" ") : (props.common ?? []);
   const own = presetTag(preset)
     .split(" ")
     .filter((part) => part && !said.includes(part));
@@ -942,7 +947,7 @@ function InitiativeCell(props: { ctx: Ctx; bonus: number; bonusText: string }) {
             source={JSON.stringify([row, entry, props.bonus, preset])}
             text={scored ? "Roll instead" : `Initiative ${bonus}`}
             tag={tag || undefined}
-            name={["Initiative", does, presetLine(preset)].filter(Boolean).join(", ")}
+            name={["Initiative", does, presetWords(preset)].filter(Boolean).join(", ")}
             row={row}
             disabled={ctx.blocked}
             onTap={roll}
@@ -974,7 +979,7 @@ function DeathSaveCell(props: { ctx: Ctx; bonus: number | null }) {
       source={JSON.stringify([row, ctx.creature, preset, ctx.actor?.deathSaves, ctx.dice.view.encounter?.round])}
       text={props.bonus === null ? "Death Save" : `Death Save ${signedText(props.bonus)}`}
       tag={presetTag(preset) || undefined}
-      name={["Death Save", presetLine(preset)].filter(Boolean).join(", ")}
+      name={["Death Save", presetWords(preset)].filter(Boolean).join(", ")}
       row={row}
       disabled={ctx.blocked ?? (waits ? WAITS_FOR_REGENERATION : null)}
       onTap={(override) => option.deathSave(ctx.creature, preset, row, openRecord(ctx.dice.view.encounter, ctx.actor, "deathSave"), override)}
