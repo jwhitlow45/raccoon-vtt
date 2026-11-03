@@ -16,8 +16,12 @@ import { setSoundOn, useSoundOn } from "../encounter/alerts.ts";
 import { setSoundEnabled, usePingSound } from "../pings/feedback.ts";
 import { diceLoader } from "../dice/throw/hooks.ts";
 import { useWeatherStillReason, WEATHER_CARDS } from "../weather/store.ts";
+import { useDeviceStillReason } from "../animmap/AnimMapController.tsx";
+import { useServerAnimatedMaps } from "../animmap/status.ts";
+import { ANIMATED_MAPS_CHOICES, ANIMATED_MAPS_HELP, ANIMATED_MAPS_LABEL, ANIMATED_MAPS_WORDS, deviceStillHelp, LOW_POWER_HELP, type AnimatedMapsChoice } from "../animmap/words.ts";
 import { DiceSetPicker } from "./DiceSetPicker.tsx";
 import {
+  setAnimatedMaps,
   setLowPower,
   setMapDetail,
   setRollAnimation,
@@ -30,6 +34,7 @@ import {
   THEME_CHOICES,
   UI_SCALES,
   uiScaleLabel,
+  useAnimatedMaps,
   useLowPower,
   useMapVariant,
   useRollAnimation,
@@ -89,6 +94,9 @@ export default function ThisDevice() {
   const weatherStill = useWeatherStillReason();
   const themeChoice = useThemeChoice();
   const themeHelp = useId();
+  const animatedMapsOn = useServerAnimatedMaps();
+  const animatedMaps = useAnimatedMaps();
+  const animatedStill = useDeviceStillReason();
   return (
     <div style={{ display: "grid" }}>
       <Section label="Interface size" divider={false}>
@@ -110,7 +118,11 @@ export default function ThisDevice() {
       <Section label="Battery">
         <Switch
           label="Low power"
-          help="Draws the map at a lower resolution, skips small animations, keeps weather still and shows rolls without dice, to save battery on long sessions. Text on the map looks softer."
+          help={
+            animatedMapsOn
+              ? LOW_POWER_HELP
+              : "Draws the map at a lower resolution, skips small animations, keeps weather still and shows rolls without dice, to save battery on long sessions. Text on the map looks softer."
+          }
           checked={lowPower}
           onChange={setLowPower}
         />
@@ -130,6 +142,19 @@ export default function ThisDevice() {
             onChange={setMapDetail}
           />
         </div>
+        {/* Hidden while the server's switch is off, since no map can move then (docs/design/design-v1-animated-maps.md 4.4). */}
+        {animatedMapsOn ? (
+          <div style={{ padding: `${theme.space(2)}px 0` }}>
+            <RadioCards<AnimatedMapsChoice>
+              legend={ANIMATED_MAPS_LABEL}
+              // Only while Moving is chosen: Still already shows the still.
+              help={animatedMaps === "moving" && animatedStill ? deviceStillHelp(animatedStill) : undefined}
+              value={animatedMaps}
+              options={ANIMATED_MAPS_CHOICES.map((c) => ({ value: c, label: ANIMATED_MAPS_WORDS[c], help: ANIMATED_MAPS_HELP[c] }))}
+              onChange={setAnimatedMaps}
+            />
+          </div>
+        ) : null}
       </Section>
       <Section label="Weather">
         {/* In a settings row's padding, as Map detail's cards stand. */}
