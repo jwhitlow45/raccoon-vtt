@@ -1130,6 +1130,39 @@ async function visionScreens(sweep: Sweep, page: Page, size: Size): Promise<void
   }
 }
 
+/**
+ * DG-C: New scene's Builder form with Or start from a generated dungeon,
+ * and the Generate a dungeon dialog once its first preview has drawn
+ * (docs/design/design-v1-dungeon-generator.md 4.2 and 4.7), with Custom's
+ * Across and Down showing. Nothing is made: the dialog is cancelled.
+ */
+async function dungeonScreens(sweep: Sweep, page: Page): Promise<void> {
+  try {
+    await escapeAll(page);
+    const panel = await openPanelOf(page, "Scenes");
+    const form = panel.getByRole("heading", { name: "New scene", exact: true }).locator("xpath=ancestor::*[self::section or @data-panel-group][1]");
+    await form.getByRole("radio", { name: "Builder", exact: true }).click();
+    const generate = form.getByRole("button", { name: "Generate a dungeon", exact: true });
+    await generate.scrollIntoViewIfNeeded();
+    await sweep.measure(page, "new-scene-builder", form);
+    await generate.click();
+    const dialog = page.getByRole("dialog", { name: "Generate a dungeon" });
+    await dialog.getByRole("radio", { name: "Custom", exact: true }).click();
+    if (!(await showsWithin(dialog.getByRole("img", { name: /^Preview of the dungeon/ }), 30_000))) {
+      await sweep.missing(page, "dungeon-dialog", "its preview never drew");
+      return;
+    }
+    await sweep.measure(page, "dungeon-dialog", dialog);
+    await shots.take(page, `alignment-${sweep.at}-dungeon-dialog`);
+    await dialog.getByRole("radio", { name: "Medium", exact: true }).click();
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await dialog.waitFor({ state: "detached" });
+    await form.getByRole("button", { name: "Cancel", exact: true }).click();
+  } finally {
+    await escapeAll(page);
+  }
+}
+
 /** The preview socket the DM page asked for last, held unanswered (previewWaitScreens). */
 let heldPreview: WebSocketRoute | null = null;
 
@@ -4880,6 +4913,7 @@ export function sizeTests(names: readonly string[]): void {
           await waitFor("the DM's snapshot", () => dmSocket.state);
           await dmScreens(sweep, page, size);
           await visionScreens(sweep, page, size);
+          await dungeonScreens(sweep, page);
           await previewWaitScreens(sweep, page, scale);
           if (DICE_AT.has(size.name)) await dmDiceScreens(sweep, page);
           if (COMBAT_AT.has(size.name)) await combatScreens(sweep, page, size, scale);
