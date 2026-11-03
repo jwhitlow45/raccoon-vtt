@@ -13,6 +13,13 @@ describe("sceneGroupSummary", () => {
     assert.equal(sceneGroupSummary(scene("s", { fogEnabled: true, vision: { on: true, light: "dark", perPlayer: true } }), "players"), "Explore · Dark · Per player");
   });
 
+  test("What players see names the scene's weather after the light", () => {
+    const dark = { fogEnabled: true, vision: { on: true, light: "dark" as const } };
+    assert.equal(sceneGroupSummary(scene("s", { ...dark, weather: { kind: "rain", heavy: true } }), "players"), "Explore · Dark · Heavy rain");
+    assert.equal(sceneGroupSummary(scene("s", { ...dark, weather: { kind: "rain", heavy: true, wind: "strong" } }), "players"), "Explore · Dark · Heavy rain · Strong wind");
+    assert.equal(sceneGroupSummary(scene("s", { ...dark, weather: { kind: "clear", wind: "strong" } }), "players"), "Explore · Dark · Strong wind");
+  });
+
   test("Map image and grid: whether there is an image, then the grid's shape, with its pixels on an image", () => {
     const map = { assetId: "a", widthPx: 1000, heightPx: 700, cellPx: 50, originPx: { x: 0, y: 0 } };
     assert.equal(sceneGroupSummary(scene("s"), "map"), "No map image · Squares");

@@ -39,6 +39,7 @@ import {
 } from "./settings.ts";
 import { noSightText } from "./sources.ts";
 import { usePartyReport } from "./usePartyReport.ts";
+import { WeatherSettings } from "../weather/WeatherSettings.tsx";
 
 const PHASE_LIGHTS: readonly { value: LightLevel | "keep"; label: string }[] = [
   { value: "keep", label: "Leave the light" },
@@ -159,6 +160,8 @@ export function VisionSettings(props: { scene: Scene }) {
           </div>
         </SettingRow>
       ) : null}
+
+      <WeatherSettings scene={scene} />
 
       {sightShown(scene) ? <SightRow scene={scene} working={sightWorking} /> : null}
       {perPlayer ? <HolderList sceneId={scene.id} busy={sightWorking !== null} /> : null}

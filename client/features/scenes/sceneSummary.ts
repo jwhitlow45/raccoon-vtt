@@ -2,6 +2,7 @@ import type { Scene } from "#shared/model.ts";
 import { PLAYERS_SEE_WORDS, playersSeeOf } from "#shared/playersSee.ts";
 import { isHex, sceneGrid } from "#shared/rules/grid.ts";
 import { sceneHexSpan } from "#shared/rules/hex.ts";
+import { weatherParts } from "#shared/weather.ts";
 import { SHAPE_CHOICES, shapeChoice } from "../grid/words.ts";
 import { VIEW_NAMES, suggestedKind } from "../view/choice.ts";
 import { LIGHT_LEVELS, lightOf, SIGHT_CHOICES, sightOf } from "../vision/settings.ts";
@@ -22,6 +23,7 @@ export function sceneGroupSummary(scene: Scene, group: SceneGroup): string {
       return join([
         PLAYERS_SEE_WORDS[playersSeeOf(scene)],
         LIGHT_LEVELS.find((l) => l.value === lightOf(scene))?.label ?? null,
+        ...weatherParts(scene.weather),
         sightOf(scene) === "player" ? (SIGHT_CHOICES.find((c) => c.value === "player")?.label ?? null) : null,
       ]);
     case "map": {
