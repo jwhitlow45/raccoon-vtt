@@ -136,7 +136,6 @@ export const PANELS: readonly PanelDef[] = [
   panel({ id: "scenes", title: "Scenes", icon: "scenes", order: 24, group: "play", dmOnly: true, guide: "scenes", load: () => import("../panels/ScenesPanel.tsx") }),
   panel({ id: "library", title: "Library", icon: "library", order: 48, group: "prepare", load: () => import("../panels/LibraryPanel.tsx") }),
   panel({ id: "areas", title: "Areas", icon: "areas", order: 20, group: "play", guide: "areas", load: () => import("./areas/AreasPanel.tsx") }),
-  // No `guide` yet: the outline test needs the DM guide's Time heading to exist first, so it is added with that section.
   panel({ id: "time", title: "Time", icon: "time", order: 21, group: "play", needsClock: true, guide: "time-and-the-calendar", load: () => import("./clock/TimePanel.tsx") }),
   panel({ id: "log", title: "Log", icon: "log", order: 16, group: "play", load: () => import("../panels/LogPanel.tsx") }),
   panel({ id: "journal", title: "Journal", icon: "journal", order: 18, group: "play", load: () => import("./journal/JournalPanel.tsx") }),
