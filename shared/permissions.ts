@@ -805,6 +805,12 @@ function forPlayer(op: Op, c: Check): Decision {
     case "trap.spring":
     case "trap.act":
     case "trap.settle":
+    // The room's clock is the DM's to keep (docs/design/design-v1-calendar.md 6.2).
+    case "clock.start":
+    case "clock.stop":
+    case "clock.update":
+    case "clock.set":
+    case "clock.advance":
       return FORBIDDEN;
 
     case "token.updateMany": {

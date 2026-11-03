@@ -25,7 +25,7 @@ test("snapshot and export schema accept bounded lifecycle records and reject mal
 
 test("version 35/31 steps are identity migrations and A readers refuse 31 with empty ledger and replay tail", () => {
   assert.ok(OP_VERSION >= 35);
-  assert.equal(SNAPSHOT_VERSION, 31);
+  assert.ok(SNAPSHOT_VERSION >= 31);
   const op = { t: "log.chat", text: "old chat" };
   assert.equal(runMigrations(op, 34, 35, opMigrations), op);
   const old = room();

@@ -3312,6 +3312,9 @@ export function eventReach(state: RoomState, data: LogEvent): Reach {
     case "encounter":
     case "member":
       return "all";
+    // Its audience is frozen when written (lineReader): a line written while the clock was hidden is the DM's by its number.
+    case "clock":
+      return "all";
     case "handout": {
       const handout = ownEntry(state.handouts, data.handoutId);
       if (!handout) return [];
@@ -3641,6 +3644,9 @@ function projectEventCtx(ctx: Ctx, data: LogEvent, copy = false): LogEvent | nul
     case "encounter":
       // A fight started behind the pause screen is news when the game resumes.
       return ctx.paused ? null : data;
+    case "clock":
+      // A player keeps every clock line that reached them, after sharing goes off or the clock stops too (docs/design/design-v1-calendar.md 6.4).
+      return data;
     case "handout": {
       const handout = ownEntry(ctx.state.handouts, data.handoutId);
       return handout && projectHandoutCtx(ctx, handout) ? data : null;

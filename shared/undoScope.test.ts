@@ -14,11 +14,13 @@ const inventory = {
     "roll.ask", "roll.answer", "roll.reopen", "roll.close", "template.create", "template.update", "template.delete", "drawing.create", "drawing.delete", "drawing.clear",
     "fog.draft", "fog.publish", "fog.discard", "fog.live", "fog.reset", "build.paint", "build.erase", "build.rect", "build.poly", "build.edge", "build.label", "build.clear", "build.walls", "build.stamps", "build.lights", "build.height", "build.stairs", "build.rough",
     "door.set", "trap.spring", "trap.act", "trap.settle", "scene.setPhase", "room.setPlayerScene", "view.follow", "view.blackout", "journal.reveal", "handout.show", "handout.close",
+    "clock.set", "clock.advance",
   ],
   setup: [
     "trap.create", "trap.delete", "character.create", "character.delete", "monster.create", "monster.update", "monster.delete", "monster.setSrdImage", "companionBlock.create", "companionBlock.update", "companionBlock.delete",
     "savedEncounter.create", "savedEncounter.update", "savedEncounter.delete", "scene.create", "scene.delete", "scene.duplicate", "scene.reorder", "scene.setMap", "scene.setGrid", "vision.holders", "room.update",
     "journal.create", "journal.update", "journal.delete", "pin.put", "pin.remove", "handoutDoc.create", "handoutDoc.delete",
+    "clock.start", "clock.stop", "clock.update",
   ],
   none: ["roll.change", "cast.ask", "cast.close", "dice.roll", "roll.dice", "actor.deathRoll", "actor.rechargeRoll", "build.ask", "member.update", "log.chat", "log.whisper", "undo", "redo"],
 } satisfies Record<UndoScope, string[]>;

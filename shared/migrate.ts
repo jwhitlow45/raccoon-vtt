@@ -11,8 +11,8 @@ import { ownEntry } from "./records.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 31;
-export const OP_VERSION = 41;
+export const SNAPSHOT_VERSION = 32;
+export const OP_VERSION = 42;
 
 export type MigrationStep = {
   from: number;
@@ -214,6 +214,10 @@ export const snapshotMigrations: MigrationStep[] = [
   { from: 29, to: 30, apply: (state) => state },
   // Save outcome status is optional. Older readers must refuse this boundary even without a ledger.
   { from: 30, to: 31, apply: (state) => state },
+  // The in-game clock, phase C1 (docs/design/design-v1-calendar.md 6.6): the room's `clock` and a character's `longRest`
+  // are optional, and absent reads as none, so a v31 room is a v32 room as it is. The number moves so that an older
+  // build, which knows neither, refuses a room with a clock rather than load it and send players a hidden one.
+  { from: 31, to: 32, apply: (state) => state },
   // No step moves a square trip wire's imported 1/64 ends onto half cells (FU43-DATA-01). A snapshot migrates before its
   // stored ops replay, so a moved end would change what a stored walk springs and what a stored restore's guard matches.
   // The rules take such a wire as it stands instead (server/rooms/squareWires.legacy.test.ts).
@@ -1062,7 +1066,31 @@ export const opMigrations: MigrationStep[] = [
     to: 41,
     apply: (op) => op,
   },
+  {
+    // The in-game clock, phase C1 (docs/design/design-v1-calendar.md 6.6): no
+    // op changes shape, so the step is the identity. The five clock ops and
+    // the clock line are new, which an older strict schema refuses. From this
+    // version a fight's end adds its rounds to the clock and a character's
+    // Long Rest writes its stamp (`clockTicks`). No op stored before met a
+    // clock, so the gate changes no replay today.
+    // Deploy: nothing to do. Open pages reload with the new build. Rollback
+    // needs the backup for a room with version 42 ops after its last
+    // snapshot, or a clock in it, which an older build refuses to load.
+    from: 41,
+    to: 42,
+    apply: (op) => op,
+  },
 ];
+
+/**
+ * Whether the room's clock moves with existing ops (docs/design/design-v1-calendar.md
+ * 6.6): a fight's end adds its rounds, and a character's Long Rest writes
+ * when it ended. Ops stored before version 42 met no clock and replay
+ * without either. Live ops carry no stored version and take today's rule.
+ */
+export function clockTicks(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < 42);
+}
 
 /** Historical restores keep their original log entries and numbering. */
 export function writesUndoCorrections(opVersion: number | undefined): boolean {

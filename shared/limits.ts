@@ -505,6 +505,23 @@ export const LIMITS = {
   resourcePoolMax: 200,
   /** The HP one Regeneration heals. */
   regenerateMax: 999,
+  /**
+   * The in-game clock (docs/design/design-v1-calendar.md 6.7): a Months
+   * calendar's months, each month's days, a year's days, the days of its
+   * week, each name's characters and the words after the year. The clock
+   * holds `t` within plus or minus `clockSecondsMax` (about 317,000 years of
+   * 365 days), one step moves it at most `clockStepMax` (100 such years), and
+   * a line's date holds at most `clockDateChars`.
+   */
+  calendarMonths: 24,
+  calendarMonthDays: 400,
+  calendarYearDays: 1_000,
+  calendarWeekDays: 14,
+  calendarNameChars: 24,
+  calendarEraChars: 12,
+  clockSecondsMax: 10_000_000_000_000,
+  clockStepMax: 100 * 365 * 86_400,
+  clockDateChars: 120,
 } as const;
 
 export type LimitCheck = { ok: true } | { ok: false; code: "quota"; message: string };

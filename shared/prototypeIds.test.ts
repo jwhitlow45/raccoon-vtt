@@ -86,6 +86,11 @@ function handMade(state: RoomState): Case[] {
   both({ t: "roll.dice", tag: "tag9", rollId: roll, target: { characterId: c0 } });
   both({ t: "actor.deathRoll", tag: "tag9", target: { characterId: c0 }, record: 1 });
   both({ t: "actor.rechargeRoll", tag: "tag9", target: { tokenId: t0 }, key: "actions:fire-breath", name: "Fire Breath", min: 5 });
+  both({ t: "clock.start", id: "clock1", at: 8 * 3_600, shown: true, calendar: { kind: "months", months: [{ name: "Deepwinter", days: 30 }], week: ["Moonday"], era: "AF" } });
+  both({ t: "clock.stop" });
+  both({ t: "clock.update", calendar: { kind: "days" }, shown: false, at: 0 });
+  both({ t: "clock.set", at: 3_600 });
+  both({ t: "clock.advance", by: 600, why: "longRest" });
   both({ t: "undo", head: "0192f0aa-0000-7000-8000-000000000001" });
   both({ t: "redo", head: "0192f0aa-0000-7000-8000-000000000001" });
   dm({ t: "sys.memberJoin", member: { id: "p9", name: "New", color: "#ff0000", kind: "player", createdAt: AT } });

@@ -395,7 +395,7 @@ test("DM status projects through entity reads, while player/display/View-as seri
 
 test("op 33/34 history replays unchanged and snapshot 29/30/31 never invents status", () => {
   assert.ok(OP_VERSION >= 35);
-  assert.equal(SNAPSHOT_VERSION, 31);
+  assert.ok(SNAPSHOT_VERSION >= 31);
   const { page: _page, ...legacy } = outcome();
   for (const version of [33, 34, 35]) {
     assert.deepEqual(migrateOp(legacy, version), legacy);

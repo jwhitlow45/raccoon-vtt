@@ -10,6 +10,7 @@ import { CLASS_IDS } from "./rules/classResources.ts";
 import { DAMAGE_TYPES } from "./rules/damage.ts";
 import { cellIndexMost } from "./rules/grid.ts";
 import { sceneHexSpan } from "./rules/hex.ts";
+import { yearDays } from "./calendar.ts";
 import {
   ABILITY_KEYS,
   CHUNK_CELLS,
@@ -1919,6 +1920,30 @@ const useKind = z.discriminatedUnion("kind", [
 
 const op = <T extends string, S extends z.ZodRawShape>(t: T, shape: S) => z.strictObject({ t: z.literal(t), ...shape });
 
+/**
+ * The room's clock (docs/design/design-v1-calendar.md 6.2 and 6.7). Every list
+ * and name is bounded, and names follow the name characters rule, so a
+ * line's stored date stays within `LIMITS.clockDateChars`. A time is whole
+ * seconds within plus or minus `clockSecondsMax`, a step 1 second to 100
+ * years. The reducer refuses a time whose stored baseline would pass the
+ * bound during a fight (6.2).
+ */
+const calendarName = z.string().min(1).max(LIMITS.calendarNameChars).regex(NAME_CHARS, "names cannot hold control or text direction characters");
+const calendarMonth = z.strictObject({ name: calendarName, days: z.number().int().min(1).max(LIMITS.calendarMonthDays) });
+const calendar = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("days") }),
+  z
+    .strictObject({
+      kind: z.literal("months"),
+      months: z.array(calendarMonth).min(1).max(LIMITS.calendarMonths),
+      week: z.array(calendarName).min(1).max(LIMITS.calendarWeekDays).optional(),
+      era: z.string().min(1).max(LIMITS.calendarEraChars).regex(NAME_CHARS, "names cannot hold control or text direction characters").optional(),
+    })
+    .refine((c) => yearDays(c.months) <= LIMITS.calendarYearDays, { message: `a year holds at most ${LIMITS.calendarYearDays.toLocaleString("en-US")} days` }),
+]);
+const clockTime = z.number().int().min(-LIMITS.clockSecondsMax).max(LIMITS.clockSecondsMax);
+const clockStep = z.number().int().min(1).max(LIMITS.clockStepMax);
+
 // The builder's ops a gesture of several may send, which a `build.ask` carries (docs/design/design-v1-map-discovery.md 5.3).
 const buildPaintOp = op("build.paint", { sceneId: id, terrain, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), forget });
 const buildEraseOp = op("build.erase", { sceneId: id, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), forget });
@@ -2359,6 +2384,23 @@ const stateClientOps = [
   op("encounter.update", { entryId: id, patch: entryPatch, counts: lairCounts.optional() }).refine((o) => o.counts === undefined || o.patch.inLair !== undefined, {
     message: "lair counts go with In lair",
   }),
+  /**
+   * The room's clock (docs/design/design-v1-calendar.md 6.2), the DM's. An
+   * `at` is the time as the DM read it, `clockNow` with a running fight's
+   * rounds, which the reducer stores less those rounds (5.1). The design
+   * names it `t`, which every op's own type already holds. Start is refused
+   * while a clock exists, the others while none does. Start, Stop and
+   * Update are Setup history steps, Set and Advance play steps.
+   */
+  op("clock.start", { id, at: clockTime, shown: z.boolean(), calendar }),
+  op("clock.stop", {}),
+  op("clock.update", { calendar: calendar.optional(), shown: z.boolean().optional(), at: clockTime.optional() }).refine(
+    (o) => o.calendar !== undefined || o.shown !== undefined || o.at !== undefined,
+    { message: "a clock update changes something" },
+  ),
+  op("clock.set", { at: clockTime }),
+  /** `why` marks the party's Long Rest, whose gesture sends the advance first (4.5). */
+  op("clock.advance", { by: clockStep, why: z.literal("longRest").optional() }),
   op("log.chat", { text: longText.min(1) }),
   op("log.whisper", { to: z.array(id).min(1).max(MAX_OWNERS), text: longText.min(1) }),
   op("handout.show", { handout: handoutInput }),
@@ -2808,6 +2850,8 @@ export const diceSchemas = { diceResult, critOn, advantageMode };
 export const rollAnswerSchemas = { rollChange };
 /** A player's ask for saves, so the stored-state schema checks imported asks by the same bounds (docs/design/design-v1-player-save-spell.md 5.7). */
 export const castSchemas = { castInput, castEnd, castRolled };
+/** The clock's shapes, so the stored-state schema checks imported clocks by the same bounds (docs/design/design-v1-calendar.md 6.6). */
+export const clockSchemas = { calendar, calendarName, clockTime, clockStep };
 /** A trap's fields, so the stored-state schema checks imported traps by the same bounds (docs/design/design-v1-traps.md 6.2). */
 export const trapSchemas = { plainId, trapName, trapZone, trapRigInput, trapDue, cellRects, trapMessage: trapLine(LIMITS.trapMessageChars) };
 /** A handout's pages and audience, so the stored-state schema checks imports by the same bounds (docs/design/design-v1-pdf-handouts.md 3.3). */

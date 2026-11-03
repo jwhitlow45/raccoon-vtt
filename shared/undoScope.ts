@@ -97,6 +97,12 @@ export const UNDO_SCOPE_BY_OP = {
   "encounter.next": "play",
   "encounter.prev": "play",
   "encounter.update": "play",
+  // The clock (docs/design/design-v1-calendar.md 6.2): starting, stopping and the calendar or sharing are setup, moving the time is play.
+  "clock.start": "setup",
+  "clock.stop": "setup",
+  "clock.update": "setup",
+  "clock.set": "play",
+  "clock.advance": "play",
   "log.chat": "none",
   "log.whisper": "none",
   "handout.show": "play",

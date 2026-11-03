@@ -81,6 +81,12 @@ export function reads(op: Op, state: RoomState): Reads {
     case "actor.rechargeRoll":
     // An ask reads its damage roll's lines from the log, which only the server holds whole (docs/design/design-v1-player-save-spell.md 5.6).
     case "cast.ask":
+    // The room's clock (docs/design/design-v1-calendar.md 6.2) waits for the server until its key exists.
+    case "clock.start":
+    case "clock.stop":
+    case "clock.update":
+    case "clock.set":
+    case "clock.advance":
       return NEVER;
 
     case "room.update":

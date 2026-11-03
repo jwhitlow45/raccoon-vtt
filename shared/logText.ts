@@ -1,3 +1,4 @@
+import { spanText } from "./calendar.ts";
 import { critParts, type CritParts } from "./dice/crit.ts";
 import { formatFormula, parseFormula } from "./dice/formula.ts";
 import { hitOf, rolledTerms } from "./dice/roll.ts";
@@ -406,6 +407,20 @@ function plural(n: number, one: string, many: string): string {
 }
 
 /**
+ * A clock line (docs/design/design-v1-calendar.md 4.7), from the date it
+ * stored when written, so a calendar renamed later never rewrites it.
+ */
+export function clockText(data: Extract<LogEvent, { type: "clock" }>): string {
+  if (data.from !== undefined) return `The DM ${data.from === "undo" ? "undid" : "redid"} a clock change. It is now ${data.date}.`;
+  if (data.why === "start") return `The DM starts the clock: ${data.date}.`;
+  if (data.why === "set") return `The DM sets the date and time: ${data.date}.`;
+  const span = spanText(data.by ?? 0);
+  // "1 hour passes." but "2 days and 3 hours pass.": one unit of one, or under a minute, takes the singular.
+  const verb = /^(1 [a-z]+|less than a minute)$/.test(span) ? "passes" : "pass";
+  return `${span.charAt(0).toUpperCase()}${span.slice(1)} ${verb}${data.why === "longRest" ? " in a Long Rest" : ""}. It is now ${data.date}.`;
+}
+
+/**
  * One event as a sentence. Numbers appear only when the projection kept
  * them, which it does only for viewers who may see that creature's exact
  * HP. Otherwise the HP label (Bloodied, Dying) is all there is to say.
@@ -561,6 +576,8 @@ function eventText(data: LogEvent, names: LogNames, dm: boolean): string {
       return castText(data, creatureName(names, data));
     case "use":
       return useText(data, creatureName(names, data));
+    case "clock":
+      return clockText(data);
     case "trap": {
       // The DM's trap log (docs/design/design-v1-traps.md 6.3): the name the trap had when it went off.
       const who = creatureList(names, data.by, data.more);

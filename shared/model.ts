@@ -203,7 +203,46 @@ export type RoomState = {
    * Duplicate with Fog starts without one. A projection never holds it.
    */
   memoryShared?: Record<SceneId, ShareMark>;
+  /**
+   * The in-game clock (docs/design/design-v1-calendar.md 6.1), off until the
+   * DM starts it. Absent and null are both "no clock", so rooms from before
+   * it need no migration. The DM gets it whole, a player and a table display
+   * only `{ id, rev: 0, t, calendar }` while it is shown (6.4).
+   */
+  clock?: RoomClock | null;
 };
+
+/** One month of a Months calendar: its name and its length in days. */
+export type CalendarMonth = { name: string; days: number };
+
+/**
+ * How the clock's seconds read as dates (docs/design/design-v1-calendar.md 5):
+ * Day count ("Day 4"), or the DM's own months with an optional week of
+ * named days and words after the year. No leap days, and years count from 0.
+ */
+export type Calendar = { kind: "days" } | { kind: "months"; months: CalendarMonth[]; week?: string[]; era?: string };
+
+export type RoomClock = {
+  /** A new id at each start, so a rest stamp from an earlier clock reads as none. */
+  id: string;
+  rev: number;
+  /**
+   * Whole seconds from the calendar's first moment (shared/calendar.ts),
+   * without the running fight's rounds, which `clockNow` adds while the
+   * fight runs and its end stores (5.1, 4.6).
+   */
+  t: number;
+  /** Players receive the clock and its lines. */
+  shown: boolean;
+  calendar: Calendar;
+};
+
+/**
+ * When a character's last Long Rest ended (docs/design/design-v1-calendar.md
+ * 4.5): `clockNow` as the rest applied, and the id of the clock that read
+ * it, so a stamp from a stopped clock reads as none under a new one.
+ */
+export type LongRestStamp = { at: number; clock: string };
 
 /** A scene's mark in `playedScenes` or `memoryShared`. The mark is the entry: only its presence says anything. */
 export type SceneMark = { sceneId: SceneId; rev: number };
@@ -1324,6 +1363,13 @@ export type Character = {
    * none. Its players and the DM read them, other players never.
    */
   resources?: ClassResource[];
+  /**
+   * When its last Long Rest ended by the room's clock (docs/design/design-v1-calendar.md
+   * 4.5), DM only: every player projection drops it, the character's owners
+   * included. Written by `actor.rest` while a clock runs, never by a client
+   * patch. Absent until then, and in rooms from before it.
+   */
+  longRest?: LongRestStamp;
 };
 
 /**
@@ -2638,7 +2684,17 @@ export type LogEvent =
    * back, and `hidden` a use after a secret roll: both reach only the DM and
    * the creature's owners.
    */
-  | (AboutCreature & { type: "use"; what: "legendary" | "resist" | "ability" | "resource"; name?: string; cost?: number; left?: number; max?: number; back?: true; hidden?: true });
+  | (AboutCreature & { type: "use"; what: "legendary" | "resist" | "ability" | "resource"; name?: string; cost?: number; left?: number; max?: number; back?: true; hidden?: true })
+  | ClockLogEvent;
+
+/**
+ * A change of the room's clock (docs/design/design-v1-calendar.md 4.7): `date`
+ * is `lineDate` as it read after the change, so renaming a month never
+ * rewrites a line. `by` is a step's seconds, `why` what moved it other than
+ * a step, and `from` the DM's Undo or Redo of a change. Its audience is
+ * frozen when written: shared while the clock is shown, the DM's otherwise.
+ */
+export type ClockLogEvent = { type: "clock"; date: string; by?: number; why?: "longRest" | "set" | "start"; from?: "undo" | "redo" };
 
 /**
  * One roll of a `dice` line: its result, the label and creature asked, and

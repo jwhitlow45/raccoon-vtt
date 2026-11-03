@@ -35,6 +35,7 @@ import {
   boundsRollChanges,
   seatsFromSnappedFull,
   stopsFileApart,
+  clockTicks,
   seatsApart,
   hiddenTowStands,
   stopsStandClear,
@@ -1620,7 +1621,7 @@ describe("follow-up batch 45: op version 38, single file behind a squeezing hold
 describe("follow-up batch 46: op version 39, a row's In lair kept on its token (LAIR-TICK-CARRY)", () => {
   test("keeps stored operations unchanged through the identity step, and gates the tick at 39 with the snapshot at 31", () => {
     assert.ok(OP_VERSION >= 39);
-    assert.equal(SNAPSHOT_VERSION, 31, "a snapshot without the tick is still whole");
+    assert.ok(SNAPSHOT_VERSION >= 31, "a snapshot without the tick is still whole");
     const op = { t: "encounter.update", entryId: "e1", patch: { inLair: true } };
     assert.equal(runMigrations(op, 38, 39, opMigrations), op);
     assert.equal(migrateOp(op, 38), op);
@@ -1632,7 +1633,7 @@ describe("follow-up batch 46: op version 39, a row's In lair kept on its token (
 describe("batch 47: op version 40, Lucky and an added die held to the dice grammar's bounds (FU47-ASTRA-01)", () => {
   test("keeps stored operations unchanged through the identity step, and gates the bounds at 40 with the snapshot at 31", () => {
     assert.ok(OP_VERSION >= 40);
-    assert.equal(SNAPSHOT_VERSION, 31, "no snapshot field changes");
+    assert.ok(SNAPSHOT_VERSION >= 31, "no snapshot field changes");
     const op = { t: "roll.change", rollId: "r1", target: { characterId: "c1" }, ask: { id: "a1", on: "t1", reason: "lucky" } };
     assert.equal(runMigrations(op, 39, 40, opMigrations), op);
     assert.equal(migrateOp(op, 39), op);
@@ -1644,13 +1645,28 @@ describe("batch 47: op version 40, Lucky and an added die held to the dice gramm
 describe("op version 41, seats on a full-size walk carried by the holder's snapped box (RIDER-LED-HALF-SEAT) and a stopped file stepped apart (TRAP-STOP-STACK)", () => {
   test("keeps stored operations unchanged through the identity step, and gates the seats at 41 with the snapshot at 31", () => {
     assert.ok(OP_VERSION >= 41);
-    assert.equal(SNAPSHOT_VERSION, 31, "no snapshot field changes");
+    assert.ok(SNAPSHOT_VERSION >= 31, "no snapshot field changes");
     const op = { t: "token.move", tokenId: "mount", x: 6, y: 8 };
     assert.equal(runMigrations(op, 40, 41, opMigrations), op);
     assert.equal(migrateOp(op, 40), op);
     assert.throws(() => runMigrations(op, 41, 40, opMigrations), /down/);
     assert.deepEqual([seatsFromSnappedFull(1), seatsFromSnappedFull(40), seatsFromSnappedFull(41), seatsFromSnappedFull(undefined)], [false, false, true, true]);
     assert.deepEqual([stopsFileApart(1), stopsFileApart(40), stopsFileApart(41), stopsFileApart(undefined)], [false, false, true, true]);
+  });
+});
+
+describe("op version 42 and snapshot 32, the in-game clock (docs/design/design-v1-calendar.md 6.6)", () => {
+  test("keeps stored operations and snapshots unchanged through the identity steps, and gates the clock at 42", () => {
+    assert.ok(OP_VERSION >= 42);
+    assert.ok(SNAPSHOT_VERSION >= 32);
+    const op = { t: "encounter.end" };
+    assert.equal(runMigrations(op, 41, 42, opMigrations), op);
+    assert.equal(migrateOp(op, 41), op);
+    assert.throws(() => runMigrations(op, 42, 41, opMigrations), /down/);
+    const state = room();
+    assert.equal(runMigrations(state, 31, 32, snapshotMigrations), state);
+    assert.throws(() => runMigrations(state, 32, 31, snapshotMigrations), /down/);
+    assert.deepEqual([clockTicks(1), clockTicks(41), clockTicks(42), clockTicks(undefined)], [false, false, true, true]);
   });
 });
 

@@ -1,3 +1,4 @@
+import { spanText } from "#shared/calendar.ts";
 import { chunkKey, doorChunk, keys } from "#shared/keys.ts";
 import type { Actor, LogEvent, RoomState, Token, Viewer } from "#shared/model.ts";
 import { PLAYERS_SEE_WORDS, playersSeeOf } from "#shared/playersSee.ts";
@@ -259,6 +260,19 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
     }
     case "door.set":
       return doorPhrase(op, before);
+    // The clock (docs/design/design-v1-calendar.md 6.5). A party's Long Rest is a gesture whose first op is its advance, which names the step.
+    case "clock.start":
+      return "starting the clock";
+    case "clock.stop":
+      return "stopping the clock";
+    case "clock.update":
+      if (op.calendar !== undefined) return "changing the calendar";
+      if (op.at !== undefined) return "setting the date and time";
+      return op.shown ? "turning on Players see the date and time" : "turning off Players see the date and time";
+    case "clock.set":
+      return "setting the date and time";
+    case "clock.advance":
+      return op.why === "longRest" ? "the party's Long Rest" : `moving the clock on ${spanText(op.by)}`;
     case "encounter.start":
       return "starting the fight";
     case "encounter.end":

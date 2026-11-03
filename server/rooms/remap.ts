@@ -604,6 +604,8 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
         return { ...data, memberId: members.of(data.memberId) };
       case "encounter":
       case "correction":
+      // A clock line names no id (docs/design/design-v1-calendar.md 6.6).
+      case "clock":
         return data;
       case "teleport":
         return { ...data, tokenId: tokens.of(data.tokenId) };
