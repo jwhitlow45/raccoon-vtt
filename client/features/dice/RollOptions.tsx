@@ -65,6 +65,7 @@ import {
   playerCreatures,
   attacksLine,
   joinSentences,
+  presetNotes,
   presetTag,
   presetWords,
   rechargeUseOf,
@@ -452,12 +453,18 @@ function CardBody(props: Shown) {
   const numbers = rolls.numbers;
   const typed = parseBonus(useOption((s) => s.bonus[ctx.key] ?? ""));
   const init = rolls.initBonus;
+  const dying = actor?.life === "dying";
+  // A reminder shows under the roll it bears on, said once: what a death save's says, Initiative's line leaves out.
+  const deathNotes = dying ? presetNotes([presetFor(dice, ctx.creature, { kind: "deathSave" }, { rolls })]) : [];
+  const initNotes = presetNotes([presetFor(dice, ctx.creature, { kind: "initiative" }, { rolls })]).filter((note) => !deathNotes.includes(note));
+  const initReminder = initNotes.length > 0 ? <Help>{joinSentences(initNotes)}</Help> : null;
   return (
     <>
       {ctx.blocked ? <Note tone="info">{ctx.blocked}</Note> : null}
       {ctx.played ? <Switch label={`Ask ${props.name} to roll saves and checks`} checked={!askOff} onChange={(on) => store.setState((s) => ({ askOff: { ...s.askOff, [ctx.key]: !on } }))} /> : null}
       {/* While dying, its death save is the one roll it makes, so it leads (W7B-P-19). */}
-      {actor?.life === "dying" ? <DeathSaveCell ctx={ctx} bonus={init === null ? null : (numbers?.deathSave ?? 0)} /> : null}
+      {dying ? <DeathSaveCell ctx={ctx} bonus={init === null ? null : (numbers?.deathSave ?? 0)} /> : null}
+      {deathNotes.length > 0 ? <Help>{joinSentences(deathNotes)}</Help> : null}
       {numbers ? null : (
         <BonusField
           ctx={ctx}
@@ -466,10 +473,16 @@ function CardBody(props: Shown) {
         />
       )}
       {init !== null ? (
-        <InitiativeCell ctx={ctx} bonus={init} bonusText={signedText(init)} />
+        <>
+          <InitiativeCell ctx={ctx} bonus={init} bonusText={signedText(init)} />
+          {initReminder}
+        </>
       ) : numbers ? null : (
-        // With no known bonus it rolls by the one typed, and waits for it.
-        <InitiativeCell ctx={{ ...ctx, blocked: ctx.blocked ?? typedTap("roll", typed).waits }} bonus={typed?.ok ? typed.bonus : 0} bonusText={typed?.ok ? d20Text(typed.bonus) : "d20"} />
+        <>
+          {/* With no known bonus it rolls by the one typed, and waits for it. */}
+          <InitiativeCell ctx={{ ...ctx, blocked: ctx.blocked ?? typedTap("roll", typed).waits }} bonus={typed?.ok ? typed.bonus : 0} bonusText={typed?.ok ? d20Text(typed.bonus) : "d20"} />
+          {initReminder}
+        </>
       )}
     </>
   );
@@ -544,6 +557,12 @@ function OptionGroups(props: Shown) {
   const spellAttack = presetOf({ kind: "attack", spell: true });
   const spellNote = attacksLine(spellAttack, [...(numbers?.spellAttack !== undefined ? [{ name: "Spell attack", preset: spellAttack }] : []), ...attacksOf(spells)]);
   const sharedNote = [...new Set([saveNote, checkNote].flatMap((n) => n.split(". ")).filter(Boolean))].join(". ");
+  // What a group's rolls remind of shows under its name before a tap, each said once (WXB-R2-3), as an attacks group's line does.
+  const skillTests = SKILL_KEYS.map((s): D20Test => ({ kind: "check", ability: SKILLS[s].ability, skill: s }));
+  const reminders = (tests: readonly D20Test[]) => {
+    const notes = presetNotes(tests.map(presetOf));
+    return notes.length > 0 ? <Help>{joinSentences(notes)}</Help> : null;
+  };
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)" }}>
@@ -553,6 +572,7 @@ function OptionGroups(props: Shown) {
         </div>
       ) : null}
       <Group label="Saves and checks" {...groupFold("saves")} summary={markedSummary(ctx, foldSummaryParts({ group: "saves", note: sharedNote, saves: numbers ? Object.fromEntries(ABILITY_KEYS.map((a) => [a, numbers.abilities[a].save])) : null }, asks.saves))}>
+        {reminders([...saveTests, ...checkTests])}
         <Grid label="Saves" note={numbers ? saveNote : undefined}>
           {ABILITY_KEYS.map((a) =>
             !numbers ? (
@@ -592,6 +612,7 @@ function OptionGroups(props: Shown) {
           ),
         )}
       >
+        {reminders(skillTests)}
         {/* Room for Animal Handling, its bonus and the busy mark at the cell's 14 px type. */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 200px), 1fr))", gridAutoRows: "1fr", gap: theme.space(1) }}>
           {SKILL_KEYS.map((s: SkillKey) => {

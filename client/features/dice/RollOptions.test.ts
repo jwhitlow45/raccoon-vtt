@@ -532,4 +532,46 @@ describe("what weather and conditions remind a roll of, on the Dice panel (docs/
     const dying = render(P1, false, false, {}, true, undefined, [], undefined, [{ id: "e1", key: "unconscious" }, { id: "e2", key: "heroic-inspiration" }]);
     assert.match(buttonOf(dying, /^Death Save/)?.[1] ?? "", /Heroic Inspiration: you can spend it to reroll any die immediately after rolling it\./, "and a death save's");
   });
+
+  // A sighted player on a phone never reads a button's name, so each reminder shows as words under what it bears on, once there (WXB-R2-3).
+  const shownAt = (html: string, text: string) => [...html.matchAll(/<p[^>]*>([^<]*)<\/p>/g)].filter((m) => m[1]!.includes(text)).map((m) => m.index);
+  const groupAt = (html: string, name: string) => html.indexOf(`>${name}</span>`);
+  const where = (html: string, at: number) => {
+    const groups = (["Saves and checks", "Skills", "Actions"] as const).map((name) => [name, groupAt(html, name)] as const);
+    for (const [name, start] of groups) assert.ok(start > 0, `${name}'s group`);
+    return groups.findLast(([, start]) => start < at)?.[0] ?? "card";
+  };
+
+  test("patchy fog's reminder shows under Skills, before Perception, and under no other group", () => {
+    const FOG = "Patchy fog: Lightly Obscured. Disadvantage on Perception checks that rely on sight.";
+    const fog = render(P1, false, false, {}, true, undefined, [], { kind: "fog" });
+    const lines = shownAt(fog, FOG);
+    assert.equal(lines.length, 1, "said once");
+    assert.equal(where(fog, lines[0]!), "Skills");
+    assert.ok(lines[0]! < fog.indexOf('aria-label="Perception'), "above the skills it bears on");
+    assert.deepEqual(shownAt(render(P1, false, false, {}, true, undefined, [], { kind: "clear" }), FOG), [], "and none without the fog");
+    // With Frightened too, the Skills keep one line, a condition's reminder before the weather's.
+    const both = render(P1, false, false, {}, true, undefined, [], { kind: "fog" }, [{ id: "e1", key: "frightened" }]);
+    const skills = shownAt(both, FOG);
+    assert.equal(skills.length, 1);
+    assert.match(both.slice(skills[0]), /^<p[^>]*>Frightened: Disadvantage on ability checks while the source of fear is within line of sight\. Patchy fog: [^<]*<\/p>/);
+  });
+
+  test("a condition's reminders show once under each group they bear on and under Initiative on the card, and a death save's under it", () => {
+    const CHECKS = "Frightened: Disadvantage on ability checks while the source of fear is within line of sight.";
+    const INITIATIVE = "Frightened: Disadvantage on Initiative, a Dexterity check, while the source of fear is within line of sight.";
+    const scared = render(P1, false, false, {}, true, undefined, [], undefined, [{ id: "e1", key: "frightened" }]);
+    assert.deepEqual(shownAt(scared, CHECKS).map((at) => where(scared, at)), ["Saves and checks", "Skills"], "the checks' reminder under each group of checks");
+    const initiative = shownAt(scared, INITIATIVE);
+    assert.deepEqual(initiative.map((at) => where(scared, at)), ["card"], "Initiative's on the card");
+    assert.ok(initiative[0]! > scared.indexOf('aria-label="Initiative'), "under Initiative");
+    assert.equal(shownAt(scared, "Frightened: Disadvantage on attack rolls while the source of fear is within line of sight.").length, 1, "the attacks' line still says theirs once");
+
+    const HEROIC = "Heroic Inspiration: you can spend it to reroll any die immediately after rolling it.";
+    const dying = render(P1, false, false, {}, true, undefined, [], undefined, [{ id: "e1", key: "unconscious" }, { id: "e2", key: "heroic-inspiration" }]);
+    const heroic = shownAt(dying, HEROIC);
+    assert.deepEqual(heroic.map((at) => where(dying, at)), ["card", "Saves and checks", "Skills", "Actions"], "once in the card and once in each group");
+    assert.ok(heroic[0]! > dying.indexOf('aria-label="Death Save') && heroic[0]! < dying.indexOf('aria-label="Initiative'), "under the death save, and Initiative's line does not say it again");
+    assert.deepEqual(shownAt(render(P1, false, false, {}, true), HEROIC), [], "nothing to remind of, no line");
+  });
 });

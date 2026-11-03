@@ -1775,6 +1775,104 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     }
   });
 
+  test("wxfix-r2-3. what patchy fog and Frightened remind Thorn's rolls of shows before he rolls, once under each group it bears on and under Initiative on his card, in line on a phone at 100% and 130% and at 1440 x 900", async () => {
+    await player.setViewportSize({ width: 390, height: 844 });
+    const sceneId = dmSocket.state!.meta.playerSceneId!;
+    const bounds = dmSocket.state!.scenes[sceneId]!.bounds;
+    const FOG = "Patchy fog: Lightly Obscured. Disadvantage on Perception checks that rely on sight.";
+    const CHECKS = "Frightened: Disadvantage on ability checks while the source of fear is within line of sight.";
+    const INITIATIVE = "Frightened: Disadvantage on Initiative, a Dexterity check, while the source of fear is within line of sight.";
+    const at = { x: 3, y: 3 };
+    const tokenId = randomUUID();
+    const effectId = randomUUID();
+    const group = (rolls: Locator, name: string) => rolls.locator("[data-panel-group]").filter({ has: rolls.page().getByRole("button", { name, exact: true }) });
+    // Said where a sighted player reads it before a tap, once in each group: never only in a button's name.
+    const shown = async (rolls: Locator, where: string) => {
+      const card = rolls.locator("[data-dice-card]");
+      const saves = group(rolls, "Saves and checks");
+      const skills = group(rolls, "Skills");
+      for (const [inside, text, label] of [[skills, FOG, "fog under Skills"], [saves, CHECKS, "Frightened under Saves and checks"], [skills, CHECKS, "Frightened under Skills"], [card, INITIATIVE, "Frightened under Initiative"]] as const) {
+        // A group's reminders share its one line, as an attacks group's do.
+        const line = inside.locator("p").filter({ hasText: text });
+        await line.first().waitFor();
+        assert.equal(await line.count(), 1, `${where}: ${label} said once`);
+        await line.scrollIntoViewIfNeeded();
+        assert.ok(await line.isVisible(), `${where}: ${label} shows`);
+      }
+      assert.equal(await saves.locator("p").filter({ hasText: FOG }).count(), 0, `${where}: fog bears on no save and no ability check`);
+    };
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    await diceFoldsOpen(context);
+    try {
+      await ops!.send({ t: "token.create", token: { id: tokenId, sceneId, kind: "pc", name: "Thorn", size: "medium", ...at, visibility: "all", disposition: "ally", actor: { ref: run.thornId } } });
+      await ops!.send({ t: "actor.effect.add", target: { characterId: run.thornId }, effect: { id: effectId, key: "frightened" } });
+      await ops!.send({ t: "scene.update", sceneId, patch: { weather: { kind: "fog" } } });
+      await waitFor("the fog on Pat's phone", () => playerSocket.state?.scenes[sceneId]?.weather?.kind === "fog" || null);
+      await openDicePhone(player);
+      const rolls = thornRolls(player);
+      const perception = rolls.getByRole("button", { name: /^Perception/ });
+      await waitFor("Perception names the fog", async () => ((await perception.getAttribute("aria-label"))?.includes(FOG) ? true : null));
+      // Where the Skills start, the top of the list a player scrolls down to Perception.
+      await rolls.getByRole("button", { name: /^Acrobatics/ }).scrollIntoViewIfNeeded();
+      await sleep(200);
+      await shots.take(player, "wxfix-r2-fog-skills");
+      await rolls.getByRole("button", { name: /^Initiative/ }).scrollIntoViewIfNeeded();
+      await sleep(200);
+      await shots.take(player, "wxfix-r2-frightened-card");
+      await shown(rolls, "390 x 844");
+
+      // Each line in line with its group on a phone, at 100% and 130%.
+      const lines: string[] = [];
+      for (const scale of [1, 1.3]) {
+        await player.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
+        await player.goto(`${server.origin}/r/${run.roomId}`);
+        await player.getByRole("status", { name: "Connected" }).first().waitFor();
+        await openDicePhone(player);
+        for (const size of [{ width: 390, height: 844 }, { width: 320, height: 568 }]) {
+          const screen = `${size.width}x${size.height} ${Math.round(scale * 100)}%`;
+          await player.setViewportSize(size);
+          await sleep(200);
+          await shown(rolls, screen);
+          for (const [name, part] of [["card", rolls.locator("[data-dice-card]")], ["Saves and checks", group(rolls, "Saves and checks")], ["Skills", group(rolls, "Skills")]] as const) {
+            await part.scrollIntoViewIfNeeded();
+            await sleep(200);
+            lines.push(...alignmentLines(await measureAlignment(part), `${name} in fog, Frightened, ${screen}`));
+          }
+        }
+      }
+      await player.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+      await player.setViewportSize({ width: 390, height: 844 });
+      await player.goto(`${server.origin}/r/${run.roomId}`);
+      await player.getByRole("status", { name: "Connected" }).first().waitFor();
+      await openDicePhone(player);
+
+      // The DM's computer at 1440 x 900, Thorn picked on the map.
+      await context.addCookies(await dmContext.cookies(server.origin));
+      const page = await context.newPage();
+      await page.goto(`${server.origin}/r/${run.roomId}`);
+      await page.getByRole("status", { name: "Connected" }).first().waitFor();
+      await page.locator(".konvajs-content").first().waitFor();
+      await tapCell(page, bounds, at);
+      await openSideTab(page, "Dice");
+      const there = page.getByRole("tabpanel", { name: sideTabName("Dice") }).getByRole("region", { name: "Rolls for Thorn" });
+      await shown(there, "1440 x 900");
+      for (const [name, part] of [["card", there.locator("[data-dice-card]")], ["Saves and checks", group(there, "Saves and checks")], ["Skills", group(there, "Skills")]] as const) {
+        await part.scrollIntoViewIfNeeded();
+        await sleep(200);
+        lines.push(...alignmentLines(await measureAlignment(part), `${name} in fog, Frightened, 1440x900 100%`));
+      }
+      await there.locator("p").filter({ hasText: FOG }).scrollIntoViewIfNeeded();
+      await sleep(200);
+      await shots.take(page, "wxfix-r2-fog-1440");
+      assert.deepEqual(lines, [], "a reminder's line out of line");
+    } finally {
+      await context.close();
+      await ops!.send({ t: "scene.update", sceneId, patch: { weather: null } });
+      await ops!.send({ t: "actor.effect.remove", target: { characterId: run.thornId }, effectId }).catch(() => undefined);
+      await ops!.send({ t: "token.delete", tokenId }).catch(() => undefined);
+    }
+  });
+
   test("dpf1-d2. Again's menu repeats a secret roll's formula with the chosen mode, still secret and with its label", async () => {
     await player.emulateMedia({ reducedMotion: "reduce" });
     try {
