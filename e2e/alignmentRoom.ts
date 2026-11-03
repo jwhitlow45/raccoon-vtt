@@ -1007,6 +1007,29 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
     await escapeAll(page);
   } else await sweep.missing(page, "window-goblin", "a tap on the goblin opened no window");
 
+  // Snap off (docs/design/design-v1-snap-off.md 9): a goblin drawn off its square gets Snap to grid after Place freely, and Place freely reads pressed. The play row is measured with both, and the outline is canvas, which no DOM check reads.
+  await ops.send({ t: "token.update", tokenId: run.ids.goblin, patch: { drawnAt: { x: 9.25, y: 2.75 } } });
+  await waitFor("the goblin drawn off its square", () => (dmSocket.state?.tokens[run.ids.goblin]?.nudge ? true : null));
+  try {
+    const placed = await selectToken(page, "Goblin", { x: 9, y: 3 });
+    if (placed) {
+      await expandBar(placed);
+      const place = placed.getByRole("button", { name: "Place freely", exact: true });
+      const snap = placed.getByRole("button", { name: "Snap to grid", exact: true });
+      if ((await place.count()) === 0 || (await snap.count()) === 0) await sweep.missing(page, "snapoff-play-row", "the bar of a placed goblin has no Place freely or no Snap to grid");
+      else {
+        await sweep.measure(page, "snapoff-snap-row", placed.locator('[data-bar-row="play"]'));
+        await place.click();
+        await waitFor("Place freely pressed", async () => ((await place.getAttribute("aria-pressed")) === "true" ? true : null), 3_000);
+        await sweep.measure(page, "snapoff-pressed-row", placed.locator('[data-bar-row="play"]'));
+        await place.click();
+      }
+    } else await sweep.missing(page, "snapoff-play-row", "a tap on the placed goblin opened no window");
+  } finally {
+    await escapeAll(page);
+    await ops.send({ t: "token.update", tokenId: run.ids.goblin, patch: { drawnAt: null } });
+  }
+
   // A rider's window: Thorn on the warhorse, steering it.
   await ops.send({ t: "token.attach", tokenId: run.ids.thorn, to: run.ids.horse, kind: "ride", steer: true, x: 6, y: 5, elevation: 0 });
   const rider = await selectToken(page, "Thorn", { x: 6, y: 5 });
