@@ -243,13 +243,13 @@ It reads `E2E_PORT`, `DATABASE_URL` and `E2E_SCREENSHOT_DIR` as
 `pnpm test:e2e` does. Each file's output also goes to
 `test-results/e2e-logs`, and its screenshots to a folder of its own. Shards
 can run side by side on one machine when each has its own database and its
-own `E2E_PORT`, at least 30 apart: a file uses ports up to `E2E_PORT` plus
-29, and the join limits count every run from one address in the database.
-On macOS, reserve port 7000 for AirPlay Receiver. Choose a whole 30-port
-range that excludes it, such as 7010 to 7039 with `E2E_PORT=7010`, then
-7040 to 7069 with `E2E_PORT=7040`. Bases from 6971 through 7000 include
-port 7000 and must be skipped. Lane briefs should reserve those whole
-ranges too.
+own `E2E_PORT`, at least 60 apart: a file uses ports up to `E2E_PORT` plus
+51, the range leaves room for the next files' offsets, and the join limits
+count every run from one address in the database. On macOS, reserve port
+7000 for AirPlay Receiver. Choose a whole 60-port range that excludes it,
+such as 7010 to 7069 with `E2E_PORT=7010`, then 7070 to 7129 with
+`E2E_PORT=7070`. Bases from 6941 through 7000 include port 7000 and must be
+skipped. Lane briefs should reserve those whole ranges too.
 
 ## Rebuilding with a changed MP3 encoder
 
