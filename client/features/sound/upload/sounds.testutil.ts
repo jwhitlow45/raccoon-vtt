@@ -1,4 +1,5 @@
 import { Mp3Encoder } from "@breezystack/lamejs";
+import { concat as join } from "#shared/audio/mp3Testutil.ts";
 import { Mp3Writer, type Mp3EncoderClass } from "./encode.ts";
 
 /**
@@ -8,6 +9,9 @@ import { Mp3Writer, type Mp3EncoderClass } from "./encode.ts";
  * headers of the other formats the guard reads. Every one is a tone or
  * silence made here, never a recording.
  */
+
+/** An ID3v1 tag: 128 bytes at a file's end, the frame walk's tests' own. */
+export { id3v1 } from "#shared/audio/mp3Testutil.ts";
 
 export type Tone = { hz: number; dbfs: number };
 
@@ -82,14 +86,9 @@ export function wavFile(spec: WavSpec, channels: readonly Float32Array[]): Uint8
   return concat([wavHeader(spec, channels[0]?.length ?? 0), wavData(spec, channels)]);
 }
 
+/** The parts end to end, joined by the frame walk's own builder, which takes them one by one. */
 export function concat(parts: readonly Uint8Array[]): Uint8Array {
-  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
-  let at = 0;
-  for (const p of parts) {
-    out.set(p, at);
-    at += p.length;
-  }
-  return out;
+  return join(...parts);
 }
 
 /** A constant bitrate MP3 from the app's own encoder: 128 kbps stereo or 64 kbps mono. */
@@ -115,14 +114,6 @@ export function id3v2(title: string, size = 64): Uint8Array {
   body.set(frame);
   const n = body.length;
   return new Uint8Array([...ascii("ID3"), 3, 0, 0, (n >> 21) & 0x7f, (n >> 14) & 0x7f, (n >> 7) & 0x7f, n & 0x7f, ...body]);
-}
-
-/** An ID3v1 tag: 128 bytes at a file's end. */
-export function id3v1(title: string): Uint8Array {
-  const out = new Uint8Array(128);
-  out.set(ascii("TAG"));
-  out.set(ascii(title.slice(0, 30)), 3);
-  return out;
 }
 
 export function aiffHeader(input: { channels: number; frames: number; rateHz: number }): Uint8Array {

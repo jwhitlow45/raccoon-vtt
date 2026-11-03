@@ -1,3 +1,4 @@
+import { MP3_BITRATES, MP3_RATES } from "#shared/audio/mp3.ts";
 import { SOUND_LIMITS } from "#shared/limits.ts";
 import type { SoundUse } from "#shared/sound.ts";
 import type { ByteSource } from "./bytes.ts";
@@ -82,17 +83,18 @@ async function pastId3v2(source: ByteSource, head: Uint8Array): Promise<Start> {
 /** An MPEG audio frame header, MPEG-1, 2 or 2.5, any layer, read leniently: the strict walk is mp3.ts's. */
 export type MpegFrame = { mpeg1: boolean; layer: 1 | 2 | 3; kbps: number; rateHz: number; channels: 1 | 2; bytes: number; samples: number; crc: boolean; emphasis: boolean };
 
+/** Bitrates by header index, in kbps. MPEG-1 Layer III's and its rates are the strict walk's own tables. */
 const KBPS_V1: Record<1 | 2 | 3, readonly number[]> = {
   1: [0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448],
   2: [0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384],
-  3: [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320],
+  3: MP3_BITRATES,
 };
 const KBPS_V2: Record<1 | 2 | 3, readonly number[]> = {
   1: [0, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256],
   2: [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160],
   3: [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160],
 };
-const RATES: Record<number, readonly number[]> = { 3: [44_100, 48_000, 32_000], 2: [22_050, 24_000, 16_000], 0: [11_025, 12_000, 8_000] };
+const RATES: Record<number, readonly number[]> = { 3: MP3_RATES, 2: [22_050, 24_000, 16_000], 0: [11_025, 12_000, 8_000] };
 
 export function mpegFrameAt(b: Uint8Array, at: number): MpegFrame | null {
   if (at + 4 > b.length || b[at] !== 0xff || (b[at + 1]! & 0xe0) !== 0xe0) return null;
