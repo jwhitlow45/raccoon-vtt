@@ -1,11 +1,17 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { ApiError, importFormHeader, MAX_IMPORT_BYTES, type ApiErrorCodeOrNetwork } from "../../lib/api.ts";
-import { exportErrorText, formatBytes, importErrorText, importFileProblem } from "./backup.ts";
+import { exportErrorText, formatBytes, importErrorText, importFileProblem, soundsLeftOutText } from "./backup.ts";
 
 const zip = (size: number) => ({ name: "raccoon-room-K7QH-2MXA.zip", size, type: "application/zip" });
 
 describe("room import", () => {
+  test("an import that left sounds out says how many, and why when the server offers none (docs/design/design-v1-sound.md 6.7)", () => {
+    assert.equal(soundsLeftOutText(2, true), "The room is imported. 2 sounds were left out.");
+    assert.equal(soundsLeftOutText(1, true), "The room is imported. 1 sound was left out.");
+    assert.equal(soundsLeftOutText(1200, false), "The room is imported. This server doesn't offer sound files, so 1,200 sounds were left out.");
+  });
+
   test("refuses a file over 95 MB before uploading it", () => {
     assert.equal(importFileProblem(zip(MAX_IMPORT_BYTES)), null);
     assert.match(importFileProblem(zip(MAX_IMPORT_BYTES + 1)) ?? "", /up to 95 MB.*admin import/);

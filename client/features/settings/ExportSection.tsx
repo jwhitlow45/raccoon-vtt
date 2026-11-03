@@ -1,4 +1,5 @@
-import { useRef, useState, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { Checkbox } from "../../components/Checkbox.tsx";
 import { ErrorText } from "../../components/Field.tsx";
 import { Spinner } from "../../components/Loading.tsx";
 import { buttonLook } from "../../components/looks.ts";
@@ -28,12 +29,21 @@ type Status = { kind: "idle" } | { kind: "checking" } | { kind: "started" } | { 
  *
  * The link looks like a small secondary button. While the check runs it
  * shows a spinner and "Checking…" at full color, as a busy Button does.
+ *
+ * A room with sounds, on a server that offers them, gets Include sounds,
+ * on at first, which says what they add (docs/design/design-v1-sound.md
+ * 6.7). Off, the link asks for the zip without them. Until the room's
+ * storage is known, or when it cannot be read, there is no choice to make
+ * and the backup takes everything, as the server does by default.
  */
 export function ExportSection() {
   const roomId = useRoomView((s) => s.roomId);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const link = useRef<HTMLAnchorElement>(null);
   const checked = useRef(false);
+  const soundBytes = useRoomSoundBytes(roomId);
+  const [withSounds, setWithSounds] = useState(true);
+  const url = soundBytes === null ? exportUrl(roomId) : exportUrl(roomId, { sounds: withSounds });
 
   const onClick = (e: MouseEvent<HTMLAnchorElement>) => {
     // The second click is the one this handler made after a passing check: let the browser download.
@@ -60,9 +70,12 @@ export function ExportSection() {
         Download the whole room as one .zip file: every scene, token, character and image. Anyone can import it from the
         Home page as a new room, on this server or another.
       </Help>
+      {soundBytes !== null ? (
+        <Checkbox label="Include sounds" help={`Sounds add ${formatBytes(soundBytes)}.`} checked={withSounds} disabled={status.kind === "checking"} onChange={setWithSounds} />
+      ) : null}
       <a
         ref={link}
-        href={exportUrl(roomId)}
+        href={url}
         download={`raccoon-room-${formatRoomId(roomId)}.zip`}
         onClick={onClick}
         aria-busy={status.kind === "checking" ? true : undefined}
@@ -97,4 +110,26 @@ export function ExportSection() {
       </Help>
     </Section>
   );
+}
+
+/**
+ * What the room's sounds take, once the server says it offers sounds and
+ * the room holds some, else null. Read once for the section.
+ */
+function useRoomSoundBytes(roomId: string): number | null {
+  const [bytes, setBytes] = useState<number | null>(null);
+  useEffect(() => {
+    let live = true;
+    Promise.all([api.getConfig(), api.roomStorage(roomId)]).then(
+      ([config, storage]) => {
+        if (live) setBytes(config.roomSound && storage.sounds > 0 ? storage.sounds : null);
+      },
+      // A read that fails leaves no choice, and the backup takes everything.
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [roomId]);
+  return bytes;
 }

@@ -13,15 +13,15 @@ import { sightPiecesCheck } from "#shared/visionLimits.ts";
 import { mapDiscoveryUpgrade, migrateSnapshot, needsMapDiscoveryUpgrade } from "#shared/migrate.ts";
 import { assetCreditSchema } from "#shared/protocol.ts";
 import { STARTER_KEY, type FoundWork, type StarterKind } from "#shared/starter.ts";
-import type { Member, RoomState, VideoFacts } from "#shared/model.ts";
+import type { Member, RoomState, SoundFacts, VideoFacts } from "#shared/model.ts";
 import { withPitsCounted } from "#shared/rules/pitCount.ts";
 import { splitCheck } from "#shared/rules/walls.ts";
-import { animatedMapsOn } from "../config.ts";
+import { animatedMapsOn, roomSoundOn } from "../config.ts";
 import { isAssetError } from "../assets/errors.ts";
 import { KINDS, isAssetKind, type AssetKind } from "../assets/kinds.ts";
 import type { AssetService } from "../assets/service.ts";
 import { StarterWorkError, isStarterKind, workForKind, type StarterCatalog } from "../assets/starter.ts";
-import { deleteUnreferencedFiles, isVideoContainer, roomFileKeys } from "../assets/store.ts";
+import { SOUND_MEDIA, deleteUnreferencedFiles, isVideoContainer, roomFileKeys } from "../assets/store.ts";
 import { tempFile } from "../assets/upload.ts";
 import { markDmMembers } from "../auth/grants.ts";
 import { HttpError } from "../auth/http.ts";
@@ -30,7 +30,7 @@ import { newMember, type NewRoom } from "../auth/roomRecords.ts";
 import { randomToken, sha256 } from "../auth/tokens.ts";
 import { withTx } from "../auth/tx.ts";
 import { warnArchiveSkipped, type Logger } from "./actor.ts";
-import { EXPORT_FORMAT, EXPORT_FORMAT_VERSION, assetFileName } from "./exportRoom.ts";
+import { EXPORT_FORMAT, EXPORT_FORMAT_VERSION, assetFileName, withoutSound } from "./exportRoom.ts";
 import type { RoomGateway } from "./gateway.ts";
 import { archiveAdmitted, archiveLines } from "./persistence.ts";
 import { lastLineSeq, refillMapVideos, remapState, type ImportedAsset } from "./remap.ts";
@@ -52,7 +52,10 @@ import { parseRoomState } from "./stateSchema.ts";
  *   with the same bytes, and then the image comes from the shipped file.
  *   Each video goes through the same header check as an upload, and is
  *   skipped while the server's switch is off, which leaves its map's still
- *   (docs/design/design-v1-animated-maps.md 9.3);
+ *   (docs/design/design-v1-animated-maps.md 9.3). Each sound goes through
+ *   the upload's frame walk against the quota, and a zip without sounds,
+ *   or an import while the sound switch is off, keeps no part about sound
+ *   (docs/design/design-v1-sound.md 6.7). The room starts silent either way;
  * - every id is remapped, uploaders included.
  *
  * The room row is written first so asset rows have something to reference,
@@ -100,6 +103,14 @@ export type ImportHooks = {
 
 export type ImportDeps = { pool: pg.Pool; assets: AssetService; gateway: RoomGateway; log: Logger };
 
+/**
+ * The new room, and how many of the file's sounds it left out, with their
+ * places in playlists and scene sounds (docs/design/design-v1-sound.md 6.7):
+ * a file that failed the check or a length that did not fit its use, or
+ * all of them from a zip without sounds or while the switch is off.
+ */
+export type ImportedRoom = NewRoom & { soundsLeftOut: number };
+
 const manifestSchema = z.object({
   formatVersion: z.number().int(),
   assets: z
@@ -113,8 +124,10 @@ const manifestSchema = z.object({
         credit: z.unknown().optional(),
         // Manifest version 2. Checked on its own below too, against this server's catalog.
         starter: z.unknown().optional(),
-        // A video's container, which names its entry. The check reads the real one from the bytes.
+        // A video's container or a sound's mp3, which names its entry. The check reads the real one from the bytes.
         media: z.unknown().optional(),
+        // A sound's facts from its row, never read: the walk finds the file's own.
+        audio: z.unknown().optional(),
       }),
     )
     .max(IMPORT_LIMITS.assets),
@@ -205,7 +218,7 @@ export async function entryToFile(zip: yauzl.ZipFile, entry: yauzl.Entry, path: 
   return hash.digest();
 }
 
-export async function importRoom(deps: ImportDeps, zipPath: string, form: ImportForm, hooks: ImportHooks = {}): Promise<NewRoom> {
+export async function importRoom(deps: ImportDeps, zipPath: string, form: ImportForm, hooks: ImportHooks = {}): Promise<ImportedRoom> {
   const zip = await yauzl.openPromise(zipPath, { autoClose: false }).catch(() => {
     throw new HttpError(400, "bad_zip");
   });
@@ -253,6 +266,9 @@ export async function importRoom(deps: ImportDeps, zipPath: string, form: Import
       if (!raw.success) throw new HttpError(400, "bad_manifest");
       manifest = raw.data;
     }
+    // A zip without sounds, or this server's switch off: the room keeps nothing about sound. It starts silent either way.
+    const keepsSounds = roomSoundOn(deps.assets.config) && manifest.assets.some((a) => a.kind === "sound");
+    const incoming = silenced(keepsSounds ? parsed.state : withoutSound(parsed.state));
 
     const dmKey = randomToken();
     const roomId = await withTx(deps.pool, async (tx) => {
@@ -279,7 +295,7 @@ export async function importRoom(deps: ImportDeps, zipPath: string, form: Import
       // The remap carries the file's memory and marks under the new ids, and a file from before map discovery then takes
       // the upgrade step, so every scene it brings is marked played (docs/design/design-v1-map-discovery.md 5.5). The
       // refill then overwrites every map's and phase's video from its row (docs/design/design-v1-animated-maps.md 9.3).
-      const remapped = finishState(withDiscoveryUpgrade(refillMapVideos(remapState(parsed.state, { assets: assetIds, memberIds }), videoFacts), header.data.schemaVersion), dmMember, roomName);
+      const remapped = finishState(withDiscoveryUpgrade(refillMapVideos(remapState(incoming, { assets: assetIds, memberIds }), videoFacts), header.data.schemaVersion), dmMember, roomName);
       // The log's rings hold here as in any room, each ring its own newest (shared/logRings.ts), and the archive takes
       // the whole log, so Show older and a session's export reach every imported line.
       const state = { ...remapped, log: ringed(remapped.log, remapped.members) };
@@ -288,7 +304,7 @@ export async function importRoom(deps: ImportDeps, zipPath: string, form: Import
       const final = parseRoomState(state);
       if (!final.ok) throw new HttpError(400, "bad_room_json", { extra: { field: final.message.slice(0, 200) } });
       assertWithinLimits(state);
-      const room: NewRoom = { roomId, dmKey, dmMember };
+      const room: ImportedRoom = { roomId, dmKey, dmMember, soundsLeftOut: soundsLeftOut(parsed.state, state) };
       // Every imported member arrives as a player, the old DMs too, and
       // those keep what they had as DM in the log. So they are marked like
       // any member that held a DM grant here, and nobody can continue as them.
@@ -316,6 +332,16 @@ export async function importRoom(deps: ImportDeps, zipPath: string, form: Import
   } finally {
     zip.close();
   }
+}
+
+/** The room silent: an import never starts what the file was playing (D-261102-475). A state without the singleton keeps none. */
+export function silenced(state: RoomState): RoomState {
+  return "playing" in state ? { ...state, playing: null } : state;
+}
+
+/** The file's sounds the stored room does not hold: dropped by the switch, a zip without them, the walk or the use's length. */
+export function soundsLeftOut(file: RoomState, stored: RoomState): number {
+  return Object.keys(file.sounds ?? {}).length - Object.keys(stored.sounds ?? {}).length;
 }
 
 /**
@@ -390,6 +416,9 @@ export function assertWithinLimits(state: RoomState): void {
   if (!scenes.ok) throw over(scenes.message);
 }
 
+/** An imported asset, with a video's or a sound's facts from the row its check made, for the refill after the remap. */
+type ImportedMedia = ImportedAsset & { video?: VideoFacts; audio?: SoundFacts };
+
 /**
  * Streams each image the manifest names through the asset pipeline, at the
  * back of the processing queue, under its kind's size cap, with quota
@@ -398,7 +427,9 @@ export function assertWithinLimits(state: RoomState): void {
  * so the remap can hold each reference to the kind it takes. A video's
  * entry carries its new row's facts too, for the refill, which overwrites
  * every map's and phase's video facts from the rows the import made
- * (remap.ts refillMapVideos): the file's own are untrusted.
+ * (remap.ts refillMapVideos): the file's own are untrusted. A sound's
+ * carries the facts its frame walk found, for the same reason
+ * (docs/design/design-v1-sound.md 6.7).
  *
  * A starter pick whose work this server ships with the same bytes comes
  * from the shipped file instead, as a pick here would
@@ -413,14 +444,17 @@ async function importImages(
   roomId: string,
   counter: InflatedCounter,
   memberIds: ReadonlyMap<string, string>,
-): Promise<Map<string, ImportedAsset & { video?: VideoFacts }>> {
-  const out = new Map<string, ImportedAsset & { video?: VideoFacts }>();
+): Promise<Map<string, ImportedMedia>> {
+  const out = new Map<string, ImportedMedia>();
   const videosOn = animatedMapsOn(deps.assets.config);
+  const soundsOn = roomSoundOn(deps.assets.config);
   for (const asset of manifest.assets) {
     if (out.has(asset.id) || !isAssetKind(asset.kind)) continue;
     const kind = asset.kind;
     // While the switch is off every video is skipped unread, and its map keeps the still (D-261102-510).
     if (kind === "video" && (!videosOn || !isVideoContainer(asset.media))) continue;
+    // So is every sound while its own switch is off (D-261102-513).
+    if (kind === "sound" && (!soundsOn || asset.media !== SOUND_MEDIA)) continue;
     const sha = asset.sha256.toLowerCase();
     // Uploaders are old member ids from the manifest: only members the room knows are kept, under their new ids.
     // Every imported member is a player here, and a player can upload no DM-only kind, so such an asset keeps
@@ -523,7 +557,7 @@ async function importFromZip(
   roomId: string,
   counter: InflatedCounter,
   asset: { kind: AssetKind; uploaders: readonly string[]; credit: unknown },
-): Promise<(ImportedAsset & { video?: VideoFacts }) | null> {
+): Promise<ImportedMedia | null> {
   const cap = KINDS[asset.kind].maxUploadBytes;
   const size = entry.uncompressedSize;
   if (!Number.isSafeInteger(size) || size > cap) {
@@ -553,7 +587,7 @@ async function importFromZip(
         if (credit.success) await deps.pool.query("update assets set credit = $2 where id = $1", [result.id, JSON.stringify(credit.data)]);
         else deps.log.warn({ roomId, entry: entry.fileName }, "import left out an image's credit it could not read");
       }
-      return { id: result.id, kind: result.kind, ...(result.video ? { video: result.video } : {}) };
+      return { id: result.id, kind: result.kind, ...(result.video ? { video: result.video } : {}), ...(result.audio ? { audio: result.audio } : {}) };
     });
   } finally {
     reservation.release();

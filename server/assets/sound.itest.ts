@@ -3,10 +3,15 @@ import { createHash, randomUUID } from "node:crypto";
 import { access, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
+import yauzl from "yauzl";
+import yazl from "yazl";
 import { SOUND_LIMITS } from "#shared/limits.ts";
 import type { SoundFacts } from "#shared/model.ts";
 import { concat, framesFor, id3v1, id3v2, silentFrames, withTagFrame } from "#shared/audio/mp3Testutil.ts";
 import { formatDisplayCode } from "../auth/displaySessions.ts";
+import type { ExportManifest } from "../rooms/exportRoom.ts";
+import type { Logger } from "../rooms/actor.ts";
+import { importRoom } from "../rooms/importRoom.ts";
 import { startEngine, type Engine, type TestClient } from "../rooms/testing.ts";
 import { sweepOrphanFiles, sweepUnnamed } from "./cleanup.ts";
 import { SOUND_PIPELINE } from "./kinds.ts";
@@ -18,8 +23,8 @@ import { solid } from "./testImages.ts";
  * Sound files on the server (docs/design/design-v1-sound.md 7 and 12,
  * Integration): the switch on and off, uploads checked frame by frame in a
  * worker, refusals by code, reuse, serving by ranges, players' and
- * displays' 404s, the quota and its headroom, deletion, the storage route
- * and cleanup.
+ * displays' 404s, the quota and its headroom, deletion, the storage route,
+ * cleanup, and backups with and without sounds.
  */
 
 const MiB = 1024 * 1024;
@@ -39,6 +44,37 @@ async function uploaded(client: TestClient, roomId: string, body: Uint8Array): P
 }
 
 const read = (client: TestClient, id: string, headers: Record<string, string> = {}) => client.request("GET", `/api/assets/${id}/full`, undefined, headers);
+
+async function unzip(buf: Buffer): Promise<Map<string, Buffer>> {
+  const zip = await yauzl.fromBufferPromise(buf);
+  const out = new Map<string, Buffer>();
+  for await (const entry of zip.eachEntry()) {
+    const stream = await zip.openReadStreamPromise(entry);
+    const chunks: Buffer[] = [];
+    for await (const c of stream as AsyncIterable<Buffer>) chunks.push(c);
+    out.set(entry.fileName, Buffer.concat(chunks));
+  }
+  return out;
+}
+
+async function zipOf(files: Map<string, Buffer>): Promise<Buffer> {
+  const zip = new yazl.ZipFile();
+  for (const [name, data] of files) zip.addBuffer(data, name);
+  zip.end();
+  const chunks: Buffer[] = [];
+  for await (const c of zip.outputStream as AsyncIterable<Buffer>) chunks.push(c);
+  return Buffer.concat(chunks);
+}
+
+/** The new room's id and answer from POST /api/rooms/import. */
+async function imported(t: Engine, zip: Buffer): Promise<{ roomId: string; soundsLeftOut?: number }> {
+  const form = Buffer.from(JSON.stringify({ playerPassword: "owlbear-druid-wand", dmName: "Importer" })).toString("base64url");
+  const res = await t.client().request("POST", "/api/rooms/import", undefined, { "content-type": "application/zip", "x-import-form": form }, zip);
+  assert.equal(res.statusCode, 201, res.body);
+  const answer = res.json<{ roomId: string; soundsLeftOut?: number }>();
+  t.track(answer.roomId);
+  return answer;
+}
 
 async function exists(path: string): Promise<boolean> {
   return access(path).then(
@@ -267,6 +303,65 @@ describe("sound files with the switch on", () => {
     assert.equal(await exists(variantPath(t.assetDir, sha(unnamedBytes), "sound", "full", SOUND_PIPELINE, "mp3")), false);
   });
 
+  test("a backup carries each sound as .mp3 with its facts, and the import walks it again and trusts its own", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom();
+    const bytes = withTagFrame(sound(4_000, 31), { name: "Xing" });
+    const s = await uploaded(dm, roomId, bytes);
+    assert.equal((await dm.request("PUT", `/api/rooms/${roomId}/assets?kind=token`, undefined, { "content-type": "image/png" }, await solid(64, 64).png().toBuffer())).statusCode, 200);
+    const exported = await dm.get(`/api/rooms/${roomId}/export`);
+    assert.equal(exported.statusCode, 200, exported.body);
+    const files = await unzip(exported.rawPayload);
+    const manifest = JSON.parse(files.get("assets.json")!.toString()) as ExportManifest;
+    const entry = manifest.assets.find((a) => a.kind === "sound");
+    assert.deepEqual({ media: entry?.media, audio: entry?.audio, sha256: entry?.sha256 }, { media: "mp3", audio: s.audio, sha256: sha(bytes) });
+    assert.ok(files.get(`assets/${sha(bytes)}-sound-full.mp3`)?.equals(Buffer.from(bytes)), "the sound's entry, its bytes as stored");
+
+    // The manifest's facts are untrusted: a hand-edited one claims an hour.
+    entry!.audio = { ms: 3_600_000, channels: 1, kbps: 192 };
+    files.set("assets.json", Buffer.from(JSON.stringify(manifest)));
+    const into = await imported(t, await zipOf(files));
+    assert.equal(into.soundsLeftOut, undefined, "a room with no sounds in its state leaves none out");
+    const { rows } = await t.pool.query<{ media: string; audio: unknown; bytes: string }>("select media, audio, bytes from assets where room_id = $1 and kind = 'sound'", [into.roomId]);
+    assert.deepEqual(rows.map((r) => ({ ...r, bytes: Number(r.bytes) })), [{ media: "mp3", audio: s.audio, bytes: bytes.length }]);
+  });
+
+  test("Include sounds off, the backup holds no sound file and nothing about sound, and its images still go", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom();
+    const bytes = sound(3_000, 41);
+    await uploaded(dm, roomId, bytes);
+    assert.equal((await dm.request("PUT", `/api/rooms/${roomId}/assets?kind=token`, undefined, { "content-type": "image/png" }, await solid(64, 64).png().toBuffer())).statusCode, 200);
+    const head = await dm.request("HEAD", `/api/rooms/${roomId}/export?sounds=0`);
+    assert.equal(head.statusCode, 200);
+    const exported = await dm.get(`/api/rooms/${roomId}/export?sounds=0`);
+    assert.equal(exported.statusCode, 200, exported.body);
+    const files = await unzip(exported.rawPayload);
+    const names = [...files.keys()];
+    assert.equal(names.some((n) => n.endsWith(".mp3")), false, names.join(" "));
+    assert.ok(names.some((n) => n.endsWith("-token-full.webp")));
+    const manifest = JSON.parse(files.get("assets.json")!.toString()) as ExportManifest;
+    assert.deepEqual(manifest.assets.map((a) => a.kind), ["token"]);
+    const into = await imported(t, exported.rawPayload);
+    assert.equal((await t.pool.query("select 1 from assets where room_id = $1 and kind = 'sound'", [into.roomId])).rowCount, 0);
+  });
+
+  test("an import skips a sound entry that fails the walk, and one whose entry is missing", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom();
+    const kept = sound(3_000, 51);
+    const tampered = sound(3_000, 52);
+    const missing = sound(3_000, 53);
+    for (const b of [kept, tampered, missing]) await uploaded(dm, roomId, b);
+    const files = await unzip((await dm.get(`/api/rooms/${roomId}/export`)).rawPayload);
+    files.set(`assets/${sha(tampered)}-sound-full.mp3`, Buffer.from(concat(tampered, id3v1())));
+    files.delete(`assets/${sha(missing)}-sound-full.mp3`);
+    const into = await imported(t, await zipOf(files));
+    const { rows } = await t.pool.query<{ sha: string }>("select encode(sha256, 'hex') as sha from assets where room_id = $1 and kind = 'sound'", [into.roomId]);
+    assert.deepEqual(rows.map((r) => r.sha), [sha(kept)]);
+    assert.deepEqual(await readdir(join(t.assetDir, "tmp")).then((n) => n.filter((x) => x.startsWith("intake-"))), []);
+  });
+
   test("the orphan sweep takes an .mp3 no row names, and leaves a sound's name with another extension", async () => {
     const hex = sha(Buffer.from(randomUUID()));
     const path = variantPath(t.assetDir, hex, "sound", "full", SOUND_PIPELINE, "mp3");
@@ -319,11 +414,55 @@ describe("the sound check off the main thread (D-261102-539)", () => {
 
 describe("sound files with the switch off (D-261102-513)", () => {
   let off: Engine;
+  let on: Engine;
   before(async () => {
     off = await startEngine();
+    on = await startEngine({ env: { ROOM_SOUND: "1" } });
   });
   after(async () => {
     await off.close();
+    await on.close();
+  });
+
+  test("an import skips every sound unread, and a backup made here leaves the room's sounds out", async () => {
+    const dm = on.client();
+    const { roomId } = await dm.createRoom();
+    const bytes = sound(3_000, 61);
+    await uploaded(dm, roomId, bytes);
+    const zip = (await dm.get(`/api/rooms/${roomId}/export`)).rawPayload;
+    assert.ok((await unzip(zip)).has(`assets/${sha(bytes)}-sound-full.mp3`));
+    const into = await imported(off, zip);
+    assert.equal((await off.pool.query("select 1 from assets where room_id = $1 and kind = 'sound'", [into.roomId])).rowCount, 0);
+    // Unread, not read and then refused: nothing is skipped as a refused file.
+    const zipPath = join(off.assetDir, "import", `${randomUUID()}.zip`);
+    await mkdir(join(off.assetDir, "import"), { recursive: true });
+    await writeFile(zipPath, zip);
+    const warned: string[] = [];
+    const log = {
+      info: () => undefined,
+      debug: () => undefined,
+      error: console.error,
+      warn: (...args: unknown[]) => void warned.push(JSON.stringify(args)),
+    } as unknown as Logger;
+    const direct = await importRoom({ pool: off.pool, assets: off.app.assets, gateway: off.app.gateway, log }, zipPath, { playerPwHash: "x", dmName: "Importer", dmColor: "#3e8ef7", createdIp: null });
+    off.track(direct.roomId);
+    assert.deepEqual(warned, []);
+
+    // A room that holds a sound from when the switch was on: the server serves no sound bytes, its backups included.
+    const offDm = off.client();
+    const held = await offDm.createRoom();
+    await off.pool.query(`insert into assets (id, room_id, sha256, kind, pipeline, width, height, bytes, variants, media, audio) values ($1, $2, $3, 'sound', 1, 0, 0, $4, '{full}', 'mp3', $5)`, [
+      randomUUID(),
+      held.roomId,
+      Buffer.from(sha(bytes), "hex"),
+      bytes.length,
+      JSON.stringify({ ms: 3000, channels: 2, kbps: 128 }),
+    ]);
+    await mkdir(join(off.assetDir, sha(bytes).slice(0, 2)), { recursive: true });
+    await writeFile(variantPath(off.assetDir, sha(bytes), "sound", "full", SOUND_PIPELINE, "mp3"), bytes);
+    const files = await unzip((await offDm.get(`/api/rooms/${held.roomId}/export`)).rawPayload);
+    assert.equal([...files.keys()].some((n) => n.endsWith(".mp3")), false);
+    assert.deepEqual((JSON.parse(files.get("assets.json")!.toString()) as ExportManifest).assets, []);
   });
 
   test("an upload is sound_off before a byte is read, and nothing is stored", async () => {

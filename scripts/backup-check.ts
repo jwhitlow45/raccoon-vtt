@@ -796,7 +796,7 @@ describe("backup.sh", { concurrency: false }, () => {
   test("a dump from before the media column lists .webp as before", async () => {
     await stack.fresh();
     await applySchema();
-    await withDb((c) => c.query("alter table assets drop constraint if exists assets_video_media, drop column media, drop column video"));
+    await withDb((c) => c.query("alter table assets drop constraint if exists assets_media_facts, drop column media, drop column video, drop column audio"));
     const room = await addRoom(stack, 2);
     const name = await goodOnce(stack);
     const list = (await stack.asBackup(`cat /backups/${name}.files`)).split("\n").filter(Boolean);
@@ -836,15 +836,51 @@ describe("backup.sh", { concurrency: false }, () => {
     assert.deepEqual(sizes.trim().split("\n").map(Number), videos.map((v) => v.size));
   });
 
-  test("a row whose media is anything but null, webm or mp4 fails the whole list", async () => {
+  test("a row whose media is anything but null, webm, mp4 or mp3, or a media of another kind, fails the whole list", async () => {
+    for (const media of ["mov", "mp3", "webm"]) {
+      await stack.fresh();
+      await applySchema();
+      const room = await addRoom(stack, 1);
+      await withDb((c) => c.query("alter table assets drop constraint if exists assets_media_facts"));
+      // A map's row with a video's or a sound's media is no row the app writes: its file would be listed under another name.
+      await withDb((c) => c.query("update assets set media = $2 where id = $1", [room.images[0]!.id, media]));
+      const r = await stack.backup(["once"]);
+      assert.equal(r.code, 1, `${media}: ${r.stdout}${r.stderr}`);
+      assert.equal((await runs()).at(-1)?.outcome, "failed");
+    }
+  });
+
+  // Synced music and sound (docs/design/design-v1-sound.md 7.3): a sound is named by its row's media, mp3.
+  test("a new dump copies each sound as .mp3 beside the images, and a restore puts it back", async () => {
     await stack.fresh();
     await applySchema();
     const room = await addRoom(stack, 1);
-    await withDb((c) => c.query("alter table assets drop constraint if exists assets_video_media, drop constraint if exists assets_media_check"));
-    await withDb((c) => c.query("update assets set media = 'mov' where id = $1", [room.images[0]!.id]));
-    const r = await stack.backup(["once"]);
-    assert.equal(r.code, 1, r.stdout + r.stderr);
-    assert.equal((await runs()).at(-1)?.outcome, "failed");
+    const sounds = [
+      { hex: randomBytes(32).toString("hex"), size: 3 * MiB + 5 },
+      { hex: randomBytes(32).toString("hex"), size: 417 * 12 },
+    ];
+    await withDb(async (c) => {
+      for (const s of sounds) {
+        await c.query(
+          `insert into assets (id, room_id, sha256, kind, pipeline, width, height, bytes, variants, media, audio)
+           values ($1, $2, $3, 'sound', 1, 0, 0, $4, '{full}', 'mp3', $5)`,
+          [randomUUID(), room.roomId, Buffer.from(s.hex, "hex"), s.size, JSON.stringify({ ms: 3000, channels: 2, kbps: 128 })],
+        );
+      }
+    });
+    const paths = sounds.map((s) => variantPath("", s.hex, "sound", "full", 1, "mp3"));
+    await stack.asApp(["set -e", ...sounds.map((s, i) => `mkdir -p /data/assets/${s.hex.slice(0, 2)} && head -c ${s.size} /dev/urandom > /data/assets/${paths[i]}`)].join("\n"));
+    const name = await goodOnce(stack);
+    const list = (await stack.asBackup(`cat /backups/${name}.files`)).split("\n").filter(Boolean);
+    assert.deepEqual(list, [...listLines(room.images), ...paths].sort());
+    assert.ok(paths.every((p) => p.endsWith(".mp3")));
+    assert.deepEqual((await backups(stack)).files, list);
+    // Lost from the image volume: the restore copies them back at their length.
+    await stack.asApp(paths.map((p) => `rm /data/assets/${p}`).join("\n"));
+    const restored = await stack.restore(name);
+    assert.equal(restored.code, 0, restored.stdout + restored.stderr);
+    const sizes = await stack.asApp(paths.map((p) => `stat -c '%s' /data/assets/${p}`).join("\n"));
+    assert.deepEqual(sizes.trim().split("\n").map(Number), sounds.map((s) => s.size));
   });
 });
 

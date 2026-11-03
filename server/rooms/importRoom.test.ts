@@ -15,7 +15,7 @@ import type { FreeWall, RoomState } from "#shared/model.ts";
 import { apply, AT, room, scene, token, trap } from "#shared/testutil.ts";
 import { sightPieces, tooManySightPieces } from "#shared/visionLimits.ts";
 import { MANIFEST_VERSION, type ExportManifest, type ManifestAsset } from "./exportRoom.ts";
-import { assertWithinLimits, entryToFile, IMPORT_LIMITS, InflatedCounter, inflatedLimit } from "./importRoom.ts";
+import { assertWithinLimits, entryToFile, IMPORT_LIMITS, InflatedCounter, inflatedLimit, silenced, soundsLeftOut } from "./importRoom.ts";
 import { MEMORY_CAP } from "./memorySize.ts";
 import { SizeGuard } from "./sizeGuard.ts";
 
@@ -264,5 +264,24 @@ describe("pdf handout import caps (docs/design/design-v1-pdf-handouts.md 3.6)", 
     const manifest: ExportManifest = { formatVersion: MANIFEST_VERSION, assets: Array.from({ length: IMPORT_LIMITS.assets }, (_, i) => asset(i)) };
     const bytes = Buffer.byteLength(JSON.stringify(manifest));
     assert.ok(bytes <= IMPORT_LIMITS.manifestBytes, `a manifest of ${IMPORT_LIMITS.assets} handout pages is ${bytes} bytes`);
+  });
+});
+
+describe("an import's sounds (docs/design/design-v1-sound.md 6.7)", () => {
+  const sound = (id: string) => ({ id, rev: 0, assetId: `00000000-0000-4000-8000-00000000000${id.length}`, ms: 60_000, use: "music" as const });
+  const playing = { rev: 2, music: { run: "r", repeat: "all" as const, fade: 5 as const, now: { soundId: "a", at: 1 } }, loops: {}, effects: [], volume: { music: 80, effects: 80 } };
+
+  test("the room starts silent, and a state with no singleton gains none", () => {
+    assert.equal(silenced(room({ playing })).playing, null);
+    assert.equal("playing" in silenced(room()), false);
+    assert.deepEqual(silenced(room({ playing })).log, room().log);
+  });
+
+  test("counts the file's sounds the stored room does not hold", () => {
+    const file = room({ sounds: { a: sound("a"), bb: sound("bb"), ccc: sound("ccc") } });
+    assert.equal(soundsLeftOut(file, room({ sounds: { a: sound("a") } })), 2);
+    assert.equal(soundsLeftOut(file, room({ sounds: {} })), 3);
+    assert.equal(soundsLeftOut(file, file), 0);
+    assert.equal(soundsLeftOut(room(), room()), 0);
   });
 });

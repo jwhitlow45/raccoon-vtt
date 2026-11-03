@@ -9,14 +9,20 @@ import { rememberRoom } from "../../lib/knownRooms.ts";
 import { theme } from "../../lib/theme.ts";
 import { FileButton } from "../dm/controls.tsx";
 import { passwordProblem } from "../dm/invite.ts";
-import { formatBytes, importErrorText, importFileProblem } from "./backup.ts";
+import { formatBytes, importErrorText, importFileProblem, soundsLeftOutText } from "./backup.ts";
+
+type Created = { roomId: string; dmLink: string; password: string };
 
 /**
  * Import a room from a backup zip on the Home page (design 16.4). It makes a
  * new room with new IDs and a new DM link, so it counts as creating a room
  * and the creator becomes its DM, the same as the create form.
+ *
+ * An import that left sounds out says so before the DM link shows
+ * (docs/design/design-v1-sound.md 6.7), since the link's page replaces
+ * this card: one more tap, and only then.
  */
-export function ImportRoomCard(props: { onImported(created: { roomId: string; dmLink: string; password: string }): void }) {
+export function ImportRoomCard(props: { onImported(created: Created): void }) {
   const [open, setOpen] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [name, setName] = useState("");
@@ -25,9 +31,23 @@ export function ImportRoomCard(props: { onImported(created: { roomId: string; dm
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [waiting, setWaiting] = useState(false);
+  const [leftOut, setLeftOut] = useState<{ created: Created; count: number; offered: boolean } | null>(null);
   const turnstile = useTurnstile();
   const fileProblem = file ? importFileProblem(file) : null;
   const pwProblem = password.length > 0 ? passwordProblem(password) : null;
+
+  if (leftOut) {
+    return (
+      <Card title="Import a room">
+        <p role="status" style={{ margin: 0, fontSize: theme.font.body14, lineHeight: theme.leading.body }}>
+          {soundsLeftOutText(leftOut.count, leftOut.offered)}
+        </p>
+        <Button block variant="primary" onClick={() => props.onImported(leftOut.created)}>
+          Show the DM link
+        </Button>
+      </Card>
+    );
+  }
 
   if (!open) {
     return (
@@ -68,7 +88,16 @@ export function ImportRoomCard(props: { onImported(created: { roomId: string; dm
       // once, so the room is remembered before it. A blank name is the
       // backup's, which Home reads from the server.
       rememberRoom({ roomId: res.roomId, name: name.trim(), me: { role: "dm", member: { name: dmName.trim() } } });
-      props.onImported({ roomId: res.roomId, dmLink: res.dmLink, password });
+      const created = { roomId: res.roomId, dmLink: res.dmLink, password };
+      const count = res.soundsLeftOut ?? 0;
+      if (count > 0) {
+        // Only to say why: a server without sound files leaves every sound out. Unknown, the plain count is said.
+        const offered = await api.getConfig().then(
+          (config) => config.roomSound,
+          () => true,
+        );
+        setLeftOut({ created, count, offered });
+      } else props.onImported(created);
     } catch (err) {
       setError(importErrorText(err));
     } finally {

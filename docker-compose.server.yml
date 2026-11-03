@@ -124,6 +124,10 @@ services:
       # Animated maps (docs/self-hosting.md), off unless 1. Read what it says
       # about Cloudflare's terms for video before turning them on.
       - ANIMATED_MAPS
+      # Sound files for the room's music, background sounds and effects
+      # (docs/self-hosting.md), off unless 1. Each device that plays music
+      # downloads about 60 MB an hour of it.
+      - ROOM_SOUND
       # Abuse limits. The defaults match server/config.ts. They are spelled
       # out because an empty value would otherwise reach the app as 0 and
       # stop it booting.

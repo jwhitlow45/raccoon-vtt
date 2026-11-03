@@ -3,18 +3,23 @@ import type pg from "pg";
 import yazl from "yazl";
 import { SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import { saveOutcomeLedgerSchema } from "#shared/saveOutcomeContract.ts";
-import type { RoomState, VideoContainer, Viewer } from "#shared/model.ts";
+import type { RoomState, Scene, SoundFacts, Viewer } from "#shared/model.ts";
 import { assetCreditSchema, type AssetCredit } from "#shared/protocol.ts";
 import { STARTER_KEY } from "#shared/starter.ts";
 import { isAssetKind, isVariant, type AssetKind, type Variant } from "../assets/kinds.ts";
-import { isVideoContainer, variantPath } from "../assets/store.ts";
+import { SOUND_MEDIA, isVideoContainer, soundFactsOfRow, variantPath, type AssetMedia } from "../assets/store.ts";
 
 /**
  * The room export file (design 16.4): `room.json` with the committed state,
- * `assets.json` with a manifest, and every image variant and video under
- * `assets/`. Only the log is filtered: whispers the exporting DM may not
- * read are left out. Import treats the manifest as untrusted and
- * re-processes each image and checks each video again.
+ * `assets.json` with a manifest, and every image variant, video and sound
+ * under `assets/`. Only the log is filtered: whispers the exporting DM may
+ * not read are left out. Import treats the manifest as untrusted and
+ * re-processes each image and checks each video and sound again.
+ *
+ * Sounds go in unless the DM leaves them out (docs/design/design-v1-sound.md
+ * 6.7, D-261102-475), and never while the server's switch is off, since it
+ * then serves no sound bytes: without them the zip holds no sound file and
+ * no part of the state about sound.
  */
 export const EXPORT_FORMAT = "raccoon-vtt-room";
 export const EXPORT_FORMAT_VERSION = 1;
@@ -26,7 +31,9 @@ export const EXPORT_FORMAT_VERSION = 1;
  *
  * The `video` kind and its `media`, the container its file is named by
  * (docs/design/design-v1-animated-maps.md 9.3), need no new version: a
- * server that does not know the kind skips it, so its import keeps the stills.
+ * server that does not know the kind skips it, so its import keeps the
+ * stills. Nor do the `sound` kind, its `mp3` and its `audio`: a state that
+ * holds sounds is a newer snapshot version, which an older server refuses.
  */
 export const MANIFEST_VERSION = 2;
 
@@ -42,8 +49,10 @@ export type ManifestAsset = {
   credit?: AssetCredit;
   /** A starter pick's work key. The import keeps it only where its own catalog has that work with these bytes. */
   starter?: string;
-  /** A video's container, which names its file: `assets/<sha256>-video-full.webm` or `.mp4`. */
-  media?: VideoContainer;
+  /** A video's container or a sound's mp3, which names its file: `assets/<sha256>-video-full.webm`, `.mp4` or `assets/<sha256>-sound-full.mp3`. */
+  media?: AssetMedia;
+  /** A sound's facts from its row. The import walks the file again and trusts its own. */
+  audio?: SoundFacts;
 };
 
 export type ExportManifest = { formatVersion: number; assets: ManifestAsset[] };
@@ -65,21 +74,49 @@ export type RoomExport = {
   dmMemberIds: string[];
 };
 
-/** An entry's name: WebP for an image, and a video's own container (D-261102-454). */
-export function assetFileName(sha256: string, kind: AssetKind, variant: Variant, media?: VideoContainer | null): string {
-  return `assets/${sha256}-${kind}-${variant}.${kind === "video" && media ? media : "webp"}`;
+/** An entry's name: WebP for an image, a video's own container (D-261102-454), and mp3 for a sound. */
+export function assetFileName(sha256: string, kind: AssetKind, variant: Variant, media?: AssetMedia | null): string {
+  const ext = kind === "sound" ? SOUND_MEDIA : kind === "video" && isVideoContainer(media) ? media : "webp";
+  return `assets/${sha256}-${kind}-${variant}.${ext}`;
 }
+
+/**
+ * The state with no part about sound (docs/design/design-v1-sound.md 6.7):
+ * an empty library, no playlist, silence, no scene's sound and the names
+ * switch off. A collection the state does not hold stays absent, as it is
+ * in a room from before sound, so this never adds one.
+ */
+export function withoutSound(state: RoomState): RoomState {
+  const { soundNames: _names, ...settings } = state.meta.settings;
+  const scenes: Record<string, Scene> = {};
+  for (const [id, scene] of Object.entries(state.scenes)) {
+    const { sound: _sound, ...kept } = scene;
+    scenes[id] = kept;
+  }
+  return {
+    ...state,
+    ...("sounds" in state ? { sounds: {} } : {}),
+    ...("playlists" in state ? { playlists: {} } : {}),
+    ...("playing" in state ? { playing: null } : {}),
+    meta: { ...state.meta, settings },
+    scenes,
+  };
+}
+
+/** Whether an export carries sounds: the DM's choice, and never while the server's switch is off. */
+export type ExportChoice = { sounds: boolean };
 
 /**
  * The state as the export carries it: everything, with whispers the DM is
  * not party to removed, and without the record of the running turn's
  * reminders (RoomState.reminded), which belongs to that turn and which the
- * import would leave behind anyway.
+ * import would leave behind anyway. Without sounds, nothing about sound.
  */
-export function exportableState(state: RoomState, dm: Viewer): RoomState {
+export function exportableState(state: RoomState, dm: Viewer, choice: ExportChoice = { sounds: true }): RoomState {
   const log = state.log.filter((e) => e.kind !== "whisper" || e.from === dm.memberId || e.to?.includes(dm.memberId) === true);
   const { reminded: _reminded, ...rest } = state;
-  return { ...rest, log };
+  const kept = { ...rest, log };
+  return choice.sounds ? kept : withoutSound(kept);
 }
 
 type AssetRow = {
@@ -94,18 +131,27 @@ type AssetRow = {
   credit: unknown;
   starter: string | null;
   media: string | null;
+  audio: unknown;
 };
 
-export async function roomManifest(pool: pg.Pool, roomId: string): Promise<{ manifest: ExportManifest; rows: AssetRow[] }> {
-  const { rows } = await pool.query<AssetRow>(
-    `select a.id, a.sha256, a.kind, a.pipeline, a.width, a.height, a.variants, a.credit, a.starter, a.media,
+/** Whether a row goes in the zip: a kind this server knows, a video with its container, and a sound with its facts when sounds go. */
+function exported(r: AssetRow, choice: ExportChoice): boolean {
+  if (!isAssetKind(r.kind)) return false;
+  if (r.kind === "video") return isVideoContainer(r.media);
+  if (r.kind === "sound") return choice.sounds && soundFactsOfRow({ kind: r.kind, media: r.media as AssetMedia | null, audio: r.audio }) !== undefined;
+  return true;
+}
+
+export async function roomManifest(pool: pg.Pool, roomId: string, choice: ExportChoice = { sounds: true }): Promise<{ manifest: ExportManifest; rows: AssetRow[] }> {
+  const { rows: all } = await pool.query<AssetRow>(
+    `select a.id, a.sha256, a.kind, a.pipeline, a.width, a.height, a.variants, a.credit, a.starter, a.media, a.audio,
        array(select u.member_id from asset_uploaders u where u.asset_id = a.id order by u.member_id) as uploaders
      from assets a where a.room_id = $1 order by a.created_at, a.id`,
     [roomId],
   );
-  const assets: ManifestAsset[] = rows
-    .filter((r) => isAssetKind(r.kind) && (r.kind !== "video" || isVideoContainer(r.media)))
-    .map((r) => {
+  // The zip's files come from these rows too, so a row left out here leaves its file out.
+  const rows = all.filter((r) => exported(r, choice));
+  const assets: ManifestAsset[] = rows.map((r) => {
       const asset: ManifestAsset = {
         id: r.id,
         sha256: r.sha256.toString("hex"),
@@ -120,6 +166,11 @@ export async function roomManifest(pool: pg.Pool, roomId: string): Promise<{ man
       if (r.credit !== null && credit.success) asset.credit = credit.data;
       if (r.starter !== null && STARTER_KEY.test(r.starter)) asset.starter = r.starter;
       if (r.kind === "video" && isVideoContainer(r.media)) asset.media = r.media;
+      if (r.kind === "sound") {
+        asset.media = SOUND_MEDIA;
+        const audio = soundFactsOfRow({ kind: r.kind, media: SOUND_MEDIA, audio: r.audio });
+        if (audio) asset.audio = audio;
+      }
       return asset;
     });
   return { manifest: { formatVersion: MANIFEST_VERSION, assets }, rows };
@@ -138,15 +189,15 @@ export function buildExportZip(assetDir: string, data: { room: RoomExport; manif
   zip.addBuffer(Buffer.from(JSON.stringify(data.manifest)), "assets.json", { mtime });
   for (const row of data.rows) {
     if (!isAssetKind(row.kind)) continue;
-    const media = row.kind === "video" ? row.media : null;
-    if (row.kind === "video" && !isVideoContainer(media)) continue;
+    const media: AssetMedia | null = row.kind === "video" && isVideoContainer(row.media) ? row.media : row.kind === "sound" ? SOUND_MEDIA : null;
+    if (row.kind === "video" && media === null) continue;
     const hex = row.sha256.toString("hex");
     for (const variant of row.variants) {
       if (!isVariant(variant)) continue;
-      const path = variantPath(assetDir, hex, row.kind, variant, row.pipeline, isVideoContainer(media) ? media : null);
+      const path = variantPath(assetDir, hex, row.kind, variant, row.pipeline, media);
       if (!existsSync(path)) continue;
-      // Already WebP, WebM or MP4: compressing again only costs CPU.
-      zip.addFile(path, assetFileName(hex, row.kind, variant, isVideoContainer(media) ? media : null), { compress: false, mtime });
+      // Already WebP, WebM, MP4 or MP3: compressing again only costs CPU.
+      zip.addFile(path, assetFileName(hex, row.kind, variant, media), { compress: false, mtime });
     }
   }
   zip.end();

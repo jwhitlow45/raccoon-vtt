@@ -76,6 +76,15 @@ export function importErrorText(err: unknown): string {
   return err.message;
 }
 
+/**
+ * What an import that left sounds out says (docs/design/design-v1-sound.md
+ * 6.7): the count, and why when the server offers no sound files at all.
+ */
+export function soundsLeftOutText(count: number, offered: boolean): string {
+  const sounds = count === 1 ? "1 sound was" : `${count.toLocaleString("en-US")} sounds were`;
+  return offered ? `The room is imported. ${sounds} left out.` : `The room is imported. This server doesn't offer sound files, so ${sounds} left out.`;
+}
+
 /** Why the server refused a backup (server/http/export.ts), in words. A HEAD carries no body, so the status decides. */
 export function exportErrorText(err: unknown): string {
   if (!(err instanceof ApiError)) return "Something went wrong. Try again.";

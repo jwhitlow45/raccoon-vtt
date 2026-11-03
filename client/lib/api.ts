@@ -123,6 +123,12 @@ export type ServerConfig = { turnstileSiteKey: string | null; searchEnabled: boo
  * (docs/design/design-v1-sound.md 6.7). Absent is none.
  */
 export type ImportRoomAnswer = { roomId: string; dmLink: string; soundsLeftOut?: number };
+/**
+ * GET /api/rooms/:id/storage, DM only (docs/design/design-v1-sound.md 7.2):
+ * what the room's quota counts, the quota (0 for none) and what its sounds
+ * take, in bytes. The server reads it again at most every 10 seconds.
+ */
+export type RoomStorage = { used: number; quota: number; sounds: number };
 /** The server's own shape, which sends the original's size only when the search service gave it. */
 export type { SearchResult, SearchSource };
 /** Who a device with no member in the room becomes on a DM claim (design 10.2). */
@@ -740,6 +746,9 @@ export const api = {
   /** Runs the export route's checks without making the zip: resolves when an export may start now, else throws the refusal. */
   checkExport: (roomId: string) => request<void>("HEAD", exportUrl(roomId)),
 
+  /** The room's storage line, DM only (docs/design/design-v1-sound.md 7.2). */
+  roomStorage: (roomId: string) => request<RoomStorage>("GET", `${room(roomId)}/storage`),
+
   /** The caller's own receipts of one tag, for an op whose answer this device lost (docs/design/design-v1-dice.md 1.2). */
   getReceipts: (roomId: string, tag: string) => request<ReceiptLookup>("GET", `${room(roomId)}/receipts/${encodeURIComponent(tag)}`),
 
@@ -933,7 +942,7 @@ export function logExportUrl(roomId: string, range: LogRange, tz: string): strin
   return `${room(roomId)}/log/export?${q.toString()}`;
 }
 
-/** A plain GET the browser downloads, so the zip streams to disk instead of into memory. */
-export function exportUrl(roomId: string): string {
-  return `${room(roomId)}/export`;
+/** A plain GET the browser downloads, so the zip streams to disk instead of into memory. `sounds: false` leaves the room's sounds out. */
+export function exportUrl(roomId: string, opts: { sounds?: boolean } = {}): string {
+  return `${room(roomId)}/export${opts.sounds === false ? "?sounds=0" : ""}`;
 }

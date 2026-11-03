@@ -3,6 +3,7 @@ import { PassThrough } from "node:stream";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { ApiErrorCode } from "#shared/apiErrors.ts";
+import { roomSoundOn } from "../config.ts";
 import { isAssetError } from "../assets/errors.ts";
 import { WindowLimiter } from "../assets/limits.ts";
 import { receiveToFile, tempFile } from "../assets/upload.ts";
@@ -21,7 +22,9 @@ import { diskHasRoom } from "./rooms.ts";
  * Room export and import (design 16.4 and 10.3).
  *
  * Export copies the committed state on the actor queue and streams the zip
- * outside it, so the room keeps playing. Slots bound what streams at once
+ * outside it, so the room keeps playing. `?sounds=0` leaves the room's
+ * sounds out, files and state (docs/design/design-v1-sound.md 6.7), and so
+ * does the server's switch off, since it then serves no sound bytes. Slots bound what streams at once
  * (1 per room, 1 per IP, 2 server-wide) and hourly counts bound how often
  * (4 per room and per IP). A reader averaging under 64 KiB/s over 30 s, or
  * one still reading after 30 minutes, is cut off so it cannot hold a slot.
@@ -61,8 +64,9 @@ export async function registerExportRoutes(app: FastifyInstance, kit: AuthKit, d
 
   await app.register(async (r) => {
     r.setErrorHandler(accessErrors);
-    r.get("/api/rooms/:id/export", async (req, reply) => {
+    r.get<{ Querystring: { sounds?: string } }>("/api/rooms/:id/export", async (req, reply) => {
       const roomId = roomParam(req);
+      const choice = { sounds: req.query.sounds !== "0" && roomSoundOn(kit.config) };
       const grant = await requireGrant(kit, req, reply, roomId, "dm");
       const ip = kit.ip(req);
       const checks = [
@@ -93,12 +97,12 @@ export async function registerExportRoutes(app: FastifyInstance, kit: AuthKit, d
       try {
         const actor = await deps.manager.acquire(roomId);
         // The state is immutable, so the copy on the queue is a reference and the manifest query is the only wait.
-        const copied = await actor.read((state, seq) => ({ state: exportableState(state, { memberId: grant.memberId, role: "dm" }), seq }));
+        const copied = await actor.read((state, seq) => ({ state: exportableState(state, { memberId: grant.memberId, role: "dm" }, choice), seq }));
         // Read after the copy: a member marked later got its DM grant after
         // the copy too, so the copied log holds nothing it had as DM.
         const dmMemberIds = await formerDmsOfLiveRoom(kit.pool, roomId);
         if (!dmMemberIds) throw new HttpError(404, "room_not_found");
-        const { manifest, rows } = await roomManifest(kit.pool, roomId);
+        const { manifest, rows } = await roomManifest(kit.pool, roomId, choice);
         hourly.record(checks);
         const out = new PassThrough();
         const zip = buildExportZip(app.assets.assetDir, { room: roomExport(roomId, copied.seq, copied.state, dmMemberIds), manifest, rows });
@@ -222,7 +226,7 @@ export async function registerExportRoutes(app: FastifyInstance, kit: AuthKit, d
           },
         );
         if (newCookie) kit.sessions.setCookie(reply, newCookie);
-        return reply.code(201).send({ roomId: room.roomId, dmLink: dmLink(room.roomId, room.dmKey) });
+        return reply.code(201).send({ roomId: room.roomId, dmLink: dmLink(room.roomId, room.dmKey), ...(room.soundsLeftOut > 0 ? { soundsLeftOut: room.soundsLeftOut } : {}) });
       } finally {
         releaseSlot();
         await unlink(path).catch(() => undefined);
