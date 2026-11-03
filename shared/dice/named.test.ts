@@ -416,6 +416,9 @@ describe("which attacks are with a ranged weapon (docs/design/design-v1-weather.
 
   test("a weapon's name counts whole or by its last words, without case, a bracket or a +1", () => {
     for (const name of ["Longbow", "longbow", "Elven Longbow", "Longbow +1", "Light Crossbow (Recharge 5-6)", "Sling", "Musket"]) assert.equal(weaponNamed(name), "ranged", name);
+    // D&D Beyond's 2014 items name a crossbow by its kind after a comma.
+    for (const name of ["Crossbow, Light", "Crossbow, Hand", "Crossbow, Heavy", "Crossbow, Light +1", "Longbow, +1"]) assert.equal(weaponNamed(name), "ranged", name);
+    assert.equal(weaponNamed("Hammer, Light"), "thrown");
     for (const name of ["Javelin", "Silvered Dagger", "Trident +2", "Light Hammer"]) assert.equal(weaponNamed(name), "thrown", name);
     for (const name of ["Bone Bow", "Longbows of Doom", "Crossbow", "Rock", "Force Bolt", "Longsword", "Bowling"]) assert.equal(weaponNamed(name), null, name);
   });

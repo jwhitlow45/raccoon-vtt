@@ -91,12 +91,11 @@ function signedValue(sign: string, digits: string): number {
 const ATTACK = /\b(?:Melee|Ranged)(?: or (?:Melee|Ranged))?(?: (?:Weapon|Spell)(?: or (?:Weapon|Spell))?)? Attack(?: Roll)?:\s*([+\-−–])\s*(\d+)/i;
 /** A name's form for comparing with the Weapons table: no case, no bracket, no "+1", one space between words. */
 function weaponKey(name: string): string {
-  return name
-    .replace(/\s*\([^()]*\)/g, " ")
-    .replace(/\s*[+\-−–]\s*\d+\b/g, " ")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, " ");
+  const plain = name.replace(/\s*\([^()]*\)/g, " ").replace(/\s*[+\-−–]\s*\d+\b/g, " ");
+  // D&D Beyond's 2014 items put a weapon's kind after a comma, "Crossbow, Light", where the table says "Light Crossbow".
+  const parts = plain.split(",").map((p) => p.trim()).filter(Boolean);
+  const words = parts.length === 2 ? `${parts[1]} ${parts[0]}` : parts.join(" ");
+  return words.toLowerCase().replace(/\s+/g, " ");
 }
 
 let weaponsByKey: Map<string, "ranged" | "thrown"> | null = null;
