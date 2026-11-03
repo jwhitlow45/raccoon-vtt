@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SLOW_DRAW_MS, TICK_CLAMP_MS, WARMUP_MS, WINDOW_MS, WeatherMode, type ModeInput } from "./mode.ts";
+import { MIN_FRAME_COSTS, SLOW_DRAW_MS, SLOW_FRAME_MS, TICK_CLAMP_MS, WARMUP_MS, WINDOW_MS, WeatherMode, type ModeInput } from "./mode.ts";
 
 const SHOWN: ModeInput = {
   setting: "moving",
@@ -146,4 +146,65 @@ test("version moves only when what the controller reads changes", () => {
   assert.equal(mode.version, v + 1);
   mode.update({ setting: "still" }, 4);
   assert.equal(mode.version, v + 2);
+});
+
+test("a held frame does not tick and changes nothing, so the next frame ticks by the whole gap, clamped", () => {
+  const mode = new WeatherMode(SHOWN, 0);
+  assert.equal(mode.frame(0), 0);
+  assert.equal(mode.frame(33.3, true), null, "held");
+  assert.equal(mode.drew(1), "camera", "a held frame's draw is no tick's");
+  assert.equal(mode.frame(66.7, true), null);
+  assert.equal(mode.frame(100), TICK_CLAMP_MS);
+  assert.equal(mode.ticks, 2);
+  assert.equal(mode.frame(116.7, true), null, "a frame the gate holds anyway");
+  assert.ok(Math.abs(mode.frame(133.4)! - 33.4) < 1e-9);
+});
+
+/** Runs frames every `every` ms until `until`, each tick drawing at 0.1 ms and adding `cost` ms to its frame. */
+function runCosts(mode: WeatherMode, from: number, until: number, every: number, cost: (tickAt: number) => number): void {
+  for (let now = from; now < until; now += every) {
+    if (mode.frame(now) === null) continue;
+    mode.drew(0.1);
+    mode.added(cost(now), now);
+  }
+}
+
+test("a window whose ticks add more than 2 ms to their frames by the median steps down, and one whose few slow ones do not", () => {
+  const slow = new WeatherMode(SHOWN, 0);
+  runCosts(slow, 0, WARMUP_MS + WINDOW_MS + 100, 1000 / 60, () => SLOW_FRAME_MS + 0.5);
+  assert.equal(slow.level, "half");
+  const spiky = new WeatherMode(SHOWN, 0);
+  // Four ticks in ten add 9 ms, the rest 0.3: its median is the weather's.
+  runCosts(spiky, 0, 4 * (WARMUP_MS + WINDOW_MS), 1000 / 60, (at) => (Math.round(at / (1000 / 60)) % 10 < 4 ? 9 : 0.3));
+  assert.equal(spiky.level, "full");
+});
+
+test("a window with too few frame costs says nothing by them", () => {
+  // One tick in 25 reports, all slow: about 3.6 a window, under the minimum.
+  assert.ok((WINDOW_MS / 1000) * (30 / 25) < MIN_FRAME_COSTS);
+  const sparse = new WeatherMode(SHOWN, 0);
+  let n = 0;
+  for (let now = 0; now < 3 * (WARMUP_MS + WINDOW_MS); now += 1000 / 60) {
+    if (sparse.frame(now) === null) continue;
+    sparse.drew(0.1);
+    if (++n % 25 === 0) sparse.added(9, now);
+  }
+  assert.equal(sparse.level, "full");
+});
+
+test("a frame cost counts only in the window its tick was in", () => {
+  const mode = new WeatherMode(SHOWN, 0);
+  const late: number[] = [];
+  let n = 0;
+  for (let now = 0; now < WARMUP_MS + WINDOW_MS + 100; now += 1000 / 60) {
+    if (mode.frame(now) === null) continue;
+    mode.drew(0.1);
+    // Ticks in the warm-up add 9 ms, and their measures come back only once the window is open, beside the window's own few.
+    if (now < WARMUP_MS) late.push(now);
+    else {
+      for (const at of late.splice(0)) mode.added(9, at);
+      if (++n % 9 === 0) mode.added(0.3, now);
+    }
+  }
+  assert.equal(mode.level, "full", "the warm-up's ticks say nothing, whenever their measures land");
 });

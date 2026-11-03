@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { lookOf } from "./looks.ts";
-import { SLOW_DRAW_MS, TICK_MS } from "./mode.ts";
-import { TICK_BUDGET_MS, tickCostForMode, WeatherRoom, weatherStillReason, type Frames, type WeatherTarget } from "./store.ts";
+import { rng } from "#shared/testutil.ts";
+import { TICK_MS } from "./mode.ts";
+import { WeatherRoom, weatherStillReason, type Frames, type WeatherTarget } from "./store.ts";
 
 /**
  * The room's weather clock (docs/design/design-v1-weather.md 5.2): one loop
@@ -157,64 +158,159 @@ describe("This device's line on what keeps the weather still", () => {
 });
 
 describe("what a tick adds to its frame, which the sceneFunc's own timing cannot see", () => {
+  type Board = (frame: number, at: number) => number;
   /**
-   * A 60 Hz screen whose board spends `board` ms of every frame, and whose
+   * A screen at `hz` whose board spends `board` ms of each frame, and whose
    * weather tick adds `tick` ms: the draw and, on a canvas without a GPU,
-   * its paint. The layer's tick reports as WeatherLayer.tsx does.
+   * its paint. Frames come on the screen's beat, a late one at the next
+   * beat. With `late`, every measure comes back only after the next frame
+   * has started.
    */
-  function run(input: { board: number; tick: number; seconds: number; strayEvery?: number }) {
-    let n = 0;
+  function run(input: { hz: number; seconds: number; tick: number; board: Board; strayEvery?: number; late?: boolean; between?: (frame: number, ticked: boolean) => number }) {
+    const period = 1000 / input.hz;
     const frames = new HandFrames();
     let now = 0;
+    let frame = 0;
+    let n = 0;
+    let ticked = false;
+    const out: (() => void)[] = [];
     const room = new WeatherRoom(
       frames,
       () => now,
       (after) => {
-        // Now and then a long task of something else's, a chunk's parse, runs before the measure's message.
-        now += input.board + (input.strayEvery && ++n % input.strayEvery === 0 ? 60 : 0);
-        after();
+        // The board's own work runs after the loop's callback and before the paint, and now and then something else's long task runs before the measure's message.
+        now += input.board(frame, now) + (input.strayEvery && ++n % input.strayEvery === 0 ? 60 : 0);
+        if (input.late) out.push(after);
+        else after();
+        // A long task of something else's after the measure, which drops the frames it runs into.
+        now += input.between?.(frame, ticked) ?? 0;
       },
     );
     room.setLook(RAIN);
+    const samples: number[] = [];
+    const added = room.mode.added.bind(room.mode);
+    room.mode.added = (ms, at) => {
+      samples.push(ms);
+      added(ms, at);
+    };
+    let ticks = 0;
     let most = 0;
     room.register({
       tick() {
+        ticks++;
+        ticked = true;
         now += input.tick;
         most = Math.max(most, room.frameCost);
-        room.mode.drew(tickCostForMode(0.1, room.frameCost));
+        room.mode.drew(0.1);
       },
     });
     const end = input.seconds * 1000;
     let at = 0;
     while (at < end) {
-      at += 16.7;
-      now = Math.max(now, at);
-      frames.run(now);
+      at += period;
+      if (now > at) at = Math.ceil(now / period) * period;
+      now = at;
+      frame++;
+      ticked = false;
+      const due = out.splice(0);
+      frames.run(at);
+      for (const after of due) after();
     }
-    return { room, most };
+    return { level: room.state.getState().level, frameCost: room.frameCost, most, ticks, samples };
   }
 
-  test("a canvas with no GPU, whose ticks add 3 ms of paint (90 ms a second, over 6.1's 60), steps down to half and then holds still", () => {
-    const { room } = run({ board: 1, tick: 3, seconds: 12 });
-    assert.ok(room.frameCost > 2.5 && room.frameCost < 3.5, `${room.frameCost}`);
-    assert.equal(room.state.getState().level, "still");
-    assert.equal(room.state.getState().effective, "still");
+  const steady: Board = () => 1;
+  /** A 1.5 s pan every 8 s, the board spending 6 ms more in each of its frames. */
+  const pans: Board = (_frame, at) => 1 + (at % 8000 < 1500 ? 6 : 0);
+  const RATES = [30, 60, 120] as const;
+
+  test("a healthy GPU canvas never steps down for pans at 30, 60 or 120 Hz, which every frame beside a tick pays too", () => {
+    for (const hz of RATES) {
+      const r = run({ hz, seconds: 60, tick: 0.3, board: pans });
+      assert.equal(r.level, "full", `${hz} Hz`);
+      assert.ok(r.most < 1, `${hz} Hz: frame cost up to ${r.most}`);
+    }
+  });
+
+  test("a load step at 60 Hz, on a tick's frame or the frame after it, is never the weather's, and moves only the tick at the step", () => {
+    for (const phase of [0, 1]) {
+      // From 1 ms a frame to 7 at frame 300 + phase, and back at 600 + phase: a pan that starts and ends.
+      const step: Board = (frame) => (frame >= 300 + phase && frame < 600 + phase ? 7 : 1);
+      const r = run({ hz: 60, seconds: 20, tick: 0.3, board: step });
+      assert.equal(r.level, "full", `phase ${phase}`);
+      assert.ok(r.most < 1, `phase ${phase}: frame cost up to ${r.most}`);
+      // Each tick is judged by the frames beside it, so only a tick that has the step between its neighbours reads more than its own cost.
+      const off = r.samples.filter((ms) => Math.abs(ms - 0.3) > 0.01);
+      assert.ok(off.length <= 2, `phase ${phase}: ${off.length} ticks read off: ${off.join(", ")}`);
+    }
+  });
+
+  test("a board whose every frame costs something different keeps a healthy canvas moving, and still finds a slow one", () => {
+    for (const seed of [1, 2, 3, 4, 5]) {
+      const r0 = rng(seed);
+      // From 1 to 4 ms a frame, at random, at every rate, and from 0.5 to 7.5 where ticks have a neighbour on each side.
+      const jitter: Board = () => 1 + r0() * 3;
+      const wide: Board = () => 0.5 + r0() * 7;
+      for (const hz of RATES) {
+        assert.equal(run({ hz, seconds: 120, tick: 0.3, board: jitter }).level, "full", `seed ${seed} at ${hz} Hz`);
+        assert.equal(run({ hz, seconds: 14, tick: 3, board: jitter }).level, "still", `seed ${seed} at ${hz} Hz, no GPU`);
+      }
+      for (const hz of [60, 120]) assert.equal(run({ hz, seconds: 120, tick: 0.3, board: wide }).level, "full", `seed ${seed} at ${hz} Hz, wide`);
+    }
+  });
+
+  test("a 30 Hz screen, where every frame would tick, holds one tick in eight to measure against, and keeps about 26 ticks a second", () => {
+    const r = run({ hz: 30, seconds: 10, tick: 0.3, board: steady });
+    assert.ok(r.ticks >= 255 && r.ticks <= 270, `${r.ticks} ticks in 10 s`);
+    assert.ok(r.frameCost > 0.2 && r.frameCost < 0.4, `measured ${r.frameCost}`);
+    const busy = run({ hz: 30, seconds: 10, tick: 3, board: () => 9 });
+    assert.ok(busy.frameCost > 2.5 && busy.frameCost < 3.5, `a busy board's ticks measured ${busy.frameCost}, not its 9 ms`);
+  });
+
+  test("a canvas with no GPU, whose ticks add 3 ms of paint (90 ms a second, over 6.1's 60), steps down to half and then holds still, at 30, 60 and 120 Hz, panned or not", () => {
+    for (const hz of RATES) {
+      for (const board of [steady, pans]) {
+        const r = run({ hz, seconds: 14, tick: 3, board });
+        assert.equal(r.level, "still", `${hz} Hz ${board === pans ? "panned" : "at rest"}`);
+      }
+    }
+    const r = run({ hz: 60, seconds: 14, tick: 3, board: steady });
+    assert.ok(r.frameCost > 2.5 && r.frameCost < 3.5, `${r.frameCost}`);
   });
 
   test("a GPU canvas whose ticks add half a millisecond keeps moving, however busy the board is in every frame and however often something else's long task runs", () => {
     for (const board of [0.5, 9]) {
-      const { room, most } = run({ board, tick: 0.5, seconds: 12 });
+      const { level, most } = run({ hz: 60, tick: 0.5, seconds: 12, board: () => board });
       assert.ok(most < 0.6, `board ${board}: ${most}`);
-      assert.equal(room.state.getState().level, "full", `board ${board}`);
+      assert.equal(level, "full", `board ${board}`);
     }
     // A long task every fifth frame slows the frames themselves, which the mode judges by their gaps. The cost a tick adds stays its own.
-    const { most } = run({ board: 0.5, tick: 0.5, seconds: 12, strayEvery: 5 });
+    const { most } = run({ hz: 60, tick: 0.5, seconds: 12, board: () => 0.5, strayEvery: 5 });
     assert.ok(most < 0.6, `a stray task every fifth frame: ${most}`);
   });
 
-  test("the budget's 2 ms a tick meets the mode's line, and the sceneFunc's own time counts when it is the larger", () => {
-    assert.equal(tickCostForMode(0.1, TICK_BUDGET_MS), SLOW_DRAW_MS);
-    assert.equal(tickCostForMode(5, 0), 5);
-    assert.ok(tickCostForMode(0.1, 1) < SLOW_DRAW_MS);
+  test("a frame across a dropped one is no tick's neighbour", () => {
+    // At 120 Hz a pan's first move comes with a long task that drops the frames it runs into, after a frame with no tick, and the board then costs 7 ms a frame where it cost 1.
+    let dropped = -1;
+    const r = run({
+      hz: 120,
+      seconds: 3,
+      tick: 0.3,
+      board: (frame) => (dropped >= 0 && frame > dropped ? 7 : 1),
+      between: (frame, ticked) => {
+        if (dropped >= 0 || frame < 200 || ticked) return 0;
+        dropped = frame;
+        return 30;
+      },
+    });
+    assert.ok(dropped > 0 && r.samples.length > 50);
+    assert.ok(Math.max(...r.samples) < 0.31, `the tick after the drop is measured against the frame after it alone: ${Math.max(...r.samples)}`);
+  });
+
+  test("a measure that comes back only after the next frame started says nothing", () => {
+    const r = run({ hz: 60, seconds: 12, tick: 3, board: steady, late: true });
+    assert.deepEqual(r.samples, []);
+    assert.equal(r.frameCost, 0);
+    assert.equal(r.level, "full");
   });
 });

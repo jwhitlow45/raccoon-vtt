@@ -5,7 +5,7 @@ import type { RadioCardOption } from "../../components/RadioCards.tsx";
 import { scopeSlot, useScopedIfAny } from "../../state/scope.ts";
 import { useLowPower, WEATHER_MODE_WORDS, type WeatherMode as WeatherSettingValue } from "../device/settings.ts";
 import type { Look } from "./looks.ts";
-import { SLOW_DRAW_MS, WeatherMode, type ModeInput, type StepLevel } from "./mode.ts";
+import { WeatherMode, type ModeInput, type StepLevel } from "./mode.ts";
 import type { Field } from "./sim.ts";
 import type { TextureSource } from "./textures.ts";
 
@@ -71,17 +71,20 @@ export class WeatherRoom {
   textures: OwnedTextures | null = null;
   /**
    * What a tick adds to its frame on the main thread, in ms, the median of
-   * recent ticks (#run): the draw, and where the 2D canvas has no GPU, its
-   * raster and paint, which no timing inside the sceneFunc sees.
+   * recent ticks (#measured), for the test hooks and the bench: the draw,
+   * and where the 2D canvas has no GPU, its raster and paint, which no
+   * timing inside the sceneFunc sees. The mode judges each window's own.
    */
   frameCost = 0;
   readonly #frames: Frames;
   readonly #now: () => number;
   readonly #afterFrame: AfterFrame;
-  /** The main thread's time from a frame's start to after its paint, in frames with no tick. */
-  readonly #baseline: number[] = [];
+  /** The loop's last frames, oldest first. */
+  readonly #recent: FrameSeen[] = [];
   /** What recent ticks added to their frames. */
   readonly #added: number[] = [];
+  /** Frames in a row that ticked, so a screen at 33 frames a second or fewer, where every frame ticks, holds one now and then. */
+  #ticksInARow = 0;
   readonly #targets: WeatherTarget[] = [];
   #frame: number | null = null;
   #version = -1;
@@ -180,48 +183,68 @@ export class WeatherRoom {
     }
   }
 
+  /**
+   * One loop frame. A 2D canvas with no GPU rasters at paint, after the
+   * sceneFunc: a software canvas cost 60 to 230 ms a second at 4x slowdown
+   * while its sceneFunc stayed under 0.1 ms (bench --software). So each
+   * frame is timed from its start to a task after its paint, and a tick's
+   * cost is its frame less the frames beside it (#measured).
+   */
   readonly #run = (time: number): void => {
     this.#frame = null;
     const start = this.#now();
-    const ms = this.mode.frame(time);
+    // A measure still out when the next frame starts ran past it, so it holds that frame's work too and says nothing.
+    const last = this.#recent.at(-1);
+    if (last && !last.settled) this.#measured(last);
+    const ms = this.mode.frame(time, this.#ticksInARow >= SAMPLE_AFTER);
     const ticked = ms !== null && this.#targets.length > 0;
     if (ms !== null) this.#targets[this.#targets.length - 1]?.tick(ms);
+    this.#ticksInARow = ticked ? this.#ticksInARow + 1 : 0;
+    const seen: FrameSeen = { at: time, ticked, spent: null, settled: false };
+    this.#recent.push(seen);
+    if (this.#recent.length > RECENT_FRAMES) this.#recent.shift();
     this.#settle();
-    // The whole frame on the main thread, its paint included: a tick's frame less the board's own frames is what the weather adds.
     this.#afterFrame(() => {
-      const spent = this.#now() - start;
-      const into = ticked ? this.#added : this.#baseline;
-      into.push(ticked ? Math.max(0, spent - median(this.#baseline)) : spent);
-      if (into.length > COST_FRAMES) into.shift();
-      // A median, so a few frames that something else slowed move nothing, and a cost every tick pays moves it within half a second.
-      if (ticked && this.#added.length >= MIN_TICKS) this.frameCost = median(this.#added);
+      if (seen.settled) return;
+      seen.spent = this.#now() - start;
+      this.#measured(seen);
     });
   };
+
+  /**
+   * A frame's measure is in, or never will be. The tick before it now has
+   * both its neighbours: its cost is its own frame less the mean of the
+   * frames on either side of it with no tick, each within about one frame
+   * of it. So a pan, a drag, the dice or the isometric board's background
+   * work, which every frame around the tick pays too, cancels out within a
+   * frame, and a tick with no such neighbour says nothing.
+   */
+  #measured(seen: FrameSeen): void {
+    seen.settled = true;
+    const i = this.#recent.indexOf(seen);
+    const tick = this.#recent[i - 1];
+    if (!tick?.ticked || tick.spent === null) return;
+    const frame = medianGap(this.#recent);
+    const beside = [this.#recent[i - 2], seen].filter((f): f is FrameSeen => f !== undefined && !f.ticked && f.spent !== null && Math.abs(f.at - tick.at) <= frame * NEIGHBOUR_FRAMES);
+    if (beside.length === 0) return;
+    const cost = Math.max(0, tick.spent - beside.reduce((sum, f) => sum + f.spent!, 0) / beside.length);
+    this.mode.added(cost, tick.at);
+    this.#added.push(cost);
+    if (this.#added.length > COST_TICKS) this.#added.shift();
+    if (this.#added.length >= MIN_TICKS) this.frameCost = median(this.#added);
+  }
 
   /** A new look, layer or stage starts its cost afresh, as the step-down's warm-up does. */
   #resetCost(): void {
     this.frameCost = 0;
-    this.#baseline.length = 0;
+    this.#recent.length = 0;
     this.#added.length = 0;
+    this.#ticksInARow = 0;
   }
 }
 
-/** 6.1's budget, 60 ms a second over none, at 30 ticks a second. */
-export const TICK_BUDGET_MS = 2;
-
-/**
- * The cost a tick's draw reports to the mode (mode.ts `drew`). Its
- * step-down line is SLOW_DRAW_MS for the draw inside the sceneFunc, which
- * on a GPU canvas is all the weather costs the main thread. A 2D canvas
- * with no GPU rasters at paint, after the sceneFunc, and a software
- * canvas cost 60 to 230 ms a second at 4x slowdown, over budget, while its
- * sceneFunc stayed under 0.1 ms and never stepped down (bench --software).
- * So the frame's cost counts too, scaled so that the budget's 2 ms a tick
- * meets the mode's line, and only the larger of the two counts.
- */
-export function tickCostForMode(sceneMs: number, frameCost: number): number {
-  return Math.max(sceneMs, (frameCost * SLOW_DRAW_MS) / TICK_BUDGET_MS);
-}
+/** One loop frame as the cost measure sees it: its time, whether it ticked, and its main thread time from its start to after its paint, null until measured or when the next frame came first. */
+type FrameSeen = { at: number; ticked: boolean; spent: number | null; settled: boolean };
 
 /** How a task after the frame's rendering is asked for: a message, which runs after paint and before the next frame. */
 export type AfterFrame = (run: () => void) => void;
@@ -237,14 +260,35 @@ function browserAfterFrame(): AfterFrame {
   };
 }
 
-/** The frames a tick's cost is judged against (the board's own work in frames with no tick), and the ticks its cost is the median of. */
-const COST_FRAMES = 15;
-/** Ticks measured before their median counts, so the first few, one of them slowed, say nothing alone. */
+/** The frames kept for a tick's neighbours and the length of one frame. */
+const RECENT_FRAMES = 16;
+/** The ticks `frameCost` is the median of, and how many it needs first. */
+const COST_TICKS = 15;
 const MIN_TICKS = 5;
+/** A neighbour no further from its tick than this many frames, so no frame was dropped between them. */
+const NEIGHBOUR_FRAMES = 1.5;
+/**
+ * Ticks in a row before the loop holds one (mode.ts `frame`'s hold). At 33
+ * frames a second or fewer every frame ticks, so no frame shows the board
+ * without the weather. Holding one in eight there, about four a second,
+ * gives each hold two ticks to measure and a 3 s window about 20, enough
+ * that a board whose frames vary by a few ms never reads as the weather's.
+ * A held frame shows the particles one frame longer, which rain and snow
+ * hide, and it never happens at 60 or 120 Hz, where ticks skip frames.
+ */
+export const SAMPLE_AFTER = 7;
+
 function median(values: readonly number[]): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.floor(sorted.length / 2)]!;
+}
+
+/** The usual time between the loop's frames, which a dropped frame does not move. */
+function medianGap(frames: readonly FrameSeen[]): number {
+  const gaps: number[] = [];
+  for (let k = 1; k < frames.length; k++) gaps.push(frames[k]!.at - frames[k - 1]!.at);
+  return median(gaps);
 }
 
 /** One per Room page, so View as a player keeps a clock of its own. */

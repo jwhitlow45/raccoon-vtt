@@ -4,15 +4,15 @@ import { int, rng } from "#shared/testutil.ts";
 import { TOP_DOWN } from "../../lib/view.ts";
 import { drawWeather } from "./draw.ts";
 import { lookOf } from "./looks.ts";
-import { SLOW_DRAW_MS, TICK_MS, WARMUP_MS, WINDOW_MS, WeatherMode, type ModeInput, type StepLevel } from "./mode.ts";
+import { SLOW_DRAW_MS, SLOW_FRAME_MS, TICK_MS, WARMUP_MS, WINDOW_MS, WeatherMode, type ModeInput, type StepLevel } from "./mode.ts";
 import { createField, stepField } from "./sim.ts";
 
 /*
  * The mode as one state machine (the weather design note, 6.3 and 12):
- * random sequences of frames, draws, camera changes, setting and power
- * flips, hides, panels, the preview, tools, scene loads, remounts and
- * weather changes, driving a real field the way the controller does. The
- * invariants are checked after every event.
+ * random sequences of frames, held frames, draws and frame costs, camera
+ * changes, setting and power flips, hides, panels, the preview, tools,
+ * scene loads, remounts and weather changes, driving a real field the way
+ * the controller does. The invariants are checked after every event.
  */
 
 const SHOWN: ModeInput = {
@@ -96,13 +96,16 @@ test("2,000 random sequences keep the mode's invariants", () => {
           now += every;
           const was = mode.looping;
           const before = fieldKey(field);
-          const dt = mode.frame(now);
+          // Now and then the controller holds a frame to measure the board without the weather (store.ts SAMPLE_AFTER).
+          const hold = r() < 0.1;
+          const dt = mode.frame(now, hold);
           observe(step);
           if (dt === null) {
             assert.equal(fieldKey(field), before);
-            if (was && mode.looping) assert.ok(lastTick !== null && now - lastTick < TICK_MS, `liveness: a seen moving frame ticks unless the gate holds it, seed ${seed}`);
+            if (was && mode.looping && !hold) assert.ok(lastTick !== null && now - lastTick < TICK_MS, `liveness: a seen moving frame ticks unless the gate or a hold holds it, seed ${seed}`);
             continue;
           }
+          assert.equal(hold, false, `a held frame never ticks, seed ${seed}`);
           assert.ok(was, `no tick without a loop, seed ${seed}`);
           if (lastTick !== null) assert.ok(now - lastTick >= TICK_MS, `no two ticks within 30 ms, seed ${seed}`);
           assert.ok(dt >= 0 && dt <= 50);
@@ -111,6 +114,8 @@ test("2,000 random sequences keep the mode's invariants", () => {
           const cost = fast ? r() * 3 : r() < 0.5 ? r() * 3 : SLOW_DRAW_MS + r() * 6;
           drawWeather(recorder, field, { camera: { x: 0, y: 0, scale: 50 }, clip: null }, null);
           assert.equal(mode.drew(cost), "tick");
+          // What the tick added to its whole frame, as the controller measures it after paint.
+          mode.added(fast ? r() * 1.5 : r() < 0.5 ? r() * 1.5 : SLOW_FRAME_MS + r() * 4, now);
         }
       } else if (event === 4) {
         // A pan or zoom: the stage's own batchDraw runs the sceneFunc with no tick behind it.

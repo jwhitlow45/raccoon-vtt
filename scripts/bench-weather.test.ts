@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { weatherProblem, type SceneWeather } from "../shared/weather.ts";
-import { gateFailures, HEAVIEST, p95, type Row } from "./bench-weather.ts";
+import { WARMUP_MS, WINDOW_MS } from "../client/features/weather/mode.ts";
+import { gateFailures, HEAVIEST, p95, stepDownSettled, type Row } from "./bench-weather.ts";
 
 /*
  * The weather bench's gates (docs/design/design-v1-weather.md 6.1): rest
@@ -43,5 +44,26 @@ describe("the weather bench's gates", () => {
       ["rain", "snow", "fog", "leaves", "ash", "sand", "wind"],
     );
     for (const k of HEAVIEST) assert.equal(weatherProblem(k.weather as SceneWeather), null, k.name);
+  });
+
+  test("with a GPU the weather keeps all its particles after pans, and without one it may not", () => {
+    const panned = (level: number): Row[] => [{ row: "level after pans, rain", view: "topDown", value: level, unit: "level" }];
+    assert.deepEqual(gateFailures(panned(0)), []);
+    assert.deepEqual(gateFailures(panned(1)), ["topDown level after pans, rain: half"]);
+    assert.deepEqual(gateFailures(panned(2), { software: true }), []);
+  });
+});
+
+describe("when the bench reads a kind's rest", () => {
+  const two = WARMUP_MS + 2 * WINDOW_MS + 500;
+  test("two windows after the warm-up with no step, or after the warm-up that follows a halving, or once still", () => {
+    assert.equal(stepDownSettled([], 0), false);
+    assert.equal(stepDownSettled([{ at: 0, level: 0 }, { at: 8000, level: 0 }], 8000), false);
+    assert.equal(stepDownSettled([{ at: 0, level: 0 }, { at: two, level: 0 }], two), true);
+    // A halving at 5 s restarts the warm-up, so the rest waits two windows past it.
+    const halved = [{ at: 0, level: 0 }, { at: 5000, level: 1 }, { at: two + 1000, level: 1 }];
+    assert.equal(stepDownSettled(halved, two + 1000), false);
+    assert.equal(stepDownSettled([...halved, { at: 5000 + two, level: 1 }], 5000 + two), true);
+    assert.equal(stepDownSettled([{ at: 0, level: 0 }, { at: 10_000, level: 2 }], 10_000), true);
   });
 });

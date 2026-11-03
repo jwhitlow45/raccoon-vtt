@@ -12,16 +12,22 @@
  *
  * - rest: busy ms a second over 4 s with no weather, then with each kind
  *   heavy and its strongest wind (fog takes a moderate one, which is its
- *   most), moving, each on a page loaded afresh, measured 8.5 s in, after
- *   the warm-up and two of the step-down's windows, with the level it
- *   reached and what a tick adds to its frame. Still and Off with
- *   heavy rain too.
+ *   most), moving, each on a page loaded afresh, measured once the
+ *   step-down has settled: held still, or two of its windows after the
+ *   warm-up that follows its last step (about 8.5 s with no step, 13.5 s
+ *   after a halving), with the level it reached and what a tick adds to its
+ *   frame. Still and Off with heavy rain too.
  * - pan and drag: each frame's gap while a finger pans the map and drags a
  *   creature, with no weather and with heavy rain and a strong wind.
+ * - level after pans: heavy rain and a strong wind on a fresh page, a
+ *   finger panning on and off for 11 s, past two windows, and the level
+ *   it leaves.
  *
  * Gates (6.1): rest busy at most 60 ms a second over none for every kind,
- * a pan's and a drag's 95th percentile frame at most 2 ms over none, and
- * no ticks at rest for Still and Off. It exits 1 when one fails.
+ * a pan's and a drag's 95th percentile frame at most 2 ms over none, no
+ * ticks at rest for Still and Off, and, with a GPU, all the particles still
+ * there after the pans, since a pan is the board's work and never the
+ * weather's. It exits 1 when one fails.
  *
  * It needs `pnpm build` first and a Postgres in DATABASE_URL. It makes its
  * room and deletes it at the end. Run it alone, since other work on the
@@ -31,9 +37,9 @@
  *
  * `--software` runs Chrome without a GPU for its 2D canvas, the worst case:
  * the raster then runs on the main thread, outside the sceneFunc's own
- * timing. The layer counts each tick's whole frame for the step-down
- * (features/weather/store.ts tickCostForMode), and this mode checks that
- * the step-down brings every kind within budget.
+ * timing. The room measures what each tick adds to its whole frame for the
+ * step-down (features/weather/store.ts), and this mode checks that the
+ * step-down brings every kind within budget.
  */
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -43,6 +49,7 @@ import { parseArgs } from "node:util";
 import { chromium, type CDPSession, type Page } from "playwright-core";
 import sharp from "sharp";
 import { OpSocket, ROOT, sleep, SocketWatch, startServer, Touches, waitFor } from "../e2e/harness.ts";
+import { WARMUP_MS, WINDOW_MS } from "../client/features/weather/mode.ts";
 
 const PHONE = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true };
 const CPU_SLOWDOWN = 4;
@@ -79,8 +86,21 @@ export function p95(values: readonly number[]): number {
   return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))] ?? 0;
 }
 
-/** The gates' failures over a run's rows, in words. */
-export function gateFailures(rows: readonly Row[]): string[] {
+/**
+ * Whether the step-down has settled, from the levels read since the page
+ * loaded, oldest first: held still, or two windows after the warm-up that
+ * follows the last change, so no window it could still judge is left.
+ */
+export function stepDownSettled(levels: readonly { at: number; level: number }[], now: number): boolean {
+  const last = levels.at(-1);
+  if (!last) return false;
+  if (last.level === LEVELS.indexOf("still")) return true;
+  const changed = levels.findLast((l, i) => i === 0 || l.level !== levels[i - 1]!.level)!.at;
+  return now - changed >= WARMUP_MS + 2 * WINDOW_MS + 500;
+}
+
+/** The gates' failures over a run's rows, in words. With a GPU, a pan must never step the weather down. */
+export function gateFailures(rows: readonly Row[], options: { software?: boolean } = {}): string[] {
   const out: string[] = [];
   const at = (row: string, view: View) => rows.find((r) => r.row === row && r.view === view)?.value;
   for (const view of ["topDown", "isometric"] as const) {
@@ -94,6 +114,8 @@ export function gateFailures(rows: readonly Row[]): string[] {
       if (base !== undefined && rain !== undefined && rain - base > FRAME_BUDGET_MS) out.push(`${view} ${gesture}: p95 ${(rain - base).toFixed(1)} ms over none`);
     }
     for (const r of rows.filter((x) => x.view === view && x.unit === "ticks")) if (r.value !== 0) out.push(`${view} ${r.row}: ${r.value} ticks at rest`);
+    const panned = at("level after pans, rain", view);
+    if (!options.software && panned !== undefined && panned !== 0) out.push(`${view} level after pans, rain: ${LEVELS[panned]}`);
   }
   return out;
 }
@@ -235,10 +257,20 @@ async function main(): Promise<void> {
     };
     // Past the 2 s warm-up and two 3 s windows, so what is measured is after any step-down, as a long session runs.
     // The CPU is slowed from the page's load on, so the warm-up and the step-down judge the slowed page.
+    /** Waits until the step-down cannot move again (stepDownSettled), at most 30 s. */
+    const settle = async () => {
+      const from = Date.now();
+      const levels: { at: number; level: number }[] = [];
+      while (Date.now() - from < 30_000) {
+        levels.push({ at: Date.now(), level: await level(page) });
+        if (stepDownSettled(levels, Date.now())) return;
+        await sleep(250);
+      }
+    };
     const rest = async (prepare: () => Promise<void> = async () => {}) =>
       throttled(async () => {
         await prepare();
-        await sleep(8500);
+        await settle();
         const a = await busy(cdp);
         await sleep(REST_MS);
         return ((await busy(cdp)) - a) / (REST_MS / 1000);
@@ -254,20 +286,36 @@ async function main(): Promise<void> {
       await sleep(800);
     };
     const middle = { x: 195, y: 422 };
+    /** One finger panning the map down and right, then back. */
+    const swipes = async (touches: Touches) => {
+      await touches.start([{ x: 120, y: 300 }]);
+      for (let i = 1; i <= 20; i++) await touches.move([{ x: 120 + i * 6, y: 300 + i * 8 }], 16);
+      await touches.end([], 16);
+      await touches.start([{ x: 240, y: 460 }], 120);
+      for (let i = 1; i <= 20; i++) await touches.move([{ x: 240 - i * 6, y: 460 - i * 8 }], 16);
+      await touches.end([], 16);
+    };
     const pan = async () =>
       throttled(async () => {
         const stop = await recordFrames(page);
         const touches = new Touches(cdp);
         for (let r = 0; r < 3; r++) {
-          await touches.start([{ x: 120, y: 300 }]);
-          for (let i = 1; i <= 20; i++) await touches.move([{ x: 120 + i * 6, y: 300 + i * 8 }], 16);
-          await touches.end([], 16);
-          await touches.start([{ x: 240, y: 460 }], 120);
-          for (let i = 1; i <= 20; i++) await touches.move([{ x: 240 - i * 6, y: 460 - i * 8 }], 16);
-          await touches.end([], 16);
+          await swipes(touches);
           await sleep(300);
         }
         return p95(await stop());
+      });
+    /** Pans on and off from a fresh page past two windows, and reads the level the weather is left at. */
+    const panned = async (view: View) =>
+      throttled(async () => {
+        await fresh(view, HEAVIEST[0]!.weather);
+        const touches = new Touches(cdp);
+        const from = Date.now();
+        while (Date.now() - from < 11_000) {
+          await swipes(touches);
+          await sleep(500);
+        }
+        return level(page);
       });
     const drag = async () =>
       throttled(async () => {
@@ -308,6 +356,7 @@ async function main(): Promise<void> {
       await fresh(view, HEAVIEST[0]!.weather);
       add({ row: "pan, rain", view, value: await pan(), unit: "ms p95" });
       add({ row: "drag, rain", view, value: await drag(), unit: "ms p95" });
+      add({ row: "level after pans, rain", view, value: await panned(view), unit: "level" });
       for (const mode of ["still", "off"] as const) {
         await page.evaluate((m) => localStorage.setItem("rvtt.weather", m), mode);
         await fresh(view, HEAVIEST[0]!.weather);
@@ -327,7 +376,7 @@ async function main(): Promise<void> {
     rmSync(work, { recursive: true, force: true });
   }
   if (values.out) writeFileSync(values.out, `${JSON.stringify(rows, null, 2)}\n`);
-  const failures = gateFailures(rows);
+  const failures = gateFailures(rows, { software: values.software === true });
   for (const f of failures) console.error(`over budget: ${f}`);
   if (failures.length > 0) process.exitCode = 1;
 }

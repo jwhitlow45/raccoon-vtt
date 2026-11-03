@@ -4,7 +4,7 @@
  * clock of its own: every call carries its time, as requestAnimationFrame
  * and performance.now give it. The controller asks it each frame whether to
  * tick, steps the field and draws when it says so, and tells it what each
- * draw cost.
+ * draw cost and what each tick added to its whole frame.
  */
 
 /** This device's choice, `rvtt.weather`. */
@@ -49,6 +49,14 @@ export const WINDOW_MS = 3000;
 export const SLOW_GAP_MS = 50;
 /** A window whose 95th percentile draw is over this steps down. */
 export const SLOW_DRAW_MS = 4;
+/**
+ * A window whose median frame cost is over this steps down: what a tick
+ * adds to its whole frame, paint included (store.ts), against 6.1's budget
+ * of 60 ms a second at 30 ticks a second.
+ */
+export const SLOW_FRAME_MS = 2;
+/** A window with fewer frame costs than this says nothing by them, as a 30 Hz screen's first window may. */
+export const MIN_FRAME_COSTS = 5;
 
 /** A gap this long between ticks is a stall, not slowness: it drops its window and warms up again. */
 export const STALL_MS = 1000;
@@ -79,6 +87,7 @@ export class WeatherMode {
   #windowAt: number | null = null;
   #gaps: number[] = [];
   #draws: number[] = [];
+  #costs: number[] = [];
   /** The next draw is the tick's: set by a ticking frame, spent by `drew`, cleared by the next frame. */
   #tickDraw = false;
   #tickInWindow = false;
@@ -122,13 +131,16 @@ export class WeatherMode {
   /**
    * A frame at `now`. Returns the ms to step the field by when this frame
    * ticks, else null. A tick's draw must follow in the same frame, and its
-   * `drew` is counted as the tick's.
+   * `drew` is counted as the tick's. With `hold`, a frame that would tick
+   * does not, and changes nothing: the controller holds one now and then
+   * where every frame ticks, so it sees a frame without the weather's work.
    */
-  frame(now: number): number | null {
+  frame(now: number, hold = false): number | null {
     this.#tickDraw = false;
     if (!this.#looping) return null;
     const last = this.#lastTick;
     if (last !== null && now - last < TICK_MS) return null;
+    if (hold) return null;
     if (last !== null && now - last >= STALL_MS) {
       // A stall is a pause the page never announced, a map decoding or a tab coming back: its window is dropped, as a pause's is.
       this.#restart(now);
@@ -154,6 +166,15 @@ export class WeatherMode {
     }
     this.cameraDraws++;
     return "camera";
+  }
+
+  /**
+   * What the tick at `tickAt` added to its whole frame, in ms, measured
+   * after its paint (store.ts). It counts in the window open at that tick,
+   * so a measure that comes back after a pause or a remount counts nowhere.
+   */
+  added(ms: number, tickAt: number): void {
+    if (this.#windowAt !== null && tickAt >= this.#windowAt) this.#costs.push(ms);
   }
 
   /** The step-down so far: it only goes down, until the page reloads. */
@@ -225,18 +246,24 @@ export class WeatherMode {
     this.#windowAt = now;
     this.#gaps = [];
     this.#draws = [];
+    this.#costs = [];
   }
 
   #close(): void {
     this.#windowAt = null;
     this.#gaps = [];
     this.#draws = [];
+    this.#costs = [];
     this.#tickInWindow = false;
   }
 
   /** A full window: too slow steps down once, and the next window opens here either way. */
   #judge(now: number): void {
-    const slow = (this.#gaps.length > 0 && median(this.#gaps) > SLOW_GAP_MS) || (this.#draws.length > 0 && p95(this.#draws) > SLOW_DRAW_MS);
+    // The frame costs by their median, since each holds whatever else that frame and its neighbours did (store.ts), and a median sees through it.
+    const slow =
+      (this.#gaps.length > 0 && median(this.#gaps) > SLOW_GAP_MS) ||
+      (this.#draws.length > 0 && p95(this.#draws) > SLOW_DRAW_MS) ||
+      (this.#costs.length >= MIN_FRAME_COSTS && median(this.#costs) > SLOW_FRAME_MS);
     if (slow) {
       const next = this.#input.particles && this.#level === "full" ? "half" : "still";
       this.#level = LEVELS[Math.max(LEVELS.indexOf(this.#level), LEVELS.indexOf(next))]!;
