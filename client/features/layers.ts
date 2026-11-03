@@ -30,6 +30,7 @@ import { RulerController } from "./measure/RulerController.ts";
 import { AreaController } from "./areas/AreaController.ts";
 import { TetherController } from "./attach/TetherController.ts";
 import { quietLazy } from "../lib/quietLazy.tsx";
+import { WeatherController } from "./weather/WeatherController.tsx";
 
 /* The DM's height marks and explored outline, loaded after the room opens (lib/quietLazy.tsx). */
 const HeightLayer = quietLazy<LayerProps>(() => import("./builder/heights/HeightLayer.tsx").then((m) => m.HeightLayer), ["dm"], "The height marks");
@@ -38,8 +39,11 @@ const ExploredEdgeLayer = quietLazy<LayerProps>(() => import("./vision/ExploredE
 /**
  * What features draw on the map canvas (design sections 13.3 and 14.2).
  *
- * Why a registry: the canvas has at most four Konva layers (map, board,
- * tokens, overlay), and several features share each one. Each feature owns
+ * Why a registry: the canvas has at most five Konva layers (map, board,
+ * weather, tokens, overlay), and several features share each one. Konva
+ * warns past five on a stage (`MAX_LAYERS_NUMBER`), so the weather's
+ * (docs/design/design-v1-weather.md 5.1) is the last spare one, mounted only
+ * while the scene has weather: no feature adds a layer of its own. Each feature owns
  * its renderer in its own files and adds one line here. Stage.tsx renders
  * every entry in its layer, in `order`, and never needs to know the feature.
  *
@@ -180,6 +184,7 @@ export const CONTROLLERS: readonly ControllerDef[] = [
   { id: "rulers", Component: RulerController },
   { id: "areas", Component: AreaController },
   { id: "tethers", Component: TetherController },
+  { id: "weather", Component: WeatherController },
 ];
 
 export function layersOf(layer: LayerDef["layer"]): LayerDef[] {

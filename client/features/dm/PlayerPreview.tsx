@@ -17,6 +17,7 @@ import { createPreview, previewRoom, watchPreviewLoad, type Preview, type Previe
 import { PreviewContext, type PreviewNotice } from "./previewContext.ts";
 import { PreviewWait } from "./PreviewWait.tsx";
 import { viewAsSlot } from "./viewAs.tsx";
+import { coverRoomForPreview } from "../weather/store.ts";
 
 const FLASH_MS = 2_000;
 
@@ -104,6 +105,8 @@ export function PlayerPreview(props: {
     [noticeHeight],
   );
   const context = useMemo(() => ({ memberId, name, notice }), [memberId, name, notice]);
+  // The DM's own board is covered while this shows, so its weather waits and the preview's board draws its own (docs/design/design-v1-weather.md 5.2).
+  useEffect(() => coverRoomForPreview(), []);
 
   // Made in an effect, so a development double mount disposes the first one. Another player means a new socket, a new name does not.
   const nameRef = useRef(name);

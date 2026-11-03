@@ -46,6 +46,7 @@ import { BoardViewContext, boardPillsSlot, boardViewsOf, type BoardViews } from 
 import { useDraggedIds } from "../draggedIds.ts";
 import type { IsoToken } from "../TokenNode.tsx";
 import { groupWalls, meets, ReliefIndex, type DrawPiece, type Item, type StandeeIn } from "./buckets.ts";
+import { WeatherMount } from "../../features/weather/WeatherController.tsx";
 import { IsoGroundContext, TreeShownContext, useShownView, useTreeShown, useTreeShownStore, useTreeShownView, type IsoGround } from "./context.ts";
 import { drawRun, runPaintedBox, standeePaintedBox, type DrawContext, type GroundCopy } from "./drawRelief.ts";
 import { FogView } from "./fogView.ts";
@@ -720,6 +721,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
               </Group>
             </Group>
           </Layer>
+          <WeatherMount scene={scene} view={isometric(turn)} width={size.width} height={size.height} />
           {/*
             The drag layer: what moves frame by frame. Other members' drags with
             their tags, and the moving marks, draw here rather than in the

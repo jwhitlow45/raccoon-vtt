@@ -16,6 +16,7 @@ import { turnFocus, useFollowTurn } from "../features/encounter/followTurn.ts";
 import { panAnchor, requestPan, watchPans } from "../features/encounter/pan.ts";
 import { stageCameraSlot } from "../features/scenes/stageCamera.ts";
 import { CONTROLLERS, layersOf, type LayerProps } from "../features/layers.ts";
+import { WeatherMount } from "../features/weather/WeatherController.tsx";
 import { displayViewKey, viewKey } from "../features/view/store.ts";
 import { viewGestureSlot } from "../features/view/choice.ts";
 import { useRoomViewChoice } from "../features/view/ViewMenu.tsx";
@@ -1703,6 +1704,7 @@ export function MapStage(props: {
                           ))}
                         </Layer>
                       ) : null}
+                      <WeatherMount scene={scene} view={TOP_DOWN} width={size.width} height={size.height} />
                       <Layer>
                         {below.map((t) => renderToken(t))}
                         <RemoteDrags tokens={tokens} scale={cam.scale} youId={youId} draggingId={draggingId} eased={eased} />
