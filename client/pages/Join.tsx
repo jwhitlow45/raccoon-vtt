@@ -16,6 +16,7 @@ import { AskToJoin, OutcomeCard } from "./AskToJoin.tsx";
 import { completeWithRecovery, hasMember } from "./askToJoin.ts";
 import { DmLinkEntry } from "./DmLinkEntry.tsx";
 import { HomeHeader } from "./Home.tsx";
+import { askView, joinCards } from "./joinCards.ts";
 import {
   CHALLENGE_NOTICE,
   CHALLENGE_UNAVAILABLE,
@@ -82,45 +83,40 @@ export function Join(props: {
   const lookup = useMine(roomId, mode === "ask" || mode === "ask_only");
   // In With the password, or by asking, the ask card replaces the password
   // card only when the player taps Ask to join, or a request is waiting.
-  const [view, setView] = useState<"password" | "ask">("password");
+  const [tapped, setTapped] = useState(false);
   // Once the player leaves the request's card with Back, it is spent: the ask card that follows starts fresh.
   const [spent, setSpent] = useState(false);
-  useEffect(() => {
-    if (lookup.kind === "done" && lookup.mine) setView("ask");
-  }, [lookup]);
+  const linked = start.auto;
+  const view = askView({ tapped, found: lookup.kind === "done" && lookup.mine !== null, spent, linked });
   // The DM stopped taking requests while this page waited on one.
   const [closed, setClosed] = useState(false);
 
-  const askCard = (shown: "ask" | "ask_only") =>
-    lookup.kind === "done" ? (
-      <AskToJoin
-        roomId={roomId}
-        mode={shown}
-        mine={spent ? null : lookup.mine}
-        linkOpened={props.link !== null}
-        onBack={() => {
-          setSpent(true);
-          setView("password");
-        }}
-        onJoined={props.onJoined}
-        onModeChanged={props.onRefreshMode}
-        onClosed={() => {
-          setClosed(true);
-          props.onRefreshMode();
-        }}
-      />
-    ) : (
-      <Card>
-        <Loading text="Loading…" />
-      </Card>
-    );
+  const askCard = (shown: "ask" | "ask_only") => (
+    <AskToJoin
+      roomId={roomId}
+      mode={shown}
+      mine={spent || lookup.kind !== "done" ? null : lookup.mine}
+      linkOpened={props.link !== null}
+      onBack={() => {
+        setSpent(true);
+        setTapped(false);
+      }}
+      onJoined={props.onJoined}
+      onModeChanged={props.onRefreshMode}
+      onClosed={() => {
+        setClosed(true);
+        props.onRefreshMode();
+      }}
+    />
+  );
 
   const passwordCard = (
     <PasswordStep roomId={roomId} start={start} onOk={(ok, entered) => setStep({ ...ok, entered })} onModeChanged={props.onRefreshMode} />
   );
 
+  const cards = joinCards({ mode, picking: step !== null, view, looked: lookup.kind === "done", linked });
   let body;
-  if (step) {
+  if (cards === "pick" && step) {
     body = (
       <PickPlayer
         roomId={roomId}
@@ -128,17 +124,25 @@ export function Join(props: {
         players={step.players}
         dmColors={step.dmColors}
         onJoined={props.onJoined}
-        onModeChanged={props.onRefreshMode}
+        onModeChanged={() => {
+          // The ticket is no way in now: the page shows the new mode's cards.
+          setStep(null);
+          props.onRefreshMode();
+        }}
         onExpired={() => {
           setStart({ ...step.entered, auto: false, notice: "That took a while, so press Next again.", error: null });
           setStep(null);
         }}
       />
     );
-  } else if (mode === "ask_only") {
-    body = askCard("ask_only");
-  } else if (mode === "ask" && view === "ask") {
-    body = askCard("ask");
+  } else if (cards === "loading") {
+    body = (
+      <Card>
+        <Loading text="Loading…" />
+      </Card>
+    );
+  } else if (cards === "ask_only" || cards === "ask") {
+    body = askCard(cards);
   } else {
     body = (
       <>
@@ -147,13 +151,7 @@ export function Join(props: {
         {mode === "ask" ? (
           <Card title="No password?">
             <p style={{ margin: 0 }}>Ask the DM to let you in.</p>
-            {lookup.kind === "loading" ? (
-              <Loading text="Loading…" />
-            ) : (
-              <Button onClick={() => setView("ask")} disabled={lookup.kind !== "done"}>
-                Ask to join
-              </Button>
-            )}
+            <Button onClick={() => setTapped(true)}>Ask to join</Button>
           </Card>
         ) : null}
       </>
