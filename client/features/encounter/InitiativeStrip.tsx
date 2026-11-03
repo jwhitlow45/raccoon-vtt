@@ -397,7 +397,7 @@ function TrackerTarget(props: { label: string; reach: number }) {
  */
 const PILL_PAD = 6;
 
-function YourTurn(props: { notice: boolean; fontSize: number; inline?: boolean; slot?: HTMLElement | null }) {
+export function YourTurn(props: { notice: boolean; fontSize: number; inline?: boolean; slot?: HTMLElement | null }) {
   const text: CSSProperties = {
     flex: "none",
     justifySelf: "start",
@@ -417,8 +417,9 @@ function YourTurn(props: { notice: boolean; fontSize: number; inline?: boolean; 
       </span>
     );
   }
+  // The pill's cream under ink is the fixed highlight fill, which stays cream on a light page. It settles into the strip's turn text, amber there.
   const colors = {
-    "--rvtt-notice-fill": theme.color.accentSoft,
+    "--rvtt-notice-fill": theme.color.highlightFill,
     "--rvtt-notice-ink": theme.color.ink,
     "--rvtt-notice-settled": theme.color.accentSoft,
   } as CSSProperties;
@@ -431,14 +432,14 @@ function YourTurn(props: { notice: boolean; fontSize: number; inline?: boolean; 
   if (props.slot) {
     return (
       <>
-        <span aria-hidden className="rvtt-turn-notice" style={{ ...text, ...colors, padding: `0 ${PILL_PAD}px`, margin: props.inline ? 0 : `0 -${PILL_PAD}px`, borderRadius: theme.radius.pill, background: theme.color.accentSoft, color: theme.color.ink }}>
+        <span aria-hidden className="rvtt-turn-notice" style={{ ...text, ...colors, padding: `0 ${PILL_PAD}px`, margin: props.inline ? 0 : `0 -${PILL_PAD}px`, borderRadius: theme.radius.pill, background: theme.color.highlightFill, color: theme.color.ink }}>
           Your turn
         </span>
         {createPortal(
           <span
             role="status"
             aria-live="assertive"
-            style={{ padding: `${theme.space(1)}px ${theme.space(3)}px`, borderRadius: theme.radius.pill, background: theme.color.accentSoft, color: theme.color.ink, fontSize: theme.font.body14, fontWeight: theme.weight.bold, boxShadow: theme.shadow.float }}
+            style={{ padding: `${theme.space(1)}px ${theme.space(3)}px`, borderRadius: theme.radius.pill, background: theme.color.highlightFill, color: theme.color.ink, fontSize: theme.font.body14, fontWeight: theme.weight.bold, boxShadow: theme.shadow.float }}
           >
             Your turn
           </span>,
@@ -459,7 +460,7 @@ function YourTurn(props: { notice: boolean; fontSize: number; inline?: boolean; 
         margin: props.inline ? 0 : `0 -${PILL_PAD}px`,
         ...(props.inline ? null : { maxWidth: `calc(100% + ${2 * PILL_PAD}px)` }),
         borderRadius: theme.radius.pill,
-        background: theme.color.accentSoft,
+        background: theme.color.highlightFill,
         color: theme.color.ink,
         animation: `rvtt-turn-notice ${TURN_NOTICE_MS}ms ease-out both`,
       }}

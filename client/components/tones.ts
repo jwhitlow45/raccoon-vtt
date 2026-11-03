@@ -27,10 +27,14 @@ export type NoticeTone = "info" | "warning" | "danger" | "highlight";
  * A Notice's fill, outline and text. `focus` is the focus ring inside it,
  * set as `--rvtt-focus` (globals.css): on the cream highlight the accent
  * ring would vanish (the crest yellow reads 1.1:1 there), so it is ink.
+ * The highlight's fill is the fixed cream `highlightFill` under ink in
+ * both schemes, and its outline `accentSoft`, the turn's own color: the
+ * same cream in dark, and in light an amber that shows the notice's edge
+ * where cream on a light page would not (1.2:1).
  */
 export const NOTICE_TONES: Record<NoticeTone, { fill: string; outline: string; text: string; focus?: string }> = {
   info: { fill: theme.color.surfaceRaised, outline: theme.color.border, text: theme.color.text },
   warning: { fill: theme.color.warningFill, outline: theme.color.warning, text: theme.color.text },
   danger: { fill: theme.color.dangerFill, outline: theme.color.danger, text: theme.color.text },
-  highlight: { fill: theme.color.accentSoft, outline: theme.color.accentSoft, text: theme.color.ink, focus: theme.color.ink },
+  highlight: { fill: theme.color.highlightFill, outline: theme.color.accentSoft, text: theme.color.ink, focus: theme.color.ink },
 };
