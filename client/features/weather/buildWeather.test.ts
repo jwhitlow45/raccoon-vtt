@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import fc from "fast-check";
 import { WEATHER_KINDS, weatherProblem, type SceneWeather } from "#shared/weather.ts";
-import { buildWeather, CLEAR_PICKER, COMPASS, pickerOf, windHelp, windOffered, type Picker, type WindLevel } from "./buildWeather.ts";
+import { buildWeather, CLEAR_PICKER, COMPASS, forcedNow, pickerOf, windHelp, windOffered, type Picker, type WindLevel } from "./buildWeather.ts";
 
 /** The picker rules of docs/design/design-v1-weather.md 4.1, each as the DM would meet it. */
 
@@ -134,5 +134,21 @@ describe("the picker's words", () => {
     assert.equal(new Set(COMPASS.map((c) => `${c.row},${c.col}`)).size, 8);
     assert.equal(COMPASS[0]!.name, "Toward the top");
     assert.equal(COMPASS[7]!.name, "Toward the top left");
+  });
+});
+
+describe("a forced change's reason, while its weather stands", () => {
+  test("shown while the scene holds what the pick sent, gone after an Undo or a co-DM's change", () => {
+    const built = buildWeather(from({ kind: "rain", wind: "strong", toward: 270 }), { kind: "fog" });
+    assert.ok(built.forced && built.weather);
+    const forced = { text: built.forced, weather: built.weather };
+    // The scene as the server stores it, in its one stored form, keys in any order.
+    assert.equal(forcedNow(forced, { toward: 270, wind: "moderate", kind: "fog" } as SceneWeather), "The wind is moderate now: strong wind disperses fog.");
+    assert.equal(forcedNow(forced, { kind: "rain", wind: "strong", toward: 270 }), null, "Undo put the rain back");
+    assert.equal(forcedNow(forced, { kind: "fog", wind: "moderate", toward: 270, heavy: true }), null, "a co-DM made it heavy");
+    assert.equal(forcedNow(forced, undefined), null, "a co-DM cleared it");
+    assert.equal(forcedNow(null, { kind: "fog" }), null);
+    const cleared = { text: "x", weather: null };
+    assert.equal(forcedNow(cleared, undefined), "x", "a pick that sent no weather stands while the scene has none");
   });
 });

@@ -771,7 +771,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
     }
   });
 
-  test("wx-ui-2. fog drops a strong wind and says why, a sandstorm raises it, Strong is off in fog, and Weather rules on rolls off keeps the look", async () => {
+  test("wx-ui-2. fog drops a strong wind and says why until the weather moves on, a sandstorm raises it, Strong is off in fog, and Weather rules on rolls off keeps the look", async () => {
     try {
       await view(run.arenaId);
       const panel = await scenesPanel(dm);
@@ -787,7 +787,15 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
       await kind.selectOption({ label: "Fog" });
       await waitFor("fog", () => (weatherOf(run.arenaId)?.kind === "fog" ? true : null));
       assert.deepEqual(weatherOf(run.arenaId), { kind: "fog", wind: "moderate" });
-      await what.getByText("The wind is moderate now: strong wind disperses fog.").waitFor();
+      const moderated = what.getByText("The wind is moderate now: strong wind disperses fog.");
+      await moderated.waitFor();
+      // Another device puts the strong wind back, as an Undo or a co-DM would, and the reason goes with the weather it was about.
+      await ops.send({ t: "scene.update", sceneId: run.arenaId, patch: { weather: { kind: "rain", wind: "strong" } } });
+      await waitFor("rain again", () => (weatherOf(run.arenaId)?.kind === "rain" ? true : null));
+      await moderated.waitFor({ state: "detached" });
+      await kind.selectOption({ label: "Fog" });
+      await waitFor("fog again", () => (weatherOf(run.arenaId)?.kind === "fog" ? true : null));
+      await moderated.waitFor();
       assert.equal(await wind.getByRole("radio", { name: "Strong", exact: true }).isDisabled(), true, "strong wind disperses fog");
       await strength.getByRole("radio", { name: "Heavy", exact: true }).check();
       await what.getByText(/^Heavily Obscured: a creature trying to see something in it has the Blinded condition\./).waitFor();

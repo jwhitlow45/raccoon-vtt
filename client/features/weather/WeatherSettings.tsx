@@ -14,12 +14,14 @@ import { Select } from "../scenes/controls.tsx";
 import {
   buildWeather,
   COMPASS,
+  forcedNow,
   KIND_CHOICES,
   pickerOf,
   strengthWords,
   windHelp,
   windOffered,
   WIND_CHOICES,
+  type Forced,
   type Picker,
   type WindLevel,
 } from "./buildWeather.ts";
@@ -44,13 +46,13 @@ export function WeatherSettings(props: { scene: Scene }) {
   useEffect(() => {
     if (weather !== undefined) setOpen(true);
   }, [weather === undefined]);
-  // Why the last pick moved something the DM did not pick, said in the wind's help until the next pick.
-  const [forced, setForced] = useState<string | null>(null);
+  // Why the last pick moved something the DM did not pick, said in the wind's help while the scene holds what that pick sent.
+  const [forced, setForced] = useState<Forced | null>(null);
 
   const change = (pick: Partial<Picker>) => {
     const built = buildWeather(picker, pick);
     if (built.refused) return;
-    setForced(built.forced);
+    setForced(built.forced === null ? null : { text: built.forced, weather: built.weather });
     actions.dispatch({ t: "scene.update", sceneId: scene.id, patch: { weather: built.weather } });
   };
 
@@ -63,7 +65,7 @@ export function WeatherSettings(props: { scene: Scene }) {
         summary: open ? undefined : <span style={{ color: theme.color.textMuted, fontSize: theme.font.small }}>{weatherSummary(weather)}</span>,
       }}
     >
-      <WeatherBody picker={picker} weather={weather} forced={forced} change={change} />
+      <WeatherBody picker={picker} weather={weather} forced={forcedNow(forced, weather)} change={change} />
     </Section>
   );
 }

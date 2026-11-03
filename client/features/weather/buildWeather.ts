@@ -1,4 +1,4 @@
-import { DEFAULT_TOWARD, weatherProblem, WEATHER_PROBLEMS, type SceneWeather, type WeatherKind } from "#shared/weather.ts";
+import { DEFAULT_TOWARD, normalWeather, weatherProblem, WEATHER_PROBLEMS, type SceneWeather, type WeatherKind } from "#shared/weather.ts";
 
 /*
  * The fold's picker as plain data (docs/design/design-v1-weather.md 4.1), and the
@@ -91,6 +91,20 @@ function toWeather(p: Picker): SceneWeather | null {
   }
   if (!p.rules) out.rules = false;
   return out;
+}
+
+/** Why a pick moved something the DM did not pick, and the weather it sent. */
+export type Forced = { text: string; weather: SceneWeather | null };
+
+/**
+ * A forced change's reason while the scene still holds the weather that pick
+ * sent, else null: an Undo, a co-DM's change or another device's moves the
+ * weather on, and the reason with it.
+ */
+export function forcedNow(forced: Forced | null, weather: SceneWeather | undefined): string | null {
+  if (!forced) return null;
+  const key = (w: SceneWeather | null | undefined) => (w ? JSON.stringify(normalWeather(w)) : "none");
+  return key(forced.weather) === key(weather) ? forced.text : null;
 }
 
 /** The wind's help under the picker: the forced change's reason, else why an option is off. */
