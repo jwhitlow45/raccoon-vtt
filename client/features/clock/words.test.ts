@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Calendar } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
-import { amountBy, calendarSummary, chipName, chipText, composeDraft, DAY_FROM_ONE, draftDate, firstDay, keptSeconds, restNote, setAt, stepName, STEPS, timeSeconds, timeValue, toDawn, weekdayLine } from "./words.ts";
+import { amountBy, calendarSummary, chipName, chipText, composeDraft, DAY_FROM_ONE, draftDate, firstDay, keptSeconds, reconcileDate, restNote, setAt, stepName, STEPS, timeSeconds, timeValue, toDawn, weekdayLine } from "./words.ts";
 
 const DAY = 86_400;
 const H = 3_600;
@@ -77,6 +77,15 @@ describe("the date fields", () => {
     assert.deepEqual(composeDraft({ ...draft, month: "1", day: "2" }, MONTHS), { ok: false, field: "day", reason: "Pick a day from 1 to 1." });
     assert.deepEqual(composeDraft({ ...draft, time: "" }, MONTHS), { ok: false, field: "time", reason: "Pick a time." });
     assert.equal(composeDraft({ ...draft, year: "abc" }, MONTHS).ok, false);
+  });
+
+  test("a month the calendar no longer has reads as none, and composing it names the month (ASTRA-04)", () => {
+    const draft = { day: "1", month: "2", year: "1", time: "08:00" };
+    const two: Calendar = { kind: "months", months: [{ name: "Deepwinter", days: 30 }, { name: "Midwinter", days: 1 }] };
+    assert.equal(reconcileDate(draft, MONTHS), draft);
+    assert.deepEqual(reconcileDate(draft, two), { ...draft, month: "" });
+    assert.deepEqual(composeDraft(reconcileDate(draft, two), two), { ok: false, field: "month", reason: "Pick a month." });
+    assert.equal(reconcileDate(draft, DAYS), draft);
   });
 
   test("Day count refuses a day under 1 (CALB-O-06)", () => {

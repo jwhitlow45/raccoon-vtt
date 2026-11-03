@@ -142,6 +142,18 @@ function whole(text: string): number {
   return /^-?\d{1,15}$/.test(trimmed) ? Number(trimmed) : Number.NaN;
 }
 
+/**
+ * A draft as its calendar can show it (ASTRA-04): a month the calendar no
+ * longer has, such as one another DM removed while Set was open, reads as
+ * none, so its select asks for a month and Set names it, rather than the
+ * select showing a month the draft does not hold.
+ */
+export function reconcileDate(draft: DateDraft, calendar: Calendar): DateDraft {
+  if (calendar.kind !== "months" || draft.month === "") return draft;
+  const month = whole(draft.month);
+  return Number.isInteger(month) && month >= 0 && month < calendar.months.length ? draft : { ...draft, month: "" };
+}
+
 /** Day count names days from 1. composeDate takes any whole day, so a moment before Day 1 still reads back. */
 export const DAY_FROM_ONE = "Pick a day from 1.";
 

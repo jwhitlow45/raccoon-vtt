@@ -10,10 +10,10 @@ import { IconButton } from "../../components/IconButton.tsx";
 import { RadioCards } from "../../components/RadioCards.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
-import { calendarOf, calendarUpdate, draftOf, draftYearDays, type CalendarDraft, type MonthRow } from "./calendarDraft.ts";
+import { calendarOf, calendarUpdate, draftOf, draftYearDays, followMonth, type CalendarDraft, type MonthRow } from "./calendarDraft.ts";
 import { DateFieldsEditor } from "./DateFieldsEditor.tsx";
 import { DISCARD, useDiscard } from "./useDiscard.ts";
-import { composeDraft, draftDate, firstDay, keptSeconds, type DateDraft } from "./words.ts";
+import { composeDraft, draftDate, firstDay, keptSeconds, reconcileDate, type DateDraft } from "./words.ts";
 
 export const KIND_OPTIONS = [
   { value: "days", label: "Day count", help: "Day 1, Day 2 and on." },
@@ -28,7 +28,14 @@ export const KIND_OPTIONS = [
  * no clock to update, so Save hands the calendar back to the start form
  * (`onSave`) and nothing is sent until Start the clock.
  */
-export function CalendarDialog(props: { initial: Calendar; clock: RoomClock | null; onSave?(calendar: Calendar): void; opener?: RefObject<HTMLElement | null>; onClose(): void }) {
+export function CalendarDialog(props: {
+  initial: Calendar;
+  clock: RoomClock | null;
+  /** Before the clock starts: the calendar saved, and how a date the start form holds follows its months as they moved or went. */
+  onSave?(calendar: Calendar, follow: (date: DateDraft) => DateDraft): void;
+  opener?: RefObject<HTMLElement | null>;
+  onClose(): void;
+}) {
   const { clock } = props;
   const actions = useRoomActions();
   const encounter = useRoomView((s) => s.view?.encounter ?? null);
@@ -48,14 +55,17 @@ export function CalendarDialog(props: { initial: Calendar; clock: RoomClock | nu
   const timeOfDay = clock ? ((now % 86_400) + 86_400) % 86_400 : 0;
   const derived: DateDraft | null =
     clock === null || !result.ok ? null : kindChanged ? firstDay(timeOfDay) : draftDate(now, result.calendar);
-  const dateValue = dateEdit ?? derived;
+  const dateValue = dateEdit && result.ok ? reconcileDate(dateEdit, result.calendar) : (dateEdit ?? derived);
   const composed = result.ok && dateValue ? composeDraft(dateValue, result.calendar, keptSeconds(dateValue, now)) : null;
 
   const dirty = !sameDraft(draft, start) || dateEdit !== null;
   const { armed, leave } = useDiscard(dirty, props.onClose, draft, dateEdit);
+  // Today follows the calendar as it is edited (ASTRA-04): a new kind starts it again from the first day, and a date the DM typed keeps its month by its row.
   const edit = (next: CalendarDraft) => {
     setDraft(next);
     setError(null);
+    if (next.kind !== draft.kind) setDateEdit(null);
+    else if (dateEdit && next.rows !== draft.rows) setDateEdit(followMonth(dateEdit, draft.rows, next.rows));
   };
 
   const save = () => {
@@ -65,7 +75,8 @@ export function CalendarDialog(props: { initial: Calendar; clock: RoomClock | nu
       return;
     }
     if (!clock) {
-      props.onSave?.(result.calendar);
+      const rows = draft.rows;
+      props.onSave?.(result.calendar, (date) => followMonth(date, start.rows, rows));
       props.onClose();
       return;
     }

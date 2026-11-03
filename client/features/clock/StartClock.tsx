@@ -8,12 +8,11 @@ import { theme } from "../../lib/theme.ts";
 import { useRoomActions } from "../../state/view.ts";
 import { CalendarDialog, KIND_OPTIONS, STARTING_MONTHS } from "./CalendarDialog.tsx";
 import { DateFieldsEditor } from "./DateFieldsEditor.tsx";
-import { composeDraft, firstDay, calendarSummary, type DateDraft } from "./words.ts";
+import { pickStartKind, savedToStart, START_FORM, type StartForm } from "./calendarDraft.ts";
+import { composeDraft, calendarSummary } from "./words.ts";
 
 export const START_INTRO = "Keep the in-game date and time. You move it on as time passes. A Long Rest for the party and each fight move it too.";
 export const SHARE_HELP = "Off, players get no date, time or time lines at all.";
-const EIGHT_AM = 8 * 3_600;
-const FIRST: DateDraft = firstDay(EIGHT_AM);
 
 /**
  * The Time panel with no clock (docs/design/design-v1-calendar.md 4.1). The
@@ -24,29 +23,21 @@ const FIRST: DateDraft = firstDay(EIGHT_AM);
  */
 export function StartClock() {
   const actions = useRoomActions();
-  const [calendar, setCalendar] = useState<Calendar>({ kind: "days" });
-  const [monthsDraft, setMonthsDraft] = useState<Calendar | null>(null);
-  const [date, setDate] = useState<DateDraft>(FIRST);
+  const [form, setForm] = useState<StartForm>(START_FORM);
+  const { calendar, date, tried } = form;
   const [shown, setShown] = useState(true);
-  const [tried, setTried] = useState(false);
   const [dialog, setDialog] = useState<Calendar | null>(null);
   const changeButton = useRef<HTMLButtonElement>(null);
   const composed = composeDraft(date, calendar);
 
   const pickKind = (kind: "days" | "months") => {
-    if (kind === calendar.kind) return;
-    if (kind === "days") setCalendar({ kind: "days" });
-    else if (monthsDraft) setCalendar(monthsDraft);
-    else {
-      setDialog(STARTING_MONTHS);
-      return;
-    }
-    setDate(FIRST);
-    setTried(false);
+    const next = pickStartKind(form, kind);
+    if (next === "ask") setDialog(STARTING_MONTHS);
+    else setForm(next);
   };
 
   const start = () => {
-    setTried(true);
+    setForm({ ...form, tried: true });
     if (!composed.ok) return;
     actions.dispatch({ t: "clock.start", id: actions.newId(), at: composed.t, shown, calendar });
   };
@@ -66,7 +57,7 @@ export function StartClock() {
         ) : null}
       </div>
       <Section label="It is now" divider={false}>
-        <DateFieldsEditor calendar={calendar} value={date} onChange={setDate} composed={composed} showErrors={tried} />
+        <DateFieldsEditor calendar={calendar} value={date} onChange={(next) => setForm({ ...form, date: next })} composed={composed} showErrors={tried} />
       </Section>
       <Switch label="Players see the date and time" help={SHARE_HELP} checked={shown} onChange={setShown} />
       <Button variant="primary" block onClick={start}>
@@ -77,12 +68,7 @@ export function StartClock() {
           initial={dialog}
           clock={null}
           opener={calendar.kind === "months" ? changeButton : undefined}
-          onSave={(saved) => {
-            setMonthsDraft(saved);
-            setCalendar(saved);
-            setDate(FIRST);
-            setTried(false);
-          }}
+          onSave={(saved, follow) => setForm(savedToStart(form, saved, follow))}
           onClose={() => setDialog(null)}
         />
       ) : null}

@@ -1,6 +1,7 @@
 import { yearDays, type ComposedDate } from "#shared/calendar.ts";
 import { LIMITS } from "#shared/limits.ts";
 import type { Calendar } from "#shared/model.ts";
+import { composeDraft, firstDay, reconcileDate, type DateDraft } from "./words.ts";
 
 /**
  * The Calendar dialog's draft (docs/design/design-v1-calendar.md 4.3): the
@@ -86,4 +87,50 @@ export function calendarUpdate(o: { before: Calendar; calendar: Calendar; today:
   const at = (o.todayTouched || kindChanged) && o.today?.ok === true && o.today.t !== o.now ? o.today.t : undefined;
   if (!calendarChanged && at === undefined) return null;
   return { ...(calendarChanged ? { calendar: o.calendar } : {}), ...(at !== undefined ? { at } : {}) };
+}
+
+/**
+ * A date's month as rows move or go (ASTRA-04): the month it named by its
+ * row, wherever that row now is, or none once the row is removed. So a
+ * date the DM chose keeps naming the same month as the calendar is edited.
+ */
+export function followMonth(date: DateDraft, before: readonly MonthRow[], after: readonly MonthRow[]): DateDraft {
+  if (date.month === "") return date;
+  const key = before[Number(date.month)]?.key;
+  const at = key === undefined ? -1 : after.findIndex((r) => r.key === key);
+  return { ...date, month: at < 0 ? "" : String(at) };
+}
+
+export type MonthsCalendar = Extract<Calendar, { kind: "months" }>;
+
+/**
+ * The start form's calendar and date (4.1). `months` is the last Months
+ * calendar saved on the form, so picking Months again brings it back, and
+ * only a Months save replaces it (ASTRA-02). `tried` shows the date's
+ * errors.
+ */
+export type StartForm = { calendar: Calendar; months: MonthsCalendar | null; date: DateDraft; tried: boolean };
+
+/** The start form's first date: the first day, at 8:00 AM. */
+export const START_DATE: DateDraft = firstDay(8 * 3_600);
+export const START_FORM: StartForm = { calendar: { kind: "days" }, months: null, date: START_DATE, tried: false };
+
+/** A kind picked on the start form: the form with it, or "ask" when Months has no calendar yet and the Calendar dialog names one. */
+export function pickStartKind(form: StartForm, kind: Calendar["kind"]): StartForm | "ask" {
+  if (kind === form.calendar.kind) return form;
+  if (kind === "months" && !form.months) return "ask";
+  return { ...form, calendar: kind === "days" ? { kind: "days" } : form.months!, date: START_DATE, tried: false };
+}
+
+/**
+ * The Calendar dialog's Save on the start form. A new kind starts the date
+ * again from the first day. The same kind saved again, a rename or new
+ * month lengths, keeps the date chosen with its month followed to its row,
+ * and checks it against the months as they are now (ASTRA-03).
+ */
+export function savedToStart(form: StartForm, saved: Calendar, follow: (date: DateDraft) => DateDraft): StartForm {
+  const months = saved.kind === "months" ? saved : form.months;
+  if (saved.kind !== form.calendar.kind) return { calendar: saved, months, date: START_DATE, tried: false };
+  const date = reconcileDate(follow(form.date), saved);
+  return { calendar: saved, months, date, tried: !composeDraft(date, saved).ok };
 }

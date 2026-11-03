@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { LIMITS } from "#shared/limits.ts";
 import type { Calendar } from "#shared/model.ts";
-import { calendarOf, calendarUpdate, draftOf, draftYearDays, sameCalendar, startingRows, weekNames, type CalendarDraft } from "./calendarDraft.ts";
+import { calendarOf, calendarUpdate, draftOf, followMonth, pickStartKind, savedToStart, START_DATE, START_FORM, draftYearDays, sameCalendar, startingRows, weekNames, type CalendarDraft } from "./calendarDraft.ts";
 
 let key = 0;
 const next = () => ++key;
@@ -83,5 +83,59 @@ describe("what the Calendar dialog's Save sends (CALB-O-02, ASTRA-01)", () => {
 
   test("a kind change sends the first day's moment, untouched or not", () => {
     assert.deepEqual(calendarUpdate({ before: { kind: "days" }, calendar: MONTHS, today: { ok: true, t: 60 * 86_400 + now }, todayTouched: false, now }), { calendar: MONTHS, at: 60 * 86_400 + now });
+  });
+});
+
+describe("a date as the calendar is edited (ASTRA-03, ASTRA-04)", () => {
+  const rows = [{ key: 1, name: "Deepwinter", days: "30" }, { key: 2, name: "Thaw", days: "30" }, { key: 3, name: "Bloom", days: "30" }];
+  const date = { day: "4", month: "1", year: "1204", time: "06:00" };
+
+  test("its month follows its row as rows move, and reads as none once the row goes", () => {
+    assert.equal(followMonth(date, rows, [rows[1]!, rows[0]!, rows[2]!]).month, "0");
+    assert.equal(followMonth(date, rows, [rows[0]!, rows[2]!]).month, "");
+    assert.equal(followMonth(date, rows, rows).month, "1");
+    assert.equal(followMonth({ ...date, month: "" }, rows, rows).month, "");
+  });
+});
+
+describe("the start form (ASTRA-02, ASTRA-03)", () => {
+  const MONTHS: Calendar = { kind: "months", months: [{ name: "Deepwinter", days: 30 }, { name: "Thaw", days: 30 }] };
+  const keep = (d: typeof START_DATE) => d;
+
+  test("Months with no calendar yet asks for one, and Day count saved from that dialog keeps Months asking", () => {
+    assert.equal(pickStartKind(START_FORM, "months"), "ask");
+    const days = savedToStart(START_FORM, { kind: "days" }, keep);
+    assert.equal(days.months, null);
+    assert.equal(pickStartKind(days, "months"), "ask");
+  });
+
+  test("a Day count save keeps the Months calendar, so Months picks it again", () => {
+    const months = savedToStart(START_FORM, MONTHS, keep);
+    assert.deepEqual(months.calendar, MONTHS);
+    const days = savedToStart(months, { kind: "days" }, keep);
+    assert.deepEqual(days.calendar, { kind: "days" });
+    assert.deepEqual(days.months, MONTHS);
+    const again = pickStartKind(days, "months");
+    assert.notEqual(again, "ask");
+    assert.deepEqual(again !== "ask" && again.calendar, MONTHS);
+  });
+
+  test("a same-kind save keeps the date chosen, and one a shorter month no longer holds shows its error", () => {
+    const months = { ...savedToStart(START_FORM, MONTHS, keep), date: { day: "30", month: "1", year: "1204", time: "06:00" } };
+    const renamed: Calendar = { kind: "months", months: [{ name: "Frost", days: 30 }, { name: "Thaw", days: 30 }] };
+    const kept = savedToStart(months, renamed, keep);
+    assert.deepEqual(kept.date, months.date);
+    assert.equal(kept.tried, false);
+    const shorter = savedToStart(months, { kind: "months", months: [{ name: "Frost", days: 30 }, { name: "Thaw", days: 28 }] }, keep);
+    assert.deepEqual(shorter.date, months.date);
+    assert.equal(shorter.tried, true, "Pick a day from 1 to 28 shows at once");
+    const removed = savedToStart(months, { kind: "months", months: [{ name: "Frost", days: 30 }] }, (d) => ({ ...d, month: "" }));
+    assert.equal(removed.date.month, "");
+    assert.equal(removed.tried, true);
+  });
+
+  test("a kind change starts the date again from the first day", () => {
+    const months = { ...savedToStart(START_FORM, MONTHS, keep), date: { day: "9", month: "1", year: "1204", time: "06:00" } };
+    assert.deepEqual(savedToStart(months, { kind: "days" }, keep).date, START_DATE);
   });
 });
