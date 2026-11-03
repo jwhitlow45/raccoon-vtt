@@ -14,6 +14,7 @@ import { usePreview } from "../features/dm/previewContext.ts";
 import { findRect, findTokenCamera, nextOwnToken, sheetCover, type OpenSheet } from "../features/find/findToken.ts";
 import { badgeText } from "../features/log/unread.ts";
 import { VIEW_GROUP, VIEW_TIP, viewButtonLabel } from "../features/view/choice.ts";
+import { useWeatherVoice } from "../features/weather/WeatherVoice.ts";
 import { useRoomViewChoice, useViewVoice, ViewMenuBody, ViewSheetDialog, ViewVoice, type ViewChoiceState } from "../features/view/ViewMenu.tsx";
 import { XCardButton } from "../features/xcard/XCardButton.tsx";
 import type { Turn } from "../lib/view.ts";
@@ -340,6 +341,7 @@ function IconButton(props: {
 export function ViewButton(props: { onOpen?(open: boolean): void; folded?: boolean }) {
   const choice = useRoomViewChoice();
   useViewVoice(choice);
+  useWeatherVoice();
   const wide = useLayoutSize().width >= theme.layout.wideMinWidth;
   if (props.folded) return <ViewVoice />;
   // No tuck into the bar's padding, as the last button has: Fit always follows it, and a phone's 6 px gap would leave the two overlapping.

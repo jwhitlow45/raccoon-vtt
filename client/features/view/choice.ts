@@ -188,13 +188,38 @@ export function turnRefused(stored: StoredView, suggested: Scene["suggestedView"
 /**
  * The status's words, per Room page. A slot of its own, so a change
  * re-renders the status alone. `key` is new each time, so words that
- * repeat are said again.
+ * repeat are said again. The status holds one line (docs/design/design-v1-weather.md
+ * 4.2), so the view's words and the weather's join when they come close
+ * together, and `view`, `weather` and `at` remember what each said.
  */
-export const viewVoiceSlot = scopeSlot<StoreApi<{ key: number; text: string }>>(() => createStore(() => ({ key: 0, text: "" })));
+export type VoiceState = { key: number; text: string; view: string | null; weather: string | null; at: number };
+
+export const viewVoiceSlot = scopeSlot<StoreApi<VoiceState>>(() => createStore<VoiceState>(() => ({ key: 0, text: "", view: null, weather: null, at: 0 })));
+
+/** Lines from the view and the weather that come within this long of each other are one announcement. */
+export const JOIN_WITHIN_MS = 500;
+
+/**
+ * The status after a source speaks: its line, joined with the other
+ * source's if that spoke within JOIN_WITHIN_MS, the view's line first
+ * whichever came first. A source never carries its own earlier line, so a
+ * second view change replaces the first.
+ */
+export function joinedVoice(prev: Pick<VoiceState, "view" | "weather" | "at">, source: "view" | "weather", text: string, now: number): Pick<VoiceState, "text" | "view" | "weather" | "at"> {
+  const recent = now - prev.at <= JOIN_WITHIN_MS;
+  const view = source === "view" ? text : recent ? prev.view : null;
+  const weather = source === "weather" ? text : recent ? prev.weather : null;
+  return { view, weather, at: now, text: [view, weather].filter((line) => line !== null).join(" ") };
+}
+
+export function sayJoined(scope: RoomScope, source: "view" | "weather", text: string, now: number = Date.now()): void {
+  const voice = scope.get(viewVoiceSlot);
+  const prev = voice.getState();
+  voice.setState({ key: prev.key + 1, ...joinedVoice(prev, source, text, now) });
+}
 
 export function sayView(scope: RoomScope, text: string): void {
-  const voice = scope.get(viewVoiceSlot);
-  voice.setState({ key: voice.getState().key + 1, text });
+  sayJoined(scope, "view", text);
 }
 
 /**

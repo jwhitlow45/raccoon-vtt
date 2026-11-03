@@ -3,6 +3,10 @@ import { describe, test } from "node:test";
 import { isometric, TOP_DOWN, type Turn } from "../../lib/view.ts";
 import {
   choiceOf,
+  JOIN_WITHIN_MS,
+  joinedVoice,
+  sayJoined,
+  viewVoiceSlot,
   choiceWords,
   followSaid,
   ISO_TEST_FLAG,
@@ -23,6 +27,7 @@ import {
   wantedKind,
   type ViewState,
 } from "./choice.ts";
+import { RoomScope } from "../../state/scope.ts";
 import { FOLLOW_THE_SCENE, isoReady, withPick } from "./store.ts";
 
 const state = (over: Partial<ViewState> = {}): ViewState => ({ sceneId: "s1", shown: TOP_DOWN, pick: null, wanted: "topDown", forcedBy: null, ...over });
@@ -130,5 +135,33 @@ describe("the view choice (docs/design/design-v1-isometric-view.md 7, 8)", () =>
     assert.equal(turnRefused(FOLLOW_THE_SCENE, undefined, "fog"), "Turning needs the isometric view.", "Top-down is wanted anyway");
     assert.equal(turnRefused(FOLLOW_THE_SCENE, "isometric", "grid"), "Line up grid works top-down. Isometric comes back when you switch tools.");
     assert.equal(turnRefused(withPick(FOLLOW_THE_SCENE, "isometric"), undefined, "trap"), "Traps work top-down. Isometric comes back when you switch tools.");
+  });
+});
+
+describe("the polite status holds one line (docs/design/design-v1-weather.md 4.2)", () => {
+  const said = (scope: RoomScope) => scope.get(viewVoiceSlot).getState();
+
+  test("a weather line within 500 ms of a view line joins it, the view's first, whichever was said first", () => {
+    const viewFirst = new RoomScope();
+    sayJoined(viewFirst, "view", "Isometric view.", 1_000);
+    sayJoined(viewFirst, "weather", "Weather here: Heavy rain.", 1_000 + JOIN_WITHIN_MS);
+    assert.equal(said(viewFirst).text, "Isometric view. Weather here: Heavy rain.");
+    const weatherFirst = new RoomScope();
+    sayJoined(weatherFirst, "weather", "Weather here: Heavy rain.", 1_000);
+    sayJoined(weatherFirst, "view", "Isometric view.", 1_200);
+    assert.equal(said(weatherFirst).text, "Isometric view. Weather here: Heavy rain.");
+    assert.equal(said(weatherFirst).key, 2, "said again, as a new announcement");
+  });
+
+  test("lines further apart stand alone, and a source never keeps its own earlier line", () => {
+    const apart = new RoomScope();
+    sayJoined(apart, "view", "Isometric view.", 1_000);
+    sayJoined(apart, "weather", "Weather here: Fog.", 1_000 + JOIN_WITHIN_MS + 1);
+    assert.equal(said(apart).text, "Weather here: Fog.");
+    const twice = new RoomScope();
+    sayJoined(twice, "view", "Isometric view.", 0);
+    sayJoined(twice, "view", "Top-down view.", 100);
+    assert.equal(said(twice).text, "Top-down view.");
+    assert.deepEqual(joinedVoice({ view: null, weather: null, at: 0 }, "weather", "Weather here: Fog.", 0).text, "Weather here: Fog.");
   });
 });
