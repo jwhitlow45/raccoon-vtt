@@ -273,6 +273,33 @@ describe("the drops (5.4)", () => {
     assert.ok(rescued >= 1, "a flat retry that went through");
   });
 
+  test("DG-R1-07: only a tree link the search found no way for is retried flat, never one with no doorway or an empty budget", () => {
+    const s = { ...DEFAULT_SETTINGS, w: 80, h: 80, rooms: 30 };
+    const next = seeds(24);
+    const whys = new Set<string>();
+    let raisedBudget = 0;
+    for (let i = 0; i < 60; i++) {
+      const seed = next();
+      const full = planDungeon(s, seed);
+      for (const budget of [SEARCH_BUDGET, 0, Math.floor((SEARCH_BUDGET - full.trace.treeLeft) / 2)]) {
+        const p = planDungeon(s, seed, budget);
+        ok(p, s);
+        const why = new Map(p.trace.failed.map((f) => [f.link, f.why]));
+        for (const f of p.trace.failed) whys.add(f.why);
+        for (const li of p.trace.retried) assert.equal(why.get(li), "none", `link ${li} retried after ${why.get(li)}`);
+        // A link with a raised end that failed on the budget is dropped at once, its rooms keeping their ground.
+        for (const f of p.trace.failed) {
+          if (f.why === "none") continue;
+          const l = p.links[f.link]!;
+          if (full.board.rooms[l.a]!.ground !== 0 || full.board.rooms[l.b]!.ground !== 0) raisedBudget++;
+          assert.ok(!p.trace.retried.includes(f.link));
+        }
+      }
+    }
+    assert.ok(whys.has("budget") && whys.has("none"), `failures seen: ${[...whys].join(", ")}`);
+    assert.ok(raisedBudget >= 5, `${raisedBudget} failures on a raised room not retried`);
+  });
+
   test("loops that fail are skipped with their doorways, doors and runs", () => {
     const s = { ...DEFAULT_SETTINGS };
     const next = seeds(23);

@@ -45,6 +45,8 @@ const ROOMS_PER_LOOP = 4;
 export type PlanTrace = {
   /** Tree links retried with their raised or sunk end rooms made flat. */
   retried: number[];
+  /** Each tree link's first failure and why: no way through, an empty budget, or no doorway at an end. */
+  failed: { link: number; why: "none" | "budget" | "doorway" }[];
   /** Tree links that failed twice, and the rooms each took with it. */
   dropped: { link: number; rooms: number[] }[];
   /** Loop links skipped, their doorways gone. */
@@ -80,7 +82,7 @@ export function planDungeon(input: DungeonSettings, seed: Seed, budget: number =
   const { w: W, h: H } = s;
   const width = s.wide ? 2 : 1;
   const rng = seedStream(seed);
-  const trace: PlanTrace = { retried: [], dropped: [], skipped: [], stubFailed: false, treeLeft: budget, loopsLeft: budget, budgetLeft: budget };
+  const trace: PlanTrace = { retried: [], failed: [], dropped: [], skipped: [], stubFailed: false, treeLeft: budget, loopsLeft: budget, budgetLeft: budget };
 
   // Steps 1 to 3: rooms, the entrance, the tree and the extra ways round.
   const rects = placeRooms(rng, s);
@@ -109,25 +111,29 @@ export function planDungeon(input: DungeonSettings, seed: Seed, budget: number =
   const router = new Router(board);
   const options = { wide: s.wide, turn: TURN_COST[s.corridors], noise, budget: { left: budget } };
   const paths: (number[] | null)[] = links.map(() => null);
-  const routeLink = (li: number): boolean => {
+  const routeLink = (li: number): "built" | "none" | "budget" | "doorway" => {
     const { a, b } = ends[li]!;
-    if (!a || !b || a.removed || b.removed) return false;
+    if (!a || !b || a.removed || b.removed) return "doorway";
     const found = router.route(a, { anchor: board.anchor(b), side: b.side }, options);
-    if (!found.ok) return false;
+    if (!found.ok) return found.why;
     for (const k of found.cells) board.laid[k] = 1;
     paths[li] = found.cells;
-    return true;
+    return "built";
   };
   const children = new Map<number, number[]>();
   for (const l of tree) children.set(l.a, [...(children.get(l.a) ?? []), l.b]);
   const branch = (room: number): number[] => [room, ...(children.get(room) ?? []).flatMap(branch)];
   tree.forEach((l, li) => {
-    if (board.rooms[l.b]!.dropped || routeLink(li)) return;
-    const raised = [l.a, l.b].filter((i) => board.rooms[i]!.ground !== 0);
+    if (board.rooms[l.b]!.dropped) return;
+    const first = routeLink(li);
+    if (first === "built") return;
+    trace.failed.push({ link: li, why: first });
+    // Only a search that found no way can go through once a run is gone. No doorway stays none, and an empty budget stays empty.
+    const raised = first === "none" ? [l.a, l.b].filter((i) => board.rooms[i]!.ground !== 0) : [];
     if (raised.length > 0) {
       trace.retried.push(li);
       for (const i of raised) board.flatten(i);
-      if (routeLink(li)) return;
+      if (routeLink(li) === "built") return;
     }
     const gone = branch(l.b);
     // The failed link's doorway on the kept room goes in the sweep after routing, with every other unbuilt one.
@@ -137,7 +143,7 @@ export function planDungeon(input: DungeonSettings, seed: Seed, budget: number =
   trace.treeLeft = options.budget.left;
   loops.forEach((_, j) => {
     const li = tree.length + j;
-    if (routeLink(li)) return;
+    if (routeLink(li) === "built") return;
     trace.skipped.push(li);
     for (const d of [ends[li]!.a, ends[li]!.b]) if (d) board.removeDoorway(d);
   });
