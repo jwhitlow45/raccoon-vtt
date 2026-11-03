@@ -594,11 +594,13 @@ export class RoomActor {
   /**
    * The `joinRequests` signal (docs/design/design-v1-join-requests.md 5.3)
    * to every DM socket that has its snapshot, never a table display or a
-   * View as preview, which must learn nothing about who is asking.
+   * View as preview, which must learn nothing about who is asking. Both of
+   * those read as `'player'` (connection.ts), so the role alone keeps them
+   * out, as it does for `access`, and ws.itest.ts holds the rule.
    */
   notifyJoinRequests(): void {
     for (const conn of this.#connections) {
-      if (!conn.closed && conn.role === "dm" && conn.held !== null && !conn.display && conn.previewBy === null) conn.send({ t: "joinRequests" });
+      if (!conn.closed && conn.role === "dm" && conn.held !== null) conn.send({ t: "joinRequests" });
     }
   }
 

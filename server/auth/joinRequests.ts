@@ -25,6 +25,12 @@ export const SWEEP_MS = 15_000;
 export const ADMISSION_DEADLINE_MS = 30_000;
 /** Twice the admission deadline, so every ask that started before a mark meets it. */
 export const GOT_IN_MARK_MS = 60_000;
+/**
+ * How long a room's generation is kept after its last bump, once nothing in
+ * the room is live: twice the admission deadline, so no ask that read the
+ * generation before the bump can still reach final admission.
+ */
+export const GENERATION_KEEP_MS = 2 * ADMISSION_DEADLINE_MS;
 export const TURN_AWAY_HOLD_MS = 15 * 60_000;
 // Waiting at once, memory bounds all three: a table of about 8 phones per
 // address, 50 places a room, 500 on the server.
@@ -88,7 +94,12 @@ export type JoinRequestOptions = {
   holdMs?: number;
 };
 
-type Generation = { n: number; reason: "closed" | "deleted" | null };
+/**
+ * `n` comes from one counter for every room and never repeats, so a room
+ * whose generation was pruned and bumped again never shows a number an ask
+ * read before the prune. `at`: the bump, for pruning.
+ */
+type Generation = { n: number; reason: "closed" | "deleted" | null; at: number };
 type Waiter = { finish(state: WaitState): void };
 
 const realTimers: Timers = {
@@ -119,6 +130,7 @@ export class JoinRequests {
   #reserved = new Map<number, Reservation>();
   #nextReservation = 1;
   #generations = new Map<string, Generation>();
+  #bumps = 0;
   /** Turned-away devices, by `room|session`, until when. */
   #holds = new Map<string, number>();
   /** Devices that got in by a join, a DM claim or a let-in, by `room|session`, since when. */
@@ -481,7 +493,7 @@ export class JoinRequests {
 
   /**
    * Every 15 s: ends what has expired, drops records ended more than 2
-   * minutes ago, and forgets lapsed marks and holds.
+   * minutes ago, and forgets lapsed marks, holds and generations.
    */
   sweep(): void {
     this.#expireDue();
@@ -489,6 +501,14 @@ export class JoinRequests {
     for (const [id, r] of this.#requests) if (r.endedAt !== undefined && now - r.endedAt >= ENDED_KEEP_MS) this.#requests.delete(id);
     for (const [k, at] of this.#marks) if (now - at >= GOT_IN_MARK_MS) this.#marks.delete(k);
     for (const [k, until] of this.#holds) if (until <= now) this.#holds.delete(k);
+    // A room's generation matters only to what is live in it: its requests,
+    // and the asks reserving places there. Past the keep, an ask that read
+    // the number before the last bump is past its deadline too, so a room
+    // with nothing live forgets it, and every deleted room in time goes.
+    const live = new Set<string>();
+    for (const r of this.#requests.values()) if (!isEnding(r.state)) live.add(r.roomId);
+    for (const r of this.#reserved.values()) live.add(r.roomId);
+    for (const [roomId, g] of this.#generations) if (now - g.at >= GENERATION_KEEP_MS && !live.has(roomId)) this.#generations.delete(roomId);
   }
 
   /** Shutdown: new waits answer at once, and every held one answers `waiting` now. */
@@ -507,8 +527,7 @@ export class JoinRequests {
   }
 
   #bump(roomId: string, reason: "closed" | "deleted"): void {
-    const generation = this.#generations.get(roomId) ?? { n: 0, reason: null };
-    this.#generations.set(roomId, { n: generation.n + 1, reason });
+    this.#generations.set(roomId, { n: ++this.#bumps, reason, at: this.#now() });
     const ending: Ending = reason === "closed" ? "closed" : "gone";
     for (const r of this.#requests.values()) {
       if (r.roomId !== roomId) continue;

@@ -3,6 +3,7 @@ import { describe, test } from "node:test";
 import {
   ADMISSION_DEADLINE_MS,
   ENDED_KEEP_MS,
+  GENERATION_KEEP_MS,
   JoinRequests,
   REQUEST_LIFE_MS,
   TURN_AWAY_HOLD_MS,
@@ -141,6 +142,49 @@ describe("join requests: the ask", () => {
     store.dropRoom(ROOM);
     assert.equal(code(admit(beforeDelete, "s2")), "room_not_found");
     assert.equal(store.list(ROOM).length, 0);
+  });
+
+  test("a room's generation is forgotten once nothing in it is live, and an ask that read it before the bump is still refused (JBO1-10)", () => {
+    const { time, store, asked, admit } = setup();
+    const startedAt = time.now;
+    const before = store.generation(ROOM);
+    store.closeRoom(ROOM);
+    store.dropRoom(OTHER);
+    const live = asked("s1");
+    time.advance(GENERATION_KEEP_MS);
+    store.sweep();
+    assert.notEqual(store.generation(ROOM), before, "kept while a request waits in the room");
+    assert.equal(store.generation(OTHER), 0, "a deleted room with nothing live is forgotten");
+    store.cancel(ROOM, live.id, "s1");
+    store.sweep();
+    assert.equal(store.generation(ROOM), 0, "then this one too");
+    // The ask read the number before the bump: its deadline refuses it, never the forgotten number.
+    const stale = store.reserve(ROOM, "203.0.113.9", startedAt, before);
+    assert.ok("id" in stale);
+    assert.equal(code(admit(stale, "s9")), "busy");
+    // A bump after the prune never repeats an old number.
+    store.closeRoom(ROOM);
+    assert.notEqual(store.generation(ROOM), 0);
+    assert.notEqual(store.generation(ROOM), before);
+  });
+
+  test("a sweep right after a bump keeps the generation, so an ask that read it before the bump is still refused (JBO1-10)", () => {
+    const { time, store, admit } = setup();
+    // The ask reads the generation, then the mode, before it reserves a place.
+    const read = store.generation(ROOM);
+    store.closeRoom(ROOM);
+    const bumped = store.generation(ROOM);
+    store.sweep();
+    time.advance(1_000);
+    store.sweep();
+    const place = store.reserve(ROOM, "203.0.113.9", time.now, read);
+    assert.ok("id" in place);
+    assert.equal(code(admit(place, "s9")), "asks_off", "GENERATION: never admitted across the switch");
+    // Forgotten and bumped again, the room never shows a number read before.
+    time.advance(GENERATION_KEEP_MS);
+    store.sweep();
+    store.closeRoom(ROOM);
+    assert.notEqual(store.generation(ROOM), bumped);
   });
 
   test("the caps: 8 waiting per address per room, 50 per room, 500 on the server, places reserved counted", () => {
