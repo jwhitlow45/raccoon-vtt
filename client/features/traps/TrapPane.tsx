@@ -570,16 +570,6 @@ function hitsKind(hits: TrapRig["hits"]): HitsKind {
 }
 
 /**
- * Who it hits (4.1): the creature that set it off, everyone on the trap
- * (squares only), everyone in squares drawn on the map, or everyone in an
- * area aimed with the area tool. A choice of longer names, so rows with a
- * check (docs/design/design-v1-look-pass-2.md 2.7). An arrow key both moves and
- * chooses in a radio group, so choosing writes only what needs no map:
- * drawn squares start as the trap's own, and an area is written once
- * "Place the area" saves one, the choice held here until then. The map's
- * pick and the area tool start from the buttons that follow the choice.
- */
-/**
  * The color a trap's area wears while the area tool aims it: the trap red
  * the board draws traps in. The draft draws on Konva, which cannot read a
  * CSS variable, so it is the board's plain hex in either scheme
@@ -594,6 +584,16 @@ export function trapAreaDraft(input: { grid: Grid; trapId: string; sceneId: stri
   return draftFromTemplate(input.grid, { ...input.area, id, rev: 0, sceneId: input.sceneId, color: trapDraftColor, visibility: "dm", ownerId: "" }, id, input.tokens, input.feetPerCell);
 }
 
+/**
+ * Who it hits (4.1): the creature that set it off, everyone on the trap
+ * (squares only), everyone in squares drawn on the map, or everyone in an
+ * area aimed with the area tool. A choice of longer names, so rows with a
+ * check (docs/design/design-v1-look-pass-2.md 2.7). An arrow key both moves and
+ * chooses in a radio group, so choosing writes only what needs no map:
+ * drawn squares start as the trap's own, and an area is written once
+ * "Place the area" saves one, the choice held here until then. The map's
+ * pick and the area tool start from the buttons that follow the choice.
+ */
 function HitsChoice(props: { trap: Trap; rig: TrapRig; chunks: Readonly<Record<string, BuildChunk>>; grid: Grid; setRig(patch: RigPatch): void; pick(what: "hits", fresh?: boolean): void }) {
   const { trap, rig, chunks, grid } = props;
   const scope = useRoomScope();

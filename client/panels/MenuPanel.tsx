@@ -182,13 +182,6 @@ function useDmPlayerLink(roomId: string, dm: boolean, shown: boolean): string | 
 }
 
 /**
- * The View row, while the narrowest phone's top bar has folded its View
- * button away (features/view/choice.ts viewFoldSlot, D-261026-12): it
- * opens the same View sheet the button does, over the menu. Its place
- * stays in the menu, empty while the bar holds the button, so the menu's
- * sheet can still be found from it once the row is gone.
- */
-/**
  * Where focus goes when the Menu loses the control that held it: a phone
  * sheet's title, or in the side panel, which draws no title, the tab or the
  * split bar's name that labels the pane (pages/Room.tsx SidePane). The wide
@@ -202,6 +195,13 @@ function menuFallback(place: HTMLElement | null): HTMLElement | null {
   return label ? document.getElementById(label) : null;
 }
 
+/**
+ * The View row, while the narrowest phone's top bar has folded its View
+ * button away (features/view/choice.ts viewFoldSlot, D-261026-12): it
+ * opens the same View sheet the button does, over the menu. Its place
+ * stays in the menu, empty while the bar holds the button, so the menu's
+ * sheet can still be found from it once the row is gone.
+ */
 function ViewRow() {
   const folded = useStore(useScoped(viewFoldSlot), (s) => s.folded);
   const choice = useRoomViewChoice();

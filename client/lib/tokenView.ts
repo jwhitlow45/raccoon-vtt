@@ -116,19 +116,19 @@ export function hpText(display: HpDisplay): string | null {
 export type Chip = { glyph: string; color: string; label: string };
 
 /**
- * Each effect's chip color, label and letter glyph. The canvas draws the
- * openly licensed icon from public/icons (client/canvas/chipIcons.ts) and
- * falls back to the glyph while the icon loads, if it fails, and for custom
- * statuses. Either way the chip carries a shape as well as a color, so it
- * works for colorblind players.
- */
-/**
  * A custom status with no color of its own, and an effect key with no
  * entry below, draw on this slate. It is board art in the status palette,
  * not an interface color.
  */
 const OTHER_CHIP_COLOR = "#4b5563";
 
+/**
+ * Each effect's chip color, label and letter glyph. The canvas draws the
+ * openly licensed icon from public/icons (client/canvas/chipIcons.ts) and
+ * falls back to the glyph while the icon loads, if it fails, and for custom
+ * statuses. Either way the chip carries a shape as well as a color, so it
+ * works for colorblind players.
+ */
 const CHIPS: Record<string, { glyph: string; color: string; label: string }> = {
   blinded: { glyph: "Bl", color: "#6b7280", label: "Blinded" },
   charmed: { glyph: "Ch", color: "#d946ef", label: "Charmed" },
