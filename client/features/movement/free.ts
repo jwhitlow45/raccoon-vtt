@@ -20,6 +20,32 @@ export const HEX_KEEPS = "Hex scenes keep creatures on a hex.";
 export const GROUP_KEEPS = "A group keeps to the grid.";
 export const PLACED_TEXT = "Placed between squares.";
 
+/** How long after a drag let go with Alt held its keyup still counts as the drag's (D-261102-537). */
+export const ALT_AFTER_DRAG_MS = 1_000;
+
+/**
+ * Alt's keyups around a token drag (D-261102-537). A lone Alt's keyup opens
+ * the menu bar in browsers on Windows, so it is prevented while a drag is
+ * live, and the first one within ALT_AFTER_DRAG_MS after a drag let go with
+ * Alt held, since a hand lets go of the button a moment before the key. Any
+ * other keyup is the page's.
+ */
+export function altKeyups(now: () => number): { dragEnded(altHeld: boolean): void; swallows(key: string, dragging: boolean): boolean } {
+  let endedAt: number | null = null;
+  return {
+    dragEnded(altHeld) {
+      endedAt = altHeld ? now() : null;
+    },
+    swallows(key, dragging) {
+      if (key !== "Alt") return false;
+      if (dragging) return true;
+      const late = endedAt !== null && now() - endedAt <= ALT_AFTER_DRAG_MS;
+      endedAt = null;
+      return late;
+    },
+  };
+}
+
 /**
  * Where a token landing at `landing` is drawn for a release at `release`:
  * the shared rounding and clamp of rules/nudge.ts, so the client aims at

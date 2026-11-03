@@ -8,7 +8,7 @@ import { freeDrawnAt, nudgeAt, nudgeBound } from "#shared/rules/nudge.ts";
 import { holds } from "#shared/propertyTestutil.ts";
 import { token } from "#shared/testutil.ts";
 import { moveOpsOf, type DropPlan, type Landed, type Stop } from "./drop.ts";
-import { freeDrop, keepPlacements, leadNode, placement, type FreeInput } from "./free.ts";
+import { ALT_AFTER_DRAG_MS, altKeyups, freeDrop, keepPlacements, leadNode, placement, type FreeInput } from "./free.ts";
 import { teleportMove } from "./teleport.ts";
 import { seenRoom, thorn, world } from "./testing.ts";
 
@@ -162,5 +162,42 @@ describe("leadNode", () => {
     // A hold writes the mount at a rules spot plus its own nudge: the rider's node keeps the rider's drawn offset.
     lead.position({ x: 4 - 0.25, y: 2 });
     assert.deepEqual(at, { x: 5.375, y: 2.125 });
+  });
+});
+
+describe("Alt's keyup around a drag (D-261102-537)", () => {
+  const clock = () => {
+    let t = 0;
+    return { now: () => t, wait: (ms: number) => (t += ms) };
+  };
+
+  test("prevented while a drag is live, and only Alt", () => {
+    const keys = altKeyups(clock().now);
+    assert.equal(keys.swallows("Alt", true), true);
+    assert.equal(keys.swallows("Shift", true), false);
+    assert.equal(keys.swallows("Alt", false), false, "no drag, no drag just ended");
+  });
+
+  test("the first Alt keyup within 1 s after a drag let go with Alt held, and not the next one", () => {
+    const c = clock();
+    const keys = altKeyups(c.now);
+    keys.dragEnded(true);
+    c.wait(ALT_AFTER_DRAG_MS);
+    assert.equal(keys.swallows("Shift", false), false, "another key passes and spends nothing");
+    assert.equal(keys.swallows("Alt", false), true, "the Alt let go just after the drop");
+    assert.equal(keys.swallows("Alt", false), false, "a later Alt is the page's");
+  });
+
+  test("not past 1 s, and not after a drag let go without Alt", () => {
+    const c = clock();
+    const keys = altKeyups(c.now);
+    keys.dragEnded(true);
+    c.wait(ALT_AFTER_DRAG_MS + 1);
+    assert.equal(keys.swallows("Alt", false), false, "too late");
+    keys.dragEnded(false);
+    assert.equal(keys.swallows("Alt", false), false, "no Alt at the drop");
+    keys.dragEnded(true);
+    keys.dragEnded(false);
+    assert.equal(keys.swallows("Alt", false), false, "a later drag without Alt clears it");
   });
 });

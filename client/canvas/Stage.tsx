@@ -67,7 +67,7 @@ import { ownsToken as memberOwns } from "../features/tokens/access.ts";
 import { followOps, lastMoveSlot } from "../features/tokens/undoMove.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import type { DropPlan } from "../features/movement/drop.ts";
-import { GROUP_KEEPS, HEX_KEEPS, leadNode as offsetNode, moveFrame, PLACED_TEXT, PLACING_FREELY } from "../features/movement/free.ts";
+import { altKeyups, GROUP_KEEPS, HEX_KEEPS, leadNode as offsetNode, moveFrame, PLACED_TEXT, PLACING_FREELY } from "../features/movement/free.ts";
 import { useAimedCatches } from "../features/areas/AreaPreviewLayer.tsx";
 import { keptStops } from "../features/measure/ruler.ts";
 import { useDragStops } from "../features/movement/stageHooks.ts";
@@ -1014,18 +1014,19 @@ export function MapStage(props: {
   /**
    * Alt, Option on a Mac, as the last pointer event or key had it: a token
    * drag reads it on every move and at the drop to drop between squares
-   * (docs/design/design-v1-snap-off.md 4). While a drag is live, Alt's keyup
-   * is prevented, so a lone Alt does not open the browser's menu bar on
-   * Windows.
+   * (docs/design/design-v1-snap-off.md 4). While a drag is live, and just
+   * after one let go with Alt held, Alt's keyup is prevented, so a lone Alt
+   * does not open the browser's menu bar on Windows (free.ts altKeyups).
    */
   const altRef = useRef(false);
+  const [altUps] = useState(() => altKeyups(() => performance.now()));
   useEffect(() => {
     const track = (e: PointerEvent | KeyboardEvent) => {
       altRef.current = e.altKey;
     };
     const onKeyUp = (e: KeyboardEvent) => {
       altRef.current = e.altKey;
-      if (e.key === "Alt" && dragRef.current) e.preventDefault();
+      if (altUps.swallows(e.key, dragRef.current !== null)) e.preventDefault();
     };
     const onBlur = () => {
       altRef.current = false;
@@ -1044,7 +1045,7 @@ export function MapStage(props: {
       window.removeEventListener("keyup", onKeyUp, true);
       window.removeEventListener("blur", onBlur);
     };
-  }, []);
+  }, [altUps]);
   /** A press on a token this member may not drag, so moving it says why instead of doing nothing. */
   const refusedPressRef = useRef<{ pointerId: number; start: Point; text: string } | null>(null);
 
@@ -1725,6 +1726,7 @@ export function MapStage(props: {
       dragEnd(node, token) {
         const drag = dragRef.current;
         dragRef.current = null;
+        altUps.dragEnded(altRef.current);
         if (drag) letGoIso(drag.node, drag.homes);
         setDraggingId(null);
         setCarried(NOT_CARRIED);
@@ -1745,7 +1747,7 @@ export function MapStage(props: {
         dragStopsRef.current.drop(leadNode, lead, drag.named, (plan, placed) => landDrop(node, token, followers, drag, plan, placed), { free, inPlace });
       },
     };
-  }, [actions, stopTokenDrag, setSpot, clearSpots, popovers, tappedAgain, store, scope]);
+  }, [actions, stopTokenDrag, setSpot, clearSpots, popovers, tappedAgain, store, scope, altUps]);
 
   const memberMap = members ?? {};
   const below: ViewToken[] = [];
