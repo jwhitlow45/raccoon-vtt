@@ -443,7 +443,7 @@ describe("the light theme", { concurrency: false }, () => {
     assert.deepEqual(await group.getByRole("radio").evaluateAll((els) => els.map((e) => (e as unknown as { getAttribute(n: string): string | null }).getAttribute("value"))), ["dark", "light", "auto"]);
     assert.equal(await group.getByRole("radio", { name: "Dark", exact: true }).isChecked(), true);
     const help = await group.getAttribute("aria-describedby");
-    assert.equal((await dm.locator(`[id="${help}"]`).textContent())?.trim(), "Auto follows this device's own light or dark setting. The map, the fog, the dice tray and the table display stay dark in both.");
+    assert.equal((await dm.locator(`[id="${help}"]`).textContent())?.trim(), "Auto follows this device's own light or dark setting. The map, the fog, the dice tray and the table display stay dark in Light too.");
     await shots.take(dm, "lt-1-this-device-dark");
 
     // A tap switches the open page: no navigation, no reload.

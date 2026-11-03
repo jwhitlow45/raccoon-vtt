@@ -288,7 +288,7 @@ export function deviceDetail(fullscreen: boolean): string {
 }
 
 /** The Theme section's help, which is also the row's description. */
-export const THEME_HELP = "Auto follows this device's own light or dark setting. The map, the fog, the dice tray and the table display stay dark in both.";
+export const THEME_HELP = "Auto follows this device's own light or dark setting. The map, the fog, the dice tray and the table display stay dark in Light too.";
 
 /**
  * Theme (docs/design/design-v1-light-theme.md 4.1): Dark, Light or Auto,

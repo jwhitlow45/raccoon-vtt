@@ -39,7 +39,7 @@ Asked for in docs/design/mvp.md section 17 ("Look, feel and accessibility"): "Da
 
 Menu, This device, a **Theme** section after Interface size:
 
-- Help: "Auto follows this device's own light or dark setting. The map, the fog, the dice tray and the table display stay dark in both."
+- Help: "Auto follows this device's own light or dark setting. The map, the fog, the dice tray and the table display stay dark in Light too."
 - A Segmented row, label "Theme", options **Dark**, **Light**, **Auto**, Dark chosen at first. A tap changes the page at once, with no reload and no animation, and every other open tab or window of the app follows through the `storage` event (the guide opens in a new tab).
 - The Menu's This device row detail becomes "Interface size, theme, full screen, low power, map detail, sounds, shortcuts and sheet handle." (without "full screen" where it is missing).
 - The same layout on a phone upright, sideways, a tablet and a computer. The three options fit one row at 320 x 568 at 130%.
@@ -236,7 +236,7 @@ The contract came first and alone: the palettes, the variables with their dark f
 - **Keys and focus:** no new key. One Tab stop with arrows. Focus stays on the chosen option across a switch.
 - **Screen readers:** "Theme, radio group", options "Dark", "Light", "Auto", the help as its description.
 - **Large interface sizes:** the Theme row at 130% on 320 x 568. The status band at 130% (lt-6).
-- **Words:** Theme. Dark. Light. Auto. "Auto follows this device's own light or dark setting. The map, the fog, the dice tray and the table display stay dark in both." The This device row detail in 4.1.
+- **Words:** Theme. Dark. Light. Auto. "Auto follows this device's own light or dark setting. The map, the fog, the dice tray and the table display stay dark in Light too." The This device row detail in 4.1.
 
 ## As built
 

@@ -45,8 +45,8 @@ describe("This device's Theme section", async () => {
   test("is one radio group named Theme, described by its help", () => {
     const markup = draw("dark");
     assert.match(markup, /<div role="radiogroup" aria-label="Theme" aria-describedby="theme-help"/);
-    assert.match(markup, /<p id="theme-help"[^>]*>Auto follows this device&#x27;s own light or dark setting\. The map, the fog, the dice tray and the table display stay dark in both\.<\/p>/);
-    assert.equal(THEME_HELP, "Auto follows this device's own light or dark setting. The map, the fog, the dice tray and the table display stay dark in both.");
+    assert.match(markup, /<p id="theme-help"[^>]*>Auto follows this device&#x27;s own light or dark setting\. The map, the fog, the dice tray and the table display stay dark in Light too\.<\/p>/);
+    assert.equal(THEME_HELP, "Auto follows this device's own light or dark setting. The map, the fog, the dice tray and the table display stay dark in Light too.");
   });
 
   test("offers Dark, Light and Auto in that order, with the given one chosen", () => {
