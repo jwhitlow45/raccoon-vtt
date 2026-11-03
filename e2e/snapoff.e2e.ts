@@ -338,7 +338,7 @@ describe("raccoon-vtt snap off", { timeout: 600_000 }, () => {
   test("so-5. a drag of the placed goblin let go within 1/8 of where it is drawn keeps its placement and sends nothing, and one let go a quarter square off, on its own box, puts it back on the grid", async () => {
     await closeBars(dm);
     const before = token(dmSocket, run.goblin)!;
-    const rev = (dmSocket.state as RoomState).meta.rev;
+    const rev = before.rev;
     // Drawn middle is (11.75, 5.25). Out a square and back to 0.05 off it: a drag that began, let go under 1/8 from where the token is drawn.
     const a = await pagePoint(dm, BOUNDS, { x: 11.75, y: 5.25 });
     const out = await pagePoint(dm, BOUNDS, { x: 12.75, y: 5.25 });
@@ -350,7 +350,7 @@ describe("raccoon-vtt snap off", { timeout: 600_000 }, () => {
     await dm.mouse.up();
     await dm.waitForTimeout(600);
     assert.deepEqual(token(dmSocket, run.goblin)?.nudge, before.nudge, "jitter keeps the placement");
-    assert.equal((dmSocket.state as RoomState).meta.rev, rev, "and sends nothing");
+    assert.equal(token(dmSocket, run.goblin)?.rev, rev, "and sends nothing");
     await closeBars(dm);
     // A quarter square back toward its box's middle is past 1/8.
     const back = await pagePoint(dm, BOUNDS, { x: 11.5, y: 5.5 });
