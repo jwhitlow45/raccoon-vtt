@@ -306,3 +306,30 @@ create table if not exists ask_sessions (
   created_at timestamptz not null default now(),
   expires_at timestamptz not null
 );
+-- Animated maps (docs/design/design-v1-animated-maps.md 9.1). A video is an
+-- asset of its own kind, the check on the kind replaced only while it lacks
+-- the new kind, as the thumb kind's was. `media` is a video's container,
+-- webm or mp4, which names its file and its Content-Type. `video` holds what
+-- its header check found apart from the size and container, with camelCase
+-- keys: { video, audio?, fps, durationMs, kbps, audioChannels?, audioHz? }.
+-- Both are null for an image and set for every video, which the last check
+-- holds. It is added once, so a boot does not re-check every row each time.
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'assets'::regclass and conname = 'assets_kind_check' and pg_get_constraintdef(oid) like '%''video''%'
+  ) then
+    alter table assets drop constraint if exists assets_kind_check,
+      add constraint assets_kind_check check (kind in ('map', 'token', 'handout', 'thumb', 'video'));
+  end if;
+end $$;
+alter table assets add column if not exists media text check (media in ('webm', 'mp4'));
+alter table assets add column if not exists video jsonb;
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conrelid = 'assets'::regclass and conname = 'assets_video_media') then
+    alter table assets add constraint assets_video_media
+      check ((kind = 'video') = (media is not null) and (kind = 'video') = (video is not null));
+  end if;
+end $$;

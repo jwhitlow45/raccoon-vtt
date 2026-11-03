@@ -25,12 +25,17 @@ const TURNSTILE_ORIGIN = "https://challenges.cloudflare.com";
  * host for anything but a thumbnail. A redirect from there is checked by
  * host alone, so the server's rule in shared/searchThumbnails.ts, which
  * drops any result whose thumbnail fails it, is what holds.
+ *
+ * Media loads from this origin, an animated map's video, and from `blob:`,
+ * the first-frame probe that opens the DM's file before it uploads
+ * (docs/design/design-v1-animated-maps.md 7).
  */
 export function contentSecurityPolicy(turnstile: boolean): string {
   const script = turnstile ? `script-src 'self' ${TURNSTILE_ORIGIN}` : "script-src 'self'";
   const directives = [
     "default-src 'self'",
     `img-src 'self' blob: data: ${THUMBNAIL_CSP_SOURCES.join(" ")}`,
+    "media-src 'self' blob:",
     "connect-src 'self'",
     script,
     "style-src 'self'",

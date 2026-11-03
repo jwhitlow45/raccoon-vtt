@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, test } from "node:test";
 import type { AssetKind, Variant } from "./kinds.ts";
 import { KeyedMutex } from "./locks.ts";
-import { purgeTrash, trashDay, trashPath, variantFileName, variantPath } from "./store.ts";
+import { purgeTrash, storedVideo, toView, trashDay, trashPath, variantFileName, variantPath, videoFactsOf } from "./store.ts";
 import { tempDir } from "./testImages.ts";
 
 const SHA = "ab" + "0123456789abcdef".repeat(3) + "0123456789abcd";
@@ -20,6 +20,15 @@ describe("file naming", () => {
     assert.notEqual(variantFileName(SHA, "map", "full", 1), variantFileName(SHA, "token", "full", 1));
   });
 
+  test("a video keeps its real extension, from its row's container, and an image never takes one (D-261102-454)", () => {
+    assert.equal(variantFileName(SHA, "video", "full", 1, "webm"), `${SHA}-video-full-v1.webm`);
+    assert.equal(variantFileName(SHA, "video", "full", 2, "mp4"), `${SHA}-video-full-v2.mp4`);
+    assert.equal(trashPath("/data/assets", new Date("2026-11-02T12:00:00Z"), SHA, "video", "full", 1, "mp4"), join("/data/assets", "trash", "2026-11-02", "ab", `${SHA}-video-full-v1.mp4`));
+    assert.throws(() => variantFileName(SHA, "video", "full", 1));
+    assert.throws(() => variantFileName(SHA, "video", "full", 1, "mov" as "mp4"));
+    assert.throws(() => variantFileName(SHA, "map", "full", 1, "webm"));
+  });
+
   test("anything that is not a clean part is refused before it becomes a path", () => {
     assert.throws(() => variantFileName("../../etc/passwd", "map", "full", 1));
     assert.throws(() => variantFileName(SHA.toUpperCase(), "map", "full", 1));
@@ -27,6 +36,23 @@ describe("file naming", () => {
     assert.throws(() => variantFileName(SHA, "map", "original" as Variant, 1));
     assert.throws(() => variantFileName(SHA, "map", "full", 0));
     assert.throws(() => variantFileName(SHA, "map", "full", 1.5));
+  });
+});
+
+describe("a video row's facts", () => {
+  const facts = { widthPx: 640, heightPx: 360, container: "webm" as const, video: "vp09.00.21.08", audio: "opus", fps: 30, durationMs: 2001, kbps: 11, audioChannels: 2, audioHz: 48000 };
+
+  test("the row keeps them without the size and container, and gives them back whole", () => {
+    const row = { id: "x", kind: "video" as const, width: 640, height: 360, variants: ["full" as const], media: "webm" as const, video: storedVideo(facts) };
+    assert.deepEqual(row.video, { video: "vp09.00.21.08", audio: "opus", fps: 30, durationMs: 2001, kbps: 11, audioChannels: 2, audioHz: 48000 });
+    assert.deepEqual(videoFactsOf(row), facts);
+    assert.deepEqual(toView(row).video, facts);
+  });
+
+  test("an image row, or a video row whose columns do not read, gives none", () => {
+    assert.equal(videoFactsOf({ kind: "map", width: 1, height: 1, media: null, video: null }), undefined);
+    assert.equal(videoFactsOf({ kind: "video", width: 1, height: 1, media: "webm", video: { video: "vp8", fps: 30, durationMs: 1000, kbps: 1, note: "x" } }), undefined);
+    assert.equal(videoFactsOf({ kind: "video", width: 1, height: 1, media: "avi" as "webm", video: storedVideo(facts) }), undefined);
   });
 });
 

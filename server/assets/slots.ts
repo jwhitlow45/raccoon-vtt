@@ -12,7 +12,11 @@ import { AssetError } from "./errors.ts";
  *   own room can always upload while strangers' rooms are busy.
  * - 1 per client IP. Every phone at a table shares one IP, so in a pinned
  *   room the share is counted per session instead, and the DM's map upload
- *   never blocks a player's token.
+ *   never blocks a player's token. A video's share is always counted per
+ *   session (docs/design/design-v1-animated-maps.md 6.3): its upload may
+ *   take 15 minutes, and must not turn away every phone on the table's IP
+ *   all that time. Only a DM uploads one, and the room's 2 and the total
+ *   still bound them.
  * - 2 per room, so one room cannot take the whole server.
  * - 1 room import (a zip of a whole room) server-wide, because each holds a
  *   95 MB body.
@@ -24,6 +28,8 @@ export type SlotRequest = {
   ip: string;
   sessionId: string;
   pinned: boolean;
+  /** Count the client's share by session, not IP, as a video upload does. */
+  perSession?: boolean;
 };
 
 export type SlotLimits = {
@@ -72,7 +78,7 @@ export class IntakeSlots {
     const ceiling = req.pinned ? l.total : l.total - l.reservedForPinned;
     if (this.#inUse >= ceiling) return null;
     if (req.kind === "roomImport" && this.#roomImports >= l.roomImports) return null;
-    const clientKey = req.pinned ? `s:${req.sessionId}` : `ip:${req.ip}`;
+    const clientKey = req.pinned || req.perSession ? `s:${req.sessionId}` : `ip:${req.ip}`;
     if ((this.#byClient.get(clientKey) ?? 0) >= l.perIp) return null;
     if (req.roomId !== undefined && (this.#byRoom.get(req.roomId) ?? 0) >= l.perRoom) return null;
 

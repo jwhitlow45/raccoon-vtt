@@ -204,7 +204,7 @@ describe("upload", () => {
     assert.equal((await upload(app, roomId, dm, "token", otherPng)).statusCode, 409);
   });
 
-  test("the video kind is the DM's, and stores nothing until its header check lands (docs/design/design-v1-animated-maps.md 9.1)", async () => {
+  test("the video kind is the DM's, and takes only a video body (docs/design/design-v1-animated-maps.md 7)", async () => {
     const roomId = await room();
     const player = auth.allow(roomId, "player");
     const dm = auth.allow(roomId, "dm");

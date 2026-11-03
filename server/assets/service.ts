@@ -1,12 +1,12 @@
-import { mkdir, readdir, unlink } from "node:fs/promises";
+import { mkdir, readdir, stat, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type pg from "pg";
 import { assetCreditSchema, type AssetCredit } from "#shared/protocol.ts";
 import { starterAssetCredit, type FoundWork, type StarterKind } from "#shared/starter.ts";
-import type { Config } from "../config.ts";
+import { animatedMapsOn, type Config } from "../config.ts";
 import { createEgress, type Egress } from "./egress.ts";
 import { AssetError } from "./errors.ts";
-import { KINDS, PIPELINE, nameGrid, type AssetKind, type UploadResult } from "./kinds.ts";
+import { KINDS, PIPELINE, VIDEO_PIPELINE, nameGrid, type AssetKind, type UploadResult } from "./kinds.ts";
 import { WindowLimiter, hourlyChecks, starterHourlyChecks } from "./limits.ts";
 import { ProcessingQueue, configureSharp, processImage, removeFiles, sniffImage } from "./process.ts";
 import { RoomQuota, assertFreeDisk, hasFreeDisk, roomStoredBytes, type Reservation } from "./quota.ts";
@@ -16,6 +16,7 @@ import { IntakeSlots, Semaphore, type SlotLimits } from "./slots.ts";
 import { REAL_FLOOR_CLOCK, StarterWorkError, copyHashing, starterCatalog, starterFilePath, starterGrid, type FloorClock, type StarterCatalog, type StarterOptions } from "./starter.ts";
 import { addCredit, addUploaders, findRoomAsset, placeAndInsert, toView, uploadedAssetIds, type AssetRow } from "./store.ts";
 import { tempFile } from "./upload.ts";
+import { checkVideo } from "./video/check.ts";
 
 /**
  * Which assets of a room a player may see. The real answer comes from the
@@ -226,14 +227,14 @@ export class AssetService {
    * the room already holds as an upload leaves that row counted, as the
    * room paid for it, and an upload of a picked work's bytes leaves the
    * pick outside the quota.
+   *
+   * A video takes its own branch (#ingestVideo).
    */
   async ingest(input: IngestInput): Promise<UploadResult> {
     const { reservation, starter } = input;
     // The types already require one. Checked here too, since a row stored with neither would escape the quota unmarked.
     if (!reservation && !starter) throw new Error("an image is stored against a reservation or as a starter pick");
-    // The video kind is declared before its header check exists. Until that
-    // lands, no path may run a video through the image pipeline or store it.
-    if (input.kind === "video") throw new AssetError(415, "unsupported_type");
+    if (input.kind === "video") return this.#ingestVideo(input);
     const existing = await findRoomAsset(this.pool, input.roomId, input.sha256, input.kind);
     if (existing) return this.#reuse(existing, input);
 
@@ -258,6 +259,31 @@ export class AssetService {
       // (a refused commit, or copies dropped because the file existed).
       await removeFiles(variants.map((v) => v.path));
     }
+  }
+
+  /**
+   * A video (docs/design/design-v1-animated-maps.md 10, Ingest): no sniff
+   * for images and no sharp. The header check runs in the processing queue,
+   * zeroing the temporary file in place, and that one file is placed as the
+   * row's `full` variant. The row's hash is the upload's, and the zeroing is
+   * deterministic, so the same bytes make the same file under one
+   * VIDEO_PIPELINE. Refused whole while the server's switch is off, so no
+   * upload or import stores one (D-261102-510).
+   */
+  async #ingestVideo(input: IngestInput): Promise<UploadResult> {
+    if (!animatedMapsOn(this.config)) throw new AssetError(403, "video_off");
+    if (input.starter) throw new Error("no starter work is a video");
+    const existing = await findRoomAsset(this.pool, input.roomId, input.sha256, input.kind);
+    if (existing) return this.#reuse(existing, input);
+
+    await this.assertFreeDisk();
+    const facts = await this.queue.run(() => checkVideo(input.tempPath), { background: input.background });
+    const { size } = await stat(input.tempPath);
+    const variants = [{ name: "full" as const, path: input.tempPath, width: facts.widthPx, height: facts.heightPx, bytes: size }];
+    const write = () =>
+      placeAndInsert(this.pool, this.assetDir, { roomId: input.roomId, sha256: input.sha256, kind: "video", uploaderIds: input.uploaderIds, variants, video: facts }, VIDEO_PIPELINE);
+    const placed = await input.reservation!.commit(size, write);
+    return withCreated(placed.view, placed.created);
   }
 
   /**
@@ -333,9 +359,14 @@ export class AssetService {
   }
 }
 
-/** `created` on a handout's answer only (AssetService.ingest). */
+/**
+ * `created` on a handout's or a video's answer only (AssetService.ingest):
+ * a failed PDF or map upload deletes only what it made
+ * (docs/design/design-v1-animated-maps.md 4.1). Both are DM-only kinds,
+ * whose library lists every row already.
+ */
 function withCreated(result: UploadResult, created: boolean): UploadResult {
-  return result.kind === "handout" ? { ...result, created } : result;
+  return result.kind === "handout" || result.kind === "video" ? { ...result, created } : result;
 }
 
 function withHint(view: ReturnType<typeof toView>, nameHint: string | undefined): UploadResult {

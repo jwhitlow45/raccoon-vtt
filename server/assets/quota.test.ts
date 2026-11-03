@@ -38,6 +38,22 @@ describe("RoomQuota", () => {
     assert.equal(quota.reservedBytes("R"), 0);
   });
 
+  test("a live video's reservation leaves its headroom free, at reserve and at commit (docs/design/design-v1-animated-maps.md 6.3)", async () => {
+    const store = fakeStore();
+    store.stored.set("R", 600);
+    const quota = new RoomQuota(1000, store.read);
+    await assert.rejects(quota.reserve("R", 300, { headroom: 101 }), quota413);
+    const fits = await quota.reserve("R", 300, { headroom: 100 });
+    assert.equal(quota.reservedBytes("R"), 300, "the headroom is no reservation of its own");
+    fits.release();
+    // Variants that outgrow the reservation must still leave the headroom beside them.
+    const small = await quota.reserve("R", 100, { headroom: 100 });
+    await assert.rejects(small.commit(301, async () => undefined), quota413);
+    small.release();
+    const again = await quota.reserve("R", 100, { headroom: 100 });
+    await again.commit(300, async () => undefined);
+  });
+
   test("concurrent reservations cannot overshoot", async () => {
     const store = fakeStore();
     const quota = new RoomQuota(1000, store.read);

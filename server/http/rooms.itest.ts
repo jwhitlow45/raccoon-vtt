@@ -348,7 +348,7 @@ describe("HTTP hardening", () => {
     const res = await t.app.inject({ method: "GET", url: "/api/rooms/ZZZZZZZZ", headers: { origin: "https://evil.example" } });
     assert.equal(
       res.headers["content-security-policy"],
-      "default-src 'self'; img-src 'self' blob: data: https://serpapi.com https://encrypted-tbn0.gstatic.com https://encrypted-tbn1.gstatic.com https://encrypted-tbn2.gstatic.com https://encrypted-tbn3.gstatic.com https://api.openverse.org/v1/images/; connect-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+      "default-src 'self'; img-src 'self' blob: data: https://serpapi.com https://encrypted-tbn0.gstatic.com https://encrypted-tbn1.gstatic.com https://encrypted-tbn2.gstatic.com https://encrypted-tbn3.gstatic.com https://api.openverse.org/v1/images/; media-src 'self' blob:; connect-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
     );
     assert.equal(res.headers["referrer-policy"], "no-referrer");
     assert.equal(res.headers["x-content-type-options"], "nosniff");

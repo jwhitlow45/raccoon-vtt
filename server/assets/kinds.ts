@@ -4,7 +4,8 @@ import type { AssetCredit } from "#shared/protocol.ts";
 import { HEX_R, HEX_S } from "#shared/rules/hex.ts";
 
 /**
- * What each kind of image becomes, in one table (design section 11.1).
+ * What each kind of asset becomes, in one table (design section 11.1). A
+ * video is checked and kept as it came, never re-encoded (VIDEO_PIPELINE).
  *
  * PIPELINE is part of every file name. Any change to how a variant is made
  * (sizes, quality, encoder settings) must bump it, so a file made by an old
@@ -144,9 +145,10 @@ export type AssetView = {
 };
 
 /**
- * `created`, on a handout's answer only: whether this upload made the row,
- * rather than reusing the room's row of the same bytes
- * (docs/design/design-v1-pdf-handouts.md 3.9).
+ * `created`, on a handout's or a video's answer only: whether this upload
+ * made the row, rather than reusing the room's row of the same bytes
+ * (docs/design/design-v1-pdf-handouts.md 3.9,
+ * docs/design/design-v1-animated-maps.md 4.1).
  */
 export type UploadResult = AssetView & { cellPx?: number; hexCellPx?: HexCellPx; created?: boolean };
 

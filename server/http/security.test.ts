@@ -32,7 +32,7 @@ describe("security headers", () => {
   test("the CSP is exactly the design's", () => {
     assert.equal(
       contentSecurityPolicy(false),
-      "default-src 'self'; img-src 'self' blob: data: https://serpapi.com https://encrypted-tbn0.gstatic.com https://encrypted-tbn1.gstatic.com https://encrypted-tbn2.gstatic.com https://encrypted-tbn3.gstatic.com https://api.openverse.org/v1/images/; connect-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+      "default-src 'self'; img-src 'self' blob: data: https://serpapi.com https://encrypted-tbn0.gstatic.com https://encrypted-tbn1.gstatic.com https://encrypted-tbn2.gstatic.com https://encrypted-tbn3.gstatic.com https://api.openverse.org/v1/images/; media-src 'self' blob:; connect-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
     );
   });
 

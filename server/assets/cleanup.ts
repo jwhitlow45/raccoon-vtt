@@ -38,15 +38,25 @@ import { deleteUnreferencedFiles, purgeTrash, type FileKey } from "./store.ts";
  * appearance of an image's id counts as a use, which can only keep too
  * much. Files go after their rows, into the trash, and only when no row in
  * any room names them.
+ *
+ * An animated map's video is one more item of the library
+ * (docs/design/design-v1-animated-maps.md 4.6), named by maps and phases as
+ * an image is, and deleted, swept and trashed the same way under its own
+ * extension.
  */
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const ROOM_ID = /^[0-9A-HJKMNP-TV-Z]{8}$/;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** `<sha256>-<kind>-<variant>-v<pipeline>.webp`, the only names the orphan sweep ever touches. */
-const VARIANT_FILE = /^([0-9a-f]{64})-([a-z]+)-([a-z]+)-v([1-9][0-9]{0,5})\.webp$/;
-/** The two-character folders images live in. tmp, import and trash never match. */
+/**
+ * `<sha256>-<kind>-<variant>-v<pipeline>.<ext>`, the only names the orphan
+ * sweep ever touches: `.webp` for an image, and `.webm` or `.mp4` for a
+ * video (D-261102-454). A name whose extension is not its kind's is no file
+ * this server made, and stays where it is.
+ */
+const VARIANT_FILE = /^([0-9a-f]{64})-([a-z]+)-([a-z]+)-v([1-9][0-9]{0,5})\.(webp|webm|mp4)$/;
+/** The two-character folders images and videos live in. tmp, import and trash never match. */
 const PREFIX_DIR = /^[0-9a-f]{2}$/;
 
 export type CleanupDeps = {
@@ -381,7 +391,7 @@ export async function sweepThumbnails(deps: CleanupDeps, roomId: string): Promis
 // Files no row names ----------------------------------------------------------
 
 /**
- * Walks the image folders and moves to the trash each file named like an
+ * Walks the asset folders and moves to the trash each file named like an
  * asset variant whose (hash, kind, pipeline) no row in any room names and
  * which is more than a day old, so an upload between placing its file and
  * writing its row (another process's, such as the CLI's import) is never
@@ -401,7 +411,7 @@ export async function sweepOrphanFiles(pool: pg.Pool, assetDir: string, now: num
     const candidates = new Map<string, FileKey>();
     for (const name of await readdir(join(assetDir, dir))) {
       const m = VARIANT_FILE.exec(name);
-      if (!m || m[1]!.slice(0, 2) !== dir || !isAssetKind(m[2])) continue;
+      if (!m || m[1]!.slice(0, 2) !== dir || !isAssetKind(m[2]) || (m[2] === "video") !== (m[5] !== "webp")) continue;
       const age = await stat(join(assetDir, dir, name)).then(
         (s) => now - s.mtimeMs,
         () => 0,

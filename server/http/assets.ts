@@ -2,18 +2,20 @@ import { unlink } from "node:fs/promises";
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { ApiErrorCode } from "#shared/apiErrors.ts";
+import { VIDEO_LIMITS } from "#shared/limits.ts";
 import { STARTER_KEY, STARTER_KINDS } from "#shared/starter.ts";
+import { animatedMapsOn } from "../config.ts";
 import { MAX_FETCH_BYTES, fetchPublicImage, type Fetched } from "../assets/fetchPublic.ts";
 import { withInUse } from "../assets/cleanup.ts";
 import { AssetError, isAssetError } from "../assets/errors.ts";
 import { creditForImport } from "../assets/openverse.ts";
-import { ASSET_KINDS, KINDS, isVariant } from "../assets/kinds.ts";
+import { ASSET_KINDS, KINDS, isVariant, type Variant } from "../assets/kinds.ts";
 import type { Reservation } from "../assets/quota.ts";
-import { sendVariant } from "../assets/serve.ts";
+import { sendVariant, sendVideo, videoEtag } from "../assets/serve.ts";
 import { isCachedThumbnail } from "../assets/serpapi.ts";
 import { AssetService, type AssetServiceOptions, type VisibleAssetsFn } from "../assets/service.ts";
 import { PLAYER_PICK_FLOOR_MS, noSoonerThan } from "../assets/starter.ts";
-import { addUploaders, getAsset, listRoomAssets, variantPath } from "../assets/store.ts";
+import { addUploaders, getAsset, isVideoContainer, listRoomAssets, variantPath, type AssetRow } from "../assets/store.ts";
 import { receiveToFile, tempFile } from "../assets/upload.ts";
 import type { GrantContext } from "../auth/types.ts";
 import { clientIp } from "../auth/clientIp.ts";
@@ -24,11 +26,11 @@ import { isThumbnailUrl } from "#shared/searchThumbnails.ts";
 /**
  * Asset routes (design sections 10.8, 11.1 and 11.2):
  *
- * - `PUT /api/rooms/:id/assets?kind=` upload a raw image body
+ * - `PUT /api/rooms/:id/assets?kind=` upload a raw image or video body
  * - `GET /api/rooms/:id/assets` list what the caller may see
  * - `POST /api/rooms/:id/assets/import` import an image from a URL
  * - `POST /api/rooms/:id/assets/starter` copy a starter work into the room
- * - `GET /api/assets/:assetId/:variant` read one image
+ * - `GET /api/assets/:assetId/:variant` read one image, or a video by ranges
  *
  * plus image search, registered from search.ts. `app.assets` is the service
  * behind them, decorated so room import and room deletion can reuse its
@@ -42,6 +44,14 @@ export type AssetRouteOptions = Partial<Omit<AssetServiceOptions, "pool" | "conf
 };
 
 const ROOM_ID = /^[0-9A-HJKMNP-TV-Z]{8}$/;
+
+/** The video types an upload may declare, only with `kind=video` (docs/design/design-v1-animated-maps.md 7). */
+const VIDEO_TYPES = /^video\/(webm|mp4)$/;
+
+/** A request's media type, without its parameters, in lower case. */
+function mediaType(req: FastifyRequest): string {
+  return (req.headers["content-type"] ?? "").split(";")[0]!.trim().toLowerCase();
+}
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 const UploadQuery = z.object({
@@ -86,11 +96,13 @@ export async function registerAssetRoutes(app: FastifyInstance, opts: AssetRoute
   }
 
   // The upload route gets a scope of its own with every body parser
-  // removed except a pass-through for image/*, so the handler reads the
-  // raw stream itself, after it holds a slot, and Fastify never buffers it.
+  // removed except a pass-through for image/* and the two video types, so
+  // the handler reads the raw stream itself, after it holds a slot, and
+  // Fastify never buffers it. Any other type is a 415 before a byte is read.
   await app.register(async (scope) => {
     scope.removeAllContentTypeParsers();
     scope.addContentTypeParser(/^image\/[a-z0-9.+-]+$/i, (_req, _payload, done) => done(null));
+    scope.addContentTypeParser(["video/webm", "video/mp4"], (_req, _payload, done) => done(null));
     scope.setErrorHandler(errorHandler);
 
     scope.put<{ Params: { id: string }; Querystring: Record<string, string> }>(
@@ -112,6 +124,9 @@ export async function registerAssetRoutes(app: FastifyInstance, opts: AssetRoute
 
           const grant = await requireGrant(req, reply, roomId);
           if (KINDS[kind].dmOnly && grant.role !== "dm") throw new AssetError(403, "forbidden");
+          // A video type only with the video kind, and an image type only with an image kind, so neither pipeline ever sees the other's bytes.
+          if (VIDEO_TYPES.test(mediaType(req)) !== (kind === "video")) throw new AssetError(415, "unsupported_type");
+          if (kind === "video" && !animatedMapsOn(app.config)) throw new AssetError(403, "video_off");
           const declared = contentLength(req);
           const cap = KINDS[kind].maxUploadBytes;
           if (declared !== undefined && declared > cap) throw new AssetError(413, "too_large");
@@ -121,10 +136,11 @@ export async function registerAssetRoutes(app: FastifyInstance, opts: AssetRoute
           const ip = ipKey(clientIp(req, trustCf));
           const checks = service.hourlyChecks(grant.sessionId, ip, roomId, kind);
           service.assertHourly(checks);
-          releaseSlot = service.slots.acquire({ kind: "upload", roomId, ip, sessionId: grant.sessionId, pinned: room.pinned });
+          releaseSlot = service.slots.acquire({ kind: "upload", roomId, ip, sessionId: grant.sessionId, pinned: room.pinned, perSession: kind === "video" });
           service.hourly.record(checks);
 
-          reservation = await service.quota.reserve(roomId, declared ?? cap);
+          // A live video must leave headroom in the quota, so one upload never turns the room read-only mid-session.
+          reservation = await service.quota.reserve(roomId, declared ?? cap, { headroom: kind === "video" ? VIDEO_LIMITS.quotaHeadroomBytes : 0 });
           path = tempFile(service.tmpDir, "intake");
           const received = await receiveToFile(req.raw, path, service.bodyLimits(kind));
           bodyRead = true;
@@ -184,7 +200,7 @@ export async function registerAssetRoutes(app: FastifyInstance, opts: AssetRoute
       }
       // The variant must be one this row has before any path is built.
       if (!row.variants.includes(variant)) throw new AssetError(404, "not_found");
-      return sendVariant(reply, variantPath(service.assetDir, row.sha256.toString("hex"), row.kind, variant, row.pipeline));
+      return sendAsset(req, reply, service.assetDir, row, variant, animatedMapsOn(app.config));
     });
 
     scope.post<{ Params: { id: string } }>("/api/rooms/:id/assets/import", async (req, reply) => {
@@ -194,6 +210,8 @@ export async function registerAssetRoutes(app: FastifyInstance, opts: AssetRoute
       if (!body.success) throw new AssetError(400, "bad_request");
       const { url, fallback, kind } = body.data;
       if (KINDS[kind].dmOnly && grant.role !== "dm") throw new AssetError(403, "forbidden");
+      // Link and Search the web take images only (docs/design/design-v1-animated-maps.md 4.1).
+      if (kind === "video") throw new AssetError(415, "unsupported_type");
       // The fallback must be a thumbnail a search handed to this server, so a
       // client cannot use it to fetch anything else.
       if (fallback !== undefined && !(isThumbnailUrl(fallback) && (await isCachedThumbnail(app.pool, fallback)))) {
@@ -320,6 +338,18 @@ export async function registerAssetRoutes(app: FastifyInstance, opts: AssetRoute
 
     await registerSearchRoutes(scope, { requireGrant });
   });
+}
+
+/**
+ * One variant, as an image or as a video by ranges, for this route and the
+ * display's. Every video answers 404 while the server's switch is off
+ * (D-261102-510), the same 404 as a file that never existed.
+ */
+export function sendAsset(req: FastifyRequest, reply: FastifyReply, assetDir: string, row: AssetRow, variant: Variant, videosOn: boolean): Promise<FastifyReply> {
+  const hex = row.sha256.toString("hex");
+  if (row.kind !== "video") return sendVariant(reply, variantPath(assetDir, hex, row.kind, variant, row.pipeline));
+  if (!videosOn || !isVideoContainer(row.media)) throw new AssetError(404, "not_found");
+  return sendVideo(req, reply, variantPath(assetDir, hex, row.kind, variant, row.pipeline, row.media), { media: row.media, etag: videoEtag(hex, row.pipeline) });
 }
 
 function contentLength(req: FastifyRequest): number | undefined {

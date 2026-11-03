@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import { access, mkdir, readdir, rename, rm, stat, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type pg from "pg";
+import { z } from "zod";
 import { LIMITS } from "#shared/limits.ts";
+import type { VideoContainer, VideoFacts } from "#shared/model.ts";
 import { assetCreditSchema, type AssetCredit } from "#shared/protocol.ts";
 import { PLAYER_UPLOAD_KINDS, VARIANTS, isAssetKind, isVariant, type AssetKind, type AssetView, type Variant } from "./kinds.ts";
 import { KeyedMutex } from "./locks.ts";
@@ -19,25 +21,45 @@ import type { ProcessedVariant } from "./process.ts";
  *
  * A deleted file is never unlinked at once. It moves into the trash on the
  * same volume and waits there 48 hours (docs/design/design-v1-dm-tools.md 3.17):
- * the nightly backup dumps the database and copies the images it names
+ * the nightly backup dumps the database and copies the files it names
  * minutes apart, from another container the app's locks cannot reach, so a
  * file deleted between the two must still be there to copy.
+ *
+ * Images are WebP. A video keeps its real extension, `.webm` or `.mp4`,
+ * from its row's `media` (D-261102-454), so every tool and operator reads
+ * it as what it is.
  */
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 
-export function variantFileName(sha256Hex: string, kind: AssetKind, variant: Variant, pipeline: number): string {
+export const VIDEO_CONTAINERS = ["webm", "mp4"] as const satisfies readonly VideoContainer[];
+
+export function isVideoContainer(value: unknown): value is VideoContainer {
+  return typeof value === "string" && (VIDEO_CONTAINERS as readonly string[]).includes(value);
+}
+
+/** A file's extension: WebP for every image, and a video's own container, which a video must name. */
+export function fileExtension(kind: AssetKind, media?: VideoContainer | null): "webp" | VideoContainer {
+  if (kind !== "video") {
+    if (media) throw new Error("an image has no container of its own");
+    return "webp";
+  }
+  if (!isVideoContainer(media)) throw new Error("a video is stored as webm or mp4");
+  return media;
+}
+
+export function variantFileName(sha256Hex: string, kind: AssetKind, variant: Variant, pipeline: number, media?: VideoContainer | null): string {
   // Every part is checked even though callers pass values from our own rows:
   // this string becomes a path, and a path is the wrong place to trust input.
   if (!SHA256_HEX.test(sha256Hex) || !isAssetKind(kind) || !isVariant(variant) || !Number.isInteger(pipeline) || pipeline < 1) {
     throw new Error("invalid asset file name parts");
   }
-  return `${sha256Hex}-${kind}-${variant}-v${pipeline}.webp`;
+  return `${sha256Hex}-${kind}-${variant}-v${pipeline}.${fileExtension(kind, media)}`;
 }
 
-/** `<assetDir>/<first two hex chars>/<sha256>-<kind>-<variant>-v<pipeline>.webp` */
-export function variantPath(assetDir: string, sha256Hex: string, kind: AssetKind, variant: Variant, pipeline: number): string {
-  return join(assetDir, sha256Hex.slice(0, 2), variantFileName(sha256Hex, kind, variant, pipeline));
+/** `<assetDir>/<first two hex chars>/<sha256>-<kind>-<variant>-v<pipeline>.<webp, webm or mp4>` */
+export function variantPath(assetDir: string, sha256Hex: string, kind: AssetKind, variant: Variant, pipeline: number, media?: VideoContainer | null): string {
+  return join(assetDir, sha256Hex.slice(0, 2), variantFileName(sha256Hex, kind, variant, pipeline, media));
 }
 
 /**
@@ -57,8 +79,8 @@ export function trashDay(at: Date): string {
  * file keeps its own path below its day, so the backup finds it under any
  * day folder from the very line its list holds (docker/backup.sh).
  */
-export function trashPath(assetDir: string, at: Date, sha256Hex: string, kind: AssetKind, variant: Variant, pipeline: number): string {
-  return join(assetDir, "trash", trashDay(at), sha256Hex.slice(0, 2), variantFileName(sha256Hex, kind, variant, pipeline));
+export function trashPath(assetDir: string, at: Date, sha256Hex: string, kind: AssetKind, variant: Variant, pipeline: number, media?: VideoContainer | null): string {
+  return join(assetDir, "trash", trashDay(at), sha256Hex.slice(0, 2), variantFileName(sha256Hex, kind, variant, pipeline, media));
 }
 
 /** When deletions happen, for tests that need a deletion filed under another day. */
@@ -114,13 +136,52 @@ export type AssetRow = {
   width: number;
   height: number;
   variants: Variant[];
+  /** A video's container, which names its file and its Content-Type. Null for an image. */
+  media: VideoContainer | null;
+  /** A video's facts from its header check, without its size and container (`StoredVideo`). Null for an image. */
+  video: unknown;
 };
 
-export function toView(row: Pick<AssetRow, "id" | "kind" | "width" | "height" | "variants">): AssetView {
-  return { id: row.id, kind: row.kind, width: row.width, height: row.height, variants: row.variants };
+/**
+ * The `video` column: what the header check found
+ * (docs/design/design-v1-animated-maps.md 9.1), apart from the size, which
+ * is the row's own, and the container, which is `media`. Read back through
+ * this schema, so a row that somehow holds anything else gives no facts.
+ */
+export const storedVideoSchema = z.strictObject({
+  video: z.string().min(1).max(64),
+  audio: z.string().min(1).max(64).optional(),
+  fps: z.number().int().min(1).max(1000),
+  durationMs: z.number().int().min(1),
+  kbps: z.number().int().min(1),
+  audioChannels: z.number().int().min(1).max(255).optional(),
+  audioHz: z.number().int().min(1).optional(),
+});
+
+export type StoredVideo = z.infer<typeof storedVideoSchema>;
+
+/** The `video` column's value for a video's facts. */
+export function storedVideo(facts: VideoFacts): StoredVideo {
+  const { widthPx: _w, heightPx: _h, container: _c, ...rest } = facts;
+  return rest;
 }
 
-const ROW_COLUMNS = "id, room_id, sha256, kind, pipeline, width, height, variants";
+/** A row's video facts, or undefined for an image or a row whose columns do not read as a video's. */
+export function videoFactsOf(row: Pick<AssetRow, "kind" | "width" | "height" | "media" | "video">): VideoFacts | undefined {
+  if (row.kind !== "video" || !isVideoContainer(row.media)) return undefined;
+  const parsed = storedVideoSchema.safeParse(row.video);
+  if (!parsed.success) return undefined;
+  return { widthPx: row.width, heightPx: row.height, container: row.media, ...parsed.data };
+}
+
+export function toView(row: Pick<AssetRow, "id" | "kind" | "width" | "height" | "variants"> & Partial<Pick<AssetRow, "media" | "video">>): AssetView {
+  const view: AssetView = { id: row.id, kind: row.kind, width: row.width, height: row.height, variants: row.variants };
+  const video = videoFactsOf({ kind: row.kind, width: row.width, height: row.height, media: row.media ?? null, video: row.video ?? null });
+  if (video) view.video = video;
+  return view;
+}
+
+const ROW_COLUMNS = "id, room_id, sha256, kind, pipeline, width, height, variants, media, video";
 
 export async function getAsset(db: pg.Pool | pg.PoolClient, assetId: string): Promise<AssetRow | null> {
   const { rows } = await db.query<AssetRow>(`select ${ROW_COLUMNS} from assets where id = $1`, [assetId]);
@@ -221,6 +282,8 @@ export type NewAsset = {
   credit?: AssetCredit;
   /** A starter pick's work key, which keeps the row out of the room's quota (docs/design/design-v1-starter-art.md 5). */
   starter?: string;
+  /** A video's facts, which name its file's container and fill its row's `media` and `video`. */
+  video?: VideoFacts;
 };
 
 /**
@@ -256,7 +319,7 @@ export async function placeAndInsert(pool: pg.Pool, assetDir: string, asset: New
 async function placeFiles(assetDir: string, asset: NewAsset, pipeline: number): Promise<void> {
   const hex = asset.sha256.toString("hex");
   for (const v of asset.variants) {
-    const target = variantPath(assetDir, hex, asset.kind, v.name, pipeline);
+    const target = variantPath(assetDir, hex, asset.kind, v.name, pipeline, asset.video?.container);
     await mkdir(dirname(target), { recursive: true });
     if (await exists(target)) {
       await unlink(v.path).catch(() => undefined);
@@ -274,8 +337,8 @@ async function insertRow(pool: pg.Pool, asset: NewAsset, pipeline: number): Prom
   try {
     await client.query("begin");
     const inserted = await client.query<AssetRow>(
-      `insert into assets (id, room_id, sha256, kind, pipeline, width, height, bytes, variants, credit, starter)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `insert into assets (id, room_id, sha256, kind, pipeline, width, height, bytes, variants, credit, starter, media, video)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        on conflict (room_id, sha256, kind) do nothing
        returning ${ROW_COLUMNS}`,
       [
@@ -290,6 +353,8 @@ async function insertRow(pool: pg.Pool, asset: NewAsset, pipeline: number): Prom
         asset.variants.map((v) => v.name),
         asset.credit ? JSON.stringify(asset.credit) : null,
         asset.starter ?? null,
+        asset.video?.container ?? null,
+        asset.video ? JSON.stringify(storedVideo(asset.video)) : null,
       ],
     );
     let row = inserted.rows[0];
@@ -343,23 +408,27 @@ async function deleteIfUnreferenced(pool: pg.Pool, assetDir: string, key: FileKe
   const at = trashClock();
   let deleted = 0;
   // Every variant name, not only this kind's current list, so files from a
-  // recipe with a different variant set are cleaned up too.
+  // recipe with a different variant set are cleaned up too. A video's bytes
+  // decide its container, so its key names no extension and both are tried.
+  const extensions = key.kind === "video" ? VIDEO_CONTAINERS : [null];
   for (const variant of VARIANTS) {
-    if (await moveToTrash(assetDir, at, hex, key.kind, variant, key.pipeline)) deleted++;
+    for (const media of extensions) {
+      if (await moveToTrash(assetDir, at, hex, key.kind, variant, key.pipeline, media)) deleted++;
+    }
   }
   return deleted;
 }
 
 /** A rename on the same volume. False when there was no such file. */
-async function moveToTrash(assetDir: string, at: Date, hex: string, kind: AssetKind, variant: Variant, pipeline: number): Promise<boolean> {
-  const from = variantPath(assetDir, hex, kind, variant, pipeline);
+async function moveToTrash(assetDir: string, at: Date, hex: string, kind: AssetKind, variant: Variant, pipeline: number, media: VideoContainer | null): Promise<boolean> {
+  const from = variantPath(assetDir, hex, kind, variant, pipeline, media);
   try {
     await stat(from);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
     throw err;
   }
-  const to = trashPath(assetDir, at, hex, kind, variant, pipeline);
+  const to = trashPath(assetDir, at, hex, kind, variant, pipeline, media);
   await mkdir(dirname(to), { recursive: true });
   // The same name twice in one day holds the same bytes, so replacing it loses nothing.
   await rename(from, to);

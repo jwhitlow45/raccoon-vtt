@@ -43,6 +43,14 @@ describe("IntakeSlots", () => {
     assert.equal(slots.tryAcquire(req({ ip: "9.9.9.9", roomId: "PINNED02", sessionId: "dm", pinned: true })), null);
   });
 
+  test("a video's share is per session in any room, so a 15-minute upload never turns the table's IP away (docs/design/design-v1-animated-maps.md 6.3)", () => {
+    const slots = new IntakeSlots();
+    assert.ok(slots.tryAcquire(req({ ip: "8.8.8.8", roomId: "R2", sessionId: "dm", perSession: true })));
+    assert.ok(slots.tryAcquire(req({ ip: "8.8.8.8", roomId: "R2", sessionId: "player" })), "a player's token on the same IP");
+    assert.equal(slots.tryAcquire(req({ ip: "8.8.8.8", roomId: "R3", sessionId: "dm", perSession: true })), null, "the same session twice");
+    assert.equal(slots.tryAcquire(req({ ip: "8.8.8.8", roomId: "R3", sessionId: "other" })), null, "the IP's share is taken");
+  });
+
   test("at most 2 per room, pinned or not", () => {
     const slots = new IntakeSlots();
     assert.ok(slots.tryAcquire(req({ roomId: "R1", pinned: true })));

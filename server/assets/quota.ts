@@ -53,6 +53,11 @@ export type StoredBytesFn = (roomId: string) => Promise<number>;
  * difference before the row is written. Reserving and committing both run
  * under a per-room lock that also reads the stored size, so two concurrent
  * uploads can never both fit into the same remaining space.
+ *
+ * A live video upload also keeps `headroom` of the quota free
+ * (docs/design/design-v1-animated-maps.md 6.3): a room at its quota turns
+ * read-only mid-session, and one 64 MB video could put it there. An import
+ * passes none, so a near-full room's backup still imports.
  */
 export class RoomQuota {
   readonly quotaBytes: number;
@@ -69,15 +74,16 @@ export class RoomQuota {
     return this.#reserved.get(roomId) ?? 0;
   }
 
-  /** Reserves `bytes` for the room, or answers 413 when they do not fit. */
-  async reserve(roomId: string, bytes: number): Promise<Reservation> {
+  /** Reserves `bytes` for the room, or answers 413 when they, and `headroom` beside them, do not fit. */
+  async reserve(roomId: string, bytes: number, opts: { headroom?: number } = {}): Promise<Reservation> {
+    const headroom = opts.headroom ?? 0;
     return this.#locks.run(roomId, async () => {
       const stored = await this.#storedBytes(roomId);
-      if (stored + this.reservedBytes(roomId) + bytes > this.quotaBytes) {
+      if (stored + this.reservedBytes(roomId) + bytes + headroom > this.quotaBytes) {
         throw new AssetError(413, "quota_exceeded", { closeConnection: true });
       }
       this.#add(roomId, bytes);
-      return new Reservation(this, roomId, bytes);
+      return new Reservation(this, roomId, bytes, headroom);
     });
   }
 
@@ -88,7 +94,7 @@ export class RoomQuota {
       if (finalBytes > res.bytes) {
         const stored = await this.#storedBytes(res.roomId);
         const others = this.reservedBytes(res.roomId) - res.bytes;
-        if (stored + others + finalBytes > this.quotaBytes) {
+        if (stored + others + finalBytes + res.headroom > this.quotaBytes) {
           throw new AssetError(413, "quota_exceeded");
         }
       }
@@ -119,13 +125,16 @@ export class RoomQuota {
 export class Reservation {
   readonly roomId: string;
   readonly bytes: number;
+  /** The quota this upload must leave free beside itself. */
+  readonly headroom: number;
   released = false;
   #quota: RoomQuota;
 
-  constructor(quota: RoomQuota, roomId: string, bytes: number) {
+  constructor(quota: RoomQuota, roomId: string, bytes: number, headroom = 0) {
     this.#quota = quota;
     this.roomId = roomId;
     this.bytes = bytes;
+    this.headroom = headroom;
   }
 
   /**
