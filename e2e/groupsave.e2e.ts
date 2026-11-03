@@ -744,9 +744,11 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
   test("dp-gs2. Shared attacks keep their hits and Roll damage through a fold before the answer, a fold between Attack and Damage, and each again across a selection change that keeps two or more, and their results name a mode only where it adds no line", async () => {
     const rolls = await openGroupRolls();
     const fold = rolls.locator("[data-group-fold]", { hasText: "Shared attacks" });
-    const attack = (n: number) => rolls.getByRole("button", { name: `Scimitar for ${n}`, exact: true });
+    // The attack's button adds what bears on it to its name ("Scimitar for 3, Dis: Poisoned"), so the attack is found by its own group's name.
+    const shared = (n: number) => rolls.getByRole("group", { name: `Scimitar for ${n}`, exact: true });
+    const attack = (n: number) => shared(n).getByRole("button", { name: new RegExp(`^Scimitar for ${n}(, |$)`) });
     await attack(3).scrollIntoViewIfNeeded();
-    const ac = attack(3).locator("xpath=../..").getByLabel("Target's AC");
+    const ac = shared(3).getByLabel("Target's AC");
     await ac.fill("1");
     await ac.press("Enter");
 
@@ -843,7 +845,9 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     const poisons = run.goblins.slice(0, 2).map((g) => ({ token: g.id, effect: randomUUID() }));
     try {
       for (const p of poisons) await ops.send({ t: "actor.effect.add", target: { tokenId: p.token }, effect: { id: p.effect, key: "poisoned" } });
-      const fresh = attack(3).locator("xpath=../..").getByLabel("Target's AC");
+      // Two of the three Poisoned bear on the attack, and its button's name says so (WXB-3) while its group keeps the plain name.
+      await waitFor("the attack names the Poisoned", async () => (/^Scimitar for 3, .*Poisoned/.test((await attack(3).getAttribute("aria-label")) ?? "") ? true : null));
+      const fresh = shared(3).getByLabel("Target's AC");
       await fresh.fill("1");
       await fresh.press("Enter");
       const before = diceLines(dmSocket.state?.log).length;
