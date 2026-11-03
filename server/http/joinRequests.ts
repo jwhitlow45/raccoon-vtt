@@ -308,8 +308,15 @@ export async function registerJoinRequestRoutes(app: FastifyInstance, kit: AuthK
       return {
         mode: room.join_mode,
         challenged,
-        // Never the requester's address, device or token.
-        requests: store.list(roomId).map((x) => ({ id: x.id, name: x.name, color: x.color, askedAt: new Date(x.askedAt).toISOString() })),
+        // Never the requester's address, device or token. A request being let in says so, and whether its let-in answered 202.
+        requests: store.list(roomId).map((x) => ({
+          id: x.id,
+          name: x.name,
+          color: x.color,
+          askedAt: new Date(x.askedAt).toISOString(),
+          ...(x.state === "deciding" ? { deciding: true } : {}),
+          ...(x.pending ? { pending: true } : {}),
+        })),
         players,
       };
     });
@@ -376,7 +383,7 @@ export async function registerJoinRequestRoutes(app: FastifyInstance, kit: AuthK
         },
       });
       if (answer.kind === "pending") {
-        store.markPending(request.id, answer.memberId);
+        store.markPending(request.id);
         return reply.code(202).send({ memberId: answer.memberId, pending: true });
       }
       if (answer.kind === "in") return { memberId: answer.memberId };

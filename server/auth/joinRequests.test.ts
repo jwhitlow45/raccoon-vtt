@@ -229,11 +229,29 @@ describe("join requests: waiting", () => {
     const { store, asked } = setup();
     const r = asked("s1");
     store.take(ROOM, r.id);
-    store.markPending(r.id, "m1");
+    store.markPending(r.id);
     store.settle(r.id, "failed");
     assert.equal(store.get(r.id)?.state, "waiting");
     assert.equal(store.get(r.id)?.pending, undefined);
     assert.deepEqual(store.list(ROOM).map((x) => x.id), [r.id]);
+  });
+
+  test("a request being let in stays on the DM list, marked, and a 202 marks it pending and tells the DMs (JBO1-01)", async () => {
+    const { store, asked } = setup();
+    const signals: string[] = [];
+    store.onChange((room) => signals.push(room));
+    const r = asked("s1");
+    const other = asked("s2");
+    store.take(ROOM, r.id);
+    assert.deepEqual(store.list(ROOM).map((x) => [x.id, x.state, x.pending ?? false]), [[r.id, "deciding", false], [other.id, "waiting", false]]);
+    await Promise.resolve();
+    signals.length = 0;
+    store.markPending(r.id);
+    await Promise.resolve();
+    assert.deepEqual(signals, [ROOM], "every DM device's row says it is still letting them in");
+    assert.equal(store.list(ROOM)[0]?.pending, true);
+    store.settle(r.id, "in");
+    assert.deepEqual(store.list(ROOM).map((x) => x.id), [other.id], "an ending leaves the list");
   });
 
   test("two let-ins, or a let-in against a turn away: exactly one wins", () => {

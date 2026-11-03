@@ -12,8 +12,10 @@ import {
   joinToastText,
   nextAgeTickMs,
   panelsButtonLabel,
+  rowBusy,
   rowBusyText,
   typedNameMatch,
+  waitingRows,
   type JoinRequestList,
   type JoinRequestRow,
 } from "./joinRequests.ts";
@@ -95,6 +97,19 @@ describe("ages and words", () => {
     assert.equal(answerErrorText(undefined, "Quinn"), "Something went wrong. Try again.");
   });
 
+  test("a row being let in is busy from the list on every DM device, and this device's own answer holds it busy", () => {
+    const waiting = row("a", "Quinn");
+    const deciding = { ...waiting, deciding: true as const };
+    const pending = { ...deciding, pending: true as const };
+    assert.equal(rowBusy(null, waiting), null);
+    assert.equal(rowBusy(null, deciding), "letting", "a co-DM's let-in");
+    assert.equal(rowBusy(null, pending), "still", "a co-DM's let-in that answered 202");
+    assert.equal(rowBusy("letting", waiting), "letting", "this device's tap, before the list shows it");
+    assert.equal(rowBusy("still", deciding), "still", "this device's 202, before the list marks it pending");
+    assert.equal(rowBusy("turning", waiting), "turning");
+    assert.deepEqual(waitingRows([waiting, { ...row("b", "Pat"), deciding: true }]).map((r) => r.id), ["a"], "only waiting rows count, toast or are turned away");
+  });
+
   test("toast words name the newest and count the rest", () => {
     assert.equal(joinToastText([row("a", "Quinn")], false), "Quinn asks to join.");
     assert.equal(joinToastText([row("a", "Quinn")], true), "Quinn is waiting to join.");
@@ -120,6 +135,26 @@ describe("the join toast", () => {
     t.clock.advance(60_000);
     t.toaster.update(list([row("a", "Quinn")]), false);
     assert.deepEqual(t.shown, ["Quinn asks to join."]);
+  });
+
+  test("a request whose let-in fails and comes back to waiting never toasts again (JBO1-01)", () => {
+    const t = toasterSetup();
+    t.toaster.update(list([]), false);
+    t.toaster.update(list([row("a", "Quinn")]), false);
+    t.clock.advance(30_000);
+    t.toaster.update(list([{ ...row("a", "Quinn"), deciding: true }]), false);
+    t.clock.advance(30_000);
+    // The room was full: the request waits again, with the same id.
+    t.toaster.update(list([row("a", "Quinn")]), false);
+    t.clock.advance(30_000);
+    assert.deepEqual(t.shown, ["Quinn asks to join."]);
+  });
+
+  test("a request being let in when a DM device opens the room is no news", () => {
+    const t = toasterSetup();
+    t.toaster.update(list([{ ...row("a", "Quinn"), deciding: true, pending: true }]), false);
+    t.clock.advance(60_000);
+    assert.deepEqual(t.shown, []);
   });
 
   test("a device that opens with requests waiting says so once", () => {

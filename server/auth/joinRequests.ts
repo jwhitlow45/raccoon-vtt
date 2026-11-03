@@ -50,9 +50,7 @@ export type JoinRequest = {
   state: RequestState;
   /** An ending that arrived while deciding, applied if the let-in fails. */
   endAfter?: Ending | undefined;
-  /** The member a running let-in names. */
-  memberId?: string | undefined;
-  /** The let-in answered 202: its outcome is still being followed. */
+  /** The let-in answered 202: its outcome is still being followed. The DM list shows it. */
   pending?: boolean | undefined;
   endedAt?: number | undefined;
 };
@@ -170,10 +168,16 @@ export class JoinRequests {
     return this.#reserved.values();
   }
 
-  /** The room's waiting requests, oldest first: what DM devices list. */
+  /**
+   * The room's live requests, oldest first: what DM devices list. A request
+   * being let in stays on the list, so the device that tapped Let in keeps
+   * its row, and with it its busy words and any refusal, until the let-in
+   * settles. The list marks it, and DM devices count, toast and turn away
+   * only the waiting ones.
+   */
   list(roomId: string): JoinRequest[] {
     this.#expireDue();
-    return [...this.#requests.values()].filter((r) => r.roomId === roomId && r.state === "waiting").sort((a, b) => a.askedAt - b.askedAt);
+    return [...this.#requests.values()].filter((r) => r.roomId === roomId && !isEnding(r.state)).sort((a, b) => a.askedAt - b.askedAt);
   }
 
   /**
@@ -360,12 +364,12 @@ export class JoinRequests {
     return { ok: false, code: "request_gone" };
   }
 
-  /** The let-in answered 202, and names the member it is adding. */
-  markPending(id: string, memberId: string): void {
+  /** The let-in answered 202: every DM device's row says it is still letting them in. */
+  markPending(id: string): void {
     const r = this.#requests.get(id);
-    if (r?.state !== "deciding") return;
+    if (r?.state !== "deciding" || r.pending) return;
     r.pending = true;
-    r.memberId = memberId;
+    this.#changed(r.roomId);
   }
 
   /**
@@ -408,7 +412,6 @@ export class JoinRequests {
     }
     r.state = "waiting";
     r.pending = undefined;
-    r.memberId = undefined;
     this.#changed(r.roomId);
   }
 

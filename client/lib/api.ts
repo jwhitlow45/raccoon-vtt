@@ -51,8 +51,12 @@ export type JoinWaitAnswer =
   | { requestId: string; state: "in"; me: Me & { roomId: string; memberId: MemberId } }
   | { requestId: string; state: "superseded" }
   | { requestId: string; state: "turned_away" | "expired" | "closed" };
-/** A waiting request as DM devices see it. Never the requester's address, device or token. */
-export type JoinRequestRow = { id: string; name: string; color: string; askedAt: string };
+/**
+ * A live request as DM devices see it. Never the requester's address,
+ * device or token. `deciding`: a DM's let-in is running, so the row shows
+ * busy and counts for nothing. `pending`: that let-in answered 202.
+ */
+export type JoinRequestRow = { id: string; name: string; color: string; askedAt: string; deciding?: true; pending?: true };
 /**
  * The DM's list. `players`: the members a requester may be let in as, never
  * a former DM. `challenged`: the room passed 20 asks this hour, so asks need

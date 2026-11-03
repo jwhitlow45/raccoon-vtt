@@ -5,12 +5,18 @@ import { MockAgent } from "undici";
 import type { RoomState } from "#shared/model.ts";
 import type { JoinMode } from "#shared/protocol.ts";
 import { ipKey } from "../auth/ipKey.ts";
+import { newMember } from "../auth/roomRecords.ts";
 import { loseNextCommit, randomIp, startTestApp, type TestApp, type TestClient } from "../auth/testing.ts";
 import { randomToken, sha256 } from "../auth/tokens.ts";
 import { setTurnstileDispatcherForTests } from "../auth/turnstile.ts";
 
 const PASSWORD = "owlbear-druid-wand";
-type List = { mode: JoinMode; challenged: boolean; requests: Array<{ id: string; name: string; color: string; askedAt: string }>; players: Array<{ id: string; name: string; color: string }> };
+type List = {
+  mode: JoinMode;
+  challenged: boolean;
+  requests: Array<{ id: string; name: string; color: string; askedAt: string; deciding?: true; pending?: true }>;
+  players: Array<{ id: string; name: string; color: string }>;
+};
 
 function kit(t: TestApp) {
   async function room(mode: JoinMode = "ask"): Promise<{ dm: TestClient; roomId: string; dmKey: string }> {
@@ -417,6 +423,51 @@ describe("join requests: asking, waiting and a DM's answer", () => {
       pause.restore();
     }
     assert.equal((await phone.me(roomId)).status, 403, "KICK-ORDERED: the grant committed first and the kick deleted it");
+  });
+
+  test("a really full room refuses the let-in and its request waits again, and a slow member add keeps the request listed as deciding, then pending (JBO1-01)", async () => {
+    const { dm, roomId } = await k.room("ask");
+    // 49 players besides the DM: the room holds its 50.
+    const { rows } = await t.pool.query<{ state: RoomState }>("select state from room_snapshots where room_id = $1", [roomId]);
+    const state = rows[0]!.state;
+    const fillers = Array.from({ length: 49 }, (_, i) => newMember(`Filler ${i}`, "#30a46c", "player"));
+    for (const m of fillers) state.members[m.id] = m;
+    await t.pool.query("update room_snapshots set state = $2::jsonb where room_id = $1", [roomId, JSON.stringify(state)]);
+    const phone = t.client();
+    const id = await k.asked(phone, roomId);
+    const full = await k.letIn(dm, roomId, id);
+    assert.equal(full.statusCode, 409, full.body);
+    assert.equal(k.error(full), "room_full");
+    const back = (await k.list(dm, roomId)).requests;
+    assert.deepEqual(back.map((r) => [r.id, Object.keys(r).sort()]), [[id, ["askedAt", "color", "id", "name"]]], "waiting again, with no let-in flags");
+
+    assert.equal((await dm.delete(`/api/rooms/${roomId}/members/${fillers[0]!.id}`)).statusCode, 204);
+    const addMember = t.gateway.addMember;
+    let land!: () => void;
+    const landed = new Promise<void>((r) => (land = r));
+    let taken!: () => void;
+    const adding = new Promise<void>((r) => (taken = r));
+    t.gateway.addMember = async (room, member) => {
+      taken();
+      await landed;
+      await addMember.call(t.gateway, room, member);
+    };
+    try {
+      const letIn = k.letIn(dm, roomId, id);
+      await adding;
+      const deciding = (await k.list(dm, roomId)).requests;
+      assert.deepEqual(deciding.map((r) => [r.id, r.deciding, r.pending]), [[id, true, undefined]], "taken, and still on the list");
+      const pending = await letIn;
+      assert.equal(pending.statusCode, 202, pending.body);
+      const still = (await k.list(dm, roomId)).requests;
+      assert.deepEqual(still.map((r) => [r.id, Object.keys(r).sort()]), [[id, ["askedAt", "color", "deciding", "id", "name", "pending"]]], "only the flags, never the requester's address or token");
+    } finally {
+      land();
+      t.gateway.addMember = addMember;
+    }
+    for (let i = 0; i < 50 && (await phone.me(roomId)).status !== 200; i++) await new Promise((r) => setTimeout(r, 20));
+    assert.equal((await phone.me(roomId)).role, "player");
+    assert.deepEqual((await k.list(dm, roomId)).requests, [], "an ending leaves the list");
   });
 
   test("a member in flight is absent from continue-as and the carry-on list, and refused as not_a_player", async () => {

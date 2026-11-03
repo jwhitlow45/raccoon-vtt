@@ -24,8 +24,10 @@ import {
   JOIN_MODE_ERRORS,
   JOIN_MODE_OPTIONS,
   nextAgeTickMs,
+  rowBusy,
   rowBusyText,
   typedNameMatch,
+  waitingRows,
   type JoinRequestList,
   type JoinRequestRow,
   type JoinRequestsState,
@@ -131,7 +133,7 @@ export function useJoinRequestsRoom(): number {
     if (active && state.kind === "shown") toaster.current?.update(state.list, viewing);
   }, [active, viewing, hub]);
 
-  return useStore(hub.store, (s) => (s.kind === "shown" ? s.list.requests.length : 0));
+  return useStore(hub.store, (s) => (s.kind === "shown" ? waitingRows(s.list.requests).length : 0));
 }
 
 /** The room's join mode as the DM list last said it, or null before it answered. */
@@ -217,7 +219,7 @@ function useNow(requests: readonly JoinRequestRow[]): number {
   return now;
 }
 
-/** The DM panel's Join requests section (design 2.3). Gone while no request waits. */
+/** The DM panel's Join requests section (design 2.3). Gone while no request waits or is being let in. */
 export function JoinRequestsSection() {
   const hub = useScoped(joinRequestsSlot);
   const state = useStore(hub.store);
@@ -252,6 +254,8 @@ export function JoinRequestsSection() {
   if (state.kind !== "shown" || requests.length === 0) return null;
   const { list } = state;
   const onlineSet = new Set(online);
+  // A request being let in is no one Turn away all may turn away.
+  const waiting = waitingRows(requests);
   return (
     <Section label="Join requests">
       <div style={{ display: "grid", gap: theme.space(3) }}>
@@ -273,7 +277,7 @@ export function JoinRequestsSection() {
         ))}
       </div>
       {state.stale ? <Help>Could not refresh. Trying again…</Help> : null}
-      {requests.length >= 2 ? <TurnAwayAll ids={requests.map((r) => r.id)} onAnswered={answered} onRefused={() => hub.refresh()} /> : null}
+      {waiting.length >= 2 ? <TurnAwayAll ids={waiting.map((r) => r.id)} onAnswered={answered} onRefused={() => hub.refresh()} /> : null}
     </Section>
   );
 }
@@ -338,13 +342,13 @@ function RequestRow(props: {
   const hinted = typedNameMatch(request.name, props.players);
   const note = player ? carryOnNote(player, props.online.has(player.id), hinted?.id === player.id) : null;
 
-  // The signal that follows a 202 either drops this row or leaves it waiting again, and either way the next list settles it.
+  // This device's answer holds the row busy until a newer list shows the let-in over: the row gone, or waiting again with no let-in running.
   useEffect(() => {
-    if (stillAt.current !== null && props.listed !== stillAt.current) {
+    if (stillAt.current !== null && props.listed !== stillAt.current && !request.deciding) {
       stillAt.current = null;
       setBusy(null);
     }
-  }, [props.listed]);
+  }, [props.listed, request.deciding]);
 
   const run = async (kind: "letting" | "turning") => {
     if (busyRef.current) return;
@@ -376,7 +380,9 @@ function RequestRow(props: {
     }
   };
 
-  const disabled = busy !== null;
+  // The list keeps a request on screen while any DM device lets it in, so this row stays, with its words, until the let-in settles.
+  const shown = rowBusy(busy, request);
+  const disabled = shown !== null;
   return (
     <div
       role="group"
@@ -416,11 +422,11 @@ function RequestRow(props: {
           </div>
         ) : null}
         <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
-          <Button variant="primary" size="sm" aria-label={`Let ${request.name} in`} busy={busy === "letting" || busy === "still"} disabled={disabled && busy !== "letting" && busy !== "still"} onClick={() => void run("letting")} style={{ flex: "1 1 120px" }}>
-            {busy === "letting" || busy === "still" ? rowBusyText(busy, request.name) : "Let in"}
+          <Button variant="primary" size="sm" aria-label={`Let ${request.name} in`} busy={shown === "letting" || shown === "still"} disabled={disabled && shown !== "letting" && shown !== "still"} onClick={() => void run("letting")} style={{ flex: "1 1 120px" }}>
+            {shown === "letting" || shown === "still" ? rowBusyText(shown, request.name) : "Let in"}
           </Button>
-          <Button size="sm" aria-label={`Turn ${request.name} away`} busy={busy === "turning"} disabled={disabled && busy !== "turning"} onClick={() => void run("turning")} style={{ flex: "1 1 120px" }}>
-            {busy === "turning" ? rowBusyText("turning", request.name) : "Turn away"}
+          <Button size="sm" aria-label={`Turn ${request.name} away`} busy={shown === "turning"} disabled={disabled && shown !== "turning"} onClick={() => void run("turning")} style={{ flex: "1 1 120px" }}>
+            {shown === "turning" ? rowBusyText("turning", request.name) : "Turn away"}
           </Button>
         </div>
         <ErrorText>{error}</ErrorText>

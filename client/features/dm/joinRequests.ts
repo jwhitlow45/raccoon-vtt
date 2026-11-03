@@ -76,6 +76,23 @@ export function carryOnNote(player: Pick<CarryOnPlayer, "name">, online: boolean
 /** What a row says while its answer is out, or null when it is idle. */
 export type RowBusy = "letting" | "turning" | "still";
 
+/** The requests that wait for an answer: what the badge counts, what toasts, and what Turn away all may turn away. */
+export function waitingRows(rows: readonly JoinRequestRow[]): JoinRequestRow[] {
+  return rows.filter((r) => !r.deciding);
+}
+
+/**
+ * What a row shows: this device's own answer while it is out, else what the
+ * list says of a let-in running from any DM device, so a co-DM's row is busy
+ * too and the tapping device's row stays busy across the list's fetches.
+ */
+export function rowBusy(own: RowBusy | null, row: Pick<JoinRequestRow, "deciding" | "pending">): RowBusy | null {
+  if (own === "turning") return "turning";
+  if (own === "still" || row.pending) return "still";
+  if (own === "letting" || row.deciding) return "letting";
+  return null;
+}
+
 export function rowBusyText(busy: RowBusy, name: string): string {
   if (busy === "letting") return "Letting in…";
   if (busy === "turning") return "Turning away…";
@@ -160,7 +177,11 @@ export type JoinToaster = {
  */
 export function createJoinToaster(deps: { clock: Clock; show(text: string): void }): JoinToaster {
   const { clock } = deps;
-  /** Ids already toasted or silenced. Kept only while the list holds them, since an id never returns. */
+  /**
+   * Ids already toasted or silenced. Kept while the list holds them, which
+   * it does while a let-in decides them, so only an id that ended leaves,
+   * and an ended id never comes back.
+   */
   let seen = new Set<string>();
   let lastToastAt: number | null = null;
   let opening = true;
@@ -179,7 +200,8 @@ export function createJoinToaster(deps: { clock: Clock; show(text: string): void
     if (!latest || held) return;
     const list = latest;
     seen = new Set([...seen].filter((id) => list.requests.some((r) => r.id === id)));
-    const unseen = list.requests.filter((r) => !seen.has(r.id));
+    // A request being let in never toasts, and stays seen while it is decided, so one whose let-in fails and comes back to waiting is not news.
+    const unseen = waitingRows(list.requests).filter((r) => !seen.has(r.id));
     if (!list.challenged) floodTold = false;
     if (unseen.length === 0) {
       opening = false;
