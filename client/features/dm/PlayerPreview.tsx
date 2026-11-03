@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useStore } from "zustand";
 import { Button } from "../../components/Button.tsx";
 import { Notice } from "../../components/Notice.tsx";
+import { StatusBand } from "../../components/StatusBand.tsx";
 import { useModalDialog } from "../../lib/modalDialog.ts";
 import { useUiScale } from "../device/settings.ts";
 import { theme } from "../../lib/theme.ts";
@@ -193,6 +194,8 @@ export function PlayerPreview(props: {
         <PreviewWait name={name} failed={load === "failed"} zoom={zoom} onRetry={() => setAttempt((n) => n + 1)} />
       )}
       <div aria-hidden style={{ position: "fixed", inset: 0, zIndex: 1, pointerEvents: "none", border: `4px solid ${theme.color.accentSoft}` }} />
+      {/* The home-screen app's strip under its status bar on a light page: App's own cannot rise over the top layer, and the preview's room covers this dialog's ground. */}
+      <StatusBand />
       <div
         ref={noticeRef}
         style={{

@@ -6,7 +6,7 @@ import { bodyHoldsField, useFieldInView, useKeyboardView } from "../lib/keyboard
 import { pictureCopy, UNDER_DIM, UNDER_DIM_ATTR, useBackSwipe, usePagePictures, type PagePicture } from "../lib/backSwipe.ts";
 import { useSheetDialog } from "../lib/modalDialog.ts";
 import { DraftScope, useDraftRegistry, useSheetSwipe } from "../lib/sheetSwipe.ts";
-import { theme } from "../lib/theme.ts";
+import { statusBand, theme } from "../lib/theme.ts";
 import { headerStacks, SHEET_MAX_WIDTH, sheetFoot, sheetKeyboard, sheetMaxHeight, sheetTop } from "./sheetCap.ts";
 import { SheetHeader, type HeaderBack } from "./SheetHeader.tsx";
 
@@ -194,6 +194,8 @@ export function Sheet(props: {
     maxHeight: "none",
     borderRadius: 0,
     padding: `${theme.safe.top} ${theme.safe.right} ${theme.safe.bottom} ${theme.safe.left}`,
+    // The home-screen app's strip under its status bar on a light page (lib/theme.ts statusBand): in the top layer, App's own cannot rise over the sheet.
+    boxShadow: statusBand(zoom),
   };
   /*
    * At the foot it is no wider than a medium dialog and stands centered
@@ -239,7 +241,8 @@ export function Sheet(props: {
   // Filled, it keeps the upright sheet's top corners, with the room behind showing in them, so they never square off as it reaches the top or round again on the step down.
   const sheetCorners = `${theme.radius.lg}px ${theme.radius.lg}px 0 0`;
   // Its shadow stays once it settles: on a tablet the capped column stands over the map, where a phone's spans the screen and shows none.
-  const fullHeight: CSSProperties = { ...wholeScreen, ...bottomWidth, borderRadius: sheetCorners, boxShadow: theme.shadow.sheet };
+  const filledShadow = `${statusBand(zoom)}, ${theme.shadow.sheet}`;
+  const fullHeight: CSSProperties = { ...wholeScreen, ...bottomWidth, borderRadius: sheetCorners, boxShadow: filledShadow };
   // Beside the map while a drag holds it above its normal top, so it is drawn over the bars as it rises.
   const rising: CSSProperties = { ...fullHeight, zIndex: theme.z.overBars };
   // Typing with no room for the field: the visible area's height over the bars, at the foot as a rising sheet stands, on the right at its own width.
