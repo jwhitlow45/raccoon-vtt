@@ -8,6 +8,7 @@ import { DEFAULT_SETTINGS, type RoomState, type Scene, type Token } from "#share
 import { holderOf as linkedHolder, linkHolds } from "#shared/rules/attach.ts";
 import { labelBox } from "#shared/rules/labels.ts";
 import { isHex, sceneGrid } from "#shared/rules/grid.ts";
+import { drawnSpot } from "#shared/rules/nudge.ts";
 import { activeTool, type ToolContext, type ToolDef, type ToolPointer } from "../features/tools.ts";
 import { LabelPaneHost } from "../features/builder/LabelPaneHost.tsx";
 import { ReadoutHost } from "../features/builder/heights/ReadoutHost.tsx";
@@ -57,7 +58,7 @@ import { fitTarget } from "../lib/fitTarget.ts";
 import { revealedMask } from "../lib/fogTiles.ts";
 import { CameraGesture, distance, LongPress, mousePans, TAP_SLOP_PX } from "../lib/gestures.ts";
 import { groupFollowers, tokensByCenter, tokensInBox } from "../lib/group.ts";
-import { displayName, drawnAt as drawnSpot, drawsAboveFog, footprint, rulesSpot, snapPosition, type ViewToken } from "../lib/scene.ts";
+import { displayName, drawsAboveFog, footprint, rulesSpot, snapPosition, type ViewToken } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
 import { BoardViewContext, boardViewsOf, useBoardPills } from "./boardView.ts";
 import { useBoardFontEpoch } from "./boardFont.ts";

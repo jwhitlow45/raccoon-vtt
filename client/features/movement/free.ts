@@ -1,7 +1,7 @@
 import type { ClientOp } from "#shared/protocol.ts";
 import { footprintSize, isSqueezed } from "#shared/rules/footprint.ts";
 import { isHex, type Grid } from "#shared/rules/grid.ts";
-import { freeDrawnAt } from "#shared/rules/nudge.ts";
+import { drawnSpot, freeDrawnAt } from "#shared/rules/nudge.ts";
 import { drawnAt, snapPosition } from "../../lib/scene.ts";
 import type { DropPlan, DropToken, Landed, Point } from "./drop.ts";
 
@@ -39,7 +39,7 @@ export function placement(token: DropToken, landing: Point, release: Point): Poi
 function keeping(grid: Grid, move: Landed, token: DropToken | undefined): Landed {
   const nudge = token?.nudge;
   if (!nudge || move.squeeze || isHex(grid)) return move;
-  return { ...move, drawnAt: { x: move.x + nudge.x / 8, y: move.y + nudge.y / 8 } };
+  return { ...move, drawnAt: drawnSpot(grid, { x: move.x, y: move.y, nudge }) };
 }
 
 /**

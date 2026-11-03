@@ -7,8 +7,9 @@ import { WorkBudget, type WalkRoute } from "#shared/rules/walk.ts";
 import { routeLegCheck, routeWorld, routeWorldUnits } from "#shared/rules/hexWalk.ts";
 import type { PublicWorld } from "#shared/rules/walkWorld.ts";
 import { isHex } from "#shared/rules/grid.ts";
+import { drawnSpot } from "#shared/rules/nudge.ts";
 import { walkersCut, walkersFor, walkersOfGroup } from "../attach/walk.ts";
-import { drawnAt, rulesSpot, snapPosition } from "../../lib/scene.ts";
+import { rulesSpot, snapPosition } from "../../lib/scene.ts";
 import type { OpAnswer } from "../../state/types.ts";
 import { useRoomScope, type RoomScope } from "../../state/scope.ts";
 import type { RoomUi } from "../../state/store.ts";
@@ -187,7 +188,7 @@ export function dragStops(deps: DragDeps): DragStops {
    */
   const ruled = (token: DropToken, at: Point, free: boolean): Point => (free ? { x: at.x, y: at.y } : rulesSpot(token, at));
   /** A rules spot written to the node: where the token is drawn there, with its nudge. */
-  const drawnThere = (token: DropToken, at: Point): Point => drawnAt(null, { x: at.x, y: at.y, ...(token.nudge ? { nudge: token.nudge } : {}) });
+  const drawnThere = (token: DropToken, at: Point): Point => drawnSpot(null, { x: at.x, y: at.y, nudge: token.nudge });
   /** The lone drag's search, its world and what the world was built from. */
   let walk: Walk | null = null;
   /*

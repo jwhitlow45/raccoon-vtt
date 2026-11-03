@@ -1,6 +1,7 @@
 import { SIZE_CELLS, type Character, type Member, type RoomState, type Scene, type SceneMap, type Token } from "#shared/model.ts";
 import { footprintRect, occupiedHexes, sizeCategory, type PlacedToken } from "#shared/rules/footprint.ts";
 import type { Grid } from "#shared/rules/grid.ts";
+import { drawnSpot } from "#shared/rules/nudge.ts";
 import { HEX_R, hexAt, hexCenter, hexDistance, hexKey, hexNeighbors, snapAnchor, type Hex, type HexGrid } from "#shared/rules/hex.ts";
 import type { Rect } from "./camera.ts";
 
@@ -51,12 +52,11 @@ export function snapPosition(g: Grid, x: number, y: number, size: { w: number; h
  * this. Every rule reads the stored spot. On hexes it is the stored spot,
  * since a nudge is only valid on squares. A caller with no grid at hand
  * passes null and trusts the server's one pass (rules/nudge.ts keepNudges),
- * which keeps no nudge on a hex scene.
+ * which keeps no nudge on a hex scene. The formula is the shared one
+ * (rules/nudge.ts drawnSpot), so the board and the reducer never disagree.
  */
 export function drawnAt(g: Pick<Grid, "shape"> | null, token: Pick<Token, "x" | "y" | "nudge">): { x: number; y: number } {
-  const n = token.nudge;
-  if (!n || g?.shape === "hex") return { x: token.x, y: token.y };
-  return { x: token.x + n.x / 8, y: token.y + n.y / 8 };
+  return drawnSpot(g, token);
 }
 
 /**

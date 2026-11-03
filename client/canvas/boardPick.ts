@@ -1,8 +1,9 @@
 import { DEFAULT_SETTINGS, type BuildChunk, type RoomState, type Scene, type Token } from "#shared/model.ts";
 import type { FootprintToken } from "#shared/rules/footprint.ts";
 import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
+import { drawnSpot } from "#shared/rules/nudge.ts";
 import { screenToView, viewToScreen, type Camera, type GroundMap, type Insets, type Point, type Size } from "../lib/camera.ts";
-import { drawnAt as drawnSpot, footprint, type ViewToken } from "../lib/scene.ts";
+import { footprint, type ViewToken } from "../lib/scene.ts";
 import { cellsMeeting, footprintCells, ruleBoundPoint } from "../lib/groundCells.ts";
 import { arrowStep, drawnBase, drawnFootprintGround, drawnHeights, flatHeights, heightsStand, pickWalk, standScale, TOP_DOWN, toView, toWorld, type DrawnHeights, type DrawnSource, type PickHit, type PickSource, type View } from "../lib/view.ts";
 import { scopeSlot, type RoomScope } from "../state/scope.ts";

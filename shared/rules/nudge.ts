@@ -74,9 +74,15 @@ export function freeDrawnAt(landed: PlacedToken, release: Point): Point {
   return { x: axis(release.x, landed.x), y: axis(release.y, landed.y) };
 }
 
-/** Where a token is drawn, in cells: its stored top-left moved by its nudge, on a square scene. */
-export function drawnSpot(g: Grid, token: NudgedToken): Point {
-  if (!token.nudge || isHex(g)) return { x: token.x, y: token.y };
+/**
+ * Where a token is drawn, in cells: its stored top-left moved by its nudge,
+ * on a square scene. The one formula, which the client's drawing reads too
+ * (client/lib/scene.ts drawnAt). A caller with no grid at hand passes null
+ * and trusts the pass at the end of every op, which keeps no nudge on a hex
+ * scene.
+ */
+export function drawnSpot(g: Pick<Grid, "shape"> | null, token: Point & Pick<Token, "nudge">): Point {
+  if (!token.nudge || g?.shape === "hex") return { x: token.x, y: token.y };
   return { x: token.x + token.nudge.x / NUDGE_STEPS, y: token.y + token.nudge.y / NUDGE_STEPS };
 }
 
