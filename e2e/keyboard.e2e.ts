@@ -1176,6 +1176,24 @@ describe("raccoon-vtt: a sheet's field over the phone keyboard", { timeout: 900_
     test(`kb-16. in the fight at ${viewName(view)}, the roll card's Total and Send show whole over the keyboard`, () => rollCard(view));
   }
 
+  test("kb-so. a hardware arrow key on a token Pat placed between squares steps it one square and keeps its placement, there and back (docs/design/design-v1-snap-off.md 6.5)", async () => {
+    await setUp(pat, VIEWS[0]!);
+    await ops.send({ t: "token.update", tokenId: run.thornToken, patch: { drawnAt: { x: 5.25, y: 4.75 } } });
+    const thorn = () => patSocket.state?.tokens[run.thornToken];
+    await waitFor("Thorn placed on Pat's page", () => (thorn()?.nudge ? true : null));
+    try {
+      await thornsBar(pat);
+      await pat.keyboard.press("ArrowRight");
+      const stepped = await waitFor("Thorn a square east", () => (thorn()?.x === 6 ? thorn() : null));
+      assert.deepEqual(stepped.nudge, { x: 2, y: -2 }, "the step keeps the placement");
+      await pat.keyboard.press("ArrowLeft");
+      const back = await waitFor("Thorn back on his square", () => (thorn()?.x === 5 ? thorn() : null));
+      assert.deepEqual([back.y, back.nudge], [5, { x: 2, y: -2 }]);
+    } finally {
+      await ops.send({ t: "token.update", tokenId: run.thornToken, patch: { drawnAt: null } });
+    }
+  });
+
   test("kb-19. the raised sheets line up, nothing over 1 px, and the dock rode them on the tall phone", () => {
     assert.deepEqual(sweep, []);
     for (const view of VIEWS.filter((v) => v.height === 844)) assert.ok(docked.has(`Lay on Hands in the fight at ${viewName(view)}`), `no dock on the sheet at ${viewName(view)}`);
