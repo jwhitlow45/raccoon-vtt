@@ -10,7 +10,8 @@ import { LEAD_MS, type Playing } from "#shared/sound.ts";
  */
 
 const { askWorthy } = await import("./useSoundAsk.ts");
-const { firedAfter, somethingToHear } = await import("./store.ts");
+const { firedAfter, resetServerRoomSoundForTests, serverRoomSound, serverSound, somethingToHear } = await import("./store.ts");
+const { api } = await import("../../../lib/api.ts");
 
 const quiet: Playing = { rev: 1, music: null, loops: {}, effects: [], volume: { music: 100, effects: 100 } };
 const T = 1_000_000;
@@ -49,5 +50,36 @@ describe("the ask", () => {
     const run = { run: "r", repeat: "one" as const, fade: 5 as const, now: { soundId: "s", at: T - 60_000 } };
     assert.equal(somethingToHear({ ...quiet, music: run }, sounds, T), true);
     assert.equal(somethingToHear({ ...quiet, music: { ...run, paused: 4_000 } }, sounds, T), false, "a DM's paused run, which a player's projection drops");
+  });
+});
+
+describe("the server's switch", () => {
+  test("unknown until the server answers, never off, then on or off, and a failed read says so until the next ask", async () => {
+    const real = api.getConfig;
+    let answer: { resolve(config: unknown): void; reject(err: unknown): void } | null = null;
+    api.getConfig = (() => new Promise((resolve, reject) => (answer = { resolve: resolve as (config: unknown) => void, reject }))) as typeof api.getConfig;
+    const settled = () => new Promise((r) => setImmediate(r));
+    try {
+      resetServerRoomSoundForTests();
+      assert.equal(serverSound(), "unknown");
+      const first = serverRoomSound();
+      assert.equal(serverSound(), "unknown", "asking");
+      answer!.reject(new Error("offline"));
+      assert.equal(await first, false);
+      assert.equal(serverSound(), "failed");
+      const again = serverRoomSound();
+      assert.equal(serverSound(), "unknown", "asked again");
+      answer!.resolve({ roomSound: true });
+      assert.equal(await again, true);
+      assert.equal(serverSound(), "on");
+      resetServerRoomSoundForTests();
+      void serverRoomSound();
+      answer!.resolve({});
+      await settled();
+      assert.equal(serverSound(), "off");
+    } finally {
+      api.getConfig = real;
+      resetServerRoomSoundForTests();
+    }
   });
 });

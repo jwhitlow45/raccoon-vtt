@@ -40,6 +40,8 @@ import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
  * - mfa-1: an effect fired behind a blackout, with nothing else playing:
  *   Stop all sound and the X-card's Stop the sound while it sounds, and
  *   neither once it is over.
+ * - mfa-2: a read of the server's switch that fails says so, never that
+ *   the server has no sound files, and Try again asks again.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus forty-eight, and the
  * switch-off server on plus forty-nine, one file after another. The other
@@ -445,6 +447,25 @@ describe("the Sound panel", { concurrency: false }, () => {
       await card.getByRole("button", { name: "Dismiss", exact: true }).click();
     } finally {
       await ops.send({ t: "view.blackout", blackout: false });
+    }
+  });
+
+  test("mfa-2. a failed read of the server's switch says so, never that the server has no sound files, and Try again asks again", async () => {
+    const page = await dmContext.newPage();
+    try {
+      await page.route("**/api/config", (route) => route.abort());
+      await page.goto(`${server.origin}/r/${run.roomId}`);
+      await openSideTab(page, "Sound");
+      const panel = page.getByRole("tabpanel", { name: sideTabName("Sound") });
+      await panel.getByText("Couldn't check whether this server offers sound files. The built-in effects still work.", { exact: true }).waitFor();
+      assert.equal(await panel.getByText(/doesn't offer sound files/).count(), 0);
+      assert.deepEqual(alignmentLines(await measureAlignment(panel), "the switch's failed read, 1440x900"), []);
+      await shots.take(page, "mfa-2-dm-switch-failed");
+      await page.unroute("**/api/config");
+      await panel.getByRole("button", { name: "Try again", exact: true }).click();
+      await panel.getByRole("heading", { name: "Now playing", exact: true }).waitFor();
+    } finally {
+      await page.close();
     }
   });
 

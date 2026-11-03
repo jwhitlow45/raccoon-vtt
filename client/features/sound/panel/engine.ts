@@ -4,5 +4,5 @@
  * store and This device own both, and the panel only shows them, so every
  * read goes through this one file.
  */
-export { listenHere, retryMusic, stopListening, useListening, useServerRoomSound, useSoundHere, type MusicHere, type SoundHere } from "../engine/store.ts";
+export { listenHere, retryMusic, serverRoomSound, stopListening, useListening, useServerRoomSoundState, useSoundHere, type MusicHere, type ServerSound, type SoundHere } from "../engine/store.ts";
 export { RoomSoundControls } from "../../device/ThisDevice.tsx";

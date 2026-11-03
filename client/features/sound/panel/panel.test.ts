@@ -18,6 +18,7 @@ const { LoopToggles } = await import("./LoopsSection.tsx");
 const { Board } = await import("./EffectsBoard.tsx");
 const { PlayerNow } = await import("./PlayerSound.tsx");
 const { useReasons } = await import("./SoundPage.tsx");
+const { ServerLine } = await import("./SoundPanel.tsx");
 const words = await import("./words.ts");
 
 const noop = () => {};
@@ -126,6 +127,20 @@ describe("the effects board", () => {
     const html = board({ builtInOnly: true });
     assert.match(html, /Play Click for everyone/);
     assert.doesNotMatch(html, /Thunder/);
+  });
+});
+
+describe("the server's switch line", () => {
+  const line = (server: "unknown" | "on" | "off" | "failed") => renderToStaticMarkup(createElement(ServerLine, { server, onRetry: noop }));
+
+  test("off only once the server said so: nothing while it asks, past the shared delay its loading line, and a failed read with Try again", () => {
+    assert.equal(line("on"), "");
+    assert.match(line("off"), /This server doesn&#x27;t offer sound files./);
+    assert.doesNotMatch(line("unknown"), /doesn/, "never the off line while it asks");
+    const failed = line("failed");
+    assert.match(failed, /Couldn&#x27;t check whether this server offers sound files./);
+    assert.match(failed, />Try again</);
+    assert.doesNotMatch(failed, /doesn/);
   });
 });
 

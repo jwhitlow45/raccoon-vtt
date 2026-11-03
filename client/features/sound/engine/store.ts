@@ -36,44 +36,63 @@ class Value<T> {
 
 // ---------------------------------------------------------------- the server's switch
 
-const serverSwitch = new Value<boolean>(false);
+/** The server's switch as this page knows it: not answered yet, on, off, or a read that failed. */
+export type ServerSound = "unknown" | "on" | "off" | "failed";
+
+const serverSwitch = new Value<ServerSound>("unknown");
 let serverAsked: Promise<boolean> | null = null;
 
 /**
  * Whether the server's owner turned sound files on (ROOM_SOUND, from GET
- * /api/config). Read once a page load. A failed read counts as off, the
- * safe answer, and is tried again next time. The built-in effects play
- * either way.
+ * /api/config). Read once a page load. Until it answers the switch is
+ * unknown, never off, so the Sound panel never says the server has none
+ * while it asks. A failed read says so, and the next call asks again. The
+ * promise answers false for anything but on, the safe answer. The built-in
+ * effects play either way.
  */
 export function serverRoomSound(): Promise<boolean> {
-  serverAsked ??= api.getConfig().then(
+  if (serverAsked) return serverAsked;
+  if (serverSwitch.get() === "failed") serverSwitch.set("unknown");
+  serverAsked = api.getConfig().then(
     (config) => {
       const on = config.roomSound === true;
-      serverSwitch.set(on);
+      serverSwitch.set(on ? "on" : "off");
       return on;
     },
     () => {
       serverAsked = null;
+      serverSwitch.set("failed");
       return false;
     },
   );
   return serverAsked;
 }
 
+export const serverSound = serverSwitch.get;
+
 function subscribeServerSwitch(listener: () => void): () => void {
   void serverRoomSound();
   return serverSwitch.subscribe(listener);
 }
 
-/** The server's switch, false until it is known. The first reader asks the server. */
-export function useServerRoomSound(): boolean {
+/**
+ * The server's switch: unknown, on, off or failed. The first reader asks
+ * the server. Only "off" is the server's own no, so anything that may
+ * send a sound file's op goes on unless it is "off", and the server decides.
+ */
+export function useServerRoomSoundState(): ServerSound {
   return useSyncExternalStore(subscribeServerSwitch, serverSwitch.get, serverSwitch.get);
+}
+
+/** Whether the server said it offers sound files: false until it answers on, as it always was. */
+export function useServerRoomSound(): boolean {
+  return useServerRoomSoundState() === "on";
 }
 
 /** Forgets the switch, so a test can answer again. */
 export function resetServerRoomSoundForTests(): void {
   serverAsked = null;
-  serverSwitch.set(false);
+  serverSwitch.set("unknown");
 }
 
 // ---------------------------------------------------------------- this page's part
