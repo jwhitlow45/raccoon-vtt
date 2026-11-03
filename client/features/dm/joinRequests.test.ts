@@ -233,6 +233,23 @@ describe("the join toast", () => {
     assert.deepEqual(t.shown, [JOIN_FLOOD_TEXT, "Robin asks to join."]);
   });
 
+  test("the many-asks notice waits out the 20 s gap after an ordinary toast, and still comes once (JB-ASTRA-07)", () => {
+    const t = toasterSetup();
+    t.toaster.update(list([]), false);
+    t.toaster.update(list([row("a", "Quinn")]), false);
+    t.clock.advance(5_000);
+    // The room passes its threshold 5 s after Quinn's toast.
+    t.toaster.update(list([row("a", "Quinn"), row("b", "Pat", 5)], { challenged: true }), false);
+    assert.deepEqual(t.shown, ["Quinn asks to join."], "held for the gap");
+    t.clock.advance(14_999);
+    assert.equal(t.shown.length, 1);
+    t.clock.advance(1);
+    assert.deepEqual(t.shown, ["Quinn asks to join.", JOIN_FLOOD_TEXT]);
+    t.toaster.update(list([row("a", "Quinn"), row("b", "Pat", 5), row("c", "Sam", 30)], { challenged: true }), false);
+    t.clock.advance(60_000);
+    assert.deepEqual(t.shown, ["Quinn asks to join.", JOIN_FLOOD_TEXT], "once per challenge");
+  });
+
   test("View as a player holds new toasts until the DM leaves, and then they show", () => {
     const t = toasterSetup();
     t.toaster.update(list([]), false);

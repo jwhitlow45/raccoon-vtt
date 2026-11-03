@@ -214,6 +214,8 @@ export function createJoinToaster(deps: { clock: Clock; show(text: string): void
   let lastToastAt: number | null = null;
   let opening = true;
   let floodTold = false;
+  /** The notice is owed for this challenge and waits out the gap, as any join toast does. */
+  let floodDue = false;
   let latest: JoinRequestList | null = null;
   let held = false;
   let timer: unknown = null;
@@ -230,18 +232,32 @@ export function createJoinToaster(deps: { clock: Clock; show(text: string): void
     seen = new Set([...seen].filter((id) => list.requests.some((r) => r.id === id)));
     // A request being let in never toasts, and stays seen while it is decided, so one whose let-in fails and comes back to waiting is not news.
     const unseen = waitingRows(list.requests).filter((r) => !seen.has(r.id));
-    if (!list.challenged) floodTold = false;
-    if (unseen.length === 0) {
-      opening = false;
-      return;
+    if (!list.challenged) {
+      floodTold = false;
+      floodDue = false;
     }
     if (list.challenged) {
+      // Past the threshold no ask toasts on its own. The one notice owed
+      // says why, once per challenge, and only once the gap allows.
       for (const r of unseen) seen.add(r.id);
-      opening = false;
-      if (floodTold) return;
+      if (unseen.length > 0) {
+        opening = false;
+        if (!floodTold) floodDue = true;
+      }
+      if (!floodDue) return;
+      const wait = lastToastAt === null ? 0 : lastToastAt + JOIN_TOAST_GAP_MS - clock.now();
+      if (wait > 0) {
+        timer = clock.setTimeout(run, wait);
+        return;
+      }
+      floodDue = false;
       floodTold = true;
       lastToastAt = clock.now();
       deps.show(JOIN_FLOOD_TEXT);
+      return;
+    }
+    if (unseen.length === 0) {
+      opening = false;
       return;
     }
     const wait = lastToastAt === null ? 0 : lastToastAt + JOIN_TOAST_GAP_MS - clock.now();
