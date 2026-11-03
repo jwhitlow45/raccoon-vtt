@@ -6,6 +6,7 @@
     "alignment-icons": 80,
     "alignment-settings": 130,
     "alignment-wide": 261,
+    "animmap": 74,
     "areafog": 88,
     "areas": 33,
     "attach": 50,
@@ -27,6 +28,7 @@
     "dicefolds": 22,
     "display": 43,
     "dmphone": 167,
+    "dungeon": 30,
     "fogedge": 61,
     "fold": 67,
     "fu28-forms": 8,
@@ -67,6 +69,10 @@
     "sideheaders": 28,
     "size": 96,
     "smoke": 40,
+    "snapoff": 37,
+    "sound": 122,
+    "soundpanel": 24,
+    "soundupload": 35,
     "splitpanel": 106,
     "stickyfoot": 13,
     "swipe": 288,
@@ -77,6 +83,7 @@
     "tokenpanel-words": 80,
     "tools": 32,
     "traps": 78,
-    "vision": 54
+    "vision": 54,
+    "weather": 55
   }
 }
