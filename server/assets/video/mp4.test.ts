@@ -512,3 +512,41 @@ describe("every kept box is read to its last byte (AMBUILD-SOL-003, AMBUILD-SOL-
     }
   });
 });
+
+describe("each track's durations and composition times match its samples (AMBUILD-ASTRA-03)", () => {
+  function at(bytes: Buffer, marker: string, offset: number, value: number): Buffer {
+    const out = Buffer.from(bytes);
+    out.writeUInt32BE(value, out.indexOf(marker) + offset);
+    return out;
+  }
+
+  test("an mdhd or tkhd duration unlike the samples' is video_layout", async () => {
+    // mdhd's duration is 12 bytes into its body, tkhd's 16: 60 samples of 512 ticks are 30720, and 2000 in the movie's timescale.
+    assert.equal(mp4File().readUInt32BE(mp4File().indexOf("mdhd") + 20), 30720);
+    await refused(at(mp4File(), "mdhd", 20, 10 * 60 * 15360), "video_layout");
+    await refused(at(mp4File(), "tkhd", 24, 600_000), "video_layout");
+    await checkVideoBytes(at(mp4File(), "mdhd", 20, 30720 + 256));
+  });
+
+  test("a composition offset past what a decoder reorders, or before the start, is video_layout", async () => {
+    const offsets = (cts: (i: number) => number) => defaultVideoTrack({ samples: Array.from({ length: 60 }, (_, i) => ({ size: 30, delta: 512, cts: cts(i) })) });
+    // Every frame shown ten minutes late.
+    await refused(mp4File({ tracks: [offsets(() => 10 * 60 * 15360)] }), "video_layout");
+    // Sixteen frames late is as far as H.264 holds back.
+    await checkVideoBytes(mp4File({ tracks: [offsets((i) => (i === 0 ? 16 * 512 : 0))], movieDuration: 2000 }));
+  });
+
+  test("a negative composition offset that shows a frame before the start is video_layout", async () => {
+    const bytes = Buffer.from(mp4File({ tracks: [defaultVideoTrack({ samples: Array.from({ length: 60 }, (_, i) => ({ size: 30, delta: 512, cts: i === 0 ? 1 : 0 })) })] }));
+    // ctts version 1, its first offset -512.
+    const ctts = bytes.indexOf("ctts");
+    bytes[ctts + 4] = 1;
+    bytes.writeInt32BE(-512, ctts + 16);
+    await refused(bytes, "video_layout");
+  });
+
+  test("cslg's numbers must lie inside the media's composition times", async () => {
+    const cslg = bx("cslg", Buffer.concat([fields([1, 0], [3, 0]), fields([4, 0], [4, 0], [4, 512], [4, 0], [4, 10 * 60 * 15360])]));
+    await refused(mp4File({ tracks: [defaultVideoTrack({ extraStbl: [cslg] })] }), "bad_video");
+  });
+});

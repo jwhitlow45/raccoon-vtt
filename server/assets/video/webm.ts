@@ -371,6 +371,8 @@ async function parseSegment(walk: Walk, segment: El): Promise<ParsedVideo> {
   const soundFrames = new Tally(VIDEO_LIMITS.parseSoundFrameHeaders);
   const frameTimes: number[] = [];
   let soundEnd = -Infinity;
+  /** Where frames a BlockDuration times end, and where invisible frames lie, in ns: the timeline beyond the shown frames' starts. */
+  let timedEnd = -Infinity;
   let lastClusterTimestamp = 0;
   /** The latest block's timestamp in the Segment's ticks, which no Cue may pass. */
   let lastTicks = 0;
@@ -413,13 +415,19 @@ async function parseSegment(walk: Walk, segment: El): Promise<ParsedVideo> {
         if (timestamp === undefined) throw refuse("bad_video");
         const read = await blockHeader(walk, b, known.tracks, simple);
         walk.edits.protect(b.dataStart, b.end);
+        // A block's own time, the Cluster's plus its signed offset, is never before the file starts.
+        if (timestamp + read.relative < 0) throw refuse("bad_video");
         lastTicks = Math.max(lastTicks, timestamp + read.relative);
         const time = (timestamp + read.relative) * known.scale;
         if (read.track.type === 1) {
           videoFrames.add();
           if (read.lacing !== 0) throw refuse("bad_video");
-          if (read.invisible) return;
+          if (read.invisible) {
+            timedEnd = Math.max(timedEnd, time);
+            return;
+          }
           frameTimes.push(time);
+          if (timing.duration !== undefined) timedEnd = Math.max(timedEnd, time + timing.duration * known.scale);
           if (!firstVideoHead) firstVideoHead = await walk.src.read(read.payloadStart, Math.min(16, b.end - read.payloadStart));
         } else {
           const samples = await soundSamples(walk, b, read, soundFrames);
@@ -477,8 +485,6 @@ async function parseSegment(walk: Walk, segment: El): Promise<ParsedVideo> {
   const video = tracks.find((t) => t.type === 1)!;
   const sound = tracks.find((t) => t.type === 2);
   if (frameTimes.length === 0) throw refuse("bad_video");
-  // A Duration the Clusters run past says less than the file holds.
-  if (lastClusterTimestamp > duration) throw refuse("video_unfinished");
   // Each SeekHead entry must point at the element it names.
   for (const seek of seeks) if (placed.get(seek.position) !== seek.target) throw refuse("bad_video");
   checkCues(cueEntries, { tracks, clusters, lastTicks, segmentBytes: segment.end - segment.dataStart });
@@ -490,6 +496,10 @@ async function parseSegment(walk: Walk, segment: El): Promise<ParsedVideo> {
   // Sound may end up to a frame or 50 ms after the picture (AMN-4, AMR-3): AAC and Opus pad their last packet.
   const tolerance = Math.max(frame, VIDEO_LIMITS.soundOverrunMs * 1e6);
   if (sound && soundEnd > last + frame + tolerance) throw refuse("video_layout");
+  // A variable rate's last frame lasts about as long as the gap before it, which a muxer's Duration counts.
+  const beforeLast = frameTimes.reduce((m, t) => (t < last && t > m ? t : m), -Infinity);
+  const lastFrame = video.defaultDuration ?? Math.max(frame, Number.isFinite(beforeLast) ? last - beforeLast : 0);
+  checkTimeline({ declaredNs: duration * scale, clusterNs: lastClusterTimestamp * scale, endNs: Math.max(last + lastFrame, timedEnd, soundEnd), toleranceNs: Math.max(tolerance, lastFrame) });
 
   return {
     container: "webm",
@@ -501,6 +511,22 @@ async function parseSegment(walk: Walk, segment: El): Promise<ParsedVideo> {
     durationMs: Math.round((duration * scale) / 1e6),
     edits: walk.edits,
   };
+}
+
+/**
+ * The presentation timeline against the Duration and the length cap
+ * (AMBUILD-ASTRA-03, AMBUILD-SOL-005): the last frame's end, every
+ * BlockDuration and every invisible block, and the sound's end. A Duration
+ * the timeline runs past says less than the file holds. One the timeline
+ * falls short of by more than a frame or 50 ms is an edited timeline, a
+ * gap the player would hold. Either way the facts would not say what plays.
+ * Since the two must agree, the Duration's cap holds the timeline to it too.
+ */
+function checkTimeline(t: { declaredNs: number; clusterNs: number; endNs: number; toleranceNs: number }): void {
+  if (t.declaredNs < t.clusterNs || t.declaredNs < t.endNs - t.toleranceNs) throw refuse("video_unfinished");
+  const declaredMs = Math.round(t.declaredNs / 1e6);
+  if (declaredMs < VIDEO_LIMITS.minDurationMs || declaredMs > VIDEO_LIMITS.maxDurationMs) throw refuse("video_length");
+  if (t.declaredNs > t.endNs + t.toleranceNs) throw refuse("video_layout");
 }
 
 async function seekHead(walk: Walk, el: El, seeks: SeekEntry[]): Promise<void> {

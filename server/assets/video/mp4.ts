@@ -321,10 +321,12 @@ function parseMoov(moov: Moov, box: Box, mdats: readonly Range[]): ParsedVideo {
     if (t.remaining !== null && Math.abs(t.seconds - t.remaining) > tolerance) throw refuse("video_layout");
   };
   covers(v);
+  trackDurations(video, v, movieTimescale, tolerance);
   let longest = videoSeconds;
   if (sound) {
     const s = timing(moov, sound, movieTimescale, VIDEO_LIMITS.parseSoundFrameHeaders, "bad_video");
     covers(s);
+    trackDurations(sound, s, movieTimescale, tolerance);
     if (s.seconds > videoSeconds + tolerance) throw refuse("video_layout");
     longest = Math.max(longest, s.seconds);
   }
@@ -757,18 +759,26 @@ export function insideMdat(mdats: readonly Range[], at: number, end: number): bo
   return found !== undefined && end <= found.end;
 }
 
+/** The most frames a decoder may hold back to present out of order: H.264's largest decoded picture buffer. */
+const MAX_REORDER_FRAMES = 16;
+
 /**
  * A track's sample times and presentation length. The length is the edit's
  * segment where an edit list plays the media, else the media's own, and
  * `remaining` is what the media holds from the edit's start, which the
- * caller checks the segment covers (AM-ASTRA-08).
+ * caller checks the segment covers (AM-ASTRA-08). A composition offset may
+ * present a sample later or earlier than it decodes, but by no more than a
+ * decoder can reorder, and never before the start (AMBUILD-ASTRA-03): so no
+ * frame shows outside the timeline the durations say.
  */
-function timing(moov: Moov, track: Track, movieTimescale: number, cap: number, code: "video_fps" | "bad_video"): { times: number[]; seconds: number; remaining: number | null } {
+function timing(moov: Moov, track: Track, movieTimescale: number, cap: number, code: "video_fps" | "bad_video"): { times: number[]; seconds: number; remaining: number | null; media: number; reorder: number } {
   const tally = new Tally(cap, code);
   const times: number[] = [];
   let dts = 0;
+  let longest = 0;
   for (const [count, delta] of track.stts!) {
     tally.add(count);
+    if (count > 0) longest = Math.max(longest, delta);
     for (let i = 0; i < count; i++) {
       if ((times.length & 1023) === 0) moov.budget.check();
       times.push(dts);
@@ -776,12 +786,15 @@ function timing(moov: Moov, track: Track, movieTimescale: number, cap: number, c
     }
   }
   if (!Number.isSafeInteger(dts) || times.length !== track.sizes!.length) throw refuse("bad_video");
+  const reorder = MAX_REORDER_FRAMES * longest;
   if (track.ctts) {
     let i = 0;
     for (const [count, offset] of track.ctts) {
+      if (Math.abs(offset) > reorder) throw refuse("video_layout");
       for (let k = 0; k < count; k++) {
         if (i >= times.length) throw refuse("bad_video");
         times[i] = times[i]! + offset;
+        if (times[i]! < 0) throw refuse("video_layout");
         i++;
       }
     }
@@ -790,8 +803,25 @@ function timing(moov: Moov, track: Track, movieTimescale: number, cap: number, c
   const scale = track.timescale!;
   const media = dts / scale;
   const edit = track.edit;
-  if (!edit) return { times, seconds: media, remaining: null };
-  return { times, seconds: edit.segment / movieTimescale, remaining: (dts - edit.mediaTime) / scale };
+  if (!edit) return { times, seconds: media, remaining: null, media, reorder };
+  return { times, seconds: edit.segment / movieTimescale, remaining: (dts - edit.mediaTime) / scale, media, reorder };
+}
+
+/**
+ * A track's own durations against its samples (AMBUILD-ASTRA-03): `mdhd`'s
+ * against the media, `tkhd`'s against what it presents, and `cslg`'s
+ * bounds inside the media's composition times. A player that read either
+ * duration would otherwise show a length the facts do not.
+ */
+function trackDurations(track: Track, t: { seconds: number; media: number; reorder: number }, movieTimescale: number, tolerance: number): void {
+  const scale = track.timescale!;
+  if (Math.abs(track.mdhdDuration! / scale - t.media) > tolerance) throw refuse("video_layout");
+  if (Math.abs(track.tkhdDuration! / movieTimescale - t.seconds) > tolerance) throw refuse("video_layout");
+  const c = track.cslg;
+  if (c) {
+    const bound = t.media * scale + t.reorder;
+    if ([c.shift, c.least, c.greatest, c.start, c.end].some((v) => Math.abs(v) > bound)) throw refuse("bad_video");
+  }
 }
 
 function sampleDescription(moov: Moov, stsd: Box, track: Track): void {

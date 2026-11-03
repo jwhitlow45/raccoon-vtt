@@ -378,7 +378,7 @@ describe("the sound's length (AMR-3, AMQ-5, AM-ASTRA-28, AM-ASTRA-31)", () => {
     // The last 20 ms block starts at 2060 ms and ends at 2073.5 ms once the delay is taken off: 72.5 ms past.
     await refused(webmFile({ frameMs: frames, durationMs: 2100, sound: { blocks: soundBlocks(2080) } }), "video_layout");
     // Here it starts at 2020 ms and ends 32.5 ms past.
-    await checkVideoBytes(webmFile({ frameMs: frames, durationMs: 2100, sound: { blocks: soundBlocks(2040) } }));
+    await checkVideoBytes(webmFile({ frameMs: frames, durationMs: 2034, sound: { blocks: soundBlocks(2040) } }));
     assert.equal(videoEnd, 2001);
   });
 
@@ -393,7 +393,7 @@ describe("the sound's length (AMR-3, AMQ-5, AM-ASTRA-28, AM-ASTRA-31)", () => {
   test("a code 3 packet's frame count byte gives its length", async () => {
     // Code 3 holding 6 frames of 20 ms is 120 ms, the most a packet may hold. The last Cluster starts at 1000 ms.
     const ending = (relative: number) =>
-      tree({ frameMs: frames, durationMs: 2200, sound: { blocks: [{ ms: 0 }] } }, (t) => {
+      tree({ frameMs: frames, durationMs: 2050, sound: { blocks: [{ ms: 0 }] } }, (t) => {
         const head = Buffer.alloc(3);
         head.writeInt16BE(relative, 1);
         allEbml(segmentOf(t), I.Cluster).at(-1)!.kids!.push(bin(I.SimpleBlock, Buffer.from([0x82, head[1]!, head[2]!, 0x80, OPUS_20MS | 3, 0x06, 0, 0])));
@@ -418,7 +418,7 @@ describe("the sound's length (AMR-3, AMQ-5, AM-ASTRA-28, AM-ASTRA-31)", () => {
       cluster.kids!.push(el(I.BlockGroup, block(2, startMs - ts, 0, Buffer.from([OPUS_20MS, 1, 2, 3])), sint(I.DiscardPadding, padding * 1e6)));
     };
     // A 20 ms packet starting at 2050 ms ends at 2070 - 6.5, 62.5 ms past the picture.
-    const base = { frameMs: frames, durationMs: 2100, sound: { blocks: soundBlocks(2000) } };
+    const base = { frameMs: frames, durationMs: 2060, sound: { blocks: soundBlocks(2000) } };
     await refused(tree(base, tail(0, 2050)), "video_layout");
     await checkVideoBytes(tree(base, tail(15, 2050)));
     await refused(tree(base, tail(-15, 2050)), "video_layout");
@@ -543,5 +543,46 @@ describe("every kept value is read, checked and kept once (AMBUILD-ASTRA-02, AMB
     await checkVideoBytes(tree({}, refs(-33, 33)));
     await refused(tree({}, refs(-33, -66, 33)), "bad_video");
     await refused(tree({}, refs(2 ** 40)), "bad_video");
+  });
+});
+
+describe("the timeline must be the one the Duration says (AMBUILD-ASTRA-03, AMBUILD-SOL-005)", () => {
+  test("frames running past a short Duration in one Cluster are refused, and at their real length past the cap too", async () => {
+    // Seconds as ticks, so 602 frames a second apart fit one Cluster's relative times.
+    const frameMs = Array.from({ length: 602 }, (_, i) => i * 1000);
+    await refused(webmFile({ scale: 1e9, frameMs, clusterMs: 1e9, durationMs: 1000 }), "video_unfinished");
+    await refused(webmFile({ scale: 1e9, frameMs, clusterMs: 1e9 }), "video_length");
+    // The reviewers' pair: frames at 0 and 610 s, said to last a second.
+    await refused(webmFile({ scale: 1e8, frameMs: [0, 610_000], clusterMs: 1e9, durationMs: 1000 }), "video_unfinished");
+  });
+
+  test("an invisible block or a frame's BlockDuration past the Duration is refused", async () => {
+    await refused(tree({}, (t) => findEbml(segmentOf(t), I.Cluster).kids!.push({ id: I.SimpleBlock, data: Buffer.from([0x81, 0x75, 0x30, 0x08, 0x86, 0]) })), "video_unfinished");
+    await refused(
+      tree({}, (t) => allEbml(segmentOf(t), I.Cluster).at(-1)!.kids!.push(el(I.BlockGroup, block(1, 980, 0, Buffer.from([0x86, 0])), uint(I.BlockDuration, 20_000)))),
+      "video_unfinished",
+    );
+  });
+
+  test("a Duration longer than the timeline by more than a frame is an edited timeline", async () => {
+    await refused(webmFile({ durationMs: 5000 }), "video_layout");
+    await checkVideoBytes(webmFile({ durationMs: 2040 }));
+  });
+
+  test("a block before the file's start is refused", async () => {
+    await refused(
+      tree({}, (t) => {
+        const b = findEbml(segmentOf(t), I.Cluster, I.SimpleBlock);
+        b.data = Buffer.from(b.data!);
+        b.data.writeInt16BE(-5, 1);
+      }),
+      "bad_video",
+    );
+  });
+
+  test("a variable rate's last long frame counts in full", async () => {
+    // 1 s at 30 fps, then frames 500 ms apart, the Duration counting the last one's 500 ms.
+    const frameMs = [...Array.from({ length: 30 }, (_, i) => Math.round((i * 1000) / 30)), 1000, 1500, 2000];
+    await checkVideoBytes(webmFile({ frameMs, durationMs: 2500 }));
   });
 });
