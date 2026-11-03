@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { MARK_RING } from "../lib/memberColor.ts";
 import { BOARD_SCOPE, boardTheme, ON_BOARD, ON_BOARD_STYLE, theme } from "../lib/theme.ts";
 
 /*
@@ -50,8 +51,6 @@ export const MAP_FOCUS_STYLE = { position: "absolute", inset: 0, pointerEvents: 
 export function memberDotStyle(color: string, size: number): CSSProperties {
   return { flex: "none", width: size, height: size, borderRadius: theme.radius.round, background: color, boxShadow: MARK_RING };
 }
-
-const MARK_RING = `inset 0 0 0 ${theme.line.border}px ${theme.color.markRing}`;
 
 /**
  * The scene gate (D-261102-364): black, not the page's ground, so a

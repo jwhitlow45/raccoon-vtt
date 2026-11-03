@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import { accentFor, contrast, mix } from "../lib/accent.ts";
+import { MARK_RING } from "../lib/memberColor.ts";
 import { BOARD_SCOPE, boardTheme, MEMBER_COLORS, ON_BOARD, ON_BOARD_STYLE, PALETTES, SCHEMES, theme } from "../lib/theme.ts";
 import { MAP_FOCUS_ATTRS, MAP_FOCUS_STYLE, MAP_GROUND, memberDotStyle, SCENE_GATE_STYLE, toolGround, toolOnBoard } from "./onBoard.ts";
 
@@ -85,6 +86,11 @@ describe("the chip's member dot", () => {
     assert.equal(style.width, 8);
     assert.equal(style.height, 8);
     assert.equal(style.boxShadow, `inset 0 0 0 1px ${theme.color.markRing}`);
+    // The ring every member mark wears, from lib/memberColor.ts, so the chip's dot cannot drift from the rest.
+    assert.equal(style.boxShadow, MARK_RING);
+    const onBoard = readFileSync(new URL("./onBoard.ts", import.meta.url), "utf8");
+    assert.match(onBoard, /import \{ MARK_RING \} from "\.\.\/lib\/memberColor\.ts";/);
+    assert.doesNotMatch(onBoard, /const MARK_RING\b/);
     assert.match(room, /function ChipDot\(props: \{ color: string \}\) \{\n\s*return <span aria-hidden style=\{memberDotStyle\(props\.color, 8\)\} \/>;/);
   });
 
