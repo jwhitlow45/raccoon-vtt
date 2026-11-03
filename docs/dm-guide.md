@@ -23,6 +23,7 @@ The app does a lot, and you don't need most of it on day one. Read the [Quick st
   - [The isometric view](#the-isometric-view)
   - [Difficult ground](#difficult-ground)
   - [Light and party vision](#light-and-party-vision)
+  - [Weather](#weather)
   - [Fog](#fog)
   - [Map phases, imports and exports](#map-phases-imports-and-exports)
 - Running fights
@@ -538,6 +539,31 @@ Under the list, **Who lends sight** shows each creature with its senses and ligh
 - **The rules everyone shares use only what everyone can see.** A creature that only some players can see counts as unseen for the rules that must give every player the same answer. A horse you control that a character rides shares no turn with its rider unless every player can see it, a trap your monster sets off goes off without the players noticing, and the corners of its path stay hidden. When that matters, make the creature always visible, or mark it to share its sight. What players see points it out for a mount. Ground counts the same way: a stopping trap that a character walks into on ground only their own player sees stops them as it would in the dark (see [When a trap goes off](#when-a-trap-goes-off)), so light or reveal a trap for everyone when its stop matters.
 - **Paths follow each player's own map.** When a player drags their own token, the path finds its way over the ground that player remembers, and past creatures only they can see. Other players see the corners of that path only where they know the ground too. A trap it sets off goes off for everyone, as it does whenever a party member walks into one.
 - **Places go by who came first.** As **Who sees for themselves** describes, the 6 places go by the order in which players first owned a creature that could see there, and then by your ticks, never by what anyone has explored. A player who doesn't get a place learns only that the places are taken.
+
+## Weather
+
+A scene can have weather: rain, snow, fog, falling leaves, ash or blowing sand, drawn over the map for everyone on that scene. It sets a mood, and for a few kinds it also changes how some rolls go. It never changes what anyone can see. Sight, fog and light work just as they did, so a heavy storm will not hide the map from your players, and anything you want hidden still needs the fog tool.
+
+You set it in the scene's settings, in a fold named **Weather** inside **What players see**, right after the light. Folded, it tells you how things stand ("Clear", or "Heavy rain · Strong wind"). It opens by itself on a scene that has weather. Every change reaches your players at once.
+
+![The Weather fold open: Rain at its Heavy strength, a Strong wind blowing toward the left, the compass of eight directions, the Weather rules on rolls switch on, and the line that says what the rules do.](dm-guide/weather-settings.webp)
+
+- **Weather** is Clear, Rain, Snow, Fog, Falling leaves, Ash or Sand. **Strength** picks a light or a heavy version: Light or Heavy for most, **Patchy** or **Heavy** for fog, and **Blowing** or **Sandstorm** for sand.
+- **Wind** is Calm, Moderate or Strong, and a wind can blow on a clear day with no weather at all. Pick Clear with a wind for a breezy afternoon. Clear with Calm is simply no weather.
+- **Blows toward** appears once there is a wind. The eight buttons are a compass around a small square that stands for the map, and the arrow on each points the way the wind goes, as Top-down shows the map's edges. A wind starts out blowing toward the bottom right.
+- Strong wind disperses fog, so a strong wind and fog do not go together. If you pick Fog while the wind is Strong, the app lowers it to Moderate and tells you why under Wind. In the same way, a sandstorm is a strong wind, so picking Sandstorm raises the wind to Strong.
+
+**What it does to rolls.** The rules in the SRD give a few clear effects, and the app applies the ones that need no judgment from you:
+
+- Heavy rain, heavy snow and a sandstorm give Disadvantage on Wisdom (Perception) checks. A creature's roll option shows it ("Dis: Heavy rain"), the roller can change it as they can for a condition, and a roll request's card lists it.
+- Strong wind gives Disadvantage on an attack the app knows is made with a ranged weapon, such as a Shortbow or a character's Longbow. A thrown weapon, or a ranged attack the app cannot tell is a weapon (a spell-like Force Bolt, say), only gets a reminder, so you decide.
+- Patchy fog and heavy fog only remind. Seeing through fog depends on what a creature is trying to see, which is a call for you.
+
+Only creatures whose token stands on that scene are in its weather. A character with no token there rolls as usual. When the party is indoors on a stormy scene, turn off **Weather rules on rolls**: the weather still shows, and rolls ignore it.
+
+Weather is a look and a mood of the moment, so the settings that copy a scene's rules to other scenes ("Like" a scene, and [Using one scene's settings on others](#using-one-scenes-settings-on-others)) leave it alone, a new scene starts clear, and **Duplicate** keeps it. A change of weather is a step in Play history, so Undo puts the old weather back.
+
+**On each device.** Weather moves by default, which uses some battery. In **Menu**, **This device**, **Weather on the map** is **Moving**, **Still** or **Off**, and the table display's menu has the same three for the display alone. Off only hides the look, and rolls still follow the weather. A phone set to reduce motion, or in Low power, keeps weather still. A device that cannot keep up halves the weather, then holds it still until the page reloads, and says so in the same place. While you use the Builder, Fog, Line up grid or Traps tool, weather stays out of the way on your own device and comes back with the next tool. Players hear a short line from a screen reader when the weather of their scene changes, such as "Weather here: Heavy rain."
 
 ## Fog
 

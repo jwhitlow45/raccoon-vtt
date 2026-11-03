@@ -312,6 +312,25 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
   - The DM's reveals, hides and Fog all apply to every player's map. Switching to Whole party pools every player's map into the party's, and it stays pooled when the scene goes back to Per player. A map phase or a light change keeps the choice.
   - A door is open or closed for everyone at once. A door a party member opens or closes shows its new state on that player's map and on the party's shared map. Another player who sees for themselves, where their own map remembers the door, keeps its old state until one of their creatures sees it. A door the DM changes shows the change on a player's map only once one of their creatures sees the door. A player's map shows no door they never explored.
 
+## Weather
+
+A scene can have weather over its map: rain, snow, fog, falling leaves, ash or sand, each light or heavy, with a wind that blows toward one of eight directions. It is a look first. It never changes what anyone can see, because sight, fog and light work as they do without it.
+
+- **The DM sets it** in the scene's settings, What players see, in the **Weather** fold after the light rows. The fold names the weather when folded ("Clear", "Heavy rain · Strong wind"), opens on a scene that has weather and is folded on a clear one, and the folded What players see group names the weather too.
+  - **Weather** picks Clear, Rain, Snow, Fog, Falling leaves, Ash or Sand. **Strength** is Light and Heavy, Patchy and Heavy for fog, or Blowing and Sandstorm for sand. **Wind** is Calm, Moderate or Strong, and a wind can blow on a clear day.
+  - **Blows toward** is a compass of eight buttons around a small square that stands for the map, turned as Top-down shows the map's edges. A wind starts toward the bottom right.
+  - Strong wind disperses fog, so Fog refuses a Strong wind (picking Fog in a Strong wind lowers it to Moderate and says so). A sandstorm is a strong wind, so Sandstorm needs it (picking Sandstorm raises the wind to Strong).
+  - **Weather rules on rolls** is on at first. Turn it off where the party is indoors: the weather still shows, and rolls ignore it.
+  - Every change applies at once, is one step in Play history ("changing the weather of the scene Forest road") and can be undone. Co-DMs have the same fold, and players have no control. Duplicating a scene copies its weather. "Use these settings on other scenes" and "Like" do not, and a new scene starts clear.
+- **Players see it** on the scene they are on, drawn over the ground and under every token's name, chips and HP bar in Top-down, and in the air in front of the ground and standees in Isometric. A screen reader hears "Weather here: Heavy rain, Strong wind." in the polite status when they arrive on a scene with weather or its weather changes, and "The weather here is clear now." when it clears. The DM's device, View as a player and the table display draw it too.
+- **Rolls follow the SRD's rules** where they need no judgment, for creatures whose token stands on the weathered scene (a character with no token there is not in it):
+  - Heavy rain, heavy snow and a sandstorm give Disadvantage on Wisdom (Perception) checks, named for the weather on the roll's option and in its reading. The roller can change it as with a condition's.
+  - Strong wind gives Disadvantage on an attack the app knows is made with a ranged weapon: a stat block's bow, crossbow or sling, or a character's. Any other ranged or thrown attack gets a note, "Strong wind: Disadvantage on ranged attack rolls with weapons.", and no preset. Melee attacks, spell attacks and the bare d20 get nothing.
+  - Patchy fog and heavy fog remind on Perception checks (heavy fog on attack rolls too) and never preset, since "that rely on sight" and "trying to see something" need a call only the table can make.
+  - The rules and the notes are the SRD 5.2.1's words (Environmental Effects, Obscured Areas), and a request's card lists them with the creature's conditions.
+- **Each device chooses how it looks** in This device, Weather (below), and the table display's menu has the same three choices. The drawing is made in code, with no image files, and stops whenever nobody can see it.
+- While the DM uses the Builder, Fog, Line up grid or Traps tool, weather hides on the DM's device, and comes back with the next tool.
+
 ## Areas of effect
 
 - Shapes: Sphere, Cylinder, Cone, Cube, Line and Emanation.
@@ -554,7 +573,7 @@ Show the players' view of the map on a TV at the table, with nothing else on scr
 - The display shows the players' scene as players see it: the map, the fog, party vision (on a scene where each player sees for themselves, only what creatures that share sight see), tokens, shared areas, drawings, pins (except those linked to a page not every player can read), and pings and rulers. It shows no bars, panels, chat or log, roll requests or Initiative strip, and the room sends it no log lines at all.
 - It also shows the pause screen during a blackout, handouts shown to everyone, the X-card, and "Waiting for the DM to choose a scene" when there is none.
 - A handout of several pages shows one page at a time, with its page number. The arrow and page keys step through it, and a tap shows Previous page, Next page and Close.
-- A tap, a click or any key shows a menu for 5 seconds: Follow the DM, Fit the map, "Show whose turn it is" (off at first), Text size (85% to 130% for the names, chips and badges on the map), View (Follow the scene, Top-down or Isometric, and Turn left and Turn right in Isometric), Full screen, and Leave. The display remembers these choices, its view apart from a member's in the same browser. While the X-card or a one-page handout is open, a tap closes it instead.
+- A tap, a click or any key shows a menu for 5 seconds: Follow the DM, Fit the map, "Show whose turn it is" (off at first), Text size (85% to 130% for the names, chips and badges on the map), Weather (Moving, Still or Off, for this display only), View (Follow the scene, Top-down or Isometric, and Turn left and Turn right in Isometric), Full screen, and Leave. The display remembers these choices, its view apart from a member's in the same browser. While the X-card or a one-page handout is open, a tap closes it instead.
 - Full screen works on the display as in the room: in Chrome and Edge, Escape still closes the menu or a handout, and holding Escape leaves full screen.
 - **Follow the DM** shows the part of the map a DM device shows, scaled to the TV, in whichever view the display shows. A DM in Isometric is followed by the ground under their view, raised ground included. Turn on "Show my view on the table display" on that DM device. It follows only while the DM views the players' scene. Follow me, Bring everyone here and Look here move it too.
 - **Fit the map** fits what players can see, the revealed ground and the party's tokens, and fits again when a reveal adds more.
@@ -578,7 +597,8 @@ Menu, This device holds settings kept on this device alone:
 
 - **Interface size**: 85%, 100%, 115% or 130%. It scales the bars, the panels, the names and marks on tokens, and the readings of rulers and drags on the map, and dialogs and panels still fit the screen at every size. The map keeps its own zoom.
 - **Full screen**: the room fills the whole screen, where the browser allows it. The switch is not there on an iPhone.
-- **Low power**: draws the map at a lower resolution, loads the phone size map, skips small animations, and shows rolls without dice, to save battery on long sessions. Text on the map looks softer.
+- **Low power**: draws the map at a lower resolution, loads the phone size map, skips small animations, keeps weather still and shows rolls without dice, to save battery on long sessions. Text on the map looks softer.
+- **Weather**: Moving (rain falls, snow drifts and fog rolls, using more battery), Still (shows the weather without moving it) or Off (no weather on this device, though rolls still follow it). Moving at first. Reduced motion and Low power keep it still, and a device that cannot keep up halves the particles, then holds them still until the page reloads, and says so here.
 - **Map detail**: Phone size (up to 4096 pixels across, loads faster) or Full size (sharper on a large screen).
 - **Turn sound** and **Ping sound**.
 - **Show others' rolls as they happen**: a toast for each roll someone else makes while the Dice panel is not on screen. On at first.

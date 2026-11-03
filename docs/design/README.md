@@ -160,3 +160,6 @@ and for how to use it, the [DM guide](../dm-guide.md).
 - [design-v1-look-pass-1.md](design-v1-look-pass-1.md): locked controls that
   look locked, roll menus that fit a small screen, toasts kept clear of an
   open sheet, and long damage formulas that break between terms.
+- [design-v1-weather.md](design-v1-weather.md): weather over the map, one per
+  scene, with a wind, the SRD's roll rules where they need no judgment, and
+  each device's choice of how it looks.
