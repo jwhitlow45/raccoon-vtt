@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import fc from "fast-check";
 import { SQUARES, type Grid } from "#shared/rules/grid.ts";
-import { actionsName, drawnAt, footprint, rulesOutline, rulesSpot, snapPosition } from "./scene.ts";
+import { actionsName, dragAim, drawnAt, footprint, rulesOutline, rulesSpot, snapPosition } from "./scene.ts";
 
 const HEX: Grid = { shape: "hex", orient: "rows" };
 
@@ -47,12 +47,40 @@ describe("drawn and rules spots (snap-off 6.1)", () => {
 });
 
 describe("the rules outline (snap-off section 4)", () => {
-  test("a nudged token's rules box from its drawn top-left, and none unnudged or on hexes", () => {
-    assert.deepEqual(rulesOutline(SQUARES, { size: "medium", x: 3, y: 3, nudge: { x: 3, y: -3 } }), { x: -0.375, y: 0.375, w: 1, h: 1 });
-    assert.deepEqual(rulesOutline(SQUARES, { size: "large", x: 2, y: 6, nudge: { x: -1, y: 2 } }), { x: 0.125, y: -0.25, w: 2, h: 2 });
+  test("a nudged token's rules box on the board, and none unnudged or on hexes", () => {
+    assert.deepEqual(rulesOutline(SQUARES, { size: "medium", x: 3, y: 3, nudge: { x: 3, y: -3 } }), { x: 3, y: 3, w: 1, h: 1 });
+    assert.deepEqual(rulesOutline(SQUARES, { size: "large", x: 2, y: 6, nudge: { x: -1, y: 2 } }), { x: 2, y: 6, w: 2, h: 2 });
     assert.equal(rulesOutline(SQUARES, { size: "medium", x: 3, y: 3 }), null);
     assert.equal(rulesOutline(HEX, { size: "medium", x: 3, y: 3, nudge: { x: 1, y: 0 } }), null);
   });
+});
+
+describe("the rules outline mid-drag (SNAPBUILD-ASTRA-03)", () => {
+  /*
+   * Stored at x=3 nudged 3/8 right, the node dragged to fractional points:
+   * the outline stands on the box the drop aims at, ordinary or free, never
+   * at the node less the nudge.
+   */
+  const placed = { size: "medium" as const, x: 3, y: 3, nudge: { x: 3, y: 0 } };
+  const live = (at: { x: number; y: number }, free: boolean) => {
+    const aim = dragAim(placed, at, free);
+    return rulesOutline(SQUARES, placed, snapPosition(SQUARES, aim.x, aim.y, footprint(placed)));
+  };
+  for (const [at, ordinary, free] of [
+    [{ x: 3.625, y: 3 }, 3, 4],
+    [{ x: 3.86, y: 3.2 }, 3, 4],
+    [{ x: 4.3, y: 2.6 }, 4, 4],
+    [{ x: 5.13, y: 3.45 }, 5, 5],
+    [{ x: 5.4, y: 3.3 }, 5, 5],
+    [{ x: 2.6, y: 3.49 }, 2, 3],
+  ] as const) {
+    test(`the node at (${at.x}, ${at.y}): box ${ordinary} for an ordinary drag, ${free} for a free one`, () => {
+      const rowOf = (y: number) => Math.round(y);
+      assert.deepEqual(live(at, false), { x: ordinary, y: rowOf(at.y), w: 1, h: 1 });
+      assert.deepEqual(live(at, true), { x: free, y: rowOf(at.y), w: 1, h: 1 });
+      for (const box of [live(at, false)!, live(at, true)!]) assert.ok(Number.isInteger(box.x) && Number.isInteger(box.y), "on the grid, not under the pointer");
+    });
+  }
 });
 
 describe("a token's accessible name (snap-off section 4)", () => {

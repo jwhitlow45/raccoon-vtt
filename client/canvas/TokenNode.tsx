@@ -1,6 +1,7 @@
 import type Konva from "konva";
 import { createContext, memo, useContext, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
 import { Arc, Circle, Ellipse, Group, Image as KImage, Line, Rect, Shape, Text } from "react-konva";
+import { useStore } from "zustand";
 import { liftInPlane, pressRects, type PressCell } from "./isoPlace.ts";
 import type { Actor, Effect, GridShape } from "#shared/model.ts";
 import { shownLife } from "#shared/rules/hp.ts";
@@ -12,6 +13,8 @@ import { gridOfShape } from "#shared/rules/grid.ts";
 import { boardTheme, theme } from "../lib/theme.ts";
 import { BOARD_DISPOSITION_RING, cropSourceRect, DECOR_MIN_PX, effectChip, effectCount, initials, type Chip } from "../lib/tokenView.ts";
 import { useAccent } from "../state/accent.ts";
+import { localDragSlot } from "../state/localDrags.ts";
+import { useScoped } from "../state/scope.ts";
 import { addsToSelection } from "../state/selection.ts";
 import { useAssets, useRoomView } from "../state/view.ts";
 import { useChipIcon } from "./chipIcons.ts";
@@ -28,6 +31,7 @@ import { COVER_INSET, pressBoxes, type CellBox } from "../features/attach/groups
 import { groundGroups, type Turn } from "../lib/view.ts";
 import { pitSweep } from "./relief/drawRelief.ts";
 import { standeeParts } from "./relief/standee.ts";
+import { useTreeShown } from "./relief/context.ts";
 import { CAUGHT_RING } from "../features/areas/TemplateLayer.tsx";
 
 /** How the canvas wants to hear about taps, menus, drags and the mouse over tokens. */
@@ -141,6 +145,7 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
   // The node sits where the token is drawn, its stored spot moved by its nudge (snap-off 6.2), so its picture, decor and hit area move together.
   const at = drawnAt(gridOfShape(gridShape), token);
   const rules = useRulesOutline(props.rulesOutline === true, gridShape, token);
+  const ground = iso ? liftInPlane(iso.turn, iso.ground) : null;
   /*
    * A drag moves the node by hand, and a drop puts it where the plan lands
    * it (Stage.tsx landDrop). react-konva then sets only the coordinates
@@ -158,82 +163,102 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
   }, [at.x, at.y]);
 
   return (
-    <Group
-      ref={groupRef}
-      id={token.id}
-      name="token"
-      x={at.x}
-      y={at.y}
-      draggable={draggable}
-      opacity={iso?.dim ? theme.relief.hiddenOpacity : token.visibility === "dm" ? 0.5 : 1}
-      clipFunc={iso && iso.pits.length > 0 ? (ctx) => clipToOpenings(ctx, iso, token) : undefined}
-      onPointerClick={(e) => interaction?.select(token.id, addsToSelection(e.evt, APPLE))}
-      onMouseEnter={() => interaction?.hover(token.id)}
-      onMouseLeave={() => interaction?.hover(null)}
-      onContextMenu={(e) => {
-        e.evt.preventDefault();
-        interaction?.menu(token.id);
-      }}
-      onDragStart={(e) => interaction?.dragStart(e.target, token)}
-      onDragMove={(e) => interaction?.dragMove(e.target, token)}
-      onDragEnd={(e) => interaction?.dragEnd(e.target, token)}
-    >
-      {iso ? (
-        iso.pressOnly ? (
-          // Each piece where the ground stage lays that part of its picture, and its decor on the highest drawn ground under it (5.2).
+    <>
+      <Group
+        ref={groupRef}
+        id={token.id}
+        name="token"
+        x={at.x}
+        y={at.y}
+        draggable={draggable}
+        opacity={iso?.dim ? theme.relief.hiddenOpacity : token.visibility === "dm" ? 0.5 : 1}
+        clipFunc={iso && iso.pits.length > 0 ? (ctx) => clipToOpenings(ctx, iso, token) : undefined}
+        onPointerClick={(e) => interaction?.select(token.id, addsToSelection(e.evt, APPLE))}
+        onMouseEnter={() => interaction?.hover(token.id)}
+        onMouseLeave={() => interaction?.hover(null)}
+        onContextMenu={(e) => {
+          e.evt.preventDefault();
+          interaction?.menu(token.id);
+        }}
+        onDragStart={(e) => interaction?.dragStart(e.target, token)}
+        onDragMove={(e) => interaction?.dragMove(e.target, token)}
+        onDragEnd={(e) => interaction?.dragEnd(e.target, token)}
+      >
+        {iso ? (
+          iso.pressOnly ? (
+            // Each piece where the ground stage lays that part of its picture, and its decor on the highest drawn ground under it (5.2).
+            <>
+              <FootprintPress rects={pressRects(iso.turn, iso.press)} />
+              <Group {...liftInPlane(iso.turn, iso.ground)}>
+                {props.decor ? <DecorParts token={token} effects={actor?.effects ?? []} scale={scale} text={props.text} lockMark={props.lockMark} part="all" /> : null}
+              </Group>
+            </>
+          ) : (
+            <Standee
+              token={token}
+              actor={actor}
+              w={fp.w}
+              h={fp.h}
+              scale={scale}
+              name={name}
+              active={active}
+              selected={selected}
+              hexes={hexes}
+              iso={iso}
+              decor={props.decor ? <DecorParts token={token} effects={actor?.effects ?? []} scale={scale} text={props.text} lockMark={props.lockMark} part="all" /> : null}
+            />
+          )
+        ) : props.inset ? (
           <>
-            <FootprintPress rects={pressRects(iso.turn, iso.press)} />
-            <Group {...liftInPlane(iso.turn, iso.ground)}>
-              {props.decor ? <DecorParts token={token} effects={actor?.effects ?? []} scale={scale} text={props.text} lockMark={props.lockMark} part="all" /> : null}
+            <Group x={(fp.w * (1 - COVER_INSET)) / 2} y={(fp.h * (1 - COVER_INSET)) / 2} scaleX={COVER_INSET} scaleY={COVER_INSET} listening={!holes}>
+              <TokenFace token={token} actor={actor} w={fp.w} h={fp.h} scale={scale * COVER_INSET} name={name} active={active} selected={selected} />
             </Group>
+            {holes ? <PressArea w={fp.w} h={fp.h} inset holes={holes} /> : null}
+          </>
+        ) : holes ? (
+          <>
+            <Group listening={false}>
+              <TokenFace token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} name={name} active={active} selected={selected} hexes={hexes} />
+            </Group>
+            <PressArea w={fp.w} h={fp.h} inset={false} holes={holes} />
           </>
         ) : (
-          <Standee
-            token={token}
-            actor={actor}
-            w={fp.w}
-            h={fp.h}
-            scale={scale}
-            name={name}
-            active={active}
-            selected={selected}
-            hexes={hexes}
-            iso={iso}
-            decor={props.decor ? <DecorParts token={token} effects={actor?.effects ?? []} scale={scale} text={props.text} lockMark={props.lockMark} part="all" /> : null}
-          />
-        )
-      ) : props.inset ? (
-        <>
-          <Group x={(fp.w * (1 - COVER_INSET)) / 2} y={(fp.h * (1 - COVER_INSET)) / 2} scaleX={COVER_INSET} scaleY={COVER_INSET} listening={!holes}>
-            <TokenFace token={token} actor={actor} w={fp.w} h={fp.h} scale={scale * COVER_INSET} name={name} active={active} selected={selected} />
-          </Group>
-          {holes ? <PressArea w={fp.w} h={fp.h} inset holes={holes} /> : null}
-        </>
-      ) : holes ? (
-        <>
-          <Group listening={false}>
-            <TokenFace token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} name={name} active={active} selected={selected} hexes={hexes} />
-          </Group>
-          <PressArea w={fp.w} h={fp.h} inset={false} holes={holes} />
-        </>
-      ) : (
-        <TokenFace token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} name={name} active={active} selected={selected} hexes={hexes} />
-      )}
-      {rules ? <RulesOutline box={rules} scale={scale} ground={iso ? liftInPlane(iso.turn, iso.ground) : null} /> : null}
-      {props.decor && !iso ? <DecorParts token={token} effects={actor?.effects ?? []} scale={scale} text={props.text} lockMark={props.lockMark} part="all" /> : null}
-    </Group>
+          <TokenFace token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} name={name} active={active} selected={selected} hexes={hexes} />
+        )}
+        {props.decor && !iso ? <DecorParts token={token} effects={actor?.effects ?? []} scale={scale} text={props.text} lockMark={props.lockMark} part="all" /> : null}
+      </Group>
+      {/* Beside the node, never in it: a drag moves the node with the pointer, and the outline stays on the box the rules count (SNAPBUILD-ASTRA-03). */}
+      {rules ? <RulesOutline tokenId={token.id} box={rules} scale={scale} ground={ground} /> : null}
+    </>
   );
 });
 
-/** The rules box of a nudged token, from its drawn top-left, when asked for (scene.ts rulesOutline). */
+/**
+ * The rules box of a nudged token on the board, when asked for (scene.ts
+ * rulesOutline). While this device drags it, the box the drop would count
+ * it in, which the canvas writes as the token crosses into another box
+ * (state/localDrags.ts), so it re-renders per box crossed, not per frame.
+ */
 function useRulesOutline(shown: boolean, gridShape: GridShape | undefined, token: ViewToken): { x: number; y: number; w: number; h: number } | null {
   const { x, y, size, w, h, squeeze, nudge } = token;
   const nx = nudge?.x;
   const ny = nudge?.y;
+  const read = shown && nx !== undefined;
+  // In a hidden tree (relief/context.ts) a drag's box is never read.
+  const tree = useTreeShown();
+  const spot = useStore(useScoped(localDragSlot), (s) => (read && tree ? s.spots[token.id] : undefined));
+  const sx = spot?.x;
+  const sy = spot?.y;
   return useMemo(() => {
     if (!shown || nx === undefined || ny === undefined) return null;
-    return rulesOutline(gridOfShape(gridShape), { x, y, size, w, h, squeeze, nudge: { x: nx, y: ny } });
-  }, [shown, gridShape, x, y, size, w, h, squeeze, nx, ny]);
+    const live = sx !== undefined && sy !== undefined ? { x: sx, y: sy } : undefined;
+    return rulesOutline(gridOfShape(gridShape), { x, y, size, w, h, squeeze, nudge: { x: nx, y: ny } }, live);
+  }, [shown, gridShape, x, y, size, w, h, squeeze, nx, ny, sx, sy]);
+}
+
+/** The Konva id of a token's rules outline, beside its node. */
+export function rulesOutlineId(tokenId: string): string {
+  return `${tokenId}-rules`;
 }
 
 /**
@@ -242,12 +267,13 @@ function useRulesOutline(shown: boolean, gridShape: GridShape | undefined, token
  * view it lies on the drawn ground under the token (`ground`, the lift in
  * the ground plane), never on the standee's raised base.
  */
-function RulesOutline(props: { box: { x: number; y: number; w: number; h: number }; scale: number; ground: { x: number; y: number } | null }) {
+function RulesOutline(props: { tokenId: string; box: { x: number; y: number; w: number; h: number }; scale: number; ground: { x: number; y: number } | null }) {
   const { accent } = useAccent();
   const { box, scale } = props;
   const k = boardSizes(scale).ringPx / 3;
   return (
     <Rect
+      id={rulesOutlineId(props.tokenId)}
       name="rulesOutline"
       x={box.x + (props.ground?.x ?? 0)}
       y={box.y + (props.ground?.y ?? 0)}

@@ -105,15 +105,17 @@ export function frameAim(token: Pick<Token, "nudge">, frame: { x: number; y: num
 
 /**
  * The dashed outline of a nudged token's rules box (docs/design/design-v1-snap-off.md
- * section 4, "Where it counts"): the box every rule counts it in, from its
- * drawn top-left, in cells, the space of its node. Null for a token with no
- * nudge and on hexes, where the rules box is where it is drawn.
+ * section 4, "Where it counts"): the box every rule counts it in, on the
+ * board, in cells. While this device drags it, `spot` is where the drop
+ * would count it (state/localDrags.ts), so the outline stands on the grid
+ * apart from the art under the pointer (SNAPBUILD-ASTRA-03). Null for a
+ * token with no nudge and on hexes, where the rules box is where it is
+ * drawn.
  */
-export function rulesOutline(g: Grid, token: PlacedToken & Pick<Token, "nudge">): { x: number; y: number; w: number; h: number } | null {
+export function rulesOutline(g: Grid, token: PlacedToken & Pick<Token, "nudge">, spot?: { x: number; y: number }): { x: number; y: number; w: number; h: number } | null {
   if (!token.nudge || g.shape === "hex") return null;
-  const r = footprintRect(g, token);
-  const at = drawnAt(g, token);
-  return { x: r.x - at.x, y: r.y - at.y, w: r.w, h: r.h };
+  const r = footprintRect(g, spot ? { ...token, x: spot.x, y: spot.y } : token);
+  return { x: r.x, y: r.y, w: r.w, h: r.h };
 }
 
 /**

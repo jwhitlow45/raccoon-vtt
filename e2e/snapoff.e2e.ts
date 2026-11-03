@@ -134,7 +134,8 @@ async function nodeOf(page: Page, id: string): Promise<{ at: { x: number; y: num
       const node = main?.findOne(`#${tokenId}`);
       if (!main || !node) return null;
       const box = main.container().getBoundingClientRect();
-      const rule = node.findOne(".rulesOutline");
+      // The outline stands beside the node, so a drag moves the art and not the box (TokenNode.tsx rulesOutlineId).
+      const rule = main.findOne(`#${tokenId}-rules`);
       const r = rule && rule.isVisible() ? rule.getClientRect({ skipStroke: true }) : null;
       return { at: node.position(), outline: r ? { x: box.left + r.x, y: box.top + r.y, width: r.width, height: r.height } : null };
     },
@@ -301,21 +302,45 @@ describe("raccoon-vtt snap off", { timeout: 600_000 }, () => {
     await shots.take(dm, "so-dm-goblin-outline");
     await deselect(dm);
     await waitFor("no outline once nothing is selected", async () => ((await outlineOf(dm, run.goblin)) === null ? true : null), 5_000);
-    // An ordinary drag, parked mid-way: the outline stays on the box it counts in until the drop.
+    /*
+     * Parked mid-drag 1.3 squares right, the drawn top-left at x 12.55: the
+     * outline stands on the box the drop would count the goblin in, apart from
+     * the art under the pointer (SNAPBUILD-ASTRA-03). An ordinary drag aims
+     * from its rules spot, 12.3, at box 12. With Alt it aims at the box under
+     * the token as drawn, box 13. Each goes back and drops on its own box,
+     * which keeps the placement.
+     */
     const a = await pagePoint(dm, BOUNDS, { x: 11.5, y: 5.5 });
-    const b = await pagePoint(dm, BOUNDS, { x: 13.5, y: 5.5 });
-    await dm.mouse.move(a.x, a.y);
-    await dm.mouse.down();
-    await dm.mouse.move(b.x, b.y, { steps: 12 });
-    try {
-      const during = await waitFor("the outline while dragged", () => outlineOf(dm, run.goblin));
-      assert.ok(during.width > 0);
-    } finally {
-      await dm.mouse.move(a.x, a.y, { steps: 12 });
-      await dm.mouse.up();
+    const b = await pagePoint(dm, BOUNDS, { x: 12.8, y: 5.5 });
+    // Both drags run and take their pictures before a misplaced outline fails the step.
+    const misplaced: unknown[] = [];
+    for (const [alt, box, what] of [
+      [false, 12, "ordinary"],
+      [true, 13, "alt"],
+    ] as const) {
+      if (alt) await dm.keyboard.down("Alt");
+      try {
+        await dm.mouse.move(a.x, a.y);
+        await dm.mouse.down();
+        await dm.mouse.move(b.x, b.y, { steps: 12 });
+        try {
+          await waitFor(`the ${what} drag's node at 12.55`, async () => ((await nodeOf(dm, run.goblin))?.at.x ?? 0) > 12.5 ? true : null);
+          await shots.take(dm, `so-dm-goblin-outline-mid-${what}-drag`);
+          const during = await waitFor(`the outline while the ${what} drag is parked`, () => outlineOf(dm, run.goblin));
+          await assertOutlineOn(dm, during, { x: box, y: 5 }, 1, `mid ${what} drag`).catch((err: unknown) => misplaced.push(err));
+        } finally {
+          await dm.mouse.move(a.x, a.y, { steps: 12 });
+          await dm.mouse.up();
+        }
+      } finally {
+        if (alt) await dm.keyboard.up("Alt");
+      }
+      // Dropped back on its own box without leaving it by an eighth: the placement is kept.
+      await waitFor("the goblin still placed", () => (token(dmSocket, run.goblin)?.nudge ? true : null));
+      assert.deepEqual([token(dmSocket, run.goblin)?.x, token(dmSocket, run.goblin)?.nudge], [11, { x: 2, y: -2 }], `after the ${what} drag`);
+      await closeBars(dm);
     }
-    // Dropped back on its own box without leaving it by an eighth: the placement is kept.
-    await waitFor("the goblin still placed", () => (token(dmSocket, run.goblin)?.nudge ? true : null));
+    if (misplaced.length > 0) throw misplaced[0];
   });
 
   test("so-4. a ruler that starts on the goblin outlines its box on the DM's page", async () => {
