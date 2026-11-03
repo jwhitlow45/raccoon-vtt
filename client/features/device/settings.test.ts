@@ -165,3 +165,46 @@ test("a table display's weather lasts for its page and gives the device's own ba
   s.restoreWeatherMode();
   assert.equal(s.weatherMode(), "still");
 });
+
+/*
+ * The theme (docs/design/design-v1-light-theme.md 4.1): Dark until chosen,
+ * and a choice another window stores reaches this one through its
+ * `storage` event (lib/scheme.ts passes it to `adopt`).
+ */
+test("the theme is dark until chosen, a choice is kept, and an unknown stored one reads as dark", async () => {
+  reset({ writes: true, reads: true });
+  const s = await loadPage();
+  assert.equal(s.themeChoice(), "dark");
+  s.setThemeChoice("auto");
+  assert.equal(stored.get("rvtt.theme"), "auto");
+  assert.equal((await loadPage()).themeChoice(), "auto");
+  stored.set("rvtt.theme", "sepia");
+  assert.equal((await loadPage()).themeChoice(), "dark");
+});
+
+test("a choice another window stored is taken as this device's, unless the page holds one of its own until it lets go", async () => {
+  reset({ writes: true, reads: true });
+  const s = await loadPage();
+  let heard = 0;
+  s.subscribeThemeChoice(() => heard++);
+  s.themeChoiceSetting.adopt("light");
+  assert.equal(s.themeChoice(), "light");
+  assert.equal(heard, 1);
+  s.themeChoiceSetting.apply("dark");
+  s.themeChoiceSetting.adopt("auto");
+  assert.equal(s.themeChoice(), "dark", "the page's own value stays");
+  s.themeChoiceSetting.restore();
+  assert.equal(s.themeChoice(), "auto");
+  s.themeChoiceSetting.adopt("light");
+  assert.equal(s.themeChoice(), "light", "after restore, another window's choice shows again");
+});
+
+test("with writes failing, a choice another window stored still comes back when the page lets go", async () => {
+  reset({ writes: false, reads: true });
+  const s = await loadPage();
+  s.setThemeChoice("light");
+  s.themeChoiceSetting.apply("dark");
+  s.themeChoiceSetting.adopt("auto");
+  s.themeChoiceSetting.restore();
+  assert.equal(s.themeChoice(), "auto");
+});

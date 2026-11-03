@@ -200,6 +200,8 @@ describe("the member accent on a light page (docs/design/design-v1-light-theme.m
       assert.ok(luminanceOf(accentFor(color, "light").accent) < before, color);
       assert.ok(luminanceOf(accentFor(color, "dark").accent) > before, color);
     }
+    // A grey green beside the muted grey fits a step either way, and takes the darker step.
+    assert.equal(accentFor("#385446", "light").accent, "#334f41");
   });
 });
 
