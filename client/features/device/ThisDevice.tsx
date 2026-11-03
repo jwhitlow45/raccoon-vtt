@@ -14,6 +14,8 @@ import { useRoomScope } from "../../state/scope.ts";
 import { keySuffix, keyText, setShortcutSheet, useKeyHint, useShortcutKeys } from "../../state/shortcuts.ts";
 import { setSoundOn, useSoundOn } from "../encounter/alerts.ts";
 import { setSoundEnabled, usePingSound } from "../pings/feedback.ts";
+import { Slider } from "../scenes/controls.tsx";
+import { setRoomSound, useRoomSoundOn } from "../sound/engine/store.ts";
 import { diceLoader } from "../dice/throw/hooks.ts";
 import { useWeatherStillReason, WEATHER_CARDS } from "../weather/store.ts";
 import { useDeviceStillReason } from "../animmap/AnimMapController.tsx";
@@ -27,7 +29,9 @@ import {
   setRollAnimation,
   setRollToasts,
   setSheetHandle,
+  setSoundMix,
   setUiScale,
+  soundMix as soundMixNow,
   setThemeChoice,
   setWeatherMode,
   THEME_CHOICE_WORDS,
@@ -40,9 +44,11 @@ import {
   useRollAnimation,
   useRollToastsOn,
   useSheetHandle,
+  useSoundMix,
   useThemeChoice,
   useUiScale,
   useWeatherMode,
+  type SoundMix,
   type ThemeChoice,
   type UiScale,
 } from "./settings.ts";
@@ -170,6 +176,7 @@ export default function ThisDevice() {
         </div>
       </Section>
       <Section label="Sounds">
+        <RoomSoundControls />
         <Switch label="Turn sound" help="A short chime on your turn. Android phones also vibrate." checked={turnSound} onChange={setSoundOn} />
         <Switch
           label="Ping sound"
@@ -215,6 +222,48 @@ export default function ThisDevice() {
         <SheetHandlePreview id={handle} />
       </Section>
     </div>
+  );
+}
+
+/** Room sound's help (docs/design/design-v1-music.md 4.4). */
+export const ROOM_SOUND_HELP =
+  "Music, background sounds and effects the DM plays. At one table, play it from one device, such as the table display. Music uses about 60 MB of data an hour. On an iPhone it pauses music from other apps and plays with the ringer off.";
+
+const MIX_PARTS: readonly { key: keyof SoundMix; label: string }[] = [
+  { key: "music", label: "Music" },
+  { key: "loops", label: "Background" },
+  { key: "effects", label: "Effects" },
+];
+
+/**
+ * Room sound and, while it is on, this device's Music, Background and
+ * Effects (docs/design/design-v1-music.md 4.4): in This device's Sounds,
+ * and in the Sound panel's On this device. Turning it on is a tap that
+ * unlocks the audio. Each slider is 0 to 100%, squared into the gain.
+ */
+export function RoomSoundControls() {
+  const on = useRoomSoundOn();
+  const mix = useSoundMix();
+  return (
+    <>
+      <Switch label="Room sound" help={ROOM_SOUND_HELP} checked={on} onChange={setRoomSound} />
+      {on ? (
+        <div style={{ display: "grid", padding: `${theme.space(1)}px 0` }}>
+          {MIX_PARTS.map((part) => (
+            <Slider
+              key={part.key}
+              label={part.label}
+              value={mix[part.key]}
+              min={0}
+              max={100}
+              step={5}
+              format={(v) => `${v}%`}
+              onChange={(v) => setSoundMix({ ...soundMixNow(), [part.key]: v })}
+            />
+          ))}
+        </div>
+      ) : null}
+    </>
   );
 }
 

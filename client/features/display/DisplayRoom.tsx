@@ -39,6 +39,8 @@ import { choiceOf, choiceWords, isoOffered, pickOf, TURN_LEFT, TURN_LEFT_DESCRIP
 import { displayViewKey } from "../view/store.ts";
 import { SuggestionHelp, useViewChoice, useViewVoice, ViewVoice, type ViewChoiceState } from "../view/ViewMenu.tsx";
 import { useWeatherVoice } from "../weather/WeatherVoice.ts";
+import { SoundHost } from "../sound/engine/SoundHost.tsx";
+import { somethingToHear, useSoundHere } from "../sound/engine/store.ts";
 import {
   BAR_BUTTONS,
   barFirstFocus,
@@ -62,6 +64,7 @@ import {
 } from "./logic.ts";
 import {
   chooseDisplayAnimatedMaps,
+  chooseDisplaySound,
   chooseDisplayUiScale,
   chooseDisplayWeather,
   forgetDisplayRoom,
@@ -70,6 +73,7 @@ import {
   rememberedDisplayRoom,
   saveDisplayChoices,
   useDisplayAnimatedMaps,
+  useDisplaySound,
   useDisplayTextSize,
   useDisplayWeather,
 } from "./remember.ts";
@@ -134,6 +138,8 @@ function DisplayScreen(props: { roomId: string }) {
   return (
     <RoomScopeProvider scope={scope}>
       <DisplayTable roomId={props.roomId} />
+      {/* The room's sound, as a player who owns nothing hears it (docs/design/design-v1-music.md 4.5). */}
+      <SoundHost />
     </RoomScopeProvider>
   );
 }
@@ -281,6 +287,7 @@ function DisplayTable(props: { roomId: string }) {
       />
       {turn && gate.kind === "ready" ? <TurnPill text={turn} /> : null}
       <DisplayBanner state={connection} />
+      <DisplaySoundCard />
       {handout.current ? (
         paging.state ? (
           <HandoutPagesView key={showing} handout={handout.current} paging={paging} onTap={() => press(null)} onClose={handout.close} />
@@ -932,6 +939,7 @@ function DisplayMenu(props: {
       <TextSize onTouch={props.onTouch} />
       <WeatherRow onTouch={props.onTouch} />
       <AnimatedMapsRow onTouch={props.onTouch} />
+      <SoundRow onTouch={props.onTouch} />
       {fullscreenSupported() ? (
         <MenuButton
           role="menuitem"
@@ -1099,6 +1107,64 @@ function AnimatedMapsRow(props: { onTouch(): void }) {
           {ANIMATED_MAPS_WORDS[c]}
         </MenuButton>
       ))}
+    </div>
+  );
+}
+
+/** One row: the room's sound on this display, On or Off (docs/design/design-v1-music.md 4.5), kept for this display alone. */
+function SoundRow(props: { onTouch(): void }) {
+  const on = useDisplaySound();
+  return (
+    <div role="group" aria-label="Sound" style={{ display: "grid", gridTemplateColumns: "auto repeat(2, minmax(0, 1fr))", alignItems: "center", gap: theme.space(2) }}>
+      <span style={{ padding: `0 ${theme.space(1)}px`, fontSize: TV_TEXT.small, fontWeight: theme.weight.bold }}>Sound</span>
+      {[true, false].map((value) => (
+        <MenuButton
+          key={String(value)}
+          role="menuitemradio"
+          checked={on === value}
+          compact
+          onClick={() => {
+            chooseDisplaySound(value);
+            props.onTouch();
+          }}
+        >
+          {value ? "On" : "Off"}
+        </MenuButton>
+      ))}
+    </div>
+  );
+}
+
+/** The words of the display's sound cards. */
+export const DISPLAY_SOUND_TAP = "Tap or press a key for sound.";
+export const DISPLAY_SOUND_CANNOT = "This TV's browser can't play the room's sound. Play it from another device.";
+
+/**
+ * The card at the bottom left while the room's sound waits on this display
+ * (docs/design/design-v1-music.md 4.5): for a tap or a key, which the
+ * browser asks before any sound, or where the browser lacks what the mixer
+ * needs. Only while the room plays something, so a quiet table shows none.
+ */
+function DisplaySoundCard() {
+  const { here } = useSoundHere();
+  const on = useDisplaySound();
+  const hear = useRoomView((s) => (s.confirmed ? somethingToHear(s.confirmed.playing, s.confirmed.sounds, Date.now()) : false));
+  const text = !on || !hear ? null : here === "tap" ? DISPLAY_SOUND_TAP : here === "cannot" ? DISPLAY_SOUND_CANNOT : null;
+  if (text === null) return null;
+  return (
+    <div
+      role="status"
+      data-display-sound-card=""
+      style={{
+        position: "absolute",
+        left: `calc(${theme.safe.left} + ${theme.space(4)}px)`,
+        bottom: `calc(${theme.safe.bottom} + ${theme.space(4)}px)`,
+        zIndex: 12,
+        maxWidth: "min(480px, calc(100% - 32px))",
+        pointerEvents: "none",
+      }}
+    >
+      <Notice style={{ padding: `${theme.space(2)}px ${theme.space(4)}px`, fontSize: TV_TEXT.body }}>{text}</Notice>
     </div>
   );
 }
