@@ -38,7 +38,7 @@ describe("the ask", () => {
     assert.equal(firedAfter({ id: "e", at: T - 1_001 + LEAD_MS }, T), false);
   });
 
-  test("something to hear: music, a loop, or an effect not over, whose sound is still an Effect", () => {
+  test("something to hear: music not paused, a loop, or an effect not over, whose sound is still an Effect", () => {
     const sounds = { thunder: { ms: 25_000, use: "effect" as const }, rain: { ms: 25_000, use: "loop" as const } };
     assert.equal(somethingToHear({ ...quiet, effects: [{ id: "a", soundId: "thunder", at: T - 10_000 }] }, sounds, T), true);
     assert.equal(somethingToHear({ ...quiet, effects: [{ id: "a", soundId: "thunder", at: T - 26_000 }] }, sounds, T), false, "over");
@@ -46,5 +46,8 @@ describe("the ask", () => {
     assert.equal(somethingToHear({ ...quiet, effects: [{ id: "a", builtin: "rumble", at: T - 1_000 }] }, sounds, T), true);
     assert.equal(somethingToHear({ ...quiet, dmEffects: [{ id: "a", builtin: "rumble", at: T - 1_000 }] }, sounds, T), true, "a DM's effect behind a blackout");
     assert.equal(somethingToHear(quiet, sounds, T), false);
+    const run = { run: "r", repeat: "one" as const, fade: 5 as const, now: { soundId: "s", at: T - 60_000 } };
+    assert.equal(somethingToHear({ ...quiet, music: run }, sounds, T), true);
+    assert.equal(somethingToHear({ ...quiet, music: { ...run, paused: 4_000 } }, sounds, T), false, "a DM's paused run, which a player's projection drops");
   });
 });

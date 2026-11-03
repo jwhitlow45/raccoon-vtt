@@ -258,8 +258,15 @@ describe("synced music and sound", { concurrency: false }, () => {
   test("sn-2. a pause and a resume land every device at the same place, and a crossfade into the next track crosses on every device", async () => {
     await ops.send({ t: "music.pause" });
     await waitFor("Pat's music to stop", async () => (!/music/.test((await soundProbe(pat)).data) ? true : null), 6_000);
-    const paused = musicVoice(await soundProbe(dm));
-    assert.ok(paused === undefined || !paused.playing || paused.aimMs >= 0, "the DM's page paused too");
+    // The DM's state keeps the paused run whole, so the DM's page has to read the pause itself.
+    await waitFor(
+      "the DM's music to stop",
+      async () => {
+        const p = await soundProbe(dm);
+        return musicVoice(p) === undefined && !/music/.test(p.data) ? true : null;
+      },
+      6_000,
+    );
     await sleep(3_000);
     await ops.send({ t: "music.resume", run: runId() });
     await soundSays(pat, /^playing music/, 5_000);

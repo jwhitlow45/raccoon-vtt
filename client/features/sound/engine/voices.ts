@@ -4,6 +4,7 @@ import {
   loopCrossingMs,
   occurrencesAt,
   SHORT_FADE_MS,
+  STOP_FADE_MS,
   type MusicRun,
   type Playing,
   type Sound,
@@ -76,11 +77,15 @@ function crossEnd(now: SoundAt, nowMs: number, next: SoundAt, fadeMs: number): n
   return Math.min(next.at + fadeMs, Math.max(next.at, now.at + nowMs));
 }
 
-/** The voices that sound at `t`, or start within the lookahead. */
+/**
+ * The voices that sound at `t`, or start within the lookahead. A DM's
+ * state keeps a paused run whole, with its old `at`, so a pause is read
+ * here: a player's projection drops it, and every device falls silent alike.
+ */
 export function planVoices(playing: Playing | null | undefined, sounds: Lengths, t: number): VoicePlan[] {
   if (!playing) return [];
   const out: VoicePlan[] = [];
-  if (playing.music) out.push(...musicVoices(playing.music, sounds, t));
+  if (playing.music && playing.music.paused === undefined) out.push(...musicVoices(playing.music, sounds, t));
   for (const [loopId, loop] of Object.entries(playing.loops)) {
     const sound = soundAs(sounds, loop.soundId, "loop");
     if (!sound) continue;
@@ -152,6 +157,17 @@ function musicVoices(music: MusicRun, sounds: Lengths, t: number): VoicePlan[] {
 
 function voice(channel: Channel, key: string, soundId: SoundId, sound: Pick<Sound, "ms" | "assetId" | "level">, startAt: number, envelope: EnvelopePoint[], volume: number): VoicePlan {
   return { key, channel, soundId, assetId: sound.assetId, startAt, lengthMs: sound.ms, level: sound.level ?? 0, volume, envelope };
+}
+
+/**
+ * How long a voice that left the plan fades: a second behind a blackout,
+ * 0.3 s for a track another replaced, 2 s for a stop. A pause is a stop,
+ * since a player's projection has no music then and fades it so.
+ */
+export function leaveMs(playing: Playing | null | undefined, channel: Channel): number {
+  if (!playing) return BLACKOUT_FADE_MS;
+  if (channel === "music" && playing.music && playing.music.paused === undefined) return SHORT_FADE_MS;
+  return STOP_FADE_MS;
 }
 
 // ---------------------------------------------------------------- the elements

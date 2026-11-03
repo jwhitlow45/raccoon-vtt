@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { LOOP_FADE_IN_MS, type Playing } from "#shared/sound.ts";
-import { gainAt, LOOKAHEAD_MS, mixGain, planVoices } from "./voices.ts";
+import type { Op } from "#shared/protocol.ts";
+import { projectState } from "#shared/project.ts";
+import { applyOp } from "#shared/reducer.ts";
+import { LOOP_FADE_IN_MS, SHORT_FADE_MS, STOP_FADE_MS, type Playing, type Sound } from "#shared/sound.ts";
+import { AT, DM, P1, room } from "#shared/testutil.ts";
+import { BLACKOUT_FADE_MS, gainAt, leaveMs, LOOKAHEAD_MS, mixGain, planVoices } from "./voices.ts";
 
 /*
  * The voices a page plays at a server time (docs/design/design-v1-music.md
@@ -110,6 +114,46 @@ describe("the voices at a time", () => {
     // 4 s with a 1 s crossing: the period is 3 s, so at 3.5 s the second pass is 0.5 s in, and the third waits for the first to end.
     assert.deepEqual(voices.map((v) => T + 3_500 - v.startAt).sort((a, b) => a - b), [500, 3_500]);
     for (let t = T; t < T + 30_000; t += 100) assert.ok(planVoices(playing, SOUNDS, t).length <= 2, `two at most at ${t - T}`);
+  });
+
+  test("a paused run sounds on no device: the DM's confirmed state keeps it whole, Repeat one included, and its loops play on", () => {
+    const base = Date.parse(AT);
+    const library: Record<string, Sound> = {
+      tavern: { id: "tavern", rev: 0, name: "Tavern", assetId: "a-tavern", ms: 60_000, use: "music" },
+      rain: { id: "rain", rev: 0, name: "Rain", assetId: "a-rain", ms: 10_000, use: "loop" },
+    };
+    let state = room({ sounds: library, playing: null });
+    const ops: [Op, number][] = [
+      [{ t: "music.play", run: "r1", soundId: "tavern", order: ["tavern"], repeat: "one", fade: 5 }, 0],
+      [{ t: "loop.start", id: "l1", soundId: "rain", volume: 70 }, 0],
+      [{ t: "music.pause" }, 5_000],
+    ];
+    ops.forEach(([op, ms], i) => {
+      const r = applyOp(state, op, DM, { seq: i + 1, at: new Date(base + ms).toISOString() });
+      assert.ok(r.ok, op.t);
+      state = r.state;
+    });
+    const dm = projectState(state, DM, { sceneId: null });
+    assert.notEqual(dm.playing?.music?.paused, undefined, "the DM's state holds the paused run");
+    const pat = projectState(state, P1, { sceneId: null });
+    assert.equal(pat.playing?.music, null, "a player's has no music while paused");
+    // Past the pause, and Repeat one's passes, which once went on for good.
+    for (const later of [5_001, 10_000, 56_000, 600_000]) {
+      for (const [who, view] of [["the DM", dm], ["Pat", pat]] as const) {
+        const voices = planVoices(view.playing, view.sounds ?? {}, base + later);
+        assert.deepEqual(voices.filter((v) => v.channel === "music").map((v) => v.key), [], `${who}: no music ${later} ms in`);
+        assert.ok(voices.some((v) => v.channel === "loop"), `${who}: the loop plays on ${later} ms in`);
+      }
+    }
+  });
+
+  test("a voice leaving fades as players' devices fade it: a pause is a stop, a replaced track goes in 0.3 s, a blackout in a second", () => {
+    const run = { run: "r", repeat: "all" as const, fade: 5 as const, now: { soundId: "tavern", at: T } };
+    assert.equal(leaveMs({ ...quiet, music: run }, "music"), SHORT_FADE_MS, "another track took its place");
+    assert.equal(leaveMs({ ...quiet, music: { ...run, paused: 4_000 } }, "music"), STOP_FADE_MS, "paused, as a player's music stops");
+    assert.equal(leaveMs(quiet, "music"), STOP_FADE_MS);
+    assert.equal(leaveMs({ ...quiet, music: run }, "loop"), STOP_FADE_MS);
+    assert.equal(leaveMs(null, "music"), BLACKOUT_FADE_MS);
   });
 
   test("gainAt runs in lines between its points and holds past either end", () => {

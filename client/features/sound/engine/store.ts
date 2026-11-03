@@ -148,10 +148,10 @@ export function effectMs(e: FiredEffect, sounds: Readonly<Record<SoundId, Pick<S
   return s && s.use === "effect" ? s.ms : null;
 }
 
-/** Whether a projection has anything sounding now: music, a loop, or an effect not over. */
+/** Whether a projection has anything sounding now: music not paused (a DM's state keeps a paused run), a loop, or an effect not over. */
 export function somethingToHear(playing: Playing | null | undefined, sounds: Readonly<Record<SoundId, Pick<Sound, "ms" | "use">>> | undefined, now: number): boolean {
   if (!playing) return false;
-  if (playing.music || Object.keys(playing.loops).length > 0) return true;
+  if ((playing.music && playing.music.paused === undefined) || Object.keys(playing.loops).length > 0) return true;
   for (const e of [...playing.effects, ...(playing.dmEffects ?? [])]) {
     const ms = effectMs(e, sounds);
     if (ms !== null && e.at + ms > now) return true;

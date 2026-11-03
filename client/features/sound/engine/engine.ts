@@ -1,4 +1,4 @@
-import { SHORT_FADE_MS, STOP_FADE_MS, type BuiltinSound, type FiredEffect, type Playing, type Sound, type SoundId } from "#shared/sound.ts";
+import { SHORT_FADE_MS, type BuiltinSound, type FiredEffect, type Playing, type Sound, type SoundId } from "#shared/sound.ts";
 import type { SoundTimeLink } from "../../../state/socket.ts";
 import { soundMix, subscribeSoundMix, type SoundMix } from "../../device/settings.ts";
 import { playShape, TRAP_SOUND_SHAPES } from "./builtins.ts";
@@ -10,7 +10,7 @@ import { browserLocks, channelName, Handoff, type HandoffAudio, type HandoffPost
 import { SoundMediaSession } from "./mediaSession.ts";
 import { setMusicRetry, setSoundHere, somethingToHear, type MusicHere, type SoundHere } from "./store.ts";
 import { exposeSoundTest, type SoundTestView } from "./testHook.ts";
-import { BLACKOUT_FADE_MS, BLOB_LOOP_BYTES, planVoices, Voices, type Channel, type VoicePlan } from "./voices.ts";
+import { BLOB_LOOP_BYTES, leaveMs, planVoices, Voices, type Channel } from "./voices.ts";
 
 /**
  * The room's sound on this page (docs/design/design-v1-music.md 5), the
@@ -380,19 +380,11 @@ export class SoundEngine {
     const hear = somethingToHear(playing ?? null, this.#input.sounds, this.#serverNow());
     if (active && hear) this.#clock.start();
     else this.#clock.stop();
-    if (active && playing !== undefined) this.#voices?.update(planVoices(playing, this.#input.sounds, this.#serverNow()), (plan) => this.#leaveMs(plan));
+    if (active && playing !== undefined) this.#voices?.update(planVoices(playing, this.#input.sounds, this.#serverNow()), (plan) => leaveMs(this.#input.playing, plan.channel));
     this.#mix();
     this.#media.set(active && hear);
     this.#setAudioSession(active && hear);
     this.#report();
-  }
-
-  /** A voice that leaves the plan: a second behind a blackout, 0.3 s for a track another replaced, 2 s for a stop. */
-  #leaveMs(plan: VoicePlan): number {
-    const playing = this.#input.playing;
-    if (!playing) return BLACKOUT_FADE_MS;
-    if (plan.channel === "music") return playing.music ? SHORT_FADE_MS : STOP_FADE_MS;
-    return STOP_FADE_MS;
   }
 
   #playEffect(ctx: AudioContext, what: { buffer: unknown } | { builtin: BuiltinSound }, at: number, offsetMs: number, level: number, id: string): EffectVoice {
