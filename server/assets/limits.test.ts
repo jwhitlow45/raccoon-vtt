@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { HANDOUT_HOURLY, STARTER_HOURLY, WindowLimiter, hourlyChecks, starterHourlyChecks } from "./limits.ts";
+import { HANDOUT_HOURLY, SOUND_HOURLY, STARTER_HOURLY, WindowLimiter, hourlyChecks, starterHourlyChecks } from "./limits.ts";
 
 describe("hourlyChecks (design 10.3, docs/design/design-v1-pdf-handouts.md 3.7)", () => {
   test("a token, a map and a URL import spend the shared budget, per session, IP and room", () => {
@@ -23,6 +23,18 @@ describe("hourlyChecks (design 10.3, docs/design/design-v1-pdf-handouts.md 3.7)"
       { key: "handout:s:sess", limit: HANDOUT_HOURLY.session },
       { key: "handout:r:ROOM0001", limit: HANDOUT_HOURLY.room },
     ]);
+  });
+
+  test("a sound spends only its own, 120 a session and 240 a room, and maps still go up past it (docs/design/design-v1-sound.md 7.2)", () => {
+    assert.deepEqual(hourlyChecks("sess", "ip", "ROOM0001", "sound"), [
+      { key: "sound:s:sess", limit: 120 },
+      { key: "sound:r:ROOM0001", limit: 240 },
+    ]);
+    const hourly = new WindowLimiter(3600_000, () => 0);
+    const sounds = hourlyChecks("dm", "ip", "ROOM0001", "sound");
+    for (let i = 0; i < SOUND_HOURLY.session; i++) hourly.record(sounds);
+    assert.ok(hourly.retryAfter(sounds) > 0, "past its own limit");
+    assert.equal(hourly.retryAfter(hourlyChecks("dm", "ip", "ROOM0001", "map")), 0);
   });
 
   test("a starter pick spends a budget of its own, per session, IP and room, apart from every upload's", () => {

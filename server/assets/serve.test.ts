@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { requestedRange, videoEtag } from "./serve.ts";
+import { mediaEtag, requestedRange } from "./serve.ts";
 
-/** A video's Range answers (docs/design/design-v1-animated-maps.md 10, Serving, D-261102-457). */
+/** A video's and a sound's Range answers (docs/design/design-v1-animated-maps.md 10, Serving, D-261102-457). */
 
 test("one range, an open one and a suffix are read, clipped to the file", () => {
   assert.deepEqual(requestedRange("bytes=0-99", 1000), { start: 0, end: 99 });
@@ -25,7 +25,7 @@ test("no header, several ranges, another unit or a malformed one is the whole fi
   }
 });
 
-test("a video's ETag is strong, from its upload's hash and its pipeline", () => {
-  assert.equal(videoEtag("ab".repeat(32), 1), `"${"ab".repeat(32)}-v1"`);
-  assert.notEqual(videoEtag("ab".repeat(32), 1), videoEtag("ab".repeat(32), 2));
+test("a video's or a sound's ETag is strong, from its upload's hash and its pipeline", () => {
+  assert.equal(mediaEtag("ab".repeat(32), 1), `"${"ab".repeat(32)}-v1"`);
+  assert.notEqual(mediaEtag("ab".repeat(32), 1), mediaEtag("ab".repeat(32), 2));
 });

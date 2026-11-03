@@ -78,6 +78,28 @@ describe("RoomQuota", () => {
     await fits.commit(300, async () => undefined);
   });
 
+  test("the headroom is checked again at commit when the upload's size is its reservation, as other writes may have taken it (docs/design/design-v1-sound.md 7.2)", async () => {
+    const store = fakeStore();
+    const quota = new RoomQuota(1000, store.read);
+    const sound = await quota.reserve("R", 600, { headroom: 320 });
+    const image = await quota.reserve("R", 300);
+    await image.commit(300, async () => void store.stored.set("R", 300));
+    // 300 stored, the sound's 600 and its 320 of headroom are 1,220: the headroom is gone, though the size never grew.
+    await assert.rejects(sound.commit(600, async () => assert.fail("wrote past the headroom")), quota413);
+    sound.release();
+    const fits = await quota.reserve("R", 300, { headroom: 320 });
+    let wrote = false;
+    await fits.commit(300, async () => void (wrote = true));
+    assert.ok(wrote);
+    // An upload with no headroom keeps the old rule: a size within its reservation needs no second look.
+    store.stored.set("R", 990);
+    const plain = new RoomQuota(1000, store.read);
+    store.stored.set("R", 0);
+    const held = await plain.reserve("R", 500);
+    store.stored.set("R", 990);
+    await held.commit(500, async () => undefined);
+  });
+
   test("concurrent reservations cannot overshoot", async () => {
     const store = fakeStore();
     const quota = new RoomQuota(1000, store.read);

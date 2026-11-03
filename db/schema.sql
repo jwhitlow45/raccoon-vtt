@@ -326,10 +326,44 @@ begin
 end $$;
 alter table assets add column if not exists media text check (media in ('webm', 'mp4'));
 alter table assets add column if not exists video jsonb;
+-- Not while the sound step's rule below holds, which replaced this one.
 do $$
 begin
-  if not exists (select 1 from pg_constraint where conrelid = 'assets'::regclass and conname = 'assets_video_media') then
+  if not exists (select 1 from pg_constraint where conrelid = 'assets'::regclass and conname in ('assets_video_media', 'assets_media_facts')) then
     alter table assets add constraint assets_video_media
       check ((kind = 'video') = (media is not null) and (kind = 'video') = (video is not null));
+  end if;
+end $$;
+-- Synced music and sound (docs/design/design-v1-sound.md 7.2). A sound is an
+-- asset of its own kind, its `media` mp3 and its `audio` what the frame walk
+-- found, with camelCase keys: { ms, channels, kbps }. One rule ties each
+-- kind to its columns, replacing animated maps' (assets_video_media) and the
+-- media column's own check, which knew no mp3: a video has a container and
+-- facts, a sound mp3 and facts, an image neither. Each step runs only while
+-- its constraint lacks the new kind or rule, so a boot does not re-check
+-- every row each time.
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'assets'::regclass and conname = 'assets_kind_check' and pg_get_constraintdef(oid) like '%''sound''%'
+  ) then
+    alter table assets drop constraint if exists assets_kind_check,
+      add constraint assets_kind_check check (kind in ('map', 'token', 'handout', 'thumb', 'video', 'sound'));
+  end if;
+end $$;
+alter table assets add column if not exists audio jsonb;
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conrelid = 'assets'::regclass and conname = 'assets_media_facts') then
+    alter table assets drop constraint if exists assets_media_check,
+      drop constraint if exists assets_video_media,
+      add constraint assets_media_facts check (
+        case kind
+          when 'video' then media is not null and media in ('webm', 'mp4') and video is not null and audio is null
+          when 'sound' then media is not null and media = 'mp3' and audio is not null and video is null
+          else media is null and video is null and audio is null
+        end
+      );
   end if;
 end $$;

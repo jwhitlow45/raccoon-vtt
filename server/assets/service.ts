@@ -1,15 +1,17 @@
 import { mkdir, readdir, stat, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type pg from "pg";
+import { SOUND_LIMITS } from "#shared/limits.ts";
 import { assetCreditSchema, type AssetCredit } from "#shared/protocol.ts";
 import { starterAssetCredit, type FoundWork, type StarterKind } from "#shared/starter.ts";
-import { animatedMapsOn, type Config } from "../config.ts";
+import { animatedMapsOn, roomSoundOn, type Config } from "../config.ts";
+import { checkSound, type SoundCheckOptions } from "./audio/check.ts";
 import { createEgress, type Egress } from "./egress.ts";
 import { AssetError } from "./errors.ts";
-import { KINDS, PIPELINE, VIDEO_PIPELINE, nameGrid, type AssetKind, type UploadResult } from "./kinds.ts";
+import { KINDS, PIPELINE, SOUND_PIPELINE, VIDEO_PIPELINE, nameGrid, type AssetKind, type UploadResult } from "./kinds.ts";
 import { WindowLimiter, hourlyChecks, starterHourlyChecks } from "./limits.ts";
 import { ProcessingQueue, configureSharp, processImage, removeFiles, sniffImage } from "./process.ts";
-import { RoomQuota, assertFreeDisk, hasFreeDisk, roomStoredBytes, type Reservation } from "./quota.ts";
+import { ROOM_QUOTA_BYTES_SQL, RoomQuota, assertFreeDisk, hasFreeDisk, roomStoredBytes, type Reservation } from "./quota.ts";
 import { OpenverseSearch, openverseHttp, type OpenverseHttp } from "./openverse.ts";
 import { ImageSearch, httpJson, type HttpJson } from "./serpapi.ts";
 import { IntakeSlots, Semaphore, type SlotLimits } from "./slots.ts";
@@ -57,6 +59,8 @@ export type AssetServiceOptions = {
   starter?: StarterOptions;
   /** The clock a player's starter pick waits out its floor on (starter.ts PLAYER_PICK_FLOOR_MS), for tests. */
   pickClock?: FloorClock;
+  /** The sound check's budget, deadline and worker, for tests (audio/check.ts). */
+  soundCheck?: SoundCheckOptions;
   now?: () => number;
 };
 
@@ -83,6 +87,12 @@ export type StarterResult = UploadResult & { credit: AssetCredit; starter: strin
 
 export const MIN_FREE_BYTES = 2 * 1024 * 1024 * 1024;
 
+/** A room's storage line (docs/design/design-v1-sound.md 7.2): what its quota counts, the quota (0 for none) and what its sounds take, in bytes. */
+export type RoomStorage = { used: number; quota: number; sounds: number };
+
+/** Rooms whose storage is remembered at once. Past it the oldest are forgotten, so the memory is bounded. */
+const STORAGE_ROOMS = 512;
+
 export class AssetService {
   readonly pool: pg.Pool;
   readonly config: Config;
@@ -103,7 +113,11 @@ export class AssetService {
   readonly bodyTiming: AssetServiceOptions["bodyTiming"];
   readonly starter: StarterCatalog;
   readonly pickClock: FloorClock;
+  readonly soundCheck: SoundCheckOptions;
   #visibleAssets: VisibleAssetsFn;
+  #now: () => number;
+  /** Each room's storage line and when it was read, or the read in flight, so concurrent asks share one query. */
+  #storage = new Map<string, { at: number; value: Promise<RoomStorage> }>();
 
   constructor(opts: AssetServiceOptions) {
     this.pool = opts.pool;
@@ -121,6 +135,8 @@ export class AssetService {
     this.bodyTiming = opts.bodyTiming;
     this.starter = starterCatalog(opts.starter, opts.config.production);
     this.pickClock = opts.pickClock ?? REAL_FLOOR_CLOCK;
+    this.soundCheck = opts.soundCheck ?? {};
+    this.#now = opts.now ?? Date.now;
     const key = opts.config.SERPAPI_KEY;
     this.search = key
       ? new ImageSearch({ pool: opts.pool, apiKey: key, http: opts.serpApiHttp ?? httpJson(this.egress.strict), now: opts.now })
@@ -158,6 +174,39 @@ export class AssetService {
 
   setVisibleAssets(fn: VisibleAssetsFn): void {
     this.#visibleAssets = fn;
+  }
+
+  /**
+   * The room's storage line, read again at most every
+   * SOUND_LIMITS.storageRecheckMs, or sooner after `forgetStorage`. A read
+   * that fails is forgotten at once, so the next ask tries again.
+   */
+  storage(roomId: string): Promise<RoomStorage> {
+    const now = this.#now();
+    const kept = this.#storage.get(roomId);
+    if (kept && now - kept.at < SOUND_LIMITS.storageRecheckMs) return kept.value;
+    const value = this.#readStorage(roomId);
+    this.#storage.delete(roomId);
+    this.#storage.set(roomId, { at: now, value });
+    if (this.#storage.size > STORAGE_ROOMS) this.#storage.delete(this.#storage.keys().next().value!);
+    value.catch(() => {
+      if (this.#storage.get(roomId)?.value === value) this.#storage.delete(roomId);
+    });
+    return value;
+  }
+
+  /** After an upload or a delete in the room: its next storage line is read afresh. */
+  forgetStorage(roomId: string): void {
+    this.#storage.delete(roomId);
+  }
+
+  async #readStorage(roomId: string): Promise<RoomStorage> {
+    const { rows } = await this.pool.query<{ used: string; sounds: string }>(
+      `select ${ROOM_QUOTA_BYTES_SQL} as used,
+         coalesce((select sum(bytes) from assets where room_id = $1 and kind = 'sound' and starter is null), 0) as sounds`,
+      [roomId],
+    );
+    return { used: Number(rows[0]?.used ?? 0), quota: this.quota.quotaBytes, sounds: Number(rows[0]?.sounds ?? 0) };
   }
 
   async roomInfo(roomId: string): Promise<RoomInfo | null> {
@@ -228,13 +277,14 @@ export class AssetService {
    * room paid for it, and an upload of a picked work's bytes leaves the
    * pick outside the quota.
    *
-   * A video takes its own branch (#ingestVideo).
+   * A video takes its own branch (#ingestVideo), and so does a sound (#ingestSound).
    */
   async ingest(input: IngestInput): Promise<UploadResult> {
     const { reservation, starter } = input;
     // The types already require one. Checked here too, since a row stored with neither would escape the quota unmarked.
     if (!reservation && !starter) throw new Error("an image is stored against a reservation or as a starter pick");
     if (input.kind === "video") return this.#ingestVideo(input);
+    if (input.kind === "sound") return this.#ingestSound(input);
     const existing = await findRoomAsset(this.pool, input.roomId, input.sha256, input.kind);
     if (existing) return this.#reuse(existing, input);
 
@@ -282,6 +332,31 @@ export class AssetService {
     const variants = [{ name: "full" as const, path: input.tempPath, width: facts.widthPx, height: facts.heightPx, bytes: size }];
     const write = () =>
       placeAndInsert(this.pool, this.assetDir, { roomId: input.roomId, sha256: input.sha256, kind: "video", uploaderIds: input.uploaderIds, variants, video: facts }, VIDEO_PIPELINE);
+    const placed = await input.reservation!.commit(size, write);
+    return withCreated(placed.view, placed.created);
+  }
+
+  /**
+   * A sound (docs/design/design-v1-sound.md 7.2): no sharp and no decoder.
+   * The frame walk runs in a worker from the processing queue (audio/check.ts),
+   * and the upload itself is placed as the row's one `full` variant, so the
+   * same bytes make the same file under one SOUND_PIPELINE and reuse the
+   * row, and two sounds may name one file. The commit checks the quota's
+   * headroom again (quota.ts). Refused whole while the server's switch is
+   * off, so no upload or import stores one (D-261102-513).
+   */
+  async #ingestSound(input: IngestInput): Promise<UploadResult> {
+    if (!roomSoundOn(this.config)) throw new AssetError(403, "sound_off");
+    if (input.starter) throw new Error("no starter work is a sound");
+    const existing = await findRoomAsset(this.pool, input.roomId, input.sha256, input.kind);
+    if (existing) return this.#reuse(existing, input);
+
+    await this.assertFreeDisk();
+    const audio = await this.queue.run(() => checkSound(input.tempPath, this.soundCheck), { background: input.background });
+    const { size } = await stat(input.tempPath);
+    const variants = [{ name: "full" as const, path: input.tempPath, width: 0, height: 0, bytes: size }];
+    const write = () =>
+      placeAndInsert(this.pool, this.assetDir, { roomId: input.roomId, sha256: input.sha256, kind: "sound", uploaderIds: input.uploaderIds, variants, audio }, SOUND_PIPELINE);
     const placed = await input.reservation!.commit(size, write);
     return withCreated(placed.view, placed.created);
   }
@@ -360,13 +435,13 @@ export class AssetService {
 }
 
 /**
- * `created` on a handout's or a video's answer only (AssetService.ingest):
- * a failed PDF or map upload deletes only what it made
- * (docs/design/design-v1-animated-maps.md 4.1). Both are DM-only kinds,
- * whose library lists every row already.
+ * `created` on a handout's, a video's or a sound's answer only
+ * (AssetService.ingest): a failed PDF or map upload deletes only what it
+ * made (docs/design/design-v1-animated-maps.md 4.1). Each is a DM-only kind,
+ * whose rows the DM's library or the room's sounds name already.
  */
 function withCreated(result: UploadResult, created: boolean): UploadResult {
-  return result.kind === "handout" || result.kind === "video" ? { ...result, created } : result;
+  return result.kind === "handout" || result.kind === "video" || result.kind === "sound" ? { ...result, created } : result;
 }
 
 function withHint(view: ReturnType<typeof toView>, nameHint: string | undefined): UploadResult {

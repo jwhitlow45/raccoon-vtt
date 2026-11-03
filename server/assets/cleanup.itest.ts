@@ -7,7 +7,7 @@ import { uuidv7 } from "#shared/ids.ts";
 import type { ProjectedState } from "#shared/project.ts";
 import type { Op } from "#shared/protocol.ts";
 import { startEngine, type Engine, type Socket, type TestClient } from "../rooms/testing.ts";
-import { sweepOrphanFiles, sweepThumbnails, type CleanupDeps } from "./cleanup.ts";
+import { sweepOrphanFiles, sweepUnnamed, type CleanupDeps } from "./cleanup.ts";
 import { PIPELINE } from "./kinds.ts";
 import { trashDay, variantPath } from "./store.ts";
 import { solid } from "./testImages.ts";
@@ -142,7 +142,7 @@ describe("image cleanup", () => {
     const second = await upload(dm, roomId, "thumb", randomColor());
     assert.equal((await socket.apply({ t: "scene.update", sceneId, patch: { thumb: first.id } })).rejects, undefined);
 
-    let sweep = await sweepThumbnails(deps(), roomId);
+    let sweep = await sweepUnnamed(deps(), roomId);
     assert.deepEqual(sweep, { marked: 1, cleared: 0, deleted: 0, skipped: false });
     const mark = async (id: string) =>
       (await t.pool.query<{ unused_since: Date | null }>("select unused_since from assets where id = $1", [id])).rows[0]?.unused_since ?? null;
@@ -151,15 +151,15 @@ describe("image cleanup", () => {
 
     // Named again, as a DM device does when it sets a thumbnail.
     assert.equal((await socket.apply({ t: "scene.update", sceneId, patch: { thumb: second.id } })).rejects, undefined);
-    sweep = await sweepThumbnails(deps(), roomId);
+    sweep = await sweepUnnamed(deps(), roomId);
     assert.deepEqual(sweep, { marked: 1, cleared: 1, deleted: 0, skipped: false });
     assert.equal(await mark(second.id), null);
 
     // Less than a day unused is kept.
     await t.pool.query("update assets set unused_since = now() - interval '23 hours' where id = $1", [first.id]);
-    assert.equal((await sweepThumbnails(deps(), roomId)).deleted, 0);
+    assert.equal((await sweepUnnamed(deps(), roomId)).deleted, 0);
     await t.pool.query("update assets set unused_since = now() - interval '25 hours' where id = $1", [first.id]);
-    sweep = await sweepThumbnails(deps(), roomId);
+    sweep = await sweepUnnamed(deps(), roomId);
     assert.equal(sweep.deleted, 1);
     assert.equal(await rowExists(first.id), false);
     assert.ok(await rowExists(second.id));
@@ -184,7 +184,7 @@ describe("image cleanup", () => {
       [roomId, seq, JSON.stringify({ t: "scene.update", sceneId, patch: { thumb: inOp.id.toUpperCase() } })],
     );
     await t.pool.query("update assets set unused_since = now() - interval '2 days' where room_id = $1", [roomId]);
-    const sweep = await sweepThumbnails(deps(), roomId);
+    const sweep = await sweepUnnamed(deps(), roomId);
     assert.equal(sweep.deleted, 1);
     assert.ok(await rowExists(inSnapshot.id));
     assert.ok(await rowExists(inOp.id), "an op after the snapshot counts, whatever its case");
@@ -231,7 +231,7 @@ describe("image cleanup", () => {
     await mkdir(dirname(stale), { recursive: true });
     await writeFile(stale, "x");
     const report = await t.app.cleanup.run();
-    assert.ok(report.thumbsDeleted >= 1);
+    assert.ok(report.unnamedDeleted >= 1);
     assert.notEqual(report.orphanFiles, null, "the first pass walks the folders");
     assert.ok(report.trashDaysPurged >= 1);
     assert.equal(await exists(stale), false);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { VIDEO_LIMITS } from "#shared/limits.ts";
-import { ASSET_KINDS, KINDS, PLAYER_UPLOAD_KINDS, VIDEO_PIPELINE, cellPxHint, isAssetKind, nameGrid } from "./kinds.ts";
+import { SOUND_LIMITS, VIDEO_LIMITS } from "#shared/limits.ts";
+import { ASSET_KINDS, KINDS, PLAYER_UPLOAD_KINDS, SOUND_PIPELINE, VIDEO_PIPELINE, cellPxHint, isAssetKind, nameGrid } from "./kinds.ts";
 
 test("a cols x rows name suggests the cell size when both axes agree", () => {
   assert.equal(cellPxHint("crypt_30x20.jpg", 3000, 2000), 100);
@@ -70,4 +70,17 @@ test("a video is a kind of its own: the DM's alone to add, players read it when 
   });
   assert.ok(!PLAYER_UPLOAD_KINDS.includes("video"));
   assert.ok(Number.isInteger(VIDEO_PIPELINE) && VIDEO_PIPELINE >= 1);
+});
+
+test("a sound is a kind of its own: the DM's alone to add, players read it while it plays, one file at the sound cap (docs/design/design-v1-sound.md 7.2)", () => {
+  assert.equal(isAssetKind("sound"), true);
+  assert.deepEqual(KINDS.sound, {
+    maxUploadBytes: SOUND_LIMITS.fileBytes,
+    deadlineMs: SOUND_LIMITS.uploadDeadlineMs,
+    variants: [{ name: "full", maxSide: 0 }],
+    dmOnly: true,
+    playersRead: true,
+  });
+  assert.ok(!PLAYER_UPLOAD_KINDS.includes("sound"));
+  assert.ok(Number.isInteger(SOUND_PIPELINE) && SOUND_PIPELINE >= 1);
 });

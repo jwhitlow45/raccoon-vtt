@@ -2,20 +2,20 @@ import { unlink } from "node:fs/promises";
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { ApiErrorCode } from "#shared/apiErrors.ts";
-import { VIDEO_LIMITS } from "#shared/limits.ts";
+import { SOUND_LIMITS, VIDEO_LIMITS } from "#shared/limits.ts";
 import { STARTER_KEY, STARTER_KINDS } from "#shared/starter.ts";
-import { animatedMapsOn } from "../config.ts";
+import { animatedMapsOn, roomSoundOn, type Config } from "../config.ts";
 import { MAX_FETCH_BYTES, fetchPublicImage, type Fetched } from "../assets/fetchPublic.ts";
 import { withInUse } from "../assets/cleanup.ts";
 import { AssetError, isAssetError } from "../assets/errors.ts";
 import { creditForImport } from "../assets/openverse.ts";
 import { ASSET_KINDS, KINDS, isVariant, type Variant } from "../assets/kinds.ts";
 import type { Reservation } from "../assets/quota.ts";
-import { sendVariant, sendVideo, videoEtag } from "../assets/serve.ts";
+import { mediaEtag, sendMedia, sendVariant } from "../assets/serve.ts";
 import { isCachedThumbnail } from "../assets/serpapi.ts";
 import { AssetService, type AssetServiceOptions, type VisibleAssetsFn } from "../assets/service.ts";
 import { PLAYER_PICK_FLOOR_MS, noSoonerThan } from "../assets/starter.ts";
-import { addUploaders, getAsset, isVideoContainer, listRoomAssets, variantPath, type AssetRow } from "../assets/store.ts";
+import { SOUND_MEDIA, addUploaders, getAsset, isVideoContainer, listRoomAssets, variantPath, type AssetRow } from "../assets/store.ts";
 import { receiveToFile, tempFile } from "../assets/upload.ts";
 import type { GrantContext } from "../auth/types.ts";
 import { clientIp } from "../auth/clientIp.ts";
@@ -26,11 +26,12 @@ import { isThumbnailUrl } from "#shared/searchThumbnails.ts";
 /**
  * Asset routes (design sections 10.8, 11.1 and 11.2):
  *
- * - `PUT /api/rooms/:id/assets?kind=` upload a raw image or video body
- * - `GET /api/rooms/:id/assets` list what the caller may see
+ * - `PUT /api/rooms/:id/assets?kind=` upload a raw image, video or sound body
+ * - `GET /api/rooms/:id/assets` list the images and videos the caller may see
+ * - `GET /api/rooms/:id/storage` the room's storage, for the DM's Sound panel
  * - `POST /api/rooms/:id/assets/import` import an image from a URL
  * - `POST /api/rooms/:id/assets/starter` copy a starter work into the room
- * - `GET /api/assets/:assetId/:variant` read one image, or a video by ranges
+ * - `GET /api/assets/:assetId/:variant` read one image, or a video or a sound by ranges
  *
  * plus image search, registered from search.ts. `app.assets` is the service
  * behind them, decorated so room import and room deletion can reuse its
@@ -47,6 +48,8 @@ const ROOM_ID = /^[0-9A-HJKMNP-TV-Z]{8}$/;
 
 /** The video types an upload may declare, only with `kind=video` (docs/design/design-v1-animated-maps.md 7). */
 const VIDEO_TYPES = /^video\/(webm|mp4)$/;
+/** The one sound type, only with `kind=sound` (docs/design/design-v1-sound.md 7.2). */
+const SOUND_TYPE = "audio/mpeg";
 
 /** A request's media type, without its parameters, in lower case. */
 function mediaType(req: FastifyRequest): string {
@@ -96,13 +99,14 @@ export async function registerAssetRoutes(app: FastifyInstance, opts: AssetRoute
   }
 
   // The upload route gets a scope of its own with every body parser
-  // removed except a pass-through for image/* and the two video types, so
-  // the handler reads the raw stream itself, after it holds a slot, and
-  // Fastify never buffers it. Any other type is a 415 before a byte is read.
+  // removed except a pass-through for image/*, the two video types and the
+  // sound type, so the handler reads the raw stream itself, after it holds
+  // a slot, and Fastify never buffers it. Any other type is a 415 before a
+  // byte is read.
   await app.register(async (scope) => {
     scope.removeAllContentTypeParsers();
     scope.addContentTypeParser(/^image\/[a-z0-9.+-]+$/i, (_req, _payload, done) => done(null));
-    scope.addContentTypeParser(["video/webm", "video/mp4"], (_req, _payload, done) => done(null));
+    scope.addContentTypeParser(["video/webm", "video/mp4", SOUND_TYPE], (_req, _payload, done) => done(null));
     scope.setErrorHandler(errorHandler);
 
     scope.put<{ Params: { id: string }; Querystring: Record<string, string> }>(
@@ -124,9 +128,11 @@ export async function registerAssetRoutes(app: FastifyInstance, opts: AssetRoute
 
           const grant = await requireGrant(req, reply, roomId);
           if (KINDS[kind].dmOnly && grant.role !== "dm") throw new AssetError(403, "forbidden");
-          // A video type only with the video kind, and an image type only with an image kind, so neither pipeline ever sees the other's bytes.
-          if (VIDEO_TYPES.test(mediaType(req)) !== (kind === "video")) throw new AssetError(415, "unsupported_type");
+          // A video type only with the video kind, the sound type only with the sound kind, and an image type only with an
+          // image kind, so no pipeline ever sees another's bytes.
+          if (!typeFits(kind, mediaType(req))) throw new AssetError(415, "unsupported_type");
           if (kind === "video" && !animatedMapsOn(app.config)) throw new AssetError(403, "video_off");
+          if (kind === "sound" && !roomSoundOn(app.config)) throw new AssetError(403, "sound_off");
           const declared = contentLength(req);
           const cap = KINDS[kind].maxUploadBytes;
           if (declared !== undefined && declared > cap) throw new AssetError(413, "too_large");
@@ -136,11 +142,14 @@ export async function registerAssetRoutes(app: FastifyInstance, opts: AssetRoute
           const ip = ipKey(clientIp(req, trustCf));
           const checks = service.hourlyChecks(grant.sessionId, ip, roomId, kind);
           service.assertHourly(checks);
-          releaseSlot = service.slots.acquire({ kind: "upload", roomId, ip, sessionId: grant.sessionId, pinned: room.pinned, perSession: kind === "video" });
+          // A video or a sound may take 15 minutes to arrive: its slot is the session's, so the table's other phones still upload.
+          const perSession = kind === "video" || kind === "sound";
+          releaseSlot = service.slots.acquire({ kind: "upload", roomId, ip, sessionId: grant.sessionId, pinned: room.pinned, perSession });
           service.hourly.record(checks);
 
-          // A live video must leave headroom in the quota, so one upload never turns the room read-only mid-session.
-          reservation = await service.quota.reserve(roomId, declared ?? cap, { headroom: kind === "video" ? VIDEO_LIMITS.quotaHeadroomBytes : 0 });
+          // A live video or sound must leave headroom in the quota, so one upload never turns the room read-only mid-session.
+          const headroom = kind === "video" ? VIDEO_LIMITS.quotaHeadroomBytes : kind === "sound" ? SOUND_LIMITS.quotaHeadroomBytes : 0;
+          reservation = await service.quota.reserve(roomId, declared ?? cap, { headroom });
           path = tempFile(service.tmpDir, "intake");
           const received = await receiveToFile(req.raw, path, service.bodyLimits(kind));
           bodyRead = true;
@@ -153,6 +162,7 @@ export async function registerAssetRoutes(app: FastifyInstance, opts: AssetRoute
             reservation,
             nameHint: name,
           });
+          service.forgetStorage(roomId);
           return reply.code(200).send(result);
         } catch (err) {
           // Whatever refused the upload, an unread body is never drained:
@@ -200,7 +210,22 @@ export async function registerAssetRoutes(app: FastifyInstance, opts: AssetRoute
       }
       // The variant must be one this row has before any path is built.
       if (!row.variants.includes(variant)) throw new AssetError(404, "not_found");
-      return sendAsset(req, reply, service.assetDir, row, variant, animatedMapsOn(app.config));
+      return sendAsset(req, reply, service.assetDir, row, variant, mediaSwitches(app.config));
+    });
+
+    /*
+     * The DM's storage line (docs/design/design-v1-sound.md 7.2): what the
+     * room's quota counts, the quota, and what its sounds take, in bytes.
+     * Kept per room and read again at most every 10 seconds, or at once
+     * after an upload or a delete (AssetService.storage). A quota of 0 is
+     * none, as for the actor's read-only switch.
+     */
+    scope.get<{ Params: { id: string } }>("/api/rooms/:id/storage", async (req, reply) => {
+      const roomId = req.params.id;
+      const grant = await requireGrant(req, reply, roomId);
+      if (grant.role !== "dm") throw new AssetError(403, "forbidden");
+      reply.header("cache-control", "no-store");
+      return service.storage(roomId);
     });
 
     scope.post<{ Params: { id: string } }>("/api/rooms/:id/assets/import", async (req, reply) => {
@@ -210,8 +235,8 @@ export async function registerAssetRoutes(app: FastifyInstance, opts: AssetRoute
       if (!body.success) throw new AssetError(400, "bad_request");
       const { url, fallback, kind } = body.data;
       if (KINDS[kind].dmOnly && grant.role !== "dm") throw new AssetError(403, "forbidden");
-      // Link and Search the web take images only (docs/design/design-v1-animated-maps.md 4.1).
-      if (kind === "video") throw new AssetError(415, "unsupported_type");
+      // Link and Search the web take images only (docs/design/design-v1-animated-maps.md 4.1, docs/design/design-v1-sound.md 4.2).
+      if (kind === "video" || kind === "sound") throw new AssetError(415, "unsupported_type");
       // The fallback must be a thumbnail a search handed to this server, so a
       // client cannot use it to fetch anything else.
       if (fallback !== undefined && !(isThumbnailUrl(fallback) && (await isCachedThumbnail(app.pool, fallback)))) {
@@ -340,16 +365,35 @@ export async function registerAssetRoutes(app: FastifyInstance, opts: AssetRoute
   });
 }
 
+/** Whether a sent type fits the kind it names: a video's two, a sound's one, and image/* for every image kind. */
+function typeFits(kind: (typeof ASSET_KINDS)[number], type: string): boolean {
+  if (kind === "video") return VIDEO_TYPES.test(type);
+  if (kind === "sound") return type === SOUND_TYPE;
+  return type.startsWith("image/");
+}
+
+/** The server owner's two media switches, which the asset routes read on each request. */
+export type MediaSwitches = { videos: boolean; sounds: boolean };
+
+export function mediaSwitches(config: Pick<Config, "ANIMATED_MAPS" | "ROOM_SOUND">): MediaSwitches {
+  return { videos: animatedMapsOn(config), sounds: roomSoundOn(config) };
+}
+
 /**
- * One variant, as an image or as a video by ranges, for this route and the
- * display's. Every video answers 404 while the server's switch is off
- * (D-261102-510), the same 404 as a file that never existed.
+ * One variant, as an image, or as a video or a sound by ranges, for this
+ * route and the display's. Every video answers 404 while its switch is off
+ * (D-261102-510), and every sound while its own is (D-261102-513), the same
+ * 404 as a file that never existed.
  */
-export function sendAsset(req: FastifyRequest, reply: FastifyReply, assetDir: string, row: AssetRow, variant: Variant, videosOn: boolean): Promise<FastifyReply> {
+export function sendAsset(req: FastifyRequest, reply: FastifyReply, assetDir: string, row: AssetRow, variant: Variant, switches: MediaSwitches): Promise<FastifyReply> {
   const hex = row.sha256.toString("hex");
+  if (row.kind === "sound") {
+    if (!switches.sounds || row.media !== SOUND_MEDIA) throw new AssetError(404, "not_found");
+    return sendMedia(req, reply, variantPath(assetDir, hex, row.kind, variant, row.pipeline, row.media), { type: "audio/mpeg", etag: mediaEtag(hex, row.pipeline) });
+  }
   if (row.kind !== "video") return sendVariant(reply, variantPath(assetDir, hex, row.kind, variant, row.pipeline));
-  if (!videosOn || !isVideoContainer(row.media)) throw new AssetError(404, "not_found");
-  return sendVideo(req, reply, variantPath(assetDir, hex, row.kind, variant, row.pipeline, row.media), { media: row.media, etag: videoEtag(hex, row.pipeline) });
+  if (!switches.videos || !isVideoContainer(row.media)) throw new AssetError(404, "not_found");
+  return sendMedia(req, reply, variantPath(assetDir, hex, row.kind, variant, row.pipeline, row.media), { type: `video/${row.media}`, etag: mediaEtag(hex, row.pipeline) });
 }
 
 function contentLength(req: FastifyRequest): number | undefined {

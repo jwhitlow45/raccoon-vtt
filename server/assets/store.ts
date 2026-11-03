@@ -3,8 +3,9 @@ import { access, mkdir, readdir, rename, rm, stat, unlink } from "node:fs/promis
 import { dirname, join } from "node:path";
 import type pg from "pg";
 import { z } from "zod";
-import { LIMITS } from "#shared/limits.ts";
-import type { VideoContainer, VideoFacts } from "#shared/model.ts";
+import { MP3_BITRATES } from "#shared/audio/mp3.ts";
+import { LIMITS, SOUND_LIMITS } from "#shared/limits.ts";
+import type { SoundFacts, VideoContainer, VideoFacts } from "#shared/model.ts";
 import { assetCreditSchema, type AssetCredit } from "#shared/protocol.ts";
 import { PLAYER_UPLOAD_KINDS, VARIANTS, isAssetKind, isVariant, type AssetKind, type AssetView, type Variant } from "./kinds.ts";
 import { KeyedMutex } from "./locks.ts";
@@ -27,7 +28,7 @@ import type { ProcessedVariant } from "./process.ts";
  *
  * Images are WebP. A video keeps its real extension, `.webm` or `.mp4`,
  * from its row's `media` (D-261102-454), so every tool and operator reads
- * it as what it is.
+ * it as what it is, and a sound is `.mp3` (docs/design/design-v1-sound.md 7.2).
  */
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
@@ -38,8 +39,25 @@ export function isVideoContainer(value: unknown): value is VideoContainer {
   return typeof value === "string" && (VIDEO_CONTAINERS as readonly string[]).includes(value);
 }
 
-/** A file's extension: WebP for every image, and a video's own container, which a video must name. */
-export function fileExtension(kind: AssetKind, media?: VideoContainer | null): "webp" | VideoContainer {
+/** A sound's one container, the only file a sound row names (docs/design/design-v1-sound.md 7.2). */
+export const SOUND_MEDIA = "mp3";
+
+/** What a row's `media` column may hold: a video's container or a sound's. Null for an image. */
+export type AssetMedia = VideoContainer | typeof SOUND_MEDIA;
+
+/** The extensions each kind's files take, the only ones cleanup, deletion and the backup look for. */
+export function kindExtensions(kind: AssetKind): readonly ("webp" | AssetMedia)[] {
+  if (kind === "video") return VIDEO_CONTAINERS;
+  if (kind === "sound") return [SOUND_MEDIA];
+  return ["webp"];
+}
+
+/** A file's extension: WebP for every image, a video's own container, which a video must name, and a sound's `mp3`. */
+export function fileExtension(kind: AssetKind, media?: AssetMedia | null): "webp" | AssetMedia {
+  if (kind === "sound") {
+    if (media !== SOUND_MEDIA) throw new Error("a sound is stored as mp3");
+    return media;
+  }
   if (kind !== "video") {
     if (media) throw new Error("an image has no container of its own");
     return "webp";
@@ -48,7 +66,7 @@ export function fileExtension(kind: AssetKind, media?: VideoContainer | null): "
   return media;
 }
 
-export function variantFileName(sha256Hex: string, kind: AssetKind, variant: Variant, pipeline: number, media?: VideoContainer | null): string {
+export function variantFileName(sha256Hex: string, kind: AssetKind, variant: Variant, pipeline: number, media?: AssetMedia | null): string {
   // Every part is checked even though callers pass values from our own rows:
   // this string becomes a path, and a path is the wrong place to trust input.
   if (!SHA256_HEX.test(sha256Hex) || !isAssetKind(kind) || !isVariant(variant) || !Number.isInteger(pipeline) || pipeline < 1) {
@@ -57,8 +75,8 @@ export function variantFileName(sha256Hex: string, kind: AssetKind, variant: Var
   return `${sha256Hex}-${kind}-${variant}-v${pipeline}.${fileExtension(kind, media)}`;
 }
 
-/** `<assetDir>/<first two hex chars>/<sha256>-<kind>-<variant>-v<pipeline>.<webp, webm or mp4>` */
-export function variantPath(assetDir: string, sha256Hex: string, kind: AssetKind, variant: Variant, pipeline: number, media?: VideoContainer | null): string {
+/** `<assetDir>/<first two hex chars>/<sha256>-<kind>-<variant>-v<pipeline>.<webp, webm, mp4 or mp3>` */
+export function variantPath(assetDir: string, sha256Hex: string, kind: AssetKind, variant: Variant, pipeline: number, media?: AssetMedia | null): string {
   return join(assetDir, sha256Hex.slice(0, 2), variantFileName(sha256Hex, kind, variant, pipeline, media));
 }
 
@@ -79,7 +97,7 @@ export function trashDay(at: Date): string {
  * file keeps its own path below its day, so the backup finds it under any
  * day folder from the very line its list holds (docker/backup.sh).
  */
-export function trashPath(assetDir: string, at: Date, sha256Hex: string, kind: AssetKind, variant: Variant, pipeline: number, media?: VideoContainer | null): string {
+export function trashPath(assetDir: string, at: Date, sha256Hex: string, kind: AssetKind, variant: Variant, pipeline: number, media?: AssetMedia | null): string {
   return join(assetDir, "trash", trashDay(at), sha256Hex.slice(0, 2), variantFileName(sha256Hex, kind, variant, pipeline, media));
 }
 
@@ -136,10 +154,12 @@ export type AssetRow = {
   width: number;
   height: number;
   variants: Variant[];
-  /** A video's container, which names its file and its Content-Type. Null for an image. */
-  media: VideoContainer | null;
-  /** A video's facts from its header check, without its size and container (`StoredVideo`). Null for an image. */
+  /** A video's container or a sound's `mp3`, which names its file and its Content-Type. Null for an image. */
+  media: AssetMedia | null;
+  /** A video's facts from its header check, without its size and container (`StoredVideo`). Null for an image and a sound. */
   video: unknown;
+  /** A sound's facts from its frame walk (`storedSoundSchema`). Null for anything else. */
+  audio: unknown;
 };
 
 /**
@@ -166,6 +186,28 @@ export function storedVideo(facts: VideoFacts): StoredVideo {
   return rest;
 }
 
+/** The bitrates a stored sound may have: MPEG-1 Layer III's within the sound limits. */
+const SOUND_KBPS: readonly number[] = MP3_BITRATES.filter((kbps) => kbps >= SOUND_LIMITS.minKbps && kbps <= SOUND_LIMITS.maxKbps);
+
+/**
+ * The `audio` column: what the frame walk found (docs/design/design-v1-sound.md
+ * 7.2), held to the walk's own bounds. The intake parses a file's facts
+ * through it before the row is written, and every read of a row goes
+ * through it again, so a stored row is never one a reader refuses.
+ */
+export const storedSoundSchema = z.strictObject({
+  ms: z.number().int().min(SOUND_LIMITS.fileMinMs).max(SOUND_LIMITS.fileMaxMs),
+  channels: z.union([z.literal(1), z.literal(2)]),
+  kbps: z.number().int().refine((kbps) => SOUND_KBPS.includes(kbps), "a bitrate a stored sound may have"),
+});
+
+/** A row's sound facts, or undefined for anything but a sound whose columns read as one. */
+export function soundFactsOfRow(row: Pick<AssetRow, "kind" | "media" | "audio">): SoundFacts | undefined {
+  if (row.kind !== "sound" || row.media !== SOUND_MEDIA) return undefined;
+  const parsed = storedSoundSchema.safeParse(row.audio);
+  return parsed.success ? parsed.data : undefined;
+}
+
 /** A row's video facts, or undefined for an image or a row whose columns do not read as a video's. */
 export function videoFactsOf(row: Pick<AssetRow, "kind" | "width" | "height" | "media" | "video">): VideoFacts | undefined {
   if (row.kind !== "video" || !isVideoContainer(row.media)) return undefined;
@@ -174,14 +216,16 @@ export function videoFactsOf(row: Pick<AssetRow, "kind" | "width" | "height" | "
   return { widthPx: row.width, heightPx: row.height, container: row.media, ...parsed.data };
 }
 
-export function toView(row: Pick<AssetRow, "id" | "kind" | "width" | "height" | "variants"> & Partial<Pick<AssetRow, "media" | "video">>): AssetView {
+export function toView(row: Pick<AssetRow, "id" | "kind" | "width" | "height" | "variants"> & Partial<Pick<AssetRow, "media" | "video" | "audio">>): AssetView {
   const view: AssetView = { id: row.id, kind: row.kind, width: row.width, height: row.height, variants: row.variants };
   const video = videoFactsOf({ kind: row.kind, width: row.width, height: row.height, media: row.media ?? null, video: row.video ?? null });
   if (video) view.video = video;
+  const audio = soundFactsOfRow({ kind: row.kind, media: row.media ?? null, audio: row.audio ?? null });
+  if (audio) view.audio = audio;
   return view;
 }
 
-const ROW_COLUMNS = "id, room_id, sha256, kind, pipeline, width, height, variants, media, video";
+const ROW_COLUMNS = "id, room_id, sha256, kind, pipeline, width, height, variants, media, video, audio";
 
 export async function getAsset(db: pg.Pool | pg.PoolClient, assetId: string): Promise<AssetRow | null> {
   const { rows } = await db.query<AssetRow>(`select ${ROW_COLUMNS} from assets where id = $1`, [assetId]);
@@ -221,6 +265,10 @@ export async function addUploaders(db: pg.Pool | pg.PoolClient, assetId: string,
  * room already held lists as a new one does (design 11.1). What they see
  * without having added it lists by when the room did. The DM's list keeps
  * the room's order.
+ *
+ * Sounds are no images, so no library lists them
+ * (docs/design/design-v1-sound.md 7.2): the Sound panel reads the room's
+ * sounds from its state, and their bytes from the storage route.
  */
 export async function listRoomAssets(pool: pg.Pool, roomId: string, ids?: ReadonlySet<string>, memberId?: string): Promise<AssetView[]> {
   if (ids && ids.size === 0) return [];
@@ -229,11 +277,11 @@ export async function listRoomAssets(pool: pg.Pool, roomId: string, ids?: Readon
     ? await pool.query<Listed>(
         `select ${ROW_COLUMNS}, credit, starter from assets a
          left join asset_uploaders u on u.asset_id = a.id and u.member_id = $3
-         where a.room_id = $1 and a.id = any($2::uuid[])
+         where a.room_id = $1 and a.id = any($2::uuid[]) and a.kind <> 'sound'
          order by coalesce(u.added_at, a.created_at) desc, a.id`,
         [roomId, [...ids], memberId ?? null],
       )
-    : await pool.query<Listed>(`select ${ROW_COLUMNS}, credit, starter from assets where room_id = $1 order by created_at desc, id`, [
+    : await pool.query<Listed>(`select ${ROW_COLUMNS}, credit, starter from assets where room_id = $1 and kind <> 'sound' order by created_at desc, id`, [
         roomId,
       ]);
   return rows.map((row) => {
@@ -284,7 +332,15 @@ export type NewAsset = {
   starter?: string;
   /** A video's facts, which name its file's container and fill its row's `media` and `video`. */
   video?: VideoFacts;
+  /** A sound's facts, which fill its row's `audio`, its `media` being `mp3`. */
+  audio?: SoundFacts;
 };
+
+/** The `media` a new row takes: a video's container, a sound's mp3, or none for an image. */
+function mediaOf(asset: Pick<NewAsset, "kind" | "video">): AssetMedia | null {
+  if (asset.kind === "sound") return SOUND_MEDIA;
+  return asset.video?.container ?? null;
+}
 
 /**
  * Moves processed variants to their content names and writes the row and its
@@ -319,7 +375,7 @@ export async function placeAndInsert(pool: pg.Pool, assetDir: string, asset: New
 async function placeFiles(assetDir: string, asset: NewAsset, pipeline: number): Promise<void> {
   const hex = asset.sha256.toString("hex");
   for (const v of asset.variants) {
-    const target = variantPath(assetDir, hex, asset.kind, v.name, pipeline, asset.video?.container);
+    const target = variantPath(assetDir, hex, asset.kind, v.name, pipeline, mediaOf(asset));
     await mkdir(dirname(target), { recursive: true });
     if (await exists(target)) {
       await unlink(v.path).catch(() => undefined);
@@ -337,8 +393,8 @@ async function insertRow(pool: pg.Pool, asset: NewAsset, pipeline: number): Prom
   try {
     await client.query("begin");
     const inserted = await client.query<AssetRow>(
-      `insert into assets (id, room_id, sha256, kind, pipeline, width, height, bytes, variants, credit, starter, media, video)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      `insert into assets (id, room_id, sha256, kind, pipeline, width, height, bytes, variants, credit, starter, media, video, audio)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
        on conflict (room_id, sha256, kind) do nothing
        returning ${ROW_COLUMNS}`,
       [
@@ -353,8 +409,9 @@ async function insertRow(pool: pg.Pool, asset: NewAsset, pipeline: number): Prom
         asset.variants.map((v) => v.name),
         asset.credit ? JSON.stringify(asset.credit) : null,
         asset.starter ?? null,
-        asset.video?.container ?? null,
+        mediaOf(asset),
         asset.video ? JSON.stringify(storedVideo(asset.video)) : null,
+        asset.kind === "sound" ? JSON.stringify(storedSoundSchema.parse(asset.audio)) : null,
       ],
     );
     let row = inserted.rows[0];
@@ -410,7 +467,7 @@ async function deleteIfUnreferenced(pool: pg.Pool, assetDir: string, key: FileKe
   // Every variant name, not only this kind's current list, so files from a
   // recipe with a different variant set are cleaned up too. A video's bytes
   // decide its container, so its key names no extension and both are tried.
-  const extensions = key.kind === "video" ? VIDEO_CONTAINERS : [null];
+  const extensions: readonly (AssetMedia | null)[] = key.kind === "video" ? VIDEO_CONTAINERS : key.kind === "sound" ? [SOUND_MEDIA] : [null];
   for (const variant of VARIANTS) {
     for (const media of extensions) {
       if (await moveToTrash(assetDir, at, hex, key.kind, variant, key.pipeline, media)) deleted++;
@@ -420,7 +477,7 @@ async function deleteIfUnreferenced(pool: pg.Pool, assetDir: string, key: FileKe
 }
 
 /** A rename on the same volume. False when there was no such file. */
-async function moveToTrash(assetDir: string, at: Date, hex: string, kind: AssetKind, variant: Variant, pipeline: number, media: VideoContainer | null): Promise<boolean> {
+async function moveToTrash(assetDir: string, at: Date, hex: string, kind: AssetKind, variant: Variant, pipeline: number, media: AssetMedia | null): Promise<boolean> {
   const from = variantPath(assetDir, hex, kind, variant, pipeline, media);
   try {
     await stat(from);

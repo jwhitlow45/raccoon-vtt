@@ -14,7 +14,7 @@ import { RoomNotFoundError } from "../rooms/gateway.ts";
 import type { RoomManager } from "../rooms/manager.ts";
 import { isAssetKind, type AssetView } from "./kinds.ts";
 import { roomStoredBytes } from "./quota.ts";
-import { deleteUnreferencedFiles, purgeTrash, type FileKey } from "./store.ts";
+import { deleteUnreferencedFiles, kindExtensions, purgeTrash, type FileKey } from "./store.ts";
 
 /**
  * Cleanup of unused images (docs/design/design-v1-dm-tools.md 3.19).
@@ -43,6 +43,13 @@ import { deleteUnreferencedFiles, purgeTrash, type FileKey } from "./store.ts";
  * (docs/design/design-v1-animated-maps.md 4.6), named by maps and phases as
  * an image is, and deleted, swept and trashed the same way under its own
  * extension.
+ *
+ * A sound file (docs/design/design-v1-sound.md 7.3) is in no library: the
+ * room's `sounds` name it. So a sound row they do not name is swept by the
+ * thumbnails' rule, a day after it was first found unnamed, which frees the
+ * space of an upload whose `sound.create` never landed. The DM's delete of a
+ * sound also asks the library delete route to delete its row at once, which
+ * it does once nothing names it, since two sounds may name one file.
  */
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -51,12 +58,12 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * `<sha256>-<kind>-<variant>-v<pipeline>.<ext>`, the only names the orphan
- * sweep ever touches: `.webp` for an image, and `.webm` or `.mp4` for a
- * video (D-261102-454). A name whose extension is not its kind's is no file
- * this server made, and stays where it is.
+ * sweep ever touches: `.webp` for an image, `.webm` or `.mp4` for a video
+ * (D-261102-454) and `.mp3` for a sound. A name whose extension is not its
+ * kind's is no file this server made, and stays where it is.
  */
-const VARIANT_FILE = /^([0-9a-f]{64})-([a-z]+)-([a-z]+)-v([1-9][0-9]{0,5})\.(webp|webm|mp4)$/;
-/** The two-character folders images and videos live in. tmp, import and trash never match. */
+const VARIANT_FILE = /^([0-9a-f]{64})-([a-z]+)-([a-z]+)-v([1-9][0-9]{0,5})\.(webp|webm|mp4|mp3)$/;
+/** The two-character folders images, videos and sounds live in. tmp, import and trash never match. */
 const PREFIX_DIR = /^[0-9a-f]{2}$/;
 
 export type CleanupDeps = {
@@ -335,32 +342,36 @@ async function removeFiles(deps: CleanupDeps, roomId: string, rows: readonly Del
   });
 }
 
-// Thumbnails ----------------------------------------------------------------
+// Thumbnails and sounds -------------------------------------------------------
 
-export type ThumbSweep = { marked: number; cleared: number; deleted: number; skipped: boolean };
+export type UnnamedSweep = { marked: number; cleared: number; deleted: number; skipped: boolean };
+
+/** The kinds no library lists, so that cleanup alone deletes them once the state stops naming them. */
+const SWEPT_KINDS = ["thumb", "sound"] as const;
 
 /**
- * Marks the room's scene thumbnails its state does not name as unused since
- * now, clears the mark on any named again, and deletes those unused for a
- * day, rows and then files. Nothing restores an old thumbnail (a restore
- * keeps the current one), so nothing can need one back.
+ * Marks the room's scene thumbnails and sounds its state does not name as
+ * unused since now, clears the mark on any named again, and deletes those
+ * unused for a day, rows and then files. Nothing restores an old thumbnail
+ * (a restore keeps the current one), and no Setup step creates a sound
+ * (docs/design/design-v1-sound.md 6.6), so nothing can need one back.
  */
-export async function sweepThumbnails(deps: CleanupDeps, roomId: string): Promise<ThumbSweep> {
-  type Outcome = { sweep: ThumbSweep; rows: DeletedRow[] };
+export async function sweepUnnamed(deps: CleanupDeps, roomId: string): Promise<UnnamedSweep> {
+  type Outcome = { sweep: UnnamedSweep; rows: DeletedRow[] };
   const apply = async (used: readonly string[]): Promise<Outcome> => {
     const cleared = await deps.pool.query(
-      "update assets set unused_since = null where room_id = $1 and kind = 'thumb' and unused_since is not null and id = any($2::uuid[])",
-      [roomId, used],
+      "update assets set unused_since = null where room_id = $1 and kind = any($3::text[]) and unused_since is not null and id = any($2::uuid[])",
+      [roomId, used, SWEPT_KINDS],
     );
     const marked = await deps.pool.query(
-      "update assets set unused_since = now() where room_id = $1 and kind = 'thumb' and unused_since is null and not (id = any($2::uuid[]))",
-      [roomId, used],
+      "update assets set unused_since = now() where room_id = $1 and kind = any($3::text[]) and unused_since is null and not (id = any($2::uuid[]))",
+      [roomId, used, SWEPT_KINDS],
     );
     const { rows } = await deps.pool.query<DeletedRow>(
       `delete from assets
-       where room_id = $1 and kind = 'thumb' and unused_since <= now() - make_interval(days => $3) and not (id = any($2::uuid[]))
+       where room_id = $1 and kind = any($4::text[]) and unused_since <= now() - make_interval(days => $3) and not (id = any($2::uuid[]))
        returning id::text as id, sha256, kind, pipeline`,
-      [roomId, used, LIMITS.thumbUnusedDays],
+      [roomId, used, LIMITS.thumbUnusedDays, SWEPT_KINDS],
     );
     return { sweep: { marked: marked.rowCount ?? 0, cleared: cleared.rowCount ?? 0, deleted: rows.length, skipped: false }, rows };
   };
@@ -372,7 +383,7 @@ export async function sweepThumbnails(deps: CleanupDeps, roomId: string): Promis
       return { deleted: done.rows.map((r) => r.id), result: done };
     },
     unloaded: async () => {
-      const { rows } = await deps.pool.query<{ id: string }>("select id::text as id from assets where room_id = $1 and kind = 'thumb'", [roomId]);
+      const { rows } = await deps.pool.query<{ id: string }>("select id::text as id from assets where room_id = $1 and kind = any($2::text[])", [roomId, SWEPT_KINDS]);
       if (rows.length === 0) return { sweep: { marked: 0, cleared: 0, deleted: 0, skipped: false }, rows: [] };
       const used = await textScanUsed(
         deps.pool,
@@ -411,7 +422,7 @@ export async function sweepOrphanFiles(pool: pg.Pool, assetDir: string, now: num
     const candidates = new Map<string, FileKey>();
     for (const name of await readdir(join(assetDir, dir))) {
       const m = VARIANT_FILE.exec(name);
-      if (!m || m[1]!.slice(0, 2) !== dir || !isAssetKind(m[2]) || (m[2] === "video") !== (m[5] !== "webp")) continue;
+      if (!m || m[1]!.slice(0, 2) !== dir || !isAssetKind(m[2]) || !(kindExtensions(m[2]) as readonly string[]).includes(m[5]!)) continue;
       const age = await stat(join(assetDir, dir, name)).then(
         (s) => now - s.mtimeMs,
         () => 0,
@@ -435,10 +446,10 @@ export async function sweepOrphanFiles(pool: pg.Pool, assetDir: string, now: num
 
 // The daily job ---------------------------------------------------------------
 
-export type CleanupReport = { rooms: number; thumbsDeleted: number; orphanFiles: number | null; trashDaysPurged: number };
+export type CleanupReport = { rooms: number; unnamedDeleted: number; orphanFiles: number | null; trashDaysPurged: number };
 
 /**
- * Once a day in the server process: every room's thumbnails, the trash's
+ * Once a day in the server process: every room's thumbnails and sounds, the trash's
  * purge, and the walk for files no row names, which runs on the first pass
  * after the server starts and then every seventh. A restart only brings the
  * walk forward, which is harmless, since it keeps every file a row names
@@ -487,19 +498,19 @@ export class CleanupJob {
     const { pool, assetDir, log } = this.#deps;
     const walk = this.#passes % 7 === 0;
     this.#passes++;
-    const { rows } = await pool.query<{ room_id: string }>("select distinct room_id from assets where kind = 'thumb' order by room_id");
-    let thumbsDeleted = 0;
+    const { rows } = await pool.query<{ room_id: string }>("select distinct room_id from assets where kind = any($1::text[]) order by room_id", [SWEPT_KINDS]);
+    let unnamedDeleted = 0;
     for (const { room_id: roomId } of rows) {
       if (this.#stopped) break;
       try {
-        thumbsDeleted += (await sweepThumbnails(this.#deps, roomId)).deleted;
+        unnamedDeleted += (await sweepUnnamed(this.#deps, roomId)).deleted;
       } catch (err) {
-        log.warn({ err, roomId }, "thumbnail cleanup failed for a room");
+        log.warn({ err, roomId }, "thumbnail and sound cleanup failed for a room");
       }
     }
     const orphanFiles = walk && !this.#stopped ? await sweepOrphanFiles(pool, assetDir) : null;
     const purged = await purgeTrash(assetDir);
-    const report: CleanupReport = { rooms: rows.length, thumbsDeleted, orphanFiles, trashDaysPurged: purged.length };
+    const report: CleanupReport = { rooms: rows.length, unnamedDeleted, orphanFiles, trashDaysPurged: purged.length };
     log.info(report, "image cleanup done");
     return report;
   }
@@ -548,6 +559,7 @@ export async function registerCleanup(app: FastifyInstance, opts: CleanupOptions
     const body = DeleteBody.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: "bad_request" });
     const result = await deleteLibraryImages(deps, roomId, body.data.ids);
+    if (result.ok && result.deleted.length > 0) app.assets.forgetStorage(roomId);
     if (result.ok) {
       if (result.deleted.length > 0) req.log.info({ roomId, images: result.deleted.length }, "a DM deleted library images");
       return { deleted: result.deleted };

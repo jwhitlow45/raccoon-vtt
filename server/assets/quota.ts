@@ -54,12 +54,14 @@ export type StoredBytesFn = (roomId: string) => Promise<number>;
  * under a per-room lock that also reads the stored size, so two concurrent
  * uploads can never both fit into the same remaining space.
  *
- * A live video upload also keeps `headroom` of the quota free
- * (docs/design/design-v1-animated-maps.md 6.3): a room at its quota turns
- * read-only mid-session, and one 64 MB video could put it there. Other
- * reservations do not count a video's headroom, so the video's commit
- * checks it again, against what is stored and reserved by then. An import
- * passes none, so a near-full room's backup still imports.
+ * A live video or sound upload also keeps `headroom` of the quota free
+ * (docs/design/design-v1-animated-maps.md 6.3, docs/design/design-v1-sound.md
+ * 7.2): a room at its quota turns read-only mid-session, and one 64 MB video
+ * could put it there. Other reservations do not count an upload's headroom,
+ * and the room's own writes may take it during a long upload, so the commit
+ * checks it again, whatever the final size, against what is stored and
+ * reserved by then. An import passes none, so a near-full room's backup still
+ * imports.
  */
 export class RoomQuota {
   readonly quotaBytes: number;
@@ -93,7 +95,7 @@ export class RoomQuota {
   async commitReservation<T>(res: Reservation, finalBytes: number, write: () => Promise<T>): Promise<T> {
     return this.#locks.run(res.roomId, async () => {
       if (res.released) throw new Error("reservation already released");
-      // A live video checks again however its size came out (AMBUILD-SOL-004): uploads reserved after it and the room's own writes may have taken its headroom since.
+      // A live upload with headroom checks again however its size came out (AMBUILD-SOL-004): uploads reserved after it and the room's own writes may have taken its headroom since.
       if (finalBytes > res.bytes || res.headroom > 0) {
         const stored = await this.#storedBytes(res.roomId);
         const others = this.reservedBytes(res.roomId) - res.bytes;

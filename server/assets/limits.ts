@@ -1,3 +1,4 @@
+import { SOUND_LIMITS } from "#shared/limits.ts";
 import type { AssetKind } from "./kinds.ts";
 
 /**
@@ -92,6 +93,13 @@ const THUMB_HOURLY = { session: 240, room: 240 } as const;
 export const HANDOUT_HOURLY = { session: 250, room: 250 } as const;
 
 /**
+ * And sounds (docs/design/design-v1-sound.md 7.2): an Add button takes 20
+ * files a pick, and a DM filling a library adds a few dozen in an evening.
+ * A sound is DM only, and every one still counts against the room's quota.
+ */
+export const SOUND_HOURLY = { session: SOUND_LIMITS.hourlyPerSession, room: SOUND_LIMITS.hourlyPerRoom } as const;
+
+/**
  * Starter picks (docs/design/design-v1-starter-art.md 5) have a budget of their
  * own too. A pick runs the image pipeline as an upload does, which is the
  * cost this guards, but it never grows the room's storage, and a DM trying
@@ -117,7 +125,7 @@ export function starterHourlyChecks(sessionId: string, ip: string, roomId: strin
  * The hourly budgets an upload of `kind` spends, by key. Uploads and URL
  * imports share one (design section 10.3): 30 per session, 60 per IP, 120
  * per room. Per IP and per room are there because anyone with the password
- * can mint new sessions. A thumbnail or a handout spends only its own, per
+ * can mint new sessions. A thumbnail, a handout or a sound spends only its own, per
  * session and per room: only a DM may upload one, and a DM session needs
  * the DM link. A URL import passes no kind, so it always spends the shared
  * budget and the larger ones never pay for outbound fetches.
@@ -133,6 +141,12 @@ export function hourlyChecks(sessionId: string, ip: string, roomId: string, kind
     return [
       { key: `handout:s:${sessionId}`, limit: HANDOUT_HOURLY.session },
       { key: `handout:r:${roomId}`, limit: HANDOUT_HOURLY.room },
+    ];
+  }
+  if (kind === "sound") {
+    return [
+      { key: `sound:s:${sessionId}`, limit: SOUND_HOURLY.session },
+      { key: `sound:r:${roomId}`, limit: SOUND_HOURLY.room },
     ];
   }
   return [

@@ -1,0 +1,376 @@
+import assert from "node:assert/strict";
+import { createHash, randomUUID } from "node:crypto";
+import { access, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { after, before, describe, test } from "node:test";
+import { SOUND_LIMITS } from "#shared/limits.ts";
+import type { SoundFacts } from "#shared/model.ts";
+import { concat, framesFor, id3v1, id3v2, silentFrames, withTagFrame } from "#shared/audio/mp3Testutil.ts";
+import { formatDisplayCode } from "../auth/displaySessions.ts";
+import { startEngine, type Engine, type TestClient } from "../rooms/testing.ts";
+import { sweepOrphanFiles, sweepUnnamed } from "./cleanup.ts";
+import { SOUND_PIPELINE } from "./kinds.ts";
+import { roomStoredBytes } from "./quota.ts";
+import { variantPath } from "./store.ts";
+import { solid } from "./testImages.ts";
+
+/**
+ * Sound files on the server (docs/design/design-v1-sound.md 7 and 12,
+ * Integration): the switch on and off, uploads checked frame by frame in a
+ * worker, refusals by code, reuse, serving by ranges, players' and
+ * displays' 404s, the quota and its headroom, deletion, the storage route
+ * and cleanup.
+ */
+
+const MiB = 1024 * 1024;
+const sha = (b: Uint8Array) => createHash("sha256").update(b).digest("hex");
+const HANG = new URL("./audio/hangWorker.testutil.ts", import.meta.url);
+
+type Uploaded = { id: string; kind: string; width: number; height: number; variants: string[]; audio?: SoundFacts; created?: boolean };
+
+function upload(client: TestClient, roomId: string, body: Uint8Array, opts: { type?: string; kind?: string } = {}) {
+  return client.request("PUT", `/api/rooms/${roomId}/assets?kind=${opts.kind ?? "sound"}`, undefined, { "content-type": opts.type ?? "audio/mpeg" }, Buffer.from(body));
+}
+
+async function uploaded(client: TestClient, roomId: string, body: Uint8Array): Promise<Uploaded> {
+  const res = await upload(client, roomId, body);
+  assert.equal(res.statusCode, 200, res.body);
+  return res.json<Uploaded>();
+}
+
+const read = (client: TestClient, id: string, headers: Record<string, string> = {}) => client.request("GET", `/api/assets/${id}/full`, undefined, headers);
+
+async function exists(path: string): Promise<boolean> {
+  return access(path).then(
+    () => true,
+    () => false,
+  );
+}
+
+/** A distinct sound of `ms`, its bytes told apart by which frames carry the private bit. */
+function sound(ms = 3_000, seed = Math.floor(Math.random() * 1e9), shape: Parameters<typeof silentFrames>[1] = {}): Uint8Array {
+  return silentFrames(framesFor(ms, shape.rateHz), { ...shape, bits: (i) => ({ private: ((seed >> i % 30) & 1) === 1 }) });
+}
+
+describe("sound files with the switch on", () => {
+  let t: Engine;
+  before(async () => {
+    t = await startEngine({ env: { ROOM_SOUND: "1" } });
+  });
+  after(async () => {
+    await t.close();
+  });
+
+  test("a DM's upload stores the bytes the walk took as one .mp3, and answers its facts and created", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom();
+    const bytes = withTagFrame(sound(4_000));
+    const first = await uploaded(dm, roomId, bytes);
+    assert.deepEqual({ kind: first.kind, width: first.width, height: first.height, variants: first.variants, created: first.created }, { kind: "sound", width: 0, height: 0, variants: ["full"], created: true });
+    assert.deepEqual(first.audio, { ms: Math.floor((framesFor(4_000) * 1152 * 1000) / 44_100), channels: 2, kbps: 128 });
+    const { rows } = await t.pool.query<{ media: string; audio: unknown; video: unknown; pipeline: number; bytes: string }>("select media, audio, video, pipeline, bytes from assets where id = $1", [first.id]);
+    assert.deepEqual({ ...rows[0], bytes: Number(rows[0]!.bytes) }, { media: "mp3", audio: first.audio, video: null, pipeline: SOUND_PIPELINE, bytes: bytes.length });
+    const file = await readFile(variantPath(t.assetDir, sha(bytes), "sound", "full", SOUND_PIPELINE, "mp3"));
+    assert.ok(file.equals(bytes), "kept as it came");
+    // The same bytes again reuse the row, so two sounds may name one file.
+    const again = await uploaded(dm, roomId, bytes);
+    assert.deepEqual({ id: again.id, created: again.created }, { id: first.id, created: false });
+    assert.deepEqual(await readdir(join(t.assetDir, "tmp")), []);
+    // No library lists a sound: the room's sounds name them.
+    const library = await dm.get(`/api/rooms/${roomId}/assets`);
+    assert.deepEqual(library.json<{ assets: unknown[] }>().assets, []);
+  });
+
+  test("served as audio/mpeg with the image headers and a strong ETag, by ranges", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom();
+    const bytes = sound(2_000, 7, { kbps: 64, mode: 3, rateHz: 48_000 });
+    const s = await uploaded(dm, roomId, bytes);
+    assert.deepEqual(s.audio, { ms: Math.floor((framesFor(2_000, 48_000) * 1152 * 1000) / 48_000), channels: 1, kbps: 64 });
+    const whole = await read(dm, s.id);
+    assert.equal(whole.statusCode, 200);
+    assert.equal(whole.headers["content-type"], "audio/mpeg");
+    assert.equal(whole.headers["x-content-type-options"], "nosniff");
+    assert.equal(whole.headers["content-security-policy"], "default-src 'none'; sandbox");
+    assert.equal(whole.headers["cross-origin-resource-policy"], "same-origin");
+    assert.equal(whole.headers["cache-control"], "private, max-age=31536000, immutable");
+    assert.equal(whole.headers["accept-ranges"], "bytes");
+    assert.equal(whole.headers.etag, `"${sha(bytes)}-v${SOUND_PIPELINE}"`);
+    assert.ok(whole.rawPayload.equals(Buffer.from(bytes)));
+    const part = await read(dm, s.id, { range: "bytes=100-299" });
+    assert.equal(part.statusCode, 206);
+    assert.equal(part.headers["content-range"], `bytes 100-299/${bytes.length}`);
+    assert.ok(part.rawPayload.equals(Buffer.from(bytes.subarray(100, 300))));
+    assert.equal((await read(dm, s.id, { range: `bytes=${bytes.length}-` })).statusCode, 416);
+    assert.equal((await read(dm, s.id, { range: "bytes=0-9", "if-range": whole.headers.etag as string })).statusCode, 206);
+    assert.equal((await read(dm, s.id, { range: "bytes=0-9", "if-range": '"another"' })).statusCode, 200);
+  });
+
+  test("the upload pairs audio/mpeg with the sound kind, before a byte is read, and only a DM adds one", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom();
+    const bytes = sound();
+    for (const [type, kind] of [["audio/mpeg", "map"], ["audio/mpeg", "video"], ["image/png", "sound"], ["video/webm", "sound"], ["video/mp4", "sound"]] as const) {
+      const res = await upload(dm, roomId, bytes, { type, kind });
+      assert.equal(res.statusCode, 415, `${type} as ${kind}: ${res.body}`);
+      assert.deepEqual(res.json(), { error: "unsupported_type" });
+      assert.equal(res.headers.connection, "close", "the body is never read");
+    }
+    for (const type of ["audio/ogg", "audio/wav", "application/octet-stream"]) assert.equal((await upload(dm, roomId, bytes, { type })).statusCode, 415, type);
+    const player = t.client();
+    await player.join(roomId);
+    assert.equal((await upload(player, roomId, bytes)).statusCode, 403);
+    // Link and Search the web take images only.
+    const linked = await dm.post(`/api/rooms/${roomId}/assets/import`, { url: "https://example.com/rain.mp3", kind: "sound" });
+    assert.equal(linked.statusCode, 415, linked.body);
+    assert.equal((await t.pool.query("select 1 from assets where room_id = $1", [roomId])).rowCount, 0);
+  });
+
+  test("a refused sound answers its code and stores nothing", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom();
+    const good = sound();
+    const twoRates = concat(good, silentFrames(20, { kbps: 160 }));
+    const cases: Array<[Uint8Array, number, string]> = [
+      [concat(id3v2(200), good), 415, "sound_type"],
+      [concat(good, id3v1()), 415, "sound_type"],
+      [twoRates, 415, "sound_type"],
+      [silentFrames(framesFor(3_000, 32_000), { rateHz: 32_000 }), 415, "sound_type"],
+      [concat(good, new Uint8Array([0])), 415, "sound_type"],
+      [good.subarray(0, good.length - 1), 415, "sound_type"],
+      [new TextEncoder().encode("<svg onload=alert(1)>"), 415, "sound_type"],
+      [silentFrames(framesFor(16 * 60_000), { kbps: 64 }), 422, "sound_length"],
+      [silentFrames(5), 422, "sound_length"],
+    ];
+    for (const [bytes, status, code] of cases) {
+      const res = await upload(dm, roomId, bytes);
+      assert.equal(res.statusCode, status, res.body);
+      assert.deepEqual(res.json(), { error: code });
+    }
+    assert.equal((await t.pool.query("select 1 from assets where room_id = $1", [roomId])).rowCount, 0);
+    assert.deepEqual(await readdir(join(t.assetDir, "tmp")), []);
+    // Over the size cap by its Content-Length: refused before the body.
+    const huge = await dm.request("PUT", `/api/rooms/${roomId}/assets?kind=sound`, undefined, { "content-type": "audio/mpeg", "content-length": String(SOUND_LIMITS.fileBytes + 1) }, Buffer.alloc(16));
+    assert.equal(huge.statusCode, 413);
+  });
+
+  test("players and a table display read no sound that what plays does not name", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom();
+    const s = await uploaded(dm, roomId, sound());
+    const player = t.client();
+    await player.join(roomId);
+    const playerSocket = await t.connect(roomId, player);
+    await playerSocket.snapshot("p");
+    assert.equal((await read(player, s.id)).statusCode, 404);
+    assert.equal((await read(player, s.id, { range: "bytes=0-99" })).statusCode, 404);
+    const minted = await dm.post(`/api/rooms/${roomId}/display/code`);
+    const tv = t.client();
+    assert.equal((await tv.post("/api/display/redeem", { code: formatDisplayCode(minted.json<{ code: string }>().code) })).statusCode, 200);
+    assert.equal((await tv.request("GET", `/api/rooms/${roomId}/display/assets/${s.id}/full`, undefined, { range: "bytes=0-99" })).statusCode, 404);
+    // Nor any other room's DM.
+    const other = t.client();
+    await other.createRoom();
+    assert.equal((await read(other, s.id)).statusCode, 404);
+  });
+
+  test("the storage line: the DM's alone, read again after an upload or a delete, and a delete sends the file to the trash as .mp3", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom();
+    const storage = async () => {
+      const res = await dm.get(`/api/rooms/${roomId}/storage`);
+      assert.equal(res.statusCode, 200, res.body);
+      assert.equal(res.headers["cache-control"], "no-store");
+      return res.json<{ used: number; quota: number; sounds: number }>();
+    };
+    const before = await storage();
+    assert.deepEqual({ quota: before.quota, sounds: before.sounds }, { quota: 1024 * MiB, sounds: 0 });
+    const bytes = sound(5_000);
+    const s = await uploaded(dm, roomId, bytes);
+    const withSound = await storage();
+    assert.equal(withSound.sounds, bytes.length);
+    assert.equal(withSound.used, await roomStoredBytes(t.pool, roomId));
+    // An image counts in what the room uses, never in its sounds.
+    const image = await dm.request("PUT", `/api/rooms/${roomId}/assets?kind=token`, undefined, { "content-type": "image/png" }, await solid(64, 64).png().toBuffer());
+    assert.equal(image.statusCode, 200);
+    const afterImage = await storage();
+    assert.ok(afterImage.used > withSound.used);
+    assert.equal(afterImage.sounds, bytes.length);
+    const player = t.client();
+    await player.join(roomId);
+    assert.equal((await player.get(`/api/rooms/${roomId}/storage`)).statusCode, 403);
+
+    const gone = await dm.post(`/api/rooms/${roomId}/assets/delete`, { ids: [s.id] });
+    assert.equal(gone.statusCode, 200, gone.body);
+    assert.equal((await storage()).sounds, 0, "read again at once after the delete");
+    assert.equal(await exists(variantPath(t.assetDir, sha(bytes), "sound", "full", SOUND_PIPELINE, "mp3")), false);
+    const day = new Date().toISOString().slice(0, 10);
+    assert.ok(await exists(join(t.assetDir, "trash", day, sha(bytes).slice(0, 2), `${sha(bytes)}-sound-full-v${SOUND_PIPELINE}.mp3`)));
+  });
+
+  test("the storage line is kept 10 seconds between reads, so a burst of asks makes one query", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom();
+    const first = (await dm.get(`/api/rooms/${roomId}/storage`)).json<{ sounds: number }>();
+    // A row written behind the service's back is not seen until the line is read again.
+    await t.pool.query(`insert into assets (id, room_id, sha256, kind, pipeline, width, height, bytes, variants, media, audio) values ($1, $2, $3, 'sound', 1, 0, 0, 1000, '{full}', 'mp3', $4)`, [
+      randomUUID(),
+      roomId,
+      Buffer.alloc(32, 3),
+      JSON.stringify({ ms: 3000, channels: 2, kbps: 128 }),
+    ]);
+    const asks = await Promise.all(Array.from({ length: 5 }, () => dm.get(`/api/rooms/${roomId}/storage`)));
+    for (const ask of asks) assert.equal(ask.json<{ sounds: number }>().sounds, first.sounds);
+    t.app.assets.forgetStorage(roomId);
+    assert.equal((await dm.get(`/api/rooms/${roomId}/storage`)).json<{ sounds: number }>().sounds, 1000);
+  });
+
+  test("a live upload must leave 32 MiB of the quota free, checked again at commit, while an image needs only the quota", async () => {
+    const small = await startEngine({ env: { ROOM_SOUND: "1", ROOM_QUOTA_MB: "40" } });
+    try {
+      const dm = small.client();
+      const { roomId } = await dm.createRoom();
+      const bytes = sound(3_000, 11);
+      const stored = await roomStoredBytes(small.pool, roomId);
+      // A byte more than the room can hold beside this sound's file and the headroom.
+      const filler = 40 * MiB - stored - SOUND_LIMITS.quotaHeadroomBytes - bytes.length + 1;
+      await small.pool.query(`insert into assets (id, room_id, sha256, kind, pipeline, width, height, bytes, variants) values ($1, $2, $3, 'map', 1, 1, 1, $4, '{full}')`, [randomUUID(), roomId, Buffer.alloc(32, 9), filler]);
+      const refused = await upload(dm, roomId, bytes);
+      assert.equal(refused.statusCode, 413, refused.body);
+      assert.deepEqual(refused.json(), { error: "quota_exceeded" });
+      assert.equal((await dm.request("PUT", `/api/rooms/${roomId}/assets?kind=token`, undefined, { "content-type": "image/png" }, await solid(64, 64).png().toBuffer())).statusCode, 200);
+      assert.equal((await small.pool.query("select 1 from assets where room_id = $1 and kind = 'sound'", [roomId])).rowCount, 0);
+    } finally {
+      await small.close();
+    }
+  });
+
+  test("cleanup: a sound no state names is marked, and goes a day later, while one the stored state names stays", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom();
+    const named = await uploaded(dm, roomId, sound(3_000, 21));
+    const unnamed = await uploaded(dm, roomId, sound(3_000, 22));
+    const unnamedBytes = (await read(dm, unnamed.id)).rawPayload;
+    // Unloaded, the stored state is read as text, where any mention of an id counts as a use.
+    assert.equal(t.manager.get(roomId), null, "the room is not loaded");
+    await t.pool.query("update room_snapshots set state = jsonb_set(state, '{meta,name}', to_jsonb($2::text)) where room_id = $1", [roomId, `kept ${named.id}`]);
+    const deps = { pool: t.pool, manager: t.manager, assetDir: t.assetDir, quotaBytes: 0, log: { info: () => undefined, debug: () => undefined, warn: () => undefined, error: console.error } };
+    const first = await sweepUnnamed(deps, roomId);
+    assert.equal(first.deleted, 0);
+    const marks = await t.pool.query<{ id: string; unused: boolean }>("select id::text as id, unused_since is not null as unused from assets where room_id = $1 order by id", [roomId]);
+    assert.deepEqual(Object.fromEntries(marks.rows.map((r) => [r.id, r.unused])), { [named.id]: false, [unnamed.id]: true });
+    await t.pool.query("update assets set unused_since = now() - interval '2 days' where id = $1", [unnamed.id]);
+    const second = await sweepUnnamed(deps, roomId);
+    assert.equal(second.deleted, 1);
+    assert.equal((await t.pool.query("select 1 from assets where id = $1", [unnamed.id])).rowCount, 0);
+    assert.equal((await t.pool.query("select 1 from assets where id = $1", [named.id])).rowCount, 1);
+    assert.equal(await exists(variantPath(t.assetDir, sha(unnamedBytes), "sound", "full", SOUND_PIPELINE, "mp3")), false);
+  });
+
+  test("the orphan sweep takes an .mp3 no row names, and leaves a sound's name with another extension", async () => {
+    const hex = sha(Buffer.from(randomUUID()));
+    const path = variantPath(t.assetDir, hex, "sound", "full", SOUND_PIPELINE, "mp3");
+    await mkdir(join(t.assetDir, hex.slice(0, 2)), { recursive: true });
+    await writeFile(path, sound());
+    const other = sha(Buffer.from(randomUUID()));
+    await mkdir(join(t.assetDir, other.slice(0, 2)), { recursive: true });
+    const wrong = join(t.assetDir, other.slice(0, 2), `${other}-sound-full-v1.webp`);
+    await writeFile(wrong, Buffer.alloc(10));
+    const imageAsMp3 = join(t.assetDir, other.slice(0, 2), `${other}-map-full-v1.mp3`);
+    await writeFile(imageAsMp3, Buffer.alloc(10));
+    assert.ok((await sweepOrphanFiles(t.pool, t.assetDir, Date.now() + 3 * 24 * 3600_000)) >= 1);
+    assert.equal(await exists(path), false);
+    assert.equal(await exists(wrong), true);
+    assert.equal(await exists(imageAsMp3), true);
+  });
+});
+
+describe("the sound check off the main thread (D-261102-539)", () => {
+  test("while a check hangs, the server keeps answering, and the upload ends busy at the deadline with nothing stored", async () => {
+    const t = await startEngine({ env: { ROOM_SOUND: "1" }, assets: { soundCheck: { workerUrl: HANG, deadlineMs: 1_500 } } });
+    try {
+      // The DM and a player at one table, behind one address.
+      const dm = t.client("2001:db8:5:5::5");
+      const { roomId } = await dm.createRoom();
+      const player = t.client("2001:db8:5:5::5");
+      await player.join(roomId);
+      const started = performance.now();
+      const pending = upload(dm, roomId, sound());
+      // Let the upload reach its worker, then ask the server something else.
+      await new Promise((r) => setTimeout(r, 200));
+      const asked = performance.now();
+      const health = await t.app.inject({ method: "GET", url: "/healthz" });
+      assert.equal(health.statusCode, 200);
+      assert.ok(performance.now() - asked < 500, `healthz took ${performance.now() - asked} ms`);
+      // A sound's slot is counted by session, so the player's token goes up beside it from the same address.
+      const token = await player.request("PUT", `/api/rooms/${roomId}/assets?kind=token`, undefined, { "content-type": "image/png" }, await solid(64, 64).png().toBuffer());
+      assert.equal(token.statusCode, 200, token.body);
+      const res = await pending;
+      assert.equal(res.statusCode, 503, res.body);
+      assert.deepEqual(res.json(), { error: "busy" });
+      assert.ok(performance.now() - started >= 1_400);
+      assert.equal((await t.pool.query("select 1 from assets where room_id = $1 and kind = 'sound'", [roomId])).rowCount, 0);
+      assert.deepEqual(await readdir(join(t.assetDir, "tmp")), []);
+    } finally {
+      await t.close();
+    }
+  });
+});
+
+describe("sound files with the switch off (D-261102-513)", () => {
+  let off: Engine;
+  before(async () => {
+    off = await startEngine();
+  });
+  after(async () => {
+    await off.close();
+  });
+
+  test("an upload is sound_off before a byte is read, and nothing is stored", async () => {
+    const dm = off.client();
+    const { roomId } = await dm.createRoom();
+    const res = await upload(dm, roomId, sound());
+    assert.equal(res.statusCode, 403, res.body);
+    assert.deepEqual(res.json(), { error: "sound_off" });
+    assert.equal(res.headers.connection, "close");
+    assert.equal((await off.pool.query("select 1 from assets where room_id = $1", [roomId])).rowCount, 0);
+  });
+
+  test("the service refuses a sound on its own, so no import or command stores one either", async () => {
+    const dm = off.client();
+    const { roomId } = await dm.createRoom();
+    const bytes = sound();
+    const path = join(off.assetDir, "tmp", `intake-${randomUUID()}`);
+    await writeFile(path, bytes);
+    const reservation = await off.app.assets.quota.reserve(roomId, bytes.length);
+    try {
+      await assert.rejects(
+        off.app.assets.ingest({ roomId, uploaderIds: [], kind: "sound", tempPath: path, sha256: Buffer.from(sha(bytes), "hex"), reservation }),
+        (err: unknown) => (err as { code?: string }).code === "sound_off",
+      );
+    } finally {
+      reservation.release();
+    }
+    assert.equal((await off.pool.query("select 1 from assets where room_id = $1", [roomId])).rowCount, 0);
+  });
+
+  test("a sound the room already holds answers 404 to everyone, its DM too, by ranges or whole", async () => {
+    const dm = off.client();
+    const { roomId } = await dm.createRoom();
+    const bytes = sound();
+    const id = randomUUID();
+    await off.pool.query(`insert into assets (id, room_id, sha256, kind, pipeline, width, height, bytes, variants, media, audio) values ($1, $2, $3, 'sound', $4, 0, 0, $5, '{full}', 'mp3', $6)`, [
+      id,
+      roomId,
+      Buffer.from(sha(bytes), "hex"),
+      SOUND_PIPELINE,
+      bytes.length,
+      JSON.stringify({ ms: 3000, channels: 2, kbps: 128 }),
+    ]);
+    const path = variantPath(off.assetDir, sha(bytes), "sound", "full", SOUND_PIPELINE, "mp3");
+    await mkdir(join(off.assetDir, sha(bytes).slice(0, 2)), { recursive: true });
+    await writeFile(path, bytes);
+    assert.equal((await read(dm, id)).statusCode, 404);
+    assert.equal((await read(dm, id, { range: "bytes=0-9" })).statusCode, 404);
+  });
+});

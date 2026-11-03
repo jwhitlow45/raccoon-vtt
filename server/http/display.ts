@@ -3,7 +3,6 @@ import { z } from "zod";
 import { AssetError } from "../assets/errors.ts";
 import { KINDS, isVariant } from "../assets/kinds.ts";
 import { getAsset } from "../assets/store.ts";
-import { animatedMapsOn } from "../config.ts";
 import {
   CODE_MINUTES,
   MAX_DISPLAYS,
@@ -21,7 +20,7 @@ import { withTx } from "../auth/tx.ts";
 import { TooBusyError } from "../rooms/errors.ts";
 import { CLOSE_GRANT_REVOKED, RoomNotFoundError } from "../rooms/gateway.ts";
 import type { RoomManager } from "../rooms/manager.ts";
-import { errorHandler, sendAsset } from "./assets.ts";
+import { errorHandler, mediaSwitches, sendAsset } from "./assets.ts";
 
 /**
  * Table displays (docs/design/design-v1-dm-tools.md 3.1): a TV that shows the
@@ -218,8 +217,9 @@ export async function registerDisplayRoutes(app: FastifyInstance, kit: AuthKit, 
    * cookie reads them here instead: exactly the assets of its own projected
    * visible set (the map showing, the tokens it can see, the stamps' library
    * images, handouts shown to everyone), never by the uploader rule, since a
-   * display uploads nothing. A video comes by ranges, each range request
-   * checked as a whole one is (docs/design/design-v1-animated-maps.md 10).
+   * display uploads nothing. A video or a sound comes by ranges, each range
+   * request checked as a whole one is (docs/design/design-v1-animated-maps.md
+   * 10, docs/design/design-v1-sound.md 7.2).
    * Every refusal is the asset route's same 404.
    */
   await app.register(async (scope) => {
@@ -243,7 +243,7 @@ export async function registerDisplayRoutes(app: FastifyInstance, kit: AuthKit, 
           throw err;
         }
         if (!visible.has(row.id) || !row.variants.includes(variant)) throw new AssetError(404, "not_found");
-        return sendAsset(req, reply, app.assets.assetDir, row, variant, animatedMapsOn(app.config));
+        return sendAsset(req, reply, app.assets.assetDir, row, variant, mediaSwitches(app.config));
       },
     );
   });

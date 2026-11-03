@@ -1,5 +1,5 @@
-import { LIMITS, VIDEO_LIMITS } from "#shared/limits.ts";
-import type { VideoFacts } from "#shared/model.ts";
+import { LIMITS, SOUND_LIMITS, VIDEO_LIMITS } from "#shared/limits.ts";
+import type { SoundFacts, VideoFacts } from "#shared/model.ts";
 import type { AssetCredit } from "#shared/protocol.ts";
 import { HEX_R, HEX_S } from "#shared/rules/hex.ts";
 
@@ -22,7 +22,14 @@ export const PIPELINE = 1;
  */
 export const VIDEO_PIPELINE = 1;
 
-export const ASSET_KINDS = ["map", "token", "handout", "thumb", "video"] as const;
+/**
+ * A sound's pipeline (docs/design/design-v1-sound.md 7.2): its one file is
+ * the upload itself, which the frame walk took whole, so any change to what
+ * the walk takes must bump it.
+ */
+export const SOUND_PIPELINE = 1;
+
+export const ASSET_KINDS = ["map", "token", "handout", "thumb", "video", "sound"] as const;
 export type AssetKind = (typeof ASSET_KINDS)[number];
 
 export const VARIANTS = ["full", "mobile", "thumb"] as const;
@@ -106,6 +113,18 @@ export const KINDS: Record<AssetKind, KindSpec> = {
     dmOnly: true,
     playersRead: true,
   },
+  /**
+   * A sound file (docs/design/design-v1-sound.md 7.2): one variant, the
+   * upload the frame walk took, never decoded. It has no sides, so its row's
+   * width and height are 0. Players read it only while what plays names it.
+   */
+  sound: {
+    maxUploadBytes: SOUND_LIMITS.fileBytes,
+    deadlineMs: SOUND_LIMITS.uploadDeadlineMs,
+    variants: [{ name: "full", maxSide: 0 }],
+    dmOnly: true,
+    playersRead: true,
+  },
 };
 
 /** The kinds a player may upload, and so the only kinds a player can be the uploader of. */
@@ -142,12 +161,14 @@ export type AssetView = {
   bytes?: number;
   /** A video's facts from its header check, so the Library shows its length and the DM's still pick checks its shape. Absent for an image. */
   video?: VideoFacts;
+  /** A sound's facts from its frame walk, so the DM's browser sends `sound.create` for a length that fits its use. Absent but for a sound. */
+  audio?: SoundFacts;
 };
 
 /**
- * `created`, on a handout's or a video's answer only: whether this upload
- * made the row, rather than reusing the room's row of the same bytes
- * (docs/design/design-v1-pdf-handouts.md 3.9,
+ * `created`, on a handout's, a video's or a sound's answer only: whether
+ * this upload made the row, rather than reusing the room's row of the same
+ * bytes (docs/design/design-v1-pdf-handouts.md 3.9,
  * docs/design/design-v1-animated-maps.md 4.1).
  */
 export type UploadResult = AssetView & { cellPx?: number; hexCellPx?: HexCellPx; created?: boolean };
