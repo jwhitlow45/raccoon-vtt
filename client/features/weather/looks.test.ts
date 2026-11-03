@@ -53,7 +53,7 @@ test("fog is two sheets, patchy then heavy, and heavy kinds add their veils", ()
   assert.equal(lookOf({ kind: "ash", heavy: true })!.veil?.color, "#3a3330");
   assert.equal(lookOf({ kind: "sand", wind: "moderate" })!.veil?.alpha, 0.08);
   const storm = lookOf({ kind: "sand", heavy: true, wind: "strong" })!;
-  assert.equal(storm.veil?.alpha, 0.3);
+  assert.equal(storm.veil?.alpha, 0.24, "under 5.3's 30%, so the board's text keeps 4.5:1 (wx-9)");
   assert.equal(storm.sheets.length, 1, "a sandstorm's fast sheet");
   assert.equal(lookOf({ kind: "rain", heavy: true })!.particles!.splashEvery, 200);
   assert.equal(lookOf({ kind: "rain" })!.particles!.splashEvery, 0);

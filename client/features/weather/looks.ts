@@ -113,12 +113,13 @@ function sheetsOf(kind: WeatherKind, heavy: boolean): readonly Sheet[] {
     const [a, b] = heavy ? [0.35, 0.25] : [0.18, 0.12];
     return [{ color: FOG, alpha: a, speed: 3, scale: 2 }, { color: FOG, alpha: b, speed: 8, scale: 3.3 }];
   }
-  if (kind === "sand" && heavy) return [{ color: SAND, alpha: 0.2, speed: 160, scale: 2.5 }];
+  // Under 5.3's 20%, with the haze under its 30%: at those a trap's pill read 4.2:1 at 1x where its words read 13:1 with no weather (wx-9).
+  if (kind === "sand" && heavy) return [{ color: SAND, alpha: 0.14, speed: 160, scale: 2.5 }];
   return [];
 }
 
 function veilOf(kind: WeatherKind, heavy: boolean): Look["veil"] {
-  if (kind === "sand") return { color: SAND, alpha: heavy ? 0.3 : 0.08 };
+  if (kind === "sand") return { color: SAND, alpha: heavy ? 0.24 : 0.08 };
   if (!heavy) return null;
   if (kind === "rain") return { color: "#1b2a3a", alpha: 0.12 };
   if (kind === "snow") return { color: "#ffffff", alpha: 0.1 };
