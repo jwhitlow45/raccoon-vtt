@@ -3,13 +3,14 @@ import { Button } from "../components/Button.tsx";
 import { Card, ErrorText, Page } from "../components/Field.tsx";
 import { LoadBoundary, LoadFailureNotice } from "../components/LoadBoundary.tsx";
 import { Loading } from "../components/Loading.tsx";
-import { api, ApiError, type Me } from "../lib/api.ts";
+import { api, ApiError, type JoinMode, type Me } from "../lib/api.ts";
 import { rememberRoom } from "../lib/knownRooms.ts";
 import { navigate, replaceUrl } from "../lib/navigation.ts";
 import { dropLinkPassword, type LinkPassword } from "../lib/playerLink.ts";
 import { retryableLazy } from "../lib/retryableLazy.ts";
 import { formatRoomId, roomPath } from "../lib/roomId.ts";
 import { theme } from "../lib/theme.ts";
+import { hasMember } from "./askToJoin.ts";
 import { HomeHeader } from "./Home.tsx";
 import { Join } from "./Join.tsx";
 
@@ -20,7 +21,7 @@ const LiveRoom = retryableLazy(() => import("./LiveRoom.tsx"));
 
 type State =
   | { kind: "checking" }
-  | { kind: "join"; roomName: string }
+  | { kind: "join"; roomName: string; joinMode: JoinMode }
   /** `roomName` is known from GET /me, or from the join page that came before. */
   | { kind: "room"; me: Me; roomName: string }
   | { kind: "missing" }
@@ -60,11 +61,14 @@ export function RoomRoute(props: { roomId: string; link: LinkPassword | null }) 
     (async () => {
       try {
         const me = await api.getMe(roomId);
+        // A grant without its member (data from before members were written first) is not a way in.
+        if (!hasMember(me)) throw new ApiError(404, "Not found.", "member_not_found", null);
         settle({ kind: "room", me, roomName: me.roomName ?? "" });
       } catch (err) {
         if (!(err instanceof ApiError) || ![401, 403, 404].includes(err.status)) throw err;
         try {
-          settle({ kind: "join", roomName: (await api.getRoom(roomId)).name });
+          const info = await api.getRoom(roomId);
+          settle({ kind: "join", roomName: info.name, joinMode: info.joinMode });
         } catch (inner) {
           if (inner instanceof ApiError && inner.status === 404) settle({ kind: "missing" });
           else throw inner;
@@ -75,6 +79,14 @@ export function RoomRoute(props: { roomId: string; link: LinkPassword | null }) 
       cancelled = true;
     };
   }, [roomId, attempt]);
+
+  // A refusal that shows the DM changed how new players join: read it again and show that mode's cards.
+  function refreshMode() {
+    api.getRoom(roomId).then(
+      (info) => setState((now) => (now.kind === "join" ? { ...now, joinMode: info.joinMode } : now)),
+      () => undefined,
+    );
+  }
 
   // The Home page lists the rooms this device has been in (UP-7).
   const entered = state.kind === "room" ? state : null;
@@ -87,7 +99,14 @@ export function RoomRoute(props: { roomId: string; link: LinkPassword | null }) 
       return <Page><p style={{ color: theme.color.textMuted }}>Opening room {formatRoomId(roomId)}…</p></Page>;
     case "join":
       return (
-        <Join roomId={roomId} roomName={state.roomName} link={link} onJoined={(me) => setState({ kind: "room", me, roomName: state.roomName })} />
+        <Join
+          roomId={roomId}
+          roomName={state.roomName}
+          joinMode={state.joinMode}
+          onRefreshMode={refreshMode}
+          link={link}
+          onJoined={(me) => setState({ kind: "room", me, roomName: state.roomName })}
+        />
       );
     case "room":
       return (

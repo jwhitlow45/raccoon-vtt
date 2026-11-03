@@ -9,6 +9,7 @@ import {
   COMPLETE_RETRY_MS,
   completeWithRecovery,
   effectOf,
+  hasMember,
   initialAskState,
   OUTCOME_CARDS,
   outcomeButtons,
@@ -143,6 +144,13 @@ describe("the ask page's wait loop", () => {
     assert.equal(entered.state.kind, "in");
   });
 
+  test("a cancel that finds the request gone asks GET /me rather than showing a card or the form", () => {
+    const run = drive([{ type: "cancel" }, { type: "cancelFailed", requestId: "r1", gone: true }], drive(asked).state);
+    assert.equal(run.state.kind, "checking");
+    const failed = drive([{ type: "cancel" }, { type: "cancelFailed", requestId: "r1", gone: false }], drive(asked).state);
+    assert.equal(failed.state.kind === "waiting" && failed.state.cancelFailed, true);
+  });
+
   test("a request found on load goes straight to its card or its wait", () => {
     const waiting = drive([{ type: "found", requestId: "r9", name: "Quinn", state: "waiting" }]);
     assert.deepEqual(waiting.effects, [{ kind: "wait", requestId: "r9", seq: 1 }]);
@@ -170,6 +178,14 @@ describe("the ask page's wait loop", () => {
   test("a new request after an old one numbers its calls above the old ones", () => {
     const first = drive([...asked, { type: "answer", seq: 1, requestId: "r1", state: "expired" }, { type: "reset" }, ...asked.map((e) => (e.type === "asked" ? { ...e, requestId: "r2" } : e))]);
     assert.deepEqual(first.effects.at(-1), { kind: "wait", requestId: "r2", seq: 2 });
+  });
+});
+
+describe("a GET /me answer that opens the room", () => {
+  test("needs its member: a grant without one is not a way in", () => {
+    assert.equal(hasMember(ME), true);
+    assert.equal(hasMember({ role: "player", roomName: "Crypt" } as unknown as Me), false);
+    assert.equal(hasMember({ role: "player", member: null } as unknown as Me), false);
   });
 });
 

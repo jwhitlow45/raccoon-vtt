@@ -1,16 +1,19 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { Button } from "../components/Button.tsx";
 import { Card, ErrorText, Field, Page } from "../components/Field.tsx";
+import { Loading } from "../components/Loading.tsx";
 import { RowDot } from "../components/Row.tsx";
 import { Swatches } from "../components/Swatches.tsx";
 import { useTurnstile } from "../components/Turnstile.tsx";
-import { api, ApiError, type JoinStep, type Me } from "../lib/api.ts";
+import { api, ApiError, type JoinMode, type JoinStep, type Me, type MyJoinRequest } from "../lib/api.ts";
 import { rememberedName, rememberName } from "../lib/device.ts";
 import { readKnownRooms } from "../lib/knownRooms.ts";
 import { freeColor, memberSwatches } from "../lib/memberColor.ts";
 import type { LinkPassword } from "../lib/playerLink.ts";
 import { formatRoomId } from "../lib/roomId.ts";
 import { theme } from "../lib/theme.ts";
+import { AskToJoin, OutcomeCard } from "./AskToJoin.tsx";
+import { completeWithRecovery, hasMember } from "./askToJoin.ts";
 import { DmLinkEntry } from "./DmLinkEntry.tsx";
 import { HomeHeader } from "./Home.tsx";
 import {
@@ -49,8 +52,17 @@ function linkStart(link: LinkPassword | null): Start {
  * lands on the second step. When the ticket runs out on that step, the
  * password comes back filled in: a player who came by link never saw it.
  */
-export function Join(props: { roomId: string; roomName: string; link: LinkPassword | null; onJoined(me: Me): void }) {
-  const { roomId } = props;
+export function Join(props: {
+  roomId: string;
+  roomName: string;
+  /** How new devices join, from GET /api/rooms/:id (design join-requests 2.1). */
+  joinMode: JoinMode;
+  /** Reads the room again, after a refusal that shows the mode changed. */
+  onRefreshMode(): void;
+  link: LinkPassword | null;
+  onJoined(me: Me): void;
+}) {
+  const { roomId, joinMode: mode } = props;
   const [step, setStep] = useState<(JoinStep & { entered: Entered }) | null>(null);
   const [start, setStart] = useState(() => linkStart(props.link));
   // A device that was a DM here and lost its grant (signed out, a replaced
@@ -65,34 +77,124 @@ export function Join(props: { roomId: string; roomName: string; link: LinkPasswo
     <DmLinkEntry />
   );
 
+  // A device with a live request goes straight to its waiting card, in any
+  // tab or after a reload, so the lookup comes before any card (design 2.2).
+  const lookup = useMine(roomId, mode !== "password");
+  // In With the password, or by asking, the ask card replaces the password
+  // card only when the player taps Ask to join, or a request is waiting.
+  const [view, setView] = useState<"password" | "ask">("password");
+  useEffect(() => {
+    if (lookup.kind === "done" && lookup.mine) setView("ask");
+  }, [lookup]);
+  // The DM stopped taking requests while this page waited on one.
+  const [closed, setClosed] = useState(false);
+
+  const askCard = (shown: "ask" | "ask_only") =>
+    lookup.kind === "done" ? (
+      <AskToJoin
+        roomId={roomId}
+        mode={shown}
+        mine={lookup.mine}
+        linkOpened={props.link !== null}
+        onBack={() => setView("password")}
+        onJoined={props.onJoined}
+        onModeChanged={props.onRefreshMode}
+        onClosed={() => {
+          setClosed(true);
+          props.onRefreshMode();
+        }}
+      />
+    ) : (
+      <Card>
+        <Loading text="Loading…" />
+      </Card>
+    );
+
+  const passwordCard = (
+    <PasswordStep roomId={roomId} start={start} onOk={(ok, entered) => setStep({ ...ok, entered })} onModeChanged={props.onRefreshMode} />
+  );
+
+  let body;
+  if (step) {
+    body = (
+      <PickPlayer
+        roomId={roomId}
+        ticket={step.ticket}
+        players={step.players}
+        dmColors={step.dmColors}
+        onJoined={props.onJoined}
+        onModeChanged={props.onRefreshMode}
+        onExpired={() => {
+          setStart({ ...step.entered, auto: false, notice: "That took a while, so press Next again.", error: null });
+          setStep(null);
+        }}
+      />
+    );
+  } else if (mode === "ask_only") {
+    body = askCard("ask_only");
+  } else if (mode === "ask" && view === "ask") {
+    body = askCard("ask");
+  } else {
+    body = (
+      <>
+        {mode === "password" && closed ? <OutcomeCard outcome="closed" /> : null}
+        {passwordCard}
+        {mode === "ask" ? (
+          <Card title="No password?">
+            <p style={{ margin: 0 }}>Ask the DM to let you in.</p>
+            {lookup.kind === "loading" ? (
+              <Loading text="Loading…" />
+            ) : (
+              <Button onClick={() => setView("ask")} disabled={lookup.kind !== "done"}>
+                Ask to join
+              </Button>
+            )}
+          </Card>
+        ) : null}
+      </>
+    );
+  }
+
   return (
     <Page>
       <HomeHeader title={props.roomName} tagline={`Room ${formatRoomId(roomId)}`} />
       {wasDm ? dmEntry : null}
-      {step ? (
-        <PickPlayer
-          roomId={roomId}
-          ticket={step.ticket}
-          players={step.players}
-          dmColors={step.dmColors}
-          onJoined={props.onJoined}
-          onExpired={() => {
-            setStart({ ...step.entered, auto: false, notice: "That took a while, so press Next again.", error: null });
-            setStep(null);
-          }}
-        />
-      ) : (
-        <PasswordStep roomId={roomId} start={start} onOk={(ok, entered) => setStep({ ...ok, entered })} />
-      )}
+      {body}
       {wasDm ? null : dmEntry}
     </Page>
   );
+}
+
+type Lookup = { kind: "idle" } | { kind: "loading" } | { kind: "done"; mine: MyJoinRequest | null };
+
+/**
+ * This device's own request in the room, read once when the room takes
+ * requests. A device with none, or whose lookup fails, simply sees the ask
+ * card: asking again is safe, since one request per device replaces itself.
+ */
+function useMine(roomId: string, wanted: boolean): Lookup {
+  const [lookup, setLookup] = useState<Lookup>({ kind: "idle" });
+  const asked = lookup.kind !== "idle";
+  useEffect(() => {
+    if (!wanted || asked) return;
+    let live = true;
+    setLookup({ kind: "loading" });
+    api.getMyJoinRequest(roomId).then(
+      (mine) => live && setLookup({ kind: "done", mine }),
+      () => live && setLookup({ kind: "done", mine: null }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [roomId, wanted]);
+  return lookup;
 }
 
 function PasswordStep(props: {
   roomId: string;
   start: Start;
   onOk(step: JoinStep, entered: Entered): void;
+  onModeChanged(): void;
 }) {
   const [password, setPassword] = useState(props.start.password);
   // Until the player edits the field, a refusal is about the link, not their typing.
@@ -115,6 +217,7 @@ function PasswordStep(props: {
     } catch (err) {
       const refusal = joinRefusal(err, fromLink);
       if (refusal.challenged) setChallenged(true);
+      if (refusal.modeChanged) props.onModeChanged();
       setWaiting(refusal.resend);
       setError(refusal.error);
       // A link's old password is no use for typing the new one over.
@@ -200,6 +303,10 @@ function PasswordStep(props: {
   );
 }
 
+function settling(err: unknown): boolean {
+  return err instanceof ApiError && (err.code === "busy" || err.code === "already_in");
+}
+
 function PickPlayer(props: {
   roomId: string;
   ticket: string;
@@ -207,6 +314,7 @@ function PickPlayer(props: {
   dmColors: readonly string[];
   onJoined(me: Me): void;
   onExpired(): void;
+  onModeChanged(): void;
 }) {
   const [name, setName] = useState(rememberedName);
   // A color nobody uses yet, so each player draws in their own (lib/memberColor.ts).
@@ -235,7 +343,13 @@ function PickPlayer(props: {
     setBusy(true);
     setError(null);
     try {
-      const me = await api.completeJoin(props.roomId, { ticket: props.ticket, ...input });
+      // The server may still be settling this join (busy, or another tab finished it first), so a refusal of that kind asks where the device stands before it gives up.
+      const me = await completeWithRecovery({
+        complete: () => api.completeJoin(props.roomId, { ticket: props.ticket, ...input }),
+        getMe: () => api.getMe(props.roomId).then((m) => (hasMember(m) ? m : null), () => null),
+        sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+        recoverable: settling,
+      });
       rememberName(remembered);
       props.onJoined(me);
     } catch (err) {
@@ -244,6 +358,15 @@ function PickPlayer(props: {
       if (err instanceof ApiError && err.code === "member_removed") {
         if ("memberId" in input) setGone((g) => [...g, input.memberId]);
         setError("That member was just removed from the room. Join as someone new.");
+        return;
+      }
+      if (settling(err)) {
+        setError("Something went wrong. Try again.");
+        return;
+      }
+      // Only by asking was switched on while this page was open: nothing here lets anyone in now.
+      if (err instanceof ApiError && err.code === "asks_only") {
+        props.onModeChanged();
         return;
       }
       // The ticket lives 5 minutes and is single use, and a password change

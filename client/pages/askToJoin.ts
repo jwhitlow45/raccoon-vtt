@@ -234,6 +234,16 @@ export function reconnecting(state: AskState): boolean {
   return state.kind === "waiting" && state.io.failures > 0;
 }
 
+/**
+ * Whether a `GET /me` answer opens the room. A grant whose member is gone
+ * (data from before members were written first) is not a way in, so the
+ * page shows the join page instead (design 2.2). Every place the client
+ * reads `GET /me` to enter asks this.
+ */
+export function hasMember(me: Me): boolean {
+  return Boolean((me as { member?: unknown }).member);
+}
+
 /** The first color on the ask card: the first that is not the DM's yellow. */
 export function askStartColor(): string {
   return freeColor([], [MEMBER_COLORS[0]!]);
