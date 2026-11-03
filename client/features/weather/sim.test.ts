@@ -3,6 +3,7 @@ import { test } from "node:test";
 import fc from "fast-check";
 import { isometric, TOP_DOWN } from "../../lib/view.ts";
 import { lookOf, type Look } from "./looks.ts";
+import { HELD_STEP_MS } from "./mode.ts";
 import { createField, motionOf, particleCount, resizeField, setFieldLook, setFieldView, setHalf, spotOf, stepField, STEP_CLAMP_MS, WRAP_MARGIN, type Field } from "./sim.ts";
 
 const HEAVY_RAIN = lookOf({ kind: "rain", heavy: true, wind: "strong" })!;
@@ -72,7 +73,8 @@ test("a pan carries the weather with the ground: every mark moves by the pan, wr
   }
 });
 
-test("a 10 s step moves as far as a 50 ms one, so a tab back after a minute does not throw the field", () => {
+test("a 10 s step moves as far as the mode's longest one, after a held frame, so a tab back after a minute does not throw the field", () => {
+  assert.equal(STEP_CLAMP_MS, HELD_STEP_MS);
   const a = createField(HEAVY_RAIN, { width: 390, height: 844, view: TOP_DOWN, seed: 5 });
   const b = createField(HEAVY_RAIN, { width: 390, height: 844, view: TOP_DOWN, seed: 5 });
   stepField(a, 10_000);

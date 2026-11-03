@@ -39,8 +39,15 @@ export type ModeInput = {
 
 /** Ticks come no closer than this: 30 a second on a 60 Hz and a 120 Hz screen alike. */
 export const TICK_MS = 30;
-/** A step never covers more than this (sim.ts STEP_CLAMP_MS). */
+/** A step never covers more than this, except the one after a held frame (HELD_STEP_MS, sim.ts STEP_CLAMP_MS). */
 export const TICK_CLAMP_MS = 50;
+/**
+ * The step after a held frame covers the whole held gap, up to this: two
+ * frames at 20 a second, the slowest the weather keeps moving (SLOW_GAP_MS).
+ * Clamped to TICK_CLAMP_MS, a 30 Hz screen's 66.7 ms gap made the particles
+ * run about an eighth slow there (WXB-R3-1).
+ */
+export const HELD_STEP_MS = 2 * TICK_CLAMP_MS;
 /** No window counts this soon after a start, a resume, a scene load or a remount. */
 export const WARMUP_MS = 2000;
 /** The step-down judges ticks in windows this long. */
@@ -57,6 +64,16 @@ export const SLOW_DRAW_MS = 4;
 export const SLOW_FRAME_MS = 2;
 /** A window with fewer frame costs than this says nothing by them, as a 30 Hz screen's first window may. */
 export const MIN_FRAME_COSTS = 5;
+/**
+ * A window wants frame costs (`wantsCosts`) until it has this many, and
+ * after that while their median is SAMPLE_WHILE_MS or more. Fifteen keep
+ * WXB-R2-1's results over 120 sessions of 300 s at 30 Hz (a noisy healthy
+ * board full, a canvas with no GPU still). Five and ten let a window stop
+ * early more often and left more canvases with no GPU moving (WXB-R3-1).
+ */
+export const WANTED_COSTS = 15;
+/** Half SLOW_FRAME_MS. Costs well under the limit gain little from more, and a cost near it keeps sampling to the window's end. */
+export const SAMPLE_WHILE_MS = SLOW_FRAME_MS / 2;
 
 /** A gap this long between ticks is a stall, not slowness: it drops its window and warms up again. */
 export const STALL_MS = 1000;
@@ -92,6 +109,8 @@ export class WeatherMode {
   #held = false;
   /** The window before the one being judged read slow by its frame costs. */
   #slowCostBefore = false;
+  /** The frame before this one was held, so the next tick steps the whole gap since the last (HELD_STEP_MS). */
+  #heldGap = false;
   /** The next draw is the tick's: set by a ticking frame, spent by `drew`, cleared by the next frame. */
   #tickDraw = false;
   #tickInWindow = false;
@@ -146,6 +165,7 @@ export class WeatherMode {
     if (last !== null && now - last < TICK_MS) return null;
     if (hold) {
       if (this.#windowAt !== null) this.#held = true;
+      this.#heldGap = true;
       return null;
     }
     if (last !== null && now - last >= STALL_MS) {
@@ -160,8 +180,20 @@ export class WeatherMode {
     this.ticks++;
     this.#tickDraw = true;
     this.#tickInWindow = this.#windowAt !== null;
+    const clamp = this.#heldGap ? HELD_STEP_MS : TICK_CLAMP_MS;
+    this.#heldGap = false;
     // The first tick after a start draws at once and moves nothing: the field shows where it stood.
-    return last === null ? 0 : Math.min(TICK_CLAMP_MS, now - last);
+    return last === null ? 0 : Math.min(clamp, now - last);
+  }
+
+  /**
+   * Whether the window being judged wants more frame costs, for the
+   * controller's hold where every frame ticks (store.ts SAMPLE_AFTER): fewer
+   * than WANTED_COSTS yet, or a median so far at SAMPLE_WHILE_MS or more. So
+   * a settled healthy device holds about eight frames a window, not one in four.
+   */
+  get wantsCosts(): boolean {
+    return this.#windowAt !== null && (this.#costs.length < WANTED_COSTS || median(this.#costs) >= SAMPLE_WHILE_MS);
   }
 
   /** A sceneFunc run took `ms`. Says whether a tick started it or something else did. */
@@ -247,6 +279,7 @@ export class WeatherMode {
   #restart(now: number): void {
     this.#warmUntil = now + WARMUP_MS;
     this.#slowCostBefore = false;
+    this.#heldGap = false;
     this.#close();
   }
 

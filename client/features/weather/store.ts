@@ -209,7 +209,7 @@ export class WeatherRoom {
     // A measure still out when the next frame starts ran past it, so it holds that frame's work too and says nothing.
     const last = this.#recent.at(-1);
     if (last && !last.settled) this.#measured(last);
-    const ms = this.mode.frame(time, this.#ticksInARow >= SAMPLE_AFTER);
+    const ms = this.mode.frame(time, this.#ticksInARow >= SAMPLE_AFTER && this.mode.wantsCosts);
     const ticked = ms !== null && this.#targets.length > 0;
     if (ms !== null) this.#targets[this.#targets.length - 1]?.tick(ms);
     this.#ticksInARow = ticked ? this.#ticksInARow + 1 : 0;
@@ -281,16 +281,17 @@ const MIN_TICKS = 5;
 /** A neighbour no further from its tick than this many frames, so no frame was dropped between them. */
 const NEIGHBOUR_FRAMES = 1.5;
 /**
- * Ticks in a row before the loop holds one (mode.ts `frame`'s hold). At 33
- * frames a second or fewer every frame ticks, so no frame shows the board
- * without the weather. Holding one in four there, about seven a second,
- * gives each hold two ticks to measure and a 3 s window about 45. One in
+ * Ticks in a row before the loop holds one (mode.ts `frame`'s hold), while
+ * the window wants costs (mode.ts `wantsCosts`). At 33 frames a second or
+ * fewer every frame ticks, so no frame shows the board without the weather.
+ * Holding one in four there gives each hold two ticks to measure. One in
  * eight left a board whose frames vary by up to 8 ms stepping down healthy
  * phones within minutes, and with two slow windows in a row (mode.ts) one
  * in four keeps them moving (WXB-R2-1). A held frame shows the particles one
- * frame longer, which rain and snow hide, and its step is clamped (sim.ts
- * STEP_CLAMP_MS), so they move about an eighth slower there. It never
- * happens at 60 or 120 Hz, where ticks skip frames.
+ * frame longer, so a window stops holding once its costs are in and well
+ * under the limit, a few holds a window on a settled healthy device, and the
+ * next tick steps the whole gap (mode.ts HELD_STEP_MS), so they keep their
+ * speed (WXB-R3-1). It never happens at 60 or 120 Hz, where ticks skip frames.
  */
 export const SAMPLE_AFTER = 3;
 

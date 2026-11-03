@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { MIN_FRAME_COSTS, SLOW_DRAW_MS, SLOW_FRAME_MS, TICK_CLAMP_MS, WARMUP_MS, WINDOW_MS, WeatherMode, type ModeInput } from "./mode.ts";
+import { HELD_STEP_MS, MIN_FRAME_COSTS, SAMPLE_WHILE_MS, SLOW_DRAW_MS, SLOW_FRAME_MS, TICK_CLAMP_MS, WANTED_COSTS, WARMUP_MS, WINDOW_MS, WeatherMode, type ModeInput } from "./mode.ts";
 
 const SHOWN: ModeInput = {
   setting: "moving",
@@ -148,16 +148,37 @@ test("version moves only when what the controller reads changes", () => {
   assert.equal(mode.version, v + 2);
 });
 
-test("a held frame does not tick and changes nothing, so the next frame ticks by the whole gap, clamped", () => {
+test("a held frame does not tick and changes nothing, and the next tick steps the whole gap, up to twice the clamp", () => {
   const mode = new WeatherMode(SHOWN, 0);
   assert.equal(mode.frame(0), 0);
   assert.equal(mode.frame(33.3, true), null, "held");
   assert.equal(mode.drew(1), "camera", "a held frame's draw is no tick's");
-  assert.equal(mode.frame(66.7, true), null);
-  assert.equal(mode.frame(100), TICK_CLAMP_MS);
+  assert.ok(Math.abs(mode.frame(66.7)! - 66.7) < 1e-9, "a 30 Hz screen's held gap, whole, so the particles keep their speed");
   assert.equal(mode.ticks, 2);
-  assert.equal(mode.frame(116.7, true), null, "a frame the gate holds anyway");
-  assert.ok(Math.abs(mode.frame(133.4)! - 33.4) < 1e-9);
+  assert.equal(mode.frame(83.4, true), null, "a frame the gate holds anyway");
+  assert.ok(Math.abs(mode.frame(100)! - 33.3) < 1e-9, "and that is no hold");
+  for (const at of [133.3, 166.6, 199.9]) assert.equal(mode.frame(at, true), null);
+  assert.equal(mode.frame(250), HELD_STEP_MS, "up to twice the clamp");
+  assert.equal(mode.frame(400), TICK_CLAMP_MS, "only the one step after a hold");
+  mode.frame(433, true);
+  assert.equal(mode.frame(1500), TICK_CLAMP_MS, "a stall after a hold starts afresh, clamped as any");
+});
+
+test("a window wants frame costs until it has fifteen, then only while their median is at least half the limit", () => {
+  const mode = new WeatherMode(SHOWN, 0);
+  let now = 0;
+  for (; now < WARMUP_MS - 100; now += 33.4) mode.frame(now);
+  assert.equal(mode.wantsCosts, false, "the warm-up wants none: its costs count nowhere");
+  for (; now < WARMUP_MS + 100; now += 33.4) mode.frame(now);
+  assert.equal(mode.wantsCosts, true, "an open window with none");
+  for (let i = 1; i < WANTED_COSTS; i++) mode.added(0.3, now);
+  assert.equal(mode.wantsCosts, true, `${WANTED_COSTS - 1}`);
+  mode.added(0.3, now);
+  assert.equal(mode.wantsCosts, false, `${WANTED_COSTS}, well under the limit`);
+  for (let i = 0; i <= WANTED_COSTS; i++) mode.added(SAMPLE_WHILE_MS, now);
+  assert.equal(mode.wantsCosts, true, "a median at half the limit wants more");
+  for (; now < WARMUP_MS + WINDOW_MS + 200; now += 33.4) mode.frame(now);
+  assert.equal(mode.wantsCosts, true, "the next window starts wanting");
 });
 
 /** Runs frames every `every` ms until `until`, each tick drawing at 0.1 ms and adding `cost` ms to its frame. */

@@ -10,8 +10,12 @@ import type { Look } from "./looks.ts";
  * controller's tick steps a field. A draw reads it.
  */
 
-/** A tick never moves the field by more than this, so a tab back after a minute does not throw it. */
-export const STEP_CLAMP_MS = 50;
+/**
+ * A tick never moves the field by more than this, so a tab back after a
+ * minute does not throw it: the mode's longest step, the one after a held
+ * frame (mode.ts HELD_STEP_MS). Every other step the mode clamps to 50 ms.
+ */
+export const STEP_CLAMP_MS = 100;
 
 /** How far past each screen edge the wrap box reaches, so a mark never pops in or out at an edge. */
 export const WRAP_MARGIN = 64;

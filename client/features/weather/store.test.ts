@@ -233,9 +233,11 @@ describe("what a tick adds to its frame, which the sceneFunc's own timing cannot
     };
     let ticks = 0;
     let most = 0;
+    let moved = 0;
     room.register({
-      tick() {
+      tick(ms) {
         ticks++;
+        moved += ms;
         ticked = true;
         now += input.tick;
         most = Math.max(most, room.frameCost);
@@ -244,6 +246,8 @@ describe("what a tick adds to its frame, which the sceneFunc's own timing cannot
     });
     const end = input.seconds * 1000;
     let at = 0;
+    /** Frames in the run's second half with no tick: at 33 frames a second or fewer, the held ones. */
+    let quiet = 0;
     while (at < end) {
       at += period;
       if (now > at) at = Math.ceil(now / period) * period;
@@ -253,8 +257,9 @@ describe("what a tick adds to its frame, which the sceneFunc's own timing cannot
       const due = out.splice(0);
       frames.run(at);
       for (const after of due) after();
+      if (at > end / 2 && !ticked) quiet++;
     }
-    return { level: room.state.getState().level, frameCost: room.frameCost, most, ticks, samples };
+    return { level: room.state.getState().level, frameCost: room.frameCost, most, ticks, samples, moved, quietPerSecond: quiet / (input.seconds / 2) };
   }
 
   const steady: Board = () => 1;
@@ -297,12 +302,29 @@ describe("what a tick adds to its frame, which the sceneFunc's own timing cannot
     }
   });
 
-  test("a 30 Hz screen, where every frame would tick, holds one tick in four to measure against, and keeps about 22 ticks a second", () => {
+  test("a 30 Hz screen, where every frame would tick, holds one tick in four while a window wants frame costs, and the weather keeps its speed", () => {
     const r = run({ hz: 30, seconds: 10, tick: 0.3, board: steady });
-    assert.ok(r.ticks >= 220 && r.ticks <= 230, `${r.ticks} ticks in 10 s`);
+    assert.ok(r.ticks >= 270 && r.ticks <= 285, `${r.ticks} ticks in 10 s`);
+    // As far a second at 30 Hz as at 60 Hz, where no tick is held: the tick after a hold steps the whole gap (WXB-R3-1).
+    for (const board of [steady, (() => { const r0 = rng(7); return () => 0.5 + r0() * 8; })()]) {
+      const slow = run({ hz: 30, seconds: 60, tick: 0.3, board });
+      const fast = run({ hz: 60, seconds: 60, tick: 0.3, board: steady });
+      assert.ok(Math.abs(slow.moved / fast.moved - 1) < 0.02, `30 Hz moved ${slow.moved.toFixed(0)} ms, 60 Hz ${fast.moved.toFixed(0)}`);
+    }
     assert.ok(r.frameCost > 0.2 && r.frameCost < 0.4, `measured ${r.frameCost}`);
     const busy = run({ hz: 30, seconds: 10, tick: 3, board: () => 9 });
     assert.ok(busy.frameCost > 2.5 && busy.frameCost < 3.5, `a busy board's ticks measured ${busy.frameCost}, not its 9 ms`);
+  });
+
+  test("once its windows have their costs, a healthy 30 Hz screen repeats a frame about three times a second, not seven and a half", () => {
+    const settled = run({ hz: 30, seconds: 60, tick: 0.3, board: steady });
+    assert.ok(settled.quietPerSecond >= 2 && settled.quietPerSecond <= 3, `${settled.quietPerSecond.toFixed(2)} held frames a second`);
+    const r0 = rng(11);
+    const noisy = run({ hz: 30, seconds: 60, tick: 0.3, board: () => 1 + r0() * 3 });
+    assert.ok(noisy.quietPerSecond <= 4, `a board varying by 3 ms: ${noisy.quietPerSecond.toFixed(2)} a second`);
+    // A canvas near the limit keeps sampling every window, one tick in four.
+    const near = run({ hz: 30, seconds: 30, tick: 1.5, board: steady });
+    assert.ok(near.quietPerSecond > 7, `near the limit: ${near.quietPerSecond.toFixed(2)} a second`);
   });
 
   test("a 30 Hz screen whose board is noisy keeps a healthy canvas moving for five minutes: up to 8 ms more in any frame, or a 12 ms task in three frames of ten", () => {

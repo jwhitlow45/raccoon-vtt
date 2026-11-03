@@ -4,7 +4,7 @@ import { int, rng } from "#shared/testutil.ts";
 import { TOP_DOWN } from "../../lib/view.ts";
 import { drawWeather } from "./draw.ts";
 import { lookOf } from "./looks.ts";
-import { SLOW_DRAW_MS, SLOW_FRAME_MS, TICK_MS, WARMUP_MS, WINDOW_MS, WeatherMode, type ModeInput, type StepLevel } from "./mode.ts";
+import { HELD_STEP_MS, SLOW_DRAW_MS, SLOW_FRAME_MS, TICK_CLAMP_MS, TICK_MS, WARMUP_MS, WINDOW_MS, WeatherMode, type ModeInput, type StepLevel } from "./mode.ts";
 import { createField, stepField } from "./sim.ts";
 
 /*
@@ -59,6 +59,8 @@ test("2,000 random sequences keep the mode's invariants", () => {
     const mode = new WeatherMode(input, now);
     const field = createField(lookOf({ kind: "rain", heavy: true, wind: "strong" })!, { width: 160, height: 120, view: TOP_DOWN, seed });
     let lastTick: number | null = null;
+    /** The last frame that passed the gate was held, so the next tick may step the whole gap (HELD_STEP_MS). */
+    let heldBefore = false;
     let quietSince = now;
     let looping = mode.looping;
     let level = mode.level;
@@ -101,6 +103,7 @@ test("2,000 random sequences keep the mode's invariants", () => {
           const dt = mode.frame(now, hold);
           observe(step);
           if (dt === null) {
+            if (hold && was && (lastTick === null || now - lastTick >= TICK_MS)) heldBefore = true;
             assert.equal(fieldKey(field), before);
             if (was && mode.looping && !hold) assert.ok(lastTick !== null && now - lastTick < TICK_MS, `liveness: a seen moving frame ticks unless the gate or a hold holds it, seed ${seed}`);
             continue;
@@ -108,7 +111,9 @@ test("2,000 random sequences keep the mode's invariants", () => {
           assert.equal(hold, false, `a held frame never ticks, seed ${seed}`);
           assert.ok(was, `no tick without a loop, seed ${seed}`);
           if (lastTick !== null) assert.ok(now - lastTick >= TICK_MS, `no two ticks within 30 ms, seed ${seed}`);
-          assert.ok(dt >= 0 && dt <= 50);
+          assert.ok(dt >= 0 && dt <= (heldBefore ? HELD_STEP_MS : TICK_CLAMP_MS), `a step over 50 ms only after a held frame, seed ${seed}: ${dt}`);
+          if (lastTick !== null) assert.ok(dt <= now - lastTick + 1e-9, `never more than the time since the last tick, seed ${seed}`);
+          heldBefore = false;
           lastTick = now;
           stepField(field, dt);
           const cost = fast ? r() * 3 : r() < 0.5 ? r() * 3 : SLOW_DRAW_MS + r() * 6;
