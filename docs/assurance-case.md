@@ -41,8 +41,11 @@ the code meets each one, and section 10 of the design has the detail.
    where the server's owner allows them, is never re-encoded. The server
    reads only its headers, keeps what an allowlist names and zeroes the rest
    in place, padding included. Each value it keeps is read and checked,
-   once, so no copy it did not read survives. Nothing inside the media data
-   is ever written, and nothing is decoded on the server. The check runs in
+   once, so no copy it did not read survives. No write the server makes
+   reaches the media data: each one is checked against it before it runs.
+   Nothing is decoded on the server. A video's length is its whole
+   presentation timeline, held to the ten-minute cap whatever the file's
+   durations say. The check runs in
    a worker thread with a 5 second budget and is ended at its deadline, so
    a crafted file cannot stall the server for the other rooms. Room imports are
    validated and bounded before anything is kept, and the changes an
