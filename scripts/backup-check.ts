@@ -791,5 +791,60 @@ describe("backup.sh", { concurrency: false }, () => {
     await stack.asApp(`chmod 644 /data/assets/${variantPath("", img.hex, img.kind, "full", 1)}`);
     await goodOnce(stack);
   });
+
+  // Animated maps (docs/design/design-v1-animated-maps.md 9.3, D-261102-454): a video is named by its row's media.
+  test("a dump from before the media column lists .webp as before", async () => {
+    await stack.fresh();
+    await applySchema();
+    await withDb((c) => c.query("alter table assets drop constraint if exists assets_video_media, drop column media, drop column video"));
+    const room = await addRoom(stack, 2);
+    const name = await goodOnce(stack);
+    const list = (await stack.asBackup(`cat /backups/${name}.files`)).split("\n").filter(Boolean);
+    assert.deepEqual(list, listLines(room.images));
+    assert.ok(list.every((line) => line.endsWith(".webp")));
+  });
+
+  test("a new dump copies each video as .webm or .mp4 beside the .webp images, and a restore puts them back", async () => {
+    await stack.fresh();
+    await applySchema();
+    const room = await addRoom(stack, 1);
+    const videos = [
+      { hex: randomBytes(32).toString("hex"), media: "webm" as const, size: 3 * MiB },
+      { hex: randomBytes(32).toString("hex"), media: "mp4" as const, size: 2 * MiB + 17 },
+    ];
+    await withDb(async (c) => {
+      for (const v of videos) {
+        await c.query(
+          `insert into assets (id, room_id, sha256, kind, pipeline, width, height, bytes, variants, media, video)
+           values ($1, $2, $3, 'video', 1, 640, 360, $4, '{full}', $5, $6)`,
+          [randomUUID(), room.roomId, Buffer.from(v.hex, "hex"), v.size, v.media, JSON.stringify({ video: "vp8", fps: 30, durationMs: 2000, kbps: 1 })],
+        );
+      }
+    });
+    const paths = videos.map((v) => variantPath("", v.hex, "video", "full", 1, v.media));
+    await stack.asApp(["set -e", ...videos.map((v, i) => `mkdir -p /data/assets/${v.hex.slice(0, 2)} && head -c ${v.size} /dev/urandom > /data/assets/${paths[i]}`)].join("\n"));
+    const name = await goodOnce(stack);
+    const list = (await stack.asBackup(`cat /backups/${name}.files`)).split("\n").filter(Boolean);
+    assert.deepEqual(list, [...listLines(room.images), ...paths].sort());
+    assert.ok(paths[0]!.endsWith(".webm") && paths[1]!.endsWith(".mp4"));
+    assert.deepEqual((await backups(stack)).files, list);
+    // Lost from the image volume, as after a lost disk: the restore copies them back at their length.
+    await stack.asApp(paths.map((p) => `rm /data/assets/${p}`).join("\n"));
+    const restored = await stack.restore(name);
+    assert.equal(restored.code, 0, restored.stdout + restored.stderr);
+    const sizes = await stack.asApp(paths.map((p) => `stat -c '%s' /data/assets/${p}`).join("\n"));
+    assert.deepEqual(sizes.trim().split("\n").map(Number), videos.map((v) => v.size));
+  });
+
+  test("a row whose media is anything but null, webm or mp4 fails the whole list", async () => {
+    await stack.fresh();
+    await applySchema();
+    const room = await addRoom(stack, 1);
+    await withDb((c) => c.query("alter table assets drop constraint if exists assets_video_media, drop constraint if exists assets_media_check"));
+    await withDb((c) => c.query("update assets set media = 'mov' where id = $1", [room.images[0]!.id]));
+    const r = await stack.backup(["once"]);
+    assert.equal(r.code, 1, r.stdout + r.stderr);
+    assert.equal((await runs()).at(-1)?.outcome, "failed");
+  });
 });
 

@@ -65,8 +65,10 @@ file_size() {
 }
 
 # A line of a dump's list, as list_dump writes it, so no line can name a
-# path outside the image folders.
-LIST_LINE='^[0-9a-f]\{2\}/[0-9a-f]\{64\}-[a-z]\{1,\}-[a-z]\{1,\}-v[1-9][0-9]*\.webp$'
+# path outside the image folders. An extended pattern for grep -E, since
+# BusyBox's grep takes no \| in a basic one: an image is .webp, and an
+# animated map's video .webm or .mp4.
+LIST_LINE='^[0-9a-f]{2}/[0-9a-f]{64}-[a-z]{1,}-[a-z]{1,}-v[1-9][0-9]*\.(webp|webm|mp4)$'
 
 # How many images a dump's list names that the restore could not put in
 # place: neither a whole copy on the backups volume nor a file already on
@@ -74,7 +76,7 @@ LIST_LINE='^[0-9a-f]\{2\}/[0-9a-f]\{64\}-[a-z]\{1,\}-[a-z]\{1,\}-v[1-9][0-9]*\.w
 unrestorable() {
   bad=0
   while IFS= read -r path; do
-    if ! printf '%s\n' "$path" | grep -q "$LIST_LINE"; then
+    if ! printf '%s\n' "$path" | grep -Eq "$LIST_LINE"; then
       bad=$((bad + 1))
     elif ! file_size "$STORE/$path" > /dev/null && ! file_size "$TARGET/$path" > /dev/null; then
       bad=$((bad + 1))
@@ -126,10 +128,13 @@ release_lock() {
 # What the dump names and what is where -------------------------------------
 
 # The variant files the dump's asset rows name, one per line as
-# `<first two hex>/<sha256 hex>-<kind>-<variant>-v<pipeline>.webp`, the path
+# `<first two hex>/<sha256 hex>-<kind>-<variant>-v<pipeline>.<ext>`, the path
 # server/assets/store.ts builds (variantPath). COPY's text format writes a
-# bytea as \\x<hex> and a text[] as {a,b}. A row that does not parse fails
-# the whole list, since a list that leaves an image out is not a backup.
+# bytea as \\x<hex>, a text[] as {a,b} and a null as \N. The extension
+# comes from the media column: null, or no such column in a dump from
+# before animated maps, is .webp, and webm and mp4 are their own. A row that
+# does not parse, or any other media, fails the whole list, since a list
+# that leaves an image out is not a backup.
 list_dump() {
   pg_restore --data-only --table=assets --file=- "$1" | awk '
     /^COPY public\.assets \(/ {
@@ -151,10 +156,14 @@ list_dump() {
       variants = f[col["variants"]]
       gsub(/[{}]/, "", variants)
       nv = split(variants, v, ",")
+      media = ("media" in col) ? f[col["media"]] : "\\N"
+      if (media == "\\N") ext = "webp"
+      else if (media == "webm" || media == "mp4") ext = media
+      else { bad = 1; exit 1 }
       if (hex !~ /^[0-9a-f]{64}$/ || kind !~ /^[a-z]+$/ || pipeline !~ /^[1-9][0-9]*$/ || nv < 1) { bad = 1; exit 1 }
       for (j = 1; j <= nv; j++) {
         if (v[j] !~ /^[a-z]+$/) { bad = 1; exit 1 }
-        print substr(hex, 1, 2) "/" hex "-" kind "-" v[j] "-v" pipeline ".webp"
+        print substr(hex, 1, 2) "/" hex "-" kind "-" v[j] "-v" pipeline "." ext
       }
     }
     END { if (bad) exit 1 }
@@ -169,9 +178,9 @@ list_dump() {
 #   missing <path>                gone everywhere
 plan() {
   dir=$(mktemp -d)
-  ( cd "$SOURCE" && find . -mindepth 2 -maxdepth 2 -type f -name '*.webp' | grep -E '^\./[0-9a-f]{2}/' | xargs -r stat -c '%s %n' ) > "$dir/live" 2>/dev/null
+  ( cd "$SOURCE" && find . -mindepth 2 -maxdepth 2 -type f \( -name '*.webp' -o -name '*.webm' -o -name '*.mp4' \) | grep -E '^\./[0-9a-f]{2}/' | xargs -r stat -c '%s %n' ) > "$dir/live" 2>/dev/null
   if [ -d "$SOURCE/trash" ]; then
-    ( cd "$SOURCE/trash" && find . -mindepth 3 -maxdepth 3 -type f -name '*.webp' | xargs -r stat -c '%s %n' ) > "$dir/trash" 2>/dev/null
+    ( cd "$SOURCE/trash" && find . -mindepth 3 -maxdepth 3 -type f \( -name '*.webp' -o -name '*.webm' -o -name '*.mp4' \) | xargs -r stat -c '%s %n' ) > "$dir/trash" 2>/dev/null
   else
     : > "$dir/trash"
   fi
@@ -545,7 +554,7 @@ restore_locked() {
   find "$TARGET" -mindepth 2 -maxdepth 2 -type f -name '*.restoring' -exec rm -f {} + 2>/dev/null
   copied=0
   failed=0
-  for src in $(cd "$STORE" && find . -mindepth 2 -maxdepth 2 -type f -name '*.webp' | sed 's|^\./||'); do
+  for src in $(cd "$STORE" && find . -mindepth 2 -maxdepth 2 -type f \( -name '*.webp' -o -name '*.webm' -o -name '*.mp4' \) | sed 's|^\./||'); do
     dest="$TARGET/$src"
     [ -e "$dest" ] && continue
     mkdir -p "${dest%/*}"
