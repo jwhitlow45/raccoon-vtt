@@ -213,4 +213,24 @@ describe("one page plays per browser", () => {
     assert.ok(!b.audible(), "B keeps A's claim");
     assert.deepEqual(world.failures, []);
   });
+
+  test("without Web Locks an owner that wakes from a stall gives way to a page that started meanwhile and is stalled itself, lapsed but unarmed", () => {
+    const world = new World(false, rng(11));
+    world.delay = 5;
+    const a = world.open("member", true);
+    world.runUntil(world.now + 4_000);
+    assert.ok(a.audible() && !a.handoff.armed, "A plays alone, unarmed");
+    // B loads while A's main thread stands still, so B never hears A: the one exception, B plays beside it.
+    world.stall(a, 31_000);
+    world.runUntil(world.now + 100);
+    const b = world.open("member", true);
+    world.runUntil(world.now + 4_000);
+    assert.ok(b.audible(), "B plays, alone as far as it knows");
+    // B stalls too, before A wakes. A then sees B's last post: it played, unarmed, and its claim outlives its entry.
+    world.stall(b, 31_000);
+    world.runUntil(world.now + 40_000);
+    world.runUntil(world.now + 30_000);
+    assert.equal([a, b].filter((p) => p.audible()).length, 1, "one page sounds once both run");
+    assert.deepEqual(world.failures, []);
+  });
 });
