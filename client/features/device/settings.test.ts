@@ -208,3 +208,31 @@ test("with writes failing, a choice another window stored still comes back when 
   s.themeChoiceSetting.restore();
   assert.equal(s.themeChoice(), "auto");
 });
+
+/*
+ * Animated maps (docs/design/design-v1-animated-maps.md 4.4): Moving until
+ * chosen, and anything else reads as Moving. A table display's own choice
+ * is for its page only, as its weather is.
+ */
+
+test("animated maps read moving or still, and anything else as moving", async () => {
+  reset({ writes: true, reads: true });
+  const s = await loadPage();
+  assert.equal(s.animatedMaps(), "moving");
+  for (const raw of ["still", "moving"]) assert.equal(s.parseAnimatedMaps(raw), raw);
+  for (const raw of [null, "", "Still", "off", "STILL", "still;"]) assert.equal(s.parseAnimatedMaps(raw), "moving", String(raw));
+  s.setAnimatedMaps("still");
+  assert.equal(stored.get("rvtt.animatedMaps"), "still");
+  assert.equal((await loadPage()).animatedMaps(), "still");
+});
+
+test("a table display's animated maps last for its page and give the device's own back", async () => {
+  reset({ writes: true, reads: true });
+  stored.set("rvtt.animatedMaps", "still");
+  const s = await loadPage();
+  s.applyAnimatedMaps("moving");
+  assert.equal(s.animatedMaps(), "moving");
+  assert.equal(stored.get("rvtt.animatedMaps"), "still", "the member's choice is not touched");
+  s.restoreAnimatedMaps();
+  assert.equal(s.animatedMaps(), "still");
+});

@@ -4,6 +4,7 @@ import { setBoardInterfaceScale } from "../../lib/boardScale.ts";
 import { preferredMapVariant, readMapVariantSetting, type MapVariantSetting } from "../../lib/device.ts";
 import { formatKeyChanges, parseKeyChanges, type KeyChanges } from "../../state/keyBindings.ts";
 import { parseDiceSet } from "../dice/throw/sets.ts";
+import type { AnimatedMapsChoice } from "../animmap/words.ts";
 
 /**
  * This device's own settings (docs/design/design-v1-dm-tools.md 2.7): the
@@ -320,3 +321,25 @@ export const themeChoice = themeChoiceSetting.get;
 export const setThemeChoice = themeChoiceSetting.set;
 export const useThemeChoice = themeChoiceSetting.use;
 export const subscribeThemeChoice = themeChoiceSetting.subscribe;
+
+// ---------------------------------------------------------------- animated maps
+
+/**
+ * "Animated maps" (docs/design/design-v1-animated-maps.md 4.4): Moving, the
+ * default, or Still, which shows each map's first frame and downloads no
+ * video. Low power, reduced motion and a device that could not keep up
+ * keep them still whatever this says (features/animmap/playback.ts).
+ */
+export function parseAnimatedMaps(raw: string | null): AnimatedMapsChoice {
+  return raw === "still" ? "still" : "moving";
+}
+
+const animatedMapsSetting = setting<AnimatedMapsChoice>("rvtt.animatedMaps", parseAnimatedMaps, (c) => c);
+
+export const animatedMaps = animatedMapsSetting.get;
+export const setAnimatedMaps = animatedMapsSetting.set;
+export const useAnimatedMaps = animatedMapsSetting.use;
+export const subscribeAnimatedMaps = animatedMapsSetting.subscribe;
+/** A table display's own choice, for its page only, as its weather takes `applyWeatherMode` (features/display/remember.ts). */
+export const applyAnimatedMaps = animatedMapsSetting.apply;
+export const restoreAnimatedMaps = animatedMapsSetting.restore;
