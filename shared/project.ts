@@ -2869,6 +2869,7 @@ export const SCENE_FOR_PLAYERS = {
   name: "copied",
   order: "zeroed",
   bounds: "copied",
+  // With its video, which every op keeps the showing phase's, the only one players receive (docs/design/design-v1-animated-maps.md 7).
   map: "copied",
   grid: "copied",
   background: "copied",
@@ -4744,7 +4745,11 @@ export function visibleAssetIds(state: RoomState, viewer: Viewer, opts: ProjectO
     if (id !== undefined) ids.add(id);
   };
   const projected = projectState(state, viewer, opts);
-  for (const scene of Object.values(projected.scenes)) if (scene.map) ids.add(scene.map.assetId);
+  // A player's scene carries only the showing phase's video, on its map (docs/design/design-v1-animated-maps.md 7).
+  for (const scene of Object.values(projected.scenes)) {
+    if (scene.map) ids.add(scene.map.assetId);
+    if (scene.map?.video) ids.add(scene.map.video.assetId);
+  }
   for (const token of Object.values(projected.tokens)) {
     addImage(token.image);
     // Only the DM's and the owners' projections carry a token's other images, so a disguise's true face stays theirs.
@@ -4766,7 +4771,11 @@ export function visibleAssetIds(state: RoomState, viewer: Viewer, opts: ProjectO
     // The DM may use every asset of the room, scenes it is not viewing included, every phase and thumbnail with them.
     for (const scene of Object.values(state.scenes)) {
       if (scene.map) ids.add(scene.map.assetId);
-      for (const phase of scene.phases ?? []) ids.add(phase.assetId);
+      if (scene.map?.video) ids.add(scene.map.video.assetId);
+      for (const phase of scene.phases ?? []) {
+        ids.add(phase.assetId);
+        if (phase.video) ids.add(phase.video.assetId);
+      }
       if (scene.thumb) ids.add(scene.thumb);
     }
     for (const token of Object.values(state.tokens)) {

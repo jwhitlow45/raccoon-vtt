@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { keys, readEntity } from "./keys.ts";
-import type { Drawing, Effect, FogTile, FreeWall, LogEvent, PlayerChunk, RoomState, Stamp, Token, Viewer } from "./model.ts";
+import type { Drawing, Effect, FogTile, FreeWall, LogEvent, MapVideo, PlayerChunk, RoomState, Stamp, Token, Viewer } from "./model.ts";
 import type { Op } from "./protocol.ts";
 import {
   allKeys,
@@ -362,6 +362,13 @@ function assertNoLeaks(state: RoomState, viewer: Viewer, p: ProjectedState, labe
   const text = JSON.stringify(p);
   // A copy shares its original's images, so a phase of one scene can be the map players see on another.
   const shownMaps = new Set(Object.values(p.scenes).flatMap((sc) => (sc.map ? [sc.map.assetId] : [])));
+  // Only the showing phase's video reaches players, on its map, and they may read it (docs/design/design-v1-animated-maps.md 7).
+  const shownVideos = new Set(Object.values(p.scenes).flatMap((sc) => (sc.map?.video ? [sc.map.video.assetId] : [])));
+  for (const sc of Object.values(p.scenes)) {
+    const stored = state.scenes[sc.id]!;
+    if (stored.phases) assert.deepEqual(sc.map?.video, stored.phases.find((ph) => ph.id === stored.phaseId)?.video, `${label}: scene ${sc.id} shows a video not its showing phase's`);
+    if (sc.map?.video) assert.ok(visible.has(sc.map.video.assetId), `${label}: the shown video ${sc.map.video.assetId} is not readable`);
+  }
   for (const sc of Object.values(state.scenes)) {
     if (sc.thumb) {
       assert.ok(!text.includes(sc.thumb), `${label}: thumbnail ${sc.thumb} leaked`);
@@ -373,6 +380,15 @@ function assertNoLeaks(state: RoomState, viewer: Viewer, p: ProjectedState, labe
         assert.ok(!text.includes(phase.assetId), `${label}: phase image ${phase.assetId} leaked`);
         assert.ok(!visible.has(phase.assetId), `${label}: phase image ${phase.assetId} readable`);
       }
+      if (phase.video && !shownVideos.has(phase.video.assetId)) {
+        assert.ok(!text.includes(phase.video.assetId), `${label}: phase video ${phase.video.assetId} leaked`);
+        assert.ok(!visible.has(phase.video.assetId), `${label}: phase video ${phase.video.assetId} readable`);
+      }
+    }
+    // A map's video off the players' scene goes with its map.
+    if (sc.map?.video && !shownVideos.has(sc.map.video.assetId)) {
+      assert.ok(!text.includes(sc.map.video.assetId), `${label}: video ${sc.map.video.assetId} of another scene leaked`);
+      assert.ok(!visible.has(sc.map.video.assetId), `${label}: video ${sc.map.video.assetId} of another scene readable`);
     }
     if (sc.folder) assert.ok(!text.includes(sc.folder), `${label}: folder leaked`);
   }
@@ -618,6 +634,86 @@ describe("projection properties over random rooms", () => {
         }
       }
     }
+  });
+});
+
+/** A video over a still of this size, for the projection, which reads only its id. */
+function videoOver(assetId: string, still: { widthPx: number; heightPx: number }): MapVideo {
+  return { assetId, widthPx: still.widthPx, heightPx: still.heightPx, container: "webm", video: "vp09.00.40.08", fps: 30, durationMs: 42_000, kbps: 6_000 };
+}
+
+/**
+ * A random room's maps made animated (docs/design/design-v1-animated-maps.md
+ * 9.1): each phase a video or a still, the map showing the active phase's as
+ * every op leaves it, and a map without phases a video or not. The players'
+ * scene is the one with phases half the time.
+ */
+function withVideos(state: RoomState, r: () => number): RoomState {
+  for (const sc of Object.values(state.scenes)) {
+    if (!sc.map) continue;
+    if (sc.phases) {
+      sc.phases = sc.phases.map((ph) => (chance(r, 0.7) ? { ...ph, video: videoOver(`video-${sc.id}-${ph.id}`, ph) } : ph));
+      const active = sc.phases.find((ph) => ph.id === sc.phaseId);
+      if (active?.video) sc.map = { ...sc.map, video: active.video };
+    } else if (chance(r, 0.6)) sc.map = { ...sc.map, video: videoOver(`video-${sc.id}`, sc.map) };
+  }
+  if (state.scenes.s1?.phases && chance(r, 0.5)) state.meta = { ...state.meta, playerSceneId: "s1" };
+  return state;
+}
+
+describe("projection properties over random rooms with animated maps (docs/design/design-v1-animated-maps.md 7)", () => {
+  test("no player projection holds a video but the showing phase's, as data or as a readable asset, and projectEntity agrees", () => {
+    let hiddenOnTheirScene = 0;
+    for (let seed = 1; seed <= 250; seed++) {
+      const r = rng(seed * 7919);
+      const state = withVideos(randomState(rng(seed)), r);
+      const theirs = state.scenes[state.meta.playerSceneId ?? ""];
+      if (theirs?.phases?.some((ph) => ph.video && ph.id !== theirs.phaseId)) hiddenOnTheirScene++;
+      for (const viewer of [P1, P2, DISPLAY]) {
+        const p = projectState(state, viewer, { sceneId: "s2" });
+        assertNoLeaks(state, viewer, p, `seed ${seed} ${viewer.memberId}`);
+        for (const id of Object.keys(state.scenes)) {
+          assert.equal(stableStringify(projectEntity(keys.scene(id), state, viewer, { sceneId: "s2" })), stableStringify(p.scenes[id] ?? null), `seed ${seed} ${viewer.memberId} scene ${id}`);
+        }
+      }
+      // The DM may read every video of the room, every phase's included.
+      const dm = visibleAssetIds(state, DM, { sceneId: "s2" });
+      for (const sc of Object.values(state.scenes)) for (const v of [sc.map?.video, ...(sc.phases ?? []).map((ph) => ph.video)]) if (v) assert.ok(dm.has(v.assetId), `seed ${seed} dm ${v.assetId}`);
+    }
+    assert.ok(hiddenOnTheirScene > 20, `the sweep reached a hidden phase video on the players' scene only ${hiddenOnTheirScene} times`);
+  });
+
+  test("a phase switch hands players the new phase's video and takes the old one away, and a hidden phase's edit sends them nothing", () => {
+    const state = room();
+    const map = { assetId: "day", widthPx: 1920, heightPx: 1080, cellPx: 64, originPx: { x: 0, y: 0 } };
+    const day = videoOver("v-day", map);
+    const night = videoOver("v-night", map);
+    state.scenes.s1 = { ...state.scenes.s1!, map: { ...map, video: day }, phases: [{ id: "p1", name: "Day", assetId: "day", widthPx: 1920, heightPx: 1080, video: day }, { id: "p2", name: "Night", assetId: "night", widthPx: 1920, heightPx: 1080, video: night }, { id: "p3", name: "Fire", assetId: "fire", widthPx: 1920, heightPx: 1080 }], phaseId: "p1", phaseGrid: { refWidthPx: 1920, refHeightPx: 1080, cellPx: 64, originPx: { x: 0, y: 0 } } };
+    state.meta.playerSceneId = "s1";
+    const sees = (s: RoomState, viewer: Viewer) => ({ text: JSON.stringify(projectState(s, viewer, { sceneId: "s1" })), visible: visibleAssetIds(s, viewer, { sceneId: "s1" }) });
+    for (const viewer of [P1, DISPLAY]) {
+      const { text, visible } = sees(state, viewer);
+      assert.ok(text.includes("v-day") && visible.has("v-day"), viewer.memberId);
+      assert.ok(!text.includes("v-night") && !visible.has("v-night"), `${viewer.memberId}: the night phase's video`);
+    }
+    const dm = visibleAssetIds(state, DM, { sceneId: "s2" });
+    assert.ok(dm.has("v-day") && dm.has("v-night"));
+    // The DM swaps the hidden phase's video: players hold the same scene, so no change reaches them.
+    const swapped = apply(state, { t: "scene.update", sceneId: "s1", patch: { phases: state.scenes.s1!.phases!.map((ph) => (ph.id === "p2" ? { ...ph, video: videoOver("v-storm", map) } : ph)) } });
+    assert.equal(hashValue(projectEntity(keys.scene("s1"), swapped, P1, { sceneId: "s1" })), hashValue(projectEntity(keys.scene("s1"), state, P1, { sceneId: "s1" })));
+    assert.ok(!sees(swapped, P1).text.includes("v-storm"));
+    // Switching to the night phase, then to the still one.
+    const nightShown = apply(swapped, { t: "scene.setPhase", sceneId: "s1", phaseId: "p2" });
+    const atNight = sees(nightShown, P1);
+    assert.ok(atNight.text.includes("v-storm") && atNight.visible.has("v-storm"));
+    assert.ok(!atNight.text.includes("v-day") && !atNight.visible.has("v-day"), "the day video is taken away");
+    const stillShown = apply(nightShown, { t: "scene.setPhase", sceneId: "s1", phaseId: "p3" });
+    const atFire = sees(stillShown, P1);
+    assert.ok(!atFire.text.includes("v-") && ![...atFire.visible].some((id) => id.startsWith("v-")), "a still phase shows players no video at all");
+    // Another scene's video never reaches players, nor its map.
+    const elsewhere = apply(stillShown, { t: "scene.setMap", sceneId: "s2", map: { ...map, assetId: "crypt", video: videoOver("v-crypt", map) } });
+    assert.ok(!sees(elsewhere, P1).text.includes("v-crypt") && !sees(elsewhere, P1).visible.has("v-crypt"));
+    assert.ok(visibleAssetIds(elsewhere, DM, { sceneId: "s1" }).has("v-crypt"));
   });
 });
 

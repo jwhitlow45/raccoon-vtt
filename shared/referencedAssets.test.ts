@@ -1,19 +1,23 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { keys } from "./keys.ts";
-import type { RoomState } from "./model.ts";
-import { referencedAssetIds, restoreAddedAssets } from "./referencedAssets.ts";
+import type { MapVideo, RoomState } from "./model.ts";
+import { referencedAssetIds, referencedVideoIds, restoreAddedAssets } from "./referencedAssets.ts";
 import { character, companionBlock, customMonster, imageRef, room, scene, srdImage, token } from "./testutil.ts";
 
 const page = (assetId: string) => ({ assetId, width: 1584, height: 2048 });
+const video = (assetId: string): MapVideo => ({ assetId, widthPx: 1920, heightPx: 1080, container: "webm", video: "vp09.00.40.08", fps: 30, durationMs: 42_000, kbps: 6_000 });
 
 /** Every place a room names an image, each with its own asset id: the walk must find them all. */
 function everyReference(): RoomState {
   const state = room();
   state.scenes.s1 = scene("s1", {
-    map: { assetId: "map", widthPx: 100, heightPx: 100, cellPx: 10, originPx: { x: 0, y: 0 } },
+    map: { assetId: "map", widthPx: 100, heightPx: 100, cellPx: 10, originPx: { x: 0, y: 0 }, video: video("mapVideo") },
     thumb: "thumb",
-    phases: [{ id: "ph", name: "Night", assetId: "phase", widthPx: 100, heightPx: 100 }],
+    phases: [
+      { id: "ph", name: "Night", assetId: "phase", widthPx: 100, heightPx: 100, video: video("mapVideo") },
+      { id: "ph2", name: "Storm", assetId: "phase", widthPx: 100, heightPx: 100, video: video("phaseVideo") },
+    ],
     phaseId: "ph",
     phaseGrid: { refWidthPx: 100, refHeightPx: 100, cellPx: 10, originPx: { x: 0, y: 0 } },
   });
@@ -53,7 +57,22 @@ describe("referencedAssetIds (docs/design/design-v1-dm-tools.md 3.19)", () => {
     const found = referencedAssetIds(state);
     // A field added to the model that names an asset shows here first, and fails until the walk knows it.
     assert.deepEqual([...found].sort(), [...namedAssets(state)].sort());
-    assert.deepEqual([...found].sort(), ["altImage", "blockImage", "docPage1", "docPage2", "handout", "holderStamp", "map", "monsterImage", "page1", "page2", "phase", "portrait", "rememberedStamp", "srdImage", "stampImage", "thumb", "tokenImage"]);
+    assert.deepEqual([...found].sort(), ["altImage", "blockImage", "docPage1", "docPage2", "handout", "holderStamp", "map", "mapVideo", "monsterImage", "page1", "page2", "phase", "phaseVideo", "portrait", "rememberedStamp", "srdImage", "stampImage", "thumb", "tokenImage"]);
+  });
+
+  test("a map's and its phases' videos are video rows, so a restore checks their kind and the switch sees them (docs/design/design-v1-animated-maps.md 9.2)", () => {
+    const state = everyReference();
+    const before = state.scenes.s1!;
+    const still = { ...before, map: { ...before.map!, video: undefined }, phases: before.phases!.map(({ video: _video, ...p }) => p) };
+    const changed = { ...state, scenes: { ...state.scenes, s1: still } };
+    assert.deepEqual(restoreAddedAssets([{ key: keys.scene("s1"), value: before }], changed), [
+      { assetId: "mapVideo", kind: "video" },
+      { assetId: "mapVideo", kind: "video" },
+      { assetId: "phaseVideo", kind: "video" },
+    ]);
+    assert.deepEqual(restoreAddedAssets([{ key: keys.scene("s1"), value: before }], state), []);
+    assert.deepEqual([...referencedVideoIds(state)].sort(), ["mapvideo", "phasevideo"], "lowercased, as the actor reads rows");
+    assert.deepEqual([...referencedVideoIds(changed)], []);
   });
 
   test("a restore adds only references the entity does not hold now, and never a thumbnail", () => {

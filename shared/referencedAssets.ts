@@ -1,4 +1,4 @@
-import { parseKey, readEntity, type EntityKey } from "./keys.ts";
+import { keys, parseKey, readEntity, type EntityKey } from "./keys.ts";
 import type { ImageRef, RoomState } from "./model.ts";
 import { imageAssetId } from "./imageRef.ts";
 import type { AssetKind } from "./permissions.ts";
@@ -7,7 +7,7 @@ import type { RestoreEntry } from "./protocol.ts";
 /**
  * Every place the room's state names an image row (docs/design/design-v1-dm-tools.md
  * 2.6 and 3.19), with the kind of asset that place takes: scene maps, map
- * phases and thumbnails, token images and other images, character
+ * phases and their videos, thumbnails, token images and other images, character
  * portraits, monsters', SRD monsters' and companion blocks' default
  * images, stamps from the library, the stamps players remember
  * (docs/design/design-v1-map-discovery.md 5.4), and every page of a handout and
@@ -43,10 +43,16 @@ export function entityAssetRefs(key: EntityKey, value: unknown): AssetRef[] {
   const v = value as Record<string, unknown>;
   switch (parsed.kind) {
     case "scene": {
-      const map = v.map as { assetId?: unknown } | undefined;
+      // A map's and each phase's video are `video` rows over their stills (docs/design/design-v1-animated-maps.md 9.2).
+      const video = (place: { video?: { assetId?: unknown } } | undefined) => {
+        if (typeof place?.video?.assetId === "string") out.push({ assetId: place.video.assetId, kind: "video" });
+      };
+      const map = v.map as { assetId?: unknown; video?: { assetId?: unknown } } | undefined;
       if (typeof map?.assetId === "string") out.push({ assetId: map.assetId, kind: "map" });
-      for (const phase of (v.phases as { assetId?: unknown }[] | undefined) ?? []) {
+      video(map);
+      for (const phase of (v.phases as { assetId?: unknown; video?: { assetId?: unknown } }[] | undefined) ?? []) {
         if (typeof phase.assetId === "string") out.push({ assetId: phase.assetId, kind: "map" });
+        video(phase);
       }
       if (typeof v.thumb === "string") out.push({ assetId: v.thumb, kind: "thumb" });
       break;
@@ -111,6 +117,19 @@ export function referencedAssetIds(state: RoomState): Set<string> {
     for (const [id, value] of Object.entries((state[collection] ?? {}) as Record<string, unknown>)) {
       for (const ref of entityAssetRefs(`${kind}:${id}`, value)) ids.add(ref.assetId);
     }
+  }
+  return ids;
+}
+
+/**
+ * Every video the state's maps and phases name, lowercased as the actor
+ * reads asset rows: the ones an op may still name while the server's
+ * animated maps switch is off (docs/design/design-v1-animated-maps.md 9.2).
+ */
+export function referencedVideoIds(state: RoomState): Set<string> {
+  const ids = new Set<string>();
+  for (const [id, value] of Object.entries(state.scenes ?? {})) {
+    for (const ref of entityAssetRefs(keys.scene(id), value)) if (ref.kind === "video") ids.add(ref.assetId.toLowerCase());
   }
   return ids;
 }
