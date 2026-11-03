@@ -126,7 +126,8 @@ export type IconName =
   | "viewIsometric"
   | "turnLeft"
   | "turnRight"
-  | "viewAs";
+  | "viewAs"
+  | "windToward";
 
 /**
  * The meanings drawn with Lucide's path data, by the Lucide icon each
@@ -639,6 +640,13 @@ const SHAPES: Record<IconName, ReactNode> = {
     <g {...STROKE}>
       <path d="M5 10a7 7 0 0 1 14 0M15.5 9.5 19 11l1.5-3.5" />
       <path d="M12 14l7 3.5-7 3.5-7-3.5z" />
+    </g>
+  ),
+  // A wind blowing toward the top: an arrow with two streaks behind it, drawn for the app. The scene's Weather fold turns it to each direction of its compass, so it is never Lucide's plain arrow-up, which means move a thing up.
+  windToward: (
+    <g {...STROKE}>
+      <path d="M12 3v11M8 7l4-4 4 4" />
+      <path d="M7 14v7M17 14v7" />
     </g>
   ),
   // Lucide scan-eye: the DM looks through a player's eyes (View as a player). Never the plain eye, which means players see a thing.
