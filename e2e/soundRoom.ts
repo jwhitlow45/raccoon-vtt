@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import type { BrowserContext, Page } from "playwright-core";
+import { SAMPLES_PER_FRAME } from "#shared/audio/mp3.ts";
+import { framesFor, silentFrames } from "#shared/audio/mp3Testutil.ts";
 import { OpSocket, waitFor } from "./harness.ts";
 
 /**
@@ -69,34 +71,21 @@ export function roomSoundScript(choice: "on" | "off" | null): string {
 }
 
 /** 48 kHz needs no padding byte: 64 kbps frames are exactly 192 bytes, 24 ms each. */
-const RATE = 48_000;
-const FRAME_BYTES = 192;
-const FRAME_MS = (1152 / RATE) * 1000;
+const SILENCE = { rateHz: 48_000, kbps: 64, mode: 3 } as const;
 
 /**
  * An MP3 of silence at least `ms` long: MPEG-1 Layer III, 48 kHz, 64 kbps,
- * mono, every frame a header and zeros, which decodes as silence (the same
- * frames as scripts/silence.ts at another rate). Its length is a whole
- * number of frames, as the server counts it.
+ * mono, the frame walk's own frames of silence (shared/audio/mp3Testutil.ts),
+ * which decode as silence. Its length is a whole number of frames, as the
+ * server counts it.
  */
 export function silentSound(ms: number): Buffer {
-  const frames = Math.ceil(ms / FRAME_MS);
-  const out = Buffer.alloc(frames * FRAME_BYTES);
-  for (let i = 0; i < frames; i++) {
-    const at = i * FRAME_BYTES;
-    out[at] = 0xff;
-    out[at + 1] = 0xfb;
-    // 64 kbps, 48 kHz, no padding.
-    out[at + 2] = (0b0101 << 4) | (0b01 << 2);
-    // Mono.
-    out[at + 3] = 0b11 << 6;
-  }
-  return out;
+  return Buffer.from(silentFrames(framesFor(ms, SILENCE.rateHz), SILENCE));
 }
 
 /** A sound's length as the server walks it: frames times 1152 over the rate, rounded down. */
 export function silentMs(ms: number): number {
-  return Math.floor((Math.ceil(ms / FRAME_MS) * 1152 * 1000) / RATE);
+  return Math.floor((framesFor(ms, SILENCE.rateHz) * SAMPLES_PER_FRAME * 1000) / SILENCE.rateHz);
 }
 
 export type SoundRow = { id: string; audio?: { ms: number; channels: number; kbps: number } };

@@ -1,4 +1,4 @@
-import type { Mp3Facts } from "#shared/audio/mp3.ts";
+import { SAMPLES_PER_FRAME, type Mp3Facts } from "#shared/audio/mp3.ts";
 
 /**
  * A constant bitrate MP3 measured in 60-second pieces
@@ -14,7 +14,6 @@ import type { Mp3Facts } from "#shared/audio/mp3.ts";
 export const PIECE_SECONDS = 60;
 export const PRE_ROLL_FRAMES = 10;
 export const OUTPUT_RATE = 44_100;
-const SAMPLES_PER_FRAME = 1152;
 
 export type Mp3Piece = {
   /** Bytes of the file to decode, pre-roll frames included. */

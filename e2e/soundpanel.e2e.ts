@@ -9,6 +9,7 @@ import { framesFor, silentFrames } from "#shared/audio/mp3Testutil.ts";
 import type { SoundUse } from "#shared/sound.ts";
 import { ConsoleWatch, openSideTab, OpSocket, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
+import { addSound } from "./soundRoom.ts";
 
 /**
  * The Sound panel (docs/design/design-v1-music.md 4.1, 4.3 and 4.6), on
@@ -124,14 +125,8 @@ async function createRoom(page: Page, context: BrowserContext, origin: string, n
 }
 
 /** Uploads a sound file of frames of silence and creates its sound, as the DM's Add buttons do (4.2 step 6). */
-async function addSound(entry: (typeof LIBRARY)[number]): Promise<string> {
-  const bytes = silentFrames(framesFor(entry.ms));
-  const res = await dmContext.request.put(`${server.origin}/api/rooms/${run.roomId}/assets?kind=sound`, { headers: { Origin: server.origin, "content-type": "audio/mpeg" }, data: Buffer.from(bytes) });
-  assert.ok(res.ok(), `the ${entry.name} upload answered ${res.status()}: ${await res.text()}`);
-  const row = (await res.json()) as { id: string };
-  const id = randomUUID();
-  await ops.send({ t: "sound.create", id, assetId: row.id, name: entry.name, use: entry.use, ms: entry.ms });
-  return id;
+function addEntry(entry: (typeof LIBRARY)[number]): Promise<string> {
+  return addSound({ context: dmContext, origin: server.origin, roomId: run.roomId, ops, id: randomUUID(), name: entry.name, use: entry.use, ms: entry.ms });
 }
 
 /** The Sound panel, the side panel's tab on the desk. */
@@ -207,7 +202,7 @@ describe("the Sound panel", { concurrency: false }, () => {
     run.sceneA = dmSocket.state!.meta.playerSceneId!;
     await ops.send({ t: "scene.update", sceneId: run.sceneA, patch: { name: "Tavern" } });
     await ops.send({ t: "scene.create", scene: { id: run.sceneB, name: "Forest road", bounds: { w: 20, h: 14 }, fogEnabled: false } });
-    for (const entry of LIBRARY) run.sounds[entry.name] = await addSound(entry);
+    for (const entry of LIBRARY) run.sounds[entry.name] = await addEntry(entry);
     await until("the library in the DM's copy", () => Object.keys(dmSocket.state?.sounds ?? {}).length === LIBRARY.length);
     await join(patContext, "Pat", "#30a46c");
     await pat.goto(`${server.origin}/r/${run.roomId}`);
@@ -410,7 +405,7 @@ describe("the Sound panel", { concurrency: false }, () => {
 
   test("mfa-1. an effect fired behind a blackout keeps Stop all sound and the X-card's Stop the sound while it sounds, and neither once it is over", async () => {
     // sp-8 stopped everything and sp-10 deleted Thunder, so an 8-second Gong is the room's one effect, and nothing else plays.
-    run.sounds.Gong = await addSound({ name: "Gong", use: "effect", ms: 8_000 });
+    run.sounds.Gong = await addEntry({ name: "Gong", use: "effect", ms: 8_000 });
     await until("Gong in the DM's copy", () => dmSocket.state?.sounds?.[run.sounds.Gong!]);
     await ops.send({ t: "view.blackout", blackout: true });
     await until("the blackout", () => dmSocket.state?.meta.view.blackout === true);
