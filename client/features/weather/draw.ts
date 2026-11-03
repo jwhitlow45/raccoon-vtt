@@ -1,4 +1,4 @@
-import type { Camera } from "../../lib/camera.ts";
+import { viewToScreen, type Camera } from "../../lib/camera.ts";
 import { toView, type View } from "../../lib/view.ts";
 import type { Field } from "./sim.ts";
 import { RING_MS, WRAP_MARGIN } from "./sim.ts";
@@ -31,9 +31,9 @@ export function sceneClip(view: View, bounds: { w: number; h: number }, camera: 
     [0, bounds.h],
   ] as const;
   for (let k = 0; k < 4; k++) {
-    const v = toView(view, { x: corners[k]![0], y: corners[k]![1] });
-    out[k * 2] = v.x * camera.scale + camera.x;
-    out[k * 2 + 1] = v.y * camera.scale + camera.y;
+    const p = viewToScreen(camera, toView(view, { x: corners[k]![0], y: corners[k]![1] }));
+    out[k * 2] = p.x;
+    out[k * 2 + 1] = p.y;
   }
   return out;
 }
