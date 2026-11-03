@@ -1,0 +1,221 @@
+{
+  "version": 1,
+  "plans": [
+    {
+      "name": "the defaults",
+      "settings": {
+        "w": 50,
+        "h": 50,
+        "rooms": 12,
+        "density": "normal",
+        "corridors": "bending",
+        "wide": false,
+        "loops": true,
+        "theme": "dungeon",
+        "heights": "some",
+        "traps": "few",
+        "band": "1-4"
+      },
+      "seed": "1K7QH2MXA9F3TWQ5",
+      "sha256": "e1ec7a1fc86934fbc458268bff744e35656b4b6e278a0dea3bc46719f95eae4e"
+    },
+    {
+      "name": "Small",
+      "settings": {
+        "w": 30,
+        "h": 30,
+        "rooms": 6,
+        "density": "normal",
+        "corridors": "bending",
+        "wide": false,
+        "loops": true,
+        "theme": "dungeon",
+        "heights": "some",
+        "traps": "few",
+        "band": "1-4"
+      },
+      "seed": "1Q8V2DR4HJ0Y7ZB3",
+      "sha256": "34a6b397becedcc77dbbbf623f83fe404e71983ed484264dc2b5de203e0f2f8c"
+    },
+    {
+      "name": "Large",
+      "settings": {
+        "w": 80,
+        "h": 80,
+        "rooms": 20,
+        "density": "normal",
+        "corridors": "bending",
+        "wide": false,
+        "loops": true,
+        "theme": "dungeon",
+        "heights": "some",
+        "traps": "few",
+        "band": "1-4"
+      },
+      "seed": "1M3T9WCEX5PK2AGN",
+      "sha256": "967f2eec04cd99212076733713fe6125beefcfd3e82e0e567c8d8d95642742c2"
+    },
+    {
+      "name": "a Crypt, Dense, Winding and Wide",
+      "settings": {
+        "w": 50,
+        "h": 50,
+        "rooms": 12,
+        "density": "dense",
+        "corridors": "winding",
+        "wide": true,
+        "loops": true,
+        "theme": "crypt",
+        "heights": "some",
+        "traps": "few",
+        "band": "1-4"
+      },
+      "seed": "1A0B1C2D3E4F5G6H",
+      "sha256": "da845756b96faea4609896cb0146d01b3430334dd1232cfd7614340131658d6e"
+    },
+    {
+      "name": "Sparse and Straight, flat, no loops or traps",
+      "settings": {
+        "w": 50,
+        "h": 50,
+        "rooms": 12,
+        "density": "sparse",
+        "corridors": "straight",
+        "wide": false,
+        "loops": false,
+        "theme": "dungeon",
+        "heights": "flat",
+        "traps": "none",
+        "band": "1-4"
+      },
+      "seed": "1ZZZZZZZZZZZZZZZ",
+      "sha256": "1c943b3f301c383e1563a0af27895748f1c364393f09453b6b747eee5fd80f94"
+    },
+    {
+      "name": "a Dense Winding Crypt with many traps",
+      "settings": {
+        "w": 50,
+        "h": 50,
+        "rooms": 12,
+        "density": "dense",
+        "corridors": "winding",
+        "wide": false,
+        "loops": true,
+        "theme": "crypt",
+        "heights": "some",
+        "traps": "some",
+        "band": "11-16"
+      },
+      "seed": "1000000000000001",
+      "sha256": "c63d3aa40f219a662dd7dbbb59ede321194bb293245ae633db6b8f517e4536da"
+    },
+    {
+      "name": "the largest Wide",
+      "settings": {
+        "w": 100,
+        "h": 100,
+        "rooms": 40,
+        "density": "dense",
+        "corridors": "winding",
+        "wide": true,
+        "loops": true,
+        "theme": "dungeon",
+        "heights": "some",
+        "traps": "some",
+        "band": "1-4"
+      },
+      "seed": "1VVVVWWWWXXXXYYY",
+      "sha256": "8cb730464c9c16aac46a62bc69dcdc65741d19d356db5844ebedd927be2ff1e2"
+    },
+    {
+      "name": "the largest Narrow",
+      "settings": {
+        "w": 100,
+        "h": 100,
+        "rooms": 40,
+        "density": "sparse",
+        "corridors": "winding",
+        "wide": false,
+        "loops": true,
+        "theme": "dungeon",
+        "heights": "some",
+        "traps": "some",
+        "band": "1-4"
+      },
+      "seed": "1RS7TV8WX9YZ0123",
+      "sha256": "106d76cdb9744a4a58a875c26c76d07b4543dcbff5bd014657a35261d80c3bc2"
+    },
+    {
+      "name": "the smallest",
+      "settings": {
+        "w": 20,
+        "h": 20,
+        "rooms": 2,
+        "density": "normal",
+        "corridors": "bending",
+        "wide": false,
+        "loops": true,
+        "theme": "dungeon",
+        "heights": "some",
+        "traps": "few",
+        "band": "1-4"
+      },
+      "seed": "1HJKMNPQRST45678",
+      "sha256": "312fb876a5affd9b2d80096ec6b3992e782f0cfb06800dd295087c25dea4eb5c"
+    },
+    {
+      "name": "Custom and Wide",
+      "settings": {
+        "w": 37,
+        "h": 63,
+        "rooms": 11,
+        "density": "normal",
+        "corridors": "bending",
+        "wide": true,
+        "loops": true,
+        "theme": "dungeon",
+        "heights": "some",
+        "traps": "some",
+        "band": "17-20"
+      },
+      "seed": "1D6E7F8G9H0J1K2M",
+      "sha256": "4990f03391f257de604f8a443ef9775fc30d65cd5dcb49681c2b40fc7c952706"
+    },
+    {
+      "name": "a Large Straight Wide Crypt",
+      "settings": {
+        "w": 80,
+        "h": 80,
+        "rooms": 20,
+        "density": "normal",
+        "corridors": "straight",
+        "wide": true,
+        "loops": false,
+        "theme": "crypt",
+        "heights": "some",
+        "traps": "few",
+        "band": "1-4"
+      },
+      "seed": "1N3P4Q5R6S7T8V9W",
+      "sha256": "1c9268c1d148f35400acd230b8dece42d7e3e2bde2608a8fc3f0ce3f4de83c56"
+    },
+    {
+      "name": "Bending with traps at 5 to 10",
+      "settings": {
+        "w": 50,
+        "h": 50,
+        "rooms": 12,
+        "density": "normal",
+        "corridors": "bending",
+        "wide": false,
+        "loops": true,
+        "theme": "dungeon",
+        "heights": "some",
+        "traps": "some",
+        "band": "5-10"
+      },
+      "seed": "1X0Y1Z2A3B4C5D6E",
+      "sha256": "05e926cf400dc86bb6e0eaa493d03da95589e0283d5a227cc03f8270df9be870"
+    }
+  ]
+}
