@@ -36,12 +36,12 @@ import { playControl, undoSetup } from "./helpers/undoScope.ts";
  *   DM's 1024 px row with a blackout and a long name, and Pat's chip coming
  *   back once its date is short.
  *
- * It runs with `pnpm test:e2e` on E2E_PORT plus forty, one file after
+ * It runs with `pnpm test:e2e` on E2E_PORT plus forty-two, one file after
  * another. The other environment variables are the smoke run's
  * (smoke.e2e.ts).
  */
 
-const PORT = Number(process.env.E2E_PORT ?? 3100) + 40;
+const PORT = Number(process.env.E2E_PORT ?? 3100) + 42;
 const DATABASE_URL = process.env.DATABASE_URL ?? "postgres://raccoon:raccoon@localhost:5434/raccoon";
 const SHOT_DIR = process.env.E2E_SCREENSHOT_DIR ?? "test-results/e2e-screenshots";
 
