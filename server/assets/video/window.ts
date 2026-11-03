@@ -149,15 +149,38 @@ export type Range = { start: number; end: number };
 /** An edit that would reach into the media data: a bug in the check, so it is never turned into a refusal. */
 export class EditIntoMediaError extends Error {}
 
+/** How often a loop over edits or ranges reads the budget: often enough that no stretch between reads takes long. */
+const BUDGET_EVERY = 1024;
+
+/** `ranges` sorted by start, with overlapping and touching ones joined, so a sweep can pass over them once. */
+function joined(ranges: readonly Range[], budget: Budget | undefined): Range[] {
+  const sorted = [...ranges].sort((a, b) => a.start - b.start);
+  const out: Range[] = [];
+  for (let i = 0; i < sorted.length; i++) {
+    if (i % BUDGET_EVERY === 0) budget?.check();
+    const r = sorted[i]!;
+    const last = out[out.length - 1];
+    if (last && r.start <= last.end) last.end = Math.max(last.end, r.end);
+    else out.push({ start: r.start, end: r.end });
+  }
+  return out;
+}
+
+type Write = { offset: number; bytes: Buffer };
+
 /**
  * What the check changes, applied only once the whole file has passed.
  * Every edit overwrites bytes in place, so no byte moves and the size and
  * every offset stay as they were. `protect` names the media data (MP4's
  * `mdat` payloads, WebM's block payloads), which no edit may touch: the
  * server never writes at offsets the file's own tables give (D-261102-514).
+ *
+ * A file may hold hundreds of thousands of each (AMBUILD-ASTRA-01,
+ * AM-R1-01), so nothing here compares every edit with every range: the
+ * guard and the writes sweep lists sorted once, under the check's budget.
  */
 export class Edits {
-  readonly writes: Array<{ offset: number; bytes: Buffer }> = [];
+  readonly writes: Write[] = [];
   readonly zeroes: Range[] = [];
   readonly protected: Range[] = [];
 
@@ -178,40 +201,128 @@ export class Edits {
     return [...this.writes.map((w) => ({ start: w.offset, end: w.offset + w.bytes.length })), ...this.zeroes];
   }
 
-  /** Throws when any edit reaches into the media data: a bug in the check, never a property of the file. */
-  assertOutsideMedia(): void {
-    for (const t of this.touched()) {
-      for (const p of this.protected) {
-        if (t.start < p.end && p.start < t.end) throw new EditIntoMediaError(`a video edit at ${t.start} to ${t.end} reaches into media data at ${p.start} to ${p.end}`);
-      }
+  /**
+   * Throws when any edit reaches into the media data: a bug in the check,
+   * never a property of the file. The media ranges are joined into sorted,
+   * disjoint stretches and the edits sorted by start, so one pass finds,
+   * for each edit, the first stretch that ends after it starts: the only
+   * one it could reach into.
+   */
+  assertOutsideMedia(budget?: Budget): void {
+    const media = joined(this.protected, budget);
+    const touched = this.touched().sort((a, b) => a.start - b.start);
+    let next = 0;
+    for (let i = 0; i < touched.length; i++) {
+      if (i % BUDGET_EVERY === 0) budget?.check();
+      const t = touched[i]!;
+      while (next < media.length && media[next]!.end <= t.start) next++;
+      const p = media[next];
+      if (p && p.start < t.end) throw new EditIntoMediaError(`a video edit at ${t.start} to ${t.end} reaches into media data at ${p.start} to ${p.end}`);
     }
   }
 
-  /** The edits applied to a copy of `bytes`, for tests. */
-  applyTo(bytes: Buffer): Buffer {
-    this.assertOutsideMedia();
+  /** The edits applied to a copy of `bytes`, for tests: zeroes first, then the headers that rename what they cleared. */
+  applyTo(bytes: Buffer, budget?: Budget): Buffer {
+    this.assertOutsideMedia(budget);
+    this.#sortedWrites(budget);
     const out = Buffer.from(bytes);
     for (const z of this.zeroes) out.fill(0, z.start, z.end);
     for (const w of this.writes) w.bytes.copy(out, w.offset);
     return out;
   }
 
-  /** The edits written into the file at `path`, zeroes first, then the headers that rename what they cleared. */
-  async applyToFile(path: string): Promise<void> {
-    this.assertOutsideMedia();
+  /**
+   * The writes by offset. Two writes over the same byte would make the
+   * result hang on their order, and the check never asks for that, so it is
+   * its bug. A zero under a write is how a renamed header clears what follows it.
+   */
+  #sortedWrites(budget: Budget | undefined): Write[] {
+    const sorted = [...this.writes].sort((a, b) => a.offset - b.offset);
+    for (let i = 1; i < sorted.length; i++) {
+      if (i % BUDGET_EVERY === 0) budget?.check();
+      const prev = sorted[i - 1]!;
+      if (prev.offset + prev.bytes.length > sorted[i]!.offset) throw new Error(`two video edits write at ${sorted[i]!.offset}`);
+    }
+    return sorted;
+  }
+
+  /**
+   * The edits written into the file at `path`, at most a window at a time.
+   * One write per edit would queue hundreds of thousands of small writes
+   * on libuv's pool, which argon2 shares (process.ts). So every edited byte
+   * is gathered into joined stretches, and stretches within a window of
+   * each other go out together: the bytes between them are read first and
+   * written back as they were. A stretch longer than a window is all
+   * edits, so it is written a window at a time with nothing read.
+   */
+  async applyToFile(path: string, budget?: Budget): Promise<void> {
+    this.assertOutsideMedia(budget);
+    const writes = this.#sortedWrites(budget);
+    const zeroes = joined(this.zeroes, budget);
+    const stretches = joined(this.touched(), budget);
+    const painter = new Painter(zeroes, writes);
     const handle = await open(path, "r+");
     try {
-      const zeros = Buffer.alloc(WINDOW_BYTES);
-      for (const z of this.zeroes) {
-        for (let at = z.start; at < z.end; at += WINDOW_BYTES) {
-          const n = Math.min(WINDOW_BYTES, z.end - at);
-          await handle.write(zeros, 0, n, at);
+      let i = 0;
+      while (i < stretches.length) {
+        budget?.check();
+        const first = stretches[i]!;
+        if (first.end - first.start >= WINDOW_BYTES) {
+          for (let at = first.start; at < first.end; at += WINDOW_BYTES) {
+            budget?.check();
+            const buf = Buffer.alloc(Math.min(WINDOW_BYTES, first.end - at));
+            painter.paint(buf, at);
+            await handle.write(buf, 0, buf.length, at);
+          }
+          i++;
+          continue;
         }
+        let last = i;
+        while (last + 1 < stretches.length && stretches[last + 1]!.end - first.start <= WINDOW_BYTES) last++;
+        const buf = Buffer.alloc(stretches[last]!.end - first.start);
+        if (last > i) {
+          const { bytesRead } = await handle.read(buf, 0, buf.length, first.start);
+          if (bytesRead !== buf.length) throw refuse("bad_video");
+        }
+        painter.paint(buf, first.start);
+        await handle.write(buf, 0, buf.length, first.start);
+        i = last + 1;
       }
-      for (const w of this.writes) await handle.write(w.bytes, 0, w.bytes.length, w.offset);
       await handle.sync();
     } finally {
       await handle.close();
+    }
+  }
+}
+
+/**
+ * Paints the edits that fall in a buffer standing for the file from `at`,
+ * zeroes then writes. Buffers come in rising order, so each list is passed
+ * over once: a range is left behind only once it ends before the buffer.
+ */
+class Painter {
+  readonly #zeroes: readonly Range[];
+  readonly #writes: readonly Write[];
+  #z = 0;
+  #w = 0;
+
+  constructor(zeroes: readonly Range[], writes: readonly Write[]) {
+    this.#zeroes = zeroes;
+    this.#writes = writes;
+  }
+
+  paint(buf: Buffer, at: number): void {
+    const end = at + buf.length;
+    while (this.#z < this.#zeroes.length && this.#zeroes[this.#z]!.end <= at) this.#z++;
+    for (let k = this.#z; k < this.#zeroes.length && this.#zeroes[k]!.start < end; k++) {
+      const z = this.#zeroes[k]!;
+      buf.fill(0, Math.max(z.start, at) - at, Math.min(z.end, end) - at);
+    }
+    while (this.#w < this.#writes.length && this.#writes[this.#w]!.offset + this.#writes[this.#w]!.bytes.length <= at) this.#w++;
+    for (let k = this.#w; k < this.#writes.length && this.#writes[k]!.offset < end; k++) {
+      const w = this.#writes[k]!;
+      const from = Math.max(w.offset, at);
+      w.bytes.copy(buf, from - at, from - w.offset, Math.min(w.offset + w.bytes.length, end) - w.offset);
     }
   }
 }

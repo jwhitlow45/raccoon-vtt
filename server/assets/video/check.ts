@@ -72,7 +72,7 @@ export async function checkVideo(path: string, opts: { budget?: Budget } = {}): 
       await window.close();
     }
     const facts = capped(parsed, size);
-    await parsed.edits.applyToFile(path);
+    await parsed.edits.applyToFile(path, budget);
     return facts;
   } catch (err) {
     throw asRefusal(err);
@@ -87,7 +87,7 @@ export async function checkVideoBytes(bytes: Buffer, opts: { budget?: Budget } =
     const container = containerOf((await fileTypeFromBuffer(bytes))?.ext);
     const parsed = await parse(new BufferSource(bytes), container, budget);
     const facts = capped(parsed, bytes.length);
-    return { facts, zeroed: parsed.edits.applyTo(bytes), edits: parsed.edits };
+    return { facts, zeroed: parsed.edits.applyTo(bytes, budget), edits: parsed.edits };
   } catch (err) {
     throw asRefusal(err);
   }

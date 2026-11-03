@@ -3,6 +3,8 @@ import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import fc from "fast-check";
+import { runSettings } from "#shared/propertyTestutil.ts";
 import { AssetError } from "../errors.ts";
 import { Budget, BufferSource, EditIntoMediaError, Edits, FileWindow, Tally, WINDOW_BYTES } from "./window.ts";
 
@@ -62,6 +64,140 @@ test("a read past the end, or longer than a window, is refused", async () => {
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+const { seed, runs } = runSettings(process.env);
+
+/** The guard as first written: every edit against every media range. The sweep must agree with it on every input. */
+function naiveReachesMedia(edits: Edits): boolean {
+  return edits.touched().some((t) => edits.protected.some((p) => t.start < p.end && p.start < t.end));
+}
+
+/** Edits and media ranges anywhere in a small file, overlapping each other or not. */
+const editPlan = fc.record({
+  zeroes: fc.array(fc.tuple(fc.nat(300), fc.nat(40)), { maxLength: 12 }),
+  writes: fc.array(fc.tuple(fc.nat(300), fc.integer({ min: 1, max: 8 })), { maxLength: 12 }),
+  media: fc.array(fc.tuple(fc.nat(300), fc.integer({ min: 1, max: 40 })), { maxLength: 12 }),
+});
+
+function editsOf(plan: { zeroes: [number, number][]; writes: [number, number][]; media: [number, number][] }): Edits {
+  const edits = new Edits();
+  for (const [at, n] of plan.zeroes) edits.zero(at, at + n);
+  for (const [i, [at, n]] of plan.writes.entries()) edits.put(at, Buffer.alloc(n, 0x10 + i));
+  for (const [at, n] of plan.media) edits.protect(at, at + n);
+  return edits;
+}
+
+test("the sorted sweep agrees with every edit checked against every media range (AMBUILD-ASTRA-01)", () => {
+  let reached = 0;
+  fc.assert(
+    fc.property(editPlan, (plan) => {
+      const edits = editsOf(plan);
+      let threw = false;
+      try {
+        edits.assertOutsideMedia();
+      } catch (err) {
+        assert.ok(err instanceof EditIntoMediaError);
+        threw = true;
+      }
+      assert.equal(threw, naiveReachesMedia(edits));
+      if (threw) reached++;
+    }),
+    { seed, numRuns: runs ?? 2000 },
+  );
+  assert.ok(reached > 100, `only ${reached} plans reached the media`);
+});
+
+test("edits written a window at a time leave the file as applying each in turn would (AM-R1-01)", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "rvtt-window-"));
+  try {
+    const size = WINDOW_BYTES * 3 + 77;
+    const original = Buffer.alloc(size);
+    for (let i = 0; i < size; i++) original[i] = (i * 31 + 7) & 0xff;
+    const place = fc.nat(size - 1);
+    const plan = fc.record({
+      zeroes: fc.array(fc.tuple(place, fc.oneof(fc.nat(64), fc.nat(WINDOW_BYTES * 2))), { maxLength: 30 }),
+      writes: fc.array(fc.tuple(place, fc.integer({ min: 1, max: 9 })), { maxLength: 30 }),
+    });
+    await fc.assert(
+      fc.asyncProperty(plan, async ({ zeroes, writes }) => {
+        const edits = new Edits();
+        for (const [at, n] of zeroes) edits.zero(at, Math.min(size, at + n));
+        // The check never writes the same byte twice, so the plan keeps its writes apart.
+        let after = -1;
+        for (const [i, [at, n]] of [...writes].sort((a, b) => a[0] - b[0]).entries()) {
+          if (at <= after || at + n > size) continue;
+          edits.put(at, Buffer.alloc(n, 0x80 + i));
+          after = at + n - 1;
+        }
+        const path = join(dir, "v");
+        await writeFile(path, original);
+        await edits.applyToFile(path);
+        assert.ok((await readFile(path)).equals(edits.applyTo(original)));
+      }),
+      { seed, numRuns: runs ?? 150 },
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("two writes over one byte are the check's own bug", () => {
+  const edits = new Edits();
+  edits.put(4, Buffer.from([1, 2]));
+  edits.put(5, Buffer.from([3]));
+  assert.throws(() => edits.applyTo(Buffer.alloc(10)), /two video edits write at 5/);
+});
+
+/**
+ * The reviewers' shape (AMBUILD-ASTRA-01, AMBUILD-SOL-001): 180,002 edits
+ * between 96,000 media ranges, as a WebM with a void element after each of
+ * its blocks makes. Every edit against every range took 10 to 14 s.
+ */
+test("180,002 edits between 96,000 media ranges check and land well inside the budget", async () => {
+  const edits = new Edits();
+  let at = 0;
+  for (let i = 0; i < 96_000; i++) {
+    edits.protect(at, at + 9);
+    at += 9;
+    if (i < 90_001) {
+      edits.put(at, Buffer.from([0xec, 0x81]));
+      edits.zero(at + 2, at + 3);
+      at += 3;
+    }
+  }
+  assert.equal(edits.writes.length + edits.zeroes.length, 180_002);
+  // CPU time, with a wall-clock budget no busy machine reaches: a shared test machine stretches the wall clock, never the work.
+  const roomy = () => new Budget(120_000);
+  const cpu = (since: NodeJS.CpuUsage) => {
+    const used = process.cpuUsage(since);
+    return (used.user + used.system) / 1000;
+  };
+  const guarding = process.cpuUsage();
+  edits.assertOutsideMedia(roomy());
+  assert.ok(cpu(guarding) < 1_000, `the guard took ${Math.round(cpu(guarding))} ms of CPU`);
+  const dir = await mkdtemp(join(tmpdir(), "rvtt-window-"));
+  try {
+    const path = join(dir, "v");
+    const original = Buffer.alloc(at, 0x55);
+    await writeFile(path, original);
+    const writing = process.cpuUsage();
+    await edits.applyToFile(path, roomy());
+    assert.ok(cpu(writing) < 2_500, `the writes took ${Math.round(cpu(writing))} ms of CPU`);
+    assert.ok((await readFile(path)).equals(edits.applyTo(original)));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("the guard and the writes stop at a spent budget", async () => {
+  const edits = new Edits();
+  for (let i = 0; i < 5_000; i++) edits.zero(i * 4, i * 4 + 2);
+  let now = 0;
+  const budget = new Budget(5_000, () => now);
+  now = 6_000;
+  assert.throws(() => edits.assertOutsideMedia(budget), badVideo);
+  await assert.rejects(edits.applyToFile("never-opened", budget), badVideo);
 });
 
 test("a spent budget and a count past its cap refuse with their codes", () => {

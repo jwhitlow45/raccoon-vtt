@@ -467,7 +467,13 @@ function chunkOffsets(moov: Moov, box: Box): number[] {
   return Array.from({ length: count }, (_, i) => (each === 8 ? safe(body.readBigUInt64BE(4 + i * 8)) : body.readUInt32BE(4 + i * 4)));
 }
 
-/** Every sample's bytes, from the chunk tables, must lie inside an `mdat`: the only place the check never writes. */
+/**
+ * Every sample's bytes, from the chunk tables, must lie inside an `mdat`:
+ * the only place the check never writes. The top-level walk finds the
+ * `mdat` payloads in file order, so they are sorted and disjoint, and each
+ * sample's is found by halving rather than by trying every one: a file
+ * may hold some 200,000 empty `mdat` boxes (AM-R1-01).
+ */
 function samplesInsideMdat(moov: Moov, track: Track, mdats: readonly Range[]): void {
   const sizes = track.sizes!;
   const chunks = track.chunks!;
@@ -482,15 +488,35 @@ function samplesInsideMdat(moov: Moov, track: Track, mdats: readonly Range[]): v
     const perChunk = runs[run]![1];
     let at = chunks[chunk - 1]!;
     for (let i = 0; i < perChunk; i++) {
+      if ((sample & 1023) === 0) moov.budget.check();
       const size = sizes[sample];
       if (size === undefined) throw refuse("bad_video");
       const end = at + size;
-      if (!mdats.some((m) => at >= m.start && end <= m.end)) throw refuse("bad_video");
+      if (!insideMdat(mdats, at, end)) throw refuse("bad_video");
       at = end;
       sample++;
     }
   }
   if (sample !== sizes.length) throw refuse("bad_video");
+}
+
+/**
+ * Whether `[at, end)` lies inside one of the sorted, disjoint `mdats`. Only
+ * the last one starting at or before `at` can hold it: any earlier one
+ * ends at least a box header before that one starts.
+ */
+export function insideMdat(mdats: readonly Range[], at: number, end: number): boolean {
+  let lo = 0;
+  let hi = mdats.length - 1;
+  let found: Range | undefined;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (mdats[mid]!.start <= at) {
+      found = mdats[mid];
+      lo = mid + 1;
+    } else hi = mid - 1;
+  }
+  return found !== undefined && end <= found.end;
 }
 
 /**
