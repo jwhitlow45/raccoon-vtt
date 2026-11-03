@@ -1670,6 +1670,29 @@ describe("op version 42 and snapshot 32, the in-game clock (docs/design/design-v
   });
 });
 
+describe("op version 43 and snapshot 33, weather (docs/design/design-v1-weather.md 9.4)", () => {
+  test("keeps stored operations and snapshots unchanged through the identity steps, a scene's weather included", () => {
+    assert.ok(OP_VERSION >= 43);
+    assert.ok(SNAPSHOT_VERSION >= 33);
+    const op = { t: "scene.update", sceneId: "s1", patch: { name: "Forest road" } };
+    assert.equal(runMigrations(op, 42, 43, opMigrations), op);
+    assert.equal(migrateOp(op, 42), op);
+    const rainy = { t: "scene.update", sceneId: "s1", patch: { weather: { kind: "rain", heavy: true } } };
+    assert.equal(migrateOp(rainy, 43), rainy);
+    const state = room({ scenes: { s1: scene("s1", { weather: { kind: "snow", wind: "moderate" } }) } });
+    assert.equal(runMigrations(state, 32, 33, snapshotMigrations), state);
+    assert.equal(migrateSnapshot(state, 32), state);
+  });
+
+  test("a build at 42 and 32 refuses a room from this one, so it never drops a scene's weather unseen", () => {
+    const op = { t: "scene.update", sceneId: "s1", patch: { weather: { kind: "rain" } } };
+    assert.throws(() => runMigrations(op, 43, 42, opMigrations), /down/);
+    assert.throws(() => runMigrations(room(), 33, 32, snapshotMigrations), /down/);
+    assert.throws(() => migrateOp(op, OP_VERSION + 1), /down/, "a newer op than this build knows");
+    assert.throws(() => migrateSnapshot(room(), SNAPSHOT_VERSION + 1), /down/, "a newer snapshot than this build knows");
+  });
+});
+
 describe("the map discovery upgrade step (docs/design/design-v1-map-discovery.md 5.5, ASTRA-31)", () => {
   const scenes = {
     s1: scene("s1", { fogEnabled: true, vision: { on: true, light: "dark" } }),

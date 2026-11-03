@@ -7,6 +7,7 @@ import { LIMITS, MOST_SIGHT_HOLDERS, serializedBytes } from "#shared/limits.ts";
 import { ATTACH_KINDS } from "#shared/rules/attach.ts";
 import { DAMAGE_TYPES } from "#shared/rules/damage.ts";
 import { withLevelInRange } from "#shared/srd/conditions.ts";
+import { sceneWeatherSchema } from "#shared/weather.ts";
 import {
   MAX_ALT_IMAGES,
   MAX_RESTORE_ENTRIES,
@@ -165,6 +166,8 @@ const scene = z
     gridShape: mapSchemas.gridShape.optional(),
     // Backups from before the isometric view have none, which reads as Top-down (docs/design/design-v1-isometric-view.md 7).
     suggestedView: z.literal("isometric").optional(),
+    // Backups from before weather have none, which reads as clear and calm (docs/design/design-v1-weather.md 9.3).
+    weather: sceneWeatherSchema.optional(),
   })
   .refine(
     (s) =>

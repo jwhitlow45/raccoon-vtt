@@ -6,6 +6,7 @@ import { ATTACH_KINDS } from "./rules/attach.ts";
 import { critBound } from "./dice/crit.ts";
 import { applyMode, diceCount, doubleDice, parseExtra, parseFormula, type Formula } from "./dice/formula.ts";
 import { ICON_KEY_RE } from "./imageRef.ts";
+import { sceneWeatherSchema } from "./weather.ts";
 import { CLASS_IDS } from "./rules/classResources.ts";
 import { DAMAGE_TYPES } from "./rules/damage.ts";
 import { cellIndexMost } from "./rules/grid.ts";
@@ -2044,6 +2045,8 @@ const stateClientOps = [
       gridShape: gridShapeChoice.optional(),
       /** The view a following device shows (Scene.suggestedView). "topDown" removes the stored field. */
       suggestedView: z.enum(["topDown", "isometric"]).optional(),
+      /** The scene's weather (docs/design/design-v1-weather.md 9.2), refused where weatherProblem says it cannot be. Null removes it. */
+      weather: sceneWeatherSchema.nullable().optional(),
     }),
   }),
   /**

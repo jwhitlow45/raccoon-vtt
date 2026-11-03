@@ -198,6 +198,8 @@ export function undoScope(op: Op, before: RoomState): UndoScope {
     case "scene.update": {
       if (onlyField(op.patch, "thumb")) return "none";
       if (onlyField(op.patch, "suggestedView")) return "play";
+      // The DM changes the weather in play, as the light level (docs/design/design-v1-weather.md 9.2).
+      if (onlyField(op.patch, "weather")) return "play";
       const vision = op.patch.vision;
       if (!onlyField(op.patch, "vision") || vision === undefined || !onlyFields(vision, VISION_FIELDS)) return "setup";
       const scene = ownEntry(before.scenes, op.sceneId);

@@ -9,6 +9,7 @@ import { forgetExplored, forgetHolder } from "./map.ts";
 import { invalid, gone, type Tx } from "./tx.ts";
 import { deleteToken, sortedById } from "./tokens.ts";
 import { ownEntry } from "../records.ts";
+import { normalWeather } from "../weather.ts";
 
 export function roomUpdate(tx: Tx, op: OpOf<"room.update">): void {
   const meta = tx.state.meta;
@@ -251,6 +252,9 @@ export function sceneUpdate(tx: Tx, op: OpOf<"scene.update">): void {
   // Top-down is stored as no field, so a scene set back hashes as it did before (undo guards).
   if (p.suggestedView === "topDown") delete next.suggestedView;
   else if (p.suggestedView !== undefined) next.suggestedView = p.suggestedView;
+  // One weather has one stored form, so an undo's hash guard and a backup see the same scene whatever the op spelled.
+  if (p.weather === null) delete next.weather;
+  else if (p.weather !== undefined) next.weather = normalWeather(p.weather);
   if (p.folder === null) delete next.folder;
   else if (p.folder !== undefined) next.folder = p.folder;
   if (p.thumb === null) delete next.thumb;

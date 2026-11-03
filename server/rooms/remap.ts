@@ -51,6 +51,7 @@ import { pausedAnchorForEntry } from "#shared/rules/durations.ts";
 import { linkOf, relinked } from "#shared/reducer/uses.ts";
 import { withPcActors, withShapeRules } from "#shared/rules/pcStats.ts";
 import { phaseMap, withPhaseLight } from "#shared/reducer/phases.ts";
+import { normalWeather } from "#shared/weather.ts";
 import type { AssetKind } from "../assets/kinds.ts";
 
 /**
@@ -273,6 +274,8 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
   }
   for (const s of Object.values(state.scenes)) {
     const next: Scene = { ...s, id: scenes.of(s.id) };
+    // A hand-made backup may spell a weather longhand, and the room keeps one stored form (docs/design/design-v1-weather.md 9.3).
+    if (s.weather !== undefined) next.weather = normalWeather(s.weather);
     if (s.map) {
       const mapped = asset(s.map.assetId, "map");
       if (mapped) next.map = { ...s.map, assetId: mapped };

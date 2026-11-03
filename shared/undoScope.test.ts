@@ -134,7 +134,7 @@ describe("undo classifier inventory", () => {
   }
 
   const sceneFields = {
-    name: ["Dungeon", "setup"], bounds: [{ w: 20, h: 20 }, "setup"], grid: [{ show: false, color: "#ffffff", opacity: 0.2, lineWidth: 1 }, "setup"], background: ["#000000", "setup"], fogEnabled: [true, "setup"], defaultView: [null, "setup"], autoWalls: ["off", "setup"], folder: [null, "setup"], thumb: [null, "none"], phases: [[], "setup"], blockMovement: [true, "setup"], vision: [{ on: true, light: "dark" }, "setup"], gridShape: ["hexRows", "setup"], suggestedView: ["isometric", "play"],
+    name: ["Dungeon", "setup"], bounds: [{ w: 20, h: 20 }, "setup"], grid: [{ show: false, color: "#ffffff", opacity: 0.2, lineWidth: 1 }, "setup"], background: ["#000000", "setup"], fogEnabled: [true, "setup"], defaultView: [null, "setup"], autoWalls: ["off", "setup"], folder: [null, "setup"], thumb: [null, "none"], phases: [[], "setup"], blockMovement: [true, "setup"], vision: [{ on: true, light: "dark" }, "setup"], gridShape: ["hexRows", "setup"], suggestedView: ["isometric", "play"], weather: [{ kind: "rain", heavy: true }, "play"],
   } satisfies Record<keyof OpOf<"scene.update">["patch"], readonly [unknown, UndoScope]>;
   for (const [field, [value, expected]] of Object.entries(sceneFields)) {
     test(`scene field ${field} is ${expected}`, () => assert.equal(scope({ t: "scene.update", sceneId: "s1", patch: { [field]: value } }), expected));
@@ -150,7 +150,8 @@ describe("undo classifier inventory", () => {
     state.scenes.s1!.vision = { on: true, perPlayer: true, light: "bright" };
     assert.equal(scope(op({ vision: { on: true, perPlayer: true, light: "dim" } }), state), "play");
     assert.equal(scope(op({ vision: { on: true, perPlayer: false, light: "dim" } }), state), "setup");
-    for (const patch of [{ vision: { on: true, light: "dim" }, name: "Dungeon" }, { suggestedView: "isometric", bounds: { w: 30, h: 30 } }, { futureField: true }]) assert.equal(scope(op(patch), state), "setup");
+    assert.equal(scope(op({ weather: null }), state), "play");
+    for (const patch of [{ vision: { on: true, light: "dim" }, name: "Dungeon" }, { suggestedView: "isometric", bounds: { w: 30, h: 30 } }, { weather: { kind: "snow" }, name: "Dungeon" }, { futureField: true }]) assert.equal(scope(op(patch), state), "setup");
   });
 
   test("trap runtime state is Play, definitions and mixed edits are Setup", () => {

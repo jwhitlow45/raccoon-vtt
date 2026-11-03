@@ -45,6 +45,7 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       }
       if (op.patch.phases !== undefined && Object.keys(op.patch).length === 1) return `changing the phases of ${scene(op.sceneId)}`;
       if (op.patch.suggestedView !== undefined && Object.keys(op.patch).length === 1) return `changing the suggested view of ${scene(op.sceneId)}`;
+      if (op.patch.weather !== undefined && Object.keys(op.patch).length === 1) return `changing the weather of ${scene(op.sceneId)}`;
       if (op.patch.blockMovement !== undefined && Object.keys(op.patch).length === 1) {
         return op.patch.blockMovement ? `making walls and ledges block players' moves on ${scene(op.sceneId)}` : `letting players' moves pass walls and ledges on ${scene(op.sceneId)}`;
       }

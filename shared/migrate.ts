@@ -11,8 +11,8 @@ import { ownEntry } from "./records.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 32;
-export const OP_VERSION = 42;
+export const SNAPSHOT_VERSION = 33;
+export const OP_VERSION = 43;
 
 export type MigrationStep = {
   from: number;
@@ -218,6 +218,10 @@ export const snapshotMigrations: MigrationStep[] = [
   // are optional, and absent reads as none, so a v31 room is a v32 room as it is. The number moves so that an older
   // build, which knows neither, refuses a room with a clock rather than load it and send players a hidden one.
   { from: 31, to: 32, apply: (state) => state },
+  // Weather (docs/design/design-v1-weather.md 9.4): a scene's `weather` is optional, and absent reads as clear and calm,
+  // so a v32 room is a v33 room as it is. The number moves so that an older build, whose strict state schema refuses
+  // the field, refuses a v33 snapshot instead of loading it.
+  { from: 32, to: 33, apply: (state) => state },
   // No step moves a square trip wire's imported 1/64 ends onto half cells (FU43-DATA-01). A snapshot migrates before its
   // stored ops replay, so a moved end would change what a stored walk springs and what a stored restore's guard matches.
   // The rules take such a wire as it stands instead (server/rooms/squareWires.legacy.test.ts).
@@ -1078,6 +1082,20 @@ export const opMigrations: MigrationStep[] = [
     // snapshot, or a clock in it, which an older build refuses to load.
     from: 41,
     to: 42,
+    apply: (op) => op,
+  },
+  {
+    // Weather (docs/design/design-v1-weather.md 9.4): a `scene.update` may
+    // carry `weather`, a new optional field, so no stored op changes shape
+    // and the step is the identity. Nothing the reducer writes on its own
+    // changes, so no rule gates on it.
+    // Deploy: back up the database just before, and reload open pages,
+    // table displays included: an old page drops the field from its view
+    // and draws no weather. Rollback needs the backup for a room with
+    // version 43 ops after its last snapshot or a v33 snapshot, which an
+    // older build refuses.
+    from: 42,
+    to: 43,
     apply: (op) => op,
   },
 ];
