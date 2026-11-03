@@ -58,7 +58,15 @@ import { ownEntry } from "./records.ts";
  * exists. Visibility is decided by the projection itself, never by a second
  * copy of its rules.
  */
-export type AssetKind = "map" | "token" | "handout" | "thumb";
+export type AssetKind = "map" | "token" | "handout" | "thumb" | "video";
+
+/**
+ * The `invalid` refusals of an op that sets a map's video
+ * (docs/design/design-v1-animated-maps.md 4.5). The client shows the same
+ * words (client/features/animmap/words.ts).
+ */
+export const VIDEO_SHAPE = "That still isn't the video's shape.";
+export const VIDEO_OFF = "Animated maps are off on this server.";
 
 export type PermissionDeps = {
   /** The view before the actor's pending batch. Its map memory is settled, unlike the staged build's. */

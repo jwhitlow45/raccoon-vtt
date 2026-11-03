@@ -1,5 +1,5 @@
 import { isApiErrorCode, type ApiErrorCode } from "#shared/apiErrors.ts";
-import type { AssetId, BuildChunk, FogTile, Label, LogEntry, Member, MemberId, Scene, Stamp } from "#shared/model.ts";
+import type { AssetId, BuildChunk, FogTile, Label, LogEntry, Member, MemberId, Scene, Stamp, VideoFacts } from "#shared/model.ts";
 import type { AssetCredit, JoinMode, SearchResult, SearchSource } from "#shared/protocol.ts";
 
 /**
@@ -68,7 +68,7 @@ export type JoinRequestList = { mode: JoinMode; challenged: boolean; requests: J
 export type LetInAs = { kind: "new" } | { kind: "member"; memberId: MemberId };
 /** `pending`: the server answered 202, still finishing, and the `joinRequests` signal settles the row. */
 export type LetInAnswer = { memberId: MemberId; pending?: true };
-export type AssetKind = "map" | "token" | "handout" | "thumb";
+export type AssetKind = "map" | "token" | "handout" | "thumb" | "video";
 export type AssetVariant = "full" | "mobile" | "thumb";
 export type AssetRow = {
   id: AssetId;
@@ -89,13 +89,25 @@ export type AssetRow = {
   inUse?: boolean;
   /** The bytes the image's files take, when the server says. */
   bytes?: number;
-  /** A handout upload's answer only: whether this upload made the image, rather than reusing one the room had (docs/design/design-v1-pdf-handouts.md 3.9). */
+  /**
+   * A handout's or a video's upload answer only: whether this upload made the
+   * row, rather than reusing one the room had (docs/design/design-v1-pdf-handouts.md
+   * 3.9), so a failed animated map upload deletes only a video it made.
+   */
   created?: boolean;
   /** A starter pick's work key, `<pack>/<work>` (docs/design/design-v1-starter-art.md 5). Absent for the room's own uploads. */
   starter?: string;
   /** A starter pick's SHA-256 in hex, sent with `starter`, to tell whether this page's catalog describes the file the room holds. */
   sha256?: string;
+  /** A video's facts from the server's header check (docs/design/design-v1-animated-maps.md 9.1). Absent for an image. */
+  video?: VideoFacts;
 };
+/**
+ * GET /api/config. `animatedMaps` is the server owner's ANIMATED_MAPS switch
+ * (docs/design/design-v1-animated-maps.md 1): off, the pickers take images
+ * only and every map shows its still.
+ */
+export type ServerConfig = { turnstileSiteKey: string | null; searchEnabled: boolean; animatedMaps: boolean };
 /** The server's own shape, which sends the original's size only when the search service gave it. */
 export type { SearchResult, SearchSource };
 /** Who a device with no member in the room becomes on a DM claim (design 10.2). */
@@ -494,7 +506,7 @@ export type PlayerSceneView = { scene: Scene; buildChunks: Record<string, BuildC
 
 export const api = {
   /** Public server settings: the Turnstile site key when Turnstile is on, and whether image search is. */
-  getConfig: () => request<{ turnstileSiteKey: string | null; searchEnabled: boolean }>("GET", "/api/config"),
+  getConfig: () => request<ServerConfig>("GET", "/api/config"),
 
   createRoom: (input: { name: string; playerPassword: string; dmName: string; turnstileToken?: string }) =>
     request<{ roomId: string; dmLink: string }>("POST", "/api/rooms", { json: input }),

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { cellPxHint, nameGrid } from "./kinds.ts";
+import { VIDEO_LIMITS } from "#shared/limits.ts";
+import { ASSET_KINDS, KINDS, PLAYER_UPLOAD_KINDS, VIDEO_PIPELINE, cellPxHint, isAssetKind, nameGrid } from "./kinds.ts";
 
 test("a cols x rows name suggests the cell size when both axes agree", () => {
   assert.equal(cellPxHint("crypt_30x20.jpg", 3000, 2000), 100);
@@ -55,4 +56,18 @@ test("a single hex row or column has no odd row to stand out by half a hex", () 
   assert.deepEqual(hexPx("one_1x1.png", 70, 81), { rows: 70 });
   assert.deepEqual(hexPx("one_1x1.png", 81, 70), { columns: 70 });
   assert.deepEqual(nameGrid("row_20x1.png", 1435, 81), {}, "a single row with an odd row's half hex is not its span");
+});
+
+test("a video is a kind of its own: the DM's alone to add, players read it when shown, one file at the video cap (docs/design/design-v1-animated-maps.md 9.1)", () => {
+  assert.ok(ASSET_KINDS.includes("video"));
+  assert.equal(isAssetKind("video"), true);
+  assert.deepEqual(KINDS.video, {
+    maxUploadBytes: VIDEO_LIMITS.fileBytes,
+    deadlineMs: VIDEO_LIMITS.uploadDeadlineMs,
+    variants: [{ name: "full", maxSide: VIDEO_LIMITS.maxSidePx }],
+    dmOnly: true,
+    playersRead: true,
+  });
+  assert.ok(!PLAYER_UPLOAD_KINDS.includes("video"));
+  assert.ok(Number.isInteger(VIDEO_PIPELINE) && VIDEO_PIPELINE >= 1);
 });

@@ -651,6 +651,45 @@ export type MapPhase = {
   heightPx: number;
   /** The light level switching to this phase gives the scene's vision, so Night can make it dark (wave 4). */
   light?: LightLevel;
+  /** This phase's video, over its still (`assetId`) on the same rectangle. */
+  video?: MapVideo;
+};
+
+/**
+ * A video that plays over a map's still on the same rectangle
+ * (docs/design/design-v1-animated-maps.md 9.1). The still stays the map's
+ * `assetId`, so every reader of the map's pixels (grid search, thumbnails,
+ * export, isometric) keeps working on an image, and only the Top-down board
+ * draws the video. The client sends only `assetId`: the server overwrites
+ * every other field from the asset row, as it fills a map's size.
+ */
+export type MapVideo = {
+  assetId: AssetId;
+} & VideoFacts;
+
+/** The container a video asset is stored in, kept on its row as `media`. */
+export type VideoContainer = "webm" | "mp4";
+
+/**
+ * What the server's header check learns of a video (section 10). The asset
+ * row keeps `container` as its `media` column and the rest, but the size, as
+ * its `video` column. The size is its coded size, which the check requires to
+ * equal its display size, so the phone cap reads what a decoder needs.
+ */
+export type VideoFacts = {
+  widthPx: number;
+  heightPx: number;
+  container: VideoContainer;
+  /** RFC 6381 codec strings, such as "vp09.00.40.08", and "opus" or "mp4a.40.2". `audio` is absent with no sound track, and a file has at most one. */
+  video: string;
+  audio?: string;
+  /** The peak rate: the most frames in any one second of the file, counted over every frame. */
+  fps: number;
+  durationMs: number;
+  kbps: number;
+  /** The sound track's channels and sample rate, for Media Capabilities' audio configuration. Present exactly when `audio` is. */
+  audioChannels?: number;
+  audioHz?: number;
 };
 
 /**
@@ -672,6 +711,11 @@ export type SceneMap = {
   heightPx: number;
   cellPx: number;
   originPx: { x: number; y: number };
+  /**
+   * The shown phase's video, over this still. Every pixel value above stays
+   * the still's, and the video is stretched to the same world rectangle.
+   */
+  video?: MapVideo;
 };
 
 export type TerrainId =

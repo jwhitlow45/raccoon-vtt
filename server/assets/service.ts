@@ -231,6 +231,9 @@ export class AssetService {
     const { reservation, starter } = input;
     // The types already require one. Checked here too, since a row stored with neither would escape the quota unmarked.
     if (!reservation && !starter) throw new Error("an image is stored against a reservation or as a starter pick");
+    // The video kind is declared before its header check exists. Until that
+    // lands, no path may run a video through the image pipeline or store it.
+    if (input.kind === "video") throw new AssetError(415, "unsupported_type");
     const existing = await findRoomAsset(this.pool, input.roomId, input.sha256, input.kind);
     if (existing) return this.#reuse(existing, input);
 

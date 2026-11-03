@@ -1,4 +1,5 @@
-import { LIMITS } from "#shared/limits.ts";
+import { LIMITS, VIDEO_LIMITS } from "#shared/limits.ts";
+import type { VideoFacts } from "#shared/model.ts";
 import type { AssetCredit } from "#shared/protocol.ts";
 import { HEX_R, HEX_S } from "#shared/rules/hex.ts";
 
@@ -12,7 +13,15 @@ import { HEX_R, HEX_S } from "#shared/rules/hex.ts";
  */
 export const PIPELINE = 1;
 
-export const ASSET_KINDS = ["map", "token", "handout", "thumb"] as const;
+/**
+ * A video's pipeline, apart from the images': its one file is the upload
+ * with metadata zeroed in place, named by the upload's hash, so any change
+ * to what the header check keeps or zeroes must bump it
+ * (docs/design/design-v1-animated-maps.md 10).
+ */
+export const VIDEO_PIPELINE = 1;
+
+export const ASSET_KINDS = ["map", "token", "handout", "thumb", "video"] as const;
 export type AssetKind = (typeof ASSET_KINDS)[number];
 
 export const VARIANTS = ["full", "mobile", "thumb"] as const;
@@ -84,6 +93,18 @@ export const KINDS: Record<AssetKind, KindSpec> = {
     dmOnly: true,
     playersRead: false,
   },
+  /**
+   * An animated map's video (docs/design/design-v1-animated-maps.md 9.1). One
+   * variant, the checked upload itself, since nothing is ever decoded or
+   * scaled. Players read it only while the phase showing names it.
+   */
+  video: {
+    maxUploadBytes: VIDEO_LIMITS.fileBytes,
+    deadlineMs: VIDEO_LIMITS.uploadDeadlineMs,
+    variants: [{ name: "full", maxSide: VIDEO_LIMITS.maxSidePx }],
+    dmOnly: true,
+    playersRead: true,
+  },
 };
 
 /** The kinds a player may upload, and so the only kinds a player can be the uploader of. */
@@ -118,6 +139,8 @@ export type AssetView = {
   inUse?: boolean;
   /** A DM's library only: the stored size of all its variants, which deleting it frees from the room's quota, unless it is a starter pick, which never counted. */
   bytes?: number;
+  /** A video's facts from its header check, so the Library shows its length and the DM's still pick checks its shape. Absent for an image. */
+  video?: VideoFacts;
 };
 
 /**

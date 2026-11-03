@@ -2,7 +2,7 @@ import type pg from "pg";
 import { LIMITS, serializedBytes } from "#shared/limits.ts";
 import { dmNumbered, logsInIdOrder, whisperParties } from "#shared/logRings.ts";
 import { MAP_DISCOVERY_OP_VERSION, OP_VERSION, SNAPSHOT_VERSION, mapDiscoveryUpgrade, migrateOp, migrateSnapshot, needsMapDiscoveryUpgrade, opMigrations, type MigrationStep } from "#shared/migrate.ts";
-import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
+import type { LogEntry, RoomState, VideoFacts, Viewer } from "#shared/model.ts";
 import { opSchema, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { saveOutcomeLedgerSchema } from "#shared/saveOutcomeContract.ts";
@@ -681,7 +681,12 @@ export async function readLogEntries(client: Queryable, roomId: string, ids: rea
   });
 }
 
-export type AssetFact = { id: string; roomId: string; kind: "map" | "token" | "handout" | "thumb"; width: number; height: number; uploaders: string[] };
+/**
+ * `video` is a video row's facts (docs/design/design-v1-animated-maps.md 9.2),
+ * which `withAssetSizes` copies over every field of a map's `video` but its id.
+ * Absent for an image.
+ */
+export type AssetFact = { id: string; roomId: string; kind: "map" | "token" | "handout" | "thumb" | "video"; width: number; height: number; uploaders: string[]; video?: VideoFacts };
 
 /** The rows behind the asset ids an op names, for the reference checks in canApply (design 8.2). */
 export async function loadAssetFacts(pool: Queryable, ids: readonly string[]): Promise<Map<string, AssetFact>> {

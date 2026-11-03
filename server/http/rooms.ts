@@ -3,7 +3,7 @@ import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import { z } from "zod";
 import { playerLink } from "#shared/playerLink.ts";
 import type { JoinMode } from "#shared/protocol.ts";
-import type { Config } from "../config.ts";
+import { animatedMapsOn, type Config } from "../config.ts";
 import { deleteUnreferencedFiles, roomFileKeys } from "../assets/store.ts";
 import { putGrant, revokeGrants } from "../auth/grants.ts";
 import {
@@ -82,6 +82,7 @@ export async function registerRoomRoutes(app: FastifyInstance, kit: AuthKit): Pr
       // Openverse needs no key, so image search is always there
       // (docs/design/design-v1-dm-tools.md 3.13). Kept for the picker, which reads it.
       searchEnabled: true,
+      animatedMaps: animatedMapsOn(kit.config),
     }));
 
     r.post("/api/rooms", async (req, reply) => {

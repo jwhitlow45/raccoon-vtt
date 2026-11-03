@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { roomHandoutPages } from "./handouts.ts";
-import { HANDOUT_PAGES_FULL, LIMITS, SHOWING_COUNTS_AGAIN, checkLimits, serializedBytes, utf8Bytes } from "./limits.ts";
+import { HANDOUT_PAGES_FULL, LIMITS, SHOWING_COUNTS_AGAIN, VIDEO_LIMITS, checkLimits, phoneSizeAllows, serializedBytes, stillFitsVideo, utf8Bytes } from "./limits.ts";
 import type { CompanionBlock, EdgeFeature, FreeWall, RoomState } from "./model.ts";
 import { actor, character, companionBlock, customMonster, drawing, entry, room, srdImage, token } from "./testutil.ts";
 
@@ -291,5 +291,43 @@ describe("companion stat blocks (docs/design/design-v1-companion-stat-blocks.md 
     assert.equal(refusals, LIMITS.charactersPerRoom);
     assert.equal(Object.keys(state.companionBlocks).length, 192);
     assert.ok(serializedBytes(state) < LIMITS.stateBytes, `${serializedBytes(state)} bytes`);
+  });
+});
+
+describe("animated map limits (docs/design/design-v1-animated-maps.md 6.3)", () => {
+  test("the caps are the design's", () => {
+    const MiB = 1024 * 1024;
+    assert.equal(VIDEO_LIMITS.fileBytes, 64 * MiB);
+    assert.equal(VIDEO_LIMITS.quotaHeadroomBytes, 32 * MiB);
+    assert.deepEqual([VIDEO_LIMITS.minDurationMs, VIDEO_LIMITS.maxDurationMs], [1_000, 600_000]);
+    assert.deepEqual([VIDEO_LIMITS.minSidePx, VIDEO_LIMITS.maxSidePx, VIDEO_LIMITS.maxPixels], [256, 4096, 8_294_400]);
+    assert.deepEqual([VIDEO_LIMITS.maxFramesInASecond, VIDEO_LIMITS.maxFrames], [61, 36_600]);
+    assert.equal(VIDEO_LIMITS.uploadDeadlineMs, 15 * 60_000);
+  });
+
+  test("a still fits a video when its height, scaled to the video's width, is within 1 px of the video's", () => {
+    const video = { widthPx: 1920, heightPx: 1080 };
+    assert.equal(stillFitsVideo({ widthPx: 1920, heightPx: 1080 }, video), true);
+    assert.equal(stillFitsVideo({ widthPx: 3840, heightPx: 2160 }, video), true);
+    // 1281 px tall at 2276 px wide is 1080.6 at 1920: inside the pixel.
+    assert.equal(stillFitsVideo({ widthPx: 2276, heightPx: 1281 }, video), true);
+    assert.equal(stillFitsVideo({ widthPx: 1920, heightPx: 1081 }, video), true);
+    assert.equal(stillFitsVideo({ widthPx: 1920, heightPx: 1082 }, video), false);
+    assert.equal(stillFitsVideo({ widthPx: 1920, heightPx: 1078 }, video), false);
+    assert.equal(stillFitsVideo({ widthPx: 1080, heightPx: 1920 }, video), false);
+    assert.equal(stillFitsVideo({ widthPx: 0, heightPx: 0 }, video), false);
+    assert.equal(stillFitsVideo({ widthPx: 1920, heightPx: 1080 }, { widthPx: 0, heightPx: 1080 }), false);
+  });
+
+  test("Phone size plays up to 1920 x 1080 either way up, at up to 31 frames in any second", () => {
+    assert.equal(phoneSizeAllows({ widthPx: 1920, heightPx: 1080, fps: 30 }), true);
+    assert.equal(phoneSizeAllows({ widthPx: 1080, heightPx: 1920, fps: 30 }), true);
+    assert.equal(phoneSizeAllows({ widthPx: 1080, heightPx: 1080, fps: 31 }), true);
+    assert.equal(phoneSizeAllows({ widthPx: 1920, heightPx: 1080, fps: 32 }), false);
+    assert.equal(phoneSizeAllows({ widthPx: 1920, heightPx: 1080, fps: 60 }), false);
+    assert.equal(phoneSizeAllows({ widthPx: 1921, heightPx: 1080, fps: 30 }), false);
+    assert.equal(phoneSizeAllows({ widthPx: 1080, heightPx: 1921, fps: 30 }), false);
+    assert.equal(phoneSizeAllows({ widthPx: 1500, heightPx: 1500, fps: 30 }), false);
+    assert.equal(phoneSizeAllows({ widthPx: 3840, heightPx: 2160, fps: 30 }), false);
   });
 });

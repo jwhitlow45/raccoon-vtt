@@ -527,6 +527,80 @@ export const LIMITS = {
   clockDateChars: 120,
 } as const;
 
+const MiB = 1024 * 1024;
+
+/**
+ * Animated maps (docs/design/design-v1-animated-maps.md 6.3, D-261102-443
+ * and D-261102-512). The server checks every one of these from the file's
+ * headers alone, since it never decodes a frame.
+ */
+export const VIDEO_LIMITS = {
+  /** Most 1080p loops of a minute or two fit, under Cloudflare's 100 MB request body and the 95 MB web import. */
+  fileBytes: 64 * MiB,
+  /**
+   * A live upload must leave this much of the room's quota free, since a
+   * room at its quota turns read-only mid-session. An import needs only the
+   * quota, so a near-full room's backup still imports.
+   */
+  quotaHeadroomBytes: 32 * MiB,
+  /** Under a second stutters. Past 10 minutes is a film. */
+  minDurationMs: 1_000,
+  maxDurationMs: 10 * 60_000,
+  /** Each side, in coded pixels, and the area: square and large maps fit by area. */
+  minSidePx: 256,
+  maxSidePx: 4096,
+  maxPixels: 3840 * 2160,
+  /**
+   * The most frames in any one second of the file and in all, counted over
+   * every frame, so a variable rate is allowed within them and a fast
+   * stretch cannot hide behind a slow start.
+   */
+  maxFramesInASecond: 61,
+  maxFrames: 36_600,
+  /** How long the whole upload body may take: 64 MB on a slow home uplink. */
+  uploadDeadlineMs: 15 * 60_000,
+  /** How far a sound track may end after the picture: AAC's padding at 48 kHz runs to 21.3 ms, past a 60 fps frame. */
+  soundOverrunMs: 50,
+  /** A still is the video's shape when its height, scaled to the video's width, is within this of the video's height. */
+  shapeTolerancePx: 1,
+  /**
+   * The header parser's bounds: each value read, an MP4's `moov`, element
+   * headers, block and sample headers counted apart, nesting depth and time.
+   */
+  parseValueBytes: 4 * 1024,
+  parseMoovBytes: 8 * MiB,
+  parseElementHeaders: 200_000,
+  parseVideoFrameHeaders: 36_600,
+  parseSoundFrameHeaders: 60_000,
+  parseDepth: 8,
+  parseBudgetMs: 5_000,
+  /**
+   * Phone size map detail plays a video only up to 1920 x 1080 (1080 x 1920
+   * upright) with at most 31 frames in any second, so a nominal 30 fps
+   * passes (D-261102-444).
+   */
+  phoneLongSidePx: 1920,
+  phoneShortSidePx: 1080,
+  phoneFramesInASecond: 31,
+} as const;
+
+/**
+ * Whether a still fits a video's shape (D-261102-445): the still's height,
+ * scaled to the video's width, within `shapeTolerancePx` of the video's
+ * height. The permission check and the DM's still pick both use it.
+ */
+export function stillFitsVideo(still: { widthPx: number; heightPx: number }, video: { widthPx: number; heightPx: number }): boolean {
+  if (!(still.widthPx > 0 && still.heightPx > 0 && video.widthPx > 0 && video.heightPx > 0)) return false;
+  return Math.abs((still.heightPx * video.widthPx) / still.widthPx - video.heightPx) <= VIDEO_LIMITS.shapeTolerancePx;
+}
+
+/** Whether Phone size map detail may play a video of this size and peak rate (5.3 rule 3), upright or sideways. */
+export function phoneSizeAllows(video: { widthPx: number; heightPx: number; fps: number }): boolean {
+  const long = Math.max(video.widthPx, video.heightPx);
+  const short = Math.min(video.widthPx, video.heightPx);
+  return long <= VIDEO_LIMITS.phoneLongSidePx && short <= VIDEO_LIMITS.phoneShortSidePx && video.fps <= VIDEO_LIMITS.phoneFramesInASecond;
+}
+
 export type LimitCheck = { ok: true } | { ok: false; code: "quota"; message: string };
 
 function over(message: string): LimitCheck {

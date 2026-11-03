@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkDatabaseDisk, loadConfig } from "./config.ts";
+import { animatedMapsOn, checkDatabaseDisk, loadConfig } from "./config.ts";
 
 const base = { NODE_ENV: "test", DATABASE_URL: "postgres://x@localhost/x" };
 
@@ -42,6 +42,14 @@ describe("loadConfig", () => {
     assert.doesNotThrow(() => loadConfig({ ...base, OPENVERSE_CLIENT_ID: "", OPENVERSE_CLIENT_SECRET: "" }));
     const c = loadConfig({ ...base, OPENVERSE_CLIENT_ID: "id", OPENVERSE_CLIENT_SECRET: "secret" });
     assert.deepEqual([c.OPENVERSE_CLIENT_ID, c.OPENVERSE_CLIENT_SECRET], ["id", "secret"]);
+  });
+
+  test("animated maps are off unless ANIMATED_MAPS is 1, and an empty value is off (D-261102-510)", () => {
+    assert.equal(animatedMapsOn(loadConfig(base)), false);
+    assert.equal(animatedMapsOn(loadConfig({ ...base, ANIMATED_MAPS: "" })), false);
+    assert.equal(animatedMapsOn(loadConfig({ ...base, ANIMATED_MAPS: "0" })), false);
+    assert.equal(animatedMapsOn(loadConfig({ ...base, ANIMATED_MAPS: "1" })), true);
+    for (const value of ["true", "yes", "on", "2"]) assert.throws(() => loadConfig({ ...base, ANIMATED_MAPS: value }), /ANIMATED_MAPS/, value);
   });
 });
 

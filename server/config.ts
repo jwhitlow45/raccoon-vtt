@@ -55,7 +55,19 @@ const Env = z.object({
   OPENVERSE_CLIENT_SECRET: emptyAsUnset(z.string().max(500).optional()),
   /** A join request's life in seconds, for end-to-end tests only: production always keeps the 10 minutes. */
   JOIN_REQUEST_LIFE_S: emptyAsUnset(z.coerce.number().int().min(5).max(600).optional()),
+  /**
+   * Animated maps (docs/design/design-v1-animated-maps.md 1, D-261102-510),
+   * off unless "1". Cloudflare's CDN terms limit serving video on its
+   * non-Enterprise plans, and the risk falls on the whole site, so the
+   * server's owner opts in.
+   */
+  ANIMATED_MAPS: emptyAsUnset(z.enum(["0", "1"]).default("0")),
 });
+
+/** Whether the server takes, serves and lets ops add videos. Off, every map shows its still. */
+export function animatedMapsOn(config: Pick<Config, "ANIMATED_MAPS">): boolean {
+  return config.ANIMATED_MAPS === "1";
+}
 
 export type Config = z.infer<typeof Env> & {
   production: boolean;

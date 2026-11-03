@@ -203,6 +203,19 @@ describe("upload", () => {
     const dm = auth.allow(roomId, "dm");
     assert.equal((await upload(app, roomId, dm, "token", otherPng)).statusCode, 409);
   });
+
+  test("the video kind is the DM's, and stores nothing until its header check lands (docs/design/design-v1-animated-maps.md 9.1)", async () => {
+    const roomId = await room();
+    const player = auth.allow(roomId, "player");
+    const dm = auth.allow(roomId, "dm");
+    assert.equal((await upload(app, roomId, player, "video", otherPng)).statusCode, 403);
+    const res = await upload(app, roomId, dm, "video", otherPng);
+    assert.equal(res.statusCode, 415, res.body);
+    assert.deepEqual(res.json(), { error: "unsupported_type" });
+    const { rows } = await pool.query(`select count(*)::int as n from assets where room_id = $1`, [roomId]);
+    assert.equal(rows[0].n, 0);
+    assert.deepEqual(await readdir(join(dir, "tmp")), []);
+  });
 });
 
 describe("intake slots", () => {
