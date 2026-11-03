@@ -1,4 +1,5 @@
-import { combatUses, healRevivesDead, reviveToOne } from "../migrate.ts";
+import { clockTicks, combatUses, healRevivesDead, reviveToOne } from "../migrate.ts";
+import { clockNow } from "../calendar.ts";
 import type { Effect } from "../model.ts";
 import { MAX_EFFECTS, type DurationInput, type OpOf, type OutcomeDamage } from "../protocol.ts";
 import { resolveDuration } from "../rules/durations.ts";
@@ -76,8 +77,14 @@ export function actorRest(tx: Tx, op: OpOf<"actor.rest">): void {
   // A character's class resources come back with it (docs/design/design-v1-combat-controls.md 2.4), on the character beside its actor.
   if (resolved.character) {
     const character = tx.character(resolved.character.id);
+    let next = character;
     const resources = restedResources(character.resources, op.kind);
-    if (resources !== character.resources) tx.write(keys.character(character.id), { ...character, resources });
+    if (resources !== character.resources) next = { ...next, resources };
+    // A Long Rest records when it ended by the room's clock and which clock read it (docs/design/design-v1-calendar.md 4.5),
+    // whoever rests the character. It never moves the clock: two players resting would move it twice.
+    const clock = tx.state.clock;
+    if (op.kind === "long" && clock && clockTicks(tx.env.opVersion)) next = { ...next, longRest: { at: clockNow(clock, tx.state.encounter), clock: clock.id } };
+    if (next !== character) tx.write(keys.character(character.id), next);
   }
   tx.addActorEvents(resolved, r.events);
 }

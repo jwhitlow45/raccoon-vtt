@@ -27,7 +27,8 @@ import {
   unbindFromEntry,
   type StoredDuration,
 } from "../rules/durations.ts";
-import { attaches, combatUses, hiddenRowsShareNoMount, keepsLairTick, logsByAudience, marksHadTurn, mountsOnPlayerScene, revealsRowAnew, takesBackTurnOnly } from "../migrate.ts";
+import { attaches, clockTicks, combatUses, hiddenRowsShareNoMount, keepsLairTick, logsByAudience, marksHadTurn, mountsOnPlayerScene, revealsRowAnew, takesBackTurnOnly } from "../migrate.ts";
+import { fightSeconds } from "../calendar.ts";
 import { LIMITS } from "../limits.ts";
 import { holderOf } from "../rules/attach.ts";
 import { activeRowShownTo, inSightOfNonOwners, rowSeenByNonOwners, rowSeenMark, seenByNonOwners, seenMark, stableStringify } from "../project.ts";
@@ -233,6 +234,15 @@ export function encounterEnd(tx: Tx): void {
       const next = withoutTurnScoped(resolved.actor);
       if (next !== resolved.actor) tx.putActor(resolved, next);
     }
+  }
+  // The fight's rounds join the room's clock, 6 seconds each, the current one counted whole, with no line of their own
+  // (docs/design/design-v1-calendar.md 4.6). An end that would take the clock past its bound stops it there rather than
+  // refuse the end, since a fight that cannot end would be worse. A fight that never started adds nothing and leaves the
+  // clock unwritten, so it guards no undo.
+  const clock = tx.state.clock;
+  if (clock && clockTicks(tx.env.opVersion)) {
+    const t = Math.min(LIMITS.clockSecondsMax, clock.t + fightSeconds(encounter, true));
+    if (t !== clock.t) tx.write(keys.clock, { ...clock, t });
   }
   tx.write(keys.encounter, null);
   if (tx.state.encounterHistory.length > 0) tx.write(keys.encounterHistory, []);

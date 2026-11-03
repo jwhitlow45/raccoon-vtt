@@ -2,17 +2,18 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { keys } from "#shared/keys.ts";
 import { eventLines } from "#shared/logRings.ts";
-import type { Token, Viewer } from "#shared/model.ts";
+import { LIMITS } from "#shared/limits.ts";
+import type { RoomState, Token, Viewer } from "#shared/model.ts";
 import { MAX_RESTORE_ENTRIES, type ClientOp, type Op, type RestoreEntry } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { CHANGED_SINCE } from "#shared/reducer/misc.ts";
 import { guardHash } from "#shared/reducer/tx.ts";
 import { canApply, NO_ROOM_TO_GROW_BACK } from "#shared/permissions.ts";
 import { projectEntity } from "#shared/project.ts";
-import { actor, apply, castAsk, castTable, DM, env, member, P1, room, scene, token } from "#shared/testutil.ts";
+import { actor, apply, castAsk, castTable, character, DM, env, member, P1, room, scene, token } from "#shared/testutil.ts";
 import { MOVED_SINCE, mergeInverses, poseRestore, posesAfter, UNDO_DEPTH, UndoStacks } from "./undo.ts";
 import { UndoTable } from "./undoTesting.ts";
-import { tallyOf } from "./undoLabels.ts";
+import { describeOp, tallyOf } from "./undoLabels.ts";
 
 const inverse = (n: number): RestoreEntry[] => [{ key: `token:${n}`, value: null, expectRev: n }];
 const step = (n: number) => ({ entries: inverse(n), label: `edit ${n}` });
@@ -689,5 +690,99 @@ describe("a player's walks around walls on undo and redo (docs/design/design-v1-
     stacks.push("p1", entry("b"), "moving b", "i", {});
     const dropped = stacks.popUndo("p1")!;
     assert.deepEqual([dropped.routes, dropped.routed], [undefined, undefined]);
+  });
+});
+
+describe("the party's Long Rest and the clock (docs/design/design-v1-calendar.md 4.5, 6.5)", () => {
+  const H = 3_600;
+  const AT_LIMIT = LIMITS.clockSecondsMax - H;
+  const DAYS = { kind: "days" as const };
+  const party = (t = 22 * H, hp = 5) =>
+    room({
+      clock: { id: "c1", rev: 1, t, shown: true, calendar: DAYS },
+      characters: { bree: character("bree", { name: "Bree", actor: actor({ hp: { cur: 5, max: 20, temp: 0 } }) }), thorn: character("thorn", { name: "Thorn", actor: actor({ hp: { cur: hp, max: 20, temp: 0 } }) }) },
+      tokens: { gob: token("gob") },
+    });
+  const advance: Op = { t: "clock.advance", by: 8 * H, why: "longRest" };
+  const rest = (characterId: string): Op => ({ t: "actor.rest", target: { characterId }, kind: "long" });
+
+  /** Sends ops as the client's gesture does (client/state/actions.ts dispatchGesture): each on its own, one undo group, a refusal leaving the rest to go. */
+  function send(state: RoomState, stacks: UndoStacks, ops: { op: Op; group?: string }[], seq = 1): { state: RoomState; refused: string[] } {
+    const refused: string[] = [];
+    for (const { op, group } of ops) {
+      const r = applyOp(state, op, DM, env(seq++));
+      if (!r.ok) {
+        refused.push(`${op.t}: ${r.message}`);
+        continue;
+      }
+      stacks.push(DM.memberId, r.inverse!, describeOp(op as ClientOp, state, DM, r.state), group, undefined, undefined, undefined, false, undefined, undefined, false, { scope: "play" });
+      state = r.state;
+    }
+    return { state, refused };
+  }
+
+  function undo(state: RoomState, stacks: UndoStacks, seq: number) {
+    const step = stacks.popUndo(DM.memberId)!;
+    const r = applyOp(state, { t: "sys.restore", entries: step.entries, from: "undo", deps: true, scope: "play", correction: { label: step.label } } as Op, DM, env(seq));
+    assert.ok(r.ok, r.ok ? "" : r.message);
+    return { step, applied: r };
+  }
+
+  test("while it merges, one step named for the party's Long Rest takes back the clock and every rested character", () => {
+    const stacks = new UndoStacks();
+    const before = party();
+    const sent = send(before, stacks, [advance, rest("bree"), rest("thorn")].map((op) => ({ op, group: "rest" })));
+    assert.deepEqual(sent.refused, []);
+    assert.deepEqual(stacks.depth(DM.memberId), { undo: 1, redo: 0 });
+    for (const id of ["bree", "thorn"]) assert.deepEqual(sent.state.characters[id]!.longRest, { at: 30 * H, clock: "c1" });
+    const { step, applied } = undo(sent.state, stacks, 9);
+    assert.equal(step.label, "the party's Long Rest");
+    assert.equal(applied.state.clock!.t, 22 * H);
+    for (const id of ["bree", "thorn"]) {
+      assert.equal(applied.state.characters[id]!.longRest, undefined);
+      assert.equal(applied.state.characters[id]!.actor.hp.cur, 5);
+    }
+    assert.ok(applied.log.some((line) => line.data?.type === "clock" && line.data.from === "undo"));
+  });
+
+  test("an advance refused at the limit leaves the rests going through at the time as it was", () => {
+    const stacks = new UndoStacks();
+    const sent = send(party(LIMITS.clockSecondsMax - H), stacks, [advance, rest("bree"), rest("thorn")].map((op) => ({ op, group: "rest" })));
+    assert.deepEqual(sent.refused, ["clock.advance: The clock can't go that far."]);
+    assert.equal(sent.state.clock!.t, LIMITS.clockSecondsMax - H);
+    for (const id of ["bree", "thorn"]) assert.deepEqual(sent.state.characters[id]!.longRest, { at: AT_LIMIT, clock: "c1" });
+  });
+
+  test("a rest refused for a character at 0 HP leaves the advance and the other rests standing", () => {
+    const stacks = new UndoStacks();
+    const sent = send(party(22 * H, 0), stacks, [advance, rest("bree"), rest("thorn")].map((op) => ({ op, group: "rest" })));
+    assert.equal(sent.refused.length, 1);
+    assert.match(sent.refused[0]!, /^actor\.rest: /);
+    assert.equal(sent.state.clock!.t, 30 * H);
+    assert.deepEqual(sent.state.characters.bree!.longRest, { at: 30 * H, clock: "c1" });
+    assert.equal(sent.state.characters.thorn!.longRest, undefined);
+    assert.equal(undo(sent.state, stacks, 9).applied.state.clock!.t, 22 * H, "the step that merged still takes back what went through");
+  });
+
+  test("another op between the gesture's ops splits it into more steps, as any gesture", () => {
+    const stacks = new UndoStacks();
+    const sent = send(party(), stacks, [
+      { op: advance, group: "rest" },
+      { op: { t: "token.update", tokenId: "gob", patch: { name: "Snik" } } },
+      { op: rest("bree"), group: "rest" },
+      { op: rest("thorn"), group: "rest" },
+    ]);
+    assert.deepEqual(stacks.depth(DM.memberId), { undo: 3, redo: 0 });
+    const last = undo(sent.state, stacks, 9);
+    assert.equal(last.applied.state.clock!.t, 30 * H, "the later rests' step leaves the clock as the advance left it");
+  });
+
+  test("a step after a calendar save refuses Undo setup of the save, one guard for the whole clock", () => {
+    const table = new UndoTable(party());
+    assert.equal(table.play(DM, { t: "clock.update", calendar: { kind: "months", months: [{ name: "Thaw", days: 30 }] } }), "ok");
+    assert.equal(table.play(DM, { t: "clock.advance", by: 600 }), "ok");
+    assert.notEqual(table.restore(DM, "undo", "setup"), "ok");
+    assert.equal(table.state.clock!.calendar.kind, "months", "the calendar stays saved");
+    assert.equal(table.undo(DM), "ok", "the step itself undoes");
   });
 });
