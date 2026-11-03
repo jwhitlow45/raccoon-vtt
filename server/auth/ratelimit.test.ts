@@ -86,6 +86,6 @@ test("a turn away's write gives up on a pool that never hands out a connection, 
   const stalled = { connect: () => new Promise<never>(() => undefined) } as unknown as pg.Pool;
   const limits = new SlowLimits(stalled, { ROOMS_PER_IP_PER_DAY: 10, ROOMS_PER_DAY: 100 });
   const started = Date.now();
-  await assert.rejects(limits.recordTurnAway("ROOMAAAA", "device", "203.0.113.0", Date.now()), CheckoutTimeout);
+  await assert.rejects(limits.recordTurnAway("ROOMAAAA", "device", "203.0.113.0", Date.now(), Date.now), CheckoutTimeout);
   assert.ok(Date.now() - started < 3_000, "within its checkout bound");
 });

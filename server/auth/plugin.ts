@@ -99,7 +99,7 @@ export async function setupAuth(
     joinRequests.sweep();
     void admissions.followUp().catch((err: unknown) => app.log.warn({ err }, "join follow-up failed"));
     void joinRequests.retryHolds(
-      (hold) => limits.recordTurnAway(hold.roomId, hold.sessionId, hold.ipKey, hold.at),
+      (hold) => limits.recordTurnAway(hold.roomId, hold.sessionId, hold.ipKey, hold.at, () => joinRequests.now()),
       (err, hold) => app.log.warn({ err, roomId: hold.roomId }, "join request hold not saved yet"),
     );
   }, deps.access?.sweepMs ?? SWEEP_MS);

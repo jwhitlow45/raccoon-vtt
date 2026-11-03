@@ -709,8 +709,9 @@ describe("join requests: asking, waiting and a DM's answer", () => {
     const { dm, roomId } = await k.room("ask");
     const phone = t.client();
     const id = await k.asked(phone, roomId);
-    const restore = beforeTxStatement(t.pool, async (sql, values) => {
-      if (sql.startsWith("insert into rate_events") && String(values?.[0]?.[0]).startsWith("askno:")) await new Promise((r) => setTimeout(r, 1_500));
+    // The write's own transaction is slow to start, as after a slow checkout.
+    const restore = beforeTxStatement(t.pool, async (sql) => {
+      if (sql === "set local statement_timeout = '5000ms'") await new Promise((r) => setTimeout(r, 1_500));
     });
     try {
       const at = Date.now();
@@ -975,8 +976,10 @@ describe("join requests: limits and the challenge", () => {
   let k: ReturnType<typeof kit>;
   let cloudflare: MockAgent;
   let cloudflareDown = false;
+  /** How far this server's clock runs from the database's, for the join requests store. */
+  let skew = 0;
   before(async () => {
-    t = await startTestApp({ env: TURNSTILE });
+    t = await startTestApp({ env: TURNSTILE, access: { joinRequests: { now: () => Date.now() + skew } } });
     k = kit(t);
     cloudflare = new MockAgent();
     cloudflare.disableNetConnect();
@@ -1090,6 +1093,37 @@ describe("join requests: limits and the challenge", () => {
     const { rows } = await t.pool.query("select key from rate_events where key in ($1, $2)", [`askno:${roomId}:${(await k.askRow(phone.token))?.id}`, `asknoip:${roomId}:${ipKey(ip)}`]);
     assert.equal(rows.length, 2);
   });
+
+  for (const [way, ms] of [
+    ["ahead of", 5 * 60_000],
+    ["behind", -5 * 60_000],
+  ] as const) {
+    test(`with this server's clock 5 minutes ${way} the database's, a session made after a turn away needs Turnstile, one from before does not, and the hold lasts 15 minutes (JR-SOL-06)`, async () => {
+      const { dm, roomId } = await room();
+      const ip = randomIp();
+      const elsewhere = await room("password");
+      const older = t.client(ip);
+      await older.join(elsewhere.roomId, "Pip");
+      await new Promise((r) => setTimeout(r, 20));
+      skew = ms;
+      try {
+        const phone = t.client(ip);
+        const id = await k.asked(phone, roomId);
+        assert.equal((await dm.post(`/api/rooms/${roomId}/join-requests/turn-away`, { ids: [id] })).statusCode, 204);
+        const newer = t.client(ip);
+        await newer.join(elsewhere.roomId, "Wren");
+        assert.equal(k.error(await ask(newer, roomId)), "turnstile_required", "a session made after the turn away");
+        assert.equal((await ask(older, roomId)).statusCode, 201, "a session from before it");
+        // What a restart keeps: dated on the database's clock, so it ends 15 minutes from the turn away.
+        const { rows } = await t.pool.query<{ ago: number }>("select extract(epoch from now() - at)::float8 as ago from rate_events where key = $1", [
+          `askno:${roomId}:${(await k.askRow(phone.token))?.id}`,
+        ]);
+        assert.ok(Math.abs(rows[0]?.ago ?? Number.NaN) < 1, `stamped at the turn away: ${rows[0]?.ago} s ago`);
+      } finally {
+        skew = 0;
+      }
+    });
+  }
 
   test("an ask token's requests are counted by address, at 120 a minute, never as a session", async () => {
     const { roomId } = await room();

@@ -379,21 +379,26 @@ export class SlowLimits {
 
   /**
    * A DM turned this device away here: its own hold, and its address's,
-   * which only adds a Turnstile check. Dated `at`, the turn away itself in
-   * ms since the epoch, so a write that comes late, after a slow checkout
-   * or as the sweep's retry, ends the hold when it would have. These are
-   * the only rows stamped by this server's clock: a skew from the
-   * database's moves the hold's end by that much. The checkout and the
-   * statement are bounded, so a stalled pool costs a retry, not a wait.
+   * which only adds a Turnstile check. Dated to the turn away, `at` on the
+   * `now` clock, so a write that comes late, after a slow checkout or as
+   * the sweep's retry, ends the hold when it would have. The row is still
+   * stamped on the database's clock, as every other one is: the age is
+   * measured on ours and taken off the statement's own time. A session's
+   * creation is compared with the address's hold, so a stamp from our
+   * clock running ahead would date a session made after the turn away as
+   * older, and let it skip the check. The checkout and the statement are
+   * bounded, so a stalled pool costs a retry, not a wait.
    */
-  async recordTurnAway(roomId: string, deviceId: string, ip: string, at: number): Promise<void> {
+  async recordTurnAway(roomId: string, deviceId: string, ip: string, at: number, now: () => number): Promise<void> {
     await withTx(
       this.#pool,
       async (tx) => {
         await tx.query(`set local statement_timeout = '${TURN_AWAY_WRITE.statementMs}ms'`);
-        await tx.query("insert into rate_events (key, at) select unnest($1::text[]), $2::timestamptz", [
+        // Measured as late as it can be, just before the statement it is taken off.
+        const age = Math.max(0, now() - at) / 1000;
+        await tx.query("insert into rate_events (key, at) select unnest($1::text[]), statement_timestamp() - make_interval(secs => $2)", [
           [`askno:${roomId}:${deviceId}`, `asknoip:${roomId}:${ip}`],
-          new Date(at),
+          age,
         ]);
       },
       { checkoutMs: TURN_AWAY_WRITE.checkoutMs },
@@ -414,7 +419,7 @@ export class SlowLimits {
   async #window(key: string, seconds: number, q: Queryable = this.#pool): Promise<WindowState> {
     // Ages are computed by Postgres against its own clock, the same clock
     // that stamped the rows, so app and database clock skew cannot matter
-    // (but for a turn away's, see recordTurnAway).
+    // (a turn away's too, see recordTurnAway).
     const { rows } = await q.query<{ n: number; oldest_expires_in: number | null; since_newest: number | null }>(
       `select count(*)::int as n,
          extract(epoch from min(at) + make_interval(secs => $2) - now())::float8 as oldest_expires_in,
