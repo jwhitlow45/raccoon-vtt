@@ -129,7 +129,7 @@ export const VIDEO_REFUSALS: Readonly<Partial<Record<ApiErrorCodeOrNetwork, stri
   video_codec: "That video's format doesn't play in most browsers. Save it as MP4 (H.264) or WebM (VP9).",
   video_tracks: "That video holds more than one picture or sound track, or a track of another kind. Export it again with one video and at most one sound track.",
   video_sound: "That video's sound settings can't be checked. Export it again with AAC-LC or Opus sound.",
-  video_vorbis: "That video's sound is Vorbis, which can carry hidden text. Export it again with Opus sound, or with no sound.",
+  video_vorbis: "That video's sound is Vorbis, which this app doesn't accept. Export it again with Opus sound, or with no sound.",
   video_alpha: "That video has see-through parts. Animated maps must be solid.",
   video_hdr: "That video is HDR, which looks washed out on the map. Export it in SDR.",
   video_size: `Videos can be ${VIDEO_LIMITS.minSidePx} to ${VIDEO_LIMITS.maxSidePx} pixels on a side and 8.3 megapixels in all (3840 × 2160).`,
