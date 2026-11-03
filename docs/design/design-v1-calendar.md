@@ -371,7 +371,7 @@ Built in three steps (section 12) as phase C1. Every place the build went its ow
 - **Mutation checks.** Rules put back wrong, each caught by a test: the frozen line audience, the conditional clock read, `clockNow` in Set, the `clockTicks` gate, the floor for negative days, the fight-end clamp, the unwritten never-started fight, the fight-end restore skip, the correction gate, the shown-only projection, the size guard, the stored bound and the stamp's clock id test, among 26 in the model, 5 against the random test and 3 against the integration test, and 9 in the client words (the 24 hour window, the 16 hour boundary, the step limit, the An and A rule, the player gate of `panelsFor`, the year-length limit, empty week names and the time check). Five more, in the toasts and the party's gesture, were put back wrong too: the advance after the rests, `t` for `clockNow` in the heading, a claim never consumed, a claim that never lapses, and the undo kind ignored.
 - **A timing note.** The receipt deadline test in server/http/receipts.test.ts failed once under a loaded full run, on a 200 ms bound, and passed alone and in both lane checks. It is not part of the clock.
 
-**Not covered.** The own-device Undo toast was asserted for the DM only, not for a player's "undid" line. The table display shows nothing new, as 4.4 said. The design's edits to docs/design/design.md (6, 7.3, 8.1, 9.5, 10.5, 16.2 and 16.4) are not made yet.
+**Not covered.** The own-device Undo toast was asserted for the DM only, not for a player's "undid" line. The table display shows nothing new, as 4.4 said. The main design (docs/design/design.md) names the clock in sections 6, 7.3, 8.1, 9.5, 10.5, 16.2 and 16.4, as section 7 lists.
 
 ## Changes from review
 
