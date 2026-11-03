@@ -3,8 +3,8 @@ import type Konva from "konva";
 import { useStore } from "zustand";
 import type { AssetId } from "#shared/model.ts";
 import { useSceneLoading } from "../../canvas/SceneLoading.tsx";
-import { theme } from "../../lib/theme.ts";
 import { dockSlot } from "../../pages/fold.ts";
+import { MAP_GROUND } from "../../pages/onBoard.ts";
 import { useScoped, useScopedIfAny } from "../../state/scope.ts";
 import { useAssets, useRoomView } from "../../state/view.ts";
 import { useAnimatedMaps, useLowPower, useMapVariant } from "../device/settings.ts";
@@ -50,8 +50,13 @@ export function AnimMapController(props: ControllerProps) {
   return null;
 }
 
-/** The board's ground behind the canvas, #16161a. The light theme keeps it for the board, so the rebase onto it reads boardTheme.color.bg here. */
-const BOARD_GROUND = theme.color.bg;
+/**
+ * The board's ground behind the canvas, #16161a in both themes: the ground
+ * around the map (pages/onBoard.ts MAP_GROUND), which a light page keeps
+ * dark. A canvas color never reads `theme.color`, whose scheme tokens are
+ * CSS variables that turn light with the page (AMBUILD-ASTRA-06, AM-R1-02).
+ */
+const BOARD_GROUND = MAP_GROUND;
 
 /**
  * The board's video in the page (5.2): an `aria-hidden` box at the board's

@@ -196,8 +196,16 @@ async function createRoom(page: Page, context: BrowserContext, origin: string, n
   return { roomId, password, ops: await OpSocket.open({ origin, roomId, cookie }) };
 }
 
-/** The board's ground behind the canvas, which the cover paints (features/animmap/AnimMapController.tsx BOARD_GROUND). */
+/** The board's ground behind the canvas in both themes, which the cover paints (features/animmap/AnimMapController.tsx BOARD_GROUND). */
 const GROUND = { r: 0x16, g: 0x16, b: 0x1a };
+
+/** Pat's page in `scheme`, as This device's Theme keeps it, after a reload that also fits the scene again. */
+async function setScheme(page: Page, scheme: "dark" | "light"): Promise<void> {
+  await page.evaluate((s) => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.theme", s), scheme);
+  await page.reload();
+  await page.locator(".konvajs-content").first().waitFor();
+  await waitFor(`the page turns ${scheme}`, async () => ((await page.evaluate(() => (globalThis as unknown as { document: { documentElement: { getAttribute(n: string): string | null } } }).document.documentElement.getAttribute("data-rvtt-scheme"))) === scheme ? true : null), 5_000);
+}
 
 /** The DM sets a scene's map to a still with its video, through the socket. */
 async function setVideoMap(sceneId: string, still: StillRow, video: VideoRow): Promise<void> {
@@ -843,6 +851,36 @@ describe("animated maps", { concurrency: false }, () => {
     // Pat's map as it opens, for the steps after: a reload fits the scene again.
     await pat.reload();
     await pat.locator(".konvajs-content").first().waitFor();
+    await boardSays(pat, "playing");
+  });
+
+  test("amfix-1. on a light page the cover and the ground around the scene stay the board's dark ground, in Top-down and in Isometric", async () => {
+    await setScheme(pat, "light");
+    await boardSays(pat, "playing");
+    const cover = await pat.evaluate(() => {
+      const d = (globalThis as unknown as { document: { querySelector(s: string): unknown }; getComputedStyle(e: unknown): { backgroundColor: string } });
+      const el = d.document.querySelector("[data-animmap-cover]");
+      return el ? d.getComputedStyle(el).backgroundColor : null;
+    });
+    const size = pat.viewportSize()!;
+    await pat.mouse.move(size.width / 2, size.height / 2);
+    for (let i = 0; i < 8; i++) await pat.mouse.wheel(0, 240);
+    await sleep(600);
+    await shots.take(pat, "amfix-1-pat-light-zoomed-out");
+    assert.equal(cover, "rgb(22, 22, 26)", "the cover paints the board's ground");
+    const scene = await sceneBox(pat);
+    const strips = [
+      { x: 0, y: scene.y + scene.height / 2 - 20, width: Math.floor(scene.x) - 4, height: 40 },
+      { x: Math.ceil(scene.x + scene.width) + 4, y: scene.y + scene.height / 2 - 20, width: size.width - Math.ceil(scene.x + scene.width) - 4, height: 40 },
+    ].filter((b) => b.width >= 8 && b.height >= 8);
+    assert.ok(strips.length > 0, `some ground shows around the scene: ${JSON.stringify(scene)}`);
+    for (const strip of strips) assert.equal(await offColor(pat, strip, GROUND), 0, `only the dark ground outside the scene at ${JSON.stringify(strip)}`);
+    await viewAs(pat, "isometric");
+    await boardSays(pat, "still still-view");
+    await shots.take(pat, "amfix-1-pat-light-isometric");
+    assert.equal(await offColor(pat, { x: 4, y: 140, width: 30, height: 30 }, GROUND), 0, "the dark ground at the screen's edge in Isometric");
+    await viewAs(pat, "topDown");
+    await setScheme(pat, "dark");
     await boardSays(pat, "playing");
   });
 
