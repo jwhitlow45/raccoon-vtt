@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import fc from "fast-check";
 import type { Member } from "#shared/model.ts";
 import { runSettings } from "#shared/propertyTestutil.ts";
-import { Admissions, revokeMember, type AdmitOutcome } from "./admit.ts";
+import { ADMISSION_ROUTE_MS, Admissions, KICK_MEMORY_MS, revokeMember, type AdmitOutcome, type Begun } from "./admit.ts";
 import { RoomFullError } from "../rooms/gateway.ts";
 import { HttpError } from "./http.ts";
 import {
@@ -425,12 +425,77 @@ async function runAdmissions(faults: Fault[]): Promise<void> {
   }
 }
 
+/**
+ * Routes and kicks interleaved over a long clock: a route begins, may stall
+ * past the kicks' memory, then admits a carry-on of one of two members,
+ * while kicks of any of them land and prune each other's marks.
+ */
+type KickStep =
+  | { t: "begin"; route: number; member: number }
+  | { t: "admit"; route: number }
+  | { t: "kick"; member: number }
+  | { t: "wait"; ms: number };
+
+// Few routes and members, so a stall, a kick and a prune of that kick meet often.
+const kickStep: fc.Arbitrary<KickStep> = fc.oneof(
+  { arbitrary: fc.record({ t: fc.constant("begin" as const), route: fc.nat({ max: 1 }), member: fc.nat({ max: 1 }) }), weight: 2 },
+  { arbitrary: fc.record({ t: fc.constant("admit" as const), route: fc.nat({ max: 1 }) }), weight: 2 },
+  { arbitrary: fc.record({ t: fc.constant("kick" as const), member: fc.nat({ max: 1 }) }), weight: 3 },
+  { arbitrary: fc.record({ t: fc.constant("wait" as const), ms: fc.constantFrom(1_000, ADMISSION_ROUTE_MS / 2, ADMISSION_ROUTE_MS, KICK_MEMORY_MS + 1) }), weight: 2 },
+);
+
+async function runKicks(steps: KickStep[]): Promise<void> {
+  const db = new FakeAccessDb();
+  db.addRoom(ROOM, { player_epoch: 2, dm_epoch: 1 });
+  const gateway = new FakeRoomGateway();
+  for (const n of [0, 1]) gateway.room(ROOM).set(`k${n}`, member(`k${n}`));
+  const clock = { t: 0 };
+  const admissions = new Admissions({ pool: db.pool, gateway, options: { memberMs: 5, checkoutMs: 50, now: () => clock.t } });
+  // Our own order of events, beside the one Admissions keeps: a route's begin and each kick's mark.
+  let order = 0;
+  const lastKick = new Map<string, number>();
+  const routes = new Map<number, { begun: Begun; at: number; order: number; memberId: string; sessionId: string }>();
+  const grantedBy = new Map<string, { order: number; memberId: string; late: boolean }>();
+  const running: Promise<unknown>[] = [];
+  let sessions = 0;
+  for (const step of steps) {
+    if (step.t === "begin") {
+      routes.set(step.route, { begun: admissions.begin(), at: clock.t, order: ++order, memberId: `k${step.member}`, sessionId: `r${++sessions}` });
+    } else if (step.t === "admit") {
+      const route = routes.get(step.route);
+      if (!route) continue;
+      routes.delete(step.route);
+      const late = clock.t - route.at > ADMISSION_ROUTE_MS;
+      grantedBy.set(route.sessionId, { order: route.order, memberId: route.memberId, late });
+      running.push(admissions.admit({ roomId: ROOM, sessionId: route.sessionId, who: { kind: "member", memberId: route.memberId }, begun: route.begun, locked: async () => undefined, settled: () => undefined }));
+    } else if (step.t === "kick") {
+      lastKick.set(`k${step.member}`, ++order);
+      // The mark is taken at once, before the revoke's first await, as the route's begin is.
+      running.push(revokeMember({ pool: db.pool, gateway, admissions }, ROOM, `k${step.member}`));
+    } else {
+      await Promise.all(running.splice(0));
+      clock.t += step.ms;
+    }
+  }
+  await Promise.all(running);
+  for (const [sessionId, by] of grantedBy) {
+    const grant = db.grant(sessionId, ROOM);
+    if (!grant) continue;
+    assert.equal(by.late, false, "ROUTE-DEADLINE: a route past its deadline writes no grant");
+    assert.ok(by.order > (lastKick.get(by.memberId) ?? 0), "KICK-ORDERED: no grant stands from a route begun before its member's last kick");
+  }
+}
+
 // holds() takes a synchronous property, so the async ones run on its seed and run count directly.
 const { seed, runs } = runSettings(process.env);
 
 describe("join requests under random event sequences", () => {
   test("the store keeps every named invariant", async () => {
     await fc.assert(fc.asyncProperty(fc.array(action, { minLength: 1, maxLength: 60 }), (actions) => runStore(actions)), { seed, numRuns: runs ?? 200 });
+  });
+
+  test("a kick is never forgotten by a route that can still grant, however long the route stalls", async () => {
+    await fc.assert(fc.asyncProperty(fc.array(kickStep, { minLength: 1, maxLength: 24 }), (steps) => runKicks(steps)), { seed, numRuns: runs ?? 1_000 });
   });
 
   test("admitPlayer keeps member-first, undo-only-on-rollback and its settlements", async () => {

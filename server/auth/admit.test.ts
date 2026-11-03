@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Member } from "#shared/model.ts";
-import { Admissions, revokeMember, type AdmitAnswer, type AdmitOutcome, type AdmitPlan, type AdmitWho } from "./admit.ts";
+import { ADMISSION_ROUTE_MS, Admissions, KICK_MEMORY_MS, revokeMember, type AdmitAnswer, type AdmitOutcome, type AdmitPlan, type AdmitWho } from "./admit.ts";
 import { HttpError } from "./http.ts";
 import { FakeAccessDb, FakeRoomGateway } from "./testing.ts";
 
@@ -12,13 +12,13 @@ function member(id: string, kind: Member["kind"] = "player"): Member {
   return { id, rev: 1, name: id, color: "#123456", kind, createdAt: "2026-11-02T10:00:00.000Z" };
 }
 
-function setup(options: { memberMs?: number; checkoutMs?: number; answerMs?: number } = {}) {
+function setup(options: { memberMs?: number; checkoutMs?: number; answerMs?: number; now?: () => number } = {}) {
   const db = new FakeAccessDb();
   db.addRoom(ROOM, { player_epoch: 3, dm_epoch: 5 });
   const gateway = new FakeRoomGateway();
   // The answer's bound is past the checkout's unless a test says otherwise, so a refused checkout is answered as busy.
   const answerMs = options.answerMs ?? options.memberMs ?? 200;
-  const admissions = new Admissions({ pool: db.pool, gateway, options: { memberMs: options.memberMs ?? 40, checkoutMs: options.checkoutMs ?? 40, answerMs } });
+  const admissions = new Admissions({ pool: db.pool, gateway, options: { memberMs: options.memberMs ?? 40, checkoutMs: options.checkoutMs ?? 40, answerMs, ...(options.now ? { now: options.now } : {}) } });
   const settled: AdmitOutcome[] = [];
   const plan = (who: AdmitWho, over: Partial<AdmitPlan> = {}): AdmitPlan => ({
     roomId: ROOM,
@@ -361,6 +361,33 @@ describe("admitPlayer", () => {
     // A kick of another member, or one from before the route began, refuses nothing.
     await revokeMember({ pool: db.pool, gateway, admissions }, ROOM, "someone-else");
     assert.equal((await admissions.admit(plan({ kind: "member", memberId: "pip" }))).kind, "in");
+  });
+
+  test("a route that outlives the kicks' memory writes no grant, so a forgotten kick never lets its member back (JR-SOL-01 after pruning)", async () => {
+    const clock = { t: 1_000 };
+    const { db, gateway, admissions, plan } = setup({ now: () => clock.t });
+    gateway.room(ROOM).set("pip", member("pip"));
+    const kick = (memberId: string) => revokeMember({ pool: db.pool, gateway, admissions }, ROOM, memberId);
+    // A route stalls before its admission, its member is kicked, and a later kick of someone else forgets that one.
+    const stalled = admissions.begin();
+    await kick("pip");
+    clock.t += KICK_MEMORY_MS + 1;
+    await kick("someone-else");
+    assert.equal(codeOf(await admissions.admit(plan({ kind: "member", memberId: "pip" }, { begun: stalled }))), "busy", "past its deadline, the route writes no grant");
+    assert.equal(db.grant(SESSION, ROOM), undefined, "KICK-ORDERED across the prune");
+    // At its deadline a route still meets every kick since it began, even with a prune in between.
+    const late = admissions.begin();
+    await kick("pip");
+    clock.t += ADMISSION_ROUTE_MS;
+    await kick("someone-else");
+    assert.equal(codeOf(await admissions.admit(plan({ kind: "member", memberId: "pip" }, { begun: late }))), "member_removed");
+    // One past its deadline with no kick at all is refused too, and nothing is taken off.
+    const slow = admissions.begin();
+    clock.t += ADMISSION_ROUTE_MS + 1;
+    assert.equal(codeOf(await admissions.admit(plan({ kind: "member", memberId: "pip" }, { begun: slow }))), "busy");
+    assert.equal(gateway.room(ROOM).has("pip"), true);
+    // A route begun after the kicks, within its deadline, is a new decision.
+    assert.equal((await admissions.admit(plan({ kind: "member", memberId: "pip" }, { begun: admissions.begin() }))).kind, "in");
   });
 
   test("a carry-on pick of a former DM and a device already in are refused under the lock", async () => {

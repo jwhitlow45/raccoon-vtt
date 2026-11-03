@@ -25,7 +25,9 @@ import { CheckoutTimeout, CommitOutcomeUnknown, withTx } from "./tx.ts";
  * before it: one that has not reached its grant's check writes no grant,
  * and one past the check holds the room row lock, which the kick's revoke
  * waits for before it deletes. So a kick never answers while a grant from
- * before it can still land.
+ * before it can still land. A kick is remembered for twice the route's
+ * deadline, and a route past its deadline writes no grant, so no admission
+ * can grant once the kick it must meet could have been forgotten.
  */
 
 /** How long a caller waits for a new member to land, the room's load included, before it answers that the join is still settling. */
@@ -35,11 +37,20 @@ export const GRANT_CHECKOUT_MS = 2_000;
 /** A kick's revoke: it waits on the room row lock that a grant being written holds. */
 export const KICK_BOUNDS: RevokeBounds = { checkoutMs: 2_000, lockMs: 2_000, statementMs: 5_000 };
 /**
- * How long a kick is remembered against admissions that began before it.
- * Every admission reaches its grant's check well within this: a carry-on
- * has no member step, and a new member can be kicked only once it landed.
+ * A join's route, from `begin` to its grant's check: the session and
+ * roster reads, a password's hash, a cold room's member step. A route past
+ * it writes no grant and answers busy, however long its steps took.
  */
-const KICK_MEMORY_MS = 2 * 60_000;
+export const ADMISSION_ROUTE_MS = 60_000;
+/**
+ * How long a kick is remembered against admissions that began before it.
+ * Past the route's deadline, so a kick is forgotten only once every route
+ * that began before it would be refused at its check anyway.
+ */
+export const KICK_MEMORY_MS = 2 * ADMISSION_ROUTE_MS;
+
+/** Where a join's route started (`Admissions.begin`): its place among kicks, and its clock for the deadline. */
+export type Begun = { readonly seq: number; readonly at: number };
 
 export type LockedRoom = { join_mode: JoinMode; player_epoch: number; dm_epoch: number };
 
@@ -64,9 +75,10 @@ export type AdmitPlan = {
   /**
    * From `Admissions.begin()` when the caller's route started, before its
    * own checks of the member, so a kick that lands after that writes no
-   * grant. Taken when `admit` is called if missing.
+   * grant, and a route past `ADMISSION_ROUTE_MS` from it writes none
+   * either. Taken when `admit` is called if missing.
    */
-  begun?: number;
+  begun?: Begun;
   /**
    * The caller's checks and writes under the room row lock, in the grant's
    * transaction, before the grant: the mode, a stale ticket, promoting an
@@ -90,6 +102,8 @@ export type AdmissionsOptions = {
   checkoutMs?: number;
   /** The answer's bound, from the attempt's start, in every phase. `memberMs` when unset. */
   answerMs?: number;
+  /** The clock routes' deadlines and kicks' memory are measured on: monotonic, in ms. For tests. */
+  now?: () => number;
 };
 
 type Reconciled = "committed" | "not" | "unreachable";
@@ -104,6 +118,7 @@ export class Admissions {
   #memberMs: number;
   #checkoutMs: number;
   #answerMs: number;
+  #now: () => number;
   /** Members being added for a join, by room. */
   #inFlight = new Map<string, Set<string>>();
   /** Members whose removal after a rolled-back grant did not land, retried by the sweep. */
@@ -127,6 +142,7 @@ export class Admissions {
     this.#memberMs = deps.options?.memberMs ?? MEMBER_ANSWER_MS;
     this.#checkoutMs = deps.options?.checkoutMs ?? GRANT_CHECKOUT_MS;
     this.#answerMs = deps.options?.answerMs ?? this.#memberMs;
+    this.#now = deps.options?.now ?? (() => performance.now());
   }
 
   /** The room's members in flight, for "continue as" and the DM's carry-on list to leave out. */
@@ -140,8 +156,8 @@ export class Admissions {
   }
 
   /** Marks where a join's route starts, before it reads anything about the member it names (`AdmitPlan.begun`). */
-  begin(): number {
-    return ++this.#sequence;
+  begin(): Begun {
+    return { seq: ++this.#sequence, at: this.#now() };
   }
 
   /**
@@ -151,9 +167,19 @@ export class Admissions {
    * admission already past that check.
    */
   kicked(roomId: string, memberId: string): void {
-    const now = Date.now();
+    const now = this.#now();
     for (const [k, kick] of this.#kicks) if (now - kick.at > KICK_MEMORY_MS) this.#kicks.delete(k);
     this.#kicks.set(`${roomId}|${memberId}`, { seq: ++this.#sequence, at: now });
+  }
+
+  /**
+   * Whether the route may still write its grant: within its deadline, and
+   * no kick of the member since it began. A kick after `begun` is no older
+   * than the route, so within the deadline it is still remembered.
+   */
+  #mayGrant(roomId: string, memberId: string, begun: Begun): void {
+    if (this.#now() - begun.at > ADMISSION_ROUTE_MS) throw new HttpError(503, "busy", { retryAfter: 2 });
+    if (this.#kickedSince(roomId, memberId, begun.seq)) throw new HttpError(409, "member_removed");
   }
 
   #kickedSince(roomId: string, memberId: string, begun: number): boolean {
@@ -215,7 +241,7 @@ export class Admissions {
     return { checkoutMs: this.#checkoutMs, lockMs: 2_000, statementMs: 2_000 };
   }
 
-  async #attempt(plan: AdmitPlan, begun: number, settle: (outcome: AdmitOutcome) => void): Promise<AdmitOutcome | typeof FOLLOWING> {
+  async #attempt(plan: AdmitPlan, begun: Begun, settle: (outcome: AdmitOutcome) => void): Promise<AdmitOutcome | typeof FOLLOWING> {
     const { roomId, who } = plan;
     const memberId = memberOf(who);
     if (who.kind === "new") {
@@ -253,7 +279,7 @@ export class Admissions {
           // Last, with nothing awaited before the write: a kick from after
           // this check waits on the room lock held here, and deletes the
           // grant once it commits.
-          if (this.#kickedSince(roomId, memberId, begun)) throw new HttpError(409, "member_removed");
+          this.#mayGrant(roomId, memberId, begun);
           await putGrant(tx, { sessionId: plan.sessionId, roomId, memberId, role: "player", epoch: room.player_epoch });
         },
         { checkoutMs: this.#checkoutMs },
