@@ -74,6 +74,13 @@ export async function registerJoinRoutes(app: FastifyInstance, kit: AuthKit): Pr
         await kit.limits.recordPasswordFailure(roomId, ip);
         throw new HttpError(403, "bad_password");
       }
+      // The mode again, now the hash has had its time: a switch to Only by
+      // asking that landed meanwhile lets nobody in, and the roster and the
+      // DMs' colors below go to no one. A switch after this read drops the
+      // ticket, and join/complete refuses it under the room lock either way.
+      const now = await kit.pool.query<{ join_mode: JoinMode }>("select join_mode from rooms where id = $1", [roomId]);
+      if (!now.rows[0]) throw new HttpError(404, "room_not_found");
+      if (now.rows[0].join_mode === "ask_only") throw new HttpError(403, "asks_only");
 
       // A session is created only on success, so failed guesses cannot mint
       // sessions and earn the larger per-session request allowance.

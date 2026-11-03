@@ -673,8 +673,9 @@ describe("Only by asking keeps the password from letting anyone new in, on this 
     assert.equal(counted.rowCount, 0);
   });
 
-  test("a ticket minted before the switch, and one minted by a check in flight during it, are refused by join/complete", async () => {
+  test("a ticket minted before the switch is refused by join/complete, and a check in flight during it is refused with no ticket and no roster", async () => {
     const { roomId } = await t.client().createRoom();
+    await t.client().join(roomId, "Pip");
     const early = t.client();
     const earlyTicket = (await early.post(`/api/rooms/${roomId}/join`, { password: PASSWORD })).json<{ ticket: string }>().ticket;
     // The switch lands while this device's password is being checked.
@@ -685,18 +686,20 @@ describe("Only by asking keeps the password from letting anyone new in, on this 
       await askOnly(roomId);
       return ok;
     };
-    let duringTicket: string;
+    let refused;
     try {
-      duringTicket = (await during.post(`/api/rooms/${roomId}/join`, { password: PASSWORD })).json<{ ticket: string }>().ticket;
+      refused = await during.post(`/api/rooms/${roomId}/join`, { password: PASSWORD });
     } finally {
       hasher.verify = verify;
     }
-    for (const [c, ticket] of [[early, earlyTicket], [during, duringTicket]] as const) {
-      const res = await c.post(`/api/rooms/${roomId}/join/complete`, { ticket, name: "Quinn", color: "#112233" });
-      assert.equal(res.statusCode, 403, res.body);
-      assert.equal(res.json<{ error: string }>().error, "asks_only");
-      assert.equal((await c.me(roomId)).status, 403);
-    }
+    // The mode is read again after the hash (JBO1-04): Only by asking shows the roster and the DMs' colors to no one.
+    assert.equal(refused.statusCode, 403, refused.body);
+    assert.deepEqual(refused.json(), { error: "asks_only" });
+    assert.equal(during.token, undefined, "no session minted");
+    const res = await early.post(`/api/rooms/${roomId}/join/complete`, { ticket: earlyTicket, name: "Quinn", color: "#112233" });
+    assert.equal(res.statusCode, 403, res.body);
+    assert.equal(res.json<{ error: string }>().error, "asks_only");
+    assert.equal((await early.me(roomId)).status, 403);
   });
 
   test("a password change in each mode is one statement: the new hash in the right column, the epoch bumped once", async () => {
