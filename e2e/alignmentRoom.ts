@@ -5949,6 +5949,72 @@ async function builderScreens(sweep: Sweep, page: Page): Promise<void> {
   await pickTool(page, "Select");
 }
 
+/**
+ * The Time panel's screens at one size (docs/design/design-v1-calendar.md 9):
+ * the DM's panel with no clock, with a clock and Other amount open, Set the
+ * date and time, and the Calendar dialog with 12 months. The sweep's room
+ * has no clock, so each size starts one by op and stops it after.
+ */
+async function clockScreens(sweep: Sweep, page: Page): Promise<void> {
+  if (dmSocket.state?.clock) await ops.send({ t: "clock.stop" });
+  await closeSheets(page);
+  await escapeAll(page);
+  const start = await openPanel(page, "Time");
+  await start.getByRole("button", { name: "Start the clock", exact: true }).waitFor();
+  await sweep.measure(page, "ck-time-start", start);
+
+  await ops.send({ t: "clock.start", id: randomUUID(), at: 8 * 3_600, shown: true, calendar: { kind: "days" } });
+  const panel = await openPanel(page, "Time");
+  await panel.getByRole("button", { name: "Set the date and time…", exact: true }).waitFor();
+  await panel.getByRole("button", { name: "Other amount…", exact: true }).click();
+  await panel.getByRole("textbox", { name: "Amount", exact: true }).fill("0");
+  await panel.getByRole("button", { name: "Move on", exact: true }).click();
+  await panel.getByRole("alert").first().waitFor();
+  await sweep.measure(page, "ck-time", panel);
+
+  await panel.getByRole("button", { name: "Set the date and time…", exact: true }).click();
+  const set = page.getByRole("dialog", { name: "Set the date and time", exact: true });
+  await set.waitFor();
+  await sweep.measure(page, "ck-set", set);
+  await escapeAll(page);
+  await set.waitFor({ state: "detached" });
+
+  // Escape also put a phone's sheet away.
+  const again = await openPanel(page, "Time");
+  await again.getByRole("button", { name: "Calendar…", exact: true }).click();
+  const calendar = page.getByRole("dialog", { name: "Calendar", exact: true });
+  await calendar.waitFor();
+  await calendar.getByRole("radio", { name: "Months" }).click();
+  await calendar.getByRole("textbox", { name: "Month 12 name", exact: true }).waitFor();
+  await calendar.getByLabel("Day names", { exact: true }).fill("Moonday, Tuesday, Octday");
+  await sweep.measure(page, "ck-calendar", calendar);
+  // Leaving with changes asks first: a second Escape leaves.
+  await escapeAll(page);
+  await calendar.waitFor({ state: "detached" });
+  await ops.send({ t: "clock.stop" });
+}
+
+/** The calendar build's roots, which the sizes' sweep never reaches (docs/design/design-v1-calendar.md 9, 11). */
+export function clockTests(): void {
+  test(`ck-a. the Time panel with and without a clock, Set the date and time and the Calendar dialog with 12 months, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
+    const lines: string[] = [];
+    try {
+      for (const at of FU30_AT) {
+        const sweep = new Sweep(atName(at));
+        const page = await dmPageFor(at.size);
+        page.setDefaultTimeout(10_000);
+        await openAt(page, at.size, at.scale);
+        await waitFor("the DM's snapshot", () => dmSocket.state);
+        await clockScreens(sweep, page);
+        lines.push(...sweep.lines);
+      }
+    } finally {
+      if (dmSocket.state?.clock) await ops.send({ t: "clock.stop" }).catch(() => {});
+    }
+    assert.deepEqual(lines, [], "the Time panel or its dialogs out of line");
+  });
+}
+
 /** Follow-up batch 32's roots, which the sizes' sweep never reaches. */
 export function fu32Tests(): void {
   test(`fu32-a. a short label stands beside its Stepper or choices wherever both fit: the Monsters place card's How many, an area's group save's Slot level, and a companion's It is in Add a companion and its token's Companion group, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px (FU31-STEPPER-ROWS)`, async () => {
