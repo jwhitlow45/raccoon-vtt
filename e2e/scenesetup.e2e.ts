@@ -876,6 +876,8 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
     await waitFor("the wind toward the left", () => (weatherOf(run.arenaId)?.toward === 270 ? true : null));
     assert.deepEqual(weatherOf(run.arenaId), { kind: "rain", heavy: true, wind: "strong", toward: 270 });
     await what.getByText(/^Disadvantage on ranged attack rolls with weapons\./).waitFor();
+    // The guide's picture of the fold (docs/dm-guide/weather-settings.webp): its label at the top of the panel.
+    await fold.evaluate((el) => el.scrollIntoView({ block: "start" }));
     await shots.take(dm, "wx-ui-1-fold-open");
 
     // Folded, the fold names the weather beside its label, and the group's summary does too once the group folds.
