@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Calendar } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
-import { amountBy, calendarSummary, chipName, chipText, composeDraft, draftDate, restNote, stepName, STEPS, timeSeconds, timeValue, toDawn, weekdayLine } from "./words.ts";
+import { amountBy, calendarSummary, chipName, chipText, composeDraft, DAY_FROM_ONE, draftDate, firstDay, keptSeconds, restNote, setAt, stepName, STEPS, timeSeconds, timeValue, toDawn, weekdayLine } from "./words.ts";
 
 const DAY = 86_400;
 const H = 3_600;
@@ -79,6 +79,11 @@ describe("the date fields", () => {
     assert.equal(composeDraft({ ...draft, year: "abc" }, MONTHS).ok, false);
   });
 
+  test("Day count refuses a day under 1 (CALB-O-06)", () => {
+    for (const day of ["0", "-3"]) assert.deepEqual(composeDraft({ ...draftDate(0, DAYS), day }, DAYS), { ok: false, field: "day", reason: DAY_FROM_ONE });
+    assert.deepEqual(composeDraft({ ...draftDate(0, DAYS), day: "1" }, DAYS), { ok: true, t: 0 });
+  });
+
   test("the weekday reads out under the date, An before a vowel, nothing with no week", () => {
     assert.equal(weekdayLine(DAY, MONTHS), "A Tuesday.");
     assert.equal(weekdayLine(2 * DAY, MONTHS), "An Octday.");
@@ -93,6 +98,46 @@ describe("the date fields", () => {
     assert.equal(timeSeconds("08:00:30"), 8 * H);
     assert.equal(timeSeconds("24:00"), null);
     assert.equal(timeSeconds(""), null);
+  });
+});
+
+describe("a clock holding seconds (CALB-O-02)", () => {
+  // A 3-round fight ended at 8:00 AM: the clock reads 8:00:18, which the fields show as 08:00.
+  const now = 3 * DAY + 8 * H + 18;
+
+  test("an untouched draft names the clock's own moment, seconds and all, so Set sends nothing", () => {
+    for (const cal of [DAYS, MONTHS]) {
+      const draft = draftDate(now, cal);
+      assert.equal(draft.time, "08:00");
+      assert.equal(keptSeconds(draft, now), 18);
+      assert.deepEqual(composeDraft(draft, cal, keptSeconds(draft, now)), { ok: true, t: now });
+    }
+    const draft = draftDate(now, DAYS);
+    assert.equal(setAt(false, composeDraft(draft, DAYS, keptSeconds(draft, now)), now), null);
+    assert.equal(setAt(true, composeDraft(draft, DAYS, keptSeconds(draft, now)), now), null, "edited back to where it was");
+    assert.equal(setAt(false, { ok: true, t: now - 600 }, now), null, "another device moved the clock while Set was open");
+  });
+
+  test("a date edited alone keeps the seconds, a time typed is that minute exactly", () => {
+    const draft = { ...draftDate(now, DAYS), day: "6" };
+    assert.equal(setAt(true, composeDraft(draft, DAYS, keptSeconds(draft, now)), now), 5 * DAY + 8 * H + 18);
+    const timed = { ...draftDate(now, DAYS), time: "09:30" };
+    assert.equal(setAt(true, composeDraft(timed, DAYS, keptSeconds(timed, now)), now), 3 * DAY + 9 * H + 30 * 60);
+  });
+
+  test("a kind change's first day keeps the time of day with its seconds", () => {
+    const first = firstDay(((now % DAY) + DAY) % DAY);
+    assert.deepEqual(composeDraft(first, MONTHS, keptSeconds(first, now)), { ok: true, t: 61 * DAY + 8 * H + 18 }, "the first day of year 1, a year of 61 days");
+  });
+
+  test("the lower bound saves unchanged", () => {
+    const low = -LIMITS.clockSecondsMax;
+    assert.notEqual(low % 60, 0, "the bound is not on a whole minute");
+    const draft = draftDate(low, MONTHS);
+    assert.deepEqual(composeDraft(draft, MONTHS, keptSeconds(draft, low)), { ok: true, t: low });
+    // Day count reads it as a day under 1, which its fields refuse, so only a Set left as it opened passes it.
+    const days = draftDate(low, DAYS);
+    assert.equal(setAt(false, composeDraft(days, DAYS, keptSeconds(days, low)), low), null);
   });
 });
 

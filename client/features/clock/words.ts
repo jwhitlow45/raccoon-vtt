@@ -142,11 +142,43 @@ function whole(text: string): number {
   return /^-?\d{1,15}$/.test(trimmed) ? Number(trimmed) : Number.NaN;
 }
 
-/** The draft as a moment, or the field at fault and why. */
-export function composeDraft(draft: DateDraft, calendar: Calendar): ComposedDate {
+/** Day count names days from 1. composeDate takes any whole day, so a moment before Day 1 still reads back. */
+export const DAY_FROM_ONE = "Pick a day from 1.";
+
+/**
+ * The draft as a moment, or the field at fault and why. `seconds` are the
+ * seconds past the draft's minute it keeps (keptSeconds), added before the
+ * bound is checked, so a clock at the lower bound composes back to itself.
+ */
+export function composeDraft(draft: DateDraft, calendar: Calendar, seconds = 0): ComposedDate {
   const time = timeSeconds(draft.time);
-  return composeDate(
-    calendar.kind === "days" ? { day: whole(draft.day), time: time ?? -1 } : { day: whole(draft.day), month: whole(draft.month), year: whole(draft.year), time: time ?? -1 },
-    calendar,
-  );
+  const at = time === null ? -1 : time + seconds;
+  if (calendar.kind === "days") {
+    const day = whole(draft.day);
+    if (day < 1) return { ok: false, field: "day", reason: DAY_FROM_ONE };
+    return composeDate({ day, time: at }, calendar);
+  }
+  return composeDate({ day: whole(draft.day), month: whole(draft.month), year: whole(draft.year), time: at }, calendar);
+}
+
+/**
+ * The seconds past the minute a draft keeps (CALB-O-02). The fields name a
+ * moment to the minute, as a time field does, so the clock's own seconds,
+ * such as a fight's 18, never show in them. While the time field still
+ * reads the clock's minute, the draft keeps the clock's seconds: an
+ * untouched draft then names the clock's own moment, and a date edited
+ * alone moves the day and keeps the seconds. A time the DM typed is that
+ * minute exactly.
+ */
+export function keptSeconds(draft: DateDraft, now: number): number {
+  return draft.time === timeValue(floorMod(now, DAY_SECONDS)) ? floorMod(now, 60) : 0;
+}
+
+function floorMod(a: number, n: number): number {
+  return ((a % n) + n) % n;
+}
+
+/** What Set sends: a moment only when the DM edited the fields and they then name another than the clock's own. */
+export function setAt(dirty: boolean, composed: ComposedDate, now: number): number | null {
+  return dirty && composed.ok && composed.t !== now ? composed.t : null;
 }

@@ -1,4 +1,4 @@
-import { yearDays } from "#shared/calendar.ts";
+import { yearDays, type ComposedDate } from "#shared/calendar.ts";
 import { LIMITS } from "#shared/limits.ts";
 import type { Calendar } from "#shared/model.ts";
 
@@ -70,4 +70,20 @@ export function calendarOf(draft: CalendarDraft): DraftResult {
 
 export function sameCalendar(a: Calendar, b: Calendar): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/**
+ * What the Calendar dialog's Save sends with a clock running (4.3): the
+ * calendar when it changed, and a time only when the DM edited Today or the
+ * kind changed and Today then names another moment than the clock's own.
+ * Today read through a new calendar alone never moves the clock, so a
+ * rename keeps the clock's seconds and writes no line (CALB-O-02). Null
+ * when nothing changed.
+ */
+export function calendarUpdate(o: { before: Calendar; calendar: Calendar; today: ComposedDate | null; todayTouched: boolean; now: number }): { calendar?: Calendar; at?: number } | null {
+  const calendarChanged = !sameCalendar(o.calendar, o.before);
+  const kindChanged = o.calendar.kind !== o.before.kind;
+  const at = (o.todayTouched || kindChanged) && o.today?.ok === true && o.today.t !== o.now ? o.today.t : undefined;
+  if (!calendarChanged && at === undefined) return null;
+  return { ...(calendarChanged ? { calendar: o.calendar } : {}), ...(at !== undefined ? { at } : {}) };
 }

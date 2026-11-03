@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { LIMITS } from "#shared/limits.ts";
 import type { Calendar } from "#shared/model.ts";
-import { calendarOf, draftOf, draftYearDays, sameCalendar, startingRows, weekNames, type CalendarDraft } from "./calendarDraft.ts";
+import { calendarOf, calendarUpdate, draftOf, draftYearDays, sameCalendar, startingRows, weekNames, type CalendarDraft } from "./calendarDraft.ts";
 
 let key = 0;
 const next = () => ++key;
@@ -56,5 +57,31 @@ describe("the Calendar dialog's draft", () => {
   test("two calendars are the same when they read alike", () => {
     assert.equal(sameCalendar({ kind: "days" }, { kind: "days" }), true);
     assert.equal(sameCalendar({ kind: "days" }, { kind: "months", months: [{ name: "A", days: 1 }] }), false);
+  });
+});
+
+describe("what the Calendar dialog's Save sends (CALB-O-02, ASTRA-01)", () => {
+  const MONTHS: Calendar = { kind: "months", months: [{ name: "Deepwinter", days: 30 }, { name: "Thaw", days: 30 }] };
+  const RENAMED: Calendar = { kind: "months", months: [{ name: "Frost", days: 30 }, { name: "Thaw", days: 30 }] };
+  // After a 3-round fight: 8:00:18 on the clock, 8:00 in the fields.
+  const now = 8 * 3_600 + 18;
+
+  test("a rename sends the calendar alone, whatever Today reads through it", () => {
+    assert.deepEqual(calendarUpdate({ before: MONTHS, calendar: RENAMED, today: { ok: true, t: now - 18 }, todayTouched: false, now }), { calendar: RENAMED });
+  });
+
+  test("an unchanged calendar sends nothing, at the lower bound too", () => {
+    assert.equal(calendarUpdate({ before: MONTHS, calendar: MONTHS, today: { ok: true, t: now - 18 }, todayTouched: false, now }), null);
+    const low = -LIMITS.clockSecondsMax;
+    assert.equal(calendarUpdate({ before: { kind: "days" }, calendar: { kind: "days" }, today: { ok: false, field: "day", reason: "Pick a day from 1." }, todayTouched: false, now: low }), null);
+  });
+
+  test("an edited Today sends its moment only when it names another", () => {
+    assert.deepEqual(calendarUpdate({ before: MONTHS, calendar: MONTHS, today: { ok: true, t: now + 86_400 }, todayTouched: true, now }), { at: now + 86_400 });
+    assert.equal(calendarUpdate({ before: MONTHS, calendar: MONTHS, today: { ok: true, t: now }, todayTouched: true, now }), null);
+  });
+
+  test("a kind change sends the first day's moment, untouched or not", () => {
+    assert.deepEqual(calendarUpdate({ before: { kind: "days" }, calendar: MONTHS, today: { ok: true, t: 60 * 86_400 + now }, todayTouched: false, now }), { calendar: MONTHS, at: 60 * 86_400 + now });
   });
 });

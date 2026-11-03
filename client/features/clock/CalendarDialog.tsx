@@ -10,10 +10,10 @@ import { IconButton } from "../../components/IconButton.tsx";
 import { RadioCards } from "../../components/RadioCards.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
-import { calendarOf, draftOf, draftYearDays, sameCalendar, type CalendarDraft, type MonthRow } from "./calendarDraft.ts";
+import { calendarOf, calendarUpdate, draftOf, draftYearDays, type CalendarDraft, type MonthRow } from "./calendarDraft.ts";
 import { DateFieldsEditor } from "./DateFieldsEditor.tsx";
 import { DISCARD, useDiscard } from "./useDiscard.ts";
-import { composeDraft, draftDate, firstDay, type DateDraft } from "./words.ts";
+import { composeDraft, draftDate, firstDay, keptSeconds, type DateDraft } from "./words.ts";
 
 export const KIND_OPTIONS = [
   { value: "days", label: "Day count", help: "Day 1, Day 2 and on." },
@@ -22,8 +22,9 @@ export const KIND_OPTIONS = [
 
 /**
  * Calendar (docs/design/design-v1-calendar.md 4.3), the DM's. With a clock
- * running, Save sends one `clock.update` (the calendar, and the date as the
- * Today fields read it when that changed). Before the clock starts there is
+ * running, Save sends one `clock.update`: the calendar, and the date as
+ * Today reads it only when the DM edited Today or changed the kind
+ * (calendarUpdate). Before the clock starts there is
  * no clock to update, so Save hands the calendar back to the start form
  * (`onSave`) and nothing is sent until Start the clock.
  */
@@ -48,7 +49,7 @@ export function CalendarDialog(props: { initial: Calendar; clock: RoomClock | nu
   const derived: DateDraft | null =
     clock === null || !result.ok ? null : kindChanged ? firstDay(timeOfDay) : draftDate(now, result.calendar);
   const dateValue = dateEdit ?? derived;
-  const composed = result.ok && dateValue ? composeDraft(dateValue, result.calendar) : null;
+  const composed = result.ok && dateValue ? composeDraft(dateValue, result.calendar, keptSeconds(dateValue, now)) : null;
 
   const dirty = !sameDraft(draft, start) || dateEdit !== null;
   const { armed, leave } = useDiscard(dirty, props.onClose, draft, dateEdit);
@@ -68,15 +69,13 @@ export function CalendarDialog(props: { initial: Calendar; clock: RoomClock | nu
       props.onClose();
       return;
     }
-    if (composed && !composed.ok) {
+    // Today is checked only when Save sends it: an untouched Today reads the clock as it is, which may be a Day count day under 1.
+    if ((dateEdit !== null || kindChanged) && composed && !composed.ok) {
       setError(composed.reason);
       return;
     }
-    const calendarChanged = !sameCalendar(result.calendar, clock.calendar);
-    const dateChanged = composed?.ok === true && composed.t !== now;
-    if (calendarChanged || dateChanged) {
-      actions.dispatch({ t: "clock.update", ...(calendarChanged ? { calendar: result.calendar } : {}), ...(dateChanged && composed?.ok ? { at: composed.t } : {}) });
-    }
+    const update = calendarUpdate({ before: clock.calendar, calendar: result.calendar, today: composed, todayTouched: dateEdit !== null, now });
+    if (update) actions.dispatch({ t: "clock.update", ...update });
     props.onClose();
   };
 
