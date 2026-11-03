@@ -2887,6 +2887,8 @@ export const SCENE_FOR_PLAYERS = {
   gridShape: "copied",
   // A following player's device shows it (docs/design/design-v1-isometric-view.md 7). It names a view, nothing of the map.
   suggestedView: "copied",
+  // Players' devices draw it and their rolls follow it (docs/design/design-v1-weather.md 7). It names a look and its rules, nothing of the map.
+  weather: "copied",
 } as const satisfies Record<keyof Scene, PlayerField>;
 
 /** A scene as a player gets it: an allowlist, field by field as SCENE_FOR_PLAYERS rules. */
@@ -2914,6 +2916,8 @@ function projectSceneCtx(ctx: Ctx, scene: Scene): Scene | null {
   if (scene.gridShape !== undefined) out.gridShape = scene.gridShape;
   // A following player's device shows it (docs/design/design-v1-isometric-view.md 7). It names a view, nothing of the map.
   if (scene.suggestedView !== undefined) out.suggestedView = scene.suggestedView;
+  // Only the players' scene comes this far, so weather the DM sets up on another scene never leaves the DM's devices.
+  if (scene.weather !== undefined) out.weather = scene.weather;
   return out;
 }
 

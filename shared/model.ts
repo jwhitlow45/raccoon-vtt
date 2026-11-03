@@ -13,6 +13,7 @@
 import type { DamageType } from "./rules/damage.ts";
 import type { CorrectionLogEvent } from "./undoContract.ts";
 import type { SaveOutcomeLedger } from "./saveOutcomeContract.ts";
+import type { SceneWeather } from "./weather.ts";
 
 export type MemberId = string;
 export type SceneId = string;
@@ -570,6 +571,12 @@ export type Scene = {
    * it, so a scene set back is stored as it was.
    */
   suggestedView?: "isometric";
+  /**
+   * The scene's weather (docs/design/design-v1-weather.md 9.1), in its one
+   * stored form (normalWeather). Absent reads as clear and calm, the weather
+   * of every scene from before it, and null in a patch removes it.
+   */
+  weather?: SceneWeather;
 };
 
 /**

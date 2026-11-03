@@ -27,7 +27,13 @@ export type D20Test =
   | { kind: "check"; ability: AbilityKey; skill?: SkillKey }
   /** A Dexterity check in 2024. */
   | { kind: "initiative" }
-  | { kind: "attack"; range?: "melee" | "ranged"; spell?: true };
+  /**
+   * `weapon` is a positive sign that the attack is made with a weapon
+   * (docs/design/design-v1-weather.md 2.1), which strong wind's rule needs: a
+   * 2024 "Ranged Attack Roll" alone may be a Force Bolt. `range` is "either"
+   * for a "Melee or Ranged" attack, whose roll does not say which it was.
+   */
+  | { kind: "attack"; range?: "melee" | "ranged" | "either"; spell?: true; weapon?: true };
 
 export function isSave(test: D20Test): test is Extract<D20Test, { kind: "save" | "deathSave" }> {
   return test.kind === "save" || test.kind === "deathSave";
@@ -306,4 +312,14 @@ export type NamedRoll = {
   lasts?: { at: "start" | "end"; of: "target" | "self" };
   /** A spell's level, 0 for a cantrip (doc 2). */
   level?: number;
+  /**
+   * Where an attack reaches, from its entry's words or a character's weapon
+   * (docs/design/design-v1-weather.md 2.1). "either" is a "Melee or Ranged"
+   * attack, or a character's Thrown weapon. Absent where nothing says.
+   */
+  range?: "melee" | "ranged" | "either";
+  /** The attack is known to be made with a weapon (docs/design/design-v1-weather.md 2.1). */
+  weapon?: true;
+  /** A spell attack, 2014's "Ranged Spell Attack" under Actions among them, whatever its section. */
+  spell?: true;
 };

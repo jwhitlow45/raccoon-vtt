@@ -62,6 +62,7 @@ function fullScene(): Required<Scene> {
     gridFromFile: true,
     gridShape: "hexRows",
     suggestedView: "isometric",
+    weather: { kind: "rain", heavy: true, wind: "strong", toward: 90 },
   };
 }
 
