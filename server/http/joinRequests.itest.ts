@@ -610,6 +610,37 @@ describe("join requests: asking, waiting and a DM's answer", () => {
     }
   });
 
+  test("a database error in a let-in's first checks, or in any join request route, answers 503 busy, and the request waits again (JBO1-06)", async () => {
+    const { dm, roomId } = await k.room("ask");
+    const phone = t.client();
+    const id = await k.asked(phone, roomId);
+    const query = t.pool.query.bind(t.pool);
+    let broken: (sql: string) => boolean = () => false;
+    (t.pool as { query: unknown }).query = async (text: unknown, values?: unknown) => {
+      if (typeof text === "string" && broken(text)) throw new Error("connection terminated unexpectedly");
+      return query(text as string, values as unknown[]);
+    };
+    try {
+      // The let-in's check that the requester still has a session or token.
+      broken = (sql) => sql.includes("exists (select 1 from ask_sessions where id = $1");
+      const res = await k.letIn(dm, roomId, id);
+      assert.equal(res.statusCode, 503, res.body);
+      assert.equal(k.error(res), "busy");
+      assert.equal(res.headers["retry-after"], "2");
+      // The requester's own lookups.
+      broken = (sql) => sql.startsWith("select id from ask_sessions where token_hash");
+      for (const res of [await phone.get(`/api/rooms/${roomId}/join-requests/mine`), await k.wait(phone, roomId, id), await phone.delete(`/api/rooms/${roomId}/join-requests/${id}`)]) {
+        assert.equal(res.statusCode, 503, res.body);
+        assert.equal(k.error(res), "busy");
+      }
+    } finally {
+      (t.pool as { query: unknown }).query = query;
+    }
+    assert.deepEqual((await k.list(dm, roomId)).requests.map((r) => [r.id, r.deciding]), [[id, undefined]], "settled back to waiting, its place kept");
+    const malformed = await dm.request("POST", `/api/rooms/${roomId}/join-requests/${id}/let-in`, undefined, { "content-type": "application/json" });
+    assert.ok(malformed.statusCode >= 400 && malformed.statusCode < 500, `a malformed request keeps its own code: ${malformed.statusCode}`);
+  });
+
   test("cancel ends the request, and a cancelled request is gone to its own device", async () => {
     const { dm, roomId } = await k.room("ask");
     const phone = t.client();

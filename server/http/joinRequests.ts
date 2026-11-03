@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
+import type { ApiErrorCode } from "#shared/apiErrors.ts";
 import { JOIN_MODES, type JoinMode } from "#shared/protocol.ts";
 import type { AdmitOutcome, AdmitWho } from "../auth/admit.ts";
 import type { AskToken } from "../auth/askSessions.ts";
@@ -55,6 +56,24 @@ from prev
 where r.id = $1 and prev.join_mode <> $2::text
   and not (prev.join_mode = 'ask_only' and $2::text <> 'ask_only' and prev.player_pw_hash_held is null)
 returning prev.join_mode`;
+
+/**
+ * The errors of these routes: the access routes' typed ones as they are,
+ * and Fastify's own refusals of a request (a body too big, a wrong content
+ * type) with their codes. Anything else, a database error, a stalled pool
+ * or a room that will not load, wrote nothing a retry would repeat, so it
+ * answers 503 busy, which every page here words as the server being busy.
+ */
+function joinRequestErrors(err: Error, req: FastifyRequest, reply: FastifyReply): FastifyReply {
+  const status = (err as { statusCode?: unknown }).statusCode;
+  if (err instanceof HttpError || (typeof status === "number" && status < 500)) return accessErrors(err, req, reply);
+  try {
+    return accessErrors(err, req, reply);
+  } catch {
+    req.log.warn({ err }, "join request route failed");
+    return reply.code(503).header("retry-after", "2").send({ error: "busy" satisfies ApiErrorCode });
+  }
+}
 
 /** The asking device: its room session, else its ask token. One id either way. */
 type Device = { kind: "session" | "token"; id: string };
@@ -137,7 +156,7 @@ export async function registerJoinRequestRoutes(app: FastifyInstance, kit: AuthK
   }
 
   await app.register(async (r) => {
-    r.setErrorHandler(accessErrors);
+    r.setErrorHandler(joinRequestErrors);
 
     r.get("/api/rooms/:id/join-requests/mine", async (req, reply) => {
       const roomId = roomParam(req);
