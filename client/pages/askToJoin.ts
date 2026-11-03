@@ -23,7 +23,11 @@ export type WaitState = "waiting" | "in" | "turned_away" | "expired" | "closed" 
 /** Where the page stops once no wait is going. */
 export type Outcome = "turned_away" | "expired" | "closed" | "other_tab" | "ended";
 
-/** Cancel: tapped and not sent yet, sent, or refused because a DM's let-in is committing. */
+/**
+ * Cancel: tapped and not sent yet, sent, or refused because a DM's let-in
+ * is committing. While it is sent no wait runs: the held one is cut off as
+ * Cancel goes out, so its answer can never overtake Cancel's own.
+ */
 export type CancelStep = "none" | "queued" | "sent" | "deciding";
 
 /** One call's progress. A pause before a retry is the same call, asleep. */
@@ -64,6 +68,7 @@ export type AskEvent =
   | { type: "cancel" }
   | { type: "cancelDone"; requestId: string }
   | { type: "cancelDeciding"; requestId: string }
+  /** `gone`: the request is no longer waiting (gone, or already answered), so the page asks GET /me. */
   | { type: "cancelFailed"; requestId: string; gone: boolean }
   | { type: "waitHere" }
   /** The page is going away, or its call was cut off: whatever was in flight starts again when the page is back. */
@@ -195,6 +200,8 @@ export function reduceAsk(state: AskState, event: AskEvent, issued = 0): AskStat
 export function effectOf(state: AskState): Effect | null {
   if (state.kind === "waiting") {
     if (state.cancel === "queued") return { kind: "cancel", requestId: state.requestId };
+    // Cancel's answer decides what comes next: waiting on, the form, or GET /me.
+    if (state.cancel === "sent") return null;
     const { io } = state;
     if (io.step !== "idle") return null;
     // A pause comes first, as the same call asleep.
@@ -219,7 +226,10 @@ export function start(state: AskState): { state: AskState; effect: Effect | null
   const effect = effectOf(state);
   if (!effect) return { state, effect: null };
   if (effect.kind === "cancel") {
-    return { state: state.kind === "waiting" ? { ...state, cancel: "sent" } : state, effect };
+    // The wait in flight, or its pause, stops here: the driver cuts off a
+    // call the state no longer runs, so the held wait's answer to this
+    // cancel never arrives ahead of Cancel's own.
+    return { state: state.kind === "waiting" ? { ...state, cancel: "sent", io: { ...state.io, step: "idle", sleepMs: null } } : state, effect };
   }
   return { state: reduceAsk(state, { type: "begin" }), effect };
 }

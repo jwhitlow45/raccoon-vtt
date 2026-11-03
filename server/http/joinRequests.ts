@@ -293,6 +293,9 @@ export async function registerJoinRequestRoutes(app: FastifyInstance, kit: AuthK
       if (result === "gone") throw new HttpError(404, "request_gone");
       // A grant may already be committing. The let-in decides, and the wait hears it.
       if (result === "deciding") throw new HttpError(409, "request_deciding");
+      // Answered before Cancel landed: let in, turned away, expired or closed.
+      // The page asks GET /me, so a device let in never reads the ask form.
+      if (result === "ended") throw new HttpError(409, "request_answered");
       req.log.debug({ roomId, requestId }, "join request cancelled");
       return reply.code(204).send();
     });

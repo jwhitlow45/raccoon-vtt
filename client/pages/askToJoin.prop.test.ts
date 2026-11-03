@@ -81,6 +81,14 @@ function apply(run: Run, event: AskEvent): void {
   }
   // STOP-ON-SUPERSEDED: no call runs on a card.
   if (run.state.kind === "outcome") assert.equal(next.effect, null);
+  // CANCEL-STOPS-WAIT: no wait runs while Cancel is out, and nothing a wait says moves the page then.
+  if (run.state.kind === "waiting" && run.state.cancel === "sent") {
+    assert.notEqual(run.state.io.step, "inflight", "a wait in flight beside Cancel");
+    assert.equal(next.effect?.kind === "wait", false);
+  }
+  if (before.kind === "waiting" && before.cancel === "sent" && (event.type === "answer" || event.type === "waitFailed" || event.type === "slept")) {
+    assert.equal(run.state, before, `${event.type} moved the page while Cancel was out`);
+  }
 }
 
 function play(list: readonly Op[]): void {

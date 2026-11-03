@@ -154,7 +154,8 @@ export function AskToJoin(props: {
           () => dispatch({ type: "cancelDone", requestId: effect.requestId }),
           (err: unknown) => {
             if (err instanceof ApiError && err.code === "request_deciding") dispatch({ type: "cancelDeciding", requestId: effect.requestId });
-            else dispatch({ type: "cancelFailed", requestId: effect.requestId, gone: err instanceof ApiError && err.code === "request_gone" });
+            // Gone, or answered before Cancel landed: GET /me says whether the device is in.
+            else dispatch({ type: "cancelFailed", requestId: effect.requestId, gone: err instanceof ApiError && (err.code === "request_gone" || err.code === "request_answered") });
           },
         );
         return;

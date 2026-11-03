@@ -39,8 +39,6 @@ const shots = new Shots(SHOT_DIR === "0" ? null : SHOT_DIR);
 
 /** A new device's room page asks GET /me first and is answered 403: that is how it picks the join page, and Chrome logs it. */
 const ME_403 = /status of 403 .*\/api\/rooms\/[0-9A-Z]{8}\/me\)$/;
-/** A held wait on a request its own page cancelled is answered 404 request_gone, and Chrome logs it. */
-const CANCELLED_WAIT = /status of 404 .*\/api\/rooms\/[0-9A-Z]{8}\/join-requests\/[A-Za-z0-9_-]{43}\/wait\)$/;
 const DESKTOP = { viewport: { width: 1440, height: 900 } };
 const PHONE = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true };
 
@@ -359,8 +357,7 @@ describe("raccoon-vtt join requests", { timeout: 600_000 }, () => {
     await ask(wren.page, "Wren", { url: roomUrl() });
     const row = requestRow(dm, "Wren");
     await row.waitFor();
-    // The held wait is answered 404 request_gone as the cancel lands (design 5.1), which Chrome logs. A follow-up may answer it without an error.
-    wren.watch.allow = [ME_403, CANCELLED_WAIT];
+    // Cancel cuts off its own held wait first, so no 404 for it reaches the console.
     await wren.page.getByRole("button", { name: "Cancel" }).click();
     await wren.page.getByRole("heading", { name: "Ask to join" }).waitFor();
     await row.waitFor({ state: "detached" });
@@ -382,7 +379,6 @@ describe("raccoon-vtt join requests", { timeout: 600_000 }, () => {
     await ivy.page.getByRole("button", { name: "Wait here" }).click();
     await ivy.page.getByRole("heading", { name: "Waiting for the DM" }).waitFor();
     await second.getByRole("heading", { name: "Waiting in another tab" }).waitFor();
-    ivy.watch.allow = [ME_403, CANCELLED_WAIT];
     await ivy.page.getByRole("button", { name: "Cancel" }).click();
     await requestRow(dm, "Ivy").waitFor({ state: "detached" });
     await ivy.context.close();

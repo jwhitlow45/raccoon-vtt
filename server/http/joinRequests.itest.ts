@@ -533,6 +533,21 @@ describe("join requests: asking, waiting and a DM's answer", () => {
     assert.equal((await held).json<{ state: string }>().state, "turned_away", "the original wait was never displaced");
   });
 
+  test("a cancel after the DM answered is request_answered, so the page asks GET /me and a device let in enters (JBO1-02)", async () => {
+    const { dm, roomId } = await k.room("ask");
+    const phone = t.client();
+    const id = await k.asked(phone, roomId);
+    assert.equal((await k.letIn(dm, roomId, id)).statusCode, 200);
+    const late = await phone.delete(`/api/rooms/${roomId}/join-requests/${id}`);
+    assert.equal(late.statusCode, 409, late.body);
+    assert.equal(k.error(late), "request_answered");
+    assert.equal((await phone.me(roomId)).role, "player");
+    const away = t.client();
+    const second = await k.asked(away, roomId, "Rook");
+    await dm.post(`/api/rooms/${roomId}/join-requests/turn-away`, { ids: [second] });
+    assert.equal(k.error(await away.delete(`/api/rooms/${roomId}/join-requests/${second}`)), "request_answered");
+  });
+
   test("cancel ends the request, and a cancelled request is gone to its own device", async () => {
     const { dm, roomId } = await k.room("ask");
     const phone = t.client();

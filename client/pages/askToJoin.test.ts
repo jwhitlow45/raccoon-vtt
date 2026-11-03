@@ -137,11 +137,27 @@ describe("the ask page's wait loop", () => {
     assert.deepEqual(late.state, { kind: "form" });
   });
 
-  test("cancel refused while a let-in commits keeps waiting, and the let-in still opens the room", () => {
+  test("cancel refused while a let-in commits waits again, and the let-in still opens the room", () => {
     const deciding = drive([{ type: "cancel" }, { type: "cancelDeciding", requestId: "r1" }], drive(asked).state);
     assert.equal(deciding.state.kind === "waiting" && deciding.state.cancel, "deciding");
-    const entered = drive([{ type: "answer", seq: 1, requestId: "r1", state: "in", me: ME }], deciding.state);
+    assert.deepEqual(deciding.effects.at(-1), { kind: "wait", requestId: "r1", seq: 2 }, "the wait Cancel cut off starts again");
+    const entered = drive([{ type: "answer", seq: 2, requestId: "r1", state: "in", me: ME }], deciding.state);
     assert.equal(entered.state.kind, "in");
+  });
+
+  test("Cancel cuts off its held wait, so the wait's 404 and Cancel's 204 land in either order on the form (JB-ASTRA-06)", () => {
+    const sent = drive([{ type: "cancel" }], drive(asked).state);
+    assert.equal(sent.state.kind === "waiting" && sent.state.io.step, "idle", "no wait in flight while Cancel is out, so the page cuts the held one off");
+    // The 404 first: it belongs to a wait the page no longer runs.
+    const goneFirst = drive([{ type: "waitFailed", seq: 1, requestId: "r1", gone: true }, { type: "cancelDone", requestId: "r1" }], sent.state);
+    assert.deepEqual(goneFirst.state, { kind: "form" });
+    assert.deepEqual(goneFirst.effects, [], "and nothing new starts");
+    // The 204 first.
+    const doneFirst = drive([{ type: "cancelDone", requestId: "r1" }, { type: "waitFailed", seq: 1, requestId: "r1", gone: true }], sent.state);
+    assert.deepEqual(doneFirst.state, { kind: "form" });
+    // A cancel that failed outright waits on.
+    const failed = drive([{ type: "cancelFailed", requestId: "r1", gone: false }], sent.state);
+    assert.deepEqual(failed.effects, [{ kind: "wait", requestId: "r1", seq: 2 }]);
   });
 
   test("a cancel that finds the request gone asks GET /me rather than showing a card or the form", () => {
