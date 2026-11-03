@@ -14,7 +14,7 @@ import { useBackClose } from "../../lib/backClose.ts";
 import { containTab, inertOutside } from "../../lib/modalDialog.ts";
 import { focusMap, mapFocusSlot, panelFocusSlot } from "../../pages/mapFocus.ts";
 import { useModalSlot } from "../../pages/modalSlot.tsx";
-import { theme } from "../../lib/theme.ts";
+import { ON_BOARD, ON_BOARD_STYLE, theme } from "../../lib/theme.ts";
 import { screenHeight, useLayoutSize } from "../device/layout.ts";
 import { effectChip } from "../../lib/tokenView.ts";
 import { EffectArt, effectHasArt } from "../tokens/EffectIcon.tsx";
@@ -362,28 +362,35 @@ const roundStyle: CSSProperties = { flex: "none", fontSize: theme.font.small, fo
  */
 function TrackerTarget(props: { label: string; reach: number }) {
   const ui = useRoomUi();
-  return (
-    <button
-      type="button"
-      // A backdrop to what stands over it: the alerts' summary row may cover part of it (FightAlerts), as the band's own parts do.
-      data-rvtt-backdrop=""
-      onClick={() => ui.openPanel("tracker")}
-      aria-label={props.label}
-      style={{
-        position: "absolute",
-        top: -props.reach,
-        left: 0,
-        width: "100%",
-        height: `calc(100% + ${props.reach * 2}px)`,
-        margin: 0,
-        padding: 0,
-        border: "none",
-        borderRadius: "inherit",
-        background: "transparent",
-        cursor: "pointer",
-      }}
-    />
-  );
+  const look = trackerTargetLook(props.reach);
+  return <button type="button" {...look.attrs} onClick={() => ui.openPanel("tracker")} aria-label={props.label} style={look.style} />;
+}
+
+/**
+ * The turn strip's target, over the whole band or pill. Its ring falls past
+ * the band's foot onto the map, where any art can lie under it, so it is the
+ * board's two-tone ring (lib/theme.ts ON_BOARD): the accent resolved for
+ * dark on a dark halo, in both schemes (docs/design/design-v1-light-theme.md 6.4).
+ */
+export function trackerTargetLook(reach: number): { attrs: Record<string, string>; style: CSSProperties } {
+  return {
+    // A backdrop to what stands over it: the alerts' summary row may cover part of it (FightAlerts), as the band's own parts do.
+    attrs: { "data-rvtt-backdrop": "", ...ON_BOARD },
+    style: {
+      ...ON_BOARD_STYLE,
+      position: "absolute",
+      top: -reach,
+      left: 0,
+      width: "100%",
+      height: `calc(100% + ${reach * 2}px)`,
+      margin: 0,
+      padding: 0,
+      border: "none",
+      borderRadius: "inherit",
+      background: "transparent",
+      cursor: "pointer",
+    } as CSSProperties,
+  };
 }
 
 /**
