@@ -353,3 +353,15 @@ describe("the grid a new scene starts on (docs/design/design-v1-hex-grids.md HX-
     assert.equal("gridShape" in mapScene({ id: "p", name: "", asset: { id: "a", width: 2100, height: 1400 } }).scene, false);
   });
 });
+
+describe("an animated map's still carries its video (docs/design/design-v1-animated-maps.md 4.1 and 4.2)", () => {
+  const video = { assetId: "loop", widthPx: 1920, heightPx: 1080, container: "mp4" as const, video: "avc1.640028", fps: 30, durationMs: 12_000, kbps: 6000 };
+  test("a new map and a replacement of either shape keep the asset's video, and an image in its place drops it", () => {
+    assert.deepEqual(initialMap({ id: "still", width: 1920, height: 1080, video }).map.video, video);
+    const old = { ...initialMap({ id: "still", width: 1920, height: 1080, video }).map };
+    assert.deepEqual(replaceMap(old, { id: "still2", width: 960, height: 540, video: { ...video, assetId: "loop2" } }).video?.assetId, "loop2");
+    assert.deepEqual(replaceMap(old, { id: "other", width: 1000, height: 1000, video }).video, video);
+    assert.equal(replaceMap(old, { id: "image", width: 1920, height: 1080 }).video, undefined);
+    assert.equal(initialMap({ id: "image", width: 1920, height: 1080 }).map.video, undefined);
+  });
+});

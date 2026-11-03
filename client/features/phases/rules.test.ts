@@ -190,3 +190,54 @@ describe("the client's verdict matches the reducer's", () => {
     }
   });
 });
+
+describe("an animated map's phases keep their videos (docs/design/design-v1-animated-maps.md 9.1)", () => {
+  const facts = { widthPx: 1920, heightPx: 1280, container: "webm" as const, video: "vp09.00.40.08", fps: 30, durationMs: 42_000, kbps: 4000 };
+  const DAY_VIDEO = { assetId: "day-loop", ...facts };
+  const NIGHT_VIDEO = { assetId: "night-loop", ...facts };
+  const animated = () => scene({ map: { ...MAP, video: DAY_VIDEO } });
+
+  test("a map with no list yet shows its video on its one phase, so the first edit stores it", () => {
+    assert.deepEqual(phasesOf(animated())[0]?.video, DAY_VIDEO);
+    const renamed = renamePhase(animated(), "", "Torchlit", ids("r"));
+    assert.deepEqual(renamed?.[0]?.video, DAY_VIDEO);
+  });
+
+  test("a new phase from a video carries it, and the first phase keeps its own", () => {
+    const edit = addPhase(animated(), { assetId: "night", widthPx: 1500, heightPx: 1000, name: "Night loop", video: NIGHT_VIDEO }, ids("n"));
+    assert.ok("phases" in edit);
+    assert.deepEqual(
+      edit.phases.map((p) => p.video?.assetId),
+      ["day-loop", "night-loop"],
+    );
+    // A still phase added beside them has no video.
+    const still = addPhase(scene({ phases: edit.phases, phaseId: "n1", phaseGrid: GRID }), { assetId: "fire", widthPx: 6000, heightPx: 4000, name: "Fire" }, ids("f"));
+    assert.ok("phases" in still);
+    assert.equal(still.phases[2]?.video, undefined);
+  });
+
+  test("rename, move and remove keep every video where it was", () => {
+    const list: MapPhase[] = [
+      { ...DAY, video: DAY_VIDEO },
+      { ...NIGHT, video: NIGHT_VIDEO },
+      FIRE,
+    ];
+    const s = phased(list);
+    assert.deepEqual(
+      renamePhase(s, NIGHT.id, "Moonlit", ids("x"))?.map((p) => p.video?.assetId),
+      ["day-loop", "night-loop", undefined],
+    );
+    assert.deepEqual(
+      movePhase(s, NIGHT.id, -1)?.map((p) => [p.id, p.video?.assetId]),
+      [
+        [NIGHT.id, "night-loop"],
+        [DAY.id, "day-loop"],
+        [FIRE.id, undefined],
+      ],
+    );
+    assert.deepEqual(
+      removePhase(s, DAY.id)?.map((p) => p.video?.assetId),
+      ["night-loop", undefined],
+    );
+  });
+});

@@ -3,16 +3,21 @@ import type { MapPhase, Scene } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
 import { Button } from "../../components/Button.tsx";
 import { ErrorText, Input } from "../../components/Field.tsx";
-import { Loading } from "../../components/Loading.tsx";
+import { Loading, Spinner } from "../../components/Loading.tsx";
 import { buttonLook } from "../../components/looks.ts";
 import { Help } from "../../components/Panel.tsx";
 import { Tag } from "../../components/Tag.tsx";
 import { accessibleName } from "../../lib/a11y.ts";
 import { theme } from "../../lib/theme.ts";
 import { useAssets, useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
+import { isVideoFile } from "../animmap/firstFrame.ts";
+import { ProbeHost, StillPick, useVideoUpload } from "../animmap/MapVideoRow.tsx";
+import { useServerAnimatedMaps } from "../animmap/status.ts";
+import { animatedUploadText, mapAccept, stepText, VIDEO_PICK_HELP } from "../animmap/upload.ts";
+import { PHASE_VIDEO_TAG } from "../animmap/words.ts";
 import { ConfirmButton } from "../scenes/controls.tsx";
 import { PasteButton, PasteStatus, usePasteTarget } from "../images/PasteImage.tsx";
-import { nameFromFile } from "../scenes/create.ts";
+import { nameFromFile, type MapAsset } from "../scenes/create.ts";
 import { uploadErrorText, uploadMap } from "../scenes/upload.ts";
 import { UvttAddPhase } from "../uvtt/UvttImport.tsx";
 import { activePhaseId, addPhase, canAddPhase, movePhase, phasesOf, removeConfirmText, removePhase, renamePhase } from "./rules.ts";
@@ -37,9 +42,12 @@ export function PhasesSection(props: { scene: Scene }) {
   const store = useRoomStore();
   const roomId = useRoomView((s) => s.roomId);
   const [editing, setEditing] = useState<string | null>(null);
-  const [upload, setUpload] = useState<{ busy: boolean; waiting: boolean; error: string | null }>({ busy: false, waiting: false, error: null });
+  const [upload, setUpload] = useState<{ busy: boolean; waiting: boolean; error: string | null; step?: string; video?: boolean }>({ busy: false, waiting: false, error: null });
   const abortRef = useRef<AbortController | null>(null);
   useEffect(() => () => abortRef.current?.abort(), []);
+  // A phase may be a video (docs/design/design-v1-animated-maps.md 4.1), while the server's switch is on.
+  const videos = useServerAnimatedMaps();
+  const video = useVideoUpload(roomId);
   useEffect(() => {
     setEditing(null);
     setUpload((u) => (u.busy ? u : { busy: false, waiting: false, error: null }));
@@ -55,28 +63,43 @@ export function PhasesSection(props: { scene: Scene }) {
     if (list) actions.dispatch({ t: "scene.update", sceneId: scene.id, patch: { phases: list } });
   };
 
-  const add = async (file: File, pasted = false) => {
+  /** `still` is the DM's own image for a video whose first frame this device could not read. */
+  const add = async (file: File, pasted = false, still?: File) => {
     const sceneId = scene.id;
+    const animated = !pasted && videos && isVideoFile(file);
     const abort = new AbortController();
     abortRef.current = abort;
-    setUpload({ busy: true, waiting: false, error: null });
+    setUpload({ busy: true, waiting: false, error: null, video: animated });
+    const onWaiting = (waiting: boolean) => setUpload((u) => ({ ...u, waiting }));
     try {
-      const asset = await uploadMap(roomId, file, { pasted, signal: abort.signal, onWaiting: (waiting) => setUpload((u) => ({ ...u, waiting })) });
+      let asset: MapAsset;
+      if (animated) {
+        const done = await video.run(file, { signal: abort.signal, onWaiting, still, onStep: (step) => setUpload((u) => ({ ...u, step: stepText(step) })) });
+        if (!done) {
+          setUpload({ busy: false, waiting: false, error: null });
+          return;
+        }
+        asset = done.asset;
+      } else asset = await uploadMap(roomId, file, { pasted, signal: abort.signal, onWaiting });
       // The scene as it is now: the DM may have changed its grid or phases during the upload.
       const latest = store.getState().view?.scenes[sceneId];
       if (!latest) {
+        video.cancel();
         setUpload({ busy: false, waiting: false, error: null });
         return;
       }
-      const edit = addPhase(latest, { assetId: asset.id, widthPx: asset.width, heightPx: asset.height, name: nameFromFile(file.name) }, actions.newId);
+      const edit = addPhase(latest, { assetId: asset.id, widthPx: asset.width, heightPx: asset.height, name: nameFromFile(file.name), ...(asset.video ? { video: asset.video } : null) }, actions.newId);
       if ("problem" in edit) {
+        video.cancel();
         setUpload({ busy: false, waiting: false, error: edit.problem });
         return;
       }
       setUpload({ busy: false, waiting: false, error: null });
       actions.dispatch({ t: "scene.update", sceneId, patch: { phases: edit.phases } });
+      video.taken();
     } catch (err) {
-      if (!abort.signal.aborted) setUpload({ busy: false, waiting: false, error: uploadErrorText(err) });
+      if (abort.signal.aborted) video.cancel();
+      else setUpload({ busy: false, waiting: false, error: animated ? animatedUploadText(err) : uploadErrorText(err) });
     } finally {
       if (abortRef.current === abort) abortRef.current = null;
     }
@@ -137,11 +160,35 @@ export function PhasesSection(props: { scene: Scene }) {
           : `A map can have at most ${LIMITS.phasesPerScene} phases.`}
       </Help>
       {canAddPhase(phases) ? (
-        <div ref={addRef} style={{ display: "grid", gap: theme.space(2), justifyItems: "start" }}>
+        <div ref={addRef} style={{ position: "relative", display: "grid", gap: theme.space(2), justifyItems: "start" }}>
+          <ProbeHost host={video.host} />
           <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
-            <AddPicker busy={upload.busy} onFile={(f) => void add(f)} />
+            <AddPicker busy={upload.busy} step={upload.step} accept={mapAccept(videos)} onFile={(f) => void add(f)} />
             <PasteButton paste={paste} />
           </div>
+          {upload.busy && upload.video ? (
+            <Button
+              size="sm"
+              onClick={() => {
+                abortRef.current?.abort();
+                video.cancel();
+                setUpload({ busy: false, waiting: false, error: null });
+              }}
+            >
+              Cancel
+            </Button>
+          ) : null}
+          {video.pending ? (
+            <>
+              <StillPick pending={video.pending} busy={upload.busy} onStill={(still) => void add(video.pending!.file, false, still)} onRetry={() => void add(video.pending!.file)} />
+              {upload.busy ? null : (
+                <Button size="sm" onClick={video.cancel}>
+                  Cancel
+                </Button>
+              )}
+            </>
+          ) : null}
+          {videos ? <Help>{VIDEO_PICK_HELP}</Help> : null}
           <PasteStatus paste={paste} />
           <UvttAddPhase scene={scene} />
         </div>
@@ -173,7 +220,15 @@ function PhaseRow(props: {
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(3) }}>
         <Thumb assetId={phase.assetId} />
         <div style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(0.5), justifyItems: "start" }}>
-          <div style={{ ...ellipsis, maxWidth: "100%", fontSize: theme.font.input, fontWeight: theme.weight.strong, lineHeight: theme.leading.tight }}>{phase.name}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: theme.space(1), maxWidth: "100%", minWidth: 0 }}>
+            <div style={{ ...ellipsis, fontSize: theme.font.input, fontWeight: theme.weight.strong, lineHeight: theme.leading.tight }}>{phase.name}</div>
+            {/* After a video phase's name (docs/design/design-v1-animated-maps.md 4.2). */}
+            {phase.video ? (
+              <span style={{ flex: "none", display: "flex" }}>
+                <Tag dense>{PHASE_VIDEO_TAG}</Tag>
+              </span>
+            ) : null}
+          </div>
           {props.showing ? (
             <Tag tone="turn">Showing now</Tag>
           ) : (
@@ -253,7 +308,7 @@ function PhaseName(props: { name: string; onSave(name: string): void }) {
   );
 }
 
-function AddPicker(props: { busy: boolean; onFile(file: File): void }) {
+function AddPicker(props: { busy: boolean; step?: string; accept: string; onFile(file: File): void }) {
   return (
     <label
       style={{
@@ -269,10 +324,17 @@ function AddPicker(props: { busy: boolean; onFile(file: File): void }) {
         ...buttonLook("secondary", { disabled: props.busy }),
       }}
     >
-      {props.busy ? "Uploading…" : "Add a phase"}
+      {props.busy ? (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: theme.space(2) }}>
+          <Spinner size={theme.icon.sm} />
+          {props.step ?? "Uploading…"}
+        </span>
+      ) : (
+        "Add a phase"
+      )}
       <input
         type="file"
-        accept="image/*"
+        accept={props.accept}
         aria-label="Add a phase from an image"
         disabled={props.busy}
         style={{ position: "absolute", inset: 0, opacity: 0, width: "100%", cursor: "pointer" }}

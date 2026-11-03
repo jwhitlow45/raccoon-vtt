@@ -1,5 +1,5 @@
 import { LIMITS } from "#shared/limits.ts";
-import type { MapPhase, PhaseGrid, Scene } from "#shared/model.ts";
+import type { MapPhase, MapVideo, PhaseGrid, Scene } from "#shared/model.ts";
 import { MAX_NAME } from "#shared/protocol.ts";
 import { NOT_SAME_SHAPE, phaseProblem, TOO_SMALL } from "#shared/reducer/phases.ts";
 
@@ -25,8 +25,9 @@ export { NOT_SAME_SHAPE, phaseProblem, TOO_SMALL };
 export function phasesOf(scene: Scene): MapPhase[] {
   if (scene.phases && scene.phases.length > 0) return scene.phases;
   if (!scene.map) return [];
-  const { assetId, widthPx, heightPx } = scene.map;
-  return [{ id: "", name: FIRST_PHASE_NAME, assetId, widthPx, heightPx }];
+  const { assetId, widthPx, heightPx, video } = scene.map;
+  // An animated map's video comes along, or the first edit would store a list that drops it (docs/design/design-v1-animated-maps.md 9.1).
+  return [{ id: "", name: FIRST_PHASE_NAME, assetId, widthPx, heightPx, ...(video ? { video } : null) }];
 }
 
 /** The phase showing now. A scene without a stored list shows its only phase. */
@@ -68,7 +69,7 @@ export type PhaseEdit = { phases: MapPhase[] } | { problem: string };
  * The list with a new image added at the end. The map's current image
  * stays first, so a scene's first list keeps showing what it showed.
  */
-export function addPhase(scene: Scene, image: { assetId: string; widthPx: number; heightPx: number; name: string }, newId: () => string): PhaseEdit {
+export function addPhase(scene: Scene, image: { assetId: string; widthPx: number; heightPx: number; name: string; video?: MapVideo }, newId: () => string): PhaseEdit {
   const grid = referenceGrid(scene);
   if (!grid) return { problem: "Add a map image first." };
   const phases = phasesOf(scene);
@@ -76,7 +77,14 @@ export function addPhase(scene: Scene, image: { assetId: string; widthPx: number
   const problem = phaseProblem(grid, image);
   if (problem) return { problem };
   const list = stored(phases, newId);
-  const added: MapPhase = { id: newId(), name: cleanPhaseName(image.name, `Phase ${phases.length + 1}`), assetId: image.assetId, widthPx: image.widthPx, heightPx: image.heightPx };
+  const added: MapPhase = {
+    id: newId(),
+    name: cleanPhaseName(image.name, `Phase ${phases.length + 1}`),
+    assetId: image.assetId,
+    widthPx: image.widthPx,
+    heightPx: image.heightPx,
+    ...(image.video ? { video: image.video } : null),
+  };
   return { phases: [...list, added] };
 }
 

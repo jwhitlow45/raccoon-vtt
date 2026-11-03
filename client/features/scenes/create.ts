@@ -1,4 +1,4 @@
-import type { GridShape, LightLevel, RoomState, Scene, SceneMap, ScenePreset } from "#shared/model.ts";
+import type { GridShape, LightLevel, MapVideo, RoomState, Scene, SceneMap, ScenePreset } from "#shared/model.ts";
 import { PLAYERS_SEE_WORDS } from "#shared/playersSee.ts";
 import { MAX_NAME, MAX_SCENE_CELLS, type OpOf } from "#shared/protocol.ts";
 import { gridOfShape } from "#shared/rules/grid.ts";
@@ -16,9 +16,15 @@ export type SceneInput = OpOf<"scene.create">["scene"];
 /**
  * What an upload answers with for a map: its canonical size and, from a name
  * like `crypt_30x20.jpg`, a cellPx for squares and a `hexCellPx` for each hex
- * orientation the counts fit.
+ * orientation the counts fit. An animated map's still carries its video
+ * (docs/design/design-v1-animated-maps.md 4.1), which the map it makes keeps.
  */
-export type MapAsset = { id: string; width: number; height: number; cellPx?: number; hexCellPx?: { rows?: number; columns?: number } };
+export type MapAsset = { id: string; width: number; height: number; cellPx?: number; hexCellPx?: { rows?: number; columns?: number }; video?: MapVideo };
+
+/** The video a map made from this asset carries: its own, so an image in place of an animated map drops the old one (4.2). */
+function videoOf(asset: MapAsset): { video?: MapVideo } {
+  return asset.video ? { video: asset.video } : {};
+}
 
 export const DEFAULT_GRID: Scene["grid"] = { show: true, color: "#ffffff", opacity: 0.25, lineWidth: 1 };
 export const MAT_BACKGROUND = "#2b2b31";
@@ -120,7 +126,7 @@ export function initialMap(asset: MapAsset, gridShape?: GridShape): { map: Scene
   const hinted = named !== undefined;
   const cellPx = named ?? guessCellPx(asset.width, asset.height);
   return {
-    map: { assetId: asset.id, widthPx: asset.width, heightPx: asset.height, cellPx, originPx: { x: 0, y: 0 } },
+    map: { assetId: asset.id, widthPx: asset.width, heightPx: asset.height, cellPx, originPx: { x: 0, y: 0 }, ...videoOf(asset) },
     hinted,
   };
 }
@@ -261,6 +267,7 @@ export function replaceMap(old: SceneMap | undefined, asset: MapAsset, gridShape
     heightPx: asset.height,
     cellPx: Math.min(MAX_CELL_PX, Math.max(MIN_CELL_PX, old.cellPx * k)),
     originPx: { x: old.originPx.x * k, y: old.originPx.y * k },
+    ...videoOf(asset),
   };
 }
 

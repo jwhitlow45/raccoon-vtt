@@ -18,6 +18,10 @@ import { endFinding, useGridStore } from "../grid/store.ts";
 import { useLandLater } from "../grid/useFindGrid.ts";
 import { ShapeRow } from "../grid/ShapeRow.tsx";
 import { HEX_LIMITS, shapeChoice, sizeWords, storedShape, type ShapeChoice } from "../grid/words.ts";
+import { isVideoFile } from "../animmap/firstFrame.ts";
+import { ProbeHost, StillPick, useVideoUpload } from "../animmap/MapVideoRow.tsx";
+import { useServerAnimatedMaps } from "../animmap/status.ts";
+import { animatedUploadText, mapAccept, stepText, VIDEO_PICK_HELP } from "../animmap/upload.ts";
 import { apartFromStarter } from "../images/library.ts";
 import { PasteButton, PasteStatus, usePasteTarget } from "../images/PasteImage.tsx";
 import { useEntryBusy, useHandoff } from "../images/roomPaste.ts";
@@ -111,7 +115,11 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
   const current = useRoomView((s) => (s.sceneId ? s.view?.scenes[s.sceneId] : undefined));
   /** The DM's own pick of Players see, null for the kind's start. */
   const [seen, setSeen] = useState<PlayersSeeValue | null>(null);
-  const [status, setStatus] = useState<{ busy: boolean; waiting: boolean; finding?: boolean; error: string | null }>({ busy: false, waiting: false, error: null });
+  const [status, setStatus] = useState<{ busy: boolean; waiting: boolean; finding?: boolean; error: string | null; step?: string }>({ busy: false, waiting: false, error: null });
+  // An animated map (docs/design/design-v1-animated-maps.md 4.1): the picker takes a video while the server's switch is on.
+  const videos = useServerAnimatedMaps();
+  const video = useVideoUpload(roomId);
+  const animatedFile = (f: File | null, fromPaste: boolean) => f !== null && !fromPaste && videos && isVideoFile(f);
   const fileOff = useHeld(status.busy);
   const abortRef = useRef<AbortController | null>(null);
   /** The search for the picked file's grid, running while the DM fills in the form and the file uploads. */
@@ -142,6 +150,7 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
     // Another kind of scene ends an upload in flight, or it would still
     // make its map scene after the DM moved on.
     abortRef.current?.abort();
+    video.cancel();
     stopSearch();
     setKind(k);
     setSeen(null);
@@ -158,6 +167,7 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
 
   const cancel = () => {
     abortRef.current?.abort();
+    video.cancel();
     stopSearch();
     setStatus({ busy: false, waiting: false, error: null });
     if (!status.busy) {
@@ -262,7 +272,10 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
     setPasted(fromPaste);
     setStatus({ busy: false, waiting: false, error: null });
     stopSearch();
-    if (next && searchOnImport({ source: "image", named: nameGivesSize(next.name) })) searchRef.current = { file: next, search: importSearch(next, thisDevice()) };
+    // Another file lets go of a video an earlier pick left waiting for its still.
+    video.cancel();
+    // A video's grid is searched on its still, once its first frame is read.
+    if (next && !animatedFile(next, fromPaste) && searchOnImport({ source: "image", named: nameGivesSize(next.name) })) searchRef.current = { file: next, search: importSearch(next, thisDevice()) };
   };
 
   // The room's "Use the pasted image" hands its picture here: Map image opens with it picked, and the grid search starts (docs/design/design-v1-paste.md 4).
@@ -272,39 +285,54 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
   });
   useEntryBusy("scene", status.busy);
 
-  const upload = async () => {
+  /** `still` is the DM's own image for a video whose first frame this device could not read. */
+  const upload = async (still?: File) => {
     if (!file || status.busy) return;
+    const animated = animatedFile(file, pasted);
     const intent = intentNow("map");
     const gridShape = shapeFor("map");
     const abort = new AbortController();
     abortRef.current = abort;
     setStatus({ busy: true, waiting: false, error: null });
+    const onWaiting = (waiting: boolean) => setStatus((s) => ({ ...s, waiting }));
     try {
-      const asset = await uploadMap(roomId, file, {
-        pasted,
-        signal: abort.signal,
-        onWaiting: (waiting) => setStatus((s) => ({ ...s, waiting })),
-      });
+      let asset: MapAsset;
+      let searchFile: File = file;
+      if (animated) {
+        const done = await video.run(file, { signal: abort.signal, onWaiting, still, onStep: (step) => setStatus((s) => ({ ...s, step: stepText(step) })) });
+        if (!done) {
+          // The form asks for a still image now (StillPick).
+          setStatus({ busy: false, waiting: false, error: null });
+          return;
+        }
+        asset = done.asset;
+        searchFile = done.stillFile;
+      } else asset = await uploadMap(roomId, file, { pasted, signal: abort.signal, onWaiting });
       // The name's size wins. Otherwise the search started at the pick
       // gets a short wait, or one starts now: for a name whose counts the
       // server refused, or an upload tried again after a cancel.
       let wait: ImportWait | undefined;
       if (nameCellPx(asset, storedShape(gridShape)) !== undefined) stopSearch();
       else {
-        if (searchRef.current?.file !== file) searchRef.current = { file, search: importSearch(file, thisDevice()) };
+        if (searchRef.current?.file !== searchFile) searchRef.current = { file: searchFile, search: importSearch(searchFile, thisDevice()) };
         setStatus({ busy: true, waiting: false, finding: true, error: null });
         wait = await searchRef.current.search.afterUpload(copyUrls(thisDevice(), (variant) => assets.url(asset.id, variant)), IMPORT_WAIT_MS);
         if (abort.signal.aborted) {
           wait.later?.cancel();
+          video.cancel();
           return;
         }
         searchRef.current = null;
       }
       setStatus({ busy: false, waiting: false, error: null });
       createFromAsset(asset, file.name, intent, gridShape, wait);
+      video.taken();
     } catch (err) {
-      if (abort.signal.aborted) return;
-      setStatus({ busy: false, waiting: false, error: uploadErrorText(err) });
+      if (abort.signal.aborted) {
+        video.cancel();
+        return;
+      }
+      setStatus({ busy: false, waiting: false, error: animated ? animatedUploadText(err) : uploadErrorText(err) });
     } finally {
       if (abortRef.current === abort) abortRef.current = null;
     }
@@ -340,6 +368,7 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
         <div
           ref={formRef}
           style={{
+            position: "relative",
             display: "grid",
             gap: theme.space(2),
             padding: theme.space(3),
@@ -384,7 +413,7 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
                 {file ? file.name : "Choose a map image"}
                 <input
                   type="file"
-                  accept="image/*"
+                  accept={mapAccept(videos)}
                   disabled={fileOff}
                   style={{ position: "absolute", inset: 0, width: "100%", opacity: 0, cursor: fileOff ? "default" : "pointer" }}
                   onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
@@ -403,11 +432,14 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
                   A name like <code>crypt_30x20.jpg</code> sets the scale for 30 by 20 squares. Otherwise a grid drawn on the map is looked for, and you check it or line up the grid next.
                 </Help>
               )}
+              {videos ? <Help>{VIDEO_PICK_HELP}</Help> : null}
               {actionsRow(
-                <Button size="sm" variant="primary" busy={status.busy} disabled={!file} onClick={() => void upload()}>
-                  {status.finding ? "Looking for a grid…" : status.busy ? "Uploading…" : "Upload and create"}
+                <Button size="sm" variant="primary" busy={status.busy} disabled={!file || video.pending !== null} onClick={() => void upload()}>
+                  {status.finding ? "Looking for a grid…" : status.busy ? (status.step ?? "Uploading…") : "Upload and create"}
                 </Button>,
               )}
+              {video.pending ? <StillPick pending={video.pending} busy={status.busy} onStill={(still) => void upload(still)} onRetry={() => void upload()} /> : null}
+              <ProbeHost host={video.host} />
               <Loading text="Waiting for the server…" active={status.waiting} />
               <ErrorText>{status.error}</ErrorText>
               <div style={{ display: "grid", gap: theme.space(1), justifyItems: "start" }}>

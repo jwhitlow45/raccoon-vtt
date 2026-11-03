@@ -7,7 +7,7 @@ import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { useExpansionFocus } from "../../components/expansionFocus.ts";
 import { ErrorText, FieldRow, Input } from "../../components/Field.tsx";
-import { Loading } from "../../components/Loading.tsx";
+import { Loading, Spinner } from "../../components/Loading.tsx";
 import { buttonLook } from "../../components/looks.ts";
 import { Group, Help, Note, Section } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
@@ -25,6 +25,10 @@ import { shapeChanged, useGridStore } from "../grid/store.ts";
 import { useFindGrid, useLandLater, useSwitchRefusal } from "../grid/useFindGrid.ts";
 import { shapeRefusal, ShapeRow } from "../grid/ShapeRow.tsx";
 import { HEX_LIMITS, SHAPE_HELP, sceneCellWord, shapeChoice, sizeWords, storedShape, type ShapeChoice } from "../grid/words.ts";
+import { isVideoFile } from "../animmap/firstFrame.ts";
+import { MapVideoHelp, ProbeHost, StillPick, UseStillOnly, useVideoUpload } from "../animmap/MapVideoRow.tsx";
+import { useServerAnimatedMaps } from "../animmap/status.ts";
+import { animatedUploadText, mapAccept, stepText, VIDEO_PICK_HELP } from "../animmap/upload.ts";
 import { PasteButton, PasteStatus, usePasteTarget } from "../images/PasteImage.tsx";
 import { MapExport } from "../mapexport/MapExport.tsx";
 import { BlockMovementSetting } from "../movement/SceneSetting.tsx";
@@ -34,7 +38,7 @@ import { isoOffered, suggestedKind, SUGGESTED_VIEW, SUGGESTED_VIEW_HELP, VIEW_NA
 import { VisionSettings } from "../vision/VisionSettings.tsx";
 import { deleteBlocked, sceneAfterDelete } from "./afterDelete.ts";
 import { ColorInput, ConfirmButton, NumberInput, Select, Slider } from "./controls.tsx";
-import { fogsWithFirstMap, nameCellPx, refitsToNamedMap, replacement, viewFromCamera } from "./create.ts";
+import { fogsWithFirstMap, nameCellPx, refitsToNamedMap, replacement, viewFromCamera, type MapAsset } from "./create.ts";
 import { useStartFraming } from "./FrameView.tsx";
 import { sceneGroupSummary } from "./sceneSummary.ts";
 import { SCENE_GROUP_ICONS, SCENE_GROUP_LABELS, useSceneFolds, type SceneGroup } from "./settingsFolds.ts";
@@ -454,9 +458,12 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const warningId = useId();
   useExpansionFocus(playersHere && armed, { inside: fileRef, opener: askRef });
-  const [upload, setUpload] = useState<{ busy: boolean; waiting: boolean; finding?: boolean; error: string | null }>({ busy: false, waiting: false, error: null });
+  const [upload, setUpload] = useState<{ busy: boolean; waiting: boolean; finding?: boolean; error: string | null; step?: string; video?: boolean }>({ busy: false, waiting: false, error: null });
   const abortRef = useRef<AbortController | null>(null);
   useEffect(() => () => abortRef.current?.abort(), []);
+  // An animated map (docs/design/design-v1-animated-maps.md 4.1): the pickers take a video while the server's switch is on.
+  const videos = useServerAnimatedMaps();
+  const video = useVideoUpload(roomId);
   const gridStore = useGridStore();
   const room = useRoomStore();
   const assets = useAssets();
@@ -483,10 +490,12 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
     },
   });
 
-  const choose = async (file: File, pasted = false) => {
+  /** `still` is the DM's own image for a video whose first frame this device could not read. */
+  const choose = async (file: File, pasted = false, still?: File) => {
+    const animated = !pasted && videos && isVideoFile(file);
     const abort = new AbortController();
     abortRef.current = abort;
-    setUpload({ busy: true, waiting: false, error: null });
+    setUpload({ busy: true, waiting: false, error: null, video: animated });
     // A new image is searched for a drawn grid while it uploads, as a new
     // map scene's is (NewScene.tsx). Only the upload tells whether it is
     // the same file, which keeps the grid unsearched, or has the old
@@ -494,22 +503,36 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
     // (create.ts `replacement`).
     const device = thisDevice();
     // Squares and hexes are both looked for. A name's size wins on every grid, read as that grid's cells (D-261101-190).
-    let search = searchOnImport({ source: "image", named: nameGivesSize(file.name) }) ? importSearch(file, device) : null;
+    // A video's grid is searched on its still, which exists only once the first frame is read.
+    let search = !animated && searchOnImport({ source: "image", named: nameGivesSize(file.name) }) ? importSearch(file, device) : null;
     abort.signal.addEventListener("abort", () => search?.cancel());
+    const onWaiting = (waiting: boolean) => setUpload((u) => ({ ...u, waiting }));
     try {
-      const asset = await uploadMap(roomId, file, { pasted, signal: abort.signal, onWaiting: (waiting) => setUpload((u) => ({ ...u, waiting })) });
+      let asset: MapAsset;
+      let searchFile: File = file;
+      if (animated) {
+        const done = await video.run(file, { signal: abort.signal, onWaiting, still, onStep: (step) => setUpload((u) => ({ ...u, step: stepText(step) })) });
+        if (!done) {
+          // The form asks for a still image now (StillPick).
+          setUpload({ busy: false, waiting: false, error: null });
+          return;
+        }
+        asset = done.asset;
+        searchFile = done.stillFile;
+      } else asset = await uploadMap(roomId, file, { pasted, signal: abort.signal, onWaiting });
       let wait: ImportWait = { answer: null, later: null };
       // The scene as the room holds it as the upload ends: another device may have replaced the map or changed the grid meanwhile, and the new art scales from what is there now.
       const uploaded = room.getState().view?.scenes[scene.id] ?? scene;
       const { map: next, search: searched, kept } = replacement(uploaded.map, asset, uploaded.gridShape);
       const named = nameCellPx(asset, uploaded.gridShape);
       if (searched) {
-        search ??= importSearch(file, device);
-        setUpload({ busy: true, waiting: false, finding: true, error: null });
+        search ??= importSearch(searchFile, device);
+        setUpload({ busy: true, waiting: false, finding: true, error: null, video: animated });
         wait = await search.afterUpload(copyUrls(device, (variant) => assets.url(asset.id, variant)), IMPORT_WAIT_MS);
       } else search?.cancel();
       if (abort.signal.aborted) {
         wait.later?.cancel();
+        video.cancel();
         return;
       }
       setUpload({ busy: false, waiting: false, error: null });
@@ -532,8 +555,11 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
       // found on art the scene refused belongs to no image it shows, so Line up grid is left alone.
       if (room.getState().view?.scenes[scene.id]?.map?.assetId !== next.assetId) {
         wait.later?.cancel();
+        // A video the scene refused with its still is this upload's to clean up.
+        video.cancel();
         return;
       }
+      video.taken();
       // A replacement keeps the scene as it is, unless a grid was found on
       // new art, which a scene with its own grid is only offered, as art of
       // the old image's shape is one that differs from the grid it keeps
@@ -558,10 +584,18 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
         props.close({ placing: true });
       }
     } catch (err) {
-      if (!abort.signal.aborted) setUpload({ busy: false, waiting: false, error: uploadErrorText(err) });
+      if (abort.signal.aborted) video.cancel();
+      else setUpload({ busy: false, waiting: false, error: animated ? animatedUploadText(err) : uploadErrorText(err) });
     } finally {
       if (abortRef.current === abort) abortRef.current = null;
     }
+  };
+
+  /** Stops a video's upload at any step, and keeps the row as it was. */
+  const cancelVideo = () => {
+    abortRef.current?.abort();
+    video.cancel();
+    setUpload({ busy: false, waiting: false, error: null });
   };
 
   // A label over a file input, so it takes the tap that opens the picker. It wears the small secondary button's look.
@@ -582,11 +616,12 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
         ...buttonLook("secondary", { disabled: upload.busy }),
       }}
     >
-      {upload.finding ? "Looking for a grid…" : upload.busy ? "Uploading…" : label}
+      {upload.busy ? <Spinner size={theme.icon.sm} /> : null}
+      {upload.finding ? "Looking for a grid…" : upload.busy ? (upload.step ?? "Uploading…") : label}
       <input
         ref={fileRef}
         type="file"
-        accept="image/*"
+        accept={mapAccept(videos)}
         disabled={upload.busy}
         aria-describedby={playersHere ? warningId : undefined}
         style={{ position: "absolute", inset: 0, opacity: 0, width: "100%", cursor: "pointer" }}
@@ -601,6 +636,28 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
 
   const status = (
     <>
+      {upload.busy && upload.video ? (
+        <Row>
+          <Button size="sm" onClick={cancelVideo}>
+            Cancel
+          </Button>
+        </Row>
+      ) : null}
+      {video.pending ? (
+        <StillPick
+          pending={video.pending}
+          busy={upload.busy}
+          onStill={(still) => void choose(video.pending!.file, false, still)}
+          onRetry={() => void choose(video.pending!.file)}
+        />
+      ) : null}
+      {video.pending && !upload.busy ? (
+        <Row>
+          <Button size="sm" onClick={cancelVideo}>
+            Cancel
+          </Button>
+        </Row>
+      ) : null}
       <PasteStatus paste={paste} />
       <Loading text="Waiting for the server…" active={upload.waiting} />
       <ErrorText>{upload.error}</ErrorText>
@@ -659,9 +716,18 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
 
   // The warning, the fog choice, its buttons and the status stack under the name, as the section they came from did.
   return (
-    <SettingRow name="Map image" help={map ? `A ${map.widthPx} × ${map.heightPx} px image.` : "No map image yet."} wide>
-      <div ref={rowRef} style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(2) }}>
+    <SettingRow name="Map image" help={map?.video ? <MapVideoHelp video={map.video} /> : map ? `A ${map.widthPx} × ${map.heightPx} px image.` : "No map image yet."} wide>
+      <div ref={rowRef} style={{ position: "relative", flex: 1, minWidth: 0, display: "grid", gap: theme.space(2) }}>
+        <ProbeHost host={video.host} />
         {picker(map ? "Replace map image" : "Add a map image")}
+        {/* Below the row's buttons (docs/design/design-v1-animated-maps.md 4.2). */}
+        {map?.video ? (
+          <Row>
+            <UseStillOnly scene={scene} disabled={upload.busy} />
+          </Row>
+        ) : null}
+        {/* What a video makes, under the ways to bring an image once they show (docs/design/design-v1-animated-maps.md 4.1). */}
+        {videos && !(playersHere && !armed && !upload.busy) ? <Help>{VIDEO_PICK_HELP}</Help> : null}
         {status}
       </div>
     </SettingRow>
