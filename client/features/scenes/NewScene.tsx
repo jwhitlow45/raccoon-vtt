@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { MAX_SCENE_CELLS } from "#shared/protocol.ts";
 import { gridOfShape } from "#shared/rules/grid.ts";
 import type { FoundWork } from "#shared/starter.ts";
@@ -24,6 +24,8 @@ import { useEntryBusy, useHandoff } from "../images/roomPaste.ts";
 import { loadedStarterWork } from "../starter/catalog.ts";
 import { answeredGrid, retainedGrid, starterMapScene, type StarterGrid } from "../starter/mapScene.ts";
 import { StarterDialog } from "../starter/StarterDialog.tsx";
+import { GenerateDialog } from "../dungeon/GenerateDialog.tsx";
+import { GENERATE_LEAD, HEX_NOTE } from "../dungeon/words.ts";
 import { thisDevice } from "../uvtt/limits.ts";
 import { NewScenePlayersSee, type PlayersSeeValue } from "../vision/PlayersSee.tsx";
 import { ColorInput, NumberInput } from "./controls.tsx";
@@ -97,6 +99,10 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
   const starterIntent = useRef<NewSceneIntent>({ value: "reveal" });
   /** The grid the starter dialog was opened with, as its intent is held. */
   const starterShapeRef = useRef<ShapeChoice | undefined>(undefined);
+  /** The form's name, size and Players see as Generate a dungeon opened, held while its dialog is open as the starter dialog's are. */
+  const [generate, setGenerate] = useState<{ name: string; w: number; h: number; intent: NewSceneIntent } | null>(null);
+  const generateButton = useRef<HTMLButtonElement>(null);
+  const hexNoteId = useId();
   const feetPerCell = useRoomView((s) => s.view?.meta.settings.feetPerCell ?? 5);
   const setting = useRoomView((s) => s.view?.meta.settings.newScenePlayers);
   const shapeSetting = useRoomView((s) => s.view?.meta.settings.newScenes);
@@ -446,6 +452,35 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
                   Create
                 </Button>,
               )}
+              {kind === "builder" ? (
+                <div style={{ display: "grid", gap: theme.space(1), justifyItems: "start" }}>
+                  <Help>{GENERATE_LEAD}</Help>
+                  <Button
+                    ref={generateButton}
+                    size="sm"
+                    disabled={hexFor("builder")}
+                    aria-describedby={hexFor("builder") ? hexNoteId : undefined}
+                    onClick={() => setGenerate({ name, w, h, intent: intentNow("builder") })}
+                  >
+                    Generate a dungeon
+                  </Button>
+                  {hexFor("builder") ? <Help id={hexNoteId}>{HEX_NOTE}</Help> : null}
+                </div>
+              ) : null}
+              {generate ? (
+                <GenerateDialog
+                  roomId={roomId}
+                  name={generate.name}
+                  form={generate}
+                  intent={generate.intent}
+                  opener={generateButton}
+                  onClose={() => setGenerate(null)}
+                  onMade={(id) => {
+                    setGenerate(null);
+                    open(id, "build");
+                  }}
+                />
+              ) : null}
             </>
           )}
         </div>
