@@ -251,7 +251,8 @@ export function rollKeys(rolls: readonly Pick<PcRoll, "kind" | "name" | "level">
 
 /** A roll's content as `h` hashes it (2.1): all but its id, its `ddb` mark and what a pass takes, which is the player's to set. */
 export function rollHash(roll: PcRoll): string {
-  const { id: _id, ddb: _ddb, ...rest } = roll;
+  // The range is D&D Beyond's word on its own weapon, so a roll imported before it was read is no change of D&D Beyond's.
+  const { id: _id, ddb: _ddb, range: _range, ...rest } = roll;
   if (rest.save?.onPass !== undefined) {
     const { onPass: _onPass, ...save } = rest.save;
     rest.save = save;

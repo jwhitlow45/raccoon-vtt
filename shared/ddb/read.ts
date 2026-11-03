@@ -343,13 +343,15 @@ function weaponRolls(data: Obj, ctx: Ctx, scores: Record<AbilityKey, number>, sn
     };
     const rider: PcDice[] = sneak && type && (finesse || ranged) ? [{ formula: sneak, type, optional: true, name: "Sneak Attack" }] : [];
     const attack = { prof: true, bonus: magic };
+    // Strong wind reads it (docs/design/design-v1-weather.md 2.1), so a weapon whose name is its own, an "Oathbow", still counts.
+    const range = ranged ? { range: "ranged" as const } : props.has("thrown") ? { range: "either" as const } : {};
     const one = part(dice);
-    if (one) out.push({ id: ctx.newId(), name: wname, kind: "weapon", ability, attack, dice: [one, ...rider], ddb: true });
+    if (one) out.push({ id: ctx.newId(), name: wname, kind: "weapon", ability, attack, dice: [one, ...rider], ddb: true, ...range });
     if (props.has("versatile")) {
       const versatile = arr(def.properties, MAX.properties).map(obj).find((p) => (name(p?.name, 30) ?? "").toLowerCase() === "versatile");
       const two = formula(versatile?.notes);
       const both = two ? part(two) : null;
-      if (both) out.push({ id: ctx.newId(), name: `${wname} (two hands)`, kind: "weapon", ability, attack, dice: [both, ...rider], ddb: true });
+      if (both) out.push({ id: ctx.newId(), name: `${wname} (two hands)`, kind: "weapon", ability, attack, dice: [both, ...rider], ddb: true, ...range });
     }
   }
   return { rolls: out, whole };

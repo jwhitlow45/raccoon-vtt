@@ -141,6 +141,8 @@ describe("rolls", () => {
   test("an imported roll edited here becomes the player's own", () => {
     const imported = roll({ ddb: true });
     assert.equal(editedRoll(imported, { ...imported, name: "Longsword +1" }).ddb, undefined);
+    const bow = roll({ ddb: true, range: "ranged" });
+    assert.equal(editedRoll(bow, { ...bow, name: "Longsword" }).range, undefined, "and goes by its name, not D&D Beyond's range");
     assert.equal(editedRoll(roll(), { ...roll(), name: "x" }).ddb, undefined);
   });
 

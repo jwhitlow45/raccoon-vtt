@@ -70,6 +70,13 @@ describe("a stat block's schema", () => {
     assert.equal(ok(update({ rolls: [roll({ dice: [{ formula: "8d6", type: "fire", upcast: "1".repeat(21) }] })] })), false, "upcast 20 characters");
   });
 
+  test("a weapon may carry D&D Beyond's range, ranged or either, and nothing else may", () => {
+    assert.ok(ok(update({ rolls: [roll({ kind: "weapon", range: "ranged" })] })));
+    assert.ok(ok(update({ rolls: [roll({ kind: "weapon", range: "either" })] })));
+    assert.equal(ok(update({ rolls: [roll({ kind: "weapon", range: "melee" as never })] })), false);
+    assert.equal(ok(update({ rolls: [roll({ kind: "other", range: "ranged" })] })), false, "only a weapon has a range");
+  });
+
   test("a roll needs an attack, a save or dice, never both a fixed DC and a bonus, and its name is one line of 1 to 60 characters", () => {
     assert.equal(ok(update({ rolls: [roll({ attack: undefined, dice: [] })] })), false);
     assert.ok(ok(update({ rolls: [roll({ attack: undefined, dice: [], save: { ability: "dex", bonus: 1 } })] })));

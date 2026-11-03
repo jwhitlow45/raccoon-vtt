@@ -531,10 +531,11 @@ function namedRoll(stats: PcStats, d: PcDerived, roll: PcRoll): NamedRoll {
   if (roll.kind === "weapon" && stats.critOn !== undefined) out.critOn = stats.critOn;
   if (roll.kind === "weapon") {
     // Strong wind reads this (docs/design/design-v1-weather.md 2.1). A character's roll names its weapon but not how it was used, so a Thrown weapon is either.
+    // An imported weapon carries D&D Beyond's own word, and any other goes by its name.
     out.weapon = true;
     const named = weaponNamed(roll.name);
-    if (named === "ranged") out.range = "ranged";
-    else if (named === "thrown") out.range = "either";
+    const range = roll.range ?? (named === "ranged" ? "ranged" : named === "thrown" ? "either" : undefined);
+    if (range !== undefined) out.range = range;
   }
   return out;
 }

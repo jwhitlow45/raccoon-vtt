@@ -1505,6 +1505,14 @@ export type PcRoll = {
    * (docs/design/design-v1-resync.md 2.4).
    */
   ddb?: true;
+  /**
+   * A weapon's range as D&D Beyond gives it: a ranged weapon, or a melee
+   * one with the Thrown property, for strong wind
+   * (docs/design/design-v1-weather.md 2.1). Only on an imported weapon, so a
+   * magic one named for itself ("Oathbow") still counts. Any other roll goes
+   * by its name.
+   */
+  range?: "ranged" | "either";
 };
 
 /** One part of a roll's dice. */

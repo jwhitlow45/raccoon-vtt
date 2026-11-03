@@ -454,6 +454,8 @@ describe("a character's weapon in strong wind (docs/design/design-v1-weather.md 
       [roll("bow2", { name: "Elven Longbow +1", attack, ability: "dex" }), { range: "ranged", weapon: true }, "preset"],
       [roll("dart", { name: "Dart", attack, ability: "dex" }), { range: "ranged", weapon: true }, "preset"],
       [roll("xbow", { name: "Crossbow, Light", attack, ability: "dex" }), { range: "ranged", weapon: true }, "preset"],
+      [roll("oath", { name: "Oathbow", attack, ability: "dex", ddb: true, range: "ranged" }), { range: "ranged", weapon: true }, "preset"],
+      [roll("spear", { name: "Spear of Night", attack, ability: "str", ddb: true, range: "either" }), { range: "either", weapon: true }, "note"],
       [roll("jav", { name: "Javelin", attack, ability: "str" }), { range: "either", weapon: true }, "note"],
       [roll("dagger", { name: "Dagger", attack, ability: "dex" }), { range: "either", weapon: true }, "note"],
       [roll("sword", { name: "Longsword", attack, ability: "str" }), { weapon: true }, "note"],

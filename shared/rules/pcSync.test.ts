@@ -551,6 +551,7 @@ describe("each roll's case (2.4)", () => {
     assert.equal(keys[1], `w:${hash12("w:longsword#2")}`);
     assert.equal(keys[3], `s:${hash12("s:moonbeam:2")}`);
     assert.equal(rollHash(longsword({ id: "a" })), rollHash(longsword({ id: "b", ddb: true })), "id and the mark are outside the hash");
+    assert.equal(rollHash(longsword({ id: "a" })), rollHash(longsword({ id: "a", range: "either" })), "and D&D Beyond's range, so a roll imported before it was read is no change");
     const pair = synced(fillOf({ ...empty(), rolls: read([longsword(), longsword({ attack: { prof: true, bonus: 1 } })]) }));
     const again = plan(pair, fillOf({ ...empty(), rolls: read([longsword(), longsword({ attack: { prof: true, bonus: 1 } })]) }));
     assert.equal(again.items.length, 0);

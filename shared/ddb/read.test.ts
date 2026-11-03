@@ -235,6 +235,10 @@ describe("readDdbCharacter: the character", () => {
     const bow = rolls.find((r) => r.name === "Shortbow")!;
     assert.equal(bow.ability, "dex");
     assert.equal(bow.dice[1]?.name, "Sneak Attack");
+    // D&D Beyond's own word on how each weapon is used, for strong wind.
+    assert.equal(bow.range, "ranged");
+    assert.equal(rapier.range, undefined);
+    assert.equal(sword.range, undefined);
     assert.equal(rolls.some((r) => r.name === "Dagger"), false, "a weapon not equipped");
     assert.equal(rolls.some((r) => r.name === "Cunning Action"), false, "an action with nothing to roll");
   });
@@ -676,5 +680,17 @@ describe("readDdbCharacter: a source D&D Beyond did not send (docs/design/design
         assert.deepEqual(after.stats!.adjust, synced.stats!.adjust);
       }
     });
+  });
+});
+
+describe("a weapon's range from D&D Beyond (docs/design/design-v1-weather.md 2.1)", () => {
+  test("a ranged weapon named for itself is ranged, a Thrown one either, both hands too, and the rest none", () => {
+    const item = (id: number, name: string, attackType: number, properties: string[]) => ({ equipped: true, definition: { id, name, filterType: "Weapon", damage: { diceString: "1d8" }, damageType: "Piercing", attackType, properties: properties.map((p) => (p === "Versatile" ? { name: p, notes: "1d10" } : { name: p })), grantedModifiers: [] } });
+    const fill = readDdbCharacter(wren({ inventory: [item(970, "Oathbow", 2, ["Ammunition"]), item(971, "Spear", 1, ["Thrown", "Versatile"]), item(972, "Warhammer", 1, ["Versatile"])] }), ids)!;
+    const range = (name: string) => fill.stats.rolls.find((r) => r.name === name)?.range;
+    assert.equal(range("Oathbow"), "ranged");
+    assert.equal(range("Spear"), "either");
+    assert.equal(range("Spear (two hands)"), "either");
+    assert.equal(range("Warhammer"), undefined);
   });
 });

@@ -1086,8 +1086,8 @@ export const opMigrations: MigrationStep[] = [
   },
   {
     // Weather (docs/design/design-v1-weather.md 9.4): a `scene.update` may
-    // carry `weather`, a new optional field, so no stored op changes shape
-    // and the step is the identity. Nothing the reducer writes on its own
+    // carry `weather`, and an imported weapon's roll `range`, new optional
+    // fields, so no stored op changes shape and the step is the identity. Nothing the reducer writes on its own
     // changes, so no rule gates on it.
     // Deploy: back up the database just before, and reload open pages,
     // table displays included: an old page drops the field from its view

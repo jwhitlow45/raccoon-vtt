@@ -191,7 +191,8 @@ export function newRoll(kind: PcRoll["kind"], id: string): PcRoll {
  * level 2 spell would otherwise roll its dice twice over from level 5.
  */
 export function editedRoll(roll: PcRoll, next: PcRoll): PcRoll {
-  const { ddb: _ddb, ...own } = next;
+  // D&D Beyond's range goes with its mark: the player's own roll goes by its name.
+  const { ddb: _ddb, range: _range, ...own } = next;
   const out = roll.ddb ? own : next;
   const cantrip = out.kind === "spell" && (out.level ?? 0) === 0;
   if (cantrip || !out.dice.some((p) => p.grows)) return out;

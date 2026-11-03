@@ -646,8 +646,10 @@ const pcRoll = z
     level: z.number().int().min(0).max(9).optional(),
     dice: z.array(pcDice).max(MAX_PC_DICE_PARTS),
     ddb: z.literal(true).optional(),
+    range: z.enum(["ranged", "either"]).optional(),
   })
-  .refine((r) => r.attack !== undefined || r.save !== undefined || r.dice.length > 0, { message: "a roll needs an attack, a save or dice" });
+  .refine((r) => r.attack !== undefined || r.save !== undefined || r.dice.length > 0, { message: "a roll needs an attack, a save or dice" })
+  .refine((r) => r.range === undefined || r.kind === "weapon", { message: "only a weapon has a range" });
 
 const pcAdjust = z.strictObject({
   saves: perKey(ABILITY_KEYS, pcAdjustValue).optional(),
