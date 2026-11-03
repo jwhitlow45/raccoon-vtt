@@ -5,8 +5,9 @@
  * ANIMATED_MAPS switch on, Chrome with its CPU slowed 4 times, a page of
  * 390 by 844 at 3x, and Heavy rain with a strong wind over the map.
  *
- * The video is a 1920 x 1080, 30 fps VP9 WebM, passed with --video (the
- * fixture script in e2e/fixtures/README.md makes one at that size). Its
+ * The video is a 1920 x 1080, 30 fps VP9 WebM of a few seconds, passed with
+ * --video. scripts/video-fixtures.ts shows how to record one in Chrome and
+ * rebuild it as a plain file the server takes: the same at 1920 x 1080. Its
  * still is a plain image of its size. Two scenes:
  *
  * - square: 50 px squares, at 20 px a square on screen.
@@ -174,7 +175,7 @@ async function metrics(cdp: CDPSession): Promise<{ heap: number; nodes: number }
 
 async function main(): Promise<void> {
   const { values } = parseArgs({ options: { out: { type: "string" }, video: { type: "string" }, minutes: { type: "string" } } });
-  if (!values.video) throw new Error("--video <a 1920 x 1080, 30 fps VP9 WebM> is needed (e2e/fixtures/README.md)");
+  if (!values.video) throw new Error("--video <a 1920 x 1080, 30 fps VP9 WebM> is needed");
   const minutes = Number(values.minutes ?? 10);
   const port = Number(process.env.BENCH_PORT ?? 7592);
   const databaseUrl = process.env.DATABASE_URL ?? "postgres://raccoon:raccoon@localhost:5434/raccoon";
