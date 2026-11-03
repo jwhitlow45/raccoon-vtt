@@ -220,7 +220,13 @@ export async function registerJoinRequestRoutes(app: FastifyInstance, kit: AuthK
                   if (identity.sessionId) found = { kind: "session", id: identity.sessionId };
                   else if (identity.askId) found = { kind: "token", id: identity.askId };
                 }
-                if (!found) {
+                if (found) {
+                  // The counts above were read with no device. The one found
+                  // now is held like any other, from the database, where a
+                  // hold from before a restart is the only one kept.
+                  const recovered = await kit.limits.asks(tx, roomId, ip, found.id, found.kind === "session" ? found.id : null);
+                  if (recovered.deviceHeld !== null) throw new HttpError(429, "asked_recently", { retryAfter: recovered.deviceHeld });
+                } else {
                   minted = await kit.askSessions.mint(tx);
                   found = { kind: "token", id: minted.id };
                 }

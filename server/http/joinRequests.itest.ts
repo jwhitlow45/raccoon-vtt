@@ -246,6 +246,33 @@ describe("join requests: asking, waiting and a DM's answer", () => {
     assert.equal((await phone.me(roomId)).role, "player");
   });
 
+  test("an ask that recovers its identity from a let-in's promotion meets that identity's hold, kept in the database across a restart (JR-SOL-02)", async () => {
+    const a = await k.room("ask");
+    const b = await k.room("ask");
+    const phone = t.client();
+    const rb = await k.asked(phone, b.roomId);
+    const tokenId = (await k.askRow(phone.token))?.id;
+    assert.ok(tokenId);
+    // Turned away in the first room before a restart: the hold lives only in rate_events now.
+    await t.pool.query("insert into rate_events (key, at) values ($1, now())", [`askno:${a.roomId}:${tokenId}`]);
+    // Pause the ask between its session lookup and its ask token lookup, so both miss.
+    const pause = pauseQuery(t.pool, (sql) => sql.startsWith("select id from ask_sessions where token_hash"));
+    let res;
+    try {
+      const ask = phone.post(`/api/rooms/${a.roomId}/join-requests`, { name: "Quinn", color: "#3e8ef7" });
+      await pause.reached;
+      assert.equal((await k.letIn(b.dm, b.roomId, rb)).statusCode, 200, "the promotion: the same id, now a session");
+      pause.go();
+      res = await ask;
+    } finally {
+      pause.restore();
+    }
+    assert.equal(res.statusCode, 429, res.body);
+    assert.equal(k.error(res), "asked_recently");
+    assert.ok(Number(res.headers["retry-after"]) > 800);
+    assert.deepEqual((await k.list(a.dm, a.roomId)).requests, []);
+  });
+
   test("an ask from a device signed in to another room mints no token, and its grant lands on that session", async () => {
     const elsewhere = await k.room("password");
     const { dm, roomId } = await k.room("ask_only");
