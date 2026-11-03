@@ -1,6 +1,6 @@
 import { boardSizes } from "../../../lib/boardScale.ts";
 import type { Box } from "../../../lib/boardText.ts";
-import { theme } from "../../../lib/theme.ts";
+import { boardTheme, theme } from "../../../lib/theme.ts";
 import { regionText, type HeightRegion } from "./regions.ts";
 
 /**
@@ -163,7 +163,7 @@ export function drawPills(g: MarkCanvas, pills: readonly PlacedPill[], cellPx: n
   if (shown.length === 0) return;
   g.save();
   g.scale(1 / cellPx, 1 / cellPx);
-  g.fillStyle = theme.color.overlay;
+  g.fillStyle = boardTheme.color.overlay;
   g.lineWidth = EDGE_PX;
   for (const raised of [true, false]) {
     g.beginPath();
@@ -178,7 +178,7 @@ export function drawPills(g: MarkCanvas, pills: readonly PlacedPill[], cellPx: n
   }
   g.textAlign = "center";
   g.textBaseline = "middle";
-  g.fillStyle = theme.color.text;
+  g.fillStyle = boardTheme.color.text;
   let px = 0;
   for (const p of shown) {
     if (p.fontPx !== px) g.font = font((px = p.fontPx));
@@ -198,7 +198,7 @@ export function drawMark(g: MarkCanvas, text: string, x: number, y: number, scal
   g.textBaseline = "middle";
   g.lineJoin = "round";
   g.lineWidth = 4;
-  g.strokeStyle = theme.color.textHalo;
+  g.strokeStyle = boardTheme.color.textHalo;
   g.strokeText(text, 0, 1);
   g.fillStyle = color;
   g.fillText(text, 0, 1);

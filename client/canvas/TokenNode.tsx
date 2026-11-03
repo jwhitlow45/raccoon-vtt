@@ -9,8 +9,8 @@ import { isAppleDevice } from "../lib/device.ts";
 import { lineHeight, type LabelLine } from "../lib/boardText.ts";
 import { displayName, footprint, hexFootprintOutline, type ViewToken } from "../lib/scene.ts";
 import { gridOfShape } from "#shared/rules/grid.ts";
-import { theme } from "../lib/theme.ts";
-import { cropSourceRect, DECOR_MIN_PX, DISPOSITION_RING, effectChip, effectCount, initials, type Chip } from "../lib/tokenView.ts";
+import { boardTheme, theme } from "../lib/theme.ts";
+import { BOARD_DISPOSITION_RING, cropSourceRect, DECOR_MIN_PX, effectChip, effectCount, initials, type Chip } from "../lib/tokenView.ts";
 import { useAccent } from "../state/accent.ts";
 import { addsToSelection } from "../state/selection.ts";
 import { useAssets, useRoomView } from "../state/view.ts";
@@ -267,7 +267,7 @@ function Standee(props: { token: ViewToken; actor: Partial<Actor> | undefined; w
   const parts = standeeParts(iso.turn, iso.drawn, iso.ground, { w, h }, iso);
   const upright = groundGroups(iso.turn).upright;
   const ringPx = boardSizes(scale).ringPx;
-  const ring = DISPOSITION_RING[token.disposition] ?? theme.color.neutral;
+  const ring = BOARD_DISPOSITION_RING[token.disposition] ?? boardTheme.color.neutral;
   const turnedBy = Number.isFinite(token.rotation) ? token.rotation : 0;
   const facing = (turnedBy * Math.PI) / 180;
   return (
@@ -286,7 +286,7 @@ function Standee(props: { token: ViewToken; actor: Partial<Actor> | undefined; w
           />
         ) : null}
         {iso.rings?.map((color, i) => <CaughtRing key={i} w={w} h={h} scale={scale} color={color} />)}
-        {props.active ? <Outline w={w} h={h} scale={scale} gapPx={7} color={theme.color.accentSoft} widthPx={3} /> : null}
+        {props.active ? <Outline w={w} h={h} scale={scale} gapPx={7} color={boardTheme.color.accentSoft} widthPx={3} /> : null}
         {props.selected ? <SelectedOutline w={w} h={h} scale={scale} hexes={props.hexes} /> : null}
         <Group x={w / 2} y={h / 2} rotation={upright.rotation} scaleY={upright.scaleY}>
           {parts.stem > 0 ? <Line points={[0, 0, 0, parts.stem]} stroke={theme.relief.stem} strokeWidth={1} strokeScaleEnabled={false} dash={iso.capped ? [6 / scale, 4 / scale] : undefined} listening={false} /> : null}
@@ -339,7 +339,7 @@ function TokenFace(props: { token: ViewToken; actor: Partial<Actor> | undefined;
     <>
       <TokenShadow token={token} w={w} h={h} />
       <TokenBody token={token} actor={actor} w={w} h={h} scale={scale} name={name} />
-      {props.active ? <Outline w={w} h={h} scale={scale} gapPx={7} color={theme.color.accentSoft} widthPx={3} /> : null}
+      {props.active ? <Outline w={w} h={h} scale={scale} gapPx={7} color={boardTheme.color.accentSoft} widthPx={3} /> : null}
       {props.selected ? <SelectedOutline w={w} h={h} scale={scale} hexes={props.hexes ?? null} /> : null}
     </>
   );
@@ -406,9 +406,9 @@ function LockMark(props: { place: { x: number; y: number; size: number } }) {
   const k = size / 18;
   return (
     <Group name="lock-mark" x={x + 9 * k} y={y + 9 * k} scaleX={k} scaleY={k}>
-      <Rect x={-9} y={-9} width={18} height={18} cornerRadius={9} fill={theme.color.surfaceRaised} stroke={theme.color.accentSoft} strokeWidth={1} />
-      <Arc x={0} y={-1} innerRadius={2} outerRadius={3.6} angle={180} rotation={180} fill={theme.color.accentSoft} />
-      <Rect x={-4.5} y={-1} width={9} height={6.5} cornerRadius={1.5} fill={theme.color.accentSoft} />
+      <Rect x={-9} y={-9} width={18} height={18} cornerRadius={9} fill={boardTheme.color.surfaceRaised} stroke={boardTheme.color.accentSoft} strokeWidth={1} />
+      <Arc x={0} y={-1} innerRadius={2} outerRadius={3.6} angle={180} rotation={180} fill={boardTheme.color.accentSoft} />
+      <Rect x={-4.5} y={-1} width={9} height={6.5} cornerRadius={1.5} fill={boardTheme.color.accentSoft} />
     </Group>
   );
 }
@@ -436,16 +436,16 @@ function AcMark(props: { ac: NonNullable<TokenMarks["ac"]> }) {
           ctx.save();
           ctx.scale(sx, sy);
           ctx.translate(-SHIELD_BOUNDS.x, -SHIELD_BOUNDS.y);
-          ctx.setAttr("fillStyle", theme.color.surfaceRaised);
+          ctx.setAttr("fillStyle", boardTheme.color.surfaceRaised);
           ctx.fill(shieldPath);
-          ctx.setAttr("strokeStyle", theme.color.text);
+          ctx.setAttr("strokeStyle", boardTheme.color.text);
           ctx.setAttr("lineWidth", 2 / (sx + sy));
           ctx.stroke(shieldPath);
           ctx.restore();
         }}
       />
       {/* In the top 85%, where the shield is widest, so the number never reaches its point. */}
-      <Text text={ac.text} width={ac.width} height={ac.height * 0.85} align="center" verticalAlign="middle" fontSize={ac.textPx} fontFamily={LABEL_FAMILY} fontStyle="700" fill={theme.color.text} />
+      <Text text={ac.text} width={ac.width} height={ac.height * 0.85} align="center" verticalAlign="middle" fontSize={ac.textPx} fontFamily={LABEL_FAMILY} fontStyle="700" fill={boardTheme.color.text} />
     </Group>
   );
 }
@@ -458,7 +458,7 @@ function AcMark(props: { ac: NonNullable<TokenMarks["ac"]> }) {
  * included, and the corners to the badges.
  */
 function BloodiedNotch(props: { notch: Notch }) {
-  return <Line points={props.notch.points} closed fill={theme.color.warning} stroke={theme.color.textHalo} strokeWidth={props.notch.strokeWidth} lineJoin="round" />;
+  return <Line points={props.notch.points} closed fill={boardTheme.color.warning} stroke={boardTheme.color.textHalo} strokeWidth={props.notch.strokeWidth} lineJoin="round" />;
 }
 
 /** A numbered picture token's number, in its bottom right corner, when its name has given way. */
@@ -470,8 +470,8 @@ function NumberBadge(props: { widthPx: number; heightPx: number; number: number;
   const y = props.heightPx - d;
   return (
     <Group x={x} y={y}>
-      <Rect width={width} height={d} cornerRadius={d / 2} fill={theme.color.surfaceRaised} stroke={theme.color.text} strokeWidth={1} />
-      <Text text={text} width={width} height={d} align="center" verticalAlign="middle" fontSize={props.px} fontFamily={LABEL_FAMILY} fontStyle="700" fill={theme.color.text} />
+      <Rect width={width} height={d} cornerRadius={d / 2} fill={boardTheme.color.surfaceRaised} stroke={boardTheme.color.text} strokeWidth={1} />
+      <Text text={text} width={width} height={d} align="center" verticalAlign="middle" fontSize={props.px} fontFamily={LABEL_FAMILY} fontStyle="700" fill={boardTheme.color.text} />
     </Group>
   );
 }
@@ -560,7 +560,7 @@ function TokenBody(props: {
   // No HP rule kills an object, so the map draws no dead or dying mark on one, and an HP-less creature shows no life it
   // stores underneath (docs/design/design-v1-combat-flow.md 3.6.6).
   const life = token.kind === "object" ? undefined : shownLife(actor, token);
-  const ring = DISPOSITION_RING[token.disposition] ?? theme.color.neutral;
+  const ring = BOARD_DISPOSITION_RING[token.disposition] ?? boardTheme.color.neutral;
   const ringPx = boardSizes(scale).ringPx;
   return (
     <Group x={w / 2} y={h / 2} rotation={props.upright || !Number.isFinite(token.rotation) ? 0 : token.rotation}>
@@ -573,7 +573,7 @@ function TokenBody(props: {
         {image ? (
           <KImage image={image} x={-w / 2} y={-h / 2} width={w} height={h} crop={crop} />
         ) : (
-          <Rect x={-w / 2} y={-h / 2} width={w} height={h} fill={icon ? icon.color : theme.color.surfaceRaised} />
+          <Rect x={-w / 2} y={-h / 2} width={w} height={h} fill={icon ? icon.color : boardTheme.color.surfaceRaised} />
         )}
         {icon && glyph.status === "ready" ? (
           <IconGlyph iconKey={icon.icon} d={glyph.d} side={glyphSide(w, h, square ? "square" : "circle")} color={glyphColor(icon.color)} />
@@ -601,14 +601,14 @@ function TokenBody(props: {
             fontSize={Math.max(9, Math.min(w, h) * scale * 0.38)}
             fontFamily={LABEL_FAMILY}
             fontStyle="600"
-            fill={icon ? glyphColor(icon.color) : theme.color.text}
+            fill={icon ? glyphColor(icon.color) : boardTheme.color.text}
           />
         </Group>
       ) : null}
       {life === "dead" ? (
         <Line
           points={[-w * 0.3, -h * 0.3, w * 0.3, h * 0.3, 0, 0, w * 0.3, -h * 0.3, -w * 0.3, h * 0.3]}
-          stroke={theme.color.danger}
+          stroke={boardTheme.color.danger}
           strokeWidth={Math.max(3, ringPx)}
           strokeScaleEnabled={false}
           listening={false}
@@ -782,7 +782,7 @@ function ChipView(props: { x: number; marks: TokenMarks; chip: Chip; iconKey: st
         height={side}
         cornerRadius={Math.max(3, side / 4.5)}
         fill={chip.color}
-        stroke={props.hidden ? theme.color.text : theme.color.textHalo}
+        stroke={props.hidden ? boardTheme.color.text : boardTheme.color.textHalo}
         strokeWidth={1}
         dash={props.hidden ? [3, 2] : undefined}
       />
@@ -793,7 +793,7 @@ function ChipView(props: { x: number; marks: TokenMarks; chip: Chip; iconKey: st
       )}
       {showLevel ? (
         <Group x={side - levelWidth + 2} y={side - levelHeight + 3}>
-          <Rect width={levelWidth} height={levelHeight} cornerRadius={levelHeight / 2} fill={theme.color.textHalo} />
+          <Rect width={levelWidth} height={levelHeight} cornerRadius={levelHeight / 2} fill={boardTheme.color.textHalo} />
           <Text text={levelText} width={levelWidth} height={levelHeight} align="center" verticalAlign="middle" fontSize={marks.counterPx} fontFamily={LABEL_FAMILY} fontStyle="700" fill="#ffffff" />
         </Group>
       ) : null}
@@ -805,8 +805,8 @@ function Badge(props: { badge: NonNullable<TokenMarks["badge"]> }) {
   const { badge } = props;
   return (
     <Group x={badge.x} y={badge.y}>
-      <Rect width={badge.width} height={badge.height} cornerRadius={badge.height / 2} fill={theme.color.surfaceRaised} stroke={theme.color.accentSoft} strokeWidth={1} />
-      <Text text={badge.text} width={badge.width} height={badge.height} align="center" verticalAlign="middle" fontSize={badge.textPx} fontFamily={LABEL_FAMILY} fontStyle="700" fill={theme.color.accentSoft} />
+      <Rect width={badge.width} height={badge.height} cornerRadius={badge.height / 2} fill={boardTheme.color.surfaceRaised} stroke={boardTheme.color.accentSoft} strokeWidth={1} />
+      <Text text={badge.text} width={badge.width} height={badge.height} align="center" verticalAlign="middle" fontSize={badge.textPx} fontFamily={LABEL_FAMILY} fontStyle="700" fill={boardTheme.color.accentSoft} />
     </Group>
   );
 }
@@ -819,10 +819,10 @@ const LEADING = 1.17;
  * color is never the only cue.
  */
 function lineColor(line: LabelLine): string {
-  if (line.kind === "name") return theme.color.text;
-  if (line.text === "Bloodied") return theme.color.warning;
-  if (line.text === "Dying" || line.text === "Dead") return theme.color.dangerText;
-  return theme.color.textMuted;
+  if (line.kind === "name") return boardTheme.color.text;
+  if (line.text === "Bloodied") return boardTheme.color.warning;
+  if (line.text === "Dying" || line.text === "Dead") return boardTheme.color.dangerText;
+  return boardTheme.color.textMuted;
 }
 
 /**
@@ -836,7 +836,7 @@ function Lines(props: { block: PlacedLines; plate?: boolean }) {
   return (
     <Group>
       {props.plate ? (
-        <Rect {...plateRect(block)} cornerRadius={6} fill="rgba(16, 16, 20, 0.92)" stroke={theme.color.border} strokeWidth={PLATE_STROKE} />
+        <Rect {...plateRect(block)} cornerRadius={6} fill="rgba(16, 16, 20, 0.92)" stroke={boardTheme.color.border} strokeWidth={PLATE_STROKE} />
       ) : null}
       {block.lines.map((line, i) => {
         const y = top;
@@ -854,7 +854,7 @@ function Lines(props: { block: PlacedLines; plate?: boolean }) {
             fontFamily={LABEL_FAMILY}
             fontStyle="600"
             fill={lineColor(line)}
-            stroke={props.plate ? undefined : theme.color.textHalo}
+            stroke={props.plate ? undefined : boardTheme.color.textHalo}
             strokeWidth={props.plate ? 0 : line.px / 4}
             fillAfterStrokeEnabled
           />
@@ -865,7 +865,7 @@ function Lines(props: { block: PlacedLines; plate?: boolean }) {
 }
 
 function barColor(fraction: number): string {
-  if (fraction > 0.5) return theme.color.success;
-  if (fraction > 0.25) return theme.color.warning;
-  return theme.color.danger;
+  if (fraction > 0.5) return boardTheme.color.success;
+  if (fraction > 0.25) return boardTheme.color.warning;
+  return boardTheme.color.danger;
 }

@@ -3,7 +3,7 @@ import type { Token, Trap } from "#shared/model.ts";
 import type { Point } from "../../lib/camera.ts";
 import { sceneGrid } from "#shared/rules/grid.ts";
 import { footprint } from "../../lib/scene.ts";
-import { theme } from "../../lib/theme.ts";
+import { boardTheme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
 import type { StackPill } from "../measure/Pill.tsx";
 import { crossedTraps, crossesText, warnsOf } from "./rules.ts";
@@ -31,5 +31,5 @@ export function useTrapCrossing(token: Token, path: readonly Point[]): StackPill
     // The path is read by its points, which a drag's every frame rebuilds as a new array.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [traps, role, token.sceneId, token.squeeze, fp.w, fp.h, shape, key]);
-  return text ? { value: text, size: "screen", color: theme.color.warning, small: true } : null;
+  return text ? { value: text, size: "screen", color: boardTheme.color.warning, small: true } : null;
 }

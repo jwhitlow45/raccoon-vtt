@@ -5,8 +5,8 @@ import { sceneGrid } from "#shared/rules/grid.ts";
 import { useDraggedIds } from "../../canvas/draggedIds.ts";
 import { useIsoGround, useTreeShownStore, useTreeShownView } from "../../canvas/relief/context.ts";
 import { boardSizes } from "../../lib/boardScale.ts";
-import { theme } from "../../lib/theme.ts";
-import { DISPOSITION_RING } from "../../lib/tokenView.ts";
+import { boardTheme } from "../../lib/theme.ts";
+import { BOARD_DISPOSITION_RING } from "../../lib/tokenView.ts";
 import { localDragSlot } from "../../state/localDrags.ts";
 import { useScoped } from "../../state/scope.ts";
 import type { LayerProps } from "../layers.ts";
@@ -66,7 +66,7 @@ export const TetherLine = memo(function TetherLine(props: { line: Tether; holder
   return (
     <Line
       points={points}
-      stroke={holder ? DISPOSITION_RING[holder.disposition] : theme.color.neutral}
+      stroke={holder ? BOARD_DISPOSITION_RING[holder.disposition] : boardTheme.color.neutral}
       opacity={0.5}
       strokeWidth={px}
       strokeScaleEnabled={false}

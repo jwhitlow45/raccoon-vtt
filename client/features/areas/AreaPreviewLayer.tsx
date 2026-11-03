@@ -10,7 +10,7 @@ import { useIsoGround, useTreeShownStore, useTreeShownView } from "../../canvas/
 import type { FogView } from "../../canvas/relief/fogView.ts";
 import { UprightDash, WholeVolume } from "../../canvas/relief/VolumeShape.tsx";
 import { useViewerFog } from "../../canvas/viewerFog.ts";
-import { theme } from "../../lib/theme.ts";
+import { boardTheme } from "../../lib/theme.ts";
 import type { AoePreview } from "../../state/types.ts";
 import type { LayerProps } from "../layers.ts";
 import { formatFeet } from "../measure/ruler.ts";
@@ -93,7 +93,7 @@ export const AreaPreviewLayer = memo(function AreaPreviewLayer(props: LayerProps
   return (
     <Group listening={false}>
       {remote.map(([key, a]) => (
-        <RemotePreview key={key} preview={a} id={key} ctx={coarse} fog={fog} scale={scale} color={members?.[a.from]?.color ?? theme.color.crest} name={members?.[a.from]?.name} />
+        <RemotePreview key={key} preview={a} id={key} ctx={coarse} fog={fog} scale={scale} color={members?.[a.from]?.color ?? boardTheme.color.crest} name={members?.[a.from]?.name} />
       ))}
       {active ? <ActiveArea {...active} ctx={ctx} fog={fog} scale={scale} sceneId={scene.id} tokens={tokens} diagonal={settings.diagonal} aiming={aiming} /> : null}
     </Group>
@@ -176,18 +176,18 @@ function ActiveArea(props: {
       {iso && board?.world && props.aiming ? <WholeVolume req={{ template: t, ctx, banded: false }} id={props.id} look={{ color, dm: false, selected: true, preview: false }} turn={iso.turn} world={board.world} /> : null}
       {iso && originZ > z ? <UprightDash x={o.x} y={o.y} z0={z} z1={originZ} turn={iso.turn} color={color} /> : null}
       <Lift z={z}>
-        {outline ? <OutlineShape outline={outline} color={theme.color.textHalo} widthPx={5} opacity={0.5} /> : null}
+        {outline ? <OutlineShape outline={outline} color={boardTheme.color.textHalo} widthPx={5} opacity={0.5} /> : null}
         {outline ? <OutlineShape outline={outline} color={color} widthPx={2.5} /> : null}
         {caught.map((id) => {
           const token = ctx.tokens?.[id];
           return token ? <TokenRing key={id} token={token} grid={ctx.grid} color={color} scale={scale} widthPx={3} gapPx={4} /> : null;
         })}
         {range ? <Line points={[range.from.x, range.from.y, o.x, o.y]} stroke={color} strokeWidth={2} strokeScaleEnabled={false} dash={[6, 5]} /> : null}
-        {grips.origin ? <Circle x={o.x} y={o.y} radius={4 / scale} fill={color} stroke={theme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} /> : null}
+        {grips.origin ? <Circle x={o.x} y={o.y} radius={4 / scale} fill={color} stroke={boardTheme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} /> : null}
         {handle ? (
           <>
             <Line points={[o.x, o.y, handle.x, handle.y]} stroke={color} strokeWidth={1.5} strokeScaleEnabled={false} dash={[3, 4]} opacity={0.8} />
-            <Circle x={handle.x} y={handle.y} radius={11 / scale} fill={theme.color.overlay} stroke={color} strokeWidth={2.5} strokeScaleEnabled={false} />
+            <Circle x={handle.x} y={handle.y} radius={11 / scale} fill={boardTheme.color.overlay} stroke={color} strokeWidth={2.5} strokeScaleEnabled={false} />
             <Circle x={handle.x} y={handle.y} radius={4 / scale} fill={color} />
           </>
         ) : null}

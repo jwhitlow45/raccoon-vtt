@@ -3,7 +3,7 @@ import { Circle, Group, Line, Rect } from "react-konva";
 import type { JournalPage, Pin } from "#shared/model.ts";
 import { MarkPill, Upright } from "../../canvas/IsoParts.tsx";
 import { useIsoGround, useTreeShownStore, useTreeShownView } from "../../canvas/relief/context.ts";
-import { theme } from "../../lib/theme.ts";
+import { boardTheme } from "../../lib/theme.ts";
 import { isometric } from "../../lib/view.ts";
 import { useScoped } from "../../state/scope.ts";
 import type { LayerProps } from "../layers.ts";
@@ -58,12 +58,12 @@ export const PinLayer = memo(function PinLayer(props: LayerProps) {
           <Group key={pin.id} name="pin" id={`pin:${pin.id}`}>
             <Upright>
               <Group x={tip.x} y={tip.y} scaleX={s} scaleY={s} opacity={faded ? 0.55 : 1}>
-                {paneId === pin.id ? <Circle y={-HEAD_CENTER_PX} radius={17} stroke={theme.color.text} strokeWidth={2} dash={[4, 3]} /> : null}
-                <Line points={OUTLINE} closed fill={pin.color} stroke={theme.color.textHalo} strokeWidth={1.5} />
+                {paneId === pin.id ? <Circle y={-HEAD_CENTER_PX} radius={17} stroke={boardTheme.color.text} strokeWidth={2} dash={[4, 3]} /> : null}
+                <Line points={OUTLINE} closed fill={pin.color} stroke={boardTheme.color.textHalo} strokeWidth={1.5} />
                 {linked ? (
-                  <Rect x={-3.5} y={-HEAD_CENTER_PX - 4.5} width={7} height={9} cornerRadius={1} fill="#ffffff" stroke={theme.color.textHalo} strokeWidth={0.75} />
+                  <Rect x={-3.5} y={-HEAD_CENTER_PX - 4.5} width={7} height={9} cornerRadius={1} fill="#ffffff" stroke={boardTheme.color.textHalo} strokeWidth={0.75} />
                 ) : (
-                  <Circle y={-HEAD_CENTER_PX} radius={3.5} fill="#ffffff" stroke={theme.color.textHalo} strokeWidth={0.75} />
+                  <Circle y={-HEAD_CENTER_PX} radius={3.5} fill="#ffffff" stroke={boardTheme.color.textHalo} strokeWidth={0.75} />
                 )}
               </Group>
             </Upright>

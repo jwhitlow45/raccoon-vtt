@@ -2,7 +2,7 @@ import { memo, useMemo } from "react";
 import { Group, Shape } from "react-konva";
 import { FOG_SUBCELLS, type FogTile, type RoomState } from "#shared/model.ts";
 import { FogRaster } from "../lib/fogTiles.ts";
-import { theme } from "../lib/theme.ts";
+import { boardTheme } from "../lib/theme.ts";
 import { useRoomView } from "../state/view.ts";
 import { fogSeam } from "./fogSeam.ts";
 import { useIsoGround } from "./relief/context.ts";
@@ -12,7 +12,7 @@ function hexToRgb(hex: string): [number, number, number] {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-const FOG_RGB = hexToRgb(theme.color.fog);
+const FOG_RGB = hexToRgb(boardTheme.color.fog);
 /** How far past the scene's edge the fog frame reaches, in cells. Far enough for any zoom. */
 const FRAME_CELLS = 10_000;
 
@@ -110,7 +110,7 @@ export const FogShape = memo(function FogShape(props: {
         sceneFunc={(ctx) => {
           const native = ctx._context;
           native.save();
-          native.fillStyle = theme.color.fog;
+          native.fillStyle = boardTheme.color.fog;
           const { hole, clip } = fogSeam(native.getTransform(), w, h);
           native.beginPath();
           native.rect(-FRAME_CELLS, -FRAME_CELLS, w + FRAME_CELLS * 2, h + FRAME_CELLS * 2);

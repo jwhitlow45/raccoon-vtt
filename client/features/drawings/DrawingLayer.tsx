@@ -5,7 +5,7 @@ import { drawsHere, viewPointOf } from "../../canvas/isoPlace.ts";
 import { groundPieces, markStands, type GroundPiece } from "../../canvas/markStand.ts";
 import { measurePill } from "../../canvas/measureText.ts";
 import { useIsoGround, useTreeShownStore, useTreeShownView, type IsoGround } from "../../canvas/relief/context.ts";
-import { theme } from "../../lib/theme.ts";
+import { boardTheme, theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
 import { Clipped } from "../areas/TemplateLayer.tsx";
 import type { LayerProps } from "../layers.ts";
@@ -44,7 +44,7 @@ export const DrawingLayer = memo(function DrawingLayer(props: LayerProps) {
   const opacity = useTreeShownStore(tool$, (s) => s.opacity);
   const fill = useTreeShownStore(tool$, (s) => s.fill);
   const tool = useTreeShownView((s) => s.local.tool);
-  const memberColor = useTreeShownView((s) => (s.you ? s.view?.members[s.you.memberId]?.color : undefined)) ?? theme.color.crest;
+  const memberColor = useTreeShownView((s) => (s.you ? s.view?.members[s.you.memberId]?.color : undefined)) ?? boardTheme.color.crest;
   const iso = useIsoGround();
   // Kept rulers are drawings in the state, drawn and measured by the ruler layer (features/measure).
   const list = Object.values(drawings).filter((d): d is Drawing => !!d && d.sceneId === props.scene.id && d.kind !== "ruler");
@@ -160,9 +160,9 @@ function Draft(props: {
     <>
       {draft ? <DrawingShape kind={at.kind} points={at.points} style={{ stroke, width, opacity, fill: fill ? fillFor(stroke) : undefined }} /> : null}
       {Array.from({ length: at.handles.length / 2 }, (_, i) => (
-        <Circle key={i} x={at.handles[2 * i]} y={at.handles[2 * i + 1]} radius={(i === 0 ? 7 : 4) / scale} fill={stroke} stroke={theme.color.textHalo} strokeWidth={1} strokeScaleEnabled={false} />
+        <Circle key={i} x={at.handles[2 * i]} y={at.handles[2 * i + 1]} radius={(i === 0 ? 7 : 4) / scale} fill={stroke} stroke={boardTheme.color.textHalo} strokeWidth={1} strokeScaleEnabled={false} />
       ))}
-      {at.dot ? <Circle x={at.dot.x} y={at.dot.y} radius={5 / scale} fill={stroke} stroke={theme.color.textHalo} strokeWidth={1} strokeScaleEnabled={false} /> : null}
+      {at.dot ? <Circle x={at.dot.x} y={at.dot.y} radius={5 / scale} fill={stroke} stroke={boardTheme.color.textHalo} strokeWidth={1} strokeScaleEnabled={false} /> : null}
     </>
   );
   return (
@@ -214,7 +214,7 @@ function DrawingShape(props: { kind: DrawingKind; points: number[]; style: Drawi
           fontFamily={theme.font.body}
           fontStyle="bold"
           fill={style.stroke}
-          stroke={theme.color.textHalo}
+          stroke={boardTheme.color.textHalo}
           strokeWidth={textCells(style.width) / 14}
           fillAfterStrokeEnabled
           opacity={common.opacity}

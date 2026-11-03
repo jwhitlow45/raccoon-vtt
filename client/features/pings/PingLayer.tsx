@@ -4,7 +4,7 @@ import { Lift, MarkPill } from "../../canvas/IsoParts.tsx";
 import { useIsoGround, useTreeShownView } from "../../canvas/relief/context.ts";
 import { boardSizes } from "../../lib/boardScale.ts";
 import { useLowPower } from "../device/settings.ts";
-import { theme } from "../../lib/theme.ts";
+import { boardTheme } from "../../lib/theme.ts";
 import { PING_MS } from "../../state/ephemeral.ts";
 import type { Ping } from "../../state/types.ts";
 import type { LayerProps } from "../layers.ts";
@@ -41,7 +41,7 @@ export const PingLayer = memo(function PingLayer(props: LayerProps) {
   return (
     <Group listening={false}>
       {pings.map((p) => (
-        <PingRings key={p.id} ping={p} now={now} still={still} scale={props.scale} color={members?.[p.from]?.color ?? theme.color.accentSoft} name={markOwner(p, members)} z={iso ? iso.ground(p.x, p.y) : 0} />
+        <PingRings key={p.id} ping={p} now={now} still={still} scale={props.scale} color={members?.[p.from]?.color ?? boardTheme.color.accentSoft} name={markOwner(p, members)} z={iso ? iso.ground(p.x, p.y) : 0} />
       ))}
     </Group>
   );
@@ -66,7 +66,7 @@ function PingRings(props: { ping: Ping; now: number; still: boolean; scale: numb
         {rings.map((r, i) => (
           <Circle key={i} x={props.ping.x} y={props.ping.y} radius={r.r} stroke={props.color} strokeWidth={3} strokeScaleEnabled={false} opacity={r.opacity} listening={false} />
         ))}
-        <Circle x={props.ping.x} y={props.ping.y} radius={5 * s} fill={props.color} stroke={theme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} opacity={fade} listening={false} />
+        <Circle x={props.ping.x} y={props.ping.y} radius={5 * s} fill={props.color} stroke={boardTheme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} opacity={fade} listening={false} />
       </Lift>
       {props.name ? <MarkPill x={props.ping.x} y={props.ping.y} z={props.z} scale={props.scale} name={props.name} size="map" color={props.color} small offsetPx={14} /> : null}
     </>

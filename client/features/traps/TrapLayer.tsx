@@ -13,7 +13,7 @@ import { drawsHere, viewPointOf } from "../../canvas/isoPlace.ts";
 import { markStands, pillStands } from "../../canvas/markStand.ts";
 import { useIsoGround, useTreeShownStore, useTreeShownView, type IsoGround } from "../../canvas/relief/context.ts";
 import { IsoNamesContext, isoNamePill, type IsoNames } from "../../canvas/relief/isoText.ts";
-import { theme } from "../../lib/theme.ts";
+import { boardTheme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
 import { contextFrom } from "../areas/coverage.ts";
 import { OutlineShape } from "../areas/draw.tsx";
@@ -88,12 +88,12 @@ type Look = { color: string; fill: number; hatch: number; dash: number[] | undef
 /** How a trap reads (4.1, 4.5): by its state for the DM, and for players only found and whether it is disarmed. */
 function lookOf(trap: SeenTrap, dm: boolean): Look {
   if (dm) {
-    if (trap.state === "armed") return { color: theme.color.danger, fill: 0.2, hatch: 0.7, dash: undefined, width: 2 };
-    if (trap.state === "sprung") return { color: theme.color.neutral, fill: 0.12, hatch: 0.4, dash: undefined, width: 1.5 };
-    return { color: theme.color.neutral, fill: 0, hatch: 0, dash: [6, 4], width: 1.5 };
+    if (trap.state === "armed") return { color: boardTheme.color.danger, fill: 0.2, hatch: 0.7, dash: undefined, width: 2 };
+    if (trap.state === "sprung") return { color: boardTheme.color.neutral, fill: 0.12, hatch: 0.4, dash: undefined, width: 1.5 };
+    return { color: boardTheme.color.neutral, fill: 0, hatch: 0, dash: [6, 4], width: 1.5 };
   }
-  if (trap.disarmed) return { color: theme.color.neutral, fill: 0, hatch: 0, dash: [6, 4], width: 1.5 };
-  return { color: theme.color.warning, fill: 0.15, hatch: 0.6, dash: undefined, width: 1.5 };
+  if (trap.disarmed) return { color: boardTheme.color.neutral, fill: 0, hatch: 0, dash: [6, 4], width: 1.5 };
+  return { color: boardTheme.color.warning, fill: 0.15, hatch: 0.6, dash: undefined, width: 1.5 };
 }
 
 /**
@@ -230,10 +230,10 @@ const TrapMark = memo(function TrapMark(props: { trap: Trap; chunks: Readonly<Re
     badge = { x: (a[0] + b[0]) / 2, y: (a[1] + b[1]) / 2 };
     body = (
       <>
-        <Line points={[a[0], a[1], b[0], b[1]]} stroke={theme.color.textHalo} opacity={0.5} strokeWidth={look.width + 3} strokeScaleEnabled={false} lineCap="round" />
+        <Line points={[a[0], a[1], b[0], b[1]]} stroke={boardTheme.color.textHalo} opacity={0.5} strokeWidth={look.width + 3} strokeScaleEnabled={false} lineCap="round" />
         <Line points={[a[0], a[1], b[0], b[1]]} stroke={look.color} strokeWidth={look.width + 1} strokeScaleEnabled={false} dash={[8, 5]} lineCap="round" />
-        <Circle x={a[0]} y={a[1]} radius={4 * s} fill={look.color} stroke={theme.color.textHalo} strokeWidth={1} strokeScaleEnabled={false} />
-        <Circle x={b[0]} y={b[1]} radius={4 * s} fill={look.color} stroke={theme.color.textHalo} strokeWidth={1} strokeScaleEnabled={false} />
+        <Circle x={a[0]} y={a[1]} radius={4 * s} fill={look.color} stroke={boardTheme.color.textHalo} strokeWidth={1} strokeScaleEnabled={false} />
+        <Circle x={b[0]} y={b[1]} radius={4 * s} fill={look.color} stroke={boardTheme.color.textHalo} strokeWidth={1} strokeScaleEnabled={false} />
       </>
     );
   } else {
@@ -380,13 +380,13 @@ function Badge(props: { x: number; y: number; scale: number; look: Look; found: 
   const eye = { x: props.x + r * 1.15, y: props.y - r * 0.85 };
   return (
     <>
-      <Circle x={props.x} y={props.y} radius={r} fill={theme.color.overlay} stroke={props.look.color} strokeWidth={1.5} strokeScaleEnabled={false} dash={props.look.dash} />
+      <Circle x={props.x} y={props.y} radius={r} fill={boardTheme.color.overlay} stroke={props.look.color} strokeWidth={1.5} strokeScaleEnabled={false} dash={props.look.dash} />
       <Path data={TRAP_ICON_PATH} x={props.x - (ICON_PX / 2) * s} y={props.y - (ICON_PX / 2) * s} scaleX={k} scaleY={k} fill={props.look.color} />
       {props.found ? (
         <>
-          <Circle x={eye.x} y={eye.y} radius={r * 0.6} fill={theme.color.overlay} />
-          <Ellipse x={eye.x} y={eye.y} radiusX={r * 0.45} radiusY={r * 0.28} stroke={theme.color.text} strokeWidth={1.2} strokeScaleEnabled={false} />
-          <Circle x={eye.x} y={eye.y} radius={r * 0.14} fill={theme.color.text} />
+          <Circle x={eye.x} y={eye.y} radius={r * 0.6} fill={boardTheme.color.overlay} />
+          <Ellipse x={eye.x} y={eye.y} radiusX={r * 0.45} radiusY={r * 0.28} stroke={boardTheme.color.text} strokeWidth={1.2} strokeScaleEnabled={false} />
+          <Circle x={eye.x} y={eye.y} radius={r * 0.14} fill={boardTheme.color.text} />
         </>
       ) : null}
     </>
@@ -403,7 +403,7 @@ function TrapHits(props: { trap: Trap; rig: TrapRig; chunks: Readonly<Record<str
   }, [rig.hits, props.chunks, props.settings, props.scene]);
   if (typeof rig.hits !== "object") return null;
   if ("cells" in rig.hits) {
-    const look = { color: theme.color.danger, fill: 0.1, hatch: 0, dash: [4, 4], width: 1 };
+    const look = { color: boardTheme.color.danger, fill: 0.1, hatch: 0, dash: [4, 4], width: 1 };
     return isHex(props.grid) ? <Hexes grid={props.grid} rects={rig.hits.cells} look={look} faint /> : <Squares rects={rig.hits.cells} look={look} faint />;
   }
   if (!outline) return null;
@@ -412,8 +412,8 @@ function TrapHits(props: { trap: Trap; rig: TrapRig; chunks: Readonly<Record<str
   const o = rig.hits.area.origin;
   return (
     <>
-      <OutlineShape outline={outline} color={theme.color.danger} widthPx={1.5} dash={[6, 4]} opacity={0.8} fill={theme.color.dangerTint} />
-      {from ? <Line points={[from.x, from.y, o.x, o.y]} stroke={theme.color.danger} strokeWidth={1} strokeScaleEnabled={false} dash={[2, 4]} opacity={0.6} listening={false} /> : null}
+      <OutlineShape outline={outline} color={boardTheme.color.danger} widthPx={1.5} dash={[6, 4]} opacity={0.8} fill={boardTheme.color.dangerTint} />
+      {from ? <Line points={[from.x, from.y, o.x, o.y]} stroke={boardTheme.color.danger} strokeWidth={1} strokeScaleEnabled={false} dash={[2, 4]} opacity={0.6} listening={false} /> : null}
     </>
   );
 }
@@ -422,17 +422,17 @@ function TrapHits(props: { trap: Trap; rig: TrapRig; chunks: Readonly<Record<str
 function Draft(props: { draft: TrapDraft; scale: number; grid: Grid }) {
   const { draft, grid } = props;
   const s = 1 / props.scale;
-  if ("rect" in draft && isHex(grid)) return <Hexes grid={grid} rects={[draft.rect]} look={{ color: theme.color.danger, fill: 0.25, hatch: 0, dash: [6, 4], width: 2 }} />;
+  if ("rect" in draft && isHex(grid)) return <Hexes grid={grid} rects={[draft.rect]} look={{ color: boardTheme.color.danger, fill: 0.25, hatch: 0, dash: [6, 4], width: 2 }} />;
   if ("rect" in draft) {
     const r = draft.rect;
-    return <Rect x={r.x} y={r.y} width={r.w} height={r.h} fill={theme.color.danger} opacity={0.25} stroke={theme.color.danger} strokeWidth={2} strokeScaleEnabled={false} dash={[6, 4]} listening={false} />;
+    return <Rect x={r.x} y={r.y} width={r.w} height={r.h} fill={boardTheme.color.danger} opacity={0.25} stroke={boardTheme.color.danger} strokeWidth={2} strokeScaleEnabled={false} dash={[6, 4]} listening={false} />;
   }
   const { a, b } = draft.wire;
   return (
     <>
-      <Line points={[a[0], a[1], b[0], b[1]]} stroke={theme.color.danger} strokeWidth={3} strokeScaleEnabled={false} dash={[8, 5]} lineCap="round" listening={false} />
-      <Circle x={a[0]} y={a[1]} radius={5 * s} fill={theme.color.danger} listening={false} />
-      <Circle x={b[0]} y={b[1]} radius={5 * s} fill={theme.color.danger} listening={false} />
+      <Line points={[a[0], a[1], b[0], b[1]]} stroke={boardTheme.color.danger} strokeWidth={3} strokeScaleEnabled={false} dash={[8, 5]} lineCap="round" listening={false} />
+      <Circle x={a[0]} y={a[1]} radius={5 * s} fill={boardTheme.color.danger} listening={false} />
+      <Circle x={b[0]} y={b[1]} radius={5 * s} fill={boardTheme.color.danger} listening={false} />
     </>
   );
 }

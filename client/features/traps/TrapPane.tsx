@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { LIMITS } from "#shared/limits.ts";
 import { cellWord, isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
-import { ABILITY_KEYS, CONDITION_KEYS, MIN_HEIGHT_FT, type AbilityKey, type BuildChunk, type ConditionKey, type SkillKey, type Trap, type TrapAction, type TrapCheck, type TrapRig, type TrapSound } from "#shared/model.ts";
+import { ABILITY_KEYS, CONDITION_KEYS, MIN_HEIGHT_FT, type AbilityKey, type BuildChunk, type ConditionKey, type SkillKey, type Trap, type TrapAction, type TrapArea, type TrapCheck, type TrapRig, type TrapSound } from "#shared/model.ts";
 import { MAX_NAME, TRAP_SOUNDS, type TrapPatch } from "#shared/protocol.ts";
 import { DAMAGE_TYPES, damageTypeName, type DamageType } from "#shared/rules/damage.ts";
 import { ABILITY_NAMES, choiceText, SKILLS } from "#shared/rules/skills.ts";
@@ -19,13 +19,13 @@ import { useBackClose } from "../../lib/backClose.ts";
 import type { Camera, Insets, Size } from "../../lib/camera.ts";
 import { displayName } from "../../lib/scene.ts";
 import { useSheetSwipe } from "../../lib/sheetSwipe.ts";
-import { theme } from "../../lib/theme.ts";
+import { boardTheme, theme } from "../../lib/theme.ts";
 import { paneDockFits, useAlertsLane, usePublishPaneLane } from "../../pages/fold.ts";
 import { PaneDockRow, usePaneDock } from "../../pages/RoomDock.tsx";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { aimTrapArea } from "../areas/AreaTool.tsx";
-import { draftFromTemplate, newDraft } from "../areas/placement.ts";
+import { draftFromTemplate, newDraft, type AreaDraft, type AreaTokens } from "../areas/placement.ts";
 import { paneEscape, panePlacement, sheetPanAnchor, SHEET_BELOW_PX } from "../builder/labelEdit.ts";
 import { labelPaneFrame, PANE_HEIGHT_UNMEASURED } from "../builder/labelPaneFrame.ts";
 import { PaneFooter } from "../builder/PaneFooter.tsx";
@@ -579,6 +579,21 @@ function hitsKind(hits: TrapRig["hits"]): HitsKind {
  * "Place the area" saves one, the choice held here until then. The map's
  * pick and the area tool start from the buttons that follow the choice.
  */
+/**
+ * The color a trap's area wears while the area tool aims it: the trap red
+ * the board draws traps in. The draft draws on Konva, which cannot read a
+ * CSS variable, so it is the board's plain hex in either scheme
+ * (client/canvas/boardColors.test.ts).
+ */
+export const trapDraftColor = boardTheme.color.danger;
+
+/** What the area tool aims for a trap: the area it hits, or a 15 ft cone at `point`, the trap's middle. */
+export function trapAreaDraft(input: { grid: Grid; trapId: string; sceneId: string; area: TrapArea | null; point: { x: number; y: number; z: number }; tokens: AreaTokens; feetPerCell: number }): AreaDraft {
+  const id = `trap-area-${input.trapId}`;
+  if (!input.area) return { ...newDraft(id, "cone", trapDraftColor), point: input.point };
+  return draftFromTemplate(input.grid, { ...input.area, id, rev: 0, sceneId: input.sceneId, color: trapDraftColor, visibility: "dm", ownerId: "" }, id, input.tokens, input.feetPerCell);
+}
+
 function HitsChoice(props: { trap: Trap; rig: TrapRig; chunks: Readonly<Record<string, BuildChunk>>; grid: Grid; setRig(patch: RigPatch): void; pick(what: "hits", fresh?: boolean): void }) {
   const { trap, rig, chunks, grid } = props;
   const scope = useRoomScope();
@@ -601,15 +616,10 @@ function HitsChoice(props: { trap: Trap; rig: TrapRig; chunks: Readonly<Record<s
     }
     setHeld(next);
   };
-  // The area tool aims it, starting from the trap's area or a 15 ft cone at the trap's middle.
   const aim = () => {
     if (!view) return;
-    const fpc = view.meta.settings.feetPerCell;
-    const id = `trap-area-${trap.id}`;
     const area = typeof rig.hits === "object" && "area" in rig.hits ? rig.hits.area : null;
-    const draft = area
-      ? draftFromTemplate(grid, { ...area, id, rev: 0, sceneId: trap.sceneId, color: theme.color.danger, visibility: "dm", ownerId: "" }, id, view.tokens, fpc)
-      : { ...newDraft(id, "cone", theme.color.danger), point: { x: center.x, y: center.y, z: zoneGroundAt(chunks, trap.sceneId, center) } };
+    const draft = trapAreaDraft({ grid, trapId: trap.id, sceneId: trap.sceneId, area, point: { x: center.x, y: center.y, z: zoneGroundAt(chunks, trap.sceneId, center) }, tokens: view.tokens, feetPerCell: view.meta.settings.feetPerCell });
     aimTrapArea(scope, ui, trap.id, draft);
   };
   const options: RowOption<HitsKind>[] = [

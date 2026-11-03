@@ -4,7 +4,7 @@ import type { Drawing, RoomState, Token } from "#shared/model.ts";
 import { sceneGrid, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import { useDelayed } from "../../components/Loading.tsx";
 import { footprint, snapPosition } from "../../lib/scene.ts";
-import { theme } from "../../lib/theme.ts";
+import { boardTheme } from "../../lib/theme.ts";
 import { MarkPill, MarkPillStack, Upright } from "../../canvas/IsoParts.tsx";
 import { boxGround, viewPointOf } from "../../canvas/isoPlace.ts";
 import { useIsoGround, useTreeShownStore, useTreeShownView, type IsoGround } from "../../canvas/relief/context.ts";
@@ -61,11 +61,11 @@ const HALO_PX = 6;
 const LEG_LABEL_MIN_PX = 56;
 
 /** Green, yellow and red, as features section 4 names them, whatever the viewer's accent. */
-const BAND_COLOR: Record<SpeedLeft["band"], string> = { walk: theme.color.success, dash: theme.color.crest, over: theme.color.danger };
+const BAND_COLOR: Record<SpeedLeft["band"], string> = { walk: boardTheme.color.success, dash: boardTheme.color.crest, over: boardTheme.color.danger };
 
 /** A drag's line and label: its speed band's color, or the text color with no band to show, never the member's, whose crest yellow would read as a Dash. */
 export function dragColor(left: SpeedLeft | null | undefined): string {
-  return left ? BAND_COLOR[left.band] : theme.color.text;
+  return left ? BAND_COLOR[left.band] : boardTheme.color.text;
 }
 
 type ReadDrag = (token: Token, to: Point, walk?: { corners: readonly Point[]; costFt?: number }) => DragRead;
@@ -107,7 +107,7 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
     };
   }, [encounter, activeTokenId, characters, rules, role, grid]);
   if (!settings) return null;
-  const colorOf = (id: string) => members?.[id]?.color ?? theme.color.crest;
+  const colorOf = (id: string) => members?.[id]?.color ?? boardTheme.color.crest;
   const kept = Object.values(drawings).filter((d): d is Drawing => !!d && d.kind === "ruler" && d.sceneId === props.scene.id);
 
   return (
@@ -206,7 +206,7 @@ function WalkRuler(props: { stops: readonly RulerStop[]; walk: WalkSource; scale
       {m.legs.map((leg, i) => {
         const pts = [leg.from, ...leg.corners, leg.to].map(mid);
         const flat = viewFlat(iso, pts);
-        const stroke = leg.searching && shown.finding ? theme.color.textMuted : leg.none ? theme.color.danger : color;
+        const stroke = leg.searching && shown.finding ? boardTheme.color.textMuted : leg.none ? boardTheme.color.danger : color;
         const a = pts[0]!;
         const b = pts[pts.length - 1]!;
         const read = legReading(m, i, held, shown.finding);
@@ -214,7 +214,7 @@ function WalkRuler(props: { stops: readonly RulerStop[]; walk: WalkSource; scale
         return (
           <Group key={i}>
             <Upright>
-              <Line points={flat} stroke={theme.color.textHalo} opacity={0.45} strokeWidth={HALO_PX} strokeScaleEnabled={false} lineCap="round" lineJoin="round" perfectDrawEnabled={false} />
+              <Line points={flat} stroke={boardTheme.color.textHalo} opacity={0.45} strokeWidth={HALO_PX} strokeScaleEnabled={false} lineCap="round" lineJoin="round" perfectDrawEnabled={false} />
               <Line points={flat} stroke={stroke} strokeWidth={LINE_PX} strokeScaleEnabled={false} lineCap="round" lineJoin="round" dash={props.kept ? undefined : [10, 6]} perfectDrawEnabled={false} />
             </Upright>
             {labelled ? <MarkPill {...midway(iso, a, b)} scale={scale} value={read.none ? "No way through" : formatFeet(read.ft)} size="screen" color={stroke} small /> : null}
@@ -224,11 +224,11 @@ function WalkRuler(props: { stops: readonly RulerStop[]; walk: WalkSource; scale
       <Upright>
         {[m.legs[0]!.from, ...m.legs.map((l) => l.to)].map((p, i) => {
           const c = viewPointOf(iso, mid(p));
-          return <Circle key={i} x={c.x} y={c.y} radius={(i === 0 || i === m.legs.length ? 5 : 4) / scale} fill={color} stroke={theme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} />;
+          return <Circle key={i} x={c.x} y={c.y} radius={(i === 0 || i === m.legs.length ? 5 : 4) / scale} fill={color} stroke={boardTheme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} />;
         })}
       </Upright>
       {shown.finding ? (
-        <MarkPill x={last.x} y={last.y} scale={scale} name={props.owner} value="Finding the way…" size="screen" color={theme.color.textMuted} offsetPx={18} />
+        <MarkPill x={last.x} y={last.y} scale={scale} name={props.owner} value="Finding the way…" size="screen" color={boardTheme.color.textMuted} offsetPx={18} />
       ) : shown.reading ? (
         <MarkPill x={last.x} y={last.y} scale={scale} name={props.owner} value={walkText(shown.reading)} size="screen" color={color} offsetPx={18} />
       ) : null}
@@ -282,13 +282,13 @@ function Ruler(props: { stops: readonly RulerStop[]; tokens: Record<string, Toke
       <Upright>
         {points.length > 1 ? (
           <>
-            <Line points={flat} stroke={theme.color.textHalo} opacity={0.45} strokeWidth={HALO_PX} strokeScaleEnabled={false} lineCap="round" lineJoin="round" perfectDrawEnabled={false} />
+            <Line points={flat} stroke={boardTheme.color.textHalo} opacity={0.45} strokeWidth={HALO_PX} strokeScaleEnabled={false} lineCap="round" lineJoin="round" perfectDrawEnabled={false} />
             <Line points={flat} stroke={color} strokeWidth={LINE_PX} strokeScaleEnabled={false} lineCap="round" lineJoin="round" dash={props.kept ? undefined : [10, 6]} perfectDrawEnabled={false} />
           </>
         ) : null}
         {points.map((p, i) => {
           const v = viewPointOf(iso, p);
-          return <Circle key={i} x={v.x} y={v.y} radius={(i === 0 || i === points.length - 1 ? 5 : 4) / scale} fill={color} stroke={theme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} />;
+          return <Circle key={i} x={v.x} y={v.y} radius={(i === 0 || i === points.length - 1 ? 5 : 4) / scale} fill={color} stroke={boardTheme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} />;
         })}
       </Upright>
       {legsFt.length > 1
@@ -327,17 +327,17 @@ function RouteMeasure(props: { route: DragRoute; token: Token; scale: number }) 
   const crossing = useTrapCrossing(token, [token, ...corners, to]);
   if (to.x === token.x && to.y === token.y && !route.waiting) return null;
   const left = route.read.left;
-  const color = finding ? theme.color.textMuted : dragColor(left);
+  const color = finding ? boardTheme.color.textMuted : dragColor(left);
   const flat = viewFlat(iso, [token, ...corners, to].map((p) => ({ x: p.x + fp.w / 2, y: p.y + fp.h / 2 })));
   const text = finding ? "Finding the way…" : dragLabel(route.read);
   return (
     <>
       <Upright>
-        <Line points={flat} stroke={theme.color.textHalo} opacity={0.45} strokeWidth={HALO_PX} strokeScaleEnabled={false} lineCap="round" lineJoin="round" />
+        <Line points={flat} stroke={boardTheme.color.textHalo} opacity={0.45} strokeWidth={HALO_PX} strokeScaleEnabled={false} lineCap="round" lineJoin="round" />
         <Line points={flat} stroke={color} strokeWidth={LINE_PX} strokeScaleEnabled={false} lineCap="round" lineJoin="round" dash={[10, 6]} />
         {corners.map((c, i) => {
           const v = viewPointOf(iso, { x: c.x + fp.w / 2, y: c.y + fp.h / 2 });
-          return <Circle key={i} x={v.x} y={v.y} radius={3.5 / scale} fill={color} stroke={theme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} />;
+          return <Circle key={i} x={v.x} y={v.y} radius={3.5 / scale} fill={color} stroke={boardTheme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} />;
         })}
       </Upright>
       <MarkPillStack
@@ -346,7 +346,7 @@ function RouteMeasure(props: { route: DragRoute; token: Token; scale: number }) 
         offsetPx={4}
         pills={[
           { value: text, size: "screen", color },
-          !finding && route.endsIn ? { value: `Ends in ${route.endsIn}'s space`, size: "screen", color: theme.color.warning, small: true } : null,
+          !finding && route.endsIn ? { value: `Ends in ${route.endsIn}'s space`, size: "screen", color: boardTheme.color.warning, small: true } : null,
           !finding && crossing,
         ]}
       />
@@ -376,11 +376,11 @@ function DragMeasure(props: { token: Token; to: Point; read: ReadDrag; scale: nu
   return (
     <>
       <Upright>
-        <Line points={flat} stroke={theme.color.textHalo} opacity={0.45} strokeWidth={HALO_PX} strokeScaleEnabled={false} lineCap="round" lineJoin="round" />
+        <Line points={flat} stroke={boardTheme.color.textHalo} opacity={0.45} strokeWidth={HALO_PX} strokeScaleEnabled={false} lineCap="round" lineJoin="round" />
         <Line points={flat} stroke={color} strokeWidth={LINE_PX} strokeScaleEnabled={false} lineCap="round" lineJoin="round" dash={[10, 6]} />
         {corners.map((c, i) => {
           const v = viewPointOf(iso, { x: c.x + fp.w / 2, y: c.y + fp.h / 2 });
-          return <Circle key={i} x={v.x} y={v.y} radius={3.5 / scale} fill={color} stroke={theme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} />;
+          return <Circle key={i} x={v.x} y={v.y} radius={3.5 / scale} fill={color} stroke={boardTheme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} />;
         })}
       </Upright>
       <MarkPillStack {...endOf(iso, to, fp)} scale={scale} offsetPx={4} pills={[{ value: dragLabel(read), size: "screen", color }, crossing]} />

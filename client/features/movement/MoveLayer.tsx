@@ -6,7 +6,7 @@ import { useIsoGround, useTreeShownStore, useTreeShownView, type IsoGround } fro
 import { TokenGhost } from "../../canvas/TokenNode.tsx";
 import { boardSizes } from "../../lib/boardScale.ts";
 import { footprint, type ViewToken } from "../../lib/scene.ts";
-import { theme } from "../../lib/theme.ts";
+import { boardTheme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
 import type { LayerProps } from "../layers.ts";
 import { holdLabel, type Point } from "./drop.ts";
@@ -38,7 +38,7 @@ export const MoveLayer = memo(function MoveLayer(props: LayerProps) {
       {note && ghosted && note.sceneId === props.scene.id ? (
         <Lift z={iso ? groundUnder(iso, ghosted, note.ghost) : 0}>
           <Group opacity={0.6} listening={false}>
-            <TokenGhost token={ghosted} x={note.ghost.x} y={note.ghost.y} scale={props.scale} color={theme.color.danger} />
+            <TokenGhost token={ghosted} x={note.ghost.x} y={note.ghost.y} scale={props.scale} color={boardTheme.color.danger} />
           </Group>
         </Lift>
       ) : null}
@@ -91,12 +91,12 @@ function HoldMark(props: { token: ViewToken; at: Point; scale: number; text: str
           y={props.at.y + h / 2}
           radiusX={w / 2 + gap}
           radiusY={h / 2 + gap}
-          stroke={theme.color.danger}
+          stroke={boardTheme.color.danger}
           strokeWidth={sizes.ringPx}
           strokeScaleEnabled={false}
         />
       </Lift>
-      <MarkPill {...label} z={z} scale={props.scale} value={props.text} size="screen" color={theme.color.danger} small above />
+      <MarkPill {...label} z={z} scale={props.scale} value={props.text} size="screen" color={boardTheme.color.danger} small above />
     </Group>
   );
 }

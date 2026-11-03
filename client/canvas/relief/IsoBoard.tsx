@@ -24,9 +24,9 @@ import { SightOverlay } from "../../features/vision/SightOverlay.tsx";
 import type { SightMode } from "../../features/vision/sightMode.ts";
 import type { AssetVariant } from "../../lib/api.ts";
 import { cameraOfStage, NO_INSETS, screenToView, type Camera, type Size } from "../../lib/camera.ts";
-import { DISPOSITION_RING } from "../../lib/tokenView.ts";
+import { BOARD_DISPOSITION_RING } from "../../lib/tokenView.ts";
 import { footprint, type ViewToken } from "../../lib/scene.ts";
-import { theme } from "../../lib/theme.ts";
+import { boardTheme, theme } from "../../lib/theme.ts";
 import { footprintCells } from "../../lib/groundCells.ts";
 import { drawnBase, drawnFootprintGround, drawnHeights, groundGroups, heightsStand, isometric, K, toView, type DrawnSource, type Turn } from "../../lib/view.ts";
 import { useStore } from "zustand";
@@ -938,7 +938,7 @@ function decorAt(
 function Silhouette(props: { token: ViewToken; turn: Turn; standee: StandeeIn; scale: number }) {
   const { token, standee } = props;
   const a = standee.art;
-  const ring = DISPOSITION_RING[token.disposition] ?? theme.color.neutral;
+  const ring = BOARD_DISPOSITION_RING[token.disposition] ?? boardTheme.color.neutral;
   const common = { stroke: ring, strokeWidth: 2, strokeScaleEnabled: false, opacity: theme.relief.silhouetteOpacity, listening: false } as const;
   return token.kind === "object" ? (
     <Rect x={a.x0} y={a.y0} width={a.x1 - a.x0} height={a.y1 - a.y0} {...common} />

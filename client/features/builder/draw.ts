@@ -3,7 +3,7 @@ import { CHUNK_CELLS, type AutoWalls, type BuildChunk, type EdgeFeature, type Fr
 import { gridOfShape, isHex } from "#shared/rules/grid.ts";
 import { cornerAt, hexCorners, hexInScene } from "#shared/rules/hex.ts";
 import { cellId, deriveWalls, indexBuild, type WallEdge } from "#shared/rules/walls.ts";
-import { theme } from "../../lib/theme.ts";
+import { boardTheme, theme } from "../../lib/theme.ts";
 import { buildDrawing, swingSide, wallRuns, type BuildDrawing, type CellRect, type TexturedTerrain } from "./geometry.ts";
 import { reliefPaths, stairCells, stairPaths, TREADS, type ReliefPaths, type StairPaths } from "./heights/relief.ts";
 import { TERRAIN_COLORS, TEXTURE_CELLS } from "./textures.ts";
@@ -422,9 +422,9 @@ export function drawLabel(g: CanvasRenderingContext2D, label: Pick<Label, "x" | 
   g.textBaseline = "middle";
   g.lineJoin = "round";
   g.lineWidth = 16;
-  g.strokeStyle = theme.color.textHalo;
+  g.strokeStyle = boardTheme.color.textHalo;
   g.strokeText(label.text, 0, 0);
-  g.fillStyle = theme.color.text;
+  g.fillStyle = boardTheme.color.text;
   g.fillText(label.text, 0, 0);
   g.restore();
 }
@@ -628,13 +628,13 @@ export function drawBuild(g: CanvasRenderingContext2D, paths: BoardPaths, opts: 
     g.save();
     g.lineCap = "round";
     g.setLineDash([0.12, 0.14]);
-    g.strokeStyle = theme.color.accentSoft;
+    g.strokeStyle = boardTheme.color.accentSoft;
     g.lineWidth = Math.max(0.05, 2 / scale);
     g.stroke(paths.noWalls);
     g.restore();
-    g.fillStyle = theme.color.accentSoft;
+    g.fillStyle = boardTheme.color.accentSoft;
     g.fill(paths.locks);
-    g.strokeStyle = theme.color.accentSoft;
+    g.strokeStyle = boardTheme.color.accentSoft;
     g.lineWidth = Math.max(0.04, 1.5 / scale);
     // A secret door not yet found stands as a wall in the relief, its mark staying flat.
     if (!standing) g.stroke(paths.secrets);

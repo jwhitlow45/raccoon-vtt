@@ -5,8 +5,8 @@ import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import { useDraggedIds } from "../../canvas/draggedIds.ts";
 import { MarkPill } from "../../canvas/IsoParts.tsx";
 import { useIsoGround, useTreeShownView } from "../../canvas/relief/context.ts";
-import { theme } from "../../lib/theme.ts";
-import { DISPOSITION_RING } from "../../lib/tokenView.ts";
+import { boardTheme } from "../../lib/theme.ts";
+import { BOARD_DISPOSITION_RING } from "../../lib/tokenView.ts";
 import { useLiveTokens } from "../areas/useLiveTokens.ts";
 import type { LayerProps } from "../layers.ts";
 import { ringShape, type RingShape } from "./rings.ts";
@@ -67,7 +67,7 @@ export function TokenRings(props: { token: Token; rules: DistanceRules; grid: Gr
     // The ring list is compared by its contents, so a token update that keeps it costs nothing.
     [key, x, y, elevation, size, w, h, height, rules, bounds.w, bounds.h, grid.shape === "hex" ? grid.orient : "squares"],
   );
-  const color = DISPOSITION_RING[token.disposition] ?? theme.color.neutral;
+  const color = BOARD_DISPOSITION_RING[token.disposition] ?? boardTheme.color.neutral;
   return (
     <>
       {shapes.map(({ ft, shape }) => (
@@ -88,7 +88,7 @@ function Ring(props: { ft: number; shape: RingShape; color: string; scale: numbe
         <>
           <Shape
             sceneFunc={scene}
-            stroke={theme.color.textHalo}
+            stroke={boardTheme.color.textHalo}
             opacity={0.35}
             strokeWidth={HALO_PX}
             strokeScaleEnabled={false}

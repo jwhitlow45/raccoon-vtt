@@ -1,5 +1,5 @@
 import type { Actor, Effect, HpVisibility, Token } from "#shared/model.ts";
-import { theme } from "./theme.ts";
+import { boardTheme, theme } from "./theme.ts";
 
 /**
  * Pure pieces of how a token looks: its HP readout, its condition chips, the
@@ -277,6 +277,8 @@ export function elevationBadge(elevation: number): string | null {
  * the tether to its holder and its range rings, so they never drift apart.
  */
 export const DISPOSITION_RING: Readonly<Record<Token["disposition"], string>> = { ally: theme.color.ally, neutral: theme.color.neutral, hostile: theme.color.hostile };
+/** The same rings as plain dark hex, for what draws them on the board, which keeps the dark look and cannot read a CSS variable. */
+export const BOARD_DISPOSITION_RING: Readonly<Record<Token["disposition"], string>> = { ally: boardTheme.color.ally, neutral: boardTheme.color.neutral, hostile: boardTheme.color.hostile };
 
 // ---------------------------------------------------------------- name labels
 

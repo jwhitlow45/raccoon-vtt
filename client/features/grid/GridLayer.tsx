@@ -4,7 +4,7 @@ import { isHex, sceneGrid } from "#shared/rules/grid.ts";
 import type { HexGrid } from "#shared/rules/hex.ts";
 import { hexLinesInView } from "../../canvas/layers/hexSpans.ts";
 import { useStore } from "zustand";
-import { theme } from "../../lib/theme.ts";
+import { boardTheme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
 import type { LayerProps } from "../layers.ts";
 import { boxCorner, boxSides, canonicalToWorld, type Calibration } from "./calibrate.ts";
@@ -41,7 +41,7 @@ export function GridLayer(props: LayerProps) {
         <ProposedHexes grid={grid} cal={cal} map={map} />
       ) : (
       <Shape
-        stroke={theme.color.crest}
+        stroke={boardTheme.color.crest}
         strokeWidth={1}
         strokeScaleEnabled={false}
         opacity={0.85}
@@ -68,7 +68,7 @@ export function GridLayer(props: LayerProps) {
         y={topLeft.y}
         width={sides.w / map.cellPx}
         height={sides.h / map.cellPx}
-        stroke={theme.color.crest}
+        stroke={boardTheme.color.crest}
         strokeWidth={3}
         strokeScaleEnabled={false}
         fill="rgba(247, 223, 0, 0.08)"
@@ -79,7 +79,7 @@ export function GridLayer(props: LayerProps) {
           <Group key={corner} x={p.x} y={p.y}>
             {/* The touch area, faint, so the DM can see how far a grab reaches. */}
             <Circle radius={HANDLE_HIT_PX / scale} fill="rgba(247, 223, 0, 0.15)" />
-            <Circle radius={7 / scale} fill={theme.color.crest} stroke="#000000" strokeWidth={1.5} strokeScaleEnabled={false} />
+            <Circle radius={7 / scale} fill={boardTheme.color.crest} stroke="#000000" strokeWidth={1.5} strokeScaleEnabled={false} />
           </Group>
         );
       })}
@@ -104,7 +104,7 @@ function ProposedHexes(props: { grid: HexGrid; cal: Calibration; map: Calibratio
   return (
     <Group x={(cal.originPx.x - map.originPx.x) / map.cellPx} y={(cal.originPx.y - map.originPx.y) / map.cellPx} scaleX={k} scaleY={k}>
       <Shape
-        stroke={theme.color.crest}
+        stroke={boardTheme.color.crest}
         strokeWidth={1}
         strokeScaleEnabled={false}
         opacity={0.85}

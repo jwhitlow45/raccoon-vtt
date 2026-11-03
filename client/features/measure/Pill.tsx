@@ -2,7 +2,7 @@ import type Konva from "konva";
 import { Label, Tag, Text } from "react-konva";
 import { useBoardView } from "../../canvas/boardView.ts";
 import { screenPx } from "../../lib/boardScale.ts";
-import { theme } from "../../lib/theme.ts";
+import { boardTheme, theme } from "../../lib/theme.ts";
 import { LEADING, pillGeometry, pillPlace, pillStackPlace, POINTER_WIDTH_PX, PILL_STROKE_PX, type PillProps, type StackPill } from "./pillPlace.ts";
 
 export { pillGeometry, pillPlace, pillReach, pillStackPlace, type PillProps, type StackPill } from "./pillPlace.ts";
@@ -85,7 +85,7 @@ function PillShape(props: Omit<PillProps, "x" | "y"> & { at: { x: number; y: num
   return (
     <Label x={props.at.x} y={props.at.y} scaleX={s} scaleY={s} listening={false}>
       <Tag
-        fill={theme.color.overlay}
+        fill={boardTheme.color.overlay}
         stroke={props.color}
         strokeWidth={PILL_STROKE_PX}
         cornerRadius={theme.radius.sm}
@@ -99,7 +99,7 @@ function PillShape(props: Omit<PillProps, "x" | "y"> & { at: { x: number; y: num
         fontSize={g.fontSize}
         fontStyle="bold"
         fontFamily={theme.font.body}
-        fill={theme.color.text}
+        fill={boardTheme.color.text}
         padding={g.padding}
         lineHeight={LEADING}
         wrap="none"

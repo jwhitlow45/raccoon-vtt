@@ -3,7 +3,7 @@ import { Circle, Line, Rect, Shape } from "react-konva";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import type { BuildChunk, Label, Light, Scene } from "#shared/model.ts";
-import { theme } from "../../lib/theme.ts";
+import { boardTheme } from "../../lib/theme.ts";
 import { useAccent } from "../../state/accent.ts";
 import { useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
@@ -171,7 +171,7 @@ function HexPreview(props: { scene: Scene; scale: number; g: HexGrid }) {
   const last = points[points.length - 1];
   const r = rect ? rectBetween(rect.a, rect.b) : null;
   const dot = (p: Point, i: number, big: boolean) => (
-    <Circle key={i} x={p.x} y={p.y} radius={(big ? 11 : 5) / scale} fill={big ? theme.color.accentSoft : accent} stroke="#000000" strokeWidth={1} strokeScaleEnabled={false} listening={false} />
+    <Circle key={i} x={p.x} y={p.y} radius={(big ? 11 : 5) / scale} fill={big ? boardTheme.color.accentSoft : accent} stroke="#000000" strokeWidth={1} strokeScaleEnabled={false} listening={false} />
   );
   return (
     <>
@@ -201,7 +201,7 @@ function HexPreview(props: { scene: Scene; scale: number; g: HexGrid }) {
           y={Math.min(rect.a.y, rect.b.y)}
           width={Math.abs(rect.b.x - rect.a.x)}
           height={Math.abs(rect.b.y - rect.a.y)}
-          stroke={mode === "rough" && !clearing ? accent : theme.color.danger}
+          stroke={mode === "rough" && !clearing ? accent : boardTheme.color.danger}
           strokeWidth={2}
           strokeScaleEnabled={false}
           dash={[6, 4]}
@@ -280,7 +280,7 @@ function SquarePreview(props: { scene: Scene; scale: number }) {
           height={r.h}
           fill={erasing ? ERASE_FILL : TERRAIN_COLORS[floor]}
           opacity={0.6}
-          stroke={erasing ? theme.color.danger : accent}
+          stroke={erasing ? boardTheme.color.danger : accent}
           strokeWidth={2}
           strokeScaleEnabled={false}
           listening={false}
@@ -295,7 +295,7 @@ function SquarePreview(props: { scene: Scene; scale: number }) {
               x={p.x}
               y={p.y}
               radius={(i === 0 && poly.length >= 3 ? 11 : 5) / scale}
-              fill={i === 0 ? theme.color.accentSoft : accent}
+              fill={i === 0 ? boardTheme.color.accentSoft : accent}
               stroke="#000000"
               strokeWidth={1}
               strokeScaleEnabled={false}

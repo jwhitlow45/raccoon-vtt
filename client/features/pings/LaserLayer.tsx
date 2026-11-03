@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { Group, Shape } from "react-konva";
-import { theme } from "../../lib/theme.ts";
+import { boardTheme } from "../../lib/theme.ts";
 import { useLowPower } from "../device/settings.ts";
 import { LASER_FADE_MS } from "../../state/ephemeral.ts";
 import type { LaserTrail } from "../../state/types.ts";
@@ -41,7 +41,7 @@ export const LaserLayer = memo(function LaserLayer(props: LayerProps) {
   return (
     <Group listening={false}>
       {trails.map((t) => {
-        const color = members?.[t.from]?.color ?? theme.color.danger;
+        const color = members?.[t.from]?.color ?? boardTheme.color.danger;
         const name = t.on ? markOwner(t, members) : null;
         const head = t.points[t.points.length - 1];
         return (
@@ -73,7 +73,7 @@ function Trail(props: { trail: LaserTrail; now: number; still: boolean; scale: n
         // A dark halo under the colored core keeps it readable on any map.
         for (const [width, style, strength] of [
           [GLOW_PX, color, 0.35],
-          [CORE_PX + 2, theme.color.textHalo, 0.5],
+          [CORE_PX + 2, boardTheme.color.textHalo, 0.5],
           [CORE_PX, color, 0.95],
         ] as const) {
           ctx.setAttr("lineWidth", width / scale);

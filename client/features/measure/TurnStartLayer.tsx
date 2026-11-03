@@ -9,7 +9,7 @@ import { measureLabel } from "../../canvas/measureText.ts";
 import { boardSizes } from "../../lib/boardScale.ts";
 import { overlaps, type Box } from "../../lib/boardText.ts";
 import { displayName } from "../../lib/scene.ts";
-import { theme } from "../../lib/theme.ts";
+import { boardTheme } from "../../lib/theme.ts";
 import { riderLine, turnMoverId } from "../attach/turns.ts";
 import type { LayerProps } from "../layers.ts";
 import { speedsOf } from "../movement/preview.ts";
@@ -101,7 +101,7 @@ export const TurnStartLayer = memo(function TurnStartLayer(props: LayerProps) {
   const iso = useIsoGround();
   if (!trail || !token || !marker) return null;
 
-  const color = theme.color.accentSoft;
+  const color = boardTheme.color.accentSoft;
   const lines = iso === null || iso.place === "ground";
   const pill = iso === null || iso.place === "upright";
   return (
@@ -162,13 +162,13 @@ function TrailLines(props: { trail: TurnTrail; color: string; scale: number }) {
         const points = seg.points.flatMap((p) => [p.x, p.y]);
         return (
           <Group key={seg.leg} opacity={seg.counted ? 1 : UNCOUNTED_OPACITY} listening={false}>
-            <Line points={points} stroke={theme.color.textHalo} opacity={0.45} strokeWidth={HALO_PX} strokeScaleEnabled={false} lineCap="round" lineJoin="round" />
+            <Line points={points} stroke={boardTheme.color.textHalo} opacity={0.45} strokeWidth={HALO_PX} strokeScaleEnabled={false} lineCap="round" lineJoin="round" />
             <Line points={points} stroke={color} strokeWidth={LINE_PX} strokeScaleEnabled={false} lineCap="round" lineJoin="round" dash={[2, 6]} />
           </Group>
         );
       })}
       {centers.slice(1, centers.length - 1).map((c, i) => (
-        <Circle key={i} x={c.x} y={c.y} radius={DOT_PX / scale} fill={color} stroke={theme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} listening={false} />
+        <Circle key={i} x={c.x} y={c.y} radius={DOT_PX / scale} fill={color} stroke={boardTheme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} listening={false} />
       ))}
     </>
   );

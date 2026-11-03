@@ -1,6 +1,6 @@
 import { Circle, Line, Rect } from "react-konva";
 import { useStore } from "zustand";
-import { theme } from "../../../lib/theme.ts";
+import { boardTheme } from "../../../lib/theme.ts";
 import { useAccent } from "../../../state/accent.ts";
 import { useScoped } from "../../../state/scope.ts";
 import { useRoomView } from "../../../state/view.ts";
@@ -41,7 +41,7 @@ export function StampHandles(props: LayerProps) {
       <Line points={corners} closed stroke="#000000" strokeWidth={4} strokeScaleEnabled={false} opacity={0.5} listening={false} />
       <Line points={corners} closed stroke={accent} strokeWidth={2} strokeScaleEnabled={false} dash={[6, 4]} listening={false} />
       <Line points={[h.top.x, h.top.y, h.rotate.x, h.rotate.y]} stroke={accent} strokeWidth={2} strokeScaleEnabled={false} listening={false} />
-      <Circle x={h.rotate.x} y={h.rotate.y} radius={knob} fill={theme.color.surfaceRaised} stroke={accent} strokeWidth={3} strokeScaleEnabled={false} listening={false} />
+      <Circle x={h.rotate.x} y={h.rotate.y} radius={knob} fill={boardTheme.color.surfaceRaised} stroke={accent} strokeWidth={3} strokeScaleEnabled={false} listening={false} />
       <Circle x={h.rotate.x} y={h.rotate.y} radius={knob / 3} fill={accent} listening={false} />
       <Rect
         x={h.resize.x}
@@ -51,7 +51,7 @@ export function StampHandles(props: LayerProps) {
         offsetX={knob}
         offsetY={knob}
         rotation={pose.rotation}
-        fill={theme.color.surfaceRaised}
+        fill={boardTheme.color.surfaceRaised}
         stroke={accent}
         strokeWidth={3}
         strokeScaleEnabled={false}

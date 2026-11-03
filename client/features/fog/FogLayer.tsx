@@ -4,14 +4,14 @@ import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import type { FogDraft, FogOp, GridShape } from "#shared/model.ts";
 import { gridOfShape } from "#shared/rules/grid.ts";
-import { theme } from "../../lib/theme.ts";
+import { boardTheme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
 import type { LayerProps } from "../layers.ts";
 import { draftOutlines, opKey, rectShape } from "./shapes.ts";
 import { useFogStore } from "./store.ts";
 
 /** Reveals outline in the crest yellow, hides in red. */
-const REVEAL = theme.color.crest;
+const REVEAL = boardTheme.color.crest;
 const HIDE = "#ff7a7a";
 
 /**

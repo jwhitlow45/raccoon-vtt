@@ -22,7 +22,8 @@ export function FlashLayer(props: LayerProps) {
   const color = useTreeShownView((s) => (s.you ? s.view?.members[s.you.memberId]?.color : undefined));
   const iso = useIsoGround();
   if (props.role !== "dm" || !current || current.sceneId !== props.scene.id) return null;
-  const { accent } = accentFor(color);
+  // The board keeps the dark look, so the flash takes the accent resolved for dark.
+  const { accent } = accentFor(color, "dark");
   const px = 1 / props.scale;
   const shape = flashShape(iso, current, props.scale);
   if (shape.kind === "line") {

@@ -1,7 +1,7 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import type { RoomState, Trap } from "#shared/model.ts";
 import { Loading } from "../../components/Loading.tsx";
-import { theme } from "../../lib/theme.ts";
+import { boardTheme, theme } from "../../lib/theme.ts";
 import { findDoor } from "../doors/doors.ts";
 import { exportContent } from "../mapexport/content.ts";
 import { renderMapPng } from "../mapexport/render.ts";
@@ -21,6 +21,9 @@ const LONG_SIDE_PX = 800;
  * dungeon Make sends and not a separate drawing of the plan. Over it, out
  * of the reading order, the armed traps hatched in the trap red and a ring
  * on the entrance room. The picture is an `img` named by the summary.
+ * The picture, its ground and the marks over it keep the board's dark look
+ * in either theme, as the map does, and the marks are SVG presentation
+ * attributes, which cannot read a CSS variable, so they take `boardTheme`.
  *
  * The previous picture stays while the next one draws, so a choice that
  * changes nothing much never flashes the box empty. The dialog hears when
@@ -93,7 +96,7 @@ export function DungeonPreview(props: {
         display: "grid",
         placeItems: "center",
         borderRadius: theme.radius.md,
-        background: theme.color.bg,
+        background: boardTheme.color.bg,
         overflow: "hidden",
       }}
     >
@@ -103,7 +106,7 @@ export function DungeonPreview(props: {
           <svg aria-hidden viewBox={`0 0 ${plan.w} ${plan.h}`} preserveAspectRatio="none" style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
             <defs>
               <pattern id={hatch} width={0.5} height={0.5} patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-                <line x1={0} y1={0} x2={0} y2={0.5} stroke={theme.color.danger} strokeWidth={0.18} />
+                <line x1={0} y1={0} x2={0} y2={0.5} stroke={boardTheme.color.danger} strokeWidth={0.18} />
               </pattern>
             </defs>
             {traps.map((t) => (
@@ -138,7 +141,7 @@ function TrapMark(props: { trap: Trap; room: RoomState; sceneId: string; hatch: 
     return (
       <>
         {zone.cells.map((r, i) => (
-          <rect key={i} x={r.x} y={r.y} width={r.w} height={r.h} fill={`url(#${props.hatch})`} stroke={theme.color.danger} strokeWidth={1} style={THIN} />
+          <rect key={i} x={r.x} y={r.y} width={r.w} height={r.h} fill={`url(#${props.hatch})`} stroke={boardTheme.color.danger} strokeWidth={1} style={THIN} />
         ))}
       </>
     );
@@ -148,14 +151,14 @@ function TrapMark(props: { trap: Trap; room: RoomState; sceneId: string; hatch: 
     const [bx, by] = zone.wire.b;
     return (
       <>
-        <line x1={ax} y1={ay} x2={bx} y2={by} stroke={theme.color.textHalo} strokeWidth={4} style={THIN} />
-        <line x1={ax} y1={ay} x2={bx} y2={by} stroke={theme.color.danger} strokeWidth={2} style={THIN} />
+        <line x1={ax} y1={ay} x2={bx} y2={by} stroke={boardTheme.color.textHalo} strokeWidth={4} style={THIN} />
+        <line x1={ax} y1={ay} x2={bx} y2={by} stroke={boardTheme.color.danger} strokeWidth={2} style={THIN} />
       </>
     );
   }
   const door = findDoor(props.room.buildChunks, props.sceneId, zone.door);
   if (!door) return null;
-  return <rect x={door.mid.x - 0.35} y={door.mid.y - 0.35} width={0.7} height={0.7} fill={`url(#${props.hatch})`} stroke={theme.color.danger} strokeWidth={1} style={THIN} />;
+  return <rect x={door.mid.x - 0.35} y={door.mid.y - 0.35} width={0.7} height={0.7} fill={`url(#${props.hatch})`} stroke={boardTheme.color.danger} strokeWidth={1} style={THIN} />;
 }
 
 /** A white ring over a dark one, so it reads on floor and on rock alike. */
@@ -164,8 +167,8 @@ function EntranceRing(props: { rect: DungeonPlan["entrance"] }) {
   const ring = { x: x - 0.5, y: y - 0.5, width: w + 1, height: h + 1, rx: 0.8, fill: "none" };
   return (
     <>
-      <rect {...ring} stroke={theme.color.textHalo} strokeWidth={4} style={THIN} />
-      <rect {...ring} stroke={theme.color.white} strokeWidth={2} style={THIN} />
+      <rect {...ring} stroke={boardTheme.color.textHalo} strokeWidth={4} style={THIN} />
+      <rect {...ring} stroke={boardTheme.color.white} strokeWidth={2} style={THIN} />
     </>
   );
 }
