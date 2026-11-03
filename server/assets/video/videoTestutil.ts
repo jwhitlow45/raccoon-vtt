@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { EBML_ID as I, encodeVint } from "./webm.ts";
 
 /**
@@ -858,4 +859,35 @@ export function mp4WithSecretsFrom(bytes: Buffer): Buffer {
     beforeMoov: [bx("free", Buffer.from(SECRETS.free))],
     inMoov: [locationUdta(), appleLocationMeta()],
   });
+}
+
+// Growth ----------------------------------------------------------------------
+
+/**
+ * The heavy tests compare the work at the caps with the work at an eighth of
+ * them, rather than time it against a fixed budget: a slow or shared test
+ * machine stretches both alike, so the ratio proves the same thing on any
+ * machine. Linear work grows about 8 times, and the quadratic work these tests
+ * guard against (every edit against every media range, every sample against
+ * every mdat) 64 times. 20 leaves room for noise either way.
+ */
+export const GROWTH_SCALE = 8;
+export const NEAR_LINEAR_GROWTH = 20;
+
+/**
+ * Asserts that `cpuMsAt(scale)`, the CPU time of the work at 1/scale of the
+ * caps, grows near linearly from an eighth to the whole, and that the whole
+ * stays under `backstopMs`, a cap no runner comes near. One eighth runs first
+ * and is dropped, so every timed run finds the code warm. The eighth takes
+ * the least of two runs, since noise only ever adds time, and runs before
+ * the whole, so it never pays for collecting the whole's garbage.
+ */
+export async function assertNearLinear(what: string, cpuMsAt: (scale: number) => Promise<number>, backstopMs: number): Promise<void> {
+  await cpuMsAt(GROWTH_SCALE);
+  const eighth = Math.min(await cpuMsAt(GROWTH_SCALE), await cpuMsAt(GROWTH_SCALE));
+  const whole = await cpuMsAt(1);
+  const growth = whole / Math.max(eighth, 0.1);
+  const read = `${what} took ${whole.toFixed(1)} ms of CPU at the caps and ${eighth.toFixed(1)} ms at an eighth`;
+  assert.ok(growth < NEAR_LINEAR_GROWTH, `${read}, ${growth.toFixed(1)} times: not near linear`);
+  assert.ok(whole < backstopMs, `${read}, over the ${backstopMs} ms backstop`);
 }

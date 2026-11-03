@@ -7,7 +7,7 @@ import fc from "fast-check";
 import { runSettings } from "#shared/propertyTestutil.ts";
 import { AssetError } from "../errors.ts";
 import { checkVideoBytes } from "./check.ts";
-import { bx, mp4File } from "./videoTestutil.ts";
+import { assertNearLinear, bx, GROWTH_SCALE, mp4File } from "./videoTestutil.ts";
 import { Budget, BufferSource, EditIntoMediaError, Edits, FileWindow, Tally, WINDOW_BYTES } from "./window.ts";
 
 /** The header check's reads and edits (docs/design/design-v1-animated-maps.md 10). */
@@ -154,39 +154,59 @@ test("two writes over one byte are the check's own bug", () => {
 /**
  * The reviewers' shape (AMBUILD-ASTRA-01, AMBUILD-SOL-001): 180,002 edits
  * between 96,000 media ranges, as a WebM with a void element after each of
- * its blocks makes. Every edit against every range took 10 to 14 s.
+ * its blocks makes, or 1/`scale` of each. Every edit against every range
+ * took 10 to 14 s.
  */
-test("180,002 edits between 96,000 media ranges check and land well inside the budget", async () => {
+function reviewersEdits(scale: number): { edits: Edits; length: number } {
   const edits = new Edits();
   let at = 0;
-  for (let i = 0; i < 96_000; i++) {
+  for (let i = 0; i < 96_000 / scale; i++) {
     edits.protect(at, at + 9);
     at += 9;
-    if (i < 90_001) {
+    if (i < 90_001 / scale) {
       edits.put(at, Buffer.from([0xec, 0x81]));
       edits.zero(at + 2, at + 3);
       at += 3;
     }
   }
-  assert.equal(edits.writes.length + edits.zeroes.length, 180_002);
+  return { edits, length: at };
+}
+
+test("180,002 edits between 96,000 media ranges check and land in near-linear time", async () => {
   // CPU time, with a wall-clock budget no busy machine reaches: a shared test machine stretches the wall clock, never the work.
   const roomy = () => new Budget(120_000);
-  const cpu = (since: NodeJS.CpuUsage) => {
+  const cpuMs = async (run: () => unknown) => {
+    const since = process.cpuUsage();
+    await run();
     const used = process.cpuUsage(since);
     return (used.user + used.system) / 1000;
   };
-  const guarding = process.cpuUsage();
-  edits.assertOutsideMedia(roomy());
-  assert.ok(cpu(guarding) < 1_000, `the guard took ${Math.round(cpu(guarding))} ms of CPU`);
+  const sizes = new Map([1, GROWTH_SCALE].map((scale) => [scale, reviewersEdits(scale)]));
+  const at = (scale: number) => sizes.get(scale)!;
+  assert.equal(at(1).edits.writes.length + at(1).edits.zeroes.length, 180_002);
+  // The guard sorts the edits and the media ranges and passes over each once, so on any machine it costs about what those sorts cost there: every edit against every range cost a thousand times that. Sorting slows past the cache, which an eighth's growth would read as noise. One run first, warming the code, holds a backstop no runner comes near. Then each reading is the least of five, each of ten runs, well above the clock's grain.
+  const { edits } = at(1);
+  const firstMs = await cpuMs(() => edits.assertOutsideMedia(roomy()));
+  assert.ok(firstMs < 2_000, `the guard took ${Math.round(firstMs)} ms of CPU, over the 2000 ms backstop`);
+  const byStart = (a: { start: number }, b: { start: number }) => a.start - b.start;
+  const least = async (run: () => void) => {
+    let ms = Infinity;
+    for (let k = 0; k < 5; k++) ms = Math.min(ms, await cpuMs(() => { for (let i = 0; i < 10; i++) run(); }));
+    return ms;
+  };
+  const sortMs = await least(() => { edits.touched().sort(byStart); [...edits.protected].sort(byStart); });
+  const guardMs = await least(() => edits.assertOutsideMedia(roomy()));
+  assert.ok(guardMs < 10 * sortMs, `the guard took ${(guardMs / 10).toFixed(1)} ms of CPU, ${(guardMs / sortMs).toFixed(1)} times the sorts it needs`);
   const dir = await mkdtemp(join(tmpdir(), "rvtt-window-"));
   try {
-    const path = join(dir, "v");
-    const original = Buffer.alloc(at, 0x55);
-    await writeFile(path, original);
-    const writing = process.cpuUsage();
-    await edits.applyToFile(path, roomy());
-    assert.ok(cpu(writing) < 2_500, `the writes took ${Math.round(cpu(writing))} ms of CPU`);
-    assert.ok((await readFile(path)).equals(edits.applyTo(original)));
+    const path = (scale: number) => join(dir, `v${scale}`);
+    const original = (scale: number) => Buffer.alloc(at(scale).length, 0x55);
+    // Only a backstop, at twice what a CI runner took (3.6 s): the growth is the check.
+    await assertNearLinear("the writes", async (scale) => {
+      await writeFile(path(scale), original(scale));
+      return cpuMs(() => at(scale).edits.applyToFile(path(scale), roomy()));
+    }, 7_500);
+    assert.ok((await readFile(path(1))).equals(at(1).edits.applyTo(original(1))));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
