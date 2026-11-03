@@ -457,33 +457,76 @@ export class FakeRoomGateway implements RoomGateway {
  * takes the callback form. Returns the undo.
  */
 export function loseNextCommit(pool: pg.Pool, writes: (sql: string) => boolean, meanwhile: () => Promise<void> = async () => undefined): () => void {
-  const connect = pool.connect.bind(pool) as () => Promise<pg.PoolClient>;
   let armed = true;
+  // Per client, since one pooled client serves many transactions: reset at each begin.
+  const wrote = new WeakMap<object, boolean>();
+  return hookClients(pool, (client, query, args) => {
+    const text = args[0];
+    if (text === "begin") wrote.set(client, false);
+    if (typeof text === "string" && writes(text)) wrote.set(client, true);
+    if (armed && wrote.get(client) === true && text === "commit") {
+      armed = false;
+      return (async () => {
+        await query("commit");
+        await meanwhile();
+        throw new Error("connection lost during commit");
+      })();
+    }
+    return query(...args);
+  });
+}
+
+type Query = (...args: unknown[]) => unknown;
+
+/**
+ * Runs `hook` in place of every statement on the clients the pool hands
+ * out, by both connect() forms (pool.query itself takes the callback
+ * form), until the returned undo. Each client is wrapped once however
+ * often it is borrowed, and the undo puts back the pool's connect and
+ * every client's own query. A suite shares one pool, whose idle clients
+ * outlive a test, so a hook left on one would run in later tests, and a
+ * wrapper per borrow would run it once per borrow.
+ */
+export function hookClients(pool: pg.Pool, hook: (client: pg.PoolClient, query: Query, args: unknown[]) => unknown): () => void {
+  const target = pool as unknown as { connect: unknown };
+  const hadConnect = Object.hasOwn(target, "connect");
+  const previous = target.connect;
+  const connect = (previous as () => Promise<pg.PoolClient>).bind(pool);
+  const wrapped = new Map<pg.PoolClient, { mine: Query; own: boolean; original: unknown }>();
+  let active = true;
   const patched = (cb?: (err: Error | undefined, client?: pg.PoolClient, done?: () => void) => void) => {
-    const wrapped = connect().then((client) => {
-      const query = client.query.bind(client) as (...args: unknown[]) => unknown;
-      let wrote = false;
-      (client as { query: unknown }).query = (...args: unknown[]) => {
-        const text = args[0];
-        if (typeof text === "string" && writes(text)) wrote = true;
-        if (armed && wrote && text === "commit") {
-          armed = false;
-          return (async () => {
-            await query("commit");
-            await meanwhile();
-            throw new Error("connection lost during commit");
-          })();
-        }
-        return query(...args);
-      };
+    const got = connect().then((client) => {
+      if (active && !wrapped.has(client)) {
+        const slot = client as unknown as { query: unknown };
+        const original = slot.query;
+        const query = (original as Query).bind(client);
+        // Inactive once undone: a hook stacked on top of this one keeps calling it.
+        const mine: Query = (...args) => (active ? hook(client, query, args) : query(...args));
+        wrapped.set(client, { mine, own: Object.hasOwn(slot, "query"), original });
+        slot.query = mine;
+      }
       return client;
     });
     if (cb) {
-      wrapped.then((client) => cb(undefined, client, () => client.release()), (err: Error) => cb(err));
+      got.then((client) => cb(undefined, client, () => client.release()), (err: Error) => cb(err));
       return undefined;
     }
-    return wrapped;
+    return got;
   };
-  (pool as { connect: unknown }).connect = patched;
-  return () => ((pool as { connect: unknown }).connect = connect);
+  target.connect = patched;
+  return () => {
+    if (!active) return;
+    active = false;
+    if (target.connect === patched) {
+      if (hadConnect) target.connect = previous;
+      else delete target.connect;
+    }
+    for (const [client, w] of wrapped) {
+      const slot = client as unknown as { query: unknown };
+      if (slot.query !== w.mine) continue;
+      if (w.own) slot.query = w.original;
+      else delete slot.query;
+    }
+    wrapped.clear();
+  };
 }

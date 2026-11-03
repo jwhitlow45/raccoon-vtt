@@ -6,7 +6,7 @@ import type { RoomState } from "#shared/model.ts";
 import type { JoinMode } from "#shared/protocol.ts";
 import { ipKey } from "../auth/ipKey.ts";
 import { newMember } from "../auth/roomRecords.ts";
-import { loseNextCommit, randomIp, startTestApp, type TestApp, type TestClient } from "../auth/testing.ts";
+import { hookClients, loseNextCommit, randomIp, startTestApp, type TestApp, type TestClient } from "../auth/testing.ts";
 import { randomToken, sha256 } from "../auth/tokens.ts";
 import { setTurnstileDispatcherForTests } from "../auth/turnstile.ts";
 
@@ -82,66 +82,39 @@ function pauseQuery(pool: pg.Pool, match: (sql: string) => boolean): { reached: 
 
 /**
  * Pauses the first statement matching `match` on a transaction's own client
- * (pool.query's are paused by pauseQuery above) until `go` is called. Both
- * connect() forms keep working, as loseNextCommit's do.
+ * (pool.query's are paused by pauseQuery above) until `go` is called, by
+ * testing.ts hookClients, so the undo leaves no client wrapped.
  */
 function pauseTxStatement(pool: pg.Pool, match: (sql: string) => boolean): { reached: Promise<void>; go: () => void; restore: () => void } {
-  const connect = pool.connect.bind(pool) as () => Promise<pg.PoolClient>;
   let armed = true;
   let reach!: () => void;
   const reached = new Promise<void>((r) => (reach = r));
   let go!: () => void;
   const gate = new Promise<void>((r) => (go = r));
-  const patched = (cb?: (err: Error | undefined, client?: pg.PoolClient, done?: () => void) => void) => {
-    const wrapped = connect().then((client) => {
-      const query = client.query.bind(client) as (...args: unknown[]) => unknown;
-      (client as { query: unknown }).query = (...args: unknown[]) => {
-        if (armed && typeof args[0] === "string" && match(args[0])) {
-          armed = false;
-          reach();
-          return gate.then(() => query(...args));
-        }
-        return query(...args);
-      };
-      return client;
-    });
-    if (cb) {
-      wrapped.then((client) => cb(undefined, client, () => client.release()), (err: Error) => cb(err));
-      return undefined;
+  const restore = hookClients(pool, (_client, query, args) => {
+    if (armed && typeof args[0] === "string" && match(args[0])) {
+      armed = false;
+      reach();
+      return gate.then(() => query(...args));
     }
-    return wrapped;
-  };
-  (pool as { connect: unknown }).connect = patched;
-  return { reached, go, restore: () => ((pool as { connect: unknown }).connect = connect) };
+    return query(...args);
+  });
+  return { reached, go, restore };
 }
 
 /**
  * Runs `before` ahead of every statement on a transaction's own client,
- * which may delay it or throw to fail it. Both connect() forms keep
- * working, as pauseTxStatement's do. Returns the undo.
+ * which may delay it or throw to fail it, by testing.ts hookClients, so the
+ * undo leaves no client wrapped. Returns the undo.
  */
 function beforeTxStatement(pool: pg.Pool, before: (sql: string, values: unknown[][] | undefined) => Promise<void> | void): () => void {
-  const connect = pool.connect.bind(pool) as () => Promise<pg.PoolClient>;
-  const patched = (cb?: (err: Error | undefined, client?: pg.PoolClient, done?: () => void) => void) => {
-    const wrapped = connect().then((client) => {
-      const query = client.query.bind(client) as (...args: unknown[]) => unknown;
-      (client as { query: unknown }).query = (...args: unknown[]) => {
-        if (typeof args[0] !== "string") return query(...args);
-        return (async () => {
-          await before(args[0] as string, args[1] as unknown[][] | undefined);
-          return query(...args);
-        })();
-      };
-      return client;
-    });
-    if (cb) {
-      wrapped.then((client) => cb(undefined, client, () => client.release()), (err: Error) => cb(err));
-      return undefined;
-    }
-    return wrapped;
-  };
-  (pool as { connect: unknown }).connect = patched;
-  return () => ((pool as { connect: unknown }).connect = connect);
+  return hookClients(pool, (_client, query, args) => {
+    if (typeof args[0] !== "string") return query(...args);
+    return (async () => {
+      await before(args[0] as string, args[1] as unknown[][] | undefined);
+      return query(...args);
+    })();
+  });
 }
 
 /** The next grant transaction commits and loses its COMMIT's answer (testing.ts loseNextCommit). */
@@ -725,6 +698,51 @@ describe("join requests: asking, waiting and a DM's answer", () => {
     } finally {
       restore();
     }
+  });
+
+  test("a transaction hook wraps each pooled client once, and after its undo none of it runs and every client has its own query back (JB-ASTRA-12)", async () => {
+    const connect = t.pool.connect;
+    const borrowed = new Set<pg.PoolClient>();
+    const borrow = async (sql: string, n = 3) => {
+      // At once, so several clients are out, then one after another, so the same ones come back.
+      const once = async () => {
+        const client = await t.pool.connect();
+        borrowed.add(client);
+        try {
+          await client.query(sql);
+        } finally {
+          client.release();
+        }
+      };
+      await Promise.all(Array.from({ length: n }, once));
+      for (let i = 0; i < n; i++) await once();
+    };
+    const seen: string[] = [];
+    const restore = beforeTxStatement(t.pool, (sql) => void seen.push(sql));
+    await borrow("select 1 as hooked");
+    assert.equal(seen.filter((s) => s === "select 1 as hooked").length, 6, "once per statement, however often its client was borrowed");
+    restore();
+    assert.equal(t.pool.connect, connect, "the pool's own connect back");
+    for (const client of borrowed) assert.equal(Object.hasOwn(client, "query"), false, "every client's own query back");
+    await borrow("select 1 as hooked");
+    assert.equal(seen.length, 6, "no hook after the undo");
+
+    // The other hooks, armed on clients and undone before they fire, never fire later.
+    const lose = loseNextCommit(t.pool, () => true);
+    const pause = pauseTxStatement(t.pool, (sql) => sql === "select 2 as paused");
+    await borrow("select 3 as armed");
+    pause.restore();
+    lose();
+    const client = await t.pool.connect();
+    try {
+      await client.query("begin");
+      const paused = client.query("select 2 as paused");
+      assert.equal(await Promise.race([paused.then(() => "ran"), new Promise((r) => setTimeout(() => r("paused"), 1_000))]), "ran", "no pause after its undo");
+      await client.query("commit");
+    } finally {
+      client.release();
+    }
+    assert.equal(t.pool.connect, connect);
   });
 
   test("a database error in a let-in's first checks, or in any join request route, answers 503 busy, and the request waits again (JBO1-06)", async () => {
