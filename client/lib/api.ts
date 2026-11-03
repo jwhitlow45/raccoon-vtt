@@ -599,7 +599,7 @@ const room = (roomId: string) => `/api/rooms/${encodeURIComponent(roomId)}`;
 export type PlayerSceneView = { scene: Scene; buildChunks: Record<string, BuildChunk>; labels: Record<string, Label>; stamps: Record<string, Stamp>; fogTiles: Record<string, FogTile> };
 
 export const api = {
-  /** Public server settings: the Turnstile site key when Turnstile is on, and whether image search is. */
+  /** Public server settings: the Turnstile site key when Turnstile is on, whether image search is, and whether the server owner turned animated maps on. */
   getConfig: () => request<ServerConfig>("GET", "/api/config"),
 
   createRoom: (input: { name: string; playerPassword: string; dmName: string; turnstileToken?: string }) =>
