@@ -267,7 +267,7 @@ describe("the Sound panel", { concurrency: false }, () => {
       assert.equal(await list.getByRole("button", { name: loop, exact: true }).getAttribute("aria-pressed"), "true");
     }
     await list.getByRole("button", { name: "Drip", exact: true }).click();
-    await panel.getByText("Four background sounds play at once at most. Stop one first.", { exact: true }).waitFor();
+    await panel.getByText("Up to four background sounds can play at once. Stop one first.", { exact: true }).waitFor();
     assert.equal(Object.keys(playing()?.loops ?? {}).length, 4, "nothing sent for the fifth");
     const rain = panel.getByLabel("Rain volume for everyone", { exact: true });
     await rain.focus();
@@ -399,7 +399,7 @@ describe("the Sound panel", { concurrency: false }, () => {
     await panel.getByRole("heading", { name: "Music", exact: true }).waitFor();
     await waitFor("its file deleted", async () => ((await dmContext.request.get(`${server.origin}/api/assets/${assetId}/full`)).status() === 404 ? true : null), 15_000);
     // The room has no effect of its own left, so Effects offers no Edit, and the board shows the built-ins alone.
-    await effects.getByText("No effects of the room's own yet.", { exact: true }).waitFor();
+    await effects.getByText("No effects added yet.", { exact: true }).waitFor();
     assert.equal(await effects.getByRole("button", { name: /^(Edit|Done)$/ }).count(), 0);
   });
 

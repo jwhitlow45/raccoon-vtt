@@ -69,7 +69,7 @@ describe("the scene's sound line", () => {
     const html = line({});
     assert.match(html, /Forest road has no sound of its own\./);
     assert.deepEqual(buttons(html), ["Use what&#x27;s playing", "Use silence"]);
-    assert.match(html, /Moving the players here plays it\./);
+    assert.match(html, /It plays when you move the players to this scene\./);
   });
 
   test("nothing playing: Use what's playing is off, and says why", () => {
@@ -100,7 +100,7 @@ describe("Background", () => {
 
   test("a fifth says why nothing started", () => {
     const html = renderToStaticMarkup(createElement(LoopToggles, { loops, playing: p, refused: true, editing: false, onToggle: noop, onEdit: noop }));
-    assert.match(html, /Four background sounds play at once at most\. Stop one first\./);
+    assert.match(html, /Up to four background sounds can play at once\. Stop one first\./);
   });
 });
 

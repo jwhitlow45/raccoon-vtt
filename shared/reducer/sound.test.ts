@@ -297,7 +297,7 @@ describe("background sounds (6.3)", () => {
       l2: { soundId: "wind", at: S0 + 2_000, volume: 70 },
       l3: { soundId: "fire", at: S0 + 3_000, volume: 70 },
     });
-    assert.equal(refusal(state, { t: "loop.start", id: "l4", soundId: "birds", volume: 70 }), "Four background sounds play at once at most. Stop one first.");
+    assert.equal(refusal(state, { t: "loop.start", id: "l4", soundId: "birds", volume: 70 }), "Up to four background sounds can play at once. Stop one first.");
     assert.equal(refusal(state, { t: "loop.start", id: "l4", soundId: "rain", volume: 70 }), "That background sound is already playing.");
     assert.equal(refusal(soundRoom(), { t: "loop.start", id: "l0", soundId: "thunder", volume: 70 }), SOUND_WORDS.notLoop);
     assert.equal(refusal(soundRoom(), { t: "loop.start", id: "constructor", soundId: "rain", volume: 70 }), "that id is reserved");

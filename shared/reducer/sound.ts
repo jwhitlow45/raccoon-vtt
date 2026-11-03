@@ -40,7 +40,7 @@ import { gone, invalid, type Tx } from "./tx.ts";
 export const SOUND_WORDS = {
   trackPlaying: "Stop the music first: this track is in the playlist that's playing.",
   loopPlaying: "Stop it first. It is playing now.",
-  fifthLoop: "Four background sounds play at once at most. Stop one first.",
+  fifthLoop: "Up to four background sounds can play at once. Stop one first.",
   loopTwice: "That background sound is already playing.",
   libraryFull: `The room keeps ${SOUND_LIMITS.soundsPerRoom} sounds at most. Delete one first.`,
   playlistsFull: `The room keeps ${SOUND_LIMITS.playlistsPerRoom} playlists at most. Delete one first.`,

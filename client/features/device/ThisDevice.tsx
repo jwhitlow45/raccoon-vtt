@@ -226,7 +226,7 @@ export default function ThisDevice() {
 
 /** Room sound's help (docs/design/design-v1-music.md 4.4). */
 export const ROOM_SOUND_HELP =
-  "Music, background sounds and effects the DM plays. At one table, play it from one device, such as the table display. Music uses about 60 MB of data an hour. On an iPhone it pauses music from other apps and plays with the ringer off.";
+  "Music, background sounds and effects the DM plays. If everyone sits at one table, turn it on for one device only, such as the table display. Music uses about 60 MB of data an hour. On an iPhone it pauses music from other apps and plays even with the ringer off.";
 
 const MIX_PARTS: readonly { key: keyof SoundMix; label: string }[] = [
   { key: "music", label: "Music" },
