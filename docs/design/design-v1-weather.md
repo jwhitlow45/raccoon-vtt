@@ -389,8 +389,9 @@ Where the build went its own way, by lane.
 - The controller's clock is tested in Node with hand-run frames (`store.test.ts`), and the real Konva stage is tested in the browser (`weather.e2e.ts` wx-1 and wx-6), since Node has no canvas.
 - A full-screen sheet is a signal of the bar dock (`sheetFull`), and each layer registration counts as a remount for the step-down's warm-up.
 - This device's help line sits under the group's name, where the radio cards put help, and shows only while Moving is chosen. The table display keeps its choice under its own key, apart from the member's.
-- wx-9's contrast check reads each pill's words from the screen, held still.
-- The bench (`scripts/bench-weather.ts`, 3x phone, processor slowed 4 times) measured rest at most 30.8 ms a second above no weather, against a budget of 60, and pan and drag frames within 0.1 ms.
+- wx-9's contrast check reads each pill's words from the screen, held still, on a 2x page where the words draw whole. At 1x a blurred Snare read 4.02:1 once on sand. Every heavy kind passes at 2x.
+- **The step-down (6.3) counts each tick's whole frame, paint included.** The sceneFunc itself took 0.1 ms on a canvas with no GPU, and the cost landed in painting and compositing after it. Each loop frame posts a message task that runs after paint. A tick's cost is its frame minus the median of the recent frames with no tick, and the room keeps the median of the last 15 ticks once it has 5, so one long task elsewhere cannot step a GPU device down. A tick reports `max(sceneMs, frameCost x SLOW_DRAW_MS / 2)` to the mode, so section 6.1's 2 ms a tick (60 ms a second) meets the mode's 4 ms line. On a software canvas every kind steps to Still within about 8 seconds. On a GPU at 4 times slowdown no kind steps down, and rest costs 13 to 51 ms a second over no weather, within the budget of 60.
+- The bench (`scripts/bench-weather.ts`, 3x phone, processor slowed 4 times, and `--software` for a canvas with no GPU) holds 6.1's gates, with pan and drag frames within 0.1 ms of none.
 
 **The controls and rolls (WX-D).**
 - `buildWeather` lives in `client/features/weather/buildWeather.ts`, apart from the fold's component, so its rules test as plain functions. A pick the weather cannot hold (Strong in fog, Calm or Moderate in a sandstorm) changes nothing, since the fold disables those.
