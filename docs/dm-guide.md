@@ -1771,7 +1771,7 @@ The clock never runs on its own. It moves when you move it, when the party takes
 1. Open **Time**. With no clock yet, the panel is a short form.
 1. Under **Calendar**, pick **Day count** for plain "Day 1, Day 2" dates, or **Months** for a calendar of your own with named months, a week and years. **Months** opens the Calendar dialog, described under [Your own calendar](#your-own-calendar). Its **Save** keeps your calendar on this form, and nothing is sent yet.
 1. Under **It is now**, set the date and the time. A new clock starts at Day 1, 8:00 AM.
-1. Choose whether players see it with **Players see the date and time**, on by default. Off, they see no date or time anywhere, not even in the Log.
+1. Choose whether players see it with **Players see the date and time**, on by default. Off, they don't see the date or time, and their Log stops showing its changes. Lines already in their Log stay.
 1. Press **Start the clock**.
 
 Nothing reaches the table before that last press. A clock you start hidden never shows a player anything, not even the line in the Log that says it started.

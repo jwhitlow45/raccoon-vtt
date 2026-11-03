@@ -12,7 +12,7 @@ import { pickStartKind, savedToStart, START_FORM, type StartForm } from "./calen
 import { composeDraft, calendarSummary } from "./words.ts";
 
 export const START_INTRO = "Track the in-game date and time. You move the clock on as time passes. Party Long Rests and fights move it too.";
-export const SHARE_HELP = "Off, players see no date or time anywhere, not even in the Log.";
+export const SHARE_HELP = "Off, players don't see the date or time, and their Log stops showing its changes.";
 
 /**
  * The Time panel with no clock (docs/design/design-v1-calendar.md 4.1). The

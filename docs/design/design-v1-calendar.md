@@ -48,7 +48,7 @@ The DM opens **Time** (a new panel, "In play" group, after Areas, and in a DM's 
 - "Track the in-game date and time. You move the clock on as time passes. Party Long Rests and fights move it too."
 - **Calendar**, two radio cards: **Day count** ("Day 1, Day 2 and on.") and **Months** ("Months, weekdays and years with names you choose."). Months opens the Calendar dialog (4.3), whose Save only keeps the calendar as a draft on this form, named beside the card ("12 months, 7-day week", with Change). Nothing is sent until Start the clock.
 - **It is now**: Day `1` (or, after Months, the month, day and year), and a time field at 8:00 AM.
-- Switch **Players see the date and time**, on: "Off, players see no date or time anywhere, not even in the Log."
+- Switch **Players see the date and time**, on: "Off, players don't see the date or time, and their Log stops showing its changes."
 - **Start the clock** (primary): the one `clock.start`, with the calendar, the date and the switch as the form holds them. So a hidden Months clock never reaches a player, its start line included.
 
 ### 4.2 The Time panel
