@@ -1478,8 +1478,9 @@ function TopBar(props: {
   const phases = useRoomView((s) => (s.sceneId ? (s.view?.scenes[s.sceneId]?.phases?.length ?? 0) : 0));
   // From 900 px up the clock's chip is the first thing to give way, and comes back once the row has room (docs/design/design-v1-calendar.md 4.8). A phone's bar has none.
   const clockText = useClockChipText();
-  const [chipOffUpTo, setChipOffUpTo] = useState(0);
-  const chip = !props.compact && clockText !== null && width > chipOffUpTo;
+  // The width and the text's length at which the chip last overflowed the row. Up to that width it stays off, unless its text is shorter now (CALB-O-09).
+  const [chipOff, setChipOff] = useState({ upTo: 0, chars: 0 });
+  const chip = !props.compact && clockText !== null && (width > chipOff.upTo || clockText.length < chipOff.chars);
   // From 900 px up the strip sits in the bar whatever it holds, so only a phone's bar records it.
   const measured = props.placement === "bar" && props.compact;
   // A phone's row, a DM's row from 900 px up, which holds Undo, Redo and the Phase menu, any row that holds Full screen, and once Isometric is offered every row, which holds the View button.
@@ -1492,9 +1493,9 @@ function TopBar(props: {
     const tuck = last ? Math.max(0, -parseFloat(getComputedStyle(last).marginRight) || 0) : 0;
     const overflow = row.scrollWidth - row.clientWidth - tuck;
     if (overflow <= 0) return;
-    // The strip leaves first. Once it is in the band, this runs again with the row it left. Then the blackout notice folds into the DM chip's place, or the chip loses its name, then on a phone the gaps' room and then the View button, which the room's menu still reaches, then Full screen, which the Menu and a key still reach, then the Phase menu, and from 900 px up the gaps' room and the View button last.
+    // On a phone the strip leaves first. Once it is in the band, this runs again with the row it left. From 900 px up the clock's chip leaves first, since the strip never moves there. Then the blackout notice folds into the DM chip's place, or the chip loses its name, then on a phone the gaps' room and then the View button, which the room's menu still reaches, then Full screen, which the Menu and a key still reach, then the Phase menu, and from 900 px up the gaps' room and the View button last.
     if (measured) recordOverflow(layoutWidth(), overflow);
-    else if (chip) setChipOffUpTo(layoutWidth());
+    else if (chip) setChipOff({ upTo: layoutWidth(), chars: clockText.length });
     else if (role === "dm" && blackout && !blackoutShort) setBlackoutShortUpTo(layoutWidth());
     else if (role === "dm" && !dmDot) setDmDotUpTo(layoutWidth());
     else if (isoOffered && props.compact && !tight) setTightUpTo(layoutWidth());
@@ -1503,7 +1504,7 @@ function TopBar(props: {
     else if (phaseMenu) setPhaseOffUpTo(layoutWidth());
     else if (isoOffered && !props.compact && !tight) setWideTightUpTo(layoutWidth());
     else if (isoOffered && !props.compact && props.canFit && !viewFolded) setWideFoldUpTo(layoutWidth());
-  }, [checks, measured, chip, recordOverflow, role, blackout, blackoutShort, dmDot, props.compact, props.canFit, tight, viewFolded, fullscreen, phaseMenu]);
+  }, [checks, measured, chip, clockText, recordOverflow, role, blackout, blackoutShort, dmDot, props.compact, props.canFit, tight, viewFolded, fullscreen, phaseMenu]);
   useLayoutEffect(() => {
     const row = rowRef.current;
     if (!checks || !row) return;
