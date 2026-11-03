@@ -34,9 +34,16 @@ function scaledGrid(grid: PhaseGrid, widthPx: number): Pick<SceneMap, "cellPx" |
   return { cellPx: grid.cellPx * scale, originPx: { x: grid.originPx.x * scale, y: grid.originPx.y * scale } };
 }
 
-/** The active image a phase gives the map: its own asset and size, with the reference grid scaled to it. */
-export function phaseMap(grid: PhaseGrid, phase: Pick<MapPhase, "assetId" | "widthPx" | "heightPx">): SceneMap {
-  return { assetId: phase.assetId, widthPx: phase.widthPx, heightPx: phase.heightPx, ...scaledGrid(grid, phase.widthPx) };
+/**
+ * The active image a phase gives the map: its own asset and size, with the
+ * reference grid scaled to it, and its video if it has one. So the map's
+ * video is always the showing phase's, the only one players receive
+ * (docs/design/design-v1-animated-maps.md 7).
+ */
+export function phaseMap(grid: PhaseGrid, phase: Pick<MapPhase, "assetId" | "widthPx" | "heightPx" | "video">): SceneMap {
+  const map: SceneMap = { assetId: phase.assetId, widthPx: phase.widthPx, heightPx: phase.heightPx, ...scaledGrid(grid, phase.widthPx) };
+  if (phase.video !== undefined) map.video = phase.video;
+  return map;
 }
 
 export function gridFits(map: Pick<SceneMap, "cellPx" | "originPx">): boolean {
@@ -99,6 +106,7 @@ export function withPhases(scene: Scene, phases: MapPhaseInput[]): Scene {
   const list: MapPhase[] = phases.map((p) => {
     const phase: MapPhase = { id: p.id, name: p.name, assetId: p.assetId, widthPx: p.widthPx, heightPx: p.heightPx };
     if (p.light !== undefined) phase.light = p.light;
+    if (p.video !== undefined) phase.video = p.video;
     return phase;
   });
   const active = list.find((p) => p.id === scene.phaseId) ?? list[0]!;
@@ -132,7 +140,10 @@ export function sceneSetPhase(tx: Tx, op: OpOf<"scene.setPhase">): void {
 /**
  * `scene.setMap` on a scene with phases: a new image replaces the active
  * phase's, on the reference grid, so it must have the reference's shape.
- * No map at all removes every phase with their grid.
+ * The new map's video replaces the phase's too, and a map without one
+ * leaves the phase a still, as Use the still only does
+ * (docs/design/design-v1-animated-maps.md 4.2). No map at all removes
+ * every phase with their grid.
  */
 export function setMapWithPhases(scene: Scene, map: SceneMap | null): Scene {
   if (map === null) {
@@ -141,7 +152,9 @@ export function setMapWithPhases(scene: Scene, map: SceneMap | null): Scene {
   }
   const active = activePhase(scene);
   if (!scene.phaseGrid || !active) return { ...scene, map };
-  const replaced: MapPhase = { ...active, assetId: map.assetId, widthPx: map.widthPx, heightPx: map.heightPx };
+  const { video: _video, ...still } = active;
+  const replaced: MapPhase = { ...still, assetId: map.assetId, widthPx: map.widthPx, heightPx: map.heightPx };
+  if (map.video !== undefined) replaced.video = map.video;
   const problem = phaseProblem(scene.phaseGrid, replaced);
   if (problem) throw invalid(problem);
   const phases = (scene.phases ?? []).map((p) => (p.id === active.id ? replaced : p));

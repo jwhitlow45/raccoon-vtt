@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import {
   MAX_EPH_BYTES,
+  checkedVideoFacts,
   clientMessageSchema,
   clientOpSchema,
   isPoseOp,
@@ -737,5 +738,64 @@ describe("snap off for a drag (docs/design/design-v1-snap-off.md 5.2)", () => {
     assert.equal(isPoseOp({ t: "token.update", tokenId: "t1", patch: { rotation: 90 } }), true);
     assert.equal(isPoseOp({ t: "token.update", tokenId: "t1", patch: { name: "Bree" } }), false);
     assert.equal(isPoseOp({ t: "token.update", tokenId: "t1", patch: {} }), false);
+  });
+});
+
+describe("a map's video (docs/design/design-v1-animated-maps.md 9.2)", () => {
+  const video = { assetId: "v1", widthPx: 1920, heightPx: 1080, container: "mp4", video: "avc1.640028", audio: "mp4a.40.2", fps: 30, durationMs: 42_000, kbps: 6_000, audioChannels: 2, audioHz: 48_000 };
+  const map = { assetId: "a1", widthPx: 1920, heightPx: 1080, cellPx: 64, originPx: { x: 0, y: 0 } };
+  const setMap = (v: unknown) => clientOpSchema.safeParse({ t: "scene.setMap", sceneId: "s1", map: { ...map, video: v } }).success;
+
+  test("rides on scene.setMap, scene.create and each phase, and is optional everywhere", () => {
+    assert.equal(setMap(video), true);
+    assert.equal(clientOpSchema.safeParse({ t: "scene.setMap", sceneId: "s1", map }).success, true);
+    assert.equal(clientOpSchema.safeParse({ t: "scene.create", scene: { id: "s2", name: "Crypt", bounds: { w: 30, h: 17 }, map: { ...map, video } } }).success, true);
+    const phase = { id: "p1", name: "Day", assetId: "a1", widthPx: 1920, heightPx: 1080 };
+    assert.equal(clientOpSchema.safeParse({ t: "scene.update", sceneId: "s1", patch: { phases: [{ ...phase, video }, { ...phase, id: "p2" }] } }).success, true);
+    assert.equal(clientOpSchema.safeParse({ t: "scene.update", sceneId: "s1", patch: { phases: [{ ...phase, video: { ...video, extra: 1 } }] } }).success, false, "strict");
+  });
+
+  test("its facts are held to the header check's caps", () => {
+    const { audio: _a, audioChannels: _c, audioHz: _h, ...silent } = video;
+    assert.equal(setMap(silent), true, "no sound track");
+    assert.equal(setMap({ ...video, container: "webm", video: "vp09.00.40.08", audio: "opus" }), true);
+    assert.equal(setMap({ ...video, container: "mov" }), false);
+    for (const [field, value] of [
+      ["widthPx", 255],
+      ["widthPx", 4097],
+      ["heightPx", 1080.5],
+      ["fps", 0],
+      ["fps", 62],
+      ["fps", 29.97],
+      ["durationMs", 999],
+      ["durationMs", 600_001],
+      ["kbps", 0],
+      ["kbps", 536_872],
+      ["audioChannels", 0],
+      ["audioHz", 0],
+    ] as const) {
+      assert.equal(setMap({ ...video, [field]: value }), false, `${field} ${value}`);
+    }
+    assert.equal(setMap({ ...video, widthPx: 4096, heightPx: 256, fps: 61, durationMs: 600_000, kbps: 536_871 }), true, "the caps themselves");
+  });
+
+  test("a codec string is letters, digits and dots, so no player's device sees a quote it would close", () => {
+    for (const codec of ["vp8", "vp09.00.40.08", "av01.0.08M.08", "avc1.640028", "mp4a.40.2", "opus"]) assert.equal(setMap({ ...video, video: codec }), true, codec);
+    for (const codec of ["", "vp9\"", "vp9,opus", "vp9 opus", ".vp9", "a".repeat(65), "vp9\n"]) {
+      assert.equal(setMap({ ...video, video: codec }), false, JSON.stringify(codec));
+      assert.equal(setMap({ ...video, audio: codec }), false, JSON.stringify(codec));
+    }
+  });
+
+  test("checkedVideoFacts reads only the known fields, a null as absent, and refuses facts out of bounds", () => {
+    const { assetId: _id, ...facts } = video;
+    assert.deepEqual(checkedVideoFacts(facts), facts);
+    assert.deepEqual(checkedVideoFacts({ ...facts, assetId: "v1", pipeline: 1 }), facts, "more fields are left out");
+    const { audio: _a, audioChannels: _c, audioHz: _h, ...silent } = facts;
+    assert.deepEqual(checkedVideoFacts({ ...silent, audio: null, audioChannels: null, audioHz: null }), silent);
+    assert.equal(checkedVideoFacts({ ...facts, fps: 120 }), undefined);
+    assert.equal(checkedVideoFacts({ ...facts, video: undefined }), undefined);
+    assert.equal(checkedVideoFacts(null), undefined);
+    assert.equal(checkedVideoFacts("webm"), undefined);
   });
 });

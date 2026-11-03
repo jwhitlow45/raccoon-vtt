@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { historyCommandSchema, historyMessageSchema, opAcknowledgmentSchema, restoreHistoryFieldsSchema } from "./undoContract.ts";
 import { saveOutcomePageSchema, saveOutcomeTransitionSchema, savePageAskFieldsSchema, savePageCloseFieldsSchema, saveRechargeSpendSchema } from "./saveOutcomeContract.ts";
-import { LIMITS, MOST_SIGHT_HOLDERS, serializedBytes } from "./limits.ts";
+import { LIMITS, MOST_SIGHT_HOLDERS, VIDEO_LIMITS, serializedBytes } from "./limits.ts";
 import { ATTACH_KINDS } from "./rules/attach.ts";
 import { critBound } from "./dice/crit.ts";
 import { applyMode, diceCount, doubleDice, parseExtra, parseFormula, type Formula } from "./dice/formula.ts";
@@ -30,6 +30,7 @@ import {
   STAMP_MAX_CELLS,
   STAMP_MIN_CELLS,
   STATUS_KEYS,
+  type VideoFacts,
 } from "./model.ts";
 
 /**
@@ -342,12 +343,64 @@ const sceneBounds = z.strictObject({
   w: z.number().int().min(1).max(MAX_SCENE_CELLS),
   h: z.number().int().min(1).max(MAX_SCENE_CELLS),
 });
+/**
+ * An RFC 6381 codec string, such as "vp09.00.40.08", "avc1.640028" or
+ * "mp4a.40.2". Letters, digits and dots only, so a player's device can put
+ * it inside a quoted MIME type for Media Capabilities and `canPlayType`
+ * without anything in it closing the quote.
+ */
+const codecString = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9.]{0,63}$/);
+/**
+ * A map's or a phase's video (docs/design/design-v1-animated-maps.md 9.1).
+ * The client sends the id with the facts it last read from the Library,
+ * and the server overwrites every field but the id from the asset row
+ * before anything reads them (server/rooms/actor.ts withAssetSizes), as it
+ * fills a map's size. The bounds are the header check's caps, so every
+ * stored video imports again.
+ */
+const mapVideo = z.strictObject({
+  assetId: id,
+  widthPx: z.number().int().min(VIDEO_LIMITS.minSidePx).max(VIDEO_LIMITS.maxSidePx),
+  heightPx: z.number().int().min(VIDEO_LIMITS.minSidePx).max(VIDEO_LIMITS.maxSidePx),
+  container: z.enum(["webm", "mp4"]),
+  video: codecString,
+  audio: codecString.optional(),
+  fps: z.number().int().min(1).max(VIDEO_LIMITS.maxFramesInASecond),
+  durationMs: z.number().min(VIDEO_LIMITS.minDurationMs).max(VIDEO_LIMITS.maxDurationMs),
+  // The largest file at the shortest length.
+  kbps: z.number().positive().max(Math.ceil((VIDEO_LIMITS.fileBytes * 8) / VIDEO_LIMITS.minDurationMs)),
+  audioChannels: z.number().int().min(1).max(255).optional(),
+  audioHz: z.number().int().min(1).max(1_000_000).optional(),
+});
+const videoFacts = mapVideo.omit({ assetId: true });
+const VIDEO_FACT_FIELDS = Object.keys(videoFacts.shape) as (keyof VideoFacts)[];
+
+/**
+ * A video row's facts as the server stores and reads them, or undefined
+ * when any is missing or out of the protocol's bounds. Only the known
+ * fields are read, and a null reads as absent, so a row's JSON or a caller's
+ * object with more in it still checks, and what comes back is exactly the
+ * fields a map's video holds.
+ */
+export function checkedVideoFacts(value: unknown): VideoFacts | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  const fields: Record<string, unknown> = {};
+  for (const field of VIDEO_FACT_FIELDS) {
+    const inner = (value as Record<string, unknown>)[field];
+    if (inner !== null && inner !== undefined) fields[field] = inner;
+  }
+  const parsed = videoFacts.safeParse(fields);
+  return parsed.success ? (parsed.data as VideoFacts) : undefined;
+}
+
 const sceneMap = z.strictObject({
   assetId: id,
   widthPx: pixelSize,
   heightPx: pixelSize,
   cellPx: z.number().min(1).max(16_384),
   originPx: z.strictObject({ x: z.number().min(-100_000).max(100_000), y: z.number().min(-100_000).max(100_000) }),
+  /** The shown phase's video over this still (docs/design/design-v1-animated-maps.md 9.2). */
+  video: mapVideo.optional(),
 });
 const defaultView = z.strictObject({ x: coord, y: coord, zoom: z.number().min(0.01).max(100) });
 
@@ -491,7 +544,7 @@ const autoWalls = z.enum(["all", "floor", "off"]);
 /** A Scenes panel folder: a single line that cannot pass for another name, as member names cannot. */
 const folderName = z.string().min(1).max(LIMITS.folderNameChars).regex(NAME_CHARS, "folder names cannot hold control or text direction characters");
 /** A map phase. Its size is the asset's, which the server fills in from the asset row before anything reads it. */
-const mapPhase = z.strictObject({ id, name, assetId: id, widthPx: pixelSize, heightPx: pixelSize, light: lightLevel.optional() });
+const mapPhase = z.strictObject({ id, name, assetId: id, widthPx: pixelSize, heightPx: pixelSize, light: lightLevel.optional(), video: mapVideo.optional() });
 const mapPhases = z
   .array(mapPhase)
   .min(1)
@@ -2770,6 +2823,7 @@ export type FreeWallInput = z.infer<typeof freeWall>;
 export type StampInput = z.infer<typeof stampInput>;
 export type LightInput = z.infer<typeof lightInput>;
 export type MapPhaseInput = z.infer<typeof mapPhase>;
+export type MapVideoInput = z.infer<typeof mapVideo>;
 export type DoorRef = z.infer<typeof doorRef>;
 export type JournalPageInput = z.infer<typeof journalPageInput>;
 export type JournalPatch = z.infer<typeof journalPatch>;
@@ -2853,6 +2907,8 @@ export const mapSchemas = {
   mapPhase,
   mapPhases,
   phaseGrid,
+  /** Animated maps' video, for the stored-state schema and the asset row's facts (docs/design/design-v1-animated-maps.md 9.1). */
+  mapVideo,
   autoWalls,
   folderName,
   /** Wave 4's shapes, for the stored-state schema. */
