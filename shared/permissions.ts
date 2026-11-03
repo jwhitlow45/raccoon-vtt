@@ -1,11 +1,11 @@
 import { chunkKey, doorChunk, holderChunkKey, keys, wallMidpoint } from "./keys.ts";
 import { imageAssetId } from "./imageRef.ts";
 import { eventLines } from "./logRings.ts";
-import type { Actor, BuildChunk, CastAsk, Character, Drawing, DurationAnchor, Effect, ImageRef, InitEntry, JournalAccess, PromptKey, RollTarget, RoomSettings, RoomState, Scene, Token, Viewer } from "./model.ts";
+import type { Actor, BuildChunk, CastAsk, Character, Drawing, DurationAnchor, Effect, ImageRef, InitEntry, JournalAccess, MapVideo, PromptKey, RollTarget, RoomSettings, RoomState, Scene, Token, Viewer } from "./model.ts";
 import { MAX_ROUTE_REACH, syncStampFits, type ActorTarget, type CharacterExpect, type DoorRef, type ExpectPart, type Op, type OpOf, type RefusalCode, type TokenInput, type TokenPatch } from "./protocol.ts";
 import { gridOfToken, hash128, heldFreeDoor, inSightOfNonOwners, ownsCharacter, ownsToken, projectEntity, shownFreeWall, stableStringify, viewerSceneId, type ProjectOpts, type ProjectedEncounter } from "./project.ts";
-import { CHARACTER_CHANGED, LIMITS } from "./limits.ts";
-import { restoreAddedAssets } from "./referencedAssets.ts";
+import { CHARACTER_CHANGED, LIMITS, stillFitsVideo } from "./limits.ts";
+import { referencedVideoIds, restoreAddedAssets } from "./referencedAssets.ts";
 import { handoutPages } from "./handouts.ts";
 import { movementRules, type Blocker, type LegEnd } from "./ruleHooks.ts";
 import { carriedIndex, holderOf, isCreature, landsAt, linkHolds, onHolder, walkerFor, withinReach } from "./rules/attach.ts";
@@ -67,6 +67,8 @@ export type AssetKind = "map" | "token" | "handout" | "thumb" | "video";
  */
 export const VIDEO_SHAPE = "That still isn't the video's shape.";
 export const VIDEO_OFF = "Animated maps are off on this server.";
+/** The `invalid` refusal of a map's video that is not a checked video of this room: deleted since, another room's, or another kind. */
+export const VIDEO_MISSING = "That video isn't in this room any more.";
 
 export type PermissionDeps = {
   /** The view before the actor's pending batch. Its map memory is settled, unlike the staged build's. */
@@ -83,6 +85,15 @@ export type PermissionDeps = {
    * fixture's local server, restores are not checked for deleted images.
    */
   restoredAssetUsable?: (assetId: string, kind: AssetKind) => boolean;
+  /**
+   * The server's ANIMATED_MAPS switch (docs/design/design-v1-animated-maps.md
+   * 9.2). Off, an op may not name a video the room's state does not
+   * already hold somewhere, so phase edits on an existing animated map
+   * still work and no new video comes in. The actor always passes it.
+   * Without it, as in the dev fixture's local server, nothing is refused
+   * for the switch.
+   */
+  animatedMaps?: boolean;
 };
 
 export type Decision = { ok: true } | { ok: false; code: RefusalCode; message: string };
@@ -666,16 +677,20 @@ function forDm(op: Op, c: Check): Decision {
     case "companionBlock.update":
       return imageUsable(c, op.patch.defaultImage) ? OK : GONE;
     case "scene.create":
-      return op.scene.map && !c.asset(op.scene.map.assetId, "map") ? GONE : OK;
+      if (op.scene.map && !c.asset(op.scene.map.assetId, "map")) return GONE;
+      return mapVideosUsable(c, op.scene.map ? [op.scene.map] : []);
     case "scene.delete":
       // Here, where ops arrive, never in the reducer: a stored delete of the players' scene from before the rule still replays, moving them on as it did.
       return op.sceneId === c.state.meta.playerSceneId ? refuse("invalid", MOVE_PLAYERS_FIRST) : OK;
     case "scene.setMap":
-      return op.map && !c.asset(op.map.assetId, "map") ? GONE : OK;
+      if (op.map && !c.asset(op.map.assetId, "map")) return GONE;
+      return mapVideosUsable(c, op.map ? [op.map] : []);
     case "scene.update": {
       // A thumbnail is a `thumb` asset and every phase a `map` asset, each of this room (docs/design/design-v1-maps-vision.md 3.3, 3.4).
       if (op.patch.thumb && !c.asset(op.patch.thumb, "thumb")) return GONE;
-      return (op.patch.phases ?? []).every((phase) => c.asset(phase.assetId, "map")) ? OK : GONE;
+      const phases = op.patch.phases ?? [];
+      if (!phases.every((phase) => c.asset(phase.assetId, "map"))) return GONE;
+      return mapVideosUsable(c, phases);
     }
     case "build.stamps":
       // A stamp from the room's library wears a token image, as a token does (design 8.2).
@@ -717,6 +732,27 @@ function forDm(op: Op, c: Check): Decision {
     default:
       return OK;
   }
+}
+
+/**
+ * The videos an op puts on maps and phases (docs/design/design-v1-animated-maps.md
+ * 9.2), each over its still, whose size the server filled from the still's
+ * row as it filled the video's facts from the video's. While the server's
+ * switch is off, a video the room's state holds nowhere is refused, compared
+ * room-wide as a restore's images are, so renaming, reordering and removing
+ * phases, or a scene copied with its video, still pass. A history restore
+ * never comes here: it puts back what passed these checks once, and
+ * `restoredAssetsUsable` holds it to a `video` row of the room.
+ */
+function mapVideosUsable(c: Check, places: readonly { widthPx: number; heightPx: number; video?: MapVideo | undefined }[]): Decision {
+  const held = c.deps.animatedMaps === false ? referencedVideoIds(c.state) : null;
+  for (const { video, ...still } of places) {
+    if (video === undefined) continue;
+    if (held && !held.has(video.assetId.toLowerCase())) return refuse("invalid", VIDEO_OFF);
+    if (!c.asset(video.assetId, "video")) return refuse("invalid", VIDEO_MISSING);
+    if (!stillFitsVideo(still, video)) return refuse("invalid", VIDEO_SHAPE);
+  }
+  return OK;
 }
 
 /** The refusal of a page private to a DM, who reads every page anyway (docs/design/design-v1-dm-tools.md 3.7). */
