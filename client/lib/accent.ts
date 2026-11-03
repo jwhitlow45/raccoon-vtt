@@ -66,8 +66,8 @@ export function accentFor(color: string | null | undefined, scheme: Scheme = "da
  * turn's text and the Log's whisper label, so a name in it would read as
  * one of them (review LTB-4: orange came within 4.2 of it on light).
  * Muted text does not count, since words are not a control that could
- * pass for a disabled one, and orange stays orange, since the name is the
- * member's and not the interface's.
+ * pass for a disabled one, and orange keeps its own hue, with no swap to
+ * the crest, since the name is the member's and not the interface's.
  */
 export function memberInk(color: string | null | undefined, scheme: Scheme = "dark"): string {
   const picked = color && HEX.test(color) ? color.toLowerCase() : null;
