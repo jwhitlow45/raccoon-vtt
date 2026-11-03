@@ -13,7 +13,7 @@ import { startEngine, type Engine } from "./testing.ts";
 
 /**
  * Synced music and sound in a live room, in Postgres and through replay
- * (docs/design/design-v1-sound.md 6.4, 6.5, 6.7 and section 12, lane SN-A):
+ * (docs/design/design-v1-sound.md 6.4, 6.5, 6.7 and section 12):
  * players' and a display's frames, the server's ticks on a clock the test
  * moves, a reclassified effect's entry leaving players' frames in its own
  * batch, Undo and Redo, the `time` frame, the load's stop, and stored ops of
