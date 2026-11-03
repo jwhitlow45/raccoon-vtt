@@ -122,6 +122,17 @@ describe("behind a blackout (ASTRA-06, CALB-O-05, D-261102-429)", () => {
     assert.deepEqual(clockLines(seen(state, DM).log), ["1:0", "3:0"]);
   });
 
+  test("a line written while shared behind a blackout reaches players at the lift, though sharing went off meanwhile (D-261102-530)", () => {
+    let state = step(inFight(), { t: "view.blackout", blackout: true }, 2);
+    state = step(state, { t: "clock.advance", by: 600 }, 3);
+    state = step(state, { t: "clock.update", shown: false }, 4);
+    state = step(state, { t: "view.blackout", blackout: false }, 5);
+    for (const who of MEMBERS) {
+      assert.ok(!("clock" in seen(state, who)), who.memberId);
+      assert.deepEqual(clockLines(seen(state, who).log), ["1:0", "3:0"], who.memberId);
+    }
+  });
+
   test("when it ends the clock comes back at the fight's time with every line, and a round after it reaches the clock", () => {
     let state = step(inFight(), { t: "view.blackout", blackout: true }, 2);
     state = step(state, { t: "clock.advance", by: 600 }, 3);

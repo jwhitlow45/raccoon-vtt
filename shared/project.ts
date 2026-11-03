@@ -3663,7 +3663,8 @@ function projectEventCtx(ctx: Ctx, data: LogEvent, copy = false): LogEvent | nul
       return ctx.paused ? null : data;
     case "clock":
       // A player keeps every clock line that reached them, after sharing goes off or the clock stops too (docs/design/design-v1-calendar.md 6.4).
-      // Behind a blackout they wait with the clock, as encounter lines do: a time skip set up there is news when the game resumes.
+      // Behind a blackout they wait with the clock, held back here at read time. A line's audience was frozen when it was written,
+      // so one written while shared reaches players when the blackout lifts, even if sharing went off meanwhile (D-261102-530).
       return ctx.paused ? null : data;
     case "handout": {
       const handout = ownEntry(ctx.state.handouts, data.handoutId);
