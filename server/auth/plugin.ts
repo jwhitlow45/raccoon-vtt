@@ -87,7 +87,6 @@ export async function setupAuth(
   timer.unref();
   app.addHook("onClose", async () => clearInterval(timer));
 
-  const admissions = new Admissions({ pool, gateway, log: app.log, options: deps.access?.admissions });
   // Join requests (docs/design/design-v1-join-requests.md 5.1): in memory,
   // signalled to the DM sockets, swept every 15 s with the follow-ups of
   // joins whose outcome or member removal is still owed.
@@ -95,6 +94,7 @@ export async function setupAuth(
   const joinRequests = new JoinRequests({ ...(lifeS !== undefined && !config.production ? { lifeMs: lifeS * 1000 } : {}), ...deps.access?.joinRequests });
   joinRequests.onChange((roomId) => gateway.joinRequestsChanged(roomId));
   app.decorate("joinRequests", joinRequests);
+  const admissions = new Admissions({ pool, gateway, log: app.log, options: deps.access?.admissions, changed: (roomId) => joinRequests.changed(roomId) });
   const sweep = setInterval(() => {
     joinRequests.sweep();
     void admissions.followUp().catch((err: unknown) => app.log.warn({ err }, "join follow-up failed"));

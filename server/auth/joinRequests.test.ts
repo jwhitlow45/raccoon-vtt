@@ -385,4 +385,17 @@ describe("join requests: waiting", () => {
     await Promise.resolve();
     assert.deepEqual(signals.sort(), [ROOM, OTHER]);
   });
+
+  test("a device getting in with no request here, or a member leaving flight, signals too: who can be let in as changed (JB-ASTRA-05)", async () => {
+    const { store } = setup();
+    const signals: string[] = [];
+    store.onChange((room) => signals.push(room));
+    store.gotIn(ROOM, "s9");
+    await Promise.resolve();
+    assert.deepEqual(signals, [ROOM]);
+    store.changed(OTHER);
+    store.changed(OTHER);
+    await Promise.resolve();
+    assert.deepEqual(signals, [ROOM, OTHER], "once per room per turn, as the store's own changes");
+  });
 });

@@ -18,7 +18,13 @@ function setup(options: { memberMs?: number; checkoutMs?: number; answerMs?: num
   const gateway = new FakeRoomGateway();
   // The answer's bound is past the checkout's unless a test says otherwise, so a refused checkout is answered as busy.
   const answerMs = options.answerMs ?? options.memberMs ?? 200;
-  const admissions = new Admissions({ pool: db.pool, gateway, options: { memberMs: options.memberMs ?? 40, checkoutMs: options.checkoutMs ?? 40, answerMs, ...(options.now ? { now: options.now } : {}) } });
+  const changes: string[] = [];
+  const admissions = new Admissions({
+    pool: db.pool,
+    gateway,
+    options: { memberMs: options.memberMs ?? 40, checkoutMs: options.checkoutMs ?? 40, answerMs, ...(options.now ? { now: options.now } : {}) },
+    changed: (roomId) => changes.push(roomId),
+  });
   const settled: AdmitOutcome[] = [];
   const plan = (who: AdmitWho, over: Partial<AdmitPlan> = {}): AdmitPlan => ({
     roomId: ROOM,
@@ -28,7 +34,7 @@ function setup(options: { memberMs?: number; checkoutMs?: number; answerMs?: num
     settled: (o) => settled.push(o),
     ...over,
   });
-  return { db, gateway, admissions, settled, plan };
+  return { db, gateway, admissions, settled, plan, changes };
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -40,14 +46,15 @@ function gate(): { wait: Promise<void>; open: () => void } {
 }
 
 describe("admitPlayer", () => {
-  test("a new player's member is written before its grant, and leaves flight once in", async () => {
-    const { db, gateway, admissions, settled, plan } = setup();
+  test("a new player's member is written before its grant, and leaves flight once in, which the DM list hears", async () => {
+    const { db, gateway, admissions, settled, plan, changes } = setup();
     let memberAtGrant: boolean | undefined;
     let inFlightAtGrant: boolean | undefined;
     db.before = (sql) => {
       if (sql.startsWith("insert into grants")) {
         memberAtGrant = gateway.room(ROOM).has("q1");
         inFlightAtGrant = admissions.inFlight(ROOM).has("q1");
+        assert.deepEqual(changes, [], "nothing to hear while the member is in flight");
       }
     };
     const answer = await admissions.admit(plan({ kind: "new", member: member("q1") }));
@@ -56,7 +63,12 @@ describe("admitPlayer", () => {
     assert.equal(inFlightAtGrant, true, "the member is in flight until its grant commits");
     assert.deepEqual(db.grant(SESSION, ROOM), { session_id: SESSION, room_id: ROOM, member_id: "q1", role: "player", epoch: 3 });
     assert.equal(admissions.inFlight(ROOM).size, 0);
+    assert.deepEqual(changes, [ROOM], "leaving flight makes it a carry-on player, so the DM list is told");
     assert.equal(settled.length, 1);
+    // A carry-on was never in flight, so its admission tells nothing more.
+    gateway.room(ROOM).set("pip", member("pip"));
+    await admissions.admit(plan({ kind: "member", memberId: "pip" }, { sessionId: "22222222-2222-4222-8222-222222222222" }));
+    assert.deepEqual(changes, [ROOM]);
   });
 
   test("a refusal under the room lock takes the member back off: revoke, remove, revoke", async () => {

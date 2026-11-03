@@ -165,6 +165,11 @@ export class JoinRequests {
     this.#signal = signal;
   }
 
+  /** Something the DM list shows changed outside the store: who a requester can be let in as. Signalled with the store's own changes. */
+  changed(roomId: string): void {
+    this.#changed(roomId);
+  }
+
   // ------------------------------------------------------------ reads
 
   /** The room's generation: bumped only by what ends its requests, a switch to With the password and a delete. */
@@ -354,7 +359,8 @@ export class JoinRequests {
   /**
    * The device got in another way, by `join/complete` or a DM claim: its
    * request here ends as gone, and the mark refuses every ask that started
-   * before now.
+   * before now. Signalled with no request too, since a device getting in
+   * can change who a requester can be let in as.
    */
   gotIn(roomId: string, sessionId: string): void {
     const deviceKey = key(roomId, sessionId);
@@ -363,6 +369,7 @@ export class JoinRequests {
     if (live?.state === "waiting") this.#end(live, "gone");
     else if (live?.state === "deciding") live.endAfter ??= "gone";
     this.#marks.set(deviceKey, this.#now());
+    this.#changed(roomId);
   }
 
   // ------------------------------------------------------------ the DM

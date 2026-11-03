@@ -528,6 +528,35 @@ describe("join requests: asking, waiting and a DM's answer", () => {
     }
   });
 
+  test("a password join's member is off the carry-on list while its grant is written, and the DM list hears once it lands (JB-ASTRA-05)", async () => {
+    const { dm, roomId } = await k.room("ask");
+    const signal = t.gateway.joinRequestsChanged;
+    const signals: string[] = [];
+    t.gateway.joinRequestsChanged = (room) => {
+      signals.push(room);
+      signal.call(t.gateway, room);
+    };
+    const pause = pauseTxStatement(t.pool, (sql) => sql.includes("insert into grants"));
+    try {
+      const phone = t.client();
+      const step1 = await phone.post(`/api/rooms/${roomId}/join`, { password: PASSWORD });
+      const joined = phone.post(`/api/rooms/${roomId}/join/complete`, { ticket: step1.json<{ ticket: string }>().ticket, name: "Wren", color: "#3e8ef7" });
+      await pause.reached;
+      assert.deepEqual((await t.gateway.playerRoster(roomId))?.map((m) => m.name), ["Wren"], "the member is on the roster, which the DM's view refreshes on");
+      assert.deepEqual((await k.list(dm, roomId)).players, [], "but in flight, so not yet someone to let a requester in as");
+      signals.length = 0;
+      pause.go();
+      assert.equal((await joined).statusCode, 200);
+      for (let i = 0; i < 50 && !signals.includes(roomId); i++) await new Promise((r) => setTimeout(r, 10));
+      assert.ok(signals.includes(roomId), "the DM list is told once the member lands");
+      assert.deepEqual((await k.list(dm, roomId)).players.map((p) => p.name), ["Wren"]);
+    } finally {
+      pause.go();
+      pause.restore();
+      t.gateway.joinRequestsChanged = signal;
+    }
+  });
+
   test("two DM devices letting in at once, or a let-in against a turn away: exactly one wins", async () => {
     const { dm, roomId, dmKey } = await k.room("ask");
     const coDm = t.client();

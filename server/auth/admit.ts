@@ -120,6 +120,7 @@ export class Admissions {
   #checkoutMs: number;
   #answerMs: number;
   #now: () => number;
+  #changed: (roomId: string) => void;
   /** Members being added for a join, by room. */
   #inFlight = new Map<string, Set<string>>();
   /** Members whose removal after a rolled-back grant did not land, retried by the sweep. */
@@ -139,7 +140,12 @@ export class Admissions {
   /** Each member's latest kick, by `room|member`: its number, and when, for forgetting it. */
   #kicks = new Map<string, { seq: number; at: number }>();
 
-  constructor(deps: { pool: pg.Pool; gateway: RoomGateway; log?: FastifyBaseLogger | undefined; options?: AdmissionsOptions | undefined }) {
+  /**
+   * `changed`: a member left flight, so the DM list's carry-on players
+   * changed with nothing else to say so (the roster showed the member when
+   * it was added).
+   */
+  constructor(deps: { pool: pg.Pool; gateway: RoomGateway; log?: FastifyBaseLogger | undefined; options?: AdmissionsOptions | undefined; changed?: (roomId: string) => void }) {
     this.#pool = deps.pool;
     this.#gateway = deps.gateway;
     this.#log = deps.log;
@@ -147,6 +153,7 @@ export class Admissions {
     this.#checkoutMs = deps.options?.checkoutMs ?? GRANT_CHECKOUT_MS;
     this.#answerMs = deps.options?.answerMs ?? this.#memberMs;
     this.#now = deps.options?.now ?? (() => performance.now());
+    this.#changed = deps.changed ?? (() => undefined);
   }
 
   /** The room's members in flight, for "continue as" and the DM's carry-on list to leave out. */
@@ -481,9 +488,9 @@ export class Admissions {
 
   #land(roomId: string, memberId: string): void {
     const set = this.#inFlight.get(roomId);
-    if (!set) return;
-    set.delete(memberId);
+    if (!set?.delete(memberId)) return;
     if (set.size === 0) this.#inFlight.delete(roomId);
+    this.#changed(roomId);
   }
 }
 
