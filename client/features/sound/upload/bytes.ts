@@ -1,5 +1,5 @@
 /**
- * A file read by ranges (docs/design/design-v1-sound.md 4.2 step 1), so the
+ * A file read by ranges (docs/design/design-v1-music.md 4.2 step 1), so the
  * header checks before any decoding read kilobytes of a 200 MB file, not
  * all of it.
  */

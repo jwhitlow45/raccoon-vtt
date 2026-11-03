@@ -44,7 +44,7 @@ import { deleteUnreferencedFiles, kindExtensions, purgeTrash, type FileKey } fro
  * an image is, and deleted, swept and trashed the same way under its own
  * extension.
  *
- * A sound file (docs/design/design-v1-sound.md 7.3) is in no library: the
+ * A sound file (docs/design/design-v1-music.md 7.3) is in no library: the
  * room's `sounds` name it. So a sound row they do not name is swept by the
  * thumbnails' rule, a day after it was first found unnamed, which frees the
  * space of an upload whose `sound.create` never landed. The DM's delete of a
@@ -354,7 +354,7 @@ const SWEPT_KINDS = ["thumb", "sound"] as const;
  * unused since now, clears the mark on any named again, and deletes those
  * unused for a day, rows and then files. Nothing restores an old thumbnail
  * (a restore keeps the current one), and no Setup step creates a sound
- * (docs/design/design-v1-sound.md 6.6), so nothing can need one back.
+ * (docs/design/design-v1-music.md 6.6), so nothing can need one back.
  */
 export async function sweepUnnamed(deps: CleanupDeps, roomId: string): Promise<UnnamedSweep> {
   type Outcome = { sweep: UnnamedSweep; rows: DeletedRow[] };

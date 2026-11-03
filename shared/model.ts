@@ -214,7 +214,7 @@ export type RoomState = {
   clock?: RoomClock | null;
   /**
    * DM only, but a player's and a display's projection keep the sounds that
-   * sound now, cut to their playback fields (docs/design/design-v1-sound.md
+   * sound now, cut to their playback fields (docs/design/design-v1-music.md
    * 6.5): the room's sound library, `keys.sound(id)`. A stored state may
    * lack it (rooms from before sound), and a reader takes absent as empty.
    */
@@ -481,7 +481,7 @@ export type RoomSettings = {
    */
   newScenePlayers?: ScenePreset;
   /**
-   * Players see what is playing (docs/design/design-v1-sound.md 4.1): the
+   * Players see what is playing (docs/design/design-v1-music.md 4.1): the
    * names of the music and background sounds playing now. Absent is off,
    * where players only hear them.
    */
@@ -601,7 +601,7 @@ export type Scene = {
   weather?: SceneWeather;
   /**
    * DM only. The sound "Move the players here" and Play it start
-   * (docs/design/design-v1-sound.md 4.6). An empty one is silence. Absent
+   * (docs/design/design-v1-music.md 4.6). An empty one is silence. Absent
    * is no sound of its own, and null in a patch removes it.
    */
   sound?: SceneSound;
@@ -722,7 +722,7 @@ export type VideoFacts = {
 
 /**
  * What the server's frame walk learns of a sound file
- * (docs/design/design-v1-sound.md 7.1), kept on its asset row as the
+ * (docs/design/design-v1-music.md 7.1), kept on its asset row as the
  * `audio` column. `ms` is frames times 1152 over the rate, the length
  * every device schedules by.
  */

@@ -27,7 +27,7 @@ function patchedSettings(settings: RoomSettings, patch: NonNullable<OpOf<"room.u
   const next: RoomSettings = { ...settings, ...rest };
   if (newScenes === "squares") delete next.newScenes;
   else if (newScenes !== undefined) next.newScenes = newScenes;
-  // Off is stored as no setting, as every room from before it has (docs/design/design-v1-sound.md 6.1).
+  // Off is stored as no setting, as every room from before it has (docs/design/design-v1-music.md 6.1).
   if (soundNames === false) delete next.soundNames;
   else if (soundNames === true) next.soundNames = true;
   return next;
@@ -259,7 +259,7 @@ export function sceneUpdate(tx: Tx, op: OpOf<"scene.update">): void {
   // One weather has one stored form, so an undo's hash guard and a backup see the same scene whatever the op spelled.
   if (p.weather === null) delete next.weather;
   else if (p.weather !== undefined) next.weather = normalWeather(p.weather);
-  // A scene's sound names only what is there, of the use its place takes (docs/design/design-v1-sound.md 6.6).
+  // A scene's sound names only what is there, of the use its place takes (docs/design/design-v1-music.md 6.6).
   if (p.sound === null) delete next.sound;
   else if (p.sound !== undefined) next.sound = checkedSceneSound(tx.state, p.sound);
   if (p.folder === null) delete next.folder;

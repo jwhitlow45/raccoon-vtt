@@ -2,7 +2,7 @@ import { SOUND_LIMITS } from "./limits.ts";
 import type { TrapSound } from "./model.ts";
 
 /**
- * The room's music and sound (docs/design/design-v1-sound.md 6.1): the DM's
+ * The room's music and sound (docs/design/design-v1-music.md 6.1): the DM's
  * library of sound files, playlists, and what plays now. Times are server
  * times in ms since 1970, from the op's `env.at`, so every device places a
  * sound by the same clock and replay lands on the same times.

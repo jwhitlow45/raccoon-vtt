@@ -4,7 +4,7 @@ import type { RoomState } from "#shared/model.ts";
 import { room, scene } from "#shared/testutil.ts";
 import { assetFileName, exportableState, withoutSound } from "./exportRoom.ts";
 
-/** A backup's sounds (docs/design/design-v1-sound.md 6.7, D-261102-475). */
+/** A backup's sounds (docs/design/design-v1-music.md 6.7, D-261102-475). */
 
 const DM = { memberId: "dm1", role: "dm" as const };
 

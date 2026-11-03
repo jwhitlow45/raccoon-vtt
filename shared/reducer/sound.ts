@@ -23,7 +23,7 @@ import {
 import { gone, invalid, type Tx } from "./tx.ts";
 
 /**
- * Synced music and sound (docs/design/design-v1-sound.md 6.3): the DM's
+ * Synced music and sound (docs/design/design-v1-music.md 6.3): the DM's
  * library, playlists, a scene's sound, and what plays now.
  *
  * Every start is the op's server time plus LEAD_MS, so replay lands on the

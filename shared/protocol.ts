@@ -436,7 +436,7 @@ const settingsPatch = z.strictObject({
   newScenes: gridShapeChoice.optional(),
   /** What players see on new scenes (docs/design/design-v1-map-discovery.md 8.2). Once set it stays set. Only the new scene form reads it. */
   newScenePlayers: z.enum(SCENE_PRESETS).optional(),
-  /** Players see what is playing (docs/design/design-v1-sound.md 4.1). False removes the stored setting. */
+  /** Players see what is playing (docs/design/design-v1-music.md 4.1). False removes the stored setting. */
   soundNames: z.boolean().optional(),
 });
 
@@ -2028,7 +2028,7 @@ const clockStep = z.number().int().min(1).max(LIMITS.clockStepMax);
 const clockDate = z.string().min(1).max(LIMITS.clockDateChars).regex(NAME_CHARS, "names cannot hold control or text direction characters");
 
 /**
- * Synced music and sound (docs/design/design-v1-sound.md 6.1 and 6.2). Every
+ * Synced music and sound (docs/design/design-v1-music.md 6.1 and 6.2). Every
  * id list is bounded and holds no id twice. A run's id is short and plain,
  * so a scene's loops can take ids made from it. Times are whole server
  * milliseconds since 1970.
@@ -2182,7 +2182,7 @@ const stateClientOps = [
       suggestedView: z.enum(["topDown", "isometric"]).optional(),
       /** The scene's weather (docs/design/design-v1-weather.md 9.2), refused where weatherProblem says it cannot be. Null removes it. */
       weather: sceneWeatherSchema.nullable().optional(),
-      /** The scene's sound (docs/design/design-v1-sound.md 4.6), the DM's alone. Null removes it, an empty one is silence. */
+      /** The scene's sound (docs/design/design-v1-music.md 4.6), the DM's alone. Null removes it, an empty one is silence. */
       sound: sceneSoundSchema.nullable().optional(),
     }),
   }),
@@ -2547,7 +2547,7 @@ const stateClientOps = [
   /** `why` marks the party's Long Rest, whose gesture sends the advance first (4.5). */
   op("clock.advance", { by: clockStep, why: z.literal("longRest").optional() }),
   /**
-   * Synced music and sound (docs/design/design-v1-sound.md 6.2), the DM's
+   * Synced music and sound (docs/design/design-v1-music.md 6.2), the DM's
    * alone. A sound's `ms` is the encoded length its upload checked, which
    * the server fills from the asset row before the op applies, as it fills
    * a map's size. Library edits, playlists and a scene's sound are Setup
@@ -2838,7 +2838,7 @@ export const serverOnlyOps = [
    * every die drawn. The reducer only copies them, so replay never rolls.
    */
   /**
-   * What the server's tick stores (docs/design/design-v1-sound.md 6.4): the
+   * What the server's tick stores (docs/design/design-v1-music.md 6.4): the
    * music as the schedule leaves it, computed from `from`, the `playing.rev`
    * it read, which the reducer refuses if anything changed since. Empty
    * `loops` and `effects` stop them too, when the last member has gone.
@@ -3158,7 +3158,7 @@ export const clientMessageSchema = z.discriminatedUnion("t", [
   z.strictObject({ t: z.literal("eph"), sceneId: id, e: ephEventSchema.refine(withinEphBytes, { message: "ephemeral payload too large" }) }),
   z.strictObject({ t: z.literal("scene"), sceneId: id }),
   z.strictObject({ t: z.literal("ping"), k: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER) }),
-  /** A probe of the server's time (docs/design/design-v1-sound.md 5.1), sent only while sound plays. */
+  /** A probe of the server's time (docs/design/design-v1-music.md 5.1), sent only while sound plays. */
   z.strictObject({ t: z.literal("time"), k: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER) }),
 ]);
 export type ClientMessage = z.infer<typeof clientMessageSchema>;
@@ -3243,7 +3243,7 @@ export const serverMessageSchema = z.discriminatedUnion("t", [
   z.strictObject({ t: z.literal("pong"), k: z.number().int().min(0) }),
   /**
    * The answer to a `time` probe: `at` is the server's clock in ms since
-   * 1970, the clock every op's time reads (docs/design/design-v1-sound.md
+   * 1970, the clock every op's time reads (docs/design/design-v1-music.md
    * 5.1). A frame of its own, never a field of `pong`, which an older page's
    * strict schema would drop and reconnect over.
    */

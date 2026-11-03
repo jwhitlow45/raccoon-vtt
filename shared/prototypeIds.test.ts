@@ -91,7 +91,7 @@ function handMade(state: RoomState): Case[] {
   both({ t: "clock.update", calendar: { kind: "days" }, shown: false, at: 0 });
   both({ t: "clock.set", at: 3_600 });
   both({ t: "clock.advance", by: 600, why: "longRest" });
-  // Synced music and sound (docs/design/design-v1-sound.md 6.2): a loop's id keys the playing record.
+  // Synced music and sound (docs/design/design-v1-music.md 6.2): a loop's id keys the playing record.
   both({ t: "sound.create", id: "snd9", assetId: "a9", name: "Rain", use: "loop", ms: 20_000 });
   both({ t: "sound.update", id: "snd1", name: "Storm" });
   both({ t: "sound.delete", id: "snd1" });

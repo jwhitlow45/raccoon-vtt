@@ -102,7 +102,7 @@ export type AssetRow = {
   /** A video's facts from the server's header check (docs/design/design-v1-animated-maps.md 9.1). Absent for an image. */
   video?: VideoFacts;
   /**
-   * A sound's facts from the server's frame walk (docs/design/design-v1-sound.md
+   * A sound's facts from the server's frame walk (docs/design/design-v1-music.md
    * 7.2). Present exactly for kind `sound`, whose `width` and `height` are 0
    * and whose one variant is `full`.
    */
@@ -112,7 +112,7 @@ export type AssetRow = {
  * GET /api/config. `animatedMaps` is the server owner's ANIMATED_MAPS switch
  * (docs/design/design-v1-animated-maps.md 1): off, the pickers take images
  * only and every map shows its still. `roomSound` is the ROOM_SOUND switch
- * (docs/design/design-v1-sound.md 1): off, the server takes and serves no
+ * (docs/design/design-v1-music.md 1): off, the server takes and serves no
  * sound file, and only the built-in effects play.
  */
 export type ServerConfig = { turnstileSiteKey: string | null; searchEnabled: boolean; animatedMaps: boolean; roomSound: boolean };
@@ -120,11 +120,11 @@ export type ServerConfig = { turnstileSiteKey: string | null; searchEnabled: boo
  * POST /api/rooms/import's answer. `soundsLeftOut`: the sounds the import
  * dropped, with their places in playlists and scene sounds, because a
  * file failed the check or its length did not fit its use
- * (docs/design/design-v1-sound.md 6.7). Absent is none.
+ * (docs/design/design-v1-music.md 6.7). Absent is none.
  */
 export type ImportRoomAnswer = { roomId: string; dmLink: string; soundsLeftOut?: number };
 /**
- * GET /api/rooms/:id/storage, DM only (docs/design/design-v1-sound.md 7.2):
+ * GET /api/rooms/:id/storage, DM only (docs/design/design-v1-music.md 7.2):
  * what the room's quota counts, the quota (0 for none) and what its sounds
  * take, in bytes. The server reads it again at most every 10 seconds.
  */
@@ -746,7 +746,7 @@ export const api = {
   /** Runs the export route's checks without making the zip: resolves when an export may start now, else throws the refusal. */
   checkExport: (roomId: string) => request<void>("HEAD", exportUrl(roomId)),
 
-  /** The room's storage line, DM only (docs/design/design-v1-sound.md 7.2). */
+  /** The room's storage line, DM only (docs/design/design-v1-music.md 7.2). */
   roomStorage: (roomId: string) => request<RoomStorage>("GET", `${room(roomId)}/storage`),
 
   /** The caller's own receipts of one tag, for an op whose answer this device lost (docs/design/design-v1-dice.md 1.2). */

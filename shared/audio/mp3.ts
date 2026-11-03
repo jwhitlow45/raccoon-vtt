@@ -1,7 +1,7 @@
 import { SOUND_LIMITS } from "../limits.ts";
 
 /**
- * The MP3 check both sides run (docs/design/design-v1-sound.md 7.1). It reads
+ * The MP3 check both sides run (docs/design/design-v1-music.md 7.1). It reads
  * frame headers only and decodes nothing, so a crafted file meets no
  * decoder on the server (D-261102-463). The server stores a file only when
  * `walkMp3` takes it whole. The DM's browser runs `stripTags` and then the

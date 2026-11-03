@@ -4,7 +4,7 @@ import { wavToFloat, type WavFormat } from "./wav.ts";
 
 /**
  * The encode worker's work, apart from the worker itself so tests run it
- * in Node (docs/design/design-v1-sound.md 4.2 steps 3 to 5): each piece
+ * in Node (docs/design/design-v1-music.md 4.2 steps 3 to 5): each piece
  * mixed to stereo where it has 4 or 6 channels, measured, and, unless the
  * file is copied, encoded to a constant bitrate MP3 at 128 kbps stereo or
  * 64 kbps mono.

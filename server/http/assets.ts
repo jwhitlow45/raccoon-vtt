@@ -48,7 +48,7 @@ const ROOM_ID = /^[0-9A-HJKMNP-TV-Z]{8}$/;
 
 /** The video types an upload may declare, only with `kind=video` (docs/design/design-v1-animated-maps.md 7). */
 const VIDEO_TYPES = /^video\/(webm|mp4)$/;
-/** The one sound type, only with `kind=sound` (docs/design/design-v1-sound.md 7.2). */
+/** The one sound type, only with `kind=sound` (docs/design/design-v1-music.md 7.2). */
 const SOUND_TYPE = "audio/mpeg";
 
 /** A request's media type, without its parameters, in lower case. */
@@ -214,7 +214,7 @@ export async function registerAssetRoutes(app: FastifyInstance, opts: AssetRoute
     });
 
     /*
-     * The DM's storage line (docs/design/design-v1-sound.md 7.2): what the
+     * The DM's storage line (docs/design/design-v1-music.md 7.2): what the
      * room's quota counts, the quota, and what its sounds take, in bytes.
      * Kept per room and read again at most every 10 seconds, or at once
      * after an upload or a delete (AssetService.storage). A quota of 0 is
@@ -235,7 +235,7 @@ export async function registerAssetRoutes(app: FastifyInstance, opts: AssetRoute
       if (!body.success) throw new AssetError(400, "bad_request");
       const { url, fallback, kind } = body.data;
       if (KINDS[kind].dmOnly && grant.role !== "dm") throw new AssetError(403, "forbidden");
-      // Link and Search the web take images only (docs/design/design-v1-animated-maps.md 4.1, docs/design/design-v1-sound.md 4.2).
+      // Link and Search the web take images only (docs/design/design-v1-animated-maps.md 4.1, docs/design/design-v1-music.md 4.2).
       if (kind === "video" || kind === "sound") throw new AssetError(415, "unsupported_type");
       // The fallback must be a thumbnail a search handed to this server, so a
       // client cannot use it to fetch anything else.

@@ -13,7 +13,7 @@ import type { AssetFactRow } from "./persistence.ts";
 import { scopeFixture, scopeObserver, ScopeClient, UndoScopeDb, until } from "./undoScopeTesting.ts";
 
 /**
- * The server moves the music on (docs/design/design-v1-sound.md 6.4) and
+ * The server moves the music on (docs/design/design-v1-music.md 6.4) and
  * keeps sound's rules where ops arrive (6.2): the queued tick computed from
  * the staged state, its back-off, the members rule with a table display
  * on, the load rules, the server's switch, the quota, and a sound's length

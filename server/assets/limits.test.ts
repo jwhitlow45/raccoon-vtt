@@ -25,7 +25,7 @@ describe("hourlyChecks (design 10.3, docs/design/design-v1-pdf-handouts.md 3.7)"
     ]);
   });
 
-  test("a sound spends only its own, 120 a session and 240 a room, and maps still go up past it (docs/design/design-v1-sound.md 7.2)", () => {
+  test("a sound spends only its own, 120 a session and 240 a room, and maps still go up past it (docs/design/design-v1-music.md 7.2)", () => {
     assert.deepEqual(hourlyChecks("sess", "ip", "ROOM0001", "sound"), [
       { key: "sound:s:sess", limit: 120 },
       { key: "sound:r:ROOM0001", limit: 240 },

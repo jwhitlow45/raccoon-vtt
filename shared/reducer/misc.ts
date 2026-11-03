@@ -393,7 +393,7 @@ function checkReferences(tx: Tx, entries: RestoreEntry[], before: Map<EntityKey,
 }
 
 /**
- * A restore's sound references hold both ways (docs/design/design-v1-sound.md
+ * A restore's sound references hold both ways (docs/design/design-v1-music.md
  * 6.6), on the state after its writes. A sound's use is part of what a
  * reference needs: a playlist plays music, and a scene's sound plays music
  * and background sounds, so naming a sound of another use is as broken as
@@ -547,7 +547,7 @@ function referencesOf(parsed: ParsedKey, value: unknown): EntityKey[] {
     }
   }
   // A playlist names its tracks, a scene's sound its playlist and sounds, and the live run its tracks and loops
-  // (docs/design/design-v1-sound.md 6.6). soundReferencesHold checks the use each place takes.
+  // (docs/design/design-v1-music.md 6.6). soundReferencesHold checks the use each place takes.
   if (parsed.kind === "scene") {
     const playlistId = (value as Partial<Scene>).sound?.music?.playlistId;
     if (playlistId !== undefined) refs.push(keys.playlist(playlistId));

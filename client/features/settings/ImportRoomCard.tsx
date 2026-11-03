@@ -19,7 +19,7 @@ type Created = { roomId: string; dmLink: string; password: string };
  * and the creator becomes its DM, the same as the create form.
  *
  * An import that left sounds out says so before the DM link shows
- * (docs/design/design-v1-sound.md 6.7), since the link's page replaces
+ * (docs/design/design-v1-music.md 6.7), since the link's page replaces
  * this card: one more tap, and only then.
  */
 export function ImportRoomCard(props: { onImported(created: Created): void }) {

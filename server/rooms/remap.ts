@@ -129,7 +129,7 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
   const sounds = new Ids(newId);
   const playlists = new Ids(newId);
   members.assign(Object.keys(state.members));
-  // Before the scenes, whose sound names both (docs/design/design-v1-sound.md 6.7).
+  // Before the scenes, whose sound names both (docs/design/design-v1-music.md 6.7).
   sounds.assign(Object.keys(state.sounds ?? {}));
   playlists.assign(Object.keys(state.playlists ?? {}));
   // Before the actors, which name the room monster a token was placed from (Actor.monsterId).
@@ -277,7 +277,7 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
   if (state.clock) out.clock = state.clock;
   /*
    * The library and the playlists come under new ids, each sound's file under
-   * its new row's id (docs/design/design-v1-sound.md 6.7). A sound whose file
+   * its new row's id (docs/design/design-v1-music.md 6.7). A sound whose file
    * did not come through as a sound stays, with an id no row has, so
    * refillSoundFacts leaves it out with its places and counts it in the
    * import's answer, and no sound ever names the old room's file. What played
@@ -850,7 +850,7 @@ function sceneSoundUnder(sound: SceneSound, sounds: IdMap, playlists: IdMap): Sc
 
 /**
  * Each sound's length from its file's row, after the id remap
- * (docs/design/design-v1-sound.md 6.7, MSOL-33). The import's own frame
+ * (docs/design/design-v1-music.md 6.7, MSOL-33). The import's own frame
  * walk made the rows, so a file's lengths are never trusted, as
  * sound.create's `ms` comes from the row and never from the client (4.2).
  * `facts` is keyed by the new asset id and read as untrusted, by the one

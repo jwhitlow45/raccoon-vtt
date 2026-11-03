@@ -603,7 +603,7 @@ export function phoneSizeAllows(video: { widthPx: number; heightPx: number; fps:
 }
 
 /**
- * Synced music and sound (docs/design/design-v1-sound.md 8, D-261102-464 and
+ * Synced music and sound (docs/design/design-v1-music.md 8, D-261102-464 and
  * D-261102-466). The server checks a file by walking its MP3 frames and
  * decodes nothing. The reading caps bind the DM's tab before it decodes.
  */

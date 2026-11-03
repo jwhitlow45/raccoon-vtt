@@ -7,7 +7,7 @@ import type { Prepared, ReadOutcome, ReadStep } from "./read.ts";
 import { refusalWords, soundNameOf, uploadRefusal, type Refusal, type RowStep } from "./words.ts";
 
 /**
- * The queue of files the Add buttons picked (docs/design/design-v1-sound.md
+ * The queue of files the Add buttons picked (docs/design/design-v1-music.md
  * 4.2): one row a file, each through reading, converting, uploading and
  * `sound.create`, its refusal on its own row while the others go on. One
  * file is read at a time, since reading is what takes the device's memory.

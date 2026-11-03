@@ -1,6 +1,6 @@
 /**
  * Four and six channels mixed to stereo before measuring and encoding
- * (docs/design/design-v1-sound.md 4.2 step 3), by the Web Audio
+ * (docs/design/design-v1-music.md 4.2 step 3), by the Web Audio
  * specification's "speakers" down-mix rules, so a file sounds as the
  * browser itself would play it on two speakers. Mono and stereo pass as
  * they are. The six channels are 5.1 in the order L, R, C, LFE, SL, SR,

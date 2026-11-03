@@ -219,7 +219,7 @@ export async function registerDisplayRoutes(app: FastifyInstance, kit: AuthKit, 
    * images, handouts shown to everyone), never by the uploader rule, since a
    * display uploads nothing. A video or a sound comes by ranges, each range
    * request checked as a whole one is (docs/design/design-v1-animated-maps.md
-   * 10, docs/design/design-v1-sound.md 7.2).
+   * 10, docs/design/design-v1-music.md 7.2).
    * Every refusal is the asset route's same 404.
    */
   await app.register(async (scope) => {

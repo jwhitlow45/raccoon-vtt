@@ -3,7 +3,7 @@ import { MP3_BITRATES, MP3_RATES, SAMPLES_PER_FRAME, frameBytes } from "./mp3.ts
 /**
  * MP3 streams of silence built byte by byte, so the frame walk's tests and
  * the server's need no encoder and ship no recording
- * (docs/design/design-v1-sound.md 12). A Layer III frame whose side
+ * (docs/design/design-v1-music.md 12). A Layer III frame whose side
  * information and main data are all zero decodes as silence: every granule
  * has no coded values. The tag builders make the ID3v2, ID3v1, APEv2,
  * Lyrics3 and Xing or Info frames the walk and `stripTags` meet in the wild.

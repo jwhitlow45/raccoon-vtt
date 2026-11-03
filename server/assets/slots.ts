@@ -14,7 +14,7 @@ import { AssetError } from "./errors.ts";
  *   room the share is counted per session instead, and the DM's map upload
  *   never blocks a player's token. A video's or a sound's share is always
  *   counted per session (docs/design/design-v1-animated-maps.md 6.3,
- *   docs/design/design-v1-sound.md 7.2): its upload may take 15 minutes,
+ *   docs/design/design-v1-music.md 7.2): its upload may take 15 minutes,
  *   and must not turn away every phone on the table's IP all that time.
  *   Only a DM uploads one, and the room's 2 and the total still bound them.
  * - 2 per room, so one room cannot take the whole server.

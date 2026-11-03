@@ -1742,7 +1742,7 @@ describe("op version 45 and snapshot 35, animated maps (docs/design/design-v1-an
   });
 });
 
-describe("op version 46 and snapshot 36, synced music and sound (docs/design/design-v1-sound.md 6.7)", () => {
+describe("op version 46 and snapshot 36, synced music and sound (docs/design/design-v1-music.md 6.7)", () => {
   test("keeps stored operations and snapshots unchanged through the identity steps, a room without sound included", () => {
     assert.ok(OP_VERSION >= 46);
     assert.ok(SNAPSHOT_VERSION >= 36);

@@ -112,7 +112,7 @@ const settings = z.strictObject({
   newScenes: mapSchemas.gridShape.optional(),
   // Backups from before map discovery have none, which reads as each kind's old default (docs/design/design-v1-map-discovery.md 8.2).
   newScenePlayers: memorySchemas.scenePreset.optional(),
-  // Backups from before sound have none, which reads as off (docs/design/design-v1-sound.md 4.1).
+  // Backups from before sound have none, which reads as off (docs/design/design-v1-music.md 4.1).
   soundNames: z.literal(true).optional(),
 });
 
@@ -447,7 +447,7 @@ const character = z.strictObject({
 const roomClock = z.strictObject({ id, rev, t: clockSchemas.clockTime, shown: z.boolean(), calendar: clockSchemas.calendar });
 
 /*
- * Synced music and sound (docs/design/design-v1-sound.md 6.1, 6.3 and 8), by
+ * Synced music and sound (docs/design/design-v1-music.md 6.1, 6.3 and 8), by
  * the bounds its ops keep. checkLimits counts none of these collections, so
  * their caps are held here. What a playlist, a scene or what plays names is
  * checked against the room's sounds in parseRoomState (soundProblem).
@@ -1030,7 +1030,7 @@ export const roomStateSchema = z.strictObject({
   // The in-game clock. Backups from before it have none, and absent and null both read as none (docs/design/design-v1-calendar.md 6.6).
   clock: roomClock.nullable().optional(),
   // Synced music and sound. Backups from before it have none, which reads as an empty library and silence, and absent and
-  // null `playing` both read as silence (docs/design/design-v1-sound.md 6.7).
+  // null `playing` both read as silence (docs/design/design-v1-music.md 6.7).
   sounds: byOwnId(sound, SOUND_LIMITS.soundsPerRoom, "sounds").optional(),
   playlists: byOwnId(playlist, SOUND_LIMITS.playlistsPerRoom, "playlists").optional(),
   playing: playing.nullable().optional(),
@@ -1045,7 +1045,7 @@ function sortedKeys(record: Readonly<Record<string, unknown>> | undefined): stri
 
 /**
  * What names a sound or a playlist names one the room holds, under the use
- * it plays as, as every op leaves a room (docs/design/design-v1-sound.md 6.3
+ * it plays as, as every op leaves a room (docs/design/design-v1-music.md 6.3
  * and 6.6): a playlist's tracks and a scene's one track are music, a scene's
  * playlist exists, a scene's background sounds and the playing loops are
  * Background, and the live run's order and `next` are music. An effect

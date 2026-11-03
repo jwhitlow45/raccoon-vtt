@@ -12,7 +12,7 @@ import { AT, DM, P1, room } from "./testutil.ts";
 /**
  * Random sequences of the sound ops through the reducer, with the server's
  * ticks worked out by soundStep at random times from the current
- * `playing.rev` (docs/design/design-v1-sound.md 6.2 to 6.5 and section 12).
+ * `playing.rev` (docs/design/design-v1-music.md 6.2 to 6.5 and section 12).
  * After every op:
  *
  * 1. A player's and a display's projection holds no playlist, no

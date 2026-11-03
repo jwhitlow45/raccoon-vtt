@@ -103,7 +103,7 @@ export const UNDO_SCOPE_BY_OP = {
   "clock.update": "setup",
   "clock.set": "play",
   "clock.advance": "play",
-  // Synced music and sound (docs/design/design-v1-sound.md 6.6): library edits and playlists are setup. An upload, a delete
+  // Synced music and sound (docs/design/design-v1-music.md 6.6): library edits and playlists are setup. An upload, a delete
   // and playback record no step and clear neither Redo (D-261102-471). A scene's sound is setup through `scene.update`.
   "sound.create": "none",
   "sound.update": "setup",

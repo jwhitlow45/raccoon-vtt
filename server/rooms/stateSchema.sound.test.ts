@@ -11,7 +11,7 @@ import { parseRoomState } from "./stateSchema.ts";
 
 /**
  * Synced music and sound in the stored-state schema
- * (docs/design/design-v1-sound.md 6.3, 6.7 and 8): the library, playlists,
+ * (docs/design/design-v1-music.md 6.3, 6.7 and 8): the library, playlists,
  * what plays and each scene's sound within their ops' bounds, and whatever
  * names a sound naming one the room holds under the use it plays as.
  */
@@ -66,7 +66,7 @@ function passes(edit: (state: RoomState) => void, why = ""): void {
 
 const many = <T>(n: number, make: (i: number) => [string, T]): Record<string, T> => Object.fromEntries(Array.from({ length: n }, (_, i) => make(i)));
 
-describe("a backup's sound (docs/design/design-v1-sound.md 6.7)", () => {
+describe("a backup's sound (docs/design/design-v1-music.md 6.7)", () => {
   test("a room with sounds of every use, a playlist, scene sounds and everything playing parses, and keeps every field", () => {
     const parsed = parseRoomState(JSON.parse(JSON.stringify(full())));
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);

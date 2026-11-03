@@ -333,7 +333,7 @@ describe("animated map limits (docs/design/design-v1-animated-maps.md 6.3)", () 
   });
 });
 
-describe("sound lengths by use (docs/design/design-v1-sound.md 4.2, D-261102-464)", () => {
+describe("sound lengths by use (docs/design/design-v1-music.md 4.2, D-261102-464)", () => {
   test("each use takes its lengths, with 100 ms over the upper cap and nothing under the lower one", () => {
     const cases: [Parameters<typeof soundUseFits>[0], number, boolean][] = [
       ["music", 29_999, false],

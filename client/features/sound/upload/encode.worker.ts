@@ -1,7 +1,7 @@
 import { PieceSink, type FromWorker, type Mp3EncoderClass, type ToWorker } from "./encode.ts";
 
 /**
- * The encode worker (docs/design/design-v1-sound.md 4.2 step 5): one file's
+ * The encode worker (docs/design/design-v1-music.md 4.2 step 5): one file's
  * pieces in, its loudness and its MP3 out. `@breezystack/lamejs` loads
  * here by `import()` only when a file is converted, so it stays a chunk of
  * its own beside its license texts (vite.config.ts `lameLicense`), and a

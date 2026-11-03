@@ -850,7 +850,7 @@ describe("backup.sh", { concurrency: false }, () => {
     }
   });
 
-  // Synced music and sound (docs/design/design-v1-sound.md 7.3): a sound is named by its row's media, mp3.
+  // Synced music and sound (docs/design/design-v1-music.md 7.3): a sound is named by its row's media, mp3.
   test("a new dump copies each sound as .mp3 beside the images, and a restore puts it back", async () => {
     await stack.fresh();
     await applySchema();

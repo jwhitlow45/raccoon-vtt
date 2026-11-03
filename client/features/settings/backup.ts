@@ -77,7 +77,7 @@ export function importErrorText(err: unknown): string {
 }
 
 /**
- * What an import that left sounds out says (docs/design/design-v1-sound.md
+ * What an import that left sounds out says (docs/design/design-v1-music.md
  * 6.7): the count, and why when the server offers no sound files at all.
  */
 export function soundsLeftOutText(count: number, offered: boolean): string {

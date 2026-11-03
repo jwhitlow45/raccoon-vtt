@@ -23,7 +23,7 @@ import { diskHasRoom } from "./rooms.ts";
  *
  * Export copies the committed state on the actor queue and streams the zip
  * outside it, so the room keeps playing. `?sounds=0` leaves the room's
- * sounds out, files and state (docs/design/design-v1-sound.md 6.7), and so
+ * sounds out, files and state (docs/design/design-v1-music.md 6.7), and so
  * does the server's switch off, since it then serves no sound bytes. Slots bound what streams at once
  * (1 per room, 1 per IP, 2 server-wide) and hourly counts bound how often
  * (4 per room and per IP). A reader averaging under 64 KiB/s over 30 s, or

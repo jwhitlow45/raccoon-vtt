@@ -267,7 +267,7 @@ describe("pdf handout import caps (docs/design/design-v1-pdf-handouts.md 3.6)", 
   });
 });
 
-describe("an import's sounds (docs/design/design-v1-sound.md 6.7)", () => {
+describe("an import's sounds (docs/design/design-v1-music.md 6.7)", () => {
   const sound = (id: string) => ({ id, rev: 0, assetId: `00000000-0000-4000-8000-00000000000${id.length}`, ms: 60_000, use: "music" as const });
   const playing = { rev: 2, music: { run: "r", repeat: "all" as const, fade: 5 as const, now: { soundId: "a", at: 1 } }, loops: {}, effects: [], volume: { music: 80, effects: 80 } };
 

@@ -2,7 +2,7 @@ import type { Mp3Facts } from "#shared/audio/mp3.ts";
 
 /**
  * A constant bitrate MP3 measured in 60-second pieces
- * (docs/design/design-v1-sound.md 4.2 step 2), so it is never held decoded
+ * (docs/design/design-v1-music.md 4.2 step 2), so it is never held decoded
  * whole. Each piece is cut on frame boundaries, with the 10 frames before
  * it as pre-roll whose output is dropped, since a Layer III frame may draw
  * on the bits of frames before it (the bit reservoir). Counts are in the

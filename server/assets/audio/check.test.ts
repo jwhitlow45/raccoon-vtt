@@ -9,7 +9,7 @@ import { AssetError } from "../errors.ts";
 import { checkSound, checkSoundBytes, soundFactsOf, walkInWorker } from "./check.ts";
 
 /**
- * The server's sound check (docs/design/design-v1-sound.md 7.1, D-261102-539):
+ * The server's sound check (docs/design/design-v1-music.md 7.1, D-261102-539):
  * the walk in a worker, with its budget inside the worker and a deadline
  * that ends the worker, refusals by the walk's codes, and every other
  * failure passing through as itself.

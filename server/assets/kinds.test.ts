@@ -72,7 +72,7 @@ test("a video is a kind of its own: the DM's alone to add, players read it when 
   assert.ok(Number.isInteger(VIDEO_PIPELINE) && VIDEO_PIPELINE >= 1);
 });
 
-test("a sound is a kind of its own: the DM's alone to add, players read it while it plays, one file at the sound cap (docs/design/design-v1-sound.md 7.2)", () => {
+test("a sound is a kind of its own: the DM's alone to add, players read it while it plays, one file at the sound cap (docs/design/design-v1-music.md 7.2)", () => {
   assert.equal(isAssetKind("sound"), true);
   assert.deepEqual(KINDS.sound, {
     maxUploadBytes: SOUND_LIMITS.fileBytes,

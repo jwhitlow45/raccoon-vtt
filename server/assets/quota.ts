@@ -55,7 +55,7 @@ export type StoredBytesFn = (roomId: string) => Promise<number>;
  * uploads can never both fit into the same remaining space.
  *
  * A live video or sound upload also keeps `headroom` of the quota free
- * (docs/design/design-v1-animated-maps.md 6.3, docs/design/design-v1-sound.md
+ * (docs/design/design-v1-animated-maps.md 6.3, docs/design/design-v1-music.md
  * 7.2): a room at its quota turns read-only mid-session, and one 64 MB video
  * could put it there. Other reservations do not count an upload's headroom,
  * and the room's own writes may take it during a long upload, so the commit

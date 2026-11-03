@@ -12,7 +12,7 @@ import type { Refusal } from "./words.ts";
 
 /**
  * One file made into the room's copy in the DM's browser
- * (docs/design/design-v1-sound.md 4.2 steps 1 to 5): the checks before any
+ * (docs/design/design-v1-music.md 4.2 steps 1 to 5): the checks before any
  * decoding, then the read that suits it, its loudness, and the MP3 to
  * upload, copied or encoded. Only one file is read at a time (job.ts), and
  * nothing here outlives its file: the worker ends, the decoded audio and

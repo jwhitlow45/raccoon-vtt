@@ -58,7 +58,7 @@ export type ParsedKey =
   | { kind: "log"; id: string }
   | { kind: "trapLog"; id: string }
   | { kind: "trapSeen"; id: string }
-  /** A sound of the room's library and a playlist (RoomState.sounds, RoomState.playlists, docs/design/design-v1-sound.md 6.1). */
+  /** A sound of the room's library and a playlist (RoomState.sounds, RoomState.playlists, docs/design/design-v1-music.md 6.1). */
   | { kind: "sound"; id: string }
   | { kind: "playlist"; id: string }
   | { kind: "chunk"; sceneId: string; cx: number; cy: number }
@@ -631,7 +631,7 @@ export function writeEntity(state: RoomState, key: EntityKey, value: unknown): R
       return { ...state, playedScenes: withEntry(state.playedScenes ?? {}, parsed.id, value as SceneMark | null) };
     case "memoryShared":
       return { ...state, memoryShared: withEntry(state.memoryShared ?? {}, parsed.id, value as SceneMark | null) };
-    // A room from before sound has neither collection, which reads as empty (docs/design/design-v1-sound.md 6.7). A
+    // A room from before sound has neither collection, which reads as empty (docs/design/design-v1-music.md 6.7). A
     // projection holds each field only while it holds something (project.ts soundFields), so a change that empties one
     // takes it away, and a device's copy built from changes matches a fresh snapshot.
     case "sound":

@@ -21,7 +21,7 @@ import { variantPath } from "./store.ts";
 import { solid } from "./testImages.ts";
 
 /**
- * Sound files on the server (docs/design/design-v1-sound.md 7 and 12,
+ * Sound files on the server (docs/design/design-v1-music.md 7 and 12,
  * Integration): the switch on and off, uploads checked frame by frame in a
  * worker, refusals by code, reuse, serving by ranges, players' and
  * displays' 404s, the quota and its headroom, deletion, the storage route,

@@ -7,7 +7,7 @@ import { apeTag, concat, id3v1, id3v2, lyrics3v1, lyrics3v2, paddingPattern, sil
 
 /**
  * The frame walk under random streams and random damage
- * (docs/design/design-v1-sound.md 12). Invariants:
+ * (docs/design/design-v1-music.md 12). Invariants:
  * - W1: a built stream of one bitrate, rate and mode passes with its frame
  *   count, its length by frames times 1152 over the rate, and each frame's
  *   first byte, whatever its padding, private, copyright, original and mode

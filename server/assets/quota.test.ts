@@ -78,7 +78,7 @@ describe("RoomQuota", () => {
     await fits.commit(300, async () => undefined);
   });
 
-  test("the headroom is checked again at commit when the upload's size is its reservation, as other writes may have taken it (docs/design/design-v1-sound.md 7.2)", async () => {
+  test("the headroom is checked again at commit when the upload's size is its reservation, as other writes may have taken it (docs/design/design-v1-music.md 7.2)", async () => {
     const store = fakeStore();
     const quota = new RoomQuota(1000, store.read);
     const sound = await quota.reserve("R", 600, { headroom: 320 });

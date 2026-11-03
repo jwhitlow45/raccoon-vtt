@@ -55,7 +55,7 @@ import { parseRoomState } from "./stateSchema.ts";
  *   (docs/design/design-v1-animated-maps.md 9.3). Each sound goes through
  *   the upload's frame walk against the quota, and a zip without sounds,
  *   or an import while the sound switch is off, keeps no part about sound
- *   (docs/design/design-v1-sound.md 6.7). The room starts silent either way;
+ *   (docs/design/design-v1-music.md 6.7). The room starts silent either way;
  * - every id is remapped, uploaders included.
  *
  * The room row is written first so asset rows have something to reference,
@@ -105,7 +105,7 @@ export type ImportDeps = { pool: pg.Pool; assets: AssetService; gateway: RoomGat
 
 /**
  * The new room, and how many of the file's sounds it left out, with their
- * places in playlists and scene sounds (docs/design/design-v1-sound.md 6.7):
+ * places in playlists and scene sounds (docs/design/design-v1-music.md 6.7):
  * a file that failed the check or a length that did not fit its use, or
  * all of them from a zip without sounds or while the switch is off.
  */
@@ -296,7 +296,7 @@ export async function importRoom(deps: ImportDeps, zipPath: string, form: Import
       // The remap carries the file's memory and marks under the new ids, and a file from before map discovery then takes
       // the upgrade step, so every scene it brings is marked played (docs/design/design-v1-map-discovery.md 5.5). The
       // refills then overwrite every map's and phase's video from its row (docs/design/design-v1-animated-maps.md 9.3), and
-      // every sound's length from its row (docs/design/design-v1-sound.md 6.7). The sound refill always runs after the remap,
+      // every sound's length from its row (docs/design/design-v1-music.md 6.7). The sound refill always runs after the remap,
       // which gives a sound whose file did not come through an id no row has, so the refill leaves it out with its places.
       const refilled = refillSoundFacts(refillMapVideos(remapState(incoming, { assets: assetIds, memberIds }), videoFacts), soundFacts);
       const remapped = finishState(withDiscoveryUpgrade(refilled.state, header.data.schemaVersion), dmMember, roomName);
@@ -433,7 +433,7 @@ type ImportedMedia = ImportedAsset & { video?: VideoFacts; audio?: SoundFacts };
  * every map's and phase's video facts from the rows the import made
  * (remap.ts refillMapVideos): the file's own are untrusted. A sound's
  * carries the facts its frame walk found, for the same reason
- * (docs/design/design-v1-sound.md 6.7).
+ * (docs/design/design-v1-music.md 6.7).
  *
  * A starter pick whose work this server ships with the same bytes comes
  * from the shipped file instead, as a pick here would

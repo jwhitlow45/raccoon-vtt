@@ -23,7 +23,7 @@ export const PIPELINE = 1;
 export const VIDEO_PIPELINE = 1;
 
 /**
- * A sound's pipeline (docs/design/design-v1-sound.md 7.2): its one file is
+ * A sound's pipeline (docs/design/design-v1-music.md 7.2): its one file is
  * the upload itself, which the frame walk took whole, so any change to what
  * the walk takes must bump it.
  */
@@ -114,7 +114,7 @@ export const KINDS: Record<AssetKind, KindSpec> = {
     playersRead: true,
   },
   /**
-   * A sound file (docs/design/design-v1-sound.md 7.2): one variant, the
+   * A sound file (docs/design/design-v1-music.md 7.2): one variant, the
    * upload the frame walk took, never decoded. It has no sides, so its row's
    * width and height are 0. Players read it only while what plays names it.
    */

@@ -82,7 +82,7 @@ export function entityAssetRefs(key: EntityKey, value: unknown): AssetRef[] {
     case "handoutDoc":
       pages(v.pages);
       break;
-    // A sound of the library is a `sound` row, which cleanup keeps while the library names it (docs/design/design-v1-sound.md 7.3).
+    // A sound of the library is a `sound` row, which cleanup keeps while the library names it (docs/design/design-v1-music.md 7.3).
     case "sound":
       if (typeof v.assetId === "string") out.push({ assetId: v.assetId, kind: "sound" });
       break;

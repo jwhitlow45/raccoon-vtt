@@ -232,7 +232,7 @@ type Command =
   | { t: "sys"; op: ServerOnlyOp; resolve: () => void; reject: (err: Error) => void }
   | { t: "read"; run: () => void }
   | { t: "step"; run: DeletionRun<unknown>; resolve: (value: unknown) => void; reject: (err: Error) => void }
-  /** The server's music tick (docs/design/design-v1-sound.md 6.4), computed when the queue reaches it, never before. */
+  /** The server's music tick (docs/design/design-v1-music.md 6.4), computed when the queue reaches it, never before. */
   | { t: "soundTick" };
 
 type Batch = {
@@ -309,7 +309,7 @@ const DELETIONS = new Set<Op["t"]>([
   "companionBlock.delete",
   // A player's Withdraw and the DM's Dismiss of an ask for saves free a waiting ask (docs/design/design-v1-player-save-spell.md 5.4).
   "cast.close",
-  // A full room can always fall silent and free a sound's space (docs/design/design-v1-sound.md 6.2). Quieter volumes pass
+  // A full room can always fall silent and free a sound's space (docs/design/design-v1-music.md 6.2). Quieter volumes pass
   // through quietensSound, and the server's tick is its own command.
   "music.stop",
   "music.pause",
@@ -321,7 +321,7 @@ const DELETIONS = new Set<Op["t"]>([
 
 /**
  * A volume op that only turns sound down, which a room at its quota still
- * accepts beside DELETIONS (docs/design/design-v1-sound.md 6.2): every value
+ * accepts beside DELETIONS (docs/design/design-v1-music.md 6.2): every value
  * it sets is at most the current one, so nothing grows and a full room can
  * still quieten what plays.
  */
@@ -472,7 +472,7 @@ export class RoomActor {
   /** A deletion step's statement in flight: the queue waits for it. */
   #stepRunning: Promise<void> | null = null;
   /**
-   * The server's music tick (docs/design/design-v1-sound.md 6.4): the timer
+   * The server's music tick (docs/design/design-v1-music.md 6.4): the timer
    * that queues the next `soundTick`, when a member socket was last open
    * (the room's last commit at load, MUS-OPUS-16), and a refused step's
    * back-off: the `playing` rev it was refused at and until when, so a step
@@ -548,7 +548,7 @@ export class RoomActor {
     await actor.reconcileKinds();
     if (actor.#opsSinceSnapshot >= actor.#opts.snapshotOps) actor.#scheduleSnapshot();
     // A room loaded long after its last commit starts silent, one loaded soon after catches up, and with the switch off
-    // nothing that names a file plays (docs/design/design-v1-sound.md 6.4). Its tick runs once now, sockets or none.
+    // nothing that names a file plays (docs/design/design-v1-music.md 6.4). Its tick runs once now, sockets or none.
     if (!actor.replayFailed && soundOf(actor.#staged.state) !== null) actor.#enqueue({ t: "soundTick" });
     return actor;
   }
@@ -615,7 +615,7 @@ export class RoomActor {
     return this.#soundTimerAt;
   }
 
-  /** The server's clock, the one every op's time reads, for the `time` frame (docs/design/design-v1-sound.md 5.1). */
+  /** The server's clock, the one every op's time reads, for the `time` frame (docs/design/design-v1-music.md 5.1). */
   serverTime(): number {
     return this.#opts.now();
   }
@@ -1497,7 +1497,7 @@ export class RoomActor {
       const verb = blocker.direction === "undo" ? "Undo" : "Redo";
       return blocker.buried ? `${verb} the ${blocker.scope} steps through ${blocker.label} first` : `${verb} the ${blocker.scope} step first: ${blocker.label}`;
     }
-    // A sound playing under the use the step would take from it (docs/design/design-v1-sound.md 6.6) keeps the step, so
+    // A sound playing under the use the step would take from it (docs/design/design-v1-music.md 6.6) keeps the step, so
     // once the DM stops it the same Undo works.
     if (step.id && !isPlayingRefusal(reason)) this.#undo.consume(viewer.memberId, direction, scope, step.id);
     return reason;
@@ -2518,7 +2518,7 @@ export class RoomActor {
     if (!this.#closed && this.idle) this.#onIdle?.(this);
   }
 
-  // The server moves the music on (docs/design/design-v1-sound.md 6.4).
+  // The server moves the music on (docs/design/design-v1-music.md 6.4).
 
   /** Whether a member's socket is open: a table display alone keeps the music going only until the members rule stops it. */
   #membersHere(): boolean {
@@ -2809,7 +2809,7 @@ async function recheckQuotaOnLoad(deps: ActorDeps, quotaBytes: number): Promise<
  * 9.2), so players' devices judge playback by what the server checked.
  */
 function withAssetSizes(op: Op, facts: Map<string, AssetFact>): Op {
-  // A sound's length is the one its file's frames give, which every device schedules by (docs/design/design-v1-sound.md 4.2).
+  // A sound's length is the one its file's frames give, which every device schedules by (docs/design/design-v1-music.md 4.2).
   if (op.t === "sound.create") {
     const fact = facts.get(op.assetId.toLowerCase());
     return fact && fact.kind === "sound" && fact.audio ? { ...op, ms: fact.audio.ms } : op;

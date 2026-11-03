@@ -16,7 +16,7 @@ import { SOUND_MEDIA, isVideoContainer, soundFactsOfRow, variantPath, type Asset
  * not read are left out. Import treats the manifest as untrusted and
  * re-processes each image and checks each video and sound again.
  *
- * Sounds go in unless the DM leaves them out (docs/design/design-v1-sound.md
+ * Sounds go in unless the DM leaves them out (docs/design/design-v1-music.md
  * 6.7, D-261102-475), and never while the server's switch is off, since it
  * then serves no sound bytes: without them the zip holds no sound file and
  * no part of the state about sound.
@@ -81,7 +81,7 @@ export function assetFileName(sha256: string, kind: AssetKind, variant: Variant,
 }
 
 /**
- * The state with no part about sound (docs/design/design-v1-sound.md 6.7):
+ * The state with no part about sound (docs/design/design-v1-music.md 6.7):
  * an empty library, no playlist, silence, no scene's sound and the names
  * switch off. A collection the state does not hold stays absent, as it is
  * in a room from before sound, so this never adds one.

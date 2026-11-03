@@ -2893,7 +2893,7 @@ export const SCENE_FOR_PLAYERS = {
   suggestedView: "copied",
   // Players' devices draw it and their rolls follow it (docs/design/design-v1-weather.md 7). It names a look and its rules, nothing of the map.
   weather: "copied",
-  sound: "dm: the playlist and loops the scene starts, which players hear only once they play (docs/design/design-v1-sound.md 6.5)",
+  sound: "dm: the playlist and loops the scene starts, which players hear only once they play (docs/design/design-v1-music.md 6.5)",
 } as const satisfies Record<keyof Scene, PlayerField>;
 
 /** A scene as a player gets it: an allowlist, field by field as SCENE_FOR_PLAYERS rules. */
@@ -4064,7 +4064,7 @@ function projectEntityCtx(ctx: Ctx, key: EntityKey): unknown {
 }
 
 /*
- * Synced music and sound (docs/design/design-v1-sound.md 6.5). The DM gets
+ * Synced music and sound (docs/design/design-v1-music.md 6.5). The DM gets
  * the library, the playlists and what plays whole. A player, a table
  * display and a View as preview get only what sounds now: the music's
  * `now` and its `next` once revealed, the loops, and the effects fired in
@@ -4674,7 +4674,7 @@ export function dependents(state: RoomState, touched: EntityKey[], other?: RoomS
 }
 
 /**
- * What a change of sound re-projects for players (docs/design/design-v1-sound.md
+ * What a change of sound re-projects for players (docs/design/design-v1-music.md
  * 6.5). The fan-out asks with each side of a batch, so the sounds a write
  * of `playing` names before and after both go again: a newly named sound
  * arrives in the same batch, and one no longer named leaves. A sound whose
@@ -4899,7 +4899,7 @@ export function visibleAssetIds(state: RoomState, viewer: Viewer, opts: ProjectO
   // A companion block's picture reaches the DM and the character's owners, the block's readers, and no one else.
   for (const block of Object.values(projected.companionBlocks)) addImage(block.defaultImage);
   // A player meets only the files of what sounds now, the next track and the effects in the open list, and the DM every
-  // sound of the library (docs/design/design-v1-sound.md 6.5). The asset routes serve no sound while the switch is off.
+  // sound of the library (docs/design/design-v1-music.md 6.5). The asset routes serve no sound while the switch is off.
   for (const sound of Object.values(projected.sounds ?? {})) ids.add(sound.assetId);
   if (viewer.role === "dm") {
     // The DM may use every asset of the room, scenes it is not viewing included, every phase and thumbnail with them.

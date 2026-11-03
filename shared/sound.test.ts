@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { crossEndAt, effectLengthMs, following, musicAt, musicChanged, playingAt, reanchor, soundDue, soundStep, type MusicRun, type Playing, type SoundLengths } from "./sound.ts";
 
-/** The music schedule's cases (docs/design/design-v1-sound.md 6.3, 6.4 and section 11), at exact times. */
+/** The music schedule's cases (docs/design/design-v1-music.md 6.3, 6.4 and section 11), at exact times. */
 const T = 1_800_000_000_000;
 
 function tracks(...lengths: number[]): { sounds: SoundLengths; order: string[] } {

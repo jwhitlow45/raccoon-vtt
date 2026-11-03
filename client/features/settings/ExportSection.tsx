@@ -31,7 +31,7 @@ type Status = { kind: "idle" } | { kind: "checking" } | { kind: "started" } | { 
  * shows a spinner and "Checking…" at full color, as a busy Button does.
  *
  * A room with sounds, on a server that offers them, gets Include sounds,
- * on at first, which says what they add (docs/design/design-v1-sound.md
+ * on at first, which says what they add (docs/design/design-v1-music.md
  * 6.7). Off, the link asks for the zip without them. Until the room's
  * storage is known, or when it cannot be read, there is no choice to make
  * and the backup takes everything, as the server does by default.

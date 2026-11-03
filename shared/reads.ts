@@ -74,7 +74,7 @@ function clockRead(state: RoomState): Read[] {
 /**
  * What plays now as a read, only where the view holds it, as the clock's:
  * a room that has never played anything has no `playing`, and the DM's
- * first play still predicts (docs/design/design-v1-sound.md 6.3).
+ * first play still predicts (docs/design/design-v1-music.md 6.3).
  */
 function playingRead(state: RoomState): Read[] {
   return state.playing ? [{ key: keys.playing }] : [];
@@ -350,7 +350,7 @@ export function reads(op: Op, state: RoomState): Reads {
     case "clock.start":
       return of([]);
 
-    // Synced music and sound (docs/design/design-v1-sound.md 6.3): playback reads what plays and the sounds it names, a play
+    // Synced music and sound (docs/design/design-v1-music.md 6.3): playback reads what plays and the sounds it names, a play
     // its playlist, a scene's sound its scene and the meta. A sound's update and delete read what plays (the first to
     // refuse, the second to edit the effect lists) and what they edit. A playlist's delete reads its scenes, never `playing`.
     // The server's tick is its own.

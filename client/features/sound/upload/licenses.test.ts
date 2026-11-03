@@ -9,7 +9,7 @@ import { lameLicense } from "../../../../vite.config.ts";
 
 /*
  * The encoder's license beside its chunk (vite.config.ts lameLicense,
- * docs/design/design-v1-sound.md 7.4), on a small build of a page whose
+ * docs/design/design-v1-music.md 7.4), on a small build of a page whose
  * worker loads the library by `import()`, as the encode worker does.
  */
 

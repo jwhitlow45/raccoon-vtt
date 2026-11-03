@@ -6,7 +6,7 @@ import { imageErrorMessage } from "../../images/errors.ts";
 
 /**
  * Every word the Add buttons and their queues show
- * (docs/design/design-v1-sound.md 4.2), in one place so the tests pin them.
+ * (docs/design/design-v1-music.md 4.2), in one place so the tests pin them.
  */
 
 /** The Add button of each section of the Sound panel. */

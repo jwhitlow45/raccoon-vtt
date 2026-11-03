@@ -10,7 +10,7 @@ import { undoScope } from "../undoScope.ts";
 import { SOUND_WORDS } from "./sound.ts";
 
 /**
- * The sound reducer against docs/design/design-v1-sound.md 6.3 and the
+ * The sound reducer against docs/design/design-v1-music.md 6.3 and the
  * cases of section 11, each with the exact state it leaves.
  */
 

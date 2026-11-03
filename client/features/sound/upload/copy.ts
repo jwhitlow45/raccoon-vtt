@@ -1,7 +1,7 @@
 import { stripTags, walkMp3, type Mp3Facts } from "#shared/audio/mp3.ts";
 
 /**
- * An MP3 the room may keep as it is (docs/design/design-v1-sound.md 4.2
+ * An MP3 the room may keep as it is (docs/design/design-v1-music.md 4.2
  * step 5, 7.1): its tags stripped, then the server's own strict walk, so a
  * file copied here is one the server takes. Its frames are copied, never
  * decoded and encoded again, and the copy holds no tag, so no title,

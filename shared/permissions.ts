@@ -68,7 +68,7 @@ export type AssetKind = "map" | "token" | "handout" | "thumb" | "video" | "sound
  */
 export const VIDEO_SHAPE = "That still isn't the video's shape.";
 export const VIDEO_OFF = "Animated maps are off on this server.";
-/** The `invalid` refusal of an op that names a sound file while the server's ROOM_SOUND switch is off (docs/design/design-v1-sound.md 6.2). */
+/** The `invalid` refusal of an op that names a sound file while the server's ROOM_SOUND switch is off (docs/design/design-v1-music.md 6.2). */
 export const SOUND_OFF = "This server doesn't offer sound files.";
 /** The `invalid` refusal of a map's video that is not a checked video of this room: deleted since, another room's, or another kind. */
 export const VIDEO_MISSING = "That video isn't in this room any more.";
@@ -98,7 +98,7 @@ export type PermissionDeps = {
    */
   animatedMaps?: boolean;
   /**
-   * The server's ROOM_SOUND switch (docs/design/design-v1-sound.md 6.2). Off,
+   * The server's ROOM_SOUND switch (docs/design/design-v1-music.md 6.2). Off,
    * every op that adds, edits or plays a sound file is refused, while stops,
    * deletes, volumes and the built-in effects still pass. The actor always
    * passes it. Without it, as in the dev fixture's local server, nothing is
@@ -665,10 +665,10 @@ function forDm(op: Op, c: Check): Decision {
       // So it writes what players remember (docs/design/design-v1-map-discovery.md 5.3).
       return refuse("forbidden", "the server records what players remember");
     case "sys.sound":
-      // The actor's tick moves the music on (docs/design/design-v1-sound.md 6.4).
+      // The actor's tick moves the music on (docs/design/design-v1-music.md 6.4).
       return refuse("forbidden", "the server moves the music on");
     case "sound.create":
-      // A sound is a `sound` asset of this room, an MP3 the server checked (docs/design/design-v1-sound.md 7.1).
+      // A sound is a `sound` asset of this room, an MP3 the server checked (docs/design/design-v1-music.md 7.1).
       if (c.deps.roomSound === false) return refuse("invalid", SOUND_OFF);
       return c.asset(op.assetId, "sound") ? OK : GONE;
     case "member.update":
@@ -776,7 +776,7 @@ function mapVideosUsable(c: Check, places: readonly { widthPx: number; heightPx:
 
 /**
  * The ops that add, edit or play a sound file, which the server's switch
- * refuses while off (docs/design/design-v1-sound.md 6.2). Stops, a pause,
+ * refuses while off (docs/design/design-v1-music.md 6.2). Stops, a pause,
  * deletes, volumes, a playlist's delete, a scene's sound removed, a scene's
  * sound that starts no file and the built-in effects still pass, so a room
  * can always fall silent and free its space. While the switch is off
@@ -927,7 +927,7 @@ function forPlayer(op: Op, c: Check): Decision {
     case "clock.update":
     case "clock.set":
     case "clock.advance":
-    // Sound is the DM's to run: players and displays control nothing (docs/design/design-v1-sound.md 4.1).
+    // Sound is the DM's to run: players and displays control nothing (docs/design/design-v1-music.md 4.1).
     case "sound.create":
     case "sound.update":
     case "sound.delete":

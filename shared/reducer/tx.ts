@@ -224,7 +224,7 @@ export class Tx {
         else this.state.clock = next as RoomClock;
         break;
       case "playing":
-        // Absent and null are both silence (docs/design/design-v1-sound.md 6.1). Its rev counts every write, which a tick's `from` names.
+        // Absent and null are both silence (docs/design/design-v1-music.md 6.1). Its rev counts every write, which a tick's `from` names.
         this.state.playing = (next as RoomState["playing"]) ?? null;
         break;
       case "log":

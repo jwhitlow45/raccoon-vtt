@@ -28,7 +28,7 @@ import type { ProcessedVariant } from "./process.ts";
  *
  * Images are WebP. A video keeps its real extension, `.webm` or `.mp4`,
  * from its row's `media` (D-261102-454), so every tool and operator reads
- * it as what it is, and a sound is `.mp3` (docs/design/design-v1-sound.md 7.2).
+ * it as what it is, and a sound is `.mp3` (docs/design/design-v1-music.md 7.2).
  */
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
@@ -39,7 +39,7 @@ export function isVideoContainer(value: unknown): value is VideoContainer {
   return typeof value === "string" && (VIDEO_CONTAINERS as readonly string[]).includes(value);
 }
 
-/** A sound's one container, the only file a sound row names (docs/design/design-v1-sound.md 7.2). */
+/** A sound's one container, the only file a sound row names (docs/design/design-v1-music.md 7.2). */
 export const SOUND_MEDIA = "mp3";
 
 /** What a row's `media` column may hold: a video's container or a sound's. Null for an image. */
@@ -190,7 +190,7 @@ export function storedVideo(facts: VideoFacts): StoredVideo {
 const SOUND_KBPS: readonly number[] = MP3_BITRATES.filter((kbps) => kbps >= SOUND_LIMITS.minKbps && kbps <= SOUND_LIMITS.maxKbps);
 
 /**
- * The `audio` column: what the frame walk found (docs/design/design-v1-sound.md
+ * The `audio` column: what the frame walk found (docs/design/design-v1-music.md
  * 7.2), held to the walk's own bounds. The intake parses a file's facts
  * through it before the row is written, and every read of a row goes
  * through it again, so a stored row is never one a reader refuses.
@@ -267,7 +267,7 @@ export async function addUploaders(db: pg.Pool | pg.PoolClient, assetId: string,
  * the room's order.
  *
  * Sounds are no images, so no library lists them
- * (docs/design/design-v1-sound.md 7.2): the Sound panel reads the room's
+ * (docs/design/design-v1-music.md 7.2): the Sound panel reads the room's
  * sounds from its state, and their bytes from the storage route.
  */
 export async function listRoomAssets(pool: pg.Pool, roomId: string, ids?: ReadonlySet<string>, memberId?: string): Promise<AssetView[]> {

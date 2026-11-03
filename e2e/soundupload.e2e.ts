@@ -12,7 +12,7 @@ import { committed, longMp3At48, toneWav, wavOfChannels } from "./fixtures/sound
 import { ConsoleWatch, OpSocket, openSideTab, ROOT, Shots, sleep, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
- * Adding sounds (docs/design/design-v1-sound.md 4.2, 12): the DM's browser
+ * Adding sounds (docs/design/design-v1-music.md 4.2, 12): the DM's browser
  * reads each file, evens its loudness and makes the room's MP3, copied or
  * encoded in a Worker.
  *

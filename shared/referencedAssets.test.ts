@@ -36,7 +36,7 @@ function everyReference(): RoomState {
   const remembered = (id: string, assetId: string) => ({ ...state.stamps.st1!, id, art: { assetId } });
   state.memory = { "s1:0,0": { sceneId: "s1", cx: 0, cy: 0, rev: 0, stamps: { st1: remembered("st1", "rememberedStamp"), gone: null } } };
   state.memoryBy = { "s1:p1:0,0": { sceneId: "s1", cx: 0, cy: 0, rev: 0, memberId: "p1", stamps: { st3: remembered("st3", "holderStamp"), st4: { ...remembered("st4", "x"), art: { key: "oak-tree" } } } } };
-  // A sound names its file (docs/design/design-v1-sound.md 7.3). Its playlists and what plays name sounds, never files.
+  // A sound names its file (docs/design/design-v1-music.md 7.3). Its playlists and what plays name sounds, never files.
   state.sounds = { rain: { id: "rain", rev: 0, name: "Rain", assetId: "soundFile", ms: 60_000, use: "loop" } };
   state.playlists = { pl: { id: "pl", rev: 0, name: "Tavern night", sounds: [], repeat: "all", fade: 5 } };
   state.playing = { rev: 1, music: null, loops: { l1: { soundId: "rain", at: 0, volume: 70 } }, effects: [], volume: { music: 100, effects: 100 } };
@@ -64,7 +64,7 @@ describe("referencedAssetIds (docs/design/design-v1-dm-tools.md 3.19)", () => {
     assert.deepEqual([...found].sort(), ["altImage", "blockImage", "docPage1", "docPage2", "handout", "holderStamp", "map", "mapVideo", "monsterImage", "page1", "page2", "phase", "phaseVideo", "portrait", "rememberedStamp", "soundFile", "srdImage", "stampImage", "thumb", "tokenImage"]);
   });
 
-  test("a sound's file is a sound row, so cleanup keeps it while the library names it and a restore checks its kind (docs/design/design-v1-sound.md 6.6)", () => {
+  test("a sound's file is a sound row, so cleanup keeps it while the library names it and a restore checks its kind (docs/design/design-v1-music.md 6.6)", () => {
     const state = everyReference();
     const rain = state.sounds!.rain!;
     const deleted = { ...state, sounds: {} };

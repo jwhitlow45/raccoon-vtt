@@ -224,7 +224,7 @@ export async function registerWebSocket(app: FastifyInstance, deps: { manager: R
           case "ping":
             conn.send({ t: "pong", k: msg.k });
             return;
-          // A device measuring the server's time for synced sound (docs/design/design-v1-sound.md 5.1), answered at once
+          // A device measuring the server's time for synced sound (docs/design/design-v1-music.md 5.1), answered at once
           // from the clock every op's time reads. A display plays sound too, so it asks as members do.
           case "time":
             conn.send({ t: "time", k: msg.k, at: room.serverTime() });

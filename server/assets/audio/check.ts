@@ -7,7 +7,7 @@ import { AssetError } from "../errors.ts";
 import { storedSoundSchema } from "../store.ts";
 
 /**
- * A sound upload's check (docs/design/design-v1-sound.md 7.1 and 7.2): the
+ * A sound upload's check (docs/design/design-v1-music.md 7.1 and 7.2): the
  * frame walk of shared/audio/mp3.ts, which decodes nothing, run in a worker
  * thread (D-261102-539). The walk is linear, but a 24 MiB file is 130,000
  * frames, and every room's sockets share the main thread, so no upload's

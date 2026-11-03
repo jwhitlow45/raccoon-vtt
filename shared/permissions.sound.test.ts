@@ -9,7 +9,7 @@ import { AT, DM, room } from "./testutil.ts";
 
 /*
  * A scene's sound while the server's switch is off
- * (docs/design/design-v1-sound.md 6.2 and 4.6, MUS-R1-06): refused when it
+ * (docs/design/design-v1-music.md 6.2 and 4.6, MUS-R1-06): refused when it
  * would start a sound file, and passed when it starts none, so a Move
  * players to a scene whose sound is silence still goes. The reducer is the
  * oracle: whatever passes starts no music run and no background sound.

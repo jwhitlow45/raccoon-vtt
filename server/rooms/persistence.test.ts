@@ -374,7 +374,7 @@ describe("asset ids an op names", () => {
   });
 });
 
-describe("a sound row's facts (docs/design/design-v1-sound.md 7.2)", () => {
+describe("a sound row's facts (docs/design/design-v1-music.md 7.2)", () => {
   const SOUND_ID = "0193a0f0-0000-7000-8000-00000000000b";
   const base: AssetFactRow = { id: SOUND_ID, room_id: "ROOM", kind: "sound", width: 0, height: 0, uploaders: null, media: "mp3", video: null, audio: { ms: 3_000, channels: 2, kbps: 128 } };
 

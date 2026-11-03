@@ -3,7 +3,7 @@ import { LEVEL_MAX, LEVEL_MIN } from "#shared/sound.ts";
 
 /**
  * Integrated loudness by ITU-R BS.1770-4, gated, and the sample peak
- * (docs/design/design-v1-sound.md 4.2 step 4, D-261102-465), fed piece by
+ * (docs/design/design-v1-music.md 4.2 step 4, D-261102-465), fed piece by
  * piece so a long file is never held whole. The level that evens a sound
  * comes from them.
  *

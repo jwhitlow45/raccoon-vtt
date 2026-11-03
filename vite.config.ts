@@ -111,7 +111,7 @@ const LAMEJS = new URL("./node_modules/@breezystack/lamejs/", import.meta.url);
 const SOUND_LICENSES = new URL("./client/features/sound/upload/licenses/", import.meta.url);
 
 /**
- * The MP3 encoder's license (docs/design/design-v1-sound.md 7.4).
+ * The MP3 encoder's license (docs/design/design-v1-music.md 7.4).
  * `@breezystack/lamejs` is LGPL-3.0, and its package's LICENSE is only a
  * short note, so the full LGPL-3.0 and the GPL-3.0 it builds on are
  * committed beside the upload's code and written beside the encoder's

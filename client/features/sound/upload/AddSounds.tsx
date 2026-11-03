@@ -13,7 +13,7 @@ import { ADD_LABEL, addedWords, cancelLabel, dismissLabel, filesLabel, PICK_CAPP
 
 /**
  * An Add button of the Sound panel and its queue of files
- * (docs/design/design-v1-sound.md 4.2): "Add music…", "Add background
+ * (docs/design/design-v1-music.md 4.2): "Add music…", "Add background
  * sounds…" or "Add effects…" by its use, a file picker of up to
  * SOUND_LIMITS.pickFiles files, one row a file with its step, percent and
  * Cancel, and each refusal on its row. It reads the room and sends

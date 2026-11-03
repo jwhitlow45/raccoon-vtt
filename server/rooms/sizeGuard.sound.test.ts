@@ -9,7 +9,7 @@ import { room } from "#shared/testutil.ts";
 import { checkWholeScenes, growthBound, measuredLog, measuredStateBytes, SizeGuard } from "./sizeGuard.ts";
 
 /**
- * Synced music and sound in the size guard (docs/design/design-v1-sound.md
+ * Synced music and sound in the size guard (docs/design/design-v1-music.md
  * 6.3): the library, the playlists and what plays ride in every DM's
  * projection, so they count in the room-level part, exactly, and only while
  * each holds something, as the projection carries them.
@@ -67,7 +67,7 @@ function assertExact(state: RoomState, why: string): void {
   }
 }
 
-describe("sound in the size guard (docs/design/design-v1-sound.md 6.3)", () => {
+describe("sound in the size guard (docs/design/design-v1-music.md 6.3)", () => {
   test("the library, the playlists and what plays count in the room-level part, exactly, after every op that writes them", () => {
     const all = steps();
     const last = all.at(-1)!.state;

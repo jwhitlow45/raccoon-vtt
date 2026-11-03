@@ -4,7 +4,7 @@ import type { Sound } from "#shared/sound.ts";
 import { room, scene } from "#shared/testutil.ts";
 import { describeOp } from "./undoLabels.ts";
 
-/** A DM's sound Setup steps go on the Setup stack in the panel's words (docs/design/design-v1-sound.md 6.6). */
+/** A DM's sound Setup steps go on the Setup stack in the panel's words (docs/design/design-v1-music.md 6.6). */
 describe("sound undo labels", () => {
   const rain: Sound = { id: "rain", rev: 0, name: "Rain", assetId: "file-rain", ms: 20_000, use: "effect" };
   const s = room({

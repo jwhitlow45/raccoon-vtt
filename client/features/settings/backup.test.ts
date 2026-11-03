@@ -6,7 +6,7 @@ import { exportErrorText, formatBytes, importErrorText, importFileProblem, sound
 const zip = (size: number) => ({ name: "raccoon-room-K7QH-2MXA.zip", size, type: "application/zip" });
 
 describe("room import", () => {
-  test("an import that left sounds out says how many, and why when the server offers none (docs/design/design-v1-sound.md 6.7)", () => {
+  test("an import that left sounds out says how many, and why when the server offers none (docs/design/design-v1-music.md 6.7)", () => {
     assert.equal(soundsLeftOutText(2, true), "The room is imported. 2 sounds were left out.");
     assert.equal(soundsLeftOutText(1, true), "The room is imported. 1 sound was left out.");
     assert.equal(soundsLeftOutText(1200, false), "The room is imported. This server doesn't offer sound files, so 1,200 sounds were left out.");

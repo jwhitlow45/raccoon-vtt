@@ -7,7 +7,7 @@ import type { Refusal } from "./words.ts";
 
 /**
  * What the DM's browser knows about a file before it decodes a byte
- * (docs/design/design-v1-sound.md 4.2 step 1, D-261102-464): its channel
+ * (docs/design/design-v1-music.md 4.2 step 1, D-261102-464): its channel
  * count and rate from its own header, and its length where the header
  * says it. A browser's decoder allocates by the file's own channels before
  * it resamples or mixes anything, so a file whose channels these headers do

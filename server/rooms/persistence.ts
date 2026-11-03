@@ -49,7 +49,7 @@ export async function archiveAdmitted(guard: ArchiveGuard): Promise<boolean> {
 
 /**
  * `lastActiveAt` is the room's last commit in ms since 1970, which the
- * sound's members rule counts from at load (docs/design/design-v1-sound.md
+ * sound's members rule counts from at load (docs/design/design-v1-music.md
  * 6.4). Absent counts from the load.
  */
 export type RoomInfo = { roomId: string; pinned: boolean; createdIp: string | null; readOnly: boolean; lastActiveAt?: number };
@@ -724,7 +724,7 @@ export async function loadAssetFacts(pool: Queryable, ids: readonly string[]): P
  * One row's fact. A video's facts are its `media` column, its size and its
  * `video` column's JSON (docs/design/design-v1-animated-maps.md 9.1), held
  * to the protocol's bounds. A sound's are its `audio` column
- * (docs/design/design-v1-sound.md 7.2), read by the rule the intake writes
+ * (docs/design/design-v1-music.md 7.2), read by the rule the intake writes
  * it by and serving reads it by (store.ts soundFactsOfRow), so a row means
  * the same to every reader. A row whose facts do not check gets none, so
  * the actor refuses it as it refuses a missing row, and no unchecked number

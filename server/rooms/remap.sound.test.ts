@@ -8,7 +8,7 @@ import { refillSoundFacts, remapState, type ImportedAsset } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
 
 /**
- * A backup's sound on import (docs/design/design-v1-sound.md 6.7): the
+ * A backup's sound on import (docs/design/design-v1-music.md 6.7): the
  * library and the playlists follow their new ids and each file its new row,
  * what played is dropped so the room starts silent, `refillSoundFacts` takes
  * every length from the rows and leaves out a sound whose file failed or
@@ -70,7 +70,7 @@ function parses(state: RoomState): void {
   assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
 }
 
-describe("a backup's sound on import (docs/design/design-v1-sound.md 6.7)", () => {
+describe("a backup's sound on import (docs/design/design-v1-music.md 6.7)", () => {
   test("sounds and playlists take new ids, each file its new row's, and every reference follows", () => {
     const state = remapped();
     const m1 = byName(state, "m1")!;

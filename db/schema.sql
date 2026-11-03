@@ -334,7 +334,7 @@ begin
       check ((kind = 'video') = (media is not null) and (kind = 'video') = (video is not null));
   end if;
 end $$;
--- Synced music and sound (docs/design/design-v1-sound.md 7.2). A sound is an
+-- Synced music and sound (docs/design/design-v1-music.md 7.2). A sound is an
 -- asset of its own kind, its `media` mp3 and its `audio` what the frame walk
 -- found, with camelCase keys: { ms, channels, kbps }. One rule ties each
 -- kind to its columns, replacing animated maps' (assets_video_media) and the

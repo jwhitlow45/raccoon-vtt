@@ -10,7 +10,7 @@ import { AT, DM, P1, room } from "./testutil.ts";
 
 /**
  * What of the room's sound reaches each viewer, path by path
- * (docs/design/design-v1-sound.md 6.5, the cases of section 11 about Pat's
+ * (docs/design/design-v1-music.md 6.5, the cases of section 11 about Pat's
  * socket, the blackout and a reclassified effect, and section 12): the full
  * snapshot, one entity at a time, the held map, the visible set and the
  * fan-out of a batch. Every state is built by real ops through the reducer,

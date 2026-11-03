@@ -93,7 +93,7 @@ const THUMB_HOURLY = { session: 240, room: 240 } as const;
 export const HANDOUT_HOURLY = { session: 250, room: 250 } as const;
 
 /**
- * And sounds (docs/design/design-v1-sound.md 7.2): an Add button takes 20
+ * And sounds (docs/design/design-v1-music.md 7.2): an Add button takes 20
  * files a pick, and a DM filling a library adds a few dozen in an evening.
  * A sound is DM only, and every one still counts against the room's quota.
  */

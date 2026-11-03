@@ -4,7 +4,7 @@ import fc from "fast-check";
 import { loopCrossingMs, occurrencesAt } from "./sound.ts";
 
 /**
- * The one timeline every sound reads (docs/design/design-v1-sound.md 5.2,
+ * The one timeline every sound reads (docs/design/design-v1-music.md 5.2,
  * section 12): random placements, lengths, crossings and moments. Nothing
  * before `at`, k never negative, at most two occurrences, positions in
  * [0, L), each occurrence's start plus its position the moment asked, and

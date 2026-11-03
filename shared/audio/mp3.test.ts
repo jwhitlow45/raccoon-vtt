@@ -4,7 +4,7 @@ import { SOUND_LIMITS } from "../limits.ts";
 import { frameBytes, stripTags, walkMp3, type Mp3Walk } from "./mp3.ts";
 import { apeTag, concat, frameHeader, framesFor, id3v1, id3v2, lyrics3v1, lyrics3v2, paddingPattern, silentFrames, withTagFrame } from "./mp3Testutil.ts";
 
-/** The frame walk and the tag strip (docs/design/design-v1-sound.md 7.1 and 12). */
+/** The frame walk and the tag strip (docs/design/design-v1-music.md 7.1 and 12). */
 
 function facts(walk: Mp3Walk) {
   if (!walk.ok) assert.fail(`refused: ${walk.code}, ${walk.why}`);

@@ -63,7 +63,7 @@ Space Grotesk is copyright 2020 The Space Grotesk Project Authors (https://githu
 
 ## Sound files: sound-*.wav and sound-*.mp3
 
-For `e2e/soundupload.e2e.ts` (docs/design/design-v1-sound.md 12). Each is a tone written from scratch by `e2e/fixtures/sounds.ts`, never a recording, and the MP3s come from the encoder the app ships (`@breezystack/lamejs`). The same run writes the same bytes.
+For `e2e/soundupload.e2e.ts` (docs/design/design-v1-music.md 12). Each is a tone written from scratch by `e2e/fixtures/sounds.ts`, never a recording, and the MP3s come from the encoder the app ships (`@breezystack/lamejs`). The same run writes the same bytes.
 
 ```sh
 node e2e/fixtures/sounds.ts

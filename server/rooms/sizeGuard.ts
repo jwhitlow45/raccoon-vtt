@@ -484,7 +484,7 @@ export function roomLevelBytes(state: RoomState): number {
   // field, its value and the comma before it, as a DM's projection holds it.
   if (state.clock) bytes += 1 + fieldBytes("clock") + valueBytes(state.clock);
   // A DM's projection holds the library, the playlists and what plays only while each holds something, so a room without
-  // sound projects as it always did (shared/project.ts soundFields, docs/design/design-v1-sound.md 6.3). An empty record
+  // sound projects as it always did (shared/project.ts soundFields, docs/design/design-v1-music.md 6.3). An empty record
   // is its two braces.
   if (state.playing) bytes += 1 + fieldBytes("playing") + valueBytes(state.playing);
   for (const name of ["sounds", "playlists"] as const) {
@@ -1244,7 +1244,7 @@ function entryKeyBytes(key: EntityKey): number {
     case "encounter":
     case "encounterHistory":
       return 0;
-    // The clock's field comes and goes with it, and so does what plays in a room from before sound (docs/design/design-v1-sound.md 6.7).
+    // The clock's field comes and goes with it, and so does what plays in a room from before sound (docs/design/design-v1-music.md 6.7).
     case "clock":
       return jsonKeyBytes("clock");
     case "playing":

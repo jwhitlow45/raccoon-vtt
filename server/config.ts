@@ -63,7 +63,7 @@ const Env = z.object({
    */
   ANIMATED_MAPS: emptyAsUnset(z.enum(["0", "1"]).default("0")),
   /**
-   * Sound files (docs/design/design-v1-sound.md 1, D-261102-513), off unless
+   * Sound files (docs/design/design-v1-music.md 1, D-261102-513), off unless
    * "1". Music streams to every device that plays it, about 60 MB an hour
    * each, through the server's CDN, so the server's owner opts in. Off, the
    * built-in effects still play, since each device makes them.

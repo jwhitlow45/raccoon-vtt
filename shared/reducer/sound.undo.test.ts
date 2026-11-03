@@ -9,7 +9,7 @@ import { AT, member, room } from "../testutil.ts";
 import { DEPENDED_ON, PARENT_GONE, restoreReferenceConflicts } from "./misc.ts";
 
 /**
- * Undo setup meets the sound's typed references (docs/design/design-v1-sound.md
+ * Undo setup meets the sound's typed references (docs/design/design-v1-music.md
  * 6.6 and section 11), through the inverses the ops record and a restore
  * marked as the server marks its own.
  */

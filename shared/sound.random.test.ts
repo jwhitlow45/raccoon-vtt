@@ -4,7 +4,7 @@ import fc from "fast-check";
 import { FADES, REPEATS, fadeMs, following, lengthAs, musicChanged, occurrencesAt, playingAt, soundDue, soundStep, type MusicChange, type MusicRun, type Playing, type SoundLengths } from "./sound.ts";
 
 /**
- * The server's music schedule (docs/design/design-v1-sound.md 6.3, 6.4 and
+ * The server's music schedule (docs/design/design-v1-music.md 6.3, 6.4 and
  * section 12): random playlists, lengths, crossfades and repeats, with
  * pauses, resumes, skips and changes of repeat or crossfade at random
  * times, and ticks at their due times and late. Invariants:

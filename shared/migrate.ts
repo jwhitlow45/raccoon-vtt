@@ -230,7 +230,7 @@ export const snapshotMigrations: MigrationStep[] = [
   // reads as a still map, so a v34 room is a v35 room as it is. The number moves so that an older build, whose strict
   // state schema refuses the field, refuses a v35 snapshot instead of loading it.
   { from: 34, to: 35, apply: (state) => state },
-  // Synced music and sound (docs/design/design-v1-sound.md 6.7): the room's `sounds`, `playlists` and `playing`, a scene's
+  // Synced music and sound (docs/design/design-v1-music.md 6.7): the room's `sounds`, `playlists` and `playing`, a scene's
   // `sound` and the `soundNames` setting are optional, and absent reads as an empty library and silence, so a v35 room is
   // a v36 room as it is. The number moves so that an older build, whose strict state schema refuses them, refuses a v36
   // snapshot instead of loading it and sending players what the DM keeps.
@@ -1143,7 +1143,7 @@ export const opMigrations: MigrationStep[] = [
     apply: (op) => op,
   },
   {
-    // Synced music and sound (docs/design/design-v1-sound.md 6.7): the
+    // Synced music and sound (docs/design/design-v1-music.md 6.7): the
     // library, playlist and playback ops are new, and `scene.update`'s
     // `sound` and `room.update`'s `soundNames` are new optional fields, so
     // no stored op changes shape and the step is the identity. No stored op

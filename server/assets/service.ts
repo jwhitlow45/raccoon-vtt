@@ -87,7 +87,7 @@ export type StarterResult = UploadResult & { credit: AssetCredit; starter: strin
 
 export const MIN_FREE_BYTES = 2 * 1024 * 1024 * 1024;
 
-/** A room's storage line (docs/design/design-v1-sound.md 7.2): what its quota counts, the quota (0 for none) and what its sounds take, in bytes. */
+/** A room's storage line (docs/design/design-v1-music.md 7.2): what its quota counts, the quota (0 for none) and what its sounds take, in bytes. */
 export type RoomStorage = { used: number; quota: number; sounds: number };
 
 /** Rooms whose storage is remembered at once. Past it the oldest are forgotten, so the memory is bounded. */
@@ -337,7 +337,7 @@ export class AssetService {
   }
 
   /**
-   * A sound (docs/design/design-v1-sound.md 7.2): no sharp and no decoder.
+   * A sound (docs/design/design-v1-music.md 7.2): no sharp and no decoder.
    * The frame walk runs in a worker from the processing queue (audio/check.ts),
    * and the upload itself is placed as the row's one `full` variant, so the
    * same bytes make the same file under one SOUND_PIPELINE and reuse the

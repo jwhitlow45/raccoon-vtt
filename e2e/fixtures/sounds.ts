@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { concat, id3v1, id3v2, mp3AtKbps, mp3Of, toneSamples, wavFile, wavHeader, type WavSpec } from "../../client/features/sound/upload/sounds.testutil.ts";
 
 /**
- * The sound fixtures for e2e/soundupload.e2e.ts (docs/design/design-v1-sound.md
+ * The sound fixtures for e2e/soundupload.e2e.ts (docs/design/design-v1-music.md
  * 12, this folder's README): tones and silence written from scratch, never
  * a recording, and MP3s from the same encoder the app ships. The small ones
  * are committed, so their bytes stay put:

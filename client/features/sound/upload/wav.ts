@@ -1,7 +1,7 @@
 import type { ByteSource } from "./bytes.ts";
 
 /**
- * WAV files (docs/design/design-v1-sound.md 4.2 step 2): the header's facts,
+ * WAV files (docs/design/design-v1-music.md 4.2 step 2): the header's facts,
  * and its PCM turned into float samples piece by piece, so a WAV of a
  * plain sample format at 44.1 or 48 kHz is never held decoded whole. Any
  * other WAV decodes whole in the browser, under the device's budget.

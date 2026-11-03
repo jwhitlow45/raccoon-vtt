@@ -394,7 +394,7 @@ One review for the stack. Commits: SN-A `feat(sound): the room's sound library a
 
 Lane SN-D, the Sound panel, scene sound, the X-card's button, the icons and this note:
 
-- **The note's name.** This note is `docs/design/design-v1-music.md`. Parts of the code cite it as `design-v1-sound.md`, the name section 9 gave it.
+- **The note's name.** This note is `docs/design/design-v1-music.md`. The build first cited it as `design-v1-sound.md`, the name section 9 gave it, and every citation now names this note.
 - **Repeat's icons** (D-261102-700). Repeat all, and Repeat off unpressed, draw Lucide `repeat`, the drawing the app's "again" meaning already had, now widened to "going round again as it went". Repeat one draws Lucide `repeat-1`. Of the new Lucide icons, `music` and `square` are the ones Lucide's license lists as derived from Feather.
 - **Playback defaults** (D-261102-701). A new playlist is Repeat all with a 5 s crossfade, and a track played from Tracks plays alone with Repeat all and a 5 s crossfade.
 - **Background's Edit** (D-261102-702). Background has Edit and Done in its header, as Effects does, so a loop's page can be reached. Both sections stay in Edit through a visit to a sound's page.

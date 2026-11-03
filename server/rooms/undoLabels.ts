@@ -29,7 +29,7 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
   const target = (t: ActorTarget) => ("tokenId" in t ? token(t.tokenId) : quoted(before.characters[t.characterId]?.name, "a character"));
   switch (op.t) {
     case "room.update":
-      // The Sound panel's switch sends the setting alone (docs/design/design-v1-sound.md 6.6).
+      // The Sound panel's switch sends the setting alone (docs/design/design-v1-music.md 6.6).
       if (op.name === undefined && op.settings?.soundNames !== undefined && Object.keys(op.settings).length === 1) {
         return op.settings.soundNames ? "turning on Players see what is playing" : "turning off Players see what is playing";
       }
@@ -282,7 +282,7 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       return "setting the date and time";
     case "clock.advance":
       return op.why === "longRest" ? "the party's Long Rest" : `moving the clock on ${spanText(op.by)}`;
-    // Synced music and sound (docs/design/design-v1-sound.md 6.6). Only the library's edits and the playlists are steps: an
+    // Synced music and sound (docs/design/design-v1-music.md 6.6). Only the library's edits and the playlists are steps: an
     // upload, a delete and playback record none, so their phrases name them only for completeness.
     case "sound.update": {
       const was = ownEntry(before.sounds, op.id);

@@ -11,7 +11,7 @@ import { AssetError } from "./errors.ts";
  * - The fixed type, nosniff and the sandboxing CSP mean that even a file
  *   that somehow held markup could never run as a page on this origin. A
  *   video's or a sound's type comes from its row, never from its bytes
- *   (docs/design/design-v1-animated-maps.md 7, docs/design/design-v1-sound.md 7.2).
+ *   (docs/design/design-v1-animated-maps.md 7, docs/design/design-v1-music.md 7.2).
  * - CORP same-origin keeps other sites from embedding them.
  */
 export const ASSET_HEADERS = {
@@ -81,7 +81,7 @@ export function mediaEtag(sha256Hex: string, pipeline: number): string {
 /**
  * Streams a video or a sound, whole or one range of it
  * (docs/design/design-v1-animated-maps.md 10, Serving,
- * docs/design/design-v1-sound.md 7.2): Safari plays neither without range
+ * docs/design/design-v1-music.md 7.2): Safari plays neither without range
  * answers. Its type comes from the row's media. An `If-Range` that is not
  * this file's ETag gets the whole file, as RFC 9110 13.1.5 asks. The caller
  * has authorized this very request, as it does every image request.
