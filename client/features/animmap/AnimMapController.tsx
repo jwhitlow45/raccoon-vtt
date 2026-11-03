@@ -12,7 +12,7 @@ import { usePreview } from "../dm/previewContext.ts";
 import type { ControllerProps } from "../layers.ts";
 import { topDownTool } from "../view/choice.ts";
 import { useCoveredByPreview, usePageVisible, useReducedMotion } from "../weather/store.ts";
-import { animMapSlot, pageSteppedDown, subscribePageStepDown, type AnimMapBoard, type BoardShown, type LayerLike, type VideoLike } from "./board.ts";
+import { animMapSlot, connectBoard, pageSteppedDown, subscribePageStepDown, type AnimMapBoard, type BoardShown, type LayerLike, type VideoLike } from "./board.ts";
 import { decodable } from "./capabilities.ts";
 import { boardVideoSlot, provideVideoJudge, useServerAnimatedMaps, type StillReason } from "./status.ts";
 
@@ -44,13 +44,7 @@ export function AnimMapController(props: ControllerProps) {
   const loading = useSceneLoading() !== null;
   const iso = props.live.view.kind === "isometric";
 
-  useLayoutEffect(() => {
-    board.onStatus = (next) => status.set(next);
-    status.set(board.status);
-    return () => {
-      board.onStatus = null;
-    };
-  }, [board, status]);
+  useLayoutEffect(() => connectBoard(board, status), [board, status]);
   useLayoutEffect(() => {
     board.input({ video, url, server, setting, lowPower, reducedMotion, variant, iso, setupTool, pageVisible, panelCovered, preview, loading });
   }, [board, video, url, server, setting, lowPower, reducedMotion, variant, iso, setupTool, pageVisible, panelCovered, preview, loading]);

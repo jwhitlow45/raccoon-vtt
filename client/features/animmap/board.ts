@@ -157,6 +157,11 @@ export function resetPageStepDownForTests(): void {
   pageStepDown = null;
 }
 
+/** How many boards hear the page's step-down, so a test sees a board let go of it. */
+export function stepDownListenersForTests(): number {
+  return stepDownListeners.size;
+}
+
 // ---------------------------------------------------------------- the board
 
 export class AnimMapBoard {
@@ -208,6 +213,8 @@ export class AnimMapBoard {
   #status: BoardVideo = null;
   #state = "none";
   readonly #listeners = new Set<() => void>();
+  /** Stops this board hearing the page's step-down, or null while it does not. */
+  #stepDownOff: (() => void) | null = null;
   /** Video draws and camera draws of the map layer, counted apart (the e2e hooks). */
   videoDraws = 0;
   cameraDraws = 0;
@@ -220,13 +227,23 @@ export class AnimMapBoard {
   constructor(env: BoardEnv) {
     this.#env = env;
     this.#stepDown = new StepDown(env.now());
-    // A step-down speaks for the page, so every board stills when one falls behind.
-    subscribePageStepDown(() => this.#settle());
+    this.#hearStepDown();
+  }
+
+  /**
+   * A step-down speaks for the page, so every board stills when one falls
+   * behind. The page's list holds the board only until dispose, so a Room
+   * scope that ends, such as View as a player's, is not kept alive by it
+   * (AM-R1-04).
+   */
+  #hearStepDown(): void {
+    this.#stepDownOff ??= subscribePageStepDown(() => this.#settle());
   }
 
   // ---------------------------------------------------------------- what the page tells it
 
   input(patch: Partial<BoardInput>): void {
+    this.#hearStepDown();
     const was = this.#input;
     const next = { ...was, ...patch };
     if (sameInput(was, next)) return;
@@ -307,15 +324,19 @@ export class AnimMapBoard {
   }
 
   /**
-   * Lets everything go: the source, the lease, the loops. The Room's tree is
-   * going, so its map layer holds nothing. Not for good: React's development
-   * double mount uses the board again, and its next input brings the video
-   * back.
+   * Lets everything go: the source, the lease, the loops, the status and the
+   * page's step-down. The controller is going, with the Room's tree or with
+   * the board alone while the Room stays, as a blackout takes the board
+   * away (AMBUILD-ASTRA-04), so its map layer holds nothing. Not for good:
+   * the board's next input, after a blackout or React's development double
+   * mount, brings the video back.
    */
   dispose(): void {
     this.#input = IDLE_INPUT;
     this.#konvaHolds = null;
     this.#settle();
+    this.#stepDownOff?.();
+    this.#stepDownOff = null;
   }
 
   // ---------------------------------------------------------------- the rule
@@ -717,6 +738,26 @@ export class AnimMapBoard {
     this.videoDraws++;
     this.#gate.drew(now, mediaMs);
   }
+}
+
+// ---------------------------------------------------------------- the controller's mount
+
+/**
+ * What AnimMapController's mount ties together: the board's status reaches
+ * the Map image row while the controller is mounted. Its unmount stops and
+ * resets the board and clears the status, since the board, scoped to the
+ * Room, outlives a controller a blackout unmounts with the map's stage
+ * (AMBUILD-ASTRA-04): otherwise the old input would keep the video's
+ * source and the decoder.
+ */
+export function connectBoard(board: AnimMapBoard, status: { get(): BoardVideo; set(next: BoardVideo): void }): () => void {
+  board.onStatus = (next) => status.set(next);
+  status.set(board.status);
+  return () => {
+    board.onStatus = null;
+    board.dispose();
+    status.set(null);
+  };
 }
 
 // ---------------------------------------------------------------- helpers

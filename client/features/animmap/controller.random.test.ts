@@ -3,10 +3,10 @@ import { afterEach, test } from "node:test";
 import fc from "fast-check";
 import type { MapVideo } from "#shared/model.ts";
 import { chance, int, pick, rng } from "#shared/testutil.ts";
-import { AnimMapBoard, IDLE_INPUT, pageSteppedDown, resetPageStepDownForTests, type BoardEnv, type BoardInput, type LayerLike, type VideoLike } from "./board.ts";
+import { AnimMapBoard, connectBoard, IDLE_INPUT, pageSteppedDown, resetPageStepDownForTests, stepDownListenersForTests, type BoardEnv, type BoardInput, type LayerLike, type VideoLike } from "./board.ts";
 import { MIN_GAP_MS } from "./pacing.ts";
 import type { Decodable } from "./playback.ts";
-import { decoderLeases, leaseDecoder, resetDecoderForTests, type DecoderLease } from "./status.ts";
+import { boardVideoStatus, decoderLeases, leaseDecoder, resetDecoderForTests, type DecoderLease } from "./status.ts";
 import { Compositor, HEALTHY, mostInWindow, renderTimes, type Content, type Display, type Struggle } from "./videoSim.testutil.ts";
 
 /*
@@ -765,4 +765,49 @@ test("a board that yielded to another board asks again only once what decides it
   await run(1000);
   assert.equal(dm.board.state, "playing", "the DM's board plays again once the preview goes");
   assert.deepEqual(world.failures, []);
+});
+
+test("a blackout unmounts the controller while the room stays: the video stops, its source and lease go, the status clears, and it plays again after (AMBUILD-ASTRA-04)", async () => {
+  const { world, dm, run } = single([{ fps: 30, ms: 2000 }], { hz: 60 }, VIDEO_A);
+  const status = boardVideoStatus();
+  const disconnect = connectBoard(dm.board, status);
+  await settle(world);
+  await run(1000);
+  assert.equal(dm.board.state, "playing");
+  assert.equal(status.get()?.playback.reason, "moving");
+  // The blackout takes MapStage away: its host, its map layer and the controller let go, in React's order, and the Room's scope keeps the board.
+  dm.board.attachHost(null);
+  dm.board.konvaHolds(null);
+  dm.board.attachLayer(null);
+  disconnect();
+  await settle(world);
+  await run(1000);
+  assert.equal(dm.video!.paused, true, "nothing plays");
+  assert.equal(dm.video!.hasSrc(), false, "the source is gone");
+  assert.deepEqual(decoderLeases(), [], "the decoder is free");
+  assert.equal(status.get(), null, "the Map image row hears nothing plays");
+  assert.equal(dm.board.state, "none");
+  // The blackout ends: the stage mounts again on the same board.
+  const again = connectBoard(dm.board, status);
+  dm.remount();
+  dm.board.input({ ...IDLE_INPUT, server: true, video: VIDEO_A, url: "/va" });
+  await settle(world);
+  await run(1000);
+  assert.equal(dm.board.state, "playing");
+  assert.equal(status.get()?.playback.reason, "moving");
+  again();
+  assert.deepEqual(world.failures, []);
+});
+
+test("a disposed board no longer hears the page's step-down, so an ended Room scope is not kept alive (AM-R1-04)", () => {
+  resetPageStepDownForTests();
+  const before = stepDownListenersForTests();
+  const world = new World();
+  const rig = new Rig(world, "gone", () => new FakeVideo(world, [{ fps: 30, ms: 2000 }], { hz: 60 }, rng(4), true), "smooth");
+  assert.equal(stepDownListenersForTests(), before + 1);
+  rig.board.dispose();
+  assert.equal(stepDownListenersForTests(), before);
+  rig.board.input({ ...IDLE_INPUT, server: true, video: VIDEO_A, url: "/va" });
+  assert.equal(stepDownListenersForTests(), before + 1, "used again, it hears it again");
+  rig.board.dispose();
 });
