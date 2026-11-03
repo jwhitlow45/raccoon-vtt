@@ -28,6 +28,7 @@ import {
   rosterKey,
   rowBusy,
   rowBusyText,
+  turnAwayAllErrorText,
   typedNameMatch,
   waitingRows,
   type JoinRequestList,
@@ -304,8 +305,7 @@ function TurnAwayAll(props: { ids: string[]; onAnswered(ids: string[]): void; on
       await api.turnAway(roomId, ids);
       props.onAnswered(ids);
     } catch (err) {
-      // Turn away skips what no longer waits, so the only refusals left are the server's own.
-      setError(answerErrorText(err instanceof ApiError && err.code === "busy" ? "busy" : undefined, ""));
+      setError(turnAwayAllErrorText(err instanceof ApiError ? err.code : undefined));
       props.onRefused();
     } finally {
       busyRef.current = false;

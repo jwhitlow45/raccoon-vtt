@@ -16,6 +16,7 @@ import {
   rosterKey,
   rowBusy,
   rowBusyText,
+  turnAwayAllErrorText,
   typedNameMatch,
   waitingRows,
   type JoinRequestList,
@@ -133,6 +134,13 @@ describe("ages and words", () => {
     assert.deepEqual(carryOnPlayers(listed, changes.removal).map((p) => p.id), ["p2"], "a removed player is never offered");
     assert.deepEqual(carryOnPlayers(listed, changes.upgrade).map((p) => p.id), ["p1"], "nor one who is a DM now");
     assert.deepEqual(carryOnPlayers(listed, undefined), listed, "before the snapshot, the server's list");
+  });
+
+  test("turn away all's refusals never name a person, whatever the server says (JBO1-11, ymzqvvnx)", () => {
+    for (const code of ["request_gone", "request_answered", "already_in", "room_full", "member_removed", "not_a_player", "weird", undefined]) {
+      assert.equal(turnAwayAllErrorText(code), "Something went wrong. Try again.", String(code));
+    }
+    assert.equal(turnAwayAllErrorText("busy"), "The server is busy. Try again in a moment.");
   });
 
   test("toast words name the newest and count the rest", () => {

@@ -151,6 +151,15 @@ export function answerErrorText(code: string | undefined, name: string): string 
   }
 }
 
+/**
+ * Turn away all's refusal. Turn away skips whatever no longer waits, so the
+ * only refusals left are the server's own, and none names a person: the
+ * button answers for several at once.
+ */
+export function turnAwayAllErrorText(code: string | undefined): string {
+  return answerErrorText(code === "busy" ? "busy" : undefined, "");
+}
+
 /** The Joining setting's three choices (design 2.1). */
 export const JOIN_MODE_OPTIONS: readonly { value: JoinMode; label: string; help: string }[] = [
   { value: "password", label: "With the password", help: "The password and the player link let new devices in." },
