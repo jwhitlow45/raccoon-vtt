@@ -179,12 +179,15 @@ export function somethingToHear(playing: Playing | null | undefined, sounds: Rea
 }
 
 /**
- * Whether an effect counts as fired after a page loaded: its op's server
- * time no earlier than a second before the load (effects.ts LOAD_SLACK_MS),
- * so a clock reading a little ahead never takes a fresh effect for an old one.
+ * An entry counts as fired after the load when its op's server time is no
+ * earlier than this before the load, so a clock reading a little ahead
+ * never takes a fresh effect for an old one.
  */
+export const LOAD_SLACK_MS = 1_000;
+
+/** Whether an effect counts as fired after a page loaded, for the ask and for the effects that play (effects.ts). */
 export function firedAfter(e: FiredEffect, loadAt: number): boolean {
-  return e.at - LEAD_MS >= loadAt - 1_000;
+  return e.at - LEAD_MS >= loadAt - LOAD_SLACK_MS;
 }
 
 // ---------------------------------------------------------------- Listen here

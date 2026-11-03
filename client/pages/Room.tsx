@@ -55,6 +55,7 @@ import { EditorHost } from "../features/monsters/EditorHost.tsx";
 import { PcStatsHost } from "../features/pcstats/PcStatsEditor.tsx";
 import { SoundHost } from "../features/sound/engine/SoundHost.tsx";
 import { ASK_TEXT, useSoundAsk } from "../features/sound/engine/useSoundAsk.ts";
+import { somethingPlays } from "../features/sound/panel/state.ts";
 import { Notice } from "../components/Notice.tsx";
 import { useJobWaiting, usePdfJobRoom } from "../features/handouts/pdf/live.ts";
 import { useJournalUnread } from "../features/journal/store.ts";
@@ -415,7 +416,7 @@ function RoomPage() {
   const hasClock = useRoomView((s) => !!s.view?.clock);
   const timeOpen = wide ? tab === "time" || below === "time" : panel === "time";
   // The Sound panel likewise, while the room plays music or a background sound this viewer receives (docs/design/design-v1-music.md 4.1). Effects show nowhere.
-  const hasSound = useRoomView((s) => !!s.view?.playing && (s.view.playing.music !== null || Object.keys(s.view.playing.loops).length > 0));
+  const hasSound = useRoomView((s) => somethingPlays(s.view?.playing));
   const soundOpen = wide ? tab === "sound" || below === "sound" : panel === "sound";
   const panels = panelsFor(role, wide, { clock: hasClock || timeOpen, sound: hasSound || soundOpen });
   const tools = useRoomView(useShallow((s) => toolsFor(role, s)));

@@ -1,6 +1,7 @@
 import { SOUND_LIMITS } from "#shared/limits.ts";
-import { LEAD_MS, type BuiltinSound, type FiredEffect, type SoundId } from "#shared/sound.ts";
+import type { BuiltinSound, FiredEffect, SoundId } from "#shared/sound.ts";
 import { builtinMs } from "./builtins.ts";
+import { firedAfter } from "./store.ts";
 
 /**
  * Effects on this page (docs/design/design-v1-music.md 5.4). Each entry of
@@ -33,13 +34,6 @@ import { builtinMs } from "./builtins.ts";
 export const LATE_WHOLE_MS = 1_000;
 /** Started partway, an effect needs this much left. */
 export const PARTWAY_LEFT_MS = 3_000;
-/**
- * An entry the page has not seen counts as fired after the load when its
- * op's server time is no earlier than this before the load, so a clock
- * reading a little ahead never takes a fresh effect for an old one.
- */
-export const LOAD_SLACK_MS = 1_000;
-
 /** What the player needs of a room effect's sound, as the projection carries it. */
 export type EffectSound = { assetId: string; ms: number; level?: number };
 
@@ -138,14 +132,14 @@ export class EffectPlayer {
       if (this.#seen.has(e.id) || this.#done.has(e.id)) continue;
       // The first look holds what played at the load, unless the page told when it loaded: the engine loads only once
       // something plays, often for the very effect it then sees first.
-      const firedAfter = (!first || this.#loadKnown) && e.at - LEAD_MS >= loadAt - LOAD_SLACK_MS;
-      if (!first && !firedAfter) {
+      const after = (!first || this.#loadKnown) && firedAfter(e, loadAt);
+      if (!first && !after) {
         // Fired before the load and seen only now, as after a change of use: never here.
         this.#done.add(e.id);
         continue;
       }
       // Seen while this page is quiet, it joins later, unless it is in the engine's first look, which came before the page could play.
-      this.#seen.set(e.id, { entry: e, kind: firedAfter && (this.#active || first) ? "fired" : "join" });
+      this.#seen.set(e.id, { entry: e, kind: after && (this.#active || first) ? "fired" : "join" });
     }
     this.#held = next;
     for (const id of this.#seen.keys()) if (!next.has(id)) this.#seen.delete(id);
