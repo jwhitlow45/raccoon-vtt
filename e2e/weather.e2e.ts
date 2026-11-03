@@ -501,29 +501,39 @@ describe("weather over the map", { concurrency: false }, () => {
     await ops.send({ t: "template.create", template: { id: run.area, sceneId: run.sceneId, shape: "sphere", size: 20, origin: { x: 20, y: 20, z: 0 }, yaw: 0, includeOrigin: false, color: "#e5484d", spell: "Fireball", ownerId: dmId, visibility: "all" } });
     const rig = { on: ["enter"], who: "any", floor: false, resets: "never", stops: false, foundOnSpring: false, hits: "trigger", actions: [], find: [], notice: false };
     await ops.send({ t: "trap.create", trap: { id: run.trap, sceneId: run.sceneId, name: "Snare", zone: { cells: [{ x: 19, y: 25, w: 2, h: 1 }] }, rig } });
-    await chooseWeather(dm, "Still");
-    // Close enough that a trap's small name shows, both pills on screen.
-    const middle = await pagePoint(dm, BOUNDS, { x: 20, y: 23 });
-    await dm.mouse.move(middle.x, middle.y);
-    for (let i = 0; i < 4; i++) await dm.mouse.wheel(0, -120);
-    await sleep(400);
+    // A computer at 2x, as most are, so a pill's words draw whole rather than as 1 px of blur, and the weather held still in its storage.
+    const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2, storageState: await dmContext.storageState() });
     const failures: string[] = [];
-    for (const weather of [{ kind: "rain", heavy: true }, { kind: "snow", heavy: true }, { kind: "fog", heavy: true }, { kind: "leaves", heavy: true }, { kind: "ash", heavy: true }, { kind: "sand", heavy: true, wind: "strong" }] as const) {
-      await setWeather(run.sceneId, weather as Weather);
-      await waitFor(`${weather.kind} on the DM's map`, async () => ((await probe(dm))?.key.startsWith(`${weather.kind} heavy`) ? true : null));
-      await sleep(300);
-      for (const name of ["Fireball", "Snare"]) {
-        const box = await pillBox(dm, name);
-        if (!box) {
-          failures.push(`${weather.kind}: no ${name} pill on screen`);
-          continue;
+    try {
+      await context.addInitScript(() => localStorage.setItem("rvtt.weather", "still"));
+      const page = await context.newPage();
+      await page.goto(`${server.origin}/r/${run.roomId}`);
+      await page.locator(".konvajs-content").first().waitFor();
+      await sleep(800);
+      // Close enough that a trap's small name shows, both pills on screen.
+      const middle = await pagePoint(page, BOUNDS, { x: 20, y: 23 });
+      await page.mouse.move(middle.x, middle.y);
+      for (let i = 0; i < 4; i++) await page.mouse.wheel(0, -120);
+      await sleep(400);
+      for (const weather of [{ kind: "rain", heavy: true }, { kind: "snow", heavy: true }, { kind: "fog", heavy: true }, { kind: "leaves", heavy: true }, { kind: "ash", heavy: true }, { kind: "sand", heavy: true, wind: "strong" }] as const) {
+        await setWeather(run.sceneId, weather as Weather);
+        await waitFor(`${weather.kind} on the DM's map`, async () => ((await probe(page))?.key.startsWith(`${weather.kind} heavy`) ? true : null));
+        await sleep(300);
+        for (const name of ["Fireball", "Snare"]) {
+          const box = await pillBox(page, name);
+          if (!box) {
+            failures.push(`${weather.kind}: no ${name} pill on screen`);
+            continue;
+          }
+          const ratio = await pillContrast(page, box);
+          if (ratio < 4.5) failures.push(`${weather.kind}: ${name} at ${ratio.toFixed(2)}:1`);
         }
-        const ratio = await pillContrast(dm, box);
-        if (ratio < 4.5) failures.push(`${weather.kind}: ${name} at ${ratio.toFixed(2)}:1`);
+        await shots.take(page, `wx-9-${weather.kind}-heavy-still`);
       }
-      await shots.take(dm, `wx-9-${weather.kind}-heavy-still`);
+    } finally {
+      await context.close();
     }
-    await chooseWeather(dm, "Moving");
+    await setWeather(run.sceneId, { kind: "rain", heavy: true, wind: "strong" });
     assert.deepEqual(failures, []);
   });
 
