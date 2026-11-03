@@ -511,7 +511,10 @@ export const LIMITS = {
    * week, each name's characters and the words after the year. The clock
    * holds `t` within plus or minus `clockSecondsMax` (about 317,000 years of
    * 365 days), one step moves it at most `clockStepMax` (100 such years), and
-   * a line's date holds at most `clockDateChars`.
+   * a line's date holds at most `clockDateChars`. Replay recomputes stored
+   * lines, and whether an undo writes one, from `clockSecondsMax` and
+   * `clockDateChars` (shared/calendar.ts clockNow, lineDate), so changing
+   * either changes replayed lines and their ids and needs an op version gate.
    */
   calendarMonths: 24,
   calendarMonthDays: 400,

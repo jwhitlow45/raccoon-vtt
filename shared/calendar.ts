@@ -13,7 +13,11 @@ import type { Calendar, CalendarMonth, Encounter, RoomClock } from "./model.ts";
  */
 
 export const DAY_SECONDS = 86_400;
-/** SRD 5.2.1, "The Order of Combat": "A round represents about 6 seconds in the game world." */
+/**
+ * SRD 5.2.1, "The Order of Combat": "A round represents about 6 seconds in
+ * the game world." Replay reads it through clockNow and a fight's end, so
+ * changing it changes replayed clocks and lines and needs an op version gate.
+ */
 export const ROUND_SECONDS = 6;
 const HOUR = 3_600;
 const DAWN = 6 * HOUR;
@@ -98,7 +102,10 @@ export function dateText(t: number, calendar: Calendar, form: "full" | "short"):
 /**
  * The date and time a clock line stores (4.7): "Day 4, 6:00 AM". Every
  * name is bounded, so the longest reads under 90 characters. The cap only
- * guards that sum.
+ * guards that sum. Replay writes every line again from this text, and
+ * decides by it whether an undo writes one (undoCorrection.ts), so any
+ * change to these words, or to dateText and timeText under them, changes
+ * replayed lines and their ids and needs an op version gate (shared/migrate.ts).
  */
 export function lineDate(t: number, calendar: Calendar): string {
   const text = `${dateText(t, calendar, "full")}, ${timeText(t)}`;
@@ -188,7 +195,9 @@ export function fightSeconds(encounter: FightView | null | undefined, ended: boo
 /**
  * The one current time (5.1): the stored `t` plus the running fight's
  * seconds, held within the clock's bound for a long fight near it. Every
- * reader of "now" calls it, the reducer and every device alike.
+ * reader of "now" calls it, the reducer and every device alike. Replay
+ * reads it for each line's date and each rest stamp, so a change here
+ * needs an op version gate (shared/migrate.ts).
  */
 export function clockNow(clock: Pick<RoomClock, "t">, encounter: FightView | null | undefined): number {
   const now = clock.t + fightSeconds(encounter, false);
