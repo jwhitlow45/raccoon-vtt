@@ -1190,6 +1190,136 @@ async function dungeonScreens(sweep: Sweep, page: Page): Promise<void> {
   }
 }
 
+/** The sizes where the sweep measures animated maps' screens: the phones upright and sideways, the tablet and the computer. */
+const ANIMMAP_AT = new Set([...PHONE_ROOTS, "844x390", "820x1180", "1440x900"]);
+
+/** The lagoon: a scene whose map is the WebM fixture over its still, made once for the file. */
+let lagoon: { sceneId: string; videoId: string } | null = null;
+
+async function lagoonScene(): Promise<{ sceneId: string; videoId: string }> {
+  if (lagoon) return lagoon;
+  const webm = readFileSync(path.join(ROOT, "e2e", "fixtures", "map-loop.webm"));
+  const put = async (kind: "video" | "map", type: string, data: Buffer) => {
+    const res = await dmContext.request.put(`${server.origin}/api/rooms/${run.roomId}/assets?kind=${kind}`, { headers: { Origin: server.origin, "content-type": type }, data });
+    assert.ok(res.ok(), `the ${kind} upload answered ${res.status()}`);
+    return (await res.json()) as { id: string; width: number; height: number; video?: Record<string, unknown> };
+  };
+  const video = await put("video", "video/webm", webm);
+  const still = await put("map", "image/png", await sharp({ create: { width: video.width, height: video.height, channels: 3, background: { r: 40, g: 90, b: 110 } } }).png().toBuffer());
+  const id = randomUUID();
+  await ops.send({ t: "scene.create", scene: { id, name: "Lagoon", bounds: { w: 16, h: 9 }, background: "#2b2b31", fogEnabled: false, autoWalls: "floor", blockMovement: true } });
+  // The client sends the video's id with the upload answer's facts, which the server fills again from the row (design 9.2).
+  await ops.send({
+    t: "scene.setMap",
+    sceneId: id,
+    map: { assetId: still.id, widthPx: still.width, heightPx: still.height, cellPx: still.width / 16, originPx: { x: 0, y: 0 }, video: { assetId: video.id, widthPx: video.width, heightPx: video.height, ...video.video } },
+  });
+  lagoon = { sceneId: id, videoId: video.id };
+  return lagoon;
+}
+
+/**
+ * am-a: animated maps' screens (docs/design/design-v1-animated-maps.md 8 and
+ * 12): the lagoon's Map image and grid group folded and open, with its
+ * device line and Use the still only, a video's upload step on the busy
+ * button, the still pick when this device cannot read the first frame,
+ * This device's Animated maps row, and the Library's film strip tile and
+ * its viewer. The DM's page goes back to the players' scene after.
+ */
+async function animatedMapScreens(sweep: Sweep, page: Page): Promise<void> {
+  const { sceneId } = await lagoonScene();
+  const webm = readFileSync(path.join(ROOT, "e2e", "fixtures", "map-loop.webm"));
+  try {
+    await escapeAll(page);
+    const panel = await openPanelOf(page, "Scenes");
+    await viewScene(panel, sceneId);
+    const fold = sceneGroupFold(panel, "Map image and grid");
+    if ((await fold.getAttribute("aria-expanded")) === "true") await fold.click();
+    await fold.scrollIntoViewIfNeeded();
+    await sweep.measure(page, "animmap-map-group-folded", sceneGroup(panel, "Map image and grid").locator("xpath=./div[1]"));
+    const group = await openSceneGroup(panel, "Map image and grid");
+    const row = group.locator("[data-setting-row]").filter({ has: page.getByText("Map image", { exact: true }) }).first();
+    await group.getByRole("button", { name: "Use the still only", exact: true }).waitFor();
+    await row.scrollIntoViewIfNeeded();
+    await sweep.measure(page, "animmap-map-image-row", row);
+    await sweep.measure(page, "animmap-map-group-open", group);
+    await shots.take(page, `alignment-${sweep.at}-animmap-map-group`);
+
+    // A video's upload, held on its first step's percent by a slow upload, then cancelled: the room holds that file already, so nothing is deleted.
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Network.enable");
+    await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: 4 * 1024 });
+    try {
+      await row.locator('input[type="file"]').first().setInputFiles({ name: "lagoon.webm", mimeType: "video/webm", buffer: webm });
+      await row.getByText(/^Uploading the video… \d+%$/).waitFor({ timeout: 30_000 });
+      await sweep.measure(page, "animmap-upload-step", row);
+      await shots.take(page, `alignment-${sweep.at}-animmap-upload-step`);
+      await row.getByRole("button", { name: "Cancel", exact: true }).click();
+    } finally {
+      await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+      await cdp.detach();
+    }
+
+    // This device cannot read the first frame: the probe's play() refused, as on an iPhone before iOS 17.4.
+    await page.evaluate(() => {
+      type P = { play(this: { src: string }): Promise<void>; __alignPlay?: P["play"] };
+      const proto = (globalThis as unknown as { HTMLMediaElement: { prototype: P } }).HTMLMediaElement.prototype;
+      proto.__alignPlay ??= proto.play;
+      const real = proto.__alignPlay;
+      proto.play = function (this: { src: string }) {
+        return this.src.startsWith("blob:") ? Promise.reject(new DOMException("refused", "NotSupportedError")) : real.call(this);
+      };
+    });
+    try {
+      await row.locator('input[type="file"]').first().setInputFiles({ name: "lagoon.webm", mimeType: "video/webm", buffer: webm });
+      await row.getByText("Pick a still image", { exact: true }).waitFor({ timeout: 30_000 });
+      await sweep.measure(page, "animmap-still-pick", row);
+      await shots.take(page, `alignment-${sweep.at}-animmap-still-pick`);
+      await row.getByRole("button", { name: "Cancel", exact: true }).click();
+    } finally {
+      await page.evaluate(() => {
+        type P = { play: unknown; __alignPlay?: unknown };
+        const proto = (globalThis as unknown as { HTMLMediaElement: { prototype: P } }).HTMLMediaElement.prototype;
+        if (proto.__alignPlay) proto.play = proto.__alignPlay;
+      });
+    }
+    await viewScene(panel, run.sceneId);
+    await closeSheets(page);
+
+    // This device's Animated maps row.
+    const menu = await openMenu(page);
+    const back = page.getByRole("button", { name: /^Back to Menu/ });
+    if (await visible(back)) await back.click();
+    await menu.getByRole("button", { name: /^This device/ }).click();
+    // The row is radio cards under Map detail, its legend naming the group (features/device/ThisDevice.tsx).
+    const animated = menu.getByRole("group", { name: "Animated maps", exact: true }).locator("xpath=..");
+    await animated.scrollIntoViewIfNeeded();
+    await sweep.measure(page, "animmap-this-device", animated);
+    await shots.take(page, `alignment-${sweep.at}-animmap-this-device`);
+    if (await visible(back)) await back.click();
+    await closeSheets(page);
+
+    // The Library: the video among the maps as a film strip, then open in the viewer.
+    const library = await openPanelOf(page, "Library");
+    const maps = library.getByRole("list", { name: "Maps in this room", exact: true });
+    const tile = maps.getByRole("button", { name: /^Animated map/ }).first();
+    await tile.scrollIntoViewIfNeeded();
+    await sweep.measure(page, "animmap-library-maps", maps);
+    await shots.take(page, `alignment-${sweep.at}-animmap-library-tile`);
+    await tile.click();
+    const viewer = page.getByRole("dialog", { name: "Animated map", exact: true });
+    await viewer.waitFor();
+    await viewer.getByText(/^\d+ × \d+ px, \d+:\d\d/).waitFor();
+    await sweep.measure(page, "animmap-library-viewer", viewer);
+    await shots.take(page, `alignment-${sweep.at}-animmap-library-viewer`);
+    await page.keyboard.press("Escape");
+    await viewer.waitFor({ state: "detached" });
+    await closeSheets(page);
+  } finally {
+    await escapeAll(page);
+  }
+}
+
 /** The preview socket the DM page asked for last, held unanswered (previewWaitScreens). */
 let heldPreview: WebSocketRoute | null = null;
 
@@ -3148,6 +3278,8 @@ export function alignmentFile(title: string, steps: () => void): void {
   describe(`raccoon-vtt alignment sweep: ${title}`, { timeout: 900_000 }, () => {
     before(async () => {
       srd = await loadMonsters();
+      // Animated maps on (docs/design/design-v1-animated-maps.md 1), so the sweep measures the screens the switch shows.
+      process.env.ANIMATED_MAPS = "1";
       server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
       browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1" });
       dmContext = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
@@ -4941,6 +5073,7 @@ export function sizeTests(names: readonly string[]): void {
           await dmScreens(sweep, page, size);
           await visionScreens(sweep, page, size);
           await dungeonScreens(sweep, page);
+          if (ANIMMAP_AT.has(size.name)) await animatedMapScreens(sweep, page);
           await previewWaitScreens(sweep, page, scale);
           if (DICE_AT.has(size.name)) await dmDiceScreens(sweep, page);
           if (COMBAT_AT.has(size.name)) await combatScreens(sweep, page, size, scale);

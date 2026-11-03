@@ -480,6 +480,304 @@ describe("animated maps", { concurrency: false }, () => {
     }
   });
 
+  /*
+   * Lane AM-D's steps (am-1 and am-9 to am-11): the DM's upload through each
+   * form, the refusals, the still pick, Use the still only and the Library.
+   * Their helpers load here, so the file's import block stays the board
+   * lane's.
+   */
+  /** The words the steps look for (client/features/animmap words.ts, upload.ts and firstFrame.ts, whose unit tests pin them). The client's modules need a DOM, so they are not imported here. */
+  const AMD_WORDS = {
+    pickHelp: "A WebM or MP4 video makes an animated map, up to 64 MB. MP4 (H.264) plays on the most devices.",
+    noFrame: "This device can't read that video's first frame. Pick a still image for it, such as the one that came with the map.",
+    lowPower: "Low Power Mode stopped the video from opening. Tap Try again, or pick a still image.",
+    mov: "That video isn't WebM or MP4. iPhone videos from Photos are MOV: save the map's MP4 to Files and pick it from there.",
+    badVideo: "That video could not be read.",
+  };
+  const amd = {
+    /** The Scenes panel, the side panel's tab on a computer. */
+    async scenes(page: Page = dm) {
+      const { openSideTab, sideTabName } = await import("./harness.ts");
+      await openSideTab(page, "Scenes");
+      return page.getByRole("tabpanel", { name: sideTabName("Scenes") });
+    },
+    /** A panel's section or group by its label: the nearest around the heading. */
+    section(panel: ReturnType<Page["locator"]>, label: string) {
+      return panel.getByRole("heading", { name: label, exact: true }).locator("xpath=ancestor::*[self::section or @data-panel-group][1]");
+    },
+    /** Shows the DM a scene from its row in the list, and waits for its settings to name it. */
+    async view(sceneId: string) {
+      const panel = await amd.scenes();
+      const name = dmSocket.state?.scenes[sceneId]?.name ?? "";
+      await panel.getByRole("button", { name: new RegExp(`^${name}(?![A-Za-z])`) }).first().click();
+      await waitFor(`the DM on ${name}`, () => dmSocket.you?.sceneId === sceneId || null);
+      const field = panel.getByRole("textbox", { name: "Scene name" }).last();
+      await waitFor(`${name}'s settings`, async () => ((await field.inputValue()) === name ? true : null));
+      return panel;
+    },
+    /** Every busy label the page's upload buttons show from now on, kept in the page so none is lost between polls. */
+    async recordLabels(page: Page = dm) {
+      await page.evaluate(() => {
+        type W = { __amdLabels?: string[]; document: { body: unknown } };
+        const w = globalThis as unknown as W & { MutationObserver: new (cb: () => void) => { observe(n: unknown, o: unknown): void } };
+        w.__amdLabels = [];
+        const seen = w.__amdLabels;
+        const read = () => {
+          const text = (w.document.body as { innerText: string }).innerText;
+          for (const m of text.matchAll(/(Reading the first frame…|Uploading the (?:video|still)… \d+%|Looking for a grid…)/g)) if (seen.at(-1) !== m[1]) seen.push(m[1]!);
+        };
+        new w.MutationObserver(read).observe(w.document.body, { subtree: true, childList: true, characterData: true });
+      });
+    },
+    labels(page: Page = dm): Promise<string[]> {
+      return page.evaluate(() => (globalThis as unknown as { __amdLabels?: string[] }).__amdLabels ?? []);
+    },
+    /** Slows this page's uploads, so each percent stays on screen long enough to read. Null lifts it. */
+    async throttle(page: Page, bytesPerSecond: number | null) {
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send("Network.enable");
+      await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: bytesPerSecond ?? -1 });
+      if (bytesPerSecond === null) await cdp.detach();
+    },
+    /** Makes the first-frame probe's play() fail as an older iPhone or Low Power Mode would. Only `blob:` sources, the probe's, are touched. Null puts play() back. */
+    async probeRefuses(page: Page, name: "NotSupportedError" | "NotAllowedError" | null) {
+      await page.evaluate((refuse) => {
+        type P = { play(this: { currentSrc: string; src: string }): Promise<void>; __amdPlay?: P["play"] };
+        const proto = (globalThis as unknown as { HTMLMediaElement: { prototype: P } }).HTMLMediaElement.prototype;
+        proto.__amdPlay ??= proto.play;
+        const real = proto.__amdPlay;
+        proto.play = refuse
+          ? function (this: { currentSrc: string; src: string }) {
+              return (this.src || this.currentSrc).startsWith("blob:") ? Promise.reject(new DOMException("refused", refuse)) : real.call(this);
+            }
+          : real;
+      }, name);
+    },
+    png(width: number, height: number, rgb = { r: 96, g: 64, b: 128 }) {
+      return sharp({ create: { width, height, channels: 3, background: rgb } }).png().toBuffer();
+    },
+    async assets(): Promise<{ id: string; kind: string; width: number; height: number; inUse?: boolean; video?: Record<string, unknown> }[]> {
+      const res = await dmContext.request.get(`${server.origin}/api/rooms/${run.roomId}/assets`);
+      assert.ok(res.ok(), `the asset list answered ${res.status()}`);
+      return ((await res.json()) as { assets: never[] }).assets;
+    },
+  };
+
+  test("am-1. the DM makes a scene from a WebM: the first frame, the video and the still with their percent, the grid looked for on the still, one Setup step, and the map moves; then the crypt's Map image row takes a named video for its scale", async () => {
+    const VIDEO_PICK_HELP = AMD_WORDS.pickHelp;
+    const known = new Set(Object.keys(dmSocket.state!.scenes));
+    const panel = await amd.scenes();
+    const form = amd.section(panel, "New scene");
+    await form.getByRole("radio", { name: "Map image", exact: true }).click();
+    await form.getByRole("textbox", { name: "Scene name" }).fill("Lagoon");
+    await form.getByText(VIDEO_PICK_HELP, { exact: true }).waitFor();
+    // A name with no size, so the grid is looked for, on the still since a video cannot be searched.
+    await form.locator('input[type="file"][accept="image/*,video/webm,video/mp4"]').first().setInputFiles({ name: "lagoon.webm", mimeType: "video/webm", buffer: readFileSync(WEBM) });
+    await amd.recordLabels();
+    await amd.throttle(dm, 64 * 1024);
+    const puts: string[] = [];
+    dm.on("request", (r) => {
+      if (r.method() === "PUT" && r.url().includes("/assets?kind=")) puts.push(new URL(r.url()).searchParams.get("kind") ?? "");
+    });
+    await form.getByRole("button", { name: "Upload and create" }).click();
+    await form.getByRole("button", { name: /^Uploading the video… \d+%$/ }).waitFor();
+    await shots.take(dm, "am-1-upload-percent");
+    const made = await waitFor("the Lagoon scene with its video", () => Object.values(dmSocket.state!.scenes).find((s) => s && !known.has(s.id) && s.name === "Lagoon" && s.map?.video), 60_000);
+    await amd.throttle(dm, null);
+    const labels = await amd.labels();
+    assert.equal(labels[0], "Reading the first frame…", labels.join(" | "));
+    const percents = labels.filter((l) => l.startsWith("Uploading the video…")).map((l) => Number(/(\d+)%/.exec(l)![1]));
+    assert.ok(percents.some((p) => p > 0 && p < 100), `a real percent between 0 and 100: ${percents.join(", ")}`);
+    assert.ok(percents.every((p, i) => i === 0 || p >= percents[i - 1]!), "the percent only rises");
+    assert.ok(labels.some((l) => l.startsWith("Uploading the still…")), labels.join(" | "));
+    assert.ok(labels.indexOf("Looking for a grid…") > labels.findIndex((l) => l.startsWith("Uploading the still…")), "the grid is looked for after the still is up");
+    assert.deepEqual(puts, ["video", "map"], "the video first, then the still");
+    const map = made.map!;
+    assert.equal(map.video!.assetId, run.webm!.id, "the same file is the room's one row");
+    assert.equal(map.video!.container, "webm");
+    assert.equal(map.video!.widthPx, 640);
+    assert.equal(map.widthPx, 640, "the still is the first frame, at the video's size");
+    assert.equal(map.heightPx, 360);
+    assert.notEqual(map.assetId, run.webmStill!.id);
+    const rows = await amd.assets();
+    assert.equal(rows.find((r) => r.id === map.assetId)?.kind, "map", "the still is a map image");
+    await waitFor("the DM on Lagoon", () => dmSocket.you?.sceneId === made.id || null);
+    // A map with no size in its name opens Line up grid, a setup tool, which shows the still the grid was looked for on.
+    await boardSays(dm, "still still-view");
+    const { pickTool } = await import("./harness.ts");
+    await pickTool(dm, "Select");
+    await boardSays(dm, "playing");
+    await shots.take(dm, "am-1-lagoon-moving");
+
+    // One Setup step: Undo setup takes the scene back whole, video and all, and Redo setup brings it again.
+    const { setupHistory } = await import("./helpers/undoScope.ts");
+    const { sheet } = await setupHistory(dm);
+    await sheet.getByRole("button", { name: "Undo setup", exact: true }).click();
+    await waitFor("the Lagoon scene undone", () => (dmSocket.state!.scenes[made.id] ? null : true));
+    await sheet.getByRole("button", { name: "Redo setup", exact: true }).click();
+    await waitFor("the Lagoon scene back with its video", () => (dmSocket.state!.scenes[made.id]?.map?.video?.assetId === run.webm!.id ? true : null));
+    await dm.keyboard.press("Escape");
+    await sheet.waitFor({ state: "detached" });
+
+    // The crypt's Map image row: a name that gives the size, which the still's upload carries, so the grid is not looked for.
+    const crypt = await amd.view(run.cryptId);
+    const { openSceneGroup } = await import("./harness.ts");
+    const group = await openSceneGroup(crypt, "Map image and grid");
+    await group.getByText(VIDEO_PICK_HELP, { exact: true }).waitFor();
+    await amd.recordLabels();
+    await group.locator('input[type="file"][accept="image/*,video/webm,video/mp4"]').first().setInputFiles({ name: "crypt_32x18.webm", mimeType: "video/webm", buffer: readFileSync(WEBM) });
+    const cryptMap = await waitFor("the crypt's animated map", () => dmSocket.state!.scenes[run.cryptId]?.map?.video ?? null, 60_000);
+    assert.equal(cryptMap.assetId, run.webm!.id);
+    assert.equal(dmSocket.state!.scenes[run.cryptId]!.map!.cellPx, 20, "640 px over 32 squares, from the video's name");
+    assert.ok(!(await amd.labels()).includes("Looking for a grid…"), "a named size is not searched");
+    // The row's help, this device's line under it, and Use the still only below its buttons.
+    await group.getByText("A 640 × 360 px video, 0:02, looping. Its first frame is the still.", { exact: true }).waitFor();
+    await group.getByText("Moving on this device.", { exact: true }).waitFor();
+    await group.getByRole("button", { name: "Use the still only", exact: true }).waitFor();
+    // The guide's picture (docs/dm-guide/animated-map.webp): the row at the top of the panel, once the steps' toasts have gone.
+    await dm.locator("[data-toast]").first().waitFor({ state: "detached", timeout: 30_000 }).catch(() => undefined);
+    await group.getByText("Map image", { exact: true }).evaluate((el) => (el as unknown as { scrollIntoView(o: unknown): void }).scrollIntoView({ block: "start" }));
+    await shots.take(dm, "am-1-crypt-map-image-row");
+  });
+
+  test("am-9. a video the DM's device or the server refuses says why in 4.5's words, and leaves nothing behind", async () => {
+    const before = (await amd.assets()).length;
+    const panel = await amd.scenes();
+    const form = amd.section(panel, "New scene");
+    await form.getByRole("radio", { name: "Map image", exact: true }).click();
+    const input = form.locator('input[type="file"][accept="image/*,video/webm,video/mp4"]').first();
+    const puts: string[] = [];
+    const watch = (r: { method(): string; url(): string }) => {
+      if (r.method() === "PUT" && r.url().includes("/assets?kind=")) puts.push(r.url());
+    };
+    dm.on("request", watch);
+    // The server's refusal of the broken MP4 is a failed request, which Chrome logs as an error.
+    const allowed = consoles.dm.allow;
+    consoles.dm.allow = [...allowed, /status of 422 .*kind=video&name=harbor\.mp4/];
+    try {
+      // An iPhone's MOV is refused on the device, before any byte goes up.
+      await input.setInputFiles({ name: "harbor.mov", mimeType: "video/quicktime", buffer: Buffer.from("not a video at all") });
+      await form.getByRole("button", { name: "Upload and create" }).click();
+      await form.getByText(AMD_WORDS.mov, { exact: true }).waitFor();
+      assert.equal(puts.length, 0, "nothing went up");
+      await shots.take(dm, "am-9-refused-mov");
+
+      // Bytes after the MP4's last box: Chrome reads the first frame, and the server's header check refuses the file.
+      const broken = Buffer.concat([readFileSync(MP4), Buffer.from([0, 0, 0])]);
+      await input.setInputFiles({ name: "harbor.mp4", mimeType: "video/mp4", buffer: broken });
+      await form.getByRole("button", { name: "Upload and create" }).click();
+      await form.getByText(AMD_WORDS.badVideo, { exact: true }).waitFor({ timeout: 30_000 });
+      assert.equal(puts.filter((u) => u.includes("kind=video")).length, 1, "the video went up once");
+      assert.equal(puts.filter((u) => u.includes("kind=map")).length, 0, "no still went up for a refused video");
+      assert.equal((await amd.assets()).length, before, "nothing left in the Library");
+      assert.ok(!Object.values(dmSocket.state!.scenes).some((s) => s?.name === "harbor"), "no scene was made");
+    } finally {
+      dm.off("request", watch);
+      consoles.dm.allow = allowed;
+      await form.getByRole("button", { name: "Cancel", exact: true }).click();
+    }
+  });
+
+  test("am-10. a device that cannot read the first frame: the video goes up, a still of another shape is refused by the server's facts, one of its shape makes the phase, and Low Power Mode's Try again reads it", async () => {
+    const { noFrame: NO_FIRST_FRAME, lowPower: LOW_POWER_STOPPED } = AMD_WORDS;
+    const crypt = await amd.view(run.cryptId);
+    const { openSceneGroup } = await import("./harness.ts");
+    const group = await openSceneGroup(crypt, "Map image and grid");
+    const phaseCount = () => dmSocket.state!.scenes[run.cryptId]?.phases?.length ?? 1;
+    const start = phaseCount();
+    const add = group.getByLabel("Add a phase from an image", { exact: true });
+    try {
+      await amd.probeRefuses(dm, "NotSupportedError");
+      await add.setInputFiles({ name: "crypt_night.mp4", mimeType: "video/mp4", buffer: readFileSync(MP4) });
+      await group.getByText(NO_FIRST_FRAME, { exact: true }).waitFor({ timeout: 30_000 });
+      await shots.take(dm, "am-10-pick-a-still");
+      const pick = group.locator("label").filter({ hasText: "Pick a still image" }).locator('input[type="file"]');
+      // A square still for a 16:9 video: the video goes up first, and its facts refuse the still.
+      await pick.setInputFiles({ name: "square.png", mimeType: "image/png", buffer: await amd.png(500, 500) });
+      await group.getByText("That image isn't the video's shape (16:9). Pick one the same shape.", { exact: true }).waitFor({ timeout: 30_000 });
+      const rows = await amd.assets();
+      const mp4Row = rows.find((r) => r.kind === "video" && r.video?.container === "mp4");
+      assert.ok(mp4Row, "the video went up before the still was checked");
+      await shots.take(dm, "am-10-still-shape");
+      // One of its shape, at another size: the phase is the video over that still.
+      await pick.setInputFiles({ name: "night.png", mimeType: "image/png", buffer: await amd.png(1280, 720, { r: 20, g: 24, b: 60 }) });
+      await waitFor("the video phase", () => (phaseCount() === start + 1 ? true : null), 30_000);
+      const phase = dmSocket.state!.scenes[run.cryptId]!.phases!.at(-1)!;
+      assert.equal(phase.video?.assetId, mp4Row.id);
+      assert.equal(phase.widthPx, 1280);
+      assert.equal(phase.name, "crypt night");
+      // The phase list says Video after its name.
+      await group.getByRole("listitem").filter({ hasText: "crypt night" }).getByText("Video", { exact: true }).waitFor();
+      assert.equal((await amd.assets()).filter((r) => r.kind === "video" && r.video?.container === "mp4").length, 1, "the video went up once for both stills");
+
+      // Low Power Mode refuses play(): Try again is a tap, which may start it.
+      await amd.probeRefuses(dm, "NotAllowedError");
+      await add.setInputFiles({ name: "crypt_flood.webm", mimeType: "video/webm", buffer: readFileSync(WEBM) });
+      await group.getByText(LOW_POWER_STOPPED, { exact: true }).waitFor({ timeout: 30_000 });
+      await shots.take(dm, "am-10-low-power");
+      await amd.probeRefuses(dm, null);
+      await group.getByRole("button", { name: "Try again", exact: true }).click();
+      await waitFor("the second video phase", () => (phaseCount() === start + 2 ? true : null), 30_000);
+      assert.equal(dmSocket.state!.scenes[run.cryptId]!.phases!.at(-1)!.video?.assetId, run.webm!.id);
+    } finally {
+      await amd.probeRefuses(dm, null);
+    }
+  });
+
+  test("am-11. Use the still only drops the crypt's video in one Setup step and Undo brings it back, and the Library shows the video as a film strip that plays in its viewer while the board lets go", async () => {
+    const crypt = await amd.view(run.cryptId);
+    const { openSceneGroup } = await import("./harness.ts");
+    const group = await openSceneGroup(crypt, "Map image and grid");
+    const before = dmSocket.state!.scenes[run.cryptId]!.map!;
+    assert.ok(before.video, "the crypt starts animated");
+    await group.getByRole("button", { name: "Use the still only", exact: true }).click();
+    await waitFor("the crypt's still alone", () => (dmSocket.state!.scenes[run.cryptId]!.map!.video ? null : true));
+    const still = dmSocket.state!.scenes[run.cryptId]!.map!;
+    assert.equal(still.assetId, before.assetId, "the still stays the map");
+    assert.equal(still.cellPx, before.cellPx, "and keeps its grid");
+    await group.getByText(`A ${still.widthPx} × ${still.heightPx} px image.`, { exact: true }).waitFor();
+    assert.equal(await group.getByRole("button", { name: "Use the still only", exact: true }).count(), 0);
+    const { undoSetup } = await import("./helpers/undoScope.ts");
+    await undoSetup(dm);
+    await waitFor("the crypt's video back", () => (dmSocket.state!.scenes[run.cryptId]!.map!.video?.assetId === before.video!.assetId ? true : null));
+
+    // The Library: the video among the maps, a film strip with its length and In use.
+    const { openSideTab, sideTabName } = await import("./harness.ts");
+    await openSideTab(dm, "Library");
+    const library = dm.getByRole("tabpanel", { name: sideTabName("Library") });
+    const maps = library.getByRole("list", { name: "Maps in this room", exact: true });
+    const tile = maps.getByRole("button", { name: "Animated map", exact: true }).first();
+    await tile.waitFor();
+    await maps.getByText("0:02", { exact: true }).first().waitFor();
+    await shots.take(dm, "am-11-library-tile");
+    await boardSays(dm, "playing");
+    await tile.click();
+    const viewer = dm.getByRole("dialog", { name: "Animated map", exact: true });
+    await viewer.waitFor();
+    await viewer.getByText(/^640 × 360 px, 0:02, .+\. In use\.$/).waitFor();
+    // One element holds a video: the viewer's. The board's let go of its src first.
+    await waitFor("the viewer's video playing", () =>
+      viewer.evaluate((el) => {
+        const v = (el as unknown as { querySelector(s: string): { currentTime: number; paused: boolean; hasAttribute(n: string): boolean } | null }).querySelector("video");
+        return v && v.hasAttribute("src") && !v.paused && v.currentTime > 0 ? true : null;
+      }),
+    );
+    const held = await probe(dm);
+    assert.equal(held?.withSrc, 1, "only the viewer's element holds a src");
+    await shots.take(dm, "am-11-library-viewer");
+    await dm.keyboard.press("Escape");
+    await viewer.waitFor({ state: "detached" });
+    // Closed, the board takes the decoder back.
+    await boardSays(dm, "playing");
+    // The room is left naming the MP4 only where the board lane's steps put it: am-12 counts a video the room names nowhere as new.
+    const mp4 = (await amd.assets()).find((r) => r.kind === "video" && r.video?.container === "mp4");
+    const cryptNow = dmSocket.state!.scenes[run.cryptId]!;
+    if (mp4 && cryptNow.phases?.some((p) => p.video?.assetId === mp4.id)) {
+      await ops.send({ t: "scene.update", sceneId: run.cryptId, patch: { phases: cryptNow.phases.filter((p) => p.video?.assetId !== mp4.id) } });
+    }
+    assert.deepEqual(consoles.dm.errors, [], "the DM's page logged no errors");
+  });
+
   // am-1 (lane AM-D): the DM adds a WebM through the New scene form.
 
   test("am-2. the players' scene plays its video in the map layer under the fog and tokens, at most 32 draws in any second, and nothing but the ground shows outside the scene", async () => {
