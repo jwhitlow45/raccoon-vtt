@@ -151,6 +151,7 @@ Tiers:
 
 - Several floors in one scene.
 - Animated maps (webm).
+  - Built in the animated maps run (docs/design/design-v1-animated-maps.md), behind a switch the server's owner turns on, since Cloudflare's terms limit serving video. A map or a phase may be a WebM or MP4 loop over its still, drawn in the map layer under the fog and tokens, and each device plays it or shows the still by its own settings.
 - Dungeon generator.
   - Phase 1 is built (docs/design/design-v1-dungeon-generator.md). New scene's Builder form offers Generate a dungeon, which makes a whole Builder scene on squares: Dungeon and Crypt themes, rooms and corridors, doors, stairs to raised and sunk rooms, and four of the SRD's example traps, with a preview, Reroll and a seed. It lands as ordinary builder changes in one Setup step, so it adds no op and no stored field.
   - Still Later: more themes (Cave, Mine and Sewer), lights, dressing from the stamps, a DM key of numbered rooms, more traps, secret doors and secret rooms, and per-room edits in the preview (phase 2), then hexes and adding a wing to an existing scene (phase 3).

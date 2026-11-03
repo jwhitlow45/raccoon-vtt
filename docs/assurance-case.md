@@ -40,8 +40,11 @@ the code meets each one, and section 10 of the design has the detail.
    loaders, re-encoded and stripped of metadata. An animated map's video,
    where the server's owner allows them, is never re-encoded. The server
    reads only its headers, keeps what an allowlist names and zeroes the rest
-   in place, padding included. Nothing inside the media data is ever
-   written, and nothing is decoded on the server. Room imports are
+   in place, padding included. Each value it keeps is read and checked,
+   once, so no copy it did not read survives. Nothing inside the media data
+   is ever written, and nothing is decoded on the server. The check runs in
+   a worker thread with a 5 second budget and is ended at its deadline, so
+   a crafted file cannot stall the server for the other rooms. Room imports are
    validated and bounded before anything is kept, and the changes an
    imported map or character turns into are checked like any other.
 7. **Browsers get the usual protections.** A strict Content Security
@@ -186,7 +189,7 @@ for a web app like this one.
 | Server-side request forgery (A10, CWE-918) | Outbound requests go only through the egress proxy. Image imports are `https` on port 443 only, with every redirect checked again and private, loopback and reserved addresses refused ([fetchPublic.ts](../server/assets/fetchPublic.ts)). |
 | Cross-site request forgery (CWE-352) and WebSocket hijacking (CWE-1385) | Every request that changes anything must come from the site itself, by `Sec-Fetch-Site` or an exact Origin. The WebSocket upgrade needs an exact Origin match. No CORS headers are sent. |
 | Unrestricted upload (CWE-434) | Images are recognized by their bytes, never their names, and SVG is always refused. Each is re-encoded to WebP and stored under a name made from its hash, so no file name a user sends ever reaches the disk ([process.ts](../server/assets/process.ts), [store.ts](../server/assets/store.ts)). A video is taken only as WebM or MP4 with `kind=video`, recognized by its bytes, checked by a bounded header parser with no decoder, served under the type its row records, and stored by hash like an image ([server/assets/video](../server/assets/video)). |
-| Resource exhaustion (CWE-400) | Body limits on every route, room limits on every kind of content (design section 10.5), a bounded queue for password hashing, socket caps, and counted entries and bytes when a zip is read ([importRoom.ts](../server/rooms/importRoom.ts)). |
+| Resource exhaustion (CWE-400) | Body limits on every route, room limits on every kind of content (design section 10.5), a bounded queue for password hashing, socket caps, and counted entries and bytes when a zip is read ([importRoom.ts](../server/rooms/importRoom.ts)). A video's header check runs in a worker thread, with every loop under its 5 second budget and the worker ended at the deadline ([check.ts](../server/assets/video/check.ts)). |
 | Input validation (CWE-20) | Every message and op is checked against a zod schema with explicit bounds before it is used ([protocol.ts](../shared/protocol.ts)). The same schemas type the client, so the two never drift apart. |
 
 ## How this is checked
