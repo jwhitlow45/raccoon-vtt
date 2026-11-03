@@ -58,7 +58,7 @@ import { fitTarget } from "../lib/fitTarget.ts";
 import { revealedMask } from "../lib/fogTiles.ts";
 import { CameraGesture, distance, LongPress, mousePans, TAP_SLOP_PX } from "../lib/gestures.ts";
 import { groupFollowers, tokensByCenter, tokensInBox } from "../lib/group.ts";
-import { displayName, drawsAboveFog, footprint, rulesSpot, snapPosition, type ViewToken } from "../lib/scene.ts";
+import { displayName, drawsAboveFog, dragAim, footprint, snapPosition, type ViewToken } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
 import { BoardViewContext, boardViewsOf, useBoardPills } from "./boardView.ts";
 import { useBoardFontEpoch } from "./boardFont.ts";
@@ -67,7 +67,7 @@ import { ownsToken as memberOwns } from "../features/tokens/access.ts";
 import { followOps, lastMoveSlot } from "../features/tokens/undoMove.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import type { DropPlan } from "../features/movement/drop.ts";
-import { GROUP_KEEPS, HEX_KEEPS, leadNode as offsetNode, PLACED_TEXT, PLACING_FREELY } from "../features/movement/free.ts";
+import { GROUP_KEEPS, HEX_KEEPS, leadNode as offsetNode, moveFrame, PLACED_TEXT, PLACING_FREELY } from "../features/movement/free.ts";
 import { useAimedCatches } from "../features/areas/AreaPreviewLayer.tsx";
 import { keptStops } from "../features/measure/ruler.ts";
 import { useDragStops } from "../features/movement/stageHooks.ts";
@@ -1696,10 +1696,10 @@ export function MapStage(props: {
         const leadFields = lone ? dragStopsRef.current.frameFields(drag.lead.id) : {};
         const named = lone ? null : new Set(drag.named.map((t) => t.id));
         const fieldsOf = (t: ViewToken, x: number, y: number) => (lone ? (t.id === drag.lead.id ? leadFields : {}) : named!.has(t.id) ? dragStopsRef.current.groupFields(t, { x, y }) : {});
-        actions.sendEph({ k: "dragMove", tokenId: token.id, x: node.x(), y: node.y(), ...fieldsOf(token, node.x(), node.y()) });
+        // A free drag's frames say so, so every device reads the box the drop counts it in as this one does (SNAPBUILD-ASTRA-02).
+        actions.sendEph(moveFrame(token.id, { x: node.x(), y: node.y() }, free, fieldsOf(token, node.x(), node.y())));
         // What follows a token reads the box it counts in: under where it is drawn for a free drag, else back in rules coordinates.
-        const spotOf = (t: ViewToken, at: Point) => (free ? at : rulesSpot(t, at));
-        const here = spotOf(token, { x: node.x(), y: node.y() });
+        const here = dragAim(token, { x: node.x(), y: node.y() }, free);
         setSpot(token, here.x, here.y);
         if (drag.followers.length === 0) return;
         // Every follower moves by the pressed node's offset from where it was drawn, each from where it is drawn itself.
@@ -1715,7 +1715,7 @@ export function MapStage(props: {
           f.node.position({ x, y });
           const layer = f.node.getLayer();
           if (layer) layers.add(layer);
-          actions.sendEph({ k: "dragMove", tokenId: f.token.id, x, y, ...fieldsOf(f.token, x, y) });
+          actions.sendEph(moveFrame(f.token.id, { x, y }, false, fieldsOf(f.token, x, y)));
           setSpot(f.token, f.token.x + dx, f.token.y + dy);
         }
         for (const layer of layers) layer.batchDraw();

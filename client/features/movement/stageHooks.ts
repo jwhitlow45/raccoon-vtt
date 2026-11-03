@@ -9,7 +9,7 @@ import type { PublicWorld } from "#shared/rules/walkWorld.ts";
 import { isHex } from "#shared/rules/grid.ts";
 import { drawnSpot } from "#shared/rules/nudge.ts";
 import { walkersCut, walkersFor, walkersOfGroup } from "../attach/walk.ts";
-import { rulesSpot, snapPosition } from "../../lib/scene.ts";
+import { dragAim, rulesSpot, snapPosition } from "../../lib/scene.ts";
 import type { OpAnswer } from "../../state/types.ts";
 import { useRoomScope, type RoomScope } from "../../state/scope.ts";
 import type { RoomUi } from "../../state/store.ts";
@@ -186,7 +186,7 @@ export function dragStops(deps: DragDeps): DragStops {
    * drag the drawn point itself, so the ghost, the route's target and the
    * plan all read the box under where the token is drawn (SNAP-OPUS3-01).
    */
-  const ruled = (token: DropToken, at: Point, free: boolean): Point => (free ? { x: at.x, y: at.y } : rulesSpot(token, at));
+  const ruled = (token: DropToken, at: Point, free: boolean): Point => dragAim(token, at, free);
   /** A rules spot written to the node: where the token is drawn there, with its nudge. */
   const drawnThere = (token: DropToken, at: Point): Point => drawnSpot(null, { x: at.x, y: at.y, nudge: token.nudge });
   /** The lone drag's search, its world and what the world was built from. */

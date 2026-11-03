@@ -1,4 +1,4 @@
-import type { ClientOp } from "#shared/protocol.ts";
+import type { ClientOp, EphEvent } from "#shared/protocol.ts";
 import { footprintSize, isSqueezed } from "#shared/rules/footprint.ts";
 import { isHex, type Grid } from "#shared/rules/grid.ts";
 import { drawnSpot, freeDrawnAt } from "#shared/rules/nudge.ts";
@@ -51,6 +51,18 @@ export function keepPlacements(grid: Grid, plan: DropPlan, tokens: readonly Drop
   if (!plan.moves.some((m) => tokens.some((t) => t.id === m.tokenId && t.nudge))) return plan;
   return { ...plan, moves: plan.moves.map((m) => keeping(grid, m, tokens.find((t) => t.id === m.tokenId))) };
 }
+
+/**
+ * A drag frame of a token drawn at `at`, which carries the drawn point
+ * (5.6). A free one says so, since a receiver reads a free drag's point as
+ * the box under it and an ordinary one's less the nudge, as this device's
+ * own drag reads it (lib/scene.ts dragAim, framedToken).
+ */
+export function moveFrame(tokenId: string, at: Point, free: boolean, fields: Omit<MoveFrame, "k" | "tokenId" | "x" | "y" | "free">): MoveFrame {
+  return { k: "dragMove", tokenId, x: at.x, y: at.y, ...fields, ...(free ? { free: true as const } : {}) };
+}
+
+type MoveFrame = Extract<EphEvent, { k: "dragMove" }>;
 
 /** The part of a dragged node the drop reads and moves. */
 export type NodeAt = { x(): number; y(): number; position(p: Point): void };

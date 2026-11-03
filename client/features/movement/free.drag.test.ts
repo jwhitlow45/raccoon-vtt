@@ -6,7 +6,12 @@ import { WorkBudget } from "#shared/rules/walk.ts";
 import { RoomScope } from "../../state/scope.ts";
 import type { DropPlan } from "./drop.ts";
 import type { FreeDrop } from "./free.ts";
-import { leadNode } from "./free.ts";
+import { leadNode, moveFrame } from "./free.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
+import { frameSpots } from "../areas/liveTokens.ts";
+import { dragAim, footprint, frameAim, snapPosition } from "../../lib/scene.ts";
+import { applyEph } from "../../state/ephemeral.ts";
+import { EMPTY_EPHEMERAL } from "../../state/types.ts";
 import { RouteWork, type Frames } from "./routeWork.ts";
 import { dragStops, type DragDeps, type Release } from "./stageHooks.ts";
 import { routeSlot } from "./store.ts";
@@ -176,5 +181,62 @@ describe("the drag boundary", () => {
     b.stops.start(hero.id);
     b.settle(node, hero);
     assert.deepEqual(node.written.at(-1), { x: 4, y: 2.25 });
+  });
+
+  /*
+   * SNAPBUILD-ASTRA-02, SB-OPUS-02: the frame this device sends aims, on every
+   * other device, where this device's own drag aims: its route, the spot
+   * what follows it reads (Stage.tsx setSpot) and another device's aura and
+   * ruler (frameSpots, frameAim), ordinary and free, at fractional points.
+   */
+  test("a nudged token's drag aims at the same box here and on every other device, ordinary and free", () => {
+    const hero = placed({ x: 3, y: 3 }, { x: 3, y: 0 });
+    const tokens = { [hero.id]: hero };
+    const box = (at: { x: number; y: number }) => snapPosition(SQUARES, at.x, at.y, footprint(hero));
+    let checked = 0;
+    for (const free of [false, true]) {
+      for (const [x, y] of [
+        [3.625, 3],
+        [3.4, 3.1],
+        [3.875, 2.6],
+        [4.3, 3.45],
+        [5.13, 3.55],
+        [2.9, 2.4],
+      ] as const) {
+        const b = board(world({ tokens: [hero] }));
+        b.stops.start(hero.id);
+        const local = b.settle(nodeAt(x, y), hero, free).to;
+        const spot = box(dragAim(hero, { x, y }, free));
+        const frame = moveFrame(hero.id, { x, y }, free, {});
+        const remote = applyEph(EMPTY_EPHEMERAL, "p2", frame, 0, { local: false, role: "dm" });
+        const preview = Object.values(remote.drags)[0]!;
+        const aura = frameSpots(tokens, [preview], () => SQUARES).get(hero.id) ?? { x: hero.x, y: hero.y };
+        const ruler = box(frameAim(hero, preview));
+        const what = `${free ? "free" : "ordinary"} at (${x}, ${y})`;
+        assert.deepEqual(spot, local, `${what}: what follows it`);
+        assert.deepEqual(aura, local, `${what}: another device's aura`);
+        assert.deepEqual(ruler, local, `${what}: another device's ruler`);
+        checked += 1;
+      }
+    }
+    assert.equal(checked, 12);
+  });
+
+  test("the reviewers' case: stored at x=3 nudged 3/8 right, dragged a quarter right, aims at box 3, and at box 4 with Alt", () => {
+    const hero = placed({ x: 3, y: 3 }, { x: 3, y: 0 });
+    for (const [free, want] of [
+      [false, 3],
+      [true, 4],
+    ] as const) {
+      const preview = Object.values(applyEph(EMPTY_EPHEMERAL, "p2", moveFrame(hero.id, { x: 3.625, y: 3 }, free, {}), 0, { local: false, role: "dm" }).drags)[0]!;
+      assert.equal(preview.free, free ? true : undefined);
+      assert.deepEqual(frameSpots({ [hero.id]: hero }, [preview], () => SQUARES).get(hero.id) ?? { x: 3, y: 3 }, { x: want, y: 3 });
+    }
+  });
+
+  test("a drop's end frame carries the landing as drawn with its new placement, and aims at the landing whatever the old nudge", () => {
+    const hero = placed({ x: 3, y: 3 }, { x: 3, y: 0 });
+    const end = applyEph(EMPTY_EPHEMERAL, "p2", { k: "dragEnd", tokenId: hero.id, x: 5.625, y: 3 }, 0, { local: false, role: "dm" });
+    assert.deepEqual(frameSpots({ [hero.id]: hero }, Object.values(end.drags), () => SQUARES).get(hero.id), { x: 6, y: 3 }, "placed 3/8 left of box 6");
   });
 });

@@ -1,6 +1,6 @@
 import type { Token } from "#shared/model.ts";
 import type { Grid } from "#shared/rules/grid.ts";
-import { footprint, snapPosition } from "../../lib/scene.ts";
+import { footprint, frameAim, snapPosition } from "../../lib/scene.ts";
 
 /**
  * Tokens where they are being dragged to, for what follows a token: an aura
@@ -18,7 +18,7 @@ import { footprint, snapPosition } from "../../lib/scene.ts";
 export type Spot = { x: number; y: number };
 type Placed = Pick<Token, "x" | "y" | "size" | "w" | "h">;
 
-/** The spot each drag would drop its token on, snapped on its scene's grid (`gridOf`), leaving out drags that would not move it. */
+/** The spot each drag would drop its token on, from where it aims in rules coordinates, snapped on its scene's grid (`gridOf`), leaving out drags that would not move it. */
 export function dragSpots<T extends Placed>(
   tokens: Readonly<Record<string, T | undefined>>,
   drags: Iterable<{ tokenId: string; x: number; y: number }>,
@@ -33,6 +33,25 @@ export function dragSpots<T extends Placed>(
     else spots.delete(d.tokenId);
   }
   return spots;
+}
+
+/**
+ * The spot each of other devices' drag frames would drop its token on
+ * (`dragSpots`). A frame carries the drawn point, which aims as the dragging
+ * device's own drag does, so a nudged token's aura and areas count where
+ * that device's drop would (lib/scene.ts frameAim, SNAPBUILD-ASTRA-02).
+ */
+export function frameSpots<T extends Placed & Pick<Token, "nudge">>(
+  tokens: Readonly<Record<string, T | undefined>>,
+  frames: Iterable<{ tokenId: string; x: number; y: number; free?: boolean; ended?: boolean }>,
+  gridOf: (token: T) => Grid,
+): Map<string, Spot> {
+  const aimed: { tokenId: string; x: number; y: number }[] = [];
+  for (const f of frames) {
+    const t = tokens[f.tokenId];
+    if (t) aimed.push({ tokenId: f.tokenId, ...frameAim(t, f) });
+  }
+  return dragSpots(tokens, aimed, gridOf);
 }
 
 export function spotsKey(spots: ReadonlyMap<string, Spot>): string {

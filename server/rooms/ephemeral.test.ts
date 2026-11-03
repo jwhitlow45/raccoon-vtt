@@ -276,6 +276,15 @@ describe("drag previews on vision scenes (docs/design/design-v1-maps-vision.md 4
     assert.ok(withheld > 0 && shown > 0, "the sweep crosses the edge of sight");
   });
 
+  test("a free drag's frame reaches a player with its flag where it is in sight, and is withheld by its point as any frame is (SNAPBUILD-ASTRA-02)", () => {
+    const state = corridor();
+    const t = table(state);
+    t.send(t.dm.conn, { k: "dragMove", tokenId: "gob", x: 13.25, y: 13.875, free: true });
+    assert.deepEqual(t.p1.got.at(-1), { k: "dragMove", tokenId: "gob", x: 13.25, y: 13.875, free: true });
+    t.send(t.dm.conn, { k: "dragMove", tokenId: "gob", x: 25.25, y: 13, free: true });
+    assert.deepEqual(t.p1.got.at(-1), { k: "dragCancel", tokenId: "gob" });
+  });
+
   test("a creature revealed on its turn out of the party's sight sends players nothing until it stands in sight", () => {
     const state = corridor();
     state.tokens.lurker = token("lurker", { x: 25, y: 13, fogExemptAuto: true });

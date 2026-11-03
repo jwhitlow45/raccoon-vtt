@@ -71,6 +71,39 @@ export function rulesSpot(token: Pick<Token, "nudge">, p: { x: number; y: number
 }
 
 /**
+ * Where a drag of a token drawn at `at` aims, in rules coordinates, unsnapped
+ * (design 6.3): its rules spot, or for a free drag the drawn point itself,
+ * so the drop counts it in the box under the token as drawn
+ * (SNAP-OPUS3-01). The drag's route, its outline, what follows it and every
+ * other device's preview of it read this.
+ */
+export function dragAim(token: Pick<Token, "nudge">, at: { x: number; y: number }, free: boolean): { x: number; y: number } {
+  return free ? { x: at.x, y: at.y } : rulesSpot(token, at);
+}
+
+/**
+ * A token as another device's drag frame reads it (design 5.6 and 6.3). A
+ * frame carries the drawn point. An ordinary drag aims at that point less
+ * the nudge, so the token keeps its nudge. A free drag aims at the box under
+ * the point (`free`), and a drop's end carries the landing as drawn with its
+ * new placement, which the bound keeps in the landing's box (`ended`). For
+ * those the token reads with no nudge, so `rulesSpot` of it is the point
+ * itself. Every reader of a frame's point, the ghost's shadow and ground,
+ * its ruler and what follows it, takes the token through here
+ * (SNAPBUILD-ASTRA-02).
+ */
+export function framedToken<T extends Pick<Token, "nudge">>(token: T, frame: { free?: boolean; ended?: boolean }): T {
+  if (!token.nudge || (!frame.free && !frame.ended)) return token;
+  const { nudge: _drawnOnly, ...rest } = token;
+  return rest as T;
+}
+
+/** Where another device's drag frame aims its token, in rules coordinates, unsnapped (`framedToken`). */
+export function frameAim(token: Pick<Token, "nudge">, frame: { x: number; y: number; free?: boolean; ended?: boolean }): { x: number; y: number } {
+  return rulesSpot(framedToken(token, frame), frame);
+}
+
+/**
  * The dashed outline of a nudged token's rules box (docs/design/design-v1-snap-off.md
  * section 4, "Where it counts"): the box every rule counts it in, from its
  * drawn top-left, in cells, the space of its node. Null for a token with no

@@ -4,7 +4,7 @@ import { sceneGrid, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import { useTreeShownStore, useTreeShownView } from "../../canvas/relief/context.ts";
 import { localDragSlot } from "../../state/localDrags.ts";
 import { useScoped } from "../../state/scope.ts";
-import { dragSpots, parseSpotsKey, spotsKey, withSpots } from "./liveTokens.ts";
+import { dragSpots, frameSpots, parseSpotsKey, spotsKey, withSpots } from "./liveTokens.ts";
 import { REST_MS } from "./store.ts";
 
 const EMPTY_TOKENS: Record<string, Token> = {};
@@ -30,7 +30,7 @@ function gridIn(scenes: RoomState["scenes"]): (token: Pick<Token, "sceneId">) =>
 export function useLiveTokens(): { tokens: Record<string, Token>; moving: boolean } {
   const tokens = useTreeShownView((s) => s.view?.tokens ?? EMPTY_TOKENS);
   const scenes = useTreeShownView((s) => s.view?.scenes ?? EMPTY_SCENES);
-  const remote = useTreeShownView((s) => (s.view ? spotsKey(dragSpots<Token>(s.view.tokens, Object.values(s.ephemeral.drags), gridIn(s.view.scenes))) : ""));
+  const remote = useTreeShownView((s) => (s.view ? spotsKey(frameSpots<Token>(s.view.tokens, Object.values(s.ephemeral.drags), gridIn(s.view.scenes))) : ""));
   const local = useTreeShownStore(useScoped(localDragSlot), (s) => spotsKey(dragSpots<Token>(tokens, Object.entries(s.spots).map(([tokenId, at]) => ({ tokenId, ...at })), gridIn(scenes))));
   const key = remote && local ? `${remote}|${local}` : remote || local;
   const live = useMemo(() => {

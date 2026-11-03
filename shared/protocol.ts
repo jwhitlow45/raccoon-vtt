@@ -2910,6 +2910,8 @@ export const ephEventSchema = z.discriminatedUnion("k", [
   z.strictObject({ k: z.literal("dragStart"), tokenId: id, x: coord, y: coord }),
   // `squeeze` is the dragging client's own preview, for drawing only: the server judges a frame's footprint itself (section 4.1).
   // `path` is the live route's corners and `ft` its cost (docs/design/design-v1-movement.md 6.5). The server sends `ft` only to the DM and the token's owners.
+  // `free` says the drag drops between squares, so a receiver reads its point as the box under it, not less the nudge (docs/design/design-v1-snap-off.md 6.3).
+  // It names no place, and the server judges the frame by its point either way.
   z.strictObject({
     k: z.literal("dragMove"),
     tokenId: id,
@@ -2918,6 +2920,7 @@ export const ephEventSchema = z.discriminatedUnion("k", [
     path: z.array(coord).max(200).optional(),
     ft: z.number().min(0).max(100_000).optional(),
     squeeze: z.literal(true).optional(),
+    free: z.literal(true).optional(),
   }),
   z.strictObject({ k: z.literal("dragEnd"), tokenId: id, x: coord, y: coord, squeeze: z.literal(true).optional() }),
   z.strictObject({ k: z.literal("dragCancel"), tokenId: id }),

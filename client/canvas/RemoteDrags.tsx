@@ -3,7 +3,7 @@ import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { useLowPower } from "../features/device/settings.ts";
 import { Pill } from "../features/measure/Pill.tsx";
-import type { ViewToken } from "../lib/scene.ts";
+import { framedToken, type ViewToken } from "../lib/scene.ts";
 import { approach } from "../state/ephemeral.ts";
 import type { DragPreview } from "../state/types.ts";
 import { useRoomView } from "../state/view.ts";
@@ -65,7 +65,8 @@ export const RemoteDrags = memo(function RemoteDrags(props: {
         if (!token || drag.tokenId === props.draggingId) return null;
         // Another device of this same member shows as a ghost too, which is what that person sees on the table.
         const tag = dragTag(drag.from, members);
-        return <Ghost key={key} id={key} drag={drag} token={token} scale={props.scale} color={tag.color} name={tag.text} eased={props.eased} iso={props.iso ?? null} part={props.part ?? null} />;
+        // The ghost's shadow, ground and stand read its frame's point as that device's drag aims it (scene.ts framedToken).
+        return <Ghost key={key} id={key} drag={drag} token={framedToken(token, drag)} scale={props.scale} color={tag.color} name={tag.text} eased={props.eased} iso={props.iso ?? null} part={props.part ?? null} />;
       })}
     </>
   );

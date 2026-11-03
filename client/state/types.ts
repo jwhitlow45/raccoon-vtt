@@ -35,6 +35,8 @@ export type DragPreview = {
   path?: number[];
   /** The leg's cost, which only the DM and the token's owners receive. */
   ft?: number;
+  /** The drag drops between squares, so its point aims at the box under it (lib/scene.ts framedToken). */
+  free?: true;
   /** A `dragEnd` arrived. The preview holds the drop point until the token's `ev` lands, so the token never flashes back. */
   ended: boolean;
   /** When the latest frame arrived, in the store clock's milliseconds. */

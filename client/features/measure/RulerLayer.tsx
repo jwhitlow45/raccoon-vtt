@@ -3,7 +3,7 @@ import { Circle, Group, Line } from "react-konva";
 import type { Drawing, RoomState, Token } from "#shared/model.ts";
 import { sceneGrid, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import { useDelayed } from "../../components/Loading.tsx";
-import { footprint, rulesSpot, snapPosition } from "../../lib/scene.ts";
+import { footprint, frameAim, rulesSpot, snapPosition } from "../../lib/scene.ts";
 import { boardTheme } from "../../lib/theme.ts";
 import { MarkPill, MarkPillStack, Upright } from "../../canvas/IsoParts.tsx";
 import { boxGround, viewPointOf } from "../../canvas/isoPlace.ts";
@@ -401,7 +401,8 @@ function DragMeasure(props: { token: Token; to: Point; read: ReadDrag; scale: nu
 
 /**
  * Another member's drag, measured from where the token stands to the
- * snapped preview point, through the route's corners its frames carry,
+ * box its frame aims at, as the dragging device's own drag reads it
+ * (lib/scene.ts frameAim, SNAPBUILD-ASTRA-02), through the route's corners its frames carry,
  * with the leg's cost they carry to the DM and the token's owners. The
  * server already dropped frames whose preview is under the fog for this
  * viewer (design 7.6), and the corners on scenes with fog or vision, so the
@@ -419,7 +420,7 @@ function RemoteDragMeasure(props: { drag: DragPreview; token: Token | undefined;
   return (
     <DragMeasure
       token={token}
-      to={snapPosition(props.grid, drag.x, drag.y, footprint(token))}
+      to={((at) => snapPosition(props.grid, at.x, at.y, footprint(token)))(frameAim(token, drag))}
       read={props.read}
       scale={props.scale}
       corners={corners}
