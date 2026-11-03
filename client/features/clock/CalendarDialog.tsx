@@ -17,7 +17,7 @@ import { composeDraft, draftDate, firstDay, keptSeconds, reconcileDate, type Dat
 
 export const KIND_OPTIONS = [
   { value: "days", label: "Day count", help: "Day 1, Day 2 and on." },
-  { value: "months", label: "Months", help: "Named months, a week and years. You name them next." },
+  { value: "months", label: "Months", help: "Months, weekdays and years with names you choose." },
 ] as const;
 
 /**
