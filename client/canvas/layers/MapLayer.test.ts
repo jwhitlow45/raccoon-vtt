@@ -77,7 +77,7 @@ function board(s: Scene, tool: string, part: (s: Scene) => ReturnType<typeof cre
 }
 
 const lined = (gridShape?: GridShape) => scene("s1", { grid: { show: true, color: GRID_COLOR, opacity: 0.25, lineWidth: 1 }, ...(gridShape ? { gridShape } : {}) });
-const mapContent = (s: Scene) => createElement(MapContent, { scene: s, variant: "full", report: false });
+const mapContent = (s: Scene) => createElement(MapContent, { scene: s, variant: "full", report: false, video: false });
 const builder = (s: Scene) => createElement(BuilderLayer, { scene: s, role: "dm", scale: 40 } as never);
 const appLines = (b: Board) => b.root.find(".sceneGrid").length;
 
