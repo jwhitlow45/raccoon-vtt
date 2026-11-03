@@ -91,6 +91,27 @@ function handMade(state: RoomState): Case[] {
   both({ t: "clock.update", calendar: { kind: "days" }, shown: false, at: 0 });
   both({ t: "clock.set", at: 3_600 });
   both({ t: "clock.advance", by: 600, why: "longRest" });
+  // Synced music and sound (docs/design/design-v1-sound.md 6.2): a loop's id keys the playing record.
+  both({ t: "sound.create", id: "snd9", assetId: "a9", name: "Rain", use: "loop", ms: 20_000 });
+  both({ t: "sound.update", id: "snd1", name: "Storm" });
+  both({ t: "sound.delete", id: "snd1" });
+  both({ t: "playlist.create", id: "pl9", name: "Night", sounds: [], repeat: "all", fade: 5 });
+  both({ t: "playlist.update", id: "pl1", name: "Day", shuffle: false });
+  both({ t: "playlist.delete", id: "pl1" });
+  both({ t: "music.play", run: "run9", soundId: "snd1", order: ["snd1"], repeat: "all", fade: 5 });
+  both({ t: "music.pause" });
+  both({ t: "music.resume", run: "run9" });
+  both({ t: "music.skip", run: "run9" });
+  both({ t: "music.stop" });
+  both({ t: "music.set", repeat: "one" });
+  both({ t: "loop.start", id: "loop9", soundId: "snd1", volume: 70 });
+  both({ t: "loop.set", id: "loop9", volume: 50 });
+  both({ t: "loop.stop", id: "loop9" });
+  both({ t: "effect.fire", id: "fx9", builtin: "crash" });
+  both({ t: "sound.mix", music: 50 });
+  both({ t: "sound.scene", sceneId: "s1", run: "run9", order: [] });
+  both({ t: "sound.stopAll" });
+  dm({ t: "sys.sound", from: 0, music: null, loops: {}, effects: [] });
   both({ t: "undo", head: "0192f0aa-0000-7000-8000-000000000001" });
   both({ t: "redo", head: "0192f0aa-0000-7000-8000-000000000001" });
   dm({ t: "sys.memberJoin", member: { id: "p9", name: "New", color: "#ff0000", kind: "player", createdAt: AT } });

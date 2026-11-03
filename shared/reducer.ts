@@ -16,6 +16,24 @@ import { linkPass, settleMounts, tokenAttach, tokenDetach } from "./reducer/atta
 import { attaches, trapsGoOff, writesUndoCorrections } from "./migrate.ts";
 import { clockCorrection, correctionViews } from "./undoCorrection.ts";
 import { clockAdvance, clockSet, clockStart, clockStop, clockUpdate } from "./reducer/clock.ts";
+import {
+  effectFire,
+  loopSet,
+  loopStart,
+  loopStop,
+  musicChange,
+  musicPlay,
+  playlistCreate,
+  playlistDelete,
+  playlistUpdate,
+  soundCreate,
+  soundDelete,
+  soundMix,
+  soundScene,
+  soundStopAll,
+  soundUpdate,
+  sysSound,
+} from "./reducer/sound.ts";
 import { projectStateForOp, stableStringify } from "./project.ts";
 import {
   encounterAdd,
@@ -425,6 +443,46 @@ function dispatch(tx: Tx, op: Op): void {
       return clockSet(tx, op);
     case "clock.advance":
       return clockAdvance(tx, op);
+    case "sound.create":
+      return soundCreate(tx, op);
+    case "sound.update":
+      return soundUpdate(tx, op);
+    case "sound.delete":
+      return soundDelete(tx, op);
+    case "playlist.create":
+      return playlistCreate(tx, op);
+    case "playlist.update":
+      return playlistUpdate(tx, op);
+    case "playlist.delete":
+      return playlistDelete(tx, op);
+    case "music.play":
+      return musicPlay(tx, op);
+    case "music.pause":
+      return musicChange(tx, { t: "pause" });
+    case "music.resume":
+      return musicChange(tx, { t: "resume", run: op.run });
+    case "music.skip":
+      return musicChange(tx, { t: "skip", run: op.run });
+    case "music.stop":
+      return musicChange(tx, { t: "stop" });
+    case "music.set":
+      return musicChange(tx, { t: "set", ...(op.repeat !== undefined ? { repeat: op.repeat } : {}), ...(op.fade !== undefined ? { fade: op.fade } : {}) });
+    case "loop.start":
+      return loopStart(tx, op);
+    case "loop.set":
+      return loopSet(tx, op);
+    case "loop.stop":
+      return loopStop(tx, op);
+    case "effect.fire":
+      return effectFire(tx, op);
+    case "sound.mix":
+      return soundMix(tx, op);
+    case "sound.scene":
+      return soundScene(tx, op);
+    case "sound.stopAll":
+      return soundStopAll(tx);
+    case "sys.sound":
+      return sysSound(tx, op);
     case "log.chat":
       return logChat(tx, op);
     case "log.whisper":

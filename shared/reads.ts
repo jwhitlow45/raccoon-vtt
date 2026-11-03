@@ -71,6 +71,32 @@ function clockRead(state: RoomState): Read[] {
   return state.clock ? [{ key: keys.clock }] : [];
 }
 
+/**
+ * What plays now as a read, only where the view holds it, as the clock's:
+ * a room that has never played anything has no `playing`, and the DM's
+ * first play still predicts (docs/design/design-v1-sound.md 6.3).
+ */
+function playingRead(state: RoomState): Read[] {
+  return state.playing ? [{ key: keys.playing }] : [];
+}
+
+/** The library's sounds a run plays: its order, which the schedule reads for each track's length. */
+function runReads(state: RoomState): Read[] {
+  const music = state.playing?.music;
+  return [...playingRead(state), ...(music?.order ?? []).map((id) => ({ key: keys.sound(id) }))];
+}
+
+/** The playlists and scenes a sound's change of use or delete edits, which a DM's view holds whole. */
+function namingSound(state: RoomState, soundId: string): Read[] {
+  const out: Read[] = [];
+  for (const [id, playlist] of Object.entries(state.playlists ?? {})) if (playlist.sounds.includes(soundId)) out.push({ key: keys.playlist(id) });
+  for (const [id, scene] of Object.entries(state.scenes)) {
+    const sound = scene.sound;
+    if (sound && (sound.music?.soundId === soundId || sound.loops.some((l) => l.soundId === soundId))) out.push({ key: keys.scene(id) });
+  }
+  return out;
+}
+
 export function reads(op: Op, state: RoomState): Reads {
   switch (op.t) {
     case "undo":
@@ -323,6 +349,54 @@ export function reads(op: Op, state: RoomState): Reads {
     // ops read the clock and the fight its time counts, where the view holds one.
     case "clock.start":
       return of([]);
+
+    // Synced music and sound (docs/design/design-v1-sound.md 6.3): playback reads what plays and the sounds it names, a play
+    // its playlist, a scene's sound its scene and the meta. A sound's update and delete read what plays (the first to
+    // refuse, the second to edit the effect lists) and what they edit. A playlist's delete reads its scenes, never `playing`.
+    // The server's tick is its own.
+    case "sys.sound":
+      return NEVER;
+    case "sound.create":
+      return of([]);
+    case "sound.update":
+    case "sound.delete":
+      return of([{ key: keys.sound(op.id) }, ...playingRead(state), ...namingSound(state, op.id)], ["scenes"]);
+    case "playlist.create":
+      return of(op.sounds.map((id) => ({ key: keys.sound(id) })));
+    case "playlist.update":
+      return of([{ key: keys.playlist(op.id) }, ...(op.sounds ?? []).map((id) => ({ key: keys.sound(id) }))]);
+    case "playlist.delete":
+      return of(
+        [{ key: keys.playlist(op.id) }, ...Object.entries(state.scenes).filter(([, scene]) => scene.sound?.music?.playlistId === op.id).map(([id]) => ({ key: keys.scene(id) }))],
+        ["scenes"],
+      );
+    case "music.play":
+      return of([...runReads(state), ...(op.playlistId !== undefined ? [{ key: keys.playlist(op.playlistId) }] : []), ...op.order.map((id) => ({ key: keys.sound(id) }))]);
+    case "music.pause":
+    case "music.resume":
+    case "music.skip":
+    case "music.stop":
+    case "music.set":
+      return of(runReads(state));
+    case "loop.start":
+      return of([...playingRead(state), { key: keys.sound(op.soundId) }]);
+    case "loop.set":
+    case "loop.stop":
+    case "sound.mix":
+    case "sound.stopAll":
+      return of(playingRead(state));
+    case "effect.fire":
+      return of([...playingRead(state), { key: keys.meta }, ...(op.soundId !== undefined ? [{ key: keys.sound(op.soundId) }] : [])]);
+    case "sound.scene": {
+      const music = ownEntry(state.scenes, op.sceneId)?.sound?.music;
+      return of([
+        { key: keys.scene(op.sceneId) },
+        { key: keys.meta },
+        ...runReads(state),
+        ...(music?.playlistId !== undefined ? [{ key: keys.playlist(music.playlistId) }] : []),
+        ...op.order.map((id) => ({ key: keys.sound(id) })),
+      ]);
+    }
     case "clock.stop":
     case "clock.update":
     case "clock.set":

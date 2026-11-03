@@ -1236,9 +1236,11 @@ function entryKeyBytes(key: EntityKey): number {
     case "encounter":
     case "encounterHistory":
       return 0;
-    // The clock's field comes and goes with it.
+    // The clock's field comes and goes with it, and so does what plays in a room from before sound (docs/design/design-v1-sound.md 6.7).
     case "clock":
       return jsonKeyBytes("clock");
+    case "playing":
+      return jsonKeyBytes("playing");
     case "log":
     case "trapLog":
     case "trapSeen":

@@ -4,6 +4,7 @@ import type { Actor, LogEvent, RoomState, Token, Viewer } from "#shared/model.ts
 import { PLAYERS_SEE_WORDS, playersSeeOf } from "#shared/playersSee.ts";
 import { gridOfScene, gridOfToken, projectEntity, type ProjectedToken } from "#shared/project.ts";
 import { isResizeOp, type ActorTarget, type ClientOp, type OpOf, type TokenPatch } from "#shared/protocol.ts";
+import { ownEntry } from "#shared/records.ts";
 import { testText } from "#shared/rules/skills.ts";
 import { sizeCategory } from "#shared/rules/footprint.ts";
 import { cellWord, SQUARES, type Grid } from "#shared/rules/grid.ts";
@@ -28,6 +29,10 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
   const target = (t: ActorTarget) => ("tokenId" in t ? token(t.tokenId) : quoted(before.characters[t.characterId]?.name, "a character"));
   switch (op.t) {
     case "room.update":
+      // The Sound panel's switch sends the setting alone (docs/design/design-v1-sound.md 6.6).
+      if (op.name === undefined && op.settings?.soundNames !== undefined && Object.keys(op.settings).length === 1) {
+        return op.settings.soundNames ? "turning on Players see what is playing" : "turning off Players see what is playing";
+      }
       return op.settings ? "changing room settings" : "renaming the room";
     case "room.setPlayerScene":
       return `moving players to ${scene(op.sceneId)}`;
@@ -46,6 +51,7 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       if (op.patch.phases !== undefined && Object.keys(op.patch).length === 1) return `changing the phases of ${scene(op.sceneId)}`;
       if (op.patch.suggestedView !== undefined && Object.keys(op.patch).length === 1) return `changing the suggested view of ${scene(op.sceneId)}`;
       if (op.patch.weather !== undefined && Object.keys(op.patch).length === 1) return `changing the weather of ${scene(op.sceneId)}`;
+      if (op.patch.sound !== undefined && Object.keys(op.patch).length === 1) return `changing the sound of ${scene(op.sceneId)}`;
       if (op.patch.blockMovement !== undefined && Object.keys(op.patch).length === 1) {
         return op.patch.blockMovement ? `making walls and ledges block players' moves on ${scene(op.sceneId)}` : `letting players' moves pass walls and ledges on ${scene(op.sceneId)}`;
       }
@@ -276,6 +282,43 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       return "setting the date and time";
     case "clock.advance":
       return op.why === "longRest" ? "the party's Long Rest" : `moving the clock on ${spanText(op.by)}`;
+    // Synced music and sound (docs/design/design-v1-sound.md 6.6). Only the library's edits and the playlists are steps: an
+    // upload, a delete and playback record none, so their phrases name them only for completeness.
+    case "sound.update": {
+      const was = ownEntry(before.sounds, op.id);
+      const name = quoted(was?.name, "a sound");
+      if (op.use !== undefined && op.use !== was?.use) return `using ${name} as ${USE_WORDS[op.use]}`;
+      return `renaming ${name}`;
+    }
+    case "playlist.create":
+      return `creating ${the("playlist", op.name)}`;
+    case "playlist.update":
+      return `changing ${the("playlist", ownEntry(before.playlists, op.id)?.name)}`;
+    case "playlist.delete":
+      return `deleting ${the("playlist", ownEntry(before.playlists, op.id)?.name)}`;
+    case "sound.create":
+      return `adding ${quoted(op.name, "a sound")}`;
+    case "sound.delete":
+      return `deleting ${quoted(ownEntry(before.sounds, op.id)?.name, "a sound")}`;
+    case "music.play":
+    case "music.pause":
+    case "music.resume":
+    case "music.skip":
+    case "music.stop":
+    case "music.set":
+      return "changing the music";
+    case "loop.start":
+    case "loop.set":
+    case "loop.stop":
+      return "changing the background sounds";
+    case "effect.fire":
+      return "playing an effect";
+    case "sound.mix":
+      return "changing the volume for everyone";
+    case "sound.scene":
+      return `playing the sound of ${scene(op.sceneId)}`;
+    case "sound.stopAll":
+      return "stopping all sound";
     case "encounter.start":
       return "starting the fight";
     case "encounter.end":
@@ -613,6 +656,9 @@ function erasingLabel(e: Erased): string {
 }
 
 /** "the scene Cave", or "a scene" when it has no name to give. */
+/** A use as its undo phrase says it: "using Rain as background". */
+const USE_WORDS = { music: "music", loop: "background", effect: "an effect" } as const;
+
 function the(kind: string, name: string | undefined): string {
   const n = quoted(name, "");
   return n ? `the ${kind} ${n}` : `a ${kind}`;

@@ -223,6 +223,10 @@ export class Tx {
         if (next === null) delete this.state.clock;
         else this.state.clock = next as RoomClock;
         break;
+      case "playing":
+        // Absent and null are both silence (docs/design/design-v1-sound.md 6.1). Its rev counts every write, which a tick's `from` names.
+        this.state.playing = (next as RoomState["playing"]) ?? null;
+        break;
       case "log":
       case "trapLog":
       case "trapSeen": {
@@ -741,6 +745,7 @@ function mapIdOf(parsed: NonNullable<ReturnType<typeof parseKey>>): string {
     case "encounter":
     case "encounterHistory":
     case "clock":
+    case "playing":
     case "meta":
       throw new Error("singleton");
     default:

@@ -21,8 +21,12 @@ const inventory = {
     "savedEncounter.create", "savedEncounter.update", "savedEncounter.delete", "scene.create", "scene.delete", "scene.duplicate", "scene.reorder", "scene.setMap", "scene.setGrid", "vision.holders", "room.update",
     "journal.create", "journal.update", "journal.delete", "pin.put", "pin.remove", "handoutDoc.create", "handoutDoc.delete",
     "clock.start", "clock.stop", "clock.update",
+    "sound.update", "playlist.create", "playlist.update", "playlist.delete",
   ],
-  none: ["roll.change", "cast.ask", "cast.close", "dice.roll", "roll.dice", "actor.deathRoll", "actor.rechargeRoll", "build.ask", "member.update", "log.chat", "log.whisper", "undo", "redo"],
+  none: [
+    "roll.change", "cast.ask", "cast.close", "dice.roll", "roll.dice", "actor.deathRoll", "actor.rechargeRoll", "build.ask", "member.update", "log.chat", "log.whisper", "undo", "redo",
+    "sound.create", "sound.delete", "music.play", "music.pause", "music.resume", "music.skip", "music.stop", "music.set", "loop.start", "loop.set", "loop.stop", "effect.fire", "sound.mix", "sound.scene", "sound.stopAll",
+  ],
 } satisfies Record<UndoScope, string[]>;
 const fieldSensitive = ["token.update", "token.updateMany", "character.update", "scene.update", "trap.update"];
 
@@ -134,7 +138,7 @@ describe("undo classifier inventory", () => {
   }
 
   const sceneFields = {
-    name: ["Dungeon", "setup"], bounds: [{ w: 20, h: 20 }, "setup"], grid: [{ show: false, color: "#ffffff", opacity: 0.2, lineWidth: 1 }, "setup"], background: ["#000000", "setup"], fogEnabled: [true, "setup"], defaultView: [null, "setup"], autoWalls: ["off", "setup"], folder: [null, "setup"], thumb: [null, "none"], phases: [[], "setup"], blockMovement: [true, "setup"], vision: [{ on: true, light: "dark" }, "setup"], gridShape: ["hexRows", "setup"], suggestedView: ["isometric", "play"], weather: [{ kind: "rain", heavy: true }, "play"],
+    name: ["Dungeon", "setup"], bounds: [{ w: 20, h: 20 }, "setup"], grid: [{ show: false, color: "#ffffff", opacity: 0.2, lineWidth: 1 }, "setup"], background: ["#000000", "setup"], fogEnabled: [true, "setup"], defaultView: [null, "setup"], autoWalls: ["off", "setup"], folder: [null, "setup"], thumb: [null, "none"], phases: [[], "setup"], blockMovement: [true, "setup"], vision: [{ on: true, light: "dark" }, "setup"], gridShape: ["hexRows", "setup"], suggestedView: ["isometric", "play"], weather: [{ kind: "rain", heavy: true }, "play"], sound: [{ music: null, loops: [] }, "setup"],
   } satisfies Record<keyof OpOf<"scene.update">["patch"], readonly [unknown, UndoScope]>;
   for (const [field, [value, expected]] of Object.entries(sceneFields)) {
     test(`scene field ${field} is ${expected}`, () => assert.equal(scope({ t: "scene.update", sceneId: "s1", patch: { [field]: value } }), expected));

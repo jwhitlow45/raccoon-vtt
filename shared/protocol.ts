@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { historyCommandSchema, historyMessageSchema, opAcknowledgmentSchema, restoreHistoryFieldsSchema } from "./undoContract.ts";
 import { saveOutcomePageSchema, saveOutcomeTransitionSchema, savePageAskFieldsSchema, savePageCloseFieldsSchema, saveRechargeSpendSchema } from "./saveOutcomeContract.ts";
-import { LIMITS, MOST_SIGHT_HOLDERS, VIDEO_LIMITS, serializedBytes } from "./limits.ts";
+import { LIMITS, MOST_SIGHT_HOLDERS, SOUND_LIMITS, VIDEO_LIMITS, serializedBytes } from "./limits.ts";
+import { FADES, LEVEL_MAX, LEVEL_MIN, REPEATS, SOUND_USES } from "./sound.ts";
 import { ATTACH_KINDS } from "./rules/attach.ts";
 import { critBound } from "./dice/crit.ts";
 import { applyMode, diceCount, doubleDice, parseExtra, parseFormula, type Formula } from "./dice/formula.ts";
@@ -435,6 +436,8 @@ const settingsPatch = z.strictObject({
   newScenes: gridShapeChoice.optional(),
   /** What players see on new scenes (docs/design/design-v1-map-discovery.md 8.2). Once set it stays set. Only the new scene form reads it. */
   newScenePlayers: z.enum(SCENE_PRESETS).optional(),
+  /** Players see what is playing (docs/design/design-v1-sound.md 4.1). False removes the stored setting. */
+  soundNames: z.boolean().optional(),
 });
 
 const fogShape = z.discriminatedUnion("kind", [
@@ -2024,6 +2027,61 @@ const clockStep = z.number().int().min(1).max(LIMITS.clockStepMax);
 /** A clock line's stored date (shared/calendar.ts lineDate), made of the calendar's names and numbers alone. */
 const clockDate = z.string().min(1).max(LIMITS.clockDateChars).regex(NAME_CHARS, "names cannot hold control or text direction characters");
 
+/**
+ * Synced music and sound (docs/design/design-v1-sound.md 6.1 and 6.2). Every
+ * id list is bounded and holds no id twice. A run's id is short and plain,
+ * so a scene's loops can take ids made from it. Times are whole server
+ * milliseconds since 1970.
+ */
+const soundUse = z.enum(SOUND_USES);
+const soundRepeat = z.enum(REPEATS);
+const soundFade = z.union(FADES.map((fade) => z.literal(fade)) as unknown as [z.ZodLiteral<0>, z.ZodLiteral<2>, z.ZodLiteral<5>, z.ZodLiteral<10>]);
+const soundVolume = z.number().int().min(0).max(100);
+const soundLevel = z.number().int().min(LEVEL_MIN).max(LEVEL_MAX);
+const runId = z.string().regex(/^[A-Za-z0-9_-]{1,40}$/, "not a run id");
+/** A loop's or a fired effect's id: plain, so it can key the playing record and never name a member of Object.prototype by its own spelling. */
+const playingId = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, "not a plain id");
+const soundTime = z.number().int().min(0).max(8_640_000_000_000_000);
+const soundLength = z.number().int().min(SOUND_LIMITS.fileMinMs).max(SOUND_LIMITS.fileMaxMs);
+const distinctIds = (ids: readonly string[]) => new Set(ids).size === ids.length;
+const playlistSounds = z.array(id).max(SOUND_LIMITS.playlistTracks).refine(distinctIds, { message: "a track is listed twice" });
+const runOrder = z.array(id).min(1).max(SOUND_LIMITS.playlistTracks).refine(distinctIds, { message: "a track is listed twice" });
+const soundAtSchema = z.strictObject({ soundId: id, at: soundTime });
+const firedEffectSchema = z
+  .strictObject({ id: playingId, soundId: id.optional(), builtin: z.enum(TRAP_SOUNDS).optional(), at: soundTime })
+  .refine((e) => (e.soundId === undefined) !== (e.builtin === undefined), { message: "an effect is a room effect or a built-in" });
+/** A scene's music and background sounds (Scene.sound): a playlist or one track, and up to 4 loops, or silence. */
+export const sceneSoundSchema = z.strictObject({
+  music: z
+    .strictObject({ playlistId: id.optional(), soundId: id.optional(), repeat: soundRepeat, fade: soundFade, shuffle: z.literal(true).optional() })
+    .refine((m) => (m.playlistId === undefined) !== (m.soundId === undefined), { message: "a scene's music is a playlist or one track" })
+    .nullable(),
+  loops: z
+    .array(z.strictObject({ soundId: id, volume: soundVolume }))
+    .max(SOUND_LIMITS.loops)
+    .refine((loops) => distinctIds(loops.map((l) => l.soundId)), { message: "a background sound is listed twice" }),
+});
+/**
+ * The DM's whole run, as `sys.sound` carries it and the room stores it: the
+ * place of `now` in its order, `next` only while it plays under Repeat all
+ * or off, and a pause's position within its track.
+ */
+export const musicRunSchema = z
+  .strictObject({
+    run: runId,
+    playlistId: id.optional(),
+    order: runOrder,
+    index: z.number().int().min(0).max(SOUND_LIMITS.playlistTracks - 1),
+    repeat: soundRepeat,
+    fade: soundFade,
+    now: soundAtSchema,
+    next: soundAtSchema.optional(),
+    paused: z.number().int().min(0).max(SOUND_LIMITS.fileMaxMs).optional(),
+  })
+  .refine((m) => m.order[m.index] === m.now.soundId, { message: "a run's index names its track" })
+  .refine((m) => m.next === undefined || (m.paused === undefined && m.repeat !== "one"), { message: "only a playing run under Repeat all or off reveals its next track" });
+export const soundSchemas = { soundUse, soundRepeat, soundFade, soundVolume, soundLevel, runId, playingId, soundTime, soundLength, playlistSounds, soundAtSchema, firedEffectSchema };
+
 // The builder's ops a gesture of several may send, which a `build.ask` carries (docs/design/design-v1-map-discovery.md 5.3).
 const buildPaintOp = op("build.paint", { sceneId: id, terrain, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), forget });
 const buildEraseOp = op("build.erase", { sceneId: id, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), forget });
@@ -2124,6 +2182,8 @@ const stateClientOps = [
       suggestedView: z.enum(["topDown", "isometric"]).optional(),
       /** The scene's weather (docs/design/design-v1-weather.md 9.2), refused where weatherProblem says it cannot be. Null removes it. */
       weather: sceneWeatherSchema.nullable().optional(),
+      /** The scene's sound (docs/design/design-v1-sound.md 4.6), the DM's alone. Null removes it, an empty one is silence. */
+      sound: sceneSoundSchema.nullable().optional(),
     }),
   }),
   /**
@@ -2486,6 +2546,50 @@ const stateClientOps = [
   op("clock.set", { at: clockTime }),
   /** `why` marks the party's Long Rest, whose gesture sends the advance first (4.5). */
   op("clock.advance", { by: clockStep, why: z.literal("longRest").optional() }),
+  /**
+   * Synced music and sound (docs/design/design-v1-sound.md 6.2), the DM's
+   * alone. A sound's `ms` is the encoded length its upload checked, which
+   * the server fills from the asset row before the op applies, as it fills
+   * a map's size. Library edits, playlists and a scene's sound are Setup
+   * steps. Uploads, deletes and playback record none.
+   */
+  op("sound.create", { id, assetId: id, name, use: soundUse, level: soundLevel.optional(), ms: soundLength }),
+  op("sound.update", { id, name: name.optional(), use: soundUse.optional() }).refine((o) => o.name !== undefined || o.use !== undefined, { message: "a sound update changes something" }),
+  op("sound.delete", { id }),
+  op("playlist.create", { id, name, sounds: playlistSounds, shuffle: z.literal(true).optional(), repeat: soundRepeat, fade: soundFade }),
+  /** `shuffle: false` removes the stored setting. */
+  op("playlist.update", { id, name: name.optional(), sounds: playlistSounds.optional(), shuffle: z.boolean().optional(), repeat: soundRepeat.optional(), fade: soundFade.optional() }).refine(
+    (o) => o.name !== undefined || o.sounds !== undefined || o.shuffle !== undefined || o.repeat !== undefined || o.fade !== undefined,
+    { message: "a playlist update changes something" },
+  ),
+  op("playlist.delete", { id }),
+  /**
+   * A playlist's tracks or one track from `index` (0 at first) in the order
+   * the DM's device fixed, shuffled or not, which the reducer compares with
+   * the playlist's. `run` is new at each play, skip, resume and scene start.
+   */
+  op("music.play", { run: runId, playlistId: id.optional(), soundId: id.optional(), order: runOrder, index: z.number().int().min(0).max(SOUND_LIMITS.playlistTracks - 1).optional(), repeat: soundRepeat, fade: soundFade })
+    .refine((o) => (o.playlistId === undefined) !== (o.soundId === undefined), { message: "music plays a playlist or one track" })
+    .refine((o) => (o.index ?? 0) < o.order.length, { message: "the first track lies in the order" }),
+  op("music.pause", {}),
+  op("music.resume", { run: runId }),
+  op("music.skip", { run: runId }),
+  op("music.stop", {}),
+  op("music.set", { repeat: soundRepeat.optional(), fade: soundFade.optional() }).refine((o) => o.repeat !== undefined || o.fade !== undefined, { message: "a music change changes something" }),
+  op("loop.start", { id: playingId, soundId: id, volume: soundVolume }),
+  op("loop.set", { id: playingId, volume: soundVolume }),
+  op("loop.stop", { id: playingId }),
+  op("effect.fire", { id: playingId, soundId: id.optional(), builtin: z.enum(TRAP_SOUNDS).optional() }).refine((o) => (o.soundId === undefined) !== (o.builtin === undefined), {
+    message: "an effect is a room effect or a built-in",
+  }),
+  op("sound.mix", { music: soundVolume.optional(), effects: soundVolume.optional() }).refine((o) => o.music !== undefined || o.effects !== undefined, { message: "a mix changes something" }),
+  /**
+   * Plays a scene's sound (4.6): Play it, or with `onMove` the move of the
+   * players there, which applies only while they are still on that scene.
+   * `order` is the scene's playlist in the order the DM's device fixed.
+   */
+  op("sound.scene", { sceneId: id, run: runId, order: z.array(id).max(SOUND_LIMITS.playlistTracks).refine(distinctIds, { message: "a track is listed twice" }), onMove: z.literal(true).optional() }),
+  op("sound.stopAll", {}),
   op("log.chat", { text: longText.min(1) }),
   op("log.whisper", { to: z.array(id).min(1).max(MAX_OWNERS), text: longText.min(1) }),
   op("handout.show", { handout: handoutInput }),
@@ -2733,6 +2837,13 @@ export const serverOnlyOps = [
    * the roller and the tag), and one result per roll, in order, holding
    * every die drawn. The reducer only copies them, so replay never rolls.
    */
+  /**
+   * What the server's tick stores (docs/design/design-v1-sound.md 6.4): the
+   * music as the schedule leaves it, computed from `from`, the `playing.rev`
+   * it read, which the reducer refuses if anything changed since. Empty
+   * `loops` and `effects` stop them too, when the last member has gone.
+   */
+  op("sys.sound", { from: z.number().int().min(0), music: musicRunSchema.nullable(), loops: z.strictObject({}).optional(), effects: z.array(z.never()).max(0).optional() }),
   op("sys.dice", {
     asked: z.discriminatedUnion("t", [diceRollAsked, rollDiceAsked, deathRollAsked, rechargeRollAsked]),
     batch: z.string().regex(/^[A-Za-z0-9_-]{16}$/, "not a batch id"),
@@ -3047,6 +3158,8 @@ export const clientMessageSchema = z.discriminatedUnion("t", [
   z.strictObject({ t: z.literal("eph"), sceneId: id, e: ephEventSchema.refine(withinEphBytes, { message: "ephemeral payload too large" }) }),
   z.strictObject({ t: z.literal("scene"), sceneId: id }),
   z.strictObject({ t: z.literal("ping"), k: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER) }),
+  /** A probe of the server's time (docs/design/design-v1-sound.md 5.1), sent only while sound plays. */
+  z.strictObject({ t: z.literal("time"), k: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER) }),
 ]);
 export type ClientMessage = z.infer<typeof clientMessageSchema>;
 
@@ -3128,6 +3241,13 @@ export const serverMessageSchema = z.discriminatedUnion("t", [
    */
   z.strictObject({ t: z.literal("clock"), at: z.string().max(40) }),
   z.strictObject({ t: z.literal("pong"), k: z.number().int().min(0) }),
+  /**
+   * The answer to a `time` probe: `at` is the server's clock in ms since
+   * 1970, the clock every op's time reads (docs/design/design-v1-sound.md
+   * 5.1). A frame of its own, never a field of `pong`, which an older page's
+   * strict schema would drop and reconnect over.
+   */
+  z.strictObject({ t: z.literal("time"), k: z.number().int().min(0), at: z.number().int().min(0) }),
   z.strictObject({ t: z.literal("resync"), reason: z.string().max(80) }),
   /**
    * DM sockets only: something about getting into the room changed outside

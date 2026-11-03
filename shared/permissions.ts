@@ -58,7 +58,7 @@ import { ownEntry } from "./records.ts";
  * exists. Visibility is decided by the projection itself, never by a second
  * copy of its rules.
  */
-export type AssetKind = "map" | "token" | "handout" | "thumb" | "video";
+export type AssetKind = "map" | "token" | "handout" | "thumb" | "video" | "sound";
 
 /**
  * The `invalid` refusals of an op that sets a map's video
@@ -67,6 +67,8 @@ export type AssetKind = "map" | "token" | "handout" | "thumb" | "video";
  */
 export const VIDEO_SHAPE = "That still isn't the video's shape.";
 export const VIDEO_OFF = "Animated maps are off on this server.";
+/** The `invalid` refusal of an op that names a sound file while the server's ROOM_SOUND switch is off (docs/design/design-v1-sound.md 6.2). */
+export const SOUND_OFF = "This server doesn't offer sound files.";
 /** The `invalid` refusal of a map's video that is not a checked video of this room: deleted since, another room's, or another kind. */
 export const VIDEO_MISSING = "That video isn't in this room any more.";
 
@@ -94,6 +96,14 @@ export type PermissionDeps = {
    * for the switch.
    */
   animatedMaps?: boolean;
+  /**
+   * The server's ROOM_SOUND switch (docs/design/design-v1-sound.md 6.2). Off,
+   * every op that adds, edits or plays a sound file is refused, while stops,
+   * deletes, volumes and the built-in effects still pass. The actor always
+   * passes it. Without it, as in the dev fixture's local server, nothing is
+   * refused for the switch.
+   */
+  roomSound?: boolean;
 };
 
 export type Decision = { ok: true } | { ok: false; code: RefusalCode; message: string };
@@ -255,6 +265,7 @@ function decide(op: Op, actor: Viewer, state: RoomState, deps: PermissionDeps, s
   const decision = actor.role === "dm" ? forDm(op, check) : forPlayer(op, check);
   // After the role's checks, so a player who names a hidden effect hears that it is not there, never what it holds.
   if (!decision.ok) return decision;
+  if (deps.roomSound === false && namesSoundFile(op)) return refuse("invalid", SOUND_OFF);
   if (op.t === "actor.outcome" && op.recharge !== undefined) {
     const recharge = canApply({ t: "actor.use", ...op.recharge }, actor, state, deps);
     if (!recharge.ok) return recharge;
@@ -652,6 +663,13 @@ function forDm(op: Op, c: Check): Decision {
     case "sys.remember":
       // So it writes what players remember (docs/design/design-v1-map-discovery.md 5.3).
       return refuse("forbidden", "the server records what players remember");
+    case "sys.sound":
+      // The actor's tick moves the music on (docs/design/design-v1-sound.md 6.4).
+      return refuse("forbidden", "the server moves the music on");
+    case "sound.create":
+      // A sound is a `sound` asset of this room, an MP3 the server checked (docs/design/design-v1-sound.md 7.1).
+      if (c.deps.roomSound === false) return refuse("invalid", SOUND_OFF);
+      return c.asset(op.assetId, "sound") ? OK : GONE;
     case "member.update":
       return op.memberId === c.actor.memberId ? OK : refuse("forbidden", "members edit only themselves");
     case "token.create":
@@ -755,6 +773,36 @@ function mapVideosUsable(c: Check, places: readonly { widthPx: number; heightPx:
   return OK;
 }
 
+/**
+ * The ops that add, edit or play a sound file, which the server's switch
+ * refuses while off (docs/design/design-v1-sound.md 6.2). Stops, a pause,
+ * deletes, volumes, a playlist's delete, a scene's sound removed and the
+ * built-in effects still pass, so a room can always fall silent and free
+ * its space. While the switch is off nothing that names a file plays,
+ * since the actor stops it as the room loads.
+ */
+function namesSoundFile(op: Op): boolean {
+  switch (op.t) {
+    case "sound.create":
+    case "sound.update":
+    case "playlist.create":
+    case "playlist.update":
+    case "music.play":
+    case "music.resume":
+    case "music.skip":
+    case "music.set":
+    case "loop.start":
+    case "sound.scene":
+      return true;
+    case "effect.fire":
+      return op.soundId !== undefined;
+    case "scene.update":
+      return op.patch.sound !== undefined && op.patch.sound !== null;
+    default:
+      return false;
+  }
+}
+
 /** The refusal of a page private to a DM, who reads every page anyway (docs/design/design-v1-dm-tools.md 3.7). */
 export const PAGE_FOR_A_PLAYER = "a page is private to one player, never to a DM";
 
@@ -855,6 +903,27 @@ function forPlayer(op: Op, c: Check): Decision {
     case "clock.update":
     case "clock.set":
     case "clock.advance":
+    // Sound is the DM's to run: players and displays control nothing (docs/design/design-v1-sound.md 4.1).
+    case "sound.create":
+    case "sound.update":
+    case "sound.delete":
+    case "playlist.create":
+    case "playlist.update":
+    case "playlist.delete":
+    case "music.play":
+    case "music.pause":
+    case "music.resume":
+    case "music.skip":
+    case "music.stop":
+    case "music.set":
+    case "loop.start":
+    case "loop.set":
+    case "loop.stop":
+    case "effect.fire":
+    case "sound.mix":
+    case "sound.scene":
+    case "sound.stopAll":
+    case "sys.sound":
       return FORBIDDEN;
 
     case "token.updateMany": {

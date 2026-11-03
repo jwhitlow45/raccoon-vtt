@@ -17,6 +17,7 @@ import {
   type SightTile,
 } from "./model.ts";
 import type { SaveOutcomeRecord } from "./saveOutcomeContract.ts";
+import type { Playing, Playlist, Sound } from "./sound.ts";
 import { ownEntry } from "./records.ts";
 
 /**
@@ -57,6 +58,9 @@ export type ParsedKey =
   | { kind: "log"; id: string }
   | { kind: "trapLog"; id: string }
   | { kind: "trapSeen"; id: string }
+  /** A sound of the room's library and a playlist (RoomState.sounds, RoomState.playlists, docs/design/design-v1-sound.md 6.1). */
+  | { kind: "sound"; id: string }
+  | { kind: "playlist"; id: string }
   | { kind: "chunk"; sceneId: string; cx: number; cy: number }
   | { kind: "fog"; sceneId: string; tx: number; ty: number }
   | { kind: "explored"; sceneId: string; tx: number; ty: number }
@@ -77,6 +81,8 @@ export type ParsedKey =
   | { kind: "encounterHistory" }
   /** The room's clock (RoomState.clock, docs/design/design-v1-calendar.md 6.1), a singleton like the encounter. */
   | { kind: "clock" }
+  /** What plays now (RoomState.playing), a singleton the server's ticks rewrite. */
+  | { kind: "playing" }
   | { kind: "meta" };
 
 export type EntityKind = ParsedKey["kind"];
@@ -113,6 +119,9 @@ export const keys = {
   /** A line of the DM's trap log, and of the players' (RoomState.trapLog, RoomState.trapSeen). */
   trapLog: (id: string): EntityKey => `trapLog:${id}`,
   trapSeen: (id: string): EntityKey => `trapSeen:${id}`,
+  /** A sound of the room's library (RoomState.sounds) and a playlist (RoomState.playlists). */
+  sound: (id: string): EntityKey => `sound:${id}`,
+  playlist: (id: string): EntityKey => `playlist:${id}`,
   chunk: (sceneId: string, cx: number, cy: number): EntityKey => `chunk:${sceneId}:${cx},${cy}`,
   fog: (sceneId: string, tx: number, ty: number): EntityKey => `fog:${sceneId}:${tx},${ty}`,
   /** A tile of the party's explored layer (RoomState.exploredTiles). */
@@ -145,6 +154,7 @@ export const keys = {
   encounter: "encounter" as EntityKey,
   encounterHistory: "encounterHistory" as EntityKey,
   clock: "clock" as EntityKey,
+  playing: "playing" as EntityKey,
   meta: "meta" as EntityKey,
 };
 
@@ -244,7 +254,7 @@ const GRID_RE = /^(-?\d+),(-?\d+)$/;
 export function parseKey(key: EntityKey): ParsedKey | null {
   const colon = key.indexOf(":");
   if (colon < 0) {
-    if (key === "encounter" || key === "encounterHistory" || key === "clock" || key === "meta") return { kind: key };
+    if (key === "encounter" || key === "encounterHistory" || key === "clock" || key === "playing" || key === "meta") return { kind: key };
     return null;
   }
   const kind = key.slice(0, colon);
@@ -278,6 +288,10 @@ export function parseKey(key: EntityKey): ParsedKey | null {
     case "memoryShared":
       return { kind, id: rest };
     case "saveOutcome":
+      return { kind, id: rest };
+    // Apart from the list above, which TypeScript narrows only up to 25 kinds at once.
+    case "sound":
+    case "playlist":
       return { kind, id: rest };
     case "fogDraft":
     case "holders":
@@ -395,6 +409,10 @@ export function collectionOf(key: EntityKey): keyof RoomState | null {
       return "playedScenes";
     case "memoryShared":
       return "memoryShared";
+    case "sound":
+      return "sounds";
+    case "playlist":
+      return "playlists";
     case "log":
       return "log";
     default:
@@ -484,6 +502,12 @@ export function readEntity(state: RoomState, key: EntityKey): unknown {
       return ownEntry(state.playedScenes, parsed.id) ?? null;
     case "memoryShared":
       return ownEntry(state.memoryShared, parsed.id) ?? null;
+    case "sound":
+      return ownEntry(state.sounds, parsed.id) ?? null;
+    case "playlist":
+      return ownEntry(state.playlists, parsed.id) ?? null;
+    case "playing":
+      return state.playing ?? null;
     case "encounter":
       return state.encounter;
     case "encounterHistory":
@@ -607,6 +631,13 @@ export function writeEntity(state: RoomState, key: EntityKey, value: unknown): R
       return { ...state, playedScenes: withEntry(state.playedScenes ?? {}, parsed.id, value as SceneMark | null) };
     case "memoryShared":
       return { ...state, memoryShared: withEntry(state.memoryShared ?? {}, parsed.id, value as SceneMark | null) };
+    // A room from before sound has neither collection, which reads as empty (docs/design/design-v1-sound.md 6.7).
+    case "sound":
+      return { ...state, sounds: withEntry(state.sounds ?? {}, parsed.id, value as Sound | null) };
+    case "playlist":
+      return { ...state, playlists: withEntry(state.playlists ?? {}, parsed.id, value as Playlist | null) };
+    case "playing":
+      return { ...state, playing: (value as Playing | null) ?? null };
     case "log":
       return { ...state, log: withLine(state.log, parsed.id, value as LogEntry | null) };
     case "encounter":

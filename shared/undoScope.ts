@@ -103,6 +103,27 @@ export const UNDO_SCOPE_BY_OP = {
   "clock.update": "setup",
   "clock.set": "play",
   "clock.advance": "play",
+  // Synced music and sound (docs/design/design-v1-sound.md 6.6): library edits and playlists are setup. An upload, a delete
+  // and playback record no step and clear neither Redo (D-261102-471). A scene's sound is setup through `scene.update`.
+  "sound.create": "none",
+  "sound.update": "setup",
+  "sound.delete": "none",
+  "playlist.create": "setup",
+  "playlist.update": "setup",
+  "playlist.delete": "setup",
+  "music.play": "none",
+  "music.pause": "none",
+  "music.resume": "none",
+  "music.skip": "none",
+  "music.stop": "none",
+  "music.set": "none",
+  "loop.start": "none",
+  "loop.set": "none",
+  "loop.stop": "none",
+  "effect.fire": "none",
+  "sound.mix": "none",
+  "sound.scene": "none",
+  "sound.stopAll": "none",
   "log.chat": "none",
   "log.whisper": "none",
   "handout.show": "play",
@@ -135,6 +156,7 @@ export const UNDO_SCOPE_BY_OP = {
   "sys.explore": "none",
   "sys.remember": "none",
   "sys.dice": "none",
+  "sys.sound": "none",
 } as const satisfies Record<Op["t"], UndoScope | "fields">;
 
 const PLAY_TOKEN_FIELDS = new Set([

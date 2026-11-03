@@ -63,6 +63,7 @@ import { imageAssetId } from "./imageRef.ts";
 import { inLiveLog, lineAudience, liveStart, neverRead } from "./logRings.ts";
 import { clipsByHeldWalls, revealSeenAnywhere } from "./migrate.ts";
 import type { Change } from "./protocol.ts";
+import { lengthAs, type FiredEffect, type MusicRun, type Playing, type Playlist, type Sound, type SoundId } from "./sound.ts";
 import type { Env } from "./reducer/tx.ts";
 import { isWritable } from "./writable.ts";
 import { autoWallBetween, autoWallsOf, paintedAt } from "./rules/autoWalls.ts";
@@ -4051,9 +4052,104 @@ function projectEntityCtx(ctx: Ctx, key: EntityKey): unknown {
       return projectHistoryCtx(ctx);
     case "clock":
       return projectClockCtx(ctx);
+    case "sound":
+      return value ? projectSoundCtx(ctx, value as Sound) : null;
+    case "playlist":
+      return ctx.viewer.role === "dm" ? value : null;
+    case "playing":
+      return projectPlayingCtx(ctx);
     case "meta":
       return projectMetaCtx(ctx);
   }
+}
+
+/*
+ * Synced music and sound (docs/design/design-v1-sound.md 6.5). The DM gets
+ * the library, the playlists and what plays whole. A player, a table
+ * display and a View as preview get only what sounds now: the music's
+ * `now` and its `next` once revealed, the loops, and the effects fired in
+ * the open whose sounds are still Effects, each sound cut to what playing
+ * it needs, and a name only for `now` and the loops while the DM turns on
+ * Players see what is playing. Never the library, a playlist, the run's
+ * order, its place in it or a pause's position, a scene's sound, an effect
+ * fired behind a blackout, an effect's name, or the next track's name.
+ * Behind a blackout, nothing. Each revision is 0, so a count of the DM's
+ * changes never shows. The projection reads no clock: the server's ticks
+ * write what plays.
+ */
+
+/** The run as players get it: what plays and how, with no order, place or label, and nothing while paused. */
+function playersMusic(state: RoomState, music: MusicRun | null): MusicRun | null {
+  if (music === null || music.paused !== undefined) return null;
+  const sounds = state.sounds;
+  if (lengthAs(sounds, music.now.soundId, "music") === undefined) return null;
+  const next = music.next !== undefined && lengthAs(sounds, music.next.soundId, "music") !== undefined ? music.next : undefined;
+  return { run: music.run, repeat: music.repeat, fade: music.fade, now: music.now, ...(next ? { next } : {}) };
+}
+
+/** What plays as players get it, or null behind a blackout and when nothing does. */
+function playersPlaying(ctx: Ctx): Playing | null {
+  const playing = ctx.state.playing;
+  if (!playing || ctx.paused) return null;
+  const sounds = ctx.state.sounds;
+  const loops: Playing["loops"] = {};
+  for (const [id, loop] of Object.entries(playing.loops)) if (lengthAs(sounds, loop.soundId, "loop") !== undefined) loops[id] = loop;
+  // An entry whose sound is gone or now has another use is history: it stops wherever it sounds (6.3).
+  const effects = playing.effects.filter((e: FiredEffect) => e.builtin !== undefined || (e.soundId !== undefined && lengthAs(sounds, e.soundId, "effect") !== undefined));
+  return { rev: 0, music: playersMusic(ctx.state, playing.music), loops, effects, volume: playing.volume };
+}
+
+function projectPlayingCtx(ctx: Ctx): Playing | null {
+  if (ctx.viewer.role === "dm") return ctx.state.playing ?? null;
+  return playersPlaying(ctx);
+}
+
+/** The sounds a player's projection names, each with whether its name goes too. */
+function soundsNamed(ctx: Ctx): Map<SoundId, boolean> {
+  const out = new Map<SoundId, boolean>();
+  const playing = playersPlaying(ctx);
+  if (!playing) return out;
+  const names = ctx.state.meta.settings.soundNames === true;
+  if (playing.music) {
+    out.set(playing.music.now.soundId, names);
+    if (playing.music.next && !out.has(playing.music.next.soundId)) out.set(playing.music.next.soundId, false);
+  }
+  for (const loop of Object.values(playing.loops)) out.set(loop.soundId, names);
+  for (const effect of playing.effects) if (effect.soundId !== undefined && !out.has(effect.soundId)) out.set(effect.soundId, false);
+  return out;
+}
+
+function projectSoundCtx(ctx: Ctx, sound: Sound): Sound | null {
+  if (ctx.viewer.role === "dm") return sound;
+  const named = soundsNamed(ctx).get(sound.id);
+  return named === undefined ? null : playersSound(sound, named);
+}
+
+/** A sound cut to what playing it needs, its name only when the DM shares it. */
+function playersSound(sound: Sound, named: boolean): Sound {
+  const out: Sound = { id: sound.id, rev: 0, assetId: sound.assetId, ms: sound.ms, use: sound.use };
+  if (sound.level !== undefined) out.level = sound.level;
+  if (named && sound.name !== undefined) out.name = sound.name;
+  return out;
+}
+
+/** The library, the playlists and what plays as fields of a projection, each only while it holds something, so a room without sound projects as it always did. */
+function soundFields(ctx: Ctx): Pick<ProjectedState, "sounds" | "playlists" | "playing"> {
+  const out: Pick<ProjectedState, "sounds" | "playlists" | "playing"> = {};
+  const playing = projectPlayingCtx(ctx);
+  if (playing) out.playing = playing;
+  if (ctx.viewer.role === "dm") {
+    if (ctx.state.sounds && Object.keys(ctx.state.sounds).length > 0) out.sounds = ctx.state.sounds;
+    if (ctx.state.playlists && Object.keys(ctx.state.playlists).length > 0) out.playlists = ctx.state.playlists as Record<string, Playlist>;
+    return out;
+  }
+  const sounds: Record<SoundId, Sound> = {};
+  for (const [id, named] of soundsNamed(ctx)) {
+    const sound = Object.hasOwn(ctx.state.sounds ?? {}, id) ? ctx.state.sounds![id] : undefined;
+    if (sound) sounds[id] = playersSound(sound, named);
+  }
+  if (Object.keys(sounds).length > 0) out.sounds = sounds;
+  return out;
 }
 
 /**
@@ -4125,6 +4221,7 @@ function projectStateCtx(ctx: Ctx): ProjectedState {
     sight: sightTilesCtx(ctx),
     ...perPlayerMapsCtx(ctx),
     ...clockField(ctx),
+    ...soundFields(ctx),
   };
 }
 
@@ -4192,7 +4289,9 @@ function projectFogTilesCtx(ctx: Ctx): Record<string, FogTile> {
 
 /** Every entity key a projection may hold, so a global re-projection can be compared with a held map. */
 export function allKeys(state: RoomState): EntityKey[] {
-  const out: EntityKey[] = [keys.meta, keys.encounter, keys.encounterHistory, keys.clock];
+  const out: EntityKey[] = [keys.meta, keys.encounter, keys.encounterHistory, keys.clock, keys.playing];
+  for (const id of Object.keys(state.sounds ?? {})) out.push(keys.sound(id));
+  for (const id of Object.keys(state.playlists ?? {})) out.push(keys.playlist(id));
   for (const id of Object.keys(state.members)) out.push(keys.member(id));
   for (const id of Object.keys(state.scenes)) out.push(keys.scene(id));
   for (const c of Object.values(state.buildChunks)) out.push(keys.chunk(c.sceneId, c.cx, c.cy));
@@ -4402,6 +4501,7 @@ export function dependents(state: RoomState, touched: EntityKey[], other?: RoomS
     const scene = ownEntry(state.scenes, sceneId);
     if (scene && heldHex(sceneId)) for (const { cx, cy } of readingTile(scene, tx, ty)) wallChunks.push({ sceneId, cx, cy });
   };
+  soundDependents(state, touched, add);
   for (const key of touched) {
     const parsed = parseKey(key);
     if (!parsed) continue;
@@ -4571,6 +4671,36 @@ export function dependents(state: RoomState, touched: EntityKey[], other?: RoomS
     for (const entry of state.trapSeen ?? []) if (entry.data?.type === "trapSeen" && entry.data.by.some((id) => tokenIds.has(id))) add(keys.trapSeen(entry.id));
   }
   return out;
+}
+
+/**
+ * What a change of sound re-projects for players (docs/design/design-v1-sound.md
+ * 6.5). The fan-out asks with each side of a batch, so the sounds a write
+ * of `playing` names before and after both go again: a newly named sound
+ * arrives in the same batch, and one no longer named leaves. A sound whose
+ * use changed, by its op, an Undo or a Redo, re-projects `playing` while
+ * either effect list names it, so its entry leaves players' lists, and
+ * its voice stops, in that batch (MSOL-38). Names follow `soundNames`, a
+ * setting, whose change re-projects everything (Tx global).
+ */
+function soundDependents(state: RoomState, touched: readonly EntityKey[], add: (key: EntityKey) => void): void {
+  const playing = state.playing;
+  if (!playing) return;
+  let sounds: Set<SoundId> | null = null;
+  for (const key of touched) {
+    if (key === keys.playing) {
+      if (playing.music) {
+        add(keys.sound(playing.music.now.soundId));
+        if (playing.music.next) add(keys.sound(playing.music.next.soundId));
+      }
+      for (const loop of Object.values(playing.loops)) add(keys.sound(loop.soundId));
+      for (const effect of [...playing.effects, ...(playing.dmEffects ?? [])]) if (effect.soundId !== undefined) add(keys.sound(effect.soundId));
+      continue;
+    }
+    if (!key.startsWith("sound:")) continue;
+    sounds ??= new Set([...playing.effects, ...(playing.dmEffects ?? [])].flatMap((e) => (e.soundId !== undefined ? [e.soundId] : [])));
+    if (sounds.has(key.slice("sound:".length))) add(keys.playing);
+  }
 }
 
 /**
@@ -4768,6 +4898,9 @@ export function visibleAssetIds(state: RoomState, viewer: Viewer, opts: ProjectO
   for (const entry of Object.values(projected.srdImages)) addImage(entry.image);
   // A companion block's picture reaches the DM and the character's owners, the block's readers, and no one else.
   for (const block of Object.values(projected.companionBlocks)) addImage(block.defaultImage);
+  // A player meets only the files of what sounds now, the next track and the effects in the open list, and the DM every
+  // sound of the library (docs/design/design-v1-sound.md 6.5). The asset routes serve no sound while the switch is off.
+  for (const sound of Object.values(projected.sounds ?? {})) ids.add(sound.assetId);
   if (viewer.role === "dm") {
     // The DM may use every asset of the room, scenes it is not viewing included, every phase and thumbnail with them.
     for (const scene of Object.values(state.scenes)) {
