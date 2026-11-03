@@ -5,13 +5,12 @@ import type { MapVideo } from "#shared/model.ts";
 import {
   boardVideoStatus,
   decoderLeases,
-  judgeVideo,
   leaseDecoder,
   MOVING,
-  provideVideoJudge,
   resetDecoderForTests,
   resetServerAnimatedMapsForTests,
   serverAnimatedMaps,
+  serverAnimatedMapsNow,
   stillFor,
   type DecoderLease,
   type DecoderUser,
@@ -34,19 +33,6 @@ describe("the board's live status", () => {
     status.set(null);
     assert.equal(heard, 4);
     assert.equal(status.get(), null);
-  });
-});
-
-describe("the device's judgment", () => {
-  test("a question asked before the board provides a judge waits for it, and the latest judge answers", async () => {
-    const early = judgeVideo(VIDEO);
-    const withdraw = provideVideoJudge(async () => stillFor("phoneSize"));
-    assert.deepEqual(await early, stillFor("phoneSize"));
-    const withdrawLater = provideVideoJudge(async () => MOVING);
-    assert.deepEqual(await judgeVideo(VIDEO), MOVING);
-    withdrawLater();
-    assert.deepEqual(await judgeVideo(VIDEO), stillFor("phoneSize"));
-    withdraw();
   });
 });
 
@@ -79,6 +65,14 @@ describe("the server's switch", () => {
     resetServerAnimatedMapsForTests();
     answer({ turnstileSiteKey: null, searchEnabled: true });
     assert.equal(await serverAnimatedMaps(), false);
+  });
+
+  test("unknown until the server answers, then on or off", async () => {
+    resetServerAnimatedMapsForTests();
+    assert.equal(serverAnimatedMapsNow(), null);
+    answer({ animatedMaps: true });
+    await serverAnimatedMaps();
+    assert.equal(serverAnimatedMapsNow(), true);
   });
 
   test("a failed read is off, and asked again next time", async () => {

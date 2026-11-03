@@ -90,19 +90,43 @@ function browserEnv(): CapabilityEnv {
 }
 
 const asked = new Map<string, Promise<Decodable>>();
+/** The answers that have come, for a render that reads them at once. */
+const settled = new Map<string, Decodable>();
+const settledListeners = new Set<() => void>();
+
+/** The question for one file: its facts, and whether Phone size asks for power-efficient decoding. */
+export function decodableKey(video: Facts, powerEfficient: boolean): string {
+  return `${playType(video)}|${video.widthPx}x${video.heightPx}|${video.fps}|${video.kbps}|${video.audioChannels ?? ""}|${video.audioHz ?? ""}|${powerEfficient ? "efficient" : "any"}`;
+}
 
 /** The browser's answer for a file, asked once a page for each file and each question. */
 export function decodable(video: Facts, powerEfficient: boolean, env?: CapabilityEnv): Promise<Decodable> {
-  const key = `${playType(video)}|${video.widthPx}x${video.heightPx}|${video.fps}|${video.kbps}|${video.audioChannels ?? ""}|${video.audioHz ?? ""}|${powerEfficient ? "efficient" : "any"}`;
+  const key = decodableKey(video, powerEfficient);
   let answer = asked.get(key);
   if (!answer) {
-    answer = askBrowser(video, powerEfficient, env ?? browserEnv());
+    answer = askBrowser(video, powerEfficient, env ?? browserEnv()).then((value) => {
+      settled.set(key, value);
+      for (const listener of [...settledListeners]) listener();
+      return value;
+    });
     asked.set(key, answer);
   }
   return answer;
 }
 
+/** The answer for a file once it has come, else undefined. */
+export function settledDecodable(video: Facts, powerEfficient: boolean): Decodable | undefined {
+  return settled.get(decodableKey(video, powerEfficient));
+}
+
+/** Hears each answer as it comes. */
+export function subscribeDecodable(listener: () => void): () => void {
+  settledListeners.add(listener);
+  return () => settledListeners.delete(listener);
+}
+
 /** Forgets every answer, so a test can ask again. */
 export function forgetCapabilitiesForTests(): void {
   asked.clear();
+  settled.clear();
 }

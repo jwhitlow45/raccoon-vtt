@@ -133,7 +133,7 @@ export type BoardShown = { element: VideoLike | null; assetId: AssetId | null; h
 /**
  * The step-down lasts until the page reloads and speaks for the device
  * (words.ts deviceStillHelp), so it is one value for the page: a board
- * that falls behind stills every board and the judge's answers too.
+ * that falls behind stills every board and every Library viewer's line too.
  */
 let pageStepDown: StepResult | null = null;
 const stepDownListeners = new Set<() => void>();
@@ -295,11 +295,6 @@ export class AnimMapBoard {
     this.#settle();
   }
 
-  /** The map size this device loads now, for the judge's question. */
-  get variant(): "full" | "mobile" {
-    return this.#input.variant;
-  }
-
   get shown(): BoardShown {
     return this.#shown;
   }
@@ -317,11 +312,6 @@ export class AnimMapBoard {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
   };
-
-  /** The playback rule for any video, as this board would apply it now, for the judge the Map image row and the Library viewer ask. */
-  judge(video: MapVideo, answer: Decodable): Playback {
-    return playback(video, this.#ruleInput(answer, false));
-  }
 
   /**
    * Lets everything go: the source, the lease, the loops, the status and the

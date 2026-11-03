@@ -6,9 +6,8 @@ import { scopeSlot, useScopedIfAny } from "../../state/scope.ts";
 /**
  * What animated maps share between the board, the DM's Map image row and the
  * Library viewer (docs/design/design-v1-animated-maps.md 5.2 and 5.3): why a
- * device shows a still, the board's live status, the device's judgment of a
- * video it is not playing, the server's switch, and the one decoder a window
- * lets a video hold.
+ * device shows a still, the board's live status, the server's switch, and
+ * the one decoder a window lets a video hold.
  */
 
 // ---------------------------------------------------------------- why a device shows the still
@@ -110,53 +109,16 @@ export function useBoardVideo(): BoardVideo {
   return useSyncExternalStore(status.subscribe, status.get, status.get);
 }
 
-// ---------------------------------------------------------------- the device's judgment of any video
-
-/**
- * The device's playback rule (5.3) for one video, as the board would apply
- * it now. The board's lane provides it, and the Map image row and the
- * Library viewer ask it about a video the board is not playing.
- */
-export type VideoJudge = (video: MapVideo) => Promise<Playback>;
-
-const judges: VideoJudge[] = [];
-let judgeArrived: (() => void) | null = null;
-let nextJudge: Promise<void> | null = null;
-
-/** Makes `judge` the one judgeVideo asks, until the returned function withdraws it. The latest provided wins. */
-export function provideVideoJudge(judge: VideoJudge): () => void {
-  judges.push(judge);
-  judgeArrived?.();
-  judgeArrived = null;
-  nextJudge = null;
-  return () => {
-    const at = judges.lastIndexOf(judge);
-    if (at >= 0) judges.splice(at, 1);
-  };
-}
-
-/**
- * The device's playback for a video. Every Room mounts the board's
- * controller, which provides the judge, so a question asked before it
- * mounts waits for it rather than guessing.
- */
-export async function judgeVideo(video: MapVideo): Promise<Playback> {
-  while (judges.length === 0) {
-    nextJudge ??= new Promise<void>((resolve) => (judgeArrived = resolve));
-    await nextJudge;
-  }
-  return judges[judges.length - 1]!(video);
-}
-
 // ---------------------------------------------------------------- the server's switch
 
-const serverSwitch = new Value<boolean>(false);
+/** The server's switch: null until GET /api/config answers. */
+const serverSwitch = new Value<boolean | null>(null);
 let serverAsked: Promise<boolean> | null = null;
 
 /**
  * Whether the server's owner turned animated maps on (ANIMATED_MAPS, from GET
  * /api/config). Read once a page load. A failed read counts as off, the safe
- * answer, and is tried again next time.
+ * answer, and is tried again by the next reader.
  */
 export function serverAnimatedMaps(): Promise<boolean> {
   serverAsked ??= api.getConfig().then(
@@ -167,6 +129,7 @@ export function serverAnimatedMaps(): Promise<boolean> {
     },
     () => {
       serverAsked = null;
+      serverSwitch.set(false);
       return false;
     },
   );
@@ -178,15 +141,25 @@ function subscribeServerSwitch(listener: () => void): () => void {
   return serverSwitch.subscribe(listener);
 }
 
+const serverOn = () => serverSwitch.get() === true;
+
+/** The server's switch now, or null until it is known. */
+export const serverAnimatedMapsNow = (): boolean | null => serverSwitch.get();
+
 /** The server's switch, false until it is known. The first reader asks the server. */
 export function useServerAnimatedMaps(): boolean {
+  return useSyncExternalStore(subscribeServerSwitch, serverOn, serverOn);
+}
+
+/** The server's switch, or null until the server answers, for a line that should wait rather than say off. */
+export function useServerAnimatedMapsKnown(): boolean | null {
   return useSyncExternalStore(subscribeServerSwitch, serverSwitch.get, serverSwitch.get);
 }
 
 /** Forgets the switch, so a test can answer again. */
 export function resetServerAnimatedMapsForTests(): void {
   serverAsked = null;
-  serverSwitch.set(false);
+  serverSwitch.set(null);
 }
 
 // ---------------------------------------------------------------- one decoder per window

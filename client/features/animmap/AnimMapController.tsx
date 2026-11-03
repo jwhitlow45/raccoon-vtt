@@ -13,16 +13,15 @@ import type { ControllerProps } from "../layers.ts";
 import { topDownTool } from "../view/choice.ts";
 import { useCoveredByPreview, usePageVisible, useReducedMotion } from "../weather/store.ts";
 import { animMapSlot, connectBoard, pageSteppedDown, subscribePageStepDown, type AnimMapBoard, type BoardShown, type LayerLike, type VideoLike } from "./board.ts";
-import { decodable } from "./capabilities.ts";
-import { boardVideoSlot, provideVideoJudge, useServerAnimatedMaps, type StillReason } from "./status.ts";
+import { boardVideoSlot, useServerAnimatedMaps, type StillReason } from "./status.ts";
 
 /**
  * Animated maps' controller (docs/design/design-v1-animated-maps.md 5.2),
  * mounted once outside both drawing trees (features/layers.ts CONTROLLERS),
  * beside the weather's. It draws nothing: it tells the room's board
- * (board.ts) what decides its video, passes the board's status on to the
- * Map image row (status.ts boardVideoSlot), and answers the device's
- * playback rule for any video (status.ts provideVideoJudge).
+ * (board.ts) what decides its video, and passes the board's status on to
+ * the Map image row (status.ts boardVideoSlot). The rule for any other
+ * video is read where it is shown (useVideoPlayback.ts).
  */
 export function AnimMapController(props: ControllerProps) {
   const board = useScoped(animMapSlot);
@@ -48,9 +47,6 @@ export function AnimMapController(props: ControllerProps) {
   useLayoutEffect(() => {
     board.input({ video, url, server, setting, lowPower, reducedMotion, variant, iso, setupTool, pageVisible, panelCovered, preview, loading });
   }, [board, video, url, server, setting, lowPower, reducedMotion, variant, iso, setupTool, pageVisible, panelCovered, preview, loading]);
-
-  // The rule for a video the board is not playing: the Map image row's other phases and the Library viewer (status.ts judgeVideo).
-  useEffect(() => provideVideoJudge(async (v) => board.judge(v, await decodable(v, board.variant === "mobile"))), [board]);
   return null;
 }
 
