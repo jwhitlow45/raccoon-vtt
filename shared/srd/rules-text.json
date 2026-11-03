@@ -142,5 +142,32 @@
       "source": "Rules Glossary, action",
       "text": "You take the Ready action to wait for a particular circumstance before you act. To do so, you take this action on your turn, which lets you act by taking a Reaction before the start of your next turn.\n\nFirst, you decide what perceivable circumstance will trigger your Reaction. Then, you choose the action you will take in response to that trigger, or you choose to move up to your Speed in response to it. Examples include “If the cultist steps on the trapdoor, I’ll pull the lever that opens it,” and “If the zombie steps next to me, I move away.”\n\nWhen the trigger occurs, you can either take your Reaction right after the trigger finishes or ignore the trigger.\n\nWhen you Ready a spell, you cast it as normal (expending any resources used to cast it) but hold its energy, which you release with your Reaction when the trigger occurs. To be readied, a spell must have a casting time of an action, and holding on to the spell’s magic requires Concentration, which you can maintain up to the start of your next turn. If your Concentration is broken, the spell dissipates without taking effect."
     }
+  },
+  "environment": {
+    "obscured-areas": {
+      "title": "Obscured Areas",
+      "source": "Playing the Game, Vision and Light",
+      "text": "An area might be Lightly or Heavily Obscured. In a Lightly Obscured area, such as an area with Dim Light, patchy fog, or moderate foliage, you have Disadvantage on Wisdom (Perception) checks that rely on sight.\n\nA Heavily Obscured area, such as an area with Darkness, heavy fog, or dense foliage, is opaque. You have the Blinded condition (see “Rules Glossary”) when trying to see something there."
+    },
+    "heavy-precipitation": {
+      "title": "Heavy Precipitation",
+      "source": "Gameplay Toolbox, Environmental Effects",
+      "text": "Everything within an area of heavy rain or heavy snowfall is Lightly Obscured, and creatures in the area have Disadvantage on all Wisdom (Perception) checks. Heavy rain also extinguishes open flames."
+    },
+    "strong-wind": {
+      "title": "Strong Wind",
+      "source": "Gameplay Toolbox, Environmental Effects",
+      "text": "Strong wind imposes Disadvantage on ranged attack rolls with weapons. It also extinguishes open flames and disperses fog. A flying creature in a strong wind must land at the end of its turn or fall.\n\nA strong wind in a desert can create a sandstorm that imposes Disadvantage on Wisdom (Perception) checks."
+    },
+    "ranged-weapons": {
+      "title": "Ranged Weapons",
+      "source": "Equipment, Weapons",
+      "text": "- Dart\n- Light Crossbow\n- Shortbow\n- Sling\n- Blowgun\n- Hand Crossbow\n- Heavy Crossbow\n- Longbow\n- Musket\n- Pistol"
+    },
+    "thrown-weapons": {
+      "title": "Melee Weapons with the Thrown Property",
+      "source": "Equipment, Weapons",
+      "text": "- Dagger\n- Handaxe\n- Javelin\n- Light Hammer\n- Spear\n- Trident"
+    }
   }
 }

@@ -1,7 +1,9 @@
 import type { D20Test } from "../dice/bonus.ts";
 import type { AdvantageSource } from "../dice/formula.ts";
 import type { AbilityKey, ConditionKey, Effect, RollTest, StatusKey } from "../model.ts";
+import type { SceneWeather } from "../weather.ts";
 import { INCAPACITATING_KEYS } from "./hp.ts";
+import { weatherPreset, weatherReminders, type WeatherRuleKey } from "./weather.ts";
 
 /**
  * What a creature's conditions and statuses do to a d20 roll
@@ -21,12 +23,16 @@ import { INCAPACITATING_KEYS } from "./hp.ts";
  * that every quote is in its rule's text, so a rule never says more than
  * the SRD. An effect the DM hid is not in the player's data, so it never
  * shows there.
+ *
+ * The weather of the scene a creature stands on adds its own rules
+ * (shared/rules/weather.ts), after the effects', keyed by the weather they
+ * come from.
  */
-export type RollReminder = { key: ConditionKey | StatusKey; text: string };
+export type RollReminder = { key: ConditionKey | StatusKey | WeatherRuleKey; text: string };
 
 /** What a creature's effects give one roll: sources for the cancel rule (docs/design/design-v1-dice.md 3.3), never a resolved mode. */
 export type RollPreset = {
-  /** `from` is the effect's key, "magic-resistance", or "tracker" for the DM's mark on an initiative row. */
+  /** `from` is the effect's key, "magic-resistance", "tracker" for the DM's mark on an initiative row, or a weather rule's key (WEATHER_RULE_NAMES). */
   sources: AdvantageSource[];
   /** Terms to add, in the table's order: "+1d4", "-4". */
   extra: string[];
@@ -326,9 +332,10 @@ function choiceTest(kind: RollTest["kind"], choice: RollTest["choices"][number])
  * `choice`, only that one of the test's choices counts, as on a card where
  * the player picked which one they rolled. Otherwise any choice the request
  * offers does. Each rule shows once, even for an effect held twice, and a
- * rule its own exception ends shows none.
+ * rule its own exception ends shows none. `weather` is that of the scene the
+ * creature stands on, if any (docs/design/design-v1-weather.md 2).
  */
-export function rollReminders(effects: readonly Pick<Effect, "key" | "level">[], test: RollTest, choice?: number): RollReminder[] {
+export function rollReminders(effects: readonly Pick<Effect, "key" | "level">[], test: RollTest, choice?: number, weather?: SceneWeather | null): RollReminder[] {
   const choices = choice === undefined ? test.choices : test.choices.slice(choice, choice + 1);
   const out: RollReminder[] = [];
   for (const rule of ROLL_REMINDER_RULES) {
@@ -338,6 +345,7 @@ export function rollReminders(effects: readonly Pick<Effect, "key" | "level">[],
     if (!asked || out.some((r) => r.key === rule.key)) continue;
     out.push({ key: rule.key, text: rule.text(effect, asked) });
   }
+  out.push(...weatherReminders(weather, choices.map((c) => choiceTest(test.kind, c))));
   return out;
 }
 
@@ -349,8 +357,15 @@ export function rollReminders(effects: readonly Pick<Effect, "key" | "level">[],
  * Magic Resistance makes with advantage. On initiative, `mark` is the DM's
  * reminder on the creature's row, which replaces the tracker's hint
  * (Invisible, Surprised, Incapacitated) and keeps Poisoned and Exhaustion.
+ * `weather` is that of the scene the creature stands on, if any
+ * (docs/design/design-v1-weather.md 2): its Disadvantage joins the sources
+ * and its notes the notes, after the effects'.
  */
-export function reminderPreset(effects: readonly Pick<Effect, "key" | "level">[], test: D20Test, ctx: { magicResistance?: boolean; mark?: "adv" | "dis" } = {}): RollPreset {
+export function reminderPreset(
+  effects: readonly Pick<Effect, "key" | "level">[],
+  test: D20Test,
+  ctx: { magicResistance?: boolean; mark?: "adv" | "dis"; weather?: SceneWeather | null } = {},
+): RollPreset {
   const out: RollPreset = { sources: [], extra: [], notes: [] };
   const marked = test.kind === "initiative" && ctx.mark !== undefined;
   if (marked) out.sources.push({ kind: ctx.mark!, from: "tracker" });
@@ -367,6 +382,9 @@ export function reminderPreset(effects: readonly Pick<Effect, "key" | "level">[]
     if (does.kind === "note" || rule.noted) out.notes.push({ key: rule.key, text: rule.text(effect, test) });
   }
   if (ctx.magicResistance && test.kind === "save" && test.spell) out.sources.push({ kind: "adv", from: "magic-resistance" });
+  const weather = weatherPreset(ctx.weather, test);
+  out.sources.push(...weather.sources);
+  out.notes.push(...weather.notes);
   return out;
 }
 

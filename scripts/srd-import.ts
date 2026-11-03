@@ -6,7 +6,7 @@ import type { AreaSpell } from "../shared/srd/area-spells.ts";
 import type { SaveSpell } from "../shared/srd/save-spells.ts";
 import type { SrdMonster } from "../shared/srd/monsters.ts";
 import { srdRollsOf } from "../shared/srd/rolls.ts";
-import type { RulesText, RulesTextEntry } from "../shared/srd/rules-text.ts";
+import type { EnvironmentKey, RulesText, RulesTextEntry } from "../shared/srd/rules-text.ts";
 import type { XpBudgetRow } from "../shared/srd/xp-budget.ts";
 import { trapPresetFacts } from "../shared/srd/traps.ts";
 
@@ -15,7 +15,7 @@ import { trapPresetFacts } from "../shared/srd/traps.ts";
  * monsters.json (every stat block), area-spells.json (spell presets for area
  * templates), save-spells.json (what a pass takes for each spell that deals
  * damage on a save), rules-text.json (the conditions and the statuses the SRD
- * defines) and xp-budget.json (the encounter XP budget per character). It
+ * defines, and the environment rules and weapon lists weather's rolls rest on) and xp-budget.json (the encounter XP budget per character). It
  * also checks the Trap tool's presets (shared/srd/traps.ts), which are
  * written by hand, against the SRD's example traps. The hand-written parts, such as summaries and colors, live in
  * conditions.ts and statuses.ts and are never touched here. rolls.json (each
@@ -234,6 +234,9 @@ const EM_DASH_FIXES: [string, string][] = [
   ["Piercing damage\u2014or 12 (2d8 + 3) Piercing damage if the target is Grappled by the mimic\u2014plus 4 (1d8)", "Piercing damage (or 12 (2d8 + 3) Piercing damage if the target is Grappled by the mimic) plus 4 (1d8)"],
   ["metal object\u2014armor or a weapon\u2014worn or carried", "metal object (armor or a weapon) worn or carried"],
   ["Piercing damage\u2014or 6 (1d4 + 4) Piercing damage if the swarm is Bloodied\u2014plus 10 (3d6) Poison damage", "Piercing damage (or 6 (1d4 + 4) Piercing damage if the swarm is Bloodied) plus 10 (3d6) Poison damage"],
+  // Environment (Obscured Areas)
+  ["Lightly Obscured area\u2014such as an area with Dim Light, patchy fog, or moderate foliage\u2014you have", "Lightly Obscured area, such as an area with Dim Light, patchy fog, or moderate foliage, you have"],
+  ["Heavily Obscured area\u2014such as an area with Darkness, heavy fog, or dense foliage\u2014is opaque", "Heavily Obscured area, such as an area with Darkness, heavy fog, or dense foliage, is opaque"],
 ];
 
 function fixEmDashes(s: string): string {
@@ -1343,6 +1346,54 @@ function spellNamed(spells: readonly Spell[], name: string): Spell {
   return spell;
 }
 
+/** The lines under a heading on its page, up to the next heading named. */
+function sectionLines(lines: readonly Line[], page: number, heading: string, next: string): Line[] {
+  const at = findLine(lines, 0, (l) => l.page === page && l.text === heading, `${heading} on page ${page}`);
+  const end = findLine(lines, at + 1, (l) => l.text === next, `${next} after ${heading}`);
+  return lines.slice(at + 1, end);
+}
+
+/** A row of the Weapons table: its name, then its damage and type, then its properties and the rest. */
+const WEAPON_ROW = /^(.+?) (\d+(?:d\d+)?) (?:Bludgeoning|Piercing|Slashing)\b(.*)$/;
+
+/** The names of the weapons in one group of the Weapons table, those whose row passes `keep`. A wrapped row's later lines name no weapon. */
+function weaponNames(lines: readonly Line[], group: string, next: string, keep: (rest: string) => boolean = () => true): string[] {
+  const out: string[] = [];
+  for (const line of sectionLines(lines, 91, group, next)) {
+    const row = WEAPON_ROW.exec(line.text);
+    if (row && keep(row[3]!)) out.push(row[1]!);
+  }
+  if (out.length === 0) throw new Error(`no weapons in ${group}`);
+  return out;
+}
+
+/**
+ * What weather's roll rules rest on (docs/design/design-v1-weather.md 2): the
+ * obscured areas, heavy precipitation and strong wind, and which weapons are
+ * ranged or thrown, so a stat block's "Ranged Attack Roll" counts as a weapon
+ * only by its name.
+ */
+function environmentText(lines: readonly Line[]): RulesText["environment"] {
+  const prose = (page: number, heading: string, next: string) => proseMarkdown(toParagraphs(sectionLines(lines, page, heading, next)));
+  const list = (names: readonly string[]) => names.map((n) => `- ${escapeMd(n)}`).join("\n");
+  const thrown = (rest: string) => /\bThrown\b/.test(rest);
+  return {
+    "obscured-areas": { title: "Obscured Areas", source: "Playing the Game, Vision and Light", text: prose(11, "Obscured Areas", "Light") },
+    "heavy-precipitation": { title: "Heavy Precipitation", source: "Gameplay Toolbox, Environmental Effects", text: prose(195, "Heavy Precipitation", "High Altitude") },
+    "strong-wind": { title: "Strong Wind", source: "Gameplay Toolbox, Environmental Effects", text: prose(195, "Strong Wind", "Thin Ice") },
+    "ranged-weapons": {
+      title: "Ranged Weapons",
+      source: "Equipment, Weapons",
+      text: list([...weaponNames(lines, "Simple Ranged Weapons", "Martial Melee Weapons"), ...weaponNames(lines, "Martial Ranged Weapons", "Armor")]),
+    },
+    "thrown-weapons": {
+      title: "Melee Weapons with the Thrown Property",
+      source: "Equipment, Weapons",
+      text: list([...weaponNames(lines, "Simple Melee Weapons", "Simple Ranged Weapons", thrown), ...weaponNames(lines, "Martial Melee Weapons", "Martial Ranged Weapons", thrown)]),
+    },
+  };
+}
+
 function buildRulesText(lines: readonly Line[], spells: readonly Spell[]): RulesText {
   const finish = (where: string, e: RulesTextEntry): RulesTextEntry => {
     const text = fixEmDashes(e.text);
@@ -1361,7 +1412,9 @@ function buildRulesText(lines: readonly Line[], spells: readonly Spell[]): Rules
     if (!src) continue;
     statuses[key] = finish(src.title, { title: src.title, source: src.source, text: src.from(lines, spells) });
   }
-  return { conditions, statuses };
+  const environment = {} as RulesText["environment"];
+  for (const [key, entry] of Object.entries(environmentText(lines)) as [EnvironmentKey, RulesTextEntry][]) environment[key] = finish(entry.title, entry);
+  return { conditions, statuses, environment };
 }
 
 // ---------------------------------------------------------------------------

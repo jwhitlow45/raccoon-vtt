@@ -252,3 +252,42 @@ function permutations<T>(items: readonly T[]): T[][] {
   if (items.length <= 1) return [[...items]];
   return items.flatMap((item, i) => permutations([...items.slice(0, i), ...items.slice(i + 1)]).map((rest) => [item, ...rest]));
 }
+
+describe("roll reminders with the scene's weather (docs/design/design-v1-weather.md 2)", () => {
+  const SANDSTORM = { kind: "sand", heavy: true, wind: "strong" } as const;
+  const HEAVY_RAIN = { kind: "rain", heavy: true } as const;
+
+  test("a Restrained creature's Dexterity save in a sandstorm takes Restrained's Disadvantage only", () => {
+    const preset = reminderPreset([{ key: "restrained" }], { kind: "save", ability: "dex" }, { weather: SANDSTORM });
+    assert.deepEqual(preset.sources, [{ kind: "dis", from: "restrained" }]);
+    assert.deepEqual(preset.notes, []);
+  });
+
+  test("weather's Disadvantage joins a condition's, each source once, and the cancel rule sees both", () => {
+    const preset = reminderPreset([{ key: "poisoned" }, { key: "invisible" }], { kind: "attack", range: "ranged", weapon: true }, { weather: SANDSTORM });
+    assert.deepEqual(preset.sources, [
+      { kind: "dis", from: "poisoned" },
+      { kind: "adv", from: "invisible" },
+      { kind: "dis", from: "strong-wind" },
+    ]);
+    assert.equal(resolveAdvantage(preset.sources), undefined, "they cancel");
+    const perception = reminderPreset([{ key: "poisoned" }], { kind: "check", ability: "wis", skill: "perception" }, { weather: HEAVY_RAIN });
+    assert.deepEqual(perception.sources, [
+      { kind: "dis", from: "poisoned" },
+      { kind: "dis", from: "heavy-rain" },
+    ]);
+    assert.deepEqual(reminderPreset([], { kind: "check", ability: "wis", skill: "perception" }, { weather: { ...HEAVY_RAIN, rules: false } }).sources, [], "the switch off");
+  });
+
+  test("a request's card lists the weather's reminders after the effects', for the choice rolled", () => {
+    assert.deepEqual(
+      rollReminders([{ key: "poisoned" }], PERCEPTION, undefined, HEAVY_RAIN).map((r) => r.key),
+      ["poisoned", "heavy-rain"],
+    );
+    const insightOrPerception: RollTest = { kind: "check", choices: [{ ability: "wis", skill: "insight" }, { ability: "wis", skill: "perception" }] };
+    assert.deepEqual(rollReminders([], insightOrPerception, 0, HEAVY_RAIN), [], "the player rolled Insight");
+    assert.deepEqual(rollReminders([], insightOrPerception, 1, { kind: "fog" }).map((r) => r.key), ["patchy-fog"]);
+    assert.deepEqual(rollReminders([], DEX_SAVE, undefined, SANDSTORM), [], "a save never");
+    assert.deepEqual(rollReminders([], PERCEPTION), [], "no weather");
+  });
+});
