@@ -10,7 +10,8 @@ import { clampSettings, GENERATOR_VERSION, type DungeonSettings } from "./settin
  * 5.1). Replay never runs the generator, so it may change, but a change
  * that moves any plan bumps GENERATOR_VERSION and this fixture together:
  * an old seed then says it is from another version. UPDATE_FIXTURES=1
- * rewrites the fixture.
+ * rewrites the fixture, but never moves a plan under the version it was
+ * pinned at, so a rewrite cannot stand in for the bump.
  */
 
 const FIXTURE = new URL("./plan.golden.fixture.json", import.meta.url);
@@ -32,6 +33,21 @@ const CASES: { name: string; settings: Partial<DungeonSettings>; seed: string }[
   { name: "Bending with traps at 5 to 10", settings: { traps: "some", band: "5-10" }, seed: "1X0Y1Z2A3B4C5D6E" },
 ];
 
+/**
+ * Why a rewrite would hide a moved plan, or null when it may go ahead: a
+ * plan kept under the same name, settings and seed whose hash changed
+ * while the version did not. New cases and a bumped version may be written.
+ */
+export function rewriteRefused(old: Golden | null, now: Golden): string | null {
+  if (!old || old.version !== now.version) return null;
+  const pinned = new Map(old.plans.map((p) => [p.name, p]));
+  const moved = now.plans.filter((p) => {
+    const was = pinned.get(p.name);
+    return was && was.seed === p.seed && JSON.stringify(was.settings) === JSON.stringify(p.settings) && was.sha256 !== p.sha256;
+  });
+  return moved.length === 0 ? null : `${moved.map((p) => p.name).join(", ")} moved at version ${now.version}: bump GENERATOR_VERSION, then rerun with UPDATE_FIXTURES=1`;
+}
+
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
 function today(): Golden {
@@ -45,6 +61,16 @@ function today(): Golden {
 }
 
 describe("golden dungeon plans", () => {
+  test("DG-R1-04: a rewrite never moves a pinned plan under its version, and takes new cases or a bumped version", () => {
+    const plan = (name: string, sha256: string) => ({ name, settings: clampSettings({}), seed: "1K7QH2MXA9F3TWQ5", sha256 });
+    const old: Golden = { version: 1, plans: [plan("a", "x"), plan("b", "y")] };
+    assert.match(rewriteRefused(old, { version: 1, plans: [plan("a", "x"), plan("b", "z")] }) ?? "", /^b moved at version 1: bump GENERATOR_VERSION/);
+    assert.equal(rewriteRefused(old, { version: 2, plans: [plan("a", "q"), plan("b", "z")] }), null, "a bumped version rewrites");
+    assert.equal(rewriteRefused(old, { version: 1, plans: [plan("a", "x"), plan("b", "y"), plan("c", "w")] }), null, "a new case is written");
+    assert.equal(rewriteRefused(old, { version: 1, plans: [plan("a", "x"), { ...plan("b", "z"), seed: "1ZZZZZZZZZZZZZZZ" }] }), null, "a case given another seed is a new pin");
+    assert.equal(rewriteRefused(null, { version: 1, plans: [plan("a", "x")] }), null, "no fixture yet");
+  });
+
   test("the fixture's version is the generator's", () => {
     const fixture = JSON.parse(readFileSync(FIXTURE, "utf8")) as Golden;
     assert.equal(fixture.version, GENERATOR_VERSION);
@@ -52,7 +78,11 @@ describe("golden dungeon plans", () => {
 
   test("twelve fixed seeds and choices make the plans they made", () => {
     const now = today();
-    if (process.env.UPDATE_FIXTURES === "1") writeFileSync(FIXTURE, `${JSON.stringify(now, null, 2)}\n`);
+    if (process.env.UPDATE_FIXTURES === "1") {
+      const refused = rewriteRefused(JSON.parse(readFileSync(FIXTURE, "utf8")) as Golden, now);
+      assert.equal(refused, null, "the fixture is not rewritten");
+      writeFileSync(FIXTURE, `${JSON.stringify(now, null, 2)}\n`);
+    }
     const fixture = JSON.parse(readFileSync(FIXTURE, "utf8")) as Golden;
     assert.equal(fixture.plans.length, 12);
     assert.deepEqual(now, fixture, "a plan moved: bump GENERATOR_VERSION and rerun with UPDATE_FIXTURES=1");
