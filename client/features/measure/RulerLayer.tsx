@@ -3,12 +3,13 @@ import { Circle, Group, Line } from "react-konva";
 import type { Drawing, RoomState, Token } from "#shared/model.ts";
 import { sceneGrid, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import { useDelayed } from "../../components/Loading.tsx";
-import { footprint, snapPosition } from "../../lib/scene.ts";
+import { footprint, rulesSpot, snapPosition } from "../../lib/scene.ts";
 import { boardTheme } from "../../lib/theme.ts";
 import { MarkPill, MarkPillStack, Upright } from "../../canvas/IsoParts.tsx";
 import { boxGround, viewPointOf } from "../../canvas/isoPlace.ts";
 import { useIsoGround, useTreeShownStore, useTreeShownView, type IsoGround } from "../../canvas/relief/context.ts";
 import { useScoped } from "../../state/scope.ts";
+import { dragLineSlot } from "../../state/store.ts";
 import type { DragPreview } from "../../state/types.ts";
 import { turnMoverId } from "../attach/turns.ts";
 import type { LayerProps } from "../layers.ts";
@@ -153,7 +154,8 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
       ) : localDrag && tokens[localDrag.tokenId] ? (
         <DragMeasure
           token={tokens[localDrag.tokenId]!}
-          to={snapPosition(grid, localDrag.x, localDrag.y, footprint(tokens[localDrag.tokenId]!))}
+          // The node is where the token is drawn, and a group drag lands each in the box under its rules spot (docs/design/design-v1-snap-off.md 6.3).
+          to={((t, at) => snapPosition(grid, at.x, at.y, footprint(t)))(tokens[localDrag.tokenId]!, rulesSpot(tokens[localDrag.tokenId]!, localDrag))}
           group={dropRoom ? { room: dropRoom, role } : undefined}
           read={read}
           scale={props.scale}
@@ -234,6 +236,12 @@ function WalkRuler(props: { stops: readonly RulerStop[]; walk: WalkSource; scale
       ) : null}
     </>
   );
+}
+
+/** This device's drag label's snap off line (state/store.ts dragLineSlot), as a pill under the label, or null. */
+function useFreeLine(): { value: string; size: "screen"; color: string; small: true } | null {
+  const line = useTreeShownStore(useScoped(dragLineSlot), (s) => s.line);
+  return line ? { value: line, size: "screen", color: boardTheme.color.textMuted, small: true } : null;
 }
 
 /**
@@ -325,7 +333,8 @@ function RouteMeasure(props: { route: DragRoute; token: Token; scale: number }) 
   const finding = route.waiting || slow;
   const corners = finding ? [] : route.corners;
   const crossing = useTrapCrossing(token, [token, ...corners, to]);
-  if (to.x === token.x && to.y === token.y && !route.waiting) return null;
+  const freeLine = useFreeLine();
+  if (to.x === token.x && to.y === token.y && !route.waiting && !freeLine) return null;
   const left = route.read.left;
   const color = finding ? boardTheme.color.textMuted : dragColor(left);
   const flat = viewFlat(iso, [token, ...corners, to].map((p) => ({ x: p.x + fp.w / 2, y: p.y + fp.h / 2 })));
@@ -348,6 +357,7 @@ function RouteMeasure(props: { route: DragRoute; token: Token; scale: number }) 
           { value: text, size: "screen", color },
           !finding && route.endsIn ? { value: `Ends in ${route.endsIn}'s space`, size: "screen", color: boardTheme.color.warning, small: true } : null,
           !finding && crossing,
+          freeLine,
         ]}
       />
     </>
@@ -365,7 +375,8 @@ function DragMeasure(props: { token: Token; to: Point; read: ReadDrag; scale: nu
   const fp = footprint(token);
   const corners = props.corners ?? [];
   const crossing = useTrapCrossing(token, [token, ...corners, to]);
-  if (to.x === token.x && to.y === token.y) return null;
+  const freeLine = useFreeLine();
+  if (to.x === token.x && to.y === token.y && !freeLine) return null;
   // This device's own drag with no walk preview, a group's, reads where its token lands and its dismount, as `token.moveMany` records them.
   const read = props.group
     ? groupReading(props.group.room, token, to, props.group.role)
@@ -383,7 +394,7 @@ function DragMeasure(props: { token: Token; to: Point; read: ReadDrag; scale: nu
           return <Circle key={i} x={v.x} y={v.y} radius={3.5 / scale} fill={color} stroke={boardTheme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} />;
         })}
       </Upright>
-      <MarkPillStack {...endOf(iso, to, fp)} scale={scale} offsetPx={4} pills={[{ value: dragLabel(read), size: "screen", color }, crossing]} />
+      <MarkPillStack {...endOf(iso, to, fp)} scale={scale} offsetPx={4} pills={[{ value: dragLabel(read), size: "screen", color }, crossing, freeLine]} />
     </>
   );
 }

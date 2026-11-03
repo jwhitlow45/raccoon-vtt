@@ -56,6 +56,38 @@ const EMPTY_CASTS: RoomState["casts"] = {};
 export const AreaPreviewLayer = memo(function AreaPreviewLayer(props: LayerProps) {
   const { scene, scale } = props;
   const aoes = useTreeShownView((s) => s.ephemeral.aoes);
+  const aim = useAim(props);
+  if (!aim) return null;
+  const { ctx, coarse, fog, active, aiming, tokens, settings, members } = aim;
+
+  const remote = Object.entries(aoes).filter(([, a]) => !a.local);
+  if (!active && remote.length === 0) return null;
+
+  return (
+    <Group listening={false}>
+      {remote.map(([key, a]) => (
+        <RemotePreview key={key} preview={a} id={key} ctx={coarse} fog={fog} scale={scale} color={members?.[a.from]?.color ?? boardTheme.color.crest} name={members?.[a.from]?.name} />
+      ))}
+      {active ? <ActiveArea {...active} ctx={ctx} fog={fog} scale={scale} sceneId={scene.id} tokens={tokens} diagonal={settings.diagonal} aiming={aiming} /> : null}
+    </Group>
+  );
+});
+
+/**
+ * The tokens this device's own aimed area catches, as the layer finds them,
+ * their ids joined by spaces. The canvas (canvas/Stage.tsx) outlines the box
+ * each counts in where it is drawn between squares
+ * (docs/design/design-v1-snap-off.md 4). It runs no effect, so the canvas
+ * calls it once outside both drawing trees.
+ */
+export function useAimedCatches(props: LayerProps): string {
+  const aim = useAim(props);
+  return aim?.active ? caughtTokens(aim.active.t, aim.ctx, props.scene.id).join(" ") : "";
+}
+
+/** What the layer and useAimedCatches read: the area this device aims, and the context its coverage is found in. */
+function useAim(props: LayerProps) {
+  const { scene } = props;
   // Tokens being dragged count where they would drop, so an aimed area's targets follow them.
   const dragged = useLiveTokens();
   const tokens = dragged.tokens;
@@ -84,21 +116,9 @@ export const AreaPreviewLayer = memo(function AreaPreviewLayer(props: LayerProps
   if (!fine || !coarse || !settings) return null;
   const aiming = samplesNow(moving || dragged.moving) === PREVIEW_SAMPLES;
   const ctx = aiming ? coarse : fine;
-
   const active = aimedArea({ tool, draft, selectedId, live, templates, sceneId: scene.id, tokens, grid: ctx.grid, feetPerCell: settings.feetPerCell, role, youId, casts });
-
-  const remote = Object.entries(aoes).filter(([, a]) => !a.local);
-  if (!active && remote.length === 0) return null;
-
-  return (
-    <Group listening={false}>
-      {remote.map(([key, a]) => (
-        <RemotePreview key={key} preview={a} id={key} ctx={coarse} fog={fog} scale={scale} color={members?.[a.from]?.color ?? boardTheme.color.crest} name={members?.[a.from]?.name} />
-      ))}
-      {active ? <ActiveArea {...active} ctx={ctx} fog={fog} scale={scale} sceneId={scene.id} tokens={tokens} diagonal={settings.diagonal} aiming={aiming} /> : null}
-    </Group>
-  );
-});
+  return { ctx, coarse, fog, active, aiming, tokens, settings, members };
+}
 
 /** The area this device aims or edits with the Area tool: its draft, or the placed area it picked with any move or turn in progress. */
 export type AimedArea = { t: AreaTemplateInput; color: string; shade: boolean; casterId?: string; pointShape: boolean; editable: boolean; id: string };

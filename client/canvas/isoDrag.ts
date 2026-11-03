@@ -3,7 +3,7 @@ import type { FootprintToken } from "#shared/rules/footprint.ts";
 import { standing, type Standing } from "#shared/rules/heights.ts";
 import { dropView, seenSeat, type DropToken, type Role } from "../features/movement/drop.ts";
 import { screenToView, viewToScreen, type Camera, type Point } from "../lib/camera.ts";
-import { footprint, snapPosition } from "../lib/scene.ts";
+import { drawnAt, footprint, rulesSpot, snapPosition } from "../lib/scene.ts";
 import { footprintCells, type GroundCell } from "../lib/groundCells.ts";
 import { drawnBase, seenFootprintGround, toView, toWorld, type DrawnHeights, type DrawnSource, type View, type ViewPoint } from "../lib/view.ts";
 import type { Grid } from "#shared/rules/grid.ts";
@@ -162,14 +162,29 @@ type Placed = FootprintToken & { id: string; sceneId: string };
  * The drawn ground a token's drag reads: its footprint's highest drawn
  * ground at a spot, and the drop's snap, both on the scene's grid, so a
  * hex scene's drag snaps to the hexes Top-down's does (hex grids, H1).
+ * The ring is where the token is drawn, so a token placed between squares
+ * snaps from its drawn corner less its `nudge`, to the box the drop counts
+ * it in. A free drag passes none, and snaps to the box under it as drawn
+ * (docs/design/design-v1-snap-off.md 6.3).
  */
-export function dragGround(heights: DrawnHeights, token: Placed, grid: Grid): DragGround {
+export function dragGround(heights: DrawnHeights, token: Placed, grid: Grid, nudge?: Point | null): DragGround {
   const size = footprint(token);
+  const ruled = (at: Point) => (nudge ? rulesSpot({ nudge }, at) : at);
   return {
     levels: levelsOf(heights),
     footGround: (at) => highest(heights, footprintCells(grid, { ...token, x: at.x, y: at.y, squeeze: undefined })),
-    snap: (at) => snapPosition(grid, at.x, at.y, size),
+    snap: (at) => {
+      const p = ruled(at);
+      return snapPosition(grid, p.x, p.y, size);
+    },
   };
+}
+
+/** The pressed node's offset from the lead's, as each is drawn, so a grip on a rider or its mount placed between squares never jumps (docs/design/design-v1-snap-off.md 6.3). */
+export function gripRel(pressed: Point & { nudge?: Point }, lead: Point & { nudge?: Point }): Point {
+  const a = drawnAt(null, pressed);
+  const b = drawnAt(null, lead);
+  return { x: a.x - b.x, y: a.y - b.y };
 }
 
 /** The highest drawn ground over a footprint's own cells, from minus infinity, so a footprint wholly in pits reads its pits. Off the scene a cell reads 0. */

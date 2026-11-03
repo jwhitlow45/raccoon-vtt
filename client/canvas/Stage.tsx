@@ -57,14 +57,18 @@ import { fitTarget } from "../lib/fitTarget.ts";
 import { revealedMask } from "../lib/fogTiles.ts";
 import { CameraGesture, distance, LongPress, mousePans, TAP_SLOP_PX } from "../lib/gestures.ts";
 import { groupFollowers, tokensByCenter, tokensInBox } from "../lib/group.ts";
-import { displayName, drawsAboveFog, footprint, snapPosition, type ViewToken } from "../lib/scene.ts";
+import { displayName, drawnAt as drawnSpot, drawsAboveFog, footprint, rulesSpot, snapPosition, type ViewToken } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
 import { BoardViewContext, boardViewsOf, useBoardPills } from "./boardView.ts";
 import { useBoardFontEpoch } from "./boardFont.ts";
 import { useBoardText, type TokenText } from "./useBoardText.ts";
 import { ownsToken as memberOwns } from "../features/tokens/access.ts";
 import { followOps, lastMoveSlot } from "../features/tokens/undoMove.ts";
+import type { ClientOp } from "#shared/protocol.ts";
 import type { DropPlan } from "../features/movement/drop.ts";
+import { GROUP_KEEPS, HEX_KEEPS, leadNode as offsetNode, PLACED_TEXT, PLACING_FREELY } from "../features/movement/free.ts";
+import { useAimedCatches } from "../features/areas/AreaPreviewLayer.tsx";
+import { keptStops } from "../features/measure/ruler.ts";
 import { useDragStops } from "../features/movement/stageHooks.ts";
 import { carriesText, dragLead, dragNamed, drawOrder, drawsInset, groupMembers, holderMiddles, pressLead, reseatText, type CellBox } from "../features/attach/groups.ts";
 import { dragsToken, movesToken, reseats, type AttachViewer, type RightsView } from "../features/attach/rights.ts";
@@ -76,9 +80,10 @@ import { useRoomScope } from "../state/scope.ts";
 import { liveCameraSlot, showGestureCamera, useChromeCamera, type ChromeAt, type ChromeCamera } from "../state/liveCamera.ts";
 import { addsToSelection, barDismiss, frontToBack, nextUnderTap } from "../state/selection.ts";
 import { hexNudge, stageKeysSlot } from "../state/shortcuts.ts";
-import { sheetOpen as sheetIsOpen, type Opening } from "../state/types.ts";
+import { sheetOpen as sheetIsOpen, type Opening, type RoomView } from "../state/types.ts";
 import { dockSlot, foldsUnderSheet, sideSheetRoom } from "../pages/fold.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
+import { dragLineSlot, placeFreelySlot } from "../state/store.ts";
 import { droppedIntoFog, intoFogText, refusedDragText, watchDrop } from "./dragNotes.ts";
 import { barChrome, barCover, barDockSlot, clearAnchor, DOCK_MIN_WIDTH, keepsOpening, largerEach, pastBars, restingBar, stripSqueezed, type BarSubject } from "./barDock.ts";
 import { footAnchor, headAnchor } from "./anchors.ts";
@@ -86,7 +91,7 @@ import { holdViewStill } from "./sceneCamera.ts";
 import { boardPickFor, boardPickSlot, drawnAt, DrawnHeightsMemo, drawnRing, groundMapOf, heldPoint, liftIn, nudgeStep, pressAt, ringCenter, standsFor, tokenBase, viewGround, type BoardPick } from "./boardPick.ts";
 import { DRAG_GROUND, liftToDragLayer, returnHome, type Home } from "./dragLayer.ts";
 import { emptyTap, putAway } from "./emptyTap.ts";
-import { dragBound, dragGround, dragPlan } from "./isoDrag.ts";
+import { dragBound, dragGround, dragPlan, gripRel } from "./isoDrag.ts";
 import { canDragToken, movesOthers } from "./dragRights.ts";
 import { fitSlot, openFramed } from "./fitSlot.ts";
 import { FogShape } from "./FogShape.tsx";
@@ -139,13 +144,32 @@ type DragParts = {
   reseatOnly: boolean;
 };
 
-/** The lead's place as a node, while the finger drags another token of its group: the same offset either way. */
-function offsetNode(node: Konva.Node, pressed: ViewToken, lead: ViewToken): { x(): number; y(): number; position(p: Point): void } {
-  return {
-    x: () => node.x() - pressed.x + lead.x,
-    y: () => node.y() - pressed.y + lead.y,
-    position: (p) => node.position({ x: p.x - lead.x + pressed.x, y: p.y - lead.y + pressed.y }),
-  };
+/**
+ * The tokens a ruler starts or stops on, by id joined by spaces: this
+ * device's own rulers, the shared ones it receives and the kept ones on the
+ * scene. A token placed between squares outlines the box it counts in
+ * while one does (docs/design/design-v1-snap-off.md 4), and a string keeps
+ * a ruler's every move from rendering the board.
+ */
+function rulerTokenIds(s: RoomView, sceneId: string): string {
+  const ids = new Set<string>();
+  for (const r of Object.values(s.ephemeral.rulers)) for (const p of r.points) if (p.tokenId) ids.add(p.tokenId);
+  for (const d of Object.values(s.view?.drawings ?? {})) {
+    if (d && d.kind === "ruler" && d.sceneId === sceneId) for (const p of keptStops(d)) if (p.tokenId) ids.add(p.tokenId);
+  }
+  return [...ids].sort().join(" ");
+}
+
+/**
+ * Tells the canvas which tokens this device's aimed area catches
+ * (AreaPreviewLayer.tsx useAimedCatches), from one place outside both drawing
+ * trees, so a moving aim renders the board only when the set changes.
+ */
+function AimCatches(props: { layer: LayerProps; onCatches(ids: string): void }): null {
+  const ids = useAimedCatches(props.layer);
+  const { onCatches } = props;
+  useEffect(() => onCatches(ids), [ids, onCatches]);
+  return null;
 }
 
 function sceneRect(scene: Scene) {
@@ -655,6 +679,15 @@ export function MapStage(props: {
   }, [allTokens, scene.id]);
   const tokensById = useMemo(() => new Map(tokens.map((t) => [t.id, t])), [tokens]);
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  // Place freely is for the next drag of its token: a tool change, a selection change or a scene change ends it (docs/design/design-v1-snap-off.md 4).
+  const selectionKey = selectedIds.join(" ");
+  useEffect(
+    () => () => {
+      const placing = scope.get(placeFreelySlot);
+      if (placing.getState().tokenId !== null) placing.setState({ tokenId: null });
+    },
+    [scope, toolId, scene.id, selectionKey],
+  );
   // Where each carried token leaves a press to a holder under it (groups.ts holderMiddles), the same boxes kept while they are the same, so the token's node renders only when they change.
   const holesRef = useRef(new Map<string, readonly CellBox[]>());
   const holes = useMemo(() => {
@@ -976,6 +1009,40 @@ export function MapStage(props: {
       window.removeEventListener("blur", onBlur);
     };
   }, [scope]);
+  /**
+   * Alt, Option on a Mac, as the last pointer event or key had it: a token
+   * drag reads it on every move and at the drop to drop between squares
+   * (docs/design/design-v1-snap-off.md 4). While a drag is live, Alt's keyup
+   * is prevented, so a lone Alt does not open the browser's menu bar on
+   * Windows.
+   */
+  const altRef = useRef(false);
+  useEffect(() => {
+    const track = (e: PointerEvent | KeyboardEvent) => {
+      altRef.current = e.altKey;
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      altRef.current = e.altKey;
+      if (e.key === "Alt" && dragRef.current) e.preventDefault();
+    };
+    const onBlur = () => {
+      altRef.current = false;
+    };
+    window.addEventListener("pointerdown", track, true);
+    window.addEventListener("pointermove", track, true);
+    window.addEventListener("pointerup", track, true);
+    window.addEventListener("keydown", track, true);
+    window.addEventListener("keyup", onKeyUp, true);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("pointerdown", track, true);
+      window.removeEventListener("pointermove", track, true);
+      window.removeEventListener("pointerup", track, true);
+      window.removeEventListener("keydown", track, true);
+      window.removeEventListener("keyup", onKeyUp, true);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
   /** A press on a token this member may not drag, so moving it says why instead of doing nothing. */
   const refusedPressRef = useRef<{ pointerId: number; start: Point; text: string } | null>(null);
 
@@ -1039,7 +1106,9 @@ export function MapStage(props: {
       const step = nudgeStep(shownRef.current, dx, dy);
       const grid = sceneGrid(sceneRef.current);
       const to = isHex(grid) ? hexNudge(grid, moved, step) : { x: moved.x + step[0], y: moved.y + step[1] };
-      const node = { x: () => to.x, y: () => to.y, position: () => {} };
+      // The drag's node is where the token is drawn, which the press reads back to rules coordinates (stageHooks.ts).
+      const drawnTo = drawnSpot(grid, { ...to, ...(moved.nudge ? { nudge: moved.nudge } : {}) });
+      const node = { x: () => drawnTo.x, y: () => drawnTo.y, position: () => {} };
       dragStopsRef.current.press(node, moved, parts.named);
     };
     // A tool's key moves nothing of the tool's while it follows a pointer (docs/design/design-v1-tool-cycle.md 2.7).
@@ -1382,8 +1451,10 @@ export function MapStage(props: {
         for (const f of drag.followers) actions.sendEph({ k: "dragCancel", tokenId: f.token.id });
       }
       clearSpots();
+      const line = scope.get(dragLineSlot);
+      if (line.getState().line !== null) line.setState({ line: null });
     },
-    [actions, scene.id, clearSpots],
+    [actions, scene.id, clearSpots, scope],
   );
 
   /**
@@ -1414,6 +1485,29 @@ export function MapStage(props: {
   );
 
   const interaction = useMemo<TokenInteraction>(() => {
+    const placing = scope.get(placeFreelySlot);
+    const dragLine = scope.get(dragLineSlot);
+    /**
+     * Whether the drag drops between squares now (docs/design/design-v1-snap-off.md 4):
+     * Alt held, or Place freely on for the pressed token, on a lone drag of
+     * the token itself on a square scene. A group, and a mount a rider's
+     * drag moves, keep to the grid. The drag label's line says which.
+     */
+    const freeNow = (drag: { tokenId: string; lead: ViewToken; named: readonly ViewToken[] }): boolean => {
+      const alt = altRef.current;
+      const asked = alt || placing.getState().tokenId === drag.tokenId;
+      const hex = isHex(sceneGrid(sceneRef.current));
+      const lone = drag.named.length === 1 && drag.lead.id === drag.tokenId;
+      const free = asked && lone && !hex;
+      const line = free ? PLACING_FREELY : alt && hex ? HEX_KEEPS : alt && !lone ? GROUP_KEEPS : null;
+      if (dragLine.getState().line !== line) dragLine.setState({ line });
+      return free;
+    };
+    /** Place freely is for one drag: any drag ends it, and so does a cancel. */
+    const endPlacing = () => {
+      if (placing.getState().tokenId !== null) placing.setState({ tokenId: null });
+      if (dragLine.getState().line !== null) dragLine.setState({ line: null });
+    };
     /**
      * An isometric drag's start (6.3): the adapter lands the lead on the
      * drawn ground under the finger, the pressed node keeping its offset
@@ -1431,10 +1525,15 @@ export function MapStage(props: {
       const stands = standsFor(pick, aboveFogRef.current)(lead);
       const plan = dragPlan({ room, role: linksRef.current.role, src: pick.src, grid: pick.grid, feetPerCell: pick.feetPerCell, token: lead, drawn: drawnRing(pick, stands) });
       const start = { node: node.getAbsolutePosition(), ring: ringCenter(pick, lead, stands) };
-      const rel = { x: pressed.x - lead.x, y: pressed.y - lead.y };
+      const rel = gripRel(pressed, lead);
+      // The ground and the snap read the rules box under the drawn ring, or for a free drag the box under it as drawn (docs/design/design-v1-snap-off.md 6.3).
+      const shift = () => {
+        const drag = dragRef.current;
+        return drag && freeNow(drag) ? null : lead.nudge;
+      };
       node.dragBoundFunc((pos) => {
         const now = pickOfRef.current(currentCam() ?? c);
-        return dragBound({ camera: now.camera, view: now.view, ground: dragGround(now.heights, lead, now.grid), plan, start, rel }, pos);
+        return dragBound({ camera: now.camera, view: now.view, ground: dragGround(now.heights, lead, now.grid, shift()), plan, start, rel }, pos);
       });
       const target = stage.findOne<Konva.Group>(`.${DRAG_GROUND}`);
       return target ? liftToDragLayer(target, [node, ...followers.map((f) => f.node)]) : [];
@@ -1446,17 +1545,17 @@ export function MapStage(props: {
     };
     /** Puts every token of a drop back where it stood, and tells the room the drag ended without a move. */
     const putBack = (node: Konva.Node, token: ViewToken, followers: readonly { token: ViewToken; node: Konva.Node }[]) => {
-      node.position({ x: token.x, y: token.y });
+      node.position(drawnSpot(sceneGrid(sceneRef.current), token));
       actions.sendEph({ k: "dragCancel", tokenId: token.id });
       for (const f of followers) {
-        f.node.position({ x: f.token.x, y: f.token.y });
+        f.node.position(drawnSpot(sceneGrid(sceneRef.current), f.token));
         f.node.getLayer()?.batchDraw();
         actions.sendEph({ k: "dragCancel", tokenId: f.token.id });
       }
       clearSpots();
     };
     /** Puts the dropped tokens where the plan lands them, each carried one by its named holder's offset, and sends the moves and the drag's end. */
-    const landDrop = (node: Konva.Node, token: ViewToken, followers: readonly { token: ViewToken; node: Konva.Node }[], parts: DragParts, plan: DropPlan) => {
+    const landDrop = (node: Konva.Node, token: ViewToken, followers: readonly { token: ViewToken; node: Konva.Node }[], parts: DragParts, plan: DropPlan, free: { place: ClientOp | null; placed: boolean } = { place: null, placed: false }) => {
       const group = parts.named;
       const moves = plan.moves;
       const landed = new Map(moves.map((m) => [m.tokenId, m]));
@@ -1482,8 +1581,24 @@ export function MapStage(props: {
         if (!m || !root) return null;
         return rootId === t.id ? { x: m.x, y: m.y } : { x: t.x + m.x - root.x, y: t.y + m.y - root.y };
       };
+      const grid = sceneGrid(sceneRef.current);
+      const inPlace = free.place?.t === "token.update" ? free.place : null;
+      /**
+       * Where a token is drawn after the drop: at its move's `drawnAt`, on
+       * its landing where its move clears the placement, else carried with
+       * its nudge, which the reducer keeps where it is still valid, or where
+       * an in-place update puts it (docs/design/design-v1-snap-off.md 6.4).
+       */
+      const drawnAfter = (t: ViewToken): Point => {
+        const at = landing(t);
+        const m = landed.get(t.id);
+        if (m) return m.drawnAt ?? { x: m.x, y: m.y };
+        if (at) return drawnSpot(grid, { ...at, ...(t.nudge ? { nudge: t.nudge } : {}) });
+        if (inPlace && inPlace.tokenId === t.id && "drawnAt" in inPlace.patch) return inPlace.patch.drawnAt ?? { x: t.x, y: t.y };
+        return drawnSpot(grid, t);
+      };
       for (const [n, t] of [[node, token] as const, ...followers.map((f) => [f.node, f.token] as const)]) {
-        n.position(landing(t) ?? { x: t.x, y: t.y });
+        n.position(drawnAfter(t));
         if (n !== node) n.getLayer()?.batchDraw();
       }
       // A player who drops a creature into the fog or out of the party's sight loses it, which reads as a bug unless the map says so.
@@ -1499,6 +1614,9 @@ export function MapStage(props: {
       const watch = watchDrop({ role: facts.role, store: facts.store, moves: dropped, notify: (text) => uiRef.current.notify(text) });
       // The moves land in the view before the spots go, so an aura on a token never jumps back.
       const sent = dragStopsRef.current.send(plan, watch?.answer);
+      // A drop let go on its own box places the token in it, or puts it back on the grid, without a move.
+      if (free.place) actions.dispatch(free.place);
+      if (free.placed) uiRef.current.notify(PLACED_TEXT);
       // The bar comes back after a drop and clears its token once, as it does when it opens (docs/design/design-v1-bar-compact.md 3.6).
       const after = facts.store.getState().local;
       if (after.actionBar && after.selectedId !== null && group.some((t) => t.id === after.selectedId || after.selectedIds.includes(t.id))) scope.get(barDockSlot).setState({ clearRequest: { tokenId: after.selectedId } });
@@ -1507,7 +1625,8 @@ export function MapStage(props: {
       if (note) uiRef.current.notify(note);
       for (const t of [token, ...followers.map((f) => f.token)]) {
         const m = landed.get(t.id);
-        const at = landing(t);
+        // Frames carry the drawn spot (docs/design/design-v1-snap-off.md 5.6): the landing with its new placement.
+        const at = landing(t) ? drawnAfter(t) : null;
         actions.sendEph(at ? { k: "dragEnd", tokenId: t.id, x: at.x, y: at.y, ...(m?.squeeze ? { squeeze: true as const } : {}) } : { k: "dragCancel", tokenId: t.id });
       }
       clearSpots();
@@ -1542,6 +1661,8 @@ export function MapStage(props: {
           }
         }
         dragRef.current = { node, tokenId: token.id, cancelled: false, followers, homes: [], ...parts };
+        // Place freely waits for its own token's drag: a drag of another token ends it.
+        if (placing.getState().tokenId !== null && placing.getState().tokenId !== token.id) endPlacing();
         if (parts.refusal) {
           uiRef.current.notify(parts.refusal);
           stopTokenDrag();
@@ -1556,8 +1677,10 @@ export function MapStage(props: {
         setDraggingId(token.id);
         setCarried(new Set([token.id, ...followers.map((f) => f.token.id)]));
         dragStopsRef.current.start(parts.lead.id, token);
-        actions.sendEph({ k: "dragStart", tokenId: token.id, x: token.x, y: token.y });
-        for (const f of followers) actions.sendEph({ k: "dragStart", tokenId: f.token.id, x: f.token.x, y: f.token.y });
+        // Frames carry the drawn spot (docs/design/design-v1-snap-off.md 5.6).
+        const grid = sceneGrid(sceneRef.current);
+        actions.sendEph({ k: "dragStart", tokenId: token.id, ...drawnSpot(grid, token) });
+        for (const f of followers) actions.sendEph({ k: "dragStart", tokenId: f.token.id, ...drawnSpot(grid, f.token) });
       },
       dragMove(node, token) {
         const drag = dragRef.current;
@@ -1565,26 +1688,34 @@ export function MapStage(props: {
         const lone = drag.named.length === 1;
         // A lone lead's preview stays at a wall or a ledge that stops its walk, or the walk of a creature it drags, so its frames do too.
         const leadNode = drag.lead.id === token.id ? node : offsetNode(node, token, drag.lead);
-        if (lone) dragStopsRef.current.frame(leadNode, drag.lead);
+        const free = freeNow(drag);
+        if (lone) dragStopsRef.current.frame(leadNode, drag.lead, free);
         // A lone lead's frames carry its route's corners and its cost (docs/design/design-v1-movement.md 6.5), and a group's named tokens
         // their own leg's cost, as the group's label reads it (review AT-ASTRA-15).
         const leadFields = lone ? dragStopsRef.current.frameFields(drag.lead.id) : {};
         const named = lone ? null : new Set(drag.named.map((t) => t.id));
         const fieldsOf = (t: ViewToken, x: number, y: number) => (lone ? (t.id === drag.lead.id ? leadFields : {}) : named!.has(t.id) ? dragStopsRef.current.groupFields(t, { x, y }) : {});
         actions.sendEph({ k: "dragMove", tokenId: token.id, x: node.x(), y: node.y(), ...fieldsOf(token, node.x(), node.y()) });
-        setSpot(token, node.x(), node.y());
+        // What follows a token reads the box it counts in: under where it is drawn for a free drag, else back in rules coordinates.
+        const spotOf = (t: ViewToken, at: Point) => (free ? at : rulesSpot(t, at));
+        const here = spotOf(token, { x: node.x(), y: node.y() });
+        setSpot(token, here.x, here.y);
         if (drag.followers.length === 0) return;
-        const dx = node.x() - token.x;
-        const dy = node.y() - token.y;
+        // Every follower moves by the pressed node's offset from where it was drawn, each from where it is drawn itself.
+        const grid = sceneGrid(sceneRef.current);
+        const from = drawnSpot(grid, token);
+        const dx = node.x() - from.x;
+        const dy = node.y() - from.y;
         const layers = new Set<Konva.Layer>();
         for (const f of drag.followers) {
-          const x = f.token.x + dx;
-          const y = f.token.y + dy;
+          const was = drawnSpot(grid, f.token);
+          const x = was.x + dx;
+          const y = was.y + dy;
           f.node.position({ x, y });
           const layer = f.node.getLayer();
           if (layer) layers.add(layer);
           actions.sendEph({ k: "dragMove", tokenId: f.token.id, x, y, ...fieldsOf(f.token, x, y) });
-          setSpot(f.token, x, y);
+          setSpot(f.token, f.token.x + dx, f.token.y + dy);
         }
         for (const layer of layers) layer.batchDraw();
       },
@@ -1596,16 +1727,22 @@ export function MapStage(props: {
         setCarried(NOT_CARRIED);
         const followers = drag?.followers ?? [];
         if (!drag || drag.cancelled) {
+          endPlacing();
           dragStopsRef.current.end();
           putBack(node, token, followers);
           return;
         }
         const leadNode = drag.lead.id === token.id ? node : offsetNode(node, token, drag.lead);
+        // Alt read at the drop, then Place freely spent on it.
+        const free = freeNow(drag);
+        const lead = drag.lead;
+        const inPlace = linksRef.current.role === "dm" || (ownsTokenRef.current(lead) && !lead.locked);
+        endPlacing();
         // A drop made while its route is searched waits at the ghost and lands once it is found (docs/design/design-v1-movement.md 3.1).
-        dragStopsRef.current.drop(leadNode, drag.lead, drag.named, (plan) => landDrop(node, token, followers, drag, plan));
+        dragStopsRef.current.drop(leadNode, lead, drag.named, (plan, placed) => landDrop(node, token, followers, drag, plan, placed), { free, inPlace });
       },
     };
-  }, [actions, stopTokenDrag, setSpot, clearSpots, popovers, tappedAgain, store]);
+  }, [actions, stopTokenDrag, setSpot, clearSpots, popovers, tappedAgain, store, scope]);
 
   const memberMap = members ?? {};
   const below: ViewToken[] = [];
@@ -1613,6 +1750,18 @@ export function MapStage(props: {
   // The party stays above the sight overlay as it does above the fog, fog or no fog (docs/design/design-v1-maps-vision.md 4.3.7).
   for (const t of tokens) ((fog || sightMode !== null) && drawsAboveFog(t, role, memberMap, characters) ? above : below).push(t);
 
+  /*
+   * Where a token placed between squares outlines the box it counts in
+   * (docs/design/design-v1-snap-off.md 4): while it is selected or dragged,
+   * while a ruler starts or stops on it, and while this device's aimed area
+   * catches it. Elsewhere the picture alone shows the place.
+   */
+  const rulerEnds = useRoomView((s) => rulerTokenIds(s, scene.id));
+  const [caughtIds, setCaughtIds] = useState("");
+  const outlined = useMemo(() => {
+    const words = (ids: string) => (ids === "" ? [] : ids.split(" "));
+    return new Set([...selectedIds, ...carried, ...words(rulerEnds), ...words(caughtIds)]);
+  }, [selectedIds, carried, rulerEnds, caughtIds]);
   const renderToken = (t: ViewToken, iso: IsoToken | null = null, text?: TokenText) => (
     <TokenNode
       key={t.id}
@@ -1627,6 +1776,7 @@ export function MapStage(props: {
       inset={drawsInset(sceneGrid(scene), allTokens, t)}
       holes={holes.get(t.id) ?? null}
       iso={iso}
+      rulesOutline={t.nudge !== undefined && outlined.has(t.id)}
     />
   );
   // Every chip and badge, then every label, then the plates, over all the tokens and the fog (TokenNode.tsx TokenDecor).
@@ -1675,6 +1825,7 @@ export function MapStage(props: {
       {size && cam && live ? (
         <>
           {/* Everything with effects mounts once, outside both drawing trees, whichever view shows (ISO-D15). */}
+          <AimCatches layer={layerProps} onCatches={setCaughtIds} />
           {CONTROLLERS.map(({ id, Component }) => (
             <Component key={id} {...layerProps} live={live} stage={isoShown ? isoStage : topStage} />
           ))}
@@ -1801,6 +1952,7 @@ export function MapStage(props: {
                     viewport={sizeInZoomed(size, zoom)}
                     tokenHeight={tokenRise(raw, selected, under, zoom, at, stands)}
                     fullAccess={role === "dm" || ownsToken(selected)}
+                    drags={plainDrag(selected)}
                     onDetails={() => onOpenDetails(selected.id)}
                     onShift={shiftForBar}
                     onClose={() => {

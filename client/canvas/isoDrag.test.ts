@@ -11,7 +11,7 @@ import { footprint, snapPosition } from "../lib/scene.ts";
 import { flatHeights, isometric, toView, type Turn, type ViewPoint } from "../lib/view.ts";
 import { boardPickFor, DrawnHeightsMemo, drawnRing, ringCenter, standsFor, type BoardPick } from "./boardPick.ts";
 import { cappedBase, standeeShape } from "./relief/standee.ts";
-import { dragBound, dragGround, dragLanding, dragPlan, levelsOf, type DragGround, type DragPlan } from "./isoDrag.ts";
+import { dragBound, dragGround, dragLanding, dragPlan, gripRel, levelsOf, type DragGround, type DragPlan } from "./isoDrag.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
 
 const CAM: Camera = { x: 600, y: 80, scale: 40 };
@@ -298,5 +298,27 @@ describe("an isometric drag on a hex scene (docs/design/design-v1-hex-grids.md, 
         assert.notDeepEqual(ground.snap(at), snapPosition(SQUARES, at.x, at.y, footprint(t)), "not the square's");
       }
     }
+  });
+});
+
+describe("an isometric drag of a token placed between squares (docs/design/design-v1-snap-off.md 6.3)", () => {
+  test("a grip on a placed rider of a placed mount leaves both where they are drawn: no jump", () => {
+    const state = world({ blockMovement: false, tokens: [token("horse", { kind: "npc", size: "large", x: 4, y: 4 }), token("rider", { x: 5, y: 4 })] });
+    const pick = pickFor(state, "dm");
+    const horse = { ...(state.tokens.horse! as Token), nudge: { x: -2, y: 1 } };
+    const rider = { ...(state.tokens.rider! as Token), nudge: { x: 3, y: 0 } };
+    // The ring where the horse is drawn, and the pressed node where the rider is.
+    const ring = viewToScreen(CAM, toView(pick.view, { x: 4 - 0.25 + 1, y: 4 + 0.125 + 1 }));
+    const node = viewToScreen(CAM, toView(pick.view, { x: 5.375, y: 4 }));
+    const input = { camera: CAM, view: pick.view, ground: dragGround(pick.heights, horse, SQUARES, horse.nudge), plan: dragPlan({ room: state, role: "dm", src: pick.src!, grid: SQUARES, feetPerCell: 5, token: horse }), start: { node, ring }, rel: gripRel(rider, horse) };
+    const at = dragBound(input, node);
+    assert.ok(Math.abs(at.x - node.x) < 1e-6 && Math.abs(at.y - node.y) < 1e-6, JSON.stringify([at, node]));
+  });
+
+  test("the snap reads the box the token counts in from where it is drawn, and a free drag the box under it", () => {
+    const t = { id: "t", sceneId: "s1", size: "medium" as const, x: 3, y: 3, elevation: 0 };
+    const heights = flatHeights({ w: 16, h: 16 });
+    assert.deepEqual(dragGround(heights, t, SQUARES, { x: 3, y: 0 }).snap({ x: 3.6, y: 3 }), { x: 3, y: 3 });
+    assert.deepEqual(dragGround(heights, t, SQUARES, null).snap({ x: 3.6, y: 3 }), { x: 4, y: 3 });
   });
 });
