@@ -1007,16 +1007,20 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
     await escapeAll(page);
   } else await sweep.missing(page, "window-goblin", "a tap on the goblin opened no window");
 
-  // Snap off (docs/design/design-v1-snap-off.md 9): a goblin drawn off its square gets Snap to grid after Place freely, and Place freely reads pressed. The play row is measured with both, and the outline is canvas, which no DOM check reads.
-  await ops.send({ t: "token.update", tokenId: run.ids.goblin, patch: { drawnAt: { x: 9.25, y: 2.75 } } });
-  await waitFor("the goblin drawn off its square", () => (dmSocket.state?.tokens[run.ids.goblin]?.nudge ? true : null));
+  // Snap off (docs/design/design-v1-snap-off.md 9): a placed token's bar gains Snap to grid after Place freely, and Place freely reads pressed. The play row is measured with both. The mule carries nothing that would take the tap, and the outline is canvas, which no DOM check reads.
+  await ops.send({ t: "token.update", tokenId: run.ids.mule, patch: { drawnAt: { x: 8.25, y: 7.75 } } });
+  await waitFor("the mule drawn off its square", () => (dmSocket.state?.tokens[run.ids.mule]?.nudge ? true : null));
   try {
-    const placed = await selectToken(page, "Goblin", { x: 9, y: 3 });
+    // The group above leaves Multi-select on at some sizes, where a tap adds the mule to a group instead of opening its own bar.
+    const done = page.getByRole("button", { name: "Done", exact: true });
+    if (await visible(done)) await done.click();
+    await escapeAll(page);
+    const placed = await selectToken(page, "Pack mule", { x: 8, y: 8 });
     if (placed) {
       await expandBar(placed);
       const place = placed.getByRole("button", { name: "Place freely", exact: true });
       const snap = placed.getByRole("button", { name: "Snap to grid", exact: true });
-      if ((await place.count()) === 0 || (await snap.count()) === 0) await sweep.missing(page, "snapoff-play-row", "the bar of a placed goblin has no Place freely or no Snap to grid");
+      if ((await place.count()) === 0 || (await snap.count()) === 0) await sweep.missing(page, "snapoff-play-row", "the bar of a placed mule has no Place freely or no Snap to grid");
       else {
         await sweep.measure(page, "snapoff-snap-row", placed.locator('[data-bar-row="play"]'));
         await place.click();
@@ -1024,10 +1028,10 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
         await sweep.measure(page, "snapoff-pressed-row", placed.locator('[data-bar-row="play"]'));
         await place.click();
       }
-    } else await sweep.missing(page, "snapoff-play-row", "a tap on the placed goblin opened no window");
+    } else await sweep.missing(page, "snapoff-play-row", "a tap on the placed mule opened no window");
   } finally {
     await escapeAll(page);
-    await ops.send({ t: "token.update", tokenId: run.ids.goblin, patch: { drawnAt: null } });
+    await ops.send({ t: "token.update", tokenId: run.ids.mule, patch: { drawnAt: null } });
   }
 
   // A rider's window: Thorn on the warhorse, steering it.
