@@ -30,7 +30,7 @@ export const WRAP_GUARD_MS = 250;
 /** More than this share dropped, or late, steps down. */
 export const SHARE = 0.25;
 export const LATE_STEP = 3;
-/** A window with fewer frames than this says too little to judge. */
+/** A window with fewer frames, or for the late rule fewer callbacks, than this says too little to judge. */
 export const MIN_FRAMES = 20;
 /** Callbacks a second in a window shaped like a 30 Hz render cap. */
 export const CAPPED_MIN = 25;
@@ -124,7 +124,8 @@ export class StepDown {
   #judge(): void {
     this.judged++;
     const kept = this.#entries.filter((e) => !e.excluded);
-    if (kept.length < MIN_FRAMES) return;
+    // A device that shows only a few frames a second has few callbacks to read, so the drops count by the decoder's frames, and the late rule by callbacks.
+    if (kept.length === 0) return;
     const fallback = kept.some((e) => e.presentedStep === null);
     const start = this.#windowAt ?? kept[0]!.now;
     const slices = new Map<number, Entry[]>();
@@ -153,6 +154,6 @@ export class StepDown {
       this.#result = capped ? "slowingOrSaving" : "slowing";
       return;
     }
-    if (!fallback && kept.filter((e) => e.late).length / kept.length > SHARE) this.#result = "slowing";
+    if (!fallback && kept.length >= MIN_FRAMES && kept.filter((e) => e.late).length / kept.length > SHARE) this.#result = "slowing";
   }
 }

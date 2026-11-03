@@ -442,7 +442,8 @@ export class AnimMapBoard {
     const full = video && answer ? playback(video, this.#ruleInput(answer, true)) : null;
     const hand = Boolean(this.#srcAsset !== null && this.#srcAsset === desired && this.#firstFrame && full && (full.play || full.reason === "stillView") && !i.setupTool);
     this.#setHanded(hand);
-    this.#loop(hand && runs && this.#playing && this.#layer !== null);
+    // Draws start once the map layer's commit holds the element, so no video draw redraws the still.
+    this.#loop(hand && runs && this.#playing && this.#layer !== null && this.#konvaHolds === this.#element);
 
     // Before the browser answers, the device's own choices already say Still, and otherwise it reads as moving, the way it is about to go.
     this.#publish(video, full ?? (video ? playback(video, this.#ruleInput("smooth", true)) : null));

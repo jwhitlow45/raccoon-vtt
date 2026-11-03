@@ -229,6 +229,24 @@ describe("the step-down", () => {
     );
   });
 
+  test("the hiccup around a loop's wrap is left out: a 1 s loop that drops frames at each wrap never steps down", () => {
+    const step = new StepDown(0);
+    let total = 0;
+    let dropped = 0;
+    let presented = 0;
+    for (let now = 0; now < 40_000; now += 1000 / 30) {
+      const within = now % 1000;
+      // Every frame dropped within 230 ms of each wrap, over two fifths of each second's frames, all inside the half second left out.
+      const hiccup = now > 1000 && (within < 230 || within > 770);
+      total++;
+      if (hiccup) dropped++;
+      else presented++;
+      if (within < 1000 / 30 && now > 1000) step.wrap(now);
+      step.sample({ now, presentedFrames: presented, totalFrames: total, droppedFrames: dropped });
+    }
+    assert.equal(step.result, null);
+  });
+
   test("a window holding a restart is dropped, and the warm-up comes first", () => {
     const step = new StepDown(0);
     // Every frame dropped during the warm-up, then a restart before a window can close.

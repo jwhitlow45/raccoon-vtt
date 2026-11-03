@@ -6,7 +6,7 @@ import { chance, int, pick, rng } from "#shared/testutil.ts";
 import { AnimMapBoard, IDLE_INPUT, pageSteppedDown, resetPageStepDownForTests, type BoardEnv, type BoardInput, type LayerLike, type VideoLike } from "./board.ts";
 import { MIN_GAP_MS } from "./pacing.ts";
 import type { Decodable } from "./playback.ts";
-import { leaseDecoder, resetDecoderForTests, type DecoderLease } from "./status.ts";
+import { decoderLeases, leaseDecoder, resetDecoderForTests, type DecoderLease } from "./status.ts";
 import { Compositor, HEALTHY, mostInWindow, renderTimes, type Content, type Display, type Struggle } from "./videoSim.testutil.ts";
 
 /*
@@ -55,6 +55,11 @@ class World {
   rejectPlay = false;
   failLoads = false;
   realSize: { w: number; h: number } | null = null;
+  /** Commits React holds until the frame's draws are done: a commit late enough for Konva to draw before it. */
+  lateCommits: (() => void)[] = [];
+  /** The share of commits that land after the next frame's draws. */
+  lateShare = 0;
+  r: () => number = () => 1;
 
   later(run: () => void, ms: number): number {
     const id = this.#next++;
@@ -172,8 +177,12 @@ class FakeVideo implements VideoLike {
     });
   }
 
+  /** Sources this element took, for a test that counts them. */
+  sources = 0;
+
   load(): void {
     log(this.#world.now.toFixed(1), "load() src", this.attrs.get("src"));
+    if (this.hasSrc()) this.sources++;
     this.#generation++;
     this.#loaded = false;
     this.paused = true;
@@ -330,6 +339,7 @@ class Rig {
   #videoDraw(held: FakeVideo | null): void {
     const el = this.video;
     if (!el || held !== el) return this.world.fail(`${this.label}: a video draw while Konva draws the still`);
+    if (this.cameraPending) this.world.fail(`${this.label}: a video draw in a frame the camera's draw already shows`);
     if (el.paused || !el.hasSrc()) return this.world.fail(`${this.label}: a video draw while not playing`);
     const media = el.withCallbacks && el.callbacks !== undefined && !this.#inFallback() ? el.lastMediaMs : null;
     this.draws.push({ now: this.world.now, media, jumped: el.jumped });
@@ -347,14 +357,17 @@ class Rig {
   #queueCommit(): void {
     if (this.#commitQueued) return;
     this.#commitQueued = true;
-    queueMicrotask(() => {
+    const commit = () => {
       this.#commitQueued = false;
       const next = this.board.shown.element;
       if (next !== this.konvaHeld) {
         this.konvaHeld = next;
         this.board.konvaHolds(next);
       }
-    });
+    };
+    // Mostly at once, and now and then only after the next frame's draws, so a source cleared before the commit would meet a Konva draw.
+    if (this.world.r() < this.world.lateShare) this.world.lateCommits.push(commit);
+    else queueMicrotask(commit);
   }
 
   remount(): void {
@@ -435,6 +448,8 @@ async function sequence(seed: number): Promise<string[]> {
   resetPageStepDownForTests();
   const r = rng(seed);
   const world = new World();
+  world.r = r;
+  world.lateShare = 0.3;
   const content = pick(r, CONTENTS);
   const display = pick(r, DISPLAYS);
   const withCallbacks = !chance(r, 0.2);
@@ -481,6 +496,7 @@ async function sequence(seed: number): Promise<string[]> {
       world.frames.clear();
       for (const [, run] of frames) ticking(rigs(), () => run(at));
       for (const rig of rigs()) rig.cameraDraw();
+      for (const commit of world.lateCommits.splice(0)) commit();
       await settle(world);
       check();
     }
@@ -633,6 +649,7 @@ function single(content: Content, display: Display, video: MapVideo) {
       world.frames.clear();
       for (const f of frames) ticking([dm], () => f(at));
       dm.cameraDraw();
+      for (const commit of world.lateCommits.splice(0)) commit();
       await settle(world);
     }
   };
@@ -677,5 +694,72 @@ test("a healthy board on Moving plays, draws about 30 a second, and pauses when 
   await settle(world);
   await run(100);
   assert.ok(dm.board.videoDraws > hidden, "it plays again at once");
+  assert.deepEqual(world.failures, []);
+});
+
+test("a failed load is tried once more after 5 s, and a second failure shows the still with its reason", async () => {
+  const { world, dm, run } = single([{ fps: 30, ms: 2000 }], { hz: 60 }, VIDEO_A);
+  world.failLoads = true;
+  await settle(world);
+  await run(1000);
+  assert.equal(dm.board.state, "loading", "waiting for the retry");
+  assert.equal(dm.video!.hasSrc(), false, "the failed source is let go meanwhile");
+  world.failLoads = false;
+  await run(5000);
+  assert.equal(dm.board.state, "playing", "the retry plays");
+  world.failLoads = true;
+  dm.board.input({ video: VIDEO_B, url: "/vb" });
+  await settle(world);
+  await run(7000);
+  assert.equal(dm.board.state, "still load-failed");
+  assert.equal(dm.video!.hasSrc(), false);
+  assert.deepEqual(world.failures, []);
+});
+
+test("a play() the browser refuses shows the still, and a tap on the board plays it", async () => {
+  const { world, dm, run } = single([{ fps: 30, ms: 2000 }], { hz: 60 }, VIDEO_A);
+  world.rejectPlay = true;
+  await settle(world);
+  await run(1000);
+  assert.equal(dm.board.state, "still not-started");
+  assert.equal(dm.konvaHeld, null, "Konva draws the still");
+  dm.board.tapped();
+  await settle(world);
+  await run(500);
+  assert.equal(dm.board.state, "still not-started", "a tap the browser still refuses keeps the still");
+  world.rejectPlay = false;
+  dm.board.tapped();
+  await settle(world);
+  await run(500);
+  assert.equal(dm.board.state, "playing");
+  assert.deepEqual(world.failures, []);
+});
+
+test("a board that yielded to another board asks again only once what decides it changes", async () => {
+  const { world, dm, run } = single([{ fps: 30, ms: 2000 }], { hz: 60 }, VIDEO_A);
+  await settle(world);
+  await run(1000);
+  assert.equal(dm.board.state, "playing");
+  // The preview's board leases before the DM's board hears that it is covered.
+  const preview = new Rig(world, "preview", () => new FakeVideo(world, [{ fps: 30, ms: 2000 }], { hz: 60 }, rng(3), true), "smooth");
+  preview.board.input({ ...IDLE_INPUT, server: true, video: VIDEO_A, url: "/va" });
+  await settle(world);
+  await run(500);
+  assert.deepEqual(decoderLeases(), [{ user: "board", granted: true }], "only the preview's lease, the DM's board standing down");
+  assert.equal(dm.video!.hasSrc(), false);
+  assert.equal(preview.video!.hasSrc(), true);
+  assert.equal(dm.video!.sources, 1, "the DM's board never took its source back");
+  assert.equal(preview.video!.sources, 1);
+  // Covered, the DM's board asks for nothing, though what decides it changed.
+  dm.board.input({ preview: true });
+  await settle(world);
+  await run(500);
+  assert.equal(dm.video!.sources, 1);
+  assert.equal(preview.video!.hasSrc(), true, "the preview keeps its source");
+  preview.board.dispose();
+  dm.board.input({ preview: false });
+  await settle(world);
+  await run(1000);
+  assert.equal(dm.board.state, "playing", "the DM's board plays again once the preview goes");
   assert.deepEqual(world.failures, []);
 });
