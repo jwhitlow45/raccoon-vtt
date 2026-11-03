@@ -18,18 +18,25 @@ import { parseDiceSet } from "../dice/throw/sets.ts";
  * the menu included.
  */
 
-type Setting<T> = {
+export type Setting<T> = {
   get(): T;
   set(value: T): void;
   /** Takes a value for this page only, leaving the stored one as it is. */
   apply(value: T): void;
   /** Goes back to the device's own value: the stored one, or the one chosen on this page when storage could not keep it. */
   restore(): void;
+  /**
+   * Takes what another window of the app stored, from its `storage` event,
+   * as the device's own. A value this page took for itself with `apply`
+   * stays until `restore`, which then gives this one.
+   */
+  adopt(raw: string | null): void;
   subscribe(listener: () => void): () => void;
   use(): T;
 };
 
-function setting<T>(key: string, parse: (raw: string | null) => T, format: (value: T) => string, onChange?: (value: T) => void): Setting<T> {
+/** One device setting kept in local storage under `key` (the store pattern above). Exported for lib/scheme.ts, which keeps the theme in one. */
+export function setting<T>(key: string, parse: (raw: string | null) => T, format: (value: T) => string, onChange?: (value: T) => void): Setting<T> {
   const listeners = new Set<() => void>();
   let value = parse(read(key));
   /**
@@ -41,13 +48,15 @@ function setting<T>(key: string, parse: (raw: string | null) => T, format: (valu
    */
   let own = value;
   let saved = true;
+  /** Whether `apply` took a value for this page only, which a value from another window must not replace. */
+  let pageOnly = false;
   onChange?.(value);
   const subscribe = (listener: () => void) => {
     listeners.add(listener);
     return () => listeners.delete(listener);
   };
   const get = () => value;
-  const apply = (next: T) => {
+  const show = (next: T) => {
     if (Object.is(next, value)) return;
     value = next;
     onChange?.(next);
@@ -64,13 +73,23 @@ function setting<T>(key: string, parse: (raw: string | null) => T, format: (valu
         // Private mode or storage full: the setting lasts until the page closes.
         saved = false;
       }
-      apply(next);
+      pageOnly = false;
+      show(next);
     },
-    apply,
+    apply(next) {
+      pageOnly = true;
+      show(next);
+    },
     restore() {
       const raw = saved ? read(key) : null;
       if (raw !== null) own = parse(raw);
-      apply(own);
+      pageOnly = false;
+      show(own);
+    },
+    adopt(raw) {
+      own = parse(raw);
+      saved = true;
+      if (!pageOnly) show(own);
     },
     subscribe,
     // The same value for a render outside the browser, as a component's unit test makes: it reads the defaults.
@@ -273,3 +292,31 @@ export const subscribeWeatherMode = weatherModeSetting.subscribe;
 /** A table display's own choice, for its page only, as its text size takes `applyUiScale` (features/display/remember.ts). */
 export const applyWeatherMode = weatherModeSetting.apply;
 export const restoreWeatherMode = weatherModeSetting.restore;
+
+// ---------------------------------------------------------------- theme
+
+/**
+ * "Theme" (docs/design/design-v1-light-theme.md 4.1): Dark, the default,
+ * Light, or Auto, which follows the device's own light or dark setting.
+ * Anything else stored reads as dark. lib/scheme.ts resolves it and colors
+ * the page, and every open window of the app follows a change.
+ */
+export const THEME_CHOICES = ["dark", "light", "auto"] as const;
+export type ThemeChoice = (typeof THEME_CHOICES)[number];
+
+/** Each choice's name, in This device's row. */
+export const THEME_CHOICE_WORDS: Readonly<Record<ThemeChoice, string>> = { dark: "Dark", light: "Light", auto: "Auto" };
+
+export function parseThemeChoice(raw: string | null): ThemeChoice {
+  return raw === "light" || raw === "auto" ? raw : "dark";
+}
+
+/** The key, for lib/scheme.ts's `storage` listener. */
+export const THEME_KEY = "rvtt.theme";
+
+export const themeChoiceSetting = setting<ThemeChoice>(THEME_KEY, parseThemeChoice, (c) => c);
+
+export const themeChoice = themeChoiceSetting.get;
+export const setThemeChoice = themeChoiceSetting.set;
+export const useThemeChoice = themeChoiceSetting.use;
+export const subscribeThemeChoice = themeChoiceSetting.subscribe;

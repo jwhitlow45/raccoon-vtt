@@ -1,4 +1,4 @@
-import { theme } from "./theme.ts";
+import { PALETTES, theme, type Scheme } from "./theme.ts";
 
 /**
  * The interface accent follows the viewing member's own color (decided
@@ -17,6 +17,11 @@ import { theme } from "./theme.ts";
  * becomes a lighter navy rather than a grey. Text on an accent fill takes
  * whichever of a dark and a light ink reads better, and black when neither
  * reaches 4.5:1.
+ *
+ * The checks read the scheme's own palette (docs/design/design-v1-light-theme.md
+ * 6.3), so on a light page the crest yellow becomes a dark olive gold.
+ * Dark is the default, and what draws on the board, which stays dark,
+ * passes "dark" by name.
  */
 export type Accent = {
   accent: string;
@@ -46,47 +51,74 @@ const HEX = /^#[0-9a-f]{6}$/i;
  */
 const CREST_ORANGE = "#f38400";
 
-export function accentFor(color: string | null | undefined): Accent {
+export function accentFor(color: string | null | undefined, scheme: Scheme = "dark"): Accent {
   const picked = color && HEX.test(color) ? color.toLowerCase() : null;
   const base = picked && picked !== CREST_ORANGE ? picked : theme.color.crest;
-  const accent = fits(base) ? base : nearestFit(base);
+  const accent = fitsAccent(base, scheme) ? base : nearestFit(base, scheme, fitsAccent, accentFallback(scheme));
   return { accent, onAccent: inkOn(accent), tint: rgba(accent, TINT_ALPHA), selection: rgba(accent, SELECTION_ALPHA) };
 }
 
+/**
+ * A member's name or other words in their own color (the Log, recent
+ * rolls): the member's color where it reads as text on the scheme's
+ * surfaces, else the nearest that does, by the accent's search. Only the
+ * contrast counts, since words are not a control that could pass for the
+ * turn highlight or a disabled one, and orange stays orange, since the
+ * name is the member's and not the interface's.
+ */
+export function memberInk(color: string | null | undefined, scheme: Scheme = "dark"): string {
+  const picked = color && HEX.test(color) ? color.toLowerCase() : null;
+  if (!picked) return PALETTES[scheme].text;
+  return readsAsText(picked, scheme) ? picked : nearestFit(picked, scheme, readsAsText, PALETTES[scheme].text);
+}
+
+/**
+ * Where no lightness fits, which never happened in thousands of random
+ * colors: dark keeps the crest it always had, and light takes its own text
+ * color, since the crest yellow reads 1.3:1 on a light page.
+ */
+function accentFallback(scheme: Scheme): string {
+  return scheme === "dark" ? theme.color.crest : PALETTES.light.text;
+}
+
+function readsAsText(hex: string, scheme: Scheme): boolean {
+  return contrast(hex, behindAccentText(hex, scheme)) >= MIN_TEXT_CONTRAST;
+}
+
 /** Whether a color can be the accent as it is. */
-function fits(hex: string): boolean {
-  return (
-    contrast(hex, behindAccentText(hex)) >= MIN_TEXT_CONTRAST &&
-    cie76(hex, theme.color.accentSoft) >= MIN_APART &&
-    cie76(hex, theme.color.textMuted) >= MIN_APART
-  );
+function fitsAccent(hex: string, scheme: Scheme): boolean {
+  const palette = PALETTES[scheme];
+  return readsAsText(hex, scheme) && cie76(hex, palette.accentSoft) >= MIN_APART && cie76(hex, palette.textMuted) >= MIN_APART;
 }
 
 /**
  * The fitting color nearest the member's in OKLCH lightness, at the same
  * hue with as much of its chroma as sRGB holds there. Small steps, so it
- * moves no further than it must. Lighter goes first at each step: a dark
- * color can only get there by lightening, while a light one by the cream
- * can go either way.
+ * moves no further than it must. Toward the scheme's text goes first at
+ * each step, lighter on dark and darker on light: a color on the ground's
+ * side can only get there that way, while one by the turn highlight can
+ * go either way.
  */
-function nearestFit(hex: string): string {
+function nearestFit(hex: string, scheme: Scheme, fits: (hex: string, scheme: Scheme) => boolean, fallback: string): string {
   const [l, c, h] = toOklch(hex);
+  const toward = scheme === "dark" ? 1 : -1;
   for (let i = 1; i <= 200; i++) {
-    for (const next of [l + i * 0.005, l - i * 0.005]) {
+    for (const next of [l + toward * i * 0.005, l - toward * i * 0.005]) {
       if (next < 0 || next > 1) continue;
       const candidate = fromOklch(next, maxChroma(next, c, h), h);
-      if (fits(candidate)) return candidate;
+      if (fits(candidate, scheme)) return candidate;
     }
   }
-  return theme.color.crest;
+  return fallback;
 }
 
 /**
- * The lightest place accent text sits: a pressed control's tint over a
- * raised surface. Every other surface it sits on is darker.
+ * The place accent text reads worst: a pressed control's tint over a raised
+ * surface. In dark it is the lightest ground the accent sits on, and in
+ * light the darkest.
  */
-export function behindAccentText(accent: string): string {
-  return mix(theme.color.surfaceRaised, accent, TINT_ALPHA);
+export function behindAccentText(accent: string, scheme: Scheme = "dark"): string {
+  return mix(PALETTES[scheme].surfaceRaised, accent, TINT_ALPHA);
 }
 
 /** The CSS variables that `theme.color.accent` and its kin read, for an element's style. */
@@ -96,6 +128,34 @@ export function accentVars(a: Accent): Record<string, string> {
     "--rvtt-on-accent": a.onAccent,
     "--rvtt-accent-tint": a.tint,
     "--rvtt-selection": a.selection,
+  };
+}
+
+/**
+ * The accent the scheme falls back to outside a room, the crest's own for
+ * that scheme: `theme.color.accent` reads it where no member's accent is
+ * set (lib/scheme.ts writes them on the page's root).
+ */
+export function baseAccentVars(a: Accent): Record<string, string> {
+  return {
+    "--rvtt-base-accent": a.accent,
+    "--rvtt-base-on-accent": a.onAccent,
+    "--rvtt-base-accent-tint": a.tint,
+    "--rvtt-base-selection": a.selection,
+  };
+}
+
+/**
+ * The member's accent resolved for dark, which `BOARD_SCOPE` and
+ * `ON_BOARD_STYLE` (lib/theme.ts) read for what keeps the dark look and for
+ * rings that fall on the board. Pass `accentFor(color, "dark")`.
+ */
+export function boardAccentVars(a: Accent): Record<string, string> {
+  return {
+    "--rvtt-board-accent": a.accent,
+    "--rvtt-board-on-accent": a.onAccent,
+    "--rvtt-board-accent-tint": a.tint,
+    "--rvtt-board-selection": a.selection,
   };
 }
 
