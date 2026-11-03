@@ -1,4 +1,4 @@
-import { useId, useSyncExternalStore } from "react";
+import { Fragment, useId, useSyncExternalStore } from "react";
 import { Button } from "../../components/Button.tsx";
 import { Select } from "../../components/Field.tsx";
 import { GRABBER_DESIGNS, GRABBER_TOP, grabberDesign, parseGrabber, type GrabberId } from "../../components/grabberDesigns.ts";
@@ -14,7 +14,6 @@ import { useRoomScope } from "../../state/scope.ts";
 import { keySuffix, keyText, setShortcutSheet, useKeyHint, useShortcutKeys } from "../../state/shortcuts.ts";
 import { setSoundOn, useSoundOn } from "../encounter/alerts.ts";
 import { setSoundEnabled, usePingSound } from "../pings/feedback.ts";
-import { Slider } from "../scenes/controls.tsx";
 import { setRoomSound, useRoomSoundOn } from "../sound/engine/store.ts";
 import { diceLoader } from "../dice/throw/hooks.ts";
 import { useWeatherStillReason, WEATHER_CARDS } from "../weather/store.ts";
@@ -244,22 +243,33 @@ const MIX_PARTS: readonly { key: keyof SoundMix; label: string }[] = [
 export function RoomSoundControls() {
   const on = useRoomSoundOn();
   const mix = useSoundMix();
+  const id = useId();
   return (
     <>
       <Switch label="Room sound" help={ROOM_SOUND_HELP} checked={on} onChange={setRoomSound} />
       {on ? (
-        <div style={{ display: "grid", padding: `${theme.space(1)}px 0` }}>
+        // One grid for the three, so their names share a column and the sliders start and end together.
+        <div style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr) 3.2em", alignItems: "center", columnGap: theme.space(3), padding: `${theme.space(1)}px 0` }}>
           {MIX_PARTS.map((part) => (
-            <Slider
-              key={part.key}
-              label={part.label}
-              value={mix[part.key]}
-              min={0}
-              max={100}
-              step={5}
-              format={(v) => `${v}%`}
-              onChange={(v) => setSoundMix({ ...soundMixNow(), [part.key]: v })}
-            />
+            <Fragment key={part.key}>
+              <label htmlFor={`${id}-${part.key}`} style={{ fontSize: theme.font.body14, color: theme.color.text }}>
+                {part.label}
+              </label>
+              <input
+                id={`${id}-${part.key}`}
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={mix[part.key]}
+                aria-valuetext={`${mix[part.key]}%`}
+                onChange={(e) => setSoundMix({ ...soundMixNow(), [part.key]: Number(e.target.value) })}
+                style={{ width: "100%", minWidth: 0, height: theme.touch, margin: 0, accentColor: theme.color.accent }}
+              />
+              <span aria-hidden style={{ fontSize: theme.font.small, color: theme.color.textMuted, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                {mix[part.key]}%
+              </span>
+            </Fragment>
           ))}
         </div>
       ) : null}
