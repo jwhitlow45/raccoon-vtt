@@ -31,6 +31,7 @@ import { AreaController } from "./areas/AreaController.ts";
 import { TetherController } from "./attach/TetherController.ts";
 import { quietLazy } from "../lib/quietLazy.tsx";
 import { WeatherController } from "./weather/WeatherController.tsx";
+import { AnimMapController } from "./animmap/AnimMapController.tsx";
 
 /* The DM's height marks and explored outline, loaded after the room opens (lib/quietLazy.tsx). */
 const HeightLayer = quietLazy<LayerProps>(() => import("./builder/heights/HeightLayer.tsx").then((m) => m.HeightLayer), ["dm"], "The height marks");
@@ -185,6 +186,7 @@ export const CONTROLLERS: readonly ControllerDef[] = [
   { id: "areas", Component: AreaController },
   { id: "tethers", Component: TetherController },
   { id: "weather", Component: WeatherController },
+  { id: "animmap", Component: AnimMapController },
 ];
 
 export function layersOf(layer: LayerDef["layer"]): LayerDef[] {

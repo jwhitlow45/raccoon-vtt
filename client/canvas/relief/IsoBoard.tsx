@@ -696,7 +696,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
             <Group scaleY={groups.outer.scaleY}>
               <Group rotation={groups.inner.rotation}>
                 <IsoGroundContext.Provider value={groundCtx}>
-                  <MapContent scene={scene} variant={props.variant} report={!hidden} onDrawn={onDrawn} />
+                  <MapContent scene={scene} variant={props.variant} report={!hidden} video={false} onDrawn={onDrawn} />
                   {GROUND_LAYERS.map(({ id, Component }) => (
                     <Component key={id} {...props.layerProps} />
                   ))}

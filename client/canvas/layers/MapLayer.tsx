@@ -3,6 +3,7 @@ import { Image as KImage, Layer, Rect, Shape } from "react-konva";
 import type Konva from "konva";
 import type { Scene } from "#shared/model.ts";
 import { sceneGrid } from "#shared/rules/grid.ts";
+import { useMapVideo } from "../../features/animmap/AnimMapController.tsx";
 import { phasePreloads, usePhasePreload } from "../../features/phases/preload.ts";
 import { mapSwap, sameShown, type ShownMap } from "../../features/phases/swap.ts";
 import type { AssetVariant } from "../../lib/api.ts";
@@ -48,7 +49,7 @@ function sameMapInputs(a: { scene: Scene; variant: AssetVariant }, b: { scene: S
 function MapLayerImpl(props: { scene: Scene; variant: AssetVariant; report: boolean }) {
   return (
     <Layer listening={false}>
-      <MapContent scene={props.scene} variant={props.variant} report={props.report} />
+      <MapContent scene={props.scene} variant={props.variant} report={props.report} video />
     </Layer>
   );
 }
@@ -92,8 +93,13 @@ export function useReadableMap(drawn: DrawnMap | null): DrawnMap | null {
  * Top-down and for the isometric view's ground stage. Only the tree on
  * screen reports the map's progress (`report`), so the loading notice and
  * a failed download's toast come once.
+ *
+ * `video`: this tree draws an animated map's video in the still's place
+ * (docs/design/design-v1-animated-maps.md 5.1). Only Top-down's map layer
+ * passes it, so the isometric tree, and the side tints its `onDrawn` feeds,
+ * only ever get the still.
  */
-export const MapContent = memo(function MapContent(props: { scene: Scene; variant: AssetVariant; report: boolean; onDrawn?: (drawn: DrawnMap | null) => void }) {
+export const MapContent = memo(function MapContent(props: { scene: Scene; variant: AssetVariant; report: boolean; video: boolean; onDrawn?: (drawn: DrawnMap | null) => void }) {
   const { scene, variant } = props;
   const { w, h } = scene.bounds;
   // Lining up the grid means finding the lines drawn in the map's art, and
@@ -103,11 +109,11 @@ export const MapContent = memo(function MapContent(props: { scene: Scene; varian
   return (
     <>
       <Rect x={0} y={0} width={w} height={h} fill={scene.background || "#2b2b31"} />
-      {scene.map ? <MapImage sceneId={scene.id} map={scene.map} phases={scene.phases} variant={variant} sceneName={scene.name} report={props.report} onDrawn={props.onDrawn} /> : null}
+      {scene.map ? <MapImage sceneId={scene.id} map={scene.map} phases={scene.phases} variant={variant} sceneName={scene.name} report={props.report} video={props.video} onDrawn={props.onDrawn} /> : null}
       {scene.grid?.show && !aligning ? <Grid scene={scene} /> : null}
     </>
   );
-}, (a, b) => a.report === b.report && a.onDrawn === b.onDrawn && sameMapInputs(a, b));
+}, (a, b) => a.report === b.report && a.video === b.video && a.onDrawn === b.onDrawn && sameMapInputs(a, b));
 
 const NO_PRELOADS: ReturnType<typeof phasePreloads> = [];
 
@@ -118,9 +124,12 @@ function MapImage(props: {
   variant: AssetVariant;
   sceneName: string;
   report: boolean;
+  video: boolean;
   onDrawn?: (drawn: DrawnMap | null) => void;
 }) {
   const assets = useAssets();
+  // The board's video while it may draw here, in place of the still (features/animmap/board.ts). The phase-swap keep below only ever holds the still.
+  const moving = useMapVideo(props.video, props.map.video?.assetId);
   const ui = useRoomUi();
   const progress = useMapProgressStore();
   const rect = mapWorldRect(props.map);
@@ -189,11 +198,13 @@ function MapImage(props: {
   // A map removed from its scene unmounts this, and nothing may go on reading the image it drew.
   useEffect(() => () => onDrawn?.(null), [onDrawn]);
   if (!drawn) return null;
+  // The video is stretched to the still's rectangle, the one the grid was lined up on.
+  if (moving.element && rect) return <KImage ref={moving.ref} image={moving.element} x={rect.x} y={rect.y} width={rect.width} height={rect.height} />;
   // Every variant is stretched to the calibrated rectangle, so a phone's
   // 4096 px copy and a desktop's 8192 px original agree with the printed
   // grid. The image is never cache()d: a cached 8192 px map exceeds iOS
   // canvas limits.
-  return <KImage image={drawn.image} x={drawn.rect.x} y={drawn.rect.y} width={drawn.rect.width} height={drawn.rect.height} />;
+  return <KImage ref={moving.ref} image={drawn.image} x={drawn.rect.x} y={drawn.rect.y} width={drawn.rect.width} height={drawn.rect.height} />;
 }
 
 /**
@@ -212,34 +223,74 @@ function Grid(props: { scene: Scene }) {
   const { w, h } = props.scene.bounds;
   const { color, opacity, lineWidth } = props.scene.grid;
   const grid = sceneGrid(props.scene);
+  const strokeWidth = lineWidth > 0 ? lineWidth : 1;
+  // A new grid or bounds starts a new path cache. The scene keeps its grid object until the grid changes.
+  const cache = useMemo<GridPath>(() => ({ key: "", path: null }), [props.scene.grid, props.scene.gridShape, w, h]);
   return (
     <Shape
       name="sceneGrid"
       stroke={color || "#ffffff"}
-      strokeWidth={lineWidth > 0 ? lineWidth : 1}
+      strokeWidth={strokeWidth}
       strokeScaleEnabled={false}
       opacity={Number.isFinite(opacity) ? opacity : 0.25}
       perfectDrawEnabled={false}
       sceneFunc={(ctx, shape) => {
-        ctx.beginPath();
-        if (grid.shape === "hex") {
-          const view = groundInView(shape);
-          if (view) hexLinesInView(grid, props.scene.bounds, view, ctx);
-          ctx.strokeShape(shape);
-          return;
-        }
-        for (let x = 0; x <= w; x++) {
-          ctx.moveTo(x, 0);
-          ctx.lineTo(x, h);
-        }
-        for (let y = 0; y <= h; y++) {
-          ctx.moveTo(0, y);
-          ctx.lineTo(w, y);
-        }
-        ctx.strokeShape(shape);
+        const path = gridPath(cache, shape, (sink) => {
+          if (grid.shape === "hex") {
+            const view = groundInView(shape);
+            if (view) hexLinesInView(grid, props.scene.bounds, view, sink);
+            return;
+          }
+          for (let x = 0; x <= w; x++) {
+            sink.moveTo(x, 0);
+            sink.lineTo(x, h);
+          }
+          for (let y = 0; y <= h; y++) {
+            sink.moveTo(0, y);
+            sink.lineTo(w, y);
+          }
+        });
+        if (!path) return;
+        // As Konva strokes a line that keeps its width on screen: in the canvas's device pixels, the path already in the stage's.
+        const g = ctx._context;
+        const ratio = ctx.getCanvas().getPixelRatio();
+        g.save();
+        g.setTransform(ratio, 0, 0, ratio, 0, 0);
+        g.lineWidth = strokeWidth;
+        g.strokeStyle = color || "#ffffff";
+        g.stroke(path);
+        g.restore();
       }}
     />
   );
+}
+
+/** A grid's lines as one path in the stage's pixels, and the transform and stage size it was built for. */
+type GridPath = { key: string; path: Path2D | null };
+
+/**
+ * The grid's path, built once per camera (docs/design/design-v1-animated-maps.md
+ * 5.2). An animated map redraws the map layer up to 30 times a second with
+ * the camera still, and a hex scene's lines walk every hex in view
+ * (hexSpans.ts), which would be the main cost of a zoomed-out hex scene. So
+ * the path is kept in the stage's pixels, keyed on the shape's absolute
+ * transform and the stage's size, and a draw with neither changed strokes
+ * the same path. A camera move builds it afresh, as every draw did before.
+ */
+function gridPath(cache: GridPath, shape: Konva.Shape, build: (sink: { moveTo(x: number, y: number): void; lineTo(x: number, y: number): void }) => void): Path2D | null {
+  const stage = shape.getStage();
+  const m = shape.getAbsoluteTransform().getMatrix();
+  const key = `${m.join(",")}|${stage?.width() ?? 0}x${stage?.height() ?? 0}`;
+  if (cache.key === key) return cache.path;
+  const [a = 1, b = 0, c = 0, d = 1, e = 0, f = 0] = m;
+  const path = new Path2D();
+  build({
+    moveTo: (x, y) => path.moveTo(a * x + c * y + e, b * x + d * y + f),
+    lineTo: (x, y) => path.lineTo(a * x + c * y + e, b * x + d * y + f),
+  });
+  cache.key = key;
+  cache.path = path;
+  return path;
 }
 
 /**

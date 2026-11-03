@@ -161,7 +161,7 @@ describe("the board's controllers mount once", () => {
     const { layers, controllers } = registry();
     assert.deepEqual(
       controllers.map((c) => c.id),
-      ["dm-camera", "scene-thumbnails", "trap-alerts", "teleport-toasts", "pings", "pins", "rulers", "areas", "tethers", "weather"],
+      ["dm-camera", "scene-thumbnails", "trap-alerts", "teleport-toasts", "pings", "pins", "rulers", "areas", "tethers", "weather", "animmap"],
     );
     for (const id of ["dm-camera", "scene-thumbnails"]) assert.ok(!layers.some((l) => l.id === id), `${id} drawn in a tree`);
     assert.doesNotMatch(read("features/dm/CameraLayer.tsx"), /getStage\(|react-konva/, "the camera controller reads the camera it is given, not a stage");

@@ -18,6 +18,7 @@ import { panAnchor, requestPan, watchPans } from "../features/encounter/pan.ts";
 import { stageCameraSlot } from "../features/scenes/stageCamera.ts";
 import { CONTROLLERS, layersOf, type LayerProps } from "../features/layers.ts";
 import { WeatherMount } from "../features/weather/WeatherController.tsx";
+import { AnimMapHost } from "../features/animmap/AnimMapController.tsx";
 import { displayViewKey, viewKey } from "../features/view/store.ts";
 import { viewGestureSlot } from "../features/view/choice.ts";
 import { useRoomViewChoice } from "../features/view/ViewMenu.tsx";
@@ -1829,6 +1830,8 @@ export function MapStage(props: {
 
   return (
     <div ref={wrapRef} style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
+      {/* An animated map's video and its cover, under both stages (docs/design/design-v1-animated-maps.md 5.2). */}
+      <AnimMapHost />
       {size && cam && live ? (
         <>
           {/* Everything with effects mounts once, outside both drawing trees, whichever view shows (ISO-D15). */}
