@@ -3,7 +3,18 @@ import { Button } from "../../components/Button.tsx";
 import { Dialog } from "../../components/Dialog.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
+import type { Playing } from "#shared/sound.ts";
+import { send } from "../sound/panel/ops.ts";
+import { STOP_THE_SOUND } from "../sound/panel/words.ts";
 import { XMark } from "./XCardButton.tsx";
+
+/**
+ * Whether the room's sound plays: music or a background sound. The effect
+ * lists stay as history after their effects end, so they never count.
+ */
+function soundSounds(playing: Playing | null | undefined): boolean {
+  return playing ? playing.music !== null || Object.keys(playing.loops).length > 0 : false;
+}
 
 /**
  * The X-card as every device in the room shows it (docs/design/design-v1-dm-tools.md
@@ -14,9 +25,11 @@ import { XMark } from "./XCardButton.tsx";
  * It is a modal dialog, so it shows over any sheet or dialog already open
  * and everyone reads it before going on. Dismiss, Escape or a tap beside
  * it closes it. The DM's card adds "Pause the game", which turns the
- * blackout on. A table display, where a tap anywhere closes the card and
- * does nothing else (section 3.1), mounts it with `tapCloses` and passes
- * its own `card`, so its tap and key rules know while the card shows.
+ * blackout on, and while sound plays "Stop the sound", which stops it all,
+ * effects too (docs/design/design-v1-music.md 4.6). A table display, where
+ * a tap anywhere closes the card and does nothing else (section 3.1),
+ * mounts it with `tapCloses` and passes its own `card`, so its tap and key
+ * rules know while the card shows.
  */
 export function XCardHost(props: { tapCloses?: boolean; card?: XCardShowing }) {
   const own = useXCard();
@@ -46,6 +59,7 @@ export function useXCard(): XCardShowing {
 function XCard(props: { tapCloses: boolean; onDismiss(): void }) {
   const dm = useRoomView((s) => s.you?.role === "dm");
   const blackout = useRoomView((s) => s.view?.meta.view.blackout === true);
+  const sounding = useRoomView((s) => soundSounds(s.view?.playing));
   const actions = useRoomActions();
 
   return (
@@ -70,6 +84,7 @@ function XCard(props: { tapCloses: boolean; onDismiss(): void }) {
                 {blackout ? "The game is paused" : "Pause the game"}
               </Button>
             ) : null}
+            {dm && sounding ? <Button onClick={() => send(actions, { t: "sound.stopAll" })}>{STOP_THE_SOUND}</Button> : null}
           </div>
         </div>
       </div>

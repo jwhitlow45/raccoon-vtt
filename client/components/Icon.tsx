@@ -127,7 +127,15 @@ export type IconName =
   | "turnLeft"
   | "turnRight"
   | "viewAs"
-  | "windToward";
+  | "windToward"
+  | "music"
+  | "play"
+  | "pause"
+  | "skip"
+  | "stop"
+  | "repeatOne"
+  | "shuffle"
+  | "volume";
 
 /**
  * The meanings drawn with Lucide's path data, by the Lucide icon each
@@ -200,6 +208,14 @@ export const LUCIDE: Partial<Record<IconName, LucideIcon>> = {
   mapLabel: "type",
   light: "lightbulb",
   stamp: "stamp",
+  music: "music",
+  play: "play",
+  pause: "pause",
+  skip: "skip-forward",
+  stop: "square",
+  repeatOne: "repeat-1",
+  shuffle: "shuffle",
+  volume: "volume-2",
 };
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
@@ -342,7 +358,7 @@ const SHAPES: Record<IconName, ReactNode> = {
   fogRoom: <path {...STROKE} d="M4 4h16v16H4zM4 13h7M14 4v9h6" />,
   // A plain circle crossed by a slash, where the area tool's From control names no creature: No caster, or "From you" (docs/design/design-v1-area-from-character.md 3.2).
   noCaster: <path {...STROKE} d="M12 4a8 8 0 1 0 0 16 8 8 0 1 0 0-16zM6.3 17.7L17.7 6.3" />,
-  // Lucide repeat: a roll sent again as it went. Never Redo, which takes back an undo.
+  // Lucide repeat: something going round again as it went, a roll sent again or the music's Repeat all (and Repeat off, unpressed). Never Redo, which takes back an undo.
   again: <path {...STROKE} d="m17 2 4 4-4 4M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4M21 13v1a4 4 0 0 1-4 4H3" />,
   // Lucide eye-off: hidden from players (a secret roll, a hidden token, a DM-only note). Never the side panel's Hide.
   hidden: (
@@ -647,6 +663,38 @@ const SHAPES: Record<IconName, ReactNode> = {
     <g {...STROKE}>
       <path d="M12 3v11M8 7l4-4 4 4" />
       <path d="M7 14v7M17 14v7" />
+    </g>
+  ),
+  // The Sound panel's own (docs/design/design-v1-music.md 4.1). Lucide music: the panel, the room's music and sound.
+  music: (
+    <g {...STROKE}>
+      <path d="M9 18V5l12-2v13" />
+      <circle cx="6" cy="18" r="3" />
+      <circle cx="18" cy="16" r="3" />
+    </g>
+  ),
+  // Lucide play: start or resume the music for everyone. Never a roll, which has no play.
+  play: <path {...STROKE} d="M6 3l14 9-14 9z" />,
+  // Lucide pause: hold the music where it is, for everyone.
+  pause: (
+    <g {...STROKE}>
+      <rect x="14" y="4" width="4" height="16" rx="1" />
+      <rect x="6" y="4" width="4" height="16" rx="1" />
+    </g>
+  ),
+  // Lucide skip-forward: on to the next track.
+  skip: <path {...STROKE} d="M5 4l10 8-10 8zM19 5v14" />,
+  // Lucide square: stop a sound for everyone. Never Delete, which the trash can draws.
+  stop: <rect {...STROKE} width="18" height="18" x="3" y="3" rx="2" />,
+  // Lucide repeat-1: the music's Repeat one, the same track again.
+  repeatOne: <path {...STROKE} d="m17 2 4 4-4 4M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4M21 13v1a4 4 0 0 1-4 4H3M11 10h1v4" />,
+  // Lucide shuffle: a playlist played in a new random order each time.
+  shuffle: <path {...STROKE} d="m18 14 4 4-4 4M18 2l4 4-4 4M2 18h1.973a4 4 0 0 0 3.3-1.7l5.454-8.6a4 4 0 0 1 3.3-1.7H22M2 6h1.972a4 4 0 0 1 3.6 2.2M22 18h-6.041a4 4 0 0 1-3.3-1.8l-.359-.45" />,
+  // Lucide volume-2: a volume for everyone, beside its slider.
+  volume: (
+    <g {...STROKE}>
+      <path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z" />
+      <path d="M16 9a5 5 0 0 1 0 6M19.364 18.364a9 9 0 0 0 0-12.728" />
     </g>
   ),
   // Lucide scan-eye: the DM looks through a player's eyes (View as a player). Never the plain eye, which means players see a thing.

@@ -69,7 +69,7 @@ Changes to every icon: the black background square was removed and the fill set 
 
 The interface icons marked Lucide in `client/components/Icon.tsx` are path data copied from [Lucide](https://github.com/lucide-icons/lucide) ([lucide.dev](https://lucide.dev)), version 0.525.0, used under the ISC License. The app does not ship the Lucide package. The other icons in that file were drawn for this project. The icons copied, by Lucide's names:
 
-`arrow-down`, `arrow-left`, `arrow-right`, `arrow-up`, `book-open`, `brick-wall`, `calendar-clock`, `chevrons-down`, `circle-user-round`, `clipboard-list`, `compass`, `contact-round`, `copy-plus`, `crop`, `crown`, `download`, `eraser`, `external-link`, `eye`, `eye-off`, `file-text`, `focus`, `footprints`, `hash`, `image`, `info`, `library`, `lightbulb`, `list-tree`, `lock`, `log-out`, `map`, `maximize-2`, `menu`, `minimize-2`, `mountain`, `notebook-text`, `paintbrush`, `paw-print`, `pencil`, `radar`, `radius`, `redo-2`, `refresh-cw`, `repeat`, `scan-eye`, `scroll-text`, `settings`, `share`, `skull`, `smartphone`, `snail`, `square-dashed`, `stamp`, `sticky-note`, `swords`, `timer`, `trash-2`, `type`, `undo-2`, `user-minus`, `users`, `zap`, `zoom-in`, `zoom-out`.
+`arrow-down`, `arrow-left`, `arrow-right`, `arrow-up`, `book-open`, `brick-wall`, `calendar-clock`, `chevrons-down`, `circle-user-round`, `clipboard-list`, `compass`, `contact-round`, `copy-plus`, `crop`, `crown`, `download`, `eraser`, `external-link`, `eye`, `eye-off`, `file-text`, `focus`, `footprints`, `hash`, `image`, `info`, `library`, `lightbulb`, `list-tree`, `lock`, `log-out`, `map`, `maximize-2`, `menu`, `minimize-2`, `mountain`, `music`, `notebook-text`, `paintbrush`, `pause`, `paw-print`, `pencil`, `play`, `radar`, `radius`, `redo-2`, `refresh-cw`, `repeat`, `repeat-1`, `scan-eye`, `scroll-text`, `settings`, `share`, `shuffle`, `skip-forward`, `skull`, `smartphone`, `snail`, `square`, `square-dashed`, `stamp`, `sticky-note`, `swords`, `timer`, `trash-2`, `type`, `undo-2`, `user-minus`, `users`, `volume-2`, `zap`, `zoom-in`, `zoom-out`.
 
 ```
 ISC License
@@ -89,7 +89,7 @@ ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ```
 
-Lucide's license credits the icons it derived from Feather to Feather's own MIT License. Of the icons copied here, these are derived from Feather: `arrow-down`, `arrow-left`, `arrow-right`, `arrow-up`, `chevrons-down`, `compass`, `download`, `external-link`, `hash`, `info`, `lock`, `log-out`, `minimize-2`, `share`, `smartphone`, `trash-2`, `type`, `zoom-in`, `zoom-out`.
+Lucide's license credits the icons it derived from Feather to Feather's own MIT License. Of the icons copied here, these are derived from Feather: `arrow-down`, `arrow-left`, `arrow-right`, `arrow-up`, `chevrons-down`, `compass`, `download`, `external-link`, `hash`, `info`, `lock`, `log-out`, `minimize-2`, `music`, `share`, `smartphone`, `square`, `trash-2`, `type`, `zoom-in`, `zoom-out`.
 
 ```
 The MIT License (MIT)
@@ -1035,6 +1035,10 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
+
+## Sound encoder
+
+When the DM adds a sound that is not already a suitable MP3, the browser encodes it with [@breezystack/lamejs](https://www.npmjs.com/package/@breezystack/lamejs) 1.2.7, a JavaScript port of the LAME MP3 encoder whose source is at [github.com/shijinyu/lamejs](https://github.com/shijinyu/lamejs), used under the GNU Lesser General Public License v3.0. It ships as a chunk of its own, loaded only to convert a file, with a license banner naming it. The full LGPL-3.0 and GPL-3.0 texts are in `client/features/sound/upload/licenses/` and are served beside that chunk. Since the app's own source is public under the AGPL, anyone can rebuild it with a changed copy of the library (`docs/development.md` says how).
 
 ## Rules content (SRD 5.2.1)
 

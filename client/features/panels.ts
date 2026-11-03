@@ -149,6 +149,7 @@ export const PANELS: readonly PanelDef[] = [
   // From 900 px up the party bar sits atop the side panel instead (features/party/PartyDock.tsx).
   panel({ id: "party", title: "Party", icon: "group", order: 14, group: "play", dmOnly: true, narrowOnly: true, load: () => import("./party/PartyPanel.tsx") }),
   panel({ id: "dm", title: "DM", icon: "dm", order: 22, group: "play", dmOnly: true, guide: "dm-panel", load: () => import("../panels/DmPanel.tsx") }),
+  panel({ id: "sound", title: "Sound", icon: "music", order: 23, group: "play", needsSound: true, guide: "music-and-sound", load: () => import("./sound/panel/SoundPanel.tsx") }),
   panel({ id: "outliner", title: "Outliner", icon: "outliner", order: 46, group: "prepare", dmOnly: true, guide: "outliner", load: () => import("./outliner/OutlinerPanel.tsx") }),
   panel({ id: "menu", title: "Menu", icon: "more", order: 90, group: "room", load: () => import("../panels/MenuPanel.tsx") }),
 ];
@@ -157,7 +158,7 @@ export const PANELS: readonly PanelDef[] = [
  * What a player's view holds that some panels wait for. `clock`: the room's
  * clock, so Time is listed (docs/design/design-v1-calendar.md 4.4). `sound`:
  * something playing that they receive, so Sound is listed
- * (docs/design/design-v1-sound.md 4.1, D-261102-462). The DM has both panels
+ * (docs/design/design-v1-music.md 4.1, D-261102-462). The DM has both panels
  * always. A player whose Time or Sound panel is open when it stops keeps it
  * open (pages/Room.tsx), so these only decide what is listed.
  */

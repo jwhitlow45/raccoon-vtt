@@ -17,6 +17,8 @@ import { sceneRowDetail } from "./sceneSummary.ts";
 import { thumbSources } from "./thumbnail.ts";
 import { sightOf } from "#shared/keys.ts";
 import { moveWarning } from "../vision/moveWarning.ts";
+import { send } from "../sound/panel/ops.ts";
+import { playlistsOf, sceneOrder, soundsOf } from "../sound/panel/state.ts";
 
 /**
  * The room's scenes in order. Tapping one shows it to the DM (players stay
@@ -54,6 +56,8 @@ export function SceneList(props: { scenes: Scene[]; viewingId: string | null; pl
   });
   const moving = useDelayed(movingTo !== null) ? movingTo : null;
   const sight = useRoomView((s) => (s.view ? sightOf(s.view) : undefined));
+  const sounds = useRoomView((s) => soundsOf(s.view));
+  const playlists = useRoomView((s) => playlistsOf(s.view));
   const warningFor = (scene: Scene) => moveWarning({ scene, viewing: scene.id === viewingId, sight });
 
   const movePlayers = (scene: Scene) => {
@@ -63,6 +67,8 @@ export function SceneList(props: { scenes: Scene[]; viewingId: string | null; pl
     }
     setConfirmMove(null);
     actions.dispatch({ t: "room.setPlayerScene", sceneId: scene.id });
+    // The scene's own sound, right behind the move. It plays only while the players are still there, so a refused move or another DM's later move leaves the room's sound alone (docs/design/design-v1-music.md 4.6).
+    if (scene.sound) send(actions, { t: "sound.scene", sceneId: scene.id, run: actions.newId(), order: sceneOrder(scene.sound, playlists, sounds), onMove: true });
   };
 
   const reorder = (order: string[] | null) => {
