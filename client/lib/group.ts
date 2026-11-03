@@ -1,7 +1,7 @@
 import type { ClientOp } from "#shared/protocol.ts";
 import { MAX_MOVES } from "#shared/protocol.ts";
 import type { Grid } from "#shared/rules/grid.ts";
-import { footprint, snapPosition } from "./scene.ts";
+import { drawnAt, footprint, snapPosition } from "./scene.ts";
 
 /**
  * Moving several selected tokens as one (features section 5), as plain
@@ -77,8 +77,12 @@ export function moveOps(moves: readonly Move[]): ClientOp[] {
   return ops;
 }
 
-/** The tokens whose footprints overlap a box dragged on the map, in world cells. */
-export function tokensInBox<T extends Placed>(tokens: Iterable<T>, a: { x: number; y: number }, b: { x: number; y: number }): T[] {
+/**
+ * The tokens whose drawn boxes overlap a box dragged on the map, in world
+ * cells: a nudged token is taken where it is drawn
+ * (docs/design/design-v1-snap-off.md 6.2), as the eye judges the box.
+ */
+export function tokensInBox<T extends Placed & { nudge?: { x: number; y: number } }>(tokens: Iterable<T>, a: { x: number; y: number }, b: { x: number; y: number }): T[] {
   const x0 = Math.min(a.x, b.x);
   const x1 = Math.max(a.x, b.x);
   const y0 = Math.min(a.y, b.y);
@@ -86,7 +90,8 @@ export function tokensInBox<T extends Placed>(tokens: Iterable<T>, a: { x: numbe
   const out: T[] = [];
   for (const t of tokens) {
     const fp = footprint(t);
-    if (t.x < x1 && t.x + fp.w > x0 && t.y < y1 && t.y + fp.h > y0) out.push(t);
+    const at = drawnAt(null, t);
+    if (at.x < x1 && at.x + fp.w > x0 && at.y < y1 && at.y + fp.h > y0) out.push(t);
   }
   return out;
 }

@@ -86,6 +86,13 @@ describe("moving a group", () => {
     );
     assert.deepEqual(tokensInBox(tokens, { x: 0, y: 0 }, { x: 1, y: 1 }), []);
   });
+
+  test("a box takes a nudged token where it is drawn (docs/design/design-v1-snap-off.md 6.2)", () => {
+    const nudged = { id: "n", x: 2, y: 2, size: "medium" as const, nudge: { x: 3, y: 0 } };
+    // Drawn over [2.375, 3.375], so a box from x 3.2 meets it, and one ending at 2.3 misses it.
+    assert.deepEqual(tokensInBox([nudged], { x: 3.2, y: 2 }, { x: 4, y: 3 }).map((t) => t.id), ["n"]);
+    assert.deepEqual(tokensInBox([nudged], { x: 1, y: 2 }, { x: 2.3, y: 3 }), []);
+  });
 });
 
 describe("a box in the isometric view (docs/design/design-v1-isometric-view.md 6.2)", () => {

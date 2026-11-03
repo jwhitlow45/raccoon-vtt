@@ -2,7 +2,7 @@ import { FOG_SUBCELLS, type RoomState, type Token } from "#shared/model.ts";
 import { tileKey } from "#shared/keys.ts";
 import { decodeTile, getBit, TILE_CELLS } from "#shared/rules/fog.ts";
 import { boardSizes } from "../../lib/boardScale.ts";
-import { displayName, footprint } from "../../lib/scene.ts";
+import { displayName, drawnAt, footprint } from "../../lib/scene.ts";
 import { DECOR_MIN_PX } from "../../lib/tokenView.ts";
 
 /**
@@ -24,20 +24,22 @@ export type Point = { x: number; y: number };
  * the zoom (lib/boardScale.ts): its body, the chip row over its top edge,
  * and the band a label of two lines hangs in under its HP bar, as wide as
  * its measured name. A token too small on screen for marks takes its body.
+ * Each where the token is drawn (docs/design/design-v1-snap-off.md 6.2).
  */
 export function tokenBoxes(tokens: readonly Token[], scale: number, measure: (text: string, px: number) => number): Box[] {
   const sizes = boardSizes(scale);
   const out: Box[] = [];
   for (const t of tokens) {
     const fp = footprint(t);
-    out.push({ x0: t.x, y0: t.y, x1: t.x + fp.w, y1: t.y + fp.h });
+    const { x, y } = drawnAt(null, t);
+    out.push({ x0: x, y0: y, x1: x + fp.w, y1: y + fp.h });
     if (fp.w * scale < DECOR_MIN_PX) continue;
-    const cx = t.x + fp.w / 2;
+    const cx = x + fp.w / 2;
     const chips = sizes.chipPx / 2 / scale;
-    out.push({ x0: t.x, y0: t.y - chips, x1: t.x + fp.w, y1: t.y });
+    out.push({ x0: x, y0: y - chips, x1: x + fp.w, y1: y });
     const widthPx = Math.min(15 * sizes.namePx, Math.max(fp.w * scale, measure(displayName(t), sizes.namePx) + 4));
     const half = widthPx / 2 / scale;
-    const top = t.y + fp.h + sizes.gapPx / scale;
+    const top = y + fp.h + sizes.gapPx / scale;
     const tall = (2 * sizes.gapPx + sizes.barPx + Math.round(sizes.namePx * 1.17) + Math.round(sizes.hpPx * 1.17)) / scale;
     out.push({ x0: cx - half, y0: top, x1: cx + half, y1: top + tall });
   }

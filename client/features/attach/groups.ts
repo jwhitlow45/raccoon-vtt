@@ -3,7 +3,7 @@ import type { Token } from "#shared/model.ts";
 import { carriedGroup, carriedIndex, fullRect, holderOf, publicMembers, type SeenByAll } from "#shared/rules/attach.ts";
 import type { PlacedToken } from "#shared/rules/footprint.ts";
 import type { Grid } from "#shared/rules/grid.ts";
-import { displayName } from "../../lib/scene.ts";
+import { displayName, drawnAt } from "../../lib/scene.ts";
 import { linkTag } from "./tags.ts";
 
 /**
@@ -19,7 +19,26 @@ type Tokens = Readonly<Record<string, Token | undefined>>;
 /** A carried token drawn inset, to this share of its size, so the mount's edge and ring show around it. */
 export const COVER_INSET = 0.7;
 
-/** Whether a carried token's footprint covers its holder's whole footprint, as a Small rider on a Medium mastiff does (4.2, 4.4). */
+type DrawnToken = PlacedToken & Pick<Token, "nudge">;
+
+/**
+ * A token's full footprint where it is drawn: the box links read, moved by
+ * its nudge (docs/design/design-v1-snap-off.md 6.2). A nudge is valid only
+ * on a token on its own snapped spot, so that box is the stored spot's.
+ * Drawing and presses read this, never a rule.
+ */
+function drawnRect(g: Grid, token: DrawnToken): { x: number; y: number; w: number; h: number } {
+  const r = fullRect(g, token);
+  const at = drawnAt(g, token);
+  return { x: r.x + at.x - token.x, y: r.y + at.y - token.y, w: r.w, h: r.h };
+}
+
+/**
+ * Whether a carried token's footprint covers its holder's whole footprint,
+ * as a Small rider on a Medium mastiff does (4.2, 4.4). It reads the rules
+ * boxes, not the drawn ones: it decides who a drag moves (dragLead), and a
+ * nudge never changes a rule.
+ */
 export function coversHolder(g: Grid, carried: PlacedToken, holder: PlacedToken): boolean {
   const a = fullRect(g, carried);
   const b = fullRect(g, holder);
@@ -86,10 +105,10 @@ export function holderMiddles(g: Grid, tokens: Tokens, token: Token): CellBox[] 
   }
 }
 
-/** The holder's middle (holderMiddle) where it lies inside the carried token's footprint, in the token's own cells, or null where it misses it. */
+/** The holder's middle (holderMiddle) where it lies inside the carried token's footprint, in the token's own cells, or null where it misses it. Both where they are drawn, as the node's hit area is. */
 function middleIn(g: Grid, holder: Token, token: Token): CellBox | null {
-  const h = fullRect(g, holder);
-  const t = fullRect(g, token);
+  const h = drawnRect(g, holder);
+  const t = drawnRect(g, token);
   const mx = Math.min(0.25, h.w / 4);
   const my = Math.min(0.25, h.h / 4);
   const x0 = Math.max(t.x, h.x + h.w / 2 - mx);
@@ -275,8 +294,9 @@ export function tethers(g: Grid, tokens: Tokens, sceneId: string, at: (t: Token)
   return out.sort((a, b) => (a.id < b.id ? -1 : 1));
 }
 
+/** A tether end: the middle of the token's footprint at `p`, a rules spot, drawn where its nudge draws it. */
 function center(g: Grid, t: Token, p: { x: number; y: number }): { x: number; y: number } {
-  const r = fullRect(g, { ...t, x: p.x, y: p.y });
+  const r = drawnRect(g, { ...t, x: p.x, y: p.y });
   return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
 }
 

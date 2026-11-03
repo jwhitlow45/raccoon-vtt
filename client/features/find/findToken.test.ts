@@ -66,6 +66,15 @@ describe("find my token", () => {
     });
   });
 
+  test("fits a nudged token's drawn box (docs/design/design-v1-snap-off.md 6.2)", () => {
+    assert.deepEqual(findRect({ x: 10, y: 6, size: "medium", nudge: { x: 3, y: -1 } }), {
+      x: 10.375 - FIND_ROOM_CELLS,
+      y: 5.875 - FIND_ROOM_CELLS,
+      width: 1 + FIND_ROOM_CELLS * 2,
+      height: 1 + FIND_ROOM_CELLS * 2,
+    });
+  });
+
   test("keeps clear of a phone's open sheet", () => {
     assert.deepEqual(sheetCover(null), { top: 0, right: 0, bottom: 0, left: 0 });
     assert.deepEqual(sheetCover({ placement: "bottom", width: 390, height: 401.5 }), { top: 0, right: 0, bottom: 402, left: 0 });

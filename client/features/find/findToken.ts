@@ -1,7 +1,7 @@
 import type { MemberId, RoomState, SceneId, Token } from "#shared/model.ts";
 import { cameraAt, fitRect, type Camera, type Insets, type Rect, type Size } from "../../lib/camera.ts";
 import { TOP_DOWN, toView, viewBox, type View, type ViewBox } from "../../lib/view.ts";
-import { footprint } from "../../lib/scene.ts";
+import { drawnAt, footprint } from "../../lib/scene.ts";
 import { liftIn, tokenBase, type BoardPick } from "../../canvas/boardPick.ts";
 import type { FootprintToken } from "#shared/rules/footprint.ts";
 import { ownsToken } from "../tokens/access.ts";
@@ -40,12 +40,13 @@ export function nextOwnToken(input: {
   return own[(last + 1) % own.length] ?? null;
 }
 
-/** What the camera fits for a found token: its footprint with room around it, so a press both pans and zooms. */
-export function findRect(token: Pick<Token, "x" | "y" | "size" | "w" | "h">): Rect {
+/** What the camera fits for a found token: its drawn box (docs/design/design-v1-snap-off.md 6.2) with room around it, so a press both pans and zooms. */
+export function findRect(token: Pick<Token, "x" | "y" | "size" | "w" | "h" | "nudge">): Rect {
   const fp = footprint(token);
+  const at = drawnAt(null, token);
   return {
-    x: token.x - FIND_ROOM_CELLS,
-    y: token.y - FIND_ROOM_CELLS,
+    x: at.x - FIND_ROOM_CELLS,
+    y: at.y - FIND_ROOM_CELLS,
     width: fp.w + FIND_ROOM_CELLS * 2,
     height: fp.h + FIND_ROOM_CELLS * 2,
   };

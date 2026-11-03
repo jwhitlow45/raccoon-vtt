@@ -249,3 +249,37 @@ describe("the bar's link words (docs/design/design-v1-look-pass-2.md 2.10)", () 
     for (const t of [bree, owl, torch, goblin]) assert.equal(groupLine(all, t).holder?.text, linkTag(all, t), t.name);
   });
 });
+
+describe("a nudged rider's press area (docs/design/design-v1-snap-off.md 6.2)", () => {
+  test("a tap on a horse's middle under a knight nudged forward picks the horse, and the knight takes the rest of where it is drawn", () => {
+    const horse = token("horse", { name: "Warhorse", size: "large", x: 4, y: 4 });
+    const knight = token("knight", { name: "Knight", x: 5, y: 5, nudge: { x: -3, y: -3 }, attached: { to: "horse", kind: "ride" } });
+    const tokens: Record<string, Token> = { horse, knight };
+    // Drawn from (4.625, 4.625), the knight sits over the horse's middle, a half square about (5, 5).
+    assert.deepEqual(holderMiddles(SQUARES, tokens, knight), [{ x: 0.125, y: 0.125, w: 0.5, h: 0.5 }]);
+    const pressAt = (at: { x: number; y: number }) => {
+      for (const t of [knight, horse]) {
+        const w = t.size === "large" ? 2 : 1;
+        const node = t.nudge ? { x: t.x + t.nudge.x / 8, y: t.y + t.nudge.y / 8 } : t;
+        const x = at.x - node.x;
+        const y = at.y - node.y;
+        if (pressBoxes(w, w, drawsInset(SQUARES, tokens, t), holderMiddles(SQUARES, tokens, t)).some((b) => x > b.x && x < b.x + b.w && y > b.y && y < b.y + b.h)) return dragLead(SQUARES, tokens, t).id;
+      }
+      return null;
+    };
+    assert.equal(pressAt({ x: 5, y: 5 }), "horse");
+    assert.equal(pressAt({ x: 4.7, y: 4.7 }), "knight", "the knight's drawn corner forward of the horse's middle");
+    assert.equal(pressAt({ x: 5.7, y: 5.7 }), "horse", "past the knight's drawn box, where its stored box would still be");
+  });
+
+  test("a nudge never changes who a drag moves, and tethers end where tokens are drawn", () => {
+    const mastiff = token("mastiff", { name: "Mastiff", x: 8, y: 8 });
+    const halfling = token("halfling", { name: "Pip", size: "small", x: 8, y: 8, nudge: { x: 3, y: 0 }, attached: { to: "mastiff", kind: "ride" } });
+    assert.equal(coversHolder(SQUARES, halfling, mastiff), true, "the rules boxes still cover");
+    assert.equal(dragLead(SQUARES, { mastiff, halfling }, halfling).id, "mastiff");
+    const goblin = token("goblin", { name: "Goblin", x: 6, y: 4, nudge: { x: 0, y: 2 }, attached: { to: "mastiff", kind: "drag" } });
+    const [line] = tethers(SQUARES, { mastiff, goblin }, "s1");
+    assert.deepEqual(line!.from, { x: 6.5, y: 4.75 });
+    assert.deepEqual(line!.to, { x: 8.5, y: 8.5 });
+  });
+});

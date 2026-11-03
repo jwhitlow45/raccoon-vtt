@@ -86,4 +86,9 @@ describe("lightCaptionSpot (LPD-REGRESS-3)", () => {
     const spot = lightCaptionSpot(light, size, 40, [under, over, ...tokenBodies({ g: goblin }, "s1", 40)]);
     assert.deepEqual(spot, { x: (200 - 17 - 6 - 100) / 40, y: 5 }, "the goblin beside the sun sends it to the left");
   });
+
+  test("a nudged token's body counts where it is drawn (docs/design/design-v1-snap-off.md 6.2)", () => {
+    const goblin = { id: "g", sceneId: "s1", x: 6, y: 4, size: "medium", nudge: { x: -2, y: 1 } } as Token;
+    assert.deepEqual(tokenBodies({ g: goblin }, "s1", 40), [box(230, 165, 270, 205)]);
+  });
 });

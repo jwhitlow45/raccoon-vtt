@@ -3,7 +3,7 @@ import type { Light, Token } from "#shared/model.ts";
 import type { Box } from "../../lib/boardText.ts";
 import type { Point } from "../../lib/camera.ts";
 import { lightCells } from "#shared/rules/vision.ts";
-import { footprint } from "../../lib/scene.ts";
+import { drawnAt, footprint } from "../../lib/scene.ts";
 import { scopeSlot } from "../../state/scope.ts";
 import { lightText } from "../vision/presets.ts";
 import { overlaps } from "./heights/boardText.ts";
@@ -104,13 +104,14 @@ export function lightCaptionSpot(light: Point, size: { width: number; height: nu
   return null;
 }
 
-/** The bodies of a scene's tokens, in screen pixels with the world's origin at 0,0, the space of lightCaptionSpot's `avoid`. */
+/** The bodies of a scene's tokens where they are drawn (docs/design/design-v1-snap-off.md 6.2), in screen pixels with the world's origin at 0,0, the space of lightCaptionSpot's `avoid`. */
 export function tokenBodies(tokens: Readonly<Record<string, Token | undefined>>, sceneId: string, scale: number): Box[] {
   const out: Box[] = [];
   for (const t of Object.values(tokens)) {
     if (!t || t.sceneId !== sceneId) continue;
     const fp = footprint(t);
-    out.push({ x0: t.x * scale, y0: t.y * scale, x1: (t.x + fp.w) * scale, y1: (t.y + fp.h) * scale });
+    const { x, y } = drawnAt(null, t);
+    out.push({ x0: x * scale, y0: y * scale, x1: (x + fp.w) * scale, y1: (y + fp.h) * scale });
   }
   return out;
 }

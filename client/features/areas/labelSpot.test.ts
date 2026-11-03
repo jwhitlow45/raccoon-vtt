@@ -13,6 +13,11 @@ describe("where a placed area's name goes", () => {
     assert.deepEqual(spot, { x: 5, y: 2, place: "above", oneLine: false });
   });
 
+  test("a nudged token is kept clear of where it is drawn (docs/design/design-v1-snap-off.md 6.2)", () => {
+    const [body] = tokenBoxes([token("n", { x: 4, y: 3, nudge: { x: 3, y: 2 } })], 30, measure);
+    assert.deepEqual(body, { x0: 4.375, y0: 3.25, x1: 5.375, y1: 4.25 });
+  });
+
   test("below the area when a token's name label sits where the name would go", () => {
     // A goblin whose label hangs just above the area's top edge.
     const avoid = tokenBoxes([token("gob", { x: 4, y: 0, number: 2 })], 30, measure);
