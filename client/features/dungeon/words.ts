@@ -87,21 +87,23 @@ export function previewName(s: Pick<Summary, "rooms">, side: Side): string {
 
 /**
  * How Make ended, in one sentence (4.4). `opened` says whether the new
- * scene is on screen. Delete is refused for the players' scene
- * (shared/permissions.ts), so every way back by Delete says to move them.
+ * scene is on screen. Delete and Undo setup are both refused for the
+ * players' scene (shared/permissions.ts), and Undo setup's step may be
+ * split or gone (a co-DM's edit, a restart), so every way back says to
+ * move the players and only Delete is promised.
  */
 export function outcomeText(outcome: DungeonOutcome, name: string, opened: boolean): { text: string; tone: "info" | "error" } {
   const goTo = opened ? "" : " Open it from the Scenes panel.";
   switch (outcome.k) {
     case "complete":
       return outcome.checked
-        ? { text: `The connection dropped while making ${name}, but it is complete. Undo setup in Setup history takes it back.${goTo}`, tone: "info" }
+        ? { text: `The connection dropped while making ${name}, but it is complete. Undo setup in Setup history usually takes it back, and Delete in the scene's menu always does, once the players are on another scene.${goTo}`, tone: "info" }
         : { text: `Made ${name}.${goTo}`, tone: "info" };
     case "none":
       return { text: outcome.lost ? "The connection dropped, and no scene was made. Try again." : "The server refused the dungeon, so no scene was made.", tone: "error" };
     case "partial":
       return {
-        text: `The server refused part of ${name}, so it may be missing rooms, doors or traps. Use Undo setup in Setup history, or Delete it from the scene's menu once the players are on another scene.${goTo}`,
+        text: `The server refused part of ${name}, so it may be missing rooms, doors or traps. Once the players are on another scene, Undo setup in Setup history or Delete in the scene's menu takes it back.${goTo}`,
         tone: "error",
       };
     case "unconfirmed":
