@@ -23,10 +23,22 @@ const LONG_SIDE_PX = 800;
  * on the entrance room. The picture is an `img` named by the summary.
  *
  * The previous picture stays while the next one draws, so a choice that
- * changes nothing much never flashes the box empty.
+ * changes nothing much never flashes the box empty. The dialog hears when
+ * each picture is in, and keeps Make off until the one on screen is the
+ * dungeon Make would send.
  */
-export function DungeonPreview(props: { drawn: Drawn | null; width: number; height: number; drawing: boolean; children?: ReactNode }) {
-  const { drawn, width, height } = props;
+export function DungeonPreview(props: {
+  drawn: Drawn | null;
+  width: number;
+  height: number;
+  drawing: boolean;
+  /** The picture of `drawn` is on screen, so Make may send it (flow.ts). */
+  onPictured(drawn: Drawn): void;
+  /** The picture of `drawn` could not be made, so the box empties and Make stays off. */
+  onPictureFailed(drawn: Drawn): void;
+  children?: ReactNode;
+}) {
+  const { drawn, width, height, onPictured, onPictureFailed } = props;
   const [url, setUrl] = useState<{ src: string; of: Drawn } | null>(null);
   const hatch = useId();
 
@@ -34,21 +46,34 @@ export function DungeonPreview(props: { drawn: Drawn | null; width: number; heig
     if (!drawn) return;
     let live = true;
     const scene = Object.values(drawn.room.scenes)[0];
-    if (!scene) return;
+    if (!scene) {
+      setUrl(null);
+      onPictureFailed(drawn);
+      return;
+    }
     const long = Math.max(scene.bounds.w, scene.bounds.h);
     const pxPerCell = LONG_SIDE_PX / long;
     const size = { pxPerCell, requested: pxPerCell, width: Math.round(scene.bounds.w * pxPerCell), height: Math.round(scene.bounds.h * pxPerCell) };
     const content = exportContent({ buildChunks: drawn.room.buildChunks, labels: {}, fogTiles: {}, stamps: {}, scene, view: "dm" });
+    // The picture and its report land in one update, so Make never turns on a render before the picture shows.
     renderMapPng({ scene, size, content, grid: false, map: null, encode: encodeThumb }).then(
       (blob) => {
-        if (live) setUrl({ src: URL.createObjectURL(blob), of: drawn });
+        if (!live) return;
+        setUrl({ src: URL.createObjectURL(blob), of: drawn });
+        onPictured(drawn);
       },
-      // A canvas the device refuses leaves the last picture. The summary and Make still stand.
-      () => {},
+      // A canvas the device refuses empties the box rather than leave an older dungeon standing for this one.
+      () => {
+        if (!live) return;
+        setUrl(null);
+        onPictureFailed(drawn);
+      },
     );
     return () => {
       live = false;
     };
+    // The callbacks are the dialog's dispatch, the same on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drawn]);
   // A picture's URL goes once the next one shows, or the preview closes, so the old one stays on screen while the next draws.
   useEffect(() => (url ? () => URL.revokeObjectURL(url.src) : undefined), [url]);

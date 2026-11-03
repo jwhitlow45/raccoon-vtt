@@ -1,8 +1,9 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode, type RefObject } from "react";
 import { LEVEL_BANDS, type LevelBand } from "#shared/srd/traps.ts";
 import { Button } from "../../components/Button.tsx";
 import { Dialog, PINNED_FOOT } from "../../components/Dialog.tsx";
 import { ErrorText, Input } from "../../components/Field.tsx";
+import { Held } from "../../components/Held.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { Help, Note } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
@@ -16,10 +17,11 @@ import { BAND_NAMES } from "../traps/rules.ts";
 import { builderScene, cleanName, pickNow, withPlayersSee, type NewSceneIntent, type SceneInput } from "../scenes/create.ts";
 import { NumberInput } from "../scenes/controls.tsx";
 import { closePreviews, preview, warmPreviews, type Preview } from "./client.ts";
+import { flowStep, readiness, startFlow, type Flow, type FlowEvent } from "./flow.ts";
 import { SCENE_PLACEHOLDER, withIds } from "./ops.ts";
 import { DungeonPreview, type Drawn } from "./Preview.tsx";
 import { loadChoices, saveChoices, settingsOf, sidesOf, startChoices, withSize, type Choices } from "./remembered.ts";
-import { formatSeed, newSeed, parseSeed } from "./seed.ts";
+import { formatSeed, newSeed, parseSeed, type Seed } from "./seed.ts";
 import { clampRooms, MAX_SIDE, MIN_ROOMS, MIN_SIDE, roomCap, type SizeChoice } from "./settings.ts";
 import { sendDungeon } from "./send.ts";
 import {
@@ -33,6 +35,7 @@ import {
   fogLine,
   NOT_MADE,
   outcomeText,
+  PICTURE_FAILED,
   previewName,
   roomsHint,
   SEED_BAD,
@@ -77,7 +80,8 @@ export function GenerateDialog(props: {
   form: { w: number; h: number };
   intent: NewSceneIntent;
   opener: RefObject<HTMLButtonElement | null>;
-  onClose(): void;
+  /** `made` when a Make was sent and did not end with no scene: hidden mid-send or after a partial one, the form must not make another. */
+  onClose(made: boolean): void;
   /** Make ended complete with the dialog open: the form opens the scene. */
   onMade(sceneId: string): void;
 }) {
@@ -90,14 +94,14 @@ export function GenerateDialog(props: {
   const fogWarning = useRoomView((s) => fogLine(pickNow(props.intent, s.view, "builder").pick));
   const [choices, setChoices] = useState<Choices>(() => startChoices(loadChoices(props.roomId), props.form));
   const [seedText, setSeedText] = useState(() => formatSeed(newSeed()));
-  const [shown, setShown] = useState<Shown | null>(null);
-  const [problem, setProblem] = useState<"fit" | "bug" | null>(null);
-  const [pending, setPending] = useState(true);
+  const [flow, step] = useReducer((f: Flow<Shown>, e: FlowEvent<Shown>) => flowStep(f, e), undefined, startFlow<Shown>);
   const [sending, setSending] = useState<Sending | null>(null);
   /** How a Make that did not complete ended, said in the dialog. `retry` when no scene was made, so Make may send again. */
   const [failed, setFailed] = useState<{ text: string; retry: boolean } | null>(null);
   const mounted = useRef(true);
   const request = useRef(0);
+  /** A Make was sent and did not end with no scene, so a scene may exist: the form starts over when the dialog goes. */
+  const sceneMayExist = useRef(false);
   const themeRef = useRef<HTMLDivElement>(null);
   const root = useRef<HTMLDivElement>(null);
   const layout = useBodyLayout(root);
@@ -127,30 +131,26 @@ export function GenerateDialog(props: {
 
   useEffect(() => saveChoices(props.roomId, choices), [props.roomId, choices]);
 
-  // Only the newest answer shows: each request takes a number, and an older one arriving late is dropped.
+  // Only the newest answer shows: each request takes a number, and the flow drops an answer to any older one (flow.ts).
+  // A seed that stops reading takes a number too, so a request still drawing never replaces the preview kept.
   useEffect(() => {
+    const asked = ++request.current;
     if (key === null || !parsed.ok) {
-      setPending(false);
+      step({ k: "invalid", id: asked });
       return;
     }
-    setPending(true);
-    const asked = ++request.current;
+    step({ k: "ask", id: asked });
     const seed = parsed.seed;
     const timer = setTimeout(() => {
       preview(settings, seed, scene).then(
         (result) => {
-          if (!mounted.current || request.current !== asked) return;
-          setPending(false);
-          if (result.ok) {
-            const side = entranceSide(result.plan);
-            setShown({ result, drawn: { plan: result.plan, room: result.room, name: previewName(result.summary, side) } });
-            setProblem(null);
-          } else setProblem(result.error);
+          if (!mounted.current) return;
+          if (!result.ok) return step({ k: "answer", id: asked, answer: { ok: false, error: result.error } });
+          const drawn = { plan: result.plan, room: result.room, name: previewName(result.summary, entranceSide(result.plan)) };
+          step({ k: "answer", id: asked, answer: { ok: true, value: { result, drawn } } });
         },
         () => {
-          if (!mounted.current || request.current !== asked) return;
-          setPending(false);
-          setProblem("bug");
+          if (mounted.current) step({ k: "answer", id: asked, answer: { ok: false, error: "bug" } });
         },
       );
     }, QUIET_MS);
@@ -160,9 +160,14 @@ export function GenerateDialog(props: {
   }, [key, scene]);
 
   const busy = sending !== null;
-  const current = shown && !problem && !pending ? shown.result : null;
-  const canMake = !busy && (failed === null || failed.retry) && parsed.ok && current !== null && current.summary.rooms >= 2;
+  /** The choices and Make wait while Make sends, and stay so after a partial or unconfirmed one: a scene exists then, and another Make would be a second dungeon. */
+  const locked = busy || (failed !== null && !failed.retry);
+  const ready = readiness(flow);
+  const current = ready.current?.result ?? null;
+  const { problem } = flow;
+  const canMake = !locked && parsed.ok && current !== null && current.summary.rooms >= 2;
 
+  const close = () => props.onClose(sceneMayExist.current);
   const set = (patch: Partial<Choices>) => setChoices((c) => ({ ...c, ...patch }));
   const setSize = (patch: Partial<Pick<Choices, "size" | "across" | "down">>) => setChoices((c) => withSize(c, patch));
 
@@ -178,6 +183,7 @@ export function GenerateDialog(props: {
     frames.frameOnOpen = { sceneId: made.sceneId, rect: grownWithin({ x: plan.entrance.x, y: plan.entrance.y, width: plan.entrance.w, height: plan.entrance.h }, FRAME_MARGIN, { w: plan.w, h: plan.h }) };
     setFailed(null);
     setSending({ answered: 0, total: ops.length });
+    sceneMayExist.current = true;
     // The send opens the scene once complete, or to compare it when answers were lost, unless a hidden dialog's DM went elsewhere.
     const outcome = await sendDungeon(
       { ops, sceneId: made.sceneId, room: current.room },
@@ -198,6 +204,7 @@ export function GenerateDialog(props: {
       ui.notify(said.text, said.tone);
       return;
     }
+    if (outcome.k === "none") sceneMayExist.current = false;
     setSending(null);
     setFailed({ text: said.text, retry: outcome.k === "none" });
   };
@@ -210,8 +217,15 @@ export function GenerateDialog(props: {
 
   // Reroll stands in the preview's corner, so the preview and the choices each keep one left edge.
   const previewBox = (
-    <DungeonPreview drawn={shown?.drawn ?? null} width={layout.width} height={layout.height} drawing={pending && parsed.ok}>
-      <Button size="sm" disabled={busy} onClick={() => setSeedText(formatSeed(newSeed()))}>
+    <DungeonPreview
+      drawn={flow.shown?.drawn ?? null}
+      width={layout.width}
+      height={layout.height}
+      drawing={ready.drawing}
+      onPictured={(drawn) => step({ k: "pictured", drawn })}
+      onPictureFailed={(drawn) => step({ k: "pictureFailed", drawn })}
+    >
+      <Button size="sm" disabled={locked} onClick={() => setSeedText(formatSeed(newSeed()))}>
         Reroll
       </Button>
     </DungeonPreview>
@@ -222,123 +236,126 @@ export function GenerateDialog(props: {
   const choicesBox = (
     <div style={{ display: "grid", gap: theme.space(4), minWidth: 0, alignContent: "start" }}>
       {failed ? <ErrorText>{failed.text}</ErrorText> : null}
-      {problem === "fit" ? <ErrorText>{FIT_NONE}</ErrorText> : problem === "bug" ? <ErrorText>{NOT_MADE}</ErrorText> : fit ? <Note>{fit}</Note> : null}
-      <div ref={themeRef}>
-        <Choice<Choices["theme"]>
-          name="Theme"
-          value={choices.theme}
-          disabled={busy}
-          onChange={(theme) => set({ theme })}
+      {problem === "fit" ? (
+        <ErrorText>{FIT_NONE}</ErrorText>
+      ) : problem === "bug" ? (
+        <ErrorText>{NOT_MADE}</ErrorText>
+      ) : ready.pictureFailed ? (
+        <ErrorText>{PICTURE_FAILED}</ErrorText>
+      ) : fit ? (
+        <Note>{fit}</Note>
+      ) : null}
+      {/* Held while Make sends and once a scene exists, so no choice draws a preview Make can no longer send. */}
+      <Held held={locked} style={{ display: "grid", gap: theme.space(4), minWidth: 0 }}>
+        <div ref={themeRef}>
+          <Choice<Choices["theme"]>
+            name="Theme"
+            value={choices.theme}
+            onChange={(theme) => set({ theme })}
+            options={[
+              { value: "dungeon", label: "Dungeon" },
+              { value: "crypt", label: "Crypt" },
+            ]}
+            help={THEME_HELP[choices.theme]}
+          />
+        </div>
+        <Choice<SizeChoice>
+          name="Size"
+          value={choices.size}
+          onChange={(size) => setSize({ size })}
           options={[
-            { value: "dungeon", label: "Dungeon" },
-            { value: "crypt", label: "Crypt" },
+            { value: "small", label: "Small" },
+            { value: "medium", label: "Medium" },
+            { value: "large", label: "Large" },
+            { value: "custom", label: "Custom" },
           ]}
-          help={THEME_HELP[choices.theme]}
+          help={sizeLine(w, h, feetPerCell)}
+        >
+          {choices.size === "custom" ? (
+            <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
+              <NumberInput label="Across" value={choices.across} min={MIN_SIDE} max={MAX_SIDE} onChange={(across) => setSize({ across })} />
+              <span aria-hidden>×</span>
+              <NumberInput label="Down" value={choices.down} min={MIN_SIDE} max={MAX_SIDE} onChange={(down) => setSize({ down })} />
+            </div>
+          ) : null}
+        </Choice>
+        <Named name="Rooms" help={roomsHint(roomsLimit)}>
+          {(nameId, helpId) => (
+            <div role="group" aria-labelledby={nameId} aria-describedby={helpId}>
+              <NumberInput label="Rooms" value={clampRooms(choices.rooms, w, h)} min={MIN_ROOMS} max={roomsLimit} onChange={(rooms) => set({ rooms })} />
+            </div>
+          )}
+        </Named>
+        <Choice<Choices["density"]>
+          name="Density"
+          value={choices.density}
+          onChange={(density) => set({ density })}
+          options={[
+            { value: "sparse", label: "Sparse" },
+            { value: "normal", label: "Normal" },
+            { value: "dense", label: "Dense" },
+          ]}
+          help={DENSITY_HELP}
         />
-      </div>
-      <Choice<SizeChoice>
-        name="Size"
-        value={choices.size}
-        disabled={busy}
-        onChange={(size) => setSize({ size })}
-        options={[
-          { value: "small", label: "Small" },
-          { value: "medium", label: "Medium" },
-          { value: "large", label: "Large" },
-          { value: "custom", label: "Custom" },
-        ]}
-        help={sizeLine(w, h, feetPerCell)}
-      >
-        {choices.size === "custom" ? (
-          <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
-            <NumberInput label="Across" value={choices.across} min={MIN_SIDE} max={MAX_SIDE} onChange={(across) => setSize({ across })} />
-            <span aria-hidden>×</span>
-            <NumberInput label="Down" value={choices.down} min={MIN_SIDE} max={MAX_SIDE} onChange={(down) => setSize({ down })} />
-          </div>
-        ) : null}
-      </Choice>
-      <Named name="Rooms" help={roomsHint(roomsLimit)}>
-        {(nameId, helpId) => (
-          <div role="group" aria-labelledby={nameId} aria-describedby={helpId}>
-            <NumberInput label="Rooms" value={clampRooms(choices.rooms, w, h)} min={MIN_ROOMS} max={roomsLimit} onChange={(rooms) => set({ rooms })} />
-          </div>
+        <Choice<Choices["corridors"]>
+          name="Corridors"
+          value={choices.corridors}
+          onChange={(corridors) => set({ corridors })}
+          options={[
+            { value: "straight", label: "Straight" },
+            { value: "bending", label: "Bending" },
+            { value: "winding", label: "Winding" },
+          ]}
+        />
+        <Choice<"narrow" | "wide">
+          name="Corridor width"
+          value={choices.wide ? "wide" : "narrow"}
+          onChange={(v) => set({ wide: v === "wide" })}
+          options={[
+            { value: "narrow", label: "Narrow" },
+            { value: "wide", label: "Wide" },
+          ]}
+          help={WIDE_HELP}
+        />
+        <Switch label="Extra ways round" help={LOOPS_HELP} checked={choices.loops} onChange={(loops) => set({ loops })} />
+        <Choice<Choices["heights"]>
+          name="Heights"
+          value={choices.heights}
+          onChange={(heights) => set({ heights })}
+          options={[
+            { value: "flat", label: "Flat" },
+            { value: "some", label: "Some" },
+          ]}
+          help={HEIGHTS_HELP}
+        />
+        <Choice<Choices["traps"]>
+          name="Traps"
+          value={choices.traps}
+          onChange={(traps) => set({ traps })}
+          options={[
+            { value: "none", label: "None" },
+            { value: "few", label: "Few" },
+            { value: "some", label: "Some" },
+          ]}
+          help={choices.traps === "none" ? undefined : TRAPS_HELP}
+        />
+        {choices.traps === "none" ? null : (
+          <Choice<LevelBand>
+            name="Party level"
+            value={choices.band}
+            onChange={(band) => set({ band })}
+            options={LEVEL_BANDS.map((b) => ({ value: b, label: BAND_NAMES[b].replace("Levels ", ""), title: BAND_NAMES[b] }))}
+          />
         )}
-      </Named>
-      <Choice<Choices["density"]>
-        name="Density"
-        value={choices.density}
-        disabled={busy}
-        onChange={(density) => set({ density })}
-        options={[
-          { value: "sparse", label: "Sparse" },
-          { value: "normal", label: "Normal" },
-          { value: "dense", label: "Dense" },
-        ]}
-        help={DENSITY_HELP}
-      />
-      <Choice<Choices["corridors"]>
-        name="Corridors"
-        value={choices.corridors}
-        disabled={busy}
-        onChange={(corridors) => set({ corridors })}
-        options={[
-          { value: "straight", label: "Straight" },
-          { value: "bending", label: "Bending" },
-          { value: "winding", label: "Winding" },
-        ]}
-      />
-      <Choice<"narrow" | "wide">
-        name="Corridor width"
-        value={choices.wide ? "wide" : "narrow"}
-        disabled={busy}
-        onChange={(v) => set({ wide: v === "wide" })}
-        options={[
-          { value: "narrow", label: "Narrow" },
-          { value: "wide", label: "Wide" },
-        ]}
-        help={WIDE_HELP}
-      />
-      <Switch label="Extra ways round" help={LOOPS_HELP} checked={choices.loops} disabled={busy} onChange={(loops) => set({ loops })} />
-      <Choice<Choices["heights"]>
-        name="Heights"
-        value={choices.heights}
-        disabled={busy}
-        onChange={(heights) => set({ heights })}
-        options={[
-          { value: "flat", label: "Flat" },
-          { value: "some", label: "Some" },
-        ]}
-        help={HEIGHTS_HELP}
-      />
-      <Choice<Choices["traps"]>
-        name="Traps"
-        value={choices.traps}
-        disabled={busy}
-        onChange={(traps) => set({ traps })}
-        options={[
-          { value: "none", label: "None" },
-          { value: "few", label: "Few" },
-          { value: "some", label: "Some" },
-        ]}
-        help={choices.traps === "none" ? undefined : TRAPS_HELP}
-      />
-      {choices.traps === "none" ? null : (
-        <Choice<LevelBand>
-          name="Party level"
-          value={choices.band}
-          disabled={busy}
-          onChange={(band) => set({ band })}
-          options={LEVEL_BANDS.map((b) => ({ value: b, label: BAND_NAMES[b].replace("Levels ", ""), title: BAND_NAMES[b] }))}
-        />
-      )}
-      <SeedField text={seedText} disabled={busy} error={parsed.ok ? null : SEED_BAD} note={parsed.ok && parsed.otherVersion ? SEED_OTHER_VERSION : null} onChange={setSeedText} />
+      </Held>
+      <SeedField text={seedText} seed={parsed.ok ? parsed.seed : null} disabled={locked} error={parsed.ok ? null : SEED_BAD} note={parsed.ok && parsed.otherVersion ? SEED_OTHER_VERSION : null} onChange={setSeedText} />
     </div>
   );
 
   return (
     <Dialog
       title="Generate a dungeon"
-      onClose={props.onClose}
+      onClose={close}
       width="lg"
       phone="fill"
       backClose
@@ -348,7 +365,7 @@ export function GenerateDialog(props: {
       footer={
         <>
           {/* Each grows, so one that wraps under the status fills its line. */}
-          <Button onClick={props.onClose} style={{ flex: "1 1 auto" }}>{busy ? "Hide" : failed && !failed.retry ? "Close" : "Cancel"}</Button>
+          <Button onClick={close} style={{ flex: "1 1 auto" }}>{busy ? "Hide" : failed && !failed.retry ? "Close" : "Cancel"}</Button>
           {failed && !failed.retry ? null : (
             <Button variant="primary" busy={busy} disabled={!canMake && !busy} onClick={() => void make()} style={{ flex: "1 1 auto" }}>
               Make the scene
@@ -438,7 +455,6 @@ function Choice<T extends string>(props: {
   value: T;
   options: readonly { value: T; label: string; title?: string }[];
   onChange(value: NoInfer<T>): void;
-  disabled: boolean;
   help?: ReactNode;
   children?: ReactNode;
 }) {
@@ -448,17 +464,19 @@ function Choice<T extends string>(props: {
       <span id={nameId} style={NAME_STYLE}>
         {props.name}
       </span>
-      <Segmented<T> labelledBy={nameId} value={props.value} options={props.options} disabled={props.disabled} onChange={props.onChange} description={props.help} />
+      <Segmented<T> labelledBy={nameId} value={props.value} options={props.options} onChange={props.onChange} description={props.help} />
       {props.children}
     </div>
   );
 }
 
-function SeedField(props: { text: string; disabled: boolean; error: string | null; note: string | null; onChange(text: string): void }) {
+/** The seed's field. Copy seed copies the seed as read, in its usual form, whatever spacing or case was typed. */
+function SeedField(props: { text: string; seed: Seed | null; disabled: boolean; error: string | null; note: string | null; onChange(text: string): void }) {
   const id = useId();
   const hintId = useId();
+  const { seed } = props;
   const copy = () => {
-    void navigator.clipboard?.writeText(props.text).catch(() => {});
+    if (seed !== null) void navigator.clipboard?.writeText(formatSeed(seed)).catch(() => {});
   };
   return (
     <div style={{ display: "grid", gap: theme.space(1), minWidth: 0 }}>
@@ -480,7 +498,7 @@ function SeedField(props: { text: string; disabled: boolean; error: string | nul
           onChange={(e) => props.onChange(e.target.value)}
           style={{ flex: "1 1 12em", minWidth: 0, fontFamily: theme.font.mono }}
         />
-        <Button onClick={copy} disabled={!!props.error}>
+        <Button onClick={copy} disabled={seed === null}>
           Copy seed
         </Button>
       </div>

@@ -32,6 +32,7 @@ export const DRAWING = "Drawing the dungeon…";
 export const WAITING = "Waiting for the server…";
 export const FIT_NONE = "Could not fit two rooms. Try a larger size, fewer rooms or Sparse.";
 export const NOT_MADE = "This dungeon could not be made. Reroll for another.";
+export const PICTURE_FAILED = "This device could not draw the preview, so Make is off. Reroll or change a choice to try again.";
 export const SEED_BAD = "A seed is 16 letters and digits, like 1K7Q-H2MX-A9F3-TWQ5.";
 export const SEED_OTHER_VERSION = "This seed is from another version of the generator, so it makes a different dungeon now.";
 

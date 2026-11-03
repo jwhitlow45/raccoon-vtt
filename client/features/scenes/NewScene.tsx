@@ -181,11 +181,16 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
     return withPlayersSee(scene, pick);
   };
 
-  const open = (id: string, tool: string | null) => {
-    actions.switchScene(id);
+  /** The form as it opens, once a scene is made from it. */
+  const startOver = () => {
     setKind(null);
     setName("");
     setFile(null);
+  };
+
+  const open = (id: string, tool: string | null) => {
+    actions.switchScene(id);
+    startOver();
     if (tool) {
       ui.setTool(tool);
       props.close({ placing: true });
@@ -474,7 +479,11 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
                   form={generate}
                   intent={generate.intent}
                   opener={generateButton}
-                  onClose={() => setGenerate(null)}
+                  onClose={(made) => {
+                    setGenerate(null);
+                    // A dungeon is on its way, so the form starts over as a Create does, and a second Create makes no second scene.
+                    if (made) startOver();
+                  }}
                   onMade={(id) => {
                     setGenerate(null);
                     open(id, "build");
