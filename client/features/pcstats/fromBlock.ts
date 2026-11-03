@@ -1,7 +1,7 @@
 import { blockRollNumbers, type NamedRoll } from "#shared/dice/bonus.ts";
 import { blockDefenses } from "#shared/dice/defenses.ts";
 import { parseFormula, formatFormula } from "#shared/dice/formula.ts";
-import { blockActions, blockEntries, hasTrait } from "#shared/dice/named.ts";
+import { blockActions, hasTrait, rangedOf } from "#shared/dice/named.ts";
 import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type PcDice, type PcRoll, type PcStats, type StatBlock } from "#shared/model.ts";
 import { MAX_PC_DICE_PARTS } from "#shared/protocol.ts";
 import { DAMAGE_TYPES, type DamageType } from "#shared/rules/damage.ts";
@@ -48,12 +48,6 @@ function attackAbility(bonus: number, mods: Record<AbilityKey, number>, pb: numb
   const order: AbilityKey[] = ranged ? ["dex", "str", "con", "int", "wis", "cha"] : ["str", "dex", "con", "int", "wis", "cha"];
   const found = order.find((a) => mods[a] + pb === bonus);
   return found ? { ability: found, rest: 0 } : { ability: "str", rest: bonus - (mods.str + pb) };
-}
-
-/** Whether a named roll's entry is a ranged attack, "Ranged Attack Roll" or 2014's "Ranged Weapon Attack", which reads Dexterity first. */
-function rangedOf(entries: ReturnType<typeof blockEntries>, named: NamedRoll): boolean {
-  const entry = entries.find((e) => e.section === named.section && named.name.startsWith(e.name.replace(/\s*\(.*$/, "")));
-  return entry !== undefined && /^\W*ranged\b/i.test(entry.text);
 }
 
 /** A damage part's formula without a trailing constant equal to the modifier, which becomes "Add the modifier". */
@@ -196,9 +190,9 @@ export function statsFromBlock(block: StatBlock, level: number | undefined, newI
   if (anyDefense) out.stats.defenses = defenses;
   if (hasTrait(view, "Evasion")) out.stats.evasion = true;
 
-  const entries = blockEntries(view);
   for (const named of blockActions(view)) {
-    const roll = rollOf(named, newId(), { mods, pb, ranged: rangedOf(entries, named), warnings });
+    // A ranged attack reads Dexterity first, by the rule the rolls read too (shared/dice/named.ts).
+    const roll = rollOf(named, newId(), { mods, pb, ranged: rangedOf(named), warnings });
     if (roll) out.stats.rolls.push(roll);
   }
 

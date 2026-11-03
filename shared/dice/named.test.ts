@@ -5,7 +5,8 @@ import { loadMonsters, type SrdMonster } from "../srd/monsters.ts";
 import { emptyStatBlock, monsterView } from "../statBlock.ts";
 import type { NamedRoll } from "./bonus.ts";
 import { formatFormula, parseFormula } from "./formula.ts";
-import { blockActions, blockEntries, hasTrait, multiattackNote, type BlockEntry } from "./named.ts";
+import { weatherPreset } from "../rules/weather.ts";
+import { attackTest, blockActions, blockEntries, hasTrait, multiattackNote, rangedOf, weaponNamed, type BlockEntry } from "./named.ts";
 
 /**
  * The stat block reader (docs/design/design-v1-roll-options.md 3.1) over every
@@ -314,7 +315,7 @@ describe("2014 wording, as room monsters and pasted text keep it", () => {
       ]),
     );
     assert.deepEqual(rolls, [
-      { key: "actions:bite", name: "Bite", section: "actions", attack: 5, damage: [{ formula: "1d8+3", type: "piercing" }] },
+      { key: "actions:bite", name: "Bite", section: "actions", attack: 5, damage: [{ formula: "1d8+3", type: "piercing" }], range: "melee", weapon: true },
       { key: "actions:bite:hit", name: "Bite, on a hit", section: "actions", save: { ability: "con", dc: 11, onPass: "half" }, damage: [{ formula: "2d8", type: "poison" }] },
     ]);
   });
@@ -333,7 +334,7 @@ describe("2014 wording, as room monsters and pasted text keep it", () => {
     assert.deepEqual(rolls, [
       { key: "actions:glare", name: "Glare", section: "actions", save: { ability: "wis", dc: 14, onPass: "none" }, damage: [], conditions: ["frightened"], saveEnds: true },
       { key: "actions:stomp", name: "Stomp", section: "actions", save: { ability: "str", dc: 12, onPass: "none" }, damage: [], conditions: ["stunned"], lasts: { at: "end", of: "self" } },
-      { key: "actions:tail", name: "Tail", section: "actions", attack: 6, damage: [{ formula: "1d8+2", type: "bludgeoning" }], conditions: ["grappled", "restrained"] },
+      { key: "actions:tail", name: "Tail", section: "actions", attack: 6, damage: [{ formula: "1d8+2", type: "bludgeoning" }], conditions: ["grappled", "restrained"], range: "melee", weapon: true },
       { key: "actions:tail:later", name: "Tail, later turns", section: "actions", damage: [{ formula: "2d6", type: "acid" }] },
     ]);
   });
@@ -357,11 +358,93 @@ describe("2014 wording, as room monsters and pasted text keep it", () => {
         { traits: [{ name: "Keen Smell", text: "The drake has Advantage on Wisdom (Perception) checks that rely on smell." }] },
       ),
     );
-    assert.deepEqual(rolls, [{ key: "actions:huge-bite", name: "Huge Bite", section: "actions", attack: 4, damage: [] }]);
+    assert.deepEqual(rolls, [{ key: "actions:huge-bite", name: "Huge Bite", section: "actions", attack: 4, damage: [], range: "melee" }]);
   });
 
   test("the reader is cached per view object", () => {
     const view = roomMonster([{ name: "Claw", text: "Melee Attack Roll: +4, reach 5 ft. Hit: 5 (1d6 + 2) Slashing damage." }]);
     assert.equal(blockActions(view), blockActions(view));
+  });
+});
+
+describe("which attacks are with a ranged weapon (docs/design/design-v1-weather.md 2.1)", () => {
+  const STRONG = { kind: "clear", wind: "strong" } as const;
+  /** What strong wind does to a named roll's attack: a preset, a note or nothing. */
+  const wind = (roll: NamedRoll) => {
+    const preset = weatherPreset(STRONG, attackTest(roll));
+    return preset.sources.length > 0 ? "preset" : preset.notes.length > 0 ? "note" : "nothing";
+  };
+
+  test("a 2024 Ranged Attack Roll is a weapon only by a ranged or Thrown weapon's name", () => {
+    const cases: [string, string, Pick<NamedRoll, "range" | "weapon" | "spell">, string][] = [
+      ["Scout", "Longbow", { range: "ranged", weapon: true }, "preset"],
+      ["Goblin Warrior", "Shortbow", { range: "ranged", weapon: true }, "preset"],
+      ["Knight", "Heavy Crossbow", { range: "ranged", weapon: true }, "preset"],
+      ["Wererat", "Hand Crossbow (Humanoid or Hybrid Form Only)", { range: "ranged", weapon: true }, "preset"],
+      ["Stone Golem", "Force Bolt", { range: "ranged" }, "note"],
+      ["Spirit Naga", "Necrotic Ray", { range: "ranged" }, "note"],
+      ["Ape", "Rock", { range: "ranged" }, "note"],
+      ["Ogre", "Javelin", { range: "either", weapon: true }, "note"],
+      ["Guard", "Spear", { range: "either", weapon: true }, "note"],
+      ["Goblin Warrior", "Scimitar", { range: "melee" }, "nothing"],
+    ];
+    for (const [monster, name, kind, expected] of cases) {
+      const roll = named(byName(monster), name);
+      assert.deepEqual({ range: roll.range, weapon: roll.weapon, spell: roll.spell }, { range: kind.range, weapon: kind.weapon, spell: kind.spell }, `${monster}: ${name}`);
+      assert.equal(wind(roll), expected, `${monster}: ${name}`);
+    }
+  });
+
+  test("every SRD attack has its range from its own words, and only a named weapon is a ranged weapon", () => {
+    let ranged = 0;
+    every((m, entry) => {
+      const printed = /\b(Melee or Ranged|Melee|Ranged) Attack Roll:/.exec(entry.text);
+      if (!printed) return;
+      const roll = rollOf(m, entry);
+      if (!roll) return;
+      const range = printed[1] === "Melee or Ranged" ? "either" : printed[1] === "Ranged" ? "ranged" : "melee";
+      assert.equal(roll.range, range, `${m.name}: ${entry.name}`);
+      assert.equal(rangedOf(roll), range === "ranged");
+      assert.equal(roll.spell, undefined, `${m.name}: ${entry.name} says no spell`);
+      if (roll.weapon) {
+        assert.notEqual(weaponNamed(entry.name), null, `${m.name}: ${entry.name}`);
+        if (range === "ranged") ranged++;
+      }
+    });
+    assert.equal(ranged, 19, "the SRD's ranged weapon attacks");
+  });
+
+  test("a weapon's name counts whole or by its last words, without case, a bracket or a +1", () => {
+    for (const name of ["Longbow", "longbow", "Elven Longbow", "Longbow +1", "Light Crossbow (Recharge 5-6)", "Sling", "Musket"]) assert.equal(weaponNamed(name), "ranged", name);
+    for (const name of ["Javelin", "Silvered Dagger", "Trident +2", "Light Hammer"]) assert.equal(weaponNamed(name), "thrown", name);
+    for (const name of ["Bone Bow", "Longbows of Doom", "Crossbow", "Rock", "Force Bolt", "Longsword", "Bowling"]) assert.equal(weaponNamed(name), null, name);
+  });
+
+  test("2014 names the weapon or the spell itself, whatever the section", () => {
+    const view = roomMonster([
+      { name: "Bone Bow", text: "Ranged Weapon Attack: +4 to hit, range 80/320 ft., one target. Hit: 5 (1d6 + 2) piercing damage." },
+      { name: "Spear", text: "Melee or Ranged Weapon Attack: +4 to hit, reach 5 ft. or range 20/60 ft., one target. Hit: 5 (1d6 + 2) piercing damage." },
+      { name: "Spark", text: "Ranged Spell Attack: +5 to hit, range 120 ft., one creature. Hit: 10 (3d6) fire damage." },
+      { name: "Shock", text: "Melee Spell Attack: +5 to hit, reach 5 ft., one creature. Hit: 10 (3d6) lightning damage." },
+      { name: "Claw", text: "Melee Weapon Attack: +4 to hit, reach 5 ft., one target. Hit: 5 (1d6 + 2) slashing damage." },
+      { name: "Elven Longbow", text: "Ranged Attack Roll: +6, range 150/600 ft. Hit: 7 (1d8 + 3) Piercing damage." },
+      { name: "Javelin", text: "Ranged Attack Roll: +6, range 30/120 ft. Hit: 7 (1d6 + 4) Piercing damage." },
+    ]);
+    const rolls = blockActions(view);
+    assert.deepEqual(
+      rolls.map((r) => [r.name, r.range, r.weapon, r.spell, wind(r)]),
+      [
+        ["Bone Bow", "ranged", true, undefined, "preset"],
+        ["Spear", "either", true, undefined, "note"],
+        ["Spark", "ranged", undefined, true, "nothing"],
+        ["Shock", "melee", undefined, true, "nothing"],
+        ["Claw", "melee", true, undefined, "nothing"],
+        ["Elven Longbow", "ranged", true, undefined, "preset"],
+        ["Javelin", "ranged", true, undefined, "preset"],
+      ],
+    );
+    assert.deepEqual(attackTest(rolls[2]!), { kind: "attack", spell: true, range: "ranged" }, "a spell attack under Actions stays a spell");
+    assert.deepEqual(attackTest({ section: "spells", range: "ranged" }), { kind: "attack", spell: true, range: "ranged" }, "a character's spell by its section");
+    assert.deepEqual(attackTest({ section: "actions" }), { kind: "attack" });
   });
 });

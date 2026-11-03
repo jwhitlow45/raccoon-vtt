@@ -1,6 +1,7 @@
 import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Actor, type Character, type PcDice, type PcRoll, type PcStats, type SkillKey, type Token } from "../model.ts";
 import type { ActorPatch, PcStatsPatch } from "../protocol.ts";
 import type { DamagePart, NamedRoll, RollNumbers } from "../dice/bonus.ts";
+import { weaponNamed } from "../dice/named.ts";
 import type { Defense } from "../dice/defenses.ts";
 import { formatFormula, parseFormula, type DiceTerm, type Formula, type Term } from "../dice/formula.ts";
 import { LIMITS, serializedBytes } from "../limits.ts";
@@ -528,6 +529,13 @@ function namedRoll(stats: PcStats, d: PcDerived, roll: PcRoll): NamedRoll {
   if (dice !== null) out.dice = dice;
   // Improved Critical names weapon attacks, so spells and other rolls crit on 20 alone.
   if (roll.kind === "weapon" && stats.critOn !== undefined) out.critOn = stats.critOn;
+  if (roll.kind === "weapon") {
+    // Strong wind reads this (docs/design/design-v1-weather.md 2.1). A character's roll names its weapon but not how it was used, so a Thrown weapon is either.
+    out.weapon = true;
+    const named = weaponNamed(roll.name);
+    if (named === "ranged") out.range = "ranged";
+    else if (named === "thrown") out.range = "either";
+  }
   return out;
 }
 

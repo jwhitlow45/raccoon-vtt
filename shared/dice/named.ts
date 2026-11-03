@@ -1,7 +1,8 @@
 import { ABILITY_KEYS, CONDITION_KEYS, type AbilityKey, type ConditionKey } from "../model.ts";
 import { DAMAGE_TYPES, type DamageType } from "../rules/damage.ts";
 import type { StatBlockMonster } from "../srd/monsters.ts";
-import type { DamagePart, NamedRoll } from "./bonus.ts";
+import { weaponList } from "../srd/rules-text.ts";
+import type { D20Test, DamagePart, NamedRoll } from "./bonus.ts";
 import { formatFormula, parseFormula } from "./formula.ts";
 
 /**
@@ -88,6 +89,78 @@ function signedValue(sign: string, digits: string): number {
  * with every mix of melee or ranged and weapon or spell.
  */
 const ATTACK = /\b(?:Melee|Ranged)(?: or (?:Melee|Ranged))?(?: (?:Weapon|Spell)(?: or (?:Weapon|Spell))?)? Attack(?: Roll)?:\s*([+\-−–])\s*(\d+)/i;
+/** A name's form for comparing with the Weapons table: no case, no bracket, no "+1", one space between words. */
+function weaponKey(name: string): string {
+  return name
+    .replace(/\s*\([^()]*\)/g, " ")
+    .replace(/\s*[+\-−–]\s*\d+\b/g, " ")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+let weaponsByKey: Map<string, "ranged" | "thrown"> | null = null;
+
+/**
+ * Which of the SRD 5.2.1's weapons a roll's name names (docs/design/design-v1-weather.md
+ * 2.1): a ranged weapon ("Longbow", "Elven Longbow", "Longbow +1"), a melee
+ * weapon with the Thrown property ("Javelin"), or neither ("Bone Bow"). The
+ * whole name counts, or its last words, so a weapon's own name before it
+ * changes nothing.
+ */
+export function weaponNamed(name: string): "ranged" | "thrown" | null {
+  weaponsByKey ??= new Map([...weaponList("thrown-weapons").map((n) => [weaponKey(n), "thrown"] as const), ...weaponList("ranged-weapons").map((n) => [weaponKey(n), "ranged"] as const)]);
+  const words = weaponKey(name).split(" ");
+  for (let from = 0; from < words.length; from++) {
+    const found = weaponsByKey.get(words.slice(from).join(" "));
+    if (found) return found;
+  }
+  return null;
+}
+
+type AttackKind = Pick<NamedRoll, "range" | "weapon" | "spell">;
+
+/**
+ * What an attack's own words say of it (docs/design/design-v1-weather.md 2.1).
+ * 2014 names it: "Ranged Weapon Attack", "Melee or Ranged Weapon Attack",
+ * "Ranged Spell Attack". 2024's "Ranged Attack Roll" does not, since a Force
+ * Bolt makes one too, so there the action's name must be one of the SRD's
+ * ranged or Thrown weapons.
+ */
+function attackKindOf(words: string, name: string): AttackKind {
+  const melee = /\bmelee\b/i.test(words);
+  const ranged = /\branged\b/i.test(words);
+  const out: AttackKind = {};
+  if (melee && ranged) out.range = "either";
+  else if (ranged) out.range = "ranged";
+  else if (melee) out.range = "melee";
+  const weapon = /\bweapon\b/i.test(words);
+  const spell = /\bspell\b/i.test(words);
+  // "Weapon or Spell Attack" says neither for sure.
+  if (spell && !weapon) out.spell = true;
+  else if (weapon && !spell) out.weapon = true;
+  else if (!weapon && !spell && ranged && weaponNamed(nameParts(name).name) !== null) out.weapon = true;
+  return out;
+}
+
+/** Whether a named roll is a ranged attack, "Ranged Attack Roll" or 2014's "Ranged Weapon Attack", which a character's block reads with Dexterity first. */
+export function rangedOf(named: Pick<NamedRoll, "range">): boolean {
+  return named.range === "ranged";
+}
+
+/**
+ * A named roll's attack as the d20 test it rolls (docs/design/design-v1-weather.md
+ * 2.1), with what it is known to be: a spell from its own words or its
+ * section, its range, and whether it is made with a weapon.
+ */
+export function attackTest(named: Pick<NamedRoll, "section" | "range" | "weapon" | "spell">): Extract<D20Test, { kind: "attack" }> {
+  const out: Extract<D20Test, { kind: "attack" }> = { kind: "attack" };
+  if (named.spell === true || named.section === "spells") out.spell = true;
+  if (named.range !== undefined) out.range = named.range;
+  if (named.weapon === true) out.weapon = true;
+  return out;
+}
+
 const SAVE_2024 = new RegExp(`\\b(${ABILITY_WORDS}) Saving Throw:\\s*DC\\s*(\\d+)`, "i");
 const SAVE_2014 = new RegExp(`\\bDC\\s*(\\d+) (${ABILITY_WORDS}) saving throw\\b`, "i");
 
@@ -395,7 +468,7 @@ function entryRolls(entry: BlockEntry): { suffix: string; label: string; roll: R
       damage.push(...hit.now);
       later.push(...hit.later);
     }
-    const roll: Roll = { attack: signedValue(attack[1]!.replace(MINUS, "-"), attack[2]!), damage, ...effectsOf(hitClauses.join(" "), old) };
+    const roll: Roll = { attack: signedValue(attack[1]!.replace(MINUS, "-"), attack[2]!), damage, ...effectsOf(hitClauses.join(" "), old), ...attackKindOf(attack[0], entry.name) };
     out.push({ suffix: "", label: "", roll });
   }
   if (save) {

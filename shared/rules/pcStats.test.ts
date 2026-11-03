@@ -3,6 +3,8 @@ import { describe, test } from "node:test";
 import type { Character, PcRoll, PcStats } from "../model.ts";
 import { AREA_SPELLS } from "../srd/area-spells.ts";
 import { actor, character } from "../testutil.ts";
+import { attackTest } from "../dice/named.ts";
+import { weatherPreset } from "./weather.ts";
 import {
   EMPTY_PC_STATS,
   applyPcStatsPatch,
@@ -10,6 +12,7 @@ import {
   pcActorNumbers,
   pcDefenses,
   pcDerived,
+  namedRollOf,
   pcNamedRolls,
   pcProficiency,
   pcRollFits,
@@ -437,6 +440,39 @@ describe("named rolls (docs/design/design-v1-pc-stats.md 3.4)", () => {
   test("named rolls are kept per character object", () => {
     const bree = pc(5, { ...caster, rolls: [roll("w", { dice: [{ formula: "1d4" }] })] });
     assert.equal(pcNamedRolls(bree), pcNamedRolls(bree));
+  });
+});
+
+describe("a character's weapon in strong wind (docs/design/design-v1-weather.md 2.1)", () => {
+  const STRONG = { kind: "clear", wind: "strong" } as const;
+  const block = stats({ abilities: { str: 14, dex: 16, con: 12, int: 10, wis: 10, cha: 10 } });
+  const attack = { prof: true, bonus: 0 };
+
+  test("a ranged weapon is ranged, a Thrown one either, any other weapon has no range, and a spell is a spell", () => {
+    const cases: [PcRoll, Partial<ReturnType<typeof namedRollOf>>, string][] = [
+      [roll("bow", { name: "Longbow", attack, ability: "dex" }), { range: "ranged", weapon: true }, "preset"],
+      [roll("bow2", { name: "Elven Longbow +1", attack, ability: "dex" }), { range: "ranged", weapon: true }, "preset"],
+      [roll("dart", { name: "Dart", attack, ability: "dex" }), { range: "ranged", weapon: true }, "preset"],
+      [roll("jav", { name: "Javelin", attack, ability: "str" }), { range: "either", weapon: true }, "note"],
+      [roll("dagger", { name: "Dagger", attack, ability: "dex" }), { range: "either", weapon: true }, "note"],
+      [roll("sword", { name: "Longsword", attack, ability: "str" }), { weapon: true }, "note"],
+      [roll("bolt", { name: "Fire Bolt", kind: "spell", attack, ability: "spell", level: 0 }), {}, "nothing"],
+      [roll("insp", { name: "Longbow", kind: "other", dice: [{ formula: "1d8" }] }), {}, "nothing"],
+    ];
+    for (const [r, kind, expected] of cases) {
+      const named = namedRollOf(block, 3, r);
+      assert.deepEqual({ range: named.range, weapon: named.weapon }, { range: kind.range, weapon: kind.weapon }, r.name);
+      const preset = weatherPreset(STRONG, attackTest(named));
+      assert.equal(preset.sources.length > 0 ? "preset" : preset.notes.length > 0 ? "note" : "nothing", expected, `${r.kind} ${r.name}`);
+    }
+  });
+
+  test("pcNamedRolls carries the same signal", () => {
+    const character = pc(3, stats({ ...block, rolls: [roll("bow", { name: "Shortbow", attack, ability: "dex" })] }));
+    assert.deepEqual(
+      pcNamedRolls(character).map((r) => [r.name, r.range, r.weapon]),
+      [["Shortbow", "ranged", true]],
+    );
   });
 });
 
