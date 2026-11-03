@@ -12,7 +12,10 @@
  *
  * - rest: busy ms a second over 4 s with no weather, then with each kind
  *   heavy and its strongest wind (fog takes a moderate one, which is its
- *   most), moving. Still and Off with heavy rain too.
+ *   most), moving, each on a page loaded afresh, measured 8.5 s in, after
+ *   the warm-up and two of the step-down's windows, with the level it
+ *   reached and what a tick adds to its frame. Still and Off with
+ *   heavy rain too.
  * - pan and drag: each frame's gap while a finger pans the map and drags a
  *   creature, with no weather and with heavy rain and a strong wind.
  *
@@ -25,6 +28,12 @@
  * machine skews every number:
  *
  *   DATABASE_URL=postgres://... BENCH_PORT=7591 node scripts/bench-weather.ts --out weather.json
+ *
+ * `--software` runs Chrome without a GPU for its 2D canvas, the worst case:
+ * the raster then runs on the main thread, outside the sceneFunc's own
+ * timing. The layer counts each tick's whole frame for the step-down
+ * (features/weather/store.ts tickCostForMode), and this mode checks that
+ * the step-down brings every kind within budget.
  */
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -60,7 +69,10 @@ export const HEAVIEST: readonly { name: string; weather: Weather }[] = [
   { name: "wind", weather: { kind: "clear", wind: "strong" } },
 ];
 
-export type Row = { row: string; view: View; value: number; unit: "ms/s" | "ms p95" | "ticks" };
+export type Row = { row: string; view: View; value: number; unit: "ms/s" | "ms p95" | "ticks" | "level" | "ms" };
+
+/** The step-down's level as a row's value: 0 all the particles, 1 half, 2 still. */
+export const LEVELS = ["full", "half", "still"] as const;
 
 export function p95(values: readonly number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
@@ -105,6 +117,34 @@ function ticks(page: Page): Promise<number | null> {
   });
 }
 
+/** The step-down's level on the weather canvas that shows (WeatherLayer.tsx `weatherLevel`), as LEVELS' index. */
+function level(page: Page): Promise<number> {
+  return page.evaluate((levels) => {
+    type Stage = { visible(): boolean; width(): number; getLayers(): { getCanvas(): { _canvas: { dataset: Record<string, string>; weatherLevel?: string } } }[] };
+    const konva = (globalThis as unknown as { Konva?: { stages: Stage[] } }).Konva;
+    for (const stage of konva?.stages ?? []) {
+      if (!stage.visible() || stage.width() === 0) continue;
+      const layer = stage.getLayers().find((l) => l.getCanvas()._canvas.dataset.weather !== undefined);
+      if (layer) return Math.max(0, levels.indexOf(layer.getCanvas()._canvas.weatherLevel ?? "full"));
+    }
+    return 0;
+  }, [...LEVELS] as string[]);
+}
+
+/** What a tick adds to its frame on the main thread, as the layer measured it (WeatherLayer.tsx `weatherFrameCost`), in ms. */
+function frameCost(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    type Stage = { visible(): boolean; width(): number; getLayers(): { getCanvas(): { _canvas: { dataset: Record<string, string>; weatherFrameCost?: number } } }[] };
+    const konva = (globalThis as unknown as { Konva?: { stages: Stage[] } }).Konva;
+    for (const stage of konva?.stages ?? []) {
+      if (!stage.visible() || stage.width() === 0) continue;
+      const layer = stage.getLayers().find((l) => l.getCanvas()._canvas.dataset.weather !== undefined);
+      if (layer) return layer.getCanvas()._canvas.weatherFrameCost ?? 0;
+    }
+    return 0;
+  });
+}
+
 /** Starts recording each frame's gap on the page, and returns what stops it and gives the gaps. */
 async function recordFrames(page: Page): Promise<() => Promise<number[]>> {
   await page.evaluate(() => {
@@ -128,12 +168,13 @@ async function recordFrames(page: Page): Promise<() => Promise<number[]>> {
 }
 
 async function main(): Promise<void> {
-  const { values } = parseArgs({ options: { out: { type: "string" } } });
+  const { values } = parseArgs({ options: { out: { type: "string" }, software: { type: "boolean" } } });
   const port = Number(process.env.BENCH_PORT ?? 7591);
   const databaseUrl = process.env.DATABASE_URL ?? "postgres://raccoon:raccoon@localhost:5434/raccoon";
   const work = mkdtempSync(path.join(tmpdir(), "raccoon-bench-weather-"));
   const server = await startServer({ port, assetDir: path.join(work, "assets"), databaseUrl });
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  // --software: a page whose 2D canvas has no GPU, so its raster runs on the main thread, where the sceneFunc's own timing cannot see it.
+  const browser = await chromium.launch({ channel: "chrome", headless: true, args: values.software ? ["--disable-gpu", "--disable-accelerated-2d-canvas"] : [] });
   const rows: Row[] = [];
   // Each row prints as it is measured, so a run that stops partway keeps what it had.
   const add = (r: Row) => {
@@ -192,14 +233,26 @@ async function main(): Promise<void> {
         await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
       }
     };
-    // Past the 2 s warm-up, so a step-down could show in what is measured.
-    const rest = async () =>
+    // Past the 2 s warm-up and two 3 s windows, so what is measured is after any step-down, as a long session runs.
+    // The CPU is slowed from the page's load on, so the warm-up and the step-down judge the slowed page.
+    const rest = async (prepare: () => Promise<void> = async () => {}) =>
       throttled(async () => {
-        await sleep(2500);
+        await prepare();
+        await sleep(8500);
         const a = await busy(cdp);
         await sleep(REST_MS);
         return ((await busy(cdp)) - a) / (REST_MS / 1000);
       });
+    const pick = (view: View) => page.evaluate((v) => (globalThis as unknown as { __rvttIsoHook: { pick(p: string): void } }).__rvttIsoHook.pick(v), view);
+    /** The page loaded afresh on `weather` in `view`: a step-down lasts until the page reloads, so each kind starts at full. */
+    const fresh = async (view: View, weather: Weather) => {
+      await set(weather);
+      await page.reload();
+      await page.locator(".konvajs-content").first().waitFor({ state: "attached" });
+      await waitFor("the test hook", () => page.evaluate(() => ("__rvttIsoHook" in globalThis ? true : null)));
+      await pick(view);
+      await sleep(800);
+    };
     const middle = { x: 195, y: 422 };
     const pan = async () =>
       throttled(async () => {
@@ -243,33 +296,27 @@ async function main(): Promise<void> {
       });
 
     for (const view of ["topDown", "isometric"] as const) {
-      await page.evaluate((v) => (globalThis as unknown as { __rvttIsoHook: { pick(p: string): void } }).__rvttIsoHook.pick(v), view);
-      await sleep(800);
-      await set(null);
+      await fresh(view, null);
       add({ row: "rest, none", view, value: await rest(), unit: "ms/s" });
       add({ row: "pan, none", view, value: await pan(), unit: "ms p95" });
       add({ row: "drag, none", view, value: await drag(), unit: "ms p95" });
       for (const k of HEAVIEST) {
-        await set(k.weather);
-        add({ row: `rest, ${k.name}`, view, value: await rest(), unit: "ms/s" });
+        add({ row: `rest, ${k.name}`, view, value: await rest(() => fresh(view, k.weather)), unit: "ms/s" });
+        add({ row: `level, ${k.name}`, view, value: await level(page), unit: "level" });
+        add({ row: `frame cost, ${k.name}`, view, value: await frameCost(page), unit: "ms" });
       }
-      await set(HEAVIEST[0]!.weather);
+      await fresh(view, HEAVIEST[0]!.weather);
       add({ row: "pan, rain", view, value: await pan(), unit: "ms p95" });
       add({ row: "drag, rain", view, value: await drag(), unit: "ms p95" });
       for (const mode of ["still", "off"] as const) {
         await page.evaluate((m) => localStorage.setItem("rvtt.weather", m), mode);
-        await page.reload();
-        await page.locator(".konvajs-content").first().waitFor({ state: "attached" });
-        await page.evaluate((v) => (globalThis as unknown as { __rvttIsoHook: { pick(p: string): void } }).__rvttIsoHook.pick(v), view);
-        await sleep(1500);
+        await fresh(view, HEAVIEST[0]!.weather);
+        await sleep(700);
         const before = (await ticks(page)) ?? 0;
         add({ row: `rest, rain ${mode}`, view, value: await rest(), unit: "ms/s" });
         add({ row: `ticks, rain ${mode}`, view, value: ((await ticks(page)) ?? 0) - before, unit: "ticks" });
       }
       await page.evaluate(() => localStorage.removeItem("rvtt.weather"));
-      await page.reload();
-      await page.locator(".konvajs-content").first().waitFor({ state: "attached" });
-      await sleep(1000);
     }
   } finally {
     ops?.close();
