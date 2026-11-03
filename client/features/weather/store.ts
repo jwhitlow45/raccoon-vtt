@@ -103,6 +103,8 @@ export class WeatherRoom {
     this.#lookChanged = true;
     if (!look) this.releaseTextures();
     this.mode.update({ weather: look !== null, particles: look?.particles != null }, this.#now());
+    // A new look makes its textures on its first draws, a stall the step-down must not judge (mode.ts lookChanged).
+    if (look) this.mode.lookChanged(this.#now());
     this.#settle();
   }
 
