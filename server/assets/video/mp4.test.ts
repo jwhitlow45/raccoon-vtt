@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { VIDEO_LIMITS } from "#shared/limits.ts";
 import { AssetError } from "../errors.ts";
-import { checkVideoBytes } from "./check.ts";
+import { capped, checkVideoBytes } from "./check.ts";
 import { audioSpecificConfig, avcCodecString } from "./mp4.ts";
 import {
   FFMPEG_AAC_LC,
@@ -23,6 +23,7 @@ import {
   type Mp4Options,
   type Mp4Track,
 } from "./videoTestutil.ts";
+import { Edits } from "./window.ts";
 
 /**
  * The MP4 header check, one case per check in
@@ -357,5 +358,157 @@ describe("avcC (AMS-3)", () => {
     assert.ok((await checkVideoBytes(bytes)).zeroed.includes(zeros));
     await refused(mp4File({ tracks: [defaultVideoTrack({ entry: visualEntry("avc1", 640, 360, "", bx("avcC", Buffer.concat([avcCBytes(), Buffer.from([0, 7])]))) })] }), "bad_video");
     await refused(mp4File({ tracks: [defaultVideoTrack({ entry: visualEntry("avc1", 640, 360, "", bx("avcC", Buffer.concat([high(Buffer.from([0xfd, 0xf8, 0xf8, 0x00])), Buffer.from([3])]))) })] }), "bad_video");
+  });
+});
+
+describe("every kept box is read to its last byte (AMBUILD-SOL-003, AMBUILD-SOL-006)", () => {
+  const TEXT = "Kept by Mallory Example";
+  /** `bytes` with `data` written `offset` bytes after the first `marker`, a box's type. */
+  function patched(bytes: Buffer, marker: string, offset: number, data: Buffer | string, nth = 0): Buffer {
+    const out = Buffer.from(bytes);
+    let at = -1;
+    for (let i = 0; i <= nth; i++) at = out.indexOf(marker, at + 1);
+    assert.ok(at >= 0, `no ${marker}`);
+    (typeof data === "string" ? Buffer.from(data, "latin1") : data).copy(out, at + offset);
+    return out;
+  }
+  /** Text in place, then gone from the stored bytes, the file still accepted. */
+  async function cleared(bytes: Buffer, text: string): Promise<Buffer> {
+    assert.ok(bytes.includes(text), `the fixture holds ${text}`);
+    const { zeroed } = await checkVideoBytes(bytes);
+    assert.equal(zeroed.includes(text), false, `${text} survived`);
+    return zeroed;
+  }
+  const full = (version: number, flags = 0) => fields([1, version], [3, flags]);
+  const withStbl = (...extra: ReturnType<typeof bx>[]) => mp4File({ tracks: [defaultVideoTrack({ extraStbl: extra })] });
+
+  test("ftyp keeps its major brand, zeroes its minor version and any brand it does not know", async () => {
+    const zeroed = await cleared(patched(mp4File(), "ftyp", 8, "Mlry"), "Mlry");
+    assert.equal(zeroed.subarray(zeroed.indexOf("ftyp") + 4, zeroed.indexOf("ftyp") + 8).toString("latin1"), "isom");
+    await cleared(patched(mp4File(), "ftyp", 16, "Malo"), "Malo");
+    await refused(patched(mp4File(), "ftyp", 5, Buffer.from([0x01])), "bad_video");
+  });
+
+  test("mvhd's reserved and predefined bytes are zeroed, and its matrix must be the identity", async () => {
+    await cleared(patched(mp4File(), "mvhd", 4 + 4 + 22, "Mallory!12"), "Mallory!12");
+    await cleared(patched(mp4File(), "mvhd", 4 + 4 + 68, TEXT), TEXT);
+    await refused(patched(mp4File(), "mvhd", 4 + 4 + 32, fields([4, 0], [4, 0x10000])), "video_geometry");
+  });
+
+  test("tkhd's reserved bytes are zeroed, and a sound track's matrix and size are the identity and none", async () => {
+    await cleared(patched(mp4File(), "tkhd", 8 + 20, "Mallory!"), "Mallory!");
+    const sound = patched(withSound(), "tkhd", 8 + 36, TEXT.slice(0, 20), 1);
+    const zeroed = await cleared(sound, TEXT.slice(0, 20));
+    const at = zeroed.indexOf("tkhd", zeroed.indexOf("tkhd") + 1);
+    assert.deepEqual([...zeroed.subarray(at + 8 + 36, at + 8 + 44)], [0, 1, 0, 0, 0, 0, 0, 0]);
+  });
+
+  test("hdlr's predefined and reserved bytes, where QuickTime names a component and a maker, are zeroed", async () => {
+    await cleared(patched(mp4File(), "hdlr", 8, "mhlr"), "mhlr");
+    await cleared(patched(mp4File(), "hdlr", 16, "Mallory Inc"), "Mallory Inc");
+  });
+
+  test("mdhd's language says und and its predefined bytes are zeroed", async () => {
+    const zeroed = await cleared(patched(mp4File(), "mdhd", 8 + 16, "MX"), "MX");
+    const at = zeroed.indexOf("mdhd");
+    assert.deepEqual([...zeroed.subarray(at + 24, at + 28)], [0x55, 0xc4, 0, 0]);
+  });
+
+  test("vmhd's and smhd's fields and every sample entry's reserved bytes are zeroed", async () => {
+    await cleared(patched(mp4File(), "vmhd", 8, "MaloryEx"), "MaloryEx");
+    await cleared(patched(withSound(), "smhd", 8, "Malo"), "Malo");
+    // The second avc1: the first is a compatible brand in ftyp.
+    await cleared(patched(mp4File(), "avc1", 4, "Malory", 1), "Malory");
+    await cleared(patched(mp4File(), "avc1", 4 + 8, "FFMPMallory!", 1), "FFMPMallory!");
+    await cleared(patched(withSound(), "mp4a", 4 + 10, "appl!!"), "appl!!");
+  });
+
+  test("a FullBox with a version or a flag its type does not have is refused", async () => {
+    await refused(patched(mp4File(), "stts", 5, "Mal"), "bad_video");
+    await refused(patched(mp4File(), "mdhd", 4, Buffer.from([2])), "bad_video");
+    await refused(patched(mp4File(), "url ", 5, Buffer.from([0, 0, 3])), "bad_video");
+  });
+
+  test("a square pasp says 1:1, btrt goes, and an nclx colr's reserved bits must be clear", async () => {
+    const zeroed = await cleared(mp4File({ tracks: [videoWith(bx("pasp", Buffer.from("MaloMalo")))] }), "MaloMalo");
+    assert.ok(zeroed.includes(Buffer.concat([Buffer.from("pasp"), fields([4, 1], [4, 1])])));
+    await cleared(mp4File({ tracks: [videoWith(bx("btrt", Buffer.from("Mallory Exam")))] }), "Mallory Exam");
+    await refused(mp4File({ tracks: [videoWith(bx("colr", Buffer.concat([Buffer.from("nclx"), fields([2, 1], [2, 1], [2, 1], [1, 0x41])])))] }), "bad_video");
+  });
+
+  test("stss and sdtp are read against the sample count", async () => {
+    const stss = (...numbers: number[]) => bx("stss", Buffer.concat([full(0), fields([4, numbers.length]), ...numbers.map((n) => fields([4, n]))]));
+    await checkVideoBytes(withStbl(stss(1, 31)));
+    await refused(withStbl(stss(1, 61)), "bad_video");
+    await refused(withStbl(stss(31, 1)), "bad_video");
+    await refused(withStbl(bx("stss", Buffer.concat([full(0), fields([4, 1]), Buffer.from(TEXT)]))), "bad_video");
+    const sdtp = (bytes: Buffer) => bx("sdtp", Buffer.concat([full(0), bytes]));
+    await checkVideoBytes(withStbl(sdtp(Buffer.alloc(60, 0x24))));
+    await refused(withStbl(sdtp(Buffer.alloc(59, 0x24))), "bad_video");
+    await refused(withStbl(sdtp(Buffer.concat([Buffer.from(TEXT), Buffer.alloc(60 - TEXT.length, 0x24)]))), "bad_video");
+  });
+
+  test("a sample group of a known type is read whole, and one of any other type goes with its mapping", async () => {
+    const sgpd = (type: string, ...records: Buffer[]) => bx("sgpd", Buffer.concat([full(1), Buffer.from(type, "latin1"), fields([4, records[0]?.length ?? 0], [4, records.length]), ...records]));
+    const sbgp = (type: string, ...runs: Array<[number, number]>) => bx("sbgp", Buffer.concat([full(0), Buffer.from(type, "latin1"), fields([4, runs.length]), ...runs.map(([n, i]) => fields([4, n], [4, i]))]));
+    // FFmpeg's AAC roll group: a roll distance of -1 for every sample.
+    const roll = [sgpd("roll", Buffer.from([0xff, 0xff])), sbgp("roll", [60, 1])];
+    await checkVideoBytes(withStbl(...roll));
+    await refused(withStbl(sgpd("roll", Buffer.from("Mallory")), sbgp("roll", [60, 1])), "bad_video");
+    await refused(withStbl(sgpd("roll", Buffer.from([0xff, 0xff])), sbgp("roll", [61, 1])), "bad_video");
+    await refused(withStbl(sgpd("roll", Buffer.from([0xff, 0xff])), sbgp("roll", [60, 2])), "bad_video");
+    await refused(withStbl(...roll, sgpd("roll", Buffer.from([0xff, 0xfe]))), "bad_video");
+    // A private type's description holding text is dropped, and so is its mapping.
+    await cleared(withStbl(sgpd("priv", Buffer.from(TEXT)), sbgp("priv", [60, 1])), TEXT);
+    await cleared(withStbl(sbgp("Mlry", [60, 1])), "Mlry");
+  });
+
+  test("cslg must be one of its two layouts, its bounds in order", async () => {
+    const cslg = (version: number, ...values: number[]) => bx("cslg", Buffer.concat([full(version), ...values.map((v) => (version === 1 ? fields([8, BigInt(v)]) : fields([4, v >>> 0])))]));
+    await checkVideoBytes(withStbl(cslg(0, 0, 0, 512, 0, 30720)));
+    await refused(withStbl(cslg(0, 0, 512, 0, 0, 30720)), "bad_video");
+    await refused(withStbl(bx("cslg", Buffer.concat([full(0), Buffer.from(TEXT)]))), "bad_video");
+  });
+
+  test("an avcC parameter set must be a parameter set, so an SEI holding text is refused", async () => {
+    const sei = Buffer.concat([Buffer.from([0x06, 0x05]), Buffer.from(TEXT)]);
+    const record = Buffer.concat([avcCBytes().subarray(0, -8), Buffer.from([1]), fields([2, sei.length]), sei]);
+    await refused(mp4File({ tracks: [defaultVideoTrack({ entry: visualEntry("avc1", 640, 360, "", bx("avcC", record)) })] }), "bad_video");
+  });
+
+  test("facts the protocol would refuse are never stored, so the schemas cannot drift (AM-R1-05)", () => {
+    const parsed = { container: "mp4" as const, widthPx: 640, heightPx: 360, video: "avc1.42C01E", audio: "mp4a.40.2", audioChannels: 2, audioHz: 48_000, fps: 30, durationMs: 2000, edits: new Edits() };
+    assert.equal(capped(parsed, 10_000).audioHz, 48_000);
+    assert.throws(() => capped({ ...parsed, audioHz: 2_000_000 }, 10_000), (err: unknown) => err instanceof AssetError && err.code === "bad_video");
+    assert.throws(() => capped({ ...parsed, video: "avc1.42C01E;x" }, 10_000), (err: unknown) => err instanceof AssetError && err.code === "bad_video");
+  });
+
+  test("an AAC rate outside the table is video_sound (AM-R1-05)", async () => {
+    // AAC-LC, rate index 15 then 24 bits of 2,000,000 Hz, stereo.
+    const bits = new Array<number>();
+    const put = (v: number, n: number) => {
+      for (let i = n - 1; i >= 0; i--) bits.push((v >> i) & 1);
+    };
+    put(2, 5);
+    put(15, 4);
+    put(2_000_000, 24);
+    put(2, 4);
+    put(0, 3);
+    while (bits.length % 8) bits.push(0);
+    const asc = Buffer.from(Array.from({ length: bits.length / 8 }, (_, i) => bits.slice(i * 8, i * 8 + 8).reduce((v, b) => v * 2 + b, 0)));
+    await refused(mp4File({ tracks: [defaultVideoTrack(), defaultSoundTrack({ entry: aacEntry(esdsBytes({ asc })) })] }), "video_sound");
+  });
+
+  test("a second copy of a box its parent holds once is refused", async () => {
+    const twice: Array<[string, Partial<Mp4Track>]> = [
+      ["edts", { edits: [{ segment: 2000, mediaTime: 0 }], extraTrak: [bx("edts", undefined, bx("elst", Buffer.concat([full(0), fields([4, 0])])))] }],
+      ["stss", { extraStbl: [bx("stss", Buffer.concat([full(0), fields([4, 1], [4, 1])])), bx("stss", Buffer.concat([full(0), fields([4, 1], [4, 1])]))] }],
+      ["pasp", { entry: visualEntry("avc1", 640, 360, "", bx("avcC", avcCBytes()), bx("pasp", fields([4, 1], [4, 1])), bx("pasp", fields([4, 1], [4, 1]))) }],
+      ["dinf", { extraMinf: [bx("dinf", undefined, bx("dref", Buffer.concat([full(0), fields([4, 1])]), bx("url ", full(0, 1))))] }],
+      ["vmhd", { extraMinf: [bx("vmhd", Buffer.concat([full(0, 1), Buffer.alloc(8)]))] }],
+    ];
+    for (const [name, o] of twice) {
+      await assert.rejects(checkVideoBytes(mp4File({ tracks: [defaultVideoTrack(o)] })), (err: unknown) => err instanceof AssetError && err.code === "bad_video", name);
+    }
   });
 });

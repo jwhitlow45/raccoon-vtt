@@ -3,6 +3,7 @@ import { Worker } from "node:worker_threads";
 import { fileTypeFromBuffer, fileTypeFromFile } from "file-type";
 import type { ApiErrorCode } from "#shared/apiErrors.ts";
 import { VIDEO_LIMITS } from "#shared/limits.ts";
+import { checkedVideoFacts } from "#shared/protocol.ts";
 import type { VideoContainer, VideoFacts } from "#shared/model.ts";
 import { AssetError } from "../errors.ts";
 import { parseMp4 } from "./mp4.ts";
@@ -29,7 +30,12 @@ export function containerOf(ext: string | undefined): VideoContainer {
   throw refuse("video_type");
 }
 
-/** The caps of 6.3, then the facts, with `kbps` from the file's size and length. */
+/**
+ * The caps of 6.3, then the facts, with `kbps` from the file's size and
+ * length. Last, the facts must be ones the protocol takes (AM-R1-05): a
+ * stored video whose facts the protocol refused would be in the Library and
+ * in no map, as every op naming it would fail.
+ */
 export function capped(parsed: ParsedVideo, fileBytes: number): VideoFacts {
   const { edits: _edits, ...facts } = parsed;
   const L = VIDEO_LIMITS;
@@ -38,7 +44,9 @@ export function capped(parsed: ParsedVideo, fileBytes: number): VideoFacts {
   if (facts.durationMs < L.minDurationMs || facts.durationMs > L.maxDurationMs) throw refuse("video_length");
   if (facts.fps > L.maxFramesInASecond) throw refuse("video_fps");
   // Bits per millisecond is kilobits per second. At least 1, so a tiny file still reads as a rate.
-  return { ...facts, kbps: Math.max(1, Math.round((fileBytes * 8) / facts.durationMs)) };
+  const checked = checkedVideoFacts({ ...facts, kbps: Math.max(1, Math.round((fileBytes * 8) / facts.durationMs)) });
+  if (!checked) throw refuse("bad_video");
+  return checked;
 }
 
 async function parse(src: Source, container: VideoContainer, budget: Budget): Promise<ParsedVideo> {

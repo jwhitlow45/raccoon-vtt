@@ -14,6 +14,12 @@ import { Edits, Tally, refuse, type Budget, type Range, type Source } from "./wi
  * are zeroed too (AM-ASTRA-01). Nothing inside `mdat` is ever written, and
  * every sample the tables name must lie inside an `mdat`, so no edit can
  * land on an offset the file's own tables give (D-261102-514).
+ *
+ * A kept box is read to its last byte (AMBUILD-SOL-003): each FullBox's
+ * version and flags are checked, each field is a number in its range, a
+ * field the format reserves or fixes is zeroed, and a box the format
+ * allows once in its parent is refused the second time, so no copy the
+ * check did not read is kept.
  */
 
 type Box = {
@@ -28,10 +34,33 @@ type Box = {
 
 const PADDING = new Set(["free", "skip", "wide"]);
 const FRAGMENTED = new Set(["moof", "mfra", "sidx", "ssix", "styp", "emsg", "prft", "mvex"]);
-const SAMPLE_TABLES_KEPT = new Set(["stss", "sdtp", "sbgp", "sgpd", "cslg"]);
 const AAC_RATES = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
 
-type Timing = { timescale: number; deltas: number[]; offsets: number[] | null; edit: { segment: number; mediaTime: number } | null };
+/**
+ * The compatible brands `ftyp` keeps: those of the files this check
+ * accepts. Any other is zeroed in place, which no player reads as anything,
+ * so a list of brands holds no text.
+ */
+const KNOWN_BRANDS = new Set([
+  "isom", "iso2", "iso3", "iso4", "iso5", "iso6", "iso7", "iso8", "iso9", "avc1", "av01", "mp41", "mp42", "mp71",
+  "M4V ", "M4VH", "M4VP", "dash", "cmfc", "cmf2", "dby1", "MSNV", "XAVC", "mmp4", "3gp4", "3gp5", "3gp6", "3g2a",
+]);
+
+/**
+ * Sample group types `sgpd` and `sbgp` may keep, each with its one-record
+ * layout (ISO 14496-12 10): AAC's and Opus's roll and pre-roll, random
+ * access points, sync samples and temporal levels. Any other type is
+ * dropped with its mapping, since an unknown record could be anything.
+ */
+const SAMPLE_GROUPS: Readonly<Record<string, { bytes: number; check(record: Buffer): boolean }>> = {
+  roll: { bytes: 2, check: () => true },
+  prol: { bytes: 2, check: () => true },
+  "rap ": { bytes: 1, check: () => true },
+  // Two reserved bits, then a NAL unit type.
+  sync: { bytes: 1, check: (r) => (r[0]! & 0xc0) === 0 },
+  // One flag, then seven reserved bits.
+  tele: { bytes: 1, check: (r) => (r[0]! & 0x7f) === 0 },
+};
 
 type Track = {
   handler: string;
@@ -47,12 +76,17 @@ type Track = {
   dataRef?: number;
   drefCount?: number;
   timescale?: number;
+  /** tkhd's duration in the movie's timescale, and mdhd's in the track's. */
+  tkhdDuration?: number;
+  mdhdDuration?: number;
   edit?: { segment: number; mediaTime: number } | null;
   stts?: Array<[number, number]>;
   ctts?: Array<[number, number]>;
   stsc?: Array<[number, number]>;
   sizes?: number[];
   chunks?: number[];
+  /** cslg's five numbers, checked against the track's own timing once it is known. */
+  cslg?: { shift: number; least: number; greatest: number; start: number; end: number };
 };
 
 class Moov {
@@ -93,11 +127,30 @@ class Moov {
     return this.slice(box.payload, box.end);
   }
 
-  /** A FullBox's version, its flags, and the rest of its payload. */
-  full(box: Box): { version: number; flags: number; body: Buffer; at: number } {
+  /**
+   * A FullBox's version, at most `maxVersion`, its flags, which may hold
+   * only the `allowed` bits and must hold the `required` ones, and the
+   * rest of its payload.
+   */
+  full(box: Box, maxVersion: number, flags: { allowed?: number; required?: number } = {}): { version: number; flags: number; body: Buffer; at: number } {
     const p = this.payload(box);
     if (p.length < 4) throw refuse("bad_video");
-    return { version: p[0]!, flags: p.readUIntBE(1, 3), body: p.subarray(4), at: box.payload + 4 };
+    const version = p[0]!;
+    const f = p.readUIntBE(1, 3);
+    const allowed = flags.allowed ?? 0;
+    const required = flags.required ?? 0;
+    if (version > maxVersion || (f & ~allowed) !== 0 || (f & required) !== required) throw refuse("bad_video");
+    return { version, flags: f, body: p.subarray(4), at: box.payload + 4 };
+  }
+
+  /** Bytes the format reserves or fixes, from `at`, zeroed in place. */
+  zeroAt(at: number, length: number): void {
+    this.edits.zero(at, at + length);
+  }
+
+  /** `bytes` written at `at`, only where the file holds something else, so a stored file checks again with no edit. */
+  putAt(at: number, bytes: Buffer): void {
+    if (!this.slice(at, at + bytes.length).equals(bytes)) this.edits.put(at, bytes);
   }
 
   renameFree(box: Box): void {
@@ -114,6 +167,12 @@ class Moov {
     if (PADDING.has(box.type)) this.zeroPayload(box);
     else this.renameFree(box);
   }
+}
+
+/** Refuses a second box of a type its parent may hold once (AMBUILD-SOL-006). */
+function once(seen: Set<string>, type: string): void {
+  if (seen.has(type)) throw refuse("bad_video");
+  seen.add(type);
 }
 
 /** A box header at `at` inside `[.., parentEnd)`. A size of 0 runs to the end, which only the last top-level box may do. */
@@ -142,6 +201,26 @@ function boxHeader(read: (offset: number, length: number) => Buffer, at: number,
   return { type, start: at, end, payload, afterType };
 }
 
+/** Four printable ASCII bytes, as every brand is written. */
+function isFourCc(b: Buffer): boolean {
+  return b.length === 4 && b.every((c) => c >= 0x20 && c <= 0x7e);
+}
+
+/**
+ * `ftyp`: a printable major brand, which names the container to the sniff,
+ * the minor version zeroed, and each compatible brand kept only when known.
+ */
+async function fileType(src: Source, box: Box, edits: Edits): Promise<void> {
+  const length = box.end - box.payload;
+  if (length < 8 || length > VIDEO_LIMITS.parseValueBytes || (length - 8) % 4 !== 0) throw refuse("bad_video");
+  const p = await src.read(box.payload, length);
+  if (!isFourCc(p.subarray(0, 4))) throw refuse("bad_video");
+  edits.zero(box.payload + 4, box.payload + 8);
+  for (let at = 8; at < length; at += 4) {
+    if (!KNOWN_BRANDS.has(p.subarray(at, at + 4).toString("latin1"))) edits.zero(box.payload + at, box.payload + at + 4);
+  }
+}
+
 export async function parseMp4(src: Source, budget: Budget): Promise<ParsedVideo> {
   const edits = new Edits();
   const headers = new Tally(VIDEO_LIMITS.parseElementHeaders);
@@ -158,6 +237,7 @@ export async function parseMp4(src: Source, budget: Budget): Promise<ParsedVideo
     const box = boxHeader((o, n) => head.subarray(o - at, o - at + n), at, src.size, true);
     if (first) {
       if (box.type !== "ftyp") throw refuse("video_type");
+      await fileType(src, box, edits);
       first = false;
     } else if (box.type === "ftyp") {
       throw refuse("bad_video");
@@ -184,6 +264,13 @@ export async function parseMp4(src: Source, budget: Budget): Promise<ParsedVideo
   return parseMoov(moov, moovBox, mdats);
 }
 
+const IDENTITY = [0x10000, 0, 0, 0, 0x10000, 0, 0, 0, 0x40000000];
+const IDENTITY_BYTES = Buffer.concat(IDENTITY.map((v) => {
+  const b = Buffer.alloc(4);
+  b.writeUInt32BE(v);
+  return b;
+}));
+
 function parseMoov(moov: Moov, box: Box, mdats: readonly Range[]): ParsedVideo {
   let movieTimescale = 0;
   let movieDuration = 0;
@@ -193,12 +280,17 @@ function parseMoov(moov: Moov, box: Box, mdats: readonly Range[]): ParsedVideo {
     if (child.type === "mvhd") {
       if (sawHeader) throw refuse("bad_video");
       sawHeader = true;
-      const { version, body, at } = moov.full(child);
-      if (version > 1 || body.length !== (version === 1 ? 108 : 96)) throw refuse("bad_video");
+      const { version, body, at } = moov.full(child, 1);
+      if (body.length !== (version === 1 ? 108 : 96)) throw refuse("bad_video");
       const t = version === 1 ? 16 : 8;
       moov.edits.zero(at, at + t);
       movieTimescale = body.readUInt32BE(t);
       movieDuration = version === 1 ? safe(body.readBigUInt64BE(t + 4)) : body.readUInt32BE(t + 4);
+      // After the rate and the volume: ten reserved bytes, the movie's matrix, then 24 more reserved before next_track_ID.
+      const rate = t + (version === 1 ? 12 : 8);
+      moov.zeroAt(at + rate + 6, 10);
+      if (!body.subarray(rate + 16, rate + 52).equals(IDENTITY_BYTES)) throw refuse("video_geometry");
+      moov.zeroAt(at + rate + 52, 24);
     } else if (child.type === "trak") tracks.push(parseTrak(moov, child));
     else if (child.type === "mvex") throw refuse("video_fragmented");
     else moov.drop(child); // udta, meta, iods, uuid and the rest
@@ -266,34 +358,49 @@ function parseTrak(moov: Moov, trak: Box): Track {
   const mdiaKids = moov.children(mdia, 3);
   const hdlr = mdiaKids.filter((b) => b.type === "hdlr");
   if (hdlr.length !== 1) throw refuse("bad_video");
-  const h = moov.full(hdlr[0]!);
+  const h = moov.full(hdlr[0]!, 0);
   if (h.body.length < 20) throw refuse("bad_video");
   track.handler = h.body.subarray(4, 8).toString("latin1");
   if (!["vide", "soun", "tmcd"].includes(track.handler)) throw refuse("video_tracks");
+  // pre_defined, where QuickTime names a component type, and the reserved twelve, where it names a maker.
+  moov.zeroAt(h.at, 4);
+  moov.zeroAt(h.at + 8, 12);
   // The handler's name is free text, so it is zeroed to an empty string.
   moov.edits.zero(h.at + 20, hdlr[0]!.end);
 
-  let sawTkhd = false;
+  const seen = new Set<string>();
   for (const box of boxes) {
     if (box.type === "tkhd") {
-      if (sawTkhd) throw refuse("bad_video");
-      sawTkhd = true;
-      const { version, body, at } = moov.full(box);
-      if (version > 1 || body.length !== (version === 1 ? 92 : 80)) throw refuse("bad_video");
+      once(seen, box.type);
+      // Enabled, in the movie, in the preview and the size as an aspect ratio are the only flags.
+      const { version, body, at } = moov.full(box, 1, { allowed: 0xf });
+      if (body.length !== (version === 1 ? 92 : 80)) throw refuse("bad_video");
       const t = version === 1 ? 16 : 8;
       moov.edits.zero(at, at + t);
+      moov.zeroAt(at + t + 4, 4); // reserved after track_ID
+      track.tkhdDuration = version === 1 ? safe(body.readBigUInt64BE(t + 8)) : body.readUInt32BE(t + 8);
       const rest = version === 1 ? 32 : 20;
+      moov.zeroAt(at + rest, 8);
+      moov.zeroAt(at + rest + 14, 2);
       const matrix = body.subarray(rest + 16, rest + 52);
-      const IDENTITY = [0x10000, 0, 0, 0, 0x10000, 0, 0, 0, 0x40000000];
-      track.identity = IDENTITY.every((value, i) => matrix.readUInt32BE(i * 4) === value);
+      track.identity = matrix.equals(IDENTITY_BYTES);
       const w = body.readUInt32BE(rest + 52);
       const hgt = body.readUInt32BE(rest + 56);
       track.tkhdWidth = w % 0x10000 === 0 ? w / 0x10000 : Number.NaN;
       track.tkhdHeight = hgt % 0x10000 === 0 ? hgt / 0x10000 : Number.NaN;
+      if (track.handler !== "vide") {
+        // A sound or timecode track shows nothing: its matrix is the identity and its size none, whatever the file said.
+        moov.putAt(at + rest + 16, IDENTITY_BYTES);
+        moov.putAt(at + rest + 52, Buffer.alloc(8));
+      }
     } else if (box.type === "edts") {
+      once(seen, box.type);
+      const inEdts = new Set<string>();
       for (const e of moov.children(box, 3)) {
-        if (e.type === "elst") track.edit = editList(moov, e);
-        else moov.drop(e);
+        if (e.type === "elst") {
+          once(inEdts, e.type);
+          track.edit = editList(moov, e);
+        } else moov.drop(e);
       }
     } else if (box.type === "mdia") {
       parseMdia(moov, mdiaKids, track);
@@ -301,13 +408,13 @@ function parseTrak(moov: Moov, trak: Box): Track {
       moov.drop(box); // tref, udta, meta, uuid and the rest
     }
   }
-  if (!sawTkhd) throw refuse("bad_video");
+  if (!seen.has("tkhd")) throw refuse("bad_video");
   return track;
 }
 
 function editList(moov: Moov, box: Box): { segment: number; mediaTime: number } | null {
-  const { version, body } = moov.full(box);
-  if (version > 1 || body.length < 4) throw refuse("bad_video");
+  const { version, body } = moov.full(box, 1);
+  if (body.length < 4) throw refuse("bad_video");
   const count = body.readUInt32BE(0);
   const each = version === 1 ? 20 : 12;
   if (body.length !== 4 + count * each) throw refuse("bad_video");
@@ -321,91 +428,219 @@ function editList(moov: Moov, box: Box): { segment: number; mediaTime: number } 
   return { segment, mediaTime };
 }
 
+/** The language a kept `mdhd` says: "und", packed, since a track's language is the place it was made as much as WebM's Language is. */
+const UNDETERMINED = Buffer.from([0x55, 0xc4]);
+
 function parseMdia(moov: Moov, kids: Box[], track: Track): void {
-  let sawMdhd = false;
+  const seen = new Set<string>();
   for (const box of kids) {
     if (box.type === "hdlr") continue;
     if (box.type === "mdhd") {
-      if (sawMdhd) throw refuse("bad_video");
-      sawMdhd = true;
-      const { version, body, at } = moov.full(box);
-      if (version > 1 || body.length !== (version === 1 ? 32 : 20)) throw refuse("bad_video");
+      once(seen, box.type);
+      const { version, body, at } = moov.full(box, 1);
+      if (body.length !== (version === 1 ? 32 : 20)) throw refuse("bad_video");
       const t = version === 1 ? 16 : 8;
       moov.edits.zero(at, at + t);
       track.timescale = body.readUInt32BE(t);
       if (track.timescale <= 0) throw refuse("bad_video");
+      track.mdhdDuration = version === 1 ? safe(body.readBigUInt64BE(t + 4)) : body.readUInt32BE(t + 4);
+      moov.putAt(at + body.length - 4, UNDETERMINED);
+      moov.zeroAt(at + body.length - 2, 2);
     } else if (box.type === "minf") {
+      once(seen, box.type);
       parseMinf(moov, box, track);
     } else {
       moov.drop(box); // elng, udta and the rest
     }
   }
-  if (!sawMdhd) throw refuse("bad_video");
+  if (!seen.has("mdhd")) throw refuse("bad_video");
 }
 
 function parseMinf(moov: Moov, minf: Box, track: Track): void {
-  let sawStbl = false;
+  const seen = new Set<string>();
   for (const box of moov.children(minf, 4)) {
     if (box.type === "vmhd" && track.handler === "vide") {
-      if (moov.full(box).body.length !== 8) throw refuse("bad_video");
+      once(seen, box.type);
+      const { body, at } = moov.full(box, 0, { allowed: 1 });
+      if (body.length !== 8) throw refuse("bad_video");
+      moov.zeroAt(at, 8); // graphicsmode and opcolor, both 0 in a plain file
     } else if (box.type === "smhd" && track.handler === "soun") {
-      if (moov.full(box).body.length !== 4) throw refuse("bad_video");
+      once(seen, box.type);
+      const { body, at } = moov.full(box, 0);
+      if (body.length !== 4) throw refuse("bad_video");
+      moov.zeroAt(at, 4); // balance, centred, and a reserved two
     } else if (box.type === "dinf") {
+      once(seen, box.type);
+      const inDinf = new Set<string>();
       for (const d of moov.children(box, 5)) {
-        if (d.type === "dref") track.drefCount = dataReferences(moov, d);
-        else moov.drop(d);
+        if (d.type === "dref") {
+          once(inDinf, d.type);
+          track.drefCount = dataReferences(moov, d);
+        } else moov.drop(d);
       }
     } else if (box.type === "stbl") {
-      if (sawStbl) throw refuse("bad_video");
-      sawStbl = true;
+      once(seen, box.type);
       parseStbl(moov, box, track);
     } else {
       moov.drop(box); // gmhd, nmhd, a data handler's hdlr and the rest
     }
   }
-  if (!sawStbl) throw refuse("bad_video");
+  if (!seen.has("stbl")) throw refuse("bad_video");
 }
 
 /** Every data reference must be the file itself: a `url ` with the self-contained flag and no location. */
 function dataReferences(moov: Moov, dref: Box): number {
-  const { version, body } = moov.full(dref);
-  if (version !== 0 || body.length < 4) throw refuse("bad_video");
+  const { body } = moov.full(dref, 0);
+  if (body.length < 4) throw refuse("bad_video");
   const count = body.readUInt32BE(0);
   const entries = moov.children(dref, 6, dref.payload + 8);
   if (count < 1 || entries.length !== count) throw refuse("bad_video");
   for (const e of entries) {
     if (e.type !== "url ") throw refuse("bad_video");
-    const { flags, body: rest } = moov.full(e);
-    if (!(flags & 1) || rest.some((b) => b !== 0)) throw refuse("bad_video");
+    const { body: rest } = moov.full(e, 0, { allowed: 1, required: 1 });
+    if (rest.some((b) => b !== 0)) throw refuse("bad_video");
   }
   return count;
 }
 
+/** The sample tables read once each, and the optional ones checked once the sample count is known. */
+const STBL_ONCE = new Set(["stsd", "stts", "ctts", "stsc", "stsz", "stz2", "stco", "co64", "stss", "sdtp", "cslg"]);
+
 function parseStbl(moov: Moov, stbl: Box, track: Track): void {
   const seen = new Set<string>();
+  const later: Box[] = [];
   for (const box of moov.children(stbl, 5)) {
-    const once = ["stsd", "stts", "ctts", "stsc", "stsz", "stz2", "stco", "co64"];
-    if (once.includes(box.type)) {
-      if (seen.has(box.type)) throw refuse("bad_video");
-      seen.add(box.type);
-    }
+    if (STBL_ONCE.has(box.type)) once(seen, box.type);
     if (box.type === "stsd") sampleDescription(moov, box, track);
     else if (box.type === "stts") track.stts = pairs(moov, box, 0);
     else if (box.type === "ctts") track.ctts = pairs(moov, box, 1);
     else if (box.type === "stsc") track.stsc = chunkRuns(moov, box);
     else if (box.type === "stsz" || box.type === "stz2") track.sizes = sampleSizes(moov, box);
     else if (box.type === "stco" || box.type === "co64") track.chunks = chunkOffsets(moov, box);
-    else if (SAMPLE_TABLES_KEPT.has(box.type)) moov.full(box);
+    else if (box.type === "stss" || box.type === "sdtp" || box.type === "sbgp" || box.type === "sgpd" || box.type === "cslg") later.push(box);
     else moov.drop(box); // subs, saiz, saio, senc and the rest
   }
   if ((seen.has("stsz") && seen.has("stz2")) || (seen.has("stco") && seen.has("co64"))) throw refuse("bad_video");
   if (!track.sampleEntry || !track.stts || !track.stsc || !track.sizes || !track.chunks) throw refuse("bad_video");
+  optionalTables(moov, later, track, track.sizes.length);
+}
+
+/**
+ * `stss`, `sdtp`, `sbgp`, `sgpd` and `cslg`, each read whole against the
+ * track's sample count (AMBUILD-SOL-003). A sample group of a type off
+ * SAMPLE_GROUPS is dropped with its mapping.
+ */
+function optionalTables(moov: Moov, boxes: readonly Box[], track: Track, samples: number): void {
+  const descriptions = new Map<string, { box: Box; entries: number }>();
+  const mappings = new Map<string, Box>();
+  for (const box of boxes) {
+    if (box.type === "stss") syncSamples(moov, box, samples);
+    else if (box.type === "sdtp") dependencies(moov, box, samples);
+    else if (box.type === "cslg") track.cslg = compositionShift(moov, box);
+    else {
+      const type = moov.payload(box).subarray(4, 8).toString("latin1");
+      const held = box.type === "sgpd" ? descriptions : mappings;
+      if (held.has(type)) throw refuse("bad_video");
+      if (box.type === "sgpd") descriptions.set(type, { box, entries: 0 });
+      else mappings.set(type, box);
+    }
+  }
+  for (const [type, d] of descriptions) {
+    if (SAMPLE_GROUPS[type]) d.entries = groupDescriptions(moov, d.box, SAMPLE_GROUPS[type]);
+    else moov.renameFree(d.box);
+  }
+  for (const [type, box] of mappings) {
+    const d = descriptions.get(type);
+    if (!SAMPLE_GROUPS[type] || !d) {
+      moov.renameFree(box);
+      continue;
+    }
+    groupMapping(moov, box, samples, d.entries);
+  }
+}
+
+/** `stss`: sample numbers, rising, each a sample the track has. */
+function syncSamples(moov: Moov, box: Box, samples: number): void {
+  const { body } = moov.full(box, 0);
+  if (body.length < 4) throw refuse("bad_video");
+  const count = body.readUInt32BE(0);
+  if (body.length !== 4 + count * 4) throw refuse("bad_video");
+  let previous = 0;
+  for (let i = 0; i < count; i++) {
+    if ((i & 1023) === 0) moov.budget.check();
+    const n = body.readUInt32BE(4 + i * 4);
+    if (n <= previous || n > samples) throw refuse("bad_video");
+    previous = n;
+  }
+}
+
+/** `sdtp`: a byte a sample, none of its three two-bit fields after the first holding the reserved 3. */
+function dependencies(moov: Moov, box: Box, samples: number): void {
+  const { body } = moov.full(box, 0);
+  if (body.length !== samples) throw refuse("bad_video");
+  for (let i = 0; i < body.length; i++) {
+    const b = body[i]!;
+    if ((b & 0x30) === 0x30 || (b & 0x0c) === 0x0c || (b & 0x03) === 0x03) throw refuse("bad_video");
+  }
+}
+
+function compositionShift(moov: Moov, box: Box): NonNullable<Track["cslg"]> {
+  const { version, body } = moov.full(box, 1);
+  const each = version === 1 ? 8 : 4;
+  if (body.length !== each * 5) throw refuse("bad_video");
+  const read = (i: number) => (version === 1 ? Number(body.readBigInt64BE(i * 8)) : body.readInt32BE(i * 4));
+  const [shift, least, greatest, start, end] = [0, 1, 2, 3, 4].map(read) as [number, number, number, number, number];
+  if (![shift, least, greatest, start, end].every(Number.isSafeInteger) || least > greatest || start > end) throw refuse("bad_video");
+  return { shift, least, greatest, start, end };
+}
+
+/** `sgpd` of a known type: every record that type's length and layout. Answers how many it holds. */
+function groupDescriptions(moov: Moov, box: Box, kind: (typeof SAMPLE_GROUPS)[string]): number {
+  const { version, body } = moov.full(box, 2);
+  let at = 4;
+  const u32 = () => {
+    if (at + 4 > body.length) throw refuse("bad_video");
+    const v = body.readUInt32BE(at);
+    at += 4;
+    return v;
+  };
+  const defaultLength = version === 1 ? u32() : kind.bytes;
+  const defaultIndex = version === 2 ? u32() : 0;
+  const count = u32();
+  if (defaultLength !== 0 && defaultLength !== kind.bytes) throw refuse("bad_video");
+  if (defaultIndex > count) throw refuse("bad_video");
+  for (let i = 0; i < count; i++) {
+    if ((i & 1023) === 0) moov.budget.check();
+    const length = version === 1 && defaultLength === 0 ? u32() : kind.bytes;
+    if (length !== kind.bytes || at + length > body.length) throw refuse("bad_video");
+    if (!kind.check(body.subarray(at, at + length))) throw refuse("bad_video");
+    at += length;
+  }
+  if (at !== body.length) throw refuse("bad_video");
+  return count;
+}
+
+/** `sbgp`: runs of samples, no more than the track has, each naming a description its `sgpd` holds or none. */
+function groupMapping(moov: Moov, box: Box, samples: number, descriptions: number): void {
+  const { version, body } = moov.full(box, 1);
+  const head = version === 1 ? 12 : 8;
+  if (body.length < head) throw refuse("bad_video");
+  // A known type takes no parameter.
+  if (version === 1 && body.readUInt32BE(4) !== 0) throw refuse("bad_video");
+  const count = body.readUInt32BE(head - 4);
+  if (body.length !== head + count * 8) throw refuse("bad_video");
+  let mapped = 0;
+  for (let i = 0; i < count; i++) {
+    if ((i & 1023) === 0) moov.budget.check();
+    mapped += body.readUInt32BE(head + i * 8);
+    if (mapped > samples || body.readUInt32BE(head + i * 8 + 4) > descriptions) throw refuse("bad_video");
+  }
 }
 
 /** stts or ctts: (count, value) runs. ctts version 1 takes signed offsets. */
 function pairs(moov: Moov, box: Box, signedVersion: number): Array<[number, number]> {
-  const { version, body } = moov.full(box);
-  if (version > signedVersion || body.length < 4) throw refuse("bad_video");
+  const { version, body } = moov.full(box, signedVersion);
+  if (body.length < 4) throw refuse("bad_video");
   const count = body.readUInt32BE(0);
   if (body.length !== 4 + count * 8) throw refuse("bad_video");
   const out: Array<[number, number]> = [];
@@ -417,8 +652,8 @@ function pairs(moov: Moov, box: Box, signedVersion: number): Array<[number, numb
 }
 
 function chunkRuns(moov: Moov, box: Box): Array<[number, number]> {
-  const { version, body } = moov.full(box);
-  if (version !== 0 || body.length < 4) throw refuse("bad_video");
+  const { body } = moov.full(box, 0);
+  if (body.length < 4) throw refuse("bad_video");
   const count = body.readUInt32BE(0);
   if (body.length !== 4 + count * 12) throw refuse("bad_video");
   const out: Array<[number, number]> = [];
@@ -435,8 +670,8 @@ function chunkRuns(moov: Moov, box: Box): Array<[number, number]> {
 }
 
 function sampleSizes(moov: Moov, box: Box): number[] {
-  const { version, body } = moov.full(box);
-  if (version !== 0 || body.length < 8) throw refuse("bad_video");
+  const { body } = moov.full(box, 0);
+  if (body.length < 8) throw refuse("bad_video");
   // No track here may hold more samples than the sound's cap, the larger of the two.
   const cap = VIDEO_LIMITS.parseSoundFrameHeaders;
   if (box.type === "stsz") {
@@ -455,12 +690,15 @@ function sampleSizes(moov: Moov, box: Box): number[] {
   if (count > cap || ![4, 8, 16].includes(field) || body.readUIntBE(0, 3) !== 0) throw refuse("bad_video");
   if (body.length !== 8 + Math.ceil((count * field) / 8)) throw refuse("bad_video");
   const bits = new Bits(body.subarray(8));
-  return Array.from({ length: count }, () => bits.read(field));
+  const sizes = Array.from({ length: count }, () => bits.read(field));
+  // An odd count of 4-bit sizes leaves half a byte, which must be zero.
+  if (!bits.restIsZero()) throw refuse("bad_video");
+  return sizes;
 }
 
 function chunkOffsets(moov: Moov, box: Box): number[] {
-  const { version, body } = moov.full(box);
-  if (version !== 0 || body.length < 4) throw refuse("bad_video");
+  const { body } = moov.full(box, 0);
+  if (body.length < 4) throw refuse("bad_video");
   const count = body.readUInt32BE(0);
   const each = box.type === "co64" ? 8 : 4;
   if (count > VIDEO_LIMITS.parseSoundFrameHeaders || body.length !== 4 + count * each) throw refuse("bad_video");
@@ -557,14 +795,16 @@ function timing(moov: Moov, track: Track, movieTimescale: number, cap: number, c
 }
 
 function sampleDescription(moov: Moov, stsd: Box, track: Track): void {
-  const { version, body } = moov.full(stsd);
-  if (version !== 0 || body.length < 4 || body.readUInt32BE(0) !== 1) throw refuse("bad_video");
+  const { body } = moov.full(stsd, 0);
+  if (body.length < 4 || body.readUInt32BE(0) !== 1) throw refuse("bad_video");
   const entries = moov.children(stsd, 6, stsd.payload + 8);
   if (entries.length !== 1) throw refuse("bad_video");
   const entry = entries[0]!;
   track.sampleEntry = entry.type;
   const p = moov.payload(entry);
   if (p.length < 8) throw refuse("bad_video");
+  // Every sample entry starts with six reserved bytes.
+  moov.zeroAt(entry.payload, 6);
   track.dataRef = p.readUInt16BE(6);
   if (track.handler === "vide") visualEntry(moov, entry, track);
   else if (track.handler === "soun") audioEntry(moov, entry, track);
@@ -575,28 +815,37 @@ function visualEntry(moov: Moov, entry: Box, track: Track): void {
   if (!["avc1", "avc3", "av01"].includes(entry.type)) throw refuse("video_codec");
   const p = moov.payload(entry);
   if (p.length < 78) throw refuse("bad_video");
+  // The predefined and reserved sixteen, where QuickTime puts a version, a vendor and qualities, and the reserved four after the resolutions.
+  moov.zeroAt(entry.payload + 8, 16);
+  moov.zeroAt(entry.payload + 36, 4);
   track.width = p.readUInt16BE(24);
   track.height = p.readUInt16BE(26);
   // The compressor name is a free-text Pascal string, so it is zeroed to an empty one.
   moov.edits.zero(entry.payload + 42, entry.payload + 74);
   let sawConfig = false;
+  const seen = new Set<string>();
   for (const box of moov.children(entry, 7, entry.payload + 78)) {
     if ((box.type === "avcC" && entry.type !== "av01") || (box.type === "av1C" && entry.type === "av01")) {
       if (sawConfig) throw refuse("bad_video");
       sawConfig = true;
       track.codec = box.type === "avcC" ? avcCodecString(entry.type, moov.payload(box)) : av1CodecString(moov.payload(box));
     } else if (box.type === "pasp") {
+      once(seen, box.type);
       const b = moov.payload(box);
       if (b.length !== 8) throw refuse("bad_video");
       if (b.readUInt32BE(0) !== b.readUInt32BE(4)) throw refuse("video_geometry");
+      // Square pixels as N:N say 1:1, which is all a square ratio needs to say.
+      moov.putAt(box.payload, Buffer.from([0, 0, 0, 1, 0, 0, 0, 1]));
     } else if (box.type === "clap") {
       throw refuse("video_geometry");
-    } else if (box.type === "btrt") {
-      if (moov.payload(box).length !== 12) throw refuse("bad_video");
     } else if (box.type === "colr") {
       const b = moov.payload(box);
+      // One of each colour type, as the format allows an nclx beside an ICC profile.
+      once(seen, `colr ${b.subarray(0, 4).toString("latin1")}`);
       if (b.length >= 4 && b.subarray(0, 4).toString("latin1") === "nclx") {
         if (b.length !== 11) throw refuse("bad_video");
+        // Primaries, transfer and matrix are 8-bit code points in 16-bit fields, then the full-range bit and seven reserved.
+        if (b[4] !== 0 || b[6] !== 0 || b[8] !== 0 || (b[10]! & 0x7f) !== 0) throw refuse("bad_video");
         const transfer = b.readUInt16BE(6);
         if (transfer === 16 || transfer === 18) throw refuse("video_hdr");
       } else {
@@ -604,37 +853,47 @@ function visualEntry(moov: Moov, entry: Box, track: Track): void {
         moov.renameFree(box);
       }
     } else {
-      moov.drop(box); // fiel, clli, mdcv, the spherical boxes and the rest
+      // btrt goes too: three free numbers no player needs to play the file.
+      moov.drop(box); // fiel, clli, mdcv, btrt, the spherical boxes and the rest
     }
   }
   if (!sawConfig) throw refuse("bad_video");
 }
 
+/** NAL unit types an avcC's parameter sets may be: a sequence, a picture and a sequence extension set. */
+const NAL_SPS = 7;
+const NAL_PPS = 8;
+const NAL_SPS_EXT = 13;
+
 /**
  * `avcC` (ISO 14496-15 5.3.3.1), read with its High-profile extension
  * optional, since some muxers omit it. Bytes after the record that are all
- * zero are kept, still zero, and only others are refused (AMS-3).
+ * zero are kept, still zero, and only others are refused (AMS-3). Each
+ * parameter set must be a NAL unit of its own kind, so no other unit rides
+ * along outside the media data.
  */
 export function avcCodecString(entryType: string, b: Buffer): string {
   if (b.length < 7 || b[0] !== 1) throw refuse("bad_video");
   const profile = b[1]!;
   let at = 5;
-  const sets = (count: number) => {
+  const sets = (count: number, type: number) => {
     for (let i = 0; i < count; i++) {
       if (at + 2 > b.length) throw refuse("bad_video");
       const n = b.readUInt16BE(at);
+      const nal = b[at + 2];
+      if (n < 1 || nal === undefined || (nal & 0x80) !== 0 || (nal & 0x1f) !== type) throw refuse("bad_video");
       at += 2 + n;
       if (at > b.length) throw refuse("bad_video");
     }
   };
-  sets(b[at++]! & 0x1f);
+  sets(b[at++]! & 0x1f, NAL_SPS);
   if (at >= b.length) throw refuse("bad_video");
-  sets(b[at++]!);
+  sets(b[at++]!, NAL_PPS);
   const zeroFrom = (from: number) => b.subarray(from).every((x) => x === 0);
   if (at < b.length && !zeroFrom(at)) {
     if (![100, 110, 122, 144].includes(profile) || at + 4 > b.length) throw refuse("bad_video");
     at += 3;
-    sets(b[at++]!);
+    sets(b[at++]!, NAL_SPS_EXT);
     if (at < b.length && !zeroFrom(at)) throw refuse("bad_video");
   }
   const hex = (n: number) => n.toString(16).toUpperCase().padStart(2, "0");
@@ -647,6 +906,9 @@ function audioEntry(moov: Moov, entry: Box, track: Track): void {
   if (p.length < 28) throw refuse("bad_video");
   // Version 0, as ISO writes it: QuickTime's later versions put the codec record in other places.
   if (p.readUInt16BE(8) !== 0) throw refuse("video_sound");
+  // The reserved eight, where QuickTime keeps a version, a revision and a vendor, and the predefined and reserved four after the sample size.
+  moov.zeroAt(entry.payload + 8, 8);
+  moov.zeroAt(entry.payload + 20, 4);
   let sawConfig = false;
   for (const box of moov.children(entry, 7, entry.payload + 28)) {
     if ((box.type === "esds" && entry.type === "mp4a") || (box.type === "dOps" && entry.type === "Opus")) {
@@ -662,19 +924,19 @@ function audioEntry(moov: Moov, entry: Box, track: Track): void {
         track.channels = opusHead(moov.payload(box), "mp4").channels;
         track.hz = OPUS_HZ;
       }
-    } else if (box.type === "btrt") {
-      if (moov.payload(box).length !== 12) throw refuse("bad_video");
     } else {
-      moov.drop(box); // chan, wave and the rest
+      moov.drop(box); // chan, wave, btrt and the rest
     }
   }
   if (!sawConfig) throw refuse("video_sound");
 }
 
-/** The timecode's sample entry keeps only its fixed fields: its `name` box and anything else go. */
+/** The timecode's sample entry keeps only its fixed fields, its reserved ones zeroed: its `name` box and anything else go. */
 function timecodeEntry(moov: Moov, entry: Box): void {
   if (entry.type !== "tmcd") throw refuse("video_tracks");
   if (moov.payload(entry).length < 26) throw refuse("bad_video");
+  moov.zeroAt(entry.payload + 8, 4);
+  moov.zeroAt(entry.payload + 25, 1);
   for (const box of moov.children(entry, 7, entry.payload + 26)) moov.drop(box);
 }
 
@@ -738,10 +1000,9 @@ export function audioSpecificConfig(record: Buffer): { objectType: number; chann
     const t = bits.read(5);
     return t === 31 ? 32 + bits.read(6) : t;
   };
+  // A rate outside the table (index 15 and its 24 bits) is refused, since no AAC encoder for video writes one and its range runs past what a stored video may say (AM-R1-05).
   const rate = () => {
-    const index = bits.read(4);
-    if (index === 15) return bits.read(24);
-    const hz = AAC_RATES[index];
+    const hz = AAC_RATES[bits.read(4)];
     if (hz === undefined) throw refuse("video_sound");
     return hz;
   };
