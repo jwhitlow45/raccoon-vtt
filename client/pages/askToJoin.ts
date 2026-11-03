@@ -268,7 +268,14 @@ export const OUTCOME_CARDS: Record<Outcome, { title: string; body: string }> = {
   ended: { title: "Request ended", body: "That request ended. Ask again." },
 };
 
-/** The buttons under an outcome, from the design's table. Back returns to the password card, or to the ask card where there is none. */
+/**
+ * The buttons under an outcome, from the design's table. Back returns to
+ * the password card, or to the ask card where there is none. This page
+ * shows only in the asking modes, so "Requests are off" here means the DM
+ * turned requests on again since (the server keeps the ending 2 minutes),
+ * and Ask again is the way on. With the password, the join page shows that
+ * card itself, above the password card, with no buttons.
+ */
 export function outcomeButtons(outcome: Outcome): ("back" | "again" | "here")[] {
   switch (outcome) {
     case "turned_away":
@@ -276,11 +283,10 @@ export function outcomeButtons(outcome: Outcome): ("back" | "again" | "here")[] 
     case "expired":
       return ["again", "back"];
     case "ended":
+    case "closed":
       return ["again"];
     case "other_tab":
       return ["here"];
-    case "closed":
-      return [];
   }
 }
 

@@ -218,7 +218,8 @@ describe("the ask page's words", () => {
   test("each ending offers the buttons of the design's table", () => {
     assert.deepEqual(outcomeButtons("turned_away"), ["back"]);
     assert.deepEqual(outcomeButtons("expired"), ["again", "back"]);
-    assert.deepEqual(outcomeButtons("closed"), []);
+    // Shown on the ask page only in an asking mode, where requests are on again (JBO1-03).
+    assert.deepEqual(outcomeButtons("closed"), ["again"]);
     assert.deepEqual(outcomeButtons("other_tab"), ["here"]);
     assert.deepEqual(outcomeButtons("ended"), ["again"]);
   });
