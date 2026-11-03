@@ -165,7 +165,7 @@ describe("the room clock's Time panel", () => {
 
   test("ck-1. the DM starts a Day count clock at Day 1, 8:00 AM, and Pat's copy and one shared line read it", async () => {
     const panel = await timePanel();
-    await panel.getByText("Keep the in-game date and time. You move it on as time passes. A Long Rest for the party and each fight move it too.", { exact: true }).waitFor();
+    await panel.getByText("Track the in-game date and time. You move the clock on as time passes. Party Long Rests and fights move it too.", { exact: true }).waitFor();
     assert.equal(await panel.getByRole("radio", { name: "Day count" }).isChecked(), true);
     assert.equal(await panel.getByLabel("Day", { exact: true }).inputValue(), "1");
     assert.equal(await panel.getByLabel("Time", { exact: true }).inputValue(), "08:00");

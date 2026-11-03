@@ -15,9 +15,9 @@ import { StepButtons } from "./StepButtons.tsx";
 import { calendarSummary, timeLine } from "./words.ts";
 
 export const NOT_SHARING = "The DM isn't sharing the date and time now.";
-export const FIGHT_NOTE = "In a fight, the clock adds 6 seconds a round when it ends.";
+export const FIGHT_NOTE = "When the fight ends, the clock moves on 6 seconds for each round.";
 export const HIDDEN_NOTE = "Players don't see the date and time.";
-export const STOP_HELP = "The date and time go. Undo setup in Setup history brings them back.";
+export const STOP_HELP = "Removes the date and time for everyone. Undo setup in Setup history brings them back.";
 
 /**
  * Time (docs/design/design-v1-calendar.md 4): the room's in-game date and time.

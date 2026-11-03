@@ -145,7 +145,7 @@ export function CalendarDialog(props: {
                   Add a month
                 </Button>
               </div>
-              <Help>A month of 1 day shows by its name alone, as a festival day does.</Help>
+              <Help>A 1-day month, such as a festival day, shows by its name alone.</Help>
             </Section>
             <Field label="Day names" value={draft.week} hint="In order, split by commas. Leave it empty for no week." onChange={(e) => edit({ ...draft, week: e.target.value })} />
             <Field label="After the year" value={draft.era} maxLength={LIMITS.calendarEraChars} hint="Words after the year, such as an era's initials. Leave it empty for none." onChange={(e) => edit({ ...draft, era: e.target.value })} />

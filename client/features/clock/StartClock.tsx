@@ -11,8 +11,8 @@ import { DateFieldsEditor } from "./DateFieldsEditor.tsx";
 import { pickStartKind, savedToStart, START_FORM, type StartForm } from "./calendarDraft.ts";
 import { composeDraft, calendarSummary } from "./words.ts";
 
-export const START_INTRO = "Keep the in-game date and time. You move it on as time passes. A Long Rest for the party and each fight move it too.";
-export const SHARE_HELP = "Off, players get no date, time or time lines at all.";
+export const START_INTRO = "Track the in-game date and time. You move the clock on as time passes. Party Long Rests and fights move it too.";
+export const SHARE_HELP = "Off, players see no date or time anywhere, not even in the Log.";
 
 /**
  * The Time panel with no clock (docs/design/design-v1-calendar.md 4.1). The

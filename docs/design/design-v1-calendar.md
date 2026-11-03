@@ -45,10 +45,10 @@ The SRD names no calendar. Published settings' calendars are not SRD content, so
 
 The DM opens **Time** (a new panel, "In play" group, after Areas, and in a DM's "Run the table" group since the panel groups change). With no clock it reads:
 
-- "Keep the in-game date and time. You move it on as time passes. A Long Rest for the party and each fight move it too."
+- "Track the in-game date and time. You move the clock on as time passes. Party Long Rests and fights move it too."
 - **Calendar**, two radio cards: **Day count** ("Day 1, Day 2 and on.") and **Months** ("Months, weekdays and years with names you choose."). Months opens the Calendar dialog (4.3), whose Save only keeps the calendar as a draft on this form, named beside the card ("12 months, 7-day week", with Change). Nothing is sent until Start the clock.
 - **It is now**: Day `1` (or, after Months, the month, day and year), and a time field at 8:00 AM.
-- Switch **Players see the date and time**, on: "Off, players get no date, time or time lines at all."
+- Switch **Players see the date and time**, on: "Off, players see no date or time anywhere, not even in the Log."
 - **Start the clock** (primary): the one `clock.start`, with the calendar, the date and the switch as the form holds them. So a hidden Months clock never reaches a player, its start line included.
 
 ### 4.2 The Time panel
@@ -60,12 +60,12 @@ For everyone with a clock, at the top, in a polite live region:
 
 For the DM, under it:
 
-- During a fight: "In a fight, the clock adds 6 seconds a round when it ends." While the clock is hidden: "Players don't see the date and time."
+- During a fight: "When the fight ends, the clock moves on 6 seconds for each round." While the clock is hidden: "Players don't see the date and time."
 - **Move the clock on**, a group of four buttons in a 2 by 2 grid: **10 minutes**, **1 hour**, **8 hours**, **To dawn** (the next 6:00 AM). Each is one `clock.advance`. Then **Other amount…**, which opens a row in place: a number field, a unit (Minutes, Hours, Days) and **Move on**.
 - **Set the date and time…** opens a dialog (4.3).
 - Switch **Players see the date and time**.
 - **Calendar…**, its value beside it ("Day count", or "12 months, 7-day week").
-- At the foot, **Stop the clock** (danger, armed second tap): "The date and time go. Undo setup in Setup history brings them back."
+- At the foot, **Stop the clock** (danger, armed second tap): "Removes the date and time for everyone. Undo setup in Setup history brings them back."
 
 Every step applies at once and shows on every device. A mistake is the top bar's Undo. Setting the clock back is Set, never a negative step.
 
@@ -76,7 +76,7 @@ Every step applies at once and shows on every device. A mistake is the top bar's
 **Calendar** (Dialog, DM only):
 
 - The two radio cards of 4.1.
-- For Months: one row per month, Name and Days, with Move up, Move down and Remove ("Remove Deepwinter"). **Add a month**. New calendars start with 12 rows, "Month 1" to "Month 12", 30 days each. Help: "A month of 1 day shows by its name alone, as a festival day does."
+- For Months: one row per month, Name and Days, with Move up, Move down and Remove ("Remove Deepwinter"). **Add a month**. New calendars start with 12 rows, "Month 1" to "Month 12", 30 days each. Help: "A 1-day month, such as a festival day, shows by its name alone."
 - **Day names**: one field, "In order, split by commas. Leave it empty for no week."
 - **After the year**: one field, "Words after the year, such as an era's initials. Leave it empty for none."
 - "A year is N days.", with N counted from the rows as they are edited (`yearDays`).
