@@ -137,10 +137,12 @@ const noBoard = { subscribe: () => () => {}, shown: NOT_SHOWN };
  * once Konva holds it no more.
  */
 export function useMapVideo(enabled: boolean, assetId: AssetId | undefined): { element: HTMLVideoElement | null; ref: (node: Konva.Image | null) => void } {
-  const board = useScopedIfAny(animMapSlot);
+  // Only the tree that draws the video speaks to the board: the isometric tree's map image, which never does, must not tell it Konva let go, nor hand it its own layer.
+  const scoped = useScopedIfAny(animMapSlot);
+  const board = enabled ? scoped : null;
   const source = board ?? noBoard;
   const shown = useSyncExternalStore(source.subscribe, () => source.shown, () => NOT_SHOWN);
-  const element = enabled && assetId !== undefined && shown.assetId === assetId ? (shown.element as unknown as HTMLVideoElement | null) : null;
+  const element = board && assetId !== undefined && shown.assetId === assetId ? (shown.element as unknown as HTMLVideoElement | null) : null;
   useLayoutEffect(() => {
     board?.konvaHolds(element as unknown as VideoLike | null);
   }, [board, element]);
@@ -148,10 +150,11 @@ export function useMapVideo(enabled: boolean, assetId: AssetId | undefined): { e
   const layerRef = useRef<Konva.Layer | null>(null);
   const ref = useCallback(
     (node: Konva.Image | null) => {
+      if (!board) return;
       const layer = node?.getLayer() ?? null;
       if (layer === layerRef.current) return;
       layerRef.current = layer;
-      board?.attachLayer(layer ? konvaLayer(layer) : null);
+      board.attachLayer(layer ? konvaLayer(layer) : null);
     },
     [board],
   );
