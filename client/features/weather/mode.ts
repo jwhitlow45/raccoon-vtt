@@ -25,9 +25,7 @@ export type ModeInput = {
   /** Its look has particles, so a step-down halves them before it holds still. Fog has none. */
   particles: boolean;
   pageVisible: boolean;
-  /** The room's map tree is not frozen. */
-  mapShown: boolean;
-  /** A weather layer is registered and its tree shows. */
+  /** A weather layer is registered and its tree shows, so a frozen map tree, or a room closed, has none. */
   layer: boolean;
   /** A panel fills the whole screen. */
   covered: boolean;
@@ -35,7 +33,6 @@ export type ModeInput = {
   preview: boolean;
   /** The scene is still loading. */
   loading: boolean;
-  roomOpen: boolean;
   /** The Builder, Fog, Line up grid or Traps tool is in use. */
   setupTool: boolean;
 };
@@ -199,7 +196,7 @@ export class WeatherMode {
   /** Seen: every reason it would stop is absent (5.2's "stops when unseen"). */
   #seen(): boolean {
     const i = this.#input;
-    return this.mounted && i.mapShown && i.layer && !i.covered && !i.preview && !i.loading && i.roomOpen;
+    return this.mounted && i.layer && !i.covered && !i.preview && !i.loading;
   }
 
   #settle(now: number): void {

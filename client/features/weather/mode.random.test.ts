@@ -22,22 +22,20 @@ const SHOWN: ModeInput = {
   weather: true,
   particles: true,
   pageVisible: true,
-  mapShown: true,
   layer: true,
   covered: false,
   preview: false,
   loading: false,
-  roomOpen: true,
   setupTool: false,
 };
 
-const FLAGS = ["reducedMotion", "lowPower", "weather", "particles", "pageVisible", "mapShown", "layer", "covered", "preview", "loading", "roomOpen", "setupTool"] as const;
+const FLAGS = ["reducedMotion", "lowPower", "weather", "particles", "pageVisible", "layer", "covered", "preview", "loading", "setupTool"] as const;
 const LEVELS: readonly StepLevel[] = ["full", "half", "still"];
 
 /** The rule the mode must follow, written out again from the design's words. */
 function shouldLoop(i: ModeInput, level: StepLevel): boolean {
   const moving = i.weather && i.setting === "moving" && !i.reducedMotion && !i.lowPower && level !== "still";
-  const seen = !i.setupTool && i.pageVisible && i.mapShown && i.layer && !i.covered && !i.preview && !i.loading && i.roomOpen;
+  const seen = !i.setupTool && i.pageVisible && i.layer && !i.covered && !i.preview && !i.loading;
   return moving && seen;
 }
 

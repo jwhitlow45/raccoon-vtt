@@ -54,12 +54,10 @@ const IDLE: ModeInput = {
   weather: false,
   particles: false,
   pageVisible: true,
-  mapShown: true,
   layer: false,
   covered: false,
   preview: false,
   loading: false,
-  roomOpen: true,
   setupTool: false,
 };
 

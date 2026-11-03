@@ -9,12 +9,10 @@ const SHOWN: ModeInput = {
   weather: true,
   particles: true,
   pageVisible: true,
-  mapShown: true,
   layer: true,
   covered: false,
   preview: false,
   loading: false,
-  roomOpen: true,
   setupTool: false,
 };
 
@@ -76,7 +74,7 @@ test("Off, Still, reduced motion and Low power", () => {
 test("a setup tool and a hidden page mount no layer, and every unseen reason stops the loop", () => {
   assert.equal(new WeatherMode({ ...SHOWN, setupTool: true }, 0).mounted, false);
   assert.equal(new WeatherMode({ ...SHOWN, pageVisible: false }, 0).mounted, false);
-  for (const patch of [{ mapShown: false }, { layer: false }, { covered: true }, { preview: true }, { loading: true }, { roomOpen: false }, { setupTool: true }, { pageVisible: false }] as Partial<ModeInput>[]) {
+  for (const patch of [{ layer: false }, { covered: true }, { preview: true }, { loading: true }, { setupTool: true }, { pageVisible: false }] as Partial<ModeInput>[]) {
     const mode = new WeatherMode(SHOWN, 0);
     mode.frame(0);
     mode.update(patch, 10);
