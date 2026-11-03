@@ -3,7 +3,7 @@ import { LIMITS, serializedBytes } from "#shared/limits.ts";
 import { dmNumbered, logsInIdOrder, whisperParties } from "#shared/logRings.ts";
 import { MAP_DISCOVERY_OP_VERSION, OP_VERSION, SNAPSHOT_VERSION, mapDiscoveryUpgrade, migrateOp, migrateSnapshot, needsMapDiscoveryUpgrade, opMigrations, type MigrationStep } from "#shared/migrate.ts";
 import type { LogEntry, RoomState, VideoFacts, Viewer } from "#shared/model.ts";
-import { opSchema, type Op } from "#shared/protocol.ts";
+import { checkedVideoFacts, opSchema, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { saveOutcomeLedgerSchema } from "#shared/saveOutcomeContract.ts";
 import { CommitOutcomeUnknown, type Queryable } from "../auth/tx.ts";
@@ -688,18 +688,43 @@ export async function readLogEntries(client: Queryable, roomId: string, ids: rea
  */
 export type AssetFact = { id: string; roomId: string; kind: "map" | "token" | "handout" | "thumb" | "video"; width: number; height: number; uploaders: string[]; video?: VideoFacts };
 
-/** The rows behind the asset ids an op names, for the reference checks in canApply (design 8.2). */
+/** An asset row as loadAssetFacts reads it. */
+export type AssetFactRow = { id: string; room_id: string; kind: AssetFact["kind"]; width: number; height: number; uploaders: string[] | null; media?: unknown; video?: unknown };
+
+/**
+ * The rows behind the asset ids an op names, for the reference checks in
+ * canApply (design 8.2), with a video row's facts for `withAssetSizes`.
+ * The video columns are read through the row's JSON, which answers null
+ * for a column the database does not have, so an image lookup never fails
+ * on them.
+ */
 export async function loadAssetFacts(pool: Queryable, ids: readonly string[]): Promise<Map<string, AssetFact>> {
   const facts = new Map<string, AssetFact>();
   if (ids.length === 0) return facts;
-  const { rows } = await pool.query<{ id: string; room_id: string; kind: AssetFact["kind"]; width: number; height: number; uploaders: string[] | null }>(
+  const { rows } = await pool.query<AssetFactRow>(
     `select a.id, a.room_id, a.kind, a.width, a.height,
-       array(select u.member_id from asset_uploaders u where u.asset_id = a.id) as uploaders
+       array(select u.member_id from asset_uploaders u where u.asset_id = a.id) as uploaders,
+       to_jsonb(a) -> 'media' as media, to_jsonb(a) -> 'video' as video
      from assets a where a.id = any($1::uuid[])`,
     [ids],
   );
-  for (const r of rows) facts.set(r.id, { id: r.id, roomId: r.room_id, kind: r.kind, width: r.width, height: r.height, uploaders: r.uploaders ?? [] });
+  for (const r of rows) facts.set(r.id, assetFactOf(r));
   return facts;
+}
+
+/**
+ * One row's fact. A video's facts are its `media` column, its size and its
+ * `video` column's JSON (docs/design/design-v1-animated-maps.md 9.1), held
+ * to the protocol's bounds. A video row whose facts do not check gets none,
+ * so the actor refuses it as it refuses a missing row, and no unchecked
+ * number reaches a map.
+ */
+export function assetFactOf(r: AssetFactRow): AssetFact {
+  const fact: AssetFact = { id: r.id, roomId: r.room_id, kind: r.kind, width: r.width, height: r.height, uploaders: r.uploaders ?? [] };
+  if (r.kind !== "video" || r.video === null || typeof r.video !== "object") return fact;
+  const video = checkedVideoFacts({ ...r.video, widthPx: r.width, heightPx: r.height, container: r.media ?? (r.video as { container?: unknown }).container });
+  if (video !== undefined) fact.video = video;
+  return fact;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

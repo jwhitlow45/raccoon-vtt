@@ -4,7 +4,7 @@ import { BLOCK_SAVES_TOO_FAST, BLOCKS_AT_QUOTA, BLOCKS_ROOM_TOO_FULL, checkLimit
 import { serverDraw, type Draw } from "#shared/dice/roll.ts";
 import { withTodaysSrdIds } from "#shared/migrate.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
-import type { HandoutPage, LogEntry, RoomState, Token, Viewer } from "#shared/model.ts";
+import type { HandoutPage, LogEntry, MapVideo, RoomState, Token, Viewer } from "#shared/model.ts";
 import { canApply, doorReachPassed, touchLanding, MOVE_PLAYERS_FIRST_BACK, type PermissionDeps } from "#shared/permissions.ts";
 import { holderOf, linkHolds, onHolder } from "#shared/rules/attach.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
@@ -104,6 +104,12 @@ export type ActorOptions = {
   memoryGrowth: typeof memoryGrowth;
   /** Asked before each write to the log archive (persistence.ts ArchiveGuard). The app passes the asset volume's free-disk check. */
   archiveGuard: ArchiveGuard;
+  /**
+   * The server's ANIMATED_MAPS switch (server/config.ts animatedMapsOn).
+   * Off, no op may bring in a video the room does not already name
+   * (shared/permissions.ts PermissionDeps.animatedMaps).
+   */
+  animatedMaps: boolean;
 };
 
 export const DEFAULT_ACTOR_OPTIONS: ActorOptions = {
@@ -124,6 +130,7 @@ export const DEFAULT_ACTOR_OPTIONS: ActorOptions = {
   mapStep: mapStepOps,
   memoryGrowth,
   archiveGuard: ARCHIVE_ALWAYS,
+  animatedMaps: false,
 };
 
 export type ActorDeps = {
@@ -1732,6 +1739,8 @@ export class RoomActor {
       canUseAsset: (memberId, assetId, kind) => {
         const fact = facts.get(assetId.toLowerCase());
         if (!fact || fact.roomId !== this.roomId || fact.kind !== kind) return false;
+        // A video row whose facts did not check filled nothing, so the op still holds the client's numbers (withAssetSizes).
+        if (kind === "video" && fact.video === undefined) return false;
         if (viewer.role === "dm") return true;
         if (fact.uploaders.includes(memberId)) return true;
         return this.#stagedVisibleAssets(memberId).has(fact.id);
@@ -1742,6 +1751,7 @@ export class RoomActor {
         const fact = facts.get(assetId.toLowerCase());
         return fact !== undefined && fact.roomId === this.roomId && fact.kind === kind;
       },
+      animatedMaps: this.#opts.animatedMaps,
     };
   }
 
@@ -2601,7 +2611,9 @@ async function recheckQuotaOnLoad(deps: ActorDeps, quotaBytes: number): Promise<
  * row knows (design 5). The row's
  * values replace whatever the client sent, before authorization sees the
  * op. An asset the room cannot use keeps the client's numbers, and
- * authorization refuses it.
+ * authorization refuses it. A map's or a phase's video takes every fact but
+ * its id from its row the same way (docs/design/design-v1-animated-maps.md
+ * 9.2), so players' devices judge playback by what the server checked.
  */
 function withAssetSizes(op: Op, facts: Map<string, AssetFact>): Op {
   // A handout's page sizes lay out the viewer before any image loads (docs/design/design-v1-pdf-handouts.md 3.1).
@@ -2609,21 +2621,25 @@ function withAssetSizes(op: Op, facts: Map<string, AssetFact>): Op {
   if (op.t === "handoutDoc.create") return { ...op, doc: { ...op.doc, pages: pagesWithSizes(op.doc.pages, facts) } };
   // A phase's size decides its grid, so it comes from the asset row too (docs/design/design-v1-maps-vision.md 3.4).
   if (op.t === "scene.update" && op.patch.phases) {
-    const phases = op.patch.phases.map((phase) => {
-      const fact = facts.get(phase.assetId.toLowerCase());
-      return fact && fact.kind === "map" ? { ...phase, widthPx: fact.width, heightPx: fact.height } : phase;
-    });
+    const phases = op.patch.phases.map((phase) => withVideoFacts(withMapSize(phase, facts), facts));
     return { ...op, patch: { ...op.patch, phases } };
   }
-  if (op.t === "scene.setMap" && op.map) {
-    const fact = facts.get(op.map.assetId.toLowerCase());
-    if (fact && fact.kind === "map") return { ...op, map: { ...op.map, widthPx: fact.width, heightPx: fact.height } };
-  }
-  if (op.t === "scene.create" && op.scene.map) {
-    const fact = facts.get(op.scene.map.assetId.toLowerCase());
-    if (fact && fact.kind === "map") return { ...op, scene: { ...op.scene, map: { ...op.scene.map, widthPx: fact.width, heightPx: fact.height } } };
-  }
+  if (op.t === "scene.setMap" && op.map) return { ...op, map: withVideoFacts(withMapSize(op.map, facts), facts) };
+  if (op.t === "scene.create" && op.scene.map) return { ...op, scene: { ...op.scene, map: withVideoFacts(withMapSize(op.scene.map, facts), facts) } };
   return op;
+}
+
+/** A map's or a phase's still at its row's size, where the row is a map image. */
+function withMapSize<T extends { assetId: string; widthPx: number; heightPx: number }>(place: T, facts: Map<string, AssetFact>): T {
+  const fact = facts.get(place.assetId.toLowerCase());
+  return fact && fact.kind === "map" ? { ...place, widthPx: fact.width, heightPx: fact.height } : place;
+}
+
+/** A map's or a phase's video with its row's facts, where the row is a video whose facts checked (persistence.ts assetFactOf). */
+function withVideoFacts<T extends { video?: MapVideo | undefined }>(place: T, facts: Map<string, AssetFact>): T {
+  if (place.video === undefined) return place;
+  const fact = facts.get(place.video.assetId.toLowerCase());
+  return fact && fact.kind === "video" && fact.video ? { ...place, video: { assetId: place.video.assetId, ...fact.video } } : place;
 }
 
 /** Each page's size from its asset row, where the row is a handout image. */

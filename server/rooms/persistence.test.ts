@@ -7,7 +7,7 @@ import type { Op, RestoreEntry } from "#shared/protocol.ts";
 import { stableStringify } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { DM, actor, character, entry, env, member, reveal, room, token } from "#shared/testutil.ts";
-import { assetIdsOf, loadRoom, type Pool } from "./persistence.ts";
+import { assetFactOf, assetIdsOf, loadAssetFacts, loadRoom, type AssetFactRow, type Pool } from "./persistence.ts";
 
 /**
  * Replay of stored ops (design 16.2), against a pool that answers the two
@@ -370,5 +370,35 @@ describe("asset ids an op names", () => {
     assert.deepEqual(assetIdsOf({ t: "scene.update", sceneId: "s", patch: { thumb: a.toUpperCase(), phases: [{ id: "p", name: "Day", assetId: b, widthPx: 1, heightPx: 1 }] } }), [a, b]);
     assert.deepEqual(assetIdsOf({ t: "build.stamps", sceneId: "s", put: [{ id: "st", art: { assetId: c } }] }), [c]);
     assert.deepEqual(assetIdsOf({ t: "scene.update", sceneId: "s", patch: { thumb: "not-a-uuid" } }), []);
+  });
+});
+
+describe("a video row's facts (docs/design/design-v1-animated-maps.md 9.1)", () => {
+  const VIDEO_ID = "0193a0f0-0000-7000-8000-00000000000a";
+  const base: AssetFactRow = { id: VIDEO_ID, room_id: "ROOM", kind: "video", width: 1920, height: 1080, uploaders: null, media: "webm", video: { video: "vp09.00.40.08", fps: 30, durationMs: 42_000, kbps: 6_000 } };
+
+  test("come from the media column, the size and the video column's JSON", () => {
+    assert.deepEqual(assetFactOf(base), { id: VIDEO_ID, roomId: "ROOM", kind: "video", width: 1920, height: 1080, uploaders: [], video: { widthPx: 1920, heightPx: 1080, container: "webm", video: "vp09.00.40.08", fps: 30, durationMs: 42_000, kbps: 6_000 } });
+    const sound = assetFactOf({ ...base, media: "mp4", video: { video: "avc1.640028", audio: "mp4a.40.2", audioChannels: 2, audioHz: 48_000, fps: 30, durationMs: 42_000, kbps: 6_000 } });
+    assert.deepEqual(sound.video, { widthPx: 1920, heightPx: 1080, container: "mp4", video: "avc1.640028", audio: "mp4a.40.2", audioChannels: 2, audioHz: 48_000, fps: 30, durationMs: 42_000, kbps: 6_000 });
+    assert.equal(assetFactOf({ ...base, media: null, video: { ...(base.video as object), container: "mp4" } }).video?.container, "mp4", "the JSON's container where the column has none");
+    assert.equal(assetFactOf({ ...base, video: { ...(base.video as object), audio: null } }).video?.audio, undefined, "a null reads as absent");
+  });
+
+  test("a video row whose facts do not check gets none, so the actor refuses it, and an image row gets none at all", () => {
+    for (const video of [null, "x", { ...(base.video as object), fps: 999 }, { ...(base.video as object), video: 'vp9"' }, { fps: 30 }]) {
+      assert.equal(assetFactOf({ ...base, video }).video, undefined, JSON.stringify(video));
+    }
+    assert.equal(assetFactOf({ ...base, media: "mov" }).video, undefined);
+    assert.equal(assetFactOf({ ...base, width: 8192 }).video, undefined, "a size past the cap");
+    assert.equal("video" in assetFactOf({ ...base, kind: "map", media: null }), false);
+  });
+
+  test("the lookup reads the video columns through the row's JSON, so a database without them still answers", async () => {
+    let sql = "";
+    const pool = { query: async (text: string) => ((sql = text), { rows: [{ ...base, media: undefined, video: undefined, kind: "map" }] }) } as unknown as Pool;
+    const facts = await loadAssetFacts(pool, [VIDEO_ID]);
+    assert.match(sql, /to_jsonb\(a\) -> 'media' as media, to_jsonb\(a\) -> 'video' as video/);
+    assert.deepEqual(facts.get(VIDEO_ID), { id: VIDEO_ID, roomId: "ROOM", kind: "map", width: 1920, height: 1080, uploaders: [] });
   });
 });
