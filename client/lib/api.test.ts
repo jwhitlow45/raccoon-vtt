@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { api, ApiError, FileCutShortError, FileTooLargeError, logExportUrl, MAX_LOG_FILE_BYTES, parseRetryAfter, retryOn503, toApiError, UploadQueue } from "./api.ts";
+import { api, ApiError, FileCutShortError, FileTooLargeError, logExportUrl, MAX_LOG_FILE_BYTES, parseRetryAfter, retryOn503, setProgressXhrForTests, toApiError, UploadQueue, type ProgressXhr } from "./api.ts";
 
 describe("toApiError", () => {
   test("keeps a code from the server's list and leaves any other out, status and body kept", async () => {
@@ -286,6 +286,149 @@ describe("the log export file", () => {
       assert.deepEqual(urls, ["/api/rooms/ABCD2345/log/sessions", "/api/rooms/ABCD2345/log/sessions?before=120%3A0", "/api/rooms/ABCD2345/log?after=7%3A1"]);
     } finally {
       globalThis.fetch = original;
+    }
+  });
+});
+
+/** An XHR the test answers by hand, one per request, in the order they were opened. */
+class FakeXhr implements ProgressXhr {
+  static made: FakeXhr[] = [];
+  method = "";
+  url = "";
+  headers: Record<string, string> = {};
+  sent: Blob | null = null;
+  aborted = false;
+  status = 0;
+  responseText = "";
+  withCredentials = false;
+  responseHeaders: Record<string, string> = {};
+  onload: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  onabort: (() => void) | null = null;
+  readonly upload: ProgressXhr["upload"] = { onprogress: null };
+  constructor() {
+    FakeXhr.made.push(this);
+  }
+  open(method: string, url: string) {
+    this.method = method;
+    this.url = url;
+  }
+  setRequestHeader(name: string, value: string) {
+    this.headers[name] = value;
+  }
+  getResponseHeader(name: string) {
+    return this.responseHeaders[name] ?? null;
+  }
+  send(body: Blob) {
+    this.sent = body;
+  }
+  abort() {
+    this.aborted = true;
+    this.onabort?.();
+  }
+  progress(loaded: number, total: number) {
+    this.upload.onprogress?.({ loaded, total, lengthComputable: true });
+  }
+  answer(status: number, body: unknown, headers: Record<string, string> = {}) {
+    this.status = status;
+    this.responseText = JSON.stringify(body);
+    this.responseHeaders = { "content-type": "application/json", ...headers };
+    this.onload?.();
+  }
+}
+
+async function until(check: () => boolean, label: string): Promise<void> {
+  for (let i = 0; i < 400; i++) {
+    if (check()) return;
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  assert.fail(`timed out waiting for ${label}`);
+}
+
+describe("the upload path with its percent (docs/design/design-v1-animated-maps.md 4.1, D-261102-511)", () => {
+  test("reports the sent fraction, answers the row, and keeps the device's one upload queue", async () => {
+    FakeXhr.made = [];
+    const restore = setProgressXhrForTests(() => new FakeXhr());
+    try {
+      const seen: number[] = [];
+      const video = new Blob([new Uint8Array(1000)], { type: "video/webm" });
+      const first = api.uploadAssetWithProgress("r1", "video", video, { name: "crypt_30x20.webm", onProgress: (f) => seen.push(f) });
+      // An ordinary upload asked meanwhile waits behind it: the server gives a device one intake slot.
+      const originalFetch = globalThis.fetch;
+      let fetched = 0;
+      globalThis.fetch = (async () => {
+        fetched++;
+        return new Response(JSON.stringify({ id: "still", kind: "map", width: 640, height: 360, variants: ["full"] }), { status: 200, headers: { "content-type": "application/json" } });
+      }) as typeof fetch;
+      try {
+        const second = api.uploadAsset("r1", "map", new Blob([new Uint8Array(10)], { type: "image/webp" }));
+        await until(() => FakeXhr.made.length === 1, "the video's request");
+        const xhr = FakeXhr.made[0]!;
+        assert.equal(xhr.method, "PUT");
+        assert.equal(xhr.url, "/api/rooms/r1/assets?kind=video&name=crypt_30x20.webm");
+        assert.equal(xhr.headers["content-type"], "video/webm");
+        assert.equal(xhr.sent, video);
+        xhr.progress(420, 1000);
+        await new Promise((r) => setTimeout(r, 20));
+        assert.equal(fetched, 0, "the image waits while the video goes up");
+        xhr.answer(200, { id: "v1", kind: "video", width: 640, height: 360, variants: ["full"], created: true });
+        const row = await first;
+        assert.equal(row.id, "v1");
+        assert.equal(row.created, true);
+        assert.deepEqual(seen, [0, 0.42, 1]);
+        await second;
+        assert.equal(fetched, 1);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    } finally {
+      restore();
+    }
+  });
+
+  test("a 503 is waited out and sent again, its percent starting over, and a refusal is the same ApiError as request's", async () => {
+    FakeXhr.made = [];
+    const restore = setProgressXhrForTests(() => new FakeXhr());
+    try {
+      const waits: boolean[] = [];
+      const seen: number[] = [];
+      const upload = api.uploadAssetWithProgress("r1", "video", new Blob([new Uint8Array(100)], { type: "video/mp4" }), { onWaiting: (w) => waits.push(w), onProgress: (f) => seen.push(f) });
+      await until(() => FakeXhr.made.length === 1, "the first try");
+      FakeXhr.made[0]!.progress(50, 100);
+      FakeXhr.made[0]!.answer(503, { error: "busy" }, { "retry-after": "0" });
+      await until(() => FakeXhr.made.length === 2, "the second try");
+      FakeXhr.made[1]!.answer(415, { error: "video_codec", message: "That video's format doesn't play in most browsers." });
+      const err = await upload.then(
+        () => null,
+        (e: unknown) => e,
+      );
+      assert.ok(err instanceof ApiError);
+      assert.equal(err.status, 415);
+      assert.equal(err.code, "video_codec");
+      assert.deepEqual(waits, [true, false]);
+      assert.deepEqual(seen, [0, 0.5, 0]);
+    } finally {
+      restore();
+    }
+  });
+
+  test("no answer at all is network, and an abort stops the request and rejects with the signal's reason", async () => {
+    FakeXhr.made = [];
+    const restore = setProgressXhrForTests(() => new FakeXhr());
+    try {
+      const lost = api.uploadAssetWithProgress("r1", "video", new Blob([new Uint8Array(1)], { type: "video/webm" }));
+      await until(() => FakeXhr.made.length === 1, "the request");
+      FakeXhr.made[0]!.onerror?.();
+      await assert.rejects(lost, (e: unknown) => e instanceof ApiError && e.code === "network");
+
+      const abort = new AbortController();
+      const cancelled = api.uploadAssetWithProgress("r1", "video", new Blob([new Uint8Array(1)], { type: "video/webm" }), { signal: abort.signal });
+      await until(() => FakeXhr.made.length === 2, "the second request");
+      abort.abort();
+      await assert.rejects(cancelled, (e: unknown) => e instanceof DOMException && e.name === "AbortError");
+      assert.equal(FakeXhr.made[1]!.aborted, true);
+    } finally {
+      restore();
     }
   });
 });

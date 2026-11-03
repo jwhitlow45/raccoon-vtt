@@ -492,6 +492,100 @@ export type UploadOptions = RetryOptions & {
   onSending?: (sending: boolean) => void;
 };
 
+/**
+ * An upload whose sent bytes the page hears as they go
+ * (docs/design/design-v1-animated-maps.md 4.1, D-261102-511). `fraction` runs
+ * from 0 to 1 across the body, starting at 0 again when a 503 sends it anew.
+ */
+export type ProgressUploadOptions = UploadOptions & { onProgress?: (fraction: number) => void };
+
+/** The parts of XMLHttpRequest the progress path uses, so a test can stand in for it. */
+export type ProgressXhr = {
+  open(method: string, url: string): void;
+  setRequestHeader(name: string, value: string): void;
+  getResponseHeader(name: string): string | null;
+  send(body: Blob): void;
+  abort(): void;
+  readonly status: number;
+  readonly responseText: string;
+  withCredentials: boolean;
+  onload: (() => void) | null;
+  onerror: (() => void) | null;
+  onabort: (() => void) | null;
+  readonly upload: { onprogress: ((e: { loaded: number; total: number; lengthComputable: boolean }) => void) | null };
+};
+
+let makeXhr: () => ProgressXhr = () => new XMLHttpRequest() as unknown as ProgressXhr;
+
+/** Swaps the XHR the progress path makes, for tests. Returns the way back. */
+export function setProgressXhrForTests(make: () => ProgressXhr): () => void {
+  const before = makeXhr;
+  makeXhr = make;
+  return () => {
+    makeXhr = before;
+  };
+}
+
+/**
+ * One PUT through XHR, the only browser API that reports an upload's sent
+ * bytes. Its answer and its errors match `request`'s: a refusal becomes the
+ * same ApiError, read through toApiError from a Response built of the
+ * XHR's status, body and headers, and no answer at all is "network".
+ */
+function sendWithProgress<T>(path: string, body: Blob, contentType: string, signal: AbortSignal | undefined, onProgress: ((fraction: number) => void) | undefined): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason);
+    const xhr = makeXhr();
+    const onAbort = () => xhr.abort();
+    const done = () => signal?.removeEventListener("abort", onAbort);
+    xhr.open("PUT", path);
+    // A same-origin XHR sends the session cookie without withCredentials, which only reaches other origins.
+    xhr.withCredentials = false;
+    xhr.setRequestHeader("accept", "application/json");
+    xhr.setRequestHeader("content-type", contentType);
+    xhr.upload.onprogress = (e) => {
+      const total = e.lengthComputable && e.total > 0 ? e.total : body.size;
+      if (total > 0) onProgress?.(Math.min(1, Math.max(0, e.loaded / total)));
+    };
+    xhr.onload = () => {
+      done();
+      const headers = new Headers();
+      for (const name of ["content-type", "retry-after"]) {
+        const value = xhr.getResponseHeader(name);
+        if (value !== null) headers.set(name, value);
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        onProgress?.(1);
+        if (xhr.status === 204 || !(headers.get("content-type") ?? "").includes("application/json")) return resolve(undefined as T);
+        try {
+          resolve(JSON.parse(xhr.responseText) as T);
+        } catch {
+          reject(new ApiError(xhr.status, "The server's answer could not be read.", undefined, null));
+        }
+        return;
+      }
+      // Below 200 never reaches onload but a 0, which is no answer.
+      if (xhr.status < 200) return reject(new ApiError(0, "Could not reach the server. Check your connection.", "network", null));
+      void toApiError(new Response(xhr.responseText, { status: xhr.status, headers })).then(reject);
+    };
+    xhr.onerror = () => {
+      done();
+      reject(new ApiError(0, "Could not reach the server. Check your connection.", "network", null));
+    };
+    xhr.onabort = () => {
+      done();
+      reject(signal?.reason ?? new DOMException("The upload was cancelled.", "AbortError"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    onProgress?.(0);
+    xhr.send(body);
+  });
+}
+
+function assetPutPath(roomId: string, kind: AssetKind, name: string | undefined): string {
+  return `${room(roomId)}/assets?kind=${kind}${name ? `&name=${encodeURIComponent(name.slice(0, 255))}` : ""}`;
+}
+
 const room = (roomId: string) => `/api/rooms/${encodeURIComponent(roomId)}`;
 
 /**
@@ -688,11 +782,31 @@ export const api = {
         retryOn503(async () => {
           options.onSending?.(true);
           try {
-            return await request<AssetRow>("PUT", `${room(roomId)}/assets?kind=${kind}${options.name ? `&name=${encodeURIComponent(options.name.slice(0, 255))}` : ""}`, {
+            return await request<AssetRow>("PUT", assetPutPath(roomId, kind, options.name), {
               body: file,
               contentType: file.type,
               signal: options.signal,
             });
+          } finally {
+            options.onSending?.(false);
+          }
+        }, options),
+      { background: options.background, signal: options.signal },
+    ),
+
+  /**
+   * uploadAsset with the percent sent (ProgressUploadOptions), for an
+   * animated map's video and still. Through the same queue and the same
+   * 503 retries, so a 64 MB video never races another upload of this
+   * device, and a busy server is waited out as for any image.
+   */
+  uploadAssetWithProgress: (roomId: string, kind: AssetKind, file: Blob, options: ProgressUploadOptions = {}) =>
+    uploads.run(
+      () =>
+        retryOn503(async () => {
+          options.onSending?.(true);
+          try {
+            return await sendWithProgress<AssetRow>(assetPutPath(roomId, kind, options.name), file, file.type, options.signal, options.onProgress);
           } finally {
             options.onSending?.(false);
           }
