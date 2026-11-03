@@ -16,8 +16,9 @@ import { builtinMs } from "./builtins.ts";
  * skipped.
  *
  * Each load and each voice belongs to its entry, and is cancelled when that
- * entry leaves the list: stopped, deleted, given another use, or past the
- * list's cap. Stop all, Room sound off, a blackout and disposal cancel
+ * entry leaves the list (stopped, or past the list's cap) or its sound
+ * stops being an Effect (deleted, or given another use), which a DM's list
+ * keeps as history. Stop all, Room sound off, a blackout and disposal cancel
  * every load and voice at once, the design's engine-wide generation: each
  * waiting entry is done for good and the decode in flight is aborted, so a
  * fetch or a decode that finishes late never starts a sound. Decoded
@@ -114,12 +115,15 @@ export class EffectPlayer {
    */
   see(effects: readonly FiredEffect[] | null, sounds: Readonly<Record<SoundId, EffectSound>>): void {
     const now = this.#env.serverNow();
-    this.#sounds = sounds;
     const list = effects ?? [];
     const next = new Map(list.map((e) => [e.id, e]));
     for (const id of this.#held.keys()) {
       if (!next.has(id)) this.#cancel(id);
     }
+    // A DM's list keeps an entry whose sound was deleted or given another use, as history, so the sound leaving is a
+    // withdrawal too. Both run before the new sounds are taken: an entry's old sound names the load to abort.
+    for (const e of list) if (e.soundId !== undefined && !Object.hasOwn(sounds, e.soundId)) this.#cancel(e.id);
+    this.#sounds = sounds;
     const first = this.#loadAt === null;
     if (first) this.#loadAt = now;
     for (const e of list) {

@@ -144,6 +144,42 @@ describe("effects on a page", () => {
     void finish;
   });
 
+  test("a DM's list keeps an entry as history when its sound stops being an Effect: its voice and its load stop, and it stays spent if the use changes back", async () => {
+    const { w, player, finish } = harness();
+    player.setActive(true);
+    player.see([], SOUNDS);
+    w.now += 1_000;
+    const at = w.now + LEAD_MS;
+    const list = [fired("t", "thunder", at), fired("g", "gong", at)];
+    player.see(list, SOUNDS);
+    await finish("a-thunder");
+    assert.equal(w.started.length, 1, "Thunder plays, the gong's load is in flight");
+    const gongLoad = w.decodes.find((d) => d.assetId === "a-gong")!;
+    // Both given another use (or deleted): the effect sounds leave, the entries stay.
+    const { thunder: _t, gong: _g, ...rest } = SOUNDS;
+    player.see(list, rest);
+    assert.ok(w.started[0]!.stopped, "Thunder stops");
+    assert.equal(player.voices, 0);
+    assert.ok(gongLoad.signal.aborted, "the gong's load goes");
+    w.now += 500;
+    player.see(list, SOUNDS);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(w.started.length, 1, "neither starts again once their use changes back");
+    assert.equal(w.decodes.filter((d) => !d.signal.aborted).length, 0, "nothing loads");
+  });
+
+  test("an entry leaving with its sound, as a player's projection drops both, aborts its load", async () => {
+    const { w, player } = harness();
+    player.setActive(true);
+    player.see([], SOUNDS);
+    w.now += 1_000;
+    player.see([fired("g", "gong", w.now + LEAD_MS)], SOUNDS);
+    const load = w.decodes.find((d) => d.assetId === "a-gong")!;
+    const { gong: _g, ...rest } = SOUNDS;
+    player.see([], rest);
+    assert.ok(load.signal.aborted);
+  });
+
   test("a reconnect's cleared store withdraws nothing: the next snapshot's list goes on", async () => {
     const { w, player, finish } = harness();
     player.setActive(true);
