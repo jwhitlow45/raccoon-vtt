@@ -75,9 +75,10 @@ const BOARD_GROUND = "#16161a";
  * (5.3 Autoplay): the box listens on the board's container, since the
  * canvas over it takes the press.
  *
- * Test hooks: `data-animmap` says what the board does with its video, and
- * the box's `animMapDraws` and `animMapCameraDraws` count the map layer's
- * video draws and camera draws apart.
+ * Test hooks: `data-animmap` says what the board does with its video, the
+ * box's `animMapDraws` and `animMapCameraDraws` count the map layer's video
+ * draws and camera draws apart, and `animMapDrawMs` holds the last video
+ * draws' main-thread times for the bench.
  */
 export function AnimMapHost() {
   const board = useScoped(animMapSlot);
@@ -91,6 +92,7 @@ export function AnimMapHost() {
     if (!box || !slot) return;
     Object.defineProperty(box, "animMapDraws", { configurable: true, get: () => board.videoDraws });
     Object.defineProperty(box, "animMapCameraDraws", { configurable: true, get: () => board.cameraDraws });
+    Object.defineProperty(box, "animMapDrawMs", { configurable: true, get: () => [...board.drawMs] });
     box.dataset.animmap = board.state;
     board.onState = (state) => (box.dataset.animmap = state);
     board.attachHost({

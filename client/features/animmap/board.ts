@@ -120,6 +120,8 @@ export const IDLE_INPUT: BoardInput = {
 export const RETRY_MS = 5000;
 /** Without a frame callback this long after `playing`, the board draws on animation frames (5.2). */
 export const CALLBACK_WAIT_MS = 1000;
+/** The video draws whose times the bench reads: half a minute of them. */
+const DRAW_TIMES = 900;
 /** A loop's wrap shows as the time going back by more than this, in seconds, against the last frame. */
 const WRAP_BACK_S = 0.25;
 
@@ -209,6 +211,8 @@ export class AnimMapBoard {
   /** Video draws and camera draws of the map layer, counted apart (the e2e hooks). */
   videoDraws = 0;
   cameraDraws = 0;
+  /** The main thread's time of the last DRAW_TIMES video draws, in ms, for the bench (scripts/bench-animmap.ts). */
+  readonly drawMs: number[] = [];
   /** Called with the status for the Map image row, and with the test hook's words, on a change. */
   onStatus: ((status: BoardVideo) => void) | null = null;
   onState: ((state: string) => void) | null = null;
@@ -700,11 +704,14 @@ export class AnimMapBoard {
     const layer = this.#layer;
     if (!layer || layer.waitingForDraw()) return;
     this.#drawing = true;
+    const start = this.#env.now();
     try {
       layer.draw();
     } finally {
       this.#drawing = false;
     }
+    this.drawMs.push(this.#env.now() - start);
+    if (this.drawMs.length > DRAW_TIMES) this.drawMs.shift();
     this.videoDraws++;
     this.#gate.drew(now, mediaMs);
   }
