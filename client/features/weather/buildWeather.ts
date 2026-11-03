@@ -63,9 +63,7 @@ export function buildWeather(before: Picker, change: Partial<Picker>): Built {
   // A new kind starts light, so a sandstorm and a heavy fog are always a pick of their own.
   if (kindChanged || next.kind === "clear") next.heavy = false;
 
-  // Calm forgets the direction, so a wind picked again starts toward the bottom right.
-  if (next.wind === "calm" || before.wind === "calm") next.toward = change.toward ?? DEFAULT_TOWARD;
-
+  // Calm forgets the direction with no code here: a stored weather keeps `toward` only with a wind, so the picker rebuilt from it starts a new wind toward the bottom right.
   if (next.kind === "fog" && next.wind === "strong") {
     if (change.wind === "strong") return { weather: toWeather(before), forced: null, refused: true };
     next.wind = "moderate";
