@@ -80,6 +80,7 @@ import { localDragSlot } from "../state/localDrags.ts";
 import { useRoomScope } from "../state/scope.ts";
 import { liveCameraSlot, showGestureCamera, useChromeCamera, type ChromeAt, type ChromeCamera } from "../state/liveCamera.ts";
 import { addsToSelection, barDismiss, frontToBack, nextUnderTap } from "../state/selection.ts";
+import { sayTool } from "../state/toolbar.ts";
 import { hexNudge, stageKeysSlot } from "../state/shortcuts.ts";
 import { sheetOpen as sheetIsOpen, type Opening, type RoomView } from "../state/types.ts";
 import { dockSlot, foldsUnderSheet, sideSheetRoom } from "../pages/fold.ts";
@@ -1617,7 +1618,8 @@ export function MapStage(props: {
       const sent = dragStopsRef.current.send(plan, watch?.answer);
       // A drop let go on its own box places the token in it, or puts it back on the grid, without a move.
       if (free.place) actions.dispatch(free.place);
-      if (free.placed) uiRef.current.notify(PLACED_TEXT);
+      // Spoken, not shown (D-261102-536): the token already shows where it sits, and a toast after every free drop is noise. The tool's polite status is always on the page.
+      if (free.placed) sayTool(scope, PLACED_TEXT);
       // The bar comes back after a drop and clears its token once, as it does when it opens (docs/design/design-v1-bar-compact.md 3.6).
       const after = facts.store.getState().local;
       if (after.actionBar && after.selectedId !== null && group.some((t) => t.id === after.selectedId || after.selectedIds.includes(t.id))) scope.get(barDockSlot).setState({ clearRequest: { tokenId: after.selectedId } });

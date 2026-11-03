@@ -181,13 +181,15 @@ async function altDrag(page: Page, from: { x: number; y: number }, to: { x: numb
   }
 }
 
-/** The screen reader's polite line, where toasts are announced. */
+/** The board's polite status, which speaks without a toast (D-261102-536). */
 function announced(page: Page): Locator {
-  return page.locator("[data-rvtt-toast-status]");
+  return page.locator("[data-rvtt-tool-status]");
 }
 
+/** A screen reader hears `text`, and no toast shows it. */
 async function reads(page: Page, text: string): Promise<void> {
   await waitFor(`"${text}" announced`, async () => (((await announced(page).innerText()) ?? "").includes(text) ? true : null), 8_000);
+  assert.equal(await page.locator("[data-toast]").filter({ hasText: text }).count(), 0, `"${text}" is spoken, not shown`);
 }
 
 describe("raccoon-vtt snap off", { timeout: 600_000 }, () => {
