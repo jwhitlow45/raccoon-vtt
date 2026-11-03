@@ -185,6 +185,7 @@ function param() {
     },
     setValueAtTime(value: number, at: number) {
       events.push({ kind: "set", value, at });
+      this.value = value;
     },
     linearRampToValueAtTime(value: number, at: number) {
       events.push({ kind: "ramp", value, at });
@@ -205,7 +206,7 @@ function rig(t: { now: number }) {
   const output = { music: node(), loop: node() } as unknown as Record<"music" | "loop", AudioNode>;
   gains.length = 0;
   const voices = new Voices({ ctx, unlock, output, serverNow: () => t.now, latencyMs: () => 0, url: (assetId) => `/api/assets/${assetId}` });
-  return { voices, pool, gains };
+  return { voices, pool, gains, ctx: ctx as unknown as { currentTime: number } };
 }
 
 describe("the voices on the pool", () => {
@@ -235,6 +236,30 @@ describe("the voices on the pool", () => {
     t.now += 200;
     await new Promise((r) => setTimeout(r, SHORT_FADE_MS + 150));
     assert.deepEqual(voices.snapshot(), []);
+    voices.dispose();
+  });
+
+  test("a kept voice whose gain changes, as the incoming track promoted halfway through a crossfade, ramps to it over 0.3 s, at once and at the next check", () => {
+    const t = { now: T };
+    const { voices, gains, ctx } = rig(t);
+    const crossing: Playing = { ...quiet, music: { run: "r1", repeat: "all", fade: 5, now: { soundId: "tavern", at: T - 57_000 }, next: { soundId: "road", at: T - 2_000 } } };
+    voices.update(planVoices(crossing, SOUNDS, t.now), () => SHORT_FADE_MS);
+    // Each voice makes its fade, envelope and mix gains in turn: Road's envelope is the fifth.
+    const road = gains[4]!.gain;
+    assert.equal(road.value, 0.4, "two fifths into its crossfade");
+    const promoted: Playing = { ...quiet, music: { run: "r1", repeat: "all", fade: 5, now: { soundId: "road", at: T - 2_000 } } };
+    const after = () => road.events.slice(road.events.findLastIndex((e) => e.kind === "cancel") + 1);
+    voices.update(planVoices(promoted, SOUNDS, t.now), () => SHORT_FADE_MS);
+    assert.deepEqual(after().slice(0, 2), [
+      { kind: "set", value: 0.4, at: 0 },
+      { kind: "ramp", value: 1, at: SHORT_FADE_MS / 1000 },
+    ]);
+    t.now += 100;
+    ctx.currentTime = 0.1;
+    voices.check(false);
+    const ramp = after()[1]!;
+    assert.ok(ramp.kind === "ramp" && ramp.value === 1 && Math.abs(ramp.at - SHORT_FADE_MS / 1000) < 1e-9, "the check keeps the ramp, never a step to 1");
+    assert.ok(after().every((e) => e.kind !== "set" || e.value === 0.4));
     voices.dispose();
   });
 });

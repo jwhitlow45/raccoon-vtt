@@ -204,6 +204,8 @@ type Live = {
   leaving: boolean;
   failed: boolean;
   dueSince: number | null;
+  /** Until this server time the envelope ramps from where it was to the plan, after a new plan moved its gain. */
+  smoothUntil: number;
   /** The source it plays, which a loop's blob replaces only at its next pass. */
   url: string;
 };
@@ -261,6 +263,8 @@ export class Voices {
       const plan = wanted.get(key);
       if (plan) {
         const volumeChanged = plan.volume !== v.plan.volume || plan.level !== v.plan.level;
+        // A promotion during a crossfade, or a pause or a change of repeat in one, gives the voice another gain now.
+        if (gainAt(plan.envelope, t) !== gainAt(v.plan.envelope, t)) v.smoothUntil = t + SHORT_FADE_MS;
         v.plan = plan;
         if (volumeChanged) this.#ramp(v.mix.gain, mixGain(plan), SHORT_FADE_MS);
         this.#envelope(v);
@@ -366,7 +370,7 @@ export class Voices {
     mix.gain.value = mixGain(plan);
     source.connect(fade).connect(env).connect(mix).connect(this.#env.output[plan.channel]);
     const url = this.#env.url(plan.assetId, plan.channel);
-    const v: Live = { plan, index, el, fade, env, mix, drift: new Drift(), playing: false, startTimer: null, leaving: false, failed: false, dueSince: null, url };
+    const v: Live = { plan, index, el, fade, env, mix, drift: new Drift(), playing: false, startTimer: null, leaving: false, failed: false, dueSince: null, url, smoothUntil: 0 };
     this.#live.set(plan.key, v);
     el.onerror = () => {
       v.failed = true;
@@ -490,15 +494,26 @@ export class Voices {
     }, SEEK_FADE_MS);
   }
 
-  /** The envelope from now to the horizon, on the audio clock, mapped from server time afresh. */
+  /**
+   * The envelope from now to the horizon, on the audio clock, mapped from
+   * server time afresh. While a new plan's gain is still coming in it ramps
+   * from where the gain is, so it never steps.
+   */
   #envelope(v: Live): void {
     const t = this.#env.serverNow();
     const p = v.env.gain;
     const ctxNow = this.#env.ctx.currentTime;
+    const current = p.value;
     p.cancelScheduledValues(ctxNow);
-    p.setValueAtTime(gainAt(v.plan.envelope, t), ctxNow);
+    const from = Math.max(t, v.smoothUntil);
+    if (from > t) {
+      p.setValueAtTime(current, ctxNow);
+      p.linearRampToValueAtTime(gainAt(v.plan.envelope, from), this.#ctxAt(from));
+    } else {
+      p.setValueAtTime(gainAt(v.plan.envelope, t), ctxNow);
+    }
     const end = t + HORIZON_MS;
-    for (const [at] of v.plan.envelope) if (at > t && at < end) p.linearRampToValueAtTime(gainAt(v.plan.envelope, at), this.#ctxAt(at));
+    for (const [at] of v.plan.envelope) if (at > from && at < end) p.linearRampToValueAtTime(gainAt(v.plan.envelope, at), this.#ctxAt(at));
     p.linearRampToValueAtTime(gainAt(v.plan.envelope, end), this.#ctxAt(end));
   }
 
