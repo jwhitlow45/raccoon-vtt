@@ -23,6 +23,7 @@ import { PALETTES, theme } from "../client/lib/theme.ts";
 import { alignmentLines, containmentLines, disabledLookLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measureAlignment, menuWordLines, pillLines, popoverScrollbarLines, proficiencyHeightLines, proficiencyLines, rollingGridLines, rollRowLines, saveOutlineLines, toastLaneLines, toastsUnderCards, type HeaderPlace, type PillPoint } from "./helpers/alignment.ts";
 import { measureSpacing, spacingLines, type SpacingFinding } from "./helpers/spacing.ts";
 import { moreMenuFixture } from "./helpers/menuFixture.ts";
+import { framesFor, silentFrames } from "../shared/audio/mp3Testutil.ts";
 
 /**
  * The alignment sweep (docs/design/design-v1-polish.md 4): the screens the
@@ -1316,6 +1317,193 @@ async function animatedMapScreens(sweep: Sweep, page: Page): Promise<void> {
     await viewer.waitFor({ state: "detached" });
     await closeSheets(page);
   } finally {
+    await escapeAll(page);
+  }
+}
+
+/** The sizes where the sweep measures the Sound panel (docs/design/design-v1-music.md 10): two phones and a computer. */
+const SOUND_AT = new Set([...PHONE_ROOTS, "1440x900"]);
+
+/** The room's sounds for the Sound panel's screens, made once: frames of silence, so nothing needs an encoder. */
+let soundLibrary: { playlist: string; music: string[]; loops: string[]; effect: string } | null = null;
+
+async function soundsReady(): Promise<NonNullable<typeof soundLibrary>> {
+  if (soundLibrary) return soundLibrary;
+  const add = async (name: string, use: "music" | "loop" | "effect", ms: number) => {
+    const res = await dmContext.request.put(`${server.origin}/api/rooms/${run.roomId}/assets?kind=sound`, { headers: { Origin: server.origin, "content-type": "audio/mpeg" }, data: Buffer.from(silentFrames(framesFor(ms))) });
+    assert.ok(res.ok(), `the ${name} upload answered ${res.status()}`);
+    const id = randomUUID();
+    await ops.send({ t: "sound.create", id, assetId: ((await res.json()) as { id: string }).id, name, use, ms });
+    return id;
+  };
+  // Long names, so the sweep sees them wrap between words at 320 px and 130%.
+  const music = [await add("The Prancing Pony at midnight", "music", 31_000), await add("Road", "music", 32_000)];
+  const loops = [await add("Rain on the cobblestones", "loop", 3_000), await add("Crowd", "loop", 3_000)];
+  const effect = await add("Thunder", "effect", 1_000);
+  const playlist = randomUUID();
+  await ops.send({ t: "playlist.create", id: playlist, name: "Tavern night", sounds: music, repeat: "all", fade: 5 });
+  soundLibrary = { playlist, music, loops, effect };
+  return soundLibrary;
+}
+
+/** Music and two background sounds playing, as the Sound panel's full screens need. */
+async function soundPlaying(): Promise<void> {
+  const lib = await soundsReady();
+  await ops.send({ t: "sound.stopAll" });
+  await ops.send({ t: "music.play", run: randomUUID(), playlistId: lib.playlist, order: lib.music, index: 0, repeat: "all", fade: 5 });
+  for (const soundId of lib.loops) await ops.send({ t: "loop.start", id: randomUUID(), soundId, volume: 70 });
+}
+
+/** A Sound panel's section by its label. */
+function soundSection(panel: Locator, label: string): Locator {
+  return panel.getByRole("heading", { name: label, exact: true }).locator("xpath=ancestor::section[1]");
+}
+
+/**
+ * sn-d: the DM's Sound panel (docs/design/design-v1-music.md 10): with
+ * nothing playing, with music, two background sounds and the board, the
+ * board in Edit, a playlist's page, a sound's page, and with the server's
+ * switch off, which a page load reads from /api/config, routed here. The
+ * room is left silent.
+ */
+async function soundScreens(sweep: Sweep, page: Page, size: Size, scale: number): Promise<void> {
+  await soundsReady();
+  try {
+    await escapeAll(page);
+    await ops.send({ t: "sound.stopAll" });
+    let panel = await openPanelOf(page, "Sound");
+    await panel.getByText("Nothing is playing.", { exact: true }).waitFor();
+    await sweep.measure(page, "sound-panel-silent", panel);
+
+    await soundPlaying();
+    await panel.locator("[data-sound-track]").waitFor();
+    await waitFor("two background volumes", async () => ((await panel.locator("[data-sound-volume]").count()) >= 4 ? true : null));
+    await sweep.measure(page, "sound-panel-playing", panel);
+    await shots.take(page, `alignment-${sweep.at}-sound-panel-playing`);
+
+    const effects = soundSection(panel, "Effects");
+    await effects.getByRole("button", { name: "Edit", exact: true }).click();
+    await effects.getByRole("button", { name: /^Thunder/ }).waitFor();
+    await effects.scrollIntoViewIfNeeded();
+    await sweep.measure(page, "sound-board-edit", effects);
+    await effects.getByRole("button", { name: /^Thunder/ }).click();
+    await page.getByRole("button", { name: /^Back to Sound/ }).first().waitFor();
+    await sweep.measure(page, "sound-sound-page", panel);
+    await page.getByRole("button", { name: /^Back to Sound/ }).first().click();
+    await soundSection(panel, "Effects").getByRole("button", { name: "Done", exact: true }).click();
+
+    await panel.getByRole("list", { name: "Playlists" }).getByRole("button", { name: /^Tavern night/ }).click();
+    await page.getByRole("button", { name: /^Back to Sound/ }).first().waitFor();
+    await sweep.measure(page, "sound-playlist-page", panel);
+    await page.getByRole("button", { name: /^Back to Sound/ }).first().click();
+    await panel.getByRole("heading", { name: "Music", exact: true }).waitFor();
+
+    // An upload in progress under Add music (lane SN-E's rows), held on its percent by a slow upload, then cancelled.
+    const music = panel.locator('[data-add-sounds="music"]');
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Network.enable");
+    await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: 4 * 1024 });
+    try {
+      await music.locator('input[type="file"]').setInputFiles({ name: "Slow road.mp3", mimeType: "audio/mpeg", buffer: Buffer.from(silentFrames(framesFor(60_000))) });
+      const row = music.locator('[data-sound-row="uploading"]').filter({ hasText: /^Uploading Slow road\.mp3… \d+%/ });
+      await row.waitFor({ timeout: 30_000 });
+      await row.scrollIntoViewIfNeeded();
+      await sweep.measure(page, "sound-upload-progress", music);
+      await row.getByRole("button", { name: /^Cancel/ }).click();
+    } finally {
+      await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+      await cdp.detach();
+    }
+
+    // A refused file on its row under Add effects (lane SN-E's rows), then dismissed.
+    const adds = panel.locator('[data-add-sounds="effect"]');
+    await adds.locator('input[type="file"]').setInputFiles({ name: "Broken.wav", mimeType: "audio/wav", buffer: Buffer.from("not a sound at all") });
+    const refused = adds.locator('[data-sound-row="refused"]');
+    await refused.waitFor({ timeout: 15_000 });
+    await refused.scrollIntoViewIfNeeded();
+    await sweep.measure(page, "sound-upload-refused", adds);
+    await refused.getByRole("button", { name: /^Dismiss/ }).click();
+
+    // This device's Sounds, Room sound on and off (lane SN-C's controls).
+    const menu = await openMenu(page);
+    const menuBack = page.getByRole("button", { name: /^Back to Menu/ });
+    if (await visible(menuBack)) await menuBack.click();
+    await menu.getByRole("button", { name: /^This device/ }).click();
+    const sounds = soundSection(menu, "Sounds");
+    await sounds.scrollIntoViewIfNeeded();
+    await sweep.measure(page, "sound-this-device-on", sounds);
+    const roomSound = sounds.getByRole("switch", { name: "Room sound" });
+    await roomSound.click();
+    await waitFor("Room sound off", async () => ((await roomSound.getAttribute("aria-checked")) === "false" ? true : null));
+    await sweep.measure(page, "sound-this-device-off", sounds);
+    await roomSound.click();
+    if (await visible(menuBack)) await menuBack.click();
+
+    // Room settings' Backup with Include sounds, which shows once the room's storage names its sounds (lane SN-B's).
+    await menu.getByRole("button", { name: /^Room settings/ }).click();
+    const backup = soundSection(menu, "Backup");
+    await backup.getByRole("checkbox", { name: "Include sounds" }).waitFor({ timeout: 15_000 });
+    await backup.scrollIntoViewIfNeeded();
+    await sweep.measure(page, "sound-backup-include", backup);
+    if (await visible(menuBack)) await menuBack.click();
+    await escapeAll(page);
+
+    // Home's import card saying how many sounds a backup left out (lane SN-B's), the server's answer routed.
+    await page.route("**/api/rooms/import", (route) => route.fulfill({ json: { roomId: run.roomId, dmLink: `${server.origin}/r/${run.roomId}`, soundsLeftOut: 2 } }));
+    try {
+      await page.goto(`${server.origin}/`);
+      const card = page.locator("section").filter({ has: page.getByRole("heading", { name: "Import a room", exact: true }) }).last();
+      await page.getByRole("button", { name: "Import from a backup", exact: true }).click();
+      await card.locator('input[type="file"]').first().setInputFiles({ name: "room.zip", mimeType: "application/zip", buffer: Buffer.from("PK\x05\x06" + "\0".repeat(18), "binary") });
+      // Home's create card has a Your name of its own.
+      const yourName = card.getByLabel("Your name", { exact: true });
+      if (!(await yourName.inputValue())) await yourName.fill("Dana the DM");
+      await card.getByRole("button", { name: "Import room", exact: true }).click();
+      await page.getByText(/^The room is imported\. 2 sounds were left out\.$/).waitFor({ timeout: 15_000 });
+      await sweep.measure(page, "sound-import-left-out", card);
+    } finally {
+      await page.unroute("**/api/rooms/import");
+      await openAt(page, size, scale);
+    }
+
+    // The switch off, as a page load reads it.
+    await page.route("**/api/config", async (route) => {
+      const res = await route.fetch();
+      await route.fulfill({ response: res, json: { ...(await res.json()), roomSound: false } });
+    });
+    try {
+      await openAt(page, size, scale);
+      panel = await openPanelOf(page, "Sound");
+      await panel.getByText(/^This server doesn't offer sound files\./).waitFor();
+      await sweep.measure(page, "sound-panel-switch-off", panel);
+    } finally {
+      await page.unroute("**/api/config");
+      await openAt(page, size, scale);
+    }
+  } finally {
+    await ops.send({ t: "sound.stopAll" });
+    await escapeAll(page);
+  }
+}
+
+/** sn-d: a player's Sound panel with music and two background sounds, with names and without (4.3). */
+async function patSoundScreens(sweep: Sweep, page: Page): Promise<void> {
+  await soundPlaying();
+  try {
+    await escapeAll(page);
+    // The ask (lane SN-C's toast), left unanswered so the next size's load asks again.
+    const ask = page.getByText("The DM is playing sound for the room.", { exact: true }).locator("xpath=ancestor::*[.//button][1]");
+    await ask.waitFor({ timeout: 15_000 });
+    await sweep.measure(page, "sound-ask", ask);
+    const panel = await openPanelOf(page, "Sound");
+    await panel.getByText("Music is playing.", { exact: true }).waitFor();
+    await sweep.measure(page, "sound-player-unnamed", panel);
+    await ops.send({ t: "room.update", settings: { soundNames: true } });
+    await panel.locator("[data-sound-player-music]").filter({ hasText: /^Music: / }).waitFor();
+    await sweep.measure(page, "sound-player-named", panel);
+  } finally {
+    await ops.send({ t: "room.update", settings: { soundNames: false } });
+    await ops.send({ t: "sound.stopAll" });
     await escapeAll(page);
   }
 }
@@ -3280,6 +3468,8 @@ export function alignmentFile(title: string, steps: () => void): void {
       srd = await loadMonsters();
       // Animated maps on (docs/design/design-v1-animated-maps.md 1), so the sweep measures the screens the switch shows.
       process.env.ANIMATED_MAPS = "1";
+      // Room sound on too (docs/design/design-v1-music.md 1), for the Sound panel's screens.
+      process.env.ROOM_SOUND = "1";
       server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
       browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1" });
       dmContext = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
@@ -5065,6 +5255,7 @@ export function sizeTests(names: readonly string[]): void {
           await openAt(pat, size, scale);
           await patScreens(sweep, pat, size);
           if (DICE_AT.has(size.name)) await patDiceScreens(sweep, pat);
+          if (SOUND_AT.has(size.name)) await patSoundScreens(sweep, pat);
           await pat.goto("about:blank");
           const page = await dmPageFor(size);
           page.setDefaultTimeout(10_000);
@@ -5074,6 +5265,7 @@ export function sizeTests(names: readonly string[]): void {
           await visionScreens(sweep, page, size);
           await dungeonScreens(sweep, page);
           if (ANIMMAP_AT.has(size.name)) await animatedMapScreens(sweep, page);
+          if (SOUND_AT.has(size.name)) await soundScreens(sweep, page, size, scale);
           await previewWaitScreens(sweep, page, scale);
           if (DICE_AT.has(size.name)) await dmDiceScreens(sweep, page);
           if (COMBAT_AT.has(size.name)) await combatScreens(sweep, page, size, scale);
