@@ -8,6 +8,7 @@ import { chromium, type Browser, type BrowserContext, type Locator, type Page } 
 import { framesFor, silentFrames } from "#shared/audio/mp3Testutil.ts";
 import type { SoundUse } from "#shared/sound.ts";
 import { ConsoleWatch, openSideTab, OpSocket, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 
 /**
  * The Sound panel (docs/design/design-v1-music.md 4.1, 4.3 and 4.6, lane
@@ -36,6 +37,9 @@ import { ConsoleWatch, openSideTab, OpSocket, Shots, sideTabName, SocketWatch, s
  *   no Add buttons, and a sound upload refused.
  * - sp-10: an effect deleted from its page on a second tap, its file with
  *   it.
+ * - mfa-1: an effect fired behind a blackout, with nothing else playing:
+ *   Stop all sound and the X-card's Stop the sound while it sounds, and
+ *   neither once it is over.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus forty-eight, and the
  * switch-off server on plus forty-nine, one file after another. The other
@@ -70,6 +74,8 @@ const run = {
   sceneA: "",
   sceneB: randomUUID(),
   sounds: {} as Record<string, string>,
+  /** When the last X-card was sent: taps within 10 s of a room's card merge into it and show none. */
+  xcardAt: 0,
 };
 
 const DESK = { width: 1440, height: 900 };
@@ -372,6 +378,7 @@ describe("the Sound panel", { concurrency: false }, () => {
   test("sp-8. the X-card's Stop the sound stops it all", async () => {
     const sent = await patContext.request.post(`${server.origin}/api/rooms/${run.roomId}/xcard`, { headers: { Origin: server.origin } });
     assert.ok(sent.ok(), `the X-card answered ${sent.status()}`);
+    run.xcardAt = Date.now();
     const card = dm.getByRole("dialog", { name: "X-card" });
     await card.waitFor();
     await shots.take(dm, "sp-8-dm-xcard");
@@ -397,6 +404,48 @@ describe("the Sound panel", { concurrency: false }, () => {
     // The room has no effect of its own left, so Effects offers no Edit, and the board shows the built-ins alone.
     await effects.getByText("No effects of the room's own yet.", { exact: true }).waitFor();
     assert.equal(await effects.getByRole("button", { name: /^(Edit|Done)$/ }).count(), 0);
+  });
+
+  test("mfa-1. an effect fired behind a blackout keeps Stop all sound and the X-card's Stop the sound while it sounds, and neither once it is over", async () => {
+    // sp-8 stopped everything and sp-10 deleted Thunder, so an 8-second Gong is the room's one effect, and nothing else plays.
+    run.sounds.Gong = await addSound({ name: "Gong", use: "effect", ms: 8_000 });
+    await until("Gong in the DM's copy", () => dmSocket.state?.sounds?.[run.sounds.Gong!]);
+    await ops.send({ t: "view.blackout", blackout: true });
+    await until("the blackout", () => dmSocket.state?.meta.view.blackout === true);
+    try {
+      const panel = await soundPanel();
+      const stopAll = panel.getByRole("button", { name: "Stop all sound", exact: true });
+      assert.equal(await stopAll.count(), 0, "nothing sounds yet");
+      await panel.getByRole("button", { name: "Play Gong for everyone", exact: true }).click();
+      await until("Gong in the DM's own list", () => playing()?.dmEffects?.some((e) => e.soundId === run.sounds.Gong));
+      assert.ok(playing()?.music === null && Object.keys(playing()?.loops ?? {}).length === 0 && playing()?.effects.length === 0, "nothing else");
+      await stopAll.waitFor();
+      assert.deepEqual(alignmentLines(await measureAlignment(panel), "Now playing with an effect behind a blackout, 1440x900"), []);
+      await panel.getByRole("heading", { name: "Now playing", exact: true }).scrollIntoViewIfNeeded();
+      await shots.take(dm, "mfa-1-dm-blackout-effect");
+      // Over, it is history: the panel renders again at its end and the button goes.
+      await stopAll.waitFor({ state: "detached", timeout: 15_000 });
+
+      // A tap within 10 s of the last card merges into it, so this one waits for its own.
+      const wait = run.xcardAt + 10_500 - Date.now();
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      const sent = await patContext.request.post(`${server.origin}/api/rooms/${run.roomId}/xcard`, { headers: { Origin: server.origin } });
+      assert.ok(sent.ok(), `the X-card answered ${sent.status()}`);
+      run.xcardAt = Date.now();
+      const card = dm.getByRole("dialog", { name: "X-card" });
+      await card.waitFor();
+      const stopSound = card.getByRole("button", { name: "Stop the sound", exact: true });
+      assert.equal(await stopSound.count(), 0, "nothing sounds");
+      await ops.send({ t: "effect.fire", id: "mfa-gong", soundId: run.sounds.Gong! });
+      await stopSound.waitFor();
+      await shots.take(dm, "mfa-1-dm-xcard-effect");
+      await stopSound.click();
+      await until("the DM's effect stopped", () => (playing()?.dmEffects ?? []).length === 0);
+      await stopSound.waitFor({ state: "detached" });
+      await card.getByRole("button", { name: "Dismiss", exact: true }).click();
+    } finally {
+      await ops.send({ t: "view.blackout", blackout: false });
+    }
   });
 
   test("sp-9. with the server's switch off: the one line, Built in and On this device, and a sound upload refused", async () => {

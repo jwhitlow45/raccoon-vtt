@@ -5,7 +5,7 @@ import { Switch } from "../../../components/Switch.tsx";
 import { theme } from "../../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../../state/view.ts";
 import type { Playing, SceneSound } from "#shared/sound.ts";
-import { Actions, useTicking, VolumeSlider } from "./controls.tsx";
+import { Actions, useSoundToStop, useTicking, VolumeSlider } from "./controls.tsx";
 import { useSoundHere } from "./engine.ts";
 import { send } from "./ops.ts";
 import { musicShown, nameOf, playlistsOf, sceneOrder, sceneSoundFrom, sceneSoundNames, serverNow, somethingPlays, soundsOf, type MusicShown } from "./state.ts";
@@ -141,7 +141,7 @@ export function NowPlaying() {
   const t = useTicking(() => serverNow({ serverOffset }), music !== null && music.paused === undefined);
   const shown = music ? musicShown(music, sounds, playlists, t) : null;
   const loops = playing ? Object.entries(playing.loops) : [];
-  const anything = somethingPlays(playing) || (playing?.effects.length ?? 0) > 0;
+  const anything = useSoundToStop();
   const { here } = useSoundHere();
 
   return (

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Playing, Playlist, SceneSound, Sound } from "#shared/sound.ts";
 import { builtinMs } from "../engine/builtins.ts";
-import { busyRefusal, effectsSounding, loopsFull, musicShown, orderFor, sceneOrder, sceneSoundFrom, sceneSoundNames, soundsByUse, useLeaves } from "./state.ts";
+import { busyRefusal, effectsSounding, loopsFull, musicShown, orderFor, sceneOrder, sceneSoundFrom, sceneSoundNames, soundsByUse, soundToStop, useLeaves } from "./state.ts";
 import { STOP_IT_FIRST, STOP_MUSIC_FIRST } from "./words.ts";
 
 const sound = (id: string, use: Sound["use"], ms: number, name = id): Sound => ({ id, rev: 1, name, assetId: `a-${id}`, ms, use });
@@ -88,6 +88,22 @@ describe("what the Sound panel reads (docs/design/design-v1-music.md 4.1)", () =
     assert.deepEqual([...at(26_000).keys], [], "Thunder's 25 seconds are over");
     assert.equal(at(500).nextEnd, 1_000, "an effect fired for 400 ms ahead wakes the board at its start");
     assert.equal(effectsSounding(null, sounds, 0).nextEnd, null);
+  });
+
+  test("Stop all sound and the X-card's Stop the sound show for music, paused too, a loop, or an effect not over, a DM's behind a blackout included", () => {
+    const run = { run: "r1", repeat: "all" as const, fade: 5 as const, now: { soundId: "pony", at: 0 } };
+    assert.deepEqual(soundToStop(null, SOUNDS, 0), { now: false, until: null });
+    assert.deepEqual(soundToStop(playing(), SOUNDS, 0), { now: false, until: null });
+    assert.deepEqual(soundToStop(playing({ music: { ...run, paused: 4_000 } }), SOUNDS, 0), { now: true, until: null });
+    assert.deepEqual(soundToStop(playing({ loops: { a: { soundId: "rain", at: 0, volume: 70 } } }), SOUNDS, 0), { now: true, until: null });
+    // Fired behind a blackout: only the DM's own list holds it, and nothing else plays.
+    const blackout = playing({ dmEffects: [{ id: "e1", soundId: "thunder", at: 1_400 }] });
+    assert.deepEqual(soundToStop(blackout, SOUNDS, 1_000), { now: true, until: 26_400 }, "from its fire, 400 ms before it sounds");
+    assert.deepEqual(soundToStop(blackout, SOUNDS, 26_400), { now: false, until: null }, "over, it is history");
+    const both = playing({ effects: [{ id: "e2", builtin: "crash", at: 2_000 }], dmEffects: [{ id: "e1", soundId: "thunder", at: 1_400 }] });
+    assert.equal(soundToStop(both, SOUNDS, 2_100).until, 26_400, "until the last of them ends");
+    assert.equal(soundToStop(playing({ effects: [{ id: "e2", builtin: "crash", at: 2_000 }] }), SOUNDS, 2_100).now, true);
+    assert.equal(soundToStop(playing({ dmEffects: [{ id: "e3", soundId: "rain", at: 0 }] }), SOUNDS, 100).now, false, "a sound no longer an Effect plays nowhere");
   });
 
   test("four loops fill Background", () => {

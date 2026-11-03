@@ -2,8 +2,10 @@ import { useEffect, useId, useState, type CSSProperties, type ReactNode } from "
 import { useHeld } from "../../../components/Held.tsx";
 import { Icon } from "../../../components/Icon.tsx";
 import { theme } from "../../../lib/theme.ts";
+import { useRoomView } from "../../../state/view.ts";
 import { usePanelShown } from "../../panels.ts";
 import { useDebounced } from "../../scenes/controls.tsx";
+import { serverNow, soundsOf, soundToStop } from "./state.ts";
 
 /**
  * A volume for everyone (docs/design/design-v1-music.md 4.1), 0 to 100%:
@@ -86,6 +88,17 @@ export function useWakeAt(at: number | null, now: number): void {
     const timer = setTimeout(() => setTick((n) => n + 1), wait);
     return () => clearTimeout(timer);
   }, [at, now]);
+}
+
+/** Whether the room has sound for Stop all sound and the X-card's Stop the sound to stop (soundToStop), rendering again once its last effect ends. */
+export function useSoundToStop(): boolean {
+  const playing = useRoomView((s) => s.view?.playing ?? null);
+  const sounds = useRoomView((s) => soundsOf(s.view));
+  const serverOffset = useRoomView((s) => s.serverOffset);
+  const t = serverNow({ serverOffset });
+  const { now, until } = soundToStop(playing, sounds, t);
+  useWakeAt(until, t);
+  return now;
 }
 
 /**

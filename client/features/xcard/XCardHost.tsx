@@ -3,18 +3,10 @@ import { Button } from "../../components/Button.tsx";
 import { Dialog } from "../../components/Dialog.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
-import type { Playing } from "#shared/sound.ts";
+import { useSoundToStop } from "../sound/panel/controls.tsx";
 import { send } from "../sound/panel/ops.ts";
 import { STOP_THE_SOUND } from "../sound/panel/words.ts";
 import { XMark } from "./XCardButton.tsx";
-
-/**
- * Whether the room's sound plays: music or a background sound. The effect
- * lists stay as history after their effects end, so they never count.
- */
-function soundSounds(playing: Playing | null | undefined): boolean {
-  return playing ? playing.music !== null || Object.keys(playing.loops).length > 0 : false;
-}
 
 /**
  * The X-card as every device in the room shows it (docs/design/design-v1-dm-tools.md
@@ -59,7 +51,7 @@ export function useXCard(): XCardShowing {
 function XCard(props: { tapCloses: boolean; onDismiss(): void }) {
   const dm = useRoomView((s) => s.you?.role === "dm");
   const blackout = useRoomView((s) => s.view?.meta.view.blackout === true);
-  const sounding = useRoomView((s) => soundSounds(s.view?.playing));
+  const sounding = useSoundToStop();
   const actions = useRoomActions();
 
   return (

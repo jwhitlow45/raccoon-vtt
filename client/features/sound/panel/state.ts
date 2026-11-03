@@ -140,6 +140,25 @@ export function somethingPlays(playing: Playing | null | undefined): boolean {
   return playing.music !== null || Object.keys(playing.loops).length > 0;
 }
 
+/**
+ * Whether Stop all sound and the X-card's Stop the sound show at `t` (4.1,
+ * 4.6): music, paused too, a background sound, or an effect not yet over
+ * from either list, so one the DM fired behind a blackout counts. An effect
+ * over stays in its list as history and never counts, or the buttons would
+ * stay for good (D-261102-704). `until` is when the answer turns false by
+ * time alone, the last effect's end, for one render then.
+ */
+export function soundToStop(playing: Playing | null | undefined, sounds: Sounds, t: number): { now: boolean; until: number | null } {
+  if (somethingPlays(playing)) return { now: true, until: null };
+  let until: number | null = null;
+  for (const e of playing ? [...playing.effects, ...(playing.dmEffects ?? [])] : []) {
+    const sound = e.soundId === undefined ? undefined : sounds[e.soundId];
+    const ms = e.builtin !== undefined ? builtinMs(e.builtin) : sound?.use === "effect" ? sound.ms : null;
+    if (ms !== null && e.at + ms > t) until = Math.max(until ?? 0, e.at + ms);
+  }
+  return { now: until !== null, until };
+}
+
 /** The loop entry that plays this sound, if one does. */
 export function loopOf(playing: Playing | null | undefined, soundId: SoundId): string | null {
   if (!playing) return null;
