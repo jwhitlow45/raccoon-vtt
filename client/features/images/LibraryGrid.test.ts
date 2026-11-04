@@ -9,7 +9,7 @@ import { describe, test } from "node:test";
  * showing it, or else what the image is.
  */
 
-const { docDetails, docTile, focusAfterDelete, imageDetails, imageTile, stillOfVideo, viewTitle, viewVariant } = await import("./LibraryGrid.tsx");
+const { docDetails, docTile, focusAfterDelete, imageDetails, imageTile, stillOfVideo, videoView, viewTitle, viewVariant } = await import("./LibraryGrid.tsx");
 
 const row = (kind: "map" | "token" | "handout", variants: ("full" | "mobile" | "thumb")[] = ["full", "thumb"]) => ({ id: "a", kind, width: 100, height: 100, variants });
 
@@ -77,6 +77,21 @@ describe("a library tile's name and status (docs/design/design-v1-pdf-handouts.m
     const facts = { widthPx: 1920, heightPx: 1080, container: "mp4" as const, video: "avc1.640028", fps: 30, durationMs: 125_000, kbps: 4000 };
     assert.equal(imageDetails({ width: 1920, height: 1080, bytes: 2_000_000, video: facts }, "Not in use"), "1920 × 1080 px, 2:05, 2 MB. Not in use.");
     assert.deepEqual(imageTile({ id: "v", kind: "video", width: 1920, height: 1080, variants: ["full"], inUse: true }, { dm: true }), { label: "Animated map", status: "In use" });
+  });
+
+  test("a turned or stretched video's line and viewer page read the size it shows at, not its coded size (docs/design/design-v1-video-turns.md 7)", () => {
+    const facts = { widthPx: 1920, heightPx: 1080, container: "mp4" as const, video: "avc1.640028", fps: 30, durationMs: 42_000, kbps: 4000 };
+    // The row keeps the coded size.
+    assert.equal(imageDetails({ width: 1920, height: 1080, bytes: 2_000_000, video: { ...facts, turn: 90 } }, null), "1080 × 1920 px, 0:42, 2 MB.");
+    assert.equal(imageDetails({ width: 1920, height: 1080, video: { ...facts, turn: 180, mirror: true } }, null), "1920 × 1080 px, 0:42.");
+    assert.equal(imageDetails({ width: 1440, height: 1080, video: { ...facts, widthPx: 1440, displayWidthPx: 1920 } }, null), "1920 × 1080 px, 0:42.");
+    assert.equal(imageDetails({ width: 1440, height: 1080, video: { ...facts, widthPx: 1440, displayWidthPx: 1920, turn: 270 } }, null), "1080 × 1920 px, 0:42.");
+    const assets = { url: (id: string, variant: string) => `/a/${id}/${variant}` };
+    const page = videoView({ assetId: "v", ...facts, turn: 90 }, "s", assets).pages[0]!;
+    assert.deepEqual([page.width, page.height], [1080, 1920], "the page stands upright");
+    assert.deepEqual(page.video?.video.turn, 90, "and the element turns into it");
+    const plain = videoView({ assetId: "v", ...facts }, null, assets).pages[0]!;
+    assert.deepEqual([plain.width, plain.height], [1920, 1080]);
   });
 
   test("a video's still in the viewer is the still of the first scene or phase that names it", () => {

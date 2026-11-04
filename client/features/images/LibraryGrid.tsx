@@ -3,6 +3,7 @@ import { useStore } from "zustand";
 import { handoutPages } from "#shared/handouts.ts";
 import { imageAssetId } from "#shared/imageRef.ts";
 import type { Handout, HandoutDoc, MapVideo, Scene } from "#shared/model.ts";
+import { drawnSize } from "#shared/videoGeometry.ts";
 import { Button } from "../../components/Button.tsx";
 import { Empty } from "../../components/Empty.tsx";
 import { useHeld } from "../../components/Held.tsx";
@@ -664,7 +665,9 @@ export function docTile(doc: Pick<HandoutDoc, "title" | "pages">, showing: boole
 export function imageDetails(row: Pick<AssetRow, "width" | "height" | "bytes" | "video"> | undefined, status: string | null): string | null {
   // A video's line names its length between its size and the bytes it takes (docs/design/design-v1-animated-maps.md 4.6).
   const length = row?.video ? `, ${videoLength(row.video.durationMs)}` : "";
-  const size = row ? `${row.width} × ${row.height} px${length}${typeof row.bytes === "number" ? `, ${formatBytes(row.bytes)}` : ""}.` : null;
+  // A video's size is the one it shows at, turned and stretched (docs/design/design-v1-video-turns.md 7), not the coded size its row keeps.
+  const shown = row?.video ? drawnSize({ ...row.video, widthPx: row.width, heightPx: row.height }) : row ? { widthPx: row.width, heightPx: row.height } : null;
+  const size = shown ? `${shown.widthPx} × ${shown.heightPx} px${length}${typeof row?.bytes === "number" ? `, ${formatBytes(row.bytes)}` : ""}.` : null;
   const parts = [size, status ? `${status}.` : null].filter((p) => p !== null);
   return parts.length > 0 ? parts.join(" ") : null;
 }
@@ -689,11 +692,13 @@ function ImageDetails(props: { row: AssetRow | undefined; status: string | null 
  * there under the device's playback rule, and otherwise shows `still`, the
  * still of the first scene or phase that names it, or a film strip.
  */
-function videoView(video: MapVideo, still: string | null, assets: AssetSource): TileView {
+export function videoView(video: MapVideo, still: string | null, assets: AssetSource): TileView {
   const title = VIDEO_KIND;
+  // The page is the picture as it shows, so a turned video's page stands upright (docs/design/design-v1-video-turns.md 7).
+  const page = drawnSize(video);
   return {
     title,
-    pages: [{ src: assets.url(video.assetId, "full"), alt: title, width: video.widthPx, height: video.heightPx, video: { video, still: still ? assets.url(still, "full") : null } }],
+    pages: [{ src: assets.url(video.assetId, "full"), alt: title, width: page.widthPx, height: page.heightPx, video: { video, still: still ? assets.url(still, "full") : null } }],
   };
 }
 

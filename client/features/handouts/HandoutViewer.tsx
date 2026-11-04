@@ -21,6 +21,7 @@ import { useScoped } from "../../state/scope.ts";
 import { useSurfaceKeyHint, withKey } from "../../state/shortcuts.ts";
 import { FilmStrip } from "../animmap/MapVideoRow.tsx";
 import { leaseDecoder } from "../animmap/status.ts";
+import { placementTransform } from "../animmap/turn.ts";
 import { useVideoPlayback } from "../animmap/useVideoPlayback.ts";
 import { STILL_HERE, stillReasonText } from "../animmap/words.ts";
 import { useLayoutSize } from "../device/layout.ts";
@@ -895,7 +896,7 @@ function PageVideo(props: { page: ViewerPage; box: Rect | undefined; attempt: nu
           // A source cleared on purpose fires no error worth showing.
           if (e.currentTarget.getAttribute("src")) onSettle("failed");
         }}
-        style={{ ...place, objectFit: "fill" }}
+        style={turnedVideoStyle(box, media.video)}
       />
     );
   }
@@ -920,6 +921,20 @@ function PageVideo(props: { page: ViewerPage; box: Rect | undefined; attempt: nu
       <FilmStrip />
     </span>
   );
+}
+
+/**
+ * A video page's element (docs/design/design-v1-video-turns.md 7): the
+ * frame's box before the turn, centered on the page box, filled whatever
+ * the browser's own size for it, and turned and mirrored about its center,
+ * so its box on screen is the page box. A plain video fills the page box.
+ */
+function turnedVideoStyle(box: Rect | undefined, video: MapVideo): CSSProperties {
+  const left = box?.left ?? 0;
+  const top = box?.top ?? 0;
+  if (!box) return { position: "absolute", display: "block", left, top, maxWidth: "none", objectFit: "fill" };
+  const { element, css } = placementTransform({ x: left, y: top, width: box.width, height: box.height }, video);
+  return { position: "absolute", display: "block", left: element.x, top: element.y, width: element.width, height: element.height, maxWidth: "none", objectFit: "fill", ...(css !== "none" ? { transform: css } : null) };
 }
 
 /**

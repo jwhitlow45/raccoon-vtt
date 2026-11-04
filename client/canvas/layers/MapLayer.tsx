@@ -4,6 +4,7 @@ import type Konva from "konva";
 import type { Scene } from "#shared/model.ts";
 import { sceneGrid } from "#shared/rules/grid.ts";
 import { useMapVideo } from "../../features/animmap/AnimMapController.tsx";
+import { videoPlacement } from "../../features/animmap/turn.ts";
 import { phasePreloads, usePhasePreload } from "../../features/phases/preload.ts";
 import { mapSwap, sameShown, type ShownMap } from "../../features/phases/swap.ts";
 import type { AssetVariant } from "../../lib/api.ts";
@@ -198,14 +199,18 @@ function MapImage(props: {
   // A map removed from its scene unmounts this, and nothing may go on reading the image it drew.
   useEffect(() => () => onDrawn?.(null), [onDrawn]);
   if (!drawn) return null;
-  // The video is stretched to the still's rectangle, the one the grid was lined up on.
-  if (moving.element && rect) return <KImage ref={moving.ref} image={moving.element} x={rect.x} y={rect.y} width={rect.width} height={rect.height} />;
+  // The video fills the still's rectangle, the one the grid was lined up on, turned and mirrored as its file asked (docs/design/design-v1-video-turns.md 7).
+  if (moving.element && rect && props.map.video) return <KImage ref={moving.ref} image={moving.element} {...videoPlacement(rect, props.map.video)} />;
   // Every variant is stretched to the calibrated rectangle, so a phone's
   // 4096 px copy and a desktop's 8192 px original agree with the printed
   // grid. The image is never cache()d: a cached 8192 px map exceeds iOS
-  // canvas limits.
-  return <KImage ref={moving.ref} image={drawn.image} x={drawn.rect.x} y={drawn.rect.y} width={drawn.rect.width} height={drawn.rect.height} />;
+  // canvas limits. It is the same Konva node as the video's, so the still
+  // takes back a plain placement's turn and scale too.
+  return <KImage ref={moving.ref} image={drawn.image} {...videoPlacement(drawn.rect, PLAIN)} />;
 }
+
+/** No turn and no mirror: a still's placement is its rectangle. */
+const PLAIN = {};
 
 /**
  * The whole grid is one shape with one path, so it is one draw call however
