@@ -1,5 +1,6 @@
 import { playersSeeFields, type NewScenePick } from "../scenes/create.ts";
 import type { DungeonPlan } from "./plan.ts";
+import { versionChar } from "./seed.ts";
 import type { DungeonOutcome } from "./send.ts";
 import type { Summary } from "./client.ts";
 
@@ -33,7 +34,8 @@ export const WAITING = "Waiting for the server…";
 export const FIT_NONE = "Could not fit two rooms. Try a larger size, fewer rooms or Sparse.";
 export const NOT_MADE = "This dungeon could not be made. Reroll for another.";
 export const PICTURE_FAILED = "This device could not draw the preview, so Make is off. Reroll or change a choice to try again.";
-export const SEED_BAD = "A seed is 16 letters and digits, like 1K7Q-H2MX-A9F3-TWQ5.";
+/** Its example is a seed of this version, so typing it draws a dungeon rather than the note for another version's. */
+export const SEED_BAD = `A seed is 16 letters and digits, like ${versionChar()}K7Q-H2MX-A9F3-TWQ5.`;
 export const SEED_OTHER_VERSION = "This seed is from another version of the generator, so it makes a different dungeon now.";
 
 /** "30 × 30 squares (150 by 150 ft)", in the room's feet per square. */

@@ -25,13 +25,14 @@ describe("dungeon seeds", () => {
   });
 
   test("a typed seed is read case-blind, spaces and dashes ignored, O as 0, I and L as 1", () => {
-    const want = { ok: true, seed: "1K7QH2MXA9F3TWQ5", otherVersion: false };
+    // L and I read as 1, the first version's character, so these are the first version's seed.
+    const want = { ok: true, seed: "1K7QH2MXA9F3TWQ5", otherVersion: versionChar() !== "1" };
     assert.deepEqual(parseSeed("1K7Q-H2MX-A9F3-TWQ5"), want);
     assert.deepEqual(parseSeed("  1k7q h2mx-a9f3  twq5 "), want);
     assert.deepEqual(parseSeed("1K7Q--H2MX\tA9F3\nTWQ5"), want);
     assert.deepEqual(parseSeed("lK7Q-H2MX-A9F3-TWQ5"), want);
     assert.deepEqual(parseSeed("IK7Q-H2MX-A9F3-TWQ5"), want);
-    assert.deepEqual(parseSeed("1000-OOOO-oooo-0001"), { ok: true, seed: "1000000000000001", otherVersion: false });
+    assert.deepEqual(parseSeed("1000-OOOO-oooo-0001"), { ok: true, seed: "1000000000000001", otherVersion: versionChar() !== "1" });
   });
 
   test("anything but the full form is not a seed", () => {
@@ -41,8 +42,12 @@ describe("dungeon seeds", () => {
   });
 
   test("a seed from another version reads, with the note", () => {
-    assert.deepEqual(parseSeed("2K7Q-H2MX-A9F3-TWQ5"), { ok: true, seed: "2K7QH2MXA9F3TWQ5", otherVersion: true });
-    assert.deepEqual(parseSeed("0K7Q-H2MX-A9F3-TWQ5"), { ok: true, seed: "0K7QH2MXA9F3TWQ5", otherVersion: true });
+    for (const version of [GENERATOR_VERSION - 1, GENERATOR_VERSION + 1, 0]) {
+      const v = versionChar(version);
+      assert.deepEqual(parseSeed(`${v}K7Q-H2MX-A9F3-TWQ5`), { ok: true, seed: `${v}K7QH2MXA9F3TWQ5`, otherVersion: true });
+    }
+    const v = versionChar();
+    assert.deepEqual(parseSeed(`${v}K7Q-H2MX-A9F3-TWQ5`), { ok: true, seed: `${v}K7QH2MXA9F3TWQ5`, otherVersion: false });
   });
 
   test("shows in four groups of four", () => {

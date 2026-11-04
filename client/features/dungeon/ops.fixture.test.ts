@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { test } from "node:test";
 import { builderScene } from "../scenes/create.ts";
 import { SCENE_PLACEHOLDER, trapPlaceholder } from "./ops.ts";
-import { parseSeed } from "./seed.ts";
+import { parseSeed, versionChar } from "./seed.ts";
 import { previewOf } from "./scratch.ts";
 import { DEFAULT_SETTINGS, GENERATOR_VERSION, roomCap, type DungeonSettings } from "./settings.ts";
 
@@ -35,8 +35,8 @@ const LARGEST: DungeonSettings = {
 };
 
 const CASES: { name: string; seed: string; settings: DungeonSettings }[] = [
-  { name: "medium", seed: "1K7Q-H2MX-A9F3-TWQ5", settings: DEFAULT_SETTINGS },
-  { name: "largest", seed: "1G3N-ERAT-0R5E-ED00", settings: LARGEST },
+  { name: "medium", seed: `${versionChar()}K7Q-H2MX-A9F3-TWQ5`, settings: DEFAULT_SETTINGS },
+  { name: "largest", seed: `${versionChar()}G3N-ERAT-0R5E-ED00`, settings: LARGEST },
 ];
 
 function today() {

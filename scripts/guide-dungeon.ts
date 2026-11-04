@@ -20,14 +20,15 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { chromium, type Page } from "playwright-core";
 import sharp from "sharp";
+import { versionChar } from "../client/features/dungeon/seed.ts";
 import { openSideTab, ROOT, sideTabName, startServer, waitFor } from "../e2e/harness.ts";
 
 const PORT = Number(process.env.GUIDE_PORT ?? 3197);
 const DATABASE_URL = process.env.DATABASE_URL ?? "postgres://raccoon:raccoon@localhost:5434/raccoon";
 const OUT = path.join(ROOT, "docs", "dm-guide");
 const WINDOW = { width: 1280, height: 800 };
-/** A seed of the generator's first version, so the dungeon is the same on every run. */
-const SEED = "1K7Q-H2MX-A9F3-TWQ5";
+/** A seed of the generator's version, so the dungeon is the same on every run. */
+const SEED = `${versionChar()}K7Q-H2MX-A9F3-TWQ5`;
 
 /** The page as the guide shows it, at the quality its other pictures use. */
 async function picture(page: Page, name: string): Promise<void> {
