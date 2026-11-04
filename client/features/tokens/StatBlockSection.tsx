@@ -117,7 +117,7 @@ export function StatBlockSection(props: {
   if ("ref" in token.actor) {
     return (
       <div ref={ref} data-stat-block="" style={{ scrollMarginTop: theme.space(2), overflowWrap: "anywhere" }}>
-        {pc ? <PcStatBlock character={pc} roll={roll} fold={{ open, onToggle: toggle, foldRef: focusRef }} /> : <Group label="Stat block" icon="statBlock" />}
+        {pc ? <PcStatBlock character={pc} roll={roll} fold={{ open, onToggle: toggle, foldRef: focusRef }} /> : <Group label="Stat block" icon="statBlock" reserve="chevron" />}
       </div>
     );
   }
@@ -208,6 +208,7 @@ export function StatBlockSection(props: {
         <Group
           label="Stat block"
           icon="statBlock"
+          reserve="chevron"
           action={
             (link.kind === "none" || (keeper !== null && (link.kind === "deleted" || link.kind === "deletedBlock"))) && (access.dm || keeper !== null) ? (
               <SmallButton ref={focusRef} wrap onClick={() => setPicking(true)}>
