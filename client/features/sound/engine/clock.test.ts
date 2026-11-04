@@ -12,7 +12,7 @@ import { FIRST_PROBES, PROBE_EVERY_MS, PROBE_GAP_MS, RTT_MAX_MS, SAMPLES_KEPT, S
 
 type Timer = { at: number; fn: () => void };
 
-function world(fallback?: number) {
+function world(fallback?: number | (() => number | undefined)) {
   const w = {
     now: 0,
     sent: [] as { k: number; at: number }[],
@@ -34,7 +34,7 @@ function world(fallback?: number) {
     clearTimer: (t) => {
       w.timers = w.timers.filter((x) => x !== t);
     },
-    fallback: () => fallback,
+    fallback: () => (typeof fallback === "function" ? fallback() : fallback),
   });
   const run = (until: number) => {
     for (;;) {
@@ -146,6 +146,30 @@ describe("the server's time for sound", () => {
     w.now = fresh.at + 300;
     clock.answer(fresh.k, fresh.at + 150 + 4000);
     assert.equal(clock.offset(), 4000, "the slower fresh round trip, not the old best");
+  });
+
+  test("a wake keeps the last epoch's reading until its first answer while the store's offset agrees within a second, so the wake's forced check reads no network delay as drift", () => {
+    let store = 4_960;
+    const { w, clock: real } = world(() => store);
+    real.start();
+    assert.equal(real.offset(), 4_960, "the store's before any answer");
+    const first = w.sent.at(-1)!;
+    w.now = first.at + 20;
+    real.answer(first.k, first.at + 10 + 5_000);
+    assert.equal(real.offset(), 5_000);
+    // Shown again: a new epoch, and the store's offset still one network delay, 40 ms, under the reading.
+    w.now = 30_000;
+    real.restart();
+    assert.equal(real.offset(), 5_000, "the last reading, not the store's 40 ms off");
+    const fresh = w.sent.at(-1)!;
+    w.now = fresh.at + 30;
+    real.answer(fresh.k, fresh.at + 15 + 5_012);
+    assert.equal(real.offset(), 5_012, "the epoch's own first answer");
+    // A sleep stopped this page's clock 3 s while the server's ran: the store's offset moved 3 s, so the old reading goes.
+    w.now = 40_000;
+    store = 7_970;
+    real.restart();
+    assert.equal(real.offset(), 7_970, "the store's after a sleep, not a reading 3 s behind");
   });
 
   test("a restart while stopped sends nothing", () => {

@@ -12,6 +12,14 @@
  * than before, and the old best round trip would hold an offset the
  * device's clock has since left behind. A device sends none while the room
  * plays nothing.
+ *
+ * Until the new epoch's first answer, the last epoch's reading stands in,
+ * as long as the store's offset agrees with it within a second: the store's
+ * is one network delay off, and a wake's forced check read with it would
+ * seek every voice, an audible dip, for that delay alone (D-261102-871). A
+ * sleep that stopped this page's clock moves the store's offset seconds
+ * away from the old reading, so the store's is used then, as it is with no
+ * reading before.
  */
 
 /** Probes at the start of an epoch, this far apart, then one every PROBE_EVERY_MS while sound plays. */
@@ -43,6 +51,8 @@ export class ServerClock {
   /** The probes still waiting for an answer: their epoch and when each was sent. */
   readonly #sent = new Map<number, { epoch: number; at: number }>();
   #samples: Sample[] = [];
+  /** The last epoch's reading, which stands in until this epoch's first answer. */
+  #carried: number | undefined = undefined;
   #running = false;
   #timer: unknown = null;
   #left = 0;
@@ -80,11 +90,23 @@ export class ServerClock {
     if (this.#samples.length > SAMPLES_KEPT) this.#samples.shift();
   }
 
-  /** Server time less `performance.now()`: the shortest round trip's reading this epoch, or the store's before its first answer. */
+  /**
+   * Server time less `performance.now()`: the shortest round trip's reading
+   * this epoch, or before its first answer the last epoch's while the
+   * store's agrees with it, else the store's.
+   */
   offset(): number | undefined {
+    const best = this.#best();
+    if (best !== undefined) return best;
+    const fallback = this.#env.fallback();
+    if (this.#carried !== undefined && fallback !== undefined && Math.abs(this.#carried - fallback) <= RTT_MAX_MS) return this.#carried;
+    return fallback;
+  }
+
+  #best(): number | undefined {
     let best: Sample | null = null;
     for (const s of this.#samples) if (best === null || s.rtt < best.rtt) best = s;
-    return best?.offset ?? this.#env.fallback();
+    return best?.offset;
   }
 
   /** The server's time now, or undefined before any reading. */
@@ -99,6 +121,7 @@ export class ServerClock {
   }
 
   #newEpoch(): void {
+    this.#carried = this.#best() ?? this.#carried;
     this.#epoch++;
     this.#samples = [];
     this.#sent.clear();
