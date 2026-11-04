@@ -5,8 +5,8 @@ import { Loading } from "../../components/Loading.tsx";
 import { buttonLook } from "../../components/looks.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions } from "../../state/view.ts";
-import { FirstFrameError, LOW_POWER_STOPPED, NO_FIRST_FRAME } from "./firstFrame.ts";
-import { AnimatedUploadError, discardVideo, uploadAnimatedMap, type AnimatedUpload, type HeldVideo, type UploadStep } from "./upload.ts";
+import { LOW_POWER_STOPPED, NO_FIRST_FRAME } from "./firstFrame.ts";
+import { VideoHold, type AnimatedUpload, type UploadStep } from "./upload.ts";
 import { useVideoPlayback } from "./useVideoPlayback.ts";
 import { playbackLine, USE_STILL_ONLY, videoRowHelp } from "./words.ts";
 
@@ -64,59 +64,36 @@ export type PendingStill = { file: File; lowPower: boolean; problem: string | nu
 export function useVideoUpload(roomId: string) {
   const host = useRef<HTMLDivElement>(null);
   const [pending, setPending] = useState<PendingStill | null>(null);
-  /** This upload's video, from its upload until the map takes it or the form lets it go. */
-  const held = useRef<HeldVideo | null>(null);
   const room = useRef(roomId);
   room.current = roomId;
-
-  const release = useCallback(() => {
-    const video = held.current;
-    held.current = null;
-    void discardVideo(room.current, video);
-  }, []);
-  useEffect(() => release, [release]);
+  /** This upload's video, from its upload until the map takes it or the form lets it go (upload.ts VideoHold). */
+  const [hold] = useState(() => new VideoHold(() => room.current));
+  useEffect(() => () => hold.release(), [hold]);
 
   /**
-   * Runs the steps for a picked video, or for its still once picked. Null
-   * when the form must ask for a still first (`pending` says why).
+   * Runs the steps for a picked video, for its still once picked, or again
+   * for its stored copy's frame on Try again. Null when the form must ask
+   * for a still first (`pending` says why).
    */
   const run = useCallback(
     async (file: File, options: { signal: AbortSignal; onStep(step: UploadStep): void; onWaiting?: (waiting: boolean) => void; still?: File }): Promise<AnimatedUpload | null> => {
       setPending(null);
-      // A new video lets go of one an earlier pick left waiting for its still.
-      if (!options.still) release();
-      try {
-        const done = await uploadAnimatedMap({ roomId: room.current, file, host: host.current, held: options.still ? held.current : null, ...options });
-        held.current = { video: done.asset.video, created: done.created };
-        return done;
-      } catch (err) {
-        if (err instanceof FirstFrameError && err.failure.kind !== "refused") {
-          setPending({ file, lowPower: err.failure.kind === "lowPower", problem: null });
-          return null;
-        }
-        if (err instanceof AnimatedUploadError && err.step === "shape" && err.held) {
-          held.current = err.held;
-          setPending({ file, lowPower: false, problem: err.message });
-          return null;
-        }
-        // The steps already let go of a video they made, so the form has nothing to hold.
-        held.current = null;
-        throw err;
-      }
+      const outcome = await hold.run({ roomId: room.current, file, host: host.current, ...options });
+      if (outcome.t === "done") return outcome.upload;
+      setPending({ file, lowPower: outcome.lowPower, problem: outcome.problem });
+      return null;
     },
-    [release],
+    [hold],
   );
 
   /** The map took the video: it is no longer this upload's to delete. */
-  const taken = useCallback(() => {
-    held.current = null;
-  }, []);
+  const taken = useCallback(() => hold.taken(), [hold]);
 
   /** The DM let the upload go: a video it made goes too. */
   const cancel = useCallback(() => {
     setPending(null);
-    release();
-  }, [release]);
+    hold.release();
+  }, [hold]);
 
   return { host, pending, run, taken, cancel };
 }
