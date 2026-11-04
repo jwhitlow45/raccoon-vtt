@@ -74,7 +74,7 @@ function fired(id: string, soundId: string, at: number): FiredEffect {
 }
 
 describe("effects on a page", () => {
-  test("an effect fired after the load starts at its time, and one ready late by up to a second plays whole", async () => {
+  test("an effect fired after the load starts at its time, and one ready late by up to 2 seconds plays whole", async () => {
     const { w, player, finish } = harness();
     player.setActive(true);
     player.see([], SOUNDS);

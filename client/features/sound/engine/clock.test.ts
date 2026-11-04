@@ -148,7 +148,7 @@ describe("the server's time for sound", () => {
     assert.equal(clock.offset(), 4000, "the slower fresh round trip, not the old best");
   });
 
-  test("a wake keeps the last epoch's reading until its first answer while the store's offset agrees within a second, so the wake's forced check reads no network delay as drift", () => {
+  test("a wake keeps the last epoch's reading until its first answer while the store's offset agrees within a second, so a voice placed after a wake starts no network delay off", () => {
     let store = 4_960;
     const { w, clock: real } = world(() => store);
     real.start();
