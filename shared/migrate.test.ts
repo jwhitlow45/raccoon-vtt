@@ -1764,6 +1764,30 @@ describe("op version 46 and snapshot 36, synced music and sound (docs/design/des
   });
 });
 
+describe("op version 47 and snapshot 37, turned and stretched videos (docs/design/design-v1-video-turns.md 9)", () => {
+  const video = { assetId: "v1", widthPx: 1920, heightPx: 1080, container: "mp4", video: "avc1.640028", fps: 30, durationMs: 2000, kbps: 800 } as const;
+  const map = { assetId: "a1", widthPx: 1920, heightPx: 1080, cellPx: 64, originPx: { x: 0, y: 0 } };
+
+  test("keeps stored operations and snapshots unchanged through the identity steps, so a stored video without the fields stays plain", () => {
+    assert.ok(OP_VERSION >= 47);
+    assert.ok(SNAPSHOT_VERSION >= 37);
+    const plain = { t: "scene.setMap", sceneId: "s1", map: { ...map, video } };
+    assert.equal(runMigrations(plain, 46, 47, opMigrations), plain);
+    assert.equal(migrateOp(plain, 46), plain);
+    const turned = { t: "scene.update", sceneId: "s1", patch: { phases: [{ id: "p1", name: "Day", ...map, widthPx: 1080, heightPx: 1920, video: { ...video, turn: 90 } }] } };
+    assert.equal(migrateOp(turned, 47), turned);
+    const state = room({ scenes: { s1: scene("s1", { map: { ...map, video } }) } });
+    assert.equal(runMigrations(state, 36, 37, snapshotMigrations), state);
+    assert.equal(migrateSnapshot(state, 36), state);
+  });
+
+  test("a build at 46 and 36 refuses a room from this one, so it never draws a turned video on its side", () => {
+    const op = { t: "scene.setMap", sceneId: "s1", map: { ...map, video: { ...video, turn: 90 } } };
+    assert.throws(() => runMigrations(op, 47, 46, opMigrations), /down/);
+    assert.throws(() => runMigrations(room(), 37, 36, snapshotMigrations), /down/);
+  });
+});
+
 describe("the map discovery upgrade step (docs/design/design-v1-map-discovery.md 5.5, ASTRA-31)", () => {
   const scenes = {
     s1: scene("s1", { fogEnabled: true, vision: { on: true, light: "dark" } }),

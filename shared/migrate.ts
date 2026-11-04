@@ -11,8 +11,8 @@ import { ownEntry } from "./records.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 36;
-export const OP_VERSION = 46;
+export const SNAPSHOT_VERSION = 37;
+export const OP_VERSION = 47;
 
 export type MigrationStep = {
   from: number;
@@ -235,6 +235,11 @@ export const snapshotMigrations: MigrationStep[] = [
   // a v36 room as it is. The number moves so that an older build, whose strict state schema refuses them, refuses a v36
   // snapshot instead of loading it and sending players what the DM keeps.
   { from: 35, to: 36, apply: (state) => state },
+  // Turned and stretched videos (docs/design/design-v1-video-turns.md 9): a map's and a phase's `video` may carry `turn`,
+  // `mirror` and `displayWidthPx`, and absent reads as plain, as every stored video is, so a v36 room is a v37 room as it
+  // is. The number moves so that an older build, whose strict state schema refuses the fields, refuses a v37 snapshot
+  // instead of loading it and drawing a turned video on its side.
+  { from: 36, to: 37, apply: (state) => state },
   // No step moves a square trip wire's imported 1/64 ends onto half cells (FU43-DATA-01). A snapshot migrates before its
   // stored ops replay, so a moved end would change what a stored walk springs and what a stored restore's guard matches.
   // The rules take such a wire as it stands instead (server/rooms/squareWires.legacy.test.ts).
@@ -1155,6 +1160,23 @@ export const opMigrations: MigrationStep[] = [
     // refuses.
     from: 45,
     to: 46,
+    apply: (op) => op,
+  },
+  {
+    // Turned and stretched videos (docs/design/design-v1-video-turns.md 9):
+    // a map's or a phase's `video` may carry `turn`, `mirror` and
+    // `displayWidthPx`, new optional fields the server fills from the
+    // video's row, so no stored op changes shape and the step is the
+    // identity. A stored op's video without them is plain, as every stored
+    // video is, so replay runs no new branch.
+    // Deploy: back up the database just before, and reload open pages,
+    // table displays included: an old page draws a turned video on its
+    // side, and an old DM tab takes a turned video's still from its own
+    // frame. Rollback needs the backup for a room with
+    // version 47 ops after its last snapshot or a v37 snapshot, which an
+    // older build refuses.
+    from: 46,
+    to: 47,
     apply: (op) => op,
   },
 ];
