@@ -48,7 +48,7 @@ The app's Docs page (/docs) lists every written doc. To learn the tools as a DM,
 ## Phones, tablets and connection
 
 - Every change shows on every device at once, and your own edits show before the server confirms them.
-- The connection mends itself. A dead connection is noticed within about 35 seconds. The app reconnects when the phone wakes or the network comes back, and catches up without a reload. Edits made offline are sent once it is back. A burst of large edits, such as two Builder rooms on a large map, goes out at the pace the server takes it, so every edit lands within a few seconds.
+- The connection mends itself. A dead connection is noticed within about 35 seconds. The app reconnects when the phone wakes or the network comes back, and catches up without a reload. Music and background sounds that a server restart cut off load again on their own once the room reconnects. Edits made offline are sent once it is back. A burst of large edits, such as two Builder rooms on a large map, goes out at the pace the server takes it, so every edit lands within a few seconds.
 - A small dot shows the connection. A banner appears only after a few seconds offline.
 - On a short screen, a notice that lasts (Reconnecting, the Starting view bar, a part that did not load, "Viewing as") keeps to one line, its buttons in the same row and More to read the rest, so it never stands over the toolbar. Where even that leaves no room for a row of the tool's options, the options stand over it.
 - Other people's token drags move live, with their name over the token in their color.
