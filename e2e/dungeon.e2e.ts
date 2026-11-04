@@ -373,6 +373,11 @@ describe("dungeon generator", { concurrency: false }, () => {
       return { type: a?.type ?? null, value: a?.value ?? null };
     });
     assert.deepEqual(focused, { type: "radio", value: "dungeon" }, "focus opens on Theme");
+    // DGOPTS: Party level says what it changes.
+    const band = dialog.getByRole("radiogroup", { name: "Party level", exact: true });
+    const helpId = await band.getAttribute("aria-describedby");
+    assert.ok(helpId, "Party level has its help");
+    assert.equal(await dialog.locator(`[id="${helpId}"]`).textContent(), "How strong the traps are: their save DCs, damage and pit depths follow the SRD for a party of these levels.");
   });
 
   test("DG-2. a fixed seed draws the same dungeon each time, read case-blind with O as 0 and L as 1, a bad seed keeps the old preview with Make off, and another version's says so", async () => {
