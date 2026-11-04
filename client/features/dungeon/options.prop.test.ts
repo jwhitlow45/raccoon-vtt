@@ -83,7 +83,7 @@ describe("the options look as they say", () => {
     });
   }
 
-  test("Heights moves only the heights: every mark keeps the same seed's floors and locks wherever it keeps the same doorways", () => {
+  test("Heights keeps the floors and locks: every mark keeps the same seed's floors and locks wherever it keeps the same doorways and rooms", () => {
     for (const seed of seeds(78, 20)) {
       const plans = Object.values(HEIGHT_PRESETS).map((heights) => planDungeon({ ...DEFAULT_SETTINGS, heights }, seed));
       const doors = (i: number) => plans[i]!.board.doorways.filter((d) => !d.removed).length;

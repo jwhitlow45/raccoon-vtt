@@ -146,7 +146,7 @@ describe("corridor styles at every size", () => {
     }
   });
 
-  test("the style moves only the corridors: every style keeps the same seed's rooms and locks, and every plan keeps the invariants", () => {
+  test("the rooms stay where they are in every style, the locks too wherever a style keeps as many doorways, and every plan keeps the invariants", () => {
     const seedArb: fc.Arbitrary<Seed> = fc.array(fc.constantFrom(...CROCKFORD), { minLength: 15, maxLength: 15 }).map((c) => versionChar() + c.join(""));
     const settingsArb: fc.Arbitrary<DungeonSettings> = fc
       .record({
