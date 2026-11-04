@@ -5,6 +5,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
+import { openGroup } from "./helpers/groups.ts";
 import { ConsoleWatch, OpSocket, openSideTab, Shots, sideTabName, sleep, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { addSound, errors, inStep, IPHONE_AUDIO, musicVoice, readTap, roomSoundScript, SOUND_TAP, SOUND_TEST_FLAG, soundProbe, soundSays, tapGlitches, toneSound, type SoundProbe } from "./soundRoom.ts";
 
@@ -145,13 +146,14 @@ async function openMenu(page: Page): Promise<Locator> {
   return sheet;
 }
 
-/** This device's Sounds section, opened from the Menu. */
+/** This device's Sounds group, opened from the Menu, and open: This device's groups start folded on a phone (docs/design/design-v1-panel-groups.md 6.2). */
 async function thisDeviceSounds(page: Page): Promise<Locator> {
   const menu = await openMenu(page);
   const back = menu.getByRole("button", { name: /^Back to Menu/ });
   if (await visible(back)) await back.click();
   await menu.getByRole("button", { name: /^This device/ }).click();
-  const section = menu.locator("section").filter({ has: page.getByRole("heading", { name: "Sounds", exact: true }) }).last();
+  await openGroup(menu, "Sounds");
+  const section = menu.locator("[data-panel-group]").filter({ has: page.getByRole("heading", { name: "Sounds", exact: true }) }).last();
   await section.scrollIntoViewIfNeeded();
   return section;
 }

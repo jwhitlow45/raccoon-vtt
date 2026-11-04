@@ -5,6 +5,7 @@ import type { Locator, Page } from "playwright-core";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { actor, bar, BOUNDS, browser, checks, columnOver, coveredIn, dm, dmCdp, dmSocket, EDGE_TOKENS, firstEmpty, frame, frameSteps, freeTop, hitAt, homeTokens, middle, oneMoveUp, openClear, openOn, openPanel, ops, panTo, panTwo, pat, patCdp, patContext, patOps, patSocket, PHONE, PHONES, type Placed, rectOf, restFile, run, server, setUp, shots, startCams, startProbe, steady, stopCams, stopProbe, tokenRect, view } from "./barrestRoom.ts";
 import { barControl, expandBar, multiSelect, pickTool, readCamera, sleep, Touches, touchSwipe, waitFor, wholeInReach } from "./harness.ts";
+import { openGroup } from "./helpers/groups.ts";
 
 /**
  * The token action bar at rest on a phone held upright
@@ -1875,6 +1876,8 @@ restFile(null, () => {
       await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).tap();
       await page.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Menu/ }).tap();
       await page.getByRole("button", { name: /^This device/ }).tap();
+      // This device's groups start folded on a phone (docs/design/design-v1-panel-groups.md 6.2).
+      await openGroup(page.getByRole("region", { name: "Menu" }), "Interface size");
       await page.getByRole("radiogroup", { name: "Interface size" }).getByRole("radio", { name: label }).check({ force: true });
       await page.getByRole("region", { name: "Menu" }).getByRole("button", { name: "Close Menu" }).tap();
       await waitFor(`the menu closed at ${label}`, async () => (await page.getByRole("radiogroup", { name: "Interface size" }).count()) === 0);

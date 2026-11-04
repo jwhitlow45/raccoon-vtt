@@ -7,6 +7,7 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import { ConsoleWatch, OpSocket, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
+import { openGroup } from "./helpers/groups.ts";
 
 /**
  * The shortcut sheet (docs/design/design-v1-dm-tools.md 3.14): the keys, then on
@@ -180,10 +181,71 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     await sheet.waitFor({ state: "detached" });
   });
 
+  test("ambc-2. on a phone, This device starts with every group folded, each saying what it holds, no line under its header and every name at one edge, in line, and a group opened stays open through a reload", async () => {
+    const openThisDevice = async () => {
+      await player.locator('button[title="Panels"]').click();
+      await player.getByRole("list", { name: "Panels" }).getByRole("button", { name: /^Menu/ }).click();
+      await player.getByRole("button", { name: /^This device/ }).click();
+      const menu = player.getByRole("dialog", { name: "Menu" });
+      await menu.getByRole("button", { name: "Interface size", exact: true }).waitFor();
+      return menu;
+    };
+    const groupsOf = (menu: Locator) =>
+      menu.locator("[data-panel-group]").evaluateAll((boxes) =>
+        boxes.map((box) => {
+          type El = { querySelector(s: string): El | null; getAttribute(n: string): string | null; textContent: string | null; getBoundingClientRect(): { left: number }; ownerDocument: { getElementById(id: string): El | null } };
+          const el = box as unknown as El;
+          const fold = el.querySelector("[data-group-fold]");
+          const name = el.querySelector("[data-group-name]");
+          const style = (globalThis as unknown as { getComputedStyle(e: unknown): { borderTopWidth: string } }).getComputedStyle(box);
+          const described = fold?.getAttribute("aria-describedby");
+          return {
+            name: name?.textContent ?? "",
+            left: name?.getBoundingClientRect().left ?? NaN,
+            line: style.borderTopWidth !== "0px",
+            open: fold?.getAttribute("aria-expanded") ?? null,
+            summary: described ? (el.ownerDocument.getElementById(described)?.textContent ?? "") : null,
+          };
+        }),
+      );
+    let menu = await openThisDevice();
+    // Nothing stored: setup folds below 900 px (docs/design/design-v1-panel-groups.md 6.2).
+    const start = await groupsOf(menu);
+    assert.deepEqual(start.map((g) => g.name), ["Interface size", "Theme", "Screen", "Battery", "Map detail", "Weather", "Sounds", "Rolls", "Shortcuts", "Sheet handle"]);
+    assert.deepEqual(start.map((g) => g.open), start.map(() => "false"), "every group folded");
+    assert.deepEqual(start.map((g) => g.line), start.map((_, i) => i > 0), "no line under the sheet's header, one over every other group");
+    for (const g of start) assert.ok(Math.abs(g.left - start[0]!.left) <= 1, `${g.name}'s name at ${g.left}, Interface size's at ${start[0]!.left}`);
+    const summaries = Object.fromEntries(start.map((g) => [g.name, g.summary]));
+    assert.equal(summaries["Interface size"], "100%");
+    assert.equal(summaries.Theme, "Dark");
+    assert.equal(summaries.Screen, "Full screen off");
+    assert.equal(summaries.Battery, "Low power off");
+    assert.match(summaries["Map detail"] ?? "", /^Phone size/);
+    assert.match(summaries.Weather ?? "", /^Moving/);
+    assert.match(summaries.Sounds ?? "", /^Room sound (on|off)$/);
+    assert.equal(summaries.Rolls, "Roll animation on");
+    assert.equal(summaries.Shortcuts, null, "Shortcuts holds no setting to sum up");
+    assert.equal(summaries["Sheet handle"], "Ringed tail");
+    assert.deepEqual(alignmentLines(await measureAlignment(menu), "This device folded on a phone"), []);
+    await shots.take(player, "ambc-2-this-device-folded");
+    // The viewer's tap is kept on this device.
+    await menu.getByRole("button", { name: "Rolls", exact: true }).click();
+    await menu.locator("[data-dice-set]").first().waitFor();
+    assert.deepEqual(alignmentLines(await measureAlignment(menu.getByRole("button", { name: "Rolls", exact: true }).locator("xpath=ancestor::h3[1]")), "This device's Rolls header open"), []);
+    await player.reload();
+    await player.getByRole("status", { name: "Connected" }).first().waitFor();
+    menu = await openThisDevice();
+    assert.deepEqual((await groupsOf(menu)).filter((g) => g.open === "true").map((g) => g.name), ["Rolls"], "Rolls stays open through a reload, and only Rolls");
+    await menu.getByRole("button", { name: "Rolls", exact: true }).click();
+    await player.keyboard.press("Escape");
+  });
+
   test("3. on an Android phone, Menu, This device shows a player's keys and the Back button, and nothing for the mouse or the DM", async () => {
     await player.locator('button[title="Panels"]').click();
     await player.getByRole("list", { name: "Panels" }).getByRole("button", { name: /^Menu/ }).click();
     await player.getByRole("button", { name: /^This device/ }).click();
+    // This device's groups start folded on a phone (docs/design/design-v1-panel-groups.md 6.2).
+    await openGroup(player.getByRole("dialog", { name: "Menu" }), "Shortcuts");
     await player.getByRole("button", { name: "Show the shortcuts" }).click();
     const sheet = player.getByRole("dialog", { name: "Shortcuts" });
     await sheet.waitFor();
@@ -224,6 +286,8 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     await player.locator('button[title="Panels"]').click();
     await player.getByRole("list", { name: "Panels" }).getByRole("button", { name: /^Menu/ }).click();
     await player.getByRole("button", { name: /^This device/ }).click();
+    // This device's groups start folded on a phone (docs/design/design-v1-panel-groups.md 6.2).
+    await openGroup(player.getByRole("dialog", { name: "Menu" }), "Shortcuts");
     await player.getByRole("button", { name: "Show the shortcuts" }).click();
     const sheet = player.getByRole("dialog", { name: "Shortcuts" });
     await sheet.waitFor();
@@ -295,6 +359,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     await player.locator('button[title="Panels"]').click();
     await player.getByRole("list", { name: "Panels" }).getByRole("button", { name: /^Menu/ }).click();
     await player.getByRole("button", { name: /^This device/ }).click();
+    await openGroup(player.getByRole("dialog", { name: "Menu" }), "Screen");
     const phoneToggle = player.getByRole("switch", { name: "Full screen" });
     // The sheet's own hidden button fills the sheet, not the page, so it goes by a name of its own.
     const menuSheet = player.getByRole("dialog").filter({ has: phoneToggle });
@@ -432,6 +497,8 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     await player.locator('button[title="Panels"]').click();
     await player.getByRole("list", { name: "Panels" }).getByRole("button", { name: /^Menu/ }).click();
     await player.getByRole("button", { name: /^This device/ }).click();
+    // This device's groups start folded on a phone (docs/design/design-v1-panel-groups.md 6.2).
+    await openGroup(player.getByRole("dialog", { name: "Menu" }), "Shortcuts");
     await player.getByRole("button", { name: "Show the shortcuts" }).click();
     const phoneSheet = player.getByRole("dialog", { name: "Shortcuts" });
     await phoneSheet.waitFor();
@@ -1166,6 +1233,8 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
         // The menu's panel loads as it opens.
         await thisDevice.or(show).first().waitFor();
         if ((await thisDevice.count()) > 0) await thisDevice.click();
+        // Folded on a phone until opened (docs/design/design-v1-panel-groups.md 6.2).
+        await openGroup(dm, "Shortcuts");
         await show.scrollIntoViewIfNeeded();
         assert.equal((await show.textContent())?.trim(), "Show the shortcuts (?)", `${at}: its words name ?`);
         assert.equal(await show.getAttribute("aria-keyshortcuts"), "?");

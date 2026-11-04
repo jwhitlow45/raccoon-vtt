@@ -7,6 +7,7 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import sharp from "sharp";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
+import { openGroup } from "./helpers/groups.ts";
 import { ConsoleWatch, OpSocket, openSideTab, pagePoint, pickTool, ROOT, Shots, sideTabName, sleep, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
@@ -193,6 +194,8 @@ async function openThisDevice(page: Page): Promise<Locator> {
   const back = page.getByRole("button", { name: /^Back to Menu/ });
   if (await back.isVisible()) await back.click();
   await menu.getByRole("button", { name: /^This device/ }).click();
+  // This device's groups start folded on a phone (docs/design/design-v1-panel-groups.md 6.2).
+  await openGroup(menu, "Weather");
   return menu;
 }
 
@@ -628,7 +631,7 @@ describe("weather over the map", { concurrency: false }, () => {
           await page.goto(`${server.origin}/r/${run.roomId}`);
           await page.locator(".konvajs-content").first().waitFor();
           const menu = await openThisDevice(page);
-          const section = menu.locator("section").filter({ has: page.getByRole("heading", { name: "Weather", exact: true }) }).last();
+          const section = menu.locator("[data-panel-group]").filter({ has: page.getByRole("heading", { name: "Weather", exact: true }) }).last();
           await section.scrollIntoViewIfNeeded();
           await section.getByText("Reduced motion keeps weather still.", { exact: true }).waitFor();
           const at = `this device weather ${size.width}x${size.height} ${Math.round(scale * 100)}%`;

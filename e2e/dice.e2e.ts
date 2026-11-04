@@ -10,6 +10,7 @@ import { keptD20 } from "#shared/dice/roll.ts";
 import type { DiceRoll, LogEntry, LogEvent } from "#shared/model.ts";
 import { barControl, ConsoleWatch, diceFoldsOpen, OpSocket, openSideTab, reopenRoom, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, containmentLines, measureAlignment } from "./helpers/alignment.ts";
+import { openGroup } from "./helpers/groups.ts";
 
 /**
  * Dice on the server (docs/design/design-v1-dice.md 13), on the real server serving
@@ -1565,6 +1566,8 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
       await player.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).tap();
       await player.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Menu/ }).tap();
       await player.getByRole("button", { name: /^This device/ }).tap();
+      // This device's groups start folded on a phone (docs/design/design-v1-panel-groups.md 6.2): Rolls holds the dice sets.
+      await openGroup(player.locator('dialog[data-rvtt-sheet][aria-label="Menu"]'), "Rolls");
       const tiles = player.locator("[data-dice-set]");
       await tiles.first().scrollIntoViewIfNeeded();
       assert.equal(await tiles.count(), 8);

@@ -8,6 +8,7 @@ import { chromium, type Browser, type BrowserContext, type CDPSession, type Loca
 import { LIMITS } from "../shared/limits.ts";
 import { GRABBER_DESIGNS, grabberRoom, heldShare, STRETCH_X, STRETCH_Y, type GrabberId } from "../client/components/grabberDesigns.ts";
 import { barControl, ConsoleWatch, OpSocket, openSceneGroup, pagePoint, pickOption, pickTool, readCamera, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { openGroup } from "./helpers/groups.ts";
 
 /**
  * Swipe a phone's bottom sheet down to close it, and the panel sheet up to
@@ -1626,6 +1627,8 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
       await setUp(dm, { width: 375, height: 667, scale: 1 });
       const menu = await openPanel(dm, "Menu");
       await menu.getByRole("button", { name: /^This device/ }).click();
+      // This device's groups start folded on a phone (docs/design/design-v1-panel-groups.md 6.2).
+      await openGroup(menu, "Sheet handle");
       const choice = menu.getByRole("combobox", { name: "Sheet handle" });
       await choice.scrollIntoViewIfNeeded();
       assert.deepEqual(await choice.locator("option").allTextContents(), ["Ringed tail", "Bandit mask", "Paw beans", "Scroll rod", "Rune divider", "Plain pill"]);
@@ -2427,6 +2430,8 @@ async function pickHandle(page: Page, id: GrabberId): Promise<void> {
     if (await back.isVisible()) await back.click();
     await menu.getByRole("button", { name: /^This device/ }).click();
   }
+  // This device's groups start folded on a phone (docs/design/design-v1-panel-groups.md 6.2).
+  await openGroup(menu, "Sheet handle");
   await choice.selectOption(id);
   await waitFor(`the Menu's grabber to become ${id}`, async () => ((await designOf(menu.locator("[data-sheet-grabber]"))) === id ? true : null), 3_000);
   await menu.locator("header").getByRole("button", { name: /^Close/ }).click();

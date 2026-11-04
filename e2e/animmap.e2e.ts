@@ -8,6 +8,7 @@ import { chromium, type Browser, type BrowserContext, type Locator, type Page } 
 import sharp from "sharp";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { ConsoleWatch, OpSocket, openSideTab, pagePoint, pickTool, ROOT, Shots, sideTabName, sleep, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { openGroup } from "./helpers/groups.ts";
 
 /**
  * Animated maps (docs/design/design-v1-animated-maps.md): a WebM or MP4 on
@@ -416,6 +417,8 @@ async function openThisDevice(page: Page): Promise<Locator> {
   const back = page.getByRole("button", { name: /^Back to Menu/ });
   if (await back.isVisible()) await back.click();
   await menu.getByRole("button", { name: /^This device/ }).click();
+  // This device's groups start folded on a phone (docs/design/design-v1-panel-groups.md 6.2): Map detail holds the rows here.
+  await openGroup(menu, "Map detail");
   await menu.getByRole("group", { name: "Map images" }).waitFor();
   return menu;
 }
@@ -986,6 +989,7 @@ describe("animated maps", { concurrency: false }, () => {
     assert.equal(requestsFor(pat, id), before, "Low power downloads no video");
     const lowMenu = await openThisDevice(pat);
     await lowMenu.getByText("Low power keeps animated maps still.", { exact: true }).waitFor();
+    await openGroup(lowMenu, "Battery");
     await lowMenu.getByText(/keeps weather and animated maps still/).waitFor();
     await shots.take(pat, "am-4-this-device-low-power");
     await closeMenu(pat);

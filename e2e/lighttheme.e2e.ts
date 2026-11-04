@@ -182,13 +182,21 @@ async function closeSheets(page: Page): Promise<void> {
   }
 }
 
-/** Menu, This device, as the Menu stands now. */
+/**
+ * Menu, This device, as the Menu stands now, with every group open: they
+ * start folded on a phone (docs/design/design-v1-panel-groups.md 6.2), and
+ * the sweeps read every setting, as a viewer who opened each would see it.
+ */
 async function openThisDevice(page: Page): Promise<Locator> {
   const menu = await openPanel(page, "Menu");
-  if (await menu.getByRole("radiogroup", { name: "Theme" }).isVisible()) return menu;
-  const back = page.getByRole("button", { name: /^Back to Menu/ });
-  if (await back.isVisible()) await back.click();
-  await menu.getByRole("button", { name: /^This device/ }).click();
+  const theme = menu.getByRole("button", { name: "Theme", exact: true });
+  if (!(await theme.isVisible())) {
+    const back = page.getByRole("button", { name: /^Back to Menu/ });
+    if (await back.isVisible()) await back.click();
+    await menu.getByRole("button", { name: /^This device/ }).click();
+    await theme.waitFor();
+  }
+  for (const name of await menu.locator('[data-group-fold][aria-expanded="false"] [data-group-name]').allTextContents()) await openGroup(menu, name);
   await menu.getByRole("radiogroup", { name: "Theme" }).waitFor();
   return menu;
 }

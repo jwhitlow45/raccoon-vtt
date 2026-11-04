@@ -2,12 +2,13 @@ import { Fragment, useId, useSyncExternalStore } from "react";
 import { Button } from "../../components/Button.tsx";
 import { Select } from "../../components/Field.tsx";
 import { GRABBER_DESIGNS, GRABBER_TOP, grabberDesign, parseGrabber, type GrabberId } from "../../components/grabberDesigns.ts";
-import { Help, Section } from "../../components/Panel.tsx";
+import { Group, Help } from "../../components/Panel.tsx";
 import { RadioCards } from "../../components/RadioCards.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { GrabberDrawing } from "../../components/SheetGrabber.tsx";
 import { Switch } from "../../components/Switch.tsx";
 import { enterFullscreen, exitFullscreen, fullscreenSupported, useFullscreen } from "../../lib/fullscreen.ts";
+import { thisDeviceFoldsSlot, useFolds, type ThisDeviceSection } from "../../lib/folds.ts";
 import { theme } from "../../lib/theme.ts";
 import { UNBOUND, type KeyMap } from "../../state/keyBindings.ts";
 import { useRoomScope } from "../../state/scope.ts";
@@ -21,6 +22,7 @@ import { useDeviceStillReason } from "../animmap/AnimMapController.tsx";
 import { useServerAnimatedMaps } from "../animmap/status.ts";
 import { ANIMATED_MAPS_CHOICES, ANIMATED_MAPS_HELP, ANIMATED_MAPS_LABEL, ANIMATED_MAPS_WORDS, deviceStillHelp, LOW_POWER_HELP, type AnimatedMapsChoice } from "../animmap/words.ts";
 import { DiceSetPicker } from "./DiceSetPicker.tsx";
+import { MAP_IMAGE_WORDS, deviceSummaries } from "./summaries.ts";
 import {
   setAnimatedMaps,
   setLowPower,
@@ -102,25 +104,47 @@ export default function ThisDevice() {
   const animatedMapsOn = useServerAnimatedMaps();
   const animatedMaps = useAnimatedMaps();
   const animatedStill = useDeviceStillReason();
+  const roomSound = useRoomSoundOn();
+  const fold = useFolds(thisDeviceFoldsSlot);
+  const summary = deviceSummaries({
+    scale,
+    theme: themeChoice,
+    fullscreen,
+    lowPower,
+    variant,
+    animatedMaps: animatedMapsOn ? animatedMaps : null,
+    weather,
+    weatherHeld: weatherStill !== null,
+    roomSound,
+    rollAnimation,
+    handle,
+  });
+  /*
+   * Each section a group that folds (docs/design/design-v1-panel-groups.md
+   * 6.2), all of them setup: folded on a phone and open from 900 px up until
+   * this device folds or opens one, and kept mounted while folded, so a
+   * picker's state lasts through a fold.
+   */
+  const group = (key: ThisDeviceSection) => ({ ...fold(key), keep: true, wholeSummary: true, summary: summary[key] });
   return (
     <div style={{ display: "grid" }}>
-      <Section label="Interface size" divider={false}>
+      <Group label="Interface size" {...group("size")} divider={false}>
         <Help>The bars, panels and the names and marks on tokens. The map keeps its own zoom: pinch or use the wheel.</Help>
         <Segmented<UiScale> label="Interface size" grow value={scale} options={UI_SCALES.map((s) => ({ value: s, label: uiScaleLabel(s) }))} onChange={setUiScale} />
-      </Section>
-      <ThemeSection value={themeChoice} helpId={themeHelp} />
+      </Group>
+      <ThemeSection value={themeChoice} helpId={themeHelp} fold={group("theme")} />
       {/* Where the browser can, so not on iPhone Safari (lib/fullscreen.ts). Here too, since a phone's top bar has no room for the button and a touch screen may have no keyboard. */}
       {fullscreenSupported() ? (
-        <Section label="Screen">
+        <Group label="Screen" {...group("screen")}>
           <Switch
             label="Full screen"
             help={fullscreenHelp(keys)}
             checked={fullscreen}
             onChange={(on) => void (on ? enterFullscreen() : exitFullscreen())}
           />
-        </Section>
+        </Group>
       ) : null}
-      <Section label="Battery">
+      <Group label="Battery" {...group("battery")}>
         <Switch
           label="Low power"
           help={
@@ -131,8 +155,8 @@ export default function ThisDevice() {
           checked={lowPower}
           onChange={setLowPower}
         />
-      </Section>
-      <Section label="Map detail">
+      </Group>
+      <Group label="Map detail" {...group("mapDetail")}>
         {/* In a settings row's padding, as Room settings stands the same cards, so its label stands where Battery's and Sounds' do (docs/design/design-v1-spacing-pass.md S3). */}
         <div style={{ padding: `${theme.space(2)}px 0` }}>
           <RadioCards
@@ -141,8 +165,8 @@ export default function ThisDevice() {
             value={lowPower ? "mobile" : variant}
             disabled={lowPower}
             options={[
-              { value: "mobile", label: "Phone size", help: "Up to 4096 pixels across. Loads faster and needs less memory." },
-              { value: "full", label: "Full size", help: "Sharper on a large screen. A big map can be too much for a phone." },
+              { value: "mobile", label: MAP_IMAGE_WORDS.mobile, help: "Up to 4096 pixels across. Loads faster and needs less memory." },
+              { value: "full", label: MAP_IMAGE_WORDS.full, help: "Sharper on a large screen. A big map can be too much for a phone." },
             ]}
             onChange={setMapDetail}
           />
@@ -160,8 +184,8 @@ export default function ThisDevice() {
             />
           </div>
         ) : null}
-      </Section>
-      <Section label="Weather">
+      </Group>
+      <Group label="Weather" {...group("weather")}>
         {/* In a settings row's padding, as Map detail's cards stand. */}
         <div style={{ padding: `${theme.space(2)}px 0` }}>
           <RadioCards
@@ -173,8 +197,8 @@ export default function ThisDevice() {
             onChange={setWeatherMode}
           />
         </div>
-      </Section>
-      <Section label="Sounds">
+      </Group>
+      <Group label="Sounds" {...group("sounds")}>
         <RoomSoundControls />
         <Switch label="Turn sound" help="A short chime on your turn. Android phones also vibrate." checked={turnSound} onChange={setSoundOn} />
         <Switch
@@ -183,8 +207,8 @@ export default function ThisDevice() {
           checked={pingSound}
           onChange={setSoundEnabled}
         />
-      </Section>
-      <Section label="Rolls">
+      </Group>
+      <Group label="Rolls" {...group("rolls")}>
         <Switch label="Show others' rolls as they happen" help="A short note for each roll someone else makes, while the Dice panel is not on screen." checked={rollToasts} onChange={setRollToasts} />
         <Switch
           label="Roll animation"
@@ -199,8 +223,8 @@ export default function ThisDevice() {
           onChange={setRollAnimation}
         />
         <DiceSetPicker />
-      </Section>
-      <Section label="Shortcuts">
+      </Group>
+      <Group label="Shortcuts" {...group("shortcuts")}>
         <Help>{shortcutsHelp(keys)}</Help>
         <Button size="sm" aria-keyshortcuts={sheetKey?.aria} onClick={() => setShortcutSheet(scope, true)} style={{ justifySelf: "start" }}>
           <span>
@@ -208,8 +232,8 @@ export default function ThisDevice() {
             <span aria-hidden>{keySuffix(sheetKey)}</span>
           </span>
         </Button>
-      </Section>
-      <Section label="Sheet handle">
+      </Group>
+      <Group label="Sheet handle" {...group("handle")}>
         <Help id={handleHelp}>The mark at the top of a phone's sheets that shows you can swipe them. It fills with your color as you pull one, fully when letting go would move it.</Help>
         <Select aria-label="Sheet handle" aria-describedby={handleHelp} value={handle} onChange={(e) => setSheetHandle(parseGrabber(e.target.value))} style={{ width: "100%" }}>
           {GRABBER_DESIGNS.map((d) => (
@@ -219,7 +243,7 @@ export default function ThisDevice() {
           ))}
         </Select>
         <SheetHandlePreview id={handle} />
-      </Section>
+      </Group>
     </div>
   );
 }
@@ -287,6 +311,9 @@ export function deviceDetail(fullscreen: boolean): string {
   return `Interface size, theme, ${fullscreen ? "full screen, " : ""}low power, map detail, weather, sounds, roll animation, shortcuts and sheet\u00a0handle.`;
 }
 
+/** What a group of This device takes from its page: its fold, its summary and how it shows. */
+type GroupFold = Omit<Parameters<typeof Group>[0], "label" | "children">;
+
 /** The Theme section's help, which is also the row's description. */
 export const THEME_HELP = "Auto follows this device's own light or dark setting. The map, the fog, the dice tray and the table display stay dark in Light too.";
 
@@ -296,9 +323,9 @@ export const THEME_HELP = "Auto follows this device's own light or dark setting.
  * its four do. A pick recolors the page at once (lib/scheme.ts), and
  * every other open window of the app follows it.
  */
-export function ThemeSection(props: { value: ThemeChoice; helpId: string }) {
+export function ThemeSection(props: { value: ThemeChoice; helpId: string; fold?: GroupFold }) {
   return (
-    <Section label="Theme">
+    <Group label="Theme" {...props.fold}>
       <Help id={props.helpId}>{THEME_HELP}</Help>
       <Segmented<ThemeChoice>
         label="Theme"
@@ -308,7 +335,7 @@ export function ThemeSection(props: { value: ThemeChoice; helpId: string }) {
         options={THEME_CHOICES.map((c) => ({ value: c, label: THEME_CHOICE_WORDS[c] }))}
         onChange={setThemeChoice}
       />
-    </Section>
+    </Group>
   );
 }
 
