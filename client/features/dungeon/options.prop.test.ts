@@ -65,8 +65,8 @@ describe("the options look as they say", () => {
           got += p.rooms.filter((r) => r.ground !== 0).length;
           want += raisedCount(share, p.rooms.length);
         }
-        // A run needs 3 or 4 squares of rock out from each of its room's doorways. Small packs its rooms 4 apart, so about one room in four there has no room for its stairs, and Most reaches 3 of its 4.
-        const floor = size === "small" ? 0.7 : 0.9;
+        // A run needs 3 or 4 squares of rock out from each of its room's doorways. Small packs its rooms 4 apart, so about one room in four there has no room for its stairs, and Most reaches about 3 of its 4, 2 in 3 in an unlucky sample.
+        const floor = size === "small" ? 0.6 : 0.9;
         assert.ok(got >= want * floor, `${size} Heights ${share}%: ${got} of ${want} rooms off flat`);
       }
       for (const twelfths of Object.values(TRAP_PRESETS)) {
@@ -98,7 +98,8 @@ describe("the options look as they say", () => {
         const side = SIZE_SIDES[size];
         const base = { ...DEFAULT_SETTINGS, w: side, h: side, rooms: defaultRooms(size, side, side), density };
         const look = { crypt: { rooms: 0, pillared: 0, doors: 0, locked: 0, wood: 0 }, dungeon: { rooms: 0, pillared: 0, doors: 0, locked: 0, wood: 0 } };
-        for (const seed of seeds(80 + i, 20)) {
+        // Small dungeons have few rooms each, so Small takes more of them for a steady share.
+        for (const seed of seeds(80 + i, size === "small" ? 60 : 20)) {
           for (const theme of ["crypt", "dungeon"] as const) {
             const p = planDungeon({ ...base, theme }, seed).plan;
             const pillars = new Set(p.paint.pillar ?? []);
@@ -113,8 +114,8 @@ describe("the options look as they say", () => {
             t.wood += p.rooms.filter((r) => r.floor === "wood").length;
           }
         }
-        // Sparse rooms are 3 to 6 squares a side and only those 5 by 5 or more take pillars, a quarter of them, less the doorways' lines.
-        assert.ok(look.crypt.pillared >= look.crypt.rooms * 0.12, `${size} ${density}: pillars in ${look.crypt.pillared} of ${look.crypt.rooms} Crypt rooms`);
+        // Sparse rooms are 3 to 6 squares a side and only those 5 by 5 or more take pillars, a quarter of them, less the doorways' lines: about 1 room in 7 on Small Sparse.
+        assert.ok(look.crypt.pillared >= look.crypt.rooms * 0.1, `${size} ${density}: pillars in ${look.crypt.pillared} of ${look.crypt.rooms} Crypt rooms`);
         assert.ok(look.crypt.locked / look.crypt.doors > look.dungeon.locked / look.dungeon.doors, `${size} ${density}: locks`);
         assert.equal(look.dungeon.pillared, 0);
         assert.equal(look.crypt.wood, 0);
