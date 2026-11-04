@@ -21,7 +21,8 @@ import { ConsoleWatch, openSideTab, Shots, SocketWatch, startServer, waitFor, ty
  * review's fixes (lane joinfix, labels jf-): a request found on load that
  * Back leaves, "Requests are off" once requests are on again, the carry-on
  * list after a password join, a let-in held up in the database, and a room
- * that is really full.
+ * that is really full. lp30fix-2: a page left on "Requests are off" offers
+ * Ask again once requests are on again, with no reload.
  *
  * Every ask comes from 127.0.0.1, so the file stays well under one
  * address's 30 asks an hour in a room and a room's 20 asks before it
@@ -704,6 +705,50 @@ describe("raccoon-vtt join requests", { timeout: 600_000 }, () => {
     await juno.page.getByRole("button", { name: "Cancel" }).click();
     await row.waitFor({ state: "detached" });
     await juno.context.close();
+  });
+
+  test("lp30fix-2. a newcomer left on Requests are off is offered Ask again once requests are on again, with no reload: at the page's next read of the room, and when it gets focus", async () => {
+    const olive = await device("olive");
+    // The page's own clock, so its 15 s read of the room comes when the test says.
+    await olive.page.clock.install();
+    await ask(olive.page, "Olive", { url: roomUrl() });
+    await requestRow(dm, "Olive").waitFor();
+    await dismissToasts(dm);
+    const closedCard = olive.page.getByRole("heading", { name: "Requests are off" }).locator("xpath=ancestor::section[1]");
+    const askAgain = closedCard.getByRole("button", { name: "Ask again" });
+    await pickMode(dm, "With the password");
+    await closedCard.waitFor();
+    await olive.page.getByRole("heading", { name: "Join the game" }).waitFor();
+    await olive.page.getByLabel("Player password").fill("not yet sent");
+    await pickMode(dm, "With the password, or by asking");
+    await olive.page.waitForTimeout(1_000);
+    assert.equal(await askAgain.count(), 0, "no Ask again before the page reads the room again");
+    await shots.take(olive.page, "lp30fix-2-before-the-read");
+    await olive.page.clock.fastForward(16_000);
+    await askAgain.waitFor({ timeout: 5_000 });
+    await shots.take(olive.page, "lp30fix-2-ask-again");
+    assert.equal(await olive.page.getByLabel("Player password").inputValue(), "not yet sent", "the password card stays under it, as it was");
+    assert.equal(await olive.page.getByRole("heading", { name: "No password?" }).count(), 0, "Ask again is the one way to ask");
+
+    // Again in Only by asking, brought by the page getting focus.
+    await askAgain.click();
+    await olive.page.getByRole("heading", { name: "Ask to join" }).waitFor();
+    await olive.page.getByRole("button", { name: "Ask to join" }).click();
+    await olive.page.getByRole("heading", { name: "Waiting for the DM" }).waitFor();
+    await requestRow(dm, "Olive").waitFor();
+    await dismissToasts(dm);
+    await pickMode(dm, "With the password");
+    await closedCard.waitFor();
+    await pickMode(dm, "Only by asking");
+    await olive.page.waitForTimeout(500);
+    assert.equal(await askAgain.count(), 0);
+    await olive.page.evaluate(() => (globalThis as unknown as EventTarget).dispatchEvent(new Event("focus")));
+    await askAgain.waitFor({ timeout: 5_000 });
+    assert.equal(await olive.page.getByRole("heading", { name: "Join the game" }).count(), 0, "no password card in Only by asking");
+    await askAgain.click();
+    await olive.page.getByRole("heading", { name: "Ask to join" }).waitFor();
+    await pickMode(dm, "With the password, or by asking");
+    await olive.context.close();
   });
 
   test("jr-13. no page logged an error", () => {

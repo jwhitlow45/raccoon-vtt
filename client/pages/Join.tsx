@@ -115,6 +115,7 @@ export function Join(props: {
   );
 
   const cards = joinCards({ mode, picking: step !== null, view, looked: lookup.kind === "done", linked });
+  useClosedPoll(closed && mode === "password" && cards !== "pick", props.onRefreshMode);
   let body;
   if (cards === "pick" && step) {
     body = (
@@ -134,6 +135,30 @@ export function Join(props: {
           setStep(null);
         }}
       />
+    );
+  } else if (closed && mode !== "password") {
+    // Requests are on again: the card the request ended on stays, in the same place so its focus and a password being typed
+    // below it are kept, and now offers Ask again, as a reload would show it.
+    body = (
+      <>
+        <OutcomeCard outcome="closed">
+          <div style={{ display: "grid", gap: theme.space(2) }}>
+            <Button
+              // Under it the password card's Next stays the main way in, as beside No password?'s Ask to join.
+              variant={mode === "ask" ? "secondary" : "primary"}
+              onClick={() => {
+                setClosed(false);
+                // The request it ended on is spent, so the ask card starts fresh.
+                setSpent(true);
+                setTapped(true);
+              }}
+            >
+              Ask again
+            </Button>
+          </div>
+        </OutcomeCard>
+        {mode === "ask" ? passwordCard : null}
+      </>
     );
   } else if (cards === "loading") {
     body = (
@@ -166,6 +191,34 @@ export function Join(props: {
       {wasDm ? null : dmEntry}
     </Page>
   );
+}
+
+/** How often the page reads the room's mode again while it says "Requests are off" over the password card. */
+const CLOSED_POLL_MS = 15_000;
+
+/**
+ * Nothing tells a join page that the DM turned requests back on, so while
+ * it says "Requests are off" over the password card it reads the room
+ * again whenever it comes back into view and every 15 s it is shown, and
+ * Ask again comes without a reload (design join-requests 2.2).
+ */
+function useClosedPoll(on: boolean, refresh: () => void): void {
+  const latest = useRef(refresh);
+  latest.current = refresh;
+  useEffect(() => {
+    if (!on) return;
+    const read = () => {
+      if (document.visibilityState === "visible") latest.current();
+    };
+    const timer = setInterval(read, CLOSED_POLL_MS);
+    window.addEventListener("focus", read);
+    document.addEventListener("visibilitychange", read);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", read);
+      document.removeEventListener("visibilitychange", read);
+    };
+  }, [on]);
 }
 
 type Lookup = { kind: "idle" } | { kind: "loading" } | { kind: "done"; mine: MyJoinRequest | null };
