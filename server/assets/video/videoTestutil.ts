@@ -194,6 +194,8 @@ export type WebmOptions = {
   frameBytes?: number;
   /** Real frames, a recording's, in place of the synthetic ones `frameMs` makes. */
   frames?: Array<{ ms: number; key: boolean; data: Buffer }>;
+  /** More children of the video track's Video element, such as a display size or a Projection. */
+  videoKids?: Ebml[];
 };
 
 /**
@@ -218,7 +220,7 @@ export function webmTree(o: WebmOptions = {}): Ebml[] {
     uint(I.TrackType, 1),
     str(I.CodecID, o.codec ?? "V_VP9"),
     ...(o.codecPrivate ? [bin(I.CodecPrivate, o.codecPrivate)] : []),
-    el(I.Video, uint(I.PixelWidth, width), uint(I.PixelHeight, height)),
+    el(I.Video, uint(I.PixelWidth, width), uint(I.PixelHeight, height), ...(o.videoKids ?? [])),
   );
   const tracks = [videoTrack];
   const sound = o.sound ?? null;
@@ -319,7 +321,19 @@ export const SECRETS = {
   icc: "ICC profile by Heidi Example",
   udta: "User data of Ivan Example",
   tmcd: "Reel of Judy Example",
+  face: "Face of Mallory Example at 0.41 0.22",
+  device: "Phone of Niaj Example",
 } as const;
+
+/**
+ * A Projection element (Matroska's 0x7670) with its type and its pose in
+ * degrees, as a 360 or a turned WebM carries one
+ * (docs/design/design-v1-video-turns.md 4.2): ProjectionType 0x7671, then
+ * PoseYaw, PosePitch and PoseRoll, 0x7673 to 0x7675.
+ */
+export function projectionEl(pose: { yaw?: number; pitch?: number; roll?: number } = {}, type = 0): Ebml {
+  return el(0x7670, uint(0x7671, type), float(0x7673, pose.yaw ?? 0, 4), float(0x7674, pose.pitch ?? 0, 4), float(0x7675, pose.roll ?? 0, 4));
+}
 
 /** A WebM with every kind of identifying text 7 names, in each place a tool may leave it. */
 export function webmWithSecrets(o: WebmOptions = {}): Ebml[] {
@@ -436,6 +450,67 @@ export function audioEntry(type: string, channels: number, hz: number, ...kids: 
   return bx(type, fields(Buffer.alloc(6), [2, 1], [2, 0], [2, 0], [4, 0], [2, channels], [2, 16], [2, 0], [2, 0], [4, hz * 0x10000]), ...kids);
 }
 
+/** A QuickTime version 1 sound entry (docs/design/design-v1-video-turns.md 4.5): its compression ID and four counts after the version 0 fields. */
+export function audioEntryV1(type: string, channels: number, hz: number, o: { compressionId?: number; samplesPerPacket?: number; bytesPerPacket?: number; bytesPerFrame?: number; bytesPerSample?: number; version?: number } = {}, ...kids: Box[]): Box {
+  return bx(
+    type,
+    fields(Buffer.alloc(6), [2, 1], [2, o.version ?? 1], [2, 0], [4, 0], [2, channels], [2, 16], [2, o.compressionId ?? 0xfffe], [2, 0], [4, hz * 0x10000], [4, o.samplesPerPacket ?? 1024], [4, o.bytesPerPacket ?? 0], [4, o.bytesPerFrame ?? 0], [4, o.bytesPerSample ?? 2]),
+    ...kids,
+  );
+}
+
+/** QuickTime's `wave` around AAC's `esds`, as FFmpeg and Apple write it: `frma`, an `mp4a` of four zero bytes, the `esds` and a terminator. */
+export function waveBox(esds: Buffer = esdsBytes(), ...extra: Box[]): Box {
+  return bx("wave", undefined, bx("frma", Buffer.from("mp4a", "latin1")), bx("mp4a", Buffer.alloc(4)), bx("esds", esds), ...extra, { type: "\0\0\0\0" });
+}
+
+/** A `pasp` of h:v. */
+export const paspBox = (h: number, v: number): Box => bx("pasp", fields([4, h], [4, v]));
+
+/** A `clap` of width wN/wD, height hN/hD and offsets xN/xD, yN/yD, the offsets signed. */
+export function clapBox(wN: number, wD: number, hN: number, hD: number, xN = 0, xD = 1, yN = 0, yD = 1): Box {
+  return bx("clap", fields(...[wN, wD, hN, hD, xN, xD, yN, yD].map((v): [4, number] => [4, v >>> 0])));
+}
+
+/** A MOV's `tapt` with its clean, production and encoded sizes in pixels. */
+export function taptBox(clef: [number, number], prof: [number, number] = clef, enof: [number, number] = clef): Box {
+  const size = (type: string, [w, h]: [number, number]) => bx(type, fields([4, 0], [4, w * 0x10000], [4, h * 0x10000]));
+  return bx("tapt", undefined, size("clef", clef), size("prof", prof), size("enof", enof));
+}
+
+/** QuickTime's `colr` of type `nclc`: primaries, transfer and matrix, without nclx's range byte. */
+export const nclcBox = (primaries = 1, transfer = 1, matrix = 1): Box => bx("colr", Buffer.concat([Buffer.from("nclc", "latin1"), fields([2, primaries], [2, transfer], [2, matrix])]));
+
+/** QuickTime's `alis` data reference to the file itself: the self-reference flag and nothing else. */
+export const alisRef = (): Box => bx("alis", full(0, 1));
+
+/** The matrix of one of 4.1's rows (a, b, c, d in units), with its translation in raw 16.16. */
+export function tkhdMatrix(row: { a: number; b: number; c: number; d: number }, tx = 0, ty = 0): number[] {
+  return [row.a * 0x10000, row.b * 0x10000, 0, row.c * 0x10000, row.d * 0x10000, 0, tx, ty, 0x40000000];
+}
+
+/**
+ * One raw data block of AAC-LC stereo that decodes to silence: a channel
+ * pair with no common window, each channel's global gain 0 and no scale
+ * factor bands, then the end element (ISO 14496-3 4.4.2). Worked out bit by
+ * bit, so a fixture's sound plays without an encoder.
+ */
+export const SILENT_AAC_STEREO = Buffer.from([0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0e]);
+
+/**
+ * A timed metadata track, handler `meta` with one `mebx` entry, as an
+ * iPhone writes for detected faces and the still image's time
+ * (docs/design/design-v1-video-turns.md 4.5). Its keys name what it holds.
+ */
+export function metadataTrack(o: Partial<Mp4Track> & { samples: Mp4Sample[]; keys?: string[] }): Mp4Track {
+  const keys = (o.keys ?? ["com.apple.quicktime.detected-face"]).map((key, i) => ({
+    type: String.fromCharCode(0, 0, 0, i + 1),
+    kids: [bx("keyd", Buffer.concat([Buffer.from("mdta", "latin1"), Buffer.from(key, "latin1")])), bx("dtyp", fields([4, 0], [4, 0]))],
+  }));
+  const { keys: _keys, ...rest } = o;
+  return { handler: "meta", entry: bx("mebx", fields(Buffer.alloc(6), [2, 1]), bx("keys", undefined, ...keys)), timescale: 600, ...rest };
+}
+
 export type Mp4Sample = { size: number; delta: number; cts?: number; bytes?: Buffer; key?: boolean };
 
 export type Mp4Track = {
@@ -447,12 +522,20 @@ export type Mp4Track = {
   edits?: Array<{ segment: number; mediaTime: number; rate?: number }>;
   matrix?: number[];
   tkhdSize?: { width: number; height: number };
+  /** tkhd's size in raw 16.16, for a size that is not whole pixels. */
+  tkhdRaw?: { width: number; height: number };
+  /** tkhd's flags. Default: enabled and in the movie. */
+  tkhdFlags?: number;
   handlerName?: string;
+  /** The data references. Default: one `url ` to the file itself. */
+  dataRefs?: Box[];
   extraTrak?: Box[];
   extraStbl?: Box[];
   extraMinf?: Box[];
   /** Samples per chunk. Default: the whole track in one chunk. */
   chunkSamples?: number;
+  /** The chunk offsets in place of where the writer puts the samples, given the mdat payload and those defaults. */
+  chunkOffsets?: (layout: { mdat: { start: number; end: number }; defaults: number[] }) => number[];
 };
 
 export type Mp4Options = {
@@ -461,6 +544,8 @@ export type Mp4Options = {
   /** mvhd's duration in its timescale. Default: the longest track's. */
   movieDuration?: number;
   brand?: string;
+  /** ftyp's compatible brands. Default: isom, iso2, avc1 and mp41. */
+  compatible?: string[];
   /** Boxes between ftyp and moov, and inside moov after the tracks. */
   beforeMoov?: Box[];
   inMoov?: Box[];
@@ -502,8 +587,9 @@ function trakBox(t: Mp4Track, id: number, movieTimescale: number, chunkOffsets: 
   const mediaTicks = t.samples.reduce((s, x) => s + x.delta, 0);
   const segmentTotal = t.edits?.reduce((s, e) => s + e.segment, 0) ?? Math.round((mediaTicks / t.timescale) * movieTimescale);
   const size = t.tkhdSize ?? (t.handler === "vide" ? { width: t.entry.head!.readUInt16BE(24), height: t.entry.head!.readUInt16BE(26) } : { width: 0, height: 0 });
+  const raw = t.tkhdRaw ?? { width: size.width * 0x10000, height: size.height * 0x10000 };
   const matrix = Buffer.concat((t.matrix ?? IDENTITY_MATRIX).map((v) => fields([4, v >>> 0])));
-  const tkhd = bx("tkhd", Buffer.concat([full(0, 3), fields([4, 0x7a6b5c4d], [4, 0x7a6b5c4e], [4, id], [4, 0], [4, segmentTotal], Buffer.alloc(8), [2, 0], [2, 0], [2, t.handler === "soun" ? 0x100 : 0], [2, 0]), matrix, fields([4, size.width * 0x10000], [4, size.height * 0x10000])]));
+  const tkhd = bx("tkhd", Buffer.concat([full(0, t.tkhdFlags ?? 3), fields([4, 0x7a6b5c4d], [4, 0x7a6b5c4e], [4, id], [4, 0], [4, segmentTotal], Buffer.alloc(8), [2, 0], [2, 0], [2, t.handler === "soun" ? 0x100 : 0], [2, 0]), matrix, fields([4, raw.width], [4, raw.height])]));
   const per = t.chunkSamples ?? t.samples.length;
   const stts: Array<[number, number]> = [];
   for (const s of t.samples) {
@@ -535,7 +621,8 @@ function trakBox(t: Mp4Track, id: number, movieTimescale: number, chunkOffsets: 
   );
   const handlerName = Buffer.concat([Buffer.from(t.handlerName ?? "", "latin1"), Buffer.from([0])]);
   const header = t.handler === "vide" ? [bx("vmhd", Buffer.concat([full(0, 1), Buffer.alloc(8)]))] : t.handler === "soun" ? [bx("smhd", Buffer.concat([full(0), Buffer.alloc(4)]))] : [];
-  const minf = bx("minf", undefined, ...header, bx("dinf", undefined, bx("dref", Buffer.concat([full(0), fields([4, 1])]), bx("url ", full(0, 1)))), stbl, ...(t.extraMinf ?? []));
+  const refs = t.dataRefs ?? [bx("url ", full(0, 1))];
+  const minf = bx("minf", undefined, ...header, bx("dinf", undefined, bx("dref", Buffer.concat([full(0), fields([4, refs.length])]), ...refs)), stbl, ...(t.extraMinf ?? []));
   const mdia = bx(
     "mdia",
     undefined,
@@ -557,7 +644,7 @@ function trakBox(t: Mp4Track, id: number, movieTimescale: number, chunkOffsets: 
 export function mp4File(o: Mp4Options = {}): Buffer {
   const tracks = o.tracks ?? [defaultVideoTrack()];
   const movieTimescale = o.movieTimescale ?? 1000;
-  const ftyp = bx("ftyp", Buffer.concat([Buffer.from(o.brand ?? "isom", "latin1"), fields([4, 0x200]), Buffer.from("isomiso2avc1mp41", "latin1")]));
+  const ftyp = bx("ftyp", Buffer.concat([Buffer.from(o.brand ?? "isom", "latin1"), fields([4, 0x200]), Buffer.from((o.compatible ?? ["isom", "iso2", "avc1", "mp41"]).join(""), "latin1")]));
   const samples = tracks.flatMap((t, ti) => t.samples.map((s, i) => s.bytes ?? filler(s.size, ti * 100000 + i + 1)));
   const mdatPayload = Buffer.concat(samples);
   const build = (mdatStart: number) => {
@@ -569,7 +656,8 @@ export function mp4File(o: Mp4Options = {}): Buffer {
         if (k % per === 0) offsets.push(at);
         at += t.samples[k]!.size;
       }
-      return trakBox(t, i + 1, movieTimescale, offsets);
+      const placed = t.chunkOffsets ? t.chunkOffsets({ mdat: { start: mdatStart, end: mdatStart + mdatPayload.length }, defaults: offsets }) : offsets;
+      return trakBox(t, i + 1, movieTimescale, placed);
     });
     const longest = Math.max(...tracks.map((t) => (t.edits ? t.edits.reduce((s, e) => s + e.segment, 0) : Math.round((t.samples.reduce((s, x) => s + x.delta, 0) / t.timescale) * movieTimescale))));
     const mvhd = bx("mvhd", Buffer.concat([full(0), fields([4, 0x7a6b5c4d], [4, 0x7a6b5c4e], [4, movieTimescale], [4, o.movieDuration ?? longest], [4, 0x10000], [2, 0x100], Buffer.alloc(10)), ...IDENTITY_MATRIX.map((v) => fields([4, v])), Buffer.alloc(24), fields([4, tracks.length + 1])]));
@@ -602,6 +690,69 @@ export function appleLocationMeta(text: string = SECRETS.location): Box {
     bx("keys", Buffer.concat([full(0), fields([4, 1], [4, 8 + key.length]), Buffer.from("mdta", "latin1"), Buffer.from(key, "latin1")])),
     bx("ilst", undefined, { type: "\u0000\u0000\u0000\u0001", kids: [bx("data", Buffer.concat([fields([4, 1], [4, 0]), Buffer.from(text, "latin1")]))] }),
   );
+}
+
+/** QuickTime metadata with one key for each entry, as an iPhone writes its place, its model and its software. */
+export function appleMeta(entries: Array<[key: string, value: string]>): Box {
+  return bx(
+    "meta",
+    full(0),
+    bx("hdlr", Buffer.concat([full(0), fields([4, 0]), Buffer.from("mdta", "latin1"), Buffer.alloc(12), Buffer.from([0])])),
+    bx("keys", Buffer.concat([full(0), fields([4, entries.length]), ...entries.map(([key]) => Buffer.concat([fields([4, 8 + key.length]), Buffer.from("mdta", "latin1"), Buffer.from(key, "latin1")]))])),
+    bx("ilst", undefined, ...entries.map(([, value], i) => ({ type: String.fromCharCode(0, 0, 0, i + 1), kids: [bx("data", Buffer.concat([fields([4, 1], [4, 0]), Buffer.from(value, "latin1")]))] }))),
+  );
+}
+
+/** The four rows an iPhone or Android camera, Apple's editors and FFmpeg write most, from 4.1's table. */
+export const ROWS = {
+  turn90: { a: 0, b: 1, c: -1, d: 0 },
+  turn180: { a: -1, b: 0, c: 0, d: -1 },
+  turn270: { a: 0, b: -1, c: 1, d: 0 },
+  turn270Mirror: { a: 0, b: -1, c: -1, d: 0 },
+} as const;
+
+/** A visual sample entry with any colour box swapped for QuickTime's `nclc`, whether its children are boxes or bytes after the fixed 78. */
+function withNclc(entry: Box): Box {
+  const head = entry.head!;
+  const kept = rawBoxes(head, 78, head.length).filter((b) => b.type !== "colr").map((b) => head.subarray(b.start, b.end));
+  return { type: entry.type, head: Buffer.concat([head.subarray(0, 78), ...kept]), kids: [...(entry.kids ?? []).filter((k) => k.type !== "colr"), nclcBox()] };
+}
+
+/**
+ * An iPhone's Most Compatible MOV as public reports describe one
+ * (docs/design/design-v1-video-turns.md 2 and 4.5), its strings made up:
+ * the `qt  ` brand, `alis` data references, an `nclc` colour, AAC in a
+ * version 1 sound entry inside `wave` with a `chan`, a `tapt` at the
+ * turned size, two timed metadata tracks holding a face and a place (the
+ * second starting with an empty edit), the movie's `meta` and `udta` with a
+ * place and the phone, and the 90 row with Apple's translation (H, 0).
+ * `video` is the picture's track, which keeps its samples.
+ */
+export function iphoneMov(video: Mp4Track = defaultVideoTrack()): Buffer {
+  const width = video.entry.head!.readUInt16BE(24);
+  const height = video.entry.head!.readUInt16BE(26);
+  const picture: Mp4Track = { ...video, entry: withNclc(video.entry), matrix: tkhdMatrix(ROWS.turn90, height * 0x10000, 0), dataRefs: [alisRef()], handlerName: SECRETS.device, extraTrak: [taptBox([height, width])] };
+  const aac = defaultSoundTrack();
+  const sound: Mp4Track = {
+    ...aac,
+    entry: audioEntryV1("mp4a", 2, 48000, {}, waveBox(), bx("chan", Buffer.alloc(24))),
+    samples: aac.samples.map((s) => ({ ...s, size: SILENT_AAC_STEREO.length, bytes: SILENT_AAC_STEREO })),
+    dataRefs: [alisRef()],
+    handlerName: SECRETS.device,
+  };
+  const text = (s: string) => Buffer.from(s, "latin1");
+  const faces = metadataTrack({ samples: Array.from({ length: 4 }, () => ({ size: SECRETS.face.length, delta: 300, bytes: text(SECRETS.face) })), handlerName: SECRETS.device });
+  const place = metadataTrack({
+    keys: ["com.apple.quicktime.still-image-time", "com.apple.quicktime.location.ISO6709"],
+    samples: [{ size: SECRETS.location.length, delta: 600, bytes: text(SECRETS.location) }],
+    edits: [{ segment: 500, mediaTime: -1 }, { segment: 1000, mediaTime: 0 }],
+  });
+  return mp4File({
+    brand: "qt  ",
+    compatible: ["qt  "],
+    tracks: [picture, sound, faces, place],
+    inMoov: [appleMeta([["com.apple.quicktime.location.ISO6709", SECRETS.location], ["com.apple.quicktime.model", SECRETS.device], ["com.apple.quicktime.software", "17.4"]]), locationUdta()],
+  });
 }
 
 // Recordings ------------------------------------------------------------------

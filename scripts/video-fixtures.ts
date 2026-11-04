@@ -1,23 +1,52 @@
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { chromium, type Page } from "playwright-core";
+import type { VideoFacts } from "../shared/model.ts";
+import { AssetError } from "../server/assets/errors.ts";
 import { checkVideoBytes } from "../server/assets/video/check.ts";
-import { mp4File, mp4WithSecretsFrom, readMp4Recording, readWebmRecording, webmFile, webmWithSecretsFrom } from "../server/assets/video/videoTestutil.ts";
+import { EBML_ID } from "../server/assets/video/webm.ts";
+import {
+  ROWS,
+  SECRETS,
+  clapBox,
+  encodeBox,
+  iphoneMov,
+  mp4File,
+  mp4WithSecretsFrom,
+  paspBox,
+  readMp4Recording,
+  readWebmRecording,
+  tkhdMatrix,
+  uint,
+  webmFile,
+  webmWithSecretsFrom,
+  type Box,
+  type Mp4Track,
+} from "../server/assets/video/videoTestutil.ts";
 
 /**
- * Makes the animated map fixtures, e2e/fixtures/map-loop.webm (VP9) and
- * map-loop.mp4 (H.264), each 640 x 360 and 2 s long
- * (docs/design/design-v1-animated-maps.md 12, e2e/fixtures/README.md):
+ * Makes the animated map fixtures (docs/design/design-v1-animated-maps.md
+ * 12, docs/design/design-v1-video-turns.md 14, e2e/fixtures/README.md):
  *
- *   node scripts/video-fixtures.ts
+ *   node scripts/video-fixtures.ts           records the two loops, then makes the rest from them
+ *   node scripts/video-fixtures.ts derived   makes the rest from the loops already here
  *
- * Chrome's MediaRecorder records a test pattern drawn on a canvas: color
- * bars, a square that crosses them and the frame's number. A recording is
- * no plain file (the WebM has no length and the MP4 is fragmented, both of
- * which the server refuses), so the test writer rebuilds each one from its
- * frames, as a muxer would, never touching a frame. Then each file must
- * pass the server's header check and play and loop in Chrome, and so must
- * a copy with identifying text added and then cleared by the check.
+ * The loops are map-loop.webm (VP9) and map-loop.mp4 (H.264), each 640 x
+ * 360 and 2 s long. Chrome's MediaRecorder records a test pattern drawn on
+ * a canvas: color bars, a square that crosses them and the frame's number.
+ * A recording is no plain file (the WebM has no length and the MP4 is
+ * fragmented, both of which the server refuses), so the test writer
+ * rebuilds each one from its frames, as a muxer would, never touching a
+ * frame. Then each file must pass the server's header check and play and
+ * loop in Chrome, and so must a copy with identifying text added and then
+ * cleared by the check.
+ *
+ * The rest are the loops' own frames under other headers: turned, mirrored,
+ * stretched and cropped pictures as phones, cameras, Apple's editors and
+ * FFmpeg write them, and an iPhone's MOV. Each must meet the check as the
+ * design says, and each one stored must play and loop in Chrome. A turned
+ * or stretched MP4 stored is byte for byte the stored plain loop, since the
+ * check rewrites only its header.
  */
 
 /**
@@ -39,6 +68,7 @@ type Video = {
   src: string;
   readonly currentTime: number;
   readonly duration: number;
+  readonly error: { readonly code: number } | null;
   readonly videoWidth: number;
   play(): Promise<void>;
   pause(): void;
@@ -124,8 +154,8 @@ function plainMp4(recorded: Buffer): Buffer {
   return mp4File({ tracks: [{ handler: "vide", entry: rec.entry, timescale: 30_000, samples }] });
 }
 
-/** Plays the bytes muted and looping in Chrome, and answers its length and whether it came round again. */
-async function plays(page: Page, bytes: Buffer, type: string): Promise<{ duration: number; looped: boolean; width: number }> {
+/** Plays the bytes muted and looping in Chrome, and answers its length, whether it came round again and any media error. */
+async function plays(page: Page, bytes: Buffer, type: string): Promise<{ duration: number; looped: boolean; width: number; error: number | null }> {
   return page.evaluate(
     async ({ base64, type }) => {
       const { document } = globalThis as unknown as Browser;
@@ -144,7 +174,7 @@ async function plays(page: Page, bytes: Buffer, type: string): Promise<{ duratio
         last = video.currentTime;
       });
       await new Promise((r) => setTimeout(r, 3200));
-      const out = { duration: video.duration, looped, width: video.videoWidth };
+      const out = { duration: video.duration, looped, width: video.videoWidth, error: video.error?.code ?? null };
       video.pause();
       video.remove();
       return out;
@@ -153,24 +183,109 @@ async function plays(page: Page, bytes: Buffer, type: string): Promise<{ duratio
   );
 }
 
+function playedWell(file: string, p: Awaited<ReturnType<typeof plays>>): void {
+  if (Math.abs(p.duration - SECONDS) > 0.05 || !p.looped || p.width !== 640 || p.error !== null) throw new Error(`${file} did not play and loop as a 2 s, 640 px video: ${JSON.stringify(p)}`);
+}
+
+/** The MP4 loop's picture as a track to rebuild under other headers. */
+function loopTrack(loop: Buffer): Mp4Track {
+  const rec = readMp4Recording(loop);
+  return { handler: "vide", entry: rec.entry, timescale: rec.timescale, samples: rec.samples };
+}
+
+/** The loop's sample entry with its box of `box`'s type swapped for `box` where it lies, or `box` added last where it has none. */
+function entryWith(track: Mp4Track, box: Box): Mp4Track {
+  const head = track.entry.head!;
+  const parts: Buffer[] = [head.subarray(0, 78)];
+  let swapped = false;
+  for (let at = 78; at + 8 <= head.length; at += head.readUInt32BE(at)) {
+    const same = head.subarray(at + 4, at + 8).toString("latin1") === box.type;
+    parts.push(same ? encodeBox(box) : head.subarray(at, at + head.readUInt32BE(at)));
+    swapped ||= same;
+  }
+  if (!swapped) parts.push(encodeBox(box));
+  return { ...track, entry: { type: track.entry.type, head: Buffer.concat(parts) } };
+}
+
+/** What each made file must meet: the geometry the check finds, or its refusal. */
+type Expect = { geometry: Partial<Pick<VideoFacts, "turn" | "mirror" | "displayWidthPx">>; samePlain?: boolean } | { refused: string };
+
+/**
+ * The loops' frames under other headers (docs/design/design-v1-video-turns.md
+ * 14). The pattern's bars and dark strip tell all eight orientations apart.
+ */
+function derived(mp4: Buffer, webm: Buffer): Array<{ file: string; type: string; bytes: Buffer; expect: Expect }> {
+  const track = loopTrack(mp4);
+  const [w, h] = [640 * 0x10000, 360 * 0x10000];
+  const rec = readWebmRecording(webm);
+  return [
+    // Android's MediaMuxer: the 90 row with no translation.
+    { file: "map-turn-90.mp4", type: "video/mp4", bytes: mp4File({ tracks: [{ ...track, matrix: tkhdMatrix(ROWS.turn90) }] }), expect: { geometry: { turn: 90 }, samePlain: true } },
+    // Apple's: the 180 row moved back into view by (W, H).
+    { file: "map-turn-180.mp4", type: "video/mp4", bytes: mp4File({ tracks: [{ ...track, matrix: tkhdMatrix(ROWS.turn180, w, h) }] }), expect: { geometry: { turn: 180 }, samePlain: true } },
+    // FFmpeg's -display_rotation 90 -display_hflip: counter-clockwise, then a, c and tx negated, with no translation.
+    { file: "map-turn-270-mirror.mp4", type: "video/mp4", bytes: mp4File({ tracks: [{ ...track, matrix: tkhdMatrix(ROWS.turn270Mirror) }] }), expect: { geometry: { turn: 270, mirror: true }, samePlain: true } },
+    // FFmpeg's MP4 mode: pasp 4:3 beside tkhd's width times the aspect, rounded in 16.16.
+    { file: "map-wide.mp4", type: "video/mp4", bytes: mp4File({ tracks: [{ ...entryWith(track, paspBox(4, 3)), tkhdRaw: { width: Math.round((w * 4) / 3), height: h } }] }), expect: { geometry: { displayWidthPx: 853 }, samePlain: true } },
+    {
+      file: "map-wide.webm",
+      type: "video/webm",
+      bytes: webmFile({ width: rec.width, height: rec.height, codec: rec.codecId, ...(rec.codecPrivate ? { codecPrivate: rec.codecPrivate } : {}), frames: rec.frames, durationMs: SECONDS * 1000, videoKids: [uint(EBML_ID.DisplayWidth, 853), uint(EBML_ID.DisplayHeight, 360)] }),
+      expect: { geometry: { displayWidthPx: 853 } },
+    },
+    // A real crop of 8 px off the width, which stays refused.
+    { file: "map-clap.mp4", type: "video/mp4", bytes: mp4File({ tracks: [entryWith(track, clapBox(632, 1, 360, 1))] }), expect: { refused: "video_geometry" } },
+    { file: "map-iphone.mov", type: "video/mp4", bytes: iphoneMov(track), expect: { geometry: { turn: 90 } } },
+  ];
+}
+
+const loops = process.argv.includes("derived")
+  ? { webm: await readFile(`${OUT}map-loop.webm`), mp4: await readFile(`${OUT}map-loop.mp4`) }
+  : undefined;
+
 const browser = await chromium.launch({ channel: "chrome", headless: true });
 try {
   const page = await browser.newPage();
   await page.setContent("<!doctype html><title>fixtures</title>");
-  const made = [
-    { file: "map-loop.webm", type: "video/webm", bytes: plainWebm(await record(page, "video/webm;codecs=vp9")), secrets: webmWithSecretsFrom },
-    { file: "map-loop.mp4", type: "video/mp4", bytes: plainMp4(await record(page, "video/mp4;codecs=avc1.42E01E")), secrets: mp4WithSecretsFrom },
-  ];
-  for (const m of made) {
-    const { facts } = await checkVideoBytes(m.bytes);
-    const played = await plays(page, m.bytes, m.type);
-    const cleared = (await checkVideoBytes(m.secrets(m.bytes))).zeroed;
-    const clearedPlayed = await plays(page, cleared, m.type);
-    console.log(m.file, m.bytes.length, "bytes", JSON.stringify(facts), "plays", JSON.stringify(played), "cleared copy plays", JSON.stringify(clearedPlayed));
-    for (const p of [played, clearedPlayed]) {
-      if (Math.abs(p.duration - SECONDS) > 0.05 || !p.looped || p.width !== 640) throw new Error(`${m.file} did not play and loop as a 2 s, 640 px video: ${JSON.stringify(p)}`);
+  const webm = loops?.webm ?? plainWebm(await record(page, "video/webm;codecs=vp9"));
+  const mp4 = loops?.mp4 ?? plainMp4(await record(page, "video/mp4;codecs=avc1.42E01E"));
+  if (!loops) {
+    const made = [
+      { file: "map-loop.webm", type: "video/webm", bytes: webm, secrets: webmWithSecretsFrom },
+      { file: "map-loop.mp4", type: "video/mp4", bytes: mp4, secrets: mp4WithSecretsFrom },
+    ];
+    for (const m of made) {
+      const { facts } = await checkVideoBytes(m.bytes);
+      const played = await plays(page, m.bytes, m.type);
+      const cleared = (await checkVideoBytes(m.secrets(m.bytes))).zeroed;
+      const clearedPlayed = await plays(page, cleared, m.type);
+      console.log(m.file, m.bytes.length, "bytes", JSON.stringify(facts), "plays", JSON.stringify(played), "cleared copy plays", JSON.stringify(clearedPlayed));
+      for (const p of [played, clearedPlayed]) playedWell(m.file, p);
+      await writeFile(`${OUT}${m.file}`, m.bytes);
     }
-    await writeFile(`${OUT}${m.file}`, m.bytes);
+  }
+  const plainStored = (await checkVideoBytes(mp4)).zeroed;
+  for (const d of derived(mp4, webm)) {
+    const checked = await checkVideoBytes(d.bytes).catch((err: unknown) => {
+      if (err instanceof AssetError) return err;
+      throw err;
+    });
+    if ("refused" in d.expect) {
+      if (!(checked instanceof AssetError) || checked.code !== d.expect.refused) throw new Error(`${d.file} was not refused as ${d.expect.refused}`);
+      console.log(d.file, d.bytes.length, "bytes, refused as", checked.code);
+    } else {
+      if (checked instanceof AssetError) throw new Error(`${d.file} was refused as ${checked.code}`);
+      const { turn, mirror, displayWidthPx } = checked.facts;
+      const geometry = { ...(turn ? { turn } : {}), ...(mirror ? { mirror } : {}), ...(displayWidthPx ? { displayWidthPx } : {}) };
+      if (JSON.stringify(geometry) !== JSON.stringify(d.expect.geometry)) throw new Error(`${d.file} checked as ${JSON.stringify(geometry)}, not ${JSON.stringify(d.expect.geometry)}`);
+      if (d.expect.samePlain && !checked.zeroed.equals(plainStored)) throw new Error(`${d.file} stored is not the plain loop stored`);
+      const left = Object.values(SECRETS).filter((s) => checked.zeroed.includes(s));
+      if (left.length > 0) throw new Error(`${d.file} stored still holds ${left.join(", ")}`);
+      const played = await plays(page, checked.zeroed, d.type);
+      playedWell(d.file, played);
+      console.log(d.file, d.bytes.length, "bytes", JSON.stringify(checked.facts), "stored plays", JSON.stringify(played));
+    }
+    await writeFile(`${OUT}${d.file}`, d.bytes);
   }
 } finally {
   await browser.close();

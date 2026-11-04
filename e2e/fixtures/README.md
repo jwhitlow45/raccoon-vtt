@@ -10,7 +10,25 @@ For `e2e/animmap.e2e.ts` (docs/design/design-v1-animated-maps.md 12): a VP9 WebM
 node scripts/video-fixtures.ts
 ```
 
-It needs Google Chrome, which Playwright launches as the `chrome` channel. A new run records new frames, so the files' bytes change while what they show stays the same.
+It needs Google Chrome, which Playwright launches as the `chrome` channel. A new run records new frames, so the files' bytes change while what they show stays the same, and it makes the videos below again from the new loops.
+
+## Turned, stretched and cropped videos, and an iPhone MOV
+
+For the `amr` steps in `e2e/animmap.e2e.ts` (docs/design/design-v1-video-turns.md 14): the loops' own frames under other headers, written by the same script and the same test writer from the loops here, with no new recording and no downloaded video. Each shows the loop's pattern, whose bars and dark strip tell all eight orientations apart.
+
+- `map-turn-90.mp4`: the 90 row with no translation, as Android's MediaMuxer writes a portrait video. Drawn 360 × 640.
+- `map-turn-180.mp4`: the 180 row moved back into view by the picture's width and height, as Apple writes it.
+- `map-turn-270-mirror.mp4`: 270 and then a mirror, as FFmpeg's `-display_rotation 90 -display_hflip` writes it, with no translation. Drawn 360 × 640.
+- `map-wide.mp4`: a `pasp` of 4:3 with `tkhd`'s width at 640 × 4/3 rounded in 16.16, as FFmpeg's MP4 mode writes it. Drawn 853 × 360.
+- `map-wide.webm`: DisplayWidth 853 and DisplayHeight 360 over the loop's 640 × 360 pixels. Drawn 853 × 360.
+- `map-clap.mp4`: a `clap` that crops 8 px off the width. The server refuses it.
+- `map-iphone.mov`: an iPhone's Most Compatible MOV as public reports describe one, with made-up strings: the `qt  ` brand, `alis` data references, an `nclc` colour, silent AAC in a version 1 sound entry inside `wave`, a `tapt` at the turned size, two timed metadata tracks holding a face and a place, QuickTime metadata naming a place and a phone, and the 90 row with Apple's translation. Drawn 360 × 640, and stored as an MP4 with none of the strings. Its AAC frames were worked out bit by bit, so no encoder made them.
+
+```sh
+node scripts/video-fixtures.ts derived
+```
+
+`derived` makes only these, from the loops already here, so the same loops give the same bytes. Either way the script checks that each file meets the server's header check as the design says, that each stored copy plays and loops in Chrome, and that a turned or stretched MP4 stored is byte for byte the stored loop.
 
 ## PDF fixtures
 
