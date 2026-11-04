@@ -602,7 +602,7 @@ Show the players' view of the map on a TV at the table, with nothing else on scr
 
 ## Sound ([design](docs/design/design-v1-music.md))
 
-Music, background sounds and effects the DM plays for the room, starting within a second or two of each other on every device that plays them. Once a track or background sound starts, each device plays it straight through, so a slow connection never makes it stutter, and a pause and a resume start every device again from the DM's place. Sound files need the server's switch (Running the server). The five built-in effects work without it.
+Music, background sounds and effects the DM plays for the room, starting within a second or two of each other on every device that plays them, or as soon as a slow connection has loaded them. Once a track or background sound starts, each device plays it straight through, so a slow connection never makes it stutter, and a pause and a resume start every device again from the DM's place. Sound files need the server's switch (Running the server). The five built-in effects work without it.
 
 - **The Sound panel** sits after DM in play. The DM and co-DMs always have it. A player has it while the room plays something they hear, and one left open stays until they close it.
 - **Now playing**: the music's name, "Tavern night · 3 of 12" (or "One track"), and "1:24 / 3:10" over a thin bar, with Pause (Play while paused), Skip ("Skip past" the incoming track during a crossfade), Stop the music and Repeat, which steps Repeat all, Repeat one and Repeat off. Under it the volumes for everyone: Music, each background sound with its Stop, and Effects. Stop all sound stops effects too.
