@@ -17,9 +17,9 @@ const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { RoomProvider } = await import("../../state/view.ts");
 const themeModule = await import("../../lib/theme.ts");
-const { WeatherSettings, weatherSummary } = await import("./WeatherSettings.tsx");
+const { SceneWeather, WeatherSettings, weatherSummary } = await import("./WeatherSettings.tsx");
 
-function render(weather: SceneWeather | undefined): string {
+function render(weather: SceneWeather | undefined, part: typeof WeatherSettings | typeof SceneWeather = WeatherSettings): string {
   const view: RoomState = room({ members: { dm1: member("dm1", "dm") } });
   view.scenes.s1 = scene("s1", weather ? { weather } : {});
   const store = createStore(() => ({ view, you: { memberId: "dm1", role: "dm" }, roomId: "r1", connection: "open", pending: [] as { op: ClientOp }[], local: { selectedIds: [], multi: false } }));
@@ -29,7 +29,7 @@ function render(weather: SceneWeather | undefined): string {
       actions: { dispatch: () => 1, newId: () => "x" } as never,
       ui: {} as never,
       assets: { url: () => "" } as never,
-      children: createElement(WeatherSettings, { scene: view.scenes.s1 as Scene }),
+      children: createElement(part, { scene: view.scenes.s1 as Scene }),
     }),
   );
 }
@@ -120,5 +120,29 @@ describe("the Weather fold", () => {
     assert.doesNotMatch(html, /role="switch"/);
     assert.match(text(html), /A look only\. The rules stay as they are\./);
     assert.match(text(html), /Players see it at once\. Each device can show it still or turn it off in This device\./);
+  });
+});
+
+describe("SceneWeather, the controls with no fold (docs/design/design-v1-panel-groups.md 4.1)", () => {
+  test("it draws the controls with no disclosure of its own, on a clear scene and a scene with weather alike", () => {
+    for (const weather of [undefined, { kind: "rain", heavy: true, wind: "strong" } as const]) {
+      const html = render(weather, SceneWeather);
+      assert.doesNotMatch(html, /aria-expanded/);
+      assert.doesNotMatch(html, /<section/);
+      assert.match(html, /<select[^>]*aria-label="Weather"|aria-label="Weather"[^>]*>/, "the kind's picker");
+      assert.match(text(html), /Players see it at once\. Each device can show it still or turn it off in This device\./);
+    }
+  });
+
+  test("the fold in What players see holds exactly SceneWeather's controls", () => {
+    const weather = { kind: "snow", wind: "moderate", toward: 270 } as const;
+    // Ids differ from one render to the next, so they are left out of the comparison.
+    const noIds = (html: string) => html.replace(/ (id|name|aria-labelledby|aria-describedby)="[^"]*"/g, "");
+    const folded = noIds(render(weather));
+    const alone = noIds(render(weather, SceneWeather));
+    const at = folded.indexOf(alone);
+    assert.ok(at > 0, "the open fold holds SceneWeather as drawn alone");
+    assert.match(folded.slice(0, at), /^<section[^>]*><div data-section-label=""[^>]*><h3[^>]*><button[^>]*>.*?<\/button><\/h3><\/div>$/, "under the fold's label and nothing else");
+    assert.equal(folded.slice(at + alone.length), "</section>", "and nothing after it");
   });
 });
