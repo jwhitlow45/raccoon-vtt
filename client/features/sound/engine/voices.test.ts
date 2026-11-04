@@ -193,11 +193,24 @@ function param() {
   };
 }
 
-/** A pooled element that counts its plays and seeks, and refuses a play with the error `refuse` names for its source, if any. */
+/**
+ * A pooled element that counts its plays, seeks and loads, and refuses a play with the error `refuse` names for its source, if
+ * any. Setting its source starts a load and clears its error, as a browser's does even for the same source.
+ */
 function element(refuse: (src: string) => string | null) {
   let at = 0;
+  let src = "";
   return {
-    src: "",
+    get src() {
+      return src;
+    },
+    set src(value: string) {
+      src = value;
+      this.loads++;
+      this.error = null;
+    },
+    loads: 0,
+    error: null as { code: number } | null,
     muted: false,
     paused: true,
     playbackRate: 1,
@@ -503,6 +516,70 @@ describe("the voices on the pool", () => {
     el.readyState = 4;
     el.onplaying?.();
     assert.deepEqual(states, ["playing", "loading", "playing"]);
+    voices.dispose();
+  });
+
+  test("an element's error fails its voice only while it holds the voice's own file: a swapped-in silence's is put back at the check", () => {
+    const t = { now: T };
+    const states: MusicState[] = [];
+    const { voices, pool } = rig(t, { gestures: new EventTarget(), onMusic: (s) => states.push(s) });
+    voices.update(planVoices(playingTavern, SOUNDS, t.now), () => SHORT_FADE_MS);
+    const el = pool.find((e) => e.src === "/api/assets/a-tavern")!;
+    // Silence that cannot load while the server is away, on the element the voice holds.
+    el.src = "/sounds/silence.mp3";
+    el.error = { code: 4 };
+    el.onerror?.();
+    assert.ok(!states.includes("failed"), "not the voice's own file");
+    t.now += 1_000;
+    voices.check(false);
+    assert.equal(el.src, "/api/assets/a-tavern", "the check put its file back");
+    el.error = { code: 4 };
+    el.onerror?.();
+    assert.equal(states.at(-1), "failed", "its own file's error fails it");
+    voices.dispose();
+  });
+
+  test("a voice on an element whose last load of the same file failed, as one a restart cut off, loads it again", async () => {
+    const t = { now: T };
+    const states: MusicState[] = [];
+    const { voices, pool } = rig(t, { gestures: new EventTarget(), onMusic: (s) => states.push(s) });
+    voices.update(planVoices(playingTavern, SOUNDS, t.now), () => SHORT_FADE_MS);
+    const el = pool.find((e) => e.src === "/api/assets/a-tavern")!;
+    el.error = { code: 2 };
+    el.onerror?.();
+    assert.equal(states.at(-1), "failed");
+    // The voice goes, its element still holding the file that failed, and the same file plays again on it.
+    voices.update([], () => 0);
+    await wait(100);
+    const loads = el.loads;
+    voices.update(planVoices(playingTavern, SOUNDS, t.now), () => SHORT_FADE_MS);
+    assert.equal(pool.find((e) => e.src === "/api/assets/a-tavern" && !e.paused), el, "the same element");
+    assert.equal(el.loads, loads + 1, "it loads the file again, so its play can succeed");
+    assert.equal(el.error, null);
+    assert.equal(states.at(-1), "playing");
+    voices.dispose();
+  });
+
+  test("Try again, or a reconnect, loads a failed file again, and one that cannot load fails again", () => {
+    const t = { now: T };
+    const states: MusicState[] = [];
+    const { voices, pool } = rig(t, { gestures: new EventTarget(), onMusic: (s) => states.push(s) });
+    voices.update(planVoices(playingTavern, SOUNDS, t.now), () => SHORT_FADE_MS);
+    const el = pool.find((e) => e.src === "/api/assets/a-tavern")!;
+    el.error = { code: 4 };
+    el.onerror?.();
+    const loads = el.loads;
+    voices.retry();
+    assert.equal(el.loads, loads + 1);
+    assert.equal(states.at(-1), "playing");
+    // A missing file answers 404 again.
+    el.error = { code: 4 };
+    el.onerror?.();
+    assert.equal(states.at(-1), "failed");
+    t.now += 1_000;
+    voices.check(false);
+    assert.equal(el.loads, loads + 1, "the check leaves a failed voice alone");
+    assert.equal(states.at(-1), "failed");
     voices.dispose();
   });
 });

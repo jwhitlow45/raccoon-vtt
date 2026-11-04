@@ -13,7 +13,8 @@ import { addSound, errors, inStep, IPHONE_AUDIO, musicVoice, readTap, roomSoundS
  * and 12), steps sn-1 to sn-7: sync and a late join with the
  * ask, a crossfade and a pause, what a player's socket carries, a blackout,
  * effects and Stop all, a touch phone's ask and its tap after a reload, and
- * one page per browser with the table display. The sounds are silence
+ * one page per browser with the table display. lp30fix-1 restarts the
+ * server while an iPhone's files still load. The sounds are silence
  * built frame by frame (soundRoom.ts), uploaded through the asset route.
  *
  * Each page's engine is read through its test hook (testHook.ts): the root
@@ -682,6 +683,49 @@ describe("synced music and sound", { concurrency: false }, () => {
       assert.deepEqual(found.dropouts, [], "no dropout");
     } finally {
       await gusContext.close();
+    }
+  });
+
+  test("lp30fix-1. the server restarts while an iPhone's tap has its music and background sound still loading, and once back both play in step with no tap", async () => {
+    await playTrack(run.ids.tavern, 0, "all");
+    await ops.send({ t: "loop.start", id: "loop-restart", soundId: run.ids.rain, volume: 70 });
+    await soundSays(dm, /^playing music loops:1/, 6_000);
+    const fayContext = await browser.newContext({ viewport: PHONE, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    try {
+      for (const script of [SOUND_TEST_FLAG, IPHONE_AUDIO, roomSoundScript("on")]) await fayContext.addInitScript(script);
+      await join(fayContext, "Fay", "#ec4899");
+      const fay = await fayContext.newPage();
+      await openRoom(fay);
+      await soundSays(fay, /^tap/, 8_000);
+      // The files Fay's tap starts loading are held until the server has stopped, then cut off as a restart cuts them.
+      let serverDown = () => {};
+      const down = new Promise<void>((resolve) => (serverDown = resolve));
+      const held = [run.assets[run.ids.tavern]!, run.assets[run.ids.rain]!];
+      const holdFiles = (url: URL) => held.some((id) => url.pathname.includes(id));
+      await fayContext.route(holdFiles, async (route) => {
+        await down;
+        await route.abort("connectionrefused");
+      });
+      await fay.getByRole("status", { name: "Connected" }).first().tap();
+      await soundSays(fay, /^playing music:loading/, 5_000);
+      ops.close();
+      assert.equal(await server.stop(), 0, "the server shut down cleanly");
+      serverDown();
+      await soundSays(fay, /music:failed/, 5_000);
+      await fayContext.unroute(holdFiles);
+      server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
+      for (const page of [dm, pat, fay]) await page.getByRole("status", { name: "Connected" }).first().waitFor({ timeout: 30_000 });
+      const cookie = (await dmContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
+      ops = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
+      await soundSays(fay, /^playing music loops:1$/, 8_000);
+      await inStep(fay, 100, 8_000);
+      const { gap } = await placesTogether(dm, fay);
+      assert.ok(gap <= 100, `Fay's phone and the DM's page within 0.1 s after the restart (${gap.toFixed(0)} ms)`);
+      await shots.take(fay, "lp30fix-1-playing-after-restart");
+    } finally {
+      await fayContext.close();
+      // Only a server that came back takes it.
+      await ops.send({ t: "loop.stop", id: "loop-restart" }).catch(() => {});
     }
   });
 });

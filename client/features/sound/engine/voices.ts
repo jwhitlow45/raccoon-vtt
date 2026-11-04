@@ -334,7 +334,7 @@ export class Voices {
     this.#reportMusic();
   }
 
-  /** Try again for music that did not load. */
+  /** Try again for music that did not load, from the panel or once the room reconnects. */
   retry(): void {
     for (const v of this.#live.values()) {
       if (!v.failed || v.leaving) continue;
@@ -396,12 +396,15 @@ export class Voices {
     const v: Live = { plan, index, el, fade, env, mix, drift: new Drift(), playing: false, startTimer: null, leaving: false, failed: false, dueSince: null, refused: false, plays: 0, asking: false, places: 0, url, smoothUntil: 0 };
     this.#live.set(plan.key, v);
     el.onerror = () => {
+      // Only a failure of the voice's own file fails it. One of a source swapped in, as a bless's silence, is the check's to put back.
+      if (!el.src.endsWith(v.url)) return;
       v.failed = true;
       this.#reportMusic();
     };
     el.onplaying = () => this.#reportMusic();
     el.onwaiting = () => this.#reportMusic();
-    if (!el.src.endsWith(url)) el.src = url;
+    // An element whose last load of this file failed, as one cut off by a server restart, loads it again: only setting the source does.
+    if (!el.src.endsWith(url) || el.error) el.src = url;
     el.loop = false;
     el.playbackRate = 1;
     this.#envelope(v);

@@ -426,6 +426,10 @@ The fast lane on sounds heard in music playback (lane sndglitch, D-261102-870 an
 - **The pitch is not kept** (5.3). With `preservesPitch` on, Chrome time-stretches every nudge, and each change of rate stepped the waveform, a click often with a few milliseconds of dropout, while the stretch warbled between: 28 such glitches at 38 changes of rate in two minutes of nudges, none with the pitch let go. A nudge is now 26 cents of pitch at 1.5% and 51 at 3%, for a second or two.
 - **A wake keeps the clock's last reading** (5.1). A wake's new epoch fell back to the store's offset, one network delay off, just as the wake's forced check read the voices, so with a socket 40 ms slower one way every show of the window sought each voice (an audible dip) and nudged it back after: 12 seeks at 12 shows in two minutes, 1 with the last reading standing in until the epoch's first answer. The store's offset is still used when it is more than a second from that reading, as after a sleep that stopped the page's clock.
 
+Live play review 30 (lane lp30fix):
+
+- **A restart** (5.3, 5.6, LP30-SND-1). A file an element is loading when the server goes away fails its voice, as a file that cannot load does, and the Sound panel says the music didn't load. Once the room reconnects every failed voice loads its file again, as Try again does, so music and background sounds come back in place without a tap. A file that still cannot load fails again. A voice placed on an element whose last load of the same file failed sets the source again, since only that loads it, and only an error of the voice's own file fails the voice: one of a source swapped in is the check's to put back.
+
 ## Design review
 
 Five rounds of design review, by Claude and Codex reviewers, shaped this note. What they changed, in brief:

@@ -108,6 +108,9 @@ export class SoundEngine {
     if (reconnected) this.#clock.restart();
     if (input.playing !== undefined && this.#effects) this.#effects.see(effectList(input.playing), effectSounds(input.sounds));
     this.#refresh();
+    // A file cut off while the server was away, as by a restart, loads again once it is back, as Try again would. Every failed
+    // voice, since an element's error can come just before the socket's close does. A file that cannot load fails again.
+    if (reconnected) this.#voices?.retry();
   }
 
   dispose(): void {
