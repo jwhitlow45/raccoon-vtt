@@ -8,9 +8,10 @@ import { CROCKFORD, newSeed, versionChar, type Seed } from "./seed.ts";
 import { clampSettings, DEFAULT_SETTINGS, defaultRooms, HEIGHT_PRESETS, HEIGHTS_MAX, HEIGHTS_STEP, raisedCount, roomCap, SIZE_SIDES, TRAP_PRESETS, TRAPS_MAX, trapCount } from "./settings.ts";
 
 /*
- * Heights and Traps are sliders (D-261102-832): what a DM sets is what the
- * dungeon shows, near enough, at every Size. Never more than the slider
- * asks, and over a fixed set of dungeons per Size, close to it.
+ * The options look as they say at every Size (D-261102-832, 836). Heights
+ * and Traps are sliders: never more than a slider asks, and over a fixed
+ * set of dungeons per Size, close to it. A Crypt shows its pillars at every
+ * Density.
  */
 
 const SIZES = ["small", "medium", "large"] as const;
@@ -25,7 +26,7 @@ function seeds(label: number, n: number): Seed[] {
 
 const seedArb: fc.Arbitrary<Seed> = fc.array(fc.constantFrom(...CROCKFORD), { minLength: 15, maxLength: 15 }).map((c) => versionChar() + c.join(""));
 
-describe("Heights and Traps follow their sliders", () => {
+describe("the options look as they say", () => {
   test("a dungeon never raises more rooms than Heights asks, nor places more traps than Traps asks, and the entrance stays flat", () => {
     holds(
       fc.property(
@@ -88,6 +89,37 @@ describe("Heights and Traps follow their sliders", () => {
       const doors = (i: number) => plans[i]!.board.doorways.filter((d) => !d.removed).length;
       const look = (i: number) => [plans[i]!.plan.rooms.map((r) => r.floor), plans[i]!.plan.doors.filter((d) => d.state === "locked").length];
       for (let i = 1; i < plans.length; i++) if (doors(i) === doors(0) && plans[i]!.plan.rooms.length === plans[0]!.plan.rooms.length) assert.deepEqual(look(i), look(0), `mark ${i}`);
+    }
+  });
+
+  test("Theme: a Crypt has pillars in a good share of its rooms at every Density and Size, and locks more doors than a Dungeon, which has wood floors and no pillars", () => {
+    for (const [i, size] of SIZES.entries()) {
+      for (const density of ["sparse", "normal", "dense"] as const) {
+        const side = SIZE_SIDES[size];
+        const base = { ...DEFAULT_SETTINGS, w: side, h: side, rooms: defaultRooms(size, side, side), density };
+        const look = { crypt: { rooms: 0, pillared: 0, doors: 0, locked: 0, wood: 0 }, dungeon: { rooms: 0, pillared: 0, doors: 0, locked: 0, wood: 0 } };
+        for (const seed of seeds(80 + i, 20)) {
+          for (const theme of ["crypt", "dungeon"] as const) {
+            const p = planDungeon({ ...base, theme }, seed).plan;
+            const pillars = new Set(p.paint.pillar ?? []);
+            const t = look[theme];
+            t.rooms += p.rooms.length;
+            t.pillared += p.rooms.filter((r) => [...pillars].some((c) => {
+              const [x, y] = c.split(",").map(Number) as [number, number];
+              return x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h;
+            })).length;
+            t.doors += p.doors.length;
+            t.locked += p.doors.filter((d) => d.state === "locked").length;
+            t.wood += p.rooms.filter((r) => r.floor === "wood").length;
+          }
+        }
+        // Sparse rooms are 3 to 6 squares a side and only those 5 by 5 or more take pillars, a quarter of them, less the doorways' lines.
+        assert.ok(look.crypt.pillared >= look.crypt.rooms * 0.12, `${size} ${density}: pillars in ${look.crypt.pillared} of ${look.crypt.rooms} Crypt rooms`);
+        assert.ok(look.crypt.locked / look.crypt.doors > look.dungeon.locked / look.dungeon.doors, `${size} ${density}: locks`);
+        assert.equal(look.dungeon.pillared, 0);
+        assert.equal(look.crypt.wood, 0);
+        assert.ok(look.dungeon.wood > 0, `${size} ${density}: wood`);
+      }
     }
   });
 

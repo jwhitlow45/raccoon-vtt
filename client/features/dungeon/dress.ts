@@ -16,8 +16,13 @@ const LOCKED_IN_100: Readonly<Record<Theme, number>> = { dungeon: 15, crypt: 25 
 const WOOD_CHANCE = [1, 5] as const;
 const RUBBLE_CHANCE = [1, 3] as const;
 const PIT_CHANCE = [1, 6] as const;
-/** Crypt rooms this size or larger get pillars. */
-const PILLAR_MIN_ROOM = 6;
+/**
+ * Crypt rooms this size or larger get pillars: a 5 by 5 room's ring holds
+ * one at each corner. From 6, Sparse rooms (3 to 6 squares a side) almost
+ * never had one, so a Sparse Crypt read as a Dungeon with more locks
+ * (D-261102-836).
+ */
+const PILLAR_MIN_ROOM = 5;
 
 /**
  * The squares from each of a room's doorways to its middle: straight in
@@ -114,7 +119,7 @@ export function placePits(rng: Stream, board: Board, rooms: readonly number[], f
 }
 
 /**
- * Pillars in a Crypt's rooms 6 by 6 or larger: every other square of the
+ * Pillars in a Crypt's rooms 5 by 5 or larger: every other square of the
  * ring a square in from the walls, where `free` allows. A pillar may stand
  * on a dais but never on the square at the top of its stair.
  */
