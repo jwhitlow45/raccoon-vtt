@@ -698,13 +698,21 @@ export type MapVideo = {
 /** The container a video asset is stored in, kept on its row as `media`. */
 export type VideoContainer = "webm" | "mp4";
 
+/** A clockwise turn a video's file asked for (docs/design/design-v1-video-turns.md 6.1). */
+export type VideoTurn = 90 | 180 | 270;
+
 /**
  * What the server's header check learns of a video (section 10). The asset
  * row keeps `container` as its `media` column and the rest, but the size, as
- * its `video` column. The size is its coded size, which the check requires to
- * equal its display size, so the phone cap reads what a decoder needs.
+ * its `video` column.
  */
 export type VideoFacts = {
+  /**
+   * The coded size, which the stored file now plays at in every browser, so
+   * the phone cap and Media Capabilities read what a decoder handles
+   * (D-261102-852). The size the picture is drawn at is shared/videoGeometry.ts
+   * `drawnSize`.
+   */
   widthPx: number;
   heightPx: number;
   container: VideoContainer;
@@ -718,6 +726,15 @@ export type VideoFacts = {
   /** The sound track's channels and sample rate, for Media Capabilities' audio configuration. Present exactly when `audio` is. */
   audioChannels?: number;
   audioHz?: number;
+  /**
+   * How the file showed its picture (D-261102-850): turned clockwise, then
+   * mirrored left to right. The check rewrites the file plain, so the stored
+   * file no longer says so and the app draws the turn itself.
+   */
+  turn?: VideoTurn;
+  mirror?: true;
+  /** The picture's width once its pixel shape applies, before the turn, when its pixels are not square. */
+  displayWidthPx?: number;
 };
 
 /**

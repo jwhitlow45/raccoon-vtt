@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { historyCommandSchema, historyMessageSchema, opAcknowledgmentSchema, restoreHistoryFieldsSchema } from "./undoContract.ts";
 import { saveOutcomePageSchema, saveOutcomeTransitionSchema, savePageAskFieldsSchema, savePageCloseFieldsSchema, saveRechargeSpendSchema } from "./saveOutcomeContract.ts";
-import { LIMITS, MOST_SIGHT_HOLDERS, SOUND_LIMITS, VIDEO_LIMITS, serializedBytes } from "./limits.ts";
+import { LIMITS, MOST_SIGHT_HOLDERS, SOUND_LIMITS, VIDEO_LIMITS, serializedBytes, videoGeometryProblem } from "./limits.ts";
 import { FADES, LEVEL_MAX, LEVEL_MIN, REPEATS, SOUND_USES } from "./sound.ts";
 import { ATTACH_KINDS } from "./rules/attach.ts";
 import { critBound } from "./dice/crit.ts";
@@ -372,13 +372,19 @@ const mapVideo = z.strictObject({
   kbps: z.number().positive().max(Math.ceil((VIDEO_LIMITS.fileBytes * 8) / VIDEO_LIMITS.minDurationMs)),
   audioChannels: z.number().int().min(1).max(255).optional(),
   audioHz: z.number().int().min(1).max(1_000_000).optional(),
+  // How to draw the plain stored file (docs/design/design-v1-video-turns.md 6.1). A stretched width is a drawn side before
+  // the turn, so the side caps bound it. How it must relate to `widthPx` is videoGeometryProblem's.
+  turn: z.union([z.literal(90), z.literal(180), z.literal(270)]).optional(),
+  mirror: z.literal(true).optional(),
+  displayWidthPx: z.number().int().min(VIDEO_LIMITS.minSidePx).max(VIDEO_LIMITS.maxSidePx).optional(),
 });
 const videoFacts = mapVideo.omit({ assetId: true });
 const VIDEO_FACT_FIELDS = Object.keys(videoFacts.shape) as (keyof VideoFacts)[];
 
 /**
  * A video row's facts as the server stores and reads them, or undefined
- * when any is missing or out of the protocol's bounds. Only the known
+ * when any is missing, out of the protocol's bounds, or a geometry that
+ * cannot stand with the coded size (`videoGeometryProblem`). Only the known
  * fields are read, and a null reads as absent, so a row's JSON or a caller's
  * object with more in it still checks, and what comes back is exactly the
  * fields a map's video holds.
@@ -391,7 +397,9 @@ export function checkedVideoFacts(value: unknown): VideoFacts | undefined {
     if (inner !== null && inner !== undefined) fields[field] = inner;
   }
   const parsed = videoFacts.safeParse(fields);
-  return parsed.success ? (parsed.data as VideoFacts) : undefined;
+  if (!parsed.success) return undefined;
+  const facts = parsed.data as VideoFacts;
+  return videoGeometryProblem(facts) === null ? facts : undefined;
 }
 
 const sceneMap = z.strictObject({

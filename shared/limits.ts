@@ -3,6 +3,7 @@ import { isWritable } from "./writable.ts";
 import { CHUNK_CELLS, HEIGHTS_CHARS, type BuildChunk, type CompanionBlock, type CustomMonster, type JournalPage, type RoomState, type Token } from "./model.ts";
 import { ownEntry } from "./records.ts";
 import type { SoundUse } from "./sound.ts";
+import { drawnSize, type VideoGeometry, type VideoShape } from "./videoGeometry.ts";
 
 /**
  * Room limits (design section 10.5). Open room creation means every room is
@@ -547,7 +548,7 @@ export const VIDEO_LIMITS = {
   /** Under a second stutters. Past 10 minutes is a film. */
   minDurationMs: 1_000,
   maxDurationMs: 10 * 60_000,
-  /** Each side, in coded pixels, and the area: square and large maps fit by area. */
+  /** Each side and the area, of both the coded and the drawn size (`videoSizeFits`): square and large maps fit by area. */
   minSidePx: 256,
   maxSidePx: 4096,
   maxPixels: 3840 * 2160,
@@ -588,14 +589,49 @@ export const VIDEO_LIMITS = {
 /**
  * Whether a still fits a video's shape (D-261102-445): the still's height,
  * scaled to the video's width, within `shapeTolerancePx` of the video's
- * height. The permission check and the DM's still pick both use it.
+ * height. The video's size is the one it is drawn at, turned and stretched
+ * (docs/design/design-v1-video-turns.md 6.2), so a portrait phone video
+ * takes a portrait still. The permission check, the DM's still pick and an
+ * import's refill all use it.
  */
-export function stillFitsVideo(still: { widthPx: number; heightPx: number }, video: { widthPx: number; heightPx: number }): boolean {
-  if (!(still.widthPx > 0 && still.heightPx > 0 && video.widthPx > 0 && video.heightPx > 0)) return false;
-  return Math.abs((still.heightPx * video.widthPx) / still.widthPx - video.heightPx) <= VIDEO_LIMITS.shapeTolerancePx;
+export function stillFitsVideo(still: { widthPx: number; heightPx: number }, video: VideoShape): boolean {
+  const shown = drawnSize(video);
+  if (!(still.widthPx > 0 && still.heightPx > 0 && shown.widthPx > 0 && shown.heightPx > 0)) return false;
+  return Math.abs((still.heightPx * shown.widthPx) / still.widthPx - shown.heightPx) <= VIDEO_LIMITS.shapeTolerancePx;
 }
 
-/** Whether Phone size map detail may play a video of this size and peak rate (5.3 rule 3), upright or sideways. */
+/** Whether a size is inside the header check's caps (6.3): each side and the area. Both the coded and the drawn size must be. */
+export function videoSizeFits(size: { widthPx: number; heightPx: number }): boolean {
+  const L = VIDEO_LIMITS;
+  return Math.min(size.widthPx, size.heightPx) >= L.minSidePx && Math.max(size.widthPx, size.heightPx) <= L.maxSidePx && size.widthPx * size.heightPx <= L.maxPixels;
+}
+
+/**
+ * Why a video's geometry cannot stand with its coded size, or null
+ * (docs/design/design-v1-video-turns.md 6.1). A stretched width is a whole
+ * number from half to twice the coded width and never equal to it, and the
+ * drawn size is inside the caps. A zod refine would break `mapVideo.omit`,
+ * so the row's facts, the stored state's maps and phases, and an import's
+ * manifest geometry each call this instead.
+ */
+export function videoGeometryProblem(facts: VideoShape & VideoGeometry): string | null {
+  const { widthPx: w, turn, mirror, displayWidthPx: dw } = facts;
+  if (turn !== undefined && turn !== 90 && turn !== 180 && turn !== 270) return "a turn is 90, 180 or 270";
+  if (mirror !== undefined && mirror !== true) return "a mirror is true or absent";
+  if (dw !== undefined) {
+    if (!Number.isInteger(dw)) return "a stretched width is a whole number";
+    if (dw === w) return "a stretched width differs from the coded width";
+    if (2 * dw < w || dw > 2 * w) return "a stretched width is half to twice the coded width";
+  }
+  return videoSizeFits(drawnSize(facts)) ? null : "the drawn size is inside the caps";
+}
+
+/**
+ * Whether Phone size map detail may play a video of this size and peak rate
+ * (5.3 rule 3), upright or sideways. It reads the coded size, never the
+ * drawn one, since it guards the decoder, which works on coded frames
+ * (docs/design/design-v1-video-turns.md 6.3).
+ */
 export function phoneSizeAllows(video: { widthPx: number; heightPx: number; fps: number }): boolean {
   const long = Math.max(video.widthPx, video.heightPx);
   const short = Math.min(video.widthPx, video.heightPx);

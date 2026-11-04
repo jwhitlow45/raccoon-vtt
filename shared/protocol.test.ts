@@ -798,4 +798,42 @@ describe("a map's video (docs/design/design-v1-animated-maps.md 9.2)", () => {
     assert.equal(checkedVideoFacts(null), undefined);
     assert.equal(checkedVideoFacts("webm"), undefined);
   });
+
+  test("how to draw it rides along, bounded: a turn, a mirror and a stretched width (docs/design/design-v1-video-turns.md 6.1)", () => {
+    for (const turn of [90, 180, 270]) assert.equal(setMap({ ...video, turn }), true, `turn ${turn}`);
+    assert.equal(setMap({ ...video, mirror: true }), true);
+    assert.equal(setMap({ ...video, widthPx: 1440, displayWidthPx: 1920 }), true);
+    assert.equal(setMap({ ...video, turn: 90, mirror: true, widthPx: 1440, displayWidthPx: 1920 }), true, "all three");
+    for (const [field, value] of [
+      ["turn", 0],
+      ["turn", 45],
+      ["turn", 360],
+      ["turn", "90"],
+      ["mirror", false],
+      ["mirror", 1],
+      ["displayWidthPx", 255],
+      ["displayWidthPx", 4097],
+      ["displayWidthPx", 853.5],
+      ["displayWidthPx", "853"],
+    ] as const) {
+      assert.equal(setMap({ ...video, [field]: value }), false, `${field} ${value}`);
+    }
+  });
+
+  test("checkedVideoFacts keeps the geometry and refuses one that cannot stand with the coded size", () => {
+    const { assetId: _id, ...facts } = video;
+    const turned = { ...facts, turn: 90, mirror: true } as const;
+    assert.deepEqual(checkedVideoFacts(turned), turned);
+    const wide = { ...facts, widthPx: 640, heightPx: 360, displayWidthPx: 853 };
+    assert.deepEqual(checkedVideoFacts(wide), wide);
+    assert.deepEqual(checkedVideoFacts({ ...facts, turn: null, mirror: null, displayWidthPx: null }), facts, "a null reads as plain");
+    assert.equal(checkedVideoFacts({ ...wide, displayWidthPx: 640 }), undefined, "a stretched width equal to the coded one");
+    assert.equal(checkedVideoFacts({ ...wide, displayWidthPx: 1281 }), undefined, "past twice the coded width");
+    assert.equal(checkedVideoFacts({ ...wide, widthPx: 1280, displayWidthPx: 639 }), undefined, "under half the coded width");
+    assert.deepEqual(checkedVideoFacts({ ...wide, widthPx: 1280, displayWidthPx: 640 }), { ...wide, widthPx: 1280, displayWidthPx: 640 }, "half itself");
+    assert.deepEqual(checkedVideoFacts({ ...wide, displayWidthPx: 1280 }), { ...wide, displayWidthPx: 1280 }, "twice itself");
+    assert.equal(checkedVideoFacts({ ...facts, widthPx: 3840, heightPx: 2160, displayWidthPx: 4000 }), undefined, "the drawn area past the cap");
+    assert.equal(checkedVideoFacts({ ...facts, mirror: false }), undefined, "a mirror is true or absent");
+    assert.equal(checkedVideoFacts({ ...facts, turn: 45 }), undefined);
+  });
 });

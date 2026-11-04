@@ -76,6 +76,24 @@ describe("a map's video (docs/design/design-v1-animated-maps.md 9.2)", () => {
     assert.equal(decide({ t: "scene.update", sceneId: "s1", patch: { phases } }, state), `invalid: ${VIDEO_SHAPE}`);
   });
 
+  test("the still is held to the shape the video is drawn at, turned and stretched (docs/design/design-v1-video-turns.md 6.2)", () => {
+    const state = held();
+    const set = (still: Partial<SceneMap>, v: MapVideo) => decide({ t: "scene.setMap", sceneId: "s2", map: { ...STILL, ...still, video: v } }, state);
+    const tall = { assetId: "a-tall", widthPx: 1080, heightPx: 1920 };
+    for (const turn of [90, 270] as const) {
+      assert.equal(set(tall, { ...video("v-new"), turn }), "ok", `a portrait still for a ${turn} turn`);
+      assert.equal(set(tall, { ...video("v-new"), turn, mirror: true }), "ok", `mirrored ${turn}`);
+      assert.equal(set({}, { ...video("v-new"), turn }), `invalid: ${VIDEO_SHAPE}`, `a landscape still for a ${turn} turn`);
+    }
+    assert.equal(set({}, { ...video("v-new"), turn: 180 }), "ok", "a half turn keeps the shape");
+    assert.equal(set(tall, { ...video("v-new"), turn: 180 }), `invalid: ${VIDEO_SHAPE}`);
+    assert.equal(set({}, { ...video("v-new"), mirror: true }), "ok", "a mirror keeps the shape");
+    const wide = { ...video("v-new", 640, 360), displayWidthPx: 853 };
+    assert.equal(set({ widthPx: 853, heightPx: 360 }, wide), "ok", "a 4:3 pixel shape stretches the still's width");
+    assert.equal(set({ widthPx: 640, heightPx: 360 }, wide), `invalid: ${VIDEO_SHAPE}`, "the coded shape no longer fits");
+    assert.equal(set({ assetId: "a-tall", widthPx: 360, heightPx: 853 }, { ...wide, turn: 90 }), "ok", "stretched, then turned");
+  });
+
   test("players set no map, a video's included", () => {
     assert.equal(decide({ t: "scene.setMap", sceneId: "s1", map: { ...STILL, video: video("v-new") } }, held(), depsWith(), P1).split(":")[0], "forbidden");
   });
