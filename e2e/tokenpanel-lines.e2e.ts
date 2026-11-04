@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { barControl, openSideTab, waitFor } from "./harness.ts";
-import { actor, atLp22Sizes, bar, cell, DESK, dm, dmCdp, dmSocket, focusedText, groupIn, measureIn, openGroup, ops, panelFile, panelOf, player, playerSocket, run, setUp, shots, TABLET, tapToken, unfilledLines } from "./tokenpanelRoom.ts";
+import { openGroup } from "./helpers/groups.ts";
+import { actor, atLp22Sizes, bar, cell, DESK, dm, dmCdp, dmSocket, focusedText, groupIn, measureIn, ops, panelFile, panelOf, player, playerSocket, run, setUp, shots, TABLET, tapToken, unfilledLines } from "./tokenpanelRoom.ts";
 
 /** FU39-C: a separate room for focus and group lines (CISPEED-F6, E2E-SPLIT). */
 panelFile("focus and group lines", () => {

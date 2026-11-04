@@ -6,6 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page, type Route } from "playwright-core";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
+import { openGroup } from "./helpers/groups.ts";
 import { barControl, ConsoleWatch, openPage, OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
@@ -233,13 +234,6 @@ export function bar(page: Page, name: string): Locator {
 export function tokenPanel(page: Page): Locator {
   // Exact, since the panel's Token settings group is a region of its own.
   return page.getByRole("tabpanel", { name: "Token", exact: true }).or(page.getByRole("region", { name: "Token", exact: true }));
-}
-
-/** Opens one of the panel's groups (docs/design/design-v1-token-panel-groups.md), which Image, Notes and Position start folded. */
-export async function openGroup(panel: Locator, name: string): Promise<void> {
-  const fold = panel.getByRole("button", { name, exact: true });
-  if ((await fold.getAttribute("aria-expanded")) === "false") await fold.click();
-  await waitFor(`${name} open`, async () => ((await fold.getAttribute("aria-expanded")) === "true" ? true : null), 3000);
 }
 
 /** A token's panel from a tap on it and Details in its bar, Combat open. */

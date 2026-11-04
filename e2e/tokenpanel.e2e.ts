@@ -6,8 +6,9 @@ import type { Locator, Page } from "playwright-core";
 import { INTER_FAMILY } from "../client/lib/interFont.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { barControl, expandBar, multiSelect, openSideTab, pagePoint, waitFor, wholeInReach } from "./harness.ts";
+import { openGroup } from "./helpers/groups.ts";
 import { assetRow, chooseStarterWork, starterCounts, starterWork } from "./starterPick.ts";
-import { actor, applyInView, bar, combatSections, DESK, dm, dmCdp, dmConsole, dmContext, dmSocket, type El, failSrdData, familyOf, fieldBeforeModes, fitMap, focused, foldedSummary, footprintRect, groupIn, hpPairSideBySide, inside, labelUnderFade, LONG_IMMUNITIES, mapBadges, mapLocks, noSideScroll, openGroup, ops, panelFile, panelOf, player, playerCdp, playerContext, playerSocket, rectOf, resize, ringsCompact, ringsFull, run, sectionIn, server, settle, setUp, SHEET, shots, speedUnitsWhole, steadyAboveSize, stepperRows, storedFolds, tapToken, tokenPanel, type View } from "./tokenpanelRoom.ts";
+import { actor, applyInView, bar, combatSections, DESK, dm, dmCdp, dmConsole, dmContext, dmSocket, type El, failSrdData, familyOf, fieldBeforeModes, fitMap, focused, foldedSummary, footprintRect, groupIn, hpPairSideBySide, inside, labelUnderFade, LONG_IMMUNITIES, mapBadges, mapLocks, noSideScroll, ops, panelFile, panelOf, player, playerCdp, playerContext, playerSocket, rectOf, resize, ringsCompact, ringsFull, run, sectionIn, server, settle, setUp, SHEET, shots, speedUnitsWhole, steadyAboveSize, stepperRows, storedFolds, tapToken, tokenPanel, type View } from "./tokenpanelRoom.ts";
 
 /**
  * The token panel, the stat summary and AC on tokens

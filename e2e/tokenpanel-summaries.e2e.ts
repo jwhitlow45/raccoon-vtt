@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import type { Locator } from "playwright-core";
 import { expandBar, openSideTab, waitFor } from "./harness.ts";
-import { actor, afterPpLines, atLp22Sizes, bar, cell, DESK, dm, dmCdp, dmSocket, groupIn, measureIn, openGroup, ops, panelFile, panelOf, pastLineEnd, resize, run, sectionIn, setUp, SHEET, shots, tapToken } from "./tokenpanelRoom.ts";
+import { openGroup } from "./helpers/groups.ts";
+import { actor, afterPpLines, atLp22Sizes, bar, cell, DESK, dm, dmCdp, dmSocket, groupIn, measureIn, ops, panelFile, panelOf, pastLineEnd, resize, run, sectionIn, setUp, SHEET, shots, tapToken } from "./tokenpanelRoom.ts";
 
 /** FU39-C: a separate room for life, conditions, fight buttons and quick numbers (CISPEED-F6, E2E-SPLIT). */
 panelFile("life, conditions, fight buttons and quick numbers", () => {

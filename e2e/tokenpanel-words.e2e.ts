@@ -3,8 +3,9 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import type { Locator } from "playwright-core";
 import { waitFor } from "./harness.ts";
+import { openGroup } from "./helpers/groups.ts";
 import { loneLastWord } from "./helpers/wraps.ts";
-import { actor, cell, DESK, dm, dmCdp, dmSocket, groupIn, measureIn, openGroup, ops, panelFile, panelOf, player, playerCdp, playerSocket, run, setUp, shots } from "./tokenpanelRoom.ts";
+import { actor, cell, DESK, dm, dmCdp, dmSocket, groupIn, measureIn, ops, panelFile, panelOf, player, playerCdp, playerSocket, run, setUp, shots } from "./tokenpanelRoom.ts";
 
 /** FU39-C: a separate room for wrapped kind and size words (CISPEED-F6, E2E-SPLIT). */
 panelFile("wrapped kind and size words", () => {
