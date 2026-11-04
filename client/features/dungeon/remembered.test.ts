@@ -11,7 +11,7 @@ function memory() {
 
 test("DG-C: the defaults are Dungeon, Medium, 12 rooms, Normal, Bending, Narrow, loops on, Heights Some, Traps Few at 1-4", () => {
   const s = settingsOf(DEFAULT_CHOICES);
-  assert.deepEqual(s, { theme: "dungeon", w: 50, h: 50, rooms: 12, density: "normal", corridors: "bending", wide: false, loops: true, heights: "some", traps: "few", band: "1-4" });
+  assert.deepEqual(s, { theme: "dungeon", w: 50, h: 50, rooms: 12, density: "normal", corridors: "bending", wide: false, loops: true, heights: 25, traps: 2, band: "1-4" });
 });
 
 test("DG-C: a size's rooms start at 6, 12, 20 or one per 200 squares", () => {
@@ -39,7 +39,7 @@ test("DG-C: Custom starts at the form's size, clamped to 20 to 100, until a choi
 
 test("DG-C: choices round trip through storage per room, and no seed or other field is written", () => {
   const storage = memory();
-  const c: Choices = { ...DEFAULT_CHOICES, theme: "crypt", size: "custom", across: 70, down: 45, rooms: 18, wide: true, traps: "some", band: "11-16" };
+  const c: Choices = { ...DEFAULT_CHOICES, theme: "crypt", size: "custom", across: 70, down: 45, rooms: 18, wide: true, heights: 50, traps: 6, band: "11-16" };
   saveChoices("ROOM1", { ...c, seed: "1K7Q-H2MX-A9F3-TWQ5" } as Choices, storage);
   assert.deepEqual(loadChoices("ROOM1", storage), c);
   assert.equal(loadChoices("ROOM2", storage), null);
@@ -74,4 +74,12 @@ test("DG-C: whatever storage holds parses to valid choices or nothing", () => {
       assert.equal(typeof s.wide, "boolean");
     }),
   );
+});
+
+test("DGOPTS: choices kept before the sliders read as the marks that replaced them", () => {
+  const storage = memory();
+  storage.setItem("rvtt.dungeon.OLD", JSON.stringify({ ...DEFAULT_CHOICES, heights: "flat", traps: "some" }));
+  assert.deepEqual(loadChoices("OLD", storage), { ...DEFAULT_CHOICES, heights: 0, traps: 4 });
+  storage.setItem("rvtt.dungeon.OLD", JSON.stringify({ ...DEFAULT_CHOICES, heights: "some", traps: "none" }));
+  assert.deepEqual(loadChoices("OLD", storage), { ...DEFAULT_CHOICES, heights: 25, traps: 0 });
 });

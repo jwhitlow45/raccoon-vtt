@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { clampRooms, clampSettings, clampSide, DEFAULT_SETTINGS, defaultRooms, MAX_ROOMS, roomCap, SIZE_SIDES } from "./settings.ts";
+import { clampRooms, clampSettings, clampSide, DEFAULT_SETTINGS, defaultRooms, MAX_ROOMS, raisedCount, roomCap, SIZE_SIDES } from "./settings.ts";
 
 describe("dungeon settings", () => {
   test("defaults: Dungeon, Medium, 12 rooms, Normal, Bending, Narrow, loops on, Heights Some, Traps Few at 1-4", () => {
@@ -13,8 +13,8 @@ describe("dungeon settings", () => {
       wide: false,
       loops: true,
       theme: "dungeon",
-      heights: "some",
-      traps: "few",
+      heights: 25,
+      traps: 2,
       band: "1-4",
     });
   });
@@ -53,7 +53,33 @@ describe("dungeon settings", () => {
     const odd = clampSettings({ w: 500, h: -3, rooms: 99, density: "packed", corridors: 3, wide: "yes", loops: null, theme: "cave", heights: "lots", traps: "many", band: "21-30" });
     assert.deepEqual(odd, { ...DEFAULT_SETTINGS, w: 100, h: 20, rooms: roomCap(100, 20) });
     assert.deepEqual(clampSettings({ w: 30, h: 30 }), { ...DEFAULT_SETTINGS, w: 30, h: 30, rooms: 10 });
-    const kept = { w: 64, h: 41, rooms: 9, density: "dense", corridors: "winding", wide: true, loops: false, theme: "crypt", heights: "flat", traps: "some", band: "17-20" } as const;
+    const kept = { w: 64, h: 41, rooms: 9, density: "dense", corridors: "winding", wide: true, loops: false, theme: "crypt", heights: 0, traps: 4, band: "17-20" } as const;
     assert.deepEqual(clampSettings(kept), kept);
+  });
+
+  test("Heights and Traps read old choices as the marks that replaced them, and a number to its slider's nearest step", () => {
+    const read = (heights: unknown, traps: unknown) => {
+      const s = clampSettings({ heights, traps });
+      return [s.heights, s.traps];
+    };
+    assert.deepEqual(read("flat", "none"), [0, 0]);
+    assert.deepEqual(read("some", "few"), [25, 2]);
+    assert.deepEqual(read("flat", "some"), [0, 4]);
+    assert.deepEqual(read(23, 2.4), [25, 2]);
+    assert.deepEqual(read(77, 7), [75, 6]);
+    assert.deepEqual(read(-5, -1), [0, 0]);
+    assert.deepEqual(read("toString", "constructor"), [25, 2], "only an old choice's own words");
+    assert.deepEqual(read(Number.NaN, null), [25, 2]);
+  });
+
+  test("Heights raises its share of the rooms but the entrance, rounded, and at least one for any share", () => {
+    assert.equal(raisedCount(0, 12), 0);
+    assert.equal(raisedCount(25, 12), 3);
+    assert.equal(raisedCount(75, 12), 8);
+    assert.equal(raisedCount(10, 6), 1);
+    assert.equal(raisedCount(5, 6), 1, "at least one");
+    assert.equal(raisedCount(50, 6), 3, "half of five rounds up");
+    assert.equal(raisedCount(75, 2), 1);
+    assert.equal(raisedCount(75, 1), 0, "the entrance alone");
   });
 });

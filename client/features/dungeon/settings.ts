@@ -13,13 +13,11 @@ import { LEVEL_BANDS, type LevelBand } from "#shared/srd/traps.ts";
  * bumps this and the fixture together. Replay never reads it: the stored
  * ops hold the dungeon.
  */
-export const GENERATOR_VERSION = 2;
+export const GENERATOR_VERSION = 3;
 
 export type Density = "sparse" | "normal" | "dense";
 export type CorridorStyle = "straight" | "bending" | "winding";
 export type Theme = "dungeon" | "crypt";
-export type HeightsChoice = "flat" | "some";
-export type TrapsChoice = "none" | "few" | "some";
 
 export type DungeonSettings = {
   /** Squares across and down, MIN_SIDE to MAX_SIDE. */
@@ -34,10 +32,23 @@ export type DungeonSettings = {
   /** Extra ways around: loop links beside the tree. */
   loops: boolean;
   theme: Theme;
-  heights: HeightsChoice;
-  traps: TrapsChoice;
+  /** Rooms raised or sunk, never the entrance, in percent: 0 to HEIGHTS_MAX in steps of HEIGHTS_STEP. */
+  heights: number;
+  /** Rooms with a trap, in twelfths: 0 to TRAPS_MAX, so Few's one per six and Some's one per three are steps. */
+  traps: number;
   band: LevelBand;
 };
+
+export const HEIGHTS_MAX = 75;
+export const HEIGHTS_STEP = 5;
+/** The Heights slider's named marks. Some is the quarter the generator always aimed at (D-261102-832). */
+export const HEIGHT_PRESETS = { Flat: 0, Few: 10, Some: 25, Many: 50, Most: 75 } as const;
+export const TRAPS_MAX = 6;
+/** The Traps slider's named marks: none, one per six rooms, one per three and one per two. */
+export const TRAP_PRESETS = { None: 0, Few: 2, Some: 4, Many: 6 } as const;
+/** What a device remembered from before the sliders, read as the marks that replaced them. */
+const OLD_HEIGHTS: Readonly<Record<string, number>> = { flat: HEIGHT_PRESETS.Flat, some: HEIGHT_PRESETS.Some };
+const OLD_TRAPS: Readonly<Record<string, number>> = { none: TRAP_PRESETS.None, few: TRAP_PRESETS.Few, some: TRAP_PRESETS.Some };
 
 /** The Size choices. Custom takes Across and Down. */
 export type SizeChoice = "small" | "medium" | "large" | "custom";
@@ -54,7 +65,8 @@ const SQUARES_PER_ROOM_CUSTOM = 200;
 /** The presets' starting Rooms. */
 const PRESET_ROOMS: Readonly<Record<Exclude<SizeChoice, "custom">, number>> = { small: 6, medium: 12, large: 20 };
 
-export const MAX_TRAPS = 12;
+/** Traps of one dungeon: Many's one per two rooms up to 40 rooms. Each is one `trap.create`, so the largest dungeon stays far under the burst of 60 ops. */
+export const MAX_TRAPS = 20;
 /** Door edges of one dungeon. The largest Wide topology makes 198, and one `build.edge` holds 500. */
 export const MAX_DOOR_EDGES = 200;
 /** Search expansions for the whole dungeon's corridors (5.4). */
@@ -69,16 +81,14 @@ export const DEFAULT_SETTINGS: Readonly<DungeonSettings> = {
   wide: false,
   loops: true,
   theme: "dungeon",
-  heights: "some",
-  traps: "few",
+  heights: HEIGHT_PRESETS.Some,
+  traps: TRAP_PRESETS.Few,
   band: "1-4",
 };
 
 const DENSITIES: readonly Density[] = ["sparse", "normal", "dense"];
 const CORRIDORS: readonly CorridorStyle[] = ["straight", "bending", "winding"];
 const THEMES: readonly Theme[] = ["dungeon", "crypt"];
-const HEIGHTS: readonly HeightsChoice[] = ["flat", "some"];
-const TRAPS: readonly TrapsChoice[] = ["none", "few", "some"];
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
@@ -105,6 +115,30 @@ export function defaultRooms(size: SizeChoice, w: number, h: number): number {
 
 const oneOf = <T>(value: unknown, choices: readonly T[], fallback: T): T => (choices.includes(value as T) ? (value as T) : fallback);
 
+/** A slider's value from anything: a number to the nearest step within 0 to `max`, an old choice's word as its mark, else the fallback. */
+function onSlider(value: unknown, max: number, step: number, old: Readonly<Record<string, number>>, fallback: number): number {
+  if (typeof value === "string") return Object.hasOwn(old, value) ? old[value]! : fallback;
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return clamp(Math.round(value / step) * step, 0, max);
+}
+
+/**
+ * Rooms a Heights share raises or sinks among `rooms`, never the entrance:
+ * the share of the others, rounded, and at least one for any share above
+ * none, so Few always shows on a small map.
+ */
+export function raisedCount(share: number, rooms: number): number {
+  const others = Math.max(0, rooms - 1);
+  if (share <= 0 || others === 0) return 0;
+  return clamp(Math.floor((2 * share * others + 100) / 200), 1, others);
+}
+
+/** Traps a Traps share places among `rooms` kept rooms: its twelfths of them, rounded down, at least one and at most MAX_TRAPS. */
+export function trapCount(twelfths: number, rooms: number): number {
+  if (twelfths <= 0) return 0;
+  return clamp(Math.floor((rooms * twelfths) / 12), 1, MAX_TRAPS);
+}
+
 /**
  * Settings the generator can take from anything shaped like them, such as
  * choices a device remembered under an older build: each field read or
@@ -122,8 +156,8 @@ export function clampSettings(s: Partial<Record<keyof DungeonSettings, unknown>>
     wide: typeof s.wide === "boolean" ? s.wide : DEFAULT_SETTINGS.wide,
     loops: typeof s.loops === "boolean" ? s.loops : DEFAULT_SETTINGS.loops,
     theme: oneOf(s.theme, THEMES, DEFAULT_SETTINGS.theme),
-    heights: oneOf(s.heights, HEIGHTS, DEFAULT_SETTINGS.heights),
-    traps: oneOf(s.traps, TRAPS, DEFAULT_SETTINGS.traps),
+    heights: onSlider(s.heights, HEIGHTS_MAX, HEIGHTS_STEP, OLD_HEIGHTS, DEFAULT_SETTINGS.heights),
+    traps: onSlider(s.traps, TRAPS_MAX, 1, OLD_TRAPS, DEFAULT_SETTINGS.traps),
     band: oneOf(s.band, LEVEL_BANDS, DEFAULT_SETTINGS.band),
   };
 }

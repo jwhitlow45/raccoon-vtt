@@ -7,7 +7,7 @@ import { generate, planDungeon, type Planned } from "./plan.ts";
 import { planProblems } from "./plan.testkit.ts";
 import { Stream } from "./random.ts";
 import { CROCKFORD, newSeed, versionChar, type Seed } from "./seed.ts";
-import { clampSettings, DEFAULT_SETTINGS, defaultRooms, GENERATOR_VERSION, roomCap, SEARCH_BUDGET, SIZE_SIDES, type DungeonSettings } from "./settings.ts";
+import { clampSettings, DEFAULT_SETTINGS, defaultRooms, GENERATOR_VERSION, HEIGHT_PRESETS, HEIGHTS_MAX, HEIGHTS_STEP, roomCap, SEARCH_BUDGET, SIZE_SIDES, TRAPS_MAX, type DungeonSettings } from "./settings.ts";
 
 /*
  * Property tests of the dungeon generator (docs/design/design-v1-dungeon-generator.md
@@ -28,8 +28,8 @@ const settingsArb: fc.Arbitrary<DungeonSettings> = fc
     wide: fc.boolean(),
     loops: fc.boolean(),
     theme: fc.constantFrom("dungeon", "crypt"),
-    heights: fc.constantFrom("flat", "some"),
-    traps: fc.constantFrom("none", "few", "some"),
+    heights: fc.integer({ min: 0, max: HEIGHTS_MAX / HEIGHTS_STEP }).map((n) => n * HEIGHTS_STEP),
+    traps: fc.integer({ min: 0, max: TRAPS_MAX }),
     band: fc.constantFrom("1-4", "5-10", "11-16", "17-20"),
   } as const)
   .map((s) => clampSettings({ ...s, rooms: Math.min(s.rooms, roomCap(s.w, s.h)) }));
@@ -88,7 +88,7 @@ describe("dungeon plans", () => {
   test("the largest choices keep the invariants and the door cap", () => {
     for (const wide of [false, true]) {
       for (const density of ["sparse", "dense"] as const) {
-        const s = clampSettings({ w: 100, h: 100, rooms: 40, density, corridors: "winding", wide, loops: true, theme: "crypt", heights: "some", traps: "some", band: "17-20" });
+        const s = clampSettings({ w: 100, h: 100, rooms: 40, density, corridors: "winding", wide, loops: true, theme: "crypt", heights: HEIGHTS_MAX, traps: TRAPS_MAX, band: "17-20" });
         const next = seeds(wide ? 1 : 2);
         for (let i = 0; i < 3; i++) ok(planDungeon(s, next()), s);
       }
@@ -215,7 +215,7 @@ describe("the drops (5.4)", () => {
   });
 
   test("a budget that runs out partway drops the failed link's room and every room past it, and reads the count after", () => {
-    const s = { ...DEFAULT_SETTINGS, heights: "flat" as const };
+    const s = { ...DEFAULT_SETTINGS, heights: HEIGHT_PRESETS.Flat };
     const next = seeds(21);
     let seen = 0;
     for (let i = 0; i < 20; i++) {

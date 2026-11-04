@@ -5,7 +5,7 @@ import { builderScene } from "../scenes/create.ts";
 import { SCENE_PLACEHOLDER, trapPlaceholder } from "./ops.ts";
 import { parseSeed, versionChar } from "./seed.ts";
 import { previewOf } from "./scratch.ts";
-import { DEFAULT_SETTINGS, GENERATOR_VERSION, roomCap, type DungeonSettings } from "./settings.ts";
+import { DEFAULT_SETTINGS, GENERATOR_VERSION, HEIGHTS_MAX, roomCap, TRAPS_MAX, type DungeonSettings } from "./settings.ts";
 
 /*
  * The op fixture between the client and the server's tests (docs/design/design-v1-dungeon-generator.md
@@ -29,8 +29,8 @@ const LARGEST: DungeonSettings = {
   wide: true,
   loops: true,
   theme: "dungeon",
-  heights: "some",
-  traps: "some",
+  heights: HEIGHTS_MAX,
+  traps: TRAPS_MAX,
   band: "5-10",
 };
 

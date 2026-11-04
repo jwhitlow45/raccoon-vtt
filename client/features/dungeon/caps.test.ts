@@ -7,7 +7,7 @@ import { builderScene } from "../scenes/create.ts";
 import { SCENE_PLACEHOLDER } from "./ops.ts";
 import { previewOf } from "./scratch.ts";
 import { newSeed } from "./seed.ts";
-import { MAX_DOOR_EDGES, roomCap, type DungeonSettings } from "./settings.ts";
+import { HEIGHTS_MAX, MAX_DOOR_EDGES, roomCap, TRAPS_MAX, type DungeonSettings } from "./settings.ts";
 
 /*
  * The caps at the largest choices (docs/design/design-v1-dungeon-generator.md
@@ -41,8 +41,8 @@ test("DG-B: the largest choices stay at or under 80% of the sight cap with pits 
       wide: i % 4 < 2,
       loops: true,
       theme: i % 8 < 4 ? "dungeon" : "crypt",
-      heights: "some",
-      traps: "some",
+      heights: HEIGHTS_MAX,
+      traps: TRAPS_MAX,
       band: "17-20",
     };
     const made = previewOf(s, seedOf(i), builderScene({ id: "x", name: "Dungeon", w: 100, h: 100 }));

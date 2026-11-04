@@ -1,6 +1,7 @@
 import { playersSeeFields, type NewScenePick } from "../scenes/create.ts";
 import type { DungeonPlan } from "./plan.ts";
 import { versionChar } from "./seed.ts";
+import { raisedCount, trapCount } from "./settings.ts";
 import type { DungeonOutcome } from "./send.ts";
 import type { Summary } from "./client.ts";
 
@@ -20,7 +21,7 @@ export const THEME_HELP = {
 export const DENSITY_HELP = "How much of the map the rooms fill.";
 export const WIDE_HELP = "Wide corridors and their doorways are 2 squares across, with double doors, so Large creatures walk them without squeezing once the doors are open.";
 export const LOOPS_HELP = "Adds loops, so the way back is not always the way in.";
-export const HEIGHTS_HELP = "Raises or sinks a few rooms, with stairs to them.";
+export const HEIGHTS_HELP = "Rooms raised or sunk 5 or 10 ft, with stairs to them. The entrance room stays flat.";
 export const TRAPS_HELP = "Example traps from the SRD. Players see one only once it is found.";
 /** Party level picks the SRD's column for each example trap, as the Trap tool's does: nothing else in the dungeon reads it. */
 export const PARTY_LEVEL_HELP = "How strong the traps are: their save DCs, damage and pit depths follow the SRD for a party of these levels.";
@@ -47,6 +48,18 @@ export function sizeLine(w: number, h: number, feetPerCell: number): string {
 
 export function roomsHint(max: number): string {
   return `2 to ${max} on this size`;
+}
+
+/** Heights' value in words, for the Rooms asked: "Flat", or "About 3 rooms of 12 off flat ground". */
+export function heightsWords(share: number, rooms: number): string {
+  const n = raisedCount(share, rooms);
+  return share <= 0 ? "Flat" : `About ${n} ${n === 1 ? "room" : "rooms"} of ${rooms} off flat ground`;
+}
+
+/** Traps' value in words, for the Rooms asked: "No traps", or "About 4 traps". */
+export function trapsWords(twelfths: number, rooms: number): string {
+  const n = trapCount(twelfths, rooms);
+  return n === 0 ? "No traps" : `About ${n} ${n === 1 ? "trap" : "traps"}`;
 }
 
 function counted(n: number, one: string, many: string): string {

@@ -22,7 +22,8 @@ import { SCENE_PLACEHOLDER, withIds } from "./ops.ts";
 import { DungeonPreview, type Drawn } from "./Preview.tsx";
 import { loadChoices, saveChoices, settingsOf, sidesOf, startChoices, withSize, type Choices } from "./remembered.ts";
 import { formatSeed, newSeed, parseSeed, type Seed } from "./seed.ts";
-import { clampRooms, MAX_SIDE, MIN_ROOMS, MIN_SIDE, roomCap, type SizeChoice } from "./settings.ts";
+import { PresetSlider, type Preset } from "./PresetSlider.tsx";
+import { clampRooms, HEIGHT_PRESETS, HEIGHTS_MAX, HEIGHTS_STEP, MAX_SIDE, MIN_ROOMS, MIN_SIDE, roomCap, TRAP_PRESETS, TRAPS_MAX, type SizeChoice } from "./settings.ts";
 import { sendDungeon } from "./send.ts";
 import {
   DENSITY_HELP,
@@ -30,6 +31,7 @@ import {
   FIT_NONE,
   fitLine,
   HEIGHTS_HELP,
+  heightsWords,
   LOOPS_HELP,
   makingLine,
   fogLine,
@@ -45,9 +47,13 @@ import {
   statusLine,
   THEME_HELP,
   TRAPS_HELP,
+  trapsWords,
   WAITING,
   WIDE_HELP,
 } from "./words.ts";
+
+const HEIGHT_MARKS: readonly Preset[] = Object.entries(HEIGHT_PRESETS).map(([label, value]) => ({ label, value }));
+const TRAP_MARKS: readonly Preset[] = Object.entries(TRAP_PRESETS).map(([label, value]) => ({ label, value }));
 
 /** A change of choice or seed draws a new preview after this much quiet (4.3). */
 const QUIET_MS = 150;
@@ -233,6 +239,7 @@ export function GenerateDialog(props: {
   );
 
   const roomsLimit = roomCap(w, h);
+  const rooms = clampRooms(choices.rooms, w, h);
   const fit = current ? fitLine(current.summary) : null;
   const choicesBox = (
     <div style={{ display: "grid", gap: theme.space(4), minWidth: 0, alignContent: "start" }}>
@@ -283,7 +290,7 @@ export function GenerateDialog(props: {
         <Named name="Rooms" help={roomsHint(roomsLimit)}>
           {(nameId, helpId) => (
             <div role="group" aria-labelledby={nameId} aria-describedby={helpId}>
-              <NumberInput label="Rooms" value={clampRooms(choices.rooms, w, h)} min={MIN_ROOMS} max={roomsLimit} onChange={(rooms) => set({ rooms })} />
+              <NumberInput label="Rooms" value={rooms} min={MIN_ROOMS} max={roomsLimit} onChange={(rooms) => set({ rooms })} />
             </div>
           )}
         </Named>
@@ -319,28 +326,29 @@ export function GenerateDialog(props: {
           help={WIDE_HELP}
         />
         <Switch label="Extra ways around" help={LOOPS_HELP} checked={choices.loops} onChange={(loops) => set({ loops })} />
-        <Choice<Choices["heights"]>
+        <PresetSlider
           name="Heights"
           value={choices.heights}
-          onChange={(heights) => set({ heights })}
-          options={[
-            { value: "flat", label: "Flat" },
-            { value: "some", label: "Some" },
-          ]}
+          min={0}
+          max={HEIGHTS_MAX}
+          step={HEIGHTS_STEP}
+          presets={HEIGHT_MARKS}
+          words={heightsWords(choices.heights, rooms)}
           help={HEIGHTS_HELP}
+          onChange={(heights) => set({ heights })}
         />
-        <Choice<Choices["traps"]>
+        <PresetSlider
           name="Traps"
           value={choices.traps}
+          min={0}
+          max={TRAPS_MAX}
+          step={1}
+          presets={TRAP_MARKS}
+          words={trapsWords(choices.traps, rooms)}
+          help={choices.traps === 0 ? undefined : TRAPS_HELP}
           onChange={(traps) => set({ traps })}
-          options={[
-            { value: "none", label: "None" },
-            { value: "few", label: "Few" },
-            { value: "some", label: "Some" },
-          ]}
-          help={choices.traps === "none" ? undefined : TRAPS_HELP}
         />
-        {choices.traps === "none" ? null : (
+        {choices.traps === 0 ? null : (
           <Choice<LevelBand>
             name="Party level"
             value={choices.band}

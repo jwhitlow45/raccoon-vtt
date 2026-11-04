@@ -17,7 +17,7 @@ const MARGIN = 2;
 const GAPS = { narrow: { sparse: 6, normal: 4, dense: 3 }, wide: { sparse: 7, normal: 5, dense: 4 } } as const;
 const DAIS_RISE = 5;
 const MAX_DOOR_EDGES = 200;
-const MAX_TRAPS = 12;
+const MAX_TRAPS = 20;
 const TRAP_SPACING = 6;
 const PITS = new Set(["hidden-pit", "spiked-pit"]);
 const FALLING_NET = "falling-net";
@@ -373,7 +373,7 @@ export function planProblems(planned: Planned, s: DungeonSettings): string[] {
   const raisedRun = new Set<number>();
   for (let k = 0; k < W * g.H; k++) if (g.room[k]! < 0 && (g.ground[k] !== 0 || g.up[k] !== undefined)) raisedRun.add(k);
   if (plan.traps.length > MAX_TRAPS) say(`${plan.traps.length} traps`);
-  if (s.traps === "none" && plan.traps.length > 0) say("traps on None");
+  if (s.traps === 0 && plan.traps.length > 0) say("traps on None");
   for (const t of plan.traps) {
     const z = t.zone;
     if ("cells" in z) {

@@ -193,23 +193,28 @@ describe("raised and sunk rooms' runs", () => {
     assert.equal(runFits(board, b, north, mouths), false);
   });
 
-  test("rooms are decided in order, and a room with any run that does not fit stays flat with no run kept", () => {
+  test("a room tries each ground in its drawn order and stays flat with no run kept when none fits, and Flat raises nothing", () => {
     const north: Rect = { x: ROOM.x, y: ROOM.y - 3 - 5, w: 8, h: 5 };
     const { board } = fixture(1, [ROOM, north]);
-    // Every draw says raise, and the first height, +5.
-    const always = new (class extends Stream {
-      override next32(): number {
-        return 0;
-      }
-    })(new Uint8Array(32), new Uint8Array(12));
-    raiseRooms(always, board, 1);
-    assert.equal(board.rooms[0]!.ground, 0);
+    // Every draw is 0: the grounds' order comes out +10, -5, -10, +5.
+    const zeros = () =>
+      new (class extends Stream {
+        override next32(): number {
+          return 0;
+        }
+      })(new Uint8Array(32), new Uint8Array(12));
+    raiseRooms(zeros(), board, 1, 75);
+    assert.equal(board.rooms[0]!.ground, 0, "no run fits the 3 squares of rock to the room north");
     assert.ok(board.doorways.every((d) => d.run === null));
     assert.ok(board.runAt.every((v) => v === 0) && board.besideAt.every((v) => v === 0));
-    // Without the room north, the same draws raise it.
-    const open = fixture(1);
-    raiseRooms(always, open.board, 1);
-    assert.equal(open.board.rooms[0]!.ground, RAISES[0]);
+    // With the other room far off in a corner, the same draws raise it to the first ground of its order.
+    const corner: Rect = { x: 2, y: 2, w: 3, h: 3 };
+    const open = fixture(1, [ROOM, corner]);
+    raiseRooms(zeros(), open.board, 1, 75);
+    assert.equal(open.board.rooms[0]!.ground, 10);
     assert.ok(open.board.doorways.every((d) => d.run !== null));
+    const flat = fixture(1, [ROOM, corner]);
+    raiseRooms(zeros(), flat.board, 1, 0);
+    assert.equal(flat.board.rooms[0]!.ground, 0);
   });
 });
