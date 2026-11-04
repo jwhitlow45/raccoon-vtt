@@ -5,6 +5,7 @@ import { describe, test } from "node:test";
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { GROUP_BOX, GROUP_FOLD, Group, Section, summaryClip } = await import("./Panel.tsx");
+const { SettingRow } = await import("./SettingRow.tsx");
 
 /** A panel's groups (docs/design/design-v1-dice-ui.md 3.2, docs/design/design-v1-token-panel-groups.md 4), as markup. */
 describe("Group", () => {
@@ -130,5 +131,97 @@ describe("Group", () => {
     const markup = renderToStaticMarkup(createElement(Group, { label: "Stat block" }, "block"));
     assert.match(markup, /grid-template-columns:minmax\(0, 1fr\)[^"]*"><span[^>]*><span id/);
     assert.doesNotMatch(markup, /grid-template-columns:auto/);
+  });
+
+  /** A group's header: the fold's or the plain head's look, the lead's markup and the summary's look. */
+  function header(markup: string) {
+    const lead = /<h3[^>]*>(?:<button[^>]*>|<span style="[^"]*">)(<span style="[^"]*height:19.2px[^"]*">.*?<\/span>)?<span style="[^"]*flex-wrap:wrap/.exec(markup)?.[1] ?? "";
+    const summary = /id="[^"]+-summary" style="([^"]*)"/.exec(markup)?.[1] ?? "";
+    return { lead, summary };
+  }
+
+  test("panel groups 6.1: with wholeSummary the summary asks for its whole words in the same wrapping row, and without it the 4em floor stays", () => {
+    const folded = { label: "Weather", icon: "image", open: false, onToggle: () => {}, summary: "Heavy rain · Strong wind" } as const;
+    const whole = renderToStaticMarkup(createElement(Group, { ...folded, wholeSummary: true }, "inside"));
+    const look = header(whole).summary;
+    assert.match(look, /^flex:0 1 auto;min-width:0;margin-left:auto/, "its words' own width, shrinking only past its line");
+    assert.doesNotMatch(look, /4em/, "no floor to cut it to");
+    assert.doesNotMatch(look, /max-width/);
+    assert.match(look, /white-space:nowrap/);
+    assert.match(look, /text-overflow:ellipsis/, "cut only where its own line is too short");
+    assert.match(whole, /<span style="[^"]*flex-wrap:wrap[^"]*"><span id="[^"]+" data-group-name=""[^>]*>Weather<\/span><span id="[^"]+-summary"/, "it shares the name's wrapping row, so it moves under the name where it does not fit beside it");
+    const floor = header(renderToStaticMarkup(createElement(Group, folded, "inside"))).summary;
+    assert.match(floor, /^flex:1 1 4em;width:4em;min-width:0;max-width:max-content;margin-left:auto/, "today's rule, unchanged");
+  });
+
+  test("panel groups 6.1: reserve keeps the missing chevron's or icon's space at the lead, so the name lines up with its peers", () => {
+    const reserved = (markup: string) => (markup.match(/<span aria-hidden="true" data-group-reserve="" style="display:block;flex:none;width:16px;height:16px"><\/span>/g) ?? []).length;
+    // Join requests: no fold and no icon, under folding groups with no icons.
+    const join = renderToStaticMarkup(createElement(Group, { label: "Join requests", reserve: "chevron" }, "asks"));
+    assert.equal(reserved(join), 1);
+    assert.match(join, /grid-template-columns:auto minmax\(0, 1fr\)/, "a lead column, as its folding peers have");
+    assert.match(header(join).lead, /^<span[^>]*><span aria-hidden="true" data-group-reserve=""[^>]*><\/span><\/span>$/, "the space alone, where a chevron would be");
+    // The Stat block with no fold: its icon after a chevron's space, as its folding peers' icons sit.
+    const block = header(renderToStaticMarkup(createElement(Group, { label: "Stat block", icon: "statBlock", reserve: "chevron" }))).lead;
+    assert.match(block, /^<span[^>]*><span aria-hidden="true" data-group-reserve=""[^>]*><\/span><span aria-hidden="true" data-group-icon=""/, "the chevron's space, then the icon");
+    // New scene: a fold with no icon, among groups with icons.
+    const scene = header(renderToStaticMarkup(createElement(Group, { label: "New scene", open: false, onToggle: () => {}, reserve: "icon" }, "form"))).lead;
+    assert.match(scene, /^<span[^>]*><svg[^>]*>.*?<\/svg><span aria-hidden="true" data-group-reserve=""[^>]*><\/span><\/span>$/, "the chevron, then the icon's space");
+    // A reserve where the group draws the real thing keeps nothing extra.
+    assert.equal(reserved(renderToStaticMarkup(createElement(Group, { label: "Combat", open: true, onToggle: () => {}, reserve: "chevron" }))), 0);
+    assert.equal(reserved(renderToStaticMarkup(createElement(Group, { label: "Stats", icon: "stats", reserve: "icon" }))), 0);
+    assert.equal(reserved(renderToStaticMarkup(createElement(Group, { label: "Stat block", icon: "statBlock" }))), 0, "none unless asked");
+  });
+
+  test("panel groups 6.1: divider={false} drops the line over a panel's first group, and every other group keeps it", () => {
+    const first = renderToStaticMarkup(createElement(Group, { label: "Time", open: true, onToggle: () => {}, divider: false }, "x"));
+    assert.match(first, /^<div data-panel-group="" style="display:grid;grid-template-columns:minmax\(0, 1fr\)">/);
+    for (const divider of [undefined, true]) {
+      const markup = renderToStaticMarkup(createElement(Group, { label: "Time", open: true, onToggle: () => {}, ...(divider === undefined ? {} : { divider }) }, "x"));
+      assert.match(markup, /^<div data-panel-group="" style="[^"]*border-top:1px solid/, `divider ${divider}`);
+    }
+  });
+
+  test("panel groups 11: every group's name carries data-group-name, a group with no fold included", () => {
+    for (const props of [{ label: "Combat", open: true, onToggle: () => {} }, { label: "Join requests" }, { label: "Stat block", icon: "statBlock" as const }]) {
+      const markup = renderToStaticMarkup(createElement(Group, props, "x"));
+      assert.match(markup, new RegExp(`<span id="[^"]+" data-group-name=""[^>]*>${props.label}</span>`));
+      assert.equal(markup.match(/data-group-name/g)?.length, 1);
+    }
+  });
+});
+
+describe("SettingRow", () => {
+  test("panel groups 6.2: with onOpen the row is one button holding the name, the help and a trailing chevron, named by its label", () => {
+    const markup = renderToStaticMarkup(createElement(SettingRow, { name: "Weather", help: "Heavy rain · Strong wind", label: "Weather: Heavy rain · Strong wind, in Ambiance", onOpen: () => {} }));
+    assert.match(markup, /^<button type="button" data-setting-row="" aria-label="Weather: Heavy rain · Strong wind, in Ambiance" style="display:flex;flex-wrap:nowrap;align-items:center;gap:8px 12px;min-height:44px;padding:8px 0;width:100%;margin:0;background:transparent;border:none/, "a setting's row, its own box, no card");
+    assert.equal(markup.match(/<button/g)?.length, 1, "one button, no control inside it");
+    assert.doesNotMatch(markup, /<div/, "a button holds spans only");
+    assert.match(markup, /<span id="[^"]+" style="[^"]*">Weather<\/span><span id="[^"]+" style="[^"]*">Heavy rain · Strong wind<\/span>/);
+    const chevron = /<span style="flex:none;display:flex;color:([^"]+)"><svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="20" height="20"/.exec(markup);
+    assert.ok(chevron, "a chevron at md where a control would sit");
+    assert.equal(markup.indexOf("Heavy rain") < markup.indexOf("<svg"), true, "after the words");
+  });
+
+  test("with onOpen and no label, the row's words name it", () => {
+    const markup = renderToStaticMarkup(createElement(SettingRow, { name: "Weather", help: "Clear", onOpen: () => {} }));
+    assert.doesNotMatch(markup, /aria-label/);
+    assert.match(markup, />Weather<.*>Clear</);
+  });
+
+  test("without onOpen the row draws as it always has: the words and the control in their own boxes, no button of its own", () => {
+    const markup = renderToStaticMarkup(createElement(SettingRow, { name: "Light", help: "Bright", children: "control" }));
+    assert.match(markup, /^<div data-setting-row="" style="display:flex;flex-wrap:nowrap;align-items:center;gap:8px 12px;min-height:44px;padding:8px 0"><div style="flex:1 1 auto;min-width:0;display:grid;gap:2px"><span id="[^"]+" style="[^"]*">Light<\/span><span id="[^"]+" style="[^"]*">Bright<\/span><\/div><div style="flex:none;min-width:0;display:flex;justify-content:flex-end">control<\/div><\/div>$/);
+    assert.doesNotMatch(markup, /<button/);
+  });
+
+  test("a row takes its control or onOpen, one of the two, by its type", () => {
+    // @ts-expect-error: a row with neither has nothing to show where its control would sit.
+    void createElement(SettingRow, { name: "Nothing" });
+    // @ts-expect-error: a row that opens elsewhere holds no control of its own.
+    void createElement(SettingRow, { name: "Both", onOpen: () => {}, children: "control" });
+    // @ts-expect-error: a label names the button, so a row with a control takes none.
+    void createElement(SettingRow, { name: "Label", label: "x", children: "control" });
+    assert.ok(true);
   });
 });
