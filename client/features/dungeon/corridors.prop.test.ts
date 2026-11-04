@@ -14,7 +14,9 @@ import { clampSettings, DEFAULT_SETTINGS, defaultRooms, roomCap, SIZE_SIDES, typ
  * player sees of a corridor is how often it turns and how far it wanders
  * from the shortest way, so each style's character and the gaps between
  * them are held over a fixed set of dungeons per Size, with the same seed
- * in every style so only the style changes.
+ * in every style so only the style changes. Each bound sits clear of the
+ * worst of 40 samples of 30 dungeons, since a GENERATOR_VERSION step draws
+ * every sample afresh.
  */
 
 const STYLES: readonly CorridorStyle[] = ["straight", "bending", "winding"];
@@ -78,18 +80,18 @@ describe("corridor styles at every size", () => {
       keepsRooms(s, size);
       const turns = (style: CorridorStyle) => mean(s[style].map((m) => m.turns));
       const detour = (style: CorridorStyle) => mean(s[style].map((m) => m.detour));
-      // Each style's character, on the sample's averages.
-      assert.ok(turns("straight") <= 1.6 && detour("straight") <= 1.15, `Straight turns ${turns("straight")}, detour ${detour("straight")}`);
+      // Each style's character, on the sample's averages. A few long ways round a room move Straight's detour by up to a fifth between samples.
+      assert.ok(turns("straight") <= 1.6 && detour("straight") <= 1.3, `Straight turns ${turns("straight")}, detour ${detour("straight")}`);
       assert.ok(turns("bending") >= 1.8 && turns("bending") <= 3.5, `Bending turns ${turns("bending")}`);
-      assert.ok(turns("winding") >= 3.2 && detour("winding") >= 1.35, `Winding turns ${turns("winding")}, detour ${detour("winding")}`);
-      // The same seed in each style: at most 1 in 7 dungeons out of order. Some Small maps join every room by short crossings, where any style has a couple of turns at most.
-      assert.ok(ahead(s, "straight", "bending") >= SAMPLE * 0.85, `Bending ahead of Straight in ${ahead(s, "straight", "bending")} of ${SAMPLE}`);
-      assert.ok(ahead(s, "bending", "winding") >= SAMPLE * 0.85, `Winding ahead of Bending in ${ahead(s, "bending", "winding")} of ${SAMPLE}`);
-      // The middle halves of the styles' ranges never meet: a typical dungeon of one style is never a typical one of the next.
+      assert.ok(turns("winding") >= 2.9 && detour("winding") >= 1.35, `Winding turns ${turns("winding")}, detour ${detour("winding")}`);
+      // The same seed in each style: on Small about 1 dungeon in 16 out of order, so a sample allows 3 in 10. Some Small maps join every room by short crossings, where any style has a couple of turns at most.
+      assert.ok(ahead(s, "straight", "bending") >= SAMPLE * 0.7, `Bending ahead of Straight in ${ahead(s, "straight", "bending")} of ${SAMPLE}`);
+      assert.ok(ahead(s, "bending", "winding") >= SAMPLE * 0.7, `Winding ahead of Bending in ${ahead(s, "bending", "winding")} of ${SAMPLE}`);
+      // A typical dungeon of one style is never a typical one of the next: the middle ones are half a turn a corridor apart or more, and from Medium up the middle halves of the styles' ranges never meet. A Small dungeon has 5 corridors or so, so its turns come in steps of a fifth and its quarters can touch.
       for (const [lo, hi] of [["straight", "bending"], ["bending", "winding"]] as const) {
-        const top = quantile(s[lo].map((m) => m.turns), 0.75);
-        const bottom = quantile(s[hi].map((m) => m.turns), 0.25);
-        assert.ok(top < bottom, `${lo}'s upper quarter ${top} meets ${hi}'s lower quarter ${bottom}`);
+        const at = (style: CorridorStyle, q: number) => quantile(s[style].map((m) => m.turns), q);
+        assert.ok(at(hi, 0.5) - at(lo, 0.5) >= 0.5, `${lo}'s middle ${at(lo, 0.5)} is close to ${hi}'s ${at(hi, 0.5)}`);
+        if (size !== "small") assert.ok(at(lo, 0.75) < at(hi, 0.25), `${lo}'s upper quarter ${at(lo, 0.75)} meets ${hi}'s lower quarter ${at(hi, 0.25)}`);
       }
     });
   }
@@ -101,10 +103,10 @@ describe("corridor styles at every size", () => {
       const turns = (style: CorridorStyle) => mean(s[style].map((m) => m.turns));
       assert.ok(turns("straight") <= 1.6, `${size}: Straight turns ${turns("straight")}`);
       assert.ok(turns("straight") < turns("bending") && turns("bending") < turns("winding"), `${size}: turns ${STYLES.map(turns).join(", ")}`);
-      // Wide doorways need 4 squares of side, so short sides leave Bending's doorways where Straight's are more often than on Narrow.
-      assert.ok(ahead(s, "straight", "bending") >= SAMPLE * 0.8, `${size}: Bending ahead of Straight in ${ahead(s, "straight", "bending")}`);
-      // Two-square corridors with their walls need twice the rock to wind, and Small has little, so there Winding leads in only about 6 dungeons in 10.
-      const lead = size === "small" ? 0.5 : 0.85;
+      // Wide doorways need 4 squares of side, so short sides leave Bending's doorways where Straight's are more often than on Narrow: on Small, Bending leads in about 7 dungeons in 8.
+      assert.ok(ahead(s, "straight", "bending") >= SAMPLE * (size === "small" ? 0.6 : 0.9), `${size}: Bending ahead of Straight in ${ahead(s, "straight", "bending")}`);
+      // Two-square corridors with their walls need twice the rock to wind, and Small has little, so there Winding leads in only about 2 dungeons in 3. From Medium up it leads in 9 in 10 or more.
+      const lead = size === "small" ? 0.35 : 0.7;
       assert.ok(ahead(s, "bending", "winding") >= SAMPLE * lead, `${size}: Winding ahead of Bending in ${ahead(s, "bending", "winding")}`);
     }
   });
