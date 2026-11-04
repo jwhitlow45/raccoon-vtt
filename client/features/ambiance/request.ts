@@ -11,15 +11,15 @@ export const AMBIANCE_PANEL = "ambiance";
 /**
  * A request to show one of Ambiance's sections
  * (docs/design/design-v1-panel-groups.md 4.3): the section's group, once
- * drawn, scrolls its header to the top of the panel's body, takes focus on
- * its fold where `focus` asks, and clears the request. `seq` tells one press
- * from the next, so a second press acts again. A Sound subpage that shows
- * goes back to the first page first, as Back does. Per Room page, so a press
- * in "view as a player" never reaches the DM's own panel.
+ * drawn, scrolls its header to the top of the panel's body and clears the
+ * request. Focus goes where the panel's opening sends it. `seq` tells one
+ * press from the next, so a second press acts again. A Sound subpage that
+ * shows goes back to the first page first, as Back does. Per Room page, so a
+ * press in "view as a player" never reaches the DM's own panel.
  */
-export type AmbianceRequest = { section: AmbianceSection | null; focus: boolean; seq: number };
+export type AmbianceRequest = { section: AmbianceSection | null; seq: number };
 
-export const ambianceRequestSlot = scopeSlot(() => createStore<AmbianceRequest>(() => ({ section: null, focus: false, seq: 0 })));
+export const ambianceRequestSlot = scopeSlot(() => createStore<AmbianceRequest>(() => ({ section: null, seq: 0 })));
 
 /** The elements the Ambiance panel draws in, one per tree it is mounted in (useAmbianceRoot). */
 export const ambianceRootsSlot = scopeSlot(() => new Set<Pick<HTMLElement, "contains">>());
@@ -44,10 +44,10 @@ export type AmbianceHow = { from?: string | null; pane?: undefined } | { pane: "
 
 /**
  * The one way into Ambiance from elsewhere (4.3): the top bar's chip asks
- * for Time, Scenes' Weather row for Weather with focus. It opens the panel
- * and reveals the section, open for now and never written (lib/folds.ts),
- * so a DM who folded it on purpose finds it folded again once Ambiance
- * closes.
+ * for Time. It opens the panel and reveals the section, open for now and
+ * never written (lib/folds.ts), so a DM who folded it on purpose finds it
+ * folded again once Ambiance closes. The way back, from Ambiance's rows into
+ * Scenes, is features/scenes/request.ts.
  *
  * First it blurs a field focused inside the panel, such as a playlist's
  * or a sound's name on a subpage, which saves on blur: the request then
@@ -55,11 +55,11 @@ export type AmbianceHow = { from?: string | null; pane?: undefined } | { pane: "
  * itself cannot be trusted to blur it: the chip moves no focus on its
  * press, and Safari focuses no button on a click (features/panels.ts).
  */
-export function openAmbiance(scope: RoomScope, ui: Pick<RoomUi, "openPanel">, section: AmbianceSection, options: AmbianceHow & { focus?: boolean } = {}): void {
+export function openAmbiance(scope: RoomScope, ui: Pick<RoomUi, "openPanel">, section: AmbianceSection, options: AmbianceHow = {}): void {
   blurInside(scope.get(ambianceRootsSlot));
   scope.get(ambianceFoldsSlot).reveal(section);
   const request = scope.get(ambianceRequestSlot);
-  request.setState({ section, focus: options.focus ?? false, seq: request.getState().seq + 1 });
+  request.setState({ section, seq: request.getState().seq + 1 });
   const how: PanelHow | undefined = options.pane ? { pane: options.pane } : options.from ? { from: options.from } : undefined;
   ui.openPanel(AMBIANCE_PANEL, how);
 }

@@ -128,6 +128,7 @@ export type IconName =
   | "turnRight"
   | "viewAs"
   | "windToward"
+  | "weather"
   | "music"
   | "play"
   | "pause"
@@ -207,6 +208,7 @@ export const LUCIDE: Partial<Record<IconName, LucideIcon>> = {
   difficultGround: "snail",
   mapLabel: "type",
   light: "lightbulb",
+  weather: "cloud-rain",
   stamp: "stamp",
   music: "music",
   play: "play",
@@ -663,6 +665,13 @@ const SHAPES: Record<IconName, ReactNode> = {
     <g {...STROKE}>
       <path d="M12 3v11M8 7l4-4 4 4" />
       <path d="M7 14v7M17 14v7" />
+    </g>
+  ),
+  // Lucide cloud-rain: a scene's weather, on its Light and weather group in Scenes and Ambiance's Weather row (docs/design/design-v1-scenes-reorg.md 3, 4.2).
+  weather: (
+    <g {...STROKE}>
+      <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242" />
+      <path d="M16 14v6M8 14v6M12 16v6" />
     </g>
   ),
   // The Sound panel's own (docs/design/design-v1-music.md 4.1). Lucide music: the panel, the room's music and sound.

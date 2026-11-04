@@ -28,12 +28,15 @@ export function Tag(props: {
   cut?: number | "100%";
   /** Before the words, at the text's size, such as `hidden` on a row players do not see (docs/design/design-v1-icons.md 3.1 rule 3). */
   icon?: IconName;
+  /** For a control that names the tag in its `aria-describedby`, such as a folded group whose row the tag stands on (Group's `describedBy`). */
+  id?: string;
   children: ReactNode;
 }) {
   const tone = TAG_TONES[props.tone ?? "muted"];
   const cut = props.cut;
   return (
     <span
+      id={props.id}
       title={props.title ?? (cut !== undefined && typeof props.children === "string" ? props.children : undefined)}
       style={{
         display: "inline-flex",

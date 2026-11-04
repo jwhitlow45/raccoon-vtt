@@ -15,13 +15,13 @@ export type SettingRowProps = { name: string; help?: ReactNode; wide?: boolean; 
   | {
       /**
        * Makes the whole row one button that opens the setting where it lives
-       * (docs/design/design-v1-panel-groups.md 6.2, Scenes' Weather row): the
-       * name, the help under it, and a chevron where a control would sit. It
-       * keeps a setting's look, never a raised Row card, so its name starts
+       * (docs/design/design-v1-scenes-reorg.md 5, Ambiance's Scene sound row):
+       * the name, the help under it, and a chevron where a control would sit.
+       * It keeps a setting's look, never a raised Row card, so its name starts
        * at its neighbors' edge.
        */
       onOpen(): void;
-      /** The button's name where the row's words would read poorly as one, such as "Weather: Heavy rain · Strong wind, in Ambiance". */
+      /** The button's name where the row's name alone says too little, such as "Scene sound, in Scenes". */
       label?: string;
       children?: undefined;
     }
@@ -77,14 +77,18 @@ export function SettingRow(props: SettingRowProps) {
       <button
         type="button"
         data-setting-row=""
+        // Named by its label or its name, and described by its help, as a control in a row is: the help read once, not twice.
         aria-label={props.label}
+        aria-labelledby={props.label ? undefined : nameId}
+        aria-describedby={ids.helpId}
         disabled={props.disabled}
         onClick={props.onOpen}
         style={{ ...row, width: "100%", margin: 0, background: "transparent", border: "none", color: theme.color.text, fontFamily: theme.font.body, textAlign: "left", cursor: props.disabled ? "default" : "pointer" }}
       >
         <span style={{ flex: "1 1 auto", minWidth: 0, display: "grid", gap: theme.space(0.5) }}>{words}</span>
         <span style={{ flex: "none", display: "flex", color: props.disabled ? theme.color.textDisabled : theme.color.textMuted }}>
-          <Icon name="chevronRight" size="md" />
+          {/* Small, as an opening group's, so the two kinds of row that open elsewhere wear one chevron. */}
+          <Icon name="chevronRight" size="sm" />
         </span>
       </button>
     );

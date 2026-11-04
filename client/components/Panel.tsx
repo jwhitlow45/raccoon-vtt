@@ -245,35 +245,21 @@ export function summaryClip(): CSSProperties {
 }
 const SUMMARY_CLIP = summaryClip();
 
-/**
- * A fold of a panel's sections that belong together by use (the Token
- * panel's Combat, Notes and Position, docs/design/design-v1-dice-ui.md 5): a 48 px
- * row with a chevron, the group's icon where it has one, its name at 16 px
- * weight 700, and when folded a one-line summary of what it holds ("HP
- * 18/24 · 2 conditions") at the row's end. Where the row cannot hold the
- * name and the summary's least beside it, the summary takes a line of its
- * own under the name, and the row grows by that line. Groups
- * part by a 1 px line, and the sections inside part by `space(4)`, keeping
- * their capitals labels as h4 under the group's h3, so the two levels never
- * look alike. A group of fields rather than sections spaces them as a
- * Section does. A group is no landmark: its heading is enough to move by, and
- * the Token panel held up to eight regions when each was one (Section).
- */
-export function Group(props: {
+/** A group's header folds its body (`open` and `onToggle`), or is one button that opens what it names elsewhere (`onOpen`), never both. */
+export type GroupProps = {
   label: string;
   /** Its icon, after the chevron and before its name (docs/design/design-v1-icons-2.md 5), in the chevron's muted color. */
   icon?: IconName;
-  /** Absent for a group that never folds, such as a stat block whose character is not in view: the same row, with no chevron. */
-  open?: boolean;
-  onToggle?(): void;
   summary?: ReactNode;
   /** On the header's row after the name, outside the disclosure: "Take a shape", "Attach a stat block". */
   action?: ReactNode;
-  foldRef?: Ref<HTMLButtonElement>;
-  /** `sections` for a group of Sections, parted by `space(4)`. A group of fields and lines, the default, keeps a Section's own `space(2)`. */
-  holds?: "sections" | "rows";
-  /** Folded content stays mounted and hidden, as a Section fold's `keep`: work under way in it lasts through a fold (the scene settings' groups, docs/design/design-v1-design-pass.md 4.1). */
-  keep?: boolean;
+  /**
+   * More ids, space separated, that describe the header's button after the
+   * summary: a tag in `action`, such as Fog and vision's "No walls", or an
+   * attention badge (docs/design/design-v1-panel-groups.md 6.1), whose words a
+   * screen reader would otherwise never hear from the fold.
+   */
+  describedBy?: string;
   /**
    * The folded summary asks for its whole words (docs/design/design-v1-panel-groups.md
    * 4.2): beside the name only where it fits whole, else on a line of its
@@ -290,11 +276,61 @@ export function Group(props: {
   reserve?: "chevron" | "icon";
   /** The line over the group, as a Section's `divider`. A panel's first group passes false, so no line sits just under the panel's header. */
   divider?: boolean;
-  children?: ReactNode;
-}) {
+} & (
+  | {
+      /** Absent for a group that never folds, such as a stat block whose character is not in view: the same row, with no chevron. */
+      open?: boolean;
+      onToggle?(): void;
+      foldRef?: Ref<HTMLButtonElement>;
+      /** `sections` for a group of Sections, parted by `space(4)`. A group of fields and lines, the default, keeps a Section's own `space(2)`. */
+      holds?: "sections" | "rows";
+      /** Folded content stays mounted and hidden, as a Section fold's `keep`: work under way in it lasts through a fold (the scene settings' groups, docs/design/design-v1-design-pass.md 4.1). */
+      keep?: boolean;
+      children?: ReactNode;
+      onOpen?: undefined;
+      openLabel?: undefined;
+    }
+  | {
+      /**
+       * Makes the header one button that opens what the group names where it
+       * lives (docs/design/design-v1-scenes-reorg.md 9), such as Ambiance's
+       * Weather row, which opens the scene's weather in Scenes. It holds no
+       * body and never folds, so it has no `aria-expanded`, and its summary
+       * always shows, with a chevron at the row's end where a peer's body
+       * would open. It keeps a group's 48 px row, lead and line, so it reads
+       * as a peer of the folding groups around it.
+       */
+      onOpen(): void;
+      /** The button's name where the group's name alone says too little: "Weather: Heavy rain · Strong wind, in Goblin cave's settings". */
+      openLabel?: string;
+      open?: undefined;
+      onToggle?: undefined;
+      foldRef?: undefined;
+      holds?: undefined;
+      keep?: undefined;
+      children?: undefined;
+    }
+);
+
+/**
+ * A fold of a panel's sections that belong together by use (the Token
+ * panel's Combat, Notes and Position, docs/design/design-v1-dice-ui.md 5): a 48 px
+ * row with a chevron, the group's icon where it has one, its name at 16 px
+ * weight 700, and when folded a one-line summary of what it holds ("HP
+ * 18/24 · 2 conditions") at the row's end. Where the row cannot hold the
+ * name and the summary's least beside it, the summary takes a line of its
+ * own under the name, and the row grows by that line. Groups
+ * part by a 1 px line, and the sections inside part by `space(4)`, keeping
+ * their capitals labels as h4 under the group's h3, so the two levels never
+ * look alike. A group of fields rather than sections spaces them as a
+ * Section does. A group is no landmark: its heading is enough to move by, and
+ * the Token panel held up to eight regions when each was one (Section).
+ */
+export function Group(props: GroupProps) {
   const id = useId();
   const summaryId = `${id}-summary`;
-  const folds = props.open !== undefined && props.onToggle !== undefined;
+  const opens = props.onOpen !== undefined;
+  const folds = !opens && props.open !== undefined && props.onToggle !== undefined;
   const open = props.open ?? true;
   // Marked so a check finds every group's name, a group with no fold included, which has no button to find it by (e2e/alignmentRoom.ts).
   const name = (
@@ -319,8 +355,9 @@ export function Group(props: {
    * cut, only where its own line is narrower than its words.
    */
   const ask: CSSProperties = props.wholeSummary ? { flex: "0 1 auto", minWidth: 0 } : { flex: "1 1 4em", width: "4em", minWidth: 0, maxWidth: "max-content" };
+  // A group that opens elsewhere shows its summary always: it has no body to show instead.
   const summary =
-    !open && props.summary ? (
+    (!open || opens) && props.summary ? (
       <span
         id={summaryId}
         style={{
@@ -358,7 +395,8 @@ export function Group(props: {
   const hasLead = chevron !== null || icon !== null;
   const head: CSSProperties = {
     display: "grid",
-    gridTemplateColumns: hasLead ? "auto minmax(0, 1fr)" : "minmax(0, 1fr)",
+    // A group that opens elsewhere ends in its chevron's own column, as tall as the name's line, so the chevron stands by the name when the summary wraps under it.
+    gridTemplateColumns: [hasLead ? "auto" : null, "minmax(0, 1fr)", opens ? "auto" : null].filter(Boolean).join(" "),
     alignItems: "start",
     alignContent: "center",
     columnGap: theme.space(2),
@@ -379,36 +417,63 @@ export function Group(props: {
       {summary}
     </span>
   );
+  const trail = opens ? (
+    <span style={{ display: "flex", alignItems: "center", height: NAME_LINE, color: theme.color.textMuted }}>
+      <Icon name="chevronRight" size="sm" />
+    </span>
+  ) : null;
+  // The summary first, then what the caller adds, such as a tag in the action that the fold's own words leave out.
+  const described = [summary ? summaryId : null, props.describedBy || null].filter(Boolean).join(" ") || undefined;
+  const button: CSSProperties = {
+    ...head,
+    paddingInline: 0,
+    background: "transparent",
+    border: "none",
+    color: theme.color.text,
+    fontFamily: theme.font.body,
+    textAlign: "left",
+    cursor: "pointer",
+  };
   const body = props.children && (open || props.keep);
   return (
     <div data-panel-group="" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", borderTop: props.divider === false ? undefined : `${theme.line.border}px solid ${theme.color.border}` }}>
       {/* The action wraps under the name where both do not fit, as Add a stat block and Take a shape do in a narrow card, rather than run over it. */}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), minHeight: GROUP_ROW }}>
         <h3 style={{ margin: 0, display: "flex", flex: "1 1 auto", minWidth: 0 }}>
-          {folds ? (
+          {opens ? (
+            <button
+              type="button"
+              // Its own mark, apart from a fold's, so a check or a helper that finds folds by data-group-fold never takes it for one.
+              data-group-open=""
+              aria-label={props.openLabel}
+              aria-labelledby={props.openLabel ? undefined : id}
+              aria-describedby={described}
+              onClick={(e) => {
+                // As a fold: focus first, so a field being typed in commits before the press takes focus elsewhere.
+                e.currentTarget.focus();
+                props.onOpen?.();
+              }}
+              style={button}
+            >
+              {lead}
+              {words}
+              {trail}
+            </button>
+          ) : folds ? (
             <button
               ref={props.foldRef}
               type="button"
               data-group-fold=""
               // Named by the group's name alone, so the name never changes as it folds. The summary describes it.
               aria-labelledby={id}
-              aria-describedby={summary ? summaryId : undefined}
+              aria-describedby={described}
               aria-expanded={open}
               onClick={(e) => {
                 // As FoldLabel: focus first, so a field being typed in commits before the fold hides or unmounts it.
                 e.currentTarget.focus();
                 props.onToggle?.();
               }}
-              style={{
-                ...head,
-                paddingInline: 0,
-                background: "transparent",
-                border: "none",
-                color: theme.color.text,
-                fontFamily: theme.font.body,
-                textAlign: "left",
-                cursor: "pointer",
-              }}
+              style={button}
             >
               {lead}
               {words}

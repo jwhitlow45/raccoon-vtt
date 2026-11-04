@@ -193,14 +193,15 @@ export function foldsSlot<S extends string>(surface: FoldSurface<S>): ScopeSlot<
 
 /* The four surfaces (6.2). A play section starts open everywhere, a setup section by wideAt. */
 
-export const AMBIANCE_SECTIONS = ["time", "weather", "sound"] as const;
+/** Ambiance's Weather is a row that opens the scene's weather in Scenes, never a fold (docs/design/design-v1-scenes-reorg.md 4.2), so a `weather` key a device stored before is passed over. */
+export const AMBIANCE_SECTIONS = ["time", "sound"] as const;
 export type AmbianceSection = (typeof AMBIANCE_SECTIONS)[number];
 
-/** Ambiance's compact start (D-261102-760): Time open on its start form while no clock runs and folded once one does, Weather folded, Sound open, on every width. */
+/** Ambiance's compact start (D-261102-760): Time open on its start form while no clock runs and folded once one does, Sound open, on every width. */
 export const AMBIANCE_FOLDS: FoldSurface<AmbianceSection> = {
   key: "rvtt.ambianceFolds",
   sections: AMBIANCE_SECTIONS,
-  starts: (_width, room) => ({ time: !room.clock, weather: false, sound: true }),
+  starts: (_width, room) => ({ time: !room.clock, sound: true }),
 };
 export const ambianceFoldsSlot = foldsSlot(AMBIANCE_FOLDS);
 
@@ -218,17 +219,30 @@ export const DM_PANEL_FOLDS: FoldSurface<DmPanelSection> = {
 };
 export const dmPanelFoldsSlot = foldsSlot(DM_PANEL_FOLDS);
 
-/** The scene settings' four groups under their stored keys (features/scenes/settingsFolds.ts), and New scene. All scenes, the scene's name, Export and Delete never fold. */
-export const SCENES_SECTIONS = ["players", "map", "walls", "scene", "new"] as const;
+/**
+ * The scene settings' six groups (docs/design/design-v1-scenes-reorg.md 3):
+ * Light and weather (`light`), Scene sound (`sound`), Fog and vision
+ * (`players`, What players see's key, so a device's fold of it carries
+ * over), Map and grid (`map`), Walls and movement (`walls`) and Size and
+ * view (`scene`), and New scene. All scenes, the scene's name and Export
+ * never fold.
+ */
+export const SCENES_SECTIONS = ["light", "sound", "players", "map", "walls", "scene", "new"] as const;
 export type ScenesSection = (typeof SCENES_SECTIONS)[number];
 
-/** The key the scene settings' folds have always had, so a device's folds carry over. New scene starts open while the room has no scene to set up. */
+/**
+ * The key the scene settings' folds have always had, so a device's folds
+ * carry over. Light and weather is the one group used in play, so it opens
+ * everywhere (D-261102-862). Fog and vision is setup now that Light has
+ * left it: in play the DM changes fog with the Fog tool. New scene starts
+ * open while the room has no scene to set up.
+ */
 export const SCENES_FOLDS: FoldSurface<ScenesSection> = {
   key: "rvtt.sceneSettingsFolds",
   sections: SCENES_SECTIONS,
   starts: (width, room) => {
     const wide = wideAt(width);
-    return { players: true, map: wide, walls: wide, scene: wide, new: wide || !room.scenes };
+    return { light: true, sound: wide, players: wide, map: wide, walls: wide, scene: wide, new: wide || !room.scenes };
   },
 };
 export const scenesFoldsSlot = foldsSlot(SCENES_FOLDS);
