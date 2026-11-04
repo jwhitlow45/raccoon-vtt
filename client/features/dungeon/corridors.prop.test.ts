@@ -40,7 +40,7 @@ function corridorShape(p: Planned): Shape {
   let steps = 0;
   let shortest = 0;
   let n = 0;
-  for (const chain of p.ways) {
+  for (const chain of p.chains) {
     if (!chain || chain.length < 2) continue;
     n++;
     for (let i = 2; i < chain.length; i++) if (chain[i]! - chain[i - 1]! !== chain[i - 1]! - chain[i - 2]!) turns++;

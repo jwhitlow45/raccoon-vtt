@@ -76,7 +76,7 @@ export type Planned = {
   /** Each link's corridor squares in path order, or null where it was never built. */
   paths: (number[] | null)[];
   /** Each built link's search positions in order (a block's top-left on Wide), for reading its turns. */
-  ways: (number[] | null)[];
+  chains: (number[] | null)[];
   stub: Doorway | null;
   stubPath: number[] | null;
   entrance: number;
@@ -340,7 +340,7 @@ export function planDungeon(input: DungeonSettings, seed: Seed, budget: number =
     traps,
     entrance: entrance.room >= 0 ? { x: rects[entrance.room]!.x, y: rects[entrance.room]!.y, w: rects[entrance.room]!.w, h: rects[entrance.room]!.h } : { x: 0, y: 0, w: 0, h: 0 },
   };
-  return { plan, trace, board, links, paths, ways: chains, stub: stub && !stub.removed ? stub : null, stubPath, entrance: entrance.room, daises };
+  return { plan, trace, board, links, paths, chains, stub: stub && !stub.removed ? stub : null, stubPath, entrance: entrance.room, daises };
 }
 
 function doorEdgeOf(board: Board, d: Doorway, j: number): string {
