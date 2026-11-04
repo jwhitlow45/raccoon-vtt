@@ -151,15 +151,15 @@ export function planDungeon(input: DungeonSettings, seed: Seed, budget: number =
     return "built";
   };
   /**
-   * Moves a styled link's doorways to where Straight puts them, the sides
+   * Places a link's doorways afresh where Straight puts them, the sides
    * facing each other aimed at the other room's middle, for one more try
-   * (D-261102-831): a way round a room or an off-center doorway can find no
-   * path where the plain doorways would. Its rooms must be flat, since the
-   * new doorways have no runs. False when the style placed them plainly
-   * already, or a doorway no longer fits.
+   * (D-261102-831). A way round a room or an off-center doorway can find no
+   * path where the plain doorways would. Nor can a flattened run's, whose
+   * corridor still starts from the old far landing, so Straight's links try
+   * again too. Its rooms must be flat, since the new doorways have no runs.
+   * False when a doorway no longer fits.
    */
   const replain = (li: number): boolean => {
-    if (style === "straight") return false;
     for (const d of [ends[li]!.a, ends[li]!.b]) if (d) board.removeDoorway(d);
     ends[li] = placeLink(li, facingSides);
     trace.replaced.push(li);
