@@ -6,6 +6,7 @@ const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { GROUP_BOX, GROUP_FOLD, Group, Section, summaryClip } = await import("./Panel.tsx");
 const { SettingRow } = await import("./SettingRow.tsx");
+const { Tag } = await import("./Tag.tsx");
 
 /** A panel's groups (docs/design/design-v1-dice-ui.md 3.2, docs/design/design-v1-token-panel-groups.md 4), as markup. */
 describe("Group", () => {
@@ -182,6 +183,86 @@ describe("Group", () => {
     }
   });
 
+  test("scenes-reorg 9: with onOpen the header is one button that opens elsewhere: data-group-open, no aria-expanded, no body, the summary shown and describing it, a trailing sm chevron", () => {
+    const markup = renderToStaticMarkup(
+      createElement(Group, { label: "Weather", icon: "weather", reserve: "chevron", wholeSummary: true, summary: "Heavy rain · Strong wind", onOpen: () => {}, openLabel: "Weather: Heavy rain · Strong wind, in Goblin cave's settings" }),
+    );
+    assert.equal(markup.match(/<button/g)?.length, 1, "one button");
+    const button = /<h3[^>]*><button ([^>]*)>(.*)<\/button><\/h3>/.exec(markup);
+    assert.ok(button, "the button is the heading's");
+    const [, attrs = "", inner = ""] = button;
+    assert.match(attrs, /^type="button" data-group-open="" aria-label="Weather: Heavy rain · Strong wind, in Goblin cave&#x27;s settings" aria-describedby="([^"]+-summary)"/, "named by openLabel, described by the summary");
+    assert.doesNotMatch(attrs, /aria-labelledby/, "openLabel names it alone");
+    assert.doesNotMatch(markup, /aria-expanded/, "it never folds");
+    assert.doesNotMatch(markup, /data-group-fold/, "never taken for a fold");
+    assert.match(attrs, /grid-template-columns:auto minmax\(0, 1fr\) auto/, "the lead, the words, the chevron's own column");
+    const describedBy = /aria-describedby="([^"]+)"/.exec(attrs)?.[1];
+    assert.match(markup, new RegExp(`<span id="${describedBy}" style="flex:0 1 auto;min-width:0;margin-left:auto[^"]*">Heavy rain · Strong wind</span>`), "its whole summary, shown though it is no fold");
+    assert.match(inner, /data-group-reserve=""[^>]*><\/span><span aria-hidden="true" data-group-icon=""/, "the lead as a group's: the chevron's space, then the icon");
+    assert.match(inner, /data-group-name=""[^>]*>Weather<\/span>/);
+    const trail = /<\/span><\/span><span style="([^"]*)"><svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="16" height="16"[^>]*>(.*?)<\/svg><\/span>$/.exec(inner);
+    assert.ok(trail, "a 16 px chevron after the words, last in the button");
+    assert.match(trail[1] ?? "", /height:19.2px/, "as tall as the name's line, so it stands by the name when the summary wraps");
+    assert.match(trail[1] ?? "", /color:/);
+    assert.equal(trail[2], renderToStaticMarkup(createElement(Group, { label: "x", open: false, onToggle: () => {} })).match(/<svg[^>]*>(.*?)<\/svg>/)?.[1], "the folded chevron's own shape, chevronRight");
+    assert.match(markup, /^<div data-panel-group="" style="[^"]*border-top:1px solid/, "a group's line over it");
+    assert.match(attrs, /min-height:48px/, "a group's 48 px row");
+  });
+
+  test("an opening group with no openLabel is named by its name, and with no lead has only the words and the chevron's columns", () => {
+    const markup = renderToStaticMarkup(createElement(Group, { label: "Scene sound", summary: "None of its own", onOpen: () => {} }));
+    const id = /data-group-name=""/.test(markup) ? /<span id="([^"]+)" data-group-name=""/.exec(markup)?.[1] : undefined;
+    assert.ok(id);
+    assert.match(markup, new RegExp(`<button type="button" data-group-open="" aria-labelledby="${id}" aria-describedby="${id}-summary"`));
+    assert.doesNotMatch(markup, /aria-label=/);
+    assert.match(markup, /grid-template-columns:minmax\(0, 1fr\) auto;/);
+    const plain = renderToStaticMarkup(createElement(Group, { label: "Scene sound", onOpen: () => {} }));
+    assert.doesNotMatch(plain, /aria-describedby/, "no summary, no description");
+  });
+
+  test("an opening group calls onOpen, focusing its button first so a field being typed in commits", () => {
+    const calls: string[] = [];
+    // A render to markup runs no handlers, so this reads the button's props from the element tree Group returns, drawn inside a component for its hooks.
+    let tree: unknown = null;
+    function Probe() {
+      tree = Group({ label: "Weather", onOpen: () => calls.push("open") });
+      return tree as ReturnType<typeof Group>;
+    }
+    renderToStaticMarkup(createElement(Probe));
+    const button = findButton(tree);
+    assert.ok(button, "the header's button");
+    button.props.onClick({ currentTarget: { focus: () => calls.push("focus") } });
+    assert.deepEqual(calls, ["focus", "open"]);
+  });
+
+  test("an opening group takes no fold, no body and no fold's ref, by its type", () => {
+    // @ts-expect-error: a group that opens elsewhere never folds.
+    void createElement(Group, { label: "Weather", onOpen: () => {}, open: false, onToggle: () => {} });
+    // @ts-expect-error: it holds no body.
+    void createElement(Group, { label: "Weather", onOpen: () => {}, children: "inside" });
+    // @ts-expect-error: openLabel names an opening group's button alone.
+    void createElement(Group, { label: "Weather", openLabel: "x", open: true, onToggle: () => {} });
+    assert.ok(true);
+  });
+
+  test("scenes-reorg 9: describedBy adds its ids after the summary's on a fold, alone where no summary shows, and nothing without it", () => {
+    const folded = renderToStaticMarkup(createElement(Group, { label: "Fog and vision", open: false, onToggle: () => {}, summary: "Explore", describedBy: "tag-1", action: createElement(Tag, { id: "tag-1", tone: "warning", children: "No walls" }) }, "x"));
+    assert.match(folded, /aria-describedby="[^"]+-summary tag-1"/, "the summary, then the tag");
+    assert.match(folded, /<span id="tag-1" style="[^"]*">No walls<\/span>/, "the tag the id points at, with the words the fold is described by");
+    const open = renderToStaticMarkup(createElement(Group, { label: "Fog and vision", open: true, onToggle: () => {}, summary: "Explore", describedBy: "tag-1" }, "x"));
+    assert.match(open, /aria-describedby="tag-1"/, "open, no summary shows, so the tag alone");
+    const none = renderToStaticMarkup(createElement(Group, { label: "Fog and vision", open: true, onToggle: () => {} }, "x"));
+    assert.doesNotMatch(none, /aria-describedby/);
+    const opener = renderToStaticMarkup(createElement(Group, { label: "Weather", summary: "Clear", onOpen: () => {}, describedBy: "badge-1" }));
+    assert.match(opener, /aria-describedby="[^"]+-summary badge-1"/, "an opening group's too");
+  });
+
+  test("a fold keeps its two columns: the opening group's chevron column is its own", () => {
+    const fold = renderToStaticMarkup(createElement(Group, { label: "Walls and movement", icon: "walls", open: false, onToggle: () => {}, summary: "Walls block moves" }, "x"));
+    assert.match(fold, /grid-template-columns:auto minmax\(0, 1fr\);/);
+    assert.equal(fold.match(/<svg/g)?.length, 2, "its chevron and its icon, nothing at the end");
+  });
+
   test("panel groups 11: every group's name carries data-group-name, a group with no fold included", () => {
     for (const props of [{ label: "Combat", open: true, onToggle: () => {} }, { label: "Join requests" }, { label: "Stat block", icon: "statBlock" as const }]) {
       const markup = renderToStaticMarkup(createElement(Group, props, "x"));
@@ -192,21 +273,32 @@ describe("Group", () => {
 });
 
 describe("SettingRow", () => {
-  test("panel groups 6.2: with onOpen the row is one button holding the name, the help and a trailing chevron, named by its label", () => {
-    const markup = renderToStaticMarkup(createElement(SettingRow, { name: "Weather", help: "Heavy rain · Strong wind", label: "Weather: Heavy rain · Strong wind, in Ambiance", onOpen: () => {} }));
-    assert.match(markup, /^<button type="button" data-setting-row="" aria-label="Weather: Heavy rain · Strong wind, in Ambiance" style="display:flex;flex-wrap:nowrap;align-items:center;gap:8px 12px;min-height:44px;padding:8px 0;width:100%;margin:0;background:transparent;border:none/, "a setting's row, its own box, no card");
+  test("panel groups 6.2: with onOpen the row is one button holding the name, the help and a trailing chevron, named by its label and described by its help", () => {
+    const markup = renderToStaticMarkup(createElement(SettingRow, { name: "Scene sound", help: "Goblin cave's sound: Tavern night.", label: "Scene sound, in Scenes", onOpen: () => {} }));
+    const helpId = /<span id="([^"]+)" style="[^"]*">Goblin cave&#x27;s sound: Tavern night.<\/span>/.exec(markup)?.[1];
+    assert.ok(helpId, "the help, with its id");
+    assert.match(
+      markup,
+      new RegExp(`^<button type="button" data-setting-row="" aria-label="Scene sound, in Scenes" aria-describedby="${helpId}" style="display:flex;flex-wrap:nowrap;align-items:center;gap:8px 12px;min-height:44px;padding:8px 0;width:100%;margin:0;background:transparent;border:none`),
+      "a setting's row, its own box, no card, described by its help (SCN-O-01)",
+    );
     assert.equal(markup.match(/<button/g)?.length, 1, "one button, no control inside it");
     assert.doesNotMatch(markup, /<div/, "a button holds spans only");
-    assert.match(markup, /<span id="[^"]+" style="[^"]*">Weather<\/span><span id="[^"]+" style="[^"]*">Heavy rain · Strong wind<\/span>/);
-    const chevron = /<span style="flex:none;display:flex;color:([^"]+)"><svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="20" height="20"/.exec(markup);
-    assert.ok(chevron, "a chevron at md where a control would sit");
-    assert.equal(markup.indexOf("Heavy rain") < markup.indexOf("<svg"), true, "after the words");
+    assert.match(markup, /<span id="[^"]+" style="[^"]*">Scene sound<\/span><span id="[^"]+" style="[^"]*">Goblin cave/);
+    const chevron = /<span style="flex:none;display:flex;color:([^"]+)"><svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="16" height="16"/.exec(markup);
+    assert.ok(chevron, "a chevron at sm where a control would sit, as an opening group's (SCN-O-11)");
+    assert.equal(markup.indexOf("Tavern night") < markup.indexOf("<svg"), true, "after the words");
   });
 
-  test("with onOpen and no label, the row's words name it", () => {
+  test("with onOpen and no label, its name names it and its help describes it, so the help is read once", () => {
     const markup = renderToStaticMarkup(createElement(SettingRow, { name: "Weather", help: "Clear", onOpen: () => {} }));
-    assert.doesNotMatch(markup, /aria-label/);
-    assert.match(markup, />Weather<.*>Clear</);
+    assert.doesNotMatch(markup, /aria-label=/);
+    const nameId = /<span id="([^"]+)" style="[^"]*">Weather<\/span>/.exec(markup)?.[1];
+    const helpId = /<span id="([^"]+)" style="[^"]*">Clear<\/span>/.exec(markup)?.[1];
+    assert.ok(nameId && helpId);
+    assert.match(markup, new RegExp(`aria-labelledby="${nameId}" aria-describedby="${helpId}"`));
+    const bare = renderToStaticMarkup(createElement(SettingRow, { name: "Weather", onOpen: () => {} }));
+    assert.doesNotMatch(bare, /aria-describedby/, "no help, no description");
   });
 
   test("without onOpen the row draws as it always has: the words and the control in their own boxes, no button of its own", () => {
@@ -225,3 +317,25 @@ describe("SettingRow", () => {
     assert.ok(true);
   });
 });
+
+describe("Tag", () => {
+  test("scenes-reorg 13 (SCN-O-14): an id lands on the tag, so a fold's description resolves to its words, and without one the tag draws as before", () => {
+    assert.match(renderToStaticMarkup(createElement(Tag, { id: "no-walls", tone: "warning", children: "No walls" })), /^<span id="no-walls" style="[^"]*">No walls<\/span>$/);
+    assert.match(renderToStaticMarkup(createElement(Tag, { tone: "warning", children: "No walls" })), /^<span style="[^"]*">No walls<\/span>$/);
+  });
+});
+
+/** The first button in an element tree, as Group returns it. */
+function findButton(node: unknown): { props: { onClick(e: unknown): void } } | null {
+  if (!node || typeof node !== "object") return null;
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findButton(child);
+      if (found) return found;
+    }
+    return null;
+  }
+  const element = node as { type?: unknown; props?: { children?: unknown; onClick?: unknown } };
+  if (element.type === "button") return element as never;
+  return findButton(element.props?.children);
+}

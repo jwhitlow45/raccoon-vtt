@@ -11,7 +11,8 @@ const { RoomScopeProvider } = await import("../../state/scope.ts");
 
 /*
  * The one way into Ambiance from elsewhere (docs/design/design-v1-panel-groups.md
- * 4.3): the top bar's chip and Scenes' Weather row.
+ * 4.3): the top bar's chip, its only caller now that Weather lives in Scenes
+ * (docs/design/design-v1-scenes-reorg.md 7), and any later caller in a panel.
  */
 
 /** What openAmbiance asks of the room's UI and the page, recorded in order. */
@@ -46,23 +47,30 @@ function withFocus(active: unknown, fn: () => void): void {
 }
 
 describe("openAmbiance", () => {
-  test("the chip: Ambiance opens in the top pane, and Time shows open with no focus asked", () => {
+  test("the chip: Ambiance opens in the top pane, and Time shows open", () => {
     const scope = new RoomScope();
     const { calls, ui } = recorder();
     openAmbiance(scope, ui, "time", { pane: "top" });
     assert.deepEqual(calls, ['openPanel ambiance {"pane":"top"}']);
     assert.equal(AMBIANCE_PANEL, "ambiance");
-    assert.deepEqual(scope.get(ambianceRequestSlot).getState(), { section: "time", focus: false, seq: 1 });
+    assert.deepEqual(scope.get(ambianceRequestSlot).getState(), { section: "time", seq: 1 });
     assert.equal(scope.get(ambianceFoldsSlot).get(390, CLOCK).time, true, "revealed over its folded start");
   });
 
-  test("the Scenes row: Ambiance opens from Scenes, so with two panels in the other pane, and Weather asks for focus", () => {
+  test("a caller in a panel: Ambiance opens from that panel, so with two panels in the other pane", () => {
     const scope = new RoomScope();
     const { calls, ui } = recorder();
-    openAmbiance(scope, ui, "weather", { from: "scenes", focus: true });
-    assert.deepEqual(calls, ['openPanel ambiance {"from":"scenes"}']);
-    assert.deepEqual(scope.get(ambianceRequestSlot).getState(), { section: "weather", focus: true, seq: 1 });
-    assert.equal(scope.get(ambianceFoldsSlot).get(390, CLOCK).weather, true);
+    openAmbiance(scope, ui, "time", { from: "log" });
+    assert.deepEqual(calls, ['openPanel ambiance {"from":"log"}']);
+    assert.deepEqual(scope.get(ambianceRequestSlot).getState(), { section: "time", seq: 1 });
+    assert.equal(scope.get(ambianceFoldsSlot).get(390, CLOCK).time, true);
+  });
+
+  test("the request asks for no focus: its only caller with focus, Scenes' Weather row, is gone (SCN-O-02)", () => {
+    const scope = new RoomScope();
+    // @ts-expect-error: openAmbiance takes no focus option now.
+    openAmbiance(scope, recorder().ui, "time", { pane: "top", focus: true });
+    assert.deepEqual(Object.keys(scope.get(ambianceRequestSlot).getState()).sort(), ["section", "seq"]);
   });
 
   test("with neither, it opens as any path outside the panels does", () => {
@@ -95,9 +103,9 @@ describe("openAmbiance", () => {
   test("a request in one Room page never reaches another's, as a preview's never reaches the DM's", () => {
     const dm = new RoomScope();
     const preview = new RoomScope();
-    openAmbiance(preview, recorder().ui, "weather", { from: "scenes", focus: true });
+    openAmbiance(preview, recorder().ui, "time", { pane: "top" });
     assert.equal(dm.get(ambianceRequestSlot).getState().seq, 0);
-    assert.equal(dm.get(ambianceFoldsSlot).get(390, CLOCK).weather, false);
+    assert.equal(dm.get(ambianceFoldsSlot).get(390, CLOCK).time, false);
   });
 
   test("a field focused in the panel, such as a subpage's name, blurs before anything else, so it saves while still drawn", () => {
@@ -114,9 +122,9 @@ describe("openAmbiance", () => {
     const { calls, ui } = recorder();
     const elsewhere = { blur: () => calls.push("blur") };
     scope.get(ambianceRootsSlot).add({ contains: () => false });
-    withFocus(elsewhere, () => openAmbiance(scope, ui, "weather", { from: "scenes", focus: true }));
-    withFocus(null, () => openAmbiance(scope, ui, "weather", { from: "scenes", focus: true }));
-    assert.deepEqual(calls, ['openPanel ambiance {"from":"scenes"}', 'openPanel ambiance {"from":"scenes"}']);
+    withFocus(elsewhere, () => openAmbiance(scope, ui, "time", { pane: "top" }));
+    withFocus(null, () => openAmbiance(scope, ui, "time", { pane: "top" }));
+    assert.deepEqual(calls, ['openPanel ambiance {"pane":"top"}', 'openPanel ambiance {"pane":"top"}']);
   });
 
   test("useAmbianceRoot: the panel's root counts while mounted, and no longer once it goes", () => {

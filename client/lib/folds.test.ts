@@ -68,10 +68,10 @@ const NO_SCENE: FoldRoom = { clock: false, scenes: false };
 const AMB = AMBIANCE_FOLDS.key;
 
 describe("where each surface starts with nothing stored (6.1, 6.2)", () => {
-  test("Ambiance, compact on every width: Time folded once a clock runs and open without one, Weather folded, Sound open", () => {
+  test("Ambiance, compact on every width: Time folded once a clock runs and open without one, Sound open", () => {
     for (const width of [320, 390, 899, 900, 1440]) {
-      assert.deepEqual(AMBIANCE_FOLDS.starts(width, CLOCK), { time: false, weather: false, sound: true }, `${width} with a clock`);
-      assert.deepEqual(AMBIANCE_FOLDS.starts(width, NO_CLOCK), { time: true, weather: false, sound: true }, `${width} with no clock`);
+      assert.deepEqual(AMBIANCE_FOLDS.starts(width, CLOCK), { time: false, sound: true }, `${width} with a clock`);
+      assert.deepEqual(AMBIANCE_FOLDS.starts(width, NO_CLOCK), { time: true, sound: true }, `${width} with no clock`);
     }
   });
 
@@ -80,11 +80,16 @@ describe("where each surface starts with nothing stored (6.1, 6.2)", () => {
     assert.deepEqual(DM_PANEL_FOLDS.starts(900, CLOCK), { handouts: true, screens: true, check: true, link: true, display: true });
   });
 
-  test("Scenes: What players see open everywhere, the setup groups and New scene by the width, and New scene open while the room has no scene", () => {
-    assert.deepEqual(SCENES_FOLDS.starts(899, CLOCK), { players: true, map: false, walls: false, scene: false, new: false });
-    assert.deepEqual(SCENES_FOLDS.starts(900, CLOCK), { players: true, map: true, walls: true, scene: true, new: true });
+  test("Scenes (scenes-reorg 3): Light and weather open everywhere, Scene sound, Fog and vision and the setup groups by the width, New scene too and open while the room has no scene", () => {
+    for (const width of [320, 390, 899]) {
+      assert.deepEqual(SCENES_FOLDS.starts(width, CLOCK), { light: true, sound: false, players: false, map: false, walls: false, scene: false, new: false }, `${width}`);
+    }
+    for (const width of [900, 1440]) {
+      assert.deepEqual(SCENES_FOLDS.starts(width, CLOCK), { light: true, sound: true, players: true, map: true, walls: true, scene: true, new: true }, `${width}`);
+    }
     assert.equal(SCENES_FOLDS.starts(390, NO_SCENE).new, true);
     assert.equal(SCENES_FOLDS.starts(390, NO_SCENE).map, false, "only New scene reads the room");
+    assert.equal(SCENES_FOLDS.starts(390, NO_SCENE).light, true);
   });
 
   test("This device: every section is setup, folded at 899 and open at 900", () => {
@@ -97,7 +102,8 @@ describe("where each surface starts with nothing stored (6.1, 6.2)", () => {
       [AMBIANCE_FOLDS.key, DM_PANEL_FOLDS.key, SCENES_FOLDS.key, THIS_DEVICE_FOLDS.key],
       ["rvtt.ambianceFolds", "rvtt.dmPanelFolds", "rvtt.sceneSettingsFolds", "rvtt.thisDeviceFolds"],
     );
-    assert.deepEqual(AMBIANCE_SECTIONS, ["time", "weather", "sound"]);
+    assert.deepEqual(AMBIANCE_SECTIONS, ["time", "sound"], "Weather is a row that opens Scenes, never a fold (scenes-reorg 4.2)");
+    assert.deepEqual(SCENES_SECTIONS, ["light", "sound", "players", "map", "walls", "scene", "new"]);
   });
 
   test("each surface's slot holds its own store, apart per Room page", () => {
@@ -114,8 +120,8 @@ describe("where each surface starts with nothing stored (6.1, 6.2)", () => {
 
 describe("what a device remembers (6.1)", () => {
   test("a stored value wins over its start, and the rest follow their starts", () => {
-    const folds = createFolds(AMBIANCE_FOLDS, storage({ [AMB]: JSON.stringify({ weather: true, sound: false }) }));
-    assert.deepEqual(folds.get(390, CLOCK), { time: false, weather: true, sound: false });
+    const folds = createFolds(AMBIANCE_FOLDS, storage({ [AMB]: JSON.stringify({ sound: false }) }));
+    assert.deepEqual(folds.get(390, CLOCK), { time: false, sound: false });
   });
 
   test("a stored fold wins over a start that reads the room: Time folded by hand with no clock stays folded", () => {
@@ -125,8 +131,16 @@ describe("what a device remembers (6.1)", () => {
   });
 
   test("a value that is no boolean, or a key no section has, is passed over", () => {
-    const folds = createFolds(AMBIANCE_FOLDS, storage({ [AMB]: JSON.stringify({ time: "yes", weather: 1, chip: true }) }));
-    assert.deepEqual(folds.get(390, CLOCK), { time: false, weather: false, sound: true });
+    const folds = createFolds(AMBIANCE_FOLDS, storage({ [AMB]: JSON.stringify({ time: "yes", sound: 1, chip: true }) }));
+    assert.deepEqual(folds.get(390, CLOCK), { time: false, sound: true });
+  });
+
+  test("a Weather fold a device stored before Weather became a row is passed over, and dropped at the next tap", () => {
+    const s = storage({ [AMB]: JSON.stringify({ weather: true, time: true }) });
+    const folds = createFolds(AMBIANCE_FOLDS, s);
+    assert.deepEqual(folds.get(390, CLOCK), { time: true, sound: true });
+    folds.tap("sound", false);
+    assert.deepEqual(s.json(AMB), { time: true, sound: false });
   });
 
   test("storage that cannot be read opens every section, and taps still fold for the page", () => {
@@ -137,43 +151,43 @@ describe("what a device remembers (6.1)", () => {
       ["null", storage({ [AMB]: "null" })],
     ] as const) {
       const folds = createFolds(AMBIANCE_FOLDS, s);
-      assert.deepEqual(folds.get(390, CLOCK), { time: true, weather: true, sound: true }, why);
+      assert.deepEqual(folds.get(390, CLOCK), { time: true, sound: true }, why);
       assert.doesNotThrow(() => folds.tap("sound", false));
       assert.equal(folds.get(390, CLOCK).sound, false, `${why}: the tap folds for the page`);
     }
-    assert.deepEqual(createFolds(AMBIANCE_FOLDS, null).get(390, CLOCK), { time: true, weather: true, sound: true }, "no storage");
+    assert.deepEqual(createFolds(AMBIANCE_FOLDS, null).get(390, CLOCK), { time: true, sound: true }, "no storage");
   });
 
   test("a tap stores its section beside the others stored, and drops what no section is", () => {
-    const s = storage({ [AMB]: JSON.stringify({ sound: false, chip: true, time: "yes" }) });
+    const s = storage({ [AMB]: JSON.stringify({ time: true, chip: true, sound: "yes" }) });
     const folds = createFolds(AMBIANCE_FOLDS, s);
-    folds.tap("weather", true);
-    assert.deepEqual(s.json(AMB), { sound: false, weather: true });
-    assert.deepEqual(folds.get(390, CLOCK), { time: false, weather: true, sound: false });
+    folds.tap("sound", false);
+    assert.deepEqual(s.json(AMB), { time: true, sound: false });
+    assert.deepEqual(folds.get(390, CLOCK), { time: true, sound: false });
   });
 
   test("a tap writes beside what another tab stored after this page read it", () => {
     const s = storage();
     const folds = createFolds(AMBIANCE_FOLDS, s);
     folds.get(390, CLOCK);
-    s.items.set(AMB, JSON.stringify({ sound: false }));
-    folds.tap("weather", true);
-    assert.deepEqual(s.json(AMB), { sound: false, weather: true });
+    s.items.set(AMB, JSON.stringify({ time: true }));
+    folds.tap("sound", false);
+    assert.deepEqual(s.json(AMB), { time: true, sound: false });
   });
 
-  test("tap Weather open, reload: open", () => {
+  test("fold Sound, reload: folded", () => {
     const s = storage();
-    createFolds(AMBIANCE_FOLDS, s).tap("weather", true);
-    assert.equal(createFolds(AMBIANCE_FOLDS, s).get(390, CLOCK).weather, true);
+    createFolds(AMBIANCE_FOLDS, s).tap("sound", false);
+    assert.equal(createFolds(AMBIANCE_FOLDS, s).get(390, CLOCK).sound, false);
   });
 
   test("a tap that asks not to write (a preview) folds for the page and stores nothing", () => {
     const s = storage();
     const folds = createFolds(AMBIANCE_FOLDS, s);
-    folds.tap("weather", true, false);
-    assert.equal(folds.get(390, CLOCK).weather, true);
+    folds.tap("sound", false, false);
+    assert.equal(folds.get(390, CLOCK).sound, false);
     assert.equal(s.writes(), 0);
-    assert.equal(createFolds(AMBIANCE_FOLDS, s).get(390, CLOCK).weather, false);
+    assert.equal(createFolds(AMBIANCE_FOLDS, s).get(390, CLOCK).sound, true);
   });
 
   test("writeFold over storage that throws or is missing takes the tap without a throw", () => {
@@ -194,35 +208,55 @@ describe("what a device remembers (6.1)", () => {
     assert.deepEqual(folds.get(1440, CLOCK), { handouts: true, screens: true, check: true, link: false, display: true });
   });
 
-  test("the scene folds' stored values read as the scene settings read them", () => {
-    const cases = [null, JSON.stringify({ scene: false }), JSON.stringify({ players: false, map: true }), JSON.stringify({ map: "yes", grid: false }), "{not json", "[true]"];
-    for (const raw of cases) {
+  test("the scene folds' stored values read as the scene settings read them, Fog and vision on What players see's key and now on the setup rule", () => {
+    // Fog and vision's fold with this stored value, at a phone's width and a computer's: a stored boolean wins, unreadable storage opens it, else the setup rule.
+    const cases: [raw: string | null, players: { phone: boolean; wide: boolean }][] = [
+      [null, { phone: false, wide: true }],
+      [JSON.stringify({ scene: false }), { phone: false, wide: true }],
+      [JSON.stringify({ players: false, map: true }), { phone: false, wide: false }],
+      [JSON.stringify({ players: true }), { phone: true, wide: true }],
+      [JSON.stringify({ map: "yes", grid: false }), { phone: false, wide: true }],
+      ["{not json", { phone: true, wide: true }],
+      ["[true]", { phone: true, wide: true }],
+    ];
+    for (const [raw, players] of cases) {
       for (const width of [390, 899, 900, 1440]) {
         const s = storage(raw === null ? {} : { [SCENES_FOLDS.key]: raw });
         const now = createFolds(SCENES_FOLDS, s).get(width, CLOCK);
         const before = resolveSceneFolds(s, width);
-        assert.deepEqual({ players: now.players, map: now.map, walls: now.walls, scene: now.scene }, before, `${raw} at ${width}`);
+        assert.deepEqual({ map: now.map, walls: now.walls, scene: now.scene }, { map: before.map, walls: before.walls, scene: before.scene }, `${raw} at ${width}`);
+        assert.equal(now.players, width >= 900 ? players.wide : players.phone, `Fog and vision, ${raw} at ${width}`);
       }
     }
-    assert.deepEqual(SCENES_SECTIONS.slice(0, 4), ["players", "map", "walls", "scene"]);
+  });
+
+  test("a device that unfolded What players see on a phone finds Fog and vision open, and Light and weather stays open whatever else it stored", () => {
+    const s = storage({ [SCENES_FOLDS.key]: JSON.stringify({ players: true, map: false }) });
+    const now = createFolds(SCENES_FOLDS, s).get(390, CLOCK);
+    assert.equal(now.players, true);
+    assert.equal(now.light, true);
+    assert.equal(now.sound, false, "Scene sound is setup");
   });
 
   test("a scene tap keeps the scene settings' stored values beside New scene's", () => {
     const s = storage({ [SCENES_FOLDS.key]: JSON.stringify({ map: true, walls: false }) });
-    createFolds(SCENES_FOLDS, s).tap("new", false);
-    assert.deepEqual(s.json(SCENES_FOLDS.key), { map: true, walls: false, new: false });
+    const folds = createFolds(SCENES_FOLDS, s);
+    folds.tap("new", false);
+    folds.tap("light", false);
+    folds.tap("sound", true);
+    assert.deepEqual(s.json(SCENES_FOLDS.key), { light: false, sound: true, map: true, walls: false, new: false });
   });
 });
 
 describe("reveals (6.1)", () => {
   test("a reveal opens a folded section and writes nothing", () => {
-    const s = storage({ [AMB]: JSON.stringify({ weather: false }) });
+    const s = storage({ [AMB]: JSON.stringify({ sound: false }) });
     const folds = createFolds(AMBIANCE_FOLDS, s);
     folds.follow(true, CLOCK);
-    folds.reveal("weather");
-    assert.equal(folds.get(390, CLOCK).weather, true);
+    folds.reveal("sound");
+    assert.equal(folds.get(390, CLOCK).sound, true);
     assert.equal(s.writes(), 0);
-    assert.deepEqual(s.json(AMB), { weather: false });
+    assert.deepEqual(s.json(AMB), { sound: false });
   });
 
   test("it ends as its panel goes from open to closed, and the stored fold shows again", () => {
@@ -251,21 +285,21 @@ describe("reveals (6.1)", () => {
     const s = storage();
     const folds = createFolds(AMBIANCE_FOLDS, s);
     folds.follow(true, CLOCK);
-    folds.reveal("weather");
-    folds.tap("weather", false);
-    assert.equal(folds.get(390, CLOCK).weather, false);
-    assert.deepEqual(s.json(AMB), { weather: false });
-    folds.tap("weather", true);
+    folds.reveal("time");
+    folds.tap("time", false);
+    assert.equal(folds.get(390, CLOCK).time, false);
+    assert.deepEqual(s.json(AMB), { time: false });
+    folds.tap("time", true);
     folds.follow(false, CLOCK);
-    assert.equal(folds.get(390, CLOCK).weather, true, "the tap, not a reveal, so closing keeps it");
+    assert.equal(folds.get(390, CLOCK).time, true, "the tap, not a reveal, so closing keeps it");
   });
 
   test("endReveals ends every reveal at once", () => {
-    const folds = createFolds(AMBIANCE_FOLDS, storage());
-    folds.reveal("weather");
+    const folds = createFolds(AMBIANCE_FOLDS, storage({ [AMB]: JSON.stringify({ sound: false }) }));
+    folds.reveal("sound");
     folds.reveal("time");
     folds.endReveals();
-    assert.deepEqual(folds.get(390, CLOCK), { time: false, weather: false, sound: true });
+    assert.deepEqual(folds.get(390, CLOCK), { time: false, sound: false });
   });
 
   test("every change tells the page, and a listener that stopped hears nothing", () => {
@@ -273,12 +307,12 @@ describe("reveals (6.1)", () => {
     let heard = 0;
     const stop = folds.subscribe(() => heard++);
     folds.follow(true, CLOCK);
-    folds.reveal("weather");
+    folds.reveal("time");
     folds.tap("sound", false);
     folds.follow(false, CLOCK);
     assert.equal(heard, 4, "the hold, the reveal, the tap and the close");
     stop();
-    folds.reveal("weather");
+    folds.reveal("time");
     assert.equal(heard, 4);
   });
 });
@@ -440,18 +474,18 @@ describe("useFolds, as a surface's groups read it", () => {
 
   test("onToggle flips its section in the Room's store", () => {
     const { seen, scope } = drawn({ clock: true });
-    seen.weather.onToggle();
-    assert.equal(scope.get(ambianceFoldsSlot).get(390, CLOCK).weather, true);
+    seen.sound.onToggle();
+    assert.equal(scope.get(ambianceFoldsSlot).get(390, CLOCK).sound, false);
   });
 
   test("in a preview a tap folds for its page and writes nothing", () => {
     const s = storage();
     const preview = drawn({ clock: true, preview: true, storage: s });
-    preview.seen.weather.onToggle();
-    assert.equal(preview.scope.get(ambianceFoldsSlot).get(390, CLOCK).weather, true);
+    preview.seen.sound.onToggle();
+    assert.equal(preview.scope.get(ambianceFoldsSlot).get(390, CLOCK).sound, false);
     assert.equal(s.writes(), 0, "a preview writes nothing");
     const own = drawn({ clock: true, storage: s });
-    own.seen.weather.onToggle();
+    own.seen.sound.onToggle();
     assert.equal(s.writes(), 1, "the DM's own page writes its tap");
   });
 
