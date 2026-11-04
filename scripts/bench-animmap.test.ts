@@ -46,6 +46,16 @@ describe("the animated maps bench's gates", () => {
     assert.deepEqual(gateFailures(session(0, -0.07)), ["session: element drift -7.0%"]);
   });
 
+  test("the turned run's draws are held to the same gates (docs/design/design-v1-video-turns.md 7)", () => {
+    const turned = (median: number, p95: number, most: number): Row[] => [
+      { row: "draw median", scene: "turned", value: median, unit: "ms" },
+      { row: "draw p95", scene: "turned", value: p95, unit: "ms" },
+      { row: "most a second", scene: "turned", value: most, unit: "draws" },
+    ];
+    assert.deepEqual(gateFailures(turned(1.5, 4, 32)), []);
+    assert.deepEqual(gateFailures(turned(1.6, 4.2, 33)), ["turned: a video draw's median 1.60 ms", "turned: a video draw's p95 4.20 ms", "turned: 33 video draws in one second"]);
+  });
+
   test("quantiles of the frames and draws", () => {
     assert.equal(quantile(Array.from({ length: 100 }, (_, i) => i + 1), 0.95), 96);
     assert.equal(quantile([3, 1, 2], 0.5), 2);

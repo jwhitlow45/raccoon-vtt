@@ -22,8 +22,12 @@
  *   percentile, from the board's own timing (features/animmap/board.ts).
  * - most a second: the most video draws in any second over 10 s, and the
  *   draws while the page is hidden and on Still.
- * Then the long run: a 10 minute session on the hex scene, the JS heap and
- * the page's element count after a garbage collection at its start and end.
+ * Then a turned run (docs/design/design-v1-video-turns.md 7): the same
+ * video with `turn: 90` in its row, as a portrait phone video's upload
+ * leaves it, on a portrait still, so every draw turns the frame. Its draw
+ * rows are gated as the others. Then the long run: a 10 minute session on
+ * the hex scene, the JS heap and the page's element count after a garbage
+ * collection at its start and end.
  *
  * Gates (6.1): a pan's and a drag's p95 at most 2 ms over the still, a
  * draw's median at most 1.5 ms and its p95 at most 4 ms, at most 32 video
@@ -44,6 +48,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import pg from "pg";
 import { chromium, type CDPSession, type Page } from "playwright-core";
 import sharp from "sharp";
 import { OpSocket, sleep, SocketWatch, startServer, Touches, waitFor } from "../e2e/harness.ts";
@@ -58,7 +63,7 @@ export const DRAW_P95_MS = 4;
 export const MOST_A_SECOND = 32;
 export const DRIFT = 0.05;
 
-export type Scene = "square" | "hex" | "session";
+export type Scene = "square" | "hex" | "turned" | "session";
 export type Row = { row: string; scene: Scene; value: number; unit: "ms p95" | "ms" | "draws" | "share" | "bytes" | "nodes" };
 
 export function quantile(values: readonly number[], q: number): number {
@@ -76,16 +81,18 @@ export function gateFailures(rows: readonly Row[]): string[] {
       const moving = at(`${gesture}, moving`, scene);
       if (still !== undefined && moving !== undefined && moving - still > FRAME_BUDGET_MS) out.push(`${scene} ${gesture}: p95 ${(moving - still).toFixed(1)} ms over the still`);
     }
+    for (const quiet of ["draws hidden", "draws on Still"]) {
+      const n = at(quiet, scene);
+      if (n !== undefined && n !== 0) out.push(`${scene}: ${n} ${quiet}`);
+    }
+  }
+  for (const scene of ["square", "hex", "turned"] as const) {
     const median = at("draw median", scene);
     const p95 = at("draw p95", scene);
     if (median !== undefined && median > DRAW_MEDIAN_MS) out.push(`${scene}: a video draw's median ${median.toFixed(2)} ms`);
     if (p95 !== undefined && p95 > DRAW_P95_MS) out.push(`${scene}: a video draw's p95 ${p95.toFixed(2)} ms`);
     const most = at("most a second", scene);
     if (most !== undefined && most > MOST_A_SECOND) out.push(`${scene}: ${most} video draws in one second`);
-    for (const quiet of ["draws hidden", "draws on Still"]) {
-      const n = at(quiet, scene);
-      if (n !== undefined && n !== 0) out.push(`${scene}: ${n} ${quiet}`);
-    }
   }
   for (const drift of ["heap drift", "element drift"]) {
     const v = at(drift, "session");
@@ -336,6 +343,34 @@ async function main(): Promise<void> {
       add({ row: "draws on Still", scene: name, value: (await draws(page)) - before, unit: "draws" });
       await page.evaluate(() => localStorage.removeItem("rvtt.animatedMaps"));
     }
+
+    // Turned: the plain file's row says turn 90, as a portrait phone video's upload leaves it, on a portrait still of the drawn size.
+    const db = new pg.Pool({ connectionString: databaseUrl });
+    try {
+      await db.query(`update assets set video = video || '{"turn": 90}'::jsonb where id = $1`, [video.id]);
+    } finally {
+      await db.end();
+    }
+    const portraitPng = await sharp({ create: { width: video.height, height: video.width, channels: 3, background: { r: 60, g: 70, b: 60 } } }).png().toBuffer();
+    const portrait = (await (await context.request.put(`${server.origin}/api/rooms/${roomId}/assets?kind=map`, { headers: { ...headers, "content-type": "image/png" }, data: portraitPng })).json()) as { id: string; width: number; height: number };
+    const turnedBounds = { w: Math.floor(portrait.width / square.cellPx), h: Math.floor(portrait.height / square.cellPx) };
+    await ops.send({ t: "scene.update", sceneId: square.id, patch: { bounds: turnedBounds, defaultView: { x: turnedBounds.w / 2, y: turnedBounds.h / 2, zoom: square.zoom } } });
+    await ops.send({ t: "scene.setMap", sceneId: square.id, map: { assetId: portrait.id, widthPx: portrait.width, heightPx: portrait.height, cellPx: square.cellPx, originPx: { x: 0, y: 0 }, video: { ...mapVideo, turn: 90 } } });
+    await ops.send({ t: "room.setPlayerScene", sceneId: square.id });
+    await page.reload();
+    await page.locator(".konvajs-content").first().waitFor({ state: "attached" });
+    await waitFor("the turned video playing", async () => ((await boardState(page)) === "playing" ? true : null), 20_000);
+    // The server fills the facts from the row, so the map draws turned only once the row says so.
+    await waitFor("the turned facts", () => (watch.state?.scenes[square.id]?.map?.video?.turn === 90 ? true : null), 10_000);
+    await sleep(2500);
+    const turnedTimes = await throttled(async () => {
+      await sleep(12_000);
+      return drawTimes(page);
+    });
+    add({ row: "draw median", scene: "turned", value: quantile(turnedTimes, 0.5), unit: "ms" });
+    add({ row: "draw p95", scene: "turned", value: quantile(turnedTimes, 0.95), unit: "ms" });
+    add({ row: "most a second", scene: "turned", value: await throttled(() => mostInASecond(page, 10_000)), unit: "draws" });
+    add({ row: "state", scene: "turned", value: (await boardState(page)) === "playing" ? 1 : 0, unit: "share" });
 
     // The long session: the hex scene playing with heavy rain, slowed throughout.
     await fresh(hex.id, hex.cellPx, true);
