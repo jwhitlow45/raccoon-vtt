@@ -4,6 +4,7 @@ import { chunkHeights } from "#shared/rules/heights.ts";
 import { seenGround, type Cell, type GroundSource } from "../features/builder/heights/ground.ts";
 import { cameraOfStage, screenToView, type Camera, type Insets, type Point, type Rect, type Size } from "./camera.ts";
 import { cellAtPoint, cellId, cellPolygon, groundSurface, lineInterval, neighborsOf, polygonSide, sameCell, sceneExtent, type GroundCell, type GroundSurface } from "./groundCells.ts";
+import { NO_RUNS, stairCandidates, stairRuns, treadUnder, TREADS, type StairReader, type StairRuns, type StairStep } from "./stairRuns.ts";
 
 /**
  * The board's two views (docs/design/design-v1-isometric-view.md section 4).
@@ -183,8 +184,22 @@ export function standScale(lowPower: boolean): number {
   return (lowPower ? 2 : 1) * STAND_MIN_PX;
 }
 
-/** What drawn heights read: the ground this viewer may see (heights/ground.ts) on the scene's own grid, never one guessed from its chunks, and whether heights stand at this zoom. */
-export type DrawnSource = GroundSource & { grid: Grid; stand: boolean };
+/**
+ * From this many screen pixels a cell, twice it in Low power, the relief
+ * draws its detail: stairs climb in steps and creatures stand on them
+ * (docs/design/design-v1-iso-depth.md 7, D-261102-883). Below it every reader
+ * (the drawing, picks, a standee's base, the drag, the ground stage) reads
+ * the plain pieces together.
+ */
+export const DETAIL_MIN_PX = 24;
+
+/** Whether the relief draws its detail at this zoom: DETAIL_MIN_PX a cell, twice it in Low power. */
+export function heightsDetail(scale: number, lowPower: boolean): boolean {
+  return scale >= (lowPower ? 2 : 1) * DETAIL_MIN_PX;
+}
+
+/** What drawn heights read: the ground this viewer may see (heights/ground.ts) on the scene's own grid, never one guessed from its chunks, whether heights stand at this zoom, and whether the detail shows (`heightsDetail`, false when left out). */
+export type DrawnSource = GroundSource & { grid: Grid; stand: boolean; detail?: boolean };
 
 /**
  * A cell's drawn ground in feet: its seen ground while heights stand, and 0
@@ -235,7 +250,78 @@ export type DrawnHeights = GroundSurface & {
   at(x: number, y: number): number;
   /** What it was read from, when `drawnHeights` made it: two snapshots of one source but their fog differ only under the fog tiles that differ (relief/volumes.ts groundChanges). */
   readonly source?: DrawnHeightsSource;
+  /**
+   * The stairs that climb in steps, found whatever the zoom so a piece's
+   * bounds never change with the detail (docs/design/design-v1-iso-depth.md 6).
+   * Every reader of steps goes through `stepAt`, which holds them to `detail`.
+   */
+  readonly runs?: StairRuns;
+  /** Whether the detail shows at this zoom (`heightsDetail`). */
+  readonly detail?: boolean;
 };
+
+/** The stepping stair at a cell key, as every reader of steps sees it: none while the detail does not show. */
+export function stepAt(heights: Pick<DrawnHeights, "runs" | "detail">, x: number, y: number): StairStep | undefined {
+  return heights.detail ? heights.runs?.at(x, y) : undefined;
+}
+
+/** The drawn surface under a world point in cells of height: the tread under it on a stepping stair, else the drawn ground (`atPoint`). */
+export function surfaceAt(heights: DrawnHeights, p: Point): number {
+  if (heights.detail && heights.runs && heights.runs.size > 0 && !isHex(heights.grid)) {
+    const x = Math.floor(p.x);
+    const y = Math.floor(p.y);
+    const s = heights.runs.at(x, y);
+    if (s) return treadUnder(s, x, y, p);
+  }
+  return heights.atPoint(p);
+}
+
+/** Whether any of a footprint's cells is a stepping stair for these heights' readers. */
+function steppingUnder(heights: Pick<DrawnHeights, "runs" | "detail">, cells: Iterable<GroundCell>): boolean {
+  if (!heights.detail || !heights.runs || heights.runs.size === 0) return false;
+  for (const c of cells) if (heights.runs.at(c.col, c.row)) return true;
+  return false;
+}
+
+/**
+ * The stand surface under a footprint, in cells of height
+ * (docs/design/design-v1-iso-depth.md 5.4, D-261102-882): the highest of its
+ * cells' surfaces, each its drawn ground, or on a stepping stair the tread
+ * under the point of that cell nearest the footprint's middle. So a Medium
+ * on a stair stands on its middle tread, and a Large across a stair and a
+ * higher landing keeps the landing. With no stepping stair under it, it is
+ * the drawn footprint ground (`drawnFootprintGround`) exactly.
+ */
+export function standSurface(heights: DrawnHeights, cells: readonly GroundCell[]): number {
+  if (!steppingUnder(heights, cells)) return highestOver(cells, (c) => heights.atCell(c));
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const c of cells) {
+    x0 = Math.min(x0, c.col);
+    y0 = Math.min(y0, c.row);
+    x1 = Math.max(x1, c.col + 1);
+    y1 = Math.max(y1, c.row + 1);
+  }
+  const middle = { x: (x0 + x1) / 2, y: (y0 + y1) / 2 };
+  return highestOver(cells, (c) => {
+    const s = heights.runs!.at(c.col, c.row);
+    return s ? treadUnder(s, c.col, c.row, middle) : heights.atCell(c);
+  });
+}
+
+/**
+ * A standee's drawn base in cells of height, as every reader of it takes it
+ * (the standees, `tokenBase`, the drag): on the stand surface when it stands
+ * on the ground, its elevation its footprint's seen ground, and otherwise
+ * `drawnBase`, so a flier keeps its elevation and a token inside the ground
+ * its base. The rules' ground still decides which it is.
+ */
+export function drawnStandBase(src: DrawnSource, heights: DrawnHeights, cells: readonly GroundCell[], elevation: number, feetPerCell: number): number {
+  if (steppingUnder(heights, cells) && elevation === seenFootprintGround(src, cells)) return standSurface(heights, cells);
+  return drawnBase(src, cells, elevation) / feetPerCell;
+}
 
 /** The inputs of a `drawnHeights` snapshot, the chunks and the fog by reference. */
 export type DrawnHeightsSource = Readonly<Pick<DrawnSource, "sceneId" | "chunks" | "fog" | "grid" | "bounds" | "stand">> & { readonly feet: number };
@@ -248,9 +334,11 @@ export function flatHeights(bounds: { w: number; h: number }, grid: Grid = SQUAR
 /**
  * The drawn heights of a viewer's scene, read once per pick or per change
  * of the ground. Each cell's drawn ground is read once and kept, since a
- * hex's fog test reads its sub-cells.
+ * hex's fog test reads its sub-cells. Given the walls' stair directions
+ * (`stairs`), on squares it finds the stairs that climb in steps too
+ * (stairRuns.ts), on the ground this viewer has seen.
  */
-export function drawnHeights(src: DrawnSource, feetPerCell: number): DrawnHeights {
+export function drawnHeights(src: DrawnSource, feetPerCell: number, stairs: StairReader | null = null): DrawnHeights {
   const source: DrawnHeightsSource = { sceneId: src.sceneId, chunks: src.chunks, fog: src.fog, grid: src.grid, bounds: src.bounds, stand: src.stand, feet: feetPerCell };
   if (!src.stand) return { ...flatHeights(src.bounds, src.grid), source };
   const grid = src.grid;
@@ -278,7 +366,14 @@ export function drawnHeights(src: DrawnSource, feetPerCell: number): DrawnHeight
     return z;
   };
   const surface = groundSurface(grid, src.bounds, (c) => at(c.col, c.row));
-  return { ...surface, low: low / feetPerCell, high: high / feetPerCell, at: (x, y) => surface.atCell({ col: x, row: y }), source };
+  const runs = stairs && !isHex(grid) ? stairRuns(stairCellsOf(src), (x, y) => stairs.stairAt(x, y), at, (x, y) => seenGround(src, { x, y }) !== null) : NO_RUNS;
+  return { ...surface, low: low / feetPerCell, high: high / feetPerCell, at: (x, y) => surface.atCell({ col: x, row: y }), source, runs, detail: src.detail ?? false };
+}
+
+/** The cells of a scene's chunks that may hold a stair. */
+function* stairCellsOf(src: DrawnSource): Generator<Point> {
+  const prefix = `${src.sceneId}:`;
+  for (const [key, chunk] of Object.entries(src.chunks)) if (key.startsWith(prefix)) yield* stairCandidates(chunk);
 }
 
 // ---------------------------------------------------------------- picking
@@ -350,11 +445,17 @@ export function pickWalk(src: PickSource, screen: Point): PickHit {
   while (visited <= w + h) {
     visited++;
     const ground = heights.at(cx, cy);
-    if (z <= ground) return { point: inCell(at(z), cx, cy), z, cell: { col: cx, row: cy }, visited };
     const exitX = ((stepX > 0 ? cx + 1 : cx) - a.x) / dx;
     const exitY = ((stepY > 0 ? cy + 1 : cy) - a.y) / dy;
     const out = Math.max(exitX, exitY, leave);
-    if (ground >= out) return { point: inCell(at(ground), cx, cy), z: ground, cell: { col: cx, row: cy }, visited };
+    const step = stepAt(heights, cx, cy);
+    if (step) {
+      const hit = treadHit(step, cx, cy, z, out, a, dx, dy);
+      if (hit !== null) return { point: inCell(at(hit), cx, cy), z: hit, cell: { col: cx, row: cy }, visited };
+    } else {
+      if (z <= ground) return { point: inCell(at(z), cx, cy), z, cell: { col: cx, row: cy }, visited };
+      if (ground >= out) return { point: inCell(at(ground), cx, cy), z: ground, cell: { col: cx, row: cy }, visited };
+    }
     z = out;
     if (out === leave) break;
     if (exitX >= exitY) cx += stepX;
@@ -433,6 +534,36 @@ function hexWalk(src: PickSource, v: ViewPoint, top: number, bottom: number): Pi
   // Past the box the ground is 0: its top when the trace is still above it.
   if (z > 0) return flat(at(0), 0, visited);
   return flat(at(z), z, visited);
+}
+
+/**
+ * Where a press's trace, `a` + z·(dx, dy), meets a stepping stair's treads
+ * in its square, entering at height `zIn` and leaving at `zOut`: each tread
+ * a level top, as the walk reads a cell, met on its near face (a riser, or
+ * the square's own near side) when the trace reaches it at or below its
+ * height, or on its top when its height lies between. Null when the trace
+ * passes over every tread (docs/design/design-v1-iso-depth.md 5.4, Picks).
+ */
+function treadHit(s: StairStep, cx: number, cy: number, zIn: number, zOut: number, a: Point, dx: number, dy: number): number | null {
+  const across = s.d === "e" || s.d === "w";
+  // The heights at which the trace crosses the lines between treads, inside the square, highest first.
+  const cuts: number[] = [];
+  for (let j = 1; j < TREADS; j++) {
+    const f = j / TREADS;
+    const line = s.d === "e" ? cx + f : s.d === "w" ? cx + 1 - f : s.d === "s" ? cy + f : cy + 1 - f;
+    const zc = across ? (line - a.x) / dx : (line - a.y) / dy;
+    if (zc < zIn && zc > zOut) cuts.push(zc);
+  }
+  cuts.sort((p, q) => q - p);
+  let from = zIn;
+  for (const to of [...cuts, zOut]) {
+    const mid = (from + to) / 2;
+    const tread = treadUnder(s, cx, cy, { x: a.x + mid * dx, y: a.y + mid * dy });
+    if (from <= tread) return from;
+    if (tread >= to) return tread;
+    from = to;
+  }
+  return null;
 }
 
 /** The cell a trace moving by `step` along an axis is in at `x`: on a cell line, the cell it moves into. */
