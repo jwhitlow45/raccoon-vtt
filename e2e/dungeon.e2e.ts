@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
+import { versionChar } from "../client/features/dungeon/seed.ts";
+import { GENERATOR_VERSION } from "../client/features/dungeon/settings.ts";
 import { CHUNK_CELLS, type BuildChunk, type RoomState } from "../shared/model.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { undoSetup } from "./helpers/undoScope.ts";
@@ -38,11 +40,13 @@ const shots = new Shots(SHOT_DIR === "0" ? null : SHOT_DIR);
 const PHONE = { width: 390, height: 844 };
 const DESKTOP = { width: 1280, height: 800 };
 /** A seed of this generator's version, so its dungeon is the same on every run. */
-const SEED = "1K7Q-H2MX-A9F3-TWQ5";
+const SEED = `${versionChar()}K7Q-H2MX-A9F0-TW15`;
 /** The same seed as a DM might type it: lower case, spaces, O for 0 and L for 1. */
-const SEED_TYPED = "lk7q h2mx a9f3 twq5";
+const SEED_TYPED = `${versionChar().toLowerCase()}k7q h2mx a9fo twl5`;
+/** The words for a seed that does not read, its example a seed of this version. */
+const SEED_BAD = `A seed is 16 letters and digits, like ${versionChar()}K7Q-H2MX-A9F3-TWQ5.`;
 /** A seed whose version character is not this generator's. */
-const OTHER_VERSION = "2K7Q-H2MX-A9F3-TWQ5";
+const OTHER_VERSION = `${versionChar(GENERATOR_VERSION + 1)}K7Q-H2MX-A9F3-TWQ5`;
 /** Main-thread limits under the 4x slowdown (design section 8). */
 const TASK_LIMIT_MS = 100;
 
@@ -388,8 +392,8 @@ describe("dungeon generator", { concurrency: false }, () => {
     assert.equal(await (await previewImg(dialog)).getAttribute("alt"), name, "the same dungeon from the typed seed");
     await shots.take(dm, "DG-2-fixed-seed");
 
-    await seed.fill("1K7Q-H2MX");
-    await dialog.getByText("A seed is 16 letters and digits, like 1K7Q-H2MX-A9F3-TWQ5.", { exact: true }).waitFor();
+    await seed.fill(SEED.slice(0, 9));
+    await dialog.getByText(SEED_BAD, { exact: true }).waitFor();
     assert.equal(await make.isDisabled(), true, "Make is off for a bad seed");
     assert.equal(await (await previewImg(dialog)).getAttribute("alt"), name, "the old preview stays");
     await shots.take(dm, "DG-2-bad-seed");
@@ -588,7 +592,7 @@ describe("dungeon generator", { concurrency: false }, () => {
     for (const c of sceneChunks(state(patSocket), run.sceneId)) {
       for (const f of Object.values(c.edges)) if (f.kind === "door") assert.notEqual((f as { state?: string }).state, "locked", "a locked door reads closed");
     }
-    assert.ok(!patSocket.everSaw("1K7Q") && !patSocket.everSaw("H2MXA9F3"), "the seed never reaches a player");
+    assert.ok(!patSocket.everSaw(SEED.slice(0, 4)) && !patSocket.everSaw(SEED.replace(/-/g, "").slice(4, 12)), "the seed never reaches a player");
     await shots.take(pat, "DG-7-pat-explore");
     await ops.send({ t: "room.setPlayerScene", sceneId: run.firstSceneId });
   });
