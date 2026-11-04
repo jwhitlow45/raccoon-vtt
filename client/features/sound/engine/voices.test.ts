@@ -5,6 +5,7 @@ import { projectState } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { LOOP_FADE_IN_MS, SHORT_FADE_MS, STOP_FADE_MS, type Playing, type Sound } from "#shared/sound.ts";
 import { AT, DM, P1, room } from "#shared/testutil.ts";
+import { SEEK_FADE_MS } from "./settle.ts";
 import { BLACKOUT_FADE_MS, gainAt, leaveMs, LOOKAHEAD_MS, mixGain, planVoices, Voices, type MusicState } from "./voices.ts";
 
 /*
@@ -326,7 +327,7 @@ describe("the voices on the pool", () => {
     ]);
     t.now += 100;
     ctx.currentTime = 0.1;
-    voices.check(false);
+    voices.check();
     const ramp = after()[1]!;
     assert.ok(ramp.kind === "ramp" && ramp.value === 1 && Math.abs(ramp.at - SHORT_FADE_MS / 1000) < 1e-9, "the check keeps the ramp, never a step to 1");
     assert.ok(after().every((e) => e.kind !== "set" || e.value === 0.4));
@@ -349,7 +350,7 @@ describe("the voices on the pool", () => {
     const tried = { plays: el.plays, seeks: el.seeks };
     for (let i = 0; i < 2; i++) {
       t.now += 1_000;
-      voices.check(false);
+      voices.check();
       await wait(250);
     }
     assert.deepEqual(states, ["playing", "loading"], "two checks later it still loads, never back to playing for a moment");
@@ -358,7 +359,7 @@ describe("the voices on the pool", () => {
     gestures.dispatchEvent(new Event("click"));
     assert.equal(el.plays, tried.plays + 1, "placed again inside the gesture");
     await wait(10);
-    voices.check(false);
+    voices.check();
     assert.equal(el.plays, tried.plays + 1);
     assert.deepEqual(states, ["playing", "loading"]);
     allowed = true;
@@ -369,7 +370,7 @@ describe("the voices on the pool", () => {
     await wait(10);
     el.paused = true;
     t.now += 1_000;
-    voices.check(false);
+    voices.check();
     assert.equal(el.plays, tried.plays + 3, "once it played, a stop short of its end is put back at the check");
     voices.dispose();
   });
@@ -425,7 +426,7 @@ describe("the voices on the pool", () => {
     };
     el.paused = true;
     t.now += 1_000;
-    voices.check(false);
+    voices.check();
     el.onerror?.();
     voices.retry();
     assert.ok(!el.paused, "the newer play sounds");
@@ -434,7 +435,7 @@ describe("the voices on the pool", () => {
     el.paused = true;
     const plays = el.plays;
     t.now += 1_000;
-    voices.check(false);
+    voices.check();
     assert.equal(el.plays, plays + 1, "stopped again, it is put back at the check");
     voices.dispose();
   });
@@ -443,38 +444,97 @@ describe("the voices on the pool", () => {
     const t = { now: T };
     const { voices, pool } = rig(t, { refuse: () => "NotAllowedError", gestures: new EventTarget() });
     voices.update(planVoices(playingTavern, SOUNDS, t.now), () => SHORT_FADE_MS);
-    voices.check(false);
+    voices.check();
     const el = pool.find((e) => e.src === "/api/assets/a-tavern")!;
     assert.deepEqual({ plays: el.plays, seeks: el.seeks }, { plays: 1, seeks: 1 });
     voices.dispose();
   });
 
-  test("a drift seek that a placement overtook does nothing, so the element is not sought twice or dipped", async () => {
+  test("a track that falls behind, as through a stall on a slow connection, is never sought or slowed: it plays on from where it is", async () => {
+    const t = { now: T };
+    const { voices, pool } = rig(t, { gestures: new EventTarget() });
+    voices.update(planVoices(playingTavern, SOUNDS, t.now), () => SHORT_FADE_MS);
+    const el = pool.find((e) => e.src === "/api/assets/a-tavern")!;
+    for (let i = 0; i < 3; i++) await Promise.resolve();
+    const placed = { seeks: el.seeks, plays: el.plays };
+    // The element stands still while the timeline moves on 10 s: 10 s behind by the end.
+    for (let i = 0; i < 10; i++) {
+      t.now += 1_000;
+      voices.check();
+    }
+    assert.deepEqual({ seeks: el.seeks, plays: el.plays, rate: el.playbackRate }, { ...placed, rate: 1 });
+    voices.dispose();
+  });
+
+  test("a seek the browser dropped before the file loaded is put right once, at the first check that finds the track playing", async () => {
     mock.timers.enable({ apis: ["setTimeout"] });
-    let clock = 0;
-    const now = mock.method(performance, "now", () => clock);
     try {
       const t = { now: T };
       const { voices, pool } = rig(t, { gestures: new EventTarget() });
       voices.update(planVoices(playingTavern, SOUNDS, t.now), () => SHORT_FADE_MS);
       const el = pool.find((e) => e.src === "/api/assets/a-tavern")!;
-      // Its play answered.
       for (let i = 0; i < 3; i++) await Promise.resolve();
-      // A second later the element has not moved, 1 s behind: the check seeks, fading out first.
-      clock += 1_000;
+      // The browser dropped the seek to 10 s in: the element plays from the file's start.
+      el.currentTime = 0;
+      el.seeks--;
+      const seeks = el.seeks;
       t.now += 1_000;
-      voices.check(false);
+      voices.check();
+      mock.timers.tick(SEEK_FADE_MS);
+      assert.equal(el.seeks, seeks + 1, "sought once, after its fade out");
+      assert.equal(el.currentTime, 11, "to the timeline's place");
+      t.now += 1_000;
+      voices.check();
+      mock.timers.tick(SEEK_FADE_MS);
+      assert.equal(el.seeks, seeks + 1, "and never again");
+      voices.dispose();
+    } finally {
+      mock.timers.reset();
+    }
+  });
+
+  test("a check's seek that a placement overtook does nothing, so the element is not sought twice or dipped", async () => {
+    mock.timers.enable({ apis: ["setTimeout"] });
+    try {
+      const t = { now: T };
+      const { voices, pool } = rig(t, { gestures: new EventTarget() });
+      voices.update(planVoices(playingTavern, SOUNDS, t.now), () => SHORT_FADE_MS);
+      const el = pool.find((e) => e.src === "/api/assets/a-tavern")!;
+      for (let i = 0; i < 3; i++) await Promise.resolve();
+      // The browser dropped the seek, so the check seeks, fading out first.
+      el.currentTime = 0;
+      el.seeks--;
+      t.now += 1_000;
+      voices.check();
       const seeks = el.seeks;
       // Before the seek's fade is out the element stops, and the next check puts it back in place.
       el.paused = true;
-      voices.check(false);
+      voices.check();
       assert.equal(el.seeks, seeks + 1);
-      clock += 200;
       mock.timers.tick(200);
       assert.equal(el.seeks, seeks + 1, "the overtaken seek moved nothing");
       voices.dispose();
     } finally {
-      now.mock.restore();
+      mock.timers.reset();
+    }
+  });
+
+  test("a pass the timeline ended while its element still plays, having fallen behind, fades out instead of stopping with a click", async () => {
+    mock.timers.enable({ apis: ["setTimeout"] });
+    try {
+      const t = { now: T };
+      const once: Playing = { ...quiet, music: { run: "r1", repeat: "off", fade: 0, now: { soundId: "tavern", at: T - 10_000 } } };
+      const { voices, pool } = rig(t, { gestures: new EventTarget() });
+      voices.update(planVoices(once, SOUNDS, t.now), () => SHORT_FADE_MS);
+      const el = pool.find((e) => e.src === "/api/assets/a-tavern")!;
+      for (let i = 0; i < 3; i++) await Promise.resolve();
+      t.now = T + 50_000;
+      voices.update(planVoices(once, SOUNDS, t.now), () => SHORT_FADE_MS);
+      assert.equal(el.paused, false, "it plays on through the fade");
+      mock.timers.tick(SHORT_FADE_MS + 60);
+      assert.equal(el.paused, true, "then stops");
+      voices.dispose();
+    } finally {
       mock.timers.reset();
     }
   });
@@ -489,7 +549,7 @@ describe("the voices on the pool", () => {
     const plays = el.plays;
     for (let i = 0; i < 2; i++) {
       t.now += 1_000;
-      voices.check(false);
+      voices.check();
       await wait(250);
     }
     assert.equal(el.plays, plays + 2, "each check tries it again");
@@ -510,7 +570,7 @@ describe("the voices on the pool", () => {
     el.readyState = 1;
     t.now += 1_000;
     voices.update(planVoices(playingTavern, SOUNDS, t.now), () => SHORT_FADE_MS);
-    voices.check(false);
+    voices.check();
     await wait(250);
     assert.deepEqual(states, ["playing", "loading"], "loading once, never back to playing for a moment");
     el.readyState = 4;
@@ -531,7 +591,7 @@ describe("the voices on the pool", () => {
     el.onerror?.();
     assert.ok(!states.includes("failed"), "not the voice's own file");
     t.now += 1_000;
-    voices.check(false);
+    voices.check();
     assert.equal(el.src, "/api/assets/a-tavern", "the check put its file back");
     el.error = { code: 4 };
     el.onerror?.();
@@ -577,7 +637,7 @@ describe("the voices on the pool", () => {
     el.onerror?.();
     assert.equal(states.at(-1), "failed");
     t.now += 1_000;
-    voices.check(false);
+    voices.check();
     assert.equal(el.loads, loads + 1, "the check leaves a failed voice alone");
     assert.equal(states.at(-1), "failed");
     voices.dispose();

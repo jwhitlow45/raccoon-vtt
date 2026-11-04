@@ -212,12 +212,10 @@ function browserContext(): AudioContext | null {
 }
 
 /**
- * Readies a pooled element. The drift check plays it 1.5% or 3% off now and
- * then (drift.ts). With the pitch kept the browser time-stretches to do it,
- * and in Chrome every change of rate then steps the waveform, a click, and
- * the stretch warbles between: players heard it as a bad network. With the
- * pitch let go the element is resampled, so a nudge is 26 or 51 cents of
- * pitch for a second or two and no click (D-261102-870).
+ * Readies a pooled element. Elements play at speed 1 (settle.ts), but the
+ * pitch stays let go, since a change of rate with the pitch kept makes
+ * Chrome time-stretch, and every change then steps the waveform, a click
+ * players heard as a bad network (D-261102-870).
  */
 export function poolElement<T extends { preload: string; preservesPitch: boolean }>(el: T): T {
   el.preload = "auto";

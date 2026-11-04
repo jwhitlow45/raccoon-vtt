@@ -13,7 +13,7 @@ import {
 } from "#shared/sound.ts";
 import { onActivation, type Activation } from "../../../lib/activation.ts";
 import type { SoundUnlock } from "./context.ts";
-import { Drift, SEEK_FADE_MS } from "./drift.ts";
+import { SEEK_FADE_MS, Settle } from "./settle.ts";
 
 /**
  * Music and background sounds on this page (docs/design/design-v1-music.md
@@ -21,7 +21,8 @@ import { Drift, SEEK_FADE_MS } from "./drift.ts";
  * sound should sound at a server time, where in its file, and its envelope.
  * `Voices` keeps the pool's elements on that plan: each element runs
  * through its own gains to the music or background channel, is aimed at
- * its place plus the output's latency, and the drift check keeps it there.
+ * its place plus the output's latency when it starts, and then plays on by
+ * itself (settle.ts).
  */
 
 /** A voice due to start within this is loaded ahead, paused at its start, so it can start on time. */
@@ -200,7 +201,7 @@ type Live = {
   fade: GainNode;
   env: GainNode;
   mix: GainNode;
-  drift: Drift;
+  settle: Settle;
   /** Set once the element plays, null while it waits for its start. */
   playing: boolean;
   startTimer: ReturnType<typeof setTimeout> | null;
@@ -282,8 +283,7 @@ export class Voices {
         if (volumeChanged) this.#ramp(v.mix.gain, mixGain(plan), SHORT_FADE_MS);
         this.#envelope(v);
       } else if (t >= v.plan.startAt + v.plan.lengthMs) {
-        // A pass that ended by itself is silent already, and its element is free for the next.
-        this.#release(v);
+        this.#ended(v);
       } else {
         this.#leave(v, leaveMs(v.plan));
       }
@@ -297,25 +297,19 @@ export class Voices {
     this.#reportMusic();
   }
 
-  /** Once a second: the drift check, the envelopes renewed, starts that waited for an element, ends released. */
-  check(forced: boolean): void {
+  /** Once a second: a dropped seek put right, the envelopes renewed, starts that waited for an element, ends released. */
+  check(): void {
     const t = this.#env.serverNow();
     for (const v of this.#live.values()) {
       if (v.leaving) continue;
       if (t > v.plan.startAt + v.plan.lengthMs + 500) {
-        this.#release(v);
+        this.#ended(v);
         continue;
       }
       this.#envelope(v);
       if (this.#heal(v, t)) continue;
       if (!v.playing || v.el.paused || v.el.readyState < 2) continue;
-      if (forced) v.drift.force();
-      const action = v.drift.check(performance.now(), v.el.currentTime * 1000, this.#aim(v.plan, t));
-      if (action.kind === "rate") {
-        if (v.el.playbackRate !== action.rate) v.el.playbackRate = action.rate;
-      } else {
-        this.#seek(v);
-      }
+      if (v.settle.check(v.el.currentTime * 1000)) this.#seek(v);
     }
     this.#reportMusic();
   }
@@ -393,7 +387,7 @@ export class Voices {
     mix.gain.value = mixGain(plan);
     source.connect(fade).connect(env).connect(mix).connect(this.#env.output[plan.channel]);
     const url = this.#env.url(plan.assetId, plan.channel);
-    const v: Live = { plan, index, el, fade, env, mix, drift: new Drift(), playing: false, startTimer: null, leaving: false, failed: false, dueSince: null, refused: false, plays: 0, asking: false, places: 0, url, smoothUntil: 0 };
+    const v: Live = { plan, index, el, fade, env, mix, settle: new Settle(), playing: false, startTimer: null, leaving: false, failed: false, dueSince: null, refused: false, plays: 0, asking: false, places: 0, url, smoothUntil: 0 };
     this.#live.set(plan.key, v);
     el.onerror = () => {
       // Only a failure of the voice's own file fails it. One of a source swapped in, as a bless's silence, is the check's to put back.
@@ -471,7 +465,7 @@ export class Voices {
     v.places++;
     const ctxNow = this.#env.ctx.currentTime;
     if (aim < 0) {
-      // Loaded ahead at position 0 and paused. A timer starts it, and the drift check corrects any lateness.
+      // Loaded ahead at position 0 and paused. A timer starts it, and a late start plays on late.
       v.el.pause();
       try {
         v.el.currentTime = 0;
@@ -487,7 +481,7 @@ export class Voices {
         v.playing = true;
         v.dueSince = performance.now();
         this.#play(v);
-        v.drift.sought(performance.now());
+        v.settle.placed(0);
         this.#reportSoon();
       }, -aim);
       return;
@@ -495,14 +489,14 @@ export class Voices {
     try {
       v.el.currentTime = aim / 1000;
     } catch {
-      // Not seekable yet: the drift check seeks once it is.
+      // Not seekable yet: the first check that finds it playing seeks it if it is still short.
     }
     v.fade.gain.cancelScheduledValues(ctxNow);
     v.fade.gain.setValueAtTime(0, ctxNow);
     v.fade.gain.linearRampToValueAtTime(1, ctxNow + JOIN_FADE_MS / 1000);
     v.playing = true;
     v.dueSince = due;
-    v.drift.sought(performance.now());
+    v.settle.placed(aim);
     this.#play(v);
     this.#reportSoon();
   }
@@ -559,9 +553,8 @@ export class Voices {
       try {
         v.el.currentTime = this.#aim(v.plan, this.#env.serverNow()) / 1000;
       } catch {
-        // Not seekable now: the next check tries again.
+        // Not seekable now: it plays on from where it is.
       }
-      v.el.playbackRate = 1;
       const at = this.#env.ctx.currentTime;
       p.cancelScheduledValues(at);
       p.setValueAtTime(0, at);
@@ -597,6 +590,17 @@ export class Voices {
     p.cancelScheduledValues(ctxNow);
     p.setValueAtTime(p.value, ctxNow);
     p.linearRampToValueAtTime(value, ctxNow + ms / 1000);
+  }
+
+  /**
+   * A pass the timeline says has ended. An element that played to its end
+   * has stopped and is free for the next. One still playing fell behind on a
+   * slow connection, so its last part fades out quickly instead of stopping
+   * with a click.
+   */
+  #ended(v: Live): void {
+    if (v.el.paused) this.#release(v);
+    else this.#leave(v, SHORT_FADE_MS);
   }
 
   #leave(v: Live, ms: number): void {

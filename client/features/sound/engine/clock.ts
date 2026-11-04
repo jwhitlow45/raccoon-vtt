@@ -15,8 +15,8 @@
  *
  * Until the new epoch's first answer, the last epoch's reading stands in,
  * as long as the store's offset agrees with it within a second: the store's
- * is one network delay off, and a wake's forced check read with it would
- * seek every voice, an audible dip, for that delay alone (D-261102-871). A
+ * is one network delay off, and a voice placed with it, as one a wake
+ * stopped, would start that delay off the others (D-261102-871). A
  * sleep that stopped this page's clock moves the store's offset seconds
  * away from the old reading, so the store's is used then, as it is with no
  * reading before.

@@ -153,7 +153,7 @@ async function walk(seed: number): Promise<string[]> {
       // The engine's tick: the plan read again, then the check.
       if (world.active) {
         update();
-        voices.check(false);
+        voices.check();
       }
     } else if (roll < 0.6) {
       world.step = `${i} stop`;
@@ -183,9 +183,9 @@ async function walk(seed: number): Promise<string[]> {
         still = false;
       }
     } else {
-      // A wake, as the page coming back into view does: the check, sought, whether or not the page plays.
+      // A wake, as the page coming back into view does: the check, whether or not the page plays.
       world.step = `${i} wake`;
-      voices.check(true);
+      voices.check();
     }
     await flush();
     if (!world.active && voices.snapshot().length > 0) world.failures.push(`${world.step}: a voice sounds on a stopped page`);

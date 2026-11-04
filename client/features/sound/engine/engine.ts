@@ -4,7 +4,7 @@ import { soundMix, subscribeSoundMix, type SoundMix } from "../../device/setting
 import { playShape, TRAP_SOUND_SHAPES } from "./builtins.ts";
 import { ServerClock } from "./clock.ts";
 import { mixerSupported, soundContext, soundUnlock, watchAudio, type AudioSessionLike } from "./context.ts";
-import { CHECK_MS, STALLED_MS } from "./drift.ts";
+import { CHECK_MS } from "./settle.ts";
 import { EffectPlayer, type EffectSound, type EffectVoice } from "./effects.ts";
 import { browserLocks, channelName, Handoff, type HandoffAudio, type HandoffPost, type PageKind } from "./handoff.ts";
 import { SoundMediaSession } from "./mediaSession.ts";
@@ -219,7 +219,7 @@ export class SoundEngine {
         () => {
           this.#handoff?.contextLeft();
           soundUnlock().rearm();
-          this.#voices?.check(true);
+          this.#voices?.check();
         },
         () => this.#refresh(),
       ),
@@ -440,7 +440,6 @@ export class SoundEngine {
     if (this.#disposed) return;
     const perf = performance.now();
     const ctx = this.#ctx;
-    const late = this.#lastCheck.perf > 0 && perf - this.#lastCheck.perf > STALLED_MS;
     if (ctx && this.#active && this.#lastCheck.perf > 0) {
       const audio = (ctx.currentTime - this.#lastCheck.ctx) * 1000;
       // The audio clock stood still while the page's ran: an interruption the context may not have told of yet (4.4). The
@@ -451,14 +450,14 @@ export class SoundEngine {
     this.#lastCheck = { perf, ctx: ctx?.currentTime ?? 0 };
     // The plan moves with time (a loop's next pass, the next track's start), so it is read again before the check.
     this.#refresh();
-    if (this.#active) this.#voices?.check(late);
+    if (this.#active) this.#voices?.check();
     this.#timer = setTimeout(() => this.#tick(), CHECK_MS);
   }
 
-  /** A wake: what the clock measured may no longer hold, and every voice seeks to the timeline. */
+  /** A wake: what the clock measured may no longer hold. A voice still playing plays on, and the check puts back one the wake stopped. */
   #woke(): void {
     this.#clock.restart();
-    this.#voices?.check(true);
+    this.#voices?.check();
     this.#refresh();
   }
 
