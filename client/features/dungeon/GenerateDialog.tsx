@@ -35,6 +35,7 @@ import {
   fogLine,
   NOT_MADE,
   outcomeText,
+  PARTY_LEVEL_HELP,
   PICTURE_FAILED,
   previewName,
   roomsHint,
@@ -345,6 +346,7 @@ export function GenerateDialog(props: {
             value={choices.band}
             onChange={(band) => set({ band })}
             options={LEVEL_BANDS.map((b) => ({ value: b, label: BAND_NAMES[b].replace("Levels ", ""), title: BAND_NAMES[b] }))}
+            help={PARTY_LEVEL_HELP}
           />
         )}
       </Held>

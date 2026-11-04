@@ -22,6 +22,8 @@ export const WIDE_HELP = "Wide corridors and their doorways are 2 squares across
 export const LOOPS_HELP = "Adds loops, so the way back is not always the way in.";
 export const HEIGHTS_HELP = "Raises or sinks a few rooms, with stairs to them.";
 export const TRAPS_HELP = "Example traps from the SRD. Players see one only once it is found.";
+/** Party level picks the SRD's column for each example trap, as the Trap tool's does: nothing else in the dungeon reads it. */
+export const PARTY_LEVEL_HELP = "How strong the traps are: their save DCs, damage and pit depths follow the SRD for a party of these levels.";
 export const NO_FOG_WARNING = "Players see this scene without fog, so every room shows at once. Explore or Reveal by hand keeps rooms dark until found.";
 
 /** The warning above the foot when the form's Players see leaves fog off (Everything, or Like a scene without fog), else null. */
