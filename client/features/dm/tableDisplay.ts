@@ -42,7 +42,9 @@ function subscribe(listener: () => void): () => void {
 }
 
 export function useShowView(roomId: string): boolean {
-  return useSyncExternalStore(subscribe, () => read(roomId));
+  const get = () => read(roomId);
+  // The same reader serves a render to markup, so a test can draw the DM panel (panels/DmPanel.test.ts).
+  return useSyncExternalStore(subscribe, get, get);
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -99,4 +101,10 @@ export function sendsView(input: { dm: boolean; on: boolean; sceneId: string; pl
 export function displaysText(n: number): string {
   if (n <= 0) return "No table display is connected.";
   return n === 1 ? "1 table display connected." : `${n} table displays connected.`;
+}
+
+/** The folded Table display group's summary, short where the open line is a sentence (docs/design/design-v1-panel-groups.md 6.2, D-261102-767). */
+export function displaysSummary(n: number): string {
+  if (n <= 0) return "No display";
+  return n === 1 ? "1 display" : `${n} displays`;
 }

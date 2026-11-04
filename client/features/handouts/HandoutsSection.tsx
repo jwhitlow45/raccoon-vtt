@@ -7,15 +7,19 @@ import { Checkbox } from "../../components/Checkbox.tsx";
 import { useExpansionFocus } from "../../components/expansionFocus.ts";
 import { ErrorText, Field } from "../../components/Field.tsx";
 import { Loading } from "../../components/Loading.tsx";
-import { Help, Section } from "../../components/Panel.tsx";
+import { Group, Help } from "../../components/Panel.tsx";
 import { RadioCards } from "../../components/RadioCards.tsx";
 import { DotLabel, Row, RowList } from "../../components/Row.tsx";
 import { Tag } from "../../components/Tag.tsx";
 import { api, ApiError, type AssetRow } from "../../lib/api.ts";
+import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { theme } from "../../lib/theme.ts";
+import { Badge } from "../../pages/RoomChrome.tsx";
 import { useScoped } from "../../state/scope.ts";
 import { useAssets, useRoomActions, useRoomView } from "../../state/view.ts";
 import { FileButton } from "../dm/controls.tsx";
+import { dmBadgeLabel } from "../dm/joinRequests.ts";
+import { handoutsSummary } from "../dm/summaries.ts";
 import { honorsImageOrientation } from "../images/orientation.ts";
 import { PasteButton, PasteStatus, usePasteTarget } from "../images/PasteImage.tsx";
 import { useEntryBusy, useHandoff } from "../images/roomPaste.ts";
@@ -27,7 +31,7 @@ import { audienceText, pageCountText, showHandoutOp, showingKey, TITLE_FIELD_MAX
 import { HandoutViewer, type ViewerPage } from "./HandoutViewer.tsx";
 import { JobBlock } from "./pdf/JobBlock.tsx";
 import { isPdfFile, jobPageIds, pdfPickRefusal } from "./pdf/job.ts";
-import { usePdfJob } from "./pdf/live.ts";
+import { useJobWaiting, usePdfJob } from "./pdf/live.ts";
 import { StarterDialog } from "../starter/StarterDialog.tsx";
 
 const STARTER_HANDOUT_USES = ["handout"] as const;
@@ -52,11 +56,19 @@ type Viewed = { title: string; pages: ViewerPage[]; showing: string; details: st
  * showing now, with a way to look at each as players see it and to close
  * it for everyone, and a form to show a new one from the room's library or
  * a fresh upload (docs/design/design-v1-pdf-handouts.md 4.1, 8.2 and 8.4).
+ *
+ * A group that folds (docs/design/design-v1-panel-groups.md 6.1 and 6.2),
+ * kept mounted, so an upload and the form's draft last through a fold.
+ * Folded, it says how many show, with the DM panel's badge while the
+ * upload waits on the DM. A waiting upload and a pasted image reveal it
+ * (pdf/live.ts, images/RoomPaste.tsx). `divider` is false while it is the
+ * panel's first group.
  */
-export function HandoutsSection() {
+export function HandoutsSection(props: { fold: { open: boolean; onToggle(): void }; divider: boolean }) {
   const handouts = useRoomView((s) => s.view?.handouts);
   const members = useRoomView((s) => s.view?.members);
   const docs = useRoomView((s) => s.view?.handoutDocs);
+  const waiting = useJobWaiting();
   const actions = useRoomActions();
   const assets = useAssets();
   const draft = useScoped(handoutDraftSlot);
@@ -140,8 +152,19 @@ export function HandoutsSection() {
     },
     [draft, docs],
   );
+  const summary = (
+    <>
+      {handoutsSummary(showing.length)}
+      {waiting ? (
+        <>
+          <span style={VISUALLY_HIDDEN}>, </span>
+          <Badge count={1} label={dmBadgeLabel(1, 0)} />
+        </>
+      ) : null}
+    </>
+  );
   return (
-    <Section label="Handouts" divider={false}>
+    <Group label="Handouts" {...props.fold} keep wholeSummary summary={summary} divider={props.divider}>
       <JobBlock
         onLeave={afterBlock}
         onShow={showSaved}
@@ -204,7 +227,7 @@ export function HandoutsSection() {
           opener={viewOpener}
         />
       ) : null}
-    </Section>
+    </Group>
   );
 }
 

@@ -9,6 +9,7 @@ import sharp from "sharp";
 import { accentFor } from "../client/lib/accent.ts";
 import { PALETTES } from "../client/lib/theme.ts";
 import { lightOnly, normal, parseColor, partColors, ratio, sweepContrast, sweepRing, type Sweep } from "./helpers/contrast.ts";
+import { openGroup } from "./helpers/groups.ts";
 import { ConsoleWatch, OpSocket, openSideTab, pagePoint, pickOption, pickTool, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
@@ -853,6 +854,8 @@ describe("the light theme", { concurrency: false }, () => {
         await desk.keyboard.press("Escape");
         await xcard.waitFor({ state: "detached" });
         const dmPanel = await openPanel(desk, "DM");
+        // Setup, so folded on a phone (docs/design/design-v1-panel-groups.md 6.2).
+        await openGroup(dmPanel, "Check their view");
         await dmPanel.getByRole("combobox", { name: "View as a player" }).selectOption({ label: "Pat" });
         await dmPanel.getByRole("button", { name: "View", exact: true }).click();
         const preview = desk.locator('dialog[aria-label="Viewing as Pat"]');

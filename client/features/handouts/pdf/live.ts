@@ -1,12 +1,13 @@
 import { useEffect, useRef } from "react";
-import { useStore } from "zustand";
+import { useStore, type StoreApi } from "zustand";
 import { api } from "../../../lib/api.ts";
-import { useRoomScope, useScoped } from "../../../state/scope.ts";
+import { dmPanelFoldsSlot } from "../../../lib/folds.ts";
+import { useRoomScope, useScoped, type RoomScope } from "../../../state/scope.ts";
 import type { RoomActions, RoomUi, RoomViewStore } from "../../../state/view.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../../state/view.ts";
 import { deleteImages, rememberAsset, uploadingSlot } from "../../images/library.ts";
 import { canvasSource, encodeWithin, pageThumb } from "./encode.ts";
-import { jobActive, jobPageIds, onePdfAtATime, pdfJobSlot, waitsOnDm } from "./job.ts";
+import { jobActive, jobPageIds, onePdfAtATime, pdfJobSlot, waitsOnDm, type JobSlotState } from "./job.ts";
 import { clearLedger, ledgerKey, localLedgerStorage, readLedger, recoveryOf } from "./ledger.ts";
 import { JobRunner, roomReadOf, type JobDeps } from "./run.ts";
 
@@ -102,11 +103,35 @@ export function useJobWaiting(): boolean {
 }
 
 /**
+ * Reveals the DM panel's Handouts each time the job starts to wait on the
+ * DM (docs/design/design-v1-panel-groups.md 6.1, D-261102-758), so a folded
+ * Handouts shows the upload's block when the DM next looks. A reveal made
+ * with the panel closed waits for it to open, and writes nothing. Only a
+ * new wait reveals: the DM may fold Handouts again while one lasts, as with
+ * any reveal, and a wait that goes on from one step to the next is the same.
+ */
+export function revealOnWait(jobs: Pick<StoreApi<JobSlotState>, "getState" | "subscribe">, reveal: () => void): () => void {
+  let was = waitsOnDm(jobs.getState().job);
+  return jobs.subscribe((s) => {
+    const now = waitsOnDm(s.job);
+    if (now && !was) reveal();
+    was = now;
+  });
+}
+
+/** The Room's wiring of `revealOnWait`: its job, and the DM panel's Handouts. */
+export function revealHandoutsOnWait(scope: RoomScope): () => void {
+  const folds = scope.get(dmPanelFoldsSlot);
+  return revealOnWait(scope.get(pdfJobSlot).store, () => folds.reveal("handouts"));
+}
+
+/**
  * The room page's share of the job: the warning before the page goes while
- * a job is under way, and, when this device opens the room as a DM with a
- * ledger and no job, the recovery line, or the ledger cleared quietly when
- * its save happened (4.1.2, 4.1.6). Mounted once by the Room page, so it
- * runs with the DM panel closed.
+ * a job is under way, the reveal of Handouts when it waits on the DM, and,
+ * when this device opens the room as a DM with a ledger and no job, the
+ * recovery line, or the ledger cleared quietly when its save happened
+ * (4.1.2, 4.1.6). Mounted once by the Room page, so it runs with the DM
+ * panel closed.
  */
 export function usePdfJobRoom(): void {
   const scope = useRoomScope();
@@ -131,6 +156,8 @@ export function usePdfJobRoom(): void {
     mirror(slot.store.getState().job);
     return slot.store.subscribe((s) => mirror(s.job));
   }, [slot, uploading]);
+
+  useEffect(() => revealHandoutsOnWait(scope), [scope]);
 
   useEffect(() => {
     if (!active) return;

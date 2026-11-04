@@ -4,7 +4,7 @@ import { Button } from "../../components/Button.tsx";
 import { ErrorText, Field } from "../../components/Field.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { Notice } from "../../components/Notice.tsx";
-import { Help, Section } from "../../components/Panel.tsx";
+import { Group, Help, Section } from "../../components/Panel.tsx";
 import { QrCode } from "../../components/QrCode.tsx";
 import { Row, RowList } from "../../components/Row.tsx";
 import { Tag } from "../../components/Tag.tsx";
@@ -125,8 +125,12 @@ export function MemberActions(props: { memberId: string; name: string; kind: "dm
  * `main` makes "Show the player link" the primary button, as on the
  * Members page, where it is what the page is for. In the DM tab it acts
  * on the side of play, so it is secondary there.
+ *
+ * With `fold` it is the DM panel's Player link group, which folds
+ * (docs/design/design-v1-panel-groups.md 6.2) and stays mounted while
+ * folded, so a link on screen is hidden with the group, not fetched again.
  */
-export function PlayerLinkSection(props: { main?: boolean }) {
+export function PlayerLinkSection(props: { main?: boolean; fold?: { open: boolean; onToggle(): void } }) {
   const roomId = useRoomView((s) => s.roomId);
   const accessVersion = useRoomView((s) => s.accessVersion);
   const askOnly = useJoinMode() === "ask_only";
@@ -141,8 +145,8 @@ export function PlayerLinkSection(props: { main?: boolean }) {
     if (accessVersion !== openedAt.current) loader.accessChanged();
   }, [accessVersion, loader]);
 
-  return (
-    <Section label="Player link">
+  const body = (
+    <>
       <Help>
         Players join with this link or its QR code, without typing anything. It carries the player password, so share
         it only with your group.
@@ -172,7 +176,14 @@ export function PlayerLinkSection(props: { main?: boolean }) {
       )}
       {askOnly ? <Help>{ASK_ONLY_LINK_NOTE}</Help> : null}
       {state.kind === "error" ? <ErrorText>{state.message}</ErrorText> : null}
-    </Section>
+    </>
+  );
+  return props.fold ? (
+    <Group label="Player link" {...props.fold} keep wholeSummary>
+      {body}
+    </Group>
+  ) : (
+    <Section label="Player link">{body}</Section>
   );
 }
 

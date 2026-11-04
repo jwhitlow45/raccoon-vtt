@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "../../components/Button.tsx";
 import { ErrorText } from "../../components/Field.tsx";
 import { Notice } from "../../components/Notice.tsx";
-import { Help, Section } from "../../components/Panel.tsx";
+import { Group, Help } from "../../components/Panel.tsx";
 import { QrCode } from "../../components/QrCode.tsx";
 import { Switch } from "../../components/Switch.tsx";
 import { api, ApiError, type DisplayCode } from "../../lib/api.ts";
@@ -12,7 +12,7 @@ import { formatDisplayCode } from "../display/logic.ts";
 import { SecretLink } from "./controls.tsx";
 import { absoluteLink, inviteCountdown } from "./invite.ts";
 import { usePreview } from "./previewContext.ts";
-import { displaysText, setShowView, useShowView } from "./tableDisplay.ts";
+import { displaysSummary, displaysText, setShowView, useShowView } from "./tableDisplay.ts";
 
 /**
  * The DM panel's Table display section (docs/design/design-v1-dm-tools.md 3.1).
@@ -26,8 +26,10 @@ import { displaysText, setShowView, useShowView } from "./tableDisplay.ts";
  *   link and the link's QR code, good once within 10 minutes.
  *
  * Displays also show in Members, DM devices, where each can be signed out.
+ * A group that folds (docs/design/design-v1-panel-groups.md 6.2), kept
+ * mounted, so a code on screen keeps counting down while folded.
  */
-export function TableDisplaySection() {
+export function TableDisplaySection(props: { fold: { open: boolean; onToggle(): void } }) {
   const roomId = useRoomView((s) => s.roomId);
   const displays = useRoomView((s) => s.displays ?? 0);
   const showView = useShowView(roomId);
@@ -72,7 +74,7 @@ export function TableDisplaySection() {
   };
 
   return (
-    <Section label="Table display">
+    <Group label="Table display" {...props.fold} keep wholeSummary summary={displaysSummary(displays)}>
       <Help>
         Show the map on a TV for the table, as the players see it, with nothing else on it. On the TV, open RaccoonVTT
         and choose Set up a table display.
@@ -109,7 +111,7 @@ export function TableDisplaySection() {
         </Notice>
       ) : null}
       <ErrorText>{error}</ErrorText>
-    </Section>
+    </Group>
   );
 }
 

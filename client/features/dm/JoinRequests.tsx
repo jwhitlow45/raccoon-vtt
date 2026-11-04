@@ -4,7 +4,7 @@ import { createStore, type StoreApi } from "zustand/vanilla";
 import { Button } from "../../components/Button.tsx";
 import { ErrorText, Select } from "../../components/Field.tsx";
 import { Loading } from "../../components/Loading.tsx";
-import { Help, Section } from "../../components/Panel.tsx";
+import { Group, Help, Section } from "../../components/Panel.tsx";
 import { RadioCards } from "../../components/RadioCards.tsx";
 import { Row, RowDot } from "../../components/Row.tsx";
 import { api, ApiError, type JoinMode, type LetInAs } from "../../lib/api.ts";
@@ -225,7 +225,19 @@ function useNow(requests: readonly JoinRequestRow[]): number {
   return now;
 }
 
-/** The DM panel's Join requests section (design 2.3). Gone while no request waits or is being let in. */
+/** Whether the DM panel shows its Join requests section: while any request waits or is being let in. */
+export function useJoinRequestsShown(): boolean {
+  const hub = useScoped(joinRequestsSlot);
+  return useStore(hub.store, (s) => s.kind === "shown" && s.list.requests.length > 0);
+}
+
+/**
+ * The DM panel's Join requests section (design 2.3). Gone while no request
+ * waits or is being let in. A group that never folds, since someone is
+ * waiting on it (docs/design/design-v1-panel-groups.md 6.1): it keeps the
+ * chevron's space, so its name lines up with the folding groups under it,
+ * and as the panel's first group it draws no line under the header.
+ */
 export function JoinRequestsSection() {
   const hub = useScoped(joinRequestsSlot);
   const state = useStore(hub.store);
@@ -265,7 +277,7 @@ export function JoinRequestsSection() {
   // A request being let in is no one Turn away all may turn away.
   const waiting = waitingRows(requests);
   return (
-    <Section label="Join requests">
+    <Group label="Join requests" reserve="chevron" divider={false}>
       <div style={{ display: "grid", gap: theme.space(3) }}>
         {requests.map((r) => (
           <RequestRow
@@ -286,7 +298,7 @@ export function JoinRequestsSection() {
       </div>
       {state.stale ? <Help>Could not refresh. Trying again…</Help> : null}
       {waiting.length >= 2 ? <TurnAwayAll ids={waiting.map((r) => r.id)} onAnswered={answered} onRefused={() => hub.refresh()} /> : null}
-    </Section>
+    </Group>
   );
 }
 

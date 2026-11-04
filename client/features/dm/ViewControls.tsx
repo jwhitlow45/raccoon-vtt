@@ -1,9 +1,10 @@
 import { useCallback, useId, useMemo, useState, useSyncExternalStore } from "react";
+import { useStore } from "zustand";
 import type { Member } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { Select } from "../../components/Field.tsx";
 import { Notice } from "../../components/Notice.tsx";
-import { Help, Section } from "../../components/Panel.tsx";
+import { Group, Help } from "../../components/Panel.tsx";
 import { Switch } from "../../components/Switch.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
@@ -11,15 +12,22 @@ import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { currentFocus, focusEvent, subscribeFocus } from "./camera.ts";
 import { viewAsSlot } from "./viewAs.tsx";
 import { PartySightToggle } from "../vision/PartySightToggle.tsx";
+import { partySightSlot, visionOn } from "../vision/sightMode.ts";
+import { checkSummary, screensSummary } from "./summaries.ts";
+
+/** A DM panel group's fold, from the panel's store (lib/folds.ts). */
+type GroupFold = { open: boolean; onToggle(): void };
 
 /**
  * The DM's view tools (features section 13), in two groups by what they do
  * (docs/design/design-v1-layout-hierarchy.md M4). "Players' screens" acts on the
  * table: follow me, bring everyone here, black out. "Check their view"
  * only looks: view as a player and party sight. Undo and Redo sit in the
- * top bar on every layout (M2), so the panel has no copy of its own.
+ * top bar on every layout (M2), so the panel has no copy of its own. Each
+ * is a group that folds (docs/design/design-v1-panel-groups.md 6.2), kept
+ * mounted, so a sent Bring everyone here still says so when opened again.
  */
-export function ViewControls() {
+export function ViewControls(props: { screens: GroupFold; check: GroupFold }) {
   const actions = useRoomActions();
   const view = useRoomView((s) => s.view?.meta.view);
   const members = useRoomView((s) => s.view?.members);
@@ -29,13 +37,22 @@ export function ViewControls() {
   const onPlayerScene = sceneId !== null && sceneId === playerSceneId;
   const scope = useRoomScope();
   const subscribe = useCallback((listener: () => void) => subscribeFocus(scope, listener), [scope]);
-  const focusScene = useSyncExternalStore(subscribe, () => currentFocus(scope)?.sceneId ?? null);
+  const focus = () => currentFocus(scope)?.sceneId ?? null;
+  // The same reader serves a render to markup, so a test can draw the panel (panels/DmPanel.test.ts).
+  const focusScene = useSyncExternalStore(subscribe, focus, focus);
   const [sent, setSent] = useState(false);
+  // Party sight says so while it veils the map, which it does only on a scene with party vision (PartySightToggle).
+  const partySight = useStore(useScoped(partySightSlot), (s) => s.on);
+  const sightShown = useRoomView((s) => {
+    const scene = s.sceneId ? s.view?.scenes[s.sceneId] : undefined;
+    return scene !== undefined && visionOn(scene);
+  });
 
   if (!view) return null;
+  const screens = screensSummary({ onPlayerScene, playerSceneName: playerSceneName ?? null, follow: view.follow, blackout: view.blackout });
   return (
     <>
-      <Section label="Players' screens">
+      <Group label="Players' screens" {...props.screens} keep wholeSummary summary={screens}>
         {!onPlayerScene ? (
           <Notice role="status">
             You are looking at a different scene than the players{playerSceneName ? `, who are on ${playerSceneName}` : ""}. Follow
@@ -70,11 +87,11 @@ export function ViewControls() {
           checked={view.blackout}
           onChange={(blackout) => actions.dispatch({ t: "view.blackout", blackout })}
         />
-      </Section>
-      <Section label="Check their view">
+      </Group>
+      <Group label="Check their view" {...props.check} keep wholeSummary summary={checkSummary(partySight && sightShown)}>
         <ViewAsPlayer members={members} />
         <PartySightToggle />
-      </Section>
+      </Group>
     </>
   );
 }

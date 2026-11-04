@@ -5,7 +5,8 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import pg from "pg";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, openSideTab, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, sideTabName, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 
 /**
  * Join requests the DM approves (docs/design/design-v1-join-requests.md 10,
@@ -139,10 +140,13 @@ function requestRow(page: Page, name: string): Locator {
   return page.getByRole("group", { name: `Join request from ${name}` });
 }
 
-/** The DM panel's Join requests section, by its heading, never an outer section holding it. */
+/** The DM panel's Join requests group (components/Panel.tsx Group), by its heading, never an outer box holding it. */
 function requestsSection(page: Page): Locator {
-  return page.getByRole("heading", { name: "Join requests", exact: true }).locator("xpath=ancestor::section[1]");
+  return page.getByRole("heading", { name: "Join requests", exact: true }).locator("xpath=ancestor::*[@data-panel-group][1]");
 }
+
+/** The DM panel's groups that fold, in order (docs/design/design-v1-panel-groups.md 6.2). */
+const DM_GROUPS = ["Handouts", "Players' screens", "Check their view", "Player link", "Table display"] as const;
 
 function joiningSection(page: Page): Locator {
   return page.getByRole("heading", { name: "Joining", exact: true }).locator("xpath=ancestor::section[1]");
@@ -387,6 +391,55 @@ describe("raccoon-vtt join requests", { timeout: 600_000 }, () => {
     await row.waitFor({ state: "detached" });
     assert.equal((await call(wren.context, "GET", `/api/rooms/${run.roomId}/join-requests/mine`)).status, 204, "a device with no request is answered with nothing");
     await wren.context.close();
+  });
+
+  test("ambc-1. a request over every DM panel group folded by hand: Join requests first and open, no line over it, its name at the folded names' edge, and the folds kept through a reload", async () => {
+    const una = await device("una");
+    await ask(una.page, "Una", { url: roomUrl() });
+    await openSideTab(dm, "DM");
+    const panel = dm.getByRole("tabpanel", { name: sideTabName("DM") });
+    const row = requestRow(dm, "Una");
+    await row.waitFor();
+    await dismissToasts(dm);
+    // A computer starts every group open, so the DM folds each, as a DM who wants a short panel would.
+    for (const name of DM_GROUPS) {
+      const fold = panel.getByRole("button", { name, exact: true });
+      if ((await fold.getAttribute("aria-expanded")) === "true") await fold.click();
+    }
+    const check = async (at: string) => {
+      const groups = await panel.locator("[data-panel-group]").evaluateAll((boxes) =>
+        boxes.map((box) => {
+          type El = { querySelector(s: string): El | null; getAttribute(n: string): string | null; textContent: string | null; getBoundingClientRect(): { left: number } };
+          const el = box as unknown as El;
+          const name = el.querySelector("[data-group-name]");
+          const style = (globalThis as unknown as { getComputedStyle(e: unknown): { borderTopWidth: string } }).getComputedStyle(box);
+          return { name: name?.textContent ?? "", left: name?.getBoundingClientRect().left ?? NaN, line: style.borderTopWidth !== "0px", expanded: el.querySelector("[data-group-fold]")?.getAttribute("aria-expanded") ?? null };
+        }),
+      );
+      assert.deepEqual(
+        groups.map((g) => [g.name, g.expanded, g.line]),
+        [["Join requests", null, false], ...DM_GROUPS.map((name) => [name, "false", true])],
+        `${at}: Join requests first, never folding and with no line over it, then the five folded`,
+      );
+      for (const g of groups.slice(1)) assert.ok(Math.abs(g.left - groups[0]!.left) <= 1, `${at}: ${g.name}'s name at ${g.left}, Join requests' at ${groups[0]!.left}`);
+      await row.getByRole("button", { name: "Let Una in" }).waitFor();
+      assert.deepEqual(alignmentLines(await measureAlignment(panel), `the DM panel ${at}`), []);
+    };
+    await check("folded by hand");
+    assert.deepEqual(await dm.evaluate(() => JSON.parse(localStorage.getItem("rvtt.dmPanelFolds") ?? "null")), { handouts: false, screens: false, check: false, link: false, display: false });
+    await shots.take(dm, "ambc-1-request-over-folded-groups");
+    // This device keeps each fold.
+    await dm.reload();
+    await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+    await openSideTab(dm, "DM");
+    await row.waitFor();
+    await dismissToasts(dm);
+    await check("after a reload");
+    // Open again for the steps after, which use the panel as a computer starts it.
+    for (const name of DM_GROUPS) await panel.getByRole("button", { name, exact: true }).click();
+    await row.getByRole("button", { name: "Turn Una away" }).click();
+    await requestsSection(dm).waitFor({ state: "detached" });
+    await una.context.close();
   });
 
   test("jr-7. a second tab takes over a request, and Wait here takes it back", async () => {
