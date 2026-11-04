@@ -162,6 +162,9 @@ const SIZES = [
   { name: "320x568", width: 320, height: 568 },
 ] as const;
 
+/** Devices start a track within this of each other: each voice is placed once and then plays on by itself (D-261102-940). */
+const START_MS = 1_000;
+
 describe("synced music and sound", { concurrency: false }, () => {
   before(async () => {
     process.env.ROOM_SOUND = "1";
@@ -221,10 +224,10 @@ describe("synced music and sound", { concurrency: false }, () => {
     await soundSays(dm, /^playing music/, 5_000);
     await soundSays(pat, /^playing music/, 5_000);
     assert.ok(Date.now() - started < 3_000, `both played within 3 s of the op (${Date.now() - started} ms)`);
-    await inStep(dm, 100, 6_000);
-    await inStep(pat, 100, 6_000);
+    await inStep(dm, START_MS, 6_000);
+    await inStep(pat, START_MS, 6_000);
     const { gap } = await placesTogether(dm, pat);
-    assert.ok(gap <= 100, `the DM's page and Pat's within 0.1 s of each other (${gap.toFixed(0)} ms)`);
+    assert.ok(gap <= START_MS, `the DM's page and Pat's within a second of each other (${gap.toFixed(0)} ms)`);
 
     // Ana's phone has no choice yet: the ask, then Play here.
     const anaContext = await browser.newContext({ viewport: PHONE, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
@@ -245,10 +248,10 @@ describe("synced music and sound", { concurrency: false }, () => {
       await ask.waitFor({ state: "detached" });
       assert.equal(await ana.evaluate(() => localStorage.getItem("rvtt.roomSound")), "on", "Play here turns Room sound on");
       await soundSays(ana, /^playing music/, 5_000);
-      await inStep(ana, 100, 6_000);
+      await inStep(ana, START_MS, 6_000);
       assert.ok(Date.now() - tapped < 6_500, `in place within 6 s of the tap (${Date.now() - tapped} ms)`);
       const late = await placesTogether(ana, pat);
-      assert.ok(late.gap <= 100, `Ana and Pat within 0.1 s (${late.gap.toFixed(0)} ms)`);
+      assert.ok(late.gap <= START_MS, `Ana and Pat within a second (${late.gap.toFixed(0)} ms)`);
       const v = musicVoice(late.a)!;
       assert.ok(Math.abs(v.aimMs - (Date.now() - started)) < 1_500, `Ana joined at the track's place, ${v.aimMs.toFixed(0)} ms in`);
     } finally {
@@ -271,10 +274,10 @@ describe("synced music and sound", { concurrency: false }, () => {
     await sleep(3_000);
     await ops.send({ t: "music.resume", run: runId() });
     await soundSays(pat, /^playing music/, 5_000);
-    await inStep(dm, 100, 6_000);
-    await inStep(pat, 100, 6_000);
+    await inStep(dm, START_MS, 6_000);
+    await inStep(pat, START_MS, 6_000);
     const { gap } = await placesTogether(dm, pat);
-    assert.ok(gap <= 100, `resumed within 0.1 s of each other (${gap.toFixed(0)} ms)`);
+    assert.ok(gap <= START_MS, `resumed within a second of each other (${gap.toFixed(0)} ms)`);
 
     // Forest road then Tavern night with a 5 s crossfade: revealed 20 s before Tavern's start, crossed from 26 s, promoted at its end.
     await ops.send({ t: "playlist.create", id: "pl-road", name: "The road", sounds: [run.ids.road, run.ids.tavern], repeat: "off", fade: 5 });
@@ -303,7 +306,7 @@ describe("synced music and sound", { concurrency: false }, () => {
       },
       12_000,
     );
-    await inStep(pat, 100, 6_000);
+    await inStep(pat, START_MS, 6_000);
   });
 
   test("sn-3. Pat's socket names no next track before its reveal, and with names shared only the music and loops playing now, never an effect", async () => {
@@ -339,7 +342,7 @@ describe("synced music and sound", { concurrency: false }, () => {
   test("sn-4. behind a blackout Pat's phone falls silent and never receives an effect fired there, the DM's page plays on, and Pat comes back in place", async () => {
     await playTrack(run.ids.tavern);
     await soundSays(pat, /^playing music/, 5_000);
-    await inStep(pat, 100, 6_000);
+    await inStep(pat, START_MS, 6_000);
     const before = patSocket.received.length;
     await ops.send({ t: "view.blackout", blackout: true });
     await waitFor("Pat's sound to go", async () => ((await soundProbe(pat)).data === "playing" ? true : null), 5_000);
@@ -351,9 +354,9 @@ describe("synced music and sound", { concurrency: false }, () => {
     assert.ok(!(await soundProbe(pat)).effects.started.some((e) => e.id === "fx-dark"));
     await ops.send({ t: "view.blackout", blackout: false });
     await soundSays(pat, /^playing music/, 6_000);
-    await inStep(pat, 100, 6_000);
+    await inStep(pat, START_MS, 6_000);
     const { gap } = await placesTogether(dm, pat);
-    assert.ok(gap <= 100, `back in place with the DM's page (${gap.toFixed(0)} ms)`);
+    assert.ok(gap <= START_MS, `back in place with the DM's page (${gap.toFixed(0)} ms)`);
     assert.ok(!(await soundProbe(pat)).effects.started.some((e) => e.id === "fx-dark"), "and never later");
   });
 
@@ -413,7 +416,7 @@ describe("synced music and sound", { concurrency: false }, () => {
       await askOf(cy).waitFor();
       await askOf(bo).getByRole("button", { name: "Play here" }).tap();
       await soundSays(bo, /^playing music/, 6_000);
-      await inStep(bo, 100, 6_000);
+      await inStep(bo, START_MS, 6_000);
       await askOf(cy).getByRole("button", { name: "Not on this device" }).tap();
       await askOf(cy).waitFor({ state: "detached" });
       await sleep(1_500);
@@ -431,7 +434,7 @@ describe("synced music and sound", { concurrency: false }, () => {
       await shots.take(bo, "sn-6-waiting-for-a-tap");
       await bo.getByRole("status", { name: "Connected" }).first().tap();
       await soundSays(bo, /^playing music/, 6_000);
-      await inStep(bo, 100, 6_000);
+      await inStep(bo, START_MS, 6_000);
     } finally {
       await boContext.close();
       await cyContext.close();
@@ -476,7 +479,7 @@ describe("synced music and sound", { concurrency: false }, () => {
     await tv.getByRole("button", { name: "Connect" }).click();
     await soundSays(tv, /^playing music/, 10_000);
     await waitFor("the DM's tabs to go quiet", async () => (!(await soundProbe(dm)).state?.owns && !(await soundProbe(second)).state?.owns ? true : null), 5_000);
-    await inStep(tv, 100, 6_000);
+    await inStep(tv, START_MS, 6_000);
     await shots.take(tv, "sn-7-display-plays");
     // The display's menu: its Sound row.
     await tv.mouse.click(TV.width / 2, TV.height / 2);
@@ -639,9 +642,9 @@ describe("synced music and sound", { concurrency: false }, () => {
       const cookie = (await dmContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
       ops = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
       await soundSays(fay, /^playing music loops:1$/, 8_000);
-      await inStep(fay, 100, 8_000);
+      await inStep(fay, START_MS, 8_000);
       const { gap } = await placesTogether(dm, fay);
-      assert.ok(gap <= 100, `Fay's phone and the DM's page within 0.1 s after the restart (${gap.toFixed(0)} ms)`);
+      assert.ok(gap <= START_MS, `Fay's phone and the DM's page within a second after the restart (${gap.toFixed(0)} ms)`);
       await shots.take(fay, "lp30fix-1-playing-after-restart");
     } finally {
       await fayContext.close();
@@ -651,7 +654,7 @@ describe("synced music and sound", { concurrency: false }, () => {
   });
 
   // Runs last: it turns the DM's room sound off, reloads the DM's page and closes Pat's, and restores none of them.
-  test("sndglitch-1. through a throttled network: a window shown again seeks nothing for a network delay, and the drift check's nudge back from 80 ms changes the speed in the design's steps, never seeks, and leaves no click or dropout in the output", async () => {
+  test("sndglitch-1. through a throttled network: once a track plays, nothing seeks it or changes its speed, through wakes, a small slip or a long stall, and the output has no click or dropout", async () => {
     // A tone on the DM's page or Pat's would sound aloud where the tests run: Gus's page alone plays it, into the tap.
     await dm.evaluate(() => localStorage.setItem("rvtt.roomSound", "off"));
     await openRoom(dm);
@@ -663,8 +666,7 @@ describe("synced music and sound", { concurrency: false }, () => {
       await gusContext.addInitScript(SOUND_TEST_FLAG);
       await gusContext.addInitScript(roomSoundScript("on"));
       await gusContext.addInitScript(SOUND_TAP);
-      // Frames to Gus 100 ms late and none the other way, as a slow downlink: the store's offset is 100 ms under the
-      // server's time, and the time frames' reading 50 ms under it.
+      // Frames to Gus 100 ms late and none the other way, as a slow downlink.
       await gusContext.routeWebSocket(/\/ws\?room=/, (ws) => {
         const upstream = ws.connectToServer();
         ws.onMessage((m) => upstream.send(m));
@@ -679,52 +681,53 @@ describe("synced music and sound", { concurrency: false }, () => {
       await openRoom(gus);
       await playTrack(toneId, 0, "off");
       await soundSays(gus, /^playing music/, 10_000);
+      // Through the slow link it starts within a second or two of its place.
+      await inStep(gus, 2 * START_MS, 10_000);
       type Tap = { elements: { paused: boolean; src: string; currentTime: number }[]; self: boolean; ctx: { currentTime: number } };
       const now = () => gus.evaluate(() => (globalThis as unknown as { __soundTap: Tap }).__soundTap.ctx.currentTime);
+      await sleep(2_000);
+      const from = await now();
 
-      // Shown again three times, each in step first and past the second that keeps two seeks apart. A wake starts a new
-      // measurement epoch, and its forced check must read the last epoch's offset, not the store's 50 ms further off,
-      // or it seeks every time.
-      const wakes: number[] = [];
+      // Shown again three times: each a wake, which once sought every voice to the timeline.
       for (let i = 0; i < 3; i++) {
-        await inStep(gus, 20, 10_000);
-        await sleep(1_200);
-        wakes.push(await now());
         await gus.evaluate(() => (globalThis as unknown as { document: EventTarget }).document.dispatchEvent(new Event("visibilitychange")));
-        await sleep(2_500);
+        await sleep(1_500);
       }
-      const woken = (await readTap(gus)).log.filter((c) => !c.self && c.kind === "seek" && wakes.some((w) => c.at >= w && c.at <= w + 2));
-      // A reading may land just past 25 ms once at the forced check: one seek of three at most.
-      assert.ok(woken.length <= 1, `a wake seeks for a network delay: ${JSON.stringify(woken)} after wakes at ${wakes.map((w) => w.toFixed(2)).join(", ")}`);
-
-      await inStep(gus, 30, 10_000);
-      await sleep(1_000);
-      // The test moves Gus's element 80 ms ahead, as a change of the clock's offset or the output's latency moves its aim.
-      const shiftAt = await gus.evaluate((id) => {
-        const tap = (globalThis as unknown as { __soundTap: Tap }).__soundTap;
-        const el = tap.elements.find((e) => !e.paused && e.src.includes(id));
-        if (!el) return null;
-        tap.self = true;
-        el.currentTime += 0.08;
-        tap.self = false;
-        return tap.ctx.currentTime;
-      }, asset);
-      assert.ok(shiftAt !== null, "Gus's page plays the tone");
-      await sleep(8_000);
+      // The test moves Gus's element 80 ms ahead, as a slip of the clock's offset or the output's latency would, then
+      // 3 s back, as a long stall on a weak link leaves it behind.
+      const slip = (ms: number) =>
+        gus.evaluate(
+          ({ id, ms }) => {
+            const tap = (globalThis as unknown as { __soundTap: Tap }).__soundTap;
+            const el = tap.elements.find((e) => !e.paused && e.src.includes(id));
+            if (!el) return null;
+            tap.self = true;
+            el.currentTime += ms / 1000;
+            tap.self = false;
+            return tap.ctx.currentTime;
+          },
+          { id: asset, ms },
+        );
+      const ahead = await slip(80);
+      assert.ok(ahead !== null, "Gus's page plays the tone");
+      await sleep(3_000);
+      const behind = await slip(-3_000);
+      assert.ok(behind !== null, "Gus's page still plays the tone");
+      await sleep(4_000);
       const { log, quanta } = await readTap(gus);
       // Only the tone's own element counts: a spare element warming up through the throttled link may fail its load, which the engine ignores.
-      assert.deepEqual(log.filter((c) => c.kind === "error" && (c.src ?? "").includes(asset)), [], "the tone plays on through every seek");
-      const engine = log.filter((c) => !c.self && c.at > shiftAt);
-      const rates = engine.filter((c) => c.kind === "rate").map((c) => `${c.at.toFixed(2)} s: ${c.to}`);
-      assert.equal(engine.filter((c) => c.kind === "seek").length, 0, `80 ms is a nudge, never a seek: ${JSON.stringify(engine)}`);
-      // 3% off to 60 ms, 1.5% off to 25 ms, then speed 1: three changes, and one more nudge in and out when a reading
-      // lands just past 25 ms, as the readings' noise of about 10 ms allows.
-      assert.ok(rates.length >= 2 && rates.length <= 5, `the nudge in the design's steps: ${rates.join(", ")}`);
-      assert.ok(engine.some((c) => c.kind === "rate" && c.at > shiftAt + 0.3), `a change of speed the output is measured across: ${rates.join(", ")}`);
-      // The test's own step is a cut in the tone: its quarter second is left out, and every change of speed the check makes is measured.
-      const found = tapGlitches(quanta, shiftAt - 1, shiftAt + 7.5, [[shiftAt - 0.05, shiftAt + 0.25]]);
+      assert.deepEqual(log.filter((c) => c.kind === "error" && (c.src ?? "").includes(asset)), [], "the tone plays on");
+      const engine = log.filter((c) => !c.self && c.at > from && (c.kind === "seek" || c.kind === "rate"));
+      assert.deepEqual(engine, [], "no seek and no change of speed once the track plays");
+      const behindBy = (await soundProbe(gus)).voices.find((v) => v.channel === "music" && v.playing);
+      assert.ok(behindBy && behindBy.aimMs - behindBy.currentMs > 2_500, `the stalled track plays on from where it is: ${JSON.stringify(behindBy)}`);
+      // The test's own two steps are cuts in the tone: each quarter second is left out.
+      const found = tapGlitches(quanta, from, behind + 3.5, [
+        [ahead - 0.05, ahead + 0.25],
+        [behind - 0.05, behind + 0.25],
+      ]);
       assert.ok(found.level > 0.05, `the tone reaches the tap (level ${found.level.toFixed(3)})`);
-      assert.deepEqual(found.clicks, [], `no click at a change of speed (${rates.join(", ")})`);
+      assert.deepEqual(found.clicks, [], "no click");
       assert.deepEqual(found.dropouts, [], "no dropout");
     } finally {
       await gusContext.close();
