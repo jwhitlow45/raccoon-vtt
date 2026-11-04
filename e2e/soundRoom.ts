@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import type { BrowserContext, Page } from "playwright-core";
 import { SAMPLES_PER_FRAME } from "#shared/audio/mp3.ts";
 import { framesFor, silentFrames } from "#shared/audio/mp3Testutil.ts";
+import { mp3Of } from "../client/features/sound/upload/sounds.testutil.ts";
 import { OpSocket, waitFor } from "./harness.ts";
 
 /**
@@ -97,9 +98,9 @@ export async function uploadSound(context: BrowserContext, origin: string, roomI
   return (await res.json()) as SoundRow;
 }
 
-/** Uploads silence of `ms` and adds it to the room's library as `use`, returning the sound's id. */
-export async function addSound(input: { context: BrowserContext; origin: string; roomId: string; ops: OpSocket; id: string; name: string; use: "music" | "loop" | "effect"; ms: number }): Promise<string> {
-  const row = await uploadSound(input.context, input.origin, input.roomId, silentSound(input.ms), `${input.name}.mp3`);
+/** Uploads silence of `ms`, or the bytes given, and adds it to the room's library as `use`, returning the sound's id. */
+export async function addSound(input: { context: BrowserContext; origin: string; roomId: string; ops: OpSocket; id: string; name: string; use: "music" | "loop" | "effect"; ms: number; bytes?: Buffer }): Promise<string> {
+  const row = await uploadSound(input.context, input.origin, input.roomId, input.bytes ?? silentSound(input.ms), `${input.name}.mp3`);
   await input.ops.send({ t: "sound.create", id: input.id, assetId: row.id, name: input.name, use: input.use, ms: row.audio?.ms ?? silentMs(input.ms) });
   return input.id;
 }
@@ -169,4 +170,151 @@ export async function inStep(page: Page, ms: number, timeoutMs = 8_000): Promise
   } catch (err) {
     throw new Error(`${(err as Error).message}, and it said ${JSON.stringify(last)}`, { cause: err });
   }
+}
+
+/** The tone the tap measures: a sine with a period of exactly 128 samples at 48 kHz. */
+export const TAP_TONE_HZ = 375;
+
+/**
+ * A steady 375 Hz tone at -10.5 dBFS on the left, so a dropout, a step or a
+ * click in the room's output shows against it, and a chord of three
+ * unrelated partials on the right, stereo at 48 kHz from the app's own
+ * encoder (128 kbps). With the same tone on both sides Chrome fails to
+ * decode after most seeks ("mp1: invalid bit allocation"): its frames are
+ * so alike that a false frame header in one lines up with the next.
+ */
+export function toneSound(seconds: number): Buffer {
+  const length = Math.round(seconds * 48_000);
+  const left = new Float32Array(length);
+  const right = new Float32Array(length);
+  for (let i = 0; i < length; i++) {
+    left[i] = 0.3 * Math.sin((2 * Math.PI * TAP_TONE_HZ * i) / 48_000);
+    right[i] = [311.1, 437.3, 593.7].reduce((sum, hz) => sum + 0.1 * Math.sin((2 * Math.PI * hz * i) / 48_000), 0);
+  }
+  return Buffer.from(mp3Of([left, right], 48_000));
+}
+
+/**
+ * The tap's processor, on the audio thread: for each 128-frame quantum of
+ * the room's output, its time, the left tone's mean and lowest level, and the
+ * largest step a two-tap predictor of the tone finds. A clean tone leaves
+ * that predictor almost nothing, so a step there is a click or a cut.
+ */
+const TAP_WORKLET = `
+class SoundTap extends AudioWorkletProcessor {
+  constructor(o) {
+    super();
+    const w = (2 * Math.PI * o.processorOptions.hz) / sampleRate;
+    this.c2 = 2 * Math.cos(w); this.cw = Math.cos(w); this.sw = Math.sin(w);
+    this.x1 = 0; this.x2 = 0; this.out = [];
+    this.port.onmessage = () => this.flush();
+  }
+  flush() { if (this.out.length > 0) { this.port.postMessage(this.out); this.out = []; } }
+  process(inputs) {
+    const x = inputs[0] && inputs[0][0];
+    const n = x ? x.length : 128;
+    let sum = 0, min = Infinity, step = 0;
+    if (x) {
+      for (let i = 0; i < n; i++) {
+        const v = x[i];
+        step = Math.max(step, Math.abs(v - this.c2 * this.x1 + this.x2));
+        const c = (v * this.cw - this.x1) / this.sw;
+        const a = Math.sqrt(v * v + c * c);
+        sum += a; min = Math.min(min, a);
+        this.x2 = this.x1; this.x1 = v;
+      }
+    } else { min = 0; this.x1 = 0; this.x2 = 0; }
+    this.out.push(currentFrame / sampleRate, sum / n, min, step);
+    if (this.out.length >= 1500) this.flush();
+    return true;
+  }
+}
+registerProcessor("sound-tap", SoundTap);`;
+
+/**
+ * Set before the app's first script, in a context made with `bypassCSP`
+ * (the tap's processor loads from a blob): the room sound's output goes to
+ * the tap alone, never the speaker, and every change of an element's
+ * `playbackRate` or `currentTime`, and every media error, is logged with
+ * the audio clock's time, marked as the test's own while `self` is set.
+ * `elements` holds every pooled element.
+ */
+export const SOUND_TAP = `(() => {
+  const tap = { log: [], quanta: [], elements: [], ctx: null, node: null, pending: [], self: false };
+  globalThis.__soundTap = tap;
+  const at = () => (tap.ctx ? tap.ctx.currentTime : -1);
+  const P = HTMLMediaElement.prototype;
+  const time = Object.getOwnPropertyDescriptor(P, "currentTime");
+  const rate = Object.getOwnPropertyDescriptor(P, "playbackRate");
+  Object.defineProperty(P, "playbackRate", { configurable: true, get() { return rate.get.call(this); }, set(v) { if (rate.get.call(this) !== v) tap.log.push({ kind: "rate", at: at(), to: v, self: tap.self }); rate.set.call(this, v); } });
+  Object.defineProperty(P, "currentTime", { configurable: true, get() { return time.get.call(this); }, set(v) { tap.log.push({ kind: "seek", at: at(), to: v, self: tap.self }); time.set.call(this, v); } });
+  const RealAudio = globalThis.Audio;
+  globalThis.Audio = function Audio(src) {
+    const el = src === undefined ? new RealAudio() : new RealAudio(src);
+    tap.elements.push(el);
+    el.addEventListener("error", () => tap.log.push({ kind: "error", at: at(), to: el.error ? el.error.code : 0, self: false, why: el.error ? el.error.message : "" }));
+    return el;
+  };
+  globalThis.Audio.prototype = RealAudio.prototype;
+  const connect = AudioNode.prototype.connect;
+  AudioNode.prototype.connect = function (dest, ...rest) {
+    if (dest instanceof AudioDestinationNode && this.context === tap.ctx) {
+      if (tap.node) connect.call(this, tap.node);
+      else tap.pending.push(this);
+      return dest;
+    }
+    return connect.call(this, dest, ...rest);
+  };
+  const Real = globalThis.AudioContext;
+  globalThis.AudioContext = class extends Real {
+    constructor(...args) {
+      super(...args);
+      // The room sound's context asks for "playback" (context.ts), the chime's and the ping's do not.
+      if (!args[0] || args[0].latencyHint !== "playback") return;
+      tap.ctx = this;
+      const url = URL.createObjectURL(new Blob([${JSON.stringify(TAP_WORKLET)}], { type: "text/javascript" }));
+      this.audioWorklet.addModule(url).then(() => {
+        const node = new AudioWorkletNode(this, "sound-tap", { channelCount: 2, channelCountMode: "explicit", processorOptions: { hz: ${TAP_TONE_HZ} } });
+        node.port.onmessage = (e) => { for (const v of e.data) tap.quanta.push(v); };
+        connect.call(node, this.destination);
+        tap.node = node;
+        for (const n of tap.pending.splice(0)) connect.call(n, node);
+      });
+    }
+  };
+})();`;
+
+/** A change of an element's speed or place, or a media error (`to` its code, `why` its message). */
+export type TapChange = { kind: "rate" | "seek" | "error"; at: number; to: number; self: boolean; why?: string };
+export type TapQuantum = { at: number; level: number; lowest: number; step: number };
+
+/** Everything the tap holds so far, its last quanta flushed first. */
+export async function readTap(page: Page): Promise<{ log: TapChange[]; quanta: TapQuantum[] }> {
+  await page.evaluate(() => (globalThis as unknown as { __soundTap: { node: { port: { postMessage(m: string): void } } | null } }).__soundTap.node?.port.postMessage("flush"));
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  const raw = await page.evaluate(() => {
+    const tap = (globalThis as unknown as { __soundTap: { log: TapChange[]; quanta: number[] } }).__soundTap;
+    return { log: tap.log, quanta: tap.quanta };
+  });
+  const quanta: TapQuantum[] = [];
+  for (let i = 0; i + 3 < raw.quanta.length; i += 4) quanta.push({ at: raw.quanta[i]!, level: raw.quanta[i + 1]!, lowest: raw.quanta[i + 2]!, step: raw.quanta[i + 3]! });
+  return { log: raw.log, quanta };
+}
+
+/**
+ * The clicks and dropouts in the tap's quanta from `from` to `to` (audio
+ * clock seconds), leaving out the spans in `skip`: a click is a step past
+ * 2% of the tone's level, which a clean tone never comes near and a
+ * time-stretch's change of rate passes many times over, and a dropout is a
+ * quantum where the tone falls under half its level.
+ */
+export function tapGlitches(quanta: readonly TapQuantum[], from: number, to: number, skip: readonly (readonly [number, number])[]): { level: number; clicks: string[]; dropouts: string[] } {
+  const span = quanta.filter((q) => q.at >= from && q.at <= to && !skip.some(([a, b]) => q.at >= a && q.at <= b));
+  const levels = span.map((q) => q.level).sort((a, b) => a - b);
+  const level = levels[Math.floor(levels.length / 2)] ?? 0;
+  return {
+    level,
+    clicks: span.filter((q) => q.step > 0.02 * level).map((q) => `${q.at.toFixed(3)} s: ${((100 * q.step) / level).toFixed(1)}%`),
+    dropouts: span.filter((q) => q.lowest < 0.5 * level).map((q) => `${q.at.toFixed(3)} s: ${((100 * q.lowest) / level).toFixed(0)}%`),
+  };
 }

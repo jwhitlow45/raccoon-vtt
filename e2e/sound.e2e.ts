@@ -6,7 +6,7 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { ConsoleWatch, OpSocket, openSideTab, Shots, sideTabName, sleep, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
-import { addSound, errors, inStep, IPHONE_AUDIO, musicVoice, roomSoundScript, SOUND_TEST_FLAG, soundProbe, soundSays, type SoundProbe } from "./soundRoom.ts";
+import { addSound, errors, inStep, IPHONE_AUDIO, musicVoice, readTap, roomSoundScript, SOUND_TAP, SOUND_TEST_FLAG, soundProbe, soundSays, tapGlitches, toneSound, type SoundProbe } from "./soundRoom.ts";
 
 /**
  * Synced music and sound on every device (docs/design/design-v1-music.md 5
@@ -604,5 +604,84 @@ describe("synced music and sound", { concurrency: false }, () => {
       }
     }
     assert.deepEqual(lines, [], "out of line");
+  });
+
+  test("sndglitch-1. through a throttled network: a window shown again seeks nothing for a network delay, and the drift check's nudge back from 80 ms changes the speed in the design's steps, never seeks, and leaves no click or dropout in the output", async () => {
+    // A tone on the DM's page or Pat's would sound aloud where the tests run: Gus's page alone plays it, into the tap.
+    await dm.evaluate(() => localStorage.setItem("rvtt.roomSound", "off"));
+    await openRoom(dm);
+    await pat.close();
+    const toneId = await addSound({ context: dmContext, origin: server.origin, roomId: run.roomId, ops, id: "snd-tone", name: "Tone", use: "music", ms: 60_000, bytes: toneSound(60) });
+    const asset = await waitFor("the tone's asset", () => dmSocket.state?.sounds?.[toneId]?.assetId ?? null);
+    const gusContext = await browser.newContext({ viewport: { width: 1280, height: 800 }, bypassCSP: true });
+    try {
+      await gusContext.addInitScript(SOUND_TEST_FLAG);
+      await gusContext.addInitScript(roomSoundScript("on"));
+      await gusContext.addInitScript(SOUND_TAP);
+      // Frames to Gus 100 ms late and none the other way, as a slow downlink: the store's offset is 100 ms under the
+      // server's time, and the time frames' reading 50 ms under it.
+      await gusContext.routeWebSocket(/\/ws\?room=/, (ws) => {
+        const upstream = ws.connectToServer();
+        ws.onMessage((m) => upstream.send(m));
+        upstream.onMessage((m) => setTimeout(() => ws.send(m), 100));
+      });
+      await join(gusContext, "Gus", "#eab308");
+      const gus = await gusContext.newPage();
+      // A phone on a fair link: the page and every range of the track through it.
+      const cdp = await gusContext.newCDPSession(gus);
+      await cdp.send("Network.enable");
+      await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 150, downloadThroughput: 1_500_000 / 8, uploadThroughput: 750_000 / 8 });
+      await openRoom(gus);
+      await playTrack(toneId, 0, "off");
+      await soundSays(gus, /^playing music/, 10_000);
+      type Tap = { elements: { paused: boolean; src: string; currentTime: number }[]; self: boolean; ctx: { currentTime: number } };
+      const now = () => gus.evaluate(() => (globalThis as unknown as { __soundTap: Tap }).__soundTap.ctx.currentTime);
+
+      // Shown again three times, each in step first and past the second that keeps two seeks apart. A wake starts a new
+      // measurement epoch, and its forced check must read the last epoch's offset, not the store's 50 ms further off,
+      // or it seeks every time.
+      const wakes: number[] = [];
+      for (let i = 0; i < 3; i++) {
+        await inStep(gus, 20, 10_000);
+        await sleep(1_200);
+        wakes.push(await now());
+        await gus.evaluate(() => (globalThis as unknown as { document: EventTarget }).document.dispatchEvent(new Event("visibilitychange")));
+        await sleep(2_500);
+      }
+      const woken = (await readTap(gus)).log.filter((c) => !c.self && c.kind === "seek" && wakes.some((w) => c.at >= w && c.at <= w + 2));
+      // A reading may land just past 25 ms once at the forced check: one seek of three at most.
+      assert.ok(woken.length <= 1, `a wake seeks for a network delay: ${JSON.stringify(woken)} after wakes at ${wakes.map((w) => w.toFixed(2)).join(", ")}`);
+
+      await inStep(gus, 30, 10_000);
+      await sleep(1_000);
+      // The test moves Gus's element 80 ms ahead, as a change of the clock's offset or the output's latency moves its aim.
+      const shiftAt = await gus.evaluate((id) => {
+        const tap = (globalThis as unknown as { __soundTap: Tap }).__soundTap;
+        const el = tap.elements.find((e) => !e.paused && e.src.includes(id));
+        if (!el) return null;
+        tap.self = true;
+        el.currentTime += 0.08;
+        tap.self = false;
+        return tap.ctx.currentTime;
+      }, asset);
+      assert.ok(shiftAt !== null, "Gus's page plays the tone");
+      await sleep(8_000);
+      const { log, quanta } = await readTap(gus);
+      assert.deepEqual(log.filter((c) => c.kind === "error"), [], "the tone plays on through every seek");
+      const engine = log.filter((c) => !c.self && c.at > shiftAt);
+      const rates = engine.filter((c) => c.kind === "rate").map((c) => `${c.at.toFixed(2)} s: ${c.to}`);
+      assert.equal(engine.filter((c) => c.kind === "seek").length, 0, `80 ms is a nudge, never a seek: ${JSON.stringify(engine)}`);
+      // 3% off to 60 ms, 1.5% off to 25 ms, then speed 1: three changes, and one more nudge in and out when a reading
+      // lands just past 25 ms, as the readings' noise of about 10 ms allows.
+      assert.ok(rates.length >= 2 && rates.length <= 5, `the nudge in the design's steps: ${rates.join(", ")}`);
+      assert.ok(engine.some((c) => c.kind === "rate" && c.at > shiftAt + 0.3), `a change of speed the output is measured across: ${rates.join(", ")}`);
+      // The test's own step is a cut in the tone: its quarter second is left out, and every change of speed the check makes is measured.
+      const found = tapGlitches(quanta, shiftAt - 1, shiftAt + 7.5, [[shiftAt - 0.05, shiftAt + 0.25]]);
+      assert.ok(found.level > 0.05, `the tone reaches the tap (level ${found.level.toFixed(3)})`);
+      assert.deepEqual(found.clicks, [], `no click at a change of speed (${rates.join(", ")})`);
+      assert.deepEqual(found.dropouts, [], "no dropout");
+    } finally {
+      await gusContext.close();
+    }
   });
 });
