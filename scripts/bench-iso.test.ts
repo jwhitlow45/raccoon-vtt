@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { CDPSession, Page } from "playwright-core";
-import { CAP_FIRST_ROW, gate, hexRelief, largestGate, partsPast, tetherWork, timedUntil } from "./bench-iso.ts";
+import { CAP_FIRST_ROW, gate, generatedDungeon, hexRelief, largestGate, partsPast, tetherWork, timedUntil } from "./bench-iso.ts";
 
 /*
  * The isometric bench's build rows (docs/design/design-v1-iso-area-shapes.md 6
@@ -88,6 +88,28 @@ describe("the square relief room (docs/design/design-v1-relief-pan.md 9)", () =>
     assert.equal(cells.length, 1600);
     assert.ok(heights.every((o) => o.height !== 0));
     assert.ok(!built.ops.some((o) => o.t === "scene.update" && "gridShape" in (o.patch as object)), "squares, the default grid");
+  });
+});
+
+describe("the generated dungeon room (docs/design/design-v1-iso-depth.md 7)", () => {
+  test("the seed's 50 by 50 dungeon has runs to raised and sunk rooms, and the walker stands at the foot of a raised one", async () => {
+    const { make, grounds } = await generatedDungeon();
+    assert.ok(grounds.some((g) => g >= 10) && grounds.some((g) => g <= -10) && grounds.some((g) => g === -5), `run grounds ${grounds.join(", ")}`);
+    const built = make("s1");
+    assert.ok(built.ops.every((o) => o.t !== "scene.create"), "the bench room's own scene");
+    assert.ok(built.ops.filter((o) => o.t !== "scene.update" && o.t !== "token.create").every((o) => o.sceneId === "s1"));
+    assert.ok(built.ops.some((o) => o.t === "build.stairs") && built.ops.some((o) => o.t === "build.height"));
+    const walker = built.ops.find((o) => o.t === "token.create" && (o.token as { id: string }).id === built.walker)!.token as { x: number; y: number };
+    const stairs = built.ops.filter((o) => o.t === "build.stairs").flatMap((o) => o.cells as string[]);
+    assert.ok(!stairs.includes(`${walker.x},${walker.y}`), "on the foot, not a stair");
+    assert.ok(Math.hypot(built.at40.x - walker.x - 0.5, built.at40.y - walker.y - 0.5) <= 2, "the camera on the run");
+  });
+
+  test("its rows are held by the largest-move gate, and a turn by the 150 ms one", () => {
+    const ms = (rounds: number[]) => ({ median: 8, max: Math.max(...rounds), n: 48, rounds });
+    assert.match(largestGate("pan, 24 px, generated dungeon on squares", ms([60, 60, 60]), ms([10, 10, 10])), /OVER in 3 of 3 pairs$/);
+    assert.match(gate("turn, generated dungeon on squares, 40 px, each turn visited before", { median: 151, max: 200, n: 12 }, undefined), /^OVER 150 ms/);
+    assert.match(gate("pan, caps, 24 px", { median: 40, max: 50, n: 48 }, 10), /^OVER \(budget 17\.5\)/, "the caps' pans by `gate` too");
   });
 });
 

@@ -33,6 +33,10 @@
  *   pans at 40 px and 12 px are counted too, on an untimed pan of their
  *   own: the canvas's fills, clips, image copies and patterns and the
  *   ground stage's draws, each a frame.
+ * - dungeon: a 50 by 50 generated dungeon with rooms raised and sunk and
+ *   the runs of stairs to them (docs/design/design-v1-iso-depth.md 7), with
+ *   a pan, a drag up a run and a turn at 40 and 24 px, and in Low power at
+ *   48 and 64 px, beside the caps' pans at 24 px and at 48 px in Low power.
  *
  * Rows: pan (the typical scene at 40 px, the caps at fit and at 40 px, the
  * crowd at 40 px), a local drag (each whole frame), the ringed and aura'd
@@ -92,6 +96,8 @@ export async function tetherWork(length = 200): Promise<{ candidates: number; vi
 }
 
 const PHONE = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true };
+/** The server's snapshot budget window, with a second to spare. */
+const SNAPSHOT_WINDOW_MS = 61_000;
 const CPU_SLOWDOWN = 4;
 const STEPS = 16;
 const ROUNDS = 3;
@@ -334,6 +340,53 @@ function pits(sceneId: string): Built {
   return { ops, walker: walker.id as string, bounds: { w: 200, h: 200 }, at40: { x: 100, y: 100 } };
 }
 const hexRow = (orient: string, what: string) => `${what}, hex relief ${orient}`;
+
+/** A fixed seed whose 50 by 50 dungeon has rooms raised 10 ft and sunk 5 and 10 ft, each reached by a run of stairs. */
+export const DUNGEON_SEED = "17FYEGJ4RA4QXRDA";
+const DUNGEON_SIDE = 50;
+
+type PlannedDungeon = { plan: unknown; board: { W: number; doorways: { removed: boolean; run: { ground: number; near: number[]; stairs: { cell: number }[]; far: number[] } | null }[] } };
+
+/**
+ * The generated dungeon room (docs/design/design-v1-iso-depth.md 7): the
+ * generator's own plan and ops for DUNGEON_SEED, its scene made the bench
+ * room's, with fog off. The walker stands at the foot of a run up to a 10 ft
+ * room and the camera at the run's middle, so a drag toward the canvas's
+ * middle climbs it, and a creature stands on each of its stairs. Read from
+ * the client's generator, once a run.
+ */
+export async function generatedDungeon(): Promise<{ make: (sceneId: string) => Built; grounds: number[] }> {
+  // Keep browser-only canvas types out of the server tools' compilation, as the tether row does.
+  const { planDungeon } = (await import(new URL("../client/features/dungeon/plan.ts", import.meta.url).href)) as { planDungeon(s: object, seed: string): PlannedDungeon };
+  const { buildOps } = (await import(new URL("../client/features/dungeon/ops.ts", import.meta.url).href)) as { buildOps(plan: unknown, scene: object): Op[] };
+  const { builderScene } = (await import(new URL("../client/features/scenes/create.ts", import.meta.url).href)) as { builderScene(i: { id: string; name: string; w: number; h: number }): object };
+  const settings = { w: DUNGEON_SIDE, h: DUNGEON_SIDE, rooms: 10, density: "normal", corridors: "straight", wide: false, loops: false, theme: "dungeon", heights: "some", traps: "none", band: "1-4" };
+  const planned = planDungeon(settings, DUNGEON_SEED);
+  const made = buildOps(planned.plan, builderScene({ id: "dungeon-scene", name: "Dungeon", w: DUNGEON_SIDE, h: DUNGEON_SIDE }));
+  const W = planned.board.W;
+  const runs = planned.board.doorways.flatMap((d) => (!d.removed && d.run ? [d.run] : []));
+  const run = runs.find((r) => r.ground >= 10);
+  if (!run) throw new Error(`the dungeon of ${DUNGEON_SEED} has no run up to a raised room`);
+  const at = (k: number) => ({ x: k % W, y: Math.floor(k / W) });
+  const make = (sceneId: string): Built => {
+    const ops: Op[] = made.map((op): Op => {
+      if (op.t !== "scene.create") return { ...op, sceneId };
+      const scene = op.scene as { bounds: { w: number; h: number }; autoWalls?: unknown };
+      return { t: "scene.update", sceneId, patch: { bounds: scene.bounds, fogEnabled: false, ...(scene.autoWalls ? { autoWalls: scene.autoWalls } : {}) } };
+    });
+    const foot = at(run.far[0]!);
+    const walker = token(sceneId, "Walker", foot.x, foot.y, { kind: "npc", disposition: "ally" });
+    ops.push({ t: "token.create", token: walker });
+    for (const [i, s] of run.stairs.entries()) {
+      const p = at(s.cell);
+      ops.push({ t: "token.create", token: token(sceneId, `Climber ${i + 1}`, p.x, p.y) });
+    }
+    const head = at(run.near[0]!);
+    return { ops, walker: walker.id as string, bounds: { w: DUNGEON_SIDE, h: DUNGEON_SIDE }, at40: { x: (foot.x + head.x + 1) / 2, y: (foot.y + head.y + 1) / 2 } };
+  };
+  return { make, grounds: runs.map((r) => r.ground) };
+}
+const dungeonRow = (what: string) => `${what}, generated dungeon on squares`;
 
 // ---------------------------------------------------------------- the page
 
@@ -873,7 +926,9 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       live = kind;
       return b.dm;
     };
-    // The rooms for areas come last, so the others keep their ids and the parity images of before still match.
+    const dungeon = await generatedDungeon();
+    const roomTimes: number[] = [];
+    // The rooms for areas come last, so the others keep their ids and the parity images of before still match. The generated dungeon came after them.
     for (const [kind, make] of [
       ["typical", typical],
       ["caps", caps],
@@ -885,7 +940,12 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       ["hexColumns", hexRelief("columns")],
       ["squares", hexRelief("squares")],
       ["pits", pits],
+      ["dungeon", dungeon.make],
     ] as const) {
+      // A room costs the session two snapshots, the page's and the DM socket's. Past 20 a minute the server holds the next back and closes a session that keeps asking (server/rooms/budgets.ts DEFAULT_SNAPSHOT_BUDGET), so the eleventh room waits out the first's minute.
+      const recent = roomTimes.filter((t) => Date.now() - t < SNAPSHOT_WINDOW_MS);
+      if (recent.length >= 10) await page.waitForTimeout(SNAPSHOT_WINDOW_MS - (Date.now() - recent[0]!));
+      roomTimes.push(Date.now());
       const room = await createRoom(page, `Bench iso ${kind} ${stamp}`);
       rooms.push(room);
       const dm = await Socket.open(server.origin, room.roomId, await cookieNow());
@@ -1038,6 +1098,13 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       // The caps at 12 px, its largest move reported, not gated (D-261030-538).
       await open("caps", 12);
       await addPan("pan, caps, 12 px", () => touchPan(page, cdp, STEPS));
+      // At the zoom stairs start to step, and in Low power at the first zoom they step there (docs/design/design-v1-iso-depth.md 7).
+      await open("caps", 24);
+      await addPan("pan, caps, 24 px", () => touchPan(page, cdp, STEPS));
+      await page.evaluate(() => localStorage.setItem("rvtt.lowPower", "on"));
+      await open("caps", 48);
+      await addPan("pan, caps, 48 px in Low power", () => touchPan(page, cdp, STEPS));
+      await page.evaluate(() => localStorage.removeItem("rvtt.lowPower"));
       await open("caps", 40);
       await add("pan, caps, 40 px", () => throttled(() => rounds(() => touchPan(page, cdp, STEPS))));
       await select(page, scene.group!);
@@ -1240,6 +1307,41 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
         rows.push({ row: hexRow(orient, "a 40 ft cube on alternating hex heights, each frame while it builds, 40 px"), view, ms: frameStats(frames2) });
         if (view === "isometric") rows.push({ row: hexRow(orient, "a 40 ft cube on alternating hex heights, from its sending until it stands (ms whole, not a frame)"), view, ms: stats(builds.slice(1)) });
       }
+    }
+
+    /*
+     * The generated dungeon (docs/design/design-v1-iso-depth.md 7): a pan, a
+     * drag up a run and in Isometric a turn, at 40 px and at the 24 px stairs
+     * start to step from, and in Low power at 48 and 64 px, where they step
+     * there. The page reloads with the setting on for those.
+     */
+    if (!opts.only || opts.only.some((o) => dungeonRow("").includes(o) || o.includes("generated dungeon"))) {
+      const { scene } = built.dungeon!;
+      const hook = (call: "turn", arg?: unknown) => page.evaluate(([c, a]) => (globalThis as unknown as { __rvttIsoHook?: Record<string, (a: unknown) => unknown> }).__rvttIsoHook?.[c]?.(a), [call, arg] as const);
+      for (const [zoom, low] of [
+        [40, false],
+        [24, false],
+        [48, true],
+        [64, true],
+      ] as const) {
+        await page.evaluate((on) => (on ? localStorage.setItem("rvtt.lowPower", "on") : localStorage.removeItem("rvtt.lowPower")), low);
+        await open("dungeon", zoom);
+        const at = `${zoom} px${low ? " in Low power" : ""}`;
+        await addPan(dungeonRow(`pan, ${at}`), () => touchPan(page, cdp, STEPS));
+        await add(dungeonRow(`local drag up a run, whole frame, ${at}`), () => throttled(() => rounds(() => touchDrag(page, cdp, scene.walker, STEPS))));
+        if (view === "isometric") {
+          // The selected walker is the point a turn keeps still (boardPick.ts heldPoint), so every turn shows the same run.
+          await select(page, [scene.walker]);
+          for (const t of [1, 2, 3, 0] as const) {
+            await hook("turn", t);
+            await frames(page, 6);
+          }
+          await add(`turn, ${dungeonRow(`${at}, each turn visited before`)}`, () => throttled(() => rounds(() => timed(page, cdp, 4, async (i) => void (await hook("turn", (i + 1) % 4)), 4))));
+          await page.keyboard.press("Escape");
+          await frames(page, 8);
+        }
+      }
+      await page.evaluate(() => localStorage.removeItem("rvtt.lowPower"));
     }
 
     // A scene sunk 100 ft: a pan repairs many toned cells, in rows past a few (kept.ts repairRegions), and counted in Isometric.
