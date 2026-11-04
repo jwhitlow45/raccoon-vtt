@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { headerSink, PanelScrollKeeper, panelOffered, panelSections, PANELS, panelsFor, panelSubject, RESTORE_WAIT_MS, restoreStep, scrollOf, tabGroup, type PanelHeader, type PanelScroll, type PanelSection } from "./panels.ts";
+import { canonicalPanelId, PANEL_RENAMES } from "./panels.ts";
 
 describe("the panels' order and groups (docs/design/design-v1-layout-hierarchy.md M3)", () => {
   const titles = (role: "dm" | "player", wide: boolean) => panelsFor(role, wide).map((p) => p.title);
@@ -454,5 +455,24 @@ describe("the panel scroll keeper under random orders", () => {
           assert.equal(el.scrollTop, before.saved.top, `held, but not at the saved place: ${at}`);
       }
     }
+  });
+});
+
+describe("old panel ids (docs/design/design-v1-panel-groups.md 7)", () => {
+  test("Time and Sound name Ambiance now, and every other id is itself", () => {
+    assert.deepEqual(PANEL_RENAMES, { time: "ambiance", sound: "ambiance" });
+    assert.equal(canonicalPanelId("time"), "ambiance");
+    assert.equal(canonicalPanelId("sound"), "ambiance");
+    for (const p of PANELS) if (!(p.id in PANEL_RENAMES)) assert.equal(canonicalPanelId(p.id), p.id);
+    assert.equal(canonicalPanelId("ambiance"), "ambiance");
+    assert.equal(canonicalPanelId(""), "");
+  });
+
+  test("a stored id that names something on an object's prototype comes back as it is", () => {
+    for (const id of ["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"]) assert.equal(canonicalPanelId(id), id);
+  });
+
+  test("the renames are fixed for the page's life", () => {
+    assert.ok(Object.isFrozen(PANEL_RENAMES));
   });
 });
