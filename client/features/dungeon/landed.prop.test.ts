@@ -15,7 +15,7 @@ import { SCENE_PLACEHOLDER } from "./ops.ts";
 import type { DungeonPlan, PlanRoom } from "./plan.ts";
 import { previewOf } from "./scratch.ts";
 import { newSeed } from "./seed.ts";
-import { clampRooms, MAX_SIDE, MIN_SIDE, roomCap, type DungeonSettings } from "./settings.ts";
+import { clampRooms, HEIGHT_PRESETS, HEIGHTS_MAX, HEIGHTS_STEP, MAX_SIDE, MIN_SIDE, roomCap, TRAP_PRESETS, TRAPS_MAX, type DungeonSettings } from "./settings.ts";
 
 /*
  * A generated dungeon as it lands (docs/design/design-v1-dungeon-generator.md
@@ -38,8 +38,8 @@ const settings: fc.Arbitrary<DungeonSettings> = fc
     wide: fc.boolean(),
     loops: fc.boolean(),
     theme: fc.constantFrom("dungeon", "crypt"),
-    heights: fc.constantFrom("flat", "some", "some"),
-    traps: fc.constantFrom("none", "few", "some"),
+    heights: fc.integer({ min: 0, max: HEIGHTS_MAX / HEIGHTS_STEP }).map((n) => n * HEIGHTS_STEP),
+    traps: fc.integer({ min: 0, max: TRAPS_MAX }),
     band: fc.constantFrom(...LEVEL_BANDS),
   })
   .map((s) => ({ ...s, rooms: clampRooms(s.rooms, s.w, s.h) }));
@@ -259,7 +259,7 @@ test("DG-B: the defaults at each size, and Wide with heights, land by the same r
   const sizes: [number, number][] = [[30, 30], [50, 50], [80, 80]];
   holds(
     fc.property(fc.constantFrom(...sizes), fc.boolean(), seed, ([w, h], wide, seedText) =>
-      checkLanded({ w, h, rooms: Math.min(roomCap(w, h), w === 30 ? 6 : w === 50 ? 12 : 20), density: "normal", corridors: "bending", wide, loops: true, theme: "dungeon", heights: "some", traps: "few", band: "1-4" }, seedText),
+      checkLanded({ w, h, rooms: Math.min(roomCap(w, h), w === 30 ? 6 : w === 50 ? 12 : 20), density: "normal", corridors: "bending", wide, loops: true, theme: "dungeon", heights: HEIGHT_PRESETS.Some, traps: TRAP_PRESETS.Few, band: "1-4" }, seedText),
     ),
     24,
   );

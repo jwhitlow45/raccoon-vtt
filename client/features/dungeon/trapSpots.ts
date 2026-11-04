@@ -2,7 +2,6 @@ import type { TrapZone } from "#shared/model.ts";
 import { trapPreset } from "#shared/srd/traps.ts";
 import type { Board } from "./layout.ts";
 import type { Stream } from "./random.ts";
-import { MAX_TRAPS, type TrapsChoice } from "./settings.ts";
 
 /*
  * Where the SRD's example traps go (docs/design/design-v1-dungeon-generator.md
@@ -21,18 +20,11 @@ export const POISONED_NEEDLE = "poisoned-needle";
 
 /** Traps keep this many squares apart, between their middles. */
 export const TRAP_SPACING = 6;
-const TRAPS_PER_ROOMS: Readonly<Record<Exclude<TrapsChoice, "none">, number>> = { few: 6, some: 3 };
 
 /** A pit preset's squares, as the Trap tool's preset has them (2 by 2). */
 function pitSize(): { w: number; h: number } {
   const zone = trapPreset(HIDDEN_PIT, "1-4")!.zone;
   return zone.kind === "squares" ? { w: zone.w, h: zone.h } : { w: 2, h: 2 };
-}
-
-/** How many traps a choice places among `rooms` kept rooms: one per six or per three, at least one, at most 12. */
-export function trapCount(choice: TrapsChoice, rooms: number): number {
-  if (choice === "none") return 0;
-  return Math.min(MAX_TRAPS, Math.max(1, Math.floor(rooms / TRAPS_PER_ROOMS[choice])));
 }
 
 export type Spot = { kind: "pit" | "net" | "needle"; zone: TrapZone; /** Its middle, doubled. */ mid: [number, number] };

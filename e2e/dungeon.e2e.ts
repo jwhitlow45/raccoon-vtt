@@ -169,6 +169,21 @@ async function previewImg(dialog: Locator): Promise<Locator> {
   return img;
 }
 
+/** New scene's Builder form, then Generate a dungeon, once its preview has drawn. */
+async function openDialog(page: Page): Promise<Locator> {
+  const form = newSceneForm(await scenesPanel(page));
+  if ((await form.getByRole("button", { name: "Generate a dungeon", exact: true }).count()) === 0) await form.getByRole("radio", { name: "Builder", exact: true }).click();
+  await form.getByRole("button", { name: "Generate a dungeon", exact: true }).click();
+  const dialog = dialogOf(page);
+  await previewImg(dialog);
+  return dialog;
+}
+
+/** A named mark under one of the dialog's sliders. */
+function mark(dialog: Locator, slider: string, name: string): Locator {
+  return dialog.getByRole("group", { name: `${slider} marks`, exact: true }).getByRole("button", { name, exact: true });
+}
+
 async function seedField(dialog: Locator): Promise<Locator> {
   return dialog.getByRole("textbox", { name: "Seed", exact: true });
 }
@@ -472,6 +487,22 @@ describe("dungeon generator", { concurrency: false }, () => {
     await dialog.getByRole("radio", { name: "Crypt", exact: true }).check();
     await dialog.getByRole("radio", { name: "Small", exact: true }).check();
     await dialog.getByRole("radio", { name: "Wide", exact: true }).check();
+    // DGOPTS: Page Up jumps Heights to its next mark, a tap on a Traps mark sets it, the arrows step between, and each reads in words.
+    const heights = dialog.getByRole("slider", { name: "Heights", exact: true });
+    const traps = dialog.getByRole("slider", { name: "Traps", exact: true });
+    await heights.focus();
+    await heights.press("PageUp");
+    assert.equal(await heights.inputValue(), "50", "Page Up from Some to Many");
+    assert.equal(await heights.getAttribute("aria-valuetext"), "About 3 rooms of 6 off flat ground");
+    await mark(dialog, "Traps", "Many").click();
+    assert.equal(await traps.inputValue(), "6");
+    assert.equal(await mark(dialog, "Traps", "Many").getAttribute("aria-pressed"), "true");
+    assert.equal(await traps.getAttribute("aria-valuetext"), "About 3 traps");
+    await traps.press("ArrowLeft");
+    assert.equal(await traps.getAttribute("aria-valuetext"), "About 2 traps");
+    assert.equal(await mark(dialog, "Traps", "Many").getAttribute("aria-pressed"), "false", "between marks");
+    await traps.press("End");
+    await shots.take(dm, "DGOPTS-sliders");
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
     await dialog.waitFor({ state: "detached" });
     await dm.waitForTimeout(1_000);
@@ -487,7 +518,11 @@ describe("dungeon generator", { concurrency: false }, () => {
     assert.notEqual((await (await seedField(dialog)).inputValue()).replace(/-/g, ""), SEED.replace(/-/g, ""), "never a remembered seed");
     const stored = await dm.evaluate((id) => (globalThis as unknown as { localStorage: { getItem(k: string): string | null } }).localStorage.getItem(`rvtt.dungeon.${id}`), run.roomId);
     assert.ok(stored && !/seed/i.test(stored), `stored choices: ${stored}`);
+    assert.equal(await dialog.getByRole("slider", { name: "Heights", exact: true }).inputValue(), "50", "remembered Heights");
+    assert.equal(await dialog.getByRole("slider", { name: "Traps", exact: true }).inputValue(), "6", "remembered Traps");
     // Back to the defaults this run measures.
+    await mark(dialog, "Heights", "Some").click();
+    await mark(dialog, "Traps", "Few").click();
     await dialog.getByRole("radio", { name: "Dungeon", exact: true }).check();
     await dialog.getByRole("radio", { name: "Medium", exact: true }).check();
     await dialog.getByRole("radio", { name: "Narrow", exact: true }).check();
@@ -625,6 +660,10 @@ describe("dungeon generator", { concurrency: false }, () => {
       for (const name of ["Across", "Down", "Rooms", "Seed"]) assert.equal(await dialog.getByRole("textbox", { name, exact: true }).isDisabled(), true, `${name} held`);
       for (const name of ["Crypt", "Small", "Dense", "Winding", "Wide"]) assert.equal(await dialog.getByRole("radio", { name, exact: true }).first().isDisabled(), true, `${name} held`);
       assert.equal(await dialog.getByRole("switch", { name: "Extra ways around" }).isDisabled(), true, "Extra ways around held");
+      for (const name of ["Heights", "Traps"]) {
+        assert.equal(await dialog.getByRole("slider", { name, exact: true }).isDisabled(), true, `${name} held`);
+        assert.equal(await mark(dialog, name, name === "Heights" ? "Most" : "Many").isDisabled(), true, `${name}'s marks held`);
+      }
       assert.equal(await dialog.getByRole("button", { name: "Reroll", exact: true }).isDisabled(), true, "Reroll held");
       assert.equal(await dialog.getByRole("button", { name: "Copy seed", exact: true }).isDisabled(), false, "Copy seed stays");
       await dialog.getByRole("button", { name: "Hide", exact: true }).click();
@@ -666,8 +705,10 @@ describe("dungeon generator", { concurrency: false }, () => {
       await field.fill(value);
       await field.press("Enter");
     }
-    for (const name of ["Dense", "Winding", "Wide", "Some"]) await dialog.getByRole("radio", { name, exact: true }).first().check();
-    await dialog.getByRole("radiogroup", { name: "Traps", exact: true }).getByRole("radio", { name: "Some", exact: true }).check();
+    for (const name of ["Dense", "Winding", "Wide"]) await dialog.getByRole("radio", { name, exact: true }).first().check();
+    // The sliders' tops: the most rooms off flat ground and the most traps.
+    await mark(dialog, "Heights", "Most").click();
+    await mark(dialog, "Traps", "Many").click();
     await (await seedField(dialog)).fill(SEED);
     const status = await waitFor("the largest dungeon's status", async () => {
       const now = await statusText(dialog, 60_000);
@@ -688,11 +729,7 @@ describe("dungeon generator", { concurrency: false }, () => {
       await phone.goto(dm.url());
       await phone.getByRole("status", { name: "Connected" }).first().waitFor();
       for (const [label, page] of [["desktop", dm], ["phone", phone]] as const) {
-        const form = newSceneForm(await scenesPanel(page));
-        if ((await form.getByRole("button", { name: "Generate a dungeon", exact: true }).count()) === 0) await form.getByRole("radio", { name: "Builder", exact: true }).click();
-        await form.getByRole("button", { name: "Generate a dungeon", exact: true }).click();
-        const dialog = dialogOf(page);
-        await previewImg(dialog);
+        const dialog = await openDialog(page);
         lines.push(...alignmentLines(await measureAlignment(dialog), `DG-9 dialog, ${label}`));
         await shots.take(page, `DG-9-${label}`);
         await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
@@ -700,6 +737,66 @@ describe("dungeon generator", { concurrency: false }, () => {
       }
     } finally {
       await phone.close();
+    }
+    assert.deepEqual(lines, []);
+  });
+
+  test("DGOPTS-1. the Heights and Traps sliders whole within 1 px at 1440 x 900, 390 x 844 and 320 x 568 at 130%, dark and light: the marks on one row where they fit, else two shared evenly, no word cut", async () => {
+    const page = await dmContext.newPage();
+    const lines: string[] = [];
+    try {
+      for (const [label, size, scale] of [["computer", { width: 1440, height: 900 }, 1], ["phone", PHONE, 1], ["smallest", { width: 320, height: 568 }, 1.3]] as const) {
+        for (const scheme of ["dark", "light"] as const) {
+          await page.setViewportSize(size);
+          if (!page.url().startsWith(server.origin)) await page.goto(server.origin);
+          await page.evaluate((kv) => {
+            for (const [k, v] of Object.entries(kv)) localStorage.setItem(k, v);
+          }, { "rvtt.uiScale": String(scale), "rvtt.theme": scheme });
+          await page.goto(dm.url());
+          await page.getByRole("status", { name: "Connected" }).first().waitFor();
+          const dialog = await openDialog(page);
+          const at = `${label} ${scheme}`;
+          for (const name of ["Heights", "Traps"]) {
+            const slider = dialog.getByRole("slider", { name, exact: true });
+            await slider.scrollIntoViewIfNeeded();
+            const box = slider.locator("xpath=..");
+            lines.push(...alignmentLines(await measureAlignment(box), `DGOPTS-1 ${name}, ${at}`));
+            const read = await box.evaluate((el) => {
+              type E = { getBoundingClientRect(): { top: number; left: number; right: number }; scrollWidth: number; clientWidth: number; textContent: string | null };
+              const root = el as unknown as E & { querySelectorAll(s: string): ArrayLike<E> };
+              const marks = Array.from(root.querySelectorAll("button"));
+              const words = Array.from(root.querySelectorAll("span, label, p"));
+              const edge = root.getBoundingClientRect();
+              const tops = marks.map((m) => Math.round(m.getBoundingClientRect().top));
+              return {
+                count: marks.length,
+                tops: [...new Set(tops)],
+                firstRow: tops.filter((t) => t === tops[0]).length,
+                narrowest: Math.min(...marks.map((m) => Math.round((m.getBoundingClientRect() as unknown as { width: number }).width))),
+                cut: [...marks, ...words].filter((e) => e.scrollWidth > e.clientWidth + 1).map((e) => e.textContent),
+                outside: [...marks, ...words].filter((e) => e.getBoundingClientRect().right > edge.right + 1 || e.getBoundingClientRect().left < edge.left - 1).map((e) => e.textContent),
+              };
+            });
+            // Every mark keeps its 44 px: one row where they fit, else two shared evenly, and only on the smallest phone.
+            if (read.tops.length !== (label === "smallest" && read.count > 4 ? 2 : 1) || read.firstRow < read.count / 2) lines.push(`DGOPTS-1 ${name}, ${at}: the marks stand on ${read.tops.length} rows, ${read.firstRow} on the first`);
+            if (read.narrowest < 44) lines.push(`DGOPTS-1 ${name}, ${at}: a mark ${read.narrowest} px wide`);
+            if (read.cut.length > 0) lines.push(`DGOPTS-1 ${name}, ${at}: cut ${JSON.stringify(read.cut)}`);
+            if (read.outside.length > 0) lines.push(`DGOPTS-1 ${name}, ${at}: past the edge ${JSON.stringify(read.outside)}`);
+          }
+          // The sliders whole in the shot, their names clear of the preview that stays at the top on a phone.
+          await dialog.getByRole("slider", { name: "Heights", exact: true }).evaluate((el) => (el as unknown as { scrollIntoView(o: unknown): void }).scrollIntoView({ block: "center" }));
+          await shots.take(page, `DGOPTS-1-form-${label}-${scheme}`);
+          await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+          await dialog.waitFor({ state: "detached" });
+        }
+      }
+    } finally {
+      // The size and theme are this device's, so the other pages of the run open as they did.
+      await page.evaluate(() => {
+        localStorage.removeItem("rvtt.uiScale");
+        localStorage.removeItem("rvtt.theme");
+      });
+      await page.close();
     }
     assert.deepEqual(lines, []);
   });

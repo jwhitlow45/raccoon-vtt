@@ -5,8 +5,8 @@ import { DAIS_RISE, placeDais, raiseRooms, type Dais } from "./heights.ts";
 import { Board, chooseEntrance, doorEdge, facingSides, loopLinks, placeDoorway, placeRooms, rockBetween, treeLinks, type Doorway, type Link, type Rect, type Side } from "./layout.ts";
 import { seedStream } from "./random.ts";
 import type { Seed } from "./seed.ts";
-import { clampSettings, GENERATOR_VERSION, MAX_DOOR_EDGES, SEARCH_BUDGET, type DungeonSettings } from "./settings.ts";
-import { pickTraps, trapCount, trapSpots } from "./trapSpots.ts";
+import { clampSettings, GENERATOR_VERSION, MAX_DOOR_EDGES, SEARCH_BUDGET, trapCount, type DungeonSettings } from "./settings.ts";
+import { pickTraps, trapSpots } from "./trapSpots.ts";
 
 /*
  * The dungeon a seed and the choices make (docs/design/design-v1-dungeon-generator.md
@@ -132,7 +132,7 @@ export function planDungeon(input: DungeonSettings, seed: Seed, budget: number =
   }
 
   // Step 5: heights, before any corridor, so every run is reserved first.
-  if (s.heights === "some" && entrance.room >= 0) raiseRooms(rng, board, entrance.room);
+  if (entrance.room >= 0) raiseRooms(rng, board, entrance.room, s.heights);
 
   // Step 6: corridors, tree links in Prim's order, then the loops, then the stub.
   const bend = (a: readonly [number, number], b: readonly [number, number]) => bends(ways, s.corridors, a, b, width);
@@ -268,7 +268,7 @@ export function planDungeon(input: DungeonSettings, seed: Seed, budget: number =
   const painted = (k: number) => board.roomAt[k] !== 0 || corridor.has(k);
   const floorFree = (k: number) => painted(k) && !overlay.has(k) && !daisSquares.has(k) && !clear.has(k) && !inside.has(k) && (board.roomAt[k] !== 0 || plainCorridor(k));
   const traps =
-    s.traps === "none"
+    s.traps === 0
       ? []
       : pickTraps(
           rng,

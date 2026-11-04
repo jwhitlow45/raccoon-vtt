@@ -1,5 +1,6 @@
 import { Board, DX, DY, OPPOSITE, type Doorway, type Rect, type Run, type Side } from "./layout.ts";
 import type { Stream } from "./random.ts";
+import { raisedCount } from "./settings.ts";
 
 /*
  * Raised and sunk rooms with their stair runs, and daises
@@ -13,8 +14,6 @@ import type { Stream } from "./random.ts";
 
 /** The grounds a raised or sunk room may take, in feet. */
 export const RAISES: readonly number[] = [5, 10, -5, -10];
-/** About a quarter of the rooms but the entrance are raised or sunk. */
-const RAISE_CHANCE = [1, 4] as const;
 /** A dais stands this far above its room's floor. */
 export const DAIS_RISE = 5;
 const DAIS_MIN_ROOM = 6;
@@ -113,33 +112,51 @@ export function runFits(board: Board, d: Doorway, run: Run, mouths: Uint8Array):
 }
 
 /**
- * Raises or sinks about a quarter of the rooms but the entrance, decided
- * in room order. A room is raised only when every one of its doorways' runs
- * fits, else it stays flat.
+ * Raises or sinks `raisedCount(share, rooms)` of the rooms but the entrance
+ * (D-261102-832). Rooms are tried in an order drawn at random, each at its
+ * grounds in an order drawn too, and a room takes the first ground whose
+ * runs fit every one of its doorways, else stays flat. Every draw is made
+ * before any fit is tried, so neither the share nor what fits moves the
+ * stream the rest of the dungeon draws from. A share the map has no room
+ * for raises fewer.
  */
-export function raiseRooms(rng: Stream, board: Board, entrance: number): void {
+export function raiseRooms(rng: Stream, board: Board, entrance: number, share: number): void {
+  // Drawn even for Flat, so moving Heights never moves the doors and dressing drawn after.
+  const order = rng.shuffle(board.rooms.flatMap((r, i) => (i === entrance || r.dropped ? [] : [i])));
+  const grounds = order.map(() => rng.shuffle([...RAISES]));
+  const want = raisedCount(share, board.rooms.length);
+  if (want === 0) return;
   const mouths = mouthCounts(board);
-  board.rooms.forEach((room, i) => {
-    if (i === entrance || room.dropped) return;
-    if (!rng.chance(...RAISE_CHANCE)) return;
-    const ground = rng.pick(RAISES);
+  let raised = 0;
+  order.forEach((i, n) => {
+    if (raised === want) return;
     const doors = board.doorways.filter((d) => d.room === i && !d.removed);
     if (doors.length === 0) return;
-    const reserved: Doorway[] = [];
-    for (const d of doors) {
-      const run = runFor(board, d, ground);
-      if (!runFits(board, d, run, mouths)) {
-        for (const r of reserved) {
-          board.unreserve(r.run!);
-          r.run = null;
-        }
-        return;
-      }
-      board.reserve(d, run);
-      reserved.push(d);
+    for (const ground of grounds[n]!) {
+      if (!reserveAll(board, doors, ground, mouths)) continue;
+      board.rooms[i]!.ground = ground;
+      raised++;
+      return;
     }
-    room.ground = ground;
   });
+}
+
+/** Reserves a run for each doorway at `ground`, or none of them when one does not fit. */
+function reserveAll(board: Board, doors: readonly Doorway[], ground: number, mouths: Uint8Array): boolean {
+  const reserved: Doorway[] = [];
+  for (const d of doors) {
+    const run = runFor(board, d, ground);
+    if (!runFits(board, d, run, mouths)) {
+      for (const r of reserved) {
+        board.unreserve(r.run!);
+        r.run = null;
+      }
+      return false;
+    }
+    board.reserve(d, run);
+    reserved.push(d);
+  }
+  return true;
 }
 
 // ------------------------------------------------------------ daises
