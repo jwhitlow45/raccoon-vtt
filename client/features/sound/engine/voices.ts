@@ -465,7 +465,7 @@ export class Voices {
     v.places++;
     const ctxNow = this.#env.ctx.currentTime;
     if (aim < 0) {
-      // Loaded ahead at position 0 and paused. A timer starts it, and a late start plays on late.
+      // Loaded ahead at position 0 and paused. A timer starts it.
       v.el.pause();
       try {
         v.el.currentTime = 0;
@@ -481,7 +481,9 @@ export class Voices {
         v.playing = true;
         v.dueSince = performance.now();
         this.#play(v);
-        v.settle.placed(0);
+        // A timer a throttled phone ran late leaves the element at 0 behind its place: the first check seeks it once
+        // if it is more than 2 s late, and an on time start is left alone.
+        v.settle.placed(Math.max(0, this.#aim(v.plan, this.#env.serverNow())));
         this.#reportSoon();
       }, -aim);
       return;

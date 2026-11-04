@@ -10,9 +10,11 @@
  *
  * One check stays. A browser may drop a seek made before the file's header
  * has loaded, as iOS Safari has done, which would play a joined track from
- * its start. So the first check that finds a placed element playing seeks it
- * once if it is more than 2 s short of where it was put. One that is only
- * late, having waited on the network, plays on from there.
+ * its start, and a throttled phone may run a loaded-ahead pass's start timer
+ * late, leaving it at 0 behind its place. So the first check that finds a
+ * placed element playing seeks it once if it is more than 2 s short of
+ * where it should have started. One that is only late, having waited on the
+ * network, plays on from there.
  */
 
 /** Short of where it was put by more than this, an element's seek was dropped. */

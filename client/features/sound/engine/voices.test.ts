@@ -451,18 +451,82 @@ describe("the voices on the pool", () => {
   });
 
   test("a track that falls behind, as through a stall on a slow connection, is never sought or slowed: it plays on from where it is", async () => {
-    const t = { now: T };
-    const { voices, pool } = rig(t, { gestures: new EventTarget() });
-    voices.update(planVoices(playingTavern, SOUNDS, t.now), () => SHORT_FADE_MS);
-    const el = pool.find((e) => e.src === "/api/assets/a-tavern")!;
-    for (let i = 0; i < 3; i++) await Promise.resolve();
-    const placed = { seeks: el.seeks, plays: el.plays };
-    // The element stands still while the timeline moves on 10 s: 10 s behind by the end.
-    for (let i = 0; i < 10; i++) {
+    mock.timers.enable({ apis: ["setTimeout"] });
+    try {
+      const t = { now: T };
+      const { voices, pool } = rig(t, { gestures: new EventTarget() });
+      voices.update(planVoices(playingTavern, SOUNDS, t.now), () => SHORT_FADE_MS);
+      const el = pool.find((e) => e.src === "/api/assets/a-tavern")!;
+      for (let i = 0; i < 3; i++) await Promise.resolve();
+      const placed = { seeks: el.seeks, plays: el.plays };
+      // The element stands still while the timeline moves on 10 s: 10 s behind by the end. Each check's seek would land after its fade.
+      for (let i = 0; i < 10; i++) {
+        t.now += 1_000;
+        voices.check();
+        mock.timers.tick(SEEK_FADE_MS);
+      }
+      assert.deepEqual({ seeks: el.seeks, plays: el.plays, rate: el.playbackRate }, { ...placed, rate: 1 });
+      voices.dispose();
+    } finally {
+      mock.timers.reset();
+    }
+  });
+
+  test("a next pass whose start timer a throttled phone ran 5 s late is sought once to its place, and one on time is left alone", async () => {
+    mock.timers.enable({ apis: ["setTimeout"] });
+    try {
+      const t = { now: T };
+      const ahead: Playing = { ...quiet, music: { run: "r1", repeat: "off", fade: 0, now: { soundId: "tavern", at: T + 1_000 } } };
+      const { voices, pool } = rig(t, { gestures: new EventTarget() });
+      voices.update(planVoices(ahead, SOUNDS, t.now), () => SHORT_FADE_MS);
+      const el = pool.find((e) => e.src === "/api/assets/a-tavern")!;
+      const loaded = el.seeks;
+      // The timer runs 5 s after its time.
+      t.now = T + 6_000;
+      mock.timers.tick(1_000);
+      for (let i = 0; i < 3; i++) await Promise.resolve();
+      voices.check();
+      mock.timers.tick(SEEK_FADE_MS);
+      assert.equal(el.seeks, loaded + 1, "sought once");
+      assert.equal(el.currentTime, 5, "to its place");
       t.now += 1_000;
       voices.check();
+      mock.timers.tick(SEEK_FADE_MS);
+      assert.equal(el.seeks, loaded + 1, "and never again");
+      voices.dispose();
+
+      // On time, the same pass plays from 0 untouched.
+      const t2 = { now: T };
+      const second = rig(t2, { gestures: new EventTarget() });
+      second.voices.update(planVoices(ahead, SOUNDS, t2.now), () => SHORT_FADE_MS);
+      const el2 = second.pool.find((e) => e.src === "/api/assets/a-tavern")!;
+      const loaded2 = el2.seeks;
+      t2.now = T + 1_000;
+      mock.timers.tick(1_000);
+      for (let i = 0; i < 3; i++) await Promise.resolve();
+      t2.now += 1_000;
+      second.voices.check();
+      mock.timers.tick(SEEK_FADE_MS);
+      assert.equal(el2.seeks, loaded2, "an on time start is never sought");
+      second.voices.dispose();
+    } finally {
+      mock.timers.reset();
     }
-    assert.deepEqual({ seeks: el.seeks, plays: el.plays, rate: el.playbackRate }, { ...placed, rate: 1 });
+  });
+
+  test("a pass that played to its end is released at once, so the next voice takes its element in the same update", () => {
+    const t = { now: T };
+    const once: Playing = { ...quiet, music: { run: "r1", repeat: "off", fade: 0, now: { soundId: "tavern", at: T - 10_000 } } };
+    const { voices, pool } = rig(t, { gestures: new EventTarget() });
+    voices.update(planVoices(once, SOUNDS, t.now), () => SHORT_FADE_MS);
+    const el = pool.find((e) => e.src === "/api/assets/a-tavern")!;
+    const index = pool.indexOf(el);
+    // It reached the file's end, so it has stopped by itself.
+    el.paused = true;
+    t.now = T + 50_000;
+    const next: Playing = { ...quiet, music: { run: "r2", repeat: "off", fade: 0, now: { soundId: "road", at: T + 50_000 } } };
+    voices.update([...planVoices(once, SOUNDS, t.now), ...planVoices(next, SOUNDS, t.now)], () => SHORT_FADE_MS);
+    assert.equal(pool[index]!.src, "/api/assets/a-road", "the next track took the element at once");
     voices.dispose();
   });
 
