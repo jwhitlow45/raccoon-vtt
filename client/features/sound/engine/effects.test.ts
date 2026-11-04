@@ -91,17 +91,17 @@ describe("effects on a page", () => {
     assert.equal(w.started.at(-1)!.at, w.now);
   });
 
-  test("later than a second it starts partway with 3 s left, else it is skipped", async () => {
+  test("later than 2 seconds it starts partway with 3 s left, else it is skipped", async () => {
     const { w, player, finish } = harness();
     player.setActive(true);
     player.see([], SOUNDS);
     w.now += 1_000;
     const at = w.now + LEAD_MS;
     player.see([fired("g", "gong", at), fired("b", "bell", at)], SOUNDS);
-    w.now = at + 2_000;
+    w.now = at + 3_000;
     await finish("a-gong");
     assert.equal(w.started.length, 1);
-    assert.equal(w.started[0]!.offset, 2_000, "8 s gong, 6 s left: partway");
+    assert.equal(w.started[0]!.offset, 3_000, "8 s gong, 5 s left: partway");
     await finish("a-bell");
     assert.equal(w.started.length, 1, "2 s bell, nothing left: skipped");
     const late = harness();

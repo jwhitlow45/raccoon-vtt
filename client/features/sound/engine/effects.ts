@@ -14,9 +14,9 @@ import { firedAfter } from "./store.ts";
  * an entry starts only if it was fired after the page loaded the room and
  * was never withdrawn from this page's list: so one that comes back after
  * Undo, Redo or a change of use, or one fired before the load that the page
- * sees only later, never starts. Ready late by up to a second, it plays
- * whole, late. Later than that it starts partway in with 3 seconds or more
- * left, else it is skipped.
+ * sees only later, never starts. Ready late by up to 2 seconds, as on a
+ * slow connection, it plays whole, late (D-261102-940). Later than that it
+ * starts partway in with 3 seconds or more left, else it is skipped.
  *
  * Each load and each voice belongs to its entry, and is cancelled when that
  * entry leaves the list (stopped, or past the list's cap) or its sound
@@ -31,7 +31,7 @@ import { firedAfter } from "./store.ts";
  */
 
 /** Ready this late or less, an effect plays whole. */
-export const LATE_WHOLE_MS = 1_000;
+export const LATE_WHOLE_MS = 2_000;
 /** Started partway, an effect needs this much left. */
 export const PARTWAY_LEFT_MS = 3_000;
 /** What the player needs of a room effect's sound, as the projection carries it. */
