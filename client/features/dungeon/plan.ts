@@ -1,8 +1,8 @@
 import type { StairDirection, TerrainId, TrapZone } from "#shared/model.ts";
-import { ROCK_NOISE, Router, TURN_COST } from "./corridors.ts";
+import { bends, Router, TURN_COST } from "./corridors.ts";
 import { daisClear, doorLines, doorStates, placePillars, placePits, placeRubble, roomFloors } from "./dress.ts";
 import { DAIS_RISE, placeDais, raiseRooms, type Dais } from "./heights.ts";
-import { Board, chooseEntrance, doorEdge, facingSides, loopLinks, placeDoorway, placeRooms, treeLinks, type Doorway, type Link, type Side } from "./layout.ts";
+import { Board, chooseEntrance, doorEdge, facingSides, loopLinks, placeDoorway, placeRooms, rockBetween, treeLinks, type Doorway, type Link, type Rect, type Side } from "./layout.ts";
 import { seedStream } from "./random.ts";
 import type { Seed } from "./seed.ts";
 import { clampSettings, GENERATOR_VERSION, MAX_DOOR_EDGES, SEARCH_BUDGET, type DungeonSettings } from "./settings.ts";
@@ -38,6 +38,12 @@ export type DungeonPlan = {
   entrance: { x: number; y: number; w: number; h: number };
 };
 
+/**
+ * Winding moves a link's doorways round to the rooms' other sides when the
+ * rock between them is under this, by width: a gap that narrow holds only a
+ * straight crossing or a Z, whatever the style.
+ */
+const WRAP_BELOW = { narrow: 8, wide: 10 } as const;
 /** About one extra way round per this many rooms. */
 const ROOMS_PER_LOOP = 4;
 
@@ -49,6 +55,8 @@ export type PlanTrace = {
   failed: { link: number; why: "none" | "budget" | "doorway" }[];
   /** Tree links that failed twice, and the rooms each took with it. */
   dropped: { link: number; rooms: number[] }[];
+  /** Links whose styled doorways moved to the plain sides for one more try. */
+  replaced: number[];
   /** Loop links skipped, their doorways gone. */
   skipped: number[];
   /** Whether the entrance has no stub to the map's edge. */
@@ -67,6 +75,8 @@ export type Planned = {
   links: Link[];
   /** Each link's corridor squares in path order, or null where it was never built. */
   paths: (number[] | null)[];
+  /** Each built link's search positions in order (a block's top-left on Wide), for reading its turns. */
+  ways: (number[] | null)[];
   stub: Doorway | null;
   stubPath: number[] | null;
   entrance: number;
@@ -82,7 +92,7 @@ export function planDungeon(input: DungeonSettings, seed: Seed, budget: number =
   const { w: W, h: H } = s;
   const width = s.wide ? 2 : 1;
   const rng = seedStream(seed);
-  const trace: PlanTrace = { retried: [], failed: [], dropped: [], skipped: [], stubFailed: false, treeLeft: budget, loopsLeft: budget, budgetLeft: budget };
+  const trace: PlanTrace = { retried: [], failed: [], dropped: [], replaced: [], skipped: [], stubFailed: false, treeLeft: budget, loopsLeft: budget, budgetLeft: budget };
 
   // Steps 1 to 3: rooms, the entrance, the tree and the extra ways around.
   const rects = placeRooms(rng, s);
@@ -94,31 +104,66 @@ export function planDungeon(input: DungeonSettings, seed: Seed, budget: number =
   const links = [...tree, ...loops];
 
   // Step 4: doorways, the stub's first so the way in always has its side.
+  // The corridors' own stream: doorway aims and waypoints, so the style moves only the corridors.
+  const ways = seedStream(seed, GENERATOR_VERSION, 1);
+  const style = s.corridors;
+  // Straight aims each doorway at the other room's middle, so facing rooms join in a line. The others aim at a spot drawn along the side, so even a short crossing takes a Z.
+  const aim = style === "straight" ? undefined : (last: number) => ways.int(1, last);
   const stub = entrance.room >= 0 ? placeDoorway(board, entrance.room, [entrance.side], rects[entrance.room]!, width, -1, true) : null;
-  const ends = links.map((l, li) => {
-    const a = placeDoorway(board, l.a, facingSides(rects[l.a]!, rects[l.b]!), rects[l.b]!, width, li);
-    const b = a ? placeDoorway(board, l.b, facingSides(rects[l.b]!, rects[l.a]!), rects[l.a]!, width, li) : null;
+  /** A link's two doorways on the first of each room's `sides` with a spot, or none. */
+  const placeLink = (li: number, sides: (r: Rect, o: Rect) => readonly Side[], at?: (last: number) => number): { a: Doorway | null; b: Doorway | null } => {
+    const l = links[li]!;
+    const a = placeDoorway(board, l.a, sides(rects[l.a]!, rects[l.b]!), rects[l.b]!, width, li, false, at);
+    const b = a ? placeDoorway(board, l.b, sides(rects[l.b]!, rects[l.a]!), rects[l.a]!, width, li, false, at) : null;
     if (a && !b) board.removeDoorway(a);
     return { a: b ? a : null, b };
-  });
+  };
+  const ends = links.map((_, li) => placeLink(li, facingSides, aim));
+  // Winding then moves the doorways of rooms with little rock between them round to the other sides, so the corridor winds round a room rather than crossing the gap straight. A move that does not fit keeps the doorways where they were.
+  if (style === "winding") {
+    ends.forEach((e, li) => {
+      const l = links[li]!;
+      if (!e.a || !e.b || rockBetween(rects[l.a]!, rects[l.b]!) >= WRAP_BELOW[s.wide ? "wide" : "narrow"]) return;
+      e.a.removed = e.b.removed = true;
+      const moved = placeLink(li, (r, o) => [facingSides(r, o)[1]]);
+      if (moved.a) ends[li] = moved;
+      else e.a.removed = e.b.removed = false;
+    });
+  }
 
   // Step 5: heights, before any corridor, so every run is reserved first.
   if (s.heights === "some" && entrance.room >= 0) raiseRooms(rng, board, entrance.room);
 
   // Step 6: corridors, tree links in Prim's order, then the loops, then the stub.
-  const amplitude = ROCK_NOISE[s.corridors];
-  const noise = amplitude > 0 ? Uint8Array.from({ length: W * H }, () => rng.int(0, amplitude)) : null;
+  const bend = (a: readonly [number, number], b: readonly [number, number]) => bends(ways, s.corridors, a, b, width);
   const router = new Router(board);
-  const options = { wide: s.wide, turn: TURN_COST[s.corridors], noise, budget: { left: budget } };
+  const options = { wide: s.wide, turn: TURN_COST, budget: { left: budget } };
   const paths: (number[] | null)[] = links.map(() => null);
+  const chains: (number[] | null)[] = links.map(() => null);
   const routeLink = (li: number): "built" | "none" | "budget" | "doorway" => {
     const { a, b } = ends[li]!;
     if (!a || !b || a.removed || b.removed) return "doorway";
-    const found = router.route(a, { anchor: board.anchor(b), side: b.side }, options);
+    const found = router.route(a, { anchor: board.anchor(b), side: b.side }, options, bend);
     if (!found.ok) return found.why;
     for (const k of found.cells) board.laid[k] = 1;
     paths[li] = found.cells;
+    chains[li] = found.chain;
     return "built";
+  };
+  /**
+   * Moves a styled link's doorways to where Straight puts them, the sides
+   * facing each other aimed at the other room's middle, for one more try
+   * (D-261102-831): a way round a room or an off-center doorway can find no
+   * path where the plain doorways would. Its rooms must be flat, since the
+   * new doorways have no runs. False when the style placed them plainly
+   * already, or a doorway no longer fits.
+   */
+  const replain = (li: number): boolean => {
+    if (style === "straight") return false;
+    for (const d of [ends[li]!.a, ends[li]!.b]) if (d) board.removeDoorway(d);
+    ends[li] = placeLink(li, facingSides);
+    trace.replaced.push(li);
+    return ends[li]!.a !== null;
   };
   const children = new Map<number, number[]>();
   for (const l of tree) children.set(l.a, [...(children.get(l.a) ?? []), l.b]);
@@ -135,15 +180,19 @@ export function planDungeon(input: DungeonSettings, seed: Seed, budget: number =
       for (const i of raised) board.flatten(i);
       if (routeLink(li) === "built") return;
     }
+    // Both end rooms are flat by now, so their doorways can move without a run.
+    if (first === "none" && replain(li) && routeLink(li) === "built") return;
     const gone = branch(l.b);
     // The failed link's doorway on the kept room goes in the sweep after routing, with every other unbuilt one.
     for (const i of gone) board.drop(i);
     trace.dropped.push({ link: li, rooms: gone });
   });
   trace.treeLeft = options.budget.left;
-  loops.forEach((_, j) => {
+  loops.forEach((l, j) => {
     const li = tree.length + j;
-    if (routeLink(li) === "built") return;
+    const first = routeLink(li);
+    if (first === "built") return;
+    if (first === "none" && board.rooms[l.a]!.ground === 0 && board.rooms[l.b]!.ground === 0 && replain(li) && routeLink(li) === "built") return;
     trace.skipped.push(li);
     for (const d of [ends[li]!.a, ends[li]!.b]) if (d) board.removeDoorway(d);
   });
@@ -291,7 +340,7 @@ export function planDungeon(input: DungeonSettings, seed: Seed, budget: number =
     traps,
     entrance: entrance.room >= 0 ? { x: rects[entrance.room]!.x, y: rects[entrance.room]!.y, w: rects[entrance.room]!.w, h: rects[entrance.room]!.h } : { x: 0, y: 0, w: 0, h: 0 },
   };
-  return { plan, trace, board, links, paths, stub: stub && !stub.removed ? stub : null, stubPath, entrance: entrance.room, daises };
+  return { plan, trace, board, links, paths, ways: chains, stub: stub && !stub.removed ? stub : null, stubPath, entrance: entrance.room, daises };
 }
 
 function doorEdgeOf(board: Board, d: Doorway, j: number): string {

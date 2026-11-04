@@ -3,6 +3,7 @@ import { createCipheriv } from "node:crypto";
 import { describe, test } from "node:test";
 import { chachaBlock, seedStream, Stream } from "./random.ts";
 import { parseSeed } from "./seed.ts";
+import { GENERATOR_VERSION } from "./settings.ts";
 
 const hex = (s: string) => Uint8Array.from(s.replace(/[\s:]/g, "").match(/../g)!.map((b) => parseInt(b, 16)));
 const toWords = (bytes: Uint8Array) => {
@@ -138,6 +139,9 @@ describe("seed streams", () => {
     const first = words(a);
     assert.deepEqual(words(b), first);
     assert.notDeepEqual(words(seedStream(parseSeedOk("1K7Q-H2MX-A9F3-TWQ4"))), first);
-    assert.notDeepEqual(words(seedStream(parseSeedOk("1K7Q-H2MX-A9F3-TWQ5"), 2)), first);
+    assert.notDeepEqual(words(seedStream(parseSeedOk("1K7Q-H2MX-A9F3-TWQ5"), GENERATOR_VERSION + 1)), first);
+    // The corridors' lane draws its own words from the same seed.
+    assert.notDeepEqual(words(seedStream(parseSeedOk("1K7Q-H2MX-A9F3-TWQ5"), GENERATOR_VERSION, 1)), first);
+    assert.deepEqual(words(seedStream(parseSeedOk("1K7Q-H2MX-A9F3-TWQ5"), GENERATOR_VERSION, 0)), first);
   });
 });

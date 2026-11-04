@@ -396,6 +396,11 @@ export function doorEdge(x: number, y: number, side: Side): string {
   }
 }
 
+/** The rock between two rooms across their larger gap. */
+export function rockBetween(r: Rect, o: Rect): number {
+  return Math.max(o.x - (r.x + r.w), r.x - (o.x + o.w), o.y - (r.y + r.h), r.y - (o.y + o.h));
+}
+
 /** The side of `r` facing `o`: across the larger gap, the middles' offset breaking a tie. Then the other axis's side. */
 export function facingSides(r: Rect, o: Rect): [Side, Side] {
   const xgap = Math.max(o.x - (r.x + r.w), r.x - (o.x + o.w));
@@ -414,9 +419,10 @@ export function facingSides(r: Rect, o: Rect): [Side, Side] {
  * itself for the entrance stub's), never at
  * a corner, a square clear of the side's other doorways, and with open rock
  * outside it for its corridor to leave by. The entrance stub's may open
- * into the margin.
+ * into the margin. `aim`, given the last spot a side has, picks the spot to
+ * start from instead of the one facing the target's middle.
  */
-export function placeDoorway(board: Board, room: number, sides: readonly Side[], target: Rect, width: 1 | 2, link: number, stub = false): Doorway | null {
+export function placeDoorway(board: Board, room: number, sides: readonly Side[], target: Rect, width: 1 | 2, link: number, stub = false, aim?: (last: number) => number): Doorway | null {
   const r = board.rooms[room]!;
   for (const side of sides) {
     const { length, at } = sideCells(r, side);
@@ -424,7 +430,7 @@ export function placeDoorway(board: Board, room: number, sides: readonly Side[],
     if (last < 1) continue;
     const start = side === "n" || side === "s" ? r.x : r.y;
     const toward = middleAlong(target, side) - Math.floor((width - 1) / 2);
-    const want = Math.min(last, Math.max(1, toward - start));
+    const want = aim ? aim(last) : Math.min(last, Math.max(1, toward - start));
     const taken = board.doorways.filter((d) => d.room === room && d.side === side && !d.removed);
     for (let off = 0; off <= last; off++) {
       for (const i of off === 0 ? [want] : [want - off, want + off]) {
