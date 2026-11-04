@@ -5,6 +5,7 @@ import { Dialog } from "../../components/Dialog.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { Row } from "../../components/Row.tsx";
 import { Help } from "../../components/Panel.tsx";
+import { dmPanelFoldsSlot } from "../../lib/folds.ts";
 import { displayName, footprint } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
@@ -140,8 +141,16 @@ function UsePastedImage(props: { offer: Offer; onClose(): void; onToken(tokenId:
     }
     props.onClose();
     if (id === "scene") ui.openPanel("scenes");
-    else if (id === "handout") ui.openPanel("dm");
-    else {
+    else if (id === "handout") {
+      /*
+       * Handouts opens before the panel does, so a folded Handouts shows the
+       * form that takes the picture (docs/design/design-v1-panel-groups.md
+       * 6.1, D-261102-761). For now only: the reveal writes nothing, and ends
+       * as the DM panel closes.
+       */
+      scope.get(dmPanelFoldsSlot).reveal("handouts");
+      ui.openPanel("dm");
+    } else {
       /*
        * As choosing Stamp mode does in the builder's row, with the stamp
        * picker open on it. On a narrow window a panel's sheet keeps the

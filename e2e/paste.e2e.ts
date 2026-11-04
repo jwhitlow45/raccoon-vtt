@@ -701,6 +701,40 @@ describe("raccoon-vtt paste run", { timeout: 300_000 }, () => {
     await pickTool(dm, "Select");
   });
 
+  test("pg-2. with Handouts stored folded and the DM panel closed, Handout opens Handouts by itself, and its form takes the picture, writing no fold", async () => {
+    // The DM folds Handouts, as on a computer it starts open, then leaves the DM panel for another.
+    await openSideTab(dm, "DM");
+    const panel = dm.getByRole("tabpanel", { name: "DM" });
+    const fold = panel.getByRole("button", { name: "Handouts", exact: true });
+    if ((await fold.getAttribute("aria-expanded")) === "true") await fold.click();
+    await waitFor("Handouts folded", async () => ((await fold.getAttribute("aria-expanded")) === "false" ? true : null));
+    const stored = () => dm.evaluate(() => JSON.parse(localStorage.getItem("rvtt.dmPanelFolds") ?? "null") as unknown);
+    assert.deepEqual(await stored(), { handouts: false });
+    await openSideTab(dm, "Scenes");
+    await pickTool(dm, "Select");
+    await blur(dm);
+
+    const handouts = dmUploads.handout ?? 0;
+    assert.equal(await paste(dm, { files: [await swatch([160, 40, 120])] }), true);
+    const sheet = dm.getByRole("dialog", { name: "Use the pasted image" });
+    await sheet.getByRole("button", { name: "Handout", exact: true }).click();
+    // Never opened here: the paste reveals it (docs/design/design-v1-panel-groups.md 6.1, D-261102-761).
+    await panel.waitFor();
+    assert.equal(await fold.getAttribute("aria-expanded"), "true", "Handouts opened by itself");
+    const form = dm.getByRole("group", { name: "Show a handout" });
+    await form.getByRole("button", { name: "Change", exact: true }).waitFor({ timeout: 30_000 });
+    assert.equal(dmUploads.handout, handouts + 1, "the form uploaded the picture once");
+    assert.match(await form.getByLabel("Title").inputValue(), /^Pasted image /);
+    assert.deepEqual(await stored(), { handouts: false }, "a reveal writes nothing");
+    await shots.take(dm, "pg-2-handouts-revealed");
+    await form.getByRole("button", { name: "Change", exact: true }).click();
+    await form.getByRole("button", { name: "Cancel", exact: true }).click();
+    // Open again for good: the DM's tap ends the reveal, and the next one stores Handouts open.
+    await fold.click();
+    if ((await fold.getAttribute("aria-expanded")) === "false") await fold.click();
+    assert.deepEqual(await stored(), { handouts: true });
+  });
+
   test("pa-12. no page errors along the way", () => {
     assert.deepEqual(dmConsole.errors.filter((e) => e.startsWith("uncaught")), []);
     assert.deepEqual(playerConsole.errors.filter((e) => e.startsWith("uncaught")), []);
