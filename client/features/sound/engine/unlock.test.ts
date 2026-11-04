@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Playing } from "#shared/sound.ts";
-import { createSoundUnlock, LISTEN_ELEMENT, mixerSupported, POOL_SIZE, SILENCE_URL, watchAudio, type PoolElement } from "./context.ts";
+import { createSoundUnlock, LISTEN_ELEMENT, mixerSupported, poolElement, POOL_SIZE, SILENCE_URL, watchAudio, type PoolElement } from "./context.ts";
 import { planVoices, Voices } from "./voices.ts";
 
 /*
@@ -479,5 +479,11 @@ describe("the room sound's unlock", () => {
       g.window = before.window;
       g.Audio = before.Audio;
     }
+  });
+
+  test("a pooled element reads ahead and lets the pitch go, so the drift check's nudges resample and never time-stretch", () => {
+    const el = poolElement({ preload: "none", preservesPitch: true });
+    assert.equal(el.preload, "auto");
+    assert.equal(el.preservesPitch, false, "a time-stretch clicks at every change of rate (D-261102-870)");
   });
 });

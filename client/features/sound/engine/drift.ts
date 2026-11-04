@@ -5,7 +5,8 @@
  * from 60 to 150 ms 3% off, and past 150 ms, or after a stall, a resume, a
  * show or an interruption, it seeks with a short fade out and in. Only
  * these five fixed rates, since some browsers glitch on every change of a
- * free-running rate, and the pitch is kept. From 150 ms the error falls
+ * free-running rate, and the pitch is not kept: a time-stretch clicks at
+ * every change (context.ts poolElement). From 150 ms the error falls
  * under 25 ms within 6 seconds: 3 s at 3%, then 2.3 s at 1.5%.
  */
 
