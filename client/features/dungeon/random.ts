@@ -129,8 +129,9 @@ export class Stream {
  * version as the nonce's first word, so the same bits under another
  * version draw another stream. `lane` is the nonce's second word: lane 1
  * draws the corridors' doorway aims and waypoints apart from the main
- * stream, so changing Corridors moves only the corridors, never the heights,
- * locks or dressing drawn after them.
+ * stream, so a change of Corridors leaves the rooms where they are. Which
+ * rooms are raised and the dressing can still change, since the doorways
+ * decide which runs fit and where the daises go.
  */
 export function seedStream(seed: Seed, version: number = GENERATOR_VERSION, lane = 0): Stream {
   const nonce = new Uint8Array(12);

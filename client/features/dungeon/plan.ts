@@ -104,7 +104,7 @@ export function planDungeon(input: DungeonSettings, seed: Seed, budget: number =
   const links = [...tree, ...loops];
 
   // Step 4: doorways, the stub's first so the way in always has its side.
-  // The corridors' own stream: doorway aims and waypoints, so the style moves only the corridors.
+  // The corridors' own stream: doorway aims and waypoints, so a change of style leaves the rooms where they are.
   const ways = seedStream(seed, GENERATOR_VERSION, 1);
   const style = s.corridors;
   // Straight aims each doorway at the other room's middle, so facing rooms join in a line. The others aim at a spot drawn along the side, so even a short crossing takes a Z.
