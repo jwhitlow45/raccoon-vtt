@@ -252,7 +252,7 @@ export const SOUND_TAP = `(() => {
   globalThis.Audio = function Audio(src) {
     const el = src === undefined ? new RealAudio() : new RealAudio(src);
     tap.elements.push(el);
-    el.addEventListener("error", () => tap.log.push({ kind: "error", at: at(), to: el.error ? el.error.code : 0, self: false, why: el.error ? el.error.message : "" }));
+    el.addEventListener("error", () => tap.log.push({ kind: "error", at: at(), to: el.error ? el.error.code : 0, self: false, why: el.error ? el.error.message : "", src: el.currentSrc || el.src }));
     return el;
   };
   globalThis.Audio.prototype = RealAudio.prototype;
@@ -285,7 +285,7 @@ export const SOUND_TAP = `(() => {
 })();`;
 
 /** A change of an element's speed or place, or a media error (`to` its code, `why` its message). */
-export type TapChange = { kind: "rate" | "seek" | "error"; at: number; to: number; self: boolean; why?: string };
+export type TapChange = { kind: "rate" | "seek" | "error"; at: number; to: number; self: boolean; why?: string; src?: string };
 export type TapQuantum = { at: number; level: number; lowest: number; step: number };
 
 /** Everything the tap holds so far, its last quanta flushed first. */

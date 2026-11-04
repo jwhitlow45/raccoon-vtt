@@ -712,7 +712,8 @@ describe("synced music and sound", { concurrency: false }, () => {
       assert.ok(shiftAt !== null, "Gus's page plays the tone");
       await sleep(8_000);
       const { log, quanta } = await readTap(gus);
-      assert.deepEqual(log.filter((c) => c.kind === "error"), [], "the tone plays on through every seek");
+      // Only the tone's own element counts: a spare element warming up through the throttled link may fail its load, which the engine ignores.
+      assert.deepEqual(log.filter((c) => c.kind === "error" && (c.src ?? "").includes(asset)), [], "the tone plays on through every seek");
       const engine = log.filter((c) => !c.self && c.at > shiftAt);
       const rates = engine.filter((c) => c.kind === "rate").map((c) => `${c.at.toFixed(2)} s: ${c.to}`);
       assert.equal(engine.filter((c) => c.kind === "seek").length, 0, `80 ms is a nudge, never a seek: ${JSON.stringify(engine)}`);
