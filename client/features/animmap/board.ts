@@ -2,7 +2,7 @@ import type { AssetId, MapVideo } from "#shared/model.ts";
 import { scopeSlot } from "../../state/scope.ts";
 import { decodable as askDecodable } from "./capabilities.ts";
 import { DrawGate } from "./pacing.ts";
-import { playback, type Decodable, type PlaybackInput } from "./playback.ts";
+import { playback, reportWaitsForFrame, type Decodable, type PlaybackInput } from "./playback.ts";
 import { decoderLeases, leaseDecoder, type BoardVideo, type DecoderHandlers, type DecoderLease, type DecoderUser, type Playback, type StillReason } from "./status.ts";
 import { StepDown, type StepResult } from "./stepDown.ts";
 import type { AnimatedMapsChoice } from "./words.ts";
@@ -48,10 +48,18 @@ export type VideoLike = {
   pause(): void;
   addEventListener(type: string, listener: () => void): void;
   removeEventListener(type: string, listener: () => void): void;
-  requestVideoFrameCallback?(callback: (now: number, metadata: { mediaTime: number; presentedFrames: number }) => void): number;
+  requestVideoFrameCallback?(callback: (now: number, metadata: FrameMetadata) => void): number;
   cancelVideoFrameCallback?(handle: number): void;
   getVideoPlaybackQuality?(): { totalVideoFrames: number; droppedVideoFrames: number };
 };
+
+/**
+ * What a frame callback tells of its frame. `width` and `height` are the
+ * frame's media pixels, the decoded size before any pixel aspect, which the
+ * spec defines (docs/design/design-v1-video-turns.md 6.3). Optional, since
+ * an older engine may leave them out.
+ */
+export type FrameMetadata = { mediaTime: number; presentedFrames: number; width?: number; height?: number };
 
 /** The Top-down map layer, as the board draws it. */
 export type LayerLike = {
@@ -187,7 +195,10 @@ export class AnimMapBoard {
   #handed = false;
   /** Per asset: what went wrong with it, kept until another asset shows. */
   #forAsset: AssetId | null = null;
-  #realSize: { widthPx: number; heightPx: number } | undefined = undefined;
+  /** The size the element reported on `loadedmetadata` and `resize`. */
+  #reportedSize: { widthPx: number; heightPx: number } | undefined = undefined;
+  /** The last frame callback's own size, once one gave it: from then on the only size judged. */
+  #frameSize: { widthPx: number; heightPx: number } | undefined = undefined;
   #notStarted = false;
   #loadFailed = false;
   #retried = false;
@@ -343,13 +354,30 @@ export class AnimMapBoard {
       steppedDown: pageStepDown,
       ...(forBoard
         ? {
-            ...(this.#realSize ? { realSize: this.#realSize } : {}),
+            ...(this.#judgedSize() ? { realSize: this.#judgedSize() } : {}),
             loadFailed: this.#loadFailed,
             stillView: i.iso || i.setupTool,
             notStarted: this.#notStarted,
           }
         : {}),
     };
+  }
+
+  /**
+   * The size the rule judges (docs/design/design-v1-video-turns.md 6.3,
+   * D-261102-897): the frames' own once a frame callback gave one, so a
+   * later `resize` waits for the next frame. Before the first callback, a
+   * reported coded or stretched size waits for that frame while callbacks
+   * are expected, and the video plays for it. Without callbacks, the
+   * reported size is judged as reported.
+   */
+  #judgedSize(): { widthPx: number; heightPx: number } | undefined {
+    if (this.#frameSize) return this.#frameSize;
+    const reported = this.#reportedSize;
+    const video = this.#input.video;
+    if (!reported || !video) return reported;
+    const expected = !this.#fallback && !this.#callbackSeen && typeof this.#element?.requestVideoFrameCallback === "function";
+    return expected && reportWaitsForFrame(reported, video) ? undefined : reported;
   }
 
   #question(video: MapVideo): string {
@@ -405,7 +433,8 @@ export class AnimMapBoard {
     if ((video?.assetId ?? null) !== this.#forAsset) {
       // Another video: what went wrong with the last one stays with it.
       this.#forAsset = video?.assetId ?? null;
-      this.#realSize = undefined;
+      this.#reportedSize = undefined;
+      this.#frameSize = undefined;
       this.#notStarted = false;
       this.#loadFailed = false;
       this.#retried = false;
@@ -608,12 +637,13 @@ export class AnimMapBoard {
     ["error", () => this.#failed()],
   ];
 
+  /** The element's reported size. Once a frame gave its own, this changes nothing until the next frame says so. */
   #sized(): void {
     const el = this.#element;
     if (!el || this.#srcAsset === null || !(el.videoWidth > 0 && el.videoHeight > 0)) return;
     const real = { widthPx: el.videoWidth, heightPx: el.videoHeight };
-    if (this.#realSize && this.#realSize.widthPx === real.widthPx && this.#realSize.heightPx === real.heightPx) return;
-    this.#realSize = real;
+    if (sameSize(this.#reportedSize, real)) return;
+    this.#reportedSize = real;
     this.#settle();
   }
 
@@ -675,9 +705,17 @@ export class AnimMapBoard {
     this.#callbackTimer = null;
   }
 
-  readonly #onFrame = (now: number, metadata: { mediaTime: number; presentedFrames: number }): void => {
+  readonly #onFrame = (now: number, metadata: FrameMetadata): void => {
     this.#callback = null;
+    const seen = this.#callbackSeen;
     this.#callbackSeen = true;
+    const { width, height } = metadata;
+    const sized = typeof width === "number" && typeof height === "number" && width > 0 && height > 0;
+    // A new frame size, or the first callback ending the wait for one, is judged before this frame draws.
+    if (sized && !sameSize(this.#frameSize, { widthPx: width, heightPx: height })) {
+      this.#frameSize = { widthPx: width, heightPx: height };
+      this.#settle();
+    } else if (!seen) this.#settle();
     if (this.#element && this.#handed && this.#srcAsset !== null) {
       this.#sample(now, metadata.presentedFrames, metadata.mediaTime);
       const mediaMs = metadata.mediaTime * 1000;
@@ -751,6 +789,10 @@ export function connectBoard(board: AnimMapBoard, status: { get(): BoardVideo; s
 }
 
 // ---------------------------------------------------------------- helpers
+
+function sameSize(a: { widthPx: number; heightPx: number } | undefined, b: { widthPx: number; heightPx: number }): boolean {
+  return a !== undefined && a.widthPx === b.widthPx && a.heightPx === b.heightPx;
+}
 
 function sameInput(a: BoardInput, b: BoardInput): boolean {
   for (const key of Object.keys(b) as (keyof BoardInput)[]) if (a[key] !== b[key]) return false;

@@ -3,9 +3,9 @@ import { afterEach, test } from "node:test";
 import fc from "fast-check";
 import type { MapVideo } from "#shared/model.ts";
 import { chance, int, pick, rng } from "#shared/testutil.ts";
-import { AnimMapBoard, connectBoard, IDLE_INPUT, pageSteppedDown, resetPageStepDownForTests, stepDownListenersForTests, type BoardEnv, type BoardInput, type LayerLike, type VideoLike } from "./board.ts";
+import { AnimMapBoard, CALLBACK_WAIT_MS, connectBoard, IDLE_INPUT, pageSteppedDown, resetPageStepDownForTests, stepDownListenersForTests, type BoardEnv, type BoardInput, type FrameMetadata, type LayerLike, type VideoLike } from "./board.ts";
 import { MIN_GAP_MS } from "./pacing.ts";
-import type { Decodable } from "./playback.ts";
+import { sizeProblem, type Decodable } from "./playback.ts";
 import { boardVideoStatus, decoderLeases, leaseDecoder, resetDecoderForTests, type DecoderLease } from "./status.ts";
 import { Compositor, HEALTHY, mostInWindow, renderTimes, type Content, type Display, type Struggle } from "./videoSim.testutil.ts";
 
@@ -37,7 +37,29 @@ import { Compositor, HEALTHY, mostInWindow, renderTimes, type Content, type Disp
 const VIDEO_A: MapVideo = { assetId: "va", widthPx: 1280, heightPx: 720, container: "webm", video: "vp09.00.40.08", fps: 30, durationMs: 2000, kbps: 3000 };
 const VIDEO_B: MapVideo = { ...VIDEO_A, assetId: "vb", container: "mp4", video: "avc1.640028", fps: 60 };
 const VIDEO_UHD: MapVideo = { ...VIDEO_A, assetId: "vu", widthPx: 3840, heightPx: 2160 };
-const VIDEOS = [VIDEO_A, VIDEO_B, VIDEO_UHD] as const;
+/** A 4:3 file: coded 1920 x 1080, drawn 2560 x 1080 (docs/design/design-v1-video-turns.md 6.3). */
+const VIDEO_WIDE: MapVideo = { ...VIDEO_A, assetId: "vw", container: "mp4", video: "avc1.640028", widthPx: 1920, heightPx: 1080, displayWidthPx: 2560 };
+/** An Android portrait video: coded 1920 x 1080, turned 90. */
+const VIDEO_TURNED: MapVideo = { ...VIDEO_WIDE, assetId: "vt", displayWidthPx: undefined, turn: 90 };
+const VIDEOS = [VIDEO_A, VIDEO_B, VIDEO_UHD, VIDEO_WIDE, VIDEO_TURNED] as const;
+
+type Size = { w: number; h: number };
+
+/**
+ * What an element reports for a video's source and what its frames really
+ * are: the board's fixtures report what they decode, and the 4:3 file
+ * reports its coded size, its stretched size or Gecko's rounding of it,
+ * and now and then really decodes at the stretch, as a WebM that declares
+ * one may (D-261102-897).
+ */
+function sizesFor(video: MapVideo | undefined, r: () => number): { reported: Size; frame: Size } {
+  if (!video || (video.displayWidthPx === undefined && video.turn === undefined)) return { reported: { w: 1280, h: 720 }, frame: { w: 1280, h: 720 } };
+  const coded = { w: video.widthPx, h: video.heightPx };
+  if (video.displayWidthPx === undefined) return { reported: coded, frame: coded };
+  const stretched = { w: video.displayWidthPx, h: video.heightPx };
+  const reported = pick(r, [coded, stretched, { w: video.displayWidthPx - 1, h: video.heightPx }]);
+  return { reported, frame: chance(r, 0.3) ? stretched : coded };
+}
 
 const CONTENTS: readonly Content[] = [[{ fps: 24, ms: 2000 }], [{ fps: 30, ms: 2000 }], [{ fps: 31, ms: 3000 }], [{ fps: 59.94, ms: 2000 }], [{ fps: 60, ms: 2000 }]];
 const DISPLAYS: readonly Display[] = [{ hz: 60 }, { hz: 59.95 }, { hz: 60.05 }, { hz: 90 }, { hz: 120 }, { hz: 144 }, { hz: 60, capped: true }];
@@ -54,7 +76,10 @@ class World {
   failures: string[] = [];
   rejectPlay = false;
   failLoads = false;
+  /** A real size change mid-stream, as VP9 may have: both what the element reports and its frames. */
   realSize: { w: number; h: number } | null = null;
+  /** What each source's element reports and decodes, by its address. */
+  sizes: (url: string | undefined) => { reported: Size; frame: Size } = () => ({ reported: { w: 1280, h: 720 }, frame: { w: 1280, h: 720 } });
   /** Commits React holds until the frame's draws are done: a commit late enough for Konva to draw before it. */
   lateCommits: (() => void)[] = [];
   /** The share of commits that land after the next frame's draws. */
@@ -123,9 +148,17 @@ class FakeVideo implements VideoLike {
   #generation = 0;
   compositor: Compositor | null = null;
   #pausedMedia = 0;
-  callbacks = new Map<number, (now: number, m: { mediaTime: number; presentedFrames: number }) => void>();
+  callbacks = new Map<number, (now: number, m: FrameMetadata) => void>();
   #nextCallback = 1;
   readonly withCallbacks: boolean;
+  /** The frame callback's metadata gives the frame's size, as the spec says, or leaves it out, as an older engine may. */
+  frameSizes = true;
+  /** The method is there but never calls back, as on a browser that runs none for this element. */
+  silent = false;
+  /** What this source's frames decode at. */
+  frameSize: Size = { w: 1280, h: 720 };
+  /** The size the last frame callback gave the board, or null before one did. */
+  lastFrameGiven: Size | null = null;
   /** The media time of the frame last given to a callback, and whether a wrap or a new source came since the frame before. */
   lastMediaMs: number | null = null;
   jumped = true;
@@ -193,6 +226,7 @@ class FakeVideo implements VideoLike {
     this.videoHeight = 0;
     this.callbacks.clear();
     this.jumped = true;
+    this.lastFrameGiven = null;
     if (!this.hasSrc()) return;
     const generation = this.#generation;
     this.#world.later(
@@ -204,8 +238,10 @@ class FakeVideo implements VideoLike {
           return;
         }
         this.#loaded = true;
-        this.videoWidth = this.#world.realSize?.w ?? 1280;
-        this.videoHeight = this.#world.realSize?.h ?? 720;
+        const sizes = this.#world.sizes(this.attrs.get("src"));
+        this.frameSize = this.#world.realSize ?? sizes.frame;
+        this.videoWidth = this.#world.realSize?.w ?? sizes.reported.w;
+        this.videoHeight = this.#world.realSize?.h ?? sizes.reported.h;
         this.fire("loadedmetadata");
         this.fire("loadeddata");
         if (!this.paused) this.#start();
@@ -245,7 +281,7 @@ class FakeVideo implements VideoLike {
     this.#queue("pause");
   }
 
-  requestVideoFrameCallback(callback: (now: number, m: { mediaTime: number; presentedFrames: number }) => void): number {
+  requestVideoFrameCallback(callback: (now: number, m: FrameMetadata) => void): number {
     const id = this.#nextCallback++;
     this.callbacks.set(id, callback);
     return id;
@@ -266,10 +302,13 @@ class FakeVideo implements VideoLike {
       return false;
     }
     if (cb.wrapped) this.jumped = true;
+    if (this.silent) return true;
     const callbacks = [...this.callbacks.values()];
     this.callbacks.clear();
     this.lastMediaMs = cb.mediaMs;
-    for (const run of callbacks) run(now, { mediaTime: cb.mediaMs / 1000, presentedFrames: cb.presentedFrames });
+    const size = this.frameSizes ? { width: this.frameSize.w, height: this.frameSize.h } : {};
+    if (callbacks.length > 0 && this.frameSizes) this.lastFrameGiven = this.frameSize;
+    for (const run of callbacks) run(now, { mediaTime: cb.mediaMs / 1000, presentedFrames: cb.presentedFrames, ...size });
     return true;
   }
 }
@@ -292,6 +331,8 @@ class Rig {
   /** The earliest shown frame no draw has shown yet. */
   waitingSince: number | null = null;
   #commitQueued = false;
+  /** What the board is told now, for the size invariant. */
+  told: () => { video: MapVideo | null; variant: "full" | "mobile" } = () => ({ video: null, variant: "full" });
 
   constructor(world: World, label: string, makeVideo: () => FakeVideo, decodable: Decodable) {
     this.world = world;
@@ -341,6 +382,10 @@ class Rig {
     if (!el || held !== el) return this.world.fail(`${this.label}: a video draw while Konva draws the still`);
     if (this.cameraPending) this.world.fail(`${this.label}: a video draw in a frame the camera's draw already shows`);
     if (el.paused || !el.hasSrc()) return this.world.fail(`${this.label}: a video draw while not playing`);
+    // A frame whose own size breaks the rule is never drawn (D-261102-897), whatever the element reported.
+    const told = this.told();
+    const frame = el.lastFrameGiven;
+    if (frame && told.video && sizeProblem({ widthPx: frame.w, heightPx: frame.h }, told.video.fps, told.variant)) this.world.fail(`${this.label}: a video draw of a ${frame.w} x ${frame.h} frame on ${told.variant}`);
     const media = el.withCallbacks && el.callbacks !== undefined && !this.#inFallback() ? el.lastMediaMs : null;
     this.draws.push({ now: this.world.now, media, jumped: el.jumped });
     log(this.world.now.toFixed(1), this.label, "draw media", media?.toFixed(1), "jumped", el.jumped);
@@ -453,8 +498,14 @@ async function sequence(seed: number): Promise<string[]> {
   const content = pick(r, CONTENTS);
   const display = pick(r, DISPLAYS);
   const withCallbacks = !chance(r, 0.2);
+  const frameSizes = !chance(r, 0.1);
   const decodable = pick(r, ["smooth", "smooth", "smooth", "notSmooth"] as const);
-  const make = () => new FakeVideo(world, content, display, r, withCallbacks);
+  world.sizes = (url) => sizesFor(VIDEOS.find((v) => url === `/${v.assetId}`), r);
+  const make = () => {
+    const v = new FakeVideo(world, content, display, r, withCallbacks);
+    v.frameSizes = frameSizes;
+    return v;
+  };
   const dm = new Rig(world, "dm", make, decodable);
   log("content", JSON.stringify(content), "display", JSON.stringify(display), "callbacks", withCallbacks, decodable);
   dm.board.onState = (state) => {
@@ -463,7 +514,8 @@ async function sequence(seed: number): Promise<string[]> {
   };
   let preview: Rig | null = null;
   const viewer = new Viewer();
-  let input: BoardInput = { ...IDLE_INPUT, server: true, video: VIDEO_A, url: "/a" };
+  let input: BoardInput = { ...IDLE_INPUT, server: true, video: VIDEO_A, url: "/va" };
+  dm.told = () => ({ video: input.video, variant: input.variant });
   dm.board.input(input);
   let stepped: string | null = null;
   const rigs = () => [dm, ...(preview ? [preview] : [])];
@@ -526,6 +578,7 @@ async function sequence(seed: number): Promise<string[]> {
       // View as a player: the preview's board mounts over the room, or goes.
       if (!preview) {
         const p = new Rig(world, "preview", make, decodable);
+        p.told = () => ({ video: input.video, variant: input.variant });
         p.board.onState = (state) => {
           reached.states.add(`preview ${state}`);
           log(world.now.toFixed(1), "preview state", state);
@@ -554,8 +607,10 @@ async function sequence(seed: number): Promise<string[]> {
       world.realSize = chance(r, 0.5) ? { w: 2560, h: 1440 } : null;
       for (const rig of rigs()) {
         if (!rig.video?.hasSrc()) continue;
-        rig.video.videoWidth = world.realSize?.w ?? 1280;
-        rig.video.videoHeight = world.realSize?.h ?? 720;
+        const sizes = world.sizes(rig.video.attrs.get("src"));
+        rig.video.frameSize = world.realSize ?? sizes.frame;
+        rig.video.videoWidth = world.realSize?.w ?? sizes.reported.w;
+        rig.video.videoHeight = world.realSize?.h ?? sizes.reported.h;
         rig.video.fire("resize");
       }
     } else if (roll < 0.93) {
@@ -619,18 +674,30 @@ test("2,000 random sequences keep the board's invariants", { skip: Boolean(ONE) 
   // The sequences reached the board playing, its fallback, and each way it stops.
   assert.ok(reached.drew > reached.sequences * 0.2, `${reached.drew} of ${reached.sequences} drew`);
   assert.ok(reached.fallbackDrew > 0 && reached.cameraDraws > 0);
-  for (const state of ["playing", "paused", "loading", "waiting", "covered", "still setting", "still low-power", "still still-view", "still not-started", "still load-failed", "still not-smooth", "preview playing"])
+  for (const state of ["playing", "paused", "loading", "waiting", "covered", "still setting", "still low-power", "still still-view", "still not-started", "still load-failed", "still not-smooth", "still phone-size", "preview playing"])
     assert.ok(reached.states.has(state), `no sequence reached ${state}: ${[...reached.states].join(", ")}`);
 });
 
-/** One board on a display, with its element, run by hand. */
-function single(content: Content, display: Display, video: MapVideo) {
+/** One board on a display, with its element, run by hand. `sizes` is what the element reports and decodes; `variant` the map detail it starts on. */
+function single(content: Content, display: Display, video: MapVideo, options: { callbacks?: boolean; silent?: boolean; sizes?: { reported: Size; frame: Size }; variant?: "full" | "mobile" } = {}) {
   resetDecoderForTests();
   resetPageStepDownForTests();
   const world = new World();
+  if (options.sizes) world.sizes = () => options.sizes!;
   const r = rng(9);
-  const dm = new Rig(world, "dm", () => new FakeVideo(world, content, display, r, true), "smooth");
-  dm.board.input({ ...IDLE_INPUT, server: true, video, url: `/${video.assetId}` });
+  const dm = new Rig(
+    world,
+    "dm",
+    () => {
+      const v = new FakeVideo(world, content, display, r, options.callbacks ?? true);
+      v.silent = options.silent === true;
+      return v;
+    },
+    "smooth",
+  );
+  const variant = options.variant ?? "full";
+  dm.told = () => ({ video, variant });
+  dm.board.input({ ...IDLE_INPUT, server: true, video, url: `/${video.assetId}`, variant });
   const run = async (ms: number) => {
     const until = world.now + ms;
     for (const at of renderTimes(display, world.now + 1e-6, until)) {
@@ -797,6 +864,101 @@ test("a blackout unmounts the controller while the room stays: the video stops, 
   assert.equal(status.get()?.playback.reason, "moving");
   again();
   assert.deepEqual(world.failures, []);
+});
+
+/*
+ * The size the board judges (docs/design/design-v1-video-turns.md 6.3 and
+ * 13, D-261102-897): each frame's own size from its frame callback, a
+ * reported coded or stretched size held until the first frame, and the
+ * reported size judged as reported without callbacks.
+ */
+const SECOND = [{ fps: 30, ms: 2000 }] as const;
+const HZ60 = { hz: 60 };
+
+test("on Phone size, a 1920 × 1080 video turned 90 plays: the cap reads the coded size", async () => {
+  const { world, dm, run } = single(SECOND, HZ60, VIDEO_TURNED, { variant: "mobile", sizes: { reported: { w: 1920, h: 1080 }, frame: { w: 1920, h: 1080 } } });
+  await settle(world);
+  await run(1500);
+  assert.equal(dm.board.state, "playing");
+  assert.deepEqual(world.failures, []);
+});
+
+test("on Phone size, a 4:3 file that Gecko reports at 2560 × 1080, or 2559, plays: its frames are 1920 × 1080", async () => {
+  for (const w of [2560, 2559, 2561, 1920]) {
+    const { world, dm, run } = single(SECOND, HZ60, VIDEO_WIDE, { variant: "mobile", sizes: { reported: { w, h: 1080 }, frame: { w: 1920, h: 1080 } } });
+    await settle(world);
+    await run(1500);
+    assert.equal(dm.board.state, "playing", `reported ${w}`);
+    assert.ok(dm.board.videoDraws > 20, `${w}: it draws`);
+    assert.deepEqual(world.failures, []);
+  }
+  // Two pixels off is no rounding: judged as reported, the still.
+  const { world, dm, run } = single(SECOND, HZ60, VIDEO_WIDE, { variant: "mobile", sizes: { reported: { w: 2562, h: 1080 }, frame: { w: 1920, h: 1080 } } });
+  await settle(world);
+  await run(1500);
+  assert.equal(dm.board.state, "still phone-size");
+  assert.equal(dm.board.videoDraws, 0);
+});
+
+test("on Phone size, a WebM that declares 2560 × 720 for 1280 × 720 and really decodes at 2560 × 720 shows the still after its first frame", async () => {
+  const liar: MapVideo = { ...VIDEO_A, assetId: "vl", widthPx: 1280, heightPx: 720, displayWidthPx: 2560 };
+  const { world, dm, run } = single(SECOND, HZ60, liar, { variant: "mobile", sizes: { reported: { w: 2560, h: 720 }, frame: { w: 2560, h: 720 } } });
+  await settle(world);
+  await run(1500);
+  assert.equal(dm.board.state, "still phone-size", "the frame's own size is judged");
+  assert.equal(dm.board.videoDraws, 0, "and that frame is never drawn");
+  assert.equal(dm.konvaHeld, null, "Konva draws the still");
+  // On Full size the same frames are inside the caps.
+  dm.board.input({ variant: "full" });
+  dm.told = () => ({ video: liar, variant: "full" });
+  await settle(world);
+  await run(1500);
+  assert.equal(dm.board.state, "playing");
+  assert.deepEqual(world.failures, []);
+});
+
+test("the 4:3 file reported at 2560 × 1080 without frame callbacks, or with none in CALLBACK_WAIT_MS, is judged as reported: the still on Phone size", async () => {
+  {
+    const { world, dm, run } = single(SECOND, HZ60, VIDEO_WIDE, { variant: "mobile", callbacks: false, sizes: { reported: { w: 2560, h: 1080 }, frame: { w: 1920, h: 1080 } } });
+    await settle(world);
+    await run(1500);
+    assert.equal(dm.board.state, "still phone-size", "no method: as reported at once");
+  }
+  {
+    const { world, dm, run } = single(SECOND, HZ60, VIDEO_WIDE, { variant: "mobile", silent: true, sizes: { reported: { w: 2560, h: 1080 }, frame: { w: 1920, h: 1080 } } });
+    await settle(world);
+    await run(CALLBACK_WAIT_MS / 2);
+    assert.notEqual(dm.board.state, "still phone-size", "held while a callback may still come");
+    await run(CALLBACK_WAIT_MS + 1000);
+    assert.equal(dm.board.state, "still phone-size", "none came: as reported");
+  }
+});
+
+test("plain facts with an SPS stretch reported at 2560 × 1080 for 1920 × 1080 show the still on Phone size, and a frame of 1920 × 1080 then a resize to 2560 × 1080 keeps playing", async () => {
+  const plain: MapVideo = { ...VIDEO_WIDE, assetId: "vp", displayWidthPx: undefined };
+  {
+    const { world, dm, run } = single(SECOND, HZ60, plain, { variant: "mobile", sizes: { reported: { w: 2560, h: 1080 }, frame: { w: 1920, h: 1080 } } });
+    await settle(world);
+    await run(1500);
+    assert.equal(dm.board.state, "still phone-size", "no stretch in the facts, so nothing holds it: the documented exception");
+  }
+  {
+    const { world, dm, run } = single(SECOND, HZ60, plain, { variant: "mobile", sizes: { reported: { w: 1920, h: 1080 }, frame: { w: 1920, h: 1080 } } });
+    await settle(world);
+    await run(1000);
+    assert.equal(dm.board.state, "playing");
+    const el = dm.video!;
+    el.videoWidth = 2560;
+    el.fire("resize");
+    await settle(world);
+    await run(1000);
+    assert.equal(dm.board.state, "playing", "the resize waits for the next frame, which is 1920 × 1080");
+    // A frame that really grows is judged on that frame.
+    el.frameSize = { w: 2560, h: 1080 };
+    await run(500);
+    assert.equal(dm.board.state, "still phone-size");
+    assert.deepEqual(world.failures, []);
+  }
 });
 
 test("a disposed board no longer hears the page's step-down, so an ended Room scope is not kept alive (AM-R1-04)", () => {

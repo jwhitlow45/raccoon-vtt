@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, describe, test } from "node:test";
 import type { MapVideo } from "#shared/model.ts";
 import { askBrowser, decodable, decodingConfig, forgetCapabilitiesForTests, playType, type DecodingConfig } from "./capabilities.ts";
-import { playback, sizeProblem, type PlaybackInput } from "./playback.ts";
+import { playback, reportWaitsForFrame, sizeProblem, type PlaybackInput } from "./playback.ts";
 import { MOVING, stillFor } from "./status.ts";
 
 /*
@@ -55,6 +55,28 @@ describe("the playback rule", () => {
     assert.deepEqual(playback(HD, { ...PLAYS, loadFailed: true }), stillFor("loadFailed"));
     assert.deepEqual(playback(HD, { ...PLAYS, stillView: true }), stillFor("stillView"));
     assert.deepEqual(playback(HD, { ...PLAYS, notStarted: true }), stillFor("notStarted"));
+  });
+
+  test("Phone size reads the coded size: a 1920 × 1080 video turned 90 or stretched to 2560 plays, and the frames' own size is what rule 4 judges (docs/design/design-v1-video-turns.md 6.3)", () => {
+    const phone = { ...PLAYS, variant: "mobile" as const };
+    assert.deepEqual(playback({ ...HD, turn: 90 } as MapVideo, phone), MOVING);
+    assert.deepEqual(playback({ ...HD, displayWidthPx: 2560 } as MapVideo, phone), MOVING);
+    assert.deepEqual(playback({ ...HD, displayWidthPx: 2560 } as MapVideo, { ...phone, realSize: { widthPx: 1920, heightPx: 1080 } }), MOVING, "frames at the coded size");
+    assert.deepEqual(playback({ ...HD, widthPx: 1280, heightPx: 720, displayWidthPx: 2560 } as MapVideo, { ...phone, realSize: { widthPx: 2560, heightPx: 720 } }), stillFor("phoneSize"), "frames that really decode at the stretch");
+  });
+
+  test("a reported size waits for the first frame only when it is the coded size, or the stretched size within a pixel of its width", () => {
+    const wide = { widthPx: 1920, heightPx: 1080, displayWidthPx: 2560 };
+    assert.equal(reportWaitsForFrame({ widthPx: 1920, heightPx: 1080 }, wide), true, "coded");
+    assert.equal(reportWaitsForFrame({ widthPx: 2560, heightPx: 1080 }, wide), true, "stretched");
+    assert.equal(reportWaitsForFrame({ widthPx: 2559, heightPx: 1080 }, wide), true, "Gecko's rounding");
+    assert.equal(reportWaitsForFrame({ widthPx: 2561, heightPx: 1080 }, wide), true);
+    assert.equal(reportWaitsForFrame({ widthPx: 2562, heightPx: 1080 }, wide), false, "two pixels off");
+    assert.equal(reportWaitsForFrame({ widthPx: 2560, heightPx: 1081 }, wide), false, "the height is exact");
+    assert.equal(reportWaitsForFrame({ widthPx: 1920, heightPx: 1081 }, wide), false);
+    assert.equal(reportWaitsForFrame({ widthPx: 2560, heightPx: 1080 }, { widthPx: 1920, heightPx: 1080 }), false, "plain facts: an SPS stretch is judged as reported");
+    assert.equal(reportWaitsForFrame({ widthPx: 1920, heightPx: 1080 }, { widthPx: 1920, heightPx: 1080 }), true);
+    assert.equal(reportWaitsForFrame({ widthPx: 1080, heightPx: 1920 }, { widthPx: 1920, heightPx: 1080 }), false, "the stored file is plain, so a turned report is not held");
   });
 
   test("the real size holds to the server's caps on any device", () => {

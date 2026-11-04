@@ -26,7 +26,13 @@ export type PlaybackInput = {
   decodable: Decodable;
   /** The step-down (5.4) for this page: it lasts until the page reloads. */
   steppedDown: "slowing" | "slowingOrSaving" | null;
-  /** The element's own size, read on `loadedmetadata` and `resize`. Absent before the element reports one, or when the question is about a video the board is not playing. */
+  /**
+   * The size the board's element decodes: its frames' own size from their
+   * frame callbacks, else the size it reported on `loadedmetadata` and
+   * `resize` where that is not waiting for the first frame (board.ts).
+   * Absent before either, or when the question is about a video the board
+   * is not playing.
+   */
   realSize?: { widthPx: number; heightPx: number };
   /** The element's media failed after its one retry. */
   loadFailed?: boolean;
@@ -63,6 +69,22 @@ export function playback(video: Pick<MapVideo, "widthPx" | "heightPx" | "fps">, 
   if (input.stillView) return stillFor("stillView");
   if (input.notStarted) return stillFor("notStarted");
   return MOVING;
+}
+
+/**
+ * Whether a size the element reported before its first frame waits for that
+ * frame's own size instead of being judged (docs/design/design-v1-video-turns.md
+ * 6.3, D-261102-897): the coded size, or the stretched size within a pixel
+ * of its width, as Gecko reports a stretched file before it rounds. A size
+ * equal to the declared stretch is never taken on trust: a WebM that
+ * declares 2560 x 720 for 1280 x 720 may really decode at 2560 x 720, so
+ * the frame says which. The board holds such a size only while it expects
+ * frame callbacks.
+ */
+export function reportWaitsForFrame(reported: { widthPx: number; heightPx: number }, video: Pick<MapVideo, "widthPx" | "heightPx" | "displayWidthPx">): boolean {
+  if (reported.heightPx !== video.heightPx) return false;
+  if (reported.widthPx === video.widthPx) return true;
+  return video.displayWidthPx !== undefined && Math.abs(reported.widthPx - video.displayWidthPx) <= 1;
 }
 
 /**
