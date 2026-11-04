@@ -744,7 +744,7 @@ describe("the sheet's rows beside the keys", () => {
       const tokenWindow = section(role, IPHONE, "Token window")!;
       assert.deepEqual(tokenWindow.rows.map((r) => r.id), ["barEscape", "windowMoveKeys", "windowResizeKeys"]);
       assert.ok(tokenWindow.intro?.includes("never move a token"));
-      assert.deepEqual(inputs(role, IPHONE, "Dialogs"), ["Escape", "Tab, Shift+Tab"]);
+      assert.deepEqual(inputs(role, IPHONE, "Dialogs"), role === "dm" ? ["Escape", "Tab, Shift+Tab", "Page Up, Page Down"] : ["Escape", "Tab, Shift+Tab"]);
     }
     const keys = section("player", IPHONE, "Keys")!;
     assert.match(keys.intro ?? "", /a dialog is open/);

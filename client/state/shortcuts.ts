@@ -1238,6 +1238,8 @@ export const BEHAVIORS: readonly Behavior[] = [
   // Every dialog: components/Dialog.tsx, lib/modalDialog.ts, features/journal/JournalEditor.tsx, features/monsters/MonsterEditor.tsx.
   { id: "dialogEscape", input: "Escape", does: "Close it. A journal page or a monster with unsaved changes asks first", roles: EVERYONE, device: "keys", surface: "Dialogs" },
   { id: "dialogTab", input: "Tab, Shift+Tab", does: "Move through its controls without leaving it", roles: EVERYONE, device: "keys", surface: "Dialogs" },
+  // features/dungeon/PresetSlider.tsx (D-261102-839).
+  { id: "dungeonMarks", input: "Page Up, Page Down", does: "In Generate a dungeon, move Heights or Traps to its next or previous mark", roles: DM, device: "keys", surface: "Dialogs" },
 
   { id: "setupUndo", input: "Ctrl+Z (Cmd+Z on a Mac)", does: "Undo the next setup step", roles: DM, device: "keys", surface: "Setup history" },
   { id: "setupRedo", input: "Ctrl+Shift+Z (Cmd+Shift+Z on a Mac)", does: "Redo the next setup step", roles: DM, device: "keys", surface: "Setup history" },
