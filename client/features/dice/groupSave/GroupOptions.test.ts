@@ -136,7 +136,7 @@ describe("several selected: the card and the groups (5.3)", () => {
 
   test("under the card, the groups in order: Saves and checks, Skills, Shared attacks", () => {
     const markup = render(setup(), ["ta", "tb"]);
-    const groups = [...markup.matchAll(/<span id="[^"]+" style="[^"]*">(Saves and checks|Skills|Shared attacks)<\/span>/g)].map((m) => m[1]);
+    const groups = [...markup.matchAll(/<span id="[^"]+"[^>]*>(Saves and checks|Skills|Shared attacks)<\/span>/g)].map((m) => m[1]);
     assert.deepEqual(groups, ["Saves and checks", "Skills", "Shared attacks"]);
     assert.ok(markup.indexOf("data-dice-card") < markup.indexOf("data-panel-group"));
   });

@@ -274,14 +274,31 @@ export function Group(props: {
   holds?: "sections" | "rows";
   /** Folded content stays mounted and hidden, as a Section fold's `keep`: work under way in it lasts through a fold (the scene settings' groups, docs/design/design-v1-design-pass.md 4.1). */
   keep?: boolean;
+  /**
+   * The folded summary asks for its whole words (docs/design/design-v1-panel-groups.md
+   * 4.2): beside the name only where it fits whole, else on a line of its
+   * own under the name, cut with "…" only where that line is too short.
+   * Without it the summary asks for its floor, as below.
+   */
+  wholeSummary?: boolean;
+  /**
+   * An empty space the width of the chevron or the icon this group lacks,
+   * so its name lines up with peers that have one (6.1): Join requests,
+   * which never folds, over folding groups, or New scene, with no icon,
+   * over groups that wear one.
+   */
+  reserve?: "chevron" | "icon";
+  /** The line over the group, as a Section's `divider`. A panel's first group passes false, so no line sits just under the panel's header. */
+  divider?: boolean;
   children?: ReactNode;
 }) {
   const id = useId();
   const summaryId = `${id}-summary`;
   const folds = props.open !== undefined && props.onToggle !== undefined;
   const open = props.open ?? true;
+  // Marked so a check finds every group's name, a group with no fold included, which has no button to find it by (e2e/alignmentRoom.ts).
   const name = (
-    <span id={id} style={{ flex: "0 1 auto", minWidth: 0, fontSize: theme.font.input, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight }}>
+    <span id={id} data-group-name="" style={{ flex: "0 1 auto", minWidth: 0, fontSize: theme.font.input, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight }}>
       {props.label}
     </span>
   );
@@ -296,15 +313,18 @@ export function Group(props: {
    * keeps the name's line wherever the name and that least leave it room,
    * rather than wrap for the summary's whole words.
    */
+  /*
+   * A whole summary asks for its words alone: the row wraps it under the
+   * name wherever name and words do not fit on one line, and it shrinks,
+   * cut, only where its own line is narrower than its words.
+   */
+  const ask: CSSProperties = props.wholeSummary ? { flex: "0 1 auto", minWidth: 0 } : { flex: "1 1 4em", width: "4em", minWidth: 0, maxWidth: "max-content" };
   const summary =
     !open && props.summary ? (
       <span
         id={summaryId}
         style={{
-          flex: "1 1 4em",
-          width: "4em",
-          minWidth: 0,
-          maxWidth: "max-content",
+          ...ask,
           marginLeft: "auto",
           textAlign: "right",
           fontSize: theme.font.small,
@@ -327,7 +347,15 @@ export function Group(props: {
    * own line and nothing more. All of it is CSS, so the static markup and
    * the first paint lay out alike.
    */
-  const hasLead = folds || props.icon !== undefined;
+  const chevron = folds ? <Icon name={open ? "chevronDown" : "chevronRight"} size="sm" /> : props.reserve === "chevron" ? <Reserved /> : null;
+  const icon = props.icon ? (
+    <span aria-hidden data-group-icon="" style={{ display: "flex" }}>
+      <Icon name={props.icon} size="sm" />
+    </span>
+  ) : props.reserve === "icon" ? (
+    <Reserved />
+  ) : null;
+  const hasLead = chevron !== null || icon !== null;
   const head: CSSProperties = {
     display: "grid",
     gridTemplateColumns: hasLead ? "auto minmax(0, 1fr)" : "minmax(0, 1fr)",
@@ -341,12 +369,8 @@ export function Group(props: {
   };
   const lead = hasLead ? (
     <span style={{ display: "flex", alignItems: "center", gap: theme.space(2), height: NAME_LINE, color: theme.color.textMuted }}>
-      {folds ? <Icon name={open ? "chevronDown" : "chevronRight"} size="sm" /> : null}
-      {props.icon ? (
-        <span aria-hidden data-group-icon="" style={{ display: "flex" }}>
-          <Icon name={props.icon} size="sm" />
-        </span>
-      ) : null}
+      {chevron}
+      {icon}
     </span>
   ) : null;
   const words = (
@@ -357,7 +381,7 @@ export function Group(props: {
   );
   const body = props.children && (open || props.keep);
   return (
-    <div data-panel-group="" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", borderTop: `${theme.line.border}px solid ${theme.color.border}` }}>
+    <div data-panel-group="" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", borderTop: props.divider === false ? undefined : `${theme.line.border}px solid ${theme.color.border}` }}>
       {/* The action wraps under the name where both do not fit, as Add a stat block and Take a shape do in a narrow card, rather than run over it. */}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), minHeight: GROUP_ROW }}>
         <h3 style={{ margin: 0, display: "flex", flex: "1 1 auto", minWidth: 0 }}>
@@ -410,6 +434,11 @@ export function Group(props: {
       ) : null}
     </div>
   );
+}
+
+/** The space a group's missing chevron or icon keeps (Group's `reserve`): both are `sm` icons. */
+function Reserved() {
+  return <span aria-hidden data-group-reserve="" style={{ display: "block", flex: "none", width: theme.icon.sm, height: theme.icon.sm }} />;
 }
 
 const HELP: CSSProperties = { margin: 0, fontSize: theme.font.small, lineHeight: theme.leading.body, color: theme.color.textMuted };

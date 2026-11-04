@@ -92,7 +92,7 @@ describe("Group", () => {
     assert.match(look, /padding-block:14.4px/, "the name's line padded to 48 px, so a wrapped summary adds only its line");
     // The lead: chevron and icon in one span of the name's line height, before the words' row.
     assert.match(inner, /^<span style="[^"]*height:19.2px[^"]*"><svg[^>]*>.*?<\/svg><span aria-hidden="true" data-group-icon=""/);
-    const row = /<span style="([^"]*)"><span id="[^"]+" style="([^"]*)">Walls and movement<\/span><span id="[^"]+-summary" style="([^"]*)">Walls block moves<\/span><\/span>/.exec(inner);
+    const row = /<span style="([^"]*)"><span id="[^"]+" data-group-name="" style="([^"]*)">Walls and movement<\/span><span id="[^"]+-summary" style="([^"]*)">Walls block moves<\/span><\/span>/.exec(inner);
     assert.ok(row, "the name and the summary share one wrapping row");
     const [, rowLook = "", nameLook = "", summaryLook = ""] = row;
     assert.match(rowLook, /flex-wrap:wrap/);

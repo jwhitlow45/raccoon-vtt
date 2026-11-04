@@ -232,6 +232,24 @@ export function panelById(id: string | null): PanelDef | undefined {
 }
 
 /**
+ * Panel ids that left the registry, and the panel that took each one's
+ * place (docs/design/design-v1-panel-groups.md 7): Time and Sound became
+ * sections of Ambiance. Never aliases in the registry, which a list could
+ * show twice.
+ */
+export const PANEL_RENAMES: Readonly<Record<string, string>> = Object.freeze({ time: "ambiance", sound: "ambiance" });
+
+/**
+ * A panel id as the registry knows it now, for an id that may be old: a
+ * stored split, a reopen after a reload, or a stale caller of openPanel. An
+ * id that was never renamed comes back as it is. Only the map's own keys
+ * count, so a stored "constructor" never reads the object's prototype.
+ */
+export function canonicalPanelId(id: string): string {
+  return Object.hasOwn(PANEL_RENAMES, id) ? (PANEL_RENAMES[id] as string) : id;
+}
+
+/**
  * A panel's subpage, as the sheet or side panel shows it in its header
  * (docs/design/design-v1-visual.md 2.3): Members inside Menu, a journal page, the
  * encounter editor. `title` is the subpage's name and `parent` the panel's,
