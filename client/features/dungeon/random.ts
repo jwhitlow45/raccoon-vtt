@@ -127,13 +127,16 @@ export class Stream {
 /**
  * The stream a seed starts: its 75 bits as the key, and the generator's
  * version as the nonce's first word, so the same bits under another
- * version draw another stream.
+ * version draw another stream. `lane` is the nonce's second word: lane 1
+ * draws the corridors' doorway aims and waypoints apart from the main
+ * stream, so changing Corridors moves only the corridors, never the heights,
+ * locks or dressing drawn after them.
  */
-export function seedStream(seed: Seed, version: number = GENERATOR_VERSION): Stream {
+export function seedStream(seed: Seed, version: number = GENERATOR_VERSION, lane = 0): Stream {
   const nonce = new Uint8Array(12);
-  nonce[0] = version & 0xff;
-  nonce[1] = (version >>> 8) & 0xff;
-  nonce[2] = (version >>> 16) & 0xff;
-  nonce[3] = (version >>> 24) & 0xff;
+  for (let i = 0; i < 4; i++) {
+    nonce[i] = (version >>> (8 * i)) & 0xff;
+    nonce[4 + i] = (lane >>> (8 * i)) & 0xff;
+  }
   return new Stream(seedKey(seed), nonce);
 }

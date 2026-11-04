@@ -7,7 +7,7 @@ import { generate, planDungeon, type Planned } from "./plan.ts";
 import { planProblems } from "./plan.testkit.ts";
 import { Stream } from "./random.ts";
 import { CROCKFORD, newSeed, versionChar, type Seed } from "./seed.ts";
-import { clampSettings, DEFAULT_SETTINGS, defaultRooms, roomCap, SEARCH_BUDGET, SIZE_SIDES, type DungeonSettings } from "./settings.ts";
+import { clampSettings, DEFAULT_SETTINGS, defaultRooms, GENERATOR_VERSION, roomCap, SEARCH_BUDGET, SIZE_SIDES, type DungeonSettings } from "./settings.ts";
 
 /*
  * Property tests of the dungeon generator (docs/design/design-v1-dungeon-generator.md
@@ -61,7 +61,7 @@ describe("dungeon plans", () => {
       fc.property(settingsArb, seedArb, (s, seed) => {
         const p = planDungeon(s, seed);
         ok(p, s);
-        assert.equal(p.plan.version, 1);
+        assert.equal(p.plan.version, GENERATOR_VERSION);
         assert.equal(p.plan.asked, s.rooms);
         // The fitted count is the rooms kept, read after the drops.
         assert.equal(p.plan.rooms.length, p.board.rooms.filter((r) => !r.dropped).length);
@@ -242,7 +242,8 @@ describe("the drops (5.4)", () => {
 
   test("a tree link that fails is retried once with its raised or sunk end rooms flat, and their runs turn to flat corridor", () => {
     // Budget to the end of the tree on a plan with raised rooms, less a little: the last links fail, and those to raised rooms are retried flat.
-    const s = { ...DEFAULT_SETTINGS, w: 80, h: 80, rooms: 30 };
+    // Straight and Wide, where a run most often stands in a link's way. Bending and Winding move their doorways, and a styled link that finds no way also tries the plain ones (corridors.prop.test.ts).
+    const s = { ...DEFAULT_SETTINGS, w: 80, h: 80, rooms: 30, corridors: "straight" as const, wide: true };
     const next = seeds(22);
     let retried = 0;
     let rescued = 0;
@@ -274,7 +275,7 @@ describe("the drops (5.4)", () => {
   });
 
   test("DG-R1-07: only a tree link the search found no way for is retried flat, never one with no doorway or an empty budget", () => {
-    const s = { ...DEFAULT_SETTINGS, w: 80, h: 80, rooms: 30 };
+    const s = { ...DEFAULT_SETTINGS, w: 80, h: 80, rooms: 30, corridors: "straight" as const, wide: true };
     const next = seeds(24);
     const whys = new Set<string>();
     let raisedBudget = 0;

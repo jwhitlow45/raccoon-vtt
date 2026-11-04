@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "plans": [
     {
       "name": "the defaults",
@@ -17,7 +17,7 @@
         "band": "1-4"
       },
       "seed": "1K7QH2MXA9F3TWQ5",
-      "sha256": "e1ec7a1fc86934fbc458268bff744e35656b4b6e278a0dea3bc46719f95eae4e"
+      "sha256": "6177f5e4521330adf87df612f51353d004014f97ef77d126360514aae2f20028"
     },
     {
       "name": "Small",
@@ -35,7 +35,7 @@
         "band": "1-4"
       },
       "seed": "1Q8V2DR4HJ0Y7ZB3",
-      "sha256": "34a6b397becedcc77dbbbf623f83fe404e71983ed484264dc2b5de203e0f2f8c"
+      "sha256": "b9dcec9f219fabb9f32444f423062a3f4c65477f684fa8ad1326a4e7428ad642"
     },
     {
       "name": "Large",
@@ -53,7 +53,7 @@
         "band": "1-4"
       },
       "seed": "1M3T9WCEX5PK2AGN",
-      "sha256": "967f2eec04cd99212076733713fe6125beefcfd3e82e0e567c8d8d95642742c2"
+      "sha256": "da40c30d27b5c9e8648ea48ef68ebefcdf5805a6b7834bb51001d6a65a4ae98c"
     },
     {
       "name": "a Crypt, Dense, Winding and Wide",
@@ -71,7 +71,7 @@
         "band": "1-4"
       },
       "seed": "1A0B1C2D3E4F5G6H",
-      "sha256": "da845756b96faea4609896cb0146d01b3430334dd1232cfd7614340131658d6e"
+      "sha256": "00116548b9c7a825b7afeb4e440e1e6d487a4852f561ff8ae35144ad969ad35c"
     },
     {
       "name": "Sparse and Straight, flat, no loops or traps",
@@ -89,7 +89,7 @@
         "band": "1-4"
       },
       "seed": "1ZZZZZZZZZZZZZZZ",
-      "sha256": "1c943b3f301c383e1563a0af27895748f1c364393f09453b6b747eee5fd80f94"
+      "sha256": "3a8e2f7e1f1a6a9f1806f9dc027cc2bb4d382ba95e53524a7f2dba65c1e3d063"
     },
     {
       "name": "a Dense Winding Crypt with many traps",
@@ -107,7 +107,7 @@
         "band": "11-16"
       },
       "seed": "1000000000000001",
-      "sha256": "c63d3aa40f219a662dd7dbbb59ede321194bb293245ae633db6b8f517e4536da"
+      "sha256": "b5110042ac3678a024900312d4efeb71aa5ecc232587ff87596ef81799ff3758"
     },
     {
       "name": "the largest Wide",
@@ -125,7 +125,7 @@
         "band": "1-4"
       },
       "seed": "1VVVVWWWWXXXXYYY",
-      "sha256": "8cb730464c9c16aac46a62bc69dcdc65741d19d356db5844ebedd927be2ff1e2"
+      "sha256": "066fe7f0d8a504fcd78e381bdb134c9b483eedfdd7401f811a9281542ced2e24"
     },
     {
       "name": "the largest Narrow",
@@ -143,7 +143,7 @@
         "band": "1-4"
       },
       "seed": "1RS7TV8WX9YZ0123",
-      "sha256": "106d76cdb9744a4a58a875c26c76d07b4543dcbff5bd014657a35261d80c3bc2"
+      "sha256": "35d25a58236e5b7abfef2d1174fcde1b495c2ecd429980eabb6028ceb3abcb72"
     },
     {
       "name": "the smallest",
@@ -161,7 +161,7 @@
         "band": "1-4"
       },
       "seed": "1HJKMNPQRST45678",
-      "sha256": "312fb876a5affd9b2d80096ec6b3992e782f0cfb06800dd295087c25dea4eb5c"
+      "sha256": "ac815095e3bacafff02e59a0dce66043285a1d4d81a4c927fefd182861413e06"
     },
     {
       "name": "Custom and Wide",
@@ -179,7 +179,7 @@
         "band": "17-20"
       },
       "seed": "1D6E7F8G9H0J1K2M",
-      "sha256": "4990f03391f257de604f8a443ef9775fc30d65cd5dcb49681c2b40fc7c952706"
+      "sha256": "6d83e84829a4d924eae01bdd547430826b04d2d6cb021a14a2d22b046bcf48e3"
     },
     {
       "name": "a Large Straight Wide Crypt",
@@ -197,7 +197,7 @@
         "band": "1-4"
       },
       "seed": "1N3P4Q5R6S7T8V9W",
-      "sha256": "1c9268c1d148f35400acd230b8dece42d7e3e2bde2608a8fc3f0ce3f4de83c56"
+      "sha256": "048f5b877b01b6be70190c79b285a8314db868873cf3af4bf5bae2483c8a637e"
     },
     {
       "name": "Bending with traps at 5 to 10",
@@ -215,7 +215,7 @@
         "band": "5-10"
       },
       "seed": "1X0Y1Z2A3B4C5D6E",
-      "sha256": "05e926cf400dc86bb6e0eaa493d03da95589e0283d5a227cc03f8270df9be870"
+      "sha256": "108b6d1f0f8ce185778023b3b7edf6da6461ad797560c3c56f8130f6df8561b2"
     }
   ]
 }

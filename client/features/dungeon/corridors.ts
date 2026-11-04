@@ -1,4 +1,5 @@
 import { DX, DY, type Board, type Doorway, type Side } from "./layout.ts";
+import type { Stream } from "./random.ts";
 import type { CorridorStyle } from "./settings.ts";
 
 /*
@@ -8,32 +9,91 @@ import type { CorridorStyle } from "./settings.ts";
  * is a half: rock 2, a square already laid 1, so corridors join. Integer
  * costs, a binary heap with ties broken by insertion order, and a fixed
  * order of moves, so every device finds the same corridors.
+ *
+ * A cheapest way is always a shortest one, so costs alone cannot make a
+ * corridor wind: a search with any turn cost or per-square noise picked
+ * among the shortest ways, and between doorways on one row that is the one
+ * straight line whatever the style (D-261102-830). So a style sets the
+ * waypoints a corridor passes through: Straight none, Bending one or two set
+ * off to a side, Winding many, alternating sides. Each leg is its own
+ * search, and a corridor that cannot pass its waypoints takes the direct way.
+ * Where doorways go is the plan's part (plan.ts): Bending and Winding aim
+ * them off the line between rooms, and Winding moves them round a room when
+ * the rock between is too narrow to wind in.
  */
 
-/** What a turn costs by corridor style, in the doubled units. */
-export const TURN_COST: Readonly<Record<CorridorStyle, number>> = { straight: 12, bending: 2, winding: 1 };
-/**
- * A seeded extra on each rock square, 0 to this, by style. Without it a
- * search takes the fewest turns whatever a turn costs, so Bending drew the
- * very corridors Straight did (D-261102-410).
- */
-export const ROCK_NOISE: Readonly<Record<CorridorStyle, number>> = { straight: 0, bending: 4, winding: 6 };
+/** What a turn costs, in the doubled units: six squares of rock, so each leg keeps to the fewest turns and a corridor bends where its waypoints ask. */
+export const TURN_COST = 12;
 const ROCK = 2;
 const LAID = 1;
+/** Extra on a rock square beside another corridor, so a corridor joins one or keeps a square of rock from it, rarely running alongside as one wide patch. */
+const BESIDE = 3;
 /** A search first stays in its ends' box grown by this many squares, then takes the whole map. */
 const BOX_GROWTH = 12;
+/** How far a waypoint may move to the nearest open square or block. */
+const SNAP_REACH = 2;
 
 const DIRS: readonly Side[] = ["n", "e", "s", "w"];
 const DIR_INDEX: Readonly<Record<Side, number>> = { n: 0, e: 1, s: 2, w: 3 };
 
 export type Budget = { left: number };
 
-export type RouteOptions = { wide: boolean; turn: number; noise: Uint8Array | null; budget: Budget };
+/** A square or a block's top-left square, as x and y. */
+export type XY = readonly [number, number];
+
+export type RouteOptions = { wide: boolean; turn: number; budget: Budget };
 
 /** Where a search ends: a doorway's anchor, or the scene edge on one side, reached heading out. */
 export type Goal = { anchor: number[]; side: Side } | { edge: Side };
 
-export type RouteResult = { ok: true; cells: number[] } | { ok: false; why: "none" | "budget" };
+/** A found way: its squares, each once, and its search positions (a block's top-left on Wide) in order. */
+export type RouteResult = { ok: true; cells: number[]; chain: number[] } | { ok: false; why: "none" | "budget" };
+
+type Area = { x0: number; y0: number; x1: number; y1: number };
+type Found = { ok: true; chain: number[]; dir: number } | { ok: false; why: "none" | "budget" };
+
+/** Bending's waypoints: one from this length (two squares more on Wide), two from the next. */
+const BEND_MIN = 6;
+const BEND_TWO = 18;
+/** How far a bend may stand off the line, at most, in squares (blocks on Wide). */
+const BEND_REACH = 5;
+/** Winding's waypoints: one per this many squares (one more on Wide), less one, so the last leaves room before the far end. */
+const WIND_SPACING = 3;
+const WIND_MAX = 12;
+/** How far a winding waypoint stands off the line: 2 to this (one more each on Wide). */
+const WIND_REACH = 3;
+
+/**
+ * The waypoints a style bends a corridor through, between its ends `a` and
+ * `b` (block positions on Wide, where `size` is 2): points along the line
+ * between them, each set off across it. Bending takes one, or two on a long
+ * way, each to a side drawn at random, so it jogs aside and back. Winding
+ * takes one every few squares, alternating sides, so it snakes. Points keep
+ * a few squares apart and from the far end, since each leg turns at its
+ * point and must not run beside the leg before it: a way too short for one
+ * takes none.
+ */
+export function bends(rng: Stream, style: CorridorStyle, a: XY, b: XY, size = 1): XY[] {
+  if (style === "straight") return [];
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const length = Math.abs(dx) + Math.abs(dy);
+  const wider = size - 1;
+  const count = style === "bending" ? (length < BEND_MIN + 2 * wider ? 0 : length < BEND_TWO ? 1 : 2) : Math.min(WIND_MAX, Math.floor(length / (WIND_SPACING + wider)) - 1);
+  // Offsets go across the longer axis, so the jogs show along the way.
+  const acrossY = Math.abs(dx) >= Math.abs(dy);
+  const [least, most] = style === "bending" ? [2 * size, Math.max(2 * size, Math.min(BEND_REACH * size, Math.floor(length / 3)))] : [2 + wider, WIND_REACH + wider];
+  let sign = rng.chance(1, 2) ? 1 : -1;
+  const out: XY[] = [];
+  for (let i = 1; i <= count; i++) {
+    // The i-th of count points evenly along the line, rounded half up in whole numbers.
+    const along = (d: number) => Math.floor((2 * d * i + count + 1) / (2 * (count + 1)));
+    const reach = sign * rng.int(least, most);
+    out.push(acrossY ? [a[0] + along(dx), a[1] + along(dy) + reach] : [a[0] + along(dx) + reach, a[1] + along(dy)]);
+    sign = style === "winding" ? -sign : rng.chance(1, 2) ? 1 : -1;
+  }
+  return out;
+}
 
 /** A min-heap of search states by cost, then by insertion order. */
 class Heap {
@@ -120,6 +180,7 @@ export class Router {
   readonly #parent: Int32Array;
   readonly #stamp: Int32Array;
   readonly #done: Int32Array;
+  readonly #beside: Uint8Array;
   readonly #heap = new Heap();
   #searches = 0;
 
@@ -130,6 +191,7 @@ export class Router {
     this.#parent = new Int32Array(states);
     this.#stamp = new Int32Array(states);
     this.#done = new Int32Array(states);
+    this.#beside = new Uint8Array(board.W * board.H);
   }
 
   /**
@@ -159,31 +221,138 @@ export class Router {
   /**
    * A corridor from a doorway's anchor, leaving outward, to a goal. On
    * Wide a position is the block's top-left square, and a block is open
-   * only when its four squares are. The first try stays in the ends' box
-   * grown by 12 squares, then the whole map. Every expansion spends one
-   * from the budget, and an empty budget fails the search.
+   * only when its four squares are. Every expansion spends one from the
+   * budget, and an empty budget fails the search.
+   *
+   * With `bend`, the corridor first tries the waypoints it gives for its
+   * ends, one search per leg, each in its ends' box grown by 12 squares. A
+   * leg never crosses or runs back over the legs before it. A waypoint on a
+   * closed square moves to the nearest open one within 2, or is left out.
+   * If a leg finds no way, the corridor takes the direct way: the ends' box
+   * grown by 12 squares first, then the whole map.
    */
-  route(from: Doorway, goal: Goal, options: RouteOptions): RouteResult {
+  route(from: Doorway, goal: Goal, options: RouteOptions, bend?: (a: XY, b: XY) => XY[]): RouteResult {
     const b = this.#board;
     const stub = "edge" in goal;
     const open = this.openSquares(stub);
+    this.#markBeside();
     const size = options.wide ? 2 : 1;
     const start = blockOf(b, b.anchor(from), from.side, size);
-    const target = "anchor" in goal ? blockOf(b, goal.anchor, goal.side, size) : -1;
-    const ends = [start, target >= 0 ? target : edgeProjection(b, start, goal as { edge: Side }, size)];
-    const xs = ends.map((k) => k % b.W);
-    const ys = ends.map((k) => Math.floor(k / b.W));
-    const box = { x0: Math.max(0, Math.min(...xs) - BOX_GROWTH), y0: Math.max(0, Math.min(...ys) - BOX_GROWTH), x1: Math.min(b.W - 1, Math.max(...xs) + BOX_GROWTH + size - 1), y1: Math.min(b.H - 1, Math.max(...ys) + BOX_GROWTH + size - 1) };
+    const dir = DIR_INDEX[from.side];
+    const end: { at: number } | { edge: Side } = "anchor" in goal ? { at: blockOf(b, goal.anchor, goal.side, size) } : { edge: goal.edge };
+    if (bend && "at" in end) {
+      const points = this.#snap(open, bend(this.#xy(start), this.#xy(end.at)), start, end.at, size);
+      if (points.length > 0) {
+        const legs = this.#legs(open, start, dir, points, end.at, size, options);
+        if (legs.ok || legs.why === "budget") return legs;
+      }
+    }
+    const box = this.#box([start, "at" in end ? end.at : edgeProjection(b, start, end, size)], size);
     const whole = { x0: 0, y0: 0, x1: b.W - 1, y1: b.H - 1 };
     for (const area of [box, whole]) {
-      const found = this.#search(open, start, from.side, goal, target, area, size, options);
-      if (found.ok || found.why === "budget") return found;
+      const found = this.#search(open, start, dir, end, area, size, options);
+      if (found.ok) return { ok: true, chain: found.chain, cells: this.#cells(found.chain, size) };
+      if (found.why === "budget") return found;
       if (area.x0 === whole.x0 && area.y0 === whole.y0 && area.x1 === whole.x1 && area.y1 === whole.y1) return found;
     }
     return { ok: false, why: "none" };
   }
 
-  #search(open: Uint8Array, start: number, dir: Side, goal: Goal, target: number, area: { x0: number; y0: number; x1: number; y1: number }, size: number, options: RouteOptions): RouteResult {
+  /** Marks the rock squares beside a laid corridor square, for BESIDE. */
+  #markBeside(): void {
+    const b = this.#board;
+    const near = this.#beside;
+    near.fill(0);
+    for (let k = 0; k < near.length; k++) {
+      if (b.laid[k] !== 1) continue;
+      const x = k % b.W;
+      if (x > 0) near[k - 1] = 1;
+      if (x < b.W - 1) near[k + 1] = 1;
+      if (k >= b.W) near[k - b.W] = 1;
+      if (k + b.W < near.length) near[k + b.W] = 1;
+    }
+  }
+
+  #xy(k: number): XY {
+    return [k % this.#board.W, Math.floor(k / this.#board.W)];
+  }
+
+  #box(ends: readonly number[], size: number): Area {
+    const b = this.#board;
+    const xs = ends.map((k) => k % b.W);
+    const ys = ends.map((k) => Math.floor(k / b.W));
+    return { x0: Math.max(0, Math.min(...xs) - BOX_GROWTH), y0: Math.max(0, Math.min(...ys) - BOX_GROWTH), x1: Math.min(b.W - 1, Math.max(...xs) + BOX_GROWTH + size - 1), y1: Math.min(b.H - 1, Math.max(...ys) + BOX_GROWTH + size - 1) };
+  }
+
+  #fits(open: Uint8Array, k: number, size: number): boolean {
+    const W = this.#board.W;
+    for (let j = 0; j < size; j++) for (let i = 0; i < size; i++) if (open[k + j * W + i] !== 1) return false;
+    return true;
+  }
+
+  /**
+   * Waypoints moved onto open positions: each to the nearest open one
+   * within SNAP_REACH, in a fixed order, or left out. A waypoint next to an
+   * end, or on the one before it, adds no bend and is left out too.
+   */
+  #snap(open: Uint8Array, points: readonly XY[], start: number, target: number, size: number): number[] {
+    const b = this.#board;
+    const out: number[] = [];
+    const near = (k: number, o: number) => Math.abs((k % b.W) - (o % b.W)) + Math.abs(Math.floor(k / b.W) - Math.floor(o / b.W)) <= 1;
+    for (const [px, py] of points) {
+      let found = -1;
+      for (let r = 0; r <= SNAP_REACH && found < 0; r++) {
+        for (let dy = -r; dy <= r && found < 0; dy++) {
+          for (const dx of r === Math.abs(dy) ? [r - Math.abs(dy)] : [-(r - Math.abs(dy)), r - Math.abs(dy)]) {
+            const x = px + dx;
+            const y = py + dy;
+            if (x < 0 || y < 0 || x > b.W - size || y > b.H - size) continue;
+            const k = y * b.W + x;
+            if (this.#fits(open, k, size)) {
+              found = k;
+              break;
+            }
+          }
+        }
+      }
+      if (found < 0 || near(found, start) || near(found, target) || (out.length > 0 && near(found, out.at(-1)!))) continue;
+      out.push(found);
+    }
+    return out;
+  }
+
+  /**
+   * A corridor through its waypoints, a search per leg. Each leg closes its
+   * own squares and the squares beside them to the legs after it, but for
+   * the block where the next one starts and the squares it turns out by, so
+   * the corridor never crosses itself or runs alongside itself as a wide
+   * patch. A waypoint no leg reaches is passed over. When the last leg finds
+   * no way to the goal, the leg before it is taken back and the goal tried
+   * from the waypoint before, down to the doorway itself.
+   */
+  #legs(open: Uint8Array, start: number, dir: number, points: readonly number[], target: number, size: number, options: RouteOptions): RouteResult {
+    const W = this.#board.W;
+    const stops: { at: number; dir: number; chain: number[]; free: Uint8Array }[] = [{ at: start, dir, chain: [start], free: open.slice() }];
+    let i = 0;
+    for (;;) {
+      const from = stops.at(-1)!;
+      const goal = i < points.length ? points[i]! : target;
+      const found = this.#search(from.free, from.at, from.dir, { at: goal }, this.#box([from.at, goal], size), size, options);
+      if (found.ok) {
+        const chain = [...from.chain, ...found.chain.slice(1)];
+        if (goal === target) return { ok: true, chain, cells: this.#cells(chain, size) };
+        stops.push({ at: goal, dir: found.dir, chain, free: closeLeg(from.free, found.chain, size, W) });
+        i++;
+        continue;
+      }
+      if (found.why === "budget") return found;
+      if (goal !== target) i++;
+      else if (stops.length > 1) stops.pop();
+      else return found;
+    }
+  }
+
+  #search(open: Uint8Array, start: number, dir: number, end: { at: number } | { edge: Side }, area: Area, size: number, options: RouteOptions): Found {
     const b = this.#board;
     const W = b.W;
     const id = ++this.#searches;
@@ -193,11 +362,11 @@ export class Router {
       const x = k % W;
       const y = (k - x) / W;
       if (x < area.x0 || y < area.y0 || x + size - 1 > area.x1 || y + size - 1 > area.y1) return false;
-      for (let j = 0; j < size; j++) for (let i = 0; i < size; i++) if (open[k + j * W + i] !== 1) return false;
-      return true;
+      return this.#fits(open, k, size);
     };
     if (!fits(start)) return { ok: false, why: "none" };
-    const edge = "edge" in goal ? goal.edge : null;
+    const edge = "edge" in end ? end.edge : null;
+    const target = "at" in end ? end.at : -1;
     const tx = target >= 0 ? target % W : 0;
     const ty = target >= 0 ? Math.floor(target / W) : 0;
     const minStep = LAID * size;
@@ -216,7 +385,7 @@ export class Router {
       const y = (k - x) / W;
       return edge === "w" ? x === 0 : edge === "n" ? y === 0 : edge === "e" ? x === W - size : y === b.H - size;
     };
-    const s0 = start * 4 + DIR_INDEX[dir];
+    const s0 = start * 4 + dir;
     this.#stamp[s0] = id;
     this.#g[s0] = 0;
     this.#parent[s0] = -1;
@@ -229,7 +398,11 @@ export class Router {
       this.#done[s] = id;
       const k = s >> 2;
       const d = s & 3;
-      if (reached(k, d)) return { ok: true, cells: this.#cells(s, size) };
+      if (reached(k, d)) {
+        const chain: number[] = [];
+        for (let t = s; t >= 0; t = this.#parent[t]!) chain.push(t >> 2);
+        return { ok: true, chain: chain.reverse(), dir: d };
+      }
       const g = this.#g[s]!;
       const x = k % W;
       const y = (k - x) / W;
@@ -248,7 +421,7 @@ export class Router {
         // The squares the block moves onto: its leading row.
         for (let j = 0; j < size; j++) {
           const c = leading(nk, side, j, size, W);
-          cost += b.laid[c] === 1 ? LAID : ROCK + (options.noise ? options.noise[c]! : 0);
+          cost += b.laid[c] === 1 ? LAID : ROCK + (this.#beside[c] === 1 ? BESIDE : 0);
         }
         const ng = g + cost;
         if (this.#stamp[ns] === id && this.#g[ns]! <= ng) continue;
@@ -261,12 +434,9 @@ export class Router {
     return { ok: false, why: "none" };
   }
 
-  /** The squares of a found way, from its start, each once. */
-  #cells(end: number, size: number): number[] {
+  /** The squares of a way's positions, from its start, each once. */
+  #cells(chain: readonly number[], size: number): number[] {
     const W = this.#board.W;
-    const chain: number[] = [];
-    for (let s = end; s >= 0; s = this.#parent[s]!) chain.push(s >> 2);
-    chain.reverse();
     const seen = new Set<number>();
     const out: number[] = [];
     for (const k of chain) {
@@ -282,6 +452,37 @@ export class Router {
     }
     return out;
   }
+}
+
+/**
+ * The open squares after a leg: its squares closed, and the squares beside
+ * them, but for its last block where the next leg starts and the squares
+ * beside the block before it, which the next leg turns out by.
+ */
+function closeLeg(open: Uint8Array, chain: readonly number[], size: number, W: number): Uint8Array {
+  const free = open.slice();
+  const last = chain.at(-1)!;
+  const keep = new Set<number>();
+  for (let j = 0; j < size; j++) for (let i = 0; i < size; i++) keep.add(last + j * W + i);
+  const close = (c: number) => {
+    if (c >= 0 && c < free.length && !keep.has(c)) free[c] = 0;
+  };
+  chain.forEach((k, n) => {
+    const beside = n <= chain.length - 1 - size;
+    for (let j = 0; j < size; j++) {
+      for (let i = 0; i < size; i++) {
+        const c = k + j * W + i;
+        close(c);
+        if (!beside) continue;
+        const x = c % W;
+        if (x > 0) close(c - 1);
+        if (x < W - 1) close(c + 1);
+        close(c - W);
+        close(c + W);
+      }
+    }
+  });
+  return free;
 }
 
 /** The `j`-th square of a block's leading row when it moves toward `side`. */
