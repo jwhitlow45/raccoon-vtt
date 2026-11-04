@@ -25,6 +25,16 @@ describe("the Map image row's words (docs/design/design-v1-animated-maps.md 4.2)
     assert.equal(videoRowHelp({ widthPx: 1920, heightPx: 1080, durationMs: 42_000 }), "A 1920 × 1080 px video, 0:42, looping. Its first frame is the still.");
   });
 
+  test("the help gives the size the video is drawn at, turned and stretched (docs/design/design-v1-video-turns.md 7)", () => {
+    const portrait = { widthPx: 1920, heightPx: 1080, durationMs: 42_000 };
+    assert.equal(videoRowHelp({ ...portrait, turn: 90 }), "A 1080 × 1920 px video, 0:42, looping. Its first frame is the still.");
+    assert.equal(videoRowHelp({ ...portrait, turn: 270 }), "A 1080 × 1920 px video, 0:42, looping. Its first frame is the still.");
+    assert.equal(videoRowHelp({ ...portrait, turn: 180 }), "A 1920 × 1080 px video, 0:42, looping. Its first frame is the still.");
+    const wide = { widthPx: 640, heightPx: 360, displayWidthPx: 853, durationMs: 5_000 };
+    assert.equal(videoRowHelp(wide), "A 853 × 360 px video, 0:05, looping. Its first frame is the still.");
+    assert.equal(videoRowHelp({ ...wide, turn: 90 }), "A 360 × 853 px video, 0:05, looping. Its first frame is the still.");
+  });
+
   test("a length reads as minutes and seconds, rounded to the second", () => {
     assert.equal(videoLength(1_000), "0:01");
     assert.equal(videoLength(41_600), "0:42");
@@ -87,7 +97,7 @@ describe("This device and the table display (4.4)", () => {
 describe("a refused video (4.5)", () => {
   test("every video code the server can answer has words", () => {
     const videoCodes = API_ERROR_CODES.filter((code) => code.startsWith("video_") || code === "bad_video");
-    assert.equal(videoCodes.length, 16);
+    assert.equal(videoCodes.length, 17);
     for (const code of videoCodes) assert.ok(VIDEO_REFUSALS[code], code);
   });
 
@@ -98,6 +108,24 @@ describe("a refused video (4.5)", () => {
     assert.equal(words("video_off"), "Animated maps are off on this server.");
     assert.equal(words("unsupported_type"), words("video_type"));
     assert.equal(words("bad_video"), "That video could not be read.");
+  });
+
+  test("the words for turned files and iPhone videos are the design's (docs/design/design-v1-video-turns.md 4.4 and 4.5)", () => {
+    const words = (code: string) => videoRefusalText(new ApiError(422, "x", code as never, null));
+    assert.equal(words("video_geometry"), "That video's file crops or reshapes its picture in a way this app can't show. Export it again as a plain MP4 or WebM.");
+    assert.equal(words("video_type"), "That video isn't WebM, MP4 or MOV.");
+    assert.equal(words("unsupported_type"), "That video isn't WebM, MP4 or MOV.");
+    assert.equal(
+      words("video_hevc"),
+      "That video is HEVC (High Efficiency), which most browsers can't play. Export it as H.264, for example with QuickTime Player's Export As and Greater Compatibility on a Mac. For new iPhone videos, set Settings > Camera > Formats to Most Compatible.",
+    );
+  });
+
+  test("every refusal is plain sentences, with no em dash or semicolon", () => {
+    for (const [code, text] of Object.entries(VIDEO_REFUSALS)) {
+      assert.match(text!, /^\S.*\.$/, code);
+      assert.doesNotMatch(text!, /[\u2014;]/, code);
+    }
   });
 
   test("anything else is left to the image words", () => {

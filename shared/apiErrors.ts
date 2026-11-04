@@ -97,6 +97,7 @@ export const API_ERROR_CODES = [
   "video_fragmented",
   "video_geometry",
   "video_hdr",
+  "video_hevc",
   "video_layout",
   "video_length",
   "video_off",

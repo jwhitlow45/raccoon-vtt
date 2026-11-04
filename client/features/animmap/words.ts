@@ -1,13 +1,15 @@
 import { VIDEO_LIMITS } from "#shared/limits.ts";
 import type { MapVideo, VideoContainer } from "#shared/model.ts";
 import { VIDEO_OFF, VIDEO_SHAPE } from "#shared/permissions.ts";
+import { drawnSize } from "#shared/videoGeometry.ts";
 import { ApiError, type ApiErrorCodeOrNetwork } from "../../lib/api.ts";
 import type { Playback, StillReason } from "./status.ts";
 
 /**
  * Every word animated maps show (docs/design/design-v1-animated-maps.md 4.2,
- * 4.4 and 4.5), in one place so the board's lane, the DM's upload and the
- * Library say the same thing, and the tests pin them.
+ * 4.4 and 4.5, and docs/design/design-v1-video-turns.md 4.4 and 4.5), in one
+ * place so the board's lane, the DM's upload and the Library say the same
+ * thing, and the tests pin them.
  */
 
 export { VIDEO_OFF, VIDEO_SHAPE };
@@ -20,9 +22,10 @@ export function videoLength(durationMs: number): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
-/** The Map image row's help for an animated map, in place of "A 1920 × 1080 px image.". */
-export function videoRowHelp(video: Pick<MapVideo, "widthPx" | "heightPx" | "durationMs">): string {
-  return `A ${video.widthPx} × ${video.heightPx} px video, ${videoLength(video.durationMs)}, looping. Its first frame is the still.`;
+/** The Map image row's help for an animated map, in place of "A 1920 × 1080 px image.". The size is the one it is drawn at, so a portrait phone video reads 1080 × 1920. */
+export function videoRowHelp(video: Pick<MapVideo, "widthPx" | "heightPx" | "turn" | "displayWidthPx" | "durationMs">): string {
+  const shown = drawnSize(video);
+  return `A ${shown.widthPx} × ${shown.heightPx} px video, ${videoLength(video.durationMs)}, looping. Its first frame is the still.`;
 }
 
 export const MOVING_HERE = "Moving on this device.";
@@ -123,9 +126,11 @@ const MB = VIDEO_LIMITS.fileBytes / (1024 * 1024);
 
 /** The upload's refusals, by the code the asset routes answer. */
 export const VIDEO_REFUSALS: Readonly<Partial<Record<ApiErrorCodeOrNetwork, string>>> = {
-  video_type: "That video isn't WebM or MP4. iPhone videos from Photos are MOV: save the map's MP4 to Files and pick it from there.",
+  video_type: "That video isn't WebM, MP4 or MOV.",
   // The upload route answers 415 for a content type it does not take, before reading the body.
-  unsupported_type: "That video isn't WebM or MP4. iPhone videos from Photos are MOV: save the map's MP4 to Files and pick it from there.",
+  unsupported_type: "That video isn't WebM, MP4 or MOV.",
+  video_hevc:
+    "That video is HEVC (High Efficiency), which most browsers can't play. Export it as H.264, for example with QuickTime Player's Export As and Greater Compatibility on a Mac. For new iPhone videos, set Settings > Camera > Formats to Most Compatible.",
   video_codec: "That video's format doesn't play in most browsers. Save it as MP4 (H.264) or WebM (VP9).",
   video_tracks: "That video holds more than one picture or sound track, or a track of another kind. Export it again with one video and at most one sound track.",
   video_sound: "That video's sound settings can't be checked. Export it again with AAC-LC or Opus sound.",
@@ -133,7 +138,7 @@ export const VIDEO_REFUSALS: Readonly<Partial<Record<ApiErrorCodeOrNetwork, stri
   video_alpha: "That video has see-through parts. Animated maps must be solid.",
   video_hdr: "That video is HDR, which looks washed out on the map. Export it in SDR.",
   video_size: `Videos can be ${VIDEO_LIMITS.minSidePx} to ${VIDEO_LIMITS.maxSidePx} pixels on a side and 8.3 megapixels in all (3840 × 2160).`,
-  video_geometry: "That video's file turns or stretches its picture, as phone videos often do. Export it again without rotation.",
+  video_geometry: "That video's file crops or reshapes its picture in a way this app can't show. Export it again as a plain MP4 or WebM.",
   video_length: "Videos can be 1 second to 10 minutes long.",
   video_fps: "Videos can be up to 60 frames a second.",
   video_unfinished: "That video doesn't say how long it is, as screen recordings often don't. Save it again with a video editor.",
