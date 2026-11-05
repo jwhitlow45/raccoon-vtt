@@ -183,6 +183,35 @@ describe("an animated map's upload (docs/design/design-v1-animated-maps.md 4.1, 
     assert.ok(!w.order.includes("map"), "no still went up");
   });
 
+  test("a cancel as the stored copy fails to read is a cancel, not a hold: the video this upload made is deleted", async () => {
+    for (const kind of ["unreadable", "lowPower"] as const) {
+      const abort = new AbortController();
+      const w = world({
+        frame: async () => null,
+        stored: () => {
+          abort.abort();
+          return Promise.reject(new FirstFrameError({ kind }));
+        },
+      });
+      const err = await run(w, { signal: abort.signal }).catch((e: unknown) => e);
+      assert.ok(err instanceof FirstFrameError, kind);
+      assert.ok(!(err instanceof AnimatedUploadError), `${kind}: nothing held`);
+      assert.deepEqual(w.removed, [["v1"]], kind);
+    }
+  });
+
+  test("a form's run that a cancel races holds nothing, whatever the steps held", async () => {
+    const removed: string[][] = [];
+    const abort = new AbortController();
+    const turned = videoRow({ video: { ...FACTS, turn: 90 } });
+    const w = world({ video: async () => turned, still: async () => (abort.abort(), stillRow({ width: 500, height: 500 })) });
+    const hold = new VideoHold(() => "r1", { remove: async (_r, ids) => void removed.push(ids) });
+    const err = await hold.run({ roomId: "r1", file, host: null, signal: abort.signal, onStep: () => {}, deps: w.deps }).catch((e: unknown) => e);
+    assert.ok(err instanceof DOMException && err.name === "AbortError", "the cancel, not the shape refusal that raced it");
+    assert.equal(hold.held, null);
+    assert.deepEqual(removed, [["v1"]]);
+  });
+
   test("a MOV goes up as an MP4, the type the server checks and stores it as", async () => {
     const w = world();
     const mov = new File([new Uint8Array(10)], "IMG_0042.MOV", { type: "video/quicktime" });

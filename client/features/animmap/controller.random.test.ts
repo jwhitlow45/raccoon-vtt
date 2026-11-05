@@ -923,6 +923,7 @@ test("the 4:3 file reported at 2560 × 1080 without frame callbacks, or with non
     await settle(world);
     await run(1500);
     assert.equal(dm.board.state, "still phone-size", "no method: as reported at once");
+    assert.equal(dm.board.videoDraws, 0, "not even one frame drawn while nothing could judge it");
   }
   {
     const { world, dm, run } = single(SECOND, HZ60, VIDEO_WIDE, { variant: "mobile", silent: true, sizes: { reported: { w: 2560, h: 1080 }, frame: { w: 1920, h: 1080 } } });

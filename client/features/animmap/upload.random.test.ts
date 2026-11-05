@@ -318,6 +318,8 @@ async function sequence(seed: number): Promise<string[]> {
       const at = int(r, 0, world.queue.length - 1);
       const [event] = world.queue.splice(at, 1);
       event!.run();
+      // Now and then the DM cancels in the same turn, before the answer's reactions run, so a cancel races what the answer settles.
+      if (chance(r, 0.05)) cancel();
     } else if (roll < 0.82) cancel();
     else if (now().t === "ask") {
       const asked = now() as Extract<FormState, { t: "ask" }>;
