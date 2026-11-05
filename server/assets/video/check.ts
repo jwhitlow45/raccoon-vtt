@@ -2,8 +2,9 @@ import { stat } from "node:fs/promises";
 import { Worker } from "node:worker_threads";
 import { fileTypeFromBuffer, fileTypeFromFile } from "file-type";
 import type { ApiErrorCode } from "#shared/apiErrors.ts";
-import { VIDEO_LIMITS } from "#shared/limits.ts";
+import { VIDEO_LIMITS, videoSizeFits } from "#shared/limits.ts";
 import { checkedVideoFacts } from "#shared/protocol.ts";
+import { drawnSize } from "#shared/videoGeometry.ts";
 import type { VideoContainer, VideoFacts } from "#shared/model.ts";
 import { AssetError } from "../errors.ts";
 import { parseMp4 } from "./mp4.ts";
@@ -22,25 +23,31 @@ export type ParsedVideo = Omit<VideoFacts, "kbps"> & { edits: Edits };
 
 /**
  * The container by its first bytes, never by what the sender claimed.
- * Matroska that is not WebM, MOV and every other container is `video_type`.
+ * A QuickTime MOV goes through the MP4 check and is stored, named and
+ * served as an MP4 (docs/design/design-v1-video-turns.md 4.5,
+ * D-261102-890). The sniff also names a file that starts with `moov` or
+ * `mdat` a MOV, and the MP4 check refuses one without `ftyp` as
+ * `video_type`. Matroska that is not WebM, and every other container, is
+ * `video_type`.
  */
 export function containerOf(ext: string | undefined): VideoContainer {
   if (ext === "webm") return "webm";
-  if (ext === "mp4" || ext === "m4v") return "mp4";
+  if (ext === "mp4" || ext === "m4v" || ext === "mov") return "mp4";
   throw refuse("video_type");
 }
 
 /**
- * The caps of 6.3, then the facts, with `kbps` from the file's size and
- * length. Last, the facts must be ones the protocol takes (AM-R1-05): a
+ * The caps of 6.3, on the coded size the decoder works on and on the drawn
+ * size the app shows (docs/design/design-v1-video-turns.md 4.3), then the
+ * facts, with `kbps` from the file's size and length. Last, the facts must
+ * be ones the protocol takes (AM-R1-05), any other geometry included: a
  * stored video whose facts the protocol refused would be in the Library and
  * in no map, as every op naming it would fail.
  */
 export function capped(parsed: ParsedVideo, fileBytes: number): VideoFacts {
   const { edits: _edits, ...facts } = parsed;
   const L = VIDEO_LIMITS;
-  const { widthPx: w, heightPx: h } = facts;
-  if (Math.min(w, h) < L.minSidePx || Math.max(w, h) > L.maxSidePx || w * h > L.maxPixels) throw refuse("video_size");
+  if (!videoSizeFits(facts) || !videoSizeFits(drawnSize(facts))) throw refuse("video_size");
   if (facts.durationMs < L.minDurationMs || facts.durationMs > L.maxDurationMs) throw refuse("video_length");
   if (facts.fps > L.maxFramesInASecond) throw refuse("video_fps");
   // Bits per millisecond is kilobits per second. At least 1, so a tiny file still reads as a rate.

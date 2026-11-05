@@ -529,6 +529,8 @@ export type Mp4Track = {
   handlerName?: string;
   /** The data references. Default: one `url ` to the file itself. */
   dataRefs?: Box[];
+  /** Boxes right after tkhd, before mdia, where an iPhone writes its `tapt`. */
+  beforeMdia?: Box[];
   extraTrak?: Box[];
   extraStbl?: Box[];
   extraMinf?: Box[];
@@ -633,7 +635,7 @@ function trakBox(t: Mp4Track, id: number, movieTimescale: number, chunkOffsets: 
   const edts = t.edits
     ? [bx("edts", undefined, bx("elst", Buffer.concat([full(0), fields([4, t.edits.length]), ...t.edits.map((e) => Buffer.concat([fields([4, e.segment]), (() => { const b = Buffer.alloc(4); b.writeInt32BE(e.mediaTime); return b; })(), fields([4, e.rate ?? 0x10000])]))])))]
     : [];
-  return bx("trak", undefined, tkhd, ...edts, mdia, ...(t.extraTrak ?? []));
+  return bx("trak", undefined, tkhd, ...(t.beforeMdia ?? []), ...edts, mdia, ...(t.extraTrak ?? []));
 }
 
 /**

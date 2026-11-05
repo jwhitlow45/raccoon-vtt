@@ -6,20 +6,34 @@ import { capped, checkVideoBytes } from "./check.ts";
 import { audioSpecificConfig, avcCodecString } from "./mp4.ts";
 import {
   FFMPEG_AAC_LC,
+  IDENTITY_MATRIX,
+  ROWS,
   SECRETS,
+  alisRef,
   appleLocationMeta,
   audioEntry,
+  audioEntryV1,
   av1CBytes,
   avcCBytes,
   bx,
+  clapBox,
   dOpsBytes,
   defaultSoundTrack,
   defaultVideoTrack,
   esdsBytes,
   fields,
+  filler,
+  iphoneMov,
   locationUdta,
+  metadataTrack,
   mp4File,
+  nclcBox,
+  paspBox,
+  taptBox,
+  tkhdMatrix,
   visualEntry,
+  waveBox,
+  type Box,
   type Mp4Options,
   type Mp4Track,
 } from "./videoTestutil.ts";
@@ -165,14 +179,15 @@ describe("metadata is zeroed from an allowlist (section 7)", () => {
 });
 
 describe("refusals", () => {
-  test("MOV and other ISO containers are video_type", async () => {
-    await refused(mp4File({ brand: "qt  " }), "video_type");
+  test("a file without ftyp, which the sniff names a MOV, and the ISO containers that are not videos are video_type", async () => {
+    const plain = mp4File();
+    await refused(plain.subarray(plain.readUInt32BE(0)), "video_type");
     await refused(mp4File({ brand: "M4A " }), "video_type");
     await refused(mp4File({ brand: "3gp5" }), "video_type");
   });
 
-  test("HEVC, MPEG-4 Part 2 and AC-3 are video_codec", async () => {
-    await refused(mp4File({ tracks: [defaultVideoTrack({ entry: visualEntry("hvc1", 640, 360, "") })] }), "video_codec");
+  test("HEVC is video_hevc, and MPEG-4 Part 2 and AC-3 are video_codec", async () => {
+    await refused(mp4File({ tracks: [defaultVideoTrack({ entry: visualEntry("hvc1", 640, 360, "") })] }), "video_hevc");
     await refused(mp4File({ tracks: [defaultVideoTrack({ entry: visualEntry("mp4v", 640, 360, "") })] }), "video_codec");
     await refused(mp4File({ tracks: [defaultVideoTrack(), defaultSoundTrack({ entry: audioEntry("ac-3", 2, 48000) })] }), "video_codec");
   });
@@ -189,10 +204,10 @@ describe("refusals", () => {
     await refused(mp4File({ afterMdat: [bx("moof", undefined, bx("mfhd", Buffer.alloc(8)))] }), "video_fragmented");
   });
 
-  test("a rotation, a tkhd size unlike the sample entry's, a non-square pasp and a clap are video_geometry", async () => {
-    await refused(mp4File({ tracks: [defaultVideoTrack({ matrix: [0, 0x10000, 0, -0x10000 >>> 0, 0, 0, 0, 0, 0x40000000] })] }), "video_geometry");
+  test("a matrix off 4.1's rows, a tkhd size its pasp does not allow, a pasp past 2:1 and a real clap are video_geometry", async () => {
+    await refused(mp4File({ tracks: [defaultVideoTrack({ matrix: [46341, 46341, 0, -46341 >>> 0, 46341, 0, 0, 0, 0x40000000] })] }), "video_geometry");
     await refused(mp4File({ tracks: [defaultVideoTrack({ tkhdSize: { width: 853, height: 360 } })] }), "video_geometry");
-    await refused(mp4File({ tracks: [videoWith(bx("pasp", fields([4, 4], [4, 3])))] }), "video_geometry");
+    await refused(mp4File({ tracks: [videoWith(bx("pasp", fields([4, 3], [4, 1])))] }), "video_geometry");
     await refused(mp4File({ tracks: [videoWith(bx("clap", Buffer.alloc(32)))] }), "video_geometry");
   });
 
@@ -616,5 +631,342 @@ describe("the presentation interval comes from the composition times (round 2: A
     const samples = (offset: number) => Array.from({ length: 60 }, (_, i) => ({ size: 30, delta: i === 59 ? 15360 : 512, cts: i === 10 ? offset : 0 }));
     await checkVideoBytes(mp4File({ tracks: [defaultVideoTrack({ samples: samples(8192) })] }));
     await refused(mp4File({ tracks: [defaultVideoTrack({ samples: samples(9000) })] }), "video_layout");
+  });
+});
+
+// Turned, stretched and cropped pictures, and QuickTime MOV (docs/design/design-v1-video-turns.md 4.1, 4.5, 5 and 13) ------
+
+const U = 0x10000;
+const W = 640 * U;
+const H = 360 * U;
+
+/** The video `tkhd`'s matrix and size in raw 16.16, read from file bytes: the first `tkhd` is the video's, version 0. */
+function videoTkhd(bytes: Buffer): { matrix: number[]; width: number; height: number } {
+  const matrix = bytes.indexOf("tkhd") + 4 + 4 + 36;
+  return { matrix: Array.from({ length: 9 }, (_, i) => bytes.readUInt32BE(matrix + i * 4)), width: bytes.readUInt32BE(matrix + 36), height: bytes.readUInt32BE(matrix + 40) };
+}
+
+/** The stored bytes of the plain loop the writer builds by default, which every header-only rewrite of it must equal. */
+const plainStored = async () => (await checkVideoBytes(mp4File())).zeroed;
+
+/** The geometry fields of a check's facts, with the plain ones absent. */
+const geometryOf = (facts: { turn?: number; mirror?: true; displayWidthPx?: number }) => ({
+  ...(facts.turn !== undefined ? { turn: facts.turn } : {}),
+  ...(facts.mirror !== undefined ? { mirror: facts.mirror } : {}),
+  ...(facts.displayWidthPx !== undefined ? { displayWidthPx: facts.displayWidthPx } : {}),
+});
+
+/**
+ * 4.1's table written out here on its own, so the parser's copy in
+ * shared/videoGeometry.ts is checked against it: a, b, c, d, the turn, the
+ * mirror and the one translation other than (0, 0) the row may carry.
+ */
+const TABLE: ReadonlyArray<readonly [number, number, number, number, 0 | 90 | 180 | 270, boolean, readonly [number, number] | null]> = [
+  [1, 0, 0, 1, 0, false, null],
+  [0, 1, -1, 0, 90, false, [H, 0]],
+  [-1, 0, 0, -1, 180, false, [W, H]],
+  [0, -1, 1, 0, 270, false, [0, W]],
+  [-1, 0, 0, 1, 0, true, [W, 0]],
+  [0, 1, 1, 0, 90, true, null],
+  [1, 0, 0, -1, 180, true, [0, H]],
+  [0, -1, -1, 0, 270, true, [H, W]],
+];
+
+describe("turned pictures (4.1's matrix)", () => {
+  test("Android's portrait, the 90 row with no translation, is turn 90, stored with the identity at the coded size, byte for byte the plain file's", async () => {
+    const bytes = mp4File({ tracks: [defaultVideoTrack({ matrix: tkhdMatrix(ROWS.turn90) })] });
+    const { facts, zeroed } = await checkVideoBytes(bytes);
+    assert.deepEqual(geometryOf(facts), { turn: 90 });
+    assert.deepEqual({ w: facts.widthPx, h: facts.heightPx }, { w: 640, h: 360 }, "the coded size stays");
+    assert.deepEqual(videoTkhd(zeroed), { matrix: IDENTITY_MATRIX, width: W, height: H });
+    assert.ok(mdatOf(zeroed).equals(mdatOf(bytes)));
+    assert.ok(zeroed.equals(await plainStored()));
+  });
+
+  test("every row of the table, with no translation and with its own, gives the table's turn and mirror", async () => {
+    const plain = await plainStored();
+    for (const [a, b, c, d, turn, mirror, shift] of TABLE) {
+      for (const [tx, ty] of [[0, 0] as const, ...(shift ? [shift] : [])]) {
+        const { facts, zeroed } = await checkVideoBytes(mp4File({ tracks: [defaultVideoTrack({ matrix: tkhdMatrix({ a, b, c, d }, tx, ty) })] }));
+        const row = `${[a, b, c, d].join(" ")} at (${tx / U}, ${ty / U})`;
+        assert.deepEqual(geometryOf(facts), { ...(turn ? { turn } : {}), ...(mirror ? { mirror: true } : {}) }, row);
+        assert.ok(zeroed.equals(plain), `${row} stored plain`);
+      }
+    }
+  });
+
+  test("another row's translation, a translation by a pixel, a scale, a skew, 45 degrees, u, v or w off, a turned mvhd and a turned tkhd size are video_geometry", async () => {
+    const cases: Array<[string, Partial<Mp4Track>]> = [
+      ["(W, 0) on the 90 row", { matrix: tkhdMatrix(ROWS.turn90, W, 0) }],
+      ["(H, 0) on the 180 row", { matrix: tkhdMatrix(ROWS.turn180, H, 0) }],
+      ["a pixel's translation", { matrix: tkhdMatrix({ a: 1, b: 0, c: 0, d: 1 }, U, 0) }],
+      ["scale 2", { matrix: [2 * U, 0, 0, 0, 2 * U, 0, 0, 0, 0x40000000] }],
+      ["a skew", { matrix: [U, U, 0, 0, U, 0, 0, 0, 0x40000000] }],
+      ["45 degrees", { matrix: [46341, 46341, 0, -46341, 46341, 0, 0, 0, 0x40000000] }],
+      ["u off", { matrix: [U, 0, 1, 0, U, 0, 0, 0, 0x40000000] }],
+      ["v off", { matrix: [U, 0, 0, 0, U, 1, 0, 0, 0x40000000] }],
+      ["w off", { matrix: [U, 0, 0, 0, U, 0, 0, 0, 0x40000001] }],
+      ["tkhd holding the turned size", { matrix: tkhdMatrix(ROWS.turn90), tkhdSize: { width: 360, height: 640 } }],
+      ["tkhd a pixel taller", { tkhdSize: { width: 640, height: 361 } }],
+    ];
+    for (const [what, track] of cases) {
+      await assert.rejects(checkVideoBytes(mp4File({ tracks: [defaultVideoTrack(track)] })), (err: unknown) => err instanceof AssetError && err.code === "video_geometry", what);
+    }
+    // mvhd stays the identity: its matrix turns every track at once, which no browser reads alike (3).
+    const bytes = Buffer.from(mp4File());
+    const mvhd = bytes.indexOf("mvhd") + 4 + 4 + 36;
+    for (const [i, v] of tkhdMatrix(ROWS.turn90).entries()) bytes.writeUInt32BE(v >>> 0, mvhd + i * 4);
+    await refused(bytes, "video_geometry");
+  });
+
+  test("a turn is checked again on what it shows: 4096 x 2025 turned is 2025 x 4096, inside the caps", async () => {
+    const big = defaultVideoTrack({ width: 4096, height: 2025, matrix: tkhdMatrix(ROWS.turn270) });
+    assert.equal((await checkVideoBytes(mp4File({ tracks: [big] }))).facts.turn, 270);
+  });
+});
+
+describe("stretched pictures (4.1's size)", () => {
+  const entry = (width: number, height: number, ...kids: Box[]) => visualEntry("avc1", width, height, "", bx("avcC", avcCBytes()), ...kids);
+  const stretched = (pasp: Box | null, tkhdRaw: { width: number; height: number } = { width: W, height: H }, o: Partial<Mp4Track> = {}) =>
+    mp4File({ tracks: [defaultVideoTrack({ entry: entry(640, 360, ...(pasp ? [pasp] : [])), tkhdRaw, ...o })] });
+
+  test("pasp 4:3 with tkhd at the coded width or at FFmpeg's rounded 16.16, and a tkhd-only stretch, are 853 wide, stored 1:1 at the coded size", async () => {
+    const plain = (await checkVideoBytes(stretched(paspBox(1, 1)))).zeroed;
+    const plainNoPasp = (await checkVideoBytes(stretched(null))).zeroed;
+    const ffmpeg = { width: Math.round((W * 4) / 3), height: H };
+    for (const [what, bytes, twin] of [
+      ["pasp 4:3, tkhd coded", stretched(paspBox(4, 3)), plain],
+      ["pasp 4:3, tkhd stretched", stretched(paspBox(4, 3), ffmpeg), plain],
+      ["tkhd stretched alone", stretched(null, ffmpeg), plainNoPasp],
+    ] as const) {
+      const { facts, zeroed } = await checkVideoBytes(bytes);
+      assert.deepEqual(geometryOf(facts), { displayWidthPx: 853 }, what);
+      assert.equal(videoTkhd(zeroed).width, W, `${what}: tkhd at the coded width`);
+      assert.ok(zeroed.equals(twin), `${what}: stored as the plain twin`);
+    }
+    assert.ok(plain.includes(Buffer.concat([Buffer.from("pasp"), fields([4, 1], [4, 1])])));
+  });
+
+  test("pasp 3:1, 0:3, 70000:1 and 70000:69999, tkhd 2 px off the pasp, a square pasp with a stretched tkhd, and flag 0x8 with any stretch are video_geometry", async () => {
+    const ffmpeg = { width: Math.round((W * 4) / 3), height: H };
+    for (const [what, bytes] of [
+      ["3:1", stretched(paspBox(3, 1))],
+      ["0:3", stretched(paspBox(0, 3))],
+      ["70000:1", stretched(paspBox(70_000, 1))],
+      ["70000:69999", stretched(paspBox(70_000, 69_999))],
+      ["2 px off", stretched(paspBox(4, 3), { width: ffmpeg.width + 2 * U, height: H })],
+      ["square pasp, tkhd stretched", stretched(paspBox(1, 1), ffmpeg)],
+      ["0:0, tkhd stretched", stretched(paspBox(0, 0), ffmpeg)],
+      ["flag 0x8 with pasp 4:3", stretched(paspBox(4, 3), { width: W, height: H }, { tkhdFlags: 0xb })],
+      ["flag 0x8 with tkhd stretched", stretched(null, ffmpeg, { tkhdFlags: 0xb })],
+      ["1:2 past by a tkhd pixel", stretched(null, { width: W / 2 - U, height: H })],
+    ] as const) {
+      await assert.rejects(checkVideoBytes(bytes), (err: unknown) => err instanceof AssetError && err.code === "video_geometry", what);
+    }
+    // Within a pixel passes, flag 0x8 on a plain file passes, and 0:0 with the coded width is square, as before.
+    assert.equal((await checkVideoBytes(stretched(paspBox(4, 3), { width: ffmpeg.width + U, height: H }))).facts.displayWidthPx, 853);
+    assert.equal((await checkVideoBytes(stretched(paspBox(1, 1), { width: W, height: H }, { tkhdFlags: 0xb }))).facts.displayWidthPx, undefined);
+    assert.equal((await checkVideoBytes(stretched(paspBox(0, 0)))).facts.displayWidthPx, undefined);
+    assert.equal((await checkVideoBytes(stretched(paspBox(2, 1)))).facts.displayWidthPx, 1280, "2:1 itself");
+    assert.equal((await checkVideoBytes(stretched(paspBox(1, 2)))).facts.displayWidthPx, 320, "1:2 itself");
+  });
+
+  test("stretched past the area cap or past 4096 a side is video_size", async () => {
+    await refused(mp4File({ tracks: [defaultVideoTrack({ entry: entry(2048, 2048, paspBox(2, 1)), width: 2048, height: 2048 })] }), "video_size");
+    await refused(mp4File({ tracks: [defaultVideoTrack({ entry: entry(3000, 1000, paspBox(3, 2)), width: 3000, height: 1000 })] }), "video_size");
+    // 2880 x 2160 at 4:3 is 3840 x 2160, the cap itself.
+    assert.equal((await checkVideoBytes(mp4File({ tracks: [defaultVideoTrack({ entry: entry(2880, 2160, paspBox(4, 3)), width: 2880, height: 2160 })] }))).facts.displayWidthPx, 3840);
+  });
+
+  test("a clap that crops nothing goes as free, and one that crops 8 px, moves the picture or has no denominator is video_geometry (D-261102-895)", async () => {
+    for (const clap of [clapBox(640, 1, 360, 1), clapBox(1280, 2, 720, 2)]) {
+      const bytes = stretched(clap);
+      const at = bytes.indexOf("clap");
+      const { zeroed } = await checkVideoBytes(bytes);
+      assert.equal(zeroed.subarray(at, at + 4).toString("latin1"), "free");
+      assert.ok(zeroed.subarray(at + 4, at + 36).every((b) => b === 0));
+    }
+    for (const clap of [clapBox(632, 1, 360, 1), clapBox(640, 1, 352, 1), clapBox(640, 1, 360, 1, 1, 1), clapBox(640, 1, 360, 1, 0, 1, -1, 1), clapBox(640, 1, 360, 1, 0, 0), clapBox(0, 0, 360, 1)]) {
+      await refused(stretched(clap), "video_geometry");
+    }
+    await refused(stretched(bx("clap", Buffer.alloc(36))), "video_geometry");
+  });
+});
+
+describe("QuickTime MOV (4.5)", () => {
+  const STRINGS = [SECRETS.location, SECRETS.face, SECRETS.device, "com.apple.quicktime.location.ISO6709", "com.apple.quicktime.detected-face", "com.apple.quicktime.model"];
+
+  test("an iPhone's Most Compatible MOV is an MP4 turned 90, with no place, face or phone left, its metadata samples zero and every kept sample as it was", async () => {
+    const bytes = iphoneMov();
+    for (const s of STRINGS) assert.ok(bytes.includes(s), `the fixture holds ${s}`);
+    const { facts, zeroed, edits } = await checkVideoBytes(bytes);
+    assert.deepEqual({ container: facts.container, audio: facts.audio, ...geometryOf(facts) }, { container: "mp4", audio: "mp4a.40.2", turn: 90 });
+    assert.equal(zeroed.length, bytes.length);
+    for (const s of STRINGS) assert.equal(zeroed.includes(s), false, `${s} survived`);
+    assert.ok(edits.scrubs.length >= 2, "both metadata tracks' samples scrubbed");
+    assert.ok(edits.kept.length >= 2, "the picture's and the sound's chunks recorded for the scrub's own guard");
+    for (const s of edits.scrubs) assert.ok(zeroed.subarray(s.start, s.end).every((b) => b === 0), "a scrubbed range holds a byte");
+    for (const k of edits.kept) assert.ok(zeroed.subarray(k.start, k.end).equals(bytes.subarray(k.start, k.end)), "a kept sample changed");
+    // The rest of the media data is as it was too: only the scrubs reach into it.
+    const expected = Buffer.from(bytes);
+    for (const s of edits.scrubs) expected.fill(0, s.start, s.end);
+    assert.ok(mdatOf(zeroed).equals(mdatOf(expected)));
+    // The two metadata traks went as free, and the MOV keeps its brand.
+    assert.equal(zeroed.toString("latin1").split("trak").length - 1, 2);
+    assert.equal(zeroed.subarray(8, 12).toString("latin1"), "qt  ");
+    assert.equal(zeroed.subarray(16, 20).toString("latin1"), "qt  ", "qt kept as a compatible brand in a MOV");
+    const again = await checkVideoBytes(zeroed);
+    assert.ok(again.zeroed.equals(zeroed), "the stored file checks again to the same bytes");
+    assert.equal(again.edits.scrubs.length, 0, "and has no metadata track left to scrub");
+  });
+
+  const mov = (o: { video?: Partial<Mp4Track>; sound?: Partial<Mp4Track> | null; brand?: string; tracks?: Mp4Track[] } = {}) =>
+    mp4File({
+      brand: o.brand ?? "qt  ",
+      compatible: [o.brand ?? "qt  "],
+      tracks: [
+        defaultVideoTrack({ dataRefs: [alisRef()], ...o.video }),
+        ...(o.sound === null ? [] : [defaultSoundTrack({ entry: audioEntryV1("mp4a", 2, 48000, {}, waveBox()), ...o.sound })]),
+        ...(o.tracks ?? []),
+      ],
+    });
+  const v1 = (counts: Parameters<typeof audioEntryV1>[3], ...kids: Box[]) => ({ entry: audioEntryV1("mp4a", 2, 48000, counts, ...(kids.length ? kids : [waveBox()])) });
+
+  test("only under qt: alis, a version 1 sound entry and wave are refused in an ISO file, nclc goes as free there, and qt as a compatible brand is zeroed (D-261102-894)", async () => {
+    assert.equal((await checkVideoBytes(mov())).facts.audio, "mp4a.40.2");
+    await refused(mov({ brand: "isom", sound: null }), "bad_video");
+    await refused(mov({ brand: "isom", video: { dataRefs: undefined } }), "video_sound");
+    await refused(mov({ brand: "isom", video: { dataRefs: undefined }, sound: v1({}, bx("esds", esdsBytes())) }), "video_sound");
+    const wave = mp4File({ tracks: [defaultVideoTrack(), defaultSoundTrack({ entry: audioEntry("mp4a", 2, 48000, waveBox()) })] });
+    await refused(wave, "video_sound");
+    const nclc = mp4File({ tracks: [videoWith(nclcBox())] });
+    const at = nclc.indexOf("colrnclc");
+    const { zeroed } = await checkVideoBytes(nclc);
+    assert.equal(zeroed.subarray(at, at + 4).toString("latin1"), "free");
+    const listed = mp4File({ compatible: ["isom", "qt  "] });
+    assert.ok((await checkVideoBytes(listed)).zeroed.subarray(16, 24).equals(Buffer.concat([Buffer.from("isom"), Buffer.alloc(4)])));
+    // An uneven tapt in an ISO file is one more unlisted box.
+    assert.equal((await checkVideoBytes(mp4File({ tracks: [defaultVideoTrack({ extraTrak: [taptBox([1920, 1080])] })] }))).facts.widthPx, 640);
+  });
+
+  test("alis must be the file itself: its flag set and nothing after it", async () => {
+    await refused(mov({ video: { dataRefs: [bx("alis", fields([1, 0], [3, 0]))] } }), "bad_video");
+    await refused(mov({ video: { dataRefs: [bx("alis", Buffer.concat([fields([1, 0], [3, 1]), Buffer.from(SECRETS.location)]))] } }), "bad_video");
+  });
+
+  test("nclc is kept in a MOV and read as nclx is: PQ and HLG are video_hdr, and one beside an nclx is bad_video", async () => {
+    const kept = await checkVideoBytes(mov({ video: { entry: visualEntry("avc1", 640, 360, "", bx("avcC", avcCBytes()), nclcBox(1, 1, 1)) } }));
+    assert.ok(kept.zeroed.includes(Buffer.concat([Buffer.from("colrnclc"), fields([2, 1], [2, 1], [2, 1])])));
+    for (const transfer of [16, 18]) await refused(mov({ video: { entry: visualEntry("avc1", 640, 360, "", bx("avcC", avcCBytes()), nclcBox(9, transfer, 9)) } }), "video_hdr");
+    await refused(mov({ video: { entry: visualEntry("avc1", 640, 360, "", bx("avcC", avcCBytes()), nclcBox(0x101, 1, 1)) } }), "bad_video");
+    await refused(mov({ video: { entry: visualEntry("avc1", 640, 360, "", bx("avcC", avcCBytes()), bx("colr", Buffer.concat([Buffer.from("nclc"), fields([2, 1], [2, 1], [2, 1], [1, 0])]))) } }), "bad_video");
+    const both = visualEntry("avc1", 640, 360, "", bx("avcC", avcCBytes()), nclcBox(), bx("colr", Buffer.concat([Buffer.from("nclx"), fields([2, 1], [2, 1], [2, 1], [1, 0])])));
+    await refused(mov({ video: { entry: both } }), "bad_video");
+  });
+
+  test("wave is kept only as frma, an empty mp4a, the esds and the terminator, in that order", async () => {
+    const esds = bx("esds", esdsBytes());
+    const term: Box = { type: "\0\0\0\0" };
+    const shapes: Array<[string, Box]> = [
+      ["no frma", bx("wave", undefined, bx("mp4a", Buffer.alloc(4)), esds, term)],
+      ["frma naming another codec", bx("wave", undefined, bx("frma", Buffer.from("aac ")), bx("mp4a", Buffer.alloc(4)), esds, term)],
+      ["mp4a holding text", bx("wave", undefined, bx("frma", Buffer.from("mp4a")), bx("mp4a", Buffer.from("Mal!")), esds, term)],
+      ["a box more", waveBox(esdsBytes(), bx("udta", Buffer.from(SECRETS.udta)))],
+      ["a box after the terminator", bx("wave", undefined, bx("frma", Buffer.from("mp4a")), bx("mp4a", Buffer.alloc(4)), esds, term, bx("udta", Buffer.from(SECRETS.udta)))],
+      ["no terminator", bx("wave", undefined, bx("frma", Buffer.from("mp4a")), bx("mp4a", Buffer.alloc(4)), esds)],
+      ["esds first", bx("wave", undefined, esds, bx("frma", Buffer.from("mp4a")), bx("mp4a", Buffer.alloc(4)), term)],
+      ["a terminator with a payload", bx("wave", undefined, bx("frma", Buffer.from("mp4a")), bx("mp4a", Buffer.alloc(4)), esds, { type: "\0\0\0\0", head: Buffer.alloc(4) })],
+    ];
+    for (const [what, wave] of shapes) {
+      await assert.rejects(checkVideoBytes(mov({ sound: v1({}, wave) })), (err: unknown) => err instanceof AssetError && err.code === "video_sound", what);
+    }
+    // The esds in the entry itself is the other way, and in both places is two configurations.
+    assert.equal((await checkVideoBytes(mov({ sound: v1({}, esds) }))).facts.audio, "mp4a.40.2");
+    await refused(mov({ sound: v1({}, esds, waveBox()) }), "bad_video");
+  });
+
+  test("a version 1 entry's counts are bounded and kept, its compression ID 0 or -2, and a version 2 entry is video_sound (D-261102-899)", async () => {
+    const counts = { samplesPerPacket: 1024, bytesPerPacket: 2, bytesPerFrame: 4, bytesPerSample: 2 };
+    const { zeroed } = await checkVideoBytes(mov({ sound: v1(counts) }));
+    assert.ok(zeroed.includes(fields([4, 1024], [4, 2], [4, 4], [4, 2])), "the counts are kept");
+    assert.equal((await checkVideoBytes(mov({ sound: v1({ samplesPerPacket: 2048, compressionId: 0 }) }))).facts.audio, "mp4a.40.2");
+    for (const [what, bad] of [
+      ["1000 samples a packet", { samplesPerPacket: 1000 }],
+      ["65536 bytes a frame", { bytesPerFrame: 0x10000 }],
+      ["65536 bytes a packet", { bytesPerPacket: 0x10000 }],
+      ["65536 bytes a sample", { bytesPerSample: 0x10000 }],
+      ["compression ID 1", { compressionId: 1 }],
+      ["version 2", { version: 2 }],
+    ] as const) {
+      await assert.rejects(checkVideoBytes(mov({ sound: v1(bad) })), (err: unknown) => err instanceof AssetError && err.code === "video_sound", what);
+    }
+  });
+
+  test("a tapt at tkhd's size either way round goes as free, and an uneven one, or one with more or fewer sizes, is video_geometry", async () => {
+    for (const tapt of [taptBox([640, 360]), taptBox([360, 640]), taptBox([360, 640], [360, 640], [640, 360])]) {
+      const bytes = mov({ video: { extraTrak: [tapt] } });
+      const at = bytes.indexOf("tapt");
+      const { zeroed } = await checkVideoBytes(bytes);
+      assert.equal(zeroed.subarray(at, at + 4).toString("latin1"), "free");
+    }
+    const sizes = (type: string) => bx(type, fields([4, 0], [4, W], [4, H]));
+    for (const tapt of [taptBox([1920, 1080]), taptBox([640, 360], [640, 360], [640, 361]), bx("tapt", undefined, sizes("clef"), sizes("prof")), bx("tapt", undefined, sizes("clef"), sizes("prof"), sizes("enof"), sizes("enof")), bx("tapt", undefined, sizes("clef"), sizes("prof"), sizes("enof"), bx("udta", Buffer.from(SECRETS.udta)))]) {
+      await refused(mov({ video: { extraTrak: [tapt] } }), "video_geometry");
+    }
+  });
+
+  test("HEVC and Dolby Vision are video_hevc before an uneven tapt or the track count, and ProRes is video_codec", async () => {
+    for (const type of ["hvc1", "hev1", "dvh1", "dvhe"]) await refused(mov({ video: { entry: visualEntry(type, 640, 360, "") } }), "video_hevc");
+    await refused(mov({ video: { entry: visualEntry("dvh1", 640, 360, ""), extraTrak: [taptBox([1920, 1080])] } }), "video_hevc");
+    // Where an iPhone writes it, before mdia, so it is read before the sample entry.
+    await refused(mov({ video: { entry: visualEntry("hvc1", 640, 360, ""), beforeMdia: [taptBox([1920, 1080])] } }), "video_hevc");
+    await refused(mov({ video: { beforeMdia: [taptBox([1920, 1080])] } }), "video_geometry");
+    await refused(mov({ video: { entry: visualEntry("hvc1", 640, 360, "") }, tracks: [defaultSoundTrack(), defaultSoundTrack()] }), "video_hevc");
+    await refused(mov({ video: { entry: visualEntry("apcn", 640, 360, "") } }), "video_codec");
+  });
+
+  describe("timed metadata tracks, in both brands (D-261102-893)", () => {
+    const face = (o: Partial<Mp4Track> = {}) => metadataTrack({ samples: [{ size: 40, delta: 600 }], ...o });
+    const withMeta = (...meta: Mp4Track[]) => mp4File({ tracks: [defaultVideoTrack(), ...meta] });
+
+    test("an ISO file's are dropped too, and up to eight of them", async () => {
+      const { zeroed, edits } = await checkVideoBytes(withMeta(face(), face()));
+      assert.equal(edits.scrubs.length, 2);
+      assert.equal(zeroed.toString("latin1").split("trak").length - 1, 1);
+      await checkVideoBytes(withMeta(...Array.from({ length: 8 }, () => face())));
+      await refused(withMeta(...Array.from({ length: 9 }, () => face())), "video_tracks");
+    });
+
+    test("a meta track with another entry, or two entries, is video_tracks", async () => {
+      await refused(withMeta({ ...face(), entry: audioEntry("mp4a", 2, 48000, bx("esds", esdsBytes())) }), "video_tracks");
+      const two = face();
+      const bytes = Buffer.from(withMeta(two));
+      const stsd = bytes.indexOf("stsd", bytes.indexOf("mebx") - 40);
+      bytes.writeUInt32BE(2, stsd + 8);
+      await refused(bytes, "video_tracks");
+    });
+
+    test("a metadata chunk over a video sample, across two mdats, outside any mdat, or past 60,000 samples in all is bad_video", async () => {
+      await refused(withMeta(face({ chunkOffsets: ({ mdat }) => [mdat.start + 5] })), "bad_video");
+      await refused(mp4File({ tracks: [defaultVideoTrack(), face({ chunkOffsets: ({ mdat }) => [mdat.end - 4] })], afterMdat: [bx("mdat", filler(100))] }), "bad_video");
+      await refused(withMeta(face({ chunkOffsets: () => [40] })), "bad_video");
+      const many = (n: number) => metadataTrack({ samples: Array.from({ length: n }, () => ({ size: 0, delta: 0 })) });
+      await checkVideoBytes(withMeta(many(30_000), many(30_000)));
+      await refused(withMeta(many(30_000), many(30_001)), "bad_video");
+      // A chunk that only touches a video sample, or sits in a second mdat, is its own.
+      await checkVideoBytes(withMeta(face({ chunkOffsets: ({ mdat }) => [mdat.start + 120 + 59 * 40] })));
+      await checkVideoBytes(mp4File({ tracks: [defaultVideoTrack(), face({ chunkOffsets: ({ mdat }) => [mdat.end + 8] })], afterMdat: [bx("mdat", filler(100))] }));
+    });
+
+    test("a metadata track must end by the picture's end: its edits, an empty first one allowed, or its media", async () => {
+      await checkVideoBytes(withMeta(face({ edits: [{ segment: 500, mediaTime: -1 }, { segment: 1500, mediaTime: 0 }] })));
+      const late = (meta: Mp4Track) => mp4File({ tracks: [defaultVideoTrack(), meta], movieDuration: 2000 });
+      await refused(late(face({ samples: [{ size: 40, delta: 2400 }] })), "video_layout");
+      await refused(late(face({ edits: [{ segment: 2000, mediaTime: -1 }, { segment: 2000, mediaTime: 0 }] })), "video_layout");
+      await refused(withMeta(face({ edits: [{ segment: 500, mediaTime: 0 }, { segment: 500, mediaTime: -1 }] })), "video_layout");
+      await refused(withMeta(face({ edits: Array.from({ length: 5 }, () => ({ segment: 100, mediaTime: 0 })) })), "video_layout");
+      await refused(withMeta(face({ edits: [{ segment: 500, mediaTime: 0, rate: 0x20000 }] })), "video_layout");
+      await refused(withMeta(face({ edits: [{ segment: 500, mediaTime: -2 }] })), "video_layout");
+    });
   });
 });

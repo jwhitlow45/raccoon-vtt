@@ -1,7 +1,9 @@
 import { VIDEO_LIMITS } from "#shared/limits.ts";
+import type { VideoGeometry } from "#shared/videoGeometry.ts";
+import { mp4DrawnWidth, mp4Orientation, orientationFacts } from "#shared/videoGeometry.ts";
 import type { ParsedVideo } from "./check.ts";
 import { Bits, OPUS_HZ, TIMELINE_SLACK_MS, av1CodecString, opusHead, peakInOneSecond, timelineToleranceMs } from "./records.ts";
-import { Edits, Tally, refuse, type Budget, type Range, type Source } from "./window.ts";
+import { Edits, Tally, joined, refuse, type Budget, type Range, type Source } from "./window.ts";
 
 /**
  * The MP4 header check (docs/design/design-v1-animated-maps.md 10, mp4.ts).
@@ -11,15 +13,27 @@ import { Edits, Tally, refuse, type Budget, type Range, type Source } from "./wi
  * kept, their times and names zeroed. Every other box is renamed `free`
  * with an all-zero payload, the same length, so no byte moves and every
  * chunk offset stays right. `free`, `skip` and `wide` already in the file
- * are zeroed too (AM-ASTRA-01). Nothing inside `mdat` is ever written, and
+ * are zeroed too (AM-ASTRA-01). No header edit lands inside `mdat`, and
  * every sample the tables name must lie inside an `mdat`, so no edit can
- * land on an offset the file's own tables give (D-261102-514).
+ * land on an offset a kept track's tables give (D-261102-514).
  *
  * A kept box is read to its last byte (AMBUILD-SOL-003): each FullBox's
  * version and flags are checked, each field is a number in its range, a
  * field the format reserves or fixes is zeroed, and a box the format
  * allows once in its parent is refused the second time, so no copy the
  * check did not read is kept.
+ *
+ * Turned and stretched pictures (docs/design/design-v1-video-turns.md 4.1
+ * and 5): the video `tkhd`'s matrix may be one of the eight square turns
+ * and its pixels non-square up to 2:1, by exact values only. The header is
+ * rewritten plain in place, the identity at the coded size with a 1:1
+ * `pasp`, and the facts carry the turn, the mirror and the stretched width
+ * for the app to draw. A QuickTime MOV (major brand `qt  `) reads the same
+ * way, with the few QuickTime boxes an iPhone writes kept, renamed or
+ * refused as 4.5 lists, and only under that brand, so an ISO file's output
+ * is what it always was. Timed metadata tracks, such as an iPhone's
+ * detected faces, are dropped in both brands and their samples zeroed
+ * under the scrub's guard (D-261102-893).
  */
 
 type Box = {
@@ -47,6 +61,18 @@ const KNOWN_BRANDS = new Set([
 ]);
 
 /**
+ * QuickTime's brand. As the major brand it names a MOV, whose sound and
+ * colour boxes FFmpeg and CoreMedia read by the brand (D-261102-894). As a
+ * compatible brand it is kept only in a MOV: FFmpeg also reads QuickTime's
+ * sound fields when an ISO file lists it, so in one it is zeroed, as it
+ * always was.
+ */
+const QUICKTIME_BRAND = "qt  ";
+
+/** HEVC and Dolby Vision over HEVC, an iPhone's default, which most browsers cannot play (4.5, D-261102-892). */
+const HEVC_ENTRIES = new Set(["hvc1", "hev1", "dvh1", "dvhe"]);
+
+/**
  * Sample group types `sgpd` and `sbgp` may keep, each with its one-record
  * layout (ISO 14496-12 10): AAC's and Opus's roll and pre-roll, random
  * access points, sync samples and temporal levels. Any other type is
@@ -67,9 +93,18 @@ type Track = {
   sampleEntry?: string;
   width?: number;
   height?: number;
-  tkhdWidth?: number;
-  tkhdHeight?: number;
-  identity?: boolean;
+  /** `tkhd`'s size in raw 16.16, its flags and its matrix as read, with where the matrix and the size lie, for the video's rewrite. */
+  tkhd?: { width: number; height: number; flags: number; matrix: number[]; matrixAt: number; sizeAt: number };
+  /** The sample entry's `pasp` as read, h:v. */
+  pasp?: { h: number; v: number };
+  /** A real `clap` crop or an uneven `tapt`: `video_geometry`, once the codec has been judged (4.1, 4.5). */
+  reshaped?: boolean;
+  /** A MOV's `tapt` sizes in raw 16.16, clean, production and encoded, checked against `tkhd`'s once both are read. Null for one that is not those three. */
+  aperture?: Array<[number, number]> | null;
+  /** A dropped timed metadata track's `trak`, renamed `free` once its samples are known to be safe to zero (4.5). */
+  dropped?: Box;
+  /** A dropped track's presentation in the movie's timescale, from its edits, when it has any. */
+  presentation?: number;
   codec?: string;
   channels?: number;
   hz?: number;
@@ -95,13 +130,25 @@ class Moov {
   readonly edits: Edits;
   readonly headers: Tally;
   readonly budget: Budget;
+  /** Whether the major brand is `qt  `, which alone lets QuickTime's own boxes through (4.5, D-261102-894). */
+  readonly quickTime: boolean;
 
-  constructor(m: Buffer, base: number, edits: Edits, headers: Tally, budget: Budget) {
+  constructor(m: Buffer, base: number, edits: Edits, headers: Tally, budget: Budget, quickTime: boolean) {
     this.m = m;
     this.base = base;
     this.edits = edits;
     this.headers = headers;
     this.budget = budget;
+    this.quickTime = quickTime;
+  }
+
+  /**
+   * The same `moov` read with edits that are thrown away, for a track that
+   * goes whole: the shared readers zero what they read, and a write inside
+   * a box renamed `free` would leave bytes in its zeroed payload.
+   */
+  discarding(): Moov {
+    return new Moov(this.m, this.base, new Edits(), this.headers, this.budget, this.quickTime);
   }
 
   children(parent: { payload: number; end: number }, depth: number, from = parent.payload): Box[] {
@@ -209,16 +256,20 @@ function isFourCc(b: Buffer): boolean {
 /**
  * `ftyp`: a printable major brand, which names the container to the sniff,
  * the minor version zeroed, and each compatible brand kept only when known.
+ * Answers whether the file is a MOV.
  */
-async function fileType(src: Source, box: Box, edits: Edits): Promise<void> {
+async function fileType(src: Source, box: Box, edits: Edits): Promise<boolean> {
   const length = box.end - box.payload;
   if (length < 8 || length > VIDEO_LIMITS.parseValueBytes || (length - 8) % 4 !== 0) throw refuse("bad_video");
   const p = await src.read(box.payload, length);
   if (!isFourCc(p.subarray(0, 4))) throw refuse("bad_video");
+  const quickTime = p.subarray(0, 4).toString("latin1") === QUICKTIME_BRAND;
   edits.zero(box.payload + 4, box.payload + 8);
   for (let at = 8; at < length; at += 4) {
-    if (!KNOWN_BRANDS.has(p.subarray(at, at + 4).toString("latin1"))) edits.zero(box.payload + at, box.payload + at + 4);
+    const brand = p.subarray(at, at + 4).toString("latin1");
+    if (!KNOWN_BRANDS.has(brand) && !(quickTime && brand === QUICKTIME_BRAND)) edits.zero(box.payload + at, box.payload + at + 4);
   }
+  return quickTime;
 }
 
 export async function parseMp4(src: Source, budget: Budget): Promise<ParsedVideo> {
@@ -228,6 +279,7 @@ export async function parseMp4(src: Source, budget: Budget): Promise<ParsedVideo
   let moovBox: Box | undefined;
   let at = 0;
   let first = true;
+  let quickTime = false;
   const windowRead = async (offset: number, length: number) => Buffer.from(await src.read(offset, length));
   while (at < src.size) {
     budget.check();
@@ -237,7 +289,7 @@ export async function parseMp4(src: Source, budget: Budget): Promise<ParsedVideo
     const box = boxHeader((o, n) => head.subarray(o - at, o - at + n), at, src.size, true);
     if (first) {
       if (box.type !== "ftyp") throw refuse("video_type");
-      await fileType(src, box, edits);
+      quickTime = await fileType(src, box, edits);
       first = false;
     } else if (box.type === "ftyp") {
       throw refuse("bad_video");
@@ -260,16 +312,26 @@ export async function parseMp4(src: Source, budget: Budget): Promise<ParsedVideo
   }
   if (!moovBox || mdats.length === 0) throw refuse("bad_video");
   const m = await src.readAll(moovBox.start, moovBox.end - moovBox.start);
-  const moov = new Moov(Buffer.from(m), moovBox.start, edits, headers, budget);
+  const moov = new Moov(Buffer.from(m), moovBox.start, edits, headers, budget, quickTime);
   return parseMoov(moov, moovBox, mdats);
 }
 
+function words(values: readonly number[]): Buffer {
+  return Buffer.concat(values.map((v) => {
+    const b = Buffer.alloc(4);
+    b.writeUInt32BE(v);
+    return b;
+  }));
+}
+
 const IDENTITY = [0x10000, 0, 0, 0, 0x10000, 0, 0, 0, 0x40000000];
-const IDENTITY_BYTES = Buffer.concat(IDENTITY.map((v) => {
-  const b = Buffer.alloc(4);
-  b.writeUInt32BE(v);
-  return b;
-}));
+const IDENTITY_BYTES = words(IDENTITY);
+const PASP_SQUARE = words([1, 1]);
+
+/** The most timed metadata tracks a file may drop, the samples all of them may hold, and the edits each may have (4.5, D-261102-893). */
+const MAX_METADATA_TRACKS = 8;
+const MAX_METADATA_SAMPLES = 60_000;
+const MAX_METADATA_EDITS = 4;
 
 function parseMoov(moov: Moov, box: Box, mdats: readonly Range[]): ParsedVideo {
   let movieTimescale = 0;
@@ -297,19 +359,28 @@ function parseMoov(moov: Moov, box: Box, mdats: readonly Range[]): ParsedVideo {
   }
   if (!sawHeader || movieTimescale <= 0) throw refuse("bad_video");
 
-  const videos = tracks.filter((t) => t.handler === "vide");
-  const sounds = tracks.filter((t) => t.handler === "soun");
-  const timecodes = tracks.filter((t) => t.handler === "tmcd");
-  if (videos.length !== 1 || sounds.length > 1 || timecodes.length > 1 || videos.length + sounds.length + timecodes.length !== tracks.length) throw refuse("video_tracks");
+  const metadata = tracks.filter((t) => t.handler === "meta");
+  const kept = tracks.filter((t) => t.handler !== "meta");
+  const videos = kept.filter((t) => t.handler === "vide");
+  const sounds = kept.filter((t) => t.handler === "soun");
+  const timecodes = kept.filter((t) => t.handler === "tmcd");
+  if (metadata.length > MAX_METADATA_TRACKS) throw refuse("video_tracks");
+  if (videos.length !== 1 || sounds.length > 1 || timecodes.length > 1 || videos.length + sounds.length + timecodes.length !== kept.length) throw refuse("video_tracks");
   const video = videos[0]!;
   const sound = sounds[0];
-  for (const track of tracks) {
+  const keptChunks: Range[] = [];
+  for (const track of kept) {
     if (track.dataRef === undefined || track.drefCount === undefined || track.dataRef < 1 || track.dataRef > track.drefCount) throw refuse("bad_video");
-    samplesInsideMdat(moov, track, mdats);
+    for (const chunk of chunkRanges(moov, track)) {
+      if (!insideMdat(mdats, chunk.start, chunk.end)) throw refuse("bad_video");
+      moov.edits.keep(chunk.start, chunk.end);
+      keptChunks.push(chunk);
+    }
   }
+  dropMetadata(moov, metadata, mdats, keptChunks);
 
-  if (!video.identity) throw refuse("video_geometry");
-  if (video.tkhdWidth !== video.width || video.tkhdHeight !== video.height) throw refuse("video_geometry");
+  const geometry = plainVideoHeader(moov, video);
+  for (const track of kept) if (track.aperture !== undefined && !evenAperture(track)) throw refuse("video_geometry");
 
   const v = timing(moov, video, movieTimescale, VIDEO_LIMITS.parseVideoFrameHeaders, "video_fps");
   const frames = v.times.length;
@@ -327,6 +398,11 @@ function parseMoov(moov: Moov, box: Box, mdats: readonly Range[]): ParsedVideo {
     longest = Math.max(longest, s.seconds);
   }
   for (const t of timecodes) timing(moov, t, movieTimescale, 1_000, "bad_video");
+  // A dropped track still ends by the picture's end, so the movie's own length, which counts it, says no more than the kept tracks do.
+  for (const t of metadata) {
+    const ends = t.presentation !== undefined ? t.presentation / movieTimescale : t.mdhdDuration! / t.timescale!;
+    if (ends > videoSeconds + tolerance) throw refuse("video_layout");
+  }
   if (Math.abs(movieDuration / movieTimescale - longest) > tolerance) throw refuse("video_layout");
 
   const fps = peakInOneSecond(v.times, video.timescale!);
@@ -334,6 +410,7 @@ function parseMoov(moov: Moov, box: Box, mdats: readonly Range[]): ParsedVideo {
     container: "mp4",
     widthPx: video.width!,
     heightPx: video.height!,
+    ...geometry,
     video: video.codec!,
     ...(sound ? { audio: sound.codec!, audioChannels: sound.channels!, audioHz: sound.hz! } : {}),
     fps,
@@ -345,6 +422,170 @@ function parseMoov(moov: Moov, box: Box, mdats: readonly Range[]): ParsedVideo {
 function safe(n: bigint): number {
   if (n > BigInt(Number.MAX_SAFE_INTEGER)) throw refuse("bad_video");
   return Number(n);
+}
+
+/**
+ * 4.1's rules on the video `tkhd` and `pasp`, then the rewrite to plain:
+ * the identity matrix at the coded size, the `pasp` already said 1:1 as it
+ * was read. Answers the geometry the facts carry, so the app draws what the
+ * file showed. Anything outside the rules, or a real crop, is
+ * `video_geometry`, never clamped.
+ */
+function plainVideoHeader(moov: Moov, video: Track): VideoGeometry {
+  const tkhd = video.tkhd!;
+  const orientation = mp4Orientation(tkhd.matrix, tkhd.width, tkhd.height);
+  const drawnWidth = mp4DrawnWidth({
+    codedWidthPx: video.width!,
+    codedHeightPx: video.height!,
+    tkhdWidth: tkhd.width,
+    tkhdHeight: tkhd.height,
+    pasp: video.pasp,
+    sizeIsAspectRatio: (tkhd.flags & 0x8) !== 0,
+  });
+  if (!orientation || drawnWidth === undefined || video.reshaped) throw refuse("video_geometry");
+  moov.putAt(tkhd.matrixAt, IDENTITY_BYTES);
+  moov.putAt(tkhd.sizeAt, words([video.width! * 0x10000, video.height! * 0x10000]));
+  return { ...orientationFacts(orientation), ...(drawnWidth !== video.width ? { displayWidthPx: drawnWidth } : {}) };
+}
+
+/** A MOV's `tapt` says nothing new when each of its three sizes is `tkhd`'s, either way round (4.5: unconfirmed which way an iPhone writes it). */
+function evenAperture(track: Track): boolean {
+  const t = track.tkhd!;
+  return track.aperture != null && track.aperture.every(([w, h]) => (w === t.width && h === t.height) || (w === t.height && h === t.width));
+}
+
+const APERTURE_SIZES = new Set(["clef", "prof", "enof"]);
+
+/** A MOV's `tapt`: its clean, production and encoded sizes in raw 16.16, each once. Anything else in it answers null, which is uneven. */
+function aperture(moov: Moov, box: Box): Array<[number, number]> | null {
+  const sizes = new Map<string, [number, number]>();
+  for (const child of moov.children(box, 3)) {
+    const p = moov.payload(child);
+    if (!APERTURE_SIZES.has(child.type) || sizes.has(child.type) || p.length !== 12 || p.readUInt32BE(0) !== 0) return null;
+    sizes.set(child.type, [p.readUInt32BE(4), p.readUInt32BE(8)]);
+  }
+  return sizes.size === APERTURE_SIZES.size ? [...sizes.values()] : null;
+}
+
+/**
+ * The timed metadata tracks go (4.5, D-261102-893): each `trak` is renamed
+ * `free` and its samples are zeroed by the scrub, since they may hold
+ * detected faces or a place. Before any is, every chunk must lie inside one
+ * `mdat` and meet no kept track's chunk, by one sweep over both lists
+ * sorted, so the scrub never reaches a frame a browser plays. A file that
+ * breaks either is `bad_video`: no muxer writes such tables.
+ */
+function dropMetadata(moov: Moov, metadata: readonly Track[], mdats: readonly Range[], kept: readonly Range[]): void {
+  const samples = new Tally(MAX_METADATA_SAMPLES);
+  const dropped: Range[] = [];
+  for (const track of metadata) {
+    samples.add(track.sizes!.length);
+    for (const chunk of chunkRanges(moov, track)) {
+      if (!insideMdat(mdats, chunk.start, chunk.end)) throw refuse("bad_video");
+      dropped.push(chunk);
+    }
+  }
+  if (meets(dropped, kept, moov.budget)) throw refuse("bad_video");
+  for (const track of metadata) moov.renameFree(track.dropped!);
+  for (const chunk of dropped) moov.edits.scrub(chunk.start, chunk.end);
+}
+
+/** Whether any range of `a` overlaps any of `b`: `b` joined into sorted, disjoint stretches, then one pass over `a` sorted by start. */
+export function meets(a: readonly Range[], b: readonly Range[], budget: Budget): boolean {
+  const stretches = joined(b.filter((r) => r.end > r.start), budget);
+  const sorted = a.filter((r) => r.end > r.start).sort((x, y) => x.start - y.start);
+  let next = 0;
+  for (let i = 0; i < sorted.length; i++) {
+    if ((i & 1023) === 0) budget.check();
+    const r = sorted[i]!;
+    while (next < stretches.length && stretches[next]!.end <= r.start) next++;
+    const s = stretches[next];
+    if (s && s.start < r.end) return true;
+  }
+  return false;
+}
+
+/**
+ * A timed metadata track: handler `meta` with one `mebx` entry, as an
+ * iPhone writes for detected faces, the still image's time and more, and
+ * as Apple's spec allows for places (4.5). Only what the drop needs is
+ * read, its chunk tables, its length and its edits, through edits that are
+ * thrown away, since the whole `trak` goes. Any other `meta` track is
+ * `video_tracks`.
+ */
+function metadataTrack(moov: Moov, trak: Box, boxes: readonly Box[], mdiaKids: readonly Box[]): Track {
+  const quiet = moov.discarding();
+  const track: Track = { handler: "meta", dropped: trak };
+  const seen = new Set<string>();
+  for (const box of boxes) {
+    if (box.type !== "edts") continue;
+    once(seen, box.type);
+    for (const e of quiet.children(box, 3)) {
+      if (e.type !== "elst") continue;
+      once(seen, e.type);
+      track.presentation = metadataEdits(quiet, e);
+    }
+  }
+  for (const box of mdiaKids) {
+    if (box.type === "mdhd") {
+      once(seen, box.type);
+      const { version, body } = quiet.full(box, 1);
+      if (body.length !== (version === 1 ? 32 : 20)) throw refuse("bad_video");
+      const t = version === 1 ? 16 : 8;
+      track.timescale = body.readUInt32BE(t);
+      if (track.timescale <= 0) throw refuse("bad_video");
+      track.mdhdDuration = version === 1 ? safe(body.readBigUInt64BE(t + 4)) : body.readUInt32BE(t + 4);
+    } else if (box.type === "minf") {
+      once(seen, box.type);
+      for (const stbl of quiet.children(box, 4)) {
+        if (stbl.type !== "stbl") continue;
+        once(seen, stbl.type);
+        for (const s of quiet.children(stbl, 5)) {
+          if (METADATA_TABLES.has(s.type)) once(seen, s.type);
+          if (s.type === "stsd") {
+            const { body } = quiet.full(s, 0);
+            if (body.length < 4) throw refuse("bad_video");
+            const entries = quiet.children(s, 6, s.payload + 8);
+            if (body.readUInt32BE(0) !== 1 || entries.length !== 1 || entries[0]!.type !== "mebx") throw refuse("video_tracks");
+            track.sampleEntry = "mebx";
+          } else if (s.type === "stsc") track.stsc = chunkRuns(quiet, s);
+          else if (s.type === "stsz" || s.type === "stz2") track.sizes = sampleSizes(quiet, s);
+          else if (s.type === "stco" || s.type === "co64") track.chunks = chunkOffsets(quiet, s);
+        }
+      }
+    }
+  }
+  if ((seen.has("stsz") && seen.has("stz2")) || (seen.has("stco") && seen.has("co64"))) throw refuse("bad_video");
+  if (!track.sampleEntry || !track.stsc || !track.sizes || !track.chunks || track.timescale === undefined) throw refuse("bad_video");
+  return track;
+}
+
+const METADATA_TABLES = new Set(["stsd", "stsc", "stsz", "stz2", "stco", "co64"]);
+
+/**
+ * A dropped track's edits: at most four at normal rate, only the first of
+ * which may be empty, as an iPhone's still-image-time track starts with
+ * one. Answers the presentation's length in the movie's timescale, or
+ * undefined for an empty list, which plays the media as it is.
+ */
+function metadataEdits(moov: Moov, box: Box): number | undefined {
+  const { version, body } = moov.full(box, 1);
+  if (body.length < 4) throw refuse("bad_video");
+  const count = body.readUInt32BE(0);
+  const each = version === 1 ? 20 : 12;
+  if (body.length !== 4 + count * each) throw refuse("bad_video");
+  if (count === 0) return undefined;
+  if (count > MAX_METADATA_EDITS) throw refuse("video_layout");
+  let total = 0;
+  for (let i = 0; i < count; i++) {
+    const at = 4 + i * each;
+    const segment = version === 1 ? safe(body.readBigUInt64BE(at)) : body.readUInt32BE(at);
+    const mediaTime = version === 1 ? body.readBigInt64BE(at + 8) : BigInt(body.readInt32BE(at + 4));
+    const rate = body.readUInt32BE(at + (version === 1 ? 16 : 8));
+    if (rate !== 0x10000 || mediaTime < -1n || (mediaTime === -1n && i > 0)) throw refuse("video_layout");
+    total += segment;
+  }
+  return total;
 }
 
 function parseTrak(moov: Moov, trak: Box): Track {
@@ -359,6 +600,7 @@ function parseTrak(moov: Moov, trak: Box): Track {
   const h = moov.full(hdlr[0]!, 0);
   if (h.body.length < 20) throw refuse("bad_video");
   track.handler = h.body.subarray(4, 8).toString("latin1");
+  if (track.handler === "meta") return metadataTrack(moov, trak, boxes, mdiaKids);
   if (!["vide", "soun", "tmcd"].includes(track.handler)) throw refuse("video_tracks");
   // pre_defined, where QuickTime names a component type, and the reserved twelve, where it names a maker.
   moov.zeroAt(h.at, 4);
@@ -371,7 +613,7 @@ function parseTrak(moov: Moov, trak: Box): Track {
     if (box.type === "tkhd") {
       once(seen, box.type);
       // Enabled, in the movie, in the preview and the size as an aspect ratio are the only flags.
-      const { version, body, at } = moov.full(box, 1, { allowed: 0xf });
+      const { version, flags, body, at } = moov.full(box, 1, { allowed: 0xf });
       if (body.length !== (version === 1 ? 92 : 80)) throw refuse("bad_video");
       const t = version === 1 ? 16 : 8;
       moov.edits.zero(at, at + t);
@@ -380,12 +622,14 @@ function parseTrak(moov: Moov, trak: Box): Track {
       const rest = version === 1 ? 32 : 20;
       moov.zeroAt(at + rest, 8);
       moov.zeroAt(at + rest + 14, 2);
-      const matrix = body.subarray(rest + 16, rest + 52);
-      track.identity = matrix.equals(IDENTITY_BYTES);
-      const w = body.readUInt32BE(rest + 52);
-      const hgt = body.readUInt32BE(rest + 56);
-      track.tkhdWidth = w % 0x10000 === 0 ? w / 0x10000 : Number.NaN;
-      track.tkhdHeight = hgt % 0x10000 === 0 ? hgt / 0x10000 : Number.NaN;
+      track.tkhd = {
+        width: body.readUInt32BE(rest + 52),
+        height: body.readUInt32BE(rest + 56),
+        flags,
+        matrix: Array.from({ length: 9 }, (_, i) => body.readUInt32BE(rest + 16 + i * 4)),
+        matrixAt: at + rest + 16,
+        sizeAt: at + rest + 52,
+      };
       if (track.handler !== "vide") {
         // A sound or timecode track shows nothing: its matrix is the identity and its size none, whatever the file said.
         moov.putAt(at + rest + 16, IDENTITY_BYTES);
@@ -402,8 +646,13 @@ function parseTrak(moov: Moov, trak: Box): Track {
       }
     } else if (box.type === "mdia") {
       parseMdia(moov, mdiaKids, track);
+    } else if (box.type === "tapt" && moov.quickTime) {
+      // Kept as a no-op only: it goes as free, and one unlike tkhd's size is refused once the codec has been judged (4.5).
+      once(seen, box.type);
+      track.aperture = aperture(moov, box);
+      moov.renameFree(box);
     } else {
-      moov.drop(box); // tref, udta, meta, uuid and the rest
+      moov.drop(box); // tref, udta, meta, clip, matt, load, imap, uuid and the rest
     }
   }
   if (!seen.has("tkhd")) throw refuse("bad_video");
@@ -486,7 +735,11 @@ function parseMinf(moov: Moov, minf: Box, track: Track): void {
   if (!seen.has("stbl")) throw refuse("bad_video");
 }
 
-/** Every data reference must be the file itself: a `url ` with the self-contained flag and no location. */
+/**
+ * Every data reference must be the file itself: a `url ` with the
+ * self-contained flag and no location, or in a MOV, QuickTime's `alis` the
+ * same way, which says "this file" (4.5).
+ */
 function dataReferences(moov: Moov, dref: Box): number {
   const { body } = moov.full(dref, 0);
   if (body.length < 4) throw refuse("bad_video");
@@ -494,7 +747,7 @@ function dataReferences(moov: Moov, dref: Box): number {
   const entries = moov.children(dref, 6, dref.payload + 8);
   if (count < 1 || entries.length !== count) throw refuse("bad_video");
   for (const e of entries) {
-    if (e.type !== "url ") throw refuse("bad_video");
+    if (e.type !== "url " && !(e.type === "alis" && moov.quickTime)) throw refuse("bad_video");
     const { body: rest } = moov.full(e, 0, { allowed: 1, required: 1 });
     if (rest.some((b) => b !== 0)) throw refuse("bad_video");
   }
@@ -705,36 +958,41 @@ function chunkOffsets(moov: Moov, box: Box): number[] {
 }
 
 /**
- * Every sample's bytes, from the chunk tables, must lie inside an `mdat`:
- * the only place the check never writes. The top-level walk finds the
- * `mdat` payloads in file order, so they are sorted and disjoint, and each
- * sample's is found by halving rather than by trying every one: a file
- * may hold some 200,000 empty `mdat` boxes (AM-R1-01).
+ * A track's chunks as byte ranges, from its chunk tables: a chunk's samples
+ * lie one after another from its offset, so a chunk inside an `mdat` has
+ * every sample inside it. The tables must name each sample exactly once.
+ * The caller holds every kept chunk inside an `mdat`, the only place no
+ * header edit writes. The top-level walk finds the `mdat` payloads in file
+ * order, so they are sorted and disjoint, and each chunk's is found by
+ * halving rather than by trying every one: a file may hold some 200,000
+ * empty `mdat` boxes (AM-R1-01).
  */
-function samplesInsideMdat(moov: Moov, track: Track, mdats: readonly Range[]): void {
+function chunkRanges(moov: Moov, track: Track): Range[] {
   const sizes = track.sizes!;
   const chunks = track.chunks!;
   const runs = track.stsc!;
   if (runs.length === 0 || runs[0]![0] !== 1) throw refuse("bad_video");
   if (runs[runs.length - 1]![0] > chunks.length) throw refuse("bad_video");
+  const out: Range[] = [];
   let sample = 0;
   let run = 0;
   for (let chunk = 1; chunk <= chunks.length; chunk++) {
     if ((chunk & 1023) === 0) moov.budget.check();
     while (run + 1 < runs.length && runs[run + 1]![0] <= chunk) run++;
     const perChunk = runs[run]![1];
-    let at = chunks[chunk - 1]!;
+    const start = chunks[chunk - 1]!;
+    let at = start;
     for (let i = 0; i < perChunk; i++) {
       if ((sample & 1023) === 0) moov.budget.check();
       const size = sizes[sample];
       if (size === undefined) throw refuse("bad_video");
-      const end = at + size;
-      if (!insideMdat(mdats, at, end)) throw refuse("bad_video");
-      at = end;
+      at += size;
       sample++;
     }
+    out.push({ start, end: at });
   }
   if (sample !== sizes.length) throw refuse("bad_video");
+  return out;
 }
 
 /**
@@ -887,7 +1145,20 @@ function sampleDescription(moov: Moov, stsd: Box, track: Track): void {
   else timecodeEntry(moov, entry);
 }
 
+/**
+ * A `clap` that crops nothing: its width and height exactly the coded size
+ * and both offsets zero, each fraction with a denominator. AVAssetWriter
+ * writes one from the format's extensions (4.1, D-261102-895).
+ */
+function noOpAperture(b: Buffer, width: number, height: number): boolean {
+  if (b.length !== 32) return false;
+  const [wN, wD, hN, hD, xN, xD, yN, yD] = Array.from({ length: 8 }, (_, i) => b.readUInt32BE(i * 4)) as [number, number, number, number, number, number, number, number];
+  return [wD, hD, xD, yD].every((d) => d >= 1) && wN === width * wD && hN === height * hD && xN === 0 && yN === 0;
+}
+
 function visualEntry(moov: Moov, entry: Box, track: Track): void {
+  // Read first, before the tracks are counted or a tapt judged, so an iPhone's default file is told how to get one that plays (4.5).
+  if (HEVC_ENTRIES.has(entry.type)) throw refuse("video_hevc");
   if (!["avc1", "avc3", "av01"].includes(entry.type)) throw refuse("video_codec");
   const p = moov.payload(entry);
   if (p.length < 78) throw refuse("bad_video");
@@ -909,19 +1180,30 @@ function visualEntry(moov: Moov, entry: Box, track: Track): void {
       once(seen, box.type);
       const b = moov.payload(box);
       if (b.length !== 8) throw refuse("bad_video");
-      if (b.readUInt32BE(0) !== b.readUInt32BE(4)) throw refuse("video_geometry");
-      // Square pixels as N:N say 1:1, which is all a square ratio needs to say.
-      moov.putAt(box.payload, Buffer.from([0, 0, 0, 1, 0, 0, 0, 1]));
+      track.pasp = { h: b.readUInt32BE(0), v: b.readUInt32BE(4) };
+      // The stored file's pixels are square, whatever the file said: a square ratio as N:N says 1:1, and a stretch is the facts' to draw (4.1, 5).
+      moov.putAt(box.payload, PASP_SQUARE);
     } else if (box.type === "clap") {
-      throw refuse("video_geometry");
+      once(seen, box.type);
+      // A real crop is refused once the codec is judged, so an HEVC file still hears how to get one that plays.
+      if (noOpAperture(moov.payload(box), track.width!, track.height!)) moov.renameFree(box);
+      else track.reshaped = true;
     } else if (box.type === "colr") {
       const b = moov.payload(box);
+      const colour = b.subarray(0, 4).toString("latin1");
+      // QuickTime's nclc says what nclx does, without the range bit, so a MOV holds one of the two (4.5).
+      const nclc = moov.quickTime && colour === "nclc";
       // One of each colour type, as the format allows an nclx beside an ICC profile.
-      once(seen, `colr ${b.subarray(0, 4).toString("latin1")}`);
-      if (b.length >= 4 && b.subarray(0, 4).toString("latin1") === "nclx") {
+      once(seen, moov.quickTime && (colour === "nclx" || colour === "nclc") ? "colr ncl" : `colr ${colour}`);
+      if (b.length >= 4 && colour === "nclx") {
         if (b.length !== 11) throw refuse("bad_video");
         // Primaries, transfer and matrix are 8-bit code points in 16-bit fields, then the full-range bit and seven reserved.
         if (b[4] !== 0 || b[6] !== 0 || b[8] !== 0 || (b[10]! & 0x7f) !== 0) throw refuse("bad_video");
+        const transfer = b.readUInt16BE(6);
+        if (transfer === 16 || transfer === 18) throw refuse("video_hdr");
+      } else if (nclc) {
+        if (b.length !== 10) throw refuse("bad_video");
+        if (b[4] !== 0 || b[6] !== 0 || b[8] !== 0) throw refuse("bad_video");
         const transfer = b.readUInt16BE(6);
         if (transfer === 16 || transfer === 18) throw refuse("video_hdr");
       } else {
@@ -976,35 +1258,73 @@ export function avcCodecString(entryType: string, b: Buffer): string {
   return `${entryType}.${hex(profile)}${hex(b[2]!)}${hex(b[3]!)}`;
 }
 
+/** The sample counts a QuickTime version 1 sound entry may give an AAC track: AAC-LC's frame, and HE-AAC's at its doubled rate (D-261102-899). */
+const V1_SAMPLES_PER_PACKET = new Set([1024, 2048]);
+/** QuickTime's compression ID for a version 1 entry: 0, or -2 for a compressed format with its own record, as FFmpeg writes for AAC. */
+const V1_COMPRESSION_IDS = new Set([0, 0xfffe]);
+
 function audioEntry(moov: Moov, entry: Box, track: Track): void {
   if (!["mp4a", "Opus"].includes(entry.type)) throw refuse("video_codec");
   const p = moov.payload(entry);
   if (p.length < 28) throw refuse("bad_video");
-  // Version 0, as ISO writes it: QuickTime's later versions put the codec record in other places.
-  if (p.readUInt16BE(8) !== 0) throw refuse("video_sound");
-  // The reserved eight, where QuickTime keeps a version, a revision and a vendor, and the predefined and reserved four after the sample size.
-  moov.zeroAt(entry.payload + 8, 8);
-  moov.zeroAt(entry.payload + 20, 4);
+  // Version 0, as ISO writes it. A MOV may give version 1, whose four counts follow (4.5). Version 2 puts the codec record elsewhere.
+  const version = p.readUInt16BE(8);
+  if (version !== 0 && !(version === 1 && moov.quickTime)) throw refuse("video_sound");
+  let configAt = entry.payload + 28;
+  if (version === 0) {
+    // The reserved eight, where QuickTime keeps a version, a revision and a vendor, and the predefined and reserved four after the sample size.
+    moov.zeroAt(entry.payload + 8, 8);
+    moov.zeroAt(entry.payload + 20, 4);
+  } else {
+    if (p.length < 44) throw refuse("bad_video");
+    // The version stays, since readers find the counts by it. The revision and the vendor go, and so does the packet size, which AAC leaves 0.
+    moov.zeroAt(entry.payload + 10, 6);
+    moov.zeroAt(entry.payload + 22, 2);
+    if (!V1_COMPRESSION_IDS.has(p.readUInt16BE(20))) throw refuse("video_sound");
+    // Samples per packet, then bytes per packet, per frame and per sample: bounded, so none is room for text, and kept, since an untested reader may use them.
+    if (!V1_SAMPLES_PER_PACKET.has(p.readUInt32BE(28)) || [32, 36, 40].some((at) => p.readUInt32BE(at) >= 0x10000)) throw refuse("video_sound");
+    configAt = entry.payload + 44;
+  }
   let sawConfig = false;
-  for (const box of moov.children(entry, 7, entry.payload + 28)) {
-    if ((box.type === "esds" && entry.type === "mp4a") || (box.type === "dOps" && entry.type === "Opus")) {
-      if (sawConfig) throw refuse("bad_video");
-      sawConfig = true;
-      if (box.type === "esds") {
-        const aac = elementaryStream(moov.payload(box));
-        track.codec = `mp4a.40.${aac.objectType}`;
-        track.channels = aac.channels;
-        track.hz = aac.hz;
-      } else {
-        track.codec = "opus";
-        track.channels = opusHead(moov.payload(box), "mp4").channels;
-        track.hz = OPUS_HZ;
-      }
+  const config = (box: Box) => {
+    if (sawConfig) throw refuse("bad_video");
+    sawConfig = true;
+    if (box.type === "esds") {
+      const aac = elementaryStream(moov.payload(box));
+      track.codec = `mp4a.40.${aac.objectType}`;
+      track.channels = aac.channels;
+      track.hz = aac.hz;
     } else {
-      moov.drop(box); // chan, wave, btrt and the rest
+      track.codec = "opus";
+      track.channels = opusHead(moov.payload(box), "mp4").channels;
+      track.hz = OPUS_HZ;
     }
+  };
+  for (const box of moov.children(entry, 7, configAt)) {
+    if ((box.type === "esds" && entry.type === "mp4a") || (box.type === "dOps" && entry.type === "Opus")) config(box);
+    else if (box.type === "wave" && entry.type === "mp4a" && moov.quickTime) config(soundWave(moov, box));
+    else moov.drop(box); // chan, wave, btrt and the rest
   }
   if (!sawConfig) throw refuse("video_sound");
+}
+
+/** An empty box of type 0, which ends QuickTime's `wave`. */
+const TERMINATOR = "\0\0\0\0";
+
+/**
+ * QuickTime's `wave` around AAC's `esds`, kept only exactly as FFmpeg and
+ * Apple write it (4.5): `frma` naming `mp4a`, an `mp4a` holding four zero
+ * bytes, the `esds` and the terminator. Anything else in it, or any other
+ * order, is `video_sound`. Answers the `esds`.
+ */
+function soundWave(moov: Moov, wave: Box): Box {
+  const kids = moov.children(wave, 8);
+  const [frma, mp4a, esds, end] = kids;
+  const holds = (box: Box | undefined, type: string, payload: Buffer) => box !== undefined && box.type === type && moov.payload(box).equals(payload);
+  if (kids.length !== 4 || !holds(frma, "frma", Buffer.from("mp4a", "latin1")) || !holds(mp4a, "mp4a", Buffer.alloc(4)) || esds?.type !== "esds" || !holds(end, TERMINATOR, Buffer.alloc(0))) {
+    throw refuse("video_sound");
+  }
+  return esds;
 }
 
 /** The timecode's sample entry keeps only its fixed fields, its reserved ones zeroed: its `name` box and anything else go. */
