@@ -289,3 +289,84 @@ test("no write the edits make spans media data, though edits lie on both sides o
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+/*
+ * The scrub (docs/design/design-v1-video-turns.md 5, D-261102-893): the one
+ * edit that reaches into the media data, for a dropped metadata track's
+ * samples only, under its own guard.
+ */
+
+test("a scrub zeroes bytes inside one media range and off every kept sample, and a header edit there is still the check's bug", () => {
+  const edits = new Edits();
+  edits.protect(10, 40);
+  edits.keep(10, 20);
+  edits.keep(30, 35);
+  edits.scrub(20, 30);
+  edits.scrub(35, 40);
+  edits.zero(0, 4);
+  const out = edits.applyTo(Buffer.alloc(45, 9));
+  assert.deepEqual([...out], [0, 0, 0, 0, ...Array(16).fill(9), ...Array(10).fill(0), ...Array(5).fill(9), ...Array(5).fill(0), ...Array(5).fill(9)]);
+  const zero = new Edits();
+  zero.protect(10, 40);
+  zero.zero(20, 30);
+  assert.throws(() => zero.applyTo(Buffer.alloc(45)), EditIntoMediaError, "a zero in the media data is no scrub");
+});
+
+test("a scrub past its media range, across two of them, outside any, or onto a kept sample is the check's bug, in memory and on disk", async () => {
+  const cases: Array<[string, (e: Edits) => void]> = [
+    ["past the end", (e) => e.scrub(35, 41)],
+    ["before the start", (e) => e.scrub(9, 12)],
+    ["across two media ranges", (e) => e.scrub(38, 52)],
+    ["outside any", (e) => e.scrub(42, 44)],
+    ["onto a kept sample", (e) => e.scrub(18, 22)],
+    ["over a kept sample", (e) => e.scrub(11, 29)],
+    ["onto a kept sample in the second range", (e) => e.scrub(55, 61)],
+  ];
+  const dir = await mkdtemp(join(tmpdir(), "rvtt-window-"));
+  try {
+    const path = join(dir, "v");
+    for (const [what, scrub] of cases) {
+      const e = new Edits();
+      e.protect(10, 40);
+      e.protect(50, 80);
+      e.keep(20, 25);
+      e.keep(60, 70);
+      scrub(e);
+      assert.throws(() => e.applyTo(Buffer.alloc(90)), EditIntoMediaError, what);
+      await writeFile(path, Buffer.alloc(90, 7));
+      await assert.rejects(e.applyToFile(path), EditIntoMediaError, what);
+      assert.ok((await readFile(path)).equals(Buffer.alloc(90, 7)), `${what}: nothing written`);
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("scrubs land in a file a window at a time, and every write they make lies inside media and off the kept samples", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "rvtt-window-"));
+  try {
+    const path = join(dir, "v");
+    const size = WINDOW_BYTES * 3 + 100;
+    const media = { start: 50, end: size - 10 };
+    const kept = [{ start: 50, end: 90 }, { start: WINDOW_BYTES + 7, end: WINDOW_BYTES + 300 }];
+    const scrubs = [{ start: 90, end: WINDOW_BYTES + 7 }, { start: WINDOW_BYTES + 300, end: size - 10 }];
+    const e = new Edits();
+    e.protect(media.start, media.end);
+    for (const k of kept) e.keep(k.start, k.end);
+    for (const s of scrubs) e.scrub(s.start, s.end);
+    e.zero(0, 8);
+    const original = Buffer.alloc(size, 0x5a);
+    await writeFile(path, original);
+    const seen: Array<{ start: number; end: number }> = [];
+    await e.applyToFile(path, undefined, recording(seen));
+    assert.ok((await readFile(path)).equals(e.applyTo(original)));
+    const inMedia = seen.filter((s) => s.start < media.end && media.start < s.end);
+    assert.ok(inMedia.length === 3, `the second scrub goes out in two windows: ${JSON.stringify(inMedia)}`);
+    for (const s of inMedia) {
+      assert.ok(s.end - s.start <= WINDOW_BYTES && s.start >= media.start && s.end <= media.end);
+      assert.deepEqual(crosses([s], kept), [], "a scrub write met a kept sample");
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

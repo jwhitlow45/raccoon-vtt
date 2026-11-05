@@ -153,7 +153,7 @@ export class EditIntoMediaError extends Error {}
 const BUDGET_EVERY = 1024;
 
 /** `ranges` sorted by start, with overlapping and touching ones joined, so a sweep can pass over them once. */
-function joined(ranges: readonly Range[], budget: Budget | undefined): Range[] {
+export function joined(ranges: readonly Range[], budget: Budget | undefined): Range[] {
   const sorted = [...ranges].sort((a, b) => a.start - b.start);
   const out: Range[] = [];
   for (let i = 0; i < sorted.length; i++) {
@@ -168,21 +168,36 @@ function joined(ranges: readonly Range[], budget: Budget | undefined): Range[] {
 
 type Write = { offset: number; bytes: Buffer };
 
+/** The zeroes a scrub writes, a window at a time. */
+const ZERO_WINDOW = Buffer.alloc(WINDOW_BYTES);
+
 /**
  * What the check changes, applied only once the whole file has passed.
  * Every edit overwrites bytes in place, so no byte moves and the size and
  * every offset stay as they were. `protect` names the media data (MP4's
- * `mdat` payloads, WebM's block payloads), which no edit may touch: the
- * server never writes at offsets the file's own tables give (D-261102-514).
+ * `mdat` payloads, WebM's block payloads), which no `put` or `zero` may
+ * touch: the server never writes at offsets a kept track's tables give
+ * (D-261102-514).
+ *
+ * The one edit that reaches into the media data is `scrub`, which zeroes a
+ * dropped timed metadata track's samples, such as an iPhone's detected
+ * faces (docs/design/design-v1-video-turns.md 4.5 and 5, D-261102-893). It
+ * has its own guard, so a bug in a header edit can never pass as one: each
+ * scrub lies inside one media range and outside every range `keep` names,
+ * the kept tracks' samples. The parser's own sweep refuses a file whose
+ * ranges break either rule first, so the guard only ever catches the
+ * check's bug.
  *
  * A file may hold hundreds of thousands of each (AMBUILD-ASTRA-01,
  * AM-R1-01), so nothing here compares every edit with every range: the
- * guard and the writes sweep lists sorted once, under the check's budget.
+ * guards and the writes sweep lists sorted once, under the check's budget.
  */
 export class Edits {
   readonly writes: Write[] = [];
   readonly zeroes: Range[] = [];
   readonly protected: Range[] = [];
+  readonly scrubs: Range[] = [];
+  readonly kept: Range[] = [];
 
   put(offset: number, bytes: Buffer): void {
     if (bytes.length > 0) this.writes.push({ offset, bytes: Buffer.from(bytes) });
@@ -196,7 +211,34 @@ export class Edits {
     if (end > start) this.protected.push({ start, end });
   }
 
-  /** Every range an edit writes, the writes' bytes included. */
+  /** Bytes of a dropped metadata track's samples, zeroed inside the media data. */
+  scrub(start: number, end: number): void {
+    if (end > start) this.scrubs.push({ start, end });
+  }
+
+  /** A kept track's samples, which no scrub may reach. */
+  keep(start: number, end: number): void {
+    if (end > start) this.kept.push({ start, end });
+  }
+
+  /**
+   * The scrub guard: throws when a scrub reaches outside one media range or
+   * into a kept sample. Answers the scrubs joined, with the media and the
+   * kept samples, for the writer's own check at each write.
+   */
+  assertScrubsSafe(budget?: Budget): { spans: Range[]; media: Range[]; kept: Range[] } {
+    const spans = joined(this.scrubs, budget);
+    const media = joined(this.protected, budget);
+    const kept = joined(this.kept, budget);
+    const guard = new ScrubGuard(media, kept);
+    for (let i = 0; i < spans.length; i++) {
+      if (i % BUDGET_EVERY === 0) budget?.check();
+      guard.check(spans[i]!.start, spans[i]!.end);
+    }
+    return { spans, media, kept };
+  }
+
+  /** Every range a header edit writes, the writes' bytes included. Scrubs have their own guard. */
   touched(): Range[] {
     return [...this.writes.map((w) => ({ start: w.offset, end: w.offset + w.bytes.length })), ...this.zeroes];
   }
@@ -227,13 +269,15 @@ export class Edits {
     return media;
   }
 
-  /** The edits applied to a copy of `bytes`, for tests: zeroes first, then the headers that rename what they cleared. */
+  /** The edits applied to a copy of `bytes`, for tests: zeroes first, then the headers that rename what they cleared, then the scrubs. */
   applyTo(bytes: Buffer, budget?: Budget): Buffer {
     this.assertOutsideMedia(budget);
+    const { spans } = this.assertScrubsSafe(budget);
     this.#sortedWrites(budget);
     const out = Buffer.from(bytes);
     for (const z of this.zeroes) out.fill(0, z.start, z.end);
     for (const w of this.writes) w.bytes.copy(out, w.offset);
+    for (const s of spans) out.fill(0, s.start, s.end);
     return out;
   }
 
@@ -263,11 +307,14 @@ export class Edits {
    *
    * A batch never reaches across media data, though its bytes would come
    * back the same: the check never writes inside the media, and each write
-   * is held to that before it runs (AMBUILD-SOL-007). `opener` stands in
-   * for `open` in a test that records where the writes land.
+   * is held to that before it runs (AMBUILD-SOL-007). The scrubs go out
+   * last, zeroes a window at a time, each write held to the scrub guard
+   * before it runs. `opener` stands in for `open` in a test that records
+   * where the writes land.
    */
   async applyToFile(path: string, budget?: Budget, opener: (path: string, flags: string) => Promise<FileHandle> = open): Promise<void> {
     const media = this.#outsideMedia(budget);
+    const scrubs = this.assertScrubsSafe(budget);
     const writes = this.#sortedWrites(budget);
     const zeroes = joined(this.zeroes, budget);
     const stretches = joined(this.touched(), budget);
@@ -306,6 +353,15 @@ export class Edits {
         await write(buf, first.start);
         i = last + 1;
       }
+      const guard = new ScrubGuard(scrubs.media, scrubs.kept);
+      for (const span of scrubs.spans) {
+        for (let at = span.start; at < span.end; at += WINDOW_BYTES) {
+          budget?.check();
+          const length = Math.min(WINDOW_BYTES, span.end - at);
+          guard.check(at, at + length);
+          await handle.write(ZERO_WINDOW, 0, length, at);
+        }
+      }
       await handle.sync();
     } finally {
       await handle.close();
@@ -330,6 +386,32 @@ class MediaCursor {
     while (this.#at < this.#media.length && this.#media[this.#at]!.end <= start) this.#at++;
     const m = this.#media[this.#at];
     return m !== undefined && m.start < end;
+  }
+}
+
+/**
+ * Whether a scrub's span may be written: inside one of the media's sorted,
+ * disjoint stretches and meeting none of the kept samples' sorted, disjoint
+ * ranges. Spans come in rising order, so each list is passed over once.
+ */
+class ScrubGuard {
+  readonly #media: readonly Range[];
+  readonly #kept: readonly Range[];
+  #m = 0;
+  #k = 0;
+
+  constructor(media: readonly Range[], kept: readonly Range[]) {
+    this.#media = media;
+    this.#kept = kept;
+  }
+
+  check(start: number, end: number): void {
+    while (this.#m < this.#media.length && this.#media[this.#m]!.end <= start) this.#m++;
+    const m = this.#media[this.#m];
+    if (!m || m.start > start || m.end < end) throw new EditIntoMediaError(`a scrub at ${start} to ${end} reaches outside the media data`);
+    while (this.#k < this.#kept.length && this.#kept[this.#k]!.end <= start) this.#k++;
+    const k = this.#kept[this.#k];
+    if (k && k.start < end) throw new EditIntoMediaError(`a scrub at ${start} to ${end} reaches a kept sample at ${k.start} to ${k.end}`);
   }
 }
 
