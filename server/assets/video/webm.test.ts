@@ -15,6 +15,7 @@ import {
   encodeWebm,
   findEbml,
   float,
+  projectionEl,
   segmentOf,
   sint,
   str,
@@ -252,8 +253,7 @@ describe("refusals", () => {
     assert.equal((await checkVideoBytes(webmFile({ width: 2880, height: 2880 }))).facts.heightPx, 2880);
   });
 
-  test("a stretched or cropped picture is video_geometry", async () => {
-    await refused(tree({}, (t) => videoOf(t).kids!.push(uint(I.DisplayWidth, 853), uint(I.DisplayHeight, 360))), "video_geometry");
+  test("a cropped picture, or a display size in another unit, is video_geometry", async () => {
     await refused(tree({}, (t) => videoOf(t).kids!.push(uint(I.DisplayUnit, 3))), "video_geometry");
     await refused(tree({}, (t) => videoOf(t).kids!.push(uint(I.PixelCropTop, 8))), "video_geometry");
     await checkVideoBytes(tree({}, (t) => videoOf(t).kids!.push(uint(I.DisplayWidth, 640), uint(I.DisplayHeight, 360), uint(I.DisplayUnit, 0))));
@@ -706,5 +706,72 @@ describe("a VP8 frame with show_frame clear is hidden, as FFmpeg's alt-refs are 
   test("a VP9 block is never read for VP8's show_frame bit: its hidden frames come inside a superframe", async () => {
     // 0x86 is a VP9 inter frame's first byte, bit 4 clear: at a shown frame's time it is a second shown frame.
     await refused(tree({}, (t) => firstCluster(t).kids!.push({ id: I.SimpleBlock, data: Buffer.from([0x81, 0x01, 0xf4, 0x00, 0x86, 0]) })), "video_layout");
+  });
+});
+
+/** The display elements' places in an encoded file, by their id bytes and one-byte sizes. */
+function displayAt(bytes: Buffer, id: number, value: number): number {
+  return bytes.indexOf(encodeEbml(uint(id, value)));
+}
+
+describe("stretched pictures and Projections (docs/design/design-v1-video-turns.md 4.2)", () => {
+  const display = (...kids: Ebml[]) => tree({}, (t) => videoOf(t).kids!.push(...kids));
+
+  test("DisplayWidth 853 over 640 x 360 is accepted as 853 wide, and both display elements go as Voids", async () => {
+    const bytes = display(uint(I.DisplayWidth, 853), uint(I.DisplayHeight, 360));
+    const width = displayAt(bytes, I.DisplayWidth, 853);
+    const height = displayAt(bytes, I.DisplayHeight, 360);
+    assert.ok(width > 0 && height > 0);
+    const { facts, zeroed } = await checkVideoBytes(bytes);
+    assert.equal(facts.displayWidthPx, 853);
+    assert.equal(facts.widthPx, 640, "the coded size stays");
+    for (const at of [width, height]) {
+      assert.equal(zeroed[at], I.Void, "a Void where the display element was");
+      assert.ok(zeroed.subarray(at + 3, at + 5).every((b) => b === 0), "its payload zeroed");
+    }
+    const again = await checkVideoBytes(zeroed);
+    assert.ok(again.zeroed.equals(zeroed), "the stored file checks again to the same bytes");
+    assert.equal(again.facts.displayWidthPx, undefined, "and plays plain");
+  });
+
+  test("a DisplayHeight alone stretches, rounding half up in integers", async () => {
+    // 640 x 360 shown at 640 x 270 is 853.33 wide at the pixel height.
+    assert.equal((await checkVideoBytes(display(uint(I.DisplayHeight, 270)))).facts.displayWidthPx, 853);
+    // 640 x 360 shown at 641 x 360 is a pixel past the coded width.
+    assert.equal((await checkVideoBytes(display(uint(I.DisplayWidth, 641)))).facts.displayWidthPx, 641);
+  });
+
+  test("a pure scale, such as 5120 x 2880 for 2560 x 1440, is square: no stretched width, and the elements still go", async () => {
+    const bytes = tree({ width: 2560, height: 1440 }, (t) => videoOf(t).kids!.push(uint(I.DisplayWidth, 5120), uint(I.DisplayHeight, 2880)));
+    const { facts, zeroed } = await checkVideoBytes(bytes);
+    assert.equal(facts.displayWidthPx, undefined);
+    assert.equal(zeroed[displayAt(bytes, I.DisplayWidth, 5120)], I.Void);
+    // A display size equal to the pixel size says nothing new and stays.
+    const same = display(uint(I.DisplayWidth, 640), uint(I.DisplayHeight, 360));
+    assert.equal((await checkVideoBytes(same)).zeroed[displayAt(same, I.DisplayWidth, 640)], 0x54);
+  });
+
+  test("a display term of 0 or past 65535, or a shape past 2:1, is video_geometry (D-261102-899)", async () => {
+    await refused(display(uint(I.DisplayWidth, 70_000), uint(I.DisplayHeight, 360)), "video_geometry");
+    await refused(display(uint(I.DisplayWidth, 0)), "video_geometry");
+    await refused(display(uint(I.DisplayWidth, 1281)), "video_geometry");
+    await refused(display(uint(I.DisplayHeight, 721)), "video_geometry");
+    assert.equal((await checkVideoBytes(display(uint(I.DisplayWidth, 1280)))).facts.displayWidthPx, 1280, "2:1 itself");
+    assert.equal((await checkVideoBytes(display(uint(I.DisplayHeight, 720)))).facts.displayWidthPx, 320, "1:2 itself");
+  });
+
+  test("a stretch past the caps is video_size", async () => {
+    await refused(tree({ width: 2400, height: 1000 }, (t) => videoOf(t).kids!.push(uint(I.DisplayWidth, 4800))), "video_size");
+  });
+
+  test("a Projection with a pose is video_geometry, and an all-zero one goes as a Void (D-261102-858)", async () => {
+    for (const pose of [{ roll: 90 }, { yaw: 180 }, { pitch: -30 }, { roll: 0.5 }]) await refused(display(projectionEl(pose)), "video_geometry");
+    const flat = display(projectionEl({}, 1));
+    const at = flat.indexOf(Buffer.from([0x76, 0x70]));
+    const { facts, zeroed } = await checkVideoBytes(flat);
+    assert.equal(facts.displayWidthPx, undefined);
+    assert.equal(zeroed[at], I.Void);
+    assert.equal(zeroed.indexOf(Buffer.from([0x76, 0x71])), -1, "nothing of it left");
+    await refused(display(el(0x7670, float(0x7675, 0, 4), float(0x7675, 90, 4))), "bad_video");
   });
 });

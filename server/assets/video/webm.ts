@@ -1,4 +1,5 @@
 import { VIDEO_LIMITS } from "#shared/limits.ts";
+import { webmDrawnWidth } from "#shared/videoGeometry.ts";
 import { OPUS_HZ, av1CodecString, opusHead, opusPacketSamples, peakInOneSecond, timelineToleranceMs, vp9CodecPrivate, vp9CodecString, vp9KeyFrame, vp9Level, type Vp9Facts } from "./records.ts";
 import { Edits, Tally, refuse, type Budget, type Source } from "./window.ts";
 import type { ParsedVideo } from "./check.ts";
@@ -77,6 +78,12 @@ export const EBML_ID = {
   DisplayWidth: 0x54b0,
   DisplayHeight: 0x54ba,
   DisplayUnit: 0x54b2,
+  Projection: 0x7670,
+  ProjectionType: 0x7671,
+  ProjectionPrivate: 0x7672,
+  ProjectionPoseYaw: 0x7673,
+  ProjectionPosePitch: 0x7674,
+  ProjectionPoseRoll: 0x7675,
   Colour: 0x55b0,
   TransferCharacteristics: 0x55ba,
   MasteringMetadata: 0x55d0,
@@ -157,6 +164,8 @@ type Track = {
   codecDelay: number;
   width?: number;
   height?: number;
+  /** The picture's width once its display size applies, when its pixels are not square (docs/design/design-v1-video-turns.md 4.2). */
+  displayWidthPx?: number;
   transfer?: number;
   alpha?: number;
   channels?: number;
@@ -503,6 +512,7 @@ async function parseSegment(walk: Walk, segment: El): Promise<ParsedVideo> {
     container: "webm",
     widthPx: video.width!,
     heightPx: video.height!,
+    ...(video.displayWidthPx !== undefined ? { displayWidthPx: video.displayWidthPx } : {}),
     video: videoCodecString(video, firstVideoHead, fps),
     ...(sound ? { audio: "opus", audioChannels: sound.channels!, audioHz: OPUS_HZ } : {}),
     fps,
@@ -792,6 +802,7 @@ const VIDEO_KEPT = new Set<number>([I.PixelWidth, I.PixelHeight, I.DisplayWidth,
 async function videoSettings(walk: Walk, el: El, track: Track): Promise<void> {
   let displayWidth: number | undefined;
   let displayHeight: number | undefined;
+  const display: El[] = [];
   let unit = 0;
   const once = new Once();
   for await (const child of walk.children(el.dataStart, el.end, 5)) {
@@ -799,9 +810,14 @@ async function videoSettings(walk: Walk, el: El, track: Track): Promise<void> {
     if (VIDEO_KEPT.has(id)) once.take(id);
     if (id === I.PixelWidth) track.width = await walk.uint(child);
     else if (id === I.PixelHeight) track.height = await walk.uint(child);
-    else if (id === I.DisplayWidth) displayWidth = await walk.uint(child);
-    else if (id === I.DisplayHeight) displayHeight = await walk.uint(child);
-    else if (id === I.DisplayUnit) unit = await walk.uint(child);
+    else if (id === I.DisplayWidth) {
+      displayWidth = await walk.uint(child);
+      display.push(child);
+    } else if (id === I.DisplayHeight) {
+      displayHeight = await walk.uint(child);
+      display.push(child);
+    } else if (id === I.DisplayUnit) unit = await walk.uint(child);
+    else if (id === I.Projection) await projection(walk, child);
     else if (id === I.FlagInterlaced) await walk.uintIn(child, 0, 2);
     else if (id === I.AlphaMode) track.alpha = await walk.uint(child);
     else if (id === I.PixelCropBottom || id === I.PixelCropTop || id === I.PixelCropLeft || id === I.PixelCropRight) {
@@ -818,7 +834,34 @@ async function videoSettings(walk: Walk, el: El, track: Track): Promise<void> {
   if (track.alpha !== undefined && track.alpha > 1) throw refuse("bad_video");
   if (track.transfer === 16 || track.transfer === 18) throw refuse("video_hdr");
   if (unit !== 0) throw refuse("video_geometry");
-  if ((displayWidth !== undefined && displayWidth !== track.width) || (displayHeight !== undefined && displayHeight !== track.height)) throw refuse("video_geometry");
+  // Without a pixel size the track list refuses the file as unreadable.
+  if (track.width === undefined || track.height === undefined) return;
+  const drawn = webmDrawnWidth({ pixelWidth: track.width, pixelHeight: track.height, displayWidth, displayHeight });
+  if (drawn === undefined) throw refuse("video_geometry");
+  if (drawn !== track.width) track.displayWidthPx = drawn;
+  // A display size unlike the pixel size goes, so the stored file plays at its pixel size in every browser and the facts say how to draw it (4.2, 5).
+  if ((displayWidth !== undefined && displayWidth !== track.width) || (displayHeight !== undefined && displayHeight !== track.height)) {
+    for (const d of display) walk.void(d);
+  }
+}
+
+const PROJECTION_POSES = new Set<number>([I.ProjectionPoseYaw, I.ProjectionPosePitch, I.ProjectionPoseRoll]);
+
+/**
+ * A Projection goes as a Void, as every element off the list does, but is
+ * read first: Chromium's WebM parser and FFmpeg turn and mirror the picture
+ * by its pose, which the stored file must not keep asking for. So a pose
+ * other than zero is `video_geometry` (docs/design/design-v1-video-turns.md
+ * 4.2, D-261102-858).
+ */
+async function projection(walk: Walk, el: El): Promise<void> {
+  const once = new Once();
+  for await (const child of walk.children(el.dataStart, el.end, 6)) {
+    if (!PROJECTION_POSES.has(child.id)) continue;
+    once.take(child.id);
+    if ((await walk.float(child)) !== 0) throw refuse("video_geometry");
+  }
+  walk.void(el);
 }
 
 const AUDIO_KEPT = new Set<number>([I.SamplingFrequency, I.OutputSamplingFrequency, I.Channels, I.BitDepth]);
