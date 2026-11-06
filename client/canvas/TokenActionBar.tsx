@@ -129,7 +129,7 @@ import {
   type RestState,
   type Spot,
 } from "./barDock.ts";
-import { barButtons, barShort, isCompanion, type BarButtonId } from "./barButtons.ts";
+import { barButtons, barShort, isCompanion, rowUnits, type BarButtonId } from "./barButtons.ts";
 import { groupRestButtons, restButtons, restStatus, type EntryStatus, type RestFit, type RestStatus } from "./barButtons.ts";
 import { RestRow, type RestItem } from "./RestRow.tsx";
 import { NOTE_INSET } from "./barDock.ts";
@@ -155,6 +155,19 @@ const ROW_BUTTON_FLEX = "1 1 auto";
 
 /** Whether a button stands in one of the bar's rows (ButtonRow), and so grows to share its line. */
 const InButtonRow = createContext(false);
+
+/** Place freely and Snap to grid wrap as one unit that grows like a button (barButtons.ts rowUnits), so a line that fits only one of them gives each its own. */
+function placementUnits(ids: BarButtonId[], button: (id: BarButtonId) => ReactNode): ReactNode[] {
+  return rowUnits(ids).map((unit) =>
+    typeof unit === "string" ? (
+      button(unit)
+    ) : (
+      <span key="placement" data-placement-pair="" style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1), flex: ROW_BUTTON_FLEX, minWidth: 0 }}>
+        {unit.pair.map(button)}
+      </span>
+    ),
+  );
+}
 
 function ButtonRow(props: { row: "passing" | "play" | "less"; children: ReactNode }) {
   return (
@@ -579,7 +592,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
           {rows.passing.some((id) => !inStrip(id)) ? (
             <ButtonRow row="passing">{rows.passing.filter((id) => !inStrip(id)).map(button)}</ButtonRow>
           ) : null}
-          <ButtonRow row="play">{rows.play.filter((id) => !inStrip(id)).map(button)}</ButtonRow>
+          <ButtonRow row="play">{placementUnits(rows.play.filter((id) => !inStrip(id)), button)}</ButtonRow>
           {rows.play.includes("detach") ? <DetachNote detach={detach} id={detachNoteId} /> : null}
           {/* Used a few times a campaign, so after the steady line, which it would push out of view on an upright phone, and before the less-used buttons (docs/design/design-v1-token-window.md 8.9). */}
           {access.dm || (access.owner && !token.locked) ? <SizeRow token={token} owner={access.owner} canResize={access.resize} /> : null}

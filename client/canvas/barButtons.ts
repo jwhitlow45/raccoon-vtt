@@ -104,6 +104,20 @@ export function barButtons(input: BarButtonInput): { passing: BarButtonId[]; pla
   return { passing, play, less };
 }
 
+/**
+ * A row's buttons with Place freely and Snap to grid joined as one unit, so
+ * they wrap together: each takes half a line where the two fit side by side,
+ * and a line of its own where they do not. Either alone stays a plain button.
+ */
+export type RowUnit = BarButtonId | { pair: readonly [BarButtonId, BarButtonId] };
+
+export function rowUnits(ids: readonly BarButtonId[]): RowUnit[] {
+  if (!ids.includes("placeFreely") || !ids.includes("snapToGrid")) return [...ids];
+  const units: RowUnit[] = ids.filter((id) => id !== "placeFreely" && id !== "snapToGrid");
+  units.push({ pair: ["placeFreely", "snapToGrid"] });
+  return units;
+}
+
 /** A token that belongs to a character as its companion (docs/design/design-v1-combat-flow.md 3.6), whose owners who are not the DM dismiss it. */
 export function isCompanion(token: object): boolean {
   return "companion" in token && token.companion !== undefined && token.companion !== null;

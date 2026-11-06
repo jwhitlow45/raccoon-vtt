@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { barButtons, barCapacity, barShort, critSent, groupRestButtons, isCompanion, nextRestMode, restButtons, restFit, restStatus, SPAN_SHORT_BAR_PX, type BarButtonInput, type BarRoom, type EntryStatus, type RestFit, type RestStatusInput } from "./barButtons.ts";
+import { barButtons, barCapacity, barShort, critSent, groupRestButtons, isCompanion, nextRestMode, restButtons, restFit, restStatus, rowUnits, SPAN_SHORT_BAR_PX, type BarButtonInput, type BarRoom, type EntryStatus, type RestFit, type RestStatusInput } from "./barButtons.ts";
 import { deadCase, type HpTarget } from "../features/tokens/groupHp.ts";
 import { parseHpInput } from "../features/tokens/hpInput.ts";
 import { DEFAULT_SPOT, freeArea, placeBar, spanRoomAtWorst, type Chrome } from "./barDock.ts";
@@ -614,5 +614,18 @@ describe("the strip's status line (docs/design/design-v1-bar-compact.md 3.3)", (
     // Where no cut of the dead name fits beside the names left out, they become a count, and the name keeps what then fits.
     const counted = status({ dead: { kind: "heal", name: LONG, dm: false }, left: ["Goblin Warrior 2"] }, { ...AT320, note: (t) => linesAt(t, 200) <= 2 }).sentence!.text;
     assert.equal(counted, "Healing does nothing while Aldr… is dead. Leaves out 1.");
+  });
+});
+
+describe("the placement pair (rowUnits)", () => {
+  test("Place freely and Snap to grid join as one unit at the row's end, the rest unchanged", () => {
+    assert.deepEqual(rowUnits(["conditions", "roll", "attach", "placeFreely", "snapToGrid"]), ["conditions", "roll", "attach", { pair: ["placeFreely", "snapToGrid"] }]);
+  });
+  test("an unplaced token's Place freely stays a plain button", () => {
+    assert.deepEqual(rowUnits(["multiSelect", "placeFreely"]), ["multiSelect", "placeFreely"]);
+  });
+  test("Snap to grid alone stays a plain button, and a row with neither is unchanged", () => {
+    assert.deepEqual(rowUnits(["snapToGrid"]), ["snapToGrid"]);
+    assert.deepEqual(rowUnits(["conditions", "roll"]), ["conditions", "roll"]);
   });
 });
