@@ -5,6 +5,7 @@ import { dropView, seenSeat, type DropToken, type Role } from "../features/movem
 import { screenToView, viewToScreen, type Camera, type Point } from "../lib/camera.ts";
 import { drawnAt, footprint, rulesSpot, snapPosition } from "../lib/scene.ts";
 import { footprintCells, type GroundCell } from "../lib/groundCells.ts";
+import { seatCarrier } from "./relief/stand.ts";
 import { drawnBase, drawnStandBase, seenFootprintGround, standSurface, toView, toWorld, type DrawnHeights, type DrawnSource, type View, type ViewPoint } from "../lib/view.ts";
 import type { Grid } from "#shared/rules/grid.ts";
 
@@ -221,7 +222,12 @@ export function dragPlan(input: { room: RoomState; role: Role; src: DrawnSource;
   const drawn = input.drawn ?? UNCAPPED;
   const size = footprint(token);
   const ruleOf = (t: Placed, base: number): DragRule => ruleFor(seenStanding(src, grid, t), base);
-  const baseOf = (t: Placed) => (heights ? drawnStandBase(src, heights, footprintCells(grid, t), t.elevation, feetPerCell) : drawnBase(src, footprintCells(grid, t), t.elevation) / feetPerCell);
+  // A seated token's base is its holder's, as its ring draws (relief/stand.ts seatCarrier), so a still press finds it where it is.
+  const baseOf = (t: Placed) => {
+    const at = seatCarrier(t, (id) => room.tokens[id]);
+    const cells = footprintCells(grid, at);
+    return heights ? drawnStandBase(src, heights, cells, at.elevation, feetPerCell) : drawnBase(src, cells, at.elevation) / feetPerCell;
+  };
   const ownBase = baseOf(token);
   const own = ruleOf(token, ownBase);
   const seat = seenSeat(dropView(room, role), token);

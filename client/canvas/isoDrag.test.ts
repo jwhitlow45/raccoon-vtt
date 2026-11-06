@@ -9,8 +9,11 @@ import { dropLanding, dropView } from "../features/movement/drop.ts";
 import { raised, world } from "../features/movement/testing.ts";
 import { screenToView, viewToScreen, type Camera } from "../lib/camera.ts";
 import { footprint, snapPosition } from "../lib/scene.ts";
-import { flatHeights, isometric, toView, type Turn, type ViewPoint } from "../lib/view.ts";
+import { flatHeights, isometric, standSurface, toView, type Turn, type ViewPoint } from "../lib/view.ts";
+import { footprintCells } from "../lib/groundCells.ts";
+import type { DragSpot } from "../state/localDrags.ts";
 import { boardPickFor, DrawnHeightsMemo, drawnRing, ringCenter, standsFor, tokenBase, type BoardPick } from "./boardPick.ts";
+import { dragSpotBase, seatedStandBase } from "./relief/stand.ts";
 import { cappedBase, standeeShape } from "./relief/standee.ts";
 import { dragBound, dragGround, dragLanding, dragPlan, gripRel, levelsOf, type DragGround, type DragPlan } from "./isoDrag.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
@@ -424,5 +427,113 @@ describe("a drag over stairs that climb in steps (docs/design/design-v1-iso-dept
     const pick = pickAt(state, 40);
     const plan = planOf(state, pick, state.tokens.bree! as Token);
     assert.equal(plan.seat?.base, 1.4);
+  });
+
+  /**
+   * ISOBUILD-ASTRA-02: a Large mount at (9, 6), over both stairs and the
+   * corridor east of them, standing at 5 ft on the upper stair's foot tread,
+   * and a Medium rider on it at (9, 6), whose own middle is over that
+   * stair's middle tread, 2 ft higher.
+   */
+  const mounted = (extra: Token[] = [], at: { x: number; y: number; elevation: number } = { x: 9, y: 6, elevation: 5 }) =>
+    stairsWorld([token("horse", { kind: "npc", size: "large", ...at }), token("rider", { ...at, attached: { to: "horse", kind: "ride" } }), ...extra]);
+  const holders = (state: RoomState) => (id: string) => state.tokens[id];
+
+  test("a Medium rider on a Large mount across a stair sits at the mount's base in its standee, its ring and the drag's seat, and a still press moves nothing, at every turn", () => {
+    const state = mounted();
+    const horse = state.tokens.horse! as Token;
+    const rider = state.tokens.rider! as Token;
+    for (const scale of [23, 24, 40]) {
+      for (const turn of [0, 1, 2, 3] as Turn[]) {
+        const pick = pickAt(state, scale, turn);
+        const label = `${scale} px, turn ${turn}`;
+        assert.equal(standSurface(pick.heights, footprintCells(SQUARES, rider)), scale >= 24 ? 1.4 : 1, `${label}: the tread under the rider's own middle`);
+        assert.equal(seatedStandBase(pick.src!, pick.heights, SQUARES, 5, horse, holders(state)), 1, `${label}: the mount on its foot tread`);
+        assert.equal(seatedStandBase(pick.src!, pick.heights, SQUARES, 5, rider, holders(state)), 1, `${label}: the rider's standee`);
+        assert.equal(tokenBase(pick, rider), 1, `${label}: the rider's ring`);
+        const plan = planOf(state, pick, rider);
+        assert.equal(plan.seat?.base, 1, `${label}: the drag's seat`);
+        const cam = { ...CAM, scale };
+        const node = viewToScreen(cam, toView(pick.view, { x: rider.x, y: rider.y }));
+        const input = { camera: cam, view: pick.view, ground: dragGround(pick.heights, rider, SQUARES), plan, start: { node, ring: ringCenter(pick, rider) }, rel: { x: 0, y: 0 } };
+        const still = dragBound(input, node);
+        assert.ok(Math.abs(still.x - node.x) < 1e-6 && Math.abs(still.y - node.y) < 1e-6, `${label}: ${JSON.stringify([still, node])}`);
+      }
+    }
+  });
+
+  test("IsoBoard.tsx stands each standee, and this device's drag preview, on its seat's base", () => {
+    const board = readFileSync(new URL("./relief/IsoBoard.tsx", import.meta.url), "utf8");
+    assert.match(board, /const base = seatedStandBase\(src, heights, grid, feet, t, holderOf\);/);
+    assert.match(board, /const \{ base, seated \} = dragSpotBase\(/);
+    // Only another member's drag ghost, which draws with no seat, reads its own footing.
+    assert.equal(board.match(/drawnStandBase\(/g)?.length, 1);
+  });
+
+  test("down a chain of holders to the mount, and a loop of links or a dragged creature's link stands on its own", () => {
+    const state = mounted([
+      token("owl", { size: "tiny", x: 9, y: 6, elevation: 5, attached: { to: "rider", kind: "perch" } }),
+      token("a", { x: 9, y: 6, elevation: 5, attached: { to: "b", kind: "ride" } }),
+      token("b", { x: 9, y: 6, elevation: 5, attached: { to: "a", kind: "ride" } }),
+      token("caught", { x: 9, y: 6, elevation: 5, attached: { to: "horse", kind: "drag" } }),
+    ]);
+    const pick = pickAt(state, 40);
+    const base = (id: string) => tokenBase(pick, state.tokens[id]! as Token);
+    assert.equal(base("owl"), 1, "a familiar perched on the rider, on the mount");
+    assert.equal(planOf(state, pick, state.tokens.owl! as Token).seat?.base, 1, "and its drag's seat");
+    assert.equal(base("a"), 1.4, "a loop ends where it closes, on its own tread");
+    assert.equal(base("b"), 1.4);
+    assert.equal(base("caught"), 1.4, "a dragged creature walks on its own tread");
+  });
+
+  test("the drag's preview seats a rider on its mount's base while it rides with the mount's drag or keeps its seat, and off it stands on its own tread", () => {
+    const state = mounted([], { x: 3, y: 9, elevation: 0 });
+    const pick = pickAt(state, 40);
+    const tokens = state.tokens as Record<string, ViewToken>;
+    const preview = (spots: Record<string, DragSpot>, keeps: boolean) => ({
+      src: pick.src!,
+      heights: pick.heights,
+      grid: SQUARES,
+      feetPerCell: 5,
+      holderOf: (id: string) => tokens[id],
+      spots,
+      keepsSeat: () => keeps,
+      landing: (t: ViewToken, at: DragSpot) => dropLanding(dropView(state, "dm"), t, at),
+    });
+    const rider = tokens.rider!;
+    // The mount dragged onto the stairs at (9, 6), its rider with it: the mount lands at 5 ft on the upper stair's foot tread.
+    const riding = { horse: { x: 9, y: 6 }, rider: { x: 9, y: 6 } };
+    assert.deepEqual(dragSpotBase(preview(riding, false), rider, riding.rider), { base: 1, seated: true });
+    // The rider alone, moved within its standing mount.
+    const still = mounted();
+    const keeps = { ...preview({ rider: { x: 9, y: 6 } }, true), holderOf: (id: string) => still.tokens[id] as ViewToken };
+    assert.deepEqual(dragSpotBase(keeps, still.tokens.rider! as ViewToken, { x: 9, y: 6 }), { base: 1, seated: true });
+    // Off its seat onto the lower stair, stored 0: its own middle tread, at 2 ft.
+    assert.deepEqual(dragSpotBase(preview({ rider: { x: 9, y: 7 } }, false), rider, { x: 9, y: 7 }), { base: 0.4, seated: false });
+  });
+
+  test("on flat raised ground, a Small rider over a Large mount's low half across a ledge sits at the mount's base, the heights standing or flat", () => {
+    const state = world({
+      blockMovement: false,
+      heights: raised(10, 0, 30, 30, 10),
+      tokens: [token("horse", { kind: "npc", size: "large", x: 9, y: 4, elevation: 10 }), token("bree", { size: "small", x: 9, y: 4, elevation: 10, attached: { to: "horse", kind: "ride" } })],
+    });
+    const horse = state.tokens.horse! as Token;
+    const bree = state.tokens.bree! as Token;
+    // Below the stand threshold the heights lie flat and a base is its lift over the ground under it: 10 ft over the rider's own ground, none over the mount's.
+    for (const [scale, want] of [[10, 0], [40, 2]] as const) {
+      for (const turn of [0, 1, 2, 3] as Turn[]) {
+        const pick = pickAt(state, scale, turn);
+        const label = `${scale} px, turn ${turn}`;
+        assert.equal(tokenBase(pick, horse), want, label);
+        assert.equal(tokenBase(pick, bree), want, `${label}: the rider's ring`);
+        assert.equal(seatedStandBase(pick.src!, pick.heights, SQUARES, 5, bree, holders(state)), want, `${label}: the rider's standee`);
+        const cam = { ...CAM, scale };
+        const node = viewToScreen(cam, toView(pick.view, { x: bree.x, y: bree.y }));
+        const input = { camera: cam, view: pick.view, ground: dragGround(pick.heights, bree, SQUARES), plan: planOf(state, pick, bree), start: { node, ring: ringCenter(pick, bree) }, rel: { x: 0, y: 0 } };
+        const at = dragBound(input, node);
+        assert.ok(Math.abs(at.x - node.x) < 1e-6 && Math.abs(at.y - node.y) < 1e-6, `${label}: ${JSON.stringify([at, node])}`);
+      }
+    }
   });
 });

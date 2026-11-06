@@ -58,7 +58,7 @@ import { keptHost, onDeviceGrid, screenBox } from "./kept.ts";
 import { liveCameraSlot, needsApply, useCameraWhileShown, type LastApplied } from "../../state/liveCamera.ts";
 import { cullFit, cullOf } from "./cull.ts";
 import { previewLanding, seenChunks } from "./seenChunks.ts";
-import { dimmedForDm, dragFootingCells, ghostStands, ghostTagStands, ringsAtBase, splitTokens, standeeFooting, tokenBox } from "./stand.ts";
+import { dimmedForDm, dragFootingCells, dragSpotBase, ghostStands, ghostTagStands, ringsAtBase, seatedStandBase, splitTokens, standeeFooting, tokenBox } from "./stand.ts";
 import { BoardVolumes, type VolumeEntry, type VolumeWorld } from "./volumes.ts";
 import { useCommitCount, useKeptReport, useLayoutReport } from "./isoTest.ts";
 import { ON_GROUND, standeeShape, type Seat } from "./standee.ts";
@@ -245,11 +245,12 @@ function IsoBoardImpl(props: IsoBoardProps) {
   const standees = useMemo(() => {
     const standingIds = new Set(standing.map((t) => t.id));
     const all = Object.fromEntries(props.tokens.map((t) => [t.id, t]));
+    const holderOf = (id: string) => byId.get(id);
     return standing.map((t): Standing => {
       // The art stands where it is drawn and sorts by that ground point, on the base its rules box's ground gives (stand.ts standeeFooting).
       const { box, cells } = standeeFooting(grid, t);
-      // On the stand surface, a tread on a stepping stair, when it stands on the ground (docs/design/design-v1-iso-depth.md 5.4).
-      const base = drawnStandBase(src, heights, cells, t.elevation, feet);
+      // On the stand surface, a tread on a stepping stair, when it stands on the ground, and a seated token on its holder's (docs/design/design-v1-iso-depth.md 5.4).
+      const base = seatedStandBase(src, heights, grid, feet, t, holderOf);
       const ground = standSurface(heights, cells);
       const link = t.attached;
       const holder = link && onHolder(link.kind) && standingIds.has(link.to) ? link.to : null;
@@ -399,18 +400,24 @@ function IsoBoardImpl(props: IsoBoardProps) {
     (t: ViewToken, spot: DragSpot, seat: Seat): Pick<IsoToken, "base" | "ground" | "drawn" | "capped" | "rise" | "inset"> => {
       const room = store.getState().view;
       const seen = seenChunks({ chunks, sceneId: scene.id, bounds: { w, h }, fog: props.viewerFog });
-      const landingOf = (tok: ViewToken, at: { x: number; y: number }) => (room ? previewLanding(room, props.role, seen, tok, at) : tok.elevation);
-      const holderId = t.attached && onHolder(t.attached.kind) ? t.attached.to : null;
-      const holder = holderId ? byId.get(holderId) : undefined;
-      const holderSpot = holderId ? spots[holderId] : undefined;
-      const riding = holder !== undefined && holderSpot !== undefined;
-      const landing = riding ? landingOf(holder, holderSpot) : landingOf(t, spot);
-      // Off its holder's footprint a rider stands on its own, unless the holder moves with it.
-      const seated = holder !== undefined && (riding || (room !== null && seenSeat(dropView(room, props.role), t)?.keptAt(spot) === true));
+      // A seated token on its holder's base, where the holder stands or its drag puts it (stand.ts dragSpotBase).
+      const { base, seated } = dragSpotBase(
+        {
+          src,
+          heights,
+          grid,
+          feetPerCell: feet,
+          holderOf: (id) => byId.get(id),
+          spots,
+          keepsSeat: (tok, at) => room !== null && seenSeat(dropView(room, props.role), tok)?.keptAt(at) === true,
+          landing: (tok, at) => (room ? previewLanding(room, props.role, seen, tok, at) : tok.elevation),
+        },
+        t,
+        spot,
+      );
       const kept = seated ? seat : ON_GROUND;
       const fp = footprint(t);
       const cells = dragFootingCells(grid, t, spot);
-      const base = drawnStandBase(src, heights, cells, landing, feet);
       const ground = standSurface(heights, cells);
       const shape = standeeShape(turn, { x: spot.x, y: spot.y, w: fp.w, h: fp.h }, base, ground, cam.scale, size.height, kept);
       return { base, ground, drawn: shape.drawnBase, capped: shape.capped, rise: kept.rise, inset: kept.inset };

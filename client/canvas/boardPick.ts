@@ -7,10 +7,10 @@ import { footprint, type ViewToken } from "../lib/scene.ts";
 import { cellsMeeting, footprintCells, ruleBoundPoint } from "../lib/groundCells.ts";
 import { sceneWalls } from "#shared/rules/walls.ts";
 import type { StairReader } from "../lib/stairRuns.ts";
-import { arrowStep, drawnFootprintGround, drawnHeights, drawnStandBase, flatHeights, heightsDetail, heightsStand, pickWalk, standScale, standSurface, surfaceAt, TOP_DOWN, toView, toWorld, type DrawnHeights, type DrawnSource, type PickHit, type PickSource, type View } from "../lib/view.ts";
+import { arrowStep, drawnFootprintGround, drawnHeights, flatHeights, heightsDetail, heightsStand, pickWalk, standScale, standSurface, surfaceAt, TOP_DOWN, toView, toWorld, type DrawnHeights, type DrawnSource, type PickHit, type PickSource, type View } from "../lib/view.ts";
 import { scopeSlot, type RoomScope } from "../state/scope.ts";
 import { FogView } from "./relief/fogView.ts";
-import { creatureStands } from "./relief/stand.ts";
+import { creatureStands, seatedStandBase, type SeatedToken } from "./relief/stand.ts";
 import { cappedBase } from "./relief/standee.ts";
 
 /**
@@ -36,6 +36,8 @@ export type BoardPick = PickSource & {
   at(camera: Camera): BoardPick;
   /** The zoom from which this board's heights stand (view.ts standScale), Low power's when it is on. */
   standScale: number;
+  /** This viewer's tokens, where a seated token's ring finds its holder's base (`tokenBase`). */
+  tokens?: RoomState["tokens"];
 };
 
 /**
@@ -112,17 +114,19 @@ export function pressGap(pick: Pick<BoardPick, "view" | "camera" | "heights">, p
 /**
  * Where a token's ring draws, in cells of height: a standee's base as its
  * standee draws it (view.ts drawnStandBase, on a stair's tread when it
- * stands on the ground, its lift capped by relief/standee.ts cappedBase),
- * or for a creature that lies flat under the fog (`stands` false, 5.2) the
- * drawn ground under it, where the ground stage lays its picture. What
- * stands by a ring reads this one: box select, the chrome over a token, a
- * switch's held point and a drag's grab. The rules keep the logical base.
- * 0 in Top-down.
+ * stands on the ground, a seated token on its holder's by relief/stand.ts
+ * seatCarrier, its lift capped by relief/standee.ts cappedBase), or for a
+ * creature that lies flat under the fog (`stands` false, 5.2) the drawn
+ * ground under it, where the ground stage lays its picture. What stands by
+ * a ring reads this one: box select, the chrome over a token, a switch's
+ * held point and a drag's grab. The rules keep the logical base. 0 in
+ * Top-down.
  */
-export function tokenBase(pick: Pick<BoardPick, "view" | "grid" | "src" | "feetPerCell" | "camera" | "canvasHeight" | "heights">, token: FootprintToken, stands = true): number {
+export function tokenBase(pick: Pick<BoardPick, "view" | "grid" | "src" | "feetPerCell" | "camera" | "canvasHeight" | "heights" | "tokens">, token: SeatedToken, stands = true): number {
   if (pick.view.kind === "topDown" || !pick.src) return 0;
-  const cells = footprintCells(pick.grid, token);
-  return drawnRing(pick, stands)(drawnStandBase(pick.src, pick.heights, cells, token.elevation, pick.feetPerCell), standSurface(pick.heights, cells));
+  const tokens = pick.tokens;
+  const base = seatedStandBase(pick.src, pick.heights, pick.grid, pick.feetPerCell, token, (id) => tokens?.[id]);
+  return drawnRing(pick, stands)(base, standSurface(pick.heights, footprintCells(pick.grid, token)));
 }
 
 /**
@@ -163,7 +167,7 @@ export function groundIn(pick: Pick<BoardPick, "view" | "src" | "feetPerCell">, 
  * (docs/design/design-v1-snap-off.md 6.2) where its ring draws, at the base
  * its rules footprint gives (`tokenBase`).
  */
-export function ringCenter(pick: Pick<BoardPick, "view" | "grid" | "camera" | "src" | "feetPerCell" | "canvasHeight" | "heights">, token: FootprintToken & Partial<Pick<Token, "nudge">>, stands = true): Point {
+export function ringCenter(pick: Pick<BoardPick, "view" | "grid" | "camera" | "src" | "feetPerCell" | "canvasHeight" | "heights" | "tokens">, token: SeatedToken & Partial<Pick<Token, "nudge">>, stands = true): Point {
   const fp = footprint(token);
   const at = drawnSpot(pick.grid, token);
   return screenAt(pick, { x: at.x + fp.w / 2, y: at.y + fp.h / 2 }, tokenBase(pick, token, stands));
@@ -210,7 +214,8 @@ export function pressView(pick: Pick<BoardPick, "camera">, screen: Point) {
  */
 export function boardPickFor(
   input: {
-    room: Pick<RoomState, "buildChunks" | "fogTiles" | "meta"> | null;
+    /** Its tokens too, where they are known, for a seated token's ring (`tokenBase`). */
+    room: (Pick<RoomState, "buildChunks" | "fogTiles" | "meta"> & Partial<Pick<RoomState, "tokens">>) | null;
     /** Its automatic walls rule too, by which the walls point its stairs (shared/rules/walls.ts). */
     scene: Pick<Scene, "id" | "bounds" | "gridShape" | "autoWalls">;
     role: "dm" | "player";
@@ -233,7 +238,7 @@ export function boardPickFor(
   const chunks = room?.buildChunks ?? NO_CHUNKS;
   // The stairs' directions as the walls give them, the same reader the board's relief reads (docs/design/design-v1-iso-depth.md 5.2): sceneWalls keeps one set while the build is the same.
   const { src, heights } = memo.get({ chunks, sceneId: scene.id, bounds: scene.bounds, grid, fog, feetPerCell, scale: camera.scale, lowPower: input.lowPower, stairs: sceneWalls(scene, chunks) });
-  return { camera, view, grid, heights, src, feetPerCell, canvasHeight: input.canvasHeight ?? Infinity, at, standScale: standScale(input.lowPower) };
+  return { camera, view, grid, heights, src, feetPerCell, canvasHeight: input.canvasHeight ?? Infinity, at, standScale: standScale(input.lowPower), ...(room?.tokens ? { tokens: room.tokens } : {}) };
 }
 
 const NO_FOG: RoomState["fogTiles"] = {};
@@ -298,7 +303,7 @@ export class DrawnHeightsMemo {
  * own (`stands`, by its pick): Top-down has no fog to lay it flat under,
  * and Isometric may (ISO34-ASTRA-12).
  */
-export function heldPoint(was: BoardPick, now: BoardPick, selected: FootprintToken | undefined, viewport: Size, insets: Insets, stands: (pick: BoardPick) => boolean = () => true): { at: Point; before: number; after: number } {
+export function heldPoint(was: BoardPick, now: BoardPick, selected: SeatedToken | undefined, viewport: Size, insets: Insets, stands: (pick: BoardPick) => boolean = () => true): { at: Point; before: number; after: number } {
   const clear = { x0: insets.left, y0: insets.top, x1: viewport.width - insets.right, y1: viewport.height - insets.bottom };
   if (selected) {
     const ring = ringCenter(was, selected, stands(was));

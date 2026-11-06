@@ -1,5 +1,6 @@
-import { FOG_SUBCELLS } from "#shared/model.ts";
-import { footprintRect, footprintSubcells } from "#shared/rules/footprint.ts";
+import { FOG_SUBCELLS, type Token } from "#shared/model.ts";
+import { onHolder } from "#shared/rules/attach.ts";
+import { footprintRect, footprintSubcells, type FootprintToken } from "#shared/rules/footprint.ts";
 import type { Grid } from "#shared/rules/grid.ts";
 import type { Ground } from "#shared/rules/held.ts";
 import type { SegmentIndex } from "#shared/rules/segments.ts";
@@ -7,6 +8,7 @@ import { clipFootprint } from "#shared/rules/vision.ts";
 import type { Footprint } from "../../features/areas/volume.ts";
 import { footprintCells, type GroundCell } from "../../lib/groundCells.ts";
 import { atDragSpot, drawnAt, footprint, rulesSpot, type ViewToken } from "../../lib/scene.ts";
+import { drawnStandBase, type DrawnHeights, type DrawnSource } from "../../lib/view.ts";
 import type { DragSpot } from "../../state/localDrags.ts";
 import { pillReach } from "../../features/measure/pillPlace.ts";
 import { dragTagPill } from "../dragTag.ts";
@@ -86,6 +88,78 @@ export function standeeFooting(g: Grid, token: Pick<ViewToken, "x" | "y" | "size
  */
 export function dragFootingCells(g: Grid, token: Pick<ViewToken, "x" | "y" | "size" | "w" | "h" | "squeeze">, spot: DragSpot): GroundCell[] {
   return footprintCells(g, spot.squeeze === undefined ? { ...token, x: spot.x, y: spot.y, squeeze: undefined } : atDragSpot(token, spot));
+}
+
+/** A token as its drawn base reads it: its footprint, and the link it may sit on a holder by. */
+export type SeatedToken = FootprintToken & Partial<Pick<Token, "id" | "sceneId" | "attached">>;
+
+/**
+ * The token whose drawn base a token takes (docs/design/design-v1-iso-depth.md
+ * 5.4): itself, or for one that sits on its holder (rules/attach.ts
+ * onHolder) its holder's, and so down its holders, as `holderOf` finds
+ * them. A rider shares its holder's elevation, so the two stood at one
+ * height until the stand surface put each on the tread under its own
+ * middle, and a Medium rider on a Large mount across a stair floated over
+ * the mount's back (ISOBUILD-ASTRA-02). The standees, the rings' readers
+ * (canvas/boardPick.ts tokenBase) and the drag's seat (canvas/isoDrag.ts
+ * dragPlan) all read this one.
+ */
+export function seatCarrier(token: SeatedToken, holderOf: (id: string) => SeatedToken | undefined): SeatedToken {
+  let at = token;
+  const seen = new Set<string>();
+  for (;;) {
+    const link = at.attached;
+    if (!link || !onHolder(link.kind) || at.id === undefined) return at;
+    // A loop of links the rules let stand (rules/attach.ts) ends where it closes.
+    seen.add(at.id);
+    const holder = seen.has(link.to) ? undefined : holderOf(link.to);
+    if (!holder || holder.sceneId !== at.sceneId) return at;
+    at = holder;
+  }
+}
+
+/** A token's drawn base in cells (view.ts drawnStandBase), standing where its seat's carrier stands (`seatCarrier`). */
+export function seatedStandBase(src: DrawnSource, heights: DrawnHeights, g: Grid, feetPerCell: number, token: SeatedToken, holderOf: (id: string) => SeatedToken | undefined): number {
+  const at = seatCarrier(token, holderOf);
+  return drawnStandBase(src, heights, footprintCells(g, at), at.elevation, feetPerCell);
+}
+
+/**
+ * Where a token this device drags stands mid-drag, in cells of drawn
+ * height (relief/IsoBoard.tsx): on its holder's base while it rides with
+ * its holder's own drag, or keeps its seat at its spot, where the drag
+ * finds its ring (isoDrag.ts dragPlan's seat), else on the stand base of
+ * its own landing there. `seated` says which, for the seat it draws with.
+ */
+export function dragSpotBase<T extends ViewToken>(
+  input: {
+    src: DrawnSource;
+    heights: DrawnHeights;
+    grid: Grid;
+    feetPerCell: number;
+    holderOf: (id: string) => T | undefined;
+    /** This device's drag spots, by token id. */
+    spots: Readonly<Record<string, DragSpot | undefined>>;
+    /** Whether a token keeps its seat with its corner at a spot (movement/drop.ts seenSeat). */
+    keepsSeat: (token: T, spot: DragSpot) => boolean;
+    /** The elevation in feet the drop would land a token at, at a spot (movement/drop.ts previewLanding). */
+    landing: (token: T, spot: DragSpot) => number;
+  },
+  token: T,
+  spot: DragSpot,
+): { base: number; seated: boolean } {
+  const seen = new Set<string>();
+  const at = (t: T, s: DragSpot): { base: number; seated: boolean } => {
+    seen.add(t.id);
+    const link = t.attached;
+    const holder = link && onHolder(link.kind) && !seen.has(link.to) ? input.holderOf(link.to) : undefined;
+    const holderSpot = holder ? input.spots[holder.id] : undefined;
+    if (holder && holderSpot) return { base: at(holder, holderSpot).base, seated: true };
+    // Off its holder's footprint a token stands on its own, unless the holder moves with it.
+    if (holder && input.keepsSeat(t, s)) return { base: seatedStandBase(input.src, input.heights, input.grid, input.feetPerCell, holder, input.holderOf), seated: true };
+    return { base: drawnStandBase(input.src, input.heights, dragFootingCells(input.grid, t, s), input.landing(t, s), input.feetPerCell), seated: false };
+  };
+  return at(token, spot);
 }
 
 /** One box around both of a token's boxes, for a flat ghost's clip and the DM's dimming. */
