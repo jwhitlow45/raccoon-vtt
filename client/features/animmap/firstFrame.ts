@@ -1,6 +1,7 @@
 import { VIDEO_LIMITS, videoSizeFits } from "#shared/limits.ts";
 import type { MapVideo, VideoContainer } from "#shared/model.ts";
 import { drawnSize } from "#shared/videoGeometry.ts";
+import { isHevc } from "./hevcScan.ts";
 import { placementTransform } from "./turn.ts";
 import { VIDEO_REFUSALS } from "./words.ts";
 
@@ -190,7 +191,10 @@ type ProbeHow = {
 export async function readFirstFrame(file: File, options: { host: HTMLElement | null; signal?: AbortSignal; deps?: FrameDeps; timeoutMs?: number }): Promise<FirstFrame | null> {
   const early = fileRefusal(file);
   if (early) throw early;
+  // An MP4 or MOV is scanned for HEVC first, so an iPhone's default file is refused before 64 MB goes up. A WebM holds no sample entry.
+  const hevc = videoContainer(file) === "mp4" && (await isHevc(file));
   if (options.signal?.aborted) throw options.signal.reason;
+  if (hevc) throw refusal("video_hevc");
   if (!options.deps && !options.host) return null;
   const deps = options.deps ?? browserDeps(options.host!);
   const url = deps.url(file);
