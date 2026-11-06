@@ -2,15 +2,17 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import fc from "fast-check";
 import { pick, rng } from "#shared/testutil.ts";
-import { LAPSE_MS, LEASE_MS, POST_MS, TAKEOVER_MS } from "./handoff.ts";
-import { randomRun, World } from "./handoffSim.testutil.ts";
+import { CLAIM_MS, LAPSE_MS, LEASE_MS, LISTEN_MS, POST_MS, TAKEOVER_MS } from "./handoff.ts";
+import { randomRun, World, type Browser } from "./handoffSim.testutil.ts";
 
 /*
  * One page plays per browser (docs/design/design-v1-music.md 4.4 and 12):
  * pages of one room in one browser appearing, locking, freezing, stalling,
  * showing, hiding, closing and crashing, their contexts interrupted and
  * recovering by themselves, with and without Web Locks, in the world of
- * handoffSim.testutil.ts.
+ * handoffSim.testutil.ts, where a hidden page's timers wake as Chrome's,
+ * Safari's or Firefox's throttling lets them, and a stall releases what
+ * waited in any order a browser may run it.
  *
  * Invariants, checked as each task runs and every 50 ms between:
  * - Two pages never sound at once, except without Web Locks a page that
@@ -274,5 +276,55 @@ describe("one page plays per browser", () => {
     world.runUntil(t0 + 11_000);
     assert.ok(b.audible() && !a.audible(), "B plays and A gives way");
     assert.deepEqual(world.failures, []);
+  });
+
+  test("without Web Locks a page opened hidden and alone starts, though Chrome wakes its timers only once a second", () => {
+    const world = new World(false, rng(14), "chrome");
+    world.phase = 300;
+    const page = world.open("member", false);
+    world.runUntil(world.now + LISTEN_MS + CLAIM_MS + 2_000);
+    assert.ok(page.audible(), "the hidden page plays");
+    assert.deepEqual(world.failures, []);
+  });
+
+  /** How long B, the only eligible page left, takes to sound once A, the playing tab, goes. */
+  function takeover(browser: Browser, locks: boolean, end: "closes" | "crashes", hiddenFor: number, seed: number, shown: boolean): number {
+    const world = new World(locks, rng(seed), browser);
+    world.phase = (seed * 137) % 1_000;
+    const a = world.open("member", true);
+    world.runUntil(world.now + 3_000 + seed * 97);
+    const b = world.open("member", shown);
+    world.runUntil(world.now + hiddenFor + seed * 31);
+    assert.ok(a.audible() && !b.audible(), "A plays and B waits");
+    const t0 = world.now;
+    if (end === "closes") world.close(a);
+    else world.crash(a);
+    while (!b.audible() && world.now < t0 + 120_000) world.runUntil(world.now + 50);
+    assert.deepEqual(world.failures, []);
+    return world.now - t0;
+  }
+
+  for (const browser of ["chrome", "safari"] as const) {
+    for (const locks of [true, false]) {
+      test(`the only eligible page left, hidden, takes the sound over within 2 s of a shown page's time once the playing tab closes or crashes (${browser}, ${locks ? "with" : "without"} Web Locks)`, () => {
+        // Hidden 40 s, Chrome wakes its timers once a second. Hidden 10 minutes, a timer 5 deep in a chain once a minute, and Safari a timer 10 deep on a grid that has grown. Seeds 4 and 6 to 8 caught a decision timer set from the post timer's chain.
+        for (const end of ["closes", "crashes"] as const) {
+          for (const hiddenFor of [40_000, 600_000]) {
+            for (let seed = 1; seed <= 8; seed++) {
+              const shown = takeover(browser, locks, end, hiddenFor, seed, true);
+              const hidden = takeover(browser, locks, end, hiddenFor, seed, false);
+              assert.ok(hidden <= shown + 2_000, `A ${end} after ${hiddenFor / 1_000} s, seed ${seed}: hidden ${hidden} ms, shown ${shown} ms`);
+            }
+          }
+        }
+      });
+    }
+  }
+
+  test("random runs that once broke an invariant without Web Locks keep them all", () => {
+    // Seeds of randomRun in this world, so a change to the world reshuffles them. Each failed once a rule went: 580799090 and 1159891120 a post that waited, late, counts as a stall. 982591748, 35528160 and 642340447 a post on time starts the sound once the window is out. 352355709 and 953875309 a start by time waits for a confirm.
+    for (const seed of [580799090, 1159891120, 982591748, 35528160, 642340447, 352355709, 953875309]) {
+      assert.deepEqual(randomRun(seed, false), [], `seed ${seed}`);
+    }
   });
 });

@@ -6,10 +6,26 @@ import { Handoff, LAPSE_MS, TAKEOVER_MS, type HandoffAudio, type HandoffPost, ty
  * time runs every page's timers, the channel's posts and the lock manager's
  * grants as tasks on each page's main thread, which a stall holds back and
  * a freeze stops, while each page's audio renders on by its own clock.
- * A stall releases the tasks that waited in one of the orders a browser
- * may run them (`Release`).
+ * A hidden page's timers wake only when its browser's throttling lets them
+ * (`Browser`), and a stall releases the tasks that waited in one of the
+ * orders a browser may run them (`Release`).
  * HANDOFF_TRACE=1 prints what happens, for a failing seed.
  */
+
+/**
+ * Whose rules wake a hidden page's timers.
+ * - chrome: a hidden page silent for 30 s has its timers checked once a
+ *   second, and once hidden 5 minutes, a timer 5 or more deep in a chain
+ *   once a minute (developer.chrome.com/blog/timer-throttling-in-chrome-88).
+ * - safari: WebKit aligns only a timer nested 10 deep (one-shot) on a
+ *   hidden page, to whole seconds while it sounds, otherwise to a grid that
+ *   grows with the time it has been hidden (Document::domTimerAlignmentInterval,
+ *   Page::updateDOMTimerAlignmentInterval). The growth is an embedder
+ *   setting, so this takes the worst case and caps it at 32 s.
+ * - firefox: a tab with an AudioContext is not throttled (MDN, setTimeout),
+ *   and a page that takes part here always has one.
+ */
+export type Browser = "chrome" | "safari" | "firefox";
 
 /**
  * The order a stall releases the tasks that waited: "creation" by when
@@ -26,6 +42,11 @@ type Task = {
   run: () => void;
   timer: boolean;
   grant?: true;
+  /** For a timer: when it asked to run, and its nesting (0 when set outside a timer, one more than the timer it was set in). */
+  due: number;
+  nest: number;
+  /** A timer past its throttled wake-up, which waits only for its page's main thread. */
+  woke?: true;
   /** When a task that waited out a stall first became ready, for its page's release order. */
   readyAt?: number;
 };
@@ -47,6 +68,11 @@ export class SimPage {
   seenRunning = true;
   enabled = true;
   shown = false;
+  /** Whether the browser shows the page, which changes before the page hears of it, and since when it is hidden. */
+  visible = false;
+  hiddenSince = 0;
+  lastAudibleAt = -Infinity;
+  wasAudible = false;
   audioTime = 0;
   gate: Gate = { on: false, until: Infinity };
   /** The lease's deadline in this page's audio time, or null. */
@@ -92,10 +118,16 @@ export class World {
   delay: number | null = null;
   /** How every stall releases what waited, or null for one of RELEASES at random per stall. */
   release: Release | null = "creation";
+  readonly browser: Browser;
+  /** Where the throttled wake-ups fall: a browser's grid has its own phase against `Date.now()`. */
+  phase = 0;
+  /** The task running now, for a timer's nesting. */
+  #running: Task | null = null;
 
-  constructor(locks: boolean, r: () => number) {
+  constructor(locks: boolean, r: () => number, browser: Browser = "firefox") {
     this.locks = locks;
     this.r = r;
+    this.browser = browser;
   }
 
   fail(why: string): void {
@@ -109,7 +141,10 @@ export class World {
   }
 
   later(page: SimPage, ms: number, run: () => void, timer = false): Task {
-    const task: Task = { at: this.now + Math.max(0, ms), seq: this.seq++, page: page.id, run, timer };
+    const at = this.now + Math.max(0, ms);
+    const running = this.#running;
+    const nest = timer && running?.timer ? running.nest + 1 : 0;
+    const task: Task = { at, seq: this.seq++, page: page.id, run, timer, due: at, nest };
     this.tasks.push(task);
     return task;
   }
@@ -138,6 +173,7 @@ export class World {
       const stepTo = Math.min(next?.at ?? Infinity, until, this.now + 50);
       this.advance(stepTo);
       if (next && next.at <= this.now) {
+        if (this.#throttled(next)) continue;
         this.tasks.splice(this.tasks.indexOf(next), 1);
         this.runTask(next);
         this.check();
@@ -146,6 +182,41 @@ export class World {
       this.check();
       if (this.now >= until) return;
     }
+  }
+
+  /** The grid a hidden page's timer wakes on, by `browser`, or null when it runs when due. */
+  wakeGrid(page: SimPage, task: Task): number | null {
+    if (page.visible || page.gone) return null;
+    switch (this.browser) {
+      case "chrome":
+        if (this.now - page.lastAudibleAt < 30_000) return null;
+        return this.now - page.hiddenSince >= 300_000 && task.nest >= 5 ? 60_000 : 1_000;
+      case "safari": {
+        if (task.nest < 10) return null;
+        if (page.audible()) return 1_000;
+        // Hidden and silent, the grid grows to the time since that began, stepping up each time a grid's length has passed.
+        const throttledFor = this.now - Math.max(page.hiddenSince, page.lastAudibleAt);
+        return Math.min(32_000, Math.max(1_000, 2 ** Math.floor(Math.log2(Math.max(1, throttledFor / 1_000))) * 1_000));
+      }
+      case "firefox":
+        return null;
+    }
+  }
+
+  /** Moves a timer that came due on a throttled page to its wake-up, or marks it woken. */
+  #throttled(task: Task): boolean {
+    if (!task.timer || task.woke) return false;
+    const page = this.pages[task.page]!;
+    const grid = this.wakeGrid(page, task);
+    if (grid !== null) {
+      const wake = Math.ceil((task.at - this.phase) / grid) * grid + this.phase;
+      if (wake > task.at) {
+        task.at = wake;
+        return true;
+      }
+    }
+    task.woke = true;
+    return false;
   }
 
   advance(to: number): void {
@@ -168,10 +239,26 @@ export class World {
       this.tasks.push(task);
       return;
     }
-    task.run();
+    this.#running = task;
+    try {
+      task.run();
+    } finally {
+      this.#running = null;
+    }
+  }
+
+  /** Throttling eased (the page is shown, or sounds): a timer waiting for a later wake-up runs when due. */
+  rewake(page: SimPage): void {
+    for (const t of [...this.tasks, ...page.held]) if (t.page === page.id && t.timer && !t.woke) t.at = Math.max(this.now, t.due);
   }
 
   check(): void {
+    for (const p of this.pages) {
+      const audible = p.audible();
+      if (audible && !p.wasAudible) this.rewake(p);
+      p.wasAudible = audible;
+      if (audible) p.lastAudibleAt = this.now;
+    }
     const sounding = this.pages.filter((p) => p.audible());
     if (this.locks) for (const p of sounding) if (!p.holdsLock) this.fail(`${p.name} sounds without the lock`);
     if (sounding.length > 1) {
@@ -280,6 +367,8 @@ export class World {
     this.log(`${page.name} opens ${kind} ${shown ? "shown" : "hidden"}`);
     this.pages.push(page);
     page.shown = shown;
+    page.visible = shown;
+    page.hiddenSince = this.now;
     page.handoff = new Handoff({
       room: "R",
       page: page.name,
@@ -374,10 +463,15 @@ export class World {
   }
 
   show(page: SimPage, shown: boolean): void {
+    // The browser stops or starts throttling at once, and the page hears of it as a task.
+    if (shown && !page.visible) this.rewake(page);
+    if (!shown && page.visible) page.hiddenSince = this.now;
+    page.visible = shown;
+    // The page reads the state as it is when the event runs, as the engine reads document.visibilityState.
     this.onPage(page, () => {
-      this.log(`${page.name} ${shown ? "shown" : "hidden"}`);
-      page.shown = shown;
-      page.handoff.setShown(shown);
+      this.log(`${page.name} ${page.visible ? "shown" : "hidden"}`);
+      page.shown = page.visible;
+      page.handoff.setShown(page.visible);
     });
   }
 
@@ -418,9 +512,9 @@ export class World {
 }
 
 export function settleAndCheck(world: World, label: string): SimPage | null {
-  // Every stall over, then long enough for a lapse, a takeover by time, a listen window and a claim.
+  // Every stall over, then long enough for a lapse, a takeover by time, a listen window and a claim, and for three of a hidden page's once-a-second wake-ups along the way.
   const stalls = Math.max(world.now, ...world.pages.map((p) => p.stalledUntil));
-  world.runUntil(stalls + LAPSE_MS + TAKEOVER_MS + 4_000);
+  world.runUntil(stalls + LAPSE_MS + TAKEOVER_MS + 4_000 + (world.browser === "firefox" ? 0 : 3_000));
   const live = world.live().filter((p) => !p.frozen);
   const eligible = live.filter((p) => p.eligible());
   const sounding = world.pages.filter((p) => p.audible());
@@ -444,7 +538,8 @@ const STEPS: readonly Step[] = ["open", "close", "crash", "stall", "freeze", "th
 
 export function randomRun(seed: number, locks: boolean): string[] {
   const r = rng(seed);
-  const world = new World(locks, r);
+  const world = new World(locks, r, chance(r, 0.5) ? "chrome" : pick(r, ["safari", "firefox"] as const));
+  world.phase = int(r, 0, 999);
   world.release = null;
   world.open(chance(r, 0.2) ? "display" : "member", chance(r, 0.7));
   const steps = int(r, 4, 40);
@@ -497,7 +592,7 @@ export function randomRun(seed: number, locks: boolean): string[] {
       if (owner) {
         for (let k = 0; k < 6; k++) {
           const p = pick(r, world.live());
-          world.show(p, !p.shown);
+          world.show(p, !p.visible);
           world.runUntil(world.now + pick(r, [50, 500, 2_500]));
           if (!owner.audible()) world.fail(`${owner.name} stopped through tab switches`);
         }

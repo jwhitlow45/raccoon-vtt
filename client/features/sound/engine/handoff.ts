@@ -19,6 +19,10 @@
  * a winner takes over by time only 7 seconds after an armed post. From an
  * unarmed owner, a page alone when it last posted, it waits for the
  * released post and keeps that owner's claim after its entry lapses.
+ * A hidden page's timers wait for the browser's throttled wake-ups
+ * (STALL_MS), so it learns of a stall from a late post, posts when it
+ * hears one and its own is due, and starts by time only from a task that
+ * runs after everything that waited (#confirmed).
  *
  * Everything here is driven through `HandoffEnv`, so a test runs many pages
  * of one browser against a fake channel, fake locks and a fake clock.
@@ -38,7 +42,14 @@ export const HANDOFF_FADE_MS = 300;
 export const LISTEN_MS = 2_500;
 /** Without Web Locks a winner with no owner to wait for claims for this long before it plays, so two winners with views a post apart see each other first. */
 export const CLAIM_MS = 400;
-/** A timer this late means the page's main thread stood still, so what it decides waits for the posts that arrived meanwhile. */
+/**
+ * A shown page's timer, or any page's post, this late means the page's main
+ * thread stood still, so what it decides waits for the posts that arrived
+ * meanwhile. A hidden page's timers say nothing: Chrome wakes them once a
+ * second, and after 5 minutes a chained one once a minute, and Safari
+ * aligns a deeply nested one to a grid that grows while the page is hidden.
+ * Posts are never throttled.
+ */
 export const STALL_MS = 200;
 /** A lease renewed this close to its deadline may already be fading, so the owner counts it as run out. */
 const LEASE_MARGIN_MS = 500;
@@ -158,12 +169,21 @@ export class Handoff {
   #claimSince: number | null = null;
   /** Without Web Locks: no start by itself before this, after a stall, so the posts that waited arrive first. */
   #settleUntil = 0;
+  /** Without Web Locks: counts claim windows, so a confirm meant for one never starts another. */
+  #window = 0;
+  /** The confirm in flight and the window it is for, and the window the running confirm is for. */
+  #confirmTimer: unknown = null;
+  #confirmFor = 0;
+  #confirming = 0;
+  /** While a post on time is handled: every post that arrived before it has run, and the main thread is not stalled. */
+  #onTime = false;
   #leaseRenewedAt = 0;
   /** The lock request in flight, and the release of the lock once held. */
   #lockRequest: AbortController | null = null;
   #releaseLock: (() => void) | null = null;
   #posted = 0;
   #postTimer: unknown = null;
+  #postDue = Infinity;
   #decideTimer: unknown = null;
   #decideAt = Infinity;
   #yieldTimer: unknown = null;
@@ -278,6 +298,9 @@ export class Handoff {
   /** A post from another page of the room. */
   receive(msg: HandoffPost): void {
     if (this.#closed || msg.page === this.#env.page || msg.v !== 1) return;
+    // Posts are never throttled, so a late one shows a stall on a hidden page too, whose timers cannot.
+    const onTime = this.#env.now() - msg.sentAt <= STALL_MS;
+    if (!onTime) this.#stalled();
     if (msg.bye) {
       this.#peers.delete(msg.page);
     } else {
@@ -289,10 +312,23 @@ export class Handoff {
       this.#peers.set(msg.page, { post: msg });
       // A post that waited out a freeze may run before the resume event does: it still counts, but nothing acts on it until then.
       if (this.#frozen) return;
+      // A hidden page's post timer may wait long for a throttled wake-up (STALL_MS), and its entry lapse meanwhile, so a post heard once its own is due sends it, from a task no throttling holds back.
+      if (this.#postTimer !== null && now >= this.#postDue) this.#tick();
       // A page that just started, or came back from a freeze or a stall, hears every live page at once rather than in up to a post's time.
-      if (fresh) this.#post();
+      else if (fresh) this.#post();
     }
-    this.#evaluate();
+    // A decide timer set in its own callback nests deeper each time, and a hidden page's deeply nested timer wakes far later (STALL_MS), so a post sets it afresh.
+    if (this.#decideTimer !== null) {
+      this.#env.clearTimer(this.#decideTimer);
+      this.#decideTimer = null;
+      this.#decideAt = Infinity;
+    }
+    this.#onTime = onTime;
+    try {
+      this.#evaluate();
+    } finally {
+      this.#onTime = false;
+    }
   }
 
   // ---------------------------------------------------------------- deciding
@@ -388,10 +424,38 @@ export class Handoff {
     if (now < this.#listenUntil || now < this.#settleUntil) return this.#scheduleDecision(now);
     if (this.#claimSince === null) {
       this.#claimSince = now;
+      this.#window++;
       return this.#scheduleDecision(now);
     }
-    if (now < this.#claimSince + CLAIM_MS) return this.#scheduleDecision(now);
+    if (now < this.#claimSince + CLAIM_MS || !this.#confirmed()) return this.#scheduleDecision(now);
     this.#become();
+  }
+
+  /**
+   * Whether this task may start the sound once the claim window has run
+   * out. After a stall the browser runs what waited in any order, and a
+   * hidden page cannot tell a stall by its timers, so the start comes from
+   * a task that runs after all of it: a post on time, or a confirm, a timer
+   * set once the window ran out. A post that waited is late and restarts
+   * the claim (#stalled), so a confirm that runs after it starts nothing.
+   */
+  #confirmed(): boolean {
+    if (this.#onTime) return true;
+    if (this.#confirming === this.#window) return true;
+    if (this.#confirmTimer !== null && this.#confirmFor === this.#window) return false;
+    if (this.#confirmTimer !== null) this.#env.clearTimer(this.#confirmTimer);
+    const window = this.#window;
+    this.#confirmFor = window;
+    this.#confirmTimer = this.#env.setTimer(0, () => {
+      this.#confirmTimer = null;
+      this.#confirming = window;
+      try {
+        this.#evaluate();
+      } finally {
+        this.#confirming = 0;
+      }
+    });
+    return false;
   }
 
   #become(): void {
@@ -514,36 +578,51 @@ export class Handoff {
     });
   }
 
-  /** A timer that fired late means the main thread stood still: nothing starts by time until the posts that waited are in. */
+  /** A shown page's timer that fired late means the main thread stood still. A hidden page's timers wait for the browser's wake-ups, so their lateness proves nothing (STALL_MS). */
   #late(due: number): void {
-    const now = this.#env.now();
-    if (now - due <= STALL_MS) return;
-    this.#settleUntil = now + CLAIM_MS;
+    if (this.#shown && this.#env.now() - due > STALL_MS) this.#stalled();
+  }
+
+  /** The main thread stood still: nothing starts by time until the posts that waited are in. */
+  #stalled(): void {
+    this.#settleUntil = this.#env.now() + CLAIM_MS;
     this.#claimSince = null;
   }
 
   #tickLater(): void {
-    const due = this.#env.now() + POST_MS;
+    this.#postDue = this.#env.now() + POST_MS;
     this.#postTimer = this.#env.setTimer(POST_MS, () => {
       this.#postTimer = null;
-      if (this.#closed || this.#frozen) return;
-      this.#late(due);
-      const now = this.#env.now();
-      // A renewal this late may come after the lease began to fade, so the owner gives up rather than sound again.
-      if (this.#leaseRanOut(now)) {
-        this.#giveUp();
-      } else {
-        // Only while another page is still live: alone again, the lease goes.
-        this.#updateLease(now);
-        if (this.#owns && this.#armed && !this.#yielding) {
-          this.#env.audio.lease(LEASE_MS);
-          this.#leaseRenewedAt = now;
-        }
-      }
-      this.#post();
-      this.#tickLater();
-      this.#evaluate();
+      this.#tick();
     });
+  }
+
+  /**
+   * The post that renews the entry and the lease, from its timer or from a
+   * post heard once it is due. It decides nothing itself: the post timer
+   * re-arms in its own callback, so a timer set from it nests ever deeper
+   * and on a hidden page may wake only once a minute (STALL_MS). Decisions
+   * come from posts and the decide timer, which a post sets afresh.
+   */
+  #tick(): void {
+    if (this.#postTimer !== null) this.#env.clearTimer(this.#postTimer);
+    this.#postTimer = null;
+    if (this.#closed || this.#frozen) return;
+    this.#late(this.#postDue);
+    const now = this.#env.now();
+    // A renewal this late may come after the lease began to fade, so the owner gives up rather than sound again.
+    if (this.#leaseRanOut(now)) {
+      this.#giveUp();
+    } else {
+      // Only while another page is still live: alone again, the lease goes.
+      this.#updateLease(now);
+      if (this.#owns && this.#armed && !this.#yielding) {
+        this.#env.audio.lease(LEASE_MS);
+        this.#leaseRenewedAt = now;
+      }
+    }
+    this.#post();
+    this.#tickLater();
   }
 
   #post(bye = false): void {
@@ -564,11 +643,12 @@ export class Handoff {
   }
 
   #clearTimers(): void {
-    for (const t of [this.#postTimer, this.#decideTimer, this.#yieldTimer]) if (t !== null) this.#env.clearTimer(t);
+    for (const t of [this.#postTimer, this.#decideTimer, this.#yieldTimer, this.#confirmTimer]) if (t !== null) this.#env.clearTimer(t);
     this.#postTimer = null;
     this.#decideTimer = null;
     this.#decideAt = Infinity;
     this.#yieldTimer = null;
+    this.#confirmTimer = null;
   }
 
   #changed(): void {
