@@ -379,7 +379,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await pane(dm).getByText("Hidden Pit", { exact: true }).first().waitFor();
     await pane(dm).getByText("From Hidden Pit, levels 1–4").waitFor();
 
-    await unfold(dm, "Afterwards");
+    await unfold(dm, "Aftermath");
     await pane(dm).getByRole("switch", { name: "Marks itself found when players see it go off" }).click();
     await waitFor("found when it goes off turned off", () => trap(dmSocket)?.rig?.foundOnSpring === false || null);
     await unfold(dm, "Save and damage");
@@ -766,7 +766,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
           assert.ok(await wholeInReach(target), `${label}: the pane's ${name} is out of reach`);
         }
         // The folds, the pane scrolling inside to its lower ones. At 844 x 390 at 130% the tool's hint line may cover the foot of a pane at its least height, as before, so this asks only that no alert does.
-        for (const fold of ["Name", "Hits"]) {
+        for (const fold of ["Name", "Targets"]) {
           const target = pane(dm).getByRole("button", { name: fold, exact: true });
           await target.scrollIntoViewIfNeeded();
           assert.ok(await clearOfAlerts(target), `${label}: an alert covers the pane's ${fold} fold`);
@@ -870,8 +870,8 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await reopenRoom(dm);
   });
 
-  test("lp2-1b. the pane's choices fit its card: Afterwards and Hits unfold with no sideways scroll at 1280 x 800 and 844 x 390, Afterwards is one switch, Who's three words share a row, and arrow keys through Hits change what it hits and start no pick, while Add squares and Place the area still start theirs (docs/design/design-v1-look-pass-2.md 2.7)", async () => {
-    // A 320 px phone at 130%, where the pane is a sheet about 214 px inside: each of Hits' names, chosen and so with its check, fits without a sideways scroll (LP2L1-ASTRA-01).
+  test("lp2-1b. the pane's choices fit its card: Aftermath and Targets unfold with no sideways scroll at 1280 x 800 and 844 x 390, Aftermath is one switch, Who's three words share a row, and arrow keys through Targets change what it hits and start no pick, while Add squares and Place the area still start theirs (docs/design/design-v1-look-pass-2.md 2.7)", async () => {
+    // A 320 px phone at 130%, where the pane is a sheet about 214 px inside: each of Targets' names, chosen and so with its check, fits without a sideways scroll (LP2L1-ASTRA-01).
     await dm.setViewportSize({ width: 320, height: 568 });
     await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
     await reopenRoom(dm);
@@ -880,21 +880,21 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await pickTool(dm, "Trap");
     await tapCell(dm, BOUNDS, { x: 6, y: 5 });
     await pane(dm).getByText("Hidden Pit", { exact: true }).first().waitFor();
-    await unfold(dm, "Hits");
+    await unfold(dm, "Targets");
     for (const name of ["The creature that set it off", "Everyone on the trap", "Everyone in these squares", "Everyone in an area"]) {
-      await pane(dm).getByRole("radiogroup", { name: "Hits" }).getByRole("radio", { name }).click();
+      await pane(dm).getByRole("radiogroup", { name: "Targets" }).getByRole("radio", { name }).click();
       await dm.waitForTimeout(150);
       const widths = await pane(dm).evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
       assert.ok(widths.scroll <= widths.client, `320 x 568 at 130%, ${name} chosen: the pane scrolls sideways: ${JSON.stringify(widths)}`);
       // Every row inside the pane's body, short of its side padding, which a scroll width alone does not show.
       const rows = await pane(dm).evaluate((el) => {
         const body = el.getBoundingClientRect().right - parseFloat(el.ownerDocument.defaultView!.getComputedStyle(el).paddingRight) - parseFloat(el.ownerDocument.defaultView!.getComputedStyle(el).borderRightWidth);
-        return Array.from(el.querySelectorAll('[role="radiogroup"][aria-label="Hits"] label')).map((l) => ({ right: (l as { getBoundingClientRect(): { right: number } }).getBoundingClientRect().right, body }));
+        return Array.from(el.querySelectorAll('[role="radiogroup"][aria-label="Targets"] label')).map((l) => ({ right: (l as { getBoundingClientRect(): { right: number } }).getBoundingClientRect().right, body }));
       });
       for (const r of rows) assert.ok(r.right <= r.body + 0.5, `320 x 568 at 130%, ${name} chosen: a row runs past the pane's body: ${JSON.stringify(r)}`);
     }
     await shots.take(dm, "traps-lp2-1b-320x568-130-hits");
-    await pane(dm).getByRole("radiogroup", { name: "Hits" }).getByRole("radio", { name: "The creature that set it off" }).click();
+    await pane(dm).getByRole("radiogroup", { name: "Targets" }).getByRole("radio", { name: "The creature that set it off" }).click();
     await waitFor("back to the creature that set it off", () => (trap(dmSocket)?.rig?.hits === "trigger" ? true : null));
     await pane(dm).getByRole("button", { name: "Done", exact: true }).click();
     await pane(dm).waitFor({ state: "detached" });
@@ -910,9 +910,9 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
       await pickTool(dm, "Trap");
       await tapCell(dm, BOUNDS, { x: 6, y: 4 });
       await pane(dm).getByText("Hidden Pit", { exact: true }).first().waitFor();
-      await unfold(dm, "Goes off when");
-      await unfold(dm, "Afterwards");
-      await unfold(dm, "Hits");
+      await unfold(dm, "Trigger");
+      await unfold(dm, "Aftermath");
+      await unfold(dm, "Targets");
       await dm.waitForTimeout(200);
       const widths = await pane(dm).evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
       assert.ok(widths.scroll <= widths.client, `${label}: the pane scrolls sideways: ${JSON.stringify(widths)}`);
@@ -926,7 +926,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await pickTool(dm, "Trap");
     await tapCell(dm, BOUNDS, { x: 6, y: 4 });
     await pane(dm).getByText("Hidden Pit", { exact: true }).first().waitFor();
-    await unfold(dm, "Afterwards");
+    await unfold(dm, "Aftermath");
     const again = pane(dm).getByRole("switch", { name: "Arms again at the start of the next turn" });
     assert.equal(await again.getAttribute("aria-checked"), trap(dmSocket)?.rig?.resets === "nextTurn" ? "true" : "false");
     await again.click();
@@ -935,8 +935,8 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await waitFor("it goes off once", () => (trap(dmSocket)?.rig?.resets === "never" ? true : null));
 
     // From the creature that set it off, the arrow keys walk the choices: each writes what needs no map, and the pane never steps aside for a pick.
-    await unfold(dm, "Hits");
-    const hits = pane(dm).getByRole("radiogroup", { name: "Hits" });
+    await unfold(dm, "Targets");
+    const hits = pane(dm).getByRole("radiogroup", { name: "Targets" });
     await hits.getByRole("radio", { name: "The creature that set it off" }).click();
     await waitFor("it hits the creature that set it off", () => (trap(dmSocket)?.rig?.hits === "trigger" ? true : null));
     await hits.getByRole("radio", { name: "The creature that set it off" }).focus();
@@ -962,7 +962,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     // The buttons that follow the choice still start the map's pick and the area tool.
     await hits.getByRole("radio", { name: "Everyone in these squares" }).click();
     // Named apart from the Add squares that grows the trap itself, which keeps its own name (F5).
-    await unfold(dm, "Goes off when");
+    await unfold(dm, "Trigger");
     assert.equal(await pane(dm).getByRole("button", { name: "Add squares", exact: true }).count(), 1);
     await pane(dm).getByRole("button", { name: "Add squares it hits", exact: true }).click();
     await waitFor("the pane steps aside for the pick", async () => ((await pane(dm).isVisible()) ? null : true));
@@ -983,7 +983,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await tapCell(dm, BOUNDS, { x: 6, y: 4 });
     await pane(dm).getByText("Hidden Pit", { exact: true }).first().waitFor();
     assert.deepEqual(trap(dmSocket)?.rig?.on, ["enter"]);
-    await unfold(dm, "Goes off when");
+    await unfold(dm, "Trigger");
     const onto = pane(dm).getByRole("checkbox", { name: "A creature steps onto it" });
     assert.equal(await onto.getAttribute("aria-disabled"), "true");
     assert.equal(await onto.evaluate((el) => (el as unknown as { disabled: boolean }).disabled), false, "the last tick is natively disabled, out of the focus order");
@@ -1196,7 +1196,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
       await pickTool(dm, "Trap");
       await tapCell(dm, BOUNDS, { x: 10, y: 8 });
       await pane(dm).getByText("Poisoned Needle Gauntlet", { exact: true }).first().waitFor();
-      for (const group of ["Afterwards", "Save and damage", "Players read", "It also", "Finding and disarming"]) await unfold(dm, group);
+      for (const group of ["Aftermath", "Save and damage", "Message", "Map effects", "Finding and disarming"]) await unfold(dm, group);
       await dm.waitForTimeout(200);
       const rows = await paneRows(pane(dm));
       await shots.take(dm, `traps-pl1-a-${at.size.width}x${at.size.height}-${Math.round(at.scale * 100)}`);
@@ -1215,7 +1215,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
       // The pit's one way to go off keeps its tick, with the help that says why under it.
       await tapCell(dm, BOUNDS, { x: 6, y: 4 });
       await pane(dm).getByText("Hidden Pit", { exact: true }).first().waitFor();
-      await unfold(dm, "Goes off when");
+      await unfold(dm, "Trigger");
       await pane(dm).getByText("A trap on squares goes off at least one way.").waitFor();
       const { ticks } = await paneRows(pane(dm));
       assert.equal(ticks.length, 1, `${label}: the held tick was not read`);
@@ -1340,7 +1340,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await pickTool(dm, "Trap");
     await tapCell(dm, BOUNDS, { x: 6, y: 4 });
     await pane(dm).getByText("Hidden Pit", { exact: true }).first().waitFor();
-    await unfold(dm, "Goes off when");
+    await unfold(dm, "Trigger");
     const onto = pane(dm).getByRole("checkbox", { name: "A creature steps onto it" });
     // A mark on the element itself, which a new element in its place would not carry.
     const mark = (l: Locator) => l.evaluate((el) => ((el as unknown as { pl1Mark: boolean }).pl1Mark = true));
@@ -1360,7 +1360,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
 
     await ops.send({ t: "trap.update", trapId: run.trapId, patch: { rig: { sound: null } } });
     await waitFor("no sound", () => (trap(dmSocket)?.rig?.sound ? null : true));
-    await unfold(dm, "Players read");
+    await unfold(dm, "Message");
     const sound = pane(dm).getByRole("combobox", { name: "Sound", exact: true });
     const play = pane(dm).getByRole("button", { name: "Play", exact: true });
     await sound.focus();

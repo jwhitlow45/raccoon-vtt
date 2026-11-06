@@ -1026,7 +1026,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     const find = map.getByRole("button", { name: "Find the grid", exact: true });
     assert.equal(await find.isDisabled(), false, "Find the grid looks for hexes too (HX-9c)");
     await map.getByText(HEX_LIMITS.counting, { exact: true }).waitFor();
-    assert.equal(await map.getByText("Or count the squares").count(), 0);
+    assert.equal(await map.getByText("Square count").count(), 0);
     await map.getByRole("button", { name: "Line up the grid", exact: true }).click();
     const bar = dm.getByRole("toolbar", { name: "Line up grid options" });
     await bar.locator("[data-options-line]").filter({ hasText: "Drag a box over 3 hexes across. Fine-tune it by its corners." }).waitFor();
@@ -1525,7 +1525,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     assert.equal(made.grid, "hexRows");
     const editor = dm.getByRole("dialog", { name: "Edit trap" });
     await editor.waitFor();
-    await editor.getByRole("button", { name: "Afterwards", exact: true }).click();
+    await editor.getByRole("button", { name: "Aftermath", exact: true }).click();
     const pit = editor.getByRole("switch", { name: "Opens a pit" });
     assert.equal(await pit.isDisabled(), false, "from H3 a pit opens on hexes too (HX-8)");
     await shots.take(dm, "hx7-trap-pane");
@@ -1603,7 +1603,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
           await tap({ col: 10, row: 16 });
           const editor = page.getByRole("dialog", { name: "Edit trap" });
           await editor.waitFor();
-          await editor.getByRole("button", { name: "Afterwards", exact: true }).click();
+          await editor.getByRole("button", { name: "Aftermath", exact: true }).click();
           await editor.getByRole("switch", { name: "Opens a pit" }).scrollIntoViewIfNeeded();
           off.push(...alignmentLines(await measureAlignment(editor), `the trap's pane on hexes at ${at}`));
           await shots.take(page, `hx7-trap-pane-${size.name}-${scale * 100}`);

@@ -151,7 +151,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     const titles = await headings(sheet);
     assert.deepEqual(titles.slice(0, 3), ["Keys", "Mouse with keys", "Mouse and touch"], titles.join(", "));
     assert.ok(!titles.includes("Android"), titles.join(", "));
-    for (const surface of ["Side panel tabs", "Handout viewer", "Token window", "Initiative", "Roll requests", "Token and character fields", "Label, pin and light panes", "Dialogs", "Adding an image"]) {
+    for (const surface of ["Side panel tabs", "Handout viewer", "Token window", "Initiative", "Roll requests", "Token and character fields", "Label, pin and light panes", "Dialogs", "Images"]) {
       assert.ok(titles.includes(surface), `${surface} in ${titles.join(", ")}`);
     }
     // Request a roll's fields send it (docs/design/design-v1-roll-request.md 8).
@@ -294,7 +294,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     await player.getByRole("button", { name: "Show the shortcuts" }).click();
     const sheet = player.getByRole("dialog", { name: "Shortcuts" });
     await sheet.waitFor();
-    const paste = sheet.getByRole("heading", { name: "Adding an image", exact: true });
+    const paste = sheet.getByRole("heading", { name: "Images", exact: true });
     await paste.scrollIntoViewIfNeeded();
     const wide = await sheet.evaluate((root) => {
       type El = { scrollWidth: number; clientWidth: number; tagName: string; textContent: string | null };
@@ -746,9 +746,9 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     await clickCell(dm, { x: 4, y: 4 });
     const pane = dm.getByRole("dialog", { name: "Edit trap" });
     await pane.waitFor();
-    const fold = pane.getByRole("button", { name: "Hits", exact: true });
+    const fold = pane.getByRole("button", { name: "Targets", exact: true });
     if ((await fold.getAttribute("aria-expanded")) !== "true") await fold.click();
-    await pane.getByRole("radiogroup", { name: "Hits" }).getByRole("radio", { name: "Everyone in an area" }).click();
+    await pane.getByRole("radiogroup", { name: "Targets" }).getByRole("radio", { name: "Everyone in an area" }).click();
     await pane.getByRole("button", { name: "Place the area", exact: true }).click();
     await optionsOf(dm, "Area").waitFor();
     await clickCell(dm, { x: 12, y: 6 });

@@ -414,7 +414,7 @@ describe("the light theme", { concurrency: false }, () => {
     await tapCell(dm, BOUNDS, { x: 17, y: 3 });
     const pane = dm.getByRole("dialog", { name: "Edit trap" });
     await pane.waitFor();
-    const hits = pane.getByRole("button", { name: "Hits", exact: true });
+    const hits = pane.getByRole("button", { name: "Targets", exact: true });
     if ((await hits.getAttribute("aria-expanded")) !== "true") await hits.click();
     await pane.getByRole("button", { name: "Place the area", exact: true }).click();
     const areaBar = dm.getByRole("toolbar", { name: "Area options" });
@@ -863,7 +863,7 @@ describe("the light theme", { concurrency: false }, () => {
         await xcard.waitFor({ state: "detached" });
         const dmPanel = await openPanel(desk, "DM");
         // Setup, so folded on a phone (docs/design/design-v1-panel-groups.md 6.2).
-        await openGroup(dmPanel, "Check their view");
+        await openGroup(dmPanel, "Preview");
         await dmPanel.getByRole("combobox", { name: "View as a player" }).selectOption({ label: "Pat" });
         await dmPanel.getByRole("button", { name: "View", exact: true }).click();
         const preview = desk.locator('dialog[aria-label="Viewing as Pat"]');
