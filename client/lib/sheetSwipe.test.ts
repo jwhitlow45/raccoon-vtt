@@ -1380,6 +1380,46 @@ describe("PS-B. the arrows' steps", () => {
     assert.deepEqual(page.stands, [false]);
   });
 
+  test("Down over unsaved input slides to the half-follow's place and springs back, closing nothing, at 100% and 130%, and Down from full still steps down", () => {
+    for (const [scale, closeAt, sign] of [
+      [1, 380, 95],
+      [1.3, 60, 28.6],
+    ] as const) {
+      const page = new FakePage({ unsaved: true });
+      const log = logged(page);
+      const session = new SwipeSession(page.host);
+      const s = sessionStart({ stand: "normal", up: 0, closeAt, scale });
+      assert.equal(session.step("closed", s), true);
+      assert.equal(session.step("closed", s), false, "a second press during the sign");
+      page.settle();
+      assert.equal(page.closes, 0, "the typed text is never closed away");
+      assert.equal(page.shown, true);
+      assert.equal(log.length, 3);
+      near(Number(log[0]!.split(" ")[1]), sign, `${scale}: the sign's place`);
+      assert.deepEqual([log[0]!.split(" ")[0], ...log.slice(1)], ["slide", "slide 0", "rest"]);
+      assert.equal(page.placed, false);
+    }
+    const reduced = new FakePage({ unsaved: true, reduced: true });
+    const still = logged(reduced);
+    assert.equal(new SwipeSession(reduced.host).step("closed", sessionStart()), true);
+    assert.equal(reduced.closes, 0);
+    assert.deepEqual(still, [], "reduced motion: nothing moves and nothing closes");
+    const mid = new FakePage({ unsaved: true });
+    const cut = new SwipeSession(mid.host);
+    cut.step("closed", sessionStart());
+    mid.tick(SLIDE_MS / 2);
+    cut.stop();
+    mid.settle();
+    assert.equal(mid.closes, 0);
+    assert.equal(mid.placed, false, "an item change mid-sign rests");
+    assert.equal(mid.pending, false);
+    const full = new FakePage({ unsaved: true });
+    const fs = new SwipeSession(full.host);
+    assert.equal(fs.step("normal", sessionStart({ stand: "full", up: 200 })), true);
+    full.settle();
+    assert.deepEqual(full.stands, [false], "Down from full steps down over unsaved input too");
+  });
+
   test("an arrow does nothing while a finger's or a mouse's press owns the surface, and acts once it lifts", () => {
     for (const input of ["touch", "mouse"] as const) {
       const page = new FakePage();
@@ -1533,8 +1573,8 @@ const ownerEvent: fc.Arbitrary<OwnerEvent> = fc.oneof(
 );
 
 describe("PS-B. the input owner over touch, mouse, pen and the arrows", () => {
-  test("in any order: one owner, no press taken for a mouse, never two ends, nothing after a cancel or an item change, rests only at a stand, Up never closes", () => {
-    const reached = { mouseClaims: 0, touchClaims: 0, refused: 0, steps: 0, ignoredSteps: 0, closes: 0, fills: 0, interrupted: 0 };
+  test("in any order: one owner, no press taken for a mouse, never two ends, nothing after a cancel or an item change, rests only at a stand, Up never closes, Down never closes over unsaved input", () => {
+    const reached = { mouseClaims: 0, touchClaims: 0, refused: 0, steps: 0, ignoredSteps: 0, closes: 0, fills: 0, interrupted: 0, keptDrafts: 0 };
     holds(
       fc.property(
         fc.record({ up: fc.oneof(fc.constant(0), fc.integer({ min: 150, max: 350 })), closeAt: fc.integer({ min: 300, max: 600 }), reduced: fc.boolean(), keepsOpen: fc.boolean(), scale: fc.constantFrom(1, 1.3), events: fc.array(ownerEvent, { minLength: 1, maxLength: 60 }) }),
@@ -1560,13 +1600,15 @@ describe("PS-B. the input owner over touch, mouse, pen and the arrows", () => {
           /** The press the session follows, as the hook holds it (`followed`, `dragged`). */
           let down: { input: SwipeInput; dx: number; dy: number } | null = null;
           /** What began the motion now running or last run: a press or an arrow, its ends counted from here. */
-          let episode: { ends: number; cut: number | null; arrowUp: boolean; closes: number } = { ends: 0, cut: null, arrowUp: false, closes: 0 };
+          let episode: { ends: number; cut: number | null; arrowUp: boolean; closes: number; keeps: boolean } = { ends: 0, cut: null, arrowUp: false, closes: 0, keeps: false };
           const ends = () => page.closes + page.stands.length;
           const finish = () => {
             const made = ends() - episode.ends;
             assert.ok(made <= 1, `${made} ends from one press or step`);
             if (episode.cut !== null) assert.equal(ends(), episode.cut, "an end after a cancel or an item change");
             if (episode.arrowUp) assert.equal(page.closes - episode.closes, 0, "Up closed the surface");
+            if (episode.keeps) assert.equal(page.closes - episode.closes, 0, "Down closed a surface holding unsaved input");
+            if (episode.keeps) reached.keptDrafts++;
             if (page.closes > episode.closes) reached.closes++;
             if (episode.cut !== null) reached.interrupted++;
           };
@@ -1577,7 +1619,7 @@ describe("PS-B. the input owner over touch, mouse, pen and the arrows", () => {
               page.shown = true;
               stand = "normal";
             }
-            episode = { ends: ends(), cut: null, arrowUp, closes: page.closes };
+            episode = { ends: ends(), cut: null, arrowUp, closes: page.closes, keeps: false };
           };
           const start = (over: Partial<SessionStart> = {}) => sessionStart({ stand: up > 0 ? stand : "normal", up, closeAt, scale, at: now, ...over });
           for (const e of events) {
@@ -1629,6 +1671,8 @@ describe("PS-B. the input owner over touch, mouse, pen and the arrows", () => {
               const moved = session.step(to, start());
               assert.equal(moved, can, `an arrow to ${to} from ${from}${busy ? " while held or sliding" : ""}`);
               if (moved) reached.steps++;
+              // Down reads the unsaved input as it is pressed, as a swipe reads it at its claim.
+              if (moved && to === "closed" && page.unsavedNow) episode.keeps = true;
               else if (busy) reached.ignoredSteps++;
               if (moved && from === "full" && to === "normal") assert.equal(places[at], -up, "a step down slid from somewhere other than full");
             } else if (e.t === "item") {

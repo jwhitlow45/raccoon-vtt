@@ -519,11 +519,17 @@ export class SwipeSession {
    * release there plays. Nothing while a press owns the surface or a slide
    * runs, nothing toward the stand it has, and no full screen for a surface
    * without one. Up rises into the whole screen's box before it slides, and
-   * Down from full slides from full's own place. Returns whether it moved.
+   * Down from full slides from full's own place. Down toward closed on a
+   * surface holding unsaved input does what a swipe down does: it never
+   * closes (D-261106-006). Returns whether it moved.
    */
   step(to: SwipeEnd, s: SessionStart): boolean {
     if (this.busy || to === s.stand) return false;
     if (to === "full" && (s.up <= 0 || s.stand !== "normal")) return false;
+    if (to === "closed" && this.host.unsaved()) {
+      this.refuseClose(s);
+      return true;
+    }
     if (to === "full") {
       this.risen = true;
       this.host.rise(true);
@@ -532,6 +538,23 @@ export class SwipeSession {
     }
     this.settle(to, s, false, s.stand === "full" ? -s.up : 0);
     return true;
+  }
+
+  /**
+   * The sign a swipe down shows over unsaved input (4.5), played by Down:
+   * the surface slides to where a finger dragged to the close's threshold
+   * would show it, the half-follow's place, and springs back to its stand,
+   * so the typed text stays. Reduced motion has no slide, so nothing moves.
+   */
+  private refuseClose(s: SessionStart): void {
+    if (this.host.reducedMotion()) return;
+    const sign = closeDistance(s.closeAt, s.scale) * UNSAVED_FOLLOW;
+    this.placed = true;
+    this.host.place({ position: sign, clip: s.stand === "normal" }, true);
+    this.stopMotion = this.host.later(SLIDE_MS, () => {
+      this.stopMotion = null;
+      this.settle(s.stand, s, true, sign);
+    });
   }
 
   /** The owning press is over: a mouse's release or loss also ends the document's watch for touches, which no lift of a finger will. */
