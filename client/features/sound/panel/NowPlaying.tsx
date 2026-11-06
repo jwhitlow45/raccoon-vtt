@@ -2,15 +2,11 @@ import type { CSSProperties } from "react";
 import { Button } from "../../../components/Button.tsx";
 import { Help } from "../../../components/Panel.tsx";
 import { IconButton } from "../../../components/IconButton.tsx";
-import { SettingRow } from "../../../components/SettingRow.tsx";
 import { Switch } from "../../../components/Switch.tsx";
 import { theme } from "../../../lib/theme.ts";
-import { useRoomScope, useScoped } from "../../../state/scope.ts";
-import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../../state/view.ts";
+import { useScoped } from "../../../state/scope.ts";
+import { useRoomActions, useRoomView } from "../../../state/view.ts";
 import { seekBoundMs, type Playing } from "#shared/sound.ts";
-import { backgroundCount, SCENE_SOUND, SCENE_SOUND_OPEN } from "../../ambiance/words.ts";
-import { usePanelHere } from "../../panels.ts";
-import { openSceneSettings } from "../../scenes/request.ts";
 import { comingNext, type ComingNext } from "../music/dragOrder.ts";
 import { openMusicWindow, musicWindowSlot } from "../music/open.ts";
 import { Tile, TILE } from "../music/tile.ts";
@@ -21,10 +17,13 @@ import { send } from "./ops.ts";
 import { musicShown, nameOf, playlistsOf, sceneSoundFrom, sceneSoundNames, serverNow, somethingPlays, soundsOf, type MusicShown, type Sounds } from "./state.ts";
 import {
   ANOTHER_WINDOW,
+  backgroundCount,
   CLEAR,
   DEVICE_SILENT,
+  EFFECTS_LABEL,
   EFFECTS_VOLUME,
   loopVolumeName,
+  MUSIC_LABEL,
   MUSIC_VOLUME,
   NAMES_HELP,
   NAMES_SWITCH,
@@ -37,6 +36,7 @@ import {
   skipName,
   STOP_ALL,
   stopName,
+  TABLE_SOUND_HELP,
   timeShown,
   USE_PLAYING,
   USE_SILENCE,
@@ -159,8 +159,8 @@ export function SceneSoundLine(props: {
  * the music block, then Stop all sound while anything sounds, and a line
  * when this device plays nothing. Each a part of its own, so a later
  * player can take the music block's place alone. The volumes for everyone
- * and the scene's sound follow Effects, under What players hear
- * (WhatPlayersHear).
+ * and the scene's sound follow Effects, under Table sound
+ * (TableSound).
  */
 export function NowPlaying() {
   return (
@@ -246,50 +246,56 @@ export function NowLine(props: { loops: number }) {
 }
 
 /**
- * What players hear (D-261102-766): the volumes for everyone, each
- * background sound's with its Stop, the Scene sound row and Use what's
- * playing (docs/design/design-v1-scenes-reorg.md 5), and the names switch.
+ * Table sound, once What players hear (D-261102-766,
+ * docs/design/design-v1-sound-layout.md 4.2 and 7): its help, then the
+ * volumes for everyone, the music's, each background sound's with its
+ * Stop and the effects', then the scene's line with Use what's playing
+ * (6.2) and the names switch. Each slider shows a plain name, "Music", the
+ * sound's or "Effects", since the help says once that these are for every
+ * device, and keeps "volume for everyone" in its accessible name.
  */
-export function WhatPlayersHear() {
+export function TableSound() {
   const actions = useRoomActions();
   const playing = useRoomView((s) => s.view?.playing ?? null);
   const sounds = useRoomView((s) => soundsOf(s.view));
-  const music = playing?.music ?? null;
   const loops = playing ? Object.entries(playing.loops) : [];
   return (
-    <div style={{ display: "grid", gap: theme.space(4), minWidth: 0 }}>
-      <MusicVolume />
+    <div data-sound-table="" style={{ display: "grid", gap: theme.space(4), minWidth: 0 }}>
+      <Help>{TABLE_SOUND_HELP}</Help>
+      <MusicVolume label={MUSIC_LABEL} />
       {loops.map(([id, loop]) => {
         const name = nameOf(sounds[loop.soundId]);
         return (
           <VolumeSlider
             key={id}
-            label={loopVolumeName(name)}
+            label={name}
+            name={loopVolumeName(name)}
             value={loop.volume}
             onChange={(v) => send(actions, { t: "loop.set", id, volume: v })}
             trailing={<IconButton icon="stop" label={stopName(name)} onClick={() => send(actions, { t: "loop.stop", id })} />}
           />
         );
       })}
-      <VolumeSlider label={EFFECTS_VOLUME} value={playing?.volume.effects ?? 100} onChange={(v) => send(actions, { t: "sound.mix", effects: v })} />
-      <SceneSoundRow playing={playing} />
+      <VolumeSlider label={EFFECTS_LABEL} name={EFFECTS_VOLUME} value={playing?.volume.effects ?? 100} onChange={(v) => send(actions, { t: "sound.mix", effects: v })} />
+      <SceneSoundUse playing={playing} />
       <NamesSwitch />
     </div>
   );
 }
 
 /**
- * The scene's own sound, as Ambiance shows it (docs/design/design-v1-scenes-reorg.md 5):
- * a row that opens the Scene sound group in Scenes, its help the scene's
- * line, then Use what's playing, which saves what plays now into the
- * scene in view and is described by the same line, so it says which
- * scene. Play it, Use silence and Clear live in Scenes. Pure.
+ * Use what's playing (docs/design/design-v1-sound-layout.md 6.2), an
+ * action beside what plays: it saves what plays now into the scene on the
+ * DM's screen. The scene's line is plain help over it and describes it,
+ * so it says which scene, and "Play something first." says why it is off.
+ * No row opens Scenes: Play it, Use silence and Clear live there, in its
+ * Scene sound group. Pure.
  */
-export function SceneSoundShortcut(props: { sceneName: string; sound: { names: string[] } | null; canUsePlaying: boolean; lineId: string; onOpen(): void; onUsePlaying(): void }) {
+export function UseWhatsPlaying(props: { sceneName: string; sound: { names: string[] } | null; canUsePlaying: boolean; lineId: string; onUsePlaying(): void }) {
   const firstId = `${props.lineId}-first`;
   return (
     <div data-sound-scene="" style={{ display: "grid", gap: theme.space(2), minWidth: 0 }}>
-      <SettingRow name={SCENE_SOUND} label={SCENE_SOUND_OPEN} help={<span id={props.lineId}>{sceneLine(props.sceneName, props.sound)}</span>} onOpen={props.onOpen} />
+      <Help id={props.lineId}>{sceneLine(props.sceneName, props.sound)}</Help>
       <Actions>
         <Button size="sm" disabled={!props.canUsePlaying} aria-describedby={props.canUsePlaying ? props.lineId : `${props.lineId} ${firstId}`} onClick={props.onUsePlaying}>
           {USE_PLAYING}
@@ -300,39 +306,41 @@ export function SceneSoundShortcut(props: { sceneName: string; sound: { names: s
   );
 }
 
-function SceneSoundRow(props: { playing: Playing | null }) {
+/** Use what's playing for the scene on the DM's screen, none with no scene in view. */
+function SceneSoundUse(props: { playing: Playing | null }) {
   const actions = useRoomActions();
-  const scope = useRoomScope();
-  const ui = useRoomUi();
-  const store = useRoomStore();
-  const here = usePanelHere();
   const scene = useRoomView((s) => (s.sceneId ? (s.view?.scenes[s.sceneId] ?? null) : null));
   const sounds = useRoomView((s) => soundsOf(s.view));
   const playlists = useRoomView((s) => playlistsOf(s.view));
   if (!scene) return null;
   const sound = scene.sound ?? null;
   return (
-    <SceneSoundShortcut
+    <UseWhatsPlaying
       sceneName={scene.name}
       sound={sound ? { names: sceneSoundNames(sound, playlists, sounds) } : null}
       canUsePlaying={somethingPlays(props.playing)}
       lineId={`sound-scene-${scene.id}`}
-      onOpen={() => openSceneSettings(scope, ui, "sound", { from: here, room: store })}
       onUsePlaying={() => send(actions, { t: "scene.update", sceneId: scene.id, patch: { sound: sceneSoundFrom(props.playing, playlists) } })}
     />
   );
 }
 
-/** The music's volume for everyone while music plays, here and in the Music window's Now playing (docs/design/design-v1-music-player.md 3.1), one setting. */
-export function MusicVolume() {
+/**
+ * The music's volume for everyone while music plays, one setting, in Table
+ * sound and the chip's player (docs/design/design-v1-sound-layout.md 5.3).
+ * `label` is the visible name, "Music" under Table sound's help, and the
+ * accessible name always says whose volume it is. The chip's player has no
+ * heading that says so, so there it shows the whole name.
+ */
+export function MusicVolume(props: { label?: string } = {}) {
   const actions = useRoomActions();
   const music = useRoomView((s) => s.view?.playing?.music ?? null);
   const volume = useRoomView((s) => s.view?.playing?.volume.music ?? 100);
   if (!music) return null;
-  return <VolumeSlider label={MUSIC_VOLUME} value={volume} onChange={(v) => send(actions, { t: "sound.mix", music: v })} />;
+  return <VolumeSlider label={props.label ?? MUSIC_VOLUME} name={MUSIC_VOLUME} value={volume} onChange={(v) => send(actions, { t: "sound.mix", music: v })} />;
 }
 
-/** Players see what is playing, here and in the Music window, one setting. */
+/** Players see what is playing, one setting, in Table sound. */
 export function NamesSwitch() {
   const actions = useRoomActions();
   const on = useRoomView((s) => s.view?.meta.settings.soundNames === true);

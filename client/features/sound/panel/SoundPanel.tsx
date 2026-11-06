@@ -4,18 +4,17 @@ import { Loading } from "../../../components/Loading.tsx";
 import { Help, Section } from "../../../components/Panel.tsx";
 import { theme } from "../../../lib/theme.ts";
 import { useRoomView } from "../../../state/view.ts";
-import { WHAT_PLAYERS_HEAR } from "../../ambiance/words.ts";
 import { usePanelHeader, type PanelProps } from "../../panels.ts";
 import { MusicWindowHost } from "../music/MusicWindowHost.tsx";
 import { EffectsBoard } from "./EffectsBoard.tsx";
 import { RoomSoundControls, serverRoomSound, useServerRoomSoundState, type ServerSound } from "./engine.ts";
 import { LoopsSection } from "./LoopsSection.tsx";
-import { NowPlaying, WhatPlayersHear } from "./NowPlaying.tsx";
+import { NowPlaying, TableSound } from "./NowPlaying.tsx";
 import { PlayerSound } from "./PlayerSound.tsx";
 import { SoundPage } from "./SoundPage.tsx";
 import { nameOf, soundsOf } from "./state.ts";
 import { StorageLine } from "./StorageLine.tsx";
-import { SERVER_CHECKING, SERVER_FAILED, SERVER_OFF } from "./words.ts";
+import { SERVER_CHECKING, SERVER_FAILED, SERVER_OFF, TABLE_SOUND } from "./words.ts";
 
 /**
  * The Sound panel (docs/design/design-v1-sound-layout.md 4), a stub that
@@ -139,8 +138,8 @@ export function DmSoundSection(props: DmSoundFirst) {
             <NowPlaying />
           </Section>
           {effects}
-          <Section label={WHAT_PLAYERS_HEAR}>
-            <WhatPlayersHear />
+          <Section label={TABLE_SOUND}>
+            <TableSound />
           </Section>
           <LoopsSection editing={props.editing.loops} onEditing={props.onEditLoops} onOpenSound={props.onOpenSound} onStorageChanged={props.onStorageChanged} />
         </>

@@ -11,9 +11,12 @@ import { serverNow, soundsOf, soundToStop } from "./state.ts";
  * A volume for everyone (docs/design/design-v1-music.md 4.1), 0 to 100%:
  * its name over the slider, which a long name wraps, and the percent
  * beside it. A drag shows at once and sends 250 ms after the last change,
- * so it never floods the room (D-261102-470).
+ * so it never floods the room (D-261102-470). `name` is the slider's
+ * accessible name where the shown label is shorter, as under Table sound,
+ * whose help says once whose volume these are
+ * (docs/design/design-v1-sound-layout.md 7). It holds the shown words.
  */
-export function VolumeSlider(props: { label: string; value: number; onChange(value: number): void; trailing?: ReactNode }) {
+export function VolumeSlider(props: { label: string; name?: string; value: number; onChange(value: number): void; trailing?: ReactNode }) {
   const [local, set] = useDebounced(props.value, props.onChange);
   const id = useId();
   const disabled = useHeld();
@@ -31,6 +34,7 @@ export function VolumeSlider(props: { label: string; value: number; onChange(val
         <Icon name="volume" size="md" style={{ color: theme.color.textMuted }} />
         <input
           id={id}
+          aria-label={props.name}
           type="range"
           min={0}
           max={100}

@@ -1,7 +1,11 @@
 import "../../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { createStore } from "zustand/vanilla";
+import type { RoomState } from "#shared/model.ts";
 import type { Playing, Sound } from "#shared/sound.ts";
+import { room, scene } from "#shared/testutil.ts";
+import { RoomScope } from "../../../state/scope.ts";
 
 /*
  * The parts of Ambiance's Sound in each state
@@ -14,12 +18,15 @@ import type { Playing, Sound } from "#shared/sound.ts";
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { MusicNow, nextWords, NowLine, SceneSoundLine, SceneSoundShortcut } = await import("./NowPlaying.tsx");
+const { MusicNow, nextWords, NowLine, SceneSoundLine, TableSound, UseWhatsPlaying } = await import("./NowPlaying.tsx");
 const { LoopToggles } = await import("./LoopsSection.tsx");
 const { Board } = await import("./EffectsBoard.tsx");
 const { PlayerNow } = await import("./PlayerSound.tsx");
 const { useReasons } = await import("./SoundPage.tsx");
 const { ServerLine } = await import("./SoundPanel.tsx");
+const { RoomProvider } = await import("../../../state/view.ts");
+const { RoomScopeProvider } = await import("../../../state/scope.ts");
+const { tileBackground } = await import("../music/tile.ts");
 const words = await import("./words.ts");
 
 const noop = () => {};
@@ -87,26 +94,79 @@ describe("Now playing in Ambiance (docs/design/design-v1-panel-groups.md 4.1, D-
   });
 });
 
-describe("the scene's sound in Ambiance (docs/design/design-v1-scenes-reorg.md 5)", () => {
-  const shortcut = (props: Partial<Parameters<typeof SceneSoundShortcut>[0]>) =>
-    renderToStaticMarkup(createElement(SceneSoundShortcut, { sceneName: "Forest road", sound: null, canUsePlaying: true, lineId: "line", onOpen: noop, onUsePlaying: noop, ...props }));
+describe("Use what's playing in Table sound (docs/design/design-v1-sound-layout.md 6.2)", () => {
+  const use = (props: Partial<Parameters<typeof UseWhatsPlaying>[0]>) =>
+    renderToStaticMarkup(createElement(UseWhatsPlaying, { sceneName: "Forest road", sound: null, canUsePlaying: true, lineId: "line", onUsePlaying: noop, ...props }));
 
-  test("a row that opens Scene sound in Scenes, its help the line, and Use what's playing described by it, nothing more", () => {
-    const html = shortcut({ sound: { names: ["Tavern night"] } });
-    assert.match(html, /<button[^>]*aria-label="Scene sound, in Scenes"[^>]*>/);
-    const row = /<button[^>]*aria-label="Scene sound, in Scenes"[^>]*>/.exec(html)![0];
-    const help = /aria-describedby="([^"]+)"/.exec(row)![1]!;
-    assert.match(html, new RegExp(`id="${help}"[^>]*><span id="line">Forest road&#x27;s sound: Tavern night\\.</span>`));
-    assert.match(html, />Scene sound</);
+  test("the scene's line is plain help over Use what's playing, which it describes, and no row opens Scenes", () => {
+    const html = use({ sound: { names: ["Tavern night"] } });
+    assert.match(html, /<p id="line"[^>]*>Forest road&#x27;s sound: Tavern night\.<\/p>/);
     assert.match(html, /<button[^>]*aria-describedby="line"[^>]*>Use what&#x27;s playing</);
-    for (const gone of ["Play it", "Use silence", "Clear", "It plays when you move"]) assert.doesNotMatch(html, new RegExp(gone), `${gone} lives in Scenes`);
+    assert.equal([...html.matchAll(/<button/g)].length, 1, "one button, the action");
+    for (const gone of ["Scene sound", "in Scenes", "Play it", "Use silence", "Clear", "It plays when you move"]) assert.doesNotMatch(html, new RegExp(gone), `${gone} lives in Scenes`);
   });
 
   test("nothing playing: Use what's playing is off, described by the line and why", () => {
-    const html = shortcut({ canUsePlaying: false });
+    const html = use({ canUsePlaying: false });
     assert.match(html, /<button[^>]*disabled=""[^>]*aria-describedby="line line-first"|<button[^>]*aria-describedby="line line-first"[^>]*disabled=""/);
     assert.match(html, /id="line-first"[^>]*>Play something first\./);
     assert.match(html, /Forest road has no sound of its own\./);
+    assert.match(use({ sound: { names: [] } }), /Forest road is silent\./);
+  });
+});
+
+/** A DM's room around `child`: the view, the scene on screen, and what it sends. */
+function inRoom(child: ReturnType<typeof createElement>, view: RoomState, sceneId: string | null = "s1", role: "dm" | "player" = "dm") {
+  const store = createStore(() => ({ view, you: { memberId: role === "dm" ? "dm1" : "p1", role }, roomId: "r1", sceneId, serverOffset: 0, connection: "open", pending: [], online: [], displays: 0, local: { selectedIds: [], multi: false } }));
+  return renderToStaticMarkup(
+    createElement(RoomScopeProvider, {
+      scope: new RoomScope(),
+      children: createElement(RoomProvider, { store: store as never, actions: { dispatch: () => 1, newId: () => "x", sendEph: noop } as never, ui: { notify: noop, openPanel: noop } as never, assets: { url: () => "" } as never, children: child }),
+    }),
+  );
+}
+
+describe("Table sound (docs/design/design-v1-sound-layout.md 4.2 and 7)", () => {
+  const playing: Playing = {
+    rev: 1,
+    music: { run: "r", order: ["pony"], index: 0, repeat: "all", fade: 5, now: { soundId: "pony", at: Date.now() } },
+    loops: { a: { soundId: "rain", at: 0, volume: 70 } },
+    effects: [],
+    volume: { music: 80, effects: 100 },
+  };
+  const sounds = { pony: sound("pony", "music", 190_000, "The Prancing Pony"), rain: sound("rain", "loop", 40_000, "Rain on the cobblestones") };
+  const draw = (over: Partial<RoomState> = {}, sceneId: string | null = "s1") => inRoom(createElement(TableSound), room({ sounds, playing, scenes: { s1: scene("s1", { name: "Goblin cave" }) }, ...over }), sceneId);
+  const labels = (html: string) => [...html.matchAll(/<label for="([^"]+)"[^>]*>([^<]+)<\/label>/g)].map((m) => ({ text: m[2], name: new RegExp(`id="${m[1]}" aria-label="([^"]+)"`).exec(html)?.[1] ?? null }));
+
+  test("its help says once that it is for every device, then the music, each background sound and the effects by plain names", () => {
+    const html = draw();
+    const help = html.indexOf("What everyone at the table hears, set here for every device. Each device can turn itself down under On this device.");
+    assert.ok(help >= 0 && help < html.indexOf("<label"), "the help first");
+    assert.deepEqual(labels(html), [
+      { text: "Music", name: "Music volume for everyone" },
+      { text: "Rain on the cobblestones", name: "Rain on the cobblestones volume for everyone" },
+      { text: "Effects", name: "Effects volume for everyone" },
+    ]);
+    assert.match(html, /aria-label="Stop Rain on the cobblestones"/, "a background sound keeps its Stop");
+    assert.doesNotMatch(html.replace(/aria-label="[^"]*"/g, ""), /for everyone/, "no visible label says for everyone");
+  });
+
+  test("then the scene's line with Use what's playing, and the names switch last", () => {
+    const html = draw();
+    const line = html.indexOf("Goblin cave has no sound of its own.");
+    assert.ok(line > html.indexOf(">Effects<"), "after the volumes");
+    assert.ok(html.indexOf("Use what&#x27;s playing") > line);
+    assert.ok(html.indexOf("Players see what is playing") > html.indexOf("Use what&#x27;s playing"));
+  });
+
+  test("with no scene in view there is no scene line and no Use what's playing", () => {
+    const html = draw({}, null);
+    assert.doesNotMatch(html, /Use what&#x27;s playing|has no sound of its own/);
+  });
+
+  test("with no music there is no music volume", () => {
+    const html = draw({ playing: { ...playing, music: null } });
+    assert.deepEqual(labels(html).map((l) => l.text), ["Rain on the cobblestones", "Effects"]);
   });
 });
 
@@ -214,17 +274,37 @@ describe("a player's panel", () => {
   const player = (sounds: Record<string, Sound>, here: "plays" | "tap" | "other" | "off" = "plays", musicHere: "playing" | "failed" = "playing") =>
     renderToStaticMarkup(createElement(PlayerNow, { playing: p, sounds, here, music: musicHere, onRetry: noop }));
 
-  test("with names shared: the music and the background by name, never an effect", () => {
+  test("with names shared: a card with the tile and the track's name, the background by name under it, never an effect", () => {
     const html = player({ pony: sound("pony", "music", 190_000, "The Prancing Pony"), rain: sound("rain", "loop", 40_000, "Rain"), crowd: sound("crowd", "loop", 30_000, "Crowd"), thunder: sound("thunder", "effect", 25_000) });
-    assert.match(html, /Music: The Prancing Pony/);
-    assert.match(html, /Background: Rain, Crowd/);
+    const card = /<div data-sound-player-card=""[^>]*>(.*)<\/div><\/div>/.exec(html)?.[1] ?? "";
+    assert.match(card, /<span aria-hidden="true" data-music-tile="" style="[^"]*width:44px;height:44px/, "the 44 px tile, hidden from a reader");
+    assert.match(card, /data-sound-player-music=""[^>]*font-size:16px;font-weight:700[^>]*>The Prancing Pony</);
+    assert.match(card, /data-sound-player-loops=""[^>]*color:var\(--rvtt-text-muted[^>]*>Background: Rain, Crowd</, "muted, under the name");
     assert.doesNotMatch(html, /thunder|effect/i);
   });
 
-  test("without names: what plays, counted", () => {
+  test("without names: Music is playing, the background counted, and the tile one fixed tint that names nothing", () => {
     const html = player({ pony: sound("pony", "music", 190_000), rain: sound("rain", "loop", 40_000), crowd: sound("crowd", "loop", 30_000) });
-    assert.match(html, /Music is playing\./);
+    assert.match(html, /data-sound-player-music=""[^>]*>Music is playing</);
     assert.match(html, /2 background sounds are playing\./);
+    const tint = (h: string) => /data-music-tile="" style="[^"]*background:([^;"]+)/.exec(h)?.[1];
+    const other: Playing = { ...p, music: { ...p.music!, now: { soundId: "harbor", at: 0 } } };
+    const again = renderToStaticMarkup(createElement(PlayerNow, { playing: other, sounds: { harbor: sound("harbor", "music", 60_000) }, here: "plays", music: "playing", onRetry: noop }));
+    assert.equal(tint(html), tint(again), "every hidden track gets the one tint");
+    assert.equal(tint(html), tileBackground(""));
+    assert.notEqual(tint(html), tileBackground("The Prancing Pony"), "never the tint of a name the player lacks");
+  });
+
+  test("background sounds alone: their line, with no card", () => {
+    const loopsOnly: Playing = { ...p, music: null };
+    const html = renderToStaticMarkup(createElement(PlayerNow, { playing: loopsOnly, sounds: { rain: sound("rain", "loop", 40_000, "Rain"), crowd: sound("crowd", "loop", 30_000, "Crowd") }, here: "plays", music: "playing", onRetry: noop }));
+    assert.doesNotMatch(html, /data-sound-player-card|data-music-tile/);
+    assert.match(html, /data-sound-player-loops=""[^>]*>Background: Rain, Crowd</);
+  });
+
+  test("nothing playing, a Sound kept open after it stopped: Nothing is playing", () => {
+    const html = renderToStaticMarkup(createElement(PlayerNow, { playing: null, sounds: {}, here: "plays", music: "playing", onRetry: noop }));
+    assert.match(html, />Nothing is playing\.</);
   });
 
   test("this device's state: a tap to start, another window, a track that failed", () => {
