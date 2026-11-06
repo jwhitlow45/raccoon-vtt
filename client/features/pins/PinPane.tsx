@@ -261,7 +261,7 @@ export function PinEditor(props: { pin: Pin; onClose(): void; dismissRef: { curr
               </Button>
             ) : null}
           </div>
-          <Swatches label="Pin color" value={draft.color} options={MEMBER_COLORS} onChange={(color) => setDraft((d) => ({ ...d, color }))} />
+          <Swatches flush label="Pin color" value={draft.color} options={MEMBER_COLORS} onChange={(color) => setDraft((d) => ({ ...d, color }))} />
           <Checkbox checked={draft.dmOnly} onChange={(on) => setDraft((d) => withDmOnly(d, on))} label="DM only" />
         </div>
       </Held>

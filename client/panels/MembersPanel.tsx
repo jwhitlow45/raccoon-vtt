@@ -187,6 +187,7 @@ function ColorPicker(props: { id: string; member: Member; others: readonly Membe
           Your color
         </span>
         <Swatches
+          flush
           labelledBy={labelId}
           value={color}
           options={options}

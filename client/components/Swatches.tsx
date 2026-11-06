@@ -45,6 +45,13 @@ export function Swatches(props: {
   options: readonly (string | SwatchOption)[];
   onChange(color: string): void;
   disabled?: boolean;
+  /**
+   * For a row standing in a column of rows. Each 28 px disk sits in a 44 px target, so the row starts
+   * (touch - 28) / 2 out and the disks' edge is the column's edge, as a checkbox's box is. The extra
+   * lands in the container's padding, so it must not clip. Tool options and popovers leave it off:
+   * their slots measure the 44 px targets.
+   */
+  flush?: boolean;
   style?: CSSProperties;
 }) {
   const name = useId();
@@ -58,7 +65,7 @@ export function Swatches(props: {
       aria-label={props.labelledBy ? undefined : props.label}
       aria-labelledby={props.labelledBy}
       aria-disabled={disabled ? true : undefined}
-      style={{ display: "flex", flexWrap: "wrap", gap: theme.space(0.5), minWidth: 0, ...props.style }}
+      style={{ display: "flex", flexWrap: "wrap", gap: theme.space(0.5), minWidth: 0, ...(props.flush ? { marginInlineStart: -(theme.touch - 28) / 2 } : null), ...props.style }}
     >
       {props.options.map((raw) => {
         const option: SwatchOption = typeof raw === "string" ? { color: raw } : raw;

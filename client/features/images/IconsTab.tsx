@@ -64,7 +64,7 @@ export function IconsTab(props: { disabled: boolean; initial?: IconImage; onUse(
         </>
       ) : null}
       {/* The swatches wrap, so at 130% on the narrowest phone the row breaks in two rather than pushing the picker's Use off the screen. */}
-      <Swatches label="Disk color" value={color} options={ICON_COLORS.map((c) => ({ color: c, name: COLOR_NAMES[c] ?? c }))} onChange={setColor} />
+      <Swatches flush label="Disk color" value={color} options={ICON_COLORS.map((c) => ({ color: c, name: COLOR_NAMES[c] ?? c }))} onChange={setColor} />
       {/* Pinned to the dialog's foot, as the Starter tab's chosen work is, so Use never waits under the fold. */}
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(3), minHeight: 72, ...PINNED_FOOT }}>
         {selected ? (
