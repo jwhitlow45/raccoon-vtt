@@ -1,5 +1,6 @@
 import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
 import type { RoomState } from "#shared/model.ts";
@@ -11,13 +12,15 @@ import { RoomScope } from "../../state/scope.ts";
  * docs/design/design-v1-sound-layout.md 3 and 7): the DM's start form with no
  * clock, the date and the controls with one, the five step buttons of one
  * size, and a player's date or the line that says the DM isn't sharing it.
+ * Then where focus and the scroller go after this device's own start
+ * (LP31-A-TIME-1).
  */
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { RoomProvider } = await import("../../state/view.ts");
 const { RoomScopeProvider } = await import("../../state/scope.ts");
-const { default: TimePanel, NOT_SHARING } = await import("./TimePanel.tsx");
+const { default: TimePanel, NOT_SHARING, landOnOwnStart } = await import("./TimePanel.tsx");
 
 (globalThis as { localStorage?: unknown }).localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
 
@@ -100,5 +103,80 @@ describe("a player's Time", () => {
     const html = draw("player", null);
     assert.equal(NOT_SHARING, "The DM isn't sharing the date and time now.");
     assert.match(html, /The DM isn&#x27;t sharing the date and time now\./);
+  });
+});
+
+describe("after this device's own Start the clock (LP31-A-TIME-1)", () => {
+  /** A date block and a page that record what is done to them, in order, with the later step held until `settle`. */
+  function page(connected = true) {
+    const done: string[] = [];
+    const waiting: (() => void)[] = [];
+    const el = {
+      isConnected: connected,
+      focus: (options?: FocusOptions) => done.push(`focus ${JSON.stringify(options ?? null)}`),
+    };
+    const env = {
+      later: (run: () => void) => void waiting.push(run),
+      bring: (target: unknown) => void done.push(target === el ? "bring" : "bring elsewhere"),
+      takeOver: (target: unknown) => void done.push(target === el ? "take over" : "take over elsewhere"),
+    };
+    const settle = () => {
+      for (const run of waiting.splice(0)) run();
+    };
+    return { el, env, done, settle };
+  }
+
+  test("once its clock shows, the date comes into view, the scroller counts as taken, then the date takes focus without a scroll of its own", () => {
+    const p = page();
+    const startedHere = { current: "c1" as string | null };
+    landOnOwnStart(startedHere, "c1", p.el, p.env);
+    assert.deepEqual(p.done, [], "nothing before the commit's own layout effects end");
+    p.settle();
+    assert.deepEqual(p.done, ["bring", "take over", 'focus {"preventScroll":true}']);
+    assert.equal(startedHere.current, null, "acted on once");
+  });
+
+  test("a clock started on another device, or none asked for here, moves nothing", () => {
+    for (const asked of [null, "c2"]) {
+      const p = page();
+      const startedHere = { current: asked };
+      landOnOwnStart(startedHere, "c1", p.el, p.env);
+      p.settle();
+      assert.deepEqual(p.done, [], `asked for ${asked}`);
+      assert.equal(startedHere.current, asked, "a start still on its way keeps waiting for its own clock");
+    }
+  });
+
+  test("a later commit with the same clock does nothing more", () => {
+    const p = page();
+    const startedHere = { current: "c1" as string | null };
+    landOnOwnStart(startedHere, "c1", p.el, p.env);
+    p.settle();
+    landOnOwnStart(startedHere, "c1", p.el, p.env);
+    p.settle();
+    assert.equal(p.done.length, 3);
+  });
+
+  test("a date block gone before the commit settles, or never drawn, is left alone", () => {
+    const gone = page(false);
+    landOnOwnStart({ current: "c1" }, "c1", gone.el, gone.env);
+    gone.settle();
+    assert.deepEqual(gone.done, []);
+    const none = page();
+    const startedHere = { current: "c1" as string | null };
+    landOnOwnStart(startedHere, "c1", null, none.env);
+    none.settle();
+    assert.deepEqual(none.done, []);
+    assert.equal(startedHere.current, null);
+  });
+
+  test("the date block is a place to land, out of the tab order, and the panel wires the start to it", () => {
+    assert.match(draw("dm", CLOCK), /<div tabindex="-1" role="status" aria-live="polite"/);
+    const source = readFileSync(new URL("./TimePanel.tsx", import.meta.url), "utf8");
+    assert.ok(source.includes("<StartClock onStart={(id) => void (startedHere.current = id)} />"), "the start form names its clock to the panel");
+    assert.ok(source.includes("if (clockId !== null) landOnOwnStart(startedHere, clockId, dateBlock.current);"), "the panel lands as its clock changes");
+    assert.ok(source.includes("<div ref={dateBlock} tabIndex={-1} role=\"status\""), "on the date block");
+    const start = readFileSync(new URL("./StartClock.tsx", import.meta.url), "utf8");
+    assert.match(start, /const id = actions\.newId\(\);\s*props\.onStart\(id\);\s*actions\.dispatch\(\{ t: "clock\.start", id,/, "told before the op is sent, so the predicted clock already finds it");
   });
 });

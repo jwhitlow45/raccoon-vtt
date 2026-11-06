@@ -1,13 +1,14 @@
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { clockNow, dateText, fightStarted } from "#shared/calendar.ts";
 import type { RoomClock } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { Empty } from "../../components/Empty.tsx";
 import { Help, Section } from "../../components/Panel.tsx";
 import { Switch } from "../../components/Switch.tsx";
+import { startInScrollBox } from "../../lib/reveal.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
-import type { PanelProps } from "../panels.ts";
+import { takeOverPanelScroll, type PanelProps } from "../panels.ts";
 import { CalendarDialog } from "./CalendarDialog.tsx";
 import { SetTimeDialog } from "./SetTimeDialog.tsx";
 import { SHARE_HELP, StartClock } from "./StartClock.tsx";
@@ -33,14 +34,22 @@ export default function TimePanel(_props: PanelProps) {
   const role = useRoomView((s) => s.you?.role);
   const clock = useRoomView((s) => s.view?.clock ?? null);
   const encounter = useRoomView((s) => s.view?.encounter ?? null);
+  // The clock this device's own Start the clock asked for, until it shows.
+  const startedHere = useRef<string | null>(null);
+  const dateBlock = useRef<HTMLDivElement>(null);
+  const clockId = clock?.id ?? null;
+  useLayoutEffect(() => {
+    if (clockId !== null) landOnOwnStart(startedHere, clockId, dateBlock.current);
+  }, [clockId]);
 
   if (role === undefined) return null;
-  if (!clock) return role === "dm" ? <StartClock /> : <Empty>{NOT_SHARING}</Empty>;
+  if (!clock) return role === "dm" ? <StartClock onStart={(id) => void (startedHere.current = id)} /> : <Empty>{NOT_SHARING}</Empty>;
 
   const now = clockNow(clock, encounter);
   return (
     <div style={{ display: "grid", gap: theme.space(4), minWidth: 0 }}>
-      <div role="status" aria-live="polite" aria-atomic="true" style={{ display: "grid", gap: theme.space(1), minWidth: 0 }}>
+      {/* A place for focus to land after this device's own start (landOnOwnStart), not a control, so it draws no ring (globals.css). */}
+      <div ref={dateBlock} tabIndex={-1} role="status" aria-live="polite" aria-atomic="true" style={{ display: "grid", gap: theme.space(1), minWidth: 0 }}>
         <span data-clock-date="" style={{ fontSize: theme.font.display, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight, overflowWrap: "anywhere" }}>
           {dateText(now, clock.calendar, "full")}
         </span>
@@ -52,6 +61,42 @@ export default function TimePanel(_props: PanelProps) {
       {role === "dm" ? <RunningClock key={clock.id} clock={clock} now={now} fight={fightStarted(encounter)} /> : null}
     </div>
   );
+}
+
+/** What landOnOwnStart moves. */
+type LandTarget = { readonly isConnected: boolean; focus(options?: FocusOptions): void };
+
+/** How landOnOwnStart reaches the page: the browser's by default, a test's fakes. */
+export type LandEnv = { later(run: () => void): void; bring(el: LandTarget): void; takeOver(el: LandTarget): void };
+
+const PAGE: LandEnv = {
+  later: (run) => queueMicrotask(run),
+  bring: (el) => startInScrollBox(el as unknown as HTMLElement, theme.space(4)),
+  takeOver: (el) => takeOverPanelScroll(el as unknown as Element),
+};
+
+/**
+ * After this device's own Start the clock (LP31-A-TIME-1): the form and its
+ * pressed button go as the clock arrives, which left focus on the page, and
+ * on a phone the browser's scroll anchoring kept the rows under the form in
+ * place, so the new date sat above the sheet's top. Once the clock this
+ * device asked for shows, its date block comes to the top of the panel's
+ * scroller and takes focus. A clock started on another device moves
+ * nothing, and the start is acted on once. It waits for the commit's own
+ * layout effects, the panel's scroll restore among them, which runs after
+ * this child's, then counts as the viewer taking the scroller, so a restore
+ * still pending never pulls it back.
+ */
+export function landOnOwnStart(startedHere: { current: string | null }, clockId: string, el: LandTarget | null, env: LandEnv = PAGE): void {
+  if (startedHere.current !== clockId) return;
+  startedHere.current = null;
+  if (!el) return;
+  env.later(() => {
+    if (!el.isConnected) return;
+    env.bring(el);
+    env.takeOver(el);
+    el.focus({ preventScroll: true });
+  });
 }
 
 /** The DM's controls of a running clock (4.2). */

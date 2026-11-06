@@ -21,9 +21,11 @@ export const SHARE_HELP = "Off, players don't see the date or time, and their Lo
  * never reaches a player, its start line included. A Months calendar is
  * kept here as a draft by the Calendar dialog's Save. A clock started here
  * or on another device takes the form's place, so the next start, after a
- * stop, begins afresh.
+ * stop, begins afresh. `onStart` hears the id this device's own start asks
+ * for, before it is sent, so the panel can tell that clock from one started
+ * elsewhere as it arrives.
  */
-export function StartClock() {
+export function StartClock(props: { onStart(id: string): void }) {
   const actions = useRoomActions();
   const [form, setForm] = useState<StartForm>(START_FORM);
   const [shown, setShown] = useState(true);
@@ -41,7 +43,9 @@ export function StartClock() {
   const start = () => {
     setForm({ ...form, tried: true });
     if (!composed.ok) return;
-    actions.dispatch({ t: "clock.start", id: actions.newId(), at: composed.t, shown, calendar });
+    const id = actions.newId();
+    props.onStart(id);
+    actions.dispatch({ t: "clock.start", id, at: composed.t, shown, calendar });
   };
 
   return (
