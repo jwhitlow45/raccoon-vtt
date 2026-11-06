@@ -7,13 +7,12 @@ import { DM, room } from "#shared/testutil.ts";
 import type { RoomActions } from "../state/types.ts";
 
 /*
- * Room's part of the folds and the scenes request
- * (docs/design/design-v1-panel-groups.md 6.1, docs/design/design-v1-scenes-reorg.md 7):
- * a reveal ends, and a scene request no settings took is dropped, when its
- * panel goes from open to closed in the room's own store, opened and closed
- * as the page does, on a phone and from 900 px up. Server rendering runs no
- * effects, so the hooks' layout effects are caught as they render and run
- * here after each change, as React runs them after a commit.
+ * Room's part of the folds (docs/design/design-v1-panel-groups.md 6.1): a
+ * reveal ends when its panel goes from open to closed in the room's own
+ * store, opened and closed as the page does, on a phone and from 900 px
+ * up. Server rendering runs no effects, so the hooks' layout effects are
+ * caught as they render and run here after each change, as React runs them
+ * after a commit.
  */
 
 const captureKey = Symbol.for("room-close-hooks-layout");
@@ -24,7 +23,7 @@ let effects: (() => void)[] = [];
 registerHooks({
   load(url, context, next) {
     const result = next(url, context);
-    if (!url.endsWith("/lib/folds.ts") && !url.endsWith("/features/scenes/request.ts")) return result;
+    if (!url.endsWith("/lib/folds.ts")) return result;
     // A .ts file comes as bytes, a .tsx one through the test's own hooks as text.
     const source = typeof result.source === "string" ? result.source : new TextDecoder().decode(result.source as Uint8Array);
     const replaced = source.replaceAll("useLayoutEffect(", 'globalThis[Symbol.for("room-close-hooks-layout")](');
@@ -42,7 +41,6 @@ const { createRoomStore } = await import("../state/store.ts");
 const { RoomProvider } = await import("../state/view.ts");
 const { RoomScope, RoomScopeProvider } = await import("../state/scope.ts");
 const { ambianceFoldsSlot, dmPanelFoldsSlot, scenesFoldsSlot, useEndRevealsOnClose } = await import("../lib/folds.ts");
-const { openSceneSettings, sceneRequestSlot, useEndSceneRequestOnClose } = await import("../features/scenes/request.ts");
 const { LocalServer } = await import("../dev/localServer.ts");
 
 const LOADED = { clock: false, scenes: true };
@@ -61,7 +59,6 @@ function draw(p: ReturnType<typeof page>, wide: boolean): void {
     useEndRevealsOnClose("ambiance", ambianceFoldsSlot, wide);
     useEndRevealsOnClose("dm", dmPanelFoldsSlot, wide);
     useEndRevealsOnClose("scenes", scenesFoldsSlot, wide);
-    useEndSceneRequestOnClose(wide);
     return null;
   }
   // A render to markup reads a store's initial state (zustand's server snapshot), so the store is handed over reading its state now.
@@ -117,17 +114,16 @@ describe("Room's close hooks, through the room store", () => {
       }
     });
 
-    test(`${where}: a scene request no settings took is dropped as Scenes closes, and the reveal with it`, () => {
+    test(`${where}: a reveal in Scenes ends as Scenes closes`, () => {
       const p = page();
       try {
         draw(p, wide);
-        openSceneSettings(p.scope, p.store.ui, "sound", { from: "ambiance", room: p.store.store });
+        p.scope.get(scenesFoldsSlot).reveal("sound");
+        p.store.ui.openPanel("scenes");
         draw(p, wide);
-        assert.equal(p.scope.get(sceneRequestSlot).get().target, "sound", "Scenes opened, its settings not yet drawn");
-        assert.equal(p.scope.get(scenesFoldsSlot).get(390, LOADED).sound, true);
+        assert.equal(p.scope.get(scenesFoldsSlot).get(390, LOADED).sound, true, "Scene sound, setup and folded on a phone, shows revealed");
         p.store.ui.openPanel("log");
         draw(p, wide);
-        assert.equal(p.scope.get(sceneRequestSlot).get().target, null, "dropped untaken, so no later opening acts on it");
         assert.equal(p.scope.get(scenesFoldsSlot).get(390, LOADED).sound, false);
       } finally {
         p.store.dispose();
@@ -140,13 +136,13 @@ describe("Room's close hooks, through the room store", () => {
     try {
       const folds = p.scope.get(scenesFoldsSlot);
       draw(p, false);
-      openSceneSettings(p.scope, p.store.ui, "sound", { from: null, room: p.store.store });
+      folds.reveal("sound");
+      p.store.ui.openPanel("scenes");
       draw(p, false);
       assert.equal(folds.get(390, LOADED).sound, true);
       p.store.ui.closeSheets();
       draw(p, false);
       assert.equal(folds.get(390, LOADED).sound, false);
-      assert.equal(p.scope.get(sceneRequestSlot).get().target, null);
     } finally {
       p.store.dispose();
     }
@@ -161,8 +157,8 @@ test("Room.tsx calls each close hook with Room's own wide, for Ambiance, the DM 
     "useEndRevealsOnClose(AMBIANCE_PANEL, ambianceFoldsSlot, wide);",
     'useEndRevealsOnClose("dm", dmPanelFoldsSlot, wide);',
     "useEndRevealsOnClose(SCENES_PANEL, scenesFoldsSlot, wide);",
-    "useEndSceneRequestOnClose(wide);",
   ]) {
     assert.ok(body.includes(line), line);
   }
+  assert.ok(!body.includes("useEndSceneRequestOnClose"), "the scene request went with Ambiance's rows (docs/design/design-v1-sound-layout.md 6.2)");
 });

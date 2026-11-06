@@ -65,7 +65,7 @@ import { ClockChip, useClockChipText } from "../features/clock/ClockChip.tsx";
 import { useClockToasts } from "../features/clock/useClockToasts.ts";
 import { PhaseMenu } from "../features/phases/PhaseMenu.tsx";
 import { FrameViewBar } from "../features/scenes/FrameView.tsx";
-import { SCENES_PANEL, useEndSceneRequestOnClose } from "../features/scenes/request.ts";
+import { SCENES_PANEL } from "../features/scenes/ids.ts";
 import { ambianceKeptSlot, keptSections } from "../features/ambiance/kept.ts";
 import { AMBIANCE_PANEL } from "../features/ambiance/request.ts";
 import { barInset, chromeZoom, smallUi, useLayoutSize } from "../features/device/layout.ts";
@@ -546,11 +546,10 @@ function RoomPage() {
   const badgeLabels: Record<string, string> = { dm: dmBadgeLabel(uploadWaiting, joinWaiting) };
   const panelsLabel = panelsButtonLabel(unread + journalUnread, uploadWaiting, joinWaiting);
   usePdfJobRoom();
-  // Here rather than in each panel, which remounts as the layout crosses 900 px: a reveal and a held start last while their panel stays open, and a scene request untaken when Scenes closes is dropped (docs/design/design-v1-panel-groups.md 6.1).
+  // Here rather than in each panel, which remounts as the layout crosses 900 px: a reveal and a held start last while their panel stays open (docs/design/design-v1-panel-groups.md 6.1).
   useEndRevealsOnClose(AMBIANCE_PANEL, ambianceFoldsSlot, wide);
   useEndRevealsOnClose("dm", dmPanelFoldsSlot, wide);
   useEndRevealsOnClose(SCENES_PANEL, scenesFoldsSlot, wide);
-  useEndSceneRequestOnClose(wide);
   // The phone sheet that lists every panel, in the room's local state (state/types.ts sheetOpen), so
   // what floats over the map steps aside for it as for a panel. Opening a panel from anywhere takes its place.
   const picker = useRoomView((s) => s.local.panelList);

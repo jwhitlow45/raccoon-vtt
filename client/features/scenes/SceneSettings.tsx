@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { AutoWalls, Scene } from "#shared/model.ts";
 import { MAX_SCENE_CELLS, type OpOf } from "#shared/protocol.ts";
 import { autoWallsOf } from "#shared/rules/autoWalls.ts";
@@ -9,16 +9,15 @@ import { useExpansionFocus } from "../../components/expansionFocus.ts";
 import { ErrorText, FieldRow, Input } from "../../components/Field.tsx";
 import { Loading, Spinner } from "../../components/Loading.tsx";
 import { buttonLook } from "../../components/looks.ts";
-import { Group, GROUP_FOLD, Help, Note, Section } from "../../components/Panel.tsx";
+import { Group, Help, Note, Section } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { SettingRow } from "../../components/SettingRow.tsx";
 import { Switch } from "../../components/Switch.tsx";
 import { Tag } from "../../components/Tag.tsx";
-import { scrollBox, startInScrollBox } from "../../lib/reveal.ts";
 import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import type { ViewKind } from "../../lib/view.ts";
-import { useRoomScope, useScoped } from "../../state/scope.ts";
+import { useRoomScope } from "../../state/scope.ts";
 import { useAssets, useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { calibrationFromCounts, fitBounds, imageSquares, sameCalibration } from "../grid/calibrate.ts";
 import { copyUrls, importSearch, IMPORT_WAIT_MS, nameGivesSize, replacementFound, searchOnImport, type ImportWait } from "../grid/findGrid.ts";
@@ -43,14 +42,13 @@ import { useServerRoomSoundState } from "../sound/engine/store.ts";
 import { ColorInput, ConfirmButton, NumberInput, Select, Slider } from "./controls.tsx";
 import { fogsWithFirstMap, nameCellPx, refitsToNamedMap, replacement, viewFromCamera, type MapAsset } from "./create.ts";
 import { useStartFraming } from "./FrameView.tsx";
-import { sceneRequestSlot, useSceneRequestSeq } from "./request.ts";
 import { sceneGroupSummary, sceneSoundSummary } from "./sceneSummary.ts";
 import { SceneSoundSettings, useSceneSoundNames } from "./SceneSoundSettings.tsx";
 import { SCENE_GROUP_ICONS, SCENE_GROUP_LABELS, useSceneFolds, type SceneGroup } from "./settingsFolds.ts";
 import { currentStageCamera } from "./stageCamera.ts";
 import { uploadErrorText, uploadMap } from "./upload.ts";
 import { layoutWidth } from "../device/layout.ts";
-import { takeOverPanelScroll, type PanelClose } from "../panels.ts";
+import type { PanelClose } from "../panels.ts";
 
 /**
  * Settings of the scene the DM is looking at, grouped by what the DM is
@@ -68,11 +66,6 @@ import { takeOverPanelScroll, type PanelClose } from "../panels.ts";
  * op, so it shows at once and undo covers it, and a setting that is on or
  * off is a Switch row named by the setting (docs/design/design-v1-visual.md
  * 3.7), never a button named by its state.
- *
- * Ambiance's Weather and Scene sound rows open these settings at their
- * group (features/scenes/request.ts): the settings take the request once,
- * as they mount or on a new press, scroll its group into view and move
- * focus there (useSceneRequest).
  */
 export function SceneSettings(props: { scene: Scene; others: Scene[]; close: PanelClose }) {
   const { scene } = props;
@@ -94,9 +87,6 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
   const noWallsId = useId();
   // Folded, the warning would otherwise be out of sight: a tag on the row that never shrinks says it (D-261102-932). Open, the warning itself shows.
   const noWalls = wallless && !players.open;
-  const light = useRef<HTMLDivElement>(null);
-  const soundGroup = useRef<HTMLDivElement>(null);
-  useSceneRequest({ light, sound: sound ? soundGroup : null });
 
   const saveView = () => {
     // A phone's sheet hides most of the map, so the DM frames the view with the sheet closed (FrameView.tsx).
@@ -115,19 +105,15 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
         <NameField key={scene.id} name={scene.name} onSave={(name) => update({ name })} />
       </Section>
 
-      <div ref={light} style={GROUP_SLOT}>
-        <Group {...group("light", sceneGroupSummary(scene, "light"))}>
-          <LightSettings scene={scene} />
-          <SceneWeather key={scene.id} scene={scene} />
-        </Group>
-      </div>
+      <Group {...group("light", sceneGroupSummary(scene, "light"))}>
+        <LightSettings scene={scene} />
+        <SceneWeather key={scene.id} scene={scene} />
+      </Group>
 
       {sound ? (
-        <div ref={soundGroup} style={GROUP_SLOT}>
-          <Group {...group("sound", sceneSoundSummary(soundNames))}>
-            <SceneSoundSettings scene={scene} />
-          </Group>
-        </div>
+        <Group {...group("sound", sceneSoundSummary(soundNames))}>
+          <SceneSoundSettings scene={scene} />
+        </Group>
       ) : null}
 
       <Group
@@ -198,63 +184,6 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
       <MapExport scene={scene} />
     </>
   );
-}
-
-/** A box around a group that a request scrolls to, one column as the panel's own. */
-const GROUP_SLOT: CSSProperties = { display: "grid", gridTemplateColumns: "minmax(0, 1fr)" };
-
-/** The room a scroll to a group's top leaves above it. */
-const GROUP_MARGIN = theme.space(2);
-
-/**
- * Takes Ambiance's request for this scene's weather or sound
- * (features/scenes/request.ts, docs/design/design-v1-scenes-reorg.md 7), once,
- * in a layout effect as the settings mount or on a new press. Weather
- * brings Light and weather's header to the top of the panel's scroller
- * where the Weather row still shows whole under it, else the Weather row,
- * and focuses the Weather select. Sound brings Scene sound's header to the
- * top and focuses its fold. A sound request while Scene sound is not drawn
- * (the server offers no sound files) is taken and dropped.
- *
- * The scroll moves the panel's own scroller alone (lib/reveal.ts
- * startInScrollBox), as Ambiance's does: scrollIntoView also scrolls the
- * sheet's frame where the scroller cannot go far enough, as on a tall sheet
- * with little under the group, and takes the sheet's header out of sight.
- * The choice compares rects with rects alone: at 130% the page is zoomed,
- * and a scrollTop set from rect distances landed the row half out of the
- * sheet. It waits for the commit's own layout effects to end, the panel's
- * scroll restore among them (features/panels.ts usePanelScroll), which runs
- * after this child's, and then counts as the viewer taking the scroller
- * over, so a restore still pending never pulls the panel back over it.
- */
-function useSceneRequest(groups: { light: RefObject<HTMLDivElement | null>; sound: RefObject<HTMLDivElement | null> | null }): void {
-  const request = useScoped(sceneRequestSlot);
-  const seq = useSceneRequestSeq();
-  const latest = useRef(groups);
-  latest.current = groups;
-  useLayoutEffect(() => {
-    const target = request.take();
-    if (target === null) return;
-    const slot = target === "weather" ? latest.current.light.current : latest.current.sound?.current;
-    if (!slot) return;
-    queueMicrotask(() => {
-      if (!slot.isConnected) return;
-      if (target === "sound") {
-        startInScrollBox(slot, GROUP_MARGIN);
-        takeOverPanelScroll(slot);
-        slot.querySelector<HTMLElement>(GROUP_FOLD)?.focus({ preventScroll: true });
-        return;
-      }
-      const select = slot.querySelector<HTMLElement>('select[aria-label="Weather"]');
-      const row = select?.closest<HTMLElement>("[data-setting-row]") ?? null;
-      const scroller = scrollBox(slot as unknown as Parameters<typeof scrollBox>[0]) as unknown as Element | null;
-      const room = scroller ? scroller.getBoundingClientRect().height : Infinity;
-      const whole = row === null || row.getBoundingClientRect().bottom - slot.getBoundingClientRect().top + GROUP_MARGIN <= room;
-      startInScrollBox(whole || !row ? slot : row, GROUP_MARGIN);
-      takeOverPanelScroll(slot);
-      select?.focus({ preventScroll: true });
-    });
-  }, [request, seq]);
 }
 
 const VIEWS: readonly { value: ViewKind; label: string }[] = [
