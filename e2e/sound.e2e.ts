@@ -11,10 +11,11 @@ import { addSound, errors, inStep, IPHONE_AUDIO, musicVoice, readTap, roomSoundS
 
 /**
  * Synced music and sound on every device (docs/design/design-v1-music.md 5
- * and 12), steps sn-1 to sn-7: sync and a late join with the
+ * and 12), steps sn-1 to sn-7b: sync and a late join with the
  * ask, a crossfade and a pause, what a player's socket carries, a blackout,
  * effects and Stop all, a touch phone's ask and its tap after a reload, and
- * one page per browser with the table display. lp30fix-1 restarts the
+ * one page per browser with the table display, and without Web Locks with
+ * a hidden page. lp30fix-1 restarts the
  * server while an iPhone's files still load. The sounds are silence
  * built frame by frame (soundRoom.ts), uploaded through the asset route.
  *
@@ -166,6 +167,65 @@ const SIZES = [
 
 /** Devices start a track within this of each other: each voice is placed once and then plays on by itself (D-261102-940). */
 const START_MS = 1_000;
+
+/** Web Locks gone before the app's first script, as on a self-host over plain HTTP on a LAN: browsers offer them in a secure context only. */
+const NO_LOCKS = "delete Navigator.prototype.locks;";
+
+/**
+ * A tab hidden behind another, switched from the test (`__rvttHide`).
+ * Headless Chrome reports every tab visible and so never throttles one:
+ * bringToFront, a minimized window and a target opened in the background
+ * all left `visibilityState` "visible" (checked). So the page says hidden
+ * itself, and while hidden its timeouts wait for whole-second wake-ups, as
+ * a hidden, silent tab's do in Chrome. Posts are never held back. Without
+ * the wake-ups a handoff that took a hidden page's late timers for a stall
+ * passes here (checked), as it did before the fix for that.
+ */
+const HIDDEN_TAB = `(() => {
+  let hidden = false;
+  Object.defineProperty(Document.prototype, "visibilityState", { configurable: true, get: () => (hidden ? "hidden" : "visible") });
+  Object.defineProperty(Document.prototype, "hidden", { configurable: true, get: () => hidden });
+  const real = globalThis.setTimeout.bind(globalThis);
+  globalThis.setTimeout = (fn, ms, ...args) => {
+    if (!hidden) return real(fn, ms, ...args);
+    const due = performance.now() + Math.max(0, Number(ms) || 0);
+    return real(fn, Math.ceil(due / 1000) * 1000 - performance.now(), ...args);
+  };
+  globalThis.__rvttHide = (next) => {
+    if (next === hidden) return;
+    hidden = next;
+    document.dispatchEvent(new Event("visibilitychange"));
+  };
+})();`;
+
+/**
+ * Every handoff post a page hears on its room's channel, its own too, with
+ * when it came: `__rvttHeard`. The channel's name and the post's fields are
+ * handoff.ts's channelName and HandoffPost, written out here since that file
+ * needs the DOM's types and the e2e files build without them.
+ */
+function heardScript(roomId: string): string {
+  return `(() => {
+  const heard = [];
+  const channel = new BroadcastChannel(${JSON.stringify(`rvtt-sound:${roomId}`)});
+  channel.onmessage = (e) => heard.push({ at: Date.now(), ...e.data });
+  globalThis.__rvttHeard = heard;
+  globalThis.__rvttHeardChannel = channel;
+})();`;
+}
+
+type Heard = { at: number; page: string; owns: boolean; armed: boolean; sentAt: number; bye?: true };
+
+/** handoff.ts LEASE_MS: without Web Locks an owner's audio fades out this long after its last renewal unless renewed again. */
+const LEASE_MS = 6_000;
+
+/** A page's own sound passes its output gate, the lease gain, which the audio thread runs while the main thread stalls (handoff.ts HandoffAudio). */
+function sounds(probe: SoundProbe): boolean {
+  return (probe.state?.lease ?? 0) > 0;
+}
+
+/** The longest a hidden page waits to take the sound over once the shown one that played closes: at most 1.45 s in the handoff world, and CI's slack. */
+const CLOSE_TAKEOVER_MS = 4_000;
 
 describe("synced music and sound", { concurrency: false }, () => {
   before(async () => {
@@ -503,6 +563,102 @@ describe("synced music and sound", { concurrency: false }, () => {
     await waitFor("the DM's tabs to go quiet again", async () => (!(await soundProbe(dm)).state?.owns && !(await soundProbe(second)).state?.owns ? true : null), 5_000);
     await tv.close();
     await second.close();
+  });
+
+  test("sn-7b. without Web Locks, as on a LAN over HTTP: one of the DM's two pages plays, a hidden page takes over a 12 s stall only once the stalled page's lease silenced it, and takes over a closed one within 4 s, never two at once", async () => {
+    await soundSays(dm, /^playing music/, 5_000);
+    // A context of its own with the DM's sign-in, so its pages' channel reaches no page that has locks.
+    const lan = await browser.newContext({ viewport: { width: 1280, height: 800 }, storageState: await dmContext.storageState() });
+    try {
+      for (const script of [SOUND_TEST_FLAG, NO_LOCKS, HIDDEN_TAB, heardScript(run.roomId)]) await lan.addInitScript(script);
+      type Hooks = { __rvttHide(hidden: boolean): void; __rvttHeard: Heard[]; document: { visibilityState: string }; navigator: object };
+      const hide = (p: Page, hidden: boolean) => p.evaluate((h) => (globalThis as unknown as Hooks).__rvttHide(h), hidden);
+      const shown = (p: Page) => p.evaluate(() => (globalThis as unknown as Hooks).document.visibilityState);
+      const heard = (p: Page) => p.evaluate(() => (globalThis as unknown as Hooks).__rvttHeard);
+      const a = await lan.newPage();
+      await openRoom(a);
+      assert.equal(await a.evaluate(() => "locks" in (globalThis as unknown as Hooks).navigator), false, "the page has no Web Locks");
+      await soundSays(a, /^playing music/, 10_000);
+      const b = await lan.newPage();
+      await openRoom(b);
+      await soundSays(b, /^other/, 8_000);
+      await hide(b, true);
+      assert.equal(await shown(b), "hidden");
+
+      const open: Record<string, Page> = { a, b };
+      /** Every open page's probe, never two of them sounding at once. */
+      const look = async (why: string): Promise<Record<string, SoundProbe>> => {
+        const probes = await Promise.all(Object.entries(open).map(async ([name, p]) => [name, await soundProbe(p)] as const));
+        const playing = probes.filter(([, p]) => sounds(p)).map(([name]) => name);
+        assert.ok(playing.length <= 1, `${why}: two pages sound at once (${playing.join(", ")})`);
+        return Object.fromEntries(probes);
+      };
+      /** For `ms`, at every sample: only `who` plays, and only its sound passes the gate. */
+      const only = async (who: string, ms: number, why: string) => {
+        const end = Date.now() + ms;
+        do {
+          for (const [name, p] of Object.entries(await look(why))) {
+            assert.equal(p.state?.owns, name === who, `${why}: ${name} ${name === who ? "plays" : "is quiet"} (${p.data})`);
+            assert.equal(sounds(p), name === who, `${why}: ${name}'s gate ${name === who ? "open" : "shut"} (lease ${p.state?.lease})`);
+          }
+          await sleep(250);
+        } while (Date.now() < end);
+      };
+      await only("a", 3_000, "two pages, the second hidden");
+
+      // The shown page that plays stalls 12 s while its audio renders on. Its lease silences it 6 s after its last renewal, and
+      // the hidden page may take over only 7 s after that page's last post, so a stall past sn-7's 8 s shows the takeover.
+      const STALL_MS = 12_000;
+      const stallFrom = Date.now();
+      const stall = a.evaluate((ms) => {
+        const end = Date.now() + ms;
+        while (Date.now() < end) {
+          // Busy, as a long task is.
+        }
+      }, STALL_MS);
+      try {
+        await waitFor("the hidden page to take over in the stall", async () => (sounds(await soundProbe(b)) ? true : null), STALL_MS - 1_000);
+      } finally {
+        // A failure here waits for the stall's end, so it is not reported as the page closing under the stall.
+        await stall;
+      }
+      await waitFor("the stalled page to give up once it runs", async () => (!(await look("after the stall")).a!.state?.owns ? true : null), 3_000);
+      await only("b", 3_000, "after the stall");
+      const log = await heard(b);
+      const stalled = log.filter((m) => m.owns && m.sentAt < stallFrom).at(-1)?.page;
+      const takeover = log.find((m) => m.page !== stalled && m.owns);
+      assert.ok(stalled && takeover && takeover.sentAt < stallFrom + STALL_MS, "the hidden page said it plays during the stall");
+      const last = log.filter((m) => m.page === stalled && m.sentAt < takeover.sentAt).at(-1)!;
+      assert.ok(last.owns && last.armed, "the stalled page's last post renewed an armed lease");
+      const gap = takeover.sentAt - last.sentAt;
+      assert.ok(gap >= LEASE_MS, `the hidden page took over ${gap} ms after the stalled page's last renewal, once its ${LEASE_MS} ms lease ran out`);
+      assert.ok(log.filter((m) => m.page === stalled && m.sentAt > takeover.sentAt).every((m) => !m.owns), "the stalled page never said it plays once the other did");
+
+      // A tab switch: the page that plays is shown and the other hidden, and the sound stays where it is.
+      await hide(a, true);
+      await hide(b, false);
+      await only("b", 2_000, "after a tab switch");
+
+      // The shown page that plays closes: its goodbye lets the hidden page claim at once, its timers on whole seconds.
+      delete open.b;
+      const closing = Date.now();
+      await b.close();
+      // Its gate too: the audio thread reports the gain it opened a render later.
+      await waitFor("the hidden page to take over the closed one", async () => {
+        const probe = (await look("after the close")).a!;
+        return probe.state?.owns && sounds(probe) ? true : null;
+      }, CLOSE_TAKEOVER_MS + 1_000);
+      assert.equal(await shown(a), "hidden", "it took over hidden");
+      const after = (await heard(a)).filter((m) => m.at >= closing);
+      const bye = after.find((m) => m.bye);
+      const took = after.find((m) => bye && m.page !== bye.page && m.owns);
+      assert.ok(bye && took, "the closed page's goodbye, then the hidden page's post that it plays");
+      assert.ok(took.sentAt - bye.sentAt <= CLOSE_TAKEOVER_MS, `the hidden page took over ${took.sentAt - bye.sentAt} ms after the goodbye`);
+      await only("a", 2_000, "after the close");
+      console.log(`sn-7b: stall takeover ${gap} ms after the last renewal, close takeover ${took.sentAt - bye.sentAt} ms after the goodbye`);
+    } finally {
+      await lan.close();
+    }
   });
 
   test("sn-8. This device's Sounds: Room sound and, while on, the three sliders, at three sizes and two scales, dark then light, within 1 px", async () => {
