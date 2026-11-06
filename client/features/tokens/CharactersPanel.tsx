@@ -22,7 +22,7 @@ import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { ImageField, type ImageRef } from "../images/ImageField.tsx";
 import { ImagePreview } from "../images/IconDisk.tsx";
 import { partyRestOps } from "../clock/ties.ts";
-import { restNote } from "../clock/words.ts";
+import { partyRestNotes } from "../clock/words.ts";
 import { partyRestBackText } from "../resources/logic.ts";
 import { ownsCharacter } from "./access.ts";
 import { CharacterPage, myToken, SIZE_OPTIONS } from "./CharacterCard.tsx";
@@ -270,10 +270,10 @@ function PartyLongRest(props: { characters: Character[] }) {
   const left = props.characters.length - resting.length;
   const back = partyRestBackText(resting);
   const notes = clock
-    ? props.characters.flatMap((c) => {
-        const note = restNote({ name: c.name, stamp: c.longRest, clockId: clock.id, now: clockNow(clock, encounter), calendar: clock.calendar, movesClock: moveClock });
-        return note === null ? [] : [{ id: c.id, note }];
-      })
+    ? partyRestNotes(
+        props.characters.map((c) => ({ id: c.id, name: c.name, stamp: c.longRest })),
+        { clockId: clock.id, now: clockNow(clock, encounter), calendar: clock.calendar, movesClock: moveClock },
+      )
     : [];
   if (!asking) {
     return (
@@ -299,7 +299,7 @@ function PartyLongRest(props: { characters: Character[] }) {
         {left > 0 ? ` ${left === 1 ? "1 character at 0 HP stays" : `${left} characters at 0 HP stay`} as they are.` : ""}
       </Help>
       {clock ? <Checkbox label="Move the clock on 8 hours" checked={moves} onChange={setMoves} /> : null}
-      {/* Keyed by character: two characters of one name who rested together read alike (CALB-O-11). */}
+      {/* Keyed by the first character of each group: two of one name who rested apart read alike (CALB-O-11). */}
       {notes.map(({ id, note }) => (
         <Help key={id}>{note}</Help>
       ))}

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Calendar } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
-import { amountBy, calendarSummary, chipName, chipText, composeDraft, DAY_FROM_ONE, draftDate, firstDay, keptSeconds, reconcileDate, remapMonth, restNote, setAt, stepName, STEPS, timeSeconds, timeValue, toDawn, weekdayLine } from "./words.ts";
+import { amountBy, calendarSummary, chipName, chipText, composeDraft, DAY_FROM_ONE, draftDate, firstDay, keptSeconds, reconcileDate, joinNames, partyRestNotes, remapMonth, restNote, setAt, stepName, STEPS, timeSeconds, timeValue, toDawn, weekdayLine } from "./words.ts";
 
 const DAY = 86_400;
 const H = 3_600;
@@ -170,7 +170,7 @@ describe("the note on a character's last Long Rest (4.5)", () => {
     restNote({ name: "Bree", stamp: "stamp" in over ? over.stamp : stamp, clockId: over.clockId ?? "c1", now, calendar: DAYS, movesClock });
 
   test("gives the last finish and the earliest next start", () => {
-    assert.equal(note(stamp.at + 6 * H, true), "Bree finished a Long Rest at Day 4, 6:00 AM. The rules let the next start from Day 4, 10:00 PM.");
+    assert.equal(note(stamp.at + 6 * H, true), "Bree finished a Long Rest at Day 4, 6:00 AM. The next can start from Day 4, 10:00 PM.");
   });
 
   test("a rest that moves the clock: a line at 15 h 59 min after the stamp, none at 16 h", () => {
@@ -185,7 +185,7 @@ describe("the note on a character's last Long Rest (4.5)", () => {
 
   test("a stamp after now reads the same two times, never a negative age", () => {
     const text = note(stamp.at - 2 * DAY, true);
-    assert.equal(text, "Bree finished a Long Rest at Day 4, 6:00 AM. The rules let the next start from Day 4, 10:00 PM.");
+    assert.equal(text, "Bree finished a Long Rest at Day 4, 6:00 AM. The next can start from Day 4, 10:00 PM.");
     assert.ok(!text!.includes("-"));
   });
 
@@ -194,8 +194,55 @@ describe("the note on a character's last Long Rest (4.5)", () => {
     assert.equal(note(stamp.at + H, true, { stamp: undefined }), null);
   });
 
-  test("it reads the date the way the calendar does today", () => {
+  test("a date in the clock's own year drops its weekday and year", () => {
     const text = restNote({ name: "Bree", stamp: { at: DAY + 6 * H, clock: "c1" }, clockId: "c1", now: DAY + 7 * H, calendar: MONTHS, movesClock: true });
-    assert.equal(text, "Bree finished a Long Rest at Tuesday, Deepwinter 2, 0 AF, 6:00 AM. The rules let the next start from Tuesday, Deepwinter 2, 0 AF, 10:00 PM.");
+    assert.equal(text, "Bree finished a Long Rest at Deepwinter 2, 6:00 AM. The next can start from Deepwinter 2, 10:00 PM.");
+  });
+
+  test("a festival day reads by its name alone", () => {
+    const at = 30 * DAY + 17 * H;
+    const text = restNote({ name: "Bree", stamp: { at, clock: "c1" }, clockId: "c1", now: at + H, calendar: MONTHS, movesClock: true });
+    assert.equal(text, "Bree finished a Long Rest at Midwinter, 5:00 PM. The next can start from Thaw 1, 9:00 AM.");
+  });
+
+  test("a date in another year than the clock's keeps its weekday and year", () => {
+    const at = 60 * DAY + 20 * H;
+    const text = restNote({ name: "Bree", stamp: { at, clock: "c1" }, clockId: "c1", now: at + H, calendar: MONTHS, movesClock: true });
+    assert.match(text!, /^Bree finished a Long Rest at Thaw 30, 8:00 PM\. The next can start from \w+, Deepwinter 1, 1 AF, 12:00 PM\.$/);
+  });
+});
+
+describe("the party's Long Rest notes", () => {
+  const o = { clockId: "c1", now: 3 * DAY + 7 * H, calendar: DAYS, movesClock: true };
+  const at = 3 * DAY + 6 * H;
+  const who = (id: string, name: string, over: Partial<{ at: number; clock: string }> | null = {}) => ({
+    id,
+    name,
+    stamp: over === null ? undefined : { at, clock: "c1", ...over },
+  });
+
+  test("names join the way a sentence does", () => {
+    assert.equal(joinNames([]), "");
+    assert.equal(joinNames(["Bree"]), "Bree");
+    assert.equal(joinNames(["Bree", "Thorn"]), "Bree and Thorn");
+    assert.equal(joinNames(["Bree", "Thorn", "Ash"]), "Bree, Thorn and Ash");
+  });
+
+  test("characters with one stamp share one sentence", () => {
+    const notes = partyRestNotes([who("a", "Bree"), who("b", "Thorn")], o);
+    assert.deepEqual(notes, [{ id: "a", note: "Bree and Thorn finished a Long Rest at Day 4, 6:00 AM. The next can start from Day 4, 10:00 PM." }]);
+  });
+
+  test("different stamps give a sentence each, in the order the first of each appears", () => {
+    const notes = partyRestNotes([who("a", "Bree"), who("b", "Thorn", { at: at + H }), who("c", "Ash")], o);
+    assert.equal(notes.length, 2);
+    assert.match(notes[0]!.note, /^Bree and Ash finished/);
+    assert.match(notes[1]!.note, /^Thorn finished/);
+  });
+
+  test("no stamp, another clock's stamp, or a spent window adds nothing", () => {
+    const notes = partyRestNotes([who("a", "Bree", null), who("b", "Thorn", { clock: "c2" }), who("c", "Ash", { at: at - 2 * DAY }), who("d", "Moss")], o);
+    assert.deepEqual(notes.map((n) => n.id), ["d"]);
+    assert.match(notes[0]!.note, /^Moss finished/);
   });
 });

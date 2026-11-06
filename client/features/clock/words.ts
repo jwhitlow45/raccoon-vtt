@@ -1,4 +1,4 @@
-import { composeDate, DAY_SECONDS, dateOf, dateText, lineDate, nextDawn, partOfDay, timeText, type ComposedDate, type DateFields } from "#shared/calendar.ts";
+import { composeDate, DAY_SECONDS, dateOf, dateText, nextDawn, partOfDay, timeText, type ComposedDate, type DateFields } from "#shared/calendar.ts";
 import { LIMITS } from "#shared/limits.ts";
 import type { Calendar, LongRestStamp } from "#shared/model.ts";
 
@@ -122,7 +122,44 @@ export function restNote(o: { name: string; stamp: LongRestStamp | undefined; cl
   if (stamp === undefined || stamp.clock !== o.clockId) return null;
   const until = stamp.at + LONG_REST_GAP + (o.movesClock ? 0 : REST_LENGTH);
   if (o.now >= until) return null;
-  return `${o.name} finished a Long Rest at ${lineDate(stamp.at, o.calendar)}. The rules let the next start from ${lineDate(stamp.at + LONG_REST_GAP, o.calendar)}.`;
+  return `${o.name} finished a Long Rest at ${noteDate(stamp.at, o.now, o.calendar)}. The next can start from ${noteDate(stamp.at + LONG_REST_GAP, o.now, o.calendar)}.`;
+}
+
+/**
+ * A date in the note: without its weekday and year when it falls in the
+ * clock's own year, since the note is only ever about the next day or so.
+ * This is not `lineDate`, which stored clock lines use and which must not change.
+ */
+function noteDate(t: number, now: number, calendar: Calendar): string {
+  const sameYear = dateOf(t, calendar).year === dateOf(now, calendar).year;
+  return sameYear ? `${dateText(t, calendar, "short")}, ${timeText(t)}` : `${dateText(t, calendar, "full")}, ${timeText(t)}`;
+}
+
+/** "Bree", "Bree and Thorn", "Bree, Thorn and Ash". */
+export function joinNames(names: readonly string[]): string {
+  return names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)!}`;
+}
+
+/**
+ * The party's notes: characters with the same Long Rest stamp share one
+ * sentence, in the order the first of each appears. Characters with no note
+ * (no stamp, another clock's, or past the window) add none.
+ */
+export function partyRestNotes(
+  characters: readonly { id: string; name: string; stamp: LongRestStamp | undefined }[],
+  o: { clockId: string; now: number; calendar: Calendar; movesClock: boolean },
+): { id: string; note: string }[] {
+  const groups = new Map<number, { id: string; names: string[]; stamp: LongRestStamp }>();
+  for (const c of characters) {
+    if (c.stamp === undefined || restNote({ ...o, name: c.name, stamp: c.stamp }) === null) continue;
+    const group = groups.get(c.stamp.at);
+    if (group) group.names.push(c.name);
+    else groups.set(c.stamp.at, { id: c.id, names: [c.name], stamp: c.stamp });
+  }
+  return [...groups.values()].flatMap((g) => {
+    const note = restNote({ ...o, name: joinNames(g.names), stamp: g.stamp });
+    return note === null ? [] : [{ id: g.id, note }];
+  });
 }
 
 /** The date fields of Set and Start as the DM types them: text, until composeDraft reads them. */
