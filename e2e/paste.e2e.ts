@@ -735,6 +735,38 @@ describe("raccoon-vtt paste run", { timeout: 300_000 }, () => {
     assert.deepEqual(await stored(), { handouts: true });
   });
 
+  test("pg-1. with New scene stored folded and Scenes closed, New scene in the offer opens New scene by itself with the picture on Map image, writing no fold", async () => {
+    // The DM folds New scene, as on a computer it starts open, then leaves Scenes for another panel.
+    await openSideTab(dm, "Scenes");
+    const panel = dm.getByRole("tabpanel", { name: "Scenes" });
+    const fold = panel.getByRole("heading", { name: "New scene", exact: true }).getByRole("button", { name: "New scene", exact: true });
+    if ((await fold.getAttribute("aria-expanded")) === "true") await fold.click();
+    await waitFor("New scene folded", async () => ((await fold.getAttribute("aria-expanded")) === "false" ? true : null));
+    const stored = () => dm.evaluate(() => JSON.parse(localStorage.getItem("rvtt.sceneSettingsFolds") ?? "null") as { new?: boolean } | null);
+    assert.equal((await stored())?.new, false);
+    const kept = await stored();
+    await openSideTab(dm, "DM");
+    await pickTool(dm, "Select");
+    await blur(dm);
+
+    assert.equal(await paste(dm, { files: [await swatch([40, 120, 160])] }), true);
+    const sheet = dm.getByRole("dialog", { name: "Use the pasted image" });
+    await sheet.getByRole("button", { name: "New scene", exact: true }).click();
+    await sheet.waitFor({ state: "detached" });
+    // Never opened here: the paste reveals it (docs/design/design-v1-panel-groups.md 6.1, D-261102-761).
+    await panel.waitFor();
+    assert.equal(await fold.getAttribute("aria-expanded"), "true", "New scene opened by itself");
+    await panel.getByText(PASTED).waitFor();
+    assert.equal(await panel.getByRole("radio", { name: "Map image", exact: true }).isChecked(), true, "the picture went to Map image");
+    assert.deepEqual(await stored(), kept, "a reveal writes nothing");
+    await shots.take(dm, "pg-1-new-scene-revealed");
+    await panel.getByRole("button", { name: "Cancel", exact: true }).first().click();
+    // Open again for good: the DM's tap ends the reveal, and the next one stores New scene open.
+    await fold.click();
+    if ((await fold.getAttribute("aria-expanded")) === "false") await fold.click();
+    assert.equal((await stored())?.new, true);
+  });
+
   test("pa-12. no page errors along the way", () => {
     assert.deepEqual(dmConsole.errors.filter((e) => e.startsWith("uncaught")), []);
     assert.deepEqual(playerConsole.errors.filter((e) => e.startsWith("uncaught")), []);

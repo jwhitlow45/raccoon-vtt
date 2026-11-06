@@ -5,7 +5,7 @@ import { Dialog } from "../../components/Dialog.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { Row } from "../../components/Row.tsx";
 import { Help } from "../../components/Panel.tsx";
-import { dmPanelFoldsSlot } from "../../lib/folds.ts";
+import { dmPanelFoldsSlot, scenesFoldsSlot } from "../../lib/folds.ts";
 import { displayName, footprint } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
@@ -140,8 +140,11 @@ function UsePastedImage(props: { offer: Offer; onClose(): void; onToken(tokenId:
       return;
     }
     props.onClose();
-    if (id === "scene") ui.openPanel("scenes");
-    else if (id === "handout") {
+    if (id === "scene") {
+      // As Handouts below: New scene opens before the panel does, so a folded New scene shows the Map image form the picture goes to (D-261102-761).
+      scope.get(scenesFoldsSlot).reveal("new");
+      ui.openPanel("scenes");
+    } else if (id === "handout") {
       /*
        * Handouts opens before the panel does, so a folded Handouts shows the
        * form that takes the picture (docs/design/design-v1-panel-groups.md
