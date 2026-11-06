@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import type { D20Test } from "#shared/dice/bonus.ts";
 import { FORMULA_ERRORS } from "#shared/dice/formula.ts";
 import type { InitEntry } from "#shared/model.ts";
-import type { ActorTarget } from "#shared/protocol.ts";
+import type { ActorTarget, ClientOp, EntryInput } from "#shared/protocol.ts";
 import { groupKeyFor, orderRevealOf, rowGroup } from "#shared/rules/initiative.ts";
 import { Button, type ButtonProps } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
@@ -10,7 +10,8 @@ import { Help } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { useUnsavedSince } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
-import { useRoomStore, useRoomView } from "../../state/view.ts";
+import { useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
+import type { DiceView } from "../dice/creature.ts";
 import { presetFor } from "../dice/presets.ts";
 import { NEEDS_CONNECTION } from "../dice/send.ts";
 import { useDicePanel } from "../dice/useDicePanel.ts";
@@ -19,9 +20,10 @@ import type { RollModeOverride } from "../dice/rollMode.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
 import { useReceipt } from "../dice/useReceipt.ts";
 import { describeRoll, initiativeRolls, MAY_HAVE_HAPPENED, noBonusSet, planPress, rollRows, rowsToRoll, totalsHelp, type RollMode, type RollRow } from "./autoRoll.ts";
-import { useAuto, useRollBusy, useShownRoll } from "./autoState.ts";
+import type { OpAnswer } from "../../state/types.ts";
+import { modeIn, startStep, useAuto, useAutoStore, useRollBusy, useShownRoll, useStartRoll, type StartEvent, type StartFrom } from "./autoState.ts";
 import { useRowFacts, useSendAll, useSortedEntries } from "./hooks.ts";
-import { entryActor, entryName } from "./logic.ts";
+import { entryActor, entryName, sortedEntries } from "./logic.ts";
 import { RollBadge } from "./parts.tsx";
 
 /**
@@ -36,14 +38,16 @@ const INITIATIVE: D20Test = { kind: "initiative" };
 // Initiative reads only a creature's effects and the tracker's mark, never its block, so no SRD chunk is loaded for it.
 const NO_CREATURES: ActorTarget[] = [];
 
-/** The monster rows auto initiative can roll, from the DM's view, each with the initiative preset every d20 path reads. */
+/** The monster rows auto initiative can roll in a view, each with the initiative preset every d20 path reads. */
+function rowsIn(dice: DiceView, entries: readonly InitEntry[]) {
+  // Magic Resistance bears only on saves against spells, so initiative never waits for the block that says whether a creature has it.
+  return rollRows(dice.view, entries, (e) => entryName(dice.view, e), (creature) => presetFor(dice, creature, INITIATIVE, { rolls: null }));
+}
+
+/** The monster rows auto initiative can roll, from the DM's view. */
 function useRollRows(entries: readonly InitEntry[]) {
   const { dice } = useDiceView(NO_CREATURES);
-  return useMemo(() => {
-    if (!dice) return { rows: [], skipped: [] };
-    // Magic Resistance bears only on saves against spells, so initiative never waits for the block that says whether a creature has it.
-    return rollRows(dice.view, entries, (e) => entryName(dice.view, e), (creature) => presetFor(dice, creature, INITIATIVE, { rolls: null }));
-  }, [dice, entries]);
+  return useMemo(() => (dice ? rowsIn(dice, entries) : { rows: [], skipped: [] }), [dice, entries]);
 }
 
 /**
@@ -68,6 +72,62 @@ function usePress(): (rows: readonly RollRow[], mode: RollMode, kept?: readonly 
     // Connected, only the splitter refuses a group, when it is too big to roll at once.
     if (tag === null) store.setState({ last: { ...base, error: connected ? FORMULA_ERRORS.tooMuch : NEEDS_CONNECTION, done: true } });
     else store.setState({ last: { ...base, tag } });
+  };
+}
+
+/**
+ * Starting a fight (designs/qol audit Q12, plan 9): the start's ops go as
+ * one gesture under one group, `encounter.start` and then each
+ * `encounter.add` batch, so a fight of 101 rows is one Play step. With
+ * "Roll monsters' Initiative" on, once the server takes every one of them
+ * the fight's rows are in the view, and Auto Initiative's own press rolls
+ * the monster rows still without a value, with the tracker's sharing and
+ * re-roll off, so a monster that joins its group's value keeps it. The
+ * totals are then their own step, as Auto Initiative's are, so Undo takes
+ * back the totals, then the start. The wait lives in the room's auto state,
+ * so closing the tracker never drops it, and every roll button waits on it
+ * (useRollBusy). `start` returns false for a press it refused.
+ */
+export function useStartFight(): (batches: readonly EntryInput[][], from: StartFrom | null) => boolean {
+  const store = useAutoStore();
+  const actions = useRoomActions();
+  const room = useRoomStore();
+  const busy = useRollBusy();
+  const { on } = useStartRoll();
+  const press = usePress();
+  const rollNow = () => {
+    const state = room.getState();
+    const view = state.view;
+    if (!view?.encounter || !state.you) return;
+    const dice: DiceView = { you: state.you, view, sceneId: state.sceneId, srd: { monsters: null, rolls: null } };
+    const { rows } = rowsIn(dice, sortedEntries(view.encounter.entries));
+    const toRoll = rowsToRoll(rows, false);
+    // Nobody yet, a fight with no monster rows, or every monster already valued by its score: nothing to roll.
+    if (toRoll.length === 0) return;
+    press(toRoll, modeIn(store.getState(), state.roomId), rows.filter((r) => r.value !== null));
+  };
+  const step = (event: StartEvent) => {
+    const out = startStep(store.getState().start, event);
+    store.setState({ start: out.wait });
+    if (out.roll) rollNow();
+  };
+  return (batches, from) => {
+    const [first = [], ...rest] = batches;
+    const ops: ClientOp[] = [{ t: "encounter.start", entries: first }, ...rest.map((entries): ClientOp => ({ t: "encounter.add", entries }))];
+    const group = actions.newId();
+    // Nobody yet starts with no one, so nothing to roll.
+    const rollsFrom = on && from !== null && first.length > 0 ? from : null;
+    if (rollsFrom !== null) {
+      // A second press while one waits, or while a roll still lands, sends nothing.
+      if (busy || store.getState().start !== null) return false;
+      step({ kind: "press", press: group, from: rollsFrom, ops: ops.length });
+    }
+    ops.forEach((op, index) => {
+      const onAnswer = rollsFrom !== null ? (answer: OpAnswer) => step({ kind: "answer", press: group, index, answer }) : undefined;
+      const n = actions.dispatch(op, { group, ...(onAnswer ? { onAnswer } : {}) });
+      if (n === null) onAnswer?.("refused");
+    });
+    return true;
   };
 }
 

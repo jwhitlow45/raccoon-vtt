@@ -9,7 +9,8 @@ import { Help, Section } from "../components/Panel.tsx";
 import { Segmented } from "../components/Segmented.tsx";
 import { Switch } from "../components/Switch.tsx";
 import { useSoundOn, setSoundOn } from "../features/encounter/alerts.ts";
-import { AutoInitiativeControls, AutoInitiativeResult } from "../features/encounter/AutoInitiative.tsx";
+import { AutoInitiativeControls, AutoInitiativeResult, useStartFight } from "../features/encounter/AutoInitiative.tsx";
+import { useStartRoll, useStartWaiting, type StartFrom } from "../features/encounter/autoState.ts";
 import { HpLog } from "../features/encounter/HpLog.tsx";
 import { setFollowTurn, useFollowTurn } from "../features/encounter/followTurn.ts";
 import { useRowFacts, useSend, useSortedEntries, useTurnTimer, useYou } from "../features/encounter/hooks.ts";
@@ -616,24 +617,28 @@ function useJoinBatches(candidates: Record<AddMode, Token[]>): { batches(tokens:
   return { batches: (tokens) => entryBatches(tokens, actions.newId).map((batch) => batch.map(join.mark)), stateOf: join.stateOf };
 }
 
+/**
+ * The ways to start a fight, and "Roll monsters' Initiative" under them
+ * (designs/qol audit Q12): on, a start rolls the monsters once the server
+ * takes it, and the pressed button reads "Rolling…" until then
+ * (AutoInitiative.tsx useStartFight).
+ */
 function StartFight(props: { selectedTokenId: string | null }) {
-  const actions = useRoomActions();
   const candidates = useCandidates(props.selectedTokenId);
   const join = useJoinBatches(candidates);
-  const start = (tokens: Token[]) => {
-    const [first = [], ...rest] = join.batches(tokens);
-    actions.dispatch({ t: "encounter.start", entries: first });
-    for (const batch of rest) actions.dispatch({ t: "encounter.add", entries: batch });
-  };
+  const startFight = useStartFight();
+  const roll = useStartRoll();
+  const rolling = useStartWaiting();
   return (
     <Section label="New fight" style={COLUMN}>
       <Wrap>
-        <AddButtons candidates={candidates} stateOf={join.stateOf} onAdd={start} />
-        <Button size="sm" onClick={() => start([])} style={GROW}>
+        <AddButtons candidates={candidates} stateOf={join.stateOf} onAdd={(tokens, from) => startFight(join.batches(tokens), from)} rolling={rolling} />
+        <Button size="sm" onClick={() => startFight([], null)} style={GROW}>
           Nobody yet
         </Button>
       </Wrap>
       <JoinFailed candidates={candidates} stateOf={join.stateOf} />
+      <Switch label="Roll monsters' Initiative" help="Auto Initiative rolls for every monster as the fight starts." checked={roll.on} onChange={roll.setOn} />
     </Section>
   );
 }
@@ -644,22 +649,23 @@ function StartFight(props: { selectedTokenId: string | null }) {
  * not load (JoinFailed says so), so none adds a row marked off for a lair
  * it could not read.
  */
-function AddButtons(props: { candidates: Record<AddMode, Token[]>; stateOf(tokens: readonly Token[]): JoinState; onAdd(tokens: Token[]): void }) {
+function AddButtons(props: { candidates: Record<AddMode, Token[]>; stateOf(tokens: readonly Token[]): JoinState; onAdd(tokens: Token[], from: StartFrom): void; rolling?: StartFrom | null }) {
   const { candidates } = props;
   const selected = candidates.selected[0];
-  const button = (tokens: Token[], words: ReactNode) => {
+  const button = (tokens: Token[], from: StartFrom, words: ReactNode) => {
     const state = props.stateOf(tokens);
+    const rolling = props.rolling === from;
     return (
-      <Button size="sm" disabled={tokens.length === 0 || state === "failed"} busy={state === "loading"} onClick={() => props.onAdd(tokens)} style={GROW}>
-        {words}
+      <Button size="sm" disabled={tokens.length === 0 || state === "failed"} busy={state === "loading" || rolling} onClick={() => props.onAdd(tokens, from)} style={GROW}>
+        {rolling ? "Rolling…" : words}
       </Button>
     );
   };
   return (
     <>
-      {button(candidates.selected, selected ? displayName(selected) : "Selected token")}
-      {button(candidates.scene, `Everyone here (${candidates.scene.length})`)}
-      {button(candidates.visible, `Visible to players (${candidates.visible.length})`)}
+      {button(candidates.selected, "selected", selected ? displayName(selected) : "Selected token")}
+      {button(candidates.scene, "scene", `Everyone here (${candidates.scene.length})`)}
+      {button(candidates.visible, "visible", `Visible to players (${candidates.visible.length})`)}
     </>
   );
 }

@@ -3,6 +3,7 @@ import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { dispatchGesture } from "../../state/actions.ts";
 import { scopeSlot, useScoped } from "../../state/scope.ts";
+import type { OpAnswer } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
 import { useReceipts } from "../dice/useReceipt.ts";
 import { DEFAULT_ROLL_MODE, decodePrefs, encodePrefs, prefsKey, rollStillShown, settleRoll, type RollMode, type RollPress } from "./autoRoll.ts";
@@ -24,10 +25,15 @@ export type AutoState = {
   mode: RollMode;
   /** The latest roll, until the DM dismisses it or it no longer describes the fight (rollStillShown). */
   last: ShownRoll | null;
+  /** A fight started with "Roll monsters' Initiative" on, waiting for the server to take it before the monsters roll. */
+  start: StartWait | null;
+  /** The storage key "Roll monsters' Initiative" was read from, or null before the first read, and its value. */
+  startKey: string | null;
+  startOn: boolean;
 };
 
 // Per Room page, so the card survives the tracker sheet closing and "view as a player" never sees it.
-const autoSlot = scopeSlot(() => createStore<AutoState>(() => ({ key: null, mode: DEFAULT_ROLL_MODE, last: null })));
+const autoSlot = scopeSlot(() => createStore<AutoState>(() => ({ key: null, mode: DEFAULT_ROLL_MODE, last: null, start: null, startKey: null, startOn: true })));
 
 function readMode(key: string): RollMode {
   try {
@@ -36,6 +42,12 @@ function readMode(key: string): RollMode {
     // Storage blocked: the default for this page load.
     return DEFAULT_ROLL_MODE;
   }
+}
+
+/** The sharing mode as the tracker shows it now, for a roll that starts outside render: the store's, else storage's for the room. */
+export function modeIn(state: Pick<AutoState, "key" | "mode">, roomId: string): RollMode {
+  const key = prefsKey(roomId);
+  return state.key === key ? state.mode : readMode(key);
 }
 
 export function useAuto(): { store: StoreApi<AutoState>; mode: RollMode; setMode(mode: RollMode): void } {
@@ -59,13 +71,107 @@ export function useAuto(): { store: StoreApi<AutoState>; mode: RollMode; setMode
   return { store, mode, setMode };
 }
 
+// ---------------------------------------------------------------- rolling as the fight starts
+
+/**
+ * "Roll monsters' Initiative" under the start buttons (designs/qol audit
+ * Q12, D-261106-112 and 177): on unless this device turned it off for the
+ * room. Kept beside the sharing mode, on this device only, never in the room.
+ */
+export function startRollKey(roomId: string): string {
+  return `rvtt.autoInitiativeStart.${roomId}`;
+}
+
+export function parseStartRoll(raw: string | null): boolean {
+  return raw !== "off";
+}
+
+function readStartRoll(key: string): boolean {
+  try {
+    return parseStartRoll(localStorage.getItem(key));
+  } catch {
+    // Storage blocked: on, the default, for this page load.
+    return true;
+  }
+}
+
+export function useStartRoll(): { on: boolean; setOn(on: boolean): void } {
+  const store = useScoped(autoSlot);
+  const roomId = useRoomView((s) => s.roomId);
+  const key = startRollKey(roomId);
+  const state = useStore(store);
+  // As the mode: storage once per room, and meanwhile straight from it.
+  const on = state.startKey === key ? state.startOn : readStartRoll(key);
+  useEffect(() => {
+    if (store.getState().startKey !== key) store.setState({ startKey: key, startOn: readStartRoll(key) });
+  }, [store, key]);
+  const setOn = (next: boolean) => {
+    store.setState({ startKey: key, startOn: next });
+    try {
+      localStorage.setItem(key, next ? "on" : "off");
+    } catch {
+      // As above: the choice lasts until the page closes.
+    }
+  };
+  return { on, setOn };
+}
+
+/** The start button pressed: the selected token, everyone here or those visible to players. */
+export type StartFrom = "selected" | "scene" | "visible";
+
+/**
+ * A start that rolls once the server takes it (D-261106-118): its press,
+ * the button, how many ops it sent (`encounter.start`, then each
+ * `encounter.add` batch, one gesture) and which of them were taken, by
+ * their place in the start.
+ */
+export type StartWait = { press: string; from: StartFrom; ops: number; taken: readonly number[] };
+
+export type StartEvent =
+  | { kind: "press"; press: string; from: StartFrom; ops: number }
+  /** What became of the start's op at `index`. A dispatch that sent nothing counts as refused. */
+  | { kind: "answer"; press: string; index: number; answer: OpAnswer };
+
+/**
+ * One step of the start's wait: what it becomes, and whether the monsters
+ * roll now. A press while one waits is refused, so each press rolls at
+ * most once. Every op taken rolls. Any other answer ends the wait with no
+ * roll, and the refusal shows as it does today. An answer for a press
+ * that no longer waits changes nothing.
+ */
+export function startStep(wait: StartWait | null, event: StartEvent): { wait: StartWait | null; roll: boolean } {
+  if (event.kind === "press") {
+    if (wait !== null) return { wait, roll: false };
+    return { wait: event.ops > 0 ? { press: event.press, from: event.from, ops: event.ops, taken: [] } : null, roll: false };
+  }
+  if (wait === null || wait.press !== event.press || event.index < 0 || event.index >= wait.ops || wait.taken.includes(event.index)) return { wait, roll: false };
+  if (event.answer !== "taken") return { wait: null, roll: false };
+  const taken = [...wait.taken, event.index];
+  return taken.length === wait.ops ? { wait: null, roll: true } : { wait: { ...wait, taken }, roll: false };
+}
+
+/** The auto state's store, for the start, which steps its wait from the ops' answers wherever the DM is. */
+export function useAutoStore(): StoreApi<AutoState> {
+  return useScoped(autoSlot);
+}
+
+/** The button a start that waits to roll was pressed on, or null. */
+export function useStartWaiting(): StartFrom | null {
+  return useStore(useScoped(autoSlot), (s) => s.start?.from ?? null);
+}
+
 const NO_OPS: readonly number[] = [];
 
-/** Whether the last roll is still on its way: its dice, or the ops that set its totals. Every roll button waits on it. */
+/**
+ * Whether the last roll is still on its way: its dice, or the ops that set
+ * its totals, and from a start's press until its roll goes. Every roll
+ * button waits on it.
+ */
 export function useRollBusy(): boolean {
   const last = useStore(useScoped(autoSlot), (s) => s.last);
+  const starting = useStore(useScoped(autoSlot), (s) => s.start !== null);
   const pending = useAnyPending(last?.sent ?? NO_OPS);
-  return last !== null && (!last.done || pending);
+  return starting || (last !== null && (!last.done || pending));
 }
 
 /**
