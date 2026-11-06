@@ -59,7 +59,7 @@ and for how to use it, the [DM guide](../dm-guide.md).
 - [design-v1-relief-pan.md](design-v1-relief-pan.md): keeping the raised
   ground's picture smooth while the board pans.
 - [design-v1-iso-depth.md](design-v1-iso-depth.md): depth in the isometric
-  view, stairs as steps first.
+  view, stairs as steps first, then doors and windows in frames.
 - [design-v1-area-from-character.md](design-v1-area-from-character.md): a
   player's area of effect placed from their own character.
 - [design-v1-dungeon-generator.md](design-v1-dungeon-generator.md): making a
