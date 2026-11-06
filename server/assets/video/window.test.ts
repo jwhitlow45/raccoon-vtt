@@ -370,3 +370,89 @@ test("scrubs land in a file a window at a time, and every write they make lies i
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+/*
+ * Short writes (ANIMROT-ASTRA-02): a file write may land fewer bytes than
+ * it was given, so every header edit and scrub goes out in as many writes
+ * as it takes, or fails.
+ */
+
+/**
+ * A file handle whose writes land at most `most` bytes each. `trouble`
+ * names, by its number, a write that lands nothing or throws.
+ */
+function stingy(most: number, trouble?: (write: number) => "nothing" | "throw" | undefined) {
+  return async (path: string, flags: string) => {
+    const handle = await open(path, flags);
+    const write = handle.write.bind(handle) as (buf: Buffer, offset: number, length: number, position: number) => Promise<{ bytesWritten: number; buffer: Buffer }>;
+    let writes = 0;
+    return Object.assign(handle, {
+      write: async (buf: Buffer, offset: number, length: number, position: number) => {
+        const how = trouble?.(writes++);
+        if (how === "nothing") return { bytesWritten: 0, buffer: buf };
+        if (how === "throw") throw Object.assign(new Error("the disk went away"), { code: "EIO", syscall: "write" });
+        return write(buf, offset, Math.min(most, length), position);
+      },
+    }) as typeof handle;
+  };
+}
+
+/** A header write, a zeroed run and a scrub, each longer than one short write. */
+function editsPastShortWrites(): { edits: Edits; original: Buffer } {
+  const edits = new Edits();
+  edits.put(0, Buffer.from("a header edit of some length"));
+  edits.zero(40, 70);
+  edits.protect(100, 400);
+  edits.keep(100, 150);
+  edits.scrub(150, 400);
+  return { edits, original: Buffer.alloc(450, 0x5a) };
+}
+
+test("every byte of each header edit and scrub lands though the file takes at most 7 bytes a write (ANIMROT-ASTRA-02)", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "rvtt-window-"));
+  try {
+    const path = join(dir, "v");
+    const { edits, original } = editsPastShortWrites();
+    await writeFile(path, original);
+    await edits.applyToFile(path, undefined, stingy(7));
+    assert.ok((await readFile(path)).equals(edits.applyTo(original)));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a write that lands nothing, or throws after part of an edit landed, fails as the disk's error and never as a finished edit (ANIMROT-ASTRA-02)", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "rvtt-window-"));
+  try {
+    const path = join(dir, "v");
+    const diskError = (message: RegExp) => (err: unknown) => err instanceof Error && !(err instanceof AssetError) && (err as NodeJS.ErrnoException).syscall === "write" && message.test(err.message);
+    // A budget on a clock that ticks with every look, so a loop that kept trying would end as `bad_video`, not hang.
+    let now = 0;
+    const ticking = () => new Budget(10_000, () => now++);
+    for (const [what, trouble, message] of [
+      ["nothing from the third write on", (n: number) => (n >= 2 ? "nothing" : undefined), /landed no bytes/],
+      ["a throw on the second write", (n: number) => (n === 1 ? "throw" : undefined), /the disk went away/],
+      ["nothing from the scrub's second write on", (n: number) => (n >= 12 ? "nothing" : undefined), /landed no bytes/],
+    ] as const) {
+      const { edits, original } = editsPastShortWrites();
+      await writeFile(path, original);
+      await assert.rejects(edits.applyToFile(path, ticking(), stingy(7, trouble)), diskError(message), what);
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("the budget holds between the short writes of one edit (ANIMROT-ASTRA-02)", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "rvtt-window-"));
+  try {
+    const path = join(dir, "v");
+    const edits = new Edits();
+    edits.put(0, Buffer.alloc(400, 1));
+    await writeFile(path, Buffer.alloc(450));
+    let now = 0;
+    await assert.rejects(edits.applyToFile(path, new Budget(100, () => now++), stingy(1)), badVideo);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

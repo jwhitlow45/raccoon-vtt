@@ -309,8 +309,9 @@ export class Edits {
    * back the same: the check never writes inside the media, and each write
    * is held to that before it runs (AMBUILD-SOL-007). The scrubs go out
    * last, zeroes a window at a time, each write held to the scrub guard
-   * before it runs. `opener` stands in for `open` in a test that records
-   * where the writes land.
+   * before it runs. Every write lands whole (writeFully), so no header edit
+   * or scrub is ever half done in a file that is then stored. `opener`
+   * stands in for `open` in a test that records where the writes land.
    */
   async applyToFile(path: string, budget?: Budget, opener: (path: string, flags: string) => Promise<FileHandle> = open): Promise<void> {
     const media = this.#outsideMedia(budget);
@@ -325,7 +326,7 @@ export class Edits {
     const handle = await opener(path, "r+");
     const write = async (buf: Buffer, at: number) => {
       if (written.meets(at, at + buf.length)) throw new EditIntoMediaError(`a video write at ${at} to ${at + buf.length} reaches into media data`);
-      await handle.write(buf, 0, buf.length, at);
+      await writeFully(handle, buf, buf.length, at, budget);
     };
     try {
       let i = 0;
@@ -359,13 +360,32 @@ export class Edits {
           budget?.check();
           const length = Math.min(WINDOW_BYTES, span.end - at);
           guard.check(at, at + length);
-          await handle.write(ZERO_WINDOW, 0, length, at);
+          await writeFully(handle, ZERO_WINDOW, length, at, budget);
         }
       }
       await handle.sync();
     } finally {
       await handle.close();
     }
+  }
+}
+
+/**
+ * The first `length` bytes of `buf` written at `position`, in as many
+ * writes as the file takes (ANIMROT-ASTRA-02). A write may land fewer
+ * bytes than it was given, as Node's `FileHandle.write` answers, and a
+ * scrub that trusted one write could leave a face or a place in a stored
+ * file. The budget holds between writes, and a write that lands nothing is
+ * the disk's trouble, so it fails as a system error rather than looping or
+ * telling the DM the video is bad.
+ */
+export async function writeFully(handle: Pick<FileHandle, "write">, buf: Buffer, length: number, position: number, budget?: Budget): Promise<void> {
+  let done = 0;
+  while (done < length) {
+    budget?.check();
+    const { bytesWritten } = await handle.write(buf, done, length - done, position + done);
+    if (!(bytesWritten > 0)) throw Object.assign(new Error(`a video write at ${position + done} landed no bytes`), { code: "EIO", syscall: "write" });
+    done += bytesWritten;
   }
 }
 
