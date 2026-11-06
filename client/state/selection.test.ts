@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { appleKeys } from "../lib/device.ts";
-import { addsToSelection, addToSelection, barDismiss, dismissal, doneSelecting, frontToBack, keepSelected, nextUnderTap, selectToken, setMultiSelect, showActions, tapToken } from "./selection.ts";
+import { addsToSelection, addToSelection, allOfKindText, barDismiss, dismissal, doneSelecting, frontToBack, keepSelected, kindOf, nextUnderTap, pluralName, sameKind, selectToken, setMultiSelect, showActions, tapToken, type KindToken } from "./selection.ts";
 import { INITIAL_LOCAL, type LocalUi } from "./types.ts";
 import { keepsOpening, type BarSubject } from "../canvas/barDock.ts";
 
@@ -281,3 +281,68 @@ describe("a tap again in the isometric view (docs/design/design-v1-isometric-vie
   });
 });
 
+
+describe("all of a kind (designs/qol audit Q7)", () => {
+  const goblin = (id: string, number: number | undefined, over: Partial<KindToken> = {}, actor: Record<string, unknown> = { srdId: "goblin-warrior" }): KindToken =>
+    ({ id, sceneId: "s1", kind: "monster", name: "Goblin Warrior", number, actor: { inline: actor }, ...over }) as KindToken;
+  const room = [
+    goblin("g3", 3),
+    goblin("g1", 1),
+    goblin("hid", 4),
+    goblin("g2", 2),
+    goblin("far", 5, { sceneId: "s2" }),
+    goblin("boss", undefined, { name: "Snarl" }),
+    goblin("custom", 6, {}, { monsterId: "m1" }),
+    goblin("bare", 7, {}, {}),
+    goblin("npc", 8, { kind: "npc" }),
+    goblin("pc", 9, { kind: "pc" }),
+  ];
+
+  test("the same block under the same name on the same scene, by number, the one tapped among them", () => {
+    assert.deepEqual(sameKind(room, room[0]!), ["g1", "g2", "g3", "hid", "npc"]);
+    assert.deepEqual(sameKind(room, goblin("g2", 2)), ["g1", "g2", "g3", "hid", "npc"]);
+  });
+
+  test("a renamed token, another block, one with no block and a player character are kinds of their own, or none", () => {
+    assert.deepEqual(sameKind(room, room[5]!), ["boss"], "Snarl alone: no button");
+    assert.deepEqual(sameKind(room, room[6]!), ["custom"], "the room's own monster is not the SRD's");
+    assert.equal(kindOf(room[7]!), null);
+    assert.deepEqual(sameKind(room, room[7]!), []);
+    assert.equal(kindOf(room[9]!), null);
+    assert.equal(kindOf({ ...room[0]!, actor: { ref: "c1" } } as KindToken), null, "a character's token");
+  });
+
+  test("selecting them puts the group in the one's place, in their order, its bar showing", () => {
+    const one = tapToken(INITIAL_LOCAL, "g3");
+    const kin = sameKind(room, room[0]!);
+    const group = addToSelection(selectToken(one, null), kin);
+    assert.deepEqual(group.selectedIds, kin);
+    assert.equal(group.selectedId, "npc");
+    assert.equal(group.actionBar, true);
+  });
+
+  test("the words name them in the plural", () => {
+    assert.equal(allOfKindText(4, "Goblin Warrior"), "All 4 Goblin Warriors");
+    const cases: [string, string][] = [
+      ["Mummy", "Mummies"],
+      ["Lich", "Liches"],
+      ["Sphinx", "Sphinxes"],
+      ["Werewolf", "Werewolves"],
+      ["Wolf", "Wolves"],
+      ["Merfolk Skirmisher", "Merfolk Skirmishers"],
+      ["Merfolk", "Merfolk"],
+      ["Swarm of Bats", "Swarms of Bats"],
+      ["Bat (Giant)", "Bats (Giant)"],
+      ["Ogre", "Ogres"],
+      ["Gray Ooze", "Gray Oozes"],
+      ["Bandit Captain", "Bandit Captains"],
+      ["Cyclops", "Cyclopes"],
+      ["Deer", "Deer"],
+      ["Human", "Humans"],
+      ["Kobold Day", "Kobold Days"],
+      ["Harpy", "Harpies"],
+      ["Elf", "Elves"],
+    ];
+    for (const [one, many] of cases) assert.equal(pluralName(one), many, one);
+  });
+});

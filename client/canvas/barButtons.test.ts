@@ -20,6 +20,13 @@ describe("the bar's rows", () => {
     assert.deepEqual(barButtons({ ...NOTHING, placeFreely: true }).play, ["multiSelect", "placeFreely"], "a player who may move any token");
   });
 
+  test("All of a kind after Multi-select for the DM alone, leading the second line, and never in the strip (designs/qol audit Q7)", () => {
+    assert.deepEqual(barButtons({ ...DM, allOfKind: true, uses: "yes" }).play, ["conditions", "hidden", "multiSelect", "allOfKind", "roll", "uses"]);
+    assert.deepEqual(barButtons({ ...DM, allOfKind: false }).play, ["conditions", "hidden", "multiSelect", "roll"], "a lone goblin");
+    assert.deepEqual(barButtons({ ...OWNER, allOfKind: true }).play, ["conditions", "multiSelect", "roll"], "a player's bar never shows it");
+    assert.ok(!restButtons({ ...DM, allOfKind: true, lead: true }).includes("allOfKind"), "the expanded bar's, not the strip's");
+  });
+
   test("Uses after Roll for the DM and an owner on a creature with combat uses, held while its block loads (docs/design/design-v1-combat-controls.md 6)", () => {
     assert.deepEqual(barButtons({ ...DM, uses: "yes", light: true }).play, ["conditions", "hidden", "multiSelect", "roll", "uses", "light"]);
     assert.deepEqual(barButtons({ ...OWNER, uses: "loading" }).play, ["conditions", "multiSelect", "roll", "uses"]);

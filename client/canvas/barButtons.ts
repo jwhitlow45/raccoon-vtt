@@ -19,6 +19,7 @@ export type BarButtonId =
   | "placeFreely"
   | "snapToGrid"
   | "multiSelect"
+  | "allOfKind"
   | "roll"
   | "uses"
   | "locked"
@@ -58,6 +59,8 @@ export type BarButtonInput = {
   placeFreely?: boolean;
   /** The token is drawn between squares, and the viewer is the DM or an owner who may move it. Left out, no. */
   snapToGrid?: boolean;
+  /** More than one token of this one's kind stands on its scene (state/selection.ts sameKind), for the DM's "All 4 Goblin Warriors". Left out, no. */
+  allOfKind?: boolean;
 };
 
 /**
@@ -88,6 +91,8 @@ export function barButtons(input: BarButtonInput): { passing: BarButtonId[]; pla
   if (dm || owner) play.push("conditions");
   if (dm) play.push("hidden");
   play.push("multiSelect");
+  // The group it selects then has its own Conditions, Roll and Save, so it leads the second line (designs/qol audit Q7).
+  if (dm && input.allOfKind) play.push("allOfKind");
   // After Multi-select: any earlier, Roll would push Multi-select to a second line at the default width.
   if (dm || owner) play.push("roll");
   // After Roll, held while the block loads, so Light and Attach do not jump when it shows (docs/design/design-v1-combat-controls.md 6).

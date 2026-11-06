@@ -80,6 +80,7 @@ import { dispatchGesture } from "../state/actions.ts";
 import { useRoomScope, useScoped } from "../state/scope.ts";
 import { placeFreelySlot } from "../state/store.ts";
 import { barKeysSlot, useKeyHints, withKey } from "../state/shortcuts.ts";
+import { allOfKindText, sameKind } from "../state/selection.ts";
 import { sheetOpen } from "../state/types.ts";
 import {
   anchoredSpot,
@@ -273,6 +274,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
   const detachNoteId = useId();
   const placing = useScoped(placeFreelySlot);
   const placingThis = useStore(placing, (s) => s.tokenId === token.id);
+  const dockStore = useScoped(barDockSlot);
 
   const access = useMemo(
     () =>
@@ -317,6 +319,8 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
 
   const path = pathNow(encounter, token, you?.role ?? "player");
   const undoIds = barTokenIds(tokens, token);
+  // The DM's "All 4 Goblin Warriors" (designs/qol audit Q7): every token of this one's kind on its scene, hidden ones too.
+  const kin = useMemo(() => (access.dm && tokens ? sameKind(Object.values(tokens), token) : []), [access.dm, tokens, token]);
   // Its combat uses (docs/design/design-v1-combat-controls.md 6), for the DM on any creature with one and for owners on theirs.
   const usesPresence = useUsesPresence(access.dm || access.owner ? target : null);
   const buttonInput = {
@@ -333,6 +337,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
     // Snap off for a drag, on square scenes only (docs/design/design-v1-snap-off.md 4). A locked token's placement changes only by the DM.
     placeFreely: props.drags && scene !== undefined && !isHex(sceneGrid(scene)),
     snapToGrid: token.nudge !== undefined && (access.dm || (access.owner && !token.locked)),
+    allOfKind: kin.length > 1,
   };
   const rows = barButtons(buttonInput);
   useConditionsKey(rows.play.includes("conditions") && !frame.folded, drawers.openByKey);
@@ -357,6 +362,20 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
         return (
           <BarButton key={id} onClick={openRolls}>
             Roll
+          </BarButton>
+        );
+      // The group's bar takes this one's place, so focus goes to its frame once it is drawn, as Actions in the Multi-select bar sends it.
+      case "allOfKind":
+        return (
+          <BarButton
+            key={id}
+            onClick={() => {
+              dockStore.setState({ focusFrame: true });
+              ui.select(null);
+              ui.selectMany(kin);
+            }}
+          >
+            {allOfKindText(kin.length, token.name)}
           </BarButton>
         );
       // Held while its block loads, then dropped if the block lists no use, so the buttons after it do not jump.

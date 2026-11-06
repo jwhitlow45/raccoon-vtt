@@ -1,3 +1,4 @@
+import type { Token } from "#shared/model.ts";
 import type { LocalUi, Opening } from "./types.ts";
 
 /**
@@ -178,4 +179,94 @@ function sameOpening(a: Opening | null, b: Opening | null): boolean {
 
 function sameIds(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((id, i) => id === b[i]);
+}
+
+// ------------------------------------------------------------ all of a kind (designs/qol audit Q7)
+
+/** A token as the kind rule reads it. */
+export type KindToken = Pick<Token, "id" | "sceneId" | "kind" | "name" | "number" | "actor">;
+
+/**
+ * What makes tokens one kind for "All 4 Goblin Warriors": a monster or an
+ * NPC placed from a stat block, the room's own (`monsterId`) or the SRD's
+ * (`srdId`), under the same name, since the button says the name and must
+ * select only what it says. A token renamed, or one with no block, has no
+ * kind. A player character never has one.
+ */
+export function kindOf(token: KindToken): string | null {
+  if ((token.kind !== "monster" && token.kind !== "npc") || !("inline" in token.actor)) return null;
+  const actor = token.actor.inline;
+  const block = actor.monsterId !== undefined ? `room:${actor.monsterId}` : actor.srdId !== undefined ? `srd:${actor.srdId}` : null;
+  return block === null ? null : `${block}\n${token.name}`;
+}
+
+/**
+ * Every token of this one's kind on its scene, itself included, by number
+ * as their names count them (Goblin Warrior 1, 2, 3), then by id: what
+ * "All N" selects. The DM's map holds the hidden ones too, and the button
+ * is the DM's alone. Only the token itself, or nothing, for one with no
+ * kind, so a lone creature shows no button.
+ */
+export function sameKind(tokens: Iterable<KindToken>, token: KindToken): string[] {
+  const kind = kindOf(token);
+  if (kind === null) return [];
+  const kin = [...tokens].filter((t) => t.sceneId === token.sceneId && kindOf(t) === kind);
+  kin.sort((a, b) => (a.number ?? Number.MAX_SAFE_INTEGER) - (b.number ?? Number.MAX_SAFE_INTEGER) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return kin.map((t) => t.id);
+}
+
+/** Nouns whose plural is no added letter. Keys in lowercase. */
+const IRREGULAR: Readonly<Record<string, string>> = {
+  man: "men",
+  woman: "women",
+  elf: "elves",
+  dwarf: "dwarves",
+  thief: "thieves",
+  mouse: "mice",
+  louse: "lice",
+  goose: "geese",
+  ox: "oxen",
+  child: "children",
+  foot: "feet",
+  tooth: "teeth",
+  cyclops: "cyclopes",
+  fungus: "fungi",
+  pegasus: "pegasi",
+  deer: "deer",
+  sheep: "sheep",
+  fish: "fish",
+  erinyes: "erinyes",
+  undead: "undead",
+};
+
+/** One word made plural, its case kept: "Warrior" "Warriors", "Mummy" "Mummies", "Lich" "Liches", "Werewolf" "Werewolves", "Merfolk" "Merfolk". */
+function pluralWord(word: string): string {
+  const lower = word.toLowerCase();
+  const irregular = IRREGULAR[lower];
+  const caseOf = (plural: string) => (word[0] !== undefined && word[0] !== word[0].toLowerCase() ? plural[0]!.toUpperCase() + plural.slice(1) : plural);
+  if (irregular !== undefined) return caseOf(irregular);
+  if (lower.endsWith("folk")) return word;
+  if (lower.endsWith("wolf")) return `${word.slice(0, -1)}ves`;
+  if (/(s|x|z|ch|sh)$/.test(lower)) return `${word}es`;
+  if (/[^aeiou]y$/.test(lower)) return `${word.slice(0, -1)}ies`;
+  return `${word}s`;
+}
+
+/**
+ * A creature's name made plural for "All 4 Goblin Warriors": its last word
+ * before any "of" or bracket, so "Swarm of Bats" gives "Swarms of Bats"
+ * and "Bat (Giant)" gives "Bats (Giant)".
+ */
+export function pluralName(name: string): string {
+  const trimmed = name.trim();
+  const cut = /\s(?:of\s|\()/i.exec(trimmed);
+  const head = cut ? trimmed.slice(0, cut.index) : trimmed;
+  const tail = cut ? trimmed.slice(cut.index) : "";
+  const at = head.search(/\S+$/);
+  return at < 0 ? trimmed : `${head.slice(0, at)}${pluralWord(head.slice(at))}${tail}`;
+}
+
+/** The button's words: "All 4 Goblin Warriors". */
+export function allOfKindText(count: number, name: string): string {
+  return `All ${count} ${pluralName(name)}`;
 }
