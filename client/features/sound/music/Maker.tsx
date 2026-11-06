@@ -19,7 +19,7 @@ import { nameOf, orderFor, scenesNamingPlaylist, soundsByUse, totalMs, type Play
 import { NEW_PLAYLIST_NAME, PLAYING_CHANGES, playlistDetail, playlistLeavesScenes, REPEAT_CHOICES } from "../panel/words.ts";
 import { keyMovedInList, movedInList } from "./dragOrder.ts";
 import { matches } from "./Library.tsx";
-import type { MakerDraft, MakerFields, MakerTab } from "./open.ts";
+import { draftOf, type MakerDraft, type MakerFields, type MakerTab } from "./open.ts";
 import { dragRowStyle, Handle, HandleHelp, ListHead, MoveStatus, useRowDrag } from "./parts.tsx";
 import { HANDLE_KEYS, OrderedList, OrderRow, TrackLine } from "./UpNext.tsx";
 import {
@@ -56,27 +56,12 @@ import {
 } from "./words.ts";
 
 /*
- * The playlist maker (docs/design/design-v1-music-player.md 5), a step of
- * the Music window: a draft saved once, so making or changing a playlist
- * is one Setup step. The draft lives in the window's slot (open.ts), so a
- * resize across 900 px keeps it.
+ * The playlist maker (docs/design/design-v1-music-player.md 5), its own
+ * pop-up from Library (docs/design/design-v1-sound-layout.md 4.5,
+ * MakerDialog.tsx): a draft saved once, so making or changing a playlist
+ * is one Setup step. The draft lives in the Room scope's maker slot
+ * (open.ts), so a resize across 900 px keeps it.
  */
-
-/** A saved playlist's fields, as a draft edits them. */
-function fieldsOf(playlist: Playlist): MakerFields {
-  return { name: playlist.name, sounds: [...playlist.sounds], shuffle: playlist.shuffle === true, repeat: playlist.repeat, fade: playlist.fade };
-}
-
-/** A draft of a saved playlist, as it stands now. */
-export function draftOf(playlist: Playlist): MakerDraft {
-  const fields = fieldsOf(playlist);
-  return { ...fields, playlistId: playlist.id, base: { ...fields, sounds: [...playlist.sounds], rev: playlist.rev }, tab: "tracks" };
-}
-
-/** A new playlist's draft, its id chosen now so a Create sent twice makes one, with a first track when it starts from one (New playlist with this track). */
-export function newDraft(playlistId: string, seed?: SoundId): MakerDraft {
-  return { name: "", sounds: seed ? [seed] : [], shuffle: false, repeat: "all", fade: 5, playlistId, base: null, tab: "tracks" };
-}
 
 /** The name a save sends: an empty one saves as "New playlist" (5). */
 export function savedName(draft: Pick<MakerFields, "name">): string {
@@ -183,7 +168,7 @@ export function saveDraft(actions: Pick<RoomActions, "dispatch" | "newId">, draf
   send(actions, { t: "playlist.update", id: draft.playlistId, ...changed }, (answer) => onDone(answer === "taken" ? { playlistId: draft.playlistId } : null));
 }
 
-/** The maker's footer and status for the window's Dialog, and what leaving does. */
+/** The maker's footer and status for its Dialog, and what leaving does. */
 export type MakerControl = {
   footer: ReactNode;
   status: ReactNode;
@@ -197,8 +182,8 @@ export type MakerControl = {
 };
 
 /**
- * The maker's controller, called by the window on every render, idle
- * while no maker shows. Save and Create show busy and refuse a second
+ * The maker's controller, called by its dialog on every render, idle
+ * while no draft is open. Save and Create show busy and refuse a second
  * press until answered (9). Play saves first when the draft changed and
  * plays once the save is answered, so a refused save never turns into a
  * refused play (5), and plays the playlist as it then stands

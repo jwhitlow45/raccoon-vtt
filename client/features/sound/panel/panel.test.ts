@@ -1,29 +1,35 @@
 import "../../../components/testing/register.ts";
 import assert from "node:assert/strict";
-import { describe, test } from "node:test";
+import { afterEach, describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
 import type { RoomState } from "#shared/model.ts";
-import type { Playing, Sound } from "#shared/sound.ts";
+import type { MusicRun, Playing, Sound } from "#shared/sound.ts";
 import { room, scene } from "#shared/testutil.ts";
 import { RoomScope } from "../../../state/scope.ts";
 
 /*
- * The parts of Ambiance's Sound in each state
- * (docs/design/design-v1-music.md 4.1, 4.3 and 12, design-v1-music-player.md
- * 3.1): the compact music block with its Next line and Open music, Skip
- * past a crossing's incoming track, the fifth loop, Edit turning
- * the board into a list, the scene line's states, the switch-off board, and
- * the player's panel with and without names.
+ * The Sound panel and its parts in each state
+ * (docs/design/design-v1-sound-layout.md 4 and 7, design-v1-music.md 4.1,
+ * 4.3 and 12): the DM's two views and their order, Up next's fold, the
+ * idle line, the switch-off page, Table sound and Use what's playing, the
+ * fifth loop, Edit turning the board into a list, the scene line's states,
+ * the rules of the view's end and of Open Sound, and the player's card
+ * with and without names.
  */
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { MusicNow, nextWords, NowLine, SceneSoundLine, TableSound, UseWhatsPlaying } = await import("./NowPlaying.tsx");
+const { nextWords, SceneSoundLine, TableSound, UseWhatsPlaying } = await import("./NowPlaying.tsx");
 const { LoopToggles } = await import("./LoopsSection.tsx");
 const { Board } = await import("./EffectsBoard.tsx");
 const { PlayerNow } = await import("./PlayerSound.tsx");
 const { useReasons } = await import("./SoundPage.tsx");
-const { ServerLine } = await import("./SoundPanel.tsx");
+const { askStep, endViewIfClosed, ServerLine, soundOpen, upNextSummary, default: SoundPanel } = await import("./SoundPanel.tsx");
+const { soundViewSlot, soundAskSlot, openSoundNow } = await import("../music/open.ts");
+const { panelScrollSlot } = await import("../../panels.ts");
+const { queueLists, comingNext } = await import("../music/dragOrder.ts");
+const engine = await import("../engine/store.ts");
+const { api } = await import("../../../lib/api.ts");
 const { RoomProvider } = await import("../../../state/view.ts");
 const { RoomScopeProvider } = await import("../../../state/scope.ts");
 const { tileBackground } = await import("../music/tile.ts");
@@ -32,65 +38,12 @@ const words = await import("./words.ts");
 const noop = () => {};
 const sound = (id: string, use: Sound["use"], ms: number, name?: string): Sound => ({ id, rev: 1, ...(name ? { name } : null), assetId: `a-${id}`, ms, use });
 
-function music(over: Partial<Parameters<typeof MusicNow>[0]["music"]> = {}) {
-  return { soundId: "pony", name: "The Prancing Pony", lengthMs: 190_000, positionMs: 84_000, paused: false, playlistName: "Tavern night", place: 3, count: 12, single: false, crossingInto: null, ...over };
-}
-
-function now(props: Partial<Parameters<typeof MusicNow>[0]> = {}): string {
-  return renderToStaticMarkup(createElement(MusicNow, { music: music(), next: "Next: Road", lengthMs: 190_000, onPause: noop, onResume: noop, onSkip: noop, onOpen: noop, ...props }));
-}
-
-describe("the DM's Now playing (docs/design/design-v1-music-player.md 3.1)", () => {
-  test("names the track, its place, what comes next and its time, read aloud as one of the other", () => {
-    const html = now();
-    assert.match(html, /The Prancing Pony/);
-    assert.match(html, /Tavern night · 3 of 12/);
-    assert.match(html, /data-sound-next=""[^>]*>Next: Road</);
-    assert.match(html, /aria-label="1:24 of 3:10"[^>]*>1:24 \/ 3:10</);
-    assert.match(html, /aria-hidden="true" data-music-tile=""/, "a tile, hidden from a reader");
-  });
-
-  test("Pause and Skip stay, Open music joins them, and Stop the music and Repeat leave for the window", () => {
-    const html = now();
-    assert.match(html, /aria-label="Pause"/);
-    assert.match(html, /aria-label="Skip to the next track"/);
-    assert.match(html, /<button[^>]*data-music-open=""[^>]*>.*Open music</s);
-    assert.doesNotMatch(html, /Stop the music/);
-    assert.doesNotMatch(html, /Repeat (all|one|off)/);
-  });
-
-  test("Pause becomes Play while paused, and Skip goes past the incoming track during a crossfade", () => {
-    assert.match(now({ music: music({ paused: true }) }), /aria-label="Play"/);
-    assert.match(now({ music: music({ crossingInto: "Road" }) }), /aria-label="Skip past Road"/);
-    assert.match(now({ music: music({ single: true }) }), /One track/);
-  });
-
-  test("the time reads one pass under Repeat one with a crossfade, its end the pass", () => {
-    // A 1:00 track with a 10 s crossfade, 0:49 into its pass (design 10).
-    assert.match(now({ music: music({ lengthMs: 60_000, positionMs: 49_000 }), lengthMs: 50_000 }), />0:49 \/ 0:50</);
-  });
-
-  test("the Next line: the track that follows, this track again, or the last", () => {
+describe("the Next line's words, Up next's folded summary", () => {
+  test("the track that follows, this track again, or the last", () => {
     const sounds = { road: sound("road", "music", 32_000, "Road") };
     assert.equal(nextWords({ t: "track", soundId: "road" }, sounds), "Next: Road");
     assert.equal(nextWords({ t: "again" }, sounds), "Next: this track again");
     assert.equal(nextWords({ t: "last" }, sounds), "Last track");
-  });
-});
-
-describe("Now playing in Ambiance (docs/design/design-v1-panel-groups.md 4.1, D-261102-766 and 767)", () => {
-  test("the music's buttons and Open music come before its bar and time, so Pause rises into a phone's half sheet", () => {
-    const html = now();
-    const buttons = html.indexOf('aria-label="Pause"');
-    assert.ok(buttons > html.indexOf("Next: Road"), "after the name, the run line and the Next line");
-    assert.ok(buttons < html.indexOf("data-sound-time"), "before the time");
-    assert.ok(html.indexOf("data-music-open") < html.indexOf("data-sound-time"), "Open music too");
-  });
-
-  test("with no music, the background sounds are counted, else nothing is playing", () => {
-    assert.match(renderToStaticMarkup(createElement(NowLine, { loops: 2 })), />2 background sounds</);
-    assert.match(renderToStaticMarkup(createElement(NowLine, { loops: 1 })), />1 background sound</);
-    assert.match(renderToStaticMarkup(createElement(NowLine, { loops: 0 })), />Nothing is playing\.</);
   });
 });
 
@@ -314,5 +267,197 @@ describe("a player's panel", () => {
     const failed = player(sounds, "plays", "failed");
     assert.match(failed, /The music didn&#x27;t load on this device\./);
     assert.match(failed, />Try again</);
+  });
+});
+
+/** This page's storage, which the folds read and write, a Map for the test to fill. */
+const items = new Map<string, string>();
+(globalThis as { localStorage?: unknown }).localStorage = {
+  getItem: (key: string) => items.get(key) ?? null,
+  setItem: (key: string, value: string) => void items.set(key, value),
+  removeItem: (key: string) => void items.delete(key),
+};
+
+/** Sets the server's sound switch for one test, as GET /api/config would answer. */
+async function serverSays(on: boolean): Promise<void> {
+  engine.resetServerRoomSoundForTests();
+  const real = api.getConfig;
+  api.getConfig = (async () => ({ roomSound: on })) as unknown as typeof api.getConfig;
+  await engine.serverRoomSound();
+  api.getConfig = real;
+}
+
+describe("the DM's Sound panel (docs/design/design-v1-sound-layout.md 4.1 to 4.4)", () => {
+  afterEach(() => {
+    engine.resetServerRoomSoundForTests();
+    items.clear();
+  });
+  const tracks = Object.fromEntries(["a", "b", "c"].map((id) => [id, sound(id, "music", 60_000, `Track ${id}`)]));
+  const run = (over: Partial<MusicRun> = {}): Playing => ({
+    rev: 1,
+    music: { run: "r1", playlistId: "p", order: ["a", "b", "c"], index: 0, repeat: "all", fade: 0, now: { soundId: "a", at: Date.now() - 5_000 }, ...over },
+    loops: {},
+    effects: [],
+    volume: { music: 100, effects: 100 },
+  });
+  const view = (playing: Playing | null) => room({ sounds: { ...tracks, rain: sound("rain", "loop", 40_000, "Rain") }, playlists: { p: { id: "p", rev: 0, name: "Tavern night", sounds: ["a", "b", "c"], repeat: "all", fade: 0 } }, ...(playing ? { playing } : null) });
+  const draw = (playing: Playing | null, scope = new RoomScope()) => {
+    const store = createStore(() => ({ view: view(playing), you: { memberId: "dm1", role: "dm" }, roomId: "r1", sceneId: "s1", serverOffset: 0, connection: "open", pending: [], online: [], displays: 0, local: { selectedIds: [], multi: false, panel: null, tab: "sound", below: null } }));
+    return renderToStaticMarkup(
+      createElement(RoomScopeProvider, {
+        scope,
+        children: createElement(RoomProvider, { store: store as never, actions: { dispatch: () => 1, newId: () => "x", sendEph: noop } as never, ui: { notify: noop, openPanel: noop } as never, assets: { url: () => "" } as never, children: createElement(SoundPanel, {} as never) }),
+      }),
+    );
+  };
+  /** The view and the search for a render: a server render reads a store's first state, so this makes the state given its first. */
+  const viewIn = (scope: RoomScope, state: { view: "now" | "library"; query: string }) => {
+    const store = scope.get(soundViewSlot);
+    store.setState(state);
+    store.getInitialState = store.getState;
+  };
+
+  test("the view row, named Sound, starts on Now playing", async () => {
+    await serverSays(true);
+    const html = draw(run());
+    assert.match(html, /role="radiogroup" aria-label="Sound"/);
+    const checked = /<input type="radio"[^>]*checked=""[^>]*value="(\w+)"|<input type="radio"[^>]*value="(\w+)"[^>]*checked=""/.exec(html);
+    assert.equal(checked?.[1] ?? checked?.[2], "now");
+    assert.match(html, /data-sound-view="now"/);
+  });
+
+  test("Now playing in 4.2's order: the player, Stop all sound and the device line, Up next, Effects, Table sound, Background, On this device", async () => {
+    await serverSays(true);
+    const html = draw(run());
+    const player = html.indexOf("data-music-now");
+    assert.ok(player > html.indexOf('aria-label="Sound"'), "the player under the view row");
+    assert.ok(html.indexOf("data-music-stop-all") > player, "Stop all sound under it");
+    const order = ["Up next", "Effects", "Table sound", "Background", "On this device"].map((l) => html.indexOf(`>${l}<`));
+    assert.ok(order.every((at) => at > html.indexOf("data-music-stop-all")), "all under the player");
+    assert.deepEqual([...order].sort((x, y) => x - y), order);
+    assert.doesNotMatch(html, /Open music|What players hear|Scene sound, in Scenes|data-music-library=""/);
+  });
+
+  test("Up next is folded with nothing stored, its summary the Next line that describes its fold, its list kept mounted", async () => {
+    await serverSays(true);
+    const html = draw(run());
+    const fold = /<button type="button" aria-expanded="(true|false)" aria-describedby="([^"]+)"[^>]*>.*?Up next<\/button>/.exec(html);
+    assert.ok(fold, "a fold named Up next");
+    assert.equal(fold[1], "false");
+    assert.match(html, new RegExp(`<span id="${fold[2]}" data-music-upnext-summary=""[^>]*>Next: Track b</span>`));
+    assert.match(html, /<div hidden=""[^>]*>.*<ol aria-label="Up next"/s, "kept mounted, hidden");
+  });
+
+  test("Up next opened on this device: open, its summary the count", async () => {
+    await serverSays(true);
+    items.set("rvtt.soundFolds", JSON.stringify({ upnext: true }));
+    const html = draw(run());
+    assert.match(html, /aria-expanded="true"[^>]*>.*?Up next<\/button>/);
+    assert.match(html, /data-music-upnext-summary=""[^>]*>2 tracks · 2 min</);
+  });
+
+  test("with no music: the idle line names Library as a link, and there is no Up next", async () => {
+    await serverSays(true);
+    const html = draw(null);
+    assert.match(html, /No music is playing\. Pick a playlist or a track in <button type="button" data-music-library-link=""[^>]*>Library<\/button>\./);
+    assert.doesNotMatch(html, />Up next</);
+    assert.doesNotMatch(html, /data-music-stop-all/, "nothing sounds");
+    assert.ok(html.indexOf(">Effects<") > html.indexOf("data-music-library-link"));
+  });
+
+  test("Library: the search sticks to the scroller's top and holds the view slot's query, with Playlists and Tracks under it and nothing of Now playing", async () => {
+    await serverSays(true);
+    const scope = new RoomScope();
+    viewIn(scope, { view: "library", query: "Track b" });
+    const html = draw(run(), scope);
+    assert.match(html, /data-sound-view="library"/);
+    assert.match(html, /data-music-search="" style="position:sticky;top:calc\(-1 \* var\(--pane-pad-top, 0px\)\)/);
+    assert.match(html, /<input type="search" aria-label="Search music"[^>]*value="Track b"/);
+    assert.match(html, />Tracks<span[^>]*>1 of 3</);
+    assert.ok(html.indexOf("data-music-search") < html.indexOf(">Playlists<"));
+    for (const gone of ["data-music-now", ">Effects<", ">Table sound<", ">Up next<", "Guide"]) assert.doesNotMatch(html, new RegExp(gone), `${gone} is not in Library`);
+  });
+
+  test("the maker's openers carry their marks, so focus goes back to the one pressed", async () => {
+    await serverSays(true);
+    const scope = new RoomScope();
+    viewIn(scope, { view: "library", query: "" });
+    const html = draw(run(), scope);
+    assert.match(html, /<button[^>]*data-maker-opener="new"[^>]*>.*?New playlist/);
+    assert.match(html, /<button[^>]*data-maker-opener="playlist-p"/);
+  });
+
+  test("with the server's switch off: no view row, its line, Effects and On this device", async () => {
+    await serverSays(false);
+    const html = draw(run());
+    assert.doesNotMatch(html, /role="radiogroup" aria-label="Sound"/);
+    assert.match(html, /This server doesn&#x27;t offer sound files\./);
+    assert.ok(html.indexOf(">On this device<") > html.indexOf(">Effects<"));
+    assert.doesNotMatch(html, /data-music-now|>Table sound<|>Up next</);
+  });
+
+  test("with the switch off a Library view left in the slot still draws the off page", async () => {
+    await serverSays(false);
+    const scope = new RoomScope();
+    viewIn(scope, { view: "library", query: "x" });
+    const html = draw(run(), scope);
+    assert.match(html, /data-sound-view="now"/);
+    assert.doesNotMatch(html, /data-music-library=""/);
+  });
+});
+
+describe("the view's end and Open Sound (docs/design/design-v1-sound-layout.md 4.1)", () => {
+  test("Sound is open by the side panel's tab or pane below from 900 px up, and by the phone's sheet below it", () => {
+    const local = (over: Partial<{ panel: string | null; tab: string; below: string | null }>) => ({ panel: null, tab: "token", below: null, ...over });
+    assert.equal(soundOpen(local({ tab: "sound" }), 1440), true);
+    assert.equal(soundOpen(local({ below: "sound" }), 1440), true);
+    assert.equal(soundOpen(local({ panel: "sound" }), 1440), false, "the sheet's panel means nothing beside a side panel");
+    assert.equal(soundOpen(local({ panel: "sound" }), 390), true);
+    assert.equal(soundOpen(local({ tab: "sound" }), 390), false);
+  });
+
+  test("the panel leaving closed ends the view, the search and its saved scroll, and leaving still open keeps them", () => {
+    const scope = new RoomScope();
+    const kept = { top: 5_400, left: 0, end: true, page: "library", subject: null };
+    const leave = (local: { panel: string | null; tab: string; below: string | null }, px: number) => {
+      scope.get(soundViewSlot).setState({ view: "library", query: "harbor" });
+      scope.get(panelScrollSlot).set("sound", kept);
+      endViewIfClosed(scope, local, px);
+    };
+    leave({ panel: null, tab: "sound", below: null }, 1440);
+    assert.deepEqual(scope.get(soundViewSlot).getState(), { view: "library", query: "harbor" }, "a remount on the same side, still open");
+    assert.equal(scope.get(panelScrollSlot).get("sound"), kept);
+    leave({ panel: null, tab: "log", below: null }, 1440);
+    assert.deepEqual(scope.get(soundViewSlot).getState(), { view: "now", query: "" }, "closed: the next opening starts on Now playing");
+    assert.equal(scope.get(panelScrollSlot).has("sound"), false, "and at its top, never Library's foot");
+    leave({ panel: "sound", tab: "log", below: null }, 390);
+    assert.equal(scope.get(soundViewSlot).getState().view, "library", "turned below 900 px onto the open sheet");
+    leave({ panel: null, tab: "sound", below: null }, 390);
+    assert.equal(scope.get(soundViewSlot).getState().view, "now", "turned below 900 px with no sheet for it");
+  });
+
+  test("an Open Sound press is acted on once: Back first on a subpage, then the top", () => {
+    assert.equal(askStep(0, 0, false), "none", "no press yet");
+    assert.equal(askStep(1, 0, true), "back");
+    assert.equal(askStep(1, 0, false), "top");
+    assert.equal(askStep(1, 1, false), "none", "acted on");
+    assert.equal(askStep(1, 1, true), "none", "a subpage opened after the press stays");
+    const scope = new RoomScope();
+    scope.get(soundViewSlot).setState({ view: "library", query: "harbor" });
+    openSoundNow(scope, { openPanel: noop });
+    assert.equal(scope.get(soundAskSlot).getState().seq, 1);
+    assert.deepEqual(scope.get(soundViewSlot).getState(), { view: "now", query: "harbor" });
+  });
+
+  test("Up next's summary: the Next line folded, the count open, nothing to say with nothing ahead", () => {
+    const sounds = Object.fromEntries(["a", "b", "c"].map((id) => [id, sound(id, "music", 120_000, `Track ${id}`)]));
+    const t = 1_000_000;
+    const music: MusicRun = { run: "r", order: ["a", "b", "c"], index: 0, repeat: "off", fade: 0, now: { soundId: "a", at: t - 1_000 } };
+    const lists = queueLists(music, sounds, t);
+    assert.equal(upNextSummary(false, lists, comingNext(music, sounds, t), sounds), "Next: Track b");
+    assert.equal(upNextSummary(true, lists, comingNext(music, sounds, t), sounds), "2 tracks · 4 min");
+    const last: MusicRun = { ...music, index: 2, now: { soundId: "c", at: t - 1_000 } };
+    assert.equal(upNextSummary(false, queueLists(last, sounds, t), comingNext(last, sounds, t), sounds), "Last track");
+    assert.equal(upNextSummary(true, queueLists(last, sounds, t), comingNext(last, sounds, t), sounds), null);
   });
 });

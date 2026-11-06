@@ -100,8 +100,10 @@ export function Section(props: {
    * column of its own, so work under way in it lasts through a fold: an
    * upload a fold would otherwise abort, or counts typed and not applied
    * (the scene settings' groups, docs/design/design-v1-map-discovery.md 8.4).
+   * `describedBy` names the summary's id where the summary describes the
+   * fold, such as Up next's next track (docs/design/design-v1-sound-layout.md 9).
    */
-  fold?: { open: boolean; onToggle(): void; summary?: ReactNode; foldRef?: Ref<HTMLButtonElement>; keep?: boolean };
+  fold?: { open: boolean; onToggle(): void; summary?: ReactNode; foldRef?: Ref<HTMLButtonElement>; keep?: boolean; describedBy?: string };
   children: ReactNode;
   style?: CSSProperties;
 }) {
@@ -178,6 +180,7 @@ function FoldLabel(props: { id: string; label: ReactNode; tone?: "danger"; fold:
           ref={fold.foldRef}
           type="button"
           aria-expanded={fold.open}
+          aria-describedby={fold.describedBy}
           disabled={held || undefined}
           onClick={(e) => {
             // Focus first, so a field being typed in blurs and commits before the fold hides or unmounts it, even when the press moved no focus (an assistive technology's click, or Safari, whose buttons take no focus on a click).

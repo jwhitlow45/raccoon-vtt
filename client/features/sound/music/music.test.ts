@@ -6,14 +6,16 @@ import type { MusicRun, Playing, Playlist, Sound } from "#shared/sound.ts";
 import type { MakerDraft } from "./open.ts";
 
 /*
- * The Music window's own rules (docs/design/design-v1-music-player.md 4,
- * 5 and 10): Library's search and sort, its More menus' notes, the row's
- * Play and Pause, the maker's draft and what Save sends, and the seek in
- * hand.
+ * The music player's own rules (docs/design/design-v1-music-player.md 4,
+ * 5 and 10, as the Sound panel holds them,
+ * docs/design/design-v1-sound-layout.md 4): Library's search and sort, its
+ * More menus' notes, the row's Play and Pause, the maker's draft and what
+ * Save sends, and the seek in hand.
  */
 
 const { libraryPlaylists, libraryTracks, matches, playlistChoices, queueNote, rowPlay } = await import("./Library.tsx");
-const { changedFields, draftDirty, draftOf, makerStatus, newDraft, savedName, savedPlaylist, savedTracks, useMakerControl } = await import("./Maker.tsx");
+const { changedFields, draftDirty, makerStatus, savedName, savedPlaylist, savedTracks, useMakerControl } = await import("./Maker.tsx");
+const { draftOf, newDraft } = await import("./open.ts");
 const { drawn } = await import("../../../components/testing/drawn.ts");
 const { seekGesture, seekHolds } = await import("./NowFull.tsx");
 const { queueLists } = await import("./dragOrder.ts");

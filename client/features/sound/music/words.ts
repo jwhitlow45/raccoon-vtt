@@ -3,25 +3,15 @@ import type { Fade } from "#shared/sound.ts";
 import { clockText } from "../panel/words.ts";
 
 /**
- * Every word the Music window and the Sound group's music block show
- * (docs/design/design-v1-music-player.md 8), in one place so the render
- * tests, the e2e steps and the DM guide read the same text. "Player" is in
- * none of them: in this app a player is a person at the table (D-261102-962).
+ * Every word the music player, Up next, Library and the playlist maker
+ * show (docs/design/design-v1-music-player.md 8, as the Sound panel holds
+ * them, docs/design/design-v1-sound-layout.md 9), in one place so the
+ * render tests, the e2e steps and the DM guide read the same text. The
+ * Sound panel's own words are in panel/words.ts. "Player" is in none of
+ * them: in this app a player is a person at the table (D-261102-962).
  */
 
-export const OPEN_MUSIC = "Open music";
-export const MUSIC_TITLE = "Music";
-/** A step's back button, back "Music" (8). */
-export const BACK_TO_MUSIC = "Back to Music";
-export const NOW_TAB = "Now playing";
-export const LIBRARY_TAB = "Library";
-export const MUSIC_TABS = "Music";
-/** The DM guide's section the Guide link at Library's foot opens (4.4). */
-export const MUSIC_GUIDE = "the-music-window";
-export const OPEN_FAILED = "Couldn't open music.";
-export const OPENING = "Opening music…";
-
-/** The Sound group's line under the run line (3.1). */
+/** Up next's folded summary (docs/design/design-v1-sound-layout.md 4.3), and the chip player's Next line (5.3). */
 export const NEXT_AGAIN = "Next: this track again";
 export const LAST_TRACK = "Last track";
 export function nextLine(name: string): string {
@@ -59,7 +49,7 @@ export const HANDLE_HELP = "Drag, or press Up or Down.";
 export function againLine(playlistName: string | null): string {
   return playlistName === null ? "Then the queue plays again from the top:" : `Then ${playlistName} plays again from the top:`;
 }
-/** Up next's heading detail, "9 tracks · 26 min". */
+/** Up next's summary while open, "9 tracks · 26 min". */
 export function tracksDetail(tracks: number, totalMs: number): string {
   const minutes = Math.max(1, Math.round(totalMs / 60_000));
   return `${tracks} ${tracks === 1 ? "track" : "tracks"} · ${minutes} min`;
@@ -79,6 +69,10 @@ export const SORT_TRACKS = "Sort tracks";
 export const PLAYLISTS = "Playlists";
 export const TRACKS = "Tracks";
 export const NEW_PLAYLIST = "New playlist";
+/** The maker's title (docs/design/design-v1-sound-layout.md 4.5): the playlist's name, as stored now or as the draft began, or "New playlist". */
+export function makerTitle(storedName: string | undefined, draftName: string | undefined): string {
+  return storedName ?? draftName ?? NEW_PLAYLIST;
+}
 export const NO_PLAYLISTS = "No playlists yet.";
 export const ADD_TO_PLAYLIST = "Add to playlist…";
 export const ALREADY_IN_IT = "Already in it";

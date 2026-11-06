@@ -51,7 +51,9 @@ function NameField(props: { name: string; onSave(name: string): void }) {
 }
 
 /**
- * A sound's page (4.1): Name, Used as with each use its length rules out
+ * A sound's page (4.1), a Sound subpage for a background sound, an effect
+ * or a music track from Library, its back "Back to Sound"
+ * (docs/design/design-v1-sound-layout.md 4.5): Name, Used as with each use its length rules out
  * disabled and why, its length, Listen here on this device alone, and
  * Delete on a second tap. A sound that plays now refuses a change of use
  * and a delete, in words, before anything is sent. A track only queued

@@ -7,7 +7,6 @@ import { member, room } from "#shared/testutil.ts";
 import { parseMarkdown, type Block, type Inline } from "../../components/markdown.ts";
 import { parseRoute } from "../../lib/router.ts";
 import { PANELS } from "../panels.ts";
-import { MUSIC_GUIDE } from "../sound/music/words.ts";
 import { GUIDE_PATH, guideBody, guideHref, guideImageName, guideImageSize } from "./guide.ts";
 
 const DOCS = new URL("../../../docs/", import.meta.url);
@@ -96,8 +95,8 @@ describe("the DM guide's page", () => {
     assert.ok(IDS.has("quick-start"), "the empty states' link");
   });
 
-  test("the Music window's Library ends in a Guide link to the guide's section on the window", async () => {
-    assert.ok(IDS.has(MUSIC_GUIDE), `music: #${MUSIC_GUIDE}`);
+  test("Library in the Sound panel has no Guide link of its own: the panel's, at its foot, serves both views", async () => {
+    assert.equal(PANELS.find((p) => p.id === "sound")?.guide, "music-and-sound");
     const { createElement } = await import("react");
     const { renderToStaticMarkup } = await import("react-dom/server");
     const { RoomProvider } = await import("../../state/view.ts");
@@ -111,16 +110,12 @@ describe("the DM guide's page", () => {
           store: store as never,
           actions: { dispatch: () => 1, newId: () => "x" } as never,
           ui: {} as never,
-          children: createElement(Library, { onOpenMaker: () => {}, onOpenTrack: () => {} }),
+          children: createElement(Library, { onOpenTrack: () => {} }),
         }),
       }),
     );
-    const links = [...html.matchAll(/<a [^>]*>/g)].map((m) => m[0]);
-    assert.equal(links.length, 1, links.join("\n"));
-    assert.match(links[0]!, new RegExp(`href="${guideHref(MUSIC_GUIDE)}"`));
-    assert.match(links[0]!, /aria-label="Music in the DM guide \(opens in a new tab\)"/);
-    // The last thing Library shows, under Add music and the storage line.
-    assert.match(html, /<a [^>]*>Guide<\/a><\/p><\/div>$/);
+    assert.match(html, /data-music-library=""/);
+    assert.deepEqual([...html.matchAll(/<a [^>]*>/g)].map((m) => m[0]), []);
   });
 
   test("every image is in the guide's folder, every file there is shown, and each has the size the page gives it", () => {

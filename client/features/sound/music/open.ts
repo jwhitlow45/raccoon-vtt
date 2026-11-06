@@ -1,7 +1,7 @@
 import { useCallback, type RefCallback } from "react";
 import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
-import type { Fade, PlaylistId, Repeat, SoundId } from "#shared/sound.ts";
+import type { Fade, Playlist, PlaylistId, Repeat, SoundId } from "#shared/sound.ts";
 import { scopeSlot, useScoped, type RoomScope } from "../../../state/scope.ts";
 import type { RoomUi } from "../../../state/store.ts";
 import { panelScrollSlot, SOUND_PANEL } from "../../panels.ts";
@@ -122,6 +122,26 @@ export type MakerDraft = MakerFields & {
   tab: MakerTab;
 };
 
+/** A saved playlist's fields, as a draft edits them. */
+function fieldsOf(playlist: Playlist): MakerFields {
+  return { name: playlist.name, sounds: [...playlist.sounds], shuffle: playlist.shuffle === true, repeat: playlist.repeat, fade: playlist.fade };
+}
+
+/**
+ * A draft of a saved playlist, as it stands now. Here beside the slot,
+ * not in the maker, so Library opens the maker without loading the
+ * maker's code first (MakerHost.tsx).
+ */
+export function draftOf(playlist: Playlist): MakerDraft {
+  const fields = fieldsOf(playlist);
+  return { ...fields, playlistId: playlist.id, base: { ...fields, sounds: [...playlist.sounds], rev: playlist.rev }, tab: "tracks" };
+}
+
+/** A new playlist's draft, its id chosen now so a Create sent twice makes one, with a first track when it starts from one (New playlist with this track). */
+export function newDraft(playlistId: string, seed?: SoundId): MakerDraft {
+  return { name: "", sounds: seed ? [seed] : [], shuffle: false, repeat: "all", fade: 5, playlistId, base: null, tab: "tracks" };
+}
+
 /**
  * The playlist maker's pop-up (4.5): its draft while it is open, else
  * null, and the mark of the control that opened it (MAKER_OPENER), so
@@ -160,34 +180,4 @@ export function makerOpener(opener: string | null): { readonly current: HTMLElem
       return [...document.querySelectorAll<HTMLElement>(`[${MAKER_OPENER}]`)].find((el) => el.getAttribute(MAKER_OPENER) === opener) ?? null;
     },
   };
-}
-
-/*
- * The Music window's state (docs/design/design-v1-music-player.md 3.2 and
- * 5), until lane SL-B puts the maker's pop-up (makerSlot) and the Sound
- * panel's views (soundViewSlot) in the window's place. SL-B removes
- * everything below with the window, its last reader.
- */
-
-/** The narrow window's tabs (4.1). The wide one shows both at once and keeps the tab for a later narrow layout. */
-export type MusicTab = "now" | "library";
-
-/** The window's step: its home (Now playing, Up next and Library), the maker, or a track's page, the last two with back "Music". */
-export type MusicStep = { t: "home" } | { t: "maker"; draft: MakerDraft } | { t: "track"; soundId: SoundId };
-
-export type MusicWindowState = { open: boolean; tab: MusicTab; step: MusicStep };
-
-export const MUSIC_WINDOW_CLOSED: MusicWindowState = { open: false, tab: "library", step: { t: "home" } };
-
-/** The window's state for one Room page. */
-export const musicWindowSlot = scopeSlot(() => createStore<MusicWindowState>(() => MUSIC_WINDOW_CLOSED));
-
-/** Open music (3.2): on Now playing while a run exists, paused too, else on Library, at its home. */
-export function openMusicWindow(store: StoreApi<MusicWindowState>, runExists: boolean): void {
-  store.setState({ open: true, tab: runExists ? "now" : "library", step: { t: "home" } });
-}
-
-/** Closed, its step and draft let go: a close with changes has asked first (5). */
-export function closeMusicWindow(store: StoreApi<MusicWindowState>): void {
-  store.setState(MUSIC_WINDOW_CLOSED);
 }

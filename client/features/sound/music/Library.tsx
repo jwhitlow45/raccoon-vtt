@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type CSSProperties } from "react";
 import { Button } from "../../../components/Button.tsx";
 import { Input } from "../../../components/Field.tsx";
 import { IconButton } from "../../../components/IconButton.tsx";
@@ -7,8 +7,8 @@ import { Help } from "../../../components/Panel.tsx";
 import { Popover, usePopover } from "../../../components/Popover.tsx";
 import { Row, RowList } from "../../../components/Row.tsx";
 import { theme } from "../../../lib/theme.ts";
+import { useScoped } from "../../../state/scope.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../../state/view.ts";
-import { PanelGuideLink } from "../../guide/GuideLink.tsx";
 import { SOUND_LIMITS } from "#shared/limits.ts";
 import { playingAt, type MusicRun, type Playlist, type PlaylistId, type Sound, type SoundId } from "#shared/sound.ts";
 import { AddSounds } from "../upload/AddSounds.tsx";
@@ -18,6 +18,7 @@ import { nameOf, orderFor, playlistsByName, playlistsOf, playlistTracks, serverN
 import { StorageLine } from "../panel/StorageLine.tsx";
 import { lengthText, NO_MUSIC, pauseName, playlistDetail, playName } from "../panel/words.ts";
 import { queueLists, type QueueLists } from "./dragOrder.ts";
+import { draftOf, MAKER_OPENER, makerSlot, newDraft, openMaker, soundViewSlot, useSoundView } from "./open.ts";
 import { ListHead, MoreMenu, SortMenu, useWidth, viewportBound } from "./parts.tsx";
 import { Tile, TILE } from "./tile.ts";
 import {
@@ -28,8 +29,6 @@ import {
   EDIT_PLAYLIST,
   fullPlaylist,
   IN_THE_QUEUE,
-  MUSIC_GUIDE,
-  MUSIC_TITLE,
   NEW_PLAYLIST,
   NEW_PLAYLIST_WITH,
   NO_PLAYLISTS,
@@ -148,14 +147,34 @@ export function playlistChoices(playlists: Playlists, soundId: SoundId): MenuIte
 const NEW_WITH_ID = "\u0000new";
 
 /**
- * Library (docs/design/design-v1-music-player.md 4.4): search, sort, the
- * playlists with New playlist, the tracks, each row with Play or Pause
- * and its More menu, then Add music…, the storage line and the guide's
- * link to the Music window's section.
+ * The marks the controls that open the maker carry (open.ts MAKER_OPENER),
+ * so focus goes back to the one pressed as the maker closes: New
+ * playlist, a playlist's row, and a playlist's or a track's More.
  */
-export function Library(props: { onOpenMaker(playlistId: PlaylistId | null, seed?: SoundId): void; onOpenTrack(soundId: SoundId): void }) {
+export const MAKER_MARKS = {
+  new: "new",
+  playlist: (id: PlaylistId) => `playlist-${id}`,
+  playlistMore: (id: PlaylistId) => `playlist-more-${id}`,
+  trackMore: (id: SoundId) => `track-more-${id}`,
+} as const;
+
+/**
+ * Library in the Sound panel (docs/design/design-v1-music-player.md 4.4,
+ * docs/design/design-v1-sound-layout.md 4.4): search and sort in one row
+ * that sticks to the top of the panel's scroller, the playlists with New
+ * playlist, the tracks, each row with Play or Pause and its More menu,
+ * then Add music… and the storage line. The search is the view slot's
+ * (open.ts), so a switch of view, a track's page and its Back, and a turn
+ * across 900 px keep it and its list. The maker opens as its own pop-up
+ * (MakerHost.tsx), and a track's page as a Sound subpage (`onOpenTrack`).
+ * The panel's own Guide link, at its foot, serves Library too.
+ */
+export function Library(props: { onOpenTrack(soundId: SoundId): void }) {
   const actions = useRoomActions();
   const ui = useRoomUi();
+  const view = useScoped(soundViewSlot);
+  const maker = useScoped(makerSlot);
+  const { query } = useSoundView();
   const sounds = useRoomView((s) => soundsOf(s.view));
   const playlists = useRoomView((s) => playlistsOf(s.view));
   const music = useRoomView((s) => s.view?.playing?.music ?? null);
@@ -165,7 +184,7 @@ export function Library(props: { onOpenMaker(playlistId: PlaylistId | null, seed
   // Pause moves to the incoming track's row as its crossfade starts, as Now playing's name does: one render then.
   useWakeAt(music?.next !== undefined && music.paused === undefined && t < music.next.at ? music.next.at : null, t);
   const lists = queueLists(music, sounds, t);
-  const [query, setQuery] = useState("");
+  const setQuery = (next: string) => view.setState({ query: next });
   const [sort, setSortState] = useState<Sort>(readSort);
   const [storage, setStorage] = useState(0);
   const [box, width] = useWidth<HTMLDivElement>();
@@ -182,6 +201,8 @@ export function Library(props: { onOpenMaker(playlistId: PlaylistId | null, seed
     setSortState(next);
     keepSort(next);
   };
+  const editPlaylist = (playlist: Playlist, mark: string) => openMaker(maker, draftOf(playlist), mark);
+  const newPlaylist = (mark: string, seed?: SoundId) => openMaker(maker, newDraft(actions.newId(), seed), mark);
 
   const playlistItems = (p: Playlist): MenuItem[] => {
     const ids = playlistTracks(p, sounds).map((s) => s.id);
@@ -208,7 +229,7 @@ export function Library(props: { onOpenMaker(playlistId: PlaylistId | null, seed
 
   return (
     <div ref={box} data-music-library="" style={{ display: "grid", gap: theme.space(4), minWidth: 0 }}>
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), minWidth: 0 }}>
+      <div data-music-search="" style={SEARCH_ROW}>
         <div style={{ flex: "1 1 180px", minWidth: 0 }}>
           <Input type="search" aria-label={SEARCH_MUSIC} placeholder={SEARCH_MUSIC} enterKeyHint="search" value={query} onChange={(e) => setQuery(e.target.value)} style={{ width: "100%" }} />
         </div>
@@ -219,7 +240,7 @@ export function Library(props: { onOpenMaker(playlistId: PlaylistId | null, seed
         <ListHead
           detail={searching ? trackCount(shownLists.length, Object.keys(playlists).length, true) : String(Object.keys(playlists).length)}
           action={
-            <Button size="sm" icon="plus" onClick={() => props.onOpenMaker(null)}>
+            <Button size="sm" icon="plus" {...{ [MAKER_OPENER]: MAKER_MARKS.new }} onClick={() => newPlaylist(MAKER_MARKS.new)}>
               {NEW_PLAYLIST}
             </Button>
           }
@@ -241,16 +262,18 @@ export function Library(props: { onOpenMaker(playlistId: PlaylistId | null, seed
                       detail={playlistDetail(inIt.length, totalMs(inIt))}
                       chosen={music?.playlistId === p.id}
                       opener={`playlist-${p.id}`}
-                      onClick={() => props.onOpenMaker(p.id)}
+                      data={{ [MAKER_OPENER]: MAKER_MARKS.playlist(p.id) }}
+                      onClick={() => editPlaylist(p, MAKER_MARKS.playlist(p.id))}
                     />
                   </div>
                   <RowPlayButton play={rowPlay(music, { playlistId: p.id }, t)} name={p.name} disabled={inIt.length === 0} onPlay={() => playPlaylist(actions, p, sounds)} onPause={pause} onResume={resume} />
                   <MoreMenu
                     name={p.name}
                     items={playlistItems(p)}
+                    anchorRef={(el) => el?.setAttribute(MAKER_OPENER, MAKER_MARKS.playlistMore(p.id))}
                     onPick={(id) => {
                       const ids = inIt.map((s) => s.id);
-                      if (id === "edit") props.onOpenMaker(p.id);
+                      if (id === "edit") editPlaylist(p, MAKER_MARKS.playlistMore(p.id));
                       else if (lists && id === "next") queue(lists, { t: "next", soundIds: ids });
                       else if (lists && id === "queue") queue(lists, { t: "add", soundIds: ids });
                     }}
@@ -288,7 +311,7 @@ export function Library(props: { onOpenMaker(playlistId: PlaylistId | null, seed
                     }}
                     onAddTo={(playlistId) => {
                       if (playlistId === null) {
-                        props.onOpenMaker(null, s.id);
+                        newPlaylist(MAKER_MARKS.trackMore(s.id), s.id);
                         return;
                       }
                       const target = playlists[playlistId];
@@ -308,10 +331,40 @@ export function Library(props: { onOpenMaker(playlistId: PlaylistId | null, seed
         <AddSounds use="music" onStorageChanged={() => setStorage((n) => n + 1)} />
       </div>
       <StorageLine roomId={roomId} version={`${storage} ${Object.keys(sounds).length}`} />
-      <PanelGuideLink section={MUSIC_GUIDE} panel={MUSIC_TITLE} />
     </div>
   );
 }
+
+/** The scrolling pane's top padding, which its body publishes (components/Sheet.tsx paneBodyPadding). 0 outside a pane. */
+const PAD_TOP = "var(--pane-pad-top, 0px)";
+
+/** The search row's fill around its controls, the same above and below, so they sit in the middle of it, resting or stuck. */
+const SEARCH_PAD = theme.space(2);
+
+/*
+ * Search and sort stick to the top of the panel's scroller while the
+ * lists scroll under them, so a 100-track list can be searched from
+ * anywhere in it (4.4). Stuck, the row's box meets the scroller's edge,
+ * past the pane's top padding, so no row shows over it, and the rows pass
+ * under its fill. At rest its top margin gives the fill above back to the
+ * gap over it, so the controls stand where they would without, and the
+ * fill below stays as room before Playlists. A negative bottom margin
+ * would read as the pane's own inset (e2e/helpers/alignment.ts).
+ */
+const SEARCH_ROW: CSSProperties = {
+  position: "sticky",
+  top: `calc(-1 * ${PAD_TOP})`,
+  zIndex: theme.z.stickyHeader,
+  marginTop: -SEARCH_PAD,
+  padding: `${SEARCH_PAD}px 0`,
+  background: theme.color.surface,
+  boxShadow: theme.shadow.paneSides(theme.color.surface),
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  gap: theme.space(2),
+  minWidth: 0,
+};
 
 function queueOp(from: QueueLists, edit: { t: "next" | "add"; soundIds: SoundId[] }) {
   return { t: "music.queue" as const, from: from.run, edit };
@@ -338,6 +391,8 @@ function TrackMore(props: { sound: Sound; items: readonly MenuItem[]; playlists:
         anchorRef={(el) => {
           anchor.current = el;
           lists.anchorProps.ref(el);
+          // New playlist with this track opens the maker from here, so focus comes back here as it closes.
+          el?.setAttribute(MAKER_OPENER, MAKER_MARKS.trackMore(props.sound.id));
         }}
         onPick={(id, by) => {
           if (id === "playlist") openLists(by);
