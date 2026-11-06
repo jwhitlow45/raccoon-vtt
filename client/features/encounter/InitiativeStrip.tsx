@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from "react";
 import { createPortal } from "react-dom";
 import { useStore } from "zustand";
+import { createStore } from "zustand/vanilla";
 import type { Effect, LogEntry } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { Icon } from "../../components/Icon.tsx";
@@ -21,7 +22,7 @@ import { EffectArt, effectHasArt } from "../tokens/EffectIcon.tsx";
 import { dockSlot, drawn, drawsPaneRow, focusAlert, summaryFor, usePublishAlerts, useUnderSheet, type ColumnAlert, type ShowAsk } from "../../pages/fold.ts";
 import { SummaryButton, useDockSummary } from "../../pages/RoomDock.tsx";
 import { SheetHeader } from "../../components/SheetHeader.tsx";
-import { useScoped } from "../../state/scope.ts";
+import { scopeSlot, useScoped } from "../../state/scope.ts";
 import { useUiScale } from "../device/settings.ts";
 import { sheetOpen } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
@@ -29,7 +30,7 @@ import { announceTurn, unlockAudioOnTap } from "./alerts.ts";
 import { AutoRollWatch } from "./autoState.ts";
 import { BAND_MAX_DISKS, BAND_NAME_MIN_PX, bandFit, TURN_BAND_PX, useTopBars, type BandTimer, type TurnPlacement } from "./band.ts";
 import { clockText } from "./timer.ts";
-import { useConfirmedSeq, useRowFacts, useSend, useSortedEntries, useTurnTimer, useYou } from "./hooks.ts";
+import { useConfirmedSeq, useRowFacts, useSortedEntries, useTurnTimer, useYou } from "./hooks.ts";
 import {
   answersPrompt,
   concentrationPrompt,
@@ -1393,20 +1394,48 @@ function useTurnNotice(enabled: boolean): boolean {
 }
 
 /**
+ * End turn's wait, one for the Room (designs/qol plan 9, QD-OPUS-25): the
+ * number of the End turn this page sent that the server has not answered.
+ * The strip's button and the one on a phone's own token bar share it, so
+ * a press on either shows both busy and neither sends a second Next.
+ */
+export const endTurnWaitSlot = scopeSlot(() => createStore<{ n: number | null }>(() => ({ n: null })));
+
+/** Ends this player's turn through the Room's one wait, and whether that End turn is still out. */
+export function useEndTurn(): { end(): void; waiting: boolean } {
+  const store = useRoomStore();
+  const actions = useRoomActions();
+  const wait = useScoped(endTurnWaitSlot);
+  const n = useStore(wait, (s) => s.n);
+  const waiting = useRoomView((s) => n !== null && s.pending.some((p) => p.n === n));
+  useEffect(() => {
+    // Only the End turn it answered: a press since has a wait of its own.
+    if (n !== null && !waiting) wait.setState((s) => (s.n === n ? { n: null } : s));
+  }, [wait, n, waiting]);
+  const end = useCallback(() => {
+    const out = wait.getState().n;
+    if (out !== null && store.getState().pending.some((p) => p.n === out)) return;
+    const sent = actions.dispatch(turnOp("encounter.next", store.getState()));
+    if (sent !== null) wait.setState({ n: sent });
+  }, [actions, store, wait]);
+  return { end, waiting };
+}
+
+/**
  * A player's End Turn, beside the strip, shown only on their own turn. It
  * is never predicted (design 7.4: it scans the encounter), so it spins
- * until the server's event moves the turn. The wait lives in this
- * component, so it stays mounted and renders nothing off the turn.
+ * until the server's event moves the turn. The wait is the Room's
+ * (endTurnWaitSlot), and this component stays mounted and renders nothing
+ * off the turn, so it still spins for a press made elsewhere.
  */
 function EndTurnButton(props: { stack?: boolean }) {
-  const store = useRoomStore();
   const entries = useSortedEntries();
   const activeEntryId = useRoomView((s) => s.view?.encounter?.activeEntryId ?? null);
   const facts = useRowFacts();
-  const { send, waiting } = useSend();
+  const { end, waiting } = useEndTurn();
   const status = turnStatus({ entries, activeEntryId, mine: facts.mine });
   if (status !== "yours" && !waiting) return null;
-  return <EndTurnPill waiting={waiting} stack={props.stack} onClick={() => send(turnOp("encounter.next", store.getState()))} />;
+  return <EndTurnPill waiting={waiting} stack={props.stack} onClick={end} />;
 }
 
 /**
