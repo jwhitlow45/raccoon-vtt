@@ -178,7 +178,8 @@ async function toCompactBand(page: Page, view: { width: number; height: number; 
   const low = room.compactHeader + 2 * room.row;
   const goal = top ? room.header + 2 * room.row - 6 : low;
   let height = view.height;
-  for (let i = 0; i < 12 && room.form === "full" && !(room.scroller >= goal + 1 && room.scroller <= goal + 6); i++) {
+  // From the full form down, or up from a sheet already too short, as a mouse's taller sheet header leaves it at a phone's height (docs/design/design-v1-panel-size.md 9).
+  for (let i = 0; i < 12 && (room.form === "full" || room.scroller < goal + 1) && !(room.scroller >= goal + 1 && room.scroller <= goal + 6); i++) {
     height = Math.round(height - (room.scroller - (goal + 3)) * view.scale);
     await page.setViewportSize({ width: view.width, height });
     let last = -1;

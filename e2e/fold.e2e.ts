@@ -207,16 +207,17 @@ async function assertHeaderFits(sheet: Locator, scale: number, label: string): P
   const header = sheet.locator("header").first();
   const buttons = await header.locator("button").evaluateAll((els) =>
     els
-      .map((e) => ({ name: e.getAttribute("aria-label") ?? e.textContent ?? "", r: e.getBoundingClientRect() }))
+      .map((e) => ({ name: e.getAttribute("aria-label") ?? e.textContent ?? "", step: e.hasAttribute("data-sheet-step"), r: e.getBoundingClientRect() }))
       // An upright sheet's Expand sheet button is visually hidden until it has keyboard focus (docs/design/design-v1-sheet-swipe.md 4.7), so it is no target on screen. Every other header button is held to the rule.
-      .filter(({ name, r }) => r.width > 0 && name !== "Expand sheet")
-      .map(({ name, r }) => ({ name, left: r.left, right: r.right, h: r.height })),
+      .filter(({ name, step, r }) => r.width > 0 && (step || name !== "Expand sheet"))
+      .map(({ name, step, r }) => ({ name, step, left: r.left, right: r.right, h: r.height })),
   );
   assert.ok(buttons.length > 0, `${label}: the header has no buttons`);
   for (const [i, b] of buttons.entries()) {
     assert.ok(b.left >= box.x - 0.5 && b.right <= box.x + box.width + 0.5, `${label}: "${b.name}" leaves the sheet (${Math.round(b.left)}-${Math.round(b.right)} in ${Math.round(box.x)}-${Math.round(box.x + box.width)})`);
     assert.ok(b.h >= 44 * scale - 1, `${label}: "${b.name}" is under 44 px`);
-    const next = buttons[i + 1];
+    // With a mouse the step arrows stand in their own strip above the row (docs/design/design-v1-panel-size.md 5.2), so only the row's buttons sit side by side.
+    const next = buttons.slice(i + 1).find((n) => n.step === b.step);
     if (next) assert.ok(b.right <= next.left + 0.5, `${label}: "${b.name}" and "${next.name}" overlap`);
   }
 }
