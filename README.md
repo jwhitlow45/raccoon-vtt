@@ -20,25 +20,36 @@
 </p>
 
 A self-hosted virtual tabletop for D&D groups playing the 2024 rules
-(5.5e), on a square grid. It is made for phones first, and works on
-tablets, laptops and a TV at the table too. Every device stays in sync
-live. The DM sees everything, and players see only what the fog and the DM
-allow.
+(5.5e) on squares or hexes. It is made for phones first and also runs on
+tablets, laptops and a TV at the table, with every device kept in sync
+live. The DM sees everything, while players' devices receive only what the
+DM has revealed and what the party can see. The map image is the
+exception: it reaches every device whole, with the fog drawn over it, so a
+group has to trust its players with that.
 
-One server hosts many groups at once. Each room is one campaign, with its
-own room ID, player password and DM. Whoever creates a room becomes its DM
-through a private DM link. There are no accounts.
+One server hosts many groups at once, each campaign in a room of its own.
+Whoever creates a room becomes its DM through a private DM link, and
+players join with the room's ID and password, or by asking the DM to let
+them in, as the DM chooses. A group can sit around one table, play from
+elsewhere, or both, and a group that plays apart talks over a call of its
+own.
 
-- Maps from an image, a blank grid, the built-in map builder, or a
-  Universal VTT file from Dungeondraft, Dungeon Alchemist or DungeonFog.
-- Fog of war, and party vision with walls, doors, lights, darkvision and
-  raised ground.
-- Tokens with HP, conditions, elevation and lights. Rulers, movement
-  tracking, and areas of effect that count height.
-- An initiative tracker, roll requests, an encounter builder, and the SRD
-  5.2.1 monsters, conditions and spell areas built in.
-- A journal with secrets, map pins, chat and whispers, handouts, an X-card,
-  and a table display for a TV.
+- Maps from an image, a blank grid, the openly licensed starter maps, the
+  built-in map builder, a generated dungeon, or a Universal VTT file
+  (Dungeondraft, Dungeon Alchemist, Arkenforge, DungeonFog). Top-down or
+  isometric.
+- Fog of war, party vision with walls, doors, lights, darkvision and raised
+  ground, and weather.
+- Tokens with HP, conditions, elevation and lights, that can ride, carry or
+  drag each other. Rulers, movement tracking, traps, and areas of effect
+  that count height.
+- An Initiative tracker, roll requests, group saves, an encounter builder,
+  and the SRD 5.2.1 monsters, conditions and spell areas built in.
+- Dice roll on the server, so everyone sees the same result. Anyone can
+  still roll real dice and type the total.
+- Character stat blocks, with an import from a public D&D Beyond character.
+- A journal with secrets, map pins, chat and whispers, handouts, an in-game
+  clock, music and sound, an X-card, and a table display for a TV.
 
 <p align="center">
   <img src="docs/images/readme-map.webp" width="600" alt="The DM's view of a fight in a cavern: the party's tokens and three monsters on the map, fog over the ground the party has not seen yet, and the initiative tracker beside it">
@@ -50,37 +61,25 @@ through a private DM link. There are no accounts.
 </p>
 <p align="center"><sub>Art in these screenshots is credited, with its licenses, in <a href="CREDITS.md#readme-screenshots">CREDITS.md</a>.</sub></p>
 
-Dice roll on the server, so everyone sees the same result. Anyone can still
-roll real dice and type the total.
+One Node 24 process serves the React app, the JSON API and the WebSocket,
+while Postgres 17 holds the rooms and the `/data/assets` volume holds
+uploaded images, map videos and sounds. Map videos stay off until the
+server sets `ANIMATED_MAPS=1`, and uploaded sounds until it sets
+`ROOM_SOUND=1`. In production it runs with Docker Compose behind any HTTPS
+reverse proxy or tunnel that passes WebSockets through, reaches the
+internet only through an egress proxy, and backs up every night (04:00 UTC
+by default).
 
-One Node 24 process serves the React app, the JSON API and the WebSocket.
-Postgres holds the rooms, and uploaded images live on a volume. In
-production it runs with Docker Compose behind any HTTPS reverse proxy or
-tunnel that passes WebSockets through.
-
-- [Docs](#docs) lists the guides for running, developing and releasing it.
-- [CREDITS.md](CREDITS.md) lists every piece of third-party art, its source
-  and its license. None of the art is AI generated.
-- [License](#license): the code is under the GNU AGPL v3.0.
-
-## Features
-
-[FEATURES.md](FEATURES.md) lists what RaccoonVTT does today, grouped by
-area, in plain words for the DM and the players. [docs/design/mvp.md](docs/design/mvp.md)
-is the planning list behind it, with what comes next and what was skipped.
-Update FEATURES.md in the same change that adds, changes or removes a
-feature.
-
-The app lists its written docs on a Docs page at `/docs`, linked from Home.
-The [DM guide](docs/dm-guide.md) teaches the DM tools step by step, from a
-quick start to building maps, running fights and worked scenarios. Update it
-too when a change alters a step it describes.
+[FEATURES.md](FEATURES.md) lists everything it does today, by area, and the
+[DM guide](docs/dm-guide.md) teaches the DM tools step by step, from a
+quick start to building maps, running fights and worked scenarios. The
+guide is also in the app, on the Docs page (`/docs`) linked from Home.
 
 ## Quick start
 
-To try it on your own computer with nothing but Docker, run the published
-image from [Docker Hub](https://hub.docker.com/r/jwhitlow45/raccoon-vtt)
-next to a postgres. Nothing to clone or build:
+To try it on one computer with Docker, run the published image from
+[Docker Hub](https://hub.docker.com/r/jwhitlow45/raccoon-vtt) beside a
+Postgres container:
 
 ```bash
 mkdir raccoon-vtt-try && cd raccoon-vtt-try
@@ -120,24 +119,24 @@ EOF
 docker compose up -d
 ```
 
-Then open http://127.0.0.1:9180. Open exactly that address, not
-`localhost`, because the WebSocket checks Origin exactly. Create a room on
-the Home page. To see the player's side, copy the player link from the
-room's Menu and open it in a private window or another browser.
+Open http://127.0.0.1:9180, exactly that address and not `localhost`,
+because the WebSocket checks Origin exactly. Create a room on the Home
+page. To see the player's side, copy the player link from the room's Menu
+and open it in a private window or another browser.
 
-It runs with `NODE_ENV=development`, because production insists on an https
-origin, and it listens only on this computer. `docker compose down` stops
-it and keeps your rooms. `docker compose down -v` deletes them too. To put
-it on the internet, follow
+This runs with `NODE_ENV=development` and listens only on this computer.
+Production refuses to start without an `https` origin, both egress proxies
+and `ROOM_SECRET_KEY`. `docker compose down` stops it and keeps your rooms.
+`docker compose down -v` deletes them too. To put it on the internet, follow
 [Self-hosting with the published image](#self-hosting-with-the-published-image).
 
 ## Self-hosting with the published image
 
-Each release is also an image on Docker Hub,
-`docker.io/jwhitlow45/raccoon-vtt`, for linux/amd64 and linux/arm64. With
-it a server needs no copy of this repository and builds nothing: two files
-are the whole setup. You need a Linux server with Docker Engine 28 or later
-and the Docker Compose plugin 2.31 or later, and a hostname for the site.
+Each release is an image on Docker Hub, `docker.io/jwhitlow45/raccoon-vtt`,
+for linux/amd64 and linux/arm64, so a server needs only two files from the
+release, `compose.yml` and `.env`. You also need a Linux server with Docker
+Engine 28 or later and the Docker Compose plugin 2.31 or later, and a
+hostname for the site.
 
 Pick a release from the repository's
 [tags](https://github.com/jwhitlow45/raccoon-vtt/tags), `vX.Y.Z`, and download
@@ -153,40 +152,40 @@ sed -i "s/^POSTGRES_PASSWORD=$/POSTGRES_PASSWORD=$(openssl rand -hex 24)/" .env
 sed -i "s|^ROOM_SECRET_KEY=$|ROOM_SECRET_KEY=$(openssl rand -base64 32)|" .env
 ```
 
-Then open `.env` in an editor. Set `PUBLIC_ORIGIN` to `https://` plus the
-hostname, and uncomment `COMPOSE_PROFILES=https` to have Caddy serve it
-over HTTPS, or leave it for your own reverse proxy or tunnel. Then start
-it:
+In `.env`, set `PUBLIC_ORIGIN` to `https://` plus the hostname. Uncomment
+`COMPOSE_PROFILES=https` to have Caddy serve HTTPS, or leave it commented
+for your own reverse proxy or tunnel. Then start it:
 
 ```bash
 docker compose up -d
 docker compose ps
 ```
 
+`raccoon`, `postgres`, `egress` and, with the `https` profile, `caddy`
+should show `(healthy)` within about 30 seconds.
 [docs/self-hosting.md](docs/self-hosting.md#self-hosting-with-the-published-image)
-walks through every step, with HTTPS, the firewall rules, updates and
-backups.
+has every step, including HTTPS, the firewall rules, updates and backups.
 
 ## Docs
 
+- [FEATURES.md](FEATURES.md): what the app does today, by area.
+- [docs/dm-guide.md](docs/dm-guide.md): the DM guide, also in the app.
 - [docs/self-hosting.md](docs/self-hosting.md): installing a server, its
   settings, HTTPS and the reverse proxy, updating, backups, verifying the
   image and removing it.
-- [docs/operations.md](docs/operations.md): running it day to day, with the
-  admin commands, the admin page and the logs.
+- [docs/operations.md](docs/operations.md): running it day to day: the admin
+  commands, the admin page and the logs.
 - [docs/development.md](docs/development.md): local development, the checks
   and tests, the coding standards, and continuous integration.
 - [docs/releasing.md](docs/releasing.md): tagging a release, the image
   workflow, the changelog and the Docker Hub overview.
-- [docs/dm-guide.md](docs/dm-guide.md): the DM guide, also in the app at
-  `/docs`.
-- [docs/design/](docs/design/README.md): the technical design and the
-  design note behind each feature.
+- [docs/design/](docs/design/README.md): the technical design and the note
+  behind each feature.
 - [docs/assurance-case.md](docs/assurance-case.md): what the app protects
   and what it leaves to you, its threat model, and how it counters common
   weaknesses.
-- [ROADMAP.md](ROADMAP.md): what the project plans to do over the next year,
-  and what it has decided not to do.
+- [ROADMAP.md](ROADMAP.md): what comes next, over the next year, and what
+  the project has decided not to do.
 - [GOVERNANCE.md](GOVERNANCE.md): how decisions are made and who does what.
 - [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md),
   [SECURITY.md](SECURITY.md) and [CHANGELOG.md](CHANGELOG.md).
@@ -194,11 +193,12 @@ backups.
 ## License
 
 The code is under the GNU Affero General Public License v3.0 (AGPL-3.0),
-in the [LICENSE](LICENSE) file. In plain words: you may use, change and
-share it. If you run a changed copy as a site that other people use, you
-must offer those people the source code of your changed version.
+in the [LICENSE](LICENSE) file. You may use, change and share it, and if
+you run a changed copy as a site that other people use, you must offer
+those people the source code of your changed version.
 
 The third-party art, the common-password list and the SRD 5.2.1 text that
-ship with the app keep their own licenses. [CREDITS.md](CREDITS.md) lists
-each one, and [shared/srd/NOTICE.md](shared/srd/NOTICE.md) holds the SRD's
-notice.
+ship with the app keep their own licenses, which [CREDITS.md](CREDITS.md)
+lists with each one's source, and
+[shared/srd/NOTICE.md](shared/srd/NOTICE.md) holds the SRD's notice. None
+of the art is AI generated.
