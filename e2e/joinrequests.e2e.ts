@@ -146,7 +146,7 @@ function requestsSection(page: Page): Locator {
 }
 
 /** The DM panel's groups that fold, in order (docs/design/design-v1-panel-groups.md 6.2). */
-const DM_GROUPS = ["Handouts", "Players' screens", "Check their view", "Player link", "Table display"] as const;
+const DM_GROUPS = ["Handouts", "Players' screens", "Preview", "Player link", "Table display"] as const;
 
 function joiningSection(page: Page): Locator {
   return page.getByRole("heading", { name: "Joining", exact: true }).locator("xpath=ancestor::section[1]");
@@ -260,7 +260,10 @@ describe("raccoon-vtt join requests", { timeout: 600_000 }, () => {
     await shots.take(quinn.page, "guide-ask-card");
     await quinn.page.getByRole("button", { name: "Ask to join" }).click();
     await quinn.page.getByRole("heading", { name: "Waiting for the DM" }).waitFor();
-    await quinn.page.getByText("You asked to join as Quinn.", { exact: true }).waitFor();
+    // pe1: the spinner's line says the sentence, once, where it used to repeat the title (docs/design/design-v1-polish-pass.md 3.9).
+    await quinn.page.getByRole("status").filter({ hasText: /^You asked to join as Quinn\.$/ }).waitFor();
+    assert.equal(await quinn.page.getByText("You asked to join as Quinn.", { exact: true }).count(), 1, "the sentence is said once");
+    assert.equal(await quinn.page.getByText(/^Waiting for the DM…$/).count(), 0, "no line repeats the card's title");
     await quinn.page.getByText("Keep this page open. A request ends after 10 minutes.", { exact: true }).waitFor();
     await shots.take(quinn.page, "waiting-card");
 
@@ -670,6 +673,13 @@ describe("raccoon-vtt join requests", { timeout: 600_000 }, () => {
       await shots.take(dm, "jf-letting-in");
       assert.equal(await row.count(), 1, "the row stays while the let-in runs");
       await row.getByText("Letting in…", { exact: true }).waitFor();
+      // pe1: Hazel's Cancel while the let-in commits is answered "deciding", a 409 Chrome logs, and the spinner's line says the DM is letting her in, in place of her sentence (docs/design/design-v1-polish-pass.md 3.9).
+      hazel.watch.allow = [ME_403, /status of 409 .*\/join-requests\/[A-Za-z0-9_-]+\)$/];
+      await hazel.page.getByRole("button", { name: "Cancel" }).click();
+      await hazel.page.getByRole("status").filter({ hasText: /^The DM is letting you in…$/ }).waitFor();
+      assert.equal(await hazel.page.getByText("You asked to join as Hazel.", { exact: true }).count(), 0, "the sentence gives way while the DM decides");
+      assert.equal(await hazel.page.getByRole("button", { name: "Cancel" }).isDisabled(), true, "Cancel is off while the DM decides");
+      await shots.take(hazel.page, "jf-letting-you-in");
       // Past the 5 s answer bound the let-in answers 202, and the row says so.
       await dm.waitForTimeout(5_500);
       await shots.take(dm, "jf-still-letting");
