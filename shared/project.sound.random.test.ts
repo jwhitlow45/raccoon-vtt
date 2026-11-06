@@ -6,7 +6,7 @@ import type { RoomState, Viewer } from "./model.ts";
 import { TRAP_SOUNDS, opSchema, type Op, type OpOf, type RestoreEntry } from "./protocol.ts";
 import { allKeys, applyChanges, dependents, diffProjection, heldOf, projectEntity, projectState, stableStringify, type HeldEntry, type ProjectedState } from "./project.ts";
 import { applyOp, type Applied } from "./reducer.ts";
-import { FADES, REPEATS, SOUND_USES, soundDue, soundStep, type Fade, type Playing, type Repeat, type Sound, type SoundUse } from "./sound.ts";
+import { FADES, LEAD_MS, REPEATS, SOUND_USES, musicAt, soundDue, soundStep, type Fade, type Playing, type Repeat, type Sound, type SoundUse } from "./sound.ts";
 import { AT, DM, P1, room } from "./testutil.ts";
 
 /**
@@ -63,6 +63,8 @@ type Act = { gap: number } & (
   | { k: "sceneStart" }
   | { k: "undo" }
   | { k: "tick"; due: boolean }
+  | { k: "queue"; edit: number; which: number; other: number; seed: string }
+  | { k: "jump"; which: number; ms: number; seek: boolean }
 );
 
 const n = fc.nat({ max: 999 });
@@ -101,6 +103,9 @@ const ACT: fc.Arbitrary<Act> = fc.oneof(
   { weight: 1, arbitrary: act("sceneStart") },
   { weight: 2, arbitrary: act("undo") },
   { weight: 10, arbitrary: act("tick", { due: fc.boolean() }) },
+  // The queue's edits and jumps (docs/design/design-v1-music-player.md 6.6), on the DM's view of the run.
+  { weight: 10, arbitrary: act("queue", { edit: fc.nat({ max: 6 }), which: n, other: n, seed: fc.constantFrom("a", "mix1", "Zx-9_q") }) },
+  { weight: 4, arbitrary: act("jump", { which: n, ms: fc.integer({ min: 0, max: 210_000 }), seek: fc.boolean() }) },
 );
 
 /** Counters for fresh ids, and the Setup steps an Undo can take back, the newest last. */
@@ -214,6 +219,28 @@ function opFor(w: World, a: Act): { op: Op; at: number } | null {
       case "undo": {
         const entries = w.undo.pop();
         return entries === undefined ? null : { t: "sys.restore", entries, from: "undo", deps: true };
+      }
+      case "queue":
+      case "jump": {
+        const view = musicAt(s.playing?.music ?? null, s.sounds ?? {}, at + LEAD_MS);
+        if (!view) return null;
+        const order = view.order ?? [];
+        if (a.k === "jump") {
+          const soundId = a.seek ? view.now.soundId : chosen(order, a.which)!;
+          return { t: "music.jump", run: fresh("r"), from: view.run, soundId, ...(a.seek ? { ms: a.ms, on: soundId } : {}) };
+        }
+        const one = chosen(order, a.which)!;
+        const edits: OpOf<"music.queue">["edit"][] = [
+          { t: "next", soundIds: [...new Set([chosen(music, a.which), chosen(music, a.other)].filter((id) => id !== undefined))] },
+          { t: "add", soundIds: [...new Set([chosen(music, a.which), chosen(music, a.other)].filter((id) => id !== undefined))] },
+          { t: "move", soundId: one, to: chosen(["first", "passEnd", "last"] as const, a.other)! },
+          { t: "move", soundId: one, to: { before: chosen(order, a.other)! } },
+          { t: "remove", soundId: one },
+          { t: "shuffle", seed: a.seed },
+          { t: "unshuffle" },
+        ];
+        const edit = edits[a.edit]!;
+        return "soundIds" in edit && edit.soundIds.length === 0 ? null : { t: "music.queue", from: view.run, edit };
       }
       case "tick": {
         // The actor's timer fires at the due time, or the tick runs late after a gap, from the state it reads then (6.4).
@@ -346,6 +373,7 @@ test("a player's projection and the fan-out keep every sound rule of 6.5 over ra
   let hiddenFires = 0;
   let reclassified = 0;
   let undone = 0;
+  let queued = 0;
   fc.assert(
     fc.property(START, fc.array(ACT, { minLength: 10, maxLength: 60, size: "max" }), (start, acts) => {
       const w = library(start);
@@ -376,6 +404,15 @@ test("a player's projection and the fan-out keep every sound rule of 6.5 over ra
         const op = made.op;
         if (op.t === "sound.update" && op.use !== undefined && before.playing?.effects.some((e) => e.soundId === op.id)) reclassified++;
         if (op.t === "sys.restore") undone++;
+        if (op.t === "music.queue" || op.t === "music.jump") {
+          queued++;
+          // An edit or a jump gives players a next no more than 20 s before its start, or at the start they already held.
+          const had = projectState(before, P1, OPTS).playing?.music?.next;
+          const next = projectState(r.state, P1, OPTS).playing?.music?.next;
+          if (next !== undefined && (had?.soundId !== next.soundId || had.at !== next.at)) {
+            assert.ok(next.at - (made.at + LEAD_MS) <= 20_000 || next.at === had?.at, `act ${i} (${op.t}): players get the next track ${next.at - made.at - LEAD_MS} ms before it starts`);
+          }
+        }
         if (SETUP.has(op.t) && r.inverse) w.undo.push(r.inverse);
         w.state = r.state;
         const where = `act ${i} (${made.op.t})`;
@@ -403,4 +440,5 @@ test("a player's projection and the fan-out keep every sound rule of 6.5 over ra
   assert.ok(ticks > 250 && reveals > 50, `${ticks} ticks, ${reveals} reveals`);
   assert.ok(hiddenFires > 50, `${hiddenFires} effects fired behind a blackout`);
   assert.ok(reclassified > 30 && undone > 100, `${reclassified} fired effects given another use, ${undone} undos`);
+  assert.ok(queued > 600, `${queued} queue edits and jumps`);
 });

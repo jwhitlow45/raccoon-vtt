@@ -5,7 +5,7 @@ import type { RoomState, Viewer } from "./model.ts";
 import type { Change, Op, OpOf } from "./protocol.ts";
 import { allKeys, applyChanges, dependents, diffProjection, hashValue, heldOf, projectEntity, projectState, stableStringify, visibleAssetIds, type HeldEntry, type ProjectedState } from "./project.ts";
 import { applyOp, type Applied } from "./reducer.ts";
-import { soundDue, soundStep, type FiredEffect, type Playing, type Sound, type SoundUse } from "./sound.ts";
+import { following, soundDue, soundStep, type FiredEffect, type MusicRun, type Playing, type Sound, type SoundUse } from "./sound.ts";
 import { AT, DM, P1, room } from "./testutil.ts";
 
 /**
@@ -491,5 +491,93 @@ describe("the fan-out sends what the projection changed, in the same batch (6.5)
       assert.deepEqual(soundKeysHeld(conn), []);
     }
     assert.equal(state.sounds?.thunder, undefined);
+  });
+});
+
+describe("the queue's edits and jumps (docs/design/design-v1-music-player.md 6.6)", () => {
+  const queue = (edit: Extract<Op, { t: "music.queue" }>["edit"]): Op => ({ t: "music.queue", from: "r1", edit });
+  const EDITS: Extract<Op, { t: "music.queue" }>["edit"][] = [
+    { t: "next", soundIds: ["lich"] },
+    { t: "add", soundIds: ["lich"] },
+    { t: "move", soundId: "m3", to: "first" },
+    { t: "move", soundId: "m2", to: "passEnd" },
+    { t: "remove", soundId: "m2" },
+    { t: "shuffle", seed: "mix1" },
+  ];
+  const SHOWN = new Set(["run", "repeat", "fade", "now", "next"]);
+
+  /** What a player's projection holds of the run: never the DM's fields, and a next only as the track `following` names. */
+  function playersRun(state: RoomState, where: string): MusicRun | null {
+    const music = state.playing?.music ?? null;
+    for (const viewer of PLAYERS) {
+      const shown = projectState(state, viewer, OPTS).playing?.music ?? null;
+      assert.deepEqual(Object.keys(shown ?? {}).filter((k) => !SHOWN.has(k)), [], `${where}: ${viewer.memberId} gets no order, index, shuffle, playlist or pause`);
+      if (shown?.next !== undefined) assert.equal(shown.next.soundId, music!.order![following(music!)!], `${where}: the next track is the one that follows`);
+      assert.deepEqual(shown?.next, music?.next, `${where}: next as the DM's run holds it`);
+    }
+    return projectState(state, P1, OPTS).playing?.music ?? null;
+  }
+
+  test("before the reveal window an edit changes nothing players hold, so the fan-out sends them nothing", () => {
+    for (const edit of [...EDITS, { t: "unshuffle" } as const]) {
+      let state = run(library(), PLAY).state;
+      if (edit.t === "unshuffle") state = run(state, queue({ t: "shuffle", seed: "mix1" }), 5_000).state;
+      const t = table(state);
+      const b = batch(state, queue(edit), 10_000, t.all);
+      assert.deepEqual(b.r.touched, [keys.playing], edit.t);
+      assert.deepEqual(b.sent.get(t.p1), [], `${edit.t}: no change for Pat`);
+      assert.deepEqual(b.sent.get(t.display), [], `${edit.t}: none for the display`);
+      assert.equal(playersRun(b.state, edit.t)?.next, undefined);
+      assert.deepEqual(soundKeysHeld(t.p1), [keys.sound("m1")]);
+    }
+  });
+
+  test("inside it an edit that changes the following track swaps next at the same start, the new sound unnamed and the old one gone", () => {
+    const swaps: [Extract<Op, { t: "music.queue" }>["edit"], string][] = [
+      [{ t: "next", soundIds: ["lich"] }, "lich"],
+      [{ t: "move", soundId: "m3", to: "first" }, "m3"],
+      [{ t: "move", soundId: "m2", to: "passEnd" }, "m3"],
+      [{ t: "remove", soundId: "m2" }, "m3"],
+    ];
+    for (const [edit, next] of swaps) {
+      // The tick revealed Lanterns 20 s before its start at 55 s.
+      const state = tick(run(run(library(), { t: "room.update", settings: { soundNames: true } }).state, PLAY).state).state;
+      const t = table(state);
+      const b = batch(state, queue(edit), 40_000, t.all);
+      const where = `${edit.t} ${"soundId" in edit ? edit.soundId : ""}`;
+      assert.deepEqual(playersRun(b.state, where)?.next, { soundId: next, at: S0 + 55_000 }, where);
+      for (const conn of [t.p1, t.display]) {
+        const sent = b.sent.get(conn)!;
+        assert.deepEqual(changeOf(sent, keys.sound(next)), { key: keys.sound(next), value: cut(next) }, `${where}: the new next arrives unnamed`);
+        assert.deepEqual(changeOf(sent, keys.sound("m2")), { key: keys.sound("m2"), deleted: true }, `${where}: the old next leaves`);
+        assert.deepEqual(soundKeysHeld(conn), [keys.sound("m1"), keys.sound(next)].sort());
+      }
+      assert.deepEqual([...visibleAssetIds(b.state, P1, OPTS)].sort(), ["file-m1", `file-${next}`].sort(), `${where}: the old next's file is no longer Pat's`);
+    }
+  });
+
+  test("inside it an edit that keeps the following track sends players nothing", () => {
+    const keeping: Extract<Op, { t: "music.queue" }>["edit"][] = [
+      { t: "add", soundIds: ["lich"] },
+      { t: "move", soundId: "m3", to: "passEnd" },
+    ];
+    for (const edit of keeping) {
+      const state = tick(run(library(), PLAY).state).state;
+      const t = table(state);
+      const b = batch(state, queue(edit), 40_000, t.all);
+      assert.deepEqual(b.sent.get(t.p1), [], edit.t);
+      assert.deepEqual(playersRun(b.state, edit.t)?.next, { soundId: "m2", at: S0 + 55_000 });
+    }
+  });
+
+  test("a jump before and inside the window is a new run players join at its place, its next only when due", () => {
+    const before = batch(run(library(), PLAY).state, { t: "music.jump", run: "r2", from: "r1", soundId: "m3", ms: 10_000 }, 10_000, table(run(library(), PLAY).state).all).state;
+    assert.deepEqual(playersRun(before, "a jump before the window"), { run: "r2", repeat: "all", fade: 5, now: { soundId: "m3", at: S0 + 10_000 - 10_000 } });
+    const state = tick(run(library(), PLAY).state).state;
+    const t = table(state);
+    const late = batch(state, { t: "music.jump", run: "r2", from: "r1", soundId: "m3", ms: 40_000 }, 40_000, t.all);
+    assert.deepEqual(playersRun(late.state, "a seek into the window"), { run: "r2", repeat: "all", fade: 5, now: { soundId: "m3", at: S0 }, next: { soundId: "m1", at: S0 + 55_000 } });
+    assert.deepEqual(changeOf(late.sent.get(t.p1)!, keys.sound("m2")), { key: keys.sound("m2"), deleted: true });
+    assert.deepEqual(soundKeysHeld(t.p1), [keys.sound("m1"), keys.sound("m3")]);
   });
 });
