@@ -187,11 +187,11 @@ describe("the Library panel's tiles, rendered", async () => {
     assert.match(handouts, />Uploading</);
     assert.doesNotMatch(markup, /aria-pressed/, "a tile opens the viewer, it is not selected");
     assert.match(markup, />In use</, "the map's status");
-    // Clean up offers only the loose image: not the upload's page, nor a document's.
+    // Cleanup offers only the loose image: not the upload's page, nor a document's.
     assert.match(markup, />Delete 1 not in use \(100 KB\)</);
   });
 
-  test("the DM's Maps list a video as a film strip with its length and its status, and Clean up counts it (docs/design/design-v1-animated-maps.md 4.6)", () => {
+  test("the DM's Maps list a video as a film strip with its length and its status, and Cleanup counts it (docs/design/design-v1-animated-maps.md 4.6)", () => {
     resetLibraryForTest();
     const facts = { widthPx: 1920, heightPx: 1080, container: "webm" as const, video: "vp09.00.40.08", fps: 30, durationMs: 42_000, kbps: 4000 };
     rememberAsset("lib-room", { id: "v1", kind: "video", width: 1920, height: 1080, variants: ["full"], inUse: false, bytes: 2_000_000, video: facts });

@@ -166,7 +166,7 @@ export function apartFromStarter<T>(items: readonly T[], rowOf: (item: T) => Pic
 
 /** The starter picks' fold, its count in the heading so a closed fold still says what it holds. */
 export function starterFoldLabel(count: number): string {
-  return `From starter packs (${count})`;
+  return `Starter packs (${count})`;
 }
 
 /** The server takes at most this many ids a request. */
@@ -240,7 +240,7 @@ export async function deleteImages(roomId: string, ids: readonly string[]): Prom
  * the page's upload answers, and empties it when the job ends, saved,
  * cancelled or dismissed. The Library reads it. Until the job ends its
  * pages are not loose on this device, so they are tagged "Uploading" and
- * kept out of "Not in use" and Clean up, where a tap could delete a page
+ * kept out of "Not in use" and Cleanup, where a tap could delete a page
  * the job is about to save. Another DM device has no such slot and lists
  * them as loose images, which the job's save meets as `gone`.
  */

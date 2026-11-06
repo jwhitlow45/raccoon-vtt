@@ -145,7 +145,7 @@ export function usePdfJobRoom(): void {
   const ui = useRoomUi();
   const checked = useRef<string | null>(null);
 
-  // The Library's "Uploading" tags and Clean up's skip read the job's pages here (images/library.ts uploadingSlot), emptied when the job ends.
+  // The Library's "Uploading" tags and Cleanup's skip read the job's pages here (images/library.ts uploadingSlot), emptied when the job ends.
   const uploading = scope.get(uploadingSlot);
   useEffect(() => {
     const mirror = (job: Parameters<typeof jobPageIds>[0]) => {

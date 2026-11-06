@@ -137,7 +137,7 @@ export async function discardVideo(roomId: string, held: HeldVideo | null, deps:
   try {
     await deps.remove(roomId, [held.video.assetId]);
   } catch {
-    // Not in use in the Library, for the DM's Clean up.
+    // Not in use in the Library, for the DM's Cleanup.
   }
 }
 

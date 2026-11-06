@@ -79,7 +79,7 @@ export function tileImageLook(disabled: boolean) {
  * DM and players see the same tiles and the same viewer. For the DM the
  * panel lists handouts and maps too, each tile with its status, and
  * deletes an image nothing uses from the viewer's header, or every one at
- * once under Clean up (docs/design/design-v1-dm-tools.md 3.19), since only the
+ * once under Cleanup (docs/design/design-v1-dm-tools.md 3.19), since only the
  * DM can tell a handout kept for later from one nobody needs.
  *
  * Starter picks list after the room's own images, in a fold of their own,
@@ -230,7 +230,7 @@ function ManagedLibrary(props: { roomId: string; library: LibraryState; unlisted
   const scenes = useRoomView((s) => s.view?.scenes);
   const uploading = useStore(useScoped(uploadingSlot), (s) => s.ids);
   const deletes = useDocDeletes(props.roomId);
-  // The pages of a document being deleted go with it, so they are not listed loose, or offered to Clean up, meanwhile.
+  // The pages of a document being deleted go with it, so they are not listed loose, or offered to Cleanup, meanwhile.
   const going = useMemo(() => new Set(Object.values(deletes.flows).flatMap((f) => (deleteRunning(f) ? f.pages : []))), [deletes.flows]);
   const held = useMemo(() => new Set([...docs.flatMap(docAssetIds), ...uploading, ...going]), [docs, uploading, going]);
   const byId = useMemo(() => (rows ? new Map(rows.map((r) => [r.id, r])) : null), [rows]);
@@ -238,7 +238,7 @@ function ManagedLibrary(props: { roomId: string; library: LibraryState; unlisted
   const unused = rows ? notInUse(rows, held) : [];
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ text: string; error: boolean } | null>(null);
-  // The last images going take Clean up's button with them, and focus goes to its section, which then says what the delete did.
+  // The last images going take Cleanup's button with them, and focus goes to its section, which then says what the delete did.
   const cleanFocus = useHandsFocusTo<HTMLElement>();
 
   const remove = async (ids: string[]) => {
@@ -362,7 +362,7 @@ function ManagedLibrary(props: { roomId: string; library: LibraryState; unlisted
           {empty ? <Empty>{rows ? props.empty : props.unlistedEmpty}</Empty> : props.hint && (rows || props.unlisted.length > 0) ? <Help>{props.hint}</Help> : null}
           {unused.length > 0 || note || busy ? (
             <section ref={cleanFocus.target} tabIndex={-1} style={{ display: "grid", gap: theme.space(2), outline: "none" }}>
-              <SectionLabel>Clean up</SectionLabel>
+              <SectionLabel>Cleanup</SectionLabel>
               {unused.length > 0 ? (
                 <div style={{ display: "grid", gap: theme.space(1), justifyItems: "start" }}>
                   <TwoTapDelete
@@ -767,7 +767,7 @@ function DeleteNote(props: { flow: DocDelete; onRetry(): void }) {
 
 /**
  * A button that leaves as it is pressed, its work done (a delete's Try
- * again, Clean up's last delete), hands focus to `target`, which takes it
+ * again, Cleanup's last delete), hands focus to `target`, which takes it
  * from script only. Otherwise focus would fall to the page, and a keyboard
  * or screen reader user would have to find the Library again. `leaving` is
  * the button's ref. Where focus goes is chosen once the step is drawn.

@@ -255,7 +255,7 @@ export function jobHolds(job: PdfJob | null): boolean {
   return k !== "saved" && k !== "cancelled" && k !== "recovered" && k !== "refused";
 }
 
-/** The images a running job made or reused, which are not loose on this device (4.1.2): the Library tags them, and Clean up and From the library leave them out. */
+/** The images a running job made or reused, which are not loose on this device (4.1.2): the Library tags them, and Cleanup and From the library leave them out. */
 export function jobPageIds(job: PdfJob | null): ReadonlySet<string> {
   if (!job || job.phase.k === "saved" || job.phase.k === "cancelled" || job.phase.k === "recovered") return EMPTY;
   return new Set(job.pages.map((p) => p.assetId));

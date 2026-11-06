@@ -165,7 +165,7 @@ describe("documents in the DM's library", () => {
     assert.deepEqual(looseHandouts(rows, [], new Set(["p1", "blank"])).map((r) => r.id), ["loose", "kept"]);
   });
 
-  test("a running upload's pages, and a document's, are never offered to Clean up, though a stale list calls them unused", () => {
+  test("a running upload's pages, and a document's, are never offered to Cleanup, though a stale list calls them unused", () => {
     const rows = [row("job1", { kind: "handout", inUse: false }), row("docpage", { kind: "handout", inUse: false }), row("loose", { kind: "handout", inUse: false })];
     const scope = new RoomScope();
     const uploading = scope.get(uploadingSlot);
@@ -242,7 +242,7 @@ describe("starter picks apart from the room's own images (docs/design/design-v1-
   });
 
   test("the fold's heading counts what it holds", () => {
-    assert.equal(starterFoldLabel(1), "From starter packs (1)");
-    assert.equal(starterFoldLabel(12), "From starter packs (12)");
+    assert.equal(starterFoldLabel(1), "Starter packs (1)");
+    assert.equal(starterFoldLabel(12), "Starter packs (12)");
   });
 });
