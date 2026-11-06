@@ -51,7 +51,7 @@ export function useXCard(): XCardShowing {
 function XCard(props: { tapCloses: boolean; onDismiss(): void }) {
   const dm = useRoomView((s) => s.you?.role === "dm");
   const blackout = useRoomView((s) => s.view?.meta.view.blackout === true);
-  const sounding = useSoundToStop();
+  const sounding = useSoundToStop({ everyEffect: true });
   const actions = useRoomActions();
 
   return (

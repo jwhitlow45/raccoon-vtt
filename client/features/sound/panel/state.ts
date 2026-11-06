@@ -141,21 +141,31 @@ export function somethingPlays(playing: Playing | null | undefined): boolean {
   return playing.music !== null || Object.keys(playing.loops).length > 0;
 }
 
+/** A shorter effect ends on its own before the DM needs Stop all sound, and showing it for a moment shifted the player's rows. */
+export const STOP_ALL_MIN_EFFECT_MS = 10_000;
+
+export type SoundToStopOptions = {
+  /** The X-card's Stop the sound is a safety tool, so it counts an effect of any length. */
+  everyEffect?: boolean;
+};
+
 /**
  * Whether Stop all sound and the X-card's Stop the sound show at `t` (4.1,
  * 4.6): music, paused too, a background sound, or an effect not yet over
- * from either list, so one the DM fired behind a blackout counts. An effect
- * over stays in its list as history and never counts, or the buttons would
- * stay for good (D-261102-704). `until` is when the answer turns false by
- * time alone, the last effect's end, for one render then.
+ * from either list, so one the DM fired behind a blackout counts. Stop all
+ * sound counts an effect only from STOP_ALL_MIN_EFFECT_MS long, and
+ * `everyEffect` counts them all. An effect over stays in its list as
+ * history and never counts, or the buttons would stay for good
+ * (D-261102-704). `until` is when the answer turns false by time alone,
+ * the last counted effect's end, for one render then.
  */
-export function soundToStop(playing: Playing | null | undefined, sounds: Sounds, t: number): { now: boolean; until: number | null } {
+export function soundToStop(playing: Playing | null | undefined, sounds: Sounds, t: number, options: SoundToStopOptions = {}): { now: boolean; until: number | null } {
   if (somethingPlays(playing)) return { now: true, until: null };
   let until: number | null = null;
   for (const e of playing ? [...playing.effects, ...(playing.dmEffects ?? [])] : []) {
     const sound = e.soundId === undefined ? undefined : sounds[e.soundId];
     const ms = e.builtin !== undefined ? builtinMs(e.builtin) : sound?.use === "effect" ? sound.ms : null;
-    if (ms !== null && e.at + ms > t) until = Math.max(until ?? 0, e.at + ms);
+    if (ms !== null && (options.everyEffect || ms >= STOP_ALL_MIN_EFFECT_MS) && e.at + ms > t) until = Math.max(until ?? 0, e.at + ms);
   }
   return { now: until !== null, until };
 }

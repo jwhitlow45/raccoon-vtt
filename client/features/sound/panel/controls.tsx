@@ -5,7 +5,7 @@ import { theme } from "../../../lib/theme.ts";
 import { useRoomView } from "../../../state/view.ts";
 import { usePanelShown } from "../../panels.ts";
 import { useDebounced } from "../../scenes/controls.tsx";
-import { serverNow, soundsOf, soundToStop } from "./state.ts";
+import { serverNow, soundsOf, soundToStop, type SoundToStopOptions } from "./state.ts";
 
 /**
  * A volume for everyone (docs/design/design-v1-music.md 4.1), 0 to 100%:
@@ -94,13 +94,13 @@ export function useWakeAt(at: number | null, now: number): void {
   }, [at, now]);
 }
 
-/** Whether the room has sound for Stop all sound and the X-card's Stop the sound to stop (soundToStop), rendering again once its last effect ends. */
-export function useSoundToStop(): boolean {
+/** Whether the room has sound for Stop all sound and the X-card's Stop the sound to stop (soundToStop, with its rule for short effects), rendering again once its last effect ends. */
+export function useSoundToStop(options: SoundToStopOptions = {}): boolean {
   const playing = useRoomView((s) => s.view?.playing ?? null);
   const sounds = useRoomView((s) => soundsOf(s.view));
   const serverOffset = useRoomView((s) => s.serverOffset);
   const t = serverNow({ serverOffset });
-  const { now, until } = soundToStop(playing, sounds, t);
+  const { now, until } = soundToStop(playing, sounds, t, options);
   useWakeAt(until, t);
   return now;
 }
