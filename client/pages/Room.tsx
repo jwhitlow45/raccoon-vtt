@@ -435,8 +435,15 @@ function RoomPage() {
     if (next !== prev) ambianceKept.setState(next, true);
   }, [ambianceKept, ambianceOpen, hasClock, hasSound]);
   const keptTime = useStore(ambianceKept, (k) => k.time);
-  // The DM's Time shows while its fold is open, a player's while it is drawn, for the clock's toasts below.
-  const dmTimeOpen = useFolds(ambianceFoldsSlot)("time").open;
+  /*
+   * The subpage each panel names (features/panels.ts usePanelHeader), for
+   * the sheet's header or its pane's in the side panel. Kept by panel, so
+   * a swap of the side panel's two panels carries each pane's header with it.
+   */
+  const [subpages, setSubpages] = useState<Readonly<Record<string, PanelHeader | null>>>({});
+  const headerOf = useCallback((id: string) => (header: PanelHeader | null) => setSubpages((all) => (all[id] === header ? all : { ...all, [id]: header })), []);
+  // The DM's Time shows while its fold is open and no Sound subpage stands in for Ambiance's first page, a player's while it is drawn, for the clock's toasts below.
+  const dmTimeOpen = useFolds(ambianceFoldsSlot)("time").open && !subpages[AMBIANCE_PANEL];
   const timeShows = role === "dm" ? dmTimeOpen : keptTime || hasClock;
   const tools = useRoomView(useShallow((s) => toolsFor(role, s)));
   const tool = activeTool(toolId, role);
@@ -606,14 +613,6 @@ function RoomPage() {
     const rect = sheetShown ? sheetRef.current?.getBoundingClientRect() : undefined;
     return rect ? { placement: landscape ? "right" : "bottom", width: rect.width, height: rect.height } : null;
   }, [landscape, sheetShown]);
-  /*
-   * The subpage each panel names (features/panels.ts usePanelHeader), for
-   * the sheet's header or its pane's in the side panel. Kept by panel, so
-   * a swap of the side panel's two panels carries each pane's header with it.
-   */
-  const [subpages, setSubpages] = useState<Readonly<Record<string, PanelHeader | null>>>({});
-  const headerOf = useCallback((id: string) => (header: PanelHeader | null) => setSubpages((all) => (all[id] === header ? all : { ...all, [id]: header })), []);
-
   /*
    * What this device remembers of the split (pages/splitPanes.ts): read
    * once per page, once the viewer's role is known, before paint, so a
