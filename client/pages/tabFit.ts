@@ -2,8 +2,10 @@
  * Which of the side panel's tabs stand in its one row
  * (docs/design/design-v1-panel-tabs.md 3.2). The row holds a prefix of the
  * registry's order, as many as fit, and More at its end holds the rest.
- * Nothing counts use and nothing moves a tab: the result depends only on
- * the widths measured on this device and the room the row has.
+ * A device may leave panels out of the row (This device's Tab row), which
+ * More then always holds. Nothing counts use and nothing moves a tab: the
+ * result depends only on the widths measured on this device, the room the
+ * row has and the DM's own ticks.
  *
  * Widths are measured, not set per role: the tab font is Inter, but the
  * system font draws until Inter loads, and a browser's minimum font size
@@ -30,12 +32,22 @@ export const TAB_GAP = 2;
 export const GROUP_GAP = 8;
 
 export type TabWidths = {
-  /** Each panel in the registry's order: its tab's width at rest, its title as More draws it (with the caret), and its group. */
+  /**
+   * Each panel: its tab's width at rest, its title as More draws it (with
+   * the caret), and its group. The panels this device lets stand in the row
+   * come first, then the rest, each part in the registry's order.
+   */
   tabs: readonly { rest: number; more: number; group: string }[];
   /** More at rest: "More" and its caret. */
   moreRest: number;
   /** The tab list's width. */
   room: number;
+  /**
+   * How many of `tabs`, from the first, may stand in the row: This device's
+   * Tab row (designs/qol audit Q10), every panel when left out. The rest are
+   * always in More, so More stays while any is left out.
+   */
+  kept?: number;
 };
 
 /** `count` tabs stand in the row. With fewer than all, More follows with `moreRoom`. */
@@ -61,22 +73,36 @@ export function moreReserve(w: TabWidths, count: number): number {
 
 /**
  * The fit, or null where the row has no room: a hidden side panel, which
- * measures again as it shows. All tabs when they fit with their gaps, and
- * no More. Otherwise the largest prefix that leaves room for More's
- * reserve after one gap, or More alone. More's room is what the row leaves
- * it, never less than its reserve. A wider room never fits fewer tabs,
- * since every prefix that fits a room fits a wider one.
+ * measures again as it shows. All tabs when they fit with their gaps and
+ * none is left out, and no More. Otherwise the largest prefix of the kept
+ * panels that leaves room for More's reserve after one gap, or More alone.
+ * More's room is what the row leaves it, never less than its reserve. A
+ * wider room never fits fewer tabs, since every prefix that fits a room
+ * fits a wider one.
  */
 export function fitTabs(w: TabWidths): TabFit | null {
   if (!(w.room > 0)) return null;
   const n = w.tabs.length;
-  if (rowWidth(w.tabs, n) <= w.room) return { count: n, moreRoom: 0 };
-  for (let count = n - 1; count > 0; count--) {
+  const kept = Math.max(0, Math.min(w.kept ?? n, n));
+  if (kept === n && rowWidth(w.tabs, n) <= w.room) return { count: n, moreRoom: 0 };
+  // Every panel kept and too wide for the row: all of them and More cannot fit either, so the count starts one lower.
+  for (let count = kept === n ? n - 1 : kept; count > 0; count--) {
     const used = rowWidth(w.tabs, count) + TAB_GAP;
     const reserve = moreReserve(w, count);
     if (used + reserve <= w.room) return { count, moreRoom: w.room - used };
   }
   return { count: 0, moreRoom: Math.max(w.room, moreReserve(w, 0)) };
+}
+
+/**
+ * The panels in the order the fit reads them (TabWidths `tabs`): those this
+ * device lets stand in the row first, then those it leaves out, each part
+ * in the registry's order, and how many are kept. A panel id the list no
+ * longer has is ignored, so a panel added later starts in the row.
+ */
+export function keptOrder<T extends { id: string }>(panels: readonly T[], left: ReadonlySet<string>): { ordered: T[]; kept: number } {
+  const kept = panels.filter((p) => !left.has(p.id));
+  return { ordered: [...kept, ...panels.filter((p) => left.has(p.id))], kept: kept.length };
 }
 
 /**

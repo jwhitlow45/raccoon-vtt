@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { fitTabs, headerNamesOpen, ICON_TAB, MORE_CAP, moreReserve, nameCut, rowNamesOpen, rowWidth, tabLook, widthsFor, type TabWidths } from "./tabFit.ts";
+import { fitTabs, headerNamesOpen, ICON_TAB, keptOrder, MORE_CAP, moreReserve, nameCut, rowNamesOpen, rowWidth, tabLook, widthsFor, type TabWidths } from "./tabFit.ts";
 
 /*
  * The side panel's one row of tabs (docs/design/design-v1-panel-tabs.md 3.2).
@@ -241,5 +241,82 @@ describe("each panel's icon in the row (docs/design/design-v1-icons-2.md 3.1)", 
     }
     assert.equal(headerNamesOpen("named", false, false, true), false, "a named tab needs no header");
     assert.equal(headerNamesOpen("icon", true, false, true), false, "nor More's whole name");
+  });
+});
+
+describe("the panels a device keeps out of the row (designs/qol audit Q10)", () => {
+  const DM_NOW = [DM[0]!, DM[1]!, ["Dice", "play"] as const, ...DM.slice(2)];
+  const PLAYER_NOW = [PLAYER[0]!, PLAYER[1]!, ["Dice", "play"] as const, ...PLAYER.slice(2)];
+  const named = (w: TabWidths): TabWidths => ({ ...w, tabs: w.tabs.map((t) => ({ ...t, rest: t.rest + 18, more: t.more + 18 })) });
+  /** The panels in the fit's order with `left` out of the row, and the widths for them. */
+  const leaving = (font: Font, panels: readonly (readonly [string, string])[], left: readonly string[], room: number) => {
+    const { ordered, kept } = keptOrder(panels.map(([id, group]) => ({ id, group })), new Set(left));
+    const w = widths(font, ordered.map((p) => [p.id, p.group] as const), room);
+    return { ordered: ordered.map((p) => p.id), w: { ...w, kept } };
+  };
+  /** The row as drawn: the look the side panel picks, then its fit, as SideTabs does. */
+  const drawnRow = (ordered: readonly string[], w: TabWidths) => {
+    const look = tabLook(w, named(w))!;
+    return ordered.slice(0, fitTabs(widthsFor(look, named(w)))!.count);
+  };
+
+  test("untouched, every panel is kept and the row is exactly today's at every room up to 700 px", () => {
+    for (const font of [INTER, MACOS, SEGOE, DEJAVU]) {
+      for (const panels of [DM_NOW, PLAYER_NOW]) {
+        for (let room = 0; room <= 700; room++) {
+          const today = widths(font, panels, room);
+          const { ordered, w } = leaving(font, panels, [], room);
+          assert.deepEqual(ordered, panels.map(([t]) => t));
+          assert.deepEqual(fitTabs(w), fitTabs(today), `${room}`);
+          assert.equal(tabLook(w, named(w)), tabLook(today, named(today)), `${room}`);
+        }
+      }
+    }
+  });
+
+  test("with Log, Journal and Areas left out, DM is the fourth tab of the 360 px side panel's row, and More holds them", () => {
+    for (const font of [INTER, MACOS, SEGOE, DEJAVU]) {
+      const { ordered, w } = leaving(font, DM_NOW, ["Log", "Journal", "Areas"], 295);
+      assert.deepEqual(drawnRow(ordered, w), ["Token", "Initiative", "Dice", "DM"]);
+    }
+    // The same ticks at 640 px keep the registry's order among the kept panels, and nothing left out joins the row.
+    const { ordered, w } = leaving(INTER, DM_NOW, ["Log", "Journal", "Areas"], 640);
+    const row = drawnRow(ordered, w);
+    assert.deepEqual(row.slice(0, 5), ["Token", "Initiative", "Dice", "DM", "Scenes"]);
+    assert.ok(!row.some((t) => ["Log", "Journal", "Areas"].includes(t)));
+  });
+
+  test("a panel left out keeps More in the row even where every kept panel fits, and More's room counts its name", () => {
+    const { w } = leaving(INTER, PLAYER_NOW, ["Characters"], 2000);
+    const fit = fitTabs(w)!;
+    assert.equal(fit.count, PLAYER_NOW.length - 1, "every kept panel in the row");
+    assert.ok(fit.moreRoom >= INTER.more.Characters!, "and More after them, wide enough for Characters");
+    const index = w.tabs.length - 1;
+    assert.equal(nameCut(fit, w, index), false);
+  });
+
+  test("never more tabs than the kept ones, never a left-out one in the row, and a wider room never fits fewer", () => {
+    const names: string[] = DM_NOW.map(([t]) => t);
+    // Every way to leave out the first few panels, the last few, or every other one.
+    const choices = [...names.map((_, i) => names.slice(0, i)), ...names.map((_, i) => names.slice(i)), names.filter((_, i) => i % 2 === 0)];
+    for (const left of choices) {
+      let last = 0;
+      for (let room = 1; room <= 700; room += 3) {
+        const { ordered, w } = leaving(INTER, DM_NOW, left, room);
+        const fit = fitTabs(w)!;
+        assert.ok(fit.count <= names.length - left.length, `${left.join(",")} at ${room}`);
+        assert.ok(ordered.slice(0, fit.count).every((t) => !left.includes(t)));
+        assert.ok(fit.count >= last, `fewer tabs at ${room} with ${left.join(",")} left out`);
+        last = fit.count;
+        if (left.length > 0) assert.ok(fit.moreRoom >= moreReserve(w, fit.count) - 1e-9, "More always has its room");
+      }
+    }
+  });
+
+  test("every panel left out: More alone, and the order is the registry's in each part", () => {
+    const { w } = leaving(INTER, DM_NOW, DM_NOW.map(([t]) => t), 640);
+    assert.deepEqual(fitTabs(w), { count: 0, moreRoom: 640 });
+    const { ordered } = keptOrder([{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }], new Set(["b", "zzz", "a"]));
+    assert.deepEqual(ordered.map((p) => p.id), ["c", "d", "a", "b"], "an id with no panel is ignored");
   });
 });
