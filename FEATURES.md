@@ -703,6 +703,7 @@ On any device with a keyboard. They do nothing while you type in a field or a di
 | Ctrl+wheel, or a pinch on a trackpad | Zoom in or out at the pointer, faster than the wheel alone | everyone, with any tool |
 | Ctrl+wheel, or a pinch on a trackpad | Zoom the picture or the pages in or out at the pointer, down to a whole page | everyone, in the handout viewer |
 | Right-click a roll button | Open its one-roll options, such as Advantage or Secret, without rolling. Right-click it again to close them | everyone |
+| Double-click the side panel's edge | Put it back to its default width | everyone |
 
 ### Mouse and touch
 
@@ -760,6 +761,16 @@ On a screen 900 px or wider, with a tab or More's list focused. There, and on a 
 | Enter, Space in the list | Open the panel, or turn Two panels on or off, and close the list. More then shows the panel's name | everyone |
 | Tab, Shift+Tab in the list | Close it. Tab goes on to the next control, Shift+Tab back to More | everyone |
 | Escape in the list | Close it, back to More | everyone |
+
+### Side panel width
+
+On a screen 900 px or wider. With the edge focused, the arrow keys resize the panel and never move a token.
+
+| Key | Does | Who |
+| --- | --- | --- |
+| Left, Right | Widen or narrow the side panel 8 px, or 64 px with Shift | everyone, with its edge focused |
+| Home, End | Make it its default width, or its widest | everyone, with its edge focused |
+| Escape | Put the edge back where it was | everyone, while you drag it |
 
 ### Two panels
 

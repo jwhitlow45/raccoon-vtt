@@ -748,6 +748,7 @@ export const SURFACES = [
   "Toolbar",
   "Tool options",
   "Side panel tabs",
+  "Side panel width",
   "Two panels",
   "Handout viewer",
   "Token window",
@@ -909,6 +910,8 @@ export const BEHAVIORS: readonly Behavior[] = [
     roles: EVERYONE,
     device: "mouse",
   },
+  // The side panel's edge (docs/design/design-v1-panel-size.md 4.1): pages/PanelEdge.tsx and pages/panelWidth.ts resetWrite.
+  { id: "panelEdgeDouble", input: "Double-click the side panel's edge", does: "Put it back to its default width", roles: EVERYONE, device: "mouse" },
   { id: "rollOptionsHold", input: "Hold a roll button", does: "Open its one-roll options after half a second, without rolling. Tap a choice to roll once that way", roles: EVERYONE, device: "pointer" },
   { id: "rollOptionsReader", input: "Double-tap and hold a roll button with a screen reader", does: "Open its one-roll options. A plain double-tap still rolls", roles: EVERYONE, device: "pointer" },
   // A stat block's ability boxes and the rolls they open (docs/design/design-v1-stat-block-rolls.md 3.3 and 5.1): features/dice/useAbilityMenu.tsx. Their keys are under Token and character fields.
@@ -1010,6 +1013,11 @@ export const BEHAVIORS: readonly Behavior[] = [
     surface: "Side panel tabs",
   },
   { id: "tabsListEscape", input: "Escape in the list", does: "Close it, back to More", roles: EVERYONE, device: "keys", surface: "Side panel tabs" },
+
+  // The side panel's width from its edge: pages/PanelEdge.tsx, pages/panelWidth.ts edgeKey, keyWrite and resetWrite.
+  { id: "panelEdgeKeys", input: "Left, Right", does: "Widen or narrow the side panel 8 px, or 64 px with Shift", roles: EVERYONE, when: "with its edge focused", device: "keys", surface: "Side panel width" },
+  { id: "panelEdgeEnds", input: "Home, End", does: "Make it its default width, or its widest", roles: EVERYONE, when: "with its edge focused", device: "keys", surface: "Side panel width" },
+  { id: "panelEdgeEscape", input: "Escape", does: "Put the edge back where it was", roles: EVERYONE, when: "while you drag it", device: "keys", surface: "Side panel width" },
 
   // Two panels in the side panel: pages/SplitBar.tsx, pages/splitPanes.ts gripStep, components/Menu.tsx and menuKeys.ts for its list.
   { id: "splitGripKeys", input: "Up, Down", does: "Move the bar 8 px, or 64 px with Shift", roles: EVERYONE, when: "with its grip focused", device: "keys", surface: "Two panels" },
@@ -1296,6 +1304,7 @@ const SURFACE_INTRO: Partial<Record<Surface, string>> = {
   "Tool options": "A tool's options row, its More options and the pop-ups its buttons open.",
   "Side panel tabs":
     "On a screen 900 px or wider, with a tab or More's list focused. There, and on a focused choice or slider, the arrow and Page keys never move a token, and in the list a letter goes to a panel instead of running a shortcut.",
+  "Side panel width": "On a screen 900 px or wider. With the edge focused, the arrow keys resize the panel and never move a token.",
   "Two panels": "On a screen 900 px or wider, with two panels in the side panel. With the bar's grip focused, the arrow keys move the bar and never move a token.",
   "Handout viewer": "A handout the DM shows, or a picture or a PDF opened from the Library.",
   "Token window": "Where the action bar opens as a window: on a screen 600 px or wider, or a phone on its side. With its grip or corner handle focused, the arrow keys move or resize it and never move a token.",

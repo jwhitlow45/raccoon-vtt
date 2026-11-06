@@ -588,7 +588,8 @@ describe("the sheet's rows beside the keys", () => {
       if (b.device === "pointer") assert.match(b.input, /^(Drag .*(carries|carried|mount)|Place freely, then drag the token$|Tap a standee again$|Double click or tap on Undo or Redo$|Hold a roll button$|Double-tap and hold a roll button with a screen reader$|Tap, click, hold or right-click an ability box in a stat block$|Hold or right-click a roll in an ability's rolls$|Swipe right in a panel$)/, b.id);
       if (b.device !== "mouse") continue;
       // A mouse row names a key, or a button other than the left one, or the trackpad's pinch, which arrives as Ctrl and the wheel.
-      assert.match(b.input, /^(Shift|Ctrl|Alt|Space|Right-click|Drag with the right or middle button)/, b.id);
+      // And the side panel edge's double-click, which nothing on screen marks, as nothing marks the swipe back (docs/design/design-v1-panel-size.md 6).
+      assert.match(b.input, /^(Shift|Ctrl|Alt|Space|Right-click|Drag with the right or middle button|Double-click the side panel's edge$)/, b.id);
     }
   });
 
@@ -634,6 +635,7 @@ describe("the sheet's rows beside the keys", () => {
       "Ctrl+wheel, or a pinch on a trackpad",
       "Ctrl+wheel, or a pinch on a trackpad",
       "Right-click a roll button",
+      "Double-click the side panel's edge",
     ]);
     assert.deepEqual(inputs("player", ANDROID, "Android"), ["Back button"]);
   });
@@ -768,8 +770,24 @@ describe("the sheet's rows beside the keys", () => {
     assert.deepEqual(inputs("dm", DESKTOP, "Side panel tabs"), inputs("player", DESKTOP, "Side panel tabs"));
   });
 
+  test("the side panel's width: its own surface after the tabs, keys only, the same for the DM and players, and its double-click with a mouse (docs/design/design-v1-panel-size.md 6)", () => {
+    assert.equal(SURFACES.indexOf("Side panel width"), SURFACES.indexOf("Side panel tabs") + 1);
+    const rows = BEHAVIORS.filter((b) => b.surface === "Side panel width");
+    assert.deepEqual(
+      rows.map((b) => b.id),
+      ["panelEdgeKeys", "panelEdgeEnds", "panelEdgeEscape"],
+    );
+    assert.ok(rows.every((b) => b.device === "keys" && b.roles.includes("dm") && b.roles.includes("player")));
+    assert.deepEqual(inputs("dm", DESKTOP, "Side panel width"), inputs("player", DESKTOP, "Side panel width"));
+    assert.equal(section("player", DESKTOP, "Side panel width")?.intro, "On a screen 900 px or wider. With the edge focused, the arrow keys resize the panel and never move a token.");
+    for (const role of ROLES) {
+      assert.equal(inputs(role, DESKTOP, MOUSE_SECTION).at(-1), "Double-click the side panel's edge", role);
+      assert.ok(!inputs(role, IPHONE, MOUSE_SECTION).includes("Double-click the side panel's edge"), `${role}: no mouse row on a phone`);
+    }
+  });
+
   test("two panels: its own surface after the tabs, keys only, the same for the DM and players (docs/design/design-v1-split-panel.md 9.4)", () => {
-    assert.equal(SURFACES.indexOf("Two panels"), SURFACES.indexOf("Side panel tabs") + 1);
+    assert.equal(SURFACES.indexOf("Two panels"), SURFACES.indexOf("Side panel width") + 1);
     const rows = BEHAVIORS.filter((b) => b.surface === "Two panels");
     assert.deepEqual(
       rows.map((b) => b.id),
