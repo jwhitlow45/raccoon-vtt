@@ -233,4 +233,46 @@ describe("one page plays per browser", () => {
     assert.equal([a, b].filter((p) => p.audible()).length, 1, "one page sounds once both run");
     assert.deepEqual(world.failures, []);
   });
+
+  test("without Web Locks a page whose claim window ends in a stall hears the posts that waited before it plays, even when another timer runs first (seed 583274154)", () => {
+    const world = new World(false, rng(12));
+    world.delay = 5;
+    const a = world.open("member", true);
+    world.runUntil(world.now + 400);
+    const b = world.open("member", false);
+    // A's listen window ends at 2.5 s and its claim window runs to 2.9 s. B is shown then, so B outranks A, and A stalls before B's post reaches it.
+    world.runUntil(world.now + 2_100);
+    world.show(b, true);
+    world.runUntil(world.now + 1);
+    world.stall(a, 1_500);
+    // B claims and plays meanwhile. The stall ends just after A's post timer was due, so that timer runs first and looks on time.
+    world.runUntil(world.now + 3_000);
+    assert.ok(b.audible() && !a.audible(), "B plays and A gives way");
+    assert.deepEqual(world.failures, []);
+  });
+
+  test("without Web Locks a page whose claim window ends in a stall hears the posts that waited before it plays, even when an older post runs first", () => {
+    const world = new World(false, rng(13));
+    world.delay = 5;
+    const t0 = world.now;
+    const b = world.open("member", true);
+    world.runUntil(t0 + 3_000);
+    // A is shown last, so it outranks B, but B plays on as the owner.
+    const a = world.open("member", true);
+    world.runUntil(t0 + 4_000);
+    world.show(b, false);
+    // B turns its sound off and on: A starts its claim on B's release, and stalls before B's next post, eligible and outranked, reaches it.
+    world.runUntil(t0 + 7_005);
+    world.enable(b, false);
+    world.runUntil(t0 + 7_006);
+    world.enable(b, true);
+    world.runUntil(t0 + 7_010);
+    world.stall(a, 1_500);
+    // B is shown meanwhile, so it outranks A and plays. A wakes before its post timer is due, so that older post from B runs first.
+    world.runUntil(t0 + 7_100);
+    world.show(b, true);
+    world.runUntil(t0 + 11_000);
+    assert.ok(b.audible() && !a.audible(), "B plays and A gives way");
+    assert.deepEqual(world.failures, []);
+  });
 });

@@ -383,6 +383,8 @@ export class Handoff {
       this.#claimSince = null;
       return this.#scheduleDecision(now);
     }
+    // Once a stall ends, another timer or a post may run before the window's own timer, so the window's end is checked for lateness here too.
+    if (this.#claimSince !== null) this.#late(this.#claimSince + CLAIM_MS);
     if (now < this.#listenUntil || now < this.#settleUntil) return this.#scheduleDecision(now);
     if (this.#claimSince === null) {
       this.#claimSince = now;
