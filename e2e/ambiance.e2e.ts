@@ -180,6 +180,15 @@ function inScroller(el: Locator): Promise<{ bottom: number; top: number }> {
   });
 }
 
+/** A Sound subpage: Rain's page, from Background's Edit. */
+async function openLoopPage(panel: Locator): Promise<void> {
+  const background = panel.getByRole("heading", { name: "Background", exact: true }).locator("xpath=ancestor::section[1]");
+  const row = background.getByRole("button", { name: /^Edit Rain/ });
+  if ((await row.count()) === 0) await background.getByRole("button", { name: "Edit", exact: true }).click();
+  await row.click();
+  await dm.getByRole("button", { name: /^Back to Ambiance/ }).first().waitFor();
+}
+
 async function playMusic(): Promise<void> {
   await ops.send({ t: "sound.stopAll" });
   await ops.send({ t: "music.play", run: randomUUID(), playlistId: run.playlist, order: run.music, index: 0, repeat: "all", fade: 5 });
@@ -400,14 +409,15 @@ describe("Ambiance", { concurrency: false }, () => {
     await dm.evaluate(() => localStorage.removeItem("rvtt.uiScale"));
   });
 
-  test("am-1d. a reload with Initiative over Ambiance and a clock running: Time folded from the snapshot on, and Pause, Stop the music and Stop all sound in view", async () => {
+  test("am-1d. a reload with Initiative over Ambiance and a clock running: Time folded from the snapshot on, and Pause, Open music and Stop all sound in view", async () => {
     await forgetFolds();
     await dm.evaluate(() => localStorage.setItem("rvtt.sidePanelSplit", JSON.stringify({ dm: { top: "tracker", below: "ambiance" } })));
     await reload(dm);
     const pane = dm.getByRole("group", { name: "Ambiance below", exact: true });
     await pane.getByRole("button", { name: "Pause", exact: true }).waitFor();
     assert.equal(await expanded(pane, "Time"), false, "never held open by a read before the snapshot");
-    for (const name of ["Pause", "Stop the music", "Stop all sound"]) {
+    // Stop the music is the Music window's, which Open music opens (docs/design/design-v1-music-player.md 3.1).
+    for (const name of ["Pause", "Open music", "Stop all sound"]) {
       const at = await inScroller(pane.getByRole("button", { name, exact: true }));
       assert.ok(at.bottom >= 0 && at.top >= 0, `${name} in view without scrolling (${JSON.stringify(at)})`);
     }
@@ -462,24 +472,21 @@ describe("Ambiance", { concurrency: false }, () => {
     assert.equal(await expanded(await ambiance(), "Time"), false, "closed and opened again: folded");
   });
 
-  test("am-3b. the chip from a Sound subpage saves a typed playlist name and a typed sound name, then shows the first page with Time revealed", async () => {
+  test("am-3b. the chip from a Sound subpage saves a typed sound name, then shows the first page with Time revealed", async () => {
     const chip = dm.getByRole("button", { name: /^Time: / });
-    for (const page of [
-      { open: /^Tavern night/, name: "Tavern night at dusk", saved: () => dmSocket.state?.playlists?.[run.playlist]?.name === "Tavern night at dusk" },
-      { open: /^Road/, name: "Road at night", saved: () => dmSocket.state?.sounds?.[run.music[1]!]?.name === "Road at night" },
-    ]) {
+    // A playlist's page and a track's are the Music window's steps (docs/design/design-v1-music-player.md 3.2), so the subpage is a background sound's.
+    for (const page of [{ name: "Rain at night", saved: () => dmSocket.state?.sounds?.[run.loop]?.name === "Rain at night" }]) {
       const panel = await ambiance();
       await openSideTab(dm, "Log");
       await ambiance();
-      await panel.getByRole("button", { name: page.open }).first().click();
-      await dm.getByRole("button", { name: /^Back to Ambiance/ }).first().waitFor();
+      await openLoopPage(panel);
       const field = panel.getByRole("textbox", { name: "Name" });
       await field.fill(page.name);
       assert.equal(await field.evaluate((el) => el === el.ownerDocument.activeElement), true, "the name keeps focus");
       // A dispatched click moves no focus, as Safari's and the chip's own press do not (4.3, D-261102-763).
       await chip.dispatchEvent("click");
       await waitFor(`${page.name} saved`, () => (page.saved() ? true : null));
-      await panel.getByRole("heading", { name: "Music", exact: true }).waitFor();
+      await panel.getByRole("heading", { name: "Now playing", exact: true }).waitFor();
       assert.equal(await expanded(panel, "Time"), true, "Time revealed on the first page");
     }
   });
@@ -489,15 +496,15 @@ describe("Ambiance", { concurrency: false }, () => {
     await openGroup(panel, "Time");
     await panel.getByRole("button", { name: "Other amount…", exact: true }).click();
     await panel.getByLabel("Amount", { exact: true }).fill("3");
-    await panel.getByRole("button", { name: /^Tavern night/ }).first().click();
+    await openLoopPage(panel);
     await dm.getByRole("button", { name: /^Back to Ambiance/ }).first().click();
-    await panel.getByRole("heading", { name: "Music", exact: true }).waitFor();
+    await panel.getByRole("heading", { name: "Now playing", exact: true }).waitFor();
     assert.equal(await panel.getByLabel("Amount", { exact: true }).inputValue(), "3");
     await stopClock();
     await panel.getByLabel("Day", { exact: true }).fill("5");
-    await panel.getByRole("button", { name: /^Tavern night/ }).first().click();
+    await openLoopPage(panel);
     await dm.getByRole("button", { name: /^Back to Ambiance/ }).first().click();
-    await panel.getByRole("heading", { name: "Music", exact: true }).waitFor();
+    await panel.getByRole("heading", { name: "Now playing", exact: true }).waitFor();
     assert.equal(await panel.getByLabel("Day", { exact: true }).inputValue(), "5");
     await shots.take(dm, "am-3c-back-keeps-the-form");
     await forgetFolds();
@@ -530,12 +537,11 @@ describe("Ambiance", { concurrency: false }, () => {
     await summaryIs(time, "Day 3, 10:00 PM");
 
     await playMusic();
-    // am-3b renamed the playlist.
-    await summaryIs(sound, "Tavern night at dusk · 1 of 2");
+    await summaryIs(sound, "Tavern night · 1 of 2");
     await ops.send({ t: "music.pause" });
-    await summaryIs(sound, "Tavern night at dusk · 1 of 2 · Paused");
+    await summaryIs(sound, "Tavern night · 1 of 2 · Paused");
     await ops.send({ t: "loop.start", id: randomUUID(), soundId: run.loop, volume: 70 });
-    await summaryIs(sound, "Tavern night at dusk · 1 of 2 · Paused · 1 background sound");
+    await summaryIs(sound, "Tavern night · 1 of 2 · Paused · 1 background sound");
     await ops.send({ t: "music.stop" });
     await summaryIs(sound, "1 background sound");
     await ops.send({ t: "sound.stopAll" });
@@ -567,13 +573,12 @@ describe("Ambiance", { concurrency: false }, () => {
     const panel = await ambiance();
     await openGroup(panel, "Time");
     await openGroup(panel, "Sound");
-    await panel.getByRole("button", { name: /^Tavern night/ }).first().click();
-    await dm.getByRole("button", { name: /^Back to Ambiance/ }).first().waitFor();
+    await openLoopPage(panel);
     assert.equal(await panel.locator("[data-clock-date]").count(), 0, "the subpage stands in for Time");
     await ops.send({ t: "clock.advance", by: 2 * HOUR });
     await dm.getByText(/^2 hours pass\. It is now /).first().waitFor();
     await dm.getByRole("button", { name: /^Back to Ambiance/ }).first().click();
-    await panel.getByRole("heading", { name: "Music", exact: true }).waitFor();
+    await panel.getByRole("heading", { name: "Now playing", exact: true }).waitFor();
     assert.equal(await expanded(panel, "Time"), true, "Time's fold stayed open under the subpage");
   });
 

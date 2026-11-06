@@ -13,7 +13,8 @@ import { addSound } from "./soundRoom.ts";
 
 /**
  * The Sound section of Ambiance (docs/design/design-v1-music.md 4.1, 4.3 and
- * 4.6, design-v1-panel-groups.md 4.1), on
+ * 4.6, design-v1-panel-groups.md 4.1) and the Music window it opens
+ * (design-v1-music-player.md 3), on
  * the real server serving the production build with ROOM_SOUND
  * on. Dana the DM is at a desk and Pat on a phone. Sounds are made of
  * frames of silence (shared/audio/mp3Testutil.ts), so no step needs an
@@ -23,21 +24,25 @@ import { addSound } from "./soundRoom.ts";
  *   background sounds and an effect uploaded and created.
  * - sp-1: the DM's Sound with nothing playing, its sections in D-261102-766's
  *   order and the storage line.
- * - sp-2: a playlist made on its page, played, paused, resumed, stepped
- *   through Repeat, skipped and stopped, each one op.
+ * - sp-2: a playlist made in the Music window's maker and played, paused,
+ *   resumed and skipped from the Sound group, then stepped through Repeat
+ *   and stopped in the window, each one op.
  * - sp-3: Background's toggles, the fifth refused in words, a loop's
  *   volume for everyone, and its Stop.
  * - sp-4: the board's built-ins and the room's effect fired, Edit opening
  *   an effect's page with the uses its length rules out.
- * - sp-5: a sound's page refusing the delete of a playing loop and of a
- *   track of the run, and a rename on Enter.
+ * - sp-5: a sound's page refusing the delete of a playing loop, a rename on
+ *   Enter, and a track's page reached through Rename or delete…: a played
+ *   track deleted with the music playing on, a queued track's change of use
+ *   refused, the revealed next's and the playing track's delete refused.
  * - sp-6: a scene's sound saved from what plays with Ambiance's Use what's
  *   playing, started by Move players, the Scene sound row's line, and the
  *   row opening Scenes.
- * - sp-7: Players see what is playing: Pat's panel by name and by count.
+ * - sp-7: Players see what is playing: Pat's panel by name and by count,
+ *   the switch in the Sound group and in the Music window.
  * - sp-8: the X-card's Stop the sound.
- * - sp-9: a second server with the switch off: the one line, Built in and
- *   no Add buttons, and a sound upload refused.
+ * - sp-9: a second server with the switch off: the one line, Built in, no
+ *   Add buttons and no Open music, and a sound upload refused.
  * - sp-10: an effect deleted from its page on a second tap, its file with
  *   it.
  * - mfa-1: an effect fired behind a blackout, with nothing else playing:
@@ -133,6 +138,8 @@ function addEntry(entry: (typeof LIBRARY)[number]): Promise<string> {
 
 /** The DM's Sound: Ambiance, the side panel's tab on the desk, whose Sound group starts open (docs/design/design-v1-panel-groups.md 4.1, 6.1). */
 async function soundPanel(page: Page = dm): Promise<Locator> {
+  // A step that failed with the Music window open would leave it over the panel for every step after.
+  await closeMusic(page);
   await openSideTab(page, "Ambiance");
   return page.getByRole("tabpanel", { name: sideTabName("Ambiance") });
 }
@@ -173,7 +180,38 @@ async function until<T>(what: string, read: () => T | null | undefined | false, 
 
 async function back(panel: Locator): Promise<void> {
   await dm.getByRole("button", { name: /^Back to Ambiance/ }).first().click();
-  await panel.getByRole("heading", { name: "Music", exact: true }).waitFor();
+  await panel.getByRole("heading", { name: "Now playing", exact: true }).waitFor();
+}
+
+/** The Music window, opened from the Sound group's Open music, on its Library (docs/design/design-v1-music-player.md 3.2 and 4.1). */
+async function openMusic(page: Page = dm): Promise<Locator> {
+  const panel = await anySoundPanel(page);
+  await panel.getByRole("button", { name: "Open music", exact: true }).click();
+  const win = musicWindow(page);
+  await win.waitFor();
+  // Narrow, Library is a tab. Wide, it stands beside Now playing.
+  const tab = win.getByRole("radio", { name: "Library", exact: true });
+  if ((await tab.count()) > 0) await tab.click();
+  await win.getByRole("searchbox", { name: "Search music" }).waitFor();
+  return win;
+}
+
+function musicWindow(page: Page = dm): Locator {
+  return page.locator("dialog[open]").filter({ has: page.locator("[data-music-window]") });
+}
+
+async function closeMusic(page: Page = dm): Promise<void> {
+  const win = musicWindow(page);
+  if ((await win.count()) === 0) return;
+  await win.getByRole("button", { name: /^Close/ }).last().click();
+  await win.waitFor({ state: "detached" });
+}
+
+/** A track's page, a step of the Music window, through its More's Rename or delete…. */
+async function trackPage(win: Locator, name: string): Promise<void> {
+  await win.getByRole("list", { name: "Tracks" }).getByRole("button", { name: `More for ${name}`, exact: true }).click();
+  await win.page().getByRole("menuitem", { name: "Rename or delete…", exact: true }).click();
+  await win.getByRole("heading", { name, exact: true }).waitFor();
 }
 
 describe("Ambiance's Sound", { concurrency: false }, () => {
@@ -228,64 +266,76 @@ describe("Ambiance's Sound", { concurrency: false }, () => {
     assert.deepEqual(patSocket.state?.sounds ?? {}, {}, "a player holds no library");
   });
 
-  test("sp-1. the DM's Sound with nothing playing: Now playing, Effects, What players hear, Music, Background, On this device and the storage line", async () => {
+  test("sp-1. the DM's Sound with nothing playing: Now playing with Open music, Effects, What players hear, Background, On this device and the storage line", async () => {
     const panel = await soundPanel();
     await panel.getByText("Nothing is playing.", { exact: true }).waitFor();
     assert.deepEqual(await panel.locator("[data-group-name]").allTextContents(), ["Time", "Weather", "Sound"], "Ambiance's groups and its Weather row");
     // The section labels, h4 under the Sound group's h3 (D-261102-766), not the boards' own subheads.
     const sections = ambianceGroup(panel, "Sound").locator("section > h4, section > [data-section-label] > h4");
-    assert.deepEqual(await sections.allTextContents(), ["Now playing", "Effects", "What players hear", "Music", "Background", "On this device"]);
+    assert.deepEqual(await sections.allTextContents(), ["Now playing", "Effects", "What players hear", "Background", "On this device"]);
+    // Music's playlists and tracks live in the Music window (docs/design/design-v1-music-player.md 3.1).
+    await ambianceGroup(panel, "Sound").getByRole("button", { name: "Open music", exact: true }).waitFor();
     await panel.getByText(/^Sounds use .+\. Images and sounds share the room's .+, and .+ is free\.$/).waitFor({ timeout: 15_000 });
     await shots.take(dm, "sp-1-dm-panel-silent");
   });
 
-  test("sp-2. a playlist made on its page, then played, paused, resumed, Repeat stepped, skipped and stopped", async () => {
-    const panel = await soundPanel();
-    await panel.getByRole("button", { name: "New playlist", exact: true }).click();
-    const name = panel.getByRole("textbox", { name: "Name" });
-    await name.fill("Tavern night");
-    await name.press("Enter");
-    await until("the playlist's name", () => Object.values(dmSocket.state?.playlists ?? {}).some((p) => p.name === "Tavern night"));
-    await panel.getByRole("button", { name: "Add tracks", exact: true }).click();
-    await panel.getByRole("checkbox", { name: /^The Prancing Pony/ }).check();
-    await panel.getByRole("checkbox", { name: /^Road/ }).check();
-    await panel.getByRole("button", { name: "Add 2 tracks", exact: true }).click();
-    const playlist = await until("two tracks in Tavern night", () => Object.values(dmSocket.state?.playlists ?? {}).find((p) => p.name === "Tavern night" && p.sounds.length === 2));
-    assert.deepEqual(playlist.sounds, [run.sounds.Road, run.sounds["The Prancing Pony"]], "added in the checklist's order, by name");
-    await panel.getByRole("button", { name: "Move The Prancing Pony up", exact: true }).click();
-    await until("The Prancing Pony first", () => Object.values(dmSocket.state?.playlists ?? {}).find((p) => p.name === "Tavern night")?.sounds[0] === run.sounds["The Prancing Pony"]);
-    await panel.getByRole("button", { name: "Play", exact: true }).click();
+  test("sp-2. a playlist made in the Music window, played, paused, resumed and skipped from the Sound group, Repeat stepped and the music stopped in the window", async () => {
+    let win = await openMusic();
+    await win.getByRole("button", { name: "New playlist", exact: true }).click();
+    await win.getByRole("textbox", { name: "Name" }).fill("Tavern night");
+    for (const track of ["Road", "The Prancing Pony"]) await win.getByRole("button", { name: `Add ${track}`, exact: true }).click();
+    await win.getByRole("button", { name: "Move The Prancing Pony, 2 of 2", exact: true }).focus();
+    await dm.keyboard.press("ArrowUp");
+    await win.getByRole("button", { name: "Move The Prancing Pony, 1 of 2", exact: true }).waitFor();
+    // The maker keeps a draft: nothing reaches the room until Create.
+    assert.equal(Object.values(dmSocket.state?.playlists ?? {}).length, 0, "no playlist before Create");
+    await win.locator("footer").getByRole("button", { name: "Create playlist", exact: true }).click();
+    const playlist = await until("Tavern night made", () => Object.values(dmSocket.state?.playlists ?? {}).find((p) => p.name === "Tavern night"));
+    assert.deepEqual(playlist.sounds, [run.sounds["The Prancing Pony"], run.sounds.Road], "in the maker's order");
+    await win.getByRole("list", { name: "Playlists" }).getByRole("button", { name: "Play Tavern night", exact: true }).click();
     await until("the playlist playing", () => playing()?.music?.playlistId === playlist.id);
-    await back(panel);
-    await panel.locator("[data-sound-track]").filter({ hasText: /^The Prancing Pony$/ }).waitFor();
-    await panel.locator("[data-sound-run]").filter({ hasText: /^Tavern night · 1 of 2$/ }).waitFor();
-    await panel.locator("[data-sound-time]").filter({ hasText: /^\d:\d\d \/ 0:31$/ }).waitFor();
+    await closeMusic();
+
+    const panel = await soundPanel();
+    const block = panel.locator("[data-sound-now]");
+    await block.locator("[data-sound-track]").filter({ hasText: /^The Prancing Pony$/ }).waitFor();
+    await block.locator("[data-sound-run]").filter({ hasText: /^Tavern night · 1 of 2$/ }).waitFor();
+    await block.locator("[data-sound-next]").filter({ hasText: /^Next: Road$/ }).waitFor();
+    await block.locator("[data-sound-time]").filter({ hasText: /^\d:\d\d \/ 0:31$/ }).waitFor();
     await shots.take(dm, "sp-2-dm-now-playing");
 
-    await panel.getByRole("button", { name: "Pause", exact: true }).click();
+    await block.getByRole("button", { name: "Pause", exact: true }).click();
     await until("paused", () => playing()?.music?.paused !== undefined);
-    await panel.getByRole("button", { name: "Play", exact: true }).click();
+    await block.getByRole("button", { name: "Play", exact: true }).click();
     await until("resumed", () => playing()?.music && playing()?.music?.paused === undefined);
+    // Repeat and Stop the music are the window's (3.1).
+    win = await openMusic();
     for (const [from, to] of [["Repeat all", "one"], ["Repeat one", "off"], ["Repeat off", "all"]] as const) {
-      await panel.getByRole("button", { name: from, exact: true }).click();
+      await win.getByRole("button", { name: from, exact: true }).click();
       await until(`Repeat ${to}`, () => playing()?.music?.repeat === to);
     }
-    await panel.getByRole("button", { name: "Skip to the next track", exact: true }).click();
+    await closeMusic();
+    await block.getByRole("button", { name: "Skip to the next track", exact: true }).click();
     await until("the second track", () => playing()?.music?.now.soundId === run.sounds.Road);
-    await panel.locator("[data-sound-run]").filter({ hasText: /^Tavern night · 2 of 2$/ }).waitFor();
-    await panel.getByRole("button", { name: "Stop the music", exact: true }).click();
+    await block.locator("[data-sound-run]").filter({ hasText: /^Tavern night · 2 of 2$/ }).waitFor();
+    win = await openMusic();
+    await win.getByRole("button", { name: "Stop the music", exact: true }).click();
     await until("the music stopped", () => playing() === null || playing()?.music === null);
+    await closeMusic();
     await panel.getByText("Nothing is playing.", { exact: true }).waitFor();
   });
 
   test("sndfade-1. the playing row's Play is Pause: it pauses the music, Play resumes it where it paused, another row's Play starts that one, and each changes before the server answers", async () => {
     const tracksOf = (p: Locator) => p.getByRole("list", { name: "Tracks" });
     const rowButton = (p: Locator, name: string) => tracksOf(p).getByRole("button", { name, exact: true });
-    let panel = await soundPanel();
+    // The rows are the Music window's Library's (docs/design/design-v1-music-player.md 4.4).
+    let panel = await openMusic();
     await rowButton(panel, "Play Road").click();
     await until("Road playing", () => playing()?.music?.now.soundId === run.sounds.Road && playing()?.music?.paused === undefined);
     await rowButton(panel, "Pause Road").waitFor();
     assert.equal(await rowButton(panel, "Play March").count(), 1, "another row keeps Play");
+
+    await closeMusic();
 
     // The rows and Now playing at three sizes and two scales, dark then light, within 1 px. Shots at a desk and on a phone.
     const lines: string[] = [];
@@ -301,16 +351,21 @@ describe("Ambiance's Sound", { concurrency: false }, () => {
           await dm.getByRole("status", { name: "Connected" }).first().waitFor();
           const where = `${size.width}x${size.height} ${scale * 100}% ${scheme}`;
           const p = await anySoundPanel(dm);
-          await rowButton(p, "Pause Road").waitFor();
+          await p.locator("[data-sound-now]").getByRole("button", { name: "Pause", exact: true }).waitFor();
           lines.push(...alignmentLines(await measureAlignment(p.locator("[data-sound-now]")), `Now playing ${where}`));
-          lines.push(...alignmentLines(await measureAlignment(tracksOf(p)), `the Tracks rows ${where}`));
+          const device = size.width === DESK.width ? "desk" : "phone";
           if (scale === 1 && size.width !== 320) {
-            const device = size.width === DESK.width ? "desk" : "phone";
             await p.locator("[data-sound-now]").scrollIntoViewIfNeeded();
             await shots.take(dm, `sndfade-1-now-playing-${device}-${scheme}`);
-            await tracksOf(p).scrollIntoViewIfNeeded();
+          }
+          const win = await openMusic();
+          await rowButton(win, "Pause Road").waitFor();
+          lines.push(...alignmentLines(await measureAlignment(tracksOf(win)), `the Tracks rows ${where}`));
+          if (scale === 1 && size.width !== 320) {
+            await tracksOf(win).scrollIntoViewIfNeeded();
             await shots.take(dm, `sndfade-1-tracks-${device}-${scheme}`);
           }
+          await closeMusic();
         }
       }
     }
@@ -331,8 +386,8 @@ describe("Ambiance's Sound", { concurrency: false }, () => {
       });
       await slow.goto(`${server.origin}/r/${run.roomId}`);
       await slow.getByRole("status", { name: "Connected" }).first().waitFor();
-      panel = await anySoundPanel(slow);
-      const now = panel.locator("[data-sound-now]");
+      const now = (await anySoundPanel(slow)).locator("[data-sound-now]");
+      panel = await openMusic(slow);
       await rowButton(panel, "Pause Road").waitFor();
       const soon = { timeout: 1_000 };
 
@@ -413,7 +468,7 @@ describe("Ambiance's Sound", { concurrency: false }, () => {
     await effects.getByRole("button", { name: "Play Thunder for everyone", exact: true }).waitFor();
   });
 
-  test("sp-5. a sound's page refuses the delete of a playing loop and of a track of the run, in words, and renames on Enter", async () => {
+  test("sp-5. a sound's page refuses the delete of a playing loop and renames on Enter, and a track's page in the Music window deletes a played track and refuses a queued one's use, the next's delete and the playing one's", async () => {
     const panel = await soundPanel();
     // Crowd plays since sp-3. Its page opens from Background's Edit.
     const background = panel.getByRole("heading", { name: "Background", exact: true }).locator("xpath=ancestor::section[1]");
@@ -429,12 +484,43 @@ describe("Ambiance's Sound", { concurrency: false }, () => {
     await back(panel);
     await background.getByRole("button", { name: "Done", exact: true }).click();
 
-    await panel.getByRole("button", { name: "Play March", exact: true }).click();
+    // A track's page is a step of the Music window, reached from Library's More (docs/design/design-v1-music-player.md 4.4 and 6.4).
+    // Harbor is two minutes, so March, after it, is only queued until a seek near Harbor's end reveals it.
+    run.sounds.Harbor = await addEntry({ name: "Harbor", use: "music", ms: 120_000 });
+    const queueId = randomUUID();
+    const order = [run.sounds["The Prancing Pony"]!, run.sounds.Harbor, run.sounds.March!];
+    await ops.send({ t: "playlist.create", id: queueId, name: "Harbor watch", sounds: order, repeat: "off", fade: 0 });
+    await ops.send({ t: "music.play", run: randomUUID(), playlistId: queueId, order, index: 1, repeat: "off", fade: 0 });
+    await until("Harbor playing", () => playing()?.music?.now.soundId === run.sounds.Harbor);
+    const win = await openMusic();
+    // The Prancing Pony is played under Repeat off: its delete goes ahead, and the music plays on.
+    await trackPage(win, "The Prancing Pony");
+    await win.getByRole("button", { name: "Delete", exact: true }).click();
+    await win.getByRole("button", { name: "Delete The Prancing Pony", exact: true }).click();
+    await until("The Prancing Pony gone", () => !dmSocket.state?.sounds?.[run.sounds["The Prancing Pony"]!]);
+    await win.getByRole("heading", { name: "Music", exact: true }).waitFor();
+    const after = await until("the run without it", () => (playing()?.music?.order?.includes(run.sounds["The Prancing Pony"]!) === false ? playing()?.music : null));
+    assert.equal(after?.now.soundId, run.sounds.Harbor, "the music plays on");
+    // March is queued: no other use while it is.
+    await trackPage(win, "March");
+    await win.getByRole("radio", { name: "Background", exact: true }).click();
+    await win.getByText("This track is in the queue. Take it out under Up next first.", { exact: true }).waitFor();
+    assert.equal(dmSocket.state?.sounds?.[run.sounds.March!]?.use, "music", "nothing sent");
+    // Revealed as Harbor's next, it cannot go either.
+    const current = playing()!.music!;
+    await ops.send({ t: "music.jump", run: randomUUID(), from: current.run, soundId: run.sounds.Harbor, ms: 110_000, on: run.sounds.Harbor });
+    await until("March revealed next", () => playing()?.music?.next?.soundId === run.sounds.March);
+    await win.getByRole("button", { name: "Delete", exact: true }).click();
+    await win.getByText("This track plays next. Take it out of Up next first.", { exact: true }).waitFor();
+    // Playing, it cannot either.
+    await win.getByRole("button", { name: "Back to Music", exact: true }).click();
+    await win.getByRole("list", { name: "Tracks" }).getByRole("button", { name: "Play March", exact: true }).click();
     await until("March playing", () => playing()?.music?.now.soundId === run.sounds.March);
-    await panel.getByRole("list", { name: "Tracks" }).getByRole("button", { name: /^March/ }).click();
-    await panel.getByRole("button", { name: "Delete", exact: true }).click();
-    await panel.getByText("Stop the music first: this track is in the playlist that's playing.", { exact: true }).waitFor();
-    await back(panel);
+    await trackPage(win, "March");
+    await win.getByRole("button", { name: "Delete", exact: true }).click();
+    await win.getByText("This track is playing. Skip it or stop the music first.", { exact: true }).waitFor();
+    assert.ok(dmSocket.state?.sounds?.[run.sounds.March!], "nothing deleted");
+    await closeMusic();
   });
 
   test("sp-6. a scene's sound: saved from what plays, started by Move players, silence saved, and Clear", async () => {
@@ -492,7 +578,7 @@ describe("Ambiance's Sound", { concurrency: false }, () => {
     await panel.getByText("Forest road has no sound of its own.", { exact: true }).waitFor();
   });
 
-  test("sp-7. Players see what is playing: Pat's panel by name with it on, by count with it off", async () => {
+  test("sp-7. Players see what is playing: Pat's panel by name with it on, by count with it off, the switch in the Sound group and the Music window", async () => {
     const panel = await soundPanel();
     await until("something plays for Pat", () => patSocket.state?.playing?.music);
     const sheet = await patPanel();
@@ -503,8 +589,16 @@ describe("Ambiance's Sound", { concurrency: false }, () => {
     await sheet.getByText("Music: March", { exact: true }).waitFor();
     await sheet.getByText(/^Background: /).waitFor();
     await shots.take(pat, "sp-7-pat-panel-named");
-    await panel.getByRole("switch", { name: "Players see what is playing" }).click();
+    // One setting, shown in both places: the window's switch reads it, and turns it off.
+    const win = await openMusic();
+    const tab = win.getByRole("radio", { name: "Now playing", exact: true });
+    if ((await tab.count()) > 0) await tab.click();
+    const inWindow = win.getByRole("switch", { name: "Players see what is playing" });
+    assert.equal(await inWindow.getAttribute("aria-checked"), "true", "the window's switch reads the Sound group's");
+    await inWindow.click();
     await sheet.getByText("Music is playing.", { exact: true }).waitFor();
+    await closeMusic();
+    assert.equal(await panel.getByRole("switch", { name: "Players see what is playing" }).getAttribute("aria-checked"), "false");
   });
 
   test("sp-8. the X-card's Stop the sound stops it all", async () => {
@@ -531,7 +625,7 @@ describe("Ambiance's Sound", { concurrency: false }, () => {
     assert.ok(dmSocket.state?.sounds?.[run.sounds.Thunder!], "one tap deletes nothing");
     await panel.getByRole("button", { name: "Delete Thunder", exact: true }).click();
     await until("Thunder gone", () => !dmSocket.state?.sounds?.[run.sounds.Thunder!]);
-    await panel.getByRole("heading", { name: "Music", exact: true }).waitFor();
+    await panel.getByRole("heading", { name: "Now playing", exact: true }).waitFor();
     await waitFor("its file deleted", async () => ((await dmContext.request.get(`${server.origin}/api/assets/${assetId}/full`)).status() === 404 ? true : null), 15_000);
     // The room has no effect of its own left, so Effects offers no Edit, and the board shows the built-ins alone.
     await effects.getByText("No effects added yet.", { exact: true }).waitFor();
@@ -615,7 +709,7 @@ describe("Ambiance's Sound", { concurrency: false }, () => {
       await panel.getByText("This server doesn't offer sound files. Its owner can turn them on. The built-in effects still work.", { exact: true }).waitFor();
       await panel.getByRole("button", { name: "Play Click for everyone", exact: true }).waitFor();
       assert.equal(await panel.getByRole("button", { name: /^Add / }).count(), 0, "no Add buttons");
-      assert.equal(await panel.getByRole("heading", { name: "Music", exact: true }).count(), 0);
+      assert.equal(await panel.getByRole("button", { name: "Open music", exact: true }).count(), 0, "nothing can play a file, so no Open music");
       await shots.take(page, "sp-9-dm-switch-off");
       const res = await context.request.put(`${off.origin}/api/rooms/${roomId}/assets?kind=sound`, { headers: { Origin: off.origin, "content-type": "audio/mpeg" }, data: Buffer.from(silentFrames(framesFor(1_000))) });
       assert.equal(res.ok(), false);

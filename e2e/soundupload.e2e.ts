@@ -444,6 +444,8 @@ describe("the Add buttons", { concurrency: false }, () => {
   });
 
   test("su-8. Cancel stops a long file, which never reaches the room", async () => {
+    // Add music… is the Music window's, under Library's tracks (docs/design/design-v1-music-player.md 4.4).
+    await dm.getByRole("button", { name: "Open music", exact: true }).click();
     const music = adder("music");
     const before = Object.keys((dmSocket.state as unknown as { sounds?: Record<string, unknown> }).sounds ?? {}).length;
     await music.locator('input[type="file"]').setInputFiles([written("Long tavern.wav", toneWav(600))]);
@@ -453,6 +455,7 @@ describe("the Add buttons", { concurrency: false }, () => {
     await music.getByText(/Long tavern/).waitFor({ state: "detached" });
     await sleep(1000);
     assert.equal(Object.keys((dmSocket.state as unknown as { sounds?: Record<string, unknown> }).sounds ?? {}).length, before);
+    await dm.keyboard.press("Escape");
   });
 });
 
