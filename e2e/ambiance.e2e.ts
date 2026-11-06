@@ -26,11 +26,14 @@ import { addSound } from "./soundRoom.ts";
  * - am-3: the top bar's chip with Time folded, and from a Sound subpage with
  *   a name typed and focused, and Back keeping Other amount and the start
  *   form as they were left.
- * - am-5: the folded summaries and the Weather row follow the room.
+ * - am-5: the folded summaries and the Weather row follow the room, and a
+ *   clock step comes as a toast while a Sound subpage covers an open Time.
  * - am-6: Pat's Ambiance: listed, kept sections, a turn across 900 px, a
- *   restored split with Sound's old id, and a reload that asks for Time's.
+ *   restored split with Sound's old id, a reload that asks for Time's, and
+ *   the chip's press after press with Time scrolled out of the pane.
  * - am-4: the Weather and Scene sound rows into Scenes, on a phone at 100%
- *   and at 320 x 568 and 130%, and with two panels. Then a room with no
+ *   and at 320 x 568 and 130%, with two panels, and on a tall sheet under
+ *   900 px with little under each group. Then a room with no
  *   scene, imported from this room's backup with its scenes taken out: the
  *   Weather row only opens Scenes, New scene starts open there and a fold
  *   of it is kept, and the first scene made sets nothing off.
@@ -77,6 +80,8 @@ const run = {
 const DESK = { width: 1440, height: 900 };
 const PHONE = { width: 390, height: 844 };
 const SMALL = { width: 320, height: 568 };
+/** A tablet held upright: a sheet, not the side panel, and a tall one. */
+const TABLET = { width: 820, height: 1180 };
 const HOUR = 3_600;
 
 const FOLDS_KEY = "rvtt.ambianceFolds";
@@ -140,6 +145,28 @@ function storedFolds(page: Page = dm): Promise<Record<string, boolean>> {
 async function reload(page: Page): Promise<void> {
   await page.reload();
   await page.getByRole("status", { name: "Connected" }).first().waitFor();
+}
+
+/** The box that scrolls `el`'s panel: the sheet's body or the side panel's pane. Scrolls it by `by` px, or to its end with Infinity. */
+function scrollPanel(el: Locator, by: number): Promise<void> {
+  return el.evaluate((node, by) => {
+    let box = node.parentElement;
+    while (box && !/(auto|scroll)/.test(node.ownerDocument.defaultView!.getComputedStyle(box).overflowY)) box = box.parentElement;
+    if (box) box.scrollTop = by === Infinity ? box.scrollHeight : box.scrollTop + by;
+  }, by);
+}
+
+/** Every box around `el`'s scroller that is scrolled, and the page's own scroll: none, where only the panel's body moved. */
+function framesScrolled(el: Locator): Promise<string[]> {
+  return el.evaluate((node) => {
+    const win = node.ownerDocument.defaultView!;
+    let box = node.parentElement;
+    while (box && !/(auto|scroll)/.test(win.getComputedStyle(box).overflowY)) box = box.parentElement;
+    const out: string[] = [];
+    for (let at = box?.parentElement ?? null; at; at = at.parentElement) if (at.scrollTop !== 0) out.push(`${at.tagName.toLowerCase()} ${at.scrollTop}`);
+    if (win.scrollY !== 0) out.push(`the page ${win.scrollY}`);
+    return out;
+  });
 }
 
 /** How far `el` sits inside the box that scrolls it: its bottom's distance above the box's visible bottom (negative when cut), and its top below the box's top. */
@@ -533,6 +560,23 @@ describe("Ambiance", { concurrency: false }, () => {
     await forgetFolds();
   });
 
+  test("am-5b. with Time open and a Sound subpage in its place, a clock step from another device comes as a toast", async (t) => {
+    t.after(() => forgetFolds());
+    if (!dmSocket.state?.clock) await startClock();
+    await openSideTab(dm, "Log");
+    const panel = await ambiance();
+    await openGroup(panel, "Time");
+    await openGroup(panel, "Sound");
+    await panel.getByRole("button", { name: /^Tavern night/ }).first().click();
+    await dm.getByRole("button", { name: /^Back to Ambiance/ }).first().waitFor();
+    assert.equal(await panel.locator("[data-clock-date]").count(), 0, "the subpage stands in for Time");
+    await ops.send({ t: "clock.advance", by: 2 * HOUR });
+    await dm.getByText(/^2 hours pass\. It is now /).first().waitFor();
+    await dm.getByRole("button", { name: /^Back to Ambiance/ }).first().click();
+    await panel.getByRole("heading", { name: "Music", exact: true }).waitFor();
+    assert.equal(await expanded(panel, "Time"), true, "Time's fold stayed open under the subpage");
+  });
+
   test("am-1f. Ambiance measured at 1440 x 900, 390 x 844 and 320 x 568, at 100% and 130%, folded and open: nothing over 1 px", async (t) => {
     t.after(async () => {
       await dm.evaluate(() => localStorage.removeItem("rvtt.uiScale"));
@@ -610,6 +654,32 @@ describe("Ambiance", { concurrency: false }, () => {
     await reload(pat);
   });
 
+  test("am-6c. Pat's clock chip, press after press with Time scrolled above the pane, brings Time's header to the top", async (t) => {
+    t.after(async () => {
+      await ops.send({ t: "sound.stopAll" });
+      await stopClock();
+      await pat.setViewportSize(PHONE);
+    });
+    await startClock();
+    await playMusic();
+    await waitFor("Pat's clock and music", () => (patSocket.state?.clock && patSocket.state.playing?.music ? true : null));
+    // The chip is in the bar from 900 px up. A short window, so Time and Sound overflow the side panel.
+    await pat.setViewportSize({ width: 1024, height: 480 });
+    const chip = pat.getByRole("button", { name: /^Time: / });
+    await chip.click();
+    const sheet = pat.getByRole("tabpanel", { name: sideTabName("Ambiance") });
+    const time = sheet.locator("[data-panel-group]").filter({ has: pat.locator("[data-group-name]", { hasText: /^Time$/ }) });
+    await sheet.locator("[data-group-name]", { hasText: /^Sound$/ }).waitFor();
+    for (let press = 1; press <= 3; press++) {
+      await scrollPanel(time, Infinity);
+      const away = await inScroller(time);
+      assert.ok(away.top < -8, `press ${press}: Time's header above the pane before the chip (${away.top} px)`);
+      await chip.click();
+      await waitFor(`press ${press}: Time's header at the top`, async () => (Math.abs((await inScroller(time)).top) <= 8 ? true : null), 5_000).catch(async () => assert.fail(`press ${press}: Time's header ${(await inScroller(time)).top} px from the top of the body`));
+    }
+    await shots.take(pat, "am-6c-pat-chip-brings-time");
+  });
+
   test("am-4a. the Weather row on a phone and at 320 x 568 and 130%: Scenes takes the sheet with Light and weather open, never written, the Weather select focused and whole in view", async (t) => {
     t.after(() => dm.evaluate(() => localStorage.removeItem("rvtt.uiScale")));
     for (const [size, scale] of [[PHONE, "1"], [SMALL, "1.3"]] as const) {
@@ -667,6 +737,41 @@ describe("Ambiance", { concurrency: false }, () => {
     await waitFor("Scene sound's fold focused", () => group.evaluate((el) => (el === el.ownerDocument.activeElement ? true : null)));
     await shots.take(dm, "am-4b-two-panels");
     await dm.evaluate(() => localStorage.removeItem("rvtt.sidePanelSplit"));
+  });
+
+  test("am-4d. a tall sheet under 900 px with little under each group: the Scene sound and Weather rows move only Scenes' body, its header in view, and send no wheel", async (t) => {
+    t.after(async () => {
+      await dm.evaluate(() => localStorage.removeItem("rvtt.sceneSettingsFolds"));
+      await dm.setViewportSize(DESK);
+      await reload(dm);
+    });
+    await dm.setViewportSize(TABLET);
+    await forgetFolds();
+    await dm.evaluate(() => localStorage.removeItem("rvtt.sceneSettingsFolds"));
+    await reload(dm);
+    const scenes = dm.locator('dialog[data-rvtt-sheet][aria-label="Scenes"]');
+    for (const row of ["Scene sound", "Weather"] as const) {
+      const sheet = await ambianceSheet(dm);
+      // The request takes the scroller over with its own event: a wheel would also reach every wheel listener on the page, the keyboard's own among them (lib/keyboardInset.ts).
+      await dm.evaluate(() => {
+        const g = globalThis as unknown as { rvttWheels?: number; document: { addEventListener(type: string, f: () => void, o: { capture: boolean }): void } };
+        g.rvttWheels = 0;
+        g.document.addEventListener("wheel", () => void (g.rvttWheels = (g.rvttWheels ?? 0) + 1), { capture: true });
+      });
+      if (row === "Weather") await sheet.locator("[data-group-open]").click();
+      else await sheet.getByRole("button", { name: "Scene sound, in Scenes", exact: true }).click();
+      const focused = row === "Weather" ? scenes.getByRole("combobox", { name: "Weather", exact: true }) : scenes.getByRole("button", { name: "Scene sound", exact: true });
+      await waitFor(`${row}: focus taken`, () => focused.evaluate((el) => (el === el.ownerDocument.activeElement ? true : null)));
+      const head = scenes.getByRole("button", { name: row === "Weather" ? "Light and weather" : "Scene sound", exact: true });
+      assert.deepEqual(await framesScrolled(head), [], `${row}: nothing around Scenes' body scrolled`);
+      assert.equal(await dm.evaluate(() => (globalThis as unknown as { rvttWheels?: number }).rvttWheels), 0, `${row}: no wheel event sent`);
+      const close = await scenes.getByRole("button", { name: /^Close / }).first().boundingBox();
+      assert.ok(close && close.y >= 0, `${row}: the sheet's header in view (${JSON.stringify(close)})`);
+      const at = await inScroller(focused);
+      assert.ok(at.top >= 0 && at.bottom >= 0, `${row}: ${row === "Weather" ? "the Weather select" : "the group's fold"} whole in the sheet (${JSON.stringify(at)})`);
+      await shots.take(dm, `am-4d-tall-sheet-${row === "Weather" ? "weather" : "scene-sound"}`);
+      await closeSheet(scenes);
+    }
   });
 
   test("am-4c. a room with no scene: the Weather row says No scene and only opens Scenes, New scene starts open and a fold of it is kept, and the first scene made scrolls to nothing", async (t) => {
