@@ -14,6 +14,7 @@ import { UnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { SheetDialog } from "../tokens/SheetDialog.tsx";
+import { RecentDcs } from "./RecentDcs.tsx";
 import {
   addChoice,
   allSaves,
@@ -31,9 +32,12 @@ import {
   pickerSteps,
   pickerView,
   readRecent,
+  readRecentDcs,
   recentLabel,
   recentOf,
+  rememberSaveDc,
   removeChoice,
+  saveDcChips,
   seenSummary,
   sendLabel,
   switchesOf,
@@ -68,6 +72,8 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
     members && characters && tokens && meta ? defaultTargets({ members, characters, tokens, meta }, props.from, viewing) : [],
   );
   const [recent] = useState(() => readRecent(roomId));
+  // Read once as the sheet opens, as its recent requests are, so a chip never moves under the DM's finger.
+  const [recentDcs] = useState(() => readRecentDcs(roomId));
   const [sheet, setSheet] = useState<AskSheet>(() => {
     const draft = emptyDraft(
       options.filter((o) => o.ticked).map((o) => o.ref),
@@ -109,6 +115,7 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
   const seen = useMemo(() => seenSummary(draft), [draft]);
   const hasDc = draft.dc.trim() !== "";
   const chips = dcChips(draft);
+  const saveChips = saveDcChips(draft, recentDcs);
   const saves = allSaves(draft);
 
   const send = () => {
@@ -128,7 +135,10 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
       quiet: true,
       onAnswer: (answer, refusal) => {
         // Kept once the server takes it, whether or not the sheet is still open, so a repeat is one tap next time (4.7).
-        if (answer === "taken") writeRecent(roomId, withRecent(readRecent(roomId), recentOf(input.input)));
+        if (answer === "taken") {
+          writeRecent(roomId, withRecent(readRecent(roomId), recentOf(input.input)));
+          if (input.input.test.kind === "save" && input.input.dc !== undefined) rememberSaveDc(roomId, input.input.dc);
+        }
         if (!mounted.current) {
           // Closed while sending: no sheet is left to show why, so a failure says so in a toast.
           const text = closedAskText(answer, refusal);
@@ -246,7 +256,7 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
                 <Help>The creature picks which one it rolls.</Help>
               </div>
             ) : null}
-            {/* The DC and, for a check, its typical values on one row (4.4). An empty field is no DC. */}
+            {/* The DC and, for a check, its typical values on one row (4.4), or for a save the recent ones. An empty field is no DC. */}
             <div style={{ containerType: "inline-size", minWidth: 0 }}>
               <PickRow label="DC">
                 <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1), minWidth: 0 }}>
@@ -267,6 +277,8 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
                       {t.dc}
                     </Chip>
                   ))}
+                  {/* A save has no typical DC, so it offers the ones this device sent last instead (designs/qol audit Q9). */}
+                  {saveChips ? <RecentDcs chips={saveChips} onTap={(dc) => change((d) => tapDc(d, dc))} /> : null}
                 </div>
               </PickRow>
             </div>

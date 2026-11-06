@@ -547,6 +547,75 @@ export function askSwitches(roomId: string): AskSwitches {
   return switchesOf(readRecent(roomId));
 }
 
+// ------------------------------------------------------------ recent save DCs
+
+/**
+ * The DCs this device sent last for a save in a room, newest first, three
+ * kept (designs/qol audit Q9). A save's DC is its effect's (SRD 5.2.1 page
+ * 7), so no typical one fits, though a session asks the same few again. It
+ * lives in this device's storage only, never in the room, and the request
+ * sheet and the group save share it.
+ */
+export const RECENT_DCS = 3;
+
+function saveDcsKey(roomId: string): string {
+  return `rvtt.saveDcs.${roomId}`;
+}
+
+const isDc = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= LIMITS.rollDcMin && v <= LIMITS.rollDcMax;
+
+/** The stored list: each DC checked, one of each, at most three. Anything unreadable counts as none. */
+export function parseRecentDcs(raw: string | null): number[] {
+  if (raw === null) return [];
+  let list: unknown;
+  try {
+    list = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(list)) return [];
+  return [...new Set(list.filter(isDc))].slice(0, RECENT_DCS);
+}
+
+/** The list with a DC just sent first, once, at most three. A DC out of range changes nothing. */
+export function withRecentDc(list: readonly number[], dc: number): number[] {
+  if (!isDc(dc)) return [...list];
+  return [dc, ...list.filter((d) => d !== dc)].slice(0, RECENT_DCS);
+}
+
+export function readRecentDcs(roomId: string): number[] {
+  try {
+    return parseRecentDcs(typeof localStorage === "undefined" ? null : localStorage.getItem(saveDcsKey(roomId)));
+  } catch {
+    return [];
+  }
+}
+
+/** Keeps a save's DC once it is sent. Storage blocked or full: the save goes, its DC is only not offered again. */
+export function rememberSaveDc(roomId: string, dc: number): void {
+  try {
+    localStorage.setItem(saveDcsKey(roomId), JSON.stringify(withRecentDc(readRecentDcs(roomId), dc)));
+  } catch {
+    // As above.
+  }
+}
+
+/**
+ * The recent DCs as chips beside a save's DC field, lowest first, so each
+ * keeps its place while the same few come back, each pressed exactly while
+ * the field holds its number, as the typical DCs are for a check.
+ */
+export function recentDcChips(typed: string, recent: readonly number[]): { dc: number; pressed: boolean }[] {
+  const now = typed.trim();
+  return [...recent].sort((a, b) => a - b).map((dc) => ({ dc, pressed: now === String(dc) }));
+}
+
+/** The request sheet's recent DCs: while every pick is a save, and there is one, else none, since a check has its typical DCs. */
+export function saveDcChips(draft: Pick<AskDraft, "choices" | "dc">, recent: readonly number[]): { dc: number; pressed: boolean }[] | null {
+  if (!allSaves(draft) || recent.length === 0) return null;
+  return recentDcChips(draft.dc, recent);
+}
+
 /**
  * A target has an answer: a total, a save its player failed without rolling
  * (`noRoll`, which reaches the creature's players whether or not pass or

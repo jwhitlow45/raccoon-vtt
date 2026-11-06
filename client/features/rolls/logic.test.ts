@@ -78,6 +78,11 @@ import {
   switchesOf,
   tapDc,
   withRecent,
+  parseRecentDcs,
+  recentDcChips,
+  saveDcChips,
+  withRecentDc,
+  RECENT_DCS,
   type RecentAsk,
   type AnswerDraft,
   type AskDraft,
@@ -529,6 +534,40 @@ describe("the DM's sheet", () => {
     // Doc 3's fill (4.8) sets the roll and leaves the sheet's switches alone.
     const fill = fillDraft({ ...emptyDraft(ticked, { dcShown: false, resultShown: false }) }, { test: { kind: "check", choices: [{ ability: "dex", skill: "stealth" }] }, dc: 12 });
     assert.deepEqual([fill.choices, fill.dc, fill.dcShown, fill.resultShown], [[{ kind: "check", ability: "dex", skill: "stealth" }], "12", false, false]);
+  });
+
+  test("recent save DCs: newest first, one of each, three at most, a bad one dropped, shown lowest first beside a save only", () => {
+    let list = withRecentDc([], 15);
+    list = withRecentDc(list, 13);
+    list = withRecentDc(list, 17);
+    list = withRecentDc(list, 15);
+    assert.deepEqual(list, [15, 17, 13], "sent again, a DC moves to the front once");
+    assert.deepEqual(withRecentDc([15, 17], 17), [17, 15], "never twice in the list");
+    assert.equal(withRecentDc(list, 11).length, RECENT_DCS, "at most three");
+    assert.deepEqual(withRecentDc(list, 11), [11, 15, 17], "the oldest goes");
+    assert.deepEqual(withRecentDc(list, 0), list, "a DC out of range is never kept");
+    assert.deepEqual(withRecentDc(list, 51), list);
+    assert.deepEqual(withRecentDc(list, 12.5), list);
+    assert.deepEqual(parseRecentDcs(null), [], "no storage, as in a private window");
+    assert.deepEqual(parseRecentDcs("{not json"), []);
+    assert.deepEqual(parseRecentDcs(JSON.stringify({ dc: 15 })), []);
+    assert.deepEqual(parseRecentDcs(JSON.stringify([15, "13", 99, 15, 12.5, 0, 17, 13, 11])), [15, 17, 13], "a bad or repeated entry is dropped, the rest kept to three");
+    // Lowest first, so a chip keeps its place while the same few come back, and each is a view of the field.
+    assert.deepEqual(recentDcChips(" 15 ", list), [
+      { dc: 13, pressed: false },
+      { dc: 15, pressed: true },
+      { dc: 17, pressed: false },
+    ]);
+    const save: AskDraft = { ...emptyDraft([]), choices: [DEX_PICK] };
+    assert.deepEqual(saveDcChips(save, list)?.map((c) => c.dc), [13, 15, 17]);
+    assert.equal(saveDcChips(save, []), null, "nothing sent yet: no row");
+    assert.equal(saveDcChips({ ...save, choices: [{ kind: "check", ability: "dex" }] }, list), null, "a check keeps its typical DCs");
+    assert.equal(saveDcChips({ ...save, choices: [null] }, list), null, "nothing picked yet");
+    assert.ok(dcChips({ ...save, choices: [{ kind: "check", ability: "dex" }] }), "and a check still has them");
+    assert.equal(dcChips(save), null, "a save still has no typical DC");
+    // A tap fills the field, and a second one empties it, as a typical DC does.
+    assert.equal(tapDc(save, 15).dc, "15");
+    assert.equal(tapDc(tapDc(save, 15), 15).dc, "");
   });
 
   test("the words a card reads", () => {
