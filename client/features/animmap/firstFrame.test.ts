@@ -3,6 +3,7 @@ import { describe, test } from "node:test";
 import type { MapVideo } from "#shared/model.ts";
 import { VIDEO_REFUSALS } from "./words.ts";
 import { FirstFrameError, fileRefusal, isVideoFile, lengthRefusal, LOW_POWER_STOPPED, NO_FIRST_FRAME, probeSizeFits, readFirstFrame, readStoredFrame, stillFileName, videoContainer, type FrameDeps, type ProbeCanvas, type ProbeVideo } from "./firstFrame.ts";
+import { movie, picked } from "./mp4Boxes.testutil.ts";
 
 /** A `<video>` the test drives: it records what the probe asks and fires events by hand. */
 class FakeVideo implements ProbeVideo {
@@ -322,6 +323,43 @@ describe("the first frame (docs/design/design-v1-animated-maps.md 4.1)", () => {
     const h = harness();
     await assert.rejects(readFirstFrame(avi, { host: null, deps: h.deps }), FirstFrameError);
     assert.equal(h.urls.made.length, 0, "no URL was made");
+  });
+
+  test("an iPhone's HEVC MOV with its moov last is refused in the server's words before any URL or probe, and its H.264 twin goes on to the probe (AMROT-O-06)", async () => {
+    const MiB = 1024 * 1024;
+    const h = harness();
+    let settled = false;
+    const refused = readFirstFrame(picked(movie({ brand: "qt  ", entry: "hvc1", moovLast: true, media: 3 * MiB })), { host: null, deps: h.deps })
+      .catch((e: unknown) => e)
+      .finally(() => (settled = true));
+    for (let i = 0; i < 200 && !settled && h.attached() === 0; i++) await flush();
+    // A scan that missed it leaves the fake probe waiting for ever, so it is ended here and the test fails rather than hangs.
+    if (!settled) h.video.fire("error");
+    const err = await refused;
+    assert.ok(err instanceof FirstFrameError && err.failure.kind === "refused", String(err));
+    assert.equal(err.message, VIDEO_REFUSALS.video_hevc);
+    assert.equal(h.urls.made.length, 0, "no URL was made");
+    assert.equal(h.attached(), 0, "no probe opened it");
+
+    const g = harness();
+    const done = readFirstFrame(picked(movie({ brand: "qt  ", entry: "avc1", moovLast: true, media: 3 * MiB })), { host: null, deps: g.deps });
+    for (let i = 0; i < 200 && g.attached() === 0; i++) await flush();
+    assert.equal(g.attached(), 1, "the probe opened the H.264 file");
+    g.video.meta(640, 360, 2);
+    await flush();
+    g.video.fire("seeked");
+    assert.equal((await done)?.widthPx, 640);
+    assertReleased(g);
+  });
+
+  test("a cancel during the HEVC scan wins over its refusal", async () => {
+    const abort = new AbortController();
+    const h = harness();
+    const done = readFirstFrame(picked(movie({ entry: "hvc1" }), "mp4"), { host: null, deps: h.deps, signal: abort.signal }).catch((e: unknown) => e);
+    const reason = new Error("cancelled");
+    abort.abort(reason);
+    assert.equal(await done, reason);
+    assert.equal(h.urls.made.length, 0);
   });
 
   test("a picked file is a video by its type, or by its name when it came with no type, and a MOV is an MP4 (docs/design/design-v1-video-turns.md 4.5)", () => {
