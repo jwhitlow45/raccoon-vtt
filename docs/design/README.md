@@ -175,6 +175,9 @@ and for how to use it, the [DM guide](../dm-guide.md).
   loop over a map's still, off until the server's owner turns it on, with
   a header check that zeroes metadata in place and each device's choice of
   Moving or Still.
+- [design-v1-video-turns.md](design-v1-video-turns.md): animated maps
+  that turn, mirror or stretch their picture, as phone videos do, and an
+  iPhone's MOV, rewritten plain at upload and drawn turned by the app.
 - [design-v1-music.md](design-v1-music.md): synced music, background
   sounds and effects the DM plays from the Sound panel, off until the
   server's owner turns it on, with a frame check that decodes nothing and

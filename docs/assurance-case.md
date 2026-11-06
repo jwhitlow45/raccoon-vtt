@@ -41,8 +41,14 @@ the code meets each one, and section 10 of the design has the detail.
    where the server's owner allows them, is never re-encoded. The server
    reads only its headers, keeps what an allowlist names and zeroes the rest
    in place, padding included. Each value it keeps is read and checked,
-   once, so no copy it did not read survives. No write the server makes
-   reaches the media data: each one is checked against it before it runs.
+   once, so no copy it did not read survives. A turned, mirrored or
+   stretched picture's headers are rewritten plain in place, from a closed
+   list of exact values, and the turn rides in the facts. No write the
+   server makes reaches the media data but one: the samples of an iPhone's
+   dropped timed metadata tracks, which a separate guarded edit zeroes once
+   a sweep has shown they lie inside one media box and apart from every
+   kept sample. Every other write is checked against the media data before
+   it runs.
    Nothing is decoded on the server. A video's length is its whole
    presentation timeline, held to the ten-minute cap whatever the file's
    durations say. The check runs in
@@ -92,7 +98,7 @@ you rely on the app.
   player who sets Animated maps to Still downloads no video. Text inside a
   video's own frames, such as H.264 user data, and an MP4's timecode track
   are left as they are, since the server never writes inside the media
-  data. Animated maps are off unless the server's owner turns them on.
+  data beyond the dropped metadata samples. Animated maps are off unless the server's owner turns them on.
 - **A sound reaches players' decoders too.** The server walks a sound's
   MP3 frame headers and decodes nothing, so a crafted frame inside an
   otherwise valid file can still reach the audio decoder of a player's
@@ -202,7 +208,7 @@ for a web app like this one.
 | Logging failures (A09) | The server logs every request and every admin sign-in, failed sign-in, pin and deletion. Request logs carry the method, path and address but no headers or bodies, and secrets travel in bodies, cookies and URL fragments, so they stay out of the logs. |
 | Server-side request forgery (A10, CWE-918) | Outbound requests go only through the egress proxy. Image imports are `https` on port 443 only, with every redirect checked again and private, loopback and reserved addresses refused ([fetchPublic.ts](../server/assets/fetchPublic.ts)). |
 | Cross-site request forgery (CWE-352) and WebSocket hijacking (CWE-1385) | Every request that changes anything must come from the site itself, by `Sec-Fetch-Site` or an exact Origin. The WebSocket upgrade needs an exact Origin match. No CORS headers are sent. |
-| Unrestricted upload (CWE-434) | Images are recognized by their bytes, never their names, and SVG is always refused. Each is re-encoded to WebP and stored under a name made from its hash, so no file name a user sends ever reaches the disk ([process.ts](../server/assets/process.ts), [store.ts](../server/assets/store.ts)). A video is taken only as WebM or MP4 with `kind=video`, recognized by its bytes, checked by a bounded header parser with no decoder, served under the type its row records, and stored by hash like an image ([server/assets/video](../server/assets/video)). |
+| Unrestricted upload (CWE-434) | Images are recognized by their bytes, never their names, and SVG is always refused. Each is re-encoded to WebP and stored under a name made from its hash, so no file name a user sends ever reaches the disk ([process.ts](../server/assets/process.ts), [store.ts](../server/assets/store.ts)). A video is taken only as WebM, MP4 or MOV with `kind=video`, recognized by its bytes, a MOV stored and served as an MP4, checked by a bounded header parser with no decoder, served under the type its row records, and stored by hash like an image ([server/assets/video](../server/assets/video)). |
 | Resource exhaustion (CWE-400) | Body limits on every route, room limits on every kind of content (design section 10.5), a bounded queue for password hashing, socket caps, and counted entries and bytes when a zip is read ([importRoom.ts](../server/rooms/importRoom.ts)). A video's header check runs in a worker thread, with every loop under its 5 second budget and the worker ended at the deadline ([check.ts](../server/assets/video/check.ts)). |
 | Input validation (CWE-20) | Every message and op is checked against a zod schema with explicit bounds before it is used ([protocol.ts](../shared/protocol.ts)). The same schemas type the client, so the two never drift apart. |
 
