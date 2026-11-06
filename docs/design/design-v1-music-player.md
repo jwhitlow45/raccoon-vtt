@@ -372,6 +372,14 @@ Lane PL-D, the sweep and the docs:
 - **Library's guide link** is the panels' small Guide link at its foot, named "Music in the DM guide" (D-261106-027).
 - **The guide's pictures** come from scripts/guide-music.ts, which takes sound-panel.webp again for the compact Now playing. Up next's picture is a phone's (D-261106-028). The guide's three sections close Music and sound, after its general paragraphs (D-261106-029).
 
+Lane musicfix, the build review's first round:
+
+- **A drag's last place.** The dragged row's middle passes a row once it reaches that row's middle, going up or down, as the initiative tracker's drop does. So the drag's bound, the last row's middle, reaches the last slot in Up next and the maker. `dragAt` holds the bound and the slot together.
+- **The seam before the last place** (D-261106-040). With the second list empty, or its only row moving, the seam is also the last slot, and a drop there sends `passEnd`. End with the second list empty sends `passEnd` too, where 4.3 says `last`, since `last` would put the track before the playing one.
+- **The maker's tracks** (D-261106-041). Save and the status line read the draft's tracks and the base's without those no longer music, so a track deleted elsewhere is no change of this DM's, and a rename leaves another DM's list alone.
+- **The maker's Play** (D-261106-042) starts the stored playlist with the fields its save sent over it, and the draft's new base is that playlist, so another DM's tracks, Repeat, Crossfade and Shuffle play.
+- **The seek** (D-261106-043). A drag's start disarms a key's timer, a drag stays one until the pointer lets go though its seek is dropped, and a key no longer ends a drag. Only the release sends.
+
 ## Round 1 dispositions
 
 A Codex reviewer (PLAYER-ASTRA) and a Claude reviewer (PLR), against `584fa7da`. Every P2 adopted. Each claim was checked in the code.
