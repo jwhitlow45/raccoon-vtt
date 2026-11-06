@@ -765,3 +765,24 @@ describe("a popover that steps back before it closes (docs/design/design-v1-stat
     assert.deepEqual(told, ["escape", "back"], "the step back is told which it was");
   });
 });
+
+describe("a close that takes its anchor away (usePopover anchorGoes, docs/design/design-v1-sound-layout.md 5.1)", async () => {
+  await import("./testing/register.ts");
+  const { anchorStays } = await import("./Popover.tsx");
+
+  test("focus goes back to a drawn anchor unless its consumer is leaving or says the close takes the anchor away", () => {
+    assert.equal(anchorStays(false, undefined), true, "as before: a popover that names nothing");
+    assert.equal(anchorStays(false, () => false), true, "the Now playing chip while something still plays");
+    assert.equal(anchorStays(false, () => true), false, "the chip once nothing plays: it goes as its player closes");
+    assert.equal(anchorStays(true, undefined), false, "as before: its consumer is unmounting");
+    assert.equal(anchorStays(true, () => false), false);
+  });
+
+  test("the answer is read as the close happens, not as the popover opened", () => {
+    let plays = true;
+    const goes = () => !plays;
+    assert.equal(anchorStays(false, goes), true);
+    plays = false;
+    assert.equal(anchorStays(false, goes), false);
+  });
+});

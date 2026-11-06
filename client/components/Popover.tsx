@@ -124,6 +124,14 @@ export function usePopover(options: {
   onClose?(reason: CloseReason): void;
   /** Where focus goes on a close that would put it on the anchor, once the anchor has gone: ⋯ for a tool popover. */
   fallbackFocus?(): HTMLElement | null;
+  /**
+   * Whether this close takes the anchor away with it, read as it closes.
+   * Focus then goes to `fallbackFocus` though the anchor is still drawn:
+   * the Now playing chip stays while its player is open, and goes as it
+   * closes once nothing plays (docs/design/design-v1-sound-layout.md 5.1).
+   * Focus put on it would be lost a render later.
+   */
+  anchorGoes?(): boolean;
 }): PopoverHandle {
   const room = useScoped(popoverSlot);
   const key = useId();
@@ -148,7 +156,7 @@ export function usePopover(options: {
       close(reason) {
         if (room.current()?.key !== key && reason !== "replaced") return;
         // Focus moves before the popover goes, so it never falls to the page on the way.
-        if (focusOnClose(reason, focusAt(document.activeElement, box.current, anchor.current)) === "anchor") focusAnchor(leaving.current ? null : anchor.current, latest.current.fallbackFocus);
+        if (focusOnClose(reason, focusAt(document.activeElement, box.current, anchor.current)) === "anchor") focusAnchor(anchorStays(leaving.current, latest.current.anchorGoes) ? anchor.current : null, latest.current.fallbackFocus);
         room.release(key);
         latest.current.onClose?.(reason);
       },
@@ -691,6 +699,11 @@ function activeElement(): HTMLElement | null {
 
 function drawn(el: HTMLElement): boolean {
   return el.isConnected && el.getClientRects().length > 0;
+}
+
+/** Whether a close may hand focus back to the anchor: not as its consumer unmounts, nor when the consumer says the close takes the anchor away (usePopover `anchorGoes`). */
+export function anchorStays(leaving: boolean, anchorGoes: (() => boolean) | undefined): boolean {
+  return !leaving && anchorGoes?.() !== true;
 }
 
 /** The anchor while it is drawn, else what the consumer names. */
