@@ -311,8 +311,11 @@ export function deviceDetail(fullscreen: boolean): string {
   return `Interface size, theme, ${fullscreen ? "full screen, " : ""}low power, map detail, weather, sounds, roll animation, shortcuts and sheet\u00a0handle.`;
 }
 
-/** What a group of This device takes from its page: its fold, its summary and how it shows. */
-type GroupFold = Omit<Parameters<typeof Group>[0], "label" | "children">;
+/**
+ * What a group of This device takes from its page: its fold, its summary and how it shows.
+ * Only a folding group's props: an Omit over both kinds of Group would merge them into one that neither accepts.
+ */
+type GroupFold = Omit<Extract<Parameters<typeof Group>[0], { onOpen?: undefined }>, "label" | "children">;
 
 /** The Theme section's help, which is also the row's description. */
 export const THEME_HELP = "Auto follows this device's own light or dark setting. The map, the fog, the dice tray and the table display stay dark in Light too.";
