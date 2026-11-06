@@ -6,6 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import sharp from "sharp";
+import { framesFor, silentFrames } from "#shared/audio/mp3Testutil.ts";
 import { barControl, ConsoleWatch, dragWorld, openSideTab, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 import { chooseStarterWork, starterWork } from "./starterPick.ts";
 import { A5, LETTER, LETTER_WIDE, pdfOf } from "./pdfFixture.ts";
@@ -24,10 +25,10 @@ import { A5, LETTER, LETTER_WIDE, pdfOf } from "./pdfFixture.ts";
  * Every dialog is the one shell of docs/design/design-v1-visual.md 2.3, and the
  * run checks its structure in each (checkShell): the request a roll and
  * image dialogs, the editors, the scene sheet, the monster filters, the
- * stamp picker and stamp sheet, the shortcut sheet, a companion's stat
- * block picker and its numbers step, the editor for a character's stat
- * block, a player's handout of one image and of three pages, and the
- * X-card, whose card has no title row. Every button and tab in each is at least a 44 px target in the
+ * stamp picker and stamp sheet, the shortcut sheet, the Music window, a
+ * companion's stat block picker and its numbers step, the editor for a
+ * character's stat block, a player's handout of one image and of three
+ * pages, and the X-card, whose card has no title row. Every button and tab in each is at least a 44 px target in the
  * dialog's own pixels.
  *
  * It runs with `pnpm test:e2e` on its own port: E2E_PORT plus five. The
@@ -77,6 +78,9 @@ const run = {
   uvttFile: path.join(work, "Small_hall.dd2vtt"),
   /** When the X-card was last tapped. Taps within 10 s of a card merge into it (server/http/xcard.ts). */
   xcardAt: 0,
+  /** Three music tracks and their playlist, which the Music window's step plays. */
+  tracks: [] as string[],
+  playlist: randomUUID(),
 };
 
 function actor() {
@@ -116,6 +120,11 @@ function narrow(size: (typeof SIZES)[number], scale: number): boolean {
   return size.width / scale < 900;
 }
 
+/** Whether the Music window stands in two columns at this size: 912 of the room's own pixels across or more (features/sound/music/MusicWindow.tsx). */
+function musicColumns(size: (typeof SIZES)[number], scale: number): boolean {
+  return size.width / scale >= 912;
+}
+
 /** Opens a panel: the side panel's tab on a computer, or the Panels sheet's button on a phone. */
 async function openPanel(name: string, phone: boolean): Promise<void> {
   if (!phone) {
@@ -153,17 +162,18 @@ function assertInside(box: Box | null, what: string, on: Page = page): void {
   assert.ok(inside, `${what} lies outside the ${vp.width} x ${vp.height} window: ${JSON.stringify(box)}`);
 }
 
-/** No part of the dialog's body is wider than the body itself, so nothing hides past its right edge. */
-async function assertNoSideScroll(dialog: Locator, label: string): Promise<void> {
-  const widths = await dialog.locator("section").first().evaluate((card) => {
+/** No part of the dialog's body is wider than the body itself, so nothing hides past its right edge. With `columns`, each column is a body. */
+async function assertNoSideScroll(dialog: Locator, label: string, columns = false): Promise<void> {
+  const widths = await dialog.locator("section").first().evaluate((card, columns) => {
     // The server's type settings carry no DOM, as in harness.ts.
     const styleOf = (globalThis as unknown as { getComputedStyle(el: unknown): { overflowY: string } }).getComputedStyle;
-    return [...card.children].flatMap((child) => {
+    const scrollers = columns ? [...card.querySelectorAll("[data-music-column]")] : [...card.children];
+    return scrollers.flatMap((child) => {
       const el = child as unknown as { scrollWidth: number; clientWidth: number };
       const overflow = styleOf(child).overflowY;
       return overflow === "auto" || overflow === "scroll" ? [{ scroll: el.scrollWidth, client: el.clientWidth }] : [];
     });
-  });
+  }, columns);
   assert.ok(widths.length > 0, `${label}: the dialog has no scrolling body`);
   for (const w of widths) assert.ok(w.scroll <= w.client, `${label}: the body scrolls sideways, ${w.scroll} px of content in ${w.client}`);
 }
@@ -175,9 +185,11 @@ async function assertNoSideScroll(dialog: Locator, label: string): Promise<void>
  * footer when there is one, in that order; the header holds the title and
  * a close button whose name starts with "Close". The X-card is the one
  * dialog with no title row (`titleless`), since its card is its own
- * message: it has a body alone.
+ * message: it has a body alone. The wide Music window's body holds two
+ * columns that scroll on their own (`columns`), so Up next stays beside
+ * a long Library: there the body does not scroll and each column does.
  */
-async function checkShell(dialog: Locator, label: string, titleless: boolean): Promise<void> {
+async function checkShell(dialog: Locator, label: string, titleless: boolean, columns = false): Promise<void> {
   const shell = await dialog.evaluate((el) => {
     type El = { tagName: string; parentElement: El | null; children: ArrayLike<El>; querySelector(s: string): El | null; querySelectorAll(s: string): ArrayLike<El>; getAttribute(n: string): string | null };
     const styleOf = (globalThis as unknown as { getComputedStyle(el: unknown): { overflowY: string } }).getComputedStyle;
@@ -191,6 +203,7 @@ async function checkShell(dialog: Locator, label: string, titleless: boolean): P
       scrolls: children.map((c) => ["auto", "scroll"].includes(styleOf(c).overflowY)),
       title: header?.querySelector("h2, h3") ? true : false,
       closes: header ? Array.from(header.querySelectorAll("button")).map((b) => b.getAttribute("aria-label") ?? "") : [],
+      columns: card ? Array.from(card.querySelectorAll("[data-music-column]")).map((c) => ["auto", "scroll"].includes(styleOf(c).overflowY)) : [],
     };
   });
   assert.ok(shell.cardInDialog, `${label}: the card is not the dialog's own first section`);
@@ -198,9 +211,10 @@ async function checkShell(dialog: Locator, label: string, titleless: boolean): P
   assert.deepEqual(shell.tags, expected, `${label}: the card's parts`);
   assert.deepEqual(
     shell.scrolls.map((s, i) => (s ? shell.tags[i] : null)).filter(Boolean),
-    ["div"],
-    `${label}: the body, and nothing else in the card, scrolls`,
+    columns ? [] : ["div"],
+    columns ? `${label}: nothing in the card scrolls but its columns` : `${label}: the body, and nothing else in the card, scrolls`,
   );
+  if (columns) assert.deepEqual(shell.columns, [true, true], `${label}: two columns, each scrolling on its own`);
   if (titleless) return;
   assert.ok(shell.title, `${label}: the header has no title`);
   assert.match(shell.closes.at(-1) ?? "", /^Close/, `${label}: the header ends in a close button named "Close …"`);
@@ -241,16 +255,17 @@ async function checkTargets(dialog: Locator, label: string): Promise<void> {
  * a footer must be there as the dialog opens. One in the dialog's body,
  * which scrolls, must be reachable by scrolling it.
  */
-async function checkDialog(dialog: Locator, label: string, main: { name: string | RegExp; in: "footer" | "body" } | null, opts: { titleless?: boolean } = {}): Promise<void> {
+async function checkDialog(dialog: Locator, label: string, main: { name: string | RegExp; in: "footer" | "body" } | null, opts: { titleless?: boolean; columns?: boolean } = {}): Promise<void> {
   const titleless = opts.titleless === true;
+  const columns = opts.columns === true;
   const owner = dialog.page();
   await dialog.waitFor();
   // The card settles once the dialog's zoom and its content are laid out.
   await owner.waitForTimeout(250);
   assertInside(await dialog.locator("section").first().boundingBox(), `${label}: the card`, owner);
   if (!titleless) assertInside(await dialog.getByRole("button", { name: /^Close/ }).first().boundingBox(), `${label}: Close`, owner);
-  await checkShell(dialog, label, titleless);
-  await assertNoSideScroll(dialog, label);
+  await checkShell(dialog, label, titleless, columns);
+  await assertNoSideScroll(dialog, label, columns);
   await checkTargets(dialog, label);
   if (!main) return;
   const button = (main.in === "footer" ? dialog.locator("footer") : dialog).getByRole("button", { name: main.name, exact: true }).first();
@@ -333,6 +348,8 @@ async function boxSelect(from: { x: number; y: number }, to: { x: number; y: num
 
 describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000 }, () => {
   before(async () => {
+    // Room sound on, so the Sound group offers Open music (startServer passes this process's environment on).
+    process.env.ROOM_SOUND = "1";
     server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
     browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1" });
     context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
@@ -427,6 +444,17 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
     const stamp = { id: run.stamp.id, art: { key: "barrel" }, x: run.stamp.x + 0.5, y: run.stamp.y + 0.5, w: 1, h: 1, rotation: 0, z: 0, visibility: "all" };
     await ops.send({ t: "build.stamps", sceneId: run.sceneId, put: [stamp] });
     await waitFor("the monsters, the companion and the stamp in the DM's view", () => (socket.state?.tokens[run.goblin.id] && socket.state?.tokens[run.orc.id] && socket.state?.tokens[run.pip.id] && socket.state?.stamps[run.stamp.id]) || null);
+
+    // Three music tracks of silence on one file, and their playlist.
+    const track = await context.request.put(`${server.origin}/api/rooms/${run.roomId}/assets?kind=sound`, { headers: { Origin: server.origin, "content-type": "audio/mpeg" }, data: Buffer.from(silentFrames(framesFor(31_000), { kbps: 64 })) });
+    assert.ok(track.ok(), `uploading a track answered ${track.status()}`);
+    const assetId = ((await track.json()) as { id: string }).id;
+    for (const name of ["The Prancing Pony", "Road to Phandalin", "A track with a name long enough to wrap at a phone's width"]) {
+      const id = randomUUID();
+      await ops.send({ t: "sound.create", id, assetId, name, use: "music", ms: 31_000 });
+      run.tracks.push(id);
+    }
+    await ops.send({ t: "playlist.create", id: run.playlist, name: "Tavern night", sounds: run.tracks, repeat: "all", fade: 5 });
   });
 
   for (const size of SIZES.filter((s) => process.env.SIZE_ONLY === undefined || s.name === process.env.SIZE_ONLY)) {
@@ -598,6 +626,24 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
         await checkDialog(keys, `${label}, Shortcuts`, null);
         await shoot("shortcuts");
         await closeDialog(keys);
+
+        // The Music window, playing (docs/design/design-v1-music-player.md 4.1): two columns on a computer, the tall sheet with two tabs on a phone.
+        await ops.send({ t: "music.play", run: randomUUID(), playlistId: run.playlist, order: run.tracks, index: 0, repeat: "all", fade: 5 });
+        await openPanel("Ambiance", phone);
+        await page.getByRole("button", { name: "Open music", exact: true }).click();
+        const music = page.getByRole("dialog", { name: "Music", exact: true });
+        await music.getByRole("list", { name: "Up next" }).waitFor();
+        await checkDialog(music, `${label}, Music`, null, { columns: musicColumns(size, scale) });
+        await shoot("music");
+        if (!musicColumns(size, scale)) {
+          await music.getByRole("radio", { name: "Library", exact: true }).click();
+          await music.getByRole("searchbox", { name: "Search music" }).waitFor();
+          await checkDialog(music, `${label}, Music, Library`, null);
+          await shoot("music-library");
+        }
+        await closeDialog(music);
+        await ops.send({ t: "music.stop" });
+        await closeSheet(phone);
 
         // The stamp picker, then the selected stamp's tint and ⋯, pop-ups above its row on every screen.
         await pickTool(page, "Map builder");
