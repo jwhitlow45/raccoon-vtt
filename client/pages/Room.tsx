@@ -40,7 +40,7 @@ import { addsWords, useTooltip } from "../components/Tooltip.tsx";
 import { QuietLoadNotice } from "./QuietLoadNotice.tsx";
 import { ToastNote, toastPortals, toastRow, toastStacks, useToastStack } from "./ToastParts.tsx";
 import { dockedBarEdge, measureMapToasts, noticesBesideBar, noticesDock, phoneToastRoom, placeRoomToasts, settleToastHosts, lowerFloor, sheetToastsToDismiss, toastHostOf, toastLists, toastStartTop } from "./toastPlacement.ts";
-import { BlackoutChip } from "./BlackoutChip.tsx";
+import { BlackoutChip, ChipDialogs, DmChip, DmClockChip, useBlackoutShown, YouChip } from "./ChipMenus.tsx";
 import { Loading } from "../components/Loading.tsx";
 import { ScrollStrip } from "../components/ScrollStrip.tsx";
 import { Sheet, paneBodyPadding, type SheetMode } from "../components/Sheet.tsx";
@@ -138,7 +138,7 @@ import { OptionsFrameContext, type OptionsFrame } from "../features/measure/cont
 import type { Rect } from "../components/popoverPlace.ts";
 import { Badge, FindButton, FitButton, FullscreenButton, HistoryLoading, PauseScreen, Stacked, UndoButtons, useAccentVars, useEscape, useNoPageZoom, usePreloadAndReopen, useRoomTitle, ViewButton } from "./RoomChrome.tsx";
 import { DockHeaderActions, DockRow, FoldStatus, SAFE_PROBE_STYLE, useDockSummary, useLayoutHeight, useSafeAreas, type DockActions } from "./RoomDock.tsx";
-import { MAP_FOCUS_ATTRS, MAP_FOCUS_STYLE, MAP_GROUND, memberDotStyle, SCENE_GATE_STYLE, toolGround, toolOnBoard } from "./onBoard.ts";
+import { MAP_FOCUS_ATTRS, MAP_FOCUS_STYLE, MAP_GROUND, SCENE_GATE_STYLE, toolGround, toolOnBoard } from "./onBoard.ts";
 
 const { topBar: TOP_BAR, toolbar: TOOLBAR } = theme.layout;
 /** "Viewing as Pat" at its widest, in window pixels (features/dm/PlayerPreview.tsx). */
@@ -1449,7 +1449,8 @@ function TopBar(props: {
   const name = useRoomView((s) => s.view?.meta.name ?? "");
   const role = useRoomView((s) => s.you?.role);
   const connection = useRoomView((s) => s.connection);
-  const blackout = useRoomView((s) => s.view?.meta.view.blackout === true);
+  // Players see black stays while a reveal's lift is out, so its menu can say how the reveal went (designs/qol/chips.md 4.1).
+  const blackout = useBlackoutShown();
   // The alerts it holds may open over the screen (FightAlerts), and then the bar rises over the notices with them.
   const alertsOverlay = useStore(useScoped(barDockSlot), (s) => s.alertsOverlay);
   const activeEntryId = useRoomView((s) => s.view?.encounter?.activeEntryId ?? null);
@@ -1457,6 +1458,15 @@ function TopBar(props: {
   const notice = useYourTurnNotice();
   // While the View menu's popover is open, the bar holding it stands over the notices with it (docs/design/design-v1-tool-options.md 7.6).
   const [viewOpen, setViewOpen] = useState(false);
+  // The same for the chips' menus and the clock's popover, each by its own key, so one closing as another opens never lowers the bar.
+  const [chipsOpen, setChipsOpen] = useState<Readonly<Record<string, boolean>>>({});
+  const raiseFor = useMemo(() => {
+    const raise = (key: string) => (open: boolean) => setChipsOpen((now) => (now[key] === open ? now : { ...now, [key]: open }));
+    return { dm: raise("dm"), blackout: raise("blackout"), you: raise("you"), clock: raise("clock") };
+  }, []);
+  const chipOpen = Object.values(chipsOpen).some(Boolean);
+  // Focus goes here when Players see black leaves with the blackout while its menu was open (chips.md 4.1).
+  const dmChipRef = useRef<HTMLButtonElement | null>(null);
   const rowRef = useRef<HTMLDivElement>(null);
   const [strip, setStrip] = useState<HTMLDivElement | null>(null);
   const recordOverflow = useRecordOverflow();
@@ -1535,7 +1545,7 @@ function TopBar(props: {
         top: 0,
         left: 0,
         right: 0,
-        zIndex: alertsOverlay ? theme.z.alertsOverlay : viewOpen ? theme.z.popover : theme.z.bars,
+        zIndex: alertsOverlay ? theme.z.alertsOverlay : viewOpen || chipOpen ? theme.z.popover : theme.z.bars,
         padding: `${theme.safe.top} calc(${theme.safe.mapRight} + ${theme.space(3)}px) 0 calc(${theme.safe.left} + ${theme.space(3)}px)`,
         background: theme.color.overlay,
         borderBottom: `${theme.line.border}px solid ${theme.color.border}`,
@@ -1573,10 +1583,15 @@ function TopBar(props: {
         >
           {name}
         </h1>
-        {role && !blackoutShort ? <YouChip dm={role === "dm"} dot={role === "dm" ? dmDot : props.chipDot} /> : null}
-        {role === "dm" && blackout ? <BlackoutChip compact={blackoutShort} /> : null}
+        {/* The chips open menus (designs/qol/chips.md C1, C2, C7). In its short form the blackout's crossed eye is the DM chip, whose menu leads with the blackout's items. */}
+        {role === "dm" ? (
+          <DmChip dot={dmDot} eye={blackoutShort} timeGaveWay={clockText !== null && !chip} chipRef={dmChipRef} onOpen={raiseFor.dm} />
+        ) : role === "player" ? (
+          <YouChip dot={props.chipDot} onOpen={raiseFor.you} />
+        ) : null}
+        {role === "dm" && blackout && !blackoutShort ? <BlackoutChip fallbackFocus={() => dmChipRef.current} onOpen={raiseFor.blackout} /> : null}
         <div style={{ flex: 1 }} />
-        {chip ? <ClockChip onOpen={props.openTime} /> : null}
+        {chip ? role === "dm" ? <DmClockChip onOpenTime={props.openTime} onOpen={raiseFor.clock} /> : <ClockChip onOpen={props.openTime} /> : null}
         {/* Once Isometric is offered, View or Fit always follows them on a scene, so they keep their whole width. */}
         {props.undo ? <UndoButtons tuck={!(isoOffered && props.canFit)} /> : null}
         {phaseMenu ? <PhaseMenu /> : null}
@@ -1588,100 +1603,8 @@ function TopBar(props: {
       </div>
       {props.placement === "band" ? <InitiativeStrip placement="band" notice={notice} /> : null}
       <FightWatch />
+      {role === "dm" || role === "player" ? <ChipDialogs openTime={props.openTime} /> : null}
     </header>
-  );
-}
-
-/**
- * A chip in the top bar (docs/design/design-v1-visual.md 3.2): a pill 28 px tall
- * at 13 px weight 700 with a 1 px outline. `shrink` lets a long label give
- * way to the bar's buttons, cut short with an ellipsis, down to the chip's
- * first child.
- */
-function Chip(props: { outline: string; color?: string; shrink?: boolean; title?: string; children: ReactNode }) {
-  return (
-    <span
-      title={props.title}
-      style={{
-        flex: props.shrink ? "0 1 auto" : "none",
-        display: "flex",
-        alignItems: "center",
-        gap: theme.space(1.5),
-        minWidth: props.shrink ? 32 : undefined,
-        boxSizing: "border-box",
-        height: CHIP_PX,
-        padding: `0 ${theme.space(2.5)}px`,
-        borderRadius: theme.radius.pill,
-        border: `${theme.line.border}px solid ${props.outline}`,
-        color: props.color ?? theme.color.text,
-        fontSize: theme.font.small,
-        fontWeight: theme.weight.bold,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {props.children}
-    </span>
-  );
-}
-
-const CHIP_PX = 28;
-
-/** The member's color, as the dot in a chip. */
-function ChipDot(props: { color: string }) {
-  return <span aria-hidden style={memberDotStyle(props.color, 8)} />;
-}
-
-/**
- * Who this device plays as (features section 13), so a phone passed around
- * the table shows whose it is. One chip shape for the DM and a player: a
- * dot in the member's color and an outline in the accent. The DM's says
- * "DM", the player's their name, in the theme's text color, since some
- * member colors, such as the purple, are too dark to read as small text on
- * the bar. `dot` leaves only the dot, named in its title and label, where
- * the bar is too short for the name.
- */
-function YouChip(props: { dm: boolean; dot: boolean }) {
-  const member = useRoomView((s) => (s.you ? s.view?.members[s.you.memberId] : undefined));
-  if (props.dm && !props.dot) {
-    return (
-      <Chip outline={theme.color.accent}>
-        <ChipDot color={member?.color ?? theme.color.accent} />
-        DM
-      </Chip>
-    );
-  }
-  if (!member && !props.dm) return null;
-  if (props.dot) {
-    const says = props.dm ? "You are the DM" : `You are ${member?.name ?? ""}`;
-    return (
-      <span
-        role="img"
-        aria-label={says}
-        title={says}
-        style={{
-          flex: "none",
-          display: "grid",
-          placeItems: "center",
-          boxSizing: "border-box",
-          width: CHIP_PX,
-          height: CHIP_PX,
-          borderRadius: theme.radius.round,
-          border: `${theme.line.border}px solid ${theme.color.accent}`,
-        }}
-      >
-        <ChipDot color={member?.color ?? theme.color.accent} />
-      </span>
-    );
-  }
-  if (!member) return null;
-  return (
-    <Chip outline={theme.color.accent} shrink title={`You are ${member.name}`}>
-      <ChipDot color={member.color} />
-      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        <span style={VISUALLY_HIDDEN}>You are </span>
-        {member.name}
-      </span>
-    </Chip>
   );
 }
 
