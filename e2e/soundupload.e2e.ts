@@ -9,7 +9,7 @@ import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { withTagFrame } from "../shared/audio/mp3Testutil.ts";
 import { concat, id3v2, mp3Of, toneSamples } from "../client/features/sound/upload/sounds.testutil.ts";
 import { committed, longMp3At48, toneWav, wavOfChannels } from "./fixtures/sounds.ts";
-import { ConsoleWatch, OpSocket, openSideTab, ROOT, Shots, sleep, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, OpSocket, openSideTab, ROOT, Shots, sideTabName, sleep, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
  * Adding sounds (docs/design/design-v1-music.md 4.2, 12): the DM's browser
@@ -22,7 +22,7 @@ import { ConsoleWatch, OpSocket, openSideTab, ROOT, Shots, sleep, SocketWatch, s
  * converted, the pieces' pre-roll against a whole decode, a piece that
  * fails falling back, the length caps exactly at 30 s and 15 minutes, and
  * the time a 10-minute WAV takes. su-7 and su-8 run the production build
- * with the server's ROOM_SOUND switch on: Ambiance's Sound's Add buttons,
+ * with the server's ROOM_SOUND switch on: the Sound panel's Add buttons,
  * their rows, a refusal, Cancel, and what the room keeps.
  *
  * The small fixtures are e2e/fixtures/sound-*, made by e2e/fixtures/sounds.ts
@@ -349,7 +349,7 @@ describe("adding sounds", { concurrency: false }, () => {
 });
 
 /*
- * Ambiance's Sound's Add buttons on the production build, with the server's
+ * The Sound panel's Add buttons on the production build, with the server's
  * switch on. They need the whole sound stack: the panel, the server's
  * `sound` kind and `sound.create`.
  */
@@ -407,8 +407,8 @@ describe("the Add buttons", { concurrency: false }, () => {
     ops = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
     await waitFor("the DM's snapshot", () => dmSocket.state);
 
-    // Ambiance's Sound group, open from the start (docs/design/design-v1-panel-groups.md 4.1).
-    await openSideTab(dm, "Ambiance");
+    // The Sound panel opens on Now playing, where Effects stands (docs/design/design-v1-sound-layout.md 4.2).
+    await openSideTab(dm, "Sound");
     const effects = adder("effect");
     await effects.getByRole("button", { name: "Add effects…" }).waitFor();
     if (OWNER_SHOTS) await shotFor(dm, "before-add-effects");
@@ -444,8 +444,8 @@ describe("the Add buttons", { concurrency: false }, () => {
   });
 
   test("su-8. Cancel stops a long file, which never reaches the room", async () => {
-    // Add music… is the Music window's, under Library's tracks (docs/design/design-v1-music-player.md 4.4).
-    await dm.getByRole("button", { name: "Open music", exact: true }).click();
+    // Add music… is under Library's tracks, Sound's second view (docs/design/design-v1-sound-layout.md 4.4).
+    await dm.getByRole("tabpanel", { name: sideTabName("Sound") }).getByRole("radiogroup", { name: "Sound", exact: true }).getByRole("radio", { name: "Library", exact: true }).click();
     const music = adder("music");
     const before = Object.keys((dmSocket.state as unknown as { sounds?: Record<string, unknown> }).sounds ?? {}).length;
     await music.locator('input[type="file"]').setInputFiles([written("Long tavern.wav", toneWav(600))]);
@@ -455,7 +455,6 @@ describe("the Add buttons", { concurrency: false }, () => {
     await music.getByText(/Long tavern/).waitFor({ state: "detached" });
     await sleep(1000);
     assert.equal(Object.keys((dmSocket.state as unknown as { sounds?: Record<string, unknown> }).sounds ?? {}).length, before);
-    await dm.keyboard.press("Escape");
   });
 });
 
