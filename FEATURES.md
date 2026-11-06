@@ -818,6 +818,14 @@ Where the action bar opens as a window: on a screen 600 px or wider, or a phone 
 | ContextMenu, Shift+F10 | Open the roll's one-roll options, the first choice focused. Enter and Space still roll as before | everyone, on a focused Roll or Auto Initiative |
 | Up, Down, Home, End | Move through the choices. Enter or Space rolls once that way, Escape closes them back on the roll button, and Tab closes them and moves on | everyone, in roll options |
 
+### Music
+
+| Key | Does | Who |
+| --- | --- | --- |
+| Up, Down | Move the track one place | DM, on a track's handle in Up next or a playlist |
+| Home, End | Move the track to the first or the last place | DM, on a track's handle in Up next or a playlist |
+| Escape | Put the track back | DM, while dragging a track |
+
 ### Dice
 
 | Key | Does | Who |
