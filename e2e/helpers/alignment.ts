@@ -94,7 +94,9 @@ import { PALETTES, theme } from "../../client/lib/theme.ts";
  * - An edge is where two rows or more start. A row starts where the
  *   words it sets at its start start, painted or not, so a chosen
  *   option's fill, which stands its padding outside words that line up
- *   with its unchosen kin, places nothing. A row that draws a box around
+ *   with its unchosen kin, places nothing, whether the row draws it or
+ *   it is drawn inside the row around the chosen control (a checked,
+ *   selected, pressed or current one). A row that draws a box around
  *   words it centers (a stacked foot's full-width button) starts at its
  *   box. A lone painted notice may start at its words, or at its box
  *   with its fill on the column's edge, its words then set in by its
@@ -944,10 +946,12 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
   if (!doc) return [];
   const win = doc.defaultView;
   const CONTROL =
-    'button, a[href], [role="button"], [role="switch"], [role="radio"], [role="checkbox"], [role="tab"], [role="menuitem"], [role="menuitemradio"], [role="option"], [role="status"], [role="alert"], li, label, summary, input, select, textarea, [data-alert], [data-toast], [role="group"], [role="radiogroup"]';
+    'button, a[href], [role="button"], [role="switch"], [role="radio"], [role="checkbox"], [role="tab"], [role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"], [role="status"], [role="alert"], li, label, summary, input, select, textarea, [data-alert], [data-toast], [role="group"], [role="radiogroup"]';
   // What takes a tap is one box to the eye, painted or not. A live region, a list item or a group with no box of its own is looked into.
   const INTERACTIVE =
-    'button, a[href], [role="button"], [role="switch"], [role="radio"], [role="checkbox"], [role="tab"], [role="menuitem"], [role="menuitemradio"], [role="option"], summary, input, select, textarea';
+    'button, a[href], [role="button"], [role="switch"], [role="radio"], [role="checkbox"], [role="tab"], [role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"], summary, input, select, textarea';
+  // An option marked as the chosen one of its set: checked, selected, pressed, or the current one, as the scenes list marks the scene on screen (aria-current, any value but "false").
+  const CHOSEN = '[aria-checked="true"], [aria-selected="true"], [aria-pressed="true"], [aria-current]:not([aria-current="false"])';
   const CONTAINER_ROLES = ["group", "radiogroup", "dialog", "toolbar", "tabpanel", "region"];
   const FIELD = ["input", "select", "textarea"];
   const PICTURE = ["svg", "img", "canvas"];
@@ -1114,6 +1118,14 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
   const say = (el: DomElement) => `${roleOf(el)} "${nameOf(el)}"`;
 
   const isPicture = (el: DomElement) => PICTURE.includes(tag(el)) || el.getAttribute("role") === "img";
+  /**
+   * A painted part hidden from screen readers that holds no words and no
+   * control: a picture drawn in CSS, as an icon's disk or the empty circle
+   * that stands for one (features/images/IconDisk.tsx, IconsTab.tsx). The
+   * row check holds boxes beside each other to one height, and a picture
+   * beside a button keeps its own, as an svg does.
+   */
+  const drawnPicture = (el: DomElement) => el.matches('[aria-hidden="true"], [aria-hidden=""]') && (el.textContent ?? "").trim() === "" && el.querySelector(INTERACTIVE) === null;
 
   /** Whether an element cuts what overflows it, as a scroller or an ellipsis does. */
   const clips = (el: DomElement) => {
@@ -1303,9 +1315,10 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
    * draws one. What is centered or set at the end, as a field row's field
    * at its right, is no start. `notice` marks a painted row that is
    * neither tapped nor picked, so neither an option nor a chosen one
-   * (`aria-checked`, `aria-selected` or `aria-pressed`, or a label holding
-   * a checked input), whose fill shows the choice and so never places it.
-   * `inset` marks a nested list
+   * (CHOSEN, or a label holding a checked input), whose fill shows the
+   * choice and so never places it. A chosen option's fill drawn inside the
+   * row, around the control it holds (chosenFill), places nothing either:
+   * the row starts at the words in it. `inset` marks a nested list
    * or group whose content starts at its own padding or margin, which the
    * column takes as a column of its own only when it sits an indent step
    * past the column's edge. Null for a disclosure, whose body starts under
@@ -1319,12 +1332,16 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
     const column = nested && box === null && parts.every((a, i) => i === 0 || a.t >= parts[i - 1]!.b - 1);
     // Grouped menu items keep the content edge they use ungrouped. Other controls, such as radio cards, meet the surrounding column at their outer boxes.
     const starts = parts.map((a) => {
+      if (a.element && chosenFill(a.element)) {
+        const inner = atomsOf(a.element).filter((x) => x.start);
+        if (inner.length) return Math.min(...inner.map((x) => x.l));
+      }
       const edge = column && a.element?.matches('[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]') ? edgeOf(a.element) : null;
       return edge?.words ?? edge?.box ?? a.l;
     });
     const words = starts.length ? round(Math.min(...starts)) : null;
     if (words === null && box === null) return null;
-    const chosen = row.matches('[aria-checked="true"], [aria-selected="true"], [aria-pressed="true"]') || (tag(row) === "label" && row.querySelector("input:checked") !== null);
+    const chosen = row.matches(CHOSEN) || (tag(row) === "label" && row.querySelector("input:checked") !== null);
     const notice = box !== null && !chosen && !row.matches(INTERACTIVE) && !row.matches("label, li, summary");
     let inset = false;
     if (words !== null && nested) {
@@ -1333,6 +1350,35 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
       inset = Math.abs(words - own) <= LIMIT && (b.pad.l > LIMIT || (parseFloat(style(row).getPropertyValue("margin-left")) || 0) > LIMIT);
     }
     return { words, box, notice, inset };
+  }
+
+  /**
+   * Whether a box is a chosen option's fill, whose border and padding stand
+   * outside what lines up with its unchosen kin: drawn around the control
+   * it holds, as the scenes list frames the scene on screen in the accent
+   * (features/scenes/SceneList.tsx), painted, no control itself, and its
+   * first control the chosen one. Or a mark drawn beside the control inside
+   * a chosen option, holding no words and no control, where the same part
+   * of an unchosen option draws nothing: a swatch's ring around its disk,
+   * which stands out of the disk as a focus ring does
+   * (components/Swatches.tsx).
+   */
+  function chosenFill(el: DomElement): boolean {
+    if (el.matches(INTERACTIVE) || FIELD.includes(tag(el)) || !paints(el)) return false;
+    const first = el.querySelector(INTERACTIVE);
+    if (first) return first.matches(CHOSEN);
+    if ((el.textContent ?? "").trim() !== "") return false;
+    const option = el.parentElement?.closest('label, [role="radio"], [role="option"]') ?? null;
+    if (!option || !(option.matches(CHOSEN) || (tag(option) === "label" && option.querySelector("input:checked") !== null))) return false;
+    // The same place in a sibling option, by child index from the option down.
+    const path: number[] = [];
+    for (let n: DomElement = el; n !== option && n.parentElement; n = n.parentElement) path.unshift(Array.from(n.parentElement.children).indexOf(n));
+    const kin = Array.from(option.parentElement?.children ?? []).filter((o) => o !== option && tag(o) === tag(option));
+    return kin.some((o) => {
+      let n: DomElement | undefined = o;
+      for (const i of path) n = n?.children[i];
+      return n !== undefined && !paints(n);
+    });
   }
 
   const spread = (xs: readonly number[]) => Math.max(...xs) - Math.min(...xs);
@@ -1356,6 +1402,11 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
       const inset = cs.position === "sticky" ? Math.max(0, -num(cs, "margin-bottom")) * zoomOf(el) : 0;
       b.inner.b -= inset;
       b.pad.b -= inset;
+      // A dialog's pinned foot, stuck to the bottom, takes the gap above it back the same way and gives it back as padding, so its fill covers what scrolls under it from that gap down (components/Dialog.tsx PINNED_FOOT). That much of its padding above is the gap's, which every part keeps from the one above it too. A part stuck to the top pulls itself up for its own reasons, and keeps its padding.
+      const foot = cs.position === "sticky" && cs.getPropertyValue("top") === "auto" && cs.getPropertyValue("bottom") !== "auto";
+      const insetTop = foot ? Math.min(Math.max(0, -num(cs, "margin-top")) * zoomOf(el), b.pad.t) : 0;
+      b.inner.t += insetTop;
+      b.pad.t -= insetTop;
       const frame = el.getAttribute("role") === "dialog" || t === "dialog";
 
       // 1. Centering, for controls and painted boxes up to a card's size.
@@ -1418,7 +1469,7 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
             const s = seen(ch);
             if (!s) continue;
             const self = style(ch).alignSelf;
-            items.push({ node: ch, ...s, box: rectOf(ch), boxed: FIELD.includes(tag(ch)) || paints(ch), mode: modeOf(self === "auto" ? cs.alignItems : self), what: say(ch) });
+            items.push({ node: ch, ...s, box: rectOf(ch), boxed: FIELD.includes(tag(ch)) || (paints(ch) && !drawnPicture(ch)), mode: modeOf(self === "auto" ? cs.alignItems : self), what: say(ch) });
           }
         }
         const lines = linesOf(items.map((it) => ({ ...it.box, it }))).map((ln) => ({ box: ln.box, items: ln.items.map((x) => x.it) }));
