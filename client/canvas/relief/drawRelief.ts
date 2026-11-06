@@ -336,8 +336,9 @@ function linesPath<P extends Path2D | CanvasRenderingContext2D>(path: P, lines: 
 /**
  * One tread of a stepping stair as it draws at a turn: its height, its
  * faces toward the viewer (its outer side and its riser) and away (an
- * opening's far sides), and its top. `sunk` is the part below 0 of its
- * riser where that riser climbs from below 0, cut from `near`.
+ * opening's far sides), and its top. On a tread at or above 0, `sunk` is
+ * the part below 0 of its riser where that riser climbs from below 0, cut
+ * from `near`.
  */
 type TreadShape = { z: number; near: readonly SideShape[]; far: readonly SideShape[]; sunk: readonly SideShape[]; top: readonly Pt[]; source: VBox; topPath: Path2D | null; nearOutline: Path2D | null; farOutline: Path2D | null; sunkOutline: Path2D | null };
 
@@ -373,10 +374,10 @@ function stepsShapeOf(p: CellPiece, turn: Turn): StepsShape {
     const mine = faces.filter((f) => f.tread === k && f.z1 > f.z0);
     // A face up to the tread's own height faces the viewer (pieces.ts faceSpan), and one up from it is an opening's far side.
     const toward = mine.filter((f) => f.z1 === z);
-    // Only a riser reaches below 0 from a tread above it: a side facing the viewer starts at 0 at the lowest. Its two parts draw on either side of the ground (drawSteps).
-    const crosses = (f: Face) => f.z0 < 0 && f.z1 > 0;
-    const near = toward.map((f) => sideShape(view, crosses(f) ? { ...f, z0: 0 } : f, paths));
-    const sunk = toward.filter(crosses).map((f) => sideShape(view, { ...f, z1: 0 }, paths));
+    // A tread draws inside the pit's openings below 0 and outside them from 0 up (drawSteps), and so must each part of its faces. A tread below 0 keeps its faces whole, since they end at its height. On a tread at or above 0 only a riser reaches below 0 (a side facing the viewer starts at 0 at the lowest), so its part there is cut off as `sunk`, all of it on a tread at exactly 0.
+    const sunkTread = z < 0;
+    const near = sunkTread ? toward.map((f) => sideShape(view, f, paths)) : toward.filter((f) => f.z1 > 0).map((f) => sideShape(view, f.z0 < 0 ? { ...f, z0: 0 } : f, paths));
+    const sunk = sunkTread ? [] : toward.filter((f) => f.z0 < 0).map((f) => sideShape(view, { ...f, z1: 0 }, paths));
     const far = mine.filter((f) => f.z1 !== z).map((f) => sideShape(view, f, paths));
     const poly = treadPolygon(s, p.x, p.y, k);
     const top = lifted(turn, poly, z);

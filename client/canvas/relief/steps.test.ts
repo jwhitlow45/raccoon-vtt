@@ -13,7 +13,7 @@ import { stairRuns, type StairStep } from "../../lib/stairRuns.ts";
 import { drawnHeights, isometric, pickWalk, standSurface, toView, type DrawnHeights, type DrawnSource, type Turn } from "../../lib/view.ts";
 import { groupWalls, ReliefIndex } from "./buckets.ts";
 import { drawRun, tonedBoxes, type DrawContext } from "./drawRelief.ts";
-import { boundsOf, cellPieces, facesOf, risersOf, type CellPiece, type PieceSource, type VBox } from "./pieces.ts";
+import { boundsOf, cellPieces, facesOf, risersOf, type CellPiece, type Face, type PieceSource, type VBox } from "./pieces.ts";
 import { standeeShape } from "./standee.ts";
 
 /*
@@ -342,63 +342,138 @@ function sameCorners(a: readonly Pt[], b: readonly Pt[]): boolean {
   return key(a) === key(b);
 }
 
-describe("a stair from a pit up to a dais keeps its treads above 0 (ISOBUILD-ASTRA-01)", () => {
-  // An east-facing stair at (5, 5), stored at 0, between a 5 ft pit at (4, 5) and a 5 ft dais at (6, 5): one span from -5 to +5 ft.
+/**
+ * A run of stairs climbing east from a pit at (4, 5) to a dais past its top
+ * stair, as the builder makes them: the pit's and the dais's heights and each
+ * stair's own, in feet, from (5, 5) on, and the spans the run gives them.
+ */
+type PitRun = { name: string; pit: number; dais: number; stairs: readonly number[]; spans: readonly (readonly [number, number])[] };
+
+const PIT_RUNS: readonly PitRun[] = [
+  { name: "-5 to +5 ft", pit: -5, dais: 5, stairs: [0], spans: [[-1, 1]] },
+  // Spans move in fifths of a cell, so a tread can stand at exactly 0 (ISO-OPUS-4): the top tread, the second, and the first stair's top tread.
+  { name: "-20 to +5 ft", pit: -20, dais: 5, stairs: [0], spans: [[-4, 1]] },
+  { name: "-5 to +20 ft", pit: -5, dais: 20, stairs: [0], spans: [[-1, 4]] },
+  { name: "-10 to +15 ft over two stairs", pit: -10, dais: 15, stairs: [0, 5], spans: [[-2, 0.5], [0.5, 3]] },
+];
+
+function pitRun(r: PitRun) {
   const state = built([
-    { t: "build.height", sceneId: "s1", cells: ["4,5"], height: -5 },
-    { t: "build.height", sceneId: "s1", cells: ["6,5"], height: 5 },
-    { t: "build.stairs", sceneId: "s1", cells: ["5,5"], up: "e" },
+    { t: "build.height", sceneId: "s1", cells: ["4,5"], height: r.pit },
+    { t: "build.height", sceneId: "s1", cells: [`${5 + r.stairs.length},5`], height: r.dais },
+    ...r.stairs.flatMap((h, i) => (h === 0 ? [] : [{ t: "build.height", sceneId: "s1", cells: [`${5 + i},5`], height: h }])),
+    { t: "build.stairs", sceneId: "s1", cells: r.stairs.map((_, i) => `${5 + i},5`), up: "e" },
   ] as Op[]);
   const d = drawnOf(state);
   const relief = index(state, d);
-  const stair = relief.cellAt(5, 5)!;
-  const camera = { x: 0, y: 0, scale: 1 };
-  const treadZ = (k: number) => -1 + (2 * k) / 5;
-  /** Tread k's top, as it draws at a turn. */
-  const topOf = (turn: Turn, k: number) => [5 + k / 5, 5 + (k + 1) / 5].flatMap((x) => [5, 6].map((y) => toView(isometric(turn), { x, y }, treadZ(k))));
+  const stairs = r.stairs.map((_, i) => {
+    const [lo, hi] = r.spans[i]!;
+    const x = 5 + i;
+    const treadZ = (k: number) => lo + ((hi - lo) * k) / 5;
+    /** Tread k's top, as it draws at a turn. */
+    const topOf = (turn: Turn, k: number) => [x + k / 5, x + (k + 1) / 5].flatMap((tx) => [5, 6].map((y) => toView(isometric(turn), { x: tx, y }, treadZ(k))));
+    return { x, lo, hi, piece: relief.cellAt(x, 5)!, treadZ, topOf };
+  });
+  return { d, relief, stairs };
+}
 
-  test("the stair spans the pit's floor to the dais and is an opening of the pit's region", () => {
-    assert.equal(stair.kind, "steps");
-    assert.deepEqual(stair.span, span("e", -1, 1));
-    assert.ok(stair.region && stair.region === relief.cellAt(4, 5)!.region);
+/** Whether a fill shows at a screen point: it covers the point and every clip in force lets it through. */
+const showsAt = (f: { polys: Pt[][]; clips: Pt[][][] }, q: Pt) => f.polys.some((p) => insidePoly(p, q)) && f.clips.every((c) => c.some((p) => insidePoly(p, q)));
+
+describe("a stair from a pit up to a dais keeps its treads above 0 (ISOBUILD-ASTRA-01, ISO-OPUS-4)", () => {
+  const camera = { x: 0, y: 0, scale: 1 };
+
+  test("each stair spans its share of the climb, and one that starts below 0 is an opening of the pit's region", () => {
+    for (const r of PIT_RUNS) {
+      const { relief, stairs } = pitRun(r);
+      for (const s of stairs) {
+        assert.equal(s.piece.kind, "steps", r.name);
+        assert.deepEqual(s.piece.span, span("e", s.lo, s.hi), r.name);
+        if (s.lo < 0) assert.ok(s.piece.region && s.piece.region === relief.cellAt(4, 5)!.region, r.name);
+      }
+    }
   });
 
-  test("at every turn, wherever pickWalk hits a tread above 0, that tread's top is what the stair shows there", () => {
-    let hits = 0;
-    for (const turn of TURNS) {
-      const { g, fills } = clippingCanvas();
-      drawRun(g, [stair], dcAt(turn));
-      for (const k of [3, 4]) {
-        for (const [u, v] of [[0.5, 0.5], [0.5, 0.2], [0.5, 0.8], [0.2, 0.5], [0.8, 0.5]] as const) {
-          const at = { x: 5 + (k + u) / 5, y: 5 + v };
-          const screen = viewToScreen(camera, toView(isometric(turn), at, treadZ(k)));
-          const hit = pickWalk({ camera, view: isometric(turn), grid: { shape: "squares" }, heights: d.heights }, screen);
-          if (hit.cell.col !== 5 || hit.cell.row !== 5 || Math.abs(hit.z - treadZ(k)) > 1e-9) continue;
-          hits++;
-          const shown = fills.findLast((f) => f.polys.some((p) => insidePoly(p, screen)) && f.clips.every((c) => c.some((p) => insidePoly(p, screen))));
-          assert.ok(shown && shown.polys.length === 1 && sameCorners(shown.polys[0]!, topOf(turn, k)), `turn ${turn}, tread ${k} at ${JSON.stringify(at)}: the stair shows ${JSON.stringify(shown?.polys)}`);
+  test("at every turn, wherever pickWalk hits a tread at or above 0, that tread's top is what the stair shows there, and wherever it hits the ground beside, the stair shows nothing", () => {
+    for (const r of PIT_RUNS) {
+      const { d, stairs } = pitRun(r);
+      let hits = 0;
+      let ground = 0;
+      for (const turn of TURNS) {
+        const pick = (q: Pt) => pickWalk({ camera, view: isometric(turn), grid: { shape: "squares" }, heights: d.heights }, q);
+        for (const s of stairs) {
+          const { g, fills } = clippingCanvas();
+          drawRun(g, [s.piece], dcAt(turn));
+          for (let k = 0; k < 5; k++) {
+            if (s.treadZ(k) < 0) continue;
+            for (const [u, v] of [[0.5, 0.5], [0.5, 0.2], [0.5, 0.8], [0.2, 0.5], [0.8, 0.5]] as const) {
+              const at = { x: s.x + (k + u) / 5, y: 5 + v };
+              const screen = viewToScreen(camera, toView(isometric(turn), at, s.treadZ(k)));
+              const hit = pick(screen);
+              if (hit.cell.col !== s.x || hit.cell.row !== 5 || Math.abs(hit.z - s.treadZ(k)) > 1e-9) continue;
+              hits++;
+              const shown = fills.findLast((f) => showsAt(f, screen));
+              assert.ok(shown && shown.polys.length === 1 && sameCorners(shown.polys[0]!, s.topOf(turn, k)), `${r.name}, turn ${turn}, tread ${k} at ${JSON.stringify(at)}: the stair shows ${JSON.stringify(shown?.polys)}`);
+            }
+          }
+          // The ground at 0 round the run, where a part of a face below 0 drawn outside the pit's openings would show (D-261106-030).
+          for (let cy = 3; cy <= 7; cy++) {
+            for (let cx = 2; cx <= 8; cx++) {
+              if (cy === 5 && cx >= 4 && cx <= 5 + stairs.length) continue;
+              // Offset so no trace from a sample runs through a tread's or a cell's corner, where the pick and a fill may part by a float's hair.
+              for (let i = 0; i < 5; i++) {
+                for (let j = 0; j < 5; j++) {
+                  const u = 0.113 + 0.2 * i;
+                  const v = 0.157 + 0.2 * j;
+                  const screen = viewToScreen(camera, toView(isometric(turn), { x: cx + u, y: cy + v }, 0));
+                  const hit = pick(screen);
+                  if (hit.cell.col !== cx || hit.cell.row !== cy || Math.abs(hit.z) > 1e-9) continue;
+                  ground++;
+                  const shown = fills.find((f) => showsAt(f, screen));
+                  assert.ok(!shown, `${r.name}, turn ${turn}, stair at x ${s.x}: over the ground at ${(cx + u).toFixed(3)}, ${(cy + v).toFixed(3)} the stair shows ${JSON.stringify(shown?.polys)}`);
+                }
+              }
+            }
+          }
+        }
+      }
+      assert.ok(hits >= 10 * stairs.length, `${r.name}: the picks found the treads at or above 0 ${hits} times`);
+      assert.ok(ground >= 500, `${r.name}: the picks found the ground ${ground} times`);
+    }
+    // The reviewer's case among them: the top tread at turn 2, where the pick finds it at +3 ft.
+    const { d, stairs } = pitRun(PIT_RUNS[0]!);
+    const top = viewToScreen(camera, toView(isometric(2), { x: 5.9, y: 5.5 }, stairs[0]!.treadZ(4)));
+    const hit = pickWalk({ camera, view: isometric(2), grid: { shape: "squares" }, heights: d.heights }, top);
+    assert.deepEqual([hit.cell.col, hit.cell.row, Math.round(hit.z * 5)], [5, 5, 3]);
+  });
+
+  test("every face draws once in its parts either side of 0, below 0 inside the pit's openings and from 0 up outside them, and a tread below 0 fills its faces before its top", () => {
+    let parts = 0;
+    for (const r of PIT_RUNS) {
+      for (const s of pitRun(r).stairs) {
+        for (const turn of TURNS) {
+          const { g, fills } = clippingCanvas();
+          drawRun(g, [s.piece], dcAt(turn));
+          const view = isometric(turn);
+          const poly = (f: Face, z0: number, z1: number) => [toView(view, { x: f.ax, y: f.ay }, z1), toView(view, { x: f.bx, y: f.by }, z1), toView(view, { x: f.bx, y: f.by }, z0), toView(view, { x: f.ax, y: f.ay }, z0)];
+          const fillsOf = (q: Pt[]) => fills.flatMap((f, i) => (f.polys.some((p) => sameCorners(p, q)) ? [{ f, i }] : []));
+          for (const f of [...facesOf(s.piece, turn), ...risersOf(s.piece, turn)]) {
+            if (f.z1 <= f.z0) continue;
+            const where = `${r.name}, x ${s.x}, turn ${turn}, tread ${f.tread}, side ${f.side}, ${f.z0} to ${f.z1}`;
+            const below = f.z0 < 0 ? fillsOf(poly(f, f.z0, Math.min(f.z1, 0))) : [];
+            const above = f.z1 > 0 ? fillsOf(poly(f, Math.max(f.z0, 0), f.z1)) : [];
+            if (f.z0 < 0) assert.ok(below.length === 1 && below[0]!.f.clips.length === 1, `${where}: below 0 once, clipped, drawn ${below.length} times`);
+            if (f.z1 > 0) assert.ok(above.length === 1 && above[0]!.f.clips.length === 0, `${where}: from 0 up once, not clipped, drawn ${above.length} times`);
+            if (f.z0 < 0 && f.z1 > 0) assert.equal(fillsOf(poly(f, f.z0, f.z1)).length, 0, `${where}: never whole`);
+            parts += below.length + above.length;
+            // A tread below 0 keeps today's order, faces toward the viewer then its top, so its top's outline lies over theirs.
+            const k = f.tread!;
+            if (s.treadZ(k) < 0 && f.z1 === s.treadZ(k)) assert.ok(below[0]!.i < fillsOf(s.topOf(turn, k))[0]!.i, `${where}: before its top`);
+          }
         }
       }
     }
-    // The reviewer's case among them: the top tread at turn 2, where the pick finds it at +3 ft.
-    const top = viewToScreen(camera, toView(isometric(2), { x: 5.9, y: 5.5 }, treadZ(4)));
-    const hit = pickWalk({ camera, view: isometric(2), grid: { shape: "squares" }, heights: d.heights }, top);
-    assert.deepEqual([hit.cell.col, hit.cell.row, Math.round(hit.z * 5)], [5, 5, 3]);
-    assert.ok(hits >= 10, `the picks found the treads ${hits} times`);
-  });
-
-  test("the riser that crosses 0 draws its part below 0 inside the pit's openings and its part above 0 outside them", () => {
-    // East climbs away from the viewer at turns 2 and 3, so the risers face it there.
-    for (const turn of [2, 3] as Turn[]) {
-      const { g, fills } = clippingCanvas();
-      drawRun(g, [stair], dcAt(turn));
-      const face = (z0: number, z1: number) => [5, 6].flatMap((y) => [z0, z1].map((z) => toView(isometric(turn), { x: 5.6, y }, z)));
-      const below = fills.filter((f) => f.polys.some((p) => sameCorners(p, face(-0.2, 0))));
-      const above = fills.filter((f) => f.polys.some((p) => sameCorners(p, face(0, 0.2))));
-      assert.ok(below.length > 0 && below.every((f) => f.clips.length === 1), `turn ${turn}: below 0, clipped`);
-      assert.ok(above.length > 0 && above.every((f) => f.clips.length === 0), `turn ${turn}: above 0, not clipped`);
-      assert.ok(!fills.some((f) => f.polys.some((p) => sameCorners(p, face(-0.2, 0.2)))), `turn ${turn}: never whole`);
-    }
+    assert.ok(parts > 100, `${parts} parts checked`);
   });
 });
 
