@@ -247,6 +247,8 @@ export type SizesFile = "phones" | "wide";
  * stops showing everywhere is caught.
  */
 const SOME_SIZES: Record<string, Record<SizesFile, number>> = {
+  // The dungeon dialog at 1280 x 720, from the computer's size at 100% (docs/design/design-v1-polish-pass.md 3.4).
+  "dungeon-dialog-1280x720": { phones: 0, wide: 1 },
   "trap-start-from": { phones: 6, wide: 6 },
   "trap-more": { phones: 2, wide: 0 },
   "trap-pane-header-place": { phones: 0, wide: 6 },
@@ -756,6 +758,67 @@ async function shortcutSheetScreen(sweep: Sweep, page: Page): Promise<void> {
 }
 
 /** The DM's screens at one size. */
+/**
+ * Each of `root`'s buttons that shows words: its words, how many lines they
+ * lay out on, and its box. A label broken inside its button is a fault
+ * measureAlignment cannot see (docs/design/design-v1-polish-pass.md 3.5).
+ * Words with no box of their own to draw in, a screen reader's alone, are
+ * left out.
+ */
+async function buttonWordLines(root: Locator): Promise<{ words: string; lines: number; l: number; r: number; t: number }[]> {
+  return root.evaluate((el) => {
+    type Rect = { left: number; right: number; top: number; width: number; height: number };
+    type El = { getBoundingClientRect(): Rect; parentElement: El | null; textContent: string | null };
+    type Doc = { createRange(): { selectNodeContents(n: unknown): void; getClientRects(): ArrayLike<Rect> }; createTreeWalker(root: unknown, what: number): { nextNode(): El | null } };
+    const doc = (globalThis as unknown as { document: Doc }).document;
+    const out: { words: string; lines: number; l: number; r: number; t: number }[] = [];
+    for (const button of Array.from((el as unknown as { querySelectorAll(s: string): ArrayLike<El> }).querySelectorAll("button"))) {
+      const box = button.getBoundingClientRect();
+      if (box.width < 2 || box.height < 2) continue;
+      const tops: number[] = [];
+      const walker = doc.createTreeWalker(button, 4);
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        const host = n.parentElement?.getBoundingClientRect();
+        if (!(n.textContent ?? "").trim() || !host || host.width < 2 || host.height < 2) continue;
+        const range = doc.createRange();
+        range.selectNodeContents(n);
+        for (const r of Array.from(range.getClientRects())) if (r.width > 1 && r.height > 1) tops.push(r.top);
+      }
+      if (tops.length === 0) continue;
+      tops.sort((a, b) => a - b);
+      // A wrapped line starts a line's height lower. Words a few px apart, in another size or weight, share a line.
+      out.push({ words: (button.textContent ?? "").trim(), lines: tops.filter((t, i) => i === 0 || t > tops[i - 1]! + 4).length, l: box.left, r: box.right, t: box.top });
+    }
+    return out;
+  });
+}
+
+/**
+ * The play row's placement pair (docs/design/design-v1-polish-pass.md 3.5):
+ * Place freely then Snap to grid in one unit, every button's label on one
+ * line, and on the computer's 317 px bar the unit alone on its line, each
+ * button half of it. Lines naming what breaks a rule.
+ */
+async function placementPairLines(row: Locator, at: string, computer: boolean): Promise<string[]> {
+  const out: string[] = [];
+  const pair = row.locator("[data-placement-pair]");
+  if ((await pair.count()) !== 1) return [`${at}: the play row holds ${await pair.count()} placement units, not 1`];
+  const unit = await buttonWordLines(pair);
+  if (JSON.stringify(unit.map((b) => b.words)) !== JSON.stringify(["Place freely", "Snap to grid"])) out.push(`${at}: the placement unit holds ${JSON.stringify(unit.map((b) => b.words))}`);
+  const buttons = await buttonWordLines(row);
+  for (const b of buttons) if (b.lines !== 1) out.push(`${at}: "${b.words}" takes ${b.lines} lines`);
+  const [place, snap] = unit;
+  if (!computer || !place || !snap) return out;
+  const line = (await row.boundingBox())!;
+  const beside = buttons.filter((b) => !unit.some((u) => u.words === b.words) && Math.abs(b.t - place.t) <= 1);
+  if (Math.abs(place.t - snap.t) > 1 || beside.length > 0) out.push(`${at}: the pair is not alone on one line: ${JSON.stringify(buttons)}`);
+  if (Math.abs(place.l - line.x) > 1 || Math.abs(snap.r - (line.x + line.width)) > 1) out.push(`${at}: the pair spans ${place.l} to ${snap.r} of its line's ${line.x} to ${line.x + line.width}`);
+  // Each grows from its words' width, which differ by a few px, so each is held to within 2 px of half the line the gap leaves.
+  const half = (snap.r - place.l - (snap.l - place.r)) / 2;
+  if (Math.abs(place.r - place.l - half) > 2 || Math.abs(snap.r - snap.l - half) > 2) out.push(`${at}: the pair's halves are ${place.r - place.l} and ${snap.r - snap.l} px of ${half * 2}`);
+  return out;
+}
+
 async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   const headers: HeaderPlace[] = [];
   // Pat's walk left a springing waiting, whose card could cover a trap.
@@ -1003,7 +1066,7 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
       // The group's bar expanded from its strip on an upright phone.
       if ((await group.first().getAttribute("data-bar-state")) === "expanded") await sweep.measure(page, "group-expanded", group.first());
       await openTracker(page);
-      const several = page.getByText("Several at once", { exact: true }).locator("xpath=ancestor::section[1]");
+      const several = page.getByText("Group HP", { exact: true }).locator("xpath=ancestor::section[1]");
       await several.getByLabel("HP change", { exact: true }).fill("11 cold + 3 fire");
       await several.getByLabel("HP change", { exact: true }).blur();
       await sweep.measure(page, "tracker-group-hp", several);
@@ -1030,6 +1093,7 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
       if ((await place.count()) === 0 || (await snap.count()) === 0) await sweep.missing(page, "snapoff-play-row", "the bar of a placed mule has no Place freely or no Snap to grid");
       else {
         await sweep.measure(page, "snapoff-snap-row", placed.locator('[data-bar-row="play"]'));
+        await sweep.add(page, "snapoff-snap-row", await placementPairLines(placed.locator('[data-bar-row="play"]'), `${sweep.at} snapoff-snap-row`, size.name === "1440x900"));
         await place.click();
         await waitFor("Place freely pressed", async () => ((await place.getAttribute("aria-pressed")) === "true" ? true : null), 3_000);
         await sweep.measure(page, "snapoff-pressed-row", placed.locator('[data-bar-row="play"]'));
@@ -1173,7 +1237,29 @@ async function visionScreens(sweep: Sweep, page: Page, size: Size): Promise<void
  * (docs/design/design-v1-dungeon-generator.md 4.2 and 4.7), with Custom's
  * Across and Down showing. Nothing is made: the dialog is cancelled.
  */
-async function dungeonScreens(sweep: Sweep, page: Page): Promise<void> {
+/** Waits until `el`'s box holds still over two reads a frame apart, as a layout measured by a ResizeObserver settles after a resize. */
+async function settled(el: Locator): Promise<void> {
+  let last = "";
+  await waitFor("the layout to hold still", async () => {
+    const box = JSON.stringify(await el.boundingBox());
+    const still = box === last;
+    last = box;
+    if (!still) await twoFrames(el);
+    return still ? true : null;
+  }, 5_000);
+}
+
+/** Two animation frames of `el`'s page. */
+function twoFrames(el: Locator): Promise<unknown> {
+  return el.page().evaluate(() => {
+    // The e2e files compile without the DOM library, so the page's global is typed by hand.
+    const win = globalThis as unknown as { requestAnimationFrame(cb: () => void): number };
+    const frame = (cb: () => void) => win.requestAnimationFrame(cb);
+    return new Promise<void>((done) => frame(() => frame(done)));
+  });
+}
+
+async function dungeonScreens(sweep: Sweep, page: Page, size: Size, scale: number): Promise<void> {
   try {
     await escapeAll(page);
     const panel = await openPanelOf(page, "Scenes");
@@ -1193,6 +1279,18 @@ async function dungeonScreens(sweep: Sweep, page: Page): Promise<void> {
     }
     await sweep.measure(page, "dungeon-dialog", dialog);
     await shots.take(page, `alignment-${sweep.at}-dungeon-dialog`);
+    // pe1: the xl card at a smaller computer window too, its preview capped by the body's height (docs/design/design-v1-polish-pass.md 3.4).
+    if (size.name === "1440x900" && scale === 1) {
+      await page.setViewportSize({ width: 1280, height: 720 });
+      try {
+        await settled(dialog.getByRole("img", { name: /^Preview of the dungeon/ }));
+        await sweep.measure(page, "dungeon-dialog-1280x720", dialog);
+        await shots.take(page, `alignment-${sweep.at}-dungeon-dialog-1280x720`);
+      } finally {
+        await page.setViewportSize({ width: size.width, height: size.height });
+      }
+      await settled(dialog.getByRole("img", { name: /^Preview of the dungeon/ }));
+    }
     await dialog.getByRole("radio", { name: "Medium", exact: true }).click();
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
     await dialog.waitFor({ state: "detached" });
@@ -1624,7 +1722,7 @@ async function previewWaitScreens(sweep: Sweep, page: Page, scale: number): Prom
   await escapeAll(page);
   const panel = await openPanelOf(page, "DM");
   // Setup, so folded on a phone (docs/design/design-v1-panel-groups.md 6.2).
-  await openGroup(panel, "Check their view");
+  await openGroup(panel, "Preview");
   const view = panel.getByRole("button", { name: "View", exact: true });
   await view.scrollIntoViewIfNeeded();
   await view.click();
@@ -5468,7 +5566,7 @@ export function sizeTests(names: readonly string[]): void {
           await waitFor("the DM's snapshot", () => dmSocket.state);
           await dmScreens(sweep, page, size);
           await visionScreens(sweep, page, size);
-          await dungeonScreens(sweep, page);
+          await dungeonScreens(sweep, page, size, scale);
           if (ANIMMAP_AT.has(size.name)) await animatedMapScreens(sweep, page);
           if (SOUND_AT.has(size.name)) await soundScreens(sweep, page, size, scale);
           await previewWaitScreens(sweep, page, scale);
@@ -6334,7 +6432,7 @@ async function openThornResync(page: Page): Promise<Locator | null> {
   }
   await resync.scrollIntoViewIfNeeded();
   await resync.click();
-  const review = page.getByRole("dialog", { name: "Check what changes" });
+  const review = page.getByRole("dialog", { name: "Re-sync review" });
   await review.waitFor();
   return review;
 }
@@ -6678,6 +6776,23 @@ export function clockTests(): void {
   });
 }
 
+/**
+ * The scenes list's one finding by design (pg-c): the players' row holds
+ * its Players here tag at the words' own height, where each other row holds
+ * a Move players button a touch target tall (docs/design/design-v1-polish-pass.md
+ * 3.10). Rows of one kind are held to one height, so that row reads as out
+ * of line, 25.4 px at 100%.
+ */
+const SCENE_ROWS_BY_DESIGN = {
+  test(line: string): boolean {
+    const found = /^\S+ pg-scenes-list(-light)?: kind-height [\d.]+ px, ul "[^"]*": (.*)$/.exec(line);
+    if (!found) return false;
+    // The rows it names: the players' one, and only rows that offer Move players.
+    const rows = (found[2] ?? "").split(" | ").map((row) => /^li "([^"]*)" [\d.]+ px$/.exec(row)?.[1] ?? null);
+    return rows.every((row) => row !== null) && rows.filter((row) => row!.endsWith("Players here")).length === 1 && rows.filter((row) => row!.endsWith("Move players")).length === rows.length - 1;
+  },
+};
+
 /** The fold stores of the four surfaces that fold (client/lib/folds.ts), cleared so each size starts as a device that never tapped one. */
 const FOLD_KEYS = ["rvtt.soundFolds", "rvtt.dmPanelFolds", "rvtt.thisDeviceFolds", "rvtt.sceneSettingsFolds"];
 
@@ -6867,14 +6982,13 @@ export function panelGroupTests(): void {
           if (await visible(back)) await back.click();
           await menu.getByRole("button", { name: /^This device/ }).click();
           await menu.locator("[data-group-fold]").first().waitFor();
-          // Rolls stays folded: its dice set picker's tiles read as off center, a finding older than the folds, from a picker the sweep never measured before.
-          const rolls = menu.getByRole("button", { name: "Rolls", exact: true });
-          if ((await rolls.getAttribute("aria-expanded")) === "true") await rolls.click();
           await groups(sweep, page, "pg-device-start", menu);
           await setFolds(menu, false);
           await groups(sweep, page, "pg-device-folded", menu);
           await shots.take(page, `alignment-${sweep.at}-pg-device-folded`);
-          await setFolds(menu, true, ["Rolls"]);
+          // Rolls opens with the rest: its dice set's tiles share one border and padding, the die in the flow (docs/design/design-v1-polish-pass.md 3.6).
+          await setFolds(menu, true);
+          await menu.locator("[data-dice-set]").first().waitFor();
           await groups(sweep, page, "pg-device-open", menu);
           if (await visible(back)) await back.click();
         } finally {
@@ -6915,8 +7029,8 @@ export function panelGroupTests(): void {
           const wide = at.size.width / at.scale >= 900;
           const fresh = sceneGroupFold(panel, "New scene");
           if ((await fresh.getAttribute("aria-expanded")) !== String(wide)) sweep.lines.push(`${sweep.at} pg-scenes: New scene starts ${wide ? "folded" : "open"}`);
-          // Scenes' groups keep the 4em floor (dp-1a), so only their edges are held.
-          await groups(sweep, page, "pg-scenes-start", panel, panel.locator("[data-panel-group] > div:first-child"), false);
+          // Scenes' groups show their whole summaries, as the DM panel's and This device's do (docs/design/design-v1-polish-pass.md 3.1), so they are held to it too.
+          await groups(sweep, page, "pg-scenes-start", panel, panel.locator("[data-panel-group] > div:first-child"));
           const fog = sceneGroupFold(panel, "Fog and vision");
           if ((await fog.getAttribute("aria-expanded")) === "true") await fog.click();
           const vision = sceneGroup(panel, "Fog and vision");
@@ -6924,9 +7038,23 @@ export function panelGroupTests(): void {
           if (!(await showsWithin(tag, 5_000))) await sweep.missing(page, "pg-scenes-no-walls", "Fog and vision folded on a map with no walls wore no tag");
           else {
             await vision.scrollIntoViewIfNeeded();
-            await groups(sweep, page, "pg-scenes-no-walls", panel, vision, false);
+            await groups(sweep, page, "pg-scenes-no-walls", panel, vision);
             await shots.take(page, `alignment-${sweep.at}-pg-scenes-no-walls`);
           }
+          // pe1: the scenes list in live play 31 lane A's state, the DM on the cave and the players elsewhere, three rows or more, so the chosen row's accent frame stands in a column the edge check reads (3.10, D-261106-217).
+          const list = panel.getByRole("heading", { name: "All scenes", exact: true }).locator("xpath=ancestor::section[1]");
+          if ((await list.locator('li [aria-current="true"]').count()) !== 1 || (await list.locator("li").count()) < 3) sweep.lines.push(`${sweep.at} pg-scenes-list: the list has no chosen row among three or more`);
+          await list.scrollIntoViewIfNeeded();
+          const listFrom = sweep.lines.length;
+          await groups(sweep, page, "pg-scenes-list", list, list, false);
+          // The players' row holds its Players here tag at the words' own height, where the others hold a Move players button a touch target tall, by design (docs/design/design-v1-polish-pass.md 3.10). That row height alone is left out.
+          const found = sweep.lines.splice(listFrom, sweep.lines.length - listFrom);
+          const byDesign = found.filter((line) => SCENE_ROWS_BY_DESIGN.test(line));
+          sweep.lines.push(...found.filter((line) => !SCENE_ROWS_BY_DESIGN.test(line)));
+          // A rule that leaves a finding out must show it was there, or it would pass a list that never drew the players' row.
+          for (const screen of ["pg-scenes-list:", "pg-scenes-list-light:"]) if (!byDesign.some((line) => line.includes(` ${screen} `))) sweep.lines.push(`${sweep.at} ${screen} the players' row height by design was not found, so nothing shows the rule still has a finding to leave out`);
+          console.log(`${sweep.at} pg-scenes-list, left out by design: ${byDesign.join(" || ")}`);
+          await shots.take(page, `alignment-${sweep.at}-pg-scenes-list`);
         } finally {
           await forgetFolds(page);
           await closeSheets(page);
@@ -6944,6 +7072,66 @@ export function panelGroupTests(): void {
     }
     assert.deepEqual(lines, [], "Scenes' groups out of line");
     withinSnapshotBudget("pg-c");
+  });
+
+  /*
+   * pe1: the swatch rows that stand in a column of rows, flush with it
+   * (docs/design/design-v1-polish-pass.md 3.8): the pin pane's Pin color
+   * and the image picker's Icons tab's Disk color, whose rings stand in
+   * the pane's and the dialog's padding. The pin is placed by the Pin tool,
+   * as a DM's tap would, on a square clear of the room's tokens, and taken
+   * away after each size. The picker opens from New character's Add image,
+   * which makes nothing until it is saved.
+   */
+  test(`pg-d. the pin pane and the image picker's Icons tab, their swatches on the column's edge, dark and light, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
+    await newDmSession();
+    const lines: string[] = [];
+    for (const at of FU30_AT) {
+      const sweep = new Sweep(`pg-${atName(at)}`);
+      const page = await dmPageFor(at.size);
+      page.setDefaultTimeout(10_000);
+      await openAt(page, at.size, at.scale, { "rvtt.theme": "dark" });
+      await waitFor("the DM's snapshot", () => dmSocket.state);
+      const pins = new Set(Object.keys(dmSocket.state?.pins ?? {}));
+      try {
+        await pickTool(page, "Pin");
+        let cell: { x: number; y: number } | null = null;
+        for (const c of [{ x: 7, y: 4 }, { x: 12, y: 8 }, { x: 3, y: 11 }]) if (!cell && (await canvasAt(page, c))) cell = c;
+        if (!cell) await sweep.missing(page, "pg-pin-pane", "no clear square took the Pin tool's tap");
+        else {
+          await tapCell(page, BOUNDS, cell);
+          const pane = page.getByRole("dialog", { name: "Edit pin" });
+          await pane.getByRole("radiogroup", { name: "Pin color" }).waitFor();
+          await groups(sweep, page, "pg-pin-pane", pane, pane, false);
+          await shots.take(page, `alignment-${sweep.at}-pg-pin-pane`);
+          await page.keyboard.press("Escape");
+          await pane.waitFor({ state: "detached" });
+        }
+        await pickTool(page, "Select");
+
+        const characters = await openCharacters(page);
+        await characters.getByRole("button", { name: "New character", exact: true }).click();
+        await characters.getByRole("button", { name: "Add image", exact: true }).first().click();
+        const picker = page.getByRole("dialog", { name: "Choose an image" });
+        await picker.getByRole("radiogroup", { name: "Disk color" }).waitFor();
+        if ((await picker.getByRole("tab", { name: "Icons", exact: true }).getAttribute("aria-selected")) !== "true") sweep.lines.push(`${sweep.at} pg-icons-tab: the picker opens on another tab than Icons`);
+        // The tab's own panel: the source tabs above it are the picker's, not the polish pass's.
+        await groups(sweep, page, "pg-icons-tab", picker, picker.getByRole("tabpanel"), false);
+        await shots.take(page, `alignment-${sweep.at}-pg-icons-tab`);
+        await page.keyboard.press("Escape");
+        await picker.waitFor({ state: "detached" });
+      } finally {
+        for (const id of Object.keys(dmSocket.state?.pins ?? {})) if (!pins.has(id)) await ops.send({ t: "pin.remove", pinId: id }).catch(() => {});
+        await escapeAll(page);
+        await closeSheets(page);
+      }
+      console.log(`${sweep.at}: measured ${[...sweep.seen].join(", ")}`);
+      lines.push(...sweep.lines);
+    }
+    if (dm && !dm.isClosed()) await dm.evaluate(() => localStorage.setItem("rvtt.theme", "dark"));
+    assert.deepEqual(lines, [], "the pin pane or the Icons tab out of line");
+    assert.deepEqual(consoles.dm.errors, [], "the DM's page logged errors");
+    withinSnapshotBudget("pg-d");
   });
 }
 
@@ -7167,7 +7355,7 @@ export function sceneSettingsTests(): void {
             await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { weather: patch } });
             const want = patch?.kind ?? "clear";
             await waitFor(`${label} drawn`, async () => ((await kind.inputValue()) === want ? true : null));
-            if (patch?.wind === "strong") await light.getByText("Blows toward", { exact: false }).first().waitFor();
+            if (patch?.wind === "strong") await light.getByText("Direction", { exact: true }).first().waitFor();
             await light.scrollIntoViewIfNeeded();
             await sweep.measure(page, label, light);
             await shots.take(page, `alignment-${sweep.at}-${label}`);
