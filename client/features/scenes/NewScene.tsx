@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { MAX_SCENE_CELLS } from "#shared/protocol.ts";
 import { gridOfShape } from "#shared/rules/grid.ts";
 import type { FoundWork } from "#shared/starter.ts";
@@ -41,6 +41,40 @@ type Kind = "mat" | "map" | "builder";
 
 /** The room limit on scenes (design 10.5). */
 const MAX_SCENES = 50;
+
+/**
+ * Turns the panel scroller's own scroll anchoring off from a create until
+ * NewScene's next commit has laid out. A create starts the form over while
+ * the DM is scrolled down to Create, so the content shrinks under the view
+ * and the scroller's offset is clamped. Chrome keeps the anchor it chose
+ * before the clamp, with its old place in the view, and moves the scroller
+ * back to it once there is room again: as the new scene's settings drew,
+ * Scenes jumped hundreds of px into Light and weather, where the first
+ * scene made must scroll to nothing (D-261102-934). With anchoring off
+ * through the clamp, Chrome drops that anchor and picks a fresh one where
+ * the view is. Off for that one commit only, as a stat block's roll header
+ * does (docs/design/design-v1-token-roll-header.md 1.2), so the panel keeps
+ * its anchoring for everything else.
+ */
+function useAnchoringPause(): (from: Element | null) => void {
+  const held = useRef<{ box: HTMLElement; prior: string } | null>(null);
+  const restore = () => {
+    const h = held.current;
+    held.current = null;
+    if (!h) return;
+    // Reading the offset lays the commit out now, with anchoring still off, so its clamp keeps no anchor.
+    void h.box.scrollTop;
+    h.box.style.overflowAnchor = h.prior;
+  };
+  useLayoutEffect(restore);
+  useLayoutEffect(() => restore, []);
+  return useCallback((from) => {
+    const box = from?.closest<HTMLElement>("[data-pane-body]") ?? null;
+    if (!box || held.current) return;
+    held.current = { box, prior: box.style.overflowAnchor };
+    box.style.overflowAnchor = "none";
+  }, []);
+}
 
 /**
  * Creating a scene: a blank battle mat, a scene from a map image, or a
@@ -144,6 +178,7 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
   const full = props.sceneCount >= MAX_SCENES;
   // A paste lands here while the Map image form is open, as a chosen file does: picked, and searched for its grid (docs/design/design-v1-paste.md 1.2).
   const formRef = useRef<HTMLDivElement>(null);
+  const pauseAnchoring = useAnchoringPause();
   const paste = usePasteTarget(formRef, { accepts: "image", takes: kind === "map" ? "open" : "none", disabled: status.busy || kind !== "map", closed: kind !== "map", onFile: (f) => pickFile(f, true) });
 
   const pick = (k: Kind) => {
@@ -199,6 +234,7 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
   };
 
   const open = (id: string, tool: string | null) => {
+    pauseAnchoring(formRef.current);
     actions.switchScene(id);
     startOver();
     if (tool) {

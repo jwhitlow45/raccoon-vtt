@@ -819,11 +819,19 @@ describe("Ambiance", { concurrency: false }, () => {
     await closeSheet(scenes);
 
     // The row once more with Scenes left open, then a first battle mat: the new scene's settings take no target, so nothing scrolls to Weather or takes focus.
+    // On a short phone the form that starts over after Create still leaves the body scrolled, the one place a browser's own scroll anchoring could move it.
+    await dm.setViewportSize(SMALL);
     await (await ambianceSheet(dm)).locator("[data-group-open]").click();
     await newScene.waitFor();
     const form = newScene.locator("xpath=ancestor::*[@data-panel-group][1]");
+    const body = form.locator("xpath=ancestor::*[@data-pane-body][1]");
     await form.getByRole("radio", { name: "Battle mat", exact: true }).click();
     await form.getByRole("textbox", { name: "Scene name" }).fill("First mat");
+    // The body's offset once Create's commit has drawn the form over, read in the click's own task, before the server's answer can draw the settings.
+    await body.evaluate((box) => {
+      const win = box.ownerDocument.defaultView as unknown as { startedOver?: number; addEventListener(type: string, fn: () => void, options: { once: boolean }): void };
+      win.addEventListener("click", () => queueMicrotask(() => (win.startedOver = box.scrollTop)), { once: true });
+    });
     await form.getByRole("button", { name: "Create", exact: true }).click();
     const made = await waitFor("the first scene", () => Object.values(dmSocket.state?.scenes ?? {}).find((s) => s.name === "First mat"), 30_000);
     await waitFor("the DM on First mat", () => (dmSocket.you?.sceneId === made.id ? true : null));
@@ -832,6 +840,9 @@ describe("Ambiance", { concurrency: false }, () => {
     await dm.waitForTimeout(500);
     const select = scenes.getByRole("combobox", { name: "Weather", exact: true });
     assert.equal(await select.evaluate((el) => el === el.ownerDocument.activeElement), false, "the Weather select never takes focus");
+    const offsets = await body.evaluate((box) => ({ startedOver: (box.ownerDocument.defaultView as unknown as { startedOver?: number }).startedOver ?? null, now: box.scrollTop }));
+    assert.ok(offsets.startedOver !== null && offsets.startedOver > 0, `the body still scrolled once the form started over (${JSON.stringify(offsets)})`);
+    assert.ok(Math.abs(offsets.now - offsets.startedOver) <= 1, `Scenes' body stayed where the form started over as the first scene's settings drew (${JSON.stringify(offsets)})`);
     assert.ok((await inScroller(light)).top > 8, "Scenes never scrolled Light and weather to its top");
     assert.equal(await newScene.getAttribute("aria-expanded"), "true", "New scene stays open until Scenes closes");
     await shots.take(dm, "am-4c-first-scene");
