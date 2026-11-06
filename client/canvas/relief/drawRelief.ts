@@ -333,8 +333,13 @@ function linesPath<P extends Path2D | CanvasRenderingContext2D>(path: P, lines: 
   return path;
 }
 
-/** One tread of a stepping stair as it draws at a turn: its height, its faces toward the viewer (its outer side and its riser) and away (an opening's far sides), and its top. */
-type TreadShape = { z: number; near: readonly SideShape[]; far: readonly SideShape[]; top: readonly Pt[]; source: VBox; topPath: Path2D | null; nearOutline: Path2D | null; farOutline: Path2D | null };
+/**
+ * One tread of a stepping stair as it draws at a turn: its height, its
+ * faces toward the viewer (its outer side and its riser) and away (an
+ * opening's far sides), and its top. `sunk` is the part below 0 of its
+ * riser where that riser climbs from below 0, cut from `near`.
+ */
+type TreadShape = { z: number; near: readonly SideShape[]; far: readonly SideShape[]; sunk: readonly SideShape[]; top: readonly Pt[]; source: VBox; topPath: Path2D | null; nearOutline: Path2D | null; farOutline: Path2D | null; sunkOutline: Path2D | null };
 
 /** A stepping stair as it draws at a turn: its treads far to near along its climb. */
 type StepsShape = { treads: readonly TreadShape[] };
@@ -367,7 +372,11 @@ function stepsShapeOf(p: CellPiece, turn: Turn): StepsShape {
     const z = treadHeight(s, k);
     const mine = faces.filter((f) => f.tread === k && f.z1 > f.z0);
     // A face up to the tread's own height faces the viewer (pieces.ts faceSpan), and one up from it is an opening's far side.
-    const near = mine.filter((f) => f.z1 === z).map((f) => sideShape(view, f, paths));
+    const toward = mine.filter((f) => f.z1 === z);
+    // Only a riser reaches below 0 from a tread above it: a side facing the viewer starts at 0 at the lowest. Its two parts draw on either side of the ground (drawSteps).
+    const crosses = (f: Face) => f.z0 < 0 && f.z1 > 0;
+    const near = toward.map((f) => sideShape(view, crosses(f) ? { ...f, z0: 0 } : f, paths));
+    const sunk = toward.filter(crosses).map((f) => sideShape(view, { ...f, z1: 0 }, paths));
     const far = mine.filter((f) => f.z1 !== z).map((f) => sideShape(view, f, paths));
     const poly = treadPolygon(s, p.x, p.y, k);
     const top = lifted(turn, poly, z);
@@ -378,7 +387,7 @@ function stepsShapeOf(p: CellPiece, turn: Turn): StepsShape {
       source.x1 = Math.max(source.x1, q.x);
       source.y1 = Math.max(source.y1, q.y);
     }
-    return { z, near, far, top, source, topPath: paths ? polyPath(new Path2D(), top) : null, nearOutline: outlineOf(near), farOutline: outlineOf(far) };
+    return { z, near, far, sunk, top, source, topPath: paths ? polyPath(new Path2D(), top) : null, nearOutline: outlineOf(near), farOutline: outlineOf(far), sunkOutline: outlineOf(sunk) };
   });
   const shape = { treads };
   byTurn[turn] = shape;
@@ -662,24 +671,34 @@ function drawPit(g: CanvasRenderingContext2D, p: CellPiece, dc: DrawContext, vie
  * A stair that climbs in steps (docs/design/design-v1-iso-depth.md 5.2): its
  * treads far to near along its climb, each its faces toward the viewer,
  * then its top, the ground copied up or down to its height, then an
- * opening's far sides. A stair whose steps start below 0 draws inside the
- * openings of its pit region, as a pit does. Its own tops are copied here,
- * never batched with columns' (drawRun flushes those first).
+ * opening's far sides. What a stair has below 0 draws inside the openings
+ * of its pit region, as a pit does, and what it has above 0 outside them,
+ * so a stair from a pit up to a dais keeps the treads it climbs above the
+ * ground (ISOBUILD-ASTRA-01). Its own tops are copied here, never batched
+ * with columns' (drawRun flushes those first).
  */
 function drawSteps(g: CanvasRenderingContext2D, p: CellPiece, dc: DrawContext, view: VBox): void {
   const opening = isOpening(p);
-  if (opening) {
+  let clipped = false;
+  const clip = (on: boolean) => {
+    if (!opening || on === clipped) return;
+    clipped = on;
+    if (!on) {
+      g.restore();
+      return;
+    }
     g.save();
     g.beginPath();
     for (const o of openingsOf(p, dc)) addPoly(g, shapeOf(o, dc.turn).atZero);
     g.clip("nonzero");
-  }
+  };
   const shape = stepsShapeOf(p, dc.turn);
   if (dc.toned && shape.treads.some((t) => tonedAt(t.source, t.z, dc, view))) dc.toned.push(paintedBox(p, dc));
   const unit = 1 / (dc.camera.scale * dc.pixelRatio);
   const pattern = groundPattern(g, dc);
   const k = dc.pixelRatio * dc.camera.scale;
   for (const t of shape.treads) {
+    clip(t.z < 0);
     for (const f of t.near) fillSide(g, f.a, f.b, f.h, p.look, f.left, dc, null, false, f.path, f.along);
     if (t.near.length > 0) strokeFaces(g, t.near, t.nearOutline, unit);
     const path = t.topPath;
@@ -707,8 +726,13 @@ function drawSteps(g: CanvasRenderingContext2D, p: CellPiece, dc: DrawContext, v
     strokeWith(g, path);
     for (const f of t.far) fillSide(g, f.a, f.b, f.h, p.look, f.left, dc, null, false, f.path, f.along);
     if (t.far.length > 0) strokeFaces(g, t.far, t.farOutline, unit);
+    // A riser's part below 0 meets the rest of its tread's drawing only along the ground's line, so it can draw last, inside the openings with the treads below.
+    if (t.sunk.length === 0) continue;
+    clip(true);
+    for (const f of t.sunk) fillSide(g, f.a, f.b, f.h, p.look, f.left, dc, null, false, f.path, f.along);
+    strokeFaces(g, t.sunk, t.sunkOutline, unit);
   }
-  if (opening) g.restore();
+  clip(false);
 }
 
 /** The outlines of faces filled one by one, in one stroke. */

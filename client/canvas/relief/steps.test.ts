@@ -284,6 +284,124 @@ describe("drawing a stair's steps (5.2, ISOD-08)", () => {
   });
 });
 
+type Pt = { x: number; y: number };
+
+/**
+ * A canvas that writes down each fill's polygons and the clips in force as
+ * it was made, each clip the polygons of its path, so a test can say what
+ * shows at a point: the last fill over it that every clip lets through.
+ */
+function clippingCanvas(): { g: CanvasRenderingContext2D; fills: { polys: Pt[][]; clips: Pt[][][] }[] } {
+  const fills: { polys: Pt[][]; clips: Pt[][][] }[] = [];
+  let m = [1, 0, 0, 1, 0, 0];
+  let clips: Pt[][][] = [];
+  const stack: { m: number[]; clips: Pt[][][] }[] = [];
+  let polys: Pt[][] = [];
+  const tx = (x: number, y: number) => ({ x: m[0]! * x + m[2]! * y + m[4]!, y: m[1]! * x + m[3]! * y + m[5]! });
+  const g = {
+    fillStyle: "" as unknown,
+    strokeStyle: "",
+    lineWidth: 1,
+    save: () => stack.push({ m: [...m], clips }),
+    restore: () => {
+      ({ m, clips } = stack.pop()!);
+    },
+    setTransform: (a: number, b: number, c: number, d: number, e: number, f: number) => {
+      m = [a, b, c, d, e, f];
+    },
+    beginPath: () => {
+      polys = [];
+    },
+    moveTo: (x: number, y: number) => polys.push([tx(x, y)]),
+    lineTo: (x: number, y: number) => polys[polys.length - 1]!.push(tx(x, y)),
+    closePath: () => {},
+    clip: () => {
+      clips = [...clips, polys.map((p) => [...p])];
+    },
+    fill: () => fills.push({ polys: polys.map((p) => [...p]), clips }),
+    stroke: () => {},
+    createPattern: () => ({ setTransform() {} }),
+  };
+  return { g: g as unknown as CanvasRenderingContext2D, fills };
+}
+
+/** Whether a point lies inside a polygon, by the crossings of a ray from it. */
+function insidePoly(poly: readonly Pt[], q: Pt): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i]!;
+    const b = poly[j]!;
+    if (a.y > q.y !== b.y > q.y && q.x < ((b.x - a.x) * (q.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
+/** Whether two polygons have the same corners, in any order. */
+function sameCorners(a: readonly Pt[], b: readonly Pt[]): boolean {
+  const key = (p: readonly Pt[]) => p.map((q) => `${q.x.toFixed(6)},${q.y.toFixed(6)}`).sort().join(" ");
+  return key(a) === key(b);
+}
+
+describe("a stair from a pit up to a dais keeps its treads above 0 (ISOBUILD-ASTRA-01)", () => {
+  // An east-facing stair at (5, 5), stored at 0, between a 5 ft pit at (4, 5) and a 5 ft dais at (6, 5): one span from -5 to +5 ft.
+  const state = built([
+    { t: "build.height", sceneId: "s1", cells: ["4,5"], height: -5 },
+    { t: "build.height", sceneId: "s1", cells: ["6,5"], height: 5 },
+    { t: "build.stairs", sceneId: "s1", cells: ["5,5"], up: "e" },
+  ] as Op[]);
+  const d = drawnOf(state);
+  const relief = index(state, d);
+  const stair = relief.cellAt(5, 5)!;
+  const camera = { x: 0, y: 0, scale: 1 };
+  const treadZ = (k: number) => -1 + (2 * k) / 5;
+  /** Tread k's top, as it draws at a turn. */
+  const topOf = (turn: Turn, k: number) => [5 + k / 5, 5 + (k + 1) / 5].flatMap((x) => [5, 6].map((y) => toView(isometric(turn), { x, y }, treadZ(k))));
+
+  test("the stair spans the pit's floor to the dais and is an opening of the pit's region", () => {
+    assert.equal(stair.kind, "steps");
+    assert.deepEqual(stair.span, span("e", -1, 1));
+    assert.ok(stair.region && stair.region === relief.cellAt(4, 5)!.region);
+  });
+
+  test("at every turn, wherever pickWalk hits a tread above 0, that tread's top is what the stair shows there", () => {
+    let hits = 0;
+    for (const turn of TURNS) {
+      const { g, fills } = clippingCanvas();
+      drawRun(g, [stair], dcAt(turn));
+      for (const k of [3, 4]) {
+        for (const [u, v] of [[0.5, 0.5], [0.5, 0.2], [0.5, 0.8], [0.2, 0.5], [0.8, 0.5]] as const) {
+          const at = { x: 5 + (k + u) / 5, y: 5 + v };
+          const screen = viewToScreen(camera, toView(isometric(turn), at, treadZ(k)));
+          const hit = pickWalk({ camera, view: isometric(turn), grid: { shape: "squares" }, heights: d.heights }, screen);
+          if (hit.cell.col !== 5 || hit.cell.row !== 5 || Math.abs(hit.z - treadZ(k)) > 1e-9) continue;
+          hits++;
+          const shown = fills.findLast((f) => f.polys.some((p) => insidePoly(p, screen)) && f.clips.every((c) => c.some((p) => insidePoly(p, screen))));
+          assert.ok(shown && shown.polys.length === 1 && sameCorners(shown.polys[0]!, topOf(turn, k)), `turn ${turn}, tread ${k} at ${JSON.stringify(at)}: the stair shows ${JSON.stringify(shown?.polys)}`);
+        }
+      }
+    }
+    // The reviewer's case among them: the top tread at turn 2, where the pick finds it at +3 ft.
+    const top = viewToScreen(camera, toView(isometric(2), { x: 5.9, y: 5.5 }, treadZ(4)));
+    const hit = pickWalk({ camera, view: isometric(2), grid: { shape: "squares" }, heights: d.heights }, top);
+    assert.deepEqual([hit.cell.col, hit.cell.row, Math.round(hit.z * 5)], [5, 5, 3]);
+    assert.ok(hits >= 10, `the picks found the treads ${hits} times`);
+  });
+
+  test("the riser that crosses 0 draws its part below 0 inside the pit's openings and its part above 0 outside them", () => {
+    // East climbs away from the viewer at turns 2 and 3, so the risers face it there.
+    for (const turn of [2, 3] as Turn[]) {
+      const { g, fills } = clippingCanvas();
+      drawRun(g, [stair], dcAt(turn));
+      const face = (z0: number, z1: number) => [5, 6].flatMap((y) => [z0, z1].map((z) => toView(isometric(turn), { x: 5.6, y }, z)));
+      const below = fills.filter((f) => f.polys.some((p) => sameCorners(p, face(-0.2, 0))));
+      const above = fills.filter((f) => f.polys.some((p) => sameCorners(p, face(0, 0.2))));
+      assert.ok(below.length > 0 && below.every((f) => f.clips.length === 1), `turn ${turn}: below 0, clipped`);
+      assert.ok(above.length > 0 && above.every((f) => f.clips.length === 0), `turn ${turn}: above 0, not clipped`);
+      assert.ok(!fills.some((f) => f.polys.some((p) => sameCorners(p, face(-0.2, 0.2)))), `turn ${turn}: never whole`);
+    }
+  });
+});
+
 /** Every point a draw of one piece puts on the canvas, in view units. */
 function drawnPoints(p: CellPiece, turn: Turn): { x: number; y: number }[] {
   const { g, ops } = canvas();
