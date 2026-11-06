@@ -130,7 +130,8 @@ These are conventions that review looks for:
 - **Client styling** is inline, from the tokens in
   [`client/lib/theme.ts`](../client/lib/theme.ts).
 - **Words** in comments, docs and the app are plain American English, with
-  no em dashes and as few semicolons as you can manage.
+  no em dashes and no semicolons in prose. Contractions are fine. The rest of
+  the rules for docs are in [Writing the docs](writing.md).
 
 ## Continuous integration
 

@@ -32,6 +32,10 @@ Code follows the [coding standards](docs/development.md#coding-standards)
 in docs/development.md. The typecheck, the tests and CodeQL enforce many
 of them.
 
+Docs follow [Writing the docs](docs/writing.md). Update FEATURES.md in the
+same change that adds, changes or removes a feature, and the
+[DM guide](docs/dm-guide.md) too when a change alters a step it describes.
+
 Use Conventional Commits, as in `git log`: one line, lowercase after the
 colon, with an optional lowercase scope. For example,
 `fix(ui): keep the menu in view`. Every change is reviewed before it merges.
