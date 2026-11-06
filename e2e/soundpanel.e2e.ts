@@ -135,6 +135,17 @@ async function soundPanel(page: Page = dm): Promise<Locator> {
   return page.getByRole("tabpanel", { name: sideTabName("Sound") });
 }
 
+/** The DM's Sound panel at any size: the side panel's tab where there is one, or the Panels list's row and its sheet on a phone. */
+async function anySoundPanel(page: Page): Promise<Locator> {
+  if (await page.getByRole("tablist", { name: "Panels" }).isVisible()) return (await openSideTab(page, "Sound"), page.getByRole("tabpanel", { name: sideTabName("Sound") }));
+  const sheet = page.locator('dialog[data-rvtt-sheet][aria-label="Sound"]');
+  if (await sheet.isVisible()) return sheet;
+  await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
+  await page.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Sound/ }).click();
+  await sheet.waitFor();
+  return sheet;
+}
+
 /** A player's Sound panel on a phone: the Panels list's row, then its sheet. */
 async function patPanel(): Promise<Locator> {
   const sheet = pat.locator('dialog[data-rvtt-sheet][aria-label="Sound"]');
@@ -256,6 +267,102 @@ describe("the Sound panel", { concurrency: false }, () => {
     await panel.getByRole("button", { name: "Stop the music", exact: true }).click();
     await until("the music stopped", () => playing() === null || playing()?.music === null);
     await panel.getByText("Nothing is playing.", { exact: true }).waitFor();
+  });
+
+  test("sndfade-1. the playing row's Play is Pause: it pauses the music, Play resumes it where it paused, another row's Play starts that one, and each changes before the server answers", async () => {
+    const tracksOf = (p: Locator) => p.getByRole("list", { name: "Tracks" });
+    const rowButton = (p: Locator, name: string) => tracksOf(p).getByRole("button", { name, exact: true });
+    let panel = await soundPanel();
+    await rowButton(panel, "Play Road").click();
+    await until("Road playing", () => playing()?.music?.now.soundId === run.sounds.Road && playing()?.music?.paused === undefined);
+    await rowButton(panel, "Pause Road").waitFor();
+    assert.equal(await rowButton(panel, "Play March").count(), 1, "another row keeps Play");
+
+    // The rows and Now playing at three sizes and two scales, dark then light, within 1 px. Shots at a desk and on a phone.
+    const lines: string[] = [];
+    for (const scheme of ["dark", "light"] as const) {
+      for (const size of [DESK, PHONE, { width: 320, height: 568 }]) {
+        for (const scale of [1, 1.3]) {
+          await dm.setViewportSize(size);
+          await dm.evaluate(([s, sc]) => {
+            localStorage.setItem("rvtt.theme", s as string);
+            localStorage.setItem("rvtt.uiScale", String(sc));
+          }, [scheme, scale] as const);
+          await dm.goto(`${server.origin}/r/${run.roomId}`);
+          await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+          const where = `${size.width}x${size.height} ${scale * 100}% ${scheme}`;
+          const p = await anySoundPanel(dm);
+          await rowButton(p, "Pause Road").waitFor();
+          lines.push(...alignmentLines(await measureAlignment(p.locator("[data-sound-now]")), `Now playing ${where}`));
+          lines.push(...alignmentLines(await measureAlignment(tracksOf(p)), `the Tracks rows ${where}`));
+          if (scale === 1 && size.width !== 320) {
+            const device = size.width === DESK.width ? "desk" : "phone";
+            await p.locator("[data-sound-now]").scrollIntoViewIfNeeded();
+            await shots.take(dm, `sndfade-1-now-playing-${device}-${scheme}`);
+            await tracksOf(p).scrollIntoViewIfNeeded();
+            await shots.take(dm, `sndfade-1-tracks-${device}-${scheme}`);
+          }
+        }
+      }
+    }
+    await dm.setViewportSize(DESK);
+    await dm.evaluate(() => {
+      localStorage.setItem("rvtt.theme", "dark");
+      localStorage.setItem("rvtt.uiScale", "1");
+    });
+    assert.deepEqual(lines, [], "the rows and Now playing out of line");
+
+    // A page whose server frames come 1.5 s late: what its buttons show next comes from its own view of the op.
+    const slow = await dmContext.newPage();
+    try {
+      await slow.routeWebSocket(/\/ws\?room=/, (ws) => {
+        const upstream = ws.connectToServer();
+        ws.onMessage((m) => upstream.send(m));
+        upstream.onMessage((m) => setTimeout(() => ws.send(m), 1_500));
+      });
+      await slow.goto(`${server.origin}/r/${run.roomId}`);
+      await slow.getByRole("status", { name: "Connected" }).first().waitFor();
+      panel = await anySoundPanel(slow);
+      const now = panel.locator("[data-sound-now]");
+      await rowButton(panel, "Pause Road").waitFor();
+      const soon = { timeout: 1_000 };
+
+      await rowButton(panel, "Pause Road").click();
+      await rowButton(panel, "Play Road").waitFor(soon);
+      await now.getByRole("button", { name: "Play", exact: true }).waitFor(soon);
+      const paused = await until("paused", () => playing()?.music?.paused);
+      await shots.take(slow, "sndfade-1-paused");
+
+      await rowButton(panel, "Play Road").click();
+      await rowButton(panel, "Pause Road").waitFor(soon);
+      const resumed = await until("resumed", () => (playing()?.music?.paused === undefined ? playing()?.music : null));
+      assert.equal(resumed?.now.soundId, run.sounds.Road, "the same track");
+      const at = Date.now() - resumed!.now.at;
+      assert.ok(at > paused - 500 && at < paused + 3_000, `from where it paused, ${paused} ms in: ${at} ms`);
+
+      await rowButton(panel, "Play March").click();
+      await rowButton(panel, "Pause March").waitFor(soon);
+      await rowButton(panel, "Play Road").waitFor(soon);
+      await until("March playing", () => playing()?.music?.now.soundId === run.sounds.March);
+
+      // A playlist's row: Tavern night from sp-2, its first track The Prancing Pony.
+      const lists = panel.getByRole("list", { name: "Playlists" });
+      await lists.getByRole("button", { name: "Play Tavern night", exact: true }).click();
+      await lists.getByRole("button", { name: "Pause Tavern night", exact: true }).waitFor(soon);
+      await rowButton(panel, "Pause The Prancing Pony").waitFor(soon);
+      await rowButton(panel, "Play March").waitFor(soon);
+      await until("the playlist playing", () => playing()?.music?.playlistId !== undefined && playing()?.music?.paused === undefined);
+      await lists.getByRole("button", { name: "Pause Tavern night", exact: true }).click();
+      await lists.getByRole("button", { name: "Play Tavern night", exact: true }).waitFor(soon);
+      await until("the playlist paused", () => playing()?.music?.paused !== undefined);
+      await lists.getByRole("button", { name: "Play Tavern night", exact: true }).click();
+      await lists.getByRole("button", { name: "Pause Tavern night", exact: true }).waitFor(soon);
+      await until("the playlist resumed", () => playing()?.music?.playlistId !== undefined && playing()?.music?.paused === undefined);
+    } finally {
+      await slow.close();
+      await ops.send({ t: "music.stop" });
+    }
+    await until("the music stopped", () => playing() === null || playing()?.music === null);
   });
 
   test("sp-3. Background: four loops at 70%, the fifth refused in words, a volume for everyone and Stop", async () => {

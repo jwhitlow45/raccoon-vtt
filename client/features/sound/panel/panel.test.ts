@@ -19,6 +19,7 @@ const { Board } = await import("./EffectsBoard.tsx");
 const { PlayerNow } = await import("./PlayerSound.tsx");
 const { useReasons } = await import("./SoundPage.tsx");
 const { ServerLine } = await import("./SoundPanel.tsx");
+const { rowPlay, TrackRow, PlaylistRow } = await import("./MusicSection.tsx");
 const words = await import("./words.ts");
 
 const noop = () => {};
@@ -31,6 +32,40 @@ function music(over: Partial<Parameters<typeof MusicNow>[0]["music"]> = {}) {
 function now(props: Partial<Parameters<typeof MusicNow>[0]> = {}): string {
   return renderToStaticMarkup(createElement(MusicNow, { music: music(), repeat: "all", onPause: noop, onResume: noop, onSkip: noop, onStop: noop, onRepeat: noop, ...props }));
 }
+
+describe("the Music rows' Play and Pause", () => {
+  const T = 1_000_000;
+  const run = { run: "r", playlistId: "pl", order: ["pony", "road"], index: 0, repeat: "all" as const, fade: 5 as const, now: { soundId: "pony", at: T } };
+
+  test("Pause on the track Now playing names and on the playlist the run plays, Play to resume them while paused, and Play elsewhere", () => {
+    assert.equal(rowPlay(null, { soundId: "pony" }, T), "play");
+    assert.equal(rowPlay(run, { soundId: "pony" }, T + 1_000), "pause");
+    assert.equal(rowPlay(run, { playlistId: "pl" }, T + 1_000), "pause");
+    assert.equal(rowPlay(run, { soundId: "road" }, T + 1_000), "play");
+    assert.equal(rowPlay(run, { playlistId: "other" }, T + 1_000), "play");
+    assert.equal(rowPlay({ ...run, playlistId: undefined }, { playlistId: "pl" }, T + 1_000), "play", "a track from Tracks marks no playlist");
+    const paused = { ...run, paused: 4_000 };
+    assert.equal(rowPlay(paused, { soundId: "pony" }, T + 90_000), "resume");
+    assert.equal(rowPlay(paused, { playlistId: "pl" }, T + 90_000), "resume");
+    assert.equal(rowPlay(paused, { soundId: "road" }, T + 90_000), "play");
+    // In a crossfade Now playing names the incoming track, and so does Pause.
+    const crossing = { ...run, next: { soundId: "road", at: T + 25_000 } };
+    assert.equal(rowPlay(crossing, { soundId: "pony" }, T + 24_999), "pause");
+    assert.equal(rowPlay(crossing, { soundId: "pony" }, T + 25_000), "play");
+    assert.equal(rowPlay(crossing, { soundId: "road" }, T + 25_000), "pause");
+  });
+
+  test("each row's button says what it does, in Now playing's words, and an empty playlist's Play stays off", () => {
+    const track = (play: "play" | "pause" | "resume") => renderToStaticMarkup(createElement(TrackRow, { sound: sound("road", "music", 32_000, "Road"), play, onOpen: noop, onPlay: noop, onPause: noop, onResume: noop }));
+    assert.match(track("play"), /aria-label="Play Road"/);
+    assert.match(track("pause"), /aria-label="Pause Road"/);
+    assert.match(track("resume"), /aria-label="Play Road"/);
+    const empty = { id: "pl", rev: 1, name: "Tavern night", sounds: [], repeat: "all" as const, fade: 5 as const };
+    const list = (play: "play" | "pause") => renderToStaticMarkup(createElement(PlaylistRow, { playlist: empty, sounds: {}, play, onOpen: noop, onPlay: noop, onPause: noop, onResume: noop }));
+    assert.match(list("play"), /<button[^>]*aria-label="Play Tavern night"[^>]*disabled=""/);
+    assert.match(list("pause"), /aria-label="Pause Tavern night"/);
+  });
+});
 
 describe("the DM's Now playing", () => {
   test("names the track, its place and its time, read aloud as one of the other", () => {
