@@ -16,19 +16,21 @@ import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { theme } from "../../lib/theme.ts";
 import { Badge } from "../../pages/RoomChrome.tsx";
 import { useScoped } from "../../state/scope.ts";
-import { useAssets, useRoomActions, useRoomView } from "../../state/view.ts";
+import { useAssets, useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { FileButton } from "../dm/controls.tsx";
 import { dmBadgeLabel } from "../dm/joinRequests.ts";
 import { handoutsSummary } from "../dm/summaries.ts";
 import { honorsImageOrientation } from "../images/orientation.ts";
 import { PasteButton, PasteStatus, usePasteTarget } from "../images/PasteImage.tsx";
 import { useEntryBusy, useHandoff } from "../images/roomPaste.ts";
-import { apartFromStarter, docShowing } from "../images/library.ts";
+import { apartFromStarter, docShowing, useLibrary } from "../images/library.ts";
 import { checkImageFile, prepareImageUpload } from "../images/upload.ts";
 import { EMPTY_DRAFT, handoutDraftSlot, withPick, withTypedTitle, type HandoutDraft } from "./draft.ts";
 import { HANDOUT_MAX_BYTES, HANDOUT_MAX_SIDE } from "./downscale.ts";
 import { audienceText, pageCountText, showHandoutOp, showingKey, TITLE_FIELD_MAX, titleFromFileName, viewerPagesOf } from "./handouts.ts";
 import { HandoutViewer, type ViewerPage } from "./HandoutViewer.tsx";
+import { loadRecent, offerable, recentHandoutsSlot, rememberedTitle, rememberShow, reshowInput, type RecentHandout, type RecentPick } from "./recent.ts";
+import { entryKey, recentRoomOf, recentRowWords, reshowProblem, shownOf } from "./recentList.ts";
 import { JobBlock } from "./pdf/JobBlock.tsx";
 import { isPdfFile, jobPageIds, pdfPickRefusal } from "./pdf/job.ts";
 import { useJobWaiting, usePdfJob } from "./pdf/live.ts";
@@ -72,6 +74,10 @@ export function HandoutsSection(props: { fold: { open: boolean; onToggle(): void
   const actions = useRoomActions();
   const assets = useAssets();
   const draft = useScoped(handoutDraftSlot);
+  const roomId = useRoomView((s) => s.roomId);
+  const recent = useScoped(recentHandoutsSlot);
+  // This device's list for the room, read once, which the DM menu reads too.
+  useEffect(() => loadRecent(recent, roomId), [recent, roomId]);
   const [viewing, setViewing] = useState<Viewing | null>(null);
   const viewOpener = useRef<HTMLElement | null>(null);
   const showButton = useRef<HTMLButtonElement>(null);
@@ -208,6 +214,7 @@ export function HandoutsSection(props: { fold: { open: boolean; onToggle(): void
           })}
         </RowList>
       ) : null}
+      <RecentHandouts members={members ?? {}} docs={docs ?? {}} handouts={handouts ?? {}} />
       <ShowHandout
         members={members ?? {}}
         docs={docs ?? {}}
@@ -231,6 +238,136 @@ export function HandoutsSection(props: { fold: { open: boolean; onToggle(): void
   );
 }
 
+/** A recent row's state while its show is on its way, or the words of what went wrong. */
+type RowState = { busy: true } | { busy: false; problem: string };
+
+/**
+ * Recent (designs/qol audit Q11, plan 9): the handouts this device showed
+ * in this room, newest first, that are not showing now, each with one
+ * button naming whom it goes to again. Members who left are dropped from
+ * the audience, and a showing with no one left, or whose image or
+ * document is gone, is not offered (recent.ts offerable). The library is
+ * listed only while an image is among them, to leave out one deleted
+ * since.
+ */
+function RecentHandouts(props: { members: Record<string, Member | undefined>; docs: Record<string, HandoutDoc | undefined>; handouts: Record<string, Handout | undefined> }) {
+  const recent = useScoped(recentHandoutsSlot);
+  const entries = useStore(recent, (s) => s.entries);
+  // Kept here, above the list that may remount once an image joins it, so a show on its way stays busy.
+  const [rows, setRows] = useState<ReadonlyMap<string, RowState>>(new Map());
+  const list = { ...props, entries, rows, setRows };
+  return entries.some((e) => e.kind === "image") ? <RecentWithLibrary {...list} /> : <RecentRows {...list} library={null} />;
+}
+
+type RecentListProps = {
+  members: Record<string, Member | undefined>;
+  docs: Record<string, HandoutDoc | undefined>;
+  handouts: Record<string, Handout | undefined>;
+  entries: readonly RecentHandout[];
+  rows: ReadonlyMap<string, RowState>;
+  setRows(update: (rows: ReadonlyMap<string, RowState>) => ReadonlyMap<string, RowState>): void;
+};
+
+function RecentWithLibrary(props: RecentListProps) {
+  const roomId = useRoomView((s) => s.roomId);
+  const library = useLibrary(roomId);
+  return <RecentRows {...props} library={library.rows} />;
+}
+
+function RecentRows(props: RecentListProps & { library: readonly AssetRow[] | null }) {
+  const roomId = useRoomView((s) => s.roomId);
+  const actions = useRoomActions();
+  const ui = useRoomUi();
+  const assets = useAssets();
+  const recent = useScoped(recentHandoutsSlot);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const room = recentRoomOf({ members: props.members, handoutDocs: props.docs, handouts: props.handouts }, props.library);
+  const offered = offerable(props.entries, room);
+  if (offered.length === 0) return null;
+  const { setRows } = props;
+  const settle = (key: string, state: RowState | null) =>
+    setRows((rows) => {
+      const next = new Map(rows);
+      if (state) next.set(key, state);
+      else next.delete(key);
+      return next;
+    });
+  const reshow = (entry: RecentHandout) => {
+    const key = entryKey(entry);
+    if (props.rows.get(key)?.busy) return;
+    const input = reshowInput(entry, room, actions.newId());
+    const result = input ? showHandoutOp(input) : null;
+    if (!result?.ok) return settle(key, { busy: false, problem: result?.error ?? "That handout can no longer be shown." });
+    const op = result.op;
+    const n = actions.dispatch(op, {
+      quiet: true,
+      onAnswer: (answer, refusal) => {
+        if (answer === "taken") {
+          loadRecent(recent, roomId);
+          rememberShow(recent, shownOf(op, entry), Date.now());
+        }
+        const problem = answer === "taken" ? null : reshowProblem(answer, refusal);
+        // Closed while it went: no row is left to say so, so a toast does.
+        if (!mounted.current && problem) ui.notify(problem, "error");
+        settle(key, problem ? { busy: false, problem } : null);
+      },
+    });
+    if (n === null) return settle(key, { busy: false, problem: "That handout could not be sent." });
+    settle(key, { busy: true });
+  };
+  return (
+    <>
+      <Help>Recent</Help>
+      {/*
+       * Set in as the Showing list's rows are, by the list's own padding, so
+       * its rows read as a column of their own beside the section's edge.
+       * Each row's line runs the whole width, as a row list's does.
+       */}
+      <ul aria-label="Recent handouts" style={{ listStyle: "none", margin: 0, padding: `0 ${theme.space(3)}px` }}>
+        {offered.map((entry, i) => {
+          const key = entryKey(entry);
+          const words = recentRowWords(entry, props.members);
+          const state = props.rows.get(key);
+          const thumb = entry.kind === "image" ? entry.assetId : props.docs[entry.docId]?.pages[0]?.assetId;
+          return (
+            <li
+              key={key}
+              style={{
+                display: "grid",
+                gap: theme.space(1),
+                margin: `0 -${theme.space(3)}px`,
+                padding: `${theme.space(2)}px ${theme.space(3)}px`,
+                borderTop: i === 0 ? undefined : `${theme.line.border}px solid ${theme.color.border}`,
+              }}
+            >
+              {/* The button goes under the title wherever the whole title and the button do not fit on one line, so a short title is never cut for the button's sake. */}
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(3), rowGap: theme.space(2) }}>
+                <span style={{ flex: "1 1 auto", minWidth: 0, display: "flex", alignItems: "center", gap: theme.space(3) }}>
+                  <img src={thumb ? assets.url(thumb, "thumb") : undefined} alt="" width={THUMB_PX} height={THUMB_PX} style={{ flex: "none", display: "block", objectFit: "cover", borderRadius: theme.radius.sm, background: theme.color.bg }} />
+                  <span style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(0.5) }}>
+                    <span style={{ fontSize: theme.font.input, fontWeight: theme.weight.strong, lineHeight: theme.leading.tight, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.title}</span>
+                    {words.detail ? <span style={{ fontSize: theme.font.small, lineHeight: theme.leading.tight, color: theme.color.textMuted }}>{words.detail}</span> : null}
+                  </span>
+                </span>
+                <Button size="sm" icon="shown" aria-label={words.label} busy={state?.busy === true} onClick={() => reshow(entry)} style={{ maxWidth: "100%" }}>
+                  {words.button}
+                </Button>
+              </div>
+              {state && !state.busy ? <ErrorText>{state.problem}</ErrorText> : null}
+            </li>
+          );
+        })}
+      </ul>
+    </>
+  );
+}
+
 function ShowHandout(props: {
   members: Record<string, Member | undefined>;
   docs: Record<string, HandoutDoc | undefined>;
@@ -245,6 +382,7 @@ function ShowHandout(props: {
   const assets = useAssets();
   const draftStore = useScoped(handoutDraftSlot);
   const draft = useStore(draftStore);
+  const recent = useScoped(recentHandoutsSlot);
   const set = useCallback((patch: Partial<HandoutDraft>) => draftStore.setState({ ...draftStore.getState(), ...patch }), [draftStore]);
   const { open, pick, title, audience, chosen } = draft;
   const pdf = usePdfJob();
@@ -307,7 +445,8 @@ function ShowHandout(props: {
       key={a.id}
       type="button"
       aria-label="Use this image"
-      onClick={() => draftStore.setState(withPick(draftStore.getState(), { kind: "image", asset: a }, ""))}
+      // A library image has no file name to take a title from, so it takes the one this device last showed it with (designs/qol chips C4).
+      onClick={() => draftStore.setState(withPick(draftStore.getState(), { kind: "image", asset: a }, rememberedTitle(recent.getState().entries, { kind: "image", assetId: a.id }) ?? ""))}
       style={{ padding: 0, border: `${theme.line.border}px solid ${theme.color.border}`, borderRadius: theme.radius.sm, background: "transparent", cursor: "pointer", aspectRatio: "1" }}
     >
       <img src={assets.url(a.id, "thumb")} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: theme.radius.sm }} />
@@ -386,7 +525,16 @@ function ShowHandout(props: {
           : null;
     if (!result) return setError("Pick an image first.");
     if (!result.ok) return setError(result.error);
-    actions.dispatch(result.op);
+    const shown: RecentPick | null = pick?.kind === "doc" ? { kind: "doc", docId: pick.docId } : pick?.kind === "image" ? { kind: "image", assetId: pick.asset.id } : null;
+    const op = result.op;
+    // Remembered once taken, so Recent never offers a show the server refused (recent.ts rememberShow).
+    actions.dispatch(op, {
+      onAnswer: (answer) => {
+        if (answer !== "taken" || !shown) return;
+        loadRecent(recent, roomId);
+        rememberShow(recent, shownOf(op, shown), Date.now());
+      },
+    });
     draftStore.setState(EMPTY_DRAFT);
   };
 
@@ -502,7 +650,14 @@ function ShowHandout(props: {
         )}
         {status ? <Loading text={status} /> : null}
       </div>
-      <Field label="Title" value={title} maxLength={TITLE_FIELD_MAX} onChange={(e) => draftStore.setState(withTypedTitle(draftStore.getState(), e.target.value))} placeholder="The old map" />
+      <Field
+        label="Title"
+        value={title}
+        maxLength={TITLE_FIELD_MAX}
+        onChange={(e) => draftStore.setState(withTypedTitle(draftStore.getState(), e.target.value))}
+        placeholder="The old map"
+        hint={pick?.kind === "image" ? "This device keeps the title for the next time you show this image." : undefined}
+      />
       <RadioCards<"all" | "some">
         legend="Show to"
         value={audience}
