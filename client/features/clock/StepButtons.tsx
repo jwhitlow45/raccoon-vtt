@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, useState } from "react";
 import { Button } from "../../components/Button.tsx";
 import { ErrorText, Input, Select } from "../../components/Field.tsx";
 import { SectionLabel } from "../../components/Panel.tsx";
@@ -6,48 +6,43 @@ import { theme } from "../../lib/theme.ts";
 import { useRoomActions } from "../../state/view.ts";
 import { AMOUNT_UNITS, amountBy, stepName, STEPS, toDawn, type AmountUnit } from "./words.ts";
 
-/** Other amount's row: whether it shows, what is typed, its unit and the last refusal. */
-export type OtherAmount = { readonly open: boolean; readonly count: string; readonly unit: AmountUnit; readonly error: string | null };
-
-export const NO_OTHER_AMOUNT: OtherAmount = { open: false, count: "", unit: "hours", error: null };
-
 /**
  * Move the clock on (docs/design/design-v1-calendar.md 4.2): 10 minutes, 1 hour,
- * 8 hours and To dawn, each one `clock.advance`, then Other amount in a row
- * that opens in place. Every step applies at once, and the top bar's Undo is
- * the way back from a stray tap: there is no negative step, and no guard
- * against a second quick tap (D-261102-120). The four sit 2 by 2 and become
- * one column where the sheet's content is under 360 px wide (never more than two columns, however wide it is).
+ * 8 hours and To dawn, each one `clock.advance`, then Other amount, which
+ * opens its row in place. Every step applies at once, and the top bar's Undo
+ * is the way back from a stray tap: there is no negative step, and no guard
+ * against a second quick tap (D-261102-120).
  *
- * Other amount's row, open or not, with its number and unit, comes from the
- * Ambiance panel's top (`amount`), above the Sound subpages that replace the
- * whole first page, so Back finds it as it was left
- * (docs/design/design-v1-panel-groups.md 4.1, D-261102-763).
+ * The five are one size (docs/design/design-v1-sound-layout.md 7,
+ * D-261106-095): equal 44 px buttons in one grid, two by two where the
+ * content is 360 px wide or more and one column below (never more than two,
+ * however wide), with Other amount… across its own row. Move on keeps the
+ * default size too.
  */
-export function StepButtons(props: { now: number; amount: OtherAmount; onAmount(next: OtherAmount): void }) {
+export function StepButtons(props: { now: number }) {
   const actions = useRoomActions();
   const nameId = useId();
-  const { open: other, count, unit, error } = props.amount;
-  const set = (patch: Partial<OtherAmount>) => props.onAmount({ ...props.amount, ...patch });
+  const [other, setOther] = useState(false);
+  const [count, setCount] = useState("");
+  const [unit, setUnit] = useState<AmountUnit>("hours");
+  const [error, setError] = useState<string | null>(null);
   const dawn = toDawn(props.now);
   const step = (by: number) => actions.dispatch({ t: "clock.advance", by });
 
   const moveOn = () => {
     const amount = amountBy(count, unit);
     if (!amount.ok) {
-      set({ error: amount.reason });
+      setError(amount.reason);
       return;
     }
     step(amount.by);
-    set({ count: "", error: null });
+    setCount("");
+    setError(null);
   };
 
   return (
     <div style={{ display: "grid", gap: theme.space(2), minWidth: 0 }}>
-      {/* An h4, as the sections around it in Ambiance's Time group are, under the group's h3. */}
-      <SectionLabel id={nameId} level={4}>
-        Move the clock on
-      </SectionLabel>
+      <SectionLabel id={nameId}>Move the clock on</SectionLabel>
       <div role="group" aria-labelledby={nameId} style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(max(176px, calc(50% - ${theme.space(1)}px)), 1fr))`, gap: theme.space(2) }}>
         {STEPS.map((s) => (
           <Button key={s.id} aria-label={stepName(s.label)} onClick={() => step(s.by)}>
@@ -57,9 +52,7 @@ export function StepButtons(props: { now: number; amount: OtherAmount; onAmount(
         <Button aria-label={dawn.name} onClick={() => step(dawn.by)}>
           To dawn
         </Button>
-      </div>
-      <div style={{ display: "flex" }}>
-        <Button size="sm" expanded={other} onClick={() => set({ open: !other })}>
+        <Button expanded={other} onClick={() => setOther(!other)} style={{ gridColumn: "1 / -1" }}>
           Other amount…
         </Button>
       </div>
@@ -80,10 +73,13 @@ export function StepButtons(props: { now: number; amount: OtherAmount; onAmount(
               value={count}
               error={error !== null}
               autoFocus
-              onChange={(e) => set({ count: e.target.value, error: null })}
+              onChange={(e) => {
+                setCount(e.target.value);
+                setError(null);
+              }}
               style={{ flex: "1 1 0", minWidth: 0, textAlign: "right" }}
             />
-            <Select aria-label="Unit" value={unit} onChange={(e) => set({ unit: e.target.value as AmountUnit })} style={{ flex: "none" }}>
+            <Select aria-label="Unit" value={unit} onChange={(e) => setUnit(e.target.value as AmountUnit)} style={{ flex: "none" }}>
               {AMOUNT_UNITS.map((u) => (
                 <option key={u.value} value={u.value}>
                   {u.label}
@@ -91,7 +87,7 @@ export function StepButtons(props: { now: number; amount: OtherAmount; onAmount(
               ))}
             </Select>
           </div>
-          <Button type="submit" variant="primary" size="sm" block>
+          <Button type="submit" variant="primary" block>
             Move on
           </Button>
           <ErrorText>{error}</ErrorText>

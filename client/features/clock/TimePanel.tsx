@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { clockNow, dateText, fightStarted } from "#shared/calendar.ts";
 import type { RoomClock } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
@@ -10,8 +10,8 @@ import { useRoomActions, useRoomView } from "../../state/view.ts";
 import type { PanelProps } from "../panels.ts";
 import { CalendarDialog } from "./CalendarDialog.tsx";
 import { SetTimeDialog } from "./SetTimeDialog.tsx";
-import { SHARE_HELP, START_DRAFT, StartClock, type StartDraft } from "./StartClock.tsx";
-import { NO_OTHER_AMOUNT, StepButtons, type OtherAmount } from "./StepButtons.tsx";
+import { SHARE_HELP, StartClock } from "./StartClock.tsx";
+import { StepButtons } from "./StepButtons.tsx";
 import { calendarSummary, timeLine } from "./words.ts";
 
 export const NOT_SHARING = "The DM isn't sharing the date and time now.";
@@ -20,44 +20,22 @@ export const HIDDEN_NOTE = "Players don't see the date and time.";
 export const STOP_HELP = "Removes the date and time for everyone. Undo setup in Setup history brings them back.";
 
 /**
- * The Time panel (docs/design/design-v1-sound-layout.md 3), a stub that
- * draws today's Time section until lane SL-A's Time panel takes its place:
- * the DM's with Other amount and the start form kept here, a player's
- * with the date and time, or the line that says the DM isn't sharing them.
- */
-export default function TimePanel(_props: PanelProps) {
-  const role = useRoomView((s) => s.you?.role);
-  const [amount, setAmount] = useState<OtherAmount>(NO_OTHER_AMOUNT);
-  const [draft, setDraft] = useState<StartDraft>(START_DRAFT);
-  const clockId = useRoomView((s) => s.view?.clock?.id ?? null);
-  // A clock started, here or on another device, used the form up: the next start begins afresh.
-  useEffect(() => {
-    if (clockId !== null) setDraft(START_DRAFT);
-  }, [clockId]);
-  return <TimeSection {...(role === "dm" ? { kept: { amount, onAmount: setAmount, draft, onDraft: setDraft } } : null)} />;
-}
-
-/** What the DM's Time keeps above Ambiance's Sound subpages (docs/design/design-v1-panel-groups.md 4.1, D-261102-763): Other amount, and the start form with no clock. */
-export type TimeKept = { amount: OtherAmount; onAmount(next: OtherAmount): void; draft: StartDraft; onDraft(next: StartDraft): void };
-
-/**
- * Time (docs/design/design-v1-calendar.md 4), Ambiance's Time section
- * (docs/design/design-v1-panel-groups.md 4.1): the room's in-game date and
+ * The Time panel (docs/design/design-v1-calendar.md 4, its own panel again
+ * in docs/design/design-v1-sound-layout.md 3): the room's in-game date and
  * time. Everyone with a clock reads the date and the time with its part of
  * the day, in a polite live region so the DM hears a step land. The DM also
  * starts the clock, moves it on, sets it, picks its calendar, chooses
- * whether players see it, and stops it. A player whose Ambiance keeps Time
- * after sharing stops is told so until they close it
- * (features/ambiance/kept.ts). `kept` is the DM's alone.
+ * whether players see it, and stops it. A player's Time left open when the
+ * DM stops sharing says so until they close it (pages/timeSound.ts keeps it
+ * listed).
  */
-export function TimeSection(props: { kept?: TimeKept }) {
+export default function TimePanel(_props: PanelProps) {
   const role = useRoomView((s) => s.you?.role);
   const clock = useRoomView((s) => s.view?.clock ?? null);
   const encounter = useRoomView((s) => s.view?.encounter ?? null);
-  const { kept } = props;
 
   if (role === undefined) return null;
-  if (!clock) return role === "dm" && kept ? <StartClock draft={kept.draft} onDraft={kept.onDraft} /> : <Empty>{NOT_SHARING}</Empty>;
+  if (!clock) return role === "dm" ? <StartClock /> : <Empty>{NOT_SHARING}</Empty>;
 
   const now = clockNow(clock, encounter);
   return (
@@ -70,14 +48,14 @@ export function TimeSection(props: { kept?: TimeKept }) {
           {timeLine(now)}
         </span>
       </div>
-      {/* Keyed by the clock, so an armed Stop or an open dialog goes with the clock it was for, however it went: a stop here or on another device, or an Undo (ASTRA-07). */}
-      {role === "dm" && kept ? <RunningClock key={clock.id} clock={clock} now={now} fight={fightStarted(encounter)} amount={kept.amount} onAmount={kept.onAmount} /> : null}
+      {/* Keyed by the clock, so an armed Stop, an open dialog or Other amount's row goes with the clock it was for, however it went: a stop here or on another device, or an Undo (ASTRA-07). */}
+      {role === "dm" ? <RunningClock key={clock.id} clock={clock} now={now} fight={fightStarted(encounter)} /> : null}
     </div>
   );
 }
 
 /** The DM's controls of a running clock (4.2). */
-function RunningClock(props: { clock: RoomClock; now: number; fight: boolean; amount: OtherAmount; onAmount(next: OtherAmount): void }) {
+function RunningClock(props: { clock: RoomClock; now: number; fight: boolean }) {
   const { clock } = props;
   const actions = useRoomActions();
   const [dialog, setDialog] = useState<"set" | "calendar" | null>(null);
@@ -88,7 +66,7 @@ function RunningClock(props: { clock: RoomClock; now: number; fight: boolean; am
     <>
       {props.fight ? <Help>{FIGHT_NOTE}</Help> : null}
       {clock.shown ? null : <Help>{HIDDEN_NOTE}</Help>}
-      <StepButtons now={props.now} amount={props.amount} onAmount={props.onAmount} />
+      <StepButtons now={props.now} />
       <div style={{ display: "flex" }}>
         <Button ref={setButton} onClick={() => setDialog("set")}>
           Set the date and time…
