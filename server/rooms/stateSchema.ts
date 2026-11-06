@@ -1064,7 +1064,8 @@ function sortedKeys(record: Readonly<Record<string, unknown>> | undefined): stri
  * Background, and the live run's order and `next` are music. An effect
  * entry is history and may name any sound, present or not, and a run's
  * playlist is a label that may name a deleted one, whose tracks the run's
- * order is never compared with, since a run keeps the order it started with.
+ * order need not match, since the queue's edits change the order once it
+ * starts (docs/design/design-v1-music-player.md 6.1).
  * Otherwise an imported room would play a gap or a sound as the wrong kind,
  * or refuse its own next tick.
  */
