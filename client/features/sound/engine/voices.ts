@@ -288,17 +288,21 @@ export class Voices {
   update(plans: readonly VoicePlan[], leaveMs: (plan: VoicePlan) => number): void {
     this.#plans = plans;
     const wanted = new Map(plans.map((p) => [p.key, p]));
+    // Music the plan names under another key but at the same place: a change of Repeat or Crossfade during Repeat one's
+    // later passes moves `now.at` to the pass sounding, which renames its voice. The voice plays on as it is.
+    const heirs = new Map(plans.filter((p) => p.channel === "music" && !this.#live.has(p.key)).map((p) => [`${p.soundId}:${p.startAt}`, p]));
     const t = this.#env.serverNow();
-    for (const [key, v] of this.#live) {
+    for (const [key, v] of [...this.#live]) {
       if (v.leaving) continue;
       const plan = wanted.get(key);
+      const heir = plan || v.plan.channel !== "music" ? undefined : heirs.get(`${v.plan.soundId}:${v.plan.startAt}`);
       if (plan) {
-        const volumeChanged = plan.volume !== v.plan.volume || plan.level !== v.plan.level;
-        // A promotion during a crossfade, or a pause or a change of repeat in one, gives the voice another gain now.
-        if (gainAt(plan.envelope, t) !== gainAt(v.plan.envelope, t)) v.smoothUntil = t + SHORT_FADE_MS;
-        v.plan = plan;
-        if (volumeChanged) this.#ramp(v.mix.gain, mixGain(plan), SHORT_FADE_MS);
-        this.#envelope(v);
+        this.#keep(v, plan, t);
+      } else if (heir) {
+        heirs.delete(`${heir.soundId}:${heir.startAt}`);
+        this.#live.delete(key);
+        this.#live.set(heir.key, v);
+        this.#keep(v, heir, t);
       } else if (t >= v.plan.startAt + v.plan.lengthMs) {
         this.#ended(v);
       } else {
@@ -312,6 +316,16 @@ export class Voices {
       if (!this.#live.has(plan.key)) this.#start(plan);
     }
     this.#reportMusic();
+  }
+
+  /** A voice that stays takes its new plan: its envelope and mix move to it, and its element and fade go on untouched. */
+  #keep(v: Live, plan: VoicePlan, t: number): void {
+    const volumeChanged = plan.volume !== v.plan.volume || plan.level !== v.plan.level;
+    // A promotion during a crossfade, or a pause or a change of repeat in one, gives the voice another gain now.
+    if (gainAt(plan.envelope, t) !== gainAt(v.plan.envelope, t)) v.smoothUntil = t + SHORT_FADE_MS;
+    v.plan = plan;
+    if (volumeChanged) this.#ramp(v.mix.gain, mixGain(plan), SHORT_FADE_MS);
+    this.#envelope(v);
   }
 
   /** Once a second: a dropped seek put right, the envelopes renewed, starts that waited for an element, ends released. */
