@@ -79,6 +79,7 @@ describe("the scene's weather rows", () => {
   test("calm has no compass", () => {
     const html = render({ kind: "rain" });
     assert.doesNotMatch(html, /Wind blows toward/);
+    assert.doesNotMatch(html, />Direction</);
     assert.match(text(html), /Strength/);
     assert.match(html, />Light</);
     assert.match(html, />Heavy</);
@@ -89,7 +90,8 @@ describe("the scene's weather rows", () => {
     const names = [...html.matchAll(/<input type="radio"[^>]*aria-label="(Toward the [a-z ]+)"/g)].map((m) => m[1]);
     assert.deepEqual(names, ["Toward the top", "Toward the top right", "Toward the right", "Toward the bottom right", "Toward the bottom", "Toward the bottom left", "Toward the left", "Toward the top left"]);
     assert.match(html, /<input type="radio" aria-label="Toward the bottom right"[^>]*checked=""/);
-    assert.match(html, /The map&#x27;s edges as Top-down shows them\./);
+    assert.match(text(html), / Direction Where it blows toward, by the map&#x27;s edges as Top-down shows them\. /, "the row is Direction, its help keeping the wind's toward");
+    assert.doesNotMatch(html, /Blows toward/);
     const west = render({ kind: "snow", wind: "moderate", toward: 270 });
     assert.match(west, /<input type="radio" aria-label="Toward the left"[^>]*checked=""/);
   });

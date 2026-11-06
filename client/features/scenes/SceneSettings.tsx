@@ -393,7 +393,7 @@ function MapGrid(props: { scene: Scene; map: NonNullable<Scene["map"]>; close: P
       {/* Counting assumes squares that start at the image's corner. A grid whose first line sits before the image
           only comes from a Universal VTT file, and counting would slide the image half a square under its walls. */}
       {hex || map.originPx.x < 0 || map.originPx.y < 0 ? null : (
-        <SettingRow name="Or count the squares" wide>
+        <SettingRow name="Square count" wide>
           <div style={{ display: "grid", gap: theme.space(1) }}>
             {/* The counts keep their line together, so Apply wraps under them whole on a narrow phone, never beside one of them. */}
             <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>

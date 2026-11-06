@@ -165,8 +165,19 @@ describe("Copy to other scenes… (docs/design/design-v1-scenes-reorg.md 6)", ()
   });
 });
 
+describe("Sight sources (docs/design/design-v1-polish-pass.md 4.2)", () => {
+  test("with party vision on, the party creatures' row is Sight sources on a party scene and a per-player one alike", () => {
+    for (const perPlayer of [false, true]) {
+      const html = render(table({ on: true, light: "dark", ...(perPlayer ? { perPlayer: true } : {}) }));
+      assert.equal((html.match(/>Sight sources</g) ?? []).length, 1, `per player ${perPlayer}`);
+      assert.doesNotMatch(html, /Who lends/);
+    }
+    assert.doesNotMatch(render(table({ on: false, light: "dark" })), /Sight sources/, "with party vision off nothing lends sight");
+  });
+});
+
 describe("the scene's light, first in Light and weather (D-261102-933)", () => {
-  test("with party vision on: Light and its level's note, then the light with each map phase", () => {
+  test("with party vision on: Light and its level's note, then Light per phase", () => {
     const view = table({ on: true, light: "dim" });
     const phase = { assetId: "a", widthPx: 700, heightPx: 700 };
     view.scenes.s1 = { ...view.scenes.s1!, phases: [{ id: "p1", name: "Day", ...phase }, { id: "p2", name: "Night", ...phase }] };
@@ -174,7 +185,9 @@ describe("the scene's light, first in Light and weather (D-261102-933)", () => {
     assert.match(html, /aria-label="Light level"/);
     assert.match(html, /Dim everywhere: shadows the party sees darker\./);
     assert.match(html, /A phase&#x27;s light becomes the scene&#x27;s light/);
-    assert.match(html, /aria-label="Light with Night"/);
+    assert.ok(html.indexOf(">Light per phase<") > html.indexOf(">Light<"), "the row named Light per phase, after Light");
+    assert.doesNotMatch(html, /Light with each map phase/);
+    assert.match(html, /aria-label="Light with Night"/, "each phase's pick still names its phase");
     assert.doesNotMatch(html, /Light works only with party vision/);
     assert.doesNotMatch(html, /Players see|Sight|Switches/, "Fog and vision's rows stay in their group");
   });

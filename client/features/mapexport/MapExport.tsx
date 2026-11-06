@@ -213,7 +213,7 @@ export function MapExport(props: { scene: Scene }) {
       ) : null}
 
       <SettingRow
-        name="Who it is for"
+        name="Version"
         help={
           view === "player"
             ? "What players can see: secret doors not yet found are walls, and lock marks, DM-only stamps, and labels and stamps under the fog are left out."
@@ -222,7 +222,7 @@ export function MapExport(props: { scene: Scene }) {
         wide
       >
         <Segmented<ExportView>
-          label="Who it is for"
+          label="Version"
           value={view}
           options={[
             { value: "player", label: "Player view" },

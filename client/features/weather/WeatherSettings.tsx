@@ -97,7 +97,7 @@ function WeatherBody(props: { picker: Picker; weather: Weather | undefined; forc
         )}
       </SettingRow>
       {picker.wind === "calm" ? null : (
-        <SettingRow name="Blows toward" wide help="The map's edges as Top-down shows them.">
+        <SettingRow name="Direction" wide help="Where it blows toward, by the map's edges as Top-down shows them.">
           <Compass value={picker.toward} onChange={(toward) => change({ toward })} />
         </SettingRow>
       )}

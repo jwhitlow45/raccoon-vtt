@@ -149,6 +149,12 @@ describe("the scene settings page's groups (docs/design/design-v1-scenes-reorg.m
     assert.equal((page(PHONE).match(/<span id="[^"]+-summary"/g) ?? []).length, 4, "open, Light and weather shows no summary");
   });
 
+  test("Map and grid's count row is Square count", () => {
+    const html = page(ALL_OPEN, { map: MAP });
+    assert.equal((html.match(/>Square count</g) ?? []).length, 1);
+    assert.doesNotMatch(html, /Or count the squares/);
+  });
+
   test("each group's summary asks for its whole words, never the 4em floor that cut Map and grid's and Walls and movement's (docs/design/design-v1-polish-pass.md 3.1)", () => {
     const html = page({ ...PHONE, light: false }, { map: MAP, weather: { kind: "rain", heavy: true, wind: "strong" } });
     const looks = [...html.matchAll(/<span id="[^"]+-summary" style="([^"]*)"/g)].map((m) => m[1]!);

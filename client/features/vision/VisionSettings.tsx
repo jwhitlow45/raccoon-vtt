@@ -74,7 +74,7 @@ export function LightSettings(props: { scene: Scene }) {
 
       {phases ? (
         <SettingRow
-          name="Light with each map phase"
+          name="Light per phase"
           help={on ? "A phase's light becomes the scene's light when the map switches to it, and at once for the phase showing now, so Night can make the scene dark." : LIGHT_NEEDS_VISION}
           wide
         >
@@ -495,7 +495,7 @@ function Sources(props: { sceneId: string; perPlayer: boolean }) {
   const owners = useMemo(() => (members ? { members, holders: holders ?? {}, characters: characters ?? {} } : null), [members, holders, characters]);
   const lending = report.rows.filter((r) => r.lends).length;
   return (
-    <SettingRow name={props.perPlayer ? "Who lends sight" : "Who lends the party sight"} wide>
+    <SettingRow name="Sight sources" wide>
       <div style={{ display: "grid", gap: theme.space(2), width: "100%", minWidth: 0 }}>
         {report.rows.length === 0 ? (
           <Note>No party creature is on this scene. Players see only what they explored before.</Note>
