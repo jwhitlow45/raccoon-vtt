@@ -43,7 +43,7 @@ The SRD names no calendar. Published settings' calendars are not SRD content, so
 
 ### 4.1 Starting the clock
 
-The DM opens **Time** (a new panel, "In play" group, after Areas, and in a DM's "Run the table" group since the panel groups change). With no clock it reads:
+The DM opens **Time** (a new panel, "In play" group, after Areas, then in a DM's "Run the table" group, and since docs/design/design-v1-panel-groups.md the Time section of the Ambiance panel, folded once a clock runs). With no clock it reads:
 
 - "Track the in-game date and time. You move the clock on as time passes. Party Long Rests and fights move it too."
 - **Calendar**, two radio cards: **Day count** ("Day 1, Day 2 and on.") and **Months** ("Months, weekdays and years with names you choose."). Months opens the Calendar dialog (4.3), whose Save only keeps the calendar as a draft on this form, named beside the card ("12 months, 7-day week", with Change). Nothing is sent until Start the clock.
@@ -85,6 +85,8 @@ Every step applies at once and shows on every device. A mistake is the top bar's
 
 ### 4.4 What players see
 
+Amended by docs/design/design-v1-panel-groups.md 5: players get Time as a section of Ambiance, listed while the view holds the clock or something plays, and kept until Ambiance closes.
+
 - While the DM shares it, players get the Time panel (date, time, part of the day, nothing else), the top bar chip from 900 px up, a toast for each clock line while the Log and the Time panel are closed, and the lines in the Log.
 - Behind a blackout players get no clock and no clock lines, as they get no encounter and no encounter lines, and get both back when it ends.
 - With sharing off, or no clock, the Time panel is not in their list. A player whose Time panel is open when sharing stops keeps it open, reading "The DM isn't sharing the date and time now.", until they close it.
@@ -104,6 +106,8 @@ Every step applies at once and shows on every device. A mistake is the top bar's
 - A clock started or Set mid-fight reads the time the DM typed. The reducer stores that time less the fight's seconds so far, so the rounds after it add on and the end counts only them.
 
 ### 4.7 Log, toasts and the journal
+
+Amended by docs/design/design-v1-panel-groups.md 4.1: clock toasts show while neither the Log nor an open Time group in Ambiance is on screen.
 
 - Each clock change writes one line, with the date as it read then:
   - "8 hours pass. It is now Day 4, 6:00 AM." ("1 hour passes.", "2 days and 3 hours pass.")

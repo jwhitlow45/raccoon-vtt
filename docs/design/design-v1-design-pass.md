@@ -144,6 +144,8 @@ Sections 4 and 5. Every fix keeps every control and every way to reach it. Two f
 
 ### 4.1 The scene settings page (DP1, DP2, DP3, DP13)
 
+Amended by docs/design/design-v1-scenes-reorg.md 3 and 6: the groups are renamed and regrouped (What players see becomes Fog and vision, Map image and grid becomes Map and grid, with Light and weather and Scene sound added), and Light and weather is the one group open on a phone.
+
 - **The groups become `Group`s**, in today's order. Their icons are icon names from components/Icon.tsx: What players see takes `shown`, Map image and grid `image`, Walls and movement `walls`, and the fourth `scenes`. Their fold keys stay `players`, `map`, `walls` and `scene` (features/scenes/settingsFolds.ts:16), in today's store (`rvtt.sceneSettingsFolds`), with today's defaults: What players see open everywhere, the rest open from 900 px of layout. The page folds with `keep` today (SceneSettings.tsx:65), so a folded group's fields and questions stay mounted, and `Group` gains the same `keep`, drawn as `Section`'s (Panel.tsx:88-93, :118). Export as image and Delete stay `Section`s with their capitals labels, as a page's last parts that never fold.
 - **The fourth group is named "Size and view"** (D-261028-07), for what it holds: the size in squares or hexes, the background, the starting view and the suggested view. "Scene" would sit right under the new "This scene" label. The key `scene` stays, so a device's folds carry over. The name changes in `SCENE_GROUP_LABELS` (settingsFolds.ts:23) and in every e2e line that reads it (section 5).
 - **Folded summaries**, from one pure function, `sceneGroupSummary(scene, group, roomSettings)` in `features/scenes/sceneSummary.ts`:

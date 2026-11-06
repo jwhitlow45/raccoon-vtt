@@ -33,6 +33,8 @@ Ideas only: **Foundry VTT** plays playlists in sequence, shuffled, all at once o
 
 ### 4.1 The Sound panel
 
+Amended by docs/design/design-v1-panel-groups.md 4.1: the Sound panel is the Sound section of the Ambiance panel, its first page in D-261102-766's order (Now playing with Stop all sound, Effects, What players hear, Music, Background, On this device), the music's buttons above its time, and "Back to Ambiance". Amended by docs/design/design-v1-scenes-reorg.md 5: the scene's sound line moves to Scenes' Scene sound group, and Now playing's part keeps a Scene sound row and Use what's playing.
+
 `panel({ id: "sound", title: "Sound", icon: "music", order: 23, group: "play" })`, after DM and before Scenes. The DM always has it. A player has it while the room plays something, and an open one stays until closed, as the calendar's Time panel does (D-261102-462). Top to bottom:
 
 1. **Now playing.** The music: its name, under it "Tavern night · 3 of 12" (or "3 of 12" once its playlist is deleted, since the run keeps the old id only as a label, "One track" for a single track), and "1:24 / 3:10" in tabular digits over a thin bar stepping once a second while the panel shows. Four 44 px buttons: **Pause** (**Play** while paused), **Skip** ("Skip to the next track"), **Stop** ("Stop the music") and **Repeat**, stepping Repeat all, Repeat one and Repeat off and naming its state. Then **Music volume for everyone** (0 to 100%), each background sound with **<name> volume for everyone** and Stop ("Stop Rain"), **Effects volume for everyone**, and **Stop all sound**, which stops effects too. With nothing playing: "Nothing is playing."
@@ -65,6 +67,8 @@ Refusals, each on its row, the others going on: "Rain.ogg: this browser can't re
 
 ### 4.3 What players see
 
+Amended by docs/design/design-v1-panel-groups.md 5: a player's Sound is a section of Ambiance, with no folds.
+
 Their device plays if they said so (4.4). Their Sound panel holds Now playing and On this device. With names shared: "Music: The Prancing Pony" and "Background: Rain, Crowd". Without: "Music is playing." and "2 background sounds are playing." A name changes once a crossfade ends. A track loading after 200 ms adds "Loading the music…", one that cannot load "The music didn't load on this device." with Try again, and a page waiting for a tap "Tap anywhere to start the sound." No log line and no toast follows a change, and effects show nowhere (D-261102-479).
 
 ### 4.4 This device, the ask, and one page per browser
@@ -82,6 +86,8 @@ This device's **Sounds** section: **Room sound**, a switch, "Music, background s
 A display plays by default, if its browser can (5.5). Its tap menu gains **Sound**: On or Off, kept in features/display/remember.ts apart from a member's setting, as its view is. The TV's remote sets the volume. When audio waits for an activation, a card at the bottom left says "Tap or press a key for sound." A browser without what the mixer needs shows "This TV's browser can't play the room's sound. Play it from another device." Behind a blackout it is silent.
 
 ### 4.6 Scenes, blackout and the X-card
+
+Amended by docs/design/design-v1-scenes-reorg.md 5: set in the scene's settings, Scene sound, or with Use what's playing in Ambiance's Sound.
 
 - **A scene's sound** is what played when the DM tapped Use what's playing (the music's playlist or track with its repeat, shuffle and crossfade, or none, and up to 4 loops with their volumes), or silence by Use silence. "Move the players here" (features/scenes/SceneList.tsx) sends `sound.scene` with `onMove` right after `room.setPlayerScene`, and the reducer applies it only while the players' scene is still that scene, so a refused move or another DM's later move leaves it alone (D-261102-472). **Play it** sends it plainly. It replaces what plays: a run of the same playlist and loops of the same sounds keep playing, at the scene's volumes. Duplicate copies a scene's sound. "Like" and Use these settings on other scenes do not.
 - **Blackout.** Players and displays receive no sound and fade out over a second, and come back at the right place on resume. The DM's devices keep playing. An effect fired behind a blackout stays the DM's for good.
