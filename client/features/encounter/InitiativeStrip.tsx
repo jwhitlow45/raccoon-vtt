@@ -221,9 +221,14 @@ function Strip(props: { notice: boolean; stripRef?: Ref<HTMLDivElement> }) {
         </span>
         {yours ? <YourTurn notice={props.notice} fontSize={theme.font.small} inline slot={turnSlot} /> : null}
         {timer && current ? <TimerClock state={timer} /> : null}
-        {next.map((entry) => (
-          <Portrait key={entry.id} entry={entry} size={22} />
-        ))}
+        {/* One unpainted group: the row's parts beside the 26 px acting face are this group and its 22 px faces, not five smaller faces, so the row's heights agree (chips.md 5). */}
+        {next.length > 0 ? (
+          <span data-turn-faces="" style={{ flex: "none", display: "flex", alignItems: "center", gap: theme.space(1.5) }}>
+            {next.map((entry) => (
+              <Portrait key={entry.id} entry={entry} size={22} />
+            ))}
+          </span>
+        ) : null}
       </div>
       {you.role === "player" ? <EndTurnButton /> : <NextButton start={activeEntryId === null} empty={entries.length === 0} />}
     </div>
