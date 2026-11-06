@@ -392,7 +392,7 @@ describe("the Music window", { concurrency: false }, () => {
     await closeMusic();
   });
 
-  test("mu-3. a seek by keys, a drag that seeks once at its release, held short of the end under Repeat one, Previous twice within a round trip, Play then Seek before Play's answer, and Shuffle on and off", async () => {
+  test("mu-3. a seek by keys, a drag that seeks once at its release, one that seeks nothing once another DM starts another track, held short of the end under Repeat one, Previous twice within a round trip, Play then Seek before Play's answer, and Shuffle on and off", async () => {
     await fresh();
     await playTavern();
     let win = await openMusic();
@@ -435,6 +435,22 @@ describe("the Music window", { concurrency: false }, () => {
     assert.equal(released[0]!.soundId, playing);
     const lengthAt = dmSocket.state!.sounds![playing]!.ms;
     assert.ok(Math.abs((released[0]!.ms as number) - lengthAt / 2) < lengthAt * 0.1, `halfway, where it let go: ${released[0]!.ms} of ${lengthAt}`);
+
+    // A drag begun on this track as another DM starts the next: the rest of the press seeks nothing, its release included (MB-SOL-01).
+    const other = run.tavern[3]!;
+    from = dmSocket.sent.length;
+    await dm.mouse.move(track.x + track.width * 0.2, y);
+    await dm.mouse.down();
+    for (let i = 1; i <= 4; i++) await dm.mouse.move(track.x + track.width * (0.2 + 0.03 * i), y);
+    await ops.send({ t: "music.jump", run: randomUUID(), from: music()!.run, soundId: other, ms: 0, on: playing });
+    await win.locator("[data-music-track]").filter({ hasText: nameOf(other) }).waitFor();
+    for (let i = 5; i <= 10; i++) await dm.mouse.move(track.x + track.width * (0.2 + 0.03 * i), y);
+    await dm.mouse.up();
+    await sleep(800);
+    assert.equal(sentOps(from, "music.jump").length, 0, "no seek on the track another DM started");
+    assert.equal(music()!.now.soundId, other);
+    await ops.send({ t: "music.jump", run: randomUUID(), from: music()!.run, soundId: playing, ms: 0, on: other });
+    await waitFor("back on the track the steps below seek", () => (music()?.now.soundId === playing ? true : null));
 
     // Repeat one: End is held a second short of the end, less the crossfade.
     await win.getByRole("button", { name: "Repeat all", exact: true }).click();

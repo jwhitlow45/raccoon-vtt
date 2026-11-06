@@ -221,10 +221,14 @@ describe("when the seek slider sends", () => {
   }
   afterEach(() => mock.timers.reset());
 
+  // The run and track a value is given on: A, then B once another DM starts it.
+  const A = "r1\na";
+  const B = "r2\nb";
+
   test("a key's value sends 400 ms after the last, so a held arrow sends once", () => {
     const { g, sent, wait } = gesture();
     for (let i = 0; i < 5; i++) {
-      g.input();
+      assert.equal(g.input(A), true);
       wait(100);
     }
     assert.deepEqual(sent, []);
@@ -234,9 +238,9 @@ describe("when the seek slider sends", () => {
 
   test("a drag sends once, as it ends, and nothing while the pointer is down", () => {
     const { g, sent, wait } = gesture();
-    g.start();
+    g.start(A);
     for (let i = 0; i < 10; i++) {
-      g.input();
+      assert.equal(g.input(A), true);
       wait(200);
     }
     wait(500);
@@ -250,32 +254,58 @@ describe("when the seek slider sends", () => {
 
   test("a drag begun within 400 ms of a key: the key's timer never fires while the pointer is down (MB-ASTRA-05)", () => {
     const { g, sent, wait } = gesture();
-    g.input();
+    g.input(A);
     wait(100);
-    g.start();
+    g.start(A);
     wait(1_000);
     assert.deepEqual(sent, [], "held past the key's 400 ms");
-    g.input();
+    g.input(A);
     g.end();
     assert.deepEqual(sent, [1_100]);
   });
 
-  test("a seek dropped mid-drag, as the track changes, leaves the drag on: the values after arm no timer and the release sends (MUSIC-OPUS-4)", () => {
+  test("a drag on track A as another DM starts B: the seek in hand drops, the values after are refused, the release sends nothing, and the next press seeks again (MB-SOL-01)", () => {
     const { g, sent, wait } = gesture();
-    g.start();
-    g.input();
+    g.start(A);
+    assert.equal(g.input(A), true);
     wait(200);
+    // B plays: the window's effect drops A's seek, then the pointer goes on moving over B.
     g.drop();
-    g.input();
+    assert.equal(g.input(B), false, "no seek in hand made on B");
     wait(1_000);
-    assert.deepEqual(sent, []);
+    assert.equal(g.input(B), false, "for the rest of the press");
     g.end();
-    assert.deepEqual(sent, [1_200]);
+    wait(1_000);
+    assert.deepEqual(sent, [], "the release sends nothing, and no timer was armed");
+    g.start(B);
+    assert.equal(g.input(B), true);
+    g.end();
+    assert.deepEqual(sent, [2_200], "a new press on B seeks");
+  });
+
+  test("a value given on B before the window drops A's seek cancels the press too, as does a change with no value given yet", () => {
+    const { g, sent, wait } = gesture();
+    g.start(A);
+    g.input(A);
+    assert.equal(g.input(B), false, "B's first value, before the effect runs");
+    assert.equal(g.input(A), false, "and the press stays cancelled");
+    g.end();
+    assert.deepEqual(sent, []);
+    g.start(A);
+    wait(500);
+    assert.equal(g.input(B), false, "pressed on A, B playing before any value");
+    g.end();
+    assert.deepEqual(sent, []);
+    g.start(A);
+    g.input(A);
+    g.drop();
+    g.end();
+    assert.deepEqual(sent, [], "a drop with no value after it: the release sends nothing either");
   });
 
   test("a key's seek dropped before its timer sends nothing", () => {
     const { g, sent, wait } = gesture();
-    g.input();
+    g.input(A);
     wait(100);
     g.drop();
     wait(1_000);

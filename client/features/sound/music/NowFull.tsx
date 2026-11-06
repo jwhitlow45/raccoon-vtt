@@ -40,44 +40,66 @@ export type SeekTimers = { set(fn: () => void, ms: number): unknown; clear(handl
 
 const WINDOW_TIMERS: SeekTimers = { set: (fn, ms) => setTimeout(fn, ms), clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>) };
 
+/** The run and the playing track a seek is made on, as one value, so a gesture sees a change of either. */
+export function seekOn(lists: Pick<QueueLists, "run" | "playing">): string {
+  return `${lists.run}\n${lists.playing}`;
+}
+
 /**
  * When the slider sends its seek (4.2): once as a drag ends, and
  * SEEK_KEY_MS after the last value a key gave, so a held arrow sends one.
  * No timer runs inside a drag: its start disarms one a key armed just
- * before, and a value it gives arms none. `drop` disarms the timer of a
- * seek that no longer holds and leaves a drag on until the pointer lets
- * go, so the values it still gives wait for the release too. Only the
- * pointer's release ends a drag, never a key pressed while it is held:
- * the browser sends that release to the slider wherever the pointer lets
- * go. `commit` sends the seek in hand, if it still holds.
+ * before, and a value it gives arms none. Only the pointer's release ends
+ * a drag, never a key pressed while it is held: the browser sends that
+ * release to the slider wherever the pointer lets go. `commit` sends the
+ * seek in hand, if it still holds.
+ *
+ * A drag holds on to the run and track it began on (`on`, seekOn). Once
+ * either changes, by `drop` or by a value given on another, the rest of
+ * that press is cancelled: its values are refused, so no seek in hand is
+ * made on the new track, and its release sends nothing (MB-SOL-01). The
+ * DM's place was on the old track, and the next press starts afresh.
+ * `input` says whether to take its value.
  */
 export function seekGesture(commit: () => void, timers: SeekTimers = WINDOW_TIMERS) {
   let dragging = false;
+  let on = "";
+  let cancelled = false;
   let timer: unknown = null;
   const disarm = () => {
     if (timer !== null) timers.clear(timer);
     timer = null;
   };
   return {
-    start() {
+    start(at: string) {
       disarm();
       dragging = true;
+      on = at;
+      cancelled = false;
     },
     end() {
       if (!dragging) return;
       dragging = false;
       disarm();
-      commit();
+      if (!cancelled) commit();
     },
-    input() {
-      if (dragging) return;
+    input(at: string): boolean {
+      if (dragging) {
+        if (at !== on) cancelled = true;
+        return !cancelled;
+      }
       disarm();
       timer = timers.set(() => {
         timer = null;
         commit();
       }, SEEK_KEY_MS);
+      return true;
     },
-    drop: disarm,
+    /** A seek in hand no longer holds: its timer goes, and a drag under way is cancelled. */
+    drop() {
+      disarm();
+      if (dragging) cancelled = true;
+    },
   };
 }
 
@@ -198,7 +220,7 @@ export function NowFullView(props: {
  * time, and the ops its buttons send. Seek sends `music.jump` when a drag
  * ends, and 400 ms after the slider's last key, never during a drag. A
  * seek in hand is dropped when the run or the playing track changes before
- * it is sent (4.2).
+ * it is sent (4.2), and a drag under way then sends nothing at all.
  */
 export function NowFull() {
   const actions = useRoomActions();
@@ -247,13 +269,13 @@ export function NowFull() {
     setSeek(null);
   };
   const onSeek: SeekEvents = {
-    start: gesture.start,
+    start: () => gesture.start(seekOn(lists)),
     end: gesture.end,
     input: (ms) => {
+      if (!gesture.input(seekOn(lists))) return;
       const next = { run: lists.run, soundId: lists.playing, ms };
       setSeek(next);
       latest.current = { ...latest.current, seek: next };
-      gesture.input();
     },
   };
   const queue = (edit: { t: "shuffle"; seed: string } | { t: "unshuffle" }) => send(actions, { t: "music.queue", from: lists.run, edit });
