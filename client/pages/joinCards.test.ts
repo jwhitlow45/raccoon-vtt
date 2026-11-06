@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { askView, joinCards } from "./joinCards.ts";
+import { LETTING_IN, waitingLine } from "./askToJoin.ts";
 
 const cards = (over: Partial<Parameters<typeof joinCards>[0]>) => joinCards({ mode: "ask", picking: false, view: "password", looked: true, linked: false, ...over });
 
@@ -32,5 +33,12 @@ describe("the join page's cards", () => {
     assert.equal(askView({ tapped: true, found: true, spent: true, linked: false }), "ask", "Ask to join after Back");
     assert.equal(askView({ tapped: false, found: true, spent: false, linked: true }), "password", "a player link joins instead");
     assert.equal(askView({ tapped: false, found: false, spent: false, linked: false }), "password");
+  });
+});
+
+describe("the waiting card's status line", () => {
+  test("the spinner says the sentence, or the let-in line while the DM decides", () => {
+    assert.equal(waitingLine("Rowan"), "You asked to join as Rowan.");
+    assert.equal(LETTING_IN, "The DM is letting you in…");
   });
 });

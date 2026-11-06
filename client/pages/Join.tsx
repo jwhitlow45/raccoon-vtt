@@ -142,20 +142,18 @@ export function Join(props: {
     body = (
       <>
         <OutcomeCard outcome="closed">
-          <div style={{ display: "grid", gap: theme.space(2) }}>
-            <Button
-              // Under it the password card's Next stays the main way in, as beside No password?'s Ask to join.
-              variant={mode === "ask" ? "secondary" : "primary"}
-              onClick={() => {
-                setClosed(false);
-                // The request it ended on is spent, so the ask card starts fresh.
-                setSpent(true);
-                setTapped(true);
-              }}
-            >
-              Ask again
-            </Button>
-          </div>
+          <Button
+            // Under it the password card's Next stays the main way in, as beside No password?'s Ask to join.
+            variant={mode === "ask" ? "secondary" : "primary"}
+            onClick={() => {
+              setClosed(false);
+              // The request it ended on is spent, so the ask card starts fresh.
+              setSpent(true);
+              setTapped(true);
+            }}
+          >
+            Ask again
+          </Button>
         </OutcomeCard>
         {mode === "ask" ? passwordCard : null}
       </>
@@ -478,7 +476,7 @@ function PickPlayer(props: {
               Your color
             </span>
             {/* A color in use keeps its full color and a badge, and stays pickable: two players may share one. */}
-            <Swatches labelledBy={colorLabel} value={color} options={swatches} onChange={setColor} />
+            <Swatches flush labelledBy={colorLabel} value={color} options={swatches} onChange={setColor} />
           </div>
           <ErrorText>{error}</ErrorText>
           <Button type="submit" variant="primary" busy={busy}>

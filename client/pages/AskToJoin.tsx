@@ -266,7 +266,7 @@ export function AskToJoin(props: {
               <span id={colorLabel} style={{ fontSize: theme.font.body14, fontWeight: theme.weight.strong }}>
                 Your color
               </span>
-              <Swatches labelledBy={colorLabel} value={color} options={swatches} onChange={setColor} />
+              <Swatches flush labelledBy={colorLabel} value={color} options={swatches} onChange={setColor} />
             </div>
             {challenged ? (
               <>
@@ -342,8 +342,7 @@ function WaitingCard(props: { state: Extract<AskState, { kind: "waiting" }>; onC
   const cancelling = state.cancel === "queued" || state.cancel === "sent";
   return (
     <Card title="Waiting for the DM" titleRef={heading}>
-      <p style={{ margin: 0 }}>{waitingLine(state.name)}</p>
-      <Loading text={state.cancel === "deciding" ? LETTING_IN : "Waiting for the DM…"} delay={0} />
+      <Loading text={state.cancel === "deciding" ? LETTING_IN : waitingLine(state.name)} delay={0} />
       {reconnecting(state) ? (
         <p role="status" style={{ margin: 0, color: theme.color.textMuted, fontSize: theme.font.body14 }}>
           Reconnecting…
