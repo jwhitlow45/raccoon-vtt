@@ -6,7 +6,7 @@ import { Popover, usePopover, type Rect } from "../../../components/Popover.tsx"
 import { theme } from "../../../lib/theme.ts";
 import { uiScale } from "../../device/settings.ts";
 import { FADES, type Fade, type SoundId } from "#shared/sound.ts";
-import { dropSlot, makeRoom } from "./dragOrder.ts";
+import { dragAt, makeRoom } from "./dragOrder.ts";
 import { CROSSFADE, crossfadeName, FADE_WORDS, HANDLE_HELP, moreName, SORT_TRACKS, SORT_WORDS, sortName, type Sort } from "./words.ts";
 
 /**
@@ -194,9 +194,7 @@ export function useRowDrag(opts: { ids: readonly SoundId[]; lists: readonly numb
     onPointerMove(e) {
       const d = live.current;
       if (!d || d.pointerId !== e.pointerId) return;
-      const here = d.mids[d.from]!;
-      const dy = Math.min(d.mids[d.mids.length - 1]! - here, Math.max(d.mids[0]! - here, e.clientY - d.startY));
-      const slot = dropSlot(d.mids, d.from, here + dy);
+      const { dy, slot } = dragAt(d.mids, d.from, e.clientY - d.startY);
       if (dy === d.dy && slot === d.slot) return;
       const next = { ...d, dy, slot };
       live.current = next;

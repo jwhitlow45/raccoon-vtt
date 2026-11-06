@@ -137,11 +137,31 @@ export function dragKey(lists: QueueLists | null): string {
   return lists === null ? "" : `${lists.run}\n${lists.playing}\n${lists.order.join(",")}`;
 }
 
-/** The slot a dragged row's middle at `y` points at, among the other rows' middles as the drag began. */
+/**
+ * The slot a dragged row's middle at `y` points at, among the other rows'
+ * middles as the drag began. The middle passes a row once it reaches that
+ * row's middle, going up or down, as the initiative tracker's dropIndex
+ * does (features/encounter/logic.ts), so the drag's bounds (dragAt), the
+ * first and last rows' middles, point at the first and last slots.
+ */
 export function dropSlot(mids: readonly number[], from: number, y: number): number {
   let slot = 0;
-  for (let j = 0; j < mids.length; j++) if (j !== from && mids[j]! < y) slot++;
+  for (let j = 0; j < mids.length; j++) {
+    if (j === from) continue;
+    if (j < from ? mids[j]! < y : mids[j]! <= y) slot++;
+  }
   return slot;
+}
+
+/**
+ * Where a drag stands once the pointer has moved `moved` px from where it
+ * began: the row's offset, kept between the first and last rows' middles
+ * so the row never leaves its list, and the slot it points at.
+ */
+export function dragAt(mids: readonly number[], from: number, moved: number): { dy: number; slot: number } {
+  const here = mids[from]!;
+  const dy = Math.min(mids[mids.length - 1]! - here, Math.max(mids[0]! - here, moved));
+  return { dy, slot: dropSlot(mids, from, here + dy) };
 }
 
 /**

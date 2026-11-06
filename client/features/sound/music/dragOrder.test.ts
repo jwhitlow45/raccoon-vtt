@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { MusicRun, SoundLengths } from "#shared/sound.ts";
-import { comingNext, dragKey, dropSlot, keyMove, keyMovedInList, makeRoom, moveTo, movedInList, placeOf, previousTarget, queueLists } from "./dragOrder.ts";
+import { comingNext, dragAt, dragKey, dropSlot, keyMove, keyMovedInList, makeRoom, moveTo, movedInList, placeOf, previousTarget, queueLists } from "./dragOrder.ts";
 
 /*
  * Up next's lists and moves (docs/design/design-v1-music-player.md 4.3 and
@@ -106,6 +106,22 @@ describe("a drag", () => {
     assert.equal(dropSlot(mids, 1, 150), 2);
     assert.equal(dropSlot(mids, 1, 10), 0);
     assert.equal(dropSlot(mids, 1, 999), 3);
+  });
+
+  test("the pointer past either end of the list points at that end's slot, though the row stops at the end row's middle", () => {
+    const mids = [28, 84, 140, 196];
+    assert.deepEqual(dragAt(mids, 0, 500), { dy: 168, slot: 3 }, "the first row below the last: the last slot");
+    assert.deepEqual(dragAt(mids, 3, -500), { dy: -168, slot: 0 }, "the last row above the first: the first slot");
+    assert.deepEqual(dragAt(mids, 1, 112), { dy: 112, slot: 3 }, "onto the last row's middle");
+    assert.deepEqual(dragAt(mids, 2, -112), { dy: -112, slot: 0 }, "onto the first row's middle");
+    assert.deepEqual(dragAt(mids, 1, 0), { dy: 0, slot: 1 }, "where it began");
+    assert.deepEqual(dragAt([28, 84], 0, 300), { dy: 56, slot: 1 }, "two rows: the first dragged down goes after the second");
+    assert.deepEqual(dragAt([28, 84], 1, -300), { dy: -56, slot: 0 });
+    // Up next t4 to t12, then t1 and t2: t4 dragged past t2 takes the last place, and in the maker the last row's.
+    const lists = queueLists(run(), sounds, T + 1_000)!;
+    const { slot } = dragAt(Array.from({ length: 11 }, (_, i) => 28 + 56 * i), 0, 5_000);
+    assert.deepEqual(moveTo(lists, "t4", slot), { t: "move", soundId: "t4", to: "last" });
+    assert.deepEqual(movedInList(["a", "b", "c"], "a", dragAt([28, 84, 140], 0, 5_000).slot), ["b", "c", "a"]);
   });
 
   test("the others make room in the slot's list, and close the gap in the row's own", () => {
