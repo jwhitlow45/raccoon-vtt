@@ -26,7 +26,6 @@ export function StepButtons(props: { now: number }) {
   const [count, setCount] = useState("");
   const [unit, setUnit] = useState<AmountUnit>("hours");
   const [error, setError] = useState<string | null>(null);
-  const dawn = toDawn(props.now);
   const step = (by: number) => actions.dispatch({ t: "clock.advance", by });
 
   const moveOn = () => {
@@ -44,14 +43,7 @@ export function StepButtons(props: { now: number }) {
     <div style={{ display: "grid", gap: theme.space(2), minWidth: 0 }}>
       <SectionLabel id={nameId}>Move the clock on</SectionLabel>
       <div role="group" aria-labelledby={nameId} style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(max(176px, calc(50% - ${theme.space(1)}px)), 1fr))`, gap: theme.space(2) }}>
-        {STEPS.map((s) => (
-          <Button key={s.id} aria-label={stepName(s.label)} onClick={() => step(s.by)}>
-            {s.label}
-          </Button>
-        ))}
-        <Button aria-label={dawn.name} onClick={() => step(dawn.by)}>
-          To dawn
-        </Button>
+        <ClockSteps now={props.now} />
         <Button expanded={other} onClick={() => setOther(!other)} style={{ gridColumn: "1 / -1" }}>
           Other amount…
         </Button>
@@ -94,5 +86,29 @@ export function StepButtons(props: { now: number }) {
         </form>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The four steps, each one `clock.advance`: 10 minutes, 1 hour, 8 hours
+ * and To dawn, for the grid that holds them. Time's panel lays them out
+ * with Other amount… after them, and the DM's clock chip two by two in its
+ * popover (designs/qol/chips.md C5), so both send the same steps.
+ */
+export function ClockSteps(props: { now: number }) {
+  const actions = useRoomActions();
+  const dawn = toDawn(props.now);
+  const step = (by: number) => actions.dispatch({ t: "clock.advance", by });
+  return (
+    <>
+      {STEPS.map((s) => (
+        <Button key={s.id} aria-label={stepName(s.label)} onClick={() => step(s.by)}>
+          {s.label}
+        </Button>
+      ))}
+      <Button aria-label={dawn.name} onClick={() => step(dawn.by)}>
+        To dawn
+      </Button>
+    </>
   );
 }
