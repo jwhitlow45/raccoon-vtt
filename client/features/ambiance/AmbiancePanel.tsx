@@ -1,26 +1,34 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 import { Empty } from "../../components/Empty.tsx";
 import { Group } from "../../components/Panel.tsx";
-import { useScoped } from "../../state/scope.ts";
-import { useRoomView } from "../../state/view.ts";
+import { ambianceFoldsSlot, useFolds, type AmbianceSection } from "../../lib/folds.ts";
+import { startInScrollBox } from "../../lib/reveal.ts";
+import { useRoomScope, useScoped } from "../../state/scope.ts";
+import { useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
+import { useClockChipText } from "../clock/ClockChip.tsx";
 import { START_DRAFT, type StartDraft } from "../clock/StartClock.tsx";
 import { NO_OTHER_AMOUNT, type OtherAmount } from "../clock/StepButtons.tsx";
 import { TimeSection } from "../clock/TimePanel.tsx";
 import { PanelGuideLink } from "../guide/GuideLink.tsx";
-import type { PanelProps } from "../panels.ts";
+import { takeOverPanelScroll, usePanelHere, type PanelProps } from "../panels.ts";
+import { openSceneSettings } from "../scenes/request.ts";
+import { useTicking } from "../sound/panel/controls.tsx";
 import { PlayerSound } from "../sound/panel/PlayerSound.tsx";
 import { DmSoundSection, useDmSoundPages } from "../sound/panel/SoundPanel.tsx";
-import { somethingPlays } from "../sound/panel/state.ts";
+import { musicShown, playlistsOf, serverNow, somethingPlays, soundsOf } from "../sound/panel/state.ts";
+import { weatherSummary } from "../weather/WeatherSettings.tsx";
 import { ambianceKeptSlot, shownSections } from "./kept.ts";
-import { useAmbianceRoot } from "./request.ts";
-import { AMBIANCE_GUIDES, AMBIANCE_TITLE, EMPTY_LINE, SOUND_GROUP, TIME_GROUP } from "./words.ts";
+import { ambianceRequestSlot, useAmbianceRoot } from "./request.ts";
+import { AMBIANCE_GUIDES, AMBIANCE_TITLE, EMPTY_LINE, NO_SCENE, SOUND_GROUP, soundSummary, TIME_GROUP, timeSummary, WEATHER_ROW, weatherRowLabel } from "./words.ts";
 
 /**
  * Ambiance (docs/design/design-v1-panel-groups.md 4 and 5): the room's live
  * time and sound in one panel, in place of the Time and Sound panels. The
- * DM's holds both. A player's holds Time and Sound only while each has
- * something to say, or was shown
+ * DM's holds Time and Sound, groups that fold and remember (lib/folds.ts),
+ * and between them a Weather row for the scene in view that opens its
+ * weather in Scenes (docs/design/design-v1-scenes-reorg.md 4.2). A player's
+ * holds Time and Sound only while each has something to say, or was shown
  * since Ambiance opened (kept.ts), with no folds. Nothing here reads more
  * than the player's projection already holds.
  */
@@ -37,6 +45,7 @@ export default function AmbiancePanel(_props: PanelProps) {
 }
 
 function DmAmbiance() {
+  const fold = useFolds(ambianceFoldsSlot);
   const pages = useDmSoundPages(AMBIANCE_TITLE);
   // Kept here, above the Sound subpages that replace the whole first page, so Back finds them as they were (D-261102-763).
   const [amount, setAmount] = useState<OtherAmount>(NO_OTHER_AMOUNT);
@@ -46,19 +55,111 @@ function DmAmbiance() {
   useEffect(() => {
     if (clockId !== null) setDraft(START_DRAFT);
   }, [clockId]);
+  const sections = useRef<Partial<Record<AmbianceSection, HTMLDivElement | null>>>({});
+  useRequestScroll(sections, pages.subpage !== null, pages.toFirstPage);
 
   if (pages.subpage) return pages.subpage;
+  const time = fold("time");
+  const sound = fold("sound");
   return (
     <>
-      <Group label={TIME_GROUP} icon="time" divider={false}>
-        <TimeSection kept={{ amount, onAmount: setAmount, draft, onDraft: setDraft }} />
-        <PanelGuideLink section={AMBIANCE_GUIDES.time} panel={TIME_GROUP} />
-      </Group>
-      <Group label={SOUND_GROUP} icon="music">
-        <DmSoundSection {...pages.first} />
-        <PanelGuideLink section={AMBIANCE_GUIDES.sound} panel={SOUND_GROUP} />
-      </Group>
+      <div ref={(el) => void (sections.current.time = el)}>
+        <Group label={TIME_GROUP} icon="time" {...time} keep wholeSummary summary={<TimeSummary />} divider={false}>
+          <TimeSection kept={{ amount, onAmount: setAmount, draft, onDraft: setDraft }} />
+          <PanelGuideLink section={AMBIANCE_GUIDES.time} panel={TIME_GROUP} />
+        </Group>
+      </div>
+      <WeatherRow />
+      <div ref={(el) => void (sections.current.sound = el)}>
+        <Group label={SOUND_GROUP} icon="music" {...sound} keep wholeSummary summary={<SoundSummary />}>
+          <DmSoundSection {...pages.first} />
+          <PanelGuideLink section={AMBIANCE_GUIDES.sound} panel={SOUND_GROUP} />
+        </Group>
+      </div>
     </>
+  );
+}
+
+/**
+ * Acts on a request from elsewhere, the top bar's chip (request.ts, 4.3),
+ * once per press: a Sound subpage goes back to the first page as Back
+ * does, then the asked section's header goes to the top of the panel's
+ * body and counts as the viewer taking the scroller, so a remembered
+ * offset never pulls it away. After the commit, since the sheet or pane
+ * around the panel puts its remembered offset back in its own layout
+ * effect, which runs after this one, and again on the next frame, for a
+ * restore still pending then.
+ */
+function useRequestScroll(sections: { current: Partial<Record<AmbianceSection, HTMLDivElement | null>> }, onSubpage: boolean, toFirstPage: () => void): void {
+  const request = useScoped(ambianceRequestSlot);
+  const asked = useStore(request);
+  useLayoutEffect(() => {
+    const section = asked.section;
+    if (section === null) return;
+    if (onSubpage) {
+      toFirstPage();
+      return;
+    }
+    request.setState({ section: null });
+    const bring = () => {
+      const el = sections.current[section];
+      if (!el?.isConnected) return;
+      startInScrollBox(el, 0);
+      takeOverPanelScroll(el);
+    };
+    queueMicrotask(bring);
+    const frame = requestAnimationFrame(bring);
+    return () => cancelAnimationFrame(frame);
+  }, [asked, onSubpage, toFirstPage, request, sections]);
+}
+
+/** Time folded: the chip's text, "Hidden" while players don't see it, or "Not started". */
+function TimeSummary() {
+  const chip = useClockChipText();
+  const shown = useRoomView((s) => s.view?.clock?.shown ?? false);
+  return <>{timeSummary(chip === null ? null : { chip, shown })}</>;
+}
+
+/** Sound folded: what plays. Drawn only while folded, so it steps with the music only then. */
+function SoundSummary() {
+  const playing = useRoomView((s) => s.view?.playing ?? null);
+  const sounds = useRoomView((s) => soundsOf(s.view));
+  const playlists = useRoomView((s) => playlistsOf(s.view));
+  const serverOffset = useRoomView((s) => s.serverOffset);
+  const music = playing?.music ?? null;
+  // The run line's place moves on with the track, so it is read again while the music plays.
+  const t = useTicking(() => serverNow({ serverOffset }), music !== null && music.paused === undefined);
+  const shown = music ? musicShown(music, sounds, playlists, t) : null;
+  return <>{soundSummary(shown, playing ? Object.keys(playing.loops).length : 0)}</>;
+}
+
+/**
+ * The scene's weather, one row that never folds and holds nothing
+ * (docs/design/design-v1-scenes-reorg.md 4.2): a tap opens Scenes on the
+ * scene in view with Light and weather revealed and the Weather select
+ * focused, or with no scene in view only opens Scenes.
+ */
+function WeatherRow() {
+  const scope = useRoomScope();
+  const ui = useRoomUi();
+  const store = useRoomStore();
+  const here = usePanelHere();
+  const name = useRoomView((s) => (s.sceneId ? (s.view?.scenes[s.sceneId]?.name ?? null) : null));
+  const summary = useRoomView((s) => {
+    const scene = s.sceneId ? s.view?.scenes[s.sceneId] : undefined;
+    return scene ? weatherSummary(scene.weather) : null;
+  });
+  const label = weatherRowLabel(name !== null && summary !== null ? { name, summary } : null);
+  return (
+    <Group
+      label={WEATHER_ROW}
+      icon="weather"
+      reserve="chevron"
+      wholeSummary
+      summary={summary ?? NO_SCENE}
+      openLabel={label}
+      onOpen={() => openSceneSettings(scope, ui, "weather", { from: here, room: store })}
+    />
   );
 }
 
