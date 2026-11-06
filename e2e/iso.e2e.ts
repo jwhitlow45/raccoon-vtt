@@ -2698,9 +2698,15 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await ops.send({ t: "build.height", sceneId, cells: cells(2, 10, 6, 14), height: -10 });
     await ops.send({ t: "build.height", sceneId, cells: ["6,11"], height: -5 });
     await ops.send({ t: "build.stairs", sceneId, cells: ["6,11", "7,11"], up: "e" });
+    // Its board, not the last scene's while this one still loads: a turn set before then goes to the last scene, and this one opens at the turn it last had.
+    const openSteps = async () => {
+      await openSideTab(dm, "Scenes");
+      const row = dm.getByRole("tabpanel", { name: "Scenes" }).getByRole("button", { name: /^ISOD steps/ }).first();
+      await row.click();
+      await waitFor("ISOD: the steps scene shown", async () => ((await row.textContent())?.includes("you are here") ? true : null));
+    };
     await dm.bringToFront();
-    await openSideTab(dm, "Scenes");
-    await dm.getByRole("tabpanel", { name: "Scenes" }).getByRole("button", { name: /^ISOD steps/ }).first().click();
+    await openSteps();
     await isoOn(dm, 0);
     // The layout's stepping stairs, by the test hook (relief/isoTest.ts), each span in cells of height.
     const steps = await layoutWhen(dm, "ISOD: the runs step", (l) => l.steps.length === 4);
@@ -2729,9 +2735,8 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     // Below 24 px a cell the detail goes: the stairs are plain columns and pits again, and the climber stands on its stored 0 ft.
     await ops.send({ t: "scene.update", sceneId, patch: { defaultView: { x: 8.5, y: 8, zoom: 20 } } });
     await reopenRoom(dm);
-    // A reload opens the players' scene again, so the scene opens anew at its starting view.
-    await openSideTab(dm, "Scenes");
-    await dm.getByRole("tabpanel", { name: "Scenes" }).getByRole("button", { name: /^ISOD steps/ }).first().click();
+    // A reload opens the players' scene again, so the scene opens anew at its starting view, at turn 2 as it was left.
+    await openSteps();
     await isoOn(dm, 0);
     await layoutWhen(dm, "ISOD: no steps at 20 px", (l) => l.steps.length === 0 && l.order.some((e) => e.kind === "standee" && e.id === climber));
     const flatRing = await waitFor("ISOD: the climber's ring at 20 px", async () => (await ringMiddles(dm, climber)).own);
