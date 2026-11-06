@@ -87,8 +87,9 @@ function DmAmbiance() {
  * header goes to the top of the panel's body and counts as the viewer
  * taking the scroller, so a remembered offset never pulls it away. After
  * the commit, since the sheet or pane around the panel puts its remembered
- * offset back in its own layout effect, which runs after this one, and
- * again on the next frame, for a restore still pending then.
+ * offset back in its own layout effect, which runs after this one. A
+ * restore still pending after that stops at the take-over, so no later try
+ * is needed.
  */
 function useRequestScroll(sections: { current: Partial<Record<AmbianceSection, HTMLDivElement | null>> }, onSubpage: boolean, toFirstPage: () => void): void {
   const request = useScoped(ambianceRequestSlot);
@@ -108,8 +109,6 @@ function useRequestScroll(sections: { current: Partial<Record<AmbianceSection, H
       takeOverPanelScroll(el);
     };
     queueMicrotask(bring);
-    const frame = requestAnimationFrame(bring);
-    return () => cancelAnimationFrame(frame);
   }, [asked, onSubpage, toFirstPage, request, sections]);
 }
 
