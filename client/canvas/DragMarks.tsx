@@ -20,6 +20,7 @@ import { IsoGroundContext, useTreeShownView, type IsoGround } from "./relief/con
 import type { CellBox } from "./relief/fogView.ts";
 import { sortKey } from "./relief/pieces.ts";
 import { WholeVolume } from "./relief/VolumeShape.tsx";
+import { footprintCells } from "../lib/groundCells.ts";
 import { footprint } from "../lib/scene.ts";
 import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
 
@@ -126,6 +127,8 @@ export const DragMarks = memo(function DragMarks(props: { tokenIds: readonly str
   const lines = useMemo(() => (ids.size === 0 ? [] : tethers(grid, tokens, layer.scene.id).filter((l) => ids.has(l.id) || ids.has(l.holderId))), [grid, tokens, layer.scene.id, ids]);
   if (ids.size === 0 || !areas) return null;
   const groundOf = (t: Token) => {
+    // On the stand surface where a stair steps, a tread, as its standee stands (docs/design/design-v1-iso-depth.md 5.4).
+    if (iso.standOn) return iso.standOn(footprintCells(grid, t));
     const r = footprintRect(grid, t);
     return boxGround(iso, { x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.h });
   };

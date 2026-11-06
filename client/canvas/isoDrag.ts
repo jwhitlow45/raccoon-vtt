@@ -5,7 +5,7 @@ import { dropView, seenSeat, type DropToken, type Role } from "../features/movem
 import { screenToView, viewToScreen, type Camera, type Point } from "../lib/camera.ts";
 import { drawnAt, footprint, rulesSpot, snapPosition } from "../lib/scene.ts";
 import { footprintCells, type GroundCell } from "../lib/groundCells.ts";
-import { drawnBase, seenFootprintGround, toView, toWorld, type DrawnHeights, type DrawnSource, type View, type ViewPoint } from "../lib/view.ts";
+import { drawnBase, drawnStandBase, seenFootprintGround, standSurface, toView, toWorld, type DrawnHeights, type DrawnSource, type View, type ViewPoint } from "../lib/view.ts";
 import type { Grid } from "#shared/rules/grid.ts";
 
 /**
@@ -22,6 +22,13 @@ import type { Grid } from "#shared/rules/grid.ts";
  * dropLanding). Every height read is drawn ground, which holds only what
  * this viewer has seen, so pick and preview agree with the drop wherever
  * its ground is seen, and hidden terrain never moves a preview.
+ *
+ * On a stair that climbs in steps (docs/design/design-v1-iso-depth.md 5.4)
+ * the rules' ground still decides every branch: whether a flier stays up or
+ * meets higher ground, a buried token's fixed base, a seat kept or left.
+ * Only a result that stands on the ground is placed on the stand surface,
+ * the tread under it, and the scan tries the treads' heights among its
+ * levels, so the ring a press grabs is where the scan finds it again.
  */
 
 /** How a dragged token's height goes as it moves, in cells of drawn height. */
@@ -44,8 +51,10 @@ export type DragPlan = {
 export type DragGround = {
   /** Every drawn height on the scene in cells, highest first, 0 among them. */
   levels: readonly number[];
-  /** The highest drawn ground under the footprint with its corner at a spot. */
+  /** The highest drawn ground under the footprint with its corner at a spot: the rules' ground as this viewer has seen it, which alone decides how the token goes. */
   footGround(at: Point): number;
+  /** The stand surface under the footprint with its corner at a snapped spot (view.ts standSurface), where a token that stands on the ground stands. `footGround` when left out. */
+  surface?(at: Point): number;
   /** Where the drop would snap a corner. */
   snap(at: Point): Point;
 };
@@ -101,10 +110,12 @@ function placeDrawn(at: (z: number, ray: number) => Point & { z: number }, groun
   const lowest = levels[levels.length - 1] ?? 0;
   const top = drawn(levels[0] ?? 0);
   if (top === drawn(lowest)) return at(z, top);
+  // The ground a ring hangs on is the one its standee draws over, the stand surface (boardPick.ts tokenBase).
+  const surface = ground.surface ?? ground.footGround;
   let above: (Point & { z: number }) | null = null;
   for (const g of levels) {
     const found = at(z, drawn(g));
-    const under = ground.footGround(ground.snap(found));
+    const under = surface(ground.snap(found));
     if (under === g) return found;
     if (under > g) above ??= found;
   }
@@ -112,13 +123,14 @@ function placeDrawn(at: (z: number, ray: number) => Point & { z: number }, groun
 }
 
 function byRule(rule: DragRule, place: (z: number) => Point & { z: number }, stand: (z: number) => Point & { z: number }, ground: DragGround): Point & { z: number } {
+  const surface = ground.surface ?? ground.footGround;
   if (rule.kind === "fixed") return place(rule.base);
-  if (rule.kind === "walk") return scan(stand, ground, ground.levels, (at) => ground.footGround(at));
+  if (rule.kind === "walk") return scan(stand, ground, ground.levels, surface);
   const flying = place(rule.base);
   if (ground.footGround(ground.snap(flying)) <= rule.base) return flying;
-  // Over higher ground a flier lands on it, as the drop lands it: the scan by that rule, its own height among the ones tried.
+  // Over higher ground a flier lands on it, as the drop lands it: the scan by that rule, its own height among the ones tried. The rules' ground says where it lands, the stand surface where it then stands.
   const levels = [...new Set([...ground.levels, rule.base])].sort((a, b) => b - a);
-  return scan((z) => (z === rule.base ? flying : stand(z)), ground, levels, (at) => Math.max(rule.base, ground.footGround(at)));
+  return scan((z) => (z === rule.base ? flying : stand(z)), ground, levels, (at) => (ground.footGround(at) > rule.base ? surface(at) : rule.base));
 }
 
 /**
@@ -142,13 +154,14 @@ function scan(place: (z: number) => Point & { z: number }, ground: DragGround, l
 
 const levelCache = new WeakMap<DrawnHeights, readonly number[]>();
 
-/** A scene's drawn heights in cells, highest first, 0 among them, kept with the heights object. */
+/** A scene's drawn heights in cells, highest first, 0 among them, and while the detail shows every stepping stair's treads, kept with the heights object. */
 export function levelsOf(heights: DrawnHeights): readonly number[] {
   if (heights.high === 0 && heights.low === 0) return ZERO;
   let levels = levelCache.get(heights);
   if (levels) return levels;
   const seen = new Set<number>([0]);
   for (const c of heights.cellsIn({ x0: 0, y0: 0, x1: heights.bounds.w, y1: heights.bounds.h })) seen.add(heights.atCell(c));
+  if (heights.detail && heights.runs) for (const t of heights.runs.treads) seen.add(t);
   levels = [...seen].sort((a, b) => b - a);
   levelCache.set(heights, levels);
   return levels;
@@ -173,6 +186,7 @@ export function dragGround(heights: DrawnHeights, token: Placed, grid: Grid, nud
   return {
     levels: levelsOf(heights),
     footGround: (at) => highest(heights, footprintCells(grid, { ...token, x: at.x, y: at.y, squeeze: undefined })),
+    surface: (at) => standSurface(heights, footprintCells(grid, { ...token, x: at.x, y: at.y, squeeze: undefined })),
     snap: (at) => {
       const p = ruled(at);
       return snapPosition(grid, p.x, p.y, size);
@@ -197,15 +211,18 @@ function highest(heights: DrawnHeights, cells: readonly GroundCell[]): number {
 /**
  * A drag's plan at its start: the footing of the token, and of the holder
  * it sits on, judged on the ground this viewer has seen (`src`), each
- * base in cells of drawn height (view.ts drawnBase). The seat is the
- * drop's own (drop.ts seenSeat), read from this viewer's copy.
+ * base in cells of drawn height (view.ts drawnStandBase, with `heights`,
+ * else drawnBase), so a holder standing on a stair's tread seats its rider
+ * there. The seat is the drop's own (drop.ts seenSeat), read from this
+ * viewer's copy.
  */
-export function dragPlan(input: { room: RoomState; role: Role; src: DrawnSource; grid: Grid; feetPerCell: number; token: Placed & DropToken; drawn?: DragPlan["drawn"] }): DragPlan {
-  const { room, role, src, grid, feetPerCell, token } = input;
+export function dragPlan(input: { room: RoomState; role: Role; src: DrawnSource; heights?: DrawnHeights; grid: Grid; feetPerCell: number; token: Placed & DropToken; drawn?: DragPlan["drawn"] }): DragPlan {
+  const { room, role, src, heights, grid, feetPerCell, token } = input;
   const drawn = input.drawn ?? UNCAPPED;
   const size = footprint(token);
   const ruleOf = (t: Placed, base: number): DragRule => ruleFor(seenStanding(src, grid, t), base);
-  const ownBase = drawnBase(src, footprintCells(grid, token), token.elevation) / feetPerCell;
+  const baseOf = (t: Placed) => (heights ? drawnStandBase(src, heights, footprintCells(grid, t), t.elevation, feetPerCell) : drawnBase(src, footprintCells(grid, t), t.elevation) / feetPerCell);
+  const ownBase = baseOf(token);
   const own = ruleOf(token, ownBase);
   const seat = seenSeat(dropView(room, role), token);
   if (!seat) return { w: size.w, h: size.h, own, seat: null, drawn };
@@ -215,7 +232,7 @@ export function dragPlan(input: { room: RoomState; role: Role; src: DrawnSource;
     h: size.h,
     own,
     seat: {
-      base: drawnBase(src, footprintCells(grid, holder), holder.elevation) / feetPerCell,
+      base: baseOf(holder),
       keptAt: seat.keptAt,
       // Off a holder on the ground the token walks, off a flier it keeps its own height, off one inside the ground its own base.
       off: ruleFor(seenStanding(src, grid, holder), ownBase),

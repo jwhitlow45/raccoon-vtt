@@ -1527,7 +1527,7 @@ export function MapStage(props: {
       if (pick.view.kind !== "isometric" || !pick.src) return [];
       // The ring as it draws, its lift capped, or on the ground when it lies under the fog, and the ray at that same height, so no move jumps (ISO34-OPUS-10, OPUS-11).
       const stands = standsFor(pick, aboveFogRef.current)(lead);
-      const plan = dragPlan({ room, role: linksRef.current.role, src: pick.src, grid: pick.grid, feetPerCell: pick.feetPerCell, token: lead, drawn: drawnRing(pick, stands) });
+      const plan = dragPlan({ room, role: linksRef.current.role, src: pick.src, heights: pick.heights, grid: pick.grid, feetPerCell: pick.feetPerCell, token: lead, drawn: drawnRing(pick, stands) });
       const start = { node: node.getAbsolutePosition(), ring: ringCenter(pick, lead, stands) };
       const rel = gripRel(pressed, lead);
       // The ground and the snap read the rules box under the drawn ring, or for a free drag the box under it as drawn (docs/design/design-v1-snap-off.md 6.3).

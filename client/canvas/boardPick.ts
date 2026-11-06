@@ -5,7 +5,9 @@ import { drawnSpot } from "#shared/rules/nudge.ts";
 import { screenToView, viewToScreen, type Camera, type GroundMap, type Insets, type Point, type Size } from "../lib/camera.ts";
 import { footprint, type ViewToken } from "../lib/scene.ts";
 import { cellsMeeting, footprintCells, ruleBoundPoint } from "../lib/groundCells.ts";
-import { arrowStep, drawnBase, drawnFootprintGround, drawnHeights, flatHeights, heightsStand, pickWalk, standScale, TOP_DOWN, toView, toWorld, type DrawnHeights, type DrawnSource, type PickHit, type PickSource, type View } from "../lib/view.ts";
+import { sceneWalls } from "#shared/rules/walls.ts";
+import type { StairReader } from "../lib/stairRuns.ts";
+import { arrowStep, drawnFootprintGround, drawnHeights, drawnStandBase, flatHeights, heightsDetail, heightsStand, pickWalk, standScale, standSurface, surfaceAt, TOP_DOWN, toView, toWorld, type DrawnHeights, type DrawnSource, type PickHit, type PickSource, type View } from "../lib/view.ts";
 import { scopeSlot, type RoomScope } from "../state/scope.ts";
 import { FogView } from "./relief/fogView.ts";
 import { creatureStands } from "./relief/stand.ts";
@@ -109,18 +111,18 @@ export function pressGap(pick: Pick<BoardPick, "view" | "camera" | "heights">, p
 
 /**
  * Where a token's ring draws, in cells of height: a standee's base as its
- * standee draws it (view.ts drawnBase, its lift capped by
- * relief/standee.ts cappedBase), or for a creature that lies flat under
- * the fog (`stands` false, 5.2) the drawn ground under it, where the ground
- * stage lays its picture. What stands by a ring reads this one: box select,
- * the chrome over a token, a switch's held point and a drag's grab. The
- * rules keep the logical base. 0 in Top-down.
+ * standee draws it (view.ts drawnStandBase, on a stair's tread when it
+ * stands on the ground, its lift capped by relief/standee.ts cappedBase),
+ * or for a creature that lies flat under the fog (`stands` false, 5.2) the
+ * drawn ground under it, where the ground stage lays its picture. What
+ * stands by a ring reads this one: box select, the chrome over a token, a
+ * switch's held point and a drag's grab. The rules keep the logical base.
+ * 0 in Top-down.
  */
-export function tokenBase(pick: Pick<BoardPick, "view" | "grid" | "src" | "feetPerCell" | "camera" | "canvasHeight">, token: FootprintToken, stands = true): number {
+export function tokenBase(pick: Pick<BoardPick, "view" | "grid" | "src" | "feetPerCell" | "camera" | "canvasHeight" | "heights">, token: FootprintToken, stands = true): number {
   if (pick.view.kind === "topDown" || !pick.src) return 0;
   const cells = footprintCells(pick.grid, token);
-  const ground = drawnFootprintGround(pick.src, cells) / pick.feetPerCell;
-  return drawnRing(pick, stands)(drawnBase(pick.src, cells, token.elevation) / pick.feetPerCell, ground);
+  return drawnRing(pick, stands)(drawnStandBase(pick.src, pick.heights, cells, token.elevation, pick.feetPerCell), standSurface(pick.heights, cells));
 }
 
 /**
@@ -161,7 +163,7 @@ export function groundIn(pick: Pick<BoardPick, "view" | "src" | "feetPerCell">, 
  * (docs/design/design-v1-snap-off.md 6.2) where its ring draws, at the base
  * its rules footprint gives (`tokenBase`).
  */
-export function ringCenter(pick: Pick<BoardPick, "view" | "grid" | "camera" | "src" | "feetPerCell" | "canvasHeight">, token: FootprintToken & Partial<Pick<Token, "nudge">>, stands = true): Point {
+export function ringCenter(pick: Pick<BoardPick, "view" | "grid" | "camera" | "src" | "feetPerCell" | "canvasHeight" | "heights">, token: FootprintToken & Partial<Pick<Token, "nudge">>, stands = true): Point {
   const fp = footprint(token);
   const at = drawnSpot(pick.grid, token);
   return screenAt(pick, { x: at.x + fp.w / 2, y: at.y + fp.h / 2 }, tokenBase(pick, token, stands));
@@ -209,7 +211,8 @@ export function pressView(pick: Pick<BoardPick, "camera">, screen: Point) {
 export function boardPickFor(
   input: {
     room: Pick<RoomState, "buildChunks" | "fogTiles" | "meta"> | null;
-    scene: Pick<Scene, "id" | "bounds" | "gridShape">;
+    /** Its automatic walls rule too, by which the walls point its stairs (shared/rules/walls.ts). */
+    scene: Pick<Scene, "id" | "bounds" | "gridShape" | "autoWalls">;
     role: "dm" | "player";
     /** Whether the scene draws fog for this viewer. */
     fog: boolean;
@@ -227,7 +230,9 @@ export function boardPickFor(
   if (view.kind === "topDown") return { ...flatPick(camera, scene.bounds, grid), canvasHeight: input.canvasHeight ?? Infinity, at, standScale: standScale(input.lowPower) };
   const feetPerCell = room?.meta.settings.feetPerCell ?? DEFAULT_SETTINGS.feetPerCell;
   const fog = input.role === "player" && input.fog ? (room?.fogTiles ?? NO_FOG) : null;
-  const { src, heights } = memo.get({ chunks: room?.buildChunks ?? NO_CHUNKS, sceneId: scene.id, bounds: scene.bounds, grid, fog, feetPerCell, scale: camera.scale, lowPower: input.lowPower });
+  const chunks = room?.buildChunks ?? NO_CHUNKS;
+  // The stairs' directions as the walls give them, the same reader the board's relief reads (docs/design/design-v1-iso-depth.md 5.2): sceneWalls keeps one set while the build is the same.
+  const { src, heights } = memo.get({ chunks, sceneId: scene.id, bounds: scene.bounds, grid, fog, feetPerCell, scale: camera.scale, lowPower: input.lowPower, stairs: sceneWalls(scene, chunks) });
   return { camera, view, grid, heights, src, feetPerCell, canvasHeight: input.canvasHeight ?? Infinity, at, standScale: standScale(input.lowPower) };
 }
 
@@ -246,6 +251,8 @@ export type DrawnInput = {
   feetPerCell: number;
   scale: number;
   lowPower: boolean;
+  /** The stairs' direction reader (lib/stairRuns.ts StairReader), whose identity says when the stairs changed. None, no stair steps. */
+  stairs?: StairReader | null;
 };
 
 /**
@@ -254,14 +261,18 @@ export type DrawnInput = {
  * the same heights. A pick, a box select and each drag frame read these.
  */
 export class DrawnHeightsMemo {
-  #last: { input: DrawnInput; stand: boolean; src: DrawnSource; heights: DrawnHeights } | null = null;
+  #last: { input: DrawnInput; stand: boolean; detail: boolean; src: DrawnSource; heights: DrawnHeights } | null = null;
 
   get(input: DrawnInput): { src: DrawnSource; heights: DrawnHeights } {
     const stand = heightsStand(input.scale, input.lowPower);
+    // Keyed on the detail and the stairs' reader too, so picks and drags step exactly where the relief draws steps (R2-01).
+    const detail = heightsDetail(input.scale, input.lowPower);
     const last = this.#last;
     if (
       last &&
       last.stand === stand &&
+      last.detail === detail &&
+      (last.input.stairs ?? null) === (input.stairs ?? null) &&
       last.input.chunks === input.chunks &&
       last.input.fog === input.fog &&
       last.input.sceneId === input.sceneId &&
@@ -272,8 +283,8 @@ export class DrawnHeightsMemo {
     ) {
       return last;
     }
-    const src: DrawnSource = { chunks: input.chunks, sceneId: input.sceneId, bounds: { w: input.bounds.w, h: input.bounds.h }, grid: input.grid, fog: input.fog, stand };
-    const next = { input, stand, src, heights: drawnHeights(src, input.feetPerCell) };
+    const src: DrawnSource = { chunks: input.chunks, sceneId: input.sceneId, bounds: { w: input.bounds.w, h: input.bounds.h }, grid: input.grid, fog: input.fog, stand, detail };
+    const next = { input, stand, detail, src, heights: drawnHeights(src, input.feetPerCell, input.stairs ?? null) };
     this.#last = next;
     return next;
   }
@@ -297,5 +308,6 @@ export function heldPoint(was: BoardPick, now: BoardPick, selected: FootprintTok
     }
   }
   const press = pickWalk(was, { x: (clear.x0 + clear.x1) / 2, y: (clear.y0 + clear.y1) / 2 });
-  return { at: press.point, before: press.z, after: drawnAt(now, press.point) };
+  // The surface the press met in the view after, a stair's tread where one steps, as the walk meets treads.
+  return { at: press.point, before: press.z, after: now.view.kind === "topDown" ? 0 : surfaceAt(now.heights, press.point) };
 }

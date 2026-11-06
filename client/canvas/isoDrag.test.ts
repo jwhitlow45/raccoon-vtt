@@ -3,16 +3,18 @@ import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import type { RoomState, Token } from "#shared/model.ts";
 import type { ViewToken } from "../lib/scene.ts";
-import { reveal, rng, token } from "#shared/testutil.ts";
+import { applyOp } from "#shared/reducer.ts";
+import { DM, env, reveal, rng, token } from "#shared/testutil.ts";
 import { dropLanding, dropView } from "../features/movement/drop.ts";
 import { raised, world } from "../features/movement/testing.ts";
 import { screenToView, viewToScreen, type Camera } from "../lib/camera.ts";
 import { footprint, snapPosition } from "../lib/scene.ts";
 import { flatHeights, isometric, toView, type Turn, type ViewPoint } from "../lib/view.ts";
-import { boardPickFor, DrawnHeightsMemo, drawnRing, ringCenter, standsFor, type BoardPick } from "./boardPick.ts";
+import { boardPickFor, DrawnHeightsMemo, drawnRing, ringCenter, standsFor, tokenBase, type BoardPick } from "./boardPick.ts";
 import { cappedBase, standeeShape } from "./relief/standee.ts";
 import { dragBound, dragGround, dragLanding, dragPlan, gripRel, levelsOf, type DragGround, type DragPlan } from "./isoDrag.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
+import { sceneWalls } from "#shared/rules/walls.ts";
 
 const CAM: Camera = { x: 600, y: 80, scale: 40 };
 
@@ -320,5 +322,107 @@ describe("an isometric drag of a token placed between squares (docs/design/desig
     const heights = flatHeights({ w: 16, h: 16 });
     assert.deepEqual(dragGround(heights, t, SQUARES, { x: 3, y: 0 }).snap({ x: 3.6, y: 3 }), { x: 3, y: 3 });
     assert.deepEqual(dragGround(heights, t, SQUARES, null).snap({ x: 3.6, y: 3 }), { x: 4, y: 3 });
+  });
+});
+
+describe("a drag over stairs that climb in steps (docs/design/design-v1-iso-depth.md 5.4, D-261102-882)", () => {
+  /**
+   * A 10 ft landing at (9, 5) reached from the south by stairs at 0 and 5 ft
+   * pointing north, at (9, 7) and (9, 6), as the generator lays a run. A
+   * lone landing, so no higher ground stands where a still press's scan
+   * would find a nearer top first, as any platform's corner can today.
+   */
+  function stairsWorld(tokens: Token[]): RoomState {
+    const state = world({ blockMovement: false, heights: { "9,5": 10, "9,6": 5 }, tokens });
+    const r = applyOp(state, { t: "build.stairs", sceneId: "s1", cells: ["9,7", "9,6"], up: "n" }, DM, env(50));
+    if (!r.ok) throw new Error(r.message);
+    return r.state;
+  }
+  const pickAt = (state: RoomState, scale: number, turn: Turn = 0) => boardPickFor({ room: state, scene: state.scenes.s1!, role: "dm", fog: true, view: isometric(turn), camera: { ...CAM, scale }, lowPower: false, canvasHeight: 900 }, new DrawnHeightsMemo());
+  const planOf = (state: RoomState, pick: BoardPick, t: Token) => dragPlan({ room: state, role: "dm", src: pick.src!, heights: pick.heights, grid: SQUARES, feetPerCell: 5, token: t, drawn: drawnRing(pick, true) });
+
+  test("a press held still on a walker on a stair moves nothing, at every turn, at 23 and 24 px", () => {
+    const state = stairsWorld([token("walker", { x: 9, y: 6, elevation: 5 })]);
+    const t = state.tokens.walker! as Token;
+    for (const scale of [23, 24, 40]) {
+      for (const turn of [0, 1, 2, 3] as Turn[]) {
+        const pick = pickAt(state, scale, turn);
+        const cam = { ...CAM, scale };
+        const node = viewToScreen(cam, toView(pick.view, { x: t.x, y: t.y }));
+        const ring = ringCenter(pick, t);
+        const input = { camera: cam, view: pick.view, ground: dragGround(pick.heights, t, SQUARES), plan: planOf(state, pick, t), start: { node, ring }, rel: { x: 0, y: 0 } };
+        const at = dragBound(input, node);
+        assert.ok(Math.abs(at.x - node.x) < 1e-6 && Math.abs(at.y - node.y) < 1e-6, `${scale} px, turn ${turn}: ${JSON.stringify([at, node])}`);
+      }
+    }
+    // Its ring on its tread from the detail's zoom, on the stair's plain top below it.
+    assert.equal(tokenBase(pickAt(state, 24), t), 1.4);
+    assert.equal(tokenBase(pickAt(state, 23), t), 1);
+  });
+
+  test("a walker dragged onto a run stands on the tread under the finger, and off it on the plain ground", () => {
+    const state = stairsWorld([token("walker", { x: 4, y: 9 })]);
+    const t = state.tokens.walker! as Token;
+    for (const turn of [0, 3] as Turn[]) {
+      const pick = pickAt(state, 40, turn);
+      const ground = dragGround(pick.heights, t, SQUARES);
+      assert.ok(ground.levels.includes(1.4), "the treads among the levels");
+      const onto = dragLanding(pick.view, ground, planOf(state, pick, t), toView(pick.view, { x: 9.5, y: 6.5 }, 1.4));
+      assert.deepEqual({ ...ground.snap(onto), z: onto.z }, { x: 9, y: 6, z: 1.4 }, `turn ${turn}`);
+      assert.equal(dropLanding(dropView(state, "dm"), t, { x: 9, y: 6 }), 5, "the drop stores the rules' 5 ft");
+      const off = dragLanding(pick.view, ground, planOf(state, pick, t), toView(pick.view, { x: 10.5, y: 8.5 }, 0));
+      assert.deepEqual({ ...ground.snap(off), z: off.z }, { x: 10, y: 8, z: 0 }, `turn ${turn}`);
+    }
+  });
+
+  test("a flier 1 ft up stays a flier over a 2 ft tread, and the rules alone say where it lands, as the drop stores it", () => {
+    const state = stairsWorld([token("bat", { x: 3, y: 9, elevation: 1 })]);
+    const t = state.tokens.bat! as Token;
+    for (const turn of [0, 3] as Turn[]) {
+      const pick = pickAt(state, 40, turn);
+      const ground = dragGround(pick.heights, t, SQUARES);
+      const plan = planOf(state, pick, t);
+      assert.deepEqual(plan.own, { kind: "fly", base: 0.2 });
+      // Over the lower stair, stored 0 under treads from 0 to 4 ft: the rules' 0 is below it, so it flies on at 1 ft, under its middle 2 ft tread.
+      const over = dragLanding(pick.view, ground, plan, toView(pick.view, { x: 9.5, y: 7.5 }, 0.2));
+      assert.equal(over.z, 0.2, `turn ${turn}: still a flier`);
+      assert.deepEqual(ground.snap(over), { x: 9, y: 7 });
+      // Over the upper stair, stored 5 ft: the rules land it there, and the drop stores their 5 ft.
+      const onto = dragLanding(pick.view, ground, plan, toView(pick.view, { x: 9.5, y: 6.5 }, 0.2));
+      const spot = ground.snap(onto);
+      assert.deepEqual(spot, { x: 9, y: 6 }, `turn ${turn}`);
+      assert.equal(dropLanding(dropView(state, "dm"), t, spot), 5, "the drop stores the rules' 5 ft");
+    }
+  });
+
+  test("the board's drawn heights are made again for a new detail or a new stairs' reader, and kept otherwise (R2-01)", () => {
+    const state = stairsWorld([]);
+    const memo = new DrawnHeightsMemo();
+    const input = { chunks: state.buildChunks, sceneId: "s1", bounds: state.scenes.s1!.bounds, grid: SQUARES, fog: null, feetPerCell: 5, scale: 23, lowPower: false, stairs: sceneWalls(state.scenes.s1!, state.buildChunks) };
+    const flat = memo.get(input).heights;
+    const detailed = memo.get({ ...input, scale: 24 }).heights;
+    assert.notEqual(flat, detailed);
+    assert.deepEqual([flat.detail, detailed.detail], [false, true]);
+    assert.equal(memo.get({ ...input, scale: 30 }).heights, detailed, "the same detail, the same reader: kept");
+    const other = memo.get({ ...input, scale: 30, stairs: { stairAt: () => undefined } }).heights;
+    assert.notEqual(other, detailed, "a new reader: made again");
+    assert.equal(other.runs!.size, 0);
+  });
+
+  test("a flier's rules read the rules' ground, never the stand surface: over a tread above it, with a stair further up the ray, it stays where it flies", () => {
+    // East of x = 5 the rules' ground is a 5 ft stair. Everywhere a tread at 2 ft stands under a Medium's middle.
+    const ground: DragGround = { levels: [0.4, 0.2, 0], footGround: (at) => (at.x >= 5 ? 1 : 0), surface: () => 0.4, snap: (at) => snapPosition(SQUARES, at.x, at.y, { w: 1, h: 1 }) };
+    const plan: DragPlan = { w: 1, h: 1, own: { kind: "fly", base: 0.2 }, seat: null, drawn: (base) => base };
+    const view = isometric(0);
+    // The ring at 1 ft over x = 4.9, whose ray reaches x = 5.15 at 2 ft.
+    const at = dragLanding(view, ground, plan, toView(view, { x: 4.9, y: 3.5 }, 0.2));
+    assert.deepEqual({ ...ground.snap(at), z: at.z }, { x: 4, y: 3, z: 0.2 });
+  });
+
+  test("a rider on a horse standing on a stair is seated at the horse's tread", () => {
+    const state = stairsWorld([token("horse", { kind: "npc", x: 9, y: 6, elevation: 5 }), token("bree", { size: "small", x: 9, y: 6, elevation: 5, attached: { to: "horse", kind: "ride" } })]);
+    const pick = pickAt(state, 40);
+    const plan = planOf(state, pick, state.tokens.bree! as Token);
+    assert.equal(plan.seat?.base, 1.4);
   });
 });
