@@ -146,6 +146,15 @@ describe("what this device remembers", () => {
     assert.deepEqual(parseSplit(stored, "player", has), { share: 500, pair: null });
   });
 
+  test("a split stored with Time's or Sound's old id reads with Ambiance, which took their place (docs/design/design-v1-panel-groups.md 7)", () => {
+    const hasNow = (id: string) => ["token", "tracker", "ambiance"].includes(id);
+    const pairOf = (entry: unknown) => parseSplit(raw({ dm: entry }), "dm", hasNow);
+    assert.deepEqual(pairOf({ share: 400, top: "tracker", below: "sound" }), { share: 400, pair: { top: "tracker", below: "ambiance" } }, "Initiative over Sound");
+    assert.deepEqual(pairOf({ share: 400, top: "time", below: "token" }), { share: 400, pair: { top: "ambiance", below: "token" } }, "Time over Token");
+    assert.deepEqual(pairOf({ share: 400, top: "time", below: "sound" }), { share: 400, pair: null }, "Time over Sound is one panel now: no split, the share kept");
+    assert.deepEqual(pairOf({ share: 400, top: "tracker", below: "constructor" }), { share: 400, pair: null }, "only the renames' own keys count");
+  });
+
   test("each bad value of section 8", () => {
     assert.deepEqual(parseSplit(null, "dm", has), NO_SPLIT, "no key");
     assert.deepEqual(parseSplit("{not json", "dm", has), NO_SPLIT, "not JSON");

@@ -8,12 +8,12 @@ describe("the panels' order and groups (docs/design/design-v1-layout-hierarchy.m
   const groups = (role: "dm" | "player", wide: boolean) => panelsFor(role, wide).map((p) => p.group);
 
   test("a DM's phone: the in-play panels first, then those that run the table, then those for preparing, then Menu", () => {
-    assert.deepEqual(titles("dm", false), ["Token", "Initiative", "Party", "Dice", "Log", "Journal", "Areas", "DM", "Scenes", "Time", "Sound", "Monsters", "Encounters", "Characters", "Outliner", "Library", "Menu"]);
-    assert.deepEqual(groups("dm", false), ["play", "play", "play", "play", "play", "play", "play", "table", "table", "table", "table", "prepare", "prepare", "prepare", "prepare", "prepare", "room"]);
+    assert.deepEqual(titles("dm", false), ["Token", "Initiative", "Party", "Dice", "Log", "Journal", "Areas", "DM", "Scenes", "Ambiance", "Monsters", "Encounters", "Characters", "Outliner", "Library", "Menu"]);
+    assert.deepEqual(groups("dm", false), ["play", "play", "play", "play", "play", "play", "play", "table", "table", "table", "prepare", "prepare", "prepare", "prepare", "prepare", "room"]);
   });
 
   test("a DM's side panel has no Party tab: the party bar sits atop it", () => {
-    assert.deepEqual(titles("dm", true), ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "DM", "Scenes", "Time", "Sound", "Monsters", "Encounters", "Characters", "Outliner", "Library", "Menu"]);
+    assert.deepEqual(titles("dm", true), ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "DM", "Scenes", "Ambiance", "Monsters", "Encounters", "Characters", "Outliner", "Library", "Menu"]);
   });
 
   test("a player's panels, phone and wide alike", () => {
@@ -23,30 +23,24 @@ describe("the panels' order and groups (docs/design/design-v1-layout-hierarchy.m
     assert.deepEqual(groups("player", false), ["play", "play", "play", "play", "play", "play", "prepare", "prepare", "room"]);
   });
 
-  test("Time is a player's only while their view has a clock, and the DM's always", () => {
+  test("Ambiance is a player's only while Room says their view holds the clock or sound, or it is open, and the DM's always (5)", () => {
     const player = ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "Characters", "Library", "Menu"];
+    const ambiance = PANELS.find((p) => p.id === "ambiance")!;
+    assert.equal(ambiance.needsAmbiance, true);
+    assert.equal(ambiance.dmOnly, false);
+    assert.equal(ambiance.group, "table");
+    assert.equal(ambiance.icon, "ambiance");
+    assert.equal(ambiance.guide, undefined, "each group links its own section of the guide");
     for (const wide of [false, true]) {
       assert.deepEqual(titles("player", wide), player);
-      assert.deepEqual(panelsFor("player", wide, { clock: false }).map((p) => p.title), player);
-      assert.deepEqual(panelsFor("player", wide, { clock: true }).map((p) => p.title), ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "Time", "Characters", "Library", "Menu"]);
-      assert.ok(panelsFor("dm", wide, { clock: false }).some((p) => p.title === "Time"));
+      assert.deepEqual(panelsFor("player", wide, { ambiance: false }).map((p) => p.title), player);
+      assert.deepEqual(panelsFor("player", wide, { ambiance: true }).map((p) => p.title), ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "Ambiance", "Characters", "Library", "Menu"]);
+      assert.equal(panelOffered(ambiance, "player", wide), false);
+      assert.equal(panelOffered(ambiance, "dm", wide), true);
+      assert.equal(panelOffered(ambiance, "dm", wide, { ambiance: false }), true);
     }
-  });
-
-  test("a panel that needs sound is a player's only while their view plays something, and the DM's always (D-261102-462)", () => {
-    const sound = PANELS.find((p) => p.id === "sound")!;
-    assert.equal(sound.needsSound, true);
-    assert.equal(sound.dmOnly, false);
-    assert.deepEqual(panelsFor("player", false, { sound: true }).map((p) => p.title), ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "Sound", "Characters", "Library", "Menu"]);
-    for (const wide of [false, true]) {
-      assert.equal(panelOffered(sound, "player", wide), false);
-      assert.equal(panelOffered(sound, "player", wide, { sound: false, clock: true }), false);
-      assert.equal(panelOffered(sound, "player", wide, { sound: true }), true);
-      assert.equal(panelOffered(sound, "dm", wide), true);
-      assert.equal(panelOffered(sound, "dm", wide, { sound: false }), true);
-    }
-    const time = PANELS.find((p) => p.id === "time")!;
-    assert.equal(panelOffered(time, "player", false, { sound: true }), false, "sound lists no panel that needs a clock");
+    assert.ok(!PANELS.some((p) => p.id === "time" || p.id === "sound"), "Time and Sound left the registry for Ambiance");
+    assert.equal(PANELS.filter((p) => p.needsAmbiance).length, 1);
   });
 
   test("the groups keep to the order's ranges, and Initiative stays the side panel's default", () => {
@@ -65,17 +59,17 @@ describe("the panels' order and groups (docs/design/design-v1-layout-hierarchy.m
  * slice the tab row's fit can leave in More.
  */
 describe("the groups a tab row's gaps follow", () => {
-  test("a player's ungrouped row keeps Time and Sound in In play's gaps, as before Run the table", () => {
-    const player = panelsFor("player", true, { clock: true, sound: true });
+  test("a player's ungrouped row keeps Ambiance in In play's gaps, as before Run the table", () => {
+    const player = panelsFor("player", true, { ambiance: true });
     assert.deepEqual(player.map((p) => [p.title, tabGroup(p, false)]), [
       ["Token", "play"], ["Initiative", "play"], ["Dice", "play"], ["Log", "play"], ["Journal", "play"], ["Areas", "play"],
-      ["Time", "play"], ["Sound", "play"], ["Characters", "prepare"], ["Library", "prepare"], ["Menu", "room"],
+      ["Ambiance", "play"], ["Characters", "prepare"], ["Library", "prepare"], ["Menu", "room"],
     ]);
   });
 
   test("a DM's grouped row gaps Run the table off from In play and Prepare", () => {
     const dm = panelsFor("dm", true).filter((p) => p.group === "table");
-    assert.deepEqual(dm.map((p) => [p.title, tabGroup(p, true)]), [["DM", "table"], ["Scenes", "table"], ["Time", "table"], ["Sound", "table"]]);
+    assert.deepEqual(dm.map((p) => [p.title, tabGroup(p, true)]), [["DM", "table"], ["Scenes", "table"], ["Ambiance", "table"]]);
   });
 });
 
@@ -85,17 +79,17 @@ describe("the panels in sections", () => {
   test("a DM's whole phone list: In play, Run the table and Prepare over their panels, and Menu after a line", () => {
     assert.deepEqual(shape(panelSections(panelsFor("dm", false), true)), [
       ["In play", ["Token", "Initiative", "Party", "Dice", "Log", "Journal", "Areas"]],
-      ["Run the table", ["DM", "Scenes", "Time", "Sound"]],
+      ["Run the table", ["DM", "Scenes", "Ambiance"]],
       ["Prepare", ["Monsters", "Encounters", "Characters", "Outliner", "Library"]],
       ["---", ["Menu"]],
     ]);
   });
 
-  test("a player never sees Run the table: Time and Sound stay after Areas, before Characters, with no labels", () => {
-    const list = panelsFor("player", false, { clock: true, sound: true });
-    assert.deepEqual(list.map((p) => p.title), ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "Time", "Sound", "Characters", "Library", "Menu"]);
+  test("a player never sees Run the table: Ambiance stays after Areas, before Characters, with no labels", () => {
+    const list = panelsFor("player", false, { ambiance: true });
+    assert.deepEqual(list.map((p) => p.title), ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "Ambiance", "Characters", "Library", "Menu"]);
     assert.deepEqual(shape(panelSections(list, false)), [["", list.map((p) => p.title)]]);
-    assert.ok(list.every((p) => p.group !== "table" || p.id === "time" || p.id === "sound"), "only Time and Sound reach a player from the table group");
+    assert.ok(list.every((p) => p.group !== "table" || p.id === "ambiance"), "only Ambiance reaches a player from the table group");
   });
 
   test("a player's list has no labels and no line", () => {
@@ -121,11 +115,11 @@ describe("the panels in sections", () => {
     }
     assert.deepEqual(shape(panelSections(dm.slice(3), true)), [
       ["In play", ["Log", "Journal", "Areas"]],
-      ["Run the table", ["DM", "Scenes", "Time", "Sound"]],
+      ["Run the table", ["DM", "Scenes", "Ambiance"]],
       ["Prepare", ["Monsters", "Encounters", "Characters", "Outliner", "Library"]],
       ["---", ["Menu"]],
     ], "a DM's More at 1280 x 800");
-    assert.deepEqual(shape(panelSections(dm.slice(11), true)), [["Prepare", ["Encounters", "Characters", "Outliner", "Library"]], ["---", ["Menu"]]]);
+    assert.deepEqual(shape(panelSections(dm.slice(10), true)), [["Prepare", ["Encounters", "Characters", "Outliner", "Library"]], ["---", ["Menu"]]]);
     assert.deepEqual(shape(panelSections(panelsFor("player", true).slice(3), false)), [["", ["Log", "Journal", "Areas", "Characters", "Library", "Menu"]]], "a player's More");
   });
 
@@ -133,7 +127,7 @@ describe("the panels in sections", () => {
   test("every panel from 900 px up, as the split's Panel below lists them", () => {
     assert.deepEqual(shape(panelSections(panelsFor("dm", true), true)), [
       ["In play", ["Token", "Initiative", "Dice", "Log", "Journal", "Areas"]],
-      ["Run the table", ["DM", "Scenes", "Time", "Sound"]],
+      ["Run the table", ["DM", "Scenes", "Ambiance"]],
       ["Prepare", ["Monsters", "Encounters", "Characters", "Outliner", "Library"]],
       ["---", ["Menu"]],
     ]);

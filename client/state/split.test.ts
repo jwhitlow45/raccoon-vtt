@@ -205,6 +205,17 @@ describe("the store and the preview", () => {
     room.dispose();
   });
 
+  test("a stale caller's old panel id opens the panel that took its place (docs/design/design-v1-panel-groups.md 7)", () => {
+    const room = createRoomStore({ roomId: "R", you: { memberId: "dm1", role: "dm" } });
+    const state = () => room.store.getState().local;
+    room.ui.openPanel("time", { pane: "top" });
+    assert.equal(state().tab, "ambiance");
+    assert.equal(state().panel, "ambiance");
+    room.ui.openPanel("sound");
+    assert.equal(state().panel, "ambiance");
+    room.dispose();
+  });
+
   test("the preview's copy takes the same results, starting on a player's panels", () => {
     const src = createStore<RoomView>()(() => ({
       roomId: "R",

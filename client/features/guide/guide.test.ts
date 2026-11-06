@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import { parseMarkdown, type Block, type Inline } from "../../components/markdown.ts";
 import { parseRoute } from "../../lib/router.ts";
+import { AMBIANCE_GUIDES } from "../ambiance/words.ts";
 import { PANELS } from "../panels.ts";
 import { GUIDE_PATH, guideBody, guideHref, guideImageName, guideImageSize } from "./guide.ts";
 
@@ -84,9 +85,12 @@ describe("the DM guide's page", () => {
     const linked = PANELS.filter((p) => p.guide !== undefined);
     assert.deepEqual(
       linked.map((p) => p.id).sort(),
-      ["areas", "characters", "dice", "dm", "encounters", "monsters", "outliner", "scenes", "sound", "time", "token", "tracker"],
+      ["areas", "characters", "dice", "dm", "encounters", "monsters", "outliner", "scenes", "token", "tracker"],
     );
     for (const p of linked) assert.ok(IDS.has(p.guide!), `${p.id}: #${p.guide}`);
+    // Ambiance has no link of its own: its Time and Sound groups link the sections the Time and Sound panels did (docs/design/design-v1-panel-groups.md 7).
+    assert.deepEqual(AMBIANCE_GUIDES, { time: "time-and-the-calendar", sound: "music-and-sound" });
+    for (const section of Object.values(AMBIANCE_GUIDES)) assert.ok(IDS.has(section), `ambiance: #${section}`);
     assert.ok(IDS.has("quick-start"), "the empty states' link");
   });
 

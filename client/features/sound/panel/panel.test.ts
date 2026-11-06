@@ -13,7 +13,7 @@ import type { Playing, Sound } from "#shared/sound.ts";
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { MusicNow, SceneSoundLine } = await import("./NowPlaying.tsx");
+const { MusicNow, NowLine, SceneSoundLine, SceneSoundShortcut } = await import("./NowPlaying.tsx");
 const { LoopToggles } = await import("./LoopsSection.tsx");
 const { Board } = await import("./EffectsBoard.tsx");
 const { PlayerNow } = await import("./PlayerSound.tsx");
@@ -92,6 +92,45 @@ describe("the DM's Now playing", () => {
     assert.match(now(), /aria-label="Skip to the next track"/);
     assert.match(now({ music: music({ crossingInto: "Road" }) }), /aria-label="Skip past Road"/);
     assert.match(now({ music: music({ single: true }) }), /One track/);
+  });
+});
+
+describe("Now playing in Ambiance (docs/design/design-v1-panel-groups.md 4.1, D-261102-766 and 767)", () => {
+  test("the music's four buttons come before its time and bar, so Pause rises into a phone's half sheet", () => {
+    const html = now();
+    const buttons = html.indexOf('aria-label="Pause"');
+    assert.ok(buttons > html.indexOf("Tavern night · 3 of 12"), "after the name and the run line");
+    assert.ok(buttons < html.indexOf("data-sound-time"), "before the time");
+    assert.ok(html.indexOf('aria-label="Repeat all"') < html.indexOf("data-sound-time"), "all four");
+  });
+
+  test("with no music, the background sounds are counted, else nothing is playing", () => {
+    assert.match(renderToStaticMarkup(createElement(NowLine, { loops: 2 })), />2 background sounds</);
+    assert.match(renderToStaticMarkup(createElement(NowLine, { loops: 1 })), />1 background sound</);
+    assert.match(renderToStaticMarkup(createElement(NowLine, { loops: 0 })), />Nothing is playing\.</);
+  });
+});
+
+describe("the scene's sound in Ambiance (docs/design/design-v1-scenes-reorg.md 5)", () => {
+  const shortcut = (props: Partial<Parameters<typeof SceneSoundShortcut>[0]>) =>
+    renderToStaticMarkup(createElement(SceneSoundShortcut, { sceneName: "Forest road", sound: null, canUsePlaying: true, lineId: "line", onOpen: noop, onUsePlaying: noop, ...props }));
+
+  test("a row that opens Scene sound in Scenes, its help the line, and Use what's playing described by it, nothing more", () => {
+    const html = shortcut({ sound: { names: ["Tavern night"] } });
+    assert.match(html, /<button[^>]*aria-label="Scene sound, in Scenes"[^>]*>/);
+    const row = /<button[^>]*aria-label="Scene sound, in Scenes"[^>]*>/.exec(html)![0];
+    const help = /aria-describedby="([^"]+)"/.exec(row)![1]!;
+    assert.match(html, new RegExp(`id="${help}"[^>]*><span id="line">Forest road&#x27;s sound: Tavern night\\.</span>`));
+    assert.match(html, />Scene sound</);
+    assert.match(html, /<button[^>]*aria-describedby="line"[^>]*>Use what&#x27;s playing</);
+    for (const gone of ["Play it", "Use silence", "Clear", "It plays when you move"]) assert.doesNotMatch(html, new RegExp(gone), `${gone} lives in Scenes`);
+  });
+
+  test("nothing playing: Use what's playing is off, described by the line and why", () => {
+    const html = shortcut({ canUsePlaying: false });
+    assert.match(html, /<button[^>]*disabled=""[^>]*aria-describedby="line line-first"|<button[^>]*aria-describedby="line line-first"[^>]*disabled=""/);
+    assert.match(html, /id="line-first"[^>]*>Play something first\./);
+    assert.match(html, /Forest road has no sound of its own\./);
   });
 });
 
