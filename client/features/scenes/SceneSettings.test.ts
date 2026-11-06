@@ -21,10 +21,11 @@ const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { RoomProvider } = await import("../../state/view.ts");
 const { RoomScopeProvider } = await import("../../state/scope.ts");
-const { SceneSettings } = await import("./SceneSettings.tsx");
+const { mapImageLines, SceneSettings } = await import("./SceneSettings.tsx");
 const sound = await import("../sound/engine/store.ts");
 
 const MAP = { assetId: "a", widthPx: 700, heightPx: 700, cellPx: 70, originPx: { x: 0, y: 0 } };
+const VIDEO_MAP = { ...MAP, video: { assetId: "v", widthPx: 700, heightPx: 700, container: "webm" as const, video: "vp09.00.40.08", fps: 30, durationMs: 4000, kbps: 900 } };
 
 type Folds = Partial<Record<ScenesSection, boolean>>;
 const PHONE: Folds = { light: true, sound: false, players: false, map: false, walls: false, scene: false };
@@ -232,3 +233,97 @@ describe("New scene, a folding group over the settings (docs/design/design-v1-pa
     assert.equal(newScene.exec(await panel(true))?.[1], "true");
   });
 });
+
+describe("Map and grid's Map image row: Use the still only last on the picker's line, Remove map image alone on the last (docs/design/design-v1-polish-pass.md 3.3)", () => {
+  type State = Parameters<typeof mapImageLines>[0];
+  const at = (over: Partial<State>): State => ({ playersHere: false, armed: false, busy: false, map: true, video: true, firstFog: false, ...over });
+  /** A plan as words: a filled line's parts joined by " + ", a line at its buttons' own widths marked so. */
+  const plan = (s: State) => mapImageLines(s).map((l) => (typeof l === "string" ? l : `${l.buttons.join(" + ")}${l.fill ? "" : " (own width)"}`));
+
+  test("each state's lines, every button reachable in each", () => {
+    assert.deepEqual(plan(at({})), ["picker + paste + still", "remove"], "players elsewhere");
+    assert.deepEqual(plan(at({ playersHere: true })), ["ask + still", "remove"], "players here, unarmed");
+    assert.deepEqual(plan(at({ playersHere: true, armed: true })), ["note", "picker + paste + still", "cancel (own width)", "remove"], "players here, armed");
+    assert.deepEqual(plan(at({ playersHere: true, armed: true, firstFog: true })), ["note", "fog", "picker + paste + still", "cancel (own width)", "remove"], "the first map's fog choice after the players' Note");
+    assert.deepEqual(plan(at({ busy: true })), ["picker + paste + still", "remove"], "busy, players elsewhere");
+    for (const armed of [false, true]) assert.deepEqual(plan(at({ playersHere: true, armed, busy: true })), ["note", "picker + paste + still", "remove"], "busy on the players' scene: their Note first, no Cancel of the ask");
+  });
+
+  test("a still image has no Use the still only, a scene with no image no Remove, and every filled line holds only parts that draw", () => {
+    assert.deepEqual(plan(at({ video: false })), ["picker + paste", "remove"]);
+    assert.deepEqual(plan(at({ playersHere: true, video: false })), ["ask", "remove"]);
+    assert.deepEqual(plan(at({ map: false, video: false, firstFog: true })), ["picker + paste", "help"]);
+    assert.deepEqual(plan(at({ map: false, video: false, playersHere: true })), ["ask"]);
+    // Every state: Remove alone and last of the buttons, the still last on its line, no line empty, and no two lines starting alike (their keys).
+    for (const playersHere of [false, true])
+      for (const armed of [false, true])
+        for (const busy of [false, true])
+          for (const [map, video] of [[false, false], [true, false], [true, true]] as const)
+            for (const firstFog of [false, true]) {
+              const lines = mapImageLines({ playersHere, armed, busy, map, video, firstFog });
+              const buttons = lines.flatMap((l) => (typeof l === "string" ? [] : [l]));
+              const name = JSON.stringify({ playersHere, armed, busy, map, video, firstFog });
+              assert.ok(buttons.every((l) => l.buttons.length > 0), name);
+              assert.equal(new Set(buttons.map((l) => l.buttons[0])).size, buttons.length, name);
+              assert.equal(buttons.flatMap((l) => l.buttons).filter((b) => b === "remove").length, map ? 1 : 0, name);
+              if (map) assert.deepEqual(buttons.at(-1), { buttons: ["remove"], fill: true }, name);
+              assert.equal(buttons.flatMap((l) => l.buttons).filter((b) => b === "still").length, video ? 1 : 0, name);
+              for (const l of buttons) if (l.buttons.includes("still")) assert.equal(l.buttons.at(-1), "still", name);
+              assert.ok(buttons.some((l) => l.buttons.includes("ask") || l.buttons.includes("picker")), name);
+            }
+  });
+
+  /** The Map image row's lines of buttons as drawn: each line's words, a filled line's cells joined by " + ". */
+  function drawnLines(html: string): string[] {
+    const row = divAt(html, html.lastIndexOf('<div data-setting-row=""', html.indexOf(">Map image<")));
+    const LINE = '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">';
+    const CELL = '<div style="display:grid;flex:1 1 auto">';
+    const out: string[] = [];
+    for (let i = row.indexOf(LINE); i >= 0; i = row.indexOf(LINE, i + 1)) {
+      const line = divAt(row, i);
+      const words = (h: string) => h.replace(/<[^>]+>/g, "").trim();
+      const cells = childDivs(line);
+      out.push(cells.length > 0 && cells.every((c) => c.startsWith(CELL)) ? cells.map(words).join(" + ") : `${words(line)} (own width)`);
+    }
+    return out;
+  }
+
+  test("drawn with the players elsewhere: Replace map image, Paste an image and Use the still only share a filled line, then Remove map image alone", () => {
+    const html = page(ALL_OPEN, { map: VIDEO_MAP }, (s) => {
+      s.meta.playerSceneId = "s2";
+    });
+    assert.deepEqual(drawnLines(html), ["Replace map image + Paste an image + Use the still only", "Remove map image"]);
+  });
+
+  test("drawn on the players' scene, unarmed: the ask and Use the still only, then Remove map image alone, its words free to wrap inside it", () => {
+    const html = page(ALL_OPEN, { map: VIDEO_MAP });
+    assert.deepEqual(drawnLines(html), ["Replace map image + Use the still only", "Remove map image"]);
+    assert.match(html, /<button type="button"[^>]*style="[^"]*white-space:normal;overflow-wrap:anywhere;text-align:center[^"]*"[^>]*>Remove map image<\/button>/);
+    assert.deepEqual(drawnLines(page(ALL_OPEN, { map: MAP })), ["Replace map image", "Remove map image"], "a still image: no Use the still only, and no empty cell");
+  });
+});
+
+/** The div that opens at `start`, whole. */
+function divAt(html: string, start: number): string {
+  assert.ok(start >= 0);
+  const tags = /<(\/?)div\b[^>]*>/g;
+  tags.lastIndex = start;
+  let depth = 0;
+  for (let m = tags.exec(html); m; m = tags.exec(html)) {
+    depth += m[1] ? -1 : 1;
+    if (depth === 0) return html.slice(start, tags.lastIndex);
+  }
+  return html.slice(start);
+}
+
+/** The divs directly inside a div's markup, each whole. */
+function childDivs(box: string): string[] {
+  const out: string[] = [];
+  const tags = /<(\/?)div\b[^>]*>/g;
+  let depth = 0;
+  for (let m = tags.exec(box); m; m = tags.exec(box)) {
+    if (!m[1] && depth === 1) out.push(divAt(box, m.index));
+    depth += m[1] ? -1 : 1;
+  }
+  return out;
+}

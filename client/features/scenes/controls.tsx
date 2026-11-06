@@ -157,9 +157,12 @@ export function Slider(props: { label: string; value: number; min: number; max: 
 /**
  * A button that asks for a second tap before it acts, for actions that wipe
  * something out (fog everything, clear the build). No dialog, so it works the
- * same with a thumb and a mouse.
+ * same with a thumb and a mouse. `wrap` lets armed words longer than the
+ * line wrap inside the button, which grows taller, as the token panel's
+ * ConfirmButton does (features/tokens/ui.tsx), rather than run past the
+ * panel's edge or be cut, since they say what the second tap takes.
  */
-export function ConfirmButton(props: { label: string; confirm: string; title?: string; onConfirm(): void; disabled?: boolean; shrink?: boolean }) {
+export function ConfirmButton(props: { label: string; confirm: string; title?: string; onConfirm(): void; disabled?: boolean; shrink?: boolean; wrap?: boolean }) {
   const [armed, setArmed] = useState(false);
   useEffect(() => {
     if (!armed) return;
@@ -183,7 +186,13 @@ export function ConfirmButton(props: { label: string; confirm: string; title?: s
           setArmed(true);
         }
       }}
-      style={props.shrink ? { flex: "0 1 auto", minWidth: 0, maxWidth: "100%" } : { flex: "none", whiteSpace: "nowrap" }}
+      style={
+        props.shrink
+          ? { flex: "0 1 auto", minWidth: 0, maxWidth: "100%" }
+          : props.wrap
+            ? { flex: "none", minWidth: 0, maxWidth: "100%", whiteSpace: "normal", overflowWrap: "anywhere", textAlign: "center" }
+            : { flex: "none", whiteSpace: "nowrap" }
+      }
     >
       {props.shrink ? <span style={{ display: "block", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span> : label}
     </Button>

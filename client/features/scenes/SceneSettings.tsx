@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { Children, Fragment, isValidElement, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { AutoWalls, Scene } from "#shared/model.ts";
 import { MAX_SCENE_CELLS, type OpOf } from "#shared/protocol.ts";
 import { autoWallsOf } from "#shared/rules/autoWalls.ts";
@@ -682,6 +682,7 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
   /* Removing the image removes every map phase with it (docs/design/design-v1-maps-vision.md section 3.4), so the second tap says so. */
   const removeButton = (
     <ConfirmButton
+      wrap
       label="Remove map image"
       confirm={phaseCount > 1 ? `Tap again to remove all ${phaseCount} phases` : "Tap again to remove"}
       title={phaseCount > 1 ? "Removes the map image and every map phase of this scene" : undefined}
@@ -689,58 +690,47 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
     />
   );
 
-  /*
-   * The players' scene asks before the picker opens: the image is theirs to
-   * see the moment it uploads. Asked, the sentence leads and the first
-   * map's fog choice follows it, so the question reads before its answers,
-   * as the forget question and Leave Explore's do. Cancel takes a line of
-   * its own under the ways to bring an image: on a narrow phone at a large
-   * size those two already take two lines, and Cancel beside them would
-   * wrap alone. Remove map image comes last, on its own line, since it
-   * answers nothing: it acts on the image the scene has now.
-   */
-  const picker = (label: string) =>
-    playersHere && !armed && !upload.busy ? (
-      <>
-        <Row>
-          <Button ref={askRef} size="sm" onClick={() => setArmed(true)}>
-            {label}
-          </Button>
-        </Row>
-        {map ? <Row>{removeButton}</Row> : null}
-      </>
-    ) : (
-      <>
-        {playersHere ? <Note id={warningId}>The players are on this scene. They see the new image as soon as it uploads.</Note> : null}
-        {firstFog && playersHere ? <Checkbox label="Start it under fog, so they see only what you reveal" checked={fogIt} onChange={setFogIt} /> : null}
-        <Row>
-          {filePicker(playersHere ? "Choose the image" : label)}
-          <PasteButton paste={paste} />
-        </Row>
-        {playersHere && !upload.busy ? (
-          <Row>
-            <Button size="sm" onClick={() => setArmed(false)}>
-              Cancel
-            </Button>
-          </Row>
-        ) : null}
-        {map ? <Row>{removeButton}</Row> : null}
-        {firstFog && !playersHere ? <Help>Fog turns on with the first map, as for a scene made from a map.</Help> : null}
-      </>
-    );
+  const label = map ? "Replace map image" : "Add a map image";
+  const button: Record<MapImageButton, ReactNode> = {
+    ask: (
+      <Button ref={askRef} size="sm" onClick={() => setArmed(true)}>
+        {label}
+      </Button>
+    ),
+    picker: filePicker(playersHere ? "Choose the image" : label),
+    paste: <PasteButton paste={paste} />,
+    still: <UseStillOnly scene={scene} disabled={upload.busy} />,
+    cancel: (
+      <Button size="sm" onClick={() => setArmed(false)}>
+        Cancel
+      </Button>
+    ),
+    remove: removeButton,
+  };
+  const words: Record<MapImageWords, ReactNode> = {
+    note: <Note id={warningId}>The players are on this scene. They see the new image as soon as it uploads.</Note>,
+    fog: <Checkbox label="Start it under fog, so they see only what you reveal" checked={fogIt} onChange={setFogIt} />,
+    help: <Help>Fog turns on with the first map, as for a scene made from a map.</Help>,
+  };
+  const lines = mapImageLines({ playersHere, armed, busy: upload.busy, map: map !== undefined, video: map?.video !== undefined, firstFog });
 
   // The warning, the fog choice, its buttons and the status stack under the name, as the section they came from did.
   return (
     <SettingRow name="Map image" help={map?.video ? <MapVideoHelp video={map.video} /> : map ? `A ${map.widthPx} × ${map.heightPx} px image.` : "No map image yet."} wide>
       <div ref={rowRef} style={{ position: "relative", flex: 1, minWidth: 0, display: "grid", gap: theme.space(2) }}>
         <ProbeHost host={video.host} />
-        {picker(map ? "Replace map image" : "Add a map image")}
-        {/* Below the row's buttons (docs/design/design-v1-animated-maps.md 4.2). */}
-        {map?.video ? (
-          <Row>
-            <UseStillOnly scene={scene} disabled={upload.busy} />
-          </Row>
-        ) : null}
+        {lines.map((line) =>
+          typeof line === "string" ? (
+            <Fragment key={line}>{words[line]}</Fragment>
+          ) : (
+            // Keyed by the line's first button, which no other line starts with, so a line keeps its buttons, and focus in them, as a part comes or goes after it.
+            <Row key={line.buttons[0]} fill={line.fill}>
+              {line.buttons.map((b) => (
+                <Fragment key={b}>{button[b]}</Fragment>
+              ))}
+            </Row>
+          ),
+        )}
         {/* What a video makes, under the ways to bring an image once they show (docs/design/design-v1-animated-maps.md 4.1). */}
         {videos && !(playersHere && !armed && !upload.busy) ? <Help>{VIDEO_PICK_HELP}</Help> : null}
         {status}
@@ -749,8 +739,59 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
   );
 }
 
-function Row(props: { children: ReactNode }) {
-  return <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>{props.children}</div>;
+export type MapImageButton = "ask" | "picker" | "paste" | "still" | "cancel" | "remove";
+export type MapImageWords = "note" | "fog" | "help";
+/** A line of the Map image row: words, or a line of buttons that fills its width or keeps each button's own. */
+export type MapImageLine = MapImageWords | { buttons: readonly MapImageButton[]; fill: boolean };
+
+/**
+ * The Map image row's lines in each state, every button reachable in each.
+ *
+ * The players' scene asks before the picker opens: the image is theirs to
+ * see the moment it uploads. Asked, the sentence leads and the first map's
+ * fog choice follows it, so the question reads before its answers, as the
+ * forget question and Leave Explore's do. Cancel takes a line of its own
+ * under the ways to bring an image: on a narrow phone at a large size
+ * those already take two lines, and Cancel beside them would wrap alone.
+ *
+ * Use the still only stands last on the picker's line, and Remove map
+ * image alone on the last line, each line filled
+ * (docs/design/design-v1-polish-pass.md 3.3). Remove answers nothing above
+ * it: it acts on the image the scene has now. Its armed words are longer
+ * than its own, and alone on its line they move no other button. Where
+ * even that line is too short, they wrap inside it.
+ */
+export function mapImageLines(s: { playersHere: boolean; armed: boolean; busy: boolean; map: boolean; video: boolean; firstFog: boolean }): MapImageLine[] {
+  // Each part is left out where it would draw nothing, since a filled line gives every part a cell (Row).
+  const still: MapImageButton[] = s.map && s.video ? ["still"] : [];
+  const remove: MapImageLine[] = s.map ? [{ buttons: ["remove"], fill: true }] : [];
+  if (s.playersHere && !s.armed && !s.busy) return [{ buttons: ["ask", ...still], fill: true }, ...remove];
+  return [
+    ...(s.playersHere ? (["note"] as const) : []),
+    ...(s.playersHere && s.firstFog ? (["fog"] as const) : []),
+    { buttons: ["picker", "paste", ...still], fill: true },
+    ...(s.playersHere && !s.busy ? [{ buttons: ["cancel"] as const, fill: false }] : []),
+    ...remove,
+    ...(!s.playersHere && s.firstFog ? (["help"] as const) : []),
+  ];
+}
+
+/**
+ * A line of buttons that wraps. `fill` gives each child a cell that grows to
+ * share each line it wraps onto, as the Initiative panel's fight buttons and
+ * the token window's rows do (docs/design/design-v1-polish.md R6). Each child
+ * must render something, or its cell stands empty, so a call site leaves out
+ * a child that would draw nothing rather than pass one that returns null.
+ */
+function Row(props: { children: ReactNode; fill?: boolean }) {
+  const children = props.fill
+    ? Children.toArray(props.children).map((child, i) => (
+        <div key={isValidElement(child) && child.key !== null ? child.key : i} style={{ display: "grid", flex: "1 1 auto" }}>
+          {child}
+        </div>
+      ))
+    : props.children;
+  return <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>{children}</div>;
 }
 
 function formatPx(v: number): string {
