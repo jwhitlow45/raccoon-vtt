@@ -197,7 +197,7 @@ export class AnimMapBoard {
   #forAsset: AssetId | null = null;
   /** The size the element reported on `loadedmetadata` and `resize`. */
   #reportedSize: { widthPx: number; heightPx: number } | undefined = undefined;
-  /** The last frame callback's own size, once one gave it: from then on the only size judged. */
+  /** The last frame callback's own size, once one gave it for this source: from then on the only size judged. */
   #frameSize: { widthPx: number; heightPx: number } | undefined = undefined;
   #notStarted = false;
   #loadFailed = false;
@@ -380,6 +380,15 @@ export class AnimMapBoard {
     return expected && reportWaitsForFrame(reported, video) ? undefined : reported;
   }
 
+  /**
+   * The size waits for the first frame (`#judgedSize`). Until then the
+   * element plays unseen: Konva keeps the still, and a frame callback reads
+   * that frame's size, so no frame reaches the map before it is judged.
+   */
+  #sizing(): boolean {
+    return this.#reportedSize !== undefined && this.#judgedSize() === undefined;
+  }
+
   #question(video: MapVideo): string {
     return `${video.assetId}|${this.#input.variant}`;
   }
@@ -479,12 +488,14 @@ export class AnimMapBoard {
       if (!runs && !el.paused) el.pause();
     }
 
-    // Konva draws the element while the device allows it, it has a frame, and no setup tool shows the still.
+    // Konva draws the element while the device allows it, it has a frame whose size is judged, and no setup tool shows the still.
     const full = video && answer ? playback(video, this.#ruleInput(answer, true)) : null;
-    const hand = Boolean(this.#srcAsset !== null && this.#srcAsset === desired && this.#firstFrame && full && (full.play || full.reason === "stillView") && !i.setupTool);
+    const sizing = this.#sizing();
+    const hand = Boolean(this.#srcAsset !== null && this.#srcAsset === desired && this.#firstFrame && !sizing && full && (full.play || full.reason === "stillView") && !i.setupTool);
     this.#setHanded(hand);
-    // Draws start once the map layer's commit holds the element, so no video draw redraws the still.
-    this.#loop(hand && runs && this.#playing && this.#layer !== null && this.#konvaHolds === this.#element);
+    // Draws start once the map layer's commit holds the element, so no video draw redraws the still. A frame callback also runs, with nothing drawn, while the size waits for it.
+    const drawing = hand && runs && this.#playing && this.#layer !== null && this.#konvaHolds === this.#element;
+    this.#loop(drawing || (sizing && this.#srcAsset === desired && runs && this.#playing));
 
     // Before the browser answers, the device's own choices already say Still, and otherwise it reads as moving, the way it is about to go.
     this.#publish(video, full ?? (video ? playback(video, this.#ruleInput("smooth", true)) : null));
@@ -523,6 +534,9 @@ export class AnimMapBoard {
     this.#playing = false;
     this.#lastMediaS = null;
     this.#callbackSeen = false;
+    // Each source's first frame is judged anew before Konva gets it, since what an earlier source of the asset decoded need not hold for this one.
+    this.#reportedSize = undefined;
+    this.#frameSize = undefined;
     this.#fallback = false;
     this.#gate.reset();
     this.#restartWindows();
@@ -597,7 +611,8 @@ export class AnimMapBoard {
       preview: this.#input.preview,
       waiting: Boolean(this.#lease && !this.#lease.granted()) || this.#standDown || this.#yielding,
       holdsSrc: this.#srcAsset !== null,
-      firstFrame: this.#firstFrame,
+      // A frame whose size waits to be judged is not shown yet.
+      firstFrame: this.#firstFrame && !this.#sizing(),
       drawing: this.#callback !== null || this.#rafId !== null,
     });
     if (state !== this.#state) {
@@ -716,7 +731,7 @@ export class AnimMapBoard {
       this.#frameSize = { widthPx: width, heightPx: height };
       this.#settle();
     } else if (!seen) this.#settle();
-    if (this.#element && this.#handed && this.#srcAsset !== null) {
+    if (this.#element && this.#handed && this.#konvaHolds === this.#element && this.#srcAsset !== null) {
       this.#sample(now, metadata.presentedFrames, metadata.mediaTime);
       const mediaMs = metadata.mediaTime * 1000;
       if (this.#gate.frame(mediaMs, now)) this.#draw(now, mediaMs);
@@ -728,7 +743,7 @@ export class AnimMapBoard {
   readonly #onTick = (now: number): void => {
     this.#rafId = null;
     const el = this.#element;
-    if (el && this.#handed && this.#srcAsset !== null) {
+    if (el && this.#handed && this.#konvaHolds === el && this.#srcAsset !== null) {
       this.#sample(now, null, el.currentTime);
       if (this.#gate.tick(now)) this.#draw(now, null);
     }

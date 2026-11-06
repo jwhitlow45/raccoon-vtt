@@ -157,8 +157,10 @@ class FakeVideo implements VideoLike {
   silent = false;
   /** What this source's frames decode at. */
   frameSize: Size = { w: 1280, h: 720 };
-  /** The size the last frame callback gave the board, or null before one did. */
+  /** The size the last frame callback gave the board, or null before one did for this source. */
   lastFrameGiven: Size | null = null;
+  /** Every size a frame callback gave, over every source. */
+  readonly sizesGiven: Size[] = [];
   /** The media time of the frame last given to a callback, and whether a wrap or a new source came since the frame before. */
   lastMediaMs: number | null = null;
   jumped = true;
@@ -307,7 +309,10 @@ class FakeVideo implements VideoLike {
     this.callbacks.clear();
     this.lastMediaMs = cb.mediaMs;
     const size = this.frameSizes ? { width: this.frameSize.w, height: this.frameSize.h } : {};
-    if (callbacks.length > 0 && this.frameSizes) this.lastFrameGiven = this.frameSize;
+    if (callbacks.length > 0 && this.frameSizes) {
+      this.lastFrameGiven = this.frameSize;
+      this.sizesGiven.push(this.frameSize);
+    }
     for (const run of callbacks) run(now, { mediaTime: cb.mediaMs / 1000, presentedFrames: cb.presentedFrames, ...size });
     return true;
   }
@@ -333,6 +338,9 @@ class Rig {
   #commitQueued = false;
   /** What the board is told now, for the size invariant. */
   told: () => { video: MapVideo | null; variant: "full" | "mobile" } = () => ({ video: null, variant: "full" });
+  /** Every element the board handed to Konva and every one Konva held, in turn, for a test that reads the handoff. */
+  handed: (VideoLike | null)[] = [];
+  held: (VideoLike | null)[] = [];
 
   constructor(world: World, label: string, makeVideo: () => FakeVideo, decodable: Decodable) {
     this.world = world;
@@ -354,7 +362,28 @@ class Rig {
     this.board = new AnimMapBoard(env);
     this.layer = this.#makeLayer();
     this.board.attachLayer(this.layer);
-    this.board.subscribe(() => this.#queueCommit());
+    this.board.subscribe(() => {
+      const shown = this.board.shown.element;
+      if (shown !== (this.handed.at(-1) ?? null)) this.handed.push(shown);
+      this.#checkShown("handed");
+      this.#queueCommit();
+    });
+  }
+
+  /**
+   * The size rule over what the board hands to Konva (D-261102-897): the
+   * frame it judged, or the element's own frame where no callback has given
+   * one yet, must pass the rule whenever the board hands it, so Konva never
+   * gets a frame before its size is judged, for its own redraws as for the
+   * board's. Only for an element whose callbacks give sizes: without them,
+   * the reported size is judged as reported, the documented exception.
+   */
+  #checkShown(at: string): void {
+    const el = this.video;
+    if (!el || this.board.shown.element !== el || !el.withCallbacks || !el.frameSizes || el.silent || el.paused) return;
+    const told = this.told();
+    const frame = el.lastFrameGiven ?? el.frameSize;
+    if (told.video && sizeProblem({ widthPx: frame.w, heightPx: frame.h }, told.video.fps, told.variant)) this.world.fail(`${this.label}: ${at} a ${frame.w} x ${frame.h} frame on ${told.variant}`);
   }
 
   #makeLayer(): LayerLike {
@@ -407,6 +436,7 @@ class Rig {
       const next = this.board.shown.element;
       if (next !== this.konvaHeld) {
         this.konvaHeld = next;
+        this.held.push(next);
         this.board.konvaHolds(next);
       }
     };
@@ -435,6 +465,7 @@ class Rig {
   cameraDraw(): void {
     if (!this.cameraPending) return;
     this.cameraPending = false;
+    if (this.konvaHeld === this.video) this.#checkShown("Konva redrew");
     this.#cameraDrawing = true;
     try {
       this.layer.draw();
@@ -500,7 +531,12 @@ async function sequence(seed: number): Promise<string[]> {
   const withCallbacks = !chance(r, 0.2);
   const frameSizes = !chance(r, 0.1);
   const decodable = pick(r, ["smooth", "smooth", "smooth", "notSmooth"] as const);
-  world.sizes = (url) => sizesFor(VIDEOS.find((v) => url === `/${v.assetId}`), r);
+  // One file decodes the same each time it loads, so its sizes are drawn once per sequence.
+  const sizesByUrl = new Map<string | undefined, ReturnType<typeof sizesFor>>();
+  world.sizes = (url) => {
+    if (!sizesByUrl.has(url)) sizesByUrl.set(url, sizesFor(VIDEOS.find((v) => url === `/${v.assetId}`), r));
+    return sizesByUrl.get(url)!;
+  };
   const make = () => {
     const v = new FakeVideo(world, content, display, r, withCallbacks);
     v.frameSizes = frameSizes;
@@ -678,7 +714,7 @@ test("2,000 random sequences keep the board's invariants", { skip: Boolean(ONE) 
     assert.ok(reached.states.has(state), `no sequence reached ${state}: ${[...reached.states].join(", ")}`);
 });
 
-/** One board on a display, with its element, run by hand. `sizes` is what the element reports and decodes; `variant` the map detail it starts on. */
+/** One board on a display, with its element, run by hand. `sizes` is what the element reports and decodes. `variant` is the map detail it starts on. */
 function single(content: Content, display: Display, video: MapVideo, options: { callbacks?: boolean; silent?: boolean; sizes?: { reported: Size; frame: Size }; variant?: "full" | "mobile" } = {}) {
   resetDecoderForTests();
   resetPageStepDownForTests();
@@ -904,10 +940,18 @@ test("on Phone size, a WebM that declares 2560 × 720 for 1280 × 720 and really
   const liar: MapVideo = { ...VIDEO_A, assetId: "vl", widthPx: 1280, heightPx: 720, displayWidthPx: 2560 };
   const { world, dm, run } = single(SECOND, HZ60, liar, { variant: "mobile", sizes: { reported: { w: 2560, h: 720 }, frame: { w: 2560, h: 720 } } });
   await settle(world);
-  await run(1500);
+  // Konva redraws on its own too, as a pan or a token's move makes it, every frame here.
+  for (let t = 0; t < 1500; t += 50) {
+    dm.cameraPending = true;
+    await run(50);
+  }
   assert.equal(dm.board.state, "still phone-size", "the frame's own size is judged");
   assert.equal(dm.board.videoDraws, 0, "and that frame is never drawn");
-  assert.equal(dm.konvaHeld, null, "Konva draws the still");
+  assert.deepEqual(dm.handed, [], "the board never handed the element to Konva");
+  assert.deepEqual(dm.held, [], "so Konva's own redraws drew the still");
+  assert.ok(dm.board.cameraDraws > 20, "Konva redrew");
+  assert.deepEqual(dm.video!.sizesGiven[0], { w: 2560, h: 720 }, "a frame callback judged the frame with the still shown");
+  assert.equal(dm.video!.hasSrc(), false, "then the decoder is let go");
   // On Full size the same frames are inside the caps.
   dm.board.input({ variant: "full" });
   dm.told = () => ({ video: liar, variant: "full" });
@@ -929,7 +973,8 @@ test("the 4:3 file reported at 2560 × 1080 without frame callbacks, or with non
     const { world, dm, run } = single(SECOND, HZ60, VIDEO_WIDE, { variant: "mobile", silent: true, sizes: { reported: { w: 2560, h: 1080 }, frame: { w: 1920, h: 1080 } } });
     await settle(world);
     await run(CALLBACK_WAIT_MS / 2);
-    assert.notEqual(dm.board.state, "still phone-size", "held while a callback may still come");
+    assert.equal(dm.board.state, "loading", "held while a callback may still come, the still shown");
+    assert.deepEqual(dm.handed, [], "and nothing handed to Konva");
     await run(CALLBACK_WAIT_MS + 1000);
     assert.equal(dm.board.state, "still phone-size", "none came: as reported");
   }
@@ -960,6 +1005,30 @@ test("plain facts with an SPS stretch reported at 2560 × 1080 for 1920 × 1080 
     assert.equal(dm.board.state, "still phone-size");
     assert.deepEqual(world.failures, []);
   }
+});
+
+test("a new source of the same video is judged again on its first frame before Konva gets it", async () => {
+  const { world, dm, run } = single(SECOND, HZ60, VIDEO_A, { variant: "mobile", sizes: { reported: { w: 1280, h: 720 }, frame: { w: 1280, h: 720 } } });
+  await settle(world);
+  await run(1000);
+  assert.equal(dm.board.state, "playing");
+  // View as a player covers the board, which lets go of its source, and the next source decodes larger.
+  dm.board.input({ preview: true });
+  await settle(world);
+  await run(300);
+  assert.equal(dm.video!.hasSrc(), false);
+  world.sizes = () => ({ reported: { w: 1280, h: 720 }, frame: { w: 2560, h: 1440 } });
+  dm.handed.length = 0;
+  dm.held.length = 0;
+  dm.board.input({ preview: false });
+  for (let t = 0; t < 1500; t += 50) {
+    dm.cameraPending = true;
+    await run(50);
+  }
+  assert.equal(dm.board.state, "still phone-size");
+  assert.deepEqual(dm.handed.filter(Boolean), [], "the earlier source's frame size does not hand the new one");
+  assert.deepEqual(dm.held.filter(Boolean), [], "so Konva's own redraws drew the still");
+  assert.deepEqual(world.failures, []);
 });
 
 test("a disposed board no longer hears the page's step-down, so an ended Room scope is not kept alive (AM-R1-04)", () => {
