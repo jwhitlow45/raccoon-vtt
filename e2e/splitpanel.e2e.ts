@@ -614,7 +614,7 @@ describe("raccoon-vtt: two panels in the side panel", { timeout: 1_200_000 }, ()
     await list.waitFor();
     // Each item's title, after its panel's icon, which a screen reader does not hear (docs/design/design-v1-icons-2.md 3.1).
     const items = await list.getByRole("menuitemradio").evaluateAll((els) => els.map((el) => ((el as unknown as { querySelector(s: string): DomEl | null }).querySelector(":scope > :not([aria-hidden])")?.textContent ?? "").trim()));
-    assert.deepEqual(items, ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "DM", "Scenes", "Time", "Sound", "Monsters", "Encounters", "Characters", "Outliner", "Library", "Menu"]);
+    assert.deepEqual(items, ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "DM", "Scenes", "Ambiance", "Monsters", "Encounters", "Characters", "Outliner", "Library", "Menu"]);
     assert.equal(await list.getByRole("menuitemradio", { name: sideTabName("Log") }).getAttribute("aria-checked"), "true");
     assert.equal(await described(list.getByRole("menuitemradio", { name: "Initiative" })), "Shown on top");
     assert.ok(((await list.getByRole("menuitemradio", { name: "Initiative" }).textContent()) ?? "").includes("on top"));

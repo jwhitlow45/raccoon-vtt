@@ -12,7 +12,8 @@ import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { addSound } from "./soundRoom.ts";
 
 /**
- * The Sound panel (docs/design/design-v1-music.md 4.1, 4.3 and 4.6), on
+ * The Sound section of Ambiance (docs/design/design-v1-music.md 4.1, 4.3 and
+ * 4.6, design-v1-panel-groups.md 4.1), on
  * the real server serving the production build with ROOM_SOUND
  * on. Dana the DM is at a desk and Pat on a phone. Sounds are made of
  * frames of silence (shared/audio/mp3Testutil.ts), so no step needs an
@@ -20,8 +21,8 @@ import { addSound } from "./soundRoom.ts";
  * is the engine's and sound.e2e.ts's:
  * - sp-0: the room, Pat, two scenes, and three music tracks, five
  *   background sounds and an effect uploaded and created.
- * - sp-1: the DM's panel with nothing playing, its sections in order and
- *   the storage line.
+ * - sp-1: the DM's Sound with nothing playing, its sections in D-261102-766's
+ *   order and the storage line.
  * - sp-2: a playlist made on its page, played, paused, resumed, stepped
  *   through Repeat, skipped and stopped, each one op.
  * - sp-3: Background's toggles, the fifth refused in words, a loop's
@@ -30,8 +31,9 @@ import { addSound } from "./soundRoom.ts";
  *   an effect's page with the uses its length rules out.
  * - sp-5: a sound's page refusing the delete of a playing loop and of a
  *   track of the run, and a rename on Enter.
- * - sp-6: a scene's sound saved from what plays, started by Move players,
- *   silence saved and Clear.
+ * - sp-6: a scene's sound saved from what plays with Ambiance's Use what's
+ *   playing, started by Move players, the Scene sound row's line, and the
+ *   row opening Scenes.
  * - sp-7: Players see what is playing: Pat's panel by name and by count.
  * - sp-8: the X-card's Stop the sound.
  * - sp-9: a second server with the switch off: the one line, Built in and
@@ -129,29 +131,34 @@ function addEntry(entry: (typeof LIBRARY)[number]): Promise<string> {
   return addSound({ context: dmContext, origin: server.origin, roomId: run.roomId, ops, id: randomUUID(), name: entry.name, use: entry.use, ms: entry.ms });
 }
 
-/** The Sound panel, the side panel's tab on the desk. */
+/** The DM's Sound: Ambiance, the side panel's tab on the desk, whose Sound group starts open (docs/design/design-v1-panel-groups.md 4.1, 6.1). */
 async function soundPanel(page: Page = dm): Promise<Locator> {
-  await openSideTab(page, "Sound");
-  return page.getByRole("tabpanel", { name: sideTabName("Sound") });
+  await openSideTab(page, "Ambiance");
+  return page.getByRole("tabpanel", { name: sideTabName("Ambiance") });
 }
 
-/** The DM's Sound panel at any size: the side panel's tab where there is one, or the Panels list's row and its sheet on a phone. */
+/** The DM's Ambiance at any size, its Sound group inside: the side panel's tab where there is one, or the Panels list's row and its sheet on a phone. */
 async function anySoundPanel(page: Page): Promise<Locator> {
-  if (await page.getByRole("tablist", { name: "Panels" }).isVisible()) return (await openSideTab(page, "Sound"), page.getByRole("tabpanel", { name: sideTabName("Sound") }));
-  const sheet = page.locator('dialog[data-rvtt-sheet][aria-label="Sound"]');
+  if (await page.getByRole("tablist", { name: "Panels" }).isVisible()) return (await openSideTab(page, "Ambiance"), page.getByRole("tabpanel", { name: sideTabName("Ambiance") }));
+  const sheet = page.locator('dialog[data-rvtt-sheet][aria-label="Ambiance"]');
   if (await sheet.isVisible()) return sheet;
   await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
-  await page.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Sound/ }).click();
+  await page.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Ambiance/ }).click();
   await sheet.waitFor();
   return sheet;
 }
 
-/** A player's Sound panel on a phone: the Panels list's row, then its sheet. */
+/** A group of Ambiance, folded or open, by its name. */
+function ambianceGroup(panel: Locator, name: string): Locator {
+  return panel.locator("[data-panel-group]").filter({ has: panel.page().locator("h3 [data-group-name]", { hasText: new RegExp(`^${name}$`) }) });
+}
+
+/** A player's Ambiance on a phone: the Panels list's row, then its sheet. */
 async function patPanel(): Promise<Locator> {
-  const sheet = pat.locator('dialog[data-rvtt-sheet][aria-label="Sound"]');
+  const sheet = pat.locator('dialog[data-rvtt-sheet][aria-label="Ambiance"]');
   if (await sheet.isVisible()) return sheet;
   await pat.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
-  await pat.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Sound/ }).click();
+  await pat.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Ambiance/ }).click();
   await sheet.waitFor();
   return sheet;
 }
@@ -165,7 +172,7 @@ async function until<T>(what: string, read: () => T | null | undefined | false, 
 }
 
 async function back(panel: Locator): Promise<void> {
-  await dm.getByRole("button", { name: /^Back to Sound/ }).first().click();
+  await dm.getByRole("button", { name: /^Back to Ambiance/ }).first().click();
   await panel.getByRole("heading", { name: "Music", exact: true }).waitFor();
 }
 
@@ -221,11 +228,13 @@ describe("the Sound panel", { concurrency: false }, () => {
     assert.deepEqual(patSocket.state?.sounds ?? {}, {}, "a player holds no library");
   });
 
-  test("sp-1. the DM's panel with nothing playing: Now playing, Music, Background, Effects, On this device and the storage line", async () => {
+  test("sp-1. the DM's Sound with nothing playing: Now playing, Effects, What players hear, Music, Background, On this device and the storage line", async () => {
     const panel = await soundPanel();
     await panel.getByText("Nothing is playing.", { exact: true }).waitFor();
-    const headings = await panel.getByRole("heading", { level: 3 }).allTextContents();
-    assert.deepEqual(headings, ["Now playing", "Music", "Background", "Effects", "On this device"]);
+    assert.deepEqual(await panel.locator("[data-group-name]").allTextContents(), ["Time", "Weather", "Sound"], "Ambiance's groups and its Weather row");
+    // The section labels, h4 under the Sound group's h3 (D-261102-766), not the boards' own subheads.
+    const sections = ambianceGroup(panel, "Sound").locator("section > h4, section > [data-section-label] > h4");
+    assert.deepEqual(await sections.allTextContents(), ["Now playing", "Effects", "What players hear", "Music", "Background", "On this device"]);
     await panel.getByText(/^Sounds use .+\. Images and sounds share the room's .+, and .+ is free\.$/).waitFor({ timeout: 15_000 });
     await shots.take(dm, "sp-1-dm-panel-silent");
   });
@@ -394,7 +403,7 @@ describe("the Sound panel", { concurrency: false }, () => {
     const effects = panel.getByRole("heading", { name: "Effects", exact: true }).locator("xpath=ancestor::section[1]");
     await effects.getByRole("button", { name: "Edit", exact: true }).click();
     await effects.getByRole("button", { name: /^Thunder/ }).click();
-    await dm.getByRole("button", { name: /^Back to Sound/ }).first().waitFor();
+    await dm.getByRole("button", { name: /^Back to Ambiance/ }).first().waitFor();
     const music = panel.getByRole("radio", { name: "Music", exact: true });
     assert.equal(await music.isDisabled(), true, "a 1-second sound cannot be music");
     await panel.getByText("Music is 30 seconds at least. Background sounds are 2 seconds at least.", { exact: true }).waitFor();
@@ -436,8 +445,14 @@ describe("the Sound panel", { concurrency: false }, () => {
     await scenes.getByRole("button", { name: /^Forest road/ }).first().click();
     await waitFor("the DM on Forest road", () => dmSocket.you?.sceneId === run.sceneB || null);
     await soundPanel();
+    // Ambiance keeps the scene's line as the Scene sound row's help, with Use what's playing under it (docs/design/design-v1-scenes-reorg.md 5).
+    const row = panel.getByRole("button", { name: "Scene sound, in Scenes", exact: true });
+    await row.waitFor();
     await panel.getByText("Forest road has no sound of its own.", { exact: true }).waitFor();
-    await panel.getByRole("button", { name: "Use what's playing", exact: true }).click();
+    const use = panel.getByRole("button", { name: "Use what's playing", exact: true });
+    assert.match((await use.getAttribute("aria-describedby")) ?? "", /^sound-scene-/, "Use what's playing says which scene it saves to");
+    for (const gone of ["Play it", "Use silence", "Clear"]) assert.equal(await panel.getByRole("button", { name: gone, exact: true }).count(), 0, `${gone} lives in Scenes`);
+    await use.click();
     const saved = await until("Forest road's sound", () => dmSocket.state?.scenes[run.sceneB]?.sound);
     assert.equal(saved.music?.soundId, run.sounds.March);
     assert.deepEqual(saved.loops.map((l) => l.soundId).sort(), [run.sounds.Crowd, run.sounds.Fire, run.sounds.Wind].sort());
@@ -455,13 +470,16 @@ describe("the Sound panel", { concurrency: false }, () => {
     await until("its music by the move", () => playing()?.music?.now.soundId === run.sounds.March);
     assert.equal(Object.keys(playing()?.loops ?? {}).length, 3);
 
+    // The row follows the scene's sound however it is set: silence, then none.
     await soundPanel();
-    await panel.getByRole("button", { name: "Use silence", exact: true }).click();
-    await until("silence saved", () => dmSocket.state?.scenes[run.sceneB]?.sound?.music === null && dmSocket.state?.scenes[run.sceneB]?.sound?.loops.length === 0);
+    await ops.send({ t: "scene.update", sceneId: run.sceneB, patch: { sound: { music: null, loops: [] } } });
     await panel.getByText("Forest road is silent.", { exact: true }).waitFor();
     await shots.take(dm, "sp-6-dm-scene-silent");
-    await panel.getByRole("button", { name: "Clear", exact: true }).click();
-    await until("no sound of its own", () => dmSocket.state?.scenes[run.sceneB] && dmSocket.state.scenes[run.sceneB]!.sound === undefined);
+    await ops.send({ t: "scene.update", sceneId: run.sceneB, patch: { sound: null } });
+    await panel.getByText("Forest road has no sound of its own.", { exact: true }).waitFor();
+    // The row opens Scenes, which holds the scene's own Scene sound group (lane B's half of this step, run on the stack).
+    await row.click();
+    await dm.getByRole("tabpanel", { name: sideTabName("Scenes") }).waitFor();
   });
 
   test("sp-7. Players see what is playing: Pat's panel by name with it on, by count with it off", async () => {
@@ -557,8 +575,8 @@ describe("the Sound panel", { concurrency: false }, () => {
     try {
       await page.route("**/api/config", (route) => route.abort());
       await page.goto(`${server.origin}/r/${run.roomId}`);
-      await openSideTab(page, "Sound");
-      const panel = page.getByRole("tabpanel", { name: sideTabName("Sound") });
+      await openSideTab(page, "Ambiance");
+      const panel = page.getByRole("tabpanel", { name: sideTabName("Ambiance") });
       await panel.getByText("Couldn't check whether this server offers sound files. The built-in effects still work.", { exact: true }).waitFor();
       assert.equal(await panel.getByText(/doesn't offer sound files/).count(), 0);
       assert.deepEqual(alignmentLines(await measureAlignment(panel), "the switch's failed read, 1440x900"), []);
@@ -583,7 +601,7 @@ describe("the Sound panel", { concurrency: false }, () => {
       const made = await createRoom(page, context, off.origin, `${run.roomName} off`);
       roomId = made.roomId;
       socket = made.ops;
-      const panel = (await openSideTab(page, "Sound"), page.getByRole("tabpanel", { name: sideTabName("Sound") }));
+      const panel = (await openSideTab(page, "Ambiance"), page.getByRole("tabpanel", { name: sideTabName("Ambiance") }));
       await panel.getByText("This server doesn't offer sound files. Its owner can turn them on. The built-in effects still work.", { exact: true }).waitFor();
       await panel.getByRole("button", { name: "Play Click for everyone", exact: true }).waitFor();
       assert.equal(await panel.getByRole("button", { name: /^Add / }).count(), 0, "no Add buttons");

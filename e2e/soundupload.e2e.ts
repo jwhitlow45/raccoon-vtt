@@ -22,7 +22,7 @@ import { ConsoleWatch, OpSocket, openSideTab, ROOT, Shots, sleep, SocketWatch, s
  * converted, the pieces' pre-roll against a whole decode, a piece that
  * fails falling back, the length caps exactly at 30 s and 15 minutes, and
  * the time a 10-minute WAV takes. su-7 and su-8 run the production build
- * with the server's ROOM_SOUND switch on: the Sound panel's Add buttons,
+ * with the server's ROOM_SOUND switch on: Ambiance's Sound's Add buttons,
  * their rows, a refusal, Cancel, and what the room keeps.
  *
  * The small fixtures are e2e/fixtures/sound-*, made by e2e/fixtures/sounds.ts
@@ -349,7 +349,7 @@ describe("adding sounds", { concurrency: false }, () => {
 });
 
 /*
- * The Sound panel's Add buttons on the production build, with the server's
+ * Ambiance's Sound's Add buttons on the production build, with the server's
  * switch on. They need the whole sound stack: the panel, the server's
  * `sound` kind and `sound.create`.
  */
@@ -388,7 +388,7 @@ describe("the Add buttons", { concurrency: false }, () => {
     await server?.stop();
   });
 
-  /** The Sound panel's section that holds an Add button, by its use. */
+  /** The Sound section's part that holds an Add button, by its use. */
   const adder = (use: "music" | "loop" | "effect") => dm.locator(`[data-add-sounds="${use}"]`);
 
   test("su-7. the DM adds effects: rows read, convert and upload, a refusal stays on its row, and the room holds each sound with its level", async () => {
@@ -407,7 +407,8 @@ describe("the Add buttons", { concurrency: false }, () => {
     ops = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
     await waitFor("the DM's snapshot", () => dmSocket.state);
 
-    await openSideTab(dm, "Sound");
+    // Ambiance's Sound group, open from the start (docs/design/design-v1-panel-groups.md 4.1).
+    await openSideTab(dm, "Ambiance");
     const effects = adder("effect");
     await effects.getByRole("button", { name: "Add effects…" }).waitFor();
     if (OWNER_SHOTS) await shotFor(dm, "before-add-effects");
