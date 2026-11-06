@@ -129,3 +129,56 @@ describe("a backup's videos on import (docs/design/design-v1-animated-maps.md 9.
     for (const hidden of ["v-night2", "v-crypt2"]) assert.ok(!text.includes(hidden) && !visible.has(hidden), hidden);
   });
 });
+
+describe("how to draw a backup's videos on import (docs/design/design-v1-video-turns.md 9)", () => {
+  test("each video takes its turn, mirror and stretch from its new row, and the file's own claims go", () => {
+    const real = new Map(REAL);
+    real.set("v-day2", facts({ turn: 180, mirror: true }));
+    real.set("v-night2", facts({ widthPx: 1440, displayWidthPx: 1920 }));
+    const claimed = file();
+    // The file says the plain crypt video is turned and the turned day video is plain: the rows win.
+    claimed.scenes.s2!.map!.video = { ...claimed.scenes.s2!.map!.video!, turn: 180 };
+    const state = refillMapVideos(remapState(claimed, { assets: new Map(ROWS) }), real);
+    const [s1, s2] = Object.values(state.scenes).sort((a, b) => a.order - b.order);
+    assert.deepEqual(s1!.map?.video, { assetId: "v-day2", ...facts({ turn: 180, mirror: true }) });
+    assert.deepEqual(s1!.phases?.[1]?.video, { assetId: "v-night2", ...facts({ widthPx: 1440, displayWidthPx: 1920 }) });
+    assert.deepEqual(s2!.map?.video, { assetId: "v-crypt2", ...facts({ fps: 60 }) });
+    assert.ok(parseRoomState(JSON.parse(JSON.stringify(state))).ok);
+  });
+
+  test("the still must fit the picture as it shows: a quarter turn on a landscape still leaves the still, on a portrait one it stays", () => {
+    const real = new Map(REAL);
+    real.set("v-crypt2", facts({ turn: 90 }));
+    assert.equal(Object.values(imported(ROWS, real).scenes).find((s) => s.map?.assetId === "crypt2")?.map?.video, undefined, "1080 x 1920 drawn over a 1920 x 1080 still");
+    const portrait = file();
+    portrait.scenes.s2!.map = { ...MAP, assetId: "crypt", widthPx: 1080, heightPx: 1920, video: v("v-crypt") };
+    const state = refillMapVideos(remapState(portrait, { assets: new Map(ROWS) }), real);
+    assert.deepEqual(Object.values(state.scenes).find((s) => s.map?.assetId === "crypt2")?.map?.video, { assetId: "v-crypt2", ...facts({ turn: 90 }) });
+    assert.ok(parseRoomState(JSON.parse(JSON.stringify(state))).ok);
+  });
+
+  test("a row whose geometry cannot stand with its coded size is dropped like a missing row", () => {
+    const real = new Map(REAL);
+    real.set("v-crypt2", facts({ displayWidthPx: 1920 }));
+    real.set("v-day2", facts({ displayWidthPx: 4000 }));
+    const state = imported(ROWS, real);
+    const [s1, s2] = Object.values(state.scenes).sort((a, b) => a.order - b.order);
+    assert.equal(s2!.map?.video, undefined);
+    assert.equal(s1!.map?.video, undefined);
+    assert.ok(parseRoomState(JSON.parse(JSON.stringify(state))).ok);
+  });
+
+  test("players get how to draw the showing video, and nothing of a hidden phase's", () => {
+    const real = new Map(REAL);
+    real.set("v-day2", facts({ turn: 180 }));
+    real.set("v-night2", facts({ turn: 270, mirror: true, widthPx: 1080, heightPx: 1920 }));
+    const state = imported(ROWS, real);
+    const s1 = Object.values(state.scenes).sort((a, b) => a.order - b.order)[0]!;
+    state.meta.playerSceneId = s1.id;
+    const seen = projectState(state, P1, { sceneId: s1.id }) as unknown as { scenes: Record<string, { map?: { video?: MapVideo }; phases?: unknown }> };
+    const scene = Object.values(seen.scenes)[0]!;
+    assert.equal(scene.map?.video?.turn, 180);
+    assert.equal(scene.phases, undefined);
+    assert.equal(JSON.stringify(seen).includes("v-night2"), false);
+  });
+});

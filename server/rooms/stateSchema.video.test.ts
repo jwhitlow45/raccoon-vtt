@@ -63,6 +63,37 @@ describe("a map's video in a backup (docs/design/design-v1-animated-maps.md 9.1)
   });
 });
 
+describe("a turned or stretched video in a backup (docs/design/design-v1-video-turns.md 6.1, 9)", () => {
+  const TURNED = video("v-turned", { turn: 180, mirror: true });
+  // 1440 x 1080 at 4:3 draws 1920 x 1080, the still's shape.
+  const WIDE = video("v-wide", { widthPx: 1440, displayWidthPx: 1920 });
+  const message = "scenes.s1: a map's and each phase's video turn and stretch as its coded size allows";
+
+  test("a map and a phase take how to draw their video", () => {
+    assert.ok(at({ map: { ...MAP, video: TURNED } }).ok);
+    assert.ok(at({ map: { ...MAP, video: WIDE } }).ok);
+    const phases = [{ id: "p1", name: "Day", assetId: "day", widthPx: 1920, heightPx: 1080, video: WIDE }, { id: "p2", name: "Night", assetId: "night", widthPx: 1920, heightPx: 1080, video: TURNED }];
+    assert.ok(at({ phases, phaseId: "p1", phaseGrid: GRID, map: { ...MAP, video: WIDE } }).ok);
+  });
+
+  test("a stretch the coded size cannot have, or a drawn size past the caps, is refused on a map and on a phase", () => {
+    const bad: Array<[string, Partial<MapVideo>]> = [
+      ["a stretch equal to the coded width", { displayWidthPx: 1920 }],
+      ["a stretch past 2:1", { widthPx: 1000, displayWidthPx: 2001 }],
+      ["a stretch under 1:2", { widthPx: 1000, displayWidthPx: 499 }],
+      ["a drawn size past the area cap", { widthPx: 2560, heightPx: 3000, displayWidthPx: 3000 }],
+    ];
+    for (const [what, patch] of bad) {
+      const v = video("v-bad", patch);
+      assert.equal(at({ map: { ...MAP, video: v } }).message, message, `map: ${what}`);
+      const phases = [{ id: "p1", name: "Day", assetId: "day", widthPx: 1920, heightPx: 1080 }, { id: "p2", name: "Night", assetId: "night", widthPx: 1920, heightPx: 1080, video: v }];
+      assert.equal(at({ phases, phaseId: "p1", phaseGrid: GRID, map: MAP }).message, message, `phase: ${what}`);
+    }
+    // Out of the protocol's bounds is the schema's own refusal.
+    for (const patch of [{ turn: 45 }, { mirror: false }, { displayWidthPx: 0 }] as Partial<MapVideo>[]) assert.equal(at({ map: { ...MAP, video: video("v", patch) } }).ok, false, JSON.stringify(patch));
+  });
+});
+
 /*
  * The state machine rule: no sequence of the ops that write maps and phases,
  * undos included, leaves a scene the stored-state schema refuses, so every
@@ -70,7 +101,8 @@ describe("a map's video in a backup (docs/design/design-v1-animated-maps.md 9.1)
  */
 describe("the reducer and the stored-state schema agree on videos", () => {
   const stills = ["day", "dusk", "rain", "fire"];
-  const videos = [DAY, video("v-dusk"), video("v-rain", { fps: 61, audio: undefined, audioChannels: undefined, audioHz: undefined })];
+  // A turned and a stretched one among them, each drawn at the stills' shape (docs/design/design-v1-video-turns.md 6.2).
+  const videos = [DAY, video("v-dusk"), video("v-rain", { fps: 61, audio: undefined, audioChannels: undefined, audioHz: undefined }), video("v-flip", { turn: 180, mirror: true }), video("v-wide", { widthPx: 1440, displayWidthPx: 1920 })];
   const place = fc.record({ still: fc.constantFrom(...stills), video: fc.option(fc.constantFrom(...videos), { nil: undefined }) });
   const step = fc.oneof(
     fc.record({ kind: fc.constant("phases" as const), list: fc.uniqueArray(fc.record({ id: fc.constantFrom("p1", "p2", "p3", "p4"), place }), { minLength: 1, maxLength: 4, selector: (p) => p.id }) }),

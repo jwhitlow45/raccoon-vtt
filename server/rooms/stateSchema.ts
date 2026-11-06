@@ -3,7 +3,7 @@ import { correctionLogEventSchema } from "#shared/undoContract.ts";
 import { saveOutcomeLedgerSchema } from "#shared/saveOutcomeContract.ts";
 import { ABILITY_KEYS, CONDITION_KEYS, CRIT_RULES, HEIGHTS_CHARS, MAX_HEIGHT_FT, MIN_HEIGHT_FT, ORDER_REVEALS, ROUGH_CHARS, STAIRS_CHARS, STATUS_KEYS, TURN_FLAGS, type MapPhase, type MapVideo, type PhaseGrid, type RoomState, type SceneMap } from "#shared/model.ts";
 import { chunkKey, holderChunkKey } from "#shared/keys.ts";
-import { LIMITS, MOST_SIGHT_HOLDERS, SOUND_LIMITS, serializedBytes, soundUseFits } from "#shared/limits.ts";
+import { LIMITS, MOST_SIGHT_HOLDERS, SOUND_LIMITS, serializedBytes, soundUseFits, videoGeometryProblem } from "#shared/limits.ts";
 import { namesPrototypeMember } from "#shared/records.ts";
 import { lengthAs, type SoundUse } from "#shared/sound.ts";
 import { ATTACH_KINDS } from "#shared/rules/attach.ts";
@@ -188,7 +188,20 @@ const scene = z
         : s.phaseGrid !== undefined && s.map !== undefined && s.phases.some((p) => p.id === s.phaseId),
     { message: "a scene's phases come with their active phase, its grid and a map" },
   )
-  .refine(phasesFitTheirGrid, { message: "a scene's phases fit its grid, and its map is the showing phase's image" });
+  .refine(phasesFitTheirGrid, { message: "a scene's phases fit its grid, and its map is the showing phase's image" })
+  .refine(videosStandWithTheirSize, { message: "a map's and each phase's video turn and stretch as its coded size allows" });
+
+/**
+ * How each video draws must stand with its coded size, as the protocol
+ * holds a row's facts to it (shared/limits.ts videoGeometryProblem,
+ * docs/design/design-v1-video-turns.md 6.1). The bounds alone let through
+ * a stretch equal to the coded width or past 2:1, or a drawn size past the
+ * caps, which no check would have stored.
+ */
+function videosStandWithTheirSize(s: { map?: SceneMap | undefined; phases?: MapPhase[] | undefined }): boolean {
+  const videos = [s.map?.video, ...(s.phases ?? []).map((p) => p.video)];
+  return videos.every((v) => v === undefined || videoGeometryProblem(v) === null);
+}
 
 function phasesFitTheirGrid(s: { map?: SceneMap | undefined; phases?: MapPhase[] | undefined; phaseId?: string | undefined; phaseGrid?: PhaseGrid | undefined }): boolean {
   const grid = s.phaseGrid;
