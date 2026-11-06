@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { BuildChunk, FreeWall, TerrainId } from "#shared/model.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
-import { buildPaths, drawBuild, freeFrame, stairSymbols, type PathSink } from "./draw.ts";
+import { buildPaths, drawBuild, freeFrame, openDoorPaths, stairSymbols, type PathSink } from "./draw.ts";
 import { cornerAt, hexCorners, type HexGrid } from "#shared/rules/hex.ts";
 
 /** Records what a path is given, in place of a Path2D, which Node lacks. */
@@ -327,5 +327,20 @@ describe("the isometric view's ground stage (docs/design/design-v1-isometric-vie
     assert.ok(!Object.values(p.relief).some((path) => r.drew(path)), "no relief tint under a column");
     for (const path of [p.openLeaves, p.swings, flatPillars, flatShine, p.locks]) assert.ok(r.drew(path));
     assert.ok(r.calls.some((c) => c.op === "fill" && c.path === p.openLeaves), "an open door's leaf is filled as in Top-down");
+  });
+
+  test("an open door whose leaf stands upright leaves its flat leaf and arc out, door by door, keyed as the relief keys its walls (docs/design/design-v1-iso-depth.md 5.5)", () => {
+    const c = chunk({ edges: { "1,2,n": door("open"), "3,2,w": door("open") }, walls: [{ id: "free1".padEnd(12, "x"), a: [5, 5], b: [7, 5], f: door("open") }] });
+    const p = buildPaths([c], "player", {}, () => new Recorder());
+    assert.deepEqual(p.openList.map((d) => d.key), ["e1,2n", "e3,2w", `f0,0:${"free1".padEnd(12, "x")}`]);
+    const kept = openDoorPaths(p.openList.filter((d) => d.key !== "e3,2w"), () => new Recorder());
+    assert.equal(kept.swings.ops.filter((o) => o[0] === "A").length, 2, "two arcs left");
+    assert.ok(kept.openLeaves.points().every(([x]) => x < 3 || x >= 5), "the standing leaf's flat leaf is gone");
+    assert.deepEqual(openDoorPaths(p.openList, () => new Recorder()).openLeaves.ops, p.openLeaves.ops, "every door's leaves are Top-down's own");
+    const r = recorder();
+    const flat = { pillars: new Recorder() as unknown as Path2D, pillarShine: new Recorder() as unknown as Path2D };
+    drawBuild(r.g, p as never, { ...opts, standing: { ...flat, doors: kept as never } });
+    assert.ok(r.drew(kept.openLeaves) && r.drew(kept.swings));
+    assert.ok(!r.drew(p.openLeaves) && !r.drew(p.swings), "never every door's");
   });
 });

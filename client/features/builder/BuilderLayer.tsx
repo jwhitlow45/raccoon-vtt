@@ -13,7 +13,7 @@ import { isHex, sceneGrid } from "#shared/rules/grid.ts";
 import type { HexGrid } from "#shared/rules/hex.ts";
 import { hexesInRect, hexOutline } from "./hexBuild.ts";
 import { heightSlot } from "./heights/store.ts";
-import { buildPaths, CAPTION_PX, drawBuild, drawLabel, drawLightReach, drawSuns, measureLabel, pillarPaths, stairSymbols } from "./draw.ts";
+import { buildPaths, CAPTION_PX, drawBuild, drawLabel, drawLightReach, drawSuns, measureLabel, openDoorPaths, pillarPaths, stairSymbols } from "./draw.ts";
 import { useIsoGround, useTreeShownView } from "../../canvas/relief/context.ts";
 import { boxStands } from "../../canvas/relief/stand.ts";
 import { isSymbolTerrain, type TexturedTerrain } from "./geometry.ts";
@@ -77,11 +77,17 @@ const BuildBoard = memo(function BuildBoard(props: {
     if (!stepping || stepping.size === 0) return undefined;
     return stairSymbols(paths.stairList.filter((c) => !stepping.has(`${c.x},${c.y}`)), () => new Path2D(), sceneGrid({ gridShape }));
   }, [paths, stepping, gridShape]);
+  // An open door whose leaf stands upright in the relief leaves its flat leaf and arc out, door by door in the same way (5.5).
+  const leaves = iso?.heights && iso.detail ? iso.standingLeaves : undefined;
+  const doors = useMemo(() => {
+    if (!leaves || leaves.size === 0) return undefined;
+    return openDoorPaths(paths.openList.filter((d) => !leaves.has(d.key)), () => new Path2D());
+  }, [paths, leaves]);
   const standing = useMemo(() => {
     if (!iso?.heights) return undefined;
     const flat = paths.drawing.symbols.pillar.filter((c) => !boxStands(iso.fog, { x0: c.x, y0: c.y, x1: c.x + 1, y1: c.y + 1 }));
-    return { ...pillarPaths(flat, () => new Path2D()), ...(stairs ? { stairs } : {}) };
-  }, [iso, paths, stairs]);
+    return { ...pillarPaths(flat, () => new Path2D()), ...(stairs ? { stairs } : {}), ...(doors ? { doors } : {}) };
+  }, [iso, paths, stairs, doors]);
   // The floor's copy of the grid stays off while the DM lines up the grid, as the map layer's does (MapLayer.tsx MapContent).
   const aligning = useRoomView((s) => s.local.tool === "grid");
   const drawnGrid = useMemo(() => (aligning ? { ...grid, show: false } : grid), [aligning, grid]);
