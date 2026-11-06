@@ -144,7 +144,7 @@ This section gets you through a first session with only a handful of tools: one 
 1. Put the party on the map. In **Characters**, open a character, press **Place a token**, and tap the map. Players can also place their own tokens on the scene they are on.
 2. A map image starts covered in fog, so at first your players see nothing. Pick the **Fog** tool and reveal what the party can see (see [Fog](#fog)).
 3. In **Scenes**, press **Move players** on your scene if the players aren't there already. The scene the players are on is marked **Players here**.
-4. When the fight begins, open **Initiative** and, under **Start a fight with**, press **Everyone here**. Players set their own Initiative. Press **Auto Initiative** to roll for the monsters, then press **Start**.
+4. When the fight begins, open **Initiative** and, under **New fight**, press **Everyone here**. Players set their own Initiative. Press **Auto Initiative** to roll for the monsters, then press **Start**.
 5. Press **Next** (or the `N` key) at the end of each turn. When a creature takes damage, tap its token to open its action bar, type the damage with a minus sign, such as `-7`, in its HP entry, and press **Apply**. **Conditions**, in the same bar, adds Prone, Frightened and the rest.
 6. You can reveal a hidden monster yourself with **Hidden** in its action bar. Or you can leave it to the app: the room setting "Reveal hidden combatants on their turn", which is on by default, makes a hidden monster appear on its own when its turn comes.
 7. When the fight is over, press **End the fight** in Initiative, and tap it again to confirm.
@@ -213,10 +213,10 @@ For one scene, the new scene form has its own **Players see** row under the name
 
 Below the scene list (**All scenes**) and **New scene**, the panel shows the settings of the scene on your screen, under **This scene**. The **Scene name** comes first, and players can see it. Everything else sits in six groups, ordered by what you are doing when you reach for them, so the settings you change during play come first and the ones you set up once wait below:
 
-- **Light and weather**: the scene's **Light**, **Light with each map phase** on a map with phases, and then its weather. These are what a scene is like right now, the two things you are most likely to change in the middle of a session, so this group always starts open. See [Light and party vision](#light-and-party-vision) and [Weather](#weather).
+- **Light and weather**: the scene's **Light**, **Light per phase** on a map with phases, and then its weather. These are what a scene is like right now, the two things you are most likely to change in the middle of a session, so this group always starts open. See [Light and party vision](#light-and-party-vision) and [Weather](#weather).
 - **Scene sound**: the music and background sounds the scene starts when you move the players there, with **Play it**, **Use what's playing**, **Use silence** and **Clear**. It shows while your server offers sound files. See [Music and sound](#music-and-sound).
 - **Fog and vision**: **Players see**, **Sight** and who lends the party sight, the **Switches** fold with the Fog and Party vision switches, and **Copy to other scenes…**. Everything that decides how much of this scene your players see is here. See [Light and party vision](#light-and-party-vision).
-- **Map and grid**: the **Map image** (**Add a map image**, **Replace map image** and **Remove map image**), then its **Map phases** once the scene has an image (see [Map phases, imports and exports](#map-phases-imports-and-exports)), then the grid: **Grid lines**, **Grid color**, **Opacity** and **Line width**, then **Grid shape** (see [Hex grids](#hex-grids)), plus, on a map image, **Line up the grid**, **Find the grid** and **Or count the squares**.
+- **Map and grid**: the **Map image** (**Add a map image**, **Replace map image** and **Remove map image**), then its **Map phases** once the scene has an image (see [Map phases, imports and exports](#map-phases-imports-and-exports)), then the grid: **Grid lines**, **Grid color**, **Opacity** and **Line width**, then **Grid shape** (see [Hex grids](#hex-grids)), plus, on a map image, **Line up the grid**, **Find the grid** and **Square count**.
 - **Walls and movement**: **Walls and ledges block players' moves**, which is on for new scenes. While it is on, a player's token walks around walls, closed doors and ledges the party has seen, and stops only where there is no way around. Your own moves are never stopped. See [When walls stop a move](#when-walls-stop-a-move). Then **Automatic walls**, **Open the builder** and **Clear the build**.
 - **Size and view**: **Size in squares**, the **Background**, the **Starting view** and the **Suggested view**. **Save current view**, under Starting view, saves the way the map is framed on your screen right now as the view the scene opens with for everyone. **Suggested view** is **Top-down** or **Isometric**: see [The isometric view](#the-isometric-view).
 
@@ -260,7 +260,7 @@ Each place shows only the packs that suit it, sorted by pack and then by categor
 
 Stamps work differently. A starter stamp isn't copied into the room at all: the builder places it straight from the app, the same way it places the stamps that come with the app.
 
-**It doesn't use your storage.** Each room can store only so much, but pictures from the starter packs don't count toward that limit, however many you pick. In the **Library**, they sit after your own images in a folded group called **From starter packs**, so your own maps and tokens stay easy to find. The list of maps under **New scene** and the pictures in **Show a handout** work the same way: your own come first, and the picks follow under their own heading. You can delete a pick you no longer need, just like any other image, and pick it again later if you want it back.
+**It doesn't use your storage.** Each room can store only so much, but pictures from the starter packs don't count toward that limit, however many you pick. In the **Library**, they sit after your own images in a folded group called **Starter packs**, so your own maps and tokens stay easy to find. The list of maps under **New scene** and the pictures in **Show a handout** work the same way: your own come first, and the picks follow under their own heading. You can delete a pick you no longer need, just like any other image, and pick it again later if you want it back.
 
 **Maps with a grid.** Most of Dyson's maps and the painted cavern have a grid drawn on them, and for 22 of them the app already knows exactly where it lies. A scene made from one of those starts lined up on its grid, so you can skip [Lining up the grid](#lining-up-the-grid) entirely. For a few more, the app knows how big the squares are but not where they start, so the scene opens on **Line up grid** with the box already the right size, and all you need to do is move it onto the drawn squares. The Scarlet Heroes maps, the Index Card Dungeons and three of Dyson's maps have no drawn grid, so they open on **Line up grid**, just as a map of your own would. Ink maps are black lines on white paper, where the app's usual white grid lines would disappear, so their scenes start with a dark grid instead. The Index Card Dungeons are meant for exploring rather than for fighting square by square, so they work best as a map the party moves across.
 
@@ -295,7 +295,7 @@ This section is about squares. On a hex scene the box and a few of the options d
 
 Two more options wait under **⋯**. **Resize scene** (on by default) makes Apply also resize the scene to the squares the map covers. **Grid lines** turns the app's own grid lines on or off. Turn them off for art that has a grid of its own. Tokens and rulers still follow the squares either way. Since the lines stay hidden while you line up the grid, you'll see the effect of this switch once you pick another tool.
 
-**Counting the squares instead.** If the art's squares run all the way to the edges of the image, you can skip the box and simply type the count. In the scene's **Map and grid** settings, under **Or count the squares**, enter how many squares the image has across and down, then press **Apply**.
+**Counting the squares instead.** If the art's squares run all the way to the edges of the image, you can skip the box and simply type the count. In the scene's **Map and grid** settings, under **Square count**, enter how many squares the image has across and down, then press **Apply**.
 
 > [!NOTE]
 > When applying a grid also changes the scene's size, the app saves the two changes as separate steps in **Setup history** (Menu), since a scene's size and grid are settings. The first **Undo setup** takes back the resize, and a second one takes back the grid.
@@ -339,7 +339,7 @@ A scene won't change shape while it holds something laid out on its own cells, w
 
 **Building and moving on hexes.** Everything you build on squares works on hexes too, hex by hex, except painted ground. In the builder, **Walls/doors** draws wall lines from corner to corner, which [Walls and doors](#walls-and-doors) describes. **Difficult ground**, **Erase** and **Heights/stairs** work by whole hexes, and a stair points up toward one of its hex's six sides (see [Heights and stairs](#heights-and-stairs)). Lights, stamps and labels go anywhere, as they do on squares. While **Walls and ledges block players' moves** is on, creatures walk around walls and use stairs to cross ledges. They can squeeze through narrow corridors, ride, carry and drag, and set off traps drawn in hexes, pits included. The **Walking** ruler counts hexes, and **Builder room** in the Fog tool reveals a room closed in by wall lines. Each of these has a few lines for hexes in its own section.
 
-**What stays square.** A few things stay on squares for good: painted ground and rooms, pillars, automatic walls, **Or count the squares**, the Universal VTT import, **Generate a dungeon** and the `WxH` file name of an export. Wherever you would reach for one of them on a hex scene, the app says so in plain words. In the builder, the line above the options reads "On hexes the builder draws wall lines, paints heights and stairs, marks difficult ground, and places lights, stamps and labels. Painted ground needs squares." If a map needs those, make it on squares.
+**What stays square.** A few things stay on squares for good: painted ground and rooms, pillars, automatic walls, **Square count**, the Universal VTT import, **Generate a dungeon** and the `WxH` file name of an export. Wherever you would reach for one of them on a hex scene, the app says so in plain words. In the builder, the line above the options reads "On hexes the builder draws wall lines, paints heights and stairs, marks difficult ground, and places lights, stamps and labels. Painted ground needs squares." If a map needs those, make it on squares.
 
 **Lining up a hex map.** The box in **Line up grid** is made for hexes. Drag a box over 3 hexes across, which holds 7 hexes, and fine-tune it by its corners. The box keeps the shape of 7 hexes as you drag, resize or nudge it. The app draws the hexes it would make across the whole map, so you can check that they line up everywhere. The option reads **px per hex**, and **Or count the squares** gives way to a line saying counting works on squares, so use the box. **Find the grid** works on a hex scene as on any other: it looks for squares and hexes alike, and when it finds the other shape it can change the scene's shape to match, as [Lining up the grid](#lining-up-the-grid) describes.
 
@@ -502,9 +502,9 @@ A new scene starts on your room's choice, or on the one you pick as you make it 
 
 Two groups of the scene's settings fine-tune it. **Light** sits first in **Light and weather**, since it is the one you change during play, and the rest sit under Players see in **Fog and vision**:
 
-- **Light**: **Bright** (lit everywhere, as by day), **Dim** or **Dark**. The light level matters only while party vision is on, so on Explore or Custom. While party vision is off, Light says so and points you to Explore in Fog and vision, and the folded group leaves the light out of its summary. On a map with phases, **Light with each map phase** under it lets each phase set the light, so switching to Night can make the scene dark (see [Map phases, imports and exports](#map-phases-imports-and-exports)).
+- **Light**: **Bright** (lit everywhere, as by day), **Dim** or **Dark**. The light level matters only while party vision is on, so on Explore or Custom. While party vision is off, Light says so and points you to Explore in Fog and vision, and the folded group leaves the light out of its summary. On a map with phases, **Light per phase** under it lets each phase set the light, so switching to Night can make the scene dark (see [Map phases, imports and exports](#map-phases-imports-and-exports)).
 - **Sight**: **Whole party**, the default, or **Per player**. Normally the party shares its sight and its map: every player sees everything any of the party's creatures can see, so when the rogue scouts ahead, the whole table sees what she finds. Per player lets each player see only through their own creatures' eyes and those of any creature that shares sight with the party, and remember only where those creatures have been (see [Sight for each player](#sight-for-each-player)).
-- **Who lends the party sight**: the party's creatures on the scene, with their senses and lights. To add an allied NPC, so the party sees what it sees, turn on **Shares sight with the party** in the **Sight** section of its token's panel.
+- **Sight sources**: the party's creatures on the scene, with their senses and lights. To add an allied NPC, so the party sees what it sees, turn on **Shares sight with the party** in the **Sight** section of its token's panel.
 - **Switches**, a fold that holds the two switches Players see sets for you: **Fog** and **Party vision**. While it is folded, it tells you how both stand, such as "Fog on · Party vision on". You rarely need them. The one mix that no choice names, party vision on with fog off, shows as **Custom**: players then see the whole map, dimmed outside what their characters see, and the fold opens so you can see why.
 
 ![Fog and vision for the crypt: the group's name with its icon, Players see on Explore with the warning that the map has no walls yet, Sight on Whole party, who lends the party sight, the Switches fold and Copy to other scenes….](dm-guide/vision-settings.webp)
@@ -554,7 +554,7 @@ A creature that shares sight sees by any light, as every creature does, a charac
 - Untick a player to take their place away. The app asks first, because they forget their map of this scene. Their row then says they see only what creatures that share sight see.
 - Places are sticky. A player keeps theirs when their character falls unconscious or steps off the scene for a while. A player gets a place on their own only the first time they own a creature that can see there, and after that only your ticks change who holds one: exploring never moves a place from one player to another. So at a big table, where more than 6 players could see for themselves, decide who should and tick them yourself.
 
-Under the list, **Who lends sight** shows each creature with its senses and light, and whose sight it adds to: "Lends its sight to Ana", "Lends its sight to Ana and Ben", or "Lends its sight to every player" for a creature that shares sight with the party.
+Under the list, **Sight sources** shows each creature with its senses and light, and whose sight it adds to: "Lends its sight to Ana", "Lends its sight to Ana and Ben", or "Lends its sight to every player" for a creature that shares sight with the party.
 
 **Changing your mind.** A new Sight setting takes effect at once, even in the middle of a fight. Switching to **Whole party** pools every player's map into the party's shared map, and it stays pooled: if you switch back to **Per player** later, each player starts from that pooled map. Switching the map to another phase, such as from Day to Night, or changing the light leaves Sight as it is.
 
@@ -581,7 +581,7 @@ You set it in the **Light and weather** group of a scene's settings, under Light
 
 - **Weather** is Clear, Rain, Snow, Fog, Falling leaves, Ash or Sand. **Strength** picks a light or a heavy version: Light or Heavy for most, **Patchy** or **Heavy** for fog, and **Blowing** or **Sandstorm** for sand.
 - **Wind** is Calm, Moderate or Strong, and a wind can blow on a clear day with no weather at all. Pick Clear with a wind for a breezy afternoon. Clear with Calm is simply no weather.
-- **Blows toward** appears once there is a wind. The eight buttons are a compass around a small square that stands for the map, and the arrow on each points the way the wind goes, as Top-down shows the map's edges. A wind starts out blowing toward the bottom right.
+- **Direction** appears once there is a wind. The eight buttons are a compass around a small square that stands for the map, and the arrow on each points the way the wind goes, as Top-down shows the map's edges. Its help says where the wind blows toward. A wind starts out blowing toward the bottom right.
 - Strong wind disperses fog, so a strong wind and fog do not go together. If you pick Fog while the wind is Strong, the app lowers it to Moderate and tells you why under Wind. In the same way, a sandstorm is a strong wind, so picking Sandstorm raises the wind to Strong.
 
 **What it does to rolls.** The rules in the SRD give a few clear effects, and the app applies the ones that need no judgment from you:
@@ -591,7 +591,7 @@ You set it in the **Light and weather** group of a scene's settings, under Light
 - You see all of this on the Dice panel before anyone rolls. A bow's Attack button shows Dis, and the line under the creature's attacks says why ("Longbow Dis: Strong wind") along with any reminder, such as the one for a thrown Javelin. When you roll one attack for several creatures at once, the same words appear under it.
 - Patchy fog and heavy fog only remind. Seeing through fog depends on what a creature is trying to see, which is a call for you. On the Dice panel their reminder sits under the name of the Skills group, just above the skills themselves, and heavy fog's also sits under the creature's attacks. A roll request's card lists it too. Reminders from conditions show the same way, such as Frightened's under Saves and checks and under Skills, and its Initiative reminder under the Initiative button.
 
-Only creatures whose token stands on that scene are in its weather. A character with no token there rolls as usual. While the weather has rules, the **Weather rules on rolls** switch says what they are right under it, so you can see what a roll will do before anyone makes one. When the party is indoors on a stormy scene, turn the switch off: the weather still shows, and rolls ignore it.
+Only creatures whose token stands on that scene are in its weather. A character with no token there rolls as usual. While the weather has rules, the **Weather rules on rolls** switch says in one sentence what rolls here will do, and under it one line for each part of the weather gives the rule in the SRD's words, so you can see what a roll will do before anyone makes one. Heavy fog's line is in the warning color. When the party is indoors on a stormy scene, turn the switch off: the weather and its lines still show, and the switch says "Rolls here ignore these rules."
 
 Weather is a look and a mood of the moment, so the settings that copy a scene's rules to other scenes ("Like" a scene, and [Using one scene's settings on others](#using-one-scenes-settings-on-others)) leave it alone, a new scene starts clear, and **Duplicate** keeps it. A change of weather is a step in Play history, so Undo puts the old weather back.
 
@@ -694,7 +694,7 @@ If the connection drops during **Make the scene**, the app opens the new scene a
 2. Once there are two or more phases, a row of chips switches between them with one tap. On a computer, the **Phase** menu in the top bar does the same.
 3. **Edit** lets you rename a phase, move it in the list, or remove it.
 
-A phase can also set the scene's light. Under **Light and weather**, **Light with each map phase** picks Bright, Dim, Dark or **Leave the light** for each phase, so switching to Night can make the scene dark. It won't turn party vision on by itself, though, and light matters only while party vision is on.
+A phase can also set the scene's light. Under **Light and weather**, **Light per phase** picks Bright, Dim, Dark or **Leave the light** for each phase, so switching to Night can make the scene dark. It won't turn party vision on by itself, though, and light matters only while party vision is on.
 
 **Universal VTT files.** If you make maps in Dungeondraft, Dungeon Alchemist, Arkenforge or DungeonFog, you can bring in a whole map, walls, doors and lights included. Choose **From a Universal VTT file** under New scene and pick a `.dd2vtt`, `.uvtt` or `.df2vtt` file. The app reads the file and shows you what it found ("412 walls (380 on the grid, 32 free), 14 doors, 3 windows, 9 lights") before it makes anything. Then choose:
 
@@ -729,7 +729,7 @@ For a turned or stretched video, or one your device can't open before it uploads
 
 **On each device.** The row under the map's size tells you what your own device does: "Moving on this device.", or "Still on this device:" and why. Every device decides for itself and shows the still when it should: when its **Animated maps** setting in **Menu**, **This device** is **Still**, in Low power, with reduced motion, in Isometric, while you use the Builder, Fog, Line up grid or Traps tool, when it can't play the file smoothly, and on Phone size map detail for a video larger than 1920 × 1080 or faster than 30 frames a second. A device that the video slows down stops it until the page reloads. The table display's menu has its own Animated maps choice. No sound ever plays, and devices don't keep in step with one another, which a looping map never needs.
 
-**Use the still only**, under the row's buttons, keeps the still as a plain map and drops the video. It is one step in **Setup history**, so **Undo setup** brings the video back. Each map phase can be a video or a still, and the phase list shows "Video" after a video phase's name. Players only ever get the video of the phase showing.
+**Use the still only**, last on the line of ways to bring an image, keeps the still as a plain map and drops the video. It is one step in **Setup history**, so **Undo setup** brings the video back. Each map phase can be a video or a still, and the phase list shows "Video" after a video phase's name. Players only ever get the video of the phase showing.
 
 Your **Library** lists each video among the maps as a film strip with its length. Tap it to watch it large, see its size and how much space it takes, and delete one that nothing uses. A video counts toward your room's storage, and Export as image, thumbnails and Isometric all use the still.
 
@@ -767,7 +767,7 @@ For a legendary monster, the editor looks for two names in particular. A trait n
 
 The **Encounters** panel (DM only) lets you prepare fights ahead of time: which monsters, how many, and how hard the fight will be for your party. Players never see your encounters, only the tokens you place from them.
 
-![The encounter editor: Place on the map, then the XP budget for the party, with Low outlined for this encounter.](dm-guide/encounters.webp)
+![The encounter editor: Placement, then the XP budget for the party, with Low outlined for this encounter.](dm-guide/encounters.webp)
 
 1. Press **New encounter** and give it a name ("Ambush at the ford").
 2. Search under **Add** (`goblin`, `cr 1-3`) and tap a monster's **+** once for each copy you want. Each line has a count you can change, and **Remove**. A monster with a lair also gets **In its lair** on its line (see [In its lair](#in-its-lair)).
@@ -776,7 +776,7 @@ The **Encounters** panel (DM only) lets you prepare fights ahead of time: which 
 
 If you leave the editor with changes you haven't saved, it asks "Discard changes?" first.
 
-**Placing an encounter.** Open the encounter, then use **Place on the map**:
+**Placing an encounter.** Open the encounter, then use **Placement**:
 
 - Tick **Hidden from players** to place the monsters unseen.
 - If a fight is already running, **Add them to the fight** (on to begin with) gives them rows in the Initiative tracker, with identical monsters grouped to share one Initiative.
@@ -900,14 +900,14 @@ The **Initiative** panel runs the fight: who is in it, the order they act in, an
 
 ### Starting a fight
 
-With no fight running, **Start a fight with** offers you a choice of who is in it:
+With no fight running, **New fight** offers you a choice of who is in it:
 
 - The selected token's name: just that token.
 - **Everyone here (N)**: every creature on the scene, hidden ones included (their rows start hidden). Objects, the dead, and companions that act on their character's turn stay out. Companions that take their own turn come in.
 - **Visible to players (N)**: the same, but without hidden tokens or anything under fog or out of the party's sight.
 - **Nobody yet**: an empty fight to fill in later.
 
-If you have two or more tokens selected on the map, their action bar also has **Start a fight**, or **Add to the fight** once a fight is running. While a fight runs, the panel's **Add to the fight** section offers the same three choices, so latecomers can join. Players add their own creatures with **Join the fight**.
+If you have two or more tokens selected on the map, their action bar also has **Start a fight**, or **Add to the fight** once a fight is running. While a fight runs, the panel's **More creatures** section offers the same three choices, so latecomers can join. Players add their own creatures with **Your creatures**.
 
 ### Initiative values
 
@@ -1090,7 +1090,7 @@ The one-roll menu works on these rolls too. On a save, a check or a shared attac
 
 **Request a roll** asks players for a saving throw or an ability check. Each player rolls it in the app, or types the total they rolled at the table while **Players may type their roll totals** is on.
 
-![Request a roll: Dexterity save picked, DC 15, the party's characters as chips under Who rolls, and Send.](dm-guide/request.webp)
+![Request a roll: Dexterity save picked, DC 15, the party's characters as chips under Creatures, and Send.](dm-guide/request.webp)
 
 There are three ways to open it:
 
@@ -1100,10 +1100,10 @@ There are three ways to open it:
 
 Then set up the request:
 
-1. Pick what to roll: a **Save** or **Check** by ability, or a **Skill**. A skill starts at its usual ability, and **with** changes it. **Or a second choice** lets the creature pick between two, such as Athletics or Acrobatics to escape a grapple.
+1. Under **Roll**, pick what to roll: a **Save** or **Check** by ability, or a **Skill**. A skill starts at its usual ability, and **with** changes it. **Or a second choice** lets the creature pick between two, such as Athletics or Acrobatics to escape a grapple.
 2. Type the **DC**, or pick a typical one for a check (from 5, Very easy, to 30, Nearly impossible), or leave it empty.
-3. Check **Who rolls**. **Ask the party** starts with the characters on the players' scene.
-4. Under **What players see**, choose whether **Players see the DC** and **Players see pass or fail**, turn on **Against a spell** (for Magic Resistance) if it applies, and add a note if you like ("against the poison").
+3. Check **Creatures**. **Ask the party** starts with the characters on the players' scene.
+4. Under **Player view**, choose whether **Players see the DC** and **Players see pass or fail**, turn on **Against a spell** (for Magic Resistance) if it applies, and add a note if you like ("against the poison").
 5. Press **Send**. **Recent** keeps your last three requests, so you can send one again with one tap.
 
 Each player gets a card with the question and rolls it with their bonus (conditions and Bless included), or types a total where typed totals are allowed. Your own live card, at the right of the map, counts the answers as they come in ("2 of 4 answered: 1 pass, 1 fail") and shows each roll. From it you can:
@@ -1200,7 +1200,7 @@ The group save rolls one saving throw for many creatures at once and applies the
 
 When you start it from an area, the page fills itself in from the spell and its caster: "From Fireball: Dexterity save, DC 15 (Ivo's spell save DC), 8d6 Fire, half on a pass." Then work down the page:
 
-1. Check **What they roll** (**Save**, **Check** or **No save**), the **Ability** and the **DC**. **Hide the monsters' rolls from players** is on by default. **What players see** sums up on one line whether players see the DC and the pass or fail, just as it does in Request a roll. Open it to change either. **Against a spell** gives creatures with Magic Resistance their Advantage.
+1. Check **What they roll** (**Save**, **Check** or **No save**), the **Ability** and the **DC**. **Hide the monsters' rolls from players** is on by default. **Player view** sums up on one line whether players see the DC and the pass or fail, just as it does in Request a roll. Open it to change either. **Against a spell** gives creatures with Magic Resistance their Advantage.
 2. Check the damage (`8d6 Fire`). **On a pass** is **Half** or **None**. **On a fail** can add up to three conditions, with how long they last and an optional save at the end of each turn.
 3. Check the rows. Each creature in the area has one. Monsters roll on the server. Players' creatures are asked, so the player rolls on their own device, or you can press **Roll +3** for them. To change how a single row rolls, pick **Ask**, **Server** or **Type** (you type the total), or **Fails**, which is offered when a condition such as Stunned fails the roll outright. To decide a row yourself, pick **Fail**, **Pass** or **Skip**.
 4. Press the roll button ("Roll 4 saves", or "Roll 2 saves and ask 2 players"). Each row shows its roll and result ("Fail vs DC 15"), along with its defenses: resistances and immunities from its stat block, **Evasion**, and **Use Legendary Resistance (2 left)** for a legendary monster that failed. Hold the button, right-click it or press `Shift+F10` on it for one roll with Advantage, Disadvantage, in secret or normally. The pick rolls the monsters this time only and never moves **Hide the monsters' rolls from players**, except on a page the pick itself just opened from **Saves for 4**, whose switch starts as the dice it sent. The players you ask still roll their own way.
@@ -1498,16 +1498,16 @@ An example trap is a good place to start even when you have something else in mi
 The pane holds everything about the trap, in sections that fold to one line each, so you can read the whole trap at a glance and open only what you want to change. Every change is saved as you make it. On a computer the pane opens over the map, beside the trap, and on a phone it slides up from the bottom. Either way it makes room for the fight's alerts as [Alerts during a fight](#alerts-during-a-fight) describes, and a trap that goes off while the pane is open shows its toast just under the pane's header. On a small phone held sideways at a large interface size, where the pane wouldn't fit under the top bar, it covers the top bar until you close it.
 
 1. **Name**: what your players see once they find it.
-2. **Goes off when**: a creature steps onto it, starts or ends its turn on it, or steps off it. A trap has to go off one way at least, so the last one stays ticked. **Add squares** grows a trap of squares with more rectangles. **Who** sets it off: **Party**, **Others** or **Any**, with a line underneath that says which creatures that means (the section's summary spells it out, such as "by party creatures"). **Small or larger only** lets the cat walk over the plate, and **Only creatures on the floor** leaves out fliers, burrowers and riders.
-3. **Afterwards**: turn on **Arms again at the start of the next turn** for a trap that resets, or leave it off for one that goes off once. **Uses left** limits how many more times it can go off, and an empty box means no limit. Then whether it stops the creature where it goes off, and whether it marks itself found when the players see it go off. A trap of squares can also open a pit as deep as you choose.
-4. **Hits**: the creature that set it off, everyone on the trap, everyone in squares you draw, or everyone in an area, which you place with the Area tool's shapes and save into the trap.
+2. **Trigger**: a creature steps onto it, starts or ends its turn on it, or steps off it. A trap has to go off one way at least, so the last one stays ticked. **Add squares** grows a trap of squares with more rectangles. **Who** sets it off: **Party**, **Others** or **Any**, with a line underneath that says which creatures that means (the section's summary spells it out, such as "by party creatures"). **Small or larger only** lets the cat walk over the plate, and **Only creatures on the floor** leaves out fliers, burrowers and riders.
+3. **Aftermath**: turn on **Arms again at the start of the next turn** for a trap that resets, or leave it off for one that goes off once. **Uses left** limits how many more times it can go off, and an empty box means no limit. Then whether it stops the creature where it goes off, and whether it marks itself found when the players see it go off. A trap of squares can also open a pit as deep as you choose.
+4. **Targets**: the creature that set it off, everyone on the trap, everyone in squares you draw, or everyone in an area, which you place with the Area tool's shapes and save into the trap.
 5. **Save and damage**: the group save's fields: a save and its DC, half or none on a pass, damage, and conditions on a fail with how long they last. If the damage dice don't read as a formula, a line under them says so and the trap keeps its last good dice.
-6. **Players read**: the line your players see when it goes off, such as "The floor gives way!", and a sound to go with it. A silent trap has no line.
-7. **It also**: up to eight things it does to the map. Press **Add an effect**, then tap a door to close, open or lock it, a light to put it out or light it, or a hidden creature or stamp to reveal it. This is how a trap drops a portcullis or springs an ambush.
+6. **Message**: the line your players see when it goes off, such as "The floor gives way!", and a sound to go with it. A silent trap has no line.
+7. **Map effects**: up to eight things it does to the map. Press **Add an effect**, then tap a door to close, open or lock it, a light to put it out or light it, or a hidden creature or stamp to reveal it. This is how a trap drops a portcullis or springs an ambush.
 8. **Finding and disarming**: the checks that find it, such as "Wisdom (Perception) DC 15: the pressure plate", whether to hint when a creature's Passive Perception would notice it, and how it is disarmed.
 9. **DM note**: anything you want in front of you when it goes off.
 
-![A Hidden Pit just inside the crypt chamber's door, hatched in red under its name, and its pane: "From Hidden Pit, levels 5–10", then each section folded to one line that sums it up, such as Hits, "The creature that set it off", and Players read, "The floor gives way!"](dm-guide/trap-pane.webp)
+![A Hidden Pit just inside the crypt chamber's door, hatched in red under its name, and its pane: "From Hidden Pit, levels 5–10", then each section folded to one line that sums it up, such as Targets, "The creature that set it off", and Message, "The floor gives way!"](dm-guide/trap-pane.webp)
 
 While the pane is open, the squares or the area the trap hits are drawn faintly on the map, so you can check that they cover what you meant. When a section asks for something on the map, such as **Add squares**, the squares a trap hits, or **Add an effect**, the pane steps aside and the Trap tool's options say what to tap. Drag across squares or tap one, or tap the door, light, creature or stamp, then press **Done**. Outside that, a tap on the map away from the open trap closes its pane.
 
@@ -1585,21 +1585,21 @@ A companion whose character has no token on this scene reads **Away from Bree**,
 
 The **DM** panel holds the tools that act on your players' screens.
 
-![The top of the DM panel: Handouts, Players' screens and Check their view.](dm-guide/dm-panel.webp)
+![The top of the DM panel: Handouts, Players' screens and Preview.](dm-guide/dm-panel.webp)
 
 - **Handouts**: **Show a handout** shows an image or a PDF as a popup, to **Everyone** or to **Chosen players**. Pick **From the library** or **Upload a file**, or press **From starter packs** to choose one of the pictures that come with the app (see [Starter art](#starter-art)). Give it a **Title** (a starter picture fills in its own name if you haven't typed one), then press **Show**. For a PDF, the app asks which pages to include (up to 100). **Showing now** lists what is up, with **Hide** to take a handout down for everyone.
 - **Players' screens**:
   - **Follow me**: the players' maps follow yours as you pan and zoom, until you turn it off.
   - **Bring everyone here**: moves every player's map to what you see right now, once.
   - **Black out players' screens**: players see only black and "The DM has paused the game." Use it for a break, or to set up a reveal out of sight. While it is on, your top bar reads "Players see black".
-- **Check their view**: **View as a player** and **Party sight**, described just below.
+- **Preview**: **View as a player** and **Party sight**, described just below.
 - **Join requests**: shows at the top of the panel only while someone is asking to join. See [Letting players in by request](#letting-players-in-by-request).
 - **Player link**: **Show the player link** shows the link and its QR code, for players at the table to scan.
 - **Table display**: see [The table display](#the-table-display).
 
 Follow me and Bring everyone here move the players only while you are looking at the players' scene, and the panel tells you when you aren't.
 
-Each section of the DM panel folds. On a phone, the ones you set up once, Check their view, Player link and Table display, start folded, while Handouts and Players' screens start open, since you use them during play. A folded section still tells you what it holds, such as "2 showing" for Handouts or "Players on Crypt · Follow me off" when you are looking at another scene. Tap a section's name to open or fold it, and your device remembers. Join requests always sits at the top and stays open while anyone is waiting. A PDF upload that needs you opens Handouts by itself, and a badge on its row tells you about it if you fold it again.
+Each section of the DM panel folds. On a phone, the ones you set up once, Preview, Player link and Table display, start folded, while Handouts and Players' screens start open, since you use them during play. A folded section still tells you what it holds, such as "2 showing" for Handouts or "Players on Crypt · Follow me off" when you are looking at another scene. Tap a section's name to open or fold it, and your device remembers. Join requests always sits at the top and stays open while anyone is waiting. A PDF upload that needs you opens Handouts by itself, and a badge on its row tells you about it if you fold it again.
 
 ### View as a player
 
@@ -1609,7 +1609,7 @@ There are two ways in. The quickest is a creature the player owns: their charact
 
 ![Thorn's Token panel: under his name and "Level 5 character · Medium (5 ft)", his quick numbers, then the View as Pat button with its eye in a row of its own, then his stat block.](dm-guide/token-view-as.webp)
 
-The other way is the DM panel's **Check their view**, for a player who has no token on the scene: pick them under **View as a player** and press **View**.
+The other way is the DM panel's **Preview**, for a player who has no token on the scene: pick them under **View as a player** and press **View**.
 
 While you look, a line at the top reads "Viewing as Ana. Nothing here is saved. Whispers between players are not shown." Until their view arrives, it says it is loading. If it can't load, it says so, and **Try again** asks for their view once more. The whispers players send each other stay private, so you can look in without reading the notes they passed. **Exit**, or Escape, brings you back to the button you pressed.
 
@@ -1631,7 +1631,7 @@ The choice takes effect at once on every DM device. Switching back to With the p
 
 ### What the newcomer sees
 
-A newcomer who asks types a name, picks a color and presses **Ask to join**. Their page then says **Waiting for the DM** and stays there until you answer. They can lock the phone, reload the page or open the link in another tab, and the request keeps its place for 10 minutes. If nobody answers in that time, the page says so and offers to ask again. Until you answer, they learn nothing about the room: not who is playing, which colors are taken, or even whether you are online.
+A newcomer who asks types a name, picks a color and presses **Ask to join**. Their page then says **Waiting for the DM**, with a spinner that reads "You asked to join as Rowan.", and stays there until you answer. They can lock the phone, reload the page or open the link in another tab, and the request keeps its place for 10 minutes. If nobody answers in that time, the page says so and offers to ask again. Until you answer, they learn nothing about the room: not who is playing, which colors are taken, or even whether you are online.
 
 ![The ask card on a phone: the room's name and ID at the top, then Ask to join with its help line, Your name filled in with Quinn, the ten colors with purple picked, and the Ask to join and Back buttons.](dm-guide/ask-to-join.webp)
 
@@ -1662,9 +1662,9 @@ If asking ever stops working for your table, switch Joining to **With the passwo
 
 The **Characters** panel lists the party. A character belongs to the room rather than to one map, so its HP and conditions follow its tokens to every scene. A monster token is different: each one is its own copy.
 
-- **New character** takes a name, size, max HP, AC, Speed, Initiative bonus, Passive Perception, and who plays it (**Played by**). While "Players can create their own characters" is on, each player can also make up to 3 of their own.
+- **New character** takes a name, size, max HP, AC, Speed, Initiative bonus, Passive Perception, and who plays it (**Players**). While "Players can create their own characters" is on, each player can also make up to 3 of their own.
 - To put a character on the scene you are viewing, open it, press **Place a token**, and tap the map.
-- Tap a character to open its page. It reads like the Token panel: the picture, name, level and size, the quick numbers and **Place a token**, then the stat block, then **Combat** and **Companions**, open, and **Notes**, **Image**, **Stats** and **Played by**, folded until you need them. Your device remembers which ones you open. At the foot of the page, **Delete Thorn** (after a trash can) deletes the character with its tokens, its companions and its place in a fight. The line above it says what will go, and it takes a second tap ("Tap again to delete"). The chevron before the character's name at the top of the panel (**Back to Characters**) returns to the list. A player who plays a single character goes straight to its page, until they go back to the list. The list then stays until they leave the room or reload the page.
+- Tap a character to open its page. It reads like the Token panel: the picture, name, level and size, the quick numbers and **Place a token**, then the stat block, then **Combat** and **Companions**, open, and **Notes**, **Image**, **Stats** and **Players**, folded until you need them. Your device remembers which ones you open. At the foot of the page, **Delete Thorn** (after a trash can) deletes the character with its tokens, its companions and its place in a fight. The line above it says what will go, and it takes a second tap ("Tap again to delete"). The chevron before the character's name at the top of the panel (**Back to Characters**) returns to the list. A player who plays a single character goes straight to its page, until they go back to the list. The list then stays until they leave the room or reload the page.
 
 ![Thorn's page in the Characters panel: his picture, level and quick numbers, Place a token under them, then his stat block, each ability box with its small mark, Strength and Constitution, his proficient saves, outlined, then his skills and weapons.](dm-guide/pc-stats.webp)
 
@@ -1675,7 +1675,7 @@ To fill one in, press **Add a stat block** on the character's page or in its tok
 - **Paste text**: a stat block copied as text, read on your device. Set the level first.
 - **D&D Beyond**: a public character's share link or number (press **Get it**), or its JSON pasted in (**Paste its JSON instead**). It reads numbers, proficiencies, weapons, spells and class resources, but never their descriptions. **Jack of All Trades** comes in from D&D Beyond once the bard has reached the feature, and adds half the Proficiency Bonus to skills the character has no proficiency in, Passive Perception included but never Initiative. Other half proficiencies, such as the Champion's Remarkable Athlete, are not read.
 
-**Check what was read** then lists anything to double-check, what comes in (class resources included, such as "Adds Rage: 3 uses, one back on a Short Rest, all on a Long Rest"), and anything else to set (level, AC, max HP, Speed, senses, sheet link, name), where the AC line reminds you that it was worked out from the armor. When the stat block already holds values of its own, **Replaces your changes** lists each one the import would replace, with **Keep mine** beside it for any you want to keep. **Use it** fills in the editor, and **Save** keeps the result. The D&D Beyond import is best effort, since D&D Beyond can change its format at any time.
+**Import review** then lists anything to double-check, what comes in (class resources included, such as "Adds Rage: 3 uses, one back on a Short Rest, all on a Long Rest"), and anything else to set (level, AC, max HP, Speed, senses, sheet link, name), where the AC line reminds you that it was worked out from the armor. When the stat block already holds values of its own, **Replaces your changes** lists each one the import would replace, with **Keep mine** beside it for any you want to keep. **Use it** fills in the editor, and **Save** keeps the result. The D&D Beyond import is best effort, since D&D Beyond can change its format at any time.
 
 When the character changes in D&D Beyond later, such as at a level-up, use [Re-sync from D&D Beyond](#re-sync-from-dd-beyond), which shows what changed on each side before anything comes in.
 
@@ -1705,21 +1705,21 @@ A character from D&D Beyond doesn't need its resources typed in at all. The D&D 
 
 Characters level up between sessions, and players keep their sheets in D&D Beyond up to date. **Re-sync from D&D Beyond** brings those changes into the app without throwing away the changes you or the player made here. It sits beside **Edit** once a character has a stat block and a D&D Beyond link, with the date of the last sync under it, and both you and the character's players can use it. As with the first import, the character must be public in D&D Beyond, or you can paste its JSON when the app asks for it.
 
-The app remembers what the last sync brought in, so it can tell a change made in D&D Beyond from one made here. Press **Re-sync from D&D Beyond**, and after a moment the app shows **Check what changes**:
+The app remembers what the last sync brought in, so it can tell a change made in D&D Beyond from one made here. Press **Re-sync from D&D Beyond**, and after a moment the app shows **Re-sync review**:
 
 - **Changes from D&D Beyond** lists what changed only in D&D Beyond, such as a higher Wisdom or a new spell. These come in.
-- **Also set** lists the level, max HP, AC, Speed and senses, ticked, as they are on an import, and the name, unticked. Untick any line you want to leave as it is. The max HP line also says how many HP the character keeps.
-- **Your changes, kept** lists what was changed here since the last sync, such as a druid who casts with Charisma rather than Wisdom, or a weapon the player renamed. Each one stays as it is, with what D&D Beyond says beside it, unless you tick **Overwrite** on it, or press **Overwrite all**. A change made in both places is marked **Also changed in D&D Beyond**, so you can choose between the two. A roll the player deleted stays deleted, with **Add it back** if they want it again.
+- **Other fields** lists the level, max HP, AC, Speed and senses, ticked, as they are on an import, and the name, unticked. Untick any line you want to leave as it is. The max HP line also says how many HP the character keeps.
+- **Kept changes** lists what was changed here since the last sync, such as a druid who casts with Charisma rather than Wisdom, or a weapon the player renamed. Each one stays as it is, with what D&D Beyond says beside it, unless you tick **Overwrite** on it, or press **Overwrite all**. A change made in both places is marked **Also changed in D&D Beyond**, so you can choose between the two. A roll the player deleted stays deleted, with **Add it back** if they want it again.
 
-![Check what changes for Wren after a level-up in D&D Beyond: Wisdom 18, a stronger Shillelagh and Moonbeam come in, Level 6 and Max HP 45 are ticked under Also set while the name is not, and her Charisma spellcasting and AC 15, both changed here, are kept, each with its Overwrite box.](dm-guide/resync.webp)
+![Re-sync review for Wren after a level-up in D&D Beyond: Wisdom 18, a stronger Shillelagh and Moonbeam come in, Level 6 and Max HP 45 are ticked under Other fields while the name is not, and her Charisma spellcasting and AC 15, both changed here, are kept, each with its Overwrite box.](dm-guide/resync.webp)
 
-Class resources come in the same way, each on a line of its own, such as "Updates Rage: 4 uses, now 3" after a level-up. One changed here is kept, with **Overwrite**, like any other change. Spending them, though, is play rather than the sheet. If a player spent a use here that D&D Beyond still shows as unspent, the review lists it unticked under **Also set**, such as "Rage 4 of 4 left, now 3 of 4", so a re-sync never hands back a use spent in a fight. Tick it to take D&D Beyond's count.
+Class resources come in the same way, each on a line of its own, such as "Updates Rage: 4 uses, now 3" after a level-up. One changed here is kept, with **Overwrite**, like any other change. Spending them, though, is play rather than the sheet. If a player spent a use here that D&D Beyond still shows as unspent, the review lists it unticked under **Other fields**, such as "Rage 4 of 4 left, now 3 of 4", so a re-sync never hands back a use spent in a fight. Tick it to take D&D Beyond's count.
 
-![Check what changes for Kael, a barbarian who spent a Rage here and then reached level 6 in D&D Beyond: "Updates Rage: 4 uses, now 3" comes in, and under Also set, Level 6 and Max HP 78 are ticked while "Rage 4 of 4 left, now 3 of 4" is not, since unticked keeps what was spent here.](dm-guide/ddb-resources.webp)
+![Re-sync review for Kael, a barbarian who spent a Rage here and then reached level 6 in D&D Beyond: "Updates Rage: 4 uses, now 3" comes in, and under Other fields, Level 6 and Max HP 78 are ticked while "Rage 4 of 4 left, now 3 of 4" is not, since unticked keeps what was spent here.](dm-guide/ddb-resources.webp)
 
 Press **Apply** to make the changes. The app tells you how many came in and how many of your changes stayed, and **Undo the re-sync** takes it all back, the exact HP included, until you close the dialog. For you, a re-sync is also a step in **Setup history**, and so is that Undo. If you press **Undo setup** after the dialog's own Undo, it puts the sync back again, which the top bar's **Undo** never does. See [Undo, Redo and Setup history](#undo-redo-and-setup-history).
 
-A few cases work a little differently. A character imported before re-sync existed has no record of its last sync, so the app can't tell whose change is whose. Most of what differs is then listed under **Different from D&D Beyond**, and stays as it is unless you take it. Two things don't wait for you, though. The level, max HP, AC, Speed and senses come in ticked under **Also set**, as they do on an import. And the rolls that came from the earlier import follow D&D Beyond, so they update or go with the sheet, even where someone changed them here. So before the first re-sync of such a character, read both lists, and untick any Also set line you want kept. If D&D Beyond sends a character with something missing, the review says what it could not read, and those parts stay as they are. While the character is in Wild Shape or another shape, its AC and Speed are left out of the comparison, so re-sync again after the shape ends to update them. A re-sync can change the maximum HP, but it never brings a character back from death or knocks one out, and it never changes the character's size.
+A few cases work a little differently. A character imported before re-sync existed has no record of its last sync, so the app can't tell whose change is whose. Most of what differs is then listed under **Unmatched values**, and stays as it is unless you take it. Two things don't wait for you, though. The level, max HP, AC, Speed and senses come in ticked under **Other fields**, as they do on an import. And the rolls that came from the earlier import follow D&D Beyond, so they update or go with the sheet, even where someone changed them here. So before the first re-sync of such a character, read both lists, and untick any Other fields line you want kept. If D&D Beyond sends a character with something missing, the review says what it could not read, and those parts stay as they are. While the character is in Wild Shape or another shape, its AC and Speed are left out of the comparison, so re-sync again after the shape ends to update them. A re-sync can change the maximum HP, but it never brings a character back from death or knocks one out, and it never changes the character's size.
 
 ## Companions
 
@@ -1741,7 +1741,7 @@ A companion is a token that belongs to a character: a familiar, a summoned spiri
 
 - **On Bree's turn, listed under Bree**: it acts on its character's turn and is listed under that character's row in the order, with its own Reaction and Ready. This is the default for a creature.
 - **On Bree's turn, not listed**: it acts on its character's turn and stays out of the order entirely. This is the default for an effect.
-- **Its own turn**: it gets a row of its own, with its own Initiative. If you add it during a fight its character is in, it joins straight away, with its Initiative still to roll. Otherwise its player adds it with **Add Hoot** under **Join the fight**, or you add it with **Add to the fight**. **Everyone here** also includes it when you start a fight.
+- **Its own turn**: it gets a row of its own, with its own Initiative. If you add it during a fight its character is in, it joins straight away, with its Initiative still to roll. Otherwise its player adds it with **Add Hoot** under **Your creatures**, or you add it with **More creatures**. **Everyone here** also includes it when you start a fight.
 
 Other players see a companion's token and name, and see its HP as far as "Players see the party's HP" allows. A creature companion lends the party its sight, but an effect doesn't. A companion stays on its scene when the party moves on (see [the travel scenario](#the-party-travels-between-scenes)).
 
@@ -2032,7 +2032,7 @@ Goblins and wolves wait in the trees beside a road, and the party is about to wa
 
 1. In **Scenes**, under **New scene**, pick **Map image**, choose the forest road image, and press **Upload and create**. If its file name has no size in it, **Line up grid** opens: fit the box over 3 by 3 squares and press **Apply**.
 2. In **Encounters**, press **New encounter** and name it "Road ambush". Add Goblin Warrior ×4, Goblin Boss ×1 and Wolf ×2. The XP budget shows how hard the fight is for the party. Press **Save encounter**.
-3. In **Place on the map**, tick **Hidden from players**, press **Place where I tap**, and tap the trees north of the road. Then drag the wolves to the south side. Hidden tokens look translucent to you, and they never reach the players.
+3. In **Placement**, tick **Hidden from players**, press **Place where I tap**, and tap the trees north of the road. Then drag the wolves to the south side. Hidden tokens look translucent to you, and they never reach the players.
 4. In **Characters**, use **Place a token** to put each character at the west end of the road.
 5. Pick the **Fog** tool with **Clear fog** and **Rectangle**, drag over the road, the party and the trees where the goblins wait, and press **Reveal to players**. Clearing the fog doesn't reveal the goblins, because hidden tokens stay hidden even on open ground. You clear their ground now because a token that is revealed later still can't be seen while it stands under fog.
 6. In **Scenes**, press **Move players** on the forest road.
@@ -2042,7 +2042,7 @@ Goblins and wolves wait in the trees beside a road, and the party is about to wa
 **Running it**
 
 1. If the party is surprised, select the four characters (with **Multi-select**), open **Conditions** in the group's bar, and tap **Surprised**. Their Initiative rolls then have Disadvantage, and their rows show **Dis**.
-2. In **Initiative**, under **Start a fight with**, press **Everyone here**. Use this rather than "Visible to players", which would leave the hidden goblins out. Their rows start hidden.
+2. In **Initiative**, under **New fight**, press **Everyone here**. Use this rather than "Visible to players", which would leave the hidden goblins out. Their rows start hidden.
 3. The players roll their own Initiative. Press **Auto Initiative**: the four goblin warriors share one roll ("By creature"), and so do the two wolves. Then press **Start**.
 4. The hidden goblins appear on their first turn, thanks to "Reveal hidden combatants on their turn". If you would rather spring them all at once, select them and press **Hidden** in the group's bar, and their tokens appear together. If one of them has already appeared on its own turn, the first press hides that one again along with the rest, so press **Hidden** a second time to bring them all out. Their rows still join the players' order one by one, on each goblin's first turn, because that is how **Initiative order players see** works in a new room. If you want the rows to appear along with the tokens, set that option to **Everyone** in Room settings before the fight.
 5. On a goblin's turn, tap it and press **Roll** to see its roll options. On its Scimitar line ("+4 to hit"), press **Attack** to roll against Thorn's AC, then **Damage**. Tap Thorn, use the **Use 5** chip in his HP entry, and press **Apply**.
@@ -2145,7 +2145,7 @@ Bree casts Spirit Guardians and wades into the goblins, while Ivo's owl familiar
 **The familiar**
 
 1. Ivo's player opens **Characters**, which opens straight onto Ivo's page, since Ivo is the only character they play (if they have gone back to the list since they opened the room, they tap Ivo first), and presses **Add a companion**. They name it "Hoot", pick **A creature**, and under **Choose a stat block** pick the SRD Owl. Under the 2024 rules a familiar rolls its own Initiative, so they set **Turn** to **Its own turn**. **Add and place** puts the owl next to Ivo.
-2. Since Ivo is in a running fight, Hoot joins it at once, in a row of its own that reads "Companion of Ivo", and its player rolls its Initiative. Outside a fight, it joins with **Add Hoot** under **Join the fight**, or with **Everyone here** when you start one.
+2. Since Ivo is in a running fight, Hoot joins it at once, in a row of its own that reads "Companion of Ivo", and its player rolls its Initiative. Outside a fight, it joins with **Add Hoot** under **Your creatures**, or with **Everyone here** when you start one.
 3. Under party vision, the owl lends the party its sight, so it can scout a dark room ahead of everyone else.
 4. The next time Ivo summons a familiar, his player simply picks the SRD Owl again. A pasted or typed stat block would be kept under **Stat blocks** on Ivo's page instead.
 
