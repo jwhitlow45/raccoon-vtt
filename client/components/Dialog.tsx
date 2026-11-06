@@ -40,8 +40,8 @@ export type DialogProps = {
    * many fields. `sheet` rises from the bottom and fits its content, for
    * short pickers. `tall` rises from the bottom as tall as the screen less
    * its top inset and a strip of the room, for a window that keeps the
-   * sheet's grabber and swipe, such as the Music window
-   * (docs/design/design-v1-music-player.md 3.2). On a computer `fill` and
+   * sheet's grabber and swipe, such as the playlist maker
+   * (docs/design/design-v1-sound-layout.md 4.5). On a computer `fill` and
    * `tall` keep one height while their content changes, and `sheet` fits
    * its content there too.
    */

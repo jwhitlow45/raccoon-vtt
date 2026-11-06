@@ -3,7 +3,7 @@ import type { Fade, Playlist, Repeat, SceneSound } from "#shared/sound.ts";
 import type { OnAnswer, RoomActions } from "../../../state/types.ts";
 
 /**
- * The sound ops the panel and the Music window send
+ * The sound ops the Sound panel, Library and the playlist maker send
  * (docs/design/design-v1-music.md 6.2, docs/design/design-v1-music-player.md
  * 6.3), each the DM's. Playback ops record no step and Setup ops one each
  * (6.6), which the server decides by the op's type.

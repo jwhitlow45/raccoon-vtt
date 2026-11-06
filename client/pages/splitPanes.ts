@@ -192,7 +192,7 @@ export function parseSplit(raw: string | null, role: Role, has: (id: string) => 
   const entry = objectOf(parseAll(raw)?.[role]);
   if (!entry) return NO_SPLIT;
   const share = typeof entry.share === "number" && Number.isInteger(entry.share) && entry.share >= 1 && entry.share <= 999 ? entry.share : null;
-  // Old ids first (docs/design/design-v1-panel-groups.md 7): Initiative over "sound" is Initiative over Ambiance, and "time" over "sound", one panel now, is no split.
+  // Old ids first (docs/design/design-v1-sound-layout.md 3.3): "ambiance" reads as Sound, so Initiative over "ambiance" is Initiative over Sound, and "ambiance" over "sound", one panel now, is no split. "time" and "sound" are real panels again.
   const top = typeof entry.top === "string" ? canonicalPanelId(entry.top) : null;
   const below = typeof entry.below === "string" ? canonicalPanelId(entry.below) : null;
   const pair = top !== null && below !== null && top !== below && has(top) && has(below) ? { top, below } : null;

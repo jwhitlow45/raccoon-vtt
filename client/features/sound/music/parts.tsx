@@ -10,8 +10,8 @@ import { dragAt, makeRoom, pastSlop } from "./dragOrder.ts";
 import { CROSSFADE, crossfadeName, FADE_WORDS, HANDLE_HELP, moreName, SORT_TRACKS, SORT_WORDS, sortName, type Sort } from "./words.ts";
 
 /**
- * The Music window's small shared parts (docs/design/design-v1-music-player.md
- * 4 and 5): a list's heading with its count and button, the More and
+ * The small shared parts of Library, Up next and the playlist maker
+ * (docs/design/design-v1-music-player.md 4 and 5, docs/design/design-v1-sound-layout.md 4): a list's heading with its count and button, the More and
  * choice menus, and a row's drag handle with the drag itself.
  */
 

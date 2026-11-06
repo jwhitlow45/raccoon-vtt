@@ -3,7 +3,7 @@ import { LIMITS } from "#shared/limits.ts";
 import type { Calendar, LongRestStamp } from "#shared/model.ts";
 
 /**
- * The words and small rules of Ambiance's Time
+ * The words and small rules of the Time panel
  * (docs/design/design-v1-calendar.md 4 and 9), pure, so Time, its dialogs
  * and the tests read them alike.
  */

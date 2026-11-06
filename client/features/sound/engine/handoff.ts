@@ -133,7 +133,7 @@ export type HandoffEnv = {
   echo: boolean;
   locks: LockApi | null;
   audio: HandoffAudio;
-  /** Told after every change of what the page does, for the lines in Ambiance's Sound. */
+  /** Told after every change of what the page does, for the lines in the Sound panel. */
   onChange?(): void;
 };
 

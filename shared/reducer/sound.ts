@@ -55,7 +55,7 @@ export const SOUND_WORDS = {
   notEffect: "That effect isn't in the room any more.",
   nothingPlaying: "Nothing is playing.",
   firedTwice: "That effect was already played.",
-  // The queue and the Music window (docs/design/design-v1-music-player.md 6.4 and 8). The last three are a
+  // The queue, Up next and the playlist maker (docs/design/design-v1-music-player.md 6.4 and 8). The last three are a
   // delete's and a change of use's refusals for a track the music holds, by where the queue holds it.
   musicChanged: "The music changed. Try again.",
   musicMovedOn: "The music moved on. Try again.",

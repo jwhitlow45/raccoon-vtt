@@ -15,7 +15,8 @@ export type SettingRowProps = { name: string; help?: ReactNode; wide?: boolean; 
   | {
       /**
        * Makes the whole row one button that opens the setting where it lives
-       * (docs/design/design-v1-scenes-reorg.md 5, Ambiance's Scene sound row):
+       * (docs/design/design-v1-scenes-reorg.md 5), a row that only jumps to another
+       * panel, which none draws since docs/design/design-v1-sound-layout.md 6:
        * the name, the help under it, and a chevron where a control would sit.
        * It keeps a setting's look, never a raised Row card, so its name starts
        * at its neighbors' edge.

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { clockText, playerLoopsLine, playerMusicLine, playlistDetail, playlistLeavesScenes, runLine, sceneLine, sizeText, skipName, storageLine, timeShown, useLeavesLine } from "./words.ts";
+import { clockText, playerLoopsLine, playlistDetail, playlistLeavesScenes, runLine, sceneLine, sizeText, skipName, storageLine, timeShown, useLeavesLine } from "./words.ts";
 import * as words from "./words.ts";
 
 const MB = 1024 * 1024;
@@ -37,8 +37,6 @@ describe("the words of Ambiance's Sound (docs/design/design-v1-music.md 4.1 and 
   });
 
   test("a player's lines name only what the projection names", () => {
-    assert.equal(playerMusicLine("The Prancing Pony"), "Music: The Prancing Pony");
-    assert.equal(playerMusicLine(null), "Music is playing.");
     assert.equal(playerLoopsLine(["Rain", "Crowd"]), "Background: Rain, Crowd");
     assert.equal(playerLoopsLine([null, null]), "2 background sounds are playing.");
     assert.equal(playerLoopsLine([null]), "1 background sound is playing.");

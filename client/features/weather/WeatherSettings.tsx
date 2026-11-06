@@ -53,7 +53,7 @@ export function SceneWeather(props: { scene: Scene }) {
   return <WeatherBody picker={picker} weather={weather} forced={forcedNow(forced, weather)} change={change} />;
 }
 
-/** The weather in a few words: "Clear", or its names such as "Heavy rain · Strong wind". Ambiance's Weather row shows it (docs/design/design-v1-scenes-reorg.md 4.2). */
+/** The weather in a few words: "Clear", or its names such as "Heavy rain · Strong wind". The folded Light and weather group shows it (docs/design/design-v1-scenes-reorg.md 4.2). */
 export function weatherSummary(weather: Weather | undefined): string {
   const parts = weatherParts(weather);
   return parts.length === 0 ? "Clear" : parts.join(" · ");

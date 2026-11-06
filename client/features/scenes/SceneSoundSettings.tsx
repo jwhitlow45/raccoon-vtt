@@ -23,7 +23,7 @@ export function useSceneSoundNames(scene: Scene): string[] | null {
  * Scene sound, the scene's own preset (docs/design/design-v1-scenes-reorg.md 5,
  * docs/design/design-v1-music.md 4.6): what Move players starts when the
  * players arrive here. It lives with the scene's other settings, for the
- * scene in view, while what plays now stays the room's, in Ambiance. Every
+ * scene in view, while what plays now stays the room's, in Sound. Every
  * button sends the op the Sound panel's line always sent: Play it plays the
  * preset now, Use what's playing saves what plays as it, Use silence keeps
  * the scene silent, and Clear leaves it with no sound of its own.
@@ -35,7 +35,7 @@ export function SceneSoundSettings(props: { scene: Scene }) {
   const sounds = useRoomView((s) => soundsOf(s.view));
   const playlists = useRoomView((s) => playlistsOf(s.view));
   const names = useSceneSoundNames(scene);
-  // Its own ids, so Ambiance's line for the same scene, open beside it on a computer, never shares one.
+  // Its own ids, so Sound's line for the same scene, open beside it on a computer, never shares one.
   const helpId = useId();
   const sound = scene.sound ?? null;
   const setSound = (next: SceneSound | null) => send(actions, { t: "scene.update", sceneId: scene.id, patch: { sound: next } });

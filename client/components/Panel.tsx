@@ -296,8 +296,8 @@ export type GroupProps = {
   | {
       /**
        * Makes the header one button that opens what the group names where it
-       * lives (docs/design/design-v1-scenes-reorg.md 9), such as Ambiance's
-       * Weather row, which opens the scene's weather in Scenes. It holds no
+       * lives (docs/design/design-v1-scenes-reorg.md 9), a row that only jumps
+       * to another panel, which no panel draws since docs/design/design-v1-sound-layout.md 6. It holds no
        * body and never folds, so it has no `aria-expanded`, and its summary
        * always shows, with a chevron at the row's end where a peer's body
        * would open. It keeps a group's 48 px row, lead and line, so it reads

@@ -13,7 +13,7 @@ export function useClockChipText(): string | null {
 
 /**
  * The clock in the top bar from 900 px up (docs/design/design-v1-calendar.md
- * 4.8): "Day 4, 6:00 AM", a button that opens Ambiance at Time. The pill is
+ * 4.8): "Day 4, 6:00 AM", a button that opens Time. The pill is
  * 28 px like the other chips, inside a 44 px touch target. The top bar
  * steps it aside first when the row overflows (pages/Room.tsx TopBar).
  */

@@ -12,7 +12,7 @@ import { SoundQueue, type CreateAnswer, type QueueDeps, type Row, type SoundCrea
 import { ADD_LABEL, addedWords, cancelLabel, dismissLabel, filesLabel, PICK_CAPPED, stepWords } from "./words.ts";
 
 /**
- * An Add button of Ambiance's Sound and its queue of files
+ * An Add button of the Sound panel and its queue of files
  * (docs/design/design-v1-music.md 4.2): "Add music…", "Add background
  * sounds…" or "Add effects…" by its use, a file picker of up to
  * SOUND_LIMITS.pickFiles files, one row a file with its step, percent and

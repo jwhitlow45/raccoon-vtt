@@ -28,7 +28,7 @@ import { isThumbnailUrl } from "#shared/searchThumbnails.ts";
  *
  * - `PUT /api/rooms/:id/assets?kind=` upload a raw image, video or sound body
  * - `GET /api/rooms/:id/assets` list the images and videos the caller may see
- * - `GET /api/rooms/:id/storage` the room's storage, for the Sound in the DM's Ambiance
+ * - `GET /api/rooms/:id/storage` the room's storage, for the DM's Sound panel
  * - `POST /api/rooms/:id/assets/import` import an image from a URL
  * - `POST /api/rooms/:id/assets/starter` copy a starter work into the room
  * - `GET /api/assets/:assetId/:variant` read one image, or a video or a sound by ranges

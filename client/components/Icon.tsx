@@ -567,7 +567,7 @@ const SHAPES: Record<IconName, ReactNode> = {
       <circle cx="12" cy="14" r="8" />
     </g>
   ),
-  // Lucide calendar-clock: Ambiance's Time, and the top bar's date and time.
+  // Lucide calendar-clock: the Time panel, and the top bar's date and time.
   time: (
     <g {...STROKE}>
       <path d="M16 14v2.2l1.6 1M16 2v4M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5M3 10h5M8 2v4" />
@@ -673,7 +673,7 @@ const SHAPES: Record<IconName, ReactNode> = {
       <path d="M7 14v7M17 14v7" />
     </g>
   ),
-  // Lucide cloud-rain: a scene's weather, on its Light and weather group in Scenes and Ambiance's Weather row (docs/design/design-v1-scenes-reorg.md 3, 4.2).
+  // Lucide cloud-rain: a scene's weather, on its Light and weather group in Scenes (docs/design/design-v1-scenes-reorg.md 3, 4.2).
   weather: (
     <g {...STROKE}>
       <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242" />

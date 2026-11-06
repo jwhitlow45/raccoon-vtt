@@ -454,8 +454,8 @@ export const theme = {
     toolbar: 60,
     /**
      * Dialog widths on a computer. A phone shows a dialog full screen or as
-     * a bottom sheet. `xl` is the Music window's, Library beside Now playing
-     * and Up next (docs/design/design-v1-music-player.md 3.2).
+     * a bottom sheet. `xl` is the playlist maker's, its two columns side by side
+     * (docs/design/design-v1-sound-layout.md 4.5).
      */
     dialog: { sm: 440, md: 560, lg: 720, xl: 1040 },
     /**

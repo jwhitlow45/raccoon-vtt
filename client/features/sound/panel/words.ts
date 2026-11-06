@@ -6,7 +6,7 @@ import type { BuiltinSound, Repeat, SoundUse } from "#shared/sound.ts";
  * 4.3 and 10), and the Sound and Time panels' own, the Now playing chip's
  * and Table sound's (docs/design/design-v1-sound-layout.md 9), in one place
  * so the render tests, the e2e steps and the DM guide read the same text.
- * The words the Music window had for what stays (the player, Up next,
+ * The words the Music window had, which the Sound panel and the maker keep (the player, Up next,
  * Library and the maker) are in music/words.ts.
  */
 
@@ -200,11 +200,6 @@ export function sceneLine(sceneName: string, sound: { names: string[] } | null):
   if (sound === null) return `${sceneName} has no sound of its own.`;
   if (sound.names.length === 0) return `${sceneName} is silent.`;
   return `${sceneName}'s sound: ${sound.names.join(", ")}.`;
-}
-
-/** The player's Now playing (4.3): names when the DM shares them, else a count. */
-export function playerMusicLine(name: string | null): string {
-  return name === null ? "Music is playing." : `Music: ${name}`;
 }
 
 export function playerLoopsLine(names: (string | null)[]): string | null {

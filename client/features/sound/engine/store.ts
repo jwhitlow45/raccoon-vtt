@@ -8,7 +8,7 @@ import { builtinMs } from "./builtins.ts";
 import { LISTEN_ELEMENT, soundContext, soundUnlock } from "./context.ts";
 
 /**
- * What Ambiance's Sound, This device and the table display read of room
+ * What the Sound panel, This device and the table display read of room
  * sound on this page (docs/design/design-v1-music.md 4.1 to 4.5), in the
  * main bundle so reading it never loads the engine: the server's switch,
  * what this page does with the room's sound, the music's state, and
@@ -45,7 +45,7 @@ let serverAsked: Promise<boolean> | null = null;
 /**
  * Whether the server's owner turned sound files on (ROOM_SOUND, from GET
  * /api/config). Read once a page load. Until it answers the switch is
- * unknown, never off, so Ambiance's Sound never says the server has none
+ * unknown, never off, so the Sound panel never says the server has none
  * while it asks. A failed read says so, and the next call asks again. The
  * promise answers false for anything but on, the safe answer. The built-in
  * effects play either way.

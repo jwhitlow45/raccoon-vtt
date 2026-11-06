@@ -120,7 +120,7 @@ export function ownLineWatcher(): { update(s: Watched, prev: Watched): void; tak
 
 /**
  * A toast for each clock line that arrives while neither the Log nor an open
- * Time in Ambiance is on screen (docs/design/design-v1-calendar.md 4.7), for players and
+ * Time is on screen (docs/design/design-v1-calendar.md 4.7), for players and
  * co-DMs. The Log keeps every line, toast or not. A line this device's own
  * op wrote makes none.
  */

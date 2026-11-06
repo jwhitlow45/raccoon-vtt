@@ -272,7 +272,7 @@ export async function addUploaders(db: pg.Pool | pg.PoolClient, assetId: string,
  * the room's order.
  *
  * Sounds are no images, so no library lists them
- * (docs/design/design-v1-music.md 7.2): Ambiance's Sound reads the room's
+ * (docs/design/design-v1-music.md 7.2): the Sound panel reads the room's
  * sounds from its state, and their bytes from the storage route.
  */
 export async function listRoomAssets(pool: pg.Pool, roomId: string, ids?: ReadonlySet<string>, memberId?: string): Promise<AssetView[]> {

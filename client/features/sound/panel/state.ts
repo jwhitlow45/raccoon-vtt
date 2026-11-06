@@ -7,7 +7,7 @@ import { builtinMs } from "../engine/builtins.ts";
 import { STOP_IT_FIRST, TRACK_PLAYS, TRACK_PLAYS_NEXT, TRACK_QUEUED } from "./words.ts";
 
 /**
- * What Ambiance's Sound reads of the room's sound
+ * What the Sound panel reads of the room's sound
  * (docs/design/design-v1-music.md 4.1 and 6), as pure functions of the
  * projected state and the server's time, so its components and their tests
  * share one reading.

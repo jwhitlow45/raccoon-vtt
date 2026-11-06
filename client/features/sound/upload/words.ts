@@ -9,7 +9,7 @@ import { imageErrorMessage } from "../../images/errors.ts";
  * (docs/design/design-v1-music.md 4.2), in one place so the tests pin them.
  */
 
-/** The Add button of each section of Ambiance's Sound. */
+/** The Add button of each section of the Sound panel. */
 export const ADD_LABEL: Readonly<Record<SoundUse, string>> = {
   music: "Add music…",
   loop: "Add background sounds…",
