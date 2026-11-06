@@ -28,7 +28,7 @@ import { shareRecord, shareState } from "./share.ts";
 import { backoffDelay, realClock, Timer, type Clock } from "./timing.ts";
 import { addToSelection, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "./selection.ts";
 import { canonicalPanelId, panelById } from "../features/panels.ts";
-import { crossWide, EMPTY_EPHEMERAL, INITIAL_LOCAL, MAX_REFUSED, withoutBelow, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetExpanded, withSheetHidden, withSidePanelHidden, withSplit, withSplitFits, withSwap, type Ended, type LocalUi, type OnAnswer, type OpAnswer, type OpRefusal, type PanelHow, type PendingOp, type RoomView, type Toast, type ToastAction, type ToastDie, type UnknownCause, type You } from "./types.ts";
+import { crossWide, EMPTY_EPHEMERAL, INITIAL_LOCAL, MAX_REFUSED, withoutBelow, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetExpanded, withSheetHidden, withSidePanelHidden, withSplit, withSplitFits, withSwap, type Ended, type LocalUi, type OnAnswer, type OpAnswer, type OpRefusal, type PanelHow, type PendingOp, type RoomView, type Toast, type ToastAction, type ToastDie, type ToastSends, type UnknownCause, type You, hasButtons } from "./types.ts";
 
 export type { PendingOp } from "./types.ts";
 
@@ -122,8 +122,9 @@ export const ACTION_TOAST_MS = 12_000;
  */
 export function toastsLeft(toasts: readonly Toast[], now: number, heldSince?: number): { id: number; ms: number; runs: boolean }[] {
   return toasts.map((t) => {
-    const whole = t.action ? ACTION_TOAST_MS : TOAST_MS;
-    if (t.shownAt === undefined) return { id: t.id, ms: whole, runs: false };
+    const whole = hasButtons(t) ? ACTION_TOAST_MS : TOAST_MS;
+    // One whose button waits on the server stays until the answer, which starts its time again or closes it (pressToast).
+    if (t.shownAt === undefined || t.busy !== undefined) return { id: t.id, ms: whole, runs: false };
     const waits = heldSince !== undefined && t.action?.ready !== undefined;
     const at = Math.min(t.pausedAt ?? now, waits ? Math.max(heldSince, t.shownAt) : Infinity);
     return { id: t.id, ms: Math.max(0, t.shownAt + whole - at), runs: t.pausedAt === undefined && t.action?.ready?.() !== false };
@@ -185,11 +186,30 @@ export function waitedToasts(toasts: readonly Toast[], from: number, now: number
 export function withToast(toasts: readonly Toast[], toast: Toast): Toast[] {
   let out = [...toasts, toast];
   while (out.length > MAX_TOASTS) {
-    const plain = out.slice(0, -1).findIndex((t) => t.logged === true && t.action === undefined);
+    const plain = out.slice(0, -1).findIndex((t) => t.logged === true && !hasButtons(t));
     if (plain === -1) break;
     out = out.filter((_, i) => i !== plain);
   }
   return out;
+}
+
+/** What a toast's button that waits on the server says when its send threw, which no answer explains. */
+export const SEND_FAILED = "That could not be sent.";
+
+/**
+ * The toasts once the answer to a toast's busy button came (types.ts
+ * ToastSend): null, taken, closes it. Words of a refusal show in it, its
+ * button live again, and its time starts again from `now`, so the words
+ * stay as long as a new toast's, held still if it shows whole. A toast
+ * gone meanwhile stays gone. The same array when nothing changes.
+ */
+export function settledToasts(toasts: readonly Toast[], id: number, words: string | null, now: number): readonly Toast[] {
+  const toast = toasts.find((t) => t.id === id);
+  if (!toast) return toasts;
+  if (words === null) return toasts.filter((t) => t.id !== id);
+  const { busy: _busy, ...rest } = toast;
+  const next: Toast = { ...rest, said: words, ...(toast.shownAt !== undefined ? { shownAt: now } : {}), ...(toast.pausedAt !== undefined ? { pausedAt: now } : {}) };
+  return toasts.map((t) => (t.id === id ? next : t));
 }
 
 /** Options for one dispatched op. */
@@ -285,11 +305,20 @@ export type RoomUi = {
    * A short note from this page rather than the server, for this device
    * only: why a drag did nothing, or a whisper that arrived while the Log
    * is closed. Someone else's D20 Test leads with its die, and a reminder
-   * may carry one button. `logged` says the log keeps its words too, and
+   * may carry one button, or a row of buttons that wait on the server
+   * (types.ts ToastSends). `logged` says the log keeps its words too, and
    * `quiet` that a live region already said them (types.ts Toast).
    */
-  notify(text: string, tone?: Toast["tone"], die?: ToastDie, action?: ToastAction, logged?: boolean, quiet?: boolean): void;
+  notify(text: string, tone?: Toast["tone"], die?: ToastDie, action?: ToastAction | ToastSends, logged?: boolean, quiet?: boolean): void;
   dismissToast(id: number): void;
+  /**
+   * A press on a toast's button that waits on the server (types.ts
+   * ToastSend): nothing while one of its buttons is busy, else that one is
+   * busy until its answer, which closes the toast or shows its refusal
+   * (settledToasts). A player preview, whose toasts never carry such
+   * buttons, leaves it out.
+   */
+  pressToast?(id: number, index: number): void;
   /** The toast layer drew these toasts: each drawn for the first time starts its time (toastsLeft). */
   toastsDrawn(ids: readonly number[]): void;
   /** A toast shown whole stops its time, and runs on from what it had left once it shrinks back (heldToasts, docs/design/design-v1-bar-compact.md 3.5). */
@@ -704,10 +733,11 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     });
   }
 
-  function pushToast(text: string, tone: Toast["tone"] = "error", die?: ToastDie, action?: ToastAction, logged = false, quiet = false): void {
+  function pushToast(text: string, tone: Toast["tone"] = "error", die?: ToastDie, action?: ToastAction | ToastSends, logged = false, quiet = false): void {
     const toasts = get().toasts;
     if (toasts.some((t) => t.text === text)) return;
-    store.setState({ toasts: withToast(toasts, { id: ++toastSeq, text, tone, ...(die ? { die } : {}), ...(action ? { action } : {}), ...(logged ? { logged: true as const } : {}), ...(quiet ? { quiet: true as const } : {}) }) });
+    const buttons = action === undefined ? {} : "buttons" in action ? (action.buttons.length > 0 ? { actions: action.buttons, actionsLabel: action.label } : {}) : { action };
+    store.setState({ toasts: withToast(toasts, { id: ++toastSeq, text, tone, ...(die ? { die } : {}), ...buttons, ...(logged ? { logged: true as const } : {}), ...(quiet ? { quiet: true as const } : {}) }) });
   }
 
   // ------------------------------------------------------------ sending
@@ -821,6 +851,24 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     dismissToast(id) {
       const toasts = get().toasts;
       if (toasts.some((t) => t.id === id)) store.setState({ toasts: toasts.filter((t) => t.id !== id) });
+    },
+    pressToast(id, index) {
+      const toast = get().toasts.find((t) => t.id === id);
+      const button = toast?.actions?.[index];
+      if (!toast || !button || toast.busy !== undefined) return;
+      store.setState({ toasts: get().toasts.map((t) => (t.id === id ? { ...t, busy: index } : t)) });
+      const settle = (words: string | null) => {
+        const toasts = settledToasts(get().toasts, id, words, Date.now());
+        if (toasts !== get().toasts) store.setState({ toasts: [...toasts] });
+      };
+      let sent: PromiseLike<string | null>;
+      try {
+        sent = button.send();
+      } catch {
+        settle(SEND_FAILED);
+        return;
+      }
+      Promise.resolve(sent).then(settle, () => settle(SEND_FAILED));
     },
     toastsDrawn(ids) {
       const toasts = drawnToasts(get().toasts, ids, Date.now());

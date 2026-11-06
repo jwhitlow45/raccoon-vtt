@@ -8,7 +8,7 @@ import { NOTICE_TONES } from "../components/tones.ts";
 import { D20Icon } from "../features/dice/throw/D20Icon.tsx";
 import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import { theme } from "../lib/theme.ts";
-import type { Toast, ToastDie } from "../state/types.ts";
+import { hasButtons, type Toast, type ToastDie } from "../state/types.ts";
 import { TOAST_ROW_TOP, toastPortalKey } from "./toastPlacement.ts";
 
 /** The widest a toast stands, and a stack that scrolls with it, so the map either side still takes a tap. */
@@ -72,7 +72,7 @@ export function useToastStack() {
     zoomAt.current = zoom;
     const room = foot * zoom - el.getBoundingClientRect().top;
     const { drop, scrolls } = fitToasts(
-      list.map((t) => ({ id: t.id, height: height(t), action: t.action !== undefined, logged: t.logged === true })),
+      list.map((t) => ({ id: t.id, height: height(t), action: hasButtons(t), logged: t.logged === true })),
       theme.space(2) * zoom,
       room,
     );
@@ -121,8 +121,15 @@ export function ToastStack(props: { stack: ReturnType<typeof useToastStack>; sty
  * the text button's name, which shows it whole, and its action at the
  * right end, its words whole and the row's full height. Whole: the stack's
  * form with a 44 px Close at its top right, which shrinks it back.
+ *
+ * Buttons that wait on the server (types.ts ToastSend) follow the words
+ * on a line of their own after their label, such as a damage roll's
+ * "Apply to" and its creatures, each pressed through `onPress`. The one
+ * row has no room for them, so there they stay mounted and hidden, and a
+ * tap on its words shows them whole. While one is busy a tap on the words
+ * closes nothing, since the toast waits for its answer.
  */
-export function ToastNote(props: { toast: Toast; onDismiss(): void; form?: "stack" | "row" | "whole"; onWhole?(): void; onShrink?(): void }) {
+export function ToastNote(props: { toast: Toast; onDismiss(): void; form?: "stack" | "row" | "whole"; onWhole?(): void; onShrink?(): void; onPress?(index: number): void }) {
   const t = props.toast;
   const form = props.form ?? "stack";
   const tone = NOTICE_TONES[t.tone === "error" ? "danger" : "info"];
@@ -142,12 +149,15 @@ export function ToastNote(props: { toast: Toast; onDismiss(): void; form?: "stac
     boxShadow: theme.shadow.float,
   };
   const action = t.action;
+  const sends = t.actions ?? [];
   const row = form === "row";
   const whole = form === "whole";
-  const boxed = row || action !== undefined;
+  const buttons = action !== undefined || sends.length > 0;
+  const boxed = row || buttons;
+  const waits = t.busy !== undefined;
   const wordsStyle: CSSProperties = row
     ? { flex: "1 1 auto", minWidth: theme.touch, padding: `0 ${theme.space(2)}px 0 ${theme.space(3)}px`, background: "transparent", border: "none", color: "inherit", font: "inherit", textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: "pointer" }
-    : action
+    : buttons
       ? { flex: "1 1 200px", minWidth: 0, minHeight: theme.touch, padding: 0, background: "transparent", border: "none", color: "inherit", font: "inherit", textAlign: "left", cursor: "pointer" }
       : { ...look, padding: `${theme.space(2)}px ${whole ? theme.touch : theme.space(3)}px ${theme.space(2)}px ${theme.space(3)}px`, cursor: "pointer" };
   // Keep the same controls at the same React positions when a resize changes
@@ -159,12 +169,12 @@ export function ToastNote(props: { toast: Toast; onDismiss(): void; form?: "stac
         data-toast-form={row ? "row" : undefined}
         style={row
           ? { ...look, maxWidth: "none", height: theme.touch, minHeight: 0, boxSizing: "border-box", border: "none", outline: `${theme.line.border}px solid ${tone.outline}`, outlineOffset: -theme.line.border, display: "flex", alignItems: "stretch", overflow: "hidden" }
-          : action
+          : buttons
             ? { ...look, display: "flex", alignItems: "center", flexWrap: "wrap", gap: theme.space(2), padding: `${theme.space(1)}px ${whole ? theme.touch : theme.space(2)}px ${theme.space(1)}px ${theme.space(3)}px` }
             : { display: "contents" }}
       >
-        <button type="button" data-toast={boxed ? undefined : ""} aria-label={row ? t.text : undefined} onClick={row ? props.onWhole : props.onDismiss} style={wordsStyle}>
-          {!row && !action && t.die ? <ToastD20 die={t.die} text={t.text} /> : t.text}
+        <button type="button" data-toast={boxed ? undefined : ""} aria-label={row ? t.text : undefined} onClick={row ? props.onWhole : waits ? undefined : props.onDismiss} style={wordsStyle}>
+          {!row && !buttons && t.die ? <ToastD20 die={t.die} text={t.text} /> : t.text}
         </button>
         {action ? (
           <Button
@@ -179,6 +189,33 @@ export function ToastNote(props: { toast: Toast; onDismiss(): void; form?: "stac
           >
             {action.label}
           </Button>
+        ) : null}
+        {sends.length > 0 ? (
+          // The group says its label, so the label's own words are not said twice. No hook here: the form tests call this as a function.
+          <div role="group" aria-label={t.actionsLabel} data-toast-sends="" hidden={row} style={{ flex: "1 1 100%", display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
+            <span aria-hidden="true" style={{ fontSize: theme.font.small, color: tone.text, marginRight: theme.space(1) }}>
+              {t.actionsLabel}
+            </span>
+            {sends.map((send, i) => (
+              <Button
+                key={i}
+                size="sm"
+                busy={t.busy === i}
+                disabled={waits && t.busy !== i}
+                aria-label={send.name}
+                onClick={() => props.onPress?.(i)}
+                // Each grows to share its line, so one that wraps alone fills its line.
+                style={{ flex: "1 1 auto", maxWidth: "100%", whiteSpace: "normal", textAlign: "center" }}
+              >
+                {send.label}
+              </Button>
+            ))}
+          </div>
+        ) : null}
+        {t.said && !row ? (
+          <p role="alert" style={{ flex: "1 1 100%", margin: 0, fontSize: theme.font.small, overflowWrap: "anywhere" }}>
+            {t.said}
+          </p>
         ) : null}
       </div>
       {whole ? <IconButton icon="close" label="Close" onClick={props.onShrink} style={{ position: "absolute", top: 0, right: 0 }} /> : null}
@@ -265,10 +302,12 @@ export function toastPortals(a: {
   dismiss(id: number): void;
   showWhole(id: number): void;
   shrink(): void;
+  /** A press on one of a toast's buttons that wait on the server (ToastNote `onPress`). */
+  press?(id: number, index: number): void;
 }): ReactNode[] {
   return a.drawn.map((t) =>
     createPortal(
-      <ToastNote toast={t} form={toastForm(t.id, a.rowToast, a.wholeToast)} onDismiss={() => a.dismiss(t.id)} onWhole={() => a.showWhole(t.id)} onShrink={a.shrink} />,
+      <ToastNote toast={t} form={toastForm(t.id, a.rowToast, a.wholeToast)} onDismiss={() => a.dismiss(t.id)} onWhole={() => a.showWhole(t.id)} onShrink={a.shrink} onPress={(i) => a.press?.(t.id, i)} />,
       a.hostOf(t.id),
       toastPortalKey(t.id),
     ),

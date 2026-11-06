@@ -102,8 +102,25 @@ export const EMPTY_EPHEMERAL: Ephemeral = Object.freeze({
  * `quiet` marks one whose words a live region already said, as an own
  * roll's whose dice were still in the air as its panel closed: it shows,
  * and the toasts' status region skips it (LP28-A-VOICE-1).
+ * `actions` are buttons that wait on the server (ToastSend), after the
+ * words `actionsLabel`. `busy` is the place of the one pressed while its
+ * answer is out, and `said` a refusal's words, shown in the toast.
  */
-export type Toast = { id: number; text: string; tone: "error" | "info"; die?: ToastDie; action?: ToastAction; shownAt?: number; pausedAt?: number; logged?: true; quiet?: true };
+export type Toast = {
+  id: number;
+  text: string;
+  tone: "error" | "info";
+  die?: ToastDie;
+  action?: ToastAction;
+  actions?: readonly ToastSend[];
+  actionsLabel?: string;
+  busy?: number;
+  said?: string;
+  shownAt?: number;
+  pausedAt?: number;
+  logged?: true;
+  quiet?: true;
+};
 
 /**
  * A toast's one button, beside its words, such as the falling off
@@ -113,6 +130,25 @@ export type Toast = { id: number; text: string; tone: "error" | "info"; die?: To
  */
 /** A toast's button. While `ready` answers false a press does nothing, and the toast stays for a later one. */
 export type ToastAction = { label: string; run(): void; ready?(): boolean };
+
+/**
+ * A toast's button whose op waits on the server, such as a damage roll's
+ * Apply to chips on the DM's device (QOL audit Q2). Pressed, it shows busy,
+ * its toast's other buttons refuse a press, and the toast stays with its
+ * time stopped until `send` settles: null closes the toast, and a
+ * refusal's words show in it, its time started again so they can be read.
+ * `name` is its name for a screen reader where `label` alone says too
+ * little ("Apply 9 Slashing damage to Goblin 2").
+ */
+export type ToastSend = { label: string; name?: string; send(): PromiseLike<string | null> };
+
+/** A toast's row of ToastSend buttons after the words that name them, such as "Apply to". */
+export type ToastSends = { label: string; buttons: readonly ToastSend[] };
+
+/** Whether a toast has any button, the kind that stays longer and that a full stack never drops. */
+export function hasButtons(t: Pick<Toast, "action" | "actions">): boolean {
+  return t.action !== undefined || (t.actions?.length ?? 0) > 0;
+}
 
 /**
  * The flat d20 that leads a toast of someone else's D20 Test

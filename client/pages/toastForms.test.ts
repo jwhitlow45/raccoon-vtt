@@ -152,3 +152,18 @@ test("FU39 confer: sheet toasts stay assigned to the sheet and are dismissed whe
   assert.deepEqual(sheetToastsToDismiss(true, closed.places, new Set([1])), [], "an open slot dismisses nothing");
   assert.deepEqual(sheetToastsToDismiss(false, closed.places, new Set([1])), [1]);
 });
+
+test("QOL L1: a toast's buttons that wait on the server follow their label, the busy one says so, and the one row keeps them mounted and hidden", async () => {
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const send = (label: string) => ({ label, name: `Apply 9 Slashing damage to ${label}`, send: async () => null });
+  const toast: Toast = { id: 3, text: "Bree rolled 9 for Longsword damage.", tone: "info", actions: [send("Goblin 1"), send("Goblin 2")], actionsLabel: "Apply to", busy: 1, said: "Goblin 1 is already dead." };
+  const stack = renderToStaticMarkup(React.createElement(ToastNote, { toast, onDismiss() {} }));
+  assert.match(stack, /<div role="group" aria-label="Apply to" data-toast-sends=""/, "the buttons are one group, named by its label");
+  assert.match(stack, /<span aria-hidden="true"[^>]*>Apply to<\/span>/, "whose words show, said once");
+  assert.match(stack, /aria-label="Apply 9 Slashing damage to Goblin 1"/);
+  assert.match(stack, /aria-busy="true"[^>]*aria-label="Apply 9 Slashing damage to Goblin 2"|aria-label="Apply 9 Slashing damage to Goblin 2"[^>]*aria-busy="true"/, "the pressed one is busy");
+  assert.match(stack, /<p role="alert"[^>]*>Goblin 1 is already dead\.<\/p>/);
+  const row = renderToStaticMarkup(React.createElement(ToastNote, { toast, onDismiss() {}, form: "row" }));
+  assert.match(row, /data-toast-sends="" hidden=""/, "mounted in the one row, and hidden");
+  assert.doesNotMatch(row, /role="alert"/);
+});

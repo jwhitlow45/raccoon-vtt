@@ -1982,11 +1982,11 @@ function Toasts(props: {
       <ToastVoice toasts={toasts} heldSince={heldSince} />
       {/* Keep empty stacks mounted until the layout effect moves their last host, so React cannot detach its focused action first. */}
       {toastStacks({ layer: props.layer, lowAt, stacks })}
-      {toastPortals({ drawn, rowToast, wholeToast, hostOf, dismiss: (id) => ui.dismissToast(id), showWhole: (id) => { setWhole(id); ui.holdToast(id, true); }, shrink })}
+      {toastPortals({ drawn, rowToast, wholeToast, hostOf, dismiss: (id) => ui.dismissToast(id), showWhole: (id) => { setWhole(id); ui.holdToast(id, true); }, shrink, press: (id, i) => ui.pressToast?.(id, i) })}
       {toastRow({ layer: props.layer, rowBox, rowStack, safeTop: props.safeTop, right: props.row?.right ?? 0, whole: wholeToast !== undefined })}
       {slot && sheetToast
         ? createPortal(
-            <ToastNote key={sheetToast.id} toast={sheetToast} form={whole === sheetToast.id ? "whole" : "row"} onDismiss={() => ui.dismissToast(sheetToast.id)} onWhole={() => { setWhole(sheetToast.id); ui.holdToast(sheetToast.id, true); }} onShrink={shrink} />,
+            <ToastNote key={sheetToast.id} toast={sheetToast} form={whole === sheetToast.id ? "whole" : "row"} onDismiss={() => ui.dismissToast(sheetToast.id)} onWhole={() => { setWhole(sheetToast.id); ui.holdToast(sheetToast.id, true); }} onShrink={shrink} onPress={(i) => ui.pressToast?.(sheetToast.id, i)} />,
             slot,
           )
         : null}
