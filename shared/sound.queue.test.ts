@@ -162,6 +162,11 @@ describe("where the next track lands after an edit (6.4, 6.6)", () => {
     assert.deepEqual(edited(revealed, { t: "move", soundId: "s9", to: "passEnd" }, INSIDE).next, { soundId: "s3", at: T + 55_000 }, "one that keeps it keeps it");
   });
 
+  test("a next revealed before its window, as a crossfade turned from 10 s to off leaves one, stays revealed through an edit", () => {
+    const early = at(TWELVE, 2, { fade: 0, next: { soundId: "s3", at: T + 60_000 } });
+    assert.deepEqual(edited(early, { t: "next", soundIds: ["s7"] }, T + 35_000).next, { soundId: "s7", at: T + 60_000 });
+  });
+
   test("before the reveal window an edit reveals nothing early", () => {
     assert.equal(edited(THIRD, { t: "next", soundIds: ["s7"] }).next, undefined);
   });
