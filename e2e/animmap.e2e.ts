@@ -653,7 +653,7 @@ describe("animated maps", { concurrency: false }, () => {
     // The crypt's Map image row: a name that gives the size, which the still's upload carries, so the grid is not looked for.
     const crypt = await amd.view(run.cryptId);
     const { openSceneGroup } = await import("./harness.ts");
-    const group = await openSceneGroup(crypt, "Map image and grid");
+    const group = await openSceneGroup(crypt, "Map and grid");
     await group.getByText(VIDEO_PICK_HELP, { exact: true }).waitFor();
     await amd.recordLabels();
     await group.locator(VIDEO_PICKER).first().setInputFiles({ name: "crypt_32x18.webm", mimeType: "video/webm", buffer: readFileSync(WEBM) });
@@ -713,7 +713,7 @@ describe("animated maps", { concurrency: false }, () => {
     const { noFrame: NO_FIRST_FRAME, lowPower: LOW_POWER_STOPPED } = AMD_WORDS;
     const crypt = await amd.view(run.cryptId);
     const { openSceneGroup } = await import("./harness.ts");
-    const group = await openSceneGroup(crypt, "Map image and grid");
+    const group = await openSceneGroup(crypt, "Map and grid");
     const phaseCount = () => dmSocket.state!.scenes[run.cryptId]?.phases?.length ?? 1;
     const start = phaseCount();
     const add = group.getByLabel("Add a phase from an image", { exact: true });
@@ -771,7 +771,7 @@ describe("animated maps", { concurrency: false }, () => {
   test("am-11. Use the still only drops the crypt's video in one Setup step and Undo brings it back, and the Library shows the video as a film strip that plays in its viewer while the board lets go", async () => {
     const crypt = await amd.view(run.cryptId);
     const { openSceneGroup } = await import("./harness.ts");
-    const group = await openSceneGroup(crypt, "Map image and grid");
+    const group = await openSceneGroup(crypt, "Map and grid");
     const before = dmSocket.state!.scenes[run.cryptId]!.map!;
     assert.ok(before.video, "the crypt starts animated");
     await group.getByRole("button", { name: "Use the still only", exact: true }).click();

@@ -7,8 +7,9 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page, type Route } from "playwright-core";
 import sharp from "sharp";
 import type { RoomState, Scene } from "#shared/model.ts";
-import { ConsoleWatch, OpSocket, openSideTab, pickOption, pickTool, reopenRoom, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, OpSocket, openSceneGroup, openSideTab, pickOption, pickTool, reopenRoom, sceneGroup, sceneGroupFold, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
+import { SCENE_GROUP_NAMES } from "./helpers/sceneGroups.ts";
 import { historyOf, playControl, setupHistory } from "./helpers/undoScope.ts";
 import { chooseStarterWork, starterWork } from "./starterPick.ts";
 
@@ -48,12 +49,12 @@ import { chooseStarterWork, starterWork } from "./starterPick.ts";
  *   and party vision chevron first and closed on another scene, and the
  *   map image's sentence above its buttons.
  * - wx-ui-1 and wx-ui-2 (docs/design/design-v1-weather.md 12), before dp-1a so its sign-ins have not spent the DM's snapshot
- *   budget for the minute: the Weather fold on Arena sets rain, wind and its direction and one Undo in Play puts
+ *   budget for the minute: Light and weather on Arena sets rain, wind and its direction and one Undo in Play puts
  *   the old weather back, and fog, a sandstorm and Weather rules on rolls off compose as the picker says.
  * - ss-a, last on a DM session of its own: every new control measured
  *   with the alignment helper at 1440 x 900, 390 x 844 and 320 x 568, at
  *   100% and 130%, in light and dark: the form's Players see, the
- *   Universal VTT dialog's, the scene's What players see with its fold
+ *   Universal VTT dialog's, the scene's Fog and vision with its fold
  *   open and a question asked, the copy sheet, and Room settings' New
  *   scenes.
  *
@@ -296,7 +297,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
 
     // The room's first mat: Everything, so players who join see a mat.
     let panel = await scenesPanel(dm);
-    const shown = section(panel, "What players see");
+    const shown = section(panel, "Fog and vision");
     assert.equal(await checked(playersSee(shown)), "all");
     assert.deepEqual(seeOf(run.matId), { fog: false, vision: false, light: "bright", perPlayer: false });
 
@@ -335,7 +336,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
     assert.deepEqual(seeOf(cave.id), { fog: true, vision: false, light: "bright", perPlayer: false });
     assert.equal(cave.autoWalls, "floor");
     panel = await scenesPanel(dm);
-    assert.equal(await checked(playersSee(section(panel, "What players see"))), "reveal");
+    assert.equal(await checked(playersSee(section(panel, "Fog and vision"))), "reveal");
 
     // Room settings: New scenes at the end, on the room's Explore, with no As before to go back to.
     await openSideTab(dm, "Menu");
@@ -370,7 +371,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
 
     // Reveal by hand asks first. Focus stays on the radio, Explore stays chosen, and Escape answers no.
     panel = await scenesPanel(dm);
-    const what = section(panel, "What players see");
+    const what = section(panel, "Fog and vision");
     const see = playersSee(what);
     assert.equal(await checked(see), "explore");
     const reveal = see.getByRole("radio", { name: "Reveal by hand", exact: true });
@@ -394,7 +395,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
     assert.equal(await what.getByRole("group", { name: "Change what players see?" }).count(), 0);
 
     // The fold of the two switches starts closed. Party vision off from it asks too, and Cancel answers no.
-    const fold = what.getByRole("button", { name: "Fog and party vision", exact: true });
+    const fold = what.getByRole("button", { name: "Switches", exact: true });
     assert.equal(await fold.getAttribute("aria-expanded"), "false");
     assert.equal(await what.getByRole("switch", { name: "Fog", exact: true }).count(), 0);
     await fold.click();
@@ -421,10 +422,10 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
 
     // The guide's picture: Arena dark, its lantern bearer lending the party its sight, the fold put away.
     await fold.click();
-    await what.getByRole("radiogroup", { name: "Light level" }).getByRole("radio", { name: "Dark", exact: true }).check();
+    await section(panel, "Light and weather").getByRole("radiogroup", { name: "Light level" }).getByRole("radio", { name: "Dark", exact: true }).check();
     await waitFor("Arena dark", () => (seeOf(arena.id)?.light === "dark" ? true : null));
     await what.getByText("Lends the party its sight").waitFor();
-    await what.getByRole("heading", { name: "What players see" }).evaluate((el) => (el as unknown as { scrollIntoView(o: unknown): void }).scrollIntoView({ block: "start" }));
+    await what.getByRole("heading", { name: "Fog and vision" }).evaluate((el) => (el as unknown as { scrollIntoView(o: unknown): void }).scrollIntoView({ block: "start" }));
     await shots.take(dm, "ss-1-guide-what-players-see");
     assert.deepEqual(consoles.flatMap((c) => c.errors), []);
   });
@@ -481,9 +482,10 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
   test("ss-3. Cave's settings used on 3 scenes in one step name what each will do, and one Undo setup in Setup history puts all 3 back", async () => {
     await view(run.caveId);
     const panel = await scenesPanel(dm);
-    const opener = section(panel, "What players see").getByRole("button", { name: "Use these settings on other scenes…" });
+    const opener = section(panel, "Fog and vision").getByRole("button", { name: "Copy to other scenes…" });
+    assert.match((await dm.locator(`[id="${await opener.getAttribute("aria-describedby")}"]`).textContent()) ?? "", /^Copies Players see, Light and Sight\.$/);
     await opener.click();
-    const sheet = dm.getByRole("dialog", { name: "Use Cave's settings on…" });
+    const sheet = dm.getByRole("dialog", { name: "Copy Cave's settings to…" });
     await sheet.waitFor();
     await sheet.getByText("Copies Players see, Light and Sight. Movement and walls stay as they are.").waitFor();
     const line = async (name: string) => {
@@ -529,7 +531,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
   test("ss-4. a question builds its change as it is answered, keeping a light changed meanwhile, and gives focus back to the control that asked last", async () => {
     await view(run.arenaId);
     const panel = await scenesPanel(dm);
-    const what = section(panel, "What players see");
+    const what = section(panel, "Fog and vision");
     const see = playersSee(what);
     const question = what.getByRole("group", { name: "Change what players see?" });
     const explore = see.getByRole("radio", { name: "Explore", exact: true });
@@ -544,7 +546,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
     // Explore and Dark, Reveal by hand asks, Light goes to Bright meanwhile, and Change keeps Bright (MS1-ASTRA-01).
     await see.getByRole("radio", { name: "Reveal by hand", exact: true }).click();
     await question.waitFor();
-    await what.getByRole("radiogroup", { name: "Light level" }).getByRole("radio", { name: "Bright", exact: true }).check();
+    await section(panel, "Light and weather").getByRole("radiogroup", { name: "Light level" }).getByRole("radio", { name: "Bright", exact: true }).check();
     await waitFor("Arena bright", () => (seeOf(run.arenaId)?.light === "bright" ? true : null));
     assert.equal(await question.count(), 1, "the question is still open");
     await question.scrollIntoViewIfNeeded();
@@ -572,7 +574,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
     await toExplore();
 
     // By keyboard: Party vision off in the fold asks, and closing the fold over the question keeps focus on its header (MS1-F-1).
-    const fold = what.getByRole("button", { name: "Fog and party vision", exact: true });
+    const fold = what.getByRole("button", { name: "Switches", exact: true });
     if ((await fold.getAttribute("aria-expanded")) === "false") await fold.click();
     const party = what.getByRole("switch", { name: "Party vision", exact: true });
     await party.focus();
@@ -599,7 +601,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
     await see.getByRole("radio", { name: "Everything", exact: true }).click();
     await question.waitFor();
     // Day is the phase showing, so its light is the scene's at once.
-    await what.getByRole("combobox", { name: "Light with Day" }).selectOption({ label: "Dark" });
+    await section(panel, "Light and weather").getByRole("combobox", { name: "Light with Day" }).selectOption({ label: "Dark" });
     await waitFor("Arena dark from its phase", () => (seeOf(run.arenaId)?.light === "dark" ? true : null));
     await question.getByRole("button", { name: "Change", exact: true }).click();
     await waitFor("Arena on Everything", () => (seeOf(run.arenaId)?.fog === false ? true : null));
@@ -712,23 +714,28 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
     await waitFor("Arena clear again", () => (weatherOf(run.arenaId) === undefined ? true : null));
   };
 
-  test("wx-ui-1. the Weather fold sets rain, wind and its direction, shows the rules, and one Undo in Play puts the old weather back, named for the scene", async () => {
+  test("wx-ui-1. Light and weather sets rain, wind and its direction under the light with no fold of its own, shows the rules as the rules switch's help, and one Undo in Play puts the old weather back, named for the scene", async () => {
     try {
       await view(run.arenaId);
       const panel = await scenesPanel(dm);
-      const what = section(panel, "What players see");
-      const fold = what.getByRole("button", { name: "Weather", exact: true });
+      const what = section(panel, "Light and weather");
+      const fold = sceneGroupFold(panel, "Light and weather");
       assert.equal(weatherOf(run.arenaId), undefined, "Arena starts clear");
-      assert.equal(await fold.getAttribute("aria-expanded"), "false", "a clear scene folds it");
-      await what.getByText("Clear", { exact: true }).first().waitFor();
-      await fold.click();
+      // No Weather fold: its rows stand under the light (docs/design/design-v1-scenes-reorg.md 4.1).
+      assert.equal(await what.getByRole("button", { name: "Weather", exact: true }).count(), 0);
+      assert.equal(await fold.getAttribute("aria-expanded"), "true", "open on every width");
+      assert.ok((await what.getByRole("radiogroup", { name: "Light level" }).boundingBox())!.y < (await what.getByRole("combobox", { name: "Weather", exact: true }).boundingBox())!.y, "the light first");
       const kind = what.getByRole("combobox", { name: "Weather", exact: true });
       await kind.selectOption({ label: "Rain" });
       await waitFor("light rain", () => (weatherOf(run.arenaId)?.kind === "rain" ? true : null));
       await what.getByRole("radiogroup", { name: "Strength" }).getByRole("radio", { name: "Heavy", exact: true }).check();
       await waitFor("heavy rain", () => (weatherOf(run.arenaId)?.heavy === true ? true : null));
       await what.getByText("Perception checks here roll with Disadvantage.").waitFor();
-      assert.equal(await what.getByRole("switch", { name: "Weather rules on rolls", exact: true }).getAttribute("aria-checked"), "true");
+      const rules = what.getByRole("switch", { name: "Weather rules on rolls", exact: true });
+      assert.equal(await rules.getAttribute("aria-checked"), "true");
+      // One row for the rules: the switch is described by them, and no line beside it says them again (D-261102-863).
+      assert.match((await dm.locator(`[id="${await rules.getAttribute("aria-describedby")}"]`).textContent()) ?? "", /Perception checks here roll with Disadvantage\./);
+      assert.equal(await what.getByText(/Perception checks here roll with Disadvantage\./).count(), 1);
       assert.equal(await what.getByRole("radiogroup", { name: "Wind blows toward" }).count(), 0, "calm has no compass");
       await what.getByRole("radiogroup", { name: "Wind", exact: true }).getByRole("radio", { name: "Strong", exact: true }).check();
       const compass = what.getByRole("radiogroup", { name: "Wind blows toward" });
@@ -739,16 +746,18 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
       await waitFor("the wind toward the left", () => (weatherOf(run.arenaId)?.toward === 270 ? true : null));
       assert.deepEqual(weatherOf(run.arenaId), { kind: "rain", heavy: true, wind: "strong", toward: 270 });
       await what.getByText(/Attacks with a ranged weapon here roll with Disadvantage/).waitFor();
-      // The guide's picture of the fold (docs/dm-guide/weather-settings.webp): its label at the top of the panel.
+      // The guide's picture of the weather (docs/dm-guide/weather-settings.webp): its group at the top of the panel.
       // Earlier steps' toasts and the scene's loading notice are gone by then.
       await dm.getByText(/^Loading Arena/).waitFor({ state: "detached", timeout: 30_000 });
       await dm.getByText(/^(Sewer was deleted|Saved\. Undo in Setup history)/).first().waitFor({ state: "detached", timeout: 30_000 }).catch(() => undefined);
       await fold.evaluate((el) => el.scrollIntoView({ block: "start" }));
       await shots.take(dm, "wx-ui-1-fold-open");
 
-      // Folded, the fold names the weather beside its label, and the group's summary does too once the group folds.
+      // Folded, the group names the weather after the light beside its name, then opens again as the DM left it.
       await fold.click();
-      await what.getByText("Heavy rain · Strong wind", { exact: true }).waitFor();
+      await what.getByText(/^(Bright|Dim|Dark) · Heavy rain · Strong wind$/).waitFor();
+      await fold.click();
+      assert.equal(await fold.getAttribute("aria-expanded"), "true");
 
       // The newest Play step is the last pick, named for the scene, and one Undo puts the wind back where it was.
       const head = historyOf(dmSocket)?.play.undo.head;
@@ -758,7 +767,6 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
       assert.deepEqual(weatherOf(run.arenaId), { kind: "rain", heavy: true, wind: "strong" });
 
       // Clear keeps the wind, and Clear with Calm stores nothing.
-      await fold.click();
       await kind.selectOption({ label: "Clear" });
       await waitFor("a clear day with wind", () => (weatherOf(run.arenaId)?.kind === "clear" ? true : null));
       assert.deepEqual(weatherOf(run.arenaId), { kind: "clear", wind: "strong" });
@@ -775,14 +783,12 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
     try {
       await view(run.arenaId);
       const panel = await scenesPanel(dm);
-      const what = section(panel, "What players see");
-      const fold = what.getByRole("button", { name: "Weather", exact: true });
+      const what = section(panel, "Light and weather");
       const kind = what.getByRole("combobox", { name: "Weather", exact: true });
       const wind = what.getByRole("radiogroup", { name: "Wind", exact: true });
       const strength = what.getByRole("radiogroup", { name: "Strength" });
       await ops.send({ t: "scene.update", sceneId: run.arenaId, patch: { weather: { kind: "rain", wind: "strong" } } });
       await waitFor("light rain in strong wind", () => (weatherOf(run.arenaId)?.wind === "strong" ? true : null));
-      assert.equal(await fold.getAttribute("aria-expanded"), "true", "a scene with weather opens it");
 
       await kind.selectOption({ label: "Fog" });
       await waitFor("fog", () => (weatherOf(run.arenaId)?.kind === "fog" ? true : null));
@@ -799,6 +805,10 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
       assert.equal(await wind.getByRole("radio", { name: "Strong", exact: true }).isDisabled(), true, "strong wind disperses fog");
       await strength.getByRole("radio", { name: "Heavy", exact: true }).check();
       await what.getByText(/^Heavily Obscured: a creature trying to see something in it has the Blinded condition\./).waitFor();
+      // The rules switch's help warns for heavy fog.
+      const warned = await what.getByText(/^Heavily Obscured/).evaluate((el) => (globalThis as unknown as { getComputedStyle(e: unknown): { color: string } }).getComputedStyle(el).color);
+      const muted = await what.getByText("Players see it at once. Each device can show it still or turn it off in This device.").evaluate((el) => (globalThis as unknown as { getComputedStyle(e: unknown): { color: string } }).getComputedStyle(el).color);
+      assert.notEqual(warned, muted, "heavy fog's rules in the warning color");
       await shots.take(dm, "wx-ui-2-heavy-fog");
 
       await kind.selectOption({ label: "Sand" });
@@ -827,8 +837,10 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
   });
 
   test("dp-1a. the scene settings groups fold as the panel kit's groups, their summaries under the name where a phone's row is too narrow, and the scene's settings read in order", async () => {
-    const SUMMARIES = /^(Explore|Reveal by hand|Everything|Custom) · (Bright|Dim|Dark)( · Per player)?$|^(No map image|Map image) · (Squares|Hex rows|Hex columns)(, [\d.]+ px)?$|^Walls (do not )?block moves$|^\d+ × \d+ (squares|hexes)( · Isometric)?$/;
-    const GROUPS = ["What players see", "Map image and grid", "Walls and movement", "Size and view"];
+    const SUMMARIES =
+      /^((Bright|Dim|Dark) · )?(Clear|.+)$|^(Explore|Reveal by hand|Everything|Custom)( · Per player)?$|^(No map image|Map image) · (Squares|Hex rows|Hex columns)(, [\d.]+ px)?$|^Walls (do not )?block moves$|^\d+ × \d+ (squares|hexes)( · Isometric)?$/;
+    // This run's server offers no sound files, so Scene sound is not drawn (docs/design/design-v1-scenes-reorg.md 5).
+    const GROUPS: string[] = SCENE_GROUP_NAMES.filter((g) => g !== "Scene sound");
     const state = await signInAsDm();
     const lines: string[] = [];
     for (const at of [
@@ -857,7 +869,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
         const name = panel.getByRole("textbox", { name: "Scene name" }).last();
         assert.equal(await name.evaluate((el) => (el as unknown as { closest(s: string): { querySelector(s: string): { textContent: string | null } | null } | null }).closest("section")?.querySelector("h3")?.textContent), "This scene", `${at.name}: Scene name under This scene`);
 
-        // A phone opens What players see alone, then the DM folds it too.
+        // A phone opens Light and weather alone, the group used in play, then the DM folds it too.
         for (const [i, group] of GROUPS.entries()) assert.equal(await fold(group).getAttribute("aria-expanded"), i === 0 ? "true" : "false", `${at.name}: ${group} on a phone`);
         await fold(GROUPS[0]!).click();
         const heads = await panel.evaluate((root) => {
@@ -869,10 +881,12 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
             range.selectNodeContents(el);
             return Array.from(range.getClientRects()).filter((r) => r.width > 0);
           };
-          return Array.from((root as unknown as E).querySelectorAll("[data-panel-group]")).map((group) => {
+          // The settings' groups, after New scene's, which says nothing folded.
+          return Array.from((root as unknown as E).querySelectorAll("[data-panel-group]")).slice(1).map((group) => {
             const button = group.querySelector("[data-group-fold]")!;
             const name = doc.getElementById(button.getAttribute("aria-labelledby") ?? "")!;
-            const summary = doc.getElementById(button.getAttribute("aria-describedby") ?? "");
+            // The summary describes the fold first, then a tag such as No walls.
+            const summary = doc.getElementById((button.getAttribute("aria-describedby") ?? "").split(" ")[0] ?? "");
             const words = textRects(name);
             const chevron = button.querySelector("svg")!.getBoundingClientRect();
             const s = summary?.getBoundingClientRect() ?? null;
@@ -901,18 +915,17 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
           if (h.nameLines !== 1) lines.push(`${at.name} ${h.name}: its name takes ${h.nameLines} lines`);
           off("the chevron against the name's first line", h.chevronMiddle, h.nameMiddle);
           const s = h.summaryBox!;
-          if (at.wrapped) {
-            if (s.top < h.nameBottom - 1) lines.push(`${at.name} ${h.name}: its summary is not on the line under the name`);
+          // A short name such as Map and grid leaves room for the summary's floor beside it even at 320 px and 130%, where it may be cut past its floor (D-261029-36). A longer one sends it under.
+          const under = s.top >= h.nameBottom - 1;
+          if (under) {
+            if (!at.wrapped) lines.push(`${at.name} ${h.name}: its summary wrapped under the name`);
             // Its box is as wide as its words, set at the row's end, so on its own line it stands in the name's column, set in past the chevron and the icon.
             if (s.left < h.nameLeft - 1) lines.push(`${at.name} ${h.name}: its summary starts ${(h.nameLeft - s.left).toFixed(1)} px left of the name`);
-          } else {
-            if (s.top >= h.nameBottom - 1) lines.push(`${at.name} ${h.name}: its summary wrapped under the name`);
-            off("the summary's middle against the name's", s.middle, h.nameMiddle);
-          }
+          } else off("the summary's middle against the name's", s.middle, h.nameMiddle);
           off("the summary's end against the row's", s.right, h.buttonRight);
           // A summary cut with an ellipsis ends at its box, which the line above holds to the row's end.
           if (!h.summaryCut) off("the summary's words' end against the row's", h.summaryWordsRight ?? 0, h.buttonRight);
-          else if (at.wrapped) lines.push(`${at.name} ${h.name}: its summary is cut on a line of its own`);
+          else if (under) lines.push(`${at.name} ${h.name}: its summary is cut on a line of its own`);
         }
         await panel.locator("[data-panel-group]").first().scrollIntoViewIfNeeded();
         lines.push(...alignmentLines(await measureAlignment(panel.locator("[data-panel-group] > div:first-child")), `dp-1a ${at.name} folded groups`));
@@ -920,19 +933,20 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
         if (!at.wrapped) continue;
 
         // A fold the DM taps lasts through a reload on this device.
-        await fold("Map image and grid").click();
+        await fold("Map and grid").click();
         await reopenRoom(page);
         await page.getByRole("status", { name: "Connected" }).first().waitFor();
         panel = await scenesPanel(page);
-        await waitFor("Map image and grid open after the reload", async () => ((await fold("Map image and grid").getAttribute("aria-expanded")) === "true" ? true : null));
-        assert.equal(await fold("What players see").getAttribute("aria-expanded"), "false", "What players see stays folded");
+        await waitFor("Map and grid open after the reload", async () => ((await fold("Map and grid").getAttribute("aria-expanded")) === "true" ? true : null));
+        assert.equal(await fold("Light and weather").getAttribute("aria-expanded"), "false", "Light and weather stays folded");
+        assert.equal(await fold("Fog and vision").getAttribute("aria-expanded"), "false", "Fog and vision is setup now");
         assert.equal(await fold("Walls and movement").getAttribute("aria-expanded"), "false");
 
         // The map image's question reads first, then its ways, Cancel and Remove under them.
         const players = dmSocket.state!.meta.playerSceneId!;
         await view(players, page);
         panel = await scenesPanel(page);
-        const map = section(panel, "Map image and grid");
+        const map = section(panel, "Map and grid");
         await map.getByRole("button", { name: /^(Add a|Replace) map image$/ }).click();
         const note = map.getByText(/^The players are on this scene\./);
         await note.waitFor();
@@ -947,13 +961,13 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
         await shots.take(page, `dp-1a-${at.name}-map-image-question`);
         await cancel.click();
 
-        // Fog and party vision folds as a section, chevron first, saying both switches while folded, and starts closed on another scene.
-        if ((await fold("What players see").getAttribute("aria-expanded")) === "false") await fold("What players see").click();
-        const what = section(panel, "What players see");
-        const fog = what.getByRole("heading", { name: "Fog and party vision", exact: true }).getByRole("button");
+        // Switches folds as a section, chevron first, saying both switches while folded, and starts closed on another scene.
+        if ((await fold("Fog and vision").getAttribute("aria-expanded")) === "false") await fold("Fog and vision").click();
+        const what = section(panel, "Fog and vision");
+        const fog = what.getByRole("heading", { name: "Switches", exact: true }).getByRole("button");
         assert.equal(await fog.getAttribute("aria-expanded"), "false");
         assert.equal(await fog.evaluate((el) => (el as unknown as { firstElementChild: { tagName: string } | null }).firstElementChild?.tagName.toLowerCase()), "svg", "the chevron first");
-        assert.equal(await what.getByRole("heading", { name: "Fog and party vision", exact: true }).evaluate((el) => (el as unknown as { tagName: string }).tagName), "H4", "a level under the group's heading");
+        assert.equal(await what.getByRole("heading", { name: "Switches", exact: true }).evaluate((el) => (el as unknown as { tagName: string }).tagName), "H4", "a level under the group's heading");
         await what.getByText(/^Fog (on|off) · Party vision (on|off)$/).waitFor();
         await fog.click();
         await what.getByRole("switch", { name: /^Fog/ }).waitFor();
@@ -963,11 +977,70 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
         const other = [run.matId, run.caveId, run.arenaId, run.cryptId].find((id) => id !== players && sceneOf(id) && !(sceneOf(id)!.fogEnabled === false && sceneOf(id)!.vision?.on === true))!;
         await view(other, page);
         panel = await scenesPanel(page);
-        if ((await fold("What players see").getAttribute("aria-expanded")) === "false") await fold("What players see").click();
-        assert.equal(await section(panel, "What players see").getByRole("heading", { name: "Fog and party vision", exact: true }).getByRole("button").getAttribute("aria-expanded"), "false", "closed on another scene");
+        if ((await fold("Fog and vision").getAttribute("aria-expanded")) === "false") await fold("Fog and vision").click();
+        assert.equal(await section(panel, "Fog and vision").getByRole("heading", { name: "Switches", exact: true }).getByRole("button").getAttribute("aria-expanded"), "false", "closed on another scene");
       } finally {
         await context.close();
       }
+    }
+    assert.deepEqual(lines, []);
+    assert.deepEqual(consoles.flatMap((c) => c.errors), []);
+  });
+
+  test("scr-1. Fog and vision folded on a phone keeps the no-walls warning in sight: a No walls tag on its row, whole and in view at 320 x 568 and 130%, on Explore and on Per player, describing its fold", async () => {
+    const before = sceneOf(run.caveId)!;
+    const state = await signInAsDm();
+    const context = await browser.newContext({ viewport: { width: 320, height: 568 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, storageState: state });
+    const lines: string[] = [];
+    try {
+      // Cave is a map image with no walls. On Explore the warning holds.
+      await ops.send({ t: "scene.update", sceneId: run.caveId, patch: { fogEnabled: true, vision: { on: true, light: "bright" } } });
+      await waitFor("Cave on Explore", () => (sceneOf(run.caveId)?.vision?.on === true ? true : null));
+      const page = await context.newPage();
+      const watch = new ConsoleWatch("scr-1");
+      watch.attach(page);
+      consoles.push(watch);
+      await page.goto(`${server.origin}/`);
+      await page.evaluate(() => {
+        const storage = (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void; removeItem(k: string): void } }).localStorage;
+        storage.setItem("rvtt.uiScale", "1.3");
+        storage.removeItem("rvtt.sceneSettingsFolds");
+      });
+      await page.goto(`${server.origin}/r/${run.roomId}`);
+      await page.getByRole("status", { name: "Connected" }).first().waitFor();
+      await view(run.caveId, page);
+      const panel = await scenesPanel(page);
+      const fold = sceneGroupFold(panel, "Fog and vision");
+      const tag = sceneGroup(panel, "Fog and vision").getByText("No walls", { exact: true });
+      for (const perPlayer of [false, true]) {
+        if (perPlayer) {
+          await ops.send({ t: "scene.update", sceneId: run.caveId, patch: { vision: { on: true, light: "bright", perPlayer: true } } });
+          await waitFor("Cave per player", () => (sceneOf(run.caveId)?.vision?.perPlayer === true ? true : null));
+          await sceneGroup(panel, "Fog and vision").getByText("Explore · Per player", { exact: true }).waitFor();
+        }
+        assert.equal(await fold.getAttribute("aria-expanded"), "false", "Fog and vision starts folded on a phone");
+        await tag.waitFor();
+        await fold.evaluate((el) => el.scrollIntoView({ block: "center" }));
+        // Whole and in view: inside the viewport, and as wide as its words, never cut.
+        const box = (await tag.boundingBox())!;
+        const viewport = page.viewportSize()!;
+        assert.ok(box.x >= 0 && box.y >= 0 && box.x + box.width <= viewport.width && box.y + box.height <= viewport.height, `the tag in view at ${JSON.stringify(box)}`);
+        assert.equal(await tag.evaluate((el) => (el as unknown as { scrollWidth: number; clientWidth: number }).scrollWidth <= (el as unknown as { clientWidth: number }).clientWidth), true, "the tag's words whole");
+        const ids = ((await fold.getAttribute("aria-describedby")) ?? "").split(" ");
+        const words = await Promise.all(ids.map((id) => page.locator(`[id="${id}"]`).textContent()));
+        assert.deepEqual(words, [perPlayer ? "Explore · Per player" : "Explore", "No walls"], "the fold is described by its summary, then the tag");
+        lines.push(...alignmentLines(await measureAlignment(sceneGroup(panel, "Fog and vision")), `scr-1 folded with No walls${perPlayer ? ", per player" : ""}`));
+        await shots.take(page, `scr-1-no-walls-folded${perPlayer ? "-per-player" : ""}`);
+      }
+      // Open, the warning itself shows and the tag goes.
+      await fold.click();
+      await sceneGroup(panel, "Fog and vision").getByText(WALLLESS).waitFor();
+      assert.equal(await tag.count(), 0);
+      assert.equal(await fold.getAttribute("aria-describedby"), null);
+      await fold.click();
+    } finally {
+      await context.close();
+      await ops.send({ t: "scene.update", sceneId: run.caveId, patch: { fogEnabled: before.fogEnabled, vision: { on: before.vision?.on === true, light: before.vision?.light ?? "bright", perPlayer: before.vision?.perPlayer === true } } });
     }
     assert.deepEqual(lines, []);
     assert.deepEqual(consoles.flatMap((c) => c.errors), []);
@@ -1012,17 +1085,19 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
               if (found.length > 0) await shots.take(page, `ss-a-${screen}-${name}`);
               lines.push(...found);
             };
-            // The players' scene, Arena, with explored ground: What players see with the fold open and a question asked.
+            // The players' scene, Arena, with explored ground: Fog and vision with the Switches fold open and a question asked.
             await view(run.arenaId, page);
             const panel = await scenesPanel(page);
-            const what = section(panel, "What players see");
+            await openSceneGroup(panel, "Fog and vision");
+            const what = section(panel, "Fog and vision");
             await playersSee(what).waitFor();
-            await what.getByRole("button", { name: "Fog and party vision", exact: true }).click();
+            await what.getByRole("button", { name: "Switches", exact: true }).click();
             await playersSee(what).getByRole("radio", { name: "Everything", exact: true }).click();
             await what.getByRole("group", { name: "Change what players see?" }).waitFor();
             await measure("what-players-see", what);
             await page.keyboard.press("Escape");
             // The new scene form's Players see on a map image, with Like.
+            await openSceneGroup(panel, "New scene");
             const form = section(panel, "New scene");
             await form.getByRole("radio", { name: "Map image", exact: true }).click();
             await playersSee(form).getByRole("radio", { name: "Explore", exact: true }).check();
@@ -1038,15 +1113,15 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
             await measure("new-scene-builder-hex", form);
             await form.getByRole("button", { name: "Cancel", exact: true }).click();
             // The copy sheet.
-            await what.getByRole("button", { name: "Use these settings on other scenes…" }).click();
-            const sheet = page.getByRole("dialog", { name: "Use Arena's settings on…" });
+            await what.getByRole("button", { name: "Copy to other scenes…" }).click();
+            const sheet = page.getByRole("dialog", { name: "Copy Arena's settings to…" });
             await sheet.waitFor();
             await sheet.getByRole("checkbox", { name: "Crypt", exact: true }).check();
             await measure("copy-sheet", sheet);
             await page.keyboard.press("Escape");
             await sheet.waitFor({ state: "detached" });
             // The Universal VTT dialog's Players see.
-            await (await scenesPanel(page)).getByLabel("From a Universal VTT file").setInputFiles(uvtt);
+            await (await scenesPanel(page)).getByLabel("From a Universal VTT file", { exact: true }).setInputFiles(uvtt);
             const dialog = page.getByRole("dialog", { name: "Import a Universal VTT map" });
             await playersSee(dialog).waitFor({ timeout: 30_000 });
             await measure("uvtt-players-see", playersSee(dialog).locator("xpath=../.."));
@@ -1209,7 +1284,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
     await view(id);
     await waitFor("the room in the draft", () => (dmSocket.state?.fogDrafts[id]?.ops.length === 1 ? true : null));
     const panel = await scenesPanel(dm);
-    const fold = panel.getByRole("heading", { name: "Map image and grid", exact: true }).getByRole("button", { name: "Map image and grid", exact: true });
+    const fold = panel.getByRole("heading", { name: "Map and grid", exact: true }).getByRole("button", { name: "Map and grid", exact: true });
     if ((await fold.getAttribute("aria-expanded")) === "false") await fold.click();
     // Squares and hex columns are both off, each reason said once under the group.
     const why = [

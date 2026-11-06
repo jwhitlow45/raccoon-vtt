@@ -619,7 +619,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
 
     // The Scenes panel's slider moves under a sideways drag. The grid's sliders and the scene's size sit in groups a phone starts folded.
     sheet = await openPanel(dm, "Scenes");
-    await openSceneGroup(sheet, "Map image and grid");
+    await openSceneGroup(sheet, "Map and grid");
     await openSceneGroup(sheet, "Size and view");
     await steadyRect(sheet);
     const slider = sheet.locator('input[type="range"]').first();
@@ -1990,7 +1990,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
   test("fl14-b. a vertical scroll that drifts sideways, a start in the screen's edge zone and a mouse drag never go back, and All panels still does", async () => {
     await setUp(dm, { width: 375, height: 667, scale: 1 });
     const sheet = await openPanel(dm, "Scenes");
-    await openSceneGroup(sheet, "Map image and grid");
+    await openSceneGroup(sheet, "Map and grid");
     await openSceneGroup(sheet, "Size and view");
     await steadyRect(sheet);
     const body = sheet.locator("[data-pane-body]").first();

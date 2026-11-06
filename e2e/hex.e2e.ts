@@ -348,7 +348,7 @@ async function openScenes(page: Page): Promise<Locator> {
 }
 
 function exportSection(panel: Locator, page: Page): Locator {
-  return panel.locator("section").filter({ has: page.getByRole("heading", { name: "Export as image", exact: true }) }).last();
+  return panel.locator("section").filter({ has: page.getByRole("heading", { name: "Export", exact: true }) }).last();
 }
 
 /** Opens Room settings: the Menu's side tab on a wide screen, else the Panels sheet's Menu. */
@@ -989,7 +989,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await waitFor("the moor in the DM's state", () => dmSocket.state?.scenes[run.moor] ?? null);
     const panel = await openScenes(dm);
     await viewScene(dm, panel, run.moor);
-    const map = await openSceneGroup(panel, "Map image and grid");
+    const map = await openSceneGroup(panel, "Map and grid");
     const shape = map.getByRole("radiogroup", { name: "Grid shape", exact: true });
     const why = "This scene has painted ground on its squares, which can't stand on hexes. Remove them to change the grid.";
     await map.getByText(why, { exact: true }).waitFor();
@@ -1004,7 +1004,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await shots.take(dm, "hx4-grid-shape-refused");
 
     await viewScene(dm, panel, run.camp);
-    await openSceneGroup(panel, "Map image and grid");
+    await openSceneGroup(panel, "Map and grid");
     await shape.getByRole("radio", { name: "Hex columns" }).check();
     await waitFor("the camp on hex columns", () => dmSocket.state?.scenes[run.camp]?.gridShape === "hexColumns" || null);
     await openSceneGroup(panel, "Size and view");
@@ -1021,7 +1021,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await ops.send({ t: "scene.setMap", sceneId: run.camp, map: { assetId: art.id, widthPx: art.width, heightPx: art.height, cellPx: 50, originPx: { x: 0, y: 0 } } });
     await waitFor("the camp's map", () => dmSocket.state?.scenes[run.camp]?.map?.assetId === art.id || null);
     const panel = await openScenes(dm);
-    const map = await openSceneGroup(panel, "Map image and grid");
+    const map = await openSceneGroup(panel, "Map and grid");
     const find = map.getByRole("button", { name: "Find the grid", exact: true });
     assert.equal(await find.isDisabled(), false, "Find the grid looks for hexes too (HX-9c)");
     await map.getByText(HEX_LIMITS.counting, { exact: true }).waitFor();
@@ -1058,7 +1058,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
       await bar.getByText("51 px per hex", { exact: true }).filter({ visible: true }).first().waitFor();
       for (const [label, shape, cell] of [["Hex columns", "hexColumns", "hex"], ["Squares", undefined, "square"], ["Hex rows", "hexRows", "hex"]] as const) {
         const panel = await openScenes(dm);
-        await openSceneGroup(panel, "Map image and grid");
+        await openSceneGroup(panel, "Map and grid");
         await panel.getByRole("radiogroup", { name: "Grid shape", exact: true }).getByRole("radio", { name: label, exact: true }).check();
         await waitFor(`FU39-B's switch to ${label}`, () => dmSocket.state?.scenes[run.camp]?.gridShape === shape || null);
         assert.equal(dmSocket.state!.scenes[run.camp]!.map!.cellPx, 50, "switching the shape does not apply the pending size");
@@ -1081,7 +1081,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
 
   test("HX4-4. no square on a hex scene's screens, the DM's settings or Pat's board, but the Squares choices", async () => {
     const panel = await openScenes(dm);
-    await openSceneGroup(panel, "Map image and grid");
+    await openSceneGroup(panel, "Map and grid");
     await openSceneGroup(panel, "Size and view");
     assert.deepEqual(await squareWords(dm), [], "the DM's screen");
     await pat.bringToFront();
@@ -1112,13 +1112,15 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
 
           const panel = await openScenes(page);
           await viewScene(page, panel, run.camp);
-          await openSceneGroup(panel, "Map image and grid");
+          await openSceneGroup(panel, "Map and grid");
           await openSceneGroup(panel, "Size and view");
           await panel.getByRole("radiogroup", { name: "Grid shape", exact: true }).scrollIntoViewIfNeeded();
           // The groups this lane changed. The scene list above them is not this lane's.
-          off.push(...alignmentLines(await measureAlignment(sceneGroup(panel, "Map image and grid")), `a hex scene's Map image and grid at ${at}`));
+          off.push(...alignmentLines(await measureAlignment(sceneGroup(panel, "Map and grid")), `a hex scene's Map and grid at ${at}`));
           off.push(...alignmentLines(await measureAlignment(sceneGroup(panel, "Size and view")), `a hex scene's Size and view group at ${at}`));
           await shots.take(page, `hx4-scene-settings-${size.name}-${scale * 100}`);
+          // A phone starts New scene folded once the room has a scene (docs/design/design-v1-panel-groups.md 6.2).
+          await openSceneGroup(panel, "New scene");
           await panel.getByRole("radio", { name: "Builder", exact: true }).click();
           const grid = panel.getByRole("radiogroup", { name: "Grid", exact: true });
           await grid.getByRole("radio", { name: "Hex rows" }).check();
@@ -1176,13 +1178,14 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
 
           const panel = await openScenes(page);
           await viewScene(page, panel, run.camp);
-          await openSceneGroup(panel, "Map image and grid");
+          await openSceneGroup(panel, "Map and grid");
           const shape = panel.getByRole("radiogroup", { name: "Grid shape", exact: true });
           await shape.scrollIntoViewIfNeeded();
           wrong.push(...(await threeLines(shape, stack, `Grid shape at ${at}`, size.name === "390x844" && scale === 1.3 ? "Hex columns" : null)), ...(await sideways(shape, `a scene's settings at ${at}`)));
           off.push(...alignmentLines(await measureAlignment(shape.locator("xpath=..")), `Grid shape at ${at}`));
           await shots.take(page, `dp-2a-grid-shape-${size.name}-${scale * 100}`);
 
+          await openSceneGroup(panel, "New scene");
           const kinds = panel.getByRole("radiogroup", { name: "Kind of scene", exact: true });
           await kinds.scrollIntoViewIfNeeded();
           wrong.push(...(await threeLines(kinds, stack, `Kind of scene at ${at}`)));
@@ -2118,7 +2121,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     assert.equal(dmSocket.state?.scenes[run.camp]?.gridShape, "hexRows");
     const panel = await openScenes(dm);
     await viewScene(dm, panel, run.camp);
-    const group = await openSceneGroup(panel, "Map image and grid");
+    const group = await openSceneGroup(panel, "Map and grid");
     await group.getByRole("button", { name: "Find the grid", exact: true }).click();
     const map = await waitFor("the camp on the drawn hex columns", () => hx9cOnHexes(run.camp, "columns", 56), 15_000);
     const bar = dm.getByRole("toolbar", { name: "Line up grid options" });
@@ -2140,7 +2143,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await hx9cPut(run.moor, await hx9cMap("Hex moor", "rows", 64, 33));
     const panel = await openScenes(dm);
     await viewScene(dm, panel, run.moor);
-    const group = await openSceneGroup(panel, "Map image and grid");
+    const group = await openSceneGroup(panel, "Map and grid");
     await group.getByRole("button", { name: "Find the grid", exact: true }).click();
     const bar = dm.getByRole("toolbar", { name: "Line up grid options" });
     const line = bar.locator("[data-options-line]").filter({ hasText: "but this scene has painted ground on its squares, which can't stand on hexes. Remove them to change the grid." }).first();
@@ -2167,7 +2170,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
           await openAt(page, size, scale);
           const panel = await openScenes(page);
           await viewScene(page, panel, run.moor);
-          const group = await openSceneGroup(panel, "Map image and grid");
+          const group = await openSceneGroup(panel, "Map and grid");
           await group.getByRole("button", { name: "Find the grid", exact: true }).click();
           const bar = page.getByRole("toolbar", { name: "Line up grid options" });
           await bar.locator("[data-options-line]").filter({ hasText: "Remove them to change the grid." }).first().waitFor({ timeout: 15_000 });
@@ -2303,7 +2306,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     const firstMap = scene.map!;
     await waitFor("the hex scene holds 8 rows of 12 hexes", () => { const b = dmSocket.state?.scenes[scene.id]?.bounds; return b?.w === 13 && b.h === 8 ? b : null; });
     // Other art named for half the scale replaces it: the new art and its bounds are one step.
-    await (await openSceneGroup(panel, "Map image and grid")).getByLabel("Replace map image", { exact: true }).setInputFiles(second);
+    await (await openSceneGroup(panel, "Map and grid")).getByLabel("Replace map image", { exact: true }).setInputFiles(second);
     await waitFor("the replacement's scale", () => { const m = dmSocket.state?.scenes[scene.id]?.map; return m && m.assetId !== firstMap.assetId && Math.abs(m.cellPx - 35.02) < 0.05 ? m : null; }, 30_000);
     await waitFor("the bounds refit to 24 x 16 hexes", () => { const b = dmSocket.state?.scenes[scene.id]?.bounds; return b?.w === 25 && b.h === 15 ? b : null; });
     await undoSetup(dm);
@@ -2339,7 +2342,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
       await route.continue();
     });
     try {
-      await (await openSceneGroup(panel, "Map image and grid")).getByLabel("Replace map image", { exact: true }).setInputFiles(second);
+      await (await openSceneGroup(panel, "Map and grid")).getByLabel("Replace map image", { exact: true }).setInputFiles(second);
       await other.send({ t: "scene.setGrid", sceneId: scene.id, cellPx: 90, originPx: { x: 0, y: 0 } });
       await waitFor("the grid set during the upload", () => dmSocket.state?.scenes[scene.id]?.map?.cellPx === 90 || null);
     } finally {

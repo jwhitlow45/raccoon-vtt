@@ -149,6 +149,8 @@ describe("raccoon-vtt table basics", { timeout: 120_000 }, () => {
     const file = path.join(work, "crypt.png");
     await makeCrypt(file);
     await openPanel(dm, "Scenes");
+    // A phone starts New scene folded once the room has a scene (docs/design/design-v1-panel-groups.md 6.2).
+    await openSceneGroup(dm.locator('dialog[data-rvtt-sheet][aria-label="Scenes"]'), "New scene");
     await dm.getByRole("radio", { name: "Map image", exact: true }).tap();
     await dm.locator('input[type="file"][accept="image/*"]').first().setInputFiles(file);
     await dm.getByRole("button", { name: "Upload and create" }).tap();
@@ -177,8 +179,8 @@ describe("raccoon-vtt table basics", { timeout: 120_000 }, () => {
     assert.deepEqual({ cellPx: map.cellPx, originPx: map.originPx }, { cellPx: CRYPT.cellPx, originPx: CRYPT.origin });
 
     await openPanel(dm, "Scenes");
-    // A phone starts Map image and grid folded (docs/design/design-v1-map-discovery.md 8.4).
-    await openSceneGroup(dm.locator('dialog[data-rvtt-sheet][aria-label="Scenes"]'), "Map image and grid");
+    // A phone starts Map and grid folded (docs/design/design-v1-map-discovery.md 8.4).
+    await openSceneGroup(dm.locator('dialog[data-rvtt-sheet][aria-label="Scenes"]'), "Map and grid");
     const across = dm.getByLabel("Squares across the image");
     const down = dm.getByLabel("Squares down the image");
     assert.deepEqual([await across.inputValue(), await down.inputValue()], [String(CRYPT.cols), String(CRYPT.rows)]);

@@ -517,7 +517,7 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     await waitFor("one undo back to the guess", () => gridIs(keep, GUESS) || null);
 
     // A map without a grid keeps the guess, and Line up grid asks for a box as before. The Scenes
-    // panel's Find the grid, in its Map image and grid settings, answers in Line up grid too.
+    // panel's Find the grid, in its Map and grid settings, answers in Line up grid too.
     const field = await upload(plain);
     await dm.getByText("Drag a box over 3 by 3 squares of the art").first().waitFor();
     assert.ok(gridIs(field, GUESS), "a map without a grid keeps the first guess");
@@ -615,7 +615,7 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     const gridOptions = dm.getByRole("toolbar", { name: "Line up grid options" });
     assert.equal(await gridOptions.count(), 0, "Line up grid closed before the replacement");
     await openSideTab(dm, "Scenes");
-    const group = await openSceneGroup(dm.getByRole("tabpanel", { name: "Scenes" }), "Map image and grid");
+    const group = await openSceneGroup(dm.getByRole("tabpanel", { name: "Scenes" }), "Map and grid");
     await group.getByRole("button", { name: "Replace map image", exact: true }).click();
     await group.getByLabel("Choose the image", { exact: true }).setInputFiles(file);
     await dm.locator("[data-toast]").filter({ hasText: "This image is not the same shape as the map, so the grid would not line up." }).first().waitFor({ timeout: 30_000 });
@@ -1000,13 +1000,13 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     await dm.getByRole("button", { name: "Select", exact: true }).click();
     await gridOptions.waitFor({ state: "detached" });
 
-    /** The scene's Map image and grid settings, unfolded where they were left folded. */
+    /** The scene's Map and grid settings, unfolded where they were left folded. */
     const mapGroup = async () => {
-      const fold = dm.getByRole("tabpanel", { name: "Scenes" }).getByRole("heading", { name: "Map image and grid", exact: true }).getByRole("button", { name: "Map image and grid", exact: true });
+      const fold = dm.getByRole("tabpanel", { name: "Scenes" }).getByRole("heading", { name: "Map and grid", exact: true }).getByRole("button", { name: "Map and grid", exact: true });
       if ((await fold.getAttribute("aria-expanded")) === "false") await fold.click();
       return fold.locator("xpath=ancestor::*[@data-panel-group][1]");
     };
-    /** Replaces the scene's image from its Map image and grid settings, and waits for the row to be done with it. */
+    /** Replaces the scene's image from its Map and grid settings, and waits for the row to be done with it. */
     const replace = async (file: string) => {
       await openSideTab(dm, "Scenes");
       const group = await mapGroup();
@@ -1103,7 +1103,7 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
       const looking = options.getByText("Looking for a grid…");
       /** The new art drawn, its download held as the search's was, before a picture is taken. */
       const drawn = () => phone.getByText("Changing the map…").waitFor({ state: "detached", timeout: 30_000 });
-      /** Replaces the scene's image from the Scenes sheet's Map image and grid settings, as the DM's phone does. */
+      /** Replaces the scene's image from the Scenes sheet's Map and grid settings, as the DM's phone does. */
       const replace = async (file: string) => {
         await phone.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
         await phone.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Scenes/ }).click();
@@ -1115,7 +1115,7 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
           await sheet.getByRole("button", { name: new RegExp(`^${made.name}(?![A-Za-z])`) }).first().click();
           await waitFor("the field's settings on the phone", async () => ((await name.inputValue()) === made.name ? true : null));
         }
-        const fold = sheet.getByRole("heading", { name: "Map image and grid", exact: true }).getByRole("button", { name: "Map image and grid", exact: true });
+        const fold = sheet.getByRole("heading", { name: "Map and grid", exact: true }).getByRole("button", { name: "Map and grid", exact: true });
         if ((await fold.getAttribute("aria-expanded")) === "false") await fold.click();
         await sheet.getByLabel("Replace map image", { exact: true }).setInputFiles(file);
         await looking.waitFor({ timeout: 30_000 });
@@ -1193,7 +1193,7 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     await waitFor("the DM on the named map", () => dmSocket.you?.sceneId === scene.id || null);
     assert.equal(scene.map?.cellPx, 35);
     await waitFor("the first image's fit", () => { const b = sceneOf(dmSocket.state, scene.id)?.bounds; return b?.w === 40 && b.h === 28 ? b : null; });
-    const group = await openSceneGroup(panel, "Map image and grid");
+    const group = await openSceneGroup(panel, "Map and grid");
     await group.getByLabel("Replace map image", { exact: true }).setInputFiles(second);
     await waitFor("the replacement's scale", () => sceneOf(dmSocket.state, scene.id)?.map?.cellPx === 70 || null, 30_000);
     const refit = await waitFor("the bounds refit to the new scale", () => { const b = sceneOf(dmSocket.state, scene.id)?.bounds; return b?.w === 20 && b.h === 14 ? b : null; });
@@ -1203,7 +1203,7 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     await across.fill("12");
     await across.blur();
     await waitFor("the hand-set width", () => sceneOf(dmSocket.state, scene.id)?.bounds.w === 12 || null);
-    await (await openSceneGroup(panel, "Map image and grid")).getByLabel("Replace map image", { exact: true }).setInputFiles(third);
+    await (await openSceneGroup(panel, "Map and grid")).getByLabel("Replace map image", { exact: true }).setInputFiles(third);
     await waitFor("the third image's scale", () => sceneOf(dmSocket.state, scene.id)?.map?.cellPx === 140 || null, 30_000);
     await dm.waitForTimeout(500);
     assert.equal(sceneOf(dmSocket.state, scene.id)?.bounds.w, 12, "bounds the DM set by hand stay");
@@ -1233,7 +1233,7 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
       await route.continue();
     });
     try {
-      await (await openSceneGroup(panel, "Map image and grid")).getByLabel("Replace map image", { exact: true }).setInputFiles(second);
+      await (await openSceneGroup(panel, "Map and grid")).getByLabel("Replace map image", { exact: true }).setInputFiles(second);
       const across = (await openSceneGroup(panel, "Size and view")).getByLabel("Squares across");
       await across.fill("12");
       await across.blur();
@@ -1294,7 +1294,7 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     await panel.getByRole("button", { name: "Create", exact: true }).click();
     const scene = await waitFor("fu43h-2 hex mat", () => Object.values(dmSocket.state?.scenes ?? {}).find((s) => s && !known.has(s.id)));
     await waitFor("the DM on the hex mat", () => dmSocket.you?.sceneId === scene.id || null);
-    const group = await openSceneGroup(panel, "Map image and grid");
+    const group = await openSceneGroup(panel, "Map and grid");
     await group.getByLabel("Add a map image", { exact: true }).setInputFiles(file);
     const map = await waitFor("the hex mat's named image", () => sceneOf(dmSocket.state, scene.id)?.map, 30_000);
     assert.ok(Math.abs(map.cellPx - 70) < 0.1, `the name's 70 px, got ${map.cellPx}`);
@@ -1313,7 +1313,7 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     await panel.getByRole("button", { name: "Create", exact: true }).click();
     const scene = await waitFor("FU38-B hex mat", () => Object.values(dmSocket.state?.scenes ?? {}).find((s) => s && !known.has(s.id)));
     await waitFor("the DM on the hex mat", () => dmSocket.you?.sceneId === scene.id || null);
-    const group = await openSceneGroup(panel, "Map image and grid");
+    const group = await openSceneGroup(panel, "Map and grid");
     await group.getByLabel("Add a map image", { exact: true }).setInputFiles(file);
     await dm.getByRole("toolbar", { name: "Line up grid options" }).waitFor({ timeout: 30_000 });
     const map = await waitFor("the hex mat's image", () => sceneOf(dmSocket.state, scene.id)?.map);
