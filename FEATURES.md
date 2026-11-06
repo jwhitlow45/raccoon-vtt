@@ -682,6 +682,7 @@ On any device with a keyboard. They do nothing while you type in a field or a di
 | H | Hide or show the selected tokens | DM |
 | L | Lock or unlock the selected tokens | DM |
 | Delete, Backspace | Delete the selected tokens. Ctrl+Z brings them back | DM |
+| 1 to 9 | Start an HP change of the selected tokens with that number. Enter applies it | DM, and anyone on tokens whose HP they may change |
 | N | Next turn, or End turn on your own turn | DM, and players on their turn |
 | +, - | Zoom in, zoom out | everyone |
 | 0 | Fit the map | everyone |

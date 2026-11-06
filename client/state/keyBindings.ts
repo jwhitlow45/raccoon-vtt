@@ -170,6 +170,39 @@ export function holder(keys: KeyMap, id: string, key: string): string | null {
   return null;
 }
 
+/** The digits a typed HP change may start with, in order. 0 is never one: it fits the map. */
+export const HP_DIGITS: readonly string[] = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
+
+/**
+ * The digits taken from the HP range on this device, each with the
+ * shortcut that has it, in the digits' order (designs/qol audit Q3,
+ * D-261106-179). A press finds a bound key before the HP row, and a key
+ * someone chose stays theirs, so a digit moved to Ruler is Ruler's.
+ */
+export function digitHolders(keys: KeyMap): { digit: string; id: string }[] {
+  return HP_DIGITS.flatMap((digit) => {
+    const id = holder(keys, "", digit);
+    return id === null ? [] : [{ digit, id }];
+  });
+}
+
+/** The digits that start an HP change on this device: 1 to 9, less each one a shortcut has here. */
+export function hpDigits(keys: KeyMap): string[] {
+  const taken = new Set(digitHolders(keys).map((h) => h.digit));
+  return HP_DIGITS.filter((digit) => !taken.has(digit));
+}
+
+/** A range of digits as the sheet writes it: "1 to 9", "2 to 9", "1 to 4, 6 to 9", "1, 2, 4 to 9", or "7" alone. */
+export function digitRange(digits: readonly string[]): string {
+  const runs: string[][] = [];
+  for (const digit of digits) {
+    const run = runs.at(-1);
+    if (run && Number(run.at(-1)) + 1 === Number(digit)) run.push(digit);
+    else runs.push([digit]);
+  }
+  return runs.map((run) => (run.length <= 2 ? run.join(", ") : `${run[0]} to ${run.at(-1)}`)).join(", ");
+}
+
 /** The changes that give these keys: the rows that differ from their defaults. */
 function changesFrom(defaults: KeyMap, keys: KeyMap): KeyChanges {
   const changes: Record<string, string> = {};

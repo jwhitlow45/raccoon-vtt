@@ -5,8 +5,11 @@ import {
   bindingOf,
   captureKey,
   changeKey,
+  digitHolders,
+  digitRange,
   formatKeyChanges,
   holder,
+  hpDigits,
   keysInEffect,
   NOT_A_KEY,
   parseKeyChanges,
@@ -255,5 +258,36 @@ describe("changing, swapping and resetting a key", () => {
         }
       }
     }
+  });
+});
+
+describe("the digits that start an HP change (designs/qol audit Q3, D-261106-179)", () => {
+  test("1 to 9 by default, and 0, + and - never, which fit and zoom the map", () => {
+    assert.deepEqual(hpDigits(DEFAULT_KEYS), ["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+    assert.deepEqual(digitHolders(DEFAULT_KEYS), []);
+    assert.equal(digitRange(hpDigits(DEFAULT_KEYS)), "1 to 9");
+  });
+
+  test("a digit this device gave a shortcut leaves the range, and a later one takes its digit out at once", () => {
+    const ruler = keysInEffect(DEFAULT_KEYS, { "tool:ruler": "1" });
+    assert.deepEqual(hpDigits(ruler), ["2", "3", "4", "5", "6", "7", "8", "9"]);
+    assert.deepEqual(digitHolders(ruler), [{ digit: "1", id: "tool:ruler" }]);
+    assert.equal(digitRange(hpDigits(ruler)), "2 to 9");
+    const both = keysInEffect(DEFAULT_KEYS, { "tool:ruler": "1", "tool:fog": "3" });
+    assert.deepEqual(hpDigits(both), ["2", "4", "5", "6", "7", "8", "9"]);
+    assert.deepEqual(digitHolders(both), [{ digit: "1", id: "tool:ruler" }, { digit: "3", id: "tool:fog" }]);
+    assert.equal(digitRange(hpDigits(both)), "2, 4 to 9");
+    // Fit moved off 0 frees nothing for HP: 0 is never in the range.
+    assert.deepEqual(hpDigits(keysInEffect(DEFAULT_KEYS, { fit: "k" })), hpDigits(DEFAULT_KEYS));
+    // A row left with no key holds no digit.
+    assert.deepEqual(hpDigits({ ...DEFAULT_KEYS, fit: UNBOUND }), hpDigits(DEFAULT_KEYS));
+  });
+
+  test("the range writes runs, a lone digit alone, and every digit taken as nothing", () => {
+    assert.equal(digitRange(["1", "2", "3", "4", "6", "7", "8", "9"]), "1 to 4, 6 to 9");
+    assert.equal(digitRange(["7"]), "7");
+    assert.equal(digitRange(["2", "5", "6"]), "2, 5, 6", "two in a row are written apart");
+    assert.equal(digitRange(["1", "2", "4", "5", "6", "7", "8", "9"]), "1, 2, 4 to 9");
+    assert.equal(digitRange([]), "");
   });
 });

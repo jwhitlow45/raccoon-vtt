@@ -20,7 +20,7 @@ import { hasKeyboard, noteKeyboard, subscribeKeyboard } from "../lib/device.ts";
 import { fullscreenSupported, toggleFullscreen } from "../lib/fullscreen.ts";
 import { displayName } from "../lib/scene.ts";
 import { turned } from "../lib/view.ts";
-import { keyLabel, keysInEffect, pressKeys, sameKey, UNBOUND, type KeyChanges, type KeyMap } from "./keyBindings.ts";
+import { digitHolders, digitRange, hpDigits, keyLabel, keysInEffect, pressKeys, sameKey, UNBOUND, type KeyChanges, type KeyMap } from "./keyBindings.ts";
 import { scopeSlot, type RoomScope } from "./scope.ts";
 import { sayTool, tuckEvent } from "./toolbar.ts";
 import type { RoomUi } from "./store.ts";
@@ -170,6 +170,12 @@ export type Shortcut = {
   when?(env: ShortcutEnv): boolean;
   /** Arrow or Page keys, which a focused choice group or slider keeps for itself (ownsNavigationKeys). */
   navigation?: true;
+  /**
+   * The press keeps its default, so the character it types lands where
+   * `run` moved focus: the HP field, for a digit (designs/qol audit Q3).
+   * The only row that does. Every other press is the shortcut's alone.
+   */
+  typesThrough?: true;
   run(env: ShortcutEnv, e: KeyPress): void;
 } & (
   | {
@@ -178,8 +184,16 @@ export type Shortcut = {
       /** What the sheet calls it where another row asks for its key: "Already Fog". */
       name: string;
       match?: never;
+      sheetKeys?: never;
     }
-  | { key?: never; name?: never; match(e: KeyPress): boolean }
+  | {
+      key?: never;
+      name?: never;
+      /** Whether the press is this row's, with the keys in effect on this device. */
+      match(e: KeyPress, keys: KeyMap): boolean;
+      /** How the sheet writes its keys where the keys in effect change them, with a line on why. Left out, `keys`. */
+      sheetKeys?(keys: KeyMap): { input: string; note?: string };
+    }
 );
 
 /**
@@ -207,6 +221,16 @@ export const sidePanelKeysSlot = scopeSlot(() => ({ toggle: null as (() => void)
  * so O does nothing with one panel or on a phone.
  */
 export const splitKeysSlot = scopeSlot(() => ({ other: null as (() => void) | null }));
+
+/**
+ * The token action bar's part (canvas/TokenActionBar.tsx): its HP field,
+ * which 1 to 9 start a change in (designs/qol audit Q3). The bar sets it
+ * while it shows, and clears it as it goes, so the keys do nothing
+ * without it.
+ */
+export const barKeysSlot = scopeSlot(() => ({
+  hp: null as { ready(): boolean; start(digit: string): void } | null,
+}));
 
 /** The outliner's search takes focus when it next shows, after `/` (features/outliner). */
 export const outlinerSearchSlot = scopeSlot(() => ({ focusNext: false, listeners: new Set<() => void>() }));
@@ -492,6 +516,21 @@ export const SHORTCUTS: readonly Shortcut[] = [
     },
   },
   {
+    id: "hpDigit",
+    keys: "1 to 9",
+    does: "Start an HP change of the selected tokens with that number. Enter applies it",
+    roles: ["dm", "player"],
+    match: (e, keys) => hpDigits(keys).includes(e.key),
+    sheetKeys: (keys) => {
+      const taken = digitHolders(keys).map(({ digit, id }) => `${digit} is ${SHORTCUTS.find((s) => s.id === id)?.name ?? id}`);
+      return { input: digitRange(hpDigits(keys)) || NO_KEY, ...(taken.length > 0 ? { note: `${listWords(taken)} on this device.` } : {}) };
+    },
+    typesThrough: true,
+    // The field shows only to a viewer who may change the HP of every token the bar holds.
+    when: (env) => withSelection(env) && env.scope.get(barKeysSlot).hp?.ready() === true,
+    run: (env, e) => env.scope.get(barKeysSlot).hp?.start(e.key),
+  },
+  {
     id: "turn",
     ...single("n"),
     name: "Next turn",
@@ -588,6 +627,15 @@ export const SHORTCUTS: readonly Shortcut[] = [
 /** The shortcuts a role has, for the sheet. */
 export function shortcutsFor(role: "dm" | "player"): Shortcut[] {
   return SHORTCUTS.filter((s) => s.roles.includes(role));
+}
+
+/**
+ * The keys of the rows a role has. A key this device gave a DM's row, such
+ * as Fog on 3, does nothing for a player, so it takes nothing from a
+ * player's rows, such as the HP digits.
+ */
+function roleKeys(role: "dm" | "player", keys: KeyMap): KeyMap {
+  return Object.fromEntries(Object.entries(keys).filter(([id]) => SHORTCUTS.some((s) => s.id === id && s.roles.includes(role))));
 }
 
 /** Each rebindable shortcut's default key, by id. */
@@ -1321,8 +1369,17 @@ const SURFACE_INTRO: Partial<Record<Surface, string>> = {
 /** What the sheet writes for a row whose default key another row's change took (keyBindings.ts UNBOUND). */
 export const NO_KEY = "No key";
 
+/** "a", "a and b", "a, b and c". */
+function listWords(parts: readonly string[]): string {
+  return parts.length <= 1 ? (parts[0] ?? "") : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
+}
+
 function keyRow(s: Shortcut, keys: KeyMap): SheetRow {
-  if (s.key === undefined) return { id: s.id, input: s.keys, does: s.does, keys: true };
+  if (s.key === undefined) {
+    if (!s.sheetKeys) return { id: s.id, input: s.keys, does: s.does, keys: true };
+    const shown = s.sheetKeys(keys);
+    return { id: s.id, input: shown.input, does: s.does, ...(shown.note ? { when: shown.note } : {}), keys: shown.input !== NO_KEY };
+  }
   const key = keys[s.id] ?? s.key;
   const rebind = { name: s.name, changed: key !== s.key };
   return key === UNBOUND ? { id: s.id, input: NO_KEY, does: s.does, keys: false, rebind } : { id: s.id, input: keyLabel(key), does: s.does, keys: true, rebind };
@@ -1345,7 +1402,7 @@ export function sheetSections(role: "dm" | "player", device: SheetDevice, keys: 
     {
       title: "Keys",
       intro: KEYS_INTRO,
-      rows: [...shortcutsFor(role).map((s) => keyRow(s, keys)), ...room.filter((b) => b.device === "keys").map(sheetRow)],
+      rows: [...shortcutsFor(role).map((s) => keyRow(s, roleKeys(role, keys))), ...room.filter((b) => b.device === "keys").map(sheetRow)],
     },
     { title: MOUSE_SECTION, rows: device.mouse ? room.filter((b) => b.device === "mouse").map(sheetRow) : [] },
     { title: POINTER_SECTION, intro: POINTER_INTRO, rows: room.filter((b) => b.device === "pointer").map(sheetRow) },
@@ -1379,7 +1436,7 @@ export function shortcutFor(e: KeyPress, env: ShortcutEnv, gates: ShortcutGates,
   const modifier = e.ctrlKey || e.metaKey;
   const mine = SHORTCUTS.filter((s) => s.roles.includes(env.role) && (s.modifier === true) === modifier);
   const bound = (k: string) => mine.find((s) => s.key !== undefined && sameKey(keys[s.id] ?? s.key, k));
-  const shortcut = (modifier ? undefined : pressKeys(e).map(bound).find((s) => s !== undefined)) ?? mine.find((s) => s.match?.(e) === true);
+  const shortcut = (modifier ? undefined : pressKeys(e).map(bound).find((s) => s !== undefined)) ?? mine.find((s) => s.match?.(e, roleKeys(env.role, keys)) === true);
   if (!shortcut) return null;
   if (shortcut.navigation && ownsNavigationKeys(e.target)) return null;
   return !shortcut.when || shortcut.when(env) ? shortcut : null;
@@ -1403,7 +1460,7 @@ export function useShortcuts(input: { role: "dm" | "player"; tools: readonly Sho
       const dialogOpen = document.querySelector('[aria-modal="true"]') !== null;
       const shortcut = shortcutFor(e, env, { dialogOpen, preview });
       if (!shortcut) return;
-      e.preventDefault();
+      if (!shortcut.typesThrough) e.preventDefault();
       shortcut.run(env, e);
     };
     window.addEventListener("keydown", onKey);

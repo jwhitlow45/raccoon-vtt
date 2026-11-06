@@ -78,7 +78,7 @@ import { dockSlot, foldsUnderSheet, sideSheetRoom, usePublishBar } from "../page
 import { dispatchGesture } from "../state/actions.ts";
 import { useRoomScope, useScoped } from "../state/scope.ts";
 import { placeFreelySlot } from "../state/store.ts";
-import { useKeyHints, withKey } from "../state/shortcuts.ts";
+import { barKeysSlot, useKeyHints, withKey } from "../state/shortcuts.ts";
 import { sheetOpen } from "../state/types.ts";
 import {
   anchoredSpot,
@@ -1326,6 +1326,7 @@ function BarFrame(props: {
   const [viewAsRaised, setViewAsRaised] = useState(false);
   useSheetReturnFocus(barRef, RETURN_RANK.tokenBar);
   usePublishBar({ label: props.label, ...props.dock, frame: barRef });
+  useHpDigits(barRef, folded);
   /*
    * The content's whole height, whether anything is cut off below, and the
    * scroll padding that keeps a control scrolled into view clear of the
@@ -1851,6 +1852,93 @@ function BarFrame(props: {
       </div>
     </div>
   );
+}
+
+/**
+ * The bar's HP field for the keys 1 to 9 (designs/qol audit Q3): the
+ * entry's field (`data-rest-field`, the one input every HP entry marks),
+ * while the frame shows unfolded and the field is drawn.
+ */
+function useHpDigits(barRef: RefObject<HTMLDivElement | null>, folded: boolean): void {
+  const keys = useScoped(barKeysSlot);
+  const foldedNow = useRef(folded);
+  foldedNow.current = folded;
+  useLayoutEffect(() => {
+    const field = () => {
+      const el = foldedNow.current ? null : barRef.current?.querySelector<HTMLInputElement>("input[data-rest-field]");
+      return el && el.getClientRects().length > 0 ? el : null;
+    };
+    const hp = {
+      ready: () => field() !== null,
+      start: (digit: string) => {
+        const el = field();
+        if (el) startHpEntry(el, digit);
+      },
+    };
+    keys.hp = hp;
+    return () => {
+      if (keys.hp === hp) keys.hp = null;
+    };
+  }, [keys, barRef]);
+}
+
+/**
+ * A digit pressed outside any field starts the bar's HP change (designs/qol
+ * audit Q3, plan 9 QD-OPUS-26). The field takes focus, its caret at the
+ * end, and the press keeps its default, so the browser types the digit
+ * there. A browser that types nothing into a field focused during the key's
+ * own event gets the digit here once the event is done, by an input event
+ * as typing sends one, so the entry's own state takes it and hpDraft is
+ * never touched. Enter then applies, and once the field has emptied, which
+ * Apply taking the change does, focus goes back to where it was, so N, H
+ * and the next digit work again. A refused change keeps its text and focus.
+ * An entry started any other way keeps the field's Enter as it is.
+ */
+function startHpEntry(field: HTMLInputElement, digit: string): void {
+  const active = document.activeElement;
+  const before = active instanceof HTMLElement && active !== document.body && active !== field ? active : null;
+  field.focus();
+  const end = field.value.length;
+  field.setSelectionRange(end, end);
+  /*
+   * The browser's typing comes as an input event. Without one by the time
+   * the key's event is done, or by the next key in the field, whichever
+   * comes first (a test's or a fast typist's Enter can come before a
+   * timer), the digit goes in here. Never after: a field that Apply just
+   * emptied must not get the digit back.
+   */
+  let open = true;
+  const typed = () => {
+    open = false;
+    field.removeEventListener("input", typed);
+  };
+  const settle = () => {
+    if (!open) return;
+    typed();
+    if (document.activeElement !== field) return;
+    field.setRangeText(digit, field.selectionStart ?? field.value.length, field.selectionEnd ?? field.value.length, "end");
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  field.addEventListener("input", typed);
+  setTimeout(settle, 0);
+  const stop = () => {
+    settle();
+    field.removeEventListener("keydown", onKey, true);
+    field.removeEventListener("blur", stop);
+  };
+  const onKey = (e: KeyboardEvent) => {
+    settle();
+    if (e.key !== "Enter" || e.isComposing) return;
+    // After the form's own submit and the render it brings.
+    setTimeout(() => {
+      if (document.activeElement !== field || field.value !== "") return;
+      stop();
+      if (before?.isConnected) before.focus({ preventScroll: true });
+      else field.blur();
+    }, 0);
+  };
+  field.addEventListener("keydown", onKey, true);
+  field.addEventListener("blur", stop);
 }
 
 /**

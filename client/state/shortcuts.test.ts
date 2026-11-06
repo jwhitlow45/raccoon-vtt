@@ -48,6 +48,8 @@ import {
   type KeyPress,
   type SheetDevice,
   type ShortcutEnv,
+  barKeysSlot,
+  NO_KEY,
 } from "./shortcuts.ts";
 import type { RoomUi } from "./store.ts";
 import type { RoomActions, RoomView } from "./types.ts";
@@ -310,6 +312,97 @@ describe("the shortcut table", () => {
     assert.equal(run(player.env, press({ key: "h", code: "KeyH" })), null);
   });
 
+  describe("1 to 9 start the bar's HP change (designs/qol audit Q3)", () => {
+    /** The bar's HP field as the bar hands it to the keys, which records each digit it is asked to start with. */
+    const withField = (scope: RoomScope, ready = true) => {
+      const started: string[] = [];
+      scope.get(barKeysSlot).hp = { ready: () => ready, start: (digit) => void started.push(digit) };
+      return started;
+    };
+
+    test("a digit with a token selected and the bar's field showing starts the change with it, and keeps the press's default", () => {
+      const { env: e, scope, calls } = env({ selected: ["t1"] });
+      const started = withField(scope);
+      for (const digit of ["1", "5", "9"]) {
+        const found = shortcutFor(press({ key: digit, code: `Digit${digit}` }), e, open);
+        assert.equal(found?.id, "hpDigit", digit);
+        assert.equal(found?.typesThrough, true, "the browser types the digit into the field the row focuses");
+        found?.run(e, press({ key: digit, code: `Digit${digit}` }));
+      }
+      assert.deepEqual(started, ["1", "5", "9"]);
+      assert.deepEqual(calls.ops, [], "a digit sends nothing: Enter in the field applies");
+      // The number pad's digits are the same keys.
+      assert.equal(run(e, press({ key: "7", code: "Numpad7" })), "hpDigit");
+      // A layout whose digits take Shift, as AZERTY's do.
+      assert.equal(run(e, press({ key: "3", code: "Digit3", shiftKey: true })), "hpDigit");
+      assert.equal(run(e, press({ key: "\"", code: "Digit3" })), null, "the key's other character is no digit");
+      // Every other row's press is its own alone.
+      assert.deepEqual(SHORTCUTS.filter((s) => s.typesThrough).map((s) => s.id), ["hpDigit"]);
+    });
+
+    test("nothing without a selection, without the bar's field, in a field, a dialog or the preview, or on a repeat", () => {
+      const none = env();
+      withField(none.scope);
+      assert.equal(run(none.env, press({ key: "4", code: "Digit4" })), null, "nothing selected");
+      const hidden = env({ selected: ["t1"] });
+      const started = withField(hidden.scope, false);
+      assert.equal(run(hidden.env, press({ key: "4", code: "Digit4" })), null, "no field showing, as for a viewer with no HP access or a folded bar");
+      assert.equal(run(env({ selected: ["t1"] }).env, press({ key: "4", code: "Digit4" })), null, "no bar at all");
+      assert.deepEqual(started, []);
+      const { env: e, scope } = env({ selected: ["t1"] });
+      withField(scope);
+      assert.equal(run(e, press({ key: "4", code: "Digit4", target: { tagName: "INPUT", type: "text" } })), null, "a field keeps its digits");
+      assert.equal(run(e, press({ key: "4", code: "Digit4" }), { dialogOpen: true, preview: false }), null);
+      assert.equal(run(e, press({ key: "4", code: "Digit4" }), { dialogOpen: false, preview: true }), null);
+      assert.equal(run(e, press({ key: "4", code: "Digit4", repeat: true })), null);
+      assert.equal(run(e, press({ key: "4", code: "Digit4", ctrlKey: true })), null, "Ctrl with a digit stays the browser's");
+      assert.equal(run(env({ role: "player", selected: ["t2"] }).env, press({ key: "4", code: "Digit4" })), null, "a player's bar without its field");
+    });
+
+    test("0, + and - stay Fit the map and zoom", () => {
+      const { env: e, scope } = env({ selected: ["t1"] });
+      withField(scope);
+      scope.get(stageKeysSlot).zoom = () => {};
+      assert.equal(run(e, press({ key: "0", code: "Digit0" })), "fit");
+      assert.equal(run(e, press({ key: "+", code: "Equal", shiftKey: true })), "zoomIn");
+      assert.equal(run(e, press({ key: "-", code: "Minus" })), "zoomOut");
+    });
+
+    test("a digit this device moved a shortcut to is that shortcut's, and leaves the range, the sheet's row saying so (D-261106-179)", () => {
+      const { env: e, scope } = env({ selected: ["t1"] });
+      const started = withField(scope);
+      const keys = shortcutKeys({ "tool:ruler": "1" });
+      assert.equal(shortcutFor(press({ key: "1", code: "Digit1" }), e, open, keys)?.id, "tool:ruler");
+      assert.equal(shortcutFor(press({ key: "2", code: "Digit2" }), e, open, keys)?.id, "hpDigit");
+      const hp = (k: KeyMap) => sheetSections("dm", { mouse: true, android: false }, k)[0]!.rows.find((r) => r.id === "hpDigit");
+      assert.deepEqual(hp(DEFAULT_KEYS), { id: "hpDigit", input: "1 to 9", does: "Start an HP change of the selected tokens with that number. Enter applies it", keys: true });
+      assert.equal(hp(keys)?.input, "2 to 9");
+      assert.equal(hp(keys)?.when, "1 is Ruler on this device.");
+      // A later binding to another digit takes it out at once.
+      const two = shortcutKeys({ "tool:ruler": "1", "tool:fog": "3" });
+      assert.equal(shortcutFor(press({ key: "3", code: "Digit3" }), e, open, two)?.id, "tool:fog");
+      assert.equal(hp(two)?.input, "2, 4 to 9");
+      assert.equal(hp(two)?.when, "1 is Ruler and 3 is Fog on this device.");
+      assert.deepEqual(started, []);
+      // Every digit taken leaves the row with no key.
+      const all = { ...DEFAULT_KEYS, ...Object.fromEntries(["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((d, i) => [Object.keys(DEFAULT_KEYS)[i]!, d])) };
+      assert.equal(hp(all)?.input, NO_KEY);
+      assert.equal(hp(all)?.keys, false);
+    });
+
+    test("a digit a DM's row has on this device stays a player's HP digit, since it does nothing for them", () => {
+      const keys = shortcutKeys({ "tool:fog": "3" });
+      const player = env({ role: "player", selected: ["t2"] });
+      const started = withField(player.scope);
+      assert.equal(shortcutFor(press({ key: "3", code: "Digit3" }), player.env, open, keys)?.id, "hpDigit");
+      shortcutFor(press({ key: "3", code: "Digit3" }), player.env, open, keys)?.run(player.env, press({ key: "3", code: "Digit3" }));
+      assert.deepEqual(started, ["3"]);
+      const row = (role: "dm" | "player") => sheetSections(role, { mouse: true, android: false }, keys)[0]!.rows.find((r) => r.id === "hpDigit");
+      assert.deepEqual([row("player")?.input, row("player")?.when], ["1 to 9", undefined]);
+      assert.deepEqual([row("dm")?.input, row("dm")?.when], ["1, 2, 4 to 9", "3 is Fog on this device."]);
+    });
+  });
+
   test("H showing hidden tokens shows their hidden rows in the fight too, as one undo step, and hiding leaves rows alone", () => {
     const rows = [
       { id: "r2", tokenId: "t2", hidden: true },
@@ -519,7 +612,7 @@ describe("the shortcut table", () => {
       assert.ok(!s.modifier, `${s.id} is one key`);
     }
     // The rows that stay: Ctrl or Cmd, the arrow and Page keys, Delete and Backspace.
-    assert.deepEqual(SHORTCUTS.filter((s) => s.key === undefined).map((s) => s.id), ["undo", "redo", "nudge", "elevation", "delete"]);
+    assert.deepEqual(SHORTCUTS.filter((s) => s.key === undefined).map((s) => s.id), ["undo", "redo", "nudge", "elevation", "delete", "hpDigit"]);
     const defaults = Object.entries(DEFAULT_KEYS);
     for (const [id, key] of defaults) {
       const others = defaults.filter(([other, k]) => other !== id && sameKey(k, key)).map(([other]) => other);
@@ -1242,6 +1335,7 @@ describe("a control shows the key of the shortcut it does (D-261028-09)", () => 
     zoomIn: "the map zooms by a pinch or the wheel. The handout viewer's own + and - are its own keys",
     zoomOut: "the map zooms by a pinch or the wheel",
     otherPanel: "the other panel is reached by a tap on it",
+    hpDigit: "the digit is typed into the bar's HP field, which needs no button",
   };
   const ids = [...new Set([...SHORTCUTS, ...VIEW_SHORTCUTS].map((s) => (s.id.startsWith("tool:") ? "tool:*" : s.id)))];
   const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
