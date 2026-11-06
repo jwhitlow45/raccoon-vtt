@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
+import { openGroup } from "./helpers/groups.ts";
 import { ConsoleWatch, OpSocket, openSceneGroup, pagePoint, pickOption, pickTool, reopenRoom, Shots, SocketWatch, startServer, Touches, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
@@ -509,7 +510,8 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     assert.ok(thorn, "Thorn is not in the room");
     const id = randomUUID();
     await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: thorn.id }] } });
-    await openPanel(dm, "DM");
+    // A phone starts Check their view folded (docs/design/design-v1-panel-groups.md 6.2).
+    await openGroup(await openPanel(dm, "DM"), "Check their view");
     await dm.getByRole("button", { name: "View", exact: true }).tap();
     const preview = dm.getByRole("dialog", { name: "Viewing as Pat" });
     await preview.waitFor();
