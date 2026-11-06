@@ -406,7 +406,14 @@ const GUARDIANS = "#8e4ec6";
 const CONE = "#f38400";
 
 /** The board's depth list as the test hook gives it (relief/isoTest.ts BoardLayout). */
-type BoardLayout = { order: ({ kind: "standee"; id: string } | { kind: "band"; area: string; band: number })[]; standing: string[]; waiting: boolean; rings: Record<string, string[]>; steps: { x: number; y: number; d: string; lo: number; hi: number }[] };
+type BoardLayout = {
+  order: ({ kind: "standee"; id: string } | { kind: "band"; area: string; band: number })[];
+  standing: string[];
+  waiting: boolean;
+  rings: Record<string, string[]>;
+  steps: { x: number; y: number; d: string; lo: number; hi: number }[];
+  leaves: { door: string; ax: number; ay: number; bx: number; by: number; base: number }[];
+};
 
 function boardLayout(page: Page): Promise<BoardLayout | null> {
   return page.evaluate(() => (globalThis as unknown as { __rvttIsoHook?: { layout?(): unknown } }).__rvttIsoHook?.layout?.() ?? null) as Promise<BoardLayout | null>;
@@ -2731,6 +2738,112 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     const onStored = await isoPoint(dm, { x: 7.5, y: 11.5 }, 0);
     assert.ok(Math.abs(flatRing.x - onStored.x) <= 2 && Math.abs(flatRing.y - onStored.y) <= 2, `ISOD: its ring ${JSON.stringify(flatRing)} at its stored ground ${JSON.stringify(onStored)}`);
     await ops.send({ t: "token.delete", tokenId: climber });
+  });
+
+  test("ISOD-2. doors stand in frames, and an open door's leaf stands upright on its hinge: wood above the hinge, no flat leaf or arc on the ground under it, a tap on the leaf opens the door's pill over the frame, and its Close closes the door", async () => {
+    if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+    const sceneId = randomUUID();
+    const cells: string[] = [];
+    for (let y = 0; y < 10; y++) for (let x = 0; x < 12; x++) cells.push(`${x},${y}`);
+    await ops.send({ t: "scene.create", scene: { id: sceneId, name: "ISOD doors", bounds: { w: 12, h: 10 }, fogEnabled: false } });
+    await ops.send({ t: "scene.update", sceneId, patch: { defaultView: { x: 5.5, y: 4.5, zoom: 48 } } });
+    await ops.send({ t: "build.paint", sceneId, terrain: "stone", cells });
+    // A wall along y = 4 with a door at x 5 and a window at x 7. Floor lies on both sides, so the open leaf swings south, its hinge at 5.15, 4.
+    const closedDoor = { kind: "door", state: "closed", secret: false, discovered: false } as const;
+    const edges = [2, 3, 4, 5, 6, 7, 8, 9].map((x) => ({ key: `${x},4,n`, feature: x === 5 ? closedDoor : x === 7 ? { kind: "window" as const } : { kind: "wall" as const } }));
+    await ops.send({ t: "build.edge", sceneId, edges });
+    const doorState = () => (Object.values(dmSocket.state?.buildChunks ?? {}).find((c) => c?.sceneId === sceneId)?.edges["5,4,n"] as { state?: string } | undefined)?.state;
+    await dm.bringToFront();
+    await openSideTab(dm, "Scenes");
+    const row = dm.getByRole("tabpanel", { name: "Scenes" }).getByRole("button", { name: /^ISOD doors/ }).first();
+    await row.click();
+    // Its board, not the last scene's while this one still loads.
+    await waitFor("ISOD: the doors scene shown", async () => ((await row.textContent())?.includes("you are here") ? true : null));
+    await isoOn(dm, 0);
+    await layoutWhen(dm, "ISOD: no leaf while the door is closed", (l) => l.leaves.length === 0);
+    await dm.waitForTimeout(600);
+    const shade = (c: number[]) => (c[0]! + c[1]! + c[2]!) / 3;
+    const warmth = (c: number[]) => c[0]! - c[2]!;
+    // Above the hinge, on the leaf once it stands.
+    const onLeaf = await isoPoint(dm, { x: 5.19, y: 4.35 }, 0.3);
+    // Points along Top-down's arc on the ground, each clear on screen of where the leaf and the posts stand, so a change there is the arc's alone.
+    type Pt = { x: number; y: number };
+    // A box's outline on screen, the hull of its eight corners, so a point beside a slanted slab is not counted as under it.
+    const hullOf = async (x0: number, y0: number, x1: number, y1: number, z: number): Promise<Pt[]> => {
+      const pts = await Promise.all([x0, x1].flatMap((x) => [y0, y1].flatMap((y) => [0, z].map((h) => isoPoint(dm, { x, y }, h)))));
+      pts.sort((a, b) => a.x - b.x || a.y - b.y);
+      const cross = (o: Pt, a: Pt, b: Pt) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+      const half = (list: Pt[]) => {
+        const out: Pt[] = [];
+        for (const p of list) {
+          while (out.length >= 2 && cross(out[out.length - 2]!, out[out.length - 1]!, p) <= 0) out.pop();
+          out.push(p);
+        }
+        return out.slice(0, -1);
+      };
+      return [...half(pts), ...half([...pts].reverse())];
+    };
+    const near = (p: Pt, hull: Pt[]) => {
+      let inside = true;
+      for (let i = 0; i < hull.length; i++) {
+        const a = hull[i]!;
+        const b = hull[(i + 1) % hull.length]!;
+        const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+        // Signed distance from the edge, positive inside for a hull wound this way.
+        const d = ((b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)) / len;
+        if (d < -4) inside = false;
+      }
+      return inside;
+    };
+    const standing = [await hullOf(5.15, 4, 5.23, 4.7, 0.5), await hullOf(4.9, 3.9, 5.15, 4.1, 0.5), await hullOf(5.85, 3.9, 6.1, 4.1, 0.5)];
+    const arc: Pt[] = [];
+    for (let deg = 4; deg <= 86; deg += 3) {
+      const p = await isoPoint(dm, { x: 5.15 + 0.7 * Math.cos((deg * Math.PI) / 180), y: 4 + 0.7 * Math.sin((deg * Math.PI) / 180) }, 0);
+      if (!standing.some((h) => near(p, h))) arc.push(p);
+    }
+    assert.ok(arc.length >= 6, `ISOD: ${arc.length} points along the arc clear of the frame and leaf`);
+    const arcPixels = async () => Promise.all(arc.map(async (p) => (await sharp(await dm.screenshot({ clip: { x: p.x - 3, y: p.y - 3, width: 7, height: 7 } })).removeAlpha().raw().toBuffer())));
+    const changed = (a: Buffer[], b: Buffer[]) => {
+      let n = 0;
+      a.forEach((buf, k) => {
+        for (let i = 0; i + 2 < buf.length; i += 3) if (Math.max(...[0, 1, 2].map((c) => Math.abs(buf[i + c]! - b[k]![i + c]!))) > 24) n++;
+      });
+      return n;
+    };
+    const closedLeaf = await pixelAt(dm, onLeaf);
+    const closedArc = await arcPixels();
+    await shots.take(dm, "isod-2-door-closed-turn0");
+
+    await ops.send({ t: "door.set", sceneId, door: { edge: "5,4,n" }, state: "open" });
+    const open = await layoutWhen(dm, "ISOD: the open door's leaf stands", (l) => l.leaves.length === 1);
+    const leaf = open.leaves[0]!;
+    assert.deepEqual([leaf.door, leaf.ax, leaf.ay, leaf.bx, Math.round(leaf.by * 1e6) / 1e6, leaf.base], ["e5,4n", 5.15, 4, 5.15, 4.7, 0]);
+    await dm.waitForTimeout(600);
+    const openLeaf = await pixelAt(dm, onLeaf);
+    assert.ok(warmth(openLeaf) > warmth(closedLeaf) + 15, `ISOD: wood above the hinge ${openLeaf.map(Math.round)}, the floor there before ${closedLeaf.map(Math.round)}`);
+    const arcChanged = changed(await arcPixels(), closedArc);
+    assert.ok(arcChanged <= 2, `ISOD: no flat arc beside the standing leaf: ${arcChanged} pixels along it changed`);
+    await shots.take(dm, "isod-2-door-open-turn0");
+
+    // A tap on the leaf opens the door's pill, hung over the frame's top, the door left as it was.
+    await dm.mouse.click(onLeaf.x, onLeaf.y);
+    const pill = dm.getByRole("group", { name: "Open door" });
+    await pill.waitFor();
+    assert.equal(doorState(), "open", "ISOD: the tap only opened the pill");
+    const box = (await pill.boundingBox())!;
+    const top = await isoPoint(dm, { x: 5.5, y: 4 }, 0.5);
+    const line = await isoPoint(dm, { x: 5.5, y: 4 }, 0);
+    assert.ok(Math.abs(box.x + box.width / 2 - top.x) <= 2, `ISOD: the pill ${JSON.stringify(box)} over the frame at ${JSON.stringify(top)}`);
+    // Its card stands 14 px and its shadow's reach above the anchor, so hung over the line instead its foot would reach the frame's top.
+    assert.ok(box.y + box.height <= top.y - 10 && box.y + box.height >= top.y - 30, `ISOD: the pill's foot ${box.y + box.height} just above the frame's top ${top.y}, not its line ${line.y}`);
+    assert.deepEqual(alignmentLines(await measureAlignment(pill), "ISOD: the open door's pill"), []);
+    await shots.take(dm, "isod-2-door-open-pill");
+    await pill.getByRole("button", { name: "Close" }).click();
+    await waitFor("ISOD: the door closed", () => (doorState() === "closed" ? true : null));
+    await layoutWhen(dm, "ISOD: the leaf gone once the door is closed", (l) => l.leaves.length === 0);
+    await isoOn(dm, 2);
+    await dm.waitForTimeout(400);
+    await shots.take(dm, "isod-2-door-closed-turn2");
   });
 
   test("ISO-12. no page logged an error", () => {

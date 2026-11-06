@@ -7,6 +7,7 @@ import type { Turn } from "../../lib/view.ts";
 import type { KeptStats } from "./kept.ts";
 import type { Item } from "./buckets.ts";
 import type { VolumesNow } from "./volumes.ts";
+import { leafDoorKey } from "./runs.ts";
 
 /**
  * A way for tests and the bench to pick and turn without the View menu:
@@ -79,7 +80,8 @@ export type BoardVolumesNow = { standing: number; waiting: boolean };
  * with the relief's own pieces left out, which areas stand now and
  * whether one waits to, the colors of the rings at each standee's base,
  * and the stairs the layout draws as steps, with their spans in cells of
- * height (docs/design/design-v1-iso-depth.md 12).
+ * height, and the doors whose open leaf stands upright, with its hinge, its
+ * far end and its base (docs/design/design-v1-iso-depth.md 12).
  */
 export type BoardLayout = {
   order: ({ kind: "standee"; id: string } | { kind: "band"; area: string; band: number })[];
@@ -87,6 +89,7 @@ export type BoardLayout = {
   waiting: boolean;
   rings: Record<string, string[]>;
   steps: { x: number; y: number; d: string; lo: number; hi: number }[];
+  leaves: { door: string; ax: number; ay: number; bx: number; by: number; base: number }[];
 };
 
 function flagged(): boolean {
@@ -147,16 +150,18 @@ function layoutOf(r: Reported | null): BoardLayout | null {
   if (!r) return null;
   const order: BoardLayout["order"] = [];
   const steps: BoardLayout["steps"] = [];
+  const leaves: BoardLayout["leaves"] = [];
   for (const item of r.items) {
     if (item.kind === "standee") order.push({ kind: "standee", id: item.id });
     else
       for (const p of item.pieces) {
         if (p.kind === "volume") order.push({ kind: "band", area: p.area, band: p.band });
         else if (p.kind === "steps" && p.span) steps.push({ x: p.x, y: p.y, d: p.span.d, lo: p.span.lo, hi: p.span.hi });
+        else if (p.kind === "wall" && p.framed && p.piece.kind === "leaf") leaves.push({ door: leafDoorKey(p.piece) ?? "", ax: p.piece.ax, ay: p.piece.ay, bx: p.piece.bx, by: p.piece.by, base: p.base });
       }
   }
   steps.sort((a, b) => a.y - b.y || a.x - b.x);
-  return { order, standing: [...(r.volumes?.standing ?? [])].sort(), waiting: r.volumes?.waiting ?? false, rings: Object.fromEntries([...(r.rings ?? [])].map(([id, colors]) => [id, [...colors]])), steps };
+  return { order, standing: [...(r.volumes?.standing ?? [])].sort(), waiting: r.volumes?.waiting ?? false, rings: Object.fromEntries([...(r.rings ?? [])].map(([id, colors]) => [id, [...colors]])), steps, leaves };
 }
 
 /** Installs `__rvttIsoHook` while the test flag is set. */
