@@ -25,7 +25,10 @@ import { useStartGroupSave, type StartInput } from "../features/dice/groupSave/s
 import { usePreview } from "../features/dm/previewContext.ts";
 import { tokenSizeLabel } from "../features/grid/words.ts";
 import { ViewAsButton } from "../features/dm/viewAs.tsx";
-import { useSend } from "../features/encounter/hooks.ts";
+import { useRowFacts, useSend, useSortedEntries } from "../features/encounter/hooks.ts";
+import { useEndTurn } from "../features/encounter/InitiativeStrip.tsx";
+import { turnStatus } from "../features/encounter/logic.ts";
+import { EndTurnPill } from "../features/encounter/parts.tsx";
 import { tokenAccess } from "../features/tokens/access.ts";
 import { AltImagesRow } from "../features/tokens/AltImages.tsx";
 import { DoorButton } from "../features/doors/DoorButton.tsx";
@@ -133,7 +136,7 @@ import {
   type RestState,
   type Spot,
 } from "./barDock.ts";
-import { barButtons, barShort, isCompanion, rowUnits, type BarButtonId } from "./barButtons.ts";
+import { barButtons, barShort, END_TURN_STACKED, isCompanion, rowUnits, type BarButtonId } from "./barButtons.ts";
 import { groupRestButtons, restButtons, restStatus, type EntryStatus, type RestFit, type RestStatus } from "./barButtons.ts";
 import { RestRow, type RestItem } from "./RestRow.tsx";
 import { NOTE_INSET } from "./barDock.ts";
@@ -321,6 +324,8 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
 
   const path = pathNow(encounter, token, you?.role ?? "player");
   const undoIds = barTokenIds(tokens, token);
+  const yourTurn = useYourTurn();
+  const endTurn = useEndTurn();
   // The DM's "All 4 Goblin Warriors" (designs/qol audit Q7): every token of this one's kind on its scene, hidden ones too.
   const kin = useMemo(() => (access.dm && tokens ? sameKind(Object.values(tokens), token) : []), [access.dm, tokens, token]);
   // Its combat uses (docs/design/design-v1-combat-controls.md 6), for the DM on any creature with one and for owners on theirs.
@@ -340,6 +345,8 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
     placeFreely: props.drags && scene !== undefined && !isHex(sceneGrid(scene)),
     snapToGrid: token.nudge !== undefined && (access.dm || (access.owner && !token.locked)),
     allOfKind: kin.length > 1,
+    // On an upright phone only, where the strip's End turn is out of the thumb's reach (designs/qol audit Q6). Kept while it waits, so a press shows busy to its answer.
+    endTurn: rest !== null && (yourTurn || endTurn.waiting),
   };
   const rows = barButtons(buttonInput);
   useConditionsKey(rows.play.includes("conditions") && !frame.folded, drawers.openByKey);
@@ -458,6 +465,13 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
       // A companion's owners who are not the DM dismiss it in Delete's place (docs/design/design-v1-combat-flow.md 3.6.9).
       case "dismiss":
         return <DismissButton key={id} tokenId={token.id} name={displayName(token)} />;
+      // The turn strip's End turn shares its one wait (InitiativeStrip.tsx endTurnWaitSlot), so a press on either shows both busy and sends one Next. In a row it grows to share its line, its pill at the end, so it keeps the right end and never stands alone short of it.
+      case "endTurn":
+        return (
+          <span key={id} style={{ display: "flex", justifyContent: "flex-end", flex: ROW_BUTTON_FLEX }}>
+            <EndTurnPill waiting={endTurn.waiting} onClick={endTurn.end} />
+          </span>
+        );
     }
   };
 
@@ -475,13 +489,15 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
         );
       case "details":
         return <BarButton onClick={props.onDetails}>Details</BarButton>;
+      case END_TURN_STACKED:
+        return <EndTurnPill waiting={endTurn.waiting} stack onClick={endTurn.end} />;
       default:
         return button(id as BarButtonId);
     }
   };
   const restItems: RestItem[] = restIds.map((id) => ({ id, node: restButton(id) }));
-  // What the quick row drew is out of the scrolling strip's rows below it. Before its first fit, every candidate counts as drawn.
-  const inStrip = (id: string) => scrolls && (drawn ?? restIds).includes(id);
+  // What the quick row drew is out of the scrolling strip's rows below it. Before its first fit, every candidate counts as drawn. End turn drawn in either form is drawn.
+  const inStrip = (id: string) => scrolls && (drawn ?? restIds).some((at) => at === id || (id === "endTurn" && at === END_TURN_STACKED));
   const status = useRestStatus({ entry: lead ? entry : QUIET_ENTRY, idle: vitalsWords(split.line), critInRow: drawn === null || drawn.includes("crit"), active: resting });
 
   const savesAndDefenses = short ? (
@@ -863,6 +879,14 @@ function useOpenRollOptions(): () => void {
     if (groupSave.getState().shownIn === "dice") groupSave.setState({ shownIn: null });
     ui.openPanel("dice");
   };
+}
+
+/** Whether the turn is the viewer's own, as the strip's End turn reads it (InitiativeStrip.tsx EndTurnButton): never the DM's. */
+function useYourTurn(): boolean {
+  const entries = useSortedEntries();
+  const activeEntryId = useRoomView((s) => s.view?.encounter?.activeEntryId ?? null);
+  const facts = useRowFacts();
+  return turnStatus({ entries, activeEntryId, mine: facts.mine }) === "yours";
 }
 
 /**

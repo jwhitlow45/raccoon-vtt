@@ -25,7 +25,8 @@ export type BarButtonId =
   | "locked"
   | "duplicate"
   | "delete"
-  | "dismiss";
+  | "dismiss"
+  | "endTurn";
 
 /** Who the viewer is and what applies to this token now. */
 export type BarButtonInput = {
@@ -61,6 +62,8 @@ export type BarButtonInput = {
   snapToGrid?: boolean;
   /** More than one token of this one's kind stands on its scene (state/selection.ts sameKind), for the DM's "All 4 Goblin Warriors". Left out, no. */
   allOfKind?: boolean;
+  /** An upright phone's bar, on the viewer's own turn or while their End turn waits, for a player's own token (designs/qol audit Q6). Left out, no. */
+  endTurn?: boolean;
 };
 
 /**
@@ -102,6 +105,8 @@ export function barButtons(input: BarButtonInput): { passing: BarButtonId[]; pla
   // Last, outside the strip (REST_PLAY) and the passing line, so nothing that shows there moves (docs/design/design-v1-snap-off.md 4).
   if (input.placeFreely) play.push("placeFreely");
   if (input.snapToGrid) play.push("snapToGrid");
+  // At the right end, where the thumb just acted, and after everything else, since it comes and goes with the turn (designs/qol audit Q6).
+  if (!dm && owner && input.endTurn) play.push("endTurn");
   const less: BarButtonId[] = [];
   if (dm) less.push("locked", "duplicate", "delete");
   // The DM keeps Delete and gets no second button.
@@ -118,8 +123,10 @@ export type RowUnit = BarButtonId | { pair: readonly [BarButtonId, BarButtonId] 
 
 export function rowUnits(ids: readonly BarButtonId[]): RowUnit[] {
   if (!ids.includes("placeFreely") || !ids.includes("snapToGrid")) return [...ids];
-  const units: RowUnit[] = ids.filter((id) => id !== "placeFreely" && id !== "snapToGrid");
+  // End turn keeps the row's end after the pair.
+  const units: RowUnit[] = ids.filter((id) => id !== "placeFreely" && id !== "snapToGrid" && id !== "endTurn");
   units.push({ pair: ["placeFreely", "snapToGrid"] });
+  if (ids.includes("endTurn")) units.push("endTurn");
   return units;
 }
 
@@ -211,7 +218,7 @@ const PASSING: readonly string[] = ["undoMove", "countLeg", "door"];
  * never put Conditions out (3.3, D-261024-12). "place" is Roll's place:
  * the first passing action where it fits whole there, and else Roll.
  */
-const REST_FIT: readonly string[] = ["mode", "crit", "conditions", "place", "useRoll", "multiSelect", "uses", "hidden", "details"];
+const REST_FIT: readonly string[] = ["mode", "endTurn", "crit", "conditions", "place", "useRoll", "multiSelect", "uses", "hidden", "details"];
 
 /**
  * Which of the quick row's candidates show, in the order they show
@@ -221,7 +228,10 @@ const REST_FIT: readonly string[] = ["mode", "crit", "conditions", "place", "use
  * and takes what the others leave. Each other candidate shows where it
  * fits whole in the `room` left after those before it in the fitting
  * order, `gap` apart. One that does not fit is skipped, and a narrower
- * one after it may still fit. The lead always shows: it is the strip's
+ * one after it may still fit. End turn, on a player's own turn, fits
+ * right after the lead, since the strip is where their thumb is
+ * (designs/qol audit Q6), and shows at the row's end. The lead always
+ * shows: it is the strip's
  * reason to be, and its field gives up room before it goes. A candidate
  * whose width is 0 draws nothing and is left out.
  */
@@ -236,10 +246,16 @@ export function restFit(widths: Readonly<Record<string, number>>, room: number, 
     shown.push(id);
   };
   const width = (id: string) => widths[id] ?? 0;
-  const unknown = ids.filter((id) => !REST_FIT.includes(id) && !PASSING.includes(id) && id !== "roll");
+  const unknown = ids.filter((id) => !REST_FIT.includes(id) && !PASSING.includes(id) && id !== "roll" && id !== END_TURN_STACKED);
   for (const slot of [...REST_FIT, ...unknown]) {
     if (slot === "mode") {
       if (ids.includes("mode")) take("mode", width("mode") + fieldMin);
+      continue;
+    }
+    if (slot === "endTurn") {
+      // Its words on one line where they fit, else on two, as the phone band's narrow End turn has them, else not at all.
+      const form = ["endTurn", END_TURN_STACKED].find((id) => ids.includes(id) && fits(width(id)));
+      if (form !== undefined) take(form, width(form));
       continue;
     }
     if (slot === "place") {
@@ -253,11 +269,14 @@ export function restFit(widths: Readonly<Record<string, number>>, room: number, 
   return restOrder(shown);
 }
 
+/** End turn's narrow form in the strip, its words on two lines (designs/qol audit Q6), offered beside its one-line form, at most one of them drawn. */
+export const END_TURN_STACKED = "endTurnStacked";
+
 /** Drawn widths are fractions of a pixel, so a sum may land a hair over the room it fills exactly. */
 const FIT_SLACK = 0.01;
 
 /** The play row's buttons the strip offers (3.3). Light, Attach, Get off, Locked, Duplicate and Delete are rarer, one tap away behind Expand (3.4). */
-const REST_PLAY: readonly BarButtonId[] = ["conditions", "roll", "multiSelect", "uses", "hidden"];
+const REST_PLAY: readonly BarButtonId[] = ["conditions", "roll", "multiSelect", "uses", "hidden", "endTurn"];
 
 /**
  * The quick row's candidates on one token's strip, by who the viewer is
@@ -270,6 +289,7 @@ const REST_PLAY: readonly BarButtonId[] = ["conditions", "roll", "multiSelect", 
 export function restButtons(input: BarButtonInput & { lead: boolean }): string[] {
   const rows = barButtons(input);
   const ids: string[] = [...rows.passing, ...rows.play.filter((id) => REST_PLAY.includes(id))];
+  if (rows.play.includes("endTurn")) ids.push(END_TURN_STACKED);
   if (input.lead) ids.push("mode");
   else ids.push("details");
   return restOrder(ids);

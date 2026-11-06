@@ -27,6 +27,17 @@ describe("the bar's rows", () => {
     assert.ok(!restButtons({ ...DM, allOfKind: true, lead: true }).includes("allOfKind"), "the expanded bar's, not the strip's");
   });
 
+  test("End turn at the play row's end on a player's own bar, after Place freely and Snap to grid, and in the strip, never for the DM or on another's token (designs/qol audit Q6)", () => {
+    assert.deepEqual(barButtons({ ...OWNER, endTurn: true, light: true }).play, ["conditions", "multiSelect", "roll", "light", "endTurn"]);
+    const placing = barButtons({ ...OWNER, endTurn: true, placeFreely: true, snapToGrid: true });
+    assert.deepEqual(placing.play, ["conditions", "multiSelect", "roll", "placeFreely", "snapToGrid", "endTurn"]);
+    assert.deepEqual(rowUnits(placing.play), ["conditions", "multiSelect", "roll", { pair: ["placeFreely", "snapToGrid"] }, "endTurn"], "the pair wraps together, End turn after it");
+    assert.ok(!barButtons({ ...DM, endTurn: true }).play.includes("endTurn"), "the DM's Next is on the turn chip and the band");
+    assert.ok(!barButtons({ ...NOTHING, endTurn: true }).play.includes("endTurn"), "another player's token");
+    assert.deepEqual(restButtons({ ...OWNER, endTurn: true, lead: true }).slice(-2), ["endTurn", "endTurnStacked"], "both forms, at the row's end");
+    assert.ok(!restButtons({ ...OWNER, lead: true }).includes("endTurnStacked"));
+  });
+
   test("Uses after Roll for the DM and an owner on a creature with combat uses, held while its block loads (docs/design/design-v1-combat-controls.md 6)", () => {
     assert.deepEqual(barButtons({ ...DM, uses: "yes", light: true }).play, ["conditions", "hidden", "multiSelect", "roll", "uses", "light"]);
     assert.deepEqual(barButtons({ ...OWNER, uses: "loading" }).play, ["conditions", "multiSelect", "roll", "uses"]);
@@ -312,6 +323,18 @@ describe("the resting strip's quick row (docs/design/design-v1-bar-compact.md 3.
     assert.deepEqual(restFit(pick("mode", "conditions", "roll"), 0, GAP, FIELD_MIN), ["mode"]);
     assert.deepEqual(restFit(pick("conditions", "roll", "multiSelect"), 0, GAP, FIELD_MIN), []);
     assert.deepEqual(restFit({}, INNER.p390, GAP, FIELD_MIN), []);
+  });
+
+  test("End turn fits right after the lead, before Crit and Conditions, and shows at the row's end (designs/qol audit Q6)", () => {
+    const widths = { mode: 100, conditions: 95, roll: 50, multiSelect: 100, endTurn: 90 };
+    assert.deepEqual(restFit(widths, 56 + 100 + 4 + 90 + 4 + 95, 4, 56), ["mode", "conditions", "endTurn"]);
+    assert.deepEqual(restFit(widths, 56 + 100 + 4 + 90 + 4 + 60, 4, 56), ["mode", "roll", "endTurn"], "Conditions gives way before End turn does");
+    assert.deepEqual(restFit({ ...widths, crit: 50 }, 56 + 100 + 4 + 90, 4, 56), ["mode", "endTurn"], "and Crit");
+    // The two-line form where the one-line form does not fit, never both.
+    const both = { ...widths, endTurnStacked: 50 };
+    assert.deepEqual(restFit(both, 56 + 100 + 4 + 90, 4, 56), ["mode", "endTurn"]);
+    assert.deepEqual(restFit(both, 56 + 100 + 4 + 89, 4, 56), ["mode", "endTurnStacked"]);
+    assert.deepEqual(restFit(both, 56 + 100 + 4 + 49, 4, 56), ["mode"], "neither fits");
   });
 
   test("an id the strip does not know fits after the known ones, in the order given", () => {
