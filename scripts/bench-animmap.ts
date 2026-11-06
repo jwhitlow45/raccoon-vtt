@@ -345,12 +345,15 @@ async function main(): Promise<void> {
     }
 
     // Turned: the plain file's row says turn 90, as a portrait phone video's upload leaves it, on a portrait still of the drawn size.
-    const db = new pg.Pool({ connectionString: databaseUrl });
-    try {
-      await db.query(`update assets set video = video || '{"turn": 90}'::jsonb where id = $1`, [video.id]);
-    } finally {
-      await db.end();
-    }
+    const rowTurn = async (turned: boolean) => {
+      const db = new pg.Pool({ connectionString: databaseUrl });
+      try {
+        await db.query(turned ? `update assets set video = video || '{"turn": 90}'::jsonb where id = $1` : `update assets set video = video - 'turn' where id = $1`, [video.id]);
+      } finally {
+        await db.end();
+      }
+    };
+    await rowTurn(true);
     const portraitPng = await sharp({ create: { width: video.height, height: video.width, channels: 3, background: { r: 60, g: 70, b: 60 } } }).png().toBuffer();
     const portrait = (await (await context.request.put(`${server.origin}/api/rooms/${roomId}/assets?kind=map`, { headers: { ...headers, "content-type": "image/png" }, data: portraitPng })).json()) as { id: string; width: number; height: number };
     const turnedBounds = { w: Math.floor(portrait.width / square.cellPx), h: Math.floor(portrait.height / square.cellPx) };
@@ -371,6 +374,8 @@ async function main(): Promise<void> {
     add({ row: "draw p95", scene: "turned", value: quantile(turnedTimes, 0.95), unit: "ms" });
     add({ row: "most a second", scene: "turned", value: await throttled(() => mostInASecond(page, 10_000)), unit: "draws" });
     add({ row: "state", scene: "turned", value: (await boardState(page)) === "playing" ? 1 : 0, unit: "share" });
+    // The row is plain again, or the long session's landscape still would fail the turned video's shape.
+    await rowTurn(false);
 
     // The long session: the hex scene playing with heavy rain, slowed throughout.
     await fresh(hex.id, hex.cellPx, true);
