@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import type pg from "pg";
 import { z } from "zod";
 import { MP3_BITRATES } from "#shared/audio/mp3.ts";
-import { LIMITS, SOUND_LIMITS } from "#shared/limits.ts";
+import { LIMITS, SOUND_LIMITS, VIDEO_LIMITS } from "#shared/limits.ts";
 import type { SoundFacts, VideoContainer, VideoFacts } from "#shared/model.ts";
 import { assetCreditSchema, type AssetCredit } from "#shared/protocol.ts";
 import { PLAYER_UPLOAD_KINDS, VARIANTS, isAssetKind, isVariant, type AssetKind, type AssetView, type Variant } from "./kinds.ts";
@@ -176,6 +176,11 @@ export const storedVideoSchema = z.strictObject({
   kbps: z.number().int().min(1),
   audioChannels: z.number().int().min(1).max(255).optional(),
   audioHz: z.number().int().min(1).optional(),
+  // How the file showed its picture before the check made it plain (docs/design/design-v1-video-turns.md 6.1), bounded
+  // as the protocol's mapVideo bounds them. Without them here the upload's answer and the Library would lose the video.
+  turn: z.union([z.literal(90), z.literal(180), z.literal(270)]).optional(),
+  mirror: z.literal(true).optional(),
+  displayWidthPx: z.number().int().min(VIDEO_LIMITS.minSidePx).max(VIDEO_LIMITS.maxSidePx).optional(),
 });
 
 export type StoredVideo = z.infer<typeof storedVideoSchema>;

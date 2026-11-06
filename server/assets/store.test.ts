@@ -49,6 +49,18 @@ describe("a video row's facts", () => {
     assert.deepEqual(toView(row).video, facts);
   });
 
+  test("a turned, mirrored and stretched video's row keeps how to draw it, and gives it back (docs/design/design-v1-video-turns.md 6.1)", () => {
+    const turned = { ...facts, turn: 90 as const, mirror: true as const, displayWidthPx: 853 };
+    const row = { id: "x", kind: "video" as const, width: 640, height: 360, variants: ["full" as const], media: "webm" as const, video: storedVideo(turned) };
+    assert.deepEqual(row.video, { video: "vp09.00.21.08", audio: "opus", fps: 30, durationMs: 2001, kbps: 11, audioChannels: 2, audioHz: 48000, turn: 90, mirror: true, displayWidthPx: 853 });
+    assert.deepEqual(videoFactsOf(row), turned);
+    assert.deepEqual(toView(row).video, turned);
+    // Each field only as the protocol takes it.
+    for (const bad of [{ turn: 45 }, { turn: 0 }, { mirror: false }, { displayWidthPx: 853.5 }, { displayWidthPx: 255 }, { displayWidthPx: 4097 }]) {
+      assert.equal(videoFactsOf({ ...row, video: { ...row.video, ...bad } }), undefined, JSON.stringify(bad));
+    }
+  });
+
   test("an image row, or a video row whose columns do not read, gives none", () => {
     assert.equal(videoFactsOf({ kind: "map", width: 1, height: 1, media: null, video: null }), undefined);
     assert.equal(videoFactsOf({ kind: "video", width: 1, height: 1, media: "webm", video: { video: "vp8", fps: 30, durationMs: 1000, kbps: 1, note: "x" } }), undefined);
