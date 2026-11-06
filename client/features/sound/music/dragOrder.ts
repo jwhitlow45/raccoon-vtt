@@ -84,8 +84,9 @@ export function moveTo(lists: QueueLists, soundId: SoundId, slot: number): Queue
   const toSeam = lists.repeat !== "off" && s === seam;
   if (s === from && !(toSeam && !upNext)) return null;
   if (s === 0) return move(soundId, "first");
-  if (s === rest.length) return move(soundId, "last");
+  // Before the last place: with the second list empty, or its only row moving, the seam is the last slot too, and `last` would put the row before the playing track.
   if (toSeam) return move(soundId, "passEnd");
+  if (s === rest.length) return move(soundId, "last");
   return move(soundId, { before: rest[s]! });
 }
 
@@ -100,7 +101,8 @@ function move(soundId: SoundId, to: QueueMove["to"]): QueueMove {
  * play order, staying in its own list, except that they step past the
  * seam: Down from Up next's last row goes after the second list's first,
  * and Up from the second list's first goes before Up next's last. Home
- * goes to the first place and End to the last. Null for a key it does not
+ * goes to the first place and End to the last, which with the second list
+ * empty is the seam, as for a drop (moveTo). Null for a key it does not
  * take, or a move that goes nowhere.
  */
 export function keyMove(lists: QueueLists, soundId: SoundId, key: string): QueueMove | null {
@@ -120,7 +122,8 @@ export function keyMove(lists: QueueLists, soundId: SoundId, key: string): Queue
     case "Home":
       return i > 0 ? move(soundId, "first") : null;
     case "End":
-      return i < last ? move(soundId, "last") : null;
+      if (i === last) return null;
+      return move(soundId, lists.repeat !== "off" && lists.again.length === 0 ? "passEnd" : "last");
     default:
       return null;
   }

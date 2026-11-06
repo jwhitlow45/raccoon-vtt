@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { MusicRun, SoundLengths } from "#shared/sound.ts";
+import { queueEdited, type MusicRun, type SoundLengths } from "#shared/sound.ts";
 import { comingNext, dragAt, dragKey, dropSlot, keyMove, keyMovedInList, makeRoom, moveTo, movedInList, placeOf, previousTarget, queueLists } from "./dragOrder.ts";
 
 /*
@@ -73,6 +73,31 @@ describe("moves", () => {
     assert.deepEqual(moveTo(lists, "t2", 9), { t: "move", soundId: "t2", to: "passEnd" }, "a second-list row dropped at the seam");
     assert.equal(moveTo(lists, "t12", 8), null, "Up next's last row is at the seam already");
     assert.deepEqual(moveTo(lists, "t1", 9), { t: "move", soundId: "t1", to: "passEnd" }, "the second list's first row stands at the seam in play order, yet moves from the order's start to its end, 3 of 12 becoming 2 of 12");
+  });
+
+  test("at 1 of 12 the second list is empty, so the end of Up next is the seam: a drop or End there keeps the row in Up next", () => {
+    const first = run({ index: 0, now: { soundId: "t1", at: T } });
+    const atOne = queueLists(first, sounds, T + 1_000)!;
+    assert.deepEqual(atOne.again, []);
+    const drop = moveTo(atOne, "t2", 10);
+    assert.deepEqual(drop, { t: "move", soundId: "t2", to: "passEnd" }, "not last, which puts it before the playing track");
+    const after = queueEdited(first, drop!, { sounds, playlist: null }, T + 1_000);
+    assert.deepEqual(after.order, [...ids.slice(0, 1), ...ids.slice(2), "t2"]);
+    assert.equal(after.index, 0, "still 1 of 12");
+    assert.deepEqual(keyMove(atOne, "t2", "End"), drop, "End lands where the drop does");
+    assert.deepEqual(keyMove(atOne, "t11", "ArrowDown"), { t: "move", soundId: "t11", to: "passEnd" }, "as Down does");
+  });
+
+  test("the second list's only row dropped at the seam goes to the order's end, 2 of 12 becoming 1 of 12", () => {
+    const second = run({ index: 1, now: { soundId: "t2", at: T } });
+    const lists = queueLists(second, sounds, T + 1_000)!;
+    assert.deepEqual(lists.again, ["t1"]);
+    // Up next holds t3 to t12, ten rows, so for t1 the seam is slot 10, the last slot too.
+    const drop = moveTo(lists, "t1", 10);
+    assert.deepEqual(drop, { t: "move", soundId: "t1", to: "passEnd" });
+    const after = queueEdited(second, drop!, { sounds, playlist: null }, T + 1_000);
+    assert.deepEqual(after.order, [...ids.slice(1), "t1"]);
+    assert.equal(after.index, 0);
   });
 
   test("Up and Down step one place in play order and past the seam, Home and End go to the named ends", () => {
