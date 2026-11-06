@@ -13,9 +13,9 @@ import { alsoLine, changeLine, checkLines, differentIntro, goneDroppedLine, grou
 
 /**
  * A D&D Beyond read's review (docs/design/design-v1-resync.md 3.3), for the
- * re-sync dialog ("Check what changes") and the editor's D&D Beyond step
- * ("Check what was read"): the read line, Check these, the changes that
- * come in, Also set, then what is kept, what differs or what a fill
+ * re-sync dialog ("Re-sync review") and the editor's D&D Beyond step
+ * ("Import review"): the read line, Warnings, the changes that
+ * come in, Other fields, then what is kept, what differs or what a fill
  * replaces, each with its tick. Lines wrap at 14 px and never sit in a
  * table, so a long list reads on a phone. Past 10 lines a list folds into
  * its groups, each a row with its summary.
@@ -24,7 +24,7 @@ import { alsoLine, changeLine, checkLines, differentIntro, goneDroppedLine, grou
  * removes the row that had it, focus goes to its section's label, and the
  * dialog finds that label by `labelId`.
  *
- * Also set holds the class resources' spent lines, unticked, before the
+ * Other fields holds the class resources' spent lines, unticked, before the
  * name (docs/design/design-v1-ddb-resources.md 6.1). After the editor's Save was
  * refused for them, `only` shows the Class resources group and those lines
  * alone (6.2).
@@ -47,7 +47,7 @@ const LINE = { margin: 0, lineHeight: theme.leading.body, overflowWrap: "anywher
  */
 const SECTION = { display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), minWidth: 0 } as const;
 
-/** A row of a section that holds a line and its checkbox: kept, different and "Replaces your changes" rows alike. */
+/** A row of a section that holds a line and its checkbox: kept, different and "Overwritten changes" rows alike. */
 const TICK_ROW = { display: "grid", gap: theme.space(1), padding: `${theme.space(1)}px 0`, minWidth: 0 } as const;
 
 function groupsOf(items: readonly SyncItem[]): { group: SyncGroup; items: SyncItem[] }[] {
@@ -71,7 +71,7 @@ export function SyncReview(props: {
   onFocusSection?(section: ReviewSection): void;
   /** The class resources alone, after a Save refused for them. */
   only?: "resources";
-  /** With `only`, the markers Use it's splice cuts at 40, which the review names (the rest of Check these is left out). */
+  /** With `only`, the markers Use it's splice cuts at 40, which the review names (the rest of Warnings is left out). */
   dropped?: SyncResult["goneDropped"];
 }) {
   const { plan, result, ticks, name } = props;
@@ -115,7 +115,7 @@ export function SyncReview(props: {
       {checks.length > 0
         ? section(
             "checks",
-            "Check these",
+            "Warnings",
             checks.map((line, i) => (
               <p key={i} style={LINE}>
                 {line}
@@ -143,7 +143,7 @@ export function SyncReview(props: {
       {also.length + spent.length + (nameLine ? 1 : 0) > 0
         ? section(
             "also",
-            "Also set",
+            "Other fields",
             <>
               {also.map((item) => (
                 <AlsoRow key={item.id} item={item} character={props.character} source={plan.input.fill.source} ticked={ticks.has(item.id)} onTick={props.onTick} disabled={props.disabled} />
@@ -159,7 +159,7 @@ export function SyncReview(props: {
       {kept.length > 0
         ? section(
             "kept",
-            `Your changes, kept (${kept.length})`,
+            `Kept changes (${kept.length})`,
             kept.map((item) => <KeptRowView key={item.id} item={item} blocks={blocks} ticked={ticks.has(item.id)} onTick={props.onTick} disabled={props.disabled} />),
             overwriteAll,
           )
@@ -167,7 +167,7 @@ export function SyncReview(props: {
       {different.length > 0
         ? section(
             "different",
-            `Different from D&D Beyond (${different.length})`,
+            `Unmatched values (${different.length})`,
             <>
               <p style={LINE}>{differentIntro(plan, name)}</p>
               <Groups
@@ -188,7 +188,7 @@ export function SyncReview(props: {
       {replaces.length > 0
         ? section(
             "replaces",
-            `Replaces your changes (${replaces.length})`,
+            `Overwritten changes (${replaces.length})`,
             replaces.length > FOLD_PAST ? (
               <Groups
                 items={replaces}

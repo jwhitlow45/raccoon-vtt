@@ -382,7 +382,7 @@ export function PcStatsEditor(props: { characterId: string; onClose(): void }) {
     };
     return (
       <Dialog
-        title="Check what was read"
+        title="Import review"
         onClose={close}
         back={{ label: review.from === "paste" ? "Back to the pasted text" : "Back to the D&D Beyond link", onBack: () => send({ t: "back" }) }}
         status={status}
@@ -609,7 +609,7 @@ function ReviewStep(props: { review: Review; onToggle(key: AlsoKey): void }) {
       <p style={{ margin: 0 }}>{readLine(review.fill)}</p>
       {review.fill.warnings.length > 0 ? (
         <section style={REVIEW_SECTION}>
-          <SectionLabel>Check these</SectionLabel>
+          <SectionLabel>Warnings</SectionLabel>
           {review.fill.warnings.map((w, i) => (
             <p key={i} style={{ margin: 0 }}>
               {w}
@@ -620,7 +620,7 @@ function ReviewStep(props: { review: Review; onToggle(key: AlsoKey): void }) {
       {review.merge ? <p style={{ margin: 0 }}>{fillSummary(review.fill, review.merge)}</p> : null}
       {review.lines.length > 0 ? (
         <section style={REVIEW_SECTION}>
-          <SectionLabel>Also set</SectionLabel>
+          <SectionLabel>Other fields</SectionLabel>
           {review.lines.map((line) => (
             <Checkbox key={line.key} label={line.text} checked={line.on} onChange={() => props.onToggle(line.key)} />
           ))}

@@ -13,7 +13,7 @@ import { rollReading, rollTitle } from "./reading.ts";
 
 /**
  * A re-sync's words (docs/design/design-v1-resync.md 3), as plain functions for
- * node --test: each item's line in the review, the read line, Check these,
+ * node --test: each item's line in the review, the read line, Warnings,
  * the losses warning, the done line and every refusal. The merge's items
  * hold values (shared/rules/pcSync.ts), and these say them in the stat
  * block's words, the new value first, then "now" and the current one.
@@ -268,7 +268,7 @@ function resourceKeptRow(item: ResourceItem, tag: string | undefined): KeptRow {
   }
 }
 
-/** A line under Replaces your changes, the editor's: "Spellcasting ability: Charisma, becomes Wisdom". */
+/** A line under Overwritten changes, the editor's: "Spellcasting ability: Charisma, becomes Wisdom". */
 export function replacesLine(item: SyncItem, blocks: ReadingBlocks): string {
   if (item.type === "field") return `${sayValue(item.key, item.now)}, becomes ${bareValue(item.key, item.theirs)}`;
   if (item.type === "resource") {

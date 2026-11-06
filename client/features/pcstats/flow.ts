@@ -105,7 +105,7 @@ export function editorSyncPlan(
 }
 
 /**
- * The character a review's Also set help reads: the saved one's HP, which
+ * The character a review's Other fields help reads: the saved one's HP, which
  * Save works the new maximum from (fill.ts alsoPatch), under the name Save
  * leaves. The pending character's HP would already hold an earlier fill's
  * maximum, and could read as full when the saved HP is not.
@@ -322,7 +322,7 @@ export function stepFlow(state: FlowState, event: FlowEvent): { state: FlowState
         // A D&D Beyond review: the editor merged it from the draft as it is now, so it never undoes an edit made since it was read.
         const sync = event.sync;
         if (!sync) return { state, effects: NONE };
-        // After a refusal the review was of the class resources alone: the draft, its rolls and Also set stay (6.2 c).
+        // After a refusal the review was of the class resources alone: the draft, its rolls and Other fields stay (6.2 c).
         if (review.only === "resources") return { state: { ...state, step: "block", review: null, record: sync.record, resources: sync.resources }, effects: NONE };
         const draft: PcDraft = { stats: sync.stats, level: sync.level };
         return { state: { ...state, step: "block", review: null, draft, also: { ...state.also, ...sync.also }, record: sync.record, resources: sync.resources }, effects: NONE };

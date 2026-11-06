@@ -273,7 +273,7 @@ function CharacterOwners(props: { character: Character; members: RoomState["memb
   const players = Object.values(props.members ?? {}).filter((m): m is Member => !!m && m.kind === "player");
   const names = players.filter((m) => owners.includes(m.id)).map((m) => m.name);
   return (
-    <Group label="Played by" icon="group" {...props.group} summary={names.length > 0 ? names.join(", ") : "No player yet"}>
+    <Group label="Players" icon="group" {...props.group} summary={names.length > 0 ? names.join(", ") : "No player yet"}>
       {players.length === 0 ? <Help>No players have joined yet.</Help> : null}
       <div>
         {players.map((m) => (

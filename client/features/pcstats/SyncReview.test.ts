@@ -48,7 +48,7 @@ describe("the review's markup", () => {
     const { html } = render(mine, fillOf({ spellAbility: "wis", abilities: { ...empty().abilities, wis: 18 } }));
     assert.deepEqual([...html.matchAll(/<(h[1-6])\b/g)].map((m) => m[1]), ["h3", "h3"]);
     assert.match(html, /<h3 id="label-changes" tabindex="-1"[^>]*>Changes from D&amp;D Beyond \(1\)<\/h3>/);
-    assert.match(html, /<h3 id="label-kept" tabindex="-1"[^>]*>Your changes, kept \(1\)<\/h3>/);
+    assert.match(html, /<h3 id="label-kept" tabindex="-1"[^>]*>Kept changes \(1\)<\/h3>/);
     const group = /<div role="group" aria-labelledby="([^"]+)"/.exec(html);
     assert.ok(group);
     assert.match(html, new RegExp(`<p id="${group[1]}"[^>]*>Spellcasting ability: Charisma</p>`));
@@ -57,7 +57,7 @@ describe("the review's markup", () => {
     assert.match(html, /<p tabindex="-1"[^>]*>Read from D&amp;D Beyond: Bree, level 5\. Last synced on/);
   });
 
-  test("Nothing new shows only when nothing would change, and an empty Changes is left out when Also set has a line (RS-O-31)", () => {
+  test("Nothing new shows only when nothing would change, and an empty Changes is left out when Other fields has a line (RS-O-31)", () => {
     const c0 = bree();
     const fill = fillOf({ spellAbility: "wis" });
     const p0 = planSync({ mode: "resync", stats: undefined, level: 5, character: c0, fill });
@@ -70,7 +70,7 @@ describe("the review's markup", () => {
     assert.doesNotMatch(levelUp.html, /Nothing new/);
     assert.doesNotMatch(levelUp.html, /label-changes/, "no Changes section");
     assert.match(levelUp.html, /id="label-also"/);
-    // With every Also set line unticked, the record still takes the new level and maximum, so it is not nothing new.
+    // With every Other fields line unticked, the record still takes the new level and maximum, so it is not nothing new.
     assert.doesNotMatch(render(synced, { ...fill, level: 6, actor: { ...fill.actor, hpMax: 45 } }, new Set()).html, /Nothing new/);
   });
 
@@ -106,7 +106,7 @@ describe("the review's spacing and chevrons (docs/design/design-v1-look-pass-2.m
     assert.ok(folded.includes(renderToStaticMarkup(createElement(RowChevron, { open: false }))), "the shared chevron, folded");
   });
 
-  test("Replaces your changes rows are spaced as kept and different rows are, and every section stacks its rows by Section's gap", () => {
+  test("Overwritten changes rows are spaced as kept and different rows are, and every section stacks its rows by Section's gap", () => {
     const different = rowStyles(render(typed(), fill()).html);
     const editor = render(typed(), fill(), undefined, "editor");
     assert.match(editor.html, /id="label-replaces"/);
@@ -129,7 +129,7 @@ describe("the review's class resources (docs/design/design-v1-ddb-resources.md 6
     return { ...c0, ...afterSync(c0, syncPatch(c0, syncResult(p0, defaultTicks(p0)))!.patch, "2026-10-20T19:00:00.000Z") } as Character;
   }
 
-  test("a spent line is a checkbox in Also set, before the name, named by its words and described by its help", () => {
+  test("a spent line is a checkbox in Other fields, before the name, named by its words and described by its help", () => {
     const base = synced();
     const spent = { ...base, resources: base.resources!.map((r) => ({ ...r, used: 2 })) };
     const { html } = render(spent, { ...withResources(fillOf({ spellAbility: "wis" }), [rage]), name: "Bree Tallow" });
@@ -163,7 +163,7 @@ describe("the review's class resources (docs/design/design-v1-ddb-resources.md 6
     assert.match(render(typed, fill, keepTicks, "editor", "resources").html, /aria-pressed="true"[^>]*>Keep all of yours/);
   });
 
-  test("after a refused Save, the class resources alone: no other group, Check these or name line", () => {
+  test("after a refused Save, the class resources alone: no other group, Warnings or name line", () => {
     const base = synced();
     const spent = { ...base, resources: base.resources!.map((r) => ({ ...r, used: 2 })) };
     const fill = { ...withResources(fillOf({ spellAbility: "cha" }), [{ ...rage, max: 4 }]), name: "Bree Tallow", warnings: ["A warning."] };
@@ -177,7 +177,7 @@ describe("the review's class resources (docs/design/design-v1-ddb-resources.md 6
     assert.match(only, /Rage 4 of 4 left, now 2 of 4/);
   });
 
-  test("after a refused Save, Check these holds only the line for the markers Use it's splice cuts, the dropped list it is handed (OP-21)", () => {
+  test("after a refused Save, Warnings holds only the line for the markers Use it's splice cuts, the dropped list it is handed (OP-21)", () => {
     const base = synced();
     const fill = { ...withResources(fillOf({ spellAbility: "cha" }), [{ ...rage, max: 4 }]), warnings: ["A warning."] };
     const tail = "may come back on a later re-sync. Only 40 deleted rolls and class resources are remembered.";
@@ -188,6 +188,6 @@ describe("the review's class resources (docs/design/design-v1-ddb-resources.md 6
     const unnamed = render(base, fill, undefined, "resync", "resources", [{ k: "r:x1" }, { k: "r:x3" }, { k: "w:x2" }]).html;
     assert.ok(unnamed.includes(`A roll and 2 class resources you deleted ${tail}`), "unnamed markers counted by kind");
     const none = render(base, fill, undefined, "resync", "resources", []).html;
-    assert.doesNotMatch(none, /id="label-checks"/, "nothing dropped, no Check these");
+    assert.doesNotMatch(none, /id="label-checks"/, "nothing dropped, no Warnings");
   });
 });

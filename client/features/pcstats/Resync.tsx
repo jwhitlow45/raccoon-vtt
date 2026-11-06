@@ -321,7 +321,7 @@ export function ResyncDialog(props: { characterId: string; onClose(): void }) {
     // The character left this viewer's view while the review was open.
     return (
       <Dialog
-        title="Check what changes"
+        title="Re-sync review"
         onClose={close}
         phone="fill"
         width="lg"
@@ -345,7 +345,7 @@ export function ResyncDialog(props: { characterId: string; onClose(): void }) {
     const nothing = op === null;
     return (
       <Dialog
-        title="Check what changes"
+        title="Re-sync review"
         onClose={close}
         back={applying ? null : { label: "Back to the D&D Beyond link", onBack: () => send({ t: "back" }) }}
         status={statusLine}

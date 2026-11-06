@@ -217,7 +217,7 @@ export type CardGroupsInput = {
  * player opens the page for companions more often than to edit its
  * numbers (docs/design/design-v1-combat-flow.md 3.7.5), so Companions follows
  * Combat. An empty group is not drawn: Notes with nothing to read and no
- * right to write, Companions with none to see or add, and Played by for a
+ * right to write, Companions with none to see or add, and Players for a
  * player. Only the DM and the character's players open its page, so
  * anyone else sees its header alone.
  */

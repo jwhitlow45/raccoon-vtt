@@ -493,7 +493,7 @@ function NewCharacter(props: { formId: string; since: number; onDone(id: string 
       {props.owner ? (
         <Help>You play this character. The DM can still change it.</Help>
       ) : (
-        <Section label="Played by">
+        <Section label="Players">
           {players.length === 0 ? <Help>No players have joined yet. You can pick one later.</Help> : null}
           <div>
             {players.map((m) => (

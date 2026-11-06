@@ -285,7 +285,7 @@ function ClassFields(props: {
               ))}
             </Select>
           </FieldRow>
-          <Section label={`At ${CLASS_NAMES[classId]} ${draft.classLevel}`} divider={false}>
+          <Section label={`${CLASS_NAMES[classId]} ${draft.classLevel}`} divider={false}>
             {rows.length === 0 ? (
               <Help>{`No ${CLASS_NAMES[classId]} resources yet. The first comes at level ${firstLevel(classId)}.`}</Help>
             ) : (
