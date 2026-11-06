@@ -21,8 +21,9 @@
  * released post and keeps that owner's claim after its entry lapses.
  * A hidden page's timers wait for the browser's throttled wake-ups
  * (STALL_MS), so it learns of a stall from a late post, posts when it
- * hears one and its own is due, and starts by time only from a task that
- * runs after everything that waited (#confirmed).
+ * hears one and its own is due, and starts by time only from a post on
+ * time, its own come back included, which runs after every post that
+ * reached it first (#confirmed).
  *
  * Everything here is driven through `HandoffEnv`, so a test runs many pages
  * of one browser against a fake channel, fake locks and a fake clock.
@@ -123,6 +124,13 @@ export type HandoffEnv = {
   setTimer(ms: number, fn: () => void): unknown;
   clearTimer(handle: unknown): void;
   post(msg: HandoffPost): void;
+  /**
+   * The page's own posts come back to `receive` too, each behind every post
+   * that reached the page before it, as a second object on the room's
+   * channel hears them. False only without a channel, when the page hears
+   * no other page either.
+   */
+  echo: boolean;
   locks: LockApi | null;
   audio: HandoffAudio;
   /** Told after every change of what the page does, for the lines in Ambiance's Sound. */
@@ -169,12 +177,9 @@ export class Handoff {
   #claimSince: number | null = null;
   /** Without Web Locks: no start by itself before this, after a stall, so the posts that waited arrive first. */
   #settleUntil = 0;
-  /** Without Web Locks: counts claim windows, so a confirm meant for one never starts another. */
+  /** Without Web Locks: counts claim windows, and the window whose confirming post is out, so each sends one. */
   #window = 0;
-  /** The confirm in flight and the window it is for, and the window the running confirm is for. */
-  #confirmTimer: unknown = null;
   #confirmFor = 0;
-  #confirming = 0;
   /** While a post on time is handled: every post that arrived before it has run, and the main thread is not stalled. */
   #onTime = false;
   #leaseRenewedAt = 0;
@@ -295,15 +300,19 @@ export class Handoff {
     }
   }
 
-  /** A post from another page of the room. */
+  /**
+   * A post from another page of the room, or the page's own come back
+   * (HandoffEnv.echo). Its own tells nothing of its peers, only that every
+   * post that reached the page before it has run (#confirmed).
+   */
   receive(msg: HandoffPost): void {
-    if (this.#closed || msg.page === this.#env.page || msg.v !== 1) return;
-    // Posts are never throttled, so a late one shows a stall on a hidden page too, whose timers cannot.
+    if (this.#closed || msg.v !== 1) return;
+    // Posts are never throttled, so a late one shows a stall on a hidden page too, whose timers cannot. The page's own as well.
     const onTime = this.#env.now() - msg.sentAt <= STALL_MS;
     if (!onTime) this.#stalled();
     if (msg.bye) {
       this.#peers.delete(msg.page);
-    } else {
+    } else if (msg.page !== this.#env.page) {
       const before = this.#peers.get(msg.page);
       // Posts from one page arrive in order, but a stalled page may hand over an old one after a newer one.
       if (before && before.post.n >= msg.n) return;
@@ -433,28 +442,22 @@ export class Handoff {
 
   /**
    * Whether this task may start the sound once the claim window has run
-   * out. After a stall the browser runs what waited in any order, and a
-   * hidden page cannot tell a stall by its timers, so the start comes from
-   * a task that runs after all of it: a post on time, or a confirm, a timer
-   * set once the window ran out. A post that waited is late and restarts
-   * the claim (#stalled), so a confirm that runs after it starts nothing.
+   * out. After a stall the browser runs what waited in any order, timers
+   * before posts too, and a hidden page cannot tell a stall by its timers.
+   * So the start comes only from a post on time: every post that reached
+   * the page before it has run, and the page has not stood still since it
+   * was sent. With none at hand the page posts, and its own post comes back
+   * behind everything that waited (HandoffEnv.echo). A post that waited out
+   * a stall is late and restarts the claim (#stalled), its own too, where a
+   * timer set before the stall could run first and start (MB-ASTRA-06).
    */
   #confirmed(): boolean {
-    if (this.#onTime) return true;
-    if (this.#confirming === this.#window) return true;
-    if (this.#confirmTimer !== null && this.#confirmFor === this.#window) return false;
-    if (this.#confirmTimer !== null) this.#env.clearTimer(this.#confirmTimer);
-    const window = this.#window;
-    this.#confirmFor = window;
-    this.#confirmTimer = this.#env.setTimer(0, () => {
-      this.#confirmTimer = null;
-      this.#confirming = window;
-      try {
-        this.#evaluate();
-      } finally {
-        this.#confirming = 0;
-      }
-    });
+    // Without a channel the page hears no other, so no post can be waiting.
+    if (this.#onTime || !this.#env.echo) return true;
+    if (this.#confirmFor !== this.#window) {
+      this.#confirmFor = this.#window;
+      this.#post();
+    }
     return false;
   }
 
@@ -563,7 +566,8 @@ export class Handoff {
     if (this.#wants && !this.#env.locks) {
       if (now < this.#listenUntil) at = Math.min(at, this.#listenUntil);
       if (now < this.#settleUntil) at = Math.min(at, this.#settleUntil);
-      if (this.#claimSince !== null) at = Math.min(at, this.#claimSince + CLAIM_MS);
+      // A window that has run out waits for its confirming post to come back, not for a timer (#confirmed).
+      if (this.#claimSince !== null && this.#confirmFor !== this.#window) at = Math.min(at, this.#claimSince + CLAIM_MS);
     }
     if (!Number.isFinite(at)) return;
     at = Math.max(at, now + 1);
@@ -643,12 +647,11 @@ export class Handoff {
   }
 
   #clearTimers(): void {
-    for (const t of [this.#postTimer, this.#decideTimer, this.#yieldTimer, this.#confirmTimer]) if (t !== null) this.#env.clearTimer(t);
+    for (const t of [this.#postTimer, this.#decideTimer, this.#yieldTimer]) if (t !== null) this.#env.clearTimer(t);
     this.#postTimer = null;
     this.#decideTimer = null;
     this.#decideAt = Infinity;
     this.#yieldTimer = null;
-    this.#confirmTimer = null;
   }
 
   #changed(): void {

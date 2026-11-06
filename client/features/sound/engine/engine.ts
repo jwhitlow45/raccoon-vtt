@@ -67,6 +67,7 @@ export class SoundEngine {
   #clock: ServerClock;
   #handoff: Handoff | null = null;
   #channel: BroadcastChannel | null = null;
+  #hear: BroadcastChannel | null = null;
   #voices: Voices | null = null;
   #effects: EffectPlayer | null = null;
   #media: SoundMediaSession;
@@ -119,6 +120,7 @@ export class SoundEngine {
     if (this.#timer) clearTimeout(this.#timer);
     this.#handoff?.close();
     this.#channel?.close();
+    this.#hear?.close();
     this.#voices?.dispose();
     this.#effects?.dispose();
     this.#clock.stop();
@@ -185,12 +187,20 @@ export class SoundEngine {
 
     const page = randomId();
     let channel: BroadcastChannel | null = null;
+    // A second object on the channel hears every post, the page's own too, in one queue, so the handoff learns that the posts that reached the page before its own have run (HandoffEnv.echo).
+    let hear: BroadcastChannel | null = null;
     try {
-      channel = typeof BroadcastChannel === "function" ? new BroadcastChannel(channelName(this.#deps.room)) : null;
+      if (typeof BroadcastChannel === "function") {
+        channel = new BroadcastChannel(channelName(this.#deps.room));
+        hear = new BroadcastChannel(channelName(this.#deps.room));
+      }
     } catch {
+      channel?.close();
       channel = null;
+      hear = null;
     }
     this.#channel = channel;
+    this.#hear = hear;
     this.#handoff = new Handoff({
       room: this.#deps.room,
       page,
@@ -205,11 +215,12 @@ export class SoundEngine {
           // A closed channel: the page is going.
         }
       },
+      echo: hear !== null,
       locks: browserLocks(),
       audio: this.#leaseAudio(ctx, lease),
       onChange: () => this.#refresh(),
     });
-    if (channel) channel.onmessage = (e: MessageEvent) => this.#handoff?.receive(e.data as HandoffPost);
+    if (hear) hear.onmessage = (e: MessageEvent) => this.#handoff?.receive(e.data as HandoffPost);
 
     const session = (navigator as Navigator & { audioSession?: AudioSessionLike }).audioSession;
     this.#cleanups.push(

@@ -392,6 +392,7 @@ export class World {
         if (held >= 0) page.held.splice(held, 1);
       },
       post: (msg) => this.post(page, msg),
+      echo: this.echo,
       locks: this.locks ? this.lockApi(page) : null,
       audio: this.audio(page),
     });
