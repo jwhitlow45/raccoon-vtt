@@ -131,6 +131,8 @@ describe("a drag", () => {
     assert.equal(dropSlot(mids, 1, 150), 2);
     assert.equal(dropSlot(mids, 1, 10), 0);
     assert.equal(dropSlot(mids, 1, 999), 3);
+    assert.equal(dropSlot(mids, 1, mids[3]!), 3, "reaching the last row's middle passes it");
+    assert.equal(dropSlot(mids, 2, mids[0]!), 0, "as reaching the first row's does going up");
   });
 
   test("the pointer past either end of the list points at that end's slot, though the row stops at the end row's middle", () => {
