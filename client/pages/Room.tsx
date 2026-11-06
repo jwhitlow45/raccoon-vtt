@@ -69,7 +69,7 @@ import { SCENES_PANEL, useEndSceneRequestOnClose } from "../features/scenes/requ
 import { ambianceKeptSlot, keptSections } from "../features/ambiance/kept.ts";
 import { AMBIANCE_PANEL, openAmbiance } from "../features/ambiance/request.ts";
 import { barInset, chromeZoom, layoutWidth, smallUi, useLayoutSize } from "../features/device/layout.ts";
-import { uiScale as uiScaleNow, useUiScale } from "../features/device/settings.ts";
+import { uiScale as uiScaleNow, usePanelWidth, useUiScale } from "../features/device/settings.ts";
 import { activeTool, toolsFor, type ToolDef } from "../features/tools.ts";
 import { SETUP_BUTTON, SETUP_TOOLS, toolbarButtons } from "../features/toolbarOrder.ts";
 import { Icon } from "../components/Icon.tsx";
@@ -111,6 +111,8 @@ import { endedText } from "./endedText.ts";
 import { drawn, dockFits, dockSlot, DOCK_GAP, DOCK_PX, foldsUnderSheet, useSideSheetRoom } from "./fold.ts";
 import { mapFocusSlot, panelFocusSlot } from "./mapFocus.ts";
 import { firstSidePanel, readSidePanel, writeSidePanel } from "./sidePanel.ts";
+import { drawnWidth, panelCap } from "./panelWidth.ts";
+import { PanelEdge, resetPanelWidth } from "./PanelEdge.tsx";
 import { SideTabs } from "./SideTabs.tsx";
 import { SplitBar } from "./SplitBar.tsx";
 import { readSplit, roomForTwo, sameSplit, ScrollKeep, shareOf, splitPanes, swapFocus, writeSplit, type SplitEntry } from "./splitPanes.ts";
@@ -717,10 +719,13 @@ function RoomPage() {
    * layout, the role's toolbar and the side panel before paint, never from
    * a measurement, so picking a tool never moves a button.
    */
-  const mapWidth = mapWidthOf({ width, sidePanel: sideShown });
+  // The side panel's width from its edge (pages/panelWidth.ts), this device's, which the map, the tool options, popovers and the top bar follow live as it moves.
+  const storedPanelWidth = usePanelWidth();
+  const panelWidth = drawnWidth(storedPanelWidth, width);
+  const mapWidth = mapWidthOf({ width, sidePanel: sideShown, panelWidth });
   const optionsDrawn = tool.Options !== undefined && optionsShown && !sheet && !pickerOpen;
   const named = !wide || touchFirst;
-  const arrangementInput = { width, height, sidePanel: sideShown, safeLeft: safe.left, safeRight: safe.right, toolbar: toolbarShape(tools, wide), named, dm: role === "dm" };
+  const arrangementInput = { width, height, sidePanel: sideShown, panelWidth, safeLeft: safe.left, safeRight: safe.right, toolbar: toolbarShape(tools, wide), named, dm: role === "dm" };
   const optionsPlaceNow = optionsArrangement(arrangementInput);
   const optionsEdges = mergedEdges(arrangementInput, optionsPlaceNow.arrangement === "pair" ? PAIR : arrangementInput.toolbar);
   /*
@@ -1228,6 +1233,9 @@ function RoomPage() {
           ref={sidePanelRef}
           id={sidePanelId}
           hidden={!sideShown}
+          width={panelWidth}
+          storedWidth={storedPanelWidth}
+          layoutWidth={width}
           short={height < SHORT_LANDSCAPE_MAX}
           zoom={zoom}
           tabs={panels}
@@ -2819,6 +2827,10 @@ function SidePanel(props: {
   ref?: Ref<HTMLElement>;
   id: string;
   hidden: boolean;
+  /** The width it draws, in layout px (pages/panelWidth.ts drawnWidth), what this device stores, and the layout's width, which bounds it. */
+  width: number;
+  storedWidth: number | null;
+  layoutWidth: number;
   short: boolean;
   onHide(): void;
   zoom: number;
@@ -2883,6 +2895,7 @@ function SidePanel(props: {
   );
   const roomRef = useRef<HTMLDivElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
+  const edgeRef = useRef<HTMLDivElement>(null);
   const [room, setRoom] = useState<number | null>(null);
   const [dragTop, setDragTop] = useState<number | null>(null);
   const [cutTitle, setCutTitle] = useState<string | null>(null);
@@ -3090,7 +3103,9 @@ function SidePanel(props: {
       {...smallUi(props.zoom)}
       style={{
         ...chromeZoom(props.zoom),
-        width: theme.layout.sidePanelWidth,
+        // Holds the edge, which stands over its left border.
+        position: "relative",
+        width: props.width,
         flex: "none",
         display: "flex",
         flexDirection: "column",
@@ -3101,6 +3116,8 @@ function SidePanel(props: {
         paddingBottom: theme.safe.bottom,
       }}
     >
+      {/* The aside's first Tab stop. */}
+      <PanelEdge ref={edgeRef} width={props.width} cap={panelCap(props.layoutWidth)} stored={props.storedWidth} layoutWidth={props.layoutWidth} zoom={props.zoom} hidden={props.hidden} controls={props.id} />
       <PartyDock short={props.short} />
       <SideTabs
         hidden={props.hidden}
@@ -3112,6 +3129,15 @@ function SidePanel(props: {
         grouped={props.grouped}
         onTab={props.onTab}
         onHide={props.onHide}
+        // Reset width shows while the panel is wider than its default, and as it leaves, focus goes to the edge, which the panel then still has.
+        onResetWidth={
+          props.width > theme.layout.sidePanelWidth
+            ? () => {
+                edgeRef.current?.focus({ preventScroll: true });
+                resetPanelWidth(props.storedWidth);
+              }
+            : undefined
+        }
         split={{ on: below !== undefined, fits: props.fits, below: two ? (below?.id ?? null) : null, onToggle: () => props.onSplit(below === undefined) }}
         onCutTitle={setCutTitle}
         tabRef={tabRef}

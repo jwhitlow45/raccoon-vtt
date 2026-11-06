@@ -292,3 +292,43 @@ test("room sound and the mix follow another window's change, and a cleared stora
     delete (globalThis as { window?: unknown }).window;
   }
 });
+
+test("the side panel's width parses a missing key, an empty or non-number value and any width at or under the default as null, and floors the rest", async () => {
+  reset({ writes: true, reads: true });
+  const s = await loadPage();
+  for (const raw of [null, "", "  ", "abc", "NaN", "Infinity", "-5", "0", "300", "360", "360.0", "360.5"]) assert.equal(s.parsePanelWidth(raw), null, String(raw));
+  assert.equal(s.parsePanelWidth("361"), 361);
+  assert.equal(s.parsePanelWidth("500"), 500);
+  assert.equal(s.parsePanelWidth("640.9"), 640);
+  assert.equal(s.parsePanelWidth("900"), 900, "the clamp to the layout is the drawing's, not the parse's");
+  assert.equal(s.panelWidth(), null, "the default with nothing stored");
+  s.setPanelWidth(500);
+  assert.equal(stored.get("rvtt.sidePanelWidth"), "500");
+  s.setPanelWidth(null);
+  assert.equal(stored.get("rvtt.sidePanelWidth"), "", "the default stores no number");
+  assert.equal((await loadPage()).panelWidth(), null);
+});
+
+test("the side panel's width follows another window's change, and a cleared storage gives the default back", async () => {
+  reset({ writes: true, reads: true });
+  const events = new EventTarget();
+  Object.assign(globalThis, { window: events });
+  try {
+    const s = await loadPage();
+    const storageEvent = (key: string | null, newValue: string | null) => Object.assign(new Event("storage"), { key, newValue });
+    assert.equal(s.panelWidth(), null);
+    events.dispatchEvent(storageEvent("rvtt.sidePanelWidth", "520"));
+    assert.equal(s.panelWidth(), 520);
+    // A drag here shows its own width until it ends, then the other window's.
+    s.applyPanelWidth(600);
+    events.dispatchEvent(storageEvent("rvtt.sidePanelWidth", "480"));
+    assert.equal(s.panelWidth(), 600);
+    stored.set("rvtt.sidePanelWidth", "480");
+    s.restorePanelWidth();
+    assert.equal(s.panelWidth(), 480);
+    events.dispatchEvent(storageEvent(null, null));
+    assert.equal(s.panelWidth(), null);
+  } finally {
+    delete (globalThis as { window?: unknown }).window;
+  }
+});

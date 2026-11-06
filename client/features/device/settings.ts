@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { parseGrabber, type GrabberId } from "../../components/grabberDesigns.ts";
 import { setBoardInterfaceScale } from "../../lib/boardScale.ts";
+import { theme } from "../../lib/theme.ts";
 import { preferredMapVariant, readMapVariantSetting, type MapVariantSetting } from "../../lib/device.ts";
 import { formatKeyChanges, parseKeyChanges, type KeyChanges } from "../../state/keyBindings.ts";
 import { parseDiceSet } from "../dice/throw/sets.ts";
@@ -434,5 +435,51 @@ function followOtherWindows(): void {
   window.addEventListener("storage", (event) => {
     if (event.key === ROOM_SOUND_KEY || event.key === null) roomSoundSetting.adopt(event.key === null ? null : event.newValue);
     if (event.key === SOUND_MIX_KEY || event.key === null) soundMixSetting.adopt(event.key === null ? null : event.newValue);
+  });
+}
+
+// ---------------------------------------------------------------- side panel width
+
+/**
+ * The side panel's width from 900 px up (docs/design/design-v1-panel-size.md
+ * 3), in whole layout px, or null for the default. A missing key, an empty
+ * or non-number value and any width at or under the default read as null,
+ * and pages/panelWidth.ts never stores the default as a number, so a later
+ * change of the default reaches this device. A drag shows through `apply`,
+ * which its release ends with `set` or `restore`.
+ */
+export const PANEL_WIDTH_KEY = "rvtt.sidePanelWidth";
+
+export function parsePanelWidth(raw: string | null): number | null {
+  if (raw === null || raw.trim() === "") return null;
+  // Floored first, so a width that rounds down to the default reads as the default.
+  const n = Math.floor(Number(raw));
+  return Number.isFinite(n) && n > theme.layout.sidePanelWidth ? n : null;
+}
+
+const panelWidthSetting = setting<number | null>(PANEL_WIDTH_KEY, parsePanelWidth, (w) => (w === null ? "" : String(w)));
+
+export function panelWidth(): number | null {
+  followPanelWidth();
+  return panelWidthSetting.get();
+}
+export function usePanelWidth(): number | null {
+  followPanelWidth();
+  return panelWidthSetting.use();
+}
+export const setPanelWidth = panelWidthSetting.set;
+export const applyPanelWidth = panelWidthSetting.apply;
+export const restorePanelWidth = panelWidthSetting.restore;
+/** Another window's change, as its `storage` event carries it. */
+export const adoptPanelWidth = panelWidthSetting.adopt;
+
+let followingPanelWidth = false;
+
+/** Another window of the app that changes the width, or clears storage, moves this one's panel too, from the first read, as room sound follows (followOtherWindows). */
+function followPanelWidth(): void {
+  if (followingPanelWidth || typeof window === "undefined") return;
+  followingPanelWidth = true;
+  window.addEventListener("storage", (event) => {
+    if (event.key === PANEL_WIDTH_KEY || event.key === null) adoptPanelWidth(event.key === null ? null : event.newValue);
   });
 }

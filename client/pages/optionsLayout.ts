@@ -79,6 +79,8 @@ export type ArrangementInput = {
   height: number;
   /** The side panel shows beside the map, which takes its width (wide layouts only). */
   sidePanel: boolean;
+  /** The side panel's drawn width while it shows (pages/panelWidth.ts), its default when left out. */
+  panelWidth?: number;
   safeLeft: number;
   safeRight: number;
   /** The role's whole toolbar as this layout draws it (toolbarShape). */
@@ -100,9 +102,9 @@ export function shortSideways(width: number, height: number): boolean {
   return width > height && height < SHORT_LANDSCAPE_MAX;
 }
 
-/** The map's width: the layout less the side panel while it shows. */
-export function mapWidthOf(input: Pick<ArrangementInput, "width" | "sidePanel">): number {
-  return input.sidePanel ? input.width - theme.layout.sidePanelWidth : input.width;
+/** The map's width: the layout less the side panel, at its drawn width, while it shows. */
+export function mapWidthOf(input: Pick<ArrangementInput, "width" | "sidePanel" | "panelWidth">): number {
+  return input.sidePanel ? input.width - (input.panelWidth ?? theme.layout.sidePanelWidth) : input.width;
 }
 
 /** Whether Panels stands at the toolbar's right end: always on the phone layout, and from 900 px up while the side panel is hidden. */

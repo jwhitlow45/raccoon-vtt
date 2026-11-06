@@ -127,6 +127,8 @@ export function SideTabs(props: {
   grouped: boolean;
   onTab(id: string): void;
   onHide(): void;
+  /** Reset width, just before Hide panels, while the side panel is wider than its default (pages/PanelEdge.tsx), else left out. */
+  onResetWidth?: () => void;
   /**
    * Two panels (docs/design/design-v1-split-panel.md 6): whether the split is on,
    * whether the side panel holds two, and the bottom panel while it shows,
@@ -368,6 +370,7 @@ export function SideTabs(props: {
                 stop={p.id === stop}
                 index={i}
                 onClick={() => props.onTab(p.id)}
+                groupStart={opensGroup}
                 style={{ marginLeft: opensGroup ? GROUP_GAP - TAB_GAP : 0, ...look.button }}
               >
                 <Pill look={look.pill}>
@@ -421,6 +424,8 @@ export function SideTabs(props: {
         <Popover handle={menu} side="below" bound={() => innerBox(listRef.current?.closest("aside") ?? document.body, latest.current.zoom)}>
           <Menu label="More panels" sections={sections} onPick={pick} data={{ "data-tabs-menu": "" }} />
         </Popover>
+        {/* Puts the side panel back to its default width. The row's fit measures the list's room, so a tab goes into More for it where it must. */}
+        {props.onResetWidth ? <IconButton icon="foldWidth" label="Reset width" onClick={props.onResetWidth} style={{ flex: "none" }} /> : null}
         {/* SheetHeader.tsx HideButton's look, with S in its tooltip. */}
         <IconButton
           icon="collapsePanel"
@@ -493,6 +498,8 @@ export function PanelTab(props: {
   stop: boolean;
   index: number;
   onClick(): void;
+  /** The tab opens a new group in the row, after the group gap, which the alignment sweep's spacing check reads (e2e/helpers/spacing.ts). */
+  groupStart?: boolean;
   style: CSSProperties;
   children: ReactNode;
 }) {
@@ -511,6 +518,7 @@ export function PanelTab(props: {
         data-active={props.chosen}
         data-stop={panel.id}
         data-index={props.index}
+        {...(props.groupStart ? { "data-group-start": "" } : null)}
         {...PILL_FOCUS}
         {...(alone ? tooltip.anchor({ "aria-describedby": props.describedBy }) : { "aria-describedby": props.describedBy })}
         onClick={props.onClick}

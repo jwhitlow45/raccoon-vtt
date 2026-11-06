@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { TOOL_ORDER } from "../features/toolbarOrder.ts";
 import { theme } from "../lib/theme.ts";
+import { MAP_MIN } from "./panelWidth.ts";
 import {
   fitRow,
   FIRST_LAST_TOOL,
   heldFit,
   lastToolAfter,
   lastToolIn,
+  mapWidthOf,
   MERGE_MIN,
   MERGE_MIN_DM,
   mergedEdges,
@@ -20,6 +23,7 @@ import {
   POPOVER_MIN,
   SLOT_GAP,
   toolbarShape,
+  toolbarWidth,
   toolPopoverFrame,
   tuckAfter,
   type ArrangementInput,
@@ -131,6 +135,21 @@ describe("where the options stand (4.1, 4.3)", () => {
     const shown = mergedRoom(at(932, 430, 1, 59, PLAYER, { sidePanel: true }), PAIR);
     // 360 for the panel, 59 back from the right inset and 65 back from Panels.
     assert.equal(hidden - shown, 360 - 59 - 65);
+  });
+
+  test("the map's width is the layout less the side panel at its drawn width, the default when none is given (docs/design/design-v1-panel-size.md 3)", () => {
+    assert.equal(mapWidthOf({ width: 1440, sidePanel: true }), 1080);
+    assert.equal(mapWidthOf({ width: 1440, sidePanel: true, panelWidth: 640 }), 800);
+    assert.equal(mapWidthOf({ width: 1440, sidePanel: false, panelWidth: 640 }), 1440, "a hidden panel takes nothing");
+    const narrow = mergedRoom(at(1440, 900, 1, 0, DM, { sidePanel: true, panelWidth: 500, named: false }), PAIR);
+    const wide = mergedRoom(at(1440, 900, 1, 0, DM, { sidePanel: true, named: false }), PAIR);
+    assert.equal(wide - narrow, 140, "the options' room follows the drawn width");
+  });
+
+  test("the DM's widest mouse toolbar, every tool there is, fits a 600 px map with its padding: the side panel's bound (pages/panelWidth.ts MAP_MIN)", () => {
+    const every = Object.keys(TOOL_ORDER).map((id) => ({ id }));
+    const bar = toolbarWidth(toolbarShape(every, true), false) + 2 * theme.space(1);
+    assert.ok(bar <= MAP_MIN, `the toolbar takes ${bar} px: move the bound, or the toolbar runs under the panel`);
   });
 
   test("the row's element stands 6 px after the last tool and 8 px before Panels, and its controls have the room", () => {

@@ -161,7 +161,7 @@ function ViewAsMenu(props: { players: readonly Member[]; style: CSSProperties | 
       </Button>
       <Popover handle={menu} side={side} bound={viewportBound}>
         {/* Held to a side panel's width, as Attach's list is, so a long name wraps there rather than stretch the list across the screen. */}
-        <div style={{ maxWidth: theme.layout.sidePanelWidth }}>
+        <div style={{ maxWidth: theme.layout.listCap }}>
           <Menu
             label={VIEW_AS_A_PLAYER}
             sections={[{ key: "players", items: props.players.map((p) => ({ id: p.id, title: p.name, kind: "action" as const })) }]}

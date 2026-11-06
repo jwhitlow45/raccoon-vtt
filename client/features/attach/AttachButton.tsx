@@ -177,7 +177,7 @@ export function AttachList(props: { token: Token; capped?: boolean; onDone(): vo
     buttons[action.index]?.focus();
   };
 
-  const cap = props.capped ? { maxWidth: theme.layout.sidePanelWidth } : null;
+  const cap = props.capped ? { maxWidth: theme.layout.listCap } : null;
   if (rows.length === 0) {
     const [first, ...more] = emptyWords(viewer.role);
     return (

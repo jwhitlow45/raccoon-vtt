@@ -388,6 +388,13 @@ export const theme = {
    * component (1 or 2) and the table display's own order stay local.
    */
   z: {
+    /**
+     * The side panel's edge (pages/PanelEdge.tsx): over the map's canvas and
+     * under every map layer with a z, so where the top bar, the toolbar or a
+     * docked token window meets the map's right edge, that control wins the
+     * press and only the edge's part inside the panel takes it.
+     */
+    panelEdge: 1,
     /** The tracker's round header while it sticks (docs/design/design-v1-combat-flow.md 3.1): above a row being dragged (2), so a row dragged upward passes under it. */
     stickyHeader: 3,
     pane: 5,
@@ -433,7 +440,10 @@ export const theme = {
      * dot and the room name keeps its room.
      */
     chipNameMinWidth: 1100,
+    /** The side panel's default width, the one every panel is designed at. A drag widens it (pages/panelWidth.ts). */
     sidePanelWidth: 360,
+    /** The most a list in a popover takes, a side panel's default width, so it never follows a drag of the side panel's edge. */
+    listCap: 360,
     landscapeSheetWidth: 340,
     /**
      * The Room page's top bar and bottom toolbar, each before the safe area
