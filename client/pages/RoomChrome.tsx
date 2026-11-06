@@ -475,9 +475,10 @@ export function FullscreenButton() {
 /**
  * "Find my token" (features section 5), beside Fit map on a player's top
  * bar: each press pans and zooms to the next token they own on this scene
- * (features/find/findToken.ts), and says so when they have none here. The
- * DM has none: their top bar is already full on a phone, and a tracker row
- * or "follow the turn" already brings any creature into view.
+ * (features/find/findToken.ts), and says so when they have none here. It
+ * also selects that token and opens its action bar, so the next tap is the
+ * thing they came to do. The DM has none: their top bar is already full
+ * on a phone, and a tracker row or "follow the turn" already brings any creature into view.
  */
 export function FindButton(props: { openSheet(): OpenSheet | null }) {
   const slot = useScoped(fitSlot);
@@ -493,6 +494,8 @@ export function FindButton(props: { openSheet(): OpenSheet | null }) {
       return;
     }
     lastRef.current = token.id;
+    // A tap on the token, as the tracker row does. Before the camera: the store shows the bar at once, and the camera keeps the token clear of the bar that is about to open (Stage.tsx show).
+    ui.tap(token.id);
     const target = findRect(token);
     const cover = sheetCover(props.openSheet());
     // The open sheet's cover and the token bar's, the larger on each side.
