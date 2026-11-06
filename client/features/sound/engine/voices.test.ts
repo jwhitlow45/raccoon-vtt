@@ -6,7 +6,7 @@ import { applyOp } from "#shared/reducer.ts";
 import { LOOP_FADE_IN_MS, SHORT_FADE_MS, STOP_FADE_MS, type Playing, type Sound } from "#shared/sound.ts";
 import { AT, DM, P1, room } from "#shared/testutil.ts";
 import { SEEK_FADE_MS } from "./settle.ts";
-import { BLACKOUT_FADE_MS, gainAt, leaveMs, LOOKAHEAD_MS, mixGain, planVoices, Voices, type MusicState } from "./voices.ts";
+import { BLACKOUT_FADE_MS, gainAt, JOIN_FADE_MS, leaveMs, LOOKAHEAD_MS, mixGain, MUSIC_FADE_MS, planVoices, Voices, type MusicState } from "./voices.ts";
 
 /*
  * The voices a page plays at a server time (docs/design/design-v1-music.md
@@ -83,6 +83,60 @@ describe("the voices at a time", () => {
     assert.equal(gainAt(first.envelope, T + 57_500), 0.5);
     assert.equal(gainAt(second.envelope, T + 57_500), 0.5);
     assert.equal(gainAt(first.envelope, T), 1, "the first pass starts at full volume");
+  });
+
+  test("the last track with nothing after it fades out over its last 2 s, Repeat off's last track and a next that is no longer music alike", () => {
+    const end = T + 60_000;
+    const last: Playing = { ...quiet, music: { run: "r", repeat: "off", fade: 5, now: { soundId: "tavern", at: T } } };
+    const v = planVoices(last, SOUNDS, T + 50_000)[0]!;
+    assert.equal(gainAt(v.envelope, T), 1, "the envelope starts at full: the fade-in is the element's");
+    assert.equal(gainAt(v.envelope, end - MUSIC_FADE_MS), 1);
+    assert.equal(gainAt(v.envelope, end - MUSIC_FADE_MS / 2), 0.5);
+    assert.equal(gainAt(v.envelope, end), 0);
+    const gone: Playing = { ...quiet, music: { ...last.music!, repeat: "all", next: { soundId: "bell", at: end - 5_000 } } };
+    assert.equal(gainAt(planVoices(gone, SOUNDS, T + 50_000)[0]!.envelope, end - MUSIC_FADE_MS / 2), 0.5, "a next track that is an effect now ends the run");
+  });
+
+  test("a track another follows keeps its ending: a crossfade crosses, Off plays to its end at full, and Repeat one only crosses itself", () => {
+    const end = T + 60_000;
+    const off: Playing = { ...quiet, music: { run: "r", repeat: "all", fade: 0, now: { soundId: "tavern", at: T }, next: { soundId: "road", at: end } } };
+    const [out, into] = ["tavern", "road"].map((id) => planVoices(off, SOUNDS, end - 1_000).find((x) => x.soundId === id)!);
+    assert.equal(gainAt(out!.envelope, end - 1), 1, "Off: the outgoing track at full to its end");
+    assert.equal(gainAt(into!.envelope, end), 1, "Off: the next at full from its start");
+    const cross: Playing = { ...quiet, music: { ...off.music!, fade: 5, next: { soundId: "road", at: end - 5_000 } } };
+    const crossing = planVoices(cross, SOUNDS, end - 6_000).find((x) => x.soundId === "tavern")!;
+    assert.deepEqual(crossing.envelope, [
+      [T, 1],
+      [end - 5_000, 1],
+      [end, 0],
+    ]);
+    assert.equal(gainAt(crossing.envelope, end - 5_000), 1, "full until the crossfade");
+    assert.equal(gainAt(crossing.envelope, end - 2_500), 0.5, "the crossfade's line, not a 2 s fade's");
+    const one: Playing = { ...quiet, music: { run: "r", repeat: "one", fade: 0, now: { soundId: "tavern", at: T } } };
+    const pass = planVoices(one, SOUNDS, end - 1_000).find((x) => x.key.endsWith(":0"))!;
+    assert.equal(gainAt(pass.envelope, end - 1), 1, "Repeat one with no crossfade: each pass at full to its end");
+  });
+
+  test("only music's own track fades in: `now`'s first pass, never `next`, a Repeat one later pass or a loop", () => {
+    const run = { run: "r", repeat: "one" as const, fade: 5 as const, now: { soundId: "tavern", at: T } };
+    const passes = planVoices({ ...quiet, music: run }, SOUNDS, T + 54_000);
+    assert.deepEqual(
+      passes.map((x) => [x.key.split(":").at(-1), x.fadeIn ?? false]),
+      [
+        ["0", true],
+        ["1", false],
+      ],
+    );
+    const crossing: Playing = { ...quiet, music: { ...run, repeat: "all", next: { soundId: "road", at: T + 55_000 } }, loops: { a: { soundId: "rain", at: T, volume: 70 } } };
+    const plan = planVoices(crossing, SOUNDS, T + 54_000);
+    assert.deepEqual(
+      plan.filter((x) => x.channel === "music").map((x) => [x.soundId, x.fadeIn ?? false]),
+      [
+        ["tavern", true],
+        ["road", false],
+      ],
+    );
+    assert.ok(plan.some((x) => x.channel === "loop") && plan.every((x) => x.channel === "music" || x.fadeIn === undefined), "no loop fades in so");
   });
 
   test("a 10 s loop: loaded 0.4 s before its start, the first pass fading in over 2 s, and at 9 s the first and second passes at 9 and 1 s", () => {
@@ -331,6 +385,45 @@ describe("the voices on the pool", () => {
     const ramp = after()[1]!;
     assert.ok(ramp.kind === "ramp" && ramp.value === 1 && Math.abs(ramp.at - SHORT_FADE_MS / 1000) < 1e-9, "the check keeps the ramp, never a step to 1");
     assert.ok(after().every((e) => e.kind !== "set" || e.value === 0.4));
+    voices.dispose();
+  });
+
+  test("a track an op starts fades in over 2 s from its start on the audio clock, and the next track under Off starts at full", () => {
+    const t = { now: T - 400 };
+    const { voices, gains } = rig(t);
+    voices.update(planVoices({ ...quiet, music: { run: "r1", repeat: "all", fade: 0, now: { soundId: "tavern", at: T } } }, SOUNDS, t.now), () => SHORT_FADE_MS);
+    // Each voice makes its fade, envelope and mix gains in turn: the fade is the first.
+    const fade = gains[0]!.gain;
+    assert.deepEqual(fade.events.slice(fade.events.findLastIndex((e) => e.kind === "cancel") + 1), [
+      { kind: "set", value: 0, at: 0 },
+      { kind: "set", value: 0, at: 0.4 },
+      { kind: "ramp", value: 1, at: 0.4 + MUSIC_FADE_MS / 1000 },
+    ]);
+    voices.dispose();
+
+    const later = { now: T + 59_600 };
+    const next = rig(later);
+    const off: Playing = { ...quiet, music: { run: "r1", repeat: "all", fade: 0, now: { soundId: "tavern", at: T }, next: { soundId: "road", at: T + 60_000 } } };
+    next.voices.update(planVoices(off, SOUNDS, later.now), () => SHORT_FADE_MS);
+    // Tavern's three gains, then Road's.
+    const road = next.gains[3]!.gain;
+    assert.deepEqual(road.events.slice(road.events.findLastIndex((e) => e.kind === "cancel") + 1), [{ kind: "set", value: 1, at: 0 }], "back to back at full");
+    next.voices.dispose();
+  });
+
+  test("a resume or a join fades music's own track in over 2 s from when it is placed, and a background sound over 0.3 s", () => {
+    const t = { now: T + 10_000 };
+    const { voices, gains } = rig(t);
+    voices.update(planVoices({ ...quiet, music: { run: "r1", repeat: "all", fade: 5, now: { soundId: "tavern", at: T } }, loops: { a: { soundId: "rain", at: T, volume: 70 } } }, SOUNDS, t.now), () => SHORT_FADE_MS);
+    const tail = (p: ReturnType<typeof param>) => p.events.slice(p.events.findLastIndex((e) => e.kind === "cancel") + 1);
+    assert.deepEqual(tail(gains[0]!.gain), [
+      { kind: "set", value: 0, at: 0 },
+      { kind: "ramp", value: 1, at: MUSIC_FADE_MS / 1000 },
+    ]);
+    assert.deepEqual(tail(gains[3]!.gain), [
+      { kind: "set", value: 0, at: 0 },
+      { kind: "ramp", value: 1, at: JOIN_FADE_MS / 1000 },
+    ]);
     voices.dispose();
   });
 

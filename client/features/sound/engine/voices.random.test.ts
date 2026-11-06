@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import fc from "fast-check";
 import { SOUND_LIMITS } from "#shared/limits.ts";
-import { FADES, loopCrossingMs, type Playing, type Sound } from "#shared/sound.ts";
+import { crossEndAt, FADES, loopCrossingMs, REPEATS, type MusicRun, type Playing, type Sound } from "#shared/sound.ts";
 import { int, pick, rng } from "#shared/testutil.ts";
-import { LOOKAHEAD_MS, planVoices, type VoicePlan } from "./voices.ts";
+import { gainAt, LOOKAHEAD_MS, MUSIC_FADE_MS, planVoices, type VoicePlan } from "./voices.ts";
 
 /*
  * The passes a page plans for a sound that repeats (docs/design/design-v1-music.md
@@ -94,6 +94,69 @@ describe("the passes planned for a sound that repeats", () => {
             : repeatOne(int(r, SOUND_LIMITS.use.music.minMs, 120_000), pick(r, FADES));
         const failures = walk(sound, ticks(r, 120, pick(r, [300, 1_000, 1_500, 4_000])));
         assert.deepEqual(failures, [], `seed ${seed}, ${sound.lengthMs} ms`);
+      }),
+      { numRuns: 2_000 },
+    );
+  });
+});
+
+/*
+ * Music's envelope over random runs: a track, a next track or none, any
+ * crossfade, read at random times.
+ *
+ * Invariants:
+ * - A track followed by another (a crossfade, or Off) is at full until
+ *   the crossfade's start and then follows its line, never a 2 s fade.
+ * - A track with nothing after it, Repeat one aside, is at full until its
+ *   last 2 s and then fades in a line to silence at its end.
+ * - Repeat one never fades its end other than over its crossing.
+ * - The envelope's points run forward in time, as the audio clock takes them.
+ * - Promotion keeps the gain: once the crossfade ends, the incoming track
+ *   as `next` and as `now` sound the same, Off included, on the same voice.
+ */
+describe("music's envelope over random runs", () => {
+  test("crossfades and Off keep their lines, the end with nothing after it fades over 2 s, and promotion never dips", () => {
+    const close = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+    fc.assert(
+      fc.property(fc.integer({ min: 1, max: 2 ** 31 - 1 }), (seed) => {
+        const r = rng(seed);
+        const music = SOUND_LIMITS.use.music;
+        const nowMs = int(r, music.minMs, 300_000);
+        const nextMs = int(r, music.minMs, 300_000);
+        const sounds = { a: { ms: nowMs, use: "music" as const, assetId: "a-a" }, b: { ms: nextMs, use: "music" as const, assetId: "a-b" } };
+        const fade = pick(r, FADES);
+        const repeat = pick(r, REPEATS);
+        const end = AT + nowMs;
+        const followed = repeat !== "one" && r() < 0.6;
+        // The schedule's place for the next track, or later, as a reanchor or a resume near the end places it.
+        const nextAt = end - fade * 1_000 + (r() < 0.3 ? int(r, 0, fade * 1_000) : 0);
+        const run: MusicRun = { run: "r", repeat, fade, now: { soundId: "a", at: AT }, ...(followed ? { next: { soundId: "b", at: nextAt } } : {}) };
+        const t = AT + int(r, 0, nowMs - 1);
+        const now = planVoices({ ...quiet, music: run }, sounds, t).find((v) => v.key === `m:a:${AT}:0`);
+        if (!now) return;
+        // The audio clock is scheduled point by point, so the points run forward in time.
+        assert.ok(now.envelope.every((p, i, all) => i === 0 || all[i - 1]![0] <= p[0]), `seed ${seed}: points in order ${JSON.stringify(now.envelope)}`);
+        const g = gainAt(now.envelope, t);
+        if (followed) {
+          const crossEnd = crossEndAt(run.now, nowMs, run.next!, fade * 1_000);
+          const want = t < nextAt ? 1 : crossEnd > nextAt ? Math.max(0, 1 - (t - nextAt) / (crossEnd - nextAt)) : 0;
+          assert.ok(close(g, want), `seed ${seed}: followed, ${g} at ${t - AT}, want ${want}`);
+          // Promoted at the crossfade's end: the same voice, at the same gain, for the next 10 s.
+          const promoted: MusicRun = { run: "r", repeat, fade, now: run.next! };
+          for (const later of [crossEnd, crossEnd + int(r, 0, 10_000)]) {
+            const before = planVoices({ ...quiet, music: run }, sounds, later).find((v) => v.soundId === "b")!;
+            const after = planVoices({ ...quiet, music: promoted }, sounds, later).find((v) => v.soundId === "b")!;
+            assert.equal(after.key, before.key, `seed ${seed}: promotion keeps the voice`);
+            assert.ok(close(gainAt(after.envelope, later), gainAt(before.envelope, later)), `seed ${seed}: promotion at ${later - nextAt} ms into the next track keeps its gain`);
+          }
+        } else if (repeat !== "one") {
+          const want = t < end - MUSIC_FADE_MS ? 1 : (end - t) / MUSIC_FADE_MS;
+          assert.ok(close(g, want), `seed ${seed}: nothing after it, ${g} at ${t - AT}, want ${want}`);
+        } else {
+          const crossing = Math.min(fade * 1_000, Math.floor(nowMs / 2));
+          const want = crossing === 0 || t < end - crossing ? 1 : (end - t) / crossing;
+          assert.ok(close(g, want), `seed ${seed}: Repeat one, ${g} at ${t - AT}, want ${want}`);
+        }
       }),
       { numRuns: 2_000 },
     );

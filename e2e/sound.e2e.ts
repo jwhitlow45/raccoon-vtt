@@ -733,4 +733,90 @@ describe("synced music and sound", { concurrency: false }, () => {
       await gusContext.close();
     }
   });
+
+  // After sndglitch-1, whose silenced DM page it keeps: Hal's page alone plays, into the tap.
+  test("sndfade-1. the music fades in over 2 s when it starts and when it resumes, and out over 2 s when it pauses and when the last track ends with nothing after it, as a background sound does", async () => {
+    const toneId = await addSound({ context: dmContext, origin: server.origin, roomId: run.roomId, ops, id: "snd-tone-short", name: "Short tone", use: "music", ms: 32_000, bytes: toneSound(32) });
+    const loopId = await addSound({ context: dmContext, origin: server.origin, roomId: run.roomId, ops, id: "snd-tone-loop", name: "Tone loop", use: "loop", ms: 10_000, bytes: toneSound(10) });
+    await waitFor("the tones' assets", () => (dmSocket.state?.sounds?.[toneId]?.assetId && dmSocket.state?.sounds?.[loopId]?.assetId ? true : null));
+    const halContext = await browser.newContext({ viewport: { width: 1280, height: 800 }, bypassCSP: true });
+    try {
+      await halContext.addInitScript(SOUND_TEST_FLAG);
+      await halContext.addInitScript(roomSoundScript("on"));
+      await halContext.addInitScript(SOUND_TAP);
+      await join(halContext, "Hal", "#a855f7");
+      const hal = await halContext.newPage();
+      await openRoom(hal);
+      // Repeat off and one track: nothing follows it, so its end fades out.
+      await playTrack(toneId, 0, "off");
+      await soundSays(hal, /^playing music/, 10_000);
+      await sleep(6_000);
+      await ops.send({ t: "music.pause" });
+      await sleep(4_000);
+      await ops.send({ t: "music.resume", run: runId() });
+      await waitFor("the run to end", () => (dmSocket.state?.playing?.music === null ? true : null), 40_000);
+      await sleep(1_000);
+      // A background sound already fades in and out over 2 s: checked on its own span of the tap, at its own level.
+      const loopFrom = await hal.evaluate(() => (globalThis as unknown as { __soundTap: { ctx: { currentTime: number } } }).__soundTap.ctx.currentTime);
+      await ops.send({ t: "loop.start", id: "loop-tone", soundId: loopId, volume: 100 });
+      await sleep(6_000);
+      await ops.send({ t: "loop.stop", id: "loop-tone" });
+      await sleep(3_000);
+      const { quanta } = await readTap(hal);
+      const ramps = fadeRamps(quanta.filter((q) => q.at < loopFrom));
+      const loopRamps = fadeRamps(quanta.filter((q) => q.at >= loopFrom));
+      console.log(`sndfade-1 ramps ${JSON.stringify(ramps)} loop ${JSON.stringify(loopRamps)}`);
+      assert.deepEqual(
+        loopRamps.map((r) => [r.rising, r.ms > 1_200 && r.ms < 2_200]),
+        [
+          [true, true],
+          [false, true],
+        ],
+        `the background sound fades in and out over 2 s: ${JSON.stringify(loopRamps)}`,
+      );
+      assert.equal(ramps.length, 4, `a start, a pause, a resume and an end: ${JSON.stringify(ramps)}`);
+      // A 2 s line crosses from a tenth to nine tenths of the tone's level in 1.6 s. A step does so within a quantum or two.
+      const expected = [
+        ["start", true],
+        ["pause", false],
+        ["resume", true],
+        ["end", false],
+      ] as const;
+      expected.forEach(([name, rising], i) => {
+        const ramp = ramps[i]!;
+        assert.equal(ramp.rising, rising, `the ${name} goes the right way: ${JSON.stringify(ramps)}`);
+        assert.ok(ramp.ms > 1_200 && ramp.ms < 2_200, `the ${name} ramps over about 1.6 s of its 2 s: ${ramp.ms.toFixed(0)} ms`);
+      });
+    } finally {
+      await halContext.close();
+    }
+  });
 });
+
+type Ramp = { rising: boolean; at: number; ms: number };
+
+/**
+ * Each passage of the tap's level from under a tenth of the tone's full
+ * level to over nine tenths, or back, with how long it took. A start at
+ * full or a cut crosses within a few quanta, and a 2 s linear fade in 1.6 s.
+ */
+function fadeRamps(quanta: readonly { at: number; level: number }[]): Ramp[] {
+  const levels = quanta.map((q) => q.level).sort((a, b) => a - b);
+  const full = levels[Math.floor(levels.length * 0.95)] ?? 0;
+  const out: Ramp[] = [];
+  let zone: "low" | "high" | null = null;
+  let lastLow = 0;
+  let lastHigh = 0;
+  for (const q of quanta) {
+    if (q.level <= 0.1 * full) {
+      if (zone === "high") out.push({ rising: false, at: q.at, ms: (q.at - lastHigh) * 1000 });
+      zone = "low";
+      lastLow = q.at;
+    } else if (q.level >= 0.9 * full) {
+      if (zone === "low") out.push({ rising: true, at: q.at, ms: (q.at - lastLow) * 1000 });
+      zone = "high";
+      lastHigh = q.at;
+    }
+  }
+  return out;
+}
