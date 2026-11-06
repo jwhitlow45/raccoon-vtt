@@ -21,7 +21,7 @@ type GroupFold = { open: boolean; onToggle(): void };
 /**
  * The DM's view tools (features section 13), in two groups by what they do
  * (docs/design/design-v1-layout-hierarchy.md M4). "Players' screens" acts on the
- * table: follow me, bring everyone here, black out. "Check their view"
+ * table: follow me, bring everyone here, black out. "Preview"
  * only looks: view as a player and party sight. Undo and Redo sit in the
  * top bar on every layout (M2), so the panel has no copy of its own. Each
  * is a group that folds (docs/design/design-v1-panel-groups.md 6.2), kept
@@ -88,7 +88,7 @@ export function ViewControls(props: { screens: GroupFold; check: GroupFold }) {
           onChange={(blackout) => actions.dispatch({ t: "view.blackout", blackout })}
         />
       </Group>
-      <Group label="Check their view" {...props.check} keep wholeSummary summary={checkSummary(partySight && sightShown)}>
+      <Group label="Preview" {...props.check} keep wholeSummary summary={checkSummary(partySight && sightShown)}>
         <ViewAsPlayer members={members} />
         <PartySightToggle />
       </Group>

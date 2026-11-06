@@ -93,7 +93,7 @@ describe("the DM panel's groups on a phone, nothing stored", () => {
     assert.deepEqual(groups(draw()), [
       { name: "Handouts", open: true, summary: null, line: false, reserve: false },
       { name: "Players' screens", open: true, summary: null, line: true, reserve: false },
-      { name: "Check their view", open: false, summary: null, line: true, reserve: false },
+      { name: "Preview", open: false, summary: null, line: true, reserve: false },
       { name: "Player link", open: false, summary: null, line: true, reserve: false },
       { name: "Table display", open: false, summary: "No display", line: true, reserve: false },
     ]);
@@ -112,14 +112,14 @@ describe("the DM panel's groups on a phone, nothing stored", () => {
       [
         ["Handouts", "1 showing"],
         ["Players' screens", "Players on Crypt · Follow me on · Players see black"],
-        ["Check their view", null],
+        ["Preview", null],
         ["Player link", null],
         ["Table display", "2 displays"],
       ],
     );
   });
 
-  test("Check their view says Party sight is on only on a scene with party vision", () => {
+  test("Preview says Party sight is on only on a scene with party vision", () => {
     const scope = new RoomScope();
     seed(scope.get(partySightSlot), { on: true });
     assert.equal(groups(draw({ scope }))[2]!.summary, null, "a scene with no party vision has no Party sight");
@@ -160,7 +160,7 @@ describe("Join requests over the folding groups", () => {
       [
         ["Handouts", true],
         ["Players' screens", true],
-        ["Check their view", true],
+        ["Preview", true],
         ["Player link", true],
         ["Table display", true],
       ],

@@ -22,7 +22,7 @@ describe("the DM panel's folded summaries", () => {
     assert.equal(screensSummary({ onPlayerScene: false, playerSceneName: "Crypt", follow: true, blackout: true }), "Players on Crypt · Follow me on · Players see black");
   });
 
-  test("Check their view names Party sight only while it is on", () => {
+  test("Preview names Party sight only while it is on", () => {
     assert.equal(checkSummary(true), "Party sight on");
     assert.equal(checkSummary(false), undefined);
   });

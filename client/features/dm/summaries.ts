@@ -26,7 +26,7 @@ export function screensSummary(input: { onPlayerScene: boolean; playerSceneName:
   ]);
 }
 
-/** Check their view: Party sight while it veils the DM's map, else nothing, since View as a player keeps no state to say. */
+/** Preview: Party sight while it veils the DM's map, else nothing, since View as a player keeps no state to say. */
 export function checkSummary(partySight: boolean): string | undefined {
   return partySight ? "Party sight on" : undefined;
 }
