@@ -1,11 +1,11 @@
 /**
  * The DM guide's pictures of music and sound (docs/dm-guide.md, "Music and
- * sound", docs/design/design-v1-music-player.md 11.6): Ambiance's Sound
- * group while a playlist and two background sounds play, the Music window
- * on a computer with Library beside Now playing and Up next, the playlist
- * maker on a computer, and Up next on a phone with a track's More menu
- * open, taken from the real server on the production build so they always
- * show the app as it is.
+ * sound", docs/design/design-v1-sound-layout.md): the Sound panel's Now
+ * playing while a playlist and two background sounds play, its Library
+ * view, the playlist maker's pop-up on a computer, Up next on a phone with
+ * a track's More menu open, and the phone's Panels list, taken from the
+ * real server on the production build so they always show the app as it
+ * is.
  *
  * The room is a tavern with Thorn and Bree in it and a clock running. Its
  * library holds 22 tracks of silence in three playlists, two background
@@ -14,9 +14,9 @@
  *
  * It needs `pnpm build` first and a Postgres in DATABASE_URL, and turns the
  * server's sound switch on for itself. It makes a room, writes
- * docs/dm-guide/sound-panel.webp, music-window.webp and music-maker.webp
+ * docs/dm-guide/sound-panel.webp, sound-library.webp and music-maker.webp
  * at 1280 x 800, as the guide's other pictures are, and music-up-next.webp
- * at a phone's 390 x 844, and deletes the room:
+ * and screen-phone.webp at a phone's 390 x 844, and deletes the room:
  *
  *   DATABASE_URL=postgres://... GUIDE_PORT=3197 node scripts/guide-music.ts
  */
@@ -69,8 +69,9 @@ async function picture(page: Page, name: string): Promise<void> {
   console.log(`${name}.webp ${info.width} x ${info.height}, ${Math.round(info.size / 1024)} KB`);
 }
 
-function musicWindow(page: Page): Locator {
-  return page.locator("dialog[open]").filter({ has: page.locator("[data-music-window]") });
+/** The playlist maker's pop-up, which holds the maker's body. */
+function makerDialog(page: Page): Locator {
+  return page.locator("dialog[open]").filter({ has: page.locator("[data-music-maker]") });
 }
 
 process.env.ROOM_SOUND = "1";
@@ -107,7 +108,7 @@ try {
   for (const [name, x, y] of [["Thorn", 6, 5], ["Bree", 8, 6]] as const) {
     await send({ t: "token.create", token: { id: randomUUID(), sceneId, kind: "npc", name, size: "medium", x, y, visibility: "all", disposition: "ally", actor: { inline: actor() } } });
   }
-  // A clock, so Time stands folded with the date above the Weather row and Sound, as a DM's Ambiance does in play.
+  // A clock, so the top bar's chip shows the date, as a DM's room does in play.
   await send({ t: "clock.start", id: randomUUID(), at: 2 * 86_400 + 20 * 3_600, shown: true, calendar: { kind: "days" } });
 
   const upload = async (ms: number): Promise<string> => {
@@ -147,37 +148,40 @@ try {
 
   await dm.reload();
   await dm.locator(".konvajs-content").first().waitFor();
-  await openSideTab(dm, "Ambiance");
-  const panel = dm.getByRole("tabpanel", { name: sideTabName("Ambiance") });
-  await panel.locator("[data-sound-next]").waitFor();
+  await openSideTab(dm, "Sound");
+  const panel = dm.getByRole("tabpanel", { name: sideTabName("Sound") });
+  await panel.locator("[data-music-track]").waitFor();
   await picture(dm, "sound-panel");
 
-  // The Music window on a computer: Library beside Now playing and Up next.
-  await panel.locator("[data-music-open]").click();
-  const win = musicWindow(dm);
-  await win.locator("[data-music-wide]").waitFor();
-  await picture(dm, "music-window");
+  // Library, the panel's second view: the search, the sort, three playlists with Tavern night playing, and the tracks.
+  await panel.getByRole("radiogroup", { name: "Sound", exact: true }).getByRole("radio", { name: "Library", exact: true }).click();
+  const library = panel.locator("[data-music-library]");
+  await library.waitFor();
+  await picture(dm, "sound-library");
 
   // The maker on Tavern night: its settings, its tracks in order, and the room's other music to add.
-  await win.getByRole("list", { name: "Playlists" }).getByRole("button", { name: /^Tavern night/ }).click();
-  await win.getByRole("heading", { name: "Tavern night", exact: true }).waitFor();
+  await library.getByRole("list", { name: "Playlists" }).getByRole("button", { name: /^Tavern night/ }).click();
+  const maker = makerDialog(dm);
+  await maker.getByRole("heading", { name: "Tavern night", exact: true }).waitFor();
   await picture(dm, "music-maker");
-  await win.getByRole("button", { name: "Back to Music", exact: true }).click();
-  await win.getByRole("button", { name: /^Close/ }).last().click();
+  await maker.getByRole("button", { name: "Cancel", exact: true }).click();
+  await maker.waitFor({ state: "detached" });
 
-  // Up next on a phone: the tall sheet's Now playing, scrolled to Up next, with its third track's More open, where Play next can act.
+  // On a phone: the Panels list, then Up next in the Sound sheet, opened and scrolled to its heading, with its third track's More open, where Play next can act.
   const phone = await browser.newContext({ viewport: PHONE, isMobile: true, hasTouch: true, storageState: await dmContext.storageState() });
   const page = await phone.newPage();
   await page.goto(`${origin}/r/${roomId}`);
   await page.locator(".konvajs-content").first().waitFor();
   await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
-  await page.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Ambiance/ }).click();
-  const sheet = page.locator('dialog[data-rvtt-sheet][aria-label="Ambiance"]');
-  await sheet.locator("[data-music-open]").click();
-  const tall = musicWindow(page);
-  const upNext = tall.getByRole("list", { name: "Up next" });
+  const list = page.getByRole("region", { name: "Panels" });
+  await list.getByRole("button", { name: /^Time/ }).waitFor();
+  await picture(page, "screen-phone");
+  await list.getByRole("button", { name: /^Sound/ }).click();
+  const sheet = page.locator('dialog[data-rvtt-sheet][aria-label="Sound"]');
+  await sheet.getByRole("button", { name: "Up next", exact: true }).click();
+  const upNext = sheet.getByRole("list", { name: "Up next" });
   await upNext.waitFor();
-  await tall.locator("[data-music-upnext]").evaluate((el) => el.scrollIntoView({ block: "start" }));
+  await sheet.getByRole("button", { name: "Up next", exact: true }).evaluate((el) => el.scrollIntoView({ block: "start" }));
   await upNext.locator("[data-music-more]").nth(2).click();
   await page.getByRole("menu").last().waitFor();
   await picture(page, "music-up-next");
