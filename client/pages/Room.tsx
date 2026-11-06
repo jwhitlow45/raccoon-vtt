@@ -66,7 +66,8 @@ import { useClockToasts } from "../features/clock/useClockToasts.ts";
 import { PhaseMenu } from "../features/phases/PhaseMenu.tsx";
 import { FrameViewBar } from "../features/scenes/FrameView.tsx";
 import { SCENES_PANEL, useEndSceneRequestOnClose } from "../features/scenes/request.ts";
-import { AMBIANCE_PANEL } from "../features/ambiance/request.ts";
+import { ambianceKeptSlot, keptSections } from "../features/ambiance/kept.ts";
+import { AMBIANCE_PANEL, openAmbiance } from "../features/ambiance/request.ts";
 import { barInset, chromeZoom, layoutWidth, smallUi, useLayoutSize } from "../features/device/layout.ts";
 import { uiScale as uiScaleNow, useUiScale } from "../features/device/settings.ts";
 import { activeTool, toolsFor, type ToolDef } from "../features/tools.ts";
@@ -85,7 +86,7 @@ import { useWakeLock } from "../lib/wakeLock.ts";
 import type { Insets } from "../lib/camera.ts";
 import { isCoarsePointer } from "../lib/device.ts";
 import { fullscreenSupported } from "../lib/fullscreen.ts";
-import { ambianceFoldsSlot, dmPanelFoldsSlot, scenesFoldsSlot, useEndRevealsOnClose } from "../lib/folds.ts";
+import { ambianceFoldsSlot, dmPanelFoldsSlot, scenesFoldsSlot, useEndRevealsOnClose, useFolds } from "../lib/folds.ts";
 import { useFocusedFieldInView, useKeyboardView } from "../lib/keyboardInset.ts";
 import { sheetStepping } from "../lib/modalDialog.ts";
 import { roomPath } from "../lib/roomId.ts";
@@ -415,13 +416,28 @@ function RoomPage() {
   const topInset = useTopBars();
   const placement = useTurnPlacement();
   const fight = useRoomView((s) => !!s.view?.encounter);
-  // The Time panel is listed while the viewer's view holds a clock, and stays while it is open after the DM stops sharing, until it is closed (docs/design/design-v1-calendar.md 4.4).
+  /*
+   * Ambiance is listed for a player while their view holds the clock, or the
+   * room plays music or a background sound they receive (effects show
+   * nowhere), and stays while it is open after both stop, until it is closed
+   * (docs/design/design-v1-panel-groups.md 5). Open counts a hidden sheet or
+   * side panel, as its folds do (lib/folds.ts panelIsOpen).
+   */
   const hasClock = useRoomView((s) => !!s.view?.clock);
-  const timeOpen = wide ? tab === "time" || below === "time" : panel === "time";
-  // The Sound panel likewise, while the room plays music or a background sound this viewer receives (docs/design/design-v1-music.md 4.1). Effects show nowhere.
   const hasSound = useRoomView((s) => somethingPlays(s.view?.playing));
-  const soundOpen = wide ? tab === "sound" || below === "sound" : panel === "sound";
-  const panels = panelsFor(role, wide, { clock: hasClock || timeOpen, sound: hasSound || soundOpen });
+  const ambianceOpen = wide ? tab === AMBIANCE_PANEL || below === AMBIANCE_PANEL : panel === AMBIANCE_PANEL;
+  const panels = panelsFor(role, wide, { ambiance: hasClock || hasSound || ambianceOpen });
+  // A player's sections that showed since Ambiance opened stay until it closes (features/ambiance/kept.ts), here so a turn across 900 px, which remounts the panel, keeps them.
+  const ambianceKept = scope.get(ambianceKeptSlot);
+  useLayoutEffect(() => {
+    const prev = ambianceKept.getState();
+    const next = keptSections(prev, { open: ambianceOpen, clock: hasClock, sound: hasSound });
+    if (next !== prev) ambianceKept.setState(next, true);
+  }, [ambianceKept, ambianceOpen, hasClock, hasSound]);
+  const keptTime = useStore(ambianceKept, (k) => k.time);
+  // The DM's Time shows while its fold is open, a player's while it is drawn, for the clock's toasts below.
+  const dmTimeOpen = useFolds(ambianceFoldsSlot)("time").open;
+  const timeShows = role === "dm" ? dmTimeOpen : keptTime || hasClock;
   const tools = useRoomView(useShallow((s) => toolsFor(role, s)));
   const tool = activeTool(toolId, role);
   // The keyboard (state/shortcuts.ts) and pasted images (features/images/pasteRouter.ts). A "view as a player" preview answers no key and takes no paste.
@@ -510,8 +526,8 @@ function RoomPage() {
   const unread = useLogUnread(wide ? sideShows("log") : sheet?.id === "log");
   // Others' rolls as toasts while the Dice panel is not on screen (docs/design/design-v1-dice.md 8.5).
   useRollToasts(wide ? sideShows("dice") : sheet?.id === "dice");
-  // Clock lines as toasts while neither the Log nor the Time panel is on screen (docs/design/design-v1-calendar.md 4.7).
-  useClockToasts(wide ? sideShows("log") || sideShows("time") : sheet?.id === "log" || sheet?.id === "time");
+  // Clock lines as toasts while neither the Log nor an open Time in Ambiance is on screen (docs/design/design-v1-calendar.md 4.7, design-v1-panel-groups.md 4.1).
+  useClockToasts(wide ? sideShows("log") || (sideShows(AMBIANCE_PANEL) && timeShows) : sheet?.id === "log" || (sheet?.id === AMBIANCE_PANEL && timeShows));
   const journalUnread = useJournalUnread();
   // A PDF upload waiting on the DM badges the DM panel, and on a phone the Panels button too (docs/design/design-v1-pdf-handouts.md 4.1.1).
   const uploadWaiting = useJobWaiting() && role === "dm" ? 1 : 0;
@@ -614,7 +630,7 @@ function RoomPage() {
   const saveSplit = useRef<(() => void) | null>(null);
   useLayoutEffect(() => {
     if (splitStored.current !== null || splitRole === null) return;
-    const has = new Set(panelsFor(splitRole, true, { clock: true, sound: true }).map((p) => p.id));
+    const has = new Set(panelsFor(splitRole, true, { ambiance: true }).map((p) => p.id));
     const entry = readSplit(splitRole, (id) => has.has(id));
     splitStored.current = entry;
     shareRef.current = entry.share;
@@ -1034,8 +1050,8 @@ function RoomPage() {
           chipDot={wide ? width < theme.layout.chipNameMinWidth : placement === "bar" && fight}
           openSheet={openSheet}
           openTime={() => {
-            focusNext.current = { kind: "panel", id: "time" };
-            ui.openPanel("time", { pane: "top" });
+            focusNext.current = { kind: "panel", id: AMBIANCE_PANEL };
+            openAmbiance(scope, ui, "time", { pane: "top" });
           }}
         />
         <div

@@ -1,3 +1,5 @@
+import { canonicalPanelId } from "../features/panels.ts";
+
 /**
  * What a reload asked for by a failed load opens again: the panel or the
  * tool whose code did not load. Kept in sessionStorage, which a reload of
@@ -19,7 +21,8 @@ export function decodeReopen(raw: string | null, roomId: string): Reopen | null 
     const value = JSON.parse(raw) as Record<string, unknown>;
     if (value.roomId !== roomId) return null;
     const out: Reopen = {};
-    if (typeof value.panel === "string") out.panel = value.panel;
+    // An id from before a rename, kept across the reload that shipped it, opens the panel that took its place.
+    if (typeof value.panel === "string") out.panel = canonicalPanelId(value.panel);
     if (typeof value.tool === "string") out.tool = value.tool;
     return out.panel || out.tool ? out : null;
   } catch {

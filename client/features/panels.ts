@@ -68,10 +68,10 @@ export type PanelProps = {
  * Which group a panel is in (docs/design/design-v1-layout-hierarchy.md M3): the
  * ones a table reaches for in play, the ones that run the table, the ones for
  * preparing, and the room's own Menu. The groups keep to the order's ranges:
- * play 10 to 20, table 30 to 39, prepare 40 to 48, and Menu 90. Time and Sound
- * sit at 34 and 36 for now: Ambiance will take 34, and they move then
- * (panel-groups design, section 3). A player's list is not grouped, so Time
- * and Sound still follow Areas, and tabGroup keeps a player's tab row as it was.
+ * play 10 to 20, table 30 to 39, prepare 40 to 48, and Menu 90. A player's
+ * list is not grouped, so a player's Ambiance follows Areas, as Time and
+ * Sound did before it took their place (docs/design/design-v1-panel-groups.md
+ * 3), and tabGroup keeps a player's tab row as it was.
  */
 export type PanelGroup = "play" | "table" | "prepare" | "room";
 
@@ -88,10 +88,8 @@ export type PanelDef = {
   group: PanelGroup;
   /** What the panel is about, where that comes from outside it: "selection", the selected token (panelSubject). */
   subject?: "selection";
-  /** Listed for a player only while their view holds the room's clock (panelsFor). The DM always has it. */
-  needsClock: boolean;
-  /** Listed for a player only while the room plays something they receive (panelsFor). The DM always has it. */
-  needsSound: boolean;
+  /** Listed for a player only while their view holds the room's clock, the room plays something they receive, or the panel is open (panelsFor). The DM always has it. */
+  needsAmbiance: boolean;
   /** The DM guide's section on this panel, a heading's anchor in docs/dm-guide.md, for the DM's Guide link at its foot (panels/Panels.tsx). */
   guide?: string;
   Component: ComponentType<PanelProps>;
@@ -105,8 +103,7 @@ function panel(def: {
   group: PanelGroup;
   dmOnly?: boolean;
   narrowOnly?: boolean;
-  needsClock?: boolean;
-  needsSound?: boolean;
+  needsAmbiance?: boolean;
   subject?: "selection";
   guide?: string;
   load: () => Promise<{ default: ComponentType<PanelProps> }>;
@@ -121,8 +118,7 @@ function panel(def: {
     group: def.group,
     dmOnly,
     narrowOnly: def.narrowOnly ?? false,
-    needsClock: def.needsClock ?? false,
-    needsSound: def.needsSound ?? false,
+    needsAmbiance: def.needsAmbiance ?? false,
     ...(def.subject ? { subject: def.subject } : null),
     ...(def.guide ? { guide: def.guide } : null),
     Component,
@@ -143,7 +139,8 @@ export const PANELS: readonly PanelDef[] = [
   panel({ id: "scenes", title: "Scenes", icon: "scenes", order: 32, group: "table", dmOnly: true, guide: "scenes", load: () => import("../panels/ScenesPanel.tsx") }),
   panel({ id: "library", title: "Library", icon: "library", order: 48, group: "prepare", load: () => import("../panels/LibraryPanel.tsx") }),
   panel({ id: "areas", title: "Areas", icon: "areas", order: 20, group: "play", guide: "areas", load: () => import("./areas/AreasPanel.tsx") }),
-  panel({ id: "time", title: "Time", icon: "time", order: 34, group: "table", needsClock: true, guide: "time-and-the-calendar", load: () => import("./clock/TimePanel.tsx") }),
+  // No guide of its own: its Time and Sound groups each link theirs (features/ambiance/AmbiancePanel.tsx).
+  panel({ id: "ambiance", title: "Ambiance", icon: "ambiance", order: 34, group: "table", needsAmbiance: true, load: () => import("./ambiance/AmbiancePanel.tsx") }),
   panel({ id: "log", title: "Log", icon: "log", order: 16, group: "play", load: () => import("../panels/LogPanel.tsx") }),
   panel({ id: "journal", title: "Journal", icon: "journal", order: 18, group: "play", load: () => import("./journal/JournalPanel.tsx") }),
   panel({ id: "characters", title: "Characters", icon: "characters", order: 44, group: "prepare", guide: "characters-and-their-stat-blocks", load: () => import("./tokens/CharactersPanel.tsx") }),
@@ -152,27 +149,25 @@ export const PANELS: readonly PanelDef[] = [
   // From 900 px up the party bar sits atop the side panel instead (features/party/PartyDock.tsx).
   panel({ id: "party", title: "Party", icon: "group", order: 14, group: "play", dmOnly: true, narrowOnly: true, load: () => import("./party/PartyPanel.tsx") }),
   panel({ id: "dm", title: "DM", icon: "dm", order: 30, group: "table", dmOnly: true, guide: "dm-panel", load: () => import("../panels/DmPanel.tsx") }),
-  panel({ id: "sound", title: "Sound", icon: "music", order: 36, group: "table", needsSound: true, guide: "music-and-sound", load: () => import("./sound/panel/SoundPanel.tsx") }),
   panel({ id: "outliner", title: "Outliner", icon: "outliner", order: 46, group: "prepare", dmOnly: true, guide: "outliner", load: () => import("./outliner/OutlinerPanel.tsx") }),
   panel({ id: "menu", title: "Menu", icon: "more", order: 90, group: "room", load: () => import("../panels/MenuPanel.tsx") }),
 ];
 
 /**
- * What a player's view holds that some panels wait for. `clock`: the room's
- * clock, so Time is listed (docs/design/design-v1-calendar.md 4.4). `sound`:
- * something playing that they receive, so Sound is listed
- * (docs/design/design-v1-music.md 4.1, D-261102-462). The DM has both panels
- * always. A player whose Time or Sound panel is open when it stops keeps it
- * open (pages/Room.tsx), so these only decide what is listed.
+ * What a player's view holds that some panels wait for. `ambiance`: the
+ * room's clock, something playing that they receive, or Ambiance already
+ * open, the union of the rules Time and Sound had
+ * (docs/design/design-v1-panel-groups.md 5, design-v1-calendar.md 4.4,
+ * design-v1-music.md 4.1). The DM has it always. Room works it out
+ * (pages/Room.tsx), so this only decides what is listed.
  */
-export type PanelsForOptions = { clock?: boolean; sound?: boolean };
+export type PanelsForOptions = { ambiance?: boolean };
 
 /** Whether a role is offered a panel (panelsFor). */
 export function panelOffered(p: PanelDef, role: "dm" | "player", wide = false, opts: PanelsForOptions = {}): boolean {
   if (p.dmOnly && role !== "dm") return false;
   if (wide && p.narrowOnly) return false;
-  if (role === "player" && p.needsClock && !opts.clock) return false;
-  if (role === "player" && p.needsSound && !opts.sound) return false;
+  if (role === "player" && p.needsAmbiance && !opts.ambiance) return false;
   return true;
 }
 
@@ -186,8 +181,8 @@ const GROUP_LABELS: Partial<Record<PanelGroup, string>> = { play: "In play", tab
 
 /**
  * The group whose gaps a panel's tab follows in the side panel's row. Run the
- * table is a DM's group: in a player's ungrouped row Time and Sound keep In
- * play's gaps, as before that group, so a player's row does not change.
+ * table is a DM's group: in a player's ungrouped row Ambiance keeps In play's
+ * gaps, as Time and Sound did before it, so a player's row does not change.
  */
 export function tabGroup(p: PanelDef, grouped: boolean): PanelGroup {
   return !grouped && p.group === "table" ? "play" : p.group;
@@ -794,9 +789,11 @@ export function usePanelScroll(id: string | null, subpage: PanelHeader | null, b
     const takeOver = () => keeper.takeOver();
     el.addEventListener("scroll", record, { passive: true });
     for (const type of VIEWER_INPUT) el.addEventListener(type, takeOver, { passive: true });
+    el.addEventListener(TAKE_OVER, takeOver);
     return () => {
       el.removeEventListener("scroll", record);
       for (const type of VIEWER_INPUT) el.removeEventListener(type, takeOver);
+      el.removeEventListener(TAKE_OVER, takeOver);
     };
   }, [body, keeper]);
   useLayoutEffect(() => {
@@ -808,3 +805,18 @@ export function usePanelScroll(id: string | null, subpage: PanelHeader | null, b
 
 /** What the viewer does to take a scroller over. */
 const VIEWER_INPUT = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+
+/** The event takeOverPanelScroll sends up to the scroller that holds it. */
+const TAKE_OVER = "rvtt-panel-take-over";
+
+/**
+ * Counts as the viewer taking a panel's scroller over, from inside the
+ * panel: a group a request scrolled to the top of the body
+ * (docs/design/design-v1-panel-groups.md 4.3), so a remembered offset that
+ * is still being put back never pulls it away. An event that bubbles to
+ * the scroller, since the panel's code cannot reach the keeper, which
+ * belongs to the sheet or the pane around it.
+ */
+export function takeOverPanelScroll(el: Element): void {
+  el.dispatchEvent(new Event(TAKE_OVER, { bubbles: true }));
+}

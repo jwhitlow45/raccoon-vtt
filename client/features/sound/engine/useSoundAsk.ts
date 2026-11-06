@@ -12,8 +12,8 @@ import { firedAfter, setRoomSound } from "./store.ts";
  * this device: at load when something already plays (a late joiner), when
  * music or a loop starts, or when an effect is fired after the page
  * loaded. Passed unanswered, the device stays quiet and does not ask again
- * in that page load: Room sound in the Sound panel or This device turns it
- * on.
+ * in that page load: Room sound in Ambiance's Sound or This device turns
+ * it on.
  */
 
 /** An ask nobody answers passes after this. */

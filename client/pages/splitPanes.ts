@@ -1,4 +1,5 @@
 import { SHEET_BODY_MIN } from "../components/sheetCap.ts";
+import { canonicalPanelId } from "../features/panels.ts";
 import { TAP_SLOP_PX } from "../lib/gestures.ts";
 import { theme } from "../lib/theme.ts";
 
@@ -191,8 +192,10 @@ export function parseSplit(raw: string | null, role: Role, has: (id: string) => 
   const entry = objectOf(parseAll(raw)?.[role]);
   if (!entry) return NO_SPLIT;
   const share = typeof entry.share === "number" && Number.isInteger(entry.share) && entry.share >= 1 && entry.share <= 999 ? entry.share : null;
-  const { top, below } = entry;
-  const pair = typeof top === "string" && typeof below === "string" && top !== below && has(top) && has(below) ? { top, below } : null;
+  // Old ids first (docs/design/design-v1-panel-groups.md 7): Initiative over "sound" is Initiative over Ambiance, and "time" over "sound", one panel now, is no split.
+  const top = typeof entry.top === "string" ? canonicalPanelId(entry.top) : null;
+  const below = typeof entry.below === "string" ? canonicalPanelId(entry.below) : null;
+  const pair = top !== null && below !== null && top !== below && has(top) && has(below) ? { top, below } : null;
   return { share, pair };
 }
 

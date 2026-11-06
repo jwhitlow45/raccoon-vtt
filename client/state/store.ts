@@ -27,7 +27,7 @@ import { SCENE_LOAD_IDLE, sceneLoadFailureText, stepSceneLoad, type SceneLoad, t
 import { shareRecord, shareState } from "./share.ts";
 import { backoffDelay, realClock, Timer, type Clock } from "./timing.ts";
 import { addToSelection, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "./selection.ts";
-import { panelById } from "../features/panels.ts";
+import { canonicalPanelId, panelById } from "../features/panels.ts";
 import { crossWide, EMPTY_EPHEMERAL, INITIAL_LOCAL, MAX_REFUSED, withoutBelow, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetExpanded, withSheetHidden, withSidePanelHidden, withSplit, withSplitFits, withSwap, type Ended, type LocalUi, type OnAnswer, type OpAnswer, type OpRefusal, type PanelHow, type PendingOp, type RoomView, type Toast, type ToastAction, type ToastDie, type UnknownCause, type You } from "./types.ts";
 
 export type { PendingOp } from "./types.ts";
@@ -779,7 +779,9 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     showActions(open) {
       setLocal(showActions(get().local, open));
     },
-    openPanel(id, how) {
+    openPanel(asked, how) {
+      // A stale caller's old id ("time", "sound") opens the panel that took its place, so local state never holds an id the registry lacks.
+      const id = canonicalPanelId(asked);
       setLocal(withPanel(get().local, id, how, panelById(id)?.narrowOnly === true));
     },
     splitPanels(on, pair) {

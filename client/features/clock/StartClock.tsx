@@ -14,18 +14,27 @@ import { composeDraft, calendarSummary } from "./words.ts";
 export const START_INTRO = "Track the in-game date and time. You move the clock on as time passes. Party Long Rests and fights move it too.";
 export const SHARE_HELP = "Off, players don't see the date or time, and their Log stops showing its changes.";
 
+/** The start form as typed: the calendar, the date and the sharing switch. */
+export type StartDraft = { readonly form: StartForm; readonly shown: boolean };
+
+export const START_DRAFT: StartDraft = { form: START_FORM, shown: true };
+
 /**
- * The Time panel with no clock (docs/design/design-v1-calendar.md 4.1). The
+ * Ambiance's Time with no clock (docs/design/design-v1-calendar.md 4.1). The
  * form holds the calendar, the date and the sharing switch, and nothing is
  * sent until Start the clock: one `clock.start`, so a hidden Months clock
  * never reaches a player, its start line included. A Months calendar is
- * kept here as a draft by the Calendar dialog's Save.
+ * kept as a draft by the Calendar dialog's Save. The draft lives in the
+ * Ambiance panel's top (`draft`), above the Sound subpages that replace the
+ * first page, so Back finds the fields as they were
+ * (docs/design/design-v1-panel-groups.md 4.1, D-261102-763).
  */
-export function StartClock() {
+export function StartClock(props: { draft: StartDraft; onDraft(next: StartDraft): void }) {
   const actions = useRoomActions();
-  const [form, setForm] = useState<StartForm>(START_FORM);
+  const { form, shown } = props.draft;
+  const setForm = (next: StartForm) => props.onDraft({ ...props.draft, form: next });
+  const setShown = (next: boolean) => props.onDraft({ ...props.draft, shown: next });
   const { calendar, date, tried } = form;
-  const [shown, setShown] = useState(true);
   const [dialog, setDialog] = useState<Calendar | null>(null);
   const changeButton = useRef<HTMLButtonElement>(null);
   const composed = composeDraft(date, calendar);

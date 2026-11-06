@@ -1,38 +1,24 @@
-import { useCallback, useState } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import { Button } from "../../../components/Button.tsx";
 import { Loading } from "../../../components/Loading.tsx";
 import { Help, Section } from "../../../components/Panel.tsx";
 import { theme } from "../../../lib/theme.ts";
 import { useRoomView } from "../../../state/view.ts";
-import { usePanelHeader, type PanelProps } from "../../panels.ts";
+import { WHAT_PLAYERS_HEAR } from "../../ambiance/words.ts";
+import { usePanelHeader } from "../../panels.ts";
 import { EffectsBoard } from "./EffectsBoard.tsx";
 import { RoomSoundControls, serverRoomSound, useServerRoomSoundState, type ServerSound } from "./engine.ts";
 import { LoopsSection } from "./LoopsSection.tsx";
 import { MusicSection } from "./MusicSection.tsx";
-import { NowPlaying } from "./NowPlaying.tsx";
-import { PlayerSound } from "./PlayerSound.tsx";
+import { NowPlaying, WhatPlayersHear } from "./NowPlaying.tsx";
 import { PlaylistPage } from "./PlaylistPage.tsx";
 import { SoundPage } from "./SoundPage.tsx";
 import { nameOf, playlistsOf, soundsOf } from "./state.ts";
 import { StorageLine } from "./StorageLine.tsx";
 import { SERVER_CHECKING, SERVER_FAILED, SERVER_OFF } from "./words.ts";
 
-/** The page the DM's panel shows: its first page, or a playlist's or a sound's. */
+/** The page the DM's Sound shows: its first page, or a playlist's or a sound's. */
 type Page = { kind: "playlist"; id: string } | { kind: "sound"; id: string } | null;
-
-/**
- * Sound (docs/design/design-v1-music.md 4.1 and 4.3). The DM, and co-DMs,
- * run everything here. A player sees what plays and this device's
- * controls, and only while the room plays something they receive, or
- * while a panel opened then stays open (pages/Room.tsx). A display has no
- * panel.
- */
-export default function SoundPanel(_props: PanelProps) {
-  const role = useRoomView((s) => s.you?.role);
-  if (role === "dm") return <DmSound />;
-  if (role === "player") return <PlayerSound />;
-  return null;
-}
 
 /**
  * What the panel says of the server's switch when it is not on: the shared
@@ -53,71 +39,120 @@ export function ServerLine(props: { server: ServerSound; onRetry(): void }) {
   );
 }
 
-function DmSound() {
-  const server = useServerRoomSoundState();
-  const serverOn = server === "on";
-  const roomId = useRoomView((s) => s.roomId);
+/**
+ * What the DM's Sound keeps above its subpages, in the Ambiance panel's top
+ * (docs/design/design-v1-panel-groups.md 4.1, D-261102-763): which page
+ * shows, Background's and Effects' Edit, and the storage line's version. A
+ * playlist's or a sound's page replaces the whole of Ambiance's first page,
+ * as it replaced the Sound panel's, so these must outlive it. `subpage` is
+ * the page to draw in its place, or null for the first page. `toFirstPage`
+ * goes back as Back does, for a request from elsewhere (4.3).
+ */
+export type DmSoundPages = { subpage: ReactNode | null; first: DmSoundFirst; toFirstPage(): void };
+
+/** The first page's part of DmSoundPages, handed to DmSoundSection. */
+export type DmSoundFirst = {
+  editing: { loops: boolean; effects: boolean };
+  onEditLoops(editing: boolean): void;
+  onEditEffects(editing: boolean): void;
+  onOpenPlaylist(id: string): void;
+  onOpenSound(id: string): void;
+  storageVersion: number;
+  onStorageChanged(): void;
+};
+
+/** The DM's Sound pages. `parent` names the panel for each subpage's "Back to" button. */
+export function useDmSoundPages(parent: string): DmSoundPages {
   const sounds = useRoomView((s) => soundsOf(s.view));
   const playlists = useRoomView((s) => playlistsOf(s.view));
   const [page, setPage] = useState<Page>(null);
   const [storageVersion, setStorageVersion] = useState(0);
   // Kept here, above the sections a subpage replaces, so Back from a sound's page finds Background or Effects still in Edit.
   const [editing, setEditing] = useState({ loops: false, effects: false });
-  const editLoops = useCallback((loops: boolean) => setEditing((e) => ({ ...e, loops })), []);
-  const editEffects = useCallback((effects: boolean) => setEditing((e) => ({ ...e, effects })), []);
-  const storageChanged = () => setStorageVersion((n) => n + 1);
+  const onEditLoops = useCallback((loops: boolean) => setEditing((e) => ({ ...e, loops })), []);
+  const onEditEffects = useCallback((effects: boolean) => setEditing((e) => ({ ...e, effects })), []);
+  const onStorageChanged = useCallback(() => setStorageVersion((n) => n + 1), []);
+  const back = useCallback(() => setPage(null), []);
 
   // A page whose playlist or sound went, deleted here or on another DM's device, goes back to the first page.
   const playlist = page?.kind === "playlist" ? playlists[page.id] : undefined;
   const sound = page?.kind === "sound" ? sounds[page.id] : undefined;
-  const open: Page = playlist || sound ? page : null;
-  const back = () => setPage(null);
   usePanelHeader(
     playlist
-      ? { title: playlist.name, parent: "Sound", id: `playlist-${playlist.id}`, onBack: back, backTo: [`playlist-${playlist.id}`] }
+      ? { title: playlist.name, parent, id: `playlist-${playlist.id}`, onBack: back, backTo: [`playlist-${playlist.id}`] }
       : sound
-        ? { title: nameOf(sound), parent: "Sound", id: `sound-${sound.id}`, onBack: back, backTo: [`sound-${sound.id}`] }
+        ? { title: nameOf(sound), parent, id: `sound-${sound.id}`, onBack: back, backTo: [`sound-${sound.id}`] }
         : null,
   );
 
-  if (open && playlist) return <PlaylistPage key={playlist.id} playlist={playlist} onDeleted={back} />;
-  if (open && sound)
-    return (
-      <SoundPage
-        key={sound.id}
-        sound={sound}
-        onDeleted={() => {
-          storageChanged();
-          back();
-        }}
-      />
-    );
+  const subpage = playlist ? (
+    <PlaylistPage key={playlist.id} playlist={playlist} onDeleted={back} />
+  ) : sound ? (
+    <SoundPage
+      key={sound.id}
+      sound={sound}
+      onDeleted={() => {
+        onStorageChanged();
+        back();
+      }}
+    />
+  ) : null;
+  return {
+    subpage,
+    toFirstPage: back,
+    first: {
+      editing,
+      onEditLoops,
+      onEditEffects,
+      onOpenPlaylist: (id) => setPage({ kind: "playlist", id }),
+      onOpenSound: (id) => setPage({ kind: "sound", id }),
+      storageVersion,
+      onStorageChanged,
+    },
+  };
+}
 
-  const openPlaylist = (id: string) => setPage({ kind: "playlist", id });
-  const openSound = (id: string) => setPage({ kind: "sound", id });
-
+/**
+ * The DM's Sound first page, in D-261102-766's order
+ * (docs/design/design-v1-panel-groups.md 4.1): Now playing, Effects right
+ * under it, What players hear, then Music, Background, On this device and
+ * the storage line. With the server's switch off: its line, Effects and On
+ * this device.
+ */
+export function DmSoundSection(props: DmSoundFirst) {
+  const server = useServerRoomSoundState();
+  const serverOn = server === "on";
+  const roomId = useRoomView((s) => s.roomId);
+  const soundCount = useRoomView((s) => Object.keys(soundsOf(s.view)).length);
+  const effects = <EffectsBoard serverOn={serverOn} editing={props.editing.effects} onEditing={props.onEditEffects} onOpenSound={props.onOpenSound} onStorageChanged={props.onStorageChanged} />;
   return (
-    <div data-sound-panel="" style={{ display: "grid", gap: theme.space(0), minWidth: 0 }}>
+    <div data-sound-panel="" style={{ display: "grid", gap: theme.space(4), minWidth: 0 }}>
       {serverOn ? (
         <>
-          <Section label="Now playing" divider={false}>
+          <Section label="Now playing">
             <NowPlaying />
           </Section>
-          <MusicSection onOpenPlaylist={openPlaylist} onOpenSound={openSound} onStorageChanged={storageChanged} />
-          <LoopsSection editing={editing.loops} onEditing={editLoops} onOpenSound={openSound} onStorageChanged={storageChanged} />
+          {effects}
+          <Section label={WHAT_PLAYERS_HEAR}>
+            <WhatPlayersHear />
+          </Section>
+          <MusicSection onOpenPlaylist={props.onOpenPlaylist} onOpenSound={props.onOpenSound} onStorageChanged={props.onStorageChanged} />
+          <LoopsSection editing={props.editing.loops} onEditing={props.onEditLoops} onOpenSound={props.onOpenSound} onStorageChanged={props.onStorageChanged} />
         </>
       ) : (
-        <Section divider={false}>
-          <ServerLine server={server} onRetry={() => void serverRoomSound()} />
-        </Section>
+        <>
+          <Section>
+            <ServerLine server={server} onRetry={() => void serverRoomSound()} />
+          </Section>
+          {effects}
+        </>
       )}
-      <EffectsBoard serverOn={serverOn} editing={editing.effects} onEditing={editEffects} onOpenSound={openSound} onStorageChanged={storageChanged} />
       <Section label="On this device">
         <RoomSoundControls />
       </Section>
       {serverOn ? (
-        <Section divider={false}>
-          <StorageLine roomId={roomId} version={`${storageVersion} ${Object.keys(sounds).length}`} />
+        <Section>
+          <StorageLine roomId={roomId} version={`${props.storageVersion} ${soundCount}`} />
         </Section>
       ) : null}
     </div>

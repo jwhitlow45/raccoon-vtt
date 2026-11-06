@@ -45,7 +45,7 @@ export function PlayerNow(props: { playing: Playing | null; sounds: Sounds; here
   );
 }
 
-/** A player's Sound panel: Now playing and On this device (4.3). */
+/** A player's Sound, in Ambiance's Sound group: Now playing and On this device (4.3). */
 export function PlayerSound() {
   const playing = useRoomView((s) => s.view?.playing ?? null);
   const sounds = useRoomView((s) => soundsOf(s.view));

@@ -129,6 +129,7 @@ export type IconName =
   | "viewAs"
   | "windToward"
   | "weather"
+  | "ambiance"
   | "music"
   | "play"
   | "pause"
@@ -209,6 +210,7 @@ export const LUCIDE: Partial<Record<IconName, LucideIcon>> = {
   mapLabel: "type",
   light: "lightbulb",
   weather: "cloud-rain",
+  ambiance: "cloud-sun",
   stamp: "stamp",
   music: "music",
   play: "play",
@@ -561,7 +563,7 @@ const SHAPES: Record<IconName, ReactNode> = {
       <circle cx="12" cy="14" r="8" />
     </g>
   ),
-  // Lucide calendar-clock: the Time panel, and the top bar's date and time.
+  // Lucide calendar-clock: Ambiance's Time, and the top bar's date and time.
   time: (
     <g {...STROKE}>
       <path d="M16 14v2.2l1.6 1M16 2v4M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5M3 10h5M8 2v4" />
@@ -674,7 +676,15 @@ const SHAPES: Record<IconName, ReactNode> = {
       <path d="M16 14v6M8 14v6M12 16v6" />
     </g>
   ),
-  // The Sound panel's own (docs/design/design-v1-music.md 4.1). Lucide music: the panel, the room's music and sound.
+  // Lucide cloud-sun: the Ambiance panel, the room's time, weather and sound together (docs/design/design-v1-panel-groups.md 4.1).
+  ambiance: (
+    <g {...STROKE}>
+      <path d="M12 2v2M4.93 4.93l1.41 1.41M20 12h2M19.07 4.93l-1.41 1.41" />
+      <path d="M15.947 12.65a4 4 0 0 0-5.925-4.128" />
+      <path d="M13 22H7a5 5 0 1 1 4.9-6H13a3 3 0 0 1 0 6Z" />
+    </g>
+  ),
+  // The Sound section's own (docs/design/design-v1-music.md 4.1). Lucide music: the panel, the room's music and sound.
   music: (
     <g {...STROKE}>
       <path d="M9 18V5l12-2v13" />
