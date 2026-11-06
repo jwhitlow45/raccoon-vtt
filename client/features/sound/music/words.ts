@@ -16,6 +16,8 @@ export const BACK_TO_MUSIC = "Back to Music";
 export const NOW_TAB = "Now playing";
 export const LIBRARY_TAB = "Library";
 export const MUSIC_TABS = "Music";
+/** The DM guide's section the Guide link at Library's foot opens (4.4). */
+export const MUSIC_GUIDE = "the-music-window";
 export const OPEN_FAILED = "Couldn't open music.";
 export const OPENING = "Opening music…";
 

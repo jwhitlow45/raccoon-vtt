@@ -8,6 +8,7 @@ import { Popover, usePopover } from "../../../components/Popover.tsx";
 import { Row, RowList } from "../../../components/Row.tsx";
 import { theme } from "../../../lib/theme.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../../state/view.ts";
+import { PanelGuideLink } from "../../guide/GuideLink.tsx";
 import { SOUND_LIMITS } from "#shared/limits.ts";
 import { playingAt, type MusicRun, type Playlist, type PlaylistId, type Sound, type SoundId } from "#shared/sound.ts";
 import { AddSounds } from "../upload/AddSounds.tsx";
@@ -27,6 +28,8 @@ import {
   EDIT_PLAYLIST,
   fullPlaylist,
   IN_THE_QUEUE,
+  MUSIC_GUIDE,
+  MUSIC_TITLE,
   NEW_PLAYLIST,
   NEW_PLAYLIST_WITH,
   NO_PLAYLISTS,
@@ -147,7 +150,8 @@ const NEW_WITH_ID = "\u0000new";
 /**
  * Library (docs/design/design-v1-music-player.md 4.4): search, sort, the
  * playlists with New playlist, the tracks, each row with Play or Pause
- * and its More menu, then Add music… and the storage line.
+ * and its More menu, then Add music…, the storage line and the guide's
+ * link to the Music window's section.
  */
 export function Library(props: { onOpenMaker(playlistId: PlaylistId | null, seed?: SoundId): void; onOpenTrack(soundId: SoundId): void }) {
   const actions = useRoomActions();
@@ -304,6 +308,7 @@ export function Library(props: { onOpenMaker(playlistId: PlaylistId | null, seed
         <AddSounds use="music" onStorageChanged={() => setStorage((n) => n + 1)} />
       </div>
       <StorageLine roomId={roomId} version={`${storage} ${Object.keys(sounds).length}`} />
+      <PanelGuideLink section={MUSIC_GUIDE} panel={MUSIC_TITLE} />
     </div>
   );
 }

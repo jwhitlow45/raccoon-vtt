@@ -1,10 +1,14 @@
+import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, test } from "node:test";
+import { createStore } from "zustand/vanilla";
+import { member, room } from "#shared/testutil.ts";
 import { parseMarkdown, type Block, type Inline } from "../../components/markdown.ts";
 import { parseRoute } from "../../lib/router.ts";
 import { AMBIANCE_GUIDES } from "../ambiance/words.ts";
 import { PANELS } from "../panels.ts";
+import { MUSIC_GUIDE } from "../sound/music/words.ts";
 import { GUIDE_PATH, guideBody, guideHref, guideImageName, guideImageSize } from "./guide.ts";
 
 const DOCS = new URL("../../../docs/", import.meta.url);
@@ -92,6 +96,33 @@ describe("the DM guide's page", () => {
     assert.deepEqual(AMBIANCE_GUIDES, { time: "time-and-the-calendar", sound: "music-and-sound" });
     for (const section of Object.values(AMBIANCE_GUIDES)) assert.ok(IDS.has(section), `ambiance: #${section}`);
     assert.ok(IDS.has("quick-start"), "the empty states' link");
+  });
+
+  test("the Music window's Library ends in a Guide link to the guide's section on the window", async () => {
+    assert.ok(IDS.has(MUSIC_GUIDE), `music: #${MUSIC_GUIDE}`);
+    const { createElement } = await import("react");
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const { RoomProvider } = await import("../../state/view.ts");
+    const { RoomScope, RoomScopeProvider } = await import("../../state/scope.ts");
+    const { Library } = await import("../sound/music/Library.tsx");
+    const store = createStore(() => ({ view: room({ members: { dm1: member("dm1", "dm") } }), you: { memberId: "dm1", role: "dm" }, roomId: "r1", sceneId: null, serverOffset: 0, connection: "open", pending: [], local: { selectedIds: [], multi: false } }));
+    const html = renderToStaticMarkup(
+      createElement(RoomScopeProvider, {
+        scope: new RoomScope(),
+        children: createElement(RoomProvider, {
+          store: store as never,
+          actions: { dispatch: () => 1, newId: () => "x" } as never,
+          ui: {} as never,
+          children: createElement(Library, { onOpenMaker: () => {}, onOpenTrack: () => {} }),
+        }),
+      }),
+    );
+    const links = [...html.matchAll(/<a [^>]*>/g)].map((m) => m[0]);
+    assert.equal(links.length, 1, links.join("\n"));
+    assert.match(links[0]!, new RegExp(`href="${guideHref(MUSIC_GUIDE)}"`));
+    assert.match(links[0]!, /aria-label="Music in the DM guide \(opens in a new tab\)"/);
+    // The last thing Library shows, under Add music and the storage line.
+    assert.match(html, /<a [^>]*>Guide<\/a><\/p><\/div>$/);
   });
 
   test("every image is in the guide's folder, every file there is shown, and each has the size the page gives it", () => {
