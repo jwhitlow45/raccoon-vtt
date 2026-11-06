@@ -20,7 +20,7 @@ import { markedBy, ProficiencyLabel, proficiencyBox, spokenProficiency } from ".
 import { ScrollStrip } from "../../components/ScrollStrip.tsx";
 import { Switch } from "../../components/Switch.tsx";
 import { WholeParts } from "../../components/WholeParts.tsx";
-import { tabKeyIndex } from "../../lib/a11y.ts";
+import { tabKeyIndex, VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { scrollBox, startInScrollBox } from "../../lib/reveal.ts";
 import { displayName } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
@@ -68,6 +68,7 @@ import {
   presetNotes,
   presetTag,
   presetWords,
+  resultWords,
   rechargeUseOf,
   riderToggleName,
   riderText,
@@ -100,10 +101,15 @@ import { actionFill } from "./groupSave/fills.ts";
 import { AskForSavesButton, RowCast, useCloseSettledBlock, WaitingAsks } from "./cast/CastBlock.tsx";
 import { useCastTracker } from "./cast/alerts.ts";
 import { phaseOf } from "./cast/cast.ts";
-import { acceptsRollMode, type RollModeCapability, type RollModeOverride } from "./rollMode.ts";
+import { acceptsRollMode, effectiveRollMode, type RollModeCapability, type RollModeOverride } from "./rollMode.ts";
 import { useRollModeMenu } from "./useRollModeMenu.tsx";
 import { useRollPresses } from "./useDicePanel.ts";
 import { useActOnce, useInitiativeChanged, useRollBlocked, useRollOption, useRowResult, useWatchInitiative } from "./useRollOption.ts";
+import { ApplyTo } from "./ApplyTo.tsx";
+import { useCommittedRoll } from "./Roller.tsx";
+import { useReceiptVoice } from "./useReceipt.ts";
+import { chipWords, rollChip } from "./targets.ts";
+import { cardAttacks } from "../combat/alerts.ts";
 
 /** The roll mode row (Roller.tsx) and the sticky result line, which a token's Roll lands the panel by (docs/design/design-v1-dice-pass.md 8), found from the Dice panel's root (DicePanel.tsx). */
 const DICE_PANEL = "[data-dice-panel]";
@@ -379,7 +385,15 @@ function CreatureFrame(props: { loaded: Loaded; creature: ActorTarget; tokenId?:
   );
 }
 
-type Shown = { dice: DiceView; rolls: CreatureRolls; creature: ActorTarget; tokenId: string | undefined; name: string };
+type Shown = { dice: DiceView; rolls: CreatureRolls; creature: ActorTarget; tokenId: string | undefined; name: string; card?: CardRolls };
+
+/**
+ * Rows drawn on a turn card rather than in the Dice panel (QOL audit Q1):
+ * each shows its newest result under it, counting only rolls sent at or
+ * after `after`, the room seq its turn started at, and throws no dice,
+ * since the tray is the Dice panel's.
+ */
+type CardRolls = { after: number | undefined };
 
 type Ctx = {
   dice: DiceView;
@@ -401,6 +415,8 @@ type Ctx = {
   uses: readonly LimitedUse[] | null;
   /** This viewer may spend its uses: the DM, or one who owns it (6). */
   spends: boolean;
+  /** Drawn on a turn card, or null in the Dice panel (CardRolls). */
+  card: CardRolls | null;
 };
 
 /** What the card and the groups both read of a creature's options. */
@@ -435,6 +451,7 @@ function useCtx(props: Shown) {
     marks: actor?.uses,
     uses: block ? limitedUses(block) : null,
     spends: spendsFor(state, dice.you, creature),
+    card: props.card ?? null,
   };
   return { ctx, actor, character, askOff, cast };
 }
@@ -857,7 +874,7 @@ function MarkedName(props: { text: string; level: Proficiency | undefined }) {
  */
 function D20Cell(props: { ctx: Ctx; test: D20Test; bonus: number; unknown?: { typed: TypedBonus }; text: string; label?: string; critOn?: 18 | 19; rowKey?: string; grow?: boolean; fill?: boolean; common?: readonly string[]; contextVersion?: string; onLanded?(critical: boolean): void }) {
   const { ctx, test } = props;
-  const option = useRollOption("dice");
+  const option = useRollOption(ctx.card ? undefined : "dice");
   const liveRoom = useRoomStore();
   const route = routeOf({ state: ctx.dice.view, creature: ctx.creature, test, dm: ctx.dice.you.role === "dm", played: ctx.played, ask: ctx.ask });
   const sourceRoute = route.kind === "answer" ? [route.kind, requestRollSource(route.request, route.target), route.choice] : route;
@@ -1056,7 +1073,7 @@ function useRowUse() {
  */
 function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
   const { ctx } = props;
-  const option = useRollOption("dice");
+  const option = useRollOption(ctx.card ? undefined : "dice");
   const store = useOptionStore();
   const rowKey = `${ctx.key}|${props.named.key}`;
   const crit = useOption((s) => s.critical[rowKey] === true);
@@ -1232,6 +1249,7 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
           {rowUse.status.text}
         </p>
       ) : null}
+      {ctx.card ? <CardResults attackRow={named.attack !== undefined ? `${ctx.key}|${props.named.key}|attack` : null} damageRow={hasDamage ? damageRow : null} after={ctx.card.after} /> : null}
       {player ? (
         <RowCast
           dice={ctx.dice}
@@ -1318,6 +1336,109 @@ function GroupSaveButton(props: { ctx: Ctx; named: NamedRoll; spend: ((quiet: bo
           <ReplaceConfirm onDiscard={() => go(true) && setPending(false)} onKeep={() => setPending(false)} />
         </div>
       ) : null}
+    </>
+  );
+}
+
+/**
+ * A creature's attacks on its turn card (QOL audit Q1, D-261106-100): its
+ * named rolls with an attack bonus in Actions and Bonus Actions
+ * (combat/alerts.ts cardAttacks), drawn as the Dice panel's own rows, so
+ * each has the same name and numbers ("+4 to hit · 1d6+2 Slashing"),
+ * Attack, Damage, Critical, riders, Used and the one-roll menu, and its
+ * rolls start secret where the panel's do. Each row shows its newest
+ * result since `after`, the room seq its turn started at, with a damage
+ * result's Apply to chips. The attacks wait for the stat block as the
+ * card's uses do, "Loading attacks…" after 200 ms.
+ */
+export function AttackRows(props: { creature: ActorTarget; tokenId?: string | undefined; name: string; after: number | undefined; quietWait?: boolean }) {
+  const loaded = useCreatureRolls(props.creature);
+  // `quietWait`: the card's uses already say they load, or failed to, for the same block.
+  if (loaded.failed) return props.quietWait ? null : <SrdLoadFailed what="The attacks" inline />;
+  if (!loaded.dice || !loaded.rolls) return props.quietWait ? null : <Loading text="Loading attacks…" style={{ minHeight: theme.touch }} />;
+  return <CardAttacks dice={loaded.dice} rolls={loaded.rolls} creature={props.creature} tokenId={props.tokenId} name={props.name} card={{ after: props.after }} />;
+}
+
+function CardAttacks(props: Shown) {
+  const { ctx } = useCtx(props);
+  const rows = cardAttacks(ctx.rolls.named);
+  if (rows.length === 0) return null;
+  return (
+    <div role="group" aria-label={`${props.name}'s attacks`} data-card-attacks="" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)" }}>
+      {rows.map((r) => (
+        <NamedRow key={r.key} ctx={ctx} named={r} />
+      ))}
+    </div>
+  );
+}
+
+/** One row's newest roll as a card shows it, with its voice: the card sent it, so the card says it. */
+function useCardResult(row: string | null, after: number | undefined) {
+  const result = useRowResult(row ?? "", after);
+  const tag = row === null ? null : result.tag;
+  const speaks = useReceiptVoice(tag, true);
+  const committed = useCommittedRoll(tag === null ? null : result.receipt);
+  return { ...result, tag, speaks, committed };
+}
+
+type CardResult = ReturnType<typeof useCardResult>;
+
+/** "17 to hit", "6 Slashing damage": a settled result's number, then its words. */
+function resultLine(kind: "attack" | "damage", result: CardResult): ReactNode {
+  const { receipt, waiting, committed } = result;
+  if (result.tag === null || !receipt) return null;
+  if (waiting) return <Loading small text="Rolling…" active live={false} />;
+  if (receipt.state === "refused") return <span style={{ color: theme.color.dangerText }}>{receipt.text || receipt.message}</span>;
+  if (receipt.state === "unknown") return <span style={{ color: theme.color.textMuted }}>This may have happened. Check the log.</span>;
+  if (receipt.state !== "committed" || !committed.first || !committed.head) return <span style={{ color: theme.color.textMuted }}>Rolled. Its result is no longer in the log.</span>;
+  // "Normal" says nothing a plain number does not. Advantage, Disadvantage and Secret stay.
+  const mode = effectiveRollMode(committed.first, committed.secret).split(", ").filter((part) => part !== "Normal" && part !== "");
+  let words: string;
+  if (kind === "attack") {
+    // resultWords leads with the total, which the number before these words already says.
+    const [, ...more] = resultWords(result.rolls, "attack").split(", ");
+    words = ["to hit", ...more].join(", ");
+  } else {
+    const chip = rollChip(receipt.lines);
+    // One type reads "6 Slashing damage" after its number, several "9 damage (6 Slashing damage + 3 Fire damage)".
+    words = !chip?.parts ? "damage" : chip.parts.length > 1 ? `damage (${chipWords(chip)})` : chipWords(chip).replace(/^\d+ /, "");
+  }
+  return (
+    <span style={{ minWidth: 0 }}>
+      <span style={{ fontWeight: theme.weight.bold, fontVariantNumeric: "tabular-nums", marginRight: theme.space(1) }}>{committed.head.total.toLocaleString("en-US")}</span>
+      <span style={{ color: theme.color.textMuted }}>{[words, ...mode].join(", ")}</span>
+    </span>
+  );
+}
+
+/**
+ * A turn card row's newest attack and damage results (QOL audit Q1), on
+ * one line under its controls, "17 to hit  6 Slashing damage", each
+ * "Rolling…" while it waits or its refusal's words, then Apply to under a
+ * damage result. The live regions stay mounted, so each result is said
+ * once as it lands.
+ */
+function CardResults(props: { attackRow: string | null; damageRow: string | null; after: number | undefined }) {
+  const attack = useCardResult(props.attackRow, props.after);
+  const damage = useCardResult(props.damageRow, props.after);
+  const attackLine = resultLine("attack", attack);
+  const damageLine = resultLine("damage", damage);
+  const damageLines = damage.receipt?.state === "committed" ? damage.receipt.lines : null;
+  return (
+    <>
+      {attackLine || damageLine ? (
+        <div data-card-result="" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(3), rowGap: 0, minHeight: theme.touch, fontSize: theme.font.body14, overflowWrap: "anywhere" }}>
+          {attackLine}
+          {damageLine}
+        </div>
+      ) : null}
+      {damageLines ? <ApplyTo lines={damageLines} /> : null}
+      <span role="status" aria-live="polite" style={VISUALLY_HIDDEN}>
+        {attack.speaks ? attack.committed.said : ""}
+      </span>
+      <span role="status" aria-live="polite" style={VISUALLY_HIDDEN}>
+        {damage.speaks ? damage.committed.said : ""}
+      </span>
     </>
   );
 }

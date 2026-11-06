@@ -12,8 +12,8 @@ const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { TurnCard } = await import("./TurnCard.tsx");
 
-function folded(count: number): string {
-  const model = { id: "t1", name: "Adult Red Dragon", blocks: [], count, loading: false, failed: false };
+function folded(count: number, attacks = 0): string {
+  const model = { id: "t1", name: "Adult Red Dragon", blocks: [], count, attacks, loading: false, failed: false };
   return renderToStaticMarkup(createElement(TurnCard, { model, folded: true, foldable: true, onShow: () => {}, onDismiss: () => {} }));
 }
 
@@ -27,6 +27,14 @@ describe("a folded turn card", () => {
       assert.ok(id, "described");
       assert.match(markup, new RegExp(`<span id="${id}">${words}</span>`));
       assert.match(markup, new RegExp(`Adult Red Dragon&#x27;s turn: <span id="${id}">`), "the words read as before");
+    });
+  }
+});
+
+describe("a folded turn card of a creature with attacks (QOL audit Q1)", () => {
+  for (const [count, attacks, words] of [[0, 2, "2 attacks"], [3, 1, "1 attack, 3 uses"], [0, 0, "0 uses"]] as const) {
+    test(`says "${words}"`, () => {
+      assert.match(folded(count, attacks), new RegExp(`<span id="[^"]+">${words}</span>`));
     });
   }
 });

@@ -2,6 +2,7 @@ import { useId, type CSSProperties, type Ref } from "react";
 import { Button } from "../../components/Button.tsx";
 import { Icon } from "../../components/Icon.tsx";
 import { theme } from "../../lib/theme.ts";
+import { AttackRows } from "../dice/RollOptions.tsx";
 import { alertCard } from "../encounter/alertCard.ts";
 import type { TurnCardModel } from "./alerts.ts";
 import { CombatUses } from "./CombatUses.tsx";
@@ -16,9 +17,18 @@ export function turnTitle(model: Pick<TurnCardModel, "name">): string {
   return `${model.name}'s turn`;
 }
 
-/** "3 uses", the count after the title in the folded row's words, "Adult Red Dragon's turn: 3 uses" (4.2). */
-export function turnUsesText(model: Pick<TurnCardModel, "count">): string {
-  return `${model.count} ${model.count === 1 ? "use" : "uses"}`;
+/**
+ * "3 uses", the count after the title in the folded row's words, "Adult
+ * Red Dragon's turn: 3 uses" (4.2). A creature with attacks counts them
+ * first (QOL audit Q1): "Goblin Warrior 1's turn: 2 attacks", "2 attacks,
+ * 3 uses".
+ */
+export function turnUsesText(model: Pick<TurnCardModel, "count"> & Partial<Pick<TurnCardModel, "attacks">>): string {
+  const uses = `${model.count} ${model.count === 1 ? "use" : "uses"}`;
+  const attacks = model.attacks ?? 0;
+  if (attacks === 0) return uses;
+  const attackText = `${attacks} ${attacks === 1 ? "attack" : "attacks"}`;
+  return model.count > 0 ? `${attackText}, ${uses}` : attackText;
 }
 
 /** A fold's button over its words: the chevron, then the words, the trap card's look (features/traps/TrapCard.tsx), at a touch target's height. */
@@ -43,7 +53,8 @@ const FOLD: CSSProperties = {
  * turn start to its end, the turn's menu of its uses, for whoever answers
  * for it, with a block under each other creature of the turn this viewer
  * answers for. On its own turn a creature takes no legendary action, so
- * the card counts its pips and lists no button for them (13.1).
+ * the card counts its pips and lists no button for them (13.1). A
+ * creature's attacks lead each block, its uses under them (QOL audit Q1).
  *
  * `folded` is one 44 px row, "Adult Red Dragon's turn: 3 uses" with Show,
  * which FightAlerts picks under 600 px wide and wherever the card would not
@@ -106,6 +117,14 @@ export function TurnCard(props: { model: TurnCardModel; folded: boolean; foldabl
       {model.blocks.map(({ participant, uses }) => (
         <div key={participant.holder} role={several ? "group" : undefined} aria-label={several ? participant.name : undefined} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
           {several ? <div style={{ fontSize: theme.font.small, fontWeight: theme.weight.strong, color: theme.color.textMuted }}>{participant.name}</div> : null}
+          {/* Its results count from the turn's start, so last turn's hit never offers its chips again. While the uses load, they say so for both. */}
+          <AttackRows
+            creature={participant.target}
+            tokenId={"tokenId" in participant.target ? participant.target.tokenId : undefined}
+            name={participant.name}
+            after={participant.record?.id}
+            quietWait={uses === null && (model.loading || model.failed)}
+          />
           <CombatUses target={participant.target} form="card" uses={uses} loading={model.loading} failed={model.failed} ownTurn name={participant.name} />
         </div>
       ))}

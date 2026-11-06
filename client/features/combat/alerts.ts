@@ -1,8 +1,11 @@
 import { useMemo } from "react";
+import type { NamedRoll } from "#shared/dice/bonus.ts";
 import type { LimitedUse } from "#shared/dice/uses.ts";
 import { healRevivesDead } from "#shared/migrate.ts";
 import type { RoomState } from "#shared/model.ts";
 import { useRoomView } from "../../state/view.ts";
+import { creatureRolls } from "../dice/creature.ts";
+import { useDiceView } from "../dice/useDiceView.ts";
 import { entryName, playerOwnedEntry } from "../encounter/logic.ts";
 import {
   actorOf,
@@ -26,7 +29,14 @@ import { promptId, regenerationIn, turnId, useCreaturesUses, useDismissed } from
  * results: each creature of the turn this viewer answers for, its
  * Regeneration, death save and recharge prompts, and the turn card with
  * its uses. A card this device dismissed stays away for this turn.
+ * A creature with attacks gets the card too, which lists them above its
+ * uses (QOL audit Q1), so a goblin with no uses to spend has one.
  */
+
+/** The attacks a turn card lists (QOL audit Q1): a creature's named rolls with an attack bonus in Actions and Bonus Actions, in its block's order. */
+export function cardAttacks(named: readonly NamedRoll[]): NamedRoll[] {
+  return named.filter((r) => r.attack !== undefined && (r.section === "actions" || r.section === "bonusActions"));
+}
 
 export type PromptCard<P> = { id: string; participant: Participant; record: number; prompt: P };
 
@@ -34,8 +44,11 @@ export type TurnCardModel = {
   id: string;
   /** Whose turn it is: the landing row's creature, or its row's name when only other creatures of the turn are this viewer's. */
   name: string;
-  blocks: { participant: Participant; uses: readonly LimitedUse[] | null; count: number }[];
+  /** Each creature of the turn this viewer answers for: its uses, their count, and how many attacks it lists (cardAttacks). */
+  blocks: { participant: Participant; uses: readonly LimitedUse[] | null; count: number; attacks: number }[];
   count: number;
+  /** The attacks of every block, for the folded row's words. */
+  attacks: number;
   loading: boolean;
   failed: boolean;
 };
@@ -61,8 +74,20 @@ export function useCombatAlerts(): CombatAlerts {
   const shown = useMemo(() => (view && you ? all.filter((p) => answersFor(view, you, p.target) || (you.role === "dm" && p.record?.life === "dying")) : []), [view, you, all]);
   const targets = useMemo(() => shown.map((p) => p.target), [shown]);
   const read = useCreaturesUses(targets);
+  // The attacks need the SRD's rolls table as well as its blocks, which the uses alone never wait on.
+  const rolls = useDiceView(targets);
+  const attacks = useMemo(() => targets.map((t) => (rolls.dice ? (creatureRolls(rolls.dice, t)?.named ?? null) : null)), [targets, rolls.dice]);
   if (!view || !you || shown.length === 0) return NONE;
-  return combatAlerts({ view, you, participants: shown, uses: read.uses, loading: read.loading, failed: read.failed, dismissed: local.dismissed });
+  return combatAlerts({
+    view,
+    you,
+    participants: shown,
+    uses: read.uses,
+    attacks: attacks.map((named) => (named ? cardAttacks(named).length : null)),
+    loading: read.loading || rolls.loading,
+    failed: read.failed,
+    dismissed: local.dismissed,
+  });
 }
 
 /** The cards of the turn now for this viewer, free of React for its tests. */
@@ -71,6 +96,8 @@ export function combatAlerts(input: {
   you: You;
   participants: readonly Participant[];
   uses: readonly (readonly LimitedUse[] | null)[];
+  /** How many attacks each lists, null while its rolls load. Left out, none do. */
+  attacks?: readonly (number | null)[];
   loading: boolean;
   failed: boolean;
   dismissed: ReadonlySet<string>;
@@ -103,7 +130,10 @@ export function combatAlerts(input: {
     const resources = characterId !== undefined ? view.characters[characterId]?.resources : undefined;
     const count = usesCount(rows, resources);
     const skipped = rows.some((r) => r.kind === "skipped");
-    if (count > 0 || skipped || (uses === null && (input.loading || input.failed))) blocks.push({ participant: p, uses, count });
+    const attacks = input.attacks?.[i] ?? 0;
+    // A card whose attacks still load keeps its place, so it never goes and comes back as the rolls table lands.
+    const attacksWait = input.attacks !== undefined && input.attacks[i] === null && input.loading;
+    if (count > 0 || skipped || attacks > 0 || attacksWait || (uses === null && (input.loading || input.failed))) blocks.push({ participant: p, uses, count, attacks });
   });
   const encounter = view.encounter;
   if (blocks.length > 0 && encounter?.activeEntryId) {
@@ -112,7 +142,7 @@ export function combatAlerts(input: {
       const landing = input.participants.find((p) => p.landing);
       const entry = encounter.entries.find((e) => e.id === encounter.activeEntryId);
       const name = landing?.name ?? (entry ? entryName(view, entry) : "This");
-      out.turn = { id, name, blocks, count: blocks.reduce((n, b) => n + b.count, 0), loading: input.loading, failed: input.failed };
+      out.turn = { id, name, blocks, count: blocks.reduce((n, b) => n + b.count, 0), attacks: blocks.reduce((n, b) => n + b.attacks, 0), loading: input.loading, failed: input.failed };
     }
   }
   return out;
