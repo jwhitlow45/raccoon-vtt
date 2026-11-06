@@ -24,6 +24,7 @@ import { alignmentLines, containmentLines, disabledLookLines, headerLines, heade
 import { measureSpacing, spacingLines, type SpacingFinding } from "./helpers/spacing.ts";
 import { moreMenuFixture } from "./helpers/menuFixture.ts";
 import { openGroup } from "./helpers/groups.ts";
+import { SCENE_GROUP_NAMES } from "./helpers/sceneGroups.ts";
 import { framesFor, silentFrames } from "../shared/audio/mp3Testutil.ts";
 
 /**
@@ -1097,11 +1098,11 @@ async function openPanelOf(page: Page, title: string): Promise<Locator> {
   return sheet;
 }
 
-/** pv-a: the sizes where the sweep measures the whole What players see section on a per-player scene, as docs/design/design-v1-per-player-vision.md 11 asks. */
+/** pv-a: the sizes where the sweep measures the whole Fog and vision group on a per-player scene, as docs/design/design-v1-per-player-vision.md 11 asks. */
 const VISION_SECTION_AT = new Set([...PHONE_ROOTS, "1440x900"]);
 
 /**
- * pv4: per-player vision's settings in What players see
+ * pv4: per-player vision's settings in Fog and vision
  * (docs/design/design-v1-per-player-vision.md 7.1 and 11): the Sight row, and who
  * sees for themselves with Pat unticked, listed off, and asked about as the
  * DM unticks him. The scene is made per player with vision and fog off, so
@@ -1120,16 +1121,19 @@ async function visionScreens(sweep: Sweep, page: Page, size: Size): Promise<void
     if (VISION_SECTION_AT.has(size.name)) {
       await sight(true, true);
       const panel = await openPanelOf(page, "Scenes");
+      // Setup, so folded on a phone (docs/design/design-v1-scenes-reorg.md 3).
+      await openSceneGroup(panel, "Fog and vision");
       const lends = panel.getByText("Lends its sight to Pat");
       if (await showsWithin(lends.first(), 5_000)) {
         const section = panel.locator("[data-vision-sight]").locator("xpath=ancestor::*[@data-panel-group][1]");
         await section.scrollIntoViewIfNeeded();
         await sweep.measure(page, "vision-section", section);
-      } else await sweep.missing(page, "vision-section", "the What players see group on a per-player scene with vision on named no creature lending its sight to Pat");
+      } else await sweep.missing(page, "vision-section", "the Fog and vision group on a per-player scene with vision on named no creature lending its sight to Pat");
       await escapeAll(page);
     }
     await sight(true);
     const panel = await openPanelOf(page, "Scenes");
+    await openSceneGroup(panel, "Fog and vision");
     const row = panel.locator("[data-vision-sight]");
     if (!(await showsWithin(row, 5_000))) {
       await sweep.missing(page, "vision-sight", "the Scenes panel showed no Sight row");
@@ -1171,6 +1175,8 @@ async function dungeonScreens(sweep: Sweep, page: Page): Promise<void> {
   try {
     await escapeAll(page);
     const panel = await openPanelOf(page, "Scenes");
+    // Setup, so folded on a phone while the room has scenes (docs/design/design-v1-panel-groups.md 6.2).
+    await openGroup(panel, "New scene");
     const form = panel.getByRole("heading", { name: "New scene", exact: true }).locator("xpath=ancestor::*[self::section or @data-panel-group][1]");
     await form.getByRole("radio", { name: "Builder", exact: true }).click();
     const generate = form.getByRole("button", { name: "Generate a dungeon", exact: true });
@@ -1224,7 +1230,7 @@ async function lagoonScene(): Promise<{ sceneId: string; videoId: string }> {
 
 /**
  * am-a: animated maps' screens (docs/design/design-v1-animated-maps.md 8 and
- * 12): the lagoon's Map image and grid group folded and open, with its
+ * 12): the lagoon's Map and grid group folded and open, with its
  * device line and Use the still only, a video's upload step on the busy
  * button, the still pick when this device cannot read the first frame,
  * This device's Animated maps row, and the Library's film strip tile and
@@ -1237,11 +1243,11 @@ async function animatedMapScreens(sweep: Sweep, page: Page): Promise<void> {
     await escapeAll(page);
     const panel = await openPanelOf(page, "Scenes");
     await viewScene(panel, sceneId);
-    const fold = sceneGroupFold(panel, "Map image and grid");
+    const fold = sceneGroupFold(panel, "Map and grid");
     if ((await fold.getAttribute("aria-expanded")) === "true") await fold.click();
     await fold.scrollIntoViewIfNeeded();
-    await sweep.measure(page, "animmap-map-group-folded", sceneGroup(panel, "Map image and grid").locator("xpath=./div[1]"));
-    const group = await openSceneGroup(panel, "Map image and grid");
+    await sweep.measure(page, "animmap-map-group-folded", sceneGroup(panel, "Map and grid").locator("xpath=./div[1]"));
+    const group = await openSceneGroup(panel, "Map and grid");
     const row = group.locator("[data-setting-row]").filter({ has: page.getByText("Map image", { exact: true }) }).first();
     await group.getByRole("button", { name: "Use the still only", exact: true }).waitFor();
     await row.scrollIntoViewIfNeeded();
@@ -1326,10 +1332,10 @@ async function animatedMapScreens(sweep: Sweep, page: Page): Promise<void> {
   }
 }
 
-/** The sizes where the sweep measures the Sound panel (docs/design/design-v1-music.md 10): two phones and a computer. */
+/** The sizes where the sweep measures Ambiance's Sound (docs/design/design-v1-music.md 10): two phones and a computer. */
 const SOUND_AT = new Set([...PHONE_ROOTS, "1440x900"]);
 
-/** The room's sounds for the Sound panel's screens, made once: frames of silence, so nothing needs an encoder. */
+/** The room's sounds for Sound's screens, made once: frames of silence, so nothing needs an encoder. */
 let soundLibrary: { playlist: string; music: string[]; loops: string[]; effect: string } | null = null;
 
 async function soundsReady(): Promise<NonNullable<typeof soundLibrary>> {
@@ -1351,7 +1357,7 @@ async function soundsReady(): Promise<NonNullable<typeof soundLibrary>> {
   return soundLibrary;
 }
 
-/** Music and two background sounds playing, as the Sound panel's full screens need. */
+/** Music and two background sounds playing, as Sound's full screens need. */
 async function soundPlaying(): Promise<void> {
   const lib = await soundsReady();
   await ops.send({ t: "sound.stopAll" });
@@ -1359,13 +1365,14 @@ async function soundPlaying(): Promise<void> {
   for (const soundId of lib.loops) await ops.send({ t: "loop.start", id: randomUUID(), soundId, volume: 70 });
 }
 
-/** A Sound panel's section by its label. */
+/** A section of Ambiance's Sound, or any other section or group, by its label. */
 function soundSection(panel: Locator, label: string): Locator {
   return panel.getByRole("heading", { name: label, exact: true }).locator("xpath=ancestor::*[self::section or @data-panel-group][1]");
 }
 
 /**
- * sn-d: the DM's Sound panel (docs/design/design-v1-music.md 10): with
+ * sn-d: the DM's Sound, now a group of Ambiance (docs/design/design-v1-music.md 10,
+ * docs/design/design-v1-panel-groups.md 4.1), which starts open: with
  * nothing playing, with music, two background sounds and the board, the
  * board in Edit, a playlist's page, a sound's page, and with the server's
  * switch off, which a page load reads from /api/config, routed here. The
@@ -1376,7 +1383,7 @@ async function soundScreens(sweep: Sweep, page: Page, size: Size, scale: number)
   try {
     await escapeAll(page);
     await ops.send({ t: "sound.stopAll" });
-    let panel = await openPanelOf(page, "Sound");
+    let panel = await openPanelOf(page, "Ambiance");
     await panel.getByText("Nothing is playing.", { exact: true }).waitFor();
     await sweep.measure(page, "sound-panel-silent", panel);
 
@@ -1392,15 +1399,15 @@ async function soundScreens(sweep: Sweep, page: Page, size: Size, scale: number)
     await effects.scrollIntoViewIfNeeded();
     await sweep.measure(page, "sound-board-edit", effects);
     await effects.getByRole("button", { name: /^Thunder/ }).click();
-    await page.getByRole("button", { name: /^Back to Sound/ }).first().waitFor();
+    await page.getByRole("button", { name: /^Back to Ambiance/ }).first().waitFor();
     await sweep.measure(page, "sound-sound-page", panel);
-    await page.getByRole("button", { name: /^Back to Sound/ }).first().click();
+    await page.getByRole("button", { name: /^Back to Ambiance/ }).first().click();
     await soundSection(panel, "Effects").getByRole("button", { name: "Done", exact: true }).click();
 
     await panel.getByRole("list", { name: "Playlists" }).getByRole("button", { name: /^Tavern night/ }).click();
-    await page.getByRole("button", { name: /^Back to Sound/ }).first().waitFor();
+    await page.getByRole("button", { name: /^Back to Ambiance/ }).first().waitFor();
     await sweep.measure(page, "sound-playlist-page", panel);
-    await page.getByRole("button", { name: /^Back to Sound/ }).first().click();
+    await page.getByRole("button", { name: /^Back to Ambiance/ }).first().click();
     await panel.getByRole("heading", { name: "Music", exact: true }).waitFor();
 
     // An upload in progress under Add music (sound/upload/AddSounds.tsx's rows), held on its percent by a slow upload, then cancelled.
@@ -1479,7 +1486,7 @@ async function soundScreens(sweep: Sweep, page: Page, size: Size, scale: number)
     });
     try {
       await openAt(page, size, scale);
-      panel = await openPanelOf(page, "Sound");
+      panel = await openPanelOf(page, "Ambiance");
       await panel.getByText(/^This server doesn't offer sound files\./).waitFor();
       await sweep.measure(page, "sound-panel-switch-off", panel);
     } finally {
@@ -1492,7 +1499,7 @@ async function soundScreens(sweep: Sweep, page: Page, size: Size, scale: number)
   }
 }
 
-/** sn-d: a player's Sound panel with music and two background sounds, with names and without (4.3). */
+/** sn-d: a player's Sound in Ambiance with music and two background sounds, with names and without (4.3). */
 async function patSoundScreens(sweep: Sweep, page: Page): Promise<void> {
   await soundPlaying();
   try {
@@ -1501,7 +1508,7 @@ async function patSoundScreens(sweep: Sweep, page: Page): Promise<void> {
     const ask = page.getByText("The DM is playing sound for the room.", { exact: true }).locator("xpath=ancestor::*[.//button][1]");
     await ask.waitFor({ timeout: 15_000 });
     await sweep.measure(page, "sound-ask", ask);
-    const panel = await openPanelOf(page, "Sound");
+    const panel = await openPanelOf(page, "Ambiance");
     await panel.getByText("Music is playing.", { exact: true }).waitFor();
     await sweep.measure(page, "sound-player-unnamed", panel);
     await ops.send({ t: "room.update", settings: { soundNames: true } });
@@ -2786,6 +2793,93 @@ async function groupOverflowLines(root: Locator, at: string, screen: string): Pr
   return { lines: [...found.out.map((line) => `${at} ${screen}: ${line}`), ...framedLines, ...await proficiencyLines(root, `${at} ${screen}`, false, preview)], folded: found.folded };
 }
 
+
+/**
+ * The names of a panel's groups that sit in no other group at one left edge,
+ * within 1 px, and their chevrons and icons likewise where drawn
+ * (docs/design/design-v1-panel-groups.md 11). measureAlignment measures each
+ * row apart, so a group that lost its lead's space (Join requests' name sat
+ * 24 px left of its folding peers') passed it. Every group is found by its
+ * name's mark, since a group with no fold has no button to find it by.
+ */
+async function groupNameEdges(root: Locator, at: string, screen: string): Promise<string[]> {
+  const found = await root.evaluate((rootEl) => {
+    type El = {
+      textContent: string | null;
+      parentElement: El | null;
+      closest(s: string): El | null;
+      querySelector(s: string): El | null;
+      querySelectorAll(s: string): ArrayLike<El>;
+      getBoundingClientRect(): { left: number; width: number; height: number };
+    };
+    const top = rootEl as unknown as El;
+    const groups = Array.from(top.querySelectorAll("[data-panel-group]")).filter((g) => {
+      const outer = g.parentElement?.closest("[data-panel-group]") ?? null;
+      return outer === null || outer === top.closest("[data-panel-group]");
+    });
+    const drawn = (el: El | null) => el !== null && el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0;
+    const edges: { kind: string; label: string; left: number }[] = [];
+    for (const group of groups) {
+      const name = Array.from(group.querySelectorAll("[data-group-name]")).find((n) => n.closest("[data-panel-group]") === group) ?? null;
+      if (!name || !drawn(name)) continue;
+      const label = (name.textContent ?? "").trim();
+      edges.push({ kind: "name", label, left: name.getBoundingClientRect().left });
+      // The lead is the first column of the header's grid: a chevron, a reserved space or an icon.
+      const head = name.parentElement?.parentElement ?? null;
+      const lead = head && head.querySelector(":scope > span:first-child") !== name.parentElement ? head.querySelector(":scope > span:first-child") : null;
+      const first = lead?.querySelector(":scope > *") ?? null;
+      if (first && drawn(first)) edges.push({ kind: "lead", label, left: first.getBoundingClientRect().left });
+      const icon = Array.from(group.querySelectorAll("[data-group-icon]")).find((n) => n.closest("[data-panel-group]") === group) ?? null;
+      if (icon && drawn(icon)) edges.push({ kind: "icon", label, left: icon.getBoundingClientRect().left });
+    }
+    return edges;
+  });
+  const out: string[] = [];
+  for (const kind of ["name", "lead", "icon"]) {
+    const of = found.filter((e) => e.kind === kind);
+    if (of.length < 2) continue;
+    const least = Math.min(...of.map((e) => e.left));
+    const most = Math.max(...of.map((e) => e.left));
+    if (most - least > LIMIT_PX) out.push(`${at} ${screen}: group ${kind}s span ${(most - least).toFixed(1)} px (${of.map((e) => `${e.label} ${(e.left - least).toFixed(1)}`).join(", ")})`);
+  }
+  return out;
+}
+
+/**
+ * A whole summary (Group's `wholeSummary`, docs/design/design-v1-panel-groups.md
+ * 4.2) never cut while it shares its name's line: it moves under the name
+ * whole instead, and is cut only where that line of its own is too short.
+ * For the roots whose groups ask for it (Ambiance, the DM panel and This
+ * device), so every summary there is held to it, and a group that lost the
+ * prop fails rather than drop out of the check.
+ */
+async function wholeSummaryLines(root: Locator, at: string, screen: string): Promise<string[]> {
+  const found = await root.evaluate((rootEl) => {
+    type El = {
+      textContent: string | null;
+      scrollWidth: number;
+      clientWidth: number;
+      getAttribute(n: string): string | null;
+      querySelectorAll(s: string): ArrayLike<El>;
+      getBoundingClientRect(): { top: number; bottom: number; width: number };
+    };
+    const g = globalThis as unknown as { document: { getElementById(id: string): El | null } };
+    const out: string[] = [];
+    for (const button of Array.from((rootEl as unknown as El).querySelectorAll("[data-group-fold], [data-group-open]"))) {
+      const nameId = button.getAttribute("aria-labelledby");
+      const name = nameId ? g.document.getElementById(nameId) : (button.querySelectorAll("[data-group-name]")[0] ?? null);
+      const summaryId = (button.getAttribute("aria-describedby") ?? "").split(" ")[0] ?? "";
+      const summary = summaryId ? g.document.getElementById(summaryId) : null;
+      if (!name || !summary || summary.getBoundingClientRect().width === 0) continue;
+      const shares = summary.getBoundingClientRect().top < name.getBoundingClientRect().bottom - 0.5;
+      if (shares && summary.scrollWidth > summary.clientWidth + 0.5) out.push(`${(name.textContent ?? "").trim()}: its whole summary "${summary.textContent ?? ""}" is cut beside its name`);
+    }
+    return out;
+  });
+  return found.map((line) => `${at} ${screen}: ${line}`);
+}
+
+
 /**
  * Each group header's name on one line, a folded summary on its name's
  * line and cut only at its 4em floor or wider, since words fewer than the
@@ -2967,6 +3061,7 @@ async function ic2Screens(sweep: Sweep, page: Page, size: Size, scale: number): 
     await foldGroups(panel);
     await sweep.add(page, `ic2-groups-${name}`, await groupHeaderLines(panel, at, `ic2-groups-${name}`, !size.touch));
     await sweep.add(page, `ic2-groups-${name}`, (await groupOverflowLines(panel, at, `ic2-groups-${name}`)).lines);
+    await sweep.add(page, `ic2-groups-${name}`, await groupNameEdges(panel, at, `ic2-groups-${name}`));
     await sweep.measure(page, `ic2-groups-${name}`, panel.locator("[data-panel-group] > div:first-child"));
     await closeSheets(page);
     await escapeAll(page);
@@ -3478,7 +3573,7 @@ export function alignmentFile(title: string, steps: () => void): void {
       srd = await loadMonsters();
       // Animated maps on (docs/design/design-v1-animated-maps.md 1), so the sweep measures the screens the switch shows.
       process.env.ANIMATED_MAPS = "1";
-      // Room sound on too (docs/design/design-v1-music.md 1), for the Sound panel's screens.
+      // Room sound on too (docs/design/design-v1-music.md 1), for Ambiance's Sound screens.
       process.env.ROOM_SOUND = "1";
       server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
       browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1" });
@@ -6346,21 +6441,33 @@ async function builderScreens(sweep: Sweep, page: Page): Promise<void> {
 }
 
 /**
- * The Time panel's screens at one size (docs/design/design-v1-calendar.md 9):
- * the DM's panel with no clock, with a clock and Other amount open, Set the
- * date and time, and the Calendar dialog with 12 months. The sweep's room
- * has no clock, so each size starts one by op and stops it after.
+ * Ambiance with its Time group open, which folds once a clock runs
+ * (docs/design/design-v1-panel-groups.md 6.1): the open stands in for the
+ * DM's own tap.
+ */
+async function openTime(page: Page): Promise<Locator> {
+  const panel = await openPanel(page, "Ambiance");
+  await openGroup(panel, "Time");
+  return panel;
+}
+
+/**
+ * Time's screens at one size (docs/design/design-v1-calendar.md 9), in
+ * Ambiance (docs/design/design-v1-panel-groups.md 4.1): with no clock, with
+ * a clock and Other amount open, Set the date and time, and the Calendar
+ * dialog with 12 months. The sweep's room has no clock, so each size starts
+ * one by op and stops it after.
  */
 async function clockScreens(sweep: Sweep, page: Page, desk: boolean): Promise<void> {
   if (dmSocket.state?.clock) await ops.send({ t: "clock.stop" });
   await closeSheets(page);
   await escapeAll(page);
-  const start = await openPanel(page, "Time");
+  const start = await openTime(page);
   await start.getByRole("button", { name: "Start the clock", exact: true }).waitFor();
   await sweep.measure(page, "ck-time-start", start);
 
   await ops.send({ t: "clock.start", id: randomUUID(), at: 8 * 3_600, shown: true, calendar: { kind: "days" } });
-  const panel = await openPanel(page, "Time");
+  const panel = await openTime(page);
   await panel.getByRole("button", { name: "Set the date and time…", exact: true }).waitFor();
   await panel.getByRole("button", { name: "Other amount…", exact: true }).click();
   await panel.getByRole("textbox", { name: "Amount", exact: true }).fill("0");
@@ -6384,7 +6491,7 @@ async function clockScreens(sweep: Sweep, page: Page, desk: boolean): Promise<vo
   await characters.getByRole("button", { name: "Cancel", exact: true }).click();
   await closeSheets(page);
   await escapeAll(page);
-  const clockPanel = await openPanel(page, "Time");
+  const clockPanel = await openTime(page);
 
   await clockPanel.getByRole("button", { name: "Set the date and time…", exact: true }).click();
   const set = page.getByRole("dialog", { name: "Set the date and time", exact: true });
@@ -6394,7 +6501,7 @@ async function clockScreens(sweep: Sweep, page: Page, desk: boolean): Promise<vo
   await set.waitFor({ state: "detached" });
 
   // Escape also put a phone's sheet away.
-  const again = await openPanel(page, "Time");
+  const again = await openTime(page);
   await again.getByRole("button", { name: "Calendar…", exact: true }).click();
   const calendar = page.getByRole("dialog", { name: "Calendar", exact: true });
   await calendar.waitFor();
@@ -6408,18 +6515,18 @@ async function clockScreens(sweep: Sweep, page: Page, desk: boolean): Promise<vo
   await ops.send({ t: "clock.stop" });
 }
 
-/** Pat's Time panel at one size: the date and the part of the day, and nothing of the DM's controls. */
+/** Pat's Ambiance at one size, with Time: the date and the part of the day, and nothing of the DM's controls. */
 async function patClockScreens(sweep: Sweep, page: Page, desk: boolean): Promise<void> {
-  const panel = await openPanel(page, "Time");
+  const panel = await openPanel(page, "Ambiance");
   await panel.locator("[data-clock-date]").waitFor();
   await sweep.measure(page, "ck-pat-time", panel);
   if (desk) await sweep.measure(page, "ck-pat-chip", page.getByRole("button", { name: /^Time: / }));
   else if ((await page.getByRole("button", { name: /^Time: / }).count()) > 0) sweep.lines.push(`${sweep.at} ck-pat-chip: the chip shows below 900 px`);
 }
 
-/** The calendar build's roots, which the sizes' sweep never reaches (docs/design/design-v1-calendar.md 9, 11). */
+/** The calendar build's roots, now in Ambiance, which the sizes' sweep never reaches (docs/design/design-v1-calendar.md 9, 11). */
 export function clockTests(): void {
-  test(`ck-a. the Time panel with and without a clock, Set the date and time and the Calendar dialog with 12 months, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
+  test(`ck-a. Ambiance's Time with and without a clock, Set the date and time and the Calendar dialog with 12 months, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
     const lines: string[] = [];
     try {
       for (const at of FU30_AT) {
@@ -6434,10 +6541,10 @@ export function clockTests(): void {
     } finally {
       if (dmSocket.state?.clock) await ops.send({ t: "clock.stop" }).catch(() => {});
     }
-    assert.deepEqual(lines, [], "the Time panel or its dialogs out of line");
+    assert.deepEqual(lines, [], "Ambiance's Time or its dialogs out of line");
   });
 
-  test(`ck-b. Pat's Time panel and his top bar's chip, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
+  test(`ck-b. Pat's Ambiance with Time, his top bar's chip, and his Ambiance with nothing to show, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
     const lines: string[] = [];
     try {
       await ops.send({ t: "clock.start", id: randomUUID(), at: 8 * 3_600, shown: true, calendar: { kind: "days" } });
@@ -6448,11 +6555,271 @@ export function clockTests(): void {
         await patClockScreens(sweep, pat, at.size.width === 1440);
         lines.push(...sweep.lines);
       }
+      // Nothing shared and nothing playing, with Ambiance asked for by a reload (docs/design/design-v1-panel-groups.md 5, D-261102-762): its one line.
+      await ops.send({ t: "clock.stop" });
+      await ops.send({ t: "sound.stopAll" });
+      for (const at of FU30_AT) {
+        const sweep = new Sweep(atName(at));
+        await openAt(pat, at.size, at.scale);
+        await pat.evaluate((roomId) => sessionStorage.setItem("rvtt.reopen", JSON.stringify({ roomId, panel: "ambiance" })), run.roomId);
+        await reopenRoom(pat);
+        await pat.getByRole("status", { name: "Connected" }).first().waitFor();
+        const empty = pat.getByText("The DM isn't sharing the date and time or playing sound now.", { exact: true });
+        if (await showsWithin(empty, 10_000)) await sweep.measure(pat, "pg-pat-empty", await openPanel(pat, "Ambiance"));
+        else await sweep.missing(pat, "pg-pat-empty", "a reload asking for Ambiance with nothing shared showed no line");
+        lines.push(...sweep.lines);
+      }
     } finally {
       await pat.goto("about:blank").catch(() => {});
       if (dmSocket.state?.clock) await ops.send({ t: "clock.stop" }).catch(() => {});
     }
-    assert.deepEqual(lines, [], "Pat's Time panel or the chip out of line");
+    assert.deepEqual(lines, [], "Pat's Ambiance or the chip out of line");
+  });
+}
+
+/** The fold stores of the four surfaces that fold (client/lib/folds.ts), cleared so each size starts as a device that never tapped one. */
+const FOLD_KEYS = ["rvtt.ambianceFolds", "rvtt.dmPanelFolds", "rvtt.thisDeviceFolds", "rvtt.sceneSettingsFolds"];
+
+async function forgetFolds(page: Page): Promise<void> {
+  if (!page.url().startsWith(server.origin)) return;
+  await page.evaluate((keys) => {
+    for (const key of keys) localStorage.removeItem(key);
+  }, FOLD_KEYS);
+}
+
+/** Taps every fold of a panel's groups until each is `open`, as the DM's own taps would. */
+async function setFolds(panel: Locator, open: boolean, skip: readonly string[] = []): Promise<void> {
+  const folds = panel.locator("[data-group-fold]");
+  for (let i = 0; i < (await folds.count()); i++) {
+    const fold = folds.nth(i);
+    const name = ((await fold.locator("[data-group-name]").textContent()) ?? "").trim();
+    if (skip.includes(name) || !(await fold.isVisible())) continue;
+    if ((await fold.getAttribute("aria-expanded")) !== String(open)) await fold.click();
+  }
+}
+
+/** A map image with no walls on Explore, so Fog and vision's folded row wears its No walls tag (docs/design/design-v1-scenes-reorg.md 3, D-261102-932). Made once for the file. */
+let caveId: string | null = null;
+
+async function caveScene(): Promise<string> {
+  if (caveId) return caveId;
+  const data = await sharp({ create: { width: 500, height: 400, channels: 3, background: { r: 70, g: 60, b: 50 } } }).png().toBuffer();
+  const res = await dmContext.request.put(`${server.origin}/api/rooms/${run.roomId}/assets?kind=map`, { headers: { Origin: server.origin, "content-type": "image/png" }, data });
+  assert.ok(res.ok(), `the upload answered ${res.status()}`);
+  const map = (await res.json()) as { id: string; width: number; height: number };
+  const id = randomUUID();
+  await ops.send({ t: "scene.create", scene: { id, name: "Open cave", bounds: { w: 10, h: 8 }, background: "#2b2b31", fogEnabled: true, autoWalls: "off", blockMovement: false, vision: { on: true, light: "bright" } } });
+  await ops.send({ t: "scene.setMap", sceneId: id, map: { assetId: map.id, widthPx: map.width, heightPx: map.height, cellPx: 50, originPx: { x: 0, y: 0 } } });
+  caveId = id;
+  return id;
+}
+
+/**
+ * The panel groups' and the Scenes reorganization's roots
+ * (docs/design/design-v1-panel-groups.md 11, docs/design/design-v1-scenes-reorg.md 13),
+ * which the sizes' sweep never reaches, at FU30_AT's sizes. Each root is
+ * measured in the dark theme and again in the light one, and its groups'
+ * names are held to one edge with whole summaries uncut beside their names.
+ * Each size starts from no stored folds. The theme turns as a choice made in
+ * another window does (lib/scheme.ts), so the page loads once a size: the
+ * three steps' loads stay inside the snapshot budget a minute gives one
+ * address. A session of its own per step.
+ */
+export function panelGroupTests(): void {
+  async function theme(page: Page, choice: "dark" | "light"): Promise<void> {
+    // The e2e files compile without the DOM library, so the page's globals are typed by hand.
+    type Win = { dispatchEvent(e: unknown): void; StorageEvent: new (type: string, init: { key: string; newValue: string }) => unknown; document: { documentElement: { style: { colorScheme: string } } } };
+    await page.evaluate((value) => {
+      const win = globalThis as unknown as Win;
+      localStorage.setItem("rvtt.theme", value);
+      win.dispatchEvent(new win.StorageEvent("storage", { key: "rvtt.theme", newValue: value }));
+    }, choice);
+    await waitFor(`the ${choice} theme`, () => page.evaluate((value) => ((globalThis as unknown as Win).document.documentElement.style.colorScheme === value ? true : null), choice), 5_000);
+  }
+
+  /** Measures a root in both themes and holds its groups to one edge, and where `whole`, their summaries whole beside their names. */
+  async function groups(sweep: Sweep, page: Page, screen: string, root: Locator, measured: Locator = root, whole = true): Promise<void> {
+    for (const choice of ["dark", "light"] as const) {
+      await theme(page, choice);
+      const at = `${screen}${choice === "light" ? "-light" : ""}`;
+      const before = sweep.lines.length;
+      await sweep.measure(page, at, measured);
+      // The disabled look check holds words to dark's textDisabled (helpers/alignment.ts), so in light it is left out: light's differs by design.
+      if (choice === "light") sweep.lines.splice(before, sweep.lines.length - before, ...sweep.lines.slice(before).filter((line) => !line.includes(": disabled look,")));
+      await sweep.add(page, at, [...(await groupNameEdges(root, sweep.at, at)), ...(whole ? await wholeSummaryLines(root, sweep.at, at) : [])]);
+    }
+    await theme(page, "dark");
+  }
+
+  test(`pg-a. Ambiance with no clock, with a clock folded, all folded and each group open, its Weather and Scene sound rows, dark and light, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
+    await newDmSession();
+    await soundsReady();
+    const lines: string[] = [];
+    try {
+      for (const at of FU30_AT) {
+        const sweep = new Sweep(`pg-${atName(at)}`);
+        const page = await dmPageFor(at.size);
+        page.setDefaultTimeout(10_000);
+        await forgetFolds(page);
+        if (dmSocket.state?.clock) await ops.send({ t: "clock.stop" });
+        await ops.send({ t: "sound.stopAll" });
+        await openAt(page, at.size, at.scale, { "rvtt.theme": "dark" });
+        await waitFor("the DM's snapshot", () => dmSocket.state);
+        try {
+          let ambiance = await openPanel(page, "Ambiance");
+          await ambiance.getByRole("button", { name: "Start the clock", exact: true }).waitFor();
+          await groups(sweep, page, "pg-ambiance-no-clock", ambiance);
+          // A start that reads the room holds while Ambiance stays open, so it is left and opened again once the clock runs.
+          await ops.send({ t: "clock.start", id: randomUUID(), at: 2 * 86_400 + 20 * 3_600, shown: false, calendar: { kind: "days" } });
+          await soundPlaying();
+          await openPanel(page, "Log");
+          await closeSheets(page);
+          ambiance = await openPanel(page, "Ambiance");
+          await ambiance.locator("[data-sound-track]").waitFor();
+          if ((await ambiance.getByRole("button", { name: "Time", exact: true }).getAttribute("aria-expanded")) !== "false") sweep.lines.push(`${sweep.at} pg-ambiance-clock: Time is not folded at the start with a clock`);
+          await groups(sweep, page, "pg-ambiance-clock", ambiance);
+          await shots.take(page, `alignment-${sweep.at}-pg-ambiance-clock`);
+          await setFolds(ambiance, false);
+          await groups(sweep, page, "pg-ambiance-folded", ambiance);
+          await shots.take(page, `alignment-${sweep.at}-pg-ambiance-folded`);
+          await openGroup(ambiance, "Time");
+          await groups(sweep, page, "pg-ambiance-time-open", ambiance);
+          await setFolds(ambiance, false);
+          await openGroup(ambiance, "Sound");
+          await groups(sweep, page, "pg-ambiance-sound-open", ambiance);
+          const sceneRow = ambiance.getByRole("button", { name: "Scene sound, in Scenes", exact: true });
+          await sceneRow.scrollIntoViewIfNeeded();
+          await sweep.measure(page, "pg-ambiance-scene-sound-row", sceneRow);
+        } finally {
+          await ops.send({ t: "clock.stop" }).catch(() => {});
+          await ops.send({ t: "sound.stopAll" }).catch(() => {});
+          await forgetFolds(page);
+          await closeSheets(page);
+          await escapeAll(page);
+        }
+        console.log(`${sweep.at}: measured ${[...sweep.seen].join(", ")}`);
+        lines.push(...sweep.lines);
+      }
+    } finally {
+      if (dm && !dm.isClosed()) await dm.evaluate(() => localStorage.setItem("rvtt.theme", "dark"));
+    }
+    assert.deepEqual(lines, [], "Ambiance out of line");
+    withinSnapshotBudget("pg-a");
+  });
+
+  test(`pg-b. the DM panel with a join request over its folded groups and every group open, and This device folded and open, dark and light, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
+    await newDmSession();
+    const lines: string[] = [];
+    const headers = { Origin: server.origin };
+    const mode = await dmContext.request.post(`${server.origin}/api/rooms/${run.roomId}/join-mode`, { headers, data: { mode: "ask" } });
+    assert.ok(mode.ok(), `the join mode answered ${mode.status()}`);
+    // One ask for the whole step: Join requests stands first while it waits, drawn as a group that never folds (6.1, D-261102-758).
+    const asker = await playwrightRequest.newContext({ extraHTTPHeaders: headers });
+    const ask = await asker.post(`${server.origin}/api/rooms/${run.roomId}/join-requests`, { data: { name: "Quinn", color: "#8e4ec6" } });
+    assert.equal(ask.status(), 201, `the ask answered ${ask.status()}`);
+    const requestId = ((await ask.json()) as { requestId: string }).requestId;
+    try {
+      for (const at of FU30_AT) {
+        const sweep = new Sweep(`pg-${atName(at)}`);
+        const page = await dmPageFor(at.size);
+        page.setDefaultTimeout(10_000);
+        await forgetFolds(page);
+        await openAt(page, at.size, at.scale, { "rvtt.theme": "dark" });
+        await waitFor("the DM's snapshot", () => dmSocket.state);
+        try {
+          const panel = await openDmPanel(page, "DM");
+          await panel.getByRole("group", { name: "Join request from Quinn" }).waitFor();
+          await dismissToasts(page);
+          await groups(sweep, page, "pg-dm-start", panel);
+          await setFolds(panel, false);
+          await groups(sweep, page, "pg-dm-folded", panel);
+          await shots.take(page, `alignment-${sweep.at}-pg-dm-folded`);
+          await setFolds(panel, true);
+          await groups(sweep, page, "pg-dm-open", panel);
+          await closeSheets(page);
+          await escapeAll(page);
+          const menu = await openMenu(page);
+          const back = page.getByRole("button", { name: /^Back to Menu/ });
+          if (await visible(back)) await back.click();
+          await menu.getByRole("button", { name: /^This device/ }).click();
+          await menu.locator("[data-group-fold]").first().waitFor();
+          // Rolls stays folded: its dice set picker's tiles read as off center, a finding older than the folds, from a picker the sweep never measured before.
+          const rolls = menu.getByRole("button", { name: "Rolls", exact: true });
+          if ((await rolls.getAttribute("aria-expanded")) === "true") await rolls.click();
+          await groups(sweep, page, "pg-device-start", menu);
+          await setFolds(menu, false);
+          await groups(sweep, page, "pg-device-folded", menu);
+          await shots.take(page, `alignment-${sweep.at}-pg-device-folded`);
+          await setFolds(menu, true, ["Rolls"]);
+          await groups(sweep, page, "pg-device-open", menu);
+          if (await visible(back)) await back.click();
+        } finally {
+          await forgetFolds(page);
+          await closeSheets(page);
+          await escapeAll(page);
+        }
+        console.log(`${sweep.at}: measured ${[...sweep.seen].join(", ")}`);
+        lines.push(...sweep.lines);
+      }
+    } finally {
+      await asker.delete(`${server.origin}/api/rooms/${run.roomId}/join-requests/${requestId}`).catch(() => {});
+      await asker.dispose();
+      await dmContext.request.post(`${server.origin}/api/rooms/${run.roomId}/join-mode`, { headers, data: { mode: "password" } }).catch(() => {});
+      if (dm && !dm.isClosed()) await dm.evaluate(() => localStorage.setItem("rvtt.theme", "dark"));
+    }
+    assert.deepEqual(lines, [], "the DM panel or This device out of line");
+    assert.deepEqual(consoles.dm.errors, [], "the DM's page logged errors");
+    withinSnapshotBudget("pg-b");
+  });
+
+  test(`pg-c. Scenes with nothing stored, New scene folded on a phone, and Fog and vision folded with its No walls tag, dark and light, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px`, async () => {
+    await newDmSession();
+    const cave = await caveScene();
+    const lines: string[] = [];
+    try {
+      for (const at of FU30_AT) {
+        const sweep = new Sweep(`pg-${atName(at)}`);
+        const page = await dmPageFor(at.size);
+        page.setDefaultTimeout(10_000);
+        await forgetFolds(page);
+        await openAt(page, at.size, at.scale, { "rvtt.theme": "dark" });
+        await waitFor("the DM's snapshot", () => dmSocket.state);
+        try {
+          const panel = await openDmPanel(page, "Scenes");
+          // The DM's own scene is kept over a reload, so the cave is shown once per page kind.
+          if (dmSocket.you?.sceneId !== cave) await viewScene(panel, cave);
+          const wide = at.size.width / at.scale >= 900;
+          const fresh = sceneGroupFold(panel, "New scene");
+          if ((await fresh.getAttribute("aria-expanded")) !== String(wide)) sweep.lines.push(`${sweep.at} pg-scenes: New scene starts ${wide ? "folded" : "open"}`);
+          // Scenes' groups keep the 4em floor (dp-1a), so only their edges are held.
+          await groups(sweep, page, "pg-scenes-start", panel, panel.locator("[data-panel-group] > div:first-child"), false);
+          const fog = sceneGroupFold(panel, "Fog and vision");
+          if ((await fog.getAttribute("aria-expanded")) === "true") await fog.click();
+          const vision = sceneGroup(panel, "Fog and vision");
+          const tag = vision.getByText("No walls", { exact: true });
+          if (!(await showsWithin(tag, 5_000))) await sweep.missing(page, "pg-scenes-no-walls", "Fog and vision folded on a map with no walls wore no tag");
+          else {
+            await vision.scrollIntoViewIfNeeded();
+            await groups(sweep, page, "pg-scenes-no-walls", panel, vision, false);
+            await shots.take(page, `alignment-${sweep.at}-pg-scenes-no-walls`);
+          }
+        } finally {
+          await forgetFolds(page);
+          await closeSheets(page);
+          await escapeAll(page);
+        }
+        console.log(`${sweep.at}: measured ${[...sweep.seen].join(", ")}`);
+        lines.push(...sweep.lines);
+      }
+    } finally {
+      if (dm && !dm.isClosed()) {
+        await dm.evaluate(() => localStorage.setItem("rvtt.theme", "dark"));
+        await viewScene(await openDmPanel(dm, "Scenes"), run.sceneId).catch(() => {});
+        await escapeAll(dm);
+      }
+    }
+    assert.deepEqual(lines, [], "Scenes' groups out of line");
+    withinSnapshotBudget("pg-c");
   });
 }
 
@@ -6563,9 +6930,6 @@ export function grabberTests(): void {
   });
 }
 
-/** The scene settings page's groups in order (client/features/scenes/settingsFolds.ts). */
-const SCENE_GROUP_NAMES = ["What players see", "Map image and grid", "Walls and movement", "Size and view"] as const;
-
 /** The crypt of ms2-a: a map scene with a Day and a Night phase, made once for the run. */
 let cryptId: string | null = null;
 
@@ -6645,49 +7009,68 @@ export function sceneSettingsTests(): void {
         const panel = await openDmPanel(page, "Scenes");
         const name = panel.getByRole("textbox", { name: "Scene name" }).last();
         await name.waitFor();
-        // What players see opens everywhere, the rest only from 900 px of layout, which 1440 at 130% still is.
+        // Light and weather opens everywhere, the rest only from 900 px of layout, which 1440 at 130% still is, and New scene too while the room has scenes (docs/design/design-v1-scenes-reorg.md 3).
         const wide = at.size.width / at.scale >= 900;
-        for (const [i, group] of SCENE_GROUP_NAMES.entries()) {
+        for (const group of ["New scene", ...SCENE_GROUP_NAMES]) {
           const open = (await sceneGroupFold(panel, group).getAttribute("aria-expanded")) === "true";
-          if (open !== (i === 0 || wide)) sweep.lines.push(`${sweep.at} scene-settings: ${group} starts ${open ? "open" : "folded"}`);
+          if (open !== (group === "Light and weather" || wide)) sweep.lines.push(`${sweep.at} scene-settings: ${group} starts ${open ? "open" : "folded"}`);
         }
         await name.scrollIntoViewIfNeeded();
         await sweep.measure(page, "scene-settings", panel);
+        await sweep.add(page, "scene-settings", await groupNameEdges(panel, sweep.at, "scene-settings"));
         await shots.take(page, `alignment-${sweep.at}-scene-settings`);
         for (const group of SCENE_GROUP_NAMES) {
           const fold = sceneGroupFold(panel, group);
           if ((await fold.getAttribute("aria-expanded")) === "true") await fold.click();
         }
         await sweep.measure(page, "scene-settings-folded", panel);
+        await sweep.add(page, "scene-settings-folded", await groupNameEdges(panel, sweep.at, "scene-settings-folded"));
         // Each folded group's header with its summary, on the name's line or under it (docs/design/design-v1-design-pass.md 4.1).
         await sweep.measure(page, "scene-groups-folded", panel.locator("[data-panel-group] > div:first-child"));
         await shots.take(page, `alignment-${sweep.at}-scene-settings-folded`);
         for (const group of SCENE_GROUP_NAMES) await openSceneGroup(panel, group);
         await sweep.measure(page, "scene-settings-open", panel);
-        // The Weather fold (docs/design/design-v1-weather.md 12): folded, then open on a clear day with a strong wind, on heavy rain with its compass and switch, and on heavy fog's note.
-        const what = sceneGroup(panel, "What players see");
-        const weather = what.getByRole("heading", { name: "Weather", exact: true }).locator("xpath=ancestor::section[1]");
-        const weatherFold = what.getByRole("button", { name: "Weather", exact: true });
-        await weather.scrollIntoViewIfNeeded();
-        await sweep.measure(page, "weather-folded", weather);
+        // Light and weather (docs/design/design-v1-scenes-reorg.md 3 and 4.1): the light, then the weather's rows on a clear calm day, a clear day with a strong wind, heavy rain with its compass and the rules switch, and heavy fog's warning.
+        const light = sceneGroup(panel, "Light and weather");
+        const kind = light.getByRole("combobox", { name: "Weather", exact: true });
         try {
           for (const [label, patch] of [
+            ["weather-clear-calm", null],
             ["weather-clear-wind", { kind: "clear", wind: "strong" }],
             ["weather-heavy-rain", { kind: "rain", heavy: true, wind: "strong", toward: 270 }],
             ["weather-heavy-fog", { kind: "fog", heavy: true, wind: "moderate" }],
           ] as const) {
             await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { weather: patch } });
-            await waitFor(`${label} open`, async () => ((await weatherFold.getAttribute("aria-expanded")) === "true" ? true : null));
-            await weather.getByRole("combobox", { name: "Weather", exact: true }).waitFor();
-            await weather.scrollIntoViewIfNeeded();
-            await sweep.measure(page, label, weather);
+            const want = patch?.kind ?? "clear";
+            await waitFor(`${label} drawn`, async () => ((await kind.inputValue()) === want ? true : null));
+            if (patch?.wind === "strong") await light.getByText("Blows toward", { exact: false }).first().waitFor();
+            await light.scrollIntoViewIfNeeded();
+            await sweep.measure(page, label, light);
             await shots.take(page, `alignment-${sweep.at}-${label}`);
           }
         } finally {
           await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { weather: null } });
         }
+        // Scene sound (5) in its three states: none of its own, silent, and a playlist with a background sound.
+        const lib = await soundsReady();
+        const own = sceneGroup(panel, "Scene sound");
+        const sceneName = dmSocket.state?.scenes[run.sceneId]?.name ?? "";
+        try {
+          for (const [label, sound, line] of [
+            ["scene-sound-none", null, `${sceneName} has no sound of its own.`],
+            ["scene-sound-silent", { music: null, loops: [] }, `${sceneName} is silent.`],
+            ["scene-sound-set", { music: { playlistId: lib.playlist, repeat: "all", fade: 5 }, loops: [{ soundId: lib.loops[0]!, volume: 70 }] }, new RegExp(`^${sceneName}'s sound: `)],
+          ] as const) {
+            await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { sound } });
+            await own.getByText(line, typeof line === "string" ? { exact: true } : undefined).waitFor();
+            await own.scrollIntoViewIfNeeded();
+            await sweep.measure(page, label, own);
+          }
+        } finally {
+          await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { sound: null } });
+        }
         // The players are on this scene, so its map image asks first, with the first map's fog choice.
-        const map = sceneGroup(panel, "Map image and grid");
+        const map = sceneGroup(panel, "Map and grid");
         await map.getByRole("button", { name: "Add a map image" }).click();
         await map.getByText(/^The players are on this scene\./).waitFor();
         await map.scrollIntoViewIfNeeded();
@@ -6805,7 +7188,7 @@ export function sceneSettingsTests(): void {
         const panel = await openDmPanel(page, "Scenes");
         await viewScene(panel, hexCrypt);
         for (const group of SCENE_GROUP_NAMES) await openSceneGroup(panel, group);
-        const map = sceneGroup(panel, "Map image and grid");
+        const map = sceneGroup(panel, "Map and grid");
         await map.getByRole("radiogroup", { name: "Grid shape", exact: true }).scrollIntoViewIfNeeded();
         await sweep.measure(page, "scene-settings-hex", map);
         await sweep.measure(page, "scene-size-hex", sceneGroup(panel, "Size and view"));
@@ -7278,6 +7661,8 @@ export function joinRequestAlignmentTests(names: readonly string[]): void {
           await askAs("Quinn", "#8e4ec6");
           await dismissToasts(page);
           await sweep.measure(page, "jr-section-one", sectionOf(panel, "Join requests"));
+          // Join requests never folds, so its name keeps the chevron's space and lines up with the folding groups under it (docs/design/design-v1-panel-groups.md 6.1).
+          await sweep.add(page, "jr-group-names", await groupNameEdges(panel, sweep.at, "jr-group-names"));
           await askAs("Rowan Ashdown of the Western Marches", "#e5484d");
           await askAs("Pat", "#3e8ef7");
           await dismissToasts(page);
