@@ -74,8 +74,12 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
   const scope = useRoomScope();
   const startFraming = useStartFraming();
   const fold = useSceneFolds();
-  // As the token panel's and the character page's groups (docs/design/design-v1-design-pass.md 4.1), kept mounted while folded so an upload in one is never cut short.
-  const group = (key: SceneGroup, summary: string) => ({ label: SCENE_GROUP_LABELS[key], icon: SCENE_GROUP_ICONS[key], ...fold(key), keep: true, summary });
+  /*
+   * As the token panel's and the character page's groups (docs/design/design-v1-design-pass.md 4.1), kept mounted while folded so an upload in one is never cut short.
+   * A summary stands whole, beside the name or on its own line under it, as the DM panel's and This device's do (docs/design/design-v1-polish-pass.md 3.1):
+   * these are setup groups, where a second header line pushes no play control down.
+   */
+  const group = (key: SceneGroup, summary: string) => ({ label: SCENE_GROUP_LABELS[key], icon: SCENE_GROUP_ICONS[key], ...fold(key), keep: true, wholeSummary: true, summary });
   const update = (patch: OpOf<"scene.update">["patch"]) => actions.dispatch({ t: "scene.update", sceneId: scene.id, patch });
   const feetPerCell = useRoomView((s) => s.view?.meta.settings.feetPerCell ?? 5);
   const size = sizeWords(sceneGrid(scene), scene.bounds, feetPerCell);

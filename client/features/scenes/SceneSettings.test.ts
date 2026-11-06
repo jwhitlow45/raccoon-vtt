@@ -148,6 +148,16 @@ describe("the scene settings page's groups (docs/design/design-v1-scenes-reorg.m
     assert.equal((page(PHONE).match(/<span id="[^"]+-summary"/g) ?? []).length, 4, "open, Light and weather shows no summary");
   });
 
+  test("each group's summary asks for its whole words, never the 4em floor that cut Map and grid's and Walls and movement's (docs/design/design-v1-polish-pass.md 3.1)", () => {
+    const html = page({ ...PHONE, light: false }, { map: MAP, weather: { kind: "rain", heavy: true, wind: "strong" } });
+    const looks = [...html.matchAll(/<span id="[^"]+-summary" style="([^"]*)"/g)].map((m) => m[1]!);
+    assert.equal(looks.length, 5);
+    for (const look of looks) {
+      assert.match(look, /^flex:0 1 auto;min-width:0;margin-left:auto/, look);
+      assert.doesNotMatch(look, /4em|max-width/, look);
+    }
+  });
+
   test("a folded group keeps its settings drawn but hidden, and an open one shows them", () => {
     const bodies = (html: string) => [...html.matchAll(/<div (hidden="")? ?style="display:grid;grid-template-columns:minmax\(0, 1fr\);gap/g)].map((m) => (m[1] ? "hidden" : "shown"));
     assert.deepEqual(bodies(page(PHONE)), ["shown", "hidden", "hidden", "hidden", "hidden"]);
