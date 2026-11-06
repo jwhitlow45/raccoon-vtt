@@ -1373,7 +1373,7 @@ describe("animated maps", { concurrency: false }, () => {
     assert.equal(rotation, 90, "the map layer turns the video's frame");
     const scenes = await amr.view(scene.id);
     const { openSceneGroup } = await import("./harness.ts");
-    const group = await openSceneGroup(scenes, "Map image and grid");
+    const group = await openSceneGroup(scenes, "Map and grid");
     await group.getByText("A 360 × 640 px video, 0:02, looping. Its first frame is the still.", { exact: true }).waitFor();
     await shots.take(adm, "amr-1-map-image-row");
 
