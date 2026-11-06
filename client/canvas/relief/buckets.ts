@@ -16,11 +16,11 @@ import { samePiece, type WallPiece } from "./runs.ts";
  * full projected bounds for culling. A bucket is rebuilt only when what it
  * reads changes: its chunk or a neighbor's (heights, terrain, stairs), the
  * fog tiles under them (the viewer's seen ground), its own and its
- * neighbors' wall pieces, the
- * spans of the stepping stairs in them, or whatever the caller passes as
- * `global` (the stand threshold, the detail, the feet per cell, the side
- * looks). The store replaces each of those objects on every change, so
- * identity says when, and the spans compare as strings.
+ * neighbors' wall pieces, the spans of the stepping stairs in them, or
+ * whatever the caller passes as `global` (the stand threshold, the
+ * detail, the feet per cell, the side looks). The store replaces each of
+ * those objects on every change, so identity says when, and the spans
+ * compare as strings.
  *
  * Standees are placed among the pieces per layout by the own-cells rule:
  * a standee draws after every cell of its footprint whose drawn ground is at

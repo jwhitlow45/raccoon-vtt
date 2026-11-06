@@ -569,9 +569,10 @@ export type DrawBuildOptions = {
    * windows and the standing pillars stand in the relief, so the ground
    * leaves them out, and the relief's tints and shadows give way to the
    * columns. The DM's locks and secret marks, the pillars given here, which
-   * the stand rule keeps flat, and open doors still draw. A wall the relief
-   * leaves out lies under fog on both sides, where Top-down's line is
-   * covered too. Absent in Top-down, which draws as it always has.
+   * the stand rule keeps flat, and open doors whose leaf lies flat still
+   * draw. A wall the relief leaves out lies under fog on both sides, where
+   * Top-down's line is covered too. Absent in Top-down, which draws as it
+   * always has.
    *
    * `stairs`, when given, are the symbols of the stairs that do not climb
    * in steps: a stepping stair's whole symbol, its pale slab included, is
