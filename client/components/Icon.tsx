@@ -662,7 +662,7 @@ const SHAPES: Record<IconName, ReactNode> = {
       <path d="M12 14l7 3.5-7 3.5-7-3.5z" />
     </g>
   ),
-  // A wind blowing toward the top: an arrow with two streaks behind it, drawn for the app. The scene's Weather fold turns it to each direction of its compass, so it is never Lucide's plain arrow-up, which means move a thing up.
+  // A wind blowing toward the top: an arrow with two streaks behind it, drawn for the app. The scene's Light and weather group turns it to each direction of its compass, so it is never Lucide's plain arrow-up, which means move a thing up.
   windToward: (
     <g {...STROKE}>
       <path d="M12 3v11M8 7l4-4 4 4" />
@@ -684,7 +684,7 @@ const SHAPES: Record<IconName, ReactNode> = {
       <path d="M13 22H7a5 5 0 1 1 4.9-6H13a3 3 0 0 1 0 6Z" />
     </g>
   ),
-  // The Sound section's own (docs/design/design-v1-music.md 4.1). Lucide music: the panel, the room's music and sound.
+  // Ambiance's Sound group and Scenes' Scene sound (docs/design/design-v1-music.md 4.1). Lucide music: the room's music and sound.
   music: (
     <g {...STROKE}>
       <path d="M9 18V5l12-2v13" />

@@ -29,7 +29,7 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
   const target = (t: ActorTarget) => ("tokenId" in t ? token(t.tokenId) : quoted(before.characters[t.characterId]?.name, "a character"));
   switch (op.t) {
     case "room.update":
-      // The Sound panel's switch sends the setting alone (docs/design/design-v1-music.md 6.6).
+      // Ambiance's Players see what is playing switch sends the setting alone (docs/design/design-v1-music.md 6.6).
       if (op.name === undefined && op.settings?.soundNames !== undefined && Object.keys(op.settings).length === 1) {
         return op.settings.soundNames ? "turning on Players see what is playing" : "turning off Players see what is playing";
       }
@@ -56,7 +56,7 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
         return op.patch.blockMovement ? `making walls and ledges block players' moves on ${scene(op.sceneId)}` : `letting players' moves pass walls and ledges on ${scene(op.sceneId)}`;
       }
       if (op.patch.vision !== undefined && Object.keys(op.patch).every((k) => k === "vision" || k === "fogEnabled")) {
-        // The What players see settings send one of the four at a time: Players see, party vision on or off, the light level, or the Sight row.
+        // Fog and vision's settings and Light send one of the four at a time: Players see, party vision on or off, the light level, or the Sight row.
         const was = before.scenes[op.sceneId]?.vision;
         const { on, light, perPlayer } = op.patch.vision;
         // Players see sends fog and party vision together and names no Sight (docs/design/design-v1-map-discovery.md 8.1).

@@ -261,7 +261,7 @@ const MIX_PARTS: readonly { key: keyof SoundMix; label: string }[] = [
 /**
  * Room sound and, while it is on, this device's Music, Background and
  * Effects (docs/design/design-v1-music.md 4.4): in This device's Sounds,
- * and in the Sound panel's On this device. Turning it on is a tap that
+ * and in Ambiance's Sound, under On this device. Turning it on is a tap that
  * unlocks the audio. Each slider is 0 to 100%, squared into the gain.
  */
 export function RoomSoundControls() {
