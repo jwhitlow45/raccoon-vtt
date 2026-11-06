@@ -37,6 +37,7 @@
  *   the runs of stairs to them (docs/design/design-v1-iso-depth.md 7), with
  *   a pan, a drag up a run and a turn at 40 and 24 px, and in Low power at
  *   48 and 64 px, beside the caps' pans at 24 px and at 48 px in Low power.
+ *   In Isometric each zoom's pan is counted too, as the hex rows' are.
  *
  * Rows: pan (the typical scene at 40 px, the caps at fit and at 40 px, the
  * crowd at 40 px), a local drag (each whole frame), the ringed and aura'd
@@ -1329,6 +1330,14 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
         const at = `${zoom} px${low ? " in Low power" : ""}`;
         await addPan(dungeonRow(`pan, ${at}`), () => touchPan(page, cdp, STEPS));
         await add(dungeonRow(`local drag up a run, whole frame, ${at}`), () => throttled(() => rounds(() => touchDrag(page, cdp, scene.walker, STEPS))));
+        if (view === "isometric" && (!opts.only || opts.only.some((o) => dungeonRow(`pan, ${at}`).includes(o)))) {
+          // What the walls, frames, steps and outlines cost a frame, counted on an untimed pan of its own (docs/design/design-v1-iso-depth.md 7).
+          const c = await throttled(() => canvasCalls(page, cdp, STEPS));
+          const count = (what: string, v: number) => rows.push({ row: dungeonRow(`pan, ${at}, ${what} a frame (calls, not ms)`), view, ms: { median: v, max: v, n: STEPS } });
+          count("fills and strokes", c.fills);
+          count("patterns made", c.patterns);
+          if (c.kept) count("whole repaints", c.kept["whole repaints"] ?? 0);
+        }
         if (view === "isometric") {
           // The selected walker is the point a turn keeps still (boardPick.ts heldPoint), so every turn shows the same run.
           await select(page, [scene.walker]);
