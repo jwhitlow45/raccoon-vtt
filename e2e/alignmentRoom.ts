@@ -3279,6 +3279,15 @@ const CASES = `
 <div data-case="kin-gap">
   <div style="display: grid; gap: 4px"><button>One</button><button>Two</button><button>Three</button><button style="margin-top: 6px">Four</button></div>
 </div>
+<div data-case="kin-group-gap">
+  <div style="display: flex; gap: 2px"><button>One</button><button>Two</button><button data-group-start style="margin-left: 6px">Three</button><button>Four</button><button data-group-start style="margin-left: 6px">Five</button></div>
+</div>
+<div data-case="kin-group-gap-uneven">
+  <div style="display: flex; gap: 2px"><button>One</button><button>Two</button><button data-group-start style="margin-left: 6px">Three</button><button>Four</button><button data-group-start style="margin-left: 12px">Five</button></div>
+</div>
+<div data-case="kin-group-gap-unmarked">
+  <div style="display: flex; gap: 2px"><button>One</button><button>Two</button><button style="margin-left: 6px">Three</button><button>Four</button></div>
+</div>
 <div data-case="pad-uneven">
   <div class="box" style="padding: 8px 10px 3px">Uneven room</div>
 </div>
@@ -3917,6 +3926,10 @@ export function helperTest(): void {
       await caught("kin-held-tall", "kind-height");
       await caught("kin-padding", "kind-padding");
       await caught("kin-gap", "kind-gap");
+      // A group's wider gap, marked by data-group-start as the side panel's tabs are, is held only to the other groups' gaps (docs/design/design-v1-panel-size.md 9). Unmarked, it is caught.
+      await passes("kin-group-gap");
+      await caught("kin-group-gap-uneven", "kind-gap");
+      await caught("kin-group-gap-unmarked", "kind-gap");
       await caught("pad-uneven", "pad");
       await passes("pad-even");
       // A pane's sticky foot, stuck over the rows that scroll under it, is judged without the pane's inset it takes back, and stands in no row with those rows (review LP17-HP-1).
@@ -8462,4 +8475,145 @@ export function logHistoryTests(): void {
       });
     }
   }
+}
+
+/** The panel-size roots' desktop sizes (docs/design/design-v1-panel-size.md 9): each at the default width and at the cap, which is 507 at 1440 x 900 at 130% (layout 1107.7) and 640 at the others. */
+const PANEL_WIDTH_AT: { size: Size; scale: number; cap: number }[] = [
+  { size: SIZES.find((s) => s.name === "1440x900")!, scale: 1, cap: 640 },
+  { size: SIZES.find((s) => s.name === "1440x900")!, scale: 1.3, cap: 507 },
+  { size: { name: "1920x1080", width: 1920, height: 1080, touch: false }, scale: 1, cap: 640 },
+  { size: { name: "1920x1080", width: 1920, height: 1080, touch: false }, scale: 1.3, cap: 640 },
+];
+/** The sheet header's arrows with a mouse, under the 900 px layout (5.2). */
+const SHEET_MOUSE: Size = { name: "700x900", width: 700, height: 900, touch: false };
+
+/**
+ * ps-a and ps-b, the panel-size design's roots (docs/design/design-v1-panel-size.md 9),
+ * dark then light: the side panel's tab row with Reset width at its
+ * default width and at the cap, its tabs one 44 px line with no name cut
+ * and the group gap held only to the other groups' gaps, the edge's grip
+ * at the aside's middle on its border, and a sheet's header with the step
+ * arrows at 700 x 900 with a mouse, normal and full. The width and the
+ * theme change by storage events, as another window's change would, so
+ * each size and interface size loads the room once.
+ */
+export function panelSizeAlignmentTests(): void {
+  type Win = { dispatchEvent(e: unknown): void; StorageEvent: new (type: string, init: { key: string; newValue: string }) => unknown; document: { documentElement: { style: { colorScheme: string } } } };
+  /** Stores a setting and tells the page, as a change in another window of the app would. */
+  async function storeLive(page: Page, key: string, value: string): Promise<void> {
+    await page.evaluate(({ key, value }) => {
+      const win = globalThis as unknown as Win;
+      localStorage.setItem(key, value);
+      win.dispatchEvent(new win.StorageEvent("storage", { key, newValue: value }));
+    }, { key, value });
+  }
+  async function scheme(page: Page, choice: "dark" | "light"): Promise<void> {
+    await storeLive(page, "rvtt.theme", choice);
+    await waitFor(`the ${choice} theme`, () => page.evaluate((value) => ((globalThis as unknown as Win).document.documentElement.style.colorScheme === value ? true : null), choice), 5_000);
+  }
+  /** The disabled look check holds words to dark's textDisabled (helpers/alignment.ts), so in light its lines are left out: light's differs by design. */
+  function dropLightDisabled(sweep: Sweep, from: number): void {
+    sweep.lines.splice(from, sweep.lines.length - from, ...sweep.lines.slice(from).filter((line) => !line.includes(": disabled look,")));
+  }
+
+  test(`ps-a. the side panel's tab row with Reset width and the edge's grip, at the default width and the cap, at 1440 x 900 and 1920 x 1080 at 100% and 130%, dark and light, within ${LIMIT_PX} px`, async () => {
+    await newDmSession();
+    const lines: string[] = [];
+    try {
+      for (const at of PANEL_WIDTH_AT) {
+        const page = await dmPageFor(at.size);
+        page.setDefaultTimeout(10_000);
+        await openAt(page, at.size, at.scale, { "rvtt.sidePanelWidth": "", "rvtt.theme": "dark" });
+        await openSideTab(page, "Initiative");
+        const edge = page.getByRole("separator", { name: "Side panel width" });
+        const aside = page.locator('aside:has([role="tablist"][aria-label="Panels"])');
+        const row = aside.locator('div:has(> [role="tablist"][aria-label="Panels"])').first();
+        for (const width of [360, at.cap]) {
+          await storeLive(page, "rvtt.sidePanelWidth", width === 360 ? "" : String(width));
+          await waitFor(`the panel at ${width}`, async () => ((await edge.getAttribute("aria-valuenow")) === String(width) ? true : null), 5_000);
+          for (const choice of ["dark", "light"] as const) {
+            await scheme(page, choice);
+            const sweep = new Sweep(`ps-${atName(at)}-${width}-${choice}`);
+            const reset = aside.getByRole("button", { name: "Reset width", exact: true });
+            if ((await reset.count()) !== (width > 360 ? 1 : 0)) sweep.lines.push(`${sweep.at}: Reset width ${width > 360 ? "missing" : "shown at the default"}`);
+            const before = sweep.lines.length;
+            await sweep.measure(page, "ps-tab-row", row);
+            if (choice === "light") dropLightDisabled(sweep, before);
+            await sweep.add(page, "ps-tab-row", await tabRowLines(page, `${sweep.at} ps-tab-row`));
+            const grip = (await page.locator("[data-edge-grip]").boundingBox())!;
+            const box = (await aside.boundingBox())!;
+            const offY = Math.abs(grip.y + grip.height / 2 - (box.y + box.height / 2));
+            const offX = Math.abs(grip.x + grip.width / 2 - (box.x + 0.5 * at.scale));
+            await sweep.add(page, "ps-grip", [
+              ...(offY > LIMIT_PX ? [`${sweep.at} ps-grip: ${Math.round(offY * 10) / 10} px off the aside's middle`] : []),
+              ...(offX > LIMIT_PX ? [`${sweep.at} ps-grip: ${Math.round(offX * 10) / 10} px off the aside's border`] : []),
+            ]);
+            if (choice === "dark") await shots.take(page, `alignment-${sweep.at}`);
+            lines.push(...sweep.lines);
+          }
+          await scheme(page, "dark");
+        }
+      }
+    } finally {
+      if (dm && !dm.isClosed()) await dm.evaluate(() => {
+        localStorage.removeItem("rvtt.sidePanelWidth");
+        localStorage.setItem("rvtt.theme", "dark");
+      });
+    }
+    assert.deepEqual(lines, [], "the side panel's tab row or grip out of line");
+  });
+
+  test(`ps-b. a sheet's header with Up and Down beside its grabber, normal and full, at 700 x 900 with a mouse at 100% and 130%, dark and light, within ${LIMIT_PX} px`, async () => {
+    await newDmSession();
+    const lines: string[] = [];
+    try {
+      for (const scale of SCALES) {
+        const page = await dmPageFor(SHEET_MOUSE);
+        page.setDefaultTimeout(10_000);
+        await openAt(page, SHEET_MOUSE, scale, { "rvtt.theme": "dark" });
+        for (const choice of ["dark", "light"] as const) {
+          await scheme(page, choice);
+          const sheet = await openPanel(page, "Log");
+          const header = sheet.locator("[data-sheet-grab]").first();
+          const up = sheet.locator('[data-sheet-step="up"]');
+          for (const stand of ["normal", "full"] as const) {
+            if (stand === "full") {
+              await up.click();
+              await waitFor("the sheet full and at rest", async () => ((await sheet.getAttribute("aria-modal")) === "true" && (await sheet.evaluate((el) => (el as unknown as { style: { transform: string } }).style.transform)) === "" ? true : null), 5_000);
+            }
+            const sweep = new Sweep(`ps-${SHEET_MOUSE.name}${scale === 1 ? "" : "-130"}-${stand}-${choice}`);
+            const before = sweep.lines.length;
+            await sweep.measure(page, "ps-sheet-header", header);
+            if (choice === "light") dropLightDisabled(sweep, before);
+            // The grabber and both arrows' pills on one line, each pill in the middle of its 44 px target.
+            const parts = await header.evaluate((el) => {
+              type R = { top: number; bottom: number; left: number; right: number };
+              const root = el as unknown as { querySelector(s: string): { getBoundingClientRect(): R } | null };
+              const r = (s: string) => root.querySelector(s)?.getBoundingClientRect() ?? null;
+              return { grabber: r("[data-sheet-grabber]"), up: r('[data-sheet-step="up"]'), upPill: r('[data-sheet-step="up"] > [data-pill]'), down: r('[data-sheet-step="down"]'), downPill: r('[data-sheet-step="down"] > [data-pill]') };
+            });
+            const strip: string[] = [];
+            if (!parts.grabber || !parts.up || !parts.upPill || !parts.down || !parts.downPill) strip.push(`${sweep.at} ps-sheet-header: the grabber or an arrow is missing`);
+            else {
+              const midY = (b: { top: number; bottom: number }) => (b.top + b.bottom) / 2;
+              const midX = (b: { left: number; right: number }) => (b.left + b.right) / 2;
+              const line = midY(parts.grabber);
+              for (const [name, pill, hit] of [["Up", parts.upPill, parts.up], ["Down", parts.downPill, parts.down]] as const) {
+                if (Math.abs(midY(pill) - line) > LIMIT_PX) strip.push(`${sweep.at} ps-sheet-header: ${name}'s pill ${Math.round((midY(pill) - line) * 10) / 10} px off the grabber's line`);
+                if (Math.abs(midX(pill) - midX(hit)) > LIMIT_PX || Math.abs(midY(pill) - midY(hit)) > LIMIT_PX) strip.push(`${sweep.at} ps-sheet-header: ${name}'s pill off the middle of its target`);
+              }
+            }
+            await sweep.add(page, "ps-sheet-header", strip);
+            if (choice === "dark") await shots.take(page, `alignment-${sweep.at}`);
+            lines.push(...sweep.lines);
+          }
+          await closeSheets(page);
+        }
+        await scheme(page, "dark");
+      }
+    } finally {
+      if (dm && !dm.isClosed()) await dm.evaluate(() => localStorage.setItem("rvtt.theme", "dark"));
+    }
+    assert.deepEqual(lines, [], "a sheet's header with its arrows out of line");
+  });
 }

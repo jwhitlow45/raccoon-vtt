@@ -498,7 +498,7 @@ export function PanelTab(props: {
   stop: boolean;
   index: number;
   onClick(): void;
-  /** The tab opens a new group in the row, after the group gap, which the alignment sweep's spacing check reads (e2e/helpers/spacing.ts). */
+  /** The tab opens a new group in the row, after the group gap, which the alignment sweep's gap check reads (e2e/helpers/alignment.ts). */
   groupStart?: boolean;
   style: CSSProperties;
   children: ReactNode;

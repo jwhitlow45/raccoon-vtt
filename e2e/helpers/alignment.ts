@@ -16,7 +16,9 @@ import { PALETTES, theme } from "../../client/lib/theme.ts";
  * 2. One row: the parts of a flex or grid row share a middle, and the
  *    boxes among them a height.
  * 3. Same kind: sibling controls of one tag and role share a height, a
- *    side padding and a gap.
+ *    side padding and a gap. A control marked `data-group-start` opens a
+ *    group of its row (the side panel's tabs, docs/design/design-v1-panel-size.md 9),
+ *    so the wider gap before it is held only to the other groups' gaps.
  * 4. Edges: a column of rows starts each row's words at one left edge.
  * 5. Wrapping: a name alone on its line above its control, or one part
  *    alone on a wrapped row's last line where it could share it: where it
@@ -1551,14 +1553,18 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
             const order = (c: DomElement) => kids.indexOf(c);
             const sorted = [...bs].sort((x, y) => order(x.c) - order(y.c));
             const gaps: number[] = [];
+            const groupGaps: number[] = [];
             for (let i = 1; i < sorted.length; i++) {
               if (order(sorted[i]!.c) !== order(sorted[i - 1]!.c) + 1) continue;
               const p = sorted[i - 1]!.b.border;
               const c = sorted[i]!.b.border;
-              if (c.t >= p.b - 1) gaps.push(round(c.t - p.b));
-              else if (c.l >= p.r - 1) gaps.push(round(c.l - p.r));
+              const into = sorted[i]!.c.getAttribute("data-group-start") !== null ? groupGaps : gaps;
+              if (c.t >= p.b - 1) into.push(round(c.t - p.b));
+              else if (c.l >= p.r - 1) into.push(round(c.l - p.r));
             }
-            if (gaps.length >= 2 && round(spread(gaps)) > LIMIT) push({ check: "kind-gap", role: roleOf(el), name: nameOf(el), offset: round(spread(gaps)), box, what: `gaps ${gaps.join(", ")}`, detail: "" });
+            for (const [list, detail] of [[gaps, ""], [groupGaps, "between groups"]] as const) {
+              if (list.length >= 2 && round(spread(list)) > LIMIT) push({ check: "kind-gap", role: roleOf(el), name: nameOf(el), offset: round(spread(list)), box, what: `gaps ${list.join(", ")}`, detail });
+            }
           }
         }
       }
