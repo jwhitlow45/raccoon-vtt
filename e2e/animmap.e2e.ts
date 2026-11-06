@@ -19,7 +19,8 @@ import { openGroup } from "./helpers/groups.ts";
  * and Use the still only. Lane AR-B's (amr-1 to amr-7,
  * docs/design/design-v1-video-turns.md 14) upload turned, mirrored,
  * stretched and cropped videos and an iPhone MOV, and check the map shows
- * them upright, the still and the video alike. Maps are set through the
+ * them upright, the still and the video alike. hs-1 checks that an HEVC
+ * MOV is refused on the device with nothing sent. Maps are set through the
  * DM's socket where a step does not test the upload form.
  *
  * The board is read through its test hooks (features/animmap/board.ts):
@@ -512,6 +513,7 @@ describe("animated maps", { concurrency: false }, () => {
     videoType: "That video isn't WebM, MP4 or MOV.",
     badVideo: "That video could not be read.",
     geometry: "That video's file crops or reshapes its picture in a way this app can't show. Export it again as a plain MP4 or WebM.",
+    hevc: "That video is HEVC (High Efficiency), which most browsers can't play. Export it as H.264, for example with QuickTime Player's Export As and Greater Compatibility on a Mac. For new iPhone videos, set Settings > Camera > Formats to Most Compatible.",
   };
   /** The map pickers while the server takes videos (upload.ts mapAccept). */
   const VIDEO_PICKER = 'input[type="file"][accept="image/*,video/webm,video/mp4,video/quicktime,.mov"]';
@@ -704,6 +706,40 @@ describe("animated maps", { concurrency: false }, () => {
     } finally {
       dm.off("request", watch);
       consoles.dm.allow = allowed;
+      await form.getByRole("button", { name: "Cancel", exact: true }).click();
+    }
+  });
+
+  test("hs-1. an iPhone's default HEVC MOV, its moov after the media, is refused on the device in the server's words with nothing sent (AMROT-O-06)", async () => {
+    // The fixture script's writer (e2e/fixtures/README.md), so the bytes are made here and no video is downloaded.
+    const { defaultSoundTrack, defaultVideoTrack, mp4File, visualEntry } = await import("../server/assets/video/videoTestutil.ts");
+    const { checkVideoBytes } = await import("../server/assets/video/check.ts");
+    // 3 MB with moov last, as an iPhone writes it, so the scan reads the first and last MiB apart.
+    const samples = Array.from({ length: 60 }, () => ({ size: 50_000, delta: 512 }));
+    const mov = mp4File({ brand: "qt  ", compatible: ["qt  "], moovLast: true, tracks: [defaultVideoTrack({ entry: visualEntry("hvc1", 1920, 1080, ""), samples }), defaultSoundTrack()] });
+    assert.ok(mov.length > 2 * 1024 * 1024, `${mov.length} bytes`);
+    const top: string[] = [];
+    for (let at = 0; at < mov.length; at += mov.readUInt32BE(at)) top.push(mov.toString("latin1", at + 4, at + 8));
+    assert.deepEqual(top, ["ftyp", "mdat", "moov"], "moov after the media");
+    await assert.rejects(checkVideoBytes(mov), (err: { code?: string }) => err.code === "video_hevc", "the server refuses the same bytes as video_hevc");
+    const before = (await amd.assets()).length;
+    const form = await openSceneGroup(await amd.scenes(), "New scene");
+    await form.getByRole("radio", { name: "Map image", exact: true }).click();
+    const puts: string[] = [];
+    const watch = (r: { method(): string; url(): string }) => {
+      if (r.method() === "PUT" && r.url().includes("/assets?kind=")) puts.push(r.url());
+    };
+    dm.on("request", watch);
+    try {
+      await form.locator(VIDEO_PICKER).first().setInputFiles({ name: "IMG_0042.MOV", mimeType: "video/quicktime", buffer: mov });
+      await form.getByRole("button", { name: "Upload and create" }).click();
+      await form.getByText(AMD_WORDS.hevc, { exact: true }).waitFor();
+      await shots.take(dm, "hs-1-refused-hevc");
+      assert.equal(puts.length, 0, "nothing went up");
+      assert.equal((await amd.assets()).length, before, "nothing in the Library");
+      assert.equal(await form.getByRole("button", { name: "Upload and create" }).isEnabled(), true, "the form is ready for another file");
+    } finally {
+      dm.off("request", watch);
       await form.getByRole("button", { name: "Cancel", exact: true }).click();
     }
   });
