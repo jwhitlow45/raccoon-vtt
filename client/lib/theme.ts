@@ -452,8 +452,12 @@ export const theme = {
      */
     topBar: 52,
     toolbar: 60,
-    /** Dialog widths on a computer. A phone shows a dialog full screen or as a bottom sheet. */
-    dialog: { sm: 440, md: 560, lg: 720 },
+    /**
+     * Dialog widths on a computer. A phone shows a dialog full screen or as
+     * a bottom sheet. `xl` is the Music window's, Library beside Now playing
+     * and Up next (docs/design/design-v1-music-player.md 3.2).
+     */
+    dialog: { sm: 440, md: 560, lg: 720, xl: 1040 },
     /**
      * The widest a floating notice stands over the map: the connection
      * banner, the quiet load, the starting view's bar, a toast and the

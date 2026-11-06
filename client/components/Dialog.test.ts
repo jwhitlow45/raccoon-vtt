@@ -12,7 +12,7 @@ import { tokenPattern } from "./testing/tokenPattern.ts";
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { DiscardQuestion, dialogCard, DIALOG_PHONE_MAX } = await import("./Dialog.tsx");
+const { DiscardQuestion, dialogCard, DIALOG_PHONE_MAX, fillsScreen, TALL_SHEET_GAP } = await import("./Dialog.tsx");
 const { theme } = await import("../lib/theme.ts");
 
 describe("the question an editor asks before it discards", () => {
@@ -55,6 +55,74 @@ describe("the shape of a dialog's card", () => {
     assert.equal(dialogCard(390, { phone: "sheet" }).bottom, true);
   });
 });
+
+/*
+ * The Music window's tall sheet (docs/design/design-v1-music-player.md 3.2):
+ * on a phone a bottom card as tall as the screen less its top inset and a
+ * 12 px strip of the room, keeping the bottom card's grabber, swipe and,
+ * with a mouse, PS-B's Down arrow as Put away sheet with no Up, since it has
+ * no full stand. On a computer it is an editor's card, 1040 px at `xl`.
+ */
+describe("the tall sheet", () => {
+  test("a phone gets a bottom card one height tall, under the top inset and a strip of the room, and a computer the editor's card", () => {
+    assert.equal(TALL_SHEET_GAP, 12);
+    for (const width of [320, 390, DIALOG_PHONE_MAX - 1]) {
+      const { card, bottom } = dialogCard(width, { phone: "tall", width: "xl" });
+      assert.equal(bottom, true, `at ${width}`);
+      assert.equal(card.height, `calc(100% - ${theme.safe.top} - 12px)`);
+      assert.equal(card.maxHeight, undefined, "one height whatever it shows");
+      assert.equal(card.borderRadius, `${theme.radius.lg}px ${theme.radius.lg}px 0 0`);
+      assert.equal(card.paddingBottom, theme.safe.bottom);
+      assert.equal(fillsScreen(width, { phone: "tall" }), false, "a strip of the room shows above it");
+    }
+    assert.equal(dialogCard(390, { phone: "sheet" }).card.maxHeight, "92%", "a sheet still fits its content");
+    const computer = dialogCard(1440, { phone: "tall", width: "xl" });
+    assert.equal(computer.bottom, false);
+    assert.equal(theme.layout.dialog.xl, 1040);
+    assert.equal(computer.card.width, `min(1040px, calc(100% - ${theme.space(8)}px))`);
+    assert.equal(computer.card.height, `min(calc(100% - ${theme.space(8)}px), 760px)`, "an editor's one height");
+  });
+
+  test("its header has the grabber, and with a mouse Put away sheet and no Expand sheet", async () => {
+    const { Dialog } = await import("./Dialog.tsx");
+    const { drawn } = await import("./testing/drawn.ts");
+    const g = globalThis as Record<string, unknown>;
+    const previous = { window: g.window, document: g.document, HTMLElement: g.HTMLElement, matchMedia: g.matchMedia };
+    // Just enough page for a phone's render: its width, the portal's target, the focus the modal hook reads, and a mouse or none.
+    const draw = (mouse: boolean, phone: "tall" | "fill") => {
+      Object.assign(g, {
+        window: { innerWidth: 390, innerHeight: 844 },
+        document: { body: { nodeType: 1 }, activeElement: null },
+        HTMLElement: class {},
+        matchMedia: (q: string) => ({ matches: mouse && q === "(any-pointer: fine)", addEventListener() {}, removeEventListener() {} }),
+      });
+      const portal = drawn(Dialog, { title: "Music", onClose() {}, phone, width: "xl", children: createElement("p", null, "Up next") }) as unknown as { children: ReturnType<typeof createElement> };
+      return renderToStaticMarkup(portal.children);
+    };
+    try {
+      const tall = draw(true, "tall");
+      assert.match(tall, /data-sheet-grabber/, "the bottom card's grabber");
+      assert.match(tall, /<button[^>]*data-sheet-step="down"[^>]*>/);
+      assert.match(tall, /aria-label="Put away sheet"/);
+      assert.doesNotMatch(tall, /data-sheet-step="up"/, "no full stand, so no Up");
+      assert.doesNotMatch(tall, /Expand sheet/);
+      assert.match(tall, new RegExp(`height:calc\\(100% - ${escaped(theme.safe.top)} - 12px\\)`));
+      const touch = draw(false, "tall");
+      assert.match(touch, /data-sheet-grabber/, "a phone's finger swipes it");
+      assert.doesNotMatch(touch, /data-sheet-step/, "and gets no arrows");
+      assert.doesNotMatch(draw(true, "fill"), /data-sheet-grabber|data-sheet-step/, "a whole-screen card does not swipe");
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete g[key];
+        else g[key] = value;
+      }
+    }
+  });
+});
+
+function escaped(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 /*
  * A dialog opened from a held page, such as Change it on the group save

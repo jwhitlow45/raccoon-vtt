@@ -138,7 +138,9 @@ export type IconName =
   | "repeatOne"
   | "shuffle"
   | "volume"
-  | "foldWidth";
+  | "foldWidth"
+  | "previous"
+  | "queue";
 
 /**
  * The meanings drawn with Lucide's path data, by the Lucide icon each
@@ -222,6 +224,8 @@ export const LUCIDE: Partial<Record<IconName, LucideIcon>> = {
   shuffle: "shuffle",
   volume: "volume-2",
   foldWidth: "fold-horizontal",
+  previous: "skip-back",
+  queue: "list-music",
 };
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
@@ -728,6 +732,19 @@ const SHAPES: Record<IconName, ReactNode> = {
   ),
   // Lucide fold-horizontal: the side panel's Reset width, two arrows pressing in on a fold. Never Hide panels, which closes it.
   foldWidth: <path {...STROKE} d="M2 12h6M22 12h-6M12 2v2M12 8v2M12 14v2M12 20v2M19 9l-3 3 3 3M5 15l3-3-3-3" />,
+  // Lucide skip-back: the music's Previous, back to the track's start or the one before (docs/design/design-v1-music-player.md 4.2).
+  // Its polygon and line are written as one path through the same points, as skip-forward's are.
+  previous: <path {...STROKE} d="M19 20L9 12L19 4zM5 19V5" />,
+  // Lucide list-music: tracks in order, a playlist or the queue, on a playlist's tile and New playlist (docs/design/design-v1-music-player.md 7).
+  queue: (
+    <g {...STROKE}>
+      <path d="M21 15V6" />
+      <path d="M18.5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" />
+      <path d="M12 12H3" />
+      <path d="M16 6H3" />
+      <path d="M12 18H3" />
+    </g>
+  ),
 };
 
 export const ICON_NAMES = Object.keys(SHAPES) as IconName[];

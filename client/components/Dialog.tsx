@@ -33,15 +33,19 @@ export type DialogProps = {
    * not grow by default. Off, the status keeps its usual flex sizing.
    */
   statusGrow?: boolean;
-  /** The card's width on a computer: `layout.dialog.sm`, `md` or `lg`. */
+  /** The card's width on a computer: `layout.dialog.sm`, `md`, `lg` or `xl`. */
   width?: DialogWidth;
   /**
    * The shape on a phone. `fill` takes the whole screen, for editors with
    * many fields. `sheet` rises from the bottom and fits its content, for
-   * short pickers. On a computer `fill` keeps one height while its content
-   * changes, and `sheet` fits its content there too.
+   * short pickers. `tall` rises from the bottom as tall as the screen less
+   * its top inset and a strip of the room, for a window that keeps the
+   * sheet's grabber and swipe, such as the Music window
+   * (docs/design/design-v1-music-player.md 3.2). On a computer `fill` and
+   * `tall` keep one height while their content changes, and `sheet` fits
+   * its content there too.
    */
-  phone?: "fill" | "sheet";
+  phone?: "fill" | "sheet" | "tall";
   /** The backdrop. `theme.color.scrim` by default. The handout keeps a deeper one, since a dim map helps read it. */
   scrim?: string;
   /** False leaves out the title row, for the X-card, whose card is its own message. The title still names the dialog. */
@@ -100,9 +104,12 @@ function widthPx(width: DialogWidth): number {
   return typeof width === "number" ? width : theme.layout.dialog[width];
 }
 
+/** The strip of the room a tall sheet leaves in view above it, below the top inset, so it reads as a sheet over the room. */
+export const TALL_SHEET_GAP = 12;
+
 /** Whether the card takes the whole screen at a layout width, its ground reaching the screen's top. */
 export function fillsScreen(layoutPx: number, props: Pick<DialogProps, "phone" | "full">): boolean {
-  return props.full === true || (layoutPx < DIALOG_PHONE_MAX && props.phone !== "sheet");
+  return props.full === true || (layoutPx < DIALOG_PHONE_MAX && props.phone !== "sheet" && props.phone !== "tall");
 }
 
 /** The card's shape at a layout width: a sheet from the bottom, the whole screen, or a card in the middle. */
@@ -128,7 +135,8 @@ export function dialogCard(layoutPx: number, props: Pick<DialogProps, "phone" | 
     return {
       card: {
         width: "100%",
-        maxHeight: "92%",
+        // A tall sheet holds one height whatever it shows, so a change of tab or step never moves its header.
+        ...(props.phone === "tall" ? { height: `calc(100% - ${theme.safe.top} - ${TALL_SHEET_GAP}px)` } : { maxHeight: "92%" }),
         borderRadius: `${theme.radius.lg}px ${theme.radius.lg}px 0 0`,
         paddingBottom: theme.safe.bottom,
         paddingLeft: theme.safe.left,
