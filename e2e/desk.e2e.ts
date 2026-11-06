@@ -366,7 +366,7 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
 
     // On the players' scene the map image's picker comes after a warning, which it names as its description.
     await openSideTab(dm, "Scenes");
-    await section("Map image and grid").getByRole("button", { name: "Add a map image" }).click();
+    await section("Map and grid").getByRole("button", { name: "Add a map image" }).click();
     await waitFor("the image picker focused", async () => {
       const f = await focused(dm);
       return f.tag === "input" && f.name === "Choose the image";
@@ -386,7 +386,7 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
     await waitFor("Add a map image focused again", async () => (await focused(dm)).name === "Add a map image");
 
     // Export as image opens at its first choice, the scale chosen, and Close gives focus back.
-    const exporting = section("Export as image");
+    const exporting = section("Export");
     await exporting.getByRole("button", { name: "Export as image" }).click();
     await waitFor("the chosen pixels per square focused", () =>
       dm.evaluate(() => {

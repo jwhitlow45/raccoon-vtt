@@ -69,7 +69,8 @@ describe("the copy's button", () => {
   }
 
   test("shows in a room with another scene, and not in a room of one", () => {
-    assert.match(render(room()), />Use these settings on other scenes…</);
+    assert.match(render(room()), />Copy to other scenes…</);
+    assert.match(render(room()), />Copies Players see, Light and Sight\.</);
     const alone = room();
     delete alone.scenes.s2;
     assert.equal(render(alone), "");

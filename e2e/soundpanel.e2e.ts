@@ -7,7 +7,7 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import { framesFor, silentFrames } from "#shared/audio/mp3Testutil.ts";
 import type { SoundUse } from "#shared/sound.ts";
-import { ConsoleWatch, openSideTab, OpSocket, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, OpSocket, sceneGroup, sceneGroupFold, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { addSound } from "./soundRoom.ts";
 
@@ -470,16 +470,26 @@ describe("the Sound panel", { concurrency: false }, () => {
     await until("its music by the move", () => playing()?.music?.now.soundId === run.sounds.March);
     assert.equal(Object.keys(playing()?.loops ?? {}).length, 3);
 
-    // The row follows the scene's sound however it is set: silence, then none.
+    // Ambiance's row opens Scenes at the scene's own Scene sound group, with its fold focused (docs/design/design-v1-scenes-reorg.md 5 and 7).
     await soundPanel();
-    await ops.send({ t: "scene.update", sceneId: run.sceneB, patch: { sound: { music: null, loops: [] } } });
-    await panel.getByText("Forest road is silent.", { exact: true }).waitFor();
-    await shots.take(dm, "sp-6-dm-scene-silent");
-    await ops.send({ t: "scene.update", sceneId: run.sceneB, patch: { sound: null } });
-    await panel.getByText("Forest road has no sound of its own.", { exact: true }).waitFor();
-    // The row opens Scenes, which holds the scene's own Scene sound group (lane B's half of this step, run on the stack).
     await row.click();
-    await dm.getByRole("tabpanel", { name: sideTabName("Scenes") }).waitFor();
+    await scenes.waitFor();
+    const own = sceneGroup(scenes, "Scene sound");
+    await own.getByText(/^Forest road's sound: March, (Tavern crowd|Wind|Fire), (Tavern crowd|Wind|Fire), (Tavern crowd|Wind|Fire)\.$/).waitFor();
+    await waitFor("Scene sound's fold focused", () => sceneGroupFold(scenes, "Scene sound").evaluate((el) => el === el.ownerDocument.activeElement || null));
+    // Use silence and Clear live there now, and Ambiance's row follows whatever they set.
+    await own.getByRole("button", { name: "Use silence", exact: true }).click();
+    await until("silence saved", () => dmSocket.state?.scenes[run.sceneB]?.sound?.music === null && dmSocket.state?.scenes[run.sceneB]?.sound?.loops.length === 0);
+    await own.getByText("Forest road is silent.", { exact: true }).waitFor();
+    await shots.take(dm, "sp-6-dm-scene-silent");
+    await soundPanel();
+    await panel.getByText("Forest road is silent.", { exact: true }).waitFor();
+    await row.click();
+    await own.getByRole("button", { name: "Clear", exact: true }).click();
+    await until("no sound of its own", () => dmSocket.state?.scenes[run.sceneB] && dmSocket.state.scenes[run.sceneB]!.sound === undefined);
+    await own.getByText("Forest road has no sound of its own.", { exact: true }).waitFor();
+    await soundPanel();
+    await panel.getByText("Forest road has no sound of its own.", { exact: true }).waitFor();
   });
 
   test("sp-7. Players see what is playing: Pat's panel by name with it on, by count with it off", async () => {

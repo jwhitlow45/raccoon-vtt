@@ -1,26 +1,31 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { scene } from "#shared/testutil.ts";
-import { fogFoldSummary, sceneGroupSummary, sceneRowDetail } from "./sceneSummary.ts";
+import { fogFoldSummary, sceneGroupSummary, sceneRowDetail, sceneSoundSummary } from "./sceneSummary.ts";
 
-/** What each folded group of the scene settings page says (docs/design/design-v1-design-pass.md 4.1). */
+/** What each folded group of the scene settings page says (docs/design/design-v1-scenes-reorg.md 3). */
 describe("sceneGroupSummary", () => {
-  test("What players see: the preset's name and the light, with Per player when Sight is", () => {
-    assert.equal(sceneGroupSummary(scene("s", { fogEnabled: true, vision: { on: true, light: "dark" } }), "players"), "Explore · Dark");
-    assert.equal(sceneGroupSummary(scene("s", { fogEnabled: true }), "players"), "Reveal by hand · Bright");
-    assert.equal(sceneGroupSummary(scene("s", { fogEnabled: false, vision: { on: true, light: "dim" } }), "players"), "Custom · Dim");
-    assert.equal(sceneGroupSummary(scene("s", { fogEnabled: false }), "players"), "Everything · Bright");
-    assert.equal(sceneGroupSummary(scene("s", { fogEnabled: true, vision: { on: true, light: "dark", perPlayer: true } }), "players"), "Explore · Dark · Per player");
+  test("Light and weather: the light while party vision is on, then the weather, else Clear", () => {
+    assert.equal(sceneGroupSummary(scene("s", { fogEnabled: true, vision: { on: true, light: "dim" }, weather: { kind: "rain", heavy: true, wind: "strong" } }), "light"), "Dim · Heavy rain · Strong wind");
+    assert.equal(sceneGroupSummary(scene("s", { fogEnabled: true, vision: { on: true, light: "bright" } }), "light"), "Bright · Clear");
+    assert.equal(sceneGroupSummary(scene("s", { fogEnabled: false, vision: { on: true, light: "dark" }, weather: { kind: "clear", wind: "strong" } }), "light"), "Dark · Strong wind", "Custom has party vision on");
   });
 
-  test("What players see names the scene's weather after the light", () => {
-    const dark = { fogEnabled: true, vision: { on: true, light: "dark" as const } };
-    assert.equal(sceneGroupSummary(scene("s", { ...dark, weather: { kind: "rain", heavy: true } }), "players"), "Explore · Dark · Heavy rain");
-    assert.equal(sceneGroupSummary(scene("s", { ...dark, weather: { kind: "rain", heavy: true, wind: "strong" } }), "players"), "Explore · Dark · Heavy rain · Strong wind");
-    assert.equal(sceneGroupSummary(scene("s", { ...dark, weather: { kind: "clear", wind: "strong" } }), "players"), "Explore · Dark · Strong wind");
+  test("Light and weather leaves the light out while party vision is off, since it does nothing then (D-261102-933)", () => {
+    assert.equal(sceneGroupSummary(scene("s", { fogEnabled: true, vision: { on: false, light: "dark" }, weather: { kind: "rain", heavy: true, wind: "strong" } }), "light"), "Heavy rain · Strong wind");
+    assert.equal(sceneGroupSummary(scene("s", { fogEnabled: true }), "light"), "Clear");
+    assert.equal(sceneGroupSummary(scene("s"), "light"), "Clear");
   });
 
-  test("Map image and grid: whether there is an image, then the grid's shape, with its pixels on an image", () => {
+  test("Fog and vision: Players see's word, with Per player when Sight is, and no light or weather", () => {
+    assert.equal(sceneGroupSummary(scene("s", { fogEnabled: true, vision: { on: true, light: "dark" } }), "players"), "Explore");
+    assert.equal(sceneGroupSummary(scene("s", { fogEnabled: true }), "players"), "Reveal by hand");
+    assert.equal(sceneGroupSummary(scene("s", { fogEnabled: false, vision: { on: true, light: "dim" } }), "players"), "Custom");
+    assert.equal(sceneGroupSummary(scene("s", { fogEnabled: false }), "players"), "Everything");
+    assert.equal(sceneGroupSummary(scene("s", { fogEnabled: true, vision: { on: true, light: "dark", perPlayer: true }, weather: { kind: "rain", heavy: true } }), "players"), "Explore · Per player");
+  });
+
+  test("Map and grid: whether there is an image, then the grid's shape, with its pixels on an image", () => {
     const map = { assetId: "a", widthPx: 1000, heightPx: 700, cellPx: 50, originPx: { x: 0, y: 0 } };
     assert.equal(sceneGroupSummary(scene("s"), "map"), "No map image · Squares");
     assert.equal(sceneGroupSummary(scene("s", { map }), "map"), "Map image · Squares, 50 px");
@@ -52,8 +57,17 @@ describe("sceneGroupSummary", () => {
   });
 });
 
+describe("sceneSoundSummary", () => {
+  test("Scene sound: the names it plays, Silent for silence, or None of its own", () => {
+    assert.equal(sceneSoundSummary(["Tavern night", "Cave drips"]), "Tavern night, Cave drips");
+    assert.equal(sceneSoundSummary(["Tavern night"]), "Tavern night");
+    assert.equal(sceneSoundSummary([]), "Silent");
+    assert.equal(sceneSoundSummary(null), "None of its own");
+  });
+});
+
 describe("fogFoldSummary", () => {
-  test("says each switch", () => {
+  test("the Switches fold says each switch", () => {
     assert.equal(fogFoldSummary(scene("s", { fogEnabled: true, vision: { on: true, light: "dark" } })), "Fog on · Party vision on");
     assert.equal(fogFoldSummary(scene("s")), "Fog off · Party vision off");
     assert.equal(fogFoldSummary(scene("s", { fogEnabled: true })), "Fog on · Party vision off");
