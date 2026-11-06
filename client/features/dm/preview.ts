@@ -4,7 +4,7 @@ import { realClock, type Clock } from "../../state/timing.ts";
 import { drawnToasts, heldToasts, type RoomStore, type RoomUi } from "../../state/store.ts";
 import { addToSelection, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "../../state/selection.ts";
 import { crossWide, INITIAL_LOCAL, withoutBelow, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetExpanded, withSheetHidden, withSidePanelHidden, withSplit, withSplitFits, withSwap, type RoomActions, type RoomView } from "../../state/types.ts";
-import { panelById } from "../panels.ts";
+import { canonicalPanelId, panelById } from "../panels.ts";
 
 /**
  * "View as a player" (features section 13): the DM sees what one player
@@ -187,7 +187,11 @@ export function createPreview(source: PreviewSource, memberId: string, options: 
     setMultiSelect: (on) => store.setState({ local: setMultiSelect(store.getState().local, on) }),
     doneSelecting: () => store.setState({ local: doneSelecting(store.getState().local) }),
     showActions: (open) => store.setState({ local: showActions(store.getState().local, open) }),
-    openPanel: (id, how) => store.setState({ local: withPanel(store.getState().local, id, how, panelById(id)?.narrowOnly === true) }),
+    // As the room's store does: a stale caller's old id opens the panel that took its place.
+    openPanel: (asked, how) => {
+      const id = canonicalPanelId(asked);
+      store.setState({ local: withPanel(store.getState().local, id, how, panelById(id)?.narrowOnly === true) });
+    },
     // The preview is a player's room, so its split starts on a player's panels and never meets the DM's (docs/design/design-v1-split-panel.md 8).
     splitPanels: (on, pair) => store.setState({ local: on ? withSplit(store.getState().local, "player", pair) : withoutBelow(store.getState().local) }),
     swapPanels: () => store.setState({ local: withSwap(store.getState().local) }),

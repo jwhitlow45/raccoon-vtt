@@ -80,6 +80,8 @@ describe("view as a player (docs/design/design-v1-per-player-vision.md 7.4)", ()
       preview.ui.openPanel("log");
       assert.equal(preview.store.getState().local.panel, "log");
       assert.equal(src.getState().local.panel, null);
+      preview.ui.openPanel("time");
+      assert.equal(preview.store.getState().local.panel, "ambiance", "a stale caller's old id opens the panel that took its place");
 
       // The socket's state shows, and what it held stays.
       src.setState({ connection: "reconnecting" });
