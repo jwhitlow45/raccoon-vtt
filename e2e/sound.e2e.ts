@@ -791,6 +791,43 @@ describe("synced music and sound", { concurrency: false }, () => {
       await halContext.close();
     }
   });
+
+  // After sndfade-1, whose short tone it plays: Ivy's page alone plays, into the tap.
+  test("sndfade-2. music whose first load is held 3 s still fades in over 2 s once it sounds, not at full", async () => {
+    const asset = await waitFor("the short tone's asset", () => dmSocket.state?.sounds?.["snd-tone-short"]?.assetId ?? null);
+    const ivyContext = await browser.newContext({ viewport: { width: 1280, height: 800 }, bypassCSP: true });
+    try {
+      await ivyContext.addInitScript(SOUND_TEST_FLAG);
+      await ivyContext.addInitScript(roomSoundScript("on"));
+      await ivyContext.addInitScript(SOUND_TAP);
+      let releaseAt = 0;
+      // Every request for the tone waits until 3 s after the play, as a first load over a weak signal does.
+      await ivyContext.route(new RegExp(asset), async (route) => {
+        if (Date.now() < releaseAt) await sleep(releaseAt - Date.now());
+        await route.continue();
+      });
+      await join(ivyContext, "Ivy", "#14b8a6");
+      const ivy = await ivyContext.newPage();
+      await openRoom(ivy);
+      releaseAt = Date.now() + 3_500;
+      await playTrack("snd-tone-short", 0, "off");
+      await sleep(10_000);
+      await ops.send({ t: "music.stop" });
+      await sleep(3_000);
+      const ramps = fadeRamps((await readTap(ivy)).quanta);
+      console.log(`sndfade-2 ramps ${JSON.stringify(ramps)}`);
+      assert.deepEqual(
+        ramps.map((r) => [r.rising, r.ms > 1_200 && r.ms < 2_200]),
+        [
+          [true, true],
+          [false, true],
+        ],
+        `a late start fades in over 2 s, and the stop fades out: ${JSON.stringify(ramps)}`,
+      );
+    } finally {
+      await ivyContext.close();
+    }
+  });
 });
 
 type Ramp = { rising: boolean; at: number; ms: number };

@@ -3,7 +3,7 @@ import { describe, mock, test } from "node:test";
 import type { Op } from "#shared/protocol.ts";
 import { projectState } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { LOOP_FADE_IN_MS, SHORT_FADE_MS, STOP_FADE_MS, type Playing, type Sound } from "#shared/sound.ts";
+import { LOOP_FADE_IN_MS, reanchor, SHORT_FADE_MS, STOP_FADE_MS, type MusicRun, type Playing, type Sound } from "#shared/sound.ts";
 import { AT, DM, P1, room } from "#shared/testutil.ts";
 import { SEEK_FADE_MS } from "./settle.ts";
 import { BLACKOUT_FADE_MS, gainAt, JOIN_FADE_MS, leaveMs, LOOKAHEAD_MS, mixGain, MUSIC_FADE_MS, planVoices, Voices, type MusicState } from "./voices.ts";
@@ -424,6 +424,80 @@ describe("the voices on the pool", () => {
       { kind: "set", value: 0, at: 0 },
       { kind: "ramp", value: 1, at: JOIN_FADE_MS / 1000 },
     ]);
+    voices.dispose();
+  });
+
+  const fadeEvents = (p: { events: { kind: string; value: number; at: number }[] }) => p.events.slice(p.events.findLastIndex((e) => e.kind === "cancel") + 1);
+
+  test("music placed mid-track that first sounds late, as a slow first load leaves it, fades in afresh then, and a later stall leaves the fade alone", () => {
+    const t = { now: T + 10_000 };
+    const { voices, gains, pool, ctx } = rig(t);
+    voices.update(planVoices({ ...quiet, music: { run: "r1", repeat: "all", fade: 5, now: { soundId: "tavern", at: T } } }, SOUNDS, t.now), () => SHORT_FADE_MS);
+    const fade = gains[0]!.gain;
+    const el = pool[0]! as unknown as { onplaying: (() => void) | null };
+    ctx.currentTime = 3;
+    el.onplaying!();
+    assert.deepEqual(fadeEvents(fade), [
+      { kind: "set", value: 0, at: 3 },
+      { kind: "ramp", value: 1, at: 3 + MUSIC_FADE_MS / 1000 },
+    ]);
+    const after = fade.events.length;
+    ctx.currentTime = 9;
+    el.onplaying!();
+    assert.equal(fade.events.length, after, "a stall's playing again starts no fade");
+    voices.dispose();
+
+    const soon = rig({ now: T + 10_000 });
+    soon.voices.update(planVoices({ ...quiet, music: { run: "r1", repeat: "all", fade: 5, now: { soundId: "tavern", at: T } } }, SOUNDS, T + 10_000), () => SHORT_FADE_MS);
+    soon.ctx.currentTime = 0.1;
+    (soon.pool[0]! as unknown as { onplaying: () => void }).onplaying();
+    assert.deepEqual(fadeEvents(soon.gains[0]!.gain), [
+      { kind: "set", value: 0, at: 0 },
+      { kind: "ramp", value: 1, at: MUSIC_FADE_MS / 1000 },
+    ], "a timely first sound keeps the fade it was given");
+    soon.voices.dispose();
+  });
+
+  test("a start loaded ahead keeps its shared ramp when it sounds on time, ignores a bless's play before its start, and fades in afresh when it sounds late", async () => {
+    for (const lateBy of [0, 3]) {
+      const t = { now: T - 100 };
+      const { voices, gains, pool, ctx } = rig(t);
+      voices.update(planVoices({ ...quiet, music: { run: "r1", repeat: "all", fade: 0, now: { soundId: "tavern", at: T } } }, SOUNDS, t.now), () => SHORT_FADE_MS);
+      const fade = gains[0]!.gain;
+      const el = pool[0]! as unknown as { onplaying: () => void };
+      const shared = fadeEvents(fade);
+      el.onplaying();
+      assert.deepEqual(fadeEvents(fade), shared, "a bless's play of the element loaded ahead is no start");
+      await new Promise((r) => setTimeout(r, 150));
+      t.now = T + 50;
+      ctx.currentTime = 0.15 + lateBy;
+      el.onplaying();
+      if (lateBy === 0) assert.deepEqual(fadeEvents(fade), shared, "on time: the ramp from the start's server time stands");
+      else
+        assert.deepEqual(fadeEvents(fade), [
+          { kind: "set", value: 0, at: ctx.currentTime },
+          { kind: "ramp", value: 1, at: ctx.currentTime + MUSIC_FADE_MS / 1000 },
+        ]);
+      voices.dispose();
+    }
+  });
+
+  test("a change of Repeat during Repeat one's third pass renames the voice, which plays on on its element with no new fade", () => {
+    const t = { now: T };
+    const { voices, gains, pool } = rig(t);
+    const one: MusicRun = { run: "r1", repeat: "one", fade: 5, now: { soundId: "tavern", at: T - 120_000 } };
+    voices.update(planVoices({ ...quiet, music: one }, SOUNDS, t.now), () => SHORT_FADE_MS);
+    assert.deepEqual(voices.snapshot().map((v) => v.key), [`m:tavern:${T - 120_000}:2`]);
+    const fade = gains[0]!.gain;
+    const before = fade.events.length;
+    const made = gains.length;
+    const off = reanchor({ ...one, repeat: "off" }, one, SOUNDS, t.now);
+    assert.equal(off.now.at, T - 10_000, "the reanchor moves now.at to the pass sounding");
+    voices.update(planVoices({ ...quiet, music: off }, SOUNDS, t.now), () => SHORT_FADE_MS);
+    assert.deepEqual(voices.snapshot().map((v) => v.key), [`m:tavern:${T - 10_000}:0`]);
+    assert.equal(gains.length, made, "no second element's gains");
+    assert.equal(fade.events.length, before, "no new fade, in or out");
+    assert.equal(pool.filter((e) => e.plays > 0).length, 1, "one element plays");
     voices.dispose();
   });
 
