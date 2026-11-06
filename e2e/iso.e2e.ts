@@ -2851,6 +2851,75 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await shots.take(dm, "isod-2-door-closed-turn2");
   });
 
+  test("ISOD-3. a long wall's slabs and a long raised side show no line where one square meets the next, a side keeps its line where its foot changes, and below 24 px a cell the wall's planes show theirs again", async () => {
+    if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+    const sceneId = randomUUID();
+    const cells = (x0: number, y0: number, x1: number, y1: number) => {
+      const out: string[] = [];
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) out.push(`${x},${y}`);
+      return out;
+    };
+    await ops.send({ t: "scene.create", scene: { id: sceneId, name: "ISOD walls", bounds: { w: 12, h: 10 }, fogEnabled: false } });
+    await ops.send({ t: "scene.update", sceneId, patch: { defaultView: { x: 5.5, y: 5.5, zoom: 48 } } });
+    await ops.send({ t: "build.paint", sceneId, terrain: "stone", cells: cells(0, 0, 12, 10) });
+    // A wall along y = 3 from x 2 to 10, a 10 ft row of squares along y = 6, and a 5 ft step before its east half, so the row's south side's foot changes at x 6.
+    await ops.send({ t: "build.edge", sceneId, edges: [2, 3, 4, 5, 6, 7, 8, 9].map((x) => ({ key: `${x},3,n`, feature: { kind: "wall" as const } })) });
+    await ops.send({ t: "build.height", sceneId, cells: cells(2, 6, 9, 7), height: 10 });
+    await ops.send({ t: "build.height", sceneId, cells: cells(6, 7, 9, 8), height: 5 });
+    const open = async () => {
+      await dm.bringToFront();
+      await openSideTab(dm, "Scenes");
+      const row = dm.getByRole("tabpanel", { name: "Scenes" }).getByRole("button", { name: /^ISOD walls/ }).first();
+      await row.click();
+      await waitFor("ISOD: the walls scene shown", async () => ((await row.textContent())?.includes("you are here") ? true : null));
+      await isoOn(dm, 0);
+      // The layout lists standees and bands only, and this scene has none: the board settles.
+      await dm.waitForTimeout(1200);
+    };
+    /**
+     * How much darker the screen's columns at a face's upright through the
+     * ground point `p` are than the columns a few pixels either side, each
+     * column's shade averaged up the face from `z0` to `z1`: a stroked line
+     * there makes a dip, and the texture's stones average out.
+     */
+    const dip = async (p: { x: number; y: number }, z0: number, z1: number) => {
+      const top = await isoPoint(dm, p, z1);
+      const foot = await isoPoint(dm, p, z0);
+      const png = await dm.screenshot({ clip: { x: Math.round(top.x) - 6, y: Math.ceil(top.y), width: 13, height: Math.max(3, Math.floor(foot.y) - Math.ceil(top.y)) } });
+      const { data, info } = await sharp(png).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+      const cols: number[] = [];
+      for (let c = 0; c < info.width; c++) {
+        let sum = 0;
+        for (let r = 0; r < info.height; r++) for (let k = 0; k < 3; k++) sum += data[(r * info.width + c) * 3 + k]!;
+        cols.push(sum / (3 * info.height));
+      }
+      const k = info.width / 13;
+      const mid = Math.floor(info.width / 2);
+      const center = Math.min(...cols.slice(Math.floor(mid - 1.5 * k), Math.ceil(mid + 1.5 * k) + 1));
+      const outer = [...cols.slice(0, Math.round(3 * k)), ...cols.slice(info.width - Math.round(3 * k))];
+      return outer.reduce((a, b) => a + b, 0) / outer.length - center;
+    };
+    await open();
+    // The wall's south side faces the viewer at turn 0, its slab's face 0.07 of a cell south of its line.
+    const wallJoint = await dip({ x: 5, y: 3.07 }, 0.1, 0.4);
+    const sideJoint = await dip({ x: 4, y: 7 }, 1.2, 1.8);
+    const footChange = await dip({ x: 6, y: 7 }, 1.2, 1.8);
+    const dips = `wall joint ${wallJoint.toFixed(1)}, side joint ${sideJoint.toFixed(1)}, foot change ${footChange.toFixed(1)}`;
+    assert.ok(footChange >= 12, `ISOD: the side keeps its line where its foot changes: ${dips}`);
+    assert.ok(sideJoint <= footChange / 3, `ISOD: no line between two squares of the raised side: ${dips}`);
+    assert.ok(wallJoint <= footChange / 3, `ISOD: no line between two slabs of the wall: ${dips}`);
+    await shots.take(dm, "isod-3-walls-turn0");
+    await isoOn(dm, 2);
+    await dm.waitForTimeout(400);
+    await shots.take(dm, "isod-3-walls-turn2");
+    // Below 24 px a cell the wall stands as planes, each piece outlined: the check sees that line.
+    await ops.send({ t: "scene.update", sceneId, patch: { defaultView: { x: 5.5, y: 5.5, zoom: 20 } } });
+    await reopenRoom(dm);
+    await open();
+    const planeJoint = await dip({ x: 5, y: 3 }, 0.1, 0.4);
+    assert.ok(planeJoint >= 12, `ISOD: below 24 px the wall's planes keep their line: ${planeJoint.toFixed(1)} (${dips})`);
+  });
+
   test("ISO-12. no page logged an error", () => {
     for (const c of Object.values(consoles)) assert.deepEqual(c.errors, [], `${c.label}'s page`);
   });
