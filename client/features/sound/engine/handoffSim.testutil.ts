@@ -7,8 +7,9 @@ import { Handoff, LAPSE_MS, TAKEOVER_MS, type HandoffAudio, type HandoffPost, ty
  * grants as tasks on each page's main thread, which a stall holds back and
  * a freeze stops, while each page's audio renders on by its own clock.
  * A hidden page's timers wake only when its browser's throttling lets them
- * (`Browser`), and a stall releases the tasks that waited in one of the
- * orders a browser may run them (`Release`).
+ * (`Browser`). A stall may start between any two of a page's tasks
+ * (`stallSoon`), and releases the tasks that waited in one of the orders a
+ * browser may run them (`Release`). A page hears its own posts (`echo`).
  * HANDOFF_TRACE=1 prints what happens, for a failing seed.
  */
 
@@ -84,6 +85,8 @@ export class SimPage {
   held: Task[] = [];
   holdsLock = false;
   freezing: Task | null = null;
+  /** A stall that starts once the page has run this many more tasks, as a long task may start between any two. */
+  stallAfter: { tasks: number; ms: number } | null = null;
   constructor(id: number, kind: PageKind) {
     this.id = id;
     this.kind = kind;
@@ -118,6 +121,8 @@ export class World {
   delay: number | null = null;
   /** How every stall releases what waited, or null for one of RELEASES at random per stall. */
   release: Release | null = "creation";
+  /** A page hears its own posts too, behind what reached it first, as the engine's second object on the channel does (HandoffEnv.echo). */
+  echo = true;
   readonly browser: Browser;
   /** Where the throttled wake-ups fall: a browser's grid has its own phase against `Date.now()`. */
   phase = 0;
@@ -245,6 +250,11 @@ export class World {
     } finally {
       this.#running = null;
     }
+    if (page.stallAfter && --page.stallAfter.tasks <= 0) {
+      const { ms } = page.stallAfter;
+      page.stallAfter = null;
+      this.stall(page, ms);
+    }
   }
 
   /** Throttling eased (the page is shown, or sounds): a timer waiting for a later wake-up runs when due. */
@@ -280,7 +290,7 @@ export class World {
 
   post(from: SimPage, msg: HandoffPost): void {
     for (const to of this.pages) {
-      if (to === from || to.gone) continue;
+      if ((to === from && !this.echo) || to.gone) continue;
       const pair = `${from.id}>${to.id}`;
       const at = Math.max(this.now + (this.delay ?? int(this.r, 0, 15)), this.#lastDelivery.get(pair) ?? 0);
       this.#lastDelivery.set(pair, at);
@@ -428,6 +438,11 @@ export class World {
     page.stalledUntil = Math.max(page.stalledUntil, this.now + ms);
   }
 
+  /** Stalls the page right after its next `tasks` tasks, such as between a task and the 0 ms timer it sets. */
+  stallSoon(page: SimPage, tasks: number, ms: number): void {
+    page.stallAfter = { tasks, ms };
+  }
+
   freeze(page: SimPage): void {
     const task = this.later(page, 0, () => {
       page.freezing = null;
@@ -512,7 +527,8 @@ export class World {
 }
 
 export function settleAndCheck(world: World, label: string): SimPage | null {
-  // Every stall over, then long enough for a lapse, a takeover by time, a listen window and a claim, and for three of a hidden page's once-a-second wake-ups along the way.
+  // Every stall over, none still to start, then long enough for a lapse, a takeover by time, a listen window and a claim, and for three of a hidden page's once-a-second wake-ups along the way.
+  for (const p of world.pages) p.stallAfter = null;
   const stalls = Math.max(world.now, ...world.pages.map((p) => p.stalledUntil));
   world.runUntil(stalls + LAPSE_MS + TAKEOVER_MS + 4_000 + (world.browser === "firefox" ? 0 : 3_000));
   const live = world.live().filter((p) => !p.frozen);
@@ -558,7 +574,12 @@ export function randomRun(seed: number, locks: boolean): string[] {
         if (page && chance(r, 0.5)) world.crash(page);
         break;
       case "stall":
-        if (page) world.stall(page, pick(r, [300, 1_500, 4_000, 6_500, 8_000, 12_000, 31_000]));
+        if (page) {
+          const ms = pick(r, [300, 1_500, 4_000, 6_500, 8_000, 12_000, 31_000]);
+          // A stall between runs falls only between tasks due at different times, so half start right after one of the page's next few tasks.
+          if (chance(r, 0.5)) world.stallSoon(page, int(r, 1, 6), ms);
+          else world.stall(page, ms);
+        }
         break;
       case "freeze":
         if (page) world.freeze(page);

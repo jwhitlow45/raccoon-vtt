@@ -11,8 +11,9 @@ import { randomRun, World, type Browser } from "./handoffSim.testutil.ts";
  * showing, hiding, closing and crashing, their contexts interrupted and
  * recovering by themselves, with and without Web Locks, in the world of
  * handoffSim.testutil.ts, where a hidden page's timers wake as Chrome's,
- * Safari's or Firefox's throttling lets them, and a stall releases what
- * waited in any order a browser may run it.
+ * Safari's or Firefox's throttling lets them, and a stall, which may start
+ * between any two of a page's tasks, releases what waited in any order a
+ * browser may run it.
  *
  * Invariants, checked as each task runs and every 50 ms between:
  * - Two pages never sound at once, except without Web Locks a page that
