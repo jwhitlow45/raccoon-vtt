@@ -8,8 +8,9 @@ import { fitKey, fitStep, sameRecord, shapeOf, stepsFor, WIDE_STEPS, type BarCon
  * The top bar's give-way (designs/qol chips.md C6 and 5, plan.md 4): after
  * any run of content changes and widths, the bar shows what a page opened
  * now shows for the same content and width. The row here is a model of
- * TopBar's flex row in whole layout px, with Search and Now playing
- * standing in until their lanes draw them.
+ * TopBar's flex row in whole layout px. Search stands in until its lane
+ * draws it. Now playing is modelled by its two forms' widths, as
+ * features/sound/mini/NowChip.tsx draws them.
  */
 
 /** The widths a bar's words and parts take, which the content's `words` stand for. */

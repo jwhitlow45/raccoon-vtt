@@ -40,7 +40,7 @@ import { addsWords, useTooltip } from "../components/Tooltip.tsx";
 import { QuietLoadNotice } from "./QuietLoadNotice.tsx";
 import { ToastNote, toastPortals, toastRow, toastStacks, useToastStack } from "./ToastParts.tsx";
 import { dockedBarEdge, measureMapToasts, noticesBesideBar, noticesDock, phoneToastRoom, placeRoomToasts, settleToastHosts, lowerFloor, sheetToastsToDismiss, toastHostOf, toastLists, toastStartTop } from "./toastPlacement.ts";
-import { BlackoutChip, ChipDialogs, DmChip, DmClockChip, useBlackoutShown, YouChip } from "./ChipMenus.tsx";
+import { BlackoutChip, ChipDialogs, chipDialogSlot, DmChip, DmClockChip, useBlackoutShown, YouChip } from "./ChipMenus.tsx";
 import { Loading } from "../components/Loading.tsx";
 import { ScrollStrip } from "../components/ScrollStrip.tsx";
 import { Sheet, paneBodyPadding, type SheetMode } from "../components/Sheet.tsx";
@@ -54,6 +54,7 @@ import { HandoutPopup } from "../features/handouts/HandoutPopup.tsx";
 import { EditorHost } from "../features/monsters/EditorHost.tsx";
 import { PcStatsHost } from "../features/pcstats/PcStatsEditor.tsx";
 import { SoundHost } from "../features/sound/engine/SoundHost.tsx";
+import { NowChip } from "../features/sound/mini/NowChip.tsx";
 import { ASK_TEXT, useSoundAsk } from "../features/sound/engine/useSoundAsk.ts";
 import { somethingPlays } from "../features/sound/panel/state.ts";
 import { Notice } from "../components/Notice.tsx";
@@ -1393,15 +1394,16 @@ function MapArea(props: {
  *
  * Where the row overflows (scrollWidth past clientWidth), the bar gives
  * way one step at a time in a fixed order (pages/topBarFit.ts, designs/qol
- * chips.md 5): from 900 px up the clock's chip leaves, the blackout
- * notice folds into the DM chip's place, the chip keeps its dot, Full
- * screen leaves, then the Phase menu, the turn chip's next faces, the
- * gaps' room, the View button, and last the turn chip's name and an
- * overrun timer's words. On a phone the strip goes to the band first. Each
- * step's part stays in reach: the DM menu holds the clock and the phases,
- * the Menu and a key Full screen, the room's menu View. Undo and Redo
- * never leave (docs/design/design-v1-layout-hierarchy.md M2). The room name
- * shrinks to a few letters before any step.
+ * chips.md 5): from 900 px up the clock's chip leaves, the Now playing
+ * chip goes to its icon, the blackout notice folds into the DM chip's
+ * place, the chip keeps its dot, Now playing leaves, Full screen leaves,
+ * then the Phase menu, the turn chip's next faces, the gaps' room, the
+ * View button, and last the turn chip's name and an overrun timer's words.
+ * On a phone the strip goes to the band first. Each step's part stays in
+ * reach: the DM menu holds the clock, Now playing and the phases, the Menu
+ * and a key Full screen, the room's menu View. Undo and Redo never leave
+ * (docs/design/design-v1-layout-hierarchy.md M2). The room name shrinks to
+ * a few letters before any step.
  *
  * The steps start over, in the same layout pass and before paint, whenever
  * what the bar holds changes (a fight starts or ends, whose turn, a
@@ -1437,7 +1439,7 @@ function TopBar(props: {
   const [chipsOpen, setChipsOpen] = useState<Readonly<Record<string, boolean>>>({});
   const raiseFor = useMemo(() => {
     const raise = (key: string) => (open: boolean) => setChipsOpen((now) => (now[key] === open ? now : { ...now, [key]: open }));
-    return { dm: raise("dm"), blackout: raise("blackout"), you: raise("you"), clock: raise("clock") };
+    return { dm: raise("dm"), blackout: raise("blackout"), you: raise("you"), clock: raise("clock"), nowPlaying: raise("nowPlaying") };
   }, []);
   const chipOpen = Object.values(chipsOpen).some(Boolean);
   // Focus goes here when Players see black leaves with the blackout while its menu was open (chips.md 4.1).
@@ -1456,13 +1458,18 @@ function TopBar(props: {
   const onTurn = useCallback((next: TurnFacts) => setTurn((now) => (now?.key === next.key ? now : next)), []);
   const fonts = useFontsLoaded();
   const dm = role === "dm";
+  // What the Now playing chip shows as one key, kept while its player is open (features/sound/mini/NowChip.tsx showsKey), and whether its card or sheet, a chip dialog, is open.
+  const [nowKey, setNowKey] = useState<string | null>(null);
+  const dialogs = useScoped(chipDialogSlot);
+  const nowDialogOpen = useStore(dialogs, (s) => s.open?.what.t === "nowPlaying");
+  const openNowDialog = useCallback((from: HTMLElement | null) => dialogs.setState({ open: { what: { t: "nowPlaying" }, returnFocus: from } }), [dialogs]);
   const stripIn = !fight ? "none" : places === "bar" ? "bar" : places === "either" ? "movable" : "none";
   const content: BarContent = {
     phone: props.compact,
     role: role ?? null,
-    // Search (qolsearch's S3) and Now playing (the sound layout's SL-C) set theirs as they land, and draw them in the shape's forms.
+    // Search (qolsearch's S3) sets its own as it lands, and draws it in the shape's form.
     search: false,
-    nowPlaying: false,
+    nowPlaying: dm && nowKey !== null,
     clock: !props.compact && clockText !== null,
     blackout: dm && blackout,
     fullscreen: !props.compact && fullscreenSupported(),
@@ -1479,6 +1486,7 @@ function TopBar(props: {
       // A player's chip on a phone keeps its dot while the strip is in the row, which the band step decides: only the wide bar's dot is content.
       role === "player" ? `${youName}:${props.compact ? "" : props.chipDot}` : "",
       clockText ?? "",
+      dm ? (nowKey ?? "") : "",
       phaseNames ?? "",
       stripIn !== "none" ? (turn?.key ?? "") : "",
       String(fonts),
@@ -1576,12 +1584,13 @@ function TopBar(props: {
         </h1>
         {/* The chips open menus (designs/qol/chips.md C1, C2, C7). In its short form the blackout's crossed eye is the DM chip, whose menu leads with the blackout's items. */}
         {role === "dm" ? (
-          <DmChip dot={shape.dmDot} eye={shape.eye} timeGaveWay={clockText !== null && !shape.clock} chipRef={dmChipRef} onOpen={raiseFor.dm} />
+          <DmChip dot={shape.dmDot} eye={shape.eye} timeGaveWay={clockText !== null && !shape.clock} nowPlayingGaveWay={shape.nowPlaying === "off"} chipRef={dmChipRef} onOpen={raiseFor.dm} />
         ) : role === "player" ? (
           <YouChip dot={props.chipDot} onOpen={raiseFor.you} />
         ) : null}
         {shape.blackout ? <BlackoutChip fallbackFocus={() => dmChipRef.current} onOpen={raiseFor.blackout} /> : null}
         <div style={{ flex: 1 }} />
+        {dm ? <NowChip form={shape.nowPlaying} popover={!props.compact} dialogOpen={nowDialogOpen} onShows={setNowKey} onOpen={raiseFor.nowPlaying} openDialog={openNowDialog} /> : null}
         {shape.clock ? role === "dm" ? <DmClockChip onOpenTime={props.openTime} onOpen={raiseFor.clock} /> : <ClockChip onOpen={props.openTime} /> : null}
         {/* Once Isometric is offered, View or Fit always follows them on a scene, so they keep their whole width. */}
         {props.undo ? <UndoButtons tuck={!(isoOffered && props.canFit)} /> : null}

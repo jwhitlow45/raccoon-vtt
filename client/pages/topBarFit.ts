@@ -3,9 +3,9 @@ import { STRIP_FACES, STRIP_FACES_FEW, STRIP_NAME_MIN_PX } from "../features/enc
 /**
  * The top bar's parts and the order it gives way in (designs/qol plan.md
  * 4, chips.md 5), and the rule that takes the steps (fitStep, shapeOf).
- * The lanes that add a part, Search (S3) and Now playing (SL-C), set it in
- * BarContent and draw it in the form BarShape gives. Until they land, the
- * rule's randomized test stands in for both.
+ * A part sets itself in BarContent and draws in the form BarShape gives,
+ * as Now playing does (features/sound/mini/NowChip.tsx). Search (S3) will
+ * too: until it lands, the rule's randomized test stands in for it.
  */
 
 /**

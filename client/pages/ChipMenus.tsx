@@ -23,6 +23,7 @@ import { loadRecent, recentHandoutsSlot, rememberShow } from "../features/handou
 import { useLibrary } from "../features/images/library.ts";
 import { movingPlayersTo } from "../features/scenes/movePlayers.ts";
 import { useMovePlayers } from "../features/scenes/useMovePlayers.ts";
+import { NowPlayerDialog } from "../features/sound/mini/NowChip.tsx";
 import { characterPageSlot, openCharacterPage } from "../features/tokens/characterPage.ts";
 import { SheetDialog } from "../features/tokens/SheetDialog.tsx";
 import { XCardCard } from "../features/xcard/XCardButton.tsx";
@@ -202,9 +203,11 @@ export function useChipEnv(returnFocus: () => HTMLElement | null): ChipEnv {
 
 /**
  * The dialogs a chip's item opens: Show a handout… (C4), the clock's steps
- * from the DM menu (C5), a player's X-card (C7). One at a time, in the
- * room's scope, so the search's twins open the same ones. Now playing's
- * player is the sound layout's own (SL-C).
+ * from the DM menu (C5), a player's X-card (C7), and the Now playing
+ * chip's player as a card or a sheet, opened by the chip under 900 px and
+ * by the DM menu's Now playing while the chip is off the bar
+ * (docs/design/design-v1-sound-layout.md 5.3). One at a time, in the
+ * room's scope, so the search's twins open the same ones.
  */
 export function ChipDialogs(props: { openTime(): void }) {
   const store = useScoped(chipDialogSlot);
@@ -230,7 +233,7 @@ export function ChipDialogs(props: { openTime(): void }) {
     );
   }
   if (open.what.t === "xcard") return <XCardSheet opener={opener} onClose={close} />;
-  return null;
+  return <NowPlayerDialog opener={opener} onClose={close} />;
 }
 
 /** A player's X-card from their You menu: the Menu panel's small card, in a sheet of its own (chips.md C7). */
