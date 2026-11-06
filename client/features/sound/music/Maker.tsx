@@ -93,6 +93,15 @@ export function savedFields(draft: MakerFields, sounds: Sounds): MakerFields {
 }
 
 /**
+ * Whether the draft changed its tracks: both lists read without the tracks
+ * no longer music, so one deleted or turned into a loop elsewhere is no
+ * change of this DM's, and Save leaves another DM's list alone.
+ */
+function tracksChanged(draft: MakerDraft, base: MakerFields, sounds: Sounds): boolean {
+  return !sameList(savedTracks(draft, sounds), savedTracks(base, sounds));
+}
+
+/**
  * What Save sends (5): only the fields the draft changed, so another DM's
  * change to another field stands. Every field for a new playlist. Empty
  * when nothing changed.
@@ -103,7 +112,7 @@ export function changedFields(draft: MakerDraft, sounds: Sounds): Partial<MakerF
   if (base === null) return fields;
   const out: Partial<MakerFields> = {};
   if (fields.name !== base.name) out.name = fields.name;
-  if (!sameList(fields.sounds, base.sounds)) out.sounds = fields.sounds;
+  if (tracksChanged(draft, base, sounds)) out.sounds = fields.sounds;
   if (fields.shuffle !== base.shuffle) out.shuffle = fields.shuffle;
   if (fields.repeat !== base.repeat) out.repeat = fields.repeat;
   if (fields.fade !== base.fade) out.fade = fields.fade;
@@ -117,10 +126,11 @@ export function draftDirty(draft: MakerDraft, sounds: Sounds): boolean {
 }
 
 /** The status line's words (5), the most pressing first, or null. */
-export function makerStatus(input: { draft: MakerDraft; stored: Playlist | undefined; playingIt: boolean }): string | null {
+export function makerStatus(input: { draft: MakerDraft; stored: Playlist | undefined; sounds: Sounds; playingIt: boolean }): string | null {
   const { draft, stored } = input;
   if (draft.base !== null && stored === undefined) return DELETED_ELSEWHERE;
-  if (draft.base !== null && stored !== undefined && stored.rev !== draft.base.rev && !sameList(stored.sounds, draft.base.sounds) && !sameList(draft.sounds, draft.base.sounds)) return TRACKS_CHANGED;
+  // The draft's change of tracks reads as Save reads it, so the line shows only when Save would send this list over another DM's.
+  if (draft.base !== null && stored !== undefined && stored.rev !== draft.base.rev && !sameList(stored.sounds, draft.base.sounds) && tracksChanged(draft, draft.base, input.sounds)) return TRACKS_CHANGED;
   if (input.playingIt) return PLAYING_CHANGES;
   return null;
 }
@@ -219,7 +229,7 @@ export function useMakerControl(input: {
 
   if (draft === null) return { footer: null, status: null, asking: false, dirty: false, busy: null, leave: (go) => go(), play };
   const creates = draft.base === null || input.stored === undefined;
-  const line = makerStatus({ draft, stored: input.stored, playingIt: input.playingIt });
+  const line = makerStatus({ draft, stored: input.stored, sounds, playingIt: input.playingIt });
   return {
     asking,
     dirty,

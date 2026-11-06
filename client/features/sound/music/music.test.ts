@@ -127,10 +127,26 @@ describe("the maker's draft", () => {
 
   test("the status line: deleted elsewhere first, then another DM's change of tracks, then the playing note", () => {
     const draft = { ...draftOf(saved), sounds: ["b"] };
-    assert.equal(makerStatus({ draft, stored: undefined, playingIt: false }), words.DELETED_ELSEWHERE);
-    assert.equal(makerStatus({ draft, stored: { ...saved, rev: 5, sounds: ["a", "b", "c"] }, playingIt: true }), words.TRACKS_CHANGED);
-    assert.equal(makerStatus({ draft: draftOf(saved), stored: { ...saved, rev: 5, sounds: ["a", "b", "c"] }, playingIt: true }), "Changes apply the next time it starts.", "a draft that kept the tracks takes no warning");
-    assert.equal(makerStatus({ draft, stored: { ...saved, rev: 5, name: "Renamed" }, playingIt: false }), null, "another field's change is no conflict");
+    assert.equal(makerStatus({ draft, stored: undefined, sounds, playingIt: false }), words.DELETED_ELSEWHERE);
+    assert.equal(makerStatus({ draft, stored: { ...saved, rev: 5, sounds: ["a", "b", "c"] }, sounds, playingIt: true }), words.TRACKS_CHANGED);
+    assert.equal(makerStatus({ draft: draftOf(saved), stored: { ...saved, rev: 5, sounds: ["a", "b", "c"] }, sounds, playingIt: true }), "Changes apply the next time it starts.", "a draft that kept the tracks takes no warning");
+    assert.equal(makerStatus({ draft, stored: { ...saved, rev: 5, name: "Renamed" }, sounds, playingIt: false }), null, "another field's change is no conflict");
+  });
+
+  test("a rename while another DM deletes a track the draft holds and adds one: Save sends the name alone, the draft is clean, and no warning shows", () => {
+    const draft = { ...draftOf(saved), name: "Tavern late" };
+    // Another DM deleted b, which left every playlist, and added c.
+    const { b: _gone, ...left } = sounds;
+    const stored: Playlist = { ...saved, rev: 6, sounds: ["a", "c"] };
+    assert.deepEqual(changedFields(draft, left), { name: "Tavern late" }, "so c stays");
+    assert.equal(draftDirty(draftOf(saved), left), false, "an untouched draft has nothing to throw away");
+    assert.equal(makerStatus({ draft, stored, sounds: left, playingIt: false }), null);
+    const moved = { ...draft, sounds: ["a"] };
+    assert.deepEqual(changedFields(moved, left), { name: "Tavern late" }, "a list that only lost b is the same list");
+    assert.equal(makerStatus({ draft: moved, stored, sounds: left, playingIt: false }), null, "so it warns of nothing");
+    const edited = { ...draft, sounds: ["c", "a"] };
+    assert.deepEqual(changedFields(edited, left), { name: "Tavern late", sounds: ["c", "a"] }, "a real change of tracks still sends them");
+    assert.equal(makerStatus({ draft: edited, stored, sounds: left, playingIt: false }), words.TRACKS_CHANGED, "and warns that it keeps this list");
   });
 });
 
