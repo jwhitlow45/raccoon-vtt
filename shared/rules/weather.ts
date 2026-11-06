@@ -177,41 +177,105 @@ export function weatherHasRules(w: SceneWeather | null | undefined): boolean {
   return w ? WEATHER_RULES.some((rule) => rule.brings(w)) : false;
 }
 
-/** The fold's rules line (4.1): Help, or a Note for heavy fog's warning. */
-export type WeatherRulesLine = { tone: "help" | "note"; text: string };
+/**
+ * One weather part's rule as Light and weather lists it under its switch
+ * (docs/design/design-v1-polish-pass.md 3.2): its name, then what the SRD
+ * says in the SRD's words. Heavy fog's is a Note, the warning a setting's
+ * cost wears, since the map cannot hide what the fog would.
+ */
+export type WeatherRuleLine = {
+  name: string;
+  text: string;
+  /** The app's own advice, kept apart from `text` so the check of the SRD's words leaves it out. */
+  advice?: string;
+  tone: "help" | "note";
+  /** Where `quotes` live in rules-text.json's `environment`. */
+  source: EnvironmentKey;
+  /** The SRD's words `text` rests on: the test checks each is in its entry and each rule term of `text` is in one of them. */
+  quotes: readonly string[];
+};
 
-const RULES_OFF = "Rolls here ignore it.";
+const LIGHTLY_OBSCURED = "Everything within an area of heavy rain or heavy snowfall is Lightly Obscured";
+const ALL_PERCEPTION = "creatures in the area have Disadvantage on all Wisdom (Perception) checks";
+
+const RULE_LINES: Record<WeatherRuleKey, Omit<WeatherRuleLine, "name">> = {
+  "heavy-rain": {
+    text: "Lightly Obscured, and Disadvantage on all Wisdom (Perception) checks. Puts out open flames.",
+    tone: "help",
+    source: "heavy-precipitation",
+    quotes: [LIGHTLY_OBSCURED, ALL_PERCEPTION, "Heavy rain also extinguishes open flames."],
+  },
+  "heavy-snow": {
+    text: "Lightly Obscured, and Disadvantage on all Wisdom (Perception) checks.",
+    tone: "help",
+    source: "heavy-precipitation",
+    quotes: [LIGHTLY_OBSCURED, ALL_PERCEPTION],
+  },
+  sandstorm: {
+    text: "Disadvantage on Wisdom (Perception) checks.",
+    tone: "help",
+    source: "strong-wind",
+    quotes: ["A strong wind in a desert can create a sandstorm that imposes Disadvantage on Wisdom (Perception) checks."],
+  },
+  "strong-wind": {
+    text: "Disadvantage on ranged attack rolls with weapons. Puts out open flames, and a flying creature must land at the end of its turn or fall.",
+    tone: "help",
+    source: "strong-wind",
+    quotes: ["Strong wind imposes Disadvantage on ranged attack rolls with weapons.", "It also extinguishes open flames", "A flying creature in a strong wind must land at the end of its turn or fall."],
+  },
+  "patchy-fog": {
+    text: "Lightly Obscured: Disadvantage on Wisdom (Perception) checks that rely on sight.",
+    tone: "help",
+    source: "obscured-areas",
+    quotes: ["In a Lightly Obscured area, such as an area with Dim Light, patchy fog, or moderate foliage, you have Disadvantage on Wisdom (Perception) checks that rely on sight."],
+  },
+  "heavy-fog": {
+    text: "Heavily Obscured: a creature trying to see something in it has the Blinded condition.",
+    advice: "The map still shows what light and walls allow, so hide what the party could not see.",
+    tone: "note",
+    source: "obscured-areas",
+    quotes: ["A Heavily Obscured area, such as an area with Darkness, heavy fog, or dense foliage, is opaque.", "You have the Blinded condition", "when trying to see something there"],
+  },
+};
+
+/*
+ * What rolls here do with "Weather rules on rolls" on: the tests the
+ * weather presets, then the ones it reminds. Five sentences cover every
+ * weather that has a rule, since fog cannot have a strong wind
+ * (shared/weather.ts weatherProblem). A table reads plainer than words
+ * built from the rules' predicates, and weather.test.ts checks each
+ * against weatherPreset in every valid weather.
+ */
+const ROLLS = {
+  perception: "Perception checks here roll with Disadvantage.",
+  perceptionAndWind: "Perception checks and ranged weapon attacks here roll with Disadvantage. Other ranged attacks here get a reminder.",
+  wind: "Ranged weapon attacks here roll with Disadvantage. Other ranged attacks here get a reminder.",
+  patchyFog: "Perception checks here get a reminder.",
+  heavyFog: "Perception checks and attacks here get a reminder.",
+} as const;
+
+const RULES_OFF = "Rolls here ignore these rules.";
 const LOOK_ONLY = "A look only. The rules stay as they are.";
 
+/** The sentence for a weather that has a rule, with the switch on. */
+function rollsOn(w: SceneWeather): string {
+  if (w.kind === "fog") return w.heavy === true ? ROLLS.heavyFog : ROLLS.patchyFog;
+  // Heavy rain, heavy snow and a sandstorm preset Perception checks. The rest that has a rule is a strong wind alone.
+  const perception = w.heavy === true && (w.kind === "rain" || w.kind === "snow" || w.kind === "sand");
+  if (w.wind === "strong") return perception ? ROLLS.perceptionAndWind : ROLLS.wind;
+  return ROLLS.perception;
+}
+
 /**
- * The fold's rules line for a weather, from its rules in section 2's words.
- * Each part says what the SRD says and then what rolls here do, and with
- * "Weather rules on rolls" off the rolls' part gives way to "Rolls here
- * ignore it.", since nothing then presets or reminds.
+ * Light and weather's rules for a weather: one line per part that brings a
+ * rule, the kind's then the wind's, and `rolls`, the switch's help, saying
+ * in one sentence what rolls here do. With the switch off the lines stay,
+ * since the SRD still says them, and `rolls` says rolls ignore them. A
+ * weather with no rule has no switch, no lines, and says it is a look only.
  */
-export function weatherRules(w: SceneWeather | null | undefined): WeatherRulesLine {
-  if (!w || !weatherHasRules(w)) return { tone: "help", text: LOOK_ONLY };
-  const on = w.rules !== false;
-  const parts: string[] = [];
-  if (w.kind === "rain" && w.heavy === true) {
-    parts.push("Everything here is Lightly Obscured, and creatures have Disadvantage on all Wisdom (Perception) checks. Heavy rain puts out open flames.");
-    if (on) parts.push("Perception checks here roll with Disadvantage.");
-  } else if (w.kind === "snow" && w.heavy === true) {
-    parts.push("Everything here is Lightly Obscured, and creatures have Disadvantage on all Wisdom (Perception) checks.");
-    if (on) parts.push("Perception checks here roll with Disadvantage.");
-  } else if (w.kind === "sand" && w.heavy === true) {
-    parts.push("A sandstorm puts Disadvantage on Wisdom (Perception) checks.");
-    if (on) parts.push("Perception checks here roll with Disadvantage.");
-  } else if (w.kind === "fog" && w.heavy === true) {
-    parts.push("Heavily Obscured: a creature trying to see something in it has the Blinded condition. The map still shows what light and walls allow, so hide what the party could not see.");
-  } else if (w.kind === "fog") {
-    parts.push("Lightly Obscured: Disadvantage on Wisdom (Perception) checks that rely on sight.");
-    if (on) parts.push("Perception checks here remind.");
-  }
-  if (w.wind === "strong") {
-    parts.push("Disadvantage on ranged attack rolls with weapons. Strong wind puts out open flames, and a flying creature must land at the end of its turn or fall.");
-    if (on) parts.push("Attacks with a ranged weapon here roll with Disadvantage, and other ranged attacks remind.");
-  }
-  if (!on) parts.push(RULES_OFF);
-  return { tone: w.kind === "fog" && w.heavy === true ? "note" : "help", text: parts.join(" ") };
+export function weatherRuleLines(w: SceneWeather | null | undefined): { lines: WeatherRuleLine[]; rolls: string } {
+  if (!w || !weatherHasRules(w)) return { lines: [], rolls: LOOK_ONLY };
+  const brought = WEATHER_RULE_KEYS.filter((key) => WEATHER_RULES.some((rule) => rule.key === key && rule.brings(w)));
+  const lines = brought.map((key) => ({ name: WEATHER_RULE_NAMES[key], ...RULE_LINES[key] }));
+  return { lines, rolls: w.rules === false ? RULES_OFF : rollsOn(w) };
 }

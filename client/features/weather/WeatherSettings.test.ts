@@ -10,8 +10,8 @@ import type { SceneWeather } from "#shared/weather.ts";
 /*
  * A scene's weather rows as Light and weather draws them, with no fold of
  * their own (docs/design/design-v1-scenes-reorg.md 4.1): the controls each
- * weather shows, the rules as the rules switch's help, and the words under
- * them. The picks' rules are buildWeather.test.ts's.
+ * weather shows, what rolls do as the rules switch's help, a line per rule
+ * under it, and the words under them. The picks' rules are buildWeather.test.ts's.
  */
 
 const { createElement } = await import("react");
@@ -36,6 +36,7 @@ function render(weather: SceneWeather | undefined): string {
 }
 
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+const esc = (s: string | number) => String(s).replace(/[()]/g, "\\$&");
 
 /** The text of the element whose id an attribute of the element matching `at` names. */
 function named(html: string, at: RegExp, attr: "aria-labelledby" | "aria-describedby"): string {
@@ -105,26 +106,49 @@ describe("the scene's weather rows", () => {
     assert.match(storm, />Sandstorm</);
   });
 
-  test("a weather with a rule shows one rules row: the switch, its help the rules, ending Rolls here ignore it. when off, with no line beside it (D-261102-863)", () => {
-    const on = render({ kind: "rain", heavy: true });
+  test("a weather with a rule: the switch's help says what rolls here do in one sentence, then a line per weather part, kept with the switch off (docs/design/design-v1-polish-pass.md 3.2)", () => {
+    const on = render({ kind: "rain", heavy: true, wind: "strong" });
     assert.match(on, /role="switch" aria-checked="true"/);
     assert.equal(named(on, /<button[^>]*role="switch"[^>]*>/, "aria-labelledby"), "Weather rules on rolls");
-    assert.match(named(on, /<button[^>]*role="switch"[^>]*>/, "aria-describedby"), /Perception checks here roll with Disadvantage\./);
-    assert.equal((text(on).match(/Perception checks here roll with Disadvantage\./g) ?? []).length, 1, "the rules said once, as the switch's help");
-    assert.doesNotMatch(on, /Rolls in this scene follow the rules below/, "the old help, which said what the rules line says, goes");
-    const off = render({ kind: "rain", heavy: true, rules: false });
+    assert.equal(
+      named(on, /<button[^>]*role="switch"[^>]*>/, "aria-describedby"),
+      "Perception checks and ranged weapon attacks here roll with Disadvantage. Other ranged attacks here get a reminder.",
+    );
+    const lines = [...on.matchAll(/<p style="([^"]*)"><span style="([^"]*)">([^<]*)<\/span> ([^<]*)<\/p>/g)].map((m) => ({ look: m[1]!, name: m[2]!, words: `${m[3]} ${m[4]}` }));
+    assert.deepEqual(
+      lines.map((l) => l.words),
+      [
+        "Heavy rain: Lightly Obscured, and Disadvantage on all Wisdom (Perception) checks. Puts out open flames.",
+        "Strong wind: Disadvantage on ranged attack rolls with weapons. Puts out open flames, and a flying creature must land at the end of its turn or fall.",
+      ],
+    );
+    const { theme } = themeModule;
+    for (const l of lines) {
+      assert.match(l.name, new RegExp(`font-weight:${theme.weight.strong};color:${esc(theme.color.text)}`), "the name in weight 600, in the text color");
+      assert.match(l.look, new RegExp(`color:${esc(theme.color.textMuted)}`), "the line is Help");
+    }
+    // After the switch, outside its button, so the switch's description is the sentence alone.
+    assert.ok(on.indexOf("Heavy rain:") > on.indexOf('role="switch"') && on.indexOf("Heavy rain:") > on.indexOf("</button>", on.indexOf('role="switch"')));
+    assert.ok(on.indexOf("Strong wind:") < on.indexOf("Players see it at once"), "the lines before where devices decide");
+    assert.equal((text(on).match(/Perception/g) ?? []).length, 2, "Perception said twice, once for rolls and once for the rule");
+    const off = render({ kind: "rain", heavy: true, wind: "strong", rules: false });
     assert.match(off, /role="switch" aria-checked="false"/);
-    assert.match(named(off, /<button[^>]*role="switch"[^>]*>/, "aria-describedby"), /Rolls here ignore it\.$/);
-    assert.equal((text(off).match(/Rolls here ignore it\./g) ?? []).length, 1);
+    assert.equal(named(off, /<button[^>]*role="switch"[^>]*>/, "aria-describedby"), "Rolls here ignore these rules.");
+    assert.match(text(off), /Heavy rain: Lightly Obscured[\s\S]*Strong wind: Disadvantage on ranged attack rolls with weapons\./, "the lines stay");
   });
 
-  test("heavy fog's rules warn in the switch's help, the rest are help's muted words", () => {
+  test("heavy fog's line is a Note: its name in weight 600 in the warning tone, then its text and its advice. The switch says what it reminds", () => {
     const { theme } = themeModule;
     const fog = render({ kind: "fog", heavy: true });
-    assert.match(text(fog), /Heavily Obscured: a creature trying to see something in it has the Blinded condition\./);
-    assert.match(fog, new RegExp(`<span style="color:${theme.color.warning.replace(/[()]/g, "\\$&")}">Heavily Obscured`), "heavy fog warns");
+    assert.equal(named(fog, /<button[^>]*role="switch"[^>]*>/, "aria-describedby"), "Perception checks and attacks here get a reminder.");
+    assert.match(
+      fog,
+      new RegExp(
+        `<p style="[^"]*color:${esc(theme.color.warning)}[^"]*"><span style="font-weight:${theme.weight.strong}">Heavy fog:</span> Heavily Obscured: a creature trying to see something in it has the Blinded condition\\. The map still shows what light and walls allow, so hide what the party could not see\\.</p>`,
+      ),
+    );
     const rain = render({ kind: "rain", heavy: true });
-    assert.doesNotMatch(rain, new RegExp(`color:${theme.color.warning.replace(/[()]/g, "\\$&")}`), "heavy rain only helps");
+    assert.doesNotMatch(rain, new RegExp(`color:${esc(theme.color.warning)}`), "heavy rain only helps");
   });
 
   test("a look-only weather has no switch and says the rules stay as they are, then where devices decide", () => {

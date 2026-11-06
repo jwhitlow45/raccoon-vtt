@@ -1,11 +1,11 @@
 import { useId, useState } from "react";
 import type { Scene } from "#shared/model.ts";
-import { weatherHasRules, weatherRules } from "#shared/rules/weather.ts";
+import { weatherHasRules, weatherRuleLines, type WeatherRuleLine } from "#shared/rules/weather.ts";
 // The shared type is read here as Weather, since SceneWeather names this file's controls.
 import { weatherParts, type SceneWeather as Weather, type WeatherKind } from "#shared/weather.ts";
 import { choiceLook } from "../../components/looks.ts";
 import { Icon } from "../../components/Icon.tsx";
-import { Help } from "../../components/Panel.tsx";
+import { Help, Note } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { SettingRow } from "../../components/SettingRow.tsx";
 import { Switch } from "../../components/Switch.tsx";
@@ -64,7 +64,7 @@ function WeatherBody(props: { picker: Picker; weather: Weather | undefined; forc
   const clear = picker.kind === "clear";
   const [light, heavy] = strengthWords(picker.kind);
   const help = windHelp(picker, forced);
-  const rules = weatherRules(weather);
+  const rules = weatherRuleLines(weather);
   return (
     <div style={{ display: "grid", minWidth: 0 }}>
       <SettingRow name="Weather">
@@ -102,18 +102,44 @@ function WeatherBody(props: { picker: Picker; weather: Weather | undefined; forc
         </SettingRow>
       )}
       {/*
-       * One row for the rules (D-261102-863): while the weather has a rule,
-       * the switch's help is the rules themselves, which end "Rolls here
-       * ignore it." with it off, so a second line saying what it does would
-       * say it twice. Heavy fog's rules warn. With no rule, the line says so.
+       * What rolls here do is the switch's help, in one sentence, and what
+       * the SRD says follows it, a line per weather part at the panel's
+       * width (docs/design/design-v1-polish-pass.md 3.2), so neither is said
+       * twice. The lines stay with the switch off: the SRD still says them.
+       * With no rule, the line says the weather is a look only.
        */}
       {weatherHasRules(weather) ? (
-        <Switch label="Weather rules on rolls" help={rules.tone === "note" ? <span style={{ color: theme.color.warning }}>{rules.text}</span> : rules.text} checked={picker.rules} onChange={(on) => change({ rules: on })} />
+        <>
+          <Switch label="Weather rules on rolls" help={rules.rolls} checked={picker.rules} onChange={(on) => change({ rules: on })} />
+          <div style={{ display: "grid", gap: theme.space(1), paddingBottom: theme.space(2) }}>
+            {rules.lines.map((line) => (
+              <RuleLine key={line.name} line={line} />
+            ))}
+          </div>
+        </>
       ) : (
-        <Help style={{ paddingBottom: theme.space(2) }}>{rules.text}</Help>
+        <Help style={{ paddingBottom: theme.space(2) }}>{rules.rolls}</Help>
       )}
       <Help style={{ paddingBottom: theme.space(2) }}>Players see it at once. Each device can show it still or turn it off in This device.</Help>
     </div>
+  );
+}
+
+/** A weather part's rule: its name in the line's own color, as the dice sheet's reminders name each rule, then the SRD's words. Heavy fog's is a Note, its advice after them. */
+function RuleLine(props: { line: WeatherRuleLine }) {
+  const { line } = props;
+  if (line.tone === "note") {
+    return (
+      <Note>
+        <span style={{ fontWeight: theme.weight.strong }}>{line.name}:</span> {line.text}
+        {line.advice ? ` ${line.advice}` : null}
+      </Note>
+    );
+  }
+  return (
+    <Help>
+      <span style={{ fontWeight: theme.weight.strong, color: theme.color.text }}>{line.name}:</span> {line.text}
+    </Help>
   );
 }
 

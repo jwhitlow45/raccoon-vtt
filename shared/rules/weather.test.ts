@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { D20Test } from "../dice/bonus.ts";
 import { RULES_TEXT } from "../srd/rules-text.ts";
-import type { SceneWeather } from "../weather.ts";
-import { WEATHER_RULES, WEATHER_RULE_KEYS, WEATHER_RULE_NAMES, weatherHasRules, weatherPreset, weatherReminders, weatherRules } from "./weather.ts";
+import { WEATHER_KINDS, weatherProblem, type SceneWeather } from "../weather.ts";
+import { isWeatherRuleKey, WEATHER_RULES, WEATHER_RULE_KEYS, WEATHER_RULE_NAMES, weatherHasRules, weatherPreset, weatherReminders, weatherRuleLines } from "./weather.ts";
 
 /** Weather's roll rules (docs/design/design-v1-weather.md 2, lane WX-A). */
 
@@ -105,30 +105,151 @@ describe("weather's roll rules", () => {
     assert.deepEqual(weatherReminders(STRONG, [BOW, RAY]), [{ key: "strong-wind", text: "Strong wind: Disadvantage on ranged attack rolls with weapons." }]);
   });
 
-  test("the fold's rules line, its switch and its tone", () => {
-    assert.deepEqual(weatherRules(HEAVY_RAIN), {
-      tone: "help",
-      text: "Everything here is Lightly Obscured, and creatures have Disadvantage on all Wisdom (Perception) checks. Heavy rain puts out open flames. Perception checks here roll with Disadvantage.",
-    });
-    assert.deepEqual(weatherRules(STRONG), {
-      tone: "help",
-      text: "Disadvantage on ranged attack rolls with weapons. Strong wind puts out open flames, and a flying creature must land at the end of its turn or fall. Attacks with a ranged weapon here roll with Disadvantage, and other ranged attacks remind.",
-    });
-    assert.deepEqual(weatherRules({ kind: "fog", heavy: true }), {
-      tone: "note",
-      text: "Heavily Obscured: a creature trying to see something in it has the Blinded condition. The map still shows what light and walls allow, so hide what the party could not see.",
-    });
-    assert.equal(
-      weatherRules({ ...HEAVY_RAIN, wind: "strong", rules: false }).text,
-      "Everything here is Lightly Obscured, and creatures have Disadvantage on all Wisdom (Perception) checks. Heavy rain puts out open flames. Disadvantage on ranged attack rolls with weapons. Strong wind puts out open flames, and a flying creature must land at the end of its turn or fall. Rolls here ignore it.",
-    );
-    for (const w of [undefined, { kind: "rain" }, { kind: "clear", wind: "moderate" }, { kind: "ash", heavy: true }] as (SceneWeather | undefined)[]) {
-      assert.deepEqual(weatherRules(w), { tone: "help", text: "A look only. The rules stay as they are." }, JSON.stringify(w));
+  test("a look-only weather has no lines and says so, and every weather with a rule has the switch", () => {
+    for (const w of [undefined, null, { kind: "rain" }, { kind: "clear", wind: "moderate" }, { kind: "ash", heavy: true }, { kind: "leaves", wind: "moderate" }] as (SceneWeather | undefined | null)[]) {
+      assert.deepEqual(weatherRuleLines(w), { lines: [], rolls: "A look only. The rules stay as they are." }, JSON.stringify(w));
       assert.equal(weatherHasRules(w), false);
     }
     for (const w of [HEAVY_RAIN, STRONG, SANDSTORM, { kind: "fog" }, { kind: "fog", heavy: true }, { kind: "snow", heavy: true, rules: false }] as SceneWeather[]) assert.equal(weatherHasRules(w), true, JSON.stringify(w));
-    for (const text of [weatherRules(SANDSTORM).text, weatherRules({ kind: "fog" }).text, weatherRules({ kind: "snow", heavy: true }).text]) {
-      assert.ok(!text.includes("\u2014") && !text.includes(";"), text);
+  });
+});
+
+/** Light and weather's rules: one sentence for what rolls do, then a line per weather part (docs/design/design-v1-polish-pass.md 3.2). */
+describe("the weather rules' sentence and lines", () => {
+  /** Every weather the picker can make, each with the switch on and off: 34 weathers, 68 cases. */
+  function everyWeather(): SceneWeather[] {
+    const out: SceneWeather[] = [];
+    for (const kind of WEATHER_KINDS) {
+      for (const heavy of [false, true]) {
+        for (const wind of [undefined, "moderate", "strong"] as const) {
+          for (const rules of [true, false]) {
+            const w: SceneWeather = { kind, ...(heavy ? { heavy: true } : {}), ...(wind ? { wind } : {}), ...(rules ? {} : { rules: false }) };
+            if (weatherProblem(w) === null) out.push(w);
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  /** The four kinds of roll a weather can tell apart, each with the words the sentence names it by. */
+  const ROLLS = [
+    { test: PERCEPTION, words: "Perception checks" },
+    { test: BOW, words: "ranged weapon attacks" },
+    { test: EITHER, words: "other ranged attacks" },
+    { test: SCIMITAR, words: "melee attacks" },
+  ] as const;
+
+  /**
+   * The sentence `weatherPreset` asks for: the tests it presets, then the
+   * ones it reminds. Reminding every attack, ranged weapon or not, reads as
+   * "attacks". Worked out from the presets alone, never from the table.
+   */
+  function sentenceOf(w: SceneWeather): string {
+    const preset: string[] = [];
+    let remind: string[] = [];
+    for (const { test: t, words } of ROLLS) {
+      const got = weatherPreset(w, t);
+      if (got.sources.length > 0) preset.push(words);
+      else if (got.notes.length > 0) remind.push(words);
+    }
+    if (["ranged weapon attacks", "other ranged attacks", "melee attacks"].every((a) => remind.includes(a))) remind = [...remind.filter((a) => !a.endsWith("attacks")), "attacks"];
+    const cap = (xs: string[]) => {
+      const s = xs.join(" and ");
+      return s.charAt(0).toUpperCase() + s.slice(1);
+    };
+    const parts: string[] = [];
+    if (preset.length > 0) parts.push(`${cap(preset)} here roll with Disadvantage.`);
+    if (remind.length > 0) parts.push(`${cap(remind)} here get a reminder.`);
+    return parts.length > 0 ? parts.join(" ") : "Rolls here ignore these rules.";
+  }
+
+  test("every valid weather, strength, wind and switch: the sentence names exactly what weatherPreset presets, then what it reminds", () => {
+    const cases = everyWeather();
+    assert.equal(cases.length, 68);
+    const seen = new Set<string>();
+    for (const w of cases) {
+      const { rolls, lines } = weatherRuleLines(w);
+      if (!weatherHasRules(w)) {
+        assert.equal(rolls, "A look only. The rules stay as they are.", JSON.stringify(w));
+        assert.deepEqual(lines, [], JSON.stringify(w));
+        continue;
+      }
+      assert.equal(rolls, sentenceOf(w), JSON.stringify(w));
+      seen.add(rolls);
+      // Every rule that gives any roll here a preset or a reminder has its line, and no line names a rule the weather lacks.
+      const on: SceneWeather = { ...w };
+      delete on.rules;
+      const given = new Set<string>();
+      for (const { test: t } of ROLLS) {
+        const got = weatherPreset(on, t);
+        for (const s of got.sources) if (isWeatherRuleKey(s.from)) given.add(WEATHER_RULE_NAMES[s.from]);
+        for (const n of got.notes) given.add(WEATHER_RULE_NAMES[n.key]);
+      }
+      assert.deepEqual(lines.map((l) => l.name).sort(), [...given].sort(), JSON.stringify(w));
+      // The switch changes the sentence alone: the SRD still says what it says.
+      assert.deepEqual(lines, weatherRuleLines(on).lines, JSON.stringify(w));
+    }
+    assert.deepEqual([...seen].sort(), [
+      "Perception checks and attacks here get a reminder.",
+      "Perception checks and ranged weapon attacks here roll with Disadvantage. Other ranged attacks here get a reminder.",
+      "Perception checks here get a reminder.",
+      "Perception checks here roll with Disadvantage.",
+      "Ranged weapon attacks here roll with Disadvantage. Other ranged attacks here get a reminder.",
+      "Rolls here ignore these rules.",
+    ]);
+  });
+
+  test("fog with a strong wind is no case: weatherProblem refuses it", () => {
+    for (const heavy of [false, true]) {
+      const w: SceneWeather = { kind: "fog", wind: "strong", ...(heavy ? { heavy: true } : {}) };
+      assert.equal(weatherProblem(w), "Strong wind disperses fog.");
+      assert.ok(!everyWeather().some((c) => c.kind === "fog" && c.wind === "strong"));
+    }
+  });
+
+  test("the sentences the design names, rules on and off", () => {
+    assert.equal(weatherRuleLines({ kind: "fog", heavy: true }).rolls, "Perception checks and attacks here get a reminder.");
+    assert.equal(weatherRuleLines({ ...HEAVY_RAIN, wind: "strong" }).rolls, "Perception checks and ranged weapon attacks here roll with Disadvantage. Other ranged attacks here get a reminder.");
+    assert.equal(weatherRuleLines(SANDSTORM).rolls, "Perception checks and ranged weapon attacks here roll with Disadvantage. Other ranged attacks here get a reminder.");
+    assert.equal(weatherRuleLines({ kind: "leaves", wind: "strong" }).rolls, "Ranged weapon attacks here roll with Disadvantage. Other ranged attacks here get a reminder.");
+    assert.equal(weatherRuleLines({ kind: "snow", heavy: true, wind: "moderate" }).rolls, "Perception checks here roll with Disadvantage.");
+    assert.equal(weatherRuleLines({ kind: "fog", wind: "moderate" }).rolls, "Perception checks here get a reminder.");
+    for (const w of [HEAVY_RAIN, { kind: "fog", heavy: true }, SANDSTORM] as SceneWeather[]) assert.equal(weatherRuleLines({ ...w, rules: false }).rolls, "Rolls here ignore these rules.");
+  });
+
+  test("the lines: one per part, the kind's then the wind's, each named, heavy fog's a note with its advice apart", () => {
+    assert.deepEqual(
+      weatherRuleLines({ ...HEAVY_RAIN, wind: "strong" }).lines.map((l) => `${l.name}: ${l.text}`),
+      [
+        "Heavy rain: Lightly Obscured, and Disadvantage on all Wisdom (Perception) checks. Puts out open flames.",
+        "Strong wind: Disadvantage on ranged attack rolls with weapons. Puts out open flames, and a flying creature must land at the end of its turn or fall.",
+      ],
+    );
+    assert.deepEqual(weatherRuleLines(SANDSTORM).lines.map((l) => l.name), ["Sandstorm", "Strong wind"]);
+    const [fog, ...rest] = weatherRuleLines({ kind: "fog", heavy: true }).lines;
+    assert.deepEqual(rest, []);
+    assert.deepEqual(
+      { name: fog?.name, text: fog?.text, advice: fog?.advice, tone: fog?.tone },
+      {
+        name: "Heavy fog",
+        text: "Heavily Obscured: a creature trying to see something in it has the Blinded condition.",
+        advice: "The map still shows what light and walls allow, so hide what the party could not see.",
+        tone: "note",
+      },
+    );
+    for (const w of everyWeather()) for (const line of weatherRuleLines(w).lines) if (line.name !== "Heavy fog") assert.equal(line.tone, "help", line.name);
+  });
+
+  test("every line says only what its quotes say: each quote is in its SRD entry, each rule term of the line in a quote, and the advice stays out", () => {
+    const TERMS = ["Lightly Obscured", "Heavily Obscured", "Disadvantage", "Perception", "rely on sight", "Blinded", "ranged attack rolls with weapons", "flames", "flying"];
+    const lines = new Map(everyWeather().flatMap((w) => weatherRuleLines(w).lines.map((l) => [l.name, l] as const)));
+    assert.deepEqual([...lines.keys()].sort(), Object.values(WEATHER_RULE_NAMES).sort(), "every rule has a line somewhere");
+    for (const line of lines.values()) {
+      const entry = plain(RULES_TEXT.environment[line.source].text);
+      for (const quote of line.quotes) assert.ok(entry.includes(quote), `${line.name}: "${quote}"`);
+      for (const term of TERMS) if (line.text.includes(term)) assert.ok(line.quotes.some((q) => q.includes(term)), `${line.name}: "${term}" in a quote`);
+      for (const words of [line.text, line.advice ?? ""]) assert.ok(!words.includes("\u2014") && !words.includes(";"), words);
     }
   });
 });
