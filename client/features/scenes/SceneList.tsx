@@ -15,12 +15,8 @@ import { browserStorage, cleanFolderName, groupScenes, moveFolder, moveScene, re
 import { SceneMenuButton } from "./SceneMenu.tsx";
 import { sceneRowDetail } from "./sceneSummary.ts";
 import { thumbSources } from "./thumbnail.ts";
-import { sightOf } from "#shared/keys.ts";
-import { moveWarning } from "../vision/moveWarning.ts";
-import { useServerRoomSoundState } from "../sound/engine/store.ts";
-import { send } from "../sound/panel/ops.ts";
-import { playlistsOf, soundsOf } from "../sound/panel/state.ts";
-import { moveSoundOp } from "./moveSound.ts";
+import { MOVING_PLAYERS } from "./movePlayers.ts";
+import { useMovePlayers } from "./useMovePlayers.ts";
 
 /**
  * The room's scenes in order. Tapping one shows it to the DM (players stay
@@ -52,26 +48,14 @@ export function SceneList(props: { scenes: Scene[]; viewingId: string | null; pl
   const folders = useMemo(() => groups.flatMap((g) => (g.folder === null ? [] : [g.folder])), [groups]);
   const notice = useSceneLoading();
   const loadingId = useDelayed(notice !== null) ? (notice?.sceneId ?? null) : null;
-  const movingTo = useRoomView((s) => {
-    for (const p of s.pending) if (p.op.t === "room.setPlayerScene") return p.op.sceneId;
-    return null;
-  });
-  const moving = useDelayed(movingTo !== null) ? movingTo : null;
-  const sight = useRoomView((s) => (s.view ? sightOf(s.view) : undefined));
-  const sounds = useRoomView((s) => soundsOf(s.view));
-  const playlists = useRoomView((s) => playlistsOf(s.view));
-  const serverSound = useServerRoomSoundState();
-  const warningFor = (scene: Scene) => moveWarning({ scene, viewing: scene.id === viewingId, sight });
+  const mover = useMovePlayers();
+  const moving = mover.shownMovingTo;
+  const warningFor = mover.question;
 
+  // The first press on a scene that warns shows the warning, and Move anyway presses again, confirmed.
   const movePlayers = (scene: Scene) => {
-    if (warningFor(scene) !== null && confirmMove !== scene.id) {
-      setConfirmMove(scene.id);
-      return;
-    }
-    setConfirmMove(null);
-    actions.dispatch({ t: "room.setPlayerScene", sceneId: scene.id });
-    const sound = moveSoundOp(scene, { serverSound, playlists, sounds, newId: () => actions.newId() });
-    if (sound) send(actions, sound);
+    const step = mover.move(scene, { confirmed: confirmMove === scene.id });
+    setConfirmMove(step.t === "ask" ? scene.id : null);
   };
 
   const reorder = (order: string[] | null) => {
@@ -165,7 +149,7 @@ export function SceneList(props: { scenes: Scene[]; viewingId: string | null; pl
             // Lined up under the name, past the thumbnail. A button's line is a touch target tall, and words take their own height, as the tag does.
             <div style={{ display: "flex", alignItems: "center", minHeight: players || moving === scene.id ? undefined : theme.touch, paddingLeft: THUMB_WIDTH + theme.space(4) }}>
               {moving === scene.id ? (
-                <Loading small delay={0} text="Moving players…" />
+                <Loading small delay={0} text={MOVING_PLAYERS} />
               ) : players ? (
                 <Tag tone="turn">Players here</Tag>
               ) : (
