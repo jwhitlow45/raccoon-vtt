@@ -68,7 +68,7 @@ import { FrameViewBar } from "../features/scenes/FrameView.tsx";
 import { SCENES_PANEL, useEndSceneRequestOnClose } from "../features/scenes/request.ts";
 import { ambianceKeptSlot, keptSections } from "../features/ambiance/kept.ts";
 import { AMBIANCE_PANEL, openAmbiance } from "../features/ambiance/request.ts";
-import { barInset, chromeZoom, layoutWidth, smallUi, useLayoutSize } from "../features/device/layout.ts";
+import { barInset, chromeZoom, smallUi, useLayoutSize } from "../features/device/layout.ts";
 import { uiScale as uiScaleNow, usePanelWidth, useUiScale } from "../features/device/settings.ts";
 import { activeTool, toolsFor, type ToolDef } from "../features/tools.ts";
 import { SETUP_BUTTON, SETUP_TOOLS, toolbarButtons } from "../features/toolbarOrder.ts";
@@ -1050,8 +1050,9 @@ function RoomPage() {
           undo={role === "dm"}
           compact={!wide}
           placement={placement}
-          // In the bar a player's chip shows only its dot, so the strip has room: from 900 px up below 1,100 px as before, and on a phone while the strip is there.
-          chipDot={wide ? width < theme.layout.chipNameMinWidth : placement === "bar" && fight}
+          // In the bar a player's chip shows only its dot, so the strip has room: from 900 px up below 1,100 px as before, less what a wider side panel takes, and on a phone while the strip is there.
+          chipDot={wide ? width - (sideShown ? panelWidth - theme.layout.sidePanelWidth : 0) < theme.layout.chipNameMinWidth : placement === "bar" && fight}
+          barWidth={mapWidth}
           openSheet={openSheet}
           openTime={() => {
             focusNext.current = { kind: "panel", id: AMBIANCE_PANEL };
@@ -1428,7 +1429,7 @@ function MapArea(props: {
  * gives way to its dot first, then Full screen leaves the bar, then the
  * Phase menu, and once Isometric is offered the gaps take a phone's 6 px
  * and last the View button folds into the room's menu, each until the
- * layout is wider: at 900 px in a fight on a scene with phases the View
+ * bar is wider: at 900 px in a fight on a scene with phases the View
  * button overflowed the row by 5 px. Any row checks once Isometric is
  * offered, a player's too. The Menu and a key still
  * reach full screen, and a scene's "Show a phase" chips still switch
@@ -1445,7 +1446,7 @@ function MapArea(props: {
  * and is the first step: the strip never moves to the band there, so the
  * chip leaves before the blackout notice folds, for a player's row too,
  * which checks whenever the chip shows (docs/design/design-v1-calendar.md
- * 4.8). It comes back once the layout is wider than where it overflowed.
+ * 4.8). It comes back once the bar is wider than where it overflowed.
  */
 function TopBar(props: {
   ref?: Ref<HTMLElement>;
@@ -1455,6 +1456,14 @@ function TopBar(props: {
   compact: boolean;
   placement: TurnPlacement;
   chipDot: boolean;
+  /**
+   * The bar's own width in layout px: the map's from 900 px up, the
+   * window's below. Each step the bar gives way by is recorded at this
+   * width and comes back once it is wider, so a side panel that widens and
+   * narrows again, or hides and shows, brings each step back (docs/design/
+   * design-v1-panel-size.md 4.4).
+   */
+  barWidth: number;
   openSheet(): OpenSheet | null;
   openTime(): void;
 }) {
@@ -1472,12 +1481,12 @@ function TopBar(props: {
   const rowRef = useRef<HTMLDivElement>(null);
   const [strip, setStrip] = useState<HTMLDivElement | null>(null);
   const recordOverflow = useRecordOverflow();
-  const { width } = useLayoutSize();
-  // The layout width at which the full blackout notice last overflowed the row.
+  const width = props.barWidth;
+  // The bar's width at which the full blackout notice last overflowed the row.
   const [blackoutShortUpTo, setBlackoutShortUpTo] = useState(0);
   // In the compact form the blackout reminder takes the DM chip's place.
   const blackoutShort = role === "dm" && blackout && width <= blackoutShortUpTo;
-  // The layout width at which the DM's whole chip last overflowed the row: up to it, the chip is its dot.
+  // The bar's width at which the DM's whole chip last overflowed the row: up to it, the chip is its dot.
   const [dmDotUpTo, setDmDotUpTo] = useState(0);
   const dmDot = role === "dm" && (blackoutShort || width <= dmDotUpTo);
   // On a phone, the width at which the row still overflowed with the chip's dot: up to it, the gaps tighten.
@@ -1517,17 +1526,17 @@ function TopBar(props: {
     const overflow = row.scrollWidth - row.clientWidth - tuck;
     if (overflow <= 0) return;
     // On a phone the strip leaves first. Once it is in the band, this runs again with the row it left. From 900 px up the clock's chip leaves first, since the strip never moves there. Then the blackout notice folds into the DM chip's place, or the chip loses its name, then on a phone the gaps' room and then the View button, which the room's menu still reaches, then Full screen, which the Menu and a key still reach, then the Phase menu, and from 900 px up the gaps' room and the View button last.
-    if (measured) recordOverflow(layoutWidth(), overflow);
-    else if (chip) setChipOff({ upTo: layoutWidth(), chars: clockText.length });
-    else if (role === "dm" && blackout && !blackoutShort) setBlackoutShortUpTo(layoutWidth());
-    else if (role === "dm" && !dmDot) setDmDotUpTo(layoutWidth());
-    else if (isoOffered && props.compact && !tight) setTightUpTo(layoutWidth());
-    else if (isoOffered && props.compact && props.canFit && !viewFolded) setViewFoldUpTo(layoutWidth());
-    else if (fullscreen) setFullscreenOffUpTo(layoutWidth());
-    else if (phaseMenu) setPhaseOffUpTo(layoutWidth());
-    else if (isoOffered && !props.compact && !tight) setWideTightUpTo(layoutWidth());
-    else if (isoOffered && !props.compact && props.canFit && !viewFolded) setWideFoldUpTo(layoutWidth());
-  }, [checks, measured, chip, clockText, recordOverflow, role, blackout, blackoutShort, dmDot, props.compact, props.canFit, tight, viewFolded, fullscreen, phaseMenu]);
+    if (measured) recordOverflow(width, overflow);
+    else if (chip) setChipOff({ upTo: width, chars: clockText.length });
+    else if (role === "dm" && blackout && !blackoutShort) setBlackoutShortUpTo(width);
+    else if (role === "dm" && !dmDot) setDmDotUpTo(width);
+    else if (isoOffered && props.compact && !tight) setTightUpTo(width);
+    else if (isoOffered && props.compact && props.canFit && !viewFolded) setViewFoldUpTo(width);
+    else if (fullscreen) setFullscreenOffUpTo(width);
+    else if (phaseMenu) setPhaseOffUpTo(width);
+    else if (isoOffered && !props.compact && !tight) setWideTightUpTo(width);
+    else if (isoOffered && !props.compact && props.canFit && !viewFolded) setWideFoldUpTo(width);
+  }, [checks, measured, chip, clockText, recordOverflow, role, blackout, blackoutShort, dmDot, props.compact, props.canFit, tight, viewFolded, fullscreen, phaseMenu, width]);
   useLayoutEffect(() => {
     const row = rowRef.current;
     if (!checks || !row) return;
