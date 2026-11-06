@@ -7,7 +7,7 @@ import type { Turn } from "../../lib/view.ts";
 import type { BandDraw } from "../../features/areas/volume.ts";
 import type { AreaPits, VolumeLook } from "./drawRelief.ts";
 import { boundsOf, cellPieces, edgeLow, isOpening, keyOf, localKeyOf, lowestOf, polyBox, RANK, sortKey, wallItems, type CellPiece, type PieceSource, type PitRegion, type StaticPiece, type VBox } from "./pieces.ts";
-import type { WallPiece } from "./runs.ts";
+import { samePiece, type WallPiece } from "./runs.ts";
 
 /**
  * The depth list (docs/design/design-v1-isometric-view.md 5.6 and 5.7). Pieces
@@ -655,7 +655,7 @@ export function groupWalls(pieces: readonly WallPiece[], prev: ReadonlyMap<strin
   const out = new Map<string, readonly WallPiece[]>();
   for (const [key, list] of groups) {
     const old = prev?.get(key);
-    const same = old && old.length === list.length && old.every((p, i) => p.id === list[i]!.id && p.ax === list[i]!.ax && p.ay === list[i]!.ay && p.bx === list[i]!.bx && p.by === list[i]!.by && p.kind === list[i]!.kind && p.auto === list[i]!.auto);
+    const same = old && old.length === list.length && old.every((p, i) => samePiece(p, list[i]!));
     out.set(key, same ? old : list);
   }
   return out;

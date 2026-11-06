@@ -77,18 +77,22 @@ describe("standing wall runs", () => {
     assert.equal(wallPieces(walls, ALL).length, 0);
   });
 
-  test("doors and windows: a closed door stands in wood, an open door lies flat, a window stands as a pane, a secret door not yet found stands as a wall", () => {
+  test("doors and windows: a closed door stands in wood, an open door as its frame, a window as a pane, a secret door not yet found as a wall, and only the frames carry their segment", () => {
     const door = (state: "open" | "closed" | "locked", secret = false, discovered = false): EdgeFeature => ({ kind: "door", state, secret, discovered });
     const pieces = wallPieces(sceneWalls(SCENE, build({ "1,1,n": door("closed"), "2,1,n": door("open"), "3,1,n": { kind: "window" }, "4,1,n": door("locked", true), "5,1,n": door("open", true, true), "6,1,n": door("locked") })), ALL);
     assert.deepEqual(
       pieces.map((p) => [p.ax, p.kind]).sort((a, b) => Number(a[0]) - Number(b[0])),
       [
         [1, "door"],
+        [2, "open"],
         [3, "window"],
         [4, "wall"],
+        [5, "open"],
         [6, "door"],
       ],
     );
+    for (const p of pieces) assert.equal(p.frame !== undefined, p.kind !== "wall", p.id);
+    assert.ok(!pieces.some((p) => p.kind === "leaf"), "no leaf without the floor it swings into");
   });
 
   test("two free walls crossing in an X, and meeting in a T, are split where they meet, so no two pieces cross", () => {

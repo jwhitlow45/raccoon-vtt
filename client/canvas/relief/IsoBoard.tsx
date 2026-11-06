@@ -52,7 +52,7 @@ import { drawRun, runPaintedBox, standeePaintedBox, type DrawContext, type Groun
 import { FogView } from "./fogView.ts";
 import { cellLook, CellTints, hexLook, imageReader } from "./looks.ts";
 import type { VBox } from "./pieces.ts";
-import { pillarPieces, wallPieces, type WallPiece } from "./runs.ts";
+import { floorOf, leafDoorKey, pillarPieces, wallPieces, type WallPiece } from "./runs.ts";
 import { FrameScheduler, type KeptLayer } from "./scheduler.ts";
 import { keptHost, onDeviceGrid, screenBox } from "./kept.ts";
 import { liveCameraSlot, needsApply, useCameraWhileShown, type LastApplied } from "../../state/liveCamera.ts";
@@ -188,11 +188,12 @@ function IsoBoardImpl(props: IsoBoardProps) {
   // The walls a hex creature's sub-cells are clipped by, as the server withholds it (HX-D10), for the DM's dimming.
   const sightClip = useMemo(() => (isHex(grid) ? sightClipOf(walls) : null), [grid, walls]);
   const wallGroups = useRef<Map<string, readonly WallPiece[]> | null>(null);
-  const grouped = useMemo(() => {
-    // Pillars are painted ground, which stays square.
-    const pieces = stand ? [...wallPieces(walls, fog, grid), ...(isHex(grid) ? [] : pillarPieces(chunks, scene.id, { w, h }, fog))] : [];
-    return (wallGroups.current = groupWalls(pieces, wallGroups.current, { w, h }, grid));
-  }, [stand, walls, fog, chunks, scene.id, w, h, grid]);
+  const pieces = useMemo(
+    // Pillars are painted ground, which stays square. An open door's leaf swings into the floor its chunks hold, as Top-down's does.
+    () => (stand ? [...wallPieces(walls, fog, grid, floorOf(chunks, scene.id)), ...(isHex(grid) ? [] : pillarPieces(chunks, scene.id, { w, h }, fog))] : []),
+    [stand, walls, fog, chunks, scene.id, w, h, grid],
+  );
+  const grouped = useMemo(() => (wallGroups.current = groupWalls(pieces, wallGroups.current, { w, h }, grid)), [pieces, w, h, grid]);
 
   // The map image Top-down draws, for the side tints of cells with no builder terrain (looks.ts).
   const [drawnMap, setDrawnMap] = useState<DrawnMap | null>(null);
@@ -637,6 +638,9 @@ function IsoBoardImpl(props: IsoBoardProps) {
   // The stairs that climb in steps, one set while the same ones do, so the ground stage's build leaves their symbols out without rebuilding for a fog change that steps nothing new.
   const steppingCells = stand && detail ? (heights.runs?.cells ?? "") : "";
   const stepping = useMemo(() => new Set(steppingCells.split(";").filter((c) => c !== "")), [steppingCells]);
+  // The doors whose open leaf stands, kept as one set the same way, so the ground stage leaves out their flat leaf and arc (docs/design/design-v1-iso-depth.md 5.5).
+  const leafKeys = detail ? pieces.flatMap((p) => leafDoorKey(p) ?? []).join(";") : "";
+  const standingLeaves = useMemo(() => new Set(leafKeys.split(";").filter((k) => k !== "")), [leafKeys]);
   // One context per place, so a renderer drawn in several knows which part it draws there (features/layers.ts IsoPlace).
   const groundCtx: IsoGround = useMemo(
     () => ({
@@ -650,9 +654,10 @@ function IsoBoardImpl(props: IsoBoardProps) {
       surface: isHex(grid) ? { grid, atCell: heights.atCell } : undefined,
       detail,
       stepping,
+      standingLeaves,
       standOn: stepping.size > 0 ? (cells) => standSurface(heights, cells) : undefined,
     }),
-    [turn, fog, stand, uprightIds, heights, grid, detail, stepping],
+    [turn, fog, stand, uprightIds, heights, grid, detail, stepping, standingLeaves],
   );
   const movingCtx: IsoGround = useMemo(() => ({ ...groundCtx, place: "moving" }), [groundCtx]);
   const uprightCtx: IsoGround = useMemo(() => ({ ...groundCtx, place: "upright" }), [groundCtx]);

@@ -1,10 +1,12 @@
 import { CHUNK_CELLS, FOG_SUBCELLS, type BuildChunk, type WallFeature } from "#shared/model.ts";
+import { edgeDoorKey, freeDoorKey, freeFrame, freeSwingSide, openLeaf, stubOf, type OpenLeaf } from "../../features/builder/draw.ts";
 import { isHex, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import type { HexGrid } from "#shared/rules/hex.ts";
 import type { WallSet } from "#shared/rules/walls.ts";
 import type { Point } from "../../lib/camera.ts";
 import { cellAtPoint, cellCenter, cellPolygon, cellsMeeting, neighborsOf, polygonSide, type GroundCell } from "../../lib/groundCells.ts";
 import type { FogView } from "./fogView.ts";
+import { boxStands } from "./stand.ts";
 
 /**
  * Standing walls (docs/design/design-v1-isometric-view.md 5.5). The pieces are the
@@ -26,14 +28,32 @@ import type { FogView } from "./fogView.ts";
  * or along one side, and stands on that hex's ground
  * (docs/design/design-v1-iso-hex-relief.md 6.1). A run past the scene's last
  * whole hexes has an off-scene host whose ground is 0.
+ *
+ * A door or window stands in one frame of its whole segment, never of a
+ * piece (docs/design/design-v1-iso-depth.md 5.5, D-261102-885): each piece
+ * carries the segment and its own range along it, and draws the parts of
+ * the frame inside that range, so lifting fog never adds posts or moves a
+ * hinge. An open door's leaf is one piece of its own, standing on its
+ * hinge where the stand rule holds over the leaf itself.
  */
 
 /**
- * How a piece stands: a wall in stone, a closed door's leaf in wood, a
- * window's pane, a pillar's stone drum (pillarPieces). An open door lies
- * flat on the ground.
+ * How a piece stands: a wall in stone, a closed door's leaf in wood between
+ * its frame's posts, an open door's frame with nothing between its posts, a
+ * window's pane between posts, a pillar's stone drum (pillarPieces), and an
+ * open door's leaf upright on its hinge (`leaf`, one piece a door). Below
+ * the detail level an open door's frame and leaf draw nothing and its leaf
+ * lies flat on the ground, a closed door's leaf and a window's pane stand
+ * as one plane (pieces.ts wallItems).
  */
-export type WallKind = "wall" | "door" | "window" | "pillar";
+export type WallKind = "wall" | "door" | "open" | "window" | "pillar" | "leaf";
+
+/**
+ * A door's or window's whole segment, from `ax, ay` to `bx, by`, and the
+ * range of parameters along it, from 0 at `a` to 1 at `b`, that one piece
+ * covers: the piece draws the parts of the one frame inside its range.
+ */
+export type FrameRange = { ax: number; ay: number; bx: number; by: number; t0: number; t1: number };
 
 export type WallPiece = {
   /** Stable across rebuilds: the segment and where along it the piece starts. */
@@ -56,37 +76,90 @@ export type WallPiece = {
    * is the owner's whatever the turn, and it sorts with the nearer host.
    */
   hosts?: readonly { cell: GroundCell; center: Point }[];
+  /** A door's or window's frame and this piece's share of it. */
+  frame?: FrameRange;
+  /** An open door's leaf (`leaf` pieces only): its hinge is `ax, ay`, its far end `bx, by`, and it is `w` thick along the door's direction `ux, uy`, on the far side of the hinge from the first post. */
+  leaf?: { ux: number; uy: number; w: number };
 };
 
-/** What stands for a feature, or null for one that lies flat. A secret door not yet found stands as the wall the players got. */
-export function wallKind(f: WallFeature): WallKind | null {
+/** What stands for a feature. A secret door not yet found stands as the wall the players got. */
+export function wallKind(f: WallFeature): WallKind {
   if (f.kind === "wall" || f.kind === "window") return f.kind;
   if (f.secret && !f.discovered) return "wall";
-  return f.state === "open" ? null : "door";
+  return f.state === "open" ? "open" : "door";
 }
 
 type Segment = { id: string; kind: WallKind; ax: number; ay: number; bx: number; by: number; grid: boolean; auto: boolean; cuts: number[] };
 
+const LEAF = "@leaf";
+
+/** The key of the door an open leaf piece stands for (builder/draw.ts edgeDoorKey and freeDoorKey), or null for any other piece. */
+export function leafDoorKey(p: Pick<WallPiece, "id" | "kind">): string | null {
+  return p.kind === "leaf" && p.id.endsWith(LEAF) ? p.id.slice(0, -LEAF.length) : null;
+}
+
+/** Whether two pieces draw alike: the same place, kind, frame and leaf. */
+export function samePiece(p: WallPiece, q: WallPiece): boolean {
+  const f = p.frame;
+  const g = q.frame;
+  const frames = f === g || (f !== undefined && g !== undefined && f.ax === g.ax && f.ay === g.ay && f.bx === g.bx && f.by === g.by && f.t0 === g.t0 && f.t1 === g.t1);
+  const leaves = p.leaf === q.leaf || (p.leaf !== undefined && q.leaf !== undefined && p.leaf.ux === q.leaf.ux && p.leaf.uy === q.leaf.uy && p.leaf.w === q.leaf.w);
+  return p.id === q.id && p.ax === q.ax && p.ay === q.ay && p.bx === q.bx && p.by === q.by && p.kind === q.kind && p.auto === q.auto && frames && leaves;
+}
+
+/** Whether a cell is floor, as the build holds it: what an open door's leaf swings into (builder/draw.ts swingSide). */
+export type IsFloor = (x: number, y: number) => boolean;
+
+/** The floor of a scene's chunks: a cell its chunk holds terrain for, as Top-down's build reads the leaf's side. */
+export function floorOf(chunks: Readonly<Record<string, BuildChunk | undefined>>, sceneId: string): IsFloor {
+  return (x, y) => x >= 0 && y >= 0 && chunks[`${sceneId}:${Math.floor(x / CHUNK_CELLS)},${Math.floor(y / CHUNK_CELLS)}`]?.cells[`${x},${y}`] !== undefined;
+}
+
+/**
+ * An open door's leaf from its two ends, as Top-down lays it flat
+ * (builder/draw.ts openLeaf): from the first post's inner end, swung a
+ * right angle into floor, never into rock. Null for a door with no length.
+ */
+export function doorLeaf(a: Point, b: Point, isFloor: IsFloor): OpenLeaf | null {
+  const frame = freeFrame({ a: [a.x, a.y], b: [b.x, b.y] });
+  return frame ? openLeaf(frame, freeSwingSide(frame, isFloor)) : null;
+}
+
+/** The ground box an open leaf covers, in cells: the stand rule's footprint for it. */
+export function leafBox(l: OpenLeaf): { x0: number; y0: number; x1: number; y1: number } {
+  const xs = [l.hx, l.hx + l.ux * l.w, l.hx + l.nx * l.len, l.hx + l.ux * l.w + l.nx * l.len];
+  const ys = [l.hy, l.hy + l.uy * l.w, l.hy + l.ny * l.len, l.hy + l.uy * l.w + l.ny * l.len];
+  return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+}
+
+/** A frame's posts' share of its length at each end, as a parameter along it: `stubOf`, at most 0.15 cell, over the door's length. */
+export function postShare(f: Pick<FrameRange, "ax" | "ay" | "bx" | "by">): number {
+  const len = Math.hypot(f.bx - f.ax, f.by - f.ay);
+  return len > 0 ? stubOf({ len }) / len : 0;
+}
+
 const EPS = 1e-9;
 
-/** Every standing wall piece of a scene for this viewer. */
-export function wallPieces(walls: WallSet, fog: FogView, grid: Grid = SQUARES): WallPiece[] {
+/**
+ * Every standing wall piece of a scene for this viewer, and the leaf of
+ * each open door whose leaf stands. `isFloor` picks the side a leaf swings
+ * to. Left out, no leaf stands.
+ */
+export function wallPieces(walls: WallSet, fog: FogView, grid: Grid = SQUARES, isFloor?: IsFloor): WallPiece[] {
   const segments: Segment[] = [];
   for (const e of walls.edges) {
     const kind = wallKind(e.feature);
-    if (!kind) continue;
     const bx = e.side === "n" ? e.x + 1 : e.x;
     const by = e.side === "n" ? e.y : e.y + 1;
-    segments.push({ id: `e${e.x},${e.y}${e.side}`, kind, ax: e.x, ay: e.y, bx, by, grid: true, auto: e.auto, cuts: [] });
+    segments.push({ id: edgeDoorKey(e), kind, ax: e.x, ay: e.y, bx, by, grid: true, auto: e.auto, cuts: [] });
   }
   const free: Segment[] = [];
   for (const ref of walls.free) {
     const kind = wallKind(ref.wall.f);
-    if (!kind) continue;
     const [ax, ay] = ref.wall.a;
     const [bx, by] = ref.wall.b;
     if (Math.abs(ax - bx) < EPS && Math.abs(ay - by) < EPS) continue;
-    free.push({ id: `f${ref.cx},${ref.cy}:${ref.wall.id}`, kind, ax, ay, bx, by, grid: false, auto: false, cuts: [] });
+    free.push({ id: freeDoorKey(ref.cx, ref.cy, ref.wall.id), kind, ax, ay, bx, by, grid: false, auto: false, cuts: [] });
   }
   splitCrossings(free);
   segments.push(...free);
@@ -95,8 +168,37 @@ export function wallPieces(walls: WallSet, fog: FogView, grid: Grid = SQUARES): 
   for (const s of segments) {
     if (hex) s.cuts.push(...hexSideCuts(hex, s));
     piecesOf(s, fog, out, hex);
+    if (s.kind === "open" && isFloor) leafPiece(s, fog, out, hex, isFloor);
   }
   return out;
+}
+
+/**
+ * An open door's leaf, when it stands: only where every sub-cell under the
+ * leaf itself is revealed (stand.ts boxStands), the stand rule for anything
+ * upright, never by its door's line, which would stand it over fog and show
+ * which side is floor. It stands on its hinge's ground, the frame's beside
+ * the door, so opening a door never parts the leaf from its post, and over
+ * a lower floor in its swing square it clears that floor
+ * (docs/design/design-v1-iso-depth.md 5.5).
+ */
+function leafPiece(s: Segment, fog: FogView, out: WallPiece[], hex: HexGrid | null, isFloor: IsFloor): void {
+  const l = doorLeaf({ x: s.ax, y: s.ay }, { x: s.bx, y: s.by }, isFloor);
+  if (!l || !(l.len > EPS) || !boxStands(fog, leafBox(l))) return;
+  const tip = { x: l.hx + l.nx * l.len, y: l.hy + l.ny * l.len };
+  const mid = { x: l.hx + (l.ux * l.w + l.nx * l.len) / 2, y: l.hy + (l.uy * l.w + l.ny * l.len) / 2 };
+  const piece: WallPiece = { id: `${s.id}${LEAF}`, kind: "leaf", ax: l.hx, ay: l.hy, bx: tip.x, by: tip.y, cx: 0, cy: 0, beside: null, auto: false, leaf: { ux: l.ux, uy: l.uy, w: l.w } };
+  // The hinge's own run of the door, a step past the hinge along it, says where the frame stands there.
+  const past = { x: l.hx + l.ux * 1e-6, y: l.hy + l.uy * 1e-6 };
+  if (hex) {
+    const owner = cellAtPoint(hex, mid);
+    out.push({ ...piece, cx: owner.col, cy: owner.row, hosts: runHosts(hex, { x: l.hx, y: l.hy }, past) });
+    return;
+  }
+  const hx = Math.floor(past.x);
+  const hy = Math.floor(past.y);
+  const beside: readonly [number, number, number, number] = s.grid ? (s.ay === s.by ? [hx, s.ay - 1, hx, s.ay] : [s.ax - 1, hy, s.ax, hy]) : [hx, hy, hx, hy];
+  out.push({ ...piece, cx: Math.floor(mid.x), cy: Math.floor(mid.y), beside });
 }
 
 /** Where a segment crosses or touches a canonical hex side, as parameters along it: every side of every hex its box meets, past the scene too. */
@@ -226,7 +328,7 @@ function cutsOf(s: Segment): number[] {
  * judged by `runStands`: what a door's piece draws upright, so its tap and
  * its pill stand where it does (doors/tap.ts, DoorPill.tsx).
  */
-export function standingStretches(fog: FogView, a: { x: number; y: number }, b: { x: number; y: number }): [number, number][] {
+export function standingStretches(fog: FogView, a: Point, b: Point): [number, number][] {
   if (fog.all) return [[0, 1]];
   const ts = cutsOf({ id: "", kind: "wall", ax: a.x, ay: a.y, bx: b.x, by: b.y, grid: true, auto: false, cuts: [] });
   const at = (t: number) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
@@ -272,14 +374,16 @@ function piecesOf(s: Segment, fog: FogView, out: WallPiece[], hex: HexGrid | nul
   // The open piece: where it starts and the cell it is in.
   let start = -1;
   let cell = "";
+  const framed = s.kind === "door" || s.kind === "open" || s.kind === "window";
   const close = (endT: number) => {
     if (start < 0) return;
     const a = at(ts[start]!);
     const b = at(endT);
+    const frame = framed ? { frame: { ax: s.ax, ay: s.ay, bx: s.bx, by: s.by, t0: ts[start]!, t1: endT } } : {};
     if (hex) {
       const hosts = runHosts(hex, a, b);
       const owner = hosts[0]!.cell;
-      out.push({ id: `${s.id}@${start}`, kind: s.kind, ax: a.x, ay: a.y, bx: b.x, by: b.y, cx: owner.col, cy: owner.row, beside: null, auto: s.auto, hosts });
+      out.push({ id: `${s.id}@${start}`, kind: s.kind, ax: a.x, ay: a.y, bx: b.x, by: b.y, cx: owner.col, cy: owner.row, beside: null, auto: s.auto, hosts, ...frame });
       start = -1;
       return;
     }
@@ -296,6 +400,7 @@ function piecesOf(s: Segment, fog: FogView, out: WallPiece[], hex: HexGrid | nul
       cy,
       beside: s.grid ? (s.ay === s.by ? [cx, s.ay - 1, cx, s.ay] : [s.ax - 1, cy, s.ax, cy]) : null,
       auto: s.auto,
+      ...frame,
     });
     start = -1;
   };

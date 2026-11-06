@@ -42,6 +42,13 @@ export type IsoGround = {
    * leaves their symbols out (docs/design/design-v1-iso-depth.md 5.2).
    */
   stepping?: ReadonlySet<string>;
+  /**
+   * The doors, by key (builder/draw.ts edgeDoorKey and freeDoorKey), whose
+   * open leaf stands upright on its hinge while the detail shows, kept as
+   * one set while the same leaves stand: the ground stage leaves their flat
+   * leaf and arc out (docs/design/design-v1-iso-depth.md 5.5).
+   */
+  standingLeaves?: ReadonlySet<string>;
   /** The stand surface under a footprint's cells, in cells of height (lib/view.ts standSurface), where a dragged token's moving marks stand. Absent where no stair steps. */
   standOn?: (cells: readonly GroundCell[]) => number;
 };

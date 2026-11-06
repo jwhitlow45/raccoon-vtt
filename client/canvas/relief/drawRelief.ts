@@ -2,12 +2,12 @@ import type { TexturedTerrain } from "../../features/builder/geometry.ts";
 import { TERRAIN_COLORS, TERRAIN_SWATCHES, TEXTURE_CELLS } from "../../features/builder/textures.ts";
 import type { Camera } from "../../lib/camera.ts";
 import { theme } from "../../lib/theme.ts";
-import { isometric, K, toView, turnAxes, type Turn } from "../../lib/view.ts";
+import { depth, isometric, K, toView, turnAxes, type Turn } from "../../lib/view.ts";
 import type { BandPart } from "../../features/areas/volume.ts";
 import { meets, type DrawPiece, type VolumePiece } from "./buckets.ts";
 import { patternOf } from "./looks.ts";
 import { treadHeight } from "../../lib/stairRuns.ts";
-import { boundsOf, facesOf, isOpening, risersOf, treadOrder, treadPolygon, type CellPiece, type Face, type PitRegion, type SideLook, type StaticPiece, type VBox, type WallItem } from "./pieces.ts";
+import { boundsOf, facesOf, frameParts, isOpening, partCorners, risersOf, sortKey, treadOrder, treadPolygon, type CellPiece, type Face, type FramePart, type PitRegion, type SideLook, type StaticPiece, type VBox, type WallItem } from "./pieces.ts";
 
 /**
  * Drawing a run of relief pieces (docs/design/design-v1-isometric-view.md 5.5):
@@ -653,6 +653,7 @@ function drawWall(g: CanvasRenderingContext2D, w: WallItem, dc: DrawContext): vo
 
 function drawStanding(g: CanvasRenderingContext2D, w: WallItem, dc: DrawContext): void {
   if (w.piece.kind === "pillar") return drawPillar(g, w, dc);
+  if (w.framed) return drawFrame(g, w, dc);
   const view = isometric(dc.turn);
   const top = w.base + w.rise;
   const a = toView(view, { x: w.piece.ax, y: w.piece.ay }, top);
@@ -665,6 +666,104 @@ function drawStanding(g: CanvasRenderingContext2D, w: WallItem, dc: DrawContext)
   const look: SideLook = w.piece.kind === "door" ? { texture: "wood", color: TERRAIN_COLORS.wood } : { texture: "stone", color: TERRAIN_COLORS.stone };
   // A wall facing the viewer's left reads lighter, as a column's left side does.
   fillSide(g, a, b, h, look, a.x < b.x === a.y > b.y, dc, w.piece.kind === "wall" ? theme.relief.wallTint : null);
+}
+
+/** One box of a door's frame as it draws at a turn: its faces toward the viewer, its cap, and their outline as one path. */
+type PartShape = { look: FramePart["look"]; faces: readonly SideShape[]; cap: readonly Pt[] | null; capPath: Path2D | null; outline: Path2D | null };
+
+const frameShapes = new WeakMap<WallItem, (readonly PartShape[] | undefined)[]>();
+
+/**
+ * A framed piece's boxes at a turn (docs/design/design-v1-iso-depth.md 5.5),
+ * far to near along the door, kept with the item as a cell's shape is. A
+ * box draws only the sides facing the viewer and its cap, which never
+ * overlap one another on screen. A pane is one plane with no cap.
+ */
+function frameShapeOf(w: WallItem, turn: Turn): readonly PartShape[] {
+  let byTurn = frameShapes.get(w);
+  if (!byTurn) frameShapes.set(w, (byTurn = []));
+  const kept = byTurn[turn];
+  if (kept) return kept;
+  const view = isometric(turn);
+  const paths = typeof Path2D === "function";
+  const { c, s } = turnAxes(turn);
+  const parts = frameParts(w).map((q) => {
+    const corners = partCorners(q);
+    const mid = { x: corners.reduce((m, p) => m + p.x, 0) / 4, y: corners.reduce((m, p) => m + p.y, 0) / 4 };
+    return { q, corners, mid };
+  });
+  parts.sort((p, r) => sortKey(turn, p.mid.x, p.mid.y) - sortKey(turn, r.mid.x, r.mid.y));
+  const shapes = parts.map(({ q, corners, mid }): PartShape => {
+    const midU = c * mid.x - s * mid.y;
+    const faceOf = (a: Pt, b: Pt): SideShape => sideShape(view, { ax: a.x, ay: a.y, bx: b.x, by: b.y, z0: q.z0, z1: q.z1, left: c * ((a.x + b.x) / 2) - s * ((a.y + b.y) / 2) < midU, side: -1 }, paths);
+    if (q.thick === 0) {
+      const face = faceOf(q.a, q.b);
+      // A pane facing the viewer's left reads lighter, as a wall plane does.
+      return { look: q.look, faces: [{ ...face, left: face.a.x < face.b.x === face.a.y > face.b.y }], cap: null, capPath: null, outline: face.path };
+    }
+    const faces: SideShape[] = [];
+    for (let i = 0; i < 4; i++) {
+      const a = corners[i]!;
+      const b = corners[(i + 1) % 4]!;
+      // Outward from the box's middle, so the corners' winding does not matter.
+      if (depth(turn, (a.x + b.x) / 2 - mid.x, (a.y + b.y) / 2 - mid.y) > 1e-12) faces.push(faceOf(a, b));
+    }
+    const cap = lifted(turn, corners, q.z1);
+    let outline: Path2D | null = null;
+    if (paths) {
+      outline = new Path2D();
+      for (const f of faces) sidePath(outline, f.a, f.b, f.h);
+      polyPath(outline, cap);
+    }
+    return { look: q.look, faces, cap, capPath: paths ? polyPath(new Path2D(), cap) : null, outline };
+  });
+  byTurn[turn] = shapes;
+  return shapes;
+}
+
+const STONE: SideLook = { texture: "stone", color: TERRAIN_COLORS.stone };
+const WOOD: SideLook = { texture: "wood", color: TERRAIN_COLORS.wood };
+
+/**
+ * A door's or window's share of its frame (5.5): stone posts in one flat
+ * tone a face, since a post 0.15 cell wide shows no texture, a closed or
+ * open leaf in wood, a window's half-clear pane, each box's caps lit, and
+ * every box outlined at once.
+ */
+function drawFrame(g: CanvasRenderingContext2D, w: WallItem, dc: DrawContext): void {
+  const unit = 1 / (dc.camera.scale * dc.pixelRatio);
+  const stone = blended(TERRAIN_COLORS.stone, theme.relief.wallTint) ?? TERRAIN_COLORS.stone;
+  for (const part of frameShapeOf(w, dc.turn)) {
+    for (const f of part.faces) {
+      if (part.look === "post") {
+        g.fillStyle = blended(stone, f.left ? theme.relief.lit : theme.relief.shaded) ?? stone;
+        if (!f.path) {
+          g.beginPath();
+          addSide(g, f.a, f.b, f.h);
+        }
+        fillWith(g, f.path);
+      } else {
+        fillSide(g, f.a, f.b, f.h, part.look === "leaf" ? WOOD : { texture: null, color: theme.relief.pane }, part.look === "leaf" ? f.left : null, dc, null, false, f.path);
+      }
+    }
+    if (part.cap) {
+      const base = part.look === "post" ? stone : TERRAIN_COLORS.wood;
+      g.fillStyle = blended(base, theme.relief.lit) ?? base;
+      if (!part.capPath) {
+        g.beginPath();
+        addPoly(g, part.cap);
+      }
+      fillWith(g, part.capPath);
+    }
+    if (!part.outline) {
+      g.beginPath();
+      for (const f of part.faces) addSide(g, f.a, f.b, f.h);
+      if (part.cap) addPoly(g, part.cap);
+    }
+    g.strokeStyle = theme.relief.edge;
+    g.lineWidth = unit;
+    strokeWith(g, part.outline);
+  }
 }
 
 /**

@@ -78,6 +78,7 @@ export type BoardPaths<P = Path2D> = {
    */
   freeWalls: P;
   leaves: P;
+  /** Open doors' leaves and their dashed swings, every open door's (`openDoorPaths`). */
   openLeaves: P;
   swings: P;
   panes: P;
@@ -91,7 +92,30 @@ export type BoardPaths<P = Path2D> = {
   noWalls: P;
   /** Every stair the symbols draw, for the isometric ground stage to leave out the ones that climb in steps (`stairSymbols`). */
   stairList: readonly StairCell[];
+  /** Every open door the leaves draw, for the isometric ground stage to leave out the ones whose leaf stands (`openDoorPaths`). */
+  openList: readonly OpenDoor[];
 };
+
+/** An open door as its leaf draws: its key (`edgeDoorKey`, `freeDoorKey`), its frame and the side its leaf swings to. */
+export type OpenDoor = { key: string; frame: Frame; side: 1 | -1 };
+
+/** The key of a door on a cell edge, as the isometric relief names the wall segment it stands for (relief/runs.ts). */
+export function edgeDoorKey(e: { x: number; y: number; side: "n" | "w" }): string {
+  return `e${e.x},${e.y}${e.side}`;
+}
+
+/** The key of a free door, by the chunk holding it and its id, as the relief names it. */
+export function freeDoorKey(cx: number, cy: number, id: string): string {
+  return `f${cx},${cy}:${id}`;
+}
+
+/** The leaves and dashed swings of a list of open doors. */
+export function openDoorPaths<P extends PathSink>(list: readonly OpenDoor[], makePath: () => P): Pick<BoardPaths<P>, "openLeaves" | "swings"> {
+  const openLeaves = makePath();
+  const swings = makePath();
+  for (const d of list) openDoor(openLeaves, swings, d.frame, d.side);
+  return { openLeaves, swings };
+}
 
 /** A set of stairs' symbols: the pale slab under those over floor, their treads, and those over the map image. */
 export type StairSymbols<P = Path2D> = Pick<BoardPaths<P>, "stairs" | "floorStairs" | "artStairs">;
@@ -115,7 +139,7 @@ function rectsPath<P extends PathSink>(make: () => P, rects: readonly CellRect[]
  * points south, or east for a piece running north and south, the side an
  * open door swings to when both sides are alike.
  */
-type Frame = { ax: number; ay: number; ux: number; uy: number; nx: number; ny: number; len: number };
+export type Frame = { ax: number; ay: number; ux: number; uy: number; nx: number; ny: number; len: number };
 
 /** A cell edge's frame. */
 function edgeFrame(e: WallEdge): Frame {
@@ -141,7 +165,7 @@ export function freeFrame(wall: Pick<FreeWall, "a" | "b">): Frame | null {
  * The wall left at each end of a door or window, its frame: 0.15 cell, the
  * edge symbols' own, or less on a piece shorter than a cell.
  */
-function stubOf(f: Frame): number {
+export function stubOf(f: Pick<Frame, "len">): number {
   return 0.15 * Math.min(1, f.len);
 }
 
@@ -168,15 +192,24 @@ function slab(path: PathSink, f: Frame, thick: number): void {
   path.closePath();
 }
 
-function openDoor(leaf: PathSink, swing: PathSink, f: Frame, side: 1 | -1): void {
-  const { ax, ay, ux, uy } = f;
-  const nx = f.nx * side;
-  const ny = f.ny * side;
+/**
+ * An open door's leaf as Top-down lays it: hinged at the first stub's inner
+ * end, swung a right angle to `side` of the frame's normal, the opening's
+ * length long and `w` thick along the door. Isometric stands the same leaf
+ * up (relief/runs.ts), so the two views agree on where it is.
+ */
+export type OpenLeaf = { hx: number; hy: number; ux: number; uy: number; nx: number; ny: number; len: number; w: number };
+
+/** How thick an open leaf lies along its door, in cells. */
+export const OPEN_LEAF_THICK = 0.08;
+
+export function openLeaf(f: Frame, side: 1 | -1): OpenLeaf {
   const s = stubOf(f);
-  const hx = ax + ux * s;
-  const hy = ay + uy * s;
-  const len = f.len - 2 * s;
-  const w = 0.08;
+  return { hx: f.ax + f.ux * s, hy: f.ay + f.uy * s, ux: f.ux, uy: f.uy, nx: f.nx * side, ny: f.ny * side, len: f.len - 2 * s, w: OPEN_LEAF_THICK };
+}
+
+function openDoor(leaf: PathSink, swing: PathSink, f: Frame, side: 1 | -1): void {
+  const { hx, hy, ux, uy, nx, ny, len, w } = openLeaf(f, side);
   leaf.moveTo(hx, hy);
   leaf.lineTo(hx + ux * w, hy + uy * w);
   leaf.lineTo(hx + ux * w + nx * len, hy + uy * w + ny * len);
@@ -302,15 +335,14 @@ export function buildPaths(
   }
   const freeWalls = makePath();
   const leaves = makePath();
-  const openLeaves = makePath();
-  const swings = makePath();
+  const openList: OpenDoor[] = [];
   const panes = makePath();
   const locks = makePath();
   const secrets = makePath();
   const secretMarks: { x: number; y: number }[] = [];
 
   /** A door or window in a frame, its wall pieces going to `wall`. */
-  const opening = (feature: WallFeature, frame: Frame, wall: PathSink, swingTo: () => 1 | -1) => {
+  const opening = (feature: WallFeature, frame: Frame, wall: PathSink, swingTo: () => 1 | -1, key: string) => {
     if (feature.kind === "window") {
       stubs(wall, frame);
       slab(panes, frame, 0.12);
@@ -326,13 +358,13 @@ export function buildPaths(
       return;
     }
     stubs(wall, frame);
-    if (door.state === "open") openDoor(openLeaves, swings, frame, swingTo());
+    if (door.state === "open") openList.push({ key, frame, side: swingTo() });
     else slab(leaves, frame, 0.2);
     if (dm && door.state === "locked") locks.rect(mid.x - 0.07, mid.y - 0.07, 0.14, 0.14);
     if (dm && door.secret) secretMarks.push(mid);
   };
 
-  for (const e of edges) opening(e.feature, edgeFrame(e), walls, () => swingSide(e, isFloor));
+  for (const e of edges) opening(e.feature, edgeFrame(e), walls, () => swingSide(e, isFloor), edgeDoorKey(e));
 
   for (const chunk of chunks) {
     for (const wall of chunk.walls ?? []) {
@@ -347,7 +379,7 @@ export function buildPaths(
         freeWalls.moveTo(wall.a[0], wall.a[1]);
         freeWalls.lineTo(wall.b[0], wall.b[1]);
       }
-      opening(wall.f, frame, freeWalls, () => freeSwingSide(frame, isFloor));
+      opening(wall.f, frame, freeWalls, () => freeSwingSide(frame, isFloor), freeDoorKey(chunk.cx, chunk.cy, wall.id));
     }
   }
 
@@ -365,6 +397,7 @@ export function buildPaths(
     }
   }
 
+  const { openLeaves, swings } = openDoorPaths(openList, makePath);
   const floors: [TexturedTerrain, PathSink][] = [...drawing.floors].map(([t, rects]) => [t, rectsPath(makePath, rects)]);
   return {
     drawing,
@@ -392,6 +425,7 @@ export function buildPaths(
     secretMarks,
     noWalls,
     stairList,
+    openList,
   };
 }
 
@@ -534,23 +568,28 @@ export type DrawBuildOptions = {
    * (docs/design/design-v1-isometric-view.md 5.3 and 5.5): walls, closed doors,
    * windows and the standing pillars stand in the relief, so the ground
    * leaves them out, and the relief's tints and shadows give way to the
-   * columns. Open doors, the DM's locks and secret marks, and the pillars
-   * given here, which the stand rule keeps flat, still draw. A wall the
-   * relief leaves out lies under fog on both sides, where Top-down's line
-   * is covered too. Absent in Top-down, which draws as it always has.
+   * columns. The DM's locks and secret marks, the pillars given here, which
+   * the stand rule keeps flat, and open doors still draw. A wall the relief
+   * leaves out lies under fog on both sides, where Top-down's line is
+   * covered too. Absent in Top-down, which draws as it always has.
    *
    * `stairs`, when given, are the symbols of the stairs that do not climb
    * in steps: a stepping stair's whole symbol, its pale slab included, is
    * left out, since its treads copy the floor under it
    * (docs/design/design-v1-iso-depth.md 5.2, D-261102-887).
+   *
+   * `doors`, when given, are the leaves and swings of the open doors whose
+   * leaf lies flat: a leaf that stands upright on its hinge in the relief
+   * leaves its flat leaf and its arc out (5.5, D-261102-885).
    */
-  standing?: { pillars: Path2D; pillarShine: Path2D; stairs?: StairSymbols };
+  standing?: { pillars: Path2D; pillarShine: Path2D; stairs?: StairSymbols; doors?: Pick<BoardPaths, "openLeaves" | "swings"> };
 };
 
 /** Draws the build onto `g`, whose current transform maps world cells to pixels. */
 export function drawBuild(g: CanvasRenderingContext2D, paths: BoardPaths, opts: DrawBuildOptions): void {
   const { role, scale, grid, textures, labels } = opts;
   const stairs: StairSymbols = opts.standing?.stairs ?? paths;
+  const doors = opts.standing?.doors ?? paths;
   const wallWidth = Math.max(0.14, 2.5 / scale);
   const hairline = 1 / scale;
   g.save();
@@ -631,15 +670,15 @@ export function drawBuild(g: CanvasRenderingContext2D, paths: BoardPaths, opts: 
   if (!standing) g.fill(paths.panes);
   g.fillStyle = DOOR_FILL;
   if (!standing) g.fill(paths.leaves);
-  g.fill(paths.openLeaves);
+  g.fill(doors.openLeaves);
   g.strokeStyle = WALL_COLOR;
   g.lineWidth = Math.max(0.03, hairline);
   if (!standing) g.stroke(paths.panes);
   if (!standing) g.stroke(paths.leaves);
-  g.stroke(paths.openLeaves);
+  g.stroke(doors.openLeaves);
   g.setLineDash([0.08, 0.08]);
   g.strokeStyle = "rgba(21, 18, 15, 0.7)";
-  g.stroke(paths.swings);
+  g.stroke(doors.swings);
   if (role === "dm") {
     g.save();
     g.lineCap = "round";

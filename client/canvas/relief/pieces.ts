@@ -5,7 +5,7 @@ import type { Point } from "../../lib/camera.ts";
 import { cellCenter, cellInScene, cellPolygon, neighborOf, sideCount, sideEnds, sideOutward } from "../../lib/groundCells.ts";
 import { treadAt, treadHeight, TREADS, treadUnder, type StairRuns, type StairStep } from "../../lib/stairRuns.ts";
 import { depth, K, turnAxes, type Turn } from "../../lib/view.ts";
-import type { WallPiece } from "./runs.ts";
+import { postShare, type WallPiece } from "./runs.ts";
 
 /**
  * The pieces the relief layer draws in depth order
@@ -71,14 +71,81 @@ export type CellPiece = {
 /**
  * A standing wall piece, from `base` up `rise`, in cells (wallItems). On
  * hexes `hosts` are the hexes it stands in, one, or the two either side of
- * the hex side it runs along, and it sorts with the nearer.
+ * the hex side it runs along, and it sorts with the nearer. `framed`, while
+ * the detail shows, draws a door or window as its share of its frame
+ * (`frameParts`), and an open leaf stands only then.
  */
-export type WallItem = { kind: "wall"; id: string; piece: WallPiece; base: number; rise: number; hosts: readonly Point[] | null; region?: PitRegion };
+export type WallItem = { kind: "wall"; id: string; piece: WallPiece; base: number; rise: number; hosts: readonly Point[] | null; region?: PitRegion; framed?: true };
 
 export type StaticPiece = CellPiece | WallItem;
 
 /** How high a wall piece stands, in cells (ISO-D7): rooms read as rooms and stay open to a phone that turns all the time. An automatic wall beside raised ground stands less (wallItems). */
 export const WALL_RISE = 0.5;
+
+/** A door frame's posts, across the door, in cells (docs/design/design-v1-iso-depth.md 5.5). */
+export const POST_THICK = 0.2;
+/** A closed door's leaf, across the door, in cells. */
+export const LEAF_THICK = 0.07;
+/** A door leaf's height, as a share of its frame's. */
+export const LEAF_RISE = 0.92;
+
+/**
+ * One upright box of a door's or window's frame: from `a` to `b` on the
+ * ground, `thick` across that line and centered on it, unless `side` puts
+ * all of its thickness on one side (an open leaf, which lies beside its
+ * hinge's line), from `z0` up to `z1`. A pane has no thickness.
+ */
+export type FramePart = { look: "post" | "leaf" | "pane"; a: Point; b: Point; thick: number; side?: Point; z0: number; z1: number };
+
+/**
+ * The parts of a framed piece (5.5): the posts over the first and last
+ * share of its door's length, a closed door's leaf or a window's pane
+ * between them, each cut to the piece's own range, so pieces split by fog
+ * or crossings draw one frame between them. An open door's frame has
+ * nothing between its posts. An open leaf is one part, upright on its hinge.
+ */
+export function frameParts(w: WallItem): FramePart[] {
+  const p = w.piece;
+  const z0 = w.base;
+  const z1 = w.base + w.rise;
+  if (p.kind === "leaf" && p.leaf) return [{ look: "leaf", a: { x: p.ax, y: p.ay }, b: { x: p.bx, y: p.by }, thick: p.leaf.w, side: { x: p.leaf.ux, y: p.leaf.uy }, z0, z1: z0 + w.rise * LEAF_RISE }];
+  const f = p.frame;
+  if (!f) return [];
+  const post = postShare(f);
+  const at = (t: number) => ({ x: f.ax + (f.bx - f.ax) * t, y: f.ay + (f.by - f.ay) * t });
+  const out: FramePart[] = [];
+  const add = (look: FramePart["look"], t0: number, t1: number, thick: number, top: number) => {
+    const lo = Math.max(t0, f.t0);
+    const hi = Math.min(t1, f.t1);
+    if (hi - lo > 1e-9) out.push({ look, a: at(lo), b: at(hi), thick, z0, z1: top });
+  };
+  add("post", 0, post, POST_THICK, z1);
+  if (p.kind === "door") add("leaf", post, 1 - post, LEAF_THICK, z0 + w.rise * LEAF_RISE);
+  if (p.kind === "window") add("pane", post, 1 - post, 0, z1);
+  add("post", 1 - post, 1, POST_THICK, z1);
+  return out;
+}
+
+/** A frame part's corners on the ground, in order round it: its line's ends moved across by its thickness. */
+export function partCorners(q: FramePart): Point[] {
+  const dx = q.b.x - q.a.x;
+  const dy = q.b.y - q.a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  // Across the line: its own normal for a centered part, else the side it lies to, all of its thickness there.
+  const nx = -dy / len;
+  const ny = dx / len;
+  if (q.side) {
+    const t = q.thick;
+    return [q.a, q.b, { x: q.b.x + q.side.x * t, y: q.b.y + q.side.y * t }, { x: q.a.x + q.side.x * t, y: q.a.y + q.side.y * t }];
+  }
+  const h = q.thick / 2;
+  return [
+    { x: q.a.x + nx * h, y: q.a.y + ny * h },
+    { x: q.b.x + nx * h, y: q.b.y + ny * h },
+    { x: q.b.x - nx * h, y: q.b.y - ny * h },
+    { x: q.a.x - nx * h, y: q.a.y - ny * h },
+  ];
+}
 
 /** Ties in depth draw columns and steps first, then pits, then walls, then standees (5.6). */
 export const RANK = { column: 0, steps: 0, pit: 1, wall: 2, standee: 3 } as const;
@@ -303,6 +370,8 @@ export function boundsOf(p: StaticPiece, turn: Turn): VBox {
   if (p.kind === "wall") {
     grow(box, turn, p.piece.ax, p.piece.ay, p.base, p.base + p.rise);
     grow(box, turn, p.piece.bx, p.piece.by, p.base, p.base + p.rise);
+    // A frame's posts and leaf reach past its line, drawn or not, so the bounds hold at both detail levels (docs/design/design-v1-iso-depth.md 6).
+    for (const q of frameParts(p)) for (const c of partCorners(q)) grow(box, turn, c.x, c.y, q.z0, q.z1);
     return box;
   }
   // A column's sides reach down to 0 at the lowest. A pit's floor and far sides lie between its floor and 0. A stair's steps may reach either end of its span, whatever the detail (6).
@@ -326,6 +395,7 @@ export function sortKey(turn: Turn, x: number, y: number): number {
  */
 export function keyOf(p: StaticPiece, turn: Turn): number {
   if (p.kind === "wall") {
+    // An open leaf has no hosts (wallItems), so it sorts by its own middle, from its hinge to its far end, apart from its frame (docs/design/design-v1-iso-depth.md 6).
     if (p.hosts) return Math.max(...p.hosts.map((h) => sortKey(turn, h.x, h.y)));
     return sortKey(turn, (p.piece.ax + p.piece.bx) / 2, (p.piece.ay + p.piece.by) / 2);
   }
@@ -423,25 +493,29 @@ export function cellPieces(src: PieceSource, cx: number, cy: number, chunk: Buil
  * the wall. A pit's floor never brings that top below a wall on the ground
  * at 0, so a pit at a room's edge and a sunken room keep their rim.
  */
-export function wallItems(src: Pick<PieceSource, "ground">, pieces: readonly WallPiece[]): WallItem[] {
+export function wallItems(src: Pick<PieceSource, "ground" | "detail">, pieces: readonly WallPiece[]): WallItem[] {
   const out: WallItem[] = [];
+  const detail = src.detail === true;
   for (const piece of pieces) {
     const id = `w${piece.id}`;
+    // Below the detail level an open door draws nothing upright, its leaf lying flat on the ground stage (docs/design/design-v1-iso-depth.md 7).
+    if (!detail && (piece.kind === "open" || piece.kind === "leaf")) continue;
+    const framed = detail && (piece.frame !== undefined || piece.kind === "leaf") ? { framed: true as const } : {};
     if (piece.hosts) {
-      // On hexes a run stands on its host's ground, on a shared side the higher of the two, off the scene on 0 (D-261030-461).
+      // On hexes a run stands on its host's ground, on a shared side the higher of the two, off the scene on 0 (D-261030-461). An open leaf sorts by its own middle (keyOf), not with a host.
       const base = Math.max(...piece.hosts.map((h) => src.ground(h.cell.col, h.cell.row)));
-      out.push({ kind: "wall", id, piece, base, rise: WALL_RISE, hosts: piece.hosts.map((h) => h.center) });
+      out.push({ kind: "wall", id, piece, base, rise: WALL_RISE, hosts: piece.kind === "leaf" ? null : piece.hosts.map((h) => h.center), ...framed });
       continue;
     }
     if (!piece.beside) {
-      out.push({ kind: "wall", id, piece, base: src.ground(piece.cx, piece.cy), rise: WALL_RISE, hosts: null });
+      out.push({ kind: "wall", id, piece, base: src.ground(piece.cx, piece.cy), rise: WALL_RISE, hosts: null, ...framed });
       continue;
     }
     const a = src.ground(piece.beside[0], piece.beside[1]);
     const b = src.ground(piece.beside[2], piece.beside[3]);
     const high = Math.max(a, b);
     if (!piece.auto) {
-      out.push({ kind: "wall", id, piece, base: high, rise: WALL_RISE, hosts: null });
+      out.push({ kind: "wall", id, piece, base: high, rise: WALL_RISE, hosts: null, ...framed });
       continue;
     }
     const top = Math.min(high, Math.max(Math.min(a, b), 0)) + WALL_RISE;
