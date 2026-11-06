@@ -27,8 +27,10 @@ import { SEEK_FADE_MS, Settle } from "./settle.ts";
 
 /** A voice due to start within this is loaded ahead, paused at its start, so it can start on time. */
 export const LOOKAHEAD_MS = 3_000;
-/** A join or a resume fades in over this. */
+/** A background sound, or music other than a run's own track, that joins mid-pass fades in over this. */
 export const JOIN_FADE_MS = SHORT_FADE_MS;
+/** Music fades in over this when its track starts or resumes, and out over this when it ends with nothing after it, as a stop does. */
+export const MUSIC_FADE_MS = STOP_FADE_MS;
 /** Players and displays fade out over this behind a blackout. */
 export const BLACKOUT_FADE_MS = 1_000;
 /** How far ahead each envelope is scheduled on the audio clock, renewed with every check. */
@@ -55,6 +57,13 @@ export type VoicePlan = {
   /** A loop's volume for everyone, 0 to 100. Music's is the channel's. */
   volume: number;
   envelope: readonly EnvelopePoint[];
+  /**
+   * Music's `now` as a play, a skip or a resume placed it: it fades in over
+   * MUSIC_FADE_MS when its element first sounds (#place). Never in the
+   * envelope: a track promoted from `next` is `now` too, already sounding
+   * on its own element, and under Crossfade Off it must not dip.
+   */
+  fadeIn?: true;
 };
 
 /** The gain of an envelope at `t`. */
@@ -136,15 +145,23 @@ function musicVoices(music: MusicRun, sounds: Lengths, t: number): VoicePlan[] {
     const crossing = repeats ? Math.min(fade, Math.floor(now.ms / 2)) : null;
     for (const o of withNext(music.now.at, now.ms, crossing, t)) {
       const envelope: EnvelopePoint[] = [];
-      // A track starts at full volume. Repeat one's later passes fade in and out over its crossing.
+      // The envelope starts a track at full volume, its fade-in being the element's (fadeIn). Repeat one's later passes
+      // fade in and out over its crossing.
       if (repeats && o.k > 0 && crossing! > 0) envelope.push([o.startAt, 0], [o.startAt + crossing!, 1]);
       else envelope.push([o.startAt, 1]);
       if (repeats && crossing! > 0) envelope.push([o.startAt + now.ms - crossing!, 1], [o.startAt + now.ms, 0]);
       if (music.next && next) {
         const end = crossEndAt(music.now, now.ms, music.next, fade);
         envelope.push([music.next.at, 1], [end, 0]);
+      } else if (!repeats) {
+        // Nothing follows: Repeat off's last track, or a next track that is no longer music, which ends the run there. Any
+        // other run reveals its next 10 to 20 s before it starts, long before this fade reaches the horizon, so the fade
+        // sounds only at the music's own end.
+        const tail = Math.min(MUSIC_FADE_MS, Math.floor(now.ms / 2));
+        envelope.push([o.startAt + now.ms - tail, 1], [o.startAt + now.ms, 0]);
       }
-      out.push(voice("music", `m:${music.now.soundId}:${music.now.at}:${o.k}`, music.now.soundId, now, o.startAt, envelope, 100));
+      const plan = voice("music", `m:${music.now.soundId}:${music.now.at}:${o.k}`, music.now.soundId, now, o.startAt, envelope, 100);
+      out.push(o.k === 0 ? { ...plan, fadeIn: true } : plan);
     }
   }
   if (music.next && next) {
@@ -450,8 +467,8 @@ export class Voices {
   }
 
   /**
-   * Puts the element at its place: now with a short fade in, or paused at
-   * 0 until its start. `due` is when it became due to sound: a voice placed
+   * Puts the element at its place: now with a fade in, 2 s for music's own
+   * track and 0.3 s for any other voice, or paused at 0 until its start. `due` is when it became due to sound: a voice placed
    * again keeps its own, so one that keeps failing to start stays loading,
    * never back to playing for the indicator's 200 ms at each check, and one
    * that stopped short, which the line may already call loading, does too.
@@ -473,7 +490,15 @@ export class Voices {
         // Not seekable yet: it starts from 0 anyway.
       }
       v.fade.gain.cancelScheduledValues(ctxNow);
-      v.fade.gain.setValueAtTime(1, ctxNow);
+      if (v.plan.fadeIn) {
+        // From the element's start on the audio clock, as every device schedules it from the same server time.
+        const startCtx = ctxNow - aim / 1000;
+        v.fade.gain.setValueAtTime(0, ctxNow);
+        v.fade.gain.setValueAtTime(0, startCtx);
+        v.fade.gain.linearRampToValueAtTime(1, startCtx + MUSIC_FADE_MS / 1000);
+      } else {
+        v.fade.gain.setValueAtTime(1, ctxNow);
+      }
       v.playing = false;
       v.startTimer = setTimeout(() => {
         v.startTimer = null;
@@ -495,7 +520,8 @@ export class Voices {
     }
     v.fade.gain.cancelScheduledValues(ctxNow);
     v.fade.gain.setValueAtTime(0, ctxNow);
-    v.fade.gain.linearRampToValueAtTime(1, ctxNow + JOIN_FADE_MS / 1000);
+    // A resume's moment, or a join's, is this page's alone: the run says only where the track is, so the fade-in starts here.
+    v.fade.gain.linearRampToValueAtTime(1, ctxNow + (v.plan.fadeIn ? MUSIC_FADE_MS : JOIN_FADE_MS) / 1000);
     v.playing = true;
     v.dueSince = due;
     v.settle.placed(aim);
