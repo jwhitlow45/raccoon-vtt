@@ -802,6 +802,71 @@ describe("dungeon generator", { concurrency: false }, () => {
     assert.deepEqual(lines, []);
   });
 
+  test("pe1-1. on a computer the dialog is xl and the preview fills its column, the choices keeping a side panel's width from a body of 736 px and splitting evenly below it, at 100% and 130%, within 1 px (docs/design/design-v1-polish-pass.md 3.4)", async () => {
+    // The design's measured table, in layout px: the card, the preview's side and the choices' width, either side of the 802 px window where the choices reach 360.
+    const WANT = [
+      { scale: 1, width: 1440, height: 900, card: 1040, preview: 601, choices: 389 },
+      { scale: 1, width: 1280, height: 720, card: 1040, preview: 529, choices: 461 },
+      { scale: 1, width: 806, height: 900, card: 774, preview: 364, choices: 360 },
+      { scale: 1, width: 794, height: 900, card: 762, preview: 356, choices: 356 },
+      { scale: 1.3, width: 1440, height: 900, card: 1040, preview: 502, choices: 488 },
+      { scale: 1.3, width: 1048, height: 900, card: 774, preview: 365, choices: 360 },
+      { scale: 1.3, width: 1032, height: 900, card: 762, preview: 356, choices: 356 },
+    ] as const;
+    type Layout = { card: number; preview: number; previewHeight: number; choices: number };
+    /** The card, the preview and the choices beside it, in layout px: the dialog is zoomed by the interface size. */
+    const layoutOf = (dialog: Locator): Promise<Layout | null> =>
+      dialog.evaluate((d) => {
+        type El = { parentElement: El | null; children: ArrayLike<El>; currentCSSZoom?: number; querySelector(s: string): El | null; getBoundingClientRect(): { width: number; height: number } };
+        const css = (e: El) => (globalThis as unknown as { getComputedStyle(e: El): { position: string } }).getComputedStyle(e);
+        const el = d as unknown as El;
+        const card = el.querySelector("section");
+        const img = el.querySelector('img[alt^="Preview of the dungeon"]');
+        // The picture sits in a box of its own size, inside the preview's box (Preview.tsx).
+        const preview = img?.parentElement?.parentElement ?? null;
+        let column: El | null = preview;
+        while (column && css(column).position !== "absolute") column = column.parentElement;
+        const choices = column?.parentElement ? (Array.from(column.parentElement.children).find((c) => c !== column && css(c).position === "static") ?? null) : null;
+        if (!card || !preview || !choices) return null;
+        const zoom = card.currentCSSZoom ?? 1;
+        return { card: card.getBoundingClientRect().width / zoom, preview: preview.getBoundingClientRect().width / zoom, previewHeight: preview.getBoundingClientRect().height / zoom, choices: choices.getBoundingClientRect().width / zoom };
+      });
+    const near = (got: Layout | null, want: (typeof WANT)[number]) => got !== null && [got.card - want.card, got.preview - want.preview, got.previewHeight - want.preview, got.choices - want.choices].every((d) => Math.abs(d) <= 1);
+    const page = await dmContext.newPage();
+    const lines: string[] = [];
+    try {
+      for (const scale of [1, 1.3]) {
+        await page.setViewportSize({ width: 1440, height: 900 });
+        if (!page.url().startsWith(server.origin)) await page.goto(server.origin);
+        await page.evaluate((s) => localStorage.setItem("rvtt.uiScale", s), String(scale));
+        await page.goto(dm.url());
+        await page.getByRole("status", { name: "Connected" }).first().waitFor();
+        for (const want of WANT.filter((w) => w.scale === scale)) {
+          const at = `${want.width} x ${want.height} at ${scale * 100}%`;
+          // Opened at each size: under 900 px of layout the Scenes panel moves from the side panel into a sheet, and the dialog with it.
+          await page.setViewportSize({ width: want.width, height: want.height });
+          const sidePanel = want.width / scale >= 900;
+          await waitFor(`the side panel ${sidePanel ? "shown" : "put away"} at ${at}`, async () => ((await page.getByRole("tablist", { name: "Panels" }).isVisible()) === sidePanel ? true : null), 5_000);
+          const dialog = await openDialog(page);
+          // The body is measured as it lays out, so the preview follows it a frame or two later.
+          const got = await waitFor(`the dialog laid out at ${at}`, async () => {
+            const g = await layoutOf(dialog);
+            return near(g, want) ? g : null;
+          }, 3_000).catch(() => layoutOf(dialog));
+          if (!near(got, want)) lines.push(`pe1-1 ${at}: ${JSON.stringify(got)}, wanted card ${want.card}, a ${want.preview} px square and choices ${want.choices}`);
+          lines.push(...alignmentLines(await measureAlignment(dialog), `pe1-1 dialog, ${at}`));
+          await shots.take(page, `pe1-1-dialog-${want.width}x${want.height}-${scale * 100}`);
+          await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+          await dialog.waitFor({ state: "detached" });
+        }
+      }
+    } finally {
+      await page.evaluate(() => localStorage.removeItem("rvtt.uiScale")).catch(() => {});
+      await page.close();
+    }
+    assert.deepEqual(lines, []);
+  });
+
   test("DG-10. no page logged an error", () => {
     assert.deepEqual(consoles.dm.errors, []);
     assert.deepEqual(consoles.pat.errors, []);
