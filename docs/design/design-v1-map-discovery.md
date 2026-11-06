@@ -243,6 +243,8 @@ A radio group named **Players see**:
 
 ### 8.4 The settings page
 
+Amended by docs/design/design-v1-scenes-reorg.md 3: six groups, Light and weather, Scene sound, Fog and vision, Map and grid, Walls and movement and Size and view, then Export, and the Delete section goes (the row's ⋯ menu keeps Delete).
+
 Today (SceneSettings.tsx): This scene (name, map image, Fog, starting view, suggested view, size, background), Map phases, Vision (VisionSettings.tsx:75), Grid, Movement (:115), Map builder, Export, Delete. Fog sits beside the name, away from party vision. Phone and wide show the same rows, and Top-down or Isometric changes nothing on the page.
 
 Proposed, the scene name first with no header:

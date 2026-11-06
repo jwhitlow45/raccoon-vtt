@@ -166,6 +166,8 @@ This header moves no focus and is not a subpage: `useSubpageFocus` keys on subpa
 
 ### 4.1 What it lists
 
+Amended by docs/design/design-v1-panel-groups.md 3: More lists In play, Run the table (DM, Scenes, Ambiance) and Prepare, Ambiance in place of Time and Sound.
+
 - The panels More holds, in the registry's order, each once.
 - Grouped as the phone's list groups them, through one helper both use: `panelSections(panels, grouped)` in `features/panels.ts`, in place of PanelPicker's own loop (`Room.tsx:1601-1645`, `GROUP_LABELS` at `:1591`). For a DM: "In play" and "Prepare" headings over their panels, and Menu after a plain line. A heading shows only for a group with a panel in More. A player's menu has no headings or line, as a player's list has none (the layout design's 6.4): five panels read at a glance.
 - Each item: the panel's title, its badge at the end, 44 px tall, the menu's full width. The open panel's item is in the chosen look, and checked (5.1).

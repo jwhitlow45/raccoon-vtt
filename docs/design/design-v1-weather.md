@@ -61,6 +61,8 @@ Today every attack test is `{ kind: "attack" }` or `{ kind: "attack", spell: tru
 
 ### 4.1 The DM's control
 
+Amended by docs/design/design-v1-scenes-reorg.md 4: the Weather fold goes. Its rows sit in Scenes' Light and weather group under Light, the rules on rolls fold into the switch's help, and Ambiance shows a Weather row that opens them.
+
 In a scene's settings, **What players see**, a fold named **Weather** after the Light row (and after "Light with each map phase" when the scene has phases), before Sight. It opens chevron first like the Fog and party vision fold. Folded, it reads "Clear" or the weather's name, such as "Heavy rain · Strong wind" or "Strong wind". Like that sibling fold, its open state is the component's own (VisionSettings.tsx): it opens on a scene with weather and folds on a clear one, fresh each time the page opens. The group's own folded summary gains the weather: "Explore · Dark · Heavy rain".
 
 Inside, top to bottom:

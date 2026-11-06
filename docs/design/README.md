@@ -133,6 +133,13 @@ and for how to use it, the [DM guide](../dm-guide.md).
   in one row, with a More menu.
 - [design-v1-split-panel.md](design-v1-split-panel.md): two panels open at
   once in the side panel.
+- [design-v1-panel-groups.md](design-v1-panel-groups.md): the DM's panels in
+  three groups, one Ambiance panel for the room's time and sound, and
+  sections that fold and remember in Ambiance, the DM panel, Scenes and This
+  device.
+- [design-v1-scenes-reorg.md](design-v1-scenes-reorg.md): a scene's settings
+  in six groups by what the DM is doing, weather beside the light, and a
+  scene's own sound in its settings.
 - [design-v1-side-headers.md](design-v1-side-headers.md): short, matching
   headers in the side panel.
 - [design-v1-sheet-swipe.md](design-v1-sheet-swipe.md): swiping a phone's
