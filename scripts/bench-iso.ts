@@ -341,8 +341,8 @@ function pits(sceneId: string): Built {
 }
 const hexRow = (orient: string, what: string) => `${what}, hex relief ${orient}`;
 
-/** A fixed seed whose 50 by 50 dungeon has rooms raised 10 ft and sunk 5 and 10 ft, each reached by a run of stairs. */
-export const DUNGEON_SEED = "17FYEGJ4RA4QXRDA";
+/** A fixed seed whose 50 by 50 dungeon, with Many heights, has rooms raised 10 ft and sunk 5 and 10 ft, each reached by a run of stairs. */
+export const DUNGEON_SEED = "TH607EQX0DHX4HZP";
 const DUNGEON_SIDE = 50;
 
 type PlannedDungeon = { plan: unknown; board: { W: number; doorways: { removed: boolean; run: { ground: number; near: number[]; stairs: { cell: number }[]; far: number[] } | null }[] } };
@@ -360,7 +360,7 @@ export async function generatedDungeon(): Promise<{ make: (sceneId: string) => B
   const { planDungeon } = (await import(new URL("../client/features/dungeon/plan.ts", import.meta.url).href)) as { planDungeon(s: object, seed: string): PlannedDungeon };
   const { buildOps } = (await import(new URL("../client/features/dungeon/ops.ts", import.meta.url).href)) as { buildOps(plan: unknown, scene: object): Op[] };
   const { builderScene } = (await import(new URL("../client/features/scenes/create.ts", import.meta.url).href)) as { builderScene(i: { id: string; name: string; w: number; h: number }): object };
-  const settings = { w: DUNGEON_SIDE, h: DUNGEON_SIDE, rooms: 10, density: "normal", corridors: "straight", wide: false, loops: false, theme: "dungeon", heights: "some", traps: "none", band: "1-4" };
+  const settings = { w: DUNGEON_SIDE, h: DUNGEON_SIDE, rooms: 10, density: "normal", corridors: "straight", wide: false, loops: false, theme: "dungeon", heights: 50, traps: 0, band: "1-4" };
   const planned = planDungeon(settings, DUNGEON_SEED);
   const made = buildOps(planned.plan, builderScene({ id: "dungeon-scene", name: "Dungeon", w: DUNGEON_SIDE, h: DUNGEON_SIDE }));
   const W = planned.board.W;
