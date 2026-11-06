@@ -11,7 +11,7 @@ import type { MusicRun, Playlist, Sound } from "#shared/sound.ts";
  */
 
 const { libraryPlaylists, libraryTracks, matches, playlistChoices, queueNote, rowPlay } = await import("./Library.tsx");
-const { changedFields, draftDirty, draftOf, makerStatus, newDraft, savedName, savedTracks } = await import("./Maker.tsx");
+const { changedFields, draftDirty, draftOf, makerStatus, newDraft, savedName, savedPlaylist, savedTracks } = await import("./Maker.tsx");
 const { seekHolds } = await import("./NowFull.tsx");
 const { queueLists } = await import("./dragOrder.ts");
 const words = await import("./words.ts");
@@ -147,6 +147,18 @@ describe("the maker's draft", () => {
     const edited = { ...draft, sounds: ["c", "a"] };
     assert.deepEqual(changedFields(edited, left), { name: "Tavern late", sounds: ["c", "a"] }, "a real change of tracks still sends them");
     assert.equal(makerStatus({ draft: edited, stored, sounds: left, playingIt: false }), words.TRACKS_CHANGED, "and warns that it keeps this list");
+  });
+
+  test("Play starts the playlist as it stands once the save is answered: another DM's tracks, Repeat, Crossfade and Shuffle, under the fields this draft sent", () => {
+    const draft = draftOf(saved);
+    // Another DM added c and set Repeat off, Crossfade 10 s and Shuffle after the draft began.
+    const stored: Playlist = { ...saved, rev: 7, sounds: ["a", "b", "c"], repeat: "off", fade: 10, shuffle: true };
+    assert.deepEqual(savedPlaylist(draft, { playlistId: "pl", sent: {} }, stored, sounds), stored, "an unchanged draft plays what is stored");
+    assert.deepEqual(savedPlaylist({ ...draft, name: "Tavern late" }, { playlistId: "pl", sent: { name: "Tavern late" } }, { ...stored, name: "Tavern late" }, sounds), { ...stored, name: "Tavern late" }, "a rename saved, then the rest as stored");
+    assert.deepEqual(savedPlaylist({ ...draft, sounds: ["b", "a"] }, { playlistId: "pl", sent: { sounds: ["b", "a"] } }, stored, sounds).sounds, ["b", "a"], "the sent tracks, though the view does not hold the save yet");
+    const created = savedPlaylist({ ...draft, name: "Again" }, { playlistId: "fresh", sent: { name: "Again", sounds: ["a", "b"], shuffle: false, repeat: "all", fade: 5 } }, stored, sounds);
+    assert.deepEqual(created, { id: "fresh", rev: 0, name: "Again", sounds: ["a", "b"], repeat: "all", fade: 5 }, "a create under a fresh id: what it sent, not the stored playlist under the old id");
+    assert.deepEqual(draftOf(savedPlaylist(draft, { playlistId: "pl", sent: {} }, stored, sounds)), draftOf(stored), "and the draft's new base is the stored playlist, so it is clean");
   });
 });
 

@@ -62,9 +62,14 @@ import {
  * resize across 900 px keeps it.
  */
 
+/** A saved playlist's fields, as a draft edits them. */
+function fieldsOf(playlist: Playlist): MakerFields {
+  return { name: playlist.name, sounds: [...playlist.sounds], shuffle: playlist.shuffle === true, repeat: playlist.repeat, fade: playlist.fade };
+}
+
 /** A draft of a saved playlist, as it stands now. */
 export function draftOf(playlist: Playlist): MakerDraft {
-  const fields: MakerFields = { name: playlist.name, sounds: [...playlist.sounds], shuffle: playlist.shuffle === true, repeat: playlist.repeat, fade: playlist.fade };
+  const fields = fieldsOf(playlist);
   return { ...fields, playlistId: playlist.id, base: { ...fields, sounds: [...playlist.sounds], rev: playlist.rev }, tab: "tracks" };
 }
 
@@ -135,8 +140,22 @@ export function makerStatus(input: { draft: MakerDraft; stored: Playlist | undef
   return null;
 }
 
-/** A save the server took: the id it saved under and the fields it holds. */
-export type Saved = { playlistId: string; fields: MakerFields };
+/** A save the server took: the id it saved under and the fields it sent, every one for a create and none when nothing changed. */
+export type Saved = { playlistId: string; sent: Partial<MakerFields> };
+
+/**
+ * The playlist as it stands once a save is answered (5): the stored one
+ * with the fields the save sent over it, so Play and the draft's new base
+ * keep another DM's change to a field this draft left alone, and Play's
+ * order holds the tracks the server holds. The sent fields win in case the
+ * view does not hold the save yet. With nothing stored under the saved id
+ * (a create under a fresh id, or a playlist deleted since), the draft's own.
+ */
+export function savedPlaylist(draft: MakerDraft, saved: Saved, stored: Playlist | undefined, sounds: Sounds): Playlist {
+  const kept = stored?.id === saved.playlistId ? stored : undefined;
+  const fields: MakerFields = { ...(kept ? fieldsOf(kept) : savedFields(draft, sounds)), ...saved.sent };
+  return { id: saved.playlistId, rev: kept?.rev ?? 0, name: fields.name, sounds: [...fields.sounds], repeat: fields.repeat, fade: fields.fade, ...(fields.shuffle ? { shuffle: true } : null) };
+}
 
 /**
  * Sends the draft as one Setup op: `playlist.create` for a new playlist,
@@ -150,16 +169,16 @@ export function saveDraft(actions: Pick<RoomActions, "dispatch" | "newId">, draf
   if (draft.base === null || stored === undefined) {
     const playlistId = draft.base === null ? draft.playlistId : actions.newId();
     send(actions, { t: "playlist.create", id: playlistId, name: fields.name, sounds: fields.sounds, repeat: fields.repeat, fade: fields.fade, ...(fields.shuffle ? { shuffle: true as const } : null) }, (answer) =>
-      onDone(answer === "taken" ? { playlistId, fields } : null),
+      onDone(answer === "taken" ? { playlistId, sent: fields } : null),
     );
     return;
   }
   const changed = changedFields(draft, sounds);
   if (Object.keys(changed).length === 0) {
-    onDone({ playlistId: draft.playlistId, fields });
+    onDone({ playlistId: draft.playlistId, sent: changed });
     return;
   }
-  send(actions, { t: "playlist.update", id: draft.playlistId, ...changed }, (answer) => onDone(answer === "taken" ? { playlistId: draft.playlistId, fields } : null));
+  send(actions, { t: "playlist.update", id: draft.playlistId, ...changed }, (answer) => onDone(answer === "taken" ? { playlistId: draft.playlistId, sent: changed } : null));
 }
 
 /** The maker's footer and status for the window's Dialog, and what leaving does. */
@@ -180,7 +199,8 @@ export type MakerControl = {
  * while no maker shows. Save and Create show busy and refuse a second
  * press until answered (9). Play saves first when the draft changed and
  * plays once the save is answered, so a refused save never turns into a
- * refused play (5).
+ * refused play (5), and plays the playlist as it then stands
+ * (savedPlaylist).
  */
 export function useMakerControl(input: {
   draft: MakerDraft | null;
@@ -212,14 +232,13 @@ export function useMakerControl(input: {
     if (draft === null || busy !== null) return;
     const start = (saved: Saved) => {
       const now = latest.current;
-      const rev = now.stored?.id === saved.playlistId ? now.stored.rev : 0;
-      now.setDraft({ ...draft, ...saved.fields, playlistId: saved.playlistId, base: { ...saved.fields, rev } });
-      const playlist = { id: saved.playlistId, sounds: saved.fields.sounds };
-      const order = orderFor({ playlistId: playlist.id, ...(saved.fields.shuffle ? { shuffle: true } : null) }, { [playlist.id]: { ...playlist, rev, name: saved.fields.name, repeat: saved.fields.repeat, fade: saved.fields.fade } }, now.sounds);
+      const playlist = savedPlaylist(draft, saved, now.stored, now.sounds);
+      now.setDraft({ ...draftOf(playlist), tab: draft.tab });
+      const order = orderFor({ playlistId: playlist.id, ...(playlist.shuffle ? { shuffle: true } : null) }, { [playlist.id]: playlist }, now.sounds);
       if (order.length === 0) return;
-      send(actions, { t: "music.play", run: actions.newId(), playlistId: playlist.id, order, index: 0, repeat: saved.fields.repeat, fade: saved.fields.fade, ...(saved.fields.shuffle ? { shuffle: true as const } : null) });
+      send(actions, { t: "music.play", run: actions.newId(), playlistId: playlist.id, order, index: 0, repeat: playlist.repeat, fade: playlist.fade, ...(playlist.shuffle ? { shuffle: true as const } : null) });
     };
-    if (!dirty && draft.base !== null && input.stored !== undefined) start({ playlistId: draft.playlistId, fields: savedFields(draft, sounds) });
+    if (!dirty && draft.base !== null && input.stored !== undefined) start({ playlistId: draft.playlistId, sent: {} });
     else save("play", start);
   };
   const leave = (go: () => void) => {
