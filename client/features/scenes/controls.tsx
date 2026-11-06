@@ -2,7 +2,6 @@ import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import { Button } from "../../components/Button.tsx";
 import { fieldStyle } from "../../components/Field.tsx";
 import { useHeld } from "../../components/Held.tsx";
-import { buttonLook } from "../../components/looks.ts";
 import { accessibleName } from "../../lib/a11y.ts";
 import { theme } from "../../lib/theme.ts";
 
@@ -159,23 +158,14 @@ export function Slider(props: { label: string; value: number; min: number; max: 
  * A button that asks for a second tap before it acts, for actions that wipe
  * something out (fog everything, clear the build). No dialog, so it works the
  * same with a thumb and a mouse.
- *
- * `unavailable` is off for now with the disabled look, `aria-disabled` and
- * a tap that does nothing, so a button that turns off while it has focus
- * keeps it, and `describedBy` names the line that says why. It disarms,
- * so a second tap that was coming does nothing.
  */
-export function ConfirmButton(props: { label: string; confirm: string; title?: string; onConfirm(): void; disabled?: boolean; unavailable?: boolean; describedBy?: string; shrink?: boolean }) {
+export function ConfirmButton(props: { label: string; confirm: string; title?: string; onConfirm(): void; disabled?: boolean; shrink?: boolean }) {
   const [armed, setArmed] = useState(false);
-  const unavailable = props.unavailable === true && props.disabled !== true;
   useEffect(() => {
     if (!armed) return;
     const t = setTimeout(() => setArmed(false), 4000);
     return () => clearTimeout(t);
   }, [armed]);
-  useEffect(() => {
-    if (unavailable) setArmed(false);
-  }, [unavailable]);
   const label = armed ? props.confirm : props.label;
   return (
     <Button
@@ -184,11 +174,8 @@ export function ConfirmButton(props: { label: string; confirm: string; title?: s
       armed={armed}
       title={props.title}
       aria-label={accessibleName(label, props.title)}
-      aria-disabled={unavailable ? true : undefined}
-      aria-describedby={props.describedBy}
       disabled={props.disabled}
       onClick={() => {
-        if (unavailable) return;
         if (armed) {
           setArmed(false);
           props.onConfirm();
@@ -196,10 +183,7 @@ export function ConfirmButton(props: { label: string; confirm: string; title?: s
           setArmed(true);
         }
       }}
-      style={{
-        ...(props.shrink ? { flex: "0 1 auto", minWidth: 0, maxWidth: "100%" } : { flex: "none", whiteSpace: "nowrap" }),
-        ...(unavailable ? { ...buttonLook("danger", { disabled: true }), cursor: "default" } : null),
-      }}
+      style={props.shrink ? { flex: "0 1 auto", minWidth: 0, maxWidth: "100%" } : { flex: "none", whiteSpace: "nowrap" }}
     >
       {props.shrink ? <span style={{ display: "block", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span> : label}
     </Button>

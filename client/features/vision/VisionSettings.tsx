@@ -39,7 +39,6 @@ import {
 } from "./settings.ts";
 import { noSightText } from "./sources.ts";
 import { usePartyReport } from "./usePartyReport.ts";
-import { WeatherSettings } from "../weather/WeatherSettings.tsx";
 
 const PHASE_LIGHTS: readonly { value: LightLevel | "keep"; label: string }[] = [
   { value: "keep", label: "Leave the light" },
@@ -49,15 +48,87 @@ const PHASE_LIGHTS: readonly { value: LightLevel | "keep"; label: string }[] = [
 type Patch = OpOf<"scene.update">["patch"];
 
 /**
- * What players see of a scene, the first group of its settings
- * (docs/design/design-v1-map-discovery.md 8.1 and 8.4, docs/design/design-v1-maps-vision.md
- * 4.3.1), whose `Group` the settings page draws: Players see first,
- * then the light level, the light each map phase brings, Sight, who sees
- * for themselves, and every party creature on the scene with its senses,
- * its light and whether it lends sight, so the DM sees what owners set.
- * The two switches a preset sets, Fog and Party vision, sit in a fold
- * after them, open while they make Custom, and the group ends with the
- * copy onto other scenes.
+ * The scene's light (docs/design/design-v1-scenes-reorg.md 3), first in Light
+ * and weather, the group the DM changes in play: the level, the note on
+ * party creatures that carry no light, and the light each map phase brings.
+ * The level counts only while party vision is on (rules/vision.ts reads
+ * `vision.light`), and Fog and vision, which sets it, now sits folded below,
+ * so with party vision off each help says so and where to turn it on, in
+ * place of the level's note (D-261102-933). The level still stores and picks.
+ */
+export function LightSettings(props: { scene: Scene }) {
+  const { scene } = props;
+  const actions = useRoomActions();
+  const update = (patch: Patch) => actions.dispatch({ t: "scene.update", sceneId: scene.id, patch });
+  const on = scene.vision?.on === true;
+  const light = lightOf(scene);
+  const phases = scene.phases && scene.phases.length >= 2 ? scene.phases : null;
+  const tokens = useRoomView((s) => (on && light !== "bright" ? s.view?.tokens : undefined));
+  const unlit = useMemo(() => (tokens ? carriedLightsNote(tokens, scene.id, light) : null), [tokens, scene.id, light]);
+  return (
+    <>
+      <SettingRow name="Light" help={on ? LIGHT_LEVELS.find((l) => l.value === light)?.note : LIGHT_NEEDS_VISION} wide>
+        <Segmented<LightLevel> label="Light level" value={light} options={LIGHT_LEVELS} onChange={(level) => update({ vision: lightPatch(scene, level) })} />
+      </SettingRow>
+      {unlit ? <Note>{unlit}</Note> : null}
+
+      {phases ? (
+        <SettingRow
+          name="Light with each map phase"
+          help={on ? "A phase's light becomes the scene's light when the map switches to it, and at once for the phase showing now, so Night can make the scene dark." : LIGHT_NEEDS_VISION}
+          wide
+        >
+          <div style={{ display: "grid", gap: theme.space(1), width: "100%", minWidth: 0 }}>
+            {phases.map((phase) => (
+              <div key={phase.id} style={{ display: "flex", alignItems: "center", gap: theme.space(2), minWidth: 0 }}>
+                <span title={phase.name} style={{ flex: 1, minWidth: 0, fontSize: theme.font.body14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {phase.name}
+                </span>
+                <Select<LightLevel | "keep">
+                  label={`Light with ${phase.name}`}
+                  value={phase.light ?? "keep"}
+                  options={PHASE_LIGHTS}
+                  onChange={(v) => {
+                    const list = phaseWithLight(scene.phases, phase.id, v === "keep" ? null : v);
+                    if (list) update({ phases: list });
+                  }}
+                />
+              </div>
+            ))}
+          </div>
+        </SettingRow>
+      ) : null}
+    </>
+  );
+}
+
+/** Light's help while party vision is off, for the level and each phase's light alike. */
+export const LIGHT_NEEDS_VISION = "Light works only with party vision, which is off here. Choose Explore in Fog and vision to use it.";
+
+/**
+ * Whether the scene warns that its map has no walls (playersSeeRules.ts
+ * `walllessImage`): an Explore scene with a map image and nothing on it that
+ * blocks sight. The settings work it out once, for Fog and vision's warning
+ * and for the "No walls" tag its folded row wears, so the two never
+ * disagree (docs/design/design-v1-scenes-reorg.md 3, D-261102-932).
+ */
+export function useWallless(scene: Scene): boolean {
+  // Only an Explore scene with a map image needs its walls counted.
+  const chunks = useRoomView((s) => (playersSeeOf(scene) === "explore" && scene.map ? s.view?.buildChunks : undefined));
+  return useMemo(() => (chunks ? walllessImage(scene, sceneWalls(scene, chunks).sightPotential) : false), [chunks, scene]);
+}
+
+/**
+ * Fog and vision, a group of the scene's settings
+ * (docs/design/design-v1-scenes-reorg.md 3, docs/design/design-v1-maps-vision.md
+ * 4.3.1), whose `Group` the settings page draws: Players see first, with
+ * the no-walls warning (`wallless`, worked out by the page), then Sight,
+ * who sees for themselves, and every party creature on the scene with its
+ * senses, its light and whether it lends sight, so the DM sees what owners
+ * set. The two switches a preset sets, Fog and Party vision, sit in the
+ * Switches fold after them, open while they make Custom, and the group
+ * ends with the copy onto other scenes. The light the preset works with is
+ * in Light and weather (LightSettings).
  *
  * A change that leaves Explore where players explored, from the preset or
  * the switches, asks first, since players' remembered map goes with it.
@@ -72,24 +143,17 @@ type Patch = OpOf<"scene.update">["patch"];
  * the list of who sees for themselves follows it. Each waits only on its
  * own changes.
  */
-export function VisionSettings(props: { scene: Scene }) {
-  const { scene } = props;
+export function VisionSettings(props: { scene: Scene; wallless: boolean }) {
+  const { scene, wallless } = props;
   const actions = useRoomActions();
   const update = (patch: Patch) => actions.dispatch({ t: "scene.update", sceneId: scene.id, patch });
   const on = scene.vision?.on === true;
-  const light = lightOf(scene);
   const working = useRoomView((s) => visionPending(s.pending, scene.id).vision);
   const sightWorking = useRoomView((s) => visionPending(s.pending, scene.id).sight);
   const perPlayer = scene.vision?.perPlayer === true;
   const showWorking = useDelayed(working);
-  const phases = scene.phases && scene.phases.length >= 2 ? scene.phases : null;
-  const tokens = useRoomView((s) => (on && light !== "bright" ? s.view?.tokens : undefined));
-  const unlit = useMemo(() => (tokens ? carriedLightsNote(tokens, scene.id, light) : null), [tokens, scene.id, light]);
   const choice = playersSeeOf(scene);
   const explored = useRoomView((s) => (s.view ? exploredHere(s.view, scene.id) : false));
-  // Only an Explore scene with a map image needs its walls counted, for the warning.
-  const chunks = useRoomView((s) => (choice === "explore" && scene.map ? s.view?.buildChunks : undefined));
-  const wallless = useMemo(() => (chunks ? walllessImage(scene, sceneWalls(scene, chunks).sightPotential) : false), [chunks, scene]);
   const store = useRoomStore();
   const ask = useAsk<{ where: "preset" | "fold"; intent: PlayersSeeIntent }>();
   const fold = useFold(choice === "custom");
@@ -133,44 +197,15 @@ export function VisionSettings(props: { scene: Scene }) {
         {question("preset")}
       </div>
 
-      <SettingRow name="Light" help={LIGHT_LEVELS.find((l) => l.value === light)?.note} wide>
-        <Segmented<LightLevel> label="Light level" value={light} options={LIGHT_LEVELS} onChange={(level) => update({ vision: lightPatch(scene, level) })} />
-      </SettingRow>
-      {unlit ? <Note>{unlit}</Note> : null}
-
-      {phases ? (
-        <SettingRow name="Light with each map phase" help="A phase's light becomes the scene's light when the map switches to it, and at once for the phase showing now, so Night can make the scene dark." wide>
-          <div style={{ display: "grid", gap: theme.space(1), width: "100%", minWidth: 0 }}>
-            {phases.map((phase) => (
-              <div key={phase.id} style={{ display: "flex", alignItems: "center", gap: theme.space(2), minWidth: 0 }}>
-                <span title={phase.name} style={{ flex: 1, minWidth: 0, fontSize: theme.font.body14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {phase.name}
-                </span>
-                <Select<LightLevel | "keep">
-                  label={`Light with ${phase.name}`}
-                  value={phase.light ?? "keep"}
-                  options={PHASE_LIGHTS}
-                  onChange={(v) => {
-                    const list = phaseWithLight(scene.phases, phase.id, v === "keep" ? null : v);
-                    if (list) update({ phases: list });
-                  }}
-                />
-              </div>
-            ))}
-          </div>
-        </SettingRow>
-      ) : null}
-
-      <WeatherSettings scene={scene} />
-
       {sightShown(scene) ? <SightRow scene={scene} working={sightWorking} /> : null}
       {perPlayer ? <HolderList sceneId={scene.id} busy={sightWorking !== null} /> : null}
       {on ? <Sources sceneId={scene.id} perPlayer={perPlayer} /> : null}
       {perPlayer ? <MountNotes sceneId={scene.id} /> : null}
 
-      {/* A part of the group that folds, so a Section's fold: chevron first, its capitals label a level under the group's (docs/design/design-v1-design-pass.md 4.1). */}
+      {/* A part of the group that folds, so a Section's fold: chevron first, its capitals label a level under the group's (docs/design/design-v1-design-pass.md 4.1).
+          "Switches", since the group's own name already says Fog and vision (D-261102-931): its summary names the two. */}
       <Section
-        label="Fog and party vision"
+        label="Switches"
         fold={{
           open: fold.open,
           onToggle: () => {
@@ -216,7 +251,7 @@ function FogLine(props: { scene: Scene }) {
 }
 
 /**
- * The fold of Fog and Party vision (8.4): closed, since Players see sets
+ * The Switches fold, of Fog and Party vision (8.4): closed, since Players see sets
  * both, and open while they make Custom, the one pair no preset names, so
  * the DM sees which switch did it. The settings mount anew for each scene
  * (ScenesPanel.tsx), so each scene starts the fold again.

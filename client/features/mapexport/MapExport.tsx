@@ -19,7 +19,7 @@ import { prefersShare, shareFile } from "./save.ts";
 import { DEFAULT_PX_PER_CELL, exportSize, exportWords, mapVariantFor, PX_PER_CELL_CHOICES } from "./size.ts";
 
 /**
- * "Export as image" in the scene's settings: the map image and the build
+ * Export, last in the scene's settings, never folded: the map image and the build
  * as one PNG, for printing or for another VTT. It sits in the scene's
  * settings rather than the builder's option bar because it exports the
  * whole scene (an uploaded map with no build too), next to the scene's
@@ -35,6 +35,9 @@ import { DEFAULT_PX_PER_CELL, exportSize, exportWords, mapVariantFor, PX_PER_CEL
  * "Make image" reads it rather than it taking effect at once
  * (docs/design/design-v1-visual.md 3.7).
  */
+
+/** The section's label, short so it never echoes its button, "Export as image" (docs/design/design-v1-scenes-reorg.md 6). */
+const EXPORT_LABEL = "Export";
 
 type Made = { file: File; url: string; width: number; height: number; pxPerCell: number; share: boolean; notes: string[] };
 type Status = { kind: "idle" } | { kind: "busy" } | { kind: "made"; made: Made } | { kind: "error"; message: string };
@@ -169,7 +172,7 @@ export function MapExport(props: { scene: Scene }) {
 
   if (!open) {
     return (
-      <Section label="Export as image">
+      <Section label={EXPORT_LABEL}>
         <Row>
           <Button ref={opener} size="sm" onClick={() => setOpen(true)}>
             Export as image
@@ -185,7 +188,7 @@ export function MapExport(props: { scene: Scene }) {
   const empty = !scene.map && !hasBuild && !fromServer(view, scene);
   const made = status.kind === "made" ? status.made : null;
   return (
-    <Section label="Export as image">
+    <Section label={EXPORT_LABEL}>
       {/* No box of its own, so the row stays an item of the section. */}
       <div ref={options} style={{ display: "contents" }}>
         <SettingRow

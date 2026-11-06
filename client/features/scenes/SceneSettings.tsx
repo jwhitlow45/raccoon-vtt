@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import type { AutoWalls, Scene } from "#shared/model.ts";
 import { MAX_SCENE_CELLS, type OpOf } from "#shared/protocol.ts";
 import { autoWallsOf } from "#shared/rules/autoWalls.ts";
@@ -9,14 +9,15 @@ import { useExpansionFocus } from "../../components/expansionFocus.ts";
 import { ErrorText, FieldRow, Input } from "../../components/Field.tsx";
 import { Loading, Spinner } from "../../components/Loading.tsx";
 import { buttonLook } from "../../components/looks.ts";
-import { Group, Help, Note, Section } from "../../components/Panel.tsx";
+import { Group, GROUP_FOLD, Help, Note, Section } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { SettingRow } from "../../components/SettingRow.tsx";
 import { Switch } from "../../components/Switch.tsx";
+import { Tag } from "../../components/Tag.tsx";
 import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import type { ViewKind } from "../../lib/view.ts";
-import { useRoomScope } from "../../state/scope.ts";
+import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { useAssets, useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { calibrationFromCounts, fitBounds, imageSquares, sameCalibration } from "../grid/calibrate.ts";
 import { copyUrls, importSearch, IMPORT_WAIT_MS, nameGivesSize, replacementFound, searchOnImport, type ImportWait } from "../grid/findGrid.ts";
@@ -35,12 +36,15 @@ import { BlockMovementSetting } from "../movement/SceneSetting.tsx";
 import { PhasesSection } from "../phases/PhasesSection.tsx";
 import { thisDevice } from "../uvtt/limits.ts";
 import { isoOffered, suggestedKind, SUGGESTED_VIEW, SUGGESTED_VIEW_HELP, VIEW_NAMES } from "../view/choice.ts";
-import { VisionSettings } from "../vision/VisionSettings.tsx";
-import { deleteBlocked, sceneAfterDelete } from "./afterDelete.ts";
+import { LightSettings, useWallless, VisionSettings } from "../vision/VisionSettings.tsx";
+import { SceneWeather } from "../weather/WeatherSettings.tsx";
+import { useServerRoomSoundState } from "../sound/engine/store.ts";
 import { ColorInput, ConfirmButton, NumberInput, Select, Slider } from "./controls.tsx";
 import { fogsWithFirstMap, nameCellPx, refitsToNamedMap, replacement, viewFromCamera, type MapAsset } from "./create.ts";
 import { useStartFraming } from "./FrameView.tsx";
-import { sceneGroupSummary } from "./sceneSummary.ts";
+import { sceneRequestSlot, useSceneRequestSeq } from "./request.ts";
+import { sceneGroupSummary, sceneSoundSummary } from "./sceneSummary.ts";
+import { SceneSoundSettings, useSceneSoundNames } from "./SceneSoundSettings.tsx";
 import { SCENE_GROUP_ICONS, SCENE_GROUP_LABELS, useSceneFolds, type SceneGroup } from "./settingsFolds.ts";
 import { currentStageCamera } from "./stageCamera.ts";
 import { uploadErrorText, uploadMap } from "./upload.ts";
@@ -48,35 +52,50 @@ import { layoutWidth } from "../device/layout.ts";
 import type { PanelClose } from "../panels.ts";
 
 /**
- * Settings of the scene the DM is looking at, grouped by what each is for
- * (docs/design/design-v1-map-discovery.md 8.4): the scene's name under "This
- * scene", apart from New scene above it (docs/design/design-v1-design-pass.md
- * 4.1), then What players see, everything that decides what reaches players
- * (features/vision/VisionSettings.tsx), then Map image and grid, Walls and
- * movement, and Size and view: the scene's size, background and views, then export
- * and deleting it. Each group folds as the panel kit's `Group`, with its
- * icon and, folded, what it holds (sceneSummary.ts), setup groups starting
- * folded on a phone (settingsFolds.ts), and stays mounted while folded, so
- * an upload in it is never cut short. Every change is one op, so it shows at once
- * and undo covers it, and a setting that is on or off is a Switch row
- * named by the setting (docs/design/design-v1-visual.md 3.7), never a button
- * named by its state.
+ * Settings of the scene the DM is looking at, grouped by what the DM is
+ * doing (docs/design/design-v1-scenes-reorg.md 3): the scene's name under
+ * "This scene", apart from New scene above it (docs/design/design-v1-design-pass.md
+ * 4.1), then Light and weather, the group changed in play, open on every
+ * width, then the setup groups: Scene sound (the preset Move players
+ * starts), Fog and vision (everything that decides what reaches players,
+ * features/vision/VisionSettings.tsx), Map and grid, Walls and movement,
+ * and Size and view, then Export. Deleting the scene is in its row's ⋯ menu
+ * alone (SceneMenu.tsx). Each group folds as the panel kit's `Group`, with
+ * its icon and, folded, what it holds (sceneSummary.ts), setup groups
+ * starting folded on a phone (lib/folds.ts SCENES_FOLDS), and stays mounted
+ * while folded, so an upload in it is never cut short. Every change is one
+ * op, so it shows at once and undo covers it, and a setting that is on or
+ * off is a Switch row named by the setting (docs/design/design-v1-visual.md
+ * 3.7), never a button named by its state.
+ *
+ * Ambiance's Weather and Scene sound rows open these settings at their
+ * group (features/scenes/request.ts): the settings take the request once,
+ * as they mount or on a new press, scroll its group into view and move
+ * focus there (useSceneRequest).
  */
 export function SceneSettings(props: { scene: Scene; others: Scene[]; close: PanelClose }) {
-  const { scene, others } = props;
+  const { scene } = props;
   const actions = useRoomActions();
   const ui = useRoomUi();
   const scope = useRoomScope();
   const startFraming = useStartFraming();
   const fold = useSceneFolds();
   // As the token panel's and the character page's groups (docs/design/design-v1-design-pass.md 4.1), kept mounted while folded so an upload in one is never cut short.
-  const group = (key: SceneGroup) => ({ label: SCENE_GROUP_LABELS[key], icon: SCENE_GROUP_ICONS[key], ...fold(key), keep: true, summary: sceneGroupSummary(scene, key) });
+  const group = (key: SceneGroup, summary: string) => ({ label: SCENE_GROUP_LABELS[key], icon: SCENE_GROUP_ICONS[key], ...fold(key), keep: true, summary });
   const update = (patch: OpOf<"scene.update">["patch"]) => actions.dispatch({ t: "scene.update", sceneId: scene.id, patch });
-  const playerSceneId = useRoomView((s) => s.view?.meta.playerSceneId ?? null);
-  const deleteWhy = deleteBlocked(others, scene.id, playerSceneId);
-  const deleteHelp = useId();
   const feetPerCell = useRoomView((s) => s.view?.meta.settings.feetPerCell ?? 5);
   const size = sizeWords(sceneGrid(scene), scene.bounds, feetPerCell);
+  // Scene sound shows only while the server offers sound files, as the Sound panel's line did: with the switch off nothing plays to save (SoundPanel.tsx).
+  const sound = useServerRoomSoundState() === "on";
+  const soundNames = useSceneSoundNames(scene);
+  const wallless = useWallless(scene);
+  const players = group("players", sceneGroupSummary(scene, "players"));
+  const noWallsId = useId();
+  // Folded, the warning would otherwise be out of sight: a tag on the row that never shrinks says it (D-261102-932). Open, the warning itself shows.
+  const noWalls = wallless && !players.open;
+  const light = useRef<HTMLDivElement>(null);
+  const soundGroup = useRef<HTMLDivElement>(null);
+  useSceneRequest({ light, sound: sound ? soundGroup : null });
 
   const saveView = () => {
     // A phone's sheet hides most of the map, so the DM frames the view with the sheet closed (FrameView.tsx).
@@ -95,17 +114,42 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
         <NameField key={scene.id} name={scene.name} onSave={(name) => update({ name })} />
       </Section>
 
-      <Group {...group("players")}>
-        <VisionSettings scene={scene} />
+      <div ref={light} style={GROUP_SLOT}>
+        <Group {...group("light", sceneGroupSummary(scene, "light"))}>
+          <LightSettings scene={scene} />
+          <SceneWeather key={scene.id} scene={scene} />
+        </Group>
+      </div>
+
+      {sound ? (
+        <div ref={soundGroup} style={GROUP_SLOT}>
+          <Group {...group("sound", sceneSoundSummary(soundNames))}>
+            <SceneSoundSettings scene={scene} />
+          </Group>
+        </div>
+      ) : null}
+
+      <Group
+        {...players}
+        action={
+          noWalls ? (
+            <Tag id={noWallsId} tone="warning">
+              No walls
+            </Tag>
+          ) : undefined
+        }
+        describedBy={noWalls ? noWallsId : undefined}
+      >
+        <VisionSettings scene={scene} wallless={wallless} />
       </Group>
 
-      <Group {...group("map")}>
+      <Group {...group("map", sceneGroupSummary(scene, "map"))}>
         <MapImageRow scene={scene} close={props.close} />
         <PhasesSection scene={scene} />
         <GridStyle scene={scene} onChange={(grid) => update({ grid })} close={props.close} />
       </Group>
 
-      <Group {...group("walls")}>
+      <Group {...group("walls", sceneGroupSummary(scene, "walls"))}>
         <BlockMovementSetting scene={scene} />
         <SettingRow name="Automatic walls" help={AUTO_WALLS_NOTE[autoWallsOf(scene)]} wide>
           <Select<AutoWalls> label="Automatic walls" value={autoWallsOf(scene)} options={AUTO_WALLS} onChange={(autoWalls) => update({ autoWalls })} />
@@ -124,7 +168,7 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
         </div>
       </Group>
 
-      <Group {...group("scene")}>
+      <Group {...group("scene", sceneGroupSummary(scene, "scene"))}>
         <SettingRow name={size.name} help={size.holds ?? undefined} wide>
           <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
             <NumberInput label={size.across} value={scene.bounds.w} min={1} max={MAX_SCENE_CELLS} onChange={(w) => update({ bounds: { ...scene.bounds, w } })} />
@@ -151,28 +195,75 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
       </Group>
 
       <MapExport scene={scene} />
-
-      <Section label="Delete">
-        <div>
-          <ConfirmButton
-            label="Delete scene"
-            confirm="Tap again to delete"
-            title="Delete this scene and everything on it"
-            disabled={others.length === 0}
-            unavailable={deleteWhy !== null}
-            describedBy={deleteHelp}
-            onConfirm={() => {
-              const next = sceneAfterDelete(others, scene.id);
-              if (!next || deleteWhy !== null) return;
-              actions.dispatch({ t: "scene.delete", sceneId: scene.id });
-              actions.switchScene(next.id);
-            }}
-          />
-        </div>
-        <Help id={deleteHelp}>{deleteWhy ?? "Removes its tokens, drawings, build and fog too."}</Help>
-      </Section>
     </>
   );
+}
+
+/**
+ * A box around a group that a request scrolls to, one column as the
+ * panel's own, with the margin a scroll to its top leaves above it.
+ */
+const GROUP_SLOT: CSSProperties = { display: "grid", gridTemplateColumns: "minmax(0, 1fr)", scrollMarginTop: theme.space(2) };
+
+/**
+ * Takes Ambiance's request for this scene's weather or sound
+ * (features/scenes/request.ts, docs/design/design-v1-scenes-reorg.md 7), once,
+ * in a layout effect as the settings mount or on a new press. Weather
+ * brings Light and weather's header to the top of the panel's scroller
+ * where the Weather row still shows whole under it, else the Weather row,
+ * and focuses the Weather select. Sound brings Scene sound's header to the
+ * top and focuses its fold. A sound request while Scene sound is not drawn
+ * (the server offers no sound files) is taken and dropped.
+ *
+ * The scroll is `scrollIntoView` with the slot's scroll margin, and the
+ * choice compares rects with rects alone: at 130% the page is zoomed, and a
+ * scrollTop set from rect distances landed the row half out of the sheet.
+ * It waits for the commit's own layout effects to end, the panel's scroll
+ * restore among them (features/panels.ts usePanelScroll), which runs after
+ * this child's, and then counts as the viewer taking the scroller over, so a
+ * restore still pending never pulls the panel back over it.
+ */
+function useSceneRequest(groups: { light: RefObject<HTMLDivElement | null>; sound: RefObject<HTMLDivElement | null> | null }): void {
+  const request = useScoped(sceneRequestSlot);
+  const seq = useSceneRequestSeq();
+  const latest = useRef(groups);
+  latest.current = groups;
+  useLayoutEffect(() => {
+    const target = request.take();
+    if (target === null) return;
+    const slot = target === "weather" ? latest.current.light.current : latest.current.sound?.current;
+    if (!slot) return;
+    queueMicrotask(() => {
+      if (!slot.isConnected) return;
+      // The scroller listens for the viewer's input to stop a pending restore (PanelScrollKeeper.takeOver). A wheel of no distance scrolls nothing.
+      slot.dispatchEvent(new WheelEvent("wheel", { bubbles: true }));
+      if (target === "sound") {
+        slot.scrollIntoView({ block: "start" });
+        slot.querySelector<HTMLElement>(GROUP_FOLD)?.focus({ preventScroll: true });
+        return;
+      }
+      const select = slot.querySelector<HTMLElement>('select[aria-label="Weather"]');
+      const row = select?.closest<HTMLElement>("[data-setting-row]") ?? null;
+      const scroller = scrollerOf(slot);
+      const room = scroller ? scroller.getBoundingClientRect().height : Infinity;
+      const whole = row === null || row.getBoundingClientRect().bottom - slot.getBoundingClientRect().top + theme.space(2) <= room;
+      if (whole || !row) slot.scrollIntoView({ block: "start" });
+      else {
+        row.style.scrollMarginTop = `${theme.space(2)}px`;
+        row.scrollIntoView({ block: "start" });
+      }
+      select?.focus({ preventScroll: true });
+    });
+  }, [request, seq]);
+}
+
+/** The nearest box around `el` that scrolls: the side panel's pane or the phone's sheet. */
+function scrollerOf(el: HTMLElement): HTMLElement | null {
+  for (let at = el.parentElement; at; at = at.parentElement) {
+    const overflow = getComputedStyle(at).overflowY;
+    if ((overflow === "auto" || overflow === "scroll") && at.scrollHeight > at.clientHeight) return at;
+  }
+  return null;
 }
 
 const VIEWS: readonly { value: ViewKind; label: string }[] = [
@@ -246,7 +337,7 @@ function NameField(props: { name: string; onSave(name: string): void }) {
   );
 }
 
-/** The grid lines' look, and for a map image, how its squares line up with the scene's: the rest of Map image and grid. */
+/** The grid lines' look, and for a map image, how its squares line up with the scene's: the rest of Map and grid. */
 function GridStyle(props: { scene: Scene; onChange(grid: Scene["grid"]): void; close: PanelClose }) {
   const { grid } = props.scene;
   const set = (patch: Partial<Scene["grid"]>) => props.onChange({ ...grid, ...patch });
@@ -424,7 +515,7 @@ function MapGrid(props: { scene: Scene; map: NonNullable<Scene["map"]>; close: P
 }
 
 /**
- * The map image's row, first in Map image and grid: adding one to a scene
+ * The map image's row, first in Map and grid: adding one to a scene
  * without, replacing it, or removing it.
  *
  * On the scene the players are on, a new image shows on their screens the

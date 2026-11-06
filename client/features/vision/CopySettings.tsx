@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type RefObject } from "react";
+import { useId, useMemo, useRef, useState, type RefObject } from "react";
 import type { Scene } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
@@ -8,11 +8,13 @@ import { theme } from "../../lib/theme.ts";
 import type { OpAnswer, OpRefusal } from "../../state/types.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { groupScenes } from "../scenes/folders.ts";
-import { COPY_HELP, COPY_UNDO, copiedAll, copiesNothing, copyButtonText, copyLine, copyPatch, copyResult, copyTitle, type CopyAnswer } from "./copyRules.ts";
+import { COPY_BUTTON, COPY_BUTTON_HELP, COPY_HELP, COPY_UNDO, copiedAll, copiesNothing, copyButtonText, copyLine, copyPatch, copyResult, copyTitle, type CopyAnswer } from "./copyRules.ts";
 
 /**
- * "Use these settings on other scenes…" at the end of What players see
- * (docs/design/design-v1-map-discovery.md 8.3): a sheet, from the bottom on a
+ * "Copy to other scenes…" at the end of Fog and vision
+ * (docs/design/design-v1-map-discovery.md 8.3, docs/design/design-v1-scenes-reorg.md
+ * 6), its help saying what it copies, since Light now sits in another
+ * group: a sheet, from the bottom on a
  * phone, listing every other scene by folder with what players see there
  * now and what the copy would do there, so a room already full of scenes
  * takes one setup in one step. Only in a room with another scene.
@@ -28,12 +30,14 @@ export function CopySettingsButton(props: { scene: Scene }) {
   );
   const [open, setOpen] = useState(false);
   const opener = useRef<HTMLButtonElement>(null);
+  const helpId = useId();
   if (others.length === 0) return null;
   return (
-    <div style={{ display: "flex" }}>
-      <Button ref={opener} size="sm" onClick={() => setOpen(true)}>
-        Use these settings on other scenes…
+    <div style={{ display: "grid", gap: theme.space(1), justifyItems: "start", minWidth: 0 }}>
+      <Button ref={opener} size="sm" aria-describedby={helpId} onClick={() => setOpen(true)}>
+        {COPY_BUTTON}
       </Button>
+      <Help id={helpId}>{COPY_BUTTON_HELP}</Help>
       {open ? <CopySheet source={props.scene} scenes={others} opener={opener} onClose={() => setOpen(false)} /> : null}
     </div>
   );

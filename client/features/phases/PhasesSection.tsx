@@ -32,7 +32,7 @@ import { activePhaseId, addPhase, canAddPhase, movePhase, phasesOf, removeConfir
  * Players get only the phase showing. Adding, renaming or reordering the
  * others changes nothing they receive, so none of it asks first.
  *
- * It sits in the Map image and grid group under the map image's row
+ * It sits in the Map and grid group under the map image's row
  * (docs/design/design-v1-map-discovery.md 8.4), a part of the group named as a
  * setting is, with a heading a level under the group's.
  */

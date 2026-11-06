@@ -10,22 +10,26 @@ import type { SceneGroup } from "./settingsFolds.ts";
 
 /*
  * What a folded group of the scene settings page says it holds
- * (docs/design/design-v1-design-pass.md 4.1), so a phone that starts three of the
- * four folded still reads the scene at a glance. Plain functions, for node
- * --test.
+ * (docs/design/design-v1-scenes-reorg.md 3), so a phone that starts all but
+ * Light and weather folded still reads the scene at a glance. Plain
+ * functions, for node --test.
  */
 
 const join = (parts: readonly (string | null)[]): string => parts.filter((p) => p !== null).join(" · ");
 
-export function sceneGroupSummary(scene: Scene, group: SceneGroup): string {
+/**
+ * Scene sound's group says what it holds through `sceneSoundSummary`, from
+ * the names the room's library gives, so it is no case here.
+ */
+export function sceneGroupSummary(scene: Scene, group: Exclude<SceneGroup, "sound">): string {
   switch (group) {
+    case "light": {
+      // The light does nothing while party vision is off (D-261102-933), so the summary leaves it out rather than name a level that plays no part.
+      const weather = weatherParts(scene.weather);
+      return join([scene.vision?.on === true ? (LIGHT_LEVELS.find((l) => l.value === lightOf(scene))?.label ?? null) : null, ...(weather.length > 0 ? weather : ["Clear"])]);
+    }
     case "players":
-      return join([
-        PLAYERS_SEE_WORDS[playersSeeOf(scene)],
-        LIGHT_LEVELS.find((l) => l.value === lightOf(scene))?.label ?? null,
-        ...weatherParts(scene.weather),
-        sightOf(scene) === "player" ? (SIGHT_CHOICES.find((c) => c.value === "player")?.label ?? null) : null,
-      ]);
+      return join([PLAYERS_SEE_WORDS[playersSeeOf(scene)], sightOf(scene) === "player" ? (SIGHT_CHOICES.find((c) => c.value === "player")?.label ?? null) : null]);
     case "map": {
       const shape = SHAPE_CHOICES.find((c) => c.value === shapeChoice(scene.gridShape))?.label ?? "Squares";
       // A battle mat's squares have no size to say: only an image's are measured in its pixels.
@@ -37,6 +41,12 @@ export function sceneGroupSummary(scene: Scene, group: SceneGroup): string {
     case "scene":
       return join([sizeText(scene), suggestedKind(scene.suggestedView) === "isometric" ? VIEW_NAMES.isometric : null]);
   }
+}
+
+/** Scene sound's summary: the names of what it plays, "Silent" for a scene kept silent, or "None of its own". */
+export function sceneSoundSummary(names: readonly string[] | null): string {
+  if (names === null) return "None of its own";
+  return names.length === 0 ? "Silent" : names.join(", ");
 }
 
 /**
@@ -52,7 +62,7 @@ function sizeText(scene: Scene): string {
   return span.cols === 0 || span.rows === 0 ? "No whole hex" : `${span.cols} × ${span.rows} hexes`;
 }
 
-/** Fog and party vision's fold, folded inside What players see. */
+/** The Switches fold, folded inside Fog and vision: the two switches Players see sets. */
 export function fogFoldSummary(scene: Pick<Scene, "fogEnabled" | "vision">): string {
   return `Fog ${scene.fogEnabled ? "on" : "off"} · Party vision ${scene.vision?.on === true ? "on" : "off"}`;
 }
