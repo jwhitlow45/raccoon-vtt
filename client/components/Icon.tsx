@@ -129,7 +129,6 @@ export type IconName =
   | "viewAs"
   | "windToward"
   | "weather"
-  | "ambiance"
   | "music"
   | "play"
   | "pause"
@@ -213,13 +212,12 @@ export const LUCIDE: Partial<Record<IconName, LucideIcon>> = {
   mapLabel: "type",
   light: "lightbulb",
   weather: "cloud-rain",
-  ambiance: "cloud-sun",
   stamp: "stamp",
   music: "music",
   play: "play",
   pause: "pause",
   skip: "skip-forward",
-  stop: "square",
+  stop: "circle-stop",
   repeatOne: "repeat-1",
   shuffle: "shuffle",
   volume: "volume-2",
@@ -682,15 +680,7 @@ const SHAPES: Record<IconName, ReactNode> = {
       <path d="M16 14v6M8 14v6M12 16v6" />
     </g>
   ),
-  // Lucide cloud-sun: the Ambiance panel, the room's time, weather and sound together (docs/design/design-v1-panel-groups.md 4.1).
-  ambiance: (
-    <g {...STROKE}>
-      <path d="M12 2v2M4.93 4.93l1.41 1.41M20 12h2M19.07 4.93l-1.41 1.41" />
-      <path d="M15.947 12.65a4 4 0 0 0-5.925-4.128" />
-      <path d="M13 22H7a5 5 0 1 1 4.9-6H13a3 3 0 0 1 0 6Z" />
-    </g>
-  ),
-  // Ambiance's Sound group and Scenes' Scene sound (docs/design/design-v1-music.md 4.1). Lucide music: the room's music and sound.
+  // The Sound panel and Scenes' Scene sound (docs/design/design-v1-music.md 4.1). Lucide music: the room's music and sound.
   music: (
     <g {...STROKE}>
       <path d="M9 18V5l12-2v13" />
@@ -709,8 +699,13 @@ const SHAPES: Record<IconName, ReactNode> = {
   ),
   // Lucide skip-forward: on to the next track.
   skip: <path {...STROKE} d="M5 4l10 8-10 8zM19 5v14" />,
-  // Lucide square: stop a sound for everyone. Never Delete, which the trash can draws.
-  stop: <rect {...STROKE} width="18" height="18" x="3" y="3" rx="2" />,
+  // Lucide circle-stop: stop a sound for everyone. A square in a circle, since a square alone read as a checkbox (docs/design/design-v1-sound-layout.md 7). Never Delete, which the trash can draws.
+  stop: (
+    <g {...STROKE}>
+      <circle cx="12" cy="12" r="10" />
+      <rect x="9" y="9" width="6" height="6" rx="1" />
+    </g>
+  ),
   // Lucide repeat-1: the music's Repeat one, the same track again.
   repeatOne: <path {...STROKE} d="m17 2 4 4-4 4M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4M21 13v1a4 4 0 0 1-4 4H3M11 10h1v4" />,
   // Lucide shuffle: a playlist played in a new random order each time.

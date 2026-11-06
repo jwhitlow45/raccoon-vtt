@@ -124,17 +124,19 @@ export const LUCIDE_NOTICE =
  * (its LUCIDE table), and a test holds the two lists and CREDITS.md to
  * the same names, so a newly copied icon cannot ship uncredited.
  */
-export const LUCIDE_ICONS = ["arrow-down", "arrow-left", "arrow-right", "arrow-up", "book-open", "brick-wall", "calendar-clock", "chevrons-down", "circle-user-round", "clipboard-list", "cloud-rain", "cloud-sun", "compass", "contact-round", "copy-plus", "crop", "crown", "download", "eraser", "external-link", "eye", "eye-off", "file-text", "focus", "fold-horizontal", "footprints", "hash", "image", "info", "library", "lightbulb", "list-music", "list-tree", "lock", "log-out", "map", "maximize-2", "menu", "minimize-2", "mountain", "music", "notebook-text", "paintbrush", "pause", "paw-print", "pencil", "play", "radar", "radius", "redo-2", "refresh-cw", "repeat", "repeat-1", "scan-eye", "scroll-text", "settings", "share", "shuffle", "skip-back", "skip-forward", "skull", "smartphone", "snail", "square", "square-dashed", "stamp", "sticky-note", "swords", "timer", "trash-2", "type", "undo-2", "user-minus", "users", "volume-2", "zap", "zoom-in", "zoom-out"] as const;
+export const LUCIDE_ICONS = ["arrow-down", "arrow-left", "arrow-right", "arrow-up", "book-open", "brick-wall", "calendar-clock", "chevrons-down", "circle-stop", "circle-user-round", "clipboard-list", "cloud-rain", "compass", "contact-round", "copy-plus", "crop", "crown", "download", "eraser", "external-link", "eye", "eye-off", "file-text", "focus", "fold-horizontal", "footprints", "hash", "image", "info", "library", "lightbulb", "list-music", "list-tree", "lock", "log-out", "map", "maximize-2", "menu", "minimize-2", "mountain", "music", "notebook-text", "paintbrush", "pause", "paw-print", "pencil", "play", "radar", "radius", "redo-2", "refresh-cw", "repeat", "repeat-1", "scan-eye", "scroll-text", "settings", "share", "shuffle", "skip-back", "skip-forward", "skull", "smartphone", "snail", "square-dashed", "stamp", "sticky-note", "swords", "timer", "trash-2", "type", "undo-2", "user-minus", "users", "volume-2", "zap", "zoom-in", "zoom-out"] as const;
 
 export type LucideIcon = (typeof LUCIDE_ICONS)[number];
 
 /**
  * The copied icons Lucide derives from Feather, which its license credits
- * to Feather under MIT, and cloud-rain, which the list leaves out though it
- * redraws Feather's icon of that name. MIT asks for its notice in every copy, so the
- * About page shows it whole beside the ISC one, as CREDITS.md does.
+ * to Feather under MIT, and two the list leaves out though each redraws a
+ * Feather icon: cloud-rain, Feather's icon of that name, and circle-stop,
+ * Feather's stop-circle, its name before Lucide renamed it. MIT asks for
+ * its notice in every copy, so the About page shows it whole beside the
+ * ISC one, as CREDITS.md does.
  */
-export const FEATHER_ICONS = ["arrow-down", "arrow-left", "arrow-right", "arrow-up", "chevrons-down", "cloud-rain", "compass", "download", "external-link", "hash", "info", "lock", "log-out", "minimize-2", "music", "share", "smartphone", "square", "trash-2", "type", "zoom-in", "zoom-out"] as const satisfies readonly LucideIcon[];
+export const FEATHER_ICONS = ["arrow-down", "arrow-left", "arrow-right", "arrow-up", "chevrons-down", "circle-stop", "cloud-rain", "compass", "download", "external-link", "hash", "info", "lock", "log-out", "minimize-2", "music", "share", "smartphone", "trash-2", "type", "zoom-in", "zoom-out"] as const satisfies readonly LucideIcon[];
 
 export const FEATHER_NOTICE =
   "The MIT License (MIT). Copyright (c) 2013-present Cole Bemis. Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions: The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software. THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.";
