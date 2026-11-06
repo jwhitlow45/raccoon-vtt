@@ -29,6 +29,17 @@ describe("sound undo labels", () => {
     assert.equal(describeOp({ t: "playlist.delete", id: "gone" }, s), "deleting a playlist");
   });
 
+  test("adding a track to the playlist Tavern night, each named as it was, and the queue's ops as changing the music (docs/design/design-v1-music-player.md 6.3)", () => {
+    const harbor: Sound = { id: "harbor", rev: 0, name: "Harbor at dusk", assetId: "file-harbor", ms: 120_000, use: "music" };
+    const t = { ...s, sounds: { ...s.sounds, harbor } };
+    assert.equal(describeOp({ t: "playlist.add", id: "tavern", soundId: "harbor" }, t), "adding Harbor at dusk to the playlist Tavern night");
+    assert.equal(describeOp({ t: "playlist.add", id: "gone", soundId: "harbor" }, t), "adding Harbor at dusk to a playlist");
+    assert.equal(describeOp({ t: "playlist.add", id: "tavern", soundId: "gone" }, t), "adding a track to the playlist Tavern night");
+    assert.equal(describeOp({ t: "music.queue", from: "r1", edit: { t: "next", soundIds: ["harbor"] } }, t), "changing the music");
+    assert.equal(describeOp({ t: "music.queue", from: "r1", edit: { t: "shuffle", seed: "s1" } }, t), "changing the music");
+    assert.equal(describeOp({ t: "music.jump", run: "r2", from: "r1", soundId: "harbor", ms: 30_000, on: "harbor" }, t), "changing the music");
+  });
+
   test("changing the sound of the scene Forest road, its sound sent alone", () => {
     assert.equal(describeOp({ t: "scene.update", sceneId: "road", patch: { sound: { music: null, loops: [] } } }, s), "changing the sound of the scene Forest road");
     assert.equal(describeOp({ t: "scene.update", sceneId: "road", patch: { sound: null } }, s), "changing the sound of the scene Forest road");

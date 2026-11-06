@@ -3,14 +3,15 @@ import type { Fade, Playlist, Repeat, SceneSound } from "#shared/sound.ts";
 import type { OnAnswer, RoomActions } from "../../../state/types.ts";
 
 /**
- * The sound ops the panel sends (docs/design/design-v1-music.md 6.2), each
- * the DM's. Playback ops record no step and Setup ops one each (6.6), which
- * the server decides by the op's type.
+ * The sound ops the panel and the Music window send
+ * (docs/design/design-v1-music.md 6.2, docs/design/design-v1-music-player.md
+ * 6.3), each the DM's. Playback ops record no step and Setup ops one each
+ * (6.6), which the server decides by the op's type.
  */
 export type SoundOp =
-  | OpOf<"music.play" | "music.pause" | "music.resume" | "music.skip" | "music.stop" | "music.set">
+  | OpOf<"music.play" | "music.pause" | "music.resume" | "music.skip" | "music.stop" | "music.set" | "music.queue" | "music.jump">
   | OpOf<"loop.start" | "loop.set" | "loop.stop" | "effect.fire" | "sound.mix" | "sound.scene" | "sound.stopAll">
-  | OpOf<"sound.update" | "sound.delete" | "playlist.create" | "playlist.update" | "playlist.delete">
+  | OpOf<"sound.update" | "sound.delete" | "playlist.create" | "playlist.update" | "playlist.delete" | "playlist.add">
   | { t: "scene.update"; sceneId: string; patch: { sound: SceneSound | null } }
   | { t: "room.update"; settings: { soundNames: boolean } };
 

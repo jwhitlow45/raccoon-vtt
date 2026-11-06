@@ -12,6 +12,7 @@ import {
   type FiredEffect,
   type LoopPlaying,
   type MusicChange,
+  type MusicRefusalKey,
   type MusicRun,
   type Playing,
   type Playlist,
@@ -50,7 +51,21 @@ export const SOUND_WORDS = {
   notEffect: "That effect isn't in the room any more.",
   nothingPlaying: "Nothing is playing.",
   firedTwice: "That effect was already played.",
+  // The queue and the Music window (docs/design/design-v1-music-player.md 6.4 and 8). The last three replace
+  // trackPlaying for a delete and a change of use, whose callers move to them with the queue's rules.
+  musicChanged: "The music changed. Try again.",
+  musicMovedOn: "The music moved on. Try again.",
+  queueFull: `The queue holds ${SOUND_LIMITS.playlistTracks} tracks at most.`,
+  leftQueue: "That track left the queue.",
+  playingStays: "The playing track stays in the queue. Skip it or stop the music.",
+  playlistFull: `A playlist holds ${SOUND_LIMITS.playlistTracks} tracks at most.`,
+  trackPlays: "This track is playing. Skip it or stop the music first.",
+  trackPlaysNext: "This track plays next. Take it out of Up next first.",
+  trackQueued: "This track is in the queue. Take it out under Up next first.",
 } as const;
+
+/** The words of each refusal the queue's helpers throw (shared/sound.ts MusicRefusal), which must all be SOUND_WORDS'. */
+export const MUSIC_REFUSAL_WORDS: Readonly<Record<MusicRefusalKey, string>> = SOUND_WORDS;
 
 /** Why a length does not fit a use, in the sound page's words (4.1). */
 export function useLengthRefusal(use: SoundUse, ms: number): string | null {
@@ -302,6 +317,32 @@ export function musicChange(tx: Tx, change: MusicChange): void {
   if (musicAt(playing.music, sounds, t) === null) throw invalid(SOUND_WORDS.nothingPlaying);
   const music = musicChanged(playing.music, change, sounds, t);
   if (music !== playing.music) play(tx, playing, { ...playing, music });
+}
+
+// The queue (docs/design/design-v1-music-player.md 6.3 and 6.4): no step for the music ops, a Setup step for Add to playlist.
+
+/** Refused until the queue's rules are built, so a stored op of the kind cannot exist before they are. */
+const QUEUE_NOT_BUILT = "the queue is not built yet";
+
+/**
+ * A queue edit at the op's time (6.4): the guards (no run, `from`), then
+ * queueEdited on the track playing then, its `next` placed again.
+ */
+export function musicQueue(tx: Tx, op: OpOf<"music.queue">): void {
+  // Lane PL-A fills this (docs/design/design-v1-music-player.md 6.4).
+  throw invalid(QUEUE_NOT_BUILT);
+}
+
+/** Play now, Previous or a seek (6.4): the guards (no run, `from`, `on`), `ms` held to seekBoundMs less 1 s, then jumpedAt. */
+export function musicJump(tx: Tx, op: OpOf<"music.jump">): void {
+  // Lane PL-A fills this (docs/design/design-v1-music-player.md 6.4).
+  throw invalid(QUEUE_NOT_BUILT);
+}
+
+/** Add to playlist (6.4, Setup): an append of a music sound the playlist does not hold, at most SOUND_LIMITS.playlistTracks, and nothing written when it holds it. */
+export function playlistAdd(tx: Tx, op: OpOf<"playlist.add">): void {
+  // Lane PL-A fills this (docs/design/design-v1-music-player.md 6.4).
+  throw invalid(QUEUE_NOT_BUILT);
 }
 
 /** A loop's id keys the playing record, so it must never name a member of Object.prototype. */

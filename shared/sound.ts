@@ -95,6 +95,12 @@ export type MusicRun = {
   next?: SoundAt;
   /** DM only: the position in ms where it paused. A player's projection has no music while it is paused. */
   paused?: number;
+  /**
+   * DM only: Shuffle is on (docs/design/design-v1-music-player.md 6.2). The
+   * order was mixed when it was turned on, or when the run started
+   * shuffled. Absent is off.
+   */
+  shuffle?: true;
 };
 
 /** A background sound looping, at the DM's volume for everyone, 0 to 100. */
@@ -266,9 +272,10 @@ export function reanchor(music: MusicRun, before: Pick<MusicRun, "repeat" | "fad
 /**
  * A run placed at `t` (a resume, a reanchor) with its `next` revealed if
  * it was before or its reveal is due by `t`, at its crossfade's start but
- * never before `t` (MUS-OPUS-52).
+ * never before `t` (MUS-OPUS-52). Exported for the queue's edits, which
+ * place `next` again the same way (docs/design/design-v1-music-player.md 6.4).
  */
-function withNextAt(music: MusicRun, nowMs: number, t: number, wasRevealed: boolean): MusicRun {
+export function withNextAt(music: MusicRun, nowMs: number, t: number, wasRevealed: boolean): MusicRun {
   if (music.repeat === "one") return music;
   const j = following(music);
   if (j === null) return music;
@@ -422,4 +429,107 @@ export function musicChanged(music: MusicRun | null, change: MusicChange, sounds
       return set.paused !== undefined ? set : reanchor(set, current, sounds, t);
     }
   }
+}
+
+// The queue (docs/design/design-v1-music-player.md 6): the live run's order, edited while it plays.
+
+/**
+ * One edit of the queue, as `music.queue` carries it (6.2). Each is a
+ * command applied at the op's time to the track playing then, never a
+ * whole new order, so a tick between the DM's view and the op cannot make
+ * it act on the wrong track. `move`'s named places are resolved then too.
+ */
+export type QueueEdit =
+  /** Play next: right after the playing track, in this order, the playing track skipped. */
+  | { t: "next"; soundIds: SoundId[] }
+  /** Add to queue: at the end, the playing track skipped. */
+  | { t: "add"; soundIds: SoundId[] }
+  /**
+   * `first` is right after the playing track. `passEnd` is the order's end,
+   * the seam of Up next's two lists. `last` is the end of the cycle: just
+   * before the playing track under Repeat all and one, the order's end
+   * under Repeat off. `before` names the track it goes in front of.
+   */
+  | { t: "move"; soundId: SoundId; to: QueueMoveTo }
+  | { t: "remove"; soundId: SoundId }
+  /** Shuffle on, mixed by seededShuffle from this seed, so replay and the store's prediction mix alike. A run id's shape. */
+  | { t: "shuffle"; seed: string }
+  /** Shuffle off: the playlist's order back. */
+  | { t: "unshuffle" };
+
+/** Where `move` puts a track (QueueEdit). */
+export type QueueMoveTo = "first" | "passEnd" | "last" | { before: SoundId };
+
+/**
+ * What a queue edit reads besides the run: each sound's length and use,
+ * and the run's playlist while it exists, whose order `unshuffle` puts
+ * back. Null when the run has none or it was deleted.
+ */
+export type QueueContext = { sounds: SoundLengths; playlist: Pick<Playlist, "sounds"> | null };
+
+/**
+ * The refusals queueEdited and jumpedAt throw, by their key in
+ * shared/reducer/sound.ts SOUND_WORDS. The guards on the op itself (no
+ * run, `from`, `on`) are the reducer's, which throws them directly.
+ */
+export type MusicRefusalKey = "playingStays" | "leftQueue" | "queueFull" | "notMusic";
+
+/**
+ * Thrown by the queue's helpers for an edit the rules refuse. The reducer
+ * sends it on as `invalid(MUSIC_REFUSAL_WORDS[key])`, so the helpers stay
+ * pure and free of the reducer's error type, and a test can name the key.
+ */
+export class MusicRefusal extends Error {
+  readonly key: MusicRefusalKey;
+  constructor(key: MusicRefusalKey) {
+    super(key);
+    this.key = key;
+  }
+}
+
+/**
+ * The run after a queue edit at `t` (6.4), from the run musicAt gave at
+ * `t`, so an edit during a crossfade acts on the incoming track. `index`
+ * stays on the playing track, and a playing run's `next` is placed again
+ * by withNextAt, revealed at once if one was. An edit that changes
+ * nothing returns `music` itself, so the reducer writes nothing. Throws
+ * MusicRefusal for an edit the rules refuse.
+ */
+export function queueEdited(music: MusicRun, edit: QueueEdit, ctx: QueueContext, t: number): MusicRun {
+  // Lane PL-A fills this (docs/design/design-v1-music-player.md 6.4). Until then nothing calls it: the reducer's stub refuses.
+  throw new Error("queueEdited: lane PL-A builds the queue's rules");
+}
+
+/**
+ * The run after a jump at `t` to `soundId` at `ms` into it (6.4), from the
+ * run musicAt gave at `t`: Play now, Previous and a seek. Under the new
+ * `run` the track plays from `t - ms`, with `next` placed again if due. A
+ * paused run's seek of its own track stays paused at `ms`. The reducer
+ * holds `ms` to seekBoundMs less 1 s first. Throws MusicRefusal
+ * (`leftQueue`) for a track not in the order.
+ */
+export function jumpedAt(music: MusicRun, run: string, soundId: SoundId, ms: number, sounds: SoundLengths, t: number): MusicRun {
+  // Lane PL-A fills this (docs/design/design-v1-music-player.md 6.4).
+  throw new Error("jumpedAt: lane PL-A builds the queue's rules");
+}
+
+/**
+ * The end of what a seek can reach in a track (4.2, 6.4): its length, or
+ * under Repeat one with a crossfade one pass, the length less the
+ * crossfade (occurrencesAt's period), so a seek always places a single
+ * first occurrence. The seek slider spans 0 to this.
+ */
+export function seekBoundMs(music: Pick<MusicRun, "repeat" | "fade">, lengthMs: number): number {
+  // Lane PL-A fills this (docs/design/design-v1-music-player.md 6.4).
+  throw new Error("seekBoundMs: lane PL-A builds the queue's rules");
+}
+
+/**
+ * The items in an order mixed by `seed` (6.5): a small hash of the seed
+ * and a 32-bit generator, never Math.random, so replay and the store's
+ * prediction mix alike. A golden test pins its output.
+ */
+export function seededShuffle<T>(items: readonly T[], seed: string): T[] {
+  // Lane PL-A fills this (docs/design/design-v1-music-player.md 6.5).
+  throw new Error("seededShuffle: lane PL-A builds the queue's rules");
 }

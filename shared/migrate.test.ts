@@ -36,6 +36,7 @@ import {
   seatsFromSnappedFull,
   stopsFileApart,
   clockTicks,
+  musicQueues,
   seatsApart,
   hiddenTowStands,
   stopsStandClear,
@@ -1785,6 +1786,41 @@ describe("op version 47 and snapshot 37, turned and stretched videos (docs/desig
     const op = { t: "scene.setMap", sceneId: "s1", map: { ...map, video: { ...video, turn: 90 } } };
     assert.throws(() => runMigrations(op, 47, 46, opMigrations), /down/);
     assert.throws(() => runMigrations(room(), 37, 36, snapshotMigrations), /down/);
+  });
+});
+
+describe("op version 48 and snapshot 38, the queue (docs/design/design-v1-music-player.md 6.5)", () => {
+  const run = { run: "r1", playlistId: "pl1", order: ["m2", "m1"], index: 0, repeat: "all", fade: 5, now: { soundId: "m2", at: 1_000 } } as const;
+  const sounds = {
+    m1: { id: "m1", rev: 0, name: "Tavern", assetId: "a1", ms: 120_000, use: "music" },
+    m2: { id: "m2", rev: 0, name: "Road", assetId: "a2", ms: 90_000, use: "music" },
+  } as const;
+
+  test("keeps stored operations and snapshots unchanged through the identity steps, a shuffled run included, and gates the queue's rules at 48", () => {
+    assert.ok(OP_VERSION >= 48);
+    assert.ok(SNAPSHOT_VERSION >= 38);
+    const scene = { t: "sound.scene", sceneId: "s1", run: "r2", order: ["m1", "m2"] };
+    assert.equal(runMigrations(scene, 47, 48, opMigrations), scene);
+    assert.equal(migrateOp(scene, 47), scene);
+    const ops = [
+      { t: "music.play", run: "r1", playlistId: "pl1", order: ["m2", "m1"], repeat: "all", fade: 5, shuffle: true },
+      { t: "music.queue", from: "r1", edit: { t: "shuffle", seed: "s1" } },
+      { t: "music.jump", run: "r2", from: "r1", soundId: "m1", ms: 30_000, on: "m2" },
+      { t: "playlist.add", id: "pl1", soundId: "m1" },
+    ];
+    for (const op of ops) assert.equal(migrateOp(op, 48), op);
+    const state = room({ sounds, playlists: { pl1: { id: "pl1", rev: 0, name: "Night", sounds: ["m1", "m2"], repeat: "all", fade: 5 } }, playing: { rev: 1, music: { ...run, order: [...run.order], shuffle: true }, loops: {}, effects: [], volume: { music: 100, effects: 100 } } });
+    assert.equal(runMigrations(state, 37, 38, snapshotMigrations), state);
+    assert.equal(migrateSnapshot(state, 37), state);
+    assert.deepEqual([musicQueues(1), musicQueues(47), musicQueues(48), musicQueues(undefined)], [false, false, true, true]);
+  });
+
+  test("a build at 47 and 37 refuses a room from this one, so it never drops a run's Shuffle unseen, and this build refuses a newer one", () => {
+    const op = { t: "music.queue", from: "r1", edit: { t: "unshuffle" } };
+    assert.throws(() => runMigrations(op, 48, 47, opMigrations), /down/);
+    assert.throws(() => runMigrations(room(), 38, 37, snapshotMigrations), /down/);
+    assert.throws(() => migrateOp(op, OP_VERSION + 1), /down/, "a newer op than this build knows");
+    assert.throws(() => migrateSnapshot(room(), SNAPSHOT_VERSION + 1), /down/, "a newer snapshot than this build knows");
   });
 });
 

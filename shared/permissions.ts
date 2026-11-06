@@ -789,10 +789,13 @@ function namesSoundFile(op: Op, state: RoomState): boolean {
     case "sound.update":
     case "playlist.create":
     case "playlist.update":
+    case "playlist.add":
     case "music.play":
     case "music.resume":
     case "music.skip":
     case "music.set":
+    case "music.queue":
+    case "music.jump":
     case "loop.start":
       return true;
     case "sound.scene":
@@ -934,12 +937,15 @@ function forPlayer(op: Op, c: Check): Decision {
     case "playlist.create":
     case "playlist.update":
     case "playlist.delete":
+    case "playlist.add":
     case "music.play":
     case "music.pause":
     case "music.resume":
     case "music.skip":
     case "music.stop":
     case "music.set":
+    case "music.queue":
+    case "music.jump":
     case "loop.start":
     case "loop.set":
     case "loop.stop":

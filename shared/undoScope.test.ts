@@ -21,11 +21,11 @@ const inventory = {
     "savedEncounter.create", "savedEncounter.update", "savedEncounter.delete", "scene.create", "scene.delete", "scene.duplicate", "scene.reorder", "scene.setMap", "scene.setGrid", "vision.holders", "room.update",
     "journal.create", "journal.update", "journal.delete", "pin.put", "pin.remove", "handoutDoc.create", "handoutDoc.delete",
     "clock.start", "clock.stop", "clock.update",
-    "sound.update", "playlist.create", "playlist.update", "playlist.delete",
+    "sound.update", "playlist.create", "playlist.update", "playlist.delete", "playlist.add",
   ],
   none: [
     "roll.change", "cast.ask", "cast.close", "dice.roll", "roll.dice", "actor.deathRoll", "actor.rechargeRoll", "build.ask", "member.update", "log.chat", "log.whisper", "undo", "redo",
-    "sound.create", "sound.delete", "music.play", "music.pause", "music.resume", "music.skip", "music.stop", "music.set", "loop.start", "loop.set", "loop.stop", "effect.fire", "sound.mix", "sound.scene", "sound.stopAll",
+    "sound.create", "sound.delete", "music.play", "music.pause", "music.resume", "music.skip", "music.stop", "music.set", "music.queue", "music.jump", "loop.start", "loop.set", "loop.stop", "effect.fire", "sound.mix", "sound.scene", "sound.stopAll",
   ],
 } satisfies Record<UndoScope, string[]>;
 const fieldSensitive = ["token.update", "token.updateMany", "character.update", "scene.update", "trap.update"];

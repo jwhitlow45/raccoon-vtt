@@ -22,7 +22,10 @@ import {
   loopStart,
   loopStop,
   musicChange,
+  musicJump,
   musicPlay,
+  musicQueue,
+  playlistAdd,
   playlistCreate,
   playlistDelete,
   playlistUpdate,
@@ -455,6 +458,8 @@ function dispatch(tx: Tx, op: Op): void {
       return playlistUpdate(tx, op);
     case "playlist.delete":
       return playlistDelete(tx, op);
+    case "playlist.add":
+      return playlistAdd(tx, op);
     case "music.play":
       return musicPlay(tx, op);
     case "music.pause":
@@ -467,6 +472,10 @@ function dispatch(tx: Tx, op: Op): void {
       return musicChange(tx, { t: "stop" });
     case "music.set":
       return musicChange(tx, { t: "set", ...(op.repeat !== undefined ? { repeat: op.repeat } : {}), ...(op.fade !== undefined ? { fade: op.fade } : {}) });
+    case "music.queue":
+      return musicQueue(tx, op);
+    case "music.jump":
+      return musicJump(tx, op);
     case "loop.start":
       return loopStart(tx, op);
     case "loop.set":

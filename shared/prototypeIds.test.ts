@@ -104,6 +104,11 @@ function handMade(state: RoomState): Case[] {
   both({ t: "music.skip", run: "run9" });
   both({ t: "music.stop" });
   both({ t: "music.set", repeat: "one" });
+  // The queue (docs/design/design-v1-music-player.md 6.3).
+  both({ t: "playlist.add", id: "pl1", soundId: "snd1" });
+  both({ t: "music.queue", from: "run9", edit: { t: "move", soundId: "snd1", to: { before: "snd2" } } });
+  both({ t: "music.queue", from: "run9", edit: { t: "next", soundIds: ["snd1", "snd2"] } });
+  both({ t: "music.jump", run: "run10", from: "run9", soundId: "snd1", ms: 30_000, on: "snd2" });
   both({ t: "loop.start", id: "loop9", soundId: "snd1", volume: 70 });
   both({ t: "loop.set", id: "loop9", volume: 50 });
   both({ t: "loop.stop", id: "loop9" });

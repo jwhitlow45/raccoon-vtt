@@ -11,8 +11,8 @@ import { ownEntry } from "./records.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 37;
-export const OP_VERSION = 47;
+export const SNAPSHOT_VERSION = 38;
+export const OP_VERSION = 48;
 
 export type MigrationStep = {
   from: number;
@@ -240,6 +240,10 @@ export const snapshotMigrations: MigrationStep[] = [
   // is. The number moves so that an older build, whose strict state schema refuses the fields, refuses a v37 snapshot
   // instead of loading it and drawing a turned video on its side.
   { from: 36, to: 37, apply: (state) => state },
+  // The queue (docs/design/design-v1-music-player.md 6.5): a music run's `shuffle` is optional, and absent reads as off, so
+  // a v37 room is a v38 room as it is. The number moves so that an older build, whose strict state schema refuses the
+  // field, refuses a v38 snapshot instead of loading it.
+  { from: 37, to: 38, apply: (state) => state },
   // No step moves a square trip wire's imported 1/64 ends onto half cells (FU43-DATA-01). A snapshot migrates before its
   // stored ops replay, so a moved end would change what a stored walk springs and what a stored restore's guard matches.
   // The rules take such a wire as it stands instead (server/rooms/squareWires.legacy.test.ts).
@@ -1179,6 +1183,23 @@ export const opMigrations: MigrationStep[] = [
     to: 47,
     apply: (op) => op,
   },
+  {
+    // The queue (docs/design/design-v1-music-player.md 6.5): `music.queue`,
+    // `music.jump` and `playlist.add` are new ops, and `music.play`'s
+    // `shuffle` a new optional field, so no stored op changes shape and the
+    // step is the identity. Two rules are gated on this version
+    // (musicQueues): a scene's sound starts its run shuffled, and a delete
+    // takes a queued track out of the order. A stored op from before
+    // replays by the rules it met.
+    // Deploy: back up the database just before, and reload open pages,
+    // table displays included: an old page's strict schemas drop the new
+    // ops and the run's `shuffle`. Rollback needs the backup for a room
+    // with version 48 ops after its last snapshot or a v38 snapshot, which
+    // an older build refuses.
+    from: 47,
+    to: 48,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -1189,6 +1210,18 @@ export const opMigrations: MigrationStep[] = [
  */
 export function clockTicks(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < 42);
+}
+
+/**
+ * Whether the music run is a queue (docs/design/design-v1-music-player.md
+ * 6.4 and 6.5): a scene's sound sets the run's `shuffle` on a run it
+ * starts, and a delete of a track the order holds but that neither plays
+ * nor is the revealed next takes it out of the order rather than refusing.
+ * Ops stored before version 48 met neither and replay by the rules they
+ * met. Live ops carry no stored version and take today's rule.
+ */
+export function musicQueues(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < 48);
 }
 
 /** Historical restores keep their original log entries and numbering. */

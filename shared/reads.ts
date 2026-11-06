@@ -2,6 +2,7 @@ import { doorChunk, keys, readEntity, type EntityKey } from "./keys.ts";
 import type { RoomState, Viewer } from "./model.ts";
 import type { ActorTarget, Op } from "./protocol.ts";
 import type { ProjectedState } from "./project.ts";
+import type { QueueEdit } from "./sound.ts";
 import { moveGroups } from "./rules/attach.ts";
 import { stepsTakenBack } from "./reducer/encounter.ts";
 import { nextTurn } from "./rules/initiative.ts";
@@ -84,6 +85,31 @@ function playingRead(state: RoomState): Read[] {
 function runReads(state: RoomState): Read[] {
   const music = state.playing?.music;
   return [...playingRead(state), ...(music?.order ?? []).map((id) => ({ key: keys.sound(id) }))];
+}
+
+/**
+ * The sounds a queue edit names, which it checks are music, and for
+ * Shuffle off the run's playlist, whose order it puts back
+ * (docs/design/design-v1-music-player.md 6.3). The playlist only while the
+ * view holds it: a DM's view holds every playlist, so one it lacks is
+ * deleted, and the edit then changes only the flag, which still predicts.
+ */
+function queueEditReads(state: RoomState, edit: QueueEdit): Read[] {
+  switch (edit.t) {
+    case "next":
+    case "add":
+      return edit.soundIds.map((id) => ({ key: keys.sound(id) }));
+    case "move":
+      return [{ key: keys.sound(edit.soundId) }, ...(typeof edit.to === "object" ? [{ key: keys.sound(edit.to.before) }] : [])];
+    case "remove":
+      return [{ key: keys.sound(edit.soundId) }];
+    case "shuffle":
+      return [];
+    case "unshuffle": {
+      const playlistId = state.playing?.music?.playlistId;
+      return playlistId !== undefined && ownEntry(state.playlists, playlistId) ? [{ key: keys.playlist(playlistId) }] : [];
+    }
+  }
 }
 
 /** The playlists and scenes a sound's change of use or delete edits, which a DM's view holds whole. */
@@ -370,8 +396,14 @@ export function reads(op: Op, state: RoomState): Reads {
         [{ key: keys.playlist(op.id) }, ...Object.entries(state.scenes).filter(([, scene]) => scene.sound?.music?.playlistId === op.id).map(([id]) => ({ key: keys.scene(id) }))],
         ["scenes"],
       );
+    case "playlist.add":
+      return of([{ key: keys.playlist(op.id) }, { key: keys.sound(op.soundId) }]);
     case "music.play":
       return of([...runReads(state), ...(op.playlistId !== undefined ? [{ key: keys.playlist(op.playlistId) }] : []), ...op.order.map((id) => ({ key: keys.sound(id) }))]);
+    case "music.queue":
+      return of([...runReads(state), ...queueEditReads(state, op.edit)]);
+    case "music.jump":
+      return of([...runReads(state), { key: keys.sound(op.soundId) }]);
     case "music.pause":
     case "music.resume":
     case "music.skip":

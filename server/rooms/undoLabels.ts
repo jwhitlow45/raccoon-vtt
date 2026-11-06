@@ -296,6 +296,9 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       return `changing ${the("playlist", ownEntry(before.playlists, op.id)?.name)}`;
     case "playlist.delete":
       return `deleting ${the("playlist", ownEntry(before.playlists, op.id)?.name)}`;
+    // Add to playlist (docs/design/design-v1-music-player.md 6.3), the queue's one step.
+    case "playlist.add":
+      return `adding ${quoted(ownEntry(before.sounds, op.soundId)?.name, "a track")} to ${the("playlist", ownEntry(before.playlists, op.id)?.name)}`;
     case "sound.create":
       return `adding ${quoted(op.name, "a sound")}`;
     case "sound.delete":
@@ -306,6 +309,8 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
     case "music.skip":
     case "music.stop":
     case "music.set":
+    case "music.queue":
+    case "music.jump":
       return "changing the music";
     case "loop.start":
     case "loop.set":

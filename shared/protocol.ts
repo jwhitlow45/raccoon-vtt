@@ -2,7 +2,7 @@ import { z } from "zod";
 import { historyCommandSchema, historyMessageSchema, opAcknowledgmentSchema, restoreHistoryFieldsSchema } from "./undoContract.ts";
 import { saveOutcomePageSchema, saveOutcomeTransitionSchema, savePageAskFieldsSchema, savePageCloseFieldsSchema, saveRechargeSpendSchema } from "./saveOutcomeContract.ts";
 import { LIMITS, MOST_SIGHT_HOLDERS, SOUND_LIMITS, VIDEO_LIMITS, serializedBytes, videoGeometryProblem } from "./limits.ts";
-import { FADES, LEVEL_MAX, LEVEL_MIN, REPEATS, SOUND_USES } from "./sound.ts";
+import { FADES, LEVEL_MAX, LEVEL_MIN, REPEATS, SOUND_USES, type QueueEdit } from "./sound.ts";
 import { ATTACH_KINDS } from "./rules/attach.ts";
 import { critBound } from "./dice/crit.ts";
 import { applyMode, diceCount, doubleDice, parseExtra, parseFormula, type Formula } from "./dice/formula.ts";
@@ -2085,9 +2085,24 @@ export const musicRunSchema = z
     now: soundAtSchema,
     next: soundAtSchema.optional(),
     paused: z.number().int().min(0).max(SOUND_LIMITS.fileMaxMs).optional(),
+    /** Shuffle is on (docs/design/design-v1-music-player.md 6.4). Absent is off, so `false` is never stored. */
+    shuffle: z.literal(true).optional(),
   })
   .refine((m) => m.order[m.index] === m.now.soundId, { message: "a run's index names its track" })
   .refine((m) => m.next === undefined || (m.paused === undefined && m.repeat !== "one"), { message: "only a playing run under Repeat all or off reveals its next track" });
+/**
+ * One edit of the live run's order (docs/design/design-v1-music-player.md
+ * 6.2 and 6.3), shared/sound.ts QueueEdit: each id list 1 to 100 with no id
+ * twice, and a shuffle's seed a run id's shape.
+ */
+export const queueEditSchema = z.discriminatedUnion("t", [
+  z.strictObject({ t: z.literal("next"), soundIds: runOrder }),
+  z.strictObject({ t: z.literal("add"), soundIds: runOrder }),
+  z.strictObject({ t: z.literal("move"), soundId: id, to: z.union([z.enum(["first", "passEnd", "last"]), z.strictObject({ before: id })]) }),
+  z.strictObject({ t: z.literal("remove"), soundId: id }),
+  z.strictObject({ t: z.literal("shuffle"), seed: runId }),
+  z.strictObject({ t: z.literal("unshuffle") }),
+]) satisfies z.ZodType<QueueEdit>;
 export const soundSchemas = { soundUse, soundRepeat, soundFade, soundVolume, soundLevel, runId, playingId, soundTime, soundLength, playlistSounds, soundAtSchema, firedEffectSchema };
 
 // The builder's ops a gesture of several may send, which a `build.ask` carries (docs/design/design-v1-map-discovery.md 5.3).
@@ -2572,11 +2587,28 @@ const stateClientOps = [
   ),
   op("playlist.delete", { id }),
   /**
+   * Add to playlist (docs/design/design-v1-music-player.md 6.3): one track
+   * appended on the server, so two DMs adding at once both land. A Setup
+   * step, and none when the playlist already holds it.
+   */
+  op("playlist.add", { id, soundId: id }),
+  /**
    * A playlist's tracks or one track from `index` (0 at first) in the order
    * the DM's device fixed, shuffled or not, which the reducer compares with
    * the playlist's. `run` is new at each play, skip, resume and scene start.
+   * `shuffle` says the order was mixed, which the run keeps for its Shuffle
+   * button (docs/design/design-v1-music-player.md 6.4).
    */
-  op("music.play", { run: runId, playlistId: id.optional(), soundId: id.optional(), order: runOrder, index: z.number().int().min(0).max(SOUND_LIMITS.playlistTracks - 1).optional(), repeat: soundRepeat, fade: soundFade })
+  op("music.play", {
+    run: runId,
+    playlistId: id.optional(),
+    soundId: id.optional(),
+    order: runOrder,
+    index: z.number().int().min(0).max(SOUND_LIMITS.playlistTracks - 1).optional(),
+    repeat: soundRepeat,
+    fade: soundFade,
+    shuffle: z.literal(true).optional(),
+  })
     .refine((o) => (o.playlistId === undefined) !== (o.soundId === undefined), { message: "music plays a playlist or one track" })
     .refine((o) => (o.index ?? 0) < o.order.length, { message: "the first track lies in the order" }),
   op("music.pause", {}),
@@ -2584,6 +2616,18 @@ const stateClientOps = [
   op("music.skip", { run: runId }),
   op("music.stop", {}),
   op("music.set", { repeat: soundRepeat.optional(), fade: soundFade.optional() }).refine((o) => o.repeat !== undefined || o.fade !== undefined, { message: "a music change changes something" }),
+  /**
+   * The queue (docs/design/design-v1-music-player.md 6.3), the DM's, no
+   * step. Each names the run it was made on (`from`), so an edit sent
+   * before another DM's play, skip, resume, jump or scene start is
+   * refused rather than landing on music it never saw. A queue edit is a
+   * command the reducer applies at the op's time. A jump is Play now,
+   * Previous or a seek, under a new `run`, `ms` into the track (0 at
+   * first). Seek and Previous name the track they were made on (`on`),
+   * its id alone, since the store predicts with the device's clock.
+   */
+  op("music.queue", { from: runId, edit: queueEditSchema }),
+  op("music.jump", { run: runId, from: runId, soundId: id, ms: z.number().int().min(0).max(SOUND_LIMITS.fileMaxMs).optional(), on: id.optional() }),
   op("loop.start", { id: playingId, soundId: id, volume: soundVolume }),
   op("loop.set", { id: playingId, volume: soundVolume }),
   op("loop.stop", { id: playingId }),
