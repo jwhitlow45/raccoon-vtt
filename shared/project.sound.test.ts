@@ -532,6 +532,17 @@ describe("the queue's edits and jumps (docs/design/design-v1-music-player.md 6.6
     }
   });
 
+  test("a Play next 30 s before the reveal sends players nothing, and the reveal then names that track", () => {
+    const state = run(library(), PLAY).state;
+    const t = table(state);
+    const early = batch(state, queue({ t: "next", soundIds: ["lich"] }), 5_000, t.all);
+    assert.deepEqual(early.sent.get(t.p1), []);
+    const reveal = tickBatch(early.state, t.all);
+    assert.deepEqual(playersRun(reveal.state, "the reveal")?.next, { soundId: "lich", at: S0 + 55_000 });
+    assert.deepEqual(changeOf(reveal.sent.get(t.p1)!, keys.sound("lich")), { key: keys.sound("lich"), value: cut("lich") });
+    assert.equal(changeOf(reveal.sent.get(t.p1)!, keys.sound("m2")), undefined, "Lanterns never reaches Pat");
+  });
+
   test("inside it an edit that changes the following track swaps next at the same start, the new sound unnamed and the old one gone", () => {
     const swaps: [Extract<Op, { t: "music.queue" }>["edit"], string][] = [
       [{ t: "next", soundIds: ["lich"] }, "lich"],
