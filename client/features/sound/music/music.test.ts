@@ -1,6 +1,6 @@
 import "../../../components/testing/register.ts";
 import assert from "node:assert/strict";
-import { describe, test } from "node:test";
+import { afterEach, describe, mock, test } from "node:test";
 import type { MusicRun, Playlist, Sound } from "#shared/sound.ts";
 
 /*
@@ -12,7 +12,7 @@ import type { MusicRun, Playlist, Sound } from "#shared/sound.ts";
 
 const { libraryPlaylists, libraryTracks, matches, playlistChoices, queueNote, rowPlay } = await import("./Library.tsx");
 const { changedFields, draftDirty, draftOf, makerStatus, newDraft, savedName, savedPlaylist, savedTracks } = await import("./Maker.tsx");
-const { seekHolds } = await import("./NowFull.tsx");
+const { seekGesture, seekHolds } = await import("./NowFull.tsx");
 const { queueLists } = await import("./dragOrder.ts");
 const words = await import("./words.ts");
 
@@ -172,5 +172,82 @@ describe("a seek in hand", () => {
     assert.equal(seekHolds({ run: "r", soundId: "a", ms: 30_000 }, queueLists(run, lengths, T + 61_000)), false, "the next track plays now");
     assert.equal(seekHolds({ run: "r", soundId: "a", ms: 30_000 }, queueLists({ ...run, run: "r2" }, lengths, T + 1_000)), false, "another DM played or jumped");
     assert.equal(seekHolds({ run: "r", soundId: "a", ms: 30_000 }, null), false);
+  });
+});
+
+describe("when the seek slider sends", () => {
+  /** A gesture on the window's timers, mocked, and the times its commits came at. */
+  function gesture() {
+    mock.timers.enable({ apis: ["setTimeout"] });
+    let now = 0;
+    const sent: number[] = [];
+    const g = seekGesture(() => sent.push(now));
+    const wait = (ms: number) => {
+      now += ms;
+      mock.timers.tick(ms);
+    };
+    return { g, sent, wait };
+  }
+  afterEach(() => mock.timers.reset());
+
+  test("a key's value sends 400 ms after the last, so a held arrow sends once", () => {
+    const { g, sent, wait } = gesture();
+    for (let i = 0; i < 5; i++) {
+      g.input();
+      wait(100);
+    }
+    assert.deepEqual(sent, []);
+    wait(300);
+    assert.deepEqual(sent, [800]);
+  });
+
+  test("a drag sends once, as it ends, and nothing while the pointer is down", () => {
+    const { g, sent, wait } = gesture();
+    g.start();
+    for (let i = 0; i < 10; i++) {
+      g.input();
+      wait(200);
+    }
+    wait(500);
+    assert.deepEqual(sent, [], "held still past 400 ms");
+    g.end();
+    g.end();
+    assert.deepEqual(sent, [2_500], "a second release, or a lost capture after it, sends no more");
+    wait(1_000);
+    assert.deepEqual(sent, [2_500]);
+  });
+
+  test("a drag begun within 400 ms of a key: the key's timer never fires while the pointer is down (MB-ASTRA-05)", () => {
+    const { g, sent, wait } = gesture();
+    g.input();
+    wait(100);
+    g.start();
+    wait(1_000);
+    assert.deepEqual(sent, [], "held past the key's 400 ms");
+    g.input();
+    g.end();
+    assert.deepEqual(sent, [1_100]);
+  });
+
+  test("a seek dropped mid-drag, as the track changes, leaves the drag on: the values after arm no timer and the release sends (MUSIC-OPUS-4)", () => {
+    const { g, sent, wait } = gesture();
+    g.start();
+    g.input();
+    wait(200);
+    g.drop();
+    g.input();
+    wait(1_000);
+    assert.deepEqual(sent, []);
+    g.end();
+    assert.deepEqual(sent, [1_200]);
+  });
+
+  test("a key's seek dropped before its timer sends nothing", () => {
+    const { g, sent, wait } = gesture();
+    g.input();
+    wait(100);
+    g.drop();
+    wait(1_000);
+    assert.deepEqual(sent, []);
   });
 });

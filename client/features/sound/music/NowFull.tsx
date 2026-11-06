@@ -32,8 +32,54 @@ export function seekHolds(seek: HeldSeek, lists: QueueLists | null): boolean {
   return lists !== null && lists.run === seek.run && lists.playing === seek.soundId;
 }
 
-/** The slider's events: a drag's start and end, a key, and each value it takes. */
-export type SeekEvents = { start(): void; end(): void; key(): void; input(ms: number): void };
+/** The slider's events: a drag's start and end, and each value it takes. */
+export type SeekEvents = { start(): void; end(): void; input(ms: number): void };
+
+/** The timers a seek gesture arms, the window's unless a test gives its own. */
+export type SeekTimers = { set(fn: () => void, ms: number): unknown; clear(handle: unknown): void };
+
+const WINDOW_TIMERS: SeekTimers = { set: (fn, ms) => setTimeout(fn, ms), clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>) };
+
+/**
+ * When the slider sends its seek (4.2): once as a drag ends, and
+ * SEEK_KEY_MS after the last value a key gave, so a held arrow sends one.
+ * No timer runs inside a drag: its start disarms one a key armed just
+ * before, and a value it gives arms none. `drop` disarms the timer of a
+ * seek that no longer holds and leaves a drag on until the pointer lets
+ * go, so the values it still gives wait for the release too. Only the
+ * pointer's release ends a drag, never a key pressed while it is held:
+ * the browser sends that release to the slider wherever the pointer lets
+ * go. `commit` sends the seek in hand, if it still holds.
+ */
+export function seekGesture(commit: () => void, timers: SeekTimers = WINDOW_TIMERS) {
+  let dragging = false;
+  let timer: unknown = null;
+  const disarm = () => {
+    if (timer !== null) timers.clear(timer);
+    timer = null;
+  };
+  return {
+    start() {
+      disarm();
+      dragging = true;
+    },
+    end() {
+      if (!dragging) return;
+      dragging = false;
+      disarm();
+      commit();
+    },
+    input() {
+      if (dragging) return;
+      disarm();
+      timer = timers.set(() => {
+        timer = null;
+        commit();
+      }, SEEK_KEY_MS);
+    },
+    drop: disarm,
+  };
+}
 
 /**
  * Now playing in the Music window (docs/design/design-v1-music-player.md
@@ -112,7 +158,7 @@ export function NowFullView(props: {
           onPointerDown={props.onSeek.start}
           onPointerUp={props.onSeek.end}
           onPointerCancel={props.onSeek.end}
-          onKeyDown={props.onSeek.key}
+          onLostPointerCapture={props.onSeek.end}
           onChange={(e) => props.onSeek.input(Number(e.target.value) * 1000)}
           style={{ flex: 1, minWidth: 0, height: theme.touch, margin: 0, accentColor: theme.color.accent }}
         />
@@ -169,26 +215,20 @@ export function NowFull() {
   const shown = music ? musicShown(music, sounds, playlists, t) : null;
   const [box, width] = useWidth<HTMLDivElement>();
   const [seek, setSeek] = useState<HeldSeek | null>(null);
-  const dragging = useRef(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latest = useRef({ seek, lists });
   latest.current = { seek, lists };
+  // The gesture lives as long as the block, and sends through this render's commit, which reads the newest bound.
+  const sendSeek = useRef(noop);
+  const [gesture] = useState(() => seekGesture(() => sendSeek.current()));
 
   const held = seek !== null && seekHolds(seek, lists) ? seek : null;
   // A seek in hand made on a track or a run that no longer plays is dropped, its timer with it.
   useEffect(() => {
     if (seek === null || held !== null) return;
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = null;
-    dragging.current = false;
+    gesture.drop();
     setSeek(null);
-  }, [seek, held]);
-  useEffect(
-    () => () => {
-      if (timer.current) clearTimeout(timer.current);
-    },
-    [],
-  );
+  }, [seek, held, gesture]);
+  useEffect(() => gesture.drop, [gesture]);
 
   if (!music || !shown || !lists) {
     return (
@@ -198,9 +238,7 @@ export function NowFull() {
     );
   }
   const boundMs = seekBoundMs(music, shown.lengthMs);
-  const commit = () => {
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = null;
+  sendSeek.current = () => {
     const { seek: now, lists: at } = latest.current;
     if (now === null || at === null || !seekHolds(now, at)) return;
     // The server holds a seek a second short of the end, so a seek always places one first occurrence (6.4). Held here too, so the prediction agrees.
@@ -209,23 +247,13 @@ export function NowFull() {
     setSeek(null);
   };
   const onSeek: SeekEvents = {
-    start: () => {
-      dragging.current = true;
-    },
-    end: () => {
-      if (!dragging.current) return;
-      dragging.current = false;
-      commit();
-    },
-    key: () => {
-      dragging.current = false;
-    },
+    start: gesture.start,
+    end: gesture.end,
     input: (ms) => {
-      setSeek({ run: lists.run, soundId: lists.playing, ms });
-      latest.current = { ...latest.current, seek: { run: lists.run, soundId: lists.playing, ms } };
-      if (dragging.current) return;
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(commit, SEEK_KEY_MS);
+      const next = { run: lists.run, soundId: lists.playing, ms };
+      setSeek(next);
+      latest.current = { ...latest.current, seek: next };
+      gesture.input();
     },
   };
   const queue = (edit: { t: "shuffle"; seed: string } | { t: "unshuffle" }) => send(actions, { t: "music.queue", from: lists.run, edit });
@@ -264,7 +292,7 @@ const IDLE = {
   fade: 5 as const,
   boundMs: 0,
   atMs: 0,
-  onSeek: { start: noop, end: noop, key: noop, input: noop },
+  onSeek: { start: noop, end: noop, input: noop },
   onShuffle: noop,
   onPrevious: noop,
   onPause: noop,
