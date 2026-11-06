@@ -20,6 +20,7 @@ const NEW_DEVICE: DeviceValues = {
   roomSound: false,
   rollAnimation: true,
   handle: "tail",
+  tabsLeftOut: 0,
 };
 
 describe("This device's folded summaries", () => {
@@ -37,11 +38,13 @@ describe("This device's folded summaries", () => {
       rolls: "Roll animation on",
       shortcuts: undefined,
       handle: "Ringed tail",
+      tabRow: "Every panel",
     });
   });
 
   test("each setting's other values", () => {
-    const s = deviceSummaries({ ...NEW_DEVICE, scale: 1.3, theme: "auto", fullscreen: true, lowPower: true, roomSound: true, rollAnimation: false, handle: "pill" });
+    const s = deviceSummaries({ ...NEW_DEVICE, scale: 1.3, theme: "auto", fullscreen: true, lowPower: true, roomSound: true, rollAnimation: false, handle: "pill", tabsLeftOut: 3 });
+    assert.equal(s.tabRow, "3 only in More");
     assert.equal(s.size, "130%");
     assert.equal(s.theme, "Auto");
     assert.equal(deviceSummaries({ ...NEW_DEVICE, theme: "light" }).theme, "Light");

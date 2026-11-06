@@ -483,3 +483,45 @@ function followPanelWidth(): void {
     if (event.key === PANEL_WIDTH_KEY || event.key === null) adoptPanelWidth(event.key === null ? null : event.newValue);
   });
 }
+
+// ---------------------------------------------------------------- tab row
+
+/**
+ * "Tab row" (designs/qol audit Q10, D-261106-178): the panels this device
+ * keeps out of the side panel's row of tabs, by role, so More always holds
+ * them. Every panel starts in the row, and a panel added later does too,
+ * since only the ones left out are stored. Nothing counts use: only these
+ * ticks change the row. A DM's and a player's panels are kept apart, so a
+ * device that plays in one room and runs another keeps each row.
+ */
+export type TabRowRole = "dm" | "player";
+export type TabRow = Readonly<Record<TabRowRole, readonly string[]>>;
+
+export const TAB_ROW_KEY = "rvtt.tabRow";
+export const TAB_ROW_NONE: TabRow = { dm: [], player: [] };
+
+/** A panel id as the registry writes one, and no more of them than a role could have. */
+const tabIds = (v: unknown): string[] => (Array.isArray(v) ? [...new Set(v.filter((id): id is string => typeof id === "string" && /^[a-z][a-z0-9-]{0,31}$/.test(id)))].slice(0, 50) : []);
+
+export function parseTabRow(raw: string | null): TabRow {
+  if (raw === null) return TAB_ROW_NONE;
+  try {
+    const v = JSON.parse(raw) as Partial<Record<TabRowRole, unknown>> | null;
+    if (!v || typeof v !== "object" || Array.isArray(v)) return TAB_ROW_NONE;
+    return { dm: tabIds(v.dm), player: tabIds(v.player) };
+  } catch {
+    return TAB_ROW_NONE;
+  }
+}
+
+/** The row with one panel ticked into it or out of it, for one role. */
+export function withTabKept(row: TabRow, role: TabRowRole, id: string, kept: boolean): TabRow {
+  const left = row[role].filter((p) => p !== id);
+  return { ...row, [role]: kept ? left : [...left, id] };
+}
+
+const tabRowSetting = setting<TabRow>(TAB_ROW_KEY, parseTabRow, (row) => JSON.stringify({ dm: row.dm, player: row.player }));
+
+export const tabRow = tabRowSetting.get;
+export const setTabRow = tabRowSetting.set;
+export const useTabRow = tabRowSetting.use;

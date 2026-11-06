@@ -13,14 +13,18 @@ import { isCoarsePointer } from "../lib/device.ts";
 import { theme } from "../lib/theme.ts";
 import { useKeyHint, withKey } from "../state/shortcuts.ts";
 import { Badge } from "./RoomChrome.tsx";
-import { fitTabs, GROUP_GAP, nameCut, TAB_GAP, headerNamesOpen, tabLook as pickLook, widthsFor, type TabFit, type TabLook, type TabWidths } from "./tabFit.ts";
+import { useTabRow } from "../features/device/settings.ts";
+import { useRoomView } from "../state/view.ts";
+import { fitTabs, GROUP_GAP, keptOrder, nameCut, TAB_GAP, headerNamesOpen, tabLook as pickLook, widthsFor, type TabFit, type TabLook, type TabWidths } from "./tabFit.ts";
 
 /**
  * The side panel's tabs in one row (docs/design/design-v1-panel-tabs.md): the
  * registry's order, as many as fit (pages/tabFit.ts), then More, a tab
- * whose menu lists the rest under the phone list's groups. Nothing moves
- * a tab: the row depends only on the widths this device draws and the
- * room it has. A panel opened from More, by its menu or from anywhere
+ * whose menu lists the rest under the phone list's groups. This device's
+ * Tab row may leave panels out, which More then always holds (designs/qol
+ * audit Q10). Nothing moves a tab by use: the row depends only on the
+ * widths this device draws, the room it has and those ticks. A panel
+ * opened from More, by its menu or from anywhere
  * else, shows its name on More, which is then the chosen tab, so the tab
  * list always has one and every rule that sends focus to "the chosen tab"
  * finds More.
@@ -95,6 +99,7 @@ function sameLayout(a: Layout | null, b: Layout | null): boolean {
   return (
     a.look === b.look &&
     a.fit.count === b.fit.count &&
+    a.widths.kept === b.widths.kept &&
     near(a.fit.moreRoom, b.fit.moreRoom) &&
     near(a.widths.room, b.widths.room) &&
     a.widths.tabs.length === b.widths.tabs.length &&
@@ -153,7 +158,11 @@ export function SideTabs(props: {
   tabId(id: string): string;
   panelId: string;
 }) {
-  const { tabs, tab, tabRef } = props;
+  const { tab, tabRef } = props;
+  // The panels this device lets stand in the row come first, in the registry's order, and the fit holds only those (tabFit.ts kept).
+  const role = useRoomView((s) => s.you?.role ?? "player");
+  const left = useTabRow()[role];
+  const { ordered: tabs, kept } = keptOrder(props.tabs, new Set(left));
   const listRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
   const moreRef = useRef<HTMLButtonElement | null>(null);
@@ -161,8 +170,8 @@ export function SideTabs(props: {
   const belowDescribedId = useId();
   const below = props.split.below;
   const [layout, setLayout] = useState<Layout | null>(null);
-  const latest = useRef({ tabs, zoom: props.zoom, grouped: props.grouped });
-  latest.current = { tabs, zoom: props.zoom, grouped: props.grouped };
+  const latest = useRef({ tabs, kept, zoom: props.zoom, grouped: props.grouped });
+  latest.current = { tabs, kept, zoom: props.zoom, grouped: props.grouped };
   /** A focused tab went into More with the last fit, so focus moves to More once it is drawn. */
   const focusMore = useRef(false);
 
@@ -179,7 +188,7 @@ export function SideTabs(props: {
   const refit = useCallback(() => {
     const list = listRef.current;
     const row = measureRef.current;
-    const { tabs: panels, zoom, grouped } = latest.current;
+    const { tabs: panels, kept: keptNow, zoom, grouped } = latest.current;
     let next: Layout | null = null;
     if (list && row) {
       const width = (el: Element | null) => (el ? el.getBoundingClientRect().width / zoom : 0);
@@ -190,8 +199,8 @@ export function SideTabs(props: {
       const room = width(list);
       const tabsOf = (at: number[]) => panels.map((p, i) => ({ rest: at[i] ?? 0, more: more[i] ?? 0, group: tabGroup(p, grouped) }));
       // Each panel's icon before its name where the row then holds as many tabs as the names alone, else the icons alone (docs/design/design-v1-icons-2.md 3.1).
-      const withNames: TabWidths = { tabs: tabsOf(named), moreRest, room };
-      const look = pickLook({ tabs: tabsOf(rest), moreRest, room }, withNames);
+      const withNames: TabWidths = { tabs: tabsOf(named), moreRest, room, kept: keptNow };
+      const look = pickLook({ tabs: tabsOf(rest), moreRest, room, kept: keptNow }, withNames);
       const widths = look ? widthsFor(look, withNames) : withNames;
       const fit = look ? fitTabs(widths) : null;
       next = fit && look ? { fit, widths, look } : null;
@@ -206,7 +215,7 @@ export function SideTabs(props: {
   }, []);
 
   // Before the first paint, as the side panel shows and when the role's panels change: until then it draws no tabs.
-  const panelsKey = tabs.map((p) => p.id).join(" ");
+  const panelsKey = `${tabs.map((p) => p.id).join(" ")}|${kept}`;
   useLayoutEffect(refit, [refit, props.hidden, panelsKey, props.zoom]);
 
   // A resize, a rotation that changes the safe area, a new interface size, or a font that changes size. Committed at once, so no frame paints the old fit.
@@ -219,9 +228,11 @@ export function SideTabs(props: {
   }, [refit]);
 
   const fit = layout?.fit ?? null;
-  const count = fit ? fit.count : 0;
+  // Never past the kept panels, also for the one render between a tick and the fit it starts.
+  const count = fit ? Math.min(fit.count, kept) : 0;
   const row = fit ? tabs.slice(0, count) : [];
-  const held = fit ? tabs.slice(count) : [];
+  // More's menu lists its panels in the registry's order under its groups, the ones left out among them.
+  const held = fit ? props.tabs.filter((p) => !row.includes(p)) : [];
   const chosenHeld = held.find((p) => p.id === tab);
   const stops = [...row.map((p) => p.id), ...(held.length > 0 ? [MORE] : [])];
   const stop = chosenHeld ? MORE : row.some((p) => p.id === tab) ? tab : stops[0];

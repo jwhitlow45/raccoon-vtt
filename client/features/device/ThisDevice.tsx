@@ -1,5 +1,7 @@
 import { Fragment, useId, useSyncExternalStore } from "react";
 import { Button } from "../../components/Button.tsx";
+import { Checkbox } from "../../components/Checkbox.tsx";
+import { Icon } from "../../components/Icon.tsx";
 import { Select } from "../../components/Field.tsx";
 import { GRABBER_DESIGNS, GRABBER_TOP, grabberDesign, parseGrabber, type GrabberId } from "../../components/grabberDesigns.ts";
 import { Group, Help } from "../../components/Panel.tsx";
@@ -12,6 +14,9 @@ import { thisDeviceFoldsSlot, useFolds, type ThisDeviceSection } from "../../lib
 import { theme } from "../../lib/theme.ts";
 import { UNBOUND, type KeyMap } from "../../state/keyBindings.ts";
 import { useRoomScope } from "../../state/scope.ts";
+import { useRoomRoleIfAny } from "../../state/view.ts";
+import { panelsFor, type PanelDef } from "../panels.ts";
+import { useLayoutSize } from "./layout.ts";
 import { keySuffix, keyText, setShortcutSheet, useKeyHint, useShortcutKeys } from "../../state/shortcuts.ts";
 import { setSoundOn, useSoundOn } from "../encounter/alerts.ts";
 import { setSoundEnabled, usePingSound } from "../pings/feedback.ts";
@@ -31,6 +36,11 @@ import {
   setRollAnimation,
   setRollToasts,
   setSheetHandle,
+  setTabRow,
+  tabRow as tabRowNow,
+  useTabRow,
+  withTabKept,
+  type TabRowRole,
   setSoundMix,
   setUiScale,
   soundMix as soundMixNow,
@@ -107,6 +117,12 @@ export default function ThisDevice() {
   const animatedStill = useDeviceStillReason();
   const roomSound = useRoomSoundOn();
   const fold = useFolds(thisDeviceFoldsSlot);
+  // The side panel has its row of tabs from 900 px up only, so a phone never sees a setting with nothing to change. A table display has no side panel.
+  const wide = useLayoutSize().width >= theme.layout.wideMinWidth;
+  const room = useRoomRoleIfAny();
+  const tabRole: TabRowRole | null = wide && room && !room.display ? room.role : null;
+  const tabPanels = tabRole ? panelsFor(tabRole, true, { clock: true, sound: true }) : [];
+  const leftOut = useTabRow()[tabRole ?? "player"];
   const summary = deviceSummaries({
     scale,
     theme: themeChoice,
@@ -120,6 +136,7 @@ export default function ThisDevice() {
     roomSound,
     rollAnimation,
     handle,
+    tabsLeftOut: tabPanels.filter((p) => leftOut.includes(p.id)).length,
   });
   /*
    * Each section a group that folds (docs/design/design-v1-panel-groups.md
@@ -246,7 +263,43 @@ export default function ThisDevice() {
         </Select>
         <SheetHandlePreview id={handle} />
       </Group>
+      {tabRole ? <TabRowSection role={tabRole} panels={tabPanels} left={leftOut} fold={group("tabRow")} /> : null}
     </div>
+  );
+}
+
+/** Tab row's help, which is also its description. */
+export const TAB_ROW_HELP = "Pick the panels that may be tabs. The rest stay in More.";
+
+/**
+ * Tab row (designs/qol audit Q10, D-261106-178): one tick for each of the
+ * role's panels, all ticked at first, so the row is the registry's until
+ * the DM unticks one. An unticked panel stays in More, and the row holds
+ * the ticked ones in the registry's order, as many as fit
+ * (pages/tabFit.ts). Only these ticks move a tab, never use.
+ */
+function TabRowSection(props: { role: TabRowRole; panels: readonly PanelDef[]; left: readonly string[]; fold: GroupFold }) {
+  const helpId = useId();
+  return (
+    <Group label="Tab row" {...props.fold}>
+      <Help id={helpId}>{TAB_ROW_HELP}</Help>
+      <div role="group" aria-label="Panels that may be tabs" aria-describedby={helpId} style={{ display: "grid" }}>
+        {props.panels.map((p) => (
+          <Checkbox
+            key={p.id}
+            label={
+              <span style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
+                <Icon name={p.icon} size="sm" />
+                {p.title}
+              </span>
+            }
+            checked={!props.left.includes(p.id)}
+            // From the stored row, not this render's, so two quick ticks never lose one.
+            onChange={(on) => setTabRow(withTabKept(tabRowNow(), props.role, p.id, on))}
+          />
+        ))}
+      </div>
+    </Group>
   );
 }
 

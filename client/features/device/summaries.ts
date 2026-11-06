@@ -29,6 +29,8 @@ export type DeviceValues = {
   roomSound: boolean;
   rollAnimation: boolean;
   handle: GrabberId;
+  /** How many panels This device's Tab row keeps out of the side panel's row, for the viewer's role. */
+  tabsLeftOut: number;
 };
 
 const join = (parts: readonly (string | null)[]): string => parts.filter((p) => p !== null).join(" · ");
@@ -49,5 +51,6 @@ export function deviceSummaries(v: DeviceValues): Readonly<Record<ThisDeviceSect
     rolls: onOff("Roll animation", v.rollAnimation),
     shortcuts: undefined,
     handle: grabberDesign(v.handle).name,
+    tabRow: v.tabsLeftOut === 0 ? "Every panel" : `${v.tabsLeftOut} only in More`,
   };
 }

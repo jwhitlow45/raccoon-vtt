@@ -258,7 +258,7 @@ export const SCENES_FOLDS: FoldSurface<ScenesSection> = {
 };
 export const scenesFoldsSlot = foldsSlot(SCENES_FOLDS);
 
-export const THIS_DEVICE_SECTIONS = ["size", "theme", "screen", "battery", "mapDetail", "weather", "sounds", "rolls", "shortcuts", "handle"] as const;
+export const THIS_DEVICE_SECTIONS = ["size", "theme", "screen", "battery", "mapDetail", "weather", "sounds", "rolls", "shortcuts", "handle", "tabRow"] as const;
 export type ThisDeviceSection = (typeof THIS_DEVICE_SECTIONS)[number];
 
 /** Every section of This device is setup. */
@@ -267,7 +267,7 @@ export const THIS_DEVICE_FOLDS: FoldSurface<ThisDeviceSection> = {
   sections: THIS_DEVICE_SECTIONS,
   starts: (width) => {
     const wide = wideAt(width);
-    return { size: wide, theme: wide, screen: wide, battery: wide, mapDetail: wide, weather: wide, sounds: wide, rolls: wide, shortcuts: wide, handle: wide };
+    return { size: wide, theme: wide, screen: wide, battery: wide, mapDetail: wide, weather: wide, sounds: wide, rolls: wide, shortcuts: wide, handle: wide, tabRow: wide };
   },
 };
 export const thisDeviceFoldsSlot = foldsSlot(THIS_DEVICE_FOLDS);

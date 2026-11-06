@@ -332,3 +332,20 @@ test("the side panel's width follows another window's change, and a cleared stor
     delete (globalThis as { window?: unknown }).window;
   }
 });
+
+test("the tab row keeps every panel at first, stores only the ones left out, by role, and a broken value reads as none left out", async () => {
+  reset({ writes: true, reads: true });
+  const s = await loadPage();
+  assert.deepEqual(s.tabRow(), { dm: [], player: [] });
+  let row = s.withTabKept(s.tabRow(), "dm", "log", false);
+  row = s.withTabKept(row, "dm", "journal", false);
+  row = s.withTabKept(row, "dm", "log", false);
+  assert.deepEqual(row.dm, ["journal", "log"], "a panel left out twice is stored once");
+  assert.deepEqual(s.withTabKept(row, "dm", "log", true).dm, ["journal"], "ticked back into the row");
+  assert.deepEqual(row.player, [], "a DM's ticks leave a player's row alone");
+  s.setTabRow(row);
+  assert.equal(stored.get("rvtt.tabRow"), '{"dm":["journal","log"],"player":[]}');
+  assert.deepEqual((await loadPage()).tabRow(), row);
+  assert.deepEqual(s.parseTabRow('{"dm":["log",7,"Log","log","dice"],"player":"menu"}'), { dm: ["log", "dice"], player: [] }, "only panel ids, once each");
+  for (const raw of ["", "{", "null", "[]", "7", '"log"']) assert.deepEqual(s.parseTabRow(raw), { dm: [], player: [] }, raw);
+});
