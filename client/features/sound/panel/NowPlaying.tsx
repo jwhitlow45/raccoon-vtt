@@ -213,15 +213,22 @@ export function MusicBlock() {
 
 /** Stop all sound, while anything sounds (useSoundToStop). */
 export function StopAllSound() {
-  const actions = useRoomActions();
   const anything = useSoundToStop();
   if (!anything) return null;
   return (
     <Actions>
-      <Button size="sm" variant="danger" icon="stop" onClick={() => send(actions, { t: "sound.stopAll" })}>
-        {STOP_ALL}
-      </Button>
+      <StopAllButton />
     </Actions>
+  );
+}
+
+/** Stop all sound's button, for a row that shows it only while anything sounds: here, and under the player (music/NowFull.tsx). */
+export function StopAllButton() {
+  const actions = useRoomActions();
+  return (
+    <Button size="sm" variant="danger" icon="stop" onClick={() => send(actions, { t: "sound.stopAll" })}>
+      {STOP_ALL}
+    </Button>
   );
 }
 

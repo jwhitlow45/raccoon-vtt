@@ -11,7 +11,7 @@ import { lengthText } from "../panel/words.ts";
 import { dragKey, keyMove, movable, moveTo, placeOf, queueLists, type QueueLists } from "./dragOrder.ts";
 import { useJumps } from "./jumps.ts";
 import { dragRowStyle, Handle, HandleHelp, ListHead, MoreMenu, MoveStatus, useRowDrag } from "./parts.tsx";
-import { againLine, handleName, movedLine, MUSIC_ENDS, NOTHING_AFTER, PLAY_NEXT, PLAY_NOW, PLAYED, REMOVE_FROM_QUEUE, REPEAT_ONE_LINE, tracksDetail, UP_NEXT } from "./words.ts";
+import { againLine, handleName, movedLine, MUSIC_ENDS, NOTHING_AFTER, PLAY_NEXT, PLAY_NOW, PLAYED, REMOVE_FROM_QUEUE, REPEAT_ONE_LINE, UP_NEXT } from "./words.ts";
 
 /** The keys a handle takes, which never scroll the list under it. */
 export const HANDLE_KEYS = new Set(["ArrowUp", "ArrowDown", "Home", "End"]);
@@ -22,6 +22,8 @@ export const HANDLE_KEYS = new Set(["ArrowUp", "ArrowDown", "Home", "End"]);
  * all and one the rest of the cycle, or under Repeat off Played. Each edit
  * is one `music.queue` naming the run it was made on, shown at once by the
  * store's prediction. The playing track has no row: it is Now playing.
+ * Headless: the Sound panel's fold carries its name, with the next track
+ * folded and the count open (docs/design/design-v1-sound-layout.md 4.3).
  */
 export function UpNext() {
   const actions = useRoomActions();
@@ -117,7 +119,6 @@ export function UpNext() {
   return (
     <div data-music-upnext="" style={{ display: "grid", gap: theme.space(2), minWidth: 0 }}>
       <HandleHelp id={helpId} />
-      <ListHead detail={ahead.length > 0 ? tracksDetail(ahead.length, lengthOf(ahead, sounds)) : undefined}>{UP_NEXT}</ListHead>
       {lists.repeat === "one" ? <Help>{REPEAT_ONE_LINE}</Help> : null}
       {ahead.length > 0 ? <OrderedList label={UP_NEXT}>{ahead.map((id) => row(id, true))}</OrderedList> : <Help>{NOTHING_AFTER}</Help>}
       {lists.repeat !== "off" && lists.again.length > 0 ? (
@@ -144,7 +145,8 @@ export function UpNext() {
   );
 }
 
-function lengthOf(ids: readonly SoundId[], sounds: Sounds): number {
+/** How long `ids` play together: Up next's count beside its open fold, "9 tracks · 26 min". */
+export function lengthOf(ids: readonly SoundId[], sounds: Sounds): number {
   return totalMs(ids.flatMap((id) => (sounds[id] ? [sounds[id]!] : [])));
 }
 
@@ -170,7 +172,7 @@ export function OrderRow(props: { rowRef?: ((el: HTMLElement | null) => void) | 
   );
 }
 
-/** A track's name over its length, the middle of an order row. `inset` lines a row with no handle up with the window's edge. */
+/** A track's name over its length, the middle of an order row. `inset` lines a row with no handle up with the list's edge. */
 export function TrackLine(props: { name: string; ms: number; inset?: boolean }) {
   return (
     <span style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(0.5), padding: `${theme.space(1)}px 0`, paddingLeft: props.inset ? theme.space(3) : 0 }}>

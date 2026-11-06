@@ -28,7 +28,6 @@ export function nextLine(name: string): string {
   return `Next: ${name}`;
 }
 
-export const NO_MUSIC_NOW = "No music is playing. Pick a playlist or a track in Library.";
 export const SHUFFLE = "Shuffle";
 export const REPEAT = "Repeat";
 export const PLAY = "Play";

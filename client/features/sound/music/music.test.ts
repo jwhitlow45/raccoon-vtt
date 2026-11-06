@@ -1,7 +1,8 @@
 import "../../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { afterEach, describe, mock, test } from "node:test";
-import type { MusicRun, Playlist, Sound } from "#shared/sound.ts";
+import type { ReactElement } from "react";
+import type { MusicRun, Playing, Playlist, Sound } from "#shared/sound.ts";
 import type { MakerDraft } from "./open.ts";
 
 /*
@@ -310,5 +311,209 @@ describe("when the seek slider sends", () => {
     g.drop();
     wait(1_000);
     assert.deepEqual(sent, []);
+  });
+});
+
+/*
+ * The player as the Sound panel holds it, and as the chip's player will
+ * (docs/design/design-v1-sound-layout.md 4.2 and 5.3): its foot rows, the
+ * inline Crossfade, the idle line, and the ops its buttons and Up next's
+ * Play now send.
+ */
+
+const { createElement } = await import("react");
+const { renderToStaticMarkup } = await import("react-dom/server");
+const { createStore } = await import("zustand/vanilla");
+const { RoomProvider } = await import("../../../state/view.ts");
+const { RoomScope, RoomScopeProvider } = await import("../../../state/scope.ts");
+const { room } = await import("#shared/testutil.ts");
+const { NowFull, NowFullView } = await import("./NowFull.tsx");
+const { UpNext } = await import("./UpNext.tsx");
+const { jumpsSlot } = await import("./jumps.ts");
+
+const noop = () => {};
+
+/** NowFullView's props with music playing, for a test to change one. */
+function viewProps(over: Partial<Parameters<typeof NowFullView>[0]> = {}): Parameters<typeof NowFullView>[0] {
+  const shown = { soundId: "pony", name: "The Prancing Pony", lengthMs: 190_000, positionMs: 84_000, paused: false, playlistName: "Tavern night", place: 3, count: 12, single: false, crossingInto: null };
+  return {
+    shown,
+    shuffle: false,
+    repeat: "all",
+    fade: 5,
+    width: 360,
+    boundMs: 190_000,
+    atMs: 84_000,
+    onSeek: { start: noop, end: noop, input: noop },
+    onShuffle: noop,
+    onPrevious: noop,
+    onPause: noop,
+    onResume: noop,
+    onSkip: noop,
+    onRepeat: noop,
+    onFade: noop,
+    onStop: noop,
+    ...over,
+  };
+}
+
+// In a Room scope, as the panel draws it: Crossfade's and every menu's popover reads the scope.
+const drawView = (over: Partial<Parameters<typeof NowFullView>[0]> = {}) => renderToStaticMarkup(createElement(RoomScopeProvider, { scope: new RoomScope(), children: createElement(NowFullView, viewProps(over)) }));
+
+/** How many divs are open at `mark`'s tag, so two marks at one depth are siblings, not one inside the other. */
+function depthAt(html: string, mark: string): number {
+  const before = html.slice(0, html.indexOf(mark));
+  return (before.match(/<div[\s>]/g)?.length ?? 0) - (before.match(/<\/div>/g)?.length ?? 0);
+}
+
+/** The markup between an element's opening tag, found by its mark, and the next mark of the same kind or the end. */
+function part(html: string, mark: string): string {
+  const at = html.indexOf(mark);
+  assert.ok(at >= 0, `${mark} is drawn`);
+  return html.slice(at);
+}
+
+describe("the player's foot (docs/design/design-v1-sound-layout.md 4.2)", () => {
+  test("Crossfade's menu and Stop the music share a centered row, and Stop all sound stands in a centered row of its own under it", () => {
+    const html = drawView({ stopAll: createElement("button", { type: "button" }, "Stop all sound") });
+    const foot = part(html, "data-music-foot");
+    assert.match(foot, /^data-music-foot="" style="[^"]*justify-content:center/);
+    assert.ok(foot.indexOf("Crossfade: 5 s") < foot.indexOf("Stop the music"));
+    const stopAll = html.indexOf("data-music-stop-all");
+    assert.ok(stopAll > html.indexOf("Stop the music"), "under the foot");
+    assert.match(html.slice(stopAll), /^data-music-stop-all="" style="[^"]*justify-content:center[^"]*">\s*<button[^>]*>Stop all sound<\/button><\/div>/, "alone in its row");
+    assert.equal(depthAt(html, "data-music-stop-all"), depthAt(html, "data-music-foot"), "a row beside the foot's, never inside it");
+  });
+
+  test("with nothing sounding there is no Stop all sound row at all", () => {
+    assert.doesNotMatch(drawView({ stopAll: null }), /data-music-stop-all/);
+    assert.doesNotMatch(drawView(), /data-music-stop-all/);
+  });
+
+  test("inline, Crossfade is a radio group of its four choices beside its name, and no menu button", () => {
+    const html = drawView({ fadeControl: "inline", fade: 2 });
+    assert.doesNotMatch(html, /data-music-crossfade=""/, "no menu, which would close a popover that holds it");
+    const inline = part(html, "data-music-crossfade-inline");
+    const name = /<span id="([^"]+)"[^>]*>Crossfade<\/span>/.exec(inline);
+    assert.ok(name, "named Crossfade");
+    assert.match(inline, new RegExp(`role="radiogroup"[^>]*aria-labelledby="${name[1]}"`));
+    const radios = [...inline.matchAll(/<input type="radio"([^>]*)\/>([^<]+)</g)].map((m) => [m[2], /value="(\d+)"/.exec(m[1]!)?.[1], /checked=""/.test(m[1]!)]);
+    assert.deepEqual(radios, [["Off", "0", false], ["2 s", "2", true], ["5 s", "5", false], ["10 s", "10", false]]);
+    assert.ok(html.indexOf("data-music-crossfade-inline") < html.indexOf("Stop the music"), "in the foot, before Stop the music");
+  });
+
+  test("with no music the panel's line names Library as a link button, the chip's says only that none plays", () => {
+    const panel = drawView({ shown: null, onLibrary: noop });
+    assert.match(panel, /<p[^>]*>No music is playing\. Pick a playlist or a track in <button type="button" data-music-library-link=""[^>]*>Library<\/button>\.<\/p>/);
+    const chip = drawView({ shown: null });
+    assert.match(chip, /<p[^>]*>No music is playing\.<\/p>/);
+    assert.doesNotMatch(chip, /data-music-library-link|Pick a playlist/);
+  });
+
+  test("with no music but a background sound, Stop all sound's row still stands under the line", () => {
+    const html = drawView({ shown: null, onLibrary: noop, stopAll: createElement("button", { type: "button" }, "Stop all sound") });
+    assert.ok(html.indexOf("data-music-stop-all") > html.indexOf("data-music-library-link"));
+    assert.doesNotMatch(html, /Stop the music|data-music-seek/, "no transport with no music");
+  });
+});
+
+/** A DM's room with `playing`, drawn around a component, and what it sends. */
+function dmRoom(playing: Playing | null) {
+  const tracks = Object.fromEntries(["a", "b", "c"].map((id) => [id, sound(id, 60_000, `Track ${id}`)]));
+  const view = room({ sounds: tracks, playlists: { p: { id: "p", rev: 0, name: "Tavern night", sounds: ["a", "b", "c"], repeat: "all", fade: 0 } }, ...(playing ? { playing } : null) });
+  const store = createStore(() => ({ view, you: { memberId: "dm1", role: "dm" }, roomId: "r1", sceneId: "s1", serverOffset: 0, connection: "open", pending: [], online: [], displays: 0, local: { selectedIds: [], multi: false } }));
+  const scope = new RoomScope();
+  const sent: { t: string }[] = [];
+  const actions = {
+    dispatch(op: { t: string }) {
+      sent.push(op);
+      return sent.length;
+    },
+    newId: () => `id${sent.length}`,
+    sendEph: noop,
+  };
+  const around = (child: ReactElement) =>
+    createElement(RoomScopeProvider, { scope, children: createElement(RoomProvider, { store: store as never, actions: actions as never, ui: { notify: noop, openPanel: noop } as never, assets: { url: () => "" } as never, children: child }) });
+  return { around, scope, sent };
+}
+
+/** A run of a, b, c, `intoMs` into its second track b, started now on the device's clock. */
+function runOn(intoMs: number, over: Partial<MusicRun> = {}): Playing {
+  const run: MusicRun = { run: "r1", playlistId: "p", order: ["a", "b", "c"], index: 1, repeat: "all", fade: 0, now: { soundId: "b", at: Date.now() - intoMs }, ...over };
+  return { rev: 1, music: run, loops: {}, effects: [], volume: { music: 100, effects: 100 } };
+}
+
+/** The NowFullView NowFull draws, whose handlers a test calls as a tap would. */
+function playerView(r: ReturnType<typeof dmRoom>, props: Parameters<typeof NowFull>[0] = {}) {
+  const tree = drawn(NowFull, props, r.around) as { props: { children: { props: Parameters<typeof NowFullView>[0] } } };
+  return tree.props.children.props;
+}
+
+describe("the player's ops (docs/design/design-v1-sound-layout.md 5.3, 10.1)", () => {
+  test("Previous and Seek send music.jump through the Room's count of pending jumps, Skip sends music.skip itself", () => {
+    const r = dmRoom(runOn(30_000));
+    const view = playerView(r);
+    view.onPrevious();
+    assert.deepEqual(r.sent.map((o) => o.t), ["music.jump"]);
+    assert.equal(r.scope.get(jumpsSlot).n, 1, "counted in the Room's slot, which the chip's player reads too");
+    view.onSkip();
+    assert.deepEqual(r.sent.map((o) => o.t), ["music.jump", "music.skip"]);
+    assert.equal(r.scope.get(jumpsSlot).n, 1, "Skip is not a jump");
+  });
+
+  test("a seek dragged and let go sends one music.jump on the playing track, counted", () => {
+    const r = dmRoom(runOn(10_000));
+    const view = playerView(r);
+    view.onSeek.start();
+    view.onSeek.input(40_000);
+    // The value is in hand by the next render. The release reads it from the gesture's latest place.
+    view.onSeek.end();
+    const jump = r.sent.find((o) => o.t === "music.jump") as { t: string; soundId: string; on: string } | undefined;
+    assert.ok(jump, "a seek sends a jump");
+    assert.equal(jump.soundId, "b");
+    assert.equal(r.scope.get(jumpsSlot).n, 1);
+  });
+
+  test("Stop all sound's row only with `stopAll` and while anything sounds", () => {
+    const r = dmRoom(runOn(10_000));
+    assert.notEqual(playerView(r, { stopAll: true }).stopAll, null);
+    assert.equal(playerView(r, {}).stopAll, null, "the chip's player puts Stop all sound at its own foot");
+    assert.equal(playerView(dmRoom(null), { stopAll: true }).stopAll, null, "nothing sounds");
+  });
+
+  test("the inline Crossfade is passed through, and the menu is the default", () => {
+    const r = dmRoom(runOn(10_000));
+    assert.equal(playerView(r, { fadeControl: "inline" }).fadeControl, "inline");
+    assert.equal(playerView(r).fadeControl, "menu");
+  });
+});
+
+describe("Up next in the Sound panel (docs/design/design-v1-sound-layout.md 4.3)", () => {
+  test("has no heading of its own, since its fold carries the name", () => {
+    const r = dmRoom(runOn(10_000));
+    const html = renderToStaticMarkup(r.around(createElement(UpNext)));
+    assert.doesNotMatch(html, /<h3[^>]*>Up next/);
+    assert.match(html, /<ol aria-label="Up next"/, "its list keeps the name");
+  });
+
+  test("Play now sends music.jump through the Room's count of pending jumps", () => {
+    const r = dmRoom(runOn(10_000));
+    const tree = drawn(UpNext, {}, r.around) as unknown as { props: { children: unknown[] } };
+    // The first row's More menu, in the ahead list: Play now on track c.
+    const menus: { props: { items: { id: string }[]; onPick(id: string): void } }[] = [];
+    const walk = (node: unknown) => {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(walk);
+      const el = node as { props?: { items?: unknown; onPick?: unknown; children?: unknown } };
+      if (el.props?.items && el.props.onPick) menus.push(el as never);
+      walk(el.props?.children);
+    };
+    walk(tree);
+    const first = menus[0];
+    assert.ok(first, "a row's More menu");
+    assert.ok(first.props.items.some((i) => i.id === "now"));
+    first.props.onPick("now");
+    assert.deepEqual(r.sent.map((o) => o.t), ["music.jump"]);
+    assert.equal(r.scope.get(jumpsSlot).n, 1);
   });
 });

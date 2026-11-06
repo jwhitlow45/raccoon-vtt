@@ -1,20 +1,22 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Button } from "../../../components/Button.tsx";
 import { Icon } from "../../../components/Icon.tsx";
 import { IconButton } from "../../../components/IconButton.tsx";
 import { Help } from "../../../components/Panel.tsx";
+import { Segmented } from "../../../components/Segmented.tsx";
 import { theme } from "../../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../../state/view.ts";
-import { seekBoundMs, type Fade, type Repeat, type SoundId } from "#shared/sound.ts";
-import { useTicking, useWakeAt } from "../panel/controls.tsx";
+import { FADES, seekBoundMs, type Fade, type Repeat, type SoundId } from "#shared/sound.ts";
+import { useSoundToStop, useTicking, useWakeAt } from "../panel/controls.tsx";
+import { StopAllButton } from "../panel/NowPlaying.tsx";
 import { send } from "../panel/ops.ts";
 import { musicShown, playlistsOf, serverNow, soundsOf, type MusicShown } from "../panel/state.ts";
-import { clockText, REPEAT_NAMES, REPEAT_NEXT, runLine, skipName, STOP_MUSIC } from "../panel/words.ts";
+import { clockText, NO_MUSIC_PICK, NO_MUSIC_PLAYING, REPEAT_NAMES, REPEAT_NEXT, runLine, skipName, STOP_MUSIC } from "../panel/words.ts";
 import { previousTarget, queueLists, type QueueLists } from "./dragOrder.ts";
 import { useJumps } from "./jumps.ts";
 import { CrossfadeMenu, useWidth } from "./parts.tsx";
 import { Tile, TILE } from "./tile.ts";
-import { NO_MUSIC_NOW, PREVIOUS, SEEK, seekText, SHUFFLE } from "./words.ts";
+import { CROSSFADE, FADE_WORDS, PREVIOUS, SEEK, seekText, SHUFFLE } from "./words.ts";
 
 /** A seek is sent this long after the slider's last key, so a held arrow sends one (4.2). */
 export const SEEK_KEY_MS = 400;
@@ -104,10 +106,24 @@ export function seekGesture(commit: () => void, timers: SeekTimers = WINDOW_TIME
 }
 
 /**
- * Now playing in the Music window (docs/design/design-v1-music-player.md
- * 4.2): the tile with the track's name and run line, the seek row, the
- * transport (Shuffle, Previous, Play or Pause, Skip, Repeat), then
- * Crossfade and Stop the music. Pure, so its states render in a test.
+ * How the player offers Crossfade (docs/design/design-v1-sound-layout.md
+ * 5.3): its menu, or a row of its four choices in place, for the chip's
+ * popover, where the menu, a popover of its own, would close the player
+ * that holds it.
+ */
+export type FadeControl = "menu" | "inline";
+
+/**
+ * The player (docs/design/design-v1-music-player.md 4.2, as the Sound
+ * panel and the chip's player hold it, docs/design/design-v1-sound-layout.md
+ * 4.2 and 5.3): the tile with the track's name and run line, the seek row,
+ * the transport (Shuffle, Previous, Play or Pause, Skip, Repeat), then
+ * Crossfade and Stop the music in a centered row, then `stopAll` in a
+ * centered row of its own. With no music, the idle line, which names
+ * Library as a link while `onLibrary` is given, then `stopAll`. Pure, so
+ * its states render in a test. It fills its container's width, so the
+ * chip's card and sheet reach their edges, and only the chip's popover
+ * caps it.
  */
 export function NowFullView(props: {
   shown: MusicShown | null;
@@ -128,12 +144,29 @@ export function NowFullView(props: {
   onRepeat(): void;
   onFade(fade: Fade): void;
   onStop(): void;
+  /** The menu unless given. */
+  fadeControl?: FadeControl;
+  /** Stop all sound, in its own row under the foot, or null while nothing sounds. */
+  stopAll?: ReactNode;
+  /** Shows Library, where the idle line names it. Without it the line says only that no music plays. */
+  onLibrary?(): void;
 }) {
   const { shown } = props;
+  /*
+   * Its own centered row, never a wrap of the foot's: a lone button wrapped
+   * under Crossfade and Stop the music measures as an orphan at 360 and 390
+   * px (SL-OPUS-7), and this way the block looks one way at every width.
+   */
+  const stopAll = props.stopAll ? (
+    <div data-music-stop-all="" style={CENTERED}>
+      {props.stopAll}
+    </div>
+  ) : null;
   if (!shown) {
     return (
-      <div data-music-now="" style={{ display: "grid", gap: theme.space(3), minWidth: 0 }}>
-        <Help>{NO_MUSIC_NOW}</Help>
+      <div data-music-now="" data-music-idle="" style={{ display: "grid", gap: theme.space(3), minWidth: 0 }}>
+        <IdleLine onLibrary={props.onLibrary} />
+        {stopAll}
       </div>
     );
   }
@@ -205,24 +238,62 @@ export function NowFullView(props: {
           {repeat}
         </div>
       )}
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "center", gap: theme.space(2) }}>
-        <CrossfadeMenu fade={props.fade} onPick={props.onFade} />
+      <div data-music-foot="" style={CENTERED}>
+        {props.fadeControl === "inline" ? <InlineCrossfade fade={props.fade} onPick={props.onFade} /> : <CrossfadeMenu fade={props.fade} onPick={props.onFade} />}
         <Button size="sm" icon="stop" onClick={props.onStop}>
           {STOP_MUSIC}
         </Button>
       </div>
+      {stopAll}
     </div>
   );
 }
 
 /**
- * Now playing, connected: the music Now playing names at the shown server
+ * The player's line with no music. In the panel "Library" is a link button
+ * in the Guide link's look that shows Library (4.2), since the line tells
+ * the DM to go there. The chip's player has no Library to show (5.3).
+ */
+export function IdleLine(props: { onLibrary?: (() => void) | undefined }) {
+  if (!props.onLibrary) return <Help>{NO_MUSIC_PLAYING}</Help>;
+  return (
+    <Help>
+      {NO_MUSIC_PICK.before}
+      <button type="button" data-music-library-link="" onClick={props.onLibrary} style={LINK}>
+        {NO_MUSIC_PICK.link}
+      </button>
+      {NO_MUSIC_PICK.after}
+    </Help>
+  );
+}
+
+/**
+ * Crossfade's four choices in place, a radio group named "Crossfade"
+ * beside its name, as the maker's settings draw it. The choices wrap under
+ * the name where the row is short, as at 130%.
+ */
+export function InlineCrossfade(props: { fade: Fade; onPick(fade: Fade): void }) {
+  const id = useId();
+  return (
+    <div data-music-crossfade-inline="" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "center", gap: theme.space(2), minWidth: 0 }}>
+      <span id={id} style={{ fontSize: theme.font.body14, color: theme.color.textMuted }}>
+        {CROSSFADE}
+      </span>
+      <Segmented<Fade> labelledBy={id} value={props.fade} options={FADES.map((f) => ({ value: f, label: FADE_WORDS[f] }))} onChange={props.onPick} />
+    </div>
+  );
+}
+
+/**
+ * The player, connected: the music Now playing names at the shown server
  * time, and the ops its buttons send. Seek sends `music.jump` when a drag
  * ends, and 400 ms after the slider's last key, never during a drag. A
  * seek in hand is dropped when the run or the playing track changes before
  * it is sent (4.2), and a drag under way then sends nothing at all.
+ * `stopAll` adds Stop all sound's row while anything sounds, and
+ * `fadeControl` and `onLibrary` are NowFullView's.
  */
-export function NowFull() {
+export function NowFull(props: { fadeControl?: FadeControl; stopAll?: boolean; onLibrary?(): void } = {}) {
   const actions = useRoomActions();
   const jumps = useJumps();
   const music = useRoomView((s) => s.view?.playing?.music ?? null);
@@ -236,6 +307,8 @@ export function NowFull() {
   const lists = queueLists(music, sounds, t);
   const shown = music ? musicShown(music, sounds, playlists, t) : null;
   const [box, width] = useWidth<HTMLDivElement>();
+  const sounding = useSoundToStop();
+  const stopAll = props.stopAll && sounding ? <StopAllButton /> : null;
   const [seek, setSeek] = useState<HeldSeek | null>(null);
   const latest = useRef({ seek, lists });
   latest.current = { seek, lists };
@@ -254,8 +327,8 @@ export function NowFull() {
 
   if (!music || !shown || !lists) {
     return (
-      <div ref={box}>
-        <NowFullView {...IDLE} shown={null} width={width} />
+      <div ref={box} style={{ minWidth: 0 }}>
+        <NowFullView {...IDLE} shown={null} width={width} stopAll={stopAll} onLibrary={props.onLibrary} />
       </div>
     );
   }
@@ -280,7 +353,7 @@ export function NowFull() {
   };
   const queue = (edit: { t: "shuffle"; seed: string } | { t: "unshuffle" }) => send(actions, { t: "music.queue", from: lists.run, edit });
   return (
-    <div ref={box}>
+    <div ref={box} style={{ minWidth: 0 }}>
       <NowFullView
         shown={shown}
         shuffle={lists.shuffle}
@@ -302,6 +375,8 @@ export function NowFull() {
         onRepeat={() => send(actions, { t: "music.set", repeat: REPEAT_NEXT[music.repeat] })}
         onFade={(fade) => send(actions, { t: "music.set", fade })}
         onStop={() => send(actions, { t: "music.stop" })}
+        fadeControl={props.fadeControl ?? "menu"}
+        stopAll={stopAll}
       />
     </div>
   );
@@ -327,6 +402,9 @@ const IDLE = {
 
 const BIG: CSSProperties = { minWidth: 48, minHeight: 48 };
 const ROW: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center", gap: theme.space(1) };
+const CENTERED: CSSProperties = { display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "center", gap: theme.space(2), minWidth: 0 };
+/** The Guide link's look (features/guide/GuideLink.tsx), at the line's own size. */
+const LINK: CSSProperties = { padding: 0, margin: 0, border: "none", background: "transparent", color: theme.color.accent, font: "inherit", textDecoration: "underline", cursor: "pointer" };
 const TIME: CSSProperties = { flex: "none", minWidth: 40, fontSize: theme.font.small, color: theme.color.textMuted, fontVariantNumeric: "tabular-nums" };
 const PLAY_BIG: CSSProperties = {
   flex: "none",
