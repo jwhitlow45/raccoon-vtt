@@ -32,6 +32,8 @@ import { EffectIcon } from "./EffectIcon.tsx";
 import { SaveEndsFields, sameSave, saveEndsForm, saveEndsText, saveOf } from "./SaveEndsFields.tsx";
 import { FieldRow, Note, NumberField, Section, Select, SmallButton, Stepper } from "./ui.tsx";
 import { useHeld } from "../../components/Held.tsx";
+import { usePreview } from "../dm/previewContext.ts";
+import { noteConditionUsed, recentConditions } from "./recentConditions.ts";
 
 /**
  * Conditions and statuses on a creature (features section 7): the list with
@@ -233,6 +235,8 @@ const UNDER_NAME = { display: "block", width: 0, minWidth: "100%" } as const;
 /** Every condition and status as an icon tile. A tap opens its rules text and the form to add it. */
 export function EffectPicker(props: { present: Effect[]; onPick(key: EffectKey): void }) {
   const has = new Set(props.present.map((e) => e.key));
+  // The three this device used last, as they stood when the picker opened, so nothing moves under a tap (designs/qol audit Q13).
+  const [recent] = useState(() => recentConditions());
   // A raw button, so it reads the held group itself: the fieldset stops it but cannot draw it off.
   const off = useHeld();
   const tile = (key: EffectKey) => {
@@ -271,6 +275,14 @@ export function EffectPicker(props: { present: Effect[]; onPick(key: EffectKey):
   const grid = { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(76px, 1fr))", gap: theme.space(1) } as const;
   return (
     <div style={{ display: "grid", gap: theme.space(2) }}>
+      {recent.length > 0 ? (
+        <>
+          <Note>Recent</Note>
+          <div role="group" aria-label="Recent" style={grid}>
+            {recent.map(tile)}
+          </div>
+        </>
+      ) : null}
       <Note>Conditions</Note>
       <div style={grid}>{CONDITION_KEYS.map(tile)}</div>
       <Note>Statuses</Note>
@@ -293,6 +305,8 @@ function EffectDetail(props: {
 }) {
   const { effectKey: key, existing, target, canEdit } = props;
   const actions = useRoomActions();
+  // "View as a player" changes nothing on this device, its recent conditions included.
+  const preview = usePreview() !== null;
   const view = useRoomView((s) => s.view);
   const dm = useRoomView((s) => s.you?.role === "dm");
   const info = infoOf(key);
@@ -350,6 +364,7 @@ function EffectDetail(props: {
       if (dm && key === "readied" && triggerShown) effect.triggerShown = true;
       if (dm && saveValue) effect.save = saveValue;
       actions.dispatch({ t: "actor.effect.add", target, effect });
+      if (!preview) noteConditionUsed(key);
     } else {
       const patch: Extract<ClientOp, { t: "actor.effect.update" }>["patch"] = {};
       if (key === "exhaustion" && level !== existing.level) patch.level = level;

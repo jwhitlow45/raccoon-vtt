@@ -57,6 +57,7 @@ import {
   type Lit,
 } from "../features/tokens/groupEdit.ts";
 import { deadHealLine } from "../features/tokens/groupHp.ts";
+import { noteConditionUsed, recentConditions } from "../features/tokens/recentConditions.ts";
 import { GroupHpEntry } from "../features/tokens/GroupHpEntry.tsx";
 import { GroupMoreSheet } from "../features/tokens/GroupMoreSheet.tsx";
 import { DeathSaves, HpEntry, oneTarget } from "../features/tokens/HpSection.tsx";
@@ -2061,6 +2062,18 @@ function QuickConditions(props: { lit(key: Effect["key"]): Lit; onToggle(key: Ef
   useLayoutEffect(() => {
     ref.current?.scrollIntoView({ block: "nearest" });
   }, []);
+  /*
+   * The three this device used last first (designs/qol audit Q13), as they
+   * stood when the drawer opened: a row that reordered as a tile was
+   * tapped would put another condition under the finger for the next tap.
+   */
+  const [recent] = useState(() => recentConditions());
+  const preview = usePreview() !== null;
+  const toggle = (key: Effect["key"]) => {
+    // Put on, not taken off. "View as a player" changes nothing on this device.
+    if (props.lit(key) !== "all" && !preview) noteConditionUsed(key);
+    props.onToggle(key);
+  };
   // C asks for the first cell (designs/qol audit 11), as the drawer opens or while it is open already.
   const { focusFirst, onFocused } = props;
   useLayoutEffect(() => {
@@ -2084,7 +2097,7 @@ function QuickConditions(props: { lit(key: Effect["key"]): Lit; onToggle(key: Ef
               key={key}
               type="button"
               aria-pressed={some ? "mixed" : active}
-              onClick={() => props.onToggle(key)}
+              onClick={() => toggle(key)}
               style={{
                 minHeight: 50,
                 display: "grid",
@@ -2121,6 +2134,7 @@ function QuickConditions(props: { lit(key: Effect["key"]): Lit; onToggle(key: Ef
       }}
       style={{ display: "grid", gap: theme.space(2) }}
     >
+      {recent.length > 0 ? group("Recent", recent) : null}
       {group("Conditions", CONDITION_KEYS)}
       {group("Other statuses", STATUS_KEYS)}
     </div>
