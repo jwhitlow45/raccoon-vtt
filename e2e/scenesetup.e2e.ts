@@ -733,9 +733,10 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
       await what.getByText("Perception checks here roll with Disadvantage.").waitFor();
       const rules = what.getByRole("switch", { name: "Weather rules on rolls", exact: true });
       assert.equal(await rules.getAttribute("aria-checked"), "true");
-      // One row for the rules: the switch is described by them, and no line beside it says them again (D-261102-863).
-      assert.match((await dm.locator(`[id="${await rules.getAttribute("aria-describedby")}"]`).textContent()) ?? "", /Perception checks here roll with Disadvantage\./);
+      // pe1: the switch is described by what rolls here do, in one sentence said once, and a line under it per weather part says what the SRD says, its name first (docs/design/design-v1-polish-pass.md 3.2).
+      assert.equal((await dm.locator(`[id="${await rules.getAttribute("aria-describedby")}"]`).textContent()) ?? "", "Perception checks here roll with Disadvantage.");
       assert.equal(await what.getByText(/Perception checks here roll with Disadvantage\./).count(), 1);
+      await what.getByText("Heavy rain: Lightly Obscured, and Disadvantage on all Wisdom (Perception) checks. Puts out open flames.", { exact: true }).waitFor();
       assert.equal(await what.getByRole("radiogroup", { name: "Wind blows toward" }).count(), 0, "calm has no compass");
       await what.getByRole("radiogroup", { name: "Wind", exact: true }).getByRole("radio", { name: "Strong", exact: true }).check();
       const compass = what.getByRole("radiogroup", { name: "Wind blows toward" });
@@ -745,7 +746,12 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
       await compass.getByRole("radio", { name: "Toward the left" }).check();
       await waitFor("the wind toward the left", () => (weatherOf(run.arenaId)?.toward === 270 ? true : null));
       assert.deepEqual(weatherOf(run.arenaId), { kind: "rain", heavy: true, wind: "strong", toward: 270 });
-      await what.getByText(/Attacks with a ranged weapon here roll with Disadvantage/).waitFor();
+      await what.getByText("Perception checks and ranged weapon attacks here roll with Disadvantage. Other ranged attacks here get a reminder.", { exact: true }).waitFor();
+      await what.getByText("Strong wind: Disadvantage on ranged attack rolls with weapons. Puts out open flames, and a flying creature must land at the end of its turn or fall.", { exact: true }).waitFor();
+      // The compass's row is Direction, its help saying the wind blows toward the edge picked, and the compass keeps its own name (4.2).
+      await what.getByText("Direction", { exact: true }).waitFor();
+      await what.getByText("Where it blows toward, by the map's edges as Top-down shows them.", { exact: true }).waitFor();
+      assert.equal(await what.getByText("Blows toward", { exact: true }).count(), 0, "the old name is gone");
       // The guide's picture of the weather (docs/dm-guide/weather-settings.webp): its group at the top of the panel.
       // Earlier steps' toasts and the scene's loading notice are gone by then.
       await dm.getByText(/^Loading Arena/).waitFor({ state: "detached", timeout: 30_000 });
@@ -804,9 +810,11 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
       await moderated.waitFor();
       assert.equal(await wind.getByRole("radio", { name: "Strong", exact: true }).isDisabled(), true, "strong wind disperses fog");
       await strength.getByRole("radio", { name: "Heavy", exact: true }).check();
-      await what.getByText(/^Heavily Obscured: a creature trying to see something in it has the Blinded condition\./).waitFor();
-      // The rules switch's help warns for heavy fog.
-      const warned = await what.getByText(/^Heavily Obscured/).evaluate((el) => (globalThis as unknown as { getComputedStyle(e: unknown): { color: string } }).getComputedStyle(el).color);
+      // pe1: heavy fog's switch says it reminds, and its line is a Note in the warning color, its name first, then the SRD's words and the app's advice (docs/design/design-v1-polish-pass.md 3.2).
+      await what.getByText("Perception checks and attacks here get a reminder.", { exact: true }).waitFor();
+      const fogLine = what.getByText("Heavy fog: Heavily Obscured: a creature trying to see something in it has the Blinded condition. The map still shows what light and walls allow, so hide what the party could not see.", { exact: true });
+      await fogLine.waitFor();
+      const warned = await fogLine.evaluate((el) => (globalThis as unknown as { getComputedStyle(e: unknown): { color: string } }).getComputedStyle(el).color);
       const muted = await what.getByText("Players see it at once. Each device can show it still or turn it off in This device.").evaluate((el) => (globalThis as unknown as { getComputedStyle(e: unknown): { color: string } }).getComputedStyle(el).color);
       assert.notEqual(warned, muted, "heavy fog's rules in the warning color");
       await shots.take(dm, "wx-ui-2-heavy-fog");
@@ -824,7 +832,9 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
       const rules = what.getByRole("switch", { name: "Weather rules on rolls", exact: true });
       await rules.click();
       await waitFor("rules off", () => (weatherOf(run.arenaId)?.rules === false ? true : null));
-      await what.getByText(/Rolls here ignore it\.$/).waitFor();
+      await what.getByText("Rolls here ignore these rules.", { exact: true }).waitFor();
+      // The SRD still says its words with the rules off, so the lines stay.
+      await what.getByText("Sandstorm: Disadvantage on Wisdom (Perception) checks.", { exact: true }).waitFor();
       await kind.selectOption({ label: "Snow" });
       await waitFor("snow", () => (weatherOf(run.arenaId)?.kind === "snow" ? true : null));
       assert.deepEqual(weatherOf(run.arenaId), { kind: "snow", wind: "strong", rules: false });
@@ -915,7 +925,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
           if (h.nameLines !== 1) lines.push(`${at.name} ${h.name}: its name takes ${h.nameLines} lines`);
           off("the chevron against the name's first line", h.chevronMiddle, h.nameMiddle);
           const s = h.summaryBox!;
-          // A short name such as Map and grid leaves room for the summary's floor beside it even at 320 px and 130%, where it may be cut past its floor (D-261029-36). A longer one sends it under.
+          // A summary stands beside its name where it fits whole, else it moves whole under the name (Group's wholeSummary, docs/design/design-v1-polish-pass.md 3.1).
           const under = s.top >= h.nameBottom - 1;
           if (under) {
             if (!at.wrapped) lines.push(`${at.name} ${h.name}: its summary wrapped under the name`);
