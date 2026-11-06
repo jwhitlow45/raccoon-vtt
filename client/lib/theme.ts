@@ -513,6 +513,10 @@ export const theme = {
     pillarTint: "rgba(143, 137, 126, 0.3)",
     /** A window's pane, half opaque. */
     pane: "rgba(160, 210, 245, 0.5)",
+    /** A door leaf's stain over its wood, so a door reads against a wood floor. */
+    doorStain: "rgba(52, 28, 12, 0.45)",
+    /** The faint line round each square inside a raised top, so squares stay countable with the grid off. */
+    squareLine: "rgba(0, 0, 0, 0.16)",
     /** A pit's floor, darkened by its depth. */
     pitShade: "rgba(0, 0, 0, 0.4)",
     /** A standee's stem and shadow. */

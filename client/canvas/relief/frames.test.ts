@@ -304,12 +304,18 @@ describe("drawing frames", () => {
     }
   });
 
-  test("a closed door draws its posts in one flat tone a face and its leaf in wood, twelve fills at most with textures loaded, an open frame its posts alone, a window its posts and pane", () => {
-    const g = globalThis as { DOMMatrix?: unknown };
-    const had = g.DOMMatrix;
+  test("a closed door draws its posts in one flat tone a face and its leaf in stained wood, twelve fills at most with textures loaded, an open frame its posts alone, a window its posts and pane", () => {
+    const g = globalThis as { DOMMatrix?: unknown; OffscreenCanvas?: unknown };
+    const had = [g.DOMMatrix, g.OffscreenCanvas];
     g.DOMMatrix = class {};
+    // A canvas to bake the leaf's stain into its wood on, as a browser has (looks.ts tintedPatternOf).
+    g.OffscreenCanvas = class {
+      getContext() {
+        return { drawImage() {}, fillRect() {} };
+      }
+    };
     try {
-      const wood = { naturalWidth: 256 } as HTMLImageElement;
+      const wood = { naturalWidth: 256, naturalHeight: 256 } as HTMLImageElement;
       const list = items(pieces(build({ "1,1,n": door("closed"), "3,1,n": door("open"), "5,1,w": { kind: "window" } })));
       const fillsOf = (x: number, turn: Turn) => {
         const r = recording();
@@ -326,7 +332,7 @@ describe("drawing frames", () => {
         assert.equal(fillsOf(5, turn).length, 7, `turn ${turn}: a window's posts and its pane`);
       }
     } finally {
-      g.DOMMatrix = had;
+      [g.DOMMatrix, g.OffscreenCanvas] = had;
     }
   });
 });

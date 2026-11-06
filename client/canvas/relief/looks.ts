@@ -238,3 +238,45 @@ export function patternOf(g: CanvasRenderingContext2D, image: HTMLImageElement):
   if (p === undefined) patterns.set(image, (p = g.createPattern(image, "repeat")));
   return p;
 }
+
+/** One pattern per texture image and tint, the tint laid over the image once. */
+const tinted = new WeakMap<HTMLImageElement, Map<string, CanvasPattern | null>>();
+
+/**
+ * A texture with a tint baked in (docs/design/design-v1-iso-depth.md 7,
+ * D-261102-889): the image drawn once on a canvas of its own size with the
+ * tint filled over it, as a repeating pattern, so a wall's stone or a door's
+ * stained wood fills a face in one call where the image and its tint took
+ * two. Null where no canvas can be made or the image has not decoded: the
+ * caller fills the image and the tint apart, and a later call bakes it.
+ */
+export function tintedPatternOf(g: CanvasRenderingContext2D, image: HTMLImageElement, tint: string): CanvasPattern | null {
+  let byTint = tinted.get(image);
+  const kept = byTint?.get(tint);
+  if (kept !== undefined) return kept;
+  const w = image.naturalWidth;
+  const h = image.naturalHeight;
+  if (!(w > 0 && h > 0)) return null;
+  const canvas = bakeCanvas(w, h);
+  const c = canvas?.getContext("2d") as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null | undefined;
+  let p: CanvasPattern | null = null;
+  if (canvas && c) {
+    c.drawImage(image, 0, 0);
+    c.fillStyle = tint;
+    c.fillRect(0, 0, w, h);
+    p = g.createPattern(canvas, "repeat");
+  }
+  if (!byTint) tinted.set(image, (byTint = new Map()));
+  byTint.set(tint, p);
+  return p;
+}
+
+function bakeCanvas(w: number, h: number): HTMLCanvasElement | OffscreenCanvas | null {
+  if (typeof document !== "undefined") {
+    const c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    return c;
+  }
+  return typeof OffscreenCanvas === "function" ? new OffscreenCanvas(w, h) : null;
+}

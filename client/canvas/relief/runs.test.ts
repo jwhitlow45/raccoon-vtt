@@ -8,7 +8,7 @@ import { sceneWalls } from "#shared/rules/walls.ts";
 import { rng } from "#shared/testutil.ts";
 import { isometric, toView, type Turn } from "../../lib/view.ts";
 import { FogView } from "./fogView.ts";
-import { boundsOf, WALL_RISE, wallItems, type WallItem } from "./pieces.ts";
+import { boundsOf, slabCorners, WALL_RISE, WALL_THICK, wallItems, type WallItem } from "./pieces.ts";
 import { pillarPieces, wallPieces, type WallPiece } from "./runs.ts";
 
 const SCENE = { id: "s1", autoWalls: "off" as const, bounds: { w: 16, h: 16 } };
@@ -209,9 +209,11 @@ describe("automatic walls beside raised ground", () => {
   const top = (w: WallItem) => w.base + w.rise;
 
   /** The view box of a wall piece's line standing from z0 to z1, projected on its own. */
+  /** What a wall piece stands, as a slab half its thickness past every side and end, drawn or not (docs/design/design-v1-iso-depth.md 6). */
   function box(w: WallItem, turn: Turn, z0: number, z1: number) {
     const view = isometric(turn);
-    const points = [z0, z1].flatMap((z) => [toView(view, { x: w.piece.ax, y: w.piece.ay }, z), toView(view, { x: w.piece.bx, y: w.piece.by }, z)]);
+    const corners = slabCorners({ x: w.piece.ax, y: w.piece.ay }, { x: w.piece.bx, y: w.piece.by }, WALL_THICK / 2);
+    const points = [z0, z1].flatMap((z) => corners.map((c) => toView(view, c, z)));
     return { x0: Math.min(...points.map((p) => p.x)), y0: Math.min(...points.map((p) => p.y)), x1: Math.max(...points.map((p) => p.x)), y1: Math.max(...points.map((p) => p.y)) };
   }
 
@@ -253,7 +255,8 @@ describe("automatic walls beside raised ground", () => {
     assert.equal(drawn.piece.auto, false);
     assert.deepEqual([drawn.base, drawn.rise], [3, WALL_RISE]);
     const want = box(drawn, 0, 3, 3 + WALL_RISE);
-    assert.deepEqual(boundsOf(drawn, 0), want);
+    const got = boundsOf(drawn, 0);
+    for (const k of ["x0", "y0", "x1", "y1"] as const) assert.ok(Math.abs(got[k] - want[k]) < 1e-9, `${k}: ${got[k]} against ${want[k]}`);
   });
 
   test("a door on a raised edge stands on the higher ground, as before", () => {

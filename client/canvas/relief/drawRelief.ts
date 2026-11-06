@@ -5,9 +5,9 @@ import { theme } from "../../lib/theme.ts";
 import { depth, isometric, K, toView, turnAxes, type Turn } from "../../lib/view.ts";
 import type { BandPart } from "../../features/areas/volume.ts";
 import { meets, type DrawPiece, type VolumePiece } from "./buckets.ts";
-import { patternOf } from "./looks.ts";
+import { patternOf, tintedPatternOf } from "./looks.ts";
 import { treadHeight } from "../../lib/stairRuns.ts";
-import { boundsOf, facesOf, frameParts, isOpening, partCorners, risersOf, sortKey, treadOrder, treadPolygon, type CellPiece, type Face, type FramePart, type PitRegion, type SideLook, type StaticPiece, type VBox, type WallItem } from "./pieces.ts";
+import { boundsOf, edgeLow, facesOf, frameParts, isOpening, partCorners, risersOf, slabCorners, sortKey, treadOrder, treadPolygon, WALL_THICK, type CellPiece, type Face, type FramePart, type PitRegion, type SideLook, type StaticPiece, type VBox, type WallItem } from "./pieces.ts";
 
 /**
  * Drawing a run of relief pieces (docs/design/design-v1-isometric-view.md 5.5):
@@ -192,8 +192,12 @@ function addPoly(g: CanvasRenderingContext2D, pts: readonly Pt[]): void {
   g.closePath();
 }
 
-/** A side as it draws: the parallelogram from `a` to `b` and `h` view units down. */
-type SideShape = { a: Pt; b: Pt; h: number; left: boolean; path: Path2D | null };
+/**
+ * A side as it draws: the parallelogram from `a` to `b` and `h` view units
+ * down. `along` is how far its `a` end lies along its line from the
+ * world's origin, in cells, where its texture starts (fillSide).
+ */
+type SideShape = { a: Pt; b: Pt; h: number; left: boolean; path: Path2D | null; along: number };
 
 /** A cell piece's drawing at a turn, in view units: its bounds, its sides, and its polygon at its own height and at 0. */
 type CellShape = {
@@ -206,6 +210,11 @@ type CellShape = {
   /** Its top, and every side's outline together, as paths made once, where the canvas has them (tests' fakes may not). */
   topPath: Path2D | null;
   outline: Path2D | null;
+  /** Its sides' outlines as lines, by the outline rule (outlineOf), for a canvas with no paths. */
+  outlineLines: readonly (readonly Pt[])[];
+  /** The edges of its top whose neighbor is lower, its rim, as lines at its height, and as a path made once. */
+  rim: readonly (readonly Pt[])[];
+  rimPath: Path2D | null;
 };
 
 /*
@@ -225,7 +234,8 @@ function shapeOf(p: CellPiece, turn: Turn): CellShape {
   const view = isometric(turn);
   const paths = typeof Path2D === "function";
   // A stair's faces draw tread by tread (stepsShapeOf).
-  const sides = p.kind === "steps" ? [] : facesOf(p, turn).map((f) => sideShape(view, f, paths));
+  const faces = p.kind === "steps" ? [] : facesOf(p, turn);
+  const sides = faces.map((f) => sideShape(view, f, paths));
   const top = lifted(turn, p.poly, p.z);
   const atZero = lifted(turn, p.poly, 0);
   const source: VBox = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
@@ -235,12 +245,28 @@ function shapeOf(p: CellPiece, turn: Turn): CellShape {
     source.x1 = Math.max(source.x1, q.x);
     source.y1 = Math.max(source.y1, q.y);
   }
-  let outline: Path2D | null = null;
-  if (paths && sides.length > 0) {
-    outline = new Path2D();
-    for (const f of sides) sidePath(outline, f.a, f.b, f.h);
+  // Which faces' ends join the next square's along their line (pieces.ts CellPiece.joins): a face cut in fifths beside a stair never does.
+  const outlineLines = sides.flatMap((f, i) => {
+    const bits = p.joins?.[faces[i]!.side] ?? 0;
+    return faceLines(f, (bits & 1) === 0, (bits & 2) === 0);
+  });
+  const rim: Pt[][] = [];
+  // On squares a top's rim is each side whose neighbor is lower, and the squares inside keep a faint line (5.1). A hex's top keeps its whole outline until lane D4.
+  if (p.poly.length === 4) {
+    for (let i = 0; i < p.sides.length; i++) if (edgeLow(p, i) < p.z) rim.push(lifted(turn, [p.sides[i]!.a, p.sides[i]!.b], p.z));
   }
-  const shape = { bounds: boundsOf(p, turn), sides, top, atZero, source, topPath: paths ? polyPath(new Path2D(), top) : null, outline };
+  const shape = {
+    bounds: boundsOf(p, turn),
+    sides,
+    top,
+    atZero,
+    source,
+    topPath: paths ? polyPath(new Path2D(), top) : null,
+    outline: paths && outlineLines.length > 0 ? linesPath(new Path2D(), outlineLines) : null,
+    outlineLines,
+    rim,
+    rimPath: paths && rim.length > 0 ? linesPath(new Path2D(), rim) : null,
+  };
   byTurn[turn] = shape;
   return shape;
 }
@@ -250,7 +276,61 @@ function sideShape(view: ReturnType<typeof isometric>, f: Face, paths: boolean):
   const a = toView(view, { x: f.ax, y: f.ay }, f.z1);
   const b = toView(view, { x: f.bx, y: f.by }, f.z1);
   const h = K * (f.z1 - f.z0);
-  return { a, b, h, left: f.left, path: paths ? sidePath(new Path2D(), a, b, h) : null };
+  const len = Math.hypot(f.bx - f.ax, f.by - f.ay) || 1;
+  return { a, b, h, left: f.left, path: paths ? sidePath(new Path2D(), a, b, h) : null, along: (f.ax * (f.bx - f.ax) + f.ay * (f.by - f.ay)) / len };
+}
+
+/**
+ * A face's outline by the outline rule (docs/design/design-v1-iso-depth.md
+ * 5.1, D-261102-888): its top edge and its foot always, and the upright
+ * edge at each end only where `atA` or `atB` says, as few lines as join at
+ * their corners. With both ends it is the closed parallelogram.
+ */
+function faceLines(f: SideShape, atA: boolean, atB: boolean): Pt[][] {
+  const a = f.a;
+  const b = f.b;
+  const a0 = { x: a.x, y: a.y + f.h };
+  const b0 = { x: b.x, y: b.y + f.h };
+  return ringLines([a, b, b0, a0], [true, atB, true, atA]);
+}
+
+/**
+ * The lines along a ring of points that keep edge k, from point k to the
+ * next, where `keep[k]`: the whole ring closed when every edge is kept, else
+ * each run of kept edges as one line, so kept edges meeting at a corner
+ * join there as a closed outline's do.
+ */
+function ringLines(pts: readonly Pt[], keep: readonly boolean[]): Pt[][] {
+  const n = pts.length;
+  if (keep.every(Boolean)) return [[...pts, pts[0]!]];
+  const out: Pt[][] = [];
+  // Start after a dropped edge, so no run is split at the ring's seam.
+  const start = keep.findIndex((k, i) => !k && keep[(i + 1) % n]);
+  if (start < 0) return out;
+  let line: Pt[] | null = null;
+  for (let j = 1; j <= n; j++) {
+    const k = (start + j) % n;
+    if (keep[k]) {
+      line ??= [pts[k]!];
+      line.push(pts[(k + 1) % n]!);
+    } else if (line) {
+      out.push(line);
+      line = null;
+    }
+  }
+  if (line) out.push(line);
+  return out;
+}
+
+/** Adds lines to a path, each from its first point on. A line that ends where it began closes. */
+function linesPath<P extends Path2D | CanvasRenderingContext2D>(path: P, lines: readonly (readonly Pt[])[]): P {
+  for (const l of lines) {
+    path.moveTo(l[0]!.x, l[0]!.y);
+    const closed = l.length > 3 && l[l.length - 1] === l[0];
+    for (let i = 1; i < (closed ? l.length - 1 : l.length); i++) path.lineTo(l[i]!.x, l[i]!.y);
+    if (closed) path.closePath();
+  }
+  return path;
 }
 
 /** One tread of a stepping stair as it draws at a turn: its height, its faces toward the viewer (its outer side and its riser) and away (an opening's far sides), and its top. */
@@ -393,34 +473,49 @@ export function blended(base: string, over: string): string | null {
  * Fills the parallelogram from `a` to `b` and `h` view units down with a
  * look: its texture laid along the edge one tile per TEXTURE_CELLS cells of
  * length and of height, else its tone, then the light from the left. A
- * plain tone and its light fill once, mixed. Its outline follows unless the
- * caller strokes it with others (`stroke` false).
+ * texture runs on from the world's origin along the edge's line (`along`,
+ * SideShape), so faces side by side on one line show no seam in it. A tint
+ * is baked into the texture's pattern (looks.ts tintedPatternOf), else laid
+ * over it. A plain tone, its tint and its light fill once, mixed. Its
+ * outline follows unless the caller strokes it with others (`stroke` false).
  */
-function fillSide(g: CanvasRenderingContext2D, a: Pt, b: Pt, h: number, look: SideLook, left: boolean | null, dc: DrawContext, tint: string | null = null, stroke = true, path: Path2D | null = null): void {
+function fillSide(g: CanvasRenderingContext2D, a: Pt, b: Pt, h: number, look: SideLook, left: boolean | null, dc: DrawContext, tint: string | null = null, stroke = true, path: Path2D | null = null, along = 0): void {
   if (!path) {
     g.beginPath();
     addSide(g, a, b, h);
   }
   const light = left === null ? null : left ? theme.relief.lit : theme.relief.shaded;
   const img = look.texture && look.texture !== "pit" && look.texture !== "pillar" && look.texture !== "stairs" ? dc.textures[look.texture as TexturedTerrain] : undefined;
-  const pattern = img ? patternOf(g, img) : null;
+  const baked = img && tint ? tintedPatternOf(g, img, tint) : null;
+  const pattern = baked ?? (img ? patternOf(g, img) : null);
   if (pattern && img && img.naturalWidth > 0) {
     // Pattern pixels to view units: along the edge per cell of its length, and K view units down per cell of height.
     const length = Math.hypot(b.x - a.x, (b.y - a.y) * 2) || 1;
+    const ux = (b.x - a.x) / length;
+    const uy = (b.y - a.y) / length;
     const k = TEXTURE_CELLS / img.naturalWidth;
-    pattern.setTransform(new DOMMatrix([((b.x - a.x) / length) * k, ((b.y - a.y) / length) * k, 0, K * k, a.x, a.y]));
+    pattern.setTransform(new DOMMatrix([ux * k, uy * k, 0, K * k, a.x - ux * along, a.y - uy * along]));
     g.fillStyle = pattern;
     fillWith(g, path);
+    if (tint && !baked) {
+      g.fillStyle = tint;
+      fillWith(g, path);
+    }
   } else {
-    const tone = look.texture && !img ? (TERRAIN_COLORS[look.texture as TexturedTerrain] ?? look.color) : look.color;
-    const mixed = !tint && light ? blended(tone, light) : null;
-    g.fillStyle = mixed ?? tone;
-    fillWith(g, path);
-    if (mixed) return outline(g, dc, stroke, path);
-  }
-  if (tint) {
-    g.fillStyle = tint;
-    fillWith(g, path);
+    const base = look.texture && !img ? (TERRAIN_COLORS[look.texture as TexturedTerrain] ?? look.color) : look.color;
+    const tone = tint ? blended(base, tint) : base;
+    if (tone === null) {
+      // A tone the blend cannot read takes its tint as its own fill.
+      g.fillStyle = base;
+      fillWith(g, path);
+      g.fillStyle = tint!;
+      fillWith(g, path);
+    } else {
+      const mixed = light ? blended(tone, light) : null;
+      g.fillStyle = mixed ?? tone;
+      fillWith(g, path);
+      if (mixed || !light) return outline(g, dc, stroke, path);
+    }
   }
   if (light) {
     g.fillStyle = light;
@@ -437,14 +532,14 @@ function outline(g: CanvasRenderingContext2D, dc: DrawContext, stroke: boolean, 
   strokeWith(g, path);
 }
 
-/** A piece's sides, each filled, then their outlines in one stroke: they meet only along their shared edges. */
+/** A piece's sides, each filled, then their outlines by the outline rule in one stroke: they meet only along their shared edges. */
 function drawSides(g: CanvasRenderingContext2D, p: CellPiece, dc: DrawContext): void {
   const shape = shapeOf(p, dc.turn);
   if (shape.sides.length === 0) return;
-  for (const f of shape.sides) fillSide(g, f.a, f.b, f.h, p.look, f.left, dc, null, false, f.path);
+  for (const f of shape.sides) fillSide(g, f.a, f.b, f.h, p.look, f.left, dc, null, false, f.path, f.along);
   if (!shape.outline) {
     g.beginPath();
-    for (const f of shape.sides) addSide(g, f.a, f.b, f.h);
+    linesPath(g, shape.outlineLines);
   }
   outline(g, dc, true, shape.outline);
 }
@@ -509,12 +604,38 @@ function groundPattern(g: CanvasRenderingContext2D, dc: DrawContext): CanvasPatt
   return copy.pattern;
 }
 
-/** The outline of tops at one height, so a platform's edge reads on flat art. */
+/**
+ * The outline of tops at one height, so a platform's edge reads on flat
+ * art. On squares (docs/design/design-v1-iso-depth.md 5.1) every square of
+ * them takes a faint line, grid or no grid, so squares stay countable, and
+ * their rims take the edge's line, so raised ground reads as one surface. A
+ * hex's top keeps its whole outline in the edge's line.
+ */
 function outlineTops(g: CanvasRenderingContext2D, cells: readonly CellPiece[], dc: DrawContext): void {
   const path = topsPath(g, cells, dc.turn);
-  g.strokeStyle = theme.relief.edge;
+  const hex = cells[0]!.poly.length !== 4;
+  g.strokeStyle = hex ? theme.relief.edge : theme.relief.squareLine;
   g.lineWidth = 1 / (dc.camera.scale * dc.pixelRatio);
   strokeWith(g, path);
+  if (hex) return;
+  let rim: Path2D | null = null;
+  if (cells.length === 1) {
+    const shape = shapeOf(cells[0]!, dc.turn);
+    if (shape.rim.length === 0) return;
+    rim = shape.rimPath;
+  }
+  if (!rim) {
+    g.beginPath();
+    let any = false;
+    for (const c of cells) {
+      const lines = shapeOf(c, dc.turn).rim;
+      any ||= lines.length > 0;
+      linesPath(g, lines);
+    }
+    if (!any) return;
+  }
+  g.strokeStyle = theme.relief.edge;
+  strokeWith(g, rim);
 }
 
 /**
@@ -559,7 +680,7 @@ function drawSteps(g: CanvasRenderingContext2D, p: CellPiece, dc: DrawContext, v
   const pattern = groundPattern(g, dc);
   const k = dc.pixelRatio * dc.camera.scale;
   for (const t of shape.treads) {
-    for (const f of t.near) fillSide(g, f.a, f.b, f.h, p.look, f.left, dc, null, false, f.path);
+    for (const f of t.near) fillSide(g, f.a, f.b, f.h, p.look, f.left, dc, null, false, f.path, f.along);
     if (t.near.length > 0) strokeFaces(g, t.near, t.nearOutline, unit);
     const path = t.topPath;
     if (!path) {
@@ -584,7 +705,7 @@ function drawSteps(g: CanvasRenderingContext2D, p: CellPiece, dc: DrawContext, v
     g.strokeStyle = theme.relief.edge;
     g.lineWidth = unit;
     strokeWith(g, path);
-    for (const f of t.far) fillSide(g, f.a, f.b, f.h, p.look, f.left, dc, null, false, f.path);
+    for (const f of t.far) fillSide(g, f.a, f.b, f.h, p.look, f.left, dc, null, false, f.path, f.along);
     if (t.far.length > 0) strokeFaces(g, t.far, t.farOutline, unit);
   }
   if (opening) g.restore();
@@ -621,17 +742,22 @@ function drawPillar(g: CanvasRenderingContext2D, w: WallItem, dc: DrawContext): 
   g.ellipse(top.x, top.y, rx, ry, 0, 0, Math.PI, false);
   g.closePath();
   const img = dc.textures.stone;
-  const pattern = img ? patternOf(g, img) : null;
+  // The tint baked into the stone's pattern, one fill, else laid over it.
+  const baked = img ? tintedPatternOf(g, img, theme.relief.pillarTint) : null;
+  const pattern = baked ?? (img ? patternOf(g, img) : null);
   if (pattern && img && img.naturalWidth > 0) {
     const k = TEXTURE_CELLS / img.naturalWidth;
     pattern.setTransform(new DOMMatrix([k, 0, 0, K * k, top.x - rx, top.y]));
     g.fillStyle = pattern;
+    g.fill();
   } else {
-    g.fillStyle = TERRAIN_COLORS.stone;
+    g.fillStyle = blended(TERRAIN_COLORS.stone, theme.relief.pillarTint) ?? TERRAIN_COLORS.stone;
+    g.fill();
   }
-  g.fill();
-  g.fillStyle = theme.relief.pillarTint;
-  g.fill();
+  if (pattern && img && img.naturalWidth > 0 && !baked) {
+    g.fillStyle = theme.relief.pillarTint;
+    g.fill();
+  }
   g.strokeStyle = theme.relief.edge;
   g.lineWidth = 1 / (dc.camera.scale * dc.pixelRatio);
   g.stroke();
@@ -654,6 +780,7 @@ function drawWall(g: CanvasRenderingContext2D, w: WallItem, dc: DrawContext): vo
 function drawStanding(g: CanvasRenderingContext2D, w: WallItem, dc: DrawContext): void {
   if (w.piece.kind === "pillar") return drawPillar(g, w, dc);
   if (w.framed) return drawFrame(g, w, dc);
+  if (w.slab) return drawSlab(g, w, dc);
   const view = isometric(dc.turn);
   const top = w.base + w.rise;
   const a = toView(view, { x: w.piece.ax, y: w.piece.ay }, top);
@@ -663,9 +790,91 @@ function drawStanding(g: CanvasRenderingContext2D, w: WallItem, dc: DrawContext)
     fillSide(g, a, b, h, { texture: null, color: theme.relief.pane }, null, dc);
     return;
   }
-  const look: SideLook = w.piece.kind === "door" ? { texture: "wood", color: TERRAIN_COLORS.wood } : { texture: "stone", color: TERRAIN_COLORS.stone };
-  // A wall facing the viewer's left reads lighter, as a column's left side does.
-  fillSide(g, a, b, h, look, a.x < b.x === a.y > b.y, dc, w.piece.kind === "wall" ? theme.relief.wallTint : null);
+  const door = w.piece.kind === "door";
+  // A wall facing the viewer's left reads lighter, as a column's left side does. A door's leaf wears its stain, a wall its tint.
+  fillSide(g, a, b, h, door ? WOOD : STONE, a.x < b.x === a.y > b.y, dc, door ? theme.relief.doorStain : w.piece.kind === "wall" ? theme.relief.wallTint : null);
+}
+
+/** A slab as it draws at a turn: its faces toward the viewer, which of them are its narrow ends, its cap, and its outline. */
+type SlabShape = { faces: readonly { face: SideShape; end: boolean }[]; cap: readonly Pt[]; capPath: Path2D | null; lines: readonly (readonly Pt[])[]; outline: Path2D | null };
+
+const slabShapes = new WeakMap<WallItem, (SlabShape | undefined)[]>();
+
+/**
+ * A wall slab's drawing at a turn (docs/design/design-v1-iso-depth.md 5.6),
+ * kept with the item as a cell's shape is: its two long sides and two ends,
+ * of which those facing the viewer draw, never overlapping one another on
+ * screen, then its cap. An end where the wall carries on along its line
+ * shows no face and no line (pieces.ts slabOf).
+ */
+function slabShapeOf(w: WallItem, turn: Turn): SlabShape {
+  let byTurn = slabShapes.get(w);
+  if (!byTurn) slabShapes.set(w, (byTurn = []));
+  const kept = byTurn[turn];
+  if (kept) return kept;
+  const slab = w.slab!;
+  const view = isometric(turn);
+  const paths = typeof Path2D === "function";
+  const { c, s } = turnAxes(turn);
+  const z0 = w.base;
+  const z1 = w.base + w.rise;
+  // Round the slab from its `a` end's first corner: a long side, the `b` end, the other long side, the `a` end.
+  const corners = slabCorners(slab.a, slab.b, WALL_THICK / 2, 0);
+  const endAt = [0, 1, 1, 0] as const;
+  const mid = { x: (slab.a.x + slab.b.x) / 2, y: (slab.a.y + slab.b.y) / 2 };
+  const midU = c * mid.x - s * mid.y;
+  const faces: { face: SideShape; end: boolean }[] = [];
+  const lines: Pt[][] = [];
+  for (let i = 0; i < 4; i++) {
+    const a = corners[i]!;
+    const b = corners[(i + 1) % 4]!;
+    const end = i % 2 === 1;
+    if (end && !slab.face[endAt[i]!]) continue;
+    // Outward from the slab's middle, so the corners' winding does not matter.
+    if (depth(turn, (a.x + b.x) / 2 - mid.x, (a.y + b.y) / 2 - mid.y) <= 1e-12) continue;
+    const face = sideShape(view, { ax: a.x, ay: a.y, bx: b.x, by: b.y, z0, z1, left: c * ((a.x + b.x) / 2) - s * ((a.y + b.y) / 2) < midU, side: -1 }, paths);
+    faces.push({ face, end });
+    lines.push(...faceLines(face, slab.line[endAt[i]!], slab.line[endAt[(i + 1) % 4]!]));
+  }
+  const cap = lifted(turn, corners, z1);
+  lines.push(...ringLines(cap, [true, slab.line[1], true, slab.line[0]]));
+  const shape = { faces, cap, capPath: paths ? polyPath(new Path2D(), cap) : null, lines, outline: paths ? linesPath(new Path2D(), lines) : null };
+  byTurn[turn] = shape;
+  return shape;
+}
+
+/**
+ * A wall slab (5.6): its long sides in stone with the wall's tint baked in
+ * and the light from the left, its narrow ends in one flat lit or shaded
+ * tone a face, since 0.14 cell of stone shows no texture, its cap lighter,
+ * and its outline in one stroke.
+ */
+function drawSlab(g: CanvasRenderingContext2D, w: WallItem, dc: DrawContext): void {
+  const shape = slabShapeOf(w, dc.turn);
+  const stone = blended(TERRAIN_COLORS.stone, theme.relief.wallTint) ?? TERRAIN_COLORS.stone;
+  for (const { face: f, end } of shape.faces) {
+    if (!end) {
+      fillSide(g, f.a, f.b, f.h, STONE, f.left, dc, theme.relief.wallTint, false, f.path, f.along);
+      continue;
+    }
+    g.fillStyle = blended(stone, f.left ? theme.relief.lit : theme.relief.shaded) ?? stone;
+    if (!f.path) {
+      g.beginPath();
+      addSide(g, f.a, f.b, f.h);
+    }
+    fillWith(g, f.path);
+  }
+  g.fillStyle = blended(stone, theme.relief.lit) ?? stone;
+  if (!shape.capPath) {
+    g.beginPath();
+    addPoly(g, shape.cap);
+  }
+  fillWith(g, shape.capPath);
+  if (!shape.outline) {
+    g.beginPath();
+    linesPath(g, shape.lines);
+  }
+  outline(g, dc, true, shape.outline);
 }
 
 /** One box of a door's frame as it draws at a turn: its faces toward the viewer, its cap, and their outline as one path. */
@@ -727,12 +936,14 @@ const WOOD: SideLook = { texture: "wood", color: TERRAIN_COLORS.wood };
 /**
  * A door's or window's share of its frame (5.5): stone posts in one flat
  * tone a face, since a post 0.15 cell wide shows no texture, a closed or
- * open leaf in wood, a window's half-clear pane, each box's caps lit, and
+ * open leaf in stained wood, the stain baked into the wood's pattern
+ * (D-261102-922), a window's half-clear pane, each box's caps lit, and
  * every box outlined at once.
  */
 function drawFrame(g: CanvasRenderingContext2D, w: WallItem, dc: DrawContext): void {
   const unit = 1 / (dc.camera.scale * dc.pixelRatio);
   const stone = blended(TERRAIN_COLORS.stone, theme.relief.wallTint) ?? TERRAIN_COLORS.stone;
+  const stained = blended(TERRAIN_COLORS.wood, theme.relief.doorStain) ?? TERRAIN_COLORS.wood;
   for (const part of frameShapeOf(w, dc.turn)) {
     for (const f of part.faces) {
       if (part.look === "post") {
@@ -743,11 +954,11 @@ function drawFrame(g: CanvasRenderingContext2D, w: WallItem, dc: DrawContext): v
         }
         fillWith(g, f.path);
       } else {
-        fillSide(g, f.a, f.b, f.h, part.look === "leaf" ? WOOD : { texture: null, color: theme.relief.pane }, part.look === "leaf" ? f.left : null, dc, null, false, f.path);
+        fillSide(g, f.a, f.b, f.h, part.look === "leaf" ? WOOD : { texture: null, color: theme.relief.pane }, part.look === "leaf" ? f.left : null, dc, part.look === "leaf" ? theme.relief.doorStain : null, false, f.path, f.along);
       }
     }
     if (part.cap) {
-      const base = part.look === "post" ? stone : TERRAIN_COLORS.wood;
+      const base = part.look === "post" ? stone : stained;
       g.fillStyle = blended(base, theme.relief.lit) ?? base;
       if (!part.capPath) {
         g.beginPath();

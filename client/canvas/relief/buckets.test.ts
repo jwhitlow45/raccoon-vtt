@@ -214,8 +214,8 @@ describe("buckets", () => {
     relief.sync(input);
     assert.equal(relief.rebuilt, 0);
     relief.sync({ ...input, chunks: { ...chunks, "s1:2,0": chunk(2, 0) } });
-    // The chunk itself and its neighbors west and south (2,1), whose sides read its ground.
-    assert.equal(relief.rebuilt, 3);
+    // The chunk itself and the three around it in the scene, west, south and south-west, whose sides and their ends read its ground.
+    assert.equal(relief.rebuilt, 4);
     relief.sync({ ...input, global: {} });
     assert.equal(relief.rebuilt, 6);
     relief.sync({ ...input, bounds: { w: 16, h: 16 } });

@@ -15,7 +15,8 @@ import { samePiece, type WallPiece } from "./runs.ts";
  * it first comes into view at that turn, with the union of its pieces'
  * full projected bounds for culling. A bucket is rebuilt only when what it
  * reads changes: its chunk or a neighbor's (heights, terrain, stairs), the
- * fog tiles under them (the viewer's seen ground), its wall pieces, the
+ * fog tiles under them (the viewer's seen ground), its own and its
+ * neighbors' wall pieces, the
  * spans of the stepping stairs in them, or whatever the caller passes as
  * `global` (the stand threshold, the detail, the feet per cell, the side
  * looks). The store replaces each of those objects on every change, so
@@ -138,16 +139,12 @@ function openingGrid(region: PitRegion, turn: Turn): OpeningGrid {
   return { boxes, cells, asked: new WeakMap() };
 }
 
-/** A bucket's own chunk and the four beside it: a square's sides reach no further. */
-const FIVE = [
-  [0, 0],
-  [0, -1],
-  [1, 0],
-  [0, 1],
-  [-1, 0],
-] as const;
-
-/** A hex bucket's own chunk and all eight around it: a hex's neighbors reach the diagonal chunks too. */
+/**
+ * A bucket's own chunk and all eight around it: a hex's neighbors reach the
+ * diagonal chunks, and so do a square side's ends and a wall slab's, which
+ * read the squares and walls diagonally beside them (pieces.ts sideJoins
+ * and slabOf, docs/design/design-v1-iso-depth.md 5.1 and 5.6).
+ */
 const NINE = [
   [0, 0],
   [0, -1],
@@ -239,7 +236,6 @@ export class ReliefIndex {
     this.rebuilt = 0;
     const seen = new Set<string>();
     const hex = isHex(grid);
-    const around = hex ? NINE : FIVE;
     const runs = src.runs;
     for (let cy = 0; cy < down; cy++) {
       for (let cx = 0; cx < across; cx++) {
@@ -252,11 +248,11 @@ export class ReliefIndex {
           input.bounds.w,
           input.bounds.h,
           grid,
-          input.walls.get(key),
-          ...around.flatMap(([dx, dy]) => [chunks[at(dx!, dy!)], !hex && tiles ? tiles[at(dx!, dy!)] : null]),
+          ...NINE.map(([dx, dy]) => input.walls.get(`${cx + dx},${cy + dy}`)),
+          ...NINE.flatMap(([dx, dy]) => [chunks[at(dx, dy)], !hex && tiles ? tiles[at(dx, dy)] : null]),
           ...(hex && tiles ? hexTiles(grid, sceneId, cx, cy).map((k) => tiles[k]) : []),
-          // The spans of its own stepping stairs and of the four chunks' beside it, whose sides read them, as one string compared by value: an edit anywhere along a run rebuilds every bucket whose steps it moves (docs/design/design-v1-iso-depth.md 5.2).
-          runs && !hex ? FIVE.map(([dx, dy]) => runs.chunkSig(cx + dx, cy + dy)).join("|") : "",
+          // The spans of its own stepping stairs and of the chunks around it, whose sides and their ends read them, as one string compared by value: an edit anywhere along a run rebuilds every bucket whose steps it moves (docs/design/design-v1-iso-depth.md 5.2).
+          runs && !hex ? NINE.map(([dx, dy]) => runs.chunkSig(cx + dx, cy + dy)).join("|") : "",
         ];
         const old = this.#buckets.get(key);
         if (old && sameSig(old.sig, sig)) continue;
@@ -264,7 +260,8 @@ export class ReliefIndex {
         const cellList = cellPieces(src, cx, cy, chunks[at(0, 0)]);
         const cells = new Map<number, CellPiece>();
         for (const c of cellList) cells.set(c.y * 1_000_000 + c.x, c);
-        const pieces: StaticPiece[] = [...cellList, ...wallItems(src, input.walls.get(key) ?? [])];
+        const near = NINE.flatMap(([dx, dy]) => input.walls.get(`${cx + dx},${cy + dy}`) ?? []);
+        const pieces: StaticPiece[] = [...cellList, ...wallItems(src, input.walls.get(key) ?? [], near)];
         this.#buckets.set(key, { key, pieces, sig, cells, turns: new Map() });
       }
     }
