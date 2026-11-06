@@ -6,7 +6,7 @@ import { Popover, usePopover, type Rect } from "../../../components/Popover.tsx"
 import { theme } from "../../../lib/theme.ts";
 import { uiScale } from "../../device/settings.ts";
 import { FADES, type Fade, type SoundId } from "#shared/sound.ts";
-import { dragAt, makeRoom } from "./dragOrder.ts";
+import { dragAt, makeRoom, pastSlop } from "./dragOrder.ts";
 import { CROSSFADE, crossfadeName, FADE_WORDS, HANDLE_HELP, moreName, SORT_TRACKS, SORT_WORDS, sortName, type Sort } from "./words.ts";
 
 /**
@@ -122,8 +122,8 @@ function Grip() {
   );
 }
 
-/** A drag under way: the row, where it began, the rows' middles then, the slot it points at, and the key it holds on to. */
-type RowDrag = { id: SoundId; from: number; pointerId: number; startY: number; dy: number; mids: number[]; height: number; zoom: number; slot: number; key: string };
+/** A drag under way: the row, where it began, the rows' middles then, the slot it points at, whether it has gone past a tap, and the key it holds on to. */
+type RowDrag = { id: SoundId; from: number; pointerId: number; startY: number; dy: number; mids: number[]; height: number; zoom: number; slot: number; moved: boolean; key: string };
 
 export type HandleEvents = {
   onPointerDown(e: ReactPointerEvent<HTMLElement>): void;
@@ -187,7 +187,7 @@ export function useRowDrag(opts: { ids: readonly SoundId[]; lists: readonly numb
       const height = row?.getBoundingClientRect().height ?? 56;
       // The pointer and the rows' boxes read in the screen's px, and a transform inside the dialog's interface size zoom is drawn that much larger.
       const zoom = row?.currentCSSZoom ?? 1;
-      const next: RowDrag = { id, from, pointerId: e.pointerId, startY: e.clientY, dy: 0, mids, height, zoom, slot: from, key: opts.key };
+      const next: RowDrag = { id, from, pointerId: e.pointerId, startY: e.clientY, dy: 0, mids, height, zoom, slot: from, moved: false, key: opts.key };
       live.current = next;
       setHeld(next);
     },
@@ -195,8 +195,9 @@ export function useRowDrag(opts: { ids: readonly SoundId[]; lists: readonly numb
       const d = live.current;
       if (!d || d.pointerId !== e.pointerId) return;
       const { dy, slot } = dragAt(d.mids, d.from, e.clientY - d.startY);
-      if (dy === d.dy && slot === d.slot) return;
-      const next = { ...d, dy, slot };
+      const moved = pastSlop(d.moved, d.startY, e.clientY);
+      if (dy === d.dy && slot === d.slot && moved === d.moved) return;
+      const next = { ...d, dy, slot, moved };
       live.current = next;
       setHeld(next);
     },
@@ -204,7 +205,7 @@ export function useRowDrag(opts: { ids: readonly SoundId[]; lists: readonly numb
       const d = live.current;
       if (!d || d.pointerId !== e.pointerId) return;
       end();
-      if (d.key === opts.key) opts.onDrop(d.id, d.slot);
+      if (d.key === opts.key && d.moved) opts.onDrop(d.id, d.slot);
     },
     onPointerCancel: end,
     onLostPointerCapture(e) {

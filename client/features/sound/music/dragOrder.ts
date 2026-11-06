@@ -167,6 +167,20 @@ export function dragAt(mids: readonly number[], from: number, moved: number): { 
   return { dy, slot: dropSlot(mids, from, here + dy) };
 }
 
+/** How far, in the screen's px, a handle's pointer goes from where it went down before its release drops the row. A finger's jitter on a tap stays under it. */
+export const DRAG_SLOP_PX = 4;
+
+/**
+ * Whether a press on a handle is a drag yet: once its pointer has gone
+ * DRAG_SLOP_PX from where it went down, it stays one, even back there. A
+ * tap drops nothing, since a row can stand somewhere other than its own
+ * slot without moving: the second list's first row stands at the seam
+ * (moveTo), so its tap would send `passEnd`, or `first` with Up next empty.
+ */
+export function pastSlop(was: boolean, startY: number, y: number): boolean {
+  return was || Math.abs(y - startY) >= DRAG_SLOP_PX;
+}
+
 /**
  * How far each row moves while one is dragged, so the others make room
  * (4.3). `lists` gives each row's list in play order (0 Up next, 1 the
