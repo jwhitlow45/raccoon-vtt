@@ -15,8 +15,11 @@ import { ConsoleWatch, OpSocket, openSideTab, pagePoint, pickTool, ROOT, Shots, 
  * Lane AM-C's steps (am-2 to am-8 and am-12) drive playback on the board,
  * Still, Low power and reduced motion, and the table display. Lane AM-D's
  * (am-1 and am-9 to am-11) drive the DM's upload, the refusals, the Library
- * and Use the still only. Maps are set through the DM's socket where a
- * step does not test the upload form.
+ * and Use the still only. Lane AR-B's (amr-1 to amr-7,
+ * docs/design/design-v1-video-turns.md 14) upload turned, mirrored,
+ * stretched and cropped videos and an iPhone MOV, and check the map shows
+ * them upright, the still and the video alike. Maps are set through the
+ * DM's socket where a step does not test the upload form.
  *
  * The board is read through its test hooks (features/animmap/board.ts):
  * the host over the board, `[data-animmap-board]`, holds `data-animmap`
@@ -26,8 +29,9 @@ import { ConsoleWatch, OpSocket, openSideTab, pagePoint, pickTool, ROOT, Shots, 
  * apart. The one `<video>` is `video[data-animmap-video]`.
  *
  * The fixtures are e2e/fixtures/map-loop.webm (VP9) and map-loop.mp4
- * (H.264), 640 by 360 and 2 s long, made by the script the folder's README
- * names. The browser is Chrome, which plays both.
+ * (H.264), 640 by 360 and 2 s long, and the turned and stretched copies of
+ * their frames beside them, made by the script the folder's README names.
+ * The browser is Chrome, which plays them all.
  *
  * It runs with `pnpm test:e2e` on its own port, E2E_PORT plus 44, with the
  * server's ANIMATED_MAPS switch on. am-12 starts a second server with the
@@ -67,6 +71,8 @@ const run = {
   roomId: "",
   roomName: `E2E animated maps ${new Date().toISOString().slice(0, 19)}`,
   password: "",
+  /** The DM link, for a second DM session (amr-0). */
+  dmLink: "",
   sceneId: "",
   cryptId: randomUUID(),
   patId: "",
@@ -179,7 +185,7 @@ async function join(context: BrowserContext, name: string, color: string, origin
 }
 
 /** Makes a room through the home page, as a DM does, and returns its id, its player password and the DM's ops socket. */
-async function createRoom(page: Page, context: BrowserContext, origin: string, name: string): Promise<{ roomId: string; password: string; ops: OpSocket }> {
+async function createRoom(page: Page, context: BrowserContext, origin: string, name: string): Promise<{ roomId: string; password: string; ops: OpSocket; link: string }> {
   await page.goto(`${origin}/`);
   await page.getByLabel("Room name").fill(name);
   await page.getByLabel("Your name").fill("Dana the DM");
@@ -193,7 +199,7 @@ async function createRoom(page: Page, context: BrowserContext, origin: string, n
   await page.getByLabel("I saved my DM link").check();
   await page.getByRole("button", { name: "Continue to the room" }).click();
   const cookie = (await context.cookies(origin)).map((c) => `${c.name}=${c.value}`).join("; ");
-  return { roomId, password, ops: await OpSocket.open({ origin, roomId, cookie }) };
+  return { roomId, password, ops: await OpSocket.open({ origin, roomId, cookie }), link };
 }
 
 /** The board's ground behind the canvas in both themes, which the cover paints (features/animmap/AnimMapController.tsx BOARD_GROUND). */
@@ -468,6 +474,7 @@ describe("animated maps", { concurrency: false }, () => {
     const made = await createRoom(dm, dmContext, server.origin, run.roomName);
     run.roomId = made.roomId;
     run.password = made.password;
+    run.dmLink = made.link;
     ops = made.ops;
     await waitFor("the DM's snapshot", () => dmSocket.state);
     run.sceneId = dmSocket.state!.meta.playerSceneId!;
@@ -496,12 +503,15 @@ describe("animated maps", { concurrency: false }, () => {
    */
   /** The words the steps look for (client/features/animmap words.ts, upload.ts and firstFrame.ts, whose unit tests pin them). The client's modules need a DOM, so they are not imported here. */
   const AMD_WORDS = {
-    pickHelp: "A WebM or MP4 video makes an animated map, up to 64 MB. MP4 (H.264) plays on the most devices.",
+    pickHelp: "A WebM, MP4 or MOV video makes an animated map, up to 64 MB. H.264 plays on the most devices.",
     noFrame: "This device can't read that video's first frame. Pick a still image for it, such as the one that came with the map.",
     lowPower: "Low Power Mode stopped the video from opening. Tap Try again, or pick a still image.",
-    mov: "That video isn't WebM or MP4. iPhone videos from Photos are MOV: save the map's MP4 to Files and pick it from there.",
+    videoType: "That video isn't WebM, MP4 or MOV.",
     badVideo: "That video could not be read.",
+    geometry: "That video's file crops or reshapes its picture in a way this app can't show. Export it again as a plain MP4 or WebM.",
   };
+  /** The map pickers while the server takes videos (upload.ts mapAccept). */
+  const VIDEO_PICKER = 'input[type="file"][accept="image/*,video/webm,video/mp4,video/quicktime,.mov"]';
   const amd = {
     /** The Scenes panel, the side panel's tab on a computer. */
     async scenes(page: Page = dm) {
@@ -547,19 +557,29 @@ describe("animated maps", { concurrency: false }, () => {
       await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: bytesPerSecond ?? -1 });
       if (bytesPerSecond === null) await cdp.detach();
     },
-    /** Makes the first-frame probe's play() fail as an older iPhone or Low Power Mode would. Only `blob:` sources, the probe's, are touched. Null puts play() back. */
-    async probeRefuses(page: Page, name: "NotSupportedError" | "NotAllowedError" | null) {
-      await page.evaluate((refuse) => {
-        type P = { play(this: { currentSrc: string; src: string }): Promise<void>; __amdPlay?: P["play"] };
-        const proto = (globalThis as unknown as { HTMLMediaElement: { prototype: P } }).HTMLMediaElement.prototype;
-        proto.__amdPlay ??= proto.play;
-        const real = proto.__amdPlay;
-        proto.play = refuse
-          ? function (this: { currentSrc: string; src: string }) {
-              return (this.src || this.currentSrc).startsWith("blob:") ? Promise.reject(new DOMException("refused", refuse)) : real.call(this);
-            }
-          : real;
-      }, name);
+    /**
+     * Makes the first-frame probe's play() fail as an older iPhone or Low
+     * Power Mode would. Only the form's probes are touched: on the picked
+     * file (`blob:` sources) alone, or on the stored copy too (`any`). Null
+     * puts play() back.
+     */
+    async probeRefuses(page: Page, name: "NotSupportedError" | "NotAllowedError" | null, which: "blob" | "any" = "blob") {
+      await page.evaluate(
+        ([refuse, on]) => {
+          type El = { currentSrc: string; src: string; hasAttribute(n: string): boolean };
+          type P = { play(this: El): Promise<void>; __amdPlay?: P["play"] };
+          const proto = (globalThis as unknown as { HTMLMediaElement: { prototype: P } }).HTMLMediaElement.prototype;
+          proto.__amdPlay ??= proto.play;
+          const real = proto.__amdPlay;
+          proto.play = refuse
+            ? function (this: El) {
+                const probe = this.hasAttribute("data-animmap-probe") && (on === "any" || (this.src || this.currentSrc).startsWith("blob:"));
+                return probe ? Promise.reject(new DOMException("refused", refuse)) : real.call(this);
+              }
+            : real;
+        },
+        [name, which] as const,
+      );
     },
     png(width: number, height: number, rgb = { r: 96, g: 64, b: 128 }) {
       return sharp({ create: { width, height, channels: 3, background: rgb } }).png().toBuffer();
@@ -580,7 +600,7 @@ describe("animated maps", { concurrency: false }, () => {
     await form.getByRole("textbox", { name: "Scene name" }).fill("Lagoon");
     await form.getByText(VIDEO_PICK_HELP, { exact: true }).waitFor();
     // A name with no size, so the grid is looked for, on the still since a video cannot be searched.
-    await form.locator('input[type="file"][accept="image/*,video/webm,video/mp4"]').first().setInputFiles({ name: "lagoon.webm", mimeType: "video/webm", buffer: readFileSync(WEBM) });
+    await form.locator(VIDEO_PICKER).first().setInputFiles({ name: "lagoon.webm", mimeType: "video/webm", buffer: readFileSync(WEBM) });
     await amd.recordLabels();
     await amd.throttle(dm, 64 * 1024);
     const puts: string[] = [];
@@ -633,7 +653,7 @@ describe("animated maps", { concurrency: false }, () => {
     const group = await openSceneGroup(crypt, "Map image and grid");
     await group.getByText(VIDEO_PICK_HELP, { exact: true }).waitFor();
     await amd.recordLabels();
-    await group.locator('input[type="file"][accept="image/*,video/webm,video/mp4"]').first().setInputFiles({ name: "crypt_32x18.webm", mimeType: "video/webm", buffer: readFileSync(WEBM) });
+    await group.locator(VIDEO_PICKER).first().setInputFiles({ name: "crypt_32x18.webm", mimeType: "video/webm", buffer: readFileSync(WEBM) });
     const cryptMap = await waitFor("the crypt's animated map", () => dmSocket.state!.scenes[run.cryptId]?.map?.video ?? null, 60_000);
     assert.equal(cryptMap.assetId, run.webm!.id);
     assert.equal(dmSocket.state!.scenes[run.cryptId]!.map!.cellPx, 20, "640 px over 32 squares, from the video's name");
@@ -653,7 +673,7 @@ describe("animated maps", { concurrency: false }, () => {
     const panel = await amd.scenes();
     const form = amd.section(panel, "New scene");
     await form.getByRole("radio", { name: "Map image", exact: true }).click();
-    const input = form.locator('input[type="file"][accept="image/*,video/webm,video/mp4"]').first();
+    const input = form.locator(VIDEO_PICKER).first();
     const puts: string[] = [];
     const watch = (r: { method(): string; url(): string }) => {
       if (r.method() === "PUT" && r.url().includes("/assets?kind=")) puts.push(r.url());
@@ -663,12 +683,12 @@ describe("animated maps", { concurrency: false }, () => {
     const allowed = consoles.dm.allow;
     consoles.dm.allow = [...allowed, /status of 422 .*kind=video&name=harbor\.mp4/];
     try {
-      // An iPhone's MOV is refused on the device, before any byte goes up.
-      await input.setInputFiles({ name: "harbor.mov", mimeType: "video/quicktime", buffer: Buffer.from("not a video at all") });
+      // A video that is not WebM, MP4 or MOV is refused on the device, before any byte goes up. A MOV goes on to the server (amr-7).
+      await input.setInputFiles({ name: "harbor.avi", mimeType: "video/x-msvideo", buffer: Buffer.from("not a video at all") });
       await form.getByRole("button", { name: "Upload and create" }).click();
-      await form.getByText(AMD_WORDS.mov, { exact: true }).waitFor();
+      await form.getByText(AMD_WORDS.videoType, { exact: true }).waitFor();
       assert.equal(puts.length, 0, "nothing went up");
-      await shots.take(dm, "am-9-refused-mov");
+      await shots.take(dm, "am-9-refused-type");
 
       // Bytes after the MP4's last box: Chrome reads the first frame, and the server's header check refuses the file.
       const broken = Buffer.concat([readFileSync(MP4), Buffer.from([0, 0, 0])]);
@@ -695,7 +715,8 @@ describe("animated maps", { concurrency: false }, () => {
     const start = phaseCount();
     const add = group.getByLabel("Add a phase from an image", { exact: true });
     try {
-      await amd.probeRefuses(dm, "NotSupportedError");
+      // amr-b: neither the picked file nor its stored copy can be read here (docs/design/design-v1-video-turns.md 8 step 5).
+      await amd.probeRefuses(dm, "NotSupportedError", "any");
       await add.setInputFiles({ name: "crypt_night.mp4", mimeType: "video/mp4", buffer: readFileSync(MP4) });
       await group.getByText(NO_FIRST_FRAME, { exact: true }).waitFor({ timeout: 30_000 });
       await shots.take(dm, "am-10-pick-a-still");
@@ -718,6 +739,18 @@ describe("animated maps", { concurrency: false }, () => {
       await group.getByRole("listitem").filter({ hasText: "crypt night" }).getByText("Video", { exact: true }).waitFor();
       assert.equal((await amd.assets()).filter((r) => r.kind === "video" && r.video?.container === "mp4").length, 1, "the video went up once for both stills");
 
+      // amr-b: only the picked file cannot be read, as a MOV in Firefox: the still comes from the stored copy, with nothing asked.
+      await amd.probeRefuses(dm, "NotSupportedError", "blob");
+      await amd.recordLabels();
+      await add.setInputFiles({ name: "crypt_dusk.webm", mimeType: "video/webm", buffer: readFileSync(WEBM) });
+      await waitFor("the stored copy's phase", () => (phaseCount() === start + 2 ? true : null), 30_000);
+      const dusk = dmSocket.state!.scenes[run.cryptId]!.phases!.at(-1)!;
+      assert.equal(dusk.video?.assetId, run.webm!.id);
+      assert.deepEqual([dusk.widthPx, dusk.heightPx], [640, 360], "the stored copy's frame is the still");
+      const labels = await amd.labels();
+      assert.equal(labels.filter((l) => l === "Reading the first frame…").length, 2, `the busy button reads the frame again: ${labels.join(" | ")}`);
+      assert.equal(await group.getByText(NO_FIRST_FRAME, { exact: true }).count(), 0, "no still was asked for");
+
       // Low Power Mode refuses play(): Try again is a tap, which may start it.
       await amd.probeRefuses(dm, "NotAllowedError");
       await add.setInputFiles({ name: "crypt_flood.webm", mimeType: "video/webm", buffer: readFileSync(WEBM) });
@@ -725,7 +758,7 @@ describe("animated maps", { concurrency: false }, () => {
       await shots.take(dm, "am-10-low-power");
       await amd.probeRefuses(dm, null);
       await group.getByRole("button", { name: "Try again", exact: true }).click();
-      await waitFor("the second video phase", () => (phaseCount() === start + 2 ? true : null), 30_000);
+      await waitFor("the third video phase", () => (phaseCount() === start + 3 ? true : null), 30_000);
       assert.equal(dmSocket.state!.scenes[run.cryptId]!.phases!.at(-1)!.video?.assetId, run.webm!.id);
     } finally {
       await amd.probeRefuses(dm, null);
@@ -1161,6 +1194,275 @@ describe("animated maps", { concurrency: false }, () => {
     } finally {
       await tvContext.close();
     }
+  });
+
+  /*
+   * Lane AR-B's steps (amr-1 to amr-7, docs/design/design-v1-video-turns.md
+   * 14): each turned, mirrored or stretched fixture becomes a new scene's
+   * map through the New scene form, so its still is read from the stored
+   * copy. The map layer is sampled where the pattern's first bar, last bar
+   * and dark strip must show once the file's own turn and stretch apply,
+   * under Still and then Moving, and the two must agree. amr-1, amr-3 and
+   * amr-7 also check the colors there, so a placement bug the still and the
+   * board share cannot pass. They run in a second DM session, signed in by
+   * the DM link, since their uploads would spend the first session's 30
+   * uploads an hour that am-12 still needs.
+   */
+  const AMR = {
+    turn90: path.join(FIXTURES, "map-turn-90.mp4"),
+    turn180: path.join(FIXTURES, "map-turn-180.mp4"),
+    turn270Mirror: path.join(FIXTURES, "map-turn-270-mirror.mp4"),
+    wideMp4: path.join(FIXTURES, "map-wide.mp4"),
+    wideWebm: path.join(FIXTURES, "map-wide.webm"),
+    clap: path.join(FIXTURES, "map-clap.mp4"),
+    iphone: path.join(FIXTURES, "map-iphone.mov"),
+  };
+  /** Spots of the 640 × 360 pattern (scripts/video-fixtures.ts): the first bar, the last bar, and the dark strip above the square's path. */
+  const AMR_SPOTS = [
+    { name: "first bar", x: 45, y: 135, rgb: { r: 0xc0, g: 0xc0, b: 0xc0 } },
+    { name: "last bar", x: 595, y: 135, rgb: { r: 0x00, g: 0x00, b: 0xc0 } },
+    { name: "strip", x: 320, y: 280, rgb: { r: 0x10, g: 0x10, b: 0x10 } },
+  ];
+  /** H.264 and VP9 at this size, then the still's own encode, move a color this far at most. */
+  const AMR_TOLERANCE = 32;
+  const amrSocket = new SocketWatch("dm-amr");
+  const amrConsole = new ConsoleWatch("dm-amr");
+  /** The second DM session's page (amr-0). */
+  let adm: Page;
+  type AmrVideo = { widthPx: number; heightPx: number; turn?: 90 | 180 | 270; mirror?: true; displayWidthPx?: number };
+  const amr = {
+    /** Shows the second DM session a scene from its row in the list, and waits for its settings to name it. */
+    async view(sceneId: string) {
+      const panel = await amd.scenes(adm);
+      const name = amrSocket.state?.scenes[sceneId]?.name ?? "";
+      await panel.getByRole("button", { name: new RegExp(`^${name}(?![A-Za-z])`) }).first().click();
+      await waitFor(`the DM on ${name}`, () => amrSocket.you?.sceneId === sceneId || null);
+      const field = panel.getByRole("textbox", { name: "Scene name" }).last();
+      await waitFor(`${name}'s settings`, async () => ((await field.inputValue()) === name ? true : null));
+      return panel;
+    },
+    /** Where a spot of the coded frame shows in the drawn picture, as a fraction of it, by the table's matrix row and its stretch. */
+    async spotAt(video: AmrVideo, x: number, y: number): Promise<{ fx: number; fy: number }> {
+      const { drawnSize, matrixRow, orientationOf, rowShift } = await import("../shared/videoGeometry.ts");
+      const w = video.displayWidthPx ?? video.widthPx;
+      const h = video.heightPx;
+      const px = (x * w) / video.widthPx;
+      const row = matrixRow(orientationOf(video));
+      const [tx, ty] = rowShift(row, w, h);
+      const drawn = drawnSize(video);
+      return { fx: (row.a * px + row.c * y + tx) / drawn.widthPx, fy: (row.b * px + row.d * y + ty) / drawn.heightPx };
+    },
+    /** The median color of a 9 × 9 box around a page point, clear of the grid's thin lines. */
+    async colorAt(page: Page, p: { x: number; y: number }): Promise<{ r: number; g: number; b: number }> {
+      const { data, count } = await pixels(page, { x: Math.round(p.x) - 4, y: Math.round(p.y) - 4, width: 9, height: 9 });
+      const channel = (c: number) => {
+        const values = Array.from({ length: count }, (_, i) => data[i * 3 + c]!).sort((a, b) => a - b);
+        return values[Math.floor(count / 2)]!;
+      };
+      return { r: channel(0), g: channel(1), b: channel(2) };
+    },
+    /** The three spots' colors on the board's map layer. */
+    async sample(page: Page, map: { widthPx: number; heightPx: number; cellPx: number; video: AmrVideo }): Promise<{ r: number; g: number; b: number }[]> {
+      const out: { r: number; g: number; b: number }[] = [];
+      for (const spot of AMR_SPOTS) {
+        const { fx, fy } = await amr.spotAt(map.video, spot.x, spot.y);
+        const p = await pagePoint(page, BOUNDS, { x: (fx * map.widthPx) / map.cellPx, y: (fy * map.heightPx) / map.cellPx });
+        out.push(await amr.colorAt(page, p));
+      }
+      return out;
+    },
+    near(a: { r: number; g: number; b: number }, b: { r: number; g: number; b: number }): boolean {
+      return Math.abs(a.r - b.r) <= AMR_TOLERANCE && Math.abs(a.g - b.g) <= AMR_TOLERANCE && Math.abs(a.b - b.b) <= AMR_TOLERANCE;
+    },
+    /** This device's Animated maps, through the Menu. */
+    async choose(page: Page, choice: "Still" | "Moving") {
+      const menu = await openThisDevice(page);
+      await menu.getByRole("group", { name: "Animated maps" }).getByRole("radio", { name: choice, exact: true }).check();
+      await closeMenu(page);
+    },
+    /**
+     * Adds `file` as a new scene's map through the New scene form, the way a
+     * DM picks it, and checks the facts and the three spots under Still and
+     * then Moving. Returns the scene and its map.
+     */
+    async addAndCheck(label: string, file: string, as: { name: string; mimeType: string }, facts: { turn?: 90 | 180 | 270; mirror?: true; displayWidthPx?: number; container: "mp4" | "webm" }, drawn: [number, number], upright: boolean) {
+      const known = new Set(Object.keys(amrSocket.state!.scenes));
+      const panel = await amd.scenes(adm);
+      const form = amd.section(panel, "New scene");
+      await form.getByRole("radio", { name: "Map image", exact: true }).click();
+      const sceneName = `Turned ${label}`;
+      await form.getByRole("textbox", { name: "Scene name" }).fill(sceneName);
+      await form.locator(VIDEO_PICKER).first().setInputFiles({ ...as, buffer: readFileSync(file) });
+      await amd.recordLabels(adm);
+      await form.getByRole("button", { name: "Upload and create" }).click();
+      const made = await waitFor(`the ${label} scene with its video`, () => Object.values(amrSocket.state!.scenes).find((sc) => sc && !known.has(sc.id) && sc.name === sceneName && sc.map?.video), 60_000);
+      const map = made.map!;
+      const video = map.video!;
+      assert.equal(video.container, facts.container, `${label}: stored as ${facts.container}`);
+      assert.deepEqual([video.widthPx, video.heightPx], [640, 360], `${label}: the coded size`);
+      assert.equal(video.turn, facts.turn, `${label}: turn`);
+      assert.equal(video.mirror, facts.mirror, `${label}: mirror`);
+      assert.equal(video.displayWidthPx, facts.displayWidthPx, `${label}: stretched width`);
+      assert.deepEqual([map.widthPx, map.heightPx], drawn, `${label}: the still is the stored copy's frame at the drawn size`);
+      const labels = await amd.labels(adm);
+      // Read on this device first, then, for a file that is not plain, from the stored copy (docs/design/design-v1-video-turns.md 8).
+      assert.equal(labels.filter((l) => l === "Reading the first frame…").length, 2, labels.join(" | "));
+      await waitFor(`the DM on ${sceneName}`, () => amrSocket.you?.sceneId === made.id || null);
+      // Fog would tint the DM's view of the colors, so this scene has none.
+      await ops.send({ t: "scene.update", sceneId: made.id, patch: { fogEnabled: false } });
+      await pickTool(adm, "Select");
+      await adm.locator("[data-toast]").first().waitFor({ state: "detached", timeout: 30_000 }).catch(() => undefined);
+      const shaped = { widthPx: map.widthPx, heightPx: map.heightPx, cellPx: map.cellPx, video };
+
+      await amr.choose(adm, "Still");
+      await boardSays(adm, "still setting");
+      await sleep(300);
+      const still = await amr.sample(adm, shaped);
+      await shots.take(adm, `amr-${label}-still`);
+      await amr.choose(adm, "Moving");
+      await boardSays(adm, "playing");
+      await sleep(500);
+      const moving = await amr.sample(adm, shaped);
+      await shots.take(adm, `amr-${label}-moving`);
+      for (const [i, spot] of AMR_SPOTS.entries()) {
+        assert.ok(amr.near(still[i]!, moving[i]!), `${label} ${spot.name}: the still ${JSON.stringify(still[i])} and the video ${JSON.stringify(moving[i])} disagree`);
+        if (upright) {
+          assert.ok(amr.near(still[i]!, spot.rgb), `${label} ${spot.name}: the still shows ${JSON.stringify(still[i])}, not upright ${JSON.stringify(spot.rgb)}`);
+          assert.ok(amr.near(moving[i]!, spot.rgb), `${label} ${spot.name}: the video shows ${JSON.stringify(moving[i])}, not upright ${JSON.stringify(spot.rgb)}`);
+        }
+      }
+      return { scene: made, map };
+    },
+  };
+
+  test("amr-0. a second DM session, signed in by the DM link on a computer", async () => {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    await context.addInitScript(HOOK_FLAG);
+    await context.addInitScript(SOURCE_WATCH);
+    adm = await context.newPage();
+    amrConsole.attach(adm);
+    await amrSocket.attach(context, adm);
+    // Signing in by the link asks who this is, after a 403 for the unknown session and a 409 for the DM already signed in elsewhere.
+    amrConsole.allow = [/status of 403 .*\/api\/rooms\/[0-9A-Z]{8}\/me\)$/, /status of 409 .*\/api\/rooms\/[0-9A-Z]{8}\/dm\)$/];
+    await adm.goto(run.dmLink);
+    await adm.getByRole("button", { name: /Dana the DM/ }).click();
+    await waitFor("the second session's snapshot", () => amrSocket.state);
+    assert.equal(amrSocket.you?.memberId, dmSocket.you?.memberId, "the same DM");
+    amrConsole.allow = [];
+    await adm.locator(".konvajs-content").first().waitFor();
+  });
+
+  test("amr-1. an Android portrait video, the 90 row: the map and its still show it upright at 360 × 640, the Map image row names that size, and the Library viewer turns it into an upright page", async () => {
+    const { scene, map } = await amr.addAndCheck("90", AMR.turn90, { name: "tower.mp4", mimeType: "video/mp4" }, { turn: 90, container: "mp4" }, [360, 640], true);
+    assert.equal(map.video!.turn, 90);
+    // The board draws the frame turned: the Konva image's own rotation.
+    const rotation = await adm.evaluate(() => {
+      type Node = { getClassName(): string; image?(): unknown; rotation(): number };
+      const konva = (globalThis as unknown as { Konva?: { stages: { visible(): boolean; width(): number; getLayers(): { find(f: (n: Node) => boolean): Node[] }[] }[] } }).Konva;
+      for (const stage of konva?.stages ?? []) {
+        if (!stage.visible() || stage.width() === 0) continue;
+        const image = stage.getLayers()[0]?.find((n) => n.getClassName() === "Image" && (n.image?.() as { tagName?: string } | undefined)?.tagName === "VIDEO")[0];
+        if (image) return image.rotation();
+      }
+      return null;
+    });
+    assert.equal(rotation, 90, "the map layer turns the video's frame");
+    const scenes = await amr.view(scene.id);
+    const { openSceneGroup } = await import("./harness.ts");
+    const group = await openSceneGroup(scenes, "Map image and grid");
+    await group.getByText("A 360 × 640 px video, 0:02, looping. Its first frame is the still.", { exact: true }).waitFor();
+    await shots.take(adm, "amr-1-map-image-row");
+
+    // The Library viewer: the tile whose line names the drawn size.
+    const { openSideTab, sideTabName } = await import("./harness.ts");
+    await openSideTab(adm, "Library");
+    const library = adm.getByRole("tabpanel", { name: sideTabName("Library") });
+    const tiles = library.getByRole("list", { name: "Maps in this room", exact: true }).getByRole("button", { name: /^Animated map/ });
+    await tiles.first().waitFor();
+    let viewer: Locator | null = null;
+    for (let i = 0; i < (await tiles.count()) && !viewer; i++) {
+      await tiles.nth(i).click();
+      const open = adm.getByRole("dialog", { name: "Animated map", exact: true });
+      await open.waitFor();
+      if ((await open.getByText(/^360 × 640 px, 0:02, /).count()) > 0) viewer = open;
+      else {
+        await adm.keyboard.press("Escape");
+        await open.waitFor({ state: "detached" });
+      }
+    }
+    assert.ok(viewer, "a tile opens the turned video, its line naming 360 × 640");
+    const box = await waitFor("the viewer's video playing", () =>
+      viewer!.evaluate((el) => {
+        type V = { currentTime: number; paused: boolean; hasAttribute(n: string): boolean; getBoundingClientRect(): { x: number; y: number; width: number; height: number }; style: { transform: string } };
+        const v = (el as unknown as { querySelector(s: string): V | null }).querySelector("video");
+        if (!v || !v.hasAttribute("src") || v.paused || v.currentTime <= 0) return null;
+        const r = v.getBoundingClientRect();
+        return { x: r.x, y: r.y, width: r.width, height: r.height, transform: v.style.transform };
+      }),
+    );
+    assert.equal(box.transform, "matrix(0, 1, -1, 0, 0, 0)", "the element turns as the table's 90 row");
+    assert.ok(Math.abs(box.height / box.width - 640 / 360) < 0.02, `its box on screen is the upright page: ${JSON.stringify(box)}`);
+    await sleep(300);
+    for (const spot of AMR_SPOTS) {
+      const { fx, fy } = await amr.spotAt(map.video!, spot.x, spot.y);
+      const color = await amr.colorAt(adm, { x: box.x + fx * box.width, y: box.y + fy * box.height });
+      assert.ok(amr.near(color, spot.rgb), `the viewer's ${spot.name} shows ${JSON.stringify(color)}, not upright ${JSON.stringify(spot.rgb)}`);
+    }
+    await shots.take(adm, "amr-1-library-viewer");
+    await adm.keyboard.press("Escape");
+    await viewer.waitFor({ state: "detached" });
+    await boardSays(adm, "playing");
+  });
+
+  test("amr-2. Apple's 180 row, moved back into view by the picture's width and height: the still and the video agree", async () => {
+    await amr.addAndCheck("180", AMR.turn180, { name: "harbor.mp4", mimeType: "video/mp4" }, { turn: 180, container: "mp4" }, [640, 360], false);
+  });
+
+  test("amr-3. FFmpeg's 270 and then a mirror: the map and its still show it upright at 360 × 640", async () => {
+    await amr.addAndCheck("270-mirror", AMR.turn270Mirror, { name: "mirror.mp4", mimeType: "video/mp4" }, { turn: 270, mirror: true, container: "mp4" }, [360, 640], true);
+  });
+
+  test("amr-4. an MP4 with a pasp of 4:3 shows stretched to 853 × 360, the still and the video alike", async () => {
+    await amr.addAndCheck("wide-mp4", AMR.wideMp4, { name: "wide.mp4", mimeType: "video/mp4" }, { displayWidthPx: 853, container: "mp4" }, [853, 360], false);
+  });
+
+  test("amr-5. a WebM with DisplayWidth 853 shows stretched to 853 × 360, the still and the video alike", async () => {
+    await amr.addAndCheck("wide-webm", AMR.wideWebm, { name: "wide.webm", mimeType: "video/webm" }, { displayWidthPx: 853, container: "webm" }, [853, 360], false);
+  });
+
+  test("amr-6. a video whose clap crops its picture is refused in 4.4's words, and leaves nothing behind", async () => {
+    const before = (await amd.assets()).length;
+    const panel = await amd.scenes(adm);
+    const form = amd.section(panel, "New scene");
+    await form.getByRole("radio", { name: "Map image", exact: true }).click();
+    const allowed = amrConsole.allow;
+    amrConsole.allow = [...allowed, /status of 422 .*kind=video&name=cropped\.mp4/];
+    try {
+      await form.locator(VIDEO_PICKER).first().setInputFiles({ name: "cropped.mp4", mimeType: "video/mp4", buffer: readFileSync(AMR.clap) });
+      await form.getByRole("button", { name: "Upload and create" }).click();
+      await form.getByText(AMD_WORDS.geometry, { exact: true }).waitFor({ timeout: 30_000 });
+      await shots.take(adm, "amr-6-refused-clap");
+      assert.equal((await amd.assets()).length, before, "nothing left in the Library");
+    } finally {
+      amrConsole.allow = allowed;
+      await form.getByRole("button", { name: "Cancel", exact: true }).click();
+    }
+  });
+
+  test("amr-7. an iPhone's Most Compatible MOV, picked as video/quicktime, is stored as an MP4 and shows upright at 360 × 640", async () => {
+    const form = amd.section(await amd.scenes(adm), "New scene");
+    await form.getByRole("radio", { name: "Map image", exact: true }).click();
+    const accept = await form.locator(VIDEO_PICKER).first().getAttribute("accept");
+    assert.ok(accept?.includes("video/quicktime") && accept.includes(".mov"), `the picker takes a MOV: ${accept}`);
+    await amr.addAndCheck("iphone", AMR.iphone, { name: "IMG_0042.MOV", mimeType: "video/quicktime" }, { turn: 90, container: "mp4" }, [360, 640], true);
+    const row = (await amd.assets()).find((r) => r.kind === "video" && r.video?.turn === 90 && r.video?.container === "mp4" && r.id === amrSocket.state!.scenes[amrSocket.you!.sceneId!]!.map!.video!.assetId);
+    assert.ok(row, "the room's row is an MP4");
+    const bytes = await dmContext.request.get(`${server.origin}/api/assets/${row.id}/full`);
+    assert.equal(bytes.headers()["content-type"], "video/mp4", "served as an MP4");
+    // Back on the players' scene, where am-12 begins.
+    await amr.view(run.sceneId);
+    assert.deepEqual(amrConsole.errors, [], "the second DM page logged no errors");
+    await adm.context().close();
   });
 
   // am-9 to am-11 (lane AM-D): the refusals, the Library and Use the still only.
