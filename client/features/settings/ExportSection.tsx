@@ -10,6 +10,14 @@ import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
 import { ADMIN_IMPORT_COMMAND, exportErrorText, formatBytes } from "./backup.ts";
 
+/**
+ * The admin import command has spaces, so it wraps at them and breaks inside
+ * a word only when one word is wider than the line. Links with no spaces
+ * (dm/controls.tsx, Home.tsx, AboutPanel.tsx) keep `break-all`, which would
+ * split this command mid-word.
+ */
+export const ADMIN_COMMAND_STYLE = { fontFamily: theme.font.mono, whiteSpace: "pre-wrap", overflowWrap: "break-word" } as const;
+
 type Status = { kind: "idle" } | { kind: "checking" } | { kind: "started" } | { kind: "refused"; text: string };
 
 /**
@@ -106,7 +114,7 @@ export function ExportSection() {
       ) : null}
       <Help>
         The site imports backups up to {formatBytes(MAX_IMPORT_BYTES)}. The server owner can restore a bigger one with{" "}
-        <code style={{ fontFamily: theme.font.mono, wordBreak: "break-all" }}>{ADMIN_IMPORT_COMMAND}</code>
+        <code style={ADMIN_COMMAND_STYLE}>{ADMIN_IMPORT_COMMAND}</code>
       </Help>
     </Section>
   );
