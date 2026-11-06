@@ -759,7 +759,7 @@ export const SURFACES = [
   "Token and character fields",
   "Label, pin and light panes",
   "Dialogs",
-  "Adding an image",
+  "Images",
   "Setup history",
 ] as const;
 
@@ -1276,7 +1276,7 @@ export const BEHAVIORS: readonly Behavior[] = [
     does: "Paste a copied image there. Choose an image also takes an https link",
     roles: EVERYONE,
     device: "keys",
-    surface: "Adding an image",
+    surface: "Images",
   },
 ];
 
@@ -1314,7 +1314,7 @@ const SURFACE_INTRO: Partial<Record<Surface, string>> = {
   "Two panels": "On a screen 900 px or wider, with two panels in the side panel. With the bar's grip focused, the arrow keys move the bar and never move a token.",
   "Handout viewer": "A handout the DM shows, or a picture or a PDF opened from the Library.",
   "Token window": "Where the action bar opens as a window: on a screen 600 px or wider, or a phone on its side. With its grip or corner handle focused, the arrow keys move or resize it and never move a token.",
-  "Adding an image":
+  "Images":
     "Choose an image, the stamp picker, New scene's Map image, Show a handout, and a scene's Map image or Add a phase with focus there. In a text field, only a copied image with no text.",
 };
 

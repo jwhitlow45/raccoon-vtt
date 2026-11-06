@@ -880,7 +880,7 @@ Where the action bar opens as a window: on a screen 600 px or wider, or a phone 
 | Tab, Shift+Tab | Move through its controls without leaving it | everyone |
 | Page Up, Page Down | In Generate a dungeon, move Heights or Traps to its next or previous mark | DM |
 
-### Adding an image
+### Images
 
 Choose an image, the stamp picker, New scene's Map image, Show a handout, and a scene's Map image or Add a phase with focus there. In a text field, only a copied image with no text.
 

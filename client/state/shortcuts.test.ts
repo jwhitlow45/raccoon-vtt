@@ -814,8 +814,8 @@ describe("the sheet's rows beside the keys", () => {
     assert.deepEqual(inputs("dm", IPHONE, "Initiative"), ["Enter", "Escape", "Enter", ...rollKeys]);
     assert.deepEqual(inputs("player", IPHONE, "Initiative"), ["Enter", "Escape", ...rollKeys], "only the DM types several values");
     assert.deepEqual(inputs("player", IPHONE, "Dialogs"), ["Escape", "Tab, Shift+Tab"]);
-    assert.deepEqual(inputs("player", IPHONE, "Adding an image"), ["Ctrl+V (Cmd+V on a Mac)"]);
-    assert.deepEqual(inputs("dm", IPHONE, "Adding an image"), ["Ctrl+V (Cmd+V on a Mac)"]);
+    assert.deepEqual(inputs("player", IPHONE, "Images"), ["Ctrl+V (Cmd+V on a Mac)"]);
+    assert.deepEqual(inputs("dm", IPHONE, "Images"), ["Ctrl+V (Cmd+V on a Mac)"]);
     // A paste over the map is the DM's alone, in Keys after Escape, and before the fight cards' roll keys.
     assert.deepEqual(section("dm", IPHONE, "Keys")!.rows.slice(-4).map((r) => r.id), ["escape", "roomPaste", "cardRollOptions", "cardRollOptionsKeys"]);
     assert.ok(!section("player", IPHONE, "Keys")!.rows.some((r) => r.id === "roomPaste"));

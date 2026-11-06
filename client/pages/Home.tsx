@@ -448,7 +448,7 @@ function DmLinkReveal(props: { roomId: string; dmLink: string; password: string 
           </div>
         </details>
       </Card>
-      <Card title="For your players">
+      <Card title="Player link">
         <p style={{ margin: 0, color: theme.color.textMuted }}>
           Send your players this link, or let them scan the code. The password is in the link, so share it only with
           your group.
