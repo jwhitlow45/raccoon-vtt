@@ -44,7 +44,6 @@ import { gone, invalid, type Tx } from "./tx.ts";
 
 /** The refusals the DM's panel shows (4.1), in its words. */
 export const SOUND_WORDS = {
-  trackPlaying: "Stop the music first: this track is in the playlist that's playing.",
   loopPlaying: "Stop it first. It is playing now.",
   fifthLoop: "Up to four background sounds can play at once. Stop one first.",
   loopTwice: "That background sound is already playing.",
@@ -56,8 +55,8 @@ export const SOUND_WORDS = {
   notEffect: "That effect isn't in the room any more.",
   nothingPlaying: "Nothing is playing.",
   firedTwice: "That effect was already played.",
-  // The queue and the Music window (docs/design/design-v1-music-player.md 6.4 and 8). The last three replace
-  // trackPlaying for a delete and a change of use, whose callers move to them with the queue's rules.
+  // The queue and the Music window (docs/design/design-v1-music-player.md 6.4 and 8). The last three are a
+  // delete's and a change of use's refusals for a track the music holds, by where the queue holds it.
   musicChanged: "The music changed. Try again.",
   musicMovedOn: "The music moved on. Try again.",
   queueFull: `The queue holds ${SOUND_LIMITS.playlistTracks} tracks at most.`,
