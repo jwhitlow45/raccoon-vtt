@@ -13,7 +13,7 @@ import type { PopoverHandle } from "./Popover.tsx";
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { Menu } = await import("./Menu.tsx");
+const { Menu, focusMove, openingAt } = await import("./Menu.tsx");
 const { Popover, usePopoverContext } = await import("./Popover.tsx");
 const { Held } = await import("./Held.tsx");
 const { theme } = await import("../lib/theme.ts");
@@ -138,6 +138,67 @@ describe("a menu item with its own parts", () => {
     } finally {
       Object.assign(globalThis, previous);
     }
+  });
+});
+
+describe("a pick that keeps the menu open (designs/qol/chips.md 4.1)", () => {
+  test("a pick answering stay closes nothing, and another pick of the same menu still closes it", () => {
+    const picks: string[] = [];
+    const closes: string[] = [];
+    const { items } = draw(
+      {
+        label: "DM",
+        sections: [{ key: "s", items: [{ id: "move", title: "Move players here", kind: "action" }, { id: "follow", title: "Follow me", kind: "checkbox" }] }],
+        onPick: (id) => {
+          picks.push(id);
+          return id === "move" ? "stay" : undefined;
+        },
+      },
+      closes,
+    );
+    (items[0]!.props.onClick as (e: unknown) => void)({ detail: 1 });
+    assert.deepEqual(closes, [], "the warned move keeps its menu open");
+    (items[1]!.props.onClick as (e: unknown) => void)({ detail: 1 });
+    assert.deepEqual(picks, ["move", "follow"]);
+    assert.deepEqual(closes, ["pick"]);
+  });
+
+  test("Enter on an item whose pick stays keeps the menu open too", () => {
+    withFocus((focusOn) => {
+      const closes: string[] = [];
+      const drawn = draw({ label: "Blackout", sections: [{ key: "s", items: [{ id: "reveal", title: "Show players Crypt", kind: "action" }] }], onPick: () => "stay" }, closes);
+      focusOn(drawn, ["reveal"], "reveal");
+      (drawn.root.props.onKeyDown as (e: unknown) => void)(key({ key: "Enter" }));
+      assert.deepEqual(closes, []);
+    });
+  });
+
+  test("focus moves to the target only when it changes, so the menu's keys keep their place while it stands", () => {
+    assert.equal(focusMove(null, null), null);
+    assert.equal(focusMove(null, "reveal:anyway"), "reveal:anyway", "a warned move arms its anyway item, which takes focus");
+    assert.equal(focusMove("reveal:anyway", "reveal:anyway"), null, "a render while armed leaves focus where the keys put it");
+    assert.equal(focusMove("reveal:anyway", "reveal"), "reveal", "Cancel puts the item back with focus on it");
+    assert.equal(focusMove("reveal", null), null);
+  });
+});
+
+describe("where a key opening lands", () => {
+  const items: MenuItem[] = [
+    { id: "show", title: "Show a handout…", kind: "action" },
+    { id: "day", title: "Day", kind: "radio", checked: true },
+    { id: "night", title: "Night", kind: "radio" },
+    { id: "pat", title: "View as Pat", kind: "action" },
+  ];
+
+  test("a menu of actions with a choice partway down opens at its first item, or its last for Up", () => {
+    assert.equal(openingAt(items, "first", { atEdge: true }), 0);
+    assert.equal(openingAt(items, "last", { atEdge: true }), 3);
+    assert.equal(openingAt([], "first", { atEdge: true }), -1);
+  });
+
+  test("any other menu still opens at its checked choice", () => {
+    assert.equal(openingAt(items, "first"), 1);
+    assert.equal(openingAt(items, "last"), 1);
   });
 });
 

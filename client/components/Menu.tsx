@@ -90,6 +90,34 @@ export type MenuSection = {
 /** How an item was picked. */
 export type MenuPickBy = "pointer" | "key";
 
+/**
+ * What a pick answers: "stay" keeps the menu open for a pick whose result
+ * shows in the menu itself, such as a move of the players that asks first
+ * or waits on the server (designs/qol/chips.md 4.1, D-261106-136). Any
+ * other answer closes it as ever, so a pick written to return whatever
+ * its last call returned still closes.
+ */
+export type MenuPickResult = unknown;
+
+/**
+ * The item focus moves to after a render, or null. Only a change moves
+ * it, so the menu's own keys keep their place while the target stands.
+ */
+export function focusMove(before: string | null, now: string | null): string | null {
+  return now !== before ? now : null;
+}
+
+/**
+ * The item a key opening focuses: by default the checked choice, else the
+ * first (openingIndex). `atEdge`: the first item, or the last for Up,
+ * for a menu of actions that holds a choice partway down, such as the DM
+ * menu's Map phase (designs/qol/chips.md 9).
+ */
+export function openingAt(items: readonly MenuItem[], from: "first" | "last", opts: { atEdge?: boolean; skipDisabled?: boolean } = {}): number {
+  if (!opts.atEdge) return openingIndex(items, from, opts.skipDisabled);
+  return from === "last" ? items.length - 1 : items.length > 0 ? 0 : -1;
+}
+
 /** A double tap's span: a menu that covers its anchor ignores a press that starts this soon after it opens (D-261101-313). */
 export const COVER_GUARD_MS = 350;
 
@@ -101,13 +129,21 @@ export function Menu(props: {
    * The pick. It runs before focus goes back to the anchor, so the anchor
    * names what was picked by then. `by` is "key" for Enter or Space, and for
    * a click with `detail` 0, a reader's activation with no finger down
-   * (D-261101-098), else "pointer".
+   * (D-261101-098), else "pointer". "stay" keeps the menu open.
    */
-  onPick(id: string, by: MenuPickBy): void;
+  onPick(id: string, by: MenuPickBy): MenuPickResult;
+  /**
+   * The item focus moves to once drawn, whenever this changes: a pick that
+   * kept the menu open names the item that took the picked one's place,
+   * such as "Show players anyway" (designs/qol/chips.md 4.1).
+   */
+  focus?: string | null;
   /** Tiles in rows, for Setup and Tools, where Right and Left move as Down and Up do. */
   tiles?: boolean;
   /** Roll options open at an enabled action. Other menus retain their existing opening rule. */
   skipDisabledOnOpen?: boolean;
+  /** A key opening focuses the first item, or the last for Up, never a checked choice inside (openingAt). */
+  openAtEdge?: boolean;
   /** Data attributes for the menu element, such as the side panel's `data-tabs-menu`. */
   data?: Readonly<Record<`data-${string}`, string>>;
 }) {
@@ -129,9 +165,25 @@ export function Menu(props: {
   };
 
   useLayoutEffect(() => {
-    setInsideFocus((from) => focusItem(openingIndex(items, from, props.skipDisabledOnOpen)));
+    setInsideFocus((from) => focusItem(openingAt(items, from, { atEdge: props.openAtEdge, skipDisabled: props.skipDisabledOnOpen })));
     return () => setInsideFocus(null);
   });
+
+  // In the commit that drew the target, so focus never falls to the page from an item that left with the pick.
+  const focusTarget = props.focus ?? null;
+  const lastTarget = useRef(focusTarget);
+  useLayoutEffect(() => {
+    const id = focusMove(lastTarget.current, focusTarget);
+    lastTarget.current = focusTarget;
+    const node = id === null ? undefined : nodes.current.get(id);
+    if (!node) return;
+    focusInView(node);
+    // The item's own lines may place the box again, from its top (Popover.tsx contentKey), so it is brought into view once that is done.
+    const frame = requestAnimationFrame(() => {
+      if (document.activeElement === node) focusInView(node);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focusTarget]);
 
   /*
    * The popover calls this as it places its box (Popover.tsx
@@ -191,13 +243,15 @@ export function Menu(props: {
    * The pick runs first and its render commits at once, then focus goes to
    * the anchor and the menu closes. So the anchor already names the pick
    * when focus reaches it ("Monsters, tab, selected"), and focus never
-   * falls to the page between the item going and the anchor taking it.
+   * falls to the page between the item going and the anchor taking it. A
+   * pick that answers "stay" leaves the menu open, focus where its render
+   * put it.
    */
   const pick = (id: string, by: MenuPickBy) => {
     const it = items.find((item) => item.id === id);
     if (held || it?.disabled === true || it?.busy === true) return;
-    flushSync(() => props.onPick(id, by));
-    handle.close("pick");
+    const result = flushSync(() => props.onPick(id, by));
+    if (result !== "stay") handle.close("pick");
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
