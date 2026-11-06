@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { Button } from "../../components/Button.tsx";
 import { useExpansionFocus } from "../../components/expansionFocus.ts";
 import { api } from "../../lib/api.ts";
@@ -22,36 +22,13 @@ import { sendXcard, type SendState } from "./send.ts";
  * it. Cancel gives focus back to the X-card button.
  */
 export function XCardButton() {
-  const roomId = useRoomView((s) => s.roomId);
   const ui = useRoomUi();
   const [open, setOpen] = useState(false);
-  const [state, setState] = useState<SendState>({ kind: "idle" });
   // "View as a player" is the DM's own device: a card sent from it would come from the DM's grant, not the player shown.
   const preview = usePreview();
   const opener = useRef<HTMLButtonElement>(null);
   const words = useRef<HTMLParagraphElement>(null);
   useExpansionFocus(open, { inside: words, opener });
-  const live = useRef(true);
-  useEffect(() => {
-    live.current = true;
-    return () => {
-      live.current = false;
-    };
-  }, []);
-
-  const send = async () => {
-    if (state.kind === "sending") return;
-    setState({ kind: "sending" });
-    await sendXcard({
-      post: () => api.xcard(roomId),
-      closeSheet: () => ui.closePanel(),
-      settle: (next) => {
-        if (!live.current) return;
-        setState(next);
-        if (next.kind === "idle") setOpen(false);
-      },
-    });
-  };
 
   if (!open) {
     return (
@@ -59,10 +36,7 @@ export function XCardButton() {
         ref={opener}
         type="button"
         disabled={preview !== null}
-        onClick={() => {
-          setState({ kind: "idle" });
-          setOpen(true);
-        }}
+        onClick={() => setOpen(true)}
         style={{
           display: "flex",
           alignItems: "center",
@@ -91,6 +65,43 @@ export function XCardButton() {
     );
   }
 
+  return <XCardCard words={words} onCancel={() => setOpen(false)} onSent={() => setOpen(false)} closeSheet={() => ui.closePanel()} framed />;
+}
+
+/**
+ * The small card: what the X does, the large X that sends it, and
+ * Cancel. The Menu panel opens it in place of its button, and a player's
+ * You menu in a sheet of its own (designs/qol/chips.md C7). `words` takes
+ * focus as it opens, never the X. `framed` draws its own outline and its
+ * Cancel, which a sheet gives it already with its frame and its Close. A
+ * send that went out calls `onSent`, then `closeSheet`, so the sender sees
+ * the map under the shared card.
+ */
+export function XCardCard(props: { words: RefObject<HTMLParagraphElement | null>; onCancel(): void; onSent(): void; closeSheet(): void; framed?: boolean }) {
+  const roomId = useRoomView((s) => s.roomId);
+  const [state, setState] = useState<SendState>({ kind: "idle" });
+  const live = useRef(true);
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
+
+  const send = async () => {
+    if (state.kind === "sending") return;
+    setState({ kind: "sending" });
+    await sendXcard({
+      post: () => api.xcard(roomId),
+      closeSheet: props.closeSheet,
+      settle: (next) => {
+        if (!live.current) return;
+        setState(next);
+        if (next.kind === "idle") props.onSent();
+      },
+    });
+  };
+
   const sending = state.kind === "sending";
   return (
     <section
@@ -99,14 +110,13 @@ export function XCardButton() {
         display: "grid",
         justifyItems: "center",
         gap: theme.space(3),
-        padding: theme.space(4),
-        borderRadius: theme.radius.md,
-        border: `${theme.line.border}px solid ${theme.color.border}`,
-        background: theme.color.surfaceRaised,
         textAlign: "center",
+        ...(props.framed
+          ? { padding: theme.space(4), borderRadius: theme.radius.md, border: `${theme.line.border}px solid ${theme.color.border}`, background: theme.color.surfaceRaised }
+          : null),
       }}
     >
-      <p ref={words} tabIndex={-1} style={{ margin: 0, fontSize: theme.font.input, lineHeight: 1.4 }}>
+      <p ref={props.words} tabIndex={-1} style={{ margin: 0, fontSize: theme.font.input, lineHeight: 1.4 }}>
         Tap the X to ask the table to edit out what just happened. Nobody will know who tapped it.
       </p>
       <button
@@ -139,9 +149,11 @@ export function XCardButton() {
           {state.message}
         </p>
       ) : null}
-      <Button onClick={() => setOpen(false)} disabled={sending}>
-        Cancel
-      </Button>
+      {props.framed ? (
+        <Button onClick={props.onCancel} disabled={sending}>
+          Cancel
+        </Button>
+      ) : null}
     </section>
   );
 }
