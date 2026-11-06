@@ -65,8 +65,18 @@ export function viewFollow(tx: Tx, op: OpOf<"view.follow">): void {
   tx.write(keys.meta, { ...meta, view: { ...meta.view, follow: op.follow } });
 }
 
+/**
+ * The refusal of a blackout change that names a scene the players are not
+ * on (`whilePlayersOn`): another DM moved them, the move before it was
+ * refused, or the scene was deleted, which moves them too. The DM menu
+ * says it as "Not shown: the players are on another scene now. The
+ * blackout stays on."
+ */
+export const PLAYERS_ELSEWHERE = "the players are on another scene now";
+
 export function viewBlackout(tx: Tx, op: OpOf<"view.blackout">): void {
   const meta = tx.state.meta;
+  if (op.whilePlayersOn !== undefined && meta.playerSceneId !== op.whilePlayersOn) throw invalid(PLAYERS_ELSEWHERE);
   tx.write(keys.meta, { ...meta, view: { ...meta.view, blackout: op.blackout } });
 }
 

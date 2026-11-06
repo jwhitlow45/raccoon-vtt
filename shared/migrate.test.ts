@@ -1872,6 +1872,24 @@ describe("op version 48: stored ops from before replay by the rules they met (do
   });
 });
 
+describe("op version 49, the guarded reveal (designs/qol plan 3, D-261106-172)", () => {
+  test("keeps stored operations unchanged through the identity step, a lift with and without its scene, and the snapshot at 38", () => {
+    assert.ok(OP_VERSION >= 49);
+    assert.ok(SNAPSHOT_VERSION >= 38, "no state changes shape");
+    const plain = { t: "view.blackout", blackout: false };
+    assert.equal(runMigrations(plain, 48, 49, opMigrations), plain);
+    assert.equal(migrateOp(plain, 48), plain);
+    const guarded = { t: "view.blackout", blackout: false, whilePlayersOn: "s2" };
+    assert.equal(migrateOp(guarded, 49), guarded);
+    assert.ok(opSchema.safeParse(guarded).success);
+  });
+
+  test("a build at 48 refuses a room with a version 49 op, so it never reads a guard it would skip", () => {
+    const op = { t: "view.blackout", blackout: false, whilePlayersOn: "s2" };
+    assert.throws(() => runMigrations(op, 49, 48, opMigrations), /down/);
+  });
+});
+
 describe("the map discovery upgrade step (docs/design/design-v1-map-discovery.md 5.5, ASTRA-31)", () => {
   const scenes = {
     s1: scene("s1", { fogEnabled: true, vision: { on: true, light: "dark" } }),

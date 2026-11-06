@@ -12,7 +12,7 @@ import { ownEntry } from "./records.ts";
  * no old ops at all. The op pipeline is here for the crash case.
  */
 export const SNAPSHOT_VERSION = 38;
-export const OP_VERSION = 48;
+export const OP_VERSION = 49;
 
 export type MigrationStep = {
   from: number;
@@ -1198,6 +1198,21 @@ export const opMigrations: MigrationStep[] = [
     // an older build refuses.
     from: 47,
     to: 48,
+    apply: (op) => op,
+  },
+  {
+    // The QOL pass's guarded reveal (designs/qol plan 3, D-261106-172):
+    // `view.blackout` may carry `whilePlayersOn`, a new optional field, so
+    // no stored op changes shape and the step is the identity. No stored op
+    // carries it, so replay runs no new branch, and an op stored with it
+    // was applied while the players were on that scene, so it replays the
+    // same. No state changes shape, so the snapshot version stays 38.
+    // Deploy: nothing to do. Pages never receive ops, only their changes,
+    // so an open page reads a guarded lift as any other.
+    // Rollback needs the backup only for a room with version 49 ops after
+    // its last snapshot, which an older build refuses to migrate down.
+    from: 48,
+    to: 49,
     apply: (op) => op,
   },
 ];

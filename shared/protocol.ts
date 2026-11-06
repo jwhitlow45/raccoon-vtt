@@ -2149,7 +2149,18 @@ const stateClientOps = [
   op("room.update", { name: name.optional(), settings: settingsPatch.optional() }),
   op("room.setPlayerScene", { sceneId: id }),
   op("view.follow", { follow: z.boolean() }),
-  op("view.blackout", { blackout: z.boolean() }),
+  op("view.blackout", {
+    blackout: z.boolean(),
+    /**
+     * The scene the players must be on for the change to apply, or it is
+     * refused (PLAYERS_ELSEWHERE, shared/reducer/room.ts). The DM menu's
+     * Show players <scene> sends the move, then the lift naming that scene,
+     * so a refused move, a deleted scene or another DM's move in between
+     * leaves the blackout on and no player sees the old scene lit
+     * (QOL plan 3, D-261106-172). Absent applies as before.
+     */
+    whilePlayersOn: id.optional(),
+  }),
   op("member.update", { memberId: id, name: name.optional(), color: color.optional() }),
   op("scene.create", {
     scene: z.strictObject({
