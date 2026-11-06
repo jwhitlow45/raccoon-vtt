@@ -5,7 +5,6 @@ import fc from "fast-check";
 import { createStore } from "zustand/vanilla";
 import type { RoomState } from "#shared/model.ts";
 import { member, room } from "#shared/testutil.ts";
-import { resolveSceneFolds } from "../features/scenes/settingsFolds.ts";
 import { RoomScope, type ScopeSlot } from "../state/scope.ts";
 import {
   AMBIANCE_FOLDS,
@@ -207,6 +206,26 @@ describe("what a device remembers (6.1)", () => {
     folds.tap("link", false);
     assert.deepEqual(folds.get(1440, CLOCK), { handouts: true, screens: true, check: true, link: false, display: true });
   });
+
+  /**
+   * How the scene settings read their folds before they moved onto this
+   * store (features/scenes/settingsFolds.ts at 6ae1693e), kept here as the
+   * rule the store must read a device's stored values by.
+   */
+  function resolveSceneFolds(storage: Pick<Storage, "getItem">, width: number): { map: boolean; walls: boolean; scene: boolean } {
+    const wide = width >= 900;
+    let from: unknown;
+    try {
+      const raw = storage.getItem(SCENES_FOLDS.key);
+      from = raw === null ? {} : JSON.parse(raw);
+    } catch {
+      from = null;
+    }
+    if (typeof from !== "object" || from === null || Array.isArray(from)) return { map: true, walls: true, scene: true };
+    const stored = from as Record<string, unknown>;
+    const pick = (key: string, start: boolean) => (typeof stored[key] === "boolean" ? (stored[key] as boolean) : start);
+    return { map: pick("map", wide), walls: pick("walls", wide), scene: pick("scene", wide) };
+  }
 
   test("the scene folds' stored values read as the scene settings read them, Fog and vision on What players see's key and now on the setup rule", () => {
     // Fog and vision's fold with this stored value, at a phone's width and a computer's: a stored boolean wins, unreadable storage opens it, else the setup rule.

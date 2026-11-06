@@ -4,8 +4,8 @@ import { playersSeeLabel, playersSeeOf } from "./playersSeeRules.ts";
 import { lightOf } from "./settings.ts";
 
 /**
- * "Use these settings on other scenes…" (docs/design/design-v1-map-discovery.md
- * 8.3), as plain functions for node --test: the patch it sends, what each
+ * "Copy to other scenes…" (docs/design/design-v1-map-discovery.md 8.3), as
+ * plain functions for node --test: the patch it sends, what each
  * scene's line says the copy does there, and the result's words.
  */
 
@@ -27,6 +27,9 @@ export function copiesNothing(scene: Pick<Scene, "fogEnabled" | "vision">, patch
   return now.fogEnabled === patch.fogEnabled && now.vision.on === patch.vision.on && now.vision.light === patch.vision.light && now.vision.perPlayer === patch.vision.perPlayer;
 }
 
+export const COPY_BUTTON = "Copy to other scenes…";
+/** Under the button, since the light it copies is in Light and weather, another group (docs/design/design-v1-scenes-reorg.md 6). */
+export const COPY_BUTTON_HELP = "Copies Players see, Light and Sight.";
 export const COPY_HELP = "Copies Players see, Light and Sight. Movement and walls stay as they are.";
 export const COPY_UNDO = "Undo setup in Setup history puts the settings back. Players' remembered maps stay changed.";
 export const PLAYERS_HERE = "The players are here. They see the change at once.";
@@ -56,7 +59,7 @@ export function copyLine(scene: Pick<Scene, "id" | "fogEnabled" | "vision">, pat
 }
 
 export function copyTitle(sourceName: string): string {
-  return `Use ${sourceName}'s settings on…`;
+  return `Copy ${sourceName}'s settings to…`;
 }
 
 export function copyButtonText(count: number): string {

@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { clientOpSchema } from "#shared/protocol.ts";
 import { apply, room, scene } from "#shared/testutil.ts";
-import { COPY_UNDO, copiedAll, copiesNothing, copyButtonText, copyLine, copyNotes, copyPatch, copyResult, copyTitle, MAPS_JOIN, MAPS_RESET, PLAYERS_HERE } from "./copyRules.ts";
+import { COPY_BUTTON, COPY_BUTTON_HELP, COPY_UNDO, copiedAll, copiesNothing, copyButtonText, copyLine, copyNotes, copyPatch, copyResult, copyTitle, MAPS_JOIN, MAPS_RESET, PLAYERS_HERE } from "./copyRules.ts";
 import { playersSeeOf } from "./playersSeeRules.ts";
 
-/** "Use these settings on other scenes…" (docs/design/design-v1-map-discovery.md 8.3, decision 18). */
+/** "Copy to other scenes…" (docs/design/design-v1-map-discovery.md 8.3, decision 18, docs/design/design-v1-scenes-reorg.md 6). */
 
 const crypt = scene("s1", { name: "Crypt", fogEnabled: true, vision: { on: true, light: "dark", perPlayer: true }, blockMovement: true, autoWalls: "floor" });
 
@@ -46,8 +46,10 @@ describe("using a scene's vision settings on others", () => {
     assert.equal(copyLine(scene("s2", { fogEnabled: false }), whole, null), "Everything.");
   });
 
-  test("the sheet's words", () => {
-    assert.equal(copyTitle("Crypt"), "Use Crypt's settings on…");
+  test("the button's and the sheet's words", () => {
+    assert.equal(COPY_BUTTON, "Copy to other scenes…");
+    assert.equal(COPY_BUTTON_HELP, "Copies Players see, Light and Sight.");
+    assert.equal(copyTitle("Crypt"), "Copy Crypt's settings to…");
     assert.equal(copyButtonText(1), "Copy to 1 scene");
     assert.equal(copyButtonText(3), "Copy to 3 scenes");
     assert.equal(copyResult([{ name: "A", answer: "taken" }, { name: "B", answer: "taken" }, { name: "C", answer: "taken" }]), "Copied to 3 scenes.");

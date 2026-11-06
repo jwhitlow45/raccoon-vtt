@@ -8,18 +8,19 @@ import { member, room, scene } from "#shared/testutil.ts";
 import type { SceneWeather } from "#shared/weather.ts";
 
 /*
- * The Weather fold as the scene settings draw it (docs/design/design-v1-weather.md
- * 4.1): its folded summary, its open state, the controls each weather shows
- * and the words under them. The picks' rules are buildWeather.test.ts's.
+ * A scene's weather rows as Light and weather draws them, with no fold of
+ * their own (docs/design/design-v1-scenes-reorg.md 4.1): the controls each
+ * weather shows, the rules as the rules switch's help, and the words under
+ * them. The picks' rules are buildWeather.test.ts's.
  */
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { RoomProvider } = await import("../../state/view.ts");
 const themeModule = await import("../../lib/theme.ts");
-const { SceneWeather, WeatherSettings, weatherSummary } = await import("./WeatherSettings.tsx");
+const { SceneWeather, weatherSummary } = await import("./WeatherSettings.tsx");
 
-function render(weather: SceneWeather | undefined, part: typeof WeatherSettings | typeof SceneWeather = WeatherSettings): string {
+function render(weather: SceneWeather | undefined): string {
   const view: RoomState = room({ members: { dm1: member("dm1", "dm") } });
   view.scenes.s1 = scene("s1", weather ? { weather } : {});
   const store = createStore(() => ({ view, you: { memberId: "dm1", role: "dm" }, roomId: "r1", connection: "open", pending: [] as { op: ClientOp }[], local: { selectedIds: [], multi: false } }));
@@ -29,25 +30,34 @@ function render(weather: SceneWeather | undefined, part: typeof WeatherSettings 
       actions: { dispatch: () => 1, newId: () => "x" } as never,
       ui: {} as never,
       assets: { url: () => "" } as never,
-      children: createElement(part, { scene: view.scenes.s1 as Scene }),
+      children: createElement(SceneWeather, { scene: view.scenes.s1 as Scene }),
     }),
   );
 }
 
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
 
-describe("the Weather fold", () => {
-  test("folded on a clear scene, with Clear beside its label", () => {
-    const html = render(undefined);
-    assert.match(html, /<button type="button" aria-expanded="false"[^>]*>.*?Weather<\/button>/);
-    assert.match(html, /Weather<\/button><\/h[34]><span[^>]*>Clear<\/span>/);
-    assert.doesNotMatch(html, /Players see it at once/);
-  });
+/** The text of the element whose id an attribute of the element matching `at` names. */
+function named(html: string, at: RegExp, attr: "aria-labelledby" | "aria-describedby"): string {
+  const tag = html.match(at)?.[0] ?? "";
+  const id = new RegExp(`${attr}="([^"]+)"`).exec(tag)?.[1];
+  assert.ok(id, `${at} has ${attr}`);
+  const open = html.indexOf(`id="${id}"`);
+  const start = html.indexOf(">", open) + 1;
+  // A warning's words sit in a span of their own inside the help, so the text runs to the first span that ends.
+  return html.slice(start, html.indexOf("</span>", start)).replace(/<[^>]+>/g, "");
+}
 
-  test("open on a scene with weather, its summary hidden", () => {
-    const html = render({ kind: "rain", heavy: true, wind: "strong" });
-    assert.match(html, /aria-expanded="true"/);
-    assert.doesNotMatch(html, /Heavy rain · Strong wind<\/span>/);
+describe("the scene's weather rows", () => {
+  test("no fold of their own, on a clear scene and a scene with weather alike: the kind's picker first, where devices decide last", () => {
+    for (const weather of [undefined, { kind: "rain", heavy: true, wind: "strong" } as const]) {
+      const html = render(weather);
+      assert.doesNotMatch(html, /aria-expanded/);
+      assert.doesNotMatch(html, /<section/);
+      assert.match(html, /^<div[^>]*><div data-setting-row=""[^>]*>(?:(?!<\/div>)[\s\S])*?Weather/, "the Weather row first");
+      assert.match(html, /<select[^>]*aria-label="Weather"/, "the kind's picker");
+      assert.match(text(html), /Players see it at once\. Each device can show it still or turn it off in This device\. $/, "the devices line last");
+    }
   });
 
   test("the summary names the kind and the wind", () => {
@@ -95,54 +105,31 @@ describe("the Weather fold", () => {
     assert.match(storm, />Sandstorm</);
   });
 
-  test("a weather with a rule shows the switch and the rules line, and the switch is off when rules are", () => {
+  test("a weather with a rule shows one rules row: the switch, its help the rules, ending Rolls here ignore it. when off, with no line beside it (D-261102-863)", () => {
     const on = render({ kind: "rain", heavy: true });
     assert.match(on, /role="switch" aria-checked="true"/);
-    assert.match(text(on), /Weather rules on rolls/);
-    assert.match(text(on), /Perception checks here roll with Disadvantage\./);
+    assert.equal(named(on, /<button[^>]*role="switch"[^>]*>/, "aria-labelledby"), "Weather rules on rolls");
+    assert.match(named(on, /<button[^>]*role="switch"[^>]*>/, "aria-describedby"), /Perception checks here roll with Disadvantage\./);
+    assert.equal((text(on).match(/Perception checks here roll with Disadvantage\./g) ?? []).length, 1, "the rules said once, as the switch's help");
+    assert.doesNotMatch(on, /Rolls in this scene follow the rules below/, "the old help, which said what the rules line says, goes");
     const off = render({ kind: "rain", heavy: true, rules: false });
     assert.match(off, /role="switch" aria-checked="false"/);
-    assert.match(text(off), /Rolls here ignore it\./);
+    assert.match(named(off, /<button[^>]*role="switch"[^>]*>/, "aria-describedby"), /Rolls here ignore it\.$/);
+    assert.equal((text(off).match(/Rolls here ignore it\./g) ?? []).length, 1);
   });
 
-  test("heavy fog's line is a warning note, the rest are help", () => {
+  test("heavy fog's rules warn in the switch's help, the rest are help's muted words", () => {
     const { theme } = themeModule;
-    const lineOf = (html: string, words: RegExp) => new RegExp(`<p[^>]*style="([^"]*)"[^>]*>(?:(?!</p>).)*${words.source}`).exec(html)?.[1] ?? "";
     const fog = render({ kind: "fog", heavy: true });
     assert.match(text(fog), /Heavily Obscured: a creature trying to see something in it has the Blinded condition\./);
-    assert.ok(lineOf(fog, /Heavily Obscured/).includes(`color:${theme.color.warning}`), "heavy fog warns");
+    assert.match(fog, new RegExp(`<span style="color:${theme.color.warning.replace(/[()]/g, "\\$&")}">Heavily Obscured`), "heavy fog warns");
     const rain = render({ kind: "rain", heavy: true });
-    assert.ok(!lineOf(rain, /Lightly Obscured/).includes(`color:${theme.color.warning}`), "heavy rain only helps");
+    assert.doesNotMatch(rain, new RegExp(`color:${theme.color.warning.replace(/[()]/g, "\\$&")}`), "heavy rain only helps");
   });
 
-  test("a look-only weather says the rules stay as they are, and every open fold ends with where devices decide", () => {
+  test("a look-only weather has no switch and says the rules stay as they are, then where devices decide", () => {
     const html = render({ kind: "leaves" });
     assert.doesNotMatch(html, /role="switch"/);
-    assert.match(text(html), /A look only\. The rules stay as they are\./);
-    assert.match(text(html), /Players see it at once\. Each device can show it still or turn it off in This device\./);
-  });
-});
-
-describe("SceneWeather, the controls with no fold (docs/design/design-v1-panel-groups.md 4.1)", () => {
-  test("it draws the controls with no disclosure of its own, on a clear scene and a scene with weather alike", () => {
-    for (const weather of [undefined, { kind: "rain", heavy: true, wind: "strong" } as const]) {
-      const html = render(weather, SceneWeather);
-      assert.doesNotMatch(html, /aria-expanded/);
-      assert.doesNotMatch(html, /<section/);
-      assert.match(html, /<select[^>]*aria-label="Weather"|aria-label="Weather"[^>]*>/, "the kind's picker");
-      assert.match(text(html), /Players see it at once\. Each device can show it still or turn it off in This device\./);
-    }
-  });
-
-  test("the fold in What players see holds exactly SceneWeather's controls", () => {
-    const weather = { kind: "snow", wind: "moderate", toward: 270 } as const;
-    // Ids differ from one render to the next, so they are left out of the comparison.
-    const noIds = (html: string) => html.replace(/ (id|name|aria-labelledby|aria-describedby)="[^"]*"/g, "");
-    const folded = noIds(render(weather));
-    const alone = noIds(render(weather, SceneWeather));
-    const at = folded.indexOf(alone);
-    assert.ok(at > 0, "the open fold holds SceneWeather as drawn alone");
-    assert.match(folded.slice(0, at), /^<section[^>]*><div data-section-label=""[^>]*><h3[^>]*><button[^>]*>.*?<\/button><\/h3><\/div>$/, "under the fold's label and nothing else");
-    assert.equal(folded.slice(at + alone.length), "</section>", "and nothing after it");
+    assert.match(text(html), /A look only\. The rules stay as they are\. Players see it at once\. Each device can show it still or turn it off in This device\./);
   });
 });

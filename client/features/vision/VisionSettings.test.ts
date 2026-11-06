@@ -7,7 +7,8 @@ import type { ClientOp } from "#shared/protocol.ts";
 import { member, room, scene } from "#shared/testutil.ts";
 
 /*
- * The per-player parts of What players see as the DM's panel draws them
+ * Fog and vision and the scene's light as the DM's panel draws them
+ * (docs/design/design-v1-scenes-reorg.md 3), and their per-player parts
  * (docs/design/design-v1-per-player-vision.md 7.1 and 11): the Sight row under
  * the switch, named and described, who sees for themselves, and both busy
  * while their change is on its way.
@@ -16,7 +17,7 @@ import { member, room, scene } from "#shared/testutil.ts";
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { RoomProvider } = await import("../../state/view.ts");
-const { SightStatus, VisionSettings } = await import("./VisionSettings.tsx");
+const { LIGHT_NEEDS_VISION, LightSettings, SightStatus, useWallless, VisionSettings } = await import("./VisionSettings.tsx");
 const { Segmented } = await import("../../components/Segmented.tsx");
 const { SIGHT_CHOICES } = await import("./settings.ts");
 
@@ -27,7 +28,12 @@ function table(vision: Scene["vision"], fogEnabled = true): RoomState {
   return s;
 }
 
-function render(view: RoomState, pending: { op: ClientOp }[] = []): string {
+/** Fog and vision as the settings page draws it, its no-walls warning worked out by the page's own hook. */
+function FogAndVision(props: { scene: Scene }) {
+  return createElement(VisionSettings, { scene: props.scene, wallless: useWallless(props.scene) });
+}
+
+function render(view: RoomState, pending: { op: ClientOp }[] = [], part: typeof FogAndVision | typeof LightSettings = FogAndVision): string {
   const store = createStore(() => ({ view, you: { memberId: "dm1", role: "dm" }, roomId: "r1", connection: "open", pending, local: { selectedIds: [], multi: false } }));
   return renderToStaticMarkup(
     createElement(RoomProvider, {
@@ -35,7 +41,7 @@ function render(view: RoomState, pending: { op: ClientOp }[] = []): string {
       actions: { dispatch: () => 1, newId: () => "x" } as never,
       ui: {} as never,
       assets: { url: () => "" } as never,
-      children: createElement(VisionSettings, { scene: view.scenes.s1! }),
+      children: createElement(part, { scene: view.scenes.s1! }),
     }),
   );
 }
@@ -50,7 +56,7 @@ function named(html: string, at: RegExp, attr: "aria-labelledby" | "aria-describ
   return html.slice(start, html.indexOf("</", start)).replace(/<[^>]+>/g, "");
 }
 
-describe("What players see on a per-player scene (7.1, 11)", () => {
+describe("Fog and vision on a per-player scene (7.1, 11)", () => {
   test("the Sight row shows with vision off, a radio group named Sight and described by Per player's help, then who sees for themselves", () => {
     const html = render(table({ on: false, light: "dark", perPlayer: true }));
     const sight = /<div data-vision-sight[\s\S]*?(<div role="radiogroup"[^>]*>)/;
@@ -62,11 +68,11 @@ describe("What players see on a per-player scene (7.1, 11)", () => {
     assert.match(html, /Gus sees only what creatures that share sight see here\./);
     assert.doesNotMatch(html, /Ana sees only/, "Ana's entry is on");
     assert.match(html, /<input type="radio"[^>]*checked=""[^>]*value="player"/);
-    assert.ok(html.indexOf("data-vision-sight") > html.indexOf("Light level"), "after the light (docs/design/design-v1-map-discovery.md 8.4)");
-    assert.ok(html.indexOf("data-vision-sight") < html.indexOf("Fog and party vision"), "before the fold");
+    assert.ok(html.indexOf("data-vision-sight") > html.indexOf("Players see"), "after Players see");
+    assert.ok(html.indexOf("data-vision-sight") < html.indexOf(">Switches<"), "before the fold");
     assert.doesNotMatch(html, /aria-busy/);
     // Each row's question speaks through a status mounted before it has words (PV4-OP-5), so a screen reader hears them come.
-    const list = html.slice(html.indexOf("Who sees for themselves"), html.indexOf("Fog and party vision"));
+    const list = html.slice(html.indexOf("Who sees for themselves"), html.indexOf(">Switches<"));
     assert.equal((list.match(/<p role="status"[^>]*><\/p>/g) ?? []).length, 2, "Ana's row and Gus's");
   });
 
@@ -85,23 +91,23 @@ describe("What players see on a per-player scene (7.1, 11)", () => {
   });
 });
 
-describe("What players see (docs/design/design-v1-map-discovery.md 8.1 and 8.4)", () => {
+describe("Fog and vision (docs/design/design-v1-map-discovery.md 8.1, docs/design/design-v1-scenes-reorg.md 3)", () => {
   const MAP = { assetId: "a", widthPx: 700, heightPx: 700, cellPx: 70, originPx: { x: 0, y: 0 } };
   const group = /<div role="radiogroup" aria-labelledby="[^"]+" aria-describedby="[^"]+"[^>]*>/;
 
   test("Players see heads the group, a radio group named by it and described by the chosen option's help", () => {
     const html = render(table({ on: true, light: "dark" }));
-    assert.doesNotMatch(html, /What players see/, "the settings page draws the group around it (features/scenes/SceneSettings.tsx)");
+    assert.doesNotMatch(html, /Fog and vision/, "the settings page draws the group around it (features/scenes/SceneSettings.tsx)");
     assert.equal(named(html, group, "aria-labelledby"), "Players see");
     assert.match(named(html, group, "aria-describedby"), /^Players see what their characters see\./);
     assert.match(html, /<input type="radio"[^>]*checked=""[^>]*value="explore"/);
-    assert.ok(html.indexOf("Players see") < html.indexOf("Light level"), "first, before the light");
+    assert.doesNotMatch(html, /Light level|aria-label="Weather"/, "the light and the weather are Light and weather's (LightSettings, SceneWeather)");
     // Each option is named by its name alone.
     assert.match(html, /aria-labelledby="[^"]+"[^>]*>[^]*?>Reveal by hand</);
     assert.doesNotMatch(html, /Turn fog on/, "Explore turns fog on now");
     assert.doesNotMatch(html, /role="switch"/, "the fold of the two switches starts closed");
-    assert.match(html, /<button type="button" aria-expanded="false"[^>]*>.*?Fog and party vision/);
-    assert.match(html, />Use these settings on other scenes…</);
+    assert.match(html, /<button type="button" aria-expanded="false"[^>]*>.*?Switches/);
+    assert.doesNotMatch(html, /Use these settings on other scenes/);
   });
 
   test("fog off with party vision on is Custom: nothing chosen, its line describing the group, and the fold open on both switches", () => {
@@ -111,15 +117,15 @@ describe("What players see (docs/design/design-v1-map-discovery.md 8.1 and 8.4)"
     assert.match(html, /aria-expanded="true"/);
     assert.match(html, /role="switch" aria-checked="false"[^>]*>[^]*?>Fog</);
     assert.match(html, /role="switch" aria-checked="true"[^>]*>[^]*?>Party vision</);
-    assert.ok(html.indexOf(">Fog<") > html.indexOf("Fog and party vision"), "the Fog switch sits in the fold, moved from This scene");
+    assert.ok(html.indexOf(">Fog<") > html.indexOf(">Switches<"), "the Fog switch sits in the fold, moved from This scene");
   });
 
-  test("Fog and party vision folds as a Section: its label in a heading, chevron first, and folded, both switches' state beside it (docs/design/design-v1-design-pass.md 4.1)", () => {
+  test("Switches folds as a Section: its label in a heading, chevron first, and folded, both switches' state beside it, so it says what it holds without echoing the group's name (D-261102-931)", () => {
     const html = render(table({ on: true, light: "dark" }));
-    assert.match(html, /<h[34][^>]*><button type="button" aria-expanded="false"[^>]*><svg[^>]*>[\s\S]*?<\/svg>Fog and party vision<\/button><\/h[34]>/, "the chevron, then the label");
-    assert.match(html, /Fog and party vision<\/button><\/h[34]><span[^>]*>Fog on · Party vision on<\/span>/, "the summary after the heading, outside its button");
+    assert.match(html, /<h[34][^>]*><button type="button" aria-expanded="false"[^>]*><svg[^>]*>[\s\S]*?<\/svg>Switches<\/button><\/h[34]>/, "the chevron, then the label");
+    assert.match(html, /Switches<\/button><\/h[34]><span[^>]*>Fog on · Party vision on<\/span>/, "the summary after the heading, outside its button");
     const custom = render(table({ on: true, light: "dark" }, false));
-    assert.match(custom, /<button type="button" aria-expanded="true"[^>]*><svg[^>]*>[\s\S]*?<\/svg>Fog and party vision/);
+    assert.match(custom, /<button type="button" aria-expanded="true"[^>]*><svg[^>]*>[\s\S]*?<\/svg>Switches/);
     assert.doesNotMatch(custom, /Party vision on</, "open, no summary");
   });
 
@@ -141,6 +147,49 @@ describe("What players see (docs/design/design-v1-map-discovery.md 8.1 and 8.4)"
   test("a Players see change on its way makes the group busy", () => {
     const html = render(table({ on: true, light: "dark" }), [{ op: { t: "scene.update", sceneId: "s1", patch: { fogEnabled: true, vision: { on: false, light: "dark" } } } }]);
     assert.match(html, /<div role="radiogroup"[^>]*aria-busy="true"/);
+  });
+});
+
+describe("Copy to other scenes… (docs/design/design-v1-scenes-reorg.md 6)", () => {
+  test("in a room with another scene, the button ends the group, described by what it copies", () => {
+    const view = table({ on: true, light: "dark" });
+    view.scenes.s2 = scene("s2", { name: "Hall" });
+    const html = render(view);
+    const button = /<button[^>]*aria-describedby="[^"]+"[^>]*>Copy to other scenes…<\/button>/;
+    assert.match(html, button);
+    assert.equal(named(html, button, "aria-describedby"), "Copies Players see, Light and Sight.");
+    assert.ok(html.indexOf("Copy to other scenes…") > html.indexOf(">Switches<"), "after the Switches fold");
+    const alone = table({ on: true, light: "dark" });
+    alone.scenes = { s1: alone.scenes.s1! };
+    assert.doesNotMatch(render(alone), /Copy to other scenes/, "alone in the room, nothing to copy to");
+  });
+});
+
+describe("the scene's light, first in Light and weather (D-261102-933)", () => {
+  test("with party vision on: Light and its level's note, then the light with each map phase", () => {
+    const view = table({ on: true, light: "dim" });
+    const phase = { assetId: "a", widthPx: 700, heightPx: 700 };
+    view.scenes.s1 = { ...view.scenes.s1!, phases: [{ id: "p1", name: "Day", ...phase }, { id: "p2", name: "Night", ...phase }] };
+    const html = render(view, [], LightSettings);
+    assert.match(html, /aria-label="Light level"/);
+    assert.match(html, /Dim everywhere: shadows the party sees darker\./);
+    assert.match(html, /A phase&#x27;s light becomes the scene&#x27;s light/);
+    assert.match(html, /aria-label="Light with Night"/);
+    assert.doesNotMatch(html, /Light works only with party vision/);
+    assert.doesNotMatch(html, /Players see|Sight|Switches/, "Fog and vision's rows stay in their group");
+  });
+
+  test("with party vision off, each help says the light works only with it and where to turn it on, in place of the level's note", () => {
+    for (const fogEnabled of [true, false]) {
+      const view = table({ on: false, light: "dim" }, fogEnabled);
+      const phase = { assetId: "a", widthPx: 700, heightPx: 700 };
+      view.scenes.s1 = { ...view.scenes.s1!, phases: [{ id: "p1", name: "Day", ...phase }, { id: "p2", name: "Night", ...phase }] };
+      const html = render(view, [], LightSettings);
+      assert.equal(LIGHT_NEEDS_VISION, "Light works only with party vision, which is off here. Choose Explore in Fog and vision to use it.");
+      assert.equal((html.match(/Light works only with party vision, which is off here\. Choose Explore in Fog and vision to use it\./g) ?? []).length, 2, "Light's and each phase's");
+      assert.doesNotMatch(html, /Dim everywhere|A phase&#x27;s light becomes/);
+      assert.match(html, /<input type="radio"[^>]*checked=""[^>]*value="dim"/, "the level still shows and picks");
+    }
   });
 });
 

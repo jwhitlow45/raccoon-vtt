@@ -1,11 +1,11 @@
-import { useEffect, useId, useState } from "react";
+import { useId, useState } from "react";
 import type { Scene } from "#shared/model.ts";
 import { weatherHasRules, weatherRules } from "#shared/rules/weather.ts";
 // The shared type is read here as Weather, since SceneWeather names this file's controls.
 import { weatherParts, type SceneWeather as Weather, type WeatherKind } from "#shared/weather.ts";
 import { choiceLook } from "../../components/looks.ts";
 import { Icon } from "../../components/Icon.tsx";
-import { Help, Note, Section } from "../../components/Panel.tsx";
+import { Help } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { SettingRow } from "../../components/SettingRow.tsx";
 import { Switch } from "../../components/Switch.tsx";
@@ -28,39 +28,10 @@ import {
 } from "./buildWeather.ts";
 
 /**
- * The Weather fold in What players see (docs/design/design-v1-weather.md 4.1),
- * after the light rows and before Sight, around the scene's weather
- * controls (SceneWeather).
- *
- * Its open state is the component's own, as the Fog and party vision fold's
- * is: open on a scene with weather, folded on a clear one, fresh each time
- * the settings open. The settings mount anew for each scene.
- */
-export function WeatherSettings(props: { scene: Scene }) {
-  const weather = props.scene.weather;
-  const [open, setOpen] = useState(weather !== undefined);
-  useEffect(() => {
-    if (weather !== undefined) setOpen(true);
-  }, [weather === undefined]);
-  return (
-    <Section
-      label="Weather"
-      fold={{
-        open,
-        onToggle: () => setOpen((o) => !o),
-        summary: open ? undefined : <span style={{ color: theme.color.textMuted, fontSize: theme.font.small }}>{weatherSummary(weather)}</span>,
-      }}
-    >
-      <SceneWeather scene={props.scene} />
-    </Section>
-  );
-}
-
-/**
- * A scene's weather controls, with no fold of their own, for whatever holds
- * them (docs/design/design-v1-panel-groups.md 4.1): the kind, its strength,
- * the wind and where it blows, the switch that drops the roll rules for an
- * indoor scene, and the rules line. Every change sends one `scene.update`
+ * A scene's weather, rows of Light and weather under the light with no fold
+ * of their own (docs/design/design-v1-scenes-reorg.md 4.1): the kind, its
+ * strength, the wind and where it blows, Weather rules on rolls, and where
+ * each device decides how it shows. Every change sends one `scene.update`
  * with the whole weather, composed valid by `buildWeather`, so Undo puts the
  * old one back. Key it by the scene, so another scene starts it fresh.
  */
@@ -82,7 +53,7 @@ export function SceneWeather(props: { scene: Scene }) {
   return <WeatherBody picker={picker} weather={weather} forced={forcedNow(forced, weather)} change={change} />;
 }
 
-/** The fold's folded summary: "Clear", or the weather's names such as "Heavy rain · Strong wind". */
+/** The weather in a few words: "Clear", or its names such as "Heavy rain · Strong wind". Ambiance's Weather row shows it (docs/design/design-v1-scenes-reorg.md 4.2). */
 export function weatherSummary(weather: Weather | undefined): string {
   const parts = weatherParts(weather);
   return parts.length === 0 ? "Clear" : parts.join(" · ");
@@ -94,7 +65,6 @@ function WeatherBody(props: { picker: Picker; weather: Weather | undefined; forc
   const [light, heavy] = strengthWords(picker.kind);
   const help = windHelp(picker, forced);
   const rules = weatherRules(weather);
-  const RulesLine = rules.tone === "note" ? Note : Help;
   return (
     <div style={{ display: "grid", minWidth: 0 }}>
       <SettingRow name="Weather">
@@ -131,15 +101,17 @@ function WeatherBody(props: { picker: Picker; weather: Weather | undefined; forc
           <Compass value={picker.toward} onChange={(toward) => change({ toward })} />
         </SettingRow>
       )}
+      {/*
+       * One row for the rules (D-261102-863): while the weather has a rule,
+       * the switch's help is the rules themselves, which end "Rolls here
+       * ignore it." with it off, so a second line saying what it does would
+       * say it twice. Heavy fog's rules warn. With no rule, the line says so.
+       */}
       {weatherHasRules(weather) ? (
-        <Switch
-          label="Weather rules on rolls"
-          help="Rolls in this scene follow the rules below. Turn it off when the party is indoors. The weather still shows."
-          checked={picker.rules}
-          onChange={(on) => change({ rules: on })}
-        />
-      ) : null}
-      <RulesLine style={{ paddingBottom: theme.space(2) }}>{rules.text}</RulesLine>
+        <Switch label="Weather rules on rolls" help={rules.tone === "note" ? <span style={{ color: theme.color.warning }}>{rules.text}</span> : rules.text} checked={picker.rules} onChange={(on) => change({ rules: on })} />
+      ) : (
+        <Help style={{ paddingBottom: theme.space(2) }}>{rules.text}</Help>
+      )}
       <Help style={{ paddingBottom: theme.space(2) }}>Players see it at once. Each device can show it still or turn it off in This device.</Help>
     </div>
   );

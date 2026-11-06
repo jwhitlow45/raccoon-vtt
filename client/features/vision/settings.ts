@@ -3,7 +3,7 @@ import type { LightLevel, MapPhase, RoomState, Scene, SceneVision } from "#share
 import type { ClientOp, OpOf } from "#shared/protocol.ts";
 
 /**
- * The rules of a scene's What players see settings (docs/design/design-v1-maps-vision.md
+ * The rules of a scene's Fog and vision settings (docs/design/design-v1-maps-vision.md
  * sections 4.3.1 and 4.3.8), as plain functions for node --test.
  */
 
@@ -71,7 +71,7 @@ export function visionOnHelp(scene: Pick<Scene, "vision">): string {
 }
 
 /**
- * What a scene's What players see settings wait on (7.1): `vision`, a change the
+ * What a scene's Fog and vision settings wait on (7.1): `vision`, a change the
  * Party vision switch or the Light control sent, which make the switch
  * busy as before, and `sight`, the last change of the Sight row or of who
  * sees for themselves, which make the row and the list busy instead, and
@@ -113,7 +113,7 @@ export function phaseWithLight(phases: readonly MapPhase[] | undefined, phaseId:
 }
 
 /**
- * The What players see settings' words for the scene's fog while party
+ * The Fog and vision settings' words for the scene's fog while party
  * vision is on. On a per-player scene each map is a player's own, and what
  * creatures that share sight see goes on every map (review PV5-OPUS-5).
  */
@@ -130,7 +130,7 @@ export function fogNote(scene: Pick<Scene, "fogEnabled" | "vision">): { text: st
 }
 
 /**
- * The What players see settings' note for the DM when more tokens carry a
+ * The Light settings' note for the DM when more tokens carry a
  * lit light on a scene than sight lights, or null. Players' torches and hidden
  * combatants revealed on their turn are never refused at the cap, and past
  * it sight lights the party's own lights first, then the rest by token ID
