@@ -144,6 +144,8 @@ and for how to use it, the [DM guide](../dm-guide.md).
   headers in the side panel.
 - [design-v1-sheet-swipe.md](design-v1-sheet-swipe.md): swiping a phone's
   bottom sheet down to close it or up to fill the screen.
+- [design-v1-panel-size.md](design-v1-panel-size.md): a side panel that
+  widens from its edge, and step arrows and a mouse drag for sheets.
 - [design-v1-tool-options.md](design-v1-tool-options.md): a tool's options
   in one row.
 - [design-v1-tool-cycle.md](design-v1-tool-cycle.md): pressing a tool's key
