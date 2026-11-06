@@ -27,19 +27,18 @@ room links and other private data from logs and screenshots.
 
 These are the longest waits, not the usual ones:
 
-- A first reply within 7 days of the report.
+- A first reply within 7 days of the report. It confirms the report arrived
+  and says whether it is accepted as a vulnerability. If it is, you hear how
+  the fix is going until it ships.
 - A fix, or a plan with a date for one, within 90 days of the report.
-
-The first reply confirms the report arrived and says whether it is accepted
-as a vulnerability. If it is, you hear how the fix is going until it ships.
 
 ## How a report is handled
 
 Every report goes through the same steps, all inside the private advisory
 the report opened:
 
-1. **Acknowledge.** The maintainer replies to say the report arrived,
-   within the time above.
+1. **Acknowledge.** The maintainer sends the first reply, within the time
+   above.
 2. **Confirm and assess.** The maintainer reproduces the problem, decides
    whether it is a vulnerability, rates its severity with the CVSS
    calculator in the advisory, and works out which releases it affects. If
@@ -50,9 +49,7 @@ the report opened:
 4. **Release.** The fix goes out as a new release, following the usual
    [release process](docs/releasing.md). Server owners update as
    [Updating](docs/self-hosting.md#updating) describes.
-5. **Publish.** The advisory is published with the fixed version, a CVE is
-   requested through GitHub when one applies, and the reporter is credited
-   as described below.
+5. **Publish.** The advisory is published as described below.
 
 ## Coordinated disclosure
 
@@ -62,5 +59,6 @@ days have passed since the report, whichever comes first. If a fix needs
 longer, you will be asked before that date.
 
 Once the fix ships, its details are published as a GitHub security advisory
-for this repository, with a CVE when one applies. The advisory credits you
-by the name you choose, unless you would rather not be named.
+for this repository, with the fixed version and a CVE when one applies,
+requested through GitHub. The advisory credits you by the name you choose,
+unless you would rather not be named.
