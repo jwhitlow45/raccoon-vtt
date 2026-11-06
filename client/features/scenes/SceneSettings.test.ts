@@ -183,3 +183,42 @@ describe("Fog and vision's No walls tag (D-261102-932)", () => {
     assert.doesNotMatch(page(PHONE, { fogEnabled: true, vision: { on: true, light: "dark" } }), />No walls</);
   });
 });
+
+describe("New scene, a folding group over the settings (docs/design/design-v1-panel-groups.md 6.2)", () => {
+  /** The DM's Scenes panel with the Room's New scene fold as a tap leaves it. Its starts are lib/folds.test.ts's. */
+  async function panel(open: boolean, scenes = true): Promise<string> {
+    const { default: ScenesPanel } = await import("../../panels/ScenesPanel.tsx");
+    const state: RoomState = room({ members: { dm1: member("dm1", "dm") } });
+    if (!scenes) state.scenes = {};
+    const store = createStore(() => ({ view: state, you: { memberId: "dm1", role: "dm" }, roomId: "r1", sceneId: null, connection: "open", pending: [], local: { selectedIds: [], multi: false } }));
+    const scope = new RoomScope();
+    const slot = scope.get(scenesFoldsSlot);
+    slot.get(390, { clock: false, scenes });
+    slot.tap("new", open);
+    return renderToStaticMarkup(
+      createElement(RoomScopeProvider, {
+        scope,
+        children: createElement(RoomProvider, {
+          store: store as never,
+          actions: { dispatch: () => 1, newId: () => "x" } as never,
+          ui: { setTool: () => {} } as never,
+          assets: { url: () => "" } as never,
+          children: createElement(ScenesPanel, { close: () => {} } as never),
+        }),
+      }),
+    );
+  }
+  const newScene = /<div data-panel-group=""[^>]*><div[^>]*><h3[^>]*><button[^>]*data-group-fold=""[^>]*aria-expanded="(true|false)"[^>]*>([\s\S]*?)<\/button><\/h3>/;
+
+  test("a fold named New scene with no icon, its space kept so the name lines up with the groups that wear one, its form kept drawn while folded", async () => {
+    const html = await panel(false);
+    const m = newScene.exec(html);
+    assert.ok(m, "New scene is a group's fold");
+    assert.equal(m[1], "false");
+    assert.match(m[2]!, /data-group-reserve=""/, "the icon's space reserved");
+    assert.doesNotMatch(m[2]!, /data-group-icon=""/);
+    assert.match(m[2]!, />New scene</);
+    assert.match(html, /<div hidden=""[^>]*>[\s\S]*?Battle mat/, "the form stays mounted, hidden");
+    assert.equal(newScene.exec(await panel(true))?.[1], "true");
+  });
+});
