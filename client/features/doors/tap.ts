@@ -1,9 +1,11 @@
 import type { BuildChunk } from "#shared/model.ts";
 import type { Point } from "../../lib/camera.ts";
 import { K } from "../../lib/view.ts";
-import { WALL_RISE } from "../../canvas/relief/pieces.ts";
+import type { OpenLeaf } from "../builder/draw.ts";
+import { LEAF_RISE, WALL_RISE } from "../../canvas/relief/pieces.ts";
 import { FogView } from "../../canvas/relief/fogView.ts";
-import { standingStretches } from "../../canvas/relief/runs.ts";
+import { boxStands } from "../../canvas/relief/stand.ts";
+import { doorLeaf, floorOf, leafBox, standingStretches, wallKind } from "../../canvas/relief/runs.ts";
 import { boardPickOf, drawnAt, screenAt, type BoardPick } from "../../canvas/boardPick.ts";
 import type { ToolContext } from "../tools.ts";
 import { doorSeen, doorsNear, doorUnder, segmentDistance, type DoorOnMap, type Fog } from "./doors.ts";
@@ -27,7 +29,9 @@ export const DOOR_SLOP_PX = 22;
  *
  * In Isometric a door is reached by its standing piece or its line on the
  * ground, within the slop on screen (docs/design/design-v1-isometric-view.md 6.2),
- * from the press itself (`screen`).
+ * from the press itself (`screen`), or by its open leaf where that stands
+ * upright, which opens the pill as the line does: its Close closes the door
+ * through the pill's reach check and opener (docs/design/design-v1-iso-depth.md 5.5).
  */
 export function tapDoor(ctx: Pick<ToolContext, "getState" | "scene" | "camera" | "role" | "scope">, tool: string, world: Point, selected: string | null = null, screen?: Point): boolean {
   const pill = ctx.scope.get(doorPillSlot);
@@ -51,17 +55,21 @@ export function tapDoor(ctx: Pick<ToolContext, "getState" | "scene" | "camera" |
   return true;
 }
 
+/** The longest an open leaf reaches from its door's line, in cells: a free wall's longest. */
+const LEAF_REACH = 8;
+
 /**
  * The door a press reaches in Isometric: the nearest on screen within
- * DOOR_SLOP_PX, measured to its line on the drawn ground or, for a closed
- * door while heights stand, to the piece that stands WALL_RISE above the
- * higher ground beside it (relief/runs.ts). Among the doors the viewer can
- * see, as in Top-down.
+ * DOOR_SLOP_PX, measured to its line on the drawn ground or, while heights
+ * stand, to the piece that stands WALL_RISE above the higher ground beside
+ * it (relief/runs.ts), a closed door's, or an open door's frame and its
+ * upright leaf while the detail shows. Among the doors the viewer can see,
+ * as in Top-down.
  */
 export function isoDoorUnder(input: { chunks: Readonly<Record<string, BuildChunk>>; sceneId: string; fog: Fog; pick: BoardPick; world: Point; screen: Point; grid?: Grid }): DoorOnMap | null {
   const { pick, world, screen } = input;
-  // A view distance is never longer than the world distance it shows, and a press on a door drawn at one height meets ground at another up to 2K cells off per cell between them: a piece's top over the lowest ground at most.
-  const reach = DOOR_SLOP_PX / pick.camera.scale + 2 * K * (pick.heights.high - pick.heights.low + WALL_RISE) + 1;
+  // A view distance is never longer than the world distance it shows, and a press on a door drawn at one height meets ground at another up to 2K cells off per cell between them: a piece's top over the lowest ground at most. An open leaf reaches past its line by its length.
+  const reach = DOOR_SLOP_PX / pick.camera.scale + 2 * K * (pick.heights.high - pick.heights.low + WALL_RISE) + 1 + (pick.src?.detail ? LEAF_REACH : 0);
   let best: DoorOnMap | null = null;
   let bestD = Infinity;
   for (const d of doorsNear(input.chunks, input.sceneId, { x0: world.x - reach, y0: world.y - reach, x1: world.x + reach, y1: world.y + reach })) {
@@ -74,29 +82,52 @@ export function isoDoorUnder(input: { chunks: Readonly<Record<string, BuildChunk
   return best;
 }
 
-/** How far a press is from a door on screen, in px: 0 on what stands of its piece. */
-export function doorGap(pick: BoardPick, d: Pick<DoorOnMap, "a" | "b" | "mid" | "door">, screen: Point): number {
+/** How far a press is from a door on screen, in px: 0 on what stands of its piece or its open leaf. */
+export function doorGap(pick: BoardPick, d: Pick<DoorOnMap, "a" | "b" | "mid" | "door"> & { ref?: DoorOnMap["ref"] }, screen: Point): number {
   const ground = doorGround(pick, d);
   const a = screenAt(pick, d.a, ground);
   const b = screenAt(pick, d.b, ground);
   const at = (t: number) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
   let gap = segmentDistance(screen, a, b);
   for (const [t0, t1] of doorPiece(pick, d)) gap = Math.min(gap, sweepGap(screen, at(t0), at(t1), K * WALL_RISE * pick.camera.scale));
+  const leaf = standingLeaf(pick, d);
+  if (leaf) {
+    // The leaf stands on its hinge's ground, the frame's (relief/runs.ts): the higher ground beside an edge, a free door's own cell under its hinge.
+    const hinge = { x: leaf.hx, y: leaf.hy };
+    const base = d.ref && !("edge" in d.ref) ? drawnAt(pick, { x: leaf.hx + leaf.ux * 1e-6, y: leaf.hy + leaf.uy * 1e-6 }) : ground;
+    const tip = { x: leaf.hx + leaf.nx * leaf.len, y: leaf.hy + leaf.ny * leaf.len };
+    gap = Math.min(gap, sweepGap(screen, screenAt(pick, hinge, base), screenAt(pick, tip, base), K * WALL_RISE * LEAF_RISE * pick.camera.scale));
+  }
   return gap;
 }
 
 /**
  * The stretches of a door's piece that stand for this viewer, as
  * parameters from its a end to its b end, cut and judged as the relief
- * cuts its walls (relief/runs.ts): none for an open door, which lies flat,
- * or below the stand threshold, where every wall does (ISO-D12). A player
- * who sees a door only through a far corner of a cell beside it sees its
- * piece lie flat.
+ * cuts its walls (relief/runs.ts): none below the stand threshold, where
+ * every wall lies flat (ISO-D12), nor for an open door below the detail
+ * level, where it lies flat on the ground. Above it an open door's frame
+ * stands as a closed door's does (docs/design/design-v1-iso-depth.md 5.5). A
+ * player who sees a door only through a far corner of a cell beside it
+ * sees its piece lie flat.
  */
 export function doorPiece(pick: Pick<BoardPick, "src">, d: Pick<DoorOnMap, "a" | "b" | "door">): [number, number][] {
   const src = pick.src;
-  if (d.door.state === "open" || !src || !src.stand) return [];
+  if (!src || !src.stand || (d.door.state === "open" && src.detail !== true)) return [];
   return standingStretches(new FogView(src.fog, src.sceneId, src.bounds), d.a, d.b);
+}
+
+/**
+ * An open door's leaf where it stands upright for this viewer, as the relief
+ * stands it (relief/runs.ts wallPieces): heights standing, the detail
+ * showing, and every sub-cell under the leaf itself revealed. Null
+ * otherwise, and for a secret door not yet found, which stands as a wall.
+ */
+export function standingLeaf(pick: Pick<BoardPick, "src">, d: Pick<DoorOnMap, "a" | "b" | "door">): OpenLeaf | null {
+  const src = pick.src;
+  if (!src || !src.stand || src.detail !== true || wallKind(d.door) !== "open") return null;
+  const leaf = doorLeaf(d.a, d.b, floorOf(src.chunks, src.sceneId));
+  return leaf && leaf.len > 1e-9 && boxStands(new FogView(src.fog, src.sceneId, src.bounds), leafBox(leaf)) ? leaf : null;
 }
 
 /** Whether a door's piece stands at its middle, where its pill hangs over it (DoorPill.tsx). */

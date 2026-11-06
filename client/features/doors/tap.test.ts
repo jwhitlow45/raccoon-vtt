@@ -3,13 +3,13 @@ import { describe, test } from "node:test";
 import type { EdgeFeature, RoomState } from "#shared/model.ts";
 import { isometric, K, type Turn } from "../../lib/view.ts";
 import { boardPickFor, boardPickSlot, DrawnHeightsMemo, pressAt, screenAt, type BoardPick } from "../../canvas/boardPick.ts";
-import { WALL_RISE } from "../../canvas/relief/pieces.ts";
+import { LEAF_RISE, WALL_RISE } from "../../canvas/relief/pieces.ts";
 import { CLOSED, line, OPEN, raised, world } from "../movement/testing.ts";
 import { RoomScope } from "../../state/scope.ts";
 import { reveal } from "#shared/testutil.ts";
 import { segmentDistance } from "./doors.ts";
 import { doorPillSlot } from "./store.ts";
-import { DOOR_SLOP_PX, doorPieceStands, isoDoorUnder, sweepGap, tapDoor } from "./tap.ts";
+import { DOOR_SLOP_PX, doorPieceStands, isoDoorUnder, standingLeaf, sweepGap, tapDoor } from "./tap.ts";
 
 const CAM = { x: 500, y: 100, scale: 40 };
 
@@ -87,15 +87,60 @@ describe("a door tapped in Isometric (docs/design/design-v1-isometric-view.md 6.
     assert.deepEqual(under(screenAt(pick, door.mid, 2 + WALL_RISE * 0.9)), { edge: "6,5,w" });
   });
 
-  test("an open door lies flat: only its line on the ground reaches it", () => {
+  test("an open door's frame and its upright leaf reach it while the detail shows, a tap on the leaf opens its pill, and below the detail only its line does (docs/design/design-v1-iso-depth.md 5.5)", () => {
     const state = hall(OPEN);
-    const pick = pickOf(state, 0, 80);
-    const onLine = screenAt(pick, { x: 6, y: 5.5 }, 2);
-    const up = screenAt(pick, { x: 6, y: 5.5 }, 2 + WALL_RISE);
-    const under = (screen: { x: number; y: number }) => isoDoorUnder({ chunks: state.buildChunks, sceneId: "s1", fog: null, pick, world: { x: 6, y: 5.5 }, screen })?.ref ?? null;
-    assert.deepEqual(under(onLine), { edge: "6,5,w" });
-    assert.ok(K * WALL_RISE * pick.camera.scale > DOOR_SLOP_PX, "the piece is taller than the slop at this zoom");
-    assert.equal(under(up), null);
+    const world = { x: 6, y: 5.5 };
+    const under = (pick: BoardPick, screen: { x: number; y: number }) => isoDoorUnder({ chunks: state.buildChunks, sceneId: "s1", fog: null, pick, world, screen })?.ref ?? null;
+    for (const turn of [0, 1, 2, 3] as Turn[]) {
+      const pick = pickOf(state, turn, 80);
+      assert.equal(pick.src?.detail, true);
+      // No floor is painted either side, so the leaf swings east, from its hinge at 6, 5.15 to 6.7, 5.15, on the 10 ft side.
+      const leaf = standingLeaf(pick, { a: { x: 6, y: 5 }, b: { x: 6, y: 6 }, door: OPEN })!;
+      assert.deepEqual([leaf.hx, leaf.hy, leaf.nx, leaf.ny + 0], [6, 5.15, 1, 0]);
+      const onLeaf = screenAt(pick, { x: 6.6, y: 5.15 }, 2 + (WALL_RISE * LEAF_RISE) / 2);
+      // At turn 0 the press lies past the slop from the frame's band and its line: only the leaf reaches it. At other turns the leaf stands in front of its frame on screen.
+      const a = screenAt(pick, { x: 6, y: 5 }, 2);
+      const b = screenAt(pick, { x: 6, y: 6 }, 2);
+      if (turn === 0) assert.ok(sweepGap(onLeaf, a, b, K * WALL_RISE * 80) > DOOR_SLOP_PX, "the press is off the frame");
+      assert.deepEqual(under(pick, onLeaf), { edge: "6,5,w" }, `turn ${turn}: the leaf`);
+      assert.deepEqual(under(pick, screenAt(pick, { x: 6, y: 5.5 }, 2 + WALL_RISE * 0.9)), { edge: "6,5,w" }, `turn ${turn}: the frame's top`);
+      if (turn === 0) {
+        const scope = new RoomScope();
+        scope.get(boardPickSlot).read = () => pick;
+        const ctx = { getState: () => ({ view: state }) as never, scene: state.scenes.s1!, camera: () => pick.camera, role: "dm" as const, scope };
+        assert.equal(tapDoor(ctx, "select", pressAt(pick, onLeaf), null, onLeaf), true);
+        assert.deepEqual(scope.get(doorPillSlot).getState().pill, { sceneId: "s1", ref: { edge: "6,5,w" } }, "the pill opens, the door's state untouched");
+      }
+      // Below the detail, at 20 px a cell, the leaf lies flat and so does the frame: only the line reaches the door.
+      const low = pickOf(state, turn, 20);
+      assert.equal(low.src?.detail, false);
+      assert.equal(standingLeaf(low, { a: { x: 6, y: 5 }, b: { x: 6, y: 6 }, door: OPEN }), null);
+      assert.equal(under(low, screenAt(low, world, 2 + WALL_RISE * 0.9 + (DOOR_SLOP_PX + 4) / (K * 20))), null, `turn ${turn}: above where the frame would stand`);
+      assert.deepEqual(under(low, screenAt(low, world, 2)), { edge: "6,5,w" });
+    }
+  });
+
+  test("an open door's pill hangs over its frame's top at 24 px a cell and over its line at 23, as a closed door's does", () => {
+    for (const door of [OPEN, CLOSED]) {
+      const state = hall(door);
+      const d = { a: { x: 6, y: 5 }, b: { x: 6, y: 6 }, door };
+      assert.equal(doorPieceStands(pickOf(state, 0, 24), d), true);
+      assert.equal(doorPieceStands(pickOf(state, 0, 23), d), door === CLOSED, door.state);
+    }
+  });
+
+  test("security: for a player a leaf over fog lies flat, so a press on where it would stand finds nothing while its frame still reaches the door", () => {
+    const state = hall(OPEN);
+    state.scenes.s1 = { ...state.scenes.s1!, fogEnabled: true };
+    // Both sides of the door's line seen, the square east of it only its first quarter: the leaf runs to 6.7.
+    reveal(state, "s1", { x: 5, y: 5, w: 1.25, h: 1 });
+    const pick = boardPickFor({ room: state, scene: state.scenes.s1!, role: "player", fog: true, view: isometric(0), camera: { ...CAM, scale: 80 }, lowPower: false }, new DrawnHeightsMemo());
+    const d = { a: { x: 6, y: 5 }, b: { x: 6, y: 6 }, door: OPEN };
+    assert.equal(standingLeaf(pick, d), null);
+    assert.equal(doorPieceStands(pick, d), true);
+    reveal(state, "s1", { x: 5, y: 5, w: 2, h: 1 });
+    const seen = boardPickFor({ room: state, scene: state.scenes.s1!, role: "player", fog: true, view: isometric(0), camera: { ...CAM, scale: 80 }, lowPower: false }, new DrawnHeightsMemo());
+    assert.notEqual(standingLeaf(seen, d), null, "the square seen, the leaf stands");
   });
 
   test("below the stand threshold a closed door lies flat too (ISO-D12)", () => {

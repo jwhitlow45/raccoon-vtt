@@ -33,7 +33,9 @@ const PILL_HEIGHT = 48 + 44 + theme.space(1) + 2 * theme.space(2);
  * or when a token is tapped, whose bar takes its place. It steps aside
  * while a token is dragged, so it never covers where the token goes. In
  * Isometric it stands over the door's standing piece (`pick`,
- * docs/design/design-v1-isometric-view.md 5.3).
+ * docs/design/design-v1-isometric-view.md 5.3), an open door's frame too while
+ * the detail shows, whose leaf a tap opens this pill from
+ * (docs/design/design-v1-iso-depth.md 5.5).
  */
 export function DoorPillHost(props: { scene: Scene; tool: string; chrome: ChromeCamera; viewport: Size; insets: Insets }) {
   const slot = useScoped(doorPillSlot);
@@ -70,7 +72,7 @@ function Pill(props: { door: DoorOnMap; selected: string | undefined; scene: Sce
   };
   const choices = doorActions(scene.id, door, role);
   const width = Math.min(role === "dm" ? 300 : 160, props.viewport.width - 16);
-  // Over the top of a closed door's standing piece, or its line where it lies flat.
+  // Over the top of a door's standing frame, closed or open, or its line where it lies flat.
   const rise = doorPieceStands(pick, door) ? WALL_RISE : 0;
   const anchor = groundAnchor(camera, pick, door.mid, pick.view.kind === "isometric" ? doorGround(pick, door) + rise : 0);
   const place = cardPlace({ anchor, viewport: props.viewport, insets: props.insets, width, height: PILL_HEIGHT, gap: 14, prefer: "above" });
