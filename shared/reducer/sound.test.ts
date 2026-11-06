@@ -110,11 +110,15 @@ describe("the library (6.3)", () => {
 
   test("a change of use is refused while the run's order or a loop names the sound, paused included, and for a length the use does not take", () => {
     const state = step(step(soundRoom(), playTavern).state, { t: "loop.start", id: "l1", soundId: "rain", volume: 70 }).state;
-    assert.equal(refusal(state, { t: "sound.update", id: "m1", use: "loop" }), SOUND_WORDS.trackPlaying);
-    assert.equal(refusal(state, { t: "sound.update", id: "m3", use: "loop" }), "Stop the music first: this track is in the playlist that's playing.", "a later track of the order");
+    assert.equal(refusal(state, { t: "sound.update", id: "m1", use: "loop" }), "This track is playing. Skip it or stop the music first.");
+    assert.equal(refusal(state, { t: "sound.update", id: "m3", use: "loop" }), "This track is in the queue. Take it out under Up next first.", "a later track of the order");
+    // From the reveal at 165 s m2 plays next, and from its start at 185 s it is the playing track.
+    assert.equal(refusal(state, { t: "sound.update", id: "m2", use: "loop" }, 170_000), "This track plays next. Take it out of Up next first.");
+    assert.equal(refusal(state, { t: "sound.update", id: "m2", use: "loop" }, 187_000), SOUND_WORDS.trackPlays, "the incoming track of a crossfade");
+    assert.equal(refusal(state, { t: "sound.update", id: "m1", use: "loop" }, 187_000), SOUND_WORDS.trackQueued, "the outgoing one");
     assert.equal(refusal(state, { t: "sound.update", id: "rain", use: "music" }), "Stop it first. It is playing now.");
     const paused = step(state, { t: "music.pause" }, 10_000).state;
-    assert.equal(refusal(paused, { t: "sound.update", id: "m2", use: "loop" }), SOUND_WORDS.trackPlaying);
+    assert.equal(refusal(paused, { t: "sound.update", id: "m2", use: "loop" }), SOUND_WORDS.trackQueued);
     assert.equal(refusal(soundRoom(), { t: "sound.update", id: "m1", use: "effect" }), "Effects are 30 seconds at most.");
     assert.equal(refusal(soundRoom(), { t: "sound.update", id: "door", use: "loop" }), "Background sounds are 2 seconds at least.");
   });
@@ -159,10 +163,11 @@ describe("deleting a sound (6.3, section 11)", () => {
     assert.deepEqual(r.state.playing, { rev: 4, music: null, loops: {}, effects: [{ id: "e2", soundId: "door", at: startAt(100) }], volume: FULL });
   });
 
-  test("a playing loop and a track of the run are refused in the panel's words", () => {
+  test("a playing loop, the playing track and the revealed next are refused in the panel's words", () => {
     const state = step(step(soundRoom(), playTavern).state, { t: "loop.start", id: "l1", soundId: "rain", volume: 70 }).state;
     assert.equal(refusal(state, { t: "sound.delete", id: "rain" }), "Stop it first. It is playing now.");
-    assert.equal(refusal(state, { t: "sound.delete", id: "m2" }), "Stop the music first: this track is in the playlist that's playing.");
+    assert.equal(refusal(state, { t: "sound.delete", id: "m1" }), "This track is playing. Skip it or stop the music first.");
+    assert.equal(refusal(state, { t: "sound.delete", id: "m2" }, 170_000), "This track plays next. Take it out of Up next first.");
     assert.equal(refusal(state, { t: "sound.delete", id: "ghost" }), "sound is not here");
   });
 
@@ -503,5 +508,192 @@ describe("no Setup op writes playing (D-261102-471)", () => {
       assert.ok(!r.touched.includes(keys.playing), `${op.t} touches no playing`);
       assert.ok(r.inverse && !r.inverse.some((e) => e.key === keys.playing), `${op.t}'s undo puts no playing back`);
     }
+  });
+});
+
+describe("the queue's ops (docs/design/design-v1-music-player.md 6.3 and 6.4)", () => {
+  const extra = { m4: sound("m4", "music", 170_000, "Smoke"), m60: sound("m60", "music", 60_000, "Short"), x: sound("x", "music", 120_000, "Elsewhere") };
+  const FOUR: Playlist = { id: "four", rev: 0, name: "Four", sounds: ["m1", "m2", "m3", "m4"], repeat: "all", fade: 5 };
+  const queueRoom = (): RoomState => soundRoom({ sounds: { ...LIBRARY, ...extra }, playlists: { tavern: TAVERN, four: FOUR } });
+  const playFour: Op = { t: "music.play", run: "r1", playlistId: "four", order: ["m1", "m2", "m3", "m4"], repeat: "all", fade: 5 };
+  const fourRun: MusicRun = { run: "r1", playlistId: "four", order: ["m1", "m2", "m3", "m4"], index: 0, repeat: "all", fade: 5, now: { soundId: "m1", at: S0 } };
+  const four = () => step(queueRoom(), playFour).state;
+  const queue = (edit: Extract<Op, { t: "music.queue" }>["edit"], from = "r1"): Op => ({ t: "music.queue", from, edit });
+  const at = (state: RoomState, op: Op, ms: number, opVersion?: number) => applyOp(state, op, DM, { ...envAt(ms), ...(opVersion !== undefined ? { opVersion } : {}) });
+
+  test("no run, a stale from and a jump made on another track are refused in the panel's words", () => {
+    assert.equal(refusal(queueRoom(), queue({ t: "remove", soundId: "m2" })), "Nothing is playing.");
+    assert.equal(refusal(queueRoom(), { t: "music.jump", run: "r2", from: "r1", soundId: "m2" }), SOUND_WORDS.nothingPlaying);
+    const played = four();
+    assert.equal(refusal(played, queue({ t: "remove", soundId: "m2" }, "r0")), "The music changed. Try again.");
+    assert.equal(refusal(played, { t: "music.jump", run: "r2", from: "r0", soundId: "m2" }), SOUND_WORDS.musicChanged);
+    assert.equal(refusal(played, { t: "music.jump", run: "r2", from: "r1", soundId: "m1", ms: 5_000, on: "m2" }), "The music moved on. Try again.");
+    // Past the promotion at 190 s the seek made on m1 is refused, while Play now, which names no track, still lands.
+    assert.equal(refusal(played, { t: "music.jump", run: "r2", from: "r1", soundId: "m1", ms: 5_000, on: "m1" }, 191_000), SOUND_WORDS.musicMovedOn);
+    assert.equal(step(played, { t: "music.jump", run: "r2", from: "r1", soundId: "m4" }, 191_000).state.playing!.music?.now.soundId, "m4");
+    assert.equal(refusal(step(played, { t: "music.stop" }, 1_000).state, queue({ t: "unshuffle" })), SOUND_WORDS.nothingPlaying);
+  });
+
+  test("the helpers' refusals come through in their words", () => {
+    const played = four();
+    assert.equal(refusal(played, queue({ t: "remove", soundId: "m1" })), "The playing track stays in the queue. Skip it or stop the music.");
+    assert.equal(refusal(played, queue({ t: "move", soundId: "x", to: "first" })), "That track left the queue.");
+    assert.equal(refusal(played, queue({ t: "next", soundIds: ["rain"] })), SOUND_WORDS.notMusic);
+    assert.equal(refusal(played, { t: "music.jump", run: "r2", from: "r1", soundId: "x" }), SOUND_WORDS.leftQueue);
+    const big = Object.fromEntries(Array.from({ length: 100 }, (_, i) => [`b${i}`, sound(`b${i}`, "music", 60_000, `Track ${i}`)]));
+    const full = step(soundRoom({ sounds: { ...LIBRARY, ...big } }), { t: "music.play", run: "r1", soundId: "b0", order: ["b0"], repeat: "all", fade: 0 }).state;
+    const ninetyNine = Object.keys(big).filter((id) => id !== "b0");
+    const added = step(full, queue({ t: "add", soundIds: ninetyNine })).state;
+    assert.equal(added.playing!.music?.order?.length, 100);
+    assert.equal(refusal(added, queue({ t: "add", soundIds: ["m1"] })), "The queue holds 100 tracks at most.");
+  });
+
+  test("an edit writes playing alone with no step, and one that changes nothing writes nothing, so a second DM's stale press undoes nothing", () => {
+    const played = four();
+    const r = step(played, queue({ t: "remove", soundId: "m3" }), 1_000);
+    assert.deepEqual(r.state.playing!.music, { ...fourRun, order: ["m1", "m2", "m4"] });
+    assert.deepEqual(r.touched, [keys.playing]);
+    assert.equal(undoScope(queue({ t: "remove", soundId: "m3" }), played), "none");
+    const again = step(r.state, queue({ t: "remove", soundId: "m3" }), 2_000);
+    assert.deepEqual(again.touched, []);
+    assert.equal(again.state.playing, r.state.playing);
+    // Past the reveal a no-write still writes nothing: the tick stores what the schedule moved on.
+    const late = step(played, queue({ t: "move", soundId: "m2", to: "first" }), 170_000);
+    assert.deepEqual(late.touched, []);
+    assert.equal(refusal(r.state, queue({ t: "move", soundId: "m3", to: "first" }), 3_000), "That track left the queue.", "the other DM's move of the removed track");
+    const off = step(step(played, queue({ t: "shuffle", seed: "s1" }), 1_000).state, queue({ t: "unshuffle" }), 2_000).state;
+    assert.deepEqual(step(off, queue({ t: "unshuffle" }), 3_000).touched, [], "Shuffle off twice");
+  });
+
+  test("an edit during the m1 to m2 crossfade promotes m2 first, and Home on a later row lands right after it", () => {
+    const played = four();
+    const r = step(played, queue({ t: "move", soundId: "m4", to: "first" }), 187_000);
+    assert.deepEqual(r.state.playing!.music, { ...fourRun, order: ["m1", "m2", "m4", "m3"], index: 1, now: { soundId: "m2", at: S0 + 185_000 } });
+    assert.equal(refusal(played, queue({ t: "move", soundId: "m2", to: "last" }), 187_000), SOUND_WORDS.playingStays, "a move of the row that promoted");
+  });
+
+  test("inside the reveal window Play next swaps the revealed next at the same start", () => {
+    const played = four();
+    const r = step(played, queue({ t: "next", soundIds: ["m4"] }), 170_000);
+    assert.deepEqual(r.state.playing!.music, { ...fourRun, order: ["m1", "m4", "m2", "m3"], next: { soundId: "m4", at: S0 + 185_000 } });
+  });
+
+  test("a seek to 0:59 of a 1:00 Repeat one track with a 10 s crossfade is held to 0:49, playing, and paused then resumed", () => {
+    const one = step(queueRoom(), { t: "music.play", run: "r1", soundId: "m60", order: ["m60"], repeat: "one", fade: 10 }).state;
+    const sought = step(one, { t: "music.jump", run: "r2", from: "r1", soundId: "m60", ms: 59_000, on: "m60" }, 5_000).state.playing!.music!;
+    assert.deepEqual(sought, { run: "r2", order: ["m60"], index: 0, repeat: "one", fade: 10, now: { soundId: "m60", at: startAt(5_000) - 49_000 } });
+    const paused = step(one, { t: "music.pause" }, 5_000).state;
+    const moved = step(paused, { t: "music.jump", run: "r2", from: "r1", soundId: "m60", ms: 59_000, on: "m60" }, 6_000).state;
+    assert.deepEqual(moved.playing!.music, { run: "r2", order: ["m60"], index: 0, repeat: "one", fade: 10, now: { soundId: "m60", at: S0 }, paused: 49_000 }, "stays paused at the new place");
+    const resumed = step(moved, { t: "music.resume", run: "r3" }, 20_000).state;
+    assert.deepEqual(resumed.playing!.music?.now, { soundId: "m60", at: startAt(20_000) - 49_000 });
+    // A track's last second stays out of reach under every repeat, and ms 0 is the default.
+    const all = step(four(), { t: "music.jump", run: "r2", from: "r1", soundId: "m2", ms: 300_000 }, 1_000).state.playing!.music!;
+    assert.deepEqual(all.now, { soundId: "m2", at: startAt(1_000) - 199_000 });
+    assert.deepEqual(step(four(), { t: "music.jump", run: "r2", from: "r1", soundId: "m3" }, 1_000).state.playing!.music!.now, { soundId: "m3", at: startAt(1_000) });
+  });
+
+  test("a play's shuffle is stored on its run", () => {
+    const r = step(queueRoom(), { ...playFour, order: ["m3", "m1", "m4", "m2"], shuffle: true } as Op);
+    assert.deepEqual(r.state.playing!.music, { ...fourRun, order: ["m3", "m1", "m4", "m2"], now: { soundId: "m3", at: S0 }, shuffle: true });
+  });
+});
+
+describe("Add to playlist (docs/design/design-v1-music-player.md 6.4)", () => {
+  const add = (id: string, soundId: string): Op => ({ t: "playlist.add", id, soundId });
+
+  test("an append of a music sound, a Setup step, and nothing written for one it holds", () => {
+    const r = step(soundRoom(), add("tavern", "m2"));
+    assert.deepEqual(r.touched, [], "it holds it");
+    assert.equal(r.inverse, null, "no Setup step");
+    const quiet = soundRoom({ playlists: { tavern: TAVERN, quiet: { id: "quiet", rev: 0, name: "Quiet", sounds: ["m3"], repeat: "off", fade: 0 } } });
+    const added = step(quiet, add("quiet", "m1"));
+    assert.deepEqual(added.state.playlists!.quiet, { id: "quiet", rev: 1, name: "Quiet", sounds: ["m3", "m1"], repeat: "off", fade: 0 });
+    assert.deepEqual(added.touched, [keys.playlist("quiet")]);
+    assert.ok(added.inverse && added.inverse.length > 0);
+    assert.equal(undoScope(add("quiet", "m1"), quiet), "setup");
+    assert.equal(refusal(quiet, add("quiet", "rain")), SOUND_WORDS.notMusic);
+    assert.equal(refusal(quiet, add("gone", "m1")), "playlist is not here");
+  });
+
+  test("two DMs add at once: both land on a 3-track playlist, and on a 99-track one the second is refused at 100", () => {
+    const both = step(step(soundRoom({ sounds: { ...LIBRARY, x: sound("x", "music", 60_000, "X") } }), add("tavern", "x")).state, add("tavern", "m1"));
+    assert.deepEqual(step(both.state, add("tavern", "x")).touched, []);
+    const big = Object.fromEntries(Array.from({ length: 101 }, (_, i) => [`b${i}`, sound(`b${i}`, "music", 60_000, `Track ${i}`)]));
+    const ninetyNine: Playlist = { ...TAVERN, sounds: Object.keys(big).slice(0, 99) };
+    const state = soundRoom({ sounds: { ...LIBRARY, ...big }, playlists: { tavern: ninetyNine } });
+    const first = step(state, add("tavern", "b99"));
+    assert.equal(first.state.playlists!.tavern!.sounds.length, 100);
+    assert.equal(refusal(first.state, add("tavern", "b100")), "A playlist holds 100 tracks at most.");
+    const sameTrack = step(step(soundRoom({ sounds: { ...LIBRARY, x: sound("x", "music", 60_000, "X") } }), add("tavern", "x")).state, add("tavern", "x"));
+    assert.deepEqual(sameTrack.state.playlists!.tavern!.sounds, ["m1", "m2", "m3", "x"], "the same track twice lands once");
+  });
+});
+
+describe("deleting a queued track (docs/design/design-v1-music-player.md 6.4, op version 48)", () => {
+  const extra = { m4: sound("m4", "music", 170_000, "Smoke") };
+  const FOUR: Playlist = { id: "four", rev: 0, name: "Four", sounds: ["m1", "m2", "m3", "m4"], repeat: "off", fade: 5 };
+  const playFour: Op = { t: "music.play", run: "r1", playlistId: "four", order: ["m1", "m2", "m3", "m4"], index: 3, repeat: "off", fade: 5 };
+  const fourth = () => step(soundRoom({ sounds: { ...LIBRARY, ...extra }, playlists: { tavern: TAVERN, four: FOUR } }), playFour).state;
+  const del = (id: string): Op => ({ t: "sound.delete", id });
+  const at = (state: RoomState, op: Op, ms: number, opVersion?: number) => applyOp(state, op, DM, { ...envAt(ms), ...(opVersion !== undefined ? { opVersion } : {}) });
+
+  test("a played track under Repeat off while track 4 plays leaves the order, and the music plays on", () => {
+    const r = step(fourth(), del("m2"), 1_000);
+    assert.deepEqual(r.state.playing!.music, { run: "r1", playlistId: "four", order: ["m1", "m3", "m4"], index: 2, repeat: "off", fade: 5, now: { soundId: "m4", at: S0 } });
+    assert.equal(r.state.sounds!.m2, undefined);
+    assert.deepEqual(r.state.playlists!.four!.sounds, ["m1", "m3", "m4"]);
+    assert.ok(r.touched.includes(keys.playing));
+  });
+
+  test("the playing track and the revealed next are refused, and a crossfade's outgoing track goes, the incoming one written as playing", () => {
+    const played = step(soundRoom(), playTavern).state;
+    assert.equal(refusal(played, del("m1")), SOUND_WORDS.trackPlays);
+    assert.equal(refusal(played, del("m2"), 170_000), SOUND_WORDS.trackPlaysNext);
+    const r = step(played, del("m1"), 187_000);
+    assert.deepEqual(r.state.playing!.music, { ...tavernRun, order: ["m2", "m3"], index: 0, now: { soundId: "m2", at: S0 + 185_000 } });
+    assert.equal(refusal(played, del("m2"), 187_000), SOUND_WORDS.trackPlays, "the incoming track");
+  });
+
+  test("a run the schedule ended by the delete's time is written as ended", () => {
+    const last = step(soundRoom(), { t: "music.play", run: "r1", playlistId: "tavern", order: ["m1", "m2", "m3"], index: 2, repeat: "off", fade: 0 }).state;
+    const r = step(last, del("m1"), 200_000);
+    assert.equal(r.state.playing!.music, null);
+  });
+
+  test("an op stored before version 48 refuses every track of the order, as it did, and a sound no run names deletes alike", () => {
+    const state = fourth();
+    const old = at(state, del("m2"), 1_000, 47);
+    assert.ok(!old.ok && old.message === SOUND_WORDS.trackQueued);
+    const r = at(state, del("m2"), 1_000, 48);
+    assert.ok(r.ok);
+    assert.deepEqual(r.state.playing!.music?.order, ["m1", "m3", "m4"]);
+    const effect = at(state, del("thunder"), 1_000, 47);
+    assert.ok(effect.ok);
+    assert.equal(effect.state.playing, state.playing, "playing is not written");
+  });
+});
+
+describe("a scene's Shuffle on the run it starts (docs/design/design-v1-music-player.md 6.4, op version 48)", () => {
+  const shuffled = (state: RoomState) => withSceneSounds(state, { s1: { music: { playlistId: "tavern", repeat: "all", fade: 5, shuffle: true }, loops: [] } });
+  const scene: Op = { t: "sound.scene", sceneId: "s1", run: "r9", order: ["m3", "m1", "m2"] };
+  const at = (state: RoomState, op: Op, ms: number, opVersion?: number) => applyOp(state, op, DM, { ...envAt(ms), ...(opVersion !== undefined ? { opVersion } : {}) });
+
+  test("a run it starts is shuffled live and from version 48, and with no flag for an op stored before", () => {
+    for (const version of [undefined, 48]) {
+      const r = at(shuffled(soundRoom()), scene, 1_000, version);
+      assert.ok(r.ok);
+      assert.equal(r.state.playing!.music?.shuffle, true, `version ${version}`);
+    }
+    const old = at(shuffled(soundRoom()), scene, 1_000, 47);
+    assert.ok(old.ok);
+    assert.deepEqual(old.state.playing!.music, { run: "r9", playlistId: "tavern", order: ["m3", "m1", "m2"], index: 0, repeat: "all", fade: 5, now: { soundId: "m3", at: startAt(1_000) } });
+  });
+
+  test("a run of the same playlist plays on as it is, its own Shuffle kept", () => {
+    const played = step(shuffled(soundRoom()), playTavern).state;
+    const r = step(played, scene, 1_000);
+    assert.equal(r.state.playing!.music, played.playing!.music);
+    assert.equal(r.state.playing!.music?.shuffle, undefined);
   });
 });

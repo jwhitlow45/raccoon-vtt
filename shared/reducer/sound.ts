@@ -1,14 +1,19 @@
 import { keys } from "../keys.ts";
 import { SOUND_LIMITS, soundUseFits } from "../limits.ts";
+import { musicQueues } from "../migrate.ts";
 import type { RoomState, Scene } from "../model.ts";
 import type { OpOf } from "../protocol.ts";
 import { namesPrototypeMember, ownEntry } from "../records.ts";
 import {
   LEAD_MS,
+  MusicRefusal,
   effectLengthMs,
+  jumpedAt,
   lengthAs,
   musicAt,
   musicChanged,
+  queueEdited,
+  seekBoundMs,
   type FiredEffect,
   type LoopPlaying,
   type MusicChange,
@@ -107,6 +112,20 @@ function startOf(tx: Tx): number {
   return Date.parse(tx.env.at) + LEAD_MS;
 }
 
+/**
+ * The refusal of a delete or a change of use of a sound a run names
+ * (docs/design/design-v1-music-player.md 6.4), in the words that point at
+ * what to do: the playing track, the revealed next, or a track only
+ * queued, which Up next always shows a row for. Null when the run names
+ * none of it.
+ */
+function queuedRefusal(music: MusicRun | null, soundId: SoundId): string | null {
+  if (music === null) return null;
+  if (music.now.soundId === soundId) return SOUND_WORDS.trackPlays;
+  if (music.next?.soundId === soundId) return SOUND_WORDS.trackPlaysNext;
+  return (music.order ?? []).includes(soundId) ? SOUND_WORDS.trackQueued : null;
+}
+
 /** Whether the live run's order or a playing loop names a sound, and which. Effect entries are history and never count (D-261102-471). */
 export function soundPlays(playing: Playing, soundId: SoundId): "music" | "loop" | null {
   if (playing.music?.order?.includes(soundId) || playing.music?.now.soundId === soundId) return "music";
@@ -165,8 +184,11 @@ export function soundCreate(tx: Tx, op: OpOf<"sound.create">): void {
  * A rename or a change of use (Setup). A change of use is refused while
  * the live run's order or a loop names the sound, and takes it out of
  * every playlist and scene sound it no longer fits, in the same op. It
- * never writes `playing`: an entry for it in either effect list stays as
- * history, which playback, the projection and the visible set skip.
+ * never writes `playing`, so a queued track stays in the order and the
+ * refusal points at its row in Up next
+ * (docs/design/design-v1-music-player.md 6.4). An entry for it in either
+ * effect list stays as history, which playback, the projection and the
+ * visible set skip.
  */
 export function soundUpdate(tx: Tx, op: OpOf<"sound.update">): void {
   const before = soundOf(tx, op.id);
@@ -175,8 +197,12 @@ export function soundUpdate(tx: Tx, op: OpOf<"sound.update">): void {
   if (op.use !== undefined && op.use !== before.use) {
     const refusal = useLengthRefusal(op.use, before.ms);
     if (refusal) throw invalid(refusal);
-    const plays = soundPlays(playingOf(tx.state), op.id);
-    if (plays) throw invalid(plays === "music" ? SOUND_WORDS.trackPlaying : SOUND_WORDS.loopPlaying);
+    const playing = playingOf(tx.state);
+    const plays = soundPlays(playing, op.id);
+    // The stored run decides, since no Setup op writes it and a run naming a track of another use could not play.
+    // The words read the run as the panel shows it, during a crossfade the incoming track's.
+    if (plays === "music") throw invalid(queuedRefusal(musicAt(playing.music, soundsOf(tx.state), startOf(tx)), op.id) ?? queuedRefusal(playing.music, op.id)!);
+    if (plays === "loop") throw invalid(SOUND_WORDS.loopPlaying);
     next.use = op.use;
   }
   tx.write(keys.sound(op.id), next);
@@ -202,22 +228,52 @@ function leaveWhatNoLongerFits(tx: Tx, soundId: SoundId, use: SoundUse | null): 
 }
 
 /**
- * Deletes a sound (no step). Refused for a track of the live run's order
- * and a loop that plays (4.1). Its entries leave both effect lists, so a
- * sounding effect stops on every device, and it leaves every playlist and
- * scene sound in the same op. Its file goes when nothing names its row.
+ * Deletes a sound (no step). Refused for a loop that plays, the playing
+ * track and the revealed next (4.1). A track the run only queues leaves
+ * its order in the same op and the music plays on, read and written
+ * through musicAt like every music rule, so during a crossfade the
+ * incoming track is the playing one (docs/design/design-v1-music-player.md
+ * 6.4). Ops stored before version 48 met the older rule, which refused
+ * every track of the order, so they replay by it. Its entries leave both
+ * effect lists, so a sounding effect stops on every device, and it leaves
+ * every playlist and scene sound in the same op. Its file goes when
+ * nothing names its row.
  */
 export function soundDelete(tx: Tx, op: OpOf<"sound.delete">): void {
   soundOf(tx, op.id);
-  const playing = playingOf(tx.state);
-  const plays = soundPlays(playing, op.id);
-  if (plays) throw invalid(plays === "music" ? SOUND_WORDS.trackPlaying : SOUND_WORDS.loopPlaying);
+  const before = playingOf(tx.state);
+  let playing = before;
+  if (soundPlays({ ...before, music: null }, op.id) === "loop") throw invalid(SOUND_WORDS.loopPlaying);
+  if (musicQueues(tx.env.opVersion)) {
+    playing = { ...before, music: withoutQueued(before.music, soundsOf(tx.state), op.id, startOf(tx)) };
+  } else {
+    const refusal = queuedRefusal(before.music, op.id);
+    if (refusal) throw invalid(refusal);
+  }
   const named = (e: FiredEffect) => e.soundId === op.id;
   if (playing.effects.some(named) || (playing.dmEffects ?? []).some(named)) {
-    tx.write(keys.playing, withLists(playing, playing.effects.filter((e) => !named(e)), (playing.dmEffects ?? []).filter((e) => !named(e))));
+    playing = withLists(playing, playing.effects.filter((e) => !named(e)), (playing.dmEffects ?? []).filter((e) => !named(e)));
   }
+  if (playing.music !== before.music || playing.effects !== before.effects || playing.dmEffects !== before.dmEffects) tx.write(keys.playing, playing);
   tx.remove(keys.sound(op.id));
   leaveWhatNoLongerFits(tx, op.id, null);
+}
+
+/**
+ * The run a delete leaves at `t`: the stored run itself when it names no
+ * part of the sound, else the run musicAt gives with the track out of its
+ * order and `index` kept on the playing track, or null when the schedule
+ * ended the run by `t`. Refused for the playing track and the revealed
+ * next, which sound now or within 20 s on players' devices.
+ */
+function withoutQueued(music: MusicRun | null, sounds: Record<SoundId, Sound>, soundId: SoundId, t: number): MusicRun | null {
+  if (music === null || queuedRefusal(music, soundId) === null) return music;
+  const current = musicAt(music, sounds, t);
+  if (current === null) return null;
+  const refusal = queuedRefusal(current, soundId);
+  if (refusal !== null && refusal !== SOUND_WORDS.trackQueued) throw invalid(refusal);
+  const order = (current.order ?? []).filter((id) => id !== soundId);
+  return { ...current, order, index: order.indexOf(current.now.soundId) };
 }
 
 /** `playing` with its effect lists, the DM's kept only while it holds an entry. */
@@ -237,7 +293,7 @@ export function playlistCreate(tx: Tx, op: OpOf<"playlist.create">): void {
   tx.write(keys.playlist(op.id), playlist);
 }
 
-/** Changes play from the playlist's next start: a run keeps the order it started with (4.1). */
+/** Changes play from the playlist's next start: a run keeps its own order, which only the queue's edits change (docs/design/design-v1-music-player.md 6.1). */
 export function playlistUpdate(tx: Tx, op: OpOf<"playlist.update">): void {
   const before = playlistOf(tx, op.id);
   const next: Playlist = { ...before };
@@ -253,7 +309,7 @@ export function playlistUpdate(tx: Tx, op: OpOf<"playlist.update">): void {
   tx.write(keys.playlist(op.id), next);
 }
 
-/** Clears the music of every scene sound that names the playlist. A live run keeps its id, as a label only (6.3). */
+/** Clears the music of every scene sound that names the playlist. A live run keeps its id as a label, and its Shuffle off then changes only the flag (6.3, docs/design/design-v1-music-player.md 6.4). */
 export function playlistDelete(tx: Tx, op: OpOf<"playlist.delete">): void {
   playlistOf(tx, op.id);
   for (const id of sortedIds(tx.state.scenes)) {
@@ -274,10 +330,12 @@ function play(tx: Tx, before: Playing, next: Playing): void {
 /**
  * The run a play or a scene starts: the order the DM's device fixed must
  * hold the playlist's tracks, each once, or the one track, each a music
- * sound now (6.3). Only here is an order compared with a playlist: a run
- * keeps the order it started with.
+ * sound now (6.3). Only here must an order match a playlist: from its
+ * start the run's order is the queue, which the queue's edits change
+ * (docs/design/design-v1-music-player.md 6.1). `shuffle` says the DM's
+ * device mixed the order, which Shuffle's button shows.
  */
-function startedRun(tx: Tx, from: { playlistId?: string; soundId?: SoundId }, order: readonly SoundId[], run: string, index: number, settings: Pick<MusicRun, "repeat" | "fade">, t: number): MusicRun {
+function startedRun(tx: Tx, from: { playlistId?: string; soundId?: SoundId }, order: readonly SoundId[], run: string, index: number, settings: Pick<MusicRun, "repeat" | "fade" | "shuffle">, t: number): MusicRun {
   if (from.playlistId !== undefined) {
     const playlist = playlistOf(tx, from.playlistId);
     const listed = new Set(playlist.sounds);
@@ -295,6 +353,7 @@ function startedRun(tx: Tx, from: { playlistId?: string; soundId?: SoundId }, or
     repeat: settings.repeat,
     fade: settings.fade,
     now: { soundId: order[index]!, at: t },
+    ...(settings.shuffle === true ? { shuffle: true as const } : {}),
   };
 }
 
@@ -321,28 +380,77 @@ export function musicChange(tx: Tx, change: MusicChange): void {
 
 // The queue (docs/design/design-v1-music-player.md 6.3 and 6.4): no step for the music ops, a Setup step for Add to playlist.
 
-/** Refused until the queue's rules are built, so a stored op of the kind cannot exist before they are. */
-const QUEUE_NOT_BUILT = "the queue is not built yet";
+/**
+ * The run a queue edit or a jump acts on: the one musicAt gives at `t`, so
+ * during a crossfade the incoming track that Now playing names. Refused
+ * with nothing playing, and when `from` is not its run, since another DM
+ * played, skipped, resumed, jumped or started a scene since the edit was
+ * made. A tick never changes `run`, so an edit made before a promotion
+ * still applies, to the track playing at `t`.
+ */
+function runMadeOn(playing: Playing, sounds: Record<SoundId, Sound>, from: string, t: number): MusicRun {
+  const current = musicAt(playing.music, sounds, t);
+  if (current === null) throw invalid(SOUND_WORDS.nothingPlaying);
+  if (current.run !== from) throw invalid(SOUND_WORDS.musicChanged);
+  return current;
+}
+
+/** A queue helper's result, its MusicRefusal sent on in the panel's words. */
+function inWords(rule: () => MusicRun): MusicRun {
+  try {
+    return rule();
+  } catch (e) {
+    if (e instanceof MusicRefusal) throw invalid(MUSIC_REFUSAL_WORDS[e.key]);
+    throw e;
+  }
+}
 
 /**
  * A queue edit at the op's time (6.4): the guards (no run, `from`), then
- * queueEdited on the track playing then, its `next` placed again.
+ * queueEdited on the track playing then, its `next` placed again. An edit
+ * that changes nothing writes nothing, as a stop of a stopped loop, so a
+ * second DM's stale press undoes nothing.
  */
 export function musicQueue(tx: Tx, op: OpOf<"music.queue">): void {
-  // Lane PL-A fills this (docs/design/design-v1-music-player.md 6.4).
-  throw invalid(QUEUE_NOT_BUILT);
+  const playing = playingOf(tx.state);
+  const sounds = soundsOf(tx.state);
+  const t = startOf(tx);
+  const current = runMadeOn(playing, sounds, op.from, t);
+  const playlist = current.playlistId === undefined ? null : (ownEntry(tx.state.playlists, current.playlistId) ?? null);
+  const music = inWords(() => queueEdited(current, op.edit, { sounds, playlist }, t));
+  if (music !== current) play(tx, playing, { ...playing, music });
 }
 
-/** Play now, Previous or a seek (6.4): the guards (no run, `from`, `on`), `ms` held to seekBoundMs less 1 s, then jumpedAt. */
+/**
+ * Play now, Previous or a seek (6.4): the guards (no run, `from`, `on`),
+ * `ms` held to seekBoundMs less 1 s, then jumpedAt. `on` names the track
+ * the seek or Previous was made on, its id alone: the store predicts with
+ * the device's clock, so a predicted `now.at` never equals the server's.
+ */
 export function musicJump(tx: Tx, op: OpOf<"music.jump">): void {
-  // Lane PL-A fills this (docs/design/design-v1-music-player.md 6.4).
-  throw invalid(QUEUE_NOT_BUILT);
+  const playing = playingOf(tx.state);
+  const sounds = soundsOf(tx.state);
+  const t = startOf(tx);
+  const current = runMadeOn(playing, sounds, op.from, t);
+  if (op.on !== undefined && op.on !== current.now.soundId) throw invalid(SOUND_WORDS.musicMovedOn);
+  // The last second stays out of reach, so a seek never lands where the track ends before any device places it.
+  const bound = seekBoundMs(current, lengthAs(sounds, op.soundId, "music") ?? 0) - 1_000;
+  const ms = Math.max(0, Math.min(op.ms ?? 0, bound));
+  play(tx, playing, { ...playing, music: inWords(() => jumpedAt(current, op.run, op.soundId, ms, sounds, t)) });
 }
 
-/** Add to playlist (6.4, Setup): an append of a music sound the playlist does not hold, at most SOUND_LIMITS.playlistTracks, and nothing written when it holds it. */
+/**
+ * Add to playlist (6.4, Setup): an append of a music sound the playlist
+ * does not hold, at most SOUND_LIMITS.playlistTracks. It replaces no list,
+ * so two DMs adding at once both land, and one the playlist already holds
+ * writes nothing and so records no Setup step.
+ */
 export function playlistAdd(tx: Tx, op: OpOf<"playlist.add">): void {
-  // Lane PL-A fills this (docs/design/design-v1-music-player.md 6.4).
-  throw invalid(QUEUE_NOT_BUILT);
+  const playlist = playlistOf(tx, op.id);
+  if (playlist.sounds.includes(op.soundId)) return;
+  checkTracks(tx.state, [op.soundId]);
+  if (playlist.sounds.length >= SOUND_LIMITS.playlistTracks) throw invalid(SOUND_WORDS.playlistFull);
+  tx.write(keys.playlist(op.id), { ...playlist, sounds: [...playlist.sounds, op.soundId] });
 }
 
 /** A loop's id keys the playing record, so it must never name a member of Object.prototype. */
@@ -426,8 +534,10 @@ export function soundScene(tx: Tx, op: OpOf<"sound.scene">): void {
   if (wanted.music === null) music = null;
   else if (!sameMusic(current, wanted.music)) {
     const from = wanted.music.playlistId !== undefined ? { playlistId: wanted.music.playlistId } : { soundId: wanted.music.soundId! };
+    // The scene's Shuffle marks the run only from version 48: a stored op from before started its run with no flag.
+    const settings = { repeat: wanted.music.repeat, fade: wanted.music.fade, ...(wanted.music.shuffle === true && musicQueues(tx.env.opVersion) ? { shuffle: true as const } : {}) };
     // A playlist left with no tracks is silence.
-    music = op.order.length === 0 && from.playlistId !== undefined && playlistOf(tx, from.playlistId).sounds.length === 0 ? null : startedRun(tx, from, op.order, op.run, 0, wanted.music, t);
+    music = op.order.length === 0 && from.playlistId !== undefined && playlistOf(tx, from.playlistId).sounds.length === 0 ? null : startedRun(tx, from, op.order, op.run, 0, settings, t);
   }
   const loops: Record<string, LoopPlaying> = {};
   for (const id of Object.keys(playing.loops).sort()) {
