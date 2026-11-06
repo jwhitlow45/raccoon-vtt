@@ -6,17 +6,15 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import type { LogEntry } from "#shared/model.ts";
-import { ConsoleWatch, openSideTab, OpSocket, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
-import { openGroup } from "./helpers/groups.ts";
+import { ConsoleWatch, openSideTab, OpSocket, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { playControl, undoSetup } from "./helpers/undoScope.ts";
 
 /**
- * The in-game clock's Time, Ambiance's Time section
- * (docs/design/design-v1-calendar.md 4, design-v1-panel-groups.md 4), on the
- * real server serving the production build. Dana the DM is at a desk and Pat
- * on a phone:
+ * The in-game clock's Time panel (docs/design/design-v1-calendar.md 4, its
+ * own panel again in design-v1-sound-layout.md 3), on the real server serving
+ * the production build. Dana the DM is at a desk and Pat on a phone:
  * - ck-1: the DM starts a Day count clock at Day 1, 8:00 AM, and the panel,
- *   Pat's copy and one shared line read it.
+ *   Pat's copy and one shared line read it, with focus on the new date.
  * - ck-2: the four steps, Other amount and its refusals, and Set the date
  *   and time, each one op and one line.
  * - ck-4: a hidden Months clock set up in the Calendar dialog reaches Pat
@@ -24,14 +22,13 @@ import { playControl, undoSetup } from "./helpers/undoScope.ts";
  *   gives Pat the clock as it is and none of the lines written while it
  *   was hidden.
  * - ck-7: Stop the clock takes a second tap, and Undo setup brings it back.
- * - ck-2b: Pat's toast for a step while his Log and Ambiance are closed,
+ * - ck-2b: Pat's toast for a step while his Log and Time panel are closed,
  *   and none for the DM's own device.
  * - ck-3: the party's Long Rest moves the clock 8 hours first, each stamp
- *   marks its end and never reaches Pat, the card's note gives the next
- *   start, and one Undo takes the rest back.
- * - ck-5: Pat's Ambiance, open when sharing stops, keeps Time and says so
- *   until closed.
- * - ck-6: the top bar chip on a computer opens Ambiance at Time and never
+ *   marks its end and never reaches Pat, the card's one note for both gives
+ *   the next start, and one Undo takes the rest back.
+ * - ck-5: Pat's Time panel, open when sharing stops, says so until closed.
+ * - ck-6: the top bar chip on a computer opens the Time panel and never
  *   overflows Pat's row.
  * - cf-1 to cf-6, the calendar review's fixes: a clock's seconds kept by
  *   Set and a rename, Today and Set following the calendar, the discard
@@ -71,16 +68,10 @@ const PHONE = { width: 390, height: 844 };
 const HOUR = 3_600;
 const DAY = 86_400;
 
-/**
- * The DM's Time: Ambiance's Time group in the side panel's tab on the desk
- * (docs/design/design-v1-panel-groups.md 4.1), opened as the DM's own tap
- * would where it starts folded, once a clock runs.
- */
+/** The DM's Time panel: the side panel's tab on the desk, in More at 360 px (docs/design/design-v1-sound-layout.md 3.1). */
 async function timePanel(): Promise<Locator> {
-  await openSideTab(dm, "Ambiance");
-  const panel = dm.getByRole("tabpanel", { name: "Ambiance" });
-  await openGroup(panel, "Time");
-  return panel;
+  await openSideTab(dm, "Time");
+  return dm.getByRole("tabpanel", { name: sideTabName("Time") });
 }
 
 /** The clock lines a copy of the log holds, in order, as the date each stored. */
@@ -106,7 +97,7 @@ async function clockT(socket: SocketWatch, want: number): Promise<void> {
   await waitFor(`the clock at ${want} in ${socket.label}'s copy`, () => (socket.state?.clock?.t === want ? true : null), 10_000).catch(() => assert.equal(socket.state?.clock?.t, want, `${socket.label}'s clock`));
 }
 
-describe("the room clock's Time in Ambiance", () => {
+describe("the room clock's Time panel", () => {
   before(async () => {
     server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
     browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1" });
@@ -189,6 +180,17 @@ describe("the room clock's Time in Ambiance", () => {
     await panel.getByLabel("Day", { exact: true }).fill("1");
     await panel.getByRole("button", { name: "Start the clock", exact: true }).click();
     await reads(panel, "Day 1", "8:00 AM, Morning");
+    // The form and its pressed button went as the clock came, so focus lands on the new date, which stands in the panel's scroller (LP31-A-TIME-1).
+    const block = panel.locator('[role="status"][tabindex="-1"]').filter({ has: dm.locator("[data-clock-date]") });
+    await waitFor("focus on the new date", () => block.evaluate((el) => (el === el.ownerDocument.activeElement ? true : null)));
+    const placed = await block.evaluate((el) => {
+      let box = el.parentElement;
+      while (box && !/(auto|scroll)/.test(el.ownerDocument.defaultView!.getComputedStyle(box).overflowY)) box = box.parentElement;
+      const r = el.getBoundingClientRect();
+      const b = (box ?? el.ownerDocument.documentElement).getBoundingClientRect();
+      return { top: r.top - b.top, bottom: b.bottom - r.bottom };
+    });
+    assert.ok(placed.top >= 0 && placed.bottom >= 0, `the date whole in the panel (${JSON.stringify(placed)})`);
     await clockT(dmSocket, 8 * HOUR);
     await clockT(patSocket, 8 * HOUR);
     const pats = patSocket.state!.clock as unknown as Record<string, unknown>;
@@ -203,7 +205,7 @@ describe("the room clock's Time in Ambiance", () => {
     const group = panel.getByRole("group", { name: "Move the clock on" });
     assert.deepEqual(
       (await group.getByRole("button").allInnerTexts()).map((t) => t.trim()),
-      ["10 minutes", "1 hour", "8 hours", "To dawn"],
+      ["10 minutes", "1 hour", "8 hours", "To dawn", "Other amount…"],
     );
     await group.getByRole("button", { name: "Move the clock on 10 minutes", exact: true }).click();
     await reads(panel, "Day 1", "8:10 AM, Morning");
@@ -363,7 +365,7 @@ describe("the room clock's Time in Ambiance", () => {
     assert.equal(patSocket.state!.clock!.id, id);
   });
 
-  test("ck-2b. Pat gets a toast for a step while his Log and Ambiance are closed, and the DM's own device gets none", async () => {
+  test("ck-2b. Pat gets a toast for a step while his Log and Time panel are closed, and the DM's own device gets none", async () => {
     const panel = await timePanel();
     const before = clockLines(patSocket).length;
     await panel.getByRole("group", { name: "Move the clock on" }).getByRole("button", { name: "Move the clock on 1 hour", exact: true }).click();
@@ -372,7 +374,7 @@ describe("the room clock's Time in Ambiance", () => {
     assert.equal(await dm.getByText(/^1 hour passes\. It is now /).count(), 0, "the DM's own device shows no toast for its own step");
   });
 
-  test("ck-3. the party's Long Rest moves the clock 8 hours first, stamps each character's end for the DM alone, and one Undo takes it all back", async () => {
+  test("ck-3. the party's Long Rest moves the clock 8 hours first, stamps each character's end for the DM alone, says it once for both, and one Undo takes it all back", async () => {
     const actor = { hp: { cur: 20, max: 45, temp: 0 }, life: "alive", ac: 15, speeds: { walk: 30 }, initBonus: 1, passivePerception: 11, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
     await ops.send({ t: "character.create", character: { id: run.thorn, name: "Thorn", size: "medium", ownerIds: [run.patId], actor, level: 5 } });
     await ops.send({ t: "character.create", character: { id: run.bree, name: "Bree", size: "medium", ownerIds: [run.patId], actor, level: 5 } });
@@ -396,9 +398,10 @@ describe("the room clock's Time in Ambiance", () => {
     // Six hours later the card names the last finish and the earliest next start, and the rest still goes through.
     await ops.send({ t: "clock.advance", by: 6 * HOUR });
     await panel.getByRole("button", { name: "Long Rest for the party", exact: true }).click();
-    const notes = panel.getByText(/finished a Long Rest at .* The rules let the next start from /);
+    const notes = panel.getByText(/finished a Long Rest at .* The next can start from /);
     await notes.first().waitFor();
-    assert.equal(await notes.count(), 2, "one line a character");
+    assert.equal(await notes.count(), 1, "one sentence for the characters who share a stamp");
+    assert.match(await notes.innerText(), /^(Bree and Thorn|Thorn and Bree) finished a Long Rest at .+\. The next can start from .+\.$/);
     await shots.take(dm, "ck-3-rest-card");
     await box.uncheck();
     await panel.getByRole("button", { name: "Finish the Long Rest", exact: true }).click();
@@ -416,17 +419,15 @@ describe("the room clock's Time in Ambiance", () => {
     await waitFor("the stamps back", () => (dmSocket.state?.characters[run.thorn]?.longRest?.at === t0 + 14 * HOUR && dmSocket.state.characters[run.bree]?.longRest?.at === t0 + 14 * HOUR ? true : null));
   });
 
-  test("ck-5. Pat's Ambiance, open when the DM stops sharing, keeps Time and says so until he closes it, and leaves his list", async () => {
+  test("ck-5. Pat's Time panel, open when the DM stops sharing, says so until he closes it, and leaves his list", async () => {
     const panels = pat.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ });
     const list = pat.getByRole("region", { name: "Panels" });
-    const sheet = pat.locator('dialog[data-rvtt-sheet][aria-label="Ambiance"]');
+    const sheet = pat.locator('dialog[data-rvtt-sheet][aria-label="Time"]');
     await panels.click();
-    assert.equal(await list.getByRole("button", { name: /^(Time|Sound)\b/ }).count(), 0, "Time and Sound are Ambiance's now");
-    await list.getByRole("button", { name: /^Ambiance/ }).click();
+    assert.equal(await list.getByRole("button", { name: /^Sound\b/ }).count(), 0, "nothing plays, so no Sound");
+    await list.getByRole("button", { name: /^Time/ }).click();
     await sheet.locator("[data-clock-date]").waitFor();
     assert.equal(await sheet.getByRole("button").filter({ hasText: /minutes|hour|dawn|Set the date|Calendar|Stop/ }).count(), 0, "a player has none of the DM's controls");
-    assert.equal(await sheet.locator("[data-group-fold], [data-group-open]").count(), 0, "a player's Ambiance has no folds and no Weather row");
-    await sheet.getByRole("heading", { name: "Time", exact: true }).waitFor();
     await shots.take(pat, "ck-5-pat-time");
     const panel = await timePanel();
     await panel.getByRole("switch", { name: "Players see the date and time" }).click();
@@ -434,15 +435,15 @@ describe("the room clock's Time in Ambiance", () => {
     await sheet.getByRole("button", { name: /^Close / }).first().click();
     await sheet.waitFor({ state: "detached" });
     await panels.click();
-    assert.equal(await list.getByRole("button", { name: /^Ambiance/ }).count(), 0, "Ambiance is not in his list while nothing is shared or playing");
+    assert.equal(await list.getByRole("button", { name: /^Time/ }).count(), 0, "Time is not in his list while nothing is shared");
     await pat.keyboard.press("Escape");
     await panel.getByRole("switch", { name: "Players see the date and time" }).click();
     await panels.click();
-    await list.getByRole("button", { name: /^Ambiance/ }).waitFor();
+    await list.getByRole("button", { name: /^Time/ }).waitFor();
     await pat.keyboard.press("Escape");
   });
 
-  test("ck-6. on a computer the chip opens Ambiance at Time, and a long date never overflows Pat's top bar", async () => {
+  test("ck-6. on a computer the chip opens the Time panel, and a long date never overflows Pat's top bar", async () => {
     await pat.setViewportSize({ width: 1024, height: 768 });
     await pat.goto(`${server.origin}/r/${run.roomId}`);
     await pat.getByRole("status", { name: "Connected" }).first().waitFor();
@@ -450,7 +451,7 @@ describe("the room clock's Time in Ambiance", () => {
     await chip.waitFor();
     assert.match((await chip.innerText()).trim(), /, \d+:\d\d [AP]M$/);
     await chip.click();
-    await pat.getByRole("tabpanel", { name: "Ambiance" }).locator("[data-clock-date]").waitFor();
+    await pat.getByRole("tabpanel", { name: sideTabName("Time") }).locator("[data-clock-date]").waitFor();
     const overflows = () => pat.locator("header").first().evaluate((el) => el.scrollWidth - el.clientWidth);
     assert.ok((await overflows()) <= 1, "the row does not overflow with the chip");
     // A long month name and era: the row still checks, and the chip leaves when it would overflow.
