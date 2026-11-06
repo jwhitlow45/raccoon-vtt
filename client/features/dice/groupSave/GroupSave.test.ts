@@ -559,3 +559,79 @@ test("Discard asks with no \"the\" before a name, which already says whose save 
   assert.equal(groupSave.discardQuestion({ ...PAGE, test: { kind: "check", ability: "dex", skill: "acrobatics" } }), "Discard the Acrobatics check for 2?");
   assert.equal(groupSave.discardQuestion({ ...damagePage("9 fire") }), "Discard the damage for 1?");
 });
+
+/** A device's localStorage for one test, holding `items`, put back as it was after. */
+function withStorage<T>(items: Map<string, string>, run: () => T): T {
+  const global = globalThis as { localStorage?: unknown };
+  global.localStorage = { getItem: (key: string) => items.get(key) ?? null, setItem: (key: string, value: string) => void items.set(key, value) };
+  try {
+    return run();
+  } finally {
+    delete global.localStorage;
+  }
+}
+
+describe("one press for the saves and the damage (designs/qol audit Q8)", () => {
+  const ready = (damage: string): Page => ({ ...PAGE, secret: false, source: { kind: "selection", tokenIds: ["g1"] }, outcome: { ...PAGE.outcome, damage }, states: { "token:g1": { way: "server", typedBonus: 4 } } });
+
+  test("with dice in the Damage field the button reads so, and one press rolls the saves, then the damage", () => {
+    const page = captureRolls(ready("8d6 fire"));
+    const button = page.buttons.find((b) => b.name.startsWith("Roll "));
+    assert.equal(button?.name, "Roll 1 save and damage");
+    button!.onRoll();
+    const rolls = page.sent.filter((op) => op.t === "dice.roll");
+    assert.equal(rolls.length, 2, JSON.stringify(page.sent));
+    assert.ok(rolls[0]?.t === "dice.roll" && rolls[0].rolls[0]!.formula.startsWith("1d20"), "the saves first");
+    assert.ok(rolls[1]?.t === "dice.roll" && rolls[1].rolls[0]!.formula === "8d6", "then the damage");
+    assert.equal(page.saves.getState().page!.damage?.state, "sending", "the page waits on the damage as its own Roll would");
+  });
+
+  test("a typed amount has nothing to roll, so the button and the press stay the saves alone", () => {
+    const page = captureRolls(ready("9 fire"));
+    const button = page.buttons.find((b) => b.name.startsWith("Roll "));
+    assert.equal(button?.name, "Roll 1 save");
+    button!.onRoll();
+    assert.equal(page.sent.filter((op) => op.t === "dice.roll").length, 1);
+    assert.equal(page.saves.getState().page!.damage, null);
+  });
+
+  test("a refused roll sends no damage either", () => {
+    // A row with no stat block and no bonus typed: the roll is refused until the DM types one.
+    const page = captureRolls({ ...ready("8d6 fire"), states: { "token:g1": { way: "server" } } });
+    page.buttons.find((b) => b.name.startsWith("Roll "))!.onRoll();
+    assert.deepEqual(page.sent, []);
+    assert.equal(page.saves.getState().page!.damage, null);
+  });
+
+  test("the words join the parts the saves already name", () => {
+    assert.equal(groupSave.withDamageWords("Roll 3 saves"), "Roll 3 saves and damage");
+    assert.equal(groupSave.withDamageWords("Roll 3 saves and ask 2 players"), "Roll 3 saves, ask 2 players and roll damage");
+    assert.equal(groupSave.withDamageWords("Ask 2 players"), "Ask 2 players and roll damage");
+    assert.equal(groupSave.withDamageWords("Freeze the rows"), "Freeze the rows and roll damage");
+  });
+});
+
+describe("recent DCs in the group save (designs/qol audit Q9)", () => {
+  test("a save's DC field offers the DCs this device sent last, and a tap sets or clears the DC", () => {
+    const items = new Map([["rvtt.saveDcs.r1", JSON.stringify([15, 13])]]);
+    const markup = withStorage(items, () => drawPage({ ...PAGE, dc: 15 }));
+    assert.match(markup, /role="group" aria-label="Recent DCs"/);
+    const chips = [...markup.matchAll(/<button[^>]*>/g)].flatMap((m) => {
+      const dc = /aria-label="DC (\d+)"/.exec(m[0])?.[1];
+      return dc ? [[dc, /aria-pressed="(true|false)"/.exec(m[0])?.[1]]] : [];
+    });
+    assert.deepEqual(chips, [["13", "false"], ["15", "true"]], "lowest first, the DC held pressed");
+    const check = withStorage(items, () => drawPage({ ...PAGE, test: { kind: "check", ability: "dex" } }));
+    assert.doesNotMatch(check, /Recent DCs/, "a check has no recent save DCs");
+    assert.doesNotMatch(drawPage(PAGE), /Recent DCs/, "nothing sent yet: no row");
+  });
+
+  test("rolling a save keeps its DC for the next one, here and in Request a roll", () => {
+    const items = new Map<string, string>();
+    withStorage(items, () => {
+      const page = captureRolls({ ...PAGE, dc: 17, secret: false, source: { kind: "selection", tokenIds: ["g1"] }, states: { "token:g1": { way: "server", typedBonus: 4 } } });
+      page.buttons.find((b) => b.name.startsWith("Roll "))!.onRoll();
+    });
+    assert.equal(items.get("rvtt.saveDcs.r1"), "[17]");
+  });
+});

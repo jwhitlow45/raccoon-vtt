@@ -42,6 +42,8 @@ import { SrdLoadFailed } from "../../monsters/SrdLoadFailed.tsx";
 import { useReceipt, type ReceiptState } from "../useReceipt.ts";
 import { useRollBlocked } from "../useRollOption.ts";
 import { d20Text, informativeRollMode, RollResultLine, knownOrTyped, parseBonus, requestRollSource } from "../../rolls/card.ts";
+import { readRecentDcs, recentDcChips, rememberSaveDc } from "../../rolls/logic.ts";
+import { RecentDcs } from "../../rolls/RecentDcs.tsx";
 import {
   newPage,
   applyAgain,
@@ -157,6 +159,18 @@ const MARKS: readonly { value: Mark; label: string }[] = [
   { value: "skip", label: "Skip" },
 ];
 
+/**
+ * The setup's roll button once its Damage field holds dice, so one press
+ * rolls both (designs/qol audit Q8): "Roll 3 saves and damage", and where
+ * the saves' words already join two parts, "Roll 3 saves, ask 2 players
+ * and roll damage".
+ */
+export function withDamageWords(saves: string): string {
+  const parts = saves.split(" and ");
+  if (parts.length === 1 && saves.startsWith("Roll ")) return `${saves} and damage`;
+  return `${parts.join(", ")} and roll damage`;
+}
+
 /** The page's title: "Fireball's save", "Dexterity save for 6". */
 export function pageTitle(page: Pick<Page, "fill" | "test" | "rows" | "source">): string {
   if (page.fill) return page.test.kind === "none" ? page.fill.name : `${page.fill.name}'s ${page.test.kind}`;
@@ -216,6 +230,8 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   const [seenOpen, setSeenOpen] = useState(false);
   const [picking, setPicking] = useState(false);
   const [outcomeOpen, setOutcomeOpen] = useState(page.phase === "setup");
+  // The request sheet's recent save DCs, read once as the page opens so a chip never moves under the DM's finger (designs/qol audit Q9).
+  const [recentDcs] = useState(() => readRecentDcs(roomId));
   const pageRef = useRef(page);
   pageRef.current = page;
   const update = (next: Page) => {
@@ -388,11 +404,12 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
     });
   };
 
-  const startRoll = (given?: AdvantageSource[], override?: RollModeOverride) => {
-    if (!editableNow() || blocked || offScene || loading) return;
+  /** Rolls the saves, or asks for them. True when the page took the roll. */
+  const startRoll = (given?: AdvantageSource[], override?: RollModeOverride): boolean => {
+    if (!editableNow() || blocked || offScene || loading) return false;
     if (bound) {
       setError(bound);
-      return;
+      return false;
     }
     // A quick roll keeps the choices captured before replacement confirmation. A menu pick only reads the current choices.
     const taken = given ? { sources: given, restore: () => undefined } : override ? panel.peek() : panel.take();
@@ -400,6 +417,10 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
     if (step.error) taken.restore();
     run(step);
     setOutcomeOpen(false);
+    if (step.error) return false;
+    // A save's DC is offered again beside the next save's field, here and in Request a roll.
+    if (step.page.test.kind === "save" && step.page.dc !== null) rememberSaveDc(roomId, step.page.dc);
+    return true;
   };
 
   rollNowRef.current = () => {
@@ -523,9 +544,14 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   // ---- the parts
 
   const setupControls = page.phase === "setup" && !reopened ? <TestPicker page={page} onChange={edit} /> : null;
+  // A save's DC takes the ones this device sent last, as Request a roll's does (designs/qol audit Q8 and Q9).
+  const dcChips = page.test.kind === "save" && recentDcs.length > 0 ? recentDcChips(page.dc === null ? "" : String(page.dc), recentDcs) : null;
   const dcRow = (
     <FieldRow label="DC">
-      <NumberField label="DC" value={page.dc ?? undefined} min={1} max={50} nullable placeholder="None" onCommit={(dc) => edit(setDc(pageRef.current, dc))} width={88} />
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1), minWidth: 0 }}>
+        <NumberField label="DC" value={page.dc ?? undefined} min={1} max={50} nullable placeholder="None" onCommit={(dc) => edit(setDc(pageRef.current, dc))} width={88} />
+        {dcChips ? <RecentDcs chips={dcChips} onTap={(dc) => edit(setDc(pageRef.current, pageRef.current.dc === dc ? null : dc))} /> : null}
+      </div>
     </FieldRow>
   );
   const anyAsk = rows.some((r) => stateOf(shown, r).way === "ask");
@@ -616,6 +642,9 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
     return [row.holder, JSON.stringify([rollContext, row, state, serverRolls([row]), page.dmRolls.filter((r) => r.holder === row.holder), request && answer && requestRollSource(request, answer)])];
   }));
   const hasServerRoll = rows.some((r) => !r.skip && stateOf(shown, r).mark !== "skip" && stateOf(shown, r).way === "server");
+  // Dice in the Damage field roll with the saves, in one press (designs/qol audit Q8). A damage line already rolled, or brought by a player's ask, stays.
+  const withDamage = page.phase === "setup" && page.damage === null && groupDamageInvocation(page, view).rolls.length > 0;
+  const setupWords = withDamage ? withDamageWords(rollWords(shown)) : rollWords(shown);
   const rowList = (
     <div role="group" aria-label="Creatures" style={{ display: "grid", gap: theme.space(1) }}>
       {/*
@@ -743,8 +772,11 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
           {outcome}
           {rowList}
           {page.test.kind !== "none" ? (
-            <GroupRollButton source={JSON.stringify([rollContext, rows.map((r) => [r, stateOf(shown, r)]), serverRolls(rows), panel.adv, panel.dis, panel.secret])} name={rollWords(shown)} capability={{ d20: hasServerRoll, visibility: hasServerRoll ? "selectable" : "request", batch: true, manual: { mode: presses.mode } }} valid={() => pageRef.current.phase === "setup" && !offScene} variant="primary" busy={loading} disabled={blocked !== null || offScene || rows.length === 0 || tooMany || bound !== null} onRoll={(override) => startRoll(undefined, override)}>
-              {bound ?? (loading ? "Loading the stat blocks…" : rollWords(shown))}
+            <GroupRollButton source={JSON.stringify([rollContext, rows.map((r) => [r, stateOf(shown, r)]), serverRolls(rows), panel.adv, panel.dis, panel.secret, withDamage])} name={setupWords} capability={{ d20: hasServerRoll, visibility: hasServerRoll ? "selectable" : "request", batch: true, manual: { mode: presses.mode } }} valid={() => pageRef.current.phase === "setup" && !offScene} variant="primary" busy={loading} disabled={blocked !== null || offScene || rows.length === 0 || tooMany || bound !== null} onRoll={(override) => {
+              // The damage goes only once the saves did, so a refused roll leaves both for the DM's next press.
+              if (startRoll(undefined, override) && withDamage) rollDamage(override);
+            }}>
+              {bound ?? (loading ? "Loading the stat blocks…" : setupWords)}
             </GroupRollButton>
           ) : null}
         </>
