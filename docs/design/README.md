@@ -193,3 +193,7 @@ and for how to use it, the [DM guide](../dm-guide.md).
   sounds and effects the DM plays from the Sound panel, off until the
   server's owner turns it on, with a frame check that decodes nothing and
   each device's choice to play.
+- [design-v1-music-player.md](design-v1-music-player.md): the Music
+  window, a dialog with Library beside Now playing and a queue the DM
+  edits under Up next, and a playlist maker that pops up, with the Sound
+  group keeping a compact Now playing.

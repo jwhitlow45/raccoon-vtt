@@ -33,7 +33,7 @@ Ideas only: **Foundry VTT** plays playlists in sequence, shuffled, all at once o
 
 ### 4.1 The Sound panel
 
-Amended by docs/design/design-v1-panel-groups.md 4.1: the Sound panel is the Sound section of the Ambiance panel, its first page in D-261102-766's order (Now playing with Stop all sound, Effects, What players hear, Music, Background, On this device), the music's buttons above its time, and "Back to Ambiance". Amended by docs/design/design-v1-scenes-reorg.md 5: the scene's sound line moves to Scenes' Scene sound group, and Now playing's part keeps a Scene sound row and Use what's playing.
+Amended by docs/design/design-v1-panel-groups.md 4.1: the Sound panel is the Sound section of the Ambiance panel, its first page in D-261102-766's order (Now playing with Stop all sound, Effects, What players hear, Music, Background, On this device), the music's buttons above its time, and "Back to Ambiance". Amended by docs/design/design-v1-scenes-reorg.md 5: the scene's sound line moves to Scenes' Scene sound group, and Now playing's part keeps a Scene sound row and Use what's playing. Amended by docs/design/design-v1-music-player.md 3 to 5: Now playing keeps the track, its run line, a Next line, Pause or Play, Skip and Open music over its bar, and Music (the playlists, the tracks and Add music), a playlist's page, a music track's page, Stop the music and Repeat move into the Music window, where the playlist maker replaces the playlist's page and the run's order becomes a queue the DM edits.
 
 `panel({ id: "sound", title: "Sound", icon: "music", order: 23, group: "play" })`, after DM and before Scenes. The DM always has it. A player has it while the room plays something, and an open one stays until closed, as the calendar's Time panel does (D-261102-462). Top to bottom:
 
@@ -439,6 +439,13 @@ The fast lane on fades and the playing row (lane sndfade, D-261102-950 and D-261
 - **Joins.** A music join, a page taking the sound and a blackout's end fade music in over 2 s now, not 0.3 s, since nothing tells a join from a resume. So do a heal, a retry and a refused play placed again, for any `fadeIn` plan, a track promoted from `next` included, since each places the element anew. A background sound's join and a next track or Repeat one pass placed late keep 0.3 s. Background sounds already faded in and out over 2 s, measured off the tap, and are unchanged.
 - **A renamed voice plays on** (5.3). A change of Repeat or Crossfade during Repeat one's later passes reanchors `now.at` to the pass sounding, which renames its voice. Voices hands the live voice to the new plan of the same sound and start, on its element, with its fade as it was, so the place heard goes on with no dip.
 - **The playing row** (4.1, D-261102-955). The row's button turns at once because the view replays the DM's pending op. The test proves it on a page whose server frames arrive 1.5 s late. During a crossfade Pause moves to the incoming track's row at its start, as Now playing's name does, with one render at `next.at`. One button element swaps its icon and name, so focus stays on it.
+
+The Music window (docs/design/design-v1-music-player.md, lanes PL-0 to PL-D):
+
+- **The run's order is a queue** (6.1 there). Up next's edits, Shuffle and a delete of a queued track change it after the run starts, and `music.jump` starts a run at any track and place, so section 6's "fixed at its start" no longer holds. Op version 48 and snapshot version 38.
+- **The playlist's page is gone.** Its checklist and arrows gave way to the playlist maker's search, drag and keys, a draft saved once.
+- **The refusals.** "Stop the music first: this track is in the playlist that's playing." is gone. A delete and a change of use refuse by where the queue holds the track, and a track only queued deletes and leaves the queue.
+- **The alignment sweep's** playlist page root is the maker, its upload in progress is under Library's Add music, and the window's own roots are pld-a to pld-c.
 
 Live play review 30 (lane lp30fix):
 
