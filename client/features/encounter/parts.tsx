@@ -405,14 +405,26 @@ export function NextPill(props: { waiting: boolean; start: boolean; disabled?: b
  * band: on one line it is the widest thing in a row that also holds the
  * picture, the name, "Your turn" and End Turn, and at a large interface
  * size on a narrow phone it pushed End Turn off the screen.
+ *
+ * `short` drops "Time's up" once time has run out and keeps the time past
+ * it in the danger color ("+1:25"), the top bar's last step but one on a
+ * cramped bar (designs/qol chips.md 5, step 12). Its name still says time
+ * is up.
  */
-export function TimerClock(props: { state: TimerState; size?: number; stack?: boolean; icon?: boolean }) {
+export function TimerClock(props: { state: TimerState; size?: number; stack?: boolean; icon?: boolean; short?: boolean }) {
   const { state } = props;
   const color = state.over ? theme.color.dangerText : state.warning ? theme.color.warning : theme.color.textMuted;
   const text = clockText(state);
   const past = state.over && state.left < 0;
   const style: CSSProperties = { flex: "none", color, fontSize: props.size ?? theme.font.small, fontWeight: theme.weight.bold, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
   const label = state.over ? `Turn time is up, ${text} over` : `${text} left this turn`;
+  if (props.short && state.over) {
+    return (
+      <span role="timer" aria-label={label} style={style}>
+        {text}
+      </span>
+    );
+  }
   if (props.stack && past) {
     return (
       <span role="timer" aria-label={label} style={{ ...style, display: "grid", justifyItems: "end", lineHeight: theme.leading.tight }}>
