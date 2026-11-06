@@ -130,7 +130,7 @@ export function queueNote(lists: QueueLists, soundId: SoundId): string | null {
   if (soundId === lists.playing) return PLAYING_NOTE;
   const at = lists.order.indexOf(soundId);
   if (at < 0) return null;
-  // Under Repeat off a track heard already plays again from the end; under Repeat all and one every queued track is still to come.
+  // Under Repeat off a track heard already plays again from the end. Under Repeat all and one every queued track is still to come.
   return lists.repeat === "off" && at < lists.index ? null : IN_THE_QUEUE;
 }
 
