@@ -1,0 +1,148 @@
+import "../../../components/testing/register.ts";
+import assert from "node:assert/strict";
+import { describe, test } from "node:test";
+import type { MusicRun, Playlist, Sound } from "#shared/sound.ts";
+
+/*
+ * The Music window's own rules (docs/design/design-v1-music-player.md 4,
+ * 5 and 10): Library's search and sort, its More menus' notes, the row's
+ * Play and Pause, the maker's draft and what Save sends, and the seek in
+ * hand.
+ */
+
+const { libraryPlaylists, libraryTracks, matches, playlistChoices, queueNote, rowPlay } = await import("./Library.tsx");
+const { changedFields, draftDirty, draftOf, makerStatus, newDraft, savedName, savedTracks } = await import("./Maker.tsx");
+const { seekHolds } = await import("./NowFull.tsx");
+const { queueLists } = await import("./dragOrder.ts");
+const words = await import("./words.ts");
+
+const sound = (id: string, ms: number, name: string, use: Sound["use"] = "music"): Sound => ({ id, rev: 1, name, assetId: `a-${id}`, ms, use });
+const T = 1_000_000;
+
+describe("Library's search and sort", () => {
+  const sounds = Object.fromEntries(
+    [sound("h1", 128_000, "Harbor at dusk"), sound("h2", 262_000, "Harbor storm"), sound("h3", 95_000, "Hárbor watch"), sound("t1", 196_000, "Tavern theme"), sound("rain", 3_000, "Harbor rain", "loop")].map((s) => [s.id, s]),
+  );
+
+  test("a search matches names whatever their case and accents, and only music", () => {
+    assert.equal(matches("Hárbor watch", "harbor"), true);
+    assert.equal(matches("Harbor storm", "STORM"), true);
+    assert.equal(matches("Tavern theme", "harbor"), false);
+    assert.equal(matches("Tavern theme", "  "), true, "an empty search keeps every row");
+    assert.deepEqual(libraryTracks(sounds, "harbor", "name").map((s) => s.id), ["h1", "h2", "h3"]);
+  });
+
+  test("Longest first and Shortest first sort the tracks, and Name sorts by name", () => {
+    assert.deepEqual(libraryTracks(sounds, "", "long").map((s) => s.id), ["h2", "t1", "h1", "h3"]);
+    assert.deepEqual(libraryTracks(sounds, "", "short").map((s) => s.id), ["h3", "h1", "t1", "h2"]);
+    assert.deepEqual(libraryTracks(sounds, "", "name").map((s) => s.id), ["h1", "h2", "h3", "t1"]);
+  });
+
+  test("playlists stay by name and match the search too", () => {
+    const pl = (id: string, name: string): Playlist => ({ id, rev: 1, name, sounds: [], repeat: "all", fade: 5 });
+    const playlists = { b: pl("b", "Travel"), a: pl("a", "Battle"), c: pl("c", "Boss themes") };
+    assert.deepEqual(libraryPlaylists(playlists, "").map((p) => p.id), ["a", "c", "b"]);
+    assert.deepEqual(libraryPlaylists(playlists, "b").map((p) => p.id), ["a", "c"]);
+  });
+
+  test("the counts and the no-match lines", () => {
+    assert.equal(words.trackCount(3, 100, true), "3 of 100");
+    assert.equal(words.trackCount(100, 100, false), "100");
+    assert.equal(words.noTrackMatches("harbor"), 'No track matches "harbor".');
+    assert.equal(words.noPlaylistMatches("x"), 'No playlist matches "x".');
+  });
+});
+
+describe("the More menus' notes", () => {
+  const ids = ["a", "b", "c", "d", "e"];
+  const lengths = Object.fromEntries(ids.map((id) => [id, { ms: 60_000, use: "music" as const }]));
+  const run = (repeat: MusicRun["repeat"]): MusicRun => ({ run: "r", order: ids, index: 2, repeat, fade: 0, now: { soundId: "c", at: T } });
+
+  test("Add to queue: Playing on the playing track, In the queue while still to come, open for a track not queued", () => {
+    const all = queueLists(run("all"), lengths, T + 1_000)!;
+    assert.equal(queueNote(all, "c"), words.PLAYING_NOTE);
+    assert.equal(queueNote(all, "a"), words.IN_THE_QUEUE, "under Repeat all a track heard comes round again");
+    assert.equal(queueNote(all, "e"), words.IN_THE_QUEUE);
+    assert.equal(queueNote(all, "z"), null);
+    const off = queueLists(run("off"), lengths, T + 1_000)!;
+    assert.equal(queueNote(off, "a"), null, "under Repeat off a heard track can be queued again, at the end");
+    assert.equal(queueNote(off, "e"), words.IN_THE_QUEUE);
+  });
+
+  test("Add to playlist: each playlist by name, one that holds the track or is full disabled with why, then a new one with it", () => {
+    const pl = (id: string, name: string, sounds: string[]): Playlist => ({ id, rev: 1, name, sounds, repeat: "all", fade: 5 });
+    const full = Array.from({ length: 100 }, (_, i) => `f${i}`);
+    const items = playlistChoices({ t: pl("t", "Tavern night", ["a"]), b: pl("b", "Battle", []), x: pl("x", "Big", full) }, "a");
+    assert.deepEqual(
+      items.map((i) => [i.title, i.disabled === true, i.note ?? null]),
+      [
+        ["Battle", false, null],
+        ["Big", true, "100 tracks"],
+        ["Tavern night", true, "Already in it"],
+        [words.NEW_PLAYLIST_WITH, false, null],
+      ],
+    );
+  });
+});
+
+describe("a row's Play and Pause (D-261102-951)", () => {
+  const run = { run: "r", playlistId: "pl", order: ["pony", "road"], index: 0, repeat: "all" as const, fade: 5 as const, now: { soundId: "pony", at: T } };
+
+  test("Pause on the track Now playing names and on the playlist the run plays, Play to resume them while paused, and Play elsewhere", () => {
+    assert.equal(rowPlay(null, { soundId: "pony" }, T), "play");
+    assert.equal(rowPlay(run, { soundId: "pony" }, T + 1_000), "pause");
+    assert.equal(rowPlay(run, { playlistId: "pl" }, T + 1_000), "pause");
+    assert.equal(rowPlay(run, { soundId: "road" }, T + 1_000), "play");
+    assert.equal(rowPlay({ ...run, playlistId: undefined }, { playlistId: "pl" }, T + 1_000), "play", "a track played alone marks no playlist");
+    assert.equal(rowPlay({ ...run, paused: 4_000 }, { soundId: "pony" }, T + 90_000), "resume");
+    const crossing = { ...run, next: { soundId: "road", at: T + 25_000 } };
+    assert.equal(rowPlay(crossing, { soundId: "pony" }, T + 25_000), "play");
+    assert.equal(rowPlay(crossing, { soundId: "road" }, T + 25_000), "pause");
+  });
+});
+
+describe("the maker's draft", () => {
+  const sounds = Object.fromEntries([sound("a", 60_000, "A"), sound("b", 60_000, "B"), sound("c", 60_000, "C"), sound("loop", 3_000, "L", "loop")].map((s) => [s.id, s]));
+  const saved: Playlist = { id: "pl", rev: 4, name: "Tavern night", sounds: ["a", "b"], repeat: "all", fade: 5 };
+
+  test("a saved playlist's draft changes nothing until edited, then Save sends only what changed", () => {
+    const draft = draftOf(saved);
+    assert.deepEqual(changedFields(draft, sounds), {});
+    assert.equal(draftDirty(draft, sounds), false);
+    assert.deepEqual(changedFields({ ...draft, name: "Tavern late" }, sounds), { name: "Tavern late" }, "a rename sends the name alone");
+    assert.deepEqual(changedFields({ ...draft, sounds: ["b", "a"] }, sounds), { sounds: ["b", "a"] });
+    assert.deepEqual(changedFields({ ...draft, shuffle: true, fade: 10 }, sounds), { shuffle: true, fade: 10 });
+    assert.equal(draftDirty({ ...draft, repeat: "off" }, sounds), true);
+    assert.deepEqual(changedFields({ ...draft, name: "  Tavern night  " }, sounds), {}, "spaces around the same name change nothing");
+  });
+
+  test("a new playlist sends every field, an empty name as New playlist, and tracks no longer music drop out", () => {
+    const draft = { ...newDraft("new-id", "a"), sounds: ["a", "loop", "gone", "c"] };
+    assert.deepEqual(savedTracks(draft, sounds), ["a", "c"]);
+    assert.equal(savedName(draft), "New playlist");
+    assert.deepEqual(changedFields(draft, sounds), { name: "New playlist", sounds: ["a", "c"], shuffle: false, repeat: "all", fade: 5 });
+    assert.equal(draftDirty(newDraft("n"), sounds), false, "an untouched new playlist has nothing to lose");
+    assert.equal(draftDirty(newDraft("n", "a"), sounds), true, "one started from a track has");
+  });
+
+  test("the status line: deleted elsewhere first, then another DM's change of tracks, then the playing note", () => {
+    const draft = { ...draftOf(saved), sounds: ["b"] };
+    assert.equal(makerStatus({ draft, stored: undefined, playingIt: false }), words.DELETED_ELSEWHERE);
+    assert.equal(makerStatus({ draft, stored: { ...saved, rev: 5, sounds: ["a", "b", "c"] }, playingIt: true }), words.TRACKS_CHANGED);
+    assert.equal(makerStatus({ draft: draftOf(saved), stored: { ...saved, rev: 5, sounds: ["a", "b", "c"] }, playingIt: true }), "Changes apply the next time it starts.", "a draft that kept the tracks takes no warning");
+    assert.equal(makerStatus({ draft, stored: { ...saved, rev: 5, name: "Renamed" }, playingIt: false }), null, "another field's change is no conflict");
+  });
+});
+
+describe("a seek in hand", () => {
+  test("holds while the run and the playing track stay, and drops on a change of either", () => {
+    const ids = ["a", "b"];
+    const lengths = Object.fromEntries(ids.map((id) => [id, { ms: 60_000, use: "music" as const }]));
+    const run: MusicRun = { run: "r", order: ids, index: 0, repeat: "all", fade: 0, now: { soundId: "a", at: T } };
+    const lists = queueLists(run, lengths, T + 1_000)!;
+    assert.equal(seekHolds({ run: "r", soundId: "a", ms: 30_000 }, lists), true);
+    assert.equal(seekHolds({ run: "r", soundId: "a", ms: 30_000 }, queueLists(run, lengths, T + 61_000)), false, "the next track plays now");
+    assert.equal(seekHolds({ run: "r", soundId: "a", ms: 30_000 }, queueLists({ ...run, run: "r2" }, lengths, T + 1_000)), false, "another DM played or jumped");
+    assert.equal(seekHolds({ run: "r", soundId: "a", ms: 30_000 }, null), false);
+  });
+});

@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Playing, Playlist, SceneSound, Sound } from "#shared/sound.ts";
 import { builtinMs } from "../engine/builtins.ts";
-import { busyRefusal, effectsSounding, loopsFull, musicShown, orderFor, sceneOrder, sceneSoundFrom, sceneSoundNames, soundsByUse, soundToStop, useLeaves } from "./state.ts";
-import { STOP_IT_FIRST, STOP_MUSIC_FIRST } from "./words.ts";
+import { deleteRefusal, effectsSounding, loopsFull, musicShown, orderFor, sceneOrder, sceneSoundFrom, sceneSoundNames, soundsByUse, soundToStop, useLeaves, useRefusal } from "./state.ts";
+import { STOP_IT_FIRST, TRACK_PLAYS, TRACK_PLAYS_NEXT, TRACK_QUEUED } from "./words.ts";
 
 const sound = (id: string, use: Sound["use"], ms: number, name = id): Sound => ({ id, rev: 1, name, assetId: `a-${id}`, ms, use });
 
@@ -32,13 +32,15 @@ describe("what Ambiance's Sound reads (docs/design/design-v1-music.md 4.1)", () 
     assert.deepEqual(orderFor({ playlistId: "deleted" }, {}, SOUNDS), []);
   });
 
-  test("a scene's sound from what plays: its playlist with the run's settings, or the one track of a run whose playlist went", () => {
+  test("a scene's sound from what plays: its playlist with the run's settings and Shuffle, or the one track of a run whose playlist went", () => {
     const loops = { l1: { soundId: "rain", at: 0, volume: 40 } };
     const run = { run: "r1", playlistId: "tavern", order: ["pony", "road"], index: 0, repeat: "one" as const, fade: 10 as const, now: { soundId: "pony", at: 0 } };
-    assert.deepEqual(sceneSoundFrom(playing({ music: run, loops }), { tavern: { ...TAVERN, shuffle: true } }), {
+    assert.deepEqual(sceneSoundFrom(playing({ music: { ...run, shuffle: true }, loops }), { tavern: TAVERN }), {
       music: { playlistId: "tavern", repeat: "one", fade: 10, shuffle: true },
       loops: [{ soundId: "rain", volume: 40 }],
     });
+    // The run's Shuffle, as the window set it, never the playlist's (docs/design/design-v1-music-player.md 6.4).
+    assert.deepEqual(sceneSoundFrom(playing({ music: run }), { tavern: { ...TAVERN, shuffle: true } }).music, { playlistId: "tavern", repeat: "one", fade: 10 });
     assert.deepEqual(sceneSoundFrom(playing({ music: run }), {}), { music: { soundId: "pony", repeat: "one", fade: 10 }, loops: [] });
     assert.deepEqual(sceneSoundFrom(null, {}), { music: null, loops: [] });
   });
@@ -50,14 +52,24 @@ describe("what Ambiance's Sound reads (docs/design/design-v1-music.md 4.1)", () 
     assert.deepEqual(sceneOrder({ music: null, loops: [] }, {}, SOUNDS), []);
   });
 
-  test("a sound that plays refuses its delete and a change of use, in the panel's words", () => {
-    const run = { run: "r1", playlistId: "tavern", order: ["pony", "road"], index: 0, repeat: "all" as const, fade: 5 as const, now: { soundId: "pony", at: 0 } };
+  test("a delete and a change of use part ways for a track only queued (docs/design/design-v1-music-player.md 6.4)", () => {
+    const lengths = { pony: { ms: 60_000, use: "music" as const }, road: { ms: 60_000, use: "music" as const }, march: { ms: 60_000, use: "music" as const } };
+    const run = { run: "r1", playlistId: "tavern", order: ["pony", "road", "march"], index: 0, repeat: "all" as const, fade: 5 as const, now: { soundId: "pony", at: 0 } };
     const p = playing({ music: run, loops: { l1: { soundId: "rain", at: 0, volume: 70 } }, effects: [{ id: "e1", soundId: "thunder", at: 0 }] });
-    assert.equal(busyRefusal(p, "road"), STOP_MUSIC_FIRST, "a later track of the run's order too");
-    assert.equal(busyRefusal(p, "rain"), STOP_IT_FIRST);
-    assert.equal(busyRefusal(p, "thunder"), null, "a sounding effect deletes at once and stops");
-    assert.equal(busyRefusal(p, "march"), null);
-    assert.equal(busyRefusal(null, "pony"), null);
+    assert.equal(deleteRefusal(p, lengths, "pony", 1_000), TRACK_PLAYS, "the playing track refuses both");
+    assert.equal(useRefusal(p, lengths, "pony", 1_000), TRACK_PLAYS);
+    assert.equal(deleteRefusal(p, lengths, "march", 1_000), null, "a track only queued deletes, and leaves the queue in the same op");
+    assert.equal(useRefusal(p, lengths, "march", 1_000), TRACK_QUEUED, "and keeps its use while queued");
+    assert.equal(deleteRefusal(p, lengths, "rain", 1_000), STOP_IT_FIRST);
+    assert.equal(useRefusal(p, lengths, "rain", 1_000), STOP_IT_FIRST);
+    assert.equal(deleteRefusal(p, lengths, "thunder", 1_000), null, "a sounding effect deletes at once and stops");
+    assert.equal(deleteRefusal(null, lengths, "pony", 0), null);
+    // The revealed next refuses both, and from its crossfade's start it is the playing track.
+    const revealed = playing({ music: { ...run, next: { soundId: "road", at: 55_000 } } });
+    assert.equal(deleteRefusal(revealed, lengths, "road", 50_000), TRACK_PLAYS_NEXT);
+    assert.equal(useRefusal(revealed, lengths, "road", 50_000), TRACK_PLAYS_NEXT);
+    assert.equal(deleteRefusal(revealed, lengths, "road", 55_000), TRACK_PLAYS, "read through musicAt, as the reducer reads it");
+    assert.equal(deleteRefusal(revealed, lengths, "pony", 56_000), null, "the outgoing track is only queued once the crossfade began");
   });
 
   test("a change of use leaves only the places its old use held", () => {

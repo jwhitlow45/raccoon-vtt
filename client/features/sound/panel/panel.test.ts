@@ -5,21 +5,21 @@ import type { Playing, Sound } from "#shared/sound.ts";
 
 /*
  * The parts of Ambiance's Sound in each state
- * (docs/design/design-v1-music.md 4.1, 4.3 and 12): Repeat naming its
- * state, Skip past a crossing's incoming track, the fifth loop, Edit turning
+ * (docs/design/design-v1-music.md 4.1, 4.3 and 12, design-v1-music-player.md
+ * 3.1): the compact music block with its Next line and Open music, Skip
+ * past a crossing's incoming track, the fifth loop, Edit turning
  * the board into a list, the scene line's states, the switch-off board, and
  * the player's panel with and without names.
  */
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { MusicNow, NowLine, SceneSoundLine, SceneSoundShortcut } = await import("./NowPlaying.tsx");
+const { MusicNow, nextWords, NowLine, SceneSoundLine, SceneSoundShortcut } = await import("./NowPlaying.tsx");
 const { LoopToggles } = await import("./LoopsSection.tsx");
 const { Board } = await import("./EffectsBoard.tsx");
 const { PlayerNow } = await import("./PlayerSound.tsx");
 const { useReasons } = await import("./SoundPage.tsx");
 const { ServerLine } = await import("./SoundPanel.tsx");
-const { rowPlay, TrackRow, PlaylistRow } = await import("./MusicSection.tsx");
 const words = await import("./words.ts");
 
 const noop = () => {};
@@ -30,78 +30,54 @@ function music(over: Partial<Parameters<typeof MusicNow>[0]["music"]> = {}) {
 }
 
 function now(props: Partial<Parameters<typeof MusicNow>[0]> = {}): string {
-  return renderToStaticMarkup(createElement(MusicNow, { music: music(), repeat: "all", onPause: noop, onResume: noop, onSkip: noop, onStop: noop, onRepeat: noop, ...props }));
+  return renderToStaticMarkup(createElement(MusicNow, { music: music(), next: "Next: Road", lengthMs: 190_000, onPause: noop, onResume: noop, onSkip: noop, onOpen: noop, ...props }));
 }
 
-describe("the Music rows' Play and Pause", () => {
-  const T = 1_000_000;
-  const run = { run: "r", playlistId: "pl", order: ["pony", "road"], index: 0, repeat: "all" as const, fade: 5 as const, now: { soundId: "pony", at: T } };
-
-  test("Pause on the track Now playing names and on the playlist the run plays, Play to resume them while paused, and Play elsewhere", () => {
-    assert.equal(rowPlay(null, { soundId: "pony" }, T), "play");
-    assert.equal(rowPlay(run, { soundId: "pony" }, T + 1_000), "pause");
-    assert.equal(rowPlay(run, { playlistId: "pl" }, T + 1_000), "pause");
-    assert.equal(rowPlay(run, { soundId: "road" }, T + 1_000), "play");
-    assert.equal(rowPlay(run, { playlistId: "other" }, T + 1_000), "play");
-    assert.equal(rowPlay({ ...run, playlistId: undefined }, { playlistId: "pl" }, T + 1_000), "play", "a track from Tracks marks no playlist");
-    const paused = { ...run, paused: 4_000 };
-    assert.equal(rowPlay(paused, { soundId: "pony" }, T + 90_000), "resume");
-    assert.equal(rowPlay(paused, { playlistId: "pl" }, T + 90_000), "resume");
-    assert.equal(rowPlay(paused, { soundId: "road" }, T + 90_000), "play");
-    // In a crossfade Now playing names the incoming track, and so does Pause.
-    const crossing = { ...run, next: { soundId: "road", at: T + 25_000 } };
-    assert.equal(rowPlay(crossing, { soundId: "pony" }, T + 24_999), "pause");
-    assert.equal(rowPlay(crossing, { soundId: "pony" }, T + 25_000), "play");
-    assert.equal(rowPlay(crossing, { soundId: "road" }, T + 25_000), "pause");
-  });
-
-  test("each row's button says what it does, in Now playing's words, and an empty playlist's Play stays off", () => {
-    const track = (play: "play" | "pause" | "resume") => renderToStaticMarkup(createElement(TrackRow, { sound: sound("road", "music", 32_000, "Road"), play, onOpen: noop, onPlay: noop, onPause: noop, onResume: noop }));
-    assert.match(track("play"), /aria-label="Play Road"/);
-    assert.match(track("pause"), /aria-label="Pause Road"/);
-    assert.match(track("resume"), /aria-label="Play Road"/);
-    const empty = { id: "pl", rev: 1, name: "Tavern night", sounds: [], repeat: "all" as const, fade: 5 as const };
-    const list = (play: "play" | "pause") => renderToStaticMarkup(createElement(PlaylistRow, { playlist: empty, sounds: {}, play, onOpen: noop, onPlay: noop, onPause: noop, onResume: noop }));
-    assert.match(list("play"), /<button[^>]*aria-label="Play Tavern night"[^>]*disabled=""/);
-    assert.match(list("pause"), /aria-label="Pause Tavern night"/);
-  });
-});
-
-describe("the DM's Now playing", () => {
-  test("names the track, its place and its time, read aloud as one of the other", () => {
+describe("the DM's Now playing (docs/design/design-v1-music-player.md 3.1)", () => {
+  test("names the track, its place, what comes next and its time, read aloud as one of the other", () => {
     const html = now();
     assert.match(html, /The Prancing Pony/);
     assert.match(html, /Tavern night · 3 of 12/);
+    assert.match(html, /data-sound-next=""[^>]*>Next: Road</);
     assert.match(html, /aria-label="1:24 of 3:10"[^>]*>1:24 \/ 3:10</);
+    assert.match(html, /aria-hidden="true" data-music-tile=""/, "a tile, hidden from a reader");
   });
 
-  test("Repeat names its state and is pressed unless off, with Repeat one's own icon", () => {
-    for (const repeat of ["all", "one", "off"] as const) {
-      const html = now({ repeat });
-      const button = /<button[^>]*aria-label="Repeat [a-z]+"[^>]*>/.exec(html)?.[0] ?? "";
-      assert.match(button, new RegExp(`aria-label="${words.REPEAT_NAMES[repeat]}"`));
-      assert.match(button, new RegExp(`aria-pressed="${repeat !== "off"}"`));
-    }
-    assert.notEqual(now({ repeat: "one" }).length, 0);
-    assert.notEqual(now({ repeat: "one" }), now({ repeat: "all" }).replace("Repeat all", "Repeat one"), "Repeat one draws its own icon");
+  test("Pause and Skip stay, Open music joins them, and Stop the music and Repeat leave for the window", () => {
+    const html = now();
+    assert.match(html, /aria-label="Pause"/);
+    assert.match(html, /aria-label="Skip to the next track"/);
+    assert.match(html, /<button[^>]*data-music-open=""[^>]*>.*Open music</s);
+    assert.doesNotMatch(html, /Stop the music/);
+    assert.doesNotMatch(html, /Repeat (all|one|off)/);
   });
 
   test("Pause becomes Play while paused, and Skip goes past the incoming track during a crossfade", () => {
-    assert.match(now(), /aria-label="Pause"/);
     assert.match(now({ music: music({ paused: true }) }), /aria-label="Play"/);
-    assert.match(now(), /aria-label="Skip to the next track"/);
     assert.match(now({ music: music({ crossingInto: "Road" }) }), /aria-label="Skip past Road"/);
     assert.match(now({ music: music({ single: true }) }), /One track/);
+  });
+
+  test("the time reads one pass under Repeat one with a crossfade, its end the pass", () => {
+    // A 1:00 track with a 10 s crossfade, 0:49 into its pass (design 10).
+    assert.match(now({ music: music({ lengthMs: 60_000, positionMs: 49_000 }), lengthMs: 50_000 }), />0:49 \/ 0:50</);
+  });
+
+  test("the Next line: the track that follows, this track again, or the last", () => {
+    const sounds = { road: sound("road", "music", 32_000, "Road") };
+    assert.equal(nextWords({ t: "track", soundId: "road" }, sounds), "Next: Road");
+    assert.equal(nextWords({ t: "again" }, sounds), "Next: this track again");
+    assert.equal(nextWords({ t: "last" }, sounds), "Last track");
   });
 });
 
 describe("Now playing in Ambiance (docs/design/design-v1-panel-groups.md 4.1, D-261102-766 and 767)", () => {
-  test("the music's four buttons come before its time and bar, so Pause rises into a phone's half sheet", () => {
+  test("the music's buttons and Open music come before its bar and time, so Pause rises into a phone's half sheet", () => {
     const html = now();
     const buttons = html.indexOf('aria-label="Pause"');
-    assert.ok(buttons > html.indexOf("Tavern night · 3 of 12"), "after the name and the run line");
+    assert.ok(buttons > html.indexOf("Next: Road"), "after the name, the run line and the Next line");
     assert.ok(buttons < html.indexOf("data-sound-time"), "before the time");
-    assert.ok(html.indexOf('aria-label="Repeat all"') < html.indexOf("data-sound-time"), "all four");
+    assert.ok(html.indexOf("data-music-open") < html.indexOf("data-sound-time"), "Open music too");
   });
 
   test("with no music, the background sounds are counted, else nothing is playing", () => {
