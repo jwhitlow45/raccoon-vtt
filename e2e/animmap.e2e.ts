@@ -662,7 +662,7 @@ describe("animated maps", { concurrency: false }, () => {
     assert.equal(cryptMap.assetId, run.webm!.id);
     assert.equal(dmSocket.state!.scenes[run.cryptId]!.map!.cellPx, 20, "640 px over 32 squares, from the video's name");
     assert.ok(!(await amd.labels()).includes("Looking for a grid…"), "a named size is not searched");
-    // The row's help, this device's line under it, and Use the still only below its buttons.
+    // The row's help, this device's line under it, and Use the still only, last on the picker's line (pe1-1 holds the lines).
     await group.getByText("A 640 × 360 px video, 0:02, looping. Its first frame is the still.", { exact: true }).waitFor();
     await group.getByText("Moving on this device.", { exact: true }).waitFor();
     await group.getByRole("button", { name: "Use the still only", exact: true }).waitFor();
@@ -951,6 +951,175 @@ describe("animated maps", { concurrency: false }, () => {
     await viewAs(pat, "topDown");
     await setScheme(pat, "dark");
     await boardSays(pat, "playing");
+  });
+
+  /*
+   * pe1-1: the Map image row's lines (docs/design/design-v1-polish-pass.md
+   * 3.3) on the crypt, where the players are not, and on their scene, folded
+   * and asked, on the computer and on the smallest phone at 130%. Use the
+   * still only stands last on the picker's line and Remove map image alone
+   * on the last, each line filled, and Remove's second tap moves no other
+   * button: its armed words stay on one line where the line holds them,
+   * and wrap inside it where it does not, its top unmoved.
+   */
+  type Control = { words: string; l: number; r: number; t: number; b: number; lines: number; over: boolean; lineL: number; lineR: number };
+  /** The Map image row's buttons and file pickers as they lay out, each with its words' line count, whether they overflow it, and the line of buttons it stands in. */
+  const controlsOf = (row: Locator): Promise<Control[]> =>
+    row.evaluate((el) => {
+      type R = { left: number; right: number; top: number; bottom: number; width: number; height: number };
+      type E = { getBoundingClientRect(): R; parentElement: E | null; textContent: string | null; scrollWidth: number; clientWidth: number; contains(o: E): boolean; querySelectorAll(s: string): ArrayLike<E> };
+      type Doc = { createRange(): { selectNodeContents(n: unknown): void; getClientRects(): ArrayLike<R> }; createTreeWalker(root: unknown, what: number): { nextNode(): E | null } };
+      const g = globalThis as unknown as { document: Doc; getComputedStyle(e: E): { display: string; flexWrap: string } };
+      const found = Array.from((el as unknown as E).querySelectorAll('button, label:has(input[type="file"])')).filter((c) => c.getBoundingClientRect().width > 2 && c.getBoundingClientRect().height > 2);
+      const controls = found.filter((c) => !found.some((o) => o !== c && o.contains(c)));
+      return controls.map((c) => {
+        const box = c.getBoundingClientRect();
+        const tops: number[] = [];
+        const walker = g.document.createTreeWalker(c, 4);
+        for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+          if (!(n.textContent ?? "").trim()) continue;
+          const range = g.document.createRange();
+          range.selectNodeContents(n);
+          for (const r of Array.from(range.getClientRects())) if (r.width > 1 && r.height > 1) tops.push(r.top);
+        }
+        tops.sort((a, b) => a - b);
+        // The line of buttons it stands in: the nearest flex row that wraps (SceneSettings.tsx Row).
+        let line = c.parentElement;
+        while (line && !(g.getComputedStyle(line).display === "flex" && g.getComputedStyle(line).flexWrap === "wrap")) line = line.parentElement;
+        const lb = (line ?? c).getBoundingClientRect();
+        return { words: (c.textContent ?? "").trim(), l: box.left, r: box.right, t: box.top, b: box.bottom, lines: tops.filter((t, i) => i === 0 || t > tops[i - 1]! + 4).length, over: c.scrollWidth > c.clientWidth + 1, lineL: lb.left, lineR: lb.right };
+      });
+    });
+  /** The controls by the line they lay out on, top to bottom, each line's words in order. */
+  const linesOf = (controls: readonly Control[]): Control[][] => {
+    const out: Control[][] = [];
+    for (const c of [...controls].sort((a, b) => a.t - b.t || a.l - b.l)) {
+      const last = out.at(-1);
+      if (last && Math.abs(last[0]!.t - c.t) < 2) last.push(c);
+      else out.push([c]);
+    }
+    return out;
+  };
+  /** Lines naming what is out of place: the lines' words against `want`, and each line but Cancel's filled from its line's start to its end. */
+  const checkLines = (controls: readonly Control[], want: readonly (readonly string[])[], at: string): string[] => {
+    const got = linesOf(controls);
+    const words = got.map((line) => line.map((c) => c.words));
+    if (JSON.stringify(words) !== JSON.stringify(want)) return [`${at}: lines ${JSON.stringify(words)}, wanted ${JSON.stringify(want)}`];
+    const out: string[] = [];
+    for (const line of got) {
+      if (line[0]!.words === "Cancel") continue;
+      const first = line[0]!;
+      const last = line.at(-1)!;
+      if (Math.abs(first.l - first.lineL) > 1 || Math.abs(last.r - last.lineR) > 1) out.push(`${at}: the line ${JSON.stringify(line.map((c) => c.words))} spans ${first.l.toFixed(1)} to ${last.r.toFixed(1)} of ${first.lineL.toFixed(1)} to ${last.lineR.toFixed(1)}`);
+    }
+    for (const c of controls) if (c.lines !== 1 || c.over) out.push(`${at}: "${c.words}" takes ${c.lines} lines${c.over ? " and overflows" : ""}`);
+    return out;
+  };
+  /** Arms Remove map image with one tap, reads the row, and waits for it to disarm by itself: lines naming a button it moved, and Remove's words not laid out as `wrapped` says. */
+  const armRemove = async (row: Locator, wrapped: boolean, at: string, page: Page): Promise<string[]> => {
+    // In view first, so the tap scrolls nothing and every box stays where it was read.
+    await row.getByRole("button", { name: "Remove map image", exact: true }).scrollIntoViewIfNeeded();
+    const before = await controlsOf(row);
+    await row.getByRole("button", { name: "Remove map image", exact: true }).click();
+    const armed = row.getByRole("button", { name: /^Tap again to remove/ });
+    await armed.waitFor();
+    const after = await controlsOf(row);
+    await shots.take(page, `pe1-1-remove-armed-${at.replace(/[^a-z0-9]+/gi, "-")}`);
+    // Left alone, it disarms after 4 s (scenes/controls.tsx ConfirmButton), so the next step starts unarmed.
+    await row.getByRole("button", { name: "Remove map image", exact: true }).waitFor({ timeout: 8_000 });
+    const out: string[] = [];
+    const remove = after.find((c) => c.words.startsWith("Tap again to remove"));
+    const was = before.find((c) => c.words === "Remove map image");
+    if (!remove || !was || before.length !== after.length) return [`${at}: armed, the row reads ${JSON.stringify(after.map((c) => c.words))}`];
+    for (const [i, c] of before.entries()) {
+      if (c === was) continue;
+      const now = after[i]!;
+      const moved = Math.max(Math.abs(now.l - c.l), Math.abs(now.r - c.r), Math.abs(now.t - c.t), Math.abs(now.b - c.b));
+      if (now.words !== c.words || moved >= 0.5) out.push(`${at}: arming Remove moved "${c.words}" by ${moved.toFixed(2)} px`);
+    }
+    if (Math.abs(remove.t - was.t) >= 0.5) out.push(`${at}: Remove's top moved by ${(remove.t - was.t).toFixed(2)} px`);
+    if (remove.lines !== (wrapped ? 2 : 1) || remove.over) out.push(`${at}: "${remove.words}" takes ${remove.lines} lines${remove.over ? " and overflows" : ""}, wanted ${wrapped ? 2 : 1}`);
+    if (remove.r > remove.lineR + 1) out.push(`${at}: "${remove.words}" ends ${(remove.r - remove.lineR).toFixed(1)} px past its line`);
+    return out;
+  };
+  const mapImageRow = (group: Locator) => group.locator("[data-setting-row]").filter({ has: group.page().getByText("Map image", { exact: true }) }).first();
+
+  test("pe1-1. the Map image row on the computer and the smallest phone at 130%: Use the still only last on the picker's line and Remove map image alone on the last, each filled, where the players are and where they are not, asked and not, and Remove's second tap moves no other button", async () => {
+    const back = dmSocket.you?.sceneId ?? run.sceneId;
+    const phases = dmSocket.state!.scenes[run.cryptId]?.phases?.length ?? 1;
+    assert.ok(phases >= 2, `the crypt keeps am-10's phases, so Remove's second tap names them: ${phases}`);
+    assert.ok(dmSocket.state!.scenes[run.sceneId]?.map?.video && !dmSocket.state!.scenes[run.sceneId]?.phases?.length, "the players' scene is am-2's animated map, one phase");
+    const lines: string[] = [];
+    const phone = await browser.newContext({ viewport: { width: 320, height: 568 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, storageState: await dmContext.storageState() });
+    const watch = new ConsoleWatch("pe1 phone");
+    try {
+      // The computer: the crypt, where the players are not.
+      let group = await openSceneGroup(await amd.view(run.cryptId), "Map and grid");
+      let row = mapImageRow(group);
+      await row.getByRole("button", { name: "Use the still only", exact: true }).waitFor();
+      await row.scrollIntoViewIfNeeded();
+      lines.push(...checkLines(await controlsOf(row), [["Replace map image", "Paste an image"], ["Use the still only"], ["Remove map image"]], "computer, players elsewhere"));
+      await shots.take(dm, "pe1-1-map-image-elsewhere");
+      lines.push(...(await armRemove(row, false, "computer, players elsewhere", dm)));
+      // The players' scene: the ask, then its answers once asked.
+      group = await openSceneGroup(await amd.view(run.sceneId), "Map and grid");
+      row = mapImageRow(group);
+      await row.getByRole("button", { name: "Use the still only", exact: true }).waitFor();
+      await row.scrollIntoViewIfNeeded();
+      lines.push(...checkLines(await controlsOf(row), [["Replace map image", "Use the still only"], ["Remove map image"]], "computer, players here"));
+      await row.getByRole("button", { name: "Replace map image", exact: true }).click();
+      await row.getByText(/^The players are on this scene\./).waitFor();
+      lines.push(...checkLines(await controlsOf(row), [["Choose the image", "Paste an image"], ["Use the still only"], ["Cancel"], ["Remove map image"]], "computer, players here, asked"));
+      await shots.take(dm, "pe1-1-map-image-asked");
+      lines.push(...(await armRemove(row, false, "computer, players here, asked", dm)));
+      await row.getByRole("button", { name: "Cancel", exact: true }).click();
+
+      // The smallest phone at 130%: each button takes its own full line, and the crypt's Remove wraps its phases inside its own.
+      const page = await phone.newPage();
+      watch.attach(page);
+      await page.goto(`${server.origin}/`);
+      await page.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
+      await page.goto(`${server.origin}/r/${run.roomId}`);
+      await page.getByRole("status", { name: "Connected" }).first().waitFor();
+      const scenes = async () => {
+        const sheet = page.locator('dialog[data-rvtt-sheet][aria-label="Scenes"]');
+        if (!(await sheet.isVisible())) {
+          await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
+          await page.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Scenes/ }).click();
+          await sheet.waitFor();
+        }
+        return sheet;
+      };
+      const view = async (sceneId: string) => {
+        const name = dmSocket.state!.scenes[sceneId]!.name;
+        await (await scenes()).getByRole("button", { name: new RegExp(`^${name}(?![A-Za-z])`) }).first().click();
+        // A phone may put the sheet away to show the scene, so it is found again.
+        const field = (await scenes()).getByRole("textbox", { name: "Scene name" }).last();
+        await waitFor(`${name}'s settings on the phone`, async () => ((await field.inputValue({ timeout: 1_000 }).catch(() => "")) === name ? true : null));
+        const map = mapImageRow(await openSceneGroup(await scenes(), "Map and grid"));
+        await map.getByRole("button", { name: "Use the still only", exact: true }).waitFor();
+        await map.scrollIntoViewIfNeeded();
+        return map;
+      };
+      row = await view(run.cryptId);
+      lines.push(...checkLines(await controlsOf(row), [["Replace map image"], ["Paste an image"], ["Use the still only"], ["Remove map image"]], "320 at 130%, players elsewhere"));
+      await shots.take(page, "pe1-1-map-image-elsewhere-320-130");
+      lines.push(...(await armRemove(row, true, `320 at 130%, players elsewhere, ${phases} phases`, page)));
+      row = await view(run.sceneId);
+      lines.push(...checkLines(await controlsOf(row), [["Replace map image"], ["Use the still only"], ["Remove map image"]], "320 at 130%, players here"));
+      await row.getByRole("button", { name: "Replace map image", exact: true }).click();
+      await row.getByText(/^The players are on this scene\./).waitFor();
+      lines.push(...checkLines(await controlsOf(row), [["Choose the image"], ["Paste an image"], ["Use the still only"], ["Cancel"], ["Remove map image"]], "320 at 130%, players here, asked"));
+      await shots.take(page, "pe1-1-map-image-asked-320-130");
+      lines.push(...(await armRemove(row, false, "320 at 130%, players here, asked", page)));
+      await row.getByRole("button", { name: "Cancel", exact: true }).click();
+    } finally {
+      await phone.close();
+      await amd.view(back);
+    }
+    assert.deepEqual(lines, []);
+    assert.deepEqual(watch.errors, [], "the phone page logged no errors");
+    assert.ok(dmSocket.state!.scenes[run.cryptId]?.map && dmSocket.state!.scenes[run.sceneId]?.map, "no second tap removed a map");
   });
 
   test("am-3. a video phase plays for Pat when the DM switches to it, the old element freed, and a map replaced while one plays clears its source first", async () => {
