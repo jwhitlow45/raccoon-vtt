@@ -14,6 +14,7 @@ import { Segmented } from "../../components/Segmented.tsx";
 import { SettingRow } from "../../components/SettingRow.tsx";
 import { Switch } from "../../components/Switch.tsx";
 import { Tag } from "../../components/Tag.tsx";
+import { scrollBox, startInScrollBox } from "../../lib/reveal.ts";
 import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import type { ViewKind } from "../../lib/view.ts";
@@ -49,7 +50,7 @@ import { SCENE_GROUP_ICONS, SCENE_GROUP_LABELS, useSceneFolds, type SceneGroup }
 import { currentStageCamera } from "./stageCamera.ts";
 import { uploadErrorText, uploadMap } from "./upload.ts";
 import { layoutWidth } from "../device/layout.ts";
-import type { PanelClose } from "../panels.ts";
+import { takeOverPanelScroll, type PanelClose } from "../panels.ts";
 
 /**
  * Settings of the scene the DM is looking at, grouped by what the DM is
@@ -199,11 +200,11 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
   );
 }
 
-/**
- * A box around a group that a request scrolls to, one column as the
- * panel's own, with the margin a scroll to its top leaves above it.
- */
-const GROUP_SLOT: CSSProperties = { display: "grid", gridTemplateColumns: "minmax(0, 1fr)", scrollMarginTop: theme.space(2) };
+/** A box around a group that a request scrolls to, one column as the panel's own. */
+const GROUP_SLOT: CSSProperties = { display: "grid", gridTemplateColumns: "minmax(0, 1fr)" };
+
+/** The room a scroll to a group's top leaves above it. */
+const GROUP_MARGIN = theme.space(2);
 
 /**
  * Takes Ambiance's request for this scene's weather or sound
@@ -215,13 +216,16 @@ const GROUP_SLOT: CSSProperties = { display: "grid", gridTemplateColumns: "minma
  * top and focuses its fold. A sound request while Scene sound is not drawn
  * (the server offers no sound files) is taken and dropped.
  *
- * The scroll is `scrollIntoView` with the slot's scroll margin, and the
- * choice compares rects with rects alone: at 130% the page is zoomed, and a
- * scrollTop set from rect distances landed the row half out of the sheet.
- * It waits for the commit's own layout effects to end, the panel's scroll
- * restore among them (features/panels.ts usePanelScroll), which runs after
- * this child's, and then counts as the viewer taking the scroller over, so a
- * restore still pending never pulls the panel back over it.
+ * The scroll moves the panel's own scroller alone (lib/reveal.ts
+ * startInScrollBox), as Ambiance's does: scrollIntoView also scrolls the
+ * sheet's frame where the scroller cannot go far enough, as on a tall sheet
+ * with little under the group, and takes the sheet's header out of sight.
+ * The choice compares rects with rects alone: at 130% the page is zoomed,
+ * and a scrollTop set from rect distances landed the row half out of the
+ * sheet. It waits for the commit's own layout effects to end, the panel's
+ * scroll restore among them (features/panels.ts usePanelScroll), which runs
+ * after this child's, and then counts as the viewer taking the scroller
+ * over, so a restore still pending never pulls the panel back over it.
  */
 function useSceneRequest(groups: { light: RefObject<HTMLDivElement | null>; sound: RefObject<HTMLDivElement | null> | null }): void {
   const request = useScoped(sceneRequestSlot);
@@ -235,35 +239,22 @@ function useSceneRequest(groups: { light: RefObject<HTMLDivElement | null>; soun
     if (!slot) return;
     queueMicrotask(() => {
       if (!slot.isConnected) return;
-      // The scroller listens for the viewer's input to stop a pending restore (PanelScrollKeeper.takeOver). A wheel of no distance scrolls nothing.
-      slot.dispatchEvent(new WheelEvent("wheel", { bubbles: true }));
       if (target === "sound") {
-        slot.scrollIntoView({ block: "start" });
+        startInScrollBox(slot, GROUP_MARGIN);
+        takeOverPanelScroll(slot);
         slot.querySelector<HTMLElement>(GROUP_FOLD)?.focus({ preventScroll: true });
         return;
       }
       const select = slot.querySelector<HTMLElement>('select[aria-label="Weather"]');
       const row = select?.closest<HTMLElement>("[data-setting-row]") ?? null;
-      const scroller = scrollerOf(slot);
+      const scroller = scrollBox(slot as unknown as Parameters<typeof scrollBox>[0]) as unknown as Element | null;
       const room = scroller ? scroller.getBoundingClientRect().height : Infinity;
-      const whole = row === null || row.getBoundingClientRect().bottom - slot.getBoundingClientRect().top + theme.space(2) <= room;
-      if (whole || !row) slot.scrollIntoView({ block: "start" });
-      else {
-        row.style.scrollMarginTop = `${theme.space(2)}px`;
-        row.scrollIntoView({ block: "start" });
-      }
+      const whole = row === null || row.getBoundingClientRect().bottom - slot.getBoundingClientRect().top + GROUP_MARGIN <= room;
+      startInScrollBox(whole || !row ? slot : row, GROUP_MARGIN);
+      takeOverPanelScroll(slot);
       select?.focus({ preventScroll: true });
     });
   }, [request, seq]);
-}
-
-/** The nearest box around `el` that scrolls: the side panel's pane or the phone's sheet. */
-function scrollerOf(el: HTMLElement): HTMLElement | null {
-  for (let at = el.parentElement; at; at = at.parentElement) {
-    const overflow = getComputedStyle(at).overflowY;
-    if ((overflow === "auto" || overflow === "scroll") && at.scrollHeight > at.clientHeight) return at;
-  }
-  return null;
 }
 
 const VIEWS: readonly { value: ViewKind; label: string }[] = [
