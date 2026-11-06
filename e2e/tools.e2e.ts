@@ -362,9 +362,9 @@ describe("raccoon-vtt DM tools run", { timeout: 300_000 }, () => {
     await sheet.getByRole("button", { name: "Or a second choice" }).click();
     // With a second choice, each picker is a group named by its place in the pair (LPD-DMPHONE-6).
     await sheet.getByRole("group", { name: "First choice" }).getByRole("radiogroup", { name: "Saving throw" }).getByRole("radio", { name: "Strength", checked: true }).waitFor();
-    await sheet.getByRole("group", { name: "Or the second" }).getByRole("radiogroup", { name: "Saving throw" }).getByRole("radio", { name: "Dexterity" }).click();
+    await sheet.getByRole("group", { name: "Second choice" }).getByRole("radiogroup", { name: "Saving throw" }).getByRole("radio", { name: "Dexterity" }).click();
     await sheet.getByLabel("DC", { exact: true }).fill("12");
-    await sheet.getByRole("group", { name: "Who rolls" }).getByRole("button", { name: /^Thorn/, pressed: true }).waitFor();
+    await sheet.getByRole("group", { name: "Creatures" }).getByRole("button", { name: /^Thorn/, pressed: true }).waitFor();
     await shots.take(dm, "tools-roll-request");
     await sheet.getByRole("button", { name: "Send", exact: true }).click();
     await sheet.waitFor({ state: "detached" });

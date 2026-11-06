@@ -510,8 +510,8 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     assert.ok(thorn, "Thorn is not in the room");
     const id = randomUUID();
     await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "wis" }] }, dcShown: true, resultShown: true, targets: [{ characterId: thorn.id }] } });
-    // A phone starts Check their view folded (docs/design/design-v1-panel-groups.md 6.2).
-    await openGroup(await openPanel(dm, "DM"), "Check their view");
+    // A phone starts Preview folded (docs/design/design-v1-panel-groups.md 6.2).
+    await openGroup(await openPanel(dm, "DM"), "Preview");
     await dm.getByRole("button", { name: "View", exact: true }).tap();
     const preview = dm.getByRole("dialog", { name: "Viewing as Pat" });
     await preview.waitFor();

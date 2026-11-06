@@ -629,7 +629,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     await reloadAt(phone, 1.3);
     await openPanel(phone, "DM");
     // Setup, so folded on a phone (docs/design/design-v1-panel-groups.md 6.2).
-    await openGroup(sheet(phone, "DM"), "Check their view");
+    await openGroup(sheet(phone, "DM"), "Preview");
     await sheet(phone, "DM").getByRole("button", { name: "View", exact: true }).tap();
     const preview = phone.locator('dialog[aria-label="Viewing as Pat"]');
     await preview.waitFor();
@@ -1118,7 +1118,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
 
   test("7. a DM's \"view as a player\" at 480 x 320 at 130%: \"Viewing as Pat\" stands above the very short sheet, and its Exit leaves", async () => {
     await openPanel(phone, "DM");
-    await openGroup(modal(phone), "Check their view");
+    await openGroup(modal(phone), "Preview");
     await modal(phone).getByRole("button", { name: "View", exact: true }).tap();
     const preview = phone.locator('dialog[aria-label="Viewing as Pat"]');
     await preview.waitFor();
@@ -2096,12 +2096,12 @@ describe("raccoon-vtt: the handout viewer and the Library (case 8)", () => {
         const doc = (globalThis as unknown as { document: { querySelectorAll(s: string): ArrayLike<{ getAttribute(n: string): string | null; textContent: string | null; tagName: string }> } }).document;
         return Array.from(doc.querySelectorAll('ul[aria-label$="in this room"], h3, button')).flatMap((el) => {
           const label = el.tagName === "UL" ? el.getAttribute("aria-label") : (el.textContent ?? "").trim();
-          return label && /in this room|^Clean up$|^Delete \d+ not in use/.test(label) ? [label] : [];
+          return label && /in this room|^Cleanup$|^Delete \d+ not in use/.test(label) ? [label] : [];
         });
       });
       assert.deepEqual(
         order.map((l) => l.replace(/ \(.*\)$/, "")),
-        ["Handouts in this room", "Maps in this room", "Token images in this room", "Clean up", "Delete 2 not in use"],
+        ["Handouts in this room", "Maps in this room", "Token images in this room", "Cleanup", "Delete 2 not in use"],
         "the DM's library order",
       );
       await shot(dm, "library-dm-order");
@@ -2428,7 +2428,7 @@ describe("raccoon-vtt: the moves in the DM panel, Scenes, Members, Characters an
       const panel = await sideTab(dm, "DM");
       await section(panel, "Handouts").waitFor();
       const labels = await sectionLabels(panel);
-      assert.deepEqual(labels, ["Handouts", "Players' screens", "Check their view", "Player link", "Table display"]);
+      assert.deepEqual(labels, ["Handouts", "Players' screens", "Preview", "Player link", "Table display"]);
 
       const screens = section(panel, "Players' screens");
       await screens.getByRole("switch", { name: /^Follow me/ }).waitFor();
@@ -2437,13 +2437,13 @@ describe("raccoon-vtt: the moves in the DM panel, Scenes, Members, Characters an
       // Black out, rare and drastic, no longer sits under the panel's first control.
       assert.equal(await section(panel, "Handouts").getByRole("switch").count(), 0);
 
-      const checks = section(panel, "Check their view");
+      const checks = section(panel, "Preview");
       await checks.getByRole("combobox", { name: "View as a player" }).waitFor();
       assert.equal(await checks.getByRole("switch", { name: /^Follow me|^Black out/ }).count(), 0);
       await shot(panel, "dm-panel-order");
     });
 
-    test("3. M4: away from the players' scene, the notice leads Players' screens, and Party sight sits in Check their view", async () => {
+    test("3. M4: away from the players' scene, the notice leads Players' screens, and Party sight sits in Preview", async () => {
       const players = dmSocket.state!.scenes[run.sceneId]!.name;
       await ops.send({
         t: "scene.create",
@@ -2459,7 +2459,7 @@ describe("raccoon-vtt: the moves in the DM panel, Scenes, Members, Characters an
       await notice.waitFor();
       assert.equal(await childIndex(screens, notice), 1, "the notice comes first, under the label");
       assert.equal(await screens.getByRole("button", { name: "Bring everyone here" }).isDisabled(), true);
-      const checks = section(panel, "Check their view");
+      const checks = section(panel, "Preview");
       await checks.getByRole("switch", { name: /^Party sight/ }).waitFor();
       assert.equal(await screens.getByRole("switch", { name: /^Party sight/ }).count(), 0);
       await shot(panel, "dm-panel-away-from-players");

@@ -1452,7 +1452,7 @@ panelFile(null, () => {
     // The library lists the pick apart from the room's own images, in the starter packs' fold.
     await openSideTab(dm, "Library");
     const library = dm.getByRole("tabpanel", { name: "Library" });
-    await library.getByRole("button", { name: /^From starter packs \(\d+\)$/ }).click();
+    await library.getByRole("button", { name: /^Starter packs \(\d+\)$/ }).click();
     await library.getByRole("list", { name: "Token images from starter packs" }).locator(`img[src*="${image.assetId}"]`).first().waitFor();
     assert.equal(await library.getByRole("list", { name: "Token images in this room" }).locator(`img[src*="${image.assetId}"]`).count(), 0, "the pick is listed with the room's own images");
     await shots.take(dm, "sa-a-1-library-starter-fold");

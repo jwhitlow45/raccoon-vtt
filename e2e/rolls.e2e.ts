@@ -516,7 +516,7 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
 
     // Two choices: each has Remove, and removing the first makes the second the first.
     await sheet.getByRole("button", { name: "Or a second choice" }).tap();
-    const second = sheet.getByRole("group", { name: "Or the second" });
+    const second = sheet.getByRole("group", { name: "Second choice" });
     await second.getByRole("radiogroup", { name: "Ability check" }).getByRole("radio", { name: "Dexterity" }).tap();
     assert.equal(await second.getByRole("radiogroup", { name: "Saving throw" }).getByRole("radio", { name: "Dexterity" }).isDisabled(), true, "a save cannot join a check");
     assert.equal(await second.getByRole("radiogroup", { name: "Ability check" }).getByRole("radio", { name: "Strength" }).isDisabled(), true, "nor the first choice itself");
@@ -525,7 +525,7 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await shots.take(dm, "rolls-sheet-two-choices");
     await sheet.getByRole("button", { name: "Remove the first choice" }).tap();
     await sheet.getByText(/^Dexterity check, no DC\. 1 asked\.$/).waitFor();
-    assert.equal(await sheet.getByRole("group", { name: "Or the second" }).count(), 0);
+    assert.equal(await sheet.getByRole("group", { name: "Second choice" }).count(), 0);
     assert.equal(await sheet.getByRole("button", { name: /^Remove/ }).count(), 0, "one choice has no Remove");
 
     await sheet.getByRole("radiogroup", { name: "Ability check" }).getByRole("radio", { name: "Strength" }).tap();
@@ -549,7 +549,7 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await sheet.getByText(/^Strength check, no DC\. 1 asked\.$/).waitFor();
     assert.equal(await sheet.getByRole("radiogroup", { name: "Ability check" }).getByRole("radio", { name: "Strength" }).isChecked(), true, "the picker shows what the tap filled");
 
-    const fold = sheet.getByRole("button", { name: "What players see" });
+    const fold = sheet.getByRole("button", { name: "Player view" });
     assert.equal(await fold.getAttribute("aria-expanded"), "false", "folded at first");
     await sheet.getByText("Pass or fail shown. No note.").waitFor();
     assert.equal(await sheet.getByRole("checkbox", { name: "Players see the DC" }).count(), 0, "no DC, no switch for it");

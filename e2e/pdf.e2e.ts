@@ -1525,14 +1525,14 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     await shots.take(phone, "pdf-library-player-token");
     await tokenView.getByRole("button", { name: /^Close/ }).tap();
 
-    // Clean up's last delete takes its button away: focus goes to its section, which says what was deleted.
+    // Cleanup's last delete takes its button away: focus goes to its section, which says what was deleted.
     const cleanUp = library.getByRole("button", { name: /^Delete \d+ not in use/ });
     await cleanUp.waitFor();
     await cleanUp.click();
     await library.getByRole("button", { name: /^Delete (it|all \d+)\?$/ }).click();
     await library.getByText(/^Deleted \d+ images?\.$/).waitFor();
     assert.equal(await cleanUp.count(), 0, "images left not in use");
-    await waitFor("focus on the Clean up section", () =>
+    await waitFor("focus on the Cleanup section", () =>
       dm.evaluate(() => ((globalThis as unknown as { document: { activeElement: { tagName: string; textContent: string | null } | null } }).document.activeElement?.tagName ?? "") === "SECTION"),
     );
   });
