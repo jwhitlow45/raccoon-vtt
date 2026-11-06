@@ -24,6 +24,8 @@ export type DeviceValues = {
   weather: WeatherMode;
   /** A reason keeps the weather still though Moving is chosen (weather/store.ts weatherStillReason). */
   weatherHeld: boolean;
+  /** A reason keeps every animated map still though Moving is chosen (AnimMapController.tsx useDeviceStillReason). */
+  animatedHeld: boolean;
   roomSound: boolean;
   rollAnimation: boolean;
   handle: GrabberId;
@@ -40,7 +42,7 @@ export function deviceSummaries(v: DeviceValues): Readonly<Record<ThisDeviceSect
     screen: onOff("Full screen", v.fullscreen),
     battery: onOff("Low power", v.lowPower),
     // The value the cards show: Low power loads the phone size whatever is chosen.
-    mapDetail: join([MAP_IMAGE_WORDS[v.lowPower ? "mobile" : v.variant], v.animatedMaps ? ANIMATED_MAPS_WORDS[v.animatedMaps] : null]),
+    mapDetail: join([MAP_IMAGE_WORDS[v.lowPower ? "mobile" : v.variant], v.animatedMaps ? ANIMATED_MAPS_WORDS[v.animatedMaps] : null, v.animatedMaps === "moving" && v.animatedHeld ? "Held still" : null]),
     // Held still only says something while Moving is chosen: Still and Off are still already.
     weather: join([WEATHER_MODE_WORDS[v.weather], v.weather === "moving" && v.weatherHeld ? "Held still" : null]),
     sounds: onOff("Room sound", v.roomSound),

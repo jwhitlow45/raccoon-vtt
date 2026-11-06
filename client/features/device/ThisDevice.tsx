@@ -116,6 +116,7 @@ export default function ThisDevice() {
     animatedMaps: animatedMapsOn ? animatedMaps : null,
     weather,
     weatherHeld: weatherStill !== null,
+    animatedHeld: animatedStill !== null,
     roomSound,
     rollAnimation,
     handle,
