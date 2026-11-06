@@ -1824,6 +1824,54 @@ describe("op version 48 and snapshot 38, the queue (docs/design/design-v1-music-
   });
 });
 
+describe("op version 48: stored ops from before replay by the rules they met (docs/design/design-v1-music-player.md 6.5)", () => {
+  const sounds = {
+    m1: { id: "m1", rev: 0, name: "Tavern", assetId: "a1", ms: 120_000, use: "music" },
+    m2: { id: "m2", rev: 0, name: "Road", assetId: "a2", ms: 90_000, use: "music" },
+    m3: { id: "m3", rev: 0, name: "Harbor", assetId: "a3", ms: 100_000, use: "music" },
+  } as const;
+  /** A v37 room whose players' scene plays Night shuffled. */
+  const before = (): RoomState =>
+    room({
+      sounds: structuredClone(sounds) as RoomState["sounds"],
+      playlists: { pl1: { id: "pl1", rev: 0, name: "Night", sounds: ["m1", "m2", "m3"], repeat: "all", fade: 5 } },
+      scenes: { s1: scene("s1", { sound: { music: { playlistId: "pl1", repeat: "all", fade: 5, shuffle: true }, loops: [] } }), s2: scene("s2", { order: 1 }) },
+      playing: null,
+    });
+  const stored = { t: "sound.scene", sceneId: "s1", run: "r1", order: ["m2", "m3", "m1"] };
+  const at = (seq: number, opVersion?: number) => ({ seq, at: new Date(Date.parse(AT) + seq * 1_000).toISOString(), ...(opVersion !== undefined ? { opVersion } : {}) });
+  /** What a version 47 build left after the scene's sound: the run with no Shuffle, which it had no field for. */
+  const runOf47 = { run: "r1", playlistId: "pl1", order: ["m2", "m3", "m1"], index: 0, repeat: "all", fade: 5, now: { soundId: "m2", at: Date.parse(AT) + 1_000 + 400 } };
+
+  test("a stored sound.scene of a shuffled scene replays with no Shuffle from a snapshot before it, as a snapshot after it holds, while a live one sets it", () => {
+    const replayed = applyOp(migrateSnapshot(before(), 37), opSchema.parse(migrateOp(structuredClone(stored), 47)) as Op, DM, at(1, 47));
+    assert.ok(replayed.ok, replayed.ok ? "" : replayed.message);
+    assert.deepEqual(replayed.state.playing?.music, runOf47);
+    const after = migrateSnapshot({ ...before(), playing: { rev: 1, music: structuredClone(runOf47), loops: {}, effects: [], volume: { music: 100, effects: 100 } } } as RoomState, 37);
+    assert.deepEqual(replayed.state.playing, after.playing, "replayed from before or loaded after, the same run");
+    // A version 48 op after it meets the same run on both paths: Shuffle off of a run with no flag writes nothing.
+    const unshuffle = { t: "music.queue", from: "r1", edit: { t: "unshuffle" } } as Op;
+    for (const [name, state] of [["replayed", replayed.state], ["loaded", after]] as const) {
+      const r = applyOp(state, unshuffle, DM, at(2, 48));
+      assert.ok(r.ok && r.touched.length === 0, `${name}: Shuffle off writes nothing`);
+    }
+    const live = applyOp(before(), stored as Op, DM, at(1));
+    assert.ok(live.ok);
+    assert.deepEqual(live.state.playing?.music, { ...runOf47, shuffle: true });
+    const at48 = applyOp(before(), stored as Op, DM, at(1, 48));
+    assert.ok(at48.ok && at48.state.playing?.music?.shuffle === true);
+  });
+
+  test("a delete stored before 48 met the refusal of every queued track, and replays a delete of a sound no run names", () => {
+    const playing = applyOp(before(), stored as Op, DM, at(1, 47));
+    assert.ok(playing.ok);
+    const queued = applyOp(playing.state, { t: "sound.delete", id: "m1" }, DM, at(2, 47));
+    assert.ok(!queued.ok, "the queued track's delete was refused, so no such op was stored");
+    const now = applyOp(playing.state, { t: "sound.delete", id: "m1" }, DM, at(2, 48));
+    assert.ok(now.ok && now.state.playing?.music?.order?.join() === "m2,m3", "from 48 it leaves the order");
+  });
+});
+
 describe("the map discovery upgrade step (docs/design/design-v1-map-discovery.md 5.5, ASTRA-31)", () => {
   const scenes = {
     s1: scene("s1", { fogEnabled: true, vision: { on: true, light: "dark" } }),
