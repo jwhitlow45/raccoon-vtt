@@ -1,11 +1,11 @@
 import { decodeRough } from "#shared/heightCodec.ts";
 import { CHUNK_CELLS, type AutoWalls, type BuildChunk, type EdgeFeature, type FreeWall, type GridShape, type Label, type Light, type Scene, type WallFeature } from "#shared/model.ts";
-import { gridOfShape, isHex } from "#shared/rules/grid.ts";
+import { gridOfShape, isHex, type Grid } from "#shared/rules/grid.ts";
 import { cornerAt, hexCorners, hexInScene } from "#shared/rules/hex.ts";
 import { cellId, deriveWalls, indexBuild, type WallEdge } from "#shared/rules/walls.ts";
 import { boardTheme, theme } from "../../lib/theme.ts";
 import { buildDrawing, swingSide, wallRuns, type BuildDrawing, type CellRect, type TexturedTerrain } from "./geometry.ts";
-import { reliefPaths, stairCells, stairPaths, TREADS, type ReliefPaths, type StairPaths } from "./heights/relief.ts";
+import { reliefPaths, stairCells, stairPaths, TREADS, type ReliefPaths, type StairCell, type StairPaths } from "./heights/relief.ts";
 import { TERRAIN_COLORS, TEXTURE_CELLS } from "./textures.ts";
 
 /**
@@ -89,7 +89,19 @@ export type BoardPaths<P = Path2D> = {
   secretMarks: { x: number; y: number }[];
   /** DM only: edges marked "No wall", where an automatic wall was taken away. */
   noWalls: P;
+  /** Every stair the symbols draw, for the isometric ground stage to leave out the ones that climb in steps (`stairSymbols`). */
+  stairList: readonly StairCell[];
 };
+
+/** A set of stairs' symbols: the pale slab under those over floor, their treads, and those over the map image. */
+export type StairSymbols<P = Path2D> = Pick<BoardPaths<P>, "stairs" | "floorStairs" | "artStairs">;
+
+/** The symbols of a list of stairs (heights/relief.ts stairCells) on a scene's grid. */
+export function stairSymbols<P extends PathSink>(list: readonly StairCell[], makePath: () => P, grid: Grid): StairSymbols<P> {
+  const stairs = makePath();
+  for (const c of list) if (c.floor) stairs.rect(c.x + 0.08, c.y + 0.08, 0.84, 0.84);
+  return { stairs, floorStairs: stairPaths(list.filter((c) => c.floor), makePath, grid), artStairs: stairPaths(list.filter((c) => !c.floor), makePath, grid) };
+}
 
 function rectsPath<P extends PathSink>(make: () => P, rects: readonly CellRect[], inset = 0): P {
   const p = make();
@@ -252,10 +264,7 @@ export function buildPaths(
   }
   const { pillars, pillarShine } = pillarPaths(drawing.symbols.pillar, makePath);
   const stairList = stairCells(chunks, derived);
-  const stairs = makePath();
-  for (const c of stairList) if (c.floor) stairs.rect(c.x + 0.08, c.y + 0.08, 0.84, 0.84);
-  const floorStairs = stairPaths(stairList.filter((c) => c.floor), makePath, hexes);
-  const artStairs = stairPaths(stairList.filter((c) => !c.floor), makePath, hexes);
+  const { stairs, floorStairs, artStairs } = stairSymbols(stairList, makePath, hexes);
   const relief = reliefPaths(chunks, derived, scene.bounds ?? null, makePath, hexes);
   const rough = makePath();
   let roughBox: BoardPaths["roughBox"] = null;
@@ -382,6 +391,7 @@ export function buildPaths(
     secrets,
     secretMarks,
     noWalls,
+    stairList,
   };
 }
 
@@ -528,13 +538,19 @@ export type DrawBuildOptions = {
    * given here, which the stand rule keeps flat, still draw. A wall the
    * relief leaves out lies under fog on both sides, where Top-down's line
    * is covered too. Absent in Top-down, which draws as it always has.
+   *
+   * `stairs`, when given, are the symbols of the stairs that do not climb
+   * in steps: a stepping stair's whole symbol, its pale slab included, is
+   * left out, since its treads copy the floor under it
+   * (docs/design/design-v1-iso-depth.md 5.2, D-261102-887).
    */
-  standing?: { pillars: Path2D; pillarShine: Path2D };
+  standing?: { pillars: Path2D; pillarShine: Path2D; stairs?: StairSymbols };
 };
 
 /** Draws the build onto `g`, whose current transform maps world cells to pixels. */
 export function drawBuild(g: CanvasRenderingContext2D, paths: BoardPaths, opts: DrawBuildOptions): void {
   const { role, scale, grid, textures, labels } = opts;
+  const stairs: StairSymbols = opts.standing?.stairs ?? paths;
   const wallWidth = Math.max(0.14, 2.5 / scale);
   const hairline = 1 / scale;
   g.save();
@@ -568,7 +584,7 @@ export function drawBuild(g: CanvasRenderingContext2D, paths: BoardPaths, opts: 
     g.fillStyle = "rgba(255, 255, 255, 0.16)";
     g.fill(opts.standing ? opts.standing.pillarShine : paths.pillarShine);
     g.fillStyle = STAIR_SLAB;
-    g.fill(paths.stairs);
+    g.fill(stairs.stairs);
     // The floor covers the map layer's grid, so the grid is drawn again on the floor.
     if (grid.show && paths.box) {
       g.save();
@@ -592,8 +608,8 @@ export function drawBuild(g: CanvasRenderingContext2D, paths: BoardPaths, opts: 
   }
   const standing = opts.standing !== undefined;
   if (!standing) drawRelief(g, paths.relief, scale);
-  drawStairs(g, paths.floorStairs, FLOOR_STAIRS);
-  drawStairs(g, paths.artStairs, ART_STAIRS);
+  drawStairs(g, stairs.floorStairs, FLOOR_STAIRS);
+  drawStairs(g, stairs.artStairs, ART_STAIRS);
   drawRough(g, paths, scale);
   opts.underWalls?.(g);
   // Every rim first, then every wall, so a rim never shows across a wall that meets it.

@@ -13,7 +13,7 @@ import { isHex, sceneGrid } from "#shared/rules/grid.ts";
 import type { HexGrid } from "#shared/rules/hex.ts";
 import { hexesInRect, hexOutline } from "./hexBuild.ts";
 import { heightSlot } from "./heights/store.ts";
-import { buildPaths, CAPTION_PX, drawBuild, drawLabel, drawLightReach, drawSuns, measureLabel, pillarPaths } from "./draw.ts";
+import { buildPaths, CAPTION_PX, drawBuild, drawLabel, drawLightReach, drawSuns, measureLabel, pillarPaths, stairSymbols } from "./draw.ts";
 import { useIsoGround, useTreeShownView } from "../../canvas/relief/context.ts";
 import { boxStands } from "../../canvas/relief/stand.ts";
 import { isSymbolTerrain, type TexturedTerrain } from "./geometry.ts";
@@ -71,11 +71,17 @@ const BuildBoard = memo(function BuildBoard(props: {
   // On the isometric view's ground stage, what stands up there is left out here (docs/design/design-v1-isometric-view.md 5.3).
   const iso = useIsoGround();
   const flatLabels = useMemo(() => (iso ? labels.filter((l) => !iso.uprightLabels.has(l.id)) : labels), [iso, labels]);
+  // A stair that climbs in steps leaves its whole symbol out, filtered stair by stair and kept while the same stairs step, so a fog change that steps nothing new builds nothing (docs/design/design-v1-iso-depth.md 5.2).
+  const stepping = iso?.heights && iso.detail ? iso.stepping : undefined;
+  const stairs = useMemo(() => {
+    if (!stepping || stepping.size === 0) return undefined;
+    return stairSymbols(paths.stairList.filter((c) => !stepping.has(`${c.x},${c.y}`)), () => new Path2D(), sceneGrid({ gridShape }));
+  }, [paths, stepping, gridShape]);
   const standing = useMemo(() => {
     if (!iso?.heights) return undefined;
     const flat = paths.drawing.symbols.pillar.filter((c) => !boxStands(iso.fog, { x0: c.x, y0: c.y, x1: c.x + 1, y1: c.y + 1 }));
-    return pillarPaths(flat, () => new Path2D());
-  }, [iso, paths]);
+    return { ...pillarPaths(flat, () => new Path2D()), ...(stairs ? { stairs } : {}) };
+  }, [iso, paths, stairs]);
   // The floor's copy of the grid stays off while the DM lines up the grid, as the map layer's does (MapLayer.tsx MapContent).
   const aligning = useRoomView((s) => s.local.tool === "grid");
   const drawnGrid = useMemo(() => (aligning ? { ...grid, show: false } : grid), [aligning, grid]);

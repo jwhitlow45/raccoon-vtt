@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { BuildChunk, FreeWall, TerrainId } from "#shared/model.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
-import { buildPaths, drawBuild, freeFrame, type PathSink } from "./draw.ts";
+import { buildPaths, drawBuild, freeFrame, stairSymbols, type PathSink } from "./draw.ts";
 import { cornerAt, hexCorners, type HexGrid } from "#shared/rules/hex.ts";
 
 /** Records what a path is given, in place of a Path2D, which Node lacks. */
@@ -229,6 +229,24 @@ describe("stairs and heights on the board", () => {
     const lows = (paths: typeof p.floorStairs) => paths.treads[0]!.points().map(([x]) => Math.floor(x));
     assert.deepEqual([...new Set(lows(p.floorStairs))], [1, 2]);
     assert.deepEqual([...new Set(lows(p.artStairs))], [3]);
+  });
+
+  test("the isometric ground stage leaves a stepping stair's whole symbol out, its slab included, and keeps the others' (docs/design/design-v1-iso-depth.md 5.2)", () => {
+    const c: BuildChunk = { ...chunk({ cells: { "1,1": "stairs", "2,1": "stone" } }), up: marks({ 17: "n", 18: "n", 19: "n" }) };
+    const p = buildPaths([c], "player", { bounds: { w: 8, h: 8 } }, () => new Recorder());
+    assert.deepEqual(p.stairList.map((s) => `${s.x},${s.y}`).sort(), ["1,1", "2,1", "3,1"]);
+    const stepping = new Set(["1,1", "3,1"]);
+    const kept = stairSymbols(p.stairList.filter((s) => !stepping.has(`${s.x},${s.y}`)), () => new Recorder(), { shape: "squares" });
+    assert.deepEqual(kept.stairs.ops.map((o) => o.slice(1, 3)), [[2.08, 1.08]], "the slab under the stair that does not step only");
+    const lows = (paths: typeof kept.floorStairs) => [...new Set(paths.treads[0]!.points().map(([x]) => Math.floor(x)))];
+    assert.deepEqual(lows(kept.floorStairs), [2]);
+    assert.deepEqual(lows(kept.artStairs), [], "the stepping mark over the map draws nothing");
+    // Drawn on a canvas that writes down its fills: the slab fills the kept path.
+    const filled: unknown[] = [];
+    const g = { save() {}, restore() {}, fill: (path: unknown) => filled.push(path), stroke() {}, set fillStyle(_: unknown) {}, set strokeStyle(_: unknown) {}, set lineWidth(_: unknown) {}, set lineCap(_: unknown) {}, set lineJoin(_: unknown) {}, set globalAlpha(_: unknown) {}, clip() {}, beginPath() {}, moveTo() {}, lineTo() {}, setLineDash() {}, createPattern: () => null, setTransform() {} } as unknown as CanvasRenderingContext2D;
+    const standing = { pillars: new Recorder(), pillarShine: new Recorder(), stairs: kept } as unknown as NonNullable<Parameters<typeof drawBuild>[2]["standing"]>;
+    drawBuild(g, p as never, { role: "player", scale: 40, grid: { show: false, color: "#fff", opacity: 0.2, lineWidth: 1 } as never, textures: {}, labels: [], standing });
+    assert.ok(filled.includes(kept.stairs) && !filled.includes(p.stairs), "the kept slab, never the whole one");
   });
 
   test("the scene's size reaches the stairs: ground left past a shrunk scene's border gives a stair no direction", () => {
