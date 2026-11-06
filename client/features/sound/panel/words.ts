@@ -3,11 +3,11 @@ import type { BuiltinSound, Repeat, SoundUse } from "#shared/sound.ts";
 
 /**
  * Every word the Sound panel shows (docs/design/design-v1-music.md 4.1,
- * 4.3 and 10), and the Sound and Time panels' own, the Now playing chip's
+ * 4.3 and 10), and its views', the Now playing chip's and its player's,
  * and Table sound's (docs/design/design-v1-sound-layout.md 9), in one place
  * so the render tests, the e2e steps and the DM guide read the same text.
- * The words the Music window had, which the Sound panel and the maker keep (the player, Up next,
- * Library and the maker) are in music/words.ts.
+ * The player's own, Up next's, Library's and the playlist maker's are in
+ * music/words.ts.
  */
 
 export const NOTHING_PLAYING = SOUND_WORDS.nothingPlaying;
@@ -43,11 +43,8 @@ export const STORAGE_FAILED = "Couldn't check storage.";
 export const STOP_THE_SOUND = "Stop the sound";
 export const LISTEN_HELP = "Listen here plays it on this device alone.";
 
-/* The Sound and Time panels (docs/design/design-v1-sound-layout.md 3 and 4). */
+/* The Sound panel (docs/design/design-v1-sound-layout.md 4). Its subpages' "Back to Sound" is the panel header's, from this title. */
 export const SOUND_TITLE = "Sound";
-export const TIME_TITLE = "Time";
-/** A Sound subpage's back button, a track's or a background sound's page (4.5). */
-export const BACK_TO_SOUND = "Back to Sound";
 /** The view row's name, a radio group of Now playing and Library (4.1). */
 export const SOUND_VIEWS = "Sound";
 export const NOW_VIEW = "Now playing";
@@ -142,13 +139,6 @@ export function clockText(ms: number): string {
   const h = Math.floor(whole / 3600);
   const ss = String(s).padStart(2, "0");
   return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
-}
-
-/** "1:24 / 3:10" on screen, "1:24 of 3:10" for a screen reader (10). */
-export function timeShown(positionMs: number, lengthMs: number): { text: string; spoken: string } {
-  const at = clockText(Math.min(positionMs, lengthMs));
-  const of = clockText(lengthMs);
-  return { text: `${at} / ${of}`, spoken: `${at} of ${of}` };
 }
 
 /** A playlist's row detail: "12 tracks · 41 min". */

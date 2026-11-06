@@ -317,7 +317,7 @@ describe("when the seek slider sends", () => {
 });
 
 /*
- * The player as the Sound panel holds it, and as the chip's player will
+ * The player as the Sound panel holds it, and as the chip's player does
  * (docs/design/design-v1-sound-layout.md 4.2 and 5.3): its foot rows, the
  * inline Crossfade, the idle line, and the ops its buttons and Up next's
  * Play now send.

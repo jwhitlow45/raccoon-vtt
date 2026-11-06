@@ -57,8 +57,9 @@ describe("the shape of a dialog's card", () => {
 });
 
 /*
- * The Music window's tall sheet (docs/design/design-v1-music-player.md 3.2):
- * on a phone a bottom card as tall as the screen less its top inset and a
+ * The playlist maker's tall sheet (docs/design/design-v1-sound-layout.md
+ * 4.5, once the Music window's, design-v1-music-player.md 3.2): on a phone
+ * a bottom card as tall as the screen less its top inset and a
  * 12 px strip of the room, keeping the bottom card's grabber, swipe and,
  * with a mouse, PS-B's Down arrow as Put away sheet with no Up, since it has
  * no full stand. On a computer it is an editor's card, 1040 px at `xl`.

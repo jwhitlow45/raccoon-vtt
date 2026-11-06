@@ -7,7 +7,7 @@ import { useRoomActions, useRoomView } from "../../../state/view.ts";
 import type { Playing } from "#shared/sound.ts";
 import type { ComingNext } from "../music/dragOrder.ts";
 import { LAST_TRACK, NEXT_AGAIN, nextLine } from "../music/words.ts";
-import { Actions, useSoundToStop, VolumeSlider } from "./controls.tsx";
+import { Actions, VolumeSlider } from "./controls.tsx";
 import { useSoundHere } from "./engine.ts";
 import { send } from "./ops.ts";
 import { nameOf, playlistsOf, sceneSoundFrom, sceneSoundNames, somethingPlays, soundsOf, type Sounds } from "./state.ts";
@@ -37,9 +37,10 @@ import {
  * The parts of the DM's Sound panel around the player
  * (docs/design/design-v1-sound-layout.md 4.2): Stop all sound, the device
  * line, Table sound with Use what's playing, the music's volume and the
- * names switch, and the Next line's words. The chip's player
- * (docs/design/design-v1-sound-layout.md 5.3) takes some of them too. Scenes
- * draws the scene's sound line (SceneSoundLine) in its Scene sound group.
+ * names switch, and the Next line's words. The Now playing chip's player
+ * (5.3, mini/NowPlayer.tsx) draws Stop all sound, the music's volume and
+ * the Next line from here too. Scenes draws the scene's sound line
+ * (SceneSoundLine) in its Scene sound group.
  */
 
 /** The Next line's words: the track that follows, this one again, or the last. Up next's folded summary (docs/design/design-v1-sound-layout.md 4.3) and the chip player's Next line (5.3). */
@@ -90,18 +91,7 @@ export function SceneSoundLine(props: {
   );
 }
 
-/** Stop all sound in a row of buttons, while anything sounds (useSoundToStop): the chip's player's foot (docs/design/design-v1-sound-layout.md 5.3). */
-export function StopAllSound() {
-  const anything = useSoundToStop();
-  if (!anything) return null;
-  return (
-    <Actions>
-      <StopAllButton />
-    </Actions>
-  );
-}
-
-/** Stop all sound's button, for a row that shows it only while anything sounds: here, and under the player (music/NowFull.tsx). */
+/** Stop all sound's button, for a row that shows it only while anything sounds (useSoundToStop): under the panel's player (music/NowFull.tsx), and at the foot of the chip's (mini/NowPlayer.tsx). */
 export function StopAllButton() {
   const actions = useRoomActions();
   return (

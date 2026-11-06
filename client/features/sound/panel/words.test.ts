@@ -1,19 +1,17 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { clockText, playerLoopsLine, playlistDetail, playlistLeavesScenes, runLine, sceneLine, sizeText, skipName, storageLine, timeShown, useLeavesLine } from "./words.ts";
+import { clockText, playerLoopsLine, playlistDetail, playlistLeavesScenes, runLine, sceneLine, sizeText, skipName, storageLine, useLeavesLine } from "./words.ts";
 import * as words from "./words.ts";
 
 const MB = 1024 * 1024;
 
-describe("the words of Ambiance's Sound (docs/design/design-v1-music.md 4.1 and 4.3)", () => {
-  test("times read as a clock, and aloud as one of the other", () => {
+describe("the words of the Sound panel (docs/design/design-v1-music.md 4.1 and 4.3)", () => {
+  test("times read as a clock", () => {
     assert.equal(clockText(0), "0:00");
     assert.equal(clockText(84_999), "1:24");
     assert.equal(clockText(900_000), "15:00");
     assert.equal(clockText(3_725_000), "1:02:05");
     assert.equal(clockText(-5), "0:00");
-    assert.deepEqual(timeShown(84_000, 190_000), { text: "1:24 / 3:10", spoken: "1:24 of 3:10" });
-    assert.equal(timeShown(200_000, 190_000).text, "3:10 / 3:10", "a position past the end reads the end");
   });
 
   test("a playlist's row and the run's line", () => {
@@ -63,9 +61,9 @@ describe("the words of Ambiance's Sound (docs/design/design-v1-music.md 4.1 and 
   });
 });
 
-describe("the words of the Sound and Time panels and the Now playing chip (docs/design/design-v1-sound-layout.md 9)", () => {
-  test("the panels, the view row and the nothing-playing lines, word for word", () => {
-    assert.deepEqual([words.SOUND_TITLE, words.TIME_TITLE, words.BACK_TO_SOUND, words.SOUND_VIEWS, words.NOW_VIEW, words.LIBRARY_VIEW], ["Sound", "Time", "Back to Sound", "Sound", "Now playing", "Library"]);
+describe("the words of the Sound panel's views and the Now playing chip (docs/design/design-v1-sound-layout.md 9)", () => {
+  test("the panel, the view row and the nothing-playing lines, word for word", () => {
+    assert.deepEqual([words.SOUND_TITLE, words.SOUND_VIEWS, words.NOW_VIEW, words.LIBRARY_VIEW], ["Sound", "Sound", "Now playing", "Library"]);
     const pick = words.NO_MUSIC_PICK;
     assert.equal(`${pick.before}${pick.link}${pick.after}`, "No music is playing. Pick a playlist or a track in Library.");
     assert.equal(pick.link, "Library", "the link button's own word");
@@ -102,7 +100,7 @@ describe("the words of the Sound and Time panels and the Now playing chip (docs/
     assert.equal(words.chipName({ t: "stopped" }), "Now playing, stopped");
   });
 
-  test("the background count, moved here from Ambiance's words", () => {
+  test("the background count, the chip's and Now playing's with no music", () => {
     assert.equal(words.backgroundCount(1), "1 background sound");
     assert.equal(words.backgroundCount(4), "4 background sounds");
   });
