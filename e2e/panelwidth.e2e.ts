@@ -1053,16 +1053,25 @@ describe("raccoon-vtt: a side panel that resizes, and a sheet with a mouse", { t
       assert.equal(await sheet.count(), 0);
     });
 
-    test("PS-B sm-3. Down with unsaved input closes as Close does: the label pane's typed text is not saved", async () => {
+    test("PS-B sm-3. Down with unsaved input does what a swipe down does: the label pane follows partway, springs back and stays with its typed text (D-261106-006)", async () => {
       await setUp(dm, { width: 500, height: 900 });
       const pane = await openLabel(dm);
       await checkStrip(pane, 1, "the label pane", false);
       const field = pane.getByRole("textbox").first();
       await field.fill("Gate of the North");
-      await downOf(pane).click();
+      const before = await rectOf(pane);
+      const sign = await pressAndWatch(downOf(pane), pane);
+      assert.ok(Math.max(...sign.tops) > before.top + 8, `the pane follows partway down as its sign (${JSON.stringify(sign.tops)} from ${before.top})`);
+      assert.equal(await settled(pane), "rest");
+      near((await rectOf(pane)).top, before.top, "back at its normal height", 1);
+      assert.equal(await field.inputValue(), "Gate of the North", "the typed text is kept");
+      await sleep(300);
+      assert.equal(dmSocket.state?.labels[run.label]?.text, "Gate", "Down saved nothing");
+      // The X stays the way to close without saving.
+      await pane.getByRole("button", { name: /^Close/ }).first().click();
       assert.equal(await settled(pane), "gone");
       await sleep(300);
-      assert.equal(dmSocket.state?.labels[run.label]?.text, "Gate", "Down saved the typed text");
+      assert.equal(dmSocket.state?.labels[run.label]?.text, "Gate", "the X saved nothing");
       await pickTool(dm, "Select");
     });
 
