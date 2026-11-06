@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
+import yauzl from "yauzl";
+import yazl from "yazl";
 import { ConsoleWatch, openSideTab, OpSocket, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { openGroup } from "./helpers/groups.ts";
@@ -27,9 +29,11 @@ import { addSound } from "./soundRoom.ts";
  * - am-5: the folded summaries and the Weather row follow the room.
  * - am-6: Pat's Ambiance: listed, kept sections, a turn across 900 px, a
  *   restored split with Sound's old id, and a reload that asks for Time's.
- * - am-4: the Weather and Scene sound rows into Scenes. Scenes' half (the
- *   reveal, its scroll and focus) is the Scenes lane's, so the whole step
- *   passes only on the stack with it.
+ * - am-4: the Weather and Scene sound rows into Scenes, on a phone at 100%
+ *   and at 320 x 568 and 130%, and with two panels. Then a room with no
+ *   scene, imported from this room's backup with its scenes taken out: the
+ *   Weather row only opens Scenes, New scene starts open there and a fold
+ *   of it is kept, and the first scene made sets nothing off.
  * The DM panel's and This device's folds (the design's am-7 and am-8) are
  * covered where those surfaces are built: joinrequests, paste, shortcuts.
  *
@@ -67,6 +71,7 @@ const run = {
   playlist: randomUUID(),
   music: [] as string[],
   loop: "",
+  bare: "",
 };
 
 const DESK = { width: 1440, height: 900 };
@@ -164,6 +169,69 @@ async function stopClock(): Promise<void> {
   await waitFor("no clock", () => (dmSocket.state?.clock == null ? true : null));
 }
 
+/** A zip's entries by name, folders left out. */
+async function unzip(data: Buffer): Promise<Map<string, Buffer>> {
+  const zip = await new Promise<yauzl.ZipFile>((ok, no) => yauzl.fromBuffer(data, { lazyEntries: true }, (err, z) => (err || !z ? no(err) : ok(z))));
+  const out = new Map<string, Buffer>();
+  await new Promise<void>((ok, no) => {
+    zip.on("entry", (entry: yauzl.Entry) => {
+      if (entry.fileName.endsWith("/")) return zip.readEntry();
+      zip.openReadStream(entry, (err, stream) => {
+        if (err || !stream) return no(err);
+        const parts: Buffer[] = [];
+        stream.on("data", (c: Buffer) => parts.push(c));
+        stream.on("error", no);
+        stream.on("end", () => {
+          out.set(entry.fileName, Buffer.concat(parts));
+          zip.readEntry();
+        });
+      });
+    });
+    zip.on("error", no);
+    zip.on("end", () => ok());
+    zip.readEntry();
+  });
+  return out;
+}
+
+function zipOf(entries: Map<string, Buffer>): Promise<Buffer> {
+  const zip = new yazl.ZipFile();
+  for (const [name, data] of entries) zip.addBuffer(data, name);
+  zip.end();
+  return new Promise((ok, no) => {
+    const parts: Buffer[] = [];
+    zip.outputStream.on("data", (c: Buffer) => parts.push(c));
+    zip.outputStream.on("error", no);
+    zip.outputStream.on("end", () => ok(Buffer.concat(parts)));
+  });
+}
+
+/**
+ * A room with no scene, for the DM's session (panel-groups 6.1, scenes-reorg 7).
+ * No op empties a room (shared/reducer/room.ts keeps the last scene), but a
+ * backup can hold none, so this room's backup is imported with its scenes and
+ * everything on them taken out.
+ */
+async function noSceneRoom(): Promise<string> {
+  const exported = await dmContext.request.get(`${server.origin}/api/rooms/${run.roomId}/export`);
+  assert.ok(exported.ok(), `the backup answered ${exported.status()}`);
+  const entries = await unzip(await exported.body());
+  const room = JSON.parse(entries.get("room.json")!.toString("utf8")) as { state: Record<string, unknown> & { scenes: Record<string, unknown>; meta: { playerSceneId: string | null } } };
+  const sceneIds = Object.keys(room.state.scenes);
+  const onAScene = (id: string, entry: unknown) => sceneIds.some((s) => id.includes(s)) || (!!entry && typeof entry === "object" && sceneIds.includes((entry as { sceneId?: string }).sceneId ?? ""));
+  for (const [key, value] of Object.entries(room.state)) {
+    if (key === "members" || key === "meta" || !value || typeof value !== "object" || Array.isArray(value)) continue;
+    for (const [id, entry] of Object.entries(value as Record<string, unknown>)) if (onAScene(id, entry)) delete (value as Record<string, unknown>)[id];
+  }
+  room.state.scenes = {};
+  room.state.meta.playerSceneId = null;
+  entries.set("room.json", Buffer.from(JSON.stringify(room)));
+  const form = Buffer.from(JSON.stringify({ playerPassword: run.password, dmName: "Dana the DM" })).toString("base64url");
+  const res = await dmContext.request.post(`${server.origin}/api/rooms/import`, { headers: { Origin: server.origin, "content-type": "application/zip", "x-import-form": form }, data: await zipOf(entries) });
+  assert.ok(res.ok(), `the import answered ${res.status()}: ${await res.text()}`);
+  return ((await res.json()) as { roomId: string }).roomId;
+}
+
 describe("Ambiance", { concurrency: false }, () => {
   before(async () => {
     process.env.ROOM_SOUND = "1";
@@ -185,12 +253,13 @@ describe("Ambiance", { concurrency: false }, () => {
       console.error(server?.output().split("\n").slice(-40).join("\n"));
     }
     ops?.close();
-    if (run.roomId && dmContext) {
+    for (const roomId of [run.roomId, run.bare]) {
+      if (!roomId || !dmContext) continue;
       try {
-        const res = await dmContext.request.delete(`${server.origin}/api/rooms/${run.roomId}`, { headers: { Origin: server.origin }, data: { name: run.roomName } });
-        if (!res.ok()) console.error(`Deleting room ${run.roomId} answered ${res.status()}`);
+        const res = await dmContext.request.delete(`${server.origin}/api/rooms/${roomId}`, { headers: { Origin: server.origin }, data: { name: run.roomName } });
+        if (!res.ok()) console.error(`Deleting room ${roomId} answered ${res.status()}`);
       } catch (err) {
-        console.error(`Deleting room ${run.roomId} failed`, err);
+        console.error(`Deleting room ${roomId} failed`, err);
       }
     }
     await browser?.close();
@@ -541,37 +610,127 @@ describe("Ambiance", { concurrency: false }, () => {
     await reload(pat);
   });
 
-  test("am-4a. the Weather row on a phone: Scenes takes the sheet with Light and weather open, never written, and the Weather select focused", async () => {
-    await dm.setViewportSize(PHONE);
+  test("am-4a. the Weather row on a phone and at 320 x 568 and 130%: Scenes takes the sheet with Light and weather open, never written, the Weather select focused and whole in view", async (t) => {
+    t.after(() => dm.evaluate(() => localStorage.removeItem("rvtt.uiScale")));
+    for (const [size, scale] of [[PHONE, "1"], [SMALL, "1.3"]] as const) {
+      await dm.setViewportSize(size);
+      await dm.evaluate((s) => localStorage.setItem("rvtt.uiScale", s), scale);
+      await reload(dm);
+      const sheet = await ambianceSheet(dm);
+      await sheet.locator("[data-group-open]").click();
+      const scenes = dm.locator('dialog[data-rvtt-sheet][aria-label="Scenes"]');
+      await scenes.waitFor();
+      const light = scenes.getByRole("button", { name: "Light and weather", exact: true });
+      await light.waitFor();
+      assert.equal(await light.getAttribute("aria-expanded"), "true");
+      const select = scenes.getByRole("combobox", { name: "Weather", exact: true });
+      await waitFor("the Weather select focused", () => select.evaluate((el) => (el === el.ownerDocument.activeElement ? true : null)));
+      const at = await inScroller(select);
+      assert.ok(at.top >= 0 && at.bottom >= 0, `the Weather select whole in the sheet at ${size.width} x ${size.height} and ${Number(scale) * 100}% (${JSON.stringify(at)})`);
+      const stored = await dm.evaluate(() => JSON.parse(localStorage.getItem("rvtt.sceneSettingsFolds") ?? "{}") as Record<string, boolean>);
+      assert.equal(stored.light, undefined, "a reveal is never written");
+      await shots.take(dm, `am-4a-weather-opens-scenes-${size.width}-${scale}`);
+      await closeSheet(scenes);
+    }
+    // A reveal over a stored fold lasts until Scenes closes: a reload finds the fold as stored.
+    await dm.evaluate(() => localStorage.setItem("rvtt.sceneSettingsFolds", JSON.stringify({ light: false })));
     await reload(dm);
-    const sheet = await ambianceSheet(dm);
-    await sheet.locator("[data-group-open]").click();
+    await (await ambianceSheet(dm)).locator("[data-group-open]").click();
     const scenes = dm.locator('dialog[data-rvtt-sheet][aria-label="Scenes"]');
-    await scenes.waitFor();
+    await waitFor("Light and weather revealed", async () => ((await scenes.getByRole("button", { name: "Light and weather", exact: true }).getAttribute("aria-expanded")) === "true" ? true : null));
+    await reload(dm);
+    await dm.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
+    await dm.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Scenes/ }).click();
     const light = scenes.getByRole("button", { name: "Light and weather", exact: true });
     await light.waitFor();
-    assert.equal(await light.getAttribute("aria-expanded"), "true");
-    const select = scenes.getByRole("combobox", { name: "Weather", exact: true });
-    await waitFor("the Weather select focused", () => select.evaluate((el) => (el === el.ownerDocument.activeElement ? true : null)));
-    const stored = await dm.evaluate(() => JSON.parse(localStorage.getItem("rvtt.sceneSettingsFolds") ?? "{}") as Record<string, boolean>);
-    assert.equal(stored.light, undefined, "a reveal is never written");
-    await shots.take(dm, "am-4a-weather-opens-scenes");
+    assert.equal(await light.getAttribute("aria-expanded"), "false", "the stored fold, after a reload");
+    await dm.evaluate(() => localStorage.removeItem("rvtt.sceneSettingsFolds"));
+    await closeSheet(scenes);
   });
 
-  test("am-4b. the Scene sound row opens Scenes with Scene sound open and its fold focused, and with two panels Ambiance stays", async () => {
+  test("am-4b. with two panels the Weather and Scene sound rows open Scenes in the other pane, each group open and focused, and Ambiance stays", async () => {
     await dm.setViewportSize(DESK);
     await forgetFolds();
     await dm.evaluate(() => localStorage.setItem("rvtt.sidePanelSplit", JSON.stringify({ dm: { top: "tracker", below: "ambiance" } })));
     await reload(dm);
     const below = dm.getByRole("group", { name: "Ambiance below", exact: true });
-    await below.getByRole("button", { name: "Scene sound, in Scenes", exact: true }).click();
     const top = dm.getByRole("tabpanel", { name: sideTabName("Scenes") });
+    await below.locator("[data-group-open]").click();
     await top.waitFor();
+    const select = top.getByRole("combobox", { name: "Weather", exact: true });
+    await waitFor("the Weather select focused", () => select.evaluate((el) => (el === el.ownerDocument.activeElement ? true : null)));
+    assert.equal(await top.getByRole("button", { name: "Light and weather", exact: true }).getAttribute("aria-expanded"), "true");
+    await below.getByRole("button", { name: "Scene sound, in Scenes", exact: true }).click();
     await below.waitFor();
     const group = top.getByRole("button", { name: "Scene sound", exact: true });
     assert.equal(await group.getAttribute("aria-expanded"), "true");
     await waitFor("Scene sound's fold focused", () => group.evaluate((el) => (el === el.ownerDocument.activeElement ? true : null)));
+    await shots.take(dm, "am-4b-two-panels");
     await dm.evaluate(() => localStorage.removeItem("rvtt.sidePanelSplit"));
+  });
+
+  test("am-4c. a room with no scene: the Weather row says No scene and only opens Scenes, New scene starts open and a fold of it is kept, and the first scene made scrolls to nothing", async (t) => {
+    t.after(async () => {
+      await dm.evaluate(() => localStorage.removeItem("rvtt.sceneSettingsFolds"));
+      await dm.setViewportSize(DESK);
+    });
+    run.bare = await noSceneRoom();
+    await dm.setViewportSize(PHONE);
+    await dm.goto(`${server.origin}/r/${run.bare}`);
+    await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+    await dm.getByText("Create a scene to get started.", { exact: true }).waitFor();
+    await dm.evaluate((key) => {
+      localStorage.removeItem(key);
+      localStorage.removeItem("rvtt.sceneSettingsFolds");
+    }, FOLDS_KEY);
+    await reload(dm);
+    const scenes = dm.locator('dialog[data-rvtt-sheet][aria-label="Scenes"]');
+    const newScene = scenes.getByRole("button", { name: "New scene", exact: true });
+    const sceneFolds = () => dm.evaluate(() => JSON.parse(localStorage.getItem("rvtt.sceneSettingsFolds") ?? "{}") as Record<string, boolean>);
+
+    // The row names no scene and opens Scenes alone: no target, no reveal (scenes-reorg 7, D-261102-934).
+    const sheet = await ambianceSheet(dm);
+    const row = sheet.locator("[data-group-open]");
+    assert.equal(await row.getAttribute("aria-label"), "Weather: no scene, in Scenes");
+    await summaryIs(row, "No scene");
+    assert.equal(await sheet.getByRole("button", { name: "Scene sound, in Scenes", exact: true }).count(), 0, "no Scene sound row with no scene in view");
+    await shots.take(dm, "am-4c-no-scene-ambiance");
+    await row.click();
+    await newScene.waitFor();
+    assert.equal(await newScene.getAttribute("aria-expanded"), "true", "New scene starts open while the room has no scene");
+    assert.equal(await scenes.getByRole("button", { name: "Light and weather", exact: true }).count(), 0);
+    assert.deepEqual(await sceneFolds(), {}, "nothing written");
+    await shots.take(dm, "am-4c-no-scene-scenes");
+
+    // Folded by hand, New scene stays folded when Scenes is closed and opened again.
+    await newScene.click();
+    assert.deepEqual(await sceneFolds(), { new: false });
+    await closeSheet(scenes);
+    await dm.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
+    await dm.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Scenes/ }).click();
+    await newScene.waitFor();
+    assert.equal(await newScene.getAttribute("aria-expanded"), "false", "the DM's own fold wins over the start");
+    await newScene.click();
+    await closeSheet(scenes);
+
+    // The row once more with Scenes left open, then a first battle mat: the new scene's settings take no target, so nothing scrolls to Weather or takes focus.
+    await (await ambianceSheet(dm)).locator("[data-group-open]").click();
+    await newScene.waitFor();
+    const form = newScene.locator("xpath=ancestor::*[@data-panel-group][1]");
+    await form.getByRole("radio", { name: "Battle mat", exact: true }).click();
+    await form.getByRole("textbox", { name: "Scene name" }).fill("First mat");
+    await form.getByRole("button", { name: "Create", exact: true }).click();
+    const made = await waitFor("the first scene", () => Object.values(dmSocket.state?.scenes ?? {}).find((s) => s.name === "First mat"), 30_000);
+    await waitFor("the DM on First mat", () => (dmSocket.you?.sceneId === made.id ? true : null));
+    const light = scenes.getByRole("button", { name: "Light and weather", exact: true });
+    await light.waitFor();
+    await dm.waitForTimeout(500);
+    const select = scenes.getByRole("combobox", { name: "Weather", exact: true });
+    assert.equal(await select.evaluate((el) => el === el.ownerDocument.activeElement), false, "the Weather select never takes focus");
+    assert.ok((await inScroller(light)).top > 8, "Scenes never scrolled Light and weather to its top");
+    assert.equal(await newScene.getAttribute("aria-expanded"), "true", "New scene stays open until Scenes closes");
+    await shots.take(dm, "am-4c-first-scene");
+    await closeSheet(scenes);
   });
 
   test("am-z. no page logged an error", () => {
