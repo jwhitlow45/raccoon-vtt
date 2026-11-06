@@ -113,7 +113,8 @@ import { framesFor, silentFrames } from "../shared/audio/mp3Testutil.ts";
  * room, so the CI shards run them side by side: alignment.e2e.ts has the
  * drawn cases, the upright phones and the scrolling strip,
  * alignment-wide.e2e.ts the sideways phone, the tablet, the desktop and
- * 480 x 320, and alignment-icons.e2e.ts the second icon pass.
+ * 480 x 320, and alignment-icons.e2e.ts the second icon pass and the
+ * Music window's roots (docs/design/design-v1-music-player.md 11.4).
  * alignment-followups.e2e.ts has follow-up batches 30 and 32, the app
  * icon's places and This device's Sheet handle. alignment-settings.e2e.ts
  * has the builder's note and forget question, the scene settings page
@@ -1338,13 +1339,18 @@ const SOUND_AT = new Set([...PHONE_ROOTS, "1440x900"]);
 /** The room's sounds for Sound's screens, made once: frames of silence, so nothing needs an encoder. */
 let soundLibrary: { playlist: string; music: string[]; loops: string[]; effect: string } | null = null;
 
+/** Uploads `ms` of silence as a sound file, at 128 kbps or `kbps`, and gives its asset's id. */
+async function uploadSilence(name: string, ms: number, kbps?: number): Promise<string> {
+  const res = await dmContext.request.put(`${server.origin}/api/rooms/${run.roomId}/assets?kind=sound`, { headers: { Origin: server.origin, "content-type": "audio/mpeg" }, data: Buffer.from(silentFrames(framesFor(ms), { kbps })) });
+  assert.ok(res.ok(), `the ${name} upload answered ${res.status()}`);
+  return ((await res.json()) as { id: string }).id;
+}
+
 async function soundsReady(): Promise<NonNullable<typeof soundLibrary>> {
   if (soundLibrary) return soundLibrary;
   const add = async (name: string, use: "music" | "loop" | "effect", ms: number) => {
-    const res = await dmContext.request.put(`${server.origin}/api/rooms/${run.roomId}/assets?kind=sound`, { headers: { Origin: server.origin, "content-type": "audio/mpeg" }, data: Buffer.from(silentFrames(framesFor(ms))) });
-    assert.ok(res.ok(), `the ${name} upload answered ${res.status()}`);
     const id = randomUUID();
-    await ops.send({ t: "sound.create", id, assetId: ((await res.json()) as { id: string }).id, name, use, ms });
+    await ops.send({ t: "sound.create", id, assetId: await uploadSilence(name, ms), name, use, ms });
     return id;
   };
   // Long names, so the sweep sees them wrap between words at 320 px and 130%.
@@ -1370,13 +1376,52 @@ function soundSection(panel: Locator, label: string): Locator {
   return panel.getByRole("heading", { name: label, exact: true }).locator("xpath=ancestor::*[self::section or @data-panel-group][1]");
 }
 
+/** The Music window, the DM's dialog for choosing and arranging music (docs/design/design-v1-music-player.md 3.2), whichever step it shows. */
+function musicWindowOf(page: Page): Locator {
+  return page.locator("dialog[open]").filter({ has: page.locator("[data-music-window]") });
+}
+
+/** Opens the Music window from Open music in Ambiance's Sound group. */
+async function openMusicWindow(page: Page, panel: Locator): Promise<Locator> {
+  await panel.locator("[data-music-open]").click();
+  const win = musicWindowOf(page);
+  await win.locator("[data-music-window]").waitFor();
+  return win;
+}
+
+/** Library in the Music window: its column beside Now playing on a computer, else its tab, picked here. */
+async function musicLibrary(win: Locator): Promise<Locator> {
+  const tab = win.getByRole("radiogroup", { name: "Music" }).getByRole("radio", { name: "Library", exact: true });
+  if ((await visible(tab)) && !(await tab.isChecked())) await tab.click();
+  const library = win.locator("[data-music-library]");
+  await library.waitFor();
+  return library;
+}
+
+/** Now playing and Up next in the Music window: their column on a computer, else their tab, picked here. */
+async function musicNow(win: Locator): Promise<Locator> {
+  const tab = win.getByRole("radiogroup", { name: "Music" }).getByRole("radio", { name: "Now playing", exact: true });
+  if ((await visible(tab)) && !(await tab.isChecked())) await tab.click();
+  const now = win.locator("[data-music-column-now]");
+  await now.waitFor();
+  return now;
+}
+
+/** Closes the Music window by its close button, where one is open. */
+async function closeMusicWindow(page: Page): Promise<void> {
+  const win = musicWindowOf(page);
+  if ((await win.count()) === 0) return;
+  await win.getByRole("button", { name: /^Close/ }).last().click();
+  await win.waitFor({ state: "detached" });
+}
+
 /**
  * sn-d: the DM's Sound, now a group of Ambiance (docs/design/design-v1-music.md 10,
  * docs/design/design-v1-panel-groups.md 4.1), which starts open: with
  * nothing playing, with music, two background sounds and the board, the
- * board in Edit, a playlist's page, a sound's page, and with the server's
- * switch off, which a page load reads from /api/config, routed here. The
- * room is left silent.
+ * board in Edit, a sound's page, the playlist maker and an upload in
+ * Library in the Music window, and with the server's switch off, which a
+ * page load reads from /api/config, routed here. The room is left silent.
  */
 async function soundScreens(sweep: Sweep, page: Page, size: Size, scale: number): Promise<void> {
   await soundsReady();
@@ -1404,14 +1449,16 @@ async function soundScreens(sweep: Sweep, page: Page, size: Size, scale: number)
     await page.getByRole("button", { name: /^Back to Ambiance/ }).first().click();
     await soundSection(panel, "Effects").getByRole("button", { name: "Done", exact: true }).click();
 
-    await panel.getByRole("list", { name: "Playlists" }).getByRole("button", { name: /^Tavern night/ }).click();
-    await page.getByRole("button", { name: /^Back to Ambiance/ }).first().waitFor();
-    await sweep.measure(page, "sound-playlist-page", panel);
-    await page.getByRole("button", { name: /^Back to Ambiance/ }).first().click();
-    await panel.getByRole("heading", { name: "Music", exact: true }).waitFor();
+    // The playlist maker, a step of the Music window where the playlist's page was (docs/design/design-v1-music-player.md 5).
+    const win = await openMusicWindow(page, panel);
+    const library = await musicLibrary(win);
+    await library.getByRole("list", { name: "Playlists" }).getByRole("button", { name: /^Tavern night/ }).click();
+    await win.getByRole("heading", { name: "Tavern night", exact: true }).waitFor();
+    await sweep.measure(page, "sound-playlist-maker", win);
+    await win.getByRole("button", { name: "Back to Music", exact: true }).click();
 
-    // An upload in progress under Add music (sound/upload/AddSounds.tsx's rows), held on its percent by a slow upload, then cancelled.
-    const music = panel.locator('[data-add-sounds="music"]');
+    // An upload in progress under Library's Add music (sound/upload/AddSounds.tsx's rows), held on its percent by a slow upload, then cancelled.
+    const music = (await musicLibrary(win)).locator('[data-add-sounds="music"]');
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("Network.enable");
     await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: 4 * 1024 });
@@ -1426,6 +1473,7 @@ async function soundScreens(sweep: Sweep, page: Page, size: Size, scale: number)
       await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
       await cdp.detach();
     }
+    await closeMusicWindow(page);
 
     // A refused file on its row under Add effects (sound/upload/AddSounds.tsx's rows), then dismissed.
     const adds = panel.locator('[data-add-sounds="effect"]');
@@ -8615,5 +8663,321 @@ export function panelSizeAlignmentTests(): void {
       if (dm && !dm.isClosed()) await dm.evaluate(() => localStorage.setItem("rvtt.theme", "dark"));
     }
     assert.deepEqual(lines, [], "a sheet's header with its arrows out of line");
+  });
+}
+
+/** The Music window's sizes (docs/design/design-v1-music-player.md 11.4), touch ones first: the sweep's two phones and its computer, and 1280 x 720, where the window is 688 px tall, each at 100% and 130%. */
+const MUSIC_AT: { size: Size; scale: number }[] = [
+  ...FU30_AT.filter((at) => at.size.touch),
+  ...FU30_AT.filter((at) => !at.size.touch),
+  ...SCALES.map((scale) => ({ size: { name: "1280x720", width: 1280, height: 720, touch: false }, scale })),
+];
+
+/** Night watch's three long tracks: four minutes each, so no track ends while one size is measured. */
+const NIGHT_WATCH = ["Night watch on the city walls", "Forest chase", "Crypt lament"];
+
+/** The Music window's playlist: soundsReady's two tracks, then NIGHT_WATCH's on one file. Made once for the file. */
+let nightWatch: { playlist: string; order: string[] } | null = null;
+
+async function nightWatchReady(): Promise<NonNullable<typeof nightWatch>> {
+  if (nightWatch) return nightWatch;
+  const lib = await soundsReady();
+  const ms = 240_000;
+  const assetId = await uploadSilence("Night watch", ms, 64);
+  const order = [...lib.music];
+  for (const name of NIGHT_WATCH) {
+    const id = randomUUID();
+    await ops.send({ t: "sound.create", id, assetId, name, use: "music", ms });
+    order.push(id);
+  }
+  const playlist = randomUUID();
+  await ops.send({ t: "playlist.create", id: playlist, name: "Night watch", sounds: order, repeat: "all", fade: 5 });
+  nightWatch = { playlist, order };
+  return nightWatch;
+}
+
+/**
+ * pld-a to pld-c, the Music window's roots (docs/design/design-v1-music-player.md 11.4),
+ * at MUSIC_AT's sizes, each in the dark theme and again in the light one:
+ * the Sound group with nothing playing, the server's switch off, music
+ * playing and paused, the window wide (its header and each column, which
+ * scroll on their own, as roots of their own) and in both tabs, Library
+ * with no music, with music and with a search that matches nothing,
+ * Played under Repeat off, the maker wide and in both tabs, the More
+ * menus of a track, a playlist and a row of Up next, Add to playlist's
+ * menu and a track's page. pld-a runs before any step makes a sound, and
+ * says so where one did. The theme turns as a choice made in another
+ * window does (lib/scheme.ts), so each size loads the room once a step,
+ * each step on a session of its own.
+ */
+export function musicPlayerAlignmentTests(): void {
+  type Win = { dispatchEvent(e: unknown): void; StorageEvent: new (type: string, init: { key: string; newValue: string }) => unknown; document: { documentElement: { style: { colorScheme: string } } } };
+  async function scheme(page: Page, choice: "dark" | "light"): Promise<void> {
+    await page.evaluate((value) => {
+      const win = globalThis as unknown as Win;
+      localStorage.setItem("rvtt.theme", value);
+      win.dispatchEvent(new win.StorageEvent("storage", { key: "rvtt.theme", newValue: value }));
+    }, choice);
+    await waitFor(`the ${choice} theme`, () => page.evaluate((value) => ((globalThis as unknown as Win).document.documentElement.style.colorScheme === value ? true : null), choice), 5_000);
+  }
+
+  /**
+   * Measures `root` as `screen` in dark, then as `screen`-light in light,
+   * and leaves out light's disabled look lines (the check holds words to
+   * dark's textDisabled, helpers/alignment.ts) and any line `skip` names.
+   */
+  async function both(sweep: Sweep, page: Page, screen: string, root: Locator, skip: (line: string) => boolean = () => false): Promise<void> {
+    for (const choice of ["dark", "light"] as const) {
+      await scheme(page, choice);
+      const before = sweep.lines.length;
+      await sweep.measure(page, choice === "dark" ? screen : `${screen}-light`, root);
+      const kept = sweep.lines.slice(before).filter((line) => !(choice === "light" && line.includes(": disabled look,")) && !skip(line));
+      sweep.lines.splice(before, sweep.lines.length - before, ...kept);
+    }
+    await scheme(page, "dark");
+  }
+
+  /** Ambiance's Sound group, which starts open (docs/design/design-v1-panel-groups.md 4.1). */
+  async function soundGroup(sweep: Sweep, panel: Locator, screen: string): Promise<Locator> {
+    const fold = panel.getByRole("button", { name: "Sound", exact: true });
+    if ((await fold.getAttribute("aria-expanded")) !== "true") sweep.lines.push(`${sweep.at} ${screen}: the Sound group is not open`);
+    // An inner locator is queried inside each group, so it starts from the page, not from the panel.
+    return panel.locator("[data-panel-group]").filter({ has: panel.page().getByRole("button", { name: "Sound", exact: true }) });
+  }
+
+  /** The window's two columns on a computer, else null, where its tabs stand instead (4.1). */
+  async function wideOf(win: Locator): Promise<boolean> {
+    return (await win.locator("[data-music-wide]").count()) > 0;
+  }
+
+  /**
+   * Under 300 px a Library row drops its tile and wraps its name and
+   * detail (4.4), so rows whose names wrap to different line counts differ
+   * in height. The same-kind rule groups rows by their lines of words, but
+   * a row's words sit inside its button, measured as one box, so it
+   * compares a one-line row with a two-line one. Those findings alone are
+   * left out, as mu-9 leaves them out, and each row is measured as a root
+   * of its own instead.
+   */
+  function wrappedRows(line: string, at: { size: Size; scale: number }): boolean {
+    return at.size.width / at.scale < 300 && /: kind-height [\d.]+ px, ul "(Playlists|Tracks)": li /.test(line);
+  }
+
+  async function eachRow(sweep: Sweep, page: Page, library: Locator, at: { size: Size; scale: number }): Promise<void> {
+    if (at.size.width / at.scale >= 300) return;
+    for (const list of ["Playlists", "Tracks"]) {
+      const rows = library.getByRole("list", { name: list, exact: true }).locator(":scope > li");
+      for (let i = 0; i < (await rows.count()); i++) await both(sweep, page, "music-library-row", rows.nth(i));
+    }
+  }
+
+  /** Opens a row's More, measures its menu, and puts it away. */
+  async function moreMenu(sweep: Sweep, page: Page, screen: string, more: Locator): Promise<void> {
+    await more.scrollIntoViewIfNeeded();
+    await more.click();
+    const menu = page.getByRole("menu").last();
+    await menu.waitFor();
+    await both(sweep, page, screen, menu);
+    await page.keyboard.press("Escape");
+    await menu.waitFor({ state: "detached" });
+  }
+
+  /** One size's page, loaded afresh in the dark theme on this step's session, with the DM's copy of the room in hand. */
+  async function sizePage(at: { size: Size; scale: number }): Promise<Page> {
+    const page = await dmPageFor(at.size);
+    page.setDefaultTimeout(10_000);
+    await openAt(page, at.size, at.scale, { "rvtt.theme": "dark" });
+    await waitFor("the DM's snapshot", () => dmSocket.state);
+    return page;
+  }
+
+  async function putAway(page: Page): Promise<void> {
+    await closeMusicWindow(page).catch(() => {});
+    await closeSheets(page);
+    await escapeAll(page);
+  }
+
+  test(`pld-a. with no music in the room, the Sound group with nothing playing, and the Music window's Now playing and its empty Library, at 1440 x 900, 1280 x 720, 390 x 844 and 320 x 568 at 100% and 130%, dark and light, within ${LIMIT_PX} px`, async () => {
+    await newDmSession();
+    const lines: string[] = [];
+    try {
+      for (const at of MUSIC_AT) {
+        const sweep = new Sweep(`pld-${atName(at)}`);
+        const page = await sizePage(at);
+        assert.equal(Object.values(dmSocket.state?.sounds ?? {}).filter((s) => s.use === "music").length, 0, "pld-a needs a room with no music yet: run it before any step that makes sounds");
+        try {
+          const panel = await openPanel(page, "Ambiance");
+          const group = await soundGroup(sweep, panel, "music-group-nothing");
+          await group.getByText("Nothing is playing.", { exact: true }).waitFor();
+          await both(sweep, page, "music-group-nothing", group);
+          const win = await openMusicWindow(page, panel);
+          await win.getByText("No playlists yet.", { exact: true }).waitFor();
+          if (await wideOf(win)) {
+            await both(sweep, page, "music-window-header", win.locator("header").first());
+            await both(sweep, page, "music-now-empty", win.locator('[data-music-column="now"]'));
+            await both(sweep, page, "music-library-empty", win.locator('[data-music-column="library"]'));
+          } else {
+            // With nothing to play the window opens on Library (3.2).
+            const tab = win.getByRole("radiogroup", { name: "Music" }).getByRole("radio", { name: "Library", exact: true });
+            if (!(await tab.isChecked())) sweep.lines.push(`${sweep.at} music-library-empty: the window opened on Now playing with nothing to play`);
+            await both(sweep, page, "music-library-empty", win);
+            await musicNow(win);
+            await win.getByText(/^No music is playing\./).waitFor();
+            await both(sweep, page, "music-now-empty", win);
+          }
+          if (at.scale === 1) await shots.take(page, `alignment-${sweep.at}-music-now-empty`);
+        } finally {
+          await putAway(page);
+        }
+        console.log(`${sweep.at}: measured ${[...sweep.seen].join(", ")}`);
+        lines.push(...sweep.lines);
+      }
+    } finally {
+      if (dm && !dm.isClosed()) await dm.evaluate(() => localStorage.setItem("rvtt.theme", "dark"));
+    }
+    assert.deepEqual(lines, [], "the Music window with no music out of line");
+    withinSnapshotBudget("pld-a");
+  });
+
+  test(`pld-b. the Sound group with the server's switch off, which offers no Open music, at 1440 x 900, 1280 x 720, 390 x 844 and 320 x 568 at 100% and 130%, dark and light, within ${LIMIT_PX} px`, async () => {
+    await newDmSession();
+    await soundsReady();
+    const lines: string[] = [];
+    try {
+      for (const at of MUSIC_AT) {
+        const sweep = new Sweep(`pld-${atName(at)}`);
+        const page = await dmPageFor(at.size);
+        // The switch as a page load reads it.
+        await page.route("**/api/config", async (route) => {
+          const res = await route.fetch();
+          await route.fulfill({ response: res, json: { ...(await res.json()), roomSound: false } });
+        });
+        try {
+          await sizePage(at);
+          const panel = await openPanel(page, "Ambiance");
+          const group = await soundGroup(sweep, panel, "music-group-off");
+          await group.getByText(/^This server doesn't offer sound files\./).waitFor();
+          if ((await group.locator("[data-music-open]").count()) > 0) sweep.lines.push(`${sweep.at} music-group-off: Open music shows with the switch off`);
+          await both(sweep, page, "music-group-off", group);
+        } finally {
+          await page.unroute("**/api/config");
+          await putAway(page);
+        }
+        console.log(`${sweep.at}: measured ${[...sweep.seen].join(", ")}`);
+        lines.push(...sweep.lines);
+      }
+    } finally {
+      if (dm && !dm.isClosed()) await dm.evaluate(() => localStorage.setItem("rvtt.theme", "dark"));
+    }
+    assert.deepEqual(lines, [], "the Sound group with the switch off out of line");
+    withinSnapshotBudget("pld-b");
+  });
+
+  test(`pld-c. the Sound group playing and paused, the Music window wide and in both tabs, Library and a search with no match, Played under Repeat off, the maker wide and in both tabs, the More menus, Add to playlist and a track's page, at 1440 x 900, 1280 x 720, 390 x 844 and 320 x 568 at 100% and 130%, dark and light, within ${LIMIT_PX} px`, async () => {
+    await newDmSession();
+    const night = await nightWatchReady();
+    const lines: string[] = [];
+    try {
+      for (const at of MUSIC_AT) {
+        const sweep = new Sweep(`pld-${atName(at)}`);
+        await ops.send({ t: "sound.stopAll" });
+        const page = await sizePage(at);
+        const shot = async (what: string) => {
+          if (at.scale === 1) await shots.take(page, `alignment-${sweep.at}-${what}`);
+        };
+        // Night watch from its third track, so Up next holds the two after it and Played the two before it under Repeat off (4.3).
+        const runId = randomUUID();
+        await ops.send({ t: "music.play", run: runId, playlistId: night.playlist, order: night.order, index: 2, repeat: "all", fade: 5 });
+        await waitFor("Night watch playing", () => (dmSocket.state?.playing?.music?.run === runId ? true : null));
+        try {
+          const panel = await openPanel(page, "Ambiance");
+          const group = await soundGroup(sweep, panel, "music-group-playing");
+          await group.locator("[data-sound-track]").filter({ hasText: NIGHT_WATCH[0]! }).waitFor();
+          await both(sweep, page, "music-group-playing", group);
+
+          const win = await openMusicWindow(page, panel);
+          const wide = await wideOf(win);
+          await win.getByRole("list", { name: "Up next" }).waitFor();
+          if (wide) {
+            await both(sweep, page, "music-window-header", win.locator("header").first());
+            await both(sweep, page, "music-window-now", win.locator('[data-music-column="now"]'));
+            await both(sweep, page, "music-library", win.locator('[data-music-column="library"]'));
+          } else {
+            // With a run the window opens on Now playing (3.2).
+            const tab = win.getByRole("radiogroup", { name: "Music" }).getByRole("radio", { name: "Now playing", exact: true });
+            if (!(await tab.isChecked())) sweep.lines.push(`${sweep.at} music-window-now: the window opened on Library while music plays`);
+            await both(sweep, page, "music-window-now", win);
+          }
+          await shot("music-window-now");
+          await moreMenu(sweep, page, "music-more-queue", win.getByRole("list", { name: "Up next" }).locator("[data-music-more]").first());
+
+          let library = await musicLibrary(win);
+          if (!wide) {
+            await both(sweep, page, "music-library", win, (line) => wrappedRows(line, at));
+            await eachRow(sweep, page, library, at);
+            await shot("music-library");
+          }
+          await moreMenu(sweep, page, "music-more-playlist", library.getByRole("list", { name: "Playlists" }).locator("[data-music-more]").first());
+          const trackMore = library.getByRole("list", { name: "Tracks" }).locator("[data-music-more]").first();
+          await moreMenu(sweep, page, "music-more-track", trackMore);
+          await trackMore.click();
+          await page.getByRole("menuitem", { name: "Add to playlist…", exact: true }).click();
+          const lists = page.getByRole("menu", { name: "Add to playlist…" });
+          await lists.getByRole("menuitem", { name: /^Night watch/ }).waitFor();
+          await both(sweep, page, "music-add-to-playlist", lists);
+          await page.keyboard.press("Escape");
+          await lists.waitFor({ state: "detached" });
+
+          const search = library.getByRole("searchbox", { name: "Search music" });
+          await search.fill("harbor");
+          await library.getByText('No track matches "harbor".', { exact: true }).waitFor();
+          await both(sweep, page, "music-search-none", wide ? win.locator('[data-music-column="library"]') : win);
+          await shot("music-search-none");
+          await search.fill("");
+
+          // A track's page, a step of the window (4.4).
+          await trackMore.click();
+          await page.getByRole("menuitem", { name: "Rename or delete…", exact: true }).click();
+          await win.locator('[data-music-window="track"]').waitFor();
+          await both(sweep, page, "music-track-page", win);
+          await win.getByRole("button", { name: "Back to Music", exact: true }).click();
+
+          // The maker on Night watch, and its Add tracks tab where it has one (5).
+          library = await musicLibrary(win);
+          await library.getByRole("list", { name: "Playlists" }).getByRole("button", { name: /^Night watch/ }).click();
+          await win.getByRole("heading", { name: "Night watch", exact: true }).waitFor();
+          await both(sweep, page, "music-maker", win);
+          await shot("music-maker");
+          const add = win.getByRole("radio", { name: "Add tracks", exact: true });
+          if (!wide) {
+            await add.click();
+            await win.getByRole("searchbox", { name: "Search music" }).waitFor();
+            await both(sweep, page, "music-maker-add", win);
+          } else if ((await add.count()) > 0) sweep.lines.push(`${sweep.at} music-maker: tabs on a computer`);
+          await win.getByRole("button", { name: "Back to Music", exact: true }).click();
+
+          // Played under Repeat off (4.3).
+          await ops.send({ t: "music.set", repeat: "off" });
+          const upNext = (await musicNow(win)).locator("[data-music-upnext]");
+          await upNext.getByRole("list", { name: "Played" }).waitFor();
+          await both(sweep, page, "music-played", upNext);
+          await shot("music-played");
+          await closeMusicWindow(page);
+
+          await ops.send({ t: "music.pause" });
+          await group.locator('[data-sound-now] button[aria-label="Play"]').waitFor();
+          await both(sweep, page, "music-group-paused", group);
+        } finally {
+          await ops.send({ t: "sound.stopAll" }).catch(() => {});
+          await putAway(page);
+        }
+        console.log(`${sweep.at}: measured ${[...sweep.seen].join(", ")}`);
+        lines.push(...sweep.lines);
+      }
+    } finally {
+      if (dm && !dm.isClosed()) await dm.evaluate(() => localStorage.setItem("rvtt.theme", "dark"));
+    }
+    assert.deepEqual(lines, [], "the Music window out of line");
+    withinSnapshotBudget("pld-c");
   });
 }
