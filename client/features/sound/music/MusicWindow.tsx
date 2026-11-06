@@ -5,7 +5,7 @@ import { Segmented } from "../../../components/Segmented.tsx";
 import { useBackClose } from "../../../lib/backClose.ts";
 import { theme } from "../../../lib/theme.ts";
 import { useScoped } from "../../../state/scope.ts";
-import { useRoomActions, useRoomView } from "../../../state/view.ts";
+import { useRoomActions, useRoomStore, useRoomView } from "../../../state/view.ts";
 import { useLayoutSize } from "../../device/layout.ts";
 import { MusicVolume, NamesSwitch } from "../panel/NowPlaying.tsx";
 import { send } from "../panel/ops.ts";
@@ -48,6 +48,7 @@ export default function MusicWindow() {
 
 function MusicDialog() {
   const actions = useRoomActions();
+  const store = useRoomStore();
   const slot = useScoped(musicWindowSlot);
   const state = useStore(slot);
   const sounds = useRoomView((s) => soundsOf(s.view));
@@ -65,7 +66,11 @@ function MusicDialog() {
     // An answer that comes after the maker went changes nothing.
     if (slot.getState().step.t === "maker") slot.setState({ step: { t: "maker", draft: next } });
   };
-  const maker = useMakerControl({ draft, stored, sounds, playingIt: draft !== null && playingId === draft.playlistId, actions, setDraft, onSaved: home });
+  const room = () => {
+    const view = store.getState().view;
+    return { playlists: playlistsOf(view), sounds: soundsOf(view) };
+  };
+  const maker = useMakerControl({ draft, stored, sounds, playingIt: draft !== null && playingId === draft.playlistId, actions, room, setDraft, onSaved: home });
   const back = step.t === "home" ? null : () => (step.t === "maker" ? maker.leave(home) : home());
   // Android's Back steps back from a step, then closes. The key changes as the maker asks first, so the next Back has an entry of its own.
   useBackClose(state.open ? `music-${step.t}${maker.asking ? "-asking" : ""}` : null, () => (back ? back() : close()));

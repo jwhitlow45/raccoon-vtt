@@ -15,7 +15,7 @@ import { SOUND_LIMITS } from "#shared/limits.ts";
 import { FADES, REPEATS, type Fade, type Playlist, type Repeat, type SoundId } from "#shared/sound.ts";
 import { ConfirmButton } from "../../scenes/controls.tsx";
 import { send } from "../panel/ops.ts";
-import { nameOf, orderFor, scenesNamingPlaylist, soundsByUse, totalMs, type Sounds } from "../panel/state.ts";
+import { nameOf, orderFor, scenesNamingPlaylist, soundsByUse, totalMs, type Playlists, type Sounds } from "../panel/state.ts";
 import { NEW_PLAYLIST_NAME, PLAYING_CHANGES, playlistDetail, playlistLeavesScenes, REPEAT_CHOICES } from "../panel/words.ts";
 import { keyMovedInList, movedInList } from "./dragOrder.ts";
 import { matches } from "./Library.tsx";
@@ -140,21 +140,23 @@ export function makerStatus(input: { draft: MakerDraft; stored: Playlist | undef
   return null;
 }
 
-/** A save the server took: the id it saved under and the fields it sent, every one for a create and none when nothing changed. */
-export type Saved = { playlistId: string; sent: Partial<MakerFields> };
+/** A save the server took: the id it saved under. */
+export type Saved = { playlistId: string };
 
 /**
- * The playlist as it stands once a save is answered (5): the stored one
- * with the fields the save sent over it, so Play and the draft's new base
- * keep another DM's change to a field this draft left alone, and Play's
- * order holds the tracks the server holds. The sent fields win in case the
- * view does not hold the save yet. With nothing stored under the saved id
- * (a create under a fresh id, or a playlist deleted since), the draft's own.
+ * The playlist as it stands once a save is answered (5): the stored one,
+ * read from the room store as the answer comes. The store takes the
+ * answer's batch before it calls back, so this holds the save and any
+ * other DM's change committed with it, such as a track appended in the
+ * same batch. Nothing is laid over it, since the fields this save sent
+ * would put back a list the server no longer holds, and Play's order would
+ * be refused. With nothing stored under the saved id (a playlist deleted
+ * since), the draft's own.
  */
-export function savedPlaylist(draft: MakerDraft, saved: Saved, stored: Playlist | undefined, sounds: Sounds): Playlist {
-  const kept = stored?.id === saved.playlistId ? stored : undefined;
-  const fields: MakerFields = { ...(kept ? fieldsOf(kept) : savedFields(draft, sounds)), ...saved.sent };
-  return { id: saved.playlistId, rev: kept?.rev ?? 0, name: fields.name, sounds: [...fields.sounds], repeat: fields.repeat, fade: fields.fade, ...(fields.shuffle ? { shuffle: true } : null) };
+export function savedPlaylist(draft: MakerDraft, playlistId: string, stored: Playlist | undefined, sounds: Sounds): Playlist {
+  if (stored?.id === playlistId) return stored;
+  const fields = savedFields(draft, sounds);
+  return { id: playlistId, rev: 0, name: fields.name, sounds: [...fields.sounds], repeat: fields.repeat, fade: fields.fade, ...(fields.shuffle ? { shuffle: true } : null) };
 }
 
 /**
@@ -169,16 +171,16 @@ export function saveDraft(actions: Pick<RoomActions, "dispatch" | "newId">, draf
   if (draft.base === null || stored === undefined) {
     const playlistId = draft.base === null ? draft.playlistId : actions.newId();
     send(actions, { t: "playlist.create", id: playlistId, name: fields.name, sounds: fields.sounds, repeat: fields.repeat, fade: fields.fade, ...(fields.shuffle ? { shuffle: true as const } : null) }, (answer) =>
-      onDone(answer === "taken" ? { playlistId, sent: fields } : null),
+      onDone(answer === "taken" ? { playlistId } : null),
     );
     return;
   }
   const changed = changedFields(draft, sounds);
   if (Object.keys(changed).length === 0) {
-    onDone({ playlistId: draft.playlistId, sent: changed });
+    onDone({ playlistId: draft.playlistId });
     return;
   }
-  send(actions, { t: "playlist.update", id: draft.playlistId, ...changed }, (answer) => onDone(answer === "taken" ? { playlistId: draft.playlistId, sent: changed } : null));
+  send(actions, { t: "playlist.update", id: draft.playlistId, ...changed }, (answer) => onDone(answer === "taken" ? { playlistId: draft.playlistId } : null));
 }
 
 /** The maker's footer and status for the window's Dialog, and what leaving does. */
@@ -208,6 +210,8 @@ export function useMakerControl(input: {
   sounds: Sounds;
   playingIt: boolean;
   actions: Pick<RoomActions, "dispatch" | "newId">;
+  /** The room store's playlists and sounds now, which an answer reads before React renders the batch it came with. */
+  room(): { playlists: Playlists; sounds: Sounds };
   setDraft(draft: MakerDraft): void;
   onSaved(): void;
 }): MakerControl {
@@ -232,13 +236,15 @@ export function useMakerControl(input: {
     if (draft === null || busy !== null) return;
     const start = (saved: Saved) => {
       const now = latest.current;
-      const playlist = savedPlaylist(draft, saved, now.stored, now.sounds);
+      // The store, not the last render's props: the answer comes before React renders the batch that holds the save (MB-ASTRA-02).
+      const room = now.room();
+      const playlist = savedPlaylist(draft, saved.playlistId, room.playlists[saved.playlistId], room.sounds);
       now.setDraft({ ...draftOf(playlist), tab: draft.tab });
-      const order = orderFor({ playlistId: playlist.id, ...(playlist.shuffle ? { shuffle: true } : null) }, { [playlist.id]: playlist }, now.sounds);
+      const order = orderFor({ playlistId: playlist.id, ...(playlist.shuffle ? { shuffle: true } : null) }, { [playlist.id]: playlist }, room.sounds);
       if (order.length === 0) return;
       send(actions, { t: "music.play", run: actions.newId(), playlistId: playlist.id, order, index: 0, repeat: playlist.repeat, fade: playlist.fade, ...(playlist.shuffle ? { shuffle: true as const } : null) });
     };
-    if (!dirty && draft.base !== null && input.stored !== undefined) start({ playlistId: draft.playlistId, sent: {} });
+    if (!dirty && draft.base !== null && input.stored !== undefined) start({ playlistId: draft.playlistId });
     else save("play", start);
   };
   const leave = (go: () => void) => {

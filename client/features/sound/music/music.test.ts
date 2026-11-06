@@ -2,6 +2,7 @@ import "../../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { afterEach, describe, mock, test } from "node:test";
 import type { MusicRun, Playlist, Sound } from "#shared/sound.ts";
+import type { MakerDraft } from "./open.ts";
 
 /*
  * The Music window's own rules (docs/design/design-v1-music-player.md 4,
@@ -11,7 +12,8 @@ import type { MusicRun, Playlist, Sound } from "#shared/sound.ts";
  */
 
 const { libraryPlaylists, libraryTracks, matches, playlistChoices, queueNote, rowPlay } = await import("./Library.tsx");
-const { changedFields, draftDirty, draftOf, makerStatus, newDraft, savedName, savedPlaylist, savedTracks } = await import("./Maker.tsx");
+const { changedFields, draftDirty, draftOf, makerStatus, newDraft, savedName, savedPlaylist, savedTracks, useMakerControl } = await import("./Maker.tsx");
+const { drawn } = await import("../../../components/testing/drawn.ts");
 const { seekGesture, seekHolds } = await import("./NowFull.tsx");
 const { queueLists } = await import("./dragOrder.ts");
 const words = await import("./words.ts");
@@ -149,16 +151,45 @@ describe("the maker's draft", () => {
     assert.equal(makerStatus({ draft: edited, stored, sounds: left, playingIt: false }), words.TRACKS_CHANGED, "and warns that it keeps this list");
   });
 
-  test("Play starts the playlist as it stands once the save is answered: another DM's tracks, Repeat, Crossfade and Shuffle, under the fields this draft sent", () => {
+  test("Play starts the playlist as the store holds it once the save is answered: another DM's tracks, Repeat, Crossfade and Shuffle, with nothing laid over it", () => {
     const draft = draftOf(saved);
     // Another DM added c and set Repeat off, Crossfade 10 s and Shuffle after the draft began.
     const stored: Playlist = { ...saved, rev: 7, sounds: ["a", "b", "c"], repeat: "off", fade: 10, shuffle: true };
-    assert.deepEqual(savedPlaylist(draft, { playlistId: "pl", sent: {} }, stored, sounds), stored, "an unchanged draft plays what is stored");
-    assert.deepEqual(savedPlaylist({ ...draft, name: "Tavern late" }, { playlistId: "pl", sent: { name: "Tavern late" } }, { ...stored, name: "Tavern late" }, sounds), { ...stored, name: "Tavern late" }, "a rename saved, then the rest as stored");
-    assert.deepEqual(savedPlaylist({ ...draft, sounds: ["b", "a"] }, { playlistId: "pl", sent: { sounds: ["b", "a"] } }, stored, sounds).sounds, ["b", "a"], "the sent tracks, though the view does not hold the save yet");
-    const created = savedPlaylist({ ...draft, name: "Again" }, { playlistId: "fresh", sent: { name: "Again", sounds: ["a", "b"], shuffle: false, repeat: "all", fade: 5 } }, stored, sounds);
-    assert.deepEqual(created, { id: "fresh", rev: 0, name: "Again", sounds: ["a", "b"], repeat: "all", fade: 5 }, "a create under a fresh id: what it sent, not the stored playlist under the old id");
-    assert.deepEqual(draftOf(savedPlaylist(draft, { playlistId: "pl", sent: {} }, stored, sounds)), draftOf(stored), "and the draft's new base is the stored playlist, so it is clean");
+    assert.deepEqual(savedPlaylist(draft, "pl", stored, sounds), stored, "an unchanged draft plays what is stored");
+    assert.deepEqual(savedPlaylist({ ...draft, name: "Tavern late" }, "pl", { ...stored, name: "Tavern late" }, sounds), { ...stored, name: "Tavern late" }, "a rename saved, then the rest as stored");
+    // A save of [b, a] and another DM's append of c committed in one batch: the server holds [b, a, c], and the draft's [b, a] would be refused by Play's order check.
+    assert.deepEqual(savedPlaylist({ ...draft, sounds: ["b", "a"] }, "pl", { ...stored, sounds: ["b", "a", "c"] }, sounds).sounds, ["b", "a", "c"]);
+    const created = savedPlaylist({ ...draft, name: "Again" }, "fresh", stored, sounds);
+    assert.deepEqual(created, { id: "fresh", rev: 0, name: "Again", sounds: ["a", "b"], repeat: "all", fade: 5 }, "nothing stored under the saved id: the draft's own, not the stored playlist under the old id");
+    assert.deepEqual(draftOf(savedPlaylist(draft, "pl", stored, sounds)), draftOf(stored), "and the draft's new base is the stored playlist, so it is clean");
+  });
+
+  test("Play reads the room store as the save's answer comes, before React renders its batch: a save of [b, a] and another DM's append of c in one answer batch plays [b, a, c] (MB-ASTRA-02)", () => {
+    const sent: { op: Record<string, unknown>; onAnswer?: (answer: "taken") => void }[] = [];
+    let ids = 0;
+    // The store before the batch, as the last render saw it, then after.
+    let room: { playlists: Record<string, Playlist>; sounds: typeof sounds } = { playlists: { pl: saved }, sounds };
+    const drafts: MakerDraft[] = [];
+    const input = {
+      draft: { ...draftOf(saved), sounds: ["b", "a"] },
+      stored: saved,
+      sounds,
+      playingIt: false,
+      actions: { dispatch: (op: unknown, opts?: { onAnswer?: (answer: "taken") => void }) => void sent.push({ op: op as Record<string, unknown>, onAnswer: opts?.onAnswer }), newId: () => `id${++ids}` },
+      room: () => room,
+      setDraft: (d: MakerDraft) => void drafts.push(d),
+      onSaved() {},
+    };
+    const control = drawn((p: typeof input) => useMakerControl(p as never) as never, input) as unknown as { play(): void };
+    control.play();
+    assert.deepEqual(sent.map((s) => s.op), [{ t: "playlist.update", id: "pl", sounds: ["b", "a"] }], "Play saves first");
+    room = { playlists: { pl: { ...saved, rev: 6, sounds: ["b", "a", "c"] } }, sounds };
+    sent[0]!.onAnswer!("taken");
+    const played = sent.slice(1).map((s) => s.op);
+    assert.equal(played.length, 1);
+    assert.equal(played[0]!.t, "music.play");
+    assert.deepEqual(played[0]!.order, ["b", "a", "c"], "the order the server holds, so its playlist-order check takes it");
+    assert.deepEqual(drafts.map((d) => [d.sounds, d.base?.rev]), [[["b", "a", "c"], 6]], "and the draft's new base is what the store holds");
   });
 });
 
