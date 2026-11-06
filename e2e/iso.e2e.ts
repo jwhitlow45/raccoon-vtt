@@ -406,7 +406,7 @@ const GUARDIANS = "#8e4ec6";
 const CONE = "#f38400";
 
 /** The board's depth list as the test hook gives it (relief/isoTest.ts BoardLayout). */
-type BoardLayout = { order: ({ kind: "standee"; id: string } | { kind: "band"; area: string; band: number })[]; standing: string[]; waiting: boolean; rings: Record<string, string[]> };
+type BoardLayout = { order: ({ kind: "standee"; id: string } | { kind: "band"; area: string; band: number })[]; standing: string[]; waiting: boolean; rings: Record<string, string[]>; steps: { x: number; y: number; d: string; lo: number; hi: number }[] };
 
 function boardLayout(page: Page): Promise<BoardLayout | null> {
   return page.evaluate(() => (globalThis as unknown as { __rvttIsoHook?: { layout?(): unknown } }).__rvttIsoHook?.layout?.() ?? null) as Promise<BoardLayout | null>;
@@ -2670,6 +2670,67 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     assert.equal(Number.isInteger(placed.x) && Number.isInteger(placed.y), true, "a square's spot");
     assert.ok(Math.abs(placed.nudge!.x) <= 3 && Math.abs(placed.nudge!.y) <= 3, "within 3/8");
     assert.deepEqual([placed.x, placed.y, placed.nudge], [11, 7, { x: 2, y: -2 }], "the box under the release, drawn a quarter square off");
+  });
+
+  test("ISOD-1. stairs climb in steps in Isometric: a raised run and a sunk run as the generator lays them carry their spans, a tread's top and its riser show apart, a creature stands on its tread, and below 24 px a cell they lie plain again", async () => {
+    if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+    const sceneId = randomUUID();
+    const climber = randomUUID();
+    const cells = (x0: number, y0: number, x1: number, y1: number) => {
+      const out: string[] = [];
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) out.push(`${x},${y}`);
+      return out;
+    };
+    await ops.send({ t: "scene.create", scene: { id: sceneId, name: "ISOD steps", bounds: { w: 20, h: 16 }, fogEnabled: false } });
+    await ops.send({ t: "scene.update", sceneId, patch: { blockMovement: false, defaultView: { x: 8.5, y: 8, zoom: 48 } } });
+    await ops.send({ t: "build.paint", sceneId, terrain: "stone", cells: cells(0, 0, 20, 16) });
+    // A 10 ft platform reached from the south by stairs at 0 and 5 ft, and a room sunk 10 ft reached from the east by stairs at -5 and 0 ft, as the generator lays runs.
+    await ops.send({ t: "build.height", sceneId, cells: cells(8, 2, 12, 6), height: 10 });
+    await ops.send({ t: "build.height", sceneId, cells: ["9,6"], height: 5 });
+    await ops.send({ t: "build.stairs", sceneId, cells: ["9,7", "9,6"], up: "n" });
+    await ops.send({ t: "build.height", sceneId, cells: cells(2, 10, 6, 14), height: -10 });
+    await ops.send({ t: "build.height", sceneId, cells: ["6,11"], height: -5 });
+    await ops.send({ t: "build.stairs", sceneId, cells: ["6,11", "7,11"], up: "e" });
+    await dm.bringToFront();
+    await openSideTab(dm, "Scenes");
+    await dm.getByRole("tabpanel", { name: "Scenes" }).getByRole("button", { name: /^ISOD steps/ }).first().click();
+    await isoOn(dm, 0);
+    // The layout's stepping stairs, by the test hook (relief/isoTest.ts), each span in cells of height.
+    const steps = await layoutWhen(dm, "ISOD: the runs step", (l) => l.steps.length === 4);
+    assert.deepEqual(steps.steps, [
+      { x: 9, y: 6, d: "n", lo: 1, hi: 2 },
+      { x: 9, y: 7, d: "n", lo: 0, hi: 1 },
+      { x: 6, y: 11, d: "e", lo: -2, hi: -1 },
+      { x: 7, y: 11, d: "e", lo: -1, hi: 0 },
+    ]);
+    await dm.waitForTimeout(600);
+    // At turn 0 the raised run climbs away: the upper stair's middle tread at 7 ft, and the riser above it from 7 to 8 ft, face the viewer.
+    const tread = await pixelAt(dm, await isoPoint(dm, { x: 9.5, y: 6.5 }, 1.4));
+    const riser = await pixelAt(dm, await isoPoint(dm, { x: 9.5, y: 6.4 }, 1.5));
+    const shade = (c: number[]) => (c[0]! + c[1]! + c[2]!) / 3;
+    assert.ok(Math.abs(shade(tread) - shade(riser)) > 6, `ISOD: a tread's top ${tread.map(Math.round)} and its riser ${riser.map(Math.round)} show apart`);
+    await shots.take(dm, "isod-1-runs-turn0");
+    // A creature on the sunk run's 0 ft stair stands on its middle tread, at -3 ft, below its stored 0.
+    await ops.send(tokenOp(climber, { sceneId, kind: "monster", name: "Climber", x: 7, y: 11, elevation: 0, disposition: "hostile" }));
+    const ring = await waitFor("ISOD: the climber's ring", async () => (await ringMiddles(dm, climber)).own);
+    const onTread = await isoPoint(dm, { x: 7.5, y: 11.5 }, -0.6);
+    assert.ok(Math.abs(ring.x - onTread.x) <= 2 && Math.abs(ring.y - onTread.y) <= 2, `ISOD: its ring ${JSON.stringify(ring)} on the tread at ${JSON.stringify(onTread)}`);
+    await isoOn(dm, 2);
+    await layoutWhen(dm, "ISOD: the runs step at turn 2", (l) => l.steps.length === 4);
+    await dm.waitForTimeout(400);
+    await shots.take(dm, "isod-1-runs-turn2");
+    // Below 24 px a cell the detail goes: the stairs are plain columns and pits again, and the climber stands on its stored 0 ft.
+    await ops.send({ t: "scene.update", sceneId, patch: { defaultView: { x: 8.5, y: 8, zoom: 20 } } });
+    await reopenRoom(dm);
+    // A reload opens the players' scene again, so the scene opens anew at its starting view.
+    await openSideTab(dm, "Scenes");
+    await dm.getByRole("tabpanel", { name: "Scenes" }).getByRole("button", { name: /^ISOD steps/ }).first().click();
+    await isoOn(dm, 0);
+    await layoutWhen(dm, "ISOD: no steps at 20 px", (l) => l.steps.length === 0 && l.order.some((e) => e.kind === "standee" && e.id === climber));
+    const flatRing = await waitFor("ISOD: the climber's ring at 20 px", async () => (await ringMiddles(dm, climber)).own);
+    const onStored = await isoPoint(dm, { x: 7.5, y: 11.5 }, 0);
+    assert.ok(Math.abs(flatRing.x - onStored.x) <= 2 && Math.abs(flatRing.y - onStored.y) <= 2, `ISOD: its ring ${JSON.stringify(flatRing)} at its stored ground ${JSON.stringify(onStored)}`);
+    await ops.send({ t: "token.delete", tokenId: climber });
   });
 
   test("ISO-12. no page logged an error", () => {
