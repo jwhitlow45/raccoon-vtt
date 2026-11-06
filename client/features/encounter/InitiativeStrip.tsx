@@ -16,6 +16,7 @@ import { containTab, inertOutside } from "../../lib/modalDialog.ts";
 import { focusMap, mapFocusSlot, panelFocusSlot } from "../../pages/mapFocus.ts";
 import { useModalSlot } from "../../pages/modalSlot.tsx";
 import { ON_BOARD, ON_BOARD_STYLE, theme } from "../../lib/theme.ts";
+import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { screenHeight, useLayoutSize } from "../device/layout.ts";
 import { effectChip } from "../../lib/tokenView.ts";
 import { EffectArt, effectHasArt } from "../tokens/EffectIcon.tsx";
@@ -28,8 +29,8 @@ import { sheetOpen } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { announceTurn, unlockAudioOnTap } from "./alerts.ts";
 import { AutoRollWatch } from "./autoState.ts";
-import { BAND_MAX_DISKS, BAND_NAME_MIN_PX, bandFit, TURN_BAND_PX, useTopBars, type BandTimer, type TurnPlacement } from "./band.ts";
-import { clockText } from "./timer.ts";
+import { BAND_MAX_DISKS, BAND_NAME_MIN_PX, bandFit, STRIP_FACES, STRIP_NAME_PX, STRIP_NAME_YOURS_PX, TURN_BAND_PX, useTopBars, type BandTimer, type TurnPlacement } from "./band.ts";
+import { clockText, type TimerState } from "./timer.ts";
 import { useConfirmedSeq, useRowFacts, useSortedEntries, useTurnTimer, useYou } from "./hooks.ts";
 import {
   answersPrompt,
@@ -49,6 +50,7 @@ import {
   type TurnMark,
 } from "./logic.ts";
 import { EndTurnPill, NextPill, Portrait, TimerClock, TURN_PILL_PX } from "./parts.tsx";
+import { useTooltip } from "../../components/Tooltip.tsx";
 import { RollAlerts } from "../rolls/RollAlerts.tsx";
 import { knownOrTyped } from "../rolls/card.ts";
 import { CARD_MIN_WIDTH } from "../rolls/logic.ts";
@@ -111,9 +113,52 @@ function useViewport(): { width: number; height: number } {
  * (`notice`, useYourTurnNotice), and holds End Turn, so nothing about the
  * turn covers the map. `stripRef` is the bar's chip and End Turn, whose box
  * grows with them, so the top bar can tell when its row overflows.
+ *
+ * The top bar gives way around the chip (pages/topBarFit.ts): `fit` is
+ * what its steps leave the chip, and `onTurn` hears what the chip holds
+ * whenever that changes, so the bar starts its steps over. The band hears
+ * the same, so a short landscape phone's strip comes back to the bar once
+ * it fits there again.
  */
-export function InitiativeStrip(props: { placement: TurnPlacement; notice: boolean; stripRef?: Ref<HTMLDivElement> }) {
-  return props.placement === "bar" ? <Strip notice={props.notice} stripRef={props.stripRef} /> : <Band notice={props.notice} />;
+export function InitiativeStrip(props: { placement: TurnPlacement; notice: boolean; stripRef?: Ref<HTMLDivElement>; fit?: StripFit; onTurn?(turn: TurnFacts): void }) {
+  return props.placement === "bar" ? (
+    <Strip notice={props.notice} stripRef={props.stripRef} fit={props.fit ?? WHOLE_STRIP} onTurn={props.onTurn} />
+  ) : (
+    <Band notice={props.notice} onTurn={props.onTurn} />
+  );
+}
+
+/**
+ * What the top bar's give-way leaves the turn chip (designs/qol chips.md
+ * 5): how many next faces (steps 1 and 9), its name's cap, 0 once the name
+ * has left (step 11), an overrun timer's short form (step 12), and a
+ * player's inline "Your turn", which drops last (plan.md 9, QD-OPUS-30).
+ */
+export type StripFit = { faces: number; nameCap: number | null; timerShort: boolean; yourTurn: boolean };
+
+const WHOLE_STRIP: StripFit = { faces: STRIP_FACES, nameCap: null, timerShort: false, yourTurn: true };
+
+/**
+ * What the turn chip holds, for the top bar's give-way: `key` changes
+ * whenever any of it would change the chip's width at the same steps,
+ * and the rest is what the bar's steps act on.
+ */
+export type TurnFacts = { key: string; faces: number; timerOver: boolean; yourTurn: boolean };
+
+/**
+ * The chip's facts, the same from the strip and the band, so the band
+ * step never reads as new content. The timer counts in by its shape
+ * ("0:00" for "9:56"), so a tick that keeps its width changes nothing.
+ */
+function useReportTurn(
+  onTurn: ((turn: TurnFacts) => void) | undefined,
+  a: { dm: boolean; round: number | null; current: string | null; name: string; yours: boolean; endTurn: boolean; notice: boolean; timer: TimerState | null; next: readonly { id: string }[] },
+): void {
+  const timer = a.timer ? `${a.timer.over ? (a.timer.left < 0 ? "past" : "up") : "left"}:${clockText(a.timer).replace(/\d/g, "0")}` : "";
+  const key = [a.dm, a.round, a.current, a.name, a.yours, a.endTurn, a.notice, timer, ...a.next.map((e) => e.id)].join("\u0000");
+  const timerOver = a.timer?.over === true;
+  const facts = useMemo<TurnFacts>(() => ({ key, faces: a.dm ? a.next.length : 0, timerOver, yourTurn: !a.dm && a.yours }), [key]);
+  useLayoutEffect(() => onTurn?.(facts), [onTurn, facts]);
 }
 
 /**
@@ -154,7 +199,7 @@ export function useYourTurnNotice(): boolean {
  * DM the next few, in an outlined pill like the bar's other chips, with a
  * player's End Turn beside it on their turn.
  */
-function Strip(props: { notice: boolean; stripRef?: Ref<HTMLDivElement> }) {
+function Strip(props: { notice: boolean; stripRef?: Ref<HTMLDivElement>; fit: StripFit; onTurn?(turn: TurnFacts): void }) {
   const you = useYou();
   const turnSlot = useModalSlot("turn");
   const round = useRoomView((s) => s.view?.encounter?.round ?? null);
@@ -163,16 +208,19 @@ function Strip(props: { notice: boolean; stripRef?: Ref<HTMLDivElement> }) {
   const entries = useSortedEntries();
   const facts = useRowFacts();
   const timer = useTurnTimer();
-  const { width } = useViewport();
-  const wide = width >= theme.layout.wideMinWidth;
-  const { current, next } = useMemo(
-    () => stripRows({ dm: you.role === "dm", entries, activeEntryId, count: wide ? 5 : 3, skip: facts.skip }),
-    [entries, activeEntryId, wide, you.role, facts.skip],
-  );
+  const { waiting } = useEndTurn();
+  const dm = you.role === "dm";
+  const { current, next } = useMemo(() => stripRows({ dm, entries, activeEntryId, count: STRIP_FACES, skip: facts.skip }), [entries, activeEntryId, dm, facts.skip]);
+  const yours = current !== null && facts.mine(current);
+  const { name, line } = whoseTurn({ dm, started, activeName: current ? entryName(facts.view, current) : null, yours });
+  const timed = timer && current ? timer : null;
+  useReportTurn(props.onTurn, { dm, round, current: current?.id ?? null, name, yours, endTurn: !dm && (yours || waiting), notice: props.notice, timer: timed, next });
+  // Where the bar's give-way cut the name or took it, the whole name shows on hover and keyboard focus (chips.md 5, step 11). The tracker button's own name keeps it for a reader.
+  const cut = props.fit.nameCap !== null;
+  const tip = useTooltip(name);
   if (round === null) return null;
 
-  const yours = current !== null && facts.mine(current);
-  const { name, line } = whoseTurn({ dm: you.role === "dm", started, activeName: current ? entryName(facts.view, current) : null, yours });
+  const faces = next.slice(0, props.fit.faces);
   return (
     // The room name beside it gives way instead, so the strip never cuts a picture in half.
     <div ref={props.stripRef} style={{ flex: "none", display: "flex", alignItems: "center", gap: theme.space(2) }}>
@@ -182,10 +230,10 @@ function Strip(props: { notice: boolean; stripRef?: Ref<HTMLDivElement> }) {
           gap: theme.space(1.5),
           height: TURN_PILL_PX,
           // "Your turn" brings its own padding, so the pill stays even at its end.
-          padding: `0 ${yours ? 2 : theme.space(3)}px 0 ${theme.space(3)}px`,
+          padding: `0 ${yours && props.fit.yourTurn ? 2 : theme.space(3)}px 0 ${theme.space(3)}px`,
         }}
       >
-        <TrackerTarget label={`Initiative, round ${round}. ${line}. Open the tracker.`} reach={(theme.touch - TURN_PILL_PX) / 2} />
+        <TrackerTarget label={`Initiative, round ${round}. ${line}. Open the tracker.`} reach={(theme.touch - TURN_PILL_PX) / 2} tip={cut ? tip : undefined} />
         <span aria-hidden style={roundStyle}>
           R{round}
         </span>
@@ -196,35 +244,37 @@ function Strip(props: { notice: boolean; stripRef?: Ref<HTMLDivElement> }) {
             ?
           </span>
         ) : null}
-        <span
-          aria-hidden
-          data-rvtt-strip-name=""
-          style={{
-            minWidth: 0,
-            /*
-             * Narrower on the player's turn, to leave room for "Your turn"
-             * and End Turn on a small laptop. A phone's bar gets the same
-             * room as a computer's: cut shorter there, "Another creature"
-             * read "Another cre…", while a name that does not fit makes the
-             * row overflow and hands the strip to the band (band.ts).
-             */
-            maxWidth: yours ? 120 : 180,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            fontSize: theme.font.body14,
-            fontWeight: theme.weight.bold,
-            color: current ? theme.color.accentSoft : theme.color.textMuted,
-          }}
-        >
-          {name}
-        </span>
-        {yours ? <YourTurn notice={props.notice} fontSize={theme.font.small} inline slot={turnSlot} /> : null}
-        {timer && current ? <TimerClock state={timer} /> : null}
+        {props.fit.nameCap === 0 ? null : (
+          <span
+            aria-hidden
+            data-rvtt-strip-name=""
+            style={{
+              minWidth: 0,
+              /*
+               * Narrower on the player's turn, to leave room for "Your turn"
+               * and End Turn on a small laptop. A phone's bar gets the same
+               * room as a computer's: cut shorter there, "Another creature"
+               * read "Another cre…", while a name that does not fit makes the
+               * row overflow and hands the strip to the band (band.ts).
+               */
+              maxWidth: Math.min(yours ? STRIP_NAME_YOURS_PX : STRIP_NAME_PX, props.fit.nameCap ?? Infinity),
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              fontSize: theme.font.body14,
+              fontWeight: theme.weight.bold,
+              color: current ? theme.color.accentSoft : theme.color.textMuted,
+            }}
+          >
+            {name}
+          </span>
+        )}
+        {yours ? <YourTurn notice={props.notice} fontSize={theme.font.small} inline slot={turnSlot} unseen={!props.fit.yourTurn} /> : null}
+        {timed ? <TimerClock state={timed} short={props.fit.timerShort} /> : null}
         {/* One unpainted group: the row's parts beside the 26 px acting face are this group and its 22 px faces, not five smaller faces, so the row's heights agree (chips.md 5). */}
-        {next.length > 0 ? (
+        {faces.length > 0 ? (
           <span data-turn-faces="" style={{ flex: "none", display: "flex", alignItems: "center", gap: theme.space(1.5) }}>
-            {next.map((entry) => (
+            {faces.map((entry) => (
               <Portrait key={entry.id} entry={entry} size={22} />
             ))}
           </span>
@@ -241,7 +291,7 @@ function Strip(props: { notice: boolean; stripRef?: Ref<HTMLDivElement> }) {
  * the whole row lights up, with "Your turn" under the name and End Turn at
  * the row's end.
  */
-function Band(props: { notice: boolean }) {
+function Band(props: { notice: boolean; onTurn?(turn: TurnFacts): void }) {
   const you = useYou();
   const turnSlot = useModalSlot("turn");
   const round = useRoomView((s) => s.view?.encounter?.round ?? null);
@@ -250,18 +300,18 @@ function Band(props: { notice: boolean }) {
   const entries = useSortedEntries();
   const facts = useRowFacts();
   const timer = useTurnTimer();
+  const { waiting } = useEndTurn();
   const { width } = useViewport();
   const dm = you.role === "dm";
-  const { current, next } = useMemo(
-    () => stripRows({ dm, entries, activeEntryId, count: BAND_MAX_DISKS, skip: facts.skip }),
-    [entries, activeEntryId, dm, facts.skip],
-  );
-  if (round === null) return null;
-
+  // As many as the top bar's chip has, for the facts it hears: the band shows fewer.
+  const { current, next } = useMemo(() => stripRows({ dm, entries, activeEntryId, count: STRIP_FACES, skip: facts.skip }), [entries, activeEntryId, dm, facts.skip]);
   const yours = current !== null && facts.mine(current);
   const { name, line } = whoseTurn({ dm, started, activeName: current ? entryName(facts.view, current) : null, yours });
+  useReportTurn(props.onTurn, { dm, round, current: current?.id ?? null, name, yours, endTurn: !dm && (yours || waiting), notice: props.notice, timer: timer && current ? timer : null, next });
+  if (round === null) return null;
+
   const clock: BandTimer = timer && current ? (timer.over ? "over" : { clock: clockText(timer) }) : "none";
-  const fit = bandFit({ width, round, timer: clock, endTurn: !dm && yours, dmNext: dm, next: next.length });
+  const fit = bandFit({ width, round, timer: clock, endTurn: !dm && yours, dmNext: dm, next: Math.min(next.length, BAND_MAX_DISKS) });
   const shownNext = next.slice(0, fit.disks);
   const gutter = theme.space(3);
   return (
@@ -366,10 +416,15 @@ const roundStyle: CSSProperties = { flex: "none", fontSize: theme.font.small, fo
  * and End Turn cannot be a button inside a button. `reach` grows it past
  * the chip above and below, to a 44 px target.
  */
-function TrackerTarget(props: { label: string; reach: number }) {
+function TrackerTarget(props: { label: string; reach: number; tip?: ReturnType<typeof useTooltip> }) {
   const ui = useRoomUi();
   const look = trackerTargetLook(props.reach);
-  return <button type="button" {...look.attrs} onClick={() => ui.openPanel("tracker")} aria-label={props.label} style={look.style} />;
+  return (
+    <>
+      <button type="button" {...look.attrs} {...props.tip?.anchor()} onClick={() => ui.openPanel("tracker")} aria-label={props.label} style={look.style} />
+      {props.tip?.tip}
+    </>
+  );
 }
 
 /**
@@ -407,10 +462,16 @@ export function trackerTargetLook(reach: number): { attrs: Record<string, string
  * it once a turn. `inline` sits it after the name in the top bar's chip,
  * where it keeps its padding. Under the name in the band, the pill reaches
  * past the text instead, so the words line up with the name.
+ *
+ * `unseen` is the top bar's last step on a cramped player's bar (designs/qol
+ * plan.md 9, QD-OPUS-30): the words leave the chip while End turn shows,
+ * and the flare's live region stays, visually hidden, so the turn is still
+ * announced. It is the same element either way, so a step taken while it
+ * flares never mounts it again.
  */
 const PILL_PAD = 6;
 
-export function YourTurn(props: { notice: boolean; fontSize: number; inline?: boolean; slot?: HTMLElement | null }) {
+export function YourTurn(props: { notice: boolean; fontSize: number; inline?: boolean; slot?: HTMLElement | null; unseen?: boolean }) {
   const text: CSSProperties = {
     flex: "none",
     justifySelf: "start",
@@ -425,7 +486,7 @@ export function YourTurn(props: { notice: boolean; fontSize: number; inline?: bo
   };
   if (!props.notice) {
     return (
-      <span aria-hidden style={{ ...text, color: theme.color.accentSoft }}>
+      <span aria-hidden style={props.unseen ? VISUALLY_HIDDEN : { ...text, color: theme.color.accentSoft }}>
         Your turn
       </span>
     );
@@ -445,9 +506,11 @@ export function YourTurn(props: { notice: boolean; fontSize: number; inline?: bo
   if (props.slot) {
     return (
       <>
-        <span aria-hidden className="rvtt-turn-notice" style={{ ...text, ...colors, padding: `0 ${PILL_PAD}px`, margin: props.inline ? 0 : `0 -${PILL_PAD}px`, borderRadius: theme.radius.pill, background: theme.color.highlightFill, color: theme.color.ink }}>
-          Your turn
-        </span>
+        {props.unseen ? null : (
+          <span aria-hidden className="rvtt-turn-notice" style={{ ...text, ...colors, padding: `0 ${PILL_PAD}px`, margin: props.inline ? 0 : `0 -${PILL_PAD}px`, borderRadius: theme.radius.pill, background: theme.color.highlightFill, color: theme.color.ink }}>
+            Your turn
+          </span>
+        )}
         {createPortal(
           <span
             role="status"
@@ -465,18 +528,22 @@ export function YourTurn(props: { notice: boolean; fontSize: number; inline?: bo
     <span
       role="status"
       aria-live="assertive"
-      className="rvtt-turn-notice"
-      style={{
-        ...text,
-        ...colors,
-        padding: `0 ${PILL_PAD}px`,
-        margin: props.inline ? 0 : `0 -${PILL_PAD}px`,
-        ...(props.inline ? null : { maxWidth: `calc(100% + ${2 * PILL_PAD}px)` }),
-        borderRadius: theme.radius.pill,
-        background: theme.color.highlightFill,
-        color: theme.color.ink,
-        animation: `rvtt-turn-notice ${TURN_NOTICE_MS}ms ease-out both`,
-      }}
+      className={props.unseen ? undefined : "rvtt-turn-notice"}
+      style={
+        props.unseen
+          ? VISUALLY_HIDDEN
+          : {
+              ...text,
+              ...colors,
+              padding: `0 ${PILL_PAD}px`,
+              margin: props.inline ? 0 : `0 -${PILL_PAD}px`,
+              ...(props.inline ? null : { maxWidth: `calc(100% + ${2 * PILL_PAD}px)` }),
+              borderRadius: theme.radius.pill,
+              background: theme.color.highlightFill,
+              color: theme.color.ink,
+              animation: `rvtt-turn-notice ${TURN_NOTICE_MS}ms ease-out both`,
+            }
+      }
     >
       Your turn
     </span>

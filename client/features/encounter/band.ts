@@ -21,40 +21,53 @@ export const SHORT_LANDSCAPE_MAX = 500;
 export type TurnPlacement = "bar" | "band";
 
 /**
- * Where the turn strip goes (docs/design/design-v1-visual.md 3.2), in the
- * chrome's own pixels (features/device/layout.ts layoutSize), so the
- * interface size moves it as it moves everything else.
+ * Where the turn strip may go at a layout size (docs/design/design-v1-visual.md
+ * 3.2), in the chrome's own pixels (features/device/layout.ts layoutSize),
+ * so the interface size moves it as it moves everything else.
  *
  * - From 900 px wide the strip sits in the top bar, as it always has.
- * - A short landscape phone (wider than tall, under 500 px tall) puts it
- *   in the bar too, unless the bar's row overflowed at this width before.
- *   `overflowedAt` is that record (overflowRecord): the width that
- *   overflowed plus the overflow. The strip stays in the band until the
- *   layout is wider than that, so it never flips back and forth between a
- *   bar that overflows and a band.
+ * - A short landscape phone (wider than tall, under 500 px tall) may put
+ *   it in either: in the bar while the bar's row has room for it, else in
+ *   the band (docs/design/design-v1-visual.md F22). The top bar's give-way
+ *   decides, as its first step on a phone (pages/topBarFit.ts, "band").
  * - Anything else, a portrait phone above all, takes the band.
  *
  * No fixed threshold decides it, since what the bar holds varies: a long
  * room name gives way, but a player's own turn adds "Your turn" and End
  * turn, and the DM's bar has Undo and Redo.
  */
-export function turnPlacement(input: { width: number; height: number; overflowedAt: number | null }): TurnPlacement {
+export function turnPlaces(input: { width: number; height: number }): TurnPlacement | "either" {
   if (input.width >= theme.layout.wideMinWidth) return "bar";
   const shortLandscape = input.width > input.height && input.height < SHORT_LANDSCAPE_MAX;
-  if (!shortLandscape) return "band";
-  return input.overflowedAt === null || input.width > input.overflowedAt ? "bar" : "band";
+  return shortLandscape ? "either" : "band";
+}
+
+/** Where the turn strip goes: where turnPlaces puts it, and where it may go either way, the band once the top bar's give-way has taken that step (`band`). */
+export function turnPlacement(input: { width: number; height: number; band: boolean }): TurnPlacement {
+  const places = turnPlaces(input);
+  if (places !== "either") return places;
+  return input.band ? "band" : "bar";
 }
 
 /**
- * The record kept once the bar's row overflowed by `overflow` px at layout
- * width `width`: the width at which the same content would fit. A record
- * never shrinks, so a bar that overflowed at a wider width than before
- * keeps the larger need.
+ * The top bar's turn chip (InitiativeStrip.tsx Strip) shows up to five
+ * next faces from 900 px up, then three, then none, as the bar gives way
+ * (designs/qol/chips.md 5, steps 1 and 9). A phone's bar, where the strip
+ * sits only on a short landscape phone, shows the three.
  */
-export function overflowRecord(before: number | null, width: number, overflow: number): number {
-  const need = width + overflow;
-  return before === null ? need : Math.max(before, need);
-}
+export const STRIP_FACES = 5;
+export const STRIP_FACES_FEW = 3;
+
+/**
+ * The turn chip's name is cut at 180 px, and at 120 on the player's own
+ * turn, to leave room for "Your turn" and End turn. As the bar's last
+ * steps it gives way further, by what the row lacks, down to
+ * STRIP_NAME_MIN_PX (a few letters and the ellipsis), and below that it
+ * leaves the chip (chips.md 5, step 11).
+ */
+export const STRIP_NAME_PX = 180;
+export const STRIP_NAME_YOURS_PX = 120;
+export const STRIP_NAME_MIN_PX = 40;
 
 /** The acting creature's name always keeps this much of the band's row: two or three letters and the ellipsis, at the band's 16 px. */
 export const BAND_NAME_MIN_PX = 36;
@@ -138,26 +151,31 @@ export function bandFit(input: { width: number; round: number; timer: BandTimer;
 }
 
 /**
- * The record per Room page (state/scope.ts): "view as a player" draws a
- * second top bar with other contents, which must not move the DM's strip.
+ * Whether the top bar's give-way has moved the strip to the band, per Room
+ * page (state/scope.ts): "view as a player" draws a second top bar with
+ * other contents, which must not move the DM's strip. The top bar alone
+ * writes it (pages/Room.tsx TopBar).
  */
-const turnSlot = scopeSlot(() => createStore<{ overflowedAt: number | null }>(() => ({ overflowedAt: null })));
+const turnSlot = scopeSlot(() => createStore<{ band: boolean }>(() => ({ band: false })));
 
 /** Where this Room's turn strip goes now. */
 export function useTurnPlacement(): TurnPlacement {
   const { width, height } = useLayoutSize();
-  const overflowedAt = useStore(useScoped(turnSlot), (s) => s.overflowedAt);
-  return turnPlacement({ width, height, overflowedAt });
+  const band = useStore(useScoped(turnSlot), (s) => s.band);
+  return turnPlacement({ width, height, band });
 }
 
-/** Records that the top bar's row overflowed by `overflow` px at layout width `width` (pages/Room.tsx TopBar measures it). */
-export function useRecordOverflow(): (width: number, overflow: number) => void {
+/** Where this Room's turn strip may go at the layout's size (turnPlaces). */
+export function useTurnPlaces(): TurnPlacement | "either" {
+  return turnPlaces(useLayoutSize());
+}
+
+/** Sets whether the top bar's give-way has moved the strip to the band (pages/topBarFit.ts, its "band" step). */
+export function useBandStep(): (band: boolean) => void {
   const store = useScoped(turnSlot);
   return useCallback(
-    (width: number, overflow: number) => {
-      const before = store.getState().overflowedAt;
-      const next = overflowRecord(before, width, overflow);
-      if (next !== before) store.setState({ overflowedAt: next });
+    (band: boolean) => {
+      if (store.getState().band !== band) store.setState({ band });
     },
     [store],
   );

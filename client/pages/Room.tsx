@@ -45,8 +45,8 @@ import { Loading } from "../components/Loading.tsx";
 import { ScrollStrip } from "../components/ScrollStrip.tsx";
 import { Sheet, paneBodyPadding, type SheetMode } from "../components/Sheet.tsx";
 import { headerStacks, SHEET_HEADER, SHEET_HEADER_STACKED, pageHeightOf, sheetCap, sheetKeyboard, sheetMode, sheetWidth, sideSheetWidth } from "../components/sheetCap.ts";
-import { SHORT_LANDSCAPE_MAX, useRecordOverflow, useTopBars, useTurnPlacement, type TurnPlacement } from "../features/encounter/band.ts";
-import { FightWatch, InitiativeStrip, useYourTurnNotice } from "../features/encounter/InitiativeStrip.tsx";
+import { SHORT_LANDSCAPE_MAX, useBandStep, useTopBars, useTurnPlacement, useTurnPlaces, type TurnPlacement } from "../features/encounter/band.ts";
+import { FightWatch, InitiativeStrip, useYourTurnNotice, type StripFit, type TurnFacts } from "../features/encounter/InitiativeStrip.tsx";
 import { panelById, panelSections, panelsFor, panelSubject, subpageBack, TIME_PANEL, usePanelScroll, useSubpageFocus, type PanelClose, type PanelDef, type PanelHeader } from "../features/panels.ts";
 import { PartyDock } from "../features/party/PartyDock.tsx";
 import type { OpenSheet } from "../features/find/findToken.ts";
@@ -66,7 +66,7 @@ import { useClockToasts } from "../features/clock/useClockToasts.ts";
 import { PhaseMenu } from "../features/phases/PhaseMenu.tsx";
 import { FrameViewBar } from "../features/scenes/FrameView.tsx";
 import { SCENES_PANEL } from "../features/scenes/ids.ts";
-import { barInset, chromeZoom, smallUi, useLayoutSize } from "../features/device/layout.ts";
+import { barInset, chromeZoom, effectiveZoom, smallUi, useLayoutSize } from "../features/device/layout.ts";
 import { uiScale as uiScaleNow, usePanelWidth, useUiScale } from "../features/device/settings.ts";
 import { activeTool, toolsFor, type ToolDef } from "../features/tools.ts";
 import { SETUP_BUTTON, SETUP_TOOLS, toolbarButtons } from "../features/toolbarOrder.ts";
@@ -78,6 +78,7 @@ import { toolbarSlot, toolChanged, toolVoiceSlot, tuckEvent } from "../state/too
 import { useDropHpDraftsOnSelect } from "../features/tokens/hpDraft.ts";
 import { useClearStatBlockOnSelect } from "../features/tokens/statBlockOpen.ts";
 import { isoOffered, viewFoldSlot } from "../features/view/choice.ts";
+import { fitKey, fitStep, sameRecord, shapeOf, stepsFor, type BarContent, type FitRecord } from "./topBarFit.ts";
 import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import { useBackClose } from "../lib/backClose.ts";
 import { useWakeLock } from "../lib/wakeLock.ts";
@@ -1031,7 +1032,6 @@ function RoomPage() {
           placement={placement}
           // In the bar a player's chip shows only its dot, so the strip has room: from 900 px up below 1,100 px as before, less what a wider side panel takes, and on a phone while the strip is there.
           chipDot={wide ? width - (sideShown ? panelWidth - theme.layout.sidePanelWidth : 0) < theme.layout.chipNameMinWidth : placement === "bar" && fight}
-          barWidth={mapWidth}
           openSheet={openSheet}
           openTime={() => {
             focusNext.current = { kind: "panel", id: TIME_PANEL };
@@ -1391,41 +1391,25 @@ function MapArea(props: {
  * name's way of giving way first, and the phase menu's absence, which a
  * phone's bar has no room for.
  *
- * A phone's bar checks whether its row overflows (scrollWidth past
- * clientWidth). Where the bar holds the strip, it records it, so the strip
- * goes back to the band until the layout is wider than that. Where the row
- * still overflows without the strip, the DM's chip keeps only its dot, as
- * a player's does, again until the layout is wider: on a 320 px phone at
- * 130% the whole chip pushed Fit off the screen. Once Isometric is offered
- * (features/view/choice.ts isoOffered), where a phone's row still
- * overflows, its gaps tighten from 6 px to 2, and then the View button
- * folds into the room's menu as its "View" row (D-261026-12), each again
- * until the layout is wider: with the View button there, a 320 px phone at
- * 130% had no room for Fit. Undo and Redo never leave (M2 below). Until
- * Isometric is offered the row gives way as it always has. A DM's row from 900 px up
- * checks too, since Undo and Redo sit in it on every layout
- * (docs/design/design-v1-layout-hierarchy.md M2): there the strip stays, the chip
- * gives way to its dot first, then Full screen leaves the bar, then the
- * Phase menu, and once Isometric is offered the gaps take a phone's 6 px
- * and last the View button folds into the room's menu, each until the
- * bar is wider: at 900 px in a fight on a scene with phases the View
- * button overflowed the row by 5 px. Any row checks once Isometric is
- * offered, a player's too. The Menu and a key still
- * reach full screen, and a scene's "Show a phase" chips still switch
- * phases. A player's row from 900 px up checks while it holds Full screen,
- * which is the only thing in it that gives way: at 900 px with the strip,
- * "Your turn" and End turn beside the side panel, there was no room for it.
- * The row's own box keeps its size when its content grows,
- * so the check runs when the row's size changes (the window), when the
- * strip's size changes (whose turn, "Your turn" and End turn, the timer),
- * and when the bar's other content changes (the room name, the blackout
- * pill, the scene's phases, the clock chip's text).
+ * Where the row overflows (scrollWidth past clientWidth), the bar gives
+ * way one step at a time in a fixed order (pages/topBarFit.ts, designs/qol
+ * chips.md 5): from 900 px up the clock's chip leaves, the blackout
+ * notice folds into the DM chip's place, the chip keeps its dot, Full
+ * screen leaves, then the Phase menu, the turn chip's next faces, the
+ * gaps' room, the View button, and last the turn chip's name and an
+ * overrun timer's words. On a phone the strip goes to the band first. Each
+ * step's part stays in reach: the DM menu holds the clock and the phases,
+ * the Menu and a key Full screen, the room's menu View. Undo and Redo
+ * never leave (docs/design/design-v1-layout-hierarchy.md M2). The room name
+ * shrinks to a few letters before any step.
  *
- * From 900 px up, while the viewer has a clock, its chip sits before Undo
- * and is the first step: the strip never moves to the band there, so the
- * chip leaves before the blackout notice folds, for a player's row too,
- * which checks whenever the chip shows (docs/design/design-v1-calendar.md
- * 4.8). It comes back once the bar is wider than where it overflowed.
+ * The steps start over, in the same layout pass and before paint, whenever
+ * what the bar holds changes (a fight starts or ends, whose turn, a
+ * blackout, the phases, a chip's words, the timer running over, a font
+ * arriving) or its row widens, so the bar shows what a page opened now
+ * would (chips.md C6). The row's own width is measured for that, never the
+ * map's width passed down, which lagged a resize by a render and kept a
+ * step for good.
  */
 function TopBar(props: {
   ref?: Ref<HTMLElement>;
@@ -1435,14 +1419,6 @@ function TopBar(props: {
   compact: boolean;
   placement: TurnPlacement;
   chipDot: boolean;
-  /**
-   * The bar's own width in layout px: the map's from 900 px up, the
-   * window's below. Each step the bar gives way by is recorded at this
-   * width and comes back once it is wider, so a side panel that widens and
-   * narrows again, or hides and shows, brings each step back (docs/design/
-   * design-v1-panel-size.md 4.4).
-   */
-  barWidth: number;
   openSheet(): OpenSheet | null;
   openTime(): void;
 }) {
@@ -1453,8 +1429,7 @@ function TopBar(props: {
   const blackout = useBlackoutShown();
   // The alerts it holds may open over the screen (FightAlerts), and then the bar rises over the notices with them.
   const alertsOverlay = useStore(useScoped(barDockSlot), (s) => s.alertsOverlay);
-  const activeEntryId = useRoomView((s) => s.view?.encounter?.activeEntryId ?? null);
-  const round = useRoomView((s) => s.view?.encounter?.round ?? null);
+  const fight = useRoomView((s) => !!s.view?.encounter);
   const notice = useYourTurnNotice();
   // While the View menu's popover is open, the bar holding it stands over the notices with it (docs/design/design-v1-tool-options.md 7.6).
   const [viewOpen, setViewOpen] = useState(false);
@@ -1469,72 +1444,88 @@ function TopBar(props: {
   const dmChipRef = useRef<HTMLButtonElement | null>(null);
   const rowRef = useRef<HTMLDivElement>(null);
   const [strip, setStrip] = useState<HTMLDivElement | null>(null);
-  const recordOverflow = useRecordOverflow();
-  const width = props.barWidth;
-  // The bar's width at which the full blackout notice last overflowed the row.
-  const [blackoutShortUpTo, setBlackoutShortUpTo] = useState(0);
-  // In the compact form the blackout reminder takes the DM chip's place.
-  const blackoutShort = role === "dm" && blackout && width <= blackoutShortUpTo;
-  // The bar's width at which the DM's whole chip last overflowed the row: up to it, the chip is its dot.
-  const [dmDotUpTo, setDmDotUpTo] = useState(0);
-  const dmDot = role === "dm" && (blackoutShort || width <= dmDotUpTo);
-  // On a phone, the width at which the row still overflowed with the chip's dot: up to it, the gaps tighten.
-  const [tightUpTo, setTightUpTo] = useState(0);
-  // And the width at which the row still overflowed with tight gaps: up to it, the View button folds into the room's menu.
-  const [viewFoldUpTo, setViewFoldUpTo] = useState(0);
-  // From 900 px up the same two steps come last, after Full screen and the Phase menu, each with a width of its own so a wide window's steps never reach a phone's layout.
-  const [wideTightUpTo, setWideTightUpTo] = useState(0);
-  const [wideFoldUpTo, setWideFoldUpTo] = useState(0);
-  const tight = isoOffered && width <= (props.compact ? tightUpTo : wideTightUpTo);
-  const viewFolded = isoOffered && props.canFit && width <= (props.compact ? viewFoldUpTo : wideFoldUpTo);
-  const fold = useScoped(viewFoldSlot);
-  useLayoutEffect(() => fold.setState({ folded: viewFolded }), [fold, viewFolded]);
-  useEffect(() => () => fold.setState({ folded: false }), [fold]);
-  // From 900 px up, the width at which the row still overflowed with the chip's dot: up to it, the Phase menu leaves the bar.
-  const [phaseOffUpTo, setPhaseOffUpTo] = useState(0);
-  const phaseMenu = !props.compact && width > phaseOffUpTo;
-  // From 900 px up, where the browser can go full screen, the width at which the row still overflowed once a DM's chip was its dot, or a player's row did at all: up to it, Full screen leaves the bar.
-  const [fullscreenOffUpTo, setFullscreenOffUpTo] = useState(0);
-  const fullscreen = !props.compact && fullscreenSupported() && width > fullscreenOffUpTo;
-  const phases = useRoomView((s) => (s.sceneId ? (s.view?.scenes[s.sceneId]?.phases?.length ?? 0) : 0));
-  // From 900 px up the clock's chip is the first thing to give way, and comes back once the row has room (docs/design/design-v1-calendar.md 4.8). A phone's bar has none.
+  const places = useTurnPlaces();
   const clockText = useClockChipText();
-  // The width and the text's length at which the chip last overflowed the row. Up to that width it stays off, unless its text is shorter now (CALB-O-09).
-  const [chipOff, setChipOff] = useState({ upTo: 0, chars: 0 });
-  const chip = !props.compact && clockText !== null && (width > chipOff.upTo || clockText.length < chipOff.chars);
-  // From 900 px up the strip sits in the bar whatever it holds, so only a phone's bar records it.
-  const measured = props.placement === "bar" && props.compact;
-  // A phone's row, a DM's row from 900 px up, which holds Undo, Redo and the Phase menu, any row that holds Full screen, and once Isometric is offered every row, which holds the View button.
-  const checks = props.compact || role === "dm" || fullscreen || isoOffered || chip;
+  // A native select is as wide as its longest option, so the phases' names are the Phase menu's width.
+  const phaseNames = useRoomView((s) => {
+    const phases = s.sceneId ? s.view?.scenes[s.sceneId]?.phases : undefined;
+    return phases && phases.length > 1 ? phases.map((p) => p.name).join("\n") : null;
+  });
+  const youName = useRoomView((s) => (s.you ? (s.view?.members[s.you.memberId]?.name ?? "") : ""));
+  const [turn, setTurn] = useState<TurnFacts | null>(null);
+  const onTurn = useCallback((next: TurnFacts) => setTurn((now) => (now?.key === next.key ? now : next)), []);
+  const fonts = useFontsLoaded();
+  const dm = role === "dm";
+  const stripIn = !fight ? "none" : places === "bar" ? "bar" : places === "either" ? "movable" : "none";
+  const content: BarContent = {
+    phone: props.compact,
+    role: role ?? null,
+    // Search (qolsearch's S3) and Now playing (the sound layout's SL-C) set theirs as they land, and draw them in the shape's forms.
+    search: false,
+    nowPlaying: false,
+    clock: !props.compact && clockText !== null,
+    blackout: dm && blackout,
+    fullscreen: !props.compact && fullscreenSupported(),
+    phase: !props.compact && dm && phaseNames !== null,
+    gaps: isoOffered,
+    view: isoOffered && props.canFit,
+    strip: stripIn,
+    faces: stripIn !== "none" ? (turn?.faces ?? 0) : 0,
+    timerOver: stripIn !== "none" && turn?.timerOver === true,
+    yourTurn: stripIn !== "none" && turn?.yourTurn === true,
+    words: [
+      name,
+      String(props.canFit),
+      // A player's chip on a phone keeps its dot while the strip is in the row, which the band step decides: only the wide bar's dot is content.
+      role === "player" ? `${youName}:${props.compact ? "" : props.chipDot}` : "",
+      clockText ?? "",
+      phaseNames ?? "",
+      stripIn !== "none" ? (turn?.key ?? "") : "",
+      String(fonts),
+    ],
+  };
+  const key = fitKey(content);
+  // The key holds the whole content, so the steps follow it.
+  const steps = useMemo(() => stepsFor(content), [key]);
+  const [record, setRecord] = useState<FitRecord | null>(null);
+  const shape = shapeOf(content, key, record);
+  const stripFit = useMemo<StripFit>(
+    () => ({ faces: shape.faces, nameCap: shape.nameCap, timerShort: shape.timerShort, yourTurn: shape.yourTurn }),
+    [shape.faces, shape.nameCap, shape.timerShort, shape.yourTurn],
+  );
+  const setBand = useBandStep();
+  useLayoutEffect(() => setBand(shape.band), [setBand, shape.band]);
+  const fold = useScoped(viewFoldSlot);
+  useLayoutEffect(() => fold.setState({ folded: shape.viewFold }), [fold, shape.viewFold]);
+  useEffect(() => () => fold.setState({ folded: false }), [fold]);
   const check = useCallback(() => {
     const row = rowRef.current;
-    if (!checks || !row) return;
+    if (!row) return;
+    // The strip's place is the Room's (band.ts), which follows the band step a render later: measure only once it has.
+    if (content.strip === "movable" && shape.band !== (props.placement === "band")) return;
     // The last button tucks into the bar's padding by a negative margin (RoomChrome.tsx FitButton), which is room the row has, not overflow.
     const last = row.lastElementChild;
     const tuck = last ? Math.max(0, -parseFloat(getComputedStyle(last).marginRight) || 0) : 0;
     const overflow = row.scrollWidth - row.clientWidth - tuck;
-    if (overflow <= 0) return;
-    // On a phone the strip leaves first. Once it is in the band, this runs again with the row it left. From 900 px up the clock's chip leaves first, since the strip never moves there. Then the blackout notice folds into the DM chip's place, or the chip loses its name, then on a phone the gaps' room and then the View button, which the room's menu still reaches, then Full screen, which the Menu and a key still reach, then the Phase menu, and from 900 px up the gaps' room and the View button last.
-    if (measured) recordOverflow(width, overflow);
-    else if (chip) setChipOff({ upTo: width, chars: clockText.length });
-    else if (role === "dm" && blackout && !blackoutShort) setBlackoutShortUpTo(width);
-    else if (role === "dm" && !dmDot) setDmDotUpTo(width);
-    else if (isoOffered && props.compact && !tight) setTightUpTo(width);
-    else if (isoOffered && props.compact && props.canFit && !viewFolded) setViewFoldUpTo(width);
-    else if (fullscreen) setFullscreenOffUpTo(width);
-    else if (phaseMenu) setPhaseOffUpTo(width);
-    else if (isoOffered && !props.compact && !tight) setWideTightUpTo(width);
-    else if (isoOffered && !props.compact && props.canFit && !viewFolded) setWideFoldUpTo(width);
-  }, [checks, measured, chip, clockText, recordOverflow, role, blackout, blackoutShort, dmDot, props.compact, props.canFit, tight, viewFolded, fullscreen, phaseMenu, width]);
+    const nameEl = strip?.querySelector<HTMLElement>("[data-rvtt-strip-name]");
+    const turnName = nameEl ? nameEl.getBoundingClientRect().width / effectiveZoom(nameEl) : null;
+    const next = fitStep(record, key, { width: row.clientWidth, overflow, name: turnName }, steps);
+    if (!sameRecord(next, record)) setRecord(next);
+  }, [content.strip, shape.band, props.placement, strip, record, key, steps]);
+  const checkRef = useRef(check);
+  useLayoutEffect(() => {
+    checkRef.current = check;
+    check();
+  }, [check]);
   useLayoutEffect(() => {
     const row = rowRef.current;
-    if (!checks || !row) return;
-    const observer = new ResizeObserver(check);
+    if (!row) return;
+    // Before paint, so a narrowed row never draws a frame overflowing (as the split panes measure, below).
+    const observer = new ResizeObserver(() => flushSync(() => checkRef.current()));
     observer.observe(row);
     if (strip) observer.observe(strip);
     return () => observer.disconnect();
-  }, [checks, strip, check]);
-  useLayoutEffect(check, [check, name, blackout, role, activeEntryId, round, notice, phases, clockText]);
+  }, [strip]);
   return (
     <header
       ref={props.ref}
@@ -1558,7 +1549,7 @@ function TopBar(props: {
           display: "flex",
           alignItems: "center",
           // A DM's phone fits the name, Undo, Redo and Fit only with tighter gaps, and the narrowest phones the View button only with tighter still. From 900 px up a full row takes a phone's gaps before the View button folds.
-          gap: props.compact ? theme.space(tight ? 0.5 : 1.5) : theme.space(tight ? 1.5 : 3),
+          gap: props.compact ? theme.space(shape.tight ? 0.5 : 1.5) : theme.space(shape.tight ? 1.5 : 3),
           height: TOP_BAR,
         }}
       >
@@ -1585,27 +1576,44 @@ function TopBar(props: {
         </h1>
         {/* The chips open menus (designs/qol/chips.md C1, C2, C7). In its short form the blackout's crossed eye is the DM chip, whose menu leads with the blackout's items. */}
         {role === "dm" ? (
-          <DmChip dot={dmDot} eye={blackoutShort} timeGaveWay={clockText !== null && !chip} chipRef={dmChipRef} onOpen={raiseFor.dm} />
+          <DmChip dot={shape.dmDot} eye={shape.eye} timeGaveWay={clockText !== null && !shape.clock} chipRef={dmChipRef} onOpen={raiseFor.dm} />
         ) : role === "player" ? (
           <YouChip dot={props.chipDot} onOpen={raiseFor.you} />
         ) : null}
-        {role === "dm" && blackout && !blackoutShort ? <BlackoutChip fallbackFocus={() => dmChipRef.current} onOpen={raiseFor.blackout} /> : null}
+        {shape.blackout ? <BlackoutChip fallbackFocus={() => dmChipRef.current} onOpen={raiseFor.blackout} /> : null}
         <div style={{ flex: 1 }} />
-        {chip ? role === "dm" ? <DmClockChip onOpenTime={props.openTime} onOpen={raiseFor.clock} /> : <ClockChip onOpen={props.openTime} /> : null}
+        {shape.clock ? role === "dm" ? <DmClockChip onOpenTime={props.openTime} onOpen={raiseFor.clock} /> : <ClockChip onOpen={props.openTime} /> : null}
         {/* Once Isometric is offered, View or Fit always follows them on a scene, so they keep their whole width. */}
         {props.undo ? <UndoButtons tuck={!(isoOffered && props.canFit)} /> : null}
-        {phaseMenu ? <PhaseMenu /> : null}
-        {props.placement === "bar" ? <InitiativeStrip placement="bar" notice={notice} stripRef={setStrip} /> : null}
+        {shape.phase ? <PhaseMenu /> : null}
+        {props.placement === "bar" ? <InitiativeStrip placement="bar" notice={notice} stripRef={setStrip} fit={stripFit} onTurn={onTurn} /> : null}
         {props.canFit && role === "player" ? <FindButton openSheet={props.openSheet} /> : null}
-        {props.canFit && isoOffered ? <ViewButton onOpen={setViewOpen} folded={viewFolded} /> : null}
+        {props.canFit && isoOffered ? <ViewButton onOpen={setViewOpen} folded={shape.viewFold} /> : null}
         {props.canFit ? <FitButton /> : null}
-        {fullscreen ? <FullscreenButton /> : null}
+        {shape.fullscreen ? <FullscreenButton /> : null}
       </div>
-      {props.placement === "band" ? <InitiativeStrip placement="band" notice={notice} /> : null}
+      {props.placement === "band" ? <InitiativeStrip placement="band" notice={notice} onTurn={onTurn} /> : null}
       <FightWatch />
       {role === "dm" || role === "player" ? <ChipDialogs openTime={props.openTime} /> : null}
     </header>
   );
+}
+
+/**
+ * Counts the fonts this page has finished loading: one arriving after the
+ * top bar measured its row changes every part's width, as new words would
+ * (TopBar).
+ */
+function useFontsLoaded(): number {
+  const [loaded, setLoaded] = useState(0);
+  useEffect(() => {
+    const fonts = document.fonts as FontFaceSet | undefined;
+    if (!fonts) return;
+    const count = () => setLoaded((n) => n + 1);
+    fonts.addEventListener("loadingdone", count);
+    return () => fonts.removeEventListener("loadingdone", count);
+  }, []);
+  return loaded;
 }
 
 /** The connection banner, on one line on a short screen. Inside a very short sheet while one shows, its 3 s count kept here (pages/modalSlot.tsx). */
