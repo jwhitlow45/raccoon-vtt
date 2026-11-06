@@ -10,7 +10,7 @@ import { VIDEO_LIMITS } from "#shared/limits.ts";
 import type { MapVideo, RoomState, VideoFacts } from "#shared/model.ts";
 import type { ProjectedState } from "#shared/project.ts";
 import { formatDisplayCode } from "../auth/displaySessions.ts";
-import type { ExportManifest } from "../rooms/exportRoom.ts";
+import type { ExportManifest, ManifestAsset } from "../rooms/exportRoom.ts";
 import { importRoom } from "../rooms/importRoom.ts";
 import { startEngine, type Engine, type Socket, type TestClient } from "../rooms/testing.ts";
 import { VIDEO_PIPELINE } from "./kinds.ts";
@@ -18,7 +18,24 @@ import { sweepOrphanFiles } from "./cleanup.ts";
 import { roomStoredBytes } from "./quota.ts";
 import { variantPath } from "./store.ts";
 import { solid } from "./testImages.ts";
-import { SECRETS, appleLocationMeta, bx, defaultSoundTrack, defaultVideoTrack, encodeWebm, locationUdta, mp4File, mp4WithSecretsFrom, webmFile, webmWithSecrets, webmWithSecretsFrom } from "./video/videoTestutil.ts";
+import {
+  ROWS,
+  SECRETS,
+  appleLocationMeta,
+  bx,
+  defaultSoundTrack,
+  defaultVideoTrack,
+  encodeWebm,
+  locationUdta,
+  mp4File,
+  mp4WithSecretsFrom,
+  readMp4Recording,
+  tkhdMatrix,
+  visualEntry,
+  webmFile,
+  webmWithSecrets,
+  webmWithSecretsFrom,
+} from "./video/videoTestutil.ts";
 
 /**
  * Animated maps on the server (docs/design/design-v1-animated-maps.md 12,
@@ -198,9 +215,12 @@ describe("animated maps with the switch on", () => {
   test("a refused video answers its 4.5 code and stores nothing", async () => {
     const dm = t.client();
     const { roomId } = await dm.createRoom();
+    const plain = mp4File();
     const cases: Array<[Buffer, string, number, string]> = [
       [webmFile({ durationMs: null }), "video/webm", 422, "video_unfinished"],
-      [mp4File({ brand: "qt  " }), "video/mp4", 415, "video_type"],
+      // No ftyp: the sniff names it a MOV, and the MP4 check refuses it (docs/design/design-v1-video-turns.md 4.5).
+      [plain.subarray(plain.readUInt32BE(0)), "video/mp4", 415, "video_type"],
+      [mp4File({ brand: "qt  ", compatible: ["qt  "], tracks: [defaultVideoTrack({ entry: visualEntry("hvc1", 640, 360, "") })] }), "video/mp4", 422, "video_hevc"],
       [webmFile({ width: 4097, height: 2000 }), "video/webm", 422, "video_size"],
       [Buffer.from("not a video at all"), "video/webm", 415, "video_type"],
     ];
@@ -416,6 +436,205 @@ describe("animated maps with the switch on", () => {
     const scene = Object.values((await storedState(t, room.roomId)).scenes).find((s) => s.map);
     assert.ok(scene?.map, "the map came through as its still");
     assert.equal(scene.map.video, undefined);
+  });
+});
+
+/*
+ * Turned and stretched videos and iPhone MOVs on the server
+ * (docs/design/design-v1-video-turns.md 9, 13 and 14, Integration): a turned
+ * upload is stored plain with its facts, a MOV is stored and served as an
+ * MP4 with nothing of the phone left, and a backup carries how to draw each
+ * video, keyed apart and checked twice on its way back in.
+ */
+describe("turned, stretched and iPhone videos with the switch on", () => {
+  let t: Engine;
+  let scratch: string;
+  before(async () => {
+    t = await startEngine({ env: { ANIMATED_MAPS: "1" } });
+    scratch = await mkdtemp(join(tmpdir(), "rvtt-amrotate-"));
+  });
+  after(async () => {
+    await t.close();
+    await rm(scratch, { recursive: true, force: true });
+  });
+
+  const fixture = (name: string) => readFile(new URL(name, FIXTURES));
+  /** The MP4 loop's frames under another matrix: a header-only twin of the turned fixtures. */
+  const loopUnder = async (matrix: number[]) => {
+    const rec = readMp4Recording(await fixture("map-loop.mp4"));
+    return mp4File({ tracks: [{ handler: "vide", entry: rec.entry, timescale: rec.timescale, samples: rec.samples, matrix }] });
+  };
+  const turned270 = () => loopUnder(tkhdMatrix(ROWS.turn270));
+  const form = { playerPwHash: "x", dmName: "Importer", dmColor: "#3e8ef7", createdIp: null };
+  const geometryOf = (v: { turn?: number; mirror?: boolean; displayWidthPx?: number } | undefined) => ({ turn: v?.turn, mirror: v?.mirror, displayWidthPx: v?.displayWidthPx });
+
+  /** A new scene in the DM's room with a still of the video's drawn size, and the video on it. */
+  async function sceneWith(dm: TestClient, roomId: string, socket: Socket, videoId: string, size: [number, number]): Promise<string> {
+    const still = await uploaded(dm, roomId, await solid(size[0], size[1], "#264").png().toBuffer(), { kind: "map", type: "image/png" });
+    const sceneId = randomUUID();
+    assert.deepEqual((await socket.apply({ t: "scene.create", scene: { id: sceneId, name: `Scene ${size.join("x")}`, bounds: { w: 10, h: 10 } } })).rejects ?? [], []);
+    await setVideoMap(socket, sceneId, still.id, videoId, size);
+    return sceneId;
+  }
+
+  async function setVideoMap(socket: Socket, sceneId: string, stillId: string, videoId: string, [w, h]: [number, number]): Promise<void> {
+    const ev = await socket.apply({ t: "scene.setMap", sceneId, map: { assetId: stillId, widthPx: w, heightPx: h, cellPx: 40, originPx: { x: 0, y: 0 }, video: sent(videoId) } });
+    assert.deepEqual(ev.rejects ?? [], []);
+  }
+
+  /** Imports the zip of `files` as a new room, with a log that keeps what the import skipped. */
+  async function imported(files: Map<string, Buffer>, name: string): Promise<{ roomId: string; skipped: string[]; rows: Array<{ id: string; video: Record<string, unknown> }>; state: RoomState }> {
+    const zipPath = join(scratch, `${name}.zip`);
+    await writeFile(zipPath, await zipOf(files));
+    const skipped: string[] = [];
+    const log = { ...quietLog, warn: (_o: unknown, message?: string) => void skipped.push(message ?? "") };
+    const room = await importRoom({ pool: t.pool, assets: t.app.assets, gateway: t.app.gateway, log }, zipPath, form);
+    t.track(room.roomId);
+    const { rows } = await t.pool.query<{ id: string; video: Record<string, unknown> }>("select id, video from assets where room_id = $1 and kind = 'video' order by created_at", [room.roomId]);
+    return { roomId: room.roomId, skipped, rows, state: await storedState(t, room.roomId) };
+  }
+
+  const mapVideos = (state: RoomState) => Object.values(state.scenes).flatMap((s) => (s.map?.video ? [s.map.video] : []));
+  const manifestOf = (files: Map<string, Buffer>) => JSON.parse(files.get("assets.json")!.toString()) as ExportManifest;
+  const withManifest = (files: Map<string, Buffer>, change: (assets: ManifestAsset[]) => ManifestAsset[]) => {
+    const manifest = manifestOf(files);
+    const out = new Map(files);
+    out.set("assets.json", Buffer.from(JSON.stringify({ ...manifest, assets: change(manifest.assets) })));
+    return out;
+  };
+
+  test("a turned upload is stored plain, byte for byte the plain loop's, and its answer and row say how to draw it", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom();
+    const loop = await uploaded(dm, roomId, await fixture("map-loop.mp4"), { type: "video/mp4" });
+    const bytes = await fixture("map-turn-90.mp4");
+    const turned = await uploaded(dm, roomId, bytes, { type: "video/mp4" });
+    assert.deepEqual({ w: turned.video?.widthPx, h: turned.video?.heightPx, ...geometryOf(turned.video) }, { w: 640, h: 360, turn: 90, mirror: undefined, displayWidthPx: undefined });
+    assert.notEqual(turned.id, loop.id, "a live upload keeps its own bytes' hash");
+    const { rows } = await t.pool.query<{ video: Record<string, unknown> }>("select video from assets where id = $1", [turned.id]);
+    assert.equal(rows[0]!.video.turn, 90);
+    assert.ok((await read(dm, turned.id)).rawPayload.equals((await read(dm, loop.id)).rawPayload), "the stored header holds the identity at the coded size");
+    const wide = await uploaded(dm, roomId, await fixture("map-wide.webm"));
+    assert.equal(wide.video?.displayWidthPx, 853);
+  });
+
+  test("an iPhone's MOV is stored and served as an MP4, turned 90, with no place, face or phone in its bytes", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom();
+    const bytes = await fixture("map-iphone.mov");
+    const strings = [SECRETS.location, SECRETS.face, SECRETS.device, "com.apple.quicktime.location.ISO6709", "com.apple.quicktime.detected-face"];
+    for (const s of strings) assert.ok(bytes.includes(s), `the fixture holds ${s}`);
+    const video = await uploaded(dm, roomId, bytes, { type: "video/mp4", name: "IMG_0042.MOV" });
+    assert.deepEqual({ container: video.video?.container, audio: video.video?.audio, turn: video.video?.turn }, { container: "mp4", audio: "mp4a.40.2", turn: 90 });
+    const res = await read(dm, video.id);
+    assert.equal(res.headers["content-type"], "video/mp4");
+    assert.equal(res.rawPayload.length, bytes.length);
+    for (const s of strings) assert.equal(res.rawPayload.includes(s), false, s);
+    assert.ok(await exists(variantPath(t.assetDir, sha(bytes), "video", "full", VIDEO_PIPELINE, "mp4")));
+  });
+
+  test("the backup round trip: the manifest carries each video's geometry, and the import keeps every fact and every map its video", async () => {
+    const { dm, roomId, socket, sceneId, still } = await roomWithStill(t);
+    const flipped = await uploaded(dm, roomId, await fixture("map-turn-270-mirror.mp4"), { type: "video/mp4" });
+    const half = await uploaded(dm, roomId, await fixture("map-turn-180.mp4"), { type: "video/mp4" });
+    const wide = await uploaded(dm, roomId, await fixture("map-wide.mp4"), { type: "video/mp4" });
+    await setVideoMap(socket, sceneId, still.id, half.id, [640, 360]);
+    await sceneWith(dm, roomId, socket, flipped.id, [360, 640]);
+    await sceneWith(dm, roomId, socket, wide.id, [853, 360]);
+    const files = await unzip((await dm.get(`/api/rooms/${roomId}/export`)).rawPayload);
+    const geometries = Object.fromEntries(manifestOf(files).assets.filter((a) => a.kind === "video").map((a) => [a.id, a.geometry]));
+    assert.deepEqual(geometries, { [flipped.id]: { turn: 270, mirror: true }, [half.id]: { turn: 180 }, [wide.id]: { displayWidthPx: 853 } });
+    const back = await imported(files, "round-trip");
+    assert.deepEqual(back.skipped, []);
+    assert.deepEqual(back.rows.map((r) => geometryOf(r.video as VideoFacts)).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))), [
+      { turn: 180, mirror: undefined, displayWidthPx: undefined },
+      { turn: 270, mirror: true, displayWidthPx: undefined },
+      { turn: undefined, mirror: undefined, displayWidthPx: 853 },
+    ].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
+    const maps = mapVideos(back.state);
+    assert.equal(maps.length, 3, "every map keeps its video");
+    for (const v of maps) assert.ok(back.rows.some((r) => r.id === v.assetId));
+  });
+
+  test("two videos whose plain bytes are equal, turned 90 and 270, come back as two rows each with its turn, in either manifest order (D-261102-896)", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom();
+    const socket = await t.connect(roomId, dm);
+    await socket.snapshot("dm");
+    const ninety = await uploaded(dm, roomId, await fixture("map-turn-90.mp4"), { type: "video/mp4" });
+    const twoSeventy = await uploaded(dm, roomId, await turned270(), { type: "video/mp4" });
+    // Android's and Apple's 90: other upload bytes, the same stored file and the same turn, so one key on the way back.
+    const apple = await uploaded(dm, roomId, await loopUnder(tkhdMatrix(ROWS.turn90, 360 * 0x10000, 0)), { type: "video/mp4" });
+    await sceneWith(dm, roomId, socket, ninety.id, [360, 640]);
+    await sceneWith(dm, roomId, socket, twoSeventy.id, [360, 640]);
+    await sceneWith(dm, roomId, socket, apple.id, [360, 640]);
+    const files = await unzip((await dm.get(`/api/rooms/${roomId}/export`)).rawPayload);
+    const stored = [...files].filter(([name]) => name.endsWith("-video-full.mp4")).map(([, b]) => b);
+    assert.ok(stored.length === 3 && stored.every((b) => b.equals(stored[0]!)), "the three stored files are the same bytes");
+    for (const [order, change] of [["as exported", (a: ManifestAsset[]) => a], ["reversed", (a: ManifestAsset[]) => [...a].reverse()]] as const) {
+      const back = await imported(withManifest(files, change), `turns-${order}`);
+      assert.deepEqual(back.rows.map((r) => r.video.turn).sort(), [270, 90], `${order}: the two 90s share a row, and the 270 has its own`);
+      const maps = mapVideos(back.state);
+      assert.deepEqual(maps.map((v) => v.turn).sort(), [270, 90, 90], `${order}: each map keeps its own turn`);
+      assert.equal(new Set(maps.map((v) => v.assetId)).size, 2);
+    }
+  });
+
+  test("a present geometry this build would not write skips a mirrored, a 180 and a square video unread, each map a plain still, and bytes with their own turn win", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom();
+    const socket = await t.connect(roomId, dm);
+    await socket.snapshot("dm");
+    const loopBytes = await fixture("map-loop.mp4");
+    const flipped = await uploaded(dm, roomId, await fixture("map-turn-270-mirror.mp4"), { type: "video/mp4" });
+    const half = await uploaded(dm, roomId, await fixture("map-turn-180.mp4"), { type: "video/mp4" });
+    const square = await uploaded(dm, roomId, loopBytes, { type: "video/mp4" });
+    const own = await uploaded(dm, roomId, await turned270(), { type: "video/mp4" });
+    await sceneWith(dm, roomId, socket, flipped.id, [360, 640]);
+    await sceneWith(dm, roomId, socket, half.id, [640, 360]);
+    await sceneWith(dm, roomId, socket, square.id, [640, 360]);
+    await sceneWith(dm, roomId, socket, own.id, [360, 640]);
+    const files = await unzip((await dm.get(`/api/rooms/${roomId}/export`)).rawPayload);
+    const ownEntry = [...files.keys()].find((name) => name.startsWith(`assets/${manifestOf(files).assets.find((a) => a.id === own.id)!.sha256}`))!;
+    // The turned video's entry swapped for its unchecked bytes, which say 90 whatever the manifest says.
+    files.set(ownEntry, await fixture("map-turn-90.mp4"));
+    const bad: Record<string, unknown> = { [flipped.id]: { turn: 270, mirror: false }, [half.id]: { turn: "180" }, [square.id]: { displayWidthPx: 640, note: "x" }, [own.id]: { turn: 270 } };
+    const back = await imported(withManifest(files, (assets) => assets.map((a) => (a.id in bad ? ({ ...a, geometry: bad[a.id] } as ManifestAsset) : a))), "bad-geometry");
+    assert.equal(back.skipped.filter((m) => m === "import skipped a video whose geometry it could not read").length, 3);
+    assert.deepEqual(back.rows.map((r) => r.video.turn), [90], "the bytes' own turn, not the manifest's 270");
+    const maps = Object.values(back.state.scenes).filter((s) => s.map);
+    assert.equal(maps.length, 4, "every still came through");
+    assert.deepEqual(mapVideos(back.state).map((v) => v.turn), [90]);
+  });
+
+  test("a malformed geometry is skipped unread, and a well-formed one the parsed coded size cannot have is skipped after the check, whatever the manifest's sizes say", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom();
+    const socket = await t.connect(roomId, dm);
+    await socket.snapshot("dm");
+    const a = await uploaded(dm, roomId, await fixture("map-loop.mp4"), { type: "video/mp4" });
+    const b = await uploaded(dm, roomId, await fixture("map-turn-180.mp4"), { type: "video/mp4" });
+    const c = await uploaded(dm, roomId, await fixture("map-wide.mp4"), { type: "video/mp4" });
+    await sceneWith(dm, roomId, socket, a.id, [640, 360]);
+    await sceneWith(dm, roomId, socket, c.id, [853, 360]);
+    const files = await unzip((await dm.get(`/api/rooms/${roomId}/export`)).rawPayload);
+    const back = await imported(
+      withManifest(files, (assets) =>
+        assets.map((x) => {
+          if (x.id === a.id) return { ...x, geometry: { turn: 45 } } as unknown as ManifestAsset;
+          if (x.id === b.id) return { ...x, geometry: { displayWidthPx: 0 } } as unknown as ManifestAsset;
+          // 1500 wide fits a manifest that claims a 1000 px video, but the bytes are 640 wide: past 2:1.
+          if (x.id === c.id) return { ...x, width: 1000, geometry: { displayWidthPx: 1500 } };
+          return x;
+        }),
+      ),
+      "malformed",
+    );
+    assert.equal(back.skipped.filter((m) => m === "import skipped a video whose geometry it could not read").length, 2);
+    assert.equal(back.skipped.filter((m) => m === "import skipped an image").length, 1, "the stretch skipped after the parse");
+    assert.deepEqual(back.rows, []);
+    assert.equal(Object.values(back.state.scenes).filter((s) => s.map).length, 2, "both stills came through");
+    assert.deepEqual(mapVideos(back.state), []);
   });
 });
 
