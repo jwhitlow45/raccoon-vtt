@@ -670,12 +670,12 @@ export function findSummary(rig: TrapRig): string {
   return parts.length > 0 ? parts.join(", ") : NONE;
 }
 
-/** Players read: its line, else "Only a click", else None. */
+/** Message: its line, else "Only a click", else None. */
 export function readSummary(rig: Pick<TrapRig, "message" | "sound">): string {
   return rig.message ?? (rig.sound ? `Only a ${rig.sound}` : NONE);
 }
 
-/** It also: "2 things", or None. */
+/** Map effects: "2 things", or None. */
 export function alsoSummary(rig: Pick<TrapRig, "actions">): string {
   const n = rig.actions.length;
   return n === 0 ? NONE : `${n} ${n === 1 ? "thing" : "things"}`;

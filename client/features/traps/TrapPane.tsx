@@ -242,9 +242,9 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void; contro
           <Help>Players see this name once the trap is found.</Help>
         </Group>
 
-        <Group label="Goes off when" summary={triggerSummary({ zone: trap.zone, rig })} holds="rows" {...fold("when")}>
+        <Group label="Trigger" summary={triggerSummary({ zone: trap.zone, rig })} holds="rows" {...fold("when")}>
           {squares ? (
-            <div role="group" aria-label="Goes off when" style={{ display: "grid", gap: theme.space(1) }}>
+            <div role="group" aria-label="Trigger" style={{ display: "grid", gap: theme.space(1) }}>
               {TRIGGER_ORDER.map((t) => {
                 const on = rig.on.includes(t);
                 const last = on && rig.on.length === 1;
@@ -283,7 +283,7 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void; contro
           <Switch label="Only creatures on the floor" help="Leaves out fliers, burrowers and riders." checked={rig.floor} onChange={(floor) => setRig({ floor })} />
         </Group>
 
-        <Group label="Afterwards" summary={afterSummary(rig, pitDepth, opened)} holds="rows" {...fold("after")}>
+        <Group label="Aftermath" summary={afterSummary(rig, pitDepth, opened)} holds="rows" {...fold("after")}>
           {/* Off is the plain case, a trap that goes off once (docs/design/design-v1-look-pass-2.md 2.7). */}
           <Switch label="Arms again at the start of the next turn" checked={rig.resets === "nextTurn"} onChange={(on) => setRig({ resets: on ? "nextTurn" : "never" })} />
           <UsesField value={rig.usesLeft ?? null} onChange={(usesLeft) => setRig({ usesLeft })} />
@@ -309,7 +309,7 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void; contro
           ) : null}
         </Group>
 
-        <Group label="Hits" summary={hitsSummary(grid, rig)} holds="rows" {...fold("hits")}>
+        <Group label="Targets" summary={hitsSummary(grid, rig)} holds="rows" {...fold("hits")}>
           <HitsChoice trap={trap} rig={rig} chunks={chunks} grid={grid} setRig={setRig} pick={pick} />
         </Group>
 
@@ -317,7 +317,7 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void; contro
           <SaveFields rig={rig} setRig={setRig} />
         </Group>
 
-        <Group label="Players read" summary={readSummary(rig)} holds="rows" {...fold("read")}>
+        <Group label="Message" summary={readSummary(rig)} holds="rows" {...fold("read")}>
           <TextField label="What players read" placeholder="The floor gives way!" value={rig.message ?? ""} max={LIMITS.trapMessageChars} onSave={(message) => setRig({ message })} />
           {/* Play acts on the sound it follows, so it stands beside it rather than at the row's end, where a remove stands. */}
           <PartRow>
@@ -338,7 +338,7 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void; contro
           <Help>Players read the line, and hear the sound where their sound is on, when they see it go off.</Help>
         </Group>
 
-        <Group label="It also" summary={alsoSummary(rig)} holds="rows" {...fold("also")}>
+        <Group label="Map effects" summary={alsoSummary(rig)} holds="rows" {...fold("also")}>
           <ActionList trap={trap} rig={rig} setRig={setRig} />
           {/* The tool's options say what to tap once the pick starts (TrapTool.tsx PICK_LINES). */}
           <div>
@@ -631,13 +631,13 @@ function HitsChoice(props: { trap: Trap; rig: TrapRig; chunks: Readonly<Record<s
   return (
     <>
       {/* Its names wrap, so a narrow pane never scrolls sideways for them (docs/design/design-v1-look-pass-2.md D2). */}
-      <ChoiceRows<HitsKind> label="Hits" value={shown} options={options} onChange={choose} wrap />
+      <ChoiceRows<HitsKind> label="Targets" value={shown} options={options} onChange={choose} wrap />
       {shown === "cells" ? (
         <PartRow>
           <Button size="sm" onClick={() => props.pick("hits", true)}>
             Draw them again
           </Button>
-          {/* Named apart from Goes off when's Add squares, which grows the trap itself. */}
+          {/* Named apart from Trigger's Add squares, which grows the trap itself. */}
           <Button size="sm" icon="plus" aria-label={`Add ${cellWord(grid, true)} it hits`} onClick={() => props.pick("hits")}>
             Add {cellWord(grid, true)}
           </Button>
@@ -885,7 +885,7 @@ function useRest(): { start(then: () => void): void; stop(): void } {
   };
 }
 
-/** "It also" (4.1): each thing it does when it goes off, in order, with its choice and a way to take it out. */
+/** "Map effects" (4.1): each thing it does when it goes off, in order, with its choice and a way to take it out. */
 function ActionList(props: { trap: Trap; rig: TrapRig; setRig(patch: RigPatch): void }) {
   const { trap, rig, setRig } = props;
   const view = useRoomView((s) => s.view);

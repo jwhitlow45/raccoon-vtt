@@ -110,7 +110,7 @@ function pickSquares(ctx: ToolContext, picking: TrapPicking, zone: TrapZone | nu
   if (ctx.actions.dispatch({ t: "trap.update", trapId: trap.id, patch: { rig: { hits: { cells: next.rects } } } }) !== null) tool.setState({ picking: { ...picking, fresh: false } });
 }
 
-/** What a tap names for the open trap to set (4.1, "It also"): a hidden creature, a light, a door or a hidden stamp, topmost first. */
+/** What a tap names for the open trap to set (4.1, "Map effects"): a hidden creature, a light, a door or a hidden stamp, topmost first. */
 function pickAction(ctx: ToolContext, picking: TrapPicking, p: ToolPointer): void {
   const view = ctx.getState().view;
   const trap = view?.traps[picking.trapId];

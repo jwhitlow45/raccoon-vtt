@@ -1185,7 +1185,7 @@ export type RowOption<T extends string> = { value: T; label: string; title?: str
  * creature an area is cast from). Native radios, as ChoiceTiles. Wrap it
  * in PickCloses. `wrap` lets a long name break onto a second line, for
  * rows in a narrow pane, where one line ran past its edge (the trap
- * pane's Hits at 320 px and 130%), each row still 44 px at least.
+ * pane's Targets at 320 px and 130%), each row still 44 px at least.
  */
 export function ChoiceRows<T extends string>(props: { label: string; value: T; options: readonly RowOption<T>[]; onChange(value: NoInfer<T>): void; wrap?: boolean }) {
   const name = useId();
