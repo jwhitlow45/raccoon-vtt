@@ -80,11 +80,15 @@ export type Playlist = {
 export type SoundAt = { soundId: SoundId; at: number };
 
 export type MusicRun = {
-  /** New at each play, skip, resume and scene start, so a device knows a new run from a change of the same one. */
+  /** New at each play, skip, resume, jump and scene start, so a device knows a new run from a change of the same one. */
   run: string;
-  /** DM only. A label: it may name a deleted playlist, and its order is never compared with the run's. */
+  /**
+   * DM only. A label, and the order Shuffle off puts back while the
+   * playlist exists (docs/design/design-v1-music-player.md 6.4): it may name
+   * a deleted playlist, and the run's order may differ from the playlist's.
+   */
   playlistId?: PlaylistId;
-  /** DM only, always stored: this run's order, fixed at its start. */
+  /** DM only, always stored: this run's order, the queue, which only the DM's queue edits and Shuffle change once it starts (docs/design/design-v1-music-player.md 6.1). */
   order?: SoundId[];
   /** DM only, always stored: the place of `now` in `order`. */
   index?: number;
@@ -222,7 +226,7 @@ function nextChange(music: MusicRun, sounds: SoundLengths): { at: number; music:
   const fade = fadeMs(music);
   if (music.next !== undefined) {
     const at = crossEndAt(music.now, nowMs, music.next, fade);
-    // `next` is the track `following` names, as the reveal placed it and a reanchor or resume placed it again.
+    // `next` is the track `following` names, as the reveal placed it and a reanchor, resume or queue edit placed it again.
     const order = music.order ?? [];
     const j = following(music);
     const index = j !== null && order[j] === music.next.soundId ? j : order.indexOf(music.next.soundId);
@@ -270,10 +274,12 @@ export function reanchor(music: MusicRun, before: Pick<MusicRun, "repeat" | "fad
 }
 
 /**
- * A run placed at `t` (a resume, a reanchor) with its `next` revealed if
- * it was before or its reveal is due by `t`, at its crossfade's start but
- * never before `t` (MUS-OPUS-52). Exported for the queue's edits, which
- * place `next` again the same way (docs/design/design-v1-music-player.md 6.4).
+ * A run placed at `t` (a resume, a reanchor, a queue edit or a jump) with
+ * its `next` revealed if it was before or its reveal is due by `t`, at its
+ * crossfade's start but never before `t` (MUS-OPUS-52). A queue edit keeps
+ * a revealed `next` revealed, so one inside the reveal window swaps the
+ * revealed track at once, and one before it reveals nothing early
+ * (docs/design/design-v1-music-player.md 6.4).
  */
 export function withNextAt(music: MusicRun, nowMs: number, t: number, wasRevealed: boolean): MusicRun {
   if (music.repeat === "one") return music;
@@ -496,8 +502,125 @@ export class MusicRefusal extends Error {
  * MusicRefusal for an edit the rules refuse.
  */
 export function queueEdited(music: MusicRun, edit: QueueEdit, ctx: QueueContext, t: number): MusicRun {
-  // Lane PL-A fills this (docs/design/design-v1-music-player.md 6.4). Until then nothing calls it: the reducer's stub refuses.
-  throw new Error("queueEdited: lane PL-A builds the queue's rules");
+  const order = music.order ?? [];
+  const wasShuffled = music.shuffle === true;
+  let shuffle = wasShuffled;
+  let edited: SoundId[];
+  switch (edit.t) {
+    case "next":
+    case "add":
+      for (const id of edit.soundIds) if (lengthAs(ctx.sounds, id, "music") === undefined) throw new MusicRefusal("notMusic");
+      edited = edit.t === "next" ? playedNext(music, edit.soundIds) : addedToQueue(music, edit.soundIds);
+      break;
+    case "move":
+      edited = movedInQueue(music, edit.soundId, edit.to);
+      break;
+    case "remove":
+      if (edit.soundId === music.now.soundId) throw new MusicRefusal("playingStays");
+      edited = order.filter((id) => id !== edit.soundId);
+      break;
+    case "shuffle":
+      // A second press on another DM's device writes nothing, so it never mixes again what the first mixed.
+      if (wasShuffled) return music;
+      edited = shuffledQueue(music, edit.seed);
+      shuffle = true;
+      break;
+    case "unshuffle":
+      if (!wasShuffled) return music;
+      edited = ctx.playlist === null ? order : unshuffledQueue(music, ctx.playlist.sounds);
+      shuffle = false;
+      break;
+  }
+  if (shuffle === wasShuffled && sameOrder(edited, order)) return music;
+  if (edited.length > SOUND_LIMITS.playlistTracks) throw new MusicRefusal("queueFull");
+  const { next: revealed, shuffle: _was, ...rest } = music;
+  const out: MusicRun = { ...rest, order: edited, index: edited.indexOf(music.now.soundId), ...(shuffle ? { shuffle: true as const } : {}) };
+  // A paused run reveals nothing: its `now.at` is where it stood when paused, and a resume places `next` again.
+  if (music.paused !== undefined) return out;
+  const nowMs = lengthAs(ctx.sounds, music.now.soundId, "music");
+  return nowMs === undefined ? out : withNextAt(out, nowMs, t, revealed !== undefined);
+}
+
+function sameOrder(a: readonly SoundId[], b: readonly SoundId[]): boolean {
+  return a.length === b.length && a.every((id, i) => b[i] === id);
+}
+
+/** Play next: the ids right after the playing track in the order given, moved there if the run holds them, the playing track skipped. */
+function playedNext(music: MusicRun, soundIds: readonly SoundId[]): SoundId[] {
+  const order = music.order ?? [];
+  const ids = soundIds.filter((id) => id !== music.now.soundId);
+  if (ids.length === 0) return order;
+  const moving = new Set(ids);
+  const rest = order.filter((id) => !moving.has(id));
+  const at = rest.indexOf(music.now.soundId) + 1;
+  return [...rest.slice(0, at), ...ids, ...rest.slice(at)];
+}
+
+/**
+ * Add to queue: the ids the run lacks at the end, in the order given, the
+ * playing track skipped. One still to come stays where it is. Under Repeat
+ * off one already heard moves to the end too, since it would never come
+ * round again, while under Repeat all and one every track is still to come.
+ */
+function addedToQueue(music: MusicRun, soundIds: readonly SoundId[]): SoundId[] {
+  const order = music.order ?? [];
+  const heard = new Set(music.repeat === "off" ? order.slice(0, music.index ?? 0) : []);
+  const ids = soundIds.filter((id) => id !== music.now.soundId && (heard.has(id) || !order.includes(id)));
+  if (ids.length === 0) return order;
+  const moving = new Set(ids);
+  return [...order.filter((id) => !moving.has(id)), ...ids];
+}
+
+/**
+ * A move, its named places resolved at the op's time: `first` right after
+ * the track playing then, so Home on a later row while the first row
+ * promotes still lands first, `passEnd` the order's end, and `last` the
+ * cycle's end (just before the playing track under Repeat all and one).
+ */
+function movedInQueue(music: MusicRun, soundId: SoundId, to: QueueMoveTo): SoundId[] {
+  const order = music.order ?? [];
+  const playingId = music.now.soundId;
+  if (soundId === playingId) throw new MusicRefusal("playingStays");
+  if (!order.includes(soundId)) throw new MusicRefusal("leftQueue");
+  const rest = order.filter((id) => id !== soundId);
+  let at: number;
+  if (to === "first") at = rest.indexOf(playingId) + 1;
+  else if (to === "passEnd" || (to === "last" && music.repeat === "off")) at = rest.length;
+  else if (to === "last") at = rest.indexOf(playingId);
+  else {
+    at = rest.indexOf(to.before);
+    if (at < 0) throw new MusicRefusal("leftQueue");
+  }
+  return [...rest.slice(0, at), soundId, ...rest.slice(at)];
+}
+
+/**
+ * Shuffle on (6.4): under Repeat all and one every track but the playing
+ * one is mixed and it keeps its place, so "3 of 12" stays. Under Repeat
+ * off only the tracks after it, so nothing heard comes back.
+ */
+function shuffledQueue(music: MusicRun, seed: string): SoundId[] {
+  const order = music.order ?? [];
+  const index = music.index ?? 0;
+  if (music.repeat === "off") return [...order.slice(0, index + 1), ...seededShuffle(order.slice(index + 1), seed)];
+  const mixed = seededShuffle(order.filter((_, i) => i !== index), seed);
+  return [...mixed.slice(0, index), order[index]!, ...mixed.slice(index)];
+}
+
+/**
+ * Shuffle off with the run's playlist (6.4): the tracks in the playlist's
+ * order, then those it lacks in their present order. Under Repeat off only
+ * the tracks after the playing one, so nothing heard comes back.
+ */
+function unshuffledQueue(music: MusicRun, listed: readonly SoundId[]): SoundId[] {
+  const order = music.order ?? [];
+  const index = music.index ?? 0;
+  const inPlaylist = new Set(listed);
+  const back = (ids: readonly SoundId[]): SoundId[] => {
+    const held = new Set(ids);
+    return [...listed.filter((id) => held.has(id)), ...ids.filter((id) => !inPlaylist.has(id))];
+  };
+  return music.repeat === "off" ? [...order.slice(0, index + 1), ...back(order.slice(index + 1))] : back(order);
 }
 
 /**
@@ -509,8 +632,15 @@ export function queueEdited(music: MusicRun, edit: QueueEdit, ctx: QueueContext,
  * (`leftQueue`) for a track not in the order.
  */
 export function jumpedAt(music: MusicRun, run: string, soundId: SoundId, ms: number, sounds: SoundLengths, t: number): MusicRun {
-  // Lane PL-A fills this (docs/design/design-v1-music-player.md 6.4).
-  throw new Error("jumpedAt: lane PL-A builds the queue's rules");
+  const index = (music.order ?? []).indexOf(soundId);
+  if (index < 0) throw new MusicRefusal("leftQueue");
+  // A seek while paused moves the paused place, and the later resume places the track from there.
+  if (music.paused !== undefined && soundId === music.now.soundId) return { ...music, run, index, paused: ms };
+  const nowMs = lengthAs(sounds, soundId, "music");
+  if (nowMs === undefined) throw new MusicRefusal("notMusic");
+  const { next: _next, paused: _paused, ...rest } = music;
+  // A jump is a new run placed as a resume is, so nothing revealed carries over and players join at its place.
+  return withNextAt({ ...rest, run, index, now: { soundId, at: t - ms } }, nowMs, t, false);
 }
 
 /**
@@ -520,8 +650,26 @@ export function jumpedAt(music: MusicRun, run: string, soundId: SoundId, ms: num
  * first occurrence. The seek slider spans 0 to this.
  */
 export function seekBoundMs(music: Pick<MusicRun, "repeat" | "fade">, lengthMs: number): number {
-  // Lane PL-A fills this (docs/design/design-v1-music-player.md 6.4).
-  throw new Error("seekBoundMs: lane PL-A builds the queue's rules");
+  if (music.repeat !== "one") return lengthMs;
+  return lengthMs - Math.min(Math.max(0, fadeMs(music)), Math.floor(lengthMs / 2));
+}
+
+/** FNV-1a over the seed's UTF-16 units: the generator's 32-bit start, the same for a seed on every device. */
+function seedHash(seed: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < seed.length; i++) h = Math.imul(h ^ seed.charCodeAt(i), 0x01000193);
+  return h >>> 0;
+}
+
+/** mulberry32: numbers in [0, 1) from 32-bit integer steps, which every engine computes alike. */
+function generator(start: number): () => number {
+  let a = start >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let x = Math.imul(a ^ (a >>> 15), a | 1);
+    x = (x + Math.imul(x ^ (x >>> 7), x | 61)) ^ x;
+    return ((x ^ (x >>> 14)) >>> 0) / 4_294_967_296;
+  };
 }
 
 /**
@@ -530,6 +678,14 @@ export function seekBoundMs(music: Pick<MusicRun, "repeat" | "fade">, lengthMs: 
  * prediction mix alike. A golden test pins its output.
  */
 export function seededShuffle<T>(items: readonly T[], seed: string): T[] {
-  // Lane PL-A fills this (docs/design/design-v1-music-player.md 6.5).
-  throw new Error("seededShuffle: lane PL-A builds the queue's rules");
+  const out = [...items];
+  const next = generator(seedHash(seed));
+  // Fisher and Yates, from the end.
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(next() * (i + 1));
+    const swap = out[i]!;
+    out[i] = out[j]!;
+    out[j] = swap;
+  }
+  return out;
 }
