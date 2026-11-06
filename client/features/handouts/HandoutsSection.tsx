@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { useStore } from "zustand";
 import { handoutPages } from "#shared/handouts.ts";
 import type { Handout, HandoutDoc, Member } from "#shared/model.ts";
@@ -215,7 +215,7 @@ export function HandoutsSection(props: { fold: { open: boolean; onToggle(): void
         </RowList>
       ) : null}
       <RecentHandouts members={members ?? {}} docs={docs ?? {}} handouts={handouts ?? {}} />
-      <ShowHandout
+      <ShowHandoutForm
         members={members ?? {}}
         docs={docs ?? {}}
         opener={showButton}
@@ -368,7 +368,20 @@ function RecentRows(props: RecentListProps & { library: readonly AssetRow[] | nu
   );
 }
 
-function ShowHandout(props: {
+/** Where the form stands in the DM menu's Show a handout… dialog: its parts, the body and the buttons, for the dialog to place. */
+export type HandoutFormDialog = {
+  onClose(): void;
+  frame(parts: { body: ReactNode; buttons: ReactNode }): ReactNode;
+};
+
+/**
+ * Show a handout's form (docs/design/design-v1-pdf-handouts.md 4.1): the
+ * panel's, which opens in place from its button, and the DM menu's
+ * Show a handout… dialog (designs/qol/chips.md C4), one form in two places
+ * sharing the draft (draft.ts). In the dialog it is always open, lists the
+ * library at once, and Show or Cancel closes the dialog.
+ */
+export function ShowHandoutForm(props: {
   members: Record<string, Member | undefined>;
   docs: Record<string, HandoutDoc | undefined>;
   opener: RefObject<HTMLButtonElement | null>;
@@ -376,6 +389,7 @@ function ShowHandout(props: {
   onViewDoc(docId: string, opener: HTMLElement | null): void;
   /** View on a picked image: it opens as the Library opens it. */
   onViewImage(asset: AssetRow, title: string, opener: HTMLElement | null): void;
+  dialog?: HandoutFormDialog;
 }) {
   const roomId = useRoomView((s) => s.roomId);
   const actions = useRoomActions();
@@ -384,12 +398,16 @@ function ShowHandout(props: {
   const draft = useStore(draftStore);
   const recent = useScoped(recentHandoutsSlot);
   const set = useCallback((patch: Partial<HandoutDraft>) => draftStore.setState({ ...draftStore.getState(), ...patch }), [draftStore]);
-  const { open, pick, title, audience, chosen } = draft;
+  const { dialog } = props;
+  const { pick, title, audience, chosen } = draft;
+  const open = dialog !== undefined || draft.open;
   const pdf = usePdfJob();
   const [library, setLibrary] = useState<AssetRow[] | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [starter, setStarter] = useState(false);
+  // The dialog lists the library at once, so a failure there offers Try again in place of From the library.
+  const [libraryFailed, setLibraryFailed] = useState(false);
   const starterButton = useRef<HTMLButtonElement>(null);
   // A PDF saved while the form is open with nothing picked is picked at once, its title too unless one was typed (4.1.5).
   const savedDocId = pdf.job?.phase.k === "saved" ? pdf.job.docId : null;
@@ -399,12 +417,12 @@ function ShowHandout(props: {
     if (!savedDocId || !savedDocHere || autoPicked.current === savedDocId) return;
     autoPicked.current = savedDocId;
     const now = draftStore.getState();
-    if (!now.open || now.pick) return;
+    if (!(now.open || dialog) || now.pick) return;
     draftStore.setState(withPick(now, { kind: "doc", docId: savedDocId }, props.docs[savedDocId]?.title ?? ""));
-  }, [savedDocId, savedDocHere, draftStore, props.docs]);
-  // The form opens at its first field, and Show or Cancel gives focus back to the button that opened it.
+  }, [savedDocId, savedDocHere, draftStore, props.docs, dialog]);
+  // The form opens at its first field, and Show or Cancel gives focus back to the button that opened it. The dialog keeps focus its own way.
   const { opener, formRef: form } = props;
-  useExpansionFocus(open, { inside: form, opener });
+  useExpansionFocus(open && !dialog, { inside: form, opener });
   // Start the orientation check now, so it has finished by the first upload.
   useEffect(() => void honorsImageOrientation(), []);
   const players = Object.values(props.members)
@@ -449,9 +467,41 @@ function ShowHandout(props: {
       onClick={() => draftStore.setState(withPick(draftStore.getState(), { kind: "image", asset: a }, rememberedTitle(recent.getState().entries, { kind: "image", assetId: a.id }) ?? ""))}
       style={{ padding: 0, border: `${theme.line.border}px solid ${theme.color.border}`, borderRadius: theme.radius.sm, background: "transparent", cursor: "pointer", aspectRatio: "1" }}
     >
-      <img src={assets.url(a.id, "thumb")} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: theme.radius.sm }} />
+      {/* A block, so no baseline gap sits under the picture in its square. */}
+      <img src={assets.url(a.id, "thumb")} alt="" style={{ display: "block", width: "100%", height: "100%", objectFit: "cover", borderRadius: theme.radius.sm }} />
     </button>
   );
+
+  // The dialog closes while the library loads: its answer has nowhere to go.
+  const live = useRef(true);
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
+  const loadLibrary = async () => {
+    setError(null);
+    setLibraryFailed(false);
+    setStatus("Loading the library…");
+    try {
+      const res = await api.listAssets(roomId);
+      if (!live.current) return;
+      setLibrary(res.assets.filter((a) => a.kind === "handout"));
+    } catch (err) {
+      if (!live.current) return;
+      setError(err instanceof ApiError ? err.message : "The library could not be loaded.");
+      setLibraryFailed(true);
+    } finally {
+      if (live.current) setStatus(null);
+    }
+  };
+  const latestLoad = useRef(loadLibrary);
+  latestLoad.current = loadLibrary;
+  const inDialog = dialog !== undefined;
+  useEffect(() => {
+    if (inDialog) void latestLoad.current();
+  }, [inDialog]);
 
   if (!open) {
     return (
@@ -460,19 +510,6 @@ function ShowHandout(props: {
       </Button>
     );
   }
-
-  const loadLibrary = async () => {
-    setError(null);
-    setStatus("Loading the library…");
-    try {
-      const res = await api.listAssets(roomId);
-      setLibrary(res.assets.filter((a) => a.kind === "handout"));
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "The library could not be loaded.");
-    } finally {
-      setStatus(null);
-    }
-  };
 
   const uploadImage = async (file: File) => {
     setStatus("Preparing the image…");
@@ -536,25 +573,16 @@ function ShowHandout(props: {
       },
     });
     draftStore.setState(EMPTY_DRAFT);
+    dialog?.onClose();
   };
 
-  return (
-    <div
-      ref={form}
-      role="group"
-      aria-label="Show a handout"
-      style={{
-        display: "grid",
-        // As the upload's block: a column narrower than a field's own width, so nothing runs past the form's edge at 246 px.
-        gridTemplateColumns: "minmax(0, 1fr)",
-        gap: theme.space(3),
-        padding: theme.space(3),
-        borderRadius: theme.radius.md,
-        border: `${theme.line.border}px solid ${theme.color.border}`,
-        background: theme.color.bg,
-        minWidth: 0,
-      }}
-    >
+  const starterPacks = (
+    <Button ref={starterButton} size="sm" onClick={() => setStarter(true)} disabled={status !== null}>
+      From starter packs
+    </Button>
+  );
+  const body = (
+    <>
       <div style={{ display: "grid", gap: theme.space(2) }}>
         <strong style={{ fontSize: theme.font.body14 }}>Image or PDF</strong>
         {pick ? (
@@ -587,14 +615,14 @@ function ShowHandout(props: {
         ) : (
           <>
             <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
-              <Button size="sm" onClick={() => void loadLibrary()} disabled={status !== null}>
-                From the library
-              </Button>
+              {!dialog ? (
+                <Button size="sm" onClick={() => void loadLibrary()} disabled={status !== null}>
+                  From the library
+                </Button>
+              ) : null}
               <FileButton label="Upload a file" accept="image/*,application/pdf,.pdf" size="sm" disabled={status !== null} onFile={upload} />
               <PasteButton paste={paste} />
-              <Button ref={starterButton} size="sm" onClick={() => setStarter(true)} disabled={status !== null}>
-                From starter packs
-              </Button>
+              {!dialog ? starterPacks : null}
             </div>
             <PasteStatus paste={paste} />
             {starter ? (
@@ -630,7 +658,7 @@ function ShowHandout(props: {
                         overflow: "hidden",
                       }}
                     >
-                      <img src={assets.url(d.pages[0]?.assetId ?? "", "thumb")} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: theme.radius.sm }} />
+                      <img src={assets.url(d.pages[0]?.assetId ?? "", "thumb")} alt="" style={{ display: "block", width: "100%", height: "100%", objectFit: "cover", borderRadius: theme.radius.sm }} />
                       <span aria-hidden style={{ position: "absolute", left: theme.space(1), bottom: theme.space(1), display: "flex", pointerEvents: "none" }}>
                         <Tag dense>{pageCountText(d.pages.length)}</Tag>
                       </span>
@@ -645,6 +673,17 @@ function ShowHandout(props: {
                 <Help>From starter packs</Help>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(72px, 1fr))", gap: theme.space(2) }}>{looseApart.starter.map(imageTile)}</div>
               </>
+            ) : null}
+            {/* The dialog lists the library at once, so its other source follows the tiles, with Try again where the list failed. Three buttons in one row left the last alone on a phone. */}
+            {dialog ? (
+              <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
+                {starterPacks}
+                {libraryFailed ? (
+                  <Button size="sm" onClick={() => void loadLibrary()} disabled={status !== null}>
+                    Try again
+                  </Button>
+                ) : null}
+              </div>
             ) : null}
           </>
         )}
@@ -684,14 +723,58 @@ function ShowHandout(props: {
         )
       ) : null}
       <ErrorText>{error}</ErrorText>
+    </>
+  );
+  // A dialog's foot takes full-size buttons, as every dialog's does.
+  const footSize = dialog ? undefined : "sm";
+  const showButton = (
+    <Button variant="primary" size={footSize} icon="shown" onClick={show} disabled={!pick || status !== null}>
+      Show
+    </Button>
+  );
+  // Cancel only closes the form, or the dialog, and keeps its draft. A PDF upload goes on in its own block.
+  const cancelButton = (
+    <Button size={footSize} onClick={() => (dialog ? dialog.onClose() : set({ open: false }))}>
+      Cancel
+    </Button>
+  );
+  if (dialog) {
+    return dialog.frame({
+      body: (
+        <div ref={form} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(3), minWidth: 0 }}>
+          {body}
+        </div>
+      ),
+      // A dialog's foot holds Cancel, then its main action, at the right (components/Dialog.tsx).
+      buttons: (
+        <>
+          {cancelButton}
+          {showButton}
+        </>
+      ),
+    });
+  }
+  return (
+    <div
+      ref={form}
+      role="group"
+      aria-label="Show a handout"
+      style={{
+        display: "grid",
+        // As the upload's block: a column narrower than a field's own width, so nothing runs past the form's edge at 246 px.
+        gridTemplateColumns: "minmax(0, 1fr)",
+        gap: theme.space(3),
+        padding: theme.space(3),
+        borderRadius: theme.radius.md,
+        border: `${theme.line.border}px solid ${theme.color.border}`,
+        background: theme.color.bg,
+        minWidth: 0,
+      }}
+    >
+      {body}
       <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
-        <Button variant="primary" size="sm" icon="shown" onClick={show} disabled={!pick || status !== null}>
-          Show
-        </Button>
-        {/* Cancel only closes the form and keeps its draft. A PDF upload goes on in its own block. */}
-        <Button size="sm" onClick={() => set({ open: false })}>
-          Cancel
-        </Button>
+        {showButton}
+        {cancelButton}
       </div>
     </div>
   );
