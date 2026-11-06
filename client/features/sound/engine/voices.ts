@@ -25,6 +25,8 @@ import { SEEK_FADE_MS, Settle } from "./settle.ts";
  * itself (settle.ts).
  */
 
+/** A music track that first sounds this long after its fade began fades in afresh: a timely start keeps the shared ramp. */
+const LATE_SOUND_MS = 250;
 /** A voice due to start within this is loaded ahead, paused at its start, so it can start on time. */
 export const LOOKAHEAD_MS = 3_000;
 /** A background sound, or music other than a run's own track, that joins mid-pass fades in over this. */
@@ -238,6 +240,8 @@ type Live = {
   smoothUntil: number;
   /** The source it plays, which a loop's blob replaces only at its next pass. */
   url: string;
+  /** For a `fadeIn` placement: the audio clock time its fade starts, until the element first sounds, then null. */
+  fadeFrom: number | null;
 };
 
 /** One `MediaElementAudioSourceNode` per element, made once: an element can have only one. */
@@ -418,7 +422,7 @@ export class Voices {
     mix.gain.value = mixGain(plan);
     source.connect(fade).connect(env).connect(mix).connect(this.#env.output[plan.channel]);
     const url = this.#env.url(plan.assetId, plan.channel);
-    const v: Live = { plan, index, el, fade, env, mix, settle: new Settle(), playing: false, startTimer: null, leaving: false, failed: false, dueSince: null, refused: false, plays: 0, asking: false, places: 0, url, smoothUntil: 0 };
+    const v: Live = { plan, index, el, fade, env, mix, settle: new Settle(), playing: false, startTimer: null, leaving: false, failed: false, dueSince: null, refused: false, plays: 0, asking: false, places: 0, url, smoothUntil: 0, fadeFrom: null };
     this.#live.set(plan.key, v);
     el.onerror = () => {
       // Only a failure of the voice's own file fails it. One of a source swapped in, as a bless's silence, is the check's to put back.
@@ -426,7 +430,10 @@ export class Voices {
       v.failed = true;
       this.#reportMusic();
     };
-    el.onplaying = () => this.#reportMusic();
+    el.onplaying = () => {
+      this.#sounded(v);
+      this.#reportMusic();
+    };
     el.onwaiting = () => this.#reportMusic();
     // An element whose last load of this file failed, as one cut off by a server restart, loads it again: only setting the source does.
     if (!el.src.endsWith(url) || el.error) el.src = url;
@@ -482,10 +489,11 @@ export class Voices {
 
   /**
    * Puts the element at its place: now with a fade in, 2 s for music's own
-   * track and 0.3 s for any other voice, or paused at 0 until its start. `due` is when it became due to sound: a voice placed
-   * again keeps its own, so one that keeps failing to start stays loading,
-   * never back to playing for the indicator's 200 ms at each check, and one
-   * that stopped short, which the line may already call loading, does too.
+   * track and 0.3 s for any other voice, or paused at 0 until its start.
+   * `due` is when it became due to sound: a voice placed again keeps its
+   * own, so one that keeps failing to start stays loading, never back to
+   * playing for the indicator's 200 ms at each check, and one that stopped
+   * short, which the line may already call loading, does too.
    */
   #place(v: Live, due = performance.now()): void {
     const t = this.#env.serverNow();
@@ -510,8 +518,10 @@ export class Voices {
         v.fade.gain.setValueAtTime(0, ctxNow);
         v.fade.gain.setValueAtTime(0, startCtx);
         v.fade.gain.linearRampToValueAtTime(1, startCtx + MUSIC_FADE_MS / 1000);
+        v.fadeFrom = startCtx;
       } else {
         v.fade.gain.setValueAtTime(1, ctxNow);
+        v.fadeFrom = null;
       }
       v.playing = false;
       v.startTimer = setTimeout(() => {
@@ -534,13 +544,34 @@ export class Voices {
     }
     v.fade.gain.cancelScheduledValues(ctxNow);
     v.fade.gain.setValueAtTime(0, ctxNow);
-    // A resume's moment, or a join's, is this page's alone: the run says only where the track is, so the fade-in starts here.
+    // A resume's moment, a join's, or a heal's, a retry's or a refused play's placement again, is this page's alone: the
+    // run says only where the track is, so the fade-in starts here, over 2 s for any `fadeIn` plan.
     v.fade.gain.linearRampToValueAtTime(1, ctxNow + (v.plan.fadeIn ? MUSIC_FADE_MS : JOIN_FADE_MS) / 1000);
+    v.fadeFrom = v.plan.fadeIn ? ctxNow : null;
     v.playing = true;
     v.dueSince = due;
     v.settle.placed(aim);
     this.#play(v);
     this.#reportSoon();
+  }
+
+  /**
+   * The element's first sound since a `fadeIn` placement. One that comes
+   * late, as a first load over a weak signal does, would find its fade
+   * already over and start at full, so it fades in afresh from now. Only
+   * the first counts: a later stall's `playing` leaves the fade alone. A
+   * bless's play of an element loaded ahead is no start (`playing` unset).
+   */
+  #sounded(v: Live): void {
+    if (v.fadeFrom === null || v.leaving || !v.playing) return;
+    const from = v.fadeFrom;
+    v.fadeFrom = null;
+    const ctxNow = this.#env.ctx.currentTime;
+    if (ctxNow - from <= LATE_SOUND_MS / 1000) return;
+    const p = v.fade.gain;
+    p.cancelScheduledValues(ctxNow);
+    p.setValueAtTime(0, ctxNow);
+    p.linearRampToValueAtTime(1, ctxNow + MUSIC_FADE_MS / 1000);
   }
 
   /**
