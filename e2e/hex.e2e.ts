@@ -959,6 +959,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     const panel = await openScenes(dm);
     const known = new Set(Object.keys(dmSocket.state?.scenes ?? {}));
     const grid = panel.getByRole("radiogroup", { name: "Grid", exact: true });
+    await openSceneGroup(panel, "New scene");
     await panel.getByRole("radio", { name: "Builder", exact: true }).click();
     assert.equal(await grid.getByRole("radio", { name: "Squares" }).isChecked(), true, "a builder scene starts on squares");
     await grid.getByRole("radio", { name: "Hex rows" }).check();

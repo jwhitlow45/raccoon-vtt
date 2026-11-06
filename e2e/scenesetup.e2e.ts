@@ -231,7 +231,7 @@ async function view(sceneId: string, page: Page = dm): Promise<void> {
 async function newScene(kind: "Battle mat" | "Map image", name: string, opts: { see?: string; file?: string; shot?: string } = {}): Promise<Scene> {
   const known = new Set(scenes(dmSocket.state).map((s) => s.id));
   const panel = await scenesPanel(dm);
-  const form = section(panel, "New scene");
+  const form = await openSceneGroup(panel, "New scene");
   await form.getByRole("radio", { name: kind, exact: true }).click();
   await form.getByRole("textbox", { name: "Scene name" }).fill(name);
   if (opts.see) await playersSee(form).getByRole("radio", { name: opts.see, exact: true }).check();
@@ -302,7 +302,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
     assert.deepEqual(seeOf(run.matId), { fog: false, vision: false, light: "bright", perPlayer: false });
 
     // A new mat starts on the room's Explore.
-    const form = section(panel, "New scene");
+    const form = await openSceneGroup(panel, "New scene");
     await form.getByRole("radio", { name: "Battle mat", exact: true }).click();
     assert.equal(await checked(playersSee(form)), "explore");
     assert.equal(await form.getByText(STEPS_DOWN).count(), 0, "a mat steps nothing down");
@@ -314,7 +314,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
 
     // A new map image starts on Reveal by hand and says why. Explore on it warns.
     panel = await scenesPanel(dm);
-    const mapForm = section(panel, "New scene");
+    const mapForm = await openSceneGroup(panel, "New scene");
     await mapForm.getByRole("radio", { name: "Map image", exact: true }).click();
     const group = playersSee(mapForm);
     assert.equal(await checked(group), "reveal");
@@ -439,7 +439,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
     await waitFor("Crypt in the DM's state", () => sceneOf(run.cryptId));
     await view(run.cryptId);
     const panel = await scenesPanel(dm);
-    const form = section(panel, "New scene");
+    const form = await openSceneGroup(panel, "New scene");
     await form.getByRole("radio", { name: "Map image", exact: true }).click();
     const like = playersSee(form).getByRole("radio", { name: "Like Crypt", exact: true });
     const summary = await like.getAttribute("aria-describedby");
@@ -639,7 +639,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
     const upload = async (name: string, step: (id: string) => Promise<void>): Promise<Scene> => {
       const id = await source(name);
       await view(id);
-      const form = section(await scenesPanel(dm), "New scene");
+      const form = await openSceneGroup(await scenesPanel(dm), "New scene");
       await form.getByRole("radio", { name: "Map image", exact: true }).click();
       await form.getByRole("textbox", { name: "Scene name" }).fill(`${name} copy`);
       await playersSee(form).getByRole("radio", { name: `Like ${name}`, exact: true }).check();
@@ -661,7 +661,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
     const starter = async (name: string, step: (id: string) => Promise<void>): Promise<Scene> => {
       const id = await source(name);
       await view(id);
-      const form = section(await scenesPanel(dm), "New scene");
+      const form = await openSceneGroup(await scenesPanel(dm), "New scene");
       await form.getByRole("radio", { name: "Map image", exact: true }).click();
       await playersSee(form).getByRole("radio", { name: `Like ${name}`, exact: true }).check();
       await form.getByRole("button", { name: "From starter packs" }).click();
@@ -1097,8 +1097,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
             await measure("what-players-see", what);
             await page.keyboard.press("Escape");
             // The new scene form's Players see on a map image, with Like.
-            await openSceneGroup(panel, "New scene");
-            const form = section(panel, "New scene");
+            const form = await openSceneGroup(panel, "New scene");
             await form.getByRole("radio", { name: "Map image", exact: true }).click();
             await playersSee(form).getByRole("radio", { name: "Explore", exact: true }).check();
             await measure("new-scene-players-see", playersSee(form).locator("xpath=../.."));

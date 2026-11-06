@@ -7,7 +7,7 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import sharp from "sharp";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
-import { ConsoleWatch, OpSocket, openSideTab, pagePoint, pickTool, ROOT, Shots, sideTabName, sleep, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, OpSocket, openSceneGroup, openSideTab, pagePoint, pickTool, ROOT, Shots, sideTabName, sleep, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { openGroup } from "./helpers/groups.ts";
 
 /**
@@ -598,7 +598,7 @@ describe("animated maps", { concurrency: false }, () => {
     const VIDEO_PICK_HELP = AMD_WORDS.pickHelp;
     const known = new Set(Object.keys(dmSocket.state!.scenes));
     const panel = await amd.scenes();
-    const form = amd.section(panel, "New scene");
+    const form = await openSceneGroup(panel, "New scene");
     await form.getByRole("radio", { name: "Map image", exact: true }).click();
     await form.getByRole("textbox", { name: "Scene name" }).fill("Lagoon");
     await form.getByText(VIDEO_PICK_HELP, { exact: true }).waitFor();
@@ -652,7 +652,6 @@ describe("animated maps", { concurrency: false }, () => {
 
     // The crypt's Map image row: a name that gives the size, which the still's upload carries, so the grid is not looked for.
     const crypt = await amd.view(run.cryptId);
-    const { openSceneGroup } = await import("./harness.ts");
     const group = await openSceneGroup(crypt, "Map and grid");
     await group.getByText(VIDEO_PICK_HELP, { exact: true }).waitFor();
     await amd.recordLabels();
@@ -674,7 +673,7 @@ describe("animated maps", { concurrency: false }, () => {
   test("am-9. a video the DM's device or the server refuses says why in 4.5's words, and leaves nothing behind", async () => {
     const before = (await amd.assets()).length;
     const panel = await amd.scenes();
-    const form = amd.section(panel, "New scene");
+    const form = await openSceneGroup(panel, "New scene");
     await form.getByRole("radio", { name: "Map image", exact: true }).click();
     const input = form.locator(VIDEO_PICKER).first();
     const puts: string[] = [];
@@ -712,7 +711,6 @@ describe("animated maps", { concurrency: false }, () => {
   test("am-10. a device that cannot read the first frame: the video goes up, a still of another shape is refused by the server's facts, one of its shape makes the phase, and Low Power Mode's Try again reads it", async () => {
     const { noFrame: NO_FIRST_FRAME, lowPower: LOW_POWER_STOPPED } = AMD_WORDS;
     const crypt = await amd.view(run.cryptId);
-    const { openSceneGroup } = await import("./harness.ts");
     const group = await openSceneGroup(crypt, "Map and grid");
     const phaseCount = () => dmSocket.state!.scenes[run.cryptId]?.phases?.length ?? 1;
     const start = phaseCount();
@@ -770,7 +768,6 @@ describe("animated maps", { concurrency: false }, () => {
 
   test("am-11. Use the still only drops the crypt's video in one Setup step and Undo brings it back, and the Library shows the video as a film strip that plays in its viewer while the board lets go", async () => {
     const crypt = await amd.view(run.cryptId);
-    const { openSceneGroup } = await import("./harness.ts");
     const group = await openSceneGroup(crypt, "Map and grid");
     const before = dmSocket.state!.scenes[run.cryptId]!.map!;
     assert.ok(before.video, "the crypt starts animated");
@@ -1292,7 +1289,7 @@ describe("animated maps", { concurrency: false }, () => {
     async addAndCheck(label: string, file: string, as: { name: string; mimeType: string }, facts: { turn?: 90 | 180 | 270; mirror?: true; displayWidthPx?: number; container: "mp4" | "webm" }, drawn: [number, number], upright: boolean) {
       const known = new Set(Object.keys(amrSocket.state!.scenes));
       const panel = await amd.scenes(adm);
-      const form = amd.section(panel, "New scene");
+      const form = await openSceneGroup(panel, "New scene");
       await form.getByRole("radio", { name: "Map image", exact: true }).click();
       const sceneName = `Turned ${label}`;
       await form.getByRole("textbox", { name: "Scene name" }).fill(sceneName);
@@ -1372,7 +1369,6 @@ describe("animated maps", { concurrency: false }, () => {
     });
     assert.equal(rotation, 90, "the map layer turns the video's frame");
     const scenes = await amr.view(scene.id);
-    const { openSceneGroup } = await import("./harness.ts");
     const group = await openSceneGroup(scenes, "Map and grid");
     await group.getByText("A 360 × 640 px video, 0:02, looping. Its first frame is the still.", { exact: true }).waitFor();
     await shots.take(adm, "amr-1-map-image-row");
@@ -1437,7 +1433,7 @@ describe("animated maps", { concurrency: false }, () => {
   test("amr-6. a video whose clap crops its picture is refused in 4.4's words, and leaves nothing behind", async () => {
     const before = (await amd.assets()).length;
     const panel = await amd.scenes(adm);
-    const form = amd.section(panel, "New scene");
+    const form = await openSceneGroup(panel, "New scene");
     await form.getByRole("radio", { name: "Map image", exact: true }).click();
     const allowed = amrConsole.allow;
     amrConsole.allow = [...allowed, /status of 422 .*kind=video&name=cropped\.mp4/];
@@ -1454,7 +1450,7 @@ describe("animated maps", { concurrency: false }, () => {
   });
 
   test("amr-7. an iPhone's Most Compatible MOV, picked as video/quicktime, is stored as an MP4 and shows upright at 360 × 640", async () => {
-    const form = amd.section(await amd.scenes(adm), "New scene");
+    const form = await openSceneGroup(await amd.scenes(adm), "New scene");
     await form.getByRole("radio", { name: "Map image", exact: true }).click();
     const accept = await form.locator(VIDEO_PICKER).first().getAttribute("accept");
     assert.ok(accept?.includes("video/quicktime") && accept.includes(".mov"), `the picker takes a MOV: ${accept}`);

@@ -10,7 +10,7 @@ import { GENERATOR_VERSION } from "../client/features/dungeon/settings.ts";
 import { CHUNK_CELLS, type BuildChunk, type RoomState } from "../shared/model.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { undoSetup } from "./helpers/undoScope.ts";
-import { ConsoleWatch, openSideTab, OpSocket, pagePoint, pickTool, readCamera, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, openSceneGroup, openSideTab, OpSocket, pagePoint, pickTool, readCamera, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
  * The dungeon generator end to end (docs/design/design-v1-dungeon-generator.md
@@ -141,8 +141,9 @@ async function scenesPanel(page: Page): Promise<Locator> {
   return sheet;
 }
 
-function newSceneForm(panel: Locator): Locator {
-  return panel.getByRole("heading", { name: "New scene", exact: true }).locator("xpath=ancestor::*[self::section or @data-panel-group][1]");
+/** New scene's form, opened first where it is folded, as a phone folds it once the room has a scene (docs/design/design-v1-panel-groups.md 6.2). */
+function newSceneForm(panel: Locator): Promise<Locator> {
+  return openSceneGroup(panel, "New scene");
 }
 
 function dialogOf(page: Page): Locator {
@@ -171,7 +172,7 @@ async function previewImg(dialog: Locator): Promise<Locator> {
 
 /** New scene's Builder form, then Generate a dungeon, once its preview has drawn. */
 async function openDialog(page: Page): Promise<Locator> {
-  const form = newSceneForm(await scenesPanel(page));
+  const form = await newSceneForm(await scenesPanel(page));
   if ((await form.getByRole("button", { name: "Generate a dungeon", exact: true }).count()) === 0) await form.getByRole("radio", { name: "Builder", exact: true }).click();
   await form.getByRole("button", { name: "Generate a dungeon", exact: true }).click();
   const dialog = dialogOf(page);
@@ -368,7 +369,7 @@ describe("dungeon generator", { concurrency: false }, () => {
   });
 
   test("DG-1. on hexes Generate a dungeon is off with its note, and on squares it opens the dialog with focus on Theme", async () => {
-    const form = newSceneForm(await scenesPanel(dm));
+    const form = await newSceneForm(await scenesPanel(dm));
     await form.getByRole("radio", { name: "Builder", exact: true }).click();
     await form.getByText("Or start from a generated dungeon", { exact: true }).waitFor();
     const button = form.getByRole("button", { name: "Generate a dungeon", exact: true });
@@ -510,7 +511,7 @@ describe("dungeon generator", { concurrency: false }, () => {
     assert.equal(Object.keys(state(dmSocket)!.scenes).length, scenes);
     assert.deepEqual(consoles.dm.errors, [], "a late preview after closing logged nothing");
 
-    const form = newSceneForm(await scenesPanel(dm));
+    const form = await newSceneForm(await scenesPanel(dm));
     await form.getByRole("button", { name: "Generate a dungeon", exact: true }).click();
     await dialog.waitFor();
     assert.equal(await dialog.getByRole("radio", { name: "Crypt", exact: true }).isChecked(), true, "remembered theme");
@@ -640,7 +641,7 @@ describe("dungeon generator", { concurrency: false }, () => {
   test("DG-8. a DM who hides the dialog offline and opens the new scene mid-send: measured at 4x, and the dungeon lands", async () => {
     await dm.reload();
     await dm.getByRole("status", { name: "Connected" }).first().waitFor();
-    const form = newSceneForm(await scenesPanel(dm));
+    const form = await newSceneForm(await scenesPanel(dm));
     await form.getByRole("radio", { name: "Builder", exact: true }).click();
     await form.getByLabel("Scene name").fill("Second dungeon");
     await form.getByRole("button", { name: "Generate a dungeon", exact: true }).click();
@@ -669,7 +670,7 @@ describe("dungeon generator", { concurrency: false }, () => {
       await dialog.getByRole("button", { name: "Hide", exact: true }).click();
       await dialog.waitFor({ state: "detached" });
       // DG-R1-10: a dungeon is on its way, so New scene starts over and a Create there makes no second scene.
-      const name = newSceneForm(await scenesPanel(dm)).getByLabel("Scene name");
+      const name = (await newSceneForm(await scenesPanel(dm))).getByLabel("Scene name");
       assert.ok((await name.count()) === 0 || (await name.inputValue()) === "", "the form starts over once a hidden Make is sent");
       await dmCdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
       await watchLongTasks(dm);
@@ -693,7 +694,7 @@ describe("dungeon generator", { concurrency: false }, () => {
   });
 
   test("DG-8b. the largest choices: Make's one dispatch task stays under 100 ms at 4x, and its main-thread time is measured", async () => {
-    const form = newSceneForm(await scenesPanel(dm));
+    const form = await newSceneForm(await scenesPanel(dm));
     if ((await form.getByRole("button", { name: "Generate a dungeon", exact: true }).count()) === 0) await form.getByRole("radio", { name: "Builder", exact: true }).click();
     await form.getByLabel("Scene name").fill("Largest dungeon");
     await form.getByRole("button", { name: "Generate a dungeon", exact: true }).click();

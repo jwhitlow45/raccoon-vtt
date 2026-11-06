@@ -10,7 +10,7 @@ import { accentFor } from "../client/lib/accent.ts";
 import { PALETTES } from "../client/lib/theme.ts";
 import { lightOnly, normal, parseColor, partColors, ratio, sweepContrast, sweepRing, type Sweep } from "./helpers/contrast.ts";
 import { openGroup } from "./helpers/groups.ts";
-import { ConsoleWatch, OpSocket, openSideTab, pagePoint, pickOption, pickTool, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, OpSocket, openSceneGroup, openSideTab, pagePoint, pickOption, pickTool, Shots, sideTabName, sleep, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * The light theme (docs/design/design-v1-light-theme.md 13, lane LT-D): the
@@ -1193,7 +1193,8 @@ async function dungeonDialog(page: Page, at: string, kind: "computer" | "phone",
   await ops.send({ t: "member.update", memberId: dmId, color: BLUE });
   try {
     const panel = await openPanel(page, "Scenes");
-    const form = panel.getByRole("heading", { name: "New scene", exact: true }).locator("xpath=ancestor::*[self::section or @data-panel-group][1]");
+    // A phone folds New scene once the room has a scene (docs/design/design-v1-panel-groups.md 6.2).
+    const form = await openSceneGroup(panel, "New scene");
     await form.getByRole("radio", { name: "Builder", exact: true }).click();
     await form.getByRole("button", { name: "Generate a dungeon", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Generate a dungeon" });
