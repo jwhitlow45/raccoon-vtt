@@ -366,7 +366,7 @@ export function GenerateDialog(props: {
     <Dialog
       title="Generate a dungeon"
       onClose={close}
-      width="lg"
+      width="xl"
       phone="fill"
       backClose
       opener={props.opener}
@@ -412,7 +412,7 @@ export function GenerateDialog(props: {
 /**
  * The preview's box and whether the card is wide enough for two columns
  * (4.7), from the dialog's body as it lays out. On a wide card the preview
- * is a square of half the width, never taller than the body. On a narrow
+ * is a square (previewSide), never taller than the body. On a narrow
  * one it spans the body and is as tall as it is wide, up to 45% of the
  * body's height, or 40% at a large interface size or on the smallest
  * phones.
@@ -436,11 +436,22 @@ function useBodyLayout(root: RefObject<HTMLDivElement | null>): { wide: boolean;
   }, [root]);
   const wide = box.width + box.pad >= TWO_COLUMNS_PX;
   if (wide) {
-    const side = Math.max(0, Math.floor(Math.min((box.width - theme.space(4)) / 2, box.height)));
+    const side = previewSide(box.width, box.height);
     return { wide, width: side, height: side };
   }
   const share = uiScale() > 1 || box.width + box.pad < 360 ? 0.4 : 0.45;
   return { wide, width: Math.max(0, Math.floor(box.width)), height: Math.max(0, Math.floor(Math.min(box.width, box.height * share))) };
+}
+
+/**
+ * The wide card's preview side. Half the room is its floor, so the two columns
+ * split evenly on a narrow card. The choices keep a side panel's width, the
+ * width their Segmented rows are designed at, once the room allows it, so a
+ * wide card gives the preview the rest. The body's height caps it.
+ */
+export function previewSide(width: number, height: number): number {
+  const room = width - theme.space(4);
+  return Math.max(0, Math.floor(Math.min(Math.max(room / 2, room - theme.layout.sidePanelWidth), height)));
 }
 
 const NAME_STYLE = { fontSize: theme.font.body14, fontWeight: theme.weight.strong } as const;
