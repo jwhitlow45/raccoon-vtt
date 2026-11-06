@@ -7,6 +7,7 @@ import { after, before, describe, test } from "node:test";
 import sharp from "sharp";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import { ConsoleWatch, openSceneGroup, openSideTab, OpSocket, pagePoint, pickTool, readCamera, sceneGroup, sceneGroupFold, Shots, sideTabName, SocketWatch, startServer, Touches, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { openGroup } from "./helpers/groups.ts";
 
 /**
  * Layout and hierarchy (docs/design/design-v1-layout-hierarchy.md section 10):
@@ -626,6 +627,8 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     await view(phone, phoneCdp, { width: 667, height: 375 });
     await reloadAt(phone, 1.3);
     await openPanel(phone, "DM");
+    // Setup, so folded on a phone (docs/design/design-v1-panel-groups.md 6.2).
+    await openGroup(sheet(phone, "DM"), "Check their view");
     await sheet(phone, "DM").getByRole("button", { name: "View", exact: true }).tap();
     const preview = phone.locator('dialog[aria-label="Viewing as Pat"]');
     await preview.waitFor();
@@ -1114,6 +1117,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
 
   test("7. a DM's \"view as a player\" at 480 x 320 at 130%: \"Viewing as Pat\" stands above the very short sheet, and its Exit leaves", async () => {
     await openPanel(phone, "DM");
+    await openGroup(modal(phone), "Check their view");
     await modal(phone).getByRole("button", { name: "View", exact: true }).tap();
     const preview = phone.locator('dialog[aria-label="Viewing as Pat"]');
     await preview.waitFor();
@@ -2322,7 +2326,7 @@ describe("raccoon-vtt: the moves in the DM panel, Scenes, Members, Characters an
 
   /** The section of a panel whose label is `label`. */
   function section(panel: Locator, label: string): Locator {
-    return panel.locator("section").filter({ has: panel.page().getByRole("heading", { name: label, exact: true }) }).last();
+    return panel.locator("section, [data-panel-group]").filter({ has: panel.page().getByRole("heading", { name: label, exact: true }) }).last();
   }
 
   /** Where `inner`, or the child of `parent` that holds it, stands among `parent`'s children. */

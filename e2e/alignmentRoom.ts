@@ -23,6 +23,7 @@ import { PALETTES, theme } from "../client/lib/theme.ts";
 import { alignmentLines, containmentLines, disabledLookLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measureAlignment, menuWordLines, pillLines, popoverScrollbarLines, proficiencyHeightLines, proficiencyLines, rollingGridLines, rollRowLines, saveOutlineLines, toastLaneLines, toastsUnderCards, type HeaderPlace, type PillPoint } from "./helpers/alignment.ts";
 import { measureSpacing, spacingLines, type SpacingFinding } from "./helpers/spacing.ts";
 import { moreMenuFixture } from "./helpers/menuFixture.ts";
+import { openGroup } from "./helpers/groups.ts";
 import { framesFor, silentFrames } from "../shared/audio/mp3Testutil.ts";
 
 /**
@@ -1294,6 +1295,8 @@ async function animatedMapScreens(sweep: Sweep, page: Page): Promise<void> {
     const back = page.getByRole("button", { name: /^Back to Menu/ });
     if (await visible(back)) await back.click();
     await menu.getByRole("button", { name: /^This device/ }).click();
+    // Folded on a phone (docs/design/design-v1-panel-groups.md 6.2).
+    await openGroup(menu, "Map detail");
     // The row is radio cards under Map detail, its legend naming the group (features/device/ThisDevice.tsx).
     const animated = menu.getByRole("group", { name: "Animated maps", exact: true }).locator("xpath=..");
     await animated.scrollIntoViewIfNeeded();
@@ -1358,7 +1361,7 @@ async function soundPlaying(): Promise<void> {
 
 /** A Sound panel's section by its label. */
 function soundSection(panel: Locator, label: string): Locator {
-  return panel.getByRole("heading", { name: label, exact: true }).locator("xpath=ancestor::section[1]");
+  return panel.getByRole("heading", { name: label, exact: true }).locator("xpath=ancestor::*[self::section or @data-panel-group][1]");
 }
 
 /**
@@ -1431,6 +1434,7 @@ async function soundScreens(sweep: Sweep, page: Page, size: Size, scale: number)
     const menuBack = page.getByRole("button", { name: /^Back to Menu/ });
     if (await visible(menuBack)) await menuBack.click();
     await menu.getByRole("button", { name: /^This device/ }).click();
+    await openGroup(menu, "Sounds");
     const sounds = soundSection(menu, "Sounds");
     await sounds.scrollIntoViewIfNeeded();
     await sweep.measure(page, "sound-this-device-on", sounds);
@@ -1566,6 +1570,8 @@ async function previewWaitScreens(sweep: Sweep, page: Page, scale: number): Prom
   heldPreview = null;
   await escapeAll(page);
   const panel = await openPanelOf(page, "DM");
+  // Setup, so folded on a phone (docs/design/design-v1-panel-groups.md 6.2).
+  await openGroup(panel, "Check their view");
   const view = panel.getByRole("button", { name: "View", exact: true });
   await view.scrollIntoViewIfNeeded();
   await view.click();
@@ -6528,8 +6534,10 @@ export function grabberTests(): void {
           if (detail.alone) sweep.lines.push(`${sweep.at} grab-menu-row: "${detail.alone}" stands alone on the detail's last line of ${detail.lines}`);
           await shots.take(page, `alignment-grab-${sweep.at.replace(/ /g, "-")}-menu-row`);
           await row.click();
-          // The innermost section holding its heading: the panel around it is a section too.
-          const section = (heading: string) => menu.locator("section").filter({ has: page.getByRole("heading", { name: heading, exact: true }) }).last();
+          await openGroup(menu, "Theme");
+          await openGroup(menu, "Sheet handle");
+          // The innermost group holding its heading: the panel around it is a section.
+          const section = (heading: string) => menu.locator("[data-panel-group]").filter({ has: page.getByRole("heading", { name: heading, exact: true }) }).last();
           const themeGroup = menu.getByRole("radiogroup", { name: "Theme" });
           await themeGroup.scrollIntoViewIfNeeded();
           await sweep.measure(page, "grab-theme", section("Theme"));
@@ -6707,11 +6715,13 @@ export function sceneSettingsTests(): void {
         await sweep.measure(page, "room-settings", menu);
         await back.click();
         await menu.getByRole("button", { name: /^This device/ }).click();
-        const detail = menu.locator("section").filter({ has: page.getByRole("heading", { name: "Map detail", exact: true }) }).last();
+        await openGroup(menu, "Map detail");
+        await openGroup(menu, "Weather");
+        const detail = menu.locator("[data-panel-group]").filter({ has: page.getByRole("heading", { name: "Map detail", exact: true }) }).last();
         await detail.scrollIntoViewIfNeeded();
         await sweep.measure(page, "this-device-map-detail", detail);
         // This device's Weather section (docs/design/design-v1-weather.md 12): its three cards, with the still reason's help under the group.
-        const weatherCards = menu.locator("section").filter({ has: page.getByRole("heading", { name: "Weather", exact: true }) }).last();
+        const weatherCards = menu.locator("[data-panel-group]").filter({ has: page.getByRole("heading", { name: "Weather", exact: true }) }).last();
         await weatherCards.scrollIntoViewIfNeeded();
         await sweep.measure(page, "this-device-weather", weatherCards);
         await back.click();
@@ -7233,7 +7243,7 @@ const ANSWERED_REQUEST = "jdAlignmentRequestjdAlignmentRequestjdAlign";
 
 /** A Card or a Section by its heading's words, never an outer section holding it. */
 function sectionOf(scope: Page | Locator, heading: string): Locator {
-  return scope.getByRole("heading", { name: heading, exact: true }).locator("xpath=ancestor::section[1]");
+  return scope.getByRole("heading", { name: heading, exact: true }).locator("xpath=ancestor::*[self::section or @data-panel-group][1]");
 }
 
 export function joinRequestAlignmentTests(names: readonly string[]): void {
