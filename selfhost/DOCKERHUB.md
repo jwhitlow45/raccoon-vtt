@@ -1,22 +1,27 @@
 # raccoon-vtt
 
-A self-hosted virtual tabletop for D&D groups playing the 2024 rules (5.5e),
-made for phones first. It works on tablets, laptops and a TV at the table
-too, and every device stays in sync live. The DM sees everything, and
-players see only what the fog and the DM allow. It is free software under
-the GNU AGPL v3.0.
+A self-hosted virtual tabletop for D&D groups playing the 2024 rules (5.5e)
+on squares or hexes. It is made for phones first and also runs on tablets,
+laptops and a TV at the table, with every device kept in sync live. The DM
+sees everything, while players' devices receive only what the DM has
+revealed and what the party can see. The map image is the exception: it
+reaches every device whole, with the fog drawn over it, so a group has to
+trust its players with that. It is free software under the GNU AGPL v3.0.
 
 The source, the docs and the issue tracker are in
 [the raccoon-vtt repository on GitHub]({{REPOSITORY_URL}}).
 
 ## Features
 
-- One server hosts many groups. Each room is one campaign, with its own
-  room ID, player password and private DM link. There are no accounts.
+- One server hosts many groups, each campaign in a room of its own.
+  Whoever creates a room becomes its DM through a private DM link, and
+  players join with the room's ID and password, or by asking the DM to let
+  them in, as the DM chooses.
 - Maps from an image, a blank grid, the built-in map builder, or a
-  Universal VTT file from Dungeondraft, Dungeon Alchemist or DungeonFog.
+  Universal VTT file from Dungeondraft, Dungeon Alchemist, Arkenforge or
+  DungeonFog, top-down or isometric.
 - Fog of war, and party vision with walls, doors, lights, darkvision and
-  raised ground. Players' devices never receive what they may not see.
+  raised ground.
 - Tokens with HP, conditions, elevation and lights. Rulers, movement
   tracking, and areas of effect that count height.
 - An initiative tracker, roll requests, an encounter builder, and the SRD
@@ -103,7 +108,7 @@ docker compose exec raccoon node scripts/admin.ts create-room "Game Night" "Dana
 
 It prints the room's ID, its player password, the player link and the DM
 link. Anyone who reaches the site can also create a room from its Home
-page, a few a day per address.
+page, 5 a day per address by default (`ROOMS_PER_IP_PER_DAY`).
 
 The self-hosting guide's
 [Self-hosting with the published image]({{REPOSITORY_URL}}/blob/main/docs/self-hosting.md#self-hosting-with-the-published-image)
