@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, test } from "node:test";
 import { VIDEO_LIMITS } from "#shared/limits.ts";
 import { AssetError } from "../errors.ts";
 import { capped, checkVideoBytes } from "./check.ts";
-import { audioSpecificConfig, avcCodecString } from "./mp4.ts";
+import { audioSpecificConfig, avcCodecString, readSampleSizes } from "./mp4.ts";
 import {
   FFMPEG_AAC_LC,
   IDENTITY_MATRIX,
@@ -37,7 +41,7 @@ import {
   type Mp4Options,
   type Mp4Track,
 } from "./videoTestutil.ts";
-import { Edits } from "./window.ts";
+import { Budget, Edits, Tally } from "./window.ts";
 
 /**
  * The MP4 header check, one case per check in
@@ -967,6 +971,112 @@ describe("QuickTime MOV (4.5)", () => {
       await refused(withMeta(face({ edits: Array.from({ length: 5 }, () => ({ segment: 100, mediaTime: 0 })) })), "video_layout");
       await refused(withMeta(face({ edits: [{ segment: 500, mediaTime: 0, rate: 0x20000 }] })), "video_layout");
       await refused(withMeta(face({ edits: [{ segment: 500, mediaTime: -2 }] })), "video_layout");
+    });
+
+    /*
+     * Limits before memory (ANIMROT-ASTRA-01): a 20-byte stsz may claim
+     * 60,000 samples, so each limit holds before the tables it guards are
+     * read, and a size every sample shares is never spread into a table.
+     */
+
+    test("a ninth metadata track, a second picture or a second sound is video_tracks before any of its tables is read (ANIMROT-ASTRA-01)", async () => {
+      // The last trak's stsz claims more samples than any track may hold, so reading its tables would answer bad_video.
+      const unreadable = (bytes: Buffer) => {
+        const out = Buffer.from(bytes);
+        out.writeUInt32BE(0xffffffff, out.lastIndexOf("stsz", out.indexOf("mdat")) + 12);
+        return out;
+      };
+      await refused(unreadable(withMeta(...Array.from({ length: 8 }, () => face()))), "bad_video");
+      await refused(unreadable(withMeta(...Array.from({ length: 9 }, () => face()))), "video_tracks");
+      await refused(unreadable(mp4File({ tracks: [defaultVideoTrack(), defaultVideoTrack()] })), "video_tracks");
+      await refused(unreadable(mp4File({ tracks: [defaultVideoTrack(), defaultSoundTrack(), defaultSoundTrack()] })), "video_tracks");
+      // A handler of no kind kept is refused by name, though its entry would pass for a timecode's.
+      const timecodeEntry = bx("tmcd", fields(Buffer.alloc(6), [2, 1], [4, 0], [4, 0], [4, 30000], [4, 1001], [1, 30], [1, 0]));
+      await refused(mp4File({ tracks: [defaultVideoTrack(), { handler: "text", entry: timecodeEntry, timescale: 30000, samples: [{ size: 4, delta: 60060 }] }] }), "video_tracks");
+      // And a file with no picture at all.
+      await refused(mp4File({ tracks: [defaultSoundTrack()] }), "video_tracks");
+    });
+
+    test("every dropped track's samples are counted before a size is read, and a shared size stays one number (ANIMROT-ASTRA-01)", () => {
+      const tracksCode = (err: unknown) => err instanceof AssetError && err.code === "video_tracks";
+      const nearlyFull = () => {
+        const tally = new Tally(60_000, "video_tracks");
+        tally.add(59_999);
+        return tally;
+      };
+      // Tables cut short, claiming more than the tally has left: the tally refuses before the table is looked at.
+      assert.throws(() => readSampleSizes("stsz", fields([4, 0], [4, 2]), nearlyFull()), tracksCode);
+      assert.throws(() => readSampleSizes("stz2", fields([3, 0], [1, 16], [4, 2]), nearlyFull()), tracksCode);
+      assert.deepEqual(readSampleSizes("stsz", fields([4, 40], [4, 60_000])), { count: 60_000, fixed: 40 });
+      assert.deepEqual(readSampleSizes("stsz", fields([4, 0], [4, 2], [4, 7], [4, 9])), { count: 2, table: [7, 9] });
+    });
+
+    test("tracks whose samples share one stsz size read as their tables would (ANIMROT-ASTRA-01)", async () => {
+      // moov last, so both files hold their samples at the same offsets.
+      const file = (sharedSize: boolean) =>
+        mp4File({
+          moovLast: true,
+          tracks: [
+            defaultVideoTrack({ samples: Array.from({ length: 60 }, () => ({ size: 40, delta: 512 })), sharedSize }),
+            face({ samples: Array.from({ length: 3 }, () => ({ size: 40, delta: 200 })), chunkSamples: 2, sharedSize }),
+          ],
+        });
+      const table = await checkVideoBytes(file(false));
+      const shared = await checkVideoBytes(file(true));
+      // The bitrate alone differs, since a shared size makes a shorter file.
+      assert.deepEqual({ ...shared.facts, kbps: 0 }, { ...table.facts, kbps: 0 });
+      assert.deepEqual(shared.edits.scrubs, table.edits.scrubs);
+      assert.deepEqual(shared.edits.kept, table.edits.kept);
+      assert.equal(shared.edits.scrubs.length, 2);
+    });
+
+    test("a chunk claiming more samples than the track has left is bad_video at once, not after a walk of its claim (ANIMROT-ASTRA-01)", async () => {
+      class Counting extends Budget {
+        looks = 0;
+        override check(): void {
+          this.looks++;
+          super.check();
+        }
+      }
+      for (const sharedSize of [false, true]) {
+        const bytes = Buffer.from(mp4File({ tracks: [defaultVideoTrack({ sharedSize: sharedSize || undefined, samples: Array.from({ length: 60 }, () => ({ size: 40, delta: 512 })) })] }));
+        // The one stsc run's samples per chunk.
+        bytes.writeUInt32BE(0x7fffffff, bytes.indexOf("stsc") + 16);
+        const budget = new Counting();
+        await assert.rejects(checkVideoBytes(bytes, { budget }), (err: unknown) => err instanceof AssetError && err.code === "bad_video");
+        assert.ok(budget.looks < 200, `${budget.looks} looks at the budget`);
+      }
+    });
+
+    test("thousands of small metadata traks, each claiming 60,000 samples of one shared size, are refused in a small heap (ANIMROT-ASTRA-01)", async () => {
+      const claim = metadataTrack({ samples: Array.from({ length: 60_000 }, () => ({ size: 1, delta: 0 })), sharedSize: true });
+      const donor = mp4File({ tracks: [defaultVideoTrack(), claim] });
+      const at = donor.lastIndexOf("trak", donor.indexOf("mdat")) - 4;
+      const trak: Box = { type: "trak", head: donor.subarray(at + 8, at + donor.readUInt32BE(at)) };
+      const bytes = mp4File({ tracks: [defaultVideoTrack(), ...Array.from({ length: 8 }, () => face())], inMoov: Array.from({ length: 2_000 }, () => trak) });
+      assert.ok(bytes.length < 1_500_000, `${bytes.length} bytes`);
+      const dir = await mkdtemp(join(tmpdir(), "rvtt-mp4-"));
+      try {
+        const path = join(dir, "many.mp4");
+        await writeFile(path, bytes);
+        // Spread into tables, the claims would need about a gigabyte: far past this heap.
+        const code = `
+          const { readFile } = await import("node:fs/promises");
+          const { checkVideoBytes } = await import(process.env.CHECK);
+          try { await checkVideoBytes(await readFile(process.env.VIDEO)); console.log("accepted"); }
+          catch (err) { console.log(err.code ?? String(err)); }
+        `;
+        const r = spawnSync(process.execPath, ["--max-old-space-size=64", "--input-type=module", "-e", code], {
+          env: { ...process.env, CHECK: new URL("./check.ts", import.meta.url).href, VIDEO: path },
+          timeout: 30_000,
+          encoding: "utf8",
+        });
+        assert.equal(r.signal, null, "the check ended on its own");
+        assert.equal(r.status, 0, r.stderr);
+        assert.equal(r.stdout.trim(), "video_tracks");
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
     });
   });
 });

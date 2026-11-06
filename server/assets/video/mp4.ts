@@ -118,7 +118,7 @@ type Track = {
   stts?: Array<[number, number]>;
   ctts?: Array<[number, number]>;
   stsc?: Array<[number, number]>;
-  sizes?: number[];
+  sizes?: SampleSizes;
   chunks?: number[];
   /** cslg's five numbers, checked against the track's own timing once it is known. */
   cslg?: { shift: number; least: number; greatest: number; start: number; end: number };
@@ -338,6 +338,7 @@ function parseMoov(moov: Moov, box: Box, mdats: readonly Range[]): ParsedVideo {
   let movieDuration = 0;
   let sawHeader = false;
   const tracks: Track[] = [];
+  const counts: TrackCounts = { handlers: new Map(), metadataSamples: new Tally(MAX_METADATA_SAMPLES) };
   for (const child of moov.children(box, 1)) {
     if (child.type === "mvhd") {
       if (sawHeader) throw refuse("bad_video");
@@ -353,19 +354,19 @@ function parseMoov(moov: Moov, box: Box, mdats: readonly Range[]): ParsedVideo {
       moov.zeroAt(at + rate + 6, 10);
       if (!body.subarray(rate + 16, rate + 52).equals(IDENTITY_BYTES)) throw refuse("video_geometry");
       moov.zeroAt(at + rate + 52, 24);
-    } else if (child.type === "trak") tracks.push(parseTrak(moov, child));
+    } else if (child.type === "trak") tracks.push(parseTrak(moov, child, counts));
     else if (child.type === "mvex") throw refuse("video_fragmented");
     else moov.drop(child); // udta, meta, iods, uuid and the rest
   }
   if (!sawHeader || movieTimescale <= 0) throw refuse("bad_video");
 
+  // Each handler's most were held as the tracks were read (parseTrak), so only a missing picture is left to refuse.
   const metadata = tracks.filter((t) => t.handler === "meta");
   const kept = tracks.filter((t) => t.handler !== "meta");
   const videos = kept.filter((t) => t.handler === "vide");
   const sounds = kept.filter((t) => t.handler === "soun");
   const timecodes = kept.filter((t) => t.handler === "tmcd");
-  if (metadata.length > MAX_METADATA_TRACKS) throw refuse("video_tracks");
-  if (videos.length !== 1 || sounds.length > 1 || timecodes.length > 1 || videos.length + sounds.length + timecodes.length !== kept.length) throw refuse("video_tracks");
+  if (videos.length !== 1) throw refuse("video_tracks");
   const video = videos[0]!;
   const sound = sounds[0];
   const keptChunks: Range[] = [];
@@ -476,10 +477,8 @@ function aperture(moov: Moov, box: Box): Array<[number, number]> | null {
  * breaks either is `bad_video`: no muxer writes such tables.
  */
 function dropMetadata(moov: Moov, metadata: readonly Track[], mdats: readonly Range[], kept: readonly Range[]): void {
-  const samples = new Tally(MAX_METADATA_SAMPLES);
   const dropped: Range[] = [];
   for (const track of metadata) {
-    samples.add(track.sizes!.length);
     for (const chunk of chunkRanges(moov, track)) {
       if (!insideMdat(mdats, chunk.start, chunk.end)) throw refuse("bad_video");
       dropped.push(chunk);
@@ -511,9 +510,10 @@ export function meets(a: readonly Range[], b: readonly Range[], budget: Budget):
  * as Apple's spec allows for places (4.5). Only what the drop needs is
  * read, its chunk tables, its length and its edits, through edits that are
  * thrown away, since the whole `trak` goes. Any other `meta` track is
- * `video_tracks`.
+ * `video_tracks`. `samples` counts every dropped track's samples together,
+ * before each table is read.
  */
-function metadataTrack(moov: Moov, trak: Box, boxes: readonly Box[], mdiaKids: readonly Box[]): Track {
+function metadataTrack(moov: Moov, trak: Box, boxes: readonly Box[], mdiaKids: readonly Box[], samples: Tally): Track {
   const quiet = moov.discarding();
   const track: Track = { handler: "meta", dropped: trak };
   const seen = new Set<string>();
@@ -549,7 +549,7 @@ function metadataTrack(moov: Moov, trak: Box, boxes: readonly Box[], mdiaKids: r
             if (body.readUInt32BE(0) !== 1 || entries.length !== 1 || entries[0]!.type !== "mebx") throw refuse("video_tracks");
             track.sampleEntry = "mebx";
           } else if (s.type === "stsc") track.stsc = chunkRuns(quiet, s);
-          else if (s.type === "stsz" || s.type === "stz2") track.sizes = sampleSizes(quiet, s);
+          else if (s.type === "stsz" || s.type === "stz2") track.sizes = sampleSizes(quiet, s, samples);
           else if (s.type === "stco" || s.type === "co64") track.chunks = chunkOffsets(quiet, s);
         }
       }
@@ -588,7 +588,18 @@ function metadataEdits(moov: Moov, box: Box): number | undefined {
   return total;
 }
 
-function parseTrak(moov: Moov, trak: Box): Track {
+/** The most tracks of each handler a file may hold: one picture, a sound, a timecode (AMN-12), and the timed metadata tracks it drops (4.5). */
+const TRACK_LIMITS: ReadonlyMap<string, number> = new Map([
+  ["vide", 1],
+  ["soun", 1],
+  ["tmcd", 1],
+  ["meta", MAX_METADATA_TRACKS],
+]);
+
+/** What a `moov`'s tracks have taken so far: how many of each handler, and the dropped metadata tracks' samples together. */
+type TrackCounts = { handlers: Map<string, number>; metadataSamples: Tally };
+
+function parseTrak(moov: Moov, trak: Box, counts: TrackCounts): Track {
   const track: Track = { handler: "" };
   const boxes = moov.children(trak, 2);
   // The handler decides how the rest reads, so it is found first, wherever mdia holds it.
@@ -600,8 +611,13 @@ function parseTrak(moov: Moov, trak: Box): Track {
   const h = moov.full(hdlr[0]!, 0);
   if (h.body.length < 20) throw refuse("bad_video");
   track.handler = h.body.subarray(4, 8).toString("latin1");
-  if (track.handler === "meta") return metadataTrack(moov, trak, boxes, mdiaKids);
-  if (!["vide", "soun", "tmcd"].includes(track.handler)) throw refuse("video_tracks");
+  // Counted here, before any of the track's tables is read: a file of many small traks would otherwise make the check
+  // hold every one's tables before a count after the walk refused it (ANIMROT-ASTRA-01).
+  const limit = TRACK_LIMITS.get(track.handler);
+  const taken = (counts.handlers.get(track.handler) ?? 0) + 1;
+  if (limit === undefined || taken > limit) throw refuse("video_tracks");
+  counts.handlers.set(track.handler, taken);
+  if (track.handler === "meta") return metadataTrack(moov, trak, boxes, mdiaKids, counts.metadataSamples);
   // pre_defined, where QuickTime names a component type, and the reserved twelve, where it names a maker.
   moov.zeroAt(h.at, 4);
   moov.zeroAt(h.at + 8, 12);
@@ -773,7 +789,7 @@ function parseStbl(moov: Moov, stbl: Box, track: Track): void {
   }
   if ((seen.has("stsz") && seen.has("stz2")) || (seen.has("stco") && seen.has("co64"))) throw refuse("bad_video");
   if (!track.sampleEntry || !track.stts || !track.stsc || !track.sizes || !track.chunks) throw refuse("bad_video");
-  optionalTables(moov, later, track, track.sizes.length);
+  optionalTables(moov, later, track, track.sizes.count);
 }
 
 /**
@@ -921,31 +937,48 @@ function chunkRuns(moov: Moov, box: Box): Array<[number, number]> {
   return out;
 }
 
-function sampleSizes(moov: Moov, box: Box): number[] {
-  const { body } = moov.full(box, 0);
+/**
+ * A track's sample sizes as `stsz` or `stz2` gives them. One size every
+ * sample shares stays one number: a 20-byte `stsz` may claim 60,000
+ * samples, and a file of many such tracks would otherwise make the check
+ * hold millions of numbers before any limit refused it (ANIMROT-ASTRA-01).
+ */
+export type SampleSizes = { readonly count: number; readonly fixed: number } | { readonly count: number; readonly table: readonly number[] };
+
+function sampleSizes(moov: Moov, box: Box, tally?: Tally): SampleSizes {
+  return readSampleSizes(box.type, moov.full(box, 0).body, tally);
+}
+
+/**
+ * `stsz` or `stz2`'s body after its version and flags. The count is held
+ * to the per-track cap, and then to `tally`, the samples of every dropped
+ * metadata track together, before any size is read or kept, so neither
+ * limit comes after the memory it guards.
+ */
+export function readSampleSizes(type: string, body: Buffer, tally?: Tally): SampleSizes {
   if (body.length < 8) throw refuse("bad_video");
   // No track here may hold more samples than the sound's cap, the larger of the two.
   const cap = VIDEO_LIMITS.parseSoundFrameHeaders;
-  if (box.type === "stsz") {
+  const count = body.readUInt32BE(4);
+  if (count > cap) throw refuse("bad_video");
+  tally?.add(count);
+  if (type === "stsz") {
     const fixed = body.readUInt32BE(0);
-    const count = body.readUInt32BE(4);
-    if (count > cap) throw refuse("bad_video");
     if (fixed !== 0) {
       if (body.length !== 8) throw refuse("bad_video");
-      return new Array<number>(count).fill(fixed);
+      return { count, fixed };
     }
     if (body.length !== 8 + count * 4) throw refuse("bad_video");
-    return Array.from({ length: count }, (_, i) => body.readUInt32BE(8 + i * 4));
+    return { count, table: Array.from({ length: count }, (_, i) => body.readUInt32BE(8 + i * 4)) };
   }
   const field = body[3]!;
-  const count = body.readUInt32BE(4);
-  if (count > cap || ![4, 8, 16].includes(field) || body.readUIntBE(0, 3) !== 0) throw refuse("bad_video");
+  if (![4, 8, 16].includes(field) || body.readUIntBE(0, 3) !== 0) throw refuse("bad_video");
   if (body.length !== 8 + Math.ceil((count * field) / 8)) throw refuse("bad_video");
   const bits = new Bits(body.subarray(8));
-  const sizes = Array.from({ length: count }, () => bits.read(field));
+  const table = Array.from({ length: count }, () => bits.read(field));
   // An odd count of 4-bit sizes leaves half a byte, which must be zero.
   if (!bits.restIsZero()) throw refuse("bad_video");
-  return sizes;
+  return { count, table };
 }
 
 function chunkOffsets(moov: Moov, box: Box): number[] {
@@ -980,18 +1013,21 @@ function chunkRanges(moov: Moov, track: Track): Range[] {
     if ((chunk & 1023) === 0) moov.budget.check();
     while (run + 1 < runs.length && runs[run + 1]![0] <= chunk) run++;
     const perChunk = runs[run]![1];
+    // A chunk may hold no more samples than the table has left: a fixed size would otherwise answer for any sample asked.
+    if (sample + perChunk > sizes.count) throw refuse("bad_video");
     const start = chunks[chunk - 1]!;
     let at = start;
-    for (let i = 0; i < perChunk; i++) {
-      if ((sample & 1023) === 0) moov.budget.check();
-      const size = sizes[sample];
-      if (size === undefined) throw refuse("bad_video");
-      at += size;
-      sample++;
+    if ("fixed" in sizes) at += perChunk * sizes.fixed;
+    else {
+      for (let i = 0; i < perChunk; i++) {
+        if (((sample + i) & 1023) === 0) moov.budget.check();
+        at += sizes.table[sample + i]!;
+      }
     }
+    sample += perChunk;
     out.push({ start, end: at });
   }
-  if (sample !== sizes.length) throw refuse("bad_video");
+  if (sample !== sizes.count) throw refuse("bad_video");
   return out;
 }
 
@@ -1053,7 +1089,7 @@ function timing(moov: Moov, track: Track, movieTimescale: number, cap: number, c
       dts += delta;
     }
   }
-  if (!Number.isSafeInteger(dts) || times.length !== track.sizes!.length) throw refuse("bad_video");
+  if (!Number.isSafeInteger(dts) || times.length !== track.sizes!.count) throw refuse("bad_video");
   const typical = mostCommon(counts);
   const reorder = MAX_REORDER_FRAMES * typical;
   if (track.ctts) {

@@ -536,6 +536,8 @@ export type Mp4Track = {
   extraMinf?: Box[];
   /** Samples per chunk. Default: the whole track in one chunk. */
   chunkSamples?: number;
+  /** One `stsz` size for every sample, the first's, in place of a table: as a writer may give samples that share it. */
+  sharedSize?: boolean;
   /** The chunk offsets in place of where the writer puts the samples, given the mdat payload and those defaults. */
   chunkOffsets?: (layout: { mdat: { start: number; end: number }; defaults: number[] }) => number[];
 };
@@ -617,7 +619,9 @@ function trakBox(t: Mp4Track, id: number, movieTimescale: number, chunkOffsets: 
       if (!whole) runs[0] = fields([4, 1], [4, rest], [4, 1]);
       return [fields([4, runs.length]), ...runs];
     })()])),
-    bx("stsz", Buffer.concat([full(0), fields([4, 0], [4, t.samples.length]), ...t.samples.map((s) => fields([4, s.size]))])),
+    t.sharedSize
+      ? bx("stsz", Buffer.concat([full(0), fields([4, t.samples[0]!.size], [4, t.samples.length])]))
+      : bx("stsz", Buffer.concat([full(0), fields([4, 0], [4, t.samples.length]), ...t.samples.map((s) => fields([4, s.size]))])),
     bx("stco", Buffer.concat([full(0), fields([4, chunkOffsets.length]), ...chunkOffsets.map((o) => fields([4, o]))])),
     ...(t.extraStbl ?? []),
   );
