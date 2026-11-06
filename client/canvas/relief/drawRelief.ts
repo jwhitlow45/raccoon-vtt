@@ -6,7 +6,8 @@ import { isometric, K, toView, turnAxes, type Turn } from "../../lib/view.ts";
 import type { BandPart } from "../../features/areas/volume.ts";
 import { meets, type DrawPiece, type VolumePiece } from "./buckets.ts";
 import { patternOf } from "./looks.ts";
-import { boundsOf, facesOf, type CellPiece, type Face, type PitRegion, type SideLook, type StaticPiece, type VBox, type WallItem } from "./pieces.ts";
+import { treadHeight } from "../../lib/stairRuns.ts";
+import { boundsOf, facesOf, isOpening, risersOf, treadOrder, treadPolygon, type CellPiece, type Face, type PitRegion, type SideLook, type StaticPiece, type VBox, type WallItem } from "./pieces.ts";
 
 /**
  * Drawing a run of relief pieces (docs/design/design-v1-isometric-view.md 5.5):
@@ -137,12 +138,18 @@ function paints(box: VBox, dc: DrawContext, view: VBox): boolean {
  * the canvas's sides never tone a pixel that shows (docs/design/design-v1-relief-pan.md 5.3).
  */
 function tonedCell(c: CellPiece, dc: DrawContext, view: VBox): boolean {
+  // A stair's treads each copy the ground at their own lift (docs/design/design-v1-iso-depth.md 5.2).
+  if (c.kind === "steps") return stepsShapeOf(c, dc.turn).treads.some((t) => tonedAt(t.source, t.z, dc, view));
+  return tonedAt(shapeOf(c, dc.turn).source, c.z, dc, view);
+}
+
+/** Whether a top whose polygon at 0 has the box `s`, copied up by `z` cells, takes the face tone. */
+function tonedAt(s: VBox, z: number, dc: DrawContext, view: VBox): boolean {
   const ground = dc.ground;
   if (!ground || ground.width === 0 || ground.height === 0) return true;
   const k = dc.pixelRatio * dc.camera.scale;
   const ey = dc.pixelRatio * dc.camera.y;
-  const s = shapeOf(c, dc.turn).source;
-  const shift = K * c.z * k;
+  const shift = K * z * k;
   // The rows it shows on, with the antialiased pixel past each edge, which copies the ground at its own middle, then the rows of the ground they copy.
   const y0 = Math.max(s.y0 * k + ey - shift - EDGE_PX, view.y0);
   const y1 = Math.min(s.y1 * k + ey - shift + EDGE_PX, view.y1);
@@ -166,7 +173,7 @@ function deviceView(dc: DrawContext): VBox {
 export function tonedBoxes(pieces: readonly DrawPiece[], dc: DrawContext, out: VBox[]): void {
   const view = deviceView(dc);
   for (const p of pieces) {
-    if (p.kind !== "column" && p.kind !== "pit") continue;
+    if (p.kind !== "column" && p.kind !== "pit" && p.kind !== "steps") continue;
     const box = paintedBox(p, dc);
     if (meets(box, view) && tonedCell(p, dc, view)) out.push(box);
   }
@@ -217,12 +224,8 @@ function shapeOf(p: CellPiece, turn: Turn): CellShape {
   if (kept) return kept;
   const view = isometric(turn);
   const paths = typeof Path2D === "function";
-  const sides = facesOf(p, turn).map((f: Face): SideShape => {
-    const a = toView(view, { x: f.ax, y: f.ay }, f.z1);
-    const b = toView(view, { x: f.bx, y: f.by }, f.z1);
-    const h = K * (f.z1 - f.z0);
-    return { a, b, h, left: f.left, path: paths ? sidePath(new Path2D(), a, b, h) : null };
-  });
+  // A stair's faces draw tread by tread (stepsShapeOf).
+  const sides = p.kind === "steps" ? [] : facesOf(p, turn).map((f) => sideShape(view, f, paths));
   const top = lifted(turn, p.poly, p.z);
   const atZero = lifted(turn, p.poly, 0);
   const source: VBox = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
@@ -238,6 +241,66 @@ function shapeOf(p: CellPiece, turn: Turn): CellShape {
     for (const f of sides) sidePath(outline, f.a, f.b, f.h);
   }
   const shape = { bounds: boundsOf(p, turn), sides, top, atZero, source, topPath: paths ? polyPath(new Path2D(), top) : null, outline };
+  byTurn[turn] = shape;
+  return shape;
+}
+
+/** A face as it draws at a view. */
+function sideShape(view: ReturnType<typeof isometric>, f: Face, paths: boolean): SideShape {
+  const a = toView(view, { x: f.ax, y: f.ay }, f.z1);
+  const b = toView(view, { x: f.bx, y: f.by }, f.z1);
+  const h = K * (f.z1 - f.z0);
+  return { a, b, h, left: f.left, path: paths ? sidePath(new Path2D(), a, b, h) : null };
+}
+
+/** One tread of a stepping stair as it draws at a turn: its height, its faces toward the viewer (its outer side and its riser) and away (an opening's far sides), and its top. */
+type TreadShape = { z: number; near: readonly SideShape[]; far: readonly SideShape[]; top: readonly Pt[]; source: VBox; topPath: Path2D | null; nearOutline: Path2D | null; farOutline: Path2D | null };
+
+/** A stepping stair as it draws at a turn: its treads far to near along its climb. */
+type StepsShape = { treads: readonly TreadShape[] };
+
+const stepsShapes = new WeakMap<CellPiece, (StepsShape | undefined)[]>();
+
+/**
+ * A stepping stair's drawing at a turn (docs/design/design-v1-iso-depth.md
+ * 5.2), kept with the piece as a cell's shape is. Each tread takes its faces
+ * from the edge profiles (pieces.ts facesOf) and its riser (risersOf), and
+ * a face of no height or one a nearer, higher tread always covers is never
+ * made.
+ */
+function stepsShapeOf(p: CellPiece, turn: Turn): StepsShape {
+  let byTurn = stepsShapes.get(p);
+  if (!byTurn) stepsShapes.set(p, (byTurn = []));
+  const kept = byTurn[turn];
+  if (kept) return kept;
+  const s = p.span!;
+  const view = isometric(turn);
+  const paths = typeof Path2D === "function";
+  const faces = [...facesOf(p, turn), ...risersOf(p, turn)];
+  const outlineOf = (list: readonly SideShape[]) => {
+    if (!paths || list.length === 0) return null;
+    const path = new Path2D();
+    for (const f of list) sidePath(path, f.a, f.b, f.h);
+    return path;
+  };
+  const treads = treadOrder(s, turn).map((k): TreadShape => {
+    const z = treadHeight(s, k);
+    const mine = faces.filter((f) => f.tread === k && f.z1 > f.z0);
+    // A face up to the tread's own height faces the viewer (pieces.ts faceSpan), and one up from it is an opening's far side.
+    const near = mine.filter((f) => f.z1 === z).map((f) => sideShape(view, f, paths));
+    const far = mine.filter((f) => f.z1 !== z).map((f) => sideShape(view, f, paths));
+    const poly = treadPolygon(s, p.x, p.y, k);
+    const top = lifted(turn, poly, z);
+    const source: VBox = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+    for (const q of lifted(turn, poly, 0)) {
+      source.x0 = Math.min(source.x0, q.x);
+      source.y0 = Math.min(source.y0, q.y);
+      source.x1 = Math.max(source.x1, q.x);
+      source.y1 = Math.max(source.y1, q.y);
+    }
+    return { z, near, far, top, source, topPath: paths ? polyPath(new Path2D(), top) : null, nearOutline: outlineOf(near), farOutline: outlineOf(far) };
+  });
+  const shape = { treads };
   byTurn[turn] = shape;
   return shape;
 }
@@ -474,6 +537,70 @@ function drawPit(g: CanvasRenderingContext2D, p: CellPiece, dc: DrawContext, vie
   g.restore();
 }
 
+/**
+ * A stair that climbs in steps (docs/design/design-v1-iso-depth.md 5.2): its
+ * treads far to near along its climb, each its faces toward the viewer,
+ * then its top, the ground copied up or down to its height, then an
+ * opening's far sides. A stair whose steps start below 0 draws inside the
+ * openings of its pit region, as a pit does. Its own tops are copied here,
+ * never batched with columns' (drawRun flushes those first).
+ */
+function drawSteps(g: CanvasRenderingContext2D, p: CellPiece, dc: DrawContext, view: VBox): void {
+  const opening = isOpening(p);
+  if (opening) {
+    g.save();
+    g.beginPath();
+    for (const o of openingsOf(p, dc)) addPoly(g, shapeOf(o, dc.turn).atZero);
+    g.clip("nonzero");
+  }
+  const shape = stepsShapeOf(p, dc.turn);
+  if (dc.toned && shape.treads.some((t) => tonedAt(t.source, t.z, dc, view))) dc.toned.push(paintedBox(p, dc));
+  const unit = 1 / (dc.camera.scale * dc.pixelRatio);
+  const pattern = groundPattern(g, dc);
+  const k = dc.pixelRatio * dc.camera.scale;
+  for (const t of shape.treads) {
+    for (const f of t.near) fillSide(g, f.a, f.b, f.h, p.look, f.left, dc, null, false, f.path);
+    if (t.near.length > 0) strokeFaces(g, t.near, t.nearOutline, unit);
+    const path = t.topPath;
+    if (!path) {
+      g.beginPath();
+      addPoly(g, t.top);
+    }
+    if (tonedAt(t.source, t.z, dc, view)) {
+      g.fillStyle = t.z < 0 ? theme.relief.side : p.look.color;
+      fillWith(g, path);
+    }
+    if (pattern) {
+      // Pattern space is the ground's device pixels, moved by the tread's lift, as copyGround moves a top's.
+      pattern.setTransform({ a: 1 / k, b: 0, c: 0, d: 1 / k, e: -(dc.pixelRatio * dc.camera.x) / k, f: -(dc.pixelRatio * dc.camera.y + K * t.z * k) / k });
+      g.fillStyle = pattern;
+      fillWith(g, path);
+    }
+    // Below 0 a tread is darkened as a pit's floor is.
+    if (t.z < 0) {
+      g.fillStyle = theme.relief.pitShade;
+      fillWith(g, path);
+    }
+    g.strokeStyle = theme.relief.edge;
+    g.lineWidth = unit;
+    strokeWith(g, path);
+    for (const f of t.far) fillSide(g, f.a, f.b, f.h, p.look, f.left, dc, null, false, f.path);
+    if (t.far.length > 0) strokeFaces(g, t.far, t.farOutline, unit);
+  }
+  if (opening) g.restore();
+}
+
+/** The outlines of faces filled one by one, in one stroke. */
+function strokeFaces(g: CanvasRenderingContext2D, faces: readonly SideShape[], path: Path2D | null, unit: number): void {
+  if (!path) {
+    g.beginPath();
+    for (const f of faces) addSide(g, f.a, f.b, f.h);
+  }
+  g.strokeStyle = theme.relief.edge;
+  g.lineWidth = unit;
+  strokeWith(g, path);
+}
+
 /** A pillar's radius in cells, as the builder draws its disc (builder/draw.ts pillarPaths). */
 const PILLAR_RADIUS = 0.36;
 
@@ -600,9 +727,11 @@ export function drawRun(g: CanvasRenderingContext2D, pieces: readonly DrawPiece[
       batch.push(p);
       continue;
     }
+    // A stair's steps can stand over tops held at their lift, so those are copied first (ISOD-08).
     flush();
     if (!paints(paintedBox(p, dc), dc, view)) continue;
     if (p.kind === "wall") drawWall(g, p, dc);
+    else if (p.kind === "steps") drawSteps(g, p, dc, view);
     else drawPit(g, p, dc, view);
   }
   flush();

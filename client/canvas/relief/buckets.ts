@@ -6,7 +6,7 @@ import { keySpan, neighborOf } from "../../lib/groundCells.ts";
 import type { Turn } from "../../lib/view.ts";
 import type { BandDraw } from "../../features/areas/volume.ts";
 import type { AreaPits, VolumeLook } from "./drawRelief.ts";
-import { boundsOf, cellPieces, keyOf, localKeyOf, polyBox, RANK, sortKey, wallItems, type CellPiece, type PieceSource, type PitRegion, type StaticPiece, type VBox } from "./pieces.ts";
+import { boundsOf, cellPieces, edgeLow, isOpening, keyOf, localKeyOf, lowestOf, polyBox, RANK, sortKey, wallItems, type CellPiece, type PieceSource, type PitRegion, type StaticPiece, type VBox } from "./pieces.ts";
 import type { WallPiece } from "./runs.ts";
 
 /**
@@ -15,10 +15,11 @@ import type { WallPiece } from "./runs.ts";
  * it first comes into view at that turn, with the union of its pieces'
  * full projected bounds for culling. A bucket is rebuilt only when what it
  * reads changes: its chunk or a neighbor's (heights, terrain, stairs), the
- * fog tiles under them (the viewer's seen ground), its wall pieces, or
- * whatever the caller passes as `global` (the stand threshold, the feet per
- * cell, the side looks). The store replaces each of those objects on every
- * change, so identity says when.
+ * fog tiles under them (the viewer's seen ground), its wall pieces, the
+ * spans of the stepping stairs in them, or whatever the caller passes as
+ * `global` (the stand threshold, the detail, the feet per cell, the side
+ * looks). The store replaces each of those objects on every change, so
+ * identity says when, and the spans compare as strings.
  *
  * Standees are placed among the pieces per layout by the own-cells rule:
  * a standee draws after every cell of its footprint whose drawn ground is at
@@ -239,6 +240,7 @@ export class ReliefIndex {
     const seen = new Set<string>();
     const hex = isHex(grid);
     const around = hex ? NINE : FIVE;
+    const runs = src.runs;
     for (let cy = 0; cy < down; cy++) {
       for (let cx = 0; cx < across; cx++) {
         const key = `${cx},${cy}`;
@@ -253,6 +255,8 @@ export class ReliefIndex {
           input.walls.get(key),
           ...around.flatMap(([dx, dy]) => [chunks[at(dx!, dy!)], !hex && tiles ? tiles[at(dx!, dy!)] : null]),
           ...(hex && tiles ? hexTiles(grid, sceneId, cx, cy).map((k) => tiles[k]) : []),
+          // The spans of its own stepping stairs and of the four chunks' beside it, whose sides read them, as one string compared by value: an edit anywhere along a run rebuilds every bucket whose steps it moves (docs/design/design-v1-iso-depth.md 5.2).
+          runs && !hex ? FIVE.map(([dx, dy]) => runs.chunkSig(cx + dx, cy + dy)).join("|") : "",
         ];
         const old = this.#buckets.get(key);
         if (old && sameSig(old.sig, sig)) continue;
@@ -271,11 +275,13 @@ export class ReliefIndex {
   /**
    * Connects pits side by side into regions (D-261030-461), every pit's
    * region and every wall's under 0 set again. Read from drawn ground only,
-   * so an unseen pit joins nothing.
+   * so an unseen pit joins nothing. A stair whose steps start below 0 is an
+   * opening as a pit is, and two openings join where the side they share
+   * goes below 0 on the neighbor's edge profile (docs/design/design-v1-iso-depth.md 5.2).
    */
   #findRegions(): void {
     const pits: CellPiece[] = [];
-    for (const b of this.#buckets.values()) for (const c of b.cells.values()) if (c.kind === "pit") pits.push(c);
+    for (const b of this.#buckets.values()) for (const c of b.cells.values()) if (isOpening(c)) pits.push(c);
     const parent = new Map<CellPiece, CellPiece>();
     const find = (c: CellPiece): CellPiece => {
       let r = c;
@@ -291,9 +297,9 @@ export class ReliefIndex {
     for (const c of pits) parent.set(c, c);
     for (const c of pits) {
       for (let i = 0; i < c.sides.length; i++) {
-        if (c.around[i]! >= 0) continue;
+        if (edgeLow(c, i) >= 0) continue;
         const n = this.#neighbor(c, i);
-        if (!n || n.kind !== "pit") continue;
+        if (!n || !isOpening(n)) continue;
         const a = find(c);
         const b = find(n);
         if (a !== b) parent.set(a, b);
@@ -565,9 +571,10 @@ export class ReliefIndex {
       for (const cell of s.cells) {
         const c = this.cellAt(cell.col, cell.row);
         if (!c) continue;
-        if (c.z <= s.base) key = Math.max(key, keyOf(c, turn));
+        // A stair counts by its lowest tread, so a standee on its steps draws after it.
+        if (lowestOf(c) <= s.base) key = Math.max(key, keyOf(c, turn));
         else over.push(c);
-        if (c.kind === "pit" && s.base < 0 && c.region) regions.add(c.region);
+        if (isOpening(c) && s.base < 0 && c.region) regions.add(c.region);
       }
       // Its pits' whole regions, as far as they can show it: a neighbor's opening it stands behind shows it too.
       const pits = [...regions].flatMap((r) => this.openingsMeeting(r, turn, s.bounds));

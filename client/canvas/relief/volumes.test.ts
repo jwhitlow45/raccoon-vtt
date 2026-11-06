@@ -289,7 +289,9 @@ describe("the board's areas standing as their real shapes", () => {
 
   test("security: the board's volumes read the viewer's drawn heights and fog, never the real heights", () => {
     const src = readFileSync(new URL("./IsoBoard.tsx", import.meta.url), "utf8");
-    assert.match(src, /const heights = useMemo\(\(\) => drawnHeights\(src, feet\), \[src, feet\]\);/);
+    // The stairs' directions come from the walls of the viewer's own chunks (docs/design/design-v1-iso-depth.md 5.2).
+    assert.match(src, /const walls = useMemo\(\(\) => sceneWalls\(scene, chunks\), \[scene, chunks\]\);/);
+    assert.match(src, /const heights = useMemo\(\(\) => drawnHeights\(src, feet, walls\), \[src, feet, walls\]\);/);
     assert.match(src, /\(\{ heights, tiles: props\.viewerFog, px: octave, fog, live: liveGround \}\)/);
   });
 });

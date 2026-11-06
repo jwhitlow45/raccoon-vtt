@@ -34,6 +34,16 @@ export type IsoGround = {
   top?: (box: { x0: number; y0: number; x1: number; y1: number }) => number;
   /** On hexes, the drawn ground hex by hex, for a mark laid in parts on the hexes under it (markStand.ts groundPieces). Absent on squares. */
   surface?: { grid: HexGrid; atCell: (c: GroundCell) => number };
+  /** Whether the relief draws its detail at this zoom (lib/view.ts heightsDetail), which every reader of steps takes from here or from the drawn heights. False when left out. */
+  detail?: boolean;
+  /**
+   * The cells, "x,y", of the stairs that climb in steps while the detail
+   * shows, kept as one set while its cells stay the same: the ground stage
+   * leaves their symbols out (docs/design/design-v1-iso-depth.md 5.2).
+   */
+  stepping?: ReadonlySet<string>;
+  /** The stand surface under a footprint's cells, in cells of height (lib/view.ts standSurface), where a dragged token's moving marks stand. Absent where no stair steps. */
+  standOn?: (cells: readonly GroundCell[]) => number;
 };
 
 export const IsoGroundContext = createContext<IsoGround | null>(null);

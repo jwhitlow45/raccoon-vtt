@@ -1,18 +1,21 @@
 import { CHUNK_CELLS, type BuildChunk, type TerrainId } from "#shared/model.ts";
 import { isHex, SQUARES, type Grid } from "#shared/rules/grid.ts";
-import { chunkMarks } from "#shared/rules/heights.ts";
+import { chunkMarks, STEP } from "#shared/rules/heights.ts";
 import type { Point } from "../../lib/camera.ts";
 import { cellCenter, cellInScene, cellPolygon, neighborOf, sideCount, sideEnds, sideOutward } from "../../lib/groundCells.ts";
+import { treadAt, treadHeight, TREADS, treadUnder, type StairRuns, type StairStep } from "../../lib/stairRuns.ts";
 import { depth, K, turnAxes, type Turn } from "../../lib/view.ts";
 import type { WallPiece } from "./runs.ts";
 
 /**
  * The pieces the relief layer draws in depth order
  * (docs/design/design-v1-isometric-view.md 5.5 and 5.6): columns for raised cells,
- * openings for pits, and standing wall pieces. Standees are the fourth kind,
- * placed among them by buckets.ts. Everything here is in world cells and
- * heights in cells, the drawn heights of view.ts (`drawnGround`), so a
- * viewer's pieces never read terrain they have not seen.
+ * openings for pits, stairs that climb in steps
+ * (docs/design/design-v1-iso-depth.md 5.2), and standing wall pieces.
+ * Standees are the fifth kind, placed among them by buckets.ts. Everything
+ * here is in world cells and heights in cells, the drawn heights of view.ts
+ * (`drawnGround`), so a viewer's pieces never read terrain they have not
+ * seen.
  */
 
 /** A cell's four sides, in the order every list here keeps: north (y - 1), east (x + 1), south (y + 1), west (x - 1). */
@@ -30,19 +33,29 @@ export type SideLook = { texture: TerrainId | null; color: string };
 export type PitRegion = { id: number; cells: CellPiece[] };
 
 /**
- * A raised cell (drawn ground above 0) or a pit (below 0), with its
- * neighbors' drawn ground side by side: a square's four in SIDES order, a
- * hex's six in hex.ts hexNeighbors order. `x` and `y` are its key, a hex's
- * column and row on a hex scene, and `poly` and `center` are where it is.
+ * A raised cell (drawn ground above 0), a pit (below 0), or a stair that
+ * climbs in steps at any height, 0 included, with its neighbors' drawn
+ * ground side by side: a square's four in SIDES order, a hex's six in
+ * hex.ts hexNeighbors order. `x` and `y` are its key, a hex's column and
+ * row on a hex scene, and `poly` and `center` are where it is.
  */
 export type CellPiece = {
-  kind: "column" | "pit";
+  kind: "column" | "pit" | "steps";
   id: string;
   x: number;
   y: number;
   /** Drawn ground in cells. */
   z: number;
   around: readonly number[];
+  /**
+   * The span of a stair in a run that steps (lib/stairRuns.ts), whatever the
+   * detail: its bounds take the whole span, so they never change with the
+   * zoom (docs/design/design-v1-iso-depth.md 6). It draws as steps only as
+   * a `steps` piece.
+   */
+  span?: StairStep;
+  /** The neighbors that are stepping stairs, side by side with `around`, while the detail shows: a face reads their treads along the shared side. */
+  aroundSteps?: readonly (StairStep | undefined)[];
   /** Its polygon in world cells (groundCells.ts cellPolygon). */
   poly: readonly Point[];
   /** Its center in world cells, the point it sorts by. */
@@ -67,8 +80,18 @@ export type StaticPiece = CellPiece | WallItem;
 /** How high a wall piece stands, in cells (ISO-D7): rooms read as rooms and stay open to a phone that turns all the time. An automatic wall beside raised ground stands less (wallItems). */
 export const WALL_RISE = 0.5;
 
-/** Ties in depth draw columns first, then pits, then walls, then standees (5.6). */
-export const RANK = { column: 0, pit: 1, wall: 2, standee: 3 } as const;
+/** Ties in depth draw columns and steps first, then pits, then walls, then standees (5.6). */
+export const RANK = { column: 0, steps: 0, pit: 1, wall: 2, standee: 3 } as const;
+
+/** Whether a cell piece is an opening at 0, drawn below it inside its pit region's openings: a pit, or a stair whose steps start below 0. */
+export function isOpening(p: CellPiece): boolean {
+  return p.kind === "pit" || (p.kind === "steps" && p.span!.lo < 0);
+}
+
+/** The height a piece's lowest surface stands at, in cells: a stair's lowest tread, else its drawn ground. A standee at or above it draws after it (buckets.ts). */
+export function lowestOf(p: CellPiece): number {
+  return p.kind === "steps" ? p.span!.lo : p.z;
+}
 
 export type Face = {
   /** The side's ends on the ground plane, in cells. */
@@ -81,14 +104,31 @@ export type Face = {
   z1: number;
   /** Which way it faces on screen, for the light from the left: lighter left, darker right. */
   left: boolean;
-  /** The side's index, SIDES's on squares, hexNeighbors's on hexes. */
+  /** The side's index, SIDES's on squares, hexNeighbors's on hexes, or -1 for a riser inside a stair's square. */
   side: number;
+  /** On a stepping stair, the tread whose part of the side, or whose riser, this is: it draws with that tread. */
+  tread?: number;
 };
 
 /** Whether side `i` faces the viewer at this turn: its outward step brings a point nearer (larger depth). */
 export function facesViewer(turn: Turn, i: number): boolean {
   const [dx, dy] = SIDES[i]!;
   return depth(turn, dx, dy) > 0;
+}
+
+/**
+ * The face between a cell whose surface along a side is at `own` and a
+ * neighbor's at `other`, by the side's facing: toward the viewer the higher
+ * cell's side, from the lower surface (or 0, where the lower one is an
+ * opening whose own far side carries on below) up to the higher. Away from
+ * it, an opening's far side from its floor up to the neighbor's surface or
+ * 0, whichever is lower. Null where none shows.
+ */
+function faceSpan(near: boolean, own: number, other: number): { z0: number; z1: number } | null {
+  if (near) return own > 0 && other < own ? { z0: Math.max(other, 0), z1: own } : null;
+  if (own >= 0) return null;
+  const z1 = Math.min(other, 0);
+  return z1 > own ? { z0: own, z1 } : null;
 }
 
 /**
@@ -99,32 +139,125 @@ export function facesViewer(turn: Turn, i: number): boolean {
  * to the far neighbor's ground or 0, whichever is lower. A side faces the
  * viewer when its outward step brings a point nearer: on hexes three of
  * the six at every turn, whatever the heights.
+ *
+ * Every face reads both cells' edge profiles along the side they share,
+ * never a stepping stair's stored ground (docs/design/design-v1-iso-depth.md
+ * 5.2): a plain cell's is its drawn ground, flat, and a stepping stair's is
+ * its treads along that side, flat at its lowest tread on its foot side, at
+ * its top tread on its head side, and stepped on its outer sides. So a side
+ * beside a stair's outer side is cut in fifths, one face for each run of
+ * fifths with the same ends, and a stair's faces each carry their tread.
  */
 export function facesOf(p: CellPiece, turn: Turn): Face[] {
   const out: Face[] = [];
   const { c, s } = turnAxes(turn);
   const centerU = c * p.center.x - s * p.center.y;
+  const own = p.kind === "steps" ? p.span : undefined;
   for (let i = 0; i < p.sides.length; i++) {
     const side = p.sides[i]!;
     const near = depth(turn, side.out.x, side.out.y) > 0;
-    const n = p.around[i]!;
-    let z0: number;
-    let z1: number;
-    if (p.kind === "column") {
-      if (!near || n >= p.z) continue;
-      z0 = Math.max(n, 0);
-      z1 = p.z;
-    } else {
-      if (near) continue;
-      z0 = p.z;
-      z1 = Math.min(n, 0);
-      if (z1 <= z0) continue;
-    }
     const midU = c * ((side.a.x + side.b.x) / 2) - s * ((side.a.y + side.b.y) / 2);
-    out.push({ ax: side.a.x, ay: side.a.y, bx: side.b.x, by: side.b.y, z0, z1, left: midU < centerU, side: i });
+    const left = midU < centerU;
+    const other = p.aroundSteps?.[i];
+    if (!own && !other) {
+      const span = faceSpan(near, p.z, p.around[i]!);
+      if (span) out.push({ ax: side.a.x, ay: side.a.y, bx: side.b.x, by: side.b.y, z0: span.z0, z1: span.z1, left, side: i });
+      continue;
+    }
+    // A square's side, in fifths: the neighbor's key is across it.
+    const nx = p.x + side.out.x;
+    const ny = p.y + side.out.y;
+    let last: Face | null = null;
+    for (let j = 0; j < TREADS; j++) {
+      const at = (f: number) => ({ x: side.a.x + (side.b.x - side.a.x) * f, y: side.a.y + (side.b.y - side.a.y) * f });
+      const a = at(j / TREADS);
+      const b = at((j + 1) / TREADS);
+      const mid = at((j + 0.5) / TREADS);
+      const tread = own ? treadAt(own, p.x, p.y, mid) : undefined;
+      const span = faceSpan(near, own ? treadHeight(own, tread!) : p.z, other ? treadUnder(other, nx, ny, mid) : p.around[i]!);
+      if (!span) {
+        last = null;
+        continue;
+      }
+      if (last && last.z0 === span.z0 && last.z1 === span.z1 && last.tread === tread) {
+        last.bx = b.x;
+        last.by = b.y;
+        continue;
+      }
+      last = { ax: a.x, ay: a.y, bx: b.x, by: b.y, z0: span.z0, z1: span.z1, left, side: i, ...(tread === undefined ? {} : { tread }) };
+      out.push(last);
+    }
   }
   return out;
 }
+
+/** The lowest of the neighbor's edge profile along side `i`: its lowest tread along that side for a stepping stair, else its drawn ground. */
+export function edgeLow(p: CellPiece, i: number): number {
+  const other = p.aroundSteps?.[i];
+  if (!other) return p.around[i]!;
+  const side = p.sides[i]!;
+  let low = Infinity;
+  for (let j = 0; j < TREADS; j++) {
+    const f = (j + 0.5) / TREADS;
+    low = Math.min(low, treadUnder(other, p.x + side.out.x, p.y + side.out.y, { x: side.a.x + (side.b.x - side.a.x) * f, y: side.a.y + (side.b.y - side.a.y) * f }));
+  }
+  return low;
+}
+
+/**
+ * A stepping stair's risers inside its square at a turn: between each
+ * tread and the one below it, facing down the stair, where that faces the
+ * viewer. A riser facing away is covered by its own tread's slab, or lies
+ * in the ground under an opening's treads. Each draws with its upper tread.
+ */
+export function risersOf(p: CellPiece, turn: Turn): Face[] {
+  const s = p.span;
+  if (p.kind !== "steps" || !s) return [];
+  const [dx, dy] = STEP[s.d];
+  if (depth(turn, -dx, -dy) <= 0) return [];
+  const { c, s: sn } = turnAxes(turn);
+  const left = c * -dx - sn * -dy < 0;
+  const out: Face[] = [];
+  for (let k = 1; k < TREADS; k++) {
+    const [a, b] = treadLine(s, p.x, p.y, k);
+    out.push({ ax: a.x, ay: a.y, bx: b.x, by: b.y, z0: treadHeight(s, k - 1), z1: treadHeight(s, k), left, side: -1, tread: k });
+  }
+  return out;
+}
+
+/** The line across a stair's square between tread k - 1 and tread k, `k` fifths of the way up: its foot side at 0, its head side at TREADS. */
+function treadLine(s: StairStep, x: number, y: number, k: number): [Point, Point] {
+  const f = k / TREADS;
+  switch (s.d) {
+    case "e":
+      return [{ x: x + f, y }, { x: x + f, y: y + 1 }];
+    case "w":
+      return [{ x: x + 1 - f, y }, { x: x + 1 - f, y: y + 1 }];
+    case "s":
+      return [{ x, y: y + f }, { x: x + 1, y: y + f }];
+    default:
+      return [{ x, y: y + 1 - f }, { x: x + 1, y: y + 1 - f }];
+  }
+}
+
+/** Tread k's part of a stair's square, from k fifths of the way up to k + 1, its corners clockwise from the top left as a square's are. */
+export function treadPolygon(s: StairStep, x: number, y: number, k: number): Point[] {
+  const pts = [...treadLine(s, x, y, k), ...treadLine(s, x, y, k + 1)];
+  const x0 = Math.min(...pts.map((q) => q.x));
+  const y0 = Math.min(...pts.map((q) => q.y));
+  const x1 = Math.max(...pts.map((q) => q.x));
+  const y1 = Math.max(...pts.map((q) => q.y));
+  return [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }];
+}
+
+/** The order a stepping stair's treads draw in at a turn: far to near along its climb. */
+export function treadOrder(s: StairStep, turn: Turn): readonly number[] {
+  const [dx, dy] = STEP[s.d];
+  return depth(turn, dx, dy) > 0 ? ASCENDING : DESCENDING;
+}
+
+const ASCENDING = Array.from({ length: TREADS }, (_, k) => k);
+const DESCENDING = [...ASCENDING].reverse();
 
 const CORNERS = [
   [0, 0],
@@ -172,8 +305,8 @@ export function boundsOf(p: StaticPiece, turn: Turn): VBox {
     grow(box, turn, p.piece.bx, p.piece.by, p.base, p.base + p.rise);
     return box;
   }
-  // A column's sides reach down to 0 at the lowest. A pit's floor and far sides lie between its floor and 0.
-  return polyBox(turn, p.poly, Math.min(0, p.z), Math.max(0, p.z));
+  // A column's sides reach down to 0 at the lowest. A pit's floor and far sides lie between its floor and 0. A stair's steps may reach either end of its span, whatever the detail (6).
+  return polyBox(turn, p.poly, Math.min(0, p.z, p.span?.lo ?? 0), Math.max(0, p.z, p.span?.hi ?? 0));
 }
 
 /**
@@ -216,9 +349,13 @@ export type PieceSource = {
   bounds: { w: number; h: number };
   /** The scene's grid. Squares when left out. */
   grid?: Grid;
+  /** The stairs that climb in steps (view.ts DrawnHeights.runs), whatever the zoom. None when left out. */
+  runs?: StairRuns;
+  /** Whether the detail shows (view.ts heightsDetail): only then does a stepping stair draw its steps, and its neighbors' faces read them. */
+  detail?: boolean;
 };
 
-/** The column and pit pieces of one 16 by 16 bucket of keys, the chunk at cx, cy. */
+/** The column, pit and steps pieces of one 16 by 16 bucket of keys, the chunk at cx, cy. */
 export function cellPieces(src: PieceSource, cx: number, cy: number, chunk: BuildChunk | undefined): CellPiece[] {
   const grid = src.grid ?? SQUARES;
   const out: CellPiece[] = [];
@@ -235,30 +372,40 @@ export function cellPieces(src: PieceSource, cx: number, cy: number, chunk: Buil
       const cell = { col: x, row: y };
       if (hex && !cellInScene(grid, src.bounds, cell)) continue;
       const z = src.ground(x, y);
-      if (z === 0) continue;
+      const span = hex ? undefined : src.runs?.at(x, y);
+      const steps = span !== undefined && src.detail === true;
+      if (z === 0 && !steps) continue;
       // Painted ground stays square: a hex side wears its stair's swatch or its map tint.
       const terrain = hex ? null : src.terrain(x, y);
       const stair = marks !== null && marks[j * CHUNK_CELLS + i] !== ".";
       const n = sideCount(grid);
       const sides: { a: Point; b: Point; out: Point }[] = [];
       const around: number[] = [];
+      const aroundSteps: (StairStep | undefined)[] = [];
+      let steppedBeside = false;
       for (let k = 0; k < n; k++) {
         const [a, b] = sideEnds(grid, cell, k);
         const next = neighborOf(grid, cell, k);
         sides.push({ a, b, out: sideOutward(grid, cell, k) });
         around.push(src.ground(next.col, next.row));
+        const beside = !hex && src.detail === true ? src.runs?.at(next.col, next.row) : undefined;
+        aroundSteps.push(beside);
+        steppedBeside ||= beside !== undefined;
       }
       out.push({
-        kind: z > 0 ? "column" : "pit",
+        kind: steps ? "steps" : z > 0 ? "column" : "pit",
         id: `c${x},${y}`,
         x,
         y,
         z,
         around,
+        ...(span ? { span } : {}),
+        ...(steppedBeside ? { aroundSteps } : {}),
         poly: cellPolygon(grid, cell),
         center: cellCenter(grid, cell),
         sides,
-        look: src.look(x, y, stair ? "stairs" : terrain),
+        // A stair's sides wear the floor it is painted on, stone under Stairs terrain, or its map tint (docs/design/design-v1-iso-depth.md 5.3). A hex keeps the stairs swatch.
+        look: src.look(x, y, hex ? (stair ? "stairs" : null) : terrain === "stairs" ? "stone" : terrain),
         stair,
       });
     }

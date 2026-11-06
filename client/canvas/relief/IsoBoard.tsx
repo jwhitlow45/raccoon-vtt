@@ -28,7 +28,7 @@ import { BOARD_DISPOSITION_RING } from "../../lib/tokenView.ts";
 import { footprint, rulesSpot, type ViewToken } from "../../lib/scene.ts";
 import { boardTheme, theme } from "../../lib/theme.ts";
 import { footprintCells } from "../../lib/groundCells.ts";
-import { drawnBase, drawnFootprintGround, drawnHeights, groundGroups, heightsStand, isometric, K, toView, type DrawnSource, type Turn } from "../../lib/view.ts";
+import { drawnFootprintGround, drawnHeights, drawnStandBase, groundGroups, heightsDetail, heightsStand, isometric, K, standSurface, toView, type DrawnSource, type Turn } from "../../lib/view.ts";
 import { useStore } from "zustand";
 import { seenSeat, dropView } from "../../features/movement/drop.ts";
 import { localDragSlot, type DragSpot } from "../../state/localDrags.ts";
@@ -176,13 +176,15 @@ function IsoBoardImpl(props: IsoBoardProps) {
   // Footprints read the scene's grid as Top-down's do, so both views stand and lay flat the same hexes (hex grids 4.2).
   const grid = useMemo(() => sceneGrid(scene), [scene.gridShape]);
   const stand = heightsStand(cam.scale, props.lowPower);
+  // Stairs climb in steps from this zoom, and every reader of them here takes this one flag (docs/design/design-v1-iso-depth.md 7).
+  const detail = heightsDetail(cam.scale, props.lowPower);
   const fog = useMemo(() => new FogView(props.viewerFog, scene.id, { w, h }), [props.viewerFog, scene.id, w, h]);
   const dmFog = useMemo(() => (props.dmFog ? new FogView(props.dmFog, scene.id, { w, h }) : null), [props.dmFog, scene.id, w, h]);
-  const src: DrawnSource = useMemo(() => ({ chunks, sceneId: scene.id, bounds: { w, h }, grid, fog: props.viewerFog, stand }), [chunks, scene.id, w, h, grid, props.viewerFog, stand]);
-  const heights = useMemo(() => drawnHeights(src, feet), [src, feet]);
-
-  // The standing walls and pillars, by bucket, each bucket's list kept while its pieces stay the same.
+  const src: DrawnSource = useMemo(() => ({ chunks, sceneId: scene.id, bounds: { w, h }, grid, fog: props.viewerFog, stand, detail }), [chunks, scene.id, w, h, grid, props.viewerFog, stand, detail]);
+  // The standing walls and pillars, by bucket, each bucket's list kept while its pieces stay the same. Their stair directions are the ones the drawn heights' runs read.
   const walls = useMemo(() => sceneWalls(scene, chunks), [scene, chunks]);
+  const heights = useMemo(() => drawnHeights(src, feet, walls), [src, feet, walls]);
+
   // The walls a hex creature's sub-cells are clipped by, as the server withholds it (HX-D10), for the DM's dimming.
   const sightClip = useMemo(() => (isHex(grid) ? sightClipOf(walls) : null), [grid, walls]);
   const wallGroups = useRef<Map<string, readonly WallPiece[]> | null>(null);
@@ -211,7 +213,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
   const index = useRef<ReliefIndex>(null);
   index.current ??= new ReliefIndex();
   const relief = index.current;
-  const global = useMemo(() => ({ stand, feet, tints }), [stand, feet, tints]);
+  const global = useMemo(() => ({ stand, detail, feet, tints }), [stand, detail, feet, tints]);
   // Hidden, the board draws nothing. A map changed meanwhile takes its tints away and brings new ones, and each would rebuild every bucket here, so the buckets wait to be built once when the board shows (ISO2-OPUS-12).
   const synced = useMemo(() => {
     if (hidden) return null;
@@ -229,6 +231,8 @@ function IsoBoardImpl(props: IsoBoardProps) {
         look: (x, y, t) => (isHex(grid) ? hexLook(fog, tints, grid, { col: x, row: y }, t) : cellLook(fog, tints, x, y, t)),
         bounds: { w, h },
         grid,
+        runs: heights.runs,
+        detail,
       },
     });
     return {};
@@ -243,8 +247,9 @@ function IsoBoardImpl(props: IsoBoardProps) {
     return standing.map((t): Standing => {
       // The art stands where it is drawn and sorts by that ground point, on the base its rules box's ground gives (stand.ts standeeFooting).
       const { box, cells } = standeeFooting(grid, t);
-      const base = drawnBase(src, cells, t.elevation) / feet;
-      const ground = drawnFootprintGround(src, cells) / feet;
+      // On the stand surface, a tread on a stepping stair, when it stands on the ground (docs/design/design-v1-iso-depth.md 5.4).
+      const base = drawnStandBase(src, heights, cells, t.elevation, feet);
+      const ground = standSurface(heights, cells);
       const link = t.attached;
       const holder = link && onHolder(link.kind) && standingIds.has(link.to) ? link.to : null;
       const holderToken = holder ? byId.get(holder) : undefined;
@@ -270,7 +275,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
         ring: shape.ring,
       };
     });
-  }, [standing, src, grid, feet, turn, cam.scale, size.height, props.keepIds, byId, props.tokens]);
+  }, [standing, src, heights, grid, feet, turn, cam.scale, size.height, props.keepIds, byId, props.tokens]);
 
   // The canvas's view box, grown and snapped in steps, so a pan lays out again only when it crosses a step.
   const { box: cull, key: cullKey } = cullOf(cam, size);
@@ -404,12 +409,12 @@ function IsoBoardImpl(props: IsoBoardProps) {
       const kept = seated ? seat : ON_GROUND;
       const fp = footprint(t);
       const cells = dragFootingCells(grid, t, spot);
-      const base = drawnBase(src, cells, landing) / feet;
-      const ground = drawnFootprintGround(src, cells) / feet;
+      const base = drawnStandBase(src, heights, cells, landing, feet);
+      const ground = standSurface(heights, cells);
       const shape = standeeShape(turn, { x: spot.x, y: spot.y, w: fp.w, h: fp.h }, base, ground, cam.scale, size.height, kept);
       return { base, ground, drawn: shape.drawnBase, capped: shape.capped, rise: kept.rise, inset: kept.inset };
     },
-    [store, chunks, scene.id, w, h, props.viewerFog, props.role, byId, spots, src, grid, feet, turn, cam.scale, size.height],
+    [store, chunks, scene.id, w, h, props.viewerFog, props.role, byId, spots, src, heights, grid, feet, turn, cam.scale, size.height],
   );
 
   // Each standee's placing, kept while it is the same, so its node does not render again for a pan.
@@ -629,6 +634,9 @@ function IsoBoardImpl(props: IsoBoardProps) {
   useLayoutEffect(() => {
     if (!hidden) onText(isoText);
   }, [hidden, isoText, onText]);
+  // The stairs that climb in steps, one set while the same ones do, so the ground stage's build leaves their symbols out without rebuilding for a fog change that steps nothing new.
+  const steppingCells = stand && detail ? (heights.runs?.cells ?? "") : "";
+  const stepping = useMemo(() => new Set(steppingCells.split(";").filter((c) => c !== "")), [steppingCells]);
   // One context per place, so a renderer drawn in several knows which part it draws there (features/layers.ts IsoPlace).
   const groundCtx: IsoGround = useMemo(
     () => ({
@@ -640,8 +648,11 @@ function IsoBoardImpl(props: IsoBoardProps) {
       ground: (x: number, y: number) => heights.atPoint({ x, y }),
       top: isHex(grid) ? (box: { x0: number; y0: number; x1: number; y1: number }) => hexBoxGround(heights, box) : undefined,
       surface: isHex(grid) ? { grid, atCell: heights.atCell } : undefined,
+      detail,
+      stepping,
+      standOn: stepping.size > 0 ? (cells) => standSurface(heights, cells) : undefined,
     }),
-    [turn, fog, stand, uprightIds, heights, grid],
+    [turn, fog, stand, uprightIds, heights, grid, detail, stepping],
   );
   const movingCtx: IsoGround = useMemo(() => ({ ...groundCtx, place: "moving" }), [groundCtx]);
   const uprightCtx: IsoGround = useMemo(() => ({ ...groundCtx, place: "upright" }), [groundCtx]);
@@ -660,8 +671,8 @@ function IsoBoardImpl(props: IsoBoardProps) {
       const room = store.getState().view;
       const seen = seenChunks({ chunks, sceneId: scene.id, bounds: { w, h }, fog: props.viewerFog });
       const landing = room ? previewLanding(room, props.role, seen, t, spot) : t.elevation;
-      const base = drawnBase(src, cells, landing) / feet;
-      const ground = drawnFootprintGround(src, cells) / feet;
+      const base = drawnStandBase(src, heights, cells, landing, feet);
+      const ground = standSurface(heights, cells);
       if (ghostStands(fog, grid, t, at)) {
         const shape = standeeShape(turn, { x: at.x, y: at.y, w: fp.w, h: fp.h }, base, ground, cam.scale, size.height);
         const standee: IsoToken = { turn, base, ground, drawn: shape.drawnBase, capped: shape.capped, rise: 0, inset: 1, pits: [], dim: false, pressOnly: false, press: [] };
@@ -670,7 +681,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
       }
       return { standee: null, clip: fog.revealedRects(tokenBox(grid, t, at)), tag: null };
     },
-    [src, grid, feet, fog, turn, cam.scale, size.height, store, chunks, scene.id, w, h, props.viewerFog, props.role],
+    [src, heights, grid, feet, fog, turn, cam.scale, size.height, store, chunks, scene.id, w, h, props.viewerFog, props.role],
   );
 
   // The ground stage's layers cull by the layout's box, a step past the view, so a pan between steps finds them drawn. Its pills keep their points (5.8).
