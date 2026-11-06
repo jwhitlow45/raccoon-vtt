@@ -439,6 +439,7 @@ test("a player's projection and the fan-out keep every sound rule of 6.5 over ra
   assert.ok(applied > 3_000, `only ${applied} ops applied`);
   assert.ok(ticks > 250 && reveals > 50, `${ticks} ticks, ${reveals} reveals`);
   assert.ok(hiddenFires > 50, `${hiddenFires} effects fired behind a blackout`);
-  assert.ok(reclassified > 30 && undone > 100, `${reclassified} fired effects given another use, ${undone} undos`);
+  // Reclassified effects ran 28 to 72 over 16 runs once the queue's ops joined the mix, so the floor sits well under that spread.
+  assert.ok(reclassified > 10 && undone > 100, `${reclassified} fired effects given another use, ${undone} undos`);
   assert.ok(queued > 600, `${queued} queue edits and jumps`);
 });
