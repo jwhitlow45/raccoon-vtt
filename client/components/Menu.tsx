@@ -285,7 +285,8 @@ export function Menu(props: {
             {/* Unlike anywhere, break-word preserves the intrinsic word width while keeping a name longer than the cap inside the menu. */}
             {it.content ?? <span style={{ flex: "1 1 auto", minWidth: 0, whiteSpace: "normal", overflowWrap: "break-word", wordBreak: "normal" }}>{it.title}</span>}
             {it.note ? (
-              <span aria-hidden style={{ flex: "none", color: theme.color.textMuted, fontSize: theme.font.small, fontWeight: theme.weight.regular }}>
+              // An item that is off draws every word dim, its note too, which says why it is off (docs/design/design-v1-look-pass-1.md 1).
+              <span aria-hidden style={{ flex: "none", color: disabled ? theme.color.textDisabled : theme.color.textMuted, fontSize: theme.font.small, fontWeight: theme.weight.regular }}>
                 {it.note}
               </span>
             ) : null}

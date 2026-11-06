@@ -101,6 +101,13 @@ describe("a menu item with its own parts", () => {
     assert.deepEqual(picks, []);
   });
 
+  test("an item that is off draws its note dim with its title, and one that is on keeps its note muted", () => {
+    const { html } = draw({ label: "More", sections: [{ key: "s", items: [{ id: "q", title: "Add to queue", kind: "action", disabled: true, note: "In the queue" }, { id: "t", title: "Fog", kind: "action", note: "on top" }] }], onPick() {} });
+    const noteColor = (note: string) => new RegExp(`<span aria-hidden="true" style="[^"]*color:([^;"]+)[^"]*">${note}</span>`).exec(html)?.[1];
+    assert.equal(noteColor("In the queue"), theme.color.textDisabled);
+    assert.equal(noteColor("on top"), theme.color.textMuted);
+  });
+
   test("typeahead reads the title, not the content drawn, and a key the item used never reaches Menu's own handling", () => {
     const previous = { document: globalThis.document };
     const focused: string[] = [];
