@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import fc from "fast-check";
 import { pick, rng } from "#shared/testutil.ts";
 import { CLAIM_MS, LAPSE_MS, LEASE_MS, LISTEN_MS, POST_MS, TAKEOVER_MS } from "./handoff.ts";
-import { randomRun, World, type Browser } from "./handoffSim.testutil.ts";
+import { randomRun, World, type Browser, type Release } from "./handoffSim.testutil.ts";
 
 /*
  * One page plays per browser (docs/design/design-v1-music.md 4.4 and 12):
@@ -322,9 +322,88 @@ describe("one page plays per browser", () => {
     }
   }
 
+  /**
+   * MB-ASTRA-06: A, hidden, has its claim window run out at `windowEnd` and
+   * stalls 1 s before what confirms its start runs. B, a display, turns its
+   * sound on and plays meanwhile, and once the stall ends A's timers run
+   * before the posts that waited. Chrome wakes A's timers only on whole
+   * seconds, so there the window runs out later.
+   */
+  function confirmStalls(browser: Browser, release: Release, windowEnd: number): { failures: string[]; sounding: string[] } {
+    const world = new World(false, () => 0.5, browser);
+    world.delay = 5;
+    world.release = release;
+    const t0 = world.now;
+    const a = world.open("member", false);
+    const b = world.open("display", true);
+    world.enable(b, false);
+    world.runUntil(t0 + windowEnd - 300);
+    world.later(a, 300, () => world.stall(a, 1_000));
+    world.later(b, 400, () => world.enable(b, true));
+    world.runUntil(t0 + windowEnd + 6_000);
+    return { failures: world.failures, sounding: world.pages.filter((p) => p.audible()).map((p) => p.name) };
+  }
+
+  for (const [browser, windowEnd] of [["firefox", 2_900], ["safari", 2_900], ["chrome", 4_000]] as const) {
+    test(`without Web Locks a hidden page whose start waits through a stall hears the posts that waited before it plays (MB-ASTRA-06, ${browser})`, () => {
+      for (const release of ["timers", "ready", "posts", "creation"] as const) {
+        const { failures, sounding } = confirmStalls(browser, release, windowEnd);
+        assert.deepEqual(failures, [], `released ${release} first`);
+        assert.deepEqual(sounding, ["p01"], `the display plays, released ${release} first`);
+      }
+    });
+  }
+
+  test("without Web Locks a page fading out for a display goes quiet at once when it hears another page plays (seed 1006099)", () => {
+    const world = new World(false, rng(17));
+    world.delay = 5;
+    const t0 = world.now;
+    const a = world.open("member", true);
+    world.runUntil(t0 + 4_000);
+    // A plays alone and stalls. B opens meanwhile and never hears A. A display opens and turns its sound off at once, so B plays.
+    world.stall(a, 6_000);
+    world.runUntil(t0 + 4_100);
+    const b = world.open("member", false);
+    world.runUntil(t0 + 6_000);
+    const c = world.open("display", true);
+    world.enable(c, false);
+    world.runUntil(t0 + 9_900);
+    assert.ok(a.audible() && b.audible() && !c.audible(), "A, stalled, and B play, each unheard by the other");
+    // The display's sound comes on just before A runs again: B fades for it, and A, hearing the display's older post first, fades too.
+    world.enable(c, true);
+    world.runUntil(t0 + 20_000);
+    assert.deepEqual(world.failures, []);
+    assert.deepEqual(world.pages.filter((p) => p.audible()), [c], "the display plays");
+  });
+
+  test("without Web Locks a page whose claim window runs out waits for its own post to come back, with no timer meanwhile", () => {
+    const world = new World(false, rng(15));
+    world.delay = 15;
+    const t0 = world.now;
+    const page = world.open("member", true);
+    world.runUntil(t0 + LISTEN_MS + CLAIM_MS);
+    assert.ok(!page.audible(), "the window has just run out");
+    const timers = world.tasks.filter((t) => t.page === page.id && t.timer && t.at < world.now + 15);
+    assert.deepEqual(timers, [], "no timer runs before the post comes back");
+    world.runUntil(world.now + 15);
+    assert.ok(page.audible(), "its post came back, so it plays");
+    assert.deepEqual(world.failures, []);
+  });
+
+  test("without a channel that hears its own posts a lone page still starts, hidden and shown", () => {
+    for (const shown of [false, true]) {
+      const world = new World(false, rng(16), "chrome");
+      world.echo = false;
+      const page = world.open("member", shown);
+      world.runUntil(world.now + LISTEN_MS + CLAIM_MS + 2_000);
+      assert.ok(page.audible(), shown ? "shown" : "hidden");
+      assert.deepEqual(world.failures, []);
+    }
+  });
+
   test("random runs that once broke an invariant without Web Locks keep them all", () => {
-    // Seeds of randomRun in this world, so a change to the world reshuffles them. Each failed once a rule went: 580799090 and 1159891120 a post that waited, late, counts as a stall. 982591748, 35528160 and 642340447 a post on time starts the sound once the window is out. 352355709 and 953875309 a start by time waits for a confirm.
-    for (const seed of [580799090, 1159891120, 982591748, 35528160, 642340447, 352355709, 953875309]) {
+    // Seeds of randomRun in this world, so a change to the world reshuffles them. Each failed once a rule went: 153980 a post that waited, late, counts as a stall. 4265, 10509 and 13252 a start by time waits for a post on time. 1761, 6601 and 6984 with none at hand that is the page's own post come back, not a 0 ms timer (MB-ASTRA-06). 2270 and 4742 its own post counts only on time.
+    for (const seed of [153980, 4265, 10509, 13252, 1761, 6601, 6984, 2270, 4742]) {
       assert.deepEqual(randomRun(seed, false), [], `seed ${seed}`);
     }
   });
