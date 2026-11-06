@@ -224,12 +224,13 @@ export const splitKeysSlot = scopeSlot(() => ({ other: null as (() => void) | nu
 
 /**
  * The token action bar's part (canvas/TokenActionBar.tsx): its HP field,
- * which 1 to 9 start a change in (designs/qol audit Q3). The bar sets it
- * while it shows, and clears it as it goes, so the keys do nothing
- * without it.
+ * which 1 to 9 start a change in (designs/qol audit Q3), and its
+ * Conditions, which C opens (Q13). The bar sets each while it shows it,
+ * unfolded, and clears it as it goes, so the keys do nothing without it.
  */
 export const barKeysSlot = scopeSlot(() => ({
   hp: null as { ready(): boolean; start(digit: string): void } | null,
+  conditions: null as (() => void) | null,
 }));
 
 /** The outliner's search takes focus when it next shows, after `/` (features/outliner). */
@@ -529,6 +530,16 @@ export const SHORTCUTS: readonly Shortcut[] = [
     // The field shows only to a viewer who may change the HP of every token the bar holds.
     when: (env) => withSelection(env) && env.scope.get(barKeysSlot).hp?.ready() === true,
     run: (env, e) => env.scope.get(barKeysSlot).hp?.start(e.key),
+  },
+  {
+    id: "conditions",
+    ...single("c"),
+    name: "Conditions",
+    does: "Open the Conditions of the selected tokens",
+    roles: ["dm", "player"],
+    // The bar offers them only where the viewer may change every selected creature's.
+    when: (env) => withSelection(env) && env.scope.get(barKeysSlot).conditions !== null,
+    run: (env) => env.scope.get(barKeysSlot).conditions?.(),
   },
   {
     id: "turn",
@@ -845,11 +856,11 @@ export const VIEW_BEHAVIORS: readonly Behavior[] = [{ id: "tapAgain", input: "Ta
 
 /** Every row beside the keys, in the order the sheet lists them. */
 export const BEHAVIORS: readonly Behavior[] = [
-  // The whole room: components/Popover.tsx, which takes the key first, then lib/escape.ts, pages/RoomChrome.tsx useEscape, state/selection.ts dismissal and barDismiss.
+  // The whole room: components/Popover.tsx, which takes the key first, then lib/escape.ts, pages/RoomChrome.tsx useEscape, state/selection.ts dismissal and barDismiss. The bar's open Conditions take it before the room does (canvas/TokenActionBar.tsx QuickConditions).
   {
     id: "escape",
     input: "Escape",
-    does: "Close an open pop-up first, then a sheet, else the token's action bar, else let go of the selection and end Multi-select. While the token's panel shows one token, the bar closes and keeps it. While the panel is open, a group whose bar is hidden stays until Done. A field outside the pop-up keeps its Escape",
+    does: "Close an open pop-up first, then a sheet, else the token's action bar, else let go of the selection and end Multi-select. With focus in the bar's Conditions, close them first, back on their button. While the token's panel shows one token, the bar closes and keeps it. While the panel is open, a group whose bar is hidden stays until Done. A field outside the pop-up keeps its Escape",
     roles: EVERYONE,
     device: "keys",
   },

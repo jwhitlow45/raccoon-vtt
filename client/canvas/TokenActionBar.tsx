@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type RefObject } from "react";
+import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type RefObject } from "react";
 import { useStore } from "zustand";
 import { healRevivesDead } from "#shared/migrate.ts";
 import { CONDITION_KEYS, STATUS_KEYS, type Actor, type Effect, type Token } from "#shared/model.ts";
@@ -334,6 +334,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
     snapToGrid: token.nudge !== undefined && (access.dm || (access.owner && !token.locked)),
   };
   const rows = barButtons(buttonInput);
+  useConditionsKey(rows.play.includes("conditions") && !frame.folded, drawers.openByKey);
   const lead = access.hp !== "none" && !noHp;
   // The strip's quick row: the HP entry's lead and its own candidates, then these (docs/design/design-v1-bar-compact.md 3.3).
   const restIds = rest ? restButtons({ ...buttonInput, lead }).filter((id) => id !== "mode") : [];
@@ -347,7 +348,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
         return <DoorButton key={id} token={token} />;
       case "conditions":
         return (
-          <BarButton key={id} ref={drawers.ref("play", id)} pressed={drawer === "conditions"} onClick={() => drawers.toggle("conditions")}>
+          <BarButton key={id} ref={drawers.ref("play", id)} shortcut="conditions" pressed={drawer === "conditions"} onClick={() => drawers.toggle("conditions")}>
             Conditions
           </BarButton>
         );
@@ -446,7 +447,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
       case "conditions":
       case "uses":
         return (
-          <BarButton ref={drawers.ref("rest", id)} disabled={id === "uses" && usesPresence === "loading"} pressed={drawer === id} onClick={() => drawers.fromRest(id)}>
+          <BarButton ref={drawers.ref("rest", id)} shortcut={id === "uses" ? undefined : "conditions"} disabled={id === "uses" && usesPresence === "loading"} pressed={drawer === id} onClick={() => drawers.fromRest(id)}>
             {id === "uses" ? "Uses" : "Conditions"}
           </BarButton>
         );
@@ -586,7 +587,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
             />
           ) : null}
 
-          {drawer === "conditions" ? <QuickConditions lit={(key) => (effects.some((e) => e.key === key) ? "all" : "none")} onToggle={toggleEffect} /> : null}
+          {drawer === "conditions" ? <QuickConditions lit={(key) => (effects.some((e) => e.key === key) ? "all" : "none")} onToggle={toggleEffect} {...drawers.grid} /> : null}
           {drawer === "uses" && rows.play.includes("uses") ? <UsesDrawer target={target} name={displayName(token)} onClose={drawers.close} /> : null}
 
           {rows.passing.some((id) => !inStrip(id)) ? (
@@ -681,6 +682,7 @@ function GroupBarBody(props: { tokens: readonly ViewToken[]; movable: number; on
   const scrolls = resting && rest.scrolls;
   const drawers = useRestDrawers(rest, drawer, setDrawer);
   const multiToggle = useMultiToggle(rest, multi);
+  useConditionsKey(offers.conditions && !frame.folded, drawers.openByKey);
   const [entry, setEntry] = useState<EntryStatus>(QUIET_ENTRY);
   // The ids the quick row drew (RestRow's fit), null until it first fits.
   const [drawn, setDrawn] = useState<readonly string[] | null>(null);
@@ -717,7 +719,7 @@ function GroupBarBody(props: { tokens: readonly ViewToken[]; movable: number; on
     id,
     node:
       id === "conditions" ? (
-        <BarButton ref={drawers.ref("rest", id)} pressed={drawer === "conditions"} onClick={() => drawers.fromRest("conditions")}>
+        <BarButton ref={drawers.ref("rest", id)} shortcut="conditions" pressed={drawer === "conditions"} onClick={() => drawers.fromRest("conditions")}>
           Conditions
         </BarButton>
       ) : id === "undoMove" ? (
@@ -766,13 +768,13 @@ function GroupBarBody(props: { tokens: readonly ViewToken[]; movable: number; on
             </StepperRow>
           ) : null}
           {drawer === "conditions" && offers.conditions ? (
-            <QuickConditions lit={(key) => conditionLit(creatures, key)} onToggle={(key) => send(conditionOps(creatures, key, actions.newId))} />
+            <QuickConditions lit={(key) => conditionLit(creatures, key)} onToggle={(key) => send(conditionOps(creatures, key, actions.newId))} {...drawers.grid} />
           ) : null}
           {/* Undo move on a line of its own while it shows, so the steady line below never moves (docs/design/design-v1-token-window.md 3.2). */}
           <ButtonRow row="passing">{inStrip("undoMove") ? null : <UndoMoveButton tokenIds={ids} />}</ButtonRow>
           <ButtonRow row="play">
             {offers.conditions && !inStrip("conditions") ? (
-              <BarButton ref={drawers.ref("play", "conditions")} pressed={drawer === "conditions"} onClick={() => drawers.toggle("conditions")}>
+              <BarButton ref={drawers.ref("play", "conditions")} shortcut="conditions" pressed={drawer === "conditions"} onClick={() => drawers.toggle("conditions")}>
                 Conditions
               </BarButton>
             ) : null}
@@ -941,6 +943,8 @@ type FrameControls = {
   raiseViewAs(on: boolean): void;
   /** The strip's own controls for its header, while the bar spans an upright phone. */
   strip: StripControls | null;
+  /** The frame is folded under a portrait sheet, its controls out of reach, so no key opens anything in it. */
+  folded: boolean;
 };
 
 /**
@@ -956,7 +960,7 @@ const WHOLE_HEADER: FrameControls["header"] = { grip: "button", badgeInHeader: t
 
 const NO_RAISE = () => {};
 
-const FrameContext = createContext<FrameControls>({ handle: null, sticky: false, place: null, rest: null, header: WHOLE_HEADER, short: false, raiseAttach: NO_RAISE, raiseViewAs: NO_RAISE, strip: null });
+const FrameContext = createContext<FrameControls>({ handle: null, sticky: false, place: null, rest: null, header: WHOLE_HEADER, short: false, raiseAttach: NO_RAISE, raiseViewAs: NO_RAISE, strip: null, folded: false });
 
 /**
  * The strip's width, in layout px, from which Expand and Collapse show
@@ -1739,7 +1743,7 @@ function BarFrame(props: {
           summary: headerSummary,
         }
       : null;
-  const controls: FrameControls = { handle, sticky: mode === "dock" || (mode === "span" && !scrolls), place, rest, header, short, raiseAttach: setAttachRaised, raiseViewAs: setViewAsRaised, strip };
+  const controls: FrameControls = { handle, sticky: mode === "dock" || (mode === "span" && !scrolls), place, rest, header, short, raiseAttach: setAttachRaised, raiseViewAs: setViewAsRaised, strip, folded };
 
   const { hang } = placed;
   // Placed on the page as it is while someone types, which a browser may have made shorter than the room it keeps (barDock.ts Typing).
@@ -2051,12 +2055,19 @@ export function ScrollForMore(props: { inset?: number; edge?: "top" | "foot" }) 
  * durations and the rules text live in Details, so the bar, which loads
  * with the map for everyone, carries no SRD text.
  */
-function QuickConditions(props: { lit(key: Effect["key"]): Lit; onToggle(key: Effect["key"]): void }) {
+function QuickConditions(props: { lit(key: Effect["key"]): Lit; onToggle(key: Effect["key"]): void } & GridKeys) {
   // In a window shrunk short the drawer opens above the rows, out of sight without this (docs/design/design-v1-token-window.md 5.7).
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     ref.current?.scrollIntoView({ block: "nearest" });
   }, []);
+  // C asks for the first cell (designs/qol audit 11), as the drawer opens or while it is open already.
+  const { focusFirst, onFocused } = props;
+  useLayoutEffect(() => {
+    if (!focusFirst) return;
+    ref.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    onFocused();
+  }, [focusFirst, onFocused]);
   const group = (title: string, keys: readonly Effect["key"][]) => (
     <div role="group" aria-label={title} style={{ display: "grid", gap: theme.space(1) }}>
       <div style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{title}</div>
@@ -2100,11 +2111,42 @@ function QuickConditions(props: { lit(key: Effect["key"]): Lit; onToggle(key: Ef
     </div>
   );
   return (
-    <div ref={ref} style={{ display: "grid", gap: theme.space(2) }}>
+    <div
+      ref={ref}
+      // Escape closes the drawer back on its button and leaves the bar open, so the room's Escape, which listens after, stands aside.
+      onKeyDown={(e) => {
+        if (e.key !== "Escape" || e.defaultPrevented) return;
+        e.preventDefault();
+        props.onEscape();
+      }}
+      style={{ display: "grid", gap: theme.space(2) }}
+    >
       {group("Conditions", CONDITION_KEYS)}
       {group("Other statuses", STATUS_KEYS)}
     </div>
   );
+}
+
+/** What the Conditions drawer takes from the bar's keys: C's request for its first cell, and Escape's way back. */
+type GridKeys = { focusFirst: boolean; onFocused(): void; onEscape(): void };
+
+/**
+ * C opens the bar's Conditions (designs/qol audit Q13) while the bar
+ * offers them and is not folded. The latest `open` is read at the press,
+ * so the key always acts on the drawer as it is then.
+ */
+function useConditionsKey(offered: boolean, open: () => void): void {
+  const keys = useScoped(barKeysSlot);
+  const latest = useRef(open);
+  latest.current = open;
+  useLayoutEffect(() => {
+    if (!offered) return;
+    const press = () => latest.current();
+    keys.conditions = press;
+    return () => {
+      if (keys.conditions === press) keys.conditions = null;
+    };
+  }, [keys, offered]);
 }
 
 /**
@@ -2558,9 +2600,40 @@ function useRestDrawers(rest: FrameControls["rest"], drawer: Drawer, setDrawer: 
       setFocus({ place: "rest", id: opened, tries: 0 });
       setOpened(null);
       rest.collapse();
+      return true;
     }
+    return false;
   };
+  // C's request for the grid's first cell, until the open drawer takes it.
+  const [gridFocus, setGridFocus] = useState(false);
+  const focused = useCallback(() => setGridFocus(false), []);
   return {
+    grid: {
+      focusFirst: gridFocus,
+      onFocused: focused,
+      // Back on the button that opened it: the strip's, which close already moves focus to, or else whichever Conditions is drawn, the scrolling strip's quick row's or the bar's own.
+      onEscape() {
+        if (close()) return;
+        for (const at of ["rest:conditions", "play:conditions"]) {
+          const button = buttons.current.get(at);
+          button?.focus();
+          if (button && button.ownerDocument.activeElement === button) return;
+        }
+      },
+    } satisfies GridKeys,
+    /**
+     * C: the Conditions drawer, opened rather than toggled, its first cell
+     * focused. On the resting strip it expands the bar with the drawer
+     * open, as the strip's Conditions does, but focus goes to the grid.
+     */
+    openByKey() {
+      setGridFocus(true);
+      setDrawer("conditions");
+      if (rest && rest.resting && !rest.scrolls) {
+        setOpened("conditions");
+        rest.expand();
+      }
+    },
     ref: (place: "rest" | "play", id: string) => (el: HTMLButtonElement | null) => {
       if (el) buttons.current.set(`${place}:${id}`, el);
       else buttons.current.delete(`${place}:${id}`);

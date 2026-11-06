@@ -403,6 +403,24 @@ describe("the shortcut table", () => {
     });
   });
 
+  test("C opens the bar's Conditions for the DM and players, only while the bar offers them (designs/qol audit Q13)", () => {
+    for (const role of ["dm", "player"] as const) {
+      const { env: e, scope } = env({ role, selected: [role === "dm" ? "t1" : "t2"] });
+      assert.equal(run(e, press({ key: "c", code: "KeyC" })), null, `${role}: no bar, or none with Conditions`);
+      let opened = 0;
+      scope.get(barKeysSlot).conditions = () => void opened++;
+      assert.equal(run(e, press({ key: "c", code: "KeyC" })), "conditions", role);
+      assert.equal(run(e, press({ key: "C", code: "KeyC", shiftKey: true })), "conditions", `${role}: with Shift`);
+      assert.equal(run(e, press({ key: "с", code: "KeyC" })), "conditions", `${role}: by its place on a Cyrillic layout`);
+      assert.equal(run(e, press({ key: "c", code: "KeyC", target: { tagName: "INPUT", type: "text" } })), null, `${role}: typing`);
+      assert.equal(opened, 3, role);
+    }
+    const none = env();
+    none.scope.get(barKeysSlot).conditions = () => assert.fail("nothing selected");
+    assert.equal(run(none.env, press({ key: "c", code: "KeyC" })), null);
+    assert.equal(keyHint("conditions", "player")?.text, "C");
+  });
+
   test("H showing hidden tokens shows their hidden rows in the fight too, as one undo step, and hiding leaves rows alone", () => {
     const rows = [
       { id: "r2", tokenId: "t2", hidden: true },
@@ -575,6 +593,7 @@ describe("the shortcut table", () => {
 
   test("every single key can move, and the defaults are written as the sheet writes them, one shortcut to a key", () => {
     assert.deepEqual(Object.keys(DEFAULT_KEYS).sort(), [
+      "conditions",
       "fit",
       "fullscreen",
       "hide",
@@ -1316,6 +1335,10 @@ describe("a control shows the key of the shortcut it does (D-261028-09)", () => 
     ["lock", "client/canvas/TokenActionBar.tsx", "a token's Locked"],
     ["lock", "client/canvas/TokenActionBar.tsx", "a group's Locked"],
     ["delete", "client/canvas/TokenActionBar.tsx", "Delete, a token's and a group's"],
+    ["conditions", "client/canvas/TokenActionBar.tsx", "a token's Conditions"],
+    ["conditions", "client/canvas/TokenActionBar.tsx", "a token's strip's Conditions"],
+    ["conditions", "client/canvas/TokenActionBar.tsx", "a group's Conditions"],
+    ["conditions", "client/canvas/TokenActionBar.tsx", "a group's strip's Conditions"],
     ["turn", "client/panels/TrackerPanel.tsx", "the DM's Start and Next"],
     ["turn", "client/features/encounter/parts.tsx", "a player's End turn, in the tracker and the phone's band"],
     ["fit", "client/pages/RoomChrome.tsx", "the top bar's Fit"],
