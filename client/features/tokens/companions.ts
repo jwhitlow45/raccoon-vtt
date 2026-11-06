@@ -205,7 +205,7 @@ export function companionInput(
  * It joins only a fight its character is in, with no value: its player
  * rolls or types it, as for any row of theirs. Null for a companion that
  * acts on its character's turn, with no fight, or while its character is
- * out of the fight, when it waits in Join the fight as any creature of
+ * out of the fight, when it waits in Your creatures as any creature of
  * theirs does.
  */
 export function joinFightOp(view: Pick<RoomState, "tokens" | "encounter">, input: Pick<TokenInput, "id" | "kind" | "companion">, entryId: string): ClientOp | null {

@@ -552,7 +552,7 @@ function SelectedCreatures() {
   const tokens = useRoomView((s) => s.view?.tokens);
   const picked = useMemo(() => selectedIds.flatMap((id) => tokens?.[id] ?? []), [selectedIds, tokens]);
   return (
-    <Section label="Several at once" style={COLUMN}>
+    <Section label="Group HP" style={COLUMN}>
       <Switch
         label="Multi-select"
         help="Tap rows or tokens to pick creatures, then enter damage or healing once for all of them."
@@ -626,7 +626,7 @@ function StartFight(props: { selectedTokenId: string | null }) {
     for (const batch of rest) actions.dispatch({ t: "encounter.add", entries: batch });
   };
   return (
-    <Section label="Start a fight with" style={COLUMN}>
+    <Section label="New fight" style={COLUMN}>
       <Wrap>
         <AddButtons candidates={candidates} stateOf={join.stateOf} onAdd={start} />
         <Button size="sm" onClick={() => start([])} style={GROW}>
@@ -673,7 +673,7 @@ function JoinFailed(props: { candidates: Record<AddMode, Token[]>; stateOf(token
 /**
  * What the DM uses to set the order up, right after it: Auto initiative
  * with the card of what it rolled under its button, where the DM just
- * pressed, then the other ways to set values, then Add to the fight
+ * pressed, then the other ways to set values, then More creatures
  * (docs/design/design-v1-combat-flow.md 3.2).
  */
 function DmSetup(props: { selectedTokenId: string | null; editingValues: boolean; onEditValues(): void }) {
@@ -720,7 +720,7 @@ function DmSetup(props: { selectedTokenId: string | null; editingValues: boolean
           onChange={(on) => actions.dispatch({ t: "room.update", settings: { monsterInitScore: on } })}
         />
       </Section>
-      <Section label="Add to the fight" style={COLUMN}>
+      <Section label="More creatures" style={COLUMN}>
         <Wrap>
           <AddButtons candidates={candidates} stateOf={join.stateOf} onAdd={add} />
         </Wrap>
@@ -789,7 +789,7 @@ function JoinFight() {
   );
   if (own.length === 0) return null;
   return (
-    <Section label="Join the fight" style={COLUMN}>
+    <Section label="Your creatures" style={COLUMN}>
       <Wrap>
         {own.map((token) => (
           <JoinButton key={token.id} token={token} />

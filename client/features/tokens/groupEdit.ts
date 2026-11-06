@@ -224,7 +224,7 @@ export function fightCandidates<T extends Pick<Token, "id" | "kind"> & { compani
 /**
  * "Add to the fight": rows for the creatures not in it yet (fightCandidates).
  * With no fight on, the same tap starts one with them, as the tracker's
- * "Start a fight with" does. `mark` is the rule every path into a fight
+ * "New fight" does. `mark` is the rule every path into a fight
  * builds its rows by (combat/state.ts useFightJoin), which puts In lair on
  * a creature placed in its lair.
  */

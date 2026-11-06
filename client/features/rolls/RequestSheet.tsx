@@ -270,9 +270,9 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
                 </div>
               </PickRow>
             </div>
-            <Section label="Who rolls" divider={false} style={STACKED}>
+            <Section label="Creatures" divider={false} style={STACKED}>
               {options.length === 0 ? <Help>No player plays a character yet.</Help> : null}
-              <ChipRow label="Who rolls">
+              <ChipRow label="Creatures">
                 {options.map((o) => (
                   <Chip key={o.key} pressed={ticked(o.ref)} unavailable={o.blocked} onClick={() => tick(o.ref, !ticked(o.ref))}>
                     {o.why ? `${o.name}, ${o.why}` : o.name}
@@ -280,7 +280,7 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
                 ))}
               </ChipRow>
             </Section>
-            <Section label="What players see" divider={false} fold={{ open: seenOpen, onToggle: () => setSeenOpen((v) => !v), summary: <span style={{ color: theme.color.textMuted }}>{seen}</span> }}>
+            <Section label="Player view" divider={false} fold={{ open: seenOpen, onToggle: () => setSeenOpen((v) => !v), summary: <span style={{ color: theme.color.textMuted }}>{seen}</span> }}>
               {/* Options that Send reads, so checkboxes rather than switches (docs/design/design-v1-visual.md 3.7). Each shows only while it applies (4.6). */}
               <div style={{ display: "grid" }}>
                 {hasDc ? <Checkbox label="Players see the DC" checked={draft.dcShown} onChange={(dcShown) => set({ dcShown })} /> : null}
@@ -321,7 +321,7 @@ function ChoicePicker(props: { draft: AskDraft; index: number; onStep(step: (dra
   const two = props.draft.choices.length > 1;
   const view = pickerView(props.draft, props.index);
   const whyId = useId();
-  const title = two ? (props.index === 0 ? "First choice" : "Or the second") : "What to roll";
+  const title = two ? (props.index === 0 ? "First choice" : "Second choice") : "Roll";
   const abilities = (disabled: readonly AbilityKey[]) =>
     ABILITY_KEYS.map((a) => ({ value: a, label: ABILITY_ABBR[a], title: ABILITY_NAMES[a], disabled: disabled.includes(a) }));
   return (

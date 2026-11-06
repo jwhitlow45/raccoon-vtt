@@ -337,7 +337,7 @@ function PlaceSection(props: { draft: Draft; srd: SrdList; close: PanelClose }) 
 
   const ready = count > 0 && !waiting && sceneName !== undefined;
   return (
-    <Section label="Place on the map">
+    <Section label="Placement">
       {count === 0 && !waiting ? <Help>Add monsters to place them.</Help> : null}
       {waiting ? <Loading text="Loading the monsters…" /> : null}
       {deleted > 0 ? <Notice>{deleted === 1 ? "1 creature" : `${deleted} creatures`} of a monster deleted from this room will be left out.</Notice> : null}

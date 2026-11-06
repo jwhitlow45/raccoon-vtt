@@ -539,7 +539,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
         {anyAsk || (openRolls && page.dc !== null) ? (
           // The request sheet's fold and words (LP7-PC-10): a chevron, and folded, what players will see.
           <Section
-            label="What players see"
+            label="Player view"
             divider={false}
             fold={{
               open: seenOpen,
@@ -1259,7 +1259,7 @@ function othersDamage(view: RoomState, me: string, name: string | undefined): { 
   return null;
 }
 
-/** The folded "What players see" in the request sheet's words (rolls/logic.ts seenSummary), for a group save's two switches. */
+/** The folded "Player view" in the request sheet's words (rolls/logic.ts seenSummary), for a group save's two switches. */
 function groupSeen(dcShown: boolean, hasDc: boolean, resultShown: boolean): string {
   if (hasDc && dcShown) return resultShown ? "The DC and pass or fail." : "The DC. Pass or fail hidden.";
   if (hasDc) return resultShown ? "DC hidden. Pass or fail shown." : "DC and pass or fail hidden.";

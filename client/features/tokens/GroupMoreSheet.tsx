@@ -120,7 +120,7 @@ export function GroupMoreSheet(props: { tokens: readonly Token[]; onClose(): voi
           <ImageField value={image} onChange={(next) => patch({ image: next })} shape="circle" aspect={1} canEdit />
         </FieldRow>
       </Section>
-      <Section title="What players see">
+      <Section title="Player view">
         <FieldRow label="Players see HP as" fill>
           <Select<string>
             label="Players see HP as"
