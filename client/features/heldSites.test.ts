@@ -253,7 +253,7 @@ describe("the dice set picker, with Roll animation off, is a held group", () => 
       assert.match(off, /^<fieldset disabled=""/);
       assert.match(off, new RegExp(`<legend[^>]*color:${tokenPattern(theme.color.textDisabled)}`, "i"));
       // The radios are native, so the fieldset stops them. The tiles keep their own look inside it (tileStyle).
-      assert.match(off, new RegExp(`<label[^>]*border:${theme.line.strong}px solid ${tokenPattern(theme.color.textDisabled)}`, "i"));
+      assert.match(off, new RegExp(`<label[^>]*box-shadow:inset 0 0 0 1px ${tokenPattern(theme.color.textDisabled)}`, "i"));
       setRollAnimation(true);
       const on = await drawPicker();
       assert.doesNotMatch(on, /^<fieldset disabled=""/);

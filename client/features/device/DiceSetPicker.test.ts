@@ -31,19 +31,38 @@ function frame(style: ReturnType<typeof tileStyle>): { across: number; down: num
 }
 
 describe("the dice set picker's tiles", () => {
-  test("a chosen tile is the same size as the others, with or without the switch on", () => {
-    for (const on of [true, false]) assert.deepEqual(frame(tileStyle(true, on)), frame(tileStyle(false, on)), `chosen and not differ with the switch ${on ? "on" : "off"}`);
+  test("every tile has the same border and padding, chosen or not, with the switch on or off", () => {
+    for (const on of [true, false]) {
+      assert.deepEqual(frame(tileStyle(true, on)), frame(tileStyle(false, on)), `chosen and not differ with the switch ${on ? "on" : "off"}`);
+      assert.equal(tileStyle(true, on).padding, tileStyle(false, on).padding);
+      assert.equal(px(tileStyle(true, on).border)[0], px(tileStyle(false, on).border)[0], "the same border width");
+    }
   });
 
-  test("the chosen tile still reads heavier: a strong border, in the accent while the switch is on", () => {
-    assert.equal(tileStyle(true, true).border, `${theme.line.strong}px solid ${theme.color.accent}`);
+  test("the chosen tile still reads heavier: an inset second line, in the accent while the switch is on", () => {
+    assert.equal(theme.line.border + 1, theme.line.strong, "the ring's 1 px completes the strong line");
+    assert.equal(tileStyle(true, true).boxShadow, `inset 0 0 0 1px ${theme.color.accent}`);
+    assert.equal(tileStyle(false, true).boxShadow, undefined);
     assert.equal(tileStyle(false, true).border, `${theme.line.border}px solid ${theme.color.border}`);
   });
 
   test("with the switch off the chosen tile keeps its mark, a dim outline with no tint, as a chosen option that cannot change now does (docs/design/design-v1-look-pass-2.md D37)", () => {
-    assert.equal(tileStyle(true, false).border, `${theme.line.strong}px solid ${theme.color.textDisabled}`);
+    assert.equal(tileStyle(true, false).boxShadow, `inset 0 0 0 1px ${theme.color.textDisabled}`);
     assert.equal(tileStyle(true, false).background, "transparent");
     assert.equal(tileStyle(false, false).border, `${theme.line.border}px solid ${theme.color.border}`);
+  });
+
+  test("the die's canvas flows in its box, so the alignment check sees it", () => {
+    const html = renderToStaticMarkup(
+      createElement(RoomProvider, {
+        store: createStore(() => ({ view: null, roomId: "r1", connection: "open", you: null, local: { selectedIds: [], multi: false } })) as never,
+        actions: { dispatch: () => 1 } as never,
+        ui: {} as never,
+        assets: { url: () => "" } as never,
+        children: createElement(RoomScopeProvider, { scope: new RoomScope(), children: createElement(DiceSetPicker) }),
+      }),
+    );
+    assert.doesNotMatch(html, /<canvas[^>]*position:absolute/);
   });
 });
 

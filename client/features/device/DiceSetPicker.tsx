@@ -27,26 +27,28 @@ const DIE_PX = 48;
 const TILE_MIN_PX = 72;
 
 /**
- * A tile's look, chosen or not, with the switch on or off. The chosen
- * tile's heavier border takes its extra width out of its padding, so every
- * tile is one size and a pick never makes its row taller than the other.
+ * A tile's look, chosen or not, with the switch on or off. Every tile has
+ * the same border and padding. The chosen tile's second pixel of ring is an
+ * inset shadow, so a pick never makes its row taller than the other and the
+ * alignment check sees equal padding on every tile.
  * With the switch off the chosen tile keeps a dim outline and no tint, as
  * every chosen option that cannot change now does (components/looks.ts),
  * so it still reads as the one chosen.
  */
 export function tileStyle(picked: boolean, on: boolean): CSSProperties {
-  const line = picked ? theme.line.strong : theme.line.border;
-  const extra = line - theme.line.border;
   const edge = !picked ? theme.color.border : on ? theme.color.accent : theme.color.textDisabled;
+  // The strong line is the border plus this 1 px ring, in the tile's edge color rather than the text color.
+  const ring = theme.shadow.markInside.replace("currentColor", edge);
   return {
     position: "relative",
     display: "grid",
     justifyItems: "center",
     gap: theme.space(1),
     minHeight: theme.touch,
-    padding: `${theme.space(2) - extra}px ${theme.space(1) - extra}px`,
+    padding: `${theme.space(2)}px ${theme.space(1)}px`,
     borderRadius: theme.radius.md,
-    border: `${line}px solid ${edge}`,
+    border: `${theme.line.border}px solid ${edge}`,
+    boxShadow: picked ? ring : undefined,
     background: picked && on ? theme.color.accentTint : "transparent",
     color: on ? theme.color.text : theme.color.textDisabled,
     cursor: on ? "pointer" : "default",
@@ -115,6 +117,7 @@ export function DiceSetPicker() {
                   style={{ position: "absolute", inset: 0, width: "100%", height: "100%", margin: 0, opacity: 0, cursor: "inherit" }}
                 />
                 {/* Drawn over the radio, so taps pass through it to the radio under it. */}
+                {/* The canvas flows in this box (it and the flat die never show together), so the alignment check measures the die and not only the name. */}
                 <span style={{ position: "relative", width: DIE_PX, height: DIE_PX, pointerEvents: "none" }}>
                   {previews ? null : <D20Icon size={DIE_PX} text="20" body={set.body} edge={set.edge} ink={set.ink} />}
                   <canvas
@@ -125,7 +128,7 @@ export function DiceSetPicker() {
                     }}
                     width={DIE_PX * ratio}
                     height={DIE_PX * ratio}
-                    style={{ position: "absolute", inset: 0, width: DIE_PX, height: DIE_PX, display: previews ? "block" : "none" }}
+                    style={{ width: DIE_PX, height: DIE_PX, display: previews ? "block" : "none" }}
                   />
                 </span>
                 <span style={{ fontSize: theme.font.small, fontWeight: theme.weight.strong, textAlign: "center", overflowWrap: "anywhere" }}>{set.name}</span>
