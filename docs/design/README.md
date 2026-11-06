@@ -172,6 +172,10 @@ and for how to use it, the [DM guide](../dm-guide.md).
   the whole app.
 - [design-v1-polish.md](design-v1-polish.md): a polish pass, checked by
   measurement.
+- [design-v1-polish-pass.md](design-v1-polish-pass.md): the polish pass over
+  the Later-list features and the headings of the whole app: whole summaries,
+  weather rules in lines, a wider dungeon dialog, aligned swatches and 33
+  shorter headings.
 - [design-v1-spacing-pass.md](design-v1-spacing-pass.md): the spacing pass.
 - [design-v1-icons.md](design-v1-icons.md): icons across the app.
 - [design-v1-icons-2.md](design-v1-icons-2.md): the second icon pass.
