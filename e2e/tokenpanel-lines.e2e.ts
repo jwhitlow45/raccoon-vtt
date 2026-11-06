@@ -59,7 +59,7 @@ panelFile("focus and group lines", () => {
     assert.deepEqual(off, [], "out of line by more than 1 px");
   });
 
-  test("fu31-f. each member's dot on its name, in line within 1 px at live play 22's sizes: the goblin's Owners, and on a desk Thorn's page's Played by (LP22-ALIGN-2)", async () => {
+  test("fu31-f. each member's dot on its name, in line within 1 px at live play 22's sizes: the goblin's Owners, and on a desk Thorn's page's Players (LP22-ALIGN-2)", async () => {
     const off = await atLp22Sizes(async (at) => {
       const goblin = await panelOf(dm, run.goblin.at, "Goblin 4");
       await openGroup(goblin, "Owners");
@@ -68,9 +68,9 @@ panelFile("focus and group lines", () => {
       await openSideTab(dm, "Characters");
       const page = dm.getByRole("tabpanel", { name: "Characters" });
       await page.locator(`[data-opener="character:${run.thorn.characterId}"]`).click();
-      await openGroup(page, "Played by");
-      await groupIn(page, "Played by").getByText("Pat", { exact: true }).waitFor();
-      return [...lines, ...(await measureIn(groupIn(page, "Played by"), `Thorn's Played by at ${at}`))];
+      await openGroup(page, "Players");
+      await groupIn(page, "Players").getByText("Pat", { exact: true }).waitFor();
+      return [...lines, ...(await measureIn(groupIn(page, "Players"), `Thorn's Players at ${at}`))];
     });
     assert.deepEqual(off, [], "out of line by more than 1 px");
   });

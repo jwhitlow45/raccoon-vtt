@@ -808,10 +808,10 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     await step.getByRole("button", { name: "Paste its JSON instead" }).click();
     await step.locator("textarea").fill(JSON.stringify(DDB_JSON));
     await step.getByRole("button", { name: "Read it", exact: true }).click();
-    const review = ana.getByRole("dialog", { name: "Check what was read" });
+    const review = ana.getByRole("dialog", { name: "Import review" });
     await review.getByText("Read from D&D Beyond: Wren Ashdown, level 7.").waitFor();
     // With no record of a past sync the fill takes what it read, and lists each typed value it replaces (docs/design/design-v1-resync.md 3.3).
-    await review.getByRole("heading", { name: /^Replaces your changes \(\d+\)$/ }).waitFor();
+    await review.getByRole("heading", { name: /^Overwritten changes \(\d+\)$/ }).waitFor();
     assert.equal(await review.getByRole("checkbox", { name: "AC 13, now 15", exact: true }).isChecked(), true);
     await review.getByText("Worked out from the armor. Check it.", { exact: true }).waitFor();
     assert.equal(await review.getByRole("checkbox", { name: /^Name Wren Ashdown, now Bree$/ }).isChecked(), false, "the name starts off");
@@ -841,7 +841,7 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     await step.getByRole("button", { name: "Paste its JSON instead" }).click();
     await step.locator("textarea").fill(JSON.stringify(withResources()));
     await step.getByRole("button", { name: "Read it", exact: true }).click();
-    const review = ana.getByRole("dialog", { name: "Check what was read" });
+    const review = ana.getByRole("dialog", { name: "Import review" });
     await review.getByText("Adds Breath Weapon: 3 uses, back on a Long Rest, 2 of 3 left", { exact: true }).waitFor();
     await review.getByText("Adds Luck Points: 3 uses, back on a Long Rest, 2 of 3 left", { exact: true }).waitFor();
     assert.equal(await review.getByText(/Wand of Sparks/).count(), 0, "an item's charges stay out");

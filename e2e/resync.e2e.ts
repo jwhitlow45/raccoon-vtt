@@ -302,7 +302,7 @@ async function openResync(page: Page): Promise<Locator> {
   const button = panel.getByRole("button", { name: "Re-sync from D&D Beyond", exact: true });
   await button.scrollIntoViewIfNeeded();
   await button.click();
-  const review = page.getByRole("dialog", { name: "Check what changes" });
+  const review = page.getByRole("dialog", { name: "Re-sync review" });
   await review.waitFor();
   return review;
 }
@@ -439,7 +439,7 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     assert.equal(breeIn(anaSocket)!.ddbSync, undefined, "no record before the first sync");
   });
 
-  test("rs-1. at 390 x 844 the editor's D&D Beyond step reads fixture A as Check what was read, lists Charisma under Replaces your changes, keeps it and the typed AC, and Last synced shows after Save", async () => {
+  test("rs-1. at 390 x 844 the editor's D&D Beyond step reads fixture A as Import review, lists Charisma under Overwritten changes, keeps it and the typed AC, and Last synced shows after Save", async () => {
     await reopen(ana, PHONE);
     const panel = await breeBlock(ana);
     assert.equal(await panel.getByText(/^Last synced from D&D Beyond/).count(), 0, "no line before a sync");
@@ -451,13 +451,13 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     const step = ana.getByRole("dialog", { name: "D&D Beyond" });
     assert.equal(await step.getByLabel("Share link or character number").inputValue(), SHEET, "the field starts with the sheet link");
     await step.getByRole("button", { name: "Get it", exact: true }).click();
-    const review = ana.getByRole("dialog", { name: "Check what was read" });
+    const review = ana.getByRole("dialog", { name: "Import review" });
     assert.equal(await readLine(review), "Read from D&D Beyond: Bree Tallow, level 5.");
     assert.equal(anaDdb.last(), NUMBER);
     // Its header's Back says where it goes, as the re-sync's review does (docs/design/design-v1-look-pass-2.md 3, lane 3).
     await review.getByRole("button", { name: "Back to the D&D Beyond link", exact: true }).waitFor();
     // With no record the editor fills, and lists each value of the block it would replace.
-    await review.getByRole("heading", { name: "Replaces your changes (1)", exact: true }).waitFor();
+    await review.getByRole("heading", { name: "Overwritten changes (1)", exact: true }).waitFor();
     const spell = row(review, "Spellcasting ability: Charisma, becomes Wisdom");
     const keep = spell.getByRole("checkbox", { name: "Keep mine", exact: true });
     assert.equal(await keep.isChecked(), false, "Keep mine starts unticked");
@@ -515,7 +515,7 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     await fetching.getByText("Getting Bree from D&D Beyond…", { exact: true }).waitFor();
     assert.equal(await fetching.getByRole("button", { name: "Getting it…", exact: true }).count(), 1, "the primary is busy");
     await shots.take(ana, "resync-fetching");
-    const review = ana.getByRole("dialog", { name: "Check what changes" });
+    const review = ana.getByRole("dialog", { name: "Re-sync review" });
     await review.waitFor();
     assert.match(await readLine(review), /^Read from D&D Beyond: Bree Tallow, level 6\. Last synced on [A-Z][a-z]{2} \d{1,2}\.$/);
     assert.equal(anaDdb.last(), NUMBER, "the sheet link's number is fetched");
@@ -525,7 +525,7 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     assert.equal(await review.getByRole("checkbox", { name: "Level 6, now 5", exact: true }).isChecked(), true);
     assert.equal(await review.getByRole("checkbox", { name: "Max HP 45, now 38", exact: true }).isChecked(), true);
     await review.getByText("Bree keeps 20 HP, now out of 45.", { exact: true }).waitFor();
-    await review.getByRole("heading", { name: "Your changes, kept (4)", exact: true }).waitFor();
+    await review.getByRole("heading", { name: "Kept changes (4)", exact: true }).waitFor();
     // Conflicts first, then the groups in Changes' order: Spellcasting, then Features (AC), then Rolls.
     const kept = await review.locator("[data-sync-row]").evaluateAll((els) => els.map((el) => el.querySelector("p")?.textContent ?? ""));
     assert.equal(kept.length, 4, `kept rows: ${JSON.stringify(kept)}`);
@@ -543,7 +543,7 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
   });
 
   test("rs-4. Apply shows the done line, the panel and the DM's device show level 6 and Charisma, and Cy's device has neither the block nor the record", async () => {
-    const review = ana.getByRole("dialog", { name: "Check what changes" });
+    const review = ana.getByRole("dialog", { name: "Re-sync review" });
     await review.getByRole("button", { name: "Apply", exact: true }).click();
     const done = ana.getByRole("dialog", { name: "Bree is re-synced" });
     const line = done.getByRole("status").filter({ hasText: "4 changes came in, and 5 of your changes stayed." });
@@ -609,7 +609,7 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     anaDdb.next({ fixture: fixtureB });
     review = await openResync(ana);
     await review.getByText("Nothing new from D&D Beyond.", { exact: true }).waitFor();
-    await review.getByRole("heading", { name: "Your changes, kept (1)", exact: true }).waitFor();
+    await review.getByRole("heading", { name: "Kept changes (1)", exact: true }).waitFor();
     const level = row(review, "Level 5");
     await level.getByText("D&D Beyond says 6.", { exact: true }).waitFor();
     assert.equal(await review.getByRole("button", { name: "Cancel", exact: true }).count(), 0, "Cancel goes");
@@ -678,7 +678,7 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     assert.ok(primary);
     assert.deepEqual(looks.filter((l) => l.background === primary).map((l) => l.text), ["Get it"], "one primary in the step");
     await dialog.getByRole("button", { name: "Read it", exact: true }).click();
-    const review = ana.getByRole("dialog", { name: "Check what changes" });
+    const review = ana.getByRole("dialog", { name: "Re-sync review" });
     assert.match(await readLine(review), /^Read from D&D Beyond: Bree Tallow, level 6\./);
     await row(review, "Level 5").waitFor();
     await review.getByRole("button", { name: "Back to the D&D Beyond link", exact: true }).click();
@@ -730,7 +730,7 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     await field.fill(NUMBER);
     anaDdb.next({ fixture: fixtureB });
     await dialog.getByRole("button", { name: "Get it", exact: true }).click();
-    review = ana.getByRole("dialog", { name: "Check what changes" });
+    review = ana.getByRole("dialog", { name: "Re-sync review" });
     assert.match(await readLine(review), /^Read from D&D Beyond: Bree Tallow, level 6\. Last synced on /, "the record's number, so three ways");
     assert.equal(anaDdb.last(), NUMBER, "the number typed is fetched");
     const sheetLine = review.getByRole("checkbox", { name: `Sheet link ${SHEET}, now ${ddbSheetUrl(OTHER)}`, exact: true });
@@ -773,7 +773,7 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
       dmDdb.next({ fixture: fixtureB, delayMs: 700 });
       await resync.focus();
       await dm.keyboard.press("Enter");
-      const review = dm.getByRole("dialog", { name: "Check what changes" });
+      const review = dm.getByRole("dialog", { name: "Re-sync review" });
       await review.waitFor();
       await waitFor("focus on the review's first line", async () => ((await focused(dm)).startsWith("p Read from D&D Beyond: Bree Tallow, level 6.") ? true : null));
       await tabTo(dm, "button Overwrite all");
@@ -837,9 +837,9 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
       const summary = await rolls.evaluate((el) => el.ownerDocument.getElementById(el.getAttribute("aria-describedby") ?? "")?.textContent ?? "");
       assert.equal(summary, "40: Adds Longsword, and 39 more", `${at}: the summary describes the row`);
       const headings = await review.evaluate((dialog) => [...dialog.querySelectorAll("h1, h2, h3, h4, h5, h6, [role=heading]")].map((h) => `${h.tagName.toLowerCase()} ${(h.textContent ?? "").trim()}`));
-      assert.deepEqual(headings.filter((h) => !h.startsWith("h3 ")), ["h2 Check what changes"], `${at}: the title and the sections' h3s are the only headings: ${JSON.stringify(headings)}`);
+      assert.deepEqual(headings.filter((h) => !h.startsWith("h3 ")), ["h2 Re-sync review"], `${at}: the title and the sections' h3s are the only headings: ${JSON.stringify(headings)}`);
       for (const h of headings.filter((x) => x.startsWith("h3 "))) {
-        assert.match(h, /^h3 (Check these|Changes from D&D Beyond( \(\d+\))?|Also set|Your changes, kept \(\d+\)|Different from D&D Beyond \(\d+\))$/, `${at}: ${h} is a section`);
+        assert.match(h, /^h3 (Warnings|Changes from D&D Beyond( \(\d+\))?|Other fields|Kept changes \(\d+\)|Unmatched values \(\d+\))$/, `${at}: ${h} is a section`);
       }
       const sideways = await review.evaluate((dialog) => {
         const doc = dialog.ownerDocument;
@@ -892,7 +892,7 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     anaDdb.next({ fixture: faster });
     await sheet.getByRole("button", { name: "D&D Beyond", exact: true }).click();
     await ana.getByRole("dialog", { name: "D&D Beyond" }).getByRole("button", { name: "Get it", exact: true }).click();
-    const read = ana.getByRole("dialog", { name: "Check what was read" });
+    const read = ana.getByRole("dialog", { name: "Import review" });
     await read.getByText(/^Read from D&D Beyond: Bree Tallow, level 6\./).waitFor();
     await playedBy([]);
     await waitFor("Bree's block gone from Ana's view", () => (breeIn(anaSocket) && breeIn(anaSocket)!.stats === undefined ? true : null));
@@ -945,7 +945,7 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     await wild.first().waitFor();
   });
 
-  test("ddbres-2. Wild Shape spent in a fight, then a re-sync with fixture C at every size: Nothing new, Also set's unticked spent line in line, and Done sends nothing. Ticked, Apply gives back D&D Beyond's count", async () => {
+  test("ddbres-2. Wild Shape spent in a fight, then a re-sync with fixture C at every size: Nothing new, Other fields' unticked spent line in line, and Done sends nothing. Ticked, Apply gives back D&D Beyond's count", async () => {
     await ops.send({ t: "actor.use", target: { characterId: run.bree.characterId }, use: { kind: "resource", id: breeIn(dmSocket)!.resources![0]!.id } });
     await waitFor("Wild Shape 0 of 3", () => (breeIn(anaSocket)?.resources?.[0]?.used === 3 ? true : null));
     const aligned: string[] = [];

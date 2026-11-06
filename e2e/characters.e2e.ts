@@ -526,7 +526,7 @@ describe("raccoon-vtt: deleting characters", { timeout: 600_000 }, () => {
     await focusStartsWith(dm, "h2 [] Cyra", "focus on the page's title");
     // The page names what it is, and holds nothing of a token on a map.
     await panel.getByText("Character · Medium (5 ft)", { exact: true }).waitFor();
-    for (const name of ["Stat block", "Combat", "Companions", "Notes", "Image", "Stats", "Played by"]) await panel.getByRole("button", { name, exact: true }).waitFor();
+    for (const name of ["Stat block", "Combat", "Companions", "Notes", "Image", "Stats", "Players"]) await panel.getByRole("button", { name, exact: true }).waitFor();
     for (const name of ["Position", "Token settings"]) assert.equal(await panel.getByRole("button", { name, exact: true }).count(), 0, `${name} is a token's`);
     await shots.take(dm, "characters-lp1-dm-page");
     await dm.getByRole("button", { name: "Back to Characters" }).click();
