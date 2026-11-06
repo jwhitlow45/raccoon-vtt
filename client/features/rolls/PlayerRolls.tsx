@@ -525,7 +525,8 @@ export function RollCard(props: {
   // Only while it shows, so a card folded under a sheet, or one that arrived there, never takes Back from the sheet.
   useBackClose(props.sheet && !props.hidden, props.onFold);
   // At the screen's foot a swipe down puts it off as Later does, with what was typed kept, so unsaved input never holds it (docs/design/design-v1-sheet-swipe.md section 3).
-  useSheetSwipe(props.cardRef, { enabled: props.sheet && !props.hidden, onClose: props.onFold, item: props.request.id, clip: "screen", keeps: true });
+  const swipe = useSheetSwipe(props.cardRef, { enabled: props.sheet && !props.hidden, onClose: props.onFold, item: props.request.id, clip: "screen", keeps: true });
+  const controls = props.sheet ? swipe.controls : null;
   // At the foot it stands on the on-screen keyboard (placedChrome above), and its total shows with Send.
   const view = useKeyboardView();
   useFieldInView(props.cardRef, useMemo(() => ({ view, cramped }), [view, cramped]), theme.space(2));
@@ -573,9 +574,12 @@ export function RollCard(props: {
   /*
    * The header at a phone's foot pads its content the grabber's room above
    * and, once its fill sticks, the same below, so its question and Later
-   * stand in the middle of the fill that covers what scrolls under it.
+   * stand in the middle of the fill that covers what scrolls under it. The
+   * step arrows' strip, where a mouse shows them, grows only the room above:
+   * the fill under the question keeps the grabber's room.
    */
-  const headerPad = useGrabberRoom();
+  const headerPad = useGrabberRoom(controls);
+  const footPad = useGrabberRoom();
   const { onMeasure, request: shownRequest } = props;
   const sticks = props.sheet && props.stickyHeader && cramped < 2;
   // A header that sticks covers the card's top: the field keepers keep a field below it (lib/keyboardInset.ts reads the scroll padding).
@@ -595,7 +599,7 @@ export function RollCard(props: {
       // Folded, the card has no size: the last measures stand.
       if (card.offsetHeight === 0) return;
       // Measured as a sticking header stands, its fill taking in the card's top padding, which every header at the foot reaches over, and as much under it, so whether it sticks never changes the answer.
-      const lift = sticks ? 0 : headerPad;
+      const lift = sticks ? 0 : footPad;
       const head = header.offsetHeight + lift;
       const edges = 2 * theme.line.border;
       // The answer block (5.7): from "Fail (Stunned)" or the roll row down to the total and Send.
@@ -614,7 +618,7 @@ export function RollCard(props: {
     // Capped, the card keeps its size as a choice brings reminders over the row, so its parts are watched too. A sent total remounts them, and the changed request watches the new ones.
     for (const part of card.children) observer.observe(part);
     return () => observer.disconnect();
-  }, [props.sheet, props.cardRef, onMeasure, sticks, shownRequest, headerPad]);
+  }, [props.sheet, props.cardRef, onMeasure, sticks, shownRequest, headerPad, footPad]);
   /*
    * Shown where it is too short for all of it, the card scrolls to show its
    * answer block whole under the header as it sticks. Where the block is
@@ -656,14 +660,14 @@ export function RollCard(props: {
                 zIndex: 1,
                 // The card's top and side padding, taken back so the fill covers what scrolls under it. The fill pads its content the same above and below.
                 margin: `-${theme.space(4)}px calc(-1 * (${theme.safe.right} + ${theme.space(4)}px)) 0 calc(-1 * (${theme.safe.left} + ${theme.space(4)}px))`,
-                padding: `${headerPad}px calc(${theme.safe.right} + ${theme.space(4)}px) ${headerPad}px calc(${theme.safe.left} + ${theme.space(4)}px)`,
+                padding: `${headerPad}px calc(${theme.safe.right} + ${theme.space(4)}px) ${footPad}px calc(${theme.safe.left} + ${theme.space(4)}px)`,
                 background: theme.color.surface,
               }
             : null),
         }}
       >
         {/* In the header's top padding, the grabber's room. */}
-        {props.sheet ? <SheetGrabber /> : null}
+        {props.sheet ? <SheetGrabber controls={controls} putAway="Put away roll" /> : null}
         {/* Set down so its first line's middle meets Later's, as a checkbox meets its label's first line (docs/design/design-v1-polish.md R1): a question on several lines starts beside Later rather than centering on it. */}
         <div style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(0.5), paddingTop: QUESTION_DROP }}>
           {/* The DC joins the question's line (5.1), one line less on every card. */}

@@ -18,7 +18,7 @@ import { Switch } from "../../components/Switch.tsx";
 import { useBackClose } from "../../lib/backClose.ts";
 import type { Camera, Insets, Size } from "../../lib/camera.ts";
 import { displayName } from "../../lib/scene.ts";
-import { useSheetSwipe } from "../../lib/sheetSwipe.ts";
+import { useSheetSwipe, type SheetControls } from "../../lib/sheetSwipe.ts";
 import { boardTheme, theme } from "../../lib/theme.ts";
 import { paneDockFits, useAlertsLane, usePublishPaneLane } from "../../pages/fold.ts";
 import { PaneDockRow, usePaneDock } from "../../pages/RoomDock.tsx";
@@ -139,7 +139,7 @@ export default function TrapPane(props: { trap: Trap; hidden: boolean; camera: C
   });
 
   // As a bottom sheet it swipes down to close. Each choice is sent as it is made and text when its field is left, so the focus rule alone holds it.
-  useSheetSwipe(paneRef, { enabled: sheet && !hidden, onClose: () => closeRef.current(), item: trap.id, clip: "foot", riders: dock.riders });
+  const swipe = useSheetSwipe(paneRef, { enabled: sheet && !hidden, onClose: () => closeRef.current(), item: trap.id, clip: "foot", riders: dock.riders });
 
   return (
     <>
@@ -152,7 +152,7 @@ export default function TrapPane(props: { trap: Trap; hidden: boolean; camera: C
         style={{ ...labelPaneFrame(place), overflowY: "auto", overscrollBehavior: "contain", color: theme.color.text, ...(hidden ? { display: "none" } : null) }}
       >
         {/* Keyed by trap, so a half-typed field or an armed Delete never carries over to the next trap tapped. */}
-        <TrapEditor key={trap.id} trap={trap} sheet={sheet} onClose={props.onClose} />
+        <TrapEditor key={trap.id} trap={trap} sheet={sheet} onClose={props.onClose} controls={swipe.controls} />
       </div>
       {dock.summary && place.kind === "sheet" && !hidden ? <PaneDockRow ref={dock.row} pane={paneRef} bottom={place.bottom} summary={dock.summary} onClose={() => closeRef.current()} /> : null}
     </>
@@ -162,7 +162,7 @@ export default function TrapPane(props: { trap: Trap; hidden: boolean; camera: C
 type RigPatch = NonNullable<TrapPatch["rig"]>;
 type Part = "name" | "when" | "after" | "hits" | "save" | "read" | "also" | "find" | "note";
 
-function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void }) {
+function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void; controls: SheetControls | null }) {
   const { trap } = props;
   const rig = trap.rig;
   const shape = useRoomView((s) => s.view?.scenes[trap.sceneId]?.gridShape);
@@ -230,7 +230,7 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void }) {
   return (
     // One column that never grows past the card, whatever a line inside asks for (LabelPane.tsx, PinPane.tsx).
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
-      <PaneHeader title={trap.name} onClose={props.onClose} grab={props.sheet} />
+      <PaneHeader title={trap.name} onClose={props.onClose} grab={props.sheet} controls={props.controls} />
       {from ? <Help>{from}</Help> : null}
       {doorGone ? <Note>Its door is gone, so it cannot go off. Delete it, or put a door back.</Note> : null}
 

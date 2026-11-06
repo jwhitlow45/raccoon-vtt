@@ -209,7 +209,7 @@ export function Dialog(props: DialogProps) {
   const tight = cramped && view !== null;
   useFieldInView(body, useMemo(() => ({ view, tight }), [view, tight]), theme.space(2));
   // Its title names its step, as the scene menu's do, so a new step ends a drag.
-  useSheetSwipe(card, { enabled: bottom, onClose, scroller: body, item: props.title, clip: "screen", drafts });
+  const swipe = useSheetSwipe(card, { enabled: bottom, onClose, scroller: body, item: props.title, clip: "screen", drafts });
   const headlessSheet = bottom && !header;
 
   // The dialog element is the dimmed layer over the whole screen, so a tap on it outside the card closes the card.
@@ -261,7 +261,7 @@ export function Dialog(props: DialogProps) {
             ...(tight ? { alignSelf: "stretch", height: "auto", maxHeight: "none" } : null),
           }}
         >
-          {header && !tight ? <SheetHeader title={props.title} back={props.back} actions={props.headerActions} detail={props.headerDetail} detailId={detailId} onClose={onClose} divider grab={bottom} /> : null}
+          {header && !tight ? <SheetHeader title={props.title} back={props.back} actions={props.headerActions} detail={props.headerDetail} detailId={detailId} onClose={onClose} divider grab={bottom} controls={swipe.controls} /> : null}
           <div ref={body} style={{ flex: 1, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain", padding: BODY_PAD, ...props.bodyStyle, ...(headlessSheet ? { position: "relative" } : null) }}>
             {/* With no header to hold it, the X-card's grabber sits at the top of its body, all it has to swipe by, in the 20 px its content keeps above its first line. */}
             {headlessSheet ? <SheetGrabber /> : null}

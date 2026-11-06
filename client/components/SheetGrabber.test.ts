@@ -22,6 +22,8 @@ const { PaneHeader, SheetHeader } = await import("./SheetHeader.tsx");
 const { GRABBER_DESIGNS, grabberRoom, HOLD_SHARE, parseGrabber, STRETCH_X, STRETCH_Y } = await import("./grabberDesigns.ts");
 const { setSheetHandle } = await import("../features/device/settings.ts");
 const { theme } = await import("../lib/theme.ts");
+const { finePointerNow } = await import("../lib/device.ts");
+const { SheetGrabber } = await import("./SheetGrabber.tsx");
 
 const grabbers = (markup: string) => [...markup.matchAll(/<svg[^>]*data-sheet-grabber[^>]*>/g)].map((m) => m[0]);
 const styleOf = (tag: string) => /style="([^"]*)"/.exec(tag)?.[1] ?? "";
@@ -136,5 +138,105 @@ describe("the sheet grabber", () => {
     } finally {
       setSheetHandle("tail");
     }
+  });
+});
+
+/*
+ * The step arrows (docs/design/design-v1-panel-size.md 5.1, 5.2): where
+ * any pointer is fine and the swipe's controls reach the grab area, a 44 px
+ * strip at its top holds Up, the grabber centered on its drag band, and
+ * Down. Elsewhere, the X-card's body and a grab header with no controls
+ * included, the header keeps the grabber's own room.
+ */
+type Controls = { stand: "normal" | "full"; canFill: boolean; step(to: string): void };
+const controls = (stand: "normal" | "full", canFill = true): Controls => ({ stand, canFill, step() {} });
+
+/** Runs `fn` with a matchMedia that matches only the queries given. */
+function withMedia<T>(matches: readonly string[], fn: () => T): T {
+  const g = globalThis as { matchMedia?: unknown };
+  const before = g.matchMedia;
+  g.matchMedia = (q: string) => ({ matches: matches.includes(q), addEventListener() {}, removeEventListener() {} });
+  try {
+    return fn();
+  } finally {
+    if (before === undefined) delete g.matchMedia;
+    else g.matchMedia = before;
+  }
+}
+
+const steps = (markup: string) => [...markup.matchAll(/<button[^>]*data-sheet-step="(up|down)"[^>]*>/g)].map((m) => ({ side: m[1], tag: m[0], name: /aria-label="([^"]*)"/.exec(m[0])?.[1] ?? "" }));
+
+describe("PS-B. the step arrows", () => {
+  test("the any-pointer test: a mouse beside a touch screen counts, a primary fine pointer alone does not, and no matchMedia is no mouse", () => {
+    assert.equal(withMedia(["(any-pointer: fine)"], finePointerNow), true);
+    assert.equal(withMedia(["(pointer: fine)"], finePointerNow), false);
+    assert.equal(finePointerNow(), false, "no matchMedia, as on the server");
+  });
+
+  test("with a mouse and controls: a 44 px strip, the grabber centered in it, Up and Down around its drag band, and no hidden Expand sheet", () => {
+    const markup = withMedia(["(any-pointer: fine)"], () => renderToStaticMarkup(createElement(SheetHeader, { title: "Log", onClose() {}, grab: true, controls: controls("normal"), fullScreen: { pressed: false, onPress() {} } })));
+    // 44 above the row's 56: 38 of padding and the row's own 6 above its buttons.
+    assert.match(styleOf(/^<header[^>]*>/.exec(markup)?.[0] ?? ""), /min-height:94px;padding:38px 8px 0/);
+    const [pill = ""] = grabbers(markup);
+    assert.match(styleOf(pill), /top:20px;left:50%;margin-left:-18px/);
+    assert.deepEqual(
+      steps(markup).map((b) => [b.side, b.name]),
+      [
+        ["up", "Expand sheet"],
+        ["down", "Put away sheet"],
+      ],
+    );
+    for (const b of steps(markup)) {
+      assert.match(styleOf(b.tag), /width:44px;height:44px/);
+      assert.doesNotMatch(b.tag, /disabled/);
+    }
+    // Up's 44 px stand left of the 44 px band (the tail's 36 and 4 each side), Down's right of it.
+    assert.match(styleOf(steps(markup)[0]!.tag), /margin-left:-66px/);
+    assert.match(styleOf(steps(markup)[1]!.tag), /margin-left:22px/);
+    assert.match(markup, /data-sheet-drag-band=""[^>]*style="[^"]*width:44px;height:44px;cursor:grab;user-select:none/);
+    assert.doesNotMatch(markup, /aria-label="Expand sheet"[^>]*aria-pressed/, "the hidden Expand sheet is not drawn");
+    assert.equal((markup.match(/Expand sheet/g) ?? []).length, 2, "Up's name and its tip's words only");
+  });
+
+  test("at full: Up is aria-disabled and still a button that takes focus, Down shrinks", () => {
+    const markup = withMedia(["(any-pointer: fine)"], () => renderToStaticMarkup(createElement(SheetHeader, { title: "Log", onClose() {}, grab: true, controls: controls("full") })));
+    const [up, down] = steps(markup);
+    assert.match(up!.tag, /aria-disabled="true"/);
+    assert.doesNotMatch(up!.tag, / disabled=""/);
+    assert.equal(down!.name, "Shrink sheet");
+    assert.doesNotMatch(down!.tag, /aria-disabled/);
+  });
+
+  test("a surface with no full stand shows Down only, the roll card names it, and a pane's header grows to the same strip", () => {
+    const pane = withMedia(["(any-pointer: fine)"], () => renderToStaticMarkup(createElement(PaneHeader, { title: "Label", onClose() {}, grab: true, controls: controls("normal", false) })));
+    assert.deepEqual(steps(pane).map((b) => b.name), ["Put away sheet"]);
+    const row = styleOf(/^<div[^>]*>/.exec(pane)?.[0] ?? "");
+    assert.match(row, /padding-top:42px/);
+    assert.match(row, /min-height:90px/);
+    const sticky = withMedia(["(any-pointer: fine)"], () => renderToStaticMarkup(createElement(PaneHeader, { title: "Label", onClose() {}, grab: true, sticky: true, controls: controls("normal", false) })));
+    assert.match(styleOf(/^<div[^>]*>/.exec(sticky)?.[0] ?? ""), /padding:44px 12px 2px/);
+    const roll = withMedia(["(any-pointer: fine)"], () => renderToStaticMarkup(createElement(SheetGrabber, { controls: controls("normal", false), putAway: "Put away roll" })));
+    assert.deepEqual(steps(roll).map((b) => b.name), ["Put away roll"]);
+  });
+
+  test("no arrows and today's room: a touch screen alone, no controls (a grab header without them, the X-card's body), and the server", () => {
+    const cases = [
+      withMedia(["(any-pointer: coarse)"], () => renderToStaticMarkup(createElement(SheetHeader, { title: "Log", onClose() {}, grab: true, controls: controls("normal") }))),
+      withMedia(["(any-pointer: fine)"], () => renderToStaticMarkup(createElement(SheetHeader, { title: "Log", onClose() {}, grab: true }))),
+      renderToStaticMarkup(createElement(SheetHeader, { title: "Log", onClose() {}, grab: true, controls: controls("normal") })),
+    ];
+    for (const markup of cases) {
+      assert.equal(steps(markup).length, 0);
+      assert.doesNotMatch(markup, /data-sheet-drag-band/);
+      assert.match(styleOf(/^<header[^>]*>/.exec(markup)?.[0] ?? ""), /min-height:60px;padding:4px 8px 0/);
+      assert.match(styleOf(grabbers(markup)[0] ?? ""), /top:5px/);
+    }
+    const xcard = withMedia(["(any-pointer: fine)"], () => renderToStaticMarkup(createElement(SheetGrabber, {})));
+    assert.match(styleOf(grabbers(xcard)[0] ?? ""), /top:5px/);
+    assert.equal(steps(xcard).length, 0);
+    // Controls that do not reach the header, which is no grab area, draw nothing.
+    const off = withMedia(["(any-pointer: fine)"], () => renderToStaticMarkup(createElement(SheetHeader, { title: "Log", onClose() {}, controls: controls("normal") })));
+    assert.equal(steps(off).length + grabbers(off).length, 0);
+    assert.deepEqual(Object.fromEntries(GRABBER_DESIGNS.map((d) => [d.id, grabberRoom(d.id)])), { tail: 10, mask: 15, beans: 14, rod: 12, rune: 12, pill: 10 });
   });
 });

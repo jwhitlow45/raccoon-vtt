@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import fc from "fast-check";
+import { holds } from "#shared/propertyTestutil.ts";
 import { subpageKey } from "../features/panels.ts";
 import { TAP_SLOP_PX } from "./gestures.ts";
 import {
@@ -30,7 +32,10 @@ import {
   type SwipeGeometry,
   type SwipeHost,
   type SwipeLook,
+  type SwipeEnd,
+  type SwipeInput,
   type SwipeNode,
+  type SwipeOn,
   type SwipeStart,
   type SwipeStyle,
 } from "./sheetSwipe.ts";
@@ -1292,4 +1297,371 @@ test("roll mode menu owns its rows and native scrolling without disabling touch 
   assert.equal(startsOn(menu, surface, [], css), "owned");
   assert.equal(menu.style.touchAction, "auto");
   assert.equal(startsOn(el("button", surface), surface, [], css), "content");
+});
+
+// ------------------------------------------------------------ PS-B. the arrows and the mouse
+
+/*
+ * The step arrows and the mouse's drag (docs/design/design-v1-panel-size.md
+ * 5.3): the hook reads the stand's geometry and SwipeSession.step moves the
+ * surface as a release would, and one press owns the surface at a time,
+ * whether a finger's, a mouse's or a pen's.
+ */
+
+/** What the page was told, in order: a rise, a place at a position (`at`) or a slide to one, and a rest. */
+function logged(page: FakePage): string[] {
+  const log: string[] = [];
+  const { rise, place } = page.host;
+  page.host.rise = (on) => {
+    log.push(on ? "rise" : "fall");
+    rise(on);
+  };
+  page.host.place = (look, ease, pull) => {
+    log.push(look ? `${ease ? "slide" : "at"} ${look.position}` : "rest");
+    place(look, ease, pull);
+  };
+  return log;
+}
+
+describe("PS-B. the arrows' steps", () => {
+  test("Up from normal rises into the whole screen's box at its place, slides to full, fills the screen and rests", () => {
+    const page = new FakePage();
+    const log = logged(page);
+    const session = new SwipeSession(page.host);
+    assert.equal(session.step("full", sessionStart({ stand: "normal", up: 200 })), true);
+    assert.deepEqual(log, ["rise", "at 0", "slide -200"]);
+    assert.deepEqual(page.stands, []);
+    page.tick(SLIDE_MS);
+    assert.deepEqual(page.stands, [true]);
+    assert.deepEqual(log.slice(3), ["fall", "rest"]);
+    assert.equal(page.closes, 0);
+  });
+
+  test("Down from full slides from full's own place, never from where the last touch left it", () => {
+    const page = new FakePage();
+    const session = new SwipeSession(page.host);
+    const full = sessionStart({ stand: "full", up: 200 });
+    // A drag at full that a second finger springs back leaves the touch's last place at -148.
+    session.begin(full);
+    session.move({ dx: 0, dy: 60, at: 30, cancelable: true });
+    session.cancel();
+    page.tick(SLIDE_MS);
+    session.end(60);
+    session.lifted();
+    near(session.touch.position, -148, "the touch's last place");
+    const log = logged(page);
+    assert.equal(session.step("normal", full), true);
+    assert.deepEqual(log, ["rise", "at -200", "slide 0"]);
+    page.tick(SLIDE_MS);
+    assert.deepEqual(page.stands, [false]);
+    assert.equal(page.risen, false);
+    assert.equal(page.placed, false);
+  });
+
+  test("Down from normal slides off and closes once, a kept-open surface springs back, and a double press is one step", () => {
+    for (const keeps of [false, true]) {
+      const page = new FakePage();
+      page.keepsOpen = keeps;
+      const log = logged(page);
+      const session = new SwipeSession(page.host);
+      const s = sessionStart({ stand: "normal", up: 0, closeAt: 380 });
+      assert.equal(session.step("closed", s), true);
+      assert.equal(session.step("closed", s), false, "a second press during the slide");
+      page.settle();
+      assert.equal(page.closes, 1);
+      assert.deepEqual(log, keeps ? ["slide 380", "slide 0", "rest"] : ["slide 380", "rest"]);
+    }
+    const page = new FakePage();
+    const session = new SwipeSession(page.host);
+    const full = sessionStart({ stand: "full", up: 200 });
+    assert.equal(session.step("normal", full), true);
+    assert.equal(session.step("normal", full), false);
+    page.settle();
+    assert.deepEqual(page.stands, [false]);
+  });
+
+  test("an arrow does nothing while a finger's or a mouse's press owns the surface, and acts once it lifts", () => {
+    for (const input of ["touch", "mouse"] as const) {
+      const page = new FakePage();
+      const session = new SwipeSession(page.host);
+      assert.equal(session.begin(sessionStart({ input })), true);
+      assert.equal(session.step("closed", sessionStart()), false);
+      assert.equal(session.step("full", sessionStart({ up: 200 })), false);
+      session.end(10);
+      session.lifted();
+      assert.equal(session.step("closed", sessionStart()), true);
+      page.settle();
+      assert.equal(page.closes, 1);
+    }
+  });
+
+  test("Up never acts at full, without a full stand, or toward the stand it has, and never closes", () => {
+    const page = new FakePage();
+    const session = new SwipeSession(page.host);
+    assert.equal(session.step("full", sessionStart({ stand: "full", up: 200 })), false);
+    assert.equal(session.step("full", sessionStart({ stand: "normal", up: 0 })), false);
+    assert.equal(session.step("normal", sessionStart({ stand: "normal", up: 200 })), false);
+    page.settle();
+    assert.equal(page.closes + page.stands.length, 0);
+    assert.equal(page.placed || page.risen, false);
+  });
+
+  test("with reduced motion Up arrives at once, and an item change mid-step rests with no rise, no stand and no close", () => {
+    const reduced = new FakePage({ reduced: true });
+    const log = logged(reduced);
+    assert.equal(new SwipeSession(reduced.host).step("full", sessionStart({ up: 200 })), true);
+    assert.deepEqual(reduced.stands, [true]);
+    assert.deepEqual(log, ["rise", "at 0", "fall", "rest"]);
+    for (const to of ["full", "closed"] as const) {
+      const page = new FakePage();
+      const session = new SwipeSession(page.host);
+      session.step(to, sessionStart({ up: 200 }));
+      page.tick(SLIDE_MS / 2);
+      session.stop();
+      page.settle();
+      assert.equal(page.closes + page.stands.length, 0, to);
+      assert.equal(page.risen, false);
+      assert.equal(page.placed, false);
+      assert.equal(page.pending, false);
+    }
+  });
+});
+
+describe("PS-B. a mouse on the drag band", () => {
+  test("its claim takes no press where a finger's takes one, and its release ends at the touch's own stands", () => {
+    for (const input of ["touch", "mouse"] as const) {
+      const page = new FakePage();
+      const session = new SwipeSession(page.host);
+      assert.equal(session.begin(sessionStart({ input, closeAt: 300 })), true);
+      drag(session.touch, []);
+      for (const [i, dy] of ramp(240, 20).entries()) session.move({ dx: 0, dy, at: 30 * (i + 1), cancelable: true });
+      assert.equal(page.presses, input === "mouse" ? 0 : 1, input);
+      session.end(400);
+      page.settle();
+      assert.equal(page.closes, 1, `${input}: a slow drag past half the way closes`);
+    }
+  });
+
+  test("its release and its loss end the document's watch, which a finger's ends only at the last lift", () => {
+    for (const how of ["end", "drop"] as const) {
+      const mouse = new FakePage();
+      const ms = new SwipeSession(mouse.host);
+      ms.begin(sessionStart({ input: "mouse" }));
+      assert.equal(mouse.watching, true);
+      if (how === "end") ms.end(10);
+      else ms.drop();
+      assert.equal(mouse.watching, false, how);
+      assert.equal(ms.holder, null);
+      const touch = new FakePage();
+      const ts = new SwipeSession(touch.host);
+      ts.begin(sessionStart());
+      if (how === "end") ts.end(10);
+      else ts.drop();
+      assert.equal(touch.watching, true, `${how}: a finger's watch waits for the last lift`);
+      assert.equal(ts.holder, null);
+    }
+  });
+
+  test("a touch landing during a mouse drag springs it back and starts nothing, and the drag's release ends nothing", () => {
+    const page = new FakePage();
+    const log = logged(page);
+    const session = new SwipeSession(page.host);
+    session.begin(sessionStart({ input: "mouse", closeAt: 300 }));
+    session.move({ dx: 0, dy: 200, at: 30, cancelable: true });
+    session.landed();
+    assert.equal(session.begin(sessionStart({ input: "touch" })), false);
+    assert.equal(session.holder, "mouse");
+    session.move({ dx: 0, dy: 280, at: 60, cancelable: true });
+    page.tick(SLIDE_MS);
+    session.end(90);
+    page.settle();
+    assert.equal(page.closes, 0);
+    assert.deepEqual(log.slice(-2), ["slide 0", "rest"]);
+    assert.equal(page.watching, false);
+  });
+
+  test("a mouse press during a touch swipe is ignored, and the swipe ends as a swipe", () => {
+    const page = new FakePage();
+    const session = new SwipeSession(page.host);
+    session.begin(sessionStart({ closeAt: 300 }));
+    assert.equal(session.begin(sessionStart({ input: "mouse" })), false);
+    assert.equal(session.holder, "touch");
+    for (const [i, dy] of ramp(240, 20).entries()) session.move({ dx: 0, dy, at: 30 * (i + 1), cancelable: true });
+    session.end(400);
+    page.settle();
+    assert.equal(page.closes, 1);
+  });
+
+  test("a touch tap, then a mouse drag: the drag moves and ends, with no press taken for the stale touch", () => {
+    const page = new FakePage();
+    const session = new SwipeSession(page.host);
+    session.begin(sessionStart());
+    session.end(5);
+    session.lifted();
+    session.begin(sessionStart({ input: "mouse", up: 200, at: 100 }));
+    for (const [i, dy] of ramp(-200, 20).entries()) session.move({ dx: 0, dy, at: 100 + 30 * (i + 1), cancelable: true });
+    assert.ok(page.looks.some((l) => l.position < -100), "the drag moved the surface");
+    session.end(500);
+    page.settle();
+    assert.equal(page.presses, 0);
+    assert.deepEqual(page.stands, [true]);
+  });
+});
+
+/** One input event at the surface, as the hook hands them to the session. */
+type OwnerEvent =
+  | { t: "press"; input: SwipeInput; on: Exclude<SwipeOn, "owned">; control: boolean; fingers: number }
+  | { t: "move"; dx: number; dy: number; dt: number }
+  | { t: "lift" }
+  | { t: "lost" }
+  | { t: "land" }
+  | { t: "arrow"; up: boolean }
+  | { t: "item" }
+  | { t: "tick"; ms: number }
+  | { t: "unsaved" };
+
+const ownerEvent: fc.Arbitrary<OwnerEvent> = fc.oneof(
+  { weight: 2, arbitrary: fc.record({ t: fc.constant("press" as const), input: fc.constantFrom<SwipeInput>("touch", "mouse"), on: fc.constantFrom<"grab" | "content">("grab", "grab", "content"), control: fc.boolean(), fingers: fc.constantFrom(1, 1, 1, 2) }) },
+  { weight: 5, arbitrary: fc.record({ t: fc.constant("move" as const), dx: fc.integer({ min: -30, max: 30 }), dy: fc.integer({ min: -160, max: 160 }), dt: fc.constantFrom(1, 5, 16, 30, 120) }) },
+  { weight: 2, arbitrary: fc.constant({ t: "lift" as const }) },
+  { weight: 1, arbitrary: fc.constant({ t: "lost" as const }) },
+  { weight: 1, arbitrary: fc.constant({ t: "land" as const }) },
+  { weight: 3, arbitrary: fc.record({ t: fc.constant("arrow" as const), up: fc.boolean() }) },
+  { weight: 1, arbitrary: fc.constant({ t: "item" as const }) },
+  { weight: 2, arbitrary: fc.record({ t: fc.constant("tick" as const), ms: fc.constantFrom(0, 50, 120, 200, 400) }) },
+  { weight: 1, arbitrary: fc.constant({ t: "unsaved" as const }) },
+);
+
+describe("PS-B. the input owner over touch, mouse, pen and the arrows", () => {
+  test("in any order: one owner, no press taken for a mouse, never two ends, nothing after a cancel or an item change, rests only at a stand, Up never closes", () => {
+    const reached = { mouseClaims: 0, touchClaims: 0, refused: 0, steps: 0, ignoredSteps: 0, closes: 0, fills: 0, interrupted: 0 };
+    holds(
+      fc.property(
+        fc.record({ up: fc.oneof(fc.constant(0), fc.integer({ min: 150, max: 350 })), closeAt: fc.integer({ min: 300, max: 600 }), reduced: fc.boolean(), keepsOpen: fc.boolean(), scale: fc.constantFrom(1, 1.3), events: fc.array(ownerEvent, { minLength: 1, maxLength: 60 }) }),
+        ({ up, closeAt, reduced, keepsOpen, scale, events }) => {
+          const page = new FakePage({ reduced });
+          page.keepsOpen = keepsOpen;
+          // Widened, since the host's stand callback changes it where the compiler cannot see.
+          let stand = "normal" as "normal" | "full";
+          const { stand: setStand, place } = page.host;
+          page.host.stand = (full) => {
+            stand = full ? "full" : "normal";
+            setStand(full);
+          };
+          const places: number[] = [];
+          page.host.place = (look, ease, pull) => {
+            // A surface at its normal stand shows above its normal top only in the whole screen's box (4.7), so a step up rises first.
+            if (look && look.position < -1e-9 && stand === "normal") assert.equal(page.risen, true, "shown above the normal top before it rose");
+            if (look) places.push(look.position);
+            place(look, ease, pull);
+          };
+          const session = new SwipeSession(page.host);
+          let now = 0;
+          /** The press the session follows, as the hook holds it (`followed`, `dragged`). */
+          let down: { input: SwipeInput; dx: number; dy: number } | null = null;
+          /** What began the motion now running or last run: a press or an arrow, its ends counted from here. */
+          let episode: { ends: number; cut: number | null; arrowUp: boolean; closes: number } = { ends: 0, cut: null, arrowUp: false, closes: 0 };
+          const ends = () => page.closes + page.stands.length;
+          const finish = () => {
+            const made = ends() - episode.ends;
+            assert.ok(made <= 1, `${made} ends from one press or step`);
+            if (episode.cut !== null) assert.equal(ends(), episode.cut, "an end after a cancel or an item change");
+            if (episode.arrowUp) assert.equal(page.closes - episode.closes, 0, "Up closed the surface");
+            if (page.closes > episode.closes) reached.closes++;
+            if (episode.cut !== null) reached.interrupted++;
+          };
+          const startEpisode = (arrowUp: boolean) => {
+            finish();
+            // A surface that closed went away: the next one opens at its normal stand.
+            if (!page.shown) {
+              page.shown = true;
+              stand = "normal";
+            }
+            episode = { ends: ends(), cut: null, arrowUp, closes: page.closes };
+          };
+          const start = (over: Partial<SessionStart> = {}) => sessionStart({ stand: up > 0 ? stand : "normal", up, closeAt, scale, at: now, ...over });
+          for (const e of events) {
+            const before = page.presses;
+            const owner = down?.input ?? null;
+            if (e.t === "press") {
+              const busy = session.busy;
+              if (!busy) startEpisode(false);
+              const s = start({ input: e.input, on: e.input === "mouse" ? "grab" : e.on, control: e.input === "mouse" ? false : e.control, fingers: e.input === "mouse" ? 1 : e.fingers });
+              const followed = session.begin(s);
+              if (busy) {
+                assert.equal(followed, false, "a press began while another owns the surface or a slide runs");
+                reached.refused++;
+              } else if (followed) down = { input: e.input, dx: 0, dy: 0 };
+              else if (e.input === "touch") session.lifted();
+            } else if (e.t === "move" && down) {
+              down.dx += e.dx;
+              down.dy += e.dy;
+              now += e.dt;
+              const claimed = session.touch.phase === "claimed";
+              session.move({ dx: down.dx, dy: down.dy, at: now, cancelable: true });
+              if (!claimed && session.touch.phase === "claimed") reached[down.input === "mouse" ? "mouseClaims" : "touchClaims"]++;
+            } else if (e.t === "lift" && down) {
+              now += 5;
+              const input = down.input;
+              down = null;
+              session.end(now);
+              // The hook's touch path ends the watch at the last finger's lift. A mouse's release must end it itself.
+              if (input === "touch") session.lifted();
+            } else if (e.t === "lost" && down) {
+              if (session.touch.phase !== "idle") episode.cut ??= ends();
+              const input = down.input;
+              down = null;
+              session.drop();
+              if (input === "touch") session.lifted();
+            } else if (e.t === "land") {
+              if (down) {
+                if (session.touch.phase !== "idle") episode.cut ??= ends();
+                session.landed();
+                assert.equal(session.begin(start({ input: "touch" })), false, "a touch landing on a held surface began");
+              }
+            } else if (e.t === "arrow") {
+              const to: SwipeEnd = e.up ? "full" : stand === "full" ? "normal" : "closed";
+              const busy = session.busy;
+              const can = !busy && (to !== "full" || (up > 0 && stand === "normal"));
+              if (can) startEpisode(e.up);
+              const at = places.length;
+              const from = stand;
+              const moved = session.step(to, start());
+              assert.equal(moved, can, `an arrow to ${to} from ${from}${busy ? " while held or sliding" : ""}`);
+              if (moved) reached.steps++;
+              else if (busy) reached.ignoredSteps++;
+              if (moved && from === "full" && to === "normal") assert.equal(places[at], -up, "a step down slid from somewhere other than full");
+            } else if (e.t === "item") {
+              if (down || session.sliding) episode.cut ??= ends();
+              session.stop();
+            } else if (e.t === "tick") {
+              page.tick(e.ms);
+            } else if (e.t === "unsaved") {
+              page.unsavedNow = !page.unsavedNow;
+            }
+            if (owner === "mouse") assert.equal(page.presses, before, "a press taken for a mouse");
+            assert.equal(session.holder, down?.input ?? null, "the session's owner differs from the press held");
+            if (stand === "full") reached.fills++;
+          }
+          if (down) {
+            const input = down.input;
+            session.end(now + 5);
+            if (input === "touch") session.lifted();
+          }
+          page.settle();
+          finish();
+          // At rest: no transform, no box change, no listener, at full or normal or gone.
+          assert.equal(page.placed, false, "a transform left set");
+          assert.equal(page.risen, false, "the whole screen's box left on");
+          assert.equal(page.watching, false, "the document's watch left on");
+          assert.equal(page.pending, false);
+          assert.equal(session.busy, false);
+          assert.ok(stand === "normal" || stand === "full");
+          if (stand === "full") assert.ok(up > 0, "full for a surface with no full stand");
+        },
+      ),
+      600,
+    );
+    for (const [what, count] of Object.entries(reached)) assert.ok(count > 10, `only ${count} ${what}`);
+  });
 });

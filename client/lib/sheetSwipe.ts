@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { flushSync } from "react-dom";
 import { useUiScale } from "../features/device/settings.ts";
 import { TAP_SLOP_PX } from "./gestures.ts";
@@ -89,7 +89,12 @@ export type SwipeStart = {
   up: number;
   /** The press landed on a control in the grab area (onControl), whose tap is its own: no hold of the surface until it claims (4.8). */
   control?: boolean;
+  /** What pressed: a finger, or a mouse or pen on the grabber's drag band (docs/design/design-v1-panel-size.md 5.3). A touch by default. */
+  input?: SwipeInput;
 };
+
+/** The input that owns a surface while it is pressed: one at a time, across touch, mouse and pen. */
+export type SwipeInput = "touch" | "mouse";
 
 export type SwipeMove = { dx: number; dy: number; at: number; cancelable: boolean };
 
@@ -416,6 +421,12 @@ export class SwipeSession {
   private readonly held = new Set<number>();
   /** What the host was last told of the touch's hold (4.8). */
   private holdShown = false;
+  /**
+   * The press that owns the surface, from a followed start to its lift or
+   * its loss, through a cancel or a new item too, since the press is still
+   * down: no other press and no arrow acts until it goes.
+   */
+  private owner: SwipeInput | null = null;
 
   constructor(host: SwipeHost) {
     this.host = host;
@@ -426,11 +437,22 @@ export class SwipeSession {
     return this.stopMotion !== null;
   }
 
-  /** A touch went down on the surface or a rider. Returns whether it is followed. */
+  /** The input whose press owns the surface now, if any. */
+  get holder(): SwipeInput | null {
+    return this.owner;
+  }
+
+  /** A press owns the surface or a slide runs: a new press or an arrow does nothing. */
+  get busy(): boolean {
+    return this.owner !== null || this.stopMotion !== null;
+  }
+
+  /** A touch, or a mouse or pen press on the drag band, went down on the surface or a rider. Returns whether it is followed. */
   begin(s: SessionStart): boolean {
-    if (this.stopMotion) return false;
+    if (this.busy) return false;
     const followed = this.touch.start(s);
     this.begun = followed ? s : null;
+    if (followed) this.owner = s.input ?? "touch";
     if (followed && !this.watching) {
       this.watching = true;
       this.host.watch(true);
@@ -447,7 +469,8 @@ export class SwipeSession {
     if (step.position === null || !s) return step.cancel;
     let position = step.position;
     if (step.press) {
-      this.host.takePress();
+      // A mouse has no press for the browser to take: cancelling one would cancel a stale touch's press, and the window would stop the drag's own moves (5.3).
+      if (s.input !== "mouse") this.host.takePress();
       position = this.touch.claimed(this.host.unsaved());
     }
     if (s.stand === "normal" && !this.risen && (position < 0 || this.touch.upward)) {
@@ -459,23 +482,63 @@ export class SwipeSession {
     return step.cancel;
   }
 
-  /** The touch lifted. Returns whether to cancel the lift. */
+  /** The touch lifted, or the mouse button came up wherever the pointer is. Returns whether to cancel the lift. */
   end(at: number): boolean {
     const s = this.begun;
     this.begun = null;
     const { end, cancel } = this.touch.end(at);
     this.showHold();
+    this.letGo();
     if (s && (end === "full" || end === "normal" || end === "closed")) this.settle(end, s, false);
     return cancel;
   }
 
-  /** A second finger or a `touchcancel`: a surface that moved springs back, and the touch closes nothing. */
+  /** A second finger, or a touch landing during a mouse drag: a surface that moved springs back, and the press, still down, closes nothing. */
   cancel(): void {
     const s = this.begun;
     this.begun = null;
     const moved = this.touch.cancel();
     this.showHold();
     if (moved && s) this.settle(s.stand, s, true);
+  }
+
+  /** A `touchcancel` or a `pointercancel`: as cancel, and the press is gone with no lift to come. */
+  drop(): void {
+    this.cancel();
+    this.letGo();
+  }
+
+  /** Any new touch, wherever it lands, while a press owns the surface cancels that press's swipe for good (4.5, and 5.3 for a mouse's). */
+  landed(): void {
+    if (this.owner !== null) this.cancel();
+  }
+
+  /**
+   * An arrow beside the grabber (docs/design/design-v1-panel-size.md 5.3):
+   * from `s`, the stand's own geometry read fresh, to `to`, with the slide a
+   * release there plays. Nothing while a press owns the surface or a slide
+   * runs, nothing toward the stand it has, and no full screen for a surface
+   * without one. Up rises into the whole screen's box before it slides, and
+   * Down from full slides from full's own place. Returns whether it moved.
+   */
+  step(to: SwipeEnd, s: SessionStart): boolean {
+    if (this.busy || to === s.stand) return false;
+    if (to === "full" && (s.up <= 0 || s.stand !== "normal")) return false;
+    if (to === "full") {
+      this.risen = true;
+      this.host.rise(true);
+      this.placed = true;
+      this.host.place({ position: 0, clip: true }, false);
+    }
+    this.settle(to, s, false, s.stand === "full" ? -s.up : 0);
+    return true;
+  }
+
+  /** The owning press is over: a mouse's release or loss also ends the document's watch for touches, which no lift of a finger will. */
+  private letGo(): void {
+    const was = this.owner;
+    this.owner = null;
+    if (was === "mouse") this.lifted();
   }
 
   /** The last finger lifted. */
@@ -502,6 +565,7 @@ export class SwipeSession {
   /** The surface goes: as stop, and the document is no longer watched. */
   dispose(): void {
     this.stop();
+    this.owner = null;
     this.lifted();
     if (this.held.size === 0) return;
     this.held.clear();
@@ -545,8 +609,8 @@ export class SwipeSession {
     this.host.heldByFinger(on);
   }
 
-  /** Slides to the end's place, then does what the end means. `back` is a spring back, which changes no stand. */
-  private settle(end: SwipeEnd, s: SessionStart, back: boolean): void {
+  /** Slides from `from` to the end's place, then does what the end means. `back` is a spring back, which changes no stand. `from` is the finger's place for a release, the stand's own for an arrow. */
+  private settle(end: SwipeEnd, s: SessionStart, back: boolean, from = this.touch.position): void {
     this.stopMotion?.();
     this.stopMotion = null;
     if (end === "normal" && s.stand === "full" && !this.risen) {
@@ -554,7 +618,7 @@ export class SwipeSession {
       this.risen = true;
       this.host.rise(true);
       this.placed = true;
-      this.host.place({ position: this.touch.position, clip: false }, false);
+      this.host.place({ position: from, clip: false }, false);
     }
     const target: SwipeLook = end === "closed" ? { position: s.closeAt, clip: s.stand === "normal" } : end === "full" ? { position: -s.up, clip: false } : { position: 0, clip: true };
     const arrive = () => {
@@ -855,14 +919,27 @@ export type SwipeGeometry = {
 const EASE = "cubic-bezier(0, 0, 0.2, 1)";
 const NO_RIDERS: readonly HTMLElement[] = [];
 
+/** Marks the strip between the step arrows, around the grabber, where a mouse or pen drags the surface (docs/design/design-v1-panel-size.md 5.3). */
+export const DRAG_BAND_ATTR = "data-sheet-drag-band";
+
+/**
+ * What the step arrows beside a grabber act through
+ * (docs/design/design-v1-panel-size.md 5.3): where the surface stands,
+ * whether it has a full stand, and the step to a stand, which does
+ * nothing while a press owns the surface or a slide runs.
+ */
+export type SheetControls = { stand: SwipeStand; canFill: boolean; step(to: SwipeEnd): void };
+
 /**
  * Makes a surface swipe (4.6): native listeners while `enabled`, since
  * React's own touch listeners are passive and cannot cancel a move. A
  * touch that cannot swipe returns at once. `rising` is the panel sheet's
  * box change for a drag above its normal top, and `expand` is what its
- * "Expand sheet" button does.
+ * "Expand sheet" button does. `controls` are for the step arrows, null
+ * while it does not swipe. A mouse or pen drags it by the drag band only,
+ * through the same machine a finger does.
  */
-export function useSheetSwipe(surface: RefObject<HTMLElement | null>, options: SheetSwipeOptions): { rising: boolean; expand(on: boolean): void } {
+export function useSheetSwipe(surface: RefObject<HTMLElement | null>, options: SheetSwipeOptions): { rising: boolean; expand(on: boolean): void; controls: SheetControls | null } {
   const scale = useUiScale();
   const latest = useRef({ options, scale });
   latest.current = { options, scale };
@@ -877,6 +954,8 @@ export function useSheetSwipe(surface: RefObject<HTMLElement | null>, options: S
   ridersNow.current = riders;
   /** Set while an effect stops the session: React flushes its render itself there, so the box changes wait for it. */
   const inEffect = useRef(false);
+  /** An arrow's step, which needs the listeners' geometry: set while they are on. */
+  const stepNow = useRef<((to: SwipeEnd) => void) | null>(null);
 
   // On the window from the mount, so it runs before every window listener added later and every listener below the window.
   useEffect(() => {
@@ -913,6 +992,8 @@ export function useSheetSwipe(surface: RefObject<HTMLElement | null>, options: S
     const css: SwipeStyle = (node) => getComputedStyle(node as unknown as Element);
     let geometry: SwipeGeometry | null = null;
     let followed: { id: number; x: number; y: number } | null = null;
+    /** The mouse or pen press on the drag band that the session follows, captured by the band. */
+    let dragged: { id: number; x: number; y: number; pen: boolean; band: HTMLElement } | null = null;
     let lastDown: { id: number; target: EventTarget | null } | null = null;
     let captured: Element | null = null;
     let releaseLater: ReturnType<typeof setTimeout> | null = null;
@@ -1185,11 +1266,82 @@ export function useSheetSwipe(surface: RefObject<HTMLElement | null>, options: S
       for (let i = 0; i < e.changedTouches.length; i++) heldTouches.delete(e.changedTouches[i]!.identifier);
       if (!followed || !touchOf(e.changedTouches, followed.id)) return;
       followed = null;
-      swipe.cancel();
+      swipe.drop();
     };
-    // Any new touch while one is followed, wherever it lands, cancels the swipe for good (4.5).
-    const onDocStart = () => {
-      if (followed) swipe.cancel();
+    // Any new touch while a press owns the surface, wherever it lands, cancels the swipe for good (4.5), a mouse's drag too. iOS reports a pen's own contact as a stylus touch, which is the drag itself.
+    const onDocStart = (e: TouchEvent) => {
+      if (dragged?.pen && allStylus(e.changedTouches)) return;
+      swipe.landed();
+    };
+
+    /*
+     * A mouse or pen on the drag band (docs/design/design-v1-panel-size.md
+     * 5.3): its press starts no text selection, its pointer is captured, so
+     * the moves and the release come wherever the pointer goes, and it
+     * begins a session as a touch on the grab area does. It takes no press,
+     * since there is none to take. The touch path above never sees it.
+     */
+    const startStand = (): { stand: SwipeStand; read: { geometry: SwipeGeometry; closeAt: number } } => {
+      const stand: SwipeStand = latest.current.options.full?.on ? "full" : "normal";
+      return { stand, read: readGeometry(stand) };
+    };
+    // On the window while a drag is held, so a release is heard even where the capture was lost, and the arrows never wait on a press that is over.
+    const dragTypes = [
+      ["pointermove", (e: PointerEvent) => onDragMove(e)],
+      ["pointerup", (e: PointerEvent) => onDragUp(e)],
+      ["pointercancel", (e: PointerEvent) => onDragCancel(e)],
+    ] as const;
+    const endDrag = (): void => {
+      const d = dragged;
+      if (!d) return;
+      dragged = null;
+      for (const [type, fn] of dragTypes) window.removeEventListener(type, fn, true);
+      d.band.style.cursor = "";
+      try {
+        if (d.band.hasPointerCapture(d.id)) d.band.releasePointerCapture(d.id);
+      } catch {
+        // The pointer is gone already.
+      }
+    };
+    const onBandDown = (e: PointerEvent) => {
+      if ((e.pointerType !== "mouse" && e.pointerType !== "pen") || e.button !== 0) return;
+      const band = e.target instanceof Element ? e.target.closest<HTMLElement>(`[${DRAG_BAND_ATTR}]`) : null;
+      if (!band || !el.contains(band)) return;
+      e.preventDefault();
+      if (swipe.busy) return;
+      const { stand, read } = startStand();
+      geometry = read.geometry;
+      const started = swipe.begin({ on: "grab", atTop: true, typing: false, fingers: 1, scale: latest.current.scale, at: e.timeStamp, stand, up: read.geometry.up, closeAt: read.closeAt, control: false, input: "mouse" });
+      if (!started) return;
+      dragged = { id: e.pointerId, x: e.clientX, y: e.clientY, pen: e.pointerType === "pen", band };
+      for (const [type, fn] of dragTypes) window.addEventListener(type, fn, true);
+      band.style.cursor = "grabbing";
+      try {
+        band.setPointerCapture(e.pointerId);
+      } catch {
+        // A pointer already gone: its up never comes, and the next press starts over.
+      }
+    };
+    const onDragMove = (e: PointerEvent) => {
+      if (!dragged || e.pointerId !== dragged.id) return;
+      swipe.move({ dx: e.clientX - dragged.x, dy: e.clientY - dragged.y, at: e.timeStamp, cancelable: true });
+    };
+    const onDragUp = (e: PointerEvent) => {
+      if (!dragged || e.pointerId !== dragged.id) return;
+      endDrag();
+      swipe.end(e.timeStamp);
+    };
+    const onDragCancel = (e: PointerEvent) => {
+      if (!dragged || e.pointerId !== dragged.id) return;
+      endDrag();
+      swipe.drop();
+    };
+
+    stepNow.current = (to) => {
+      if (swipe.busy) return;
+      const { stand, read } = startStand();
+      geometry = read.geometry;
+      swipe.step(to, { on: "grab", atTop: true, typing: false, fingers: 1, scale: latest.current.scale, at: performance.now(), stand, up: read.geometry.up, closeAt: read.closeAt, control: false });
     };
     const onDocEnd = (e: TouchEvent) => {
       if (e.touches.length === 0) swipe.lifted();
@@ -1207,8 +1359,13 @@ export function useSheetSwipe(surface: RefObject<HTMLElement | null>, options: S
       node.addEventListener("pointerdown", onPointerDown, true);
       node.addEventListener("gotpointercapture", onCapture, true);
     }
+    // After the guard, so a press during a slide stops before it.
+    el.addEventListener("pointerdown", onBandDown, true);
     el.addEventListener("focusin", onFocusIn);
     return () => {
+      stepNow.current = null;
+      endDrag();
+      el.removeEventListener("pointerdown", onBandDown, true);
       inEffect.current = true;
       swipe.dispose();
       inEffect.current = false;
@@ -1263,7 +1420,17 @@ export function useSheetSwipe(surface: RefObject<HTMLElement | null>, options: S
     [surface],
   );
 
-  return { rising, expand };
+  const stand: SwipeStand = options.full?.on ? "full" : "normal";
+  const canFill = options.full !== undefined;
+  const controls = useMemo<SheetControls | null>(() => (enabled ? { stand, canFill, step: (to) => stepNow.current?.(to) } : null), [enabled, stand, canFill]);
+
+  return { rising, expand, controls };
+}
+
+/** Whether every touch in a list is a pen's, as iOS marks an Apple Pencil's. */
+function allStylus(list: TouchList): boolean {
+  for (let i = 0; i < list.length; i++) if ((list[i] as Touch & { touchType?: string }).touchType !== "stylus") return false;
+  return list.length > 0;
 }
 
 /**

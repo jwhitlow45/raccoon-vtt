@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from "react";
+
 /**
  * Facts about this device that change what the client loads or how it
  * behaves. The decisions are pure functions, with thin readers of the
@@ -78,6 +80,31 @@ export function sheetDevice(): { mouse: boolean; android: boolean } {
     mouse: typeof matchMedia !== "function" || matchMedia("(any-pointer: fine)").matches,
     android: typeof navigator !== "undefined" && /Android/.test(navigator.userAgent),
   };
+}
+
+const ANY_FINE = "(any-pointer: fine)";
+
+function subscribeFinePointer(listener: () => void): () => void {
+  const query = typeof matchMedia === "function" ? matchMedia(ANY_FINE) : null;
+  query?.addEventListener?.("change", listener);
+  return () => query?.removeEventListener?.("change", listener);
+}
+
+/** Unlike sheetDevice, no matchMedia reads as no mouse, so a render on the server or in a unit test draws the phone's sheet header. Exported for that test. */
+export function finePointerNow(): boolean {
+  return typeof matchMedia === "function" && matchMedia(ANY_FINE).matches;
+}
+
+/**
+ * Whether any pointer here is a mouse or trackpad, even beside a touch
+ * screen, read live, so a trackpad connected to a tablet shows a sheet's
+ * step arrows at once (docs/design/design-v1-panel-size.md 5.1). It is the
+ * shortcut sheet's own test. The primary pointer alone would hide them on
+ * a touch laptop, whose screen counts first.
+ */
+export function useFinePointer(): boolean {
+  // The server has no matchMedia, so its snapshot is the same read: a unit test that renders to a string can give it a mouse.
+  return useSyncExternalStore(subscribeFinePointer, finePointerNow, finePointerNow);
 }
 
 let keyboardSeen = false;

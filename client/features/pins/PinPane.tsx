@@ -10,7 +10,7 @@ import { Help, Note } from "../../components/Panel.tsx";
 import { PaneHeader } from "../../components/SheetHeader.tsx";
 import { Swatches } from "../../components/Swatches.tsx";
 import { useBackClose } from "../../lib/backClose.ts";
-import { DraftScope, useDraftRegistry, useSheetSwipe, useUnsavedSince } from "../../lib/sheetSwipe.ts";
+import { DraftScope, useDraftRegistry, useSheetSwipe, useUnsavedSince, type SheetControls } from "../../lib/sheetSwipe.ts";
 import type { Camera, Insets, Size } from "../../lib/camera.ts";
 import { isCoarsePointer } from "../../lib/device.ts";
 import { MEMBER_COLORS, theme } from "../../lib/theme.ts";
@@ -97,14 +97,14 @@ export default function PinPane(props: { pin: Pin; camera: Camera; viewport: Siz
 
   // As a bottom sheet it swipes down to close, through the editor's own close as × does (docs/design/design-v1-sheet-swipe.md section 3).
   const drafts = useDraftRegistry();
-  useSheetSwipe(paneRef, { enabled: sheet, onClose: () => dismissRef.current(), item: pin.id, clip: "foot", riders: dock.riders, drafts });
+  const swipe = useSheetSwipe(paneRef, { enabled: sheet, onClose: () => dismissRef.current(), item: pin.id, clip: "foot", riders: dock.riders, drafts });
 
   return (
     <>
       <div ref={paneRef} role="dialog" aria-label="Edit pin" data-map-pane="" style={{ ...labelPaneFrame(place), overflowY: "auto", overscrollBehavior: "contain", color: theme.color.text }}>
         {/* Keyed by pin, so a draft or an armed Delete never carries over to the next pin tapped. */}
         <DraftScope value={drafts}>
-          <PinEditor key={pin.id} pin={pin} onClose={props.onClose} dismissRef={dismissRef} sheet={sheet} />
+          <PinEditor key={pin.id} pin={pin} onClose={props.onClose} dismissRef={dismissRef} sheet={sheet} controls={swipe.controls} />
         </DraftScope>
       </div>
       {dock.summary && place.kind === "sheet" ? <PaneDockRow ref={dock.row} pane={paneRef} bottom={place.bottom} summary={dock.summary} onClose={() => dismissRef.current()} /> : null}
@@ -112,7 +112,7 @@ export default function PinPane(props: { pin: Pin; camera: Camera; viewport: Siz
   );
 }
 
-export function PinEditor(props: { pin: Pin; onClose(): void; dismissRef: { current: () => void }; sheet: boolean }) {
+export function PinEditor(props: { pin: Pin; onClose(): void; dismissRef: { current: () => void }; sheet: boolean; controls?: SheetControls | null }) {
   const { pin } = props;
   const actions = useRoomActions();
   const ui = useRoomUi();
@@ -214,7 +214,7 @@ export function PinEditor(props: { pin: Pin; onClose(): void; dismissRef: { curr
   // One column no wider than the pane: a field's own minimum width would otherwise widen it and scroll the pane sideways.
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
-      <PaneHeader title="Pin" closeLabel={saving ? "Close" : "Close without saving"} onClose={close} grab={props.sheet} />
+      <PaneHeader title="Pin" closeLabel={saving ? "Close" : "Close without saving"} onClose={close} grab={props.sheet} controls={props.controls} />
       {/*
         Held as a whole while Done is pending, as editDraft refuses their edits: the label, the page, the color and DM only.
         The group stops each control and draws it off. Done stays outside it, busy, and Delete waits.

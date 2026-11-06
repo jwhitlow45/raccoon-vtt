@@ -284,6 +284,7 @@ export function Sheet(props: {
           titleRef={titleRef}
           grab={mode === "bottom"}
           fullScreen={mode === "bottom" && onExpand ? { pressed: filled, onPress: () => swipe.expand(!filled) } : undefined}
+          controls={swipe.controls}
         />
         {mode === "full" || filled ? props.notices : null}
         {/* Every mode keeps this shape, so a change of mode never mounts the panel again. */}

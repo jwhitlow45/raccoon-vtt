@@ -8,7 +8,7 @@ import { Note } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { PaneHeader } from "../../components/SheetHeader.tsx";
 import { useBackClose } from "../../lib/backClose.ts";
-import { DraftScope, useDraftRegistry, useSheetSwipe, useUnsavedSince } from "../../lib/sheetSwipe.ts";
+import { DraftScope, useDraftRegistry, useSheetSwipe, useUnsavedSince, type SheetControls } from "../../lib/sheetSwipe.ts";
 import type { Camera, Insets, Size } from "../../lib/camera.ts";
 import { isCoarsePointer } from "../../lib/device.ts";
 import { theme } from "../../lib/theme.ts";
@@ -94,7 +94,7 @@ export default function LabelPane(props: { label: Label; camera: Camera; look?: 
 
   // As a bottom sheet it swipes down to close, as its close does (docs/design/design-v1-sheet-swipe.md section 3).
   const drafts = useDraftRegistry();
-  useSheetSwipe(paneRef, { enabled: sheet, onClose: () => closeRef.current(), item: label.id, clip: "foot", riders: dock.riders, drafts });
+  const swipe = useSheetSwipe(paneRef, { enabled: sheet, onClose: () => closeRef.current(), item: label.id, clip: "foot", riders: dock.riders, drafts });
 
   return (
     <>
@@ -107,7 +107,7 @@ export default function LabelPane(props: { label: Label; camera: Camera; look?: 
       >
         {/* Keyed by label, so a draft or an armed Delete never carries over to the next label tapped. */}
         <DraftScope value={drafts}>
-          <LabelEditor key={label.id} label={label} onClose={props.onClose} sheet={sheet} />
+          <LabelEditor key={label.id} label={label} onClose={props.onClose} sheet={sheet} controls={swipe.controls} />
         </DraftScope>
       </div>
       {dock.summary && place.kind === "sheet" ? <PaneDockRow ref={dock.row} pane={paneRef} bottom={place.bottom} summary={dock.summary} onClose={() => closeRef.current()} /> : null}
@@ -115,7 +115,7 @@ export default function LabelPane(props: { label: Label; camera: Camera; look?: 
   );
 }
 
-function LabelEditor(props: { label: Label; onClose(): void; sheet: boolean }) {
+function LabelEditor(props: { label: Label; onClose(): void; sheet: boolean; controls: SheetControls | null }) {
   const { label } = props;
   const actions = useRoomActions();
   const [draft, setDraft] = useState<LabelDraft>({ text: label.text, size: label.size });
@@ -155,7 +155,7 @@ function LabelEditor(props: { label: Label; onClose(): void; sheet: boolean }) {
   // One column no wider than the pane: a field's own minimum width would otherwise widen it and scroll the pane sideways.
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
-      <PaneHeader title="Label" closeLabel="Close without saving" onClose={props.onClose} grab={props.sheet} />
+      <PaneHeader title="Label" closeLabel="Close without saving" onClose={props.onClose} grab={props.sheet} controls={props.controls} />
       <div ref={fieldRef}>
         <Input
           type="text"

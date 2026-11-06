@@ -1,12 +1,12 @@
 import { useId, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref } from "react";
 import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import { keyboardFocus } from "../lib/inputModality.ts";
-import { GRAB_ATTR, GRAB_STYLE } from "../lib/sheetSwipe.ts";
+import { GRAB_ATTR, GRAB_STYLE, type SheetControls } from "../lib/sheetSwipe.ts";
 import { theme } from "../lib/theme.ts";
 import { Icon } from "./Icon.tsx";
 import { IconButton } from "./IconButton.tsx";
 import { dangerLook } from "./looks.ts";
-import { SheetGrabber, useGrabberRoom } from "./SheetGrabber.tsx";
+import { SheetGrabber, useGrabberRoom, useSheetArrows } from "./SheetGrabber.tsx";
 
 /**
  * Where a header's back button leads. `label` is its accessible name,
@@ -100,6 +100,8 @@ export function SheetHeader(props: {
   grab?: boolean;
   /** "Expand sheet", for a sheet that fills the screen when swiped up (docs/design/design-v1-sheet-swipe.md 4.7): first in the header, hidden until it has focus. */
   fullScreen?: { pressed: boolean; onPress(): void };
+  /** The swipe's controls (lib/sheetSwipe.ts useSheetSwipe), for the step arrows beside the grabber where there is a mouse. Up is then Expand sheet, so the hidden one is not drawn. */
+  controls?: SheetControls | null;
   /**
    * A header row of the side panel (docs/design/design-v1-side-headers.md): one
    * 44 px line with the title at 16 px, the size of a pane's title, in
@@ -110,7 +112,9 @@ export function SheetHeader(props: {
 }) {
   const { back, level = 2 } = props;
   const grab = grabProps(props.grab);
-  const room = useGrabberRoom();
+  const controls = props.grab ? props.controls : null;
+  const room = useGrabberRoom(controls);
+  const arrows = useSheetArrows(controls);
   const Heading = level === 2 ? "h2" : "h3";
   const asking = !!back?.armed;
   const actions = asking ? null : props.actions;
@@ -145,13 +149,13 @@ export function SheetHeader(props: {
   // A grab area's grabber wants more room above the buttons than a row or a stacked header keeps, so it grows its top padding by the difference, which the chosen design sets (SheetGrabber).
   const lift = props.grab ? room - ROW_TOP_SPACE : 0;
   // Over the title's first 44 px, which it covers while it shows: on the title's line, after Back in one row.
-  const fullScreen = props.fullScreen ? (
+  const fullScreen = props.fullScreen && !arrows ? (
     <FullScreenButton
       {...props.fullScreen}
       at={props.stacked ? { left: padding, top: lift + STACKED_PAD + theme.touch + (STACKED_TITLE_LINE - theme.touch) / 2 } : { left: padding + (back ? theme.touch + theme.space(1) : 0), top: lift + ROW_TOP_SPACE }}
     />
   ) : null;
-  const grabber = props.grab ? <SheetGrabber /> : null;
+  const grabber = props.grab ? <SheetGrabber controls={controls} /> : null;
   const lead = fullScreen || grabber ? { position: "relative" as const } : null;
   if (props.stacked) {
     return (
@@ -333,10 +337,13 @@ export function PaneHeader(props: {
   lines?: number;
   /** The grab area of a pane standing as a bottom sheet, which swipes (lib/sheetSwipe.ts). */
   grab?: boolean;
+  /** Its swipe's controls, for the step arrows where there is a mouse. */
+  controls?: SheetControls | null;
 }) {
   const { handle, sticky, lines } = props;
   const grab = grabProps(props.grab);
-  const room = useGrabberRoom();
+  const controls = props.grab ? props.controls : null;
+  const room = useGrabberRoom(controls);
   const descriptionId = useId();
   const grip = handle?.grip.dots ? (
     <span aria-hidden {...{ [GRIP_ATTR]: "" }} style={{ flex: "none", width: 16, display: "grid", placeItems: "center", color: theme.color.textMuted }}>
@@ -419,7 +426,7 @@ export function PaneHeader(props: {
           : null),
       }}
     >
-      {props.grab ? <SheetGrabber /> : null}
+      {props.grab ? <SheetGrabber controls={controls} /> : null}
       {grip}
       {title}
       {props.actions}
