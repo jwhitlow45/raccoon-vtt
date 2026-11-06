@@ -66,8 +66,6 @@ import { useClockToasts } from "../features/clock/useClockToasts.ts";
 import { PhaseMenu } from "../features/phases/PhaseMenu.tsx";
 import { FrameViewBar } from "../features/scenes/FrameView.tsx";
 import { SCENES_PANEL } from "../features/scenes/ids.ts";
-import { ambianceKeptSlot, keptSections } from "../features/ambiance/kept.ts";
-import { AMBIANCE_PANEL } from "../features/ambiance/request.ts";
 import { barInset, chromeZoom, smallUi, useLayoutSize } from "../features/device/layout.ts";
 import { uiScale as uiScaleNow, usePanelWidth, useUiScale } from "../features/device/settings.ts";
 import { activeTool, toolsFor, type ToolDef } from "../features/tools.ts";
@@ -86,7 +84,7 @@ import { useWakeLock } from "../lib/wakeLock.ts";
 import type { Insets } from "../lib/camera.ts";
 import { isCoarsePointer } from "../lib/device.ts";
 import { fullscreenSupported } from "../lib/fullscreen.ts";
-import { ambianceFoldsSlot, dmPanelFoldsSlot, scenesFoldsSlot, useEndRevealsOnClose, useFolds } from "../lib/folds.ts";
+import { dmPanelFoldsSlot, panelIsOpen, scenesFoldsSlot, useEndRevealsOnClose } from "../lib/folds.ts";
 import { useFocusedFieldInView, useKeyboardView } from "../lib/keyboardInset.ts";
 import { sheetStepping } from "../lib/modalDialog.ts";
 import { roomPath } from "../lib/roomId.ts";
@@ -116,6 +114,7 @@ import { PanelEdge, resetPanelWidth } from "./PanelEdge.tsx";
 import { SideTabs } from "./SideTabs.tsx";
 import { SplitBar } from "./SplitBar.tsx";
 import { readSplit, roomForTwo, sameSplit, ScrollKeep, shareOf, splitPanes, swapFocus, writeSplit, type SplitEntry } from "./splitPanes.ts";
+import { clockLinesShown, playerWaits } from "./timeSound.ts";
 import { inModal, ModalSlots, useModalSlot } from "./modalSlot.tsx";
 import {
   FLOAT_MAX,
@@ -418,25 +417,10 @@ function RoomPage() {
   const topInset = useTopBars();
   const placement = useTurnPlacement();
   const fight = useRoomView((s) => !!s.view?.encounter);
-  /*
-   * Ambiance is listed for a player while their view holds the clock, or the
-   * room plays music or a background sound they receive (effects show
-   * nowhere), and stays while it is open after both stop, until it is closed
-   * (docs/design/design-v1-panel-groups.md 5). Open counts a hidden sheet or
-   * side panel, as its folds do (lib/folds.ts panelIsOpen).
-   */
+  // A player's Time and Sound are listed while each has its reason, and while open after it ends (pages/timeSound.ts).
   const hasClock = useRoomView((s) => !!s.view?.clock);
   const hasSound = useRoomView((s) => somethingPlays(s.view?.playing));
-  const ambianceOpen = wide ? tab === AMBIANCE_PANEL || below === AMBIANCE_PANEL : panel === AMBIANCE_PANEL;
-  const panels = panelsFor(role, wide, { clock: hasClock || ambianceOpen, sound: hasSound || ambianceOpen });
-  // A player's sections that showed since Ambiance opened stay until it closes (features/ambiance/kept.ts), here so a turn across 900 px, which remounts the panel, keeps them.
-  const ambianceKept = scope.get(ambianceKeptSlot);
-  useLayoutEffect(() => {
-    const prev = ambianceKept.getState();
-    const next = keptSections(prev, { open: ambianceOpen, clock: hasClock, sound: hasSound });
-    if (next !== prev) ambianceKept.setState(next, true);
-  }, [ambianceKept, ambianceOpen, hasClock, hasSound]);
-  const keptTime = useStore(ambianceKept, (k) => k.time);
+  const panels = panelsFor(role, wide, playerWaits({ clock: hasClock, sound: hasSound }, (id) => panelIsOpen({ panel, tab, below }, id, wide)));
   /*
    * The subpage each panel names (features/panels.ts usePanelHeader), for
    * the sheet's header or its pane's in the side panel. Kept by panel, so
@@ -444,9 +428,6 @@ function RoomPage() {
    */
   const [subpages, setSubpages] = useState<Readonly<Record<string, PanelHeader | null>>>({});
   const headerOf = useCallback((id: string) => (header: PanelHeader | null) => setSubpages((all) => (all[id] === header ? all : { ...all, [id]: header })), []);
-  // The DM's Time shows while its fold is open and no Sound subpage stands in for Ambiance's first page, a player's while it is drawn, for the clock's toasts below.
-  const dmTimeOpen = useFolds(ambianceFoldsSlot)("time").open && !subpages[AMBIANCE_PANEL];
-  const timeShows = role === "dm" ? dmTimeOpen : keptTime || hasClock;
   const tools = useRoomView(useShallow((s) => toolsFor(role, s)));
   const tool = activeTool(toolId, role);
   // The keyboard (state/shortcuts.ts) and pasted images (features/images/pasteRouter.ts). A "view as a player" preview answers no key and takes no paste.
@@ -535,8 +516,8 @@ function RoomPage() {
   const unread = useLogUnread(wide ? sideShows("log") : sheet?.id === "log");
   // Others' rolls as toasts while the Dice panel is not on screen (docs/design/design-v1-dice.md 8.5).
   useRollToasts(wide ? sideShows("dice") : sheet?.id === "dice");
-  // Clock lines as toasts while neither the Log nor an open Time in Ambiance is on screen (docs/design/design-v1-calendar.md 4.7, design-v1-panel-groups.md 4.1).
-  useClockToasts(wide ? sideShows("log") || (sideShows(AMBIANCE_PANEL) && timeShows) : sheet?.id === "log" || (sheet?.id === AMBIANCE_PANEL && timeShows));
+  // Clock lines as toasts while neither the Log nor Time is on screen (pages/timeSound.ts).
+  useClockToasts(clockLinesShown(wide ? sideShows : (id) => sheet?.id === id));
   const journalUnread = useJournalUnread();
   // A PDF upload waiting on the DM badges the DM panel, and on a phone the Panels button too (docs/design/design-v1-pdf-handouts.md 4.1.1).
   const uploadWaiting = useJobWaiting() && role === "dm" ? 1 : 0;
@@ -547,7 +528,6 @@ function RoomPage() {
   const panelsLabel = panelsButtonLabel(unread + journalUnread, uploadWaiting, joinWaiting);
   usePdfJobRoom();
   // Here rather than in each panel, which remounts as the layout crosses 900 px: a reveal and a held start last while their panel stays open (docs/design/design-v1-panel-groups.md 6.1).
-  useEndRevealsOnClose(AMBIANCE_PANEL, ambianceFoldsSlot, wide);
   useEndRevealsOnClose("dm", dmPanelFoldsSlot, wide);
   useEndRevealsOnClose(SCENES_PANEL, scenesFoldsSlot, wide);
   // The phone sheet that lists every panel, in the room's local state (state/types.ts sheetOpen), so

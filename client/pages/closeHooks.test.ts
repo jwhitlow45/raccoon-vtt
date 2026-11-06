@@ -40,7 +40,7 @@ const { renderToStaticMarkup } = await import("react-dom/server");
 const { createRoomStore } = await import("../state/store.ts");
 const { RoomProvider } = await import("../state/view.ts");
 const { RoomScope, RoomScopeProvider } = await import("../state/scope.ts");
-const { ambianceFoldsSlot, dmPanelFoldsSlot, scenesFoldsSlot, useEndRevealsOnClose } = await import("../lib/folds.ts");
+const { dmPanelFoldsSlot, scenesFoldsSlot, useEndRevealsOnClose } = await import("../lib/folds.ts");
 const { LocalServer } = await import("../dev/localServer.ts");
 
 const LOADED = { clock: false, scenes: true };
@@ -56,7 +56,6 @@ function page() {
 /** Room's lines as Room.tsx has them, drawn at `wide` with their layout effects run, as after a commit. */
 function draw(p: ReturnType<typeof page>, wide: boolean): void {
   function Hooks() {
-    useEndRevealsOnClose("ambiance", ambianceFoldsSlot, wide);
     useEndRevealsOnClose("dm", dmPanelFoldsSlot, wide);
     useEndRevealsOnClose("scenes", scenesFoldsSlot, wide);
     return null;
@@ -149,16 +148,16 @@ describe("Room's close hooks, through the room store", () => {
   });
 });
 
-test("Room.tsx calls each close hook with Room's own wide, for Ambiance, the DM panel and Scenes", () => {
+test("Room.tsx calls each close hook with Room's own wide, for the DM panel and Scenes, and none for Ambiance, which went", () => {
   const source = readFileSync(new URL("./Room.tsx", import.meta.url), "utf8");
   const body = source.slice(source.indexOf("function RoomPage() {"));
   assert.match(body, /const wide = width >= theme\.layout\.wideMinWidth;/);
   for (const line of [
-    "useEndRevealsOnClose(AMBIANCE_PANEL, ambianceFoldsSlot, wide);",
     'useEndRevealsOnClose("dm", dmPanelFoldsSlot, wide);',
     "useEndRevealsOnClose(SCENES_PANEL, scenesFoldsSlot, wide);",
   ]) {
     assert.ok(body.includes(line), line);
   }
   assert.ok(!body.includes("useEndSceneRequestOnClose"), "the scene request went with Ambiance's rows (docs/design/design-v1-sound-layout.md 6.2)");
+  assert.ok(!/ambiance/i.test(body), "no Ambiance wiring is left in Room (docs/design/design-v1-sound-layout.md 3.3)");
 });
