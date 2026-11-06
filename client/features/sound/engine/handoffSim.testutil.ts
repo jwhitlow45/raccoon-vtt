@@ -6,10 +6,29 @@ import { Handoff, LAPSE_MS, TAKEOVER_MS, type HandoffAudio, type HandoffPost, ty
  * time runs every page's timers, the channel's posts and the lock manager's
  * grants as tasks on each page's main thread, which a stall holds back and
  * a freeze stops, while each page's audio renders on by its own clock.
+ * A stall releases the tasks that waited in one of the orders a browser
+ * may run them (`Release`).
  * HANDOFF_TRACE=1 prints what happens, for a failing seed.
  */
 
-type Task = { at: number; seq: number; page: number; run: () => void; grant?: true };
+/**
+ * The order a stall releases the tasks that waited: "creation" by when
+ * each was made (the old world), "ready" by when each became ready, or
+ * "posts" or "timers" first, each kind then by when it became ready.
+ */
+export type Release = "creation" | "ready" | "posts" | "timers";
+const RELEASES: readonly Release[] = ["ready", "posts", "timers"];
+
+type Task = {
+  at: number;
+  seq: number;
+  page: number;
+  run: () => void;
+  timer: boolean;
+  grant?: true;
+  /** When a task that waited out a stall first became ready, for its page's release order. */
+  readyAt?: number;
+};
 
 type Gate = { on: boolean; until: number };
 
@@ -19,6 +38,8 @@ export class SimPage {
   readonly kind: PageKind;
   handoff!: Handoff;
   stalledUntil = 0;
+  /** How the current stall releases what waited. */
+  release: Release = "creation";
   frozen = false;
   gone: "closed" | "crashed" | null = null;
   /** The context really running, and whether the page has heard so. */
@@ -69,6 +90,8 @@ export class World {
   keptClaims = new Set<string>();
   /** A fixed delay for every post, for a test that needs one order. */
   delay: number | null = null;
+  /** How every stall releases what waited, or null for one of RELEASES at random per stall. */
+  release: Release | null = "creation";
 
   constructor(locks: boolean, r: () => number) {
     this.locks = locks;
@@ -85,17 +108,33 @@ export class World {
     if (process.env.HANDOFF_TRACE) console.log(`${String(this.now - 1_000_000).padStart(7)} ${what}`);
   }
 
-  later(page: SimPage, ms: number, run: () => void): Task {
-    const task = { at: this.now + Math.max(0, ms), seq: this.seq++, page: page.id, run };
+  later(page: SimPage, ms: number, run: () => void, timer = false): Task {
+    const task: Task = { at: this.now + Math.max(0, ms), seq: this.seq++, page: page.id, run, timer };
     this.tasks.push(task);
     return task;
+  }
+
+  /** Where a task runs among those due at once: what waited out a stall first, in its page's release order, then by creation. */
+  #rank(t: Task): [number, number, number] {
+    const release = this.pages[t.page]!.release;
+    if (t.readyAt === undefined || release === "creation") return [1, 0, t.seq];
+    const kind = release === "ready" ? 0 : (release === "timers") === t.timer ? 0 : 1;
+    return [0, kind * 1e15 + t.readyAt, t.seq];
+  }
+
+  #before(a: Task, b: Task): boolean {
+    if (a.at !== b.at) return a.at < b.at;
+    const ra = this.#rank(a);
+    const rb = this.#rank(b);
+    for (let i = 0; i < 3; i++) if (ra[i] !== rb[i]) return ra[i]! < rb[i]!;
+    return false;
   }
 
   /** Advances time to `until`, running every task due, checking between. */
   runUntil(until: number): void {
     for (;;) {
       let next: Task | null = null;
-      for (const t of this.tasks) if (next === null || t.at < next.at || (t.at === next.at && t.seq < next.seq)) next = t;
+      for (const t of this.tasks) if (next === null || this.#before(t, next)) next = t;
       const stepTo = Math.min(next?.at ?? Infinity, until, this.now + 50);
       this.advance(stepTo);
       if (next && next.at <= this.now) {
@@ -124,6 +163,7 @@ export class World {
       return;
     }
     if (page.stalledUntil > this.now) {
+      task.readyAt ??= this.now;
       task.at = page.stalledUntil;
       this.tasks.push(task);
       return;
@@ -245,7 +285,7 @@ export class World {
       page: page.name,
       kind,
       now: () => this.now,
-      setTimer: (ms, fn) => this.later(page, ms, fn),
+      setTimer: (ms, fn) => this.later(page, ms, fn, true),
       clearTimer: (handle) => {
         const at = this.tasks.indexOf(handle as Task);
         if (at >= 0) this.tasks.splice(at, 1);
@@ -294,7 +334,8 @@ export class World {
   }
 
   stall(page: SimPage, ms: number): void {
-    this.log(`${page.name} stalls ${ms}`);
+    if (page.stalledUntil <= this.now) page.release = this.release ?? pick(this.r, RELEASES);
+    this.log(`${page.name} stalls ${ms}, releasing in ${page.release} order`);
     page.stalledUntil = Math.max(page.stalledUntil, this.now + ms);
   }
 
@@ -404,6 +445,7 @@ const STEPS: readonly Step[] = ["open", "close", "crash", "stall", "freeze", "th
 export function randomRun(seed: number, locks: boolean): string[] {
   const r = rng(seed);
   const world = new World(locks, r);
+  world.release = null;
   world.open(chance(r, 0.2) ? "display" : "member", chance(r, 0.7));
   const steps = int(r, 4, 40);
   for (let i = 0; i < steps; i++) {
