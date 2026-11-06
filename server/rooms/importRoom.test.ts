@@ -15,7 +15,7 @@ import type { FreeWall, RoomState } from "#shared/model.ts";
 import { apply, AT, room, scene, token, trap } from "#shared/testutil.ts";
 import { sightPieces, tooManySightPieces } from "#shared/visionLimits.ts";
 import { MANIFEST_VERSION, type ExportManifest, type ManifestAsset } from "./exportRoom.ts";
-import { assertWithinLimits, entryToFile, IMPORT_LIMITS, InflatedCounter, inflatedLimit, silenced, soundsLeftOut } from "./importRoom.ts";
+import { assertWithinLimits, entryToFile, IMPORT_LIMITS, InflatedCounter, inflatedLimit, manifestGeometry, silenced, soundsLeftOut } from "./importRoom.ts";
 import { MEMORY_CAP } from "./memorySize.ts";
 import { SizeGuard } from "./sizeGuard.ts";
 
@@ -283,5 +283,18 @@ describe("an import's sounds (docs/design/design-v1-music.md 6.7)", () => {
     assert.equal(soundsLeftOut(file, room({ sounds: {} })), 3);
     assert.equal(soundsLeftOut(file, file), 0);
     assert.equal(soundsLeftOut(room(), room()), 0);
+  });
+});
+
+describe("a backup's video geometry before its entry is read (docs/design/design-v1-video-turns.md 9, stage 1)", () => {
+  test("only a shape this build writes passes: absent is plain, and anything else skips the video unread", () => {
+    assert.deepEqual(manifestGeometry(undefined), {});
+    assert.deepEqual(manifestGeometry({}), {});
+    assert.deepEqual(manifestGeometry({ displayWidthPx: 853, mirror: true, turn: 90 }), { turn: 90, mirror: true, displayWidthPx: 853 });
+    assert.deepEqual(manifestGeometry({ displayWidthPx: 256 }), { displayWidthPx: 256 });
+    assert.deepEqual(manifestGeometry({ displayWidthPx: 4096 }), { displayWidthPx: 4096 });
+    for (const bad of [null, [], "turn 90", { turn: 45 }, { turn: 0 }, { turn: "90" }, { mirror: false }, { mirror: 1 }, { displayWidthPx: 0 }, { displayWidthPx: 255 }, { displayWidthPx: 4097 }, { displayWidthPx: 853.5 }, { turn: 90, note: "x" }]) {
+      assert.equal(manifestGeometry(bad), undefined, JSON.stringify(bad));
+    }
   });
 });

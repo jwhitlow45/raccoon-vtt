@@ -6,8 +6,9 @@ import { saveOutcomeLedgerSchema } from "#shared/saveOutcomeContract.ts";
 import type { RoomState, Scene, SoundFacts, Viewer } from "#shared/model.ts";
 import { assetCreditSchema, type AssetCredit } from "#shared/protocol.ts";
 import { STARTER_KEY } from "#shared/starter.ts";
+import { videoGeometryOf, type VideoGeometry } from "#shared/videoGeometry.ts";
 import { isAssetKind, isVariant, type AssetKind, type Variant } from "../assets/kinds.ts";
-import { SOUND_MEDIA, isVideoContainer, soundFactsOfRow, variantPath, type AssetMedia } from "../assets/store.ts";
+import { SOUND_MEDIA, isVideoContainer, soundFactsOfRow, variantPath, videoFactsOf, type AssetMedia } from "../assets/store.ts";
 
 /**
  * The room export file (design 16.4): `room.json` with the committed state,
@@ -53,6 +54,13 @@ export type ManifestAsset = {
   media?: AssetMedia;
   /** A sound's facts from its row. The import walks the file again and trusts its own. */
   audio?: SoundFacts;
+  /**
+   * How to draw a video's plain stored file, from its row: `{}` for a plain
+   * one (docs/design/design-v1-video-turns.md 9). The import checks its
+   * shape before reading the entry, and against the parsed coded size after.
+   * A build from before turns ignores it, which no backup of then needed.
+   */
+  geometry?: VideoGeometry;
 };
 
 export type ExportManifest = { formatVersion: number; assets: ManifestAsset[] };
@@ -131,6 +139,7 @@ type AssetRow = {
   credit: unknown;
   starter: string | null;
   media: string | null;
+  video: unknown;
   audio: unknown;
 };
 
@@ -144,7 +153,7 @@ function exported(r: AssetRow, choice: ExportChoice): boolean {
 
 export async function roomManifest(pool: pg.Pool, roomId: string, choice: ExportChoice = { sounds: true }): Promise<{ manifest: ExportManifest; rows: AssetRow[] }> {
   const { rows: all } = await pool.query<AssetRow>(
-    `select a.id, a.sha256, a.kind, a.pipeline, a.width, a.height, a.variants, a.credit, a.starter, a.media, a.audio,
+    `select a.id, a.sha256, a.kind, a.pipeline, a.width, a.height, a.variants, a.credit, a.starter, a.media, a.video, a.audio,
        array(select u.member_id from asset_uploaders u where u.asset_id = a.id order by u.member_id) as uploaders
      from assets a where a.room_id = $1 order by a.created_at, a.id`,
     [roomId],
@@ -165,7 +174,12 @@ export async function roomManifest(pool: pg.Pool, roomId: string, choice: Export
       const credit = assetCreditSchema.safeParse(r.credit);
       if (r.credit !== null && credit.success) asset.credit = credit.data;
       if (r.starter !== null && STARTER_KEY.test(r.starter)) asset.starter = r.starter;
-      if (r.kind === "video" && isVideoContainer(r.media)) asset.media = r.media;
+      if (r.kind === "video" && isVideoContainer(r.media)) {
+        asset.media = r.media;
+        // The stored file is plain, so how to draw it lives only in the row (docs/design/design-v1-video-turns.md 9, D-261102-856).
+        const facts = videoFactsOf({ kind: r.kind, width: r.width, height: r.height, media: r.media, video: r.video });
+        if (facts) asset.geometry = videoGeometryOf(facts);
+      }
       if (r.kind === "sound") {
         asset.media = SOUND_MEDIA;
         const audio = soundFactsOfRow({ kind: r.kind, media: SOUND_MEDIA, audio: r.audio });

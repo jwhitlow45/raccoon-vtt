@@ -7,7 +7,8 @@ import type pg from "pg";
 import yauzl from "yauzl";
 import { z } from "zod";
 import { uuidv7 } from "#shared/ids.ts";
-import { checkLimits, exploredReserve, LIMITS, NO_ROOM_TO_EXPLORE } from "#shared/limits.ts";
+import { checkLimits, exploredReserve, LIMITS, NO_ROOM_TO_EXPLORE, VIDEO_LIMITS } from "#shared/limits.ts";
+import { parseVideoGeometry, type VideoGeometry } from "#shared/videoGeometry.ts";
 import { ringed } from "#shared/logRings.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
 import { mapDiscoveryUpgrade, migrateSnapshot, needsMapDiscoveryUpgrade } from "#shared/migrate.ts";
@@ -128,6 +129,8 @@ const manifestSchema = z.object({
         media: z.unknown().optional(),
         // A sound's facts from its row, never read: the walk finds the file's own.
         audio: z.unknown().optional(),
+        // How to draw a video's plain file (docs/design/design-v1-video-turns.md 9). Checked on its own below, before the entry is read.
+        geometry: z.unknown().optional(),
       }),
     )
     .max(IMPORT_LIMITS.assets),
@@ -471,13 +474,36 @@ async function importImages(
         });
     const entry = entries.get(assetFileName(sha, kind, "full", kind === "video" && isVideoContainer(asset.media) ? asset.media : null));
     const name = entry?.fileName ?? asset.id;
+    // A video's geometry is checked in shape before its entry is read (docs/design/design-v1-video-turns.md 9, stage 1).
+    // One this build would not write skips the video unread, whatever its bytes hold, so its maps keep their stills.
+    const geometry = kind === "video" ? manifestGeometry(asset.geometry) : undefined;
+    if (kind === "video" && geometry === undefined) {
+      deps.log.warn({ roomId, entry: name }, "import skipped a video whose geometry it could not read");
+      continue;
+    }
     const shipped = shippedWork(deps.assets.starter, asset.starter, sha, kind);
     const imported =
       (shipped ? await importShipped(deps, roomId, shipped, uploaders, name) : null) ??
-      (entry ? await importFromZip(deps, zip, entry, roomId, counter, { kind, uploaders, credit: asset.credit }) : null);
+      (entry ? await importFromZip(deps, zip, entry, roomId, counter, { kind, uploaders, credit: asset.credit, ...(geometry ? { geometry } : {}) }) : null);
     if (imported) out.set(asset.id, imported);
   }
   return out;
+}
+
+/**
+ * A manifest entry's video geometry in a shape this build writes, or
+ * undefined to skip the video unread (docs/design/design-v1-video-turns.md
+ * 9, stage 1): only `turn` as one of the three, `mirror` as true and
+ * `displayWidthPx` within the protocol's side bounds. An absent geometry is
+ * a plain video's, as every backup from before turns holds. Whether it
+ * suits the video is stage 2's, against the coded size the check parses
+ * (service.ts importedVideoFacts), since the manifest's sizes are never read.
+ */
+export function manifestGeometry(value: unknown): VideoGeometry | undefined {
+  if (value === undefined) return {};
+  const geometry = parseVideoGeometry(value);
+  if (geometry?.displayWidthPx !== undefined && (geometry.displayWidthPx < VIDEO_LIMITS.minSidePx || geometry.displayWidthPx > VIDEO_LIMITS.maxSidePx)) return undefined;
+  return geometry;
 }
 
 /**
@@ -560,7 +586,7 @@ async function importFromZip(
   entry: yauzl.Entry,
   roomId: string,
   counter: InflatedCounter,
-  asset: { kind: AssetKind; uploaders: readonly string[]; credit: unknown },
+  asset: { kind: AssetKind; uploaders: readonly string[]; credit: unknown; geometry?: VideoGeometry },
 ): Promise<ImportedMedia | null> {
   const cap = KINDS[asset.kind].maxUploadBytes;
   const size = entry.uncompressedSize;
@@ -582,6 +608,7 @@ async function importFromZip(
         sha256: digest,
         reservation,
         background: true,
+        ...(asset.geometry ? { geometry: asset.geometry } : {}),
       });
       // An Openverse image keeps its credit (docs/design/design-v1-dm-tools.md 2.5), and so does a starter pick imported as an
       // upload, checked as bounded text like any of the file's text, since the file is untrusted. A credit that does not

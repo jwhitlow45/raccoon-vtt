@@ -1,8 +1,11 @@
+import { createHash } from "node:crypto";
 import { mkdir, readdir, stat, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type pg from "pg";
-import { SOUND_LIMITS } from "#shared/limits.ts";
-import { assetCreditSchema, type AssetCredit } from "#shared/protocol.ts";
+import { SOUND_LIMITS, videoGeometryProblem } from "#shared/limits.ts";
+import type { VideoFacts } from "#shared/model.ts";
+import { assetCreditSchema, checkedVideoFacts, type AssetCredit } from "#shared/protocol.ts";
+import { isPlainGeometry, videoGeometryOf, type VideoGeometry } from "#shared/videoGeometry.ts";
 import { starterAssetCredit, type FoundWork, type StarterKind } from "#shared/starter.ts";
 import { animatedMapsOn, roomSoundOn, type Config } from "../config.ts";
 import { checkSound, type SoundCheckOptions } from "./audio/check.ts";
@@ -80,6 +83,14 @@ export type IngestInput = {
   background?: boolean;
   /** An Openverse image's credit, from the server's own search cache (openverse.ts creditForImport), or a starter work's, from the catalog. */
   credit?: AssetCredit;
+  /**
+   * An imported video's geometry from the backup's manifest, in a shape this
+   * build writes (importRoom.ts checks it first), `{}` where the entry had
+   * none. Its presence makes the ingest an import's: the check runs before
+   * any reuse, and the row's key follows the geometry the bytes and the
+   * manifest settle (docs/design/design-v1-video-turns.md 9).
+   */
+  geometry?: VideoGeometry;
 } & ({ reservation: Reservation; starter?: undefined } | { reservation?: undefined; starter: string });
 
 /** A starter pick's answer: an upload's, with the catalog's credit, the work's key, and a map's cell size. */
@@ -314,24 +325,38 @@ export class AssetService {
   /**
    * A video (docs/design/design-v1-animated-maps.md 10, Ingest): no sniff
    * for images and no sharp. The header check runs in the processing queue,
-   * zeroing the temporary file in place, and that one file is placed as the
-   * row's `full` variant. The row's hash is the upload's, and the zeroing is
+   * zeroing the temporary file in place and rewriting a turned or stretched
+   * header plain, and that one file is placed as the row's `full` variant.
+   * A live upload's row hash is the upload's, and the zeroing is
    * deterministic, so the same bytes make the same file under one
    * VIDEO_PIPELINE. Refused whole while the server's switch is off, so no
    * upload or import stores one (D-261102-510).
+   *
+   * An import's video, which carries `geometry`, is checked before any
+   * reuse, since its key depends on what the check finds: a turned file's
+   * stored bytes equal its plain twin's, so the digest alone would merge a
+   * video turned 90 with one turned 270 (D-261102-896).
    */
   async #ingestVideo(input: IngestInput): Promise<UploadResult> {
     if (!animatedMapsOn(this.config)) throw new AssetError(403, "video_off");
     if (input.starter) throw new Error("no starter work is a video");
-    const existing = await findRoomAsset(this.pool, input.roomId, input.sha256, input.kind);
-    if (existing) return this.#reuse(existing, input);
+    const { geometry } = input;
+    if (geometry === undefined) {
+      const existing = await findRoomAsset(this.pool, input.roomId, input.sha256, input.kind);
+      if (existing) return this.#reuse(existing, input);
+    }
 
     await this.assertFreeDisk();
-    const facts = await this.queue.run(() => checkVideo(input.tempPath), { background: input.background });
+    const checked = await this.queue.run(() => checkVideo(input.tempPath), { background: input.background });
+    const facts = geometry === undefined ? checked : importedVideoFacts(checked, geometry);
+    const sha256 = geometry === undefined ? input.sha256 : videoRowKey(input.sha256, facts);
+    if (geometry !== undefined) {
+      const existing = await findRoomAsset(this.pool, input.roomId, sha256, input.kind);
+      if (existing) return this.#reuse(existing, input);
+    }
     const { size } = await stat(input.tempPath);
     const variants = [{ name: "full" as const, path: input.tempPath, width: facts.widthPx, height: facts.heightPx, bytes: size }];
-    const write = () =>
-      placeAndInsert(this.pool, this.assetDir, { roomId: input.roomId, sha256: input.sha256, kind: "video", uploaderIds: input.uploaderIds, variants, video: facts }, VIDEO_PIPELINE);
+    const write = () => placeAndInsert(this.pool, this.assetDir, { roomId: input.roomId, sha256, kind: "video", uploaderIds: input.uploaderIds, variants, video: facts }, VIDEO_PIPELINE);
     const placed = await input.reservation!.commit(size, write);
     return withCreated(placed.view, placed.created);
   }
@@ -432,6 +457,47 @@ export class AssetService {
     if (input.credit) await addCredit(this.pool, existing.id, input.credit);
     return withCreated(withHint(toView(existing), input.nameHint), false);
   }
+}
+
+/**
+ * An imported video's facts (docs/design/design-v1-video-turns.md 9, stage
+ * 2). Bytes the check found turned or stretched keep their own facts, since
+ * the stored file is what they describe: the bytes win. Plain bytes take the
+ * manifest's geometry, which must then stand with the coded size the check
+ * parsed, the drawn caps included, as the protocol takes it. The manifest's
+ * own sizes are never read, so a well-formed geometry whose aspect breaks
+ * against the real size is caught here. Otherwise the entry is skipped as
+ * `video_geometry`, and its maps keep their stills.
+ */
+export function importedVideoFacts(checked: VideoFacts, geometry: VideoGeometry): VideoFacts {
+  if (!isPlainGeometry(videoGeometryOf(checked))) return checked;
+  const facts: VideoFacts = { ...checked, ...videoGeometryOf(geometry) };
+  if (videoGeometryProblem(facts) !== null || checkedVideoFacts(facts) === undefined) throw new AssetError(422, "video_geometry");
+  return facts;
+}
+
+/** The domain of an imported video's geometry key, with the version of its serialization. */
+const GEOMETRY_KEY_DOMAIN = "raccoon-vtt video geometry 1";
+
+/**
+ * An imported video's row key (D-261102-896). A plain video keeps its file's
+ * digest, as before turns. A turned, mirrored or stretched one is keyed by
+ * SHA-256 over the domain, a zero byte, the 32-byte digest and the geometry
+ * in fixed fields, big-endian: the turn as two bytes (0 for none), the
+ * mirror as one (1 or 0) and the stretched width as four (0 for none). Fixed
+ * in place and width, no two geometries serialize alike, and the domain
+ * keeps the key apart from any file's own hash. So an original and a
+ * header-only rotate edit, whose stored bytes are equal, are two rows,
+ * through the reuse and the `(room_id, sha256, kind)` index alike.
+ */
+export function videoRowKey(digest: Buffer, geometry: VideoGeometry): Buffer {
+  const g = videoGeometryOf(geometry);
+  if (isPlainGeometry(g)) return digest;
+  const fields = Buffer.alloc(7);
+  fields.writeUInt16BE(g.turn ?? 0, 0);
+  fields.writeUInt8(g.mirror ? 1 : 0, 2);
+  fields.writeUInt32BE(g.displayWidthPx ?? 0, 3);
+  return createHash("sha256").update(GEOMETRY_KEY_DOMAIN, "latin1").update(Buffer.from([0])).update(digest).update(fields).digest();
 }
 
 /**
