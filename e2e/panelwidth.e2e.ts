@@ -569,7 +569,7 @@ describe("raccoon-vtt: a side panel that resizes, and a sheet with a mouse", { t
       await wideDm.waitForTimeout(400);
       const center = await mapCenter(wideDm);
 
-      // A 300 px drag in 20 steps renders the room on each move: no long task over 50 ms (4.4's builder check).
+      // A 140 px drag in 20 steps renders the room on each move. The longest task is logged for the builder (4.4) and not asserted, since a loaded runner's timing would flake.
       await js(wideDm, `window.__longest = 0; new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__longest = Math.max(window.__longest, e.duration); }).observe({ type: "longtask", buffered: false }); return 0;`);
       await pressAndMove(wideDm, -140, 20);
       assert.equal(await drawn(wideDm), 500, "it follows the pointer while held");
