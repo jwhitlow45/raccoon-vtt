@@ -17,9 +17,10 @@ import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
  * 12. Sounds are frames of silence (shared/audio/mp3Testutil.ts).
  * - mu-1: Open music at a desk and on a phone, its layouts and tabs.
  * - mu-2: Up next after Play next, Add to queue and Remove.
- * - mu-3: seek (Repeat one too), Previous twice within a round trip, Play then Seek, Shuffle on and off.
+ * - mu-3: seek by keys and a drag (Repeat one too), Previous twice within a round trip, Play then Seek, Shuffle on and off.
  * - mu-4: drag and keys in Up next.
  * - mu-5: the maker.
+ * - mf-1: the maker's Save and Play after another DM's changes.
  * - mu-6: search, sort and Add to playlist.
  * - mu-7: the phone sheet's swipe and Put away sheet.
  * - mu-8: a resize across 900 px.
@@ -391,7 +392,7 @@ describe("the Music window", { concurrency: false }, () => {
     await closeMusic();
   });
 
-  test("mu-3. a seek by keys, held short of the end under Repeat one, Previous twice within a round trip, Play then Seek before Play's answer, and Shuffle on and off", async () => {
+  test("mu-3. a seek by keys, a drag that seeks once at its release, held short of the end under Repeat one, Previous twice within a round trip, Play then Seek before Play's answer, and Shuffle on and off", async () => {
     await fresh();
     await playTavern();
     let win = await openMusic();
@@ -413,6 +414,27 @@ describe("the Music window", { concurrency: false }, () => {
       const m = music();
       return m && m.now.soundId === playing && Math.abs(Date.now() - m.now.at - (seek!.ms as number)) < 2_000 ? true : null;
     });
+
+    // A mouse drag along the slider, begun within 400 ms of a key and held long past it: no seek while the pointer is down, then one at its release, though it lets go off the slider.
+    from = dmSocket.sent.length;
+    const track = (await slider.boundingBox())!;
+    const y = track.y + track.height / 2;
+    await slider.focus();
+    await dm.keyboard.press("ArrowRight");
+    await dm.mouse.move(track.x + track.width * 0.2, y);
+    await dm.mouse.down();
+    for (let i = 1; i <= 10; i++) await dm.mouse.move(track.x + track.width * (0.2 + 0.03 * i), y);
+    await sleep(1_000);
+    assert.equal(sentOps(from, "music.jump").length, 0, "nothing while the pointer is down, the key's 400 ms long past");
+    await dm.mouse.move(track.x + track.width * 0.5, y + 120);
+    await dm.mouse.up();
+    await waitFor("the release's seek", () => (sentOps(from, "music.jump").length > 0 ? true : null), 3_000);
+    await sleep(800);
+    const released = sentOps(from, "music.jump");
+    assert.equal(released.length, 1, "one music.jump, at the release");
+    assert.equal(released[0]!.soundId, playing);
+    const lengthAt = dmSocket.state!.sounds![playing]!.ms;
+    assert.ok(Math.abs((released[0]!.ms as number) - lengthAt / 2) < lengthAt * 0.1, `halfway, where it let go: ${released[0]!.ms} of ${lengthAt}`);
 
     // Repeat one: End is held a second short of the end, less the crossfade.
     await win.getByRole("button", { name: "Repeat all", exact: true }).click();
@@ -487,7 +509,7 @@ describe("the Music window", { concurrency: false }, () => {
     await closeMusic();
   });
 
-  test("mu-4. Up next's keys and drags: a step, the ends, Up past the seam, a drop at the seam, a drag that outlives a volume change, and one that ends as a crossfade starts", async () => {
+  test("mu-4. Up next's keys and drags: a step, the ends, Up past the seam, a drop at the seam, a drag that outlives a volume change, one that ends as a crossfade starts, and drops past the last row at 1 of 12 and under Repeat off", async () => {
     await fresh();
     await playTavern();
     const win = await openMusic();
@@ -575,10 +597,46 @@ describe("the Music window", { concurrency: false }, () => {
     await sleep(800);
     assert.equal(sentOps(from, "music.queue").length, 0, "nothing sent: the crossfade ended the drag");
     await win.locator("[data-music-now]").filter({ hasText: nameOf(next.soundId) }).waitFor();
+
+    // A drag past the last row takes the last place. At 1 of 12 the second list is empty, so that place is the seam, the order's end, and Now playing still reads 1 of 12.
+    const rows = win.getByRole("list", { name: "Up next" }).locator("[data-music-order-row]");
+    const pastEnd = async () => (await midOf(rows.last())) + 80;
+    const dragFrom = async (grip: Locator) => {
+      await grip.evaluate((el) => el.scrollIntoView({ block: "start" }));
+      const box = (await grip.boundingBox())!;
+      const x = box.x + box.width / 2;
+      const y0 = box.y + box.height / 2;
+      await dm.mouse.move(x, y0);
+      await dm.mouse.down();
+      await dm.mouse.move(x, y0 + 8);
+      const y1 = await pastEnd();
+      assert.ok(y1 < DESK.height, `the last row in sight: ${y1}`);
+      for (let i = 1; i <= 10; i++) await dm.mouse.move(x, y0 + 8 + ((y1 - y0 - 8) * i) / 10);
+      await dm.mouse.up();
+    };
+    const fromTop = randomUUID();
+    await ops.send({ t: "music.play", run: fromTop, playlistId: run.playlists["Tavern night"]!, order: run.tavern, index: 0, repeat: "all", fade: 5 });
+    await waitFor("Tavern night from its first track", () => (music()?.run === fromTop ? true : null));
+    await win.locator("[data-music-now]").filter({ hasText: "Tavern night · 1 of 12" }).waitFor();
+    from = dmSocket.sent.length;
+    await dragFrom(handle(t[1]!, 1));
+    await waitFor("the drop", () => (sentOps(from, "music.queue").length === 1 ? true : null), 3_000);
+    assert.deepEqual(sentOps(from, "music.queue").map((o) => o.edit), [{ t: "move", soundId: t[1], to: "passEnd" }]);
+    await waitFor("t1 at Up next's end", async () => ((await lines()).at(-1) === nameOf(t[1]!) ? true : null), 3_000);
+    await win.locator("[data-music-now]").filter({ hasText: "Tavern night · 1 of 12" }).waitFor();
+
+    // Under Repeat off, to the bottom of Up next: the order's end.
+    await playTavern("off");
+    from = dmSocket.sent.length;
+    await dragFrom(win.getByRole("button", { name: `Move ${nameOf(t[3]!)}, 1 of 9`, exact: true }));
+    await waitFor("the drop", () => (sentOps(from, "music.queue").length === 1 ? true : null), 3_000);
+    assert.deepEqual(sentOps(from, "music.queue").map((o) => o.edit), [{ t: "move", soundId: t[3], to: "last" }]);
+    await waitFor("t3 at Up next's end", async () => ((await lines()).at(-1) === nameOf(t[3]!) ? true : null), 3_000);
+    await playTavern();
     await closeMusic();
   });
 
-  test("mu-5. the maker: ten tracks by search, a drag and keys, one Create, a rename that Saves its name alone, and a close with changes that asks first", async () => {
+  test("mu-5. the maker: ten tracks by search, drags up and past the last row, keys, one Create, a rename that Saves its name alone, and a close with changes that asks first", async () => {
     await fresh();
     let win = await openMusic();
     await win.getByRole("button", { name: "New playlist", exact: true }).click();
@@ -621,8 +679,22 @@ describe("the Music window", { concurrency: false }, () => {
     const stepped = [...harbor.slice(0, 4), ...harbor.slice(5, 9), harbor[4]!, harbor[9]!];
     await win.getByRole("status").filter({ hasText: `${harbor[4]} is now 9 of 10.` }).waitFor();
     await order.getByRole("button", { name: `Remove ${harbor[9]}`, exact: true }).click();
-    const kept = stepped.slice(0, 9);
-    assert.deepEqual(await shown(), kept);
+    const left = stepped.slice(0, 9);
+    assert.deepEqual(await shown(), left);
+
+    // A drag of the first row past the last takes the last place.
+    const top = order.getByRole("button", { name: `Move ${left[0]}, 1 of 9`, exact: true });
+    await top.evaluate((el) => el.scrollIntoView({ block: "start" }));
+    const grip = (await top.boundingBox())!;
+    const bottom = (await order.locator("li").last().boundingBox())!;
+    const past = bottom.y + bottom.height + 60;
+    assert.ok(past < DESK.height, `the last row in sight: ${past}`);
+    await dm.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
+    await dm.mouse.down();
+    for (let i = 1; i <= 12; i++) await dm.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2 + ((past - grip.y - grip.height / 2) * i) / 12);
+    await dm.mouse.up();
+    const kept = [...left.slice(1), left[0]!];
+    await waitFor("the drag's order", async () => (JSON.stringify(await shown()) === JSON.stringify(kept) ? true : null), 3_000);
 
     // One Create, one Setup op, then back to Library with the playlist there.
     const before = dmSocket.sent.length;
@@ -678,6 +750,70 @@ describe("the Music window", { concurrency: false }, () => {
     await waitFor("Harbor at night deleted", () => (dmSocket.state?.playlists?.[id] ? null : true));
     delete run.playlists["Harbor nights"];
     await closeMusic();
+  });
+
+  test("mf-1. the maker after another DM's changes: a rename keeps the track they added though they deleted one the draft held, and Play, unchanged or after a Save, starts the playlist as it stands", async () => {
+    await fresh();
+    const id = run.playlists["Battle"]!;
+    const stored = () => dmSocket.state?.playlists?.[id];
+    const battle = [...stored()!.sounds];
+    const playButton = () => musicWindow().locator("[data-music-maker-settings]").getByRole("button", { name: "Play", exact: true });
+    const played = async (from: number) => {
+      const play = await waitFor("one music.play", () => (sentOps(from, "music.play").length === 1 ? sentOps(from, "music.play")[0]! : null), 3_000);
+      await waitFor("it plays", () => (music()?.run === play.run ? true : null), 3_000);
+      return play;
+    };
+    // A spare track at Battle's end, which the other DM deletes while the draft holds it.
+    const spare = randomUUID();
+    await ops.send({ t: "sound.create", id: spare, assetId: await upload(95_000), name: "Spare track", use: "music", ms: 95_000 });
+    await ops.send({ t: "playlist.add", id, soundId: spare });
+    await waitFor("the spare in Battle", () => (stored()?.sounds.includes(spare) ? true : null));
+    const win = await openMusic();
+    const openMaker = async (name: string) => {
+      await win.getByRole("list", { name: "Playlists" }).getByRole("button", { name: new RegExp(`^${name}`) }).click();
+      await win.getByRole("heading", { name, exact: true }).waitFor();
+    };
+    await openMaker("Battle");
+
+    // They delete the spare and add a track. A rename then saves the name alone, so their track stays.
+    const added = run.music[40]!;
+    await ops.send({ t: "sound.delete", id: spare });
+    await ops.send({ t: "playlist.add", id, soundId: added });
+    await waitFor("their change in the DM's view", () => (JSON.stringify(stored()?.sounds) === JSON.stringify([...battle, added]) ? true : null));
+    await win.getByRole("textbox", { name: "Name" }).fill("Battle at sea");
+    let from = dmSocket.sent.length;
+    await win.locator("footer").getByRole("button", { name: "Save", exact: true }).click();
+    await win.getByRole("heading", { name: "Music", exact: true }).waitFor();
+    assert.deepEqual(sentOps(from, "playlist.update"), [{ t: "playlist.update", id, name: "Battle at sea" }], "the name alone");
+    await waitFor("the rename", () => (stored()?.name === "Battle at sea" ? true : null));
+    assert.deepEqual(stored()!.sounds, [...battle, added], "the track they added stays");
+
+    // Play on an unchanged draft after they drop a track, move one and turn Repeat off: it plays the playlist as it stands, never refused.
+    await openMaker("Battle at sea");
+    const theirs = [added, ...battle.slice(1)];
+    await ops.send({ t: "playlist.update", id, sounds: theirs, repeat: "off" });
+    await waitFor("their tracks", () => (stored()?.repeat === "off" ? true : null));
+    from = dmSocket.sent.length;
+    await playButton().click();
+    const first = await played(from);
+    assert.equal(sentOps(from, "playlist.update").length, 0, "nothing to save");
+    assert.deepEqual([first.order, first.repeat], [theirs, "off"]);
+
+    // Save then Play: they put the tracks back and set Crossfade 10 s, and a rename saves the name alone, then plays their tracks with their Crossfade.
+    await ops.send({ t: "playlist.update", id, sounds: battle, fade: 10 });
+    await waitFor("their Crossfade", () => (stored()?.fade === 10 ? true : null));
+    await musicWindow().getByRole("textbox", { name: "Name" }).fill("Battle at dawn");
+    from = dmSocket.sent.length;
+    await playButton().click();
+    const second = await played(from);
+    assert.deepEqual(sentOps(from, "playlist.update"), [{ t: "playlist.update", id, name: "Battle at dawn" }], "the name alone");
+    assert.deepEqual([second.order, second.repeat, second.fade], [battle, "off", 10]);
+    assert.equal(await dm.getByText(/Try again\./).count(), 0, "no refusal");
+
+    // Battle as it was, and Tavern night playing again, as the steps after expect.
+    await ops.send({ t: "playlist.update", id, name: "Battle", sounds: battle, repeat: "all", fade: 5 });
+    await closeMusic();
+    await playTavern();
   });
 
   test("mu-6. Library: a search for harbor among 100 tracks, Longest first kept after a reload, and More's Add to queue note", async () => {
