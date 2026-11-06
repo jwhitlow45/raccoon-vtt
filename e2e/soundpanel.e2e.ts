@@ -46,8 +46,10 @@ import { addSound } from "./soundRoom.ts";
  * - sp-10: an effect deleted from its page on a second tap, its file with
  *   it.
  * - mfa-1: an effect fired behind a blackout, with nothing else playing:
- *   Stop all sound and the X-card's Stop the sound while it sounds, and
- *   neither once it is over.
+ *   Stop all sound (a 12-second one) and the X-card's Stop the sound while
+ *   it sounds, and neither once it is over.
+ * - sfx-1: a 3-second effect does not bring up Stop all sound, while the
+ *   X-card's Stop the sound shows for it.
  * - mfa-2: a read of the server's switch that fails says so, never that
  *   the server has no sound files, and Try again asks again.
  *
@@ -641,8 +643,8 @@ describe("the Sound panel", { concurrency: false }, () => {
   });
 
   test("mfa-1. an effect fired behind a blackout keeps Stop all sound and the X-card's Stop the sound while it sounds, and neither once it is over", async () => {
-    // sp-8 stopped everything and sp-10 deleted Thunder, so an 8-second Gong is the room's one effect, and nothing else plays.
-    run.sounds.Gong = await addEntry({ name: "Gong", use: "effect", ms: 8_000 });
+    // sp-8 stopped everything and sp-10 deleted Thunder, so a 12-second Gong (Stop all sound counts an effect from 10 seconds) is the room's one effect, and nothing else plays.
+    run.sounds.Gong = await addEntry({ name: "Gong", use: "effect", ms: 12_000 });
     await until("Gong in the DM's copy", () => dmSocket.state?.sounds?.[run.sounds.Gong!]);
     await ops.send({ t: "view.blackout", blackout: true });
     await until("the blackout", () => dmSocket.state?.meta.view.blackout === true);
@@ -658,7 +660,7 @@ describe("the Sound panel", { concurrency: false }, () => {
       await panel.locator("[data-sound-player]").scrollIntoViewIfNeeded();
       await shots.take(dm, "mfa-1-dm-blackout-effect");
       // Over, it is history: the panel renders again at its end and the button goes.
-      await stopAll.waitFor({ state: "detached", timeout: 15_000 });
+      await stopAll.waitFor({ state: "detached", timeout: 20_000 });
 
       // A tap within 10 s of the last card merges into it, so this one waits for its own.
       const wait = run.xcardAt + 10_500 - Date.now();
@@ -680,6 +682,28 @@ describe("the Sound panel", { concurrency: false }, () => {
     } finally {
       await ops.send({ t: "view.blackout", blackout: false });
     }
+  });
+
+  test("sfx-1. a short effect does not bring up Stop all sound, and the X-card's Stop the sound still shows for it", async () => {
+    run.sounds.Chime = await addEntry({ name: "Chime", use: "effect", ms: 3_000 });
+    await until("Chime in the DM's copy", () => dmSocket.state?.sounds?.[run.sounds.Chime!]);
+    // A tap within 10 s of the last card merges into it, so this one waits for its own.
+    const wait = run.xcardAt + 10_500 - Date.now();
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    const panel = await soundPanel();
+    const stopAll = panel.getByRole("button", { name: "Stop all sound", exact: true });
+    const sent = await patContext.request.post(`${server.origin}/api/rooms/${run.roomId}/xcard`, { headers: { Origin: server.origin } });
+    assert.ok(sent.ok(), `the X-card answered ${sent.status()}`);
+    run.xcardAt = Date.now();
+    const card = dm.getByRole("dialog", { name: "X-card" });
+    await card.waitFor();
+    await ops.send({ t: "effect.fire", id: "sfx-chime", soundId: run.sounds.Chime! });
+    const stopSound = card.getByRole("button", { name: "Stop the sound", exact: true });
+    await stopSound.waitFor();
+    assert.equal(await stopAll.count(), 0, "a 3-second effect leaves the player's rows alone");
+    await stopSound.click();
+    await until("the DM's effect stopped", () => (playing()?.dmEffects ?? []).length === 0);
+    await card.getByRole("button", { name: "Dismiss", exact: true }).click();
   });
 
   test("mfa-2. a failed read of the server's switch says so, never that the server has no sound files, and Try again asks again", async () => {

@@ -114,8 +114,26 @@ describe("what Ambiance's Sound reads (docs/design/design-v1-music.md 4.1)", () 
     assert.deepEqual(soundToStop(blackout, SOUNDS, 26_400), { now: false, until: null }, "over, it is history");
     const both = playing({ effects: [{ id: "e2", builtin: "crash", at: 2_000 }], dmEffects: [{ id: "e1", soundId: "thunder", at: 1_400 }] });
     assert.equal(soundToStop(both, SOUNDS, 2_100).until, 26_400, "until the last of them ends");
-    assert.equal(soundToStop(playing({ effects: [{ id: "e2", builtin: "crash", at: 2_000 }] }), SOUNDS, 2_100).now, true);
     assert.equal(soundToStop(playing({ dmEffects: [{ id: "e3", soundId: "rain", at: 0 }] }), SOUNDS, 100).now, false, "a sound no longer an Effect plays nowhere");
+  });
+
+  test("sfx-1. Stop all sound counts an effect only from 10 seconds, the X-card's option counts every one", () => {
+    const withMs = (ms: number) => ({ ...SOUNDS, fx: sound("fx", "effect", ms, "Fx") });
+    const fired = playing({ effects: [{ id: "e1", soundId: "fx", at: 1_000 }] });
+    assert.deepEqual(soundToStop(fired, withMs(9_999), 1_100), { now: false, until: null });
+    assert.deepEqual(soundToStop(fired, withMs(10_000), 1_100), { now: true, until: 11_000 });
+    assert.deepEqual(soundToStop(fired, withMs(9_999), 1_100, { everyEffect: true }), { now: true, until: 10_999 });
+    // A built-in trap sound is under 2 seconds, so it never counts, and only the X-card's option does.
+    const builtin = playing({ effects: [{ id: "e2", builtin: "crash", at: 2_000 }] });
+    assert.equal(soundToStop(builtin, SOUNDS, 2_100).now, false);
+    assert.equal(soundToStop(builtin, SOUNDS, 2_100, { everyEffect: true }).now, true);
+    // A short effect beside music still gives true, with no timer for the effect.
+    const run = { run: "r1", repeat: "all" as const, fade: 5 as const, now: { soundId: "pony", at: 0 } };
+    assert.deepEqual(soundToStop(playing({ music: run, effects: [{ id: "e1", soundId: "fx", at: 1_000 }] }), withMs(3_000), 1_100), { now: true, until: null });
+    // The DM's own list follows the same rule, and a long effect among short ones sets until.
+    assert.equal(soundToStop(playing({ dmEffects: [{ id: "e3", soundId: "fx", at: 1_000 }] }), withMs(9_999), 1_100).now, false);
+    const mixed = playing({ effects: [{ id: "e1", soundId: "fx", at: 1_000 }, { id: "e4", soundId: "thunder", at: 1_500 }] });
+    assert.equal(soundToStop(mixed, withMs(3_000), 1_600).until, 26_500, "the short one's end is not the answer");
   });
 
   test("four loops fill Background", () => {
