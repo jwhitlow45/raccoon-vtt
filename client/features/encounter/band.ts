@@ -86,6 +86,8 @@ const ROW = {
   timeUp: 68,
   endTurn: 91,
   endTurnStacked: 50,
+  /** The DM's Next pill (parts.tsx NextPill): "Start", its wider word, in the bold 14 px with its padding and outline. */
+  dmNext: 72,
   nextLabel: 25,
   disk: 24,
   diskGap: theme.space(1),
@@ -114,16 +116,17 @@ export type BandFit = { disks: number; round: boolean; stackEnd: boolean };
  * acting creature's name keeps a few letters (BAND_NAME_MIN_PX) and the
  * rest gives way around it, least needed first: the DM's Next disks, one
  * at a time, then the round ("R2", which the tracker and the band's own
- * name still give), then a player's End turn, whose words stack on two
+ * name still give), then a player's End turn (the DM's Next counts in its place and never stacks), whose words stack on two
  * lines as the time past the turn does. Before, the name gave way first:
  * at 130% it was squeezed to nothing on the DM's band while the last disk
  * still ran off the screen, and on a 320 px phone a player's End turn did.
  */
-export function bandFit(input: { width: number; round: number; timer: BandTimer; endTurn: boolean; next: number }): BandFit {
+export function bandFit(input: { width: number; round: number; timer: BandTimer; endTurn: boolean; dmNext?: boolean; next: number }): BandFit {
   const { gap } = ROW;
   const round = gap + ROW.roundLetter + ROW.roundDigit * String(input.round).length;
   const timer = input.timer === "none" ? 0 : gap + (input.timer === "over" ? ROW.timeUp : clockWidth(input.timer.clock));
-  const end = (stacked: boolean) => (input.endTurn ? gap + (stacked ? ROW.endTurnStacked : ROW.endTurn) : 0);
+  // The DM's Next never gives way or stacks (one short word), so it counts as an End turn that is already stacked or not at all.
+  const end = (stacked: boolean) => (input.endTurn ? gap + (stacked ? ROW.endTurnStacked : ROW.endTurn) : input.dmNext ? gap + ROW.dmNext : 0);
   const base = ROW.gutters + ROW.portrait + gap + ROW.nameFrame + BAND_NAME_MIN_PX + timer + ROW.slack;
   const room = input.width - base - round - end(false);
   if (room >= 0) {

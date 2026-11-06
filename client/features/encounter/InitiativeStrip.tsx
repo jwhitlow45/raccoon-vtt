@@ -48,7 +48,7 @@ import {
   type ConcentrationPrompt,
   type TurnMark,
 } from "./logic.ts";
-import { EndTurnPill, Portrait, TimerClock, TURN_PILL_PX } from "./parts.tsx";
+import { EndTurnPill, NextPill, Portrait, TimerClock, TURN_PILL_PX } from "./parts.tsx";
 import { RollAlerts } from "../rolls/RollAlerts.tsx";
 import { knownOrTyped } from "../rolls/card.ts";
 import { CARD_MIN_WIDTH } from "../rolls/logic.ts";
@@ -225,7 +225,7 @@ function Strip(props: { notice: boolean; stripRef?: Ref<HTMLDivElement> }) {
           <Portrait key={entry.id} entry={entry} size={22} />
         ))}
       </div>
-      {you.role === "player" ? <EndTurnButton /> : null}
+      {you.role === "player" ? <EndTurnButton /> : <NextButton start={activeEntryId === null} empty={entries.length === 0} />}
     </div>
   );
 }
@@ -256,7 +256,7 @@ function Band(props: { notice: boolean }) {
   const yours = current !== null && facts.mine(current);
   const { name, line } = whoseTurn({ dm, started, activeName: current ? entryName(facts.view, current) : null, yours });
   const clock: BandTimer = timer && current ? (timer.over ? "over" : { clock: clockText(timer) }) : "none";
-  const fit = bandFit({ width, round, timer: clock, endTurn: !dm && yours, next: next.length });
+  const fit = bandFit({ width, round, timer: clock, endTurn: !dm && yours, dmNext: dm, next: next.length });
   const shownNext = next.slice(0, fit.disks);
   const gutter = theme.space(3);
   return (
@@ -333,7 +333,7 @@ function Band(props: { notice: boolean }) {
           ))}
         </span>
       ) : null}
-      {dm ? null : <EndTurnButton stack={fit.stackEnd} />}
+      {dm ? <NextButton start={activeEntryId === null} empty={entries.length === 0} /> : <EndTurnButton stack={fit.stackEnd} />}
     </div>
   );
 }
@@ -1436,6 +1436,17 @@ function EndTurnButton(props: { stack?: boolean }) {
   const status = turnStatus({ entries, activeEntryId, mine: facts.mine });
   if (status !== "yours" && !waiting) return null;
   return <EndTurnPill waiting={waiting} stack={props.stack} onClick={end} />;
+}
+
+/**
+ * The DM's Next (chips C3), beside the chip and at the band's end. It
+ * shares End turn's wait, so a press on it and the N key's tracker Next
+ * cannot send twice from here. Start stands in before the first turn, as in
+ * the tracker, and an empty fight has nothing to start.
+ */
+function NextButton(props: { start: boolean; empty: boolean }) {
+  const { end, waiting } = useEndTurn();
+  return <NextPill waiting={waiting} start={props.start} disabled={props.empty} onClick={end} />;
 }
 
 /**

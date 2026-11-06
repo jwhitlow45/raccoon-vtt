@@ -89,4 +89,16 @@ describe("bandFit (LPD-DMPHONE-2)", () => {
     assert.ok(fit(320, 1.3, { round: 12 }).disks <= fit(320, 1.3, { round: 1 }).disks);
     assert.deepEqual(fit(320, 1.3, { round: 12, timer: "over" }), { disks: 0, round: true, stackEnd: false });
   });
+
+  test("the DM's Next counts as End turn does: the disks give way for it, the round after them, never the name", () => {
+    const dm = (width: number, scale: number, timer: BandTimer = "none") => bandFit({ width: width / scale, round: 1, timer, endTurn: false, dmNext: true, next: 4 });
+    assert.deepEqual(dm(390, 1), { disks: 4, round: true, stackEnd: false }, "a phone at 100% keeps all four faces");
+    assert.deepEqual(dm(320, 1), { disks: 2, round: true, stackEnd: false });
+    assert.deepEqual(dm(390, 1, "over"), { disks: 2, round: true, stackEnd: false });
+    assert.deepEqual(dm(320, 1.3), { disks: 0, round: true, stackEnd: false });
+    assert.deepEqual(dm(320, 1.3, "over"), { disks: 0, round: false, stackEnd: false }, "the round gives way next, and Next never stacks");
+    for (const width of [240, 280, 320, 360, 390, 430]) {
+      assert.ok(dm(width, 1).disks <= fit(width, 1).disks, `Next takes room at ${width}`);
+    }
+  });
 });

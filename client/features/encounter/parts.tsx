@@ -329,6 +329,74 @@ export function EndTurnPill(props: { waiting: boolean; stack?: boolean; onClick(
 }
 
 /**
+ * The DM's Next on the turn chip and the phone's band (designs/qol chips
+ * C3): "Next", or "Start" before the first turn. It is the End turn pill's
+ * outline twin, so a glance tells the DM's button from a player's solid
+ * one. It sends what N and the tracker's Next send, never predicted, and
+ * spins until the server moves the turn. As in EndTurnPill the spinner
+ * stands in the words' place and the words stay, unseen, so the pill keeps
+ * its width.
+ */
+export function NextPill(props: { waiting: boolean; start: boolean; disabled?: boolean; onClick(): void }) {
+  const keys = useKeyHint("turn");
+  const word = props.start ? "Start" : "Next";
+  const idle = props.disabled && !props.waiting;
+  return (
+    <button
+      type="button"
+      title={keys ? withKey(props.start ? "Start" : "Next turn", keys) : undefined}
+      aria-label={props.start ? "Start" : "Next turn"}
+      aria-keyshortcuts={keys?.aria}
+      onClick={props.onClick}
+      disabled={props.waiting || props.disabled}
+      aria-busy={props.waiting ? true : undefined}
+      style={{
+        // Positioned, so it stays above the phone band's own full-size tap target, which opens the tracker.
+        position: "relative",
+        flex: "none",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        minWidth: theme.touch,
+        minHeight: theme.touch,
+        padding: 0,
+        border: "none",
+        borderRadius: theme.radius.pill,
+        background: "transparent",
+        fontFamily: theme.font.body,
+        cursor: props.waiting || props.disabled ? "default" : "pointer",
+      }}
+    >
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          height: TURN_PILL_PX,
+          boxSizing: "border-box",
+          padding: `0 ${theme.space(3.5)}px`,
+          borderRadius: theme.radius.pill,
+          border: `${theme.line.border}px solid ${idle ? theme.color.controlBorder : theme.color.accent}`,
+          background: "transparent",
+          color: idle ? theme.color.textDisabled : theme.color.accentSoft,
+          fontSize: theme.font.body14,
+          fontWeight: theme.weight.bold,
+          whiteSpace: "nowrap",
+        }}
+      >
+        <span style={{ position: "relative", display: "grid", placeItems: "center" }}>
+          {props.waiting ? (
+            <span style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
+              <Spinner label="Moving to the next turn" />
+            </span>
+          ) : null}
+          <span aria-hidden style={{ opacity: props.waiting ? 0 : 1 }}>{word}</span>
+        </span>
+      </span>
+    </button>
+  );
+}
+
+/**
  * The turn timer's clock: quiet while time is left, amber in the last
  * seconds, red once it runs out, then counting the time past it. Words go
  * with the color, so the state never rests on color alone.
