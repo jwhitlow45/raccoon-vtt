@@ -106,6 +106,11 @@ export function playName(name: string): string {
   return `Play ${name}`;
 }
 
+/** The playing row's Pause, Now playing's word with the row's name. */
+export function pauseName(name: string): string {
+  return `Pause ${name}`;
+}
+
 export function stopName(name: string): string {
   return `Stop ${name}`;
 }
