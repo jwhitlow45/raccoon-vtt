@@ -82,13 +82,13 @@ function DmAmbiance() {
 
 /**
  * Acts on a request from elsewhere, the top bar's chip (request.ts, 4.3),
- * once per press: a Sound subpage goes back to the first page as Back
- * does, then the asked section's header goes to the top of the panel's
- * body and counts as the viewer taking the scroller, so a remembered
- * offset never pulls it away. After the commit, since the sheet or pane
- * around the panel puts its remembered offset back in its own layout
- * effect, which runs after this one, and again on the next frame, for a
- * restore still pending then.
+ * once per press, for the DM's Ambiance and a player's: a Sound subpage
+ * goes back to the first page as Back does, then the asked section's
+ * header goes to the top of the panel's body and counts as the viewer
+ * taking the scroller, so a remembered offset never pulls it away. After
+ * the commit, since the sheet or pane around the panel puts its remembered
+ * offset back in its own layout effect, which runs after this one, and
+ * again on the next frame, for a restore still pending then.
  */
 function useRequestScroll(sections: { current: Partial<Record<AmbianceSection, HTMLDivElement | null>> }, onSubpage: boolean, toFirstPage: () => void): void {
   const request = useScoped(ambianceRequestSlot);
@@ -163,25 +163,35 @@ function WeatherRow() {
   );
 }
 
+/** A player's Ambiance has no subpages, so a request never has one to leave. */
+const NO_SUBPAGE = () => {};
+
 function PlayerAmbiance() {
   const kept = useStore(useScoped(ambianceKeptSlot));
   const clock = useRoomView((s) => !!s.view?.clock);
   const sound = useRoomView((s) => somethingPlays(s.view?.playing));
   const shown = shownSections(kept, { clock, sound });
+  // The chip asks a player's Ambiance for Time too, as a DM's (4.3).
+  const sections = useRef<Partial<Record<AmbianceSection, HTMLDivElement | null>>>({});
+  useRequestScroll(sections, false, NO_SUBPAGE);
   if (!shown.time && !shown.sound) return <Empty>{EMPTY_LINE}</Empty>;
   // No folds for a player (5): two short sections read at a glance, each a group with its icon and name and no chevron.
   const groups: ReactNode[] = [];
   if (shown.time)
     groups.push(
-      <Group key="time" label={TIME_GROUP} icon="time" divider={false}>
-        <TimeSection />
-      </Group>,
+      <div key="time" ref={(el) => void (sections.current.time = el)}>
+        <Group label={TIME_GROUP} icon="time" divider={false}>
+          <TimeSection />
+        </Group>
+      </div>,
     );
   if (shown.sound)
     groups.push(
-      <Group key="sound" label={SOUND_GROUP} icon="music" holds="sections" divider={shown.time}>
-        <PlayerSound />
-      </Group>,
+      <div key="sound" ref={(el) => void (sections.current.sound = el)}>
+        <Group label={SOUND_GROUP} icon="music" holds="sections" divider={shown.time}>
+          <PlayerSound />
+        </Group>
+      </div>,
     );
   return <>{groups}</>;
 }
