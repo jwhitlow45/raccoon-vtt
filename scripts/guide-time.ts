@@ -1,9 +1,9 @@
 /**
  * The DM guide's pictures of the in-game clock (docs/dm-guide.md, "Time and
- * the calendar", docs/design/design-v1-calendar.md): the DM's Time panel with
- * a Months clock running, and the Calendar dialog open over it, taken from
- * the real server on the production build so they always show the app as it
- * is.
+ * the calendar", docs/design/design-v1-calendar.md): Ambiance with its Time
+ * group open on a Months clock running, and the Calendar dialog open over
+ * it, taken from the real server on the production build so they always
+ * show the app as it is.
  *
  * The room is a tavern with Thorn and Bree in it. The clock uses a calendar
  * of twelve months of 30 days, a week of seven named days and the words "AF"
@@ -99,8 +99,11 @@ try {
 
   await dm.reload();
   await dm.locator(".konvajs-content").first().waitFor();
-  await openSideTab(dm, "Time");
-  const panel = dm.getByRole("tabpanel", { name: sideTabName("Time") });
+  // The clock lives in Ambiance's Time group, which starts folded once a clock runs (docs/design/design-v1-panel-groups.md 6.1).
+  await openSideTab(dm, "Ambiance");
+  const panel = dm.getByRole("tabpanel", { name: sideTabName("Ambiance") });
+  const time = panel.getByRole("button", { name: "Time", exact: true });
+  if ((await time.getAttribute("aria-expanded")) === "false") await time.click();
   await panel.locator("[data-clock-date]").waitFor();
   await picture(dm, "time-panel");
 
