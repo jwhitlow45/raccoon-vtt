@@ -25,6 +25,7 @@ import { FACE_CHIP, faceChips } from "./RecentRolls.tsx";
 import { Tray } from "./throw/Tray.tsx";
 import { useThrows, useThrowView } from "./throw/useThrows.ts";
 import { againOf, useDicePanel, useLastRoll, useRollPresses } from "./useDicePanel.ts";
+import { ApplyTo } from "./ApplyTo.tsx";
 import { useRollBlocked } from "./useRollOption.ts";
 import { useProficiency } from "./useProficiency.ts";
 import { usePanelShown } from "../panels.ts";
@@ -150,6 +151,10 @@ export function ResultTotal(props: { total: number }) {
  * and the line shows it 1 s later, or at once on any tap or key. Again
  * stays as a busy button while the roll waits, so a keyboard press keeps
  * its focus, and is live from the answer on.
+ *
+ * A damage roll's "Apply to" chips show under the line once its result
+ * shows (QOL audit Q2, ApplyTo.tsx), in the sticky box, so they stay in
+ * reach as the options scroll under them.
  */
 export function LastResult(props: { onOpen(lineId: string): void }) {
   const last = useLastRoll();
@@ -225,6 +230,9 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
           </Button>
         ) : null}
       </div>
+      {receipt?.state === "committed" && !holding && first && head ? (
+        <ApplyTo lines={receipt.lines} style={{ paddingBottom: theme.space(1) }} />
+      ) : null}
       {repeat.menu}
       <span role="status" aria-live="polite" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>
         {said}
