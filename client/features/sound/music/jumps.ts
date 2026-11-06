@@ -1,10 +1,12 @@
-import { createContext, createElement, useContext, useMemo, useRef, type ReactNode } from "react";
+import { useMemo } from "react";
 import type { OpOf } from "#shared/protocol.ts";
+import { scopeSlot, useScoped } from "../../../state/scope.ts";
 import type { RoomActions } from "../../../state/types.ts";
+import { useRoomActions } from "../../../state/view.ts";
 import { send } from "../panel/ops.ts";
 
 /**
- * The window's jumps still waiting for the server's answer
+ * The jumps still waiting for the server's answer
  * (docs/design/design-v1-music-player.md 4.2, PLR-35). The store predicts a
  * jump from the device's clock, so the position it shows for the new run
  * reads that clock against the server's. Previous counts the playing track
@@ -13,33 +15,41 @@ import { send } from "../panel/ops.ts";
  */
 export type Jumps = { pending(): boolean; send(op: OpOf<"music.jump">): void };
 
-const JumpsContext = createContext<Jumps | null>(null);
+/** How many jumps wait, for one Room page. */
+export type JumpCount = { n: number };
 
-export function JumpsScope(props: { actions: Pick<RoomActions, "dispatch">; children: ReactNode }) {
-  const count = useRef(0);
-  const { actions } = props;
-  const jumps = useMemo<Jumps>(
-    () => ({
-      pending: () => count.current > 0,
-      send(op) {
-        count.current += 1;
-        let heard = false;
-        send(actions, op, () => {
-          // An answer comes once, but a resend after a reconnect must not count it down twice.
-          if (heard) return;
-          heard = true;
-          count.current = Math.max(0, count.current - 1);
-        });
-      },
-    }),
-    [actions],
-  );
-  return createElement(JumpsContext.Provider, { value: jumps }, props.children);
+/**
+ * One count for the Room page, not one per player
+ * (docs/design/design-v1-sound-layout.md 5.3): Previous, Seek and Play now
+ * from the Sound panel and from the chip's player count together, so a
+ * jump pending from one counts in the other.
+ */
+export const jumpsSlot = scopeSlot<JumpCount>(() => ({ n: 0 }));
+
+/** Jumps sent through `actions`, counted in `count`. */
+export function jumpsOf(count: JumpCount, actions: Pick<RoomActions, "dispatch">): Jumps {
+  return {
+    pending: () => count.n > 0,
+    send(op) {
+      count.n += 1;
+      let heard = false;
+      send(actions, op, () => {
+        // An answer comes once, but a resend after a reconnect must not count it down twice.
+        if (heard) return;
+        heard = true;
+        count.n = Math.max(0, count.n - 1);
+      });
+    },
+  };
 }
 
-/** Outside a window, as in a render test, a jump is sent with nothing to count. */
+/**
+ * The Room page's jumps. Outside a Room this throws, as every scoped read
+ * does: there is no count to fall back on that would not leave a player's
+ * Previous and Seek sending nothing.
+ */
 export function useJumps(): Jumps {
-  return useContext(JumpsContext) ?? UNCOUNTED;
+  const count = useScoped(jumpsSlot);
+  const actions = useRoomActions();
+  return useMemo(() => jumpsOf(count, actions), [count, actions]);
 }
-
-const UNCOUNTED: Jumps = { pending: () => false, send: () => {} };

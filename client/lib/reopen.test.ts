@@ -9,9 +9,10 @@ describe("opening a panel again after a reload", () => {
     assert.equal(decodeReopen(raw, "OTHER000"), null);
   });
 
-  test("an id from before a rename opens the panel that took its place (docs/design/design-v1-panel-groups.md 7)", () => {
-    assert.deepEqual(decodeReopen(encodeReopen("R", { panel: "time" }), "R"), { panel: "ambiance" });
-    assert.deepEqual(decodeReopen(encodeReopen("R", { panel: "sound" }), "R"), { panel: "ambiance" });
+  test("an id from before a rename opens the panel that took its place (docs/design/design-v1-sound-layout.md 3.3)", () => {
+    assert.deepEqual(decodeReopen(encodeReopen("R", { panel: "ambiance" }), "R"), { panel: "sound" });
+    assert.deepEqual(decodeReopen(encodeReopen("R", { panel: "time" }), "R"), { panel: "time" });
+    assert.deepEqual(decodeReopen(encodeReopen("R", { panel: "sound" }), "R"), { panel: "sound" });
     assert.deepEqual(decodeReopen(encodeReopen("R", { panel: "scenes" }), "R"), { panel: "scenes" });
   });
 

@@ -2,9 +2,12 @@ import { SOUND_WORDS } from "#shared/reducer/sound.ts";
 import type { BuiltinSound, Repeat, SoundUse } from "#shared/sound.ts";
 
 /**
- * Every word Ambiance's Sound shows (docs/design/design-v1-music.md 4.1,
- * 4.3 and 10), in one place so the render tests, the e2e steps and the
- * DM guide read the same text.
+ * Every word the Sound panel shows (docs/design/design-v1-music.md 4.1,
+ * 4.3 and 10), and the Sound and Time panels' own, the Now playing chip's
+ * and Table sound's (docs/design/design-v1-sound-layout.md 9), in one place
+ * so the render tests, the e2e steps and the DM guide read the same text.
+ * The words the Music window had for what stays (the player, Up next,
+ * Library and the maker) are in music/words.ts.
  */
 
 export const NOTHING_PLAYING = SOUND_WORDS.nothingPlaying;
@@ -39,6 +42,78 @@ export const STORAGE_CHECKING = "Checking storage…";
 export const STORAGE_FAILED = "Couldn't check storage.";
 export const STOP_THE_SOUND = "Stop the sound";
 export const LISTEN_HELP = "Listen here plays it on this device alone.";
+
+/* The Sound and Time panels (docs/design/design-v1-sound-layout.md 3 and 4). */
+export const SOUND_TITLE = "Sound";
+export const TIME_TITLE = "Time";
+/** A Sound subpage's back button, a track's or a background sound's page (4.5). */
+export const BACK_TO_SOUND = "Back to Sound";
+/** The view row's name, a radio group of Now playing and Library (4.1). */
+export const SOUND_VIEWS = "Sound";
+export const NOW_VIEW = "Now playing";
+export const LIBRARY_VIEW = "Library";
+/**
+ * The panel's player with no music (4.2): "Library" is a link button that
+ * moves the view and focus to Library's search, so the line comes in parts.
+ */
+export const NO_MUSIC_PICK = Object.freeze({ before: "No music is playing. Pick a playlist or a track in ", link: "Library", after: "." });
+/** The chip's player with no music (5.3), where there is no Library to pick from. */
+export const NO_MUSIC_PLAYING = "No music is playing.";
+
+/*
+ * Table sound, once What players hear (7): visible labels without "for
+ * everyone", since the help says so once. The accessible names keep it
+ * (MUSIC_VOLUME, EFFECTS_VOLUME, loopVolumeName), so a reader still hears
+ * whose volume it is.
+ */
+export const TABLE_SOUND = "Table sound";
+export const TABLE_SOUND_HELP = "What everyone at the table hears, set here for every device. Each device can turn itself down under On this device.";
+export const MUSIC_LABEL = "Music";
+export const EFFECTS_LABEL = "Effects";
+/** How Room sound's help begins under On this device, so it reads apart from Table sound's (7). */
+export const THIS_DEVICE_ONLY = "This device only:";
+
+/* The Now playing chip and its player (5). */
+export const CHIP_PAUSE = "Pause";
+export const CHIP_PLAY = "Play";
+/** The chip's player, a popover, a card or a sheet, all named so (5.3). */
+export const PLAYER_TITLE = "Now playing";
+export const BACKGROUND = "Background";
+export const OPEN_SOUND = "Open Sound";
+export const OPENING_PLAYER = "Opening the player…";
+export const PLAYER_FAILED = "Couldn't open the player.";
+/** The maker's pop-up while its code loads, and when it fails to (9). */
+export const OPENING_PLAYLIST = "Opening the playlist…";
+export const PLAYLIST_FAILED = "Couldn't open the playlist.";
+/** A player's Now playing card while the DM keeps the names (7). */
+export const MUSIC_IS_PLAYING = "Music is playing";
+
+/** "1 background sound", "3 background sounds": the chip with only background sounds, and Now playing's line with no music. */
+export function backgroundCount(n: number): string {
+  return n === 1 ? "1 background sound" : `${n} background sounds`;
+}
+
+/**
+ * What the chip shows (5.1 and 5.2): the music by the name Now playing
+ * gives it and its run line (runLine), paused or not, background sounds
+ * alone, or, once playback ended while its player stays open, its stopped
+ * state.
+ */
+export type ChipShows = { t: "music"; name: string; run: string; paused: boolean } | { t: "background"; count: number } | { t: "stopped" };
+
+/** The chip's visible text, beside Pause or Play: the track's name, "Paused · " before it while paused, the background count, or "Now playing" once stopped. */
+export function chipText(shows: ChipShows): string {
+  if (shows.t === "music") return shows.paused ? `Paused · ${shows.name}` : shows.name;
+  if (shows.t === "background") return backgroundCount(shows.count);
+  return PLAYER_TITLE;
+}
+
+/** The name of the chip's button that opens its player, not a live region: a reader hears it on reaching the chip. */
+export function chipName(shows: ChipShows): string {
+  if (shows.t === "music") return `${shows.paused ? "Now playing, paused" : "Now playing"}: ${shows.name}, ${shows.run}`;
+  if (shows.t === "background") return `Now playing: ${backgroundCount(shows.count)}`;
+  return "Now playing, stopped";
+}
 
 /** The built-in effects in the board's order, the trap sounds every device makes (D-261102-461). */
 export const BUILTINS: readonly { id: BuiltinSound; name: string }[] = [

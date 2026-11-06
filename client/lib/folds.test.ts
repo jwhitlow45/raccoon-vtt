@@ -18,6 +18,9 @@ import {
   SCENES_FOLDS,
   SCENES_SECTIONS,
   scenesFoldsSlot,
+  SOUND_FOLDS,
+  SOUND_SECTIONS,
+  soundFoldsSlot,
   THIS_DEVICE_FOLDS,
   THIS_DEVICE_SECTIONS,
   thisDeviceFoldsSlot,
@@ -96,10 +99,31 @@ describe("where each surface starts with nothing stored (6.1, 6.2)", () => {
     assert.ok(THIS_DEVICE_SECTIONS.every((s) => THIS_DEVICE_FOLDS.starts(900, CLOCK)[s] === true));
   });
 
+  // docs/design/design-v1-sound-layout.md 4.3: open, Up next pushes Effects below the first screen.
+  test("Sound: Up next folded on every width and with or without a clock", () => {
+    assert.deepEqual(SOUND_SECTIONS, ["upnext"]);
+    for (const width of [320, 390, 899, 900, 1440, 2560]) {
+      assert.deepEqual(SOUND_FOLDS.starts(width, CLOCK), { upnext: false }, `${width} with a clock`);
+      assert.deepEqual(SOUND_FOLDS.starts(width, NO_CLOCK), { upnext: false }, `${width} with no clock`);
+    }
+    for (const width of [390, 1440]) assert.deepEqual(createFolds(SOUND_FOLDS, storage()).get(width, CLOCK), { upnext: false }, `nothing stored at ${width}`);
+  });
+
+  test("Sound: a tap on Up next is remembered across a reload, and storage that throws opens it with taps for the page", () => {
+    const s = storage();
+    createFolds(SOUND_FOLDS, s).tap("upnext", true);
+    assert.equal(s.getItem("rvtt.soundFolds"), JSON.stringify({ upnext: true }));
+    assert.deepEqual(createFolds(SOUND_FOLDS, s).get(1440, CLOCK), { upnext: true }, "reloaded: open");
+    const blocked = createFolds(SOUND_FOLDS, storage({}, true));
+    assert.deepEqual(blocked.get(390, CLOCK), { upnext: true }, "storage that throws opens it");
+    blocked.tap("upnext", false);
+    assert.deepEqual(blocked.get(390, CLOCK), { upnext: false }, "a tap folds it for the page");
+  });
+
   test("one key per surface, the scene settings' kept", () => {
     assert.deepEqual(
-      [AMBIANCE_FOLDS.key, DM_PANEL_FOLDS.key, SCENES_FOLDS.key, THIS_DEVICE_FOLDS.key],
-      ["rvtt.ambianceFolds", "rvtt.dmPanelFolds", "rvtt.sceneSettingsFolds", "rvtt.thisDeviceFolds"],
+      [AMBIANCE_FOLDS.key, SOUND_FOLDS.key, DM_PANEL_FOLDS.key, SCENES_FOLDS.key, THIS_DEVICE_FOLDS.key],
+      ["rvtt.ambianceFolds", "rvtt.soundFolds", "rvtt.dmPanelFolds", "rvtt.sceneSettingsFolds", "rvtt.thisDeviceFolds"],
     );
     assert.deepEqual(AMBIANCE_SECTIONS, ["time", "sound"], "Weather is a row that opens Scenes, never a fold (scenes-reorg 4.2)");
     assert.deepEqual(SCENES_SECTIONS, ["light", "sound", "players", "map", "walls", "scene", "new"]);
@@ -108,10 +132,10 @@ describe("where each surface starts with nothing stored (6.1, 6.2)", () => {
   test("each surface's slot holds its own store, apart per Room page", () => {
     const a = new RoomScope();
     const b = new RoomScope();
-    const slots: ScopeSlot<FoldsStore<string>>[] = [ambianceFoldsSlot, dmPanelFoldsSlot, scenesFoldsSlot, thisDeviceFoldsSlot] as never;
+    const slots: ScopeSlot<FoldsStore<string>>[] = [ambianceFoldsSlot, soundFoldsSlot, dmPanelFoldsSlot, scenesFoldsSlot, thisDeviceFoldsSlot] as never;
     assert.deepEqual(
       slots.map((slot) => a.get(slot).surface.key),
-      ["rvtt.ambianceFolds", "rvtt.dmPanelFolds", "rvtt.sceneSettingsFolds", "rvtt.thisDeviceFolds"],
+      ["rvtt.ambianceFolds", "rvtt.soundFolds", "rvtt.dmPanelFolds", "rvtt.sceneSettingsFolds", "rvtt.thisDeviceFolds"],
     );
     assert.notEqual(a.get(ambianceFoldsSlot), b.get(ambianceFoldsSlot));
   });

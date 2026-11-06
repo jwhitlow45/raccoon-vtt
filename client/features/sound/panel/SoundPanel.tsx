@@ -5,15 +5,41 @@ import { Help, Section } from "../../../components/Panel.tsx";
 import { theme } from "../../../lib/theme.ts";
 import { useRoomView } from "../../../state/view.ts";
 import { WHAT_PLAYERS_HEAR } from "../../ambiance/words.ts";
-import { usePanelHeader } from "../../panels.ts";
+import { usePanelHeader, type PanelProps } from "../../panels.ts";
+import { MusicWindowHost } from "../music/MusicWindowHost.tsx";
 import { EffectsBoard } from "./EffectsBoard.tsx";
 import { RoomSoundControls, serverRoomSound, useServerRoomSoundState, type ServerSound } from "./engine.ts";
 import { LoopsSection } from "./LoopsSection.tsx";
 import { NowPlaying, WhatPlayersHear } from "./NowPlaying.tsx";
+import { PlayerSound } from "./PlayerSound.tsx";
 import { SoundPage } from "./SoundPage.tsx";
 import { nameOf, soundsOf } from "./state.ts";
 import { StorageLine } from "./StorageLine.tsx";
 import { SERVER_CHECKING, SERVER_FAILED, SERVER_OFF } from "./words.ts";
+
+/**
+ * The Sound panel (docs/design/design-v1-sound-layout.md 4), a stub that
+ * draws today's Sound section until lane SL-B's two views take its place:
+ * the DM's with its subpages and the Music window, a player's Now playing
+ * and On this device.
+ */
+export default function SoundPanel(_props: PanelProps) {
+  const role = useRoomView((s) => s.you?.role);
+  if (role === "dm") return <DmSound />;
+  if (role === "player") return <PlayerSound />;
+  return null;
+}
+
+function DmSound() {
+  const pages = useDmSoundPages("Sound");
+  // First, so the Music window stays mounted as a subpage comes or goes after it.
+  return (
+    <>
+      <MusicWindowHost />
+      {pages.subpage ?? <DmSoundSection {...pages.first} />}
+    </>
+  );
+}
 
 /**
  * What the panel says of the server's switch when it is not on: the shared

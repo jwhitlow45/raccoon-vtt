@@ -1,19 +1,19 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { headerSink, PanelScrollKeeper, panelOffered, panelSections, PANELS, panelsFor, panelSubject, RESTORE_WAIT_MS, restoreStep, scrollOf, tabGroup, type PanelHeader, type PanelScroll, type PanelSection } from "./panels.ts";
-import { canonicalPanelId, PANEL_RENAMES } from "./panels.ts";
+import { canonicalPanelId, PANEL_RENAMES, SOUND_PANEL, TIME_PANEL } from "./panels.ts";
 
 describe("the panels' order and groups (docs/design/design-v1-layout-hierarchy.md M3)", () => {
   const titles = (role: "dm" | "player", wide: boolean) => panelsFor(role, wide).map((p) => p.title);
   const groups = (role: "dm" | "player", wide: boolean) => panelsFor(role, wide).map((p) => p.group);
 
   test("a DM's phone: the in-play panels first, then those that run the table, then those for preparing, then Menu", () => {
-    assert.deepEqual(titles("dm", false), ["Token", "Initiative", "Party", "Dice", "Log", "Journal", "Areas", "DM", "Scenes", "Ambiance", "Monsters", "Encounters", "Characters", "Outliner", "Library", "Menu"]);
-    assert.deepEqual(groups("dm", false), ["play", "play", "play", "play", "play", "play", "play", "table", "table", "table", "prepare", "prepare", "prepare", "prepare", "prepare", "room"]);
+    assert.deepEqual(titles("dm", false), ["Token", "Initiative", "Party", "Dice", "Log", "Journal", "Areas", "DM", "Scenes", "Sound", "Time", "Monsters", "Encounters", "Characters", "Outliner", "Library", "Menu"]);
+    assert.deepEqual(groups("dm", false), ["play", "play", "play", "play", "play", "play", "play", "table", "table", "table", "table", "prepare", "prepare", "prepare", "prepare", "prepare", "room"]);
   });
 
   test("a DM's side panel has no Party tab: the party bar sits atop it", () => {
-    assert.deepEqual(titles("dm", true), ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "DM", "Scenes", "Ambiance", "Monsters", "Encounters", "Characters", "Outliner", "Library", "Menu"]);
+    assert.deepEqual(titles("dm", true), ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "DM", "Scenes", "Sound", "Time", "Monsters", "Encounters", "Characters", "Outliner", "Library", "Menu"]);
   });
 
   test("a player's panels, phone and wide alike", () => {
@@ -23,24 +23,29 @@ describe("the panels' order and groups (docs/design/design-v1-layout-hierarchy.m
     assert.deepEqual(groups("player", false), ["play", "play", "play", "play", "play", "play", "prepare", "prepare", "room"]);
   });
 
-  test("Ambiance is a player's only while Room says their view holds the clock or sound, or it is open, and the DM's always (5)", () => {
+  // docs/design/design-v1-sound-layout.md 3.1 and 3.2: Sound before Time, each with its own rule for a player.
+  test("Sound and Time are panels again, each a player's only while Room says its reason holds, and the DM's always", () => {
     const player = ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "Characters", "Library", "Menu"];
-    const ambiance = PANELS.find((p) => p.id === "ambiance")!;
-    assert.equal(ambiance.needsAmbiance, true);
-    assert.equal(ambiance.dmOnly, false);
-    assert.equal(ambiance.group, "table");
-    assert.equal(ambiance.icon, "ambiance");
-    assert.equal(ambiance.guide, undefined, "each group links its own section of the guide");
+    const sound = PANELS.find((p) => p.id === SOUND_PANEL)!;
+    const time = PANELS.find((p) => p.id === TIME_PANEL)!;
+    assert.deepEqual([SOUND_PANEL, TIME_PANEL], ["sound", "time"]);
+    assert.deepEqual([sound.title, sound.icon, sound.order, sound.group, sound.dmOnly, sound.needsSound, sound.needsClock, sound.guide], ["Sound", "music", 34, "table", false, true, false, "music-and-sound"]);
+    assert.deepEqual([time.title, time.icon, time.order, time.group, time.dmOnly, time.needsSound, time.needsClock, time.guide], ["Time", "time", 36, "table", false, false, true, "time-and-the-calendar"]);
     for (const wide of [false, true]) {
       assert.deepEqual(titles("player", wide), player);
-      assert.deepEqual(panelsFor("player", wide, { ambiance: false }).map((p) => p.title), player);
-      assert.deepEqual(panelsFor("player", wide, { ambiance: true }).map((p) => p.title), ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "Ambiance", "Characters", "Library", "Menu"]);
-      assert.equal(panelOffered(ambiance, "player", wide), false);
-      assert.equal(panelOffered(ambiance, "dm", wide), true);
-      assert.equal(panelOffered(ambiance, "dm", wide, { ambiance: false }), true);
+      assert.deepEqual(panelsFor("player", wide, { clock: false, sound: false }).map((p) => p.title), player);
+      assert.deepEqual(panelsFor("player", wide, { clock: true }).map((p) => p.title), ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "Time", "Characters", "Library", "Menu"], "the clock alone lists Time, not Sound");
+      assert.deepEqual(panelsFor("player", wide, { sound: true }).map((p) => p.title), ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "Sound", "Characters", "Library", "Menu"], "sound alone lists Sound, not Time");
+      assert.deepEqual(panelsFor("player", wide, { clock: true, sound: true }).map((p) => p.title), ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "Sound", "Time", "Characters", "Library", "Menu"]);
+      for (const p of [sound, time]) {
+        assert.equal(panelOffered(p, "player", wide), false);
+        assert.equal(panelOffered(p, "dm", wide), true);
+        assert.equal(panelOffered(p, "dm", wide, { clock: false, sound: false }), true);
+      }
     }
-    assert.ok(!PANELS.some((p) => p.id === "time" || p.id === "sound"), "Time and Sound left the registry for Ambiance");
-    assert.equal(PANELS.filter((p) => p.needsAmbiance).length, 1);
+    assert.ok(!PANELS.some((p) => p.id === "ambiance"), "Ambiance left the registry");
+    assert.deepEqual(PANELS.filter((p) => p.needsSound).map((p) => p.id), ["sound"]);
+    assert.deepEqual(PANELS.filter((p) => p.needsClock).map((p) => p.id), ["time"]);
   });
 
   test("the groups keep to the order's ranges, and Initiative stays the side panel's default", () => {
@@ -59,17 +64,17 @@ describe("the panels' order and groups (docs/design/design-v1-layout-hierarchy.m
  * slice the tab row's fit can leave in More.
  */
 describe("the groups a tab row's gaps follow", () => {
-  test("a player's ungrouped row keeps Ambiance in In play's gaps, as before Run the table", () => {
-    const player = panelsFor("player", true, { ambiance: true });
+  test("a player's ungrouped row keeps Sound and Time in In play's gaps, as before Run the table", () => {
+    const player = panelsFor("player", true, { clock: true, sound: true });
     assert.deepEqual(player.map((p) => [p.title, tabGroup(p, false)]), [
       ["Token", "play"], ["Initiative", "play"], ["Dice", "play"], ["Log", "play"], ["Journal", "play"], ["Areas", "play"],
-      ["Ambiance", "play"], ["Characters", "prepare"], ["Library", "prepare"], ["Menu", "room"],
+      ["Sound", "play"], ["Time", "play"], ["Characters", "prepare"], ["Library", "prepare"], ["Menu", "room"],
     ]);
   });
 
   test("a DM's grouped row gaps Run the table off from In play and Prepare", () => {
     const dm = panelsFor("dm", true).filter((p) => p.group === "table");
-    assert.deepEqual(dm.map((p) => [p.title, tabGroup(p, true)]), [["DM", "table"], ["Scenes", "table"], ["Ambiance", "table"]]);
+    assert.deepEqual(dm.map((p) => [p.title, tabGroup(p, true)]), [["DM", "table"], ["Scenes", "table"], ["Sound", "table"], ["Time", "table"]]);
   });
 });
 
@@ -79,17 +84,17 @@ describe("the panels in sections", () => {
   test("a DM's whole phone list: In play, Run the table and Prepare over their panels, and Menu after a line", () => {
     assert.deepEqual(shape(panelSections(panelsFor("dm", false), true)), [
       ["In play", ["Token", "Initiative", "Party", "Dice", "Log", "Journal", "Areas"]],
-      ["Run the table", ["DM", "Scenes", "Ambiance"]],
+      ["Run the table", ["DM", "Scenes", "Sound", "Time"]],
       ["Prepare", ["Monsters", "Encounters", "Characters", "Outliner", "Library"]],
       ["---", ["Menu"]],
     ]);
   });
 
-  test("a player never sees Run the table: Ambiance stays after Areas, before Characters, with no labels", () => {
-    const list = panelsFor("player", false, { ambiance: true });
-    assert.deepEqual(list.map((p) => p.title), ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "Ambiance", "Characters", "Library", "Menu"]);
+  test("a player never sees Run the table: Sound and Time stay after Areas, before Characters, with no labels", () => {
+    const list = panelsFor("player", false, { clock: true, sound: true });
+    assert.deepEqual(list.map((p) => p.title), ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "Sound", "Time", "Characters", "Library", "Menu"]);
     assert.deepEqual(shape(panelSections(list, false)), [["", list.map((p) => p.title)]]);
-    assert.ok(list.every((p) => p.group !== "table" || p.id === "ambiance"), "only Ambiance reaches a player from the table group");
+    assert.ok(list.every((p) => p.group !== "table" || p.id === "sound" || p.id === "time"), "only Sound and Time reach a player from the table group");
   });
 
   test("a player's list has no labels and no line", () => {
@@ -115,11 +120,11 @@ describe("the panels in sections", () => {
     }
     assert.deepEqual(shape(panelSections(dm.slice(3), true)), [
       ["In play", ["Log", "Journal", "Areas"]],
-      ["Run the table", ["DM", "Scenes", "Ambiance"]],
+      ["Run the table", ["DM", "Scenes", "Sound", "Time"]],
       ["Prepare", ["Monsters", "Encounters", "Characters", "Outliner", "Library"]],
       ["---", ["Menu"]],
     ], "a DM's More at 1280 x 800");
-    assert.deepEqual(shape(panelSections(dm.slice(10), true)), [["Prepare", ["Encounters", "Characters", "Outliner", "Library"]], ["---", ["Menu"]]]);
+    assert.deepEqual(shape(panelSections(dm.slice(11), true)), [["Prepare", ["Encounters", "Characters", "Outliner", "Library"]], ["---", ["Menu"]]]);
     assert.deepEqual(shape(panelSections(panelsFor("player", true).slice(3), false)), [["", ["Log", "Journal", "Areas", "Characters", "Library", "Menu"]]], "a player's More");
   });
 
@@ -127,7 +132,7 @@ describe("the panels in sections", () => {
   test("every panel from 900 px up, as the split's Panel below lists them", () => {
     assert.deepEqual(shape(panelSections(panelsFor("dm", true), true)), [
       ["In play", ["Token", "Initiative", "Dice", "Log", "Journal", "Areas"]],
-      ["Run the table", ["DM", "Scenes", "Ambiance"]],
+      ["Run the table", ["DM", "Scenes", "Sound", "Time"]],
       ["Prepare", ["Monsters", "Encounters", "Characters", "Outliner", "Library"]],
       ["---", ["Menu"]],
     ]);
@@ -300,6 +305,38 @@ describe("the panel scroll keeper", () => {
   });
 });
 
+// docs/design/design-v1-sound-layout.md 4.1: Sound's first page names its view (usePanelView), which the keeper counts as the page.
+describe("a panel whose first page has views", () => {
+  test("an offset kept on one view is never put back on the other, and a remount puts each view back at its own place", () => {
+    const kept = new Map<string, PanelScroll>();
+    const el = fakeScroller();
+    el.setContent(6000);
+    let clock = 0;
+    const keeper = new PanelScrollKeeper(kept, () => el, () => clock);
+    keeper.show("sound");
+    keeper.attempt("library");
+    el.scrollTop = 5000;
+    keeper.scrolled("library");
+    assert.equal(kept.get("sound")?.page, "library");
+    // A turn across 900 px remounts the panel on the same view.
+    keeper.show(null);
+    el.top = 0;
+    keeper.show("sound");
+    assert.equal(keeper.attempt("library"), false);
+    assert.equal(el.scrollTop, 5000, "Library back at its foot");
+    // A remount on the other view.
+    keeper.show(null);
+    el.top = 0;
+    keeper.show("sound");
+    keeper.attempt("now");
+    assert.equal(el.scrollTop, 0, "Library's offset is never put on Now playing");
+    clock = RESTORE_WAIT_MS;
+    keeper.attempt("now");
+    assert.equal(keeper.waiting, false);
+    assert.equal(el.scrollTop, 0);
+  });
+});
+
 // A sheet outside any Room, as on the dev kit page, has no map to keep in.
 describe("a panel scroll keeper with no Room", () => {
   test("keeps nothing and puts nothing back", () => {
@@ -452,13 +489,14 @@ describe("the panel scroll keeper under random orders", () => {
   });
 });
 
-describe("old panel ids (docs/design/design-v1-panel-groups.md 7)", () => {
-  test("Time and Sound name Ambiance now, and every other id is itself", () => {
-    assert.deepEqual(PANEL_RENAMES, { time: "ambiance", sound: "ambiance" });
-    assert.equal(canonicalPanelId("time"), "ambiance");
-    assert.equal(canonicalPanelId("sound"), "ambiance");
-    for (const p of PANELS) if (!(p.id in PANEL_RENAMES)) assert.equal(canonicalPanelId(p.id), p.id);
-    assert.equal(canonicalPanelId("ambiance"), "ambiance");
+describe("old panel ids (docs/design/design-v1-sound-layout.md 3.3)", () => {
+  test("Ambiance names Sound now, Time and Sound are themselves again, and every other id is itself", () => {
+    assert.deepEqual(PANEL_RENAMES, { ambiance: "sound" });
+    assert.equal(canonicalPanelId("ambiance"), "sound");
+    assert.equal(canonicalPanelId("time"), "time");
+    assert.equal(canonicalPanelId("sound"), "sound");
+    for (const p of PANELS) assert.equal(canonicalPanelId(p.id), p.id, "no registered id is renamed");
+    for (const to of Object.values(PANEL_RENAMES)) assert.ok(PANELS.some((p) => p.id === to), `${to} is registered`);
     assert.equal(canonicalPanelId(""), "");
   });
 

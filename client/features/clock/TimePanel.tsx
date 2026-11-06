@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { clockNow, dateText, fightStarted } from "#shared/calendar.ts";
 import type { RoomClock } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
@@ -7,16 +7,35 @@ import { Help, Section } from "../../components/Panel.tsx";
 import { Switch } from "../../components/Switch.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
+import type { PanelProps } from "../panels.ts";
 import { CalendarDialog } from "./CalendarDialog.tsx";
 import { SetTimeDialog } from "./SetTimeDialog.tsx";
-import { SHARE_HELP, StartClock, type StartDraft } from "./StartClock.tsx";
-import { StepButtons, type OtherAmount } from "./StepButtons.tsx";
+import { SHARE_HELP, START_DRAFT, StartClock, type StartDraft } from "./StartClock.tsx";
+import { NO_OTHER_AMOUNT, StepButtons, type OtherAmount } from "./StepButtons.tsx";
 import { calendarSummary, timeLine } from "./words.ts";
 
 export const NOT_SHARING = "The DM isn't sharing the date and time now.";
 export const FIGHT_NOTE = "When the fight ends, the clock moves on 6 seconds for each round.";
 export const HIDDEN_NOTE = "Players don't see the date and time.";
 export const STOP_HELP = "Removes the date and time for everyone. Undo setup in Setup history brings them back.";
+
+/**
+ * The Time panel (docs/design/design-v1-sound-layout.md 3), a stub that
+ * draws today's Time section until lane SL-A's Time panel takes its place:
+ * the DM's with Other amount and the start form kept here, a player's
+ * with the date and time, or the line that says the DM isn't sharing them.
+ */
+export default function TimePanel(_props: PanelProps) {
+  const role = useRoomView((s) => s.you?.role);
+  const [amount, setAmount] = useState<OtherAmount>(NO_OTHER_AMOUNT);
+  const [draft, setDraft] = useState<StartDraft>(START_DRAFT);
+  const clockId = useRoomView((s) => s.view?.clock?.id ?? null);
+  // A clock started, here or on another device, used the form up: the next start begins afresh.
+  useEffect(() => {
+    if (clockId !== null) setDraft(START_DRAFT);
+  }, [clockId]);
+  return <TimeSection {...(role === "dm" ? { kept: { amount, onAmount: setAmount, draft, onDraft: setDraft } } : null)} />;
+}
 
 /** What the DM's Time keeps above Ambiance's Sound subpages (docs/design/design-v1-panel-groups.md 4.1, D-261102-763): Other amount, and the start form with no clock. */
 export type TimeKept = { amount: OtherAmount; onAmount(next: OtherAmount): void; draft: StartDraft; onDraft(next: StartDraft): void };

@@ -205,14 +205,14 @@ describe("the store and the preview", () => {
     room.dispose();
   });
 
-  test("a stale caller's old panel id opens the panel that took its place (docs/design/design-v1-panel-groups.md 7)", () => {
+  test("a stale caller's old panel id opens the panel that took its place (docs/design/design-v1-sound-layout.md 3.3)", () => {
     const room = createRoomStore({ roomId: "R", you: { memberId: "dm1", role: "dm" } });
     const state = () => room.store.getState().local;
-    room.ui.openPanel("time", { pane: "top" });
-    assert.equal(state().tab, "ambiance");
-    assert.equal(state().panel, "ambiance");
-    room.ui.openPanel("sound");
-    assert.equal(state().panel, "ambiance");
+    room.ui.openPanel("ambiance", { pane: "top" });
+    assert.equal(state().tab, "sound");
+    assert.equal(state().panel, "sound");
+    room.ui.openPanel("time");
+    assert.equal(state().panel, "time", "Time is a panel again");
     room.dispose();
   });
 

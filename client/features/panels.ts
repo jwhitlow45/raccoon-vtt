@@ -69,9 +69,9 @@ export type PanelProps = {
  * ones a table reaches for in play, the ones that run the table, the ones for
  * preparing, and the room's own Menu. The groups keep to the order's ranges:
  * play 10 to 20, table 30 to 39, prepare 40 to 48, and Menu 90. A player's
- * list is not grouped, so a player's Ambiance follows Areas, as Time and
- * Sound did before it took their place (docs/design/design-v1-panel-groups.md
- * 3), and tabGroup keeps a player's tab row as it was.
+ * list is not grouped, so a player's Sound and Time follow Areas
+ * (docs/design/design-v1-panel-groups.md 3), and tabGroup keeps a player's
+ * tab row as it was.
  */
 export type PanelGroup = "play" | "table" | "prepare" | "room";
 
@@ -88,8 +88,10 @@ export type PanelDef = {
   group: PanelGroup;
   /** What the panel is about, where that comes from outside it: "selection", the selected token (panelSubject). */
   subject?: "selection";
-  /** Listed for a player only while their view holds the room's clock, the room plays something they receive, or the panel is open (panelsFor). The DM always has it. */
-  needsAmbiance: boolean;
+  /** Listed for a player only while their view holds the room's clock, or the panel is open (panelsFor). The DM always has it. */
+  needsClock: boolean;
+  /** Listed for a player only while the room plays something they receive, or the panel is open (panelsFor). The DM always has it. */
+  needsSound: boolean;
   /** The DM guide's section on this panel, a heading's anchor in docs/dm-guide.md, for the DM's Guide link at its foot (panels/Panels.tsx). */
   guide?: string;
   Component: ComponentType<PanelProps>;
@@ -103,7 +105,8 @@ function panel(def: {
   group: PanelGroup;
   dmOnly?: boolean;
   narrowOnly?: boolean;
-  needsAmbiance?: boolean;
+  needsClock?: boolean;
+  needsSound?: boolean;
   subject?: "selection";
   guide?: string;
   load: () => Promise<{ default: ComponentType<PanelProps> }>;
@@ -118,12 +121,17 @@ function panel(def: {
     group: def.group,
     dmOnly,
     narrowOnly: def.narrowOnly ?? false,
-    needsAmbiance: def.needsAmbiance ?? false,
+    needsClock: def.needsClock ?? false,
+    needsSound: def.needsSound ?? false,
     ...(def.subject ? { subject: def.subject } : null),
     ...(def.guide ? { guide: def.guide } : null),
     Component,
   };
 }
+
+/** The Sound and Time panels' ids, for whatever opens them or reads whether they show. */
+export const SOUND_PANEL = "sound";
+export const TIME_PANEL = "time";
 
 /**
  * Every panel, one per line, ordered by use (docs/design/design-v1-layout-hierarchy.md
@@ -139,8 +147,9 @@ export const PANELS: readonly PanelDef[] = [
   panel({ id: "scenes", title: "Scenes", icon: "scenes", order: 32, group: "table", dmOnly: true, guide: "scenes", load: () => import("../panels/ScenesPanel.tsx") }),
   panel({ id: "library", title: "Library", icon: "library", order: 48, group: "prepare", load: () => import("../panels/LibraryPanel.tsx") }),
   panel({ id: "areas", title: "Areas", icon: "areas", order: 20, group: "play", guide: "areas", load: () => import("./areas/AreasPanel.tsx") }),
-  // No guide of its own: its Time and Sound groups each link theirs (features/ambiance/AmbiancePanel.tsx).
-  panel({ id: "ambiance", title: "Ambiance", icon: "ambiance", order: 34, group: "table", needsAmbiance: true, load: () => import("./ambiance/AmbiancePanel.tsx") }),
+  // Sound before Time: at 640 px the tab row holds nine tabs, and the ninth is the first of Run the table after Scenes (docs/design/design-v1-sound-layout.md 3.1).
+  panel({ id: SOUND_PANEL, title: "Sound", icon: "music", order: 34, group: "table", needsSound: true, guide: "music-and-sound", load: () => import("./sound/panel/SoundPanel.tsx") }),
+  panel({ id: TIME_PANEL, title: "Time", icon: "time", order: 36, group: "table", needsClock: true, guide: "time-and-the-calendar", load: () => import("./clock/TimePanel.tsx") }),
   panel({ id: "log", title: "Log", icon: "log", order: 16, group: "play", load: () => import("../panels/LogPanel.tsx") }),
   panel({ id: "journal", title: "Journal", icon: "journal", order: 18, group: "play", load: () => import("./journal/JournalPanel.tsx") }),
   panel({ id: "characters", title: "Characters", icon: "characters", order: 44, group: "prepare", guide: "characters-and-their-stat-blocks", load: () => import("./tokens/CharactersPanel.tsx") }),
@@ -154,20 +163,22 @@ export const PANELS: readonly PanelDef[] = [
 ];
 
 /**
- * What a player's view holds that some panels wait for. `ambiance`: the
- * room's clock, something playing that they receive, or Ambiance already
- * open, the union of the rules Time and Sound had
- * (docs/design/design-v1-panel-groups.md 5, design-v1-calendar.md 4.4,
- * design-v1-music.md 4.1). The DM has it always. Room works it out
- * (pages/Room.tsx), so this only decides what is listed.
+ * What a player's view holds that some panels wait for, each counting the
+ * panel already open too (docs/design/design-v1-sound-layout.md 3.2).
+ * `clock`: the room's clock, or Time open, so Time is listed
+ * (docs/design/design-v1-calendar.md 4.4). `sound`: something playing that
+ * they receive, or Sound open, so Sound is listed
+ * (docs/design/design-v1-music.md 4.1). The DM has both panels always. Room
+ * works these out (pages/Room.tsx), so this only decides what is listed.
  */
-export type PanelsForOptions = { ambiance?: boolean };
+export type PanelsForOptions = { clock?: boolean; sound?: boolean };
 
 /** Whether a role is offered a panel (panelsFor). */
 export function panelOffered(p: PanelDef, role: "dm" | "player", wide = false, opts: PanelsForOptions = {}): boolean {
   if (p.dmOnly && role !== "dm") return false;
   if (wide && p.narrowOnly) return false;
-  if (role === "player" && p.needsAmbiance && !opts.ambiance) return false;
+  if (role === "player" && p.needsClock && !opts.clock) return false;
+  if (role === "player" && p.needsSound && !opts.sound) return false;
   return true;
 }
 
@@ -181,8 +192,8 @@ const GROUP_LABELS: Partial<Record<PanelGroup, string>> = { play: "In play", tab
 
 /**
  * The group whose gaps a panel's tab follows in the side panel's row. Run the
- * table is a DM's group: in a player's ungrouped row Ambiance keeps In play's
- * gaps, as Time and Sound did before it, so a player's row does not change.
+ * table is a DM's group: in a player's ungrouped row Sound and Time keep In
+ * play's gaps, so a player's row does not change.
  */
 export function tabGroup(p: PanelDef, grouped: boolean): PanelGroup {
   return !grouped && p.group === "table" ? "play" : p.group;
@@ -228,11 +239,14 @@ export function panelById(id: string | null): PanelDef | undefined {
 
 /**
  * Panel ids that left the registry, and the panel that took each one's
- * place (docs/design/design-v1-panel-groups.md 7): Time and Sound became
- * sections of Ambiance. Never aliases in the registry, which a list could
- * show twice.
+ * place (docs/design/design-v1-sound-layout.md 3.3): Ambiance went, and
+ * Time and Sound are panels again. Ambiance names Sound, since a running
+ * clock kept its Time folded, so a DM who kept Ambiance open kept it for
+ * sound. "time" and "sound" are real ids again, so a split stored before
+ * Ambiance reads as it was. Never aliases in the registry, which a list
+ * could show twice.
  */
-export const PANEL_RENAMES: Readonly<Record<string, string>> = Object.freeze({ time: "ambiance", sound: "ambiance" });
+export const PANEL_RENAMES: Readonly<Record<string, string>> = Object.freeze({ ambiance: SOUND_PANEL });
 
 /**
  * A panel id as the registry knows it now, for an id that may be old: a
@@ -596,8 +610,9 @@ export function useSubpageFocus(
 
 /**
  * Where a panel was scrolled when it last showed: its scroller's offsets,
- * whether it sat at its end, the page it showed then, null for its first
- * page or a subpage's key (subpageKey), and what it was about (panelSubject).
+ * whether it sat at its end, the page it showed then, and what it was
+ * about (panelSubject). The page is a subpage's key (subpageKey), else the
+ * view its first page names (usePanelView), else null.
  */
 export type PanelScroll = { top: number; left: number; end: boolean; page: string | null; subject: string | null };
 
@@ -608,6 +623,35 @@ export type PanelScroll = { top: number; left: number; end: boolean; page: strin
  * so a panel that left holds none of its DOM here.
  */
 export const panelScrollSlot = scopeSlot(() => new Map<string, PanelScroll>());
+
+/** The view each panel's first page shows, by panel id, for this Room page (usePanelView). */
+const panelViewSlot = scopeSlot(() => new Map<string, string>());
+
+/**
+ * Names the view a panel's first page shows, for a first page with views
+ * of its own, such as Sound's Now playing and Library
+ * (docs/design/design-v1-sound-layout.md 4.1). The scroll keeper counts it
+ * as the page, as it counts a subpage, so an offset kept on one view is
+ * never put back on the other, and a remount, as in a turn across 900 px,
+ * puts each view back where it was. It names no header: the panel still
+ * shows its first page. A view's name holds no line break, so it never
+ * reads as a subpage's key.
+ *
+ * The keeper restores only as the panel shown changes, so a panel that
+ * switches views itself puts its scroller at the new view's top.
+ */
+export function usePanelView(view: string): void {
+  const id = usePanelHere();
+  const views = useScopedIfAny(panelViewSlot);
+  // Before the sheet's or pane's own layout effect, a parent's, so the keeper's first try on a remount already reads the view.
+  useLayoutEffect(() => {
+    if (id === null || views === null) return;
+    views.set(id, view);
+    return () => {
+      if (views.get(id) === view) views.delete(id);
+    };
+  }, [id, views, view]);
+}
 
 /**
  * What a panel is about, where that comes from outside it: the selected
@@ -767,17 +811,19 @@ export class PanelScrollKeeper {
 export function usePanelScroll(id: string | null, subpage: PanelHeader | null, body: RefObject<HTMLElement | null>, subject: string | null = null): void {
   // A sheet outside any Room, as on the dev kit page, renders without keeping scroll.
   const kept = useScopedIfAny(panelScrollSlot);
-  const page = subpage ? subpageKey(subpage) : null;
-  const now = useRef({ page, subject });
-  now.current = { page, subject };
+  const views = useScopedIfAny(panelViewSlot);
+  const now = useRef({ id, subpage: subpage ? subpageKey(subpage) : null, subject });
+  now.current = { id, subpage: subpage ? subpageKey(subpage) : null, subject };
+  // Read at each use, not at this render: a panel that switches views draws again alone, without the sheet or pane around it.
+  const pageNow = () => now.current.subpage ?? (now.current.id === null ? null : (views?.get(now.current.id) ?? null));
   const [keeper] = useState(() => new PanelScrollKeeper(kept, () => body.current, () => performance.now()));
   const framing = useRef(false);
   const tryRestore = useRef(() => {});
   tryRestore.current = () => {
-    if (!keeper.attempt(now.current.page, now.current.subject) || framing.current) return;
+    if (!keeper.attempt(pageNow(), now.current.subject) || framing.current) return;
     framing.current = true;
     const frame = () => {
-      if (keeper.attempt(now.current.page, now.current.subject)) requestAnimationFrame(frame);
+      if (keeper.attempt(pageNow(), now.current.subject)) requestAnimationFrame(frame);
       else framing.current = false;
     };
     requestAnimationFrame(frame);
@@ -785,7 +831,7 @@ export function usePanelScroll(id: string | null, subpage: PanelHeader | null, b
   useEffect(() => {
     const el = body.current;
     if (!el) return;
-    const record = () => keeper.scrolled(now.current.page, now.current.subject);
+    const record = () => keeper.scrolled(pageNow(), now.current.subject);
     const takeOver = () => keeper.takeOver();
     el.addEventListener("scroll", record, { passive: true });
     for (const type of VIEWER_INPUT) el.addEventListener(type, takeOver, { passive: true });
@@ -799,7 +845,7 @@ export function usePanelScroll(id: string | null, subpage: PanelHeader | null, b
   useLayoutEffect(() => {
     keeper.show(id);
     tryRestore.current();
-    keeper.note(page, subject);
+    keeper.note(pageNow(), subject);
   });
 }
 

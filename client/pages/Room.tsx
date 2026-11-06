@@ -47,7 +47,7 @@ import { Sheet, paneBodyPadding, type SheetMode } from "../components/Sheet.tsx"
 import { headerStacks, SHEET_HEADER, SHEET_HEADER_STACKED, pageHeightOf, sheetCap, sheetKeyboard, sheetMode, sheetWidth, sideSheetWidth } from "../components/sheetCap.ts";
 import { SHORT_LANDSCAPE_MAX, useRecordOverflow, useTopBars, useTurnPlacement, type TurnPlacement } from "../features/encounter/band.ts";
 import { FightWatch, InitiativeStrip, useYourTurnNotice } from "../features/encounter/InitiativeStrip.tsx";
-import { panelById, panelSections, panelsFor, panelSubject, subpageBack, usePanelScroll, useSubpageFocus, type PanelClose, type PanelDef, type PanelHeader } from "../features/panels.ts";
+import { panelById, panelSections, panelsFor, panelSubject, subpageBack, TIME_PANEL, usePanelScroll, useSubpageFocus, type PanelClose, type PanelDef, type PanelHeader } from "../features/panels.ts";
 import { PartyDock } from "../features/party/PartyDock.tsx";
 import type { OpenSheet } from "../features/find/findToken.ts";
 import { HandoutPopup } from "../features/handouts/HandoutPopup.tsx";
@@ -67,7 +67,7 @@ import { PhaseMenu } from "../features/phases/PhaseMenu.tsx";
 import { FrameViewBar } from "../features/scenes/FrameView.tsx";
 import { SCENES_PANEL, useEndSceneRequestOnClose } from "../features/scenes/request.ts";
 import { ambianceKeptSlot, keptSections } from "../features/ambiance/kept.ts";
-import { AMBIANCE_PANEL, openAmbiance } from "../features/ambiance/request.ts";
+import { AMBIANCE_PANEL } from "../features/ambiance/request.ts";
 import { barInset, chromeZoom, smallUi, useLayoutSize } from "../features/device/layout.ts";
 import { uiScale as uiScaleNow, usePanelWidth, useUiScale } from "../features/device/settings.ts";
 import { activeTool, toolsFor, type ToolDef } from "../features/tools.ts";
@@ -428,7 +428,7 @@ function RoomPage() {
   const hasClock = useRoomView((s) => !!s.view?.clock);
   const hasSound = useRoomView((s) => somethingPlays(s.view?.playing));
   const ambianceOpen = wide ? tab === AMBIANCE_PANEL || below === AMBIANCE_PANEL : panel === AMBIANCE_PANEL;
-  const panels = panelsFor(role, wide, { ambiance: hasClock || hasSound || ambianceOpen });
+  const panels = panelsFor(role, wide, { clock: hasClock || ambianceOpen, sound: hasSound || ambianceOpen });
   // A player's sections that showed since Ambiance opened stay until it closes (features/ambiance/kept.ts), here so a turn across 900 px, which remounts the panel, keeps them.
   const ambianceKept = scope.get(ambianceKeptSlot);
   useLayoutEffect(() => {
@@ -631,7 +631,7 @@ function RoomPage() {
   const saveSplit = useRef<(() => void) | null>(null);
   useLayoutEffect(() => {
     if (splitStored.current !== null || splitRole === null) return;
-    const has = new Set(panelsFor(splitRole, true, { ambiance: true }).map((p) => p.id));
+    const has = new Set(panelsFor(splitRole, true, { clock: true, sound: true }).map((p) => p.id));
     const entry = readSplit(splitRole, (id) => has.has(id));
     splitStored.current = entry;
     shareRef.current = entry.share;
@@ -1055,8 +1055,8 @@ function RoomPage() {
           barWidth={mapWidth}
           openSheet={openSheet}
           openTime={() => {
-            focusNext.current = { kind: "panel", id: AMBIANCE_PANEL };
-            openAmbiance(scope, ui, "time", { pane: "top" });
+            focusNext.current = { kind: "panel", id: TIME_PANEL };
+            ui.openPanel(TIME_PANEL, { pane: "top" });
           }}
         />
         <div

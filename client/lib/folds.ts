@@ -7,14 +7,15 @@ import { useRoomView } from "../state/view.ts";
 import { theme } from "./theme.ts";
 
 /*
- * The folding sections of four surfaces, Ambiance, the DM panel, Scenes and
- * This device (docs/design/design-v1-panel-groups.md 6.1): which sections show
+ * The folding sections of five surfaces, Ambiance, Sound, the DM panel,
+ * Scenes and This device (docs/design/design-v1-panel-groups.md 6.1,
+ * docs/design/design-v1-sound-layout.md 4.3): which sections show
  * open, as this device last left them, with the scene settings' rule
  * (features/scenes/settingsFolds.ts) made general. One store per surface, in
  * the Room scope, so the sheet and the side panel, which draw in separate
  * trees, read the same folds, and a turn across 900 px, which remounts the
  * panel in the other tree, never refolds anything. The Token and Dice
- * panels keep their own stores: this rule is for these four alone.
+ * panels keep their own stores: this rule is for these surfaces alone.
  *
  * What a section shows, in order of strength:
  * 1. A reveal: open for now, never written (a request, a paste, a waiting
@@ -69,7 +70,7 @@ export type FoldsStore<S extends string> = {
   subscribe(listener: () => void): () => void;
 };
 
-/** The setup rule outside Ambiance (6.1): open from 900 px of layout width, folded below it, as the scene settings' groups start. */
+/** The setup rule outside Ambiance and Sound (6.1): open from 900 px of layout width, folded below it, as the scene settings' groups start. */
 function wideAt(width: number): boolean {
   return width >= theme.layout.wideMinWidth;
 }
@@ -191,7 +192,14 @@ export function foldsSlot<S extends string>(surface: FoldSurface<S>): ScopeSlot<
   return scopeSlot(() => createFolds(surface));
 }
 
-/* The four surfaces (6.2). A play section starts open everywhere, a setup section by wideAt. */
+/* The surfaces (6.2). A play section starts open everywhere, a setup section by wideAt, and Sound's Up next folded everywhere. */
+
+/*
+ * Ambiance's surface, until lane SL-A takes the Ambiance panel out of
+ * pages/Room.tsx and removes features/ambiance, its last readers. SL-A
+ * removes this surface with them. `rvtt.ambianceFolds` stays in storage
+ * unread: two booleans no other key reads.
+ */
 
 /** Ambiance's Weather is a row that opens the scene's weather in Scenes, never a fold (docs/design/design-v1-scenes-reorg.md 4.2), so a `weather` key a device stored before is passed over. */
 export const AMBIANCE_SECTIONS = ["time", "sound"] as const;
@@ -204,6 +212,22 @@ export const AMBIANCE_FOLDS: FoldSurface<AmbianceSection> = {
   starts: (_width, room) => ({ time: !room.clock, sound: true }),
 };
 export const ambianceFoldsSlot = foldsSlot(AMBIANCE_FOLDS);
+
+/** The Sound panel's one fold, Up next under the player (docs/design/design-v1-sound-layout.md 4.3). */
+export const SOUND_SECTIONS = ["upnext"] as const;
+export type SoundSection = (typeof SOUND_SECTIONS)[number];
+
+/**
+ * Up next starts folded on every width: open on a 12-track playlist it
+ * pushes Effects, used in every scene, below the side panel's first screen
+ * at 1440 x 900, and folded it still names the next track in its summary.
+ */
+export const SOUND_FOLDS: FoldSurface<SoundSection> = {
+  key: "rvtt.soundFolds",
+  sections: SOUND_SECTIONS,
+  starts: () => ({ upnext: false }),
+};
+export const soundFoldsSlot = foldsSlot(SOUND_FOLDS);
 
 /** Join requests is never a fold, so it has no key. */
 export const DM_PANEL_SECTIONS = ["handouts", "screens", "check", "link", "display"] as const;

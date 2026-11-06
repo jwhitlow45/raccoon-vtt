@@ -11,7 +11,6 @@ import { MusicVolume, NamesSwitch } from "../panel/NowPlaying.tsx";
 import { send } from "../panel/ops.ts";
 import { nameOf, playlistsOf, soundsOf } from "../panel/state.ts";
 import { SoundPage } from "../panel/SoundPage.tsx";
-import { JumpsScope } from "./jumps.ts";
 import { Library } from "./Library.tsx";
 import { draftOf, MakerBody, newDraft, useMakerControl } from "./Maker.tsx";
 import { NowFull } from "./NowFull.tsx";
@@ -38,15 +37,6 @@ const OPEN_MUSIC_BUTTON = {
  * own (MusicWindowHost.tsx), the DM's alone.
  */
 export default function MusicWindow() {
-  const actions = useRoomActions();
-  return (
-    <JumpsScope actions={actions}>
-      <MusicDialog />
-    </JumpsScope>
-  );
-}
-
-function MusicDialog() {
   const actions = useRoomActions();
   const store = useRoomStore();
   const slot = useScoped(musicWindowSlot);

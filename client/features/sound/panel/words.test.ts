@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { clockText, playerLoopsLine, playerMusicLine, playlistDetail, playlistLeavesScenes, runLine, sceneLine, sizeText, skipName, storageLine, timeShown, useLeavesLine } from "./words.ts";
+import * as words from "./words.ts";
 
 const MB = 1024 * 1024;
 
@@ -61,5 +62,50 @@ describe("the words of Ambiance's Sound (docs/design/design-v1-music.md 4.1 and 
     assert.equal(sizeText(0), "0 MB");
     assert.equal(sizeText(1000), "under 1 MB");
     assert.match(storageLine({ used: 2048 * MB, quota: 1024 * MB, sounds: 0 }), /and 0 MB is free\.$/, "a room past its quota has none free");
+  });
+});
+
+describe("the words of the Sound and Time panels and the Now playing chip (docs/design/design-v1-sound-layout.md 9)", () => {
+  test("the panels, the view row and the nothing-playing lines, word for word", () => {
+    assert.deepEqual([words.SOUND_TITLE, words.TIME_TITLE, words.BACK_TO_SOUND, words.SOUND_VIEWS, words.NOW_VIEW, words.LIBRARY_VIEW], ["Sound", "Time", "Back to Sound", "Sound", "Now playing", "Library"]);
+    const pick = words.NO_MUSIC_PICK;
+    assert.equal(`${pick.before}${pick.link}${pick.after}`, "No music is playing. Pick a playlist or a track in Library.");
+    assert.equal(pick.link, "Library", "the link button's own word");
+    assert.equal(words.NO_MUSIC_PLAYING, "No music is playing.");
+  });
+
+  test("Table sound says for everyone once, and the device's own help says this device", () => {
+    assert.equal(words.TABLE_SOUND, "Table sound");
+    assert.equal(words.TABLE_SOUND_HELP, "What everyone at the table hears, set here for every device. Each device can turn itself down under On this device.");
+    assert.deepEqual([words.MUSIC_LABEL, words.EFFECTS_LABEL], ["Music", "Effects"]);
+    assert.equal(words.THIS_DEVICE_ONLY, "This device only:");
+    assert.equal(words.MUSIC_VOLUME, "Music volume for everyone", "the accessible name keeps whose volume it is");
+    assert.ok(words.MUSIC_VOLUME.startsWith(words.MUSIC_LABEL), "and holds the visible word");
+  });
+
+  test("the chip's player, its loading lines and the maker's", () => {
+    assert.deepEqual(
+      [words.CHIP_PAUSE, words.CHIP_PLAY, words.PLAYER_TITLE, words.BACKGROUND, words.OPEN_SOUND, words.OPENING_PLAYER, words.PLAYER_FAILED, words.OPENING_PLAYLIST, words.PLAYLIST_FAILED, words.MUSIC_IS_PLAYING],
+      ["Pause", "Play", "Now playing", "Background", "Open Sound", "Opening the player…", "Couldn't open the player.", "Opening the playlist…", "Couldn't open the playlist.", "Music is playing"],
+    );
+    assert.equal(words.stopName("Rain on the cobblestones"), "Stop Rain on the cobblestones");
+  });
+
+  test("the chip's text and name in each state of 5.2, and its stopped state", () => {
+    const music = { t: "music", name: "Tavern at night", run: "Tavern night · 3 of 12", paused: false } as const;
+    assert.equal(words.chipText(music), "Tavern at night");
+    assert.equal(words.chipName(music), "Now playing: Tavern at night, Tavern night · 3 of 12");
+    assert.equal(words.chipText({ ...music, paused: true }), "Paused · Tavern at night");
+    assert.equal(words.chipName({ ...music, paused: true }), "Now playing, paused: Tavern at night, Tavern night · 3 of 12");
+    assert.equal(words.chipText({ t: "background", count: 2 }), "2 background sounds");
+    assert.equal(words.chipName({ t: "background", count: 2 }), "Now playing: 2 background sounds");
+    assert.equal(words.chipName({ t: "background", count: 1 }), "Now playing: 1 background sound");
+    assert.equal(words.chipText({ t: "stopped" }), "Now playing");
+    assert.equal(words.chipName({ t: "stopped" }), "Now playing, stopped");
+  });
+
+  test("the background count, moved here from Ambiance's words", () => {
+    assert.equal(words.backgroundCount(1), "1 background sound");
+    assert.equal(words.backgroundCount(4), "4 background sounds");
   });
 });
