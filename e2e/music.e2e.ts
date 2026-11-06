@@ -509,7 +509,7 @@ describe("the Music window", { concurrency: false }, () => {
     await closeMusic();
   });
 
-  test("mu-4. Up next's keys and drags: a step, the ends, Up past the seam, a drop at the seam, a drag that outlives a volume change, one that ends as a crossfade starts, and drops past the last row at 1 of 12 and under Repeat off", async () => {
+  test("mu-4. Up next's keys and drags: a step, the ends, Up past the seam, a drop at the seam, taps that drop nothing and a short drag that does, a drag that outlives a volume change, one that ends as a crossfade starts, and drops past the last row at 1 of 12 and under Repeat off", async () => {
     await fresh();
     await playTavern();
     const win = await openMusic();
@@ -572,6 +572,33 @@ describe("the Music window", { concurrency: false }, () => {
     await waitFor("t9 at Up next's end", async () => ((await lines()).at(-1) === nameOf(t[9]!) ? true : null), 3_000);
     assert.deepEqual(sentOps(from, "music.queue").map((o) => o.edit), [{ t: "move", soundId: t[9], to: "passEnd" }]);
     await win.locator("[data-music-now]").filter({ hasText: "Tavern night · 2 of 12" }).waitFor();
+
+    // A tap on a handle, with a finger's jitter under 4 px, drops nothing in either list, though t1, the second list's first row, stands at the seam, where a drop sends passEnd.
+    const press = async (grip: Locator, dy: number) => {
+      await grip.scrollIntoViewIfNeeded();
+      const box = (await grip.boundingBox())!;
+      const x = box.x + box.width / 2;
+      const y0 = box.y + box.height / 2;
+      await dm.mouse.move(x, y0);
+      await dm.mouse.down();
+      for (let i = 1; i <= 4; i++) await dm.mouse.move(x + 1, y0 + (dy * i) / 4);
+      await dm.mouse.up();
+    };
+    const order = await waitFor("the room holds t9's drop", () => (music()?.order?.at(-1) === t[9] ? music()!.order : null));
+    from = dmSocket.sent.length;
+    await press(handle(t[1]!, 11), 3);
+    await press(handle(t[1]!, 11), -3);
+    await press(handle(t[3]!, 1), 3);
+    await sleep(600);
+    await shots.take(dm, "mu-4-tap");
+    assert.equal(sentOps(from, "music.queue").length, 0, "a tap sends nothing");
+    assert.deepEqual(music()!.order, order);
+    await win.locator("[data-music-now]").filter({ hasText: "Tavern night · 2 of 12" }).waitFor();
+    // Past a tap, a short drag of t1 that stays at its slot drops it at the seam: Up next's end, 2 of 12 becoming 1 of 12.
+    await press(handle(t[1]!, 11), -8);
+    await waitFor("t1 at Up next's end", async () => ((await lines()).at(-1) === nameOf(t[1]!) ? true : null), 3_000);
+    assert.deepEqual(sentOps(from, "music.queue").map((o) => o.edit), [{ t: "move", soundId: t[1], to: "passEnd" }]);
+    await win.locator("[data-music-now]").filter({ hasText: "Tavern night · 1 of 12" }).waitFor();
 
     // A volume changed by another DM mid-drag changes nothing the drag holds on to: it drops.
     from = dmSocket.sent.length;
@@ -636,7 +663,7 @@ describe("the Music window", { concurrency: false }, () => {
     await closeMusic();
   });
 
-  test("mu-5. the maker: ten tracks by search, drags up and past the last row, keys, one Create, a rename that Saves its name alone, and a close with changes that asks first", async () => {
+  test("mu-5. the maker: ten tracks by search, drags up and past the last row, keys, a tap that moves nothing, one Create, a rename that Saves its name alone, and a close with changes that asks first", async () => {
     await fresh();
     let win = await openMusic();
     await win.getByRole("button", { name: "New playlist", exact: true }).click();
@@ -681,6 +708,15 @@ describe("the Music window", { concurrency: false }, () => {
     await order.getByRole("button", { name: `Remove ${harbor[9]}`, exact: true }).click();
     const left = stepped.slice(0, 9);
     assert.deepEqual(await shown(), left);
+
+    // A tap on a handle, with a finger's jitter under 4 px, leaves the draft as it is.
+    const tapped = (await order.getByRole("button", { name: `Move ${left[4]}, 5 of 9`, exact: true }).boundingBox())!;
+    await dm.mouse.move(tapped.x + tapped.width / 2, tapped.y + tapped.height / 2);
+    await dm.mouse.down();
+    await dm.mouse.move(tapped.x + tapped.width / 2 + 1, tapped.y + tapped.height / 2 + 3);
+    await dm.mouse.up();
+    await sleep(300);
+    assert.deepEqual(await shown(), left, "a tap moves no row");
 
     // A drag of the first row past the last takes the last place.
     const top = order.getByRole("button", { name: `Move ${left[0]}, 1 of 9`, exact: true });

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { queueEdited, type MusicRun, type SoundLengths } from "#shared/sound.ts";
-import { comingNext, dragAt, dragKey, dropSlot, keyMove, keyMovedInList, makeRoom, moveTo, movedInList, placeOf, previousTarget, queueLists } from "./dragOrder.ts";
+import { comingNext, DRAG_SLOP_PX, dragAt, dragKey, dropSlot, keyMove, keyMovedInList, makeRoom, movable, moveTo, movedInList, pastSlop, placeOf, previousTarget, queueLists } from "./dragOrder.ts";
 
 /*
  * Up next's lists and moves (docs/design/design-v1-music-player.md 4.3 and
@@ -159,6 +159,23 @@ describe("a drag", () => {
     assert.deepEqual(makeRoom(lists, 2, 0, 50), [50, 50, 0, 0, 0], "t6 to the top: the two above drop");
     assert.deepEqual(makeRoom(lists, 3, 3, 50), [0, 0, 0, 0, -50], "t1 at the seam shows under Up next, so t2 closes its gap");
     assert.deepEqual(makeRoom(lists, 4, 0, 50), [50, 50, 50, 0, 0], "t2 to the top: Up next drops, and t1 stays");
+  });
+
+  test("a press is a drag once its pointer goes 4 px from where it went down, and stays one back there", () => {
+    assert.equal(DRAG_SLOP_PX, 4);
+    assert.equal(pastSlop(false, 200, 200), false, "a tap");
+    assert.equal(pastSlop(false, 200, 203), false, "a finger's jitter");
+    assert.equal(pastSlop(false, 200, 196.5), false);
+    assert.equal(pastSlop(false, 200, 204), true, "down 4 px");
+    assert.equal(pastSlop(false, 200, 196), true, "up 4 px");
+    assert.equal(pastSlop(true, 200, 200), true, "dragged away and back: a drop at its own slot");
+    // Why a tap must drop nothing: the second list's first row at its own slot moves, to the order's end, or with Up next empty to its start.
+    const lists = queueLists(run(), sounds, T + 1_000)!;
+    const t1 = movable(lists).indexOf("t1");
+    assert.deepEqual(moveTo(lists, "t1", t1), { t: "move", soundId: "t1", to: "passEnd" });
+    const last = queueLists(run({ index: 11, now: { soundId: "t12", at: T } }), sounds, T + 1_000)!;
+    assert.deepEqual(last.ahead, []);
+    assert.deepEqual(moveTo(last, "t1", 0), { t: "move", soundId: "t1", to: "first" });
   });
 
   test("it holds on to the run, the playing track and the order by value, never the run's object", () => {
