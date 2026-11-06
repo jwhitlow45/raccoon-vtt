@@ -266,7 +266,7 @@ async function groupOf(page: Page, which: readonly number[]): Promise<Locator> {
   return group;
 }
 
-/** A tracker section on a desk by its heading, such as "Add to the fight", with a fight or before one. */
+/** A tracker section on a desk by its heading, such as "More creatures", with a fight or before one. */
 async function trackerSection(page: Page, heading: string): Promise<Locator> {
   const tab = page.getByRole("tab", { name: "Initiative" }).first();
   if ((await tab.getAttribute("aria-selected")) !== "true") await tab.click();
@@ -992,7 +992,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     await deselect(desk);
     await tapCell(desk, run.bounds, lairCell(2));
     await desk.getByRole("dialog", { name: `${lairName(2)} actions` }).waitFor();
-    await (await trackerSection(desk, "Add to the fight")).getByRole("button", { name: lairName(2), exact: true }).click();
+    await (await trackerSection(desk, "More creatures")).getByRole("button", { name: lairName(2), exact: true }).click();
     await waitFor("the tracker's add", () => (lairRows().join() === "true,true,true" ? true : null));
     await shots.take(desk, "cu-b-lair-joins");
 
@@ -1002,7 +1002,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     await deselect(desk);
     await tapCell(desk, run.bounds, lairCell(2));
     await desk.getByRole("dialog", { name: `${lairName(2)} actions` }).waitFor();
-    await (await trackerSection(desk, "Start a fight with")).getByRole("button", { name: lairName(2), exact: true }).click();
+    await (await trackerSection(desk, "New fight")).getByRole("button", { name: lairName(2), exact: true }).click();
     await waitFor("the tracker's start", () => (lairRows().join() === ",,true" ? true : null));
     group = await groupOf(desk, [0, 1]);
     await group.getByRole("button", { name: "Add to the fight", exact: true }).click();
@@ -1056,7 +1056,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
       const lair = tracker.getByRole("switch", { name: /^In lair/ });
       await page.getByText("Its stat block did not load. Reload to try again.", { exact: true }).first().waitFor();
       assert.ok(await lair.isDisabled(), "In lair is off while the block is unread");
-      const add = await trackerSection(page, "Add to the fight");
+      const add = await trackerSection(page, "More creatures");
       await add.getByText("The stat blocks did not load. Reload to try again.", { exact: true }).waitFor();
       assert.ok(await add.getByRole("button", { name: /^Everyone here/ }).isDisabled(), "the tracker's join is off");
       // What this changed in the row's options and the tracker's adds: the switch off, and the failure's line with its reload.
@@ -1575,7 +1575,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     assert.deepEqual(sweep, [], "out of line by more than 1 px");
   });
 
-  test("lair46-a. a line ticked In its lair for a block with lair actions alone, placed with no fight on, joins the fight the tracker's Start a fight begins with In lair on, and the Monsters place card offers the box too, each in line at every size (LAIR-TICK-CARRY)", async () => {
+  test("lair46-a. a line ticked In its lair for a block with lair actions alone, placed with no fight on, joins the fight the tracker's New fight begins with In lair on, and the Monsters place card offers the box too, each in line at every size (LAIR-TICK-CARRY)", async () => {
     const keeper = randomUUID();
     const from = sweep.length;
     await ops.send({ t: "monster.create", monster: { id: keeper, ...blockOf(customMonster(keeper, { name: "Crypt Keeper", traits: [{ name: "Lair Actions", text: "On initiative count 20, the dead stir." }] })) } });
@@ -1608,8 +1608,8 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     assert.equal(deskSocket.state?.encounter, null, "no fight to join yet");
     assert.equal(patSocket.state?.tokens[placed.id] !== undefined && "inLair" in ((patSocket.state.tokens[placed.id]!.actor as { inline?: object }).inline ?? {}), false, "Pat's copy holds no tick");
 
-    // The tracker's Start a fight with the selected keeper: its row has In lair on, though its block's counts say nothing of a lair.
-    await (await trackerSection(desk, "Start a fight with")).getByRole("button", { name: "Crypt Keeper", exact: true }).click();
+    // The tracker's New fight with the selected keeper: its row has In lair on, though its block's counts say nothing of a lair.
+    await (await trackerSection(desk, "New fight")).getByRole("button", { name: "Crypt Keeper", exact: true }).click();
     await waitFor("the keeper's row in its lair", () => (deskSocket.state?.encounter?.entries.find((e) => e.tokenId === placed.id)?.inLair === true ? true : null));
     await shots.take(desk, "lair46-a-row");
 

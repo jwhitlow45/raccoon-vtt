@@ -62,7 +62,7 @@ panelFile("life, conditions, fight buttons and quick numbers", () => {
     }
   });
 
-  test("fu31-j. with no fight, the side panel's Start a fight with leaves no button alone under the others, at 1440 x 900 and 1280 x 800, at 85%, 100%, 115% and 130% (LP22-ALIGN-6)", async () => {
+  test("fu31-j. with no fight, the side panel's New fight leaves no button alone under the others, at 1440 x 900 and 1280 x 800, at 85%, 100%, 115% and 130% (LP22-ALIGN-6)", async () => {
     const off: string[] = [];
     try {
       for (const scale of [0.85, 1, 1.15, 1.3]) {
@@ -71,9 +71,9 @@ panelFile("life, conditions, fight buttons and quick numbers", () => {
           if (i === 0) await setUp(dm, dmCdp, { ...size, scale }, null);
           else await resize(dm, dmCdp, size);
           await openSideTab(dm, "Initiative");
-          const start = dm.locator("section").filter({ has: dm.getByRole("heading", { name: "Start a fight with", exact: true }) }).last();
+          const start = dm.locator("section").filter({ has: dm.getByRole("heading", { name: "New fight", exact: true }) }).last();
           await start.getByRole("button", { name: "Nobody yet", exact: true }).waitFor();
-          off.push(...(await measureIn(start, `Start a fight with at ${at}`)));
+          off.push(...(await measureIn(start, `New fight at ${at}`)));
         }
       }
     } finally {

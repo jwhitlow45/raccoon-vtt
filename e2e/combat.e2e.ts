@@ -912,7 +912,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     assert.deepEqual(off, [], "the round or its clock not drawn whole");
   });
 
-  test("fu31-k. in a fight, the side panel's Add to the fight leaves no button alone under the others, at 1440 x 900 and 1280 x 800, at 85%, 100%, 115% and 130% (LP22-ALIGN-6)", async () => {
+  test("fu31-k. in a fight, the side panel's More creatures leaves no button alone under the others, at 1440 x 900 and 1280 x 800, at 85%, 100%, 115% and 130% (LP22-ALIGN-6)", async () => {
     const off: string[] = [];
     try {
       for (const scale of [0.85, 1, 1.15, 1.3]) {
@@ -924,10 +924,10 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
             await dm.waitForTimeout(400);
           }
           await openTracker(dm);
-          const add = dm.locator("section").filter({ has: dm.getByRole("heading", { name: "Add to the fight", exact: true }) }).last();
+          const add = dm.locator("section").filter({ has: dm.getByRole("heading", { name: "More creatures", exact: true }) }).last();
           await add.getByRole("button", { name: /^Everyone here/ }).waitFor();
           await add.scrollIntoViewIfNeeded();
-          off.push(...alignmentLines(await measureAlignment(add), `Add to the fight at ${at}`));
+          off.push(...alignmentLines(await measureAlignment(add), `More creatures at ${at}`));
           await shots.take(dm, `fu31-add-to-fight-${size.width}-${Math.round(scale * 100)}`);
         }
       }
@@ -974,10 +974,10 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     }
   });
 
-  test("5. the tracker's sections run by use, the roll card under Auto initiative with its badge for a mode and no added words, and a player's run Join the fight first", async () => {
+  test("5. the tracker's sections run by use, the roll card under Auto initiative with its badge for a mode and no added words, and a player's run Your creatures first", async () => {
     await setUp(dm, dmCdp, { ...DESK, scale: 1 });
     await openTracker(dm);
-    assert.deepEqual(await headings(dm), ["Auto Initiative", "Initiative", "Add to the fight", "Several at once", "HP changes", "Turn timer", "End", "This device"]);
+    assert.deepEqual(await headings(dm), ["Auto Initiative", "Initiative", "More creatures", "Group HP", "HP changes", "Turn timer", "End", "This device"]);
     // Twelve goblins with values: re-roll them, and the card of what it rolled sits under the button.
     await dm.getByRole("checkbox", { name: "Re-roll monsters that have a value" }).check();
     await dm.getByRole("button", { name: /^Auto Initiative \(\d+\)/ }).click();
@@ -1001,7 +1001,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     assert.ok(!/\b(Normal|Secret)\b/.test(advantage), `an Advantage result adds no words: ${advantage}`);
     await shots.take(dm, "combat-auto-advantage");
     await openTracker(ana);
-    assert.deepEqual(await headings(ana), ["Several at once", "HP changes", "This device"], "Bree is in the fight already, so Join the fight is gone");
+    assert.deepEqual(await headings(ana), ["Group HP", "HP changes", "This device"], "Bree is in the fight already, so Your creatures is gone");
   });
 
   test("5b. auto initiative's dice are the server's, secret to the DM, and a row's Roll sets the goblin's row and Ana's sets Bree's to the total that landed (docs/design/design-v1-roll-options.md 4.5, 7)", async () => {
@@ -1185,9 +1185,9 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await openSideTab(dm, "Log");
     await dm.getByText("Ana added Wildfire Spirit beside Bree.").waitFor();
     await shots.take(dm, "combat-companion-log");
-    // Neither is offered a row: not in Ana's Join the fight, nor in the DM's Everyone here.
+    // Neither is offered a row: not in Ana's Your creatures, nor in the DM's Everyone here.
     await openTracker(ana);
-    assert.equal(await ana.getByRole("heading", { name: "Join the fight" }).count(), 0, "nothing of Ana's left to join");
+    assert.equal(await ana.getByRole("heading", { name: "Your creatures" }).count(), 0, "nothing of Ana's left to join");
     await openTracker(dm);
     // Every creature but the companions is in the fight already, and the chest is an object: nothing is left to add.
     const everyone = await dm.getByRole("button", { name: /^Everyone here \(\d+\)/ }).textContent();
@@ -1283,8 +1283,8 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await panel.getByRole("combobox", { name: "Turn" }).selectOption({ label: "Its own turn" });
     await waitFor("its own turn", () => (dmSocket.state?.tokens[spirit.id]?.companion?.turn === "own" ? true : null));
     await openTracker(ana);
-    // A player's tracker: Join the fight right after the order, while it has something to join.
-    assert.deepEqual(await headings(ana), ["Join the fight", "Several at once", "HP changes", "This device"]);
+    // A player's tracker: Your creatures right after the order, while it has something to join.
+    assert.deepEqual(await headings(ana), ["Your creatures", "Group HP", "HP changes", "This device"]);
     await ana.getByRole("button", { name: "Add Wildfire Spirit" }).click();
     await waitFor("its row", () => dmSocket.state?.encounter?.entries.some((e) => e.tokenId === spirit.id) || null);
     // Its player types its value, and the row reads whose companion it is.
