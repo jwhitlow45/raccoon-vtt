@@ -658,7 +658,7 @@ export function RollCard(props: {
                 // A sticky box keeps inside its scroller's padding, so at 0 the header stood a padding's height below its place and its fill covered the top of the row under it.
                 top: -theme.space(4),
                 zIndex: 1,
-                // The card's top and side padding, taken back so the fill covers what scrolls under it. The fill pads its content the same above and below.
+                // The card's top and side padding, taken back so the fill covers what scrolls under it. The fill pads its content the grabber's room above and below, and where a mouse shows the step arrows their strip grows only the room above.
                 margin: `-${theme.space(4)}px calc(-1 * (${theme.safe.right} + ${theme.space(4)}px)) 0 calc(-1 * (${theme.safe.left} + ${theme.space(4)}px))`,
                 padding: `${headerPad}px calc(${theme.safe.right} + ${theme.space(4)}px) ${footPad}px calc(${theme.safe.left} + ${theme.space(4)}px)`,
                 background: theme.color.surface,
