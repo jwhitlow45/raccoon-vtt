@@ -7,6 +7,7 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import type { RoomState, Token } from "../shared/model.ts";
 import { barControl, ConsoleWatch, dragCells, expandBar, OpSocket, pagePoint, pickTool, Shots, SocketWatch, startServer, tapCell, Touches, touchSwipe, waitFor, type Server } from "./harness.ts";
+import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 
 /**
  * Snap off for a drag end to end (docs/design/design-v1-snap-off.md 4 and 10),
@@ -190,6 +191,41 @@ function announced(page: Page): Locator {
 async function reads(page: Page, text: string): Promise<void> {
   await waitFor(`"${text}" announced`, async () => (((await announced(page).innerText()) ?? "").includes(text) ? true : null), 8_000);
   assert.equal(await page.locator("[data-toast]").filter({ hasText: text }).count(), 0, `"${text}" is spoken, not shown`);
+}
+
+/**
+ * Each of `root`'s buttons that shows words: its words, how many lines they
+ * lay out on, and its box. A label broken inside its button is a fault
+ * measureAlignment cannot see (docs/design/design-v1-polish-pass.md 3.5).
+ * Words with no box of their own to draw in, a screen reader's alone, are
+ * left out.
+ */
+async function buttonLines(root: Locator): Promise<{ words: string; lines: number; l: number; r: number; t: number }[]> {
+  return root.evaluate((el) => {
+    type Rect = { left: number; right: number; top: number; width: number; height: number };
+    type El = { getBoundingClientRect(): Rect; parentElement: El | null; textContent: string | null };
+    type Doc = { createRange(): { selectNodeContents(n: unknown): void; getClientRects(): ArrayLike<Rect> }; createTreeWalker(root: unknown, what: number): { nextNode(): El | null } };
+    const doc = (globalThis as unknown as { document: Doc }).document;
+    const out: { words: string; lines: number; l: number; r: number; t: number }[] = [];
+    for (const button of Array.from((el as unknown as { querySelectorAll(s: string): ArrayLike<El> }).querySelectorAll("button"))) {
+      const box = button.getBoundingClientRect();
+      if (box.width < 2 || box.height < 2) continue;
+      const tops: number[] = [];
+      const walker = doc.createTreeWalker(button, 4);
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        const host = n.parentElement?.getBoundingClientRect();
+        if (!(n.textContent ?? "").trim() || !host || host.width < 2 || host.height < 2) continue;
+        const range = doc.createRange();
+        range.selectNodeContents(n);
+        for (const r of Array.from(range.getClientRects())) if (r.width > 1 && r.height > 1) tops.push(r.top);
+      }
+      if (tops.length === 0) continue;
+      tops.sort((a, b) => a - b);
+      // A wrapped line starts a line's height lower. Words a few px apart, in another size or weight, share a line.
+      out.push({ words: (button.textContent ?? "").trim(), lines: tops.filter((t, i) => i === 0 || t > tops[i - 1]! + 4).length, l: box.left, r: box.right, t: box.top });
+    }
+    return out;
+  });
 }
 
 describe("raccoon-vtt snap off", { timeout: 600_000 }, () => {
@@ -427,6 +463,59 @@ describe("raccoon-vtt snap off", { timeout: 600_000 }, () => {
     await dm.getByRole("button", { name: "Undo", exact: true }).click();
     await waitFor("placed again by Undo", () => (token(dmSocket, run.goblin)?.nudge ? true : null));
     await deselect(dm);
+  });
+
+  test("pe1-1. a placed goblin's bar on a computer: Place freely and Snap to grid wrap as one unit onto a line of their own, each half of it, under Roll and Attach, every label on one line (docs/design/design-v1-polish-pass.md 3.5)", async () => {
+    const goblinBar = await select(dm, "Goblin", { x: 10, y: 3 }, true);
+    await expandBar(goblinBar);
+    const row = goblinBar.locator('[data-bar-row="play"]');
+    const pair = row.locator("[data-placement-pair]");
+    assert.equal(await pair.count(), 1, "the two are one unit of the play row");
+    const unit = await buttonLines(pair);
+    assert.deepEqual(unit.map((b) => b.words), ["Place freely", "Snap to grid"], "Place freely first, as the Tab order has it");
+    const [place, snap] = unit as [(typeof unit)[0], (typeof unit)[0]];
+    const buttons = await buttonLines(row);
+    const before = buttons.filter((b) => !unit.some((u) => u.words === b.words));
+    const line = (await row.boundingBox())!;
+    await shots.take(dm, "pe1-1-bar-pair");
+    assert.ok(Math.abs(place.t - snap.t) <= 1, `the two share a line: tops ${place.t} and ${snap.t}`);
+    assert.ok(before.length > 0 && before.every((b) => b.t < place.t - 1), `the row's other buttons stand on the lines above: ${JSON.stringify(before)}`);
+    // Alone on its line the unit fills it, and its two buttons grow from their words to share it, so each is within 2 px of half the line the gap leaves.
+    assert.ok(Math.abs(place.l - line.x) <= 1 && Math.abs(snap.r - (line.x + line.width)) <= 1, `the pair spans its line: ${place.l} to ${snap.r} in ${line.x} to ${line.x + line.width}`);
+    const half = (snap.r - place.l - (snap.l - place.r)) / 2;
+    assert.ok(Math.abs(place.r - place.l - half) <= 2 && Math.abs(snap.r - snap.l - half) <= 2, `each half of the line: ${place.r - place.l} and ${snap.r - snap.l} of ${half * 2}`);
+    assert.deepEqual(buttons.filter((b) => b.lines !== 1).map((b) => `${b.words}: ${b.lines} lines`), [], "every label on one line");
+    assert.deepEqual(alignmentLines(await measureAlignment(row), "pe1-1 play row"), []);
+    await deselect(dm);
+  });
+
+  test("pe1-2. the DM's bar on the smallest phone at 130%: Place freely and Snap to grid take a line each, and every button's label stays on one line (docs/design/design-v1-polish-pass.md 3.5)", async () => {
+    // The DM's own session in a phone's touch context, at the interface size it keeps per device.
+    const context = await browser.newContext({ viewport: { width: 320, height: 568 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, storageState: await dmContext.storageState() });
+    const watch = new ConsoleWatch("dm-phone");
+    try {
+      const page = await context.newPage();
+      watch.attach(page);
+      await page.goto(`${server.origin}/`);
+      await page.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
+      await page.goto(`${server.origin}/r/${run.roomId}`);
+      await page.getByRole("status", { name: "Connected" }).first().waitFor();
+      await page.locator(".konvajs-content").first().waitFor();
+      const goblinBar = await select(page, "Goblin", { x: 10, y: 3 }, true);
+      await expandBar(goblinBar);
+      const pair = goblinBar.locator('[data-bar-row="play"] [data-placement-pair]');
+      await pair.scrollIntoViewIfNeeded();
+      const unit = await buttonLines(pair);
+      const all = await buttonLines(goblinBar);
+      await shots.take(page, "pe1-2-bar-320-130");
+      assert.deepEqual(unit.map((b) => b.words), ["Place freely", "Snap to grid"]);
+      assert.ok(unit[1]!.t > unit[0]!.t + 1, `each on a line of its own: tops ${unit[0]!.t} and ${unit[1]!.t}`);
+      assert.ok(all.length >= 4, `the bar's worded buttons were read: ${JSON.stringify(all.map((b) => b.words))}`);
+      assert.deepEqual(all.filter((b) => b.lines !== 1).map((b) => `${b.words}: ${b.lines} lines`), [], "every label on one line");
+      assert.deepEqual(watch.errors, [], "the phone page logged no errors");
+    } finally {
+      await context.close();
+    }
   });
 
   test("so-7. Pat on a phone taps Place freely in Bree's bar: it reads pressed, the next drag places her, and the button is off after it", async () => {
