@@ -5,9 +5,10 @@ import { critSums, labelText, rollToastText, type LogNames } from "#shared/logTe
 import type { LogEntry } from "#shared/model.ts";
 import { useRollToastsOn } from "../device/settings.ts";
 import type { ToastDie } from "../../state/types.ts";
-import { useRoomUi, useRoomView } from "../../state/view.ts";
+import { useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { rollsOf, rollVerdict, type DiceLine } from "./logic.ts";
 import { useReceipts, type ReceiptState } from "./useReceipt.ts";
+import { toastChips, useApplyEnv } from "./apply.ts";
 
 /**
  * Rolls as toasts (docs/design/design-v1-dice.md 8.5 and 8.7): someone else's
@@ -19,18 +20,27 @@ import { useReceipts, type ReceiptState } from "./useReceipt.ts";
  */
 const EMPTY_LOG: LogEntry[] = [];
 
-/** Someone else's new dice lines with their numbers, grouped one batch to a toast, oldest first. */
-export function othersRolls(fresh: readonly LogEntry[], me: string): DiceLine[][] {
-  const groups = new Map<string, DiceLine[]>();
+/** Someone else's new dice lines with their numbers, grouped one batch to a toast, oldest first, as their log entries. */
+export function othersRollLines(fresh: readonly LogEntry[], me: string): LogEntry[][] {
+  const groups = new Map<string, LogEntry[]>();
   for (const entry of fresh) {
     const data = entry.data;
     if (entry.kind !== "event" || data?.type !== "dice" || data.by === me || data.rolls.length === 0) continue;
     const key = data.batch === undefined ? entry.id : `${data.by}|${data.batch}`;
     const group = groups.get(key);
-    if (group) group.push(data);
-    else groups.set(key, [data]);
+    if (group) group.push(entry);
+    else groups.set(key, [entry]);
   }
   return [...groups.values()];
+}
+
+/** Someone else's new dice lines with their numbers, grouped one batch to a toast, oldest first. */
+export function othersRolls(fresh: readonly LogEntry[], me: string): DiceLine[][] {
+  return othersRollLines(fresh, me).map(linesOf);
+}
+
+function linesOf(entries: readonly LogEntry[]): DiceLine[] {
+  return entries.flatMap((e) => (e.data?.type === "dice" ? [e.data] : []));
 }
 
 /**
@@ -94,6 +104,9 @@ export function useRollToasts(diceShown: boolean): void {
   const encounter = useRoomView((s) => s.view?.encounter ?? null);
   const names = useMemo<LogNames>(() => ({ members: members ?? {}, tokens: tokens ?? {}, characters: characters ?? {}, handouts: handouts ?? {}, encounter }), [members, tokens, characters, handouts, encounter]);
   const ui = useRoomUi();
+  const room = useRoomStore();
+  // A damage roll's toast on the DM's device carries its Apply to chips (QOL audit Q2, ApplyTo.tsx toastChips).
+  const env = useApplyEnv();
   /** The newest entry already read. Undefined until the first snapshot, whose lines are history, not news. */
   const read = useRef<string | null | undefined>(undefined);
   /** Batches already toasted, or shown while the panel was on screen, by when they were last heard of. */
@@ -110,10 +123,17 @@ export function useRollToasts(diceShown: boolean): void {
     const fresh = since === null ? log : log.filter((e) => compareLogIds(e.id, since) > 0);
     read.current = latest;
     // Remembered even when not toasted, so a later part of a group seen in the panel stays quiet once it closes.
-    const groups = unseenGroups(othersRolls(fresh, me), batches.current, Date.now());
+    const entries = othersRollLines(fresh, me);
+    const groups = entries.map(linesOf);
+    const unseen = new Set(unseenGroups(groups, batches.current, Date.now()));
     if (!on || diceShown) return;
-    for (const lines of groups) ui.notify(rollToastText(lines, names), "info", toastDie(lines) ?? undefined, undefined, true);
-  }, [loaded, log, on, diceShown, me, names, ui]);
+    const at = room.getState();
+    groups.forEach((lines, i) => {
+      if (!unseen.has(lines)) return;
+      const chips = toastChips(env, entries[i]!, { sceneId: at.sceneId, selected: at.local.selectedIds });
+      ui.notify(rollToastText(lines, names), "info", toastDie(lines) ?? undefined, chips.length > 0 ? { label: "Apply to", buttons: chips } : undefined, true);
+    });
+  }, [loaded, log, on, diceShown, me, names, ui, room, env]);
 
   const tracker = useReceipts();
   const version = useSyncExternalStore(tracker.subscribe, tracker.version);

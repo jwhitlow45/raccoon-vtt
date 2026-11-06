@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { DiceRoll, LogEntry, LogEvent } from "#shared/model.ts";
 import { parseRollToasts } from "../device/settings.ts";
-import { BATCH_REMEMBERED_MS, othersRolls, ownResultText, toastDie, unseenGroups } from "./useRollToasts.ts";
+import { BATCH_REMEMBERED_MS, othersRollLines, othersRolls, ownResultText, toastDie, unseenGroups } from "./useRollToasts.ts";
 
 /** Rolls as toasts (docs/design/design-v1-dice.md 8.5 and 8.7). */
 let seq = 0;
@@ -89,5 +89,17 @@ describe("the toast's d20", () => {
     assert.deepEqual(toastDie([dice([attack(19)], { ac: 15 })]), { face: 19, ring: false, fumble: false, verdict: "Hit" }, "a 19 outside the range only hits");
     assert.deepEqual(toastDie([dice([attack(19, 19)])]), { face: 19, ring: false, fumble: false, verdict: null }, "with no AC, a 19 is no critical hit to name");
     assert.deepEqual(toastDie([dice([attack(1)], { ac: 5 })]), { face: 1, ring: false, fumble: true, verdict: "Miss" });
+  });
+});
+
+describe("a toast's lines keep their entries, so its Apply to chips carry the roll's line ids (QOL audit Q2)", () => {
+  test("one group a batch, as othersRolls groups them, each line with its id", () => {
+    const a = line({ batch: "G" });
+    const b = line({ batch: "G" });
+    const c = line({});
+    const mine = line({ by: "p1" });
+    const groups = othersRollLines([a, mine, b, c], "p1");
+    assert.deepEqual(groups.map((g) => g.map((e) => e.id)), [[a.id, b.id], [c.id]]);
+    assert.deepEqual(othersRolls([a, mine, b, c], "p1"), groups.map((g) => g.map((e) => e.data)));
   });
 });
