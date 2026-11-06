@@ -1,19 +1,24 @@
+import type { CSSProperties } from "react";
 import { Button } from "../../../components/Button.tsx";
 import { Help } from "../../../components/Panel.tsx";
 import { IconButton } from "../../../components/IconButton.tsx";
 import { SettingRow } from "../../../components/SettingRow.tsx";
 import { Switch } from "../../../components/Switch.tsx";
 import { theme } from "../../../lib/theme.ts";
-import { useRoomScope } from "../../../state/scope.ts";
+import { useRoomScope, useScoped } from "../../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../../state/view.ts";
-import type { Playing } from "#shared/sound.ts";
+import { seekBoundMs, type Playing } from "#shared/sound.ts";
 import { backgroundCount, SCENE_SOUND, SCENE_SOUND_OPEN } from "../../ambiance/words.ts";
 import { usePanelHere } from "../../panels.ts";
 import { openSceneSettings } from "../../scenes/request.ts";
-import { Actions, useSoundToStop, useTicking, VolumeSlider } from "./controls.tsx";
+import { comingNext, type ComingNext } from "../music/dragOrder.ts";
+import { openMusicWindow, musicWindowSlot } from "../music/open.ts";
+import { Tile, TILE } from "../music/tile.ts";
+import { LAST_TRACK, NEXT_AGAIN, nextLine, OPEN_MUSIC } from "../music/words.ts";
+import { Actions, useSoundToStop, useTicking, useWakeAt, VolumeSlider } from "./controls.tsx";
 import { useSoundHere } from "./engine.ts";
 import { send } from "./ops.ts";
-import { musicShown, nameOf, playlistsOf, sceneSoundFrom, sceneSoundNames, serverNow, somethingPlays, soundsOf, type MusicShown } from "./state.ts";
+import { musicShown, nameOf, playlistsOf, sceneSoundFrom, sceneSoundNames, serverNow, somethingPlays, soundsOf, type MusicShown, type Sounds } from "./state.ts";
 import {
   ANOTHER_WINDOW,
   CLEAR,
@@ -26,14 +31,11 @@ import {
   NOTHING_PLAYING,
   PLAY_FIRST,
   PLAY_IT,
-  REPEAT_NAMES,
-  REPEAT_NEXT,
   runLine,
   SCENE_HELP,
   sceneLine,
   skipName,
   STOP_ALL,
-  STOP_MUSIC,
   stopName,
   timeShown,
   USE_PLAYING,
@@ -41,53 +43,74 @@ import {
 } from "./words.ts";
 
 /**
- * The music's name, its place, the four buttons, then its time over a thin
- * bar (docs/design/design-v1-music.md 4.1). Pure, so its states render in a
- * test.
+ * The Sound group's music (docs/design/design-v1-music-player.md 3.1): the
+ * tile, the track's name, its run line and the read-only Next line, then
+ * Pause or Play, Skip and Open music, which wraps under them where the row
+ * is short, then the bar and the time. Stop the music and Repeat live in
+ * the Music window. Pure, so its states render in a test. `lengthMs` is
+ * the time's end: the track's length, or one pass under Repeat one with a
+ * crossfade, as the window's seek bar reads it.
  */
-export function MusicNow(props: {
-  music: MusicShown;
-  repeat: keyof typeof REPEAT_NAMES;
-  onPause(): void;
-  onResume(): void;
-  onSkip(): void;
-  onStop(): void;
-  onRepeat(): void;
-}) {
+export function MusicNow(props: { music: MusicShown; next: string; lengthMs: number; onPause(): void; onResume(): void; onSkip(): void; onOpen(): void }) {
   const { music } = props;
-  const time = timeShown(music.positionMs, music.lengthMs);
-  const fraction = music.lengthMs > 0 ? Math.min(1, music.positionMs / music.lengthMs) : 0;
+  const at = Math.min(music.positionMs, props.lengthMs);
+  const time = timeShown(at, props.lengthMs);
+  const fraction = props.lengthMs > 0 ? Math.min(1, at / props.lengthMs) : 0;
   return (
     <div data-sound-now="" style={{ display: "grid", gap: theme.space(2), minWidth: 0 }}>
-      <div style={{ display: "grid", gap: theme.space(0.5), minWidth: 0 }}>
-        <span data-sound-track="" style={{ fontSize: theme.font.heading, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight, overflowWrap: "anywhere" }}>
-          {music.name}
-        </span>
-        <span data-sound-run="" style={{ fontSize: theme.font.body14, color: theme.color.textMuted, overflowWrap: "anywhere" }}>
-          {runLine(music)}
-        </span>
+      <div style={{ display: "flex", alignItems: "center", gap: theme.space(3), minWidth: 0 }}>
+        <Tile name={music.name} size={TILE.group} />
+        <div style={{ flex: 1, display: "grid", gap: theme.space(0.5), minWidth: 0 }}>
+          <span data-sound-track="" style={{ fontSize: theme.font.input, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight, overflowWrap: "anywhere" }}>
+            {music.name}
+          </span>
+          <span data-sound-run="" style={{ fontSize: theme.font.body14, color: theme.color.textMuted, overflowWrap: "anywhere" }}>
+            {runLine(music)}
+          </span>
+          {/* Plain text, not live: it changes with each track, which the DM reads at a glance. */}
+          <span data-sound-next="" style={{ fontSize: theme.font.body14, color: theme.color.textMuted, overflowWrap: "anywhere" }}>
+            {props.next}
+          </span>
+        </div>
       </div>
       {/*
-       * One row at every size, 320 px at 130% included (10): four 44 px icons fit in 176 px. Above the time and its
-       * bar, so Pause sits inside a phone's half sheet at Ambiance's start (docs/design/design-v1-panel-groups.md 4.1, D-261102-767).
+       * Above the time and its bar, so Pause sits inside a phone's half sheet at Ambiance's start
+       * (docs/design/design-v1-panel-groups.md 4.1, D-261102-767). Open music keeps the row's end and wraps under the two where it is short.
        */}
-      <div role="group" aria-label="Music" style={{ display: "flex", gap: theme.space(2), flexWrap: "nowrap" }}>
-        {music.paused ? <IconButton icon="play" label="Play" onClick={props.onResume} /> : <IconButton icon="pause" label="Pause" onClick={props.onPause} />}
-        <IconButton icon="skip" label={skipName(music.crossingInto)} onClick={props.onSkip} />
-        <IconButton icon="stop" label={STOP_MUSIC} onClick={props.onStop} />
-        <IconButton icon={props.repeat === "one" ? "repeatOne" : "again"} label={REPEAT_NAMES[props.repeat]} pressed={props.repeat !== "off"} onClick={props.onRepeat} />
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), minWidth: 0 }}>
+        <div role="group" aria-label="Music" style={{ display: "flex", gap: theme.space(2) }}>
+          {music.paused ? <IconButton icon="play" label="Play" onClick={props.onResume} /> : <IconButton icon="pause" label="Pause" onClick={props.onPause} />}
+          <IconButton icon="skip" label={skipName(music.crossingInto)} onClick={props.onSkip} />
+        </div>
+        <OpenMusic onOpen={props.onOpen} style={{ marginLeft: "auto" }} />
       </div>
       <div style={{ display: "grid", gap: theme.space(1) }}>
+        <div aria-hidden style={{ height: 4, borderRadius: theme.radius.pill, background: theme.color.border, overflow: "hidden" }}>
+          <div style={{ width: `${fraction * 100}%`, height: "100%", background: theme.color.accent }} />
+        </div>
         {/* Not live: a screen reader reads the time when it reaches it, never once a second. */}
         <span data-sound-time="" aria-label={time.spoken} style={{ fontSize: theme.font.body14, fontVariantNumeric: "tabular-nums", color: theme.color.textMuted }}>
           {time.text}
         </span>
-        <div aria-hidden style={{ height: 4, borderRadius: theme.radius.pill, background: theme.color.border, overflow: "hidden" }}>
-          <div style={{ width: `${fraction * 100}%`, height: "100%", background: theme.color.accent }} />
-        </div>
       </div>
     </div>
   );
+}
+
+/** Open music (3.1), which focus comes back to as the window closes, found by its mark since a resize can remount it. */
+export function OpenMusic(props: { onOpen(): void; style?: CSSProperties }) {
+  return (
+    <Button size="sm" icon="music" data-music-open="" onClick={props.onOpen} style={props.style}>
+      {OPEN_MUSIC}
+    </Button>
+  );
+}
+
+/** The Next line's words (3.1): the track that follows, this one again, or the last. */
+export function nextWords(next: ComingNext, sounds: Sounds): string {
+  if (next.t === "last") return LAST_TRACK;
+  if (next.t === "again") return NEXT_AGAIN;
+  return nextLine(nameOf(sounds[next.soundId]));
 }
 
 /**
@@ -149,27 +172,41 @@ export function NowPlaying() {
   );
 }
 
-/** The music and its buttons, else how many background sounds play, else that nothing does. */
+/** The music and its buttons, else how many background sounds play, else that nothing does, each with Open music. */
 export function MusicBlock() {
   const actions = useRoomActions();
+  const musicWindow = useScoped(musicWindowSlot);
   const playing = useRoomView((s) => s.view?.playing ?? null);
   const sounds = useRoomView((s) => soundsOf(s.view));
   const playlists = useRoomView((s) => playlistsOf(s.view));
   const serverOffset = useRoomView((s) => s.serverOffset);
   const music = playing?.music ?? null;
   const t = useTicking(() => serverNow({ serverOffset }), music !== null && music.paused === undefined);
+  // The Next line changes as a crossfade starts, with no frame from the server then.
+  useWakeAt(music?.next !== undefined && music.paused === undefined && t < music.next.at ? music.next.at : null, t);
   const shown = music ? musicShown(music, sounds, playlists, t) : null;
+  const next = comingNext(music, sounds, t);
   const loops = playing ? Object.keys(playing.loops).length : 0;
-  if (!shown || !music) return <NowLine loops={loops} />;
+  const open = () => openMusicWindow(musicWindow, music !== null);
+  if (!shown || !music || !next) {
+    return (
+      <div style={{ display: "grid", gap: theme.space(2), minWidth: 0 }}>
+        <NowLine loops={loops} />
+        <div style={{ display: "flex" }}>
+          <OpenMusic onOpen={open} />
+        </div>
+      </div>
+    );
+  }
   return (
     <MusicNow
       music={shown}
-      repeat={music.repeat}
+      next={nextWords(next, sounds)}
+      lengthMs={seekBoundMs(music, shown.lengthMs)}
       onPause={() => send(actions, { t: "music.pause" })}
       onResume={() => send(actions, { t: "music.resume", run: actions.newId() })}
       onSkip={() => send(actions, { t: "music.skip", run: actions.newId() })}
-      onStop={() => send(actions, { t: "music.stop" })}
-      onRepeat={() => send(actions, { t: "music.set", repeat: REPEAT_NEXT[music.repeat] })}
+      onOpen={open}
     />
   );
 }
@@ -214,7 +251,7 @@ export function WhatPlayersHear() {
   const loops = playing ? Object.entries(playing.loops) : [];
   return (
     <div style={{ display: "grid", gap: theme.space(4), minWidth: 0 }}>
-      {music ? <VolumeSlider label={MUSIC_VOLUME} value={playing?.volume.music ?? 100} onChange={(v) => send(actions, { t: "sound.mix", music: v })} /> : null}
+      <MusicVolume />
       {loops.map(([id, loop]) => {
         const name = nameOf(sounds[loop.soundId]);
         return (
@@ -279,7 +316,17 @@ function SceneSoundRow(props: { playing: Playing | null }) {
   );
 }
 
-function NamesSwitch() {
+/** The music's volume for everyone while music plays, here and in the Music window's Now playing (docs/design/design-v1-music-player.md 3.1), one setting. */
+export function MusicVolume() {
+  const actions = useRoomActions();
+  const music = useRoomView((s) => s.view?.playing?.music ?? null);
+  const volume = useRoomView((s) => s.view?.playing?.volume.music ?? 100);
+  if (!music) return null;
+  return <VolumeSlider label={MUSIC_VOLUME} value={volume} onChange={(v) => send(actions, { t: "sound.mix", music: v })} />;
+}
+
+/** Players see what is playing, here and in the Music window, one setting. */
+export function NamesSwitch() {
   const actions = useRoomActions();
   const on = useRoomView((s) => s.view?.meta.settings.soundNames === true);
   return <Switch label={NAMES_SWITCH} help={NAMES_HELP} checked={on} onChange={(next) => send(actions, { t: "room.update", settings: { soundNames: next } })} />;

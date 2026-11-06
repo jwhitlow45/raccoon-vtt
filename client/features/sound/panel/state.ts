@@ -1,10 +1,10 @@
 import type { RoomState, Scene } from "#shared/model.ts";
 import { SOUND_LIMITS } from "#shared/limits.ts";
-import { occurrencesAt, playingAt, type MusicRun, type Playing, type Playlist, type SceneMusic, type SceneSound, type Sound, type SoundId, type SoundUse } from "#shared/sound.ts";
+import { musicAt, occurrencesAt, playingAt, type MusicRun, type Playing, type Playlist, type SceneMusic, type SceneSound, type Sound, type SoundId, type SoundLengths, type SoundUse } from "#shared/sound.ts";
 import type { RoomView } from "../../../state/types.ts";
 import { realClock, type Clock } from "../../../state/timing.ts";
 import { builtinMs } from "../engine/builtins.ts";
-import { STOP_IT_FIRST, STOP_MUSIC_FIRST } from "./words.ts";
+import { STOP_IT_FIRST, TRACK_PLAYS, TRACK_PLAYS_NEXT, TRACK_QUEUED } from "./words.ts";
 
 /**
  * What Ambiance's Sound reads of the room's sound
@@ -206,16 +206,41 @@ export function effectsSounding(playing: Playing | null | undefined, sounds: Sou
 }
 
 /**
- * Why a sound cannot be deleted or given another use now (4.1, 6.3): a
- * track in the live run's order, or a loop that plays. An effect deletes at
- * once and stops, so it is never refused.
+ * The refusal both a delete and a change of use share
+ * (docs/design/design-v1-music-player.md 6.4): the track Now playing names
+ * at `t`, the revealed next, or a loop that plays. Read through `musicAt`,
+ * as the reducer reads it at the op's time, so during a crossfade the
+ * incoming track is the playing one.
  */
-export function busyRefusal(playing: Playing | null | undefined, soundId: SoundId): string | null {
-  if (!playing) return null;
-  const music = playing.music;
-  if (music && ((music.order ?? []).includes(soundId) || music.now.soundId === soundId || music.next?.soundId === soundId)) return STOP_MUSIC_FIRST;
-  if (loopOf(playing, soundId) !== null) return STOP_IT_FIRST;
-  return null;
+function playingRefusal(playing: Playing | null | undefined, sounds: SoundLengths, soundId: SoundId, t: number): { refusal: string | null; current: MusicRun | null } {
+  if (!playing) return { refusal: null, current: null };
+  const current = musicAt(playing.music, sounds, t);
+  if (current?.now.soundId === soundId) return { refusal: TRACK_PLAYS, current };
+  if (current?.next?.soundId === soundId) return { refusal: TRACK_PLAYS_NEXT, current };
+  if (loopOf(playing, soundId) !== null) return { refusal: STOP_IT_FIRST, current };
+  return { refusal: null, current };
+}
+
+/**
+ * Why a sound cannot be deleted now (6.4): it plays, it is the revealed
+ * next, or it is a loop that plays. A track only queued deletes, and
+ * leaves the queue in the same op. An effect deletes at once and stops,
+ * so it is never refused.
+ */
+export function deleteRefusal(playing: Playing | null | undefined, sounds: SoundLengths, soundId: SoundId, t: number): string | null {
+  return playingRefusal(playing, sounds, soundId, t).refusal;
+}
+
+/**
+ * Why a sound cannot take another use now (6.4): as a delete, and also a
+ * track anywhere in the queue, since no Setup op writes the run
+ * (D-261102-471). The refusal points at Up next, which shows a row for
+ * every track the run holds.
+ */
+export function useRefusal(playing: Playing | null | undefined, sounds: SoundLengths, soundId: SoundId, t: number): string | null {
+  const { refusal, current } = playingRefusal(playing, sounds, soundId, t);
+  if (refusal !== null) return refusal;
+  return current?.order?.includes(soundId) ? TRACK_QUEUED : null;
 }
 
 /** Whether a scene's sound names this sound in this use's place: its music track, or a loop. */
@@ -253,7 +278,8 @@ export function sceneSoundFrom(playing: Playing | null | undefined, playlists: P
   const music = playing?.music ?? null;
   if (!music) return { music: null, loops };
   const playlist = music.playlistId === undefined ? undefined : playlists[music.playlistId];
-  if (playlist) return { music: { playlistId: playlist.id, repeat: music.repeat, fade: music.fade, ...(playlist.shuffle ? { shuffle: true as const } : null) }, loops };
+  // The run's Shuffle, as the DM set it in the window, not the playlist's. The queue's other edits stay the run's: a scene's sound names a playlist or a track (D-261102-472).
+  if (playlist) return { music: { playlistId: playlist.id, repeat: music.repeat, fade: music.fade, ...(music.shuffle ? { shuffle: true as const } : null) }, loops };
   return { music: { soundId: music.now.soundId, repeat: music.repeat, fade: music.fade }, loops };
 }
 

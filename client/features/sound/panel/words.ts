@@ -26,14 +26,11 @@ export const USE_PLAYING = "Use what's playing";
 export const USE_SILENCE = "Use silence";
 export const PLAY_IT = "Play it";
 export const CLEAR = "Clear";
-export const NEW_PLAYLIST = "New playlist";
 export const NEW_PLAYLIST_NAME = "New playlist";
 export const PLAYING_CHANGES = "Changes apply the next time it starts.";
-export const NO_TRACKS = "No tracks yet. Add tracks from the room's music.";
 export const NO_MUSIC = "No music yet.";
 export const NO_LOOPS = "No background sounds yet.";
 export const NO_EFFECTS = "No effects added yet.";
-export const ALL_TRACKS_IN = "Every music track is in this playlist.";
 export const BUILT_IN = "Built in";
 export const LOADING_MUSIC = "Loading the music…";
 export const MUSIC_FAILED = "The music didn't load on this device.";
@@ -152,8 +149,10 @@ export function deleteSoundAsk(name: string): string {
   return `Delete ${name}? Its file goes too, and it leaves every playlist and scene.`;
 }
 
-/** The reducer's own refusals, so a refusal the panel says first reads as the server's would. */
-export const STOP_MUSIC_FIRST = SOUND_WORDS.trackPlaying;
+/** The reducer's own refusals, so a refusal the panel says first reads as the server's would (docs/design/design-v1-music-player.md 6.4). */
+export const TRACK_PLAYS = SOUND_WORDS.trackPlays;
+export const TRACK_PLAYS_NEXT = SOUND_WORDS.trackPlaysNext;
+export const TRACK_QUEUED = SOUND_WORDS.trackQueued;
 export const STOP_IT_FIRST = SOUND_WORDS.loopPlaying;
 export const FIFTH_LOOP = SOUND_WORDS.fifthLoop;
 

@@ -13,6 +13,7 @@ import { TimeSection } from "../clock/TimePanel.tsx";
 import { PanelGuideLink } from "../guide/GuideLink.tsx";
 import { takeOverPanelScroll, usePanelHere, type PanelProps } from "../panels.ts";
 import { openSceneSettings } from "../scenes/request.ts";
+import { MusicWindowHost } from "../sound/music/MusicWindowHost.tsx";
 import { useTicking } from "../sound/panel/controls.tsx";
 import { PlayerSound } from "../sound/panel/PlayerSound.tsx";
 import { DmSoundSection, useDmSoundPages } from "../sound/panel/SoundPanel.tsx";
@@ -58,11 +59,21 @@ function DmAmbiance() {
   const sections = useRef<Partial<Record<AmbianceSection, HTMLDivElement | null>>>({});
   useRequestScroll(sections, pages.subpage !== null, pages.toFirstPage);
 
-  if (pages.subpage) return pages.subpage;
+  // First in both, so the Music window stays mounted as a subpage comes or goes under it (docs/design/design-v1-music-player.md 3.2).
+  const musicWindow = <MusicWindowHost />;
+  if (pages.subpage) {
+    return (
+      <>
+        {musicWindow}
+        {pages.subpage}
+      </>
+    );
+  }
   const time = fold("time");
   const sound = fold("sound");
   return (
     <>
+      {musicWindow}
       <div ref={(el) => void (sections.current.time = el)}>
         <Group label={TIME_GROUP} icon="time" {...time} keep wholeSummary summary={<TimeSummary />} divider={false}>
           <TimeSection kept={{ amount, onAmount: setAmount, draft, onDraft: setDraft }} />

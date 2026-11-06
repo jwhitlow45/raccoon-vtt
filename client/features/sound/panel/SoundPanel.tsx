@@ -9,16 +9,11 @@ import { usePanelHeader } from "../../panels.ts";
 import { EffectsBoard } from "./EffectsBoard.tsx";
 import { RoomSoundControls, serverRoomSound, useServerRoomSoundState, type ServerSound } from "./engine.ts";
 import { LoopsSection } from "./LoopsSection.tsx";
-import { MusicSection } from "./MusicSection.tsx";
 import { NowPlaying, WhatPlayersHear } from "./NowPlaying.tsx";
-import { PlaylistPage } from "./PlaylistPage.tsx";
 import { SoundPage } from "./SoundPage.tsx";
-import { nameOf, playlistsOf, soundsOf } from "./state.ts";
+import { nameOf, soundsOf } from "./state.ts";
 import { StorageLine } from "./StorageLine.tsx";
 import { SERVER_CHECKING, SERVER_FAILED, SERVER_OFF } from "./words.ts";
-
-/** The page the DM's Sound shows: its first page, or a playlist's or a sound's. */
-type Page = { kind: "playlist"; id: string } | { kind: "sound"; id: string } | null;
 
 /**
  * What the panel says of the server's switch when it is not on: the shared
@@ -43,10 +38,12 @@ export function ServerLine(props: { server: ServerSound; onRetry(): void }) {
  * What the DM's Sound keeps above its subpages, in the Ambiance panel's top
  * (docs/design/design-v1-panel-groups.md 4.1, D-261102-763): which page
  * shows, Background's and Effects' Edit, and the storage line's version. A
- * playlist's or a sound's page replaces the whole of Ambiance's first page,
- * as it replaced the Sound panel's, so these must outlive it. `subpage` is
- * the page to draw in its place, or null for the first page. `toFirstPage`
- * goes back as Back does, for a request from elsewhere (4.3).
+ * sound's page replaces the whole of Ambiance's first page, as it replaced
+ * the Sound panel's, so these must outlive it. `subpage` is the page to
+ * draw in its place, or null for the first page. `toFirstPage` goes back
+ * as Back does, for a request from elsewhere (4.3). A music track's page
+ * and the playlists live in the Music window
+ * (docs/design/design-v1-music-player.md 3.1).
  */
 export type DmSoundPages = { subpage: ReactNode | null; first: DmSoundFirst; toFirstPage(): void };
 
@@ -55,7 +52,6 @@ export type DmSoundFirst = {
   editing: { loops: boolean; effects: boolean };
   onEditLoops(editing: boolean): void;
   onEditEffects(editing: boolean): void;
-  onOpenPlaylist(id: string): void;
   onOpenSound(id: string): void;
   storageVersion: number;
   onStorageChanged(): void;
@@ -64,8 +60,7 @@ export type DmSoundFirst = {
 /** The DM's Sound pages. `parent` names the panel for each subpage's "Back to" button. */
 export function useDmSoundPages(parent: string): DmSoundPages {
   const sounds = useRoomView((s) => soundsOf(s.view));
-  const playlists = useRoomView((s) => playlistsOf(s.view));
-  const [page, setPage] = useState<Page>(null);
+  const [page, setPage] = useState<string | null>(null);
   const [storageVersion, setStorageVersion] = useState(0);
   // Kept here, above the sections a subpage replaces, so Back from a sound's page finds Background or Effects still in Edit.
   const [editing, setEditing] = useState({ loops: false, effects: false });
@@ -74,20 +69,11 @@ export function useDmSoundPages(parent: string): DmSoundPages {
   const onStorageChanged = useCallback(() => setStorageVersion((n) => n + 1), []);
   const back = useCallback(() => setPage(null), []);
 
-  // A page whose playlist or sound went, deleted here or on another DM's device, goes back to the first page.
-  const playlist = page?.kind === "playlist" ? playlists[page.id] : undefined;
-  const sound = page?.kind === "sound" ? sounds[page.id] : undefined;
-  usePanelHeader(
-    playlist
-      ? { title: playlist.name, parent, id: `playlist-${playlist.id}`, onBack: back, backTo: [`playlist-${playlist.id}`] }
-      : sound
-        ? { title: nameOf(sound), parent, id: `sound-${sound.id}`, onBack: back, backTo: [`sound-${sound.id}`] }
-        : null,
-  );
+  // A page whose sound went, deleted here or on another DM's device, goes back to the first page.
+  const sound = page !== null ? sounds[page] : undefined;
+  usePanelHeader(sound ? { title: nameOf(sound), parent, id: `sound-${sound.id}`, onBack: back, backTo: [`sound-${sound.id}`] } : null);
 
-  const subpage = playlist ? (
-    <PlaylistPage key={playlist.id} playlist={playlist} onDeleted={back} />
-  ) : sound ? (
+  const subpage = sound ? (
     <SoundPage
       key={sound.id}
       sound={sound}
@@ -100,24 +86,18 @@ export function useDmSoundPages(parent: string): DmSoundPages {
   return {
     subpage,
     toFirstPage: back,
-    first: {
-      editing,
-      onEditLoops,
-      onEditEffects,
-      onOpenPlaylist: (id) => setPage({ kind: "playlist", id }),
-      onOpenSound: (id) => setPage({ kind: "sound", id }),
-      storageVersion,
-      onStorageChanged,
-    },
+    first: { editing, onEditLoops, onEditEffects, onOpenSound: setPage, storageVersion, onStorageChanged },
   };
 }
 
 /**
  * The DM's Sound first page, in D-261102-766's order
- * (docs/design/design-v1-panel-groups.md 4.1): Now playing, Effects right
- * under it, What players hear, then Music, Background, On this device and
- * the storage line. With the server's switch off: its line, Effects and On
- * this device.
+ * (docs/design/design-v1-panel-groups.md 4.1): Now playing with Open music,
+ * Effects right under it, What players hear, then Background, On this
+ * device and the storage line. Music leaves for the Music window
+ * (docs/design/design-v1-music-player.md 3.1). With the server's switch
+ * off: its line, Effects and On this device, and no Open music, since
+ * nothing could play a file.
  */
 export function DmSoundSection(props: DmSoundFirst) {
   const server = useServerRoomSoundState();
@@ -136,7 +116,6 @@ export function DmSoundSection(props: DmSoundFirst) {
           <Section label={WHAT_PLAYERS_HEAR}>
             <WhatPlayersHear />
           </Section>
-          <MusicSection onOpenPlaylist={props.onOpenPlaylist} onOpenSound={props.onOpenSound} onStorageChanged={props.onStorageChanged} />
           <LoopsSection editing={props.editing.loops} onEditing={props.onEditLoops} onOpenSound={props.onOpenSound} onStorageChanged={props.onStorageChanged} />
         </>
       ) : (

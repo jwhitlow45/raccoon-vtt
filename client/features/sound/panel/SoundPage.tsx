@@ -13,7 +13,7 @@ import { SOUND_USES, type Sound, type SoundUse } from "#shared/sound.ts";
 import { Actions } from "./controls.tsx";
 import { listenHere, stopListening, useListening } from "./engine.ts";
 import { send } from "./ops.ts";
-import { busyRefusal, nameOf, playlistsOf, useLeaves } from "./state.ts";
+import { deleteRefusal, nameOf, playlistsOf, serverNow, soundsOf, useLeaves, useRefusal } from "./state.ts";
 import { deleteSoundAsk, lengthText, LISTEN_HELP, USE_NAMES, useLeavesLine } from "./words.ts";
 
 /** Why each use is off for this length, in the words of 4.1, or null when it fits. */
@@ -54,14 +54,18 @@ function NameField(props: { name: string; onSave(name: string): void }) {
  * A sound's page (4.1): Name, Used as with each use its length rules out
  * disabled and why, its length, Listen here on this device alone, and
  * Delete on a second tap. A sound that plays now refuses a change of use
- * and a delete, in words, before anything is sent. A sounding effect
- * deletes at once and stops.
+ * and a delete, in words, before anything is sent. A track only queued
+ * deletes and leaves the queue, while a change of its use is refused
+ * (docs/design/design-v1-music-player.md 6.4). A sounding effect deletes at
+ * once and stops.
  */
 export function SoundPage(props: { sound: Sound; onDeleted(): void }) {
   const { sound } = props;
   const actions = useRoomActions();
   const playing = useRoomView((s) => s.view?.playing ?? null);
   const playlists = useRoomView((s) => playlistsOf(s.view));
+  const sounds = useRoomView((s) => soundsOf(s.view));
+  const serverOffset = useRoomView((s) => s.serverOffset);
   const scenes = useRoomView((s) => s.view?.scenes ?? {});
   const roomId = useRoomView((s) => s.roomId);
   const listening = useListening();
@@ -78,7 +82,7 @@ export function SoundPage(props: { sound: Sound; onDeleted(): void }) {
 
   const changeUse = (use: SoundUse) => {
     if (use === sound.use) return;
-    const refusal = busyRefusal(playing, sound.id);
+    const refusal = useRefusal(playing, sounds, sound.id, serverNow({ serverOffset }));
     if (refusal) {
       setSaid({ text: refusal, tone: "note" });
       return;
@@ -90,7 +94,7 @@ export function SoundPage(props: { sound: Sound; onDeleted(): void }) {
   };
 
   const remove = () => {
-    const refusal = busyRefusal(playing, sound.id);
+    const refusal = deleteRefusal(playing, sounds, sound.id, serverNow({ serverOffset }));
     if (refusal) {
       setArmed(false);
       setSaid({ text: refusal, tone: "note" });
