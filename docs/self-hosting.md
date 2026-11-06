@@ -100,8 +100,8 @@ Then open `.env` in an editor and fill in:
   challenge: once a room sees 20 wrong passwords in an hour, joining it with
   the password needs the check too, instead of anyone being locked out.
   Without the keys there is no check anywhere.
-- `ANIMATED_MAPS`: optional, `1` lets a DM use a WebM or MP4 video as an
-  animated map. Unset or `0`, the server refuses video uploads, serves no
+- `ANIMATED_MAPS`: optional, `1` lets a DM use a WebM, MP4 or MOV video as
+  an animated map. Unset or `0`, the server refuses video uploads, serves no
   video and every map shows its still. Read
   [If you use Cloudflare](#6-if-you-use-cloudflare) before you turn it on
   behind Cloudflare.

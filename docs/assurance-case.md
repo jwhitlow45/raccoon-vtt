@@ -98,7 +98,8 @@ you rely on the app.
   player who sets Animated maps to Still downloads no video. Text inside a
   video's own frames, such as H.264 user data, and an MP4's timecode track
   are left as they are, since the server never writes inside the media
-  data beyond the dropped metadata samples. Animated maps are off unless the server's owner turns them on.
+  data beyond the dropped metadata samples. Animated maps are off unless
+  the server's owner turns them on.
 - **A sound reaches players' decoders too.** The server walks a sound's
   MP3 frame headers and decodes nothing, so a crafted frame inside an
   otherwise valid file can still reach the audio decoder of a player's
