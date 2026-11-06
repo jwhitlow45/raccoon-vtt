@@ -387,7 +387,11 @@ export class Handoff {
     // A lease that ran out silenced this page while its main thread stood still, and another page may play since, so it gives up before anything can renew or cancel it.
     if (this.#leaseRanOut(now)) return this.#giveUp();
     this.#updateLease(now);
-    if (this.#yielding) return this.#scheduleDecision(now);
+    if (this.#yielding) {
+      // A fade toward a display is no reason to sound beside another page that claims to play, so it goes quiet at once, as an owner does.
+      if (!this.#env.locks && this.#ownerClaim(now) !== null) return this.#giveUp();
+      return this.#scheduleDecision(now);
+    }
     if (this.#owns) {
       if (!this.#eligible) return this.#giveUp();
       // Without Web Locks it gives way to any page that claims to play, a lapsed one too while that one may still sound (#ownerClaim).
