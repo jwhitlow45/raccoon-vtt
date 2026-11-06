@@ -391,9 +391,6 @@ function UpNextFold() {
   );
 }
 
-/** For Ambiance's Sound group until Ambiance goes: the first page under the name it had. */
-export const DmSoundSection = DmSoundFirstPage;
-
 const PAGE = { display: "grid", gap: theme.space(4), minWidth: 0 } as const;
 /** The fold's usual muted summary look, wrapping under the label where the row is short, a long name kept whole. */
 const SUMMARY = { fontSize: theme.font.small, lineHeight: theme.leading.body, color: theme.color.textMuted, minWidth: 0, overflowWrap: "anywhere" } as const;
