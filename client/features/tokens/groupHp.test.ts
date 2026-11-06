@@ -218,3 +218,28 @@ describe("the HP entry's lines on the dead (docs/design/design-v1-combat-flow.md
     assert.equal(deadHealLine("Bree", false), "Healing does nothing while Bree is dead. Only the DM's Revive brings Bree back.");
   });
 });
+
+describe("sendHpEntry's numbers and answers (QOL audit Q2)", () => {
+  test("it returns each queued op's number, and every op of the gesture hears its answer under the one group", () => {
+    const sent: { op: ClientOp; opts: Record<string, unknown> | undefined }[] = [];
+    const actions = { dispatch: (op: ClientOp, opts?: Record<string, unknown>) => (sent.push({ op, opts }), sent.length + 40), newId: () => "g1" };
+    const onAnswer = () => {};
+    assert.deepEqual(sendHpEntry(actions, [target("a"), target("b")], { kind: "damage", amount: 6 }, false, { onAnswer, quiet: true }), [41, 42]);
+    assert.deepEqual(sent.map((s) => s.opts), [
+      { group: "g1", onAnswer, quiet: true },
+      { group: "g1", onAnswer, quiet: true },
+    ]);
+    // One creature is one op with no group, and an entry with no answer passes nothing new.
+    sent.length = 0;
+    assert.deepEqual(sendHpEntry(actions, [target("a")], { kind: "damage", amount: 6 }, false, { onAnswer }), [41]);
+    assert.deepEqual(sent[0]!.opts, { onAnswer });
+    sent.length = 0;
+    sendHpEntry(actions, [target("a")], { kind: "damage", amount: 6 }, false);
+    assert.equal(sent[0]!.opts, undefined);
+  });
+
+  test("an op the store would not queue is left out of the numbers", () => {
+    const actions = { dispatch: () => null, newId: () => "g" };
+    assert.deepEqual(sendHpEntry(actions, [target("a")], { kind: "damage", amount: 6 }, false, { onAnswer() {} }), []);
+  });
+});

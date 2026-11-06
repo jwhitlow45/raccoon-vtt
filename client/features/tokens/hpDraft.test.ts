@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { RoomState } from "#shared/model.ts";
-import { behindBlackout, hpDraftKey, leaveHpDraft, takeHpDraft, type HpDraft } from "./hpDraft.ts";
+import { behindBlackout, fillWaits, hpDraftKey, leaveHpDraft, takeHpDraft, type HpDraft } from "./hpDraft.ts";
 
 describe("HP drafts through a blackout (LPD-PLAYER-7)", () => {
   test("one draft per place and set of creatures, whatever order they were selected in", () => {
@@ -37,5 +37,15 @@ describe("HP drafts through a blackout (LPD-PLAYER-7)", () => {
     const resumed = { meta: { view: { blackout: false } }, scenes: {} } as unknown as RoomState;
     assert.equal(behindBlackout({ view: resumed, sceneId: "s1", you: { role: "player" } as never }), false);
     assert.equal(behindBlackout({ view: null, sceneId: null, you: null }), false, "a room still loading is not paused");
+  });
+});
+
+describe("a player's chip's fill waits for its token alone (QOL audit Q2, D-261106-117)", () => {
+  const fill = { tokenId: "g2", chip: { lineId: "9:0", lineIds: ["9:0"], amount: 6, text: "Use 6 (Scimitar damage)", critical: false }, focus: true };
+  test("only while that token alone is selected, so a later pick of another never gets it", () => {
+    assert.equal(fillWaits(fill, ["g2"]), true);
+    assert.equal(fillWaits(fill, []), false);
+    assert.equal(fillWaits(fill, ["g1"]), false);
+    assert.equal(fillWaits(fill, ["g1", "g2"]), false, "a group's entry is not the bar the chip opened");
   });
 });

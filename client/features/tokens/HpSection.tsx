@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { healRevivesDead } from "#shared/migrate.ts";
 import type { Actor, HpVisibility, LifeState, TokenKind } from "#shared/model.ts";
 import { hpLess } from "#shared/rules/hp.ts";
@@ -31,7 +31,7 @@ import { useRollBlocked, useRollOption, useRowResult } from "../dice/useRollOpti
 import { actorOf, openRecord } from "../combat/logic.ts";
 import { useDeathSaveWaits, WAITS_FOR_REGENERATION } from "../combat/state.ts";
 import { damagePreview, deadCase, deadLines, entryOperation, entryRefusal, sendHpEntry, type HpTarget } from "./groupHp.ts";
-import { hpDraftKey, useKeepHpDraft, useKeptHpDraft, type HpPlace } from "./hpDraft.ts";
+import { hpDraftKey, useHpFill, useKeepHpDraft, useKeptHpDraft, type HpPlace } from "./hpDraft.ts";
 import { HP_MODES, MAX_HP_AMOUNT, modeAfterApply, parseHpInput, type HpMode } from "./hpInput.ts";
 import { FieldRow, Note, NumberField, Section, SmallButton } from "./ui.tsx";
 
@@ -133,6 +133,22 @@ export function HpEntry(props: {
   const resting = rest?.resting === true;
   const descriptionId = useId();
 
+  // A player's Apply to chip fills the bar's entry of the token it names, as Use would (hpDraft.ts HpFill).
+  const fillTarget = props.place === "bar" && props.targets.length === 1 ? props.targets[0]!.target : null;
+  const asked = useHpFill(fillTarget && "tokenId" in fillTarget ? fillTarget.tokenId : null);
+  const field = useRef<HTMLInputElement>(null);
+  const { fill, take } = asked;
+  useEffect(() => {
+    if (!fill) return;
+    take(fill);
+    setMode("damage");
+    setText(String(fill.chip.amount));
+    setError(null);
+    setFilled(fill.chip);
+    setCrit(fill.chip.critical && atZero);
+    if (fill.focus) field.current?.focus();
+  }, [fill, take, atZero]);
+
   const fillFrom = (chip: HpChip) => {
     setText(String(chip.amount));
     setError(null);
@@ -229,6 +245,7 @@ export function HpEntry(props: {
     <>
       {resting ? <ModeToggle mode={mode} onPick={() => pickMode(nextRestMode(mode))} /> : null}
       <input
+        ref={field}
         aria-label="HP change"
         aria-describedby={describedBy}
         data-rest-field=""

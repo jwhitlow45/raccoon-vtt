@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useStore } from "zustand";
+import { createStore } from "zustand/vanilla";
 import { sceneGate } from "../../lib/scene.ts";
 import { scopeSlot, useScoped } from "../../state/scope.ts";
 import type { RoomView } from "../../state/types.ts";
@@ -94,11 +96,45 @@ export function useKeepHpDraft(key: string, draft: HpDraft): void {
   );
 }
 
-/** Room's part: a new selection drops every draft left, whose entry never came back for it. */
+/**
+ * A player's Apply to chip asking a token's bar to fill its HP entry
+ * (QOL audit Q2, D-261106-117): the roll's amount in Damage mode with its
+ * parts, as the entry's Use fills it, so its preview shows and nothing is
+ * sent until Apply, since a player has no Undo (D-261106-174). The chip
+ * selects the token, which opens its bar, and the bar's entry for that
+ * token alone takes the fill, now or as it mounts. `focus` puts the caret
+ * in the field, on a computer: a phone keeps its keyboard down.
+ */
+export type HpFill = { tokenId: string; chip: HpChip; focus: boolean };
+
+export const hpFillSlot = scopeSlot(() => createStore<{ fill: HpFill | null }>(() => ({ fill: null })));
+
+/** A fill to ask for, which the next selection of any other token drops (useDropHpDraftsOnSelect). */
+export function useAskHpFill(): (fill: HpFill) => void {
+  const fills = useScoped(hpFillSlot);
+  return useCallback((fill: HpFill) => fills.setState({ fill }), [fills]);
+}
+
+/** The fill waiting for this token's bar entry, and how the entry takes it off the shelf. Null `tokenId` waits for none. */
+export function useHpFill(tokenId: string | null): { fill: HpFill | null; take(fill: HpFill): void } {
+  const fills = useScoped(hpFillSlot);
+  const fill = useStore(fills, (s) => (tokenId !== null && s.fill?.tokenId === tokenId ? s.fill : null));
+  const take = useCallback((taken: HpFill) => fills.setState((s) => (s.fill === taken ? { fill: null } : s)), [fills]);
+  return { fill, take };
+}
+
+/** Whether a fill still waits for the selection: only while that token alone is selected. */
+export function fillWaits(fill: HpFill, selected: readonly string[]): boolean {
+  return selected.length === 1 && selected[0] === fill.tokenId;
+}
+
+/** Room's part: a new selection drops every draft left, whose entry never came back for it, and a fill for a token no longer selected alone. */
 export function useDropHpDraftsOnSelect(): void {
   const drafts = useScoped(hpDraftSlot);
+  const fills = useScoped(hpFillSlot);
   const selected = useRoomView((s) => s.local.selectedIds);
   useEffect(() => {
     drafts.clear();
-  }, [drafts, selected]);
+    fills.setState((s) => (s.fill && !fillWaits(s.fill, selected) ? { fill: null } : s));
+  }, [drafts, fills, selected]);
 }

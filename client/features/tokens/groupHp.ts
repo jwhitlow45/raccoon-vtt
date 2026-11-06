@@ -3,7 +3,7 @@ import type { ActorTarget, ClientOp, HpChange } from "#shared/protocol.ts";
 import { rowDamage } from "#shared/rules/typedDamage.ts";
 import { displayName } from "../../lib/scene.ts";
 import { dispatchGesture } from "../../state/actions.ts";
-import type { RoomActions } from "../../state/types.ts";
+import type { OnAnswer, RoomActions } from "../../state/types.ts";
 import { tokenAccess, type Role } from "./access.ts";
 import { withCrit, type HpMode, type HpParse } from "./hpInput.ts";
 import { creatureRolls, type DiceView } from "../dice/creature.ts";
@@ -95,10 +95,14 @@ export function hpOps(targets: readonly HpTarget[], change: HpChange, crit: bool
 /**
  * Sends one entry's ops as one gesture, so one undo takes the whole entry
  * back from every creature it reached, not from the last of them alone
- * (docs/design/design-v1-dm-tools.md 3.5).
+ * (docs/design/design-v1-dm-tools.md 3.5). Returns the numbers of the ops
+ * it queued, and `answer` goes with each, so a control that applies at
+ * once, as a DM's Apply to chip (QOL audit Q2), can show busy until the
+ * server answers and say a refusal where it was pressed.
  */
-export function sendHpEntry(actions: Pick<RoomActions, "dispatch" | "newId">, targets: readonly HpTarget[], change: HpChange, crit: boolean): void {
-  dispatchGesture(actions, hpOps(targets, change, crit));
+export function sendHpEntry(actions: Pick<RoomActions, "dispatch" | "newId">, targets: readonly HpTarget[], change: HpChange, crit: boolean, answer?: { onAnswer: OnAnswer; quiet?: boolean }): number[] {
+  const answered: Pick<RoomActions, "dispatch" | "newId"> = answer ? { newId: () => actions.newId(), dispatch: (op, opts) => actions.dispatch(op, { ...opts, ...answer }) } : actions;
+  return dispatchGesture(answered, hpOps(targets, change, crit));
 }
 
 /** Only the viewer's permitted defenses explain the preview. The server calculates the hit from the full actor. */
