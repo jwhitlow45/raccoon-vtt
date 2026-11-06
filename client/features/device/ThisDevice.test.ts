@@ -9,7 +9,8 @@ import { describe, test } from "node:test";
  * with a gap for the key (ISO5P2-OPUS-1).
  */
 
-const { fullscreenHelp, shortcutsHelp } = await import("./ThisDevice.tsx");
+const { fullscreenHelp, shortcutsHelp, ROOM_SOUND_HELP } = await import("./ThisDevice.tsx");
+const { THIS_DEVICE_ONLY } = await import("../sound/panel/words.ts");
 const { DEFAULT_KEYS } = await import("../../state/shortcuts.ts");
 const { UNBOUND } = await import("../../state/keyBindings.ts");
 
@@ -72,4 +73,9 @@ test("the Menu's This device row names theme after the interface size, with or w
   const { deviceDetail } = await import("./ThisDevice.tsx");
   assert.equal(deviceDetail(true), "Interface size, theme, full screen, low power, map detail, weather, sounds, roll animation, shortcuts and sheet handle.");
   assert.equal(deviceDetail(false), "Interface size, theme, low power, map detail, weather, sounds, roll animation, shortcuts and sheet handle.");
+});
+
+test("Room sound's help starts with the scope, so it reads apart from Table sound's", () => {
+  assert.ok(ROOM_SOUND_HELP.startsWith(`${THIS_DEVICE_ONLY} `));
+  assert.ok(!ROOM_SOUND_HELP.includes('"'));
 });
