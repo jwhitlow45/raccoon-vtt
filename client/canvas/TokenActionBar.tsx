@@ -20,6 +20,8 @@ import { UsesDrawer, useUsesPresence } from "../features/combat/CombatUses.tsx";
 import { useFightJoin } from "../features/combat/state.ts";
 import { SrdLoadFailed } from "../features/monsters/SrdLoadFailed.tsx";
 import { useGroupSaveStore } from "../features/dice/groupSave/store.ts";
+import { ReplaceConfirm } from "../features/dice/groupSave/ReplaceConfirm.tsx";
+import { useStartGroupSave, type StartInput } from "../features/dice/groupSave/start.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { tokenSizeLabel } from "../features/grid/words.ts";
 import { ViewAsButton } from "../features/dm/viewAs.tsx";
@@ -735,6 +737,7 @@ function GroupBarBody(props: { tokens: readonly ViewToken[]; movable: number; on
     </BarButton>
   );
   const rollButton = <BarButton onClick={openRolls}>Roll</BarButton>;
+  const groupSave = useGroupSaveStart(ids);
   const restItems: RestItem[] = restIds.map((id) => ({
     id,
     node:
@@ -801,6 +804,7 @@ function GroupBarBody(props: { tokens: readonly ViewToken[]; movable: number; on
             {offers.dm && !inStrip("hidden") ? hiddenButton : null}
             {inStrip("multiSelect") ? null : multiButton}
             {offers.dm && !inStrip("roll") ? rollButton : null}
+            {offers.dm ? <BarButton onClick={groupSave.start}>Save</BarButton> : null}
             {offers.dm && anyPlayed ? <BarButton onClick={() => openAsk(scope, { kind: "selection", tokenIds: ids })}>Request a roll</BarButton> : null}
             {offers.dm ? (
               <BarButton pressed={locked === "all"} half={locked === "some"} icon="locked" iconOnly shortcut="lock" onClick={() => send(updateManyOps(ids, flagPatch(tokens, "locked")))}>
@@ -830,6 +834,7 @@ function GroupBarBody(props: { tokens: readonly ViewToken[]; movable: number; on
               Clear
             </BarButton>
           </ButtonRow>
+          {groupSave.confirm}
           {offers.dm && outOfFight > 0 && joinState === "failed" ? <SrdLoadFailed what="The stat blocks" inline /> : null}
         </>
       )}
@@ -858,6 +863,31 @@ function useOpenRollOptions(): () => void {
     if (groupSave.getState().shownIn === "dice") groupSave.setState({ shownIn: null });
     ui.openPanel("dice");
   };
+}
+
+/**
+ * The group bar's Save (designs/qol audit Q8, plan 9 QD-OPUS-27): the group
+ * save page for the selection, as the Dice panel's "Set up a group save"
+ * opens it, with its own ability picker, its rows following the selection
+ * until the roll. A page that already holds rolls asks first, here where
+ * Save was pressed, as every start does (ReplaceConfirm).
+ */
+function useGroupSaveStart(tokenIds: readonly string[]): { start(): void; confirm: ReactNode } {
+  const startSave = useStartGroupSave();
+  const [pending, setPending] = useState<StartInput | null>(null);
+  const start = () => {
+    const input: StartInput = { source: { kind: "selection", tokenIds: [...tokenIds], live: true }, test: { kind: "save", ability: "dex" }, dc: null, panel: "dice" };
+    setPending(startSave(input) ? null : input);
+  };
+  const confirm = pending ? (
+    <ReplaceConfirm
+      onDiscard={() => {
+        if (startSave(pending, { replace: true })) setPending(null);
+      }}
+      onKeep={() => setPending(null)}
+    />
+  ) : null;
+  return { start, confirm };
 }
 
 /** The group's HP entry, field and Apply first while the window is short, as the frame decides (5.8), and the strip's lead on an upright phone. */
