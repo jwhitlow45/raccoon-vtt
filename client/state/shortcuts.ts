@@ -1109,9 +1109,9 @@ export const BEHAVIORS: readonly Behavior[] = [
     surface: "Initiative",
   },
 
-  // The Music window's handles, in Up next and the playlist maker: features/sound/music/UpNext.tsx, Maker.tsx and parts.tsx (docs/design/design-v1-music-player.md 4.3, 5).
-  { id: "musicMove", input: "Up, Down", does: "Move the track one place", roles: DM, when: "on a track's handle in Up next or a playlist", device: "keys", surface: "Music" },
-  { id: "musicEnds", input: "Home, End", does: "Move the track to the first or the last place", roles: DM, when: "on a track's handle in Up next or a playlist", device: "keys", surface: "Music" },
+  // The track handles in Up next (the Sound panel) and the playlist maker's pop-up: features/sound/music/UpNext.tsx, Maker.tsx and parts.tsx (docs/design/design-v1-music-player.md 4.3, 5).
+  { id: "musicMove", input: "Up, Down", does: "Move the track one place", roles: DM, when: "on a track's handle in Up next or the playlist maker", device: "keys", surface: "Music" },
+  { id: "musicEnds", input: "Home, End", does: "Move the track to the first or the last place", roles: DM, when: "on a track's handle in Up next or the playlist maker", device: "keys", surface: "Music" },
   { id: "musicDragEscape", input: "Escape", does: "Put the track back", roles: DM, when: "while dragging a track", device: "keys", surface: "Music" },
 
   // The Dice panel's formula field: features/dice/Roller.tsx. The field's own keys, so the room's shortcuts stand aside there.

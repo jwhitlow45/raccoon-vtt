@@ -2,6 +2,8 @@
 
 Status: built (2026-11-05), from design draft 6 (2026-11-03), lane scenesux. "As built" says where the build went its own way. Draft 4 reached review consensus in round 3 (astra and Opus, dispositions at the end), and draft 5 took the owner's choices at the preview. Draft 6 applies the Scenes reorganization (docs/design/design-v1-scenes-reorg.md draft 2, at review consensus in its round 2): weather stays in Scenes, Ambiance keeps Time and Sound with a Weather row, and one lane plan covers both designs (12, and "Draft 6" at the end). Step 0 is built (`42970941`) and lane C is being built. Decisions D-261102-750 to D-261102-767 (section 14), amended where draft 6 says by the Scenes design's D-261102-860 to 869 and 930 to 934. Code is cited from `353abada`, draft 5's citations from `108eda42`, and draft 6's from main `6ae1693e` and the step 0 tip `42970941`.
 
+Amended by docs/design/design-v1-sound-layout.md 3 and 4: Ambiance goes. Time and Sound are panels again under Run the table, in the order DM, Scenes, Sound, Time. The Weather row, the Scene sound row and Ambiance's group folds go with it. Sections 4, 5 and 6.2 below say what stood when this note was built, and the new note says what stands.
+
 The owner (2026-11-03): "i also just want to flag that the dm's panel dropdown is going to get pretty large with all of these features. open to re-organizing these in some way (maybe have an ambiance header with sections within?) or something else you come up with. we don't strictly need to do this i just want to flag this as a design consideration that should probably be reviewed to keep things from being too busy". Then: "I like the Ambiance section, but I wonder if we should also have the 'RUN THE TABLE' header with DM, Scenes, and Ambiance under it." For the long panels: "Yes, fold them too". Then: "okay if you like run the table let's go with that". After the preview (13): "panel groups looks good to me with your recommendations".
 
 ## 1. Summary
@@ -44,6 +46,8 @@ The owner (2026-11-03): "i also just want to flag that the dm's panel dropdown i
 
 ### 4.1 The panel (D-261102-751)
 
+Amended by docs/design/design-v1-sound-layout.md 3.1 and 4: this panel is gone. Sound (order 34) and Time (order 36) are panels of their own, `ambiance` opens Sound, and the DM's phone list reads In play, Run the table (DM, Scenes, Sound, Time) and Prepare.
+
 - Registry: `id: "ambiance"`, title "Ambiance", a new icon `ambiance` (Lucide `cloud-sun`), order 34, group `table`, `needsAmbiance: true` in place of `needsClock` and `needsSound`. No panel-level `guide`: each section links its own (7).
 - Its first page holds two `Group`s (`components/Panel.tsx:262`), **Time** (icon `time`) and **Sound** (icon `music`), and between them the **Weather** row (icon `weather`, Lucide `cloud-rain`). Each group keeps its content mounted while folded (`keep`). Sections inside a group keep their capitals labels, as h4 under the group's h3.
 - **Time** holds what the Time panel held, unchanged: the start form with no clock, else the date block (its polite status region), Move the clock on, Set the date and time, Sharing, Calendar and Stop. Clock toasts show while neither the Log nor an open Time group is on screen (`Room.tsx:511` reads the fold for the DM, and Time's presence for a player).
@@ -85,6 +89,8 @@ Summaries follow the room as it changes. They are descriptions, never live regio
 
 ## 5. Ambiance for players (D-261102-755)
 
+Amended by docs/design/design-v1-sound-layout.md 3.2: a player gets Time while the view holds the clock and Sound while something plays that they hear, or while that panel is open, and an open panel whose reason ends keeps its own line ("The DM isn't sharing the date and time now.", "Nothing is playing.") until it closes.
+
 - **Listed** while the player's view holds the clock, or the room plays music or a background sound they receive (`somethingPlays`), or Ambiance is open (the tab or the pane below from 900 px up, else the phone's panel, a hidden sheet or side panel included, as `Room.tsx:417` reads Time). This is the union of the Time and Sound rules, as one `PanelsForOptions.ambiance`. The DM always has it. The split restore (`Room.tsx:609`) builds its `has` with `{ ambiance: true }`, as it passes `clock` and `sound` today.
 - **Sections:** Time while the view holds the clock, Sound while something plays they receive. Each also stays while it is kept: a section that showed since Ambiance opened stays until Ambiance closes, saying today's words, "The DM isn't sharing the date and time now." and "Nothing is playing." Kept sections live in a Room scope slot, set by Room from the pure `keptSections(prev, { open, clock, sound })`, so a turn across 900 px, which remounts the panel, keeps them.
 - **Open with nothing to show** (D-261102-762). A restored split, an old id's split mapped to Ambiance, or a reload through `rvtt.reopen` can open a player's Ambiance with no clock, nothing playing and nothing kept. It then shows one line, "The DM isn't sharing the date and time or playing sound now.", until a section qualifies or the panel closes. Once closed it is not listed again until one does.
@@ -118,6 +124,8 @@ Summaries follow the room as it changes. They are descriptions, never live regio
 - Rejected: for the DM panel and This device, setup folded on every width (the scene settings set the rule the DM knows, and those panels are not used every scene), everything open (the busyness the owner flagged), one key for every surface (one key per surface is the pattern, and a bad value then spoils one surface only), a reveal that ends when the panel is next not on screen (a wait raised while the DM panel is closed would end before the DM saw it).
 
 ### 6.2 Which sections
+
+Amended by docs/design/design-v1-sound-layout.md 3.3: Ambiance's surface (`rvtt.ambianceFolds`) is no longer read and stays in storage. Sound's Up next is the one fold left of these, on `rvtt.soundFolds`, folded on every width.
 
 | Surface | Section (key) | Start | Folded summary |
 |---|---|---|---|
@@ -154,6 +162,8 @@ Summaries follow the room as it changes. They are descriptions, never live regio
 - Rejected for Scenes: folding All scenes (switching scenes is every scene), folding Export (a decided rule of map-discovery 8.4), dropping weather from Scenes entirely (a DM setting up a scene would lose sight of it), a Weather row in Scenes that opens Ambiance (draft 5, superseded by D-261102-860), another icon for New scene (none of the set reads as a new scene, and picking art is the visual design pass's). Rejected for This device: regrouping its ten sections into fewer (that moves settings, past organization).
 
 ## 7. Old names and stored ids (D-261102-756)
+
+Amended by docs/design/design-v1-sound-layout.md 3.3: `PANEL_RENAMES` is now `{ ambiance: "sound" }`. "time" and "sound" are real ids again, so a stored split of Time over Sound reads as it was, and one of "ambiance" over "sound" is no split.
 
 - **Panel ids.** "time" and "sound" leave the registry. `PANEL_RENAMES = { time: "ambiance", sound: "ambiance" }` and `canonicalPanelId(id)` in `panels.ts`, applied in three places: the store's `openPanel` (any stale caller), `parseSplit` and `decodeReopen`. `parseSplit` canonicalizes `top` and `below` first, then checks `top !== below`, then `has` (`splitPanes.ts:189`), so a pair that becomes one id reads as no split and keeps its share. The in-memory `tab` and `below` change only through `openPanel`, so they never hold an old id. No other stored key holds a panel id (every `rvtt.` key was checked), and scroll memory lives in memory only.
 - **Deep links.** None open a panel: the only fragments are `#dm=`, `#invite=` and the guide's sections.
@@ -356,6 +366,8 @@ Built in five parts, step 0, step 0b and lanes A to D, as section 12 plans. Wher
 - **The DM panel and This device:** a pasted handout gets no scroll of its own, since Handouts is the panel's first or second group and its form's focus brings it into view (D-261102-813). The design's am-5, am-7 and am-8 for these two surfaces are unit and e2e steps where they are built: `DmPanel.test.ts`, `pdf/live.test.ts`, joinrequests `ambc-1` and shortcuts `ambc-2`. ViewControls' focus and the table display's view gained a server snapshot, so the panel renders to markup in a test.
 - **am-4's rooms with no scene.** No op empties a room (`shared/reducer/room.ts` keeps the last scene), so the case reaches a real DM only through a backup with no scene. `ambiance.e2e.ts` am-4c imports its own room's backup with the scenes taken out, and checks the Weather row's "No scene", New scene's start and its kept fold, and that the first scene made scrolls to nothing.
 - **The sweep:** `groupNameEdges` and `wholeSummaryLines` live in `e2e/alignmentRoom.ts`. The name edges run on every root that holds groups: Ambiance, the DM panel with a join request waiting, This device, Scenes, and the Token panel's groups. The whole summary check runs on Ambiance, the DM panel and This device, whose groups set `wholeSummary`. The new roots run in `alignment-settings` as pg-a to pg-c, each measured in the dark theme and the light one. This device's open screen keeps Rolls folded: its dice set picker's tiles read as off center, a finding older than the folds, in a picker the sweep had never measured.
+
+- **Amended by the sound layout** (docs/design/design-v1-sound-layout.md): Ambiance, its Time, Weather and Sound groups, its folds, the Weather row and the Scene sound row were removed. Time and Sound are panels, the clock chip opens Time, the scene request helpers went with their last callers, and the group kit's `onOpen` mode (here and in `SettingRow`) has no production caller left, only its tests. The Time and Sound sweep roots (pg-a, ck-a, ck-b, sn-d) are in `e2e/alignmentRoom.ts` as the new note's 10.4 lists them.
 
 ## Changes in draft 5
 

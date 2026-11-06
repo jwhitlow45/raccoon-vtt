@@ -2,6 +2,8 @@
 
 Status: built (2026-11-06), from design draft 3 at review consensus, in lanes PL-0, PL-A, PL-B and PL-D (section 12), after design review rounds 1 to 3 (Codex and Claude reviewers, every P2 adopted, "Round 1 dispositions" to "Round 3" at the end). "As built" says where the build went its own way. Decisions D-261102-960 to 969 (section 14), amended where marked, and the builders' D-261106-007 to 029. Code is cited from `584fa7da` (OP_VERSION 46, SNAPSHOT_VERSION 36), where every cited file reads as at draft 1's `e58995ac`. It builds after lane AR-A (op 47, snapshot 37), panel-groups lanes A to D (Ambiance's Sound group, D-261102-766 and 767), lane sndfade (D-261102-950, 951, 953 to 955), and panel-size lanes PS-A and PS-B (docs/design/design-v1-panel-size.md). Every layout here works at the side panel's default 360 px and on a phone. The preview is in the `music-player-preview` screenshots folder (13). Its prototype was never committed.
 
+Amended by docs/design/design-v1-sound-layout.md 3 to 5: the Music window and Open music are gone. The player is the top of the Sound panel's Now playing view, Library is its second view, the maker is a pop-up over the panel and a track's page is a Sound subpage. The queue, its rules and the maker's body stand as built here.
+
 The owner (2026-11-05, after a session): "I wonder if we should look at a ui overhaul to make it more "player-like" (think Spotify, including a UI with the queue) with a bespoke playlist creator that pops up rather than trying to shove everything into the skinny panel".
 
 ## 1. Summary
@@ -62,6 +64,8 @@ Ambiance's Sound group (panel-groups 4.1) in D-766's order, with Now playing's m
 
 ### 3.2 The window
 
+Amended by docs/design/design-v1-sound-layout.md 4.1: there is no window. Sound's view row picks Now playing or Library, and `soundViewSlot` holds the view and Library's search.
+
 - **Computer** (layout width 600 px and up): the shared `Dialog`, `width` 1040 (`theme.layout.dialog.xl`, new), its height `min(100% - 32 px, 760 px)` as an editor's: 1040 x 760 at 1440 x 900, 1040 x 688 at 1280 x 720 (`09`). Modal: the map dims and takes no input while it is open, and Escape, the close button or a click beside it closes it.
 - **Phone** (under 600): a full-height sheet, the new `Dialog` shape `phone: "tall"`: a bottom card as tall as the screen less its top inset and 12 px, so a strip of the room shows above it. It keeps the bottom card's grabber and its swipe down to close, which a slider and a drag handle never start (`lib/sheetSwipe.ts` `ownField` and `touch-action: none`). Its header takes PS-B's `controls` as every Dialog sheet does (panel-size 5.3): on a device with a fine pointer, Down ("Put away sheet") and no Up, since it has no full stand. Android's Back steps back from the maker or a track's page, then closes it.
 - **Open music** opens it on Now playing while a run exists (paused too), else on Library. Its open state and the maker's draft live in a Room scope slot (`musicWindowSlot`, features/sound/music/open.ts), so crossing 900 px, which remounts the panel, keeps both. It opens with focus on its title and gives it back to Open music on close.
@@ -72,6 +76,8 @@ Ambiance's Sound group (panel-groups 4.1) in D-766's order, with Now playing's m
 Effects are fired in time with the map (a door, a trap, thunder), so they sit beside it, never behind a modal. Background sounds are a scene's mood, toggled in play, four at most, each with its volume. Neither has a library large enough to need search or a queue.
 
 ## 4. The Music window (D-962, D-966)
+
+Amended by docs/design/design-v1-sound-layout.md 4.2 to 4.4: Now playing is the panel's first view, with Up next as a fold folded on every width, and Library is its second, with a sticky search row.
 
 ### 4.1 Layout
 
@@ -122,6 +128,8 @@ The heading **Up next** with "9 tracks · 26 min", then the order after the play
 
 ## 5. The playlist maker (D-965)
 
+Amended by docs/design/design-v1-sound-layout.md 4.5: the maker is a pop-up (the shared `Dialog`, 1040 px with two columns from 912 layout px, the tall sheet below 600), not a step of the window, with no back button, and focus returns to what opened it.
+
 A step of the Music window, header back "Music", titled with the playlist's name or "New playlist". It replaces PlaylistPage.tsx.
 
 - **Wide**: Name, then a row with **Shuffle** (a pressed toggle), **Repeat** (All, One, Off), **Crossfade** (Off, 2 s, 5 s, 10 s) and **Play**, then two columns: **Tracks** ("12 tracks · 36 min") in order, each row a handle, name, length and Remove (×), and **Add tracks**: Search music and every music track not in it, each with **Add <name>**.
@@ -129,6 +137,7 @@ A step of the Music window, header back "Music", titled with the playlist's name
 - **Reorder** as Up next does (4.3), on the draft, Home and End included. **Add** appends, **Remove** takes out, and a track appears once.
 - **A draft, saved once.** The footer has **Cancel** and **Create playlist** (new) or **Save**. Save sends one `playlist.update` with only the fields the draft changed, so another DM's change to another field stands. Create sends one `playlist.create`. Either is one Setup step. An empty name saves as "New playlist". **Play** saves first when the draft changed and sends `music.play` only once the save is answered, so a refused save never turns into a refused play. The draft lives in the window's slot (3.2).
 - **Leaving with changes** (Cancel, Back, the close button, Escape, a swipe or Put away sheet): the status says "Throw away your changes?" (`DiscardQuestion`) and the same press again discards. The sheet's swipe springs back while the draft has changes (the dialog's draft registry).
+  Amended by docs/design/design-v1-sound-layout.md 4.5, which settles the list as D-261106-020 had it: Save and Create playlist close once answered. Cancel, the close button, Escape and Android's Back close at once with no changes and ask "Throw away your changes?" with changes. A swipe down and Put away sheet close with no changes, and with changes spring back and keep the draft, never asking.
 - **Another device.** While the playlist plays: "Changes apply the next time it starts." (today's words). Its tracks changed elsewhere since the draft began (its `rev`) while the draft changed them too: "Another DM changed this playlist's tracks. Saving keeps your list." Deleted elsewhere: "This playlist was deleted on another device. Create playlist makes it again.", and Save becomes Create playlist.
 - **Delete playlist** at the foot of the settings for a saved playlist, a second tap as today, with "It leaves 2 scenes' sound." when scenes name it.
 - Up to 100 tracks: past it Add is disabled with "A playlist holds 100 tracks at most."
@@ -385,6 +394,8 @@ Lane musictap, the build review's later rounds:
 - **A tap on a handle** drops nothing. A release drops the row only once the pointer has moved 4 px from where it went down, in Up next and the maker, so a tap on the second list's first row no longer sends `passEnd` (4.3).
 - **The maker's Play** reads the playlist and the sounds from the room store as the save is answered, with nothing laid over them, so a save answered in one batch with another DM's append plays the appended track too (5).
 - **A seek drag** under way when the run or the track changes is cancelled for the rest of that press: later input is ignored and the release sends nothing (4.2).
+
+- **Amended by the sound layout** (docs/design/design-v1-sound-layout.md): the Music window was removed. Its slot became `soundViewSlot` and `makerSlot` (`music/open.ts`), `MusicWindow.tsx` became `MakerDialog.tsx`, and a track's page is a Sound subpage. The sweep's Music window roots (pld-a to pld-c) now measure Sound's Now playing and Library views and the maker's pop-up.
 
 ## Round 1 dispositions
 

@@ -33,7 +33,7 @@ Ideas only: **Foundry VTT** plays playlists in sequence, shuffled, all at once o
 
 ### 4.1 The Sound panel
 
-Amended by docs/design/design-v1-panel-groups.md 4.1: the Sound panel is the Sound section of the Ambiance panel, its first page in D-261102-766's order (Now playing with Stop all sound, Effects, What players hear, Music, Background, On this device), the music's buttons above its time, and "Back to Ambiance". Amended by docs/design/design-v1-scenes-reorg.md 5: the scene's sound line moves to Scenes' Scene sound group, and Now playing's part keeps a Scene sound row and Use what's playing. Amended by docs/design/design-v1-music-player.md 3 to 5: Now playing keeps the track, its run line, a Next line, Pause or Play, Skip and Open music over its bar, and Music (the playlists, the tracks and Add music), a playlist's page, a music track's page, Stop the music and Repeat move into the Music window, where the playlist maker replaces the playlist's page and the run's order becomes a queue the DM edits.
+Amended by docs/design/design-v1-panel-groups.md 4.1: the Sound panel is the Sound section of the Ambiance panel, its first page in D-261102-766's order (Now playing with Stop all sound, Effects, What players hear, Music, Background, On this device), the music's buttons above its time, and "Back to Ambiance". Amended by docs/design/design-v1-scenes-reorg.md 5: the scene's sound line moves to Scenes' Scene sound group, and Now playing's part keeps a Scene sound row and Use what's playing. Amended by docs/design/design-v1-music-player.md 3 to 5: Now playing keeps the track, its run line, a Next line, Pause or Play, Skip and Open music over its bar, and Music (the playlists, the tracks and Add music), a playlist's page, a music track's page, Stop the music and Repeat move into the Music window, where the playlist maker replaces the playlist's page and the run's order becomes a queue the DM edits. Amended again by docs/design/design-v1-sound-layout.md 4: Sound is a panel of its own with two views, Now playing (the player, Up next, Effects, Table sound, Background, On this device) and Library.
 
 `panel({ id: "sound", title: "Sound", icon: "music", order: 23, group: "play" })`, after DM and before Scenes. The DM always has it. A player has it while the room plays something, and an open one stays until closed, as the calendar's Time panel does (D-261102-462). Top to bottom:
 
@@ -67,7 +67,7 @@ Refusals, each on its row, the others going on: "Rain.ogg: this browser can't re
 
 ### 4.3 What players see
 
-Amended by docs/design/design-v1-panel-groups.md 5: a player's Sound is a section of Ambiance, with no folds.
+Amended by docs/design/design-v1-panel-groups.md 5: a player's Sound is a section of Ambiance, with no folds. Amended again by docs/design/design-v1-sound-layout.md 3.2 and 7: a player's Sound is a panel, listed while something plays that they hear or while it is open, and its Now playing is a card.
 
 Their device plays if they said so (4.4). Their Sound panel holds Now playing and On this device. With names shared: "Music: The Prancing Pony" and "Background: Rain, Crowd". Without: "Music is playing." and "2 background sounds are playing." A name changes once a crossfade ends. A track loading after 200 ms adds "Loading the music…", one that cannot load "The music didn't load on this device." with Try again, and a page waiting for a tap "Tap anywhere to start the sound." No log line and no toast follows a change, and effects show nowhere (D-261102-479).
 
@@ -87,7 +87,7 @@ A display plays by default, if its browser can (5.5). Its tap menu gains **Sound
 
 ### 4.6 Scenes, blackout and the X-card
 
-Amended by docs/design/design-v1-scenes-reorg.md 5: set in the scene's settings, Scene sound, or with Use what's playing in Ambiance's Sound.
+Amended by docs/design/design-v1-scenes-reorg.md 5: set in the scene's settings, Scene sound, or with Use what's playing in Ambiance's Sound. Amended again by docs/design/design-v1-sound-layout.md 6.2: Use what's playing is in Sound's Table sound, under the scene's line.
 
 - **A scene's sound** is what played when the DM tapped Use what's playing (the music's playlist or track with its repeat, shuffle and crossfade, or none, and up to 4 loops with their volumes), or silence by Use silence. "Move the players here" (features/scenes/SceneList.tsx) sends `sound.scene` with `onMove` right after `room.setPlayerScene`, and the reducer applies it only while the players' scene is still that scene, so a refused move or another DM's later move leaves it alone (D-261102-472). **Play it** sends it plainly. It replaces what plays: a run of the same playlist and loops of the same sounds keep playing, at the scene's volumes. Duplicate copies a scene's sound. "Like" and Use these settings on other scenes do not.
 - **Blackout.** Players and displays receive no sound and fade out over a second, and come back at the right place on resume. The DM's devices keep playing. An effect fired behind a blackout stays the DM's for good.
@@ -450,6 +450,8 @@ The Music window (docs/design/design-v1-music-player.md, lanes PL-0 to PL-D):
 Live play review 30 (lane lp30fix):
 
 - **A restart** (5.3, 5.6, LP30-SND-1). A file an element is loading when the server goes away fails its voice, as a file that cannot load does, and the Sound panel says the music didn't load. Once the room reconnects every failed voice loads its file again, as Try again does, so music and background sounds come back in place without a tap. A file that still cannot load fails again. A voice placed on an element whose last load of the same file failed sets the source again, since only that loads it, and only an error of the voice's own file fails the voice: one of a source swapped in is the check's to put back.
+
+- **Amended by the sound layout** (docs/design/design-v1-sound-layout.md): the Sound panel is its own panel, "What players hear" is Table sound with plain volume labels (their accessible names keep "for everyone"), Room sound's help starts "This device only:", and every stop icon is a circle with a square.
 
 ## Design review
 

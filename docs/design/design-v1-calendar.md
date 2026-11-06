@@ -45,6 +45,8 @@ The SRD names no calendar. Published settings' calendars are not SRD content, so
 
 The DM opens **Time** (a new panel, "In play" group, after Areas, then in a DM's "Run the table" group, and since docs/design/design-v1-panel-groups.md the Time section of the Ambiance panel, folded once a clock runs). With no clock it reads:
 
+Amended by docs/design/design-v1-sound-layout.md 3.1: Time is a panel again, in Run the table after Sound (order 36), and the Ambiance panel is gone.
+
 - "Track the in-game date and time. You move the clock on as time passes. Party Long Rests and fights move it too."
 - **Calendar**, two radio cards: **Day count** ("Day 1, Day 2 and on.") and **Months** ("Months, weekdays and years with names you choose."). Months opens the Calendar dialog (4.3), whose Save only keeps the calendar as a draft on this form, named beside the card ("12 months, 7-day week", with Change). Nothing is sent until Start the clock.
 - **It is now**: Day `1` (or, after Months, the month, day and year), and a time field at 8:00 AM.
@@ -85,7 +87,7 @@ Every step applies at once and shows on every device. A mistake is the top bar's
 
 ### 4.4 What players see
 
-Amended by docs/design/design-v1-panel-groups.md 5: players get Time as a section of Ambiance, listed while the view holds the clock or something plays, and kept until Ambiance closes.
+Amended by docs/design/design-v1-panel-groups.md 5: players get Time as a section of Ambiance, listed while the view holds the clock or something plays, and kept until Ambiance closes. Amended again by docs/design/design-v1-sound-layout.md 3.2: Time is a panel of its own, listed while the view holds the clock or while Time is open, and an open Time keeps its line "The DM isn't sharing the date and time now." until it closes.
 
 - While the DM shares it, players get the Time panel (date, time, part of the day, nothing else), the top bar chip from 900 px up, a toast for each clock line while the Log and the Time panel are closed, and the lines in the Log.
 - Behind a blackout players get no clock and no clock lines, as they get no encounter and no encounter lines, and get both back when it ends.
@@ -98,6 +100,7 @@ Amended by docs/design/design-v1-panel-groups.md 5: players get Time as a sectio
 - A gesture is ops sent together, not one transaction (client/state/actions.ts `dispatchGesture`). So: an advance the server refuses (past `clockSecondsMax`) leaves the rests going through at the time as it was, with the refusal's toast. A rest the server refuses, such as a character that fell to 0 HP meanwhile, leaves the advance and the other rests standing, with its own toast. And Undo takes the gesture back in one step only while it merges (server/rooms/undo.ts): another op between its ops, or a character someone else changed in between, splits it into more steps, as it does for any gesture today.
 - A rest of one creature, from its Rest section, never moves the room's clock: two players resting would move it twice. The DM moves the clock for a party's Short Rest with **1 hour**.
 - Each character's Long Rest records when it ended (`Character.longRest`, DM only, 6.1). When the DM chooses a Long Rest for a character, or opens the party's card, the card has a line for each character in a window after its stamp. A rest that moves the clock (the party card with its checkbox ticked) starts now, so its window ends at the stamp plus 16 hours. A rest that does not move the clock (one creature's, or the party card unticked) is recorded as it finishes, so it began about 8 hours before now, and its window ends at the stamp plus 24 hours (CAL-R2-3). The line: "Bree finished a Long Rest at Day 4, 6:00 AM. The rules let the next start from Day 4, 10:00 PM." It names times only. It never says whether a rest was taken, or when this one began, which the app does not know. A stamp after the current time, left by Set or an Undo of the clock, reads the same, so it never shows a negative age. It is shown, never enforced, as known forms' limits are.
+  Amended by docs/design/design-v1-sound-layout.md 7: the line reads "Bree finished a Long Rest at Day 4, 6:00 AM. The next can start from Day 4, 10:00 PM.", characters with the same stamp share one sentence ("Bree and Thorn finished a Long Rest at Midwinter, 5:00 PM. The next can start from Thaw 1, 9:00 AM."), and a date drops its weekday and year when its year is the clock's current one.
 
 ### 4.6 Fights
 
@@ -107,7 +110,7 @@ Amended by docs/design/design-v1-panel-groups.md 5: players get Time as a sectio
 
 ### 4.7 Log, toasts and the journal
 
-Amended by docs/design/design-v1-panel-groups.md 4.1: clock toasts show while neither the Log nor an open Time group in Ambiance is on screen.
+Amended by docs/design/design-v1-panel-groups.md 4.1: clock toasts show while neither the Log nor an open Time group in Ambiance is on screen. Amended again by docs/design/design-v1-sound-layout.md 3.3: they show while neither the Log nor Time, its own panel, is on screen.
 
 - Each clock change writes one line, with the date as it read then:
   - "8 hours pass. It is now Day 4, 6:00 AM." ("1 hour passes.", "2 days and 3 hours pass.")
@@ -121,6 +124,8 @@ Amended by docs/design/design-v1-panel-groups.md 4.1: clock toasts show while ne
 - The journal editor gains **Add the date** beside Add a secret, while a clock runs: a new text block reading `### Day 4, 6:00 AM`.
 
 ### 4.8 Layouts
+
+Amended by docs/design/design-v1-sound-layout.md 3.3: the chip opens the Time panel, not Ambiance at Time.
 
 - **Phone held upright**: Time is a sheet from the Panels list. The four steps sit 2 by 2 and become one column where the sheet is narrower than 360 px of content (320 px at 130%). No top bar chip.
 - **Phone held sideways**: the sheet on the right, as other panels. No chip.
@@ -392,6 +397,8 @@ Built in three steps (section 12) as phase C1. Every place the build went its ow
 - **Tests.** e2e cf-3b moves a month and removes the middle one under an open Set. Reducer cases for the restore rule and the random test's invariant 4, projection and wire tests of the blackout for players and the table display, unit tests of the seconds, the start form, the month rules and the claims (a co-DM's line after a sharing switch and after a calendar-only save, a refused op, a player's token undo), and e2e steps cf-1 to cf-6: the seconds, Today and Set with a month gone and their discard question, the controls after a remote stop, the DM's 1024 px row with a blackout and a long name, and Pat's chip coming back. The chip is required at 1440 x 900 in the alignment sweep. Each rule was put back wrong and a test failed.
 
 **Not covered.** The own-device Undo toast was asserted for the DM only, not for a player's "undid" line. The table display shows nothing new, as 4.4 said.
+
+- **Amended by the sound layout** (docs/design/design-v1-sound-layout.md): Time left Ambiance and is a panel under Run the table, after Sound. Its step buttons are five equal 44 px buttons, starting the clock moves focus to the new date and scrolls to show it, and the Long Rest note takes the shared-stamp and short-date forms above. The clock chip opens Time.
 
 ## Changes from review
 

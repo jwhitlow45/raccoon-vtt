@@ -2,6 +2,8 @@
 
 Status: built (2026-11-05), from design draft 2 (2026-11-03), lane scenesux, after design review round 1 (its changes and dispositions at the end). "As built" says where the build went its own way. Decisions D-261102-860 to 869 and D-261102-930 to 934 (section 16). Code is cited at main `6ae1693e` (whose diff from `073ab104` touches only the sound engine, Join and FEATURES `:51`, so the line numbers hold), and the step 0 kit at `42970941` (amb0, `dbe4c9293` to `429709416`, the `SceneWeather` lift `4bc3a898c`). Builds on docs/design/design-v1-panel-groups.md draft 5 ("Build baseline (round 4)"), and section 10 lists every edit its draft 6 needs.
 
+Amended by docs/design/design-v1-sound-layout.md 6: Ambiance is gone, so the Weather row (4.2) and the Scene sound row go, and Use what's playing stays in the Sound panel with the scene's line as help text. The Scene sound group in Scenes keeps Play it, Use silence and Clear.
+
 The owner (2026-11-03): "im also starting to wonder if scene is actually where weather settings should be instead of as their own tab? open to ideas here. open to your thoughts here. regardless i think we could use a design ui/ux pass and fixed to cleanup/reorganize the scenes tab as there is a ton of stuff there now that could be condensed a bit better/reorganized". Then, on sound and time: "how does this also apply to sounds and time? do we think these are scene dependent as well? or are they different for some reason?". Then, on headings: "I also think our headings could be more direct overall. Rather than "What players see" we should do "Player vision" as an example. open to feedback on this but this feels easier to use and should maybe be our general posture on headings?"
 
 The coordinator's rules, built on here: what belongs to a scene lives in its settings in Scenes, and what is live for the whole room lives in Ambiance. Weather is a scene's setting, beside Light. Time is room-wide and stays in Ambiance. Sound now playing stays in Ambiance, and a scene's own sound (the preset Move players starts) joins the scene's settings. Headings and group names are direct noun phrases of one to three words in the table's terms, help lines explain, buttons stay verbs, and no short name clashes with a nearby one. Organization and words only: no new op, setting, stored data or feature.
@@ -98,6 +100,8 @@ Rejected: Light kept in the vision group (it is the in-play setting, and weather
 
 ### 4.2 In Ambiance (D-261102-860)
 
+Amended by docs/design/design-v1-sound-layout.md 6.2: there is no Weather row. Weather is set in Scenes, Light and weather, and shows on the map.
+
 - Ambiance's first page: **Time** (fold), **Weather** (one row), **Sound** (fold). The Weather row is a `Group` with `onOpen` (section 9): no chevron (`reserve="chevron"`), the `weather` icon, the name "Weather", the summary always shown at its end (`weatherSummary`, or "No scene"), with `wholeSummary`, and a trailing `chevronRight`. Its name lines up with Time's and Sound's (measured, 11 and 16). It never folds and holds nothing. Its button carries a new mark, `data-group-open`, apart from folds' `data-group-fold`, which the sweep and `openGroup` find folds by.
 - Its button is named "Weather: Heavy rain · Strong wind, in Goblin cave's settings" ("Weather: no scene, in Scenes" with none).
 - A tap calls `openSceneSettings(scope, ui, "weather", { from: "ambiance" })` (section 7): Scenes opens on the scene in view with Light and weather revealed, scrolled, and focus on the Weather select. With no scene in view it only opens Scenes, where New scene starts open: no target, no reveal (7).
@@ -105,6 +109,8 @@ Rejected: Light kept in the vision group (it is the in-play setting, and weather
 - Rejected: Weather as a folding group in Ambiance (draft 5: a second place to set a scene's setting), a `SettingRow` with `onOpen` between the group headers (its name would start 41 px left of Time's and Sound's), no weather in Ambiance at all (the coordinator's answer to the owner keeps a glance at the scene's weather beside the live room).
 
 ## 5. A scene's own sound (D-261102-864)
+
+Amended by docs/design/design-v1-sound-layout.md 6.2: the Sound panel's Table sound holds Use what's playing under the scene's line ("Goblin cave's sound: Tavern night."), and no row opens Scenes.
 
 The rule: what plays now is the room's, in Ambiance. What a scene starts when the players move there (`Scene.sound`, music design 4.6) is the scene's. Time has no per-scene part and stays whole in Ambiance.
 
@@ -285,6 +291,8 @@ Built in step 0b and lane B, with lane A's half of Ambiance and lane D's sweep, 
 - **The No walls tag** wraps under the header row at the row's left edge where it does not fit, as the Group's action does for Take a shape, rather than under the name.
 - **The Delete section's ConfirmButton props** (`unavailable` and `describedBy`) had no other caller, so they went with their test (8).
 - The chosen scene row's 5 px `li` finding of section 2 does not show in the sweep: ms2-a measures the whole panel, list included, and reports nothing at any size.
+
+- **Amended by the sound layout** (docs/design/design-v1-sound-layout.md 6): the Weather row and the Scene sound row were removed with Ambiance, and `features/scenes/request.ts` went with its last callers. `SCENES_PANEL` lives in `features/scenes/ids.ts`.
 
 ## Design review round 1
 

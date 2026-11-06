@@ -142,6 +142,10 @@ and for how to use it, the [DM guide](../dm-guide.md).
 - [design-v1-scenes-reorg.md](design-v1-scenes-reorg.md): a scene's settings
   in six groups by what the DM is doing, weather beside the light, and a
   scene's own sound in its settings.
+- [design-v1-sound-layout.md](design-v1-sound-layout.md): Time and Sound as
+  panels of their own instead of Ambiance, the player at the top of the
+  Sound panel's Now playing view with Library as its second view, the
+  playlist maker as a pop-up, and plainer Table sound labels.
 - [design-v1-side-headers.md](design-v1-side-headers.md): short, matching
   headers in the side panel.
 - [design-v1-sheet-swipe.md](design-v1-sheet-swipe.md): swiping a phone's
