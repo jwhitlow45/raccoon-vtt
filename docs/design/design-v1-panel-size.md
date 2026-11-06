@@ -94,7 +94,7 @@ The owner (2026-11-05): "On PC narrow screens should be able to drag panel to ma
   The X-card has no header and no strip: Dismiss stays its way. Where the arrows show, the hidden Expand sheet button is not drawn, since Up is it, with the same name.
 - **Down's words** never start with "Close" and never repeat the header's X, so a test's `/^Close/` or a screen reader's list of buttons meets one Close per sheet. "Put away" matches the roll card's. Rejected: "Close sheet" (it starts with Close, and 59 e2e Close locators match by prefix), "Lower sheet" (it does not say the sheet goes), "Dismiss" (the X-card's word), "Hide sheet" (Hide is the sideways sheet's button and Hide panels').
 - **Focus.** Up stays focusable at full (`aria-disabled`), so the full sheet's modal focus restore (`modalDialog.ts:288`) finds it and focus stays on the arrow pressed. Down keeps focus as its name changes, and a screen reader reads the new name on the next focus. "Put away sheet" closes the sheet, and focus then goes where Close sends it.
-- **Motion.** A press plays the slide a release at that end plays, then the close runs, the very function Close calls. A kept-open surface springs back. Reduced motion has no slide. Unsaved input never blocks Down, since it is as deliberate as Close, and the close asks whatever Close asks.
+- **Motion.** A press plays the slide a release at that end plays, then the close runs, the very function Close calls. A kept-open surface springs back. Reduced motion has no slide. Unsaved input blocks Down as it blocks a swipe down (D-261106-006): the sheet slides to the half-follow's place a drag to the close's threshold shows, springs back to its normal height and stays open with the typed text. The X stays the way to close without saving.
 - Rejected: arrows in the header's row beside Close (a long title loses room, and at small widths the arrows' hits met the row's actions), arrows that hide at the end of their range (the other arrow would jump), a native `disabled` Up (it drops focus inside the modal sheet).
 
 ### 5.3 The controls and the input owner (D-261102-978)
@@ -159,7 +159,7 @@ The new surface "Side panel width" follows "Side panel tabs" in `SURFACES`, with
 | 700 x 900 mouse, Enter on Up | full, focus on Up, `aria-disabled` | sm-2 |
 | Then Tab, Enter | focus on "Shrink sheet", normal, focus stays, name "Put away sheet" | sm-2 |
 | Then Enter | slides off, closed | sm-2 |
-| Down with unsaved input | closes as Close does | sm-3 |
+| Down with unsaved input | follows partway, springs back, stays open with the text | sm-3, unit |
 | An arrow as the first interaction: panel sheet, dialog as a sheet, a pane, the roll card | each steps or puts away with its slide, no jump | sm-4 |
 | Mouse drag on the band up 200 px, released outside the band | full | sm-5 |
 | Mouse press on the title or the content and move | text selects, the sheet stays | sm-5 |
@@ -227,6 +227,7 @@ Built in three lanes as section 10 plans: PS-A the width, PS-B the sheet, PS-C t
 - **The group gap** (D-261102-990): the alignment helper's same-kind gap check (`e2e/helpers/alignment.ts`, not `spacing.ts`, which measures no row's gaps) holds the gap before a `data-group-start` control only to the other groups' gaps. Drawn cases in pl3-0 pass it marked and catch it unmarked or uneven.
 - **The sweep's roots:** ps-a and ps-b in `alignment-wide.e2e.ts`. ps-a measures the tab row with Reset width and the grip at 1440 x 900 and 1920 x 1080, at 100% and 130%, at 360 and at the cap (640, or 507 at 1440 and 130%), dark and light. ps-b measures a sheet's header with its arrows at 700 x 900 with a mouse, normal and full, at 100% and 130%, dark and light.
 - **The check of today** (9): at 900 x 900 with a mouse the DM's toolbar ends at 539 and the panel starts at 540, so it is whole.
+- **Down over unsaved input** (D-261106-006, review PS-OPUS-1): built first as 5.2 said, closing as Close does, which lost a label's or a pin's typed text. Down now does what a swipe down does, as 5.2's Motion says.
 - **The guide's pictures** come from `scripts/guide-panel-size.ts`. The sheet's is a 390 x 844 window with a mouse (D-261102-992), since a guide picture is 1280 x 800 or a phone's size, and a 1280 x 800 window under 900 layout px holds its sheets sideways.
 
 ## 13. Round 1 dispositions
