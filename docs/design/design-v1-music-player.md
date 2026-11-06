@@ -377,8 +377,14 @@ Lane musicfix, the build review's first round:
 - **A drag's last place.** The dragged row's middle passes a row once it reaches that row's middle, going up or down, as the initiative tracker's drop does. So the drag's bound, the last row's middle, reaches the last slot in Up next and the maker. `dragAt` holds the bound and the slot together.
 - **The seam before the last place** (D-261106-040). With the second list empty, or its only row moving, the seam is also the last slot, and a drop there sends `passEnd`. End with the second list empty sends `passEnd` too, where 4.3 says `last`, since `last` would put the track before the playing one.
 - **The maker's tracks** (D-261106-041). Save and the status line read the draft's tracks and the base's without those no longer music, so a track deleted elsewhere is no change of this DM's, and a rename leaves another DM's list alone.
-- **The maker's Play** (D-261106-042) starts the stored playlist with the fields its save sent over it, and the draft's new base is that playlist, so another DM's tracks, Repeat, Crossfade and Shuffle play.
+- **The maker's Play** (D-261106-042) starts the stored playlist, and the draft's new base is that playlist, so another DM's tracks, Repeat, Crossfade and Shuffle play. Lane musictap changed how it reads it (below).
 - **The seek** (D-261106-043). A drag's start disarms a key's timer, a drag stays one until the pointer lets go though its seek is dropped, and a key no longer ends a drag. Only the release sends.
+
+Lane musictap, the build review's later rounds:
+
+- **A tap on a handle** drops nothing. A release drops the row only once the pointer has moved 4 px from where it went down, in Up next and the maker, so a tap on the second list's first row no longer sends `passEnd` (4.3).
+- **The maker's Play** reads the playlist and the sounds from the room store as the save is answered, with nothing laid over them, so a save answered in one batch with another DM's append plays the appended track too (5).
+- **A seek drag** under way when the run or the track changes is cancelled for the rest of that press: later input is ignored and the release sends nothing (4.2).
 
 ## Round 1 dispositions
 
