@@ -56,12 +56,12 @@ const run = {
   pin: randomUUID(),
 };
 
-// A DM always has Ambiance. A player gets it only once the room keeps time or plays sound, which this room never does.
-const DM_PANELS = ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "DM", "Scenes", "Ambiance", "Monsters", "Encounters", "Characters", "Outliner", "Library", "Menu"];
+// A DM always has Sound and Time. A player gets them only once the room plays sound or keeps time, which this room never does.
+const DM_PANELS = ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "DM", "Scenes", "Sound", "Time", "Monsters", "Encounters", "Characters", "Outliner", "Library", "Menu"];
 const PLAYER_PANELS = ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "Characters", "Library", "Menu"];
 // "Two panels" heads each menu, a checkbox this shape does not list, then the line under it (docs/design/design-v1-split-panel.md 6).
 // The Log is in the row since the tabs draw their icons alone (docs/design/design-v1-icons-2.md 6).
-const DM_MENU = ["---", "#In play", "Journal", "Areas", "#Run the table", "DM", "Scenes", "Ambiance", "#Prepare", "Monsters", "Encounters", "Characters", "Outliner", "Library", "---", "Menu"];
+const DM_MENU = ["---", "#In play", "Journal", "Areas", "#Run the table", "DM", "Scenes", "Sound", "Time", "#Prepare", "Monsters", "Encounters", "Characters", "Outliner", "Library", "---", "Menu"];
 const PLAYER_MENU = ["---", "Journal", "Areas", "Characters", "Library", "Menu"];
 /** The row's tabs in today's side panel, its icons alone (docs/design/design-v1-icons-2.md 6). */
 const ROW = ["Token", "Initiative", "Dice", "Log"];

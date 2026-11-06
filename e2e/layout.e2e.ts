@@ -1356,7 +1356,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
       return items;
     };
     // Dice comes before Log among the panels (docs/design/design-v1-dice.md 8.1).
-    assert.deepEqual(await list(phone), ["# In play", "Token", "Initiative", "Party", "Dice", "Log", "Journal", "Areas", "# Run the table", "DM", "Scenes", "Ambiance", "# Prepare", "Monsters", "Encounters", "Characters", "Outliner", "Library", "---", "Menu"]);
+    assert.deepEqual(await list(phone), ["# In play", "Token", "Initiative", "Party", "Dice", "Log", "Journal", "Areas", "# Run the table", "DM", "Scenes", "Sound", "Time", "# Prepare", "Monsters", "Encounters", "Characters", "Outliner", "Library", "---", "Menu"]);
     assert.deepEqual(await list(player), ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "Characters", "Library", "Menu"]);
   });
 

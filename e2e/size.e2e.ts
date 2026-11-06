@@ -25,7 +25,7 @@ import { A5, LETTER, LETTER_WIDE, pdfOf } from "./pdfFixture.ts";
  * Every dialog is the one shell of docs/design/design-v1-visual.md 2.3, and the
  * run checks its structure in each (checkShell): the request a roll and
  * image dialogs, the editors, the scene sheet, the monster filters, the
- * stamp picker and stamp sheet, the shortcut sheet, the Music window, a
+ * stamp picker and stamp sheet, the shortcut sheet, the playlist maker, a
  * companion's stat block picker and its numbers step, the editor for a
  * character's stat block, a player's handout of one image and of three
  * pages, and the X-card, whose card has no title row. Every button and tab in each is at least a 44 px target in the
@@ -78,7 +78,7 @@ const run = {
   uvttFile: path.join(work, "Small_hall.dd2vtt"),
   /** When the X-card was last tapped. Taps within 10 s of a card merge into it (server/http/xcard.ts). */
   xcardAt: 0,
-  /** Three music tracks and their playlist, which the Music window's step plays. */
+  /** Three music tracks and their playlist, which the playlist maker's step opens. */
   tracks: [] as string[],
   playlist: randomUUID(),
 };
@@ -120,11 +120,6 @@ function narrow(size: (typeof SIZES)[number], scale: number): boolean {
   return size.width / scale < 900;
 }
 
-/** Whether the Music window stands in two columns at this size: 912 of the room's own pixels across or more (features/sound/music/MusicWindow.tsx). */
-function musicColumns(size: (typeof SIZES)[number], scale: number): boolean {
-  return size.width / scale >= 912;
-}
-
 /** Opens a panel: the side panel's tab on a computer, or the Panels sheet's button on a phone. */
 async function openPanel(name: string, phone: boolean): Promise<void> {
   if (!phone) {
@@ -162,18 +157,17 @@ function assertInside(box: Box | null, what: string, on: Page = page): void {
   assert.ok(inside, `${what} lies outside the ${vp.width} x ${vp.height} window: ${JSON.stringify(box)}`);
 }
 
-/** No part of the dialog's body is wider than the body itself, so nothing hides past its right edge. With `columns`, each column is a body. */
-async function assertNoSideScroll(dialog: Locator, label: string, columns = false): Promise<void> {
-  const widths = await dialog.locator("section").first().evaluate((card, columns) => {
+/** No part of the dialog's body is wider than the body itself, so nothing hides past its right edge. */
+async function assertNoSideScroll(dialog: Locator, label: string): Promise<void> {
+  const widths = await dialog.locator("section").first().evaluate((card) => {
     // The server's type settings carry no DOM, as in harness.ts.
     const styleOf = (globalThis as unknown as { getComputedStyle(el: unknown): { overflowY: string } }).getComputedStyle;
-    const scrollers = columns ? [...card.querySelectorAll("[data-music-column]")] : [...card.children];
-    return scrollers.flatMap((child) => {
+    return [...card.children].flatMap((child) => {
       const el = child as unknown as { scrollWidth: number; clientWidth: number };
       const overflow = styleOf(child).overflowY;
       return overflow === "auto" || overflow === "scroll" ? [{ scroll: el.scrollWidth, client: el.clientWidth }] : [];
     });
-  }, columns);
+  });
   assert.ok(widths.length > 0, `${label}: the dialog has no scrolling body`);
   for (const w of widths) assert.ok(w.scroll <= w.client, `${label}: the body scrolls sideways, ${w.scroll} px of content in ${w.client}`);
 }
@@ -185,11 +179,9 @@ async function assertNoSideScroll(dialog: Locator, label: string, columns = fals
  * footer when there is one, in that order; the header holds the title and
  * a close button whose name starts with "Close". The X-card is the one
  * dialog with no title row (`titleless`), since its card is its own
- * message: it has a body alone. The wide Music window's body holds two
- * columns that scroll on their own (`columns`), so Up next stays beside
- * a long Library: there the body does not scroll and each column does.
+ * message: it has a body alone.
  */
-async function checkShell(dialog: Locator, label: string, titleless: boolean, columns = false): Promise<void> {
+async function checkShell(dialog: Locator, label: string, titleless: boolean): Promise<void> {
   const shell = await dialog.evaluate((el) => {
     type El = { tagName: string; parentElement: El | null; children: ArrayLike<El>; querySelector(s: string): El | null; querySelectorAll(s: string): ArrayLike<El>; getAttribute(n: string): string | null };
     const styleOf = (globalThis as unknown as { getComputedStyle(el: unknown): { overflowY: string } }).getComputedStyle;
@@ -203,7 +195,6 @@ async function checkShell(dialog: Locator, label: string, titleless: boolean, co
       scrolls: children.map((c) => ["auto", "scroll"].includes(styleOf(c).overflowY)),
       title: header?.querySelector("h2, h3") ? true : false,
       closes: header ? Array.from(header.querySelectorAll("button")).map((b) => b.getAttribute("aria-label") ?? "") : [],
-      columns: card ? Array.from(card.querySelectorAll("[data-music-column]")).map((c) => ["auto", "scroll"].includes(styleOf(c).overflowY)) : [],
     };
   });
   assert.ok(shell.cardInDialog, `${label}: the card is not the dialog's own first section`);
@@ -211,10 +202,9 @@ async function checkShell(dialog: Locator, label: string, titleless: boolean, co
   assert.deepEqual(shell.tags, expected, `${label}: the card's parts`);
   assert.deepEqual(
     shell.scrolls.map((s, i) => (s ? shell.tags[i] : null)).filter(Boolean),
-    columns ? [] : ["div"],
-    columns ? `${label}: nothing in the card scrolls but its columns` : `${label}: the body, and nothing else in the card, scrolls`,
+    ["div"],
+    `${label}: the body, and nothing else in the card, scrolls`,
   );
-  if (columns) assert.deepEqual(shell.columns, [true, true], `${label}: two columns, each scrolling on its own`);
   if (titleless) return;
   assert.ok(shell.title, `${label}: the header has no title`);
   assert.match(shell.closes.at(-1) ?? "", /^Close/, `${label}: the header ends in a close button named "Close …"`);
@@ -255,17 +245,16 @@ async function checkTargets(dialog: Locator, label: string): Promise<void> {
  * a footer must be there as the dialog opens. One in the dialog's body,
  * which scrolls, must be reachable by scrolling it.
  */
-async function checkDialog(dialog: Locator, label: string, main: { name: string | RegExp; in: "footer" | "body" } | null, opts: { titleless?: boolean; columns?: boolean } = {}): Promise<void> {
+async function checkDialog(dialog: Locator, label: string, main: { name: string | RegExp; in: "footer" | "body" } | null, opts: { titleless?: boolean } = {}): Promise<void> {
   const titleless = opts.titleless === true;
-  const columns = opts.columns === true;
   const owner = dialog.page();
   await dialog.waitFor();
   // The card settles once the dialog's zoom and its content are laid out.
   await owner.waitForTimeout(250);
   assertInside(await dialog.locator("section").first().boundingBox(), `${label}: the card`, owner);
   if (!titleless) assertInside(await dialog.getByRole("button", { name: /^Close/ }).first().boundingBox(), `${label}: Close`, owner);
-  await checkShell(dialog, label, titleless, columns);
-  await assertNoSideScroll(dialog, label, columns);
+  await checkShell(dialog, label, titleless);
+  await assertNoSideScroll(dialog, label);
   await checkTargets(dialog, label);
   if (!main) return;
   const button = (main.in === "footer" ? dialog.locator("footer") : dialog).getByRole("button", { name: main.name, exact: true }).first();
@@ -348,7 +337,7 @@ async function boxSelect(from: { x: number; y: number }, to: { x: number; y: num
 
 describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000 }, () => {
   before(async () => {
-    // Room sound on, so the Sound group offers Open music (startServer passes this process's environment on).
+    // Room sound on, so Sound's Library offers the playlists (startServer passes this process's environment on).
     process.env.ROOM_SOUND = "1";
     server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
     browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1" });
@@ -627,22 +616,22 @@ describe("raccoon-vtt dialogs at the larger interface sizes", { timeout: 600_000
         await shoot("shortcuts");
         await closeDialog(keys);
 
-        // The Music window, playing (docs/design/design-v1-music-player.md 4.1): two columns on a computer, the tall sheet with two tabs on a phone.
-        await ops.send({ t: "music.play", run: randomUUID(), playlistId: run.playlist, order: run.tracks, index: 0, repeat: "all", fade: 5 });
-        await openPanel("Ambiance", phone);
-        await page.getByRole("button", { name: "Open music", exact: true }).click();
-        const music = page.getByRole("dialog", { name: "Music", exact: true });
-        await music.getByRole("list", { name: "Up next" }).waitFor();
-        await checkDialog(music, `${label}, Music`, null, { columns: musicColumns(size, scale) });
-        await shoot("music");
-        if (!musicColumns(size, scale)) {
-          await music.getByRole("radio", { name: "Library", exact: true }).click();
-          await music.getByRole("searchbox", { name: "Search music" }).waitFor();
-          await checkDialog(music, `${label}, Music, Library`, null);
-          await shoot("music-library");
+        // The playlist maker's pop-up from Sound's Library (docs/design/design-v1-sound-layout.md 4.5): the 1040 px card on a computer, the tall sheet with its tabs on a phone.
+        await openPanel("Sound", phone);
+        const sound = phone ? page.locator('dialog[data-rvtt-sheet][aria-label="Sound"]') : page.getByRole("tabpanel", { name: sideTabName("Sound") });
+        await sound.getByRole("radiogroup", { name: "Sound", exact: true }).getByRole("radio", { name: "Library", exact: true }).click();
+        await sound.getByRole("list", { name: "Playlists" }).getByRole("button", { name: /^Tavern night/ }).click();
+        const maker = page.getByRole("dialog", { name: "Tavern night", exact: true });
+        await checkDialog(maker, `${label}, the playlist maker`, { name: "Save", in: "footer" });
+        await shoot("maker");
+        const addTracks = maker.getByRole("radio", { name: "Add tracks", exact: true });
+        if ((await addTracks.count()) > 0) {
+          await addTracks.click();
+          await maker.getByRole("searchbox", { name: "Search music" }).waitFor();
+          await checkDialog(maker, `${label}, the playlist maker, Add tracks`, { name: "Save", in: "footer" });
+          await shoot("maker-add-tracks");
         }
-        await closeDialog(music);
-        await ops.send({ t: "music.stop" });
+        await closeDialog(maker);
         await closeSheet(phone);
 
         // The stamp picker, then the selected stamp's tint and ⋯, pop-ups above its row on every screen.

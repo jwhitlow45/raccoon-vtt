@@ -876,7 +876,7 @@ describe("raccoon-vtt: a side panel that resizes, and a sheet with a mouse", { t
       // What the sweep already finds at 360 is not this lane's. At the cap nothing may be new but the tab row's intended 8 px group gap, which the spacing check learns from data-group-start (docs/design/design-v1-panel-size.md 9).
       const norm = (line: string) => line.replace(/^[^:]*: /, "").replace(/\(most start at [\d.]+\)/, "");
       const groupGap = (line: string) => / kind-gap [\d.]+ px, div\[tablist\] "Panels"/.test(line);
-      const panels = ["Initiative", "Token", "DM", "Scenes", "Ambiance"];
+      const panels = ["Initiative", "Token", "DM", "Scenes", "Sound", "Time"];
       const extra: string[] = [];
       let known = 0;
       for (const theme of ["dark", "light"] as const) {
