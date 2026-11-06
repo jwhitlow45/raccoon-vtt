@@ -1263,14 +1263,14 @@ async function animatedMapScreens(sweep: Sweep, page: Page): Promise<void> {
       await cdp.detach();
     }
 
-    // This device cannot read the first frame: the probe's play() refused, as on an iPhone before iOS 17.4.
+    // This device cannot read the first frame, of the picked file or of its stored copy (docs/design/design-v1-video-turns.md 8): the form's probes' play() refused, as on an iPhone before iOS 17.4.
     await page.evaluate(() => {
-      type P = { play(this: { src: string }): Promise<void>; __alignPlay?: P["play"] };
+      type P = { play(this: { hasAttribute(name: string): boolean }): Promise<void>; __alignPlay?: P["play"] };
       const proto = (globalThis as unknown as { HTMLMediaElement: { prototype: P } }).HTMLMediaElement.prototype;
       proto.__alignPlay ??= proto.play;
       const real = proto.__alignPlay;
-      proto.play = function (this: { src: string }) {
-        return this.src.startsWith("blob:") ? Promise.reject(new DOMException("refused", "NotSupportedError")) : real.call(this);
+      proto.play = function (this: { hasAttribute(name: string): boolean }) {
+        return this.hasAttribute("data-animmap-probe") ? Promise.reject(new DOMException("refused", "NotSupportedError")) : real.call(this);
       };
     });
     try {
