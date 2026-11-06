@@ -170,7 +170,10 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
       "Ctrl+wheel, or a pinch on a trackpad",
       "Ctrl+wheel, or a pinch on a trackpad",
       "Right-click a roll button",
+      "Double-click the side panel's edge",
     ]);
+    // pa: the side panel's width, its own section after the tabs (docs/design/design-v1-panel-size.md 6).
+    assert.deepEqual(await inputs(sheet, "Side panel width"), ["Left, Right", "Home, End", "Escape"]);
     assert.deepEqual(await inputs(sheet, "Initiative"), ["Enter", "Escape", "Enter", "ContextMenu, Shift+F10", "Up, Down, Home, End"], "the DM types several values");
     // dpf1: a roll button's one-roll options by its keys, after the panel's own (docs/design/design-v1-roll-mode-menu.md 7).
     assert.deepEqual((await inputs(sheet, "Dice")).slice(-2), ["ContextMenu, Shift+F10", "Up, Down, Home, End"]);
