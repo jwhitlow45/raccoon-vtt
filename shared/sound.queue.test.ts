@@ -130,6 +130,8 @@ describe("Shuffle (6.4, 6.5)", () => {
     assert.equal(edited(on, { t: "shuffle", seed: "mix2" }), on, "on while on writes nothing");
     assert.deepEqual(edited(on, { t: "unshuffle" }), THIRD);
     assert.equal(edited(THIRD, { t: "unshuffle" }), THIRD, "off while off writes nothing");
+    const moved = edited(THIRD, { t: "move", soundId: "s9", to: "first" });
+    assert.equal(edited(moved, { t: "unshuffle" }), moved, "nor puts back the playlist's order over the DM's own moves");
     const one = at(TWELVE, 2, { repeat: "one" });
     assert.deepEqual(edited(one, { t: "shuffle", seed: "mix1" }), { ...one, order: on.order, shuffle: true }, "Repeat one shuffles as Repeat all");
   });
