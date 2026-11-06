@@ -114,7 +114,7 @@ export type HandoffEnv = {
   post(msg: HandoffPost): void;
   locks: LockApi | null;
   audio: HandoffAudio;
-  /** Told after every change of what the page does, for the Sound panel's lines. */
+  /** Told after every change of what the page does, for the lines in Ambiance's Sound. */
   onChange?(): void;
 };
 

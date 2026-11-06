@@ -205,7 +205,7 @@ export interface VoicesEnv {
   /** The output's latency, `outputLatency` and `baseLatency`, in ms. */
   latencyMs(): number;
   url(assetId: string, channel: Channel): string;
-  /** Told when the music's state changes, for the Sound panel's lines. */
+  /** Told when the music's state changes, for the lines in Ambiance's Sound. */
   onMusic?(state: MusicState): void;
   /** Where gestures arrive (the window), for a voice whose play the browser refused until one. */
   gestures?: EventTarget;

@@ -10,8 +10,8 @@ import { RoomScope } from "../../state/scope.ts";
  * Ambiance drawn to markup (docs/design/design-v1-panel-groups.md 4, 5 and 10):
  * the DM's Time, Weather row and Sound in that order, with the compact
  * start, no line under the panel's header, the summaries while folded and
- * the Weather row's name; a player's sections with no folds, kept ones, and
- * the empty line. At a phone's layout width (no window, so layoutWidth
+ * the Weather row's name. Then a player's sections with no folds, kept ones,
+ * and the empty line. At a phone's layout width (no window, so layoutWidth
  * reads 0).
  */
 

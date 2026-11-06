@@ -4,11 +4,11 @@ import { describe, test } from "node:test";
 import type { Playing, Sound } from "#shared/sound.ts";
 
 /*
- * The Sound panel's parts in each state (docs/design/design-v1-music.md 4.1,
- * 4.3 and 12): Repeat naming its state, Skip past a crossing's incoming
- * track, the fifth loop, Edit turning the board into a list, the scene
- * line's states, the switch-off board, and the player's panel with and
- * without names.
+ * The parts of Ambiance's Sound in each state
+ * (docs/design/design-v1-music.md 4.1, 4.3 and 12): Repeat naming its
+ * state, Skip past a crossing's incoming track, the fifth loop, Edit turning
+ * the board into a list, the scene line's states, the switch-off board, and
+ * the player's panel with and without names.
  */
 
 const { createElement } = await import("react");

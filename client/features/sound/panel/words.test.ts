@@ -4,7 +4,7 @@ import { clockText, playerLoopsLine, playerMusicLine, playlistDetail, playlistLe
 
 const MB = 1024 * 1024;
 
-describe("the Sound panel's words (docs/design/design-v1-music.md 4.1 and 4.3)", () => {
+describe("the words of Ambiance's Sound (docs/design/design-v1-music.md 4.1 and 4.3)", () => {
   test("times read as a clock, and aloud as one of the other", () => {
     assert.equal(clockText(0), "0:00");
     assert.equal(clockText(84_999), "1:24");

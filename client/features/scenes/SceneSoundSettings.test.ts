@@ -73,6 +73,6 @@ describe("Scene sound in the scene's settings", () => {
 
   test("its help ids are its own, so a second line on the page shares none", () => {
     const ids = [...render({}).matchAll(/ id="([^"]+)"/g)].map((m) => m[1]);
-    assert.ok(ids.every((id) => !id!.startsWith("sound-scene-")), "never the Sound panel's id for the scene");
+    assert.ok(ids.every((id) => !id!.startsWith("sound-scene-")), "never the id Ambiance's Sound uses for the scene");
   });
 });

@@ -176,7 +176,7 @@ async function back(panel: Locator): Promise<void> {
   await panel.getByRole("heading", { name: "Music", exact: true }).waitFor();
 }
 
-describe("the Sound panel", { concurrency: false }, () => {
+describe("Ambiance's Sound", { concurrency: false }, () => {
   before(async () => {
     // startServer passes this process's environment on: every step but sp-9 runs with the switch on.
     process.env.ROOM_SOUND = "1";

@@ -3,8 +3,9 @@ import { LIMITS } from "#shared/limits.ts";
 import type { Calendar, LongRestStamp } from "#shared/model.ts";
 
 /**
- * The words and small rules of the Time panel (docs/design/design-v1-calendar.md
- * 4 and 9), pure, so the panel, its dialogs and the tests read them alike.
+ * The words and small rules of Ambiance's Time
+ * (docs/design/design-v1-calendar.md 4 and 9), pure, so Time, its dialogs
+ * and the tests read them alike.
  */
 
 export const HOUR_SECONDS = 3_600;

@@ -2,7 +2,7 @@ import { SOUND_WORDS } from "#shared/reducer/sound.ts";
 import type { BuiltinSound, Repeat, SoundUse } from "#shared/sound.ts";
 
 /**
- * Every word the Sound panel shows (docs/design/design-v1-music.md 4.1,
+ * Every word Ambiance's Sound shows (docs/design/design-v1-music.md 4.1,
  * 4.3 and 10), in one place so the render tests, the e2e steps and the
  * DM guide read the same text.
  */

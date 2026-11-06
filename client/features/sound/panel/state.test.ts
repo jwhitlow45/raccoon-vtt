@@ -22,7 +22,7 @@ function playing(over: Partial<Playing> = {}): Playing {
   return { rev: 1, music: null, loops: {}, effects: [], volume: { music: 100, effects: 100 }, ...over };
 }
 
-describe("what the Sound panel reads (docs/design/design-v1-music.md 4.1)", () => {
+describe("what Ambiance's Sound reads (docs/design/design-v1-music.md 4.1)", () => {
   test("a play's order: the playlist's music tracks in order, shuffled only when it says so", () => {
     assert.deepEqual(orderFor({ playlistId: "tavern" }, { tavern: TAVERN }, SOUNDS), ["pony", "road"], "a loop and a sound that is gone never play as tracks");
     // A random of 0 always swaps with the first: [pony, road] becomes [road, pony].
