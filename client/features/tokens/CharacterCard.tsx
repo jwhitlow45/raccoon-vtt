@@ -132,16 +132,17 @@ export function CharacterPage(props: { character: Character; close: PanelClose; 
             target={{ characterId: character.id }}
             access={{ full: access.full, hp: access.full ? "all" : "none", deathSaves: access.full, life: access.dm }}
             name={character.name}
+            search="character.hp"
           />
         );
       case "conditions":
-        return <EffectsSection key={id} effects={actor.effects ?? []} target={{ characterId: character.id }} self={{ characterId: character.id }} selfLabel={character.name} canEdit={access.full} />;
+        return <EffectsSection key={id} effects={actor.effects ?? []} target={{ characterId: character.id }} self={{ characterId: character.id }} selfLabel={character.name} canEdit={access.full} search="character.conditions" />;
       case "uses":
         return <UsesSection key={id} target={{ characterId: character.id }} name={character.name} character={character} />;
       case "reaction":
         return <ReactionSection key={id} self={{ characterId: character.id }} name={character.name} />;
       case "rest":
-        return <RestSection key={id} actor={actor} target={{ characterId: character.id }} resources={character.resources} />;
+        return <RestSection key={id} actor={actor} target={{ characterId: character.id }} resources={character.resources} search={{ short: "character.rest.short", long: "character.rest.long" }} />;
     }
   };
 
@@ -166,7 +167,7 @@ export function CharacterPage(props: { character: Character; close: PanelClose; 
         return <PcStatBlock key={id} character={character} roll={blockRoll} fold={fold("statBlock")} />;
       case "combat":
         return (
-          <Group key={id} label="Combat" icon="combat" {...fold("page.combat")} summary={combatSummary({ hp: hpWords, effects, reactionUsed: spent })} holds="sections">
+          <Group key={id} label="Combat" icon="combat" search="character.combat" {...fold("page.combat")} summary={combatSummary({ hp: hpWords, effects, reactionUsed: spent })} holds="sections">
             {cardCombat({ reaction }).map(combatPart)}
           </Group>
         );
@@ -174,7 +175,7 @@ export function CharacterPage(props: { character: Character; close: PanelClose; 
         return <CharacterCompanions key={id} character={character} canAdd onAdd={props.onAddCompanion} onBlocks={props.onBlocks} close={props.close} group={fold("page.companions")} />;
       case "notes":
         return (
-          <Group key={id} label="Notes" icon="notes" {...fold("page.notes")} summary={noteCount === 0 ? "None yet" : `${noteCount} ${noteCount === 1 ? "note" : "notes"}`}>
+          <Group key={id} label="Notes" icon="notes" search="character.notes" {...fold("page.notes")} summary={noteCount === 0 ? "None yet" : `${noteCount} ${noteCount === 1 ? "note" : "notes"}`}>
             <Labeled label="On the card" hint="The DM and this character's players read it.">
               <CardNotesField actor={actor} editable={access.canEditActor("notes")} onPatch={patchActor} label="Card notes" rows={2} />
             </Labeled>
@@ -202,7 +203,7 @@ export function CharacterPage(props: { character: Character; close: PanelClose; 
         );
       case "stats":
         return (
-          <Group key={id} label="Stats" icon="stats" {...fold("page.stats")}>
+          <Group key={id} label="Stats" icon="stats" search="character.stats" {...fold("page.stats")}>
             {access.canEdit("name") ? (
               <FieldRow label="Name" fill>
                 <TextField label="Character name" value={character.name} maxLength={80} onCommit={(v) => v.trim() && update({ name: v.trim() })} />
@@ -224,7 +225,15 @@ export function CharacterPage(props: { character: Character; close: PanelClose; 
                 <NumberField label="Character level" value={character.level} min={1} max={20} nullable placeholder="Not set" onCommit={(level) => update({ level })} />
               </FieldRow>
             ) : null}
-            <StatsFields actor={actor} canEdit={access.canEditActor} onPatch={patchActor} dm={access.dm} noAc={hpLess(actor)} fromBlock={character.stats !== undefined} />
+            <StatsFields
+              actor={actor}
+              canEdit={access.canEditActor}
+              onPatch={patchActor}
+              dm={access.dm}
+              noAc={hpLess(actor)}
+              fromBlock={character.stats !== undefined}
+              search={{ ac: "character.ac", walk: "character.walk", pp: "character.pp", senses: "character.senses" }}
+            />
             {access.canEditActor("sheetUrl") ? (
               <FieldRow label="Sheet link" fill>
                 <SheetUrlField value={actor.sheetUrl ?? ""} onPatch={patchActor} />

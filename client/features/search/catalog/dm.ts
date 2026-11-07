@@ -2,9 +2,14 @@ import type { IconName } from "../../../components/Icon.tsx";
 import { dmMenuSections, type ChipItem, type DmMenuView } from "../../../pages/chipMenus.ts";
 import { audienceDetail, CHIP_WORDS, type DmItemKind } from "../../../pages/chipWords.ts";
 import type { RoomView } from "../../../state/types.ts";
+import { TIME_ENTRIES } from "../../clock/search.ts";
 import { DM_MEMBERS_ENTRIES, DM_PANEL_ENTRIES } from "../../dm/search.ts";
+import { TRACKER_ENTRIES } from "../../encounter/search.ts";
 import { entryKey } from "../../handouts/recentList.ts";
+import { SCENES_ENTRIES } from "../../scenes/search.ts";
 import { ROOM_SETTINGS_ENTRIES } from "../../settings/search.ts";
+import { SOUND_ENTRIES } from "../../sound/search.ts";
+import { DM_CHARACTERS_ENTRIES, DM_TOKEN_FIELDS } from "../../tokens/dmSearch.ts";
 import type { SearchRoute } from "../entry.ts";
 import { recordPage, SUGGEST } from "../index.ts";
 import type { Catalog, CatalogEntry } from "./types.ts";
@@ -12,9 +17,9 @@ import { onOff } from "./write.ts";
 
 /**
  * The DM's part of the search (designs/qol/search.md 5.8 and 5.9): the DM
- * panel, Room settings, the DM's part of Members, the DM panel's words and
- * the adapter from the DM menu's items with their twins. Scenes, Time and
- * Sound, Initiative's DM rows and the token panel's DM rows are lane S2b's.
+ * panel, Room settings, the DM's part of Members, Scenes, Time, Sound,
+ * Initiative, Characters' party rest, the token panel's DM fields, the DM's
+ * panels' words and the adapter from the DM menu's items with their twins.
  * Only dmCatalog.ts loads it, by a dynamic import behind a strict role
  * check, so it is a chunk of its own that a player's device never asks
  * for. A static import anywhere else would fold it into the room's chunk,
@@ -48,8 +53,8 @@ export const TWINS: Readonly<Record<SearchedItemKind, (view: DmMenuView) => Sear
   bringEveryone: () => screens("dm.screens.bring"),
   movePlayers: sceneRow,
   showPlayers: sceneRow,
-  // The scene's own Show a phase is in its settings in Scenes, whose anchors are lane S2b's: until then, its row.
-  phase: sceneRow,
+  // The scene in view's own Show a phase, in its Map and grid (phases/PhasesSection.tsx).
+  phase: () => ({ panel: "scenes", section: "map", anchor: "scenes.map.phases" }),
   hideHandout: () => handouts("dm.handouts"),
   showRecent: () => handouts("dm.handouts.recent"),
   showHandout: () => handouts("dm.handouts.show"),
@@ -138,8 +143,8 @@ export function dmMenuViewOf(state: Pick<RoomView, "view" | "sceneId">): DmMenuV
 }
 
 export const DM_CATALOG: Catalog = {
-  entries: [...DM_PANEL_ENTRIES, ...ROOM_SETTINGS_ENTRIES, ...DM_MEMBERS_ENTRIES],
-  fields: [],
-  panels: { dm: { names: ["dm tools"] } },
+  entries: [...DM_PANEL_ENTRIES, ...ROOM_SETTINGS_ENTRIES, ...DM_MEMBERS_ENTRIES, ...SCENES_ENTRIES, ...TIME_ENTRIES, ...SOUND_ENTRIES, ...TRACKER_ENTRIES, ...DM_CHARACTERS_ENTRIES],
+  fields: DM_TOKEN_FIELDS,
+  panels: { dm: { names: ["dm tools"] }, monsters: { names: ["creatures", "bestiary"] }, scenes: { names: ["maps"] } },
   items: (ctx) => (ctx.role === "dm" && ctx.state.view ? dmMenuEntries(ctx.dmMenu ?? dmMenuViewOf(ctx.state)) : []),
 };

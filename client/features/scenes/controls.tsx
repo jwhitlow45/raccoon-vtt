@@ -17,11 +17,14 @@ export function Select<T extends string>(props: {
   value: T;
   options: readonly { value: T; label: string }[];
   onChange(value: T): void;
+  /** The room search's anchor id (features/search/entry.ts), set as `data-search` on the select. */
+  search?: string;
 }) {
   const disabled = useHeld();
   return (
     <select
       aria-label={props.label}
+      data-search={props.search}
       value={props.value}
       disabled={disabled}
       onChange={(e) => props.onChange(e.target.value as T)}

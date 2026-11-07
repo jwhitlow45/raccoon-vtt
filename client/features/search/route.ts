@@ -20,6 +20,7 @@ import { theme } from "../../lib/theme.ts";
 import { scopeSlot, useScoped, type RoomScope } from "../../state/scope.ts";
 import type { RoomUi } from "../../state/store.ts";
 import type { PanelHow } from "../../state/types.ts";
+import { DICE_ROUTE_SECTIONS, diceFoldsSlot, diceRouteKeys, type DiceRouteSection } from "../dice/diceFolds.ts";
 import { journalSlot } from "../journal/store.ts";
 import { canonicalPanelId, SOUND_PANEL, takeOverPanelScroll } from "../panels.ts";
 import { openSoundNow, soundViewSlot, type SoundView } from "../sound/music/open.ts";
@@ -167,7 +168,8 @@ const NO_FOLDS: readonly string[] = [];
 /**
  * The folds a route may open on its way to a panel's page: lib/folds.ts's
  * surfaces (the DM panel, Scenes, Sound and This device in Menu), the
- * token panel's and a character's page's (panelFolds.ts). A route's
+ * token panel's and a character's page's (panelFolds.ts), and the Dice
+ * panel's (diceFolds.ts DICE_ROUTE_SECTIONS). A route's
  * `section` names one of these, which the search's catalog test holds it
  * to (search.md 5.10).
  */
@@ -185,6 +187,8 @@ export function routeFolds(panel: string, page?: string): readonly string[] {
       return TOKEN_FOLDS;
     case "characters":
       return recordId("character", page) !== null ? PAGE_FOLDS : NO_FOLDS;
+    case "dice":
+      return DICE_ROUTE_SECTIONS;
     default:
       return NO_FOLDS;
   }
@@ -210,6 +214,11 @@ function revealOnRoute(scope: RoomScope, panel: string, page: string | undefined
     case "menu":
       scope.get(thisDeviceFoldsSlot).reveal(section as ThisDeviceSection);
       return;
+    case "dice": {
+      const folds = scope.get(diceFoldsSlot);
+      for (const key of diceRouteKeys(section as DiceRouteSection)) folds.reveal(key);
+      return;
+    }
     default: {
       const folds = scope.get(panelFoldsSlot);
       folds.reveal(section as FoldKey);

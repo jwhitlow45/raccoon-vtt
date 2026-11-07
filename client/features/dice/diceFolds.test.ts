@@ -12,6 +12,8 @@ import {
   CREATURE_GROUPS,
   DICE_FOLD_KEYS,
   DICE_FOLDS_KEY,
+  DICE_ROUTE_SECTIONS,
+  diceRouteKeys,
   diceFoldsSlot,
   diceFoldStarts,
   foldKey,
@@ -331,5 +333,44 @@ describe("useDiceFolds", () => {
     preview.value!.fold("pc.skills").onToggle();
     assert.equal(preview.value!.fold("pc.skills").open, false);
     assert.equal(previewed.writes(), 0);
+  });
+});
+
+describe("a route's reveal (designs/qol/search.md 5.5)", () => {
+  test("opens a group for now, writing nothing, its listeners hearing it, and leaves one already open as it is", () => {
+    const s = storage(JSON.stringify({ "pc.skills": false }));
+    const folds = createDiceFolds(s);
+    folds.get(PHONE);
+    let heard = 0;
+    folds.subscribe(() => heard++);
+    folds.reveal("pc.skills");
+    assert.equal(folds.get(PHONE)["pc.skills"], true);
+    assert.equal(heard, 1);
+    folds.reveal("recent");
+    assert.equal(heard, 1, "Recent rolls was open already");
+    assert.equal(s.writes(), 0);
+  });
+
+  test("ends as the panel closes, folding again only what it opened and the viewer has not tapped since", () => {
+    const s = storage(JSON.stringify({ "pc.skills": false, "monster.skills": false, "pc.saves": false }));
+    const folds = createDiceFolds(s);
+    folds.get(PHONE);
+    for (const key of ["pc.skills", "monster.skills", "pc.saves"] as const) folds.reveal(key);
+    folds.tap("monster.skills", true, true);
+    // Opened for the page, as an ask's opening does, it stays.
+    folds.open("pc.saves");
+    folds.endReveals();
+    const now = folds.get(PHONE);
+    assert.deepEqual([now["pc.skills"], now["monster.skills"], now["pc.saves"]], [false, true, true]);
+    folds.endReveals();
+    assert.deepEqual(folds.get(PHONE), now, "a second end changes nothing");
+    assert.equal(s.writes(), 1, "only the viewer's tap is stored");
+  });
+
+  test("a route's section names each kind's group, which the panel's creature decides between, or Recent rolls", () => {
+    assert.deepEqual([...DICE_ROUTE_SECTIONS], ["saves", "skills", "recent"]);
+    assert.deepEqual(diceRouteKeys("saves"), FOLD_KINDS.map((k) => foldKey(k, "saves")));
+    assert.deepEqual(diceRouteKeys("recent"), ["recent"]);
+    for (const section of DICE_ROUTE_SECTIONS) for (const key of diceRouteKeys(section)) assert.ok(DICE_FOLD_KEYS.includes(key), key);
   });
 });

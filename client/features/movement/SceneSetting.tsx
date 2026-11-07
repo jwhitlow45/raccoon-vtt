@@ -17,6 +17,7 @@ export function BlockMovementSetting(props: { scene: Scene }) {
   return (
     <Switch
       label="Walls and ledges block players' moves"
+      search="scenes.walls.block"
       help={
         on
           ? "A player's drag stops at walls, closed doors and ledges. Raised ground is reached by its stairs. Your own moves are never stopped."

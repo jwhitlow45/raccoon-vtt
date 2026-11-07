@@ -517,6 +517,7 @@ export function Roller() {
         <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
           <Input
             ref={field}
+            search="dice.formula"
             value={text}
             aria-label="Dice formula"
             aria-describedby={blocked !== null ? blockedId : reading || error ? readingId : undefined}
@@ -595,10 +596,11 @@ const MODE_RADIUS: Record<ModeShape, string> = {
  * above the other, so its accent outline and its focus ring show whole,
  * and the split line takes the pressed half's accent.
  */
-function ModeHalf(props: { shape: Exclude<ModeShape, "pill">; pressed: boolean; label: string; focused: boolean; onFocus(on: boolean): void; onPress(): void; children: ReactNode }) {
+function ModeHalf(props: { shape: Exclude<ModeShape, "pill">; pressed: boolean; label: string; search: string; focused: boolean; onFocus(on: boolean): void; onPress(): void; children: ReactNode }) {
   return (
     <button
       type="button"
+      data-search={props.search}
       aria-pressed={props.pressed}
       aria-label={props.label}
       onClick={props.onPress}
@@ -668,16 +670,16 @@ export function RollModes(props: { adv: boolean; dis: boolean; secret: boolean; 
         Next roll
       </span>
       <div ref={pair} style={{ display: "flex", flex: "none" }}>
-        <ModeHalf shape="start" pressed={props.adv} label="Advantage" focused={focused === "adv"} onFocus={focus("adv")} onPress={() => props.onPress("adv")}>
+        <ModeHalf shape="start" pressed={props.adv} label="Advantage" search="dice.next.adv" focused={focused === "adv"} onFocus={focus("adv")} onPress={() => props.onPress("adv")}>
           Adv
         </ModeHalf>
-        <ModeHalf shape="end" pressed={props.dis} label="Disadvantage" focused={focused === "dis"} onFocus={focus("dis")} onPress={() => props.onPress("dis")}>
+        <ModeHalf shape="end" pressed={props.dis} label="Disadvantage" search="dice.next.dis" focused={focused === "dis"} onFocus={focus("dis")} onPress={() => props.onPress("dis")}>
           Dis
         </ModeHalf>
       </div>
       {/* A grid stretches the chip to the span's width, so the chip fills the line once the span grows. */}
       <span ref={secret} data-dice-secret="" style={{ display: "grid", flex: wrapped ? "1 1 auto" : "none" }}>
-        <Chip pressed={props.secret} aria-label={props.dm ? "Hide from players" : "Only the DM sees it"} onClick={() => props.onPress("secret")}>
+        <Chip pressed={props.secret} data-search="dice.next.secret" aria-label={props.dm ? "Hide from players" : "Only the DM sees it"} onClick={() => props.onPress("secret")}>
           <span style={{ display: "inline-flex", alignItems: "center", gap: theme.space(1) }}>
             <Icon name="hidden" size="sm" />
             Secret

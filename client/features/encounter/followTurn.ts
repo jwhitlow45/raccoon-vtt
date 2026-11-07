@@ -24,12 +24,15 @@ function read(): boolean {
 let following = read();
 
 export function useFollowTurn(): boolean {
+  const read = () => following;
   return useSyncExternalStore(
     (fn) => {
       listeners.add(fn);
       return () => listeners.delete(fn);
     },
-    () => following,
+    read,
+    // The same read serves a render to markup, so the room search's test can draw Initiative (features/search/anchors.test.ts).
+    read,
   );
 }
 

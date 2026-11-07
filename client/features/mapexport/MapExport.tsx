@@ -174,7 +174,7 @@ export function MapExport(props: { scene: Scene }) {
     return (
       <Section label={EXPORT_LABEL}>
         <Row>
-          <Button ref={opener} size="sm" onClick={() => setOpen(true)}>
+          <Button ref={opener} size="sm" search="scenes.export" onClick={() => setOpen(true)}>
             Export as image
           </Button>
         </Row>

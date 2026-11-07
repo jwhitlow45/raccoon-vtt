@@ -92,10 +92,10 @@ export function SceneSoundLine(props: {
 }
 
 /** Stop all sound's button, for a row that shows it only while anything sounds (useSoundToStop): under the panel's player (music/NowFull.tsx), and at the foot of the chip's (mini/NowPlayer.tsx). */
-export function StopAllButton() {
+export function StopAllButton(props: { search?: string } = {}) {
   const actions = useRoomActions();
   return (
-    <Button size="sm" variant="danger" icon="stop" onClick={() => send(actions, { t: "sound.stopAll" })}>
+    <Button size="sm" variant="danger" icon="stop" search={props.search} onClick={() => send(actions, { t: "sound.stopAll" })}>
       {STOP_ALL}
     </Button>
   );
@@ -208,5 +208,5 @@ export function MusicVolume(props: { label?: string } = {}) {
 export function NamesSwitch() {
   const actions = useRoomActions();
   const on = useRoomView((s) => s.view?.meta.settings.soundNames === true);
-  return <Switch label={NAMES_SWITCH} help={NAMES_HELP} checked={on} onChange={(next) => send(actions, { t: "room.update", settings: { soundNames: next } })} />;
+  return <Switch label={NAMES_SWITCH} search="sound.table.names" help={NAMES_HELP} checked={on} onChange={(next) => send(actions, { t: "room.update", settings: { soundNames: next } })} />;
 }

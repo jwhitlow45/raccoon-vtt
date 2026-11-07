@@ -25,18 +25,18 @@ import { theme } from "../../lib/theme.ts";
 export const inputStyle: CSSProperties = fieldStyle();
 
 /** A token panel section. `title` is left out where its group's heading already names it, as Notes and Position. */
-export function Section(props: { title?: string; children: ReactNode; aside?: ReactNode; fold?: ComponentProps<typeof PanelSection>["fold"] }) {
+export function Section(props: { title?: string; children: ReactNode; aside?: ReactNode; fold?: ComponentProps<typeof PanelSection>["fold"]; search?: string }) {
   return (
-    <PanelSection label={props.title} action={props.aside} fold={props.fold}>
+    <PanelSection label={props.title} action={props.aside} fold={props.fold} search={props.search}>
       {props.children}
     </PanelSection>
   );
 }
 
 /** A label on the left and its control on the right, wrapping on narrow sheets. `fill` for a control that stretches, `fixed` for one such as a Stepper (components/Field.tsx). */
-export function FieldRow(props: { label: string; children: ReactNode; htmlFor?: string; hint?: ReactNode; fill?: boolean; fixed?: boolean }) {
+export function FieldRow(props: { label: string; children: ReactNode; htmlFor?: string; hint?: ReactNode; fill?: boolean; fixed?: boolean; search?: string }) {
   return (
-    <PanelFieldRow label={props.label} htmlFor={props.htmlFor} hint={props.hint} fill={props.fill} fixed={props.fixed}>
+    <PanelFieldRow label={props.label} htmlFor={props.htmlFor} hint={props.hint} fill={props.fill} fixed={props.fixed} search={props.search}>
       {props.children}
     </PanelFieldRow>
   );

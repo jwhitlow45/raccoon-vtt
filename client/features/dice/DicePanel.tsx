@@ -4,8 +4,11 @@ import type { LogEntry } from "#shared/model.ts";
 import { usePanelHere, type PanelProps } from "../panels.ts";
 import { scrollBox, startInScrollBox } from "../../lib/reveal.ts";
 import { theme } from "../../lib/theme.ts";
-import { useRoomUi, useRoomView } from "../../state/view.ts";
-import { useDiceFolds } from "./diceFolds.ts";
+import { panelIsOpen } from "../../lib/folds.ts";
+import { useRoomScope } from "../../state/scope.ts";
+import { useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
+import { layoutWidth } from "../device/layout.ts";
+import { diceFoldsSlot, useDiceFolds } from "./diceFolds.ts";
 import { RecentRolls } from "./RecentRolls.tsx";
 import { RollOptions, useOptionsEndOnGroup } from "./RollOptions.tsx";
 import { LastResult, Roller } from "./Roller.tsx";
@@ -105,6 +108,7 @@ export default function DicePanel(props: PanelProps) {
     setAsked((n) => n + 1);
   };
   const recentOpen = folds.folds.recent;
+  useEndRevealsOnClose();
   const root = throwPanel.ref;
   useEffect(() => {
     const lineId = reveal.current;
@@ -151,5 +155,23 @@ export default function DicePanel(props: PanelProps) {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * The panel going from open to closed folds again what a route revealed
+ * on its way (diceFolds.ts reveal), as Room does for the panels whose folds
+ * live in lib/folds.ts. The panel draws exactly while it is open, so this
+ * runs as it leaves, unless it is still open, as when a turn across 900 px
+ * remounts it in the other tree.
+ */
+function useEndRevealsOnClose(): void {
+  const scope = useRoomScope();
+  const store = useRoomStore();
+  useEffect(
+    () => () => {
+      if (!panelIsOpen(store.getState().local, "dice", layoutWidth() >= theme.layout.wideMinWidth)) scope.get(diceFoldsSlot).endReveals();
+    },
+    [scope, store],
   );
 }

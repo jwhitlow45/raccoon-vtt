@@ -10,8 +10,7 @@ import { DM_VIEW, indexOf, PAT_VIEW, rowsOf, seededRoom, viewOf } from "./search
 /**
  * The golden queries (designs/qol/search.md 5.10 point 3 and section 7):
  * each query of the case table, by role, with what it must list first, on
- * the seeded room, through the real catalogs and the entries lane S2b
- * still writes (search.testutil.ts PENDING_*), so the best bets on their
+ * the seeded room, through the real catalogs, so the best bets on their
  * entries are held here too. Pat's device has Room sound on, as one that
  * hears the music does: Music volume shows only then.
  */
@@ -24,11 +23,12 @@ const first = (rows: SearchEntry[], n: number) => rows.slice(0, n).map(row);
 describe("golden queries, the DM", () => {
   const dm = indexOf(DM_VIEW());
 
-  test("init: Initiative first, Start a fight second, then the Combat settings", () => {
+  // The case table's Combat settings, with Initiative's own rows beside them, which its prototype's catalog did not hold.
+  test("init: Initiative first, Start a fight second, then the Combat settings and Initiative's own rows", () => {
     const rows = rowsOf(dm, "init");
     assert.deepEqual(first(rows, 2), ["panel:Initiative", "action:Start a fight · Initiative"]);
-    assert.ok(rows.slice(2).every((e) => e.where.includes("Combat") || e.title === "Combat"), rows.map(row).join("\n"));
-    assert.ok(rows.length >= 3);
+    assert.ok(rows.slice(2).every((e) => e.where.includes("Combat") || e.title === "Combat" || e.where.startsWith("Initiative ·")), rows.map(row).join("\n"));
+    assert.ok(rows.slice(2).some((e) => e.where.includes("Combat")), rows.map(row).join("\n"));
   });
 
   test("long rest and rest: Long Rest for the party first, then each character's Long Rest", () => {
@@ -61,7 +61,7 @@ describe("golden queries, the DM", () => {
   test("the best bets on their entries", () => {
     assert.equal(row(rowsOf(dm, "pause")[0]!), "action:Black out players' screens · DM menu · Players' screens");
     assert.equal(row(rowsOf(dm, "blackout")[0]!), "action:Black out players' screens · DM menu · Players' screens");
-    assert.equal(row(rowsOf(dm, "dark")[0]!), "setting:Light level · Scenes · Light and weather");
+    assert.equal(row(rowsOf(dm, "dark")[0]!), "setting:Light level · Scenes · Light and weather: Bright");
     assert.equal(row(rowsOf(dm, "fight")[0]!), "action:Start a fight · Initiative");
   });
 
@@ -81,6 +81,36 @@ describe("golden queries, the DM", () => {
       for (let i = 0; i < 10; i++) recent = recordPick(recent, fresh.at(-1)!.id);
       assert.deepEqual(rowsOf(dm, text, recent), fresh, text);
     }
+  });
+});
+
+describe("golden queries, the DM's flows (search.md 2) and the rest of the panels", () => {
+  const dm = indexOf(DM_VIEW());
+
+  test("turn sound, init scores and party hp: the setting the flow ends on, first", () => {
+    assert.equal(row(rowsOf(dm, "turn sound")[0]!), "setting:Turn sound · Menu · This device · Sounds: Off");
+    assert.equal(row(rowsOf(dm, "init scores")[0]!), "setting:Use Initiative scores for monsters · Menu · Room settings · Combat: Off");
+    assert.equal(row(rowsOf(dm, "party hp")[0]!), "setting:Players see the party's HP · Menu · Room settings · Players: On");
+  });
+
+  test("new scene, the builder, a clock and a message: Scenes', Time's and the Log's own rows first", () => {
+    assert.equal(row(rowsOf(dm, "new scene")[0]!), "action:New scene · Scenes");
+    assert.equal(row(rowsOf(dm, "open the builder")[0]!), "action:Open the builder · Scenes · Walls and movement");
+    assert.equal(row(rowsOf(dm, "start clock")[0]!), "action:Start the clock · Time");
+    assert.deepEqual(first(rowsOf(dm, "chat"), 2), ["panel:Log", "action:Send a message · Log"]);
+  });
+
+  test("in a fight, end fight: End the fight first", () => {
+    const room = seededRoom();
+    room.encounter = { rev: 0, round: 1, activeEntryId: "e1", entries: [entry("e1", { tokenId: "g1", value: 12 })] };
+    assert.equal(row(rowsOf(indexOf(viewOf(room, DM)), "end fight")[0]!), "action:End the fight · Initiative");
+  });
+
+  test("with Goblin 1 selected: its own fields first, Hidden from players among them", () => {
+    const selected = indexOf(viewOf(seededRoom(), DM, { selectedId: "g1" }));
+    assert.equal(row(rowsOf(selected, "hp")[0]!), "field:Hit Points · Goblin 1: 20 of 20");
+    assert.ok(first(rowsOf(selected, "hidden"), 2).includes("field:Hidden from players · Goblin 1"));
+    assert.equal(row(rowsOf(selected, "stats")[0]!), "section:Stats · Goblin 1");
   });
 });
 
@@ -122,6 +152,12 @@ describe("golden queries, a player (Pat, who plays Bree)", () => {
 
   test("darkvision: their character's Senses, value shown", () => {
     assert.deepEqual(first(rowsOf(pat, "darkvision"), 1), ["field:Senses · Bree: Darkvision 60 ft."]);
+  });
+
+  test("saves, notes and whisper: the Dice panel's, their character's and the Log's own rows", () => {
+    assert.equal(row(rowsOf(pat, "saves")[0]!), "section:Saves and checks · Dice");
+    assert.equal(row(rowsOf(pat, "notes")[0]!), "section:Notes · Bree");
+    assert.equal(row(rowsOf(pat, "whisper")[0]!), "action:Whisper to someone · Log");
   });
 });
 

@@ -112,7 +112,7 @@ export function PhasesSection(props: { scene: Scene }) {
         Map phases
       </h4>
       {phases.length > 1 ? (
-        <div role="group" aria-label="Show a phase" style={{ display: "flex", alignItems: "center", gap: theme.space(1), flexWrap: "wrap" }}>
+        <div role="group" aria-label="Show a phase" data-search="scenes.map.phases" style={{ display: "flex", alignItems: "center", gap: theme.space(1), flexWrap: "wrap" }}>
           {phases.map((phase) => {
             const title = phase.id === active ? `${phase.name} is showing` : `Show ${phase.name}`;
             return (

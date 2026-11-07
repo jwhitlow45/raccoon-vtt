@@ -54,7 +54,8 @@ export function subscribeSoundOn(fn: () => void): () => void {
 }
 
 export function useSoundOn(): boolean {
-  return useSyncExternalStore(subscribeSoundOn, isSoundOn);
+  // The same read serves a render to markup, so the room search's test can draw Initiative (features/search/anchors.test.ts).
+  return useSyncExternalStore(subscribeSoundOn, isSoundOn, isSoundOn);
 }
 
 /** Call from a tap, so the browser lets the audio start. */

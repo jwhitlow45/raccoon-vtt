@@ -333,7 +333,7 @@ export function RecentRolls(props: { names: LogNames; me: string; open: string |
   return (
     // A group is no landmark (components/Panel.tsx), so the mark sits on a plain box around it.
     <div data-dice-recent="" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)" }}>
-      <Group label="Recent rolls" {...fold("recent")} summary={summary ? <MarkedText text={summary.text} marks={summary.marks} /> : undefined}>
+      <Group label="Recent rolls" search="dice.recent" {...fold("recent")} summary={summary ? <MarkedText text={summary.text} marks={summary.marks} /> : undefined}>
         {rows.length === 0 ? (
           <Empty>No rolls yet. Type a formula or tap a die.</Empty>
         ) : (

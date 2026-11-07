@@ -100,6 +100,7 @@ export function EffectsBoard(props: { serverOn: boolean; editing: boolean; onEdi
   return (
     <Section
       label="Effects"
+      search="sound.effects"
       action={
         canEdit ? (
           // One button whose words change, so focus stays on it through Edit and Done (10).

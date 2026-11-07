@@ -170,7 +170,7 @@ function fieldEntry(f: FieldDef, holder: string, name: string, actor: ProjectedA
   const value = actor ? f.value?.(actor) : undefined;
   return {
     id: `field:${holder}:${f.key}`,
-    kind: "field",
+    kind: f.kind ?? "field",
     title: f.title,
     ...(f.names ? { names: f.names } : null),
     ...(f.bets ? { bets: f.bets } : null),

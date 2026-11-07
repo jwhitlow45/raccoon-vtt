@@ -69,6 +69,8 @@ export function Row(props: {
   opener?: string;
   /** The shortcut it does, from state/shortcuts.ts useKeyHint: `title` its hover title with the key, "View (I)", and `aria` its `aria-keyshortcuts`. Only with `onClick`. */
   keys?: { title: string; aria: string };
+  /** The room search's anchor id (features/search/entry.ts), as `data-search` on its button. Only with `onClick`. */
+  search?: string;
   style?: CSSProperties;
 }) {
   const card = props.card === true || props.onClick !== undefined;
@@ -147,6 +149,7 @@ export function Row(props: {
       type="button"
       {...props.data}
       data-opener={props.opener}
+      data-search={props.search}
       aria-label={props.label}
       aria-labelledby={full && props.label === undefined ? titleId : undefined}
       aria-describedby={full ? detailId : undefined}

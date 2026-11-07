@@ -59,6 +59,8 @@ export type FieldPlace = { section?: string; anchor: string };
 export type FieldDef = {
   /** Unique among the fields, the last part of each entry's id: "hp" gives `field:character:<id>:hp`. */
   key: string;
+  /** A group of the panel or page rather than one field, as Combat and Notes: its rows say "Section". Left out, a field. */
+  kind?: "section";
   title: string;
   names?: readonly string[];
   bets?: readonly string[];

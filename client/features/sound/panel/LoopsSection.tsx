@@ -76,6 +76,7 @@ export function LoopsSection(props: { editing: boolean; onEditing(editing: boole
   return (
     <Section
       label="Background"
+      search="sound.background"
       action={
         loops.length > 0 ? (
           <Button size="sm" onClick={() => props.onEditing(!editing)}>

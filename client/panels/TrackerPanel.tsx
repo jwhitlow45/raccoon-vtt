@@ -630,7 +630,7 @@ function StartFight(props: { selectedTokenId: string | null }) {
   const roll = useStartRoll();
   const rolling = useStartWaiting();
   return (
-    <Section label="New fight" style={COLUMN}>
+    <Section label="New fight" search="tracker.new-fight" style={COLUMN}>
       <Wrap>
         <AddButtons candidates={candidates} stateOf={join.stateOf} onAdd={(tokens, from) => startFight(join.batches(tokens), from)} rolling={rolling} />
         <Button size="sm" onClick={() => startFight([], null)} style={GROW}>
@@ -638,7 +638,7 @@ function StartFight(props: { selectedTokenId: string | null }) {
         </Button>
       </Wrap>
       <JoinFailed candidates={candidates} stateOf={join.stateOf} />
-      <Switch label="Roll monsters' Initiative" help="Auto Initiative rolls for every monster as the fight starts." checked={roll.on} onChange={roll.setOn} />
+      <Switch label="Roll monsters' Initiative" search="tracker.new-fight.roll" help="Auto Initiative rolls for every monster as the fight starts." checked={roll.on} onChange={roll.setOn} />
     </Section>
   );
 }
@@ -697,13 +697,13 @@ function DmSetup(props: { selectedTokenId: string | null; editingValues: boolean
 
   return (
     <>
-      <Section label="Auto Initiative" style={COLUMN}>
+      <Section label="Auto Initiative" search="tracker.auto" style={COLUMN}>
         <AutoInitiativeControls />
         <AutoInitiativeResult />
       </Section>
       <Section label="Initiative" style={COLUMN}>
         <Wrap>
-          <Button size="sm" disabled={props.editingValues || entries.length === 0} onClick={props.onEditValues}>
+          <Button size="sm" search="tracker.initiative.values" disabled={props.editingValues || entries.length === 0} onClick={props.onEditValues}>
             Type several values
           </Button>
           {fills.length > 0 ? (
@@ -721,12 +721,13 @@ function DmSetup(props: { selectedTokenId: string | null; editingValues: boolean
         </Wrap>
         <Switch
           label="Monsters use Initiative scores"
+          search="tracker.initiative.scores"
           help="10 + DEX modifier instead of a roll. New monster rows start with it."
           checked={scores}
           onChange={(on) => actions.dispatch({ t: "room.update", settings: { monsterInitScore: on } })}
         />
       </Section>
-      <Section label="More creatures" style={COLUMN}>
+      <Section label="More creatures" search="tracker.more" style={COLUMN}>
         <Wrap>
           <AddButtons candidates={candidates} stateOf={join.stateOf} onAdd={add} />
         </Wrap>
@@ -754,6 +755,7 @@ function DmSettings() {
         <Help>Counts each turn down for everyone, and nudges whoever acts when time is up. It never ends a turn.</Help>
         <Segmented
           label="Turn timer"
+          search="tracker.timer"
           value={timerSec}
           options={timerChoices(timerSec)}
           onChange={(turnTimerSec) => actions.dispatch({ t: "room.update", settings: { turnTimerSec } })}
@@ -764,6 +766,7 @@ function DmSettings() {
           <Button
             size="sm"
             variant="danger"
+            search="tracker.end"
             armed={confirmEnd}
             onClick={() => {
               if (!confirmEnd) {
@@ -825,6 +828,7 @@ function SoundSwitch() {
       {dm ? (
         <Switch
           label="Camera follows the turn"
+          search="tracker.device.follow"
           help="Your map pans to whoever acts each time the turn moves. Players' maps stay where they are."
           checked={follow}
           onChange={setFollowTurn}

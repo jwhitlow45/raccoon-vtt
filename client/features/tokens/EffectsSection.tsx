@@ -67,6 +67,8 @@ export function EffectsSection(props: {
   selfLabel: string;
   canEdit: boolean;
   title?: string;
+  /** The room search's anchor id (features/search/entry.ts) on its heading, in both of its looks: the token panel's or a character page's. */
+  search?: string;
 }) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [picking, setPicking] = useState(false);
@@ -106,7 +108,7 @@ export function EffectsSection(props: {
     return (
       // No box of its own: a hold for the focus hand-off above and the presses it follows, around the section in both of its looks.
       <div ref={box} onClickCapture={notePress} style={{ display: "contents" }}>
-        <Section title={props.title ?? "Conditions"}>
+        <Section title={props.title ?? "Conditions"} search={props.search}>
           <EffectDetail
             key={detail.mode === "add" ? `add:${detail.key}` : `edit:${detail.effectId}`}
             effectKey={detail.mode === "add" ? detail.key : editing!.key}
@@ -129,6 +131,7 @@ export function EffectsSection(props: {
     <div ref={box} onClickCapture={notePress} style={{ display: "contents" }}>
       <Section
         title={props.title ?? "Conditions"}
+        search={props.search}
         aside={
           props.canEdit ? (
             <SmallButton pressed={picking} onClick={() => setPicking((p) => !p)}>

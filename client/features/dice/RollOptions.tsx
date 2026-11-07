@@ -588,7 +588,7 @@ function OptionGroups(props: Shown) {
           <RowCast dice={dice} creatureKey={ctx.key} creature={creature} name={props.name} blocked={ctx.blocked} named={null} rowSlot={null} blockHere />
         </div>
       ) : null}
-      <Group label="Saves and checks" {...groupFold("saves")} summary={markedSummary(ctx, foldSummaryParts({ group: "saves", note: sharedNote, saves: numbers ? Object.fromEntries(ABILITY_KEYS.map((a) => [a, numbers.abilities[a].save])) : null }, asks.saves))}>
+      <Group label="Saves and checks" search="dice.saves" {...groupFold("saves")} summary={markedSummary(ctx, foldSummaryParts({ group: "saves", note: sharedNote, saves: numbers ? Object.fromEntries(ABILITY_KEYS.map((a) => [a, numbers.abilities[a].save])) : null }, asks.saves))}>
         {reminders([...saveTests, ...checkTests])}
         <Grid label="Saves" note={numbers ? saveNote : undefined}>
           {ABILITY_KEYS.map((a) =>
@@ -609,6 +609,7 @@ function OptionGroups(props: Shown) {
       </Group>
       <Group
         label="Skills"
+        search="dice.skills"
         {...groupFold("skills")}
         summary={markedSummary(
           ctx,

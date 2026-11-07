@@ -1,9 +1,9 @@
 import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
-import { describe, test } from "node:test";
+import { afterEach, beforeEach, describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
 import type { RoomState } from "#shared/model.ts";
-import { DM, P1 } from "#shared/testutil.ts";
+import { DM, entry, P1 } from "#shared/testutil.ts";
 import { RoomScope } from "../../state/scope.ts";
 import type { RoomView } from "../../state/types.ts";
 import type { DmMenuView } from "../../pages/chipMenus.ts";
@@ -17,8 +17,9 @@ import { seededRoom, viewOf } from "./search.testutil.ts";
 
 /*
  * Each control the catalogs route to draws its anchor (designs/qol/search.md
- * 5.10): the DM panel, Menu's X-card, Room settings and Members, drawn
- * to markup as a DM and as a player, hold the `data-search`
+ * 5.10): the DM panel, Menu's X-card, Room settings, Members, Scenes, Time,
+ * Initiative, Characters, the Log and Sound, drawn to markup as a DM and as
+ * a player, hold the `data-search`
  * id of every entry and twin that routes there and holds now, and no id
  * the catalogs do not know. A player's drawing holds every anchor of
  * everyone's catalog there, so no entry a player cannot reach ships in
@@ -37,6 +38,13 @@ const { default: DmPanel } = await import("../../panels/DmPanel.tsx");
 const { XCardButton } = await import("../xcard/XCardButton.tsx");
 const { default: SettingsPanel } = await import("../../panels/SettingsPanel.tsx");
 const { default: MembersPanel } = await import("../../panels/MembersPanel.tsx");
+const { default: ScenesPanel } = await import("../../panels/ScenesPanel.tsx");
+const { default: TimePanel } = await import("../clock/TimePanel.tsx");
+const { default: TrackerPanel } = await import("../../panels/TrackerPanel.tsx");
+const { default: CharactersPanel } = await import("../tokens/CharactersPanel.tsx");
+const { default: LogPanel } = await import("../../panels/LogPanel.tsx");
+const { default: SoundPanel } = await import("../sound/panel/SoundPanel.tsx");
+const { default: DicePanel } = await import("../dice/DicePanel.tsx");
 const { joinRequestsSlot } = await import("../dm/JoinRequests.tsx");
 const { recentHandoutsSlot } = await import("../handouts/recent.ts");
 
@@ -85,7 +93,7 @@ function scopeFor(view: RoomView): RoomScope {
   return scope;
 }
 
-function draw(view: RoomView, Component: (props: never) => unknown): string {
+function draw(view: RoomView, Component: (props: never) => unknown, props: object = {}): string {
   const store = createStore(() => ({ ...view, connection: "open", pending: [], online: [], displays: 0, accessVersion: 0, joinRequestsVersion: 0 }));
   return renderToStaticMarkup(
     createElement(RoomScopeProvider, {
@@ -95,7 +103,7 @@ function draw(view: RoomView, Component: (props: never) => unknown): string {
         actions: { dispatch: () => 1, newId: () => "x", sendEph: () => {} } as never,
         ui: { notify: () => {}, openPanel: () => {}, closePanel: () => {} } as never,
         assets: { url: () => "" } as never,
-        children: createElement(Component as never, {} as never),
+        children: createElement(Component as never, props as never),
       }),
     }),
   );
@@ -120,7 +128,7 @@ function routes(catalogs: readonly Catalog[], ctx: SearchContext): SearchRoute[]
 /** Every anchor any catalog routes to, whatever holds now, for the reverse check. */
 function known(): Set<string> {
   const all = new Set<string>();
-  for (const view of [viewOf(fullRoom(), DM), viewOf(fullRoom(), P1)]) {
+  for (const view of [viewOf(fullRoom(), DM), viewOf(fullRoom(), P1), viewOf(phasesRoom(), DM)]) {
     const ctx = contextOf(view, true);
     for (const c of [EVERYONE, DM_CATALOG]) {
       for (const e of [...c.entries, ...(c.items?.(ctx) ?? [])]) {
@@ -132,14 +140,52 @@ function known(): Set<string> {
   return all;
 }
 
-/** A surface drawn for the roles that have it: Room settings and the DM panel are a DM's, and only a player's You menu has the X-card as an item. */
-type Surface = { name: string; panel: string; page?: string; roles: readonly ("dm" | "player")[]; Component: (props: never) => unknown };
+/** A clock running, shown to players: Time's controls of a running clock. */
+function clockRoom(): RoomState {
+  const room = fullRoom();
+  room.clock = { id: "c1", rev: 0, t: 0, shown: true, calendar: { kind: "days" } };
+  return room;
+}
+
+/** The scene in view with two map phases, whose Show a phase is the DM menu's phase items' twin. */
+function phasesRoom(): RoomState {
+  const room = fullRoom();
+  const phase = (id: string, name: string) => ({ id, name, assetId: `map-${id}`, widthPx: 100, heightPx: 100 });
+  room.scenes.s1 = { ...room.scenes.s1!, map: { assetId: "map-day", widthPx: 100, heightPx: 100, cellPx: 10, originPx: { x: 0, y: 0 } }, phases: [phase("day", "Day"), phase("night", "Night")], phaseId: "day" };
+  return room;
+}
+
+/** A fight running, with a goblin's row: Initiative's setup and settings. */
+function fightRoom(): RoomState {
+  const room = fullRoom();
+  room.encounter = { rev: 0, round: 1, activeEntryId: "e1", entries: [entry("e1", { tokenId: "g1", value: 12 })] };
+  return room;
+}
+
+/**
+ * A surface drawn for the roles that have it: Room settings and the DM panel are a DM's, and only a player's You menu has the X-card as an item.
+ * `room` draws it on another room than the full one, and `props` are its panel's.
+ */
+type Surface = { name: string; panel: string; page?: string; roles: readonly ("dm" | "player")[]; Component: (props: never) => unknown; room?: () => RoomState; props?: object };
+
+const PANEL = { close: () => {}, selectedTokenId: null };
 
 const SURFACES: Surface[] = [
   { name: "the DM panel", panel: "dm", roles: ["dm"], Component: DmPanel as never },
   { name: "Menu's X-card", panel: "menu", roles: ["player"], Component: XCardButton as never },
   { name: "Room settings", panel: "menu", page: "settings", roles: ["dm"], Component: SettingsPanel as never },
   { name: "Members", panel: "menu", page: "members", roles: ["dm", "player"], Component: MembersPanel as never },
+  { name: "Scenes", panel: "scenes", roles: ["dm"], Component: ScenesPanel as never, props: PANEL },
+  { name: "Scenes with map phases", panel: "scenes", roles: ["dm"], Component: ScenesPanel as never, props: PANEL, room: phasesRoom },
+  { name: "Time with no clock", panel: "time", roles: ["dm"], Component: TimePanel as never, props: PANEL },
+  { name: "Time with a clock", panel: "time", roles: ["dm"], Component: TimePanel as never, props: PANEL, room: clockRoom },
+  { name: "Initiative with no fight", panel: "tracker", roles: ["dm"], Component: TrackerPanel as never, props: PANEL },
+  { name: "Initiative in a fight", panel: "tracker", roles: ["dm"], Component: TrackerPanel as never, props: PANEL, room: fightRoom },
+  { name: "Characters", panel: "characters", roles: ["dm"], Component: CharactersPanel as never, props: PANEL },
+  { name: "the Log", panel: "log", roles: ["dm", "player"], Component: LogPanel as never, props: PANEL },
+  { name: "Sound before the server says it has sound files", panel: "sound", page: "now", roles: ["dm"], Component: SoundPanel as never, props: PANEL },
+  // With nothing selected, so no creature's groups, which wait for its rolls to load.
+  { name: "Dice with nothing selected", panel: "dice", roles: ["dm"], Component: DicePanel as never, props: PANEL },
 ];
 
 /** The anchors a surface must draw for a viewer: every route there that names one. */
@@ -153,13 +199,13 @@ function expected(surface: Surface, catalogs: readonly Catalog[], ctx: SearchCon
 describe("each entry's control draws its anchor (search.md 5.10)", () => {
   const all = known();
   for (const role of ["dm", "player"] as const) {
-    const view = viewOf(fullRoom(), role === "dm" ? DM : P1);
-    const ctx = contextOf(view, false);
     const catalogs = role === "dm" ? [EVERYONE, DM_CATALOG] : [EVERYONE];
     for (const surface of SURFACES) {
       if (!surface.roles.includes(role)) continue;
+      const view = viewOf((surface.room ?? fullRoom)(), role === "dm" ? DM : P1);
+      const ctx = contextOf(view, false);
       test(`${surface.name}, as ${role === "dm" ? "the DM" : "a player"}`, () => {
-        const drawn = anchorsIn(draw(view, surface.Component));
+        const drawn = anchorsIn(draw(view, surface.Component, surface.props));
         const want = expected(surface, catalogs, ctx);
         assert.ok(want.length > 0, "the check reads routes to this surface");
         for (const a of want) assert.ok(drawn.includes(a), `${a} is routed to but not drawn`);
@@ -174,6 +220,43 @@ describe("each entry's control draws its anchor (search.md 5.10)", () => {
     const dmOnly = new Set(routes([DM_CATALOG], contextOf(viewOf(fullRoom(), DM), true)).flatMap((r) => (r.anchor ? [r.anchor] : [])));
     for (const surface of SURFACES.filter((s) => s.roles.includes("player"))) {
       for (const a of anchorsIn(draw(view, surface.Component))) assert.ok(!dmOnly.has(a), `${surface.name} draws the DM's ${a} for a player`);
+    }
+  });
+});
+
+describe("a creature's fields draw their anchors (search.md 4, 5.10)", () => {
+  /** Every field place of a viewer's catalogs on one surface. */
+  const places = (catalogs: readonly Catalog[], where: "token" | "page") => catalogs.flatMap((c) => c.fields.flatMap((f) => (f[where] ? [f[where].anchor] : [])));
+  // Every group the fields live in open, as a route's reveal opens the one on its way: a folded group draws nothing under its header. Position stays folded: its Attach reads the window, which a render to markup has not.
+  beforeEach(async () => {
+    const { FOLD_KEYS, FOLDS_KEY } = await import("../tokens/panelFolds.ts");
+    items.set(FOLDS_KEY, JSON.stringify(Object.fromEntries(FOLD_KEYS.map((k) => [k, k !== "position"]))));
+  });
+  afterEach(() => items.clear());
+
+  test("the token panel, for the DM's selected goblin and for a player's own character's token", async () => {
+    const { default: TokenPanel } = await import("../../panels/TokenPanel.tsx");
+    const all = new Set([...places([EVERYONE, DM_CATALOG], "token")]);
+    for (const [viewer, tokenId, catalogs] of [
+      [DM, "g1", [EVERYONE, DM_CATALOG]],
+      [P1, "tbree", [EVERYONE]],
+    ] as const) {
+      const view = viewOf(fullRoom(), viewer, { selectedId: tokenId });
+      const drawn = anchorsIn(draw(view, TokenPanel as never, { ...PANEL, selectedTokenId: tokenId }));
+      for (const a of places(catalogs, "token")) assert.ok(drawn.includes(a), `${a} is a field of the ${viewer.role}'s but not drawn`);
+      for (const a of drawn.filter((a) => a.startsWith("token."))) assert.ok(all.has(a), `${a} is drawn but no field routes to it`);
+      assert.equal(new Set(drawn).size, drawn.length, `an anchor drawn twice: ${drawn.join(" ")}`);
+    }
+  });
+
+  test("a character's page, for its player and for the DM", async () => {
+    const { CharacterPage } = await import("../tokens/CharacterCard.tsx");
+    for (const viewer of [P1, DM]) {
+      const view = viewOf(fullRoom(), viewer);
+      const bree = view.view!.characters.bree!;
+      const drawn = anchorsIn(draw(view, CharacterPage as never, { character: bree, close: () => {}, onAddCompanion() {}, onBlocks() {}, onDelete: () => null }));
+      for (const a of places([EVERYONE], "page")) assert.ok(drawn.includes(a), `${a} is not drawn for the ${viewer.role}`);
+      assert.equal(new Set(drawn).size, drawn.length, `an anchor drawn twice: ${drawn.join(" ")}`);
     }
   });
 });

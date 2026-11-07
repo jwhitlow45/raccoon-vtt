@@ -68,7 +68,7 @@ export function LightSettings(props: { scene: Scene }) {
   return (
     <>
       <SettingRow name="Light" help={on ? LIGHT_LEVELS.find((l) => l.value === light)?.note : LIGHT_NEEDS_VISION} wide>
-        <Segmented<LightLevel> label="Light level" value={light} options={LIGHT_LEVELS} onChange={(level) => update({ vision: lightPatch(scene, level) })} />
+        <Segmented<LightLevel> label="Light level" search="scenes.light.level" value={light} options={LIGHT_LEVELS} onChange={(level) => update({ vision: lightPatch(scene, level) })} />
       </SettingRow>
       {unlit ? <Note>{unlit}</Note> : null}
 
@@ -184,6 +184,7 @@ export function VisionSettings(props: { scene: Scene; wallless: boolean }) {
     <>
       <div onKeyDown={ask.asking?.change.where === "preset" ? ask.onKeyDown : undefined} style={{ display: "grid", minWidth: 0 }}>
         <PlayersSeeChoice
+          search="scenes.players.see"
           value={choice === "custom" ? null : choice}
           none={CUSTOM_TEXT}
           busy={working}

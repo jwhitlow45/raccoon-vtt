@@ -227,9 +227,9 @@ function TokenDetails(props: PanelProps) {
       case "statBlock":
         return <StatBlockSection key={id} token={token} actor={actor} access={access} patchActor={patchActor} />;
       case "hp":
-        return <HpSection key={id} actor={actor} hpVisibility={token.hpVisibility} target={{ tokenId: token.id }} access={access} name={name} token={token} />;
+        return <HpSection key={id} actor={actor} hpVisibility={token.hpVisibility} target={{ tokenId: token.id }} access={access} name={name} token={token} search="token.hp" />;
       case "conditions":
-        return <EffectsSection key={id} effects={actor?.effects ?? []} target={{ tokenId: token.id }} self={{ tokenId: token.id }} selfLabel={name} canEdit={access.effects} />;
+        return <EffectsSection key={id} effects={actor?.effects ?? []} target={{ tokenId: token.id }} self={{ tokenId: token.id }} selfLabel={name} canEdit={access.effects} search="token.conditions" />;
       case "uses":
         return <UsesSection key={id} target={{ tokenId: token.id }} name={name} character={classResources ? character : undefined} />;
       case "reaction":
@@ -257,24 +257,34 @@ function TokenDetails(props: PanelProps) {
         return <TokenSight key={id} token={token} actor={actor} access={access} update={update} />;
       case "stats":
         // A player lent only a character's token holds no card, so its Stats is the bar's Size alone (docs/design/design-v1-token-sections.md 3).
-        return statCard && actor ? (
-          <Group key={id} label="Stats" icon="stats" {...groupFold("stats")}>
-            <SizeField token={token} actor={actor} access={access} feetPerCell={feetPerCell} />
-            <StatsFields actor={actor} canEdit={access.canEditActor} onPatch={patchActor} dm={access.dm} noAc={hpLess(actor, token)} fromBlock={character?.stats !== undefined} />
-            {access.canEditActor("sheetUrl") ? (
-              <FieldRow label="Sheet link" fill>
-                <SheetUrlField value={actor.sheetUrl ?? ""} onPatch={patchActor} />
-              </FieldRow>
-            ) : null}
-          </Group>
-        ) : (
-          <Group key={id} label="Stats" icon="stats" {...groupFold("stats")}>
-            <SizeField token={token} actor={actor ?? {}} access={access} feetPerCell={feetPerCell} />
+        return (
+          <Group key={id} label="Stats" icon="stats" search="token.stats" {...groupFold("stats")}>
+            {statCard && actor ? (
+              <>
+                <SizeField token={token} actor={actor} access={access} feetPerCell={feetPerCell} />
+                <StatsFields
+                  actor={actor}
+                  canEdit={access.canEditActor}
+                  onPatch={patchActor}
+                  dm={access.dm}
+                  noAc={hpLess(actor, token)}
+                  fromBlock={character?.stats !== undefined}
+                  search={{ ac: "token.ac", walk: "token.walk", pp: "token.pp", senses: "token.senses" }}
+                />
+                {access.canEditActor("sheetUrl") ? (
+                  <FieldRow label="Sheet link" fill>
+                    <SheetUrlField value={actor.sheetUrl ?? ""} onPatch={patchActor} />
+                  </FieldRow>
+                ) : null}
+              </>
+            ) : (
+              <SizeField token={token} actor={actor ?? {}} access={access} feetPerCell={feetPerCell} />
+            )}
           </Group>
         );
       case "settings":
         return (
-          <Group key={id} label="Token settings" icon="settings" {...groupFold("settings")}>
+          <Group key={id} label="Token settings" icon="settings" search="token.settings" {...groupFold("settings")}>
             {access.dm ? <DmSettings token={token} feetPerCell={feetPerCell} update={update} /> : <OwnerNames token={token} access={access} update={update} />}
           </Group>
         );
@@ -298,9 +308,9 @@ function TokenDetails(props: PanelProps) {
   const rings = token.rangeRings ?? [];
   const height = elevationBadge(token.elevation);
   const noteCount = [token.notes, actor?.notes, access.dm ? actor?.dmNotes : undefined].filter((n) => typeof n === "string" && n.trim() !== "").length;
-  const groups: Record<PanelGroupId, { label: string; icon: IconName; key: FoldKey; summary?: string }> = {
-    combat: { label: "Combat", icon: "combat", key: relationKey("combat", relation), summary: combatSummary({ hp: hpWords, effects, reactionUsed: spent, rings }) },
-    notes: { label: "Notes", icon: "notes", key: relationKey("notes", relation), summary: noteCount === 0 ? "None yet" : `${noteCount} ${noteCount === 1 ? "note" : "notes"}` },
+  const groups: Record<PanelGroupId, { label: string; icon: IconName; key: FoldKey; summary?: string; search?: string }> = {
+    combat: { label: "Combat", icon: "combat", key: relationKey("combat", relation), summary: combatSummary({ hp: hpWords, effects, reactionUsed: spent, rings }), search: "token.combat" },
+    notes: { label: "Notes", icon: "notes", key: relationKey("notes", relation), summary: noteCount === 0 ? "None yet" : `${noteCount} ${noteCount === 1 ? "note" : "notes"}`, search: "token.notes" },
     position: { label: "Position", icon: "position", key: "position", summary: [height ? `Elevation ${height} ft` : "On the ground", token.rotation ? `facing ${token.rotation}°` : ""].filter(Boolean).join(", ") },
     image: { label: "Image", icon: "image", key: "image" },
   };
@@ -312,7 +322,7 @@ function TokenDetails(props: PanelProps) {
           if (part.group === null) return section(part.id);
           const g = groups[part.group];
           return (
-            <Group key={part.group} label={g.label} icon={g.icon} {...groupFold(g.key)} summary={g.summary} holds="sections">
+            <Group key={part.group} label={g.label} icon={g.icon} {...groupFold(g.key)} summary={g.summary} holds="sections" search={g.search}>
               {part.sections.map(section)}
             </Group>
           );
@@ -586,6 +596,7 @@ function DmSettings(props: { token: Token; feetPerCell: number; update(patch: To
         }}
         label="Hidden from players"
         help="Never sent to players while hidden."
+        search="token.hidden"
       />
       <Switch checked={token.locked} onChange={(locked) => update({ locked })} label="Locked" help="Nobody can drag it." />
       <Switch

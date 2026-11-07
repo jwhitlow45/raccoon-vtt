@@ -169,8 +169,29 @@ export type DiceFoldsStore = {
    * its creature's groups render with the block (options.ts groupAsks).
    */
   openForNew(key: DiceFoldKey, ids: readonly string[], quiet?: readonly string[]): boolean;
+  /**
+   * Opens a group for now, writing nothing, as the room search's route
+   * opens a fold on its way (features/search/route.ts, lib/folds.ts's
+   * reveal): a viewer who folded it on purpose finds it folded again once
+   * the panel closes. A group already open is left as it is.
+   */
+  reveal(key: DiceFoldKey): void;
+  /** Folds again every group a reveal opened that the viewer has not tapped since. The panel does this as it closes. */
+  endReveals(): void;
   subscribe(listener: () => void): () => void;
 };
+
+/**
+ * The Dice panel's sections a route may open on its way (features/search/route.ts
+ * routeFolds): a creature's Saves and checks and Skills, and Recent rolls.
+ */
+export const DICE_ROUTE_SECTIONS = ["saves", "skills", "recent"] as const;
+export type DiceRouteSection = (typeof DICE_ROUTE_SECTIONS)[number];
+
+/** The folds a route's section opens: a creature's group for each kind of creature the panel may show, since which shows is the panel's to say. */
+export function diceRouteKeys(section: DiceRouteSection): DiceFoldKey[] {
+  return section === "recent" ? ["recent"] : FOLD_KINDS.map((kind) => foldKey(kind, section));
+}
 
 export function createDiceFolds(storage: WriteStorage | null): DiceFoldsStore {
   let folds: DiceFolds | null = null;
@@ -181,7 +202,10 @@ export function createDiceFolds(storage: WriteStorage | null): DiceFoldsStore {
   };
   // Before the panel has read its folds, a change starts from the phone's starts, as the token panel's do.
   const current = () => (folds ??= resolveDiceFolds(storage, { width: 0, height: 0 }));
+  const revealed = new Set<DiceFoldKey>();
   const open = (key: DiceFoldKey) => {
+    // Opened for the page: a reveal's end no longer folds it.
+    revealed.delete(key);
     if (current()[key]) return false;
     folds = { ...current(), [key]: true };
     // An opening runs while the options render, so their readers hear of it once that render is done, never in the middle of it.
@@ -194,6 +218,7 @@ export function createDiceFolds(storage: WriteStorage | null): DiceFoldsStore {
       return folds;
     },
     tap(key, next, write) {
+      revealed.delete(key);
       folds = { ...current(), [key]: next };
       if (write) writeDiceFold(storage, key, next);
       notify();
@@ -214,6 +239,20 @@ export function createDiceFolds(storage: WriteStorage | null): DiceFoldsStore {
       }
       if (fresh) open(key);
       return fresh;
+    },
+    reveal(key) {
+      if (current()[key]) return;
+      revealed.add(key);
+      folds = { ...current(), [key]: true };
+      notify();
+    },
+    endReveals() {
+      if (revealed.size === 0) return;
+      const next: Record<DiceFoldKey, boolean> = { ...current() };
+      for (const key of revealed) next[key] = false;
+      revealed.clear();
+      folds = next;
+      notify();
     },
     subscribe(listener) {
       listeners.add(listener);

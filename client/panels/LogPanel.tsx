@@ -215,7 +215,7 @@ export default function LogPanel(_props: PanelProps) {
         </Button>
         {/* A filter of what shows, so a checkbox rather than a switch (docs/design/design-v1-visual.md 3.7). */}
         <div style={{ flex: "none" }}>
-          <Checkbox label="Chat only" checked={chatOnly} onChange={setChatOnly} />
+          <Checkbox label="Chat only" search="log.chat-only" checked={chatOnly} onChange={setChatOnly} />
         </div>
       </div>
       {entries.length === 0 ? <Empty>No messages yet. Chat, whispers and what happens at the table show here.</Empty> : null}
@@ -411,6 +411,7 @@ function Composer(props: { names: LogNames; me: string; inputRef: Ref<HTMLInputE
     >
       <Select
         aria-label="Send to"
+        search="log.send-to"
         error={chosen.gone}
         value={targetId}
         onChange={(e) => {
@@ -437,6 +438,7 @@ function Composer(props: { names: LogNames; me: string; inputRef: Ref<HTMLInputE
       <div style={{ display: "flex", gap: theme.space(2) }}>
         <Input
           ref={props.inputRef}
+          search="log.message"
           aria-label={whisper ? "Whisper" : "Message"}
           value={text}
           maxLength={MAX_CHAT}

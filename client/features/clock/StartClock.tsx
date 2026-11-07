@@ -66,7 +66,7 @@ export function StartClock(props: { onStart(id: string): void }) {
         <DateFieldsEditor calendar={calendar} value={date} onChange={(next) => setForm({ ...form, date: next })} composed={composed} showErrors={tried} />
       </Section>
       <Switch label="Players see the date and time" help={SHARE_HELP} checked={shown} onChange={setShown} />
-      <Button variant="primary" block onClick={start}>
+      <Button variant="primary" block search="time.start" onClick={start}>
         Start the clock
       </Button>
       {dialog ? (

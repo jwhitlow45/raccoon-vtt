@@ -69,6 +69,7 @@ export function AddSounds(props: AddSoundsProps): ReactElement {
   const store = useRoomStore();
   slot.queue ??= new SoundQueue(liveDeps(roomId, actions, store, props));
   const queue = slot.queue;
+  const music = props.use === "music";
   // The callbacks are the latest render's, so a file that finishes after the panel re-rendered calls the current ones.
   useEffect(() => {
     queue.setDeps(liveDeps(roomId, actions, store, props));
@@ -80,7 +81,8 @@ export function AddSounds(props: AddSoundsProps): ReactElement {
 
   return (
     <div data-add-sounds={props.use} style={{ display: "flex", flexDirection: "column", gap: theme.space(2), minWidth: 0 }}>
-      <Button size="sm" icon="plus" onClick={() => input.current?.click()} style={{ alignSelf: "flex-start" }}>
+      {/* Music's alone is a result of the room search: the others stand in sections it finds. */}
+      <Button size="sm" icon="plus" search={music ? "sound.library.add" : undefined} onClick={() => input.current?.click()} style={{ alignSelf: "flex-start" }}>
         {ADD_LABEL[props.use]}
       </Button>
       <input

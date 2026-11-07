@@ -68,6 +68,8 @@ export function StatsFields(props: {
    * for the DM too, and are changed in the block.
    */
   fromBlock?: boolean;
+  /** The room search's anchors (features/search/entry.ts) for the fields it finds, the token panel's or a character page's. */
+  search?: { ac: string; walk: string; pp: string; senses: string };
 }) {
   const { actor, canEdit, onPatch, dm } = props;
   const fromBlock = props.fromBlock === true;
@@ -84,8 +86,10 @@ export function StatsFields(props: {
   // Only a viewer who may set a speed has anything to fold: the rest read only the speeds that are set.
   const [held, setHeld] = useState<readonly OtherSpeed[] | null>(null);
   const folded = editSpeeds ? foldedSpeeds(speeds, held) : [];
+  // Walk Speed alone is a result of the room search: the others stand under it in Stats.
+  const speedAnchor = (key: SpeedKey) => (key === "walk" ? props.search?.walk : undefined);
   const speedRow = (key: SpeedKey) => (
-    <Stat key={key} label={`${SPEED_LABELS[key]} Speed`} value={speeds[key] === undefined ? undefined : `${speeds[key]} ft`} editable={editSpeeds}>
+    <Stat key={key} label={`${SPEED_LABELS[key]} Speed`} value={speeds[key] === undefined ? undefined : `${speeds[key]} ft`} editable={editSpeeds} search={speedAnchor(key)}>
       <NumberField
         label={`${SPEED_LABELS[key]} Speed`}
         value={speeds[key]}
@@ -102,7 +106,7 @@ export function StatsFields(props: {
   return (
     <>
       {props.noAc ? null : (
-        <Stat label="Armor Class" value={actor.ac} editable={canEdit("ac")}>
+        <Stat label="Armor Class" value={actor.ac} editable={canEdit("ac")} search={props.search?.ac}>
           <NumberField label="Armor Class" value={actor.ac} min={0} max={100} onCommit={(n) => n !== null && onPatch({ ac: n })} />
         </Stat>
       )}
@@ -154,7 +158,7 @@ export function StatsFields(props: {
           />
         </Stat>
       ) : null}
-      <Stat label="Passive Perception" value={fromBlock ? withSource(actor.passivePerception) : actor.passivePerception} editable={!fromBlock && canEdit("passivePerception")}>
+      <Stat label="Passive Perception" value={fromBlock ? withSource(actor.passivePerception) : actor.passivePerception} editable={!fromBlock && canEdit("passivePerception")} search={props.search?.pp}>
         <NumberField
           label="Passive Perception"
           value={actor.passivePerception}
@@ -163,7 +167,7 @@ export function StatsFields(props: {
           onCommit={(n) => n !== null && onPatch({ passivePerception: n })}
         />
       </Stat>
-      <Stat label="Senses" value={actor.senses || "None"} editable={canEdit("senses")} wide>
+      <Stat label="Senses" value={actor.senses || "None"} editable={canEdit("senses")} wide search={props.search?.senses}>
         <TextField label="Senses" value={actor.senses ?? ""} maxLength={80} placeholder="Darkvision 60 ft." onCommit={(v) => onPatch({ senses: v.trim() })} />
       </Stat>
       {dm || actor.creatureType ? (
@@ -197,18 +201,19 @@ function signed(n: number | undefined): string | undefined {
   return n >= 0 ? `+${n}` : `−${-n}`;
 }
 
-function Stat(props: { label: string; value: string | number | undefined; editable: boolean; hint?: string; wide?: boolean; children: ReactNode }) {
+function Stat(props: { label: string; value: string | number | undefined; editable: boolean; hint?: string; wide?: boolean; search?: string | undefined; children: ReactNode }) {
   if (!props.editable) {
     if (props.value === undefined) return null;
     return (
-      <div style={{ display: "flex", justifyContent: "space-between", gap: theme.space(3), minHeight: 32, alignItems: "center" }}>
+      // A value read only takes focus from script alone, where the room search lands on it.
+      <div data-search={props.search} tabIndex={props.search ? -1 : undefined} style={{ display: "flex", justifyContent: "space-between", gap: theme.space(3), minHeight: 32, alignItems: "center" }}>
         <span style={{ color: theme.color.textMuted }}>{props.label}</span>
         <span style={{ textAlign: "right" }}>{props.value}</span>
       </div>
     );
   }
   return (
-    <FieldRow label={props.label} hint={props.hint} fill={props.wide}>
+    <FieldRow label={props.label} hint={props.hint} fill={props.wide} search={props.search}>
       {props.children}
     </FieldRow>
   );

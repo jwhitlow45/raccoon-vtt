@@ -109,19 +109,20 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
         <NameField key={scene.id} name={scene.name} onSave={(name) => update({ name })} />
       </Section>
 
-      <Group {...group("light", sceneGroupSummary(scene, "light"))}>
+      <Group {...group("light", sceneGroupSummary(scene, "light"))} search="scenes.light">
         <LightSettings scene={scene} />
         <SceneWeather key={scene.id} scene={scene} />
       </Group>
 
       {sound ? (
-        <Group {...group("sound", sceneSoundSummary(soundNames))}>
+        <Group {...group("sound", sceneSoundSummary(soundNames))} search="scenes.sound">
           <SceneSoundSettings scene={scene} />
         </Group>
       ) : null}
 
       <Group
         {...players}
+        search="scenes.players"
         action={
           noWalls ? (
             <Tag id={noWallsId} tone="warning">
@@ -134,20 +135,21 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
         <VisionSettings scene={scene} wallless={wallless} />
       </Group>
 
-      <Group {...group("map", sceneGroupSummary(scene, "map"))}>
+      <Group {...group("map", sceneGroupSummary(scene, "map"))} search="scenes.map">
         <MapImageRow scene={scene} close={props.close} />
         <PhasesSection scene={scene} />
         <GridStyle scene={scene} onChange={(grid) => update({ grid })} close={props.close} />
       </Group>
 
-      <Group {...group("walls", sceneGroupSummary(scene, "walls"))}>
+      <Group {...group("walls", sceneGroupSummary(scene, "walls"))} search="scenes.walls">
         <BlockMovementSetting scene={scene} />
         <SettingRow name="Automatic walls" help={AUTO_WALLS_NOTE[autoWallsOf(scene)]} wide>
-          <Select<AutoWalls> label="Automatic walls" value={autoWallsOf(scene)} options={AUTO_WALLS} onChange={(autoWalls) => update({ autoWalls })} />
+          <Select<AutoWalls> label="Automatic walls" search="scenes.walls.auto" value={autoWallsOf(scene)} options={AUTO_WALLS} onChange={(autoWalls) => update({ autoWalls })} />
         </SettingRow>
         <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
           <Button
             size="sm"
+            search="scenes.walls.builder"
             onClick={() => {
               ui.setTool("build");
               props.close({ placing: true });
@@ -159,7 +161,7 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
         </div>
       </Group>
 
-      <Group {...group("scene", sceneGroupSummary(scene, "scene"))}>
+      <Group {...group("scene", sceneGroupSummary(scene, "scene"))} search="scenes.size">
         <SettingRow name={size.name} help={size.holds ?? undefined} wide>
           <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
             <NumberInput label={size.across} value={scene.bounds.w} min={1} max={MAX_SCENE_CELLS} onChange={(w) => update({ bounds: { ...scene.bounds, w } })} />
@@ -172,7 +174,7 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
         </SettingRow>
         <SettingRow name="Starting view" help={scene.defaultView ? "The scene opens where you saved it." : "The scene opens fitted to the screen."} wide>
           <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
-            <Button size="sm" onClick={saveView}>
+            <Button size="sm" search="scenes.size.save-view" onClick={saveView}>
               Save current view
             </Button>
             {scene.defaultView ? (
@@ -245,7 +247,7 @@ function NameField(props: { name: string; onSave(name: string): void }) {
     }
   };
   return (
-    <FieldRow label="Scene name" fill htmlFor={id}>
+    <FieldRow label="Scene name" fill htmlFor={id} search="scenes.name">
       <Input
         id={id}
         value={text}
@@ -269,6 +271,7 @@ function GridStyle(props: { scene: Scene; onChange(grid: Scene["grid"]): void; c
     <>
       <Switch
         label="Grid lines"
+        search="scenes.map.grid"
         help={props.scene.map ? `Hide them when the map has its own grid. Tokens and rulers still follow the ${sceneCellWord(props.scene, true)}.` : undefined}
         checked={grid.show}
         onChange={(show) => set({ show })}

@@ -47,7 +47,7 @@ export default function ScenesPanel(props: PanelProps) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)" }}>
       <SceneList scenes={list} viewingId={viewingId} playerSceneId={playerSceneId} shownFolder={shownFolder} onShownFolderTap={() => setShownFolder(null)} />
-      <Group label="New scene" reserve="icon" {...fold("new")} keep>
+      <Group label="New scene" reserve="icon" search="scenes.new" {...fold("new")} keep>
         <NewScene sceneCount={list.length} close={props.close} />
         <UvttNewScene sceneCount={list.length} />
       </Group>

@@ -240,7 +240,7 @@ export function Library(props: { onOpenTrack(soundId: SoundId): void }) {
         <ListHead
           detail={searching ? trackCount(shownLists.length, Object.keys(playlists).length, true) : String(Object.keys(playlists).length)}
           action={
-            <Button size="sm" icon="plus" {...{ [MAKER_OPENER]: MAKER_MARKS.new }} onClick={() => newPlaylist(MAKER_MARKS.new)}>
+            <Button size="sm" icon="plus" search="sound.library.new-playlist" {...{ [MAKER_OPENER]: MAKER_MARKS.new }} onClick={() => newPlaylist(MAKER_MARKS.new)}>
               {NEW_PLAYLIST}
             </Button>
           }

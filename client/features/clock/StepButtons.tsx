@@ -41,7 +41,9 @@ export function StepButtons(props: { now: number }) {
 
   return (
     <div style={{ display: "grid", gap: theme.space(2), minWidth: 0 }}>
-      <SectionLabel id={nameId}>Move the clock on</SectionLabel>
+      <SectionLabel id={nameId} search="time.steps">
+        Move the clock on
+      </SectionLabel>
       <div role="group" aria-labelledby={nameId} style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(max(176px, calc(50% - ${theme.space(1)}px)), 1fr))`, gap: theme.space(2) }}>
         <ClockSteps now={props.now} />
         <Button expanded={other} onClick={() => setOther(!other)} style={{ gridColumn: "1 / -1" }}>

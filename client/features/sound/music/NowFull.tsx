@@ -308,7 +308,8 @@ export function NowFull(props: { fadeControl?: FadeControl; stopAll?: boolean; o
   const shown = music ? musicShown(music, sounds, playlists, t) : null;
   const [box, width] = useWidth<HTMLDivElement>();
   const sounding = useSoundToStop();
-  const stopAll = props.stopAll && sounding ? <StopAllButton /> : null;
+  // The Sound panel's is the room search's result. The Now playing chip's popover has its own, which the search never goes to.
+  const stopAll = props.stopAll && sounding ? <StopAllButton search="sound.stop-all" /> : null;
   const [seek, setSeek] = useState<HeldSeek | null>(null);
   const latest = useRef({ seek, lists });
   latest.current = { seek, lists };

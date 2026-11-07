@@ -467,6 +467,8 @@ export function HpSection(props: {
   name?: string;
   /** The token, when there is one: an effect companion and every object have no life controls (docs/design/design-v1-combat-flow.md 3.6.6). */
   token?: { kind: TokenKind; companion?: unknown };
+  /** The room search's anchor id (features/search/entry.ts) on its heading: the token panel's or a character page's. */
+  search?: string;
 }) {
   const { actor, access, target } = props;
   const actions = useRoomActions();
@@ -479,7 +481,7 @@ export function HpSection(props: {
   if (hpLess(actor, props.token)) {
     const effect = props.token?.companion !== undefined && props.token.kind === "object";
     return (
-      <Section title="Hit Points">
+      <Section title="Hit Points" search={props.search}>
         <Note>{effect ? "No HP: it is an effect." : "No HP yet."}</Note>
         {!effect && access.hp === "all" ? (
           <FieldRow label="Max HP">
@@ -497,7 +499,7 @@ export function HpSection(props: {
   }
 
   return (
-    <Section title="Hit Points">
+    <Section title="Hit Points" search={props.search}>
       {access.full && hp ? (
         // Focusable from script alone: where focus goes once a life button takes itself away (LifeControls).
         <div data-hp-vitals="" tabIndex={-1} style={{ display: "flex", alignItems: "baseline", gap: theme.space(2), flexWrap: "wrap", fontVariantNumeric: "tabular-nums" }}>

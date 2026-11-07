@@ -4,7 +4,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { ClientOp } from "#shared/protocol.ts";
-import { DM, scene } from "#shared/testutil.ts";
+import { DM, entry, P1, scene } from "#shared/testutil.ts";
 import { setRoomSoundChoice } from "../device/settings.ts";
 import { dmMenuSections, itemsOf, type ChipEnv, type DmMenuView } from "../../pages/chipMenus.ts";
 import type { DmItemKind } from "../../pages/chipWords.ts";
@@ -122,6 +122,7 @@ describe("the catalogs' entries (search.md 5.10)", () => {
         assert.ok(panels.has(r.panel), name);
         if (r.page !== undefined) {
           if (r.panel === "menu") assert.ok((MENU_PAGES as readonly string[]).includes(r.page), name);
+          else if (r.panel === "sound") assert.ok(r.page === "now" || r.page === "library", name);
           else assert.ok(r.panel === "scenes" && recordId("scene", r.page) !== null, name);
         }
         if (r.section !== undefined) assert.ok(routeFolds(r.panel, r.page).includes(r.section), name);
@@ -208,13 +209,14 @@ describe("the DM menu's items (search.md 5.5, plan.md 3)", () => {
     assert.deepEqual(blackout.act, { t: "item", itemId: "blackout", twin: { panel: "dm", section: "screens", anchor: "dm.screens.blackout" } });
   });
 
-  test("each kind's twin is its panel control, the scene's row in Scenes for a move or a phase", () => {
+  test("each kind's twin is its panel control, the scene's row in Scenes for a move, Show a phase for a phase", () => {
     const twin = (kind: SearchedItemKind) => TWINS[kind](AT_PLAY);
     assert.deepEqual(twin("follow"), { panel: "dm", section: "screens", anchor: "dm.screens.follow" });
     assert.deepEqual(twin("endBlackout"), twin("blackout"));
     assert.deepEqual(twin("movePlayers"), { panel: "scenes", page: "scene:crypt" });
     assert.deepEqual(twin("showRecent"), { panel: "dm", section: "handouts", anchor: "dm.handouts.recent" });
     assert.deepEqual(twin("viewAs"), { panel: "dm", section: "check", anchor: "dm.preview.view-as" });
+    assert.deepEqual(twin("phase"), { panel: "scenes", section: "map", anchor: "scenes.map.phases" }, "the scene in view's own Show a phase");
   });
 
   test("without the menu's own view the DM's index reads the room's, and a player's never draws an item", () => {
@@ -392,5 +394,79 @@ describe("what an entry offers and says now (search.md 5.2)", () => {
     room.scenes.s1 = { ...room.scenes.s1!, vision: { on: true } as never };
     assert.ok(!offered(DM_CATALOG, ctxOf(viewOf(room, DM))).has("setting:menu.room-settings.backup.sounds"));
     assert.ok(offered(DM_CATALOG, ctxOf(viewOf(room, DM))).has("setting:dm.preview.party-sight"));
+  });
+});
+
+describe("what the rest of the panels offer and say now (search.md 5.2, S2b)", () => {
+  const offered = (catalog: Catalog, ctx: SearchContext) => new Set(catalog.entries.filter((e) => !e.when || e.when(ctx)).map((e) => e.id));
+  const fight = () => {
+    const room = seededRoom();
+    room.encounter = { rev: 0, round: 1, activeEntryId: "e1", entries: [entry("e1", { tokenId: "g1", value: 12 })] };
+    return room;
+  };
+
+  test("Initiative offers New fight's rows outside a fight and its setup in one, Camera follows the turn always", () => {
+    const resting = offered(DM_CATALOG, ctxOf(DM_VIEW()));
+    const fighting = offered(DM_CATALOG, ctxOf(viewOf(fight(), DM)));
+    for (const id of ["action:tracker.new-fight", "setting:tracker.new-fight.roll"]) assert.ok(resting.has(id) && !fighting.has(id), id);
+    for (const id of ["section:tracker.auto", "action:tracker.initiative.values", "setting:tracker.initiative.scores", "section:tracker.more", "setting:tracker.timer", "action:tracker.end"]) assert.ok(fighting.has(id) && !resting.has(id), id);
+    assert.ok(resting.has("setting:tracker.device.follow") && fighting.has("setting:tracker.device.follow"));
+  });
+
+  test("Time offers Start the clock with no clock, and a running clock's rows with one, Players see the date and time with its value", () => {
+    const room = seededRoom();
+    assert.ok(offered(DM_CATALOG, ctxOf(viewOf(room, DM))).has("action:time.start"));
+    room.clock = { id: "c1", rev: 0, t: 0, shown: false, calendar: { kind: "days" } };
+    const ctx = ctxOf(viewOf(room, DM));
+    const now = offered(DM_CATALOG, ctx);
+    assert.ok(!now.has("action:time.start"));
+    for (const id of ["section:time.steps", "action:time.set", "setting:time.shown", "action:time.calendar", "action:time.stop"]) assert.ok(now.has(id), id);
+    assert.equal(DM_CATALOG.entries.find((e) => e.id === "setting:time.shown")?.valueNow?.(ctx), "Off");
+  });
+
+  test("Scenes offers the scene in view's settings while one is in view, with its light now", () => {
+    const room = seededRoom();
+    const ctx = ctxOf(viewOf(room, DM));
+    assert.ok(offered(DM_CATALOG, ctx).has("setting:scenes.light.level"));
+    assert.equal(DM_CATALOG.entries.find((e) => e.id === "setting:scenes.light.level")?.valueNow?.(ctx), "Bright");
+    room.scenes.s1 = { ...room.scenes.s1!, vision: { on: true, light: "dim" } as never };
+    assert.equal(DM_CATALOG.entries.find((e) => e.id === "setting:scenes.light.level")?.valueNow?.(ctxOf(viewOf(room, DM))), "Dim");
+    const none = { ...DM_VIEW(), sceneId: null } as RoomView;
+    const empty = offered(DM_CATALOG, ctxOf(none));
+    assert.ok(empty.has("action:scenes.new"), "New scene, with no scene in view too");
+    assert.ok(!empty.has("setting:scenes.light.level") && !empty.has("section:scenes.map"));
+  });
+
+  test("Sound offers Now playing always, and what waits on sound files only once the server says it has them", () => {
+    const now = offered(DM_CATALOG, ctxOf(DM_VIEW()));
+    assert.ok(now.has("section:sound.now") && now.has("section:sound.effects"));
+    // The server's switch is not known in a test, which is not "on".
+    for (const id of ["section:sound.library", "section:sound.table", "section:sound.background", "action:sound.library.add", "action:sound.stop-all", "section:sound.upnext"]) assert.ok(!now.has(id), id);
+  });
+
+  test("the Dice panel's creature groups while it shows one creature: the DM's one selected token, a player's own", () => {
+    const dice = (view: RoomView) => offered(EVERYONE, ctxOf(view)).has("section:dice.saves");
+    assert.equal(dice(DM_VIEW()), false, "nothing selected");
+    assert.equal(dice(viewOf(seededRoom(), DM, { selectedId: "g1" })), true);
+    const two = viewOf(seededRoom(), DM, { selectedId: "g1" });
+    assert.equal(dice({ ...two, local: { ...two.local, selectedIds: ["g1", "g2"] } } as RoomView), false, "several show the group's options");
+    assert.equal(dice(PAT_VIEW()), true, "Pat plays Bree");
+    const room = seededRoom();
+    room.characters.bree = { ...room.characters.bree!, ownerIds: [] };
+    assert.equal(dice(viewOf(room, P1)), false, "a player with no creature of theirs");
+    room.tokens.g1 = { ...room.tokens.g1!, ownerIds: ["p1"] };
+    assert.equal(dice(viewOf(room, P1)), true, "a token of theirs on the scene");
+  });
+
+  test("a creature's Conditions say which it has, by name, and its other fields their values", () => {
+    const room = seededRoom();
+    room.characters.bree = { ...room.characters.bree!, actor: { ...room.characters.bree!.actor, effects: [{ id: "x1", key: "prone" }, { id: "x2", key: "poisoned" }] } };
+    const bree = viewOf(room, P1).view!.characters.bree!.actor;
+    const value = (key: string) => EVERYONE.fields.find((f) => f.key === key)?.value?.(bree);
+    assert.equal(value("conditions"), "Prone, Poisoned");
+    assert.equal(value("hp"), "24 of 24");
+    assert.equal(value("ac"), "15");
+    assert.equal(value("senses"), "Darkvision 60 ft.");
+    assert.equal(EVERYONE.fields.find((f) => f.key === "conditions")?.value?.(viewOf(seededRoom(), P1).view!.characters.bree!.actor), undefined, "none, no value");
   });
 });

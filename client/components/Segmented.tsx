@@ -20,6 +20,8 @@ export type SegmentedOption<T extends string | number> = {
    * in every group.
    */
   chosenStyle?: CSSProperties;
+  /** The room search's anchor id (features/search/entry.ts) for this option alone, set on its radio, where one option is a result of its own: a creature's Long Rest. */
+  search?: string;
 };
 
 /**
@@ -127,6 +129,7 @@ export function Segmented<T extends string | number>(props: {
                 value={String(o.value)}
                 checked={chosen}
                 disabled={disabled}
+                data-search={o.search}
                 aria-label={accessibleName(o.label, o.title)}
                 onChange={() => props.onChange(o.value)}
                 style={{ position: "absolute", inset: 0, width: "100%", height: "100%", margin: 0, opacity: 0, cursor: "inherit" }}

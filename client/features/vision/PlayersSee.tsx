@@ -28,6 +28,8 @@ export function PlayersSeeChoice(props: {
   none?: ReactNode;
   disabled?: boolean;
   busy?: boolean;
+  /** The room search's anchor id (features/search/entry.ts), on the scene settings' choice alone. */
+  search?: string;
   working?: string | null;
   onChange(value: PlayersSeeValue): void;
 }) {
@@ -35,6 +37,7 @@ export function PlayersSeeChoice(props: {
   return (
     <RadioCards<PlayersSeeValue>
       radiogroup
+      search={props.search}
       legend={PLAYERS_SEE_NAME}
       value={props.value}
       options={options}

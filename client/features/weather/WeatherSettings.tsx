@@ -68,7 +68,7 @@ function WeatherBody(props: { picker: Picker; weather: Weather | undefined; forc
   return (
     <div style={{ display: "grid", minWidth: 0 }}>
       <SettingRow name="Weather">
-        <Select<WeatherKind> label="Weather" value={picker.kind} options={KIND_CHOICES} onChange={(kind) => change({ kind })} />
+        <Select<WeatherKind> label="Weather" search="scenes.light.weather" value={picker.kind} options={KIND_CHOICES} onChange={(kind) => change({ kind })} />
       </SettingRow>
       {clear ? null : (
         <SettingRow name="Strength" wide>

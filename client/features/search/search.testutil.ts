@@ -15,9 +15,8 @@ import { buildIndex, searchResults, searchRole, SUGGEST, type KeySource, type Se
 /**
  * Test fixtures for the room search: the seeded room the design's flows
  * and golden queries use (designs/qol/search.md 2 and 7), stand-in
- * catalogs for the index's own tests, and the entries lane S2b still
- * writes (PENDING_*), so the golden queries run on the real catalogs with
- * every entry the case table names. Nothing here ships.
+ * catalogs for the index's own tests, and the real catalogs each role
+ * holds, which the golden queries run on. Nothing here ships.
  */
 
 export const SRD: readonly SrdMonster[] = JSON.parse(readFileSync(new URL("../../../shared/srd/monsters.json", import.meta.url), "utf8")) as SrdMonster[];
@@ -132,23 +131,9 @@ export function keysOf(state: RoomView): KeySource {
   return { applies: (s) => !s.when || s.when(env), text: (id) => keyText(id, DEFAULT_KEYS) };
 }
 
-/**
- * What lane S2b writes into everyone's catalog, as the stand-ins wrote it:
- * the fields of a creature's panel and page, and Initiative's words. S2b
- * moves each into the real catalog and takes it out of here.
- */
-export const PENDING_EVERYONE: Catalog = { entries: [], fields: EVERYONE_FIXTURE.fields, panels: EVERYONE_FIXTURE.panels };
-
-/** What lane S2b writes into the DM's: Long Rest for the party, Start a fight, Now playing, Light level, the token panel's Hidden and Monsters' words. */
-export const PENDING_DM: Catalog = {
-  entries: DM_FIXTURE.entries.filter((e) => ["action:characters.party-long-rest", "action:tracker.start-fight", "section:sound.now", "setting:scenes.light.level"].includes(e.id)),
-  fields: DM_FIXTURE.fields,
-  panels: DM_FIXTURE.panels,
-};
-
-/** A viewer's catalogs: the real ones, with what lane S2b still writes. */
-export const DM_CATALOGS: readonly Catalog[] = [EVERYONE, DM_CATALOG, PENDING_EVERYONE, PENDING_DM];
-export const PLAYER_CATALOGS: readonly Catalog[] = [EVERYONE, PENDING_EVERYONE];
+/** A viewer's catalogs, the real ones, as catalogsFor gives them once the DM's has loaded. */
+export const DM_CATALOGS: readonly Catalog[] = [EVERYONE, DM_CATALOG];
+export const PLAYER_CATALOGS: readonly Catalog[] = [EVERYONE];
 
 /** A viewer's index of the room, from the fixture catalogs their role holds. */
 export function indexOf(state: RoomView, options: { wide?: boolean; monsters?: readonly SrdMonster[] | null } = {}): SearchIndex {

@@ -113,15 +113,15 @@ function RunningClock(props: { clock: RoomClock; now: number; fight: boolean }) 
       {clock.shown ? null : <Help>{HIDDEN_NOTE}</Help>}
       <StepButtons now={props.now} />
       <div style={{ display: "flex" }}>
-        <Button ref={setButton} onClick={() => setDialog("set")}>
+        <Button ref={setButton} search="time.set" onClick={() => setDialog("set")}>
           Set the date and time…
         </Button>
       </div>
       <Section label="Sharing" divider={false}>
-        <Switch label="Players see the date and time" help={SHARE_HELP} checked={clock.shown} onChange={(shown) => actions.dispatch({ t: "clock.update", shown })} />
+        <Switch label="Players see the date and time" search="time.shown" help={SHARE_HELP} checked={clock.shown} onChange={(shown) => actions.dispatch({ t: "clock.update", shown })} />
       </Section>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), justifyContent: "space-between" }}>
-        <Button ref={calendarButton} onClick={() => setDialog("calendar")}>
+        <Button ref={calendarButton} search="time.calendar" onClick={() => setDialog("calendar")}>
           Calendar…
         </Button>
         <span data-clock-calendar="" style={{ fontSize: theme.font.body14, color: theme.color.textMuted }}>
@@ -133,6 +133,7 @@ function RunningClock(props: { clock: RoomClock; now: number; fight: boolean }) 
         <div style={{ display: "flex" }}>
           <Button
             variant="danger"
+            search="time.stop"
             armed={stopArmed}
             onBlur={() => setStopArmed(false)}
             onClick={() => {

@@ -324,7 +324,7 @@ function NowPlayingView(props: { first: DmSoundFirst; effects: ReactNode; onLibr
       </div>
       <UpNextFold />
       {props.effects}
-      <Section label={TABLE_SOUND}>
+      <Section label={TABLE_SOUND} search="sound.table">
         <TableSound />
       </Section>
       <LoopsSection editing={first.editing.loops} onEditing={first.onEditLoops} onOpenSound={first.onOpenSound} onStorageChanged={first.onStorageChanged} />
@@ -371,6 +371,7 @@ function UpNextFold() {
   return (
     <Section
       label={UP_NEXT}
+      search="sound.upnext"
       fold={{
         ...fold,
         keep: true,

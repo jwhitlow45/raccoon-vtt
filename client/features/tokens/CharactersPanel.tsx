@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type RefObject } from "react";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { clockNow } from "#shared/calendar.ts";
@@ -262,6 +262,11 @@ function useDeleteHandOff(root: RefObject<HTMLDivElement | null>, mine: readonly
 function PartyLongRest(props: { characters: Character[] }) {
   const actions = useRoomActions();
   const [asking, setAsking] = useState(false);
+  // The press takes its own button away, so focus goes to the card's Finish, as the room search's case has it (designs/qol search.md 7), never to the page.
+  const finish = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    if (asking) finish.current?.focus();
+  }, [asking]);
   const clock = useRoomView((s) => s.view?.clock);
   const encounter = useRoomView((s) => s.view?.encounter);
   const [moves, setMoves] = useState(true);
@@ -277,7 +282,7 @@ function PartyLongRest(props: { characters: Character[] }) {
     : [];
   if (!asking) {
     return (
-      <Button size="sm" disabled={resting.length === 0} onClick={() => setAsking(true)}>
+      <Button size="sm" search="characters.party-long-rest" disabled={resting.length === 0} onClick={() => setAsking(true)}>
         Long Rest for the party
       </Button>
     );
@@ -305,6 +310,7 @@ function PartyLongRest(props: { characters: Character[] }) {
       ))}
       <div style={{ display: "flex", gap: theme.space(2) }}>
         <Button
+          ref={finish}
           variant="primary"
           size="sm"
           style={{ flex: 1 }}

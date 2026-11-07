@@ -87,7 +87,15 @@ describe("nothing but dmCatalog.ts imports catalog/dm.ts, and nothing but catalo
   const client = resolve(here, "../..");
   const target = resolve(here, "catalog/dm.ts");
   /** The feature files whose entries are the DM's alone, which catalog/dm.ts gathers. */
-  const DM_ENTRY_FILES = ["features/dm/search.ts", "features/settings/search.ts"].map((f) => resolve(client, f));
+  const DM_ENTRY_FILES = [
+    "features/dm/search.ts",
+    "features/settings/search.ts",
+    "features/scenes/search.ts",
+    "features/clock/search.ts",
+    "features/sound/search.ts",
+    "features/encounter/search.ts",
+    "features/tokens/dmSearch.ts",
+  ].map((f) => resolve(client, f));
   const SPEC = /\b(?:import|export)\s+(?:type\s+)?(?:[^'";]*?\bfrom\s*)?["']([^"']+)["']|\bimport\(\s*["']([^"']+)["']\s*\)/g;
 
   function sources(dir: string): string[] {

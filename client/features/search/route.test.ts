@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, test } from "node:test";
 import { dmPanelFoldsSlot, scenesFoldsSlot, soundFoldsSlot, thisDeviceFoldsSlot, type FoldRoom } from "../../lib/folds.ts";
 import { RoomScope } from "../../state/scope.ts";
 import type { PanelHow } from "../../state/types.ts";
+import { diceFoldsSlot } from "../dice/diceFolds.ts";
 import { journalSlot } from "../journal/store.ts";
 import { soundAskSlot, soundViewSlot } from "../sound/music/open.ts";
 import { characterPageSlot } from "../tokens/characterPage.ts";
@@ -195,6 +196,20 @@ describe("a section in a closed fold opens for now, never written (search.md 5.5
     assert.deepEqual(writes, []);
   });
 
+  test("the Dice panel's folds: a creature's group for each kind the panel may show, and Recent rolls, for now", () => {
+    const r = room();
+    const folds = r.scope.get(diceFoldsSlot);
+    const shut = folds.get(PHONE);
+    assert.deepEqual([shut["pc.saves"], shut["monster.saves"], shut["pc.skills"]], [false, false, false]);
+    r.go({ panel: "dice", section: "saves", anchor: "dice.saves" });
+    const open = folds.get(PHONE);
+    assert.deepEqual([open["pc.saves"], open["companion.saves"], open["monster.saves"]], [true, true, true]);
+    assert.equal(open["pc.skills"], false, "only what a route named");
+    assert.deepEqual(writes, []);
+    folds.endReveals();
+    assert.equal(folds.get(PHONE)["pc.saves"], false, "folded again once the panel closes");
+  });
+
   test("a section its panel does not fold there is left alone", () => {
     const r = room();
     r.go({ panel: "dm", section: "walls" });
@@ -217,6 +232,7 @@ describe("a section in a closed fold opens for now, never written (search.md 5.5
     assert.deepEqual(routeFolds("characters"), []);
     assert.ok(routeFolds("characters", recordPage("character", "c")).includes("page.combat"));
     assert.deepEqual(routeFolds("tracker"), []);
+    assert.deepEqual(routeFolds("dice"), ["saves", "skills", "recent"]);
   });
 });
 

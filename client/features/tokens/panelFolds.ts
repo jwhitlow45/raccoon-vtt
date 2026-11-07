@@ -218,6 +218,8 @@ export function statBlockOpen(folds: Folds, override: { tokenId: string | null }
 /** The folds for this Room, kept up to date with every tap. */
 export function usePanelFolds(): { folds: Folds; slot: PanelFolds } {
   const slot = useScoped(panelFoldsSlot);
-  const folds = useSyncExternalStore(slot.subscribe, () => slot.get(layoutSize(window, uiScale())));
+  // A render with no window, as the room search's anchor test draws the panel to markup, reads a phone's starts, as the Dice panel's folds do.
+  const read = () => slot.get(typeof window === "undefined" ? { width: 0, height: 0 } : layoutSize(window, uiScale()));
+  const folds = useSyncExternalStore(slot.subscribe, read, read);
   return { folds, slot };
 }

@@ -62,8 +62,8 @@ describe("the list's states", () => {
     assert.match(html, /role="group" aria-labelledby="s-suggested"><div id="s-suggested" role="presentation"[^>]*>Suggested</);
     const ids = drawnIds(html);
     assert.deepEqual(ids.slice(0, 2), ["token:g2", "panel:dice"]);
-    // The DM's catalog stand-in suggests Start a fight first outside a fight.
-    assert.equal(ids[2], "action:tracker.start-fight");
+    // The DM's catalog suggests Start a fight first outside a fight.
+    assert.equal(ids[2], "action:tracker.new-fight");
     assert.ok(!html.includes("data-search-none"), "no No match on an empty field");
   });
 
