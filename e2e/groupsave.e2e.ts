@@ -11,7 +11,7 @@ import { blockOf, customMonster } from "#shared/testutil.ts";
 import { PALETTES } from "../client/lib/theme.ts";
 import { alignmentLines, disabledLookLines, measureAlignment } from "./helpers/alignment.ts";
 import { OUTCOME_RESTORED, OUTCOME_UNDONE, OUTCOME_UNAVAILABLE, assertPrivateOutcome, openSaveDice, saveOutcomes } from "./helpers/saveOutcomes.ts";
-import { ConsoleWatch, diceFoldsOpen, multiSelect, OpSocket, openSideTab, reopenRoom, resultLine, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, diceFoldsOpen, multiSelect, OpSocket, openSideTab, reopenRoom, resultLine, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * Roll options and the group save (docs/design/design-v1-roll-options.md 11), on
@@ -1072,6 +1072,92 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     assert.equal(diceLines(dmSocket.state?.log).length, logged, "no roll reached the log");
     await dm.keyboard.press("Escape");
     await menu.waitFor({ state: "hidden" });
+  });
+
+  test("qe-1. the group bar's Save opens the group save page for three goblins, its DC offers step 3's DC 13 under Recent, and with dice in Damage one press rolls the saves and the damage", async () => {
+    await selectGoblins([0, 1, 2]);
+    const group = dm.locator('[role="dialog"][data-bar-mode]');
+    await group.getByText("3 selected").waitFor();
+    await (await barControl(group, "Save")).tap();
+    const sheet = diceSheet(dm);
+    await sheet.waitFor();
+    await sheet.getByText("Dexterity save for 3").first().waitFor();
+    // The DCs this device sent for a save stand beside the DC field (designs/qol audit Q9): step 3 sent 13.
+    const recent = sheet.getByRole("group", { name: "Recent DCs", exact: true });
+    await recent.waitFor();
+    const chip = recent.getByRole("button", { name: `DC ${DC}`, exact: true });
+    await chip.tap();
+    await waitFor("the chip pressed with the DC filled", async () => ((await chip.getAttribute("aria-pressed")) === "true" ? true : null));
+    await shots.take(dm, "qe-1-group-save-recent-dc");
+
+    const outcome = sheet.getByRole("group", { name: "Outcome" });
+    if ((await outcome.count()) === 0) await sheet.getByRole("button", { name: "Edit", exact: true }).tap();
+    await sheet.getByLabel("Damage", { exact: true }).fill("2d6 fire");
+    const both = sheet.getByRole("button", { name: "Roll 3 saves and damage", exact: true });
+    await both.waitFor();
+    const before = diceLines(dmSocket.state?.log).length;
+    await both.tap();
+    const lines = await waitFor("the saves and the damage from one press", () => {
+      const fresh = diceLines(dmSocket.state?.log).slice(before);
+      const saves = fresh.find((l) => l.rolls.length === 3);
+      const damage = fresh.find((l) => l.rolls.length === 1 && l.rolls[0]!.formula === "2d6");
+      return saves && damage ? { saves, damage, count: fresh.length } : null;
+    });
+    assert.equal(lines.saves.dc, DC);
+    assert.deepEqual(new Set(lines.saves.rolls.map((r) => r.tokenId)), new Set(run.goblins.map((g) => g.id)));
+    await dm.waitForTimeout(500);
+    assert.equal(diceLines(dmSocket.state?.log).length - before, 2, "one press rolled once each");
+  });
+
+  test("qe-2. with that page holding rolls, Save on the group bar asks in the bar, Discard the Dexterity save for 3? with Keep it focused, and Keep it keeps the rolled page", async () => {
+    const sheet = diceSheet(dm);
+    await sheet.getByRole("button", { name: "Close Dice" }).tap();
+    await sheet.waitFor({ state: "hidden" });
+    const group = dm.locator('[role="dialog"][data-bar-mode]');
+    await group.getByText("3 selected").waitFor();
+    await (await barControl(group, "Save")).tap();
+    const ask = group.getByRole("alert").filter({ hasText: "Discard the Dexterity save for 3?" });
+    await ask.waitFor();
+    await waitFor("focus on Keep it", () =>
+      dm.evaluate(() => ((globalThis as unknown as { document: { activeElement: { textContent: string | null } | null } }).document.activeElement?.textContent ?? "").trim() === "Keep it" || null),
+    );
+    await shots.take(dm, "qe-2-group-save-replace");
+    const logged = diceLines(dmSocket.state?.log).length;
+    await ask.getByRole("button", { name: "Keep it", exact: true }).tap();
+    await ask.waitFor({ state: "detached" });
+    assert.equal(await diceSheet(dm).isVisible(), false, "Keep it opened the Dice sheet");
+    assert.equal(diceLines(dmSocket.state?.log).length, logged, "Keep it rolled something");
+    // The rolled page is still the one open, so Save asks again, and Discard then opens a fresh page, the selection's rows unrolled.
+    await (await barControl(group, "Save")).tap();
+    await ask.waitFor();
+    await ask.getByRole("button", { name: "Discard", exact: true }).tap();
+    await diceSheet(dm).waitFor();
+    await diceSheet(dm).getByText("Dexterity save for 3").first().waitFor();
+    await diceSheet(dm).getByRole("button", { name: /^Roll 3 saves/ }).first().waitFor();
+    assert.equal(diceLines(dmSocket.state?.log).length, logged, "Discard rolled something");
+  });
+
+  test("qe-3. Request a roll offers the same recent DC beside a save's DC field, and a check keeps its typical DCs with no Recent", async () => {
+    if (await diceSheet(dm).isVisible()) {
+      await diceSheet(dm).getByRole("button", { name: "Close Dice" }).tap();
+      await diceSheet(dm).waitFor({ state: "hidden" });
+    }
+    const picker = dm.getByRole("list", { name: "Panels" });
+    if (!(await picker.isVisible())) await dm.locator('button[title="Panels"]').tap();
+    await picker.getByRole("button", { name: /^Party/ }).tap();
+    await dm.getByRole("button", { name: "Ask the party" }).first().tap();
+    const ask = dm.getByRole("dialog", { name: "Request a roll" });
+    await ask.waitFor();
+    await ask.getByRole("radiogroup", { name: "Saving throw" }).getByRole("radio", { name: "Wisdom" }).tap();
+    const recent = ask.getByRole("group", { name: "Recent DCs", exact: true });
+    await recent.getByRole("button", { name: `DC ${DC}`, exact: true }).tap();
+    assert.equal(await ask.getByRole("textbox", { name: "DC", exact: true }).or(ask.getByLabel("DC", { exact: true })).first().inputValue(), String(DC));
+    await shots.take(dm, "qe-3-request-recent-dc");
+    // A check's DC is the typical ones, so no Recent row stands beside it.
+    await ask.getByRole("radiogroup", { name: "Ability check" }).getByRole("radio", { name: "Strength" }).tap();
+    await waitFor("no Recent DCs for a check", async () => ((await recent.count()) === 0 ? true : null));
+    await dm.keyboard.press("Escape");
+    await ask.waitFor({ state: "detached" });
   });
 
   test("8. nothing went wrong in the browsers", () => {
