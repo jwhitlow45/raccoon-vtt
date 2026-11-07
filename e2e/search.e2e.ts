@@ -942,7 +942,7 @@ describe("the room search", { concurrency: false }, () => {
     await themeFold.click();
   });
 
-  test("se-10. Enter presses an action's control, so its own picker, confirm or code shows, and an action whose control is off is focused, not pressed", async () => {
+  test("se-10. Enter presses an action's control, so its own picker, confirm or code shows, and an action whose control is off lands on the field that turns it on, ringed and not pressed", async () => {
     await fresh();
     await pick(dm, "change your color", "action:menu.members.color");
     await landedOn(dm, "menu.members.color");
@@ -961,13 +961,17 @@ describe("the room search", { concurrency: false }, () => {
     await dm.locator('[data-search="menu.members.password.new"] input').fill("");
     const change = dm.locator('[data-search="menu.members.password.change"]');
     assert.equal(await change.isDisabled(), true, "Change the password is off");
+    // Out of the field first, so focus that comes back to it is the landing's, not the search's opener's.
+    await dm.locator('[data-search="menu.members.password.new"] input').blur();
+    assert.equal((await focused(dm))?.anchor ?? null, null, "focus out of the field");
     await pick(dm, "change the password", "action:menu.members.password.change");
     await sheet(dm).waitFor({ state: "detached" });
+    // A control that is off takes no focus, so the landing puts it on the field that turns it on, and rings the control (D-261106-362).
+    const f = await landedOn(dm, "menu.members.password.new");
+    assert.equal(f.tag, "input", "the new password's field");
+    assert.ok(await ringed(dm, "menu.members.password.change"), "Change the password ringed");
     await settle(dm);
-    await sleep(300);
     assert.equal(await dm.getByText(/Every player is signed out now/).count(), 0, "not pressed: no confirm");
-    const f = await focused(dm);
-    assert.equal(f?.anchor, "menu.members.password.change", `focused, not pressed: focus is on ${JSON.stringify(f)}`);
   });
 
   test("se-11. Enter on a token off screen selects it, frames it and opens its action bar", async () => {
