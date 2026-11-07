@@ -13,7 +13,7 @@ import type { ControllerProps } from "../layers.ts";
 import { topDownTool } from "../view/choice.ts";
 import { useCoveredByPreview, usePageVisible, useReducedMotion } from "../weather/store.ts";
 import { animMapSlot, connectBoard, pageSteppedDown, subscribePageStepDown, type AnimMapBoard, type BoardShown, type LayerLike, type VideoLike } from "./board.ts";
-import { boardVideoSlot, useServerAnimatedMaps, type StillReason } from "./status.ts";
+import { boardVideoSlot, deviceStillReason, useServerAnimatedMaps, type StillReason } from "./status.ts";
 
 /**
  * Animated maps' controller (docs/design/design-v1-animated-maps.md 5.2),
@@ -170,18 +170,12 @@ function konvaLayer(layer: Konva.Layer): LayerLike {
   };
 }
 
-/**
- * Why every animated map on this device shows its still though Moving is
- * chosen, for This device's help line: Low power, reduced motion or the
- * step-down. Null when nothing device-wide keeps them still.
- */
+/** deviceStillReason as this device stands, for This device's help line and its Held still. */
 export function useDeviceStillReason(): StillReason | null {
   const lowPower = useLowPower();
   const reducedMotion = useReducedMotion();
   const stepped = useSyncExternalStore(subscribePageStepDown, pageSteppedDown, () => null);
-  if (lowPower) return "lowPower";
-  if (reducedMotion) return "reducedMotion";
-  return stepped;
+  return deviceStillReason(lowPower, reducedMotion, stepped);
 }
 
 export type { AnimMapBoard };

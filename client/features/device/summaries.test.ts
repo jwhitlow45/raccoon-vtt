@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { THIS_DEVICE_SECTIONS } from "../../lib/folds.ts";
-import { STILL_REASONS } from "../animmap/status.ts";
+import { deviceStillReason } from "../animmap/status.ts";
+import type { StepResult } from "../animmap/stepDown.ts";
 import { deviceSummaries, type DeviceValues } from "./summaries.ts";
 
 /* This device's folded summaries (docs/design/design-v1-panel-groups.md 6.2 and 10), each branch. */
@@ -59,8 +60,19 @@ describe("This device's folded summaries", () => {
   });
 
   test("Map detail says Held still after Moving while any reason holds the maps, as Weather does", () => {
-    // ThisDevice sets animatedHeld to useDeviceStillReason() !== null: Low power, reduced motion and the step-down all give a reason.
-    for (const reason of STILL_REASONS) assert.equal(deviceSummaries({ ...NEW_DEVICE, animatedMaps: "moving", animatedHeld: reason !== null }).mapDetail, "Phone size · Moving · Held still", reason);
+    // ThisDevice sets animatedHeld to useDeviceStillReason() !== null, which is deviceStillReason as the device stands: Low power, reduced motion and each step-down give a reason, and none gives null.
+    const held = (lowPower: boolean, reducedMotion: boolean, stepped: StepResult | null) => deviceSummaries({ ...NEW_DEVICE, animatedMaps: "moving", animatedHeld: deviceStillReason(lowPower, reducedMotion, stepped) !== null }).mapDetail;
+    assert.equal(deviceStillReason(true, false, null), "lowPower");
+    assert.equal(deviceStillReason(false, true, null), "reducedMotion");
+    assert.equal(deviceStillReason(false, false, "slowing"), "slowing");
+    assert.equal(deviceStillReason(false, false, "slowingOrSaving"), "slowingOrSaving");
+    assert.equal(deviceStillReason(true, true, "slowing"), "lowPower", "Low power is named first");
+    assert.equal(deviceStillReason(false, true, "slowing"), "reducedMotion");
+    assert.equal(deviceStillReason(false, false, null), null);
+    for (const [lowPower, reducedMotion, stepped] of [[true, false, null], [false, true, null], [false, false, "slowing"], [false, false, "slowingOrSaving"]] as const) {
+      assert.equal(held(lowPower, reducedMotion, stepped), "Phone size · Moving · Held still", `${lowPower} ${reducedMotion} ${stepped}`);
+    }
+    assert.equal(held(false, false, null), "Phone size · Moving");
     assert.equal(deviceSummaries({ ...NEW_DEVICE, animatedMaps: "moving" }).mapDetail, "Phone size · Moving");
     assert.equal(deviceSummaries({ ...NEW_DEVICE, animatedMaps: "still", animatedHeld: true }).mapDetail, "Phone size · Still", "Still is still already");
     assert.equal(deviceSummaries({ ...NEW_DEVICE, animatedMaps: null, animatedHeld: true }).mapDetail, "Phone size");

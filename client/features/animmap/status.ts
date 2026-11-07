@@ -2,6 +2,7 @@ import { useSyncExternalStore } from "react";
 import type { AssetId, MapVideo } from "#shared/model.ts";
 import { api } from "../../lib/api.ts";
 import { scopeSlot, useScopedIfAny } from "../../state/scope.ts";
+import type { StepResult } from "./stepDown.ts";
 
 /**
  * What animated maps share between the board, the DM's Map image row and the
@@ -52,6 +53,18 @@ export const MOVING: Playback = { play: true, reason: "moving" };
 
 export function stillFor(reason: StillReason): Playback {
   return { play: false, reason };
+}
+
+/**
+ * Why every animated map on this device shows its still though Moving is
+ * chosen (AnimMapController.tsx useDeviceStillReason): Low power, reduced
+ * motion or the page's step-down, in that order. Null when nothing
+ * device-wide keeps them still.
+ */
+export function deviceStillReason(lowPower: boolean, reducedMotion: boolean, stepped: StepResult | null): StillReason | null {
+  if (lowPower) return "lowPower";
+  if (reducedMotion) return "reducedMotion";
+  return stepped;
 }
 
 /** A tiny store with useSyncExternalStore's shape, so one value has one source and every reader follows it. */
