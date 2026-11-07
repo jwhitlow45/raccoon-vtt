@@ -5,14 +5,17 @@ import { TOP_DOWN } from "../../lib/view.ts";
 import { drawWeather } from "./draw.ts";
 import { lookOf } from "./looks.ts";
 import { HELD_STEP_MS, SLOW_DRAW_MS, SLOW_FRAME_MS, TICK_CLAMP_MS, TICK_MS, WARMUP_MS, WINDOW_MS, WeatherMode, type ModeInput, type StepLevel } from "./mode.ts";
-import { createField, stepField } from "./sim.ts";
+import { createField, stepField, type Field } from "./sim.ts";
+import type { Camera } from "../../lib/camera.ts";
 
 /*
  * The mode as one state machine (the weather design note, 6.3 and 12):
  * random sequences of frames, held frames, draws and frame costs, camera
  * changes, setting and power flips, hides, panels, the preview, tools,
  * scene loads, remounts and weather changes, driving a real field the way
- * the controller does. The invariants are checked after every event.
+ * the controller does, each tick at the camera of its time (the zoom note,
+ * design-v1-weather-zoom.md 3.5). The invariants are checked after every
+ * event, and the field must always be its twin stepped by the ticks alone.
  */
 
 const SHOWN: ModeInput = {
@@ -43,8 +46,25 @@ const noop = () => {};
 /** A canvas that ignores everything: the draw here is only there to show it leaves the field alone. */
 const recorder = { save: noop, restore: noop, setTransform: noop, beginPath: noop, closePath: noop, moveTo: noop, lineTo: noop, arc: noop, rect: noop, clip: noop, fill: noop, stroke: noop, fillRect: noop, drawImage: noop } as unknown as CanvasRenderingContext2D;
 
-function fieldKey(f: ReturnType<typeof createField>): string {
-  return `${f.t}:${f.x[0]}:${f.y[0]}:${f.x[f.active - 1]}:${f.y[f.active - 1]}`;
+/** A quick key of what a step moves, for the checks after every frame: the clock, the landings, and each level's first and last particle. */
+function fieldKey(f: Field): string {
+  const ends = f.x.map((_, l) => `${f.x[l]![0]},${f.y[l]![0]},${f.x[l]![f.count - 1]},${f.wy[l]![f.count - 1]}`);
+  return `${f.t}:${f.landed}:${ends.join(":")}`;
+}
+
+/** Whether two fields stand exactly alike: every level's particles, wraps, rings and sheets. */
+function sameField(a: Field, b: Field): boolean {
+  const lists = (f: Field) => [...f.x, ...f.y, ...f.wx, ...f.wy, f.rings, f.sheets];
+  const la = lists(a);
+  const lb = lists(b);
+  if (a.t !== b.t || a.landed !== b.landed || la.length !== lb.length) return false;
+  for (let k = 0; k < la.length; k++) {
+    const p = la[k]!;
+    const q = lb[k]!;
+    if (p.length !== q.length) return false;
+    for (let i = 0; i < p.length; i++) if (p[i] !== q[i]) return false;
+  }
+  return true;
 }
 
 test("2,000 random sequences keep the mode's invariants", () => {
@@ -57,7 +77,11 @@ test("2,000 random sequences keep the mode's invariants", () => {
     let now = int(r, 0, 1000);
     let input: ModeInput = { ...SHOWN };
     const mode = new WeatherMode(input, now);
-    const field = createField(lookOf({ kind: "rain", heavy: true, wind: "strong" })!, { width: 160, height: 120, view: TOP_DOWN, seed });
+    const look = lookOf({ kind: "rain", heavy: true, wind: "strong" })!;
+    const field = createField(look, { width: 160, height: 120, view: TOP_DOWN, seed });
+    /** The same field stepped by the ticks alone, each at the camera of its time. */
+    const twin = createField(look, { width: 160, height: 120, view: TOP_DOWN, seed });
+    let camera: Camera = { x: 0, y: 0, scale: 50 };
     let lastTick: number | null = null;
     /** The last frame that passed the gate was held, so the next tick may step the whole gap (HELD_STEP_MS). */
     let heldBefore = false;
@@ -115,18 +139,20 @@ test("2,000 random sequences keep the mode's invariants", () => {
           if (lastTick !== null) assert.ok(dt <= now - lastTick + 1e-9, `never more than the time since the last tick, seed ${seed}`);
           heldBefore = false;
           lastTick = now;
-          stepField(field, dt);
+          stepField(field, dt, camera);
+          stepField(twin, dt, camera);
           const cost = fast ? r() * 3 : r() < 0.5 ? r() * 3 : SLOW_DRAW_MS + r() * 6;
-          drawWeather(recorder, field, { camera: { x: 0, y: 0, scale: 50 }, clip: null }, null);
+          drawWeather(recorder, field, { camera, clip: null }, null);
           assert.equal(mode.drew(cost), "tick");
           // What the tick added to its whole frame, as the controller measures it after paint.
           mode.added(fast ? r() * 1.5 : r() < 0.5 ? r() * 1.5 : SLOW_FRAME_MS + r() * 4, now);
         }
       } else if (event === 4) {
-        // A pan or zoom: the stage's own batchDraw runs the sceneFunc with no tick behind it.
+        // A pan or zoom: the stage's own batchDraw runs the sceneFunc with no tick behind it, at the stage's new camera, which the next ticks read.
         const before = fieldKey(field);
         const cameras = mode.cameraDraws;
-        drawWeather(recorder, field, { camera: { x: r() * 500, y: r() * 500, scale: 10 + r() * 90 }, clip: null }, null);
+        camera = { x: -r() * 5000, y: -r() * 5000, scale: 4 + r() * 396 };
+        drawWeather(recorder, field, { camera, clip: null, held: r() < 0.5, probe: r() < 0.2 ? { spots: {}, limit: 64, marks: 0 } : undefined }, null);
         assert.equal(mode.drew(r() * 3), "camera");
         assert.equal(mode.cameraDraws, cameras + 1);
         assert.equal(fieldKey(field), before, "a camera draw never steps the field");
@@ -150,6 +176,7 @@ test("2,000 random sequences keep the mode's invariants", () => {
         now += int(r, 100, 4000);
       }
       observe(step);
+      if (step % 50 === 49) assert.ok(sameField(field, twin), `the field is its ticks' alone, seed ${seed} step ${step}`);
       assert.equal(mode.half, mode.level === "half");
       if (mode.input.setting === "off" || !mode.input.weather) assert.equal(mode.effective, "off");
     }
