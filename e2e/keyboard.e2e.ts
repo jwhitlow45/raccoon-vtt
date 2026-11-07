@@ -1194,10 +1194,12 @@ describe("raccoon-vtt: a sheet's field over the phone keyboard", { timeout: 900_
     }
   });
 
-  test("qe-1. with a keyboard joined to Pat's phone, C on Thorn's resting strip grows his bar with Conditions open on their first cell and Escape rests it again, a digit starts his HP change in the strip's field, and on the goblin, not his, neither key does a thing", async () => {
+  test("qe-1. with a keyboard joined to Pat's phone, C on Thorn's resting strip grows his bar with Conditions open on their first cell and Escape closes them with focus back on a Conditions button, resting the bar only where the strip shows one, a digit starts his HP change in the strip's field, and on the goblin, not his, neither key does a thing", async () => {
     await setUp(pat, VIEWS[0]!);
     const bar = await thornsBar(pat);
     assert.equal(await bar.getAttribute("data-bar-state"), "rest", "Thorn's bar opens as the strip");
+    // On Thorn's own turn HP, Roll and End turn fill the strip, which then shows no Conditions to come back to.
+    const onStrip = await bar.getByRole("button", { name: "Conditions", exact: true }).isVisible();
     const focus = () =>
       pat.evaluate(() => {
         type El = { tagName: string; value?: string; textContent: string | null; getAttribute(n: string): string | null; closest(s: string): El | null };
@@ -1213,7 +1215,13 @@ describe("raccoon-vtt: a sheet's field over the phone keyboard", { timeout: 900_
     });
     await shots.take(pat, "qe-1-c-on-strip");
     await pat.keyboard.press("Escape");
-    await waitFor("the drawer closed and the strip back at rest", async () => ((await bar.getAttribute("data-bar-state")) === "rest" ? true : null));
+    await waitFor("focus back on Conditions, as on a computer", async () => {
+      const f = await focus();
+      return f.tag === "BUTTON" && f.name === "Conditions" ? true : null;
+    });
+    assert.equal(await bar.getByRole("group", { name: "Conditions", exact: true }).count(), 0, "Escape left the drawer open");
+    assert.equal(await bar.getAttribute("data-bar-state"), onStrip ? "rest" : "expanded", `the bar after Escape, the strip ${onStrip ? "showing" : "without"} Conditions`);
+    console.log(`qe-1: the strip ${onStrip ? "showed" : "did not show"} Conditions, so Escape left the bar ${onStrip ? "resting" : "grown"}`);
     assert.ok(await bar.isVisible(), "Escape in the drawer closed Thorn's bar");
     await bar.getByRole("button", { name: "Close", exact: true }).first().tap();
     await bar.waitFor({ state: "detached" });

@@ -2681,11 +2681,20 @@ function useRestDrawers(rest: FrameControls["rest"], drawer: Drawer, setDrawer: 
     if (button && button.ownerDocument.activeElement === button) setFocus(null);
     else setFocus(focus.tries >= FOCUS_TRIES ? null : { ...focus, tries: focus.tries + 1 });
   });
+  /*
+   * Whether the strip drew the opened drawer's button as the bar grew. C
+   * opens Conditions from a strip that may not show them, as on its own
+   * turn, where HP, Roll and End turn take the strip, and resting the bar
+   * then would leave the focus on nothing.
+   */
+  const backOnStrip = useRef(false);
   const close = () => {
     setDrawer(null);
     if (opened !== null && rest && expanded) {
-      setFocus({ place: "rest", id: opened, tries: 0 });
       setOpened(null);
+      // With no button of its own on the strip the bar stays grown, and Escape puts focus on its Conditions, as on a computer.
+      if (!backOnStrip.current) return false;
+      setFocus({ place: "rest", id: opened, tries: 0 });
       rest.collapse();
       return true;
     }
@@ -2717,6 +2726,9 @@ function useRestDrawers(rest: FrameControls["rest"], drawer: Drawer, setDrawer: 
       setGridFocus(true);
       setDrawer("conditions");
       if (rest && rest.resting && !rest.scrolls) {
+        // The strip keeps every candidate in its row and hides those it cannot fit.
+        const strip = buttons.current.get("rest:conditions");
+        backOnStrip.current = strip !== undefined && strip.getClientRects().length > 0 && getComputedStyle(strip).visibility !== "hidden";
         setOpened("conditions");
         rest.expand();
       }
@@ -2733,6 +2745,7 @@ function useRestDrawers(rest: FrameControls["rest"], drawer: Drawer, setDrawer: 
       }
       setDrawer(id);
       setOpened(id);
+      backOnStrip.current = true;
       setFocus({ place: "play", id, tries: 0 });
       rest.expand();
     },
