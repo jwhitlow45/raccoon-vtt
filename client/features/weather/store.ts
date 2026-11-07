@@ -126,6 +126,18 @@ export class WeatherRoom {
   #ticksInARow = 0;
   /** Ticks in a row that no like frame stood beside (#judge), so a screen where none comes, as with an animated map or long input in step with the ticks, holds one now and then. */
   #unmatched = 0;
+  /**
+   * Holds since a tick last had a like frame, and how many more ticks a due
+   * hold lets through. In long input whose moves keep a beat that locks to
+   * the holds' own, every hold makes no like frame (WXZOOM-SOL-01), so each
+   * next one comes 0 to 3 ticks later, drawn from a seeded sequence, until
+   * one makes a like frame. Elsewhere holds keep their beat: a map whose
+   * measures come back late makes barren holds too, and putting those off
+   * slowed a slow canvas's step-down.
+   */
+  #barren = 0;
+  #putOff: number | null = null;
+  #seed = 1;
   readonly #board: BoardWork;
   /** A gesture's move came since the last frame started. */
   #gestured = false;
@@ -296,11 +308,17 @@ export class WeatherRoom {
     const last = this.#recent.at(-1);
     if (last && !last.settled) this.#measured(last);
     const moves = this.#moves(time);
-    const hold = (this.#ticksInARow >= SAMPLE_AFTER || this.#unmatched >= SAMPLE_AFTER) && this.mode.wantsCosts;
+    const due = (this.#ticksInARow >= SAMPLE_AFTER || this.#unmatched >= SAMPLE_AFTER) && this.mode.wantsCosts;
+    if (!due) this.#putOff = null;
+    else this.#putOff ??= this.#barren > 0 && moves.long ? this.#draw() : 0;
     const holds = this.mode.holds;
-    const ms = this.mode.frame(time, hold);
-    // A hold makes the like frames the ticks around it wait for, so the count starts again, and the next frame ticks.
-    if (this.mode.holds !== holds) this.#unmatched = 0;
+    const ms = this.mode.frame(time, due && this.#putOff === 0);
+    if (this.mode.holds !== holds) {
+      // A hold makes the like frames the ticks around it wait for, so the count starts again, and the next frame ticks.
+      this.#unmatched = 0;
+      this.#barren++;
+      this.#putOff = null;
+    } else if (due && ms !== null) this.#putOff!--;
     const ticked = ms !== null && this.#targets.length > 0;
     if (ms !== null) this.#targets[this.#targets.length - 1]?.tick(ms);
     this.#ticksInARow = ticked ? this.#ticksInARow + 1 : 0;
@@ -394,11 +412,18 @@ export class WeatherRoom {
     }
     tick.judged = true;
     this.#unmatched = 0;
+    this.#barren = 0;
     const cost = Math.max(0, tick.spent - beside.reduce((sum, f) => sum + f.spent!, 0) / beside.length);
     this.mode.added(cost, tick.at);
     this.#added.push(cost);
     if (this.#added.length > COST_TICKS) this.#added.shift();
     if (this.#added.length >= MIN_TICKS) this.frameCost = median(this.#added);
+  }
+
+  /** A draw of 0 to 3 from a fixed seed, so a run repeats. */
+  #draw(): number {
+    this.#seed = (Math.imul(this.#seed, 1664525) + 1013904223) >>> 0;
+    return this.#seed >>> 30;
   }
 
   /** A new look, layer or stage starts its cost afresh, as the step-down's warm-up does. */
@@ -408,6 +433,8 @@ export class WeatherRoom {
     this.#added.length = 0;
     this.#ticksInARow = 0;
     this.#unmatched = 0;
+    this.#barren = 0;
+    this.#putOff = null;
     this.#mapDraws = this.#board.mapDraws();
     this.#mapUnsure = false;
   }
@@ -473,9 +500,10 @@ const INPUT_PAUSE_MS = 250;
 /**
  * How many frames off a like frame for a tick in long input may be. Moves
  * in two frames of three, or on every fourth frame in step with a 30 fps
- * map at 60 Hz, leave a tick's kind of frame three or four frames off.
+ * map at 60 Hz, leave a tick's kind of frame three or four frames off, and
+ * moves on every third frame beside a 30 fps map at 60 Hz six frames off.
  */
-const LONG_INPUT_REACH = 4;
+const LONG_INPUT_REACH = 6;
 /**
  * Ticks in a row before the loop holds one (mode.ts `frame`'s hold), while
  * the window wants costs (mode.ts `wantsCosts`). At 33 frames a second or
@@ -497,7 +525,8 @@ const LONG_INPUT_REACH = 4;
  * too: a hold on a map frame leaves a frame where only the map drew, the
  * next tick lands a frame later, out of step, and the frames on either
  * side of the hold are like frames for the ticks around it. Long input
- * whose moves skip frames in step with the ticks holds them the same way.
+ * whose moves skip frames in step with the ticks holds them the same way,
+ * and where its holds make no like frame, their beat moves (`#barren`).
  */
 export const SAMPLE_AFTER = 3;
 

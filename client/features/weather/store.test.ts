@@ -276,6 +276,8 @@ describe("what a tick adds to its frame, which the sceneFunc's own timing cannot
     let at = 0;
     /** Frames in the run's second half with no tick: at 33 frames a second or fewer, the held ones. */
     let quiet = 0;
+    /** Frames that held a tick, from mode.ts's count. */
+    const held: number[] = [];
     while (at < end) {
       at += period;
       if (now > at) at = Math.ceil(now / period) * period;
@@ -287,8 +289,9 @@ describe("what a tick adds to its frame, which the sceneFunc's own timing cannot
       frames.run(at);
       for (const after of due) after();
       if (at > end / 2 && !ticked) quiet++;
+      if (room.mode.holds > held.length) held.push(frame);
     }
-    return { level: room.state.getState().level, frameCost: room.frameCost, most, ticks, samples, moved, quietPerSecond: quiet / (input.seconds / 2), holdsPerSecond: room.mode.holds / input.seconds };
+    return { level: room.state.getState().level, frameCost: room.frameCost, most, ticks, samples, moved, quietPerSecond: quiet / (input.seconds / 2), holdsPerSecond: room.mode.holds / input.seconds, held };
   }
   /** What a move's event targets: the stage's canvas, or a panel beside the board. */
   const ON_BOARD = { on: "board" } as unknown as EventTarget;
@@ -432,6 +435,53 @@ describe("what a tick adds to its frame, which the sceneFunc's own timing cannot
         const gesture = (frame: number) => (frame + phase) % 4 === 0;
         const board: Board = (frame) => 1 + (map(frame) ? 4 : 0) + (gesture(frame - late) ? 4 : 0);
         judgedUnderInput(`phase ${phase}, ${late} late`, underInput({ hz: 60, board, gesture, map }));
+      }
+    }
+  });
+
+  test("input whose beat would lock to the holds: every fourth frame at 30 Hz, where a hold comes every fourth frame too, judged as the holds move off its beat (WXZOOM-SOL-01)", () => {
+    for (let phase = 0; phase < 4; phase++) {
+      for (const late of [0, 1]) {
+        const at = `phase ${phase}, ${late} late`;
+        const gesture = (frame: number) => (frame + phase) % 4 === 0;
+        const redraw: Board = (frame) => 1 + (gesture(frame - late) ? 4 : 0);
+        const runs = underInput({ hz: 30, board: redraw, gesture });
+        console.log("A", at, runs.healthy.samples.length, runs.healthy.holdsPerSecond.toFixed(2), runs.slow.level, runs.slow.samples.length);
+        judgedUnderInput(at, runs);
+        assert.ok(runs.healthy.holdsPerSecond < 6, `${at}: ${runs.healthy.holdsPerSecond.toFixed(2)} held frames a second`);
+        // A wheel's turn every fourth frame, its camera change and redraw in the frame after.
+        const camera = (frame: number) => Math.floor((frame + phase - 1) / 4);
+        const wheel: Board = (frame) => 1 + (camera(frame) !== camera(frame - 1) ? 4 : 0);
+        const turns = underInput({ hz: 30, board: wheel, gesture, camera });
+        console.log("W", at, turns.healthy.samples.length, turns.healthy.holdsPerSecond.toFixed(2), turns.slow.level, turns.slow.samples.length);
+        judgedUnderInput(`a wheel, ${at}`, turns);
+      }
+    }
+  });
+
+  test("where its holds make like frames, input that never pauses keeps the holds' beat: one tick in four at 30 Hz, as with no input", () => {
+    // Within a window that wants costs the holds come every fourth frame. Between windows that have theirs, none come for a second or two.
+    const gaps = (held: readonly number[]) => held.slice(1).map((frame, i) => frame - held[i]!);
+    for (const input of [{}, { gesture: () => true }]) {
+      const r = run({ hz: 30, seconds: 30, tick: 0.3, board: () => 1, ...input });
+      const off = gaps(r.held).filter((gap) => gap !== 4 && gap < 30);
+      assert.ok(r.held.length > 20 && off.length === 0, `${"gesture" in input ? "input" : "none"}: ${r.held.length} holds, gaps ${off.join(", ")}`);
+    }
+  });
+
+  test("input on every third frame beside a 30 fps map at 60 Hz, where each kind of frame comes back only six frames off, in every phase (WXZOOM-SOL-01)", () => {
+    for (let mapPhase = 0; mapPhase < 2; mapPhase++) {
+      for (let phase = 0; phase < 3; phase++) {
+        for (const late of [0, 1]) {
+          const at = `map phase ${mapPhase}, input phase ${phase}, ${late} late`;
+          const map = (frame: number) => (frame + mapPhase) % 2 === 0;
+          const gesture = (frame: number) => (frame + phase) % 3 === 0;
+          const board: Board = (frame) => 1 + (map(frame) ? 4 : 0) + (gesture(frame - late) ? 4 : 0);
+          const runs = underInput({ hz: 60, board, gesture, map });
+          console.log("B", at, runs.healthy.samples.length, runs.healthy.holdsPerSecond.toFixed(2), runs.slow.level, runs.slow.samples.length);
+          judgedUnderInput(at, runs);
+          assert.ok(runs.healthy.holdsPerSecond < 6, `${at}: ${runs.healthy.holdsPerSecond.toFixed(2)} held frames a second`);
+        }
       }
     }
   });
