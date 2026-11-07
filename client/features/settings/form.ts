@@ -270,6 +270,38 @@ const HEX_WORDS: Partial<Record<SettingField["key"], { label?: string; help?: st
   },
 };
 
+/** The name of the players' ticks under a choice of who may act, which appear while the DM picks Chosen players. */
+export const CHOSEN_PLAYERS: Readonly<Record<"playersMoveAny" | "playersDraw", string>> = {
+  playersMoveAny: "Players who can move any token",
+  playersDraw: "Players who can draw",
+};
+
+/** A heading or a setting key as an anchor id's part: "Grid and distance" is "grid-and-distance", "feetPerCell" "feet-per-cell". */
+function idPart(text: string): string {
+  return text
+    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+const HEADING_OF: ReadonlyMap<SettingField["key"], string> = new Map(SETTING_GROUPS.flatMap((g) => g.fields.map((f) => [f.key, g.heading] as const)));
+
+/**
+ * The room search's anchor ids (features/search/entry.ts) for a group and
+ * for a setting, made from this file's own data, so a setting added here is
+ * found by the search with no id to write by hand: the panel draws them
+ * (panels/SettingsPanel.tsx) and the DM's catalog routes to them
+ * (features/settings/search.ts).
+ */
+export function groupAnchor(heading: string): string {
+  return `menu.room-settings.${idPart(heading)}`;
+}
+
+export function settingAnchor(key: SettingField["key"]): string {
+  return `${groupAnchor(HEADING_OF.get(key) ?? "")}.${idPart(key)}`;
+}
+
 /** The form's groups in the room's words: SETTING_GROUPS, or with HEX_WORDS over it while the room has hexes (grid/words.ts `roomHasHexes`). */
 export function settingGroups(hexes: boolean): SettingGroup[] {
   if (!hexes) return SETTING_GROUPS;

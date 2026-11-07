@@ -180,7 +180,7 @@ export function JoiningSetting() {
   };
 
   return (
-    <Section label="Joining">
+    <Section label="Joining" search="menu.members.joining">
       {state.kind === "loading" ? (
         <Loading text="Loading…" />
       ) : mode === null ? (
@@ -191,6 +191,7 @@ export function JoiningSetting() {
       ) : (
         <RadioCards<JoinMode>
           legend="How new players join"
+          search="menu.members.joining.mode"
           value={busy ?? mode}
           options={JOIN_MODE_OPTIONS}
           busy={busy !== null}

@@ -170,7 +170,7 @@ export function HandoutsSection(props: { fold: { open: boolean; onToggle(): void
     </>
   );
   return (
-    <Group label="Handouts" {...props.fold} keep wholeSummary summary={summary} divider={props.divider}>
+    <Group label="Handouts" {...props.fold} keep wholeSummary summary={summary} divider={props.divider} search="dm.handouts">
       <JobBlock
         onLeave={afterBlock}
         onShow={showSaved}
@@ -329,7 +329,7 @@ function RecentRows(props: RecentListProps & { library: readonly AssetRow[] | nu
        * its rows read as a column of their own beside the section's edge.
        * Each row's line runs the whole width, as a row list's does.
        */}
-      <ul aria-label="Recent handouts" style={{ listStyle: "none", margin: 0, padding: `0 ${theme.space(3)}px` }}>
+      <ul aria-label="Recent handouts" data-search="dm.handouts.recent" style={{ listStyle: "none", margin: 0, padding: `0 ${theme.space(3)}px` }}>
         {offered.map((entry, i) => {
           const key = entryKey(entry);
           const words = recentRowWords(entry, props.members);
@@ -505,7 +505,7 @@ export function ShowHandoutForm(props: {
 
   if (!open) {
     return (
-      <Button ref={opener} size="sm" onClick={() => set({ open: true })} style={{ justifySelf: "start" }}>
+      <Button ref={opener} size="sm" search="dm.handouts.show" onClick={() => set({ open: true })} style={{ justifySelf: "start" }}>
         Show a handout
       </Button>
     );

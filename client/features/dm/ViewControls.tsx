@@ -52,7 +52,7 @@ export function ViewControls(props: { screens: GroupFold; check: GroupFold }) {
   const screens = screensSummary({ onPlayerScene, playerSceneName: playerSceneName ?? null, follow: view.follow, blackout: view.blackout });
   return (
     <>
-      <Group label="Players' screens" {...props.screens} keep wholeSummary summary={screens}>
+      <Group label="Players' screens" {...props.screens} keep wholeSummary summary={screens} search="dm.screens">
         {!onPlayerScene ? (
           <Notice role="status">
             You are looking at a different scene than the players{playerSceneName ? `, who are on ${playerSceneName}` : ""}. Follow
@@ -61,6 +61,7 @@ export function ViewControls(props: { screens: GroupFold; check: GroupFold }) {
         ) : null}
         <Switch
           label="Follow me"
+          search="dm.screens.follow"
           help="Players' maps follow yours as you pan and zoom, until you turn this off."
           checked={view.follow}
           onChange={(follow) => actions.dispatch({ t: "view.follow", follow })}
@@ -68,6 +69,7 @@ export function ViewControls(props: { screens: GroupFold; check: GroupFold }) {
         <div style={{ display: "grid", gap: theme.space(1), padding: `${theme.space(2)}px 0` }}>
           <Button
             size="sm"
+            search="dm.screens.bring"
             disabled={!onPlayerScene || focusScene !== sceneId}
             onClick={() => {
               const f = currentFocus(scope);
@@ -83,12 +85,13 @@ export function ViewControls(props: { screens: GroupFold; check: GroupFold }) {
         </div>
         <Switch
           label="Black out players' screens"
+          search="dm.screens.blackout"
           help={'Players see only black and "The DM has paused the game." Use it for a break or before a reveal.'}
           checked={view.blackout}
           onChange={(blackout) => actions.dispatch({ t: "view.blackout", blackout })}
         />
       </Group>
-      <Group label="Preview" {...props.check} keep wholeSummary summary={checkSummary(partySight && sightShown)}>
+      <Group label="Preview" {...props.check} keep wholeSummary summary={checkSummary(partySight && sightShown)} search="dm.preview">
         <ViewAsPlayer members={members} />
         <PartySightToggle />
       </Group>
@@ -120,7 +123,7 @@ function ViewAsPlayer(props: { members: Record<string, Member | undefined> | und
         View as a player
       </label>
       <div style={{ display: "flex", gap: theme.space(2) }}>
-        <Select id={selectId} value={chosen?.id ?? ""} onChange={(e) => setPicked(e.target.value)} style={{ flex: 1 }}>
+        <Select id={selectId} search="dm.preview.view-as" value={chosen?.id ?? ""} onChange={(e) => setPicked(e.target.value)} style={{ flex: 1 }}>
           {players.map((p) => (
             <option key={p.id} value={p.id}>
               {p.name}

@@ -74,7 +74,7 @@ export function TableDisplaySection(props: { fold: { open: boolean; onToggle(): 
   };
 
   return (
-    <Group label="Table display" {...props.fold} keep wholeSummary summary={displaysSummary(displays)}>
+    <Group label="Table display" {...props.fold} keep wholeSummary summary={displaysSummary(displays)} search="dm.display">
       <Help>
         Show the map on a TV for the table, as the players see it, with nothing else on it. On the TV, open RaccoonVTT
         and choose Set up a table display.
@@ -84,6 +84,7 @@ export function TableDisplaySection(props: { fold: { open: boolean; onToggle(): 
       </p>
       <Switch
         label="Show my view on the table display"
+        search="dm.display.show-view"
         help="A display following the DM shows the part of the map this device shows, as you pan and zoom. Only while you view the players' scene."
         checked={showView}
         disabled={preview}
@@ -93,10 +94,10 @@ export function TableDisplaySection(props: { fold: { open: boolean; onToggle(): 
         <CodeCard code={code} minting={busy === "add"} onAnother={() => void mint("add", setCode)} onDone={() => setCode(null)} />
       ) : (
         <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
-          <Button size="sm" busy={busy === "add"} disabled={(busy !== null && busy !== "add") || preview} onClick={() => void mint("add", setCode)}>
+          <Button size="sm" search="dm.display.add" busy={busy === "add"} disabled={(busy !== null && busy !== "add") || preview} onClick={() => void mint("add", setCode)}>
             {busy === "add" ? "Making a code…" : "Add a TV"}
           </Button>
-          <Button size="sm" busy={busy === "open"} disabled={(busy !== null && busy !== "open") || preview} onClick={openHere}>
+          <Button size="sm" search="dm.display.open" busy={busy === "open"} disabled={(busy !== null && busy !== "open") || preview} onClick={openHere}>
             {busy === "open" ? "Opening…" : "Open on this device"}
           </Button>
         </div>

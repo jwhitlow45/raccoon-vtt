@@ -1,5 +1,6 @@
 import type { ProjectedActor } from "#shared/project.ts";
 import type { IconName } from "../../../components/Icon.tsx";
+import type { DmMenuView } from "../../../pages/chipMenus.ts";
 import type { RoomView } from "../../../state/types.ts";
 import type { SearchEntry } from "../entry.ts";
 
@@ -23,6 +24,15 @@ export type SearchContext = {
   /** This device's member, or null before the room said who it is. */
   memberId: string | null;
   state: RoomView;
+  /** From 900 px up, where the side panel and its row of tabs stand (index.ts IndexInput). */
+  wide: boolean;
+  /**
+   * The DM menu's view as the menu reads it (pages/ChipMenus.tsx
+   * useDmMenuView), for the DM's items: with it come the parts the room's
+   * state lacks, this device's recent handouts and where the DM's camera
+   * stands. Without it the DM's catalog reads what it can from `state`.
+   */
+  dmMenu?: DmMenuView;
 };
 
 /** A section, setting or action of the catalog. */

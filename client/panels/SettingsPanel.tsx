@@ -15,6 +15,7 @@ import type { PanelProps } from "../features/panels.ts";
 import { timerChoices } from "../features/encounter/timer.ts";
 import { ExportSection } from "../features/settings/ExportSection.tsx";
 import {
+  CHOSEN_PLAYERS,
   choiceOf,
   drawersOf,
   moveAnyFor,
@@ -24,6 +25,8 @@ import {
   newScenesShape,
   parseFeetPerCell,
   parseRoomName,
+  groupAnchor,
+  settingAnchor,
   settingGroups,
   settingsOp,
   toggleOn,
@@ -65,7 +68,7 @@ export default function SettingsPanel(_props: PanelProps) {
         <RoomName current={name} onSave={(value) => actions.dispatch({ t: "room.update", name: value })} />
       </Section>
       {settingGroups(hexes).map((group) => (
-        <Section key={group.heading} label={group.heading}>
+        <Section key={group.heading} label={group.heading} search={groupAnchor(group.heading)}>
           {group.fields.map((field) => (
             <SettingControl key={field.key} field={field} settings={settings} onChange={apply} />
           ))}
@@ -78,17 +81,20 @@ export default function SettingsPanel(_props: PanelProps) {
 
 function SettingControl(props: { field: SettingField; settings: RoomSettings; onChange(next: Partial<RoomSettings>): void }) {
   const { field, settings, onChange } = props;
+  // Each setting's anchor comes from the form's data (form.ts settingAnchor), so the search finds a setting added there.
+  const search = settingAnchor(field.key);
   switch (field.kind) {
     case "toggle":
-      return <Switch label={field.label} help={field.help} checked={toggleOn(settings, field.key)} onChange={(v) => onChange({ [field.key]: v })} />;
+      return <Switch label={field.label} search={search} help={field.help} checked={toggleOn(settings, field.key)} onChange={(v) => onChange({ [field.key]: v })} />;
     case "number":
-      return <FeetPerCell label={field.label} help={field.help} value={settings.feetPerCell} onSave={(v) => onChange({ feetPerCell: v })} />;
+      return <FeetPerCell label={field.label} search={search} help={field.help} value={settings.feetPerCell} onSave={(v) => onChange({ feetPerCell: v })} />;
     case "seconds":
       // Rooms from before the timer have no value, which is off.
       return (
         <div style={{ padding: `${theme.space(2)}px 0` }}>
           <RadioCards<string>
             legend={field.label}
+            search={search}
             help={field.help}
             value={String(settings[field.key] ?? 0)}
             options={timerChoices(settings[field.key] ?? 0).map((o) => ({ value: String(o.value), label: o.label }))}
@@ -97,14 +103,15 @@ function SettingControl(props: { field: SettingField; settings: RoomSettings; on
         </div>
       );
     case "movers":
-      return <ChosenPlayers field={field} group="Players who can move any token" value={settings.playersMoveAny} onChange={(playersMoveAny) => onChange({ playersMoveAny })} />;
+      return <ChosenPlayers field={field} search={search} group={CHOSEN_PLAYERS.playersMoveAny} value={settings.playersMoveAny} onChange={(playersMoveAny) => onChange({ playersMoveAny })} />;
     case "drawers":
-      return <ChosenPlayers field={field} group="Players who can draw" value={drawersOf(settings)} onChange={(playersDraw) => onChange({ playersDraw })} />;
+      return <ChosenPlayers field={field} search={search} group={CHOSEN_PLAYERS.playersDraw} value={drawersOf(settings)} onChange={(playersDraw) => onChange({ playersDraw })} />;
     case "newScenes":
       return (
         <div style={{ padding: `${theme.space(2)}px 0` }}>
           <RadioCards<ScenePreset | "before">
             legend={field.label}
+            search={search}
             help={field.help}
             value={newScenesChoice(settings)}
             options={newScenesOptions(field, settings)}
@@ -116,13 +123,14 @@ function SettingControl(props: { field: SettingField; settings: RoomSettings; on
       );
     case "gridShape":
       // The scene's own Grid shape choice, so one choice has one look (docs/design/design-v1-design-pass.md 4.2). A room refuses no shape.
-      return <ShapeRow name={field.label} help={field.help} value={newScenesShape(settings)} onChange={(v) => onChange({ newScenes: v } as Partial<RoomSettings>)} />;
+      return <ShapeRow name={field.label} search={search} help={field.help} value={newScenesShape(settings)} onChange={(v) => onChange({ newScenes: v } as Partial<RoomSettings>)} />;
     case "choice":
       // Each key's options are typed to its own values, so the cast only widens for the shared component.
       return (
         <div style={{ padding: `${theme.space(2)}px 0` }}>
           <RadioCards<string>
             legend={field.label}
+            search={search}
             help={field.help}
             value={choiceOf(settings, field.key)}
             options={field.options}
@@ -139,7 +147,7 @@ function SettingControl(props: { field: SettingField; settings: RoomSettings; on
  * ticked below. Each tap applies at once, like the switches. Only players
  * are listed, since a DM does both anyway.
  */
-function ChosenPlayers(props: { field: Extract<SettingField, { kind: "movers" | "drawers" }>; group: string; value: WhichPlayers; onChange(value: WhichPlayers): void }) {
+function ChosenPlayers(props: { field: Extract<SettingField, { kind: "movers" | "drawers" }>; search: string; group: string; value: WhichPlayers; onChange(value: WhichPlayers): void }) {
   const { field, value } = props;
   const members = useRoomView((s) => s.view?.members);
   const players = Object.values(members ?? {})
@@ -150,6 +158,7 @@ function ChosenPlayers(props: { field: Extract<SettingField, { kind: "movers" | 
     <div style={{ display: "grid", gap: theme.space(1), padding: `${theme.space(2)}px 0` }}>
       <RadioCards<MoveAnyMode>
         legend={field.label}
+        search={props.search}
         help={field.help}
         value={moveAnyMode(value)}
         options={field.options}
@@ -157,7 +166,7 @@ function ChosenPlayers(props: { field: Extract<SettingField, { kind: "movers" | 
       />
       {chosen ? (
         players.length > 0 ? (
-          <div role="group" aria-label={props.group} style={{ display: "grid", paddingLeft: theme.space(4) }}>
+          <div role="group" aria-label={props.group} data-search={`${props.search}.chosen`} style={{ display: "grid", paddingLeft: theme.space(4) }}>
             {players.map((m) => (
               <Checkbox key={m.id} label={m.name} checked={chosen.includes(m.id)} onChange={(on) => props.onChange(withMover(value, m.id, on))} />
             ))}
@@ -183,7 +192,7 @@ function SavedSetting(props: {
   dirty: boolean;
   error: string | null;
   onSubmit(e: FormEvent): void;
-  input: InputHTMLAttributes<HTMLInputElement>;
+  input: InputHTMLAttributes<HTMLInputElement> & { search: string };
 }) {
   const errorId = useId();
   return (
@@ -215,7 +224,7 @@ function SavedSetting(props: {
 }
 
 /** Typed numbers apply on Save or Enter, not on every keystroke, so "15" never passes through "1". */
-function FeetPerCell(props: { label: string; help: string; value: number; onSave(value: number): void }) {
+function FeetPerCell(props: { label: string; search: string; help: string; value: number; onSave(value: number): void }) {
   const [text, setText] = useState(String(props.value));
   const [error, setError] = useState<string | null>(null);
   const [synced, setSynced] = useState(props.value);
@@ -243,6 +252,7 @@ function FeetPerCell(props: { label: string; help: string; value: number; onSave
       error={error}
       onSubmit={submit}
       input={{
+        search: props.search,
         value: text,
         inputMode: "numeric",
         pattern: "[0-9]*",
@@ -282,6 +292,7 @@ function RoomName(props: { current: string; onSave(name: string): void }) {
       error={error}
       onSubmit={submit}
       input={{
+        search: "menu.room-settings.name",
         value: text,
         maxLength: 80,
         onChange: (e) => {

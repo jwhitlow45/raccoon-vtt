@@ -24,6 +24,8 @@ export function ShapeRow(props: {
   refused?: Partial<Record<ShapeChoice, string>>;
   note?: ReactNode;
   disabled?: boolean;
+  /** The room search's anchor id for the choice (features/search/entry.ts). */
+  search?: string;
   onChange(value: ShapeChoice): void;
 }) {
   const reasonId = useId();
@@ -35,6 +37,7 @@ export function ShapeRow(props: {
         <div style={{ display: "grid", gap: theme.space(1), minWidth: 0, width: "100%" }}>
           <Segmented<ShapeChoice>
             labelledBy={ids.nameId}
+            search={props.search}
             describedBy={[ids.helpId, reasons.length > 0 ? reasonId : null, props.note ? noteId : null].filter(Boolean).join(" ")}
             value={props.value}
             disabled={props.disabled}

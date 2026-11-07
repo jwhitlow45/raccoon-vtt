@@ -7,6 +7,7 @@ import { displayName } from "../../lib/scene.ts";
 import { shortcutsFor, type Shortcut } from "../../state/shortcuts.ts";
 import type { RoomView } from "../../state/types.ts";
 import { panelsFor, SOUND_PANEL, type PanelsForOptions } from "../panels.ts";
+import type { DmMenuView } from "../../pages/chipMenus.ts";
 import { ownsCharacter, tokenAccess } from "../tokens/access.ts";
 import { EVERYONE } from "./catalog/everyone.ts";
 import type { Catalog, CatalogEntry, FieldDef, FieldPlace, PanelWords, SearchContext, SearchRole } from "./catalog/types.ts";
@@ -79,6 +80,8 @@ export type IndexInput = {
   catalogs: readonly Catalog[];
   /** The SRD monsters once their chunk is in, for a DM (loadedMonsters). */
   monsters: readonly SrdMonster[] | null;
+  /** The DM menu's view for a DM's search (catalog/types.ts SearchContext). */
+  dmMenu?: DmMenuView;
 };
 
 export type SearchIndex = {
@@ -187,7 +190,7 @@ export function buildIndex(input: IndexInput): SearchIndex {
   const { state } = input;
   const role = searchRole(state);
   const memberId = state.you?.memberId ?? null;
-  const ctx: SearchContext = { role, memberId, state };
+  const ctx: SearchContext = { role, memberId, state, wide: input.wide, ...(input.dmMenu ? { dmMenu: input.dmMenu } : null) };
   const b = new Builder();
 
   const panelWords = mergedPanelWords(input.catalogs);

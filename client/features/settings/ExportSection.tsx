@@ -73,16 +73,17 @@ export function ExportSection() {
   };
 
   return (
-    <Section label="Backup">
+    <Section label="Backup" search="menu.room-settings.backup">
       <Help>
         Download the whole room as one .zip file: every scene, token, character and image. Anyone can import it from the
         Home page as a new room, on this server or another.
       </Help>
       {soundBytes !== null ? (
-        <Checkbox label="Include sounds" help={`Sounds add ${formatBytes(soundBytes)}.`} checked={withSounds} disabled={status.kind === "checking"} onChange={setWithSounds} />
+        <Checkbox label="Include sounds" search="menu.room-settings.backup.sounds" help={`Sounds add ${formatBytes(soundBytes)}.`} checked={withSounds} disabled={status.kind === "checking"} onChange={setWithSounds} />
       ) : null}
       <a
         ref={link}
+        data-search="menu.room-settings.backup.download"
         href={url}
         download={`raccoon-room-${formatRoomId(roomId)}.zip`}
         onClick={onClick}

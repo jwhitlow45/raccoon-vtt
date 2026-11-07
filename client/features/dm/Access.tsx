@@ -167,6 +167,7 @@ export function PlayerLinkSection(props: { main?: boolean; fold?: { open: boolea
         <Button
           variant={props.main ? "primary" : "secondary"}
           size="sm"
+          search={props.fold ? "dm.link.show" : undefined}
           busy={state.kind === "loading"}
           onClick={() => void loader.show()}
           style={{ justifySelf: "start" }}
@@ -179,11 +180,13 @@ export function PlayerLinkSection(props: { main?: boolean; fold?: { open: boolea
     </>
   );
   return props.fold ? (
-    <Group label="Player link" {...props.fold} keep wholeSummary>
+    <Group label="Player link" {...props.fold} keep wholeSummary search="dm.link">
       {body}
     </Group>
   ) : (
-    <Section label="Player link">{body}</Section>
+    <Section label="Player link" search="menu.members.player-link">
+      {body}
+    </Section>
   );
 }
 
@@ -200,7 +203,7 @@ export function PlayerPassword() {
     <>
       {/* Remounted after a change, so a link shown before it is not left on screen. */}
       <PlayerLinkSection key={changed ?? ""} main />
-      <Section label="Player password">
+      <Section label="Player password" search="menu.members.password">
         <Help>
           Players join with this password, or with a player link that carries it. Changing it signs every player and
           table display out at once and stops old player links, so use it to keep a kicked player out. DM devices stay
@@ -208,6 +211,7 @@ export function PlayerPassword() {
         </Help>
         <Field
           label="New player password"
+          search="menu.members.password.new"
           value={password}
           maxLength={128}
           autoCapitalize="none"
@@ -236,6 +240,7 @@ export function PlayerPassword() {
         />
         <ConfirmAction
           label="Change the password"
+          search="menu.members.password.change"
           busy={busy}
           danger
           disabled={problem !== null}
@@ -404,7 +409,7 @@ export function DmDevices() {
 
   return (
     <>
-      <Section label="DM devices">
+      <Section label="DM devices" search="menu.members.dm-devices">
         <Help>Every device signed in as a DM in this room, and every table display. Sign out any you do not recognize.</Help>
         {devices === null && !error ? <Loading text="Loading the devices…" /> : null}
         {devices?.length === 0 ? <Help>No DM devices.</Help> : null}
@@ -444,7 +449,7 @@ export function DmDevices() {
         ) : null}
         <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
           {!invite ? (
-            <Button size="sm" busy={busy === "mint"} disabled={busy !== null && busy !== "mint"} onClick={() => void mint()}>
+            <Button size="sm" search="menu.members.dm-devices.add" busy={busy === "mint"} disabled={busy !== null && busy !== "mint"} onClick={() => void mint()}>
               {busy === "mint" ? "Making an invite…" : "Add a DM device"}
             </Button>
           ) : null}
@@ -467,7 +472,7 @@ export function DmDevices() {
         ) : null}
         <ErrorText>{error}</ErrorText>
       </Section>
-      <Section label="DM link" tone="danger">
+      <Section label="DM link" tone="danger" search="menu.members.dm-link">
         {newLink ? (
           <>
             <Notice tone="warning" role="status">
@@ -490,6 +495,7 @@ export function DmDevices() {
             </Help>
             <ConfirmAction
               label="Replace the DM link"
+              search="menu.members.dm-link.replace"
               danger
               busy={busy !== null}
               warning="Every other DM device and every co-DM loses DM right now, and the old link stops working. The new link is shown once. Replace it?"
@@ -533,13 +539,14 @@ export function DeleteRoom() {
   const name = storedName ?? metaName;
   const matches = typed.trim() !== "" && typed.trim() === name.trim();
   return (
-    <Section label="Delete this room" tone="danger">
+    <Section label="Delete this room" tone="danger" search="menu.members.delete">
       <Help>
         Deletes the room for everyone: every scene, token, character, the log and every image. It cannot be undone.
         Download a backup first if you might want it back.
       </Help>
       <Field
         label={`Type the room name, ${name}, to confirm`}
+        search="menu.members.delete.name"
         value={typed}
         autoComplete="off"
         onChange={(e) => {

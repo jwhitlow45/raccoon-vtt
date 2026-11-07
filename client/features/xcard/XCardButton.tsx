@@ -35,6 +35,7 @@ export function XCardButton() {
       <button
         ref={opener}
         type="button"
+        data-search="menu.xcard"
         disabled={preview !== null}
         onClick={() => setOpen(true)}
         style={{

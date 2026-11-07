@@ -102,7 +102,7 @@ export function DiceSetPicker() {
       <div style={{ display: "grid", minWidth: 0 }}>
         {on ? null : <Help style={{ marginTop: theme.space(1) }}>Turn on Roll animation to throw dice.</Help>}
         {/* Marked as a card group for the spacing check (e2e/helpers/spacing.ts), as RadioCards' cards are. */}
-        <div data-card-group="" style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(${TILE_MIN_PX}px, 1fr))`, gap: theme.space(1), marginTop: theme.space(2) }}>
+        <div data-card-group="" data-search="menu.this-device.rolls.dice-set" style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(${TILE_MIN_PX}px, 1fr))`, gap: theme.space(1), marginTop: theme.space(2) }}>
           {DICE_SETS.map((set) => {
             const picked = set.id === chosen;
             return (

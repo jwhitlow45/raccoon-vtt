@@ -147,25 +147,27 @@ export default function ThisDevice() {
   const group = (key: ThisDeviceSection) => ({ ...fold(key), keep: true, wholeSummary: true, summary: summary[key] });
   return (
     <div style={{ display: "grid" }}>
-      <Group label="Interface size" {...group("size")} divider={false}>
+      <Group label="Interface size" {...group("size")} divider={false} search="menu.this-device.size">
         <Help>The bars, panels and the names and marks on tokens. The map keeps its own zoom: pinch or use the wheel.</Help>
-        <Segmented<UiScale> label="Interface size" grow value={scale} options={UI_SCALES.map((s) => ({ value: s, label: uiScaleLabel(s) }))} onChange={setUiScale} />
+        <Segmented<UiScale> label="Interface size" search="menu.this-device.size.scale" grow value={scale} options={UI_SCALES.map((s) => ({ value: s, label: uiScaleLabel(s) }))} onChange={setUiScale} />
       </Group>
       <ThemeSection value={themeChoice} helpId={themeHelp} fold={group("theme")} />
       {/* Where the browser can, so not on iPhone Safari (lib/fullscreen.ts). Here too, since a phone's top bar has no room for the button and a touch screen may have no keyboard. */}
       {fullscreenSupported() ? (
-        <Group label="Screen" {...group("screen")}>
+        <Group label="Screen" {...group("screen")} search="menu.this-device.screen">
           <Switch
             label="Full screen"
+            search="menu.this-device.screen.fullscreen"
             help={fullscreenHelp(keys)}
             checked={fullscreen}
             onChange={(on) => void (on ? enterFullscreen() : exitFullscreen())}
           />
         </Group>
       ) : null}
-      <Group label="Battery" {...group("battery")}>
+      <Group label="Battery" {...group("battery")} search="menu.this-device.battery">
         <Switch
           label="Low power"
+          search="menu.this-device.battery.low-power"
           help={
             animatedMapsOn
               ? LOW_POWER_HELP
@@ -175,11 +177,12 @@ export default function ThisDevice() {
           onChange={setLowPower}
         />
       </Group>
-      <Group label="Map detail" {...group("mapDetail")}>
+      <Group label="Map detail" {...group("mapDetail")} search="menu.this-device.map-detail">
         {/* In a settings row's padding, as Room settings stands the same cards, so its label stands where Battery's and Sounds' do (docs/design/design-v1-spacing-pass.md S3). */}
         <div style={{ padding: `${theme.space(2)}px 0` }}>
           <RadioCards
             legend="Map images"
+            search="menu.this-device.map-detail.images"
             help={lowPower ? "Low power loads the phone size on every device." : undefined}
             value={lowPower ? "mobile" : variant}
             disabled={lowPower}
@@ -195,6 +198,7 @@ export default function ThisDevice() {
           <div style={{ padding: `${theme.space(2)}px 0` }}>
             <RadioCards<AnimatedMapsChoice>
               legend={ANIMATED_MAPS_LABEL}
+              search="menu.this-device.map-detail.animated"
               // Only while Moving is chosen: Still already shows the still.
               help={animatedMaps === "moving" && animatedStill ? deviceStillHelp(animatedStill) : undefined}
               value={animatedMaps}
@@ -204,11 +208,12 @@ export default function ThisDevice() {
           </div>
         ) : null}
       </Group>
-      <Group label="Weather" {...group("weather")}>
+      <Group label="Weather" {...group("weather")} search="menu.this-device.weather">
         {/* In a settings row's padding, as Map detail's cards stand. */}
         <div style={{ padding: `${theme.space(2)}px 0` }}>
           <RadioCards
             legend="Weather on the map"
+            search="menu.this-device.weather.mode"
             // Only while Moving is chosen: Still and Off already keep it still.
             help={weather === "moving" && weatherStill ? weatherStill : undefined}
             value={weather}
@@ -217,20 +222,22 @@ export default function ThisDevice() {
           />
         </div>
       </Group>
-      <Group label="Sounds" {...group("sounds")}>
-        <RoomSoundControls />
-        <Switch label="Turn sound" help="A short chime on your turn. Android phones also vibrate." checked={turnSound} onChange={setSoundOn} />
+      <Group label="Sounds" {...group("sounds")} search="menu.this-device.sounds">
+        <RoomSoundControls anchored />
+        <Switch label="Turn sound" search="menu.this-device.sounds.turn" help="A short chime on your turn. Android phones also vibrate." checked={turnSound} onChange={setSoundOn} />
         <Switch
           label="Ping sound"
+          search="menu.this-device.sounds.ping"
           help="A short tone when someone pings the map."
           checked={pingSound}
           onChange={setSoundEnabled}
         />
       </Group>
-      <Group label="Rolls" {...group("rolls")}>
-        <Switch label="Show others' rolls as they happen" help="A short note for each roll someone else makes, while the Dice panel is not on screen." checked={rollToasts} onChange={setRollToasts} />
+      <Group label="Rolls" {...group("rolls")} search="menu.this-device.rolls">
+        <Switch label="Show others' rolls as they happen" search="menu.this-device.rolls.toasts" help="A short note for each roll someone else makes, while the Dice panel is not on screen." checked={rollToasts} onChange={setRollToasts} />
         <Switch
           label="Roll animation"
+          search="menu.this-device.rolls.animation"
           help={
             dice === "no-webgl"
               ? "This device cannot draw the dice, so the result shows at once."
@@ -243,7 +250,7 @@ export default function ThisDevice() {
         />
         <DiceSetPicker />
       </Group>
-      <Group label="Shortcuts" {...group("shortcuts")}>
+      <Group label="Shortcuts" {...group("shortcuts")} search="menu.this-device.shortcuts">
         <Help>{shortcutsHelp(keys)}</Help>
         <Button size="sm" aria-keyshortcuts={sheetKey?.aria} onClick={() => setShortcutSheet(scope, true)} style={{ justifySelf: "start" }}>
           <span>
@@ -252,9 +259,9 @@ export default function ThisDevice() {
           </span>
         </Button>
       </Group>
-      <Group label="Sheet handle" {...group("handle")}>
+      <Group label="Sheet handle" {...group("handle")} search="menu.this-device.handle">
         <Help id={handleHelp}>The mark at the top of a phone's sheets that shows you can swipe them. It fills with your color as you pull one, fully when letting go would move it.</Help>
-        <Select aria-label="Sheet handle" aria-describedby={handleHelp} value={handle} onChange={(e) => setSheetHandle(parseGrabber(e.target.value))} style={{ width: "100%" }}>
+        <Select aria-label="Sheet handle" search="menu.this-device.handle.design" aria-describedby={handleHelp} value={handle} onChange={(e) => setSheetHandle(parseGrabber(e.target.value))} style={{ width: "100%" }}>
           {GRABBER_DESIGNS.map((d) => (
             <option key={d.id} value={d.id}>
               {d.name}
@@ -281,9 +288,9 @@ export const TAB_ROW_HELP = "Pick the panels that may be tabs. The rest stay in 
 function TabRowSection(props: { role: TabRowRole; panels: readonly PanelDef[]; left: readonly string[]; fold: GroupFold }) {
   const helpId = useId();
   return (
-    <Group label="Tab row" {...props.fold}>
+    <Group label="Tab row" {...props.fold} search="menu.this-device.tab-row">
       <Help id={helpId}>{TAB_ROW_HELP}</Help>
-      <div role="group" aria-label="Panels that may be tabs" aria-describedby={helpId} style={{ display: "grid" }}>
+      <div role="group" aria-label="Panels that may be tabs" data-search="menu.this-device.tab-row.panels" aria-describedby={helpId} style={{ display: "grid" }}>
         {props.panels.map((p) => (
           <Checkbox
             key={p.id}
@@ -306,10 +313,10 @@ function TabRowSection(props: { role: TabRowRole; panels: readonly PanelDef[]; l
 /** Room sound's help (docs/design/design-v1-music.md 4.4). */
 export const ROOM_SOUND_HELP = `${THIS_DEVICE_ONLY} Music, background sounds and effects the DM plays. If everyone sits at one table, turn it on for one device only, such as the table display. Music uses about 60 MB of data an hour. On an iPhone it pauses music from other apps and plays even with the ringer off.`;
 
-const MIX_PARTS: readonly { key: keyof SoundMix; label: string }[] = [
-  { key: "music", label: "Music" },
-  { key: "loops", label: "Background" },
-  { key: "effects", label: "Effects" },
+const MIX_PARTS: readonly { key: keyof SoundMix; label: string; search: string }[] = [
+  { key: "music", label: "Music", search: "menu.this-device.sounds.music" },
+  { key: "loops", label: "Background", search: "menu.this-device.sounds.loops" },
+  { key: "effects", label: "Effects", search: "menu.this-device.sounds.effects" },
 ];
 
 /**
@@ -317,14 +324,17 @@ const MIX_PARTS: readonly { key: keyof SoundMix; label: string }[] = [
  * Effects (docs/design/design-v1-music.md 4.4): in This device's Sounds,
  * and in the Sound panel, under On this device. Turning it on is a tap that
  * unlocks the audio. Each slider is 0 to 100%, squared into the gain.
+ *
+ * `anchored` gives the controls This device's search ids
+ * (features/device/search.ts), which one panel alone may carry.
  */
-export function RoomSoundControls() {
+export function RoomSoundControls(props: { anchored?: boolean }) {
   const on = useRoomSoundOn();
   const mix = useSoundMix();
   const id = useId();
   return (
     <>
-      <Switch label="Room sound" help={ROOM_SOUND_HELP} checked={on} onChange={setRoomSound} />
+      <Switch label="Room sound" search={props.anchored ? "menu.this-device.sounds.room" : undefined} help={ROOM_SOUND_HELP} checked={on} onChange={setRoomSound} />
       {on ? (
         // One grid for the three, so their names share a column and the sliders start and end together.
         <div style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr) 3.2em", alignItems: "center", columnGap: theme.space(3), padding: `${theme.space(1)}px 0` }}>
@@ -335,6 +345,7 @@ export function RoomSoundControls() {
               </label>
               <input
                 id={`${id}-${part.key}`}
+                data-search={props.anchored ? part.search : undefined}
                 type="range"
                 min={0}
                 max={100}
@@ -382,10 +393,11 @@ export const THEME_HELP = "Auto follows this device's own light or dark setting.
  */
 export function ThemeSection(props: { value: ThemeChoice; helpId: string; fold?: GroupFold }) {
   return (
-    <Group label="Theme" {...props.fold}>
+    <Group label="Theme" {...props.fold} search="menu.this-device.theme">
       <Help id={props.helpId}>{THEME_HELP}</Help>
       <Segmented<ThemeChoice>
         label="Theme"
+        search="menu.this-device.theme.choice"
         grow
         describedBy={props.helpId}
         value={props.value}

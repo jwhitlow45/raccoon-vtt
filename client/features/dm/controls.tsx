@@ -25,6 +25,8 @@ export function ConfirmAction(props: {
   disabled?: boolean;
   danger?: boolean;
   size?: "md" | "sm";
+  /** The room search's anchor id (features/search/entry.ts), on the first button, whose press opens the confirm. */
+  search?: string;
   onConfirm(): void | Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
@@ -34,6 +36,7 @@ export function ConfirmAction(props: {
       <Button
         variant={props.danger ? "danger" : "secondary"}
         size={size}
+        search={props.search}
         disabled={props.disabled || props.busy}
         onClick={() => setOpen(true)}
         style={{ justifySelf: "start" }}

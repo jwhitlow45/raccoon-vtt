@@ -85,6 +85,7 @@ export default function MembersPanel(_props: PanelProps) {
                           ref={colorButton}
                           size="sm"
                           aria-label="Change your color"
+                          search="menu.members.color"
                           aria-expanded={open}
                           aria-controls={open ? pickerId : undefined}
                           onClick={() => setPicking(!picking)}

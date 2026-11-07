@@ -22,6 +22,7 @@ export function PartySightToggle() {
   return (
     <Switch
       label="Party sight"
+      search="dm.preview.party-sight"
       help="Veils what the party cannot see on this scene. Your map stays lit underneath."
       checked={on}
       onChange={(next) => slot.setState({ on: next })}

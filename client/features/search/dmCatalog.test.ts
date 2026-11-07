@@ -82,10 +82,12 @@ describe("the DM's catalog loads for a DM alone (search.md 5.8)", () => {
   });
 });
 
-describe("nothing but dmCatalog.ts imports catalog/dm.ts (search.md 5.8)", () => {
+describe("nothing but dmCatalog.ts imports catalog/dm.ts, and nothing but catalog/dm.ts the files of DM entries (search.md 5.8)", () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const client = resolve(here, "../..");
   const target = resolve(here, "catalog/dm.ts");
+  /** The feature files whose entries are the DM's alone, which catalog/dm.ts gathers. */
+  const DM_ENTRY_FILES = ["features/dm/search.ts", "features/settings/search.ts"].map((f) => resolve(client, f));
   const SPEC = /\b(?:import|export)\s+(?:type\s+)?(?:[^'";]*?\bfrom\s*)?["']([^"']+)["']|\bimport\(\s*["']([^"']+)["']\s*\)/g;
 
   function sources(dir: string): string[] {
@@ -99,12 +101,12 @@ describe("nothing but dmCatalog.ts imports catalog/dm.ts (search.md 5.8)", () =>
     return out;
   }
 
-  /** Every reference to catalog/dm.ts in a source, and whether it is the dynamic import. */
-  function references(path: string, text: string): { dynamic: boolean }[] {
+  /** Every reference to a file in a source (catalog/dm.ts unless named), and whether it is the dynamic import. */
+  function references(path: string, text: string, to = target): { dynamic: boolean }[] {
     const out: { dynamic: boolean }[] = [];
     for (const m of text.matchAll(SPEC)) {
       const spec = m[1] ?? m[2];
-      if (spec && spec.startsWith(".") && resolve(dirname(path), spec).replace(/\.ts$/, "") === target.replace(/\.ts$/, "")) out.push({ dynamic: m[2] !== undefined });
+      if (spec && spec.startsWith(".") && resolve(dirname(path), spec).replace(/\.ts$/, "") === to.replace(/\.ts$/, "")) out.push({ dynamic: m[2] !== undefined });
     }
     return out;
   }
@@ -125,5 +127,15 @@ describe("nothing but dmCatalog.ts imports catalog/dm.ts (search.md 5.8)", () =>
       for (const ref of references(path, readFileSync(path, "utf8"))) found.push(`${relative(client, path)} ${ref.dynamic ? "dynamic" : "static"}`);
     }
     assert.deepEqual(found, ["features/search/dmCatalog.ts dynamic"]);
+  });
+
+  test("each file of DM entries is imported by catalog/dm.ts alone, so its entries stay in the DM's chunk", () => {
+    for (const file of DM_ENTRY_FILES) {
+      const found: string[] = [];
+      for (const path of sources(client)) {
+        for (const ref of references(path, readFileSync(path, "utf8"), file)) found.push(`${relative(client, path)} ${ref.dynamic ? "dynamic" : "static"}`);
+      }
+      assert.deepEqual(found, ["features/search/catalog/dm.ts static"], relative(client, file));
+    }
   });
 });
