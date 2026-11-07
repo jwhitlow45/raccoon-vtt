@@ -309,6 +309,27 @@ export function itemLook(item: Pick<ChipItem, "id" | "busy" | "under" | "disable
   return { ...(item.under ? { under: item.under } : {}), inert: item.busy === true || item.disabled === true };
 }
 
+/**
+ * A refusal whose row the list no longer draws (se-6): a co-DM deleted the
+ * scene of Show players <scene> before its answer came, and the item left
+ * with the scene. The sheet says it on a line under the field instead,
+ * and its status reads it. Only the latest refusal, until the field
+ * changes or another item runs.
+ */
+export function strandedRefusal(latest: string | null, said: ReadonlyMap<string, string>, drawn: ReadonlySet<string>): string | null {
+  if (latest === null || drawn.has(latest)) return null;
+  return said.get(latest) ?? null;
+}
+
+/** The line atop the list for a refusal whose row has left, in a row's refusal look (Under), in by the rows' padding and border as the list's labels are. */
+export function RefusalLine(props: { words: string }) {
+  return (
+    <p data-search-refused="" style={{ margin: 0, padding: `${theme.space(2)}px ${theme.space(3) + theme.line.border}px`, fontSize: theme.font.small, lineHeight: theme.leading.body, overflowWrap: "break-word", color: theme.color.dangerText }}>
+      {props.words}
+    </p>
+  );
+}
+
 // ---------------------------------------------------------------- the host
 
 export type SearchHostProps = {
@@ -493,6 +514,8 @@ function SearchDialog(props: BodyProps & { items: readonly ChipItem[]; env: Chip
   // A menu item's asking, its answers and its wait, kept while the search is open (search.md 5.5).
   const [asked, setAsked] = useState<Asked | null>(null);
   const [said, setSaid] = useState<ReadonlyMap<string, string>>(new Map());
+  // The item refused last, so its refusal is still said once its row has gone (strandedRefusal).
+  const [latest, setLatest] = useState<string | null>(null);
   const waiting = useRef(new Set<string>());
   // Whether an answer that comes later finds the search still open. Set again on each mount, as React's development double mount runs the cleanup once between.
   const mounted = useRef(false);
@@ -510,7 +533,9 @@ function SearchDialog(props: BodyProps & { items: readonly ChipItem[]; env: Chip
   // The status: the count once typing stops, an item's warning, refusal or wait at once.
   const activeEntry = at >= 0 ? rows[at] : undefined;
   const activeLook = activeEntry ? itemLook(itemOf(activeEntry), asked, said) : null;
-  const rowSays = activeLook?.under?.text ?? null;
+  const drawn = new Set(rows.flatMap((entry) => (entry.act.t === "item" && itemOf(entry) ? [entry.act.itemId] : [])));
+  const stranded = strandedRefusal(latest, said, drawn);
+  const rowSays = activeLook?.under?.text ?? stranded;
   const [status, setStatus] = useState("");
   const counted = statusWords(results, null);
   useEffect(() => {
@@ -525,6 +550,10 @@ function SearchDialog(props: BodyProps & { items: readonly ChipItem[]; env: Chip
   useLayoutEffect(() => {
     list.current?.querySelector<HTMLElement>(`[data-search-at="${at}"]`)?.scrollIntoView({ block: "nearest" });
   }, [at, results]);
+  // The line atop the list comes into view as it appears: the item may have stood low in a list scrolled down to it.
+  useLayoutEffect(() => {
+    if (stranded !== null) list.current?.scrollTo({ top: 0 });
+  }, [stranded]);
 
   const settle = (id: string, answer: ChipAnswer) => {
     waiting.current.delete(id);
@@ -533,8 +562,10 @@ function SearchDialog(props: BodyProps & { items: readonly ChipItem[]; env: Chip
       return;
     }
     // Closed while it waited: the refusal is the room's toast, as any op's is.
-    if (mounted.current) setSaid((m) => new Map(m).set(id, answer.words));
-    else ui.notify(answer.words, "error");
+    if (mounted.current) {
+      setSaid((m) => new Map(m).set(id, answer.words));
+      setLatest(id);
+    } else ui.notify(answer.words, "error");
   };
 
   const runItem = (itemId: string) => {
@@ -542,6 +573,7 @@ function SearchDialog(props: BodyProps & { items: readonly ChipItem[]; env: Chip
     if (!item || item.busy || item.disabled || waiting.current.has(itemId)) return;
     const confirmed = asked?.id === itemId;
     setAsked(null);
+    setLatest(null);
     setSaid((m) => {
       if (!m.has(itemId)) return m;
       const next = new Map(m);
@@ -622,6 +654,7 @@ function SearchDialog(props: BodyProps & { items: readonly ChipItem[]; env: Chip
     setText(next);
     setActive(0);
     setAsked(null);
+    setLatest(null);
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLElement>) => {
@@ -702,6 +735,7 @@ function SearchDialog(props: BodyProps & { items: readonly ChipItem[]; env: Chip
 
   const body = (
     <div ref={list} style={{ flex: sheet ? "1 1 auto" : "0 1 auto", minHeight: 0, overflowY: "auto", overscrollBehavior: "contain", padding: theme.space(2) }}>
+      {stranded !== null ? <RefusalLine words={stranded} /> : null}
       <SearchList
         ids={ids}
         listId={listId}

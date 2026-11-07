@@ -34,6 +34,8 @@ const {
   sheetKey,
   statusWords,
   stepActive,
+  strandedRefusal,
+  RefusalLine,
   BAR_FIELD_PX,
 } = await import("./SearchSheet.tsx");
 
@@ -279,6 +281,25 @@ describe("what a pick does (search.md 5.5, D-261106-144)", () => {
     const busy = { ...item, busy: true, under: { text: "Moving players…", tone: "busy" as const } };
     assert.deepEqual(itemLook(busy, asked, new Map([["movePlayers", "no"]])), { under: { text: "Moving players…", tone: "busy" }, inert: true }, "a second Enter is refused while it waits");
     assert.deepEqual(itemLook({ ...item, disabled: true }, null, new Map()), { inert: true }, "an item that is off is not pressed");
+  });
+});
+
+describe("a refusal whose row has left the list (se-6)", () => {
+  const words = "Players not moved. That scene was deleted.";
+  const said = new Map([["showPlayers", words]]);
+
+  test("it is said under the field, never written to a row no one draws", () => {
+    assert.equal(strandedRefusal("showPlayers", said, new Set()), words, "a co-DM's delete took the item and its row");
+    assert.equal(strandedRefusal("showPlayers", said, new Set(["blackout"])), words);
+    assert.equal(strandedRefusal("showPlayers", said, new Set(["showPlayers"])), null, "its row says it");
+    assert.equal(strandedRefusal(null, said, new Set()), null, "the field changed, or another item ran, since");
+    assert.equal(strandedRefusal("showPlayers", new Map(), new Set()), null, "run again, its refusal is gone");
+  });
+
+  test("its line reads as a row's refusal does", () => {
+    const line = renderToStaticMarkup(createElement(RefusalLine, { words }));
+    assert.match(line, /^<p data-search-refused=""[^>]*>Players not moved\. That scene was deleted\.<\/p>$/);
+    assert.match(line, /color:var\(--rvtt-danger-text/);
   });
 });
 
