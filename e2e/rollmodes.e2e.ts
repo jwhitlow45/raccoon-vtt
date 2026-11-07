@@ -1655,6 +1655,9 @@ describe("raccoon-vtt one-roll mode menu", { timeout: 600_000 }, () => {
     await dragon.getByRole("button", { name: /^Group save, DC \d+ DEX$/ }).first().click();
     await panel.getByText(/^From Acid Breath: Dexterity save, DC \d+/).first().waitFor();
     await selectGoblins();
+    // With the breath's damage in its field the Roll rolls the damage too (QOL audit Q8). Cleared, it is the saves' Roll alone, whose one roll this step checks.
+    if ((await outcome.count()) === 0) await panel.getByRole("button", { name: "Edit", exact: true }).click();
+    await panel.getByLabel("Damage", { exact: true }).fill("");
     const main = panel.getByRole("button", { name: /^Roll 2 saves$/ });
     if (!(await main.isVisible().catch(() => false))) await openSideTab(dm, "Dice");
     if (!(await main.isVisible().catch(() => false))) {
