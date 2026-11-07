@@ -79,6 +79,17 @@ const run = {
   patId: "",
 };
 
+/** Pat's second character, for Find my token's second press (designs/qol audit Q5). */
+const qe = { wren: { id: randomUUID(), characterId: randomUUID() } };
+
+/** How many turn ops Pat's page has sent: End turn sends the tracker's Next. */
+function nextsSent(): number {
+  return playerSocket.sent.filter((frame) => {
+    const msg = JSON.parse(frame) as { t?: string; op?: { t?: string } };
+    return msg.t === "op" && msg.op?.t === "encounter.next";
+  }).length;
+}
+
 /** A box as the page measured it, in CSS pixels. */
 type Box = { left: number; right: number };
 /** The few DOM members these steps read in the page. The e2e files compile without the DOM's types. */
@@ -1684,6 +1695,90 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     await player.getByRole("button", { name: "Create room" }).waitFor();
     await player.goto(room);
     await player.getByRole("status", { name: "Connected" }).first().waitFor();
+  });
+
+  test("qe-1. Find my token selects Pat's token and opens its bar, and a second press goes on to his next token and opens its bar", async () => {
+    await ops.send({ t: "character.create", character: { id: qe.wren.characterId, name: "Wren", size: "medium", ownerIds: [run.patId], actor: actor(18) } });
+    await ops.send({ t: "token.create", token: { id: qe.wren.id, sceneId: run.sceneId, size: "medium", visibility: "all", kind: "pc", name: "Wren", x: 3, y: 3, disposition: "ally", actor: { ref: qe.wren.characterId } } });
+    await waitFor("Wren on Pat's map", () => playerSocket.state?.tokens[qe.wren.id]);
+    await setUp({ ...PORTRAIT, scale: 1 });
+    // Find goes through Pat's tokens of one kind by id (features/find/findToken.ts).
+    const order = [
+      { id: run.thorn.id, name: "Thorn" },
+      { id: qe.wren.id, name: "Wren" },
+    ].sort((a, b) => (a.id < b.id ? -1 : 1));
+    const find = player.getByRole("button", { name: "Find my token" });
+    for (const [i, want] of [...order, order[0]!].entries()) {
+      await find.tap();
+      const bar = player.getByRole("dialog", { name: `${want.name} actions` });
+      await bar.waitFor();
+      const other = order.find((o) => o.id !== want.id)!;
+      assert.equal(await player.getByRole("dialog", { name: `${other.name} actions` }).count(), 0, `press ${i + 1}: ${other.name}'s bar stayed open`);
+      if (i === 0) await shots.take(player, "qe-1-find-opens-bar");
+    }
+    await barFrame(player).getByRole("button", { name: "Close", exact: true }).first().tap();
+    await barFrame(player).waitFor({ state: "detached" });
+    await ops.send({ t: "token.delete", tokenId: qe.wren.id });
+    await waitFor("Wren gone from Pat's map", () => (playerSocket.state?.tokens[qe.wren.id] ? null : true));
+  });
+
+  test("qe-2. on Pat's own turn End turn also stands at the right end of Thorn's own bar, two-lined at 130%, and in the expanded bar: two presses there and on the strip send one Next, and it leaves once the turn moves on", async () => {
+    await ops.send({ t: "encounter.start", entries: [{ id: run.goblin.entryId, tokenId: run.goblin.id, value: 18 }, { id: run.thorn.entryId, tokenId: run.thorn.id, value: 15 }] });
+    await ops.send({ t: "encounter.next" });
+    try {
+      // The goblin's turn: Thorn's bar offers no End turn.
+      await setUp({ ...PORTRAIT, scale: 1 });
+      await player.getByRole("button", { name: "Find my token" }).tap();
+      const bar = player.getByRole("dialog", { name: "Thorn actions" });
+      await bar.waitFor();
+      assert.equal(await bar.getByRole("button", { name: /End turn$/ }).count(), 0, "End turn on Thorn's bar on the goblin's turn");
+      await ops.send({ t: "encounter.next" });
+      await waitFor("Thorn's turn on Pat's page", () => playerSocket.state?.encounter?.activeEntryId === run.thorn.entryId || null);
+
+      const own = bar.getByRole("button", { name: /End turn$/ });
+      await own.waitFor();
+      const ownBox = (await own.boundingBox())!;
+      const barBox = (await bar.boundingBox())!;
+      assert.ok(barBox.x + barBox.width - (ownBox.x + ownBox.width) <= 24, `End turn stands ${Math.round(barBox.x + barBox.width - ownBox.x - ownBox.width)} px short of the bar's right end`);
+      assert.ok(await wholeInReach(own), "the bar's End turn takes no tap");
+      await shots.take(player, "qe-2-end-turn-own-bar");
+
+      // One wait for both buttons: the second press while the first waits sends nothing more.
+      const sentBefore = nextsSent();
+      await player.evaluate(() => {
+        type B = { click(): void; textContent: string | null };
+        const d = (globalThis as unknown as { document: { querySelector(s: string): { querySelectorAll(s: string): ArrayLike<B> } | null } }).document;
+        const ends = (root: { querySelectorAll(s: string): ArrayLike<B> } | null) => Array.from(root?.querySelectorAll("button") ?? []).filter((b) => (b.textContent ?? "").trim().endsWith("End turn"));
+        const inBar = ends(d.querySelector('[role="dialog"][data-bar-mode]'))[0];
+        const inStrip = ends(d.querySelector("header"))[0];
+        inBar?.click();
+        inStrip?.click();
+      });
+      await waitFor("the goblin's turn", () => dmSocket.state?.encounter?.activeEntryId === run.goblin.entryId || null);
+      await player.waitForTimeout(500);
+      assert.equal(nextsSent() - sentBefore, 1, "two presses on the bar's and the strip's End turn sent more than one Next");
+      assert.equal(dmSocket.state?.encounter?.activeEntryId, run.goblin.entryId, "the turn moved past the goblin");
+      await own.waitFor({ state: "detached" });
+
+      // Two lines at 130%, and the expanded bar's play row ends in it too.
+      await ops.send({ t: "encounter.next" });
+      await setUp({ ...PORTRAIT, scale: 1.3 });
+      await player.getByRole("button", { name: "Find my token" }).tap();
+      await bar.waitFor();
+      const stacked = bar.getByRole("button", { name: /End turn$/ });
+      await stacked.waitFor();
+      assert.ok(await wholeInReach(stacked), "the two-line End turn takes no tap at 130%");
+      await shots.take(player, "qe-2-end-turn-own-bar-130");
+      await expandBar(bar);
+      const expanded = bar.getByRole("button", { name: /End turn$/ });
+      await expanded.scrollIntoViewIfNeeded();
+      assert.ok(await wholeInReach(expanded), "the expanded bar's End turn takes no tap");
+      await shots.take(player, "qe-2-end-turn-expanded-130");
+    } finally {
+      await ops.send({ t: "encounter.end" }).catch(() => {});
+    }
+    await barFrame(player).getByRole("button", { name: "Close", exact: true }).first().tap().catch(() => {});
+    await setUp({ ...PORTRAIT, scale: 1 });
   });
 
   test("20. nothing went wrong in the browsers", () => {
