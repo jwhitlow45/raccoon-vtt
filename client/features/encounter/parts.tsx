@@ -1,5 +1,6 @@
 import { Fragment, type CSSProperties, type ReactNode } from "react";
 import type { Effect, InitEntry } from "#shared/model.ts";
+import { PILL_FOCUS } from "../../components/HeaderRow.tsx";
 import { Spinner as SharedSpinner } from "../../components/Loading.tsx";
 import { Tag as SharedTag, type TagTone } from "../../components/Tag.tsx";
 import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
@@ -275,6 +276,8 @@ export function EndTurnPill(props: { waiting: boolean; stack?: boolean; onClick(
       type="button"
       // N's key in the hover title only: the phone band's pill has no room for more words.
       title={keys ? withKey("End turn", keys) : undefined}
+      // Its ring hugs the pill rather than the 44 px target, whose ring would fall past the phone band's foot onto the map.
+      {...PILL_FOCUS}
       aria-keyshortcuts={keys?.aria}
       onClick={props.onClick}
       disabled={props.waiting}
@@ -297,6 +300,7 @@ export function EndTurnPill(props: { waiting: boolean; stack?: boolean; onClick(
       }}
     >
       <span
+        data-pill=""
         style={{
           display: "inline-flex",
           alignItems: "center",
@@ -347,6 +351,8 @@ export function NextPill(props: { waiting: boolean; start: boolean; disabled?: b
       title={keys ? withKey(props.start ? "Start" : "Next turn", keys) : undefined}
       aria-label={props.start ? "Start" : "Next turn"}
       aria-keyshortcuts={keys?.aria}
+      // Its ring hugs the pill, as End turn's does.
+      {...PILL_FOCUS}
       onClick={props.onClick}
       disabled={props.waiting || props.disabled}
       aria-busy={props.waiting ? true : undefined}
@@ -368,6 +374,7 @@ export function NextPill(props: { waiting: boolean; start: boolean; disabled?: b
       }}
     >
       <span
+        data-pill=""
         style={{
           display: "inline-flex",
           alignItems: "center",

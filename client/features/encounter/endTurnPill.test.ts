@@ -59,3 +59,20 @@ test("stacked, the words wrap onto two lines", () => {
   assert.match(render({ waiting: false, stack: true }), /<span style="opacity:1;width:min-content;white-space:normal[^"]*">End turn<\/span>/);
   assert.doesNotMatch(render({ waiting: false }), /min-content/);
 });
+
+/*
+ * The phone band's End turn and the DM's Next draw a 26 px pill inside a
+ * 44 px target that stands past the band's foot. A ring on the target fell
+ * on the map, where the light theme's ring read 2.67:1 over a dark board
+ * (lighttheme lt-3), so the ring goes on the pill as in a header row.
+ */
+const { NextPill } = await import("./parts.tsx");
+for (const [name, markup] of [
+  ["End turn", render({ waiting: false })],
+  ["Next", renderToStaticMarkup(createElement(NextPill, { waiting: false, start: false, onClick() {} }))],
+] as const) {
+  test(`${name}'s focus ring goes on its pill, not its larger target`, () => {
+    assert.match(markup, /^<button[^>]* data-pill-focus=""[^>]*><span data-pill=""/);
+    assert.equal(markup.match(/data-pill=""/g)?.length, 1, "one pill takes the ring");
+  });
+}
