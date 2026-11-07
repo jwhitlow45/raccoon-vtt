@@ -8,7 +8,7 @@ import { recordPick } from "./recent.ts";
 import { DM_VIEW, indexOf, PAT_VIEW, rowsOf, seededRoom, viewOf } from "./search.testutil.ts";
 
 /**
- * The golden queries (designs/qol/search.md 5.10 point 3 and section 7):
+ * The golden queries (docs/design/design-v1-qol.md 5, What keeps it current, and 8):
  * each query of the case table, by role, with what it must list first, on
  * the seeded room, through the real catalogs, so the best bets on their
  * entries are held here too. Pat's device has Room sound on, as one that
@@ -84,7 +84,7 @@ describe("golden queries, the DM", () => {
   });
 });
 
-describe("golden queries, the DM's flows (search.md 2) and the rest of the panels", () => {
+describe("golden queries, the DM's flows (design-v1-qol.md 2) and the rest of the panels", () => {
   const dm = indexOf(DM_VIEW());
 
   test("turn sound, init scores and party hp: the setting the flow ends on, first", () => {
@@ -161,7 +161,7 @@ describe("golden queries, a player (Pat, who plays Bree)", () => {
   });
 });
 
-describe("the empty field (search.md 5.2)", () => {
+describe("the empty field (design-v1-qol.md 5, The results)", () => {
   test("a DM outside a fight: Start a fight, Show a handout…, Black out players' screens, Long Rest for the party, Sound", () => {
     const out = searchResults(indexOf(DM_VIEW()), "", []);
     assert.equal(out.t, "empty");

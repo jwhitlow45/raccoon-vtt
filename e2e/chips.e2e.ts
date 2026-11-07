@@ -12,15 +12,14 @@ import { applyChanges, type ProjectedState } from "#shared/project.ts";
 import { ConsoleWatch, openSideTab, OpSocket, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
- * The top bar's chips and their menus (designs/qol/chips.md 10, qc-1 to
- * qc-13, with plan.md 9's amendments), on the real server serving the
- * production build. Dana the DM is at a desk with a second DM, Sam, on
- * another computer. Pat plays Thorn on a phone, Ana plays Wren and Lee
- * joins to be shown a handout and then removed. The room has three more
- * scenes beside the players' Citadel gate: the Crypt of Belak (fog on,
- * vision off, so a move asks nothing), the Open field (fog off, so a move
- * asks first) and a side chamber Sam deletes. The bar's give-way, Next and
- * the worst cases run in chips-bar.e2e.ts.
+ * The top bar's chips and their menus (docs/design/design-v1-qol.md 4 and 8,
+ * qc-1 to qc-13), on the real server serving the production build. Dana the
+ * DM is at a desk with a second DM, Sam, on another computer. Pat plays Thorn
+ * on a phone, Ana plays Wren and Lee joins to be shown a handout and then
+ * removed. The room has three more scenes beside the players' Citadel gate:
+ * the Crypt of Belak (fog on, vision off, so a move asks nothing), the Open
+ * field (fog off, so a move asks first) and a side chamber Sam deletes. The
+ * bar's give-way, Next and the worst cases run in chips-bar.e2e.ts.
  * - qc-0: the room.
  * - qc-1: the DM menu at rest, its keys, a phase picked, and Sam's the same.
  * - qc-2: Black out from the menu, then End the blackout leads it.

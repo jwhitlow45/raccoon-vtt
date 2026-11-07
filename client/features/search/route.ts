@@ -29,7 +29,7 @@ import { FOLD_KEYS, PAGE_FOLD_KEYS, panelFoldsSlot, type FoldKey, type RelationF
 import { SEARCH_OFF_ATTR, searchSelector, type SearchRoute } from "./entry.ts";
 
 /*
- * The route (designs/qol/search.md 5.5, D-261106-150): the one way to open
+ * The route (docs/design/design-v1-qol.md 5, The route, D-261106-150): the one way to open
  * a panel at a page, a section and a control, for the search and for any
  * QOL action that opens a panel at a section. Modeled on the Ambiance
  * panel's request, which the sound layout removed: blur a field typed in
@@ -171,7 +171,7 @@ const NO_FOLDS: readonly string[] = [];
  * token panel's and a character's page's (panelFolds.ts), and the Dice
  * panel's (diceFolds.ts DICE_ROUTE_SECTIONS). A route's
  * `section` names one of these, which the search's catalog test holds it
- * to (search.md 5.10).
+ * to (design-v1-qol.md 5, What keeps it current).
  */
 export function routeFolds(panel: string, page?: string): readonly string[] {
   switch (panel) {
@@ -238,7 +238,7 @@ export function takeRequest(slot: RouteSlot, panel: string): RouteRequest | null
 }
 
 /**
- * A paged panel's read of the route (search.md 5.5): `take` hears each new
+ * A paged panel's read of the route (design-v1-qol.md 5, The route): `take` hears each new
  * request for `panel` once, as the panel draws, a request made before it
  * mounted included, so a panel that loads its code on the route's open
  * still turns to the page.
@@ -332,7 +332,7 @@ export function landing(request: Pick<SearchRoute, "panel" | "page" | "anchor">,
   return row ? { t: "land", el: row } : PANEL;
 }
 
-/** How long a landed control wears its ring (search.md 5.5), so a tap that draws no focus ring still shows where it went. */
+/** How long a landed control wears its ring (design-v1-qol.md 5, Acting), so a tap that draws no focus ring still shows where it went. */
 export const RING_MS = 1_500;
 
 /** Room above a landed control, so its label or its section's header shows over it. */
@@ -350,13 +350,13 @@ export function focusTarget(el: HTMLElement): HTMLElement {
   return el.querySelector<HTMLElement>("input:checked") ?? el.querySelector<HTMLElement>(INNER_FOCUS) ?? el;
 }
 
-/** Whether a press would act: an action whose control is off is focused, not pressed, and its own help says why (search.md 5.5). */
+/** Whether a press would act: an action whose control is off is focused, not pressed, and its own help says why (design-v1-qol.md 5, Acting). */
 export function pressable(el: HTMLElement): boolean {
   return !el.matches(":disabled") && el.getAttribute("aria-disabled") !== "true";
 }
 
 /**
- * The landing (search.md 5.5): the control comes near the top of its
+ * The landing (design-v1-qol.md 5, The route): the control comes near the top of its
  * panel, counting as the viewer taking the scroller so a remembered offset
  * still being put back never pulls it away, takes focus, wears the ring,
  * and is pressed when the route asks and it is on. Its own confirm, busy

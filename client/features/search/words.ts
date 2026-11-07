@@ -2,12 +2,12 @@ import type { Token } from "#shared/model.ts";
 import type { SearchKind } from "./entry.ts";
 
 /**
- * The room search's own words (designs/qol/search.md 5.3 and 5.7): the
+ * The room search's own words (docs/design/design-v1-qol.md 5, Matching and Words): the
  * synonyms a DM or player types for the app's words, the small words a
  * query may hold that need match nothing, and the words a row reads. They
  * are the same for both roles and name no entry, so this file ships to
  * every device. An entry's own other names and best bets are written on the
- * entry, so a DM entry's stay in the DM's chunk with it (search.md 5.8).
+ * entry, so a DM entry's stay in the DM's chunk with it (design-v1-qol.md 5, Loading).
  */
 
 /**
@@ -102,7 +102,7 @@ export const SYNONYMS: Readonly<Record<string, readonly string[]>> = {
   whisper: ["message"],
 };
 
-/** Words a query may hold that need match nothing (search.md 5.3). Where one does match, it counts as any word does. */
+/** Words a query may hold that need match nothing (design-v1-qol.md 5, Matching). Where one does match, it counts as any word does. */
 export const SMALL_WORDS: ReadonlySet<string> = new Set(["the", "a", "an", "of", "for", "my", "on", "in", "to", "and", "with"]);
 
 /** What a row calls its kind, before where it lives: "Setting · Menu · Room settings · Combat". */

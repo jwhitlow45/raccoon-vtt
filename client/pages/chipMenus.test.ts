@@ -28,7 +28,7 @@ import {
 } from "./chipMenus.ts";
 
 /*
- * The top bar's menus as data (designs/qol/chips.md 10's unit rows): what
+ * The top bar's menus as data (docs/design/design-v1-qol.md 8): what
  * each holds for a view, and what each item's run sends, through a fake
  * room that keeps every op, event, toast and opening.
  */
@@ -103,7 +103,7 @@ const item = (sections: readonly ChipSection[], id: string): ChipItem => {
   return found;
 };
 
-describe("the DM menu (chips.md C1)", () => {
+describe("the DM menu (design-v1-qol.md 4, C1)", () => {
   test("at rest: Handouts, Players' screens, Preview, and no Map phase or Time where nothing holds them", () => {
     assert.deepEqual(titles(dmMenuSections(viewOf())), [
       ["Handouts", ["Show a handout…"]],
@@ -174,7 +174,7 @@ describe("the DM menu (chips.md C1)", () => {
   });
 });
 
-describe("the blackout's items (chips.md C2)", () => {
+describe("the blackout's items (design-v1-qol.md 4, C2)", () => {
   test("lead the DM menu above a line, End the blackout first, with no Black out item", () => {
     const sections = dmMenuSections(viewOf({ blackout: true }));
     assert.deepEqual(titles(sections)[0], ["(blackout)", ["End the blackout"]]);
@@ -222,7 +222,7 @@ describe("the blackout's items (chips.md C2)", () => {
   });
 });
 
-describe("a move from the menu (chips.md 4.1)", () => {
+describe("a move from the menu (design-v1-qol.md 4, C2's move)", () => {
   test("a warned move asks with nothing sent, arms its anyway item and Cancel, and the anyway item moves", () => {
     const view = viewOf({ viewing: open, blackout: true });
     const room = fakeEnv();
@@ -342,7 +342,7 @@ describe("Handouts in the DM menu", () => {
   });
 });
 
-describe("a player's You menu (chips.md C7)", () => {
+describe("a player's You menu (design-v1-qol.md 4, C7)", () => {
   const characters = {
     thorn: { id: "thorn", name: "Thorn", ownerIds: ["pat"] },
     wren: { id: "wren", name: "Wren", ownerIds: ["ana"] },
@@ -374,9 +374,9 @@ describe("a player's You menu (chips.md C7)", () => {
 });
 
 /*
- * The chips' look and names (chips.md 6 and 7), and how a chip menu's item
- * reaches the shared Menu: a line under its words is its description, and
- * its name stays its title. Drawn to markup.
+ * The chips' look and names (design-v1-qol.md 4, The chips' look and Words),
+ * and how a chip menu's item reaches the shared Menu: a line under its words
+ * is its description, and its name stays its title. Drawn to markup.
  */
 
 const { createElement } = await import("react");

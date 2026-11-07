@@ -21,11 +21,11 @@ import { MENU_PAGES, recordId, routeFolds } from "./route.ts";
 import { DM_VIEW, keysOf, PAT_VIEW, seededRoom, viewOf } from "./search.testutil.ts";
 
 /*
- * The catalogs lanes S2a and S2b write (designs/qol/search.md 5.10's unit
- * test): ids unique, every route's panel, page and fold real, every entry
- * a player may not reach in the DM's catalog, every kind of DM menu item a
- * row with a twin, and every anchor the catalogs route to drawn by exactly
- * one `search=` in client/**\/*.tsx, and the reverse.
+ * The catalogs lanes S2a and S2b write (docs/design/design-v1-qol.md 5, What
+ * keeps it current, its unit test): ids unique, every route's panel, page and
+ * fold real, every entry a player may not reach in the DM's catalog, every
+ * kind of DM menu item a row with a twin, and every anchor the catalogs route
+ * to drawn by exactly one `search=` in client/**\/*.tsx, and the reverse.
  */
 
 const ctxOf = (state: RoomView, over: Partial<SearchContext> = {}): SearchContext => ({ role: searchRole(state), memberId: state.you?.memberId ?? null, state, wide: true, ...over });
@@ -43,7 +43,7 @@ function routesOf(e: SearchEntry): SearchRoute[] {
   return [];
 }
 
-// The DM menu's views that draw every kind of item between them (chips.md C1, C2).
+// The DM menu's views that draw every kind of item between them (design-v1-qol.md 4, C1 and C2).
 const at = "2026-11-06T12:00:00.000Z";
 const crypt = scene("crypt", { name: "Crypt of Belak", phases: [{ id: "day", name: "Day" } as never, { id: "night", name: "Night" } as never], phaseId: "night" });
 const members = { dm1: { id: "dm1", rev: 0, name: "Dee", color: "#4cc9f0", kind: "dm", createdAt: at }, p1: { id: "p1", rev: 0, name: "Pat", color: "#4cc9f0", kind: "player", createdAt: at } } as const;
@@ -98,7 +98,7 @@ const ALL: { where: string; entry: CatalogEntry }[] = [
   ...dmMenuEntries(IN_BLACKOUT).map((entry) => ({ where: "the DM's", entry })),
 ];
 
-describe("the catalogs' entries (search.md 5.10)", () => {
+describe("the catalogs' entries (design-v1-qol.md 5, What keeps it current)", () => {
   test("ids are unique within a viewer's catalogs, and each is its kind and its anchor or the item's id", () => {
     for (const [ctx, catalogs] of [
       [dmCtx, [EVERYONE, DM_CATALOG]],
@@ -147,7 +147,7 @@ describe("the catalogs' entries (search.md 5.10)", () => {
   });
 });
 
-describe("the DM menu's items (search.md 5.5, plan.md 3)", () => {
+describe("the DM menu's items (design-v1-qol.md 5, Acting and 6)", () => {
   test("every kind the menu draws is one row with its twin, but Time and Now playing", () => {
     const drawn = new Set([...itemsOf(dmMenuSections(AT_PLAY)), ...itemsOf(dmMenuSections(IN_BLACKOUT))].map((i) => i.kind));
     assert.deepEqual([...drawn].sort(), Object.keys(KINDS).sort(), "the two views draw every kind");
@@ -244,7 +244,7 @@ describe("the DM menu's items (search.md 5.5, plan.md 3)", () => {
   });
 });
 
-describe("every anchor is drawn by exactly one search= in client/**/*.tsx, and the reverse (search.md 5.10)", () => {
+describe("every anchor is drawn by exactly one search= in client/**/*.tsx, and the reverse (design-v1-qol.md 5, What keeps it current)", () => {
   const client = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
   /** `search="id"`, `data-search="id"`, a literal inside `search={…}`, and a `search: "id"` an element's props or data hold. */
   const SEARCH = /(?<![\w-])(?:data-)?search=(?:"([^"]*)"|\{([^}\n]*)\})|(?<![\w-])search:\s*"([^"]*)"/g;
@@ -357,7 +357,7 @@ describe("every anchor is drawn by exactly one search= in client/**/*.tsx, and t
   });
 });
 
-describe("what an entry offers and says now (search.md 5.2)", () => {
+describe("what an entry offers and says now (design-v1-qol.md 5, The results)", () => {
   const offered = (catalog: Catalog, ctx: SearchContext) => new Set(catalog.entries.filter((e) => !e.when || e.when(ctx)).map((e) => e.id));
 
   test("This device offers what this device draws: the Tab row on a wide screen, the volumes while Room sound is on, Full screen where the browser has it", () => {
@@ -411,7 +411,7 @@ describe("what an entry offers and says now (search.md 5.2)", () => {
   });
 });
 
-describe("what the rest of the panels offer and say now (search.md 5.2, S2b)", () => {
+describe("what the rest of the panels offer and say now (design-v1-qol.md 5, The results, S2b)", () => {
   const offered = (catalog: Catalog, ctx: SearchContext) => new Set(catalog.entries.filter((e) => !e.when || e.when(ctx)).map((e) => e.id));
   const fight = () => {
     const room = seededRoom();

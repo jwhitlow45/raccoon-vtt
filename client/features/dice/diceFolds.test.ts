@@ -336,7 +336,7 @@ describe("useDiceFolds", () => {
   });
 });
 
-describe("a route's reveal (designs/qol/search.md 5.5)", () => {
+describe("a route's reveal (docs/design/design-v1-qol.md 5, The route)", () => {
   test("opens a group for now, writing nothing, its listeners hearing it, and leaves one already open as it is", () => {
     const s = storage(JSON.stringify({ "pc.skills": false }));
     const folds = createDiceFolds(s);

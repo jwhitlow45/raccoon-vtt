@@ -161,7 +161,7 @@ const MARKS: readonly { value: Mark; label: string }[] = [
 
 /**
  * The setup's roll button once its Damage field holds dice, so one press
- * rolls both (designs/qol audit Q8): "Roll 3 saves and damage", and where
+ * rolls both (docs/design/design-v1-qol.md 3, Q8): "Roll 3 saves and damage", and where
  * the saves' words already join two parts, "Roll 3 saves, ask 2 players
  * and roll damage".
  */
@@ -183,7 +183,7 @@ export function pageTitle(page: Pick<Page, "fill" | "test" | "rows" | "source">)
 /**
  * An ask's buttons, kept together after its words: where the line cannot
  * hold all of them, they go under the words as one group, so the last
- * never stands alone under the others (designs/qol audit Q8).
+ * never stands alone under the others (docs/design/design-v1-qol.md 3, Q8).
  */
 export function AskAnswers(props: { children: ReactNode }) {
   return <span style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>{props.children}</span>;
@@ -239,7 +239,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   const [seenOpen, setSeenOpen] = useState(false);
   const [picking, setPicking] = useState(false);
   const [outcomeOpen, setOutcomeOpen] = useState(page.phase === "setup");
-  // The request sheet's recent save DCs, read once as the page opens so a chip never moves under the DM's finger (designs/qol audit Q9).
+  // The request sheet's recent save DCs, read once as the page opens so a chip never moves under the DM's finger (docs/design/design-v1-qol.md 3, Q9).
   const [recentDcs] = useState(() => readRecentDcs(roomId));
   const pageRef = useRef(page);
   pageRef.current = page;
@@ -553,7 +553,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   // ---- the parts
 
   const setupControls = page.phase === "setup" && !reopened ? <TestPicker page={page} onChange={edit} /> : null;
-  // A save's DC takes the ones this device sent last, as Request a roll's does (designs/qol audit Q8 and Q9).
+  // A save's DC takes the ones this device sent last, as Request a roll's does (docs/design/design-v1-qol.md 3, Q8 and Q9).
   const dcChips = page.test.kind === "save" && recentDcs.length > 0 ? recentDcChips(page.dc === null ? "" : String(page.dc), recentDcs) : null;
   /*
    * The recent DCs take a line of their own under the field, at the row's
@@ -661,7 +661,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
     return [row.holder, JSON.stringify([rollContext, row, state, serverRolls([row]), page.dmRolls.filter((r) => r.holder === row.holder), request && answer && requestRollSource(request, answer)])];
   }));
   const hasServerRoll = rows.some((r) => !r.skip && stateOf(shown, r).mark !== "skip" && stateOf(shown, r).way === "server");
-  // Dice in the Damage field roll with the saves, in one press (designs/qol audit Q8). A damage line already rolled, or brought by a player's ask, stays.
+  // Dice in the Damage field roll with the saves, in one press (docs/design/design-v1-qol.md 3, Q8). A damage line already rolled, or brought by a player's ask, stays.
   const withDamage = page.phase === "setup" && page.damage === null && groupDamageInvocation(page, view).rolls.length > 0;
   const setupWords = withDamage ? withDamageWords(rollWords(shown)) : rollWords(shown);
   const rowList = (

@@ -14,7 +14,7 @@ import { buildIndex, searchResults, searchRole, SUGGEST, type KeySource, type Se
 
 /**
  * Test fixtures for the room search: the seeded room the design's flows
- * and golden queries use (designs/qol/search.md 2 and 7), stand-in
+ * and golden queries use (docs/design/design-v1-qol.md 2 and 8), stand-in
  * catalogs for the index's own tests, and the real catalogs each role
  * holds, which the golden queries run on. Nothing here ships.
  */
@@ -78,7 +78,7 @@ export const DM_FIXTURE: Catalog = {
 };
 
 /**
- * The seeded room (search.md 2): Pat plays Bree, who has Darkvision, and
+ * The seeded room (design-v1-qol.md 2): Pat plays Bree, who has Darkvision, and
  * Kel is another player's. On the Battle mat, the players' scene, stand
  * Goblin 1 and 2, a hidden Goblin Boss and Count Varo under the name
  * Hooded figure. The DM holds a Goblin cave, Goblin war drums, a page for

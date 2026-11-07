@@ -16,15 +16,15 @@ import { searchRole } from "./index.ts";
 import { indexOf, seededRoom, viewOf } from "./search.testutil.ts";
 
 /*
- * Each control the catalogs route to draws its anchor (designs/qol/search.md
- * 5.10): the DM panel, Menu's X-card, Room settings, Members, Scenes, Time,
- * Initiative, Characters, the Log and Sound, drawn to markup as a DM and as
- * a player, hold the `data-search`
- * id of every entry and twin that routes there and holds now, and no id
- * the catalogs do not know. A player's drawing holds every anchor of
- * everyone's catalog there, so no entry a player cannot reach ships in
- * the room's chunk. Drawn at a phone's layout width (no window). This
- * device's page cannot draw to markup (its turn and ping sound switches
+ * Each control the catalogs route to draws its anchor
+ * (docs/design/design-v1-qol.md 5, What keeps it current): the DM panel,
+ * Menu's X-card, Room settings, Members, Scenes, Time, Initiative,
+ * Characters, the Log and Sound, drawn to markup as a DM and as a player,
+ * hold the `data-search` id of every entry and twin that routes there and
+ * holds now, and no id the catalogs do not know. A player's drawing holds
+ * every anchor of everyone's catalog there, so no entry a player cannot reach
+ * ships in the room's chunk. Drawn at a phone's layout width (no window).
+ * This device's page cannot draw to markup (its turn and ping sound switches
  * read a store with no server snapshot), so catalog.test.ts's source scan
  * alone holds its anchors.
  */
@@ -235,7 +235,7 @@ function expected(surface: Surface, catalogs: readonly Catalog[], ctx: SearchCon
     .filter((a, i, all) => all.indexOf(a) === i);
 }
 
-describe("each entry's control draws its anchor (search.md 5.10)", () => {
+describe("each entry's control draws its anchor (design-v1-qol.md 5, What keeps it current)", () => {
   const all = known();
   for (const role of ["dm", "player"] as const) {
     const catalogs = role === "dm" ? [EVERYONE, DM_CATALOG] : [EVERYONE];
@@ -265,7 +265,7 @@ describe("each entry's control draws its anchor (search.md 5.10)", () => {
   });
 });
 
-describe("a creature's fields draw their anchors (search.md 4, 5.10)", () => {
+describe("a creature's fields draw their anchors (design-v1-qol.md 5, What it finds and What keeps it current)", () => {
   /** Every field place of a viewer's catalogs on one surface. */
   const places = (catalogs: readonly Catalog[], where: "token" | "page") => catalogs.flatMap((c) => c.fields.flatMap((f) => (f[where] ? [f[where].anchor] : [])));
   // Every group the fields live in open, as a route's reveal opens the one on its way: a folded group draws nothing under its header. Position stays folded: its Attach reads the window, which a render to markup has not.

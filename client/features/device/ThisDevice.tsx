@@ -279,7 +279,7 @@ export default function ThisDevice() {
 export const TAB_ROW_HELP = "Pick the panels that may be tabs. The rest stay in More.";
 
 /**
- * Tab row (designs/qol audit Q10, D-261106-178): one tick for each of the
+ * Tab row (docs/design/design-v1-qol.md 3, Q10, D-261106-178): one tick for each of the
  * role's panels, all ticked at first, so the row is the registry's until
  * the DM unticks one. An unticked panel stays in More, and the row holds
  * the ticked ones in the registry's order, as many as fit

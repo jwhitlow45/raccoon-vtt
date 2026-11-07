@@ -8,8 +8,8 @@ import { moveSoundOp } from "./moveSound.ts";
 
 /**
  * Moving the players to a scene, the one way every control does it
- * (designs/qol plan 3): the Scenes list's Move players, and the DM menu's
- * Move players here and Show players <scene> (chips.md 4.1). A move that
+ * (docs/design/design-v1-qol.md 6): the Scenes list's Move players, and the DM menu's
+ * Move players here and Show players <scene> (design-v1-qol.md 4, C2's move). A move that
  * may show players more or less than the DM expects asks first
  * (vision/moveWarning.ts). The move goes with the scene's own sound
  * (moveSound.ts), and a reveal adds the lift of the blackout guarded by

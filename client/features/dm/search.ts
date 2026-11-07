@@ -4,12 +4,12 @@ import { visionOn } from "../vision/sightMode.ts";
 
 /*
  * The DM panel and the DM's part of Members in the room search
- * (designs/qol/search.md 4 and 5.10). A DM's alone, so these entries load
- * with the DM's catalog only (catalog/dm.ts): nothing but that file
- * imports this one. The DM panel's controls that a DM menu item does the
- * same as (Follow me, Black out, Bring everyone here, Show a handout, View
- * as a player) have no entry here: the item is their one row, and they are
- * its twin (catalog/dm.ts TWINS).
+ * (docs/design/design-v1-qol.md 5, What it finds and What keeps it current).
+ * A DM's alone, so these entries load with the DM's catalog only
+ * (catalog/dm.ts): nothing but that file imports this one. The DM panel's
+ * controls that a DM menu item does the same as (Follow me, Black out, Bring
+ * everyone here, Show a handout, View as a player) have no entry here: the
+ * item is their one row, and they are its twin (catalog/dm.ts TWINS).
  */
 
 const DM: Place = { panel: "dm", where: "DM", icon: "dm" };

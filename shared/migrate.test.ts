@@ -1872,7 +1872,7 @@ describe("op version 48: stored ops from before replay by the rules they met (do
   });
 });
 
-describe("op version 49, the guarded reveal (designs/qol plan 3, D-261106-172)", () => {
+describe("op version 49, the guarded reveal (docs/design/design-v1-qol.md 6, D-261106-172)", () => {
   test("keeps stored operations unchanged through the identity step, a lift with and without its scene, and the snapshot at 38", () => {
     assert.ok(OP_VERSION >= 49);
     assert.ok(SNAPSHOT_VERSION >= 38, "no state changes shape");

@@ -255,7 +255,7 @@ export function HandoutsSection(props: { fold: { open: boolean; onToggle(): void
 type RowState = { busy: true } | { busy: false; problem: string };
 
 /**
- * Recent (designs/qol audit Q11, plan 9): the handouts this device showed
+ * Recent (docs/design/design-v1-qol.md 3, Q11): the handouts this device showed
  * in this room, newest first, that are not showing now, each with one
  * button naming whom it goes to again. Members who left are dropped from
  * the audience, and a showing with no one left, or whose image or
@@ -390,7 +390,7 @@ export type HandoutFormDialog = {
 /**
  * Show a handout's form (docs/design/design-v1-pdf-handouts.md 4.1): the
  * panel's, which opens in place from its button, and the DM menu's
- * Show a handout… dialog (designs/qol/chips.md C4), one form in two places
+ * Show a handout… dialog (docs/design/design-v1-qol.md 4, C4), one form in two places
  * sharing the draft (draft.ts). In the dialog it is always open, lists the
  * library at once, and Show or Cancel closes the dialog.
  */
@@ -476,7 +476,7 @@ export function ShowHandoutForm(props: {
       key={a.id}
       type="button"
       aria-label="Use this image"
-      // A library image has no file name to take a title from, so it takes the one this device last showed it with (designs/qol chips C4).
+      // A library image has no file name to take a title from, so it takes the one this device last showed it with (docs/design/design-v1-qol.md 4, C4).
       onClick={() => draftStore.setState(withPick(draftStore.getState(), { kind: "image", asset: a }, rememberedTitle(recent.getState().entries, { kind: "image", assetId: a.id }) ?? ""))}
       style={{ padding: 0, border: `${theme.line.border}px solid ${theme.color.border}`, borderRadius: theme.radius.sm, background: "transparent", cursor: "pointer", aspectRatio: "1" }}
     >

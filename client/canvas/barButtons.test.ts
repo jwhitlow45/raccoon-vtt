@@ -20,14 +20,14 @@ describe("the bar's rows", () => {
     assert.deepEqual(barButtons({ ...NOTHING, placeFreely: true }).play, ["multiSelect", "placeFreely"], "a player who may move any token");
   });
 
-  test("All of a kind after Multi-select for the DM alone, leading the second line, and never in the strip (designs/qol audit Q7)", () => {
+  test("All of a kind after Multi-select for the DM alone, leading the second line, and never in the strip (docs/design/design-v1-qol.md 3, Q7)", () => {
     assert.deepEqual(barButtons({ ...DM, allOfKind: true, uses: "yes" }).play, ["conditions", "hidden", "multiSelect", "allOfKind", "roll", "uses"]);
     assert.deepEqual(barButtons({ ...DM, allOfKind: false }).play, ["conditions", "hidden", "multiSelect", "roll"], "a lone goblin");
     assert.deepEqual(barButtons({ ...OWNER, allOfKind: true }).play, ["conditions", "multiSelect", "roll"], "a player's bar never shows it");
     assert.ok(!restButtons({ ...DM, allOfKind: true, lead: true }).includes("allOfKind"), "the expanded bar's, not the strip's");
   });
 
-  test("End turn at the play row's end on a player's own bar, after Place freely and Snap to grid, and in the strip, never for the DM or on another's token (designs/qol audit Q6)", () => {
+  test("End turn at the play row's end on a player's own bar, after Place freely and Snap to grid, and in the strip, never for the DM or on another's token (docs/design/design-v1-qol.md 3, Q6)", () => {
     assert.deepEqual(barButtons({ ...OWNER, endTurn: true, light: true }).play, ["conditions", "multiSelect", "roll", "light", "endTurn"]);
     const placing = barButtons({ ...OWNER, endTurn: true, placeFreely: true, snapToGrid: true });
     assert.deepEqual(placing.play, ["conditions", "multiSelect", "roll", "placeFreely", "snapToGrid", "endTurn"]);
@@ -325,7 +325,7 @@ describe("the resting strip's quick row (docs/design/design-v1-bar-compact.md 3.
     assert.deepEqual(restFit({}, INNER.p390, GAP, FIELD_MIN), []);
   });
 
-  test("End turn fits right after the lead, before Crit and Conditions, and shows at the row's end (designs/qol audit Q6)", () => {
+  test("End turn fits right after the lead, before Crit and Conditions, and shows at the row's end (docs/design/design-v1-qol.md 3, Q6)", () => {
     const widths = { mode: 100, conditions: 95, roll: 50, multiSelect: 100, endTurn: 90 };
     assert.deepEqual(restFit(widths, 56 + 100 + 4 + 90 + 4 + 95, 4, 56), ["mode", "conditions", "endTurn"]);
     assert.deepEqual(restFit(widths, 56 + 100 + 4 + 90 + 4 + 60, 4, 56), ["mode", "roll", "endTurn"], "Conditions gives way before End turn does");

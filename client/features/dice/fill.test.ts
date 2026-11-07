@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { RoomScope } from "../../state/scope.ts";
 import { diceFillSlot, fillDiceField, takeDiceFill } from "./fill.ts";
 
-describe("a formula put in the Dice field unrolled (designs/qol/search.md 5.5)", () => {
+describe("a formula put in the Dice field unrolled (docs/design/design-v1-qol.md 5, Acting)", () => {
   test("the field takes the newest ask once, an ask made before it drew included", () => {
     const scope = new RoomScope();
     const store = scope.get(diceFillSlot);

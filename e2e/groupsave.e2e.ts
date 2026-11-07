@@ -1082,7 +1082,7 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     const sheet = diceSheet(dm);
     await sheet.waitFor();
     await sheet.getByText("Dexterity save for 3").first().waitFor();
-    // The DCs this device sent for a save stand beside the DC field (designs/qol audit Q9): step 3 sent 13.
+    // The DCs this device sent for a save stand beside the DC field (docs/design/design-v1-qol.md 3, Q9): step 3 sent 13.
     const recent = sheet.getByRole("group", { name: "Recent DCs", exact: true });
     await recent.waitFor();
     const chip = recent.getByRole("button", { name: `DC ${DC}`, exact: true });

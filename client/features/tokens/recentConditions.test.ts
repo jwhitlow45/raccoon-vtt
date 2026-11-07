@@ -7,7 +7,7 @@ function memory(start: Record<string, string> = {}): ConditionStorage & { data: 
   return { data, getItem: (k) => data[k] ?? null, setItem: (k, v) => void (data[k] = v) };
 }
 
-describe("the conditions this device used last (designs/qol audit Q13)", () => {
+describe("the conditions this device used last (docs/design/design-v1-qol.md 3, Q13)", () => {
   beforeEach(forgetRecentConditions);
 
   test("the newest first, once each, three kept", () => {

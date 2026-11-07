@@ -2,7 +2,7 @@ import { Chip } from "../../components/Chip.tsx";
 import { theme } from "../../lib/theme.ts";
 
 /**
- * A save's recent DCs beside its DC field (designs/qol audit Q9): "Recent",
+ * A save's recent DCs beside its DC field (docs/design/design-v1-qol.md 3, Q9): "Recent",
  * then each DC this device sent last for a save, lowest first (logic.ts
  * recentDcChips), each a view of the field as a check's typical DCs are.
  * The request sheet and the group save draw the same row.

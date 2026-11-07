@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { CHIP_WORDS, DM_MENU_HEADINGS, DM_MENU_SECTIONS, audienceDescription, audienceDetail, recentDetail } from "./chipWords.ts";
 
-describe("the chips' words (designs/qol/chips.md 7)", () => {
+describe("the chips' words (docs/design/design-v1-qol.md 4, Words)", () => {
   test("a recent handout names its audience, by name up to two players and by count past them, its description naming them all", () => {
     assert.equal(audienceDetail("all"), "to everyone");
     assert.equal(audienceDetail(["Pat"]), "to Pat");
@@ -13,7 +13,7 @@ describe("the chips' words (designs/qol/chips.md 7)", () => {
     assert.equal(audienceDescription("all"), "Shows it to everyone again.");
   });
 
-  test("a document is named as the whole document, never a page of it (plan.md 9)", () => {
+  test("a document is named as the whole document, never a page of it (design-v1-qol.md 3, Q11)", () => {
     assert.equal(recentDetail("doc", "all"), "Document · to everyone");
     assert.equal(recentDetail("image", ["Pat"]), "to Pat");
   });

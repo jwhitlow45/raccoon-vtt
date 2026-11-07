@@ -1,11 +1,11 @@
 import { STRIP_FACES, STRIP_FACES_FEW, STRIP_NAME_MIN_PX } from "../features/encounter/band.ts";
 
 /**
- * The top bar's parts and the order it gives way in (designs/qol plan.md
- * 4, chips.md 5), and the rule that takes the steps (fitStep, shapeOf).
- * A part sets itself in BarContent and draws in the form BarShape gives,
- * as Now playing (features/sound/mini/NowChip.tsx) and Search
- * (features/search/SearchSheet.tsx SearchButton) do.
+ * The top bar's parts and the order it gives way in
+ * (docs/design/design-v1-qol.md 4, The give-way), and the rule that takes the
+ * steps (fitStep, shapeOf). A part sets itself in BarContent and draws in the
+ * form BarShape gives, as Now playing (features/sound/mini/NowChip.tsx) and
+ * Search (features/search/SearchSheet.tsx SearchButton) do.
  */
 
 /**
@@ -35,7 +35,7 @@ export type TopBarPart =
 export const TOP_BAR_ORDER: readonly TopBarPart[] = ["dot", "name", "you", "blackout", "search", "gap", "nowPlaying", "clock", "undo", "redo", "phase", "turn", "find", "view", "fit", "fullscreen"];
 
 /**
- * Search's forms (search.md 5.1): the field-like button with its words and
+ * Search's forms (design-v1-qol.md 5, Opening): the field-like button with its words and
  * key, its 44 px icon (step 0, which from 900 px up it never gives way
  * past), and below 900 px folded into the Panels field, its home off the
  * bar (D-261106-167). Not in View as a player, nor on a table display.
@@ -51,11 +51,11 @@ export type SearchForm = "field" | "icon" | "panels";
 export type NowPlayingForm = "full" | "compact" | "off";
 
 /**
- * The steps from 900 px up, in the order the bar takes them (chips.md 5,
- * 0 to 12, with step 10's two halves apart). Each but Search's puts what
- * left the bar into the DM menu. After step 12 a player's inline "Your
- * turn" drops while End turn shows, its live region kept, unseen
- * (plan.md 9, QD-OPUS-24 and 30). Last, where a blackout's crossed eye
+ * The steps from 900 px up, in the order the bar takes them (design-v1-qol.md
+ * 4, The give-way, 0 to 12, with step 10's two halves apart). Each but
+ * Search's puts what left the bar into the DM menu. After step 12 a player's
+ * inline "Your turn" drops while End turn shows, its live region kept, unseen
+ * (design-v1-qol.md 4, The give-way, QD-OPUS-24 and 30). Last, where a blackout's crossed eye
  * stands in the DM chip's place, it slims to the dot's width (`eyeSlim`):
  * it is 8 px wider, and no other step makes up for it.
  */
@@ -97,7 +97,7 @@ export const WIDE_STEPS: readonly WideStep[] = [
 ];
 
 /**
- * The steps below 900 px, in order (plan.md 4): the turn strip goes to the
+ * The steps below 900 px, in order (design-v1-qol.md 4, The give-way): the turn strip goes to the
  * band under the bar first. A phone's bar has no clock chip and no Phase
  * menu. The crossed eye's slimming comes last, as from 900 px up: a DM's
  * 320 px phone at 130% in a blackout with a long room name overflowed by
@@ -223,7 +223,7 @@ function nameCapFor(m: FitMeasure): number {
 
 /**
  * The bar's next record, from the one it is drawn with and the row as
- * measured then (chips.md C6). The steps start over whenever the content
+ * measured then (design-v1-qol.md 4, C6). The steps start over whenever the content
  * changes (a new key) or the row is wider than when they were taken, so
  * the bar shows what a page opened now would: the fewest steps, in order,
  * with which the row fits. A narrower row keeps its steps and takes more,
@@ -232,7 +232,7 @@ function nameCapFor(m: FitMeasure): number {
  *
  * The record keeps the width the row measured, never one passed down to
  * it, which can lag the row by a render: a step recorded with a width from
- * before a resize landed never came back (designs/qol chips.md 3.2).
+ * before a resize landed never came back (docs/design/design-v1-qol.md 4, C6).
  */
 export function fitStep(record: FitRecord | null, key: string, m: FitMeasure, steps: readonly BarStep[]): FitRecord {
   const drawn = drawnFor(record, key);

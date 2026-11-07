@@ -3,7 +3,7 @@ import { scopeSlot } from "../../state/scope.ts";
 import type { SearchEntry } from "./entry.ts";
 
 /**
- * This device's recent search picks (designs/qol/search.md 5.2 and 5.9),
+ * This device's recent search picks (docs/design/design-v1-qol.md 5, The results and Players),
  * apart from the handouts' own recent showings (features/handouts/recent.ts).
  * Kept per room and member, as result ids only, the last five newest
  * first, so a DM's picks on a shared device are never a player's. An id

@@ -14,7 +14,7 @@ import { DM_VIEW, EVERYONE_FIXTURE, indexOf, keysOf, PAT_VIEW, seededRoom, viewO
 const ids = (state: RoomView, options?: Parameters<typeof indexOf>[1]) => new Set(indexOf(state, options).items.map((i) => i.entry.id));
 const entryOf = (state: RoomView, id: string) => indexOf(state).byId.get(id)?.entry;
 
-describe("the panels and keys (search.md 5.10 sources 1 and 2)", () => {
+describe("the panels and keys (design-v1-qol.md 5, What keeps it current)", () => {
   test("every panel a role is offered is in its index, and no other", () => {
     for (const [view, role] of [[DM_VIEW(), "dm"], [PAT_VIEW(), "player"]] as const) {
       for (const wide of [true, false]) {
@@ -57,7 +57,7 @@ describe("the panels and keys (search.md 5.10 sources 1 and 2)", () => {
   });
 });
 
-describe("the room's things (search.md 4)", () => {
+describe("the room's things (design-v1-qol.md 5, What it finds)", () => {
   test("tokens on the scene in view only, a DM's hidden one marked, a hidden name found by its public one", () => {
     const dm = DM_VIEW();
     const found = ids(dm);
@@ -236,7 +236,7 @@ describe("the catalogs", () => {
   });
 });
 
-describe("recent picks on an empty field (search.md 5.9)", () => {
+describe("recent picks on an empty field (design-v1-qol.md 5, Players)", () => {
   test("a pick shows only while the index built now holds it", () => {
     const out = searchResults(indexOf(DM_VIEW()), "", ["token:g2", "gone", "panel:tracker"]);
     assert.deepEqual(out.t === "empty" && out.recent.map((e) => e.id), ["token:g2", "panel:tracker"]);

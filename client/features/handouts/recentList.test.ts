@@ -6,7 +6,7 @@ import { offerable, recordShow, reshowInput, type RecentHandout } from "./recent
 import { entryKey, recentRoomOf, recentRowWords, reshowProblem, shownOf } from "./recentList.ts";
 
 /*
- * Handouts' Recent list (designs/qol audit Q11, plan 9): a showing taken,
+ * Handouts' Recent list (docs/design/design-v1-qol.md 3, Q11): a showing taken,
  * then offered again to the same players as the room is now.
  */
 

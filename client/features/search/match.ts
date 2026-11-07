@@ -2,12 +2,12 @@ import type { SearchEntry, SearchKind } from "./entry.ts";
 import { SMALL_WORDS, SYNONYMS } from "./words.ts";
 
 /**
- * The room search's matcher and ranking (designs/qol/search.md 5.3 and
- * 5.4), pure, on words folded once when the index is built. It forgives
+ * The room search's matcher and ranking (docs/design/design-v1-qol.md 5,
+ * Matching), pure, on words folded once when the index is built. It forgives
  * case, accents, apostrophes, word order, plurals, joined words and, from
- * five letters, a typo, and knows the words a table types (words.ts).
- * Nothing here reads how often a result was picked: no typed list ever
- * reorders by use (D-261106-175).
+ * five letters, a typo, and knows the words a table types (words.ts). Nothing
+ * here reads how often a result was picked: no typed list ever reorders by
+ * use (D-261106-175).
  */
 
 /** Lowercase, accents and apostrophes dropped, anything but letters, digits and `+` to one space. */
@@ -61,7 +61,7 @@ export function searchable(entry: Pick<SearchEntry, "title" | "names" | "bets" |
 }
 
 /**
- * How well an entry matches, best first (search.md 5.4): one of its best
+ * How well an entry matches, best first (design-v1-qol.md 5, Matching): one of its best
  * bets typed whole, its whole title, the title's start or another name typed
  * whole, every word in the title, words elsewhere, and last a typo.
  */
@@ -95,7 +95,7 @@ export type Query = {
   /**
    * Grades by typed word and word. A room holds far fewer different words
    * than entries times words, so each pair's typo distance runs once per
-   * keystroke, not once per entry (search.md 5.11: the p95 keystroke fell
+   * keystroke, not once per entry (design-v1-qol.md 5, Size: the p95 keystroke fell
    * from 4.4 ms to 1.3 ms in the prototype's bench).
    */
   memo: Map<string, Map<string, Grade | null>>;
@@ -262,9 +262,9 @@ export function matchEntry(q: Query, s: Searchable): Match | null {
 }
 
 /**
- * Kinds in the order a table reaches for them within one tier (search.md
- * 5.4): what is done in play, then the room's things, then where things
- * live, then setup.
+ * Kinds in the order a table reaches for them within one tier
+ * (design-v1-qol.md 5, Matching): what is done in play, then the room's
+ * things, then where things live, then setup.
  */
 export const KIND_GROUP: Readonly<Record<SearchKind, number>> = {
   action: 0,
@@ -292,7 +292,7 @@ export function indexed(entry: SearchEntry): Indexed {
   return { entry, s: searchable(entry) };
 }
 
-/** The most rows a typed query lists (search.md 5.2). */
+/** The most rows a typed query lists (design-v1-qol.md 5, The results). */
 export const MAX_ROWS = 40;
 
 const titles = new Intl.Collator("en", { numeric: true, sensitivity: "base" });

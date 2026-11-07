@@ -1201,7 +1201,7 @@ export const opMigrations: MigrationStep[] = [
     apply: (op) => op,
   },
   {
-    // The QOL pass's guarded reveal (designs/qol plan 3, D-261106-172):
+    // The QOL pass's guarded reveal (docs/design/design-v1-qol.md 6, D-261106-172):
     // `view.blackout` may carry `whilePlayersOn`, a new optional field, so
     // no stored op changes shape and the step is the identity. No stored op
     // carries it, so replay runs no new branch, and an op stored with it

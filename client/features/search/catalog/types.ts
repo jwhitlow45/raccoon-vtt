@@ -6,13 +6,13 @@ import type { RoomView } from "../../../state/types.ts";
 import type { SearchEntry } from "../entry.ts";
 
 /**
- * The shape of the search's catalog (designs/qol/search.md 5.10): the
+ * The shape of the search's catalog (docs/design/design-v1-qol.md 5, What keeps it current): the
  * sections, settings and actions written by hand beside the features that
  * own them, the fields of a creature's panel and page, and the words for
  * the panels. Two catalogs hold them: catalog/everyone.ts, in the room's
  * chunk, with what both roles have, and catalog/dm.ts, which loads for a
  * DM alone (dmCatalog.ts), so a player's device never holds the DM's
- * entries, their other names, best bets or count (search.md 5.9). Types
+ * entries, their other names, best bets or count (design-v1-qol.md 5, Players). Types
  * only, in their own file, so a catalog and a feature's entries import
  * them without importing the index that reads them.
  */
@@ -43,8 +43,9 @@ export type CatalogEntry = SearchEntry & {
   /** The value its row shows now, a switch's "On" or "Off", read when the index is built. It wins over `value`. */
   valueNow?(ctx: SearchContext): string | undefined;
   /**
-   * Its place on an empty field's Suggested list, lowest first (search.md
-   * 5.2, index.ts SUGGEST). Left out, it is never suggested.
+   * Its place on an empty field's Suggested list, lowest first
+   * (design-v1-qol.md 5, The results, index.ts SUGGEST). Left out, it is
+   * never suggested.
    */
   suggest?: number;
 };
@@ -56,7 +57,7 @@ export type FieldPlace = { section?: string; anchor: string };
 export type FieldHolder = { surface: "token" | "page"; role: SearchRole; memberId: string | null; token?: Token; character?: Character };
 
 /**
- * A field of a token's panel or a character's page (search.md 4): the
+ * A field of a token's panel or a character's page (design-v1-qol.md 5, What it finds): the
  * index makes one entry of it for the selected token and for each
  * character the viewer may search, with that creature's value.
  */
@@ -100,7 +101,7 @@ export type Catalog = {
   panels: Readonly<Record<string, PanelWords>>;
   /**
    * Entries made from the room now, each running a menu item's own function
-   * (search.md 5.5): the DM menu's items from `dmMenuSections` in the DM's
+   * (design-v1-qol.md 5, Acting): the DM menu's items from `dmMenuSections` in the DM's
    * catalog, and a player's You menu items from `youMenuSections` in
    * everyone's, gated there by role. Lane S2a writes both.
    */

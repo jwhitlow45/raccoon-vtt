@@ -253,7 +253,7 @@ async function quiet(page: Page, ms: number): Promise<void> {
   }
 }
 
-/** The QOL pass's showings (designs/qol audit Q11): the Cragmaw map's image, and what qe-4's refused re-show said. */
+/** The QOL pass's showings (docs/design/design-v1-qol.md 3, Q11): the Cragmaw map's image, and what qe-4's refused re-show said. */
 const qe = { map: "", refusal: "" };
 
 /**

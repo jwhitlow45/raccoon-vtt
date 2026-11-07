@@ -25,14 +25,15 @@ import {
 } from "./chipWords.ts";
 
 /*
- * The top bar's menus as data (designs/qol/chips.md 11, plan.md 3): the DM
+ * The top bar's menus as data (docs/design/design-v1-qol.md 6): the DM
  * menu, the Blackout menu and a player's You menu, each item with the run
- * function the menu calls and the search calls for the same item (search.md
- * 5.5), so both send the same op. Pure, for node --test: the room comes in
- * as a view, and the run reaches the room only through `ChipEnv`.
+ * function the menu calls and the search calls for the same item
+ * (design-v1-qol.md 5, Acting), so both send the same op. Pure, for node
+ * --test: the room comes in as a view, and the run reaches the room only
+ * through `ChipEnv`.
  */
 
-/** A player's You menu's items (chips.md C7). */
+/** A player's You menu's items (design-v1-qol.md 4, C7). */
 export type YouItemKind = "sheet" | "xcard";
 
 /** What a run opened, which the room's chip dialogs or the preview draw (ChipMenus.tsx). */
@@ -127,7 +128,7 @@ export type DmMenuView = {
   outShown: boolean;
 };
 
-/** The most recent handouts the DM menu offers again (chips.md C1). */
+/** The most recent handouts the DM menu offers again (design-v1-qol.md 4, C1). */
 export const MENU_RECENT = 3;
 
 /** Names in a sentence for an audience of member ids: a re-show's audience as recent.ts offers it. */
@@ -139,7 +140,7 @@ function refusalWords(refusal: OpRefusal | undefined): string {
   return refusal?.code === "gone" ? SCENE_GONE : reasonText(refusal);
 }
 
-/** A move's answer in the item's words (chips.md 4.1). An unknown answer is a reconnect's, whose snapshot the view already shows. */
+/** A move's answer in the item's words (design-v1-qol.md 4, C2's move). An unknown answer is a reconnect's, whose snapshot the view already shows. */
 export function moveWords(answer: MoveAnswer): ChipAnswer {
   if (answer.t !== "refused") return { t: "taken" };
   return { t: "refused", words: answer.step === "lift" ? CHIP_WORDS.liftRefused : moveRefused(refusalWords(answer.refusal)) };
@@ -183,7 +184,7 @@ function moving(view: DmMenuView, out: boolean): Pick<ChipItem, "busy" | "under"
 }
 
 /**
- * The Blackout menu's items (chips.md C2): End the blackout, and while the
+ * The Blackout menu's items (design-v1-qol.md 4, C2): End the blackout, and while the
  * DM looks at another scene, Show players <scene>. They lead the DM menu
  * too during a blackout. Nothing while there is no blackout.
  */
@@ -198,7 +199,7 @@ export function blackoutItems(view: DmMenuView): ChipItem[] {
 }
 
 /**
- * The DM menu (chips.md C1, D-261106-121): during a blackout its two items
+ * The DM menu (design-v1-qol.md 4, C1, D-261106-121): during a blackout its two items
  * first, above a line, then Handouts, Players' screens, Map phase,
  * Preview, and what gave way from the bar. A section shows only while it
  * holds something.
@@ -333,7 +334,7 @@ export type YouMenuView = {
 export const XCARD_PREVIEW = "Not available while viewing as a player.";
 
 /**
- * A player's You menu (chips.md C7), headed with their name: each
+ * A player's You menu (design-v1-qol.md 4, C7), headed with their name: each
  * character they own, by name, opening its sheet, then X-card…. Only the
  * characters their projection lists with them among its owners.
  */
@@ -363,7 +364,7 @@ export const anywayId = (id: string) => `${id}:anyway`;
 export const cancelId = (id: string) => `${id}:cancel`;
 
 /**
- * The sections as the open menu draws them (chips.md 4.1, D-261106-136):
+ * The sections as the open menu draws them (design-v1-qol.md 4, C2's move, D-261106-136):
  * an item that asked stands as its anyway item, the warning under its
  * words and as its description, then Cancel. An item a refusal answered
  * shows why, under its words and as its description, until it is pressed

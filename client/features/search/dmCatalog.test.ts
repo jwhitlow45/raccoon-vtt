@@ -22,7 +22,7 @@ function spy(outcomes: ("ok" | "fail")[] = ["ok"]) {
 
 const settle = () => new Promise((done) => setTimeout(done, 0));
 
-describe("the DM's catalog loads for a DM alone (search.md 5.8)", () => {
+describe("the DM's catalog loads for a DM alone (design-v1-qol.md 5, Loading)", () => {
   test("a player, a role not yet known, or anything but exactly dm, loads nothing", () => {
     const { calls, load } = spy();
     const catalog = createDmCatalog(load);
@@ -82,7 +82,7 @@ describe("the DM's catalog loads for a DM alone (search.md 5.8)", () => {
   });
 });
 
-describe("nothing but dmCatalog.ts imports catalog/dm.ts, and nothing but catalog/dm.ts the files of DM entries (search.md 5.8)", () => {
+describe("nothing but dmCatalog.ts imports catalog/dm.ts, and nothing but catalog/dm.ts the files of DM entries (design-v1-qol.md 5, Loading)", () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const client = resolve(here, "../..");
   const target = resolve(here, "catalog/dm.ts");

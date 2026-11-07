@@ -11,7 +11,7 @@ import { DM_FIXTURE, keysOf, SRD, viewOf } from "./search.testutil.ts";
 
 /**
  * A player's search holds only what that player may see and do
- * (designs/qol/search.md 5.9 and 7): random rooms with a word of their own
+ * (docs/design/design-v1-qol.md 5, Players and 8): random rooms with a word of their own
  * planted in every name, title and note, passed through the server's
  * projection for a player, and that player's index built from it as the
  * sheet builds it. Named invariants:
@@ -127,7 +127,7 @@ function heldBy(id: string, view: NonNullable<RoomView["view"]>, owns: (tokenOrC
 const ROOM_KINDS = new Set(["token", "character", "field", "condition", "page", "handout"]);
 const DM_KINDS = new Set(["scene", "monster", "playlist", "track"]);
 
-describe("a player's search holds only what that player may see and do (search.md 5.9)", () => {
+describe("a player's search holds only what that player may see and do (design-v1-qol.md 5, Players)", () => {
   test("random rooms through the projection, with planted words everywhere", () => {
     fc.assert(
       fc.property(fc.integer({ min: 1, max: 2 ** 31 - 1 }), fc.boolean(), fc.boolean(), (seed, known, wide) => {

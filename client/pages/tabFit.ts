@@ -44,7 +44,7 @@ export type TabWidths = {
   room: number;
   /**
    * How many of `tabs`, from the first, may stand in the row: This device's
-   * Tab row (designs/qol audit Q10), every panel when left out. The rest are
+   * Tab row (docs/design/design-v1-qol.md 3, Q10), every panel when left out. The rest are
    * always in More, so More stays while any is left out.
    */
   kept?: number;

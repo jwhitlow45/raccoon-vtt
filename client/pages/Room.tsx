@@ -1264,7 +1264,7 @@ function RoomPage() {
             backRef={backRef}
             closeRef={closeRef}
           >
-            {/* Always atop the list, whether or not the top bar holds Search (designs/qol/search.md 5.1, P1). */}
+            {/* Always atop the list, whether or not the top bar holds Search (docs/design/design-v1-qol.md 5, Opening, P1). */}
             {preview ? null : <PanelsSearchField onOpen={() => setPicker(false)} />}
             <PanelPicker
               panels={panels}
@@ -1520,23 +1520,23 @@ function MapArea(props: {
  * phone's bar has no room for.
  *
  * Where the row overflows (scrollWidth past clientWidth), the bar gives
- * way one step at a time in a fixed order (pages/topBarFit.ts, designs/qol
- * chips.md 5): from 900 px up the clock's chip leaves, the Now playing
- * chip goes to its icon, the blackout notice folds into the DM chip's
- * place, the chip keeps its dot, Now playing leaves, Full screen leaves,
- * then the Phase menu, the turn chip's next faces, the gaps' room, the
- * View button, and last the turn chip's name and an overrun timer's words.
- * On a phone the strip goes to the band first. Each step's part stays in
- * reach: the DM menu holds the clock, Now playing and the phases, the Menu
- * and a key Full screen, the room's menu View. Undo and Redo never leave
- * (docs/design/design-v1-layout-hierarchy.md M2). The room name shrinks to
- * a few letters before any step.
+ * way one step at a time in a fixed order (pages/topBarFit.ts,
+ * docs/design/design-v1-qol.md 4, The give-way): from 900 px up the clock's
+ * chip leaves, the Now playing chip goes to its icon, the blackout notice
+ * folds into the DM chip's place, the chip keeps its dot, Now playing leaves,
+ * Full screen leaves, then the Phase menu, the turn chip's next faces, the
+ * gaps' room, the View button, and last the turn chip's name and an overrun
+ * timer's words. On a phone the strip goes to the band first. Each step's
+ * part stays in reach: the DM menu holds the clock, Now playing and the
+ * phases, the Menu and a key Full screen, the room's menu View. Undo and Redo
+ * never leave (docs/design/design-v1-layout-hierarchy.md M2). The room name
+ * shrinks to a few letters before any step.
  *
  * The steps start over, in the same layout pass and before paint, whenever
  * what the bar holds changes (a fight starts or ends, whose turn, a
  * blackout, the phases, a chip's words, the timer running over, a font
  * arriving) or its row widens, so the bar shows what a page opened now
- * would (chips.md C6). The row's own width is measured for that, never the
+ * would (design-v1-qol.md 4, C6). The row's own width is measured for that, never the
  * map's width passed down, which lagged a resize by a render and kept a
  * step for good.
  */
@@ -1556,7 +1556,7 @@ function TopBar(props: {
   const name = useRoomView((s) => s.view?.meta.name ?? "");
   const role = useRoomView((s) => s.you?.role);
   const connection = useRoomView((s) => s.connection);
-  // Players see black stays while a reveal's lift is out, so its menu can say how the reveal went (designs/qol/chips.md 4.1).
+  // Players see black stays while a reveal's lift is out, so its menu can say how the reveal went (docs/design/design-v1-qol.md 4, C2's move).
   const blackout = useBlackoutShown();
   // The alerts it holds may open over the screen (FightAlerts), and then the bar rises over the notices with them.
   const alertsOverlay = useStore(useScoped(barDockSlot), (s) => s.alertsOverlay);
@@ -1571,7 +1571,7 @@ function TopBar(props: {
     return { dm: raise("dm"), blackout: raise("blackout"), you: raise("you"), clock: raise("clock"), nowPlaying: raise("nowPlaying") };
   }, []);
   const chipOpen = Object.values(chipsOpen).some(Boolean);
-  // Focus goes here when Players see black leaves with the blackout while its menu was open (chips.md 4.1).
+  // Focus goes here when Players see black leaves with the blackout while its menu was open (design-v1-qol.md 4, C2's move).
   const dmChipRef = useRef<HTMLButtonElement | null>(null);
   const rowRef = useRef<HTMLDivElement>(null);
   const [strip, setStrip] = useState<HTMLDivElement | null>(null);
@@ -1711,7 +1711,7 @@ function TopBar(props: {
         >
           {name}
         </h1>
-        {/* The chips open menus (designs/qol/chips.md C1, C2, C7). In its short form the blackout's crossed eye is the DM chip, whose menu leads with the blackout's items. */}
+        {/* The chips open menus (docs/design/design-v1-qol.md 4, C1, C2 and C7). In its short form the blackout's crossed eye is the DM chip, whose menu leads with the blackout's items. */}
         {role === "dm" ? (
           <DmChip dot={shape.dmDot} eye={shape.eye} eyeSlim={shape.eyeSlim} timeGaveWay={clockText !== null && !shape.clock} nowPlayingGaveWay={shape.nowPlaying === "off"} chipRef={dmChipRef} onOpen={raiseFor.dm} />
         ) : role === "player" ? (

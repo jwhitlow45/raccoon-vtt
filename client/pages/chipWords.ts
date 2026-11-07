@@ -1,17 +1,17 @@
 import { MOVING_PLAYERS } from "../features/scenes/movePlayers.ts";
 
 /**
- * The words of the top bar's chips and their menus (designs/qol/chips.md
- * 7, with plan.md 9's whole-document showings), keyed, so the menus (lane
- * QC-A), the search's rows for menu items (S2) and the tests read the same
- * text. Declared first by lane Q0. A word with a name, a title or a scene
- * in it takes it as an argument.
+ * The words of the top bar's chips and their menus
+ * (docs/design/design-v1-qol.md 4, Words, with 3, Q11's whole-document
+ * showings), keyed, so the menus (lane QC-A), the search's rows for menu
+ * items (S2) and the tests read the same text. Declared first by lane Q0. A
+ * word with a name, a title or a scene in it takes it as an argument.
  */
 
 /**
- * Each kind of item the DM menu and the Blackout menu hold (chips.md 4,
- * C1 and C2). The search pairs each kind with its twin, the panel control
- * that does the same (search.md 5.5). Time and Now playing stand in for
+ * Each kind of item the DM menu and the Blackout menu hold (design-v1-qol.md
+ * 4, C1 and C2). The search pairs each kind with its twin, the panel control
+ * that does the same (design-v1-qol.md 5, Acting). Time and Now playing stand in for
  * the bar's chips that gave way, and the search leaves them out.
  */
 export type DmItemKind =
@@ -68,7 +68,7 @@ export const CHIP_WORDS = {
   endBlackout: "End the blackout",
   endBlackoutDescription: "Players see the map again.",
   showPlayersDescription: "Moves the players here and ends the blackout in one step.",
-  // The four steps are StepButtons' own (clock/words.ts STEPS and To dawn), which the popover reuses (chips.md C5).
+  // The four steps are StepButtons' own (clock/words.ts STEPS and To dawn), which the popover reuses (design-v1-qol.md 4, C5).
   timeTitle: "Time",
   openTime: "Open Time",
   next: "Next",
@@ -117,7 +117,7 @@ export function audienceDescription(names: "all" | readonly string[]): string {
   return `Shows it to ${names === "all" ? "everyone" : joined(names)} again.`;
 }
 
-/** A recent showing's detail: its audience, after "Document" for a whole document (plan.md 9: a document has no page of its own). */
+/** A recent showing's detail: its audience, after "Document" for a whole document (design-v1-qol.md 3, Q11: a document has no page of its own). */
 export function recentDetail(kind: "image" | "doc", names: "all" | readonly string[]): string {
   return kind === "doc" ? `${CHIP_WORDS.document} · ${audienceDetail(names)}` : audienceDetail(names);
 }

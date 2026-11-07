@@ -21,13 +21,12 @@ import { fitTabs, GROUP_GAP, keptOrder, nameCut, TAB_GAP, headerNamesOpen, tabLo
  * The side panel's tabs in one row (docs/design/design-v1-panel-tabs.md): the
  * registry's order, as many as fit (pages/tabFit.ts), then More, a tab
  * whose menu lists the rest under the phone list's groups. This device's
- * Tab row may leave panels out, which More then always holds (designs/qol
- * audit Q10). Nothing moves a tab by use: the row depends only on the
- * widths this device draws, the room it has and those ticks. A panel
- * opened from More, by its menu or from anywhere
- * else, shows its name on More, which is then the chosen tab, so the tab
- * list always has one and every rule that sends focus to "the chosen tab"
- * finds More.
+ * Tab row may leave panels out, which More then always holds
+ * (docs/design/design-v1-qol.md 3, Q10). Nothing moves a tab by use: the row
+ * depends only on the widths this device draws, the room it has and those
+ * ticks. A panel opened from More, by its menu or from anywhere else, shows
+ * its name on More, which is then the chosen tab, so the tab list always has
+ * one and every rule that sends focus to "the chosen tab" finds More.
  *
  * Badges sit on each tab's corner, so a count never widens a tab. More
  * shows the sum of the counts of the panels it holds, and its menu shows

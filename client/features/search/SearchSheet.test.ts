@@ -9,10 +9,10 @@ import { searchResults } from "./index.ts";
 import { DM_VIEW, indexOf, keysOf, PAT_VIEW, seededRoom, viewOf } from "./search.testutil.ts";
 
 /*
- * The room search's sheet (designs/qol/search.md 5.2, 5.5, 5.6, 5.8 and
- * 6): what its list says in each state, the keys inside it, what a pick
- * does by kind, a menu item's row, and the ways in. Its pieces are drawn
- * to markup. The browser check and the stack's e2e drive the whole sheet.
+ * The room search's sheet (docs/design/design-v1-qol.md 5 and 7): what its
+ * list says in each state, the keys inside it, what a pick does by kind, a
+ * menu item's row, and the ways in. Its pieces are drawn to markup. The
+ * browser check and the stack's e2e drive the whole sheet.
  */
 
 const { createElement } = await import("react");
@@ -125,7 +125,7 @@ describe("the list's states", () => {
   });
 });
 
-describe("a row (search.md 5.2)", () => {
+describe("a row (design-v1-qol.md 5, The results)", () => {
   test("its second line is its kind, then where it lives or its description, with its value", () => {
     assert.equal(rowDetail({ kind: "setting", where: "Menu · Room settings · Combat" }), "Setting · Menu · Room settings · Combat");
     assert.equal(rowDetail({ kind: "field", where: "Bree", value: "Darkvision 60 ft." }), "Field · Bree: Darkvision 60 ft.");
@@ -184,7 +184,7 @@ describe("a row (search.md 5.2)", () => {
   });
 });
 
-describe("keys inside the search (search.md 5.6)", () => {
+describe("keys inside the search (design-v1-qol.md 5, Keys)", () => {
   const key = (k: string, mods: Partial<{ ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; altKey: boolean }> = {}, code = "") => ({ key: k, code, ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, ...mods });
   const opts = { composing: false, apple: false, inField: true };
 
@@ -235,7 +235,7 @@ describe("keys inside the search (search.md 5.6)", () => {
   });
 });
 
-describe("what a pick does (search.md 5.5, D-261106-144)", () => {
+describe("what a pick does (design-v1-qol.md 5, Acting, D-261106-144)", () => {
   const route = { panel: "characters", anchor: "characters.party-long-rest", press: true };
 
   test("an action presses its control on Enter and only goes there on Shift+Enter", () => {
@@ -312,7 +312,7 @@ describe("a refusal whose row has left the list (se-6)", () => {
   });
 });
 
-describe("the ways in (search.md 5.1)", () => {
+describe("the ways in (design-v1-qol.md 5, Opening)", () => {
   const inRoom = (node: ReactNode) => renderToStaticMarkup(createElement(RoomScopeProvider, { scope: new RoomScope(), children: node }));
 
   test("the top bar's Search is a field-like button of a fixed width, or its 44 px magnifier, named Search", () => {
@@ -351,7 +351,7 @@ describe("the index the sheet lists", () => {
   });
 });
 
-describe("a DM's index reads the DM menu's view (search.md 5.5, plan.md 9)", () => {
+describe("a DM's index reads the DM menu's view (design-v1-qol.md 5, Acting and 10, The catalogs)", () => {
   test("this device's recent showing is a result, titled as the menu titles it with its audience", async () => {
     const { createStore } = await import("zustand/vanilla");
     const { RoomProvider } = await import("../../state/view.ts");

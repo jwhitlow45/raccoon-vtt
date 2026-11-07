@@ -5,15 +5,15 @@ import type { FieldDef } from "../search/catalog/types.ts";
 import { drawn, panelGroupDrawn, panelHolds, type StatRows } from "./panelDraws.ts";
 
 /*
- * A creature's fields in the room search (designs/qol/search.md 4 and
- * 5.10), for both roles, so they ship in the room's chunk through
- * catalog/everyone.ts: the token panel's for the selection, and a
- * character's page's for each character the viewer may search. Each place
- * names the fold on the way and the `search=` id on its control in
- * TokenPanel.tsx and CharacterCard.tsx, which StatsFields, HpSection,
- * EffectsSection and RestSection draw. A value reads only the actor this
- * device holds, a player's projection, so a row never says more than the
- * panel would.
+ * A creature's fields in the room search (docs/design/design-v1-qol.md 5,
+ * What it finds and What keeps it current), for both roles, so they ship in
+ * the room's chunk through catalog/everyone.ts: the token panel's for the
+ * selection, and a character's page's for each character the viewer may
+ * search. Each place names the fold on the way and the `search=` id on its
+ * control in TokenPanel.tsx and CharacterCard.tsx, which StatsFields,
+ * HpSection, EffectsSection and RestSection draw. A value reads only the
+ * actor this device holds, a player's projection, so a row never says more
+ * than the panel would.
  */
 
 const EFFECT_NAMES: ReadonlyMap<string, string> = new Map([...Object.values(CONDITIONS).map((c) => [c.key, c.name] as const), ...Object.values(STATUSES).map((s) => [s.key, s.label] as const)]);

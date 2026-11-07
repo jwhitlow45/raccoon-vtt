@@ -7,10 +7,11 @@ import { routeFolds } from "./route.ts";
 import { indexOf, seededRoom, viewOf } from "./search.testutil.ts";
 
 /*
- * A token's and a character's groups in the room search (designs/qol/search.md
- * 4, 5.9): Position, Image, Owners and Stat block on the token panel, and
- * Stat block, Companions, Image and Players on a character's page. QE1 found
- * them with no entry and no anchor.
+ * A token's and a character's groups in the room search
+ * (docs/design/design-v1-qol.md 5, What it finds and Players): Position,
+ * Image, Owners and Stat block on the token panel, and Stat block,
+ * Companions, Image and Players on a character's page. QE1 found them with no
+ * entry and no anchor.
  */
 
 const FIELDS = [...EVERYONE.fields, ...DM_CATALOG.fields];

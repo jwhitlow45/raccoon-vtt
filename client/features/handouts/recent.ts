@@ -8,7 +8,7 @@ import type { ShowInput } from "./handouts.ts";
 
 /**
  * The handouts this device showed in a room, newest first, five kept
- * (designs/qol plan 3 and 9, D-261106-173). The DM menu's Show <title>,
+ * (docs/design/design-v1-qol.md 3, Q11 and 6, D-261106-173). The DM menu's Show <title>,
  * Handouts' Recent list and the form's remembered title read the one list.
  * It lives in this device's storage only and never reaches the room. A
  * re-show goes to the audience the showing had, less the players who have
@@ -58,7 +58,7 @@ export function recordShow(entries: readonly RecentHandout[], show: RecentShow, 
   return [entry, ...entries.filter((e) => !samePick(e, show))].slice(0, RECENT_HANDOUTS);
 }
 
-/** The title this device last showed the image or document with, for the form to start from (chips.md C4), or null. */
+/** The title this device last showed the image or document with, for the form to start from (design-v1-qol.md 4, C4), or null. */
 export function rememberedTitle(entries: readonly RecentHandout[], pick: RecentPick): string | null {
   return entries.find((e) => samePick(e, pick))?.title ?? null;
 }

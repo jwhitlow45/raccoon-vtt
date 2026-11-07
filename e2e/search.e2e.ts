@@ -10,7 +10,7 @@ import { ConsoleWatch, OpSocket, readCamera, ROOT, Shots, sleep, SocketWatch, st
 import { addSound } from "./soundRoom.ts";
 
 /**
- * The room search (designs/qol/search.md 5 to 8), on the real server
+ * The room search (docs/design/design-v1-qol.md 5 to 8), on the real server
  * serving the production build with ROOM_SOUND on, in a room of three
  * scenes, two characters, goblins seen and hidden, a hooded figure whose
  * true name is hidden, a DM's journal page, a playlist and handouts:
@@ -580,7 +580,7 @@ describe("the room search", { concurrency: false }, () => {
     await dm.keyboard.press("Escape");
     await sheet(dm).waitFor({ state: "detached" });
     f = await focused(dm);
-    // A tap on the map leaves focus on the page itself, so it goes to the map's focus target (search.md 6).
+    // A tap on the map leaves focus on the page itself, so it goes to the map's focus target (design-v1-qol.md 5, Opening).
     assert.equal(opener, null, "the tap on the map put focus nowhere");
     assert.deepEqual([f?.role, f?.name], ["img", "Map"], "focus on the map's focus target");
     // A click outside, from the top bar's Search.
@@ -677,7 +677,7 @@ describe("the room search", { concurrency: false }, () => {
     await dm.keyboard.press("Escape");
   });
 
-  test("se-3. Ctrl+K while a select box has focus opens the search, as anywhere outside a dialog (search.md 5.1)", async () => {
+  test("se-3. Ctrl+K while a select box has focus opens the search, as anywhere outside a dialog (design-v1-qol.md 5, Opening)", async () => {
     await fresh();
     await pick(dm, "automatic walls", "setting:scenes.walls.auto");
     const f = await landedOn(dm, "scenes.walls.auto");
@@ -1385,7 +1385,7 @@ describe("the room search", { concurrency: false }, () => {
     assert.ok(!(await rowIds(page)).some((id) => id.startsWith("monster:")), "no monsters for a player");
     await shots.take(page, "se-20-player-goblin");
 
-    // The canaries of search.md 7 and 8: each finds nothing at all.
+    // The canaries of design-v1-qol.md 5, Players and 8: each finds nothing at all.
     for (const canary of ["goblin boss", "count varo", "villain's plans", "goblin war drums", "tavern song", "Monsters die at 0 HP", "house rules", "send players here"]) {
       await field(page).fill(canary);
       await page.locator("[data-search-none]").waitFor().catch(() => {});

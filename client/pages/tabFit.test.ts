@@ -244,7 +244,7 @@ describe("each panel's icon in the row (docs/design/design-v1-icons-2.md 3.1)", 
   });
 });
 
-describe("the panels a device keeps out of the row (designs/qol audit Q10)", () => {
+describe("the panels a device keeps out of the row (docs/design/design-v1-qol.md 3, Q10)", () => {
   const DM_NOW = [DM[0]!, DM[1]!, ["Dice", "play"] as const, ...DM.slice(2)];
   const PLAYER_NOW = [PLAYER[0]!, PLAYER[1]!, ["Dice", "play"] as const, ...PLAYER.slice(2)];
   const named = (w: TabWidths): TabWidths => ({ ...w, tabs: w.tabs.map((t) => ({ ...t, rest: t.rest + 18, more: t.more + 18 })) });

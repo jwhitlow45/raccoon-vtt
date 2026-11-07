@@ -6,7 +6,7 @@ import type { ClientOp } from "#shared/protocol.ts";
 import { RoomScope } from "../../state/scope.ts";
 
 /*
- * End turn's one wait for the Room (designs/qol plan 9, QD-OPUS-25): the
+ * End turn's one wait for the Room (docs/design/design-v1-qol.md 6, QD-OPUS-25): the
  * strip's End turn and a phone's own token bar's share it, so a press on
  * either shows both busy and the other sends no second Next. Drawn to
  * markup, which runs the hooks but no effects, with the press called on

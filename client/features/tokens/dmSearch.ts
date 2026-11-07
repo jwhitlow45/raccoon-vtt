@@ -5,10 +5,10 @@ import { drawn, panelHolds } from "./panelDraws.ts";
 
 /*
  * The token panel's and Characters' DM rows in the room search
- * (designs/qol/search.md 4 and 5.10). A DM's alone, so these load with the
- * DM's catalog only (catalog/dm.ts): nothing but that file imports this
- * one. Each anchor is the `search=` id on its control in TokenPanel.tsx
- * and CharactersPanel.tsx.
+ * (docs/design/design-v1-qol.md 5, What it finds and What keeps it current).
+ * A DM's alone, so these load with the DM's catalog only (catalog/dm.ts):
+ * nothing but that file imports this one. Each anchor is the `search=` id on
+ * its control in TokenPanel.tsx and CharactersPanel.tsx.
  */
 
 /** The selected token's settings a DM looks for, in Token settings. */

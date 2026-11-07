@@ -77,7 +77,7 @@ function focused(page: Page): Promise<{ tag: string; role: string | null; name: 
   });
 }
 
-/** The QOL pass's tokens (designs/qol audit Q3, Q7, Q13): four Goblin Warriors in a row, the fourth hidden, and Snik, a fifth by its block, renamed. */
+/** The QOL pass's tokens (docs/design/design-v1-qol.md 3, Q3, Q7 and Q13): four Goblin Warriors in a row, the fourth hidden, and Snik, a fifth by its block, renamed. */
 const qe = {
   warriors: [1, 2, 3, 4].map((number) => ({ id: randomUUID(), name: "Goblin Warrior", number, x: 1 + number * 2, y: 2 })),
   snik: { id: randomUUID(), name: "Snik", x: 3, y: 5 },

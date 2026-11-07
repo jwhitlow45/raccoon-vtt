@@ -193,7 +193,7 @@ function sameIds(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((id, i) => id === b[i]);
 }
 
-// ------------------------------------------------------------ all of a kind (designs/qol audit Q7)
+// ------------------------------------------------------------ all of a kind (docs/design/design-v1-qol.md 3, Q7)
 
 /** A token as the kind rule reads it. */
 export type KindToken = Pick<Token, "id" | "sceneId" | "kind" | "name" | "number" | "actor">;

@@ -10,20 +10,20 @@ import { action, page, type Place } from "./write.ts";
 
 /**
  * What both roles' searches find beyond the panels, keys and the room's own
- * things (designs/qol/search.md 5.10): Menu's pages and This device, your
- * own color in Members, the Dice panel, the Log's Chat, the fields and
- * groups of a creature's panel and page, and a player's You menu items.
- * Initiative's rows are a DM's: a player's Initiative holds their own
- * creatures to add and This device's Turn sound, found in This device. It
- * ships in the room's chunk, so it holds nothing only a DM may know: the
- * DM's entries live in catalog/dm.ts.
+ * things (docs/design/design-v1-qol.md 5, What keeps it current): Menu's
+ * pages and This device, your own color in Members, the Dice panel, the Log's
+ * Chat, the fields and groups of a creature's panel and page, and a player's
+ * You menu items. Initiative's rows are a DM's: a player's Initiative holds
+ * their own creatures to add and This device's Turn sound, found in This
+ * device. It ships in the room's chunk, so it holds nothing only a DM may
+ * know: the DM's entries live in catalog/dm.ts.
  */
 
 const MENU = (pageId: string, icon: Place["icon"]): Place => ({ panel: "menu", page: pageId, where: "Menu", icon });
 const MEMBERS: Place = { panel: "menu", page: "members", where: "Menu · Members", icon: "group" };
 
 /**
- * A player's You menu as rows (chips.md C7, plan.md 3): the X-card, whose
+ * A player's You menu as rows (design-v1-qol.md 4, C7 and 6): the X-card, whose
  * twin is the Menu panel's own. Their characters' sheets are the index's
  * character rows already, one row each. Never a DM's: a DM has no You menu,
  * and the DM menu's items come from the DM's catalog alone (QD-OPUS-18).

@@ -277,7 +277,7 @@ export function RequestSheet(props: { from: AskFrom; onClose(): void }) {
                       {t.dc}
                     </Chip>
                   ))}
-                  {/* A save has no typical DC, so it offers the ones this device sent last instead (designs/qol audit Q9). */}
+                  {/* A save has no typical DC, so it offers the ones this device sent last instead (docs/design/design-v1-qol.md 3, Q9). */}
                   {saveChips ? <RecentDcs chips={saveChips} onTap={(dc) => change((d) => tapDc(d, dc))} /> : null}
                 </div>
               </PickRow>

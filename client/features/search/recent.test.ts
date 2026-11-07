@@ -19,7 +19,7 @@ const blocked: PickStorage = {
 
 const store = () => createStore<RecentPicks>(() => ({ key: null, ids: [] }));
 
-describe("the search's recent picks (search.md 5.2 and 5.9)", () => {
+describe("the search's recent picks (design-v1-qol.md 5, The results and Players)", () => {
   test("newest first, each once, five kept", () => {
     let ids: string[] = [];
     for (const id of ["a", "b", "c", "a", "d", "e", "f"]) ids = recordPick(ids, id);

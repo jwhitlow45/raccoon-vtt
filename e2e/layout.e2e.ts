@@ -1278,13 +1278,13 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
       return e.scrollWidth - e.clientWidth - tuck;
     });
     assert.ok(fits <= 0, `the row overflows by ${fits} px`);
-    // Search gives way to its icon first, and never leaves the bar from 900 px up (designs/qol/plan.md 4).
+    // Search gives way to its icon first, and never leaves the bar from 900 px up (docs/design/design-v1-qol.md 4, The give-way).
     assert.equal(await topBar(desk).locator('[data-search-open="bar"]').getAttribute("data-search-form"), "icon", "Search is its icon");
     assert.equal(await topBar(desk).locator('[data-chip="dm"][data-chip-form="dot"]').isVisible(), true, "the DM chip shows its dot");
     assert.equal(await topBar(desk).getByLabel("Map phase").count(), 0, "the Phase menu left the bar");
     // Full screen leaves before the Phase menu, and Menu, This device and W still reach it.
     assert.equal(await topBar(desk).getByRole("button", { name: "Full screen", exact: true }).count(), 0, "Full screen left the bar");
-    // Once Isometric is offered the gaps narrow next. The turn chip's Next and Search's icon now share the row, so View folds into the Menu too, before the turn chip's name gives way (designs/qol/plan.md 4, steps 10 and 11).
+    // Once Isometric is offered the gaps narrow next. The turn chip's Next and Search's icon now share the row, so View folds into the Menu too, before the turn chip's name gives way (docs/design/design-v1-qol.md 4, The give-way, steps 10 and 11).
     assert.equal(await topBar(desk).getByRole("button", { name: /^View: / }).count(), 0, "the View button folded into the Menu");
     assert.equal(await topBar(desk).locator("[data-rvtt-strip-name]").isVisible(), true, "the turn chip keeps its name");
     // Fit tucks into the bar's padding, so both stay inside the top bar's own box, short of the side panel.

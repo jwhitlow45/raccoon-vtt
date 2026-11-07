@@ -4,14 +4,15 @@ import type { CatalogEntry, SearchContext } from "../search/catalog/types.ts";
 import { serverSound } from "./engine/store.ts";
 
 /*
- * Sound in the room search (designs/qol/search.md 4 and 5.10): its two
- * views, Now playing and Library, and what each holds. A DM's alone, so
- * these load with the DM's catalog only (catalog/dm.ts): nothing but that
- * file imports this one. A player's Sound panel is their device's sound,
- * which This device's rows find. Each anchor is the `search=` id on its
- * control in SoundPanel.tsx and the parts it draws. Now playing's route is
- * the Now playing chip's Open Sound (search/route.ts NOW_PLAYING), and the
- * playlists and tracks are the index's rows (search/index.ts).
+ * Sound in the room search (docs/design/design-v1-qol.md 5, What it finds and
+ * What keeps it current): its two views, Now playing and Library, and what
+ * each holds. A DM's alone, so these load with the DM's catalog only
+ * (catalog/dm.ts): nothing but that file imports this one. A player's Sound
+ * panel is their device's sound, which This device's rows find. Each anchor
+ * is the `search=` id on its control in SoundPanel.tsx and the parts it
+ * draws. Now playing's route is the Now playing chip's Open Sound
+ * (search/route.ts NOW_PLAYING), and the playlists and tracks are the index's
+ * rows (search/index.ts).
  */
 
 const NOW: Place = { panel: SOUND_PANEL, page: "now", where: "Sound", icon: "music" };

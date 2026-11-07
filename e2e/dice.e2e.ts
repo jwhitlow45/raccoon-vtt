@@ -475,7 +475,7 @@ async function resultWords(page: Page): Promise<string | null> {
 }
 
 /**
- * Apply to chips under a damage roll (designs/qol audit Q2), its steps
+ * Apply to chips under a damage roll (docs/design/design-v1-qol.md 3, Q2), its steps
  * labeled `qe-`: Thorn's token with a hidden Lurker beside him and two
  * goblins farther along his row, and a second DM computer whose socket is
  * routed, so an apply can wait on the wire or reach the server spoiled.

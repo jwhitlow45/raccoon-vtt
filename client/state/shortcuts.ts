@@ -76,7 +76,7 @@ const NOT_TYPED = new Set(["button", "checkbox", "color", "file", "image", "radi
 
 /**
  * A field of one line that a modifier with a letter types nothing in, so
- * the search's Ctrl+K may open from it (designs/qol/search.md 5.6). A
+ * the search's Ctrl+K may open from it (docs/design/design-v1-qol.md 5, Keys). A
  * text area and an editable block keep every key. A select box is no such
  * field, but takes the search's key too (takenInField).
  */
@@ -184,7 +184,7 @@ export type Shortcut = {
    * It works while typing in a one-line field too (isOneLineField), and in
    * a select box, where the key types nothing: the search's alone. On a
    * Mac Ctrl+K stays a one-line field's own, deleting to the line's end,
-   * and only Cmd+K opens the search there (search.md 5.6).
+   * and only Cmd+K opens the search there (design-v1-qol.md 5, Keys).
    */
   inFields?: true;
   /** Whether it applies now. Left out, whenever the role has it. */
@@ -193,7 +193,7 @@ export type Shortcut = {
   navigation?: true;
   /**
    * The press keeps its default, so the character it types lands where
-   * `run` moved focus: the HP field, for a digit (designs/qol audit Q3).
+   * `run` moved focus: the HP field, for a digit (docs/design/design-v1-qol.md 3, Q3).
    * The only row that does. Every other press is the shortcut's alone.
    */
   typesThrough?: true;
@@ -245,7 +245,7 @@ export const splitKeysSlot = scopeSlot(() => ({ other: null as (() => void) | nu
 
 /**
  * The token action bar's part (canvas/TokenActionBar.tsx): its HP field,
- * which 1 to 9 start a change in (designs/qol audit Q3), and its
+ * which 1 to 9 start a change in (docs/design/design-v1-qol.md 3, Q3), and its
  * Conditions, which C opens (Q13). The bar sets each while it shows it,
  * unfolded, and clears it as it goes, so the keys do nothing without it.
  */
@@ -268,7 +268,7 @@ export function setShortcutSheet(scope: RoomScope, open: boolean): void {
 }
 
 /**
- * The room search's open state (designs/qol/search.md 5.1), which Ctrl+K
+ * The room search's open state (docs/design/design-v1-qol.md 5, Opening), which Ctrl+K
  * or Cmd+K, the top bar's Search and the Panels field set
  * (features/search/SearchSheet.tsx). Per Room page, so "view as a player"
  * has none of its own to open.
@@ -1393,7 +1393,7 @@ export const BEHAVIORS: readonly Behavior[] = [
     surface: "Images",
   },
 
-  // The room search: features/search/SearchSheet.tsx, its field's own keys (designs/qol/search.md 5.6). Its field keeps Home, End, Left and Right.
+  // The room search: features/search/SearchSheet.tsx, its field's own keys (docs/design/design-v1-qol.md 5, Keys). Its field keeps Home, End, Left and Right.
   { id: "searchMove", input: "Up, Down", does: "Move through the results", roles: EVERYONE, device: "keys", surface: "Search" },
   { id: "searchGo", input: "Enter", does: "Go there, or do it", roles: EVERYONE, device: "keys", surface: "Search" },
   { id: "searchGoOnly", input: "Shift+Enter", does: "Only go there", roles: EVERYONE, device: "keys", surface: "Search" },

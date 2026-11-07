@@ -2,11 +2,11 @@ import { action, setting, type Place } from "../search/catalog/write.ts";
 import type { CatalogEntry } from "../search/catalog/types.ts";
 
 /*
- * The Log in the room search (designs/qol/search.md 4 and 5.10), for both
- * roles, so it ships in the room's chunk through catalog/everyone.ts: its
- * Chat only filter and the message field at its foot. Each anchor is the
- * `search=` id on its control in panels/LogPanel.tsx. The log's lines are
- * never indexed.
+ * The Log in the room search (docs/design/design-v1-qol.md 5, What it finds
+ * and What keeps it current), for both roles, so it ships in the room's chunk
+ * through catalog/everyone.ts: its Chat only filter and the message field at
+ * its foot. Each anchor is the `search=` id on its control in
+ * panels/LogPanel.tsx. The log's lines are never indexed.
  */
 
 const LOG: Place = { panel: "log", where: "Log", icon: "log" };

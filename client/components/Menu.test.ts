@@ -141,7 +141,7 @@ describe("a menu item with its own parts", () => {
   });
 });
 
-describe("a pick that keeps the menu open (designs/qol/chips.md 4.1)", () => {
+describe("a pick that keeps the menu open (docs/design/design-v1-qol.md 4, C2's move)", () => {
   test("a pick answering stay closes nothing, and another pick of the same menu still closes it", () => {
     const picks: string[] = [];
     const closes: string[] = [];

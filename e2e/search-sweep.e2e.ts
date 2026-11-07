@@ -10,9 +10,9 @@ import { ConsoleWatch, OpSocket, Shots, sleep, SocketWatch, startServer, waitFor
 import { addSound, roomSoundScript } from "./soundRoom.ts";
 
 /**
- * The room search's sweep (designs/qol/search.md 5.10, the test that keeps
- * it current), on the real server serving the production build with
- * ROOM_SOUND on:
+ * The room search's sweep (docs/design/design-v1-qol.md 5, What keeps it
+ * current), on the real server serving the production build with ROOM_SOUND
+ * on:
  * - se-s1 and se-s2: as the DM and as a player at a desk, every surface the
  *   search catalogs opened, every fold unfolded, and each fold header,
  *   switch, checkbox, radio group, select, slider and labeled field there
@@ -450,7 +450,7 @@ async function land(page: Page, cases: readonly Case[], where: string, out: Outc
 
 // ---------------------------------------------------------------- the anchors
 
-/** The surfaces the search catalogs (search.md 4), each opened by its own entry. */
+/** The surfaces the search catalogs (design-v1-qol.md 5, What it finds), each opened by its own entry. */
 /** `ready` is what shows once the panel's code is in, an anchor unless it draws none. */
 type Surface = { name: string; open: Case; panel: string; ready?: string };
 

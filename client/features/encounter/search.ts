@@ -3,12 +3,12 @@ import type { CatalogEntry, SearchContext } from "../search/catalog/types.ts";
 import { SUGGEST } from "../search/index.ts";
 
 /*
- * Initiative's DM rows in the room search (designs/qol/search.md 4 and
- * 5.10): starting a fight, and in one the order's setup and the turn
- * timer. A DM's alone, so these load with the DM's catalog only
- * (catalog/dm.ts): nothing but that file imports this one. Each anchor is
- * the `search=` id on its control in panels/TrackerPanel.tsx. Its Turn
- * sound is This device's own, found there (device/search.ts), so the one
+ * Initiative's DM rows in the room search (docs/design/design-v1-qol.md 5,
+ * What it finds and What keeps it current): starting a fight, and in one the
+ * order's setup and the turn timer. A DM's alone, so these load with the DM's
+ * catalog only (catalog/dm.ts): nothing but that file imports this one. Each
+ * anchor is the `search=` id on its control in panels/TrackerPanel.tsx. Its
+ * Turn sound is This device's own, found there (device/search.ts), so the one
  * setting is one row.
  */
 

@@ -2,13 +2,14 @@ import { action, inside, section, setting, type Place } from "../search/catalog/
 import type { CatalogEntry, SearchContext } from "../search/catalog/types.ts";
 
 /*
- * The Dice panel in the room search (designs/qol/search.md 4 and 5.10),
- * for both roles, so it ships in the room's chunk through
- * catalog/everyone.ts: the formula field, the next roll's choices, Recent
- * rolls, and the shown creature's Saves and checks and Skills. Each anchor
- * is the `search=` id on its control in Roller.tsx, RecentRolls.tsx and
- * RollOptions.tsx. A creature's other groups, its actions and spells,
- * hang on what its stat block holds, so they stay its own rows there.
+ * The Dice panel in the room search (docs/design/design-v1-qol.md 5, What it
+ * finds and What keeps it current), for both roles, so it ships in the room's
+ * chunk through catalog/everyone.ts: the formula field, the next roll's
+ * choices, Recent rolls, and the shown creature's Saves and checks and
+ * Skills. Each anchor is the `search=` id on its control in Roller.tsx,
+ * RecentRolls.tsx and RollOptions.tsx. A creature's other groups, its actions
+ * and spells, hang on what its stat block holds, so they stay its own rows
+ * there.
  */
 
 const DICE: Place = { panel: "dice", where: "Dice", icon: "dice" };

@@ -39,18 +39,18 @@ import { openAt } from "./route.ts";
 import { KIND_LABEL } from "./words.ts";
 
 /*
- * The room search's sheet (designs/qol/search.md 5.1, 5.2, 5.5 to 5.8 and
- * 6): the field and its ranked list over the room, opened by Ctrl+K or
- * Cmd+K, the top bar's Search and the field atop a phone's Panels list.
- * On a computer it is a dialog under the top bar, on a phone a sheet over
- * the whole screen with the field at its top. What it finds is the
- * index's (index.ts), what a result does the route's and the surfaces'
- * own: a press goes through the real control (route.ts openAt), and only
- * a condition and a menu item run a function, each the very one its own
- * surface calls. The sheet sends no op of its own.
+ * The room search's sheet (docs/design/design-v1-qol.md 5 and 7): the field
+ * and its ranked list over the room, opened by Ctrl+K or Cmd+K, the top bar's
+ * Search and the field atop a phone's Panels list. On a computer it is a
+ * dialog under the top bar, on a phone a sheet over the whole screen with the
+ * field at its top. What it finds is the index's (index.ts), what a result
+ * does the route's and the surfaces' own: a press goes through the real
+ * control (route.ts openAt), and only a condition and a menu item run a
+ * function, each the very one its own surface calls. The sheet sends no op of
+ * its own.
  */
 
-/** Every word the sheet shows (search.md 5.7). A menu item's row takes the menu's own words (chipWords.ts). */
+/** Every word the sheet shows (design-v1-qol.md 5, Words). A menu item's row takes the menu's own words (chipWords.ts). */
 export const SEARCH_WORDS = {
   /** The dialog's name and the top bar button's words. */
   name: "Search",
@@ -65,7 +65,7 @@ export const SEARCH_WORDS = {
   loadingDm: "Loading the DM's results…",
   loadingMonsters: "Loading monsters…",
   failed: "Some results could not load.",
-  /** The polite status once typing stops: how many rows show, never what is left out (search.md 5.9). */
+  /** The polite status once typing stops: how many rows show, never what is left out (design-v1-qol.md 5, Players). */
   count: (n: number) => (n === 0 ? "No match" : n === 1 ? "1 result" : `${n} results`),
   /** The computer's foot, the keys inside the search. */
   move: "Move",
@@ -81,13 +81,13 @@ export const STATUS_DELAY_MS = 500;
 /** Below this layout width the search is a sheet over the whole screen (components/Dialog.tsx DIALOG_PHONE_MAX). */
 export const SHEET_MAX = 600;
 
-/** The dialog's width on a computer (search.md 5.1). */
+/** The dialog's width on a computer (design-v1-qol.md 5, Opening). */
 export const DIALOG_PX = 640;
 
 /** The field-like Search in the top bar, a fixed width so the bar's give-way, not a squeeze, turns it into its icon (topBarFit.ts step 0). */
 export const BAR_FIELD_PX = 240;
 
-/** A result row's height, a touch target with its two lines (search.md 6). */
+/** A result row's height, a touch target with its two lines (design-v1-qol.md 7). */
 const ROW_PX = 52;
 
 /** The pill's height inside the top bar's 44 px target, as the chips' (pages/ChipMenus.tsx). */
@@ -105,7 +105,7 @@ export function rowDetail(entry: Pick<SearchEntry, "kind" | "where" | "value" | 
 export type TitlePart = { text: string; bold: boolean };
 
 /**
- * The title with the start of each typed word in bold (search.md 5.2).
+ * The title with the start of each typed word in bold (design-v1-qol.md 5, The results).
  * Folding drops accents, apostrophes and punctuation, so the letters shown
  * are found by folding the word letter by letter: "Bree's" for "bree"
  * bolds "Bree".
@@ -152,7 +152,7 @@ export function statusWords(results: SearchResults, said: string | null): string
 export type SheetKey = "up" | "down" | "go" | "goOnly" | "close" | null;
 
 /**
- * What a key does inside the search (search.md 5.6): Up and Down move the
+ * What a key does inside the search (design-v1-qol.md 5, Keys): Up and Down move the
  * highlight while the field keeps focus and its own Home, End, Left and
  * Right, Enter goes or does, Shift+Enter only goes, Escape closes, and so
  * does the key that opened it, but for a Mac's Ctrl+K in the field, which
@@ -188,7 +188,7 @@ const DICE: SearchRoute = Object.freeze({ panel: "dice" });
 const DICE_FIELD: SearchRoute = Object.freeze({ panel: "dice", anchor: "dice.formula" });
 
 /**
- * A pick's step (search.md 5.5): a verb does it, a noun goes to it, and
+ * A pick's step (design-v1-qol.md 5, Acting): a verb does it, a noun goes to it, and
  * Shift+Enter only goes. An action's route keeps its press only on Enter.
  * A menu item runs the item's own function, and goes to its twin in a
  * panel on Shift+Enter. A token is selected and framed, or its panel
@@ -279,7 +279,7 @@ export type LoadRows = {
 };
 
 /**
- * What the list says about its parts (search.md 5.8): the DM's results
+ * What the list says about its parts (design-v1-qol.md 5, Loading): the DM's results
  * while their chunk loads, the monsters while theirs does once something is
  * typed, which is where they show, and one line for any part that failed.
  */
@@ -299,7 +299,7 @@ export function loadRows(dm: DmCatalogState, monsters: MonstersPart, typed: bool
 type Asked = { id: string; warning: string; anyway: string };
 
 /**
- * A menu item's row as the menu draws the item (search.md 5.5,
+ * A menu item's row as the menu draws the item (design-v1-qol.md 5, Acting,
  * chipMenus.ts asDrawn). Asked, its title is the item's confirm with the
  * warning under it. Refused, why is under it. Busy, its busy words. Null for
  * a row that is no menu item.
@@ -350,7 +350,7 @@ export type SearchHostProps = {
 /**
  * The search while it is open, in the Room page. Focus goes back to what
  * had it as the search opened, or where that has gone, such as the Panels
- * list's field, to the map's focus target (search.md 6).
+ * list's field, to the map's focus target (design-v1-qol.md 5, Opening).
  */
 export function SearchSheetHost(props: SearchHostProps) {
   const scope = useRoomScope();
@@ -399,7 +399,7 @@ type BodyProps = SearchHostProps & { role: "dm" | "player"; opener: RefObject<HT
  * to Pat"), with the library's handout images once `probe` has listed
  * them, as the menu lists them, so an image deleted since leaves both
  * alike. What gave way from the bar is left out: Time and Sound are panels
- * of their own (search.md 4). Kept as one value while what it holds
+ * of their own (design-v1-qol.md 5, What it finds). Kept as one value while what it holds
  * stands, so the index is built again as the room changes, never on each
  * key.
  */
@@ -441,9 +441,10 @@ function useDmCatalog(role: "dm" | "player"): DmCatalogState {
 }
 
 /**
- * The index the sheet lists (search.md 5.10), built again as the view, the
- * scene in view or the selection changes, and as the DM menu's view does,
- * which `dmMenu` carries for a DM's search, never on each key.
+ * The index the sheet lists (design-v1-qol.md 5, What keeps it current),
+ * built again as the view, the scene in view or the selection changes, and as
+ * the DM menu's view does, which `dmMenu` carries for a DM's search, never on
+ * each key.
  */
 export function useSheetIndex(input: Omit<IndexInput, "state" | "dmMenu"> & { dmMenu?: DmMenuView | undefined }): SearchIndex {
   const store = useRoomStore();
@@ -481,7 +482,7 @@ function SearchDialog(props: BodyProps & { items: readonly ChipItem[]; env: Chip
   const keyboard = useKeyboardView();
   const sheet = useLayoutSize().width < SHEET_MAX;
 
-  // The index, built again as the view, the scene or the selection changes (search.md 5.10).
+  // The index, built again as the view, the scene or the selection changes (design-v1-qol.md 5, What keeps it current).
   const you = useRoomView((s) => s.you);
   const roomId = useRoomView((s) => s.roomId);
   const dm = useDmCatalog(role);
@@ -514,7 +515,7 @@ function SearchDialog(props: BodyProps & { items: readonly ChipItem[]; env: Chip
   const words = useMemo(() => parseQuery(text).words, [text]);
   const load = loadRows(dm, monsters, typed);
 
-  // A menu item's asking, its answers and its wait, kept while the search is open (search.md 5.5).
+  // A menu item's asking, its answers and its wait, kept while the search is open (design-v1-qol.md 5, Acting).
   const [asked, setAsked] = useState<Asked | null>(null);
   const [said, setSaid] = useState<ReadonlyMap<string, string>>(new Map());
   // The item refused last, so its refusal is still said once its row has gone (strandedRefusal).
@@ -621,7 +622,7 @@ function SearchDialog(props: BodyProps & { items: readonly ChipItem[]; env: Chip
         close();
         return;
       case "fill":
-        // The field takes it as the panel draws, then the route lands focus there (search.md 5.5: "puts it in the Dice field without rolling").
+        // The field takes it as the panel draws, then the route lands focus there (design-v1-qol.md 5, Acting: a dice formula's Shift+Enter "puts it in the Dice field").
         fillDiceField(scope, step.formula);
         openAt(scope, ui, DICE_FIELD);
         close();
@@ -847,7 +848,7 @@ export function listGroups(results: SearchResults): { key: string; label: string
 }
 
 /**
- * The list and what it says under its rows (search.md 5.2 and 5.8): the
+ * The list and what it says under its rows (design-v1-qol.md 5, The results and Loading): the
  * listbox, "No match", the muted rows of what is still loading, after the
  * shared delay, and the line of a part that failed with its way out.
  */
@@ -952,7 +953,7 @@ function Hint(props: { keys: readonly string[]; children: ReactNode }) {
   );
 }
 
-/** One result (search.md 5.2): its kind's icon, the title with the typed starts in bold and a mark, the second line, the key that does the same, and a menu item's line under. */
+/** One result (design-v1-qol.md 5, The results): its kind's icon, the title with the typed starts in bold and a mark, the second line, the key that does the same, and a menu item's line under. */
 export function ResultRow(props: { id: string; at: number; entry: SearchEntry; title: string; under?: ChipUnder | undefined; active: boolean; words: readonly string[]; onHover(): void; onPick(): void }) {
   const { entry } = props;
   const line: CSSProperties = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
@@ -1029,7 +1030,7 @@ function useOpenSearch(): (before?: () => void) => void {
 }
 
 /**
- * The top bar's Search (search.md 5.1, plan.md 4): a field-like button with
+ * The top bar's Search (design-v1-qol.md 4, The give-way and 5, Opening): a field-like button with
  * the magnifier, "Search" and its key, or the 44 px magnifier the give-way
  * leaves (pages/topBarFit.ts). Its tooltip and `aria-keyshortcuts` take the
  * key from the shortcut table, so a touch screen with no keyboard names
@@ -1082,7 +1083,7 @@ export function SearchButton(props: { form: "field" | "icon" }) {
 }
 
 /**
- * The field atop a phone's Panels list (search.md 5.1, P1), always there:
+ * The field atop a phone's Panels list (design-v1-qol.md 5, Opening, P1), always there:
  * a tap closes the list and opens the search with the keyboard up. It is a
  * button that looks like a field, so the list itself never raises a
  * keyboard.

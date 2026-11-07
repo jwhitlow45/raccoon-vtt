@@ -15,10 +15,11 @@ const ui = await import("../features/tokens/ui.tsx");
 const { ConfirmAction } = await import("../features/dm/controls.tsx");
 
 /*
- * The room search's anchors (designs/qol/search.md 5.10): each control of
- * the kit takes an optional `search` id and draws it as `data-search` on
- * the element the route lands on (features/search/route.ts landOn), never
- * as an attribute of its own, and draws none without it.
+ * The room search's anchors (docs/design/design-v1-qol.md 5, What keeps it
+ * current): each control of the kit takes an optional `search` id and draws
+ * it as `data-search` on the element the route lands on
+ * (features/search/route.ts landOn), never as an attribute of its own, and
+ * draws none without it.
  */
 
 const ID = "menu.test.control";

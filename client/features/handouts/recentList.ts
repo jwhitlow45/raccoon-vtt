@@ -5,7 +5,7 @@ import { audienceText } from "./handouts.ts";
 import type { RecentHandout, RecentPick, RecentRoom, RecentShow } from "./recent.ts";
 
 /*
- * Handouts' Recent list (designs/qol audit Q11, plan 9) over Q0's recent.ts:
+ * Handouts' Recent list (docs/design/design-v1-qol.md 3, Q11) over Q0's recent.ts:
  * what it reads of the room, and each row's words. Plain functions, for
  * node --test.
  */

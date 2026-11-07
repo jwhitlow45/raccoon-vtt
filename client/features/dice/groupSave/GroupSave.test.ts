@@ -571,7 +571,7 @@ function withStorage<T>(items: Map<string, string>, run: () => T): T {
   }
 }
 
-describe("one press for the saves and the damage (designs/qol audit Q8)", () => {
+describe("one press for the saves and the damage (docs/design/design-v1-qol.md 3, Q8)", () => {
   const ready = (damage: string): Page => ({ ...PAGE, secret: false, source: { kind: "selection", tokenIds: ["g1"] }, outcome: { ...PAGE.outcome, damage }, states: { "token:g1": { way: "server", typedBonus: 4 } } });
 
   test("with dice in the Damage field the button reads so, and one press rolls the saves, then the damage", () => {
@@ -611,7 +611,7 @@ describe("one press for the saves and the damage (designs/qol audit Q8)", () => 
   });
 });
 
-describe("recent DCs in the group save (designs/qol audit Q9)", () => {
+describe("recent DCs in the group save (docs/design/design-v1-qol.md 3, Q9)", () => {
   test("a save's DC field offers the DCs this device sent last, and a tap sets or clears the DC", () => {
     const items = new Map([["rvtt.saveDcs.r1", JSON.stringify([15, 13])]]);
     const markup = withStorage(items, () => drawPage({ ...PAGE, dc: 15 }));

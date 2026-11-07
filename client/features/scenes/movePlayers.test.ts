@@ -7,7 +7,7 @@ import { scene as sceneOf } from "#shared/testutil.ts";
 import type { OnAnswer, OpRefusal } from "../../state/types.ts";
 import { moveQuestion, movePlayers, movingPlayersTo, type MoveAnswer, type MoveRoom } from "./movePlayers.ts";
 
-/** The one move helper behind the Scenes list's Move players and the DM menu's moves (designs/qol plan 3, chips.md 4.1). */
+/** The one move helper behind the Scenes list's Move players and the DM menu's moves (docs/design/design-v1-qol.md 4, C2's move and 6). */
 
 const sounds: Record<string, Sound> = { m1: { id: "m1", rev: 0, name: "Harbor", assetId: "file-m1", ms: 60_000, use: "music" } };
 const playlists: Record<string, Playlist> = { night: { id: "night", rev: 0, name: "Night", sounds: ["m1"], repeat: "all", fade: 5 } };

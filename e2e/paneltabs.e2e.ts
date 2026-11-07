@@ -244,7 +244,7 @@ async function oneLine(page: Page): Promise<{ tops: number; scrolls: boolean }> 
 
 /**
  * This device's "Panels that may be tabs" in the side panel's Menu, with
- * its Tab row group open (designs/qol audit Q10). Only a wide layout draws
+ * its Tab row group open (docs/design/design-v1-qol.md 3, Q10). Only a wide layout draws
  * the group.
  */
 async function tabRowTicks(page: Page): Promise<Locator> {

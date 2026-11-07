@@ -297,7 +297,7 @@ describe("a tap again in the isometric view (docs/design/design-v1-isometric-vie
 });
 
 
-describe("all of a kind (designs/qol audit Q7)", () => {
+describe("all of a kind (docs/design/design-v1-qol.md 3, Q7)", () => {
   const goblin = (id: string, number: number | undefined, over: Partial<KindToken> = {}, actor: Record<string, unknown> = { srdId: "goblin-warrior" }): KindToken =>
     ({ id, sceneId: "s1", kind: "monster", name: "Goblin Warrior", number, actor: { inline: actor }, ...over }) as KindToken;
   const room = [

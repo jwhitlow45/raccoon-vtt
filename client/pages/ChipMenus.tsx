@@ -52,9 +52,9 @@ import { CHIP_WORDS, youChipName } from "./chipWords.ts";
 import { memberDotStyle } from "./onBoard.ts";
 
 /*
- * The top bar's chips that open something (designs/qol/chips.md C1, C2,
- * C4, C5, C7): the DM chip and its DM menu, Players see black and its
- * Blackout menu, the DM's clock chip and its steps, a player's chip and
+ * The top bar's chips that open something (docs/design/design-v1-qol.md 4,
+ * C1, C2, C4, C5 and C7): the DM chip and its DM menu, Players see black and
+ * its Blackout menu, the DM's clock chip and its steps, a player's chip and
  * its You menu, and the dialogs their items open. The menus' contents and
  * what each item does are chipMenus.ts's. This file draws them, keeps a
  * menu's asking and answers, and opens what an item opens.
@@ -69,11 +69,11 @@ function viewportBound(): Rect {
 }
 
 /**
- * A chip that opens a menu or a popover (chips.md 6, D-261106-129): the
+ * A chip that opens a menu or a popover (design-v1-qol.md 4, The chips' look, D-261106-129): the
  * 28 px pill in a 44 px tall target, its words, then a caret that says it
  * opens. The round forms, a member's dot or the crossed eye, stand where
  * the bar is shortest, so their caret is smaller and tighter: 32 px
- * against the plain dot's 28, as chips.md 5 measured. Where its words are
+ * against the plain dot's 28, as design-v1-qol.md 4, The chips' look, has it. Where its words are
  * cut, `tip` shows on hover and keyboard focus (useTooltip).
  */
 export function ChipButton(props: {
@@ -241,7 +241,7 @@ export function ChipDialogs(props: { openTime(): void }) {
   return <NowPlayerDialog opener={opener} onClose={close} />;
 }
 
-/** A player's X-card from their You menu: the Menu panel's small card, in a sheet of its own (chips.md C7). */
+/** A player's X-card from their You menu: the Menu panel's small card, in a sheet of its own (design-v1-qol.md 4, C7). */
 function XCardSheet(props: { opener: RefObject<HTMLElement | null>; onClose(): void }) {
   const words = useRef<HTMLParagraphElement>(null);
   // The card's words take focus as it opens, never the X, as in the Menu panel, so a second Enter reads what the X does.
@@ -257,7 +257,7 @@ function XCardSheet(props: { opener: RefObject<HTMLElement | null>; onClose(): v
 type DialogViewing = { kind: "doc"; id: string; opener: HTMLElement | null } | { kind: "image"; asset: AssetRow; title: string; opener: HTMLElement | null };
 
 /**
- * Show a handout… from the DM menu (chips.md C4, D-261106-176): the
+ * Show a handout… from the DM menu (design-v1-qol.md 4, C4, D-261106-176): the
  * Handouts panel's own form in a dialog, a card on a computer and a sheet
  * on a phone, sharing its draft, with the library listed at once and a
  * PDF's upload block above it.
@@ -313,7 +313,7 @@ function dateLine(t: number, calendar: Parameters<typeof chipName>[1]): string {
 }
 
 /**
- * The clock's quick steps (chips.md C5): the date line, the four steps two
+ * The clock's quick steps (design-v1-qol.md 4, C5): the date line, the four steps two
  * by two, and Open Time for the rest. In the DM clock chip's popover, and
  * in a sheet from the DM menu's Time while the chip gave way.
  */
@@ -342,7 +342,7 @@ function useRaise(open: boolean, onOpen: ((open: boolean) => void) | undefined):
 }
 
 /**
- * The DM's clock chip from 900 px up (chips.md C5, D-261106-126): its
+ * The DM's clock chip from 900 px up (design-v1-qol.md 4, C5, D-261106-126): its
  * words and a caret, opening the quick steps under it, which stay open
  * for a second step, so moving the clock no longer swaps the side panel's
  * tab. Open Time opens the Time panel. A player's clock chip still opens
@@ -375,7 +375,7 @@ export function DmClockChip(props: { onOpenTime(): void; onOpen?(open: boolean):
 // ---------------------------------------------------------------- a menu's asking and answers
 
 /**
- * What an open chip menu keeps of its items (chips.md 4.1, D-261106-136):
+ * What an open chip menu keeps of its items (design-v1-qol.md 4, C2's move, D-261106-136):
  * an item that asked first, armed as its anyway item; the words of a
  * refusal said in place; and the item focus moves to. Kept by the chip,
  * not the menu, since an answer may come after the menu closed, and
@@ -604,7 +604,7 @@ function DmMenuBody(props: { host: ChipHost; anchor: () => HTMLElement | null; t
 }
 
 /**
- * The DM chip (chips.md C1, 6 and 7): the member dot, "DM" and a caret,
+ * The DM chip (design-v1-qol.md 4, C1, The chips' look and Words): the member dot, "DM" and a caret,
  * opening the DM menu under it, on a computer and a phone alike
  * (D-261106-120, D-261106-176). Where the bar is short it is its dot, and
  * during a blackout there the crossed eye, whose menu leads with the
@@ -641,7 +641,7 @@ export function DmChip(props: { dot: boolean; eye: boolean; eyeSlim?: boolean; t
 }
 
 /**
- * Players see black (chips.md C2, D-261106-122): its words and a caret,
+ * Players see black (design-v1-qol.md 4, C2, D-261106-122): its words and a caret,
  * opening the Blackout menu: End the blackout, and while the DM looks at
  * another scene, Show players <scene>. It stays while a reveal is out
  * (useBlackoutShown). When it goes with the blackout, focus goes to the
@@ -677,7 +677,7 @@ function YouMenuBody(props: { host: ChipHost; anchor: () => HTMLElement | null }
 }
 
 /**
- * A player's chip (chips.md C7, D-261106-130): their dot, their name and a
+ * A player's chip (design-v1-qol.md 4, C7, D-261106-130): their dot, their name and a
  * caret, or only the dot where the bar is short, opening the You menu:
  * each of their characters' sheets and the X-card. In View as a player it
  * is that player's, from the preview's projection, its X-card off

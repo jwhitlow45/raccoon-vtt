@@ -72,7 +72,7 @@ export function XCardButton() {
 /**
  * The small card: what the X does, the large X that sends it, and
  * Cancel. The Menu panel opens it in place of its button, and a player's
- * You menu in a sheet of its own (designs/qol/chips.md C7). `words` takes
+ * You menu in a sheet of its own (docs/design/design-v1-qol.md 4, C7). `words` takes
  * focus as it opens, never the X. `framed` draws its own outline and its
  * Cancel, which a sheet gives it already with its frame and its Close. A
  * send that went out calls `onSent`, then `closeSheet`, so the sender sees

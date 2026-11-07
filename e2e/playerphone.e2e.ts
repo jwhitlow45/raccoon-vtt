@@ -79,7 +79,7 @@ const run = {
   patId: "",
 };
 
-/** Pat's second character, for Find my token's second press (designs/qol audit Q5). */
+/** Pat's second character, for Find my token's second press (docs/design/design-v1-qol.md 3, Q5). */
 const qe = { wren: { id: randomUUID(), characterId: randomUUID() } };
 
 /** How many turn ops Pat's page has sent: End turn sends the tracker's Next. */

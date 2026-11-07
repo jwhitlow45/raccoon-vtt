@@ -261,7 +261,7 @@ describe("changing, swapping and resetting a key", () => {
   });
 });
 
-describe("the digits that start an HP change (designs/qol audit Q3, D-261106-179)", () => {
+describe("the digits that start an HP change (docs/design/design-v1-qol.md 3, Q3, D-261106-179)", () => {
   test("1 to 9 by default, and 0, + and - never, which fit and zoom the map", () => {
     assert.deepEqual(hpDigits(DEFAULT_KEYS), ["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
     assert.deepEqual(digitHolders(DEFAULT_KEYS), []);

@@ -326,7 +326,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
   const undoIds = barTokenIds(tokens, token);
   const yourTurn = useYourTurn();
   const endTurn = useEndTurn();
-  // The DM's "All 4 Goblin Warriors" (designs/qol audit Q7): every token of this one's kind on its scene, hidden ones too.
+  // The DM's "All 4 Goblin Warriors" (docs/design/design-v1-qol.md 3, Q7): every token of this one's kind on its scene, hidden ones too.
   const kin = useMemo(() => (access.dm && tokens ? sameKind(Object.values(tokens), token) : []), [access.dm, tokens, token]);
   // Its combat uses (docs/design/design-v1-combat-controls.md 6), for the DM on any creature with one and for owners on theirs.
   const usesPresence = useUsesPresence(access.dm || access.owner ? target : null);
@@ -345,7 +345,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; drags: boo
     placeFreely: props.drags && scene !== undefined && !isHex(sceneGrid(scene)),
     snapToGrid: token.nudge !== undefined && (access.dm || (access.owner && !token.locked)),
     allOfKind: kin.length > 1,
-    // On an upright phone only, where the strip's End turn is out of the thumb's reach (designs/qol audit Q6). Kept while it waits, so a press shows busy to its answer.
+    // On an upright phone only, where the strip's End turn is out of the thumb's reach (docs/design/design-v1-qol.md 3, Q6). Kept while it waits, so a press shows busy to its answer.
     endTurn: rest !== null && (yourTurn || endTurn.waiting),
   };
   const rows = barButtons(buttonInput);
@@ -890,7 +890,7 @@ function useYourTurn(): boolean {
 }
 
 /**
- * The group bar's Save (designs/qol audit Q8, plan 9 QD-OPUS-27): the group
+ * The group bar's Save (docs/design/design-v1-qol.md 3, Q8, QD-OPUS-27): the group
  * save page for the selection, as the Dice panel's "Set up a group save"
  * opens it, with its own ability picker, its rows following the selection
  * until the roll. A page that already holds rolls asks first, here where
@@ -1933,7 +1933,7 @@ function BarFrame(props: {
 }
 
 /**
- * The bar's HP field for the keys 1 to 9 (designs/qol audit Q3): the
+ * The bar's HP field for the keys 1 to 9 (docs/design/design-v1-qol.md 3, Q3): the
  * entry's field (`data-rest-field`, the one input every HP entry marks),
  * while the frame shows unfolded and the field is drawn.
  */
@@ -1961,16 +1961,16 @@ function useHpDigits(barRef: RefObject<HTMLDivElement | null>, folded: boolean):
 }
 
 /**
- * A digit pressed outside any field starts the bar's HP change (designs/qol
- * audit Q3, plan 9 QD-OPUS-26). The field takes focus, its caret at the
- * end, and the press keeps its default, so the browser types the digit
- * there. A browser that types nothing into a field focused during the key's
- * own event gets the digit here once the event is done, by an input event
- * as typing sends one, so the entry's own state takes it and hpDraft is
+ * A digit pressed outside any field starts the bar's HP change
+ * (docs/design/design-v1-qol.md 3, Q3, QD-OPUS-26). The field takes focus,
+ * its caret at the end, and the press keeps its default, so the browser types
+ * the digit there. A browser that types nothing into a field focused during
+ * the key's own event gets the digit here once the event is done, by an input
+ * event as typing sends one, so the entry's own state takes it and hpDraft is
  * never touched. Enter then applies, and once the field has emptied, which
- * Apply taking the change does, focus goes back to where it was, so N, H
- * and the next digit work again. A refused change keeps its text and focus.
- * An entry started any other way keeps the field's Enter as it is.
+ * Apply taking the change does, focus goes back to where it was, so N, H and
+ * the next digit work again. A refused change keeps its text and focus. An
+ * entry started any other way keeps the field's Enter as it is.
  */
 function startHpEntry(field: HTMLInputElement, digit: string): void {
   const active = document.activeElement;
@@ -2136,7 +2136,7 @@ function QuickConditions(props: { lit(key: Effect["key"]): Lit; onToggle(key: Ef
     ref.current?.scrollIntoView({ block: "nearest" });
   }, []);
   /*
-   * The three this device used last first (designs/qol audit Q13), as they
+   * The three this device used last first (docs/design/design-v1-qol.md 3, Q13), as they
    * stood when the drawer opened: a row that reordered as a tile was
    * tapped would put another condition under the finger for the next tap.
    */
@@ -2147,7 +2147,7 @@ function QuickConditions(props: { lit(key: Effect["key"]): Lit; onToggle(key: Ef
     if (props.lit(key) !== "all" && !preview) noteConditionUsed(key);
     props.onToggle(key);
   };
-  // C asks for the first cell (designs/qol audit 11), as the drawer opens or while it is open already.
+  // C asks for the first cell (docs/design/design-v1-qol.md 7), as the drawer opens or while it is open already.
   const { focusFirst, onFocused } = props;
   useLayoutEffect(() => {
     if (!focusFirst) return;
@@ -2218,7 +2218,7 @@ function QuickConditions(props: { lit(key: Effect["key"]): Lit; onToggle(key: Ef
 type GridKeys = { focusFirst: boolean; onFocused(): void; onEscape(): void };
 
 /**
- * C opens the bar's Conditions (designs/qol audit Q13) while the bar
+ * C opens the bar's Conditions (docs/design/design-v1-qol.md 3, Q13) while the bar
  * offers them and is not folded. The latest `open` is read at the press,
  * so the key always acts on the drawer as it is then.
  */

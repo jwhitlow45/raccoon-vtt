@@ -204,7 +204,7 @@ export const met = { next: 0, ownEndTurn: 0 };
 export async function expectEndTurn(page: Page, label: string): Promise<void> {
   const endTurn = page.locator("header").getByRole("button", { name: "End turn", exact: true });
   if ((await endTurn.count()) > 0 && (await endTurn.isVisible())) await expectReach(label, "End turn", endTurn);
-  // On an upright phone the player's own bar holds End turn too, at its right end where the thumb just acted (designs/qol audit Q6).
+  // On an upright phone the player's own bar holds End turn too, at its right end where the thumb just acted (docs/design/design-v1-qol.md 3, Q6).
   const own = barFrame(page).getByRole("button", { name: /End turn$/ });
   if ((await own.count()) > 0 && (await own.first().isVisible())) {
     met.ownEndTurn += 1;
@@ -212,7 +212,7 @@ export async function expectEndTurn(page: Page, label: string): Promise<void> {
   }
 }
 
-/** The DM's Next at the turn chip's or the band's end, in a fight (designs/qol audit Q4, chips C3). The alerts over the screen are modal and may stand over it, as over End turn. */
+/** The DM's Next at the turn chip's or the band's end, in a fight (docs/design/design-v1-qol.md 3, Q4 and 4, C3). The alerts over the screen are modal and may stand over it, as over End turn. */
 export async function expectNext(page: Page, label: string): Promise<void> {
   if ((await alertsOverlay(page).count()) > 0) return;
   const next = page.locator("header").getByRole("button", { name: "Next turn", exact: true });

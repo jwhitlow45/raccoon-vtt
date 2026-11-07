@@ -4150,7 +4150,7 @@ export function helperTest(): void {
       await caught("kin-held-tall", "kind-height");
       await caught("kin-padding", "kind-padding");
       await caught("kin-gap", "kind-gap");
-      // An empty box that grows, as the top bar's gap before its right-hand controls (designs/qol plan.md 4), parts the controls either side of it. One of a fixed width does not.
+      // An empty box that grows, as the top bar's gap before its right-hand controls (docs/design/design-v1-qol.md 4, The top bar's order), parts the controls either side of it. One of a fixed width does not.
       await passes("kin-gap-spacer");
       await caught("kin-gap-fixed", "kind-gap");
       // A group's wider gap, marked by data-group-start as the side panel's tabs are, is held only to the other groups' gaps (docs/design/design-v1-panel-size.md 9). Unmarked, it is caught.
@@ -8271,7 +8271,7 @@ export function undoSaveAlignmentTests(names: readonly string[]): void {
           }
           const lifecycle = (check: string) => host.locator(`[data-save-lifecycle="${check}"]`);
           // Thorn has no stat block, so his save is asked of Pat, who answers by his op socket.
-          // The door's dice in Damage make one press of it ask and roll the damage too (designs/qol audit Q8).
+          // The door's dice in Damage make one press of it ask and roll the damage too (docs/design/design-v1-qol.md 3, Q8).
           await host.getByRole("button", { name: "Ask 1 player and roll damage", exact: true }).click();
           const first = await waitFor("the save asked of Pat", () => thornAsk([]));
 
@@ -9363,7 +9363,7 @@ export function musicPlayerAlignmentTests(): void {
           await ops.send({ t: "music.play", run: runId, playlistId: night.playlist, order: night.order, index: 2, repeat: "all", fade: 5 });
           for (const soundId of lib.loops) await ops.send({ t: "loop.start", id: randomUUID(), soundId, volume: 70 });
           await waitFor("music and two loops playing", () => (dmSocket.state?.playing?.music?.run === runId && Object.keys(dmSocket.state.playing.loops ?? {}).length === lib.loops.length ? true : null));
-          // At 100% the chip has room from 700 px and on an upright phone. At 130% a bar holding the room's fight may give it way into the DM menu, as at the smallest bars (SL-C, chips.md 5 step 6).
+          // At 100% the chip has room from 700 px and on an upright phone. At 130% a bar holding the room's fight may give it way into the DM menu, as at the smallest bars (SL-C, design-v1-qol.md 4, The give-way, step 6).
           const shown = await showsWithin(chip, 5_000);
           if (!shown && at.scale === 1 && (at.size.width >= 700 || at.size.width === 390)) sweep.lines.push(`${sweep.at} qe-now-chip: no Now playing chip while music plays`);
           if (shown) {
@@ -9414,12 +9414,12 @@ export function musicPlayerAlignmentTests(): void {
 }
 
 /*
- * The QOL pass's roots (designs/qol plan.md 4, chips.md 9 and 11, search.md
- * 6 and audit.md 12, as the lanes' reports name them): the top bar's chips
- * and the menus they open in each state, the search's sheet and its ways
- * in, the bar in a fight and at its most crowded, Pat's chip and bar, and
- * the controls the audit put where the DM already looks. The Now playing
- * chip's roots are qe-n, beside the music player's (musicPlayerAlignmentTests).
+ * The QOL pass's roots (docs/design/design-v1-qol.md 4, 7 and 8, as the lanes'
+ * reports name them): the top bar's chips and the menus they open in each
+ * state, the search's sheet and its ways in, the bar in a fight and at its most
+ * crowded, Pat's chip and bar, and the controls the audit put where the DM
+ * already looks. The Now playing chip's roots are qe-n, beside the music
+ * player's (musicPlayerAlignmentTests).
  */
 
 /** The top bar's own row. Where the turn strip stands as a band under it, the header holds both, so the row is measured apart from it. */
@@ -9530,7 +9530,7 @@ async function qolRestScreens(sweep: Sweep, page: Page, at: { size: Size; scale:
   await escapeAll(page);
   await sweep.measure(page, "qe-bar", barRow(page));
   await sweep.measure(page, "qe-chip-dm", barChip(page, "dm"));
-  // Search stands after the chips: its field, its icon where the row is short, and the Panels list's field once even that has no room (plan.md 4). It never leaves a bar 900 px wide, and an upright phone at 100% still has room for its icon (S3).
+  // Search stands after the chips: its field, its icon where the row is short, and the Panels list's field once even that has no room (design-v1-qol.md 4, The top bar's order). It never leaves a bar 900 px wide, and an upright phone at 100% still has room for its icon (S3).
   const search = page.locator('header[data-rvtt-topbar] [data-search-open="bar"]');
   const iconAt390 = at.size.width === 390 && at.scale === 1;
   if (await visible(search)) {
@@ -9577,7 +9577,7 @@ async function qolRestScreens(sweep: Sweep, page: Page, at: { size: Size; scale:
     }
   }
 
-  // The search, empty with Recent and Suggested, then with many rows (search.md 5.2).
+  // The search, empty with Recent and Suggested, then with many rows (design-v1-qol.md 5, The results).
   const sheet = await openSearch(page);
   if (sheet) {
     await sweep.measure(page, "qe-search-empty", dialogBox(sheet));
@@ -9587,7 +9587,7 @@ async function qolRestScreens(sweep: Sweep, page: Page, at: { size: Size; scale:
     await shutSearch(page);
   } else await sweep.missing(page, "qe-search-empty", "Ctrl+K opened no search");
 
-  // Below 900 px the Panels list holds the search's field atop its list (search.md 5.1).
+  // Below 900 px the Panels list holds the search's field atop its list (design-v1-qol.md 5, Opening).
   if (!wide) {
     await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
     const region = page.getByRole("region", { name: "Panels" });
@@ -9692,7 +9692,7 @@ async function qolElsewhereScreens(sweep: Sweep, page: Page, frames: SocketHold,
     else await sweep.missing(page, "qe-dm-menu-armed", "a move to a scene with fog off did not ask");
     await shutChipMenu(page, menu);
   }
-  // The same ask in the search's row: the first Enter arms it with the warning under it, and nothing is sent (search.md 5.5).
+  // The same ask in the search's row: the first Enter arms it with the warning under it, and nothing is sent (design-v1-qol.md 5, Acting).
   const sheet = await openSearch(page, "move players here");
   if (sheet) {
     const row = sheet.locator('[data-search-row="item:movePlayers"]');
@@ -9740,7 +9740,7 @@ async function qolFightScreens(sweep: Sweep, page: Page, at: { size: Size; scale
   if (await visible(band)) await sweep.measure(page, "qe-band", band);
   else {
     await sweep.measure(page, "qe-bar-fight", barRow(page));
-    // Four in the fight leave three next faces, which a 1440 px bar at 100% has room for (chips.md 5).
+    // Four in the fight leave three next faces, which a 1440 px bar at 100% has room for (design-v1-qol.md 4, The give-way).
     if (at.size.width === 1440 && at.scale === 1 && !(await visible(page.locator("header[data-rvtt-topbar] [data-turn-faces]")))) sweep.lines.push(`${sweep.at} qe-bar-fight: the turn chip shows no next faces at 1440 px`);
   }
   if (at.size.width < 900 && !(await visible(band))) sweep.lines.push(`${sweep.at} qe-band: a phone's fight has no band with Next`);
@@ -9839,7 +9839,7 @@ async function rowOverrun(row: Locator, scale: number): Promise<{ px: number; wh
   }, scale);
 }
 
-/** chips.md 5's worst case: 900 x 900 at 100% and 1170 x 900 at 130%, both a 540 layout px bar wide enough to keep the wide row. */
+/** design-v1-qol.md 4's worst case: 900 x 900 at 100% and 1170 x 900 at 130%, both a 540 layout px bar wide enough to keep the wide row. */
 const QOL_WORST: { size: Size; scale: number }[] = [
   { size: { name: "900x900", width: 900, height: 900, touch: false }, scale: 1 },
   { size: { name: "1170x900", width: 1170, height: 900, touch: false }, scale: 1.3 },
@@ -9945,7 +9945,7 @@ export function qolBarTests(): void {
     assert.deepEqual(lines, [], "Pat's bar, his menu or his token's bar out of line");
   });
 
-  test(`qe-e. the bar at its most crowded, chips.md 5's worst case at 900 x 900 and 1170 x 900 at 130%: for the DM a fight on the long-named boss's turn with its timer run over, a blackout, two map phases, the clock and music, and for Pat his own turn with its timer run over, within ${LIMIT_PX} px`, async () => {
+  test(`qe-e. the bar at its most crowded, design-v1-qol.md 4's worst case at 900 x 900 and 1170 x 900 at 130%: for the DM a fight on the long-named boss's turn with its timer run over, a blackout, two map phases, the clock and music, and for Pat his own turn with its timer run over, within ${LIMIT_PX} px`, async () => {
     const crypt = await cryptScene();
     const lib = await soundsReady();
     await freshDm();
@@ -9965,7 +9965,7 @@ export function qolBarTests(): void {
         await openAt(page, at.size, at.scale);
         await waitFor("the DM's snapshot", () => dmSocket.state);
         await dmOnScene(page, crypt);
-        // The timer runs over two seconds into the turn, and the bar steps again for its short form (chips.md 5 step 12).
+        // The timer runs over two seconds into the turn, and the bar steps again for its short form (design-v1-qol.md 4, The give-way, step 12).
         await page.locator('header[data-rvtt-topbar] [role="timer"]').filter({ hasText: /^\+/ }).first().waitFor({ timeout: 10_000 }).catch(() => {});
         await page.waitForTimeout(500);
         await sweep.measure(page, "qe-worst-dm", barRow(page));

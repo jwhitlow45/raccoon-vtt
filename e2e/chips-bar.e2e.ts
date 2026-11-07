@@ -10,12 +10,12 @@ import { ConsoleWatch, OpSocket, reopenRoom, Shots, SocketWatch, startServer, wa
 import { addSound } from "./soundRoom.ts";
 
 /**
- * The top bar's give-way and Next (designs/qol/chips.md 5 and 10, qc-11
- * and qc-14 to qc-16, plan.md 4 and 9), on the real server serving the
- * production build with ROOM_SOUND on. The room has the worst case's long
- * name, "The Sunless Citadel and the Gulthias Tree". Dana the DM is at a
- * desk. Pat plays Thorn on a touch screen whose size each step sets. The
- * fight is Belak the Outcast, Twig Blight Druid, Thorn and five goblins.
+ * The top bar's give-way and Next (docs/design/design-v1-qol.md 4 and 8,
+ * qc-11 and qc-14 to qc-16), on the real server serving the production build
+ * with ROOM_SOUND on. The room has the worst case's long name, "The Sunless
+ * Citadel and the Gulthias Tree". Dana the DM is at a desk. Pat plays Thorn
+ * on a touch screen whose size each step sets. The fight is Belak the
+ * Outcast, Twig Blight Druid, Thorn and five goblins.
  * - qcb-0: the room, Pat, the fight's tokens, a music track and two map
  *   pictures.
  * - qc-11: at 1440 the turn chip shows five next faces and Next, which
@@ -47,7 +47,7 @@ const shots = new Shots(SHOT_DIR === "0" ? null : SHOT_DIR);
 
 const DESK = { width: 1440, height: 900 };
 const PHONE = { width: 390, height: 844 };
-/** The worst case's two sizes (chips.md 5): each gives a 540 layout px bar beside the side panel. */
+/** The worst case's two sizes (design-v1-qol.md 4, The give-way): each gives a 540 layout px bar beside the side panel. */
 const WORST = [
   { size: { width: 900, height: 900 }, scale: 1, at: "900x900" },
   { size: { width: 1170, height: 900 }, scale: 1.3, at: "1170x900-130" },

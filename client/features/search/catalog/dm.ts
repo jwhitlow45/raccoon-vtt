@@ -16,7 +16,7 @@ import type { Catalog, CatalogEntry } from "./types.ts";
 import { onOff } from "./write.ts";
 
 /**
- * The DM's part of the search (designs/qol/search.md 5.8 and 5.9): the DM
+ * The DM's part of the search (docs/design/design-v1-qol.md 5, Loading and Players): the DM
  * panel, Room settings, the DM's part of Members, Scenes, Time, Sound,
  * Initiative, Characters' party rest, the token panel's DM fields, the DM's
  * panels' words and the adapter from the DM menu's items with their twins.
@@ -27,7 +27,7 @@ import { onOff } from "./write.ts";
  * of the feature files whose DM entries this gathers.
  */
 
-/** The DM menu's kinds the search finds. Time and Now playing stand in for the bar's chips that gave way, and the search reaches those as panels (search.md 4). */
+/** The DM menu's kinds the search finds. Time and Now playing stand in for the bar's chips that gave way, and the search reaches those as panels (design-v1-qol.md 5, What it finds). */
 export type SearchedItemKind = Exclude<DmItemKind, "time" | "nowPlaying">;
 
 export function searchedKind(kind: ChipItem["kind"]): kind is SearchedItemKind {
@@ -40,7 +40,7 @@ const handouts = (anchor: string): SearchRoute => ({ panel: "dm", section: "hand
 const sceneRow = (view: DmMenuView): SearchRoute => (view.viewing ? { panel: "scenes", page: recordPage("scene", view.viewing.id) } : { panel: "scenes" });
 
 /**
- * Each kind of item's twin (search.md 5.5): the panel control that does the
+ * Each kind of item's twin (design-v1-qol.md 5, Acting): the panel control that does the
  * same, which Shift+Enter goes to without pressing it. An item and its twin
  * are one row: the twin has no entry of its own (dm/search.ts). A kind
  * added to the menu without a twin here fails to typecheck, and
@@ -77,9 +77,10 @@ const ITEM_WORDS: Readonly<Record<SearchedItemKind, { icon: IconName; names?: re
 };
 
 /**
- * The DM menu's items as the search's rows (search.md 5.5 and 5.10): each
- * titled as the menu titles it, a recent showing with its audience ("Show
- * Belak's letter to Pat", plan.md 9), and running the item's own function,
+ * The DM menu's items as the search's rows (design-v1-qol.md 5, Acting and
+ * What keeps it current): each titled as the menu titles it, a recent showing
+ * with its audience ("Show
+ * Belak's letter to Pat", design-v1-qol.md 10, The catalogs), and running the item's own function,
  * found by its id in `dmMenuSections` when picked, so the menu and the
  * search send the same op.
  */

@@ -634,7 +634,7 @@ describe("the room clock's Time panel", () => {
       assert.ok(withClock.overflow <= 1 && without.overflow <= 1, `the row overflows: ${withClock.overflow} px with the clock, ${without.overflow} px without`);
       assert.equal(withClock.rest, without.rest, "the rest of the row reads as it does without a clock");
       assert.equal(withClock.chip, 0, "the long name leaves no room, and the chip is what leaves");
-      // Search's icon is the give-way's first step, before the clock's (designs/qol/plan.md 4).
+      // Search's icon is the give-way's first step, before the clock's (docs/design/design-v1-qol.md 4, The give-way).
       assert.equal(withClock.search, "icon", "Search gave way to its icon first");
       await undoSetup(dm);
       await waitFor("the clock back", () => (dmSocket.state?.clock ? true : null));

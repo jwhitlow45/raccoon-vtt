@@ -411,7 +411,7 @@ function sentOps(wire: Wire, t: string): number {
 }
 
 /**
- * The QOL steps' room (designs/qol audit Q1, Q2 and Q12): a second DM
+ * The QOL steps' room (docs/design/design-v1-qol.md 3, Q1, Q2 and Q12): a second DM
  * computer whose socket is routed, a Goblin Warrior with its stat block
  * beside Bree, a hidden Lurker beside the warrior, and later 90 kobolds,
  * so a fight of every creature here starts in more than one batch.

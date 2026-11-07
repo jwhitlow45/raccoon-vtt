@@ -93,7 +93,7 @@ export type MenuPickBy = "pointer" | "key";
 /**
  * What a pick answers: "stay" keeps the menu open for a pick whose result
  * shows in the menu itself, such as a move of the players that asks first
- * or waits on the server (designs/qol/chips.md 4.1, D-261106-136). Any
+ * or waits on the server (docs/design/design-v1-qol.md 4, C2's move, D-261106-136). Any
  * other answer closes it as ever, so a pick written to return whatever
  * its last call returned still closes.
  */
@@ -111,7 +111,7 @@ export function focusMove(before: string | null, now: string | null): string | n
  * The item a key opening focuses: by default the checked choice, else the
  * first (openingIndex). `atEdge`: the first item, or the last for Up,
  * for a menu of actions that holds a choice partway down, such as the DM
- * menu's Map phase (designs/qol/chips.md 9).
+ * menu's Map phase (docs/design/design-v1-qol.md 7).
  */
 export function openingAt(items: readonly MenuItem[], from: "first" | "last", opts: { atEdge?: boolean; skipDisabled?: boolean } = {}): number {
   if (!opts.atEdge) return openingIndex(items, from, opts.skipDisabled);
@@ -135,7 +135,7 @@ export function Menu(props: {
   /**
    * The item focus moves to once drawn, whenever this changes: a pick that
    * kept the menu open names the item that took the picked one's place,
-   * such as "Show players anyway" (designs/qol/chips.md 4.1).
+   * such as "Show players anyway" (docs/design/design-v1-qol.md 4, C2's move).
    */
   focus?: string | null;
   /** Tiles in rows, for Setup and Tools, where Right and Left move as Down and Up do. */

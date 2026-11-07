@@ -18,13 +18,13 @@ import { recentEntries } from "./recent.ts";
 import { ROW_WORDS, TOKEN_KIND_WORD } from "./words.ts";
 
 /**
- * The room search's index for one viewer (designs/qol/search.md 5.10),
+ * The room search's index for one viewer (docs/design/design-v1-qol.md 5, What keeps it current),
  * built from four sources: the panels the role is offered, its keys, the
  * catalogs it holds, and the room's own things read only from this
  * device's view. For a player that view is the projection the server sent
  * (shared/project.ts), so nothing hidden from them can be indexed, and the
  * kinds a player has no panel for (scenes, monsters, music) are not built
- * at all (search.md 5.9). It never reads notes, and a token is indexed by
+ * at all (design-v1-qol.md 5, Players). It never reads notes, and a token is indexed by
  * the name its view carries, so a hidden name's true one is never typed
  * into a match.
  */
@@ -40,7 +40,7 @@ export function recordPage(kind: "scene" | "srd" | "monster" | "playlist" | "tra
  * on a handout a player's Library shows, and Place on a monster's card.
  * Each is on the control of the record the route names alone
  * (music/Library.tsx, panels/LibraryPanel.tsx), and the anchor scan reads
- * this list with the catalogs' (search.md 5.10).
+ * this list with the catalogs' (design-v1-qol.md 5, What keeps it current).
  */
 export const PLAYLIST_ANCHOR = "sound.playlist";
 export const PLAY_PLAYLIST_ANCHOR = "sound.playlist.play";
@@ -50,7 +50,7 @@ export const PLACE_MONSTER_ANCHOR = "monsters.card.place";
 export const VIEW_ANCHORS: readonly string[] = [PLAYLIST_ANCHOR, PLAY_PLAYLIST_ANCHOR, TRACK_ANCHOR, OPEN_HANDOUT_ANCHOR, PLACE_MONSTER_ANCHOR];
 
 /**
- * The Suggested list's order on an empty field (search.md 5.2), lowest
+ * The Suggested list's order on an empty field (design-v1-qol.md 5, The results), lowest
  * first: in a fight Next turn, else Start a fight, then Show a handout…,
  * Black out players' screens, Long Rest for the party and Sound for a DM,
  * and a player's characters, Dice and the X-card. The index gives the

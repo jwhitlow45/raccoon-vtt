@@ -9,7 +9,7 @@ import { startEngine, type Engine, type Socket, type TestClient } from "./testin
 
 /**
  * The DM menu's Show players <scene> over the real socket and Postgres
- * (designs/qol plan 3, D-261106-172): the move, then the lift guarded by
+ * (docs/design/design-v1-qol.md 6, D-261106-172): the move, then the lift guarded by
  * the scene, under one undo group. No frame a player receives shows the
  * old scene lit, one Undo takes both back, and a move that lost to another
  * DM's or a scene deleted since leaves the blackout on.

@@ -13,7 +13,7 @@ const items = (entries: SearchEntry[]) => entries.map(indexed);
 const titles = (list: readonly Indexed[], text: string) => rank(list, parseQuery(text)).map((e) => e.title);
 const tierOf = (e: SearchEntry, text: string) => matchEntry(parseQuery(text), searchable(e))?.tier ?? null;
 
-describe("folding (search.md 5.3)", () => {
+describe("folding (design-v1-qol.md 5, Matching)", () => {
   test("drops case, accents and apostrophes, and turns punctuation to spaces", () => {
     assert.equal(fold("Players see the Party’s HP"), "players see the partys hp");
     assert.equal(fold("Café  Noël"), "cafe noel");
@@ -129,7 +129,7 @@ describe("matching a query", () => {
   });
 });
 
-describe("ranking (search.md 5.4)", () => {
+describe("ranking (design-v1-qol.md 5, Matching)", () => {
   test("tier, then nearness, then the kind's group, then cost, then the shorter title, then A to Z with numbers in order", () => {
     const list = items([
       entry("Goblin 10", { kind: "token" }),

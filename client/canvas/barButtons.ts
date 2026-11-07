@@ -62,7 +62,7 @@ export type BarButtonInput = {
   snapToGrid?: boolean;
   /** More than one token of this one's kind stands on its scene (state/selection.ts sameKind), for the DM's "All 4 Goblin Warriors". Left out, no. */
   allOfKind?: boolean;
-  /** An upright phone's bar, on the viewer's own turn or while their End turn waits, for a player's own token (designs/qol audit Q6). Left out, no. */
+  /** An upright phone's bar, on the viewer's own turn or while their End turn waits, for a player's own token (docs/design/design-v1-qol.md 3, Q6). Left out, no. */
   endTurn?: boolean;
 };
 
@@ -94,7 +94,7 @@ export function barButtons(input: BarButtonInput): { passing: BarButtonId[]; pla
   if (dm || owner) play.push("conditions");
   if (dm) play.push("hidden");
   play.push("multiSelect");
-  // The group it selects then has its own Conditions, Roll and Save, so it leads the second line (designs/qol audit Q7).
+  // The group it selects then has its own Conditions, Roll and Save, so it leads the second line (docs/design/design-v1-qol.md 3, Q7).
   if (dm && input.allOfKind) play.push("allOfKind");
   // After Multi-select: any earlier, Roll would push Multi-select to a second line at the default width.
   if (dm || owner) play.push("roll");
@@ -105,7 +105,7 @@ export function barButtons(input: BarButtonInput): { passing: BarButtonId[]; pla
   // Last, outside the strip (REST_PLAY) and the passing line, so nothing that shows there moves (docs/design/design-v1-snap-off.md 4).
   if (input.placeFreely) play.push("placeFreely");
   if (input.snapToGrid) play.push("snapToGrid");
-  // At the right end, where the thumb just acted, and after everything else, since it comes and goes with the turn (designs/qol audit Q6).
+  // At the right end, where the thumb just acted, and after everything else, since it comes and goes with the turn (docs/design/design-v1-qol.md 3, Q6).
   if (!dm && owner && input.endTurn) play.push("endTurn");
   const less: BarButtonId[] = [];
   if (dm) less.push("locked", "duplicate", "delete");
@@ -230,7 +230,7 @@ const REST_FIT: readonly string[] = ["mode", "endTurn", "crit", "conditions", "p
  * order, `gap` apart. One that does not fit is skipped, and a narrower
  * one after it may still fit. End turn, on a player's own turn, fits
  * right after the lead, since the strip is where their thumb is
- * (designs/qol audit Q6), and shows at the row's end. The lead always
+ * (docs/design/design-v1-qol.md 3, Q6), and shows at the row's end. The lead always
  * shows: it is the strip's
  * reason to be, and its field gives up room before it goes. A candidate
  * whose width is 0 draws nothing and is left out.
@@ -269,7 +269,7 @@ export function restFit(widths: Readonly<Record<string, number>>, room: number, 
   return restOrder(shown);
 }
 
-/** End turn's narrow form in the strip, its words on two lines (designs/qol audit Q6), offered beside its one-line form, at most one of them drawn. */
+/** End turn's narrow form in the strip, its words on two lines (docs/design/design-v1-qol.md 3, Q6), offered beside its one-line form, at most one of them drawn. */
 export const END_TURN_STACKED = "endTurnStacked";
 
 /** Drawn widths are fractions of a pixel, so a sum may land a hair over the room it fills exactly. */

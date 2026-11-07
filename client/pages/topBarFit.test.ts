@@ -5,7 +5,7 @@ import { STRIP_FACES_FEW, STRIP_NAME_MIN_PX, STRIP_NAME_PX, STRIP_NAME_YOURS_PX 
 import { fitKey, fitStep, sameRecord, shapeOf, stepsFor, WIDE_STEPS, type BarContent, type BarShape, type FitRecord } from "./topBarFit.ts";
 
 /*
- * The top bar's give-way (designs/qol chips.md C6 and 5, plan.md 4): after
+ * The top bar's give-way (docs/design/design-v1-qol.md 4, C6 and The give-way): after
  * any run of content changes and widths, the bar shows what a page opened
  * now shows for the same content and width. The row here is a model of
  * TopBar's flex row in whole layout px. Search and Now playing are
@@ -315,7 +315,7 @@ describe("the top bar's give-way (topBarFit)", () => {
     assert.equal(shapeOf({ ...base, phone: true, strip: "movable" }, "k", null).faces, STRIP_FACES_FEW, "a phone's bar shows three");
   });
 
-  test("the order is chips.md 5's, Search's step first, a player's Your turn last", () => {
+  test("the order is design-v1-qol.md 4's give-way, Search's step first, a player's Your turn last", () => {
     assert.deepEqual(WIDE_STEPS, [
       "searchIcon",
       "facesThree",

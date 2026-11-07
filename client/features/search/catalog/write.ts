@@ -4,7 +4,7 @@ import type { CatalogEntry } from "./types.ts";
 
 /*
  * How the catalogs write their sections, settings and actions
- * (designs/qol/search.md 5.10): each names the place it lives and its
+ * (docs/design/design-v1-qol.md 5, What keeps it current): each names the place it lives and its
  * anchor, the `data-search` id at its one `search=` prop, and the route
  * follows from them. An entry's id is its kind and its anchor, so it stays
  * the same in every index built for it and a recent pick finds it again.
@@ -58,7 +58,7 @@ export function action(place: Place, anchor: string, title: string, more: More &
   return write("action", place, anchor, title, rest, press);
 }
 
-/** A switch's value on its row (search.md 5.2). */
+/** A switch's value on its row (design-v1-qol.md 5, The results). */
 export function onOff(on: boolean): string {
   return on ? "On" : "Off";
 }

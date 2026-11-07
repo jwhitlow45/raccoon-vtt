@@ -517,7 +517,7 @@ describe("Time and Sound as panels", { concurrency: false }, () => {
     await stopClock();
     await startClock();
     await sideTab("Sound");
-    // From 900 px up the DM's chip opens the clock's steps, and their Open Time opens the panel (chips.md C5).
+    // From 900 px up the DM's chip opens the clock's steps, and their Open Time opens the panel (design-v1-qol.md 4, C5).
     await dm.getByRole("button", { name: /^Time: / }).click();
     await dm.getByRole("dialog", { name: "Time", exact: true }).getByRole("button", { name: "Open Time", exact: true }).click();
     const time = dm.getByRole("tabpanel", { name: sideTabName("Time") });

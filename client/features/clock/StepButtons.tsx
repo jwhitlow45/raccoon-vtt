@@ -95,7 +95,7 @@ export function StepButtons(props: { now: number }) {
  * The four steps, each one `clock.advance`: 10 minutes, 1 hour, 8 hours
  * and To dawn, for the grid that holds them. Time's panel lays them out
  * with Other amount… after them, and the DM's clock chip two by two in its
- * popover (designs/qol/chips.md C5), so both send the same steps.
+ * popover (docs/design/design-v1-qol.md 4, C5), so both send the same steps.
  */
 export function ClockSteps(props: { now: number }) {
   const actions = useRoomActions();

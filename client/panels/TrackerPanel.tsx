@@ -619,7 +619,7 @@ function useJoinBatches(candidates: Record<AddMode, Token[]>): { batches(tokens:
 
 /**
  * The ways to start a fight, and "Roll monsters' Initiative" under them
- * (designs/qol audit Q12): on, a start rolls the monsters once the server
+ * (docs/design/design-v1-qol.md 3, Q12): on, a start rolls the monsters once the server
  * takes it, and the pressed button reads "Rolling…" until then
  * (AutoInitiative.tsx useStartFight).
  */

@@ -314,7 +314,7 @@ describe("the shortcut table", () => {
     assert.equal(run(player.env, press({ key: "h", code: "KeyH" })), null);
   });
 
-  describe("1 to 9 start the bar's HP change (designs/qol audit Q3)", () => {
+  describe("1 to 9 start the bar's HP change (docs/design/design-v1-qol.md 3, Q3)", () => {
     /** The bar's HP field as the bar hands it to the keys, which records each digit it is asked to start with. */
     const withField = (scope: RoomScope, ready = true) => {
       const started: string[] = [];
@@ -405,7 +405,7 @@ describe("the shortcut table", () => {
     });
   });
 
-  test("C opens the bar's Conditions for the DM and players, only while the bar offers them (designs/qol audit Q13)", () => {
+  test("C opens the bar's Conditions for the DM and players, only while the bar offers them (docs/design/design-v1-qol.md 3, Q13)", () => {
     for (const role of ["dm", "player"] as const) {
       const { env: e, scope } = env({ role, selected: [role === "dm" ? "t1" : "t2"] });
       assert.equal(run(e, press({ key: "c", code: "KeyC" })), null, `${role}: no bar, or none with Conditions`);
@@ -1490,7 +1490,7 @@ test("focused setup keys preserve native editing, repeated keys, and other dialo
   for (const no of [{ focused: false }, { dm: false }, { preview: true }, { confirming: true }]) assert.equal(setupHistoryShortcut(key, { ...yes, ...no }), null);
 });
 
-describe("the room search's key (designs/qol/search.md 5.6, D-261106-141)", () => {
+describe("the room search's key (docs/design/design-v1-qol.md 5, Keys, D-261106-141)", () => {
   const scope = new RoomScope();
   const env = (role: "dm" | "player" = "dm"): ShortcutEnv => ({
     role,

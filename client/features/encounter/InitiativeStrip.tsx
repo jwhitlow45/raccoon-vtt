@@ -132,10 +132,11 @@ export function InitiativeStrip(props: { placement: TurnPlacement; notice: boole
 }
 
 /**
- * What the top bar's give-way leaves the turn chip (designs/qol chips.md
- * 5): how many next faces (steps 1 and 9), its name's cap, 0 once the name
- * has left (step 11), an overrun timer's short form (step 12), and a
- * player's inline "Your turn", which drops last (plan.md 9, QD-OPUS-30).
+ * What the top bar's give-way leaves the turn chip
+ * (docs/design/design-v1-qol.md 4, The give-way): how many next faces (steps
+ * 1 and 9), its name's cap, 0 once the name has left (step 11), an overrun
+ * timer's short form (step 12), and a
+ * player's inline "Your turn", which drops last (design-v1-qol.md 4, The give-way, QD-OPUS-30).
  */
 export type StripFit = { faces: number; nameCap: number | null; timerShort: boolean; yourTurn: boolean };
 
@@ -218,7 +219,7 @@ function Strip(props: { notice: boolean; stripRef?: Ref<HTMLDivElement>; fit: St
   const { name, line } = whoseTurn({ dm, started, activeName: current ? entryName(facts.view, current) : null, yours });
   const timed = timer && current ? timer : null;
   useReportTurn(props.onTurn, { dm, round, current: current?.id ?? null, name, yours, endTurn: !dm && (yours || waiting), notice: props.notice, timer: timed, next });
-  // Where the bar's give-way cut the name or took it, the whole name shows on hover and keyboard focus (chips.md 5, step 11). The tracker button's own name keeps it for a reader.
+  // Where the bar's give-way cut the name or took it, the whole name shows on hover and keyboard focus (design-v1-qol.md 4, The give-way, step 11). The tracker button's own name keeps it for a reader.
   const cut = props.fit.nameCap !== null;
   const tip = useTooltip(name);
   if (round === null) return null;
@@ -274,7 +275,7 @@ function Strip(props: { notice: boolean; stripRef?: Ref<HTMLDivElement>; fit: St
         )}
         {yours ? <YourTurn notice={props.notice} fontSize={theme.font.small} inline slot={turnSlot} unseen={!props.fit.yourTurn} /> : null}
         {timed ? <TimerClock state={timed} short={props.fit.timerShort} /> : null}
-        {/* One unpainted group: the row's parts beside the 26 px acting face are this group and its 22 px faces, not five smaller faces, so the row's heights agree (chips.md 5). */}
+        {/* One unpainted group: the row's parts beside the 26 px acting face are this group and its 22 px faces, not five smaller faces, so the row's heights agree (design-v1-qol.md 4, The worst case). */}
         {faces.length > 0 ? (
           <span data-turn-faces="" style={{ flex: "none", display: "flex", alignItems: "center", gap: theme.space(1.5) }}>
             {faces.map((entry) => (
@@ -466,11 +467,11 @@ export function trackerTargetLook(reach: number): { attrs: Record<string, string
  * where it keeps its padding. Under the name in the band, the pill reaches
  * past the text instead, so the words line up with the name.
  *
- * `unseen` is the top bar's last step on a cramped player's bar (designs/qol
- * plan.md 9, QD-OPUS-30): the words leave the chip while End turn shows,
- * and the flare's live region stays, visually hidden, so the turn is still
- * announced. It is the same element either way, so a step taken while it
- * flares never mounts it again.
+ * `unseen` is the top bar's last step on a cramped player's bar
+ * (docs/design/design-v1-qol.md 4, The give-way, QD-OPUS-30): the words leave
+ * the chip while End turn shows, and the flare's live region stays, visually
+ * hidden, so the turn is still announced. It is the same element either way,
+ * so a step taken while it flares never mounts it again.
  */
 const PILL_PAD = 6;
 
@@ -1470,7 +1471,7 @@ function useTurnNotice(enabled: boolean): boolean {
 }
 
 /**
- * End turn's wait, one for the Room (designs/qol plan 9, QD-OPUS-25): the
+ * End turn's wait, one for the Room (docs/design/design-v1-qol.md 6, QD-OPUS-25): the
  * number of the End turn this page sent that the server has not answered.
  * The strip's button and the one on a phone's own token bar share it, so
  * a press on either shows both busy and neither sends a second Next.

@@ -262,7 +262,7 @@ function useDeleteHandOff(root: RefObject<HTMLDivElement | null>, mine: readonly
 function PartyLongRest(props: { characters: Character[] }) {
   const actions = useRoomActions();
   const [asking, setAsking] = useState(false);
-  // The press takes its own button away, so focus goes to the card's Finish, as the room search's case has it (designs/qol search.md 7), never to the page.
+  // The press takes its own button away, so focus goes to the card's Finish, as the room search's case has it (docs/design/design-v1-qol.md 8), never to the page.
   const finish = useRef<HTMLButtonElement>(null);
   useLayoutEffect(() => {
     if (asking) finish.current?.focus();

@@ -238,7 +238,7 @@ const UNDER_NAME = { display: "block", width: 0, minWidth: "100%" } as const;
 /** Every condition and status as an icon tile. A tap opens its rules text and the form to add it. */
 export function EffectPicker(props: { present: Effect[]; onPick(key: EffectKey): void }) {
   const has = new Set(props.present.map((e) => e.key));
-  // The three this device used last, as they stood when the picker opened, so nothing moves under a tap (designs/qol audit Q13).
+  // The three this device used last, as they stood when the picker opened, so nothing moves under a tap (docs/design/design-v1-qol.md 3, Q13).
   const [recent] = useState(() => recentConditions());
   // A raw button, so it reads the held group itself: the fieldset stops it but cannot draw it off.
   const off = useHeld();

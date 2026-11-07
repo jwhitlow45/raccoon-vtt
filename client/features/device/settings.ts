@@ -487,7 +487,7 @@ function followPanelWidth(): void {
 // ---------------------------------------------------------------- tab row
 
 /**
- * "Tab row" (designs/qol audit Q10, D-261106-178): the panels this device
+ * "Tab row" (docs/design/design-v1-qol.md 3, Q10, D-261106-178): the panels this device
  * keeps out of the side panel's row of tabs, by role, so More always holds
  * them. Every panel starts in the row, and a panel added later does too,
  * since only the ones left out are stored. Nothing counts use: only these

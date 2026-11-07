@@ -61,7 +61,7 @@ function room(panels: readonly string[] = ["token", "tracker", "dice", "scenes",
   return { scope, ui, asks, opens, go: (route: SearchRoute, how?: PanelHow) => openAt(scope, ui, route, how) };
 }
 
-describe("openAt opens a panel at its page (search.md 5.5)", () => {
+describe("openAt opens a panel at its page (design-v1-qol.md 5, The route)", () => {
   test("a panel opens, and its request is published and asked of Room with the next seq", () => {
     const r = room();
     assert.equal(r.go({ panel: "tracker" }), true);
@@ -165,7 +165,7 @@ describe("openAt opens a panel at its page (search.md 5.5)", () => {
   });
 });
 
-describe("a section in a closed fold opens for now, never written (search.md 5.5)", () => {
+describe("a section in a closed fold opens for now, never written (design-v1-qol.md 5, The route)", () => {
   test("lib/folds.ts's surfaces: the DM panel, Scenes, Sound and This device in Menu", () => {
     const r = room();
     const dm = r.scope.get(dmPanelFoldsSlot);
@@ -441,7 +441,7 @@ describe("where a route lands (Room's focus kind anchor)", () => {
   });
 });
 
-describe("the landing: focus, ring and press (search.md 5.5)", () => {
+describe("the landing: focus, ring and press (design-v1-qol.md 5, The route)", () => {
   test("a control takes focus, and a route that presses presses it once", () => {
     const button = fake({ self: true });
     assert.equal(landOn(button, false), button);

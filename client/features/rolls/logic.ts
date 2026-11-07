@@ -551,7 +551,7 @@ export function askSwitches(roomId: string): AskSwitches {
 
 /**
  * The DCs this device sent last for a save in a room, newest first, three
- * kept (designs/qol audit Q9). A save's DC is its effect's (SRD 5.2.1 page
+ * kept (docs/design/design-v1-qol.md 3, Q9). A save's DC is its effect's (SRD 5.2.1 page
  * 7), so no typical one fits, though a session asks the same few again. It
  * lives in this device's storage only, never in the room, and the request
  * sheet and the group save share it.

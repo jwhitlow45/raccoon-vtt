@@ -9,7 +9,7 @@ import { DM, P1, apply, env, refused, room, scene } from "../testutil.ts";
 import { PLAYERS_ELSEWHERE } from "./room.ts";
 
 /**
- * `view.blackout`'s guard (designs/qol plan 3, D-261106-172): the DM
+ * `view.blackout`'s guard (docs/design/design-v1-qol.md 6, D-261106-172): the DM
  * menu's Show players <scene> sends the move, then the lift naming that
  * scene, and the server lifts only while the players are there. A lift the
  * move lost to, or a scene gone since, leaves the blackout on.

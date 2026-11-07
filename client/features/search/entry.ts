@@ -1,7 +1,7 @@
 import type { IconName } from "../../components/Icon.tsx";
 
 /**
- * The room search's entry and its anchors (designs/qol/search.md 5.10),
+ * The room search's entry and its anchors (docs/design/design-v1-qol.md 5, What keeps it current),
  * fixed first (lane Q0) so the lanes that fill the search read one shape:
  * S0 the matcher, the index and the empty catalogs, S1 the route, S2 the
  * entries and the controls' `search` ids, S3 the sheet. Types and the id
@@ -32,7 +32,7 @@ export type SearchKind =
   | "monster";
 
 /**
- * Where a result goes (search.md 5.5, D-261106-150): a panel, perhaps one
+ * Where a result goes (design-v1-qol.md 5, The route, D-261106-150): a panel, perhaps one
  * of its pages, a fold on the way to open for now, and the control there by
  * its anchor id, pressed or only focused. S1's `openAt` takes it as is.
  */
@@ -50,7 +50,7 @@ export type SearchRoute = {
 };
 
 /**
- * What Enter does, and Shift+Enter where it differs (search.md 5.5). Each
+ * What Enter does, and Shift+Enter where it differs (design-v1-qol.md 5, Acting). Each
  * kind runs what its own surface runs: a press goes through the real
  * control, a condition through the picker's op, and a DM menu item or a
  * You menu item through the item's own run function, found by its id in
@@ -62,7 +62,7 @@ export type SearchAct =
   | { t: "token"; tokenId: string }
   | { t: "character"; characterId: string; route?: SearchRoute }
   | { t: "condition"; condition: string; remove: boolean }
-  /** `twin` is the panel control that does the same, which Shift+Enter goes to without pressing (search.md 5.5's twins). */
+  /** `twin` is the panel control that does the same, which Shift+Enter goes to without pressing (design-v1-qol.md 5, Acting). */
   | { t: "item"; itemId: string; twin: SearchRoute }
   | { t: "roll"; formula: string };
 
@@ -77,7 +77,7 @@ export type SearchEntry = {
   kind: SearchKind;
   /** The row's title. A DM menu item's is the menu's own label, its audience included ("Show Belak's letter to Pat"). */
   title: string;
-  /** Other names typed for it, each a little weaker than the title (search.md 5.3). */
+  /** Other names typed for it, each a little weaker than the title (design-v1-qol.md 5, Matching). */
   names?: readonly string[];
   /** The words it is meant by most often, which put it first whatever else matches. A DM entry's ship in the DM's chunk with it. */
   bets?: readonly string[];
@@ -92,7 +92,7 @@ export type SearchEntry = {
   value?: string;
   /** Said in place of where it lives, for an item whose description matters more (Follow me while the DM looks elsewhere). */
   description?: string;
-  /** Ranks above the others of its tier: the selection's fields and conditions, a player's own character (search.md 5.4). */
+  /** Ranks above the others of its tier: the selection's fields and conditions, a player's own character (design-v1-qol.md 5, Matching). */
   near?: boolean;
   act: SearchAct;
 };
@@ -119,7 +119,7 @@ export const SEARCH_OFF_ATTR = "data-search-off";
  * the panel down to the control, "dm.screens.blackout" or
  * "menu.room-settings.combat.crit-rule". Each is written whole as a string
  * literal at its one `search=` prop, so a source scan pairs every catalog
- * entry with exactly one control and the reverse (search.md 5.10). A
+ * entry with exactly one control and the reverse (design-v1-qol.md 5, What keeps it current). A
  * control drawn once per panel names no record: the token panel's HP field
  * is "token.hp" whatever token it shows.
  */

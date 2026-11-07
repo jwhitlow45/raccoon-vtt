@@ -8,12 +8,12 @@ import type { CatalogEntry } from "../search/catalog/types.ts";
 import { lowPower, rollAnimation, roomSoundChoice, roomSoundOnFor, themeChoice, THEME_CHOICE_WORDS, uiScale, uiScaleLabel } from "./settings.ts";
 
 /*
- * This device's part of the room search (designs/qol/search.md 4 and
- * 5.10), for both roles, so it ships in the room's chunk through
- * catalog/everyone.ts. Each anchor is the `search=` id on its control in
- * ThisDevice.tsx. A setting a device does not draw now, such as Full
- * screen where the browser has none, is not offered, so Enter never waits
- * for a control that will not come.
+ * This device's part of the room search (docs/design/design-v1-qol.md 5, What
+ * it finds and What keeps it current), for both roles, so it ships in the
+ * room's chunk through catalog/everyone.ts. Each anchor is the `search=` id
+ * on its control in ThisDevice.tsx. A setting a device does not draw now,
+ * such as Full screen where the browser has none, is not offered, so Enter
+ * never waits for a control that will not come.
  */
 
 const DEVICE: Place = { panel: "menu", page: "device", where: "Menu · This device", icon: "device" };

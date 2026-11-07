@@ -93,12 +93,12 @@ async function checkBlackoutBar(bar: Locator, scale: number, at: string): Promis
     middles.push(b.y + b.height / 2);
     assert.ok(Math.abs(b.y + b.height / 2 - middle) <= LIMIT_PX, `${at}: a top-bar part is off the row's middle`);
   }
-  // Players see black, or where the bar is short the crossed eye standing as the DM chip (designs/qol/chips.md C2).
+  // Players see black, or where the bar is short the crossed eye standing as the DM chip (docs/design/design-v1-qol.md 4, C2).
   const blackout = bar.locator('[data-chip="blackout"], [data-chip="dm"][data-chip-form="eye"]');
   assert.equal(await blackout.count(), 1, `${at}: one blackout chip`);
   const groups: [Locator, number, string][] = [
     [bar.getByRole("status", { name: "Connected", exact: true }), 10, "connection dot"],
-    // A chip is a 44 px tall target, counted with the buttons, around its 28 px pill (chips.md 6).
+    // A chip is a 44 px tall target, counted with the buttons, around its 28 px pill (design-v1-qol.md 4, The chips' look).
     [bar.locator("[data-chip] > span"), 28, "chip"],
     [bar.getByRole("button"), 44, "button"],
   ];

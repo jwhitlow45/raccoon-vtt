@@ -175,7 +175,7 @@ export const HP_DIGITS: readonly string[] = ["1", "2", "3", "4", "5", "6", "7", 
 
 /**
  * The digits taken from the HP range on this device, each with the
- * shortcut that has it, in the digits' order (designs/qol audit Q3,
+ * shortcut that has it, in the digits' order (docs/design/design-v1-qol.md 3, Q3,
  * D-261106-179). A press finds a bound key before the HP row, and a key
  * someone chose stays theirs, so a digit moved to Ruler is Ruler's.
  */

@@ -20,12 +20,12 @@ import {
 } from "./form.ts";
 
 /*
- * Room settings in the room search (designs/qol/search.md 4 and 5.10), a
- * DM's page alone, so these entries load with the DM's catalog only
- * (catalog/dm.ts): nothing but that file imports this one. They come from
- * the form's own data (form.ts), each with its value now, so a setting
- * added there is found with no entry to write, and only its other names
- * are written here.
+ * Room settings in the room search (docs/design/design-v1-qol.md 5, What it
+ * finds and What keeps it current), a DM's page alone, so these entries load
+ * with the DM's catalog only (catalog/dm.ts): nothing but that file imports
+ * this one. They come from the form's own data (form.ts), each with its value
+ * now, so a setting added there is found with no entry to write, and only its
+ * other names are written here.
  */
 
 const SETTINGS: Place = { panel: "menu", page: "settings", where: "Menu · Room settings", icon: "settings" };

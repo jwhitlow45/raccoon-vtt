@@ -329,13 +329,13 @@ export function EndTurnPill(props: { waiting: boolean; stack?: boolean; onClick(
 }
 
 /**
- * The DM's Next on the turn chip and the phone's band (designs/qol chips
- * C3): "Next", or "Start" before the first turn. It is the End turn pill's
- * outline twin, so a glance tells the DM's button from a player's solid
- * one. It sends what N and the tracker's Next send, never predicted, and
- * spins until the server moves the turn. As in EndTurnPill the spinner
- * stands in the words' place and the words stay, unseen, so the pill keeps
- * its width.
+ * The DM's Next on the turn chip and the phone's band
+ * (docs/design/design-v1-qol.md 4, C3): "Next", or "Start" before the first
+ * turn. It is the End turn pill's outline twin, so a glance tells the DM's
+ * button from a player's solid one. It sends what N and the tracker's Next
+ * send, never predicted, and spins until the server moves the turn. As in
+ * EndTurnPill the spinner stands in the words' place and the words stay,
+ * unseen, so the pill keeps its width.
  */
 export function NextPill(props: { waiting: boolean; start: boolean; disabled?: boolean; onClick(): void }) {
   const keys = useKeyHint("turn");
@@ -408,7 +408,7 @@ export function NextPill(props: { waiting: boolean; start: boolean; disabled?: b
  *
  * `short` drops "Time's up" once time has run out and keeps the time past
  * it in the danger color ("+1:25"), the top bar's last step but one on a
- * cramped bar (designs/qol chips.md 5, step 12). Its name still says time
+ * cramped bar (docs/design/design-v1-qol.md 4, The give-way, step 12). Its name still says time
  * is up.
  */
 export function TimerClock(props: { state: TimerState; size?: number; stack?: boolean; icon?: boolean; short?: boolean }) {

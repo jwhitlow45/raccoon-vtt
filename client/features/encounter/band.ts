@@ -52,7 +52,7 @@ export function turnPlacement(input: { width: number; height: number; band: bool
 /**
  * The top bar's turn chip (InitiativeStrip.tsx Strip) shows up to five
  * next faces from 900 px up, then three, then none, as the bar gives way
- * (designs/qol/chips.md 5, steps 1 and 9). A phone's bar, where the strip
+ * (docs/design/design-v1-qol.md 4, The give-way, steps 1 and 9). A phone's bar, where the strip
  * sits only on a short landscape phone, shows the three.
  */
 export const STRIP_FACES = 5;
@@ -63,7 +63,7 @@ export const STRIP_FACES_FEW = 3;
  * turn, to leave room for "Your turn" and End turn. As the bar's last
  * steps it gives way further, by what the row lacks, down to
  * STRIP_NAME_MIN_PX (a few letters and the ellipsis), and below that it
- * leaves the chip (chips.md 5, step 11).
+ * leaves the chip (design-v1-qol.md 4, The give-way, step 11).
  */
 export const STRIP_NAME_PX = 180;
 export const STRIP_NAME_YOURS_PX = 120;

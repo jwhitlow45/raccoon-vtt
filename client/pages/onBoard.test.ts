@@ -91,7 +91,7 @@ describe("the chip's member dot", () => {
     const onBoard = readFileSync(new URL("./onBoard.ts", import.meta.url), "utf8");
     assert.match(onBoard, /import \{ MARK_RING \} from "\.\.\/lib\/memberColor\.ts";/);
     assert.doesNotMatch(onBoard, /const MARK_RING\b/);
-    // The top bar's chips moved to their own file with their menus (designs/qol/chips.md 11).
+    // The top bar's chips moved to their own file with their menus (docs/design/design-v1-qol.md 6).
     const chips = readFileSync(new URL("./ChipMenus.tsx", import.meta.url), "utf8");
     assert.match(chips, /function ChipDot\(props: \{ color: string \}\) \{\n\s*return <span aria-hidden style=\{memberDotStyle\(props\.color, 8\)\} \/>;/);
   });

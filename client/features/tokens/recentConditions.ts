@@ -3,7 +3,7 @@ import { CONDITION_KEYS, STATUS_KEYS, type ConditionKey, type StatusKey } from "
 
 /**
  * The conditions this device last put on a creature, newest first, three
- * kept (designs/qol audit Q13), which the bar's Conditions and a token's
+ * kept (docs/design/design-v1-qol.md 3, Q13), which the bar's Conditions and a token's
  * picker show first as Recent, so a scroll to Prone goes once Prone is
  * recent. A custom status is left out: its tile opens a form of its own,
  * not one status. This device's storage only, never the room's, and one

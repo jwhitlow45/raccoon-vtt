@@ -10,10 +10,10 @@ import type { OpAnswer } from "../../state/types.ts";
 import { startStep, type StartFrom, type StartWait } from "./autoState.ts";
 
 /*
- * Roll monsters' Initiative as the fight starts (designs/qol audit Q12,
- * plan 9): the start's ops go as one gesture, and once the server takes
- * every one the monsters roll. Its wait first as pure steps under random
- * answers, then the press through the hook as the tracker calls it.
+ * Roll monsters' Initiative as the fight starts (docs/design/design-v1-qol.md
+ * 3, Q12): the start's ops go as one gesture, and once the server takes every
+ * one the monsters roll. Its wait first as pure steps under random answers,
+ * then the press through the hook as the tracker calls it.
  */
 
 const ANSWERS: readonly OpAnswer[] = ["taken", "refused", "unknown"];

@@ -74,9 +74,10 @@ export function useAuto(): { store: StoreApi<AutoState>; mode: RollMode; setMode
 // ---------------------------------------------------------------- rolling as the fight starts
 
 /**
- * "Roll monsters' Initiative" under the start buttons (designs/qol audit
- * Q12, D-261106-112 and 177): on unless this device turned it off for the
- * room. Kept beside the sharing mode, on this device only, never in the room.
+ * "Roll monsters' Initiative" under the start buttons
+ * (docs/design/design-v1-qol.md 3, Q12, D-261106-112 and 177): on unless this
+ * device turned it off for the room. Kept beside the sharing mode, on this
+ * device only, never in the room.
  */
 export function startRollKey(roomId: string): string {
   return `rvtt.autoInitiativeStart.${roomId}`;

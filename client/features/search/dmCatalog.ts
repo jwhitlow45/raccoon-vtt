@@ -2,7 +2,7 @@ import { preloadInBackground, RetryableLoad, retryFailedLoads } from "../../lib/
 import type { Catalog } from "./catalog/types.ts";
 
 /**
- * The DM's catalog on this device (designs/qol/search.md 5.8 and 5.9). It
+ * The DM's catalog on this device (docs/design/design-v1-qol.md 5, Loading and Players). It
  * is data, not a component, so it loads by a RetryableLoad, as the icon
  * index and the starter packs load beside the panels: with the DM's panels
  * once the room is connected, and directly when a DM opens the search

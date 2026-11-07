@@ -6,14 +6,14 @@ import { LIGHT_LEVELS, lightOf } from "../vision/settings.ts";
 import { SCENE_GROUP_LABELS } from "./settingsFolds.ts";
 
 /*
- * Scenes in the room search (designs/qol/search.md 4 and 5.10): New scene,
- * and the settings of the scene in view, which the panel shows under the
- * list (panels/ScenesPanel.tsx). A DM's alone, so these load with the DM's
- * catalog only (catalog/dm.ts): nothing but that file imports this one.
- * Each anchor is the `search=` id on its control in SceneSettings.tsx and
- * the parts it draws. The scenes themselves are the index's rows, and Show
- * a phase is the DM menu's phase items' twin (catalog/dm.ts TWINS), with
- * no row of its own.
+ * Scenes in the room search (docs/design/design-v1-qol.md 5, What it finds
+ * and What keeps it current): New scene, and the settings of the scene in
+ * view, which the panel shows under the list (panels/ScenesPanel.tsx). A DM's
+ * alone, so these load with the DM's catalog only (catalog/dm.ts): nothing
+ * but that file imports this one. Each anchor is the `search=` id on its
+ * control in SceneSettings.tsx and the parts it draws. The scenes themselves
+ * are the index's rows, and Show a phase is the DM menu's phase items' twin
+ * (catalog/dm.ts TWINS), with no row of its own.
  */
 
 const SCENES: Place = { panel: "scenes", where: "Scenes", icon: "scenes" };

@@ -76,7 +76,7 @@ function usePress(): (rows: readonly RollRow[], mode: RollMode, kept?: readonly 
 }
 
 /**
- * Starting a fight (designs/qol audit Q12, plan 9): the start's ops go as
+ * Starting a fight (docs/design/design-v1-qol.md 3, Q12): the start's ops go as
  * one gesture under one group, `encounter.start` and then each
  * `encounter.add` batch, so a fight of 101 rows is one Play step. With
  * "Roll monsters' Initiative" on, once the server takes every one of them

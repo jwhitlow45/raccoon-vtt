@@ -3,9 +3,9 @@ import { scopeSlot, type RoomScope } from "../../state/scope.ts";
 
 /*
  * A formula another surface puts in the Dice panel's field without rolling
- * it: the room search's Shift+Enter on a dice row (designs/qol/search.md
- * 5.5). Kept apart from Roller.tsx, which loads with the panel, so the
- * search asks without loading the panel's code.
+ * it: the room search's Shift+Enter on a dice row
+ * (docs/design/design-v1-qol.md 5, Acting). Kept apart from Roller.tsx, which
+ * loads with the panel, so the search asks without loading the panel's code.
  */
 
 /** The newest formula asked for, `seq` telling one ask from the next, and the last one the field took. */
