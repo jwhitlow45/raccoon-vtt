@@ -1118,9 +1118,9 @@ describe("the room search", { concurrency: false }, () => {
     await dm.locator('[data-pane-panel="sound"] [data-sound-view="now"]').waitFor();
 
     // A character's group from its page, and the selected token's from the token panel.
-    await pick(dm, "stats bree", `field:character:${run.bree}:stats`);
-    const stats = await landedOn(dm, "character.stats");
-    assert.equal(stats.pane, "characters");
+    await pick(dm, "armor class bree", `field:character:${run.bree}:ac`);
+    const ac = await landedOn(dm, "character.ac");
+    assert.equal(ac.pane, "characters", "on Bree's page");
     await pick(dm, "goblin 1", `token:${run.g1}`);
     await dm.locator('[role="dialog"][data-bar-mode]').first().waitFor();
     await pick(dm, "stats goblin", `field:token:${run.g1}:stats`);
