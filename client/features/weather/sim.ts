@@ -404,8 +404,10 @@ export const FADE = 0.15;
 /**
  * Where a level's share of the particles ends: each mark's alpha runs from
  * 1 to 0 over the `fade` particles centered on the share's end, `edge` past
- * which nothing draws, which sums to the share and runs smoothly to nothing
- * as a share nears 0. `last` particles draw.
+ * which nothing draws, and runs smoothly to nothing as a share nears 0. The
+ * alphas sum to about the share, short by at most an eighth of the band at
+ * either end: near a share's start, and where a full share cuts the band
+ * at the active count. `last` particles draw.
  */
 function shareEnd(field: Field, share: number): { edge: number; fade: number; last: number } {
   const fade = Math.max(1, FADE * field.active);
