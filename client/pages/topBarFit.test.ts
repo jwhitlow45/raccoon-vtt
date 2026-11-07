@@ -36,7 +36,7 @@ function drawn(bar: Bar, shape: BarShape): { parts: { w: number; min: number }[]
   const fixed = (w: number) => ({ w, min: w });
   const parts = [fixed(10), { w: words.room, min: Math.min(words.room, 40) }];
   const stripInRow = c.strip === "bar" || (c.strip === "movable" && !shape.band);
-  if (dm) parts.push(fixed(shape.eye ? 40 : shape.dmDot ? 32 : 72));
+  if (dm) parts.push(fixed(shape.eye ? (shape.eyeSlim ? 32 : 40) : shape.dmDot ? 32 : 72));
   else if (c.role === "player") {
     // A phone's player chip keeps its dot while the strip is in the row (Room.tsx chipDot).
     const dot = c.phone ? stripInRow : c.words[2]!.endsWith("true");
@@ -285,6 +285,25 @@ describe("the top bar's give-way (topBarFit)", () => {
     assert.equal(tight.shape.search, "icon", "Search stays as its icon");
   });
 
+  test("a DM's 320 x 568 phone at 130% in a blackout with a long room name fits: last, the crossed eye slims to the dot's width (QC-B)", () => {
+    const content: BarContent = { phone: true, role: "dm", search: true, nowPlaying: false, clock: false, blackout: true, fullscreen: false, phase: false, gaps: true, view: true, strip: "none", faces: 0, timerOver: false, yourTurn: false, words: ["The Sunless Citadel and the Gulthias Tree"] };
+    const bar: Bar = { content, words: { room: 330, youName: 60, clock: 0, phase: 0, turnName: 0, nowPlaying: 0, timer: 0 }, fight: false };
+    const key = fitKey(content);
+    const steps = stepsFor(content);
+    assert.deepEqual(steps, ["blackoutFold", "searchPanels", "tightGaps", "viewFold", "eyeSlim"]);
+    // What the bar needs with every step but the last. There, a 222 px row (320 px over 130%, less the bar's 12 px each side) came up 1 px short in the browser. The model leaves out the 8 px Fit tucks into the bar's padding, so its widths run higher.
+    const need = measure(bar, shapeOf(content, key, { key, width: 0, taken: steps.length - 1, nameCap: null }), 0).overflow;
+    const short = need - 1;
+    const settled = settle(bar, short, null);
+    assert.deepEqual([settled.record?.taken, settled.shape.eye, settled.shape.eyeSlim], [steps.length, true, true]);
+    assert.equal(measure(bar, settled.shape, short).overflow, 0);
+    // The slim eye gives back the whole 8 px it costs over the dot.
+    assert.equal(measure(bar, settled.shape, need - 8).overflow, 0);
+    assert.ok(measure(bar, settled.shape, need - 9).overflow > 0);
+    // Where the row has the pixel, the eye keeps its caret.
+    assert.deepEqual([settle(bar, need, null).shape.eye, settle(bar, need, null).shape.eyeSlim], [true, false]);
+  });
+
   test("the next faces go from five to three, then none, the DM's alone", () => {
     const base: BarContent = { phone: false, role: "dm", search: false, nowPlaying: false, clock: false, blackout: false, fullscreen: false, phase: false, gaps: false, view: false, strip: "bar", faces: 5, timerOver: false, yourTurn: false, words: [] };
     assert.deepEqual(stepsFor(base), ["facesThree", "dmDot", "facesNone", "turnName"]);
@@ -313,9 +332,12 @@ describe("the top bar's give-way (topBarFit)", () => {
       "turnName",
       "timerShort",
       "yourTurnOff",
+      "eyeSlim",
     ]);
     const phone: BarContent = { phone: true, role: "dm", search: true, nowPlaying: true, clock: false, blackout: true, fullscreen: false, phase: false, gaps: true, view: true, strip: "movable", faces: 4, timerOver: false, yourTurn: false, words: [] };
-    assert.deepEqual(stepsFor(phone), ["band", "blackoutFold", "searchPanels", "nowPlayingOff", "tightGaps", "viewFold"]);
+    assert.deepEqual(stepsFor(phone), ["band", "blackoutFold", "searchPanels", "nowPlayingOff", "tightGaps", "viewFold", "eyeSlim"]);
+    assert.deepEqual(stepsFor({ ...phone, blackout: false }), ["band", "dmDot", "searchPanels", "nowPlayingOff", "tightGaps", "viewFold"], "the dot is already its width");
+    assert.ok(!stepsFor({ ...phone, role: "player", blackout: false }).includes("eyeSlim"), "a player has no eye");
     const shape = shapeOf(phone, fitKey(phone), null);
     assert.equal(shape.search, "icon", "a phone's Search starts as its icon");
     assert.equal(shape.nowPlaying, "compact", "and Now playing as its compact form");

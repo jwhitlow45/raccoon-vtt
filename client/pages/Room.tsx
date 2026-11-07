@@ -1713,7 +1713,7 @@ function TopBar(props: {
         </h1>
         {/* The chips open menus (designs/qol/chips.md C1, C2, C7). In its short form the blackout's crossed eye is the DM chip, whose menu leads with the blackout's items. */}
         {role === "dm" ? (
-          <DmChip dot={shape.dmDot} eye={shape.eye} timeGaveWay={clockText !== null && !shape.clock} nowPlayingGaveWay={shape.nowPlaying === "off"} chipRef={dmChipRef} onOpen={raiseFor.dm} />
+          <DmChip dot={shape.dmDot} eye={shape.eye} eyeSlim={shape.eyeSlim} timeGaveWay={clockText !== null && !shape.clock} nowPlayingGaveWay={shape.nowPlaying === "off"} chipRef={dmChipRef} onOpen={raiseFor.dm} />
         ) : role === "player" ? (
           <YouChip dot={props.chipDot} onOpen={raiseFor.you} />
         ) : null}

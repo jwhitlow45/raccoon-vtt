@@ -83,6 +83,8 @@ export function ChipButton(props: {
   outline: string;
   color?: string;
   round?: boolean;
+  /** A round form without its caret, its mark centered at the dot's width: the crossed eye at the top bar's last step (topBarFit.ts eyeSlim). */
+  slim?: boolean;
   /** A player's name gives way to the bar's buttons, cut with an ellipsis, down to its dot (features section 13). */
   shrink?: boolean;
   buttonRef?: Ref<HTMLButtonElement>;
@@ -131,7 +133,7 @@ export function ChipButton(props: {
             minWidth: 0,
             boxSizing: "border-box",
             height: CHIP_PX,
-            padding: props.round ? `0 1px 0 ${theme.space(1.5)}px` : `0 ${theme.space(1.5)}px 0 ${theme.space(2.5)}px`,
+            padding: props.slim ? `0 ${SLIM_PAD}px` : props.round ? `0 1px 0 ${theme.space(1.5)}px` : `0 ${theme.space(1.5)}px 0 ${theme.space(2.5)}px`,
             borderRadius: theme.radius.pill,
             border: `${theme.line.border}px solid ${props.outline}`,
             fontSize: theme.font.small,
@@ -140,13 +142,16 @@ export function ChipButton(props: {
           }}
         >
           {props.children}
-          <Icon name="caret" size={props.round ? 14 : "sm"} />
+          {props.slim ? null : <Icon name="caret" size={props.round ? 14 : "sm"} />}
         </span>
       </button>
       {props.tip ? tooltip.tip : null}
     </>
   );
 }
+
+/** The slim eye's sides: what the dot's form gives its 8 px dot, 1 px and 14 px caret around a 16 px mark, half each side, so the two forms are one width. */
+const SLIM_PAD = (theme.space(1.5) + 8 + 1 + 14 + 1 - theme.icon.sm) / 2;
 
 /** The member's color, as the dot in a chip. */
 function ChipDot(props: { color: string }) {
@@ -605,14 +610,14 @@ function DmMenuBody(props: { host: ChipHost; anchor: () => HTMLElement | null; t
  * during a blackout there the crossed eye, whose menu leads with the
  * blackout's items (D-261106-123).
  */
-export function DmChip(props: { dot: boolean; eye: boolean; timeGaveWay: boolean; nowPlayingGaveWay?: boolean; chipRef?: Ref<HTMLButtonElement>; onOpen?(open: boolean): void }) {
+export function DmChip(props: { dot: boolean; eye: boolean; eyeSlim?: boolean; timeGaveWay: boolean; nowPlayingGaveWay?: boolean; chipRef?: Ref<HTMLButtonElement>; onOpen?(open: boolean): void }) {
   const menu = usePopover({ kind: "menu" });
   useRaise(menu.open, props.onOpen);
   const host = useChipHost(menu);
   const color = useRoomView((s) => (s.you ? s.view?.members[s.you.memberId]?.color : undefined)) ?? theme.color.accent;
   const anchor = useCallback(() => menu.anchor.current, [menu.anchor]);
   const chip = props.eye ? (
-    <ChipButton anchor={menu.anchorProps} label={CHIP_WORDS.eyeName} tip={CHIP_WORDS.eyeName} outline={theme.color.danger} color={theme.color.dangerText} round buttonRef={props.chipRef} data={{ "data-chip": "dm", "data-chip-form": "eye" }}>
+    <ChipButton anchor={menu.anchorProps} label={CHIP_WORDS.eyeName} tip={CHIP_WORDS.eyeName} outline={theme.color.danger} color={theme.color.dangerText} round slim={props.eyeSlim} buttonRef={props.chipRef} data={{ "data-chip": "dm", "data-chip-form": "eye" }}>
       <Icon name="hidden" size="sm" />
     </ChipButton>
   ) : props.dot ? (

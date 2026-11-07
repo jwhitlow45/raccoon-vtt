@@ -55,7 +55,9 @@ export type NowPlayingForm = "full" | "compact" | "off";
  * 0 to 12, with step 10's two halves apart). Each but Search's puts what
  * left the bar into the DM menu. After step 12 a player's inline "Your
  * turn" drops while End turn shows, its live region kept, unseen
- * (plan.md 9, QD-OPUS-24 and 30).
+ * (plan.md 9, QD-OPUS-24 and 30). Last, where a blackout's crossed eye
+ * stands in the DM chip's place, it slims to the dot's width (`eyeSlim`):
+ * it is 8 px wider, and no other step makes up for it.
  */
 export type WideStep =
   | "searchIcon"
@@ -72,7 +74,8 @@ export type WideStep =
   | "viewFold"
   | "turnName"
   | "timerShort"
-  | "yourTurnOff";
+  | "yourTurnOff"
+  | "eyeSlim";
 
 export const WIDE_STEPS: readonly WideStep[] = [
   "searchIcon",
@@ -90,12 +93,19 @@ export const WIDE_STEPS: readonly WideStep[] = [
   "turnName",
   "timerShort",
   "yourTurnOff",
+  "eyeSlim",
 ];
 
-/** The steps below 900 px, in order (plan.md 4): the turn strip goes to the band under the bar first. A phone's bar has no clock chip and no Phase menu. */
-export type NarrowStep = "band" | "blackoutFold" | "dmDot" | "searchPanels" | "nowPlayingOff" | "tightGaps" | "viewFold";
+/**
+ * The steps below 900 px, in order (plan.md 4): the turn strip goes to the
+ * band under the bar first. A phone's bar has no clock chip and no Phase
+ * menu. The crossed eye's slimming comes last, as from 900 px up: a DM's
+ * 320 px phone at 130% in a blackout with a long room name overflowed by
+ * 1 px with every other step taken.
+ */
+export type NarrowStep = "band" | "blackoutFold" | "dmDot" | "searchPanels" | "nowPlayingOff" | "tightGaps" | "viewFold" | "eyeSlim";
 
-export const NARROW_STEPS: readonly NarrowStep[] = ["band", "blackoutFold", "dmDot", "searchPanels", "nowPlayingOff", "tightGaps", "viewFold"];
+export const NARROW_STEPS: readonly NarrowStep[] = ["band", "blackoutFold", "dmDot", "searchPanels", "nowPlayingOff", "tightGaps", "viewFold", "eyeSlim"];
 
 export type BarStep = WideStep | NarrowStep;
 
@@ -158,6 +168,7 @@ export function stepsFor(c: BarContent): BarStep[] {
       nowPlayingOff: dm && c.nowPlaying,
       tightGaps: c.gaps,
       viewFold: c.view,
+      eyeSlim: dm && c.blackout,
     };
     return NARROW_STEPS.filter((step) => narrow[step]);
   }
@@ -178,6 +189,7 @@ export function stepsFor(c: BarContent): BarStep[] {
     turnName: strip,
     timerShort: strip && c.timerOver,
     yourTurnOff: strip && c.yourTurn,
+    eyeSlim: dm && c.blackout,
   };
   return WIDE_STEPS.filter((step) => wide[step]);
 }
@@ -258,6 +270,8 @@ export type BarShape = {
   blackout: boolean;
   /** The crossed eye in the DM chip's place. */
   eye: boolean;
+  /** The crossed eye at the dot's width, without its caret: the last step. */
+  eyeSlim: boolean;
   /** The DM chip as its dot (or the eye). */
   dmDot: boolean;
   fullscreen: boolean;
@@ -289,6 +303,7 @@ export function shapeOf(c: BarContent, key: string, record: FitRecord | null): B
     clock: c.clock && !has("clockOff"),
     blackout: c.blackout && !has("blackoutFold"),
     eye: has("blackoutFold"),
+    eyeSlim: has("eyeSlim"),
     dmDot: has("dmDot") || has("blackoutFold"),
     fullscreen: c.fullscreen && !has("fullscreenOff"),
     phase: c.phase && !has("phaseOff"),

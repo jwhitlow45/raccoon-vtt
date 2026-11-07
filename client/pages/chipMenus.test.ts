@@ -410,6 +410,16 @@ describe("a chip that opens a menu", () => {
     const dot = chip({ label: "DM options", tip: "You are the DM", round: true }, "");
     assert.match(dot, /aria-describedby="[^"]+"/, "the dot's tooltip adds words, so a reader hears them");
   });
+
+  test("the bar's last step slims the crossed eye to the dot's width: the eye alone, centered, still a menu button named for the blackout", () => {
+    // The dot's form: 6 px, the 8 px dot, 1 px, the 14 px caret, 1 px and the 1 px borders make 32 (topBarFit.ts eyeSlim).
+    const slim = chip({ label: "DM options. Players see black", tip: "DM options. Players see black", round: true, slim: true }, "");
+    assert.match(slim, /aria-haspopup="menu"/);
+    assert.match(slim, /aria-label="DM options\. Players see black"/);
+    assert.match(slim, /padding:0 7px/, "16 px for the eye, 7 px each side and the borders: 32 px, the dot's width");
+    assert.doesNotMatch(slim, /<svg/, "no caret");
+    assert.match(chip({ label: "DM options", round: true }, ""), /<svg/, "the round forms keep theirs otherwise");
+  });
 });
 
 describe("a chip menu's item in the shared Menu", () => {
