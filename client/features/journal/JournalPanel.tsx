@@ -14,6 +14,7 @@ import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { usePanelHeader, type PanelClose, type PanelProps } from "../panels.ts";
 import { pinSlot } from "../pins/store.ts";
+import { recordPage } from "../search/route.ts";
 import { ConfirmButton } from "../tokens/ui.tsx";
 import { accessText, groupPages } from "./draft.ts";
 import { JournalEditor } from "./JournalEditor.tsx";
@@ -50,7 +51,8 @@ export default function JournalPanel(props: PanelProps) {
       ? {
           title: page.title,
           parent: "Journal",
-          id: page.id,
+          // The search's name for the page (features/search/route.ts), which Room reads to land a route once the page shows.
+          id: recordPage("page", page.id),
           onBack: back,
         }
       : null,

@@ -1,10 +1,11 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Group } from "../components/Panel.tsx";
 import type { PanelProps } from "../features/panels.ts";
 import { NewScene } from "../features/scenes/NewScene.tsx";
 import { SceneList } from "../features/scenes/SceneList.tsx";
 import { SceneSettings } from "../features/scenes/SceneSettings.tsx";
 import { useSceneFolds } from "../features/scenes/settingsFolds.ts";
+import { recordId, useRouteRequest } from "../features/search/route.ts";
 import { UvttNewScene } from "../features/uvtt/UvttImport.tsx";
 import { useRoomView } from "../state/view.ts";
 
@@ -31,11 +32,21 @@ export default function ScenesPanel(props: PanelProps) {
   const role = useRoomView((s) => s.you?.role ?? "player");
   const fold = useSceneFolds();
   const list = useMemo(() => Object.values(scenes ?? {}).sort((a, b) => a.order - b.order || (a.id < b.id ? -1 : 1)), [scenes]);
+  /*
+   * The search's route to a scene (features/search/route.ts) opens Scenes
+   * at its row, never moving the DM's view or the players, and opens the
+   * row's folder for now if this device folded it.
+   */
+  const [shownFolder, setShownFolder] = useState<string | null>(null);
+  useRouteRequest("scenes", (request) => {
+    const id = recordId("scene", request.page);
+    setShownFolder((id !== null ? scenes?.[id]?.folder : undefined) ?? null);
+  });
   if (role !== "dm") return null;
   const current = list.find((s) => s.id === viewingId);
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)" }}>
-      <SceneList scenes={list} viewingId={viewingId} playerSceneId={playerSceneId} />
+      <SceneList scenes={list} viewingId={viewingId} playerSceneId={playerSceneId} shownFolder={shownFolder} onShownFolderTap={() => setShownFolder(null)} />
       <Group label="New scene" reserve="icon" {...fold("new")} keep>
         <NewScene sceneCount={list.length} close={props.close} />
         <UvttNewScene sceneCount={list.length} />

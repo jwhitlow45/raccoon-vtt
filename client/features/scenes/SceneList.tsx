@@ -11,6 +11,7 @@ import { Tag } from "../../components/Tag.tsx";
 import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useAssets, useRoomActions, useRoomView } from "../../state/view.ts";
+import { recordPage } from "../search/route.ts";
 import { browserStorage, cleanFolderName, groupScenes, moveFolder, moveScene, readCollapsed, renameMergesInto, sendFolderRename, writeCollapsed, type SceneGroup } from "./folders.ts";
 import { SceneMenuButton } from "./SceneMenu.tsx";
 import { sceneRowDetail } from "./sceneSummary.ts";
@@ -36,7 +37,14 @@ import { useMovePlayers } from "./useMovePlayers.ts";
  * The move waits for the server, which has every player's view to build,
  * so its row says "Moving players…" until the server confirms it.
  */
-export function SceneList(props: { scenes: Scene[]; viewingId: string | null; playerSceneId: string | null }) {
+export function SceneList(props: {
+  scenes: Scene[];
+  viewingId: string | null;
+  playerSceneId: string | null;
+  /** A folder open for now, whatever this device keeps, for the search's route to a scene in it (features/search/route.ts). A tap on its header ends that. */
+  shownFolder?: string | null;
+  onShownFolderTap?(): void;
+}) {
   const { scenes, viewingId, playerSceneId } = props;
   const actions = useRoomActions();
   const roomId = useRoomView((s) => s.roomId);
@@ -68,6 +76,11 @@ export function SceneList(props: { scenes: Scene[]; viewingId: string | null; pl
   };
 
   const toggleFolder = (folder: string) => {
+    if (folder === props.shownFolder) {
+      props.onShownFolderTap?.();
+      // Open for now only, it folds again as this device kept it, and nothing is written.
+      if (collapsed.has(folder)) return;
+    }
     const next = new Set(collapsed);
     if (!next.delete(folder)) next.add(folder);
     saveCollapsed(next);
@@ -88,7 +101,7 @@ export function SceneList(props: { scenes: Scene[]; viewingId: string | null; pl
     const loading = scene.id === loadingId;
     const name = scene.name || "Untitled";
     return (
-      <li key={scene.id} style={{ padding: `${theme.space(1)}px 0`, borderTop: i === 0 ? undefined : `${theme.line.border}px solid ${theme.color.border}` }}>
+      <li key={scene.id} data-search-page={recordPage("scene", scene.id)} style={{ padding: `${theme.space(1)}px 0`, borderTop: i === 0 ? undefined : `${theme.line.border}px solid ${theme.color.border}` }}>
         <div
           style={{
             display: "grid",
@@ -193,7 +206,7 @@ export function SceneList(props: { scenes: Scene[]; viewingId: string | null; pl
         const list = <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>{group.scenes.map((scene, i) => row(group, scene, i))}</ul>;
         const folder = group.folder;
         if (folder === null) return <div key="loose">{list}</div>;
-        const shut = collapsed.has(folder);
+        const shut = collapsed.has(folder) && folder !== props.shownFolder;
         const f = folderGroups.indexOf(group);
         const marks = [
           group.scenes.some((s) => s.id === playerSceneId) ? "players here" : null,

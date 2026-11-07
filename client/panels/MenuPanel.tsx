@@ -10,6 +10,7 @@ import { useJobActive } from "../features/handouts/pdf/live.ts";
 import { joinLinkToShare } from "../features/dm/shareLink.ts";
 import { XCardButton } from "../features/xcard/XCardButton.tsx";
 import { usePanelHeader, type PanelProps } from "../features/panels.ts";
+import { MENU_PAGES, pageAfter, useRouteRequest, type MenuPage } from "../features/search/route.ts";
 import { viewFoldSlot } from "../features/view/choice.ts";
 import { useRoomViewChoice, ViewName, ViewSheetDialog } from "../features/view/ViewMenu.tsx";
 import { api } from "../lib/api.ts";
@@ -24,14 +25,15 @@ import AboutPanel from "./AboutPanel.tsx";
 import MembersPanel from "./MembersPanel.tsx";
 import SettingsPanel from "./SettingsPanel.tsx";
 
-type Page = "members" | "settings" | "about" | "device";
-
-const PAGES: Record<Page, { title: string; Component: (props: PanelProps) => ReactNode }> = {
+const PAGES: Record<MenuPage, { title: string; Component: (props: PanelProps) => ReactNode }> = {
   members: { title: "Members", Component: MembersPanel },
   settings: { title: "Room settings", Component: SettingsPanel },
   about: { title: "About", Component: AboutPanel },
   device: { title: "This device", Component: ThisDevice },
 };
+
+/** The pages a player's Menu holds. */
+const PLAYER_PAGES = MENU_PAGES.filter((p) => p !== "settings");
 
 /**
  * The room menu: the things a table needs now and then, not every turn.
@@ -46,7 +48,7 @@ export default function MenuPanel(props: PanelProps) {
   const roomId = useRoomView((s) => s.roomId);
   const preview = usePreview();
   const ui = useRoomUi();
-  const [page, setPage] = useState<Page | null>(null);
+  const [page, setPage] = useState<MenuPage | null>(null);
   const [copied, setCopied] = useState(false);
   // Leave room asks once while a PDF upload is under way on this device (docs/design/design-v1-pdf-handouts.md 4.1.6).
   const uploading = useJobActive();
@@ -58,7 +60,10 @@ export default function MenuPanel(props: PanelProps) {
   const playerLink = useDmPlayerLink(roomId, role === "dm" && preview === null, page === null);
   // "Copied, with the password" would vouch for a link the server has since replaced.
   useEffect(() => setCopied(false), [playerLink]);
-  usePanelHeader(page ? { title: PAGES[page].title, parent: "Menu", onBack: () => setPage(null) } : null);
+  // The search's route turns the page (features/search/route.ts). Room settings is a DM's alone, so a player's route never reaches it.
+  useRouteRequest("menu", (request) => setPage((shown) => pageAfter(request, role === "dm" ? MENU_PAGES : PLAYER_PAGES, shown)));
+  // The page's id is the route's name for it, which Room reads to land the route once the page shows.
+  usePanelHeader(page ? { title: PAGES[page].title, parent: "Menu", id: page, onBack: () => setPage(null) } : null);
 
   if (page) {
     const { Component } = PAGES[page];
@@ -248,7 +253,7 @@ function ViewRow() {
  * (features/panels.ts useSubpageFocus), and Leave room, which leaves, does
  * neither.
  */
-function MenuItem(props: { icon: IconName; title: string; detail: ReactNode; page?: Page; opener?: string; disabled?: boolean; keys?: { title: string; aria: string }; onClick(): void }) {
+function MenuItem(props: { icon: IconName; title: string; detail: ReactNode; page?: MenuPage; opener?: string; disabled?: boolean; keys?: { title: string; aria: string }; onClick(): void }) {
   return (
     <Row
       // Before the words, so a list read by scanning is found by its icons (docs/design/design-v1-icons.md 10.2).
