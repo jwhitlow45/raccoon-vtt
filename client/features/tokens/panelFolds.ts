@@ -131,24 +131,52 @@ export function writeFold(storage: WriteStorage | null, key: FoldKey, open: bool
 export type PanelFolds = {
   /** The folds, resolved the first time any panel asks, from storage and the defaults at that layout, then kept. */
   get(layout: Size): Folds;
-  /** A viewer's tap on a fold. `write` is false in "view as a player", which reads storage and never writes it. */
+  /** A viewer's tap on a fold. `write` is false in "view as a player", which reads storage and never writes it. It ends that fold's reveal. */
   tap(key: FoldKey, open: boolean, write: boolean): void;
+  /** Opens a fold for now, writing nothing, as lib/folds.ts's reveal does: the search's route to a field inside it (features/search/route.ts). */
+  reveal(key: FoldKey): void;
+  /** Ends every reveal. Room does this once the token's and the characters' panels have both closed. */
+  endReveals(): void;
   subscribe(listener: () => void): () => void;
 };
 
 export function createPanelFolds(storage: WriteStorage | null): PanelFolds {
   let folds: Folds | null = null;
+  const revealed = new Set<FoldKey>();
+  // The folds with each reveal open, kept while neither changes: useSyncExternalStore needs the same object back.
+  let shown: Folds | null = null;
   const listeners = new Set<() => void>();
+  const changed = () => {
+    shown = null;
+    for (const listener of listeners) listener();
+  };
   return {
     get(layout) {
       folds ??= resolveFolds(storage, layout);
-      return folds;
+      if (revealed.size === 0) return folds;
+      if (!shown) {
+        const open = { ...folds };
+        for (const key of revealed) open[key] = true;
+        shown = open;
+      }
+      return shown;
     },
     tap(key, open, write) {
       const current = folds ?? resolveFolds(storage, { width: 0, height: 0 });
       folds = { ...current, [key]: open };
+      revealed.delete(key);
       if (write) writeFold(storage, key, open);
-      for (const listener of listeners) listener();
+      changed();
+    },
+    reveal(key) {
+      if (revealed.has(key)) return;
+      revealed.add(key);
+      changed();
+    },
+    endReveals() {
+      if (revealed.size === 0) return;
+      revealed.clear();
+      changed();
     },
     subscribe(listener) {
       listeners.add(listener);
