@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DM, entry, P1 } from "#shared/testutil.ts";
+import { setRoomSoundChoice } from "../device/settings.ts";
 import type { SearchEntry } from "./entry.ts";
 import { searchResults } from "./index.ts";
 import { recordPick } from "./recent.ts";
@@ -9,11 +10,13 @@ import { DM_VIEW, indexOf, PAT_VIEW, rowsOf, seededRoom, viewOf } from "./search
 /**
  * The golden queries (designs/qol/search.md 5.10 point 3 and section 7):
  * each query of the case table, by role, with what it must list first, on
- * the seeded room. The catalogs here are search.testutil.ts's stand-ins
- * until lanes S2a and S2b write the real ones. Those lanes point this file
- * at the real catalogs and keep every expectation, so the best bets on
- * their entries are held here too.
+ * the seeded room, through the real catalogs and the entries lane S2b
+ * still writes (search.testutil.ts PENDING_*), so the best bets on their
+ * entries are held here too. Pat's device has Room sound on, as one that
+ * hears the music does: Music volume shows only then.
  */
+
+setRoomSoundChoice("on");
 
 const row = (e: SearchEntry) => `${e.kind}:${e.title}${e.mark ? ` (${e.mark})` : ""}${e.where ? ` · ${e.where}` : ""}${e.value ? `: ${e.value}` : ""}`;
 const first = (rows: SearchEntry[], n: number) => rows.slice(0, n).map(row);
@@ -96,6 +99,18 @@ describe("golden queries, a player (Pat, who plays Bree)", () => {
     const rows = rowsOf(pat, "music");
     assert.equal(row(rows[0]!), "setting:Music volume · Menu · This device · Sounds");
     assert.ok(rows.every((e) => e.where.startsWith("Menu · This device")), rows.map(row).join("\n"));
+  });
+
+  test("music with Room sound off on this device: Sounds first, Room sound among the rows, and no volume to set", () => {
+    setRoomSoundChoice("off");
+    try {
+      const rows = rowsOf(indexOf(PAT_VIEW()), "music");
+      assert.equal(row(rows[0]!), "section:Sounds · Menu · This device");
+      assert.ok(rows.map(row).includes("setting:Room sound · Menu · This device · Sounds: Off"), rows.map(row).join("\n"));
+      assert.ok(!rows.some((e) => e.title.endsWith("volume")), rows.map(row).join("\n"));
+    } finally {
+      setRoomSoundChoice("on");
+    }
   });
 
   test("a hidden token's name, a hidden name's true name, a DM page's title, a playlist's name, a DM setting: no match", () => {

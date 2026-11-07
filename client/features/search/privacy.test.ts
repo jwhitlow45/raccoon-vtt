@@ -7,7 +7,7 @@ import type { RoomView } from "../../state/types.ts";
 import type { Catalog } from "./catalog/types.ts";
 import type { SearchEntry } from "./entry.ts";
 import { buildIndex, catalogsFor, searchResults } from "./index.ts";
-import { DM_FIXTURE, EVERYONE_FIXTURE, keysOf, SRD, viewOf } from "./search.testutil.ts";
+import { DM_FIXTURE, keysOf, PENDING_EVERYONE, SRD, viewOf } from "./search.testutil.ts";
 
 /**
  * A player's search holds only what that player may see and do
@@ -143,8 +143,8 @@ describe("a player's search holds only what that player may see and do (search.m
         const dm = dmCanaries(r);
         const loads: unknown[] = [];
         const { catalogs } = catalogsFor(view, { request: (role) => (loads.push(role), { status: "ready", catalog: dm.catalog }) });
-        // The sheet passes the SRD list it has to any role. A player's index must build no monster of it.
-        const index = buildIndex({ state: view, wide, keys: keysOf(view), catalogs: [...catalogs, EVERYONE_FIXTURE], monsters: SRD });
+        // The real catalogs as catalogsFor gives them, with the fields lane S2b still writes. The sheet passes the SRD list it has to any role: a player's index must build no monster of it.
+        const index = buildIndex({ state: view, wide, keys: keysOf(view), catalogs: [...catalogs, PENDING_EVERYONE], monsters: SRD });
 
         assert.deepEqual(loads, [], "invariant 5: the DM catalog's loader was called");
         const memberId = view.you?.memberId ?? null;
