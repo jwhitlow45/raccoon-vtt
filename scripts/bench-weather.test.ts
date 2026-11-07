@@ -2,13 +2,15 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { weatherProblem, type SceneWeather } from "../shared/weather.ts";
 import { WARMUP_MS, WINDOW_MS } from "../client/features/weather/mode.ts";
-import { gateFailures, gestureOverages, HEAVIEST, p95, stepDownSettled, type Row } from "./bench-weather.ts";
+import { gateFailures, gestureOverages, HEAVIEST, LEVEL_ROWS, p95, stepDownSettled, type Row } from "./bench-weather.ts";
 
 /*
  * The weather bench's gates (docs/design/design-v1-weather.md 6.1): rest
  * busy time at most 60 ms a second over no weather for every kind, no ticks
- * at rest for Still and Off, and, with a GPU, a pan's and a drag's 95th
- * percentile frame at most 2 ms over none.
+ * at rest for Still and Off, and, with a GPU, a pan's, a drag's and a
+ * pinch's 95th percentile frame at most 2 ms over none, and every particle
+ * still there after pans, pinches and drags (the zoom note,
+ * design-v1-weather-zoom.md 4).
  */
 
 function rows(view: Row["view"], over: { rest?: number; pan?: number; drag?: number; stillTicks?: number }): Row[] {
@@ -51,6 +53,30 @@ describe("the weather bench's gates", () => {
     assert.deepEqual(gateFailures(panned(0)), []);
     assert.deepEqual(gateFailures(panned(1)), ["topDown level after pans, rain: half"]);
     assert.deepEqual(gateFailures(panned(2), { software: true }), []);
+  });
+
+  test("with a GPU a pinch gates as a pan does, moving and held still, and without one it is information", () => {
+    const pinch = (rain: number, still?: number): Row[] => [
+      { row: "pinch, none", view: "topDown", value: 17, unit: "ms p95" },
+      { row: "pinch, rain", view: "topDown", value: rain, unit: "ms p95" },
+      ...(still === undefined ? [] : [{ row: "pinch, rain still", view: "topDown" as const, value: still, unit: "ms p95" as const }]),
+    ];
+    assert.deepEqual(gateFailures(pinch(19, 19)), []);
+    assert.deepEqual(gateFailures(pinch(19.5)), ["topDown pinch: p95 2.5 ms over none"]);
+    assert.deepEqual(gateFailures(pinch(17, 20)), ["topDown pinch held still: p95 3.0 ms over none"]);
+    assert.deepEqual(gateFailures(pinch(19.5, 20), { software: true }), [], "without a GPU a pinch's frames are information");
+    assert.deepEqual(gestureOverages(pinch(19.5, 20)), ["topDown pinch: p95 2.5 ms over none", "topDown pinch held still: p95 3.0 ms over none"], "said, not gated");
+  });
+
+  test("with a GPU every particle stays after pinches and after drags as after pans, and without one they may not", () => {
+    assert.deepEqual(LEVEL_ROWS, ["level after pans, rain", "level after pinches, rain", "level after drags, rain"]);
+    for (const row of LEVEL_ROWS) {
+      const left = (level: number): Row[] => [{ row, view: "isometric", value: level, unit: "level" }];
+      assert.deepEqual(gateFailures(left(0)), [], row);
+      assert.deepEqual(gateFailures(left(1)), [`isometric ${row}: half`]);
+      assert.deepEqual(gateFailures(left(2)), [`isometric ${row}: still`]);
+      assert.deepEqual(gateFailures(left(1), { software: true }), [], `${row} without a GPU`);
+    }
   });
 
   test("without a GPU a pan's and a drag's frames are information, and what the step-down leaves at rest still gates", () => {

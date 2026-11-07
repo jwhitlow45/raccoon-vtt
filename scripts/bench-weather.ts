@@ -22,11 +22,18 @@
  * - level after pans: heavy rain and a strong wind on a fresh page, a
  *   finger panning on and off for 11 s, past two windows, and the level
  *   it leaves.
+ * - pinch, and pinch held still (the zoom note, design-v1-weather-zoom.md
+ *   4): each frame's gap while two fingers pinch out and back about the
+ *   middle, with no weather, with heavy rain, and with heavy rain held
+ *   still, where every frame of the pinch is a camera draw.
+ * - level after pinches and level after drags: as level after pans, two
+ *   fingers pinching or a finger dragging a creature on and off.
  *
  * Gates (6.1): rest busy at most 60 ms a second over none for every kind,
- * no ticks at rest for Still and Off, and, with a GPU, a pan's and a drag's
- * 95th percentile frame at most 2 ms over none and all the particles still
- * there after the pans, since a pan is the board's work and never the
+ * no ticks at rest for Still and Off, and, with a GPU, a pan's, a drag's
+ * and a pinch's 95th percentile frame (moving or held still) at most 2 ms
+ * over none, and all the particles still there after the pans, the pinches
+ * and the drags, since a gesture is the board's work and never the
  * weather's. It exits 1 when one fails.
  *
  * It needs `pnpm build` first and a Postgres in DATABASE_URL. It makes its
@@ -101,19 +108,26 @@ export function stepDownSettled(levels: readonly { at: number; level: number }[]
 
 const VIEWS = ["topDown", "isometric"] as const;
 
+/** The levels a gesture on and off from a fresh page leaves, which must stay full with a GPU. */
+export const LEVEL_ROWS = ["level after pans, rain", "level after pinches, rain", "level after drags, rain"] as const;
+
 function rowValue(rows: readonly Row[], row: string, view: View): number | undefined {
   return rows.find((r) => r.row === row && r.view === view)?.value;
 }
 
-/** Each pan's and drag's 95th percentile frame that is more than its budget over none's, in words. */
+/** Each pan's, drag's and pinch's 95th percentile frame that is more than its budget over none's, in words. */
 export function gestureOverages(rows: readonly Row[]): string[] {
   const out: string[] = [];
   for (const view of VIEWS) {
-    for (const gesture of ["pan", "drag"]) {
+    for (const gesture of ["pan", "drag", "pinch"]) {
       const base = rowValue(rows, `${gesture}, none`, view);
       const rain = rowValue(rows, `${gesture}, rain`, view);
       if (base !== undefined && rain !== undefined && rain - base > FRAME_BUDGET_MS) out.push(`${view} ${gesture}: p95 ${(rain - base).toFixed(1)} ms over none`);
     }
+    // Held still, every frame of a pinch is a camera draw, so it gates against none as a moving pinch does.
+    const base = rowValue(rows, "pinch, none", view);
+    const still = rowValue(rows, "pinch, rain still", view);
+    if (base !== undefined && still !== undefined && still - base > FRAME_BUDGET_MS) out.push(`${view} pinch held still: p95 ${(still - base).toFixed(1)} ms over none`);
   }
   return out;
 }
@@ -137,8 +151,10 @@ export function gateFailures(rows: readonly Row[], options: { software?: boolean
     }
     out.push(...gestures.filter((line) => line.startsWith(`${view} `)));
     for (const r of rows.filter((x) => x.view === view && x.unit === "ticks")) if (r.value !== 0) out.push(`${view} ${r.row}: ${r.value} ticks at rest`);
-    const panned = at("level after pans, rain", view);
-    if (!options.software && panned !== undefined && panned !== 0) out.push(`${view} level after pans, rain: ${LEVELS[panned]}`);
+    for (const row of LEVEL_ROWS) {
+      const level = at(row, view);
+      if (!options.software && level !== undefined && level !== 0) out.push(`${view} ${row}: ${LEVELS[level]}`);
+    }
   }
   return out;
 }
@@ -328,40 +344,66 @@ async function main(): Promise<void> {
         }
         return p95(await stop());
       });
-    /** Pans on and off from a fresh page past two windows, and reads the level the weather is left at. */
-    const panned = async (view: View) =>
+    /** A gesture on and off from a fresh page past two windows, and the level the weather is left at. */
+    const onAndOff = async (view: View, gesture: (touches: Touches) => Promise<void>) =>
       throttled(async () => {
         await fresh(view, HEAVIEST[0]!.weather);
         const touches = new Touches(cdp);
         const from = Date.now();
         while (Date.now() - from < 11_000) {
-          await swipes(touches);
+          await gesture(touches);
           await sleep(500);
         }
         return level(page);
       });
-    const drag = async () =>
+    /** Two fingers pinching out from 100 to 260 px apart about the middle, and back. */
+    const pinchOnce = async (touches: Touches) => {
+      const at = (d: number) => [
+        { x: middle.x - d / 2, y: middle.y, id: 1 },
+        { x: middle.x + d / 2, y: middle.y, id: 2 },
+      ];
+      await touches.start(at(100), 120);
+      for (let i = 1; i <= 20; i++) await touches.move(at(100 + i * 8), 16);
+      for (let i = 19; i >= 0; i--) await touches.move(at(100 + i * 8), 16);
+      await touches.end([], 16);
+    };
+    const pinch = async () =>
       throttled(async () => {
-        const at = await page.evaluate(() => {
-          type Node = { name(): string; getAbsolutePosition(): { x: number; y: number } };
-          const konva = (globalThis as unknown as { Konva: { stages: { visible(): boolean; width(): number; find(f: (n: Node) => boolean): Node[]; container(): { getBoundingClientRect(): { left: number; top: number } } }[] } }).Konva;
-          for (const stage of konva.stages) {
-            if (!stage.visible() || stage.width() === 0) continue;
-            const token = stage.find((n) => n.name() === "token")[0];
-            if (!token) continue;
-            const p = token.getAbsolutePosition();
-            const box = stage.container().getBoundingClientRect();
-            return { x: box.left + p.x, y: box.top + p.y };
-          }
-          return null;
-        });
-        const from = at ?? middle;
         const stop = await recordFrames(page);
         const touches = new Touches(cdp);
-        await touches.start([from]);
-        for (let i = 1; i <= 30; i++) await touches.move([{ x: from.x + i * 3, y: from.y + i * 2 }], 16);
-        for (let i = 29; i >= 0; i--) await touches.move([{ x: from.x + i * 3, y: from.y + i * 2 }], 16);
-        await touches.end([], 16);
+        for (let r = 0; r < 3; r++) {
+          await pinchOnce(touches);
+          await sleep(300);
+        }
+        return p95(await stop());
+      });
+    /** Where the first creature stands on the page, or the middle. */
+    const tokenAt = async () =>
+      (await page.evaluate(() => {
+        type Node = { name(): string; getAbsolutePosition(): { x: number; y: number } };
+        const konva = (globalThis as unknown as { Konva: { stages: { visible(): boolean; width(): number; find(f: (n: Node) => boolean): Node[]; container(): { getBoundingClientRect(): { left: number; top: number } } }[] } }).Konva;
+        for (const stage of konva.stages) {
+          if (!stage.visible() || stage.width() === 0) continue;
+          const token = stage.find((n) => n.name() === "token")[0];
+          if (!token) continue;
+          const p = token.getAbsolutePosition();
+          const box = stage.container().getBoundingClientRect();
+          return { x: box.left + p.x, y: box.top + p.y };
+        }
+        return null;
+      })) ?? middle;
+    /** A finger dragging a creature away and back. */
+    const dragOnce = async (touches: Touches, from: { x: number; y: number }) => {
+      await touches.start([from]);
+      for (let i = 1; i <= 30; i++) await touches.move([{ x: from.x + i * 3, y: from.y + i * 2 }], 16);
+      for (let i = 29; i >= 0; i--) await touches.move([{ x: from.x + i * 3, y: from.y + i * 2 }], 16);
+      await touches.end([], 16);
+    };
+    const drag = async () =>
+      throttled(async () => {
+        const from = await tokenAt();
+        const stop = await recordFrames(page);
+        await dragOnce(new Touches(cdp), from);
         await sleep(300);
         return p95(await stop());
       });
@@ -371,6 +413,7 @@ async function main(): Promise<void> {
       add({ row: "rest, none", view, value: await rest(), unit: "ms/s" });
       add({ row: "pan, none", view, value: await pan(), unit: "ms p95" });
       add({ row: "drag, none", view, value: await drag(), unit: "ms p95" });
+      add({ row: "pinch, none", view, value: await pinch(), unit: "ms p95" });
       for (const k of HEAVIEST) {
         add({ row: `rest, ${k.name}`, view, value: await rest(() => fresh(view, k.weather)), unit: "ms/s" });
         add({ row: `level, ${k.name}`, view, value: await level(page), unit: "level" });
@@ -379,7 +422,15 @@ async function main(): Promise<void> {
       await fresh(view, HEAVIEST[0]!.weather);
       add({ row: "pan, rain", view, value: await pan(), unit: "ms p95" });
       add({ row: "drag, rain", view, value: await drag(), unit: "ms p95" });
-      add({ row: "level after pans, rain", view, value: await panned(view), unit: "level" });
+      add({ row: "pinch, rain", view, value: await pinch(), unit: "ms p95" });
+      add({ row: "level after pans, rain", view, value: await onAndOff(view, swipes), unit: "level" });
+      add({ row: "level after pinches, rain", view, value: await onAndOff(view, pinchOnce), unit: "level" });
+      let from: { x: number; y: number } | null = null;
+      add({ row: "level after drags, rain", view, value: await onAndOff(view, async (touches) => dragOnce(touches, (from ??= await tokenAt()))), unit: "level" });
+      // Held still, a pinch draws the weather in every frame as a camera draw, and streaks fade in thirds there.
+      await page.evaluate(() => localStorage.setItem("rvtt.weather", "still"));
+      await fresh(view, HEAVIEST[0]!.weather);
+      add({ row: "pinch, rain still", view, value: await pinch(), unit: "ms p95" });
       for (const mode of ["still", "off"] as const) {
         await page.evaluate((m) => localStorage.setItem("rvtt.weather", m), mode);
         await fresh(view, HEAVIEST[0]!.weather);
