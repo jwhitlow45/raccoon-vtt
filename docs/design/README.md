@@ -146,6 +146,10 @@ and for how to use it, the [DM guide](../dm-guide.md).
   panels of their own instead of Ambiance, the player at the top of the
   Sound panel's Now playing view with Library as its second view, the
   playlist maker as a pop-up, and plainer Table sound labels.
+- [design-v1-qol.md](design-v1-qol.md): the quicker table: a room search
+  on Ctrl+K, menus from the DM, Players see black and player chips, apply
+  chips under a damage roll, Next and End turn within thumb reach, keys for
+  HP and conditions, and recent DCs, handouts and conditions.
 - [design-v1-side-headers.md](design-v1-side-headers.md): short, matching
   headers in the side panel.
 - [design-v1-sheet-swipe.md](design-v1-sheet-swipe.md): swiping a phone's
