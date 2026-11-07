@@ -139,7 +139,8 @@ export type IconName =
   | "volume"
   | "foldWidth"
   | "previous"
-  | "queue";
+  | "queue"
+  | "search";
 
 /**
  * The meanings drawn with Lucide's path data, by the Lucide icon each
@@ -224,6 +225,7 @@ export const LUCIDE: Partial<Record<IconName, LucideIcon>> = {
   foldWidth: "fold-horizontal",
   previous: "skip-back",
   queue: "list-music",
+  search: "search",
 };
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
@@ -738,6 +740,13 @@ const SHAPES: Record<IconName, ReactNode> = {
       <path d="M12 12H3" />
       <path d="M16 6H3" />
       <path d="M12 18H3" />
+    </g>
+  ),
+  // Lucide search: the room search (features/search/SearchSheet.tsx), in the top bar, the Panels field and the search's own field. Never the outliner's or a list's filter, which keeps its words.
+  search: (
+    <g {...STROKE}>
+      <path d="m21 21-4.34-4.34" />
+      <circle cx="11" cy="11" r="8" />
     </g>
   ),
 };

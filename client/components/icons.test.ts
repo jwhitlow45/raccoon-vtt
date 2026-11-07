@@ -31,6 +31,13 @@ describe("the interface icons", () => {
     }
   });
 
+  test("the room search's magnifier is Lucide's search, as 0.525.0 draws it, and carries Feather's notice, whose search it redraws", () => {
+    assert.equal(LUCIDE.search, "search");
+    const markup = renderToStaticMarkup(createElement(Icon, { name: "search" }));
+    assert.ok(markup.includes('d="m21 21-4.34-4.34"') && markup.includes('cx="11"') && markup.includes('r="8"'), markup);
+    assert.ok((FEATHER_ICONS as readonly string[]).includes("search"), "Feather's search is the drawing's source (Lucide's metadata names its author)");
+  });
+
   test("the Lucide icons copied are exactly the ones the credit and CREDITS.md name", () => {
     assert.deepEqual([...new Set(Object.values(LUCIDE))].sort(), [...LUCIDE_ICONS].sort());
     for (const name of Object.keys(LUCIDE)) assert.ok((ICON_NAMES as string[]).includes(name), `${name} is an icon`);
