@@ -3,7 +3,7 @@ import { Button } from "../../../components/Button.tsx";
 import { nearInScrollBox } from "../../../lib/reveal.ts";
 import { theme } from "../../../lib/theme.ts";
 import { APPLYING } from "./chain.ts";
-import { discardQuestion } from "./GroupSave.tsx";
+import { AskAnswers, discardQuestion } from "./GroupSave.tsx";
 import { useGroupSave } from "./store.ts";
 
 /**
@@ -29,12 +29,14 @@ export function ReplaceConfirm(props: { onDiscard(): void; onKeep(): void }) {
   return (
     <div ref={box} role="alert" style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap", alignItems: "center" }}>
       <span>{applying ? APPLYING : open ? discardQuestion(open) : "Discard the group save?"}</span>
-      {applying ? null : (
-        <Button variant="danger" onClick={props.onDiscard}>
-          Discard
-        </Button>
-      )}
-      <Button ref={keep} onClick={props.onKeep}>{applying ? "OK" : "Keep it"}</Button>
+      <AskAnswers>
+        {applying ? null : (
+          <Button variant="danger" onClick={props.onDiscard}>
+            Discard
+          </Button>
+        )}
+        <Button ref={keep} onClick={props.onKeep}>{applying ? "OK" : "Keep it"}</Button>
+      </AskAnswers>
     </div>
   );
 }

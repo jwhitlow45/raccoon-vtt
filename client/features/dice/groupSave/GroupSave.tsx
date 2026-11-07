@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { bonusFor } from "#shared/dice/bonus.ts";
 import type { AdvantageSource } from "#shared/dice/formula.ts";
 import { uuidv7 } from "#shared/ids.ts";
@@ -178,6 +178,15 @@ export function pageTitle(page: Pick<Page, "fill" | "test" | "rows" | "source">)
   if (page.test.kind === "none") return `Damage for ${n}`;
   const what = page.test.kind === "save" ? `${ABILITY_NAMES[page.test.ability]} save` : page.test.skill ? `${SKILLS[page.test.skill].name} check` : `${ABILITY_NAMES[page.test.ability]} check`;
   return `${what} for ${n}`;
+}
+
+/**
+ * An ask's buttons, kept together after its words: where the line cannot
+ * hold all of them, they go under the words as one group, so the last
+ * never stands alone under the others (designs/qol audit Q8).
+ */
+export function AskAnswers(props: { children: ReactNode }) {
+  return <span style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>{props.children}</span>;
 }
 
 /**
@@ -800,16 +809,18 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
       </Held>
       {reopen?.check === "undone" && page.test.kind !== "none" ? <Button busy={page.rolls.some(roll => roll.state === "sending") || page.requests.some(request => request.state === "sending")} disabled={frozen || offScene} onClick={() => doReroll(rows.map(row => row.holder))}>Roll saves again</Button> : null}
       {(reopen?.check === "undone" || reopen?.check === "unavailable") ? (
-        confirmStartOver ? <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2), alignItems: "center" }}><span>Start over? This replaces these save results.</span><Button onClick={startOver}>Start over</Button><Button onClick={() => setConfirmStartOver(false)}>Keep this save</Button></div> : <Button onClick={() => setConfirmStartOver(true)}>Start over</Button>
+        confirmStartOver ? <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2), alignItems: "center" }}><span>Start over? This replaces these save results.</span><AskAnswers><Button onClick={startOver}>Start over</Button><Button onClick={() => setConfirmStartOver(false)}>Keep this save</Button></AskAnswers></div> : <Button onClick={() => setConfirmStartOver(true)}>Start over</Button>
       ) : null}
       {page.phase !== "applying" && page.phase !== "applied" || stranded ? (
         confirmDiscard ? (
           <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap", alignItems: "center" }}>
             <span>{discardQuestion(shown)}</span>
-            <Button variant="danger" onClick={close}>
-              Discard
-            </Button>
-            <Button onClick={() => setConfirmDiscard(false)}>Keep it</Button>
+            <AskAnswers>
+              <Button variant="danger" onClick={close}>
+                Discard
+              </Button>
+              <Button onClick={() => setConfirmDiscard(false)}>Keep it</Button>
+            </AskAnswers>
           </div>
         ) : (
           <Button onClick={() => (rolledAny ? setConfirmDiscard(true) : close())}>Discard</Button>

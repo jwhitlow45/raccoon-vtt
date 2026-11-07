@@ -9616,13 +9616,10 @@ async function qolRestScreens(sweep: Sweep, page: Page, at: { size: Size; scale:
 /**
  * Findings of the product's that the QOL pass's roots meet, left to the
  * coordinator and named here so nothing else hides with them: each matches
- * one check of one item, and every line one leaves out is logged. It
- * wraps by its words' widths, so a runner whose fonts draw narrower may
- * not meet it.
+ * one check of one item, and every line one leaves out is logged. None is
+ * known now.
  */
-const QOL_KNOWN: { what: string; line: RegExp }[] = [
-  { what: "the group bar's ask before it replaces a rolled page leaves Keep it alone under Discard (audit Q8)", line: /^\S+ qe-group-replace: wrap-orphan [\d.]+ px, div\[alert\] "Discard the Dexterity save for \d+\? Discard Keep i[^"]*": button "Keep it" alone under / },
-];
+const QOL_KNOWN: { what: string; line: RegExp }[] = [];
 const qolKnownOut: string[] = [];
 
 /** Takes the known findings out of what `sweep` gathered since `before`, into qolKnownOut. */
