@@ -471,6 +471,22 @@ describe("what a tick adds to its frame, which the sceneFunc's own timing cannot
     assert.ok(panned.samples.length < 0.7 * none.samples.length, `a pan driven from a panel: ${panned.samples.length} costs`);
   });
 
+  test("a 30 fps map whose measures come back late now and then, every third frame to every eleventh: a healthy canvas holds under 6 frames a second, and a slow one still steps down (WZB-5)", () => {
+    // A late frame that saw the map draw cannot say whose draw it was (#measured), so fewer ticks are judged, a window seldom has its costs, and it keeps holding: 2.6 a second with none late.
+    for (const phase of [0, 1]) {
+      for (const lateEvery of [3, 5, 7, 11]) {
+        const at = `phase ${phase}, a measure late every ${lateEvery} frames`;
+        const map = (frame: number) => (frame + phase) % 2 === 0;
+        const board: Board = (frame) => 1 + (map(frame) ? 4 : 0);
+        const late = (frame: number) => frame % lateEvery === 0;
+        const r = run({ hz: 60, seconds: 60, tick: 0.3, board, map, late });
+        assert.equal(r.level, "full", at);
+        assert.ok(r.holdsPerSecond < 6, `${at}: ${r.holdsPerSecond.toFixed(2)} held frames a second`);
+        assert.equal(run({ hz: 60, seconds: 30, tick: 3, board, map, late }).level, "still", `${at}, no GPU`);
+      }
+    }
+  });
+
   test("a 30 fps animated map playing all along, in step with the ticks or not, at 30, 60 and 120 Hz: healthy weather stays full, and weather adding 3 ms a tick holds still while the map plays (WXZOOM-ASTRA-05)", () => {
     for (const hz of RATES) {
       const every = hz / 30;
