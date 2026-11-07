@@ -9616,12 +9616,11 @@ async function qolRestScreens(sweep: Sweep, page: Page, at: { size: Size; scale:
 /**
  * Findings of the product's that the QOL pass's roots meet, left to the
  * coordinator and named here so nothing else hides with them: each matches
- * one check of one item, and every line one leaves out is logged. Both
- * wrap by their words' widths, so a runner whose fonts draw narrower may
- * meet neither.
+ * one check of one item, and every line one leaves out is logged. It
+ * wraps by its words' widths, so a runner whose fonts draw narrower may
+ * not meet it.
  */
 const QOL_KNOWN: { what: string; line: RegExp }[] = [
-  { what: "the group save's Recent DCs wrap their last chip alone, or the DC label alone above them (audit Q8, Q9)", line: /^\S+ (qe-group-save-dcs|undo-b-[a-z]+): (wrap-orphan [\d.]+ px, span\[group\] "Recent DCs": button "DC \d+" alone under |wrap-label [\d.]+ px, div "DC Recent[\d ]*": label "DC" alone above div "Recent)/ },
   { what: "the group bar's ask before it replaces a rolled page leaves Keep it alone under Discard (audit Q8)", line: /^\S+ qe-group-replace: wrap-orphan [\d.]+ px, div\[alert\] "Discard the Dexterity save for \d+\? Discard Keep i[^"]*": button "Keep it" alone under / },
 ];
 const qolKnownOut: string[] = [];

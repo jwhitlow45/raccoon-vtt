@@ -546,13 +546,23 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
   const setupControls = page.phase === "setup" && !reopened ? <TestPicker page={page} onChange={edit} /> : null;
   // A save's DC takes the ones this device sent last, as Request a roll's does (designs/qol audit Q8 and Q9).
   const dcChips = page.test.kind === "save" && recentDcs.length > 0 ? recentDcChips(page.dc === null ? "" : String(page.dc), recentDcs) : null;
+  /*
+   * The recent DCs take a line of their own under the field, at the row's
+   * end as the field is: beside it they overran the row's 160 px of
+   * controls, so their last chip wrapped alone, or the field went under
+   * its label with them.
+   */
   const dcRow = (
-    <FieldRow label="DC">
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1), minWidth: 0 }}>
+    <div style={{ display: "grid", gap: theme.space(1) }}>
+      <FieldRow label="DC" fixed>
         <NumberField label="DC" value={page.dc ?? undefined} min={1} max={50} nullable placeholder="None" onCommit={(dc) => edit(setDc(pageRef.current, dc))} width={88} />
-        {dcChips ? <RecentDcs chips={dcChips} onTap={(dc) => edit(setDc(pageRef.current, pageRef.current.dc === dc ? null : dc))} /> : null}
-      </div>
-    </FieldRow>
+      </FieldRow>
+      {dcChips ? (
+        <div style={{ display: "flex", justifyContent: "flex-end", minWidth: 0 }}>
+          <RecentDcs chips={dcChips} onTap={(dc) => edit(setDc(pageRef.current, pageRef.current.dc === dc ? null : dc))} />
+        </div>
+      ) : null}
+    </div>
   );
   const anyAsk = rows.some((r) => stateOf(shown, r).way === "ask");
   // Open server rolls carry the DC only when players may see it (chain.ts diceEnvelope), so the switch shows for them too.
