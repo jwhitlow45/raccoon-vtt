@@ -15,6 +15,7 @@ import {
   landing,
   landOn,
   MENU_PAGES,
+  monsterPageKey,
   NOW_PLAYING,
   openAt,
   pageAfter,
@@ -392,8 +393,22 @@ describe("where a route lands (Room's focus kind anchor)", () => {
   });
 
   test("a page the route does not turn is the panel's to show, and never holds the landing", () => {
-    assert.deepEqual(landing({ panel: "monsters", page: recordPage("srd", "goblin") }, { container: box({}), subpage: null }), { t: "panel" });
     assert.deepEqual(landing({ panel: "dm", section: "handouts", page: recordPage("handout", "h1") } as SearchRoute, { container: box({}), subpage: null }), { t: "panel" });
+    assert.deepEqual(landing({ panel: "dm", section: "handouts", page: recordPage("doc", "d1") } as SearchRoute, { container: box({}), subpage: null }), { t: "panel" });
+  });
+
+  test("a monster's card is its subpage: the landing waits for it, an SRD monster's by its own id and the room's by its list's", () => {
+    const place = fake({ self: true });
+    const drawn = box({ [anchor("monsters.card.place")]: place });
+    const srd = { panel: "monsters", page: recordPage("srd", "goblin"), anchor: "monsters.card.place" };
+    assert.deepEqual(landing(srd, { container: drawn, subpage: null }), { t: "wait" });
+    assert.deepEqual(landing(srd, { container: drawn, subpage: "room:goblin" }), { t: "wait" });
+    assert.deepEqual(landing(srd, { container: drawn, subpage: "srd:goblin" }), { t: "land", el: place });
+    const own = { panel: "monsters", page: recordPage("monster", "m1"), anchor: "monsters.card.place" };
+    assert.deepEqual(landing(own, { container: drawn, subpage: "monster:m1" }), { t: "wait" });
+    assert.deepEqual(landing(own, { container: drawn, subpage: "room:m1" }), { t: "land", el: place });
+    assert.deepEqual(landing({ panel: "monsters", page: recordPage("srd", "goblin") }, { container: box({}), subpage: "srd:goblin" }), { t: "panel" });
+    assert.deepEqual([monsterPageKey("srd:goblin"), monsterPageKey("monster:m1"), monsterPageKey("scene:s1"), monsterPageKey(undefined)], ["srd:goblin", "room:m1", null, null]);
   });
 });
 

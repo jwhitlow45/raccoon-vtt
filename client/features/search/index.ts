@@ -35,13 +35,19 @@ export function recordPage(kind: "scene" | "srd" | "monster" | "playlist" | "tra
 }
 
 /**
- * The anchors the index's own rows route to, beside the catalogs' own: the
- * Play control on a playlist's page in Sound's Library. Lane S2b puts each
- * on its control as a `search=` prop, and the anchor scan reads this list
- * with the catalogs' (search.md 5.10).
+ * The anchors the index's own rows route to, beside the catalogs' own: a
+ * playlist's row and its Play and a track's Play in Sound's Library, Open
+ * on a handout a player's Library shows, and Place on a monster's card.
+ * Each is on the control of the record the route names alone
+ * (music/Library.tsx, panels/LibraryPanel.tsx), and the anchor scan reads
+ * this list with the catalogs' (search.md 5.10).
  */
+export const PLAYLIST_ANCHOR = "sound.playlist";
 export const PLAY_PLAYLIST_ANCHOR = "sound.playlist.play";
-export const VIEW_ANCHORS: readonly string[] = [PLAY_PLAYLIST_ANCHOR];
+export const TRACK_ANCHOR = "sound.track";
+export const OPEN_HANDOUT_ANCHOR = "library.handout.open";
+export const PLACE_MONSTER_ANCHOR = "monsters.card.place";
+export const VIEW_ANCHORS: readonly string[] = [PLAYLIST_ANCHOR, PLAY_PLAYLIST_ANCHOR, TRACK_ANCHOR, OPEN_HANDOUT_ANCHOR, PLACE_MONSTER_ANCHOR];
 
 /**
  * The Suggested list's order on an empty field (search.md 5.2), lowest
@@ -319,7 +325,7 @@ export function buildIndex(input: IndexInput): SearchIndex {
           title: m.name,
           where: ROW_WORDS.monster(m.cr, m.type),
           icon: "monsters",
-          act: { t: "open", route: { panel: "monsters", page: recordPage("srd", m.srdId) } },
+          act: { t: "open", route: { panel: "monsters", page: recordPage("srd", m.srdId), anchor: PLACE_MONSTER_ANCHOR } },
         })),
       );
     }
@@ -330,12 +336,15 @@ export function buildIndex(input: IndexInput): SearchIndex {
         title: m.name,
         where: `${ROW_WORDS.monster(m.cr, m.type)} · ${ROW_WORDS.roomMonster}`,
         icon: "monsters",
-        act: { t: "open", route: { panel: "monsters", page: recordPage("monster", m.id) } },
+        act: { t: "open", route: { panel: "monsters", page: recordPage("monster", m.id), anchor: PLACE_MONSTER_ANCHOR } },
       });
     }
+    const music = view.playing?.music ?? null;
     for (const pl of Object.values(view.playlists ?? {})) {
       const page = recordPage("playlist", pl.id);
-      b.entry({ id: `playlist:${pl.id}`, kind: "playlist", title: pl.name, where: ROW_WORDS.tracks(pl.sounds.length), icon: "music", act: { t: "open", route: { panel: SOUND_PANEL, page } } });
+      b.entry({ id: `playlist:${pl.id}`, kind: "playlist", title: pl.name, where: ROW_WORDS.tracks(pl.sounds.length), icon: "music", act: { t: "open", route: { panel: SOUND_PANEL, page, anchor: PLAYLIST_ANCHOR } } });
+      // Playing, its row's button is Pause, which Play would press.
+      if (music?.playlistId === pl.id && music.paused === undefined) continue;
       b.entry({
         id: `action:play:${pl.id}`,
         kind: "action",
@@ -347,7 +356,7 @@ export function buildIndex(input: IndexInput): SearchIndex {
     }
     for (const so of Object.values(view.sounds ?? {})) {
       if (so.use !== "music" || !so.name) continue;
-      b.entry({ id: `track:${so.id}`, kind: "track", title: so.name, where: ROW_WORDS.library, icon: "music", act: { t: "open", route: { panel: SOUND_PANEL, page: recordPage("track", so.id) } } });
+      b.entry({ id: `track:${so.id}`, kind: "track", title: so.name, where: ROW_WORDS.library, icon: "music", act: { t: "open", route: { panel: SOUND_PANEL, page: recordPage("track", so.id), anchor: TRACK_ANCHOR } } });
     }
     for (const doc of Object.values(view.handoutDocs)) {
       b.entry({
@@ -365,9 +374,9 @@ export function buildIndex(input: IndexInput): SearchIndex {
     b.entry({ id: `page:${j.id}`, kind: "page", title: j.title, where: j.folder ?? ROW_WORDS.journal, icon: "journal", act: { t: "open", route: { panel: "journal", page: recordPage("page", j.id) } } });
   }
 
-  // A DM's showings are in the DM panel's Handouts, a player's in Library, which lists the ones shown to them.
+  // A DM's showings are in the DM panel's Handouts, which opens one's viewer, a player's in Library, whose Open opens it.
   const handoutRoute = (id: string): SearchRoute =>
-    role === "dm" ? { panel: "dm", section: "handouts", page: recordPage("handout", id) } : { panel: "library", page: recordPage("handout", id) };
+    role === "dm" ? { panel: "dm", section: "handouts", page: recordPage("handout", id) } : { panel: "library", page: recordPage("handout", id), anchor: OPEN_HANDOUT_ANCHOR, press: true };
   for (const h of Object.values(view.handouts)) {
     b.entry({ id: `handout:${h.id}`, kind: "handout", title: h.title, where: ROW_WORDS.showing, icon: "library", act: { t: "open", route: handoutRoute(h.id) } });
   }

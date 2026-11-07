@@ -275,11 +275,27 @@ const PANEL: Landing = { t: "panel" };
 /** Panels whose subpages the route turns, each subpage's header id the page as the route names it. */
 const SUBPAGED = new Set(["menu", "characters", "journal"]);
 
-/** How Room tells that the panel shows the route's page: a subpage's header id, or a mark on the panel's first page. */
-type PageShown = { t: "subpage" } | { t: "mark"; selector: string; row: boolean };
+/**
+ * A monster's card's subpage id for a route's page (tokens/MonstersPanel.tsx
+ * MonsterDetail, its list's keys): an SRD monster's "srd:<id>" is its own,
+ * and the room's "monster:<id>" is "room:<id>" there. Null for any other page.
+ */
+export function monsterPageKey(page: string | undefined): string | null {
+  const srd = recordId("srd", page);
+  if (srd !== null) return `srd:${srd}`;
+  const own = recordId("monster", page);
+  return own !== null ? `room:${own}` : null;
+}
+
+/** How Room tells that the panel shows the route's page: a subpage's header id, the panel's own turned by the panel (a monster's card), or a mark on the panel's first page. */
+type PageShown = { t: "subpage"; id: string } | { t: "mark"; selector: string; row: boolean };
 
 function pageShown(panel: string, page: string): PageShown | null {
-  if (SUBPAGED.has(panel)) return { t: "subpage" };
+  if (panel === "monsters") {
+    const key = monsterPageKey(page);
+    return key === null ? null : { t: "subpage", id: key };
+  }
+  if (SUBPAGED.has(panel)) return { t: "subpage", id: page };
   if (panel === "scenes" && recordId("scene", page) !== null) return { t: "mark", selector: `[${SEARCH_PAGE_ATTR}="${page}"]`, row: true };
   const view = panel === SOUND_PANEL ? soundView(page) : null;
   // Sound's first page marks the view it shows (SoundPanel.tsx DmSoundFirstPage).
@@ -293,8 +309,8 @@ function pageShown(panel: string, page: string): PageShown | null {
  * focus to a new subpage's title as it publishes (useSubpageFocus), which
  * would take focus back from a control focused before. Then the anchor
  * by its `data-search` id, or a record's row, or the panel itself. A
- * page the route does not turn (a monster, a DM's handout) is the
- * panel's to show, and the landing does not wait for it.
+ * page the route does not turn (a DM's handout, whose viewer the panel
+ * opens) is the panel's to show, and the landing does not wait for it.
  */
 export function landing(request: Pick<SearchRoute, "panel" | "page" | "anchor">, view: RouteView): Landing {
   const { container } = view;
@@ -302,7 +318,7 @@ export function landing(request: Pick<SearchRoute, "panel" | "page" | "anchor">,
   const shown = request.page === undefined ? null : pageShown(request.panel, request.page);
   let row: HTMLElement | null = null;
   if (shown?.t === "subpage") {
-    if (view.subpage !== request.page) return WAIT;
+    if (view.subpage !== shown.id) return WAIT;
   } else if (shown) {
     if (view.subpage !== null) return WAIT;
     const mark = container.querySelector<HTMLElement>(shown.selector);

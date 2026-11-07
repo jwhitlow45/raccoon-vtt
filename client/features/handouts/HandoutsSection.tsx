@@ -35,6 +35,7 @@ import { JobBlock } from "./pdf/JobBlock.tsx";
 import { isPdfFile, jobPageIds, pdfPickRefusal } from "./pdf/job.ts";
 import { useJobWaiting, usePdfJob } from "./pdf/live.ts";
 import { StarterDialog } from "../starter/StarterDialog.tsx";
+import { recordId, useRouteRequest } from "../search/route.ts";
 
 const STARTER_HANDOUT_USES = ["handout"] as const;
 
@@ -92,6 +93,18 @@ export function HandoutsSection(props: { fold: { open: boolean; onToggle(): void
   };
   /** A document's View: every page, under the Library's key for it, with its page count and whether it shows. */
   const viewDoc = useCallback((docId: string, opener: HTMLElement | null) => view({ kind: "doc", id: docId }, opener), []);
+  /*
+   * The room search's route to a showing or a document of the library
+   * (features/search/route.ts) opens its viewer, which takes focus as it
+   * opens and hands it back to Show a handout as it closes, in this group
+   * the route opened.
+   */
+  useRouteRequest("dm", (request) => {
+    const handoutId = recordId("handout", request.page);
+    const docId = recordId("doc", request.page);
+    if (handoutId !== null) view({ kind: "handout", id: handoutId }, showButton.current);
+    else if (docId !== null) viewDoc(docId, showButton.current);
+  });
   const viewedHandout = viewing?.kind === "handout" ? handouts?.[viewing.id] : undefined;
   const viewedDoc = viewing?.kind === "doc" ? docs?.[viewing.id] : undefined;
   // A document's "Showing now." changes only with the showings, which the memo below follows through `handouts`.

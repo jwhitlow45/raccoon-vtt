@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { handoutPages } from "#shared/handouts.ts";
 import type { Handout } from "#shared/model.ts";
 import { Button } from "../components/Button.tsx";
@@ -8,6 +8,7 @@ import { closedSlot, openHandout } from "../features/handouts/closed.ts";
 import { pageCountText } from "../features/handouts/handouts.ts";
 import { LibraryGrid } from "../features/images/LibraryGrid.tsx";
 import type { PanelProps } from "../features/panels.ts";
+import { recordId, useRouteRequest } from "../features/search/route.ts";
 import { theme } from "../lib/theme.ts";
 import { useScoped } from "../state/scope.ts";
 import { useAssets, useRoomView } from "../state/view.ts";
@@ -53,6 +54,9 @@ function ShowingHandouts() {
    * closed the panel before, and a phone lost the Library at every look.
    */
   const reopen = (h: Handout) => openHandout(closedStore, h);
+  // The room search's route to a handout (features/search/route.ts) lands on its Open, which it presses: until the next route, that row's Open holds the anchor.
+  const [routed, setRouted] = useState<string | null>(null);
+  useRouteRequest("library", (request) => setRouted(recordId("handout", request.page)));
   if (showing.length === 0) return null;
   return (
     <Section label="Handouts from the DM" divider={false} style={{ borderBottom: `${theme.line.border}px solid ${theme.color.border}` }}>
@@ -80,10 +84,7 @@ function ShowingHandouts() {
             detail={pagesDetail(h)}
             style={{ padding: `${theme.space(2)}px 0` }}
             trailing={
-              <Button
-                size="sm"
-                onClick={() => reopen(h)}
-              >
+              <Button size="sm" search={routed === h.id ? "library.handout.open" : undefined} onClick={() => reopen(h)}>
                 Open
               </Button>
             }

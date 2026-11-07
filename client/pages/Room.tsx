@@ -79,6 +79,7 @@ import { toolbarSlot, toolChanged, toolVoiceSlot, tuckEvent } from "../state/too
 import { useDropHpDraftsOnSelect } from "../features/tokens/hpDraft.ts";
 import { useClearStatBlockOnSelect } from "../features/tokens/statBlockOpen.ts";
 import { panelFoldsSlot } from "../features/tokens/panelFolds.ts";
+import { SEARCH_ATTR } from "../features/search/entry.ts";
 import { landing, landOn, routeSlot, type RouteRequest } from "../features/search/route.ts";
 import { PanelsSearchField, SearchButton, SearchSheetHost } from "../features/search/SearchSheet.tsx";
 import { isoOffered, viewFoldSlot } from "../features/view/choice.ts";
@@ -1016,7 +1017,8 @@ function RoomPage() {
       if (box && routeWatch.current?.box !== box && typeof MutationObserver === "function") {
         routeWatch.current?.observer.disconnect();
         const observer = new MutationObserver(() => placeFocusNow.current());
-        observer.observe(box, { childList: true, subtree: true });
+        // An anchor may come as an attribute on a control already drawn, as Library's on the playlist or track a route names.
+        observer.observe(box, { childList: true, subtree: true, attributes: true, attributeFilter: [SEARCH_ATTR] });
         routeWatch.current = { box, observer };
       }
       return null;

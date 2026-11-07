@@ -7,7 +7,7 @@ import { PANELS, panelsFor } from "../panels.ts";
 import { EVERYONE } from "./catalog/everyone.ts";
 import type { Catalog } from "./catalog/types.ts";
 import type { DmCatalogState } from "./dmCatalog.ts";
-import { buildIndex, catalogsFor, diceRow, PLAY_PLAYLIST_ANCHOR, searchResults, VIEW_ANCHORS } from "./index.ts";
+import { buildIndex, catalogsFor, diceRow, OPEN_HANDOUT_ANCHOR, PLACE_MONSTER_ANCHOR, PLAY_PLAYLIST_ANCHOR, PLAYLIST_ANCHOR, searchResults, TRACK_ANCHOR, VIEW_ANCHORS } from "./index.ts";
 import { DM_VIEW, EVERYONE_FIXTURE, indexOf, keysOf, PAT_VIEW, seededRoom, viewOf } from "./search.testutil.ts";
 
 const ids = (state: RoomView, options?: Parameters<typeof indexOf>[1]) => new Set(indexOf(state, options).items.map((i) => i.entry.id));
@@ -146,10 +146,30 @@ describe("the room's things (search.md 4)", () => {
     assert.ok(VIEW_ANCHORS.includes(PLAY_PLAYLIST_ANCHOR));
   });
 
+  test("a playlist lands on its row and a track on its Play, neither pressed, in Library", () => {
+    assert.deepEqual(entryOf(DM_VIEW(), "playlist:drums")?.act, { t: "open", route: { panel: "sound", page: "playlist:drums", anchor: PLAYLIST_ANCHOR } });
+    assert.deepEqual(entryOf(DM_VIEW(), "track:song")?.act, { t: "open", route: { panel: "sound", page: "track:song", anchor: TRACK_ANCHOR } });
+    assert.ok([PLAYLIST_ANCHOR, TRACK_ANCHOR, OPEN_HANDOUT_ANCHOR, PLACE_MONSTER_ANCHOR].every((a) => VIEW_ANCHORS.includes(a)));
+  });
+
+  test("while a playlist plays, Play <playlist> is not offered, since its row's button is Pause. Paused, Play resumes it", () => {
+    const room = seededRoom();
+    const run = { playlistId: "drums", soundIds: ["song"], at: 0, startAt: 0, run: "r1", repeat: "all", fade: 0 } as unknown as NonNullable<NonNullable<typeof room.playing>["music"]>;
+    room.playing = { rev: 0, music: run, loops: {}, effects: [], volume: { music: 100, effects: 100 } };
+    assert.equal(entryOf(viewOf(room, DM), "action:play:drums"), undefined);
+    assert.ok(entryOf(viewOf(room, DM), "playlist:drums"), "the playlist's own row stays");
+    room.playing = { ...room.playing, music: { ...run, paused: 1_000 } };
+    assert.ok(entryOf(viewOf(room, DM), "action:play:drums"));
+  });
+
+  test("a monster lands on its card's Place, unpressed", () => {
+    assert.deepEqual(entryOf(DM_VIEW(), "monster:srd:goblin-boss")?.act, { t: "open", route: { panel: "monsters", page: "srd:goblin-boss", anchor: PLACE_MONSTER_ANCHOR } });
+  });
+
   test("pages and showing handouts for both, each where its role opens them", () => {
     const room = seededRoom();
     room.handouts = { h1: { id: "h1", rev: 0, assetId: "a1", title: "Map of the keep", to: "all", shownAt: "2026-10-12T20:00:00.000Z" } };
-    assert.deepEqual(entryOf(viewOf(room, P1), "handout:h1")?.act, { t: "open", route: { panel: "library", page: "handout:h1" } });
+    assert.deepEqual(entryOf(viewOf(room, P1), "handout:h1")?.act, { t: "open", route: { panel: "library", page: "handout:h1", anchor: OPEN_HANDOUT_ANCHOR, press: true } });
     assert.deepEqual(entryOf(viewOf(room, DM), "handout:h1")?.act, { t: "open", route: { panel: "dm", section: "handouts", page: "handout:h1" } });
     assert.ok(ids(viewOf(room, DM)).has("page:plans") && !ids(viewOf(room, P1)).has("page:plans"));
   });

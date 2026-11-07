@@ -26,6 +26,7 @@ import { monsterMatcher } from "./monsterSearch.ts";
 import { PLACE_TOOL_ID, setPending } from "./placement.ts";
 import { ConfirmButton, NumberField, Stepper } from "./ui.tsx";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
+import { monsterPageKey, useRouteRequest } from "../search/route.ts";
 
 /**
  * The DM's monster browser (features section 15): the room's own monsters,
@@ -49,6 +50,11 @@ export default function MonstersPanel(props: PanelProps) {
   const deferredFilters = useDeferredValue(filters);
   const [chosen, setChosen] = useState<string | null>(null);
   const [editing, setEditing] = useState<Editing | null>(null);
+  // The room search's route to a monster (features/search/route.ts) opens its card, its key the card's own subpage id.
+  useRouteRequest("monsters", (request) => {
+    const key = monsterPageKey(request.page);
+    if (key !== null) setChosen(key);
+  });
   const roomMonsters = useRoomView((s) => s.view?.monsters);
   const srdImages = useRoomView((s) => s.view?.srdImages);
 
@@ -213,7 +219,7 @@ function MonsterDetail(props: {
         ) : null}
         <Checkbox checked={hidden} onChange={setHidden} label="Hidden from players" help="Reveal it later from its token." />
         {lair !== null ? <Checkbox checked={inLair} onChange={setInLair} label="In its lair" help={lair} /> : null}
-        <Button variant="primary" size="sm" onClick={place} disabled={useTyped && typedHp === null}>
+        <Button variant="primary" size="sm" search="monsters.card.place" onClick={place} disabled={useTyped && typedHp === null}>
           {count === 1 ? "Place on the map" : `Place ${count} on the map`}
         </Button>
         <Help>Then tap the map where {count === 1 ? "it goes" : "they go"}.</Help>

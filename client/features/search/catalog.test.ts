@@ -336,10 +336,11 @@ describe("every anchor is drawn by exactly one search= in client/**/*.tsx, and t
     }
   });
 
-  test("each anchor routed to is written or made, but the playlist page's Play, which lane S2b places", () => {
+  test("each anchor routed to is written or made, the index's own rows' included", () => {
     const drawn = new Set([...written().keys(), ...made()]);
     const missing = [...routed()].filter((id) => !drawn.has(id));
-    assert.deepEqual(missing, [...VIEW_ANCHORS]);
+    assert.deepEqual(missing, []);
+    for (const id of VIEW_ANCHORS) assert.ok(drawn.has(id), id);
   });
 });
 

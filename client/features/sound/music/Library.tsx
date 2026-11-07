@@ -9,6 +9,8 @@ import { Row, RowList } from "../../../components/Row.tsx";
 import { theme } from "../../../lib/theme.ts";
 import { useScoped } from "../../../state/scope.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../../state/view.ts";
+import { SOUND_PANEL } from "../../panels.ts";
+import { recordId, useRouteRequest } from "../../search/route.ts";
 import { SOUND_LIMITS } from "#shared/limits.ts";
 import { playingAt, type MusicRun, type Playlist, type PlaylistId, type Sound, type SoundId } from "#shared/sound.ts";
 import { AddSounds } from "../upload/AddSounds.tsx";
@@ -76,9 +78,9 @@ export function rowPlay(music: MusicRun | null, row: { soundId: SoundId } | { pl
 }
 
 /** One button that stays one element as it turns from Play to Pause and back, so focus stays on it. */
-function RowPlayButton(props: { play: RowPlay; name: string; disabled?: boolean; onPlay(): void; onPause(): void; onResume(): void }) {
-  if (props.play === "pause") return <IconButton icon="pause" label={pauseName(props.name)} onClick={props.onPause} />;
-  return <IconButton icon="play" label={playName(props.name)} disabled={props.play === "play" && props.disabled} onClick={props.play === "resume" ? props.onResume : props.onPlay} />;
+function RowPlayButton(props: { play: RowPlay; name: string; disabled?: boolean; search?: string | undefined; onPlay(): void; onPause(): void; onResume(): void }) {
+  if (props.play === "pause") return <IconButton icon="pause" label={pauseName(props.name)} data-search={props.search} onClick={props.onPause} />;
+  return <IconButton icon="play" label={playName(props.name)} data-search={props.search} disabled={props.play === "play" && props.disabled} onClick={props.play === "resume" ? props.onResume : props.onPlay} />;
 }
 
 /** Search's match: by name, ignoring case and accents (4.4). */
@@ -201,6 +203,22 @@ export function Library(props: { onOpenTrack(soundId: SoundId): void }) {
     setSortState(next);
     keepSort(next);
   };
+  /*
+   * The room search's route to a playlist or a track (features/search/route.ts)
+   * opens Library at its row: the search's own words leave the field, so
+   * the row shows, and its row and Play take the route's anchors until the
+   * next route.
+   */
+  const [routed, setRouted] = useState<{ kind: "playlist" | "track"; id: string } | null>(null);
+  useRouteRequest(SOUND_PANEL, (request) => {
+    const playlist = recordId("playlist", request.page);
+    const track = recordId("track", request.page);
+    const next = playlist !== null ? { kind: "playlist" as const, id: playlist } : track !== null ? { kind: "track" as const, id: track } : null;
+    setRouted(next);
+    if (next && view.getState().query !== "") view.setState({ query: "" });
+  });
+  const routedPlaylist = routed?.kind === "playlist" ? routed.id : null;
+  const routedTrack = routed?.kind === "track" ? routed.id : null;
   const editPlaylist = (playlist: Playlist, mark: string) => openMaker(maker, draftOf(playlist), mark);
   const newPlaylist = (mark: string, seed?: SoundId) => openMaker(maker, newDraft(actions.newId(), seed), mark);
 
@@ -262,11 +280,17 @@ export function Library(props: { onOpenTrack(soundId: SoundId): void }) {
                       detail={playlistDetail(inIt.length, totalMs(inIt))}
                       chosen={music?.playlistId === p.id}
                       opener={`playlist-${p.id}`}
+                      search={routedPlaylist === p.id ? "sound.playlist" : undefined}
                       data={{ [MAKER_OPENER]: MAKER_MARKS.playlist(p.id) }}
                       onClick={() => editPlaylist(p, MAKER_MARKS.playlist(p.id))}
                     />
                   </div>
-                  <RowPlayButton play={rowPlay(music, { playlistId: p.id }, t)} name={p.name} disabled={inIt.length === 0} onPlay={() => playPlaylist(actions, p, sounds)} onPause={pause} onResume={resume} />
+                  <RowPlayButton
+                    play={rowPlay(music, { playlistId: p.id }, t)}
+                    name={p.name}
+                    disabled={inIt.length === 0}
+                    search={routedPlaylist === p.id ? "sound.playlist.play" : undefined}
+                    onPlay={() => playPlaylist(actions, p, sounds)} onPause={pause} onResume={resume} />
                   <MoreMenu
                     name={p.name}
                     items={playlistItems(p)}
@@ -299,7 +323,7 @@ export function Library(props: { onOpenTrack(soundId: SoundId): void }) {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <Row {...(tiles ? { leading: <Tile name={name} size={TILE.row} /> } : null)} wrapTitle={!tiles} fullDetail={!tiles} title={name} detail={lengthText(s.ms)} chosen={current} />
                   </div>
-                  <RowPlayButton play={rowPlay(music, { soundId: s.id }, t)} name={name} onPlay={() => playTrack(actions, s)} onPause={pause} onResume={resume} />
+                  <RowPlayButton play={rowPlay(music, { soundId: s.id }, t)} name={name} search={routedTrack === s.id ? "sound.track" : undefined} onPlay={() => playTrack(actions, s)} onPause={pause} onResume={resume} />
                   <TrackMore
                     sound={s}
                     items={trackItems(s)}
