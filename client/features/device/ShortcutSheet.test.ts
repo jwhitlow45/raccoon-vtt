@@ -51,7 +51,7 @@ test("FU40-B: narrow rebinding rows give their controls both table columns and r
   const priorWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
   try {
     setKeyChanges({ "tool:draw": "k", "tool:fog": "q" });
-    for (const width of [320 / 1.3, 300, 390, 1440]) {
+    for (const width of [320 / 1.3, 390 / 1.3, 320, 390, 1440]) {
       Object.defineProperty(globalThis, "window", { configurable: true, value: { innerWidth: width, innerHeight: 568 } });
       const html = renderToStaticMarkup(createElement(ShortcutList, { role: "dm", rebind: true }));
       const rows = Array.from(html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g), (m) => m[1]!);
@@ -59,8 +59,8 @@ test("FU40-B: narrow rebinding rows give their controls both table columns and r
       assert.ok(controlled.length >= 20);
       assert.ok(controlled.some((row) => row.includes('aria-label="Reset the key for Draw"')));
       for (const row of controlled) {
-        if (width < 300) {
-          assert.match(row, /<td colSpan="2" headers="([^"]+)"/, "at 320 px and 130%, Change and Reset need the whole row");
+        if (width < 320) {
+          assert.match(row, /<td colSpan="2" headers="([^"]+)"/, "at 320 px and 390 px at 130%, Change and Reset need the whole row");
           assert.equal(row.includes("<th"), false, "the key and its description stay in the preceding row");
           const key = /headers="([^"]+)"/.exec(row)![1]!;
           const before = rows[rows.indexOf(row) - 1]!;

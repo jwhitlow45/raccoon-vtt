@@ -115,8 +115,9 @@ export function ShortcutList(props: { role: "dm" | "player"; rebind?: boolean; s
   const keys = useShortcutKeys();
   const sections = sheetSections(props.role, sheetDevice(), keys);
   const rebind = props.rebind === true;
-  // At 320 px and 130%, a third column leaves no room for the key and its words.
-  const stackControls = useLayoutSize().width < 300;
+  // A third column needs about 280 px of the sheet: the widest keycap, the longest word of what it does, and Change with Reset.
+  // At 390 px and 130% (300 px) the sheet holds 268, so Change and Reset go under the words there too.
+  const stackControls = useLayoutSize().width < 320;
   const [editing, setEditing] = useState<Editing | null>(null);
   const changeButtons = useRef(new Map<string, HTMLButtonElement>());
   const swapButton = useRef<HTMLButtonElement>(null);
