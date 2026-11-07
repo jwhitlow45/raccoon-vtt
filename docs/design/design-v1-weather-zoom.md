@@ -1,0 +1,272 @@
+# raccoon-vtt: weather that stays with the map on a zoom
+
+Status: built (2026-11-07). Draft 2, after design review rounds 1 to 4: the "Round 1 dispositions" table and the "Round 2 notes for the build" at the end answer them, and the notes win over the sections above them. Decisions D-261106-295 to D-261106-306. It amends docs/design/design-v1-weather.md 5.2 ("Anchored to the map on a pan"), 5.3's counts and 6.4's sizes. The "As built" section at the end says where the build went its own way.
+
+The project owner (2026-11-06): "i also just noticed zooming with weather effects causes the effects to move in a weird way relative to the play surface. open to designs to get around this".
+
+## 1. What a zoom does today (measured)
+
+Measured on the base build with the cavern map, 40 by 40 squares at 40 px a square: wheel and the + key on a 1280 by 800 computer page, a two-finger pinch on a 390 by 844 phone page at 3x, in Top-down and Isometric, with heavy rain, snow, leaves and fog. Held still (reduced motion), so each zoom is exactly one camera draw, the weather canvas after the zoom was compared with the canvas before, read back three ways: not moved (a lens), moved by the stage's pan change (sim.ts `spotOf`), and zoomed with the ground about the zoom point. The script is `wxzoom-proto/measure.ts` in the prototype (section 12).
+
+- **Rain, snow and leaves, both views, all three inputs:** the pan change is the only reading that matches (mean alpha error 0.1 to 3.3, against 1.0 to 9.2 for the lens and the ground, no better than a random 40 px shift). Every mark slides together by the pan change, `(origin − anchor) × (f − 1)`, where origin is where the view's (0, 0) stands on screen, in Top-down the map's top-left corner. Marks do not race away from the zoom point: they all move one way.
+- **Sizes:** a wheel notch at (900, 300) zooms 1.11 times and slides every mark (−130, −74) px in one frame, a + press (−233, −218), the phone pinch to 2.5 times (−1,298, −1,017). In Isometric the view's origin stands nearer the screen, so the same inputs slide (−47, −49), (−12, −155) and (−101, −669).
+- **Frame by frame, Moving, a phone pinch** from 80 to 240 px apart over 16 moves at 60 Hz: each frame the ground under the fingers moves 0 px and the ground 150 px from them 7 to 19 px, while every drop or flake jumps 137 px toward the top left. Heavy rain in a strong wind streams sideways at about 8,000 px a second for the length of the pinch and snaps back to falling when the fingers stop. Snow looks blown off the screen by a gust.
+- **The wrap hides the edges:** a mark leaves and comes back 64 px off screen, so a viewer sees the whole layer lurch.
+- **Fog:** its sheets scale about the canvas's top-left corner by the zoom over 50, held between half and twice, and shift by the pan change, so banks grow from the corner and slide, and outside 25 to 100 px a square they only slide.
+- **Held still** (Still, reduced motion, Low power, stepped down to still) shows the same lurch with nothing moving to hide it, so a reduced-motion user gets motion they did not ask for.
+
+## 2. The rule: the weather lives on the stage's plane (D-261106-295)
+
+**Chosen, A: anchored in the stage's own plane.** Particles live in the stage's local coordinates (view space, lib/camera.ts) in tiles that repeat across it, and the draw maps them through the camera. A pan and a zoom then move every mark's center exactly as they move the ground, at any zoom, about any point, from any input. Each mark's sway (snow 8 px, ash 6, leaves 10) stays in screen px as part of its look (D-261106-297), so its drawn center is within `sway × |f − 1|` of its ground point through a zoom by f, and exact for the streaks, which do not sway. The sceneFunc stays a pure read of the field and the camera (5.2), and only the tick reads the camera its stage holds, to step marks at their screen speed (3.5).
+
+Measured on the prototype, the same runs: every mark the e2e hook names in both draws, 30 to 55 of the 64 it lists for a wheel notch or a + press, has its center before sway on the same ground point to 0.0 px, in both views and for every kind. Their drawn centers are off by at most 0.84 and 2.0 px for snow (bounds 0.88 and 2.0), 0.63 and 1.5 for ash (0.66 and 1.5), 1.05 and 2.5 for leaves (1.1 and 2.5), 14.0 for leaves through the 2.5 times pinch (15), and 0.0 for rain. Read from the pixels, the ground's zoom is the closest reading for every kind (wheel: rain 2.5 against 8.3 for the lens), and the pan change, today's match, the worst. Moving, the same phone pinch: on a frame with no tick every named mark stands 0.0 px from where the ground under it went, and on a tick it is off only by its own fall since the last (a median 4.5 to 5 px for heavy snow, 64 to 74 px for heavy rain in a strong wind, 5.3's speed over 33 ms).
+
+Rejected, with their costs:
+- **B, rescale about the zoom point** on each camera change, then refill or thin. A camera change would write the field, which 5.2 forbids: the sceneFunc would write, or the controller would subscribe to the camera, which D-261102-129 rejected. The state machine gains a third writer, mode.random.test's "camera draws never step the field" becomes "camera draws step it exactly so", in Still every zoom writes, and refills are random, so a zoom out and back in does not bring the same rain back.
+- **C, fade through a zoom:** hides the slide rather than fixing it. A phone pinch is continuous, so the weather would vanish for every pinch, and a wheel would flicker it notch by notch.
+- **D, a lens in screen space:** drops 5.2's anchoring on a pan, the owner's "part of the map": the map would slide under weather that stays on the glass.
+
+## 3. How A works
+
+### 3.1 Tiles at power-of-two levels (D-261106-296)
+
+- A **level** k is a set of particles stored as fractions of a square tile `T / 2^k` view units across, so `T × scale / 2^k` px on screen. A camera at `scale` draws two levels, by `l = log2(scale)`, `n = floor(l)` and `u = l − n`: the **coarse** level n, whose tile is T to 2T px on screen, and the **fine** level n + 1, half that.
+- Their **shares** are `(4 − 4^u) / 3` of the coarse level's particles and `(4^u − 1) / 3` of the fine level's. Marks per screen area are then the same at every u, and each share reaches 0 at the zoom where its level stops being drawn, so crossing an octave changes nothing on screen. Measured over zooms 4 to 400, against today's marks on screen: 0.93 to 1.04 for heavy rain on a phone, 0.89 to 1.05 for heavy leaves, 0.93 to 1.01 for heavy rain at 2048 by 1536 (the spread is sampling, over 64 camera spots a zoom).
+- **The tile T** is fixed when the field is made (`tileFor`): the wrap box's long side (the screen and 64 px a side), rounded up to 256 px, and 1,024 at least. So the coarse level never shows a particle twice across the screen. A phone held either way keeps 1,024, a 1440 by 900 window gets 1,792, a 2048 by 1536 tablet 2,304.
+- **A resize** the tile still fits (`tileFits`: the box's long side within the tile and over half of it) recounts the tile and keeps every particle on its ground. One past it, a window dragged wider or a much smaller one, makes a new field with its own tile, which reshuffles the weather once, as a new look does. Ground spots cannot survive a new tile, since the lattice the copies stand on changes. On phones and tablets a rotation keeps the long side, so it never happens there.
+- A tile holds `tileCount`: the screen's count (5.3's per area, lowered by the cap) spread over the wrap box, as today's field spreads it, over one tile, so the weather is exactly as dense on screen as today. That is 685 particles a level for heavy rain on an upright phone, of which about 215 show, as today (today's 329 cover the wrap box, so a screen has always shown about 65% of 5.3's counts).
+- **Levels** run from `floor(log2(MIN_SCALE))`, 2, to `floor(log2(MAX_SCALE)) + 1`, 9, computed from lib/camera.ts, and a sim test holds that the camera's whole range draws inside them. They share each particle's speed, size, spin and shade, so only positions (two float64s) and wrap counts (two int32s) are per level.
+- **Memory:** about 205 bytes a particle across the 8 levels, so 140 KB for heavy rain and 225 KB for a sandstorm on a phone, 270 KB for a sandstorm at 2048 by 1536 and 370 KB at 1440 by 900, the largest, where today's field is under 45 KB. Arrays grow in place when a resize needs more particles.
+- **Repeats, measured** (marks that are a second copy of a particle on screen, at 32, 38, 45, 54 and 60 px a square): with draft 1's fixed 1,024 px tile, 58% to 70% at 1440 by 900 and 89% to 100% at 2048 by 1536. With T, 0% to 25% and 0% to 34%, and 0% to 27% on a phone either way. What remains are fine-level copies at least half the wrap box's long side apart, each with its own phase and length (3.4). The `draft-2-repeats-…` strips (section 11) show the coarse level alone and both levels at 2048 by 1536 and 1440 by 900, held still, and no repeat reads in them.
+- Rejected: an offset per copy within its tile, fixed in the plane (tried: it hides repeats, but walking one more tile a side and two hashes a copy made heavy rain's tick 53 µs where 32 does it, for repeats the strips do not show), particles added and dropped as the screen's patch changes (a camera draw between ticks shows the empty edges a zoom out reveals, or must spawn, which writes the field), one level with hysteresis (density swings four times within a level), a tile the size of the screen without rounding (a window drag would remake the field every frame).
+
+### 3.2 Marks keep their screen size, speed and sway (D-261106-297)
+
+A drop is 5.3's length and speed on screen at every zoom, a flake its radius, and sway its 5.3 amplitude across the motion. Zoomed in, the drops spread apart with the ground and new ones fade in between them, the same rain seen closer. Rejected: marks that grow with the zoom (at 400 px a square a streak would be meters long, and wx-9's contrast check would need a level per zoom), growth by the square root within a level (two sizes mixing on screen through every octave), sway in the plane (its amplitude would grow with the zoom, and the tick would write a sway offset per mark and level).
+
+### 3.3 Fading at a share's end, and batches (D-261106-298)
+
+- A level's marks fade over a band of 15% of the tile's active particles, centered on the end of its share (`shareEnd`), so a zoom never pops a slow mark, and the band's alphas sum to the share.
+- Snow and ash draw the fade in thirds (`tierOf`, rounded, so the thirds average the fade, and a third of 0 draws nothing). Leaves, one `drawImage` each, fade exactly. Moving streaks (rain, sand, a clear day's wind), at 250 px a second and more, draw whole from the fade's midpoint, since one that appears reads as one more falling in, and keep one path a color. Held still nothing falls, so streaks fade in thirds there too.
+- `collect` sorts the marks by color and third in one counting pass as it gathers them, so each batch is one walk over its own marks, where draft 1 walked all of them once per color and third (nine times for ash). It is part of the build.
+
+### 3.4 Copies keep their phase (D-261106-299)
+
+A particle shows once a tile, so a copy is named by the tile it stands in less the particle's wraps: `stepField` adds to a per-level integer wrap count each time a particle's fraction wraps, forward or back, so `(mx − wx, my − wy)` names one moving copy for its life, the same before and after it crosses a tile's edge. A hash of that name, the particle and the level gives the copy's sway and spin phase and, for a streak, a length within 15% of the particle's. So copies of one particle never sway or fall in step, the phase never drifts with speed or zoom (draft 1's phase from position did, by up to half the sway rate), and a sim test walks a field through 600 ticks and over 50 tile crossings with no copy's phase changing and no copy jumping.
+
+### 3.5 The tick reads its stage's camera (D-261106-300)
+
+`stepField(field, ms, camera)`: the tick in WeatherLayer.tsx reads `cameraOfStage(stage)` as it steps, and moves only the particles the two shares draw, each by its speed in px over its tile's size on screen. The controller still subscribes to no camera, a camera draw still never steps the field, and mode.ts is unchanged. The store reads the same camera at each frame's start for one rule of its cost measure (4, D-261106-306). A stage that has not taken a camera yet reads as scale 1, under MIN_SCALE, and draws no marks that frame. Rejected: a camera subscription (D-261102-129), stepping in view units (rain would fall ten times as fast on screen at 400 px a square).
+
+### 3.6 Rings and sheets
+
+Heavy rain's rings are stored in view units, born at a random spot on screen at the tick, drawn where they fell, 2 to 6 px across on screen, at the rate the screen's marks fall through it, from 5.3's count.
+
+Each noise sheet (fog's two, the sandstorm's one) draws at two octaves by `log2(scale / 50)`: the coarse one at once to twice the sheet's size, the fine one at half to once, crossfading through the octave by a smoothstep of their alphas, with the pattern's origin at the sheet's drift in view units through the camera, so a bank keeps its place on the ground. The half-and-twice clamp goes. Fog draws four fills where it drew two (an octave under 2% alpha is skipped near an octave's ends). Measured on the phone, heavy fog held still at 50, 59.5, 70.7, 84.1 and 100 px a square: coverage (mean alpha) 0.17, 0.15, 0.16, 0.19 and 0.19, which is the sampling spread of where the banks fall, and patchiness (the alpha's spread per pixel) 0.099, 0.076, 0.068, 0.096 and 0.108, so mid-octave the banks are about 30% flatter. `draft-2-fog-heavy-held-still-50-71-100.png` shows it is slight. Weights that keep the spread (each over the root of their squares' sum) would raise mid-octave coverage by up to 41%, a fog that brightens and dims every octave, which reads worse than softer banks, at no cost either way. (D-261106-301.)
+
+### 3.7 Isometric: the main stage's plane (D-261106-302)
+
+The anchoring plane is the main stage's view space, the one plane the relief, weather, drag and upright layers draw in. The camera is a uniform scale and pan of it, so a zoom maps every point of it the same way, the ground at height 0, raised tops and standees alike, and the orthographic view needs no depth. Rain still falls down the screen in front of the standees, clipped to the ground's outline as 5.1 says.
+
+### 3.8 Every camera change (D-261106-303)
+
+Nothing is special-cased: a wheel at the pointer, a trackpad's pinch, a two-finger pinch on a phone or a tablet, + and −, Fit the map, Follow me, Bring everyone here, a ping's Look here, a resize that keeps the middle and the bar's shift all change the stage's camera, and the next draw puts every mark at its ground spot. A view switch or a turn keeps each particle's fractions, so the weather moves by that change's pan, as the map's whole drawing does.
+
+| On this device | On a zoom |
+|---|---|
+| Moving | Every frame of a pinch is a camera draw or a tick, both reading the camera. Marks spread or gather with the ground and keep falling |
+| Still, reduced motion, Low power, stepped down to still | The held frame zooms with the ground, streaks fade in thirds, and a held pinch is one camera draw a frame, gated by the bench (section 4) |
+| Stepped down to half | Each level draws half its share |
+| Off, a setup tool | No layer, as today |
+
+## 4. Performance (D-261106-304)
+
+The work per draw is the screen's marks, as today, plus a walk over each level's share, about one tile's count in all (685 for heavy rain on a phone, where today walks 329). In Node, on a context that records nothing, a tick's step and draw take, against today's: on a phone, heavy rain 32 µs against 15, snow 24 against 13, ash 22 against 12, a sandstorm 42 against 20, leaves 9 against 5 and a strong wind 6 against 3. At 2048 by 1536 heavy rain takes 42 µs against 23, and a sandstorm 61 against 34.
+
+`scripts/bench-weather.ts` gains three rows a view, all gated with a GPU: **pinch** (each frame's gap while two fingers pinch out from 100 to 260 px apart and back, three times, with none and with heavy rain, at most 2 ms over none at the 95th percentile), **pinch, rain still** (the same held still, every frame a camera draw, against none), and **level after pinches** (a fresh page pinched on and off for 11 s, past two windows, as `panned` pans, which must stay Full). The bench sets only the Isometric flag, so it never pays for the weather's test hooks (6).
+
+**Paired runs.** Quick runs (`BENCH_QUICK=1`: rest for every kind, and the pinch rows), today's build and the prototype's alternating, each run alone once the one-minute load average was under 3: 2.8, 2.8, 2.8 and 1.2 with a GPU, 1.8 and 2.0 without one, then 2.8 and 1.6, and 1.6 and 2.5, for two more passes without one over the kinds that stay moving there (the last wind alone). Round 1 ran while the five-minute average was still 6 to 7, round 2 on a quiet machine. Each cell is busy ms a second over none, with the layer's frame cost in brackets with a GPU and the level reached without one.
+
+| View | Kind | Today, GPU, rounds 1 / 2 | Draft 2, GPU, rounds 1 / 2 | Today, no GPU | Draft 2, no GPU |
+|---|---|---|---|---|---|
+| Top-down | rain | 13 / 9 (0.2 / 0.1) | 21 / 5 (0.3 / 0.0) | 0 still | 0 still |
+| Top-down | snow | 14 / 7 (0.2 / 0.1) | 13 / 11 (0.2 / 0.1) | 61 half / 63 half | 64 half / 0 still |
+| Top-down | fog | 13 / 9 (0.0 / 0.0) | 9 / 6 (0.0 / 0.0) | 0 still | 0 still |
+| Top-down | leaves | 22 / 9 (0.2 / 0.1) | 25 / 8 (0.1 / 0.1) | 59 full / 0 still | 61 full / 90 half |
+| Top-down | ash | 11 / 8 (0.1 / 0.0) | 22 / 7 (0.4 / 0.1) | 57 full / 66 full | 62 full / 0 still |
+| Top-down | sand | 47 / 8 (0.7 / 0.0) | 14 / 7 (0.2 / 0.1) | 3 still | 0 still |
+| Top-down | wind | 49 / 11 (0.3 / 0.0) | 16 / 7 (0.0 / 0.0) | 52 full / 47 full / 57 full | 51 full / 48 still / 49 full |
+| Isometric | rain | 44 / 6 (0.7 / 0.0) | 9 / 16 (0.1 / 0.2) | 57 half | 14 still |
+| Isometric | snow | 19 / 7 (0.4 / 0.0) | 11 / 4 (0.1 / 0.1) | 57 half / 62 half | 64 half / 0 still |
+| Isometric | fog | 27 / 2 (0.5 / 0.0) | 21 / 4 (0.1 / 0.1) | 0 still | 0 still |
+| Isometric | leaves | 27 / 3 (0.0 / 0.1) | 35 / 16 (0.8 / 0.1) | 58 full / 57 full | 74 full / 12 still |
+| Isometric | ash | 14 / 4 (0.1 / 0.1) | 14 / 5 (0.1 / 0.1) | 58 full / 56 full | 61 full / 0 still |
+| Isometric | sand | 28 / 4 (0.4 / 0.1) | 51 / 12 (0.8 / 0.1) | 0 still | 4 still |
+| Isometric | wind | 20 / 0 (0.5 / 0.0) | 45 / 4 (0.8 / 0.0) | 46 full / 47 full / 51 full | 73 half / 73 full / 69 full |
+
+- **With a GPU** every kind stayed Full in every run. Round 2 reads 0 to 11 ms/s today and 4 to 16 for draft 2, against 6.1's 60. The largest median frame cost was 0.7 ms today (Isometric rain, Top-down sand) and 0.8 ms for draft 2 (Isometric wind and sand), both in round 1. Against SLOW_FRAME_MS's 2 ms that is a step-down margin of 2.9 times today and 2.5 times for draft 2, and over 10 times for both in round 2, where no median passed 0.2 ms.
+- **Bucketing** (3.3) is part of the build, since these rows were measured with it and sit within the spread between today's two rounds. No further lever is needed.
+- **Pinches:** every pinch row, both builds, both views and both rounds, with no weather, heavy rain, and heavy rain held still, read 16.7 or 16.8 ms at the 95th percentile, every frame on time at 60 Hz and at most 0.1 ms over none. A held pinch draws the weather as a camera draw every frame, and costs nothing the row can see.
+- **Without a GPU** the rest rows gate at 60 ms/s and the gestures are information. Both builds land on different levels from run to run, and the gate sits at this machine's noise: today's build failed it in two of its three passes (snow 61.5, then snow 63.5, ash 65.6 and Isometric snow 62.4), draft 2 in all three (snow, ash, leaves and Isometric wind at 61 to 74, and Top-down leaves at 90 in a pass where the step-down held it at half). Two costs are real and counted in Node at the bench's zooms (32 to 54 px a square, the bench's 40 among them): the fade band draws more marks than today (snow 10% to 22% more, ash 16% to 23%, leaves 7% to 18%, rain up to 7%, wind none, with the same streak length), and snow and ash draw one fill a third. If the lane's software rows need it, the lever is a narrower band: 8% halves the extra marks, for a quicker fade through a zoom. One cost is not explained yet. Isometric's clear wind read 73, 73 and 69 ms/s without a GPU, and 54 in a fourth pass (loads 2.8 and 1.9), against today's 46, 47, 51 and 45, while Top-down's read 51, 48, 49 and 50 against 52, 47, 57 and 58. A probe in that fourth pass found the same 30 ticks a second, no camera draws, the same zoom (40 px a square) and the same canvas in both builds, and Node draws the same marks and the same streak length in Isometric at that zoom, so it is not the draw's geometry. The lane profiles it on a canvas with no GPU before its own bench (12), and its bench must show Isometric wind within the spread of today's or say why.
+
+**Level after pinches, and the camera rule (D-261106-306).** The new row failed for both builds with a GPU: today's stepped down in 3 of its 4 view runs (Top-down to still in round 2, Isometric to half in both), draft 2's in 2 of 4 (both views to still in round 2), and in a probed pair (loads 2.8 and 1.3) today's in 1 of 4 runs and draft 2's in 3 of 4. Every pinch frame was on time, so gaps and draws were not the cause. A probe of each window's judgment showed the frame costs. The cost measure (store.ts) takes a tick's frame less the frames beside it, which cancels whatever every frame pays. The bench's touch moves reached the page on about every other frame (240 of about 750 frames a page started with a moved camera, close to one frame in two while the fingers moved), the ticks' own cadence. So for seconds at a time the board's zoom redraw fell on the ticks' frames and none on their neighbors', the window's median read 2.1 to 4.0 ms, and it stepped down. Pans do the same: in the probed pair both of draft 2's 11 s pan runs in Top-down stepped it to half, while today's four passed by the phase its moves happened to keep. A busy phone coalesces touch moves into fewer frames in just this way, so this is the step-down's bug, not the bench's.
+
+The fix is one rule in store.ts's measure: a tick says nothing of its cost when its frame, or the frame before or after it, started with a different camera than the frame before that, as a tick with no neighbor already says nothing. The layer hands the store its stage's camera (`WeatherTarget.camera`), read as each frame starts. A gesture is the board's work, so its frames drop out, and its windows judge by the ticks between moves (16 to 33 a window here) and by gaps and draws as before. In the prototype 16 runs of 11 s (loads 3.0 and 2.7), pinching and panning in both views, all stayed Full, with window medians of 0 to 0.8 ms. A canvas with no GPU still steps down: its pinches add no costs, and the windows after them judge as today (store.test.ts, 7).
+
+## 5. The model and versions
+
+No model change. Nothing new is stored or sent: the field is each device's own drawing state, made fresh per page. So OP_VERSION (43) and SNAPSHOT_VERSION (33) stay, nothing replays differently, and export and import are unchanged. Privacy is unchanged: the draw reads the scene's bounds and the camera, never fog, walls, tokens or the build.
+
+## 6. Files
+
+- `client/features/weather/sim.ts`: `tileFor`, `tileFits`, levels from MIN_SCALE and MAX_SCALE, `levelsAt`, `tileOnScreen`, `tileCount`, `stepField(field, ms, camera)` with wrap counts, rings and sheets in view units, `resizeField(field, w, h)` growing arrays in place, `shareEnd`, and `eachMark`, the one walk the draw and the tests read, giving each copy's name and phase. `spotOf`, `boxW` and `boxH` go.
+- `client/features/weather/draw.ts`: `collect` into a module scratch buffer the draw owns, sorted by color and third, sway in screen px by each copy's phase, a streak's length by its copy, `held` in `DrawFrame` for streaks' thirds, rings through the camera, sheets at two octaves, and an optional `probe` it fills as it draws.
+- `client/features/weather/WeatherLayer.tsx`: the tick passes `cameraOfStage(stage)`, a field is remade when `tileFits` fails, `held` from the mode, and only under the weather's own flag, `WEATHER_TEST_FLAG` (`__rvttWeatherTest`), which weather.e2e.ts sets and the bench does not, a probe whose results the canvas publishes: `weatherSpots` (the draw's camera and up to 64 marks on screen, each its center before sway and its drawn center) and `weatherMarks` (the fades' sum on screen). No walk of its own.
+- `client/features/weather/store.ts`: `WeatherTarget.camera`, each frame's `moved`, and the camera rule in `#measured` (4). WeatherLayer.tsx's target returns `cameraOfStage(stage)`.
+- Tests: `sim.test.ts`, `draw.test.ts`, `mode.random.test.ts`, `store.test.ts`, `scripts/bench-weather.ts` and `scripts/bench-weather.test.ts`, `e2e/weather.e2e.ts`.
+- Docs, in the lane's last commit (section 8).
+
+## 7. Tests
+
+**sim.test.ts.** Kept: counts by area and caps, same seed same field, the 10 s step clamp, motion by wind and view, a view change keeps the particles, the same weather blowing another way. Changed or new:
+- Property (fast-check, 300 runs, all five views): at any scale 4 to 400, any pan, any zoom factor 0.5 to 2 about any screen point, every copy `eachMark` gives before and after has its center on the same ground point to 1e-6 px and the same phase, and a zoom under 0.3 octave shares copies.
+- Marks per screen within 15% of today's (`particleCount` times the screen's share of the wrap box) at every zoom 4 to 400, on a phone and at 2048 by 1536.
+- A step at scales 5 to 390 moves a mark its speed times the time, in screen px.
+- Over 600 ticks and at least 50 tile crossings, no copy's phase changes and no copy moves other than its step.
+- `levelsAt`: the shares over the tile areas sum to 1, each share ends at 0, MIN_SCALE draws the coarse level LEVEL_MIN and MAX_SCALE draws inside LEVEL_MAX unclamped.
+- `tileFor` (1,024 on a phone either way, 1,792 at 1440 by 900, 2,304 at 2048 by 1536), `tileFits`, a resize the tile fits keeps every mark, a level not drawn does not move, scale 1 draws nothing.
+
+**draw.test.ts.** Moving streaks one path a color, held still and snow and ash at most three a color, one per third, from one counting pass. `tierOf` rounds. Fog is four fills, two near an octave's ends. New: through a zoom, a drawn center from the probe is within `sway × |f − 1|` of its ground point, which the prototype measured at 100% of the bound for marks at full sway. A sheet's pattern maps a ground point to the same texel through a zoom, at 60 and at 150 px a square. Rings draw at their ground spot. A draw, probe and all, writes no level, wrap, ring or sheet. Kept: every paint inside the clip, two draws of one field and camera record the same calls, the outline clip in both views.
+
+**mode.random.test.ts.** The sequences gain camera changes the tick reads, and an invariant: the field after any sequence equals the field stepped by its ticks alone, each at the camera of its time.
+
+**store.test.ts.** New: a 60 Hz screen whose camera moves every other frame for 20 s, in step with the ticks and out of it, with the board 4 ms dearer in each frame it moved in, keeps a healthy canvas Full with its frame cost under 1 ms, and a canvas whose ticks add 3 ms still holds still by 40 s. Without the rule the in-step phase steps down. The existing load-step, pan and noisy-board cases stand.
+
+**bench-weather.test.ts.** A pinch's 95th percentile gates at 2 ms over none, moving and held still, and is information without a GPU. A level after pinches of half fails with a GPU and passes without one.
+
+**weather.e2e.ts**, steps after wx-12, with `WEATHER_TEST_FLAG` set:
+- `wz-1`. Top-down, held still: a wheel notch at a point, a + press and a pinch on Pat's phone, with heavy rain, snow, ash and leaves. Every mark `weatherSpots` names in both draws has its center before sway on the same ground point to 1 px, and its drawn center within `sway × |f − 1|` plus 1 px. Fog, for the wheel and the + press: read back through the ground's zoom, the canvas after differs from before by less than half the pan change's reading (measured 3.0 to 5.8 against 13.2 to 40.7).
+- `wz-2`. The same in Isometric, after a turn.
+- `wz-3`. Moving, heavy rain, a pinch on Pat's phone: on every frame without a tick the median named mark is under 1 px off its ground, ticks stay about 30 a second, and camera draws count apart.
+- `wz-4`. Zoomed by the wheel out to the scene's floor and in to 400 px a square: `weatherMarks` within 15% of today's marks on screen at each stop.
+- Run with `reach`, `iso` and `display`, beside weather.
+
+Mutation checks: anchor the walk to the screen (the ground property and wz-1 fail), drop the fine level (the band fails), step at a fixed scale (the screen speed test fails), take the phase from position again (the crossing test fails), drop the wrap counts (the crossing test fails at the first crossing), keep the fog clamp (the texel test fails at 150), let the bench set the weather flag (its rows rise, which section 4's paired run shows), drop the pinch level gate (bench-weather.test fails), and drop the camera rule (store.test's in-step pinch steps down).
+
+## 8. Docs (docs/writing.md)
+
+- FEATURES.md, Weather, a bullet after "Players see it": "Weather moves with the map: a pan or a zoom carries every drop, flake, leaf and bank of fog with the ground under it, at the same size on screen. Zoomed in, the drops spread out and more fill in between them."
+- docs/dm-guide.md, Weather, the first sentence: "A scene can have weather: rain, snow, fog, falling leaves, ash or blowing sand, drawn over the map for everyone on that scene, and it stays with the ground when you pan or zoom."
+- docs/design/design-v1-weather.md, each line that goes stale, with a pointer to this note: 1's "Cheap by design" (:12, "Particles in screen space"), 5.2's anchoring bullet ("Anchored to the map on a pan and a zoom"), 5.2's "Batched" (:136, one path a color and two pattern fills, now a path for each color and third and a fill for each sheet and octave), 6.4 (a line on the field's memory, up to 370 KB, 225 KB for a sandstorm on a phone), and 12's sim and draw test lines (:316-317, the wrap box, one path a tick, two pattern fills).
+- The draw.ts header comment, which draft 1's prototype left saying one path a color.
+
+## 9. UI checklist
+
+No new control, key, gesture, words or setting, so no shortcut sheet change. Loading: nothing waits. Screen readers: the canvas stays `aria-hidden`. Large interface sizes: marks keep their CSS px. Reduced motion: a zoom moves held-still weather only as it moves the map. Alignment: no screen changes.
+
+## 10. Cases
+
+| Case | Expected | Test |
+|---|---|---|
+| Wheel notch, + and −, held still | Each center keeps its ground spot, a drawn center within sway × \|f − 1\| | wz-1, sim property, draw sway test |
+| Pinch on a phone, Moving | Marks spread with the ground and keep falling | wz-3 |
+| Pinch across a power of two | No jump: the shares meet at 0 and 1 | sim levelsAt, band |
+| Zoomed out to the floor, in to 400 | The same marks per screen, within 15% | wz-4, sim band |
+| A copy crosses a tile's edge | Same phase, no jump | sim crossing test |
+| 2048 by 1536 or 1440 by 900 | No particle twice across the coarse level, no repeat that reads | tileFor test, the strips |
+| A window resized past its tile | One reshuffle, then anchored again | tileFits test |
+| Fog, wheel and pinch | Banks grow from the zoom point and stay put | wz-1, texel test |
+| Isometric, any turn | Weather holds to the ground and the standees | wz-2 |
+| Still, reduced motion, Low power | The held frame zooms with the map, streaks fade | wz-1, draw test |
+| Stepped down to half | Half of each share | sim half test |
+| A stage not yet scaled | Nothing drawn that frame | sim scale-1 test |
+| Heavy rain's rings | Stay where they fell | draw ring test |
+| A pinch, moving, held still, and for 11 s | Within 2 ms of none, Full after | bench rows, bench-weather.test |
+| Gesture moves every other frame, in step with the ticks | No cost read from the board's redraw, Full after | store.test, level after pinches and pans |
+
+## 11. For the project owner
+
+Shots in the weather-zoom screenshots folder. From draft 1, each five frames of one crop as the wheel zooms in 1.35 times a frame, today above the prototype: `wheel-zoom-heavy-snow-ground-circled-today-above-prototype-below.png` (the clearest: red circles mark the ground under six flakes, empty today from the second frame, filled in the prototype), the same for rain, and the plain rain strip. New for draft 2:
+- `draft-2-repeats-heavy-rain-2048x1536.png`, `draft-2-repeats-heavy-leaves-2048x1536.png`, and the same two at 1440x900: a big screen held still at 32 px a square (the coarse level alone) and at 45 and 60 (both levels), to judge whether any pattern repeats.
+- `draft-2-fog-heavy-held-still-50-71-100.png`: heavy fog on a phone at an octave's start, middle and end.
+
+## 12. Lane plan and the prototype
+
+One lane, **M**, Opus: the camera rule in store.ts with its test first, since it fixes today's build too, then sim.ts, draw.ts, WeatherLayer.tsx, their three tests, the bench's rows and bench-weather.test.ts, the wz- steps, and the docs commit. Before its bench it profiles Isometric wind on a canvas with no GPU against today's (4). Claude and Codex reviewers as usual. No OP_VERSION or SNAPSHOT_VERSION change.
+
+**The prototype** is the jj workspace `wxzoom` on urqrwyst, never committed, for the builder to read. It holds draft 2's sim.ts, draw.ts and WeatherLayer.tsx, store.ts with the camera rule and its store.test.ts case (all 20 pass, and the new one fails with the rule removed), the bench's rows with bench-weather.test.ts's new case, and `wxzoom-proto/`: `measure.ts` (sections 1 to 3 and the strips), `invariants.test.ts` (nine of section 7's tests, passing with `node --test wxzoom-proto/invariants.test.ts`), `exp/` (the Node timing and the repeat count), and the base's three files. The bench there also has a quick mode (`BENCH_QUICK=1`, `BENCH_KINDS`) for paired runs, which stays out of the build. Its sim.test.ts, draw.test.ts and mode.random.test.ts are as they were, so its typecheck fails on those three alone. The builder starts a new workspace from the stack's tip.
+
+## 13. Decisions
+
+- **D-261106-295** Weather lives in the stage's plane (A), each center exact and each drawn center within its sway. Rejected: B, C and D of section 2.
+- **D-261106-296** Two levels by power of two with shares `(4 − 4^u)/3` and `(4^u − 1)/3`, levels from the camera's range, and a tile of the wrap box's long side rounded up to 256 px, 1,024 at least, fixed per field and remade when outgrown or under half. Strips `draft-2-repeats-*` show no repeat that reads, and a big screen's tick costs about what a phone's does against today (heavy rain 42 µs against 23 at 2048 by 1536, 32 against 15 on a phone). Rejected: a fixed 1,024 px tile (58% to 100% of a big screen's marks were copies), an offset per copy (53 µs against 32 for heavy rain, for repeats the strips do not show), add and drop, one level with hysteresis, an unrounded tile.
+- **D-261106-297** Marks keep 5.3's screen size, speed and sway. Rejected: growing with the zoom or its square root, sway in the plane.
+- **D-261106-298** A fade band of 15% of the active particles at each share's end, in thirds for snow, ash and held streaks, exact for leaves, whole for moving streaks, sorted into batches in one pass. Without a GPU the band draws up to 23% more marks than today at the bench's zoom (4), and a narrower band is the lever if the lane's software rows need one. Rejected: popping slow or held marks, thirds for moving streaks, a per-mark alpha, a pass a batch.
+- **D-261106-299** A copy is named by its tile less its particle's wrap counts, and its phase and a streak's length come from that name. Rejected: a phase from position (it drifts with speed and zoom), a phase per tile (it jumps at a tile's edge).
+- **D-261106-300** The tick reads its stage's camera. Rings in view units at the screen's landing rate. Rejected: a camera subscription, stepping in view units.
+- **D-261106-301** Fog and sand sheets at two octaves crossfading by smoothstep through each octave, the clamp gone, accepting banks about 30% flatter mid-octave at the same coverage. Rejected: spread-keeping weights (coverage up to 41% higher mid-octave), a quarter-octave crossfade (banks swap at one press), one octave scaled freely, the clamp.
+- **D-261106-302** Isometric anchors on the main stage's view space.
+- **D-261106-303** No input or mode special-cased. A resize the tile fits keeps ground spots, one past it reshuffles once.
+- **D-261106-304** 6.1's budgets stand, with pinch, held pinch and level after pinches rows gated as pan's are. Measured with a GPU: a step-down margin of 2.5 times for draft 2 against 2.9 today on a loaded machine, over 10 for both on a quiet one, and every pinch frame on time.
+- **D-261106-305** The weather's test hooks have their own flag, which the bench never sets, and the draw fills them as it draws. Rejected: the Isometric flag (the bench paid for the hook), a walk of the hook's own, a lazy function over the last draw's camera (a tick between the draw and the call moves the marks).
+- **D-261106-306** The step-down's cost measure drops a tick whose frame, or a frame beside it, started on a moved camera (store.ts), so a gesture's redraw is never read as the weather's cost. It fixes a bug today's build has: the new level after pinches row stepped today's build down in 3 of 4 runs, and 16 of 16 pinch and pan runs stayed Full with the rule. Rejected: a looser SLOW_FRAME_MS (it would let a slow canvas with no GPU keep moving), dropping costs while a pointer is down (a wheel or Follow me moves the camera with no pointer, and the store would need the board's input), and a bench that sends a move every frame (a busy phone coalesces its moves as the bench's did, so the bug is real).
+
+Reviewers should look hardest at: the camera rule (D-261106-306), a store.ts change this lane takes on because its new gate found the bug in today's build, the Isometric wind cost without a GPU that is not explained yet (4), the reshuffle on a resize past the tile (D-261106-303), and fog's mid-octave look (D-261106-301).
+
+## Round 1 dispositions
+
+| Id | Finding | Disposition |
+|---|---|---|
+| WXZOOM-ASTRA-01 | Drawn centers miss the ground by the sway | Adopted as the coordinator put it: sway stays in screen px, the center is exact and the drawn center within `sway × \|f − 1\|` (2, 7), the probe publishes both, wz-1 holds the bound, measured 0.63 to 2.5 px against bounds of 0.66 to 2.5 |
+| WXZOOM-ASTRA-02 | Streak copies repeat exactly on a big screen | Adopted: the tile is the wrap box's long side (3.1), each copy has its own phase and streak length (3.4), strips at 2048 by 1536 and 1440 by 900 show no repeat that reads, and an offset per copy was tried and rejected for cost |
+| WXZOOM-ASTRA-03 | The pinch row cannot see a step-down | Adopted: a level after pinches row, required Full with a GPU, and bench-weather.test cases (4, 7). It stepped today's build down as well as draft 2's, from a step-down bug that read a gesture's redraw as the weather's cost. The camera rule fixes it (D-261106-306), with 16 of 16 runs Full |
+| WZ-1 | The bench paid for the e2e hook | Adopted: the hooks have their own flag and no walk of their own (6, D-261106-305), and the paired rows were run again |
+| WZ-2 | Tile repeats on large screens | Adopted with ASTRA-02 (3.1, D-261106-296) |
+| WZ-3 | No leaves or wind rows, no step-down margin, bucketing a later lever | Adopted: paired rows for every kind with and without a GPU, the margin 2.5 times for draft 2 against 2.9 today (over 10 for both on a quiet machine), bucketing part of the build from those numbers (3.3, 4). Without a GPU an Isometric wind cost is not explained yet and goes to the lane's profile (4, 12) |
+| WZ-4 | Phase from position drifts | Adopted: wrap counts name each copy, its phase is constant, a crossing test, and 3.3's "most of a turn" is gone (3.4) |
+| WZ-5 | Held streaks pop, `tierOf` biased | Adopted: held streaks fade in thirds, a held pinch row gates the cost (16.7 to 16.8 ms at the 95th percentile, as with no weather), `tierOf` rounds (3.3, 4) |
+| WZ-6 | Fog's mid-octave look unseen | Adopted: measured (30% flatter, same coverage), a strip for the owner, the look in D-261106-301 |
+| WZ-7 | Stale docs lines | Adopted: section 8 lists them, and the fade band reads the same in the note and the code |
+| WZ-8 | Pinch gates on p95 only | Adopted with ASTRA-03 |
+| WZ-9 | Hard-coded levels | Adopted: derived from MIN_SCALE and MAX_SCALE, with a test (3.1, 7) |
+
+## Round 2 notes for the build
+
+The coordinator's dispositions of round 2's two new findings. They win over the sections above where they differ.
+
+- **WZR2-1, the step-down's rule covers all board work, not only the camera (D-261106-306 amended).** A token drag and an animated map draw at 30 Hz too, in step with the ticks, and are as old as today's build. `moved` becomes "the board did gesture or timed work this frame": a camera change, any `pointermove`, `touchmove` or `wheel` since the last frame started, read from one passive capture listener on `window` that the store owns, and a counter the animated map's board bumps on each frame it draws (animmap/board.ts, both the `requestVideoFrameCallback` path and the `requestAnimationFrame` fallback), which ASTRA-05 below matches rather than drops. store.test gains a drag in step with the ticks with no camera change, failing without its part of the rule. A desktop mouse hover counts as a gesture too, and As built says so. The bench gains a "level after drags" row on a fresh page, gated like "level after pinches". D-261106-306 reads: "a gesture's or the animated map's redraw is never read as the weather's cost".
+- **WXZOOM-ASTRA-05, an animated map is matched, not excluded (round 3).** A gesture ends, so dropping its frames' costs is bounded. A video can run all session, so dropping every frame where the map drew would leave paint cost unjudged for good (Astra's 120 s simulation: 3 ms a tick, 3,600 ticks, no cost sample, held Full). So the counter's frames are not dropped: a tick's cost on a frame where the map drew is measured against nearby frames where the map drew and no tick ran, and the loop's held tick (one in four while the window still wants costs) supplies those frames, since a held tick on a map frame leaves a map-only frame. The matched neighbor may sit up to two frames away (a 30 fps map on a 60 Hz screen draws every other frame). Gestures (camera, pointer, touch, wheel) stay excluded as WZR2-1 says. store.test proves, with a 30 fps map running the whole time, in step with the ticks and out of step: healthy weather (0.3 ms a tick) stays Full, and costly weather (3 ms a tick, the simulation's case) steps down while the map still plays. If a phase exists where no matched frame can arise, the lane says so and holds a tick to make one.
+- **Round 4 build details.** Astra: the held-tick logic does not hold a tick at 60 Hz today, so the forced sampling ASTRA-05 needs must cover a 60 Hz screen. Opus: a matched frame's work is the same apart from the tick, a map frame only against map frames and a frame without the map only against frames without it.
+- **WXZOOM-ASTRA-04, density is what is drawn and seen.** The hooks publish only marks whose centers fall inside the actual clip polygon (the scene outline on screen, the Isometric diamond included), and `wz-4` compares their alpha-weighted count with the expected density times the visible map's area, with a tolerance sized for small counts (say what it is and why). A floor-zoom case in both views joins wz-4.
+- **WZR2-2, follow-up in the lane:** 1:1 crops of one quadrant at 45 px a square, heavy rain and heavy leaves, at 2048 x 1536, for the project owner, in the weather-zoom screenshots folder.
+
+## As built
+
+Where the build went its own way, by part.
+
+**The Isometric wind cost without a GPU (section 4).** Profiled before the bench, today's build against this one, alone on a quiet machine (loads 1.4 to 2.4), Isometric with a clear strong wind, CPU slowed 4 times, a fresh page each run. It is the bench's spread, not the build: both builds read 48 to 79 ms/s of busy time, with the same median, 50.4 ms/s over six runs each, and each had one run 25 to 29 ms/s above the rest on a fresh page. The canvas's raster (Chrome's `Canvas2DResourceProvider::ProduceCanvasResource`) took 38 to 40 ms/s in both, the weather's script under 5 ms/s in both, and the step-down's frame cost read 1.25 to 1.6 ms for this build against 1.5 to 2.15 for today's. So draft 2's 20 ms/s was the spread of a fresh page's readings, which a pass of three runs a build cannot see through.
+
+**The step-down's rule (D-261106-306, as the round 2 notes amend it).**
+- A frame is moved when its stage's camera differs from the frame before's, or a `pointermove`, `touchmove` or `wheel` reached `window` since the frame before started. The store adds one passive capture listener for the three while its loop runs and removes it when the loop stops. A mouse moving over the page counts too, hovering included: for as long as it keeps moving, no tick's cost is read, while tick gaps and draw times still judge.
+- The animated map's board counts its draws in `client/features/weather/mapFrames.ts`, bumped in the board's one draw that both the `requestVideoFrameCallback` path and the `requestAnimationFrame` fallback call. A frame drew the map when the count rose between the frame before's measure and its own, since the map draws in a frame's rendering, before the paint the measure follows. A frame whose measure came after the next frame started cannot tell, so neither it nor the frame after is any tick's like frame.
+- A tick's like frames have no tick, no gesture and the same map work. With the map playing, a tick with no like frame next to it waits for one two frames off (within 2.5 frame gaps). The existing hold (store.ts `SAMPLE_AFTER`) also fires after three ticks in a row with no like frame, and the count starts again at each hold, which mode.ts counts (`holds`). Without that restart a 120 Hz screen in one phase held every frame and the weather stopped, which store.test found before the commit. At 60 Hz a hold moves the ticks a frame, in or out of step with the map, and leaves a like frame for the ticks on either side of it.
+- store.test plays a drag with moves every second and every fourth frame, its redraw in the move's frame or the next, and a 30 fps map at 30, 60 and 120 Hz in every phase, where healthy weather keeps its speed (it moves at least 97% of the time that passed).
+
+**The probe.** It names up to 64 marks a level, not 64 in all, so a zoom across a power of two still names marks of the level both draws share, where 64 in all named only the coarse level's. It counts each mark seen by the alpha it draws at (its third, a leaf's fade, a moving streak whole), and only where its center before sway lies inside the scene's outline on screen and on the screen. The canvas publishes that outline with the marks (`weatherSpots.clip`), so wz-4 measures the visible map's area itself.
+
+**Tolerances for small counts (WXZOOM-ASTRA-04).** A draw's count of marks seen spreads by about the root of its mean, measured over 200 fields at the floor zoom (a standard deviation of 4.7 for a mean of 24.4 in Top-down, 3.2 for 10.5 in Isometric). So draw.test holds each of 64 fields within four of those plus one, and their mean within 10%, at the floor and at 40 or 90 px a square, heavy rain and heavy snow, in both views. wz-4 holds each stop, the floor's among them, within four standard deviations plus one, and the sum over every stop within 10%. A swipe at the floor left a scene smaller than the screen where it was, so the floor has one stop of one field in wz-4, and the 64 fields of draw.test are its check by number.
+
+**The tests.**
+- draw.test's fog: two fills at an octave's start and just past it, where the fine octave's weight is under 2% and skipped, and four mid-octave.
+- mode.random.test checks a quick key of the field after every frame and the whole field against its twin every 50 steps, since a full comparison after every frame took minutes.
+- The crossing test runs heavy snow falling down a phone and sand blowing straight across a 1440 by 900 window, where a copy that jumped a tile would still be on screen, so dropping either wrap count fails it.
+
+**The e2e steps.** wz-1 to wz-4 come before wx-12, so its check for console errors covers them. Both the DM's and Pat's pages set the weather's flag with the Isometric one, so every weather step draws with the probe.
+- wz-1 and wz-2 check each zoom both ways: a wheel notch in and out at a point and + and − on the DM's computer, and a pinch out and in on Pat's phone. The pinch there is 1.4 times, not 2.5: a zoom past an octave can leave the two draws no level in common (from 0.68 into an octave, 2.5 times steps past both levels the first draw showed), and so no mark named in both. Every center read 0.000 px off its ground, and every drawn center stood within sway × |f − 1|, using nearly all of it, as section 2 measured (snow through the pinch: 3.19 px of 3.2). Heavy leaves are about 35 marks on a phone, so a check needs 3 marks named in both draws.
+- Fog's sheets crossfade between octaves (D-261106-301), so how much a zoom changes their look apart from moving them depends on where in the octave it starts: from 0.36 into one a wheel notch read 14.5 through the ground's zoom against 25.8 through the pan change. Each fog zoom starts 0.8 into an octave, reached by small trackpad pinches, where a notch changes the octaves' weights least, and there it read 1.3 to 3.2 against 15.2 to 30.3 over three runs, as section 7 measured.
+- wz-3 records every draw as it publishes its marks, not every frame: a pinch whose moves land every other frame puts most of its camera draws in the ticks' frames. Over four pinches of 2.5 times, 4 to 13 camera draws followed a draw with no tick between, as the machine's load went, so the step pinches eight times (71 such draws in the last run) and needs 3. Their median mark stood 0.000 px off its ground every time, at 30 ticks a second.
+- A phone at 3x gets a third of a wheel's delta, so wz-4's notches on Pat's phone are 360.
+
+**The bench.** It gains the rows "pinch, none", "pinch, rain", "pinch, rain still", "level after pinches, rain" and "level after drags, rain", in both views, without the prototype's quick mode. Run alone with a GPU (load 2.96 at the start, 1.76 at the end), every kind stayed full in both views, the busiest at rest Top-down sand at 29.8 ms/s over none, with frame costs of 0.4 ms at most, every pan, drag and pinch, moving or held, at 16.7 or 16.8 ms at the 95th percentile, and full after pans, pinches and drags in both views. Without a GPU (load 1.70 at the start, 1.98 at the end) the rest gate failed on four rows, each a kind whose ticks read 1.9 to 2.1 ms, right at the step-down's 2 ms, so it kept moving: Top-down leaves at 64.3 and ash at 73.4 ms/s over none, Isometric snow at 64.3 (at half) and ash at 65.7. Isometric wind read 52.8, within today's spread. This is the calibration the weather note leaves open (a kind right at 2 ms sits over budget without a GPU), and today's build failed the same gate in two of three passes. The narrower fade band, section 4's lever, was not taken: it cuts a few marks a draw and moves no kind off the 2 ms line (D-261106-356).
+
+The build's own decisions are D-261106-350 to D-261106-356.

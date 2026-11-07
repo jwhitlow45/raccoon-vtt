@@ -190,6 +190,10 @@ and for how to use it, the [DM guide](../dm-guide.md).
 - [design-v1-weather.md](design-v1-weather.md): weather over the map, one per
   scene, with a wind, the SRD's roll rules where they need no judgment, and
   each device's choice of how it looks.
+- [design-v1-weather-zoom.md](design-v1-weather-zoom.md): weather that
+  stays with the ground through a zoom, its particles in the stage's plane
+  at two levels of the zoom, and a step-down that never reads a gesture's
+  or an animated map's redraw as the weather's cost.
 - [design-v1-animated-maps.md](design-v1-animated-maps.md): a WebM or MP4
   loop over a map's still, off until the server's owner turns it on, with
   a header check that zeroes metadata in place and each device's choice of

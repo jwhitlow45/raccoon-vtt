@@ -573,7 +573,7 @@ Under the list, **Sight sources** shows each creature with its senses and light,
 
 ## Weather
 
-A scene can have weather: rain, snow, fog, falling leaves, ash or blowing sand, drawn over the map for everyone on that scene. It sets a mood, and for a few kinds it also changes how some rolls go. It never changes what anyone can see. Sight, fog and light work just as they did, so a heavy storm will not hide the map from your players, and anything you want hidden still needs the fog tool.
+A scene can have weather: rain, snow, fog, falling leaves, ash or blowing sand, drawn over the map for everyone on that scene, and it stays with the ground when you pan or zoom. It sets a mood, and for a few kinds it also changes how some rolls go. It never changes what anyone can see. Sight, fog and light work just as they did, so a heavy storm will not hide the map from your players, and anything you want hidden still needs the fog tool.
 
 You set it in the **Light and weather** group of a scene's settings, under Light, where it is always in view while the group is open. Folded, the group tells you how things stand, such as "Dim · Heavy rain · Strong wind", or "Clear" with no weather. Every change reaches your players at once.
 
