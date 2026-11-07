@@ -189,12 +189,19 @@ export function hangBox(hang: Hang, height: number): Box {
   return { left: hang.left, width: hang.width, top: hang.anchor === "top" ? hang.at : hang.at - h, height: h };
 }
 
+/** The compact overlay's least height: its border, its 52 px header and its border, so its Close shows whole. */
+export const COMPACT_LEAST = 54;
+
 /**
  * The compact overlay (design 1.4): the dock's place across, or the
  * span's whole width on an upright layout, and down from 8 px under the
  * top bars to 8 px above the toolbar when that leaves it 148 px, else to
  * 8 px above the bottom safe area, over the toolbar too. It hangs by its
  * bottom, so a short bar sits where a docked one would.
+ *
+ * Where that leaves less than its header, it rises into the 8 px under
+ * the top bars, never over them: at 480 x 320 at 130% in a fight, with
+ * "Reconnecting…" up, 48 px were left and the header's Close was cut off.
  */
 export function compactHang(layout: Size, viewport: Size, chrome: Chrome, barWidth = BAR_WIDTH): Hang & { coversToolbar: boolean } {
   const free = freeArea(viewport, chrome);
@@ -204,7 +211,8 @@ export function compactHang(layout: Size, viewport: Size, chrome: Chrome, barWid
   const aboveToolbar = viewport.height - chrome.toolbar - EDGE;
   const coversToolbar = aboveToolbar - free.top < MIN_BAR_HEIGHT;
   const bottom = coversToolbar ? viewport.height - chrome.safe.bottom - EDGE : aboveToolbar;
-  return { left, width, anchor: "bottom", at: bottom, room: Math.max(0, bottom - free.top), coversToolbar };
+  const top = Math.max(free.top - EDGE, Math.min(free.top, bottom - COMPACT_LEAST));
+  return { left, width, anchor: "bottom", at: bottom, room: Math.max(0, bottom - top), coversToolbar };
 }
 
 // ------------------------------------------------------------ the stored spot

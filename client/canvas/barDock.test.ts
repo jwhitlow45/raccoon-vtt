@@ -23,6 +23,7 @@ import {
   columnTop,
   anchoredSpot,
   clampMove,
+  COMPACT_LEAST,
   compactHang,
   DEFAULT_SPOT,
   defaultBarWidth,
@@ -229,6 +230,20 @@ describe("compact", () => {
     assert.equal(freeArea(viewport, phone({ band: true, options: true, safe })).height, -4);
     assert.deepEqual(summary(phone({ band: false, options: true, safe }), viewport), { overlay: 157, lane: "summary", bar: 105, width: 259 });
     assert.deepEqual(summary(phone({ band: true, options: true, safe }), viewport), { overlay: 109, lane: "summary", bar: 57, width: 259 });
+  });
+
+  test("480 x 320 at 130% in a fight, under \"Reconnecting…\": the overlay rises into the margin under the notice to keep its header whole, never over the notice", () => {
+    const viewport = { width: 369, height: 246 };
+    const safe = { top: 0, side: 47, bottom: 21 };
+    // The lasting notice's foot, as barChrome puts the top there: it left the overlay 48 px.
+    const chrome = { ...phone({ band: true, options: true, safe }), top: 161.35 };
+    const hang = compactHang(viewport, viewport, chrome);
+    assert.equal(hang.at, 246 - 21 - 8);
+    assert.equal(hang.room, COMPACT_LEAST);
+    assert.ok(hang.at - hang.room >= chrome.top, "the overlay rose over the notice");
+    // With less room than even the margin makes up, it stops 0 px under the notice.
+    const tighter = compactHang(viewport, viewport, { ...chrome, top: 175 });
+    assert.equal(tighter.at - tighter.room, 175);
   });
 
   test("844 x 390 at 130%, the same insets: Multi-select's row stands in the toolbar's own row, so the bar docks", () => {
