@@ -6,7 +6,8 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page, type Request, type Route } from "playwright-core";
 import sharp from "sharp";
-import { ConsoleWatch, openSideTab, OpSocket, Shots, sideTabName, SocketWatch, startServer, touchSwipe, untilTapsClick, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, OpSocket, reopenRoom, Shots, sideTabName, SocketWatch, startServer, touchSwipe, untilTapsClick, waitFor, type Server } from "./harness.ts";
+import type { Handout } from "#shared/model.ts";
 import { A5, BANDS, LETTER, LETTER_WIDE, bandProblem, fontBoxDistance, pdfOf, shapeProblem, type PdfPage } from "./pdfFixture.ts";
 
 /**
@@ -250,6 +251,52 @@ async function quiet(page: Page, ms: number): Promise<void> {
   } finally {
     page.off("request", onRequest);
   }
+}
+
+/** The QOL pass's showings (designs/qol audit Q11): the Cragmaw map's image, and what qe-4's refused re-show said. */
+const qe = { map: "", refusal: "" };
+
+/**
+ * Shows a library image or a saved document through Show a handout in the
+ * DM panel, as the DM picks it: the tile, a title, and Chosen players with
+ * these names ticked. Gives the showing from the DM's state.
+ */
+async function showByForm(pick: { kind: "image"; assetId: string } | { kind: "doc"; title: string; pages: number }, title: string, players: readonly string[]): Promise<Handout> {
+  await openForm();
+  const form = handoutForm();
+  const library = form.getByRole("button", { name: "From the library", exact: true });
+  if (await library.isVisible()) await library.click();
+  const tile = pick.kind === "image" ? form.locator(`button[aria-label="Use this image"]:has(img[src*="${pick.assetId}"])`) : form.getByRole("button", { name: `Use ${pick.title}, ${pick.pages} pages`, exact: true });
+  await tile.click();
+  await form.getByLabel("Title").fill(title);
+  await form.getByRole("radio", { name: "Chosen players" }).click();
+  const chosen = form.getByRole("group", { name: "Players to show it to" });
+  // The draft keeps the last showing's ticks, so each player is set, not only ticked.
+  for (const name of ["Pip", "Pat", "Lee"]) {
+    const box = chosen.getByRole("checkbox", { name, exact: true });
+    if ((await box.count()) === 0) continue;
+    if (players.includes(name)) await box.check();
+    else await box.uncheck();
+  }
+  const before = new Set(Object.keys(dmSocket.state?.handouts ?? {}));
+  await form.getByRole("button", { name: "Show", exact: true }).click();
+  return waitFor(`${title} showing`, () => Object.values(dmSocket.state?.handouts ?? {}).find((h) => h !== undefined && !before.has(h.id) && h.title === title));
+}
+
+/** A row's button in Handouts' Recent list, by its whole name ("Show Cragmaw map to Pat"), once it shows. */
+async function recentRow(name: string | RegExp): Promise<Locator> {
+  await openSideTab(dm, "DM");
+  const list = dm.getByRole("list", { name: "Recent handouts" });
+  const button = list.getByRole("button", { name, exact: typeof name === "string" });
+  const found = await button.waitFor({ timeout: 10_000 }).then(
+    () => true,
+    () => false,
+  );
+  if (!found) {
+    const rows = await list.getByRole("button").evaluateAll((els) => els.map((el) => el.getAttribute("aria-label") ?? ""));
+    assert.fail(`no ${String(name)} in Recent, which holds ${JSON.stringify(rows)}`);
+  }
+  return button;
 }
 
 /** A promise and the call that settles it, to hold a request until the test lets it go. */
@@ -1801,4 +1848,116 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     }
   });
 
+  test("qe-1. Handouts' Recent: an image shown to Pat alone through the form is listed once hidden, its button names Pat, its re-show goes to Pat alone, and it leaves the list while it shows", async () => {
+    const image = await uploadHandout(await paper(420, 300, 2));
+    qe.map = image.assetId;
+    const shown = await showByForm({ kind: "image", assetId: image.assetId }, "Cragmaw map", ["Pat"]);
+    assert.deepEqual(shown.to, [run.patId], "the form showed it to Pat alone");
+    await ops.send({ t: "handout.close", handoutId: shown.id });
+
+    const row = await recentRow("Show Cragmaw map to Pat");
+    assert.equal(((await row.textContent()) ?? "").trim(), "Show to Pat");
+    await shots.take(dm, "qe-1-recent-handouts");
+    const before = new Set(Object.keys(dmSocket.state?.handouts ?? {}));
+    await row.click();
+    const again = await waitFor("the re-show in the DM's state", () => Object.values(dmSocket.state?.handouts ?? {}).find((h) => h !== undefined && !before.has(h.id)));
+    assert.equal(again.title, "Cragmaw map");
+    assert.deepEqual(again.to, [run.patId], "the re-show widened its audience");
+    assert.equal(again.assetId, image.assetId);
+    await waitFor("the handout on Pat's page", () => deskSocket.state?.handouts[again.id]);
+    assert.equal(phoneSocket.state?.handouts[again.id], undefined, "Pip got a handout shown to Pat alone");
+    // Showing now, it is in the Showing list with Hide, not in Recent.
+    await row.waitFor({ state: "detached" });
+    await ops.send({ t: "handout.close", handoutId: again.id });
+    await recentRow("Show Cragmaw map to Pat");
+  });
+
+  test("qe-2. a document shown to Pip and Pat lists as Document, and its re-show sends its pages as they are now, reordered and one gone, to the same two", async () => {
+    const doc = await documentOf("Ledger", [await paper(500, 700, 1), await paper(500, 700, 2), await paper(500, 700, 3)]);
+    const shown = await showByForm({ kind: "doc", title: "Ledger", pages: 3 }, "Ledger", ["Pip", "Pat"]);
+    assert.deepEqual(new Set(shown.to === "all" ? [] : shown.to), new Set([run.pipId, run.patId]));
+    assert.deepEqual((shown.pages ?? []).map((p) => p.assetId), doc.pages.map((p) => p.assetId));
+    await ops.send({ t: "handout.close", handoutId: shown.id });
+
+    const row = await recentRow(/^Show Ledger to (Pip and Pat|Pat and Pip)$/);
+    const item = row.locator("xpath=ancestor::li[1]");
+    await item.getByText("Document", { exact: true }).waitFor();
+    // No control edits a saved document's pages, so the room's own ops stand in: the document saved again under its id with page 3 first and page 2 gone.
+    const changed = [doc.pages[2]!, doc.pages[0]!];
+    await ops.send({ t: "handoutDoc.delete", docId: doc.id });
+    await ops.send({ t: "handoutDoc.create", doc: { id: doc.id, title: doc.title, pages: changed } });
+    await waitFor("the changed document in the DM's state", () => (dmSocket.state?.handoutDocs[doc.id]?.pages.length === 2 ? true : null));
+    const before = new Set(Object.keys(dmSocket.state?.handouts ?? {}));
+    await (await recentRow(/^Show Ledger to (Pip and Pat|Pat and Pip)$/)).click();
+    const again = await waitFor("the document shown again", () => Object.values(dmSocket.state?.handouts ?? {}).find((h) => h !== undefined && !before.has(h.id)));
+    assert.deepEqual((again.pages ?? []).map((p) => p.assetId), changed.map((p) => p.assetId), "the re-show sent the pages as they were, not as they are");
+    assert.deepEqual(new Set(again.to === "all" ? [] : again.to), new Set([run.pipId, run.patId]), "the re-show changed its audience");
+    await ops.send({ t: "handout.close", handoutId: again.id });
+    await recentRow(/^Show Ledger to (Pip and Pat|Pat and Pip)$/);
+
+    // A document deleted since leaves the list.
+    await ops.send({ t: "handoutDoc.delete", docId: doc.id });
+    await waitFor("the Ledger row gone", async () => ((await dm.getByRole("button", { name: /^Show Ledger to / }).count()) === 0 ? true : null));
+  });
+
+  test("qe-3. a player who left is dropped from a recent handout's audience, and one shown to that player alone is offered no more", async () => {
+    const leeContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    try {
+      const leeId = await join(leeContext, "Lee", "#e5484d");
+      await waitFor("Lee in the DM's members", () => dmSocket.state?.members[leeId]);
+      const both = await uploadHandout(await paper(440, 300, 3));
+      const alone = await uploadHandout(await paper(460, 300, 4));
+      const toBoth = await showByForm({ kind: "image", assetId: both.assetId }, "Old well", ["Pip", "Lee"]);
+      await ops.send({ t: "handout.close", handoutId: toBoth.id });
+      const toLee = await showByForm({ kind: "image", assetId: alone.assetId }, "Lee's letter", ["Lee"]);
+      await ops.send({ t: "handout.close", handoutId: toLee.id });
+      // Recent checks an image against the library list it read as it first showed one, which the form's own listing does not refresh, so a reload reads both new images.
+      await openSideTab(dm, "DM");
+      await dm.waitForTimeout(500);
+      const listed = await dm.getByRole("list", { name: "Recent handouts" }).getByRole("button").evaluateAll((els) => els.map((el) => el.getAttribute("aria-label") ?? ""));
+      console.log(`qe-3: before a reload Recent held ${JSON.stringify(listed)}`);
+      await reopenRoom(dm);
+      await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+      await recentRow(/^Show Old well to (Pip and Lee|Lee and Pip)$/);
+      await recentRow("Show Lee's letter to Lee");
+
+      const gone = await dmContext.request.delete(`${server.origin}/api/rooms/${run.roomId}/members/${leeId}`, { headers: { Origin: server.origin } });
+      assert.ok(gone.ok(), `removing Lee answered ${gone.status()}`);
+      await waitFor("Lee gone from the DM's members", () => (dmSocket.state?.members[leeId] ? null : true));
+      const row = await recentRow("Show Old well to Pip");
+      assert.equal(((await row.textContent()) ?? "").trim(), "Show to Pip");
+      await waitFor("Lee's letter no longer offered", async () => ((await dm.getByRole("button", { name: /^Show Lee's letter to / }).count()) === 0 ? true : null));
+      const before = new Set(Object.keys(dmSocket.state?.handouts ?? {}));
+      await row.click();
+      const again = await waitFor("Old well shown again", () => Object.values(dmSocket.state?.handouts ?? {}).find((h) => h !== undefined && !before.has(h.id)));
+      assert.deepEqual(again.to, [run.pipId], "the re-show went to someone besides Pip");
+      await ops.send({ t: "handout.close", handoutId: again.id });
+    } finally {
+      await leeContext.close();
+    }
+  });
+
+  test("qe-4. an image deleted since: the re-show is refused with its words in the row, and once the library lists again the image leaves the list", async () => {
+    await recentRow("Show Cragmaw map to Pat");
+    await deleteImages([qe.map]);
+    // The DM's page lists the library once a while, so the row may still stand: its press is refused and says why.
+    await dm.waitForTimeout(500);
+    const row = dm.getByRole("button", { name: "Show Cragmaw map to Pat", exact: true });
+    if ((await row.count()) > 0) {
+      await row.click();
+      const said = row.locator("xpath=ancestor::li[1]").getByRole("alert");
+      await said.waitFor();
+      const words = ((await said.textContent()) ?? "").trim();
+      assert.ok(words.length > 0, "a refused re-show said nothing");
+      await shots.take(dm, "qe-4-recent-refused");
+      qe.refusal = words;
+    } else qe.refusal = "(the row left before a press)";
+    await reopenRoom(dm);
+    await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+    await openSideTab(dm, "DM");
+    await dm.getByRole("list", { name: "Recent handouts" }).waitFor();
+    await dm.waitForTimeout(500);
+    assert.equal(await dm.getByRole("button", { name: /^Show Cragmaw map to / }).count(), 0, "a deleted image still offered");
+    console.log(`qe-4: the refused re-show said "${qe.refusal}"`);
+  });
 });
