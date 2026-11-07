@@ -1516,9 +1516,12 @@ function EndTurnButton(props: { stack?: boolean }) {
 
 /**
  * The DM's Next (chips C3), beside the chip and at the band's end. It
- * shares End turn's wait, so a press on it and the N key's tracker Next
- * cannot send twice from here. Start stands in before the first turn, as in
- * the tracker, and an empty fight has nothing to start.
+ * shares End turn's wait, so the chip's and the band's Next show busy
+ * together and a second press on either while one waits sends nothing.
+ * The N key and the tracker's Next send on their own, without the wait or
+ * its busy look: each takes the waiting Next's `from` (logic.ts turnOp),
+ * so the server moves the turn once. Start stands in before the first
+ * turn, as in the tracker, and an empty fight has nothing to start.
  */
 function NextButton(props: { start: boolean; empty: boolean }) {
   const { end, waiting } = useEndTurn();
