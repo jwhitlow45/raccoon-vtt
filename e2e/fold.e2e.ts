@@ -615,7 +615,7 @@ describe("raccoon-vtt: what floats over a phone's map folds under a sheet", { ti
     });
     await dm.locator('[data-alert="concentration"]').nth(2).waitFor();
     await assertBarInWindow(dm, "DM, 320 x 480 at 130%");
-    assert.equal(await topBar(dm).getByRole("img", { name: "You are the DM" }).count(), 1, "the DM's chip did not give way to its dot");
+    assert.equal(await topBar(dm).locator('[data-chip="dm"][data-chip-form="dot"]').count(), 1, "the DM's chip did not give way to its dot");
     await selectThornAsDm();
     await panelsButton(dm).click();
     await assertDocked(dm, 1.3, "320 x 480 at 130%, alerts and a token");
