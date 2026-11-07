@@ -2,7 +2,6 @@ import { useId, useMemo, useState, type ReactNode } from "react";
 import { SIZE_CELLS, type Character, type CreatureSize, type Member, type RoomState } from "#shared/model.ts";
 import { playsAlone } from "#shared/permissions.ts";
 import type { ActorPatch, CharacterPatch, TokenInput } from "#shared/protocol.ts";
-import { hpLess } from "#shared/rules/hp.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { FieldRow, Select } from "../../components/Field.tsx";
@@ -29,8 +28,9 @@ import { CreatureHeader } from "./CreatureHeader.tsx";
 import { characterKind, kindLine, sizeText } from "./creatureKind.ts";
 import { EffectsSection } from "./EffectsSection.tsx";
 import { HpSection } from "./HpSection.tsx";
+import { characterPageDraws } from "./panelDraws.ts";
 import { usePanelFolds, type FoldKey } from "./panelFolds.ts";
-import { cardCombat, cardGroups, combatSummary, headerActions, playersPlace, reactionSpent, type CardCombatId, type CardPartId } from "./panelOrder.ts";
+import { cardCombat, combatSummary, headerActions, playersPlace, reactionSpent, type CardCombatId, type CardPartId } from "./panelOrder.ts";
 import { PLACE_TOOL_ID, setPending } from "./placement.ts";
 import { onScene, playerToken } from "./playerCharacters.ts";
 import { QuickNumbers } from "./QuickNumbers.tsx";
@@ -109,8 +109,8 @@ export function CharacterPage(props: { character: Character; close: PanelClose; 
   const { actor } = character;
   // A character's size is one of the six: Custom is a token's alone.
   const cells = character.size === "custom" ? 1 : SIZE_CELLS[character.size];
-  const notes = access.canEditActor("notes") || !!actor.notes?.trim() || access.dm;
-  const parts = cardGroups({ dm: access.dm, plays: access.owner, statBlock: access.full, companions: true, notes, image: access.canEdit("defaultImage") });
+  // The room search reads the same rule, so it offers only what this page draws.
+  const { parts, noAc, fromBlock } = characterPageDraws({ access, character });
   const headerRow = headerActions({ dm: access.dm, on: "page", plays: access.owner, playersPlace: placeMine }).flatMap((id) =>
     id === "place" ? [<PlaceToken key={id} character={character} close={props.close} />] : id === "placeMine" ? [<PlaceMine key={id} character={character} close={props.close} />] : [],
   );
@@ -230,8 +230,8 @@ export function CharacterPage(props: { character: Character; close: PanelClose; 
               canEdit={access.canEditActor}
               onPatch={patchActor}
               dm={access.dm}
-              noAc={hpLess(actor)}
-              fromBlock={character.stats !== undefined}
+              noAc={noAc}
+              fromBlock={fromBlock}
               search={{ ac: "character.ac", walk: "character.walk", pp: "character.pp", senses: "character.senses" }}
             />
             {access.canEditActor("sheetUrl") ? (

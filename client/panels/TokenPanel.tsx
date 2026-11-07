@@ -2,7 +2,6 @@ import type { IconName } from "../components/Icon.tsx";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Actor, Character, CreatureSize, HpVisibility, Token, TokenKind } from "#shared/model.ts";
 import type { ActorPatch, ClientOp, TokenPatch } from "#shared/protocol.ts";
-import { hpLess } from "#shared/rules/hp.ts";
 import type { NextSize } from "#shared/rules/resize.ts";
 import { isCompanion } from "../canvas/barButtons.ts";
 import { DismissButton } from "../canvas/TokenActionBar.tsx";
@@ -26,7 +25,6 @@ import { ViewAsButton, ViewAsEye, viewAsPlayers } from "../features/dm/viewAs.ts
 import { usePanelHere, type PanelProps } from "../features/panels.ts";
 import { ImageField } from "../features/images/ImageField.tsx";
 import { RangeRingsSection } from "../features/measure/RangeRingsSection.tsx";
-import { statBlockShown } from "../features/monsters/statBlockLink.ts";
 import { GroundNotice } from "../features/movement/GroundNotice.tsx";
 import { ownsCharacter, tokenAccess, tokenOwnerIds, type TokenAccess } from "../features/tokens/access.ts";
 import { useAltImages } from "../features/tokens/AltImages.tsx";
@@ -38,7 +36,8 @@ import { EffectsSection } from "../features/tokens/EffectsSection.tsx";
 import { shownRowOps } from "../features/tokens/groupEdit.ts";
 import { HpSection } from "../features/tokens/HpSection.tsx";
 import { relationKey, usePanelFolds, type FoldKey } from "../features/tokens/panelFolds.ts";
-import { combatSummary, headerActions, holdsClassResources, offersMakeCompanion, panelGroups, panelRelation, reactionSpent, type PanelGroupId, type PanelSectionId } from "../features/tokens/panelOrder.ts";
+import { combatSummary, headerActions, offersMakeCompanion, panelRelation, reactionSpent, type PanelGroupId, type PanelSectionId } from "../features/tokens/panelOrder.ts";
+import { tokenPanelDraws } from "../features/tokens/panelDraws.ts";
 import { backTo, baseSize, customWords, SIZE_WORDS } from "../features/tokens/resize.ts";
 import { RestSection } from "../features/tokens/RestSection.tsx";
 import { StatBlockSection } from "../features/tokens/StatBlockSection.tsx";
@@ -184,34 +183,11 @@ function TokenDetails(props: PanelProps) {
   };
   // A viewer's tap is what this device remembers. "View as a player" reads what is stored and never writes it.
   const groupFold = (key: FoldKey) => ({ open: folds[key], onToggle: () => slot.tap(key, !folds[key], !preview) });
-  const companion = isCompanion(token);
   // The quick numbers stand under the name (docs/design/design-v1-dice-ui.md 5.1).
   const quickNumbers = vitals({ actor, token, fullAccess: access.full, place: "panel" });
-  // A player lent only a token of a character holds none of its card (docs/design/design-v1-pc-stats.md 4.2), so it has no stat card to show or edit there.
-  const playsCharacter = character !== undefined && ownsCharacter(you?.memberId, character);
-  const cardNotes =
-    access.full && actor && (access.canEditActor("notes") || actor.notes !== undefined) ? (
-      <CardNotesField actor={actor} editable={access.canEditActor("notes")} onPatch={patchActor} label="Card notes" rows={2} />
-    ) : null;
-  const statCard = actor !== undefined && (character === undefined || access.dm || playsCharacter);
-  const classResources = holdsClassResources({ dm: access.dm, character: character !== undefined, playsCharacter });
-  const parts = panelGroups({
-    dm: access.dm,
-    owner: access.owner,
-    kind: token.kind,
-    companion,
-    statBlockShown: statBlockShown({ dm: access.dm, owner: access.owner, kind: token.kind, actor, companion, character: "ref" in token.actor, ownsCharacter: character ? playsCharacter : undefined }),
-    actor: statCard,
-    ownerRenames: !access.dm && access.canEditToken("name"),
-    classResources,
-    uses: usesPresence,
-    reaction,
-    attach,
-    locked: token.locked,
-    dismiss: access.dismiss,
-    notes: access.canEditToken("notes") || !!token.notes || access.dm || cardNotes !== null,
-    image: access.canEditToken("image"),
-  });
+  // The room search reads the same rule, so it offers only what this panel draws.
+  const { parts, statCard, noAc, fromBlock, classResources, ...draws } = tokenPanelDraws({ access, memberId: you?.memberId, token, character, uses: usesPresence, reaction, attach });
+  const cardNotes = draws.cardNotes && actor ? <CardNotesField actor={actor} editable={access.canEditActor("notes")} onPatch={patchActor} label="Card notes" rows={2} /> : null;
   const relation = panelRelation(access);
 
   const section = (id: PanelSectionId): ReactNode => {
@@ -267,8 +243,8 @@ function TokenDetails(props: PanelProps) {
                   canEdit={access.canEditActor}
                   onPatch={patchActor}
                   dm={access.dm}
-                  noAc={hpLess(actor, token)}
-                  fromBlock={character?.stats !== undefined}
+                  noAc={noAc}
+                  fromBlock={fromBlock}
                   search={{ ac: "token.ac", walk: "token.walk", pp: "token.pp", senses: "token.senses" }}
                 />
                 {access.canEditActor("sheetUrl") ? (

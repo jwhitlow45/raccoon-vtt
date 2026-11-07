@@ -13,7 +13,7 @@ import { EVERYONE } from "./catalog/everyone.ts";
 import type { Catalog, SearchContext } from "./catalog/types.ts";
 import type { SearchRoute } from "./entry.ts";
 import { searchRole } from "./index.ts";
-import { seededRoom, viewOf } from "./search.testutil.ts";
+import { indexOf, seededRoom, viewOf } from "./search.testutil.ts";
 
 /*
  * Each control the catalogs route to draws its anchor (designs/qol/search.md
@@ -287,6 +287,78 @@ describe("a creature's fields draw their anchors (search.md 4, 5.10)", () => {
       for (const a of places(catalogs, "token")) assert.ok(drawn.includes(a), `${a} is a field of the ${viewer.role}'s but not drawn`);
       for (const a of drawn.filter((a) => a.startsWith("token."))) assert.ok(all.has(a), `${a} is drawn but no field routes to it`);
       assert.equal(new Set(drawn).size, drawn.length, `an anchor drawn twice: ${drawn.join(" ")}`);
+    }
+  });
+
+  test("the index offers a selected token's field exactly where its panel draws the field's anchor, for a token lent without its character, an HP-less creature and a card with rows unset too", async () => {
+    const { default: TokenPanel } = await import("../../panels/TokenPanel.tsx");
+    // Kel's token lent to Pat, who plays Bree, not Kel: Pat owns the token and holds none of Kel's card.
+    const lent = () => {
+      const room = fullRoom();
+      room.tokens.tkel = { ...room.tokens.tkel!, ownerIds: ["p1"] };
+      return room;
+    };
+    // A goblin with a maximum of 0 HP has no Armor Class in its card (hpLess).
+    const hpLessGoblin = () => {
+      const room = fullRoom();
+      const g1 = room.tokens.g1!;
+      room.tokens.g1 = { ...g1, actor: { inline: { ...("inline" in g1.actor ? g1.actor.inline : {}), hp: { cur: 0, max: 0, temp: 0 } } } } as never;
+      return room;
+    };
+    // A goblin Pat owns with no Armor Class or Passive Perception set, which Pat may not set: its card draws neither row.
+    const ownedBare = () => {
+      const room = fullRoom();
+      const g2 = room.tokens.g2!;
+      const inline = { ...("inline" in g2.actor ? g2.actor.inline : {}) } as Record<string, unknown>;
+      delete inline.ac;
+      delete inline.passivePerception;
+      room.tokens.g2 = { ...g2, ownerIds: ["p1"], actor: { inline } } as never;
+      return room;
+    };
+    for (const [name, room, viewer, tokenId] of [
+      ["the DM's goblin", fullRoom, DM, "g1"],
+      ["Pat's goblin with no AC or Passive Perception", ownedBare, P1, "g2"],
+      ["the DM's HP-less goblin", hpLessGoblin, DM, "g1"],
+      ["Pat's own Bree", fullRoom, P1, "tbree"],
+      ["Kel's token lent to Pat", lent, P1, "tkel"],
+    ] as const) {
+      const view = viewOf(room(), viewer, { selectedId: tokenId });
+      const fieldAnchors = new Set(places(viewer === DM ? [EVERYONE, DM_CATALOG] : [EVERYONE], "token"));
+      const drawn = anchorsIn(draw(view, TokenPanel as never, { ...PANEL, selectedTokenId: tokenId })).filter((a) => fieldAnchors.has(a));
+      const offered = indexOf(view)
+        .items.map((i) => i.entry)
+        .filter((e) => e.id.startsWith(`field:token:${tokenId}:`))
+        .map((e) => (e.act.t === "open" ? (e.act.route.anchor ?? "") : ""));
+      assert.ok(offered.length > 0, `${name}: the index offers its fields`);
+      assert.deepEqual([...offered].sort(), [...drawn].sort(), `${name}: offered and drawn`);
+    }
+  });
+
+  test("the index offers a character's page field exactly where the page draws its anchor, for an HP-less character too", async () => {
+    const { CharacterPage } = await import("../tokens/CharacterCard.tsx");
+    // Kel at a maximum of 0 HP has no Armor Class on the page (hpLess).
+    const hpLessKel = () => {
+      const room = fullRoom();
+      const kel = room.characters.kel!;
+      room.characters.kel = { ...kel, actor: { ...kel.actor, hp: { cur: 0, max: 0, temp: 0 } } };
+      return room;
+    };
+    for (const [name, room, viewer, characterId] of [
+      ["Pat's Bree", fullRoom, P1, "bree"],
+      ["the DM's Bree", fullRoom, DM, "bree"],
+      ["the DM's HP-less Kel", hpLessKel, DM, "kel"],
+    ] as const) {
+      const view = viewOf(room(), viewer);
+      const fieldAnchors = new Set(places(viewer === DM ? [EVERYONE, DM_CATALOG] : [EVERYONE], "page"));
+      const character = view.view!.characters[characterId]!;
+      const drawn = anchorsIn(draw(view, CharacterPage as never, { character, close: () => {}, onAddCompanion() {}, onBlocks() {}, onDelete: () => null })).filter((a) => fieldAnchors.has(a));
+      const offered = indexOf(view)
+        .items.map((i) => i.entry)
+        .filter((e) => e.id.startsWith(`field:character:${characterId}:`))
+        .map((e) => (e.act.t === "character" ? (e.act.route?.anchor ?? "") : ""));
+      // A DM finds only the few fields play reads on every character's page (everyCharacter).
+      const want = viewer === DM ? drawn.filter((a) => [EVERYONE, DM_CATALOG].some((c) => c.fields.some((f) => f.page?.anchor === a && f.everyCharacter))) : drawn;
+      assert.deepEqual([...offered].sort(), [...want].sort(), `${name}: offered and drawn`);
     }
   });
 

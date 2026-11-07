@@ -3,6 +3,7 @@ import type { Actor } from "#shared/model.ts";
 import type { ActorPatch } from "#shared/protocol.ts";
 import { Switch } from "../../components/Switch.tsx";
 import { theme } from "../../lib/theme.ts";
+import { statRows } from "./panelDraws.ts";
 import { validSheetUrl } from "./statSummary.ts";
 import { FieldRow, Note, NumberField, Section, Stepper, TextField } from "./ui.tsx";
 
@@ -73,6 +74,8 @@ export function StatsFields(props: {
 }) {
   const { actor, canEdit, onPatch, dm } = props;
   const fromBlock = props.fromBlock === true;
+  // The room search offers these rows by the same rule (panelDraws.ts).
+  const rows = statRows({ actor, canEdit, noAc: props.noAc === true, fromBlock });
   const speeds: Speeds = actor.speeds ?? { walk: 30 };
 
   const setSpeed = (key: SpeedKey, value: number | null) => {
@@ -105,11 +108,11 @@ export function StatsFields(props: {
 
   return (
     <>
-      {props.noAc ? null : (
+      {rows.ac ? (
         <Stat label="Armor Class" value={actor.ac} editable={canEdit("ac")} search={props.search?.ac}>
           <NumberField label="Armor Class" value={actor.ac} min={0} max={100} onCommit={(n) => n !== null && onPatch({ ac: n })} />
         </Stat>
-      )}
+      ) : null}
       {speedRow("walk")}
       {OTHER_SPEEDS.filter((key) => !folded.includes(key)).map(speedRow)}
       {editSpeeds ? (
@@ -158,15 +161,17 @@ export function StatsFields(props: {
           />
         </Stat>
       ) : null}
-      <Stat label="Passive Perception" value={fromBlock ? withSource(actor.passivePerception) : actor.passivePerception} editable={!fromBlock && canEdit("passivePerception")} search={props.search?.pp}>
-        <NumberField
-          label="Passive Perception"
-          value={actor.passivePerception}
-          min={0}
-          max={60}
-          onCommit={(n) => n !== null && onPatch({ passivePerception: n })}
-        />
-      </Stat>
+      {rows.pp ? (
+        <Stat label="Passive Perception" value={fromBlock ? withSource(actor.passivePerception) : actor.passivePerception} editable={!fromBlock && canEdit("passivePerception")} search={props.search?.pp}>
+          <NumberField
+            label="Passive Perception"
+            value={actor.passivePerception}
+            min={0}
+            max={60}
+            onCommit={(n) => n !== null && onPatch({ passivePerception: n })}
+          />
+        </Stat>
+      ) : null}
       <Stat label="Senses" value={actor.senses || "None"} editable={canEdit("senses")} wide search={props.search?.senses}>
         <TextField label="Senses" value={actor.senses ?? ""} maxLength={80} placeholder="Darkvision 60 ft." onCommit={(v) => onPatch({ senses: v.trim() })} />
       </Stat>

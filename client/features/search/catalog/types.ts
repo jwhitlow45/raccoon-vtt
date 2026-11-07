@@ -79,7 +79,7 @@ export type FieldDef = {
    * finds every page field of their own characters.
    */
   everyCharacter?: true;
-  /** Offered for a creature only while this holds, for a group the surface draws for some creatures alone (the token panel's Stat block). Left out, always. */
+  /** Offered for a creature only while its surface draws the control, by the surface's own rule (tokens/panelDraws.ts `drawn`). Left out, always. */
   shown?(holder: FieldHolder): boolean;
   /**
    * The value its row shows, from the creature's actor as this device holds
