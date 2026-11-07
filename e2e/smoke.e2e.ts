@@ -299,6 +299,10 @@ describe("raccoon-vtt smoke run", { timeout: 300_000 }, () => {
 
   test("7. initiative: the DM starts a fight, values go in, and both see whose turn it is", async () => {
     await dm.getByRole("tab", { name: "Initiative" }).click();
+    // The values are typed here, so the start must not roll the monsters as Roll monsters' Initiative, on at first, would (QOL audit Q12).
+    const roll = dm.getByRole("switch", { name: /^Roll monsters' Initiative/ });
+    if ((await roll.getAttribute("aria-checked")) === "true") await roll.click();
+    await waitFor("the start's roll off", async () => ((await roll.getAttribute("aria-checked")) === "false" ? true : null));
     await dm.getByRole("button", { name: "Everyone here (3)" }).click();
     await waitFor("the encounter", () => (dmSocket.state?.encounter?.entries.length ?? 0) === 3 || null);
     await setInitiative(dm, /^Goblin Warrior( \d+)?/, "15");
@@ -316,7 +320,8 @@ describe("raccoon-vtt smoke run", { timeout: 300_000 }, () => {
     assert.ok(!playerEntries.some((e) => e.tokenId === run.bossId));
 
     const dmStrip = dm.getByRole("button", { name: /^Initiative, round 1\./ });
-    await dm.getByRole("button", { name: "Start", exact: true }).click();
+    // The tracker's Start: the turn chip in the top bar has one of its own now (QOL chips C3).
+    await dm.getByRole("tabpanel", { name: "Initiative" }).getByRole("button", { name: "Start", exact: true }).click();
     await dmStrip.and(dm.getByRole("button", { name: /Thorn's turn/ })).waitFor();
     await playerStrip.and(player.getByRole("button", { name: /Your turn/ })).waitFor();
     await shots.take(player, "player-your-turn");

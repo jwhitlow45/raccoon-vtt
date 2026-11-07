@@ -257,15 +257,16 @@ describe("raccoon-vtt older features on a wave 4 build", { timeout: 180_000 }, (
 
   test("6. on a phone, a long room name gives way to the player's chip, down to a few letters (LP4-REGRESS-5)", async () => {
     // The run's room name is longer than the bar, which cut "Pat" to "P." beside it.
-    const chipName = (who: string) => player.getByTitle(`You are ${who}`).locator(":scope > span").last();
+    // The player's chip opens the You menu now (QOL chips C7), its whole name in a tooltip: the name is the pill's one span with words, after the dot.
+    const chipName = (who: string) => player.locator('button[data-chip="you"] > span > span:not([aria-hidden])').filter({ hasText: new RegExp(`^${who}$`) });
     const cut = (who: string) => chipName(who).evaluate((el) => el.scrollWidth > el.clientWidth);
     assert.equal(await cut("Pat"), false, "the player's name is cut short");
     assert.match((await chipName("Pat").textContent()) ?? "", /Pat$/);
 
-    // A longer name the bar still fits whole once the room name gave way, not cut by a hair. Beside Find, View and Fit
-    // the chip's name has 128 px of a 390 px phone, and this one takes 125 (the View button, which gives way after the
-    // chip, took the room "Bartholomew Thistlewood" had).
-    const longer = "Bartholomew Stone";
+    // A longer name the bar still fits whole once the room name gave way. Beside Search, Find, View and Fit, and the
+    // chip's own caret (QOL chips C7), the chip's name has 64 px of a 390 px phone, where it had 128 before them, and
+    // this one takes about 55.
+    const longer = "Bo Stone";
     const cookie = (await playerContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
     const own = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
     try {
