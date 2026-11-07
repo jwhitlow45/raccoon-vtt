@@ -894,6 +894,7 @@ type DomStyle = {
   opacity: string;
   flexWrap: string;
   flexDirection: string;
+  flexGrow: string;
   flexBasis: string;
   alignItems: string;
   alignSelf: string;
@@ -1582,7 +1583,9 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
       }
 
       // 3. Same kind: sibling controls of one tag, role, font size and corner share a height, a side padding and their gaps.
-      const kids = Array.from(el.children).filter((c) => shown(c) && !placedApart(c));
+      // An empty box that grows to fill its row, as the top bar's gap before its right-hand controls, stands between its neighbours, so the controls either side of it are no one run of kin whose gaps must agree. It has no height to show.
+      const spacer = (c: DomElement) => c.children.length === 0 && (c.textContent ?? "").trim() === "" && parseFloat(style(c).flexGrow) > 0;
+      const kids = Array.from(el.children).filter((c) => (shown(c) || spacer(c)) && !placedApart(c));
       if (kids.length >= 2) {
         const kin = new Map<string, DomElement[]>();
         for (const c of kids) {
