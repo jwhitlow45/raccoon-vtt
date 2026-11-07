@@ -80,6 +80,8 @@ export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   iconOnly?: "always" | "fine";
   /** The roll menu owns touch holds while hover and focus tips stay available. */
   tooltipHold?: boolean;
+  /** The room search's anchor id (features/search/entry.ts), set as `data-search` on the button. */
+  search?: string;
 };
 
 /**
@@ -107,7 +109,7 @@ function wordsOf(children: ReactNode): string | undefined {
  * destructive actions, and `armed` marks one that waits for its second tap.
  */
 export function Button(props: ButtonProps) {
-  const { tooltipHold, variant = "secondary", size = "md", block, armed, pressed, expanded, busy, icon, iconOnly, title, style, disabled: ownDisabled, onClick, children, onPointerEnter, onPointerLeave, onPointerDown, onPointerUp, onPointerCancel, onClickCapture, onFocus, onBlur, ...rest } = props;
+  const { search, tooltipHold, variant = "secondary", size = "md", block, armed, pressed, expanded, busy, icon, iconOnly, title, style, disabled: ownDisabled, onClick, children, onPointerEnter, onPointerLeave, onPointerDown, onPointerUp, onPointerCancel, onClickCapture, onFocus, onBlur, ...rest } = props;
   const disabled = useHeld(ownDisabled);
   const ignore = busy === true && !disabled;
   const bare = icon !== undefined && (iconOnly === "always" || (iconOnly === "fine" && !isCoarsePointer()));
@@ -124,6 +126,7 @@ export function Button(props: ButtonProps) {
       aria-pressed={pressed}
       aria-expanded={expanded}
       aria-busy={busy ? true : undefined}
+      data-search={search}
       {...rest}
       aria-label={bare ? name : rest["aria-label"]}
       title={tipped ? undefined : title}

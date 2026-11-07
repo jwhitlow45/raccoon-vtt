@@ -33,6 +33,8 @@ export function Checkbox(props: {
   onChange(checked: boolean): void;
   name?: string;
   value?: string;
+  /** The room search's anchor id (features/search/entry.ts), set as `data-search` on the whole row, whose box the search focuses. */
+  search?: string;
 }) {
   const id = useId();
   const labelId = useId();
@@ -88,6 +90,7 @@ export function Checkbox(props: {
   return (
     <label
       htmlFor={id}
+      data-search={props.search}
       style={{
         display: "flex",
         alignItems: props.help ? "flex-start" : "center",

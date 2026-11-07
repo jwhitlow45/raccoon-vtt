@@ -52,6 +52,8 @@ export function RadioCards<V extends string>(props: {
   status?: ReactNode;
   /** The words that describe the group while no option is chosen, in the warning tone in the status line. */
   none?: ReactNode;
+  /** The room search's anchor id (features/search/entry.ts), set as `data-search` on the group of cards, whose chosen card the search focuses. */
+  search?: string;
   onChange(value: V): void;
 }) {
   const name = useId();
@@ -155,6 +157,7 @@ export function RadioCards<V extends string>(props: {
           aria-describedby={describedBy}
           aria-busy={props.busy ? true : undefined}
           aria-disabled={disabled ? true : undefined}
+          data-search={props.search}
           data-card-group=""
           style={column}
         >
@@ -169,6 +172,7 @@ export function RadioCards<V extends string>(props: {
       aria-describedby={describedBy}
       aria-busy={props.busy ? true : undefined}
       disabled={disabled}
+      data-search={props.search}
       style={{ margin: 0, padding: 0, border: "none", minWidth: 0 }}
     >
       <legend style={nameStyle}>{props.legend}</legend>

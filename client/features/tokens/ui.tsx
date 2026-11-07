@@ -110,6 +110,8 @@ export function TextField(props: {
   rows?: number;
   disabled?: boolean;
   style?: CSSProperties;
+  /** The room search's anchor id (features/search/entry.ts), set as `data-search` on the field. */
+  search?: string;
 }) {
   const [draft, setDraft, focus, leave] = useDraft(props.value);
   const commit = () => {
@@ -120,6 +122,7 @@ export function TextField(props: {
   const disabled = useHeld(props.disabled);
   const common = {
     id: props.id,
+    "data-search": props.search,
     "aria-label": props.label,
     "aria-describedby": describedBy,
     value: draft,
@@ -183,6 +186,8 @@ type NumberFieldProps = {
    * press can leave focus where it is (characterPage.ts usePendingNumbers).
    */
   onPending?(value: number | null | undefined): void;
+  /** The room search's anchor id (features/search/entry.ts), set as `data-search` on the field. */
+  search?: string;
 };
 
 /**
@@ -232,6 +237,7 @@ function DraftNumber(props: NumberFieldProps & { align: "right" | "center" }) {
   return (
     <input
       id={props.id}
+      data-search={props.search}
       aria-label={props.label}
       type="text"
       inputMode={props.min < 0 ? "text" : "numeric"}
@@ -268,10 +274,13 @@ export function Select<T extends string>(props: {
   label: string;
   id?: string;
   disabled?: boolean;
+  /** The room search's anchor id (features/search/entry.ts), set as `data-search` on the field. */
+  search?: string;
 }) {
   return (
     <FieldSelect
       id={props.id}
+      search={props.search}
       aria-label={props.label}
       value={props.value}
       disabled={props.disabled}

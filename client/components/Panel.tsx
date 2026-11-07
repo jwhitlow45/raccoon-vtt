@@ -34,13 +34,16 @@ export function SectionLabel(props: {
   level?: 2 | 3 | 4;
   /** -1 for a label that takes focus when what had it went away, as a re-sync's sections do (docs/design/design-v1-resync.md 3.6). */
   tabIndex?: number;
+  /** The room search's anchor id (features/search/entry.ts), which also lets the label take focus from script, where the search lands. */
+  search?: string;
 }) {
   const Heading = props.level === 2 ? "h2" : props.level === 4 ? "h4" : "h3";
   const label = (
     // Its own width first ("1 1 auto", as FoldLabel's), so in the wrapping row below an action that does not fit beside it wraps under it. With a basis of 0 the action always took the line, and narrow fonts squeezed the label to a few pixels, its words running into the buttons.
     <Heading
       id={props.id}
-      tabIndex={props.tabIndex}
+      tabIndex={props.tabIndex ?? (props.search ? -1 : undefined)}
+      data-search={props.search}
       data-section-label={props.action ? undefined : ""}
       style={{ flex: "1 1 auto", minWidth: 0, margin: 0, ...sectionLabelLook(props.tone) }}
     >
@@ -104,6 +107,12 @@ export function Section(props: {
    * fold, such as Up next's next track (docs/design/design-v1-sound-layout.md 9).
    */
   fold?: { open: boolean; onToggle(): void; summary?: ReactNode; foldRef?: Ref<HTMLButtonElement>; keep?: boolean; describedBy?: string };
+  /**
+   * The room search's anchor id for the section (features/search/entry.ts),
+   * on its label's heading: the search lands on a section's header, so a
+   * fold's button takes the focus and a plain label takes it from script.
+   */
+  search?: string;
   children: ReactNode;
   style?: CSSProperties;
 }) {
@@ -127,7 +136,7 @@ export function Section(props: {
           ...props.style,
         }}
       >
-        <FoldLabel id={id} label={props.label} tone={props.tone} fold={fold} level={inGroup ? 4 : 3} />
+        <FoldLabel id={id} label={props.label} tone={props.tone} fold={fold} level={inGroup ? 4 : 3} search={props.search} />
         {fold.keep ? (
           <div hidden={!fold.open} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
             {props.children}
@@ -153,7 +162,7 @@ export function Section(props: {
       }}
     >
       {props.label ? (
-        <SectionLabel id={id} tone={props.tone} action={props.action} level={inGroup ? 4 : 3}>
+        <SectionLabel id={id} tone={props.tone} action={props.action} level={inGroup ? 4 : 3} search={props.search}>
           {props.label}
         </SectionLabel>
       ) : null}
@@ -169,13 +178,13 @@ export function Section(props: {
  * is the section label's: 13 px, weight 700, capitals, muted. Whatever a
  * caller adds after it, a summary, stays outside the button.
  */
-function FoldLabel(props: { id: string; label: ReactNode; tone?: "danger"; fold: NonNullable<Parameters<typeof Section>[0]["fold"]>; level: 3 | 4 }) {
+function FoldLabel(props: { id: string; label: ReactNode; tone?: "danger"; fold: NonNullable<Parameters<typeof Section>[0]["fold"]>; level: 3 | 4; search?: string }) {
   const { fold } = props;
   const Heading = props.level === 4 ? "h4" : "h3";
   const held = useHeld();
   return (
     <div data-section-label="" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2) }}>
-      <Heading id={props.id} style={{ flex: "1 1 auto", minWidth: 0, margin: 0, display: "flex" }}>
+      <Heading id={props.id} data-search={props.search} style={{ flex: "1 1 auto", minWidth: 0, margin: 0, display: "flex" }}>
         <button
           ref={fold.foldRef}
           type="button"
@@ -279,6 +288,13 @@ export type GroupProps = {
   reserve?: "chevron" | "icon";
   /** The line over the group, as a Section's `divider`. A panel's first group passes false, so no line sits just under the panel's header. */
   divider?: boolean;
+  /**
+   * The room search's anchor id for the group (features/search/entry.ts),
+   * on its header's heading: the search lands on a group's header, its fold
+   * or open button taking the focus, and the heading itself where it has
+   * neither, never a control in the body as a mark on the whole group would.
+   */
+  search?: string;
 } & (
   | {
       /** Absent for a group that never folds, such as a stat block whose character is not in view: the same row, with no chevron. */
@@ -442,7 +458,7 @@ export function Group(props: GroupProps) {
     <div data-panel-group="" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", borderTop: props.divider === false ? undefined : `${theme.line.border}px solid ${theme.color.border}` }}>
       {/* The action wraps under the name where both do not fit, as Add a stat block and Take a shape do in a narrow card, rather than run over it. */}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), minHeight: GROUP_ROW }}>
-        <h3 style={{ margin: 0, display: "flex", flex: "1 1 auto", minWidth: 0 }}>
+        <h3 data-search={props.search} tabIndex={props.search && !opens && !folds ? -1 : undefined} style={{ margin: 0, display: "flex", flex: "1 1 auto", minWidth: 0 }}>
           {opens ? (
             <button
               type="button"

@@ -74,6 +74,8 @@ export function Segmented<T extends string | number>(props: {
   /** Ids of lines placed elsewhere that also describe the group, such as a setting row's help and why a choice is off. */
   describedBy?: string;
   style?: CSSProperties;
+  /** The room search's anchor id (features/search/entry.ts), set as `data-search` on the radio group, whose chosen option the search focuses. */
+  search?: string;
 }) {
   const name = useId();
   const descriptionId = useId();
@@ -88,6 +90,7 @@ export function Segmented<T extends string | number>(props: {
       aria-labelledby={props.labelledBy}
       aria-describedby={[described ? descriptionId : null, props.describedBy || null].filter(Boolean).join(" ") || undefined}
       aria-disabled={groupOff ? true : undefined}
+      data-search={props.search}
       className={props.even ? evenClass(props.options.length, props.wrap === true) : undefined}
       style={{ display: "flex", flexWrap: props.even ? "nowrap" : "wrap", gap: theme.space(1), minWidth: 0, ...(props.even || described ? null : props.style) }}
     >

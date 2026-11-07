@@ -22,6 +22,8 @@ export function Switch(props: {
   checked: boolean;
   disabled?: boolean;
   busy?: boolean;
+  /** The room search's anchor id (features/search/entry.ts), set as `data-search` on the switch's own button. */
+  search?: string;
   onChange(checked: boolean): void;
 }) {
   const nameId = useId();
@@ -38,6 +40,7 @@ export function Switch(props: {
       aria-labelledby={nameId}
       aria-describedby={props.help ? helpId : undefined}
       aria-busy={busy ? true : undefined}
+      data-search={props.search}
       disabled={disabled}
       onClick={(e: MouseEvent<HTMLButtonElement>) => {
         if (busy) {

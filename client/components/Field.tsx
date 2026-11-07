@@ -51,15 +51,19 @@ export function RowHintScope(props: { children: ReactNode }) {
   return <RowHint.Provider value={undefined}>{props.children}</RowHint.Provider>;
 }
 
+/** The room search's anchor id (features/search/entry.ts), set as `data-search` on the control, or on a labeled field's or a row's whole box. */
+type Searchable = { search?: string };
+
 /** A plain input in the field look, for a place that labels it another way (`aria-label`, a FieldRow). */
-export function Input(props: InputHTMLAttributes<HTMLInputElement> & { ref?: Ref<HTMLInputElement>; error?: boolean }) {
-  const { error, style, ...rest } = props;
+export function Input(props: InputHTMLAttributes<HTMLInputElement> & { ref?: Ref<HTMLInputElement>; error?: boolean } & Searchable) {
+  const { error, style, search, ...rest } = props;
   const number = props.type === "number";
   const describedBy = useRowHint(props["aria-describedby"]);
   const disabled = useHeld(props.disabled);
   return (
     <input
       aria-invalid={error ? true : undefined}
+      data-search={search}
       {...rest}
       disabled={disabled}
       aria-describedby={describedBy}
@@ -69,22 +73,23 @@ export function Input(props: InputHTMLAttributes<HTMLInputElement> & { ref?: Ref
 }
 
 /** A native select in the field look. Native, since it is the best picker on a phone, and `color-scheme` draws its menu dark. */
-export function Select(props: SelectHTMLAttributes<HTMLSelectElement> & { ref?: Ref<HTMLSelectElement>; error?: boolean }) {
-  const { error, style, ...rest } = props;
+export function Select(props: SelectHTMLAttributes<HTMLSelectElement> & { ref?: Ref<HTMLSelectElement>; error?: boolean } & Searchable) {
+  const { error, style, search, ...rest } = props;
   const describedBy = useRowHint(props["aria-describedby"]);
   const disabled = useHeld(props.disabled);
-  return <select aria-invalid={error ? true : undefined} {...rest} disabled={disabled} aria-describedby={describedBy} style={{ ...fieldStyle({ error, disabled }), ...style }} />;
+  return <select aria-invalid={error ? true : undefined} data-search={search} {...rest} disabled={disabled} aria-describedby={describedBy} style={{ ...fieldStyle({ error, disabled }), ...style }} />;
 }
 
 /** A text area in the field look, growing from three lines. */
-export function TextArea(props: TextareaHTMLAttributes<HTMLTextAreaElement> & { ref?: Ref<HTMLTextAreaElement>; error?: boolean }) {
-  const { error, style, ...rest } = props;
+export function TextArea(props: TextareaHTMLAttributes<HTMLTextAreaElement> & { ref?: Ref<HTMLTextAreaElement>; error?: boolean } & Searchable) {
+  const { error, style, search, ...rest } = props;
   const describedBy = useRowHint(props["aria-describedby"]);
   const disabled = useHeld(props.disabled);
   return (
     <textarea
       aria-invalid={error ? true : undefined}
       rows={3}
+      data-search={search}
       {...rest}
       disabled={disabled}
       aria-describedby={describedBy}
@@ -100,15 +105,15 @@ export function TextArea(props: TextareaHTMLAttributes<HTMLTextAreaElement> & { 
  * `danger` read 4.2:1.
  */
 export function Field(
-  props: InputHTMLAttributes<HTMLInputElement> & { label: string; hint?: ReactNode; error?: string | null; trailing?: ReactNode; ref?: Ref<HTMLInputElement> },
+  props: InputHTMLAttributes<HTMLInputElement> & { label: string; hint?: ReactNode; error?: string | null; trailing?: ReactNode; ref?: Ref<HTMLInputElement> } & Searchable,
 ) {
-  const { label, hint, error, trailing, style, ...rest } = props;
+  const { label, hint, error, trailing, style, search, ...rest } = props;
   const id = useId();
   const hintId = `${id}-hint`;
   const disabled = useHeld(props.disabled);
   return (
     // The column may be narrower than the input's own width (about 20 characters), so a field in a narrow pane shrinks rather than running past its edge.
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
+    <div data-search={search} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
       <label htmlFor={id} style={{ fontSize: theme.font.body14, fontWeight: theme.weight.strong }}>
         {label}
       </label>
@@ -161,10 +166,10 @@ export function Field(
  * whole width, so a short label stays beside it wherever both fit and the
  * row wraps wherever they do not (S2-POS-1).
  */
-export function FieldRow(props: { label: string; htmlFor?: string; hint?: ReactNode; fill?: boolean; fixed?: boolean; children: ReactNode }) {
+export function FieldRow(props: { label: string; htmlFor?: string; hint?: ReactNode; fill?: boolean; fixed?: boolean; children: ReactNode } & Searchable) {
   const hintId = useId();
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), minHeight: theme.touch }}>
+    <div data-search={props.search} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), minHeight: theme.touch }}>
       {/*
        * A row wraps only where its label and its controls really do not fit
        * (docs/design/design-v1-polish.md R2). Fixed-width controls ask for their
