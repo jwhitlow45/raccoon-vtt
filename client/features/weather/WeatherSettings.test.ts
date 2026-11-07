@@ -146,7 +146,7 @@ describe("the scene's weather rows", () => {
     assert.match(
       fog,
       new RegExp(
-        `<p style="[^"]*color:${esc(theme.color.warning)}[^"]*"><span style="font-weight:${theme.weight.strong}">Heavy fog:</span> Heavily Obscured: a creature trying to see something in it has the Blinded condition\\. The map still shows what light and walls allow, so hide what the party could not see\\.</p>`,
+        `<p style="[^"]*color:${esc(theme.color.warning)}[^"]*"><span style="font-weight:${theme.weight.strong}">Heavy fog:</span> Heavily Obscured, so a creature trying to see something in it has the Blinded condition\\. The map still shows what light and walls allow, so hide what the party could not see\\.</p>`,
       ),
     );
     const rain = render({ kind: "rain", heavy: true });

@@ -812,7 +812,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
       await strength.getByRole("radio", { name: "Heavy", exact: true }).check();
       // pe1: heavy fog's switch says it reminds, and its line is a Note in the warning color, its name first, then the SRD's words and the app's advice (docs/design/design-v1-polish-pass.md 3.2).
       await what.getByText("Perception checks and attacks here get a reminder.", { exact: true }).waitFor();
-      const fogLine = what.getByText("Heavy fog: Heavily Obscured: a creature trying to see something in it has the Blinded condition. The map still shows what light and walls allow, so hide what the party could not see.", { exact: true });
+      const fogLine = what.getByText("Heavy fog: Heavily Obscured, so a creature trying to see something in it has the Blinded condition. The map still shows what light and walls allow, so hide what the party could not see.", { exact: true });
       await fogLine.waitFor();
       const warned = await fogLine.evaluate((el) => (globalThis as unknown as { getComputedStyle(e: unknown): { color: string } }).getComputedStyle(el).color);
       const muted = await what.getByText("Players see it at once. Each device can show it still or turn it off in This device.").evaluate((el) => (globalThis as unknown as { getComputedStyle(e: unknown): { color: string } }).getComputedStyle(el).color);

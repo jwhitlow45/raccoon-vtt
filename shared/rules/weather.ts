@@ -224,13 +224,13 @@ const RULE_LINES: Record<WeatherRuleKey, Omit<WeatherRuleLine, "name">> = {
     quotes: ["Strong wind imposes Disadvantage on ranged attack rolls with weapons.", "It also extinguishes open flames", "A flying creature in a strong wind must land at the end of its turn or fall."],
   },
   "patchy-fog": {
-    text: "Lightly Obscured: Disadvantage on Wisdom (Perception) checks that rely on sight.",
+    text: "Lightly Obscured, so Wisdom (Perception) checks that rely on sight have Disadvantage.",
     tone: "help",
     source: "obscured-areas",
     quotes: ["In a Lightly Obscured area, such as an area with Dim Light, patchy fog, or moderate foliage, you have Disadvantage on Wisdom (Perception) checks that rely on sight."],
   },
   "heavy-fog": {
-    text: "Heavily Obscured: a creature trying to see something in it has the Blinded condition.",
+    text: "Heavily Obscured, so a creature trying to see something in it has the Blinded condition.",
     advice: "The map still shows what light and walls allow, so hide what the party could not see.",
     tone: "note",
     source: "obscured-areas",

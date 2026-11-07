@@ -233,12 +233,16 @@ describe("the weather rules' sentence and lines", () => {
       { name: fog?.name, text: fog?.text, advice: fog?.advice, tone: fog?.tone },
       {
         name: "Heavy fog",
-        text: "Heavily Obscured: a creature trying to see something in it has the Blinded condition.",
+        text: "Heavily Obscured, so a creature trying to see something in it has the Blinded condition.",
         advice: "The map still shows what light and walls allow, so hide what the party could not see.",
         tone: "note",
       },
     );
     for (const w of everyWeather()) for (const line of weatherRuleLines(w).lines) if (line.name !== "Heavy fog") assert.equal(line.tone, "help", line.name);
+    assert.deepEqual(
+      weatherRuleLines({ kind: "fog" }).lines.map((l) => `${l.name}: ${l.text}`),
+      ["Patchy fog: Lightly Obscured, so Wisdom (Perception) checks that rely on sight have Disadvantage."],
+    );
   });
 
   test("every line says only what its quotes say: each quote is in its SRD entry, each rule term of the line in a quote, and the advice stays out", () => {
@@ -250,6 +254,8 @@ describe("the weather rules' sentence and lines", () => {
       for (const quote of line.quotes) assert.ok(entry.includes(quote), `${line.name}: "${quote}"`);
       for (const term of TERMS) if (line.text.includes(term)) assert.ok(line.quotes.some((q) => q.includes(term)), `${line.name}: "${term}" in a quote`);
       for (const words of [line.text, line.advice ?? ""]) assert.ok(!words.includes("\u2014") && !words.includes(";"), words);
+      // Shown after its name and a colon, so a colon of its own would read as a second label.
+      assert.ok(!line.text.includes(":"), line.text);
     }
   });
 });
