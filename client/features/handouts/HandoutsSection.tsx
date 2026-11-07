@@ -23,7 +23,7 @@ import { handoutsSummary } from "../dm/summaries.ts";
 import { honorsImageOrientation } from "../images/orientation.ts";
 import { PasteButton, PasteStatus, usePasteTarget } from "../images/PasteImage.tsx";
 import { useEntryBusy, useHandoff } from "../images/roomPaste.ts";
-import { apartFromStarter, docShowing, useLibrary } from "../images/library.ts";
+import { apartFromStarter, docShowing, rememberAsset, rememberListing, useLibrary } from "../images/library.ts";
 import { checkImageFile, prepareImageUpload } from "../images/upload.ts";
 import { EMPTY_DRAFT, handoutDraftSlot, withPick, withTypedTitle, type HandoutDraft } from "./draft.ts";
 import { HANDOUT_MAX_BYTES, HANDOUT_MAX_SIDE } from "./downscale.ts";
@@ -499,6 +499,8 @@ export function ShowHandoutForm(props: {
     setStatus("Loading the library…");
     try {
       const res = await api.listAssets(roomId);
+      // Recent and the DM menu read the page's own list, which must hold every image this form can show.
+      rememberListing(roomId, res.assets);
       if (!live.current) return;
       setLibrary(res.assets.filter((a) => a.kind === "handout"));
     } catch (err) {
@@ -535,6 +537,7 @@ export function ShowHandoutForm(props: {
       const row = await api.uploadAsset(roomId, "handout", blob, {
         onWaiting: (w) => setStatus(w ? "Waiting for the server…" : "Uploading…"),
       });
+      rememberAsset(roomId, row);
       setLibrary((list) => (list && !list.some((a) => a.id === row.id) ? [row, ...list] : list));
       const now = draftStore.getState();
       draftStore.setState(withPick(now, { kind: "image", asset: row }, titleFromFileName(file.name)));
@@ -549,6 +552,7 @@ export function ShowHandoutForm(props: {
   const pickStarter = (row: AssetRow, name: string) => {
     setStarter(false);
     setError(null);
+    rememberAsset(roomId, row);
     setLibrary((list) => (list && !list.some((a) => a.id === row.id) ? [row, ...list] : list));
     draftStore.setState(withPick(draftStore.getState(), { kind: "image", asset: row }, name));
   };

@@ -1911,15 +1911,25 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
       await ops.send({ t: "handout.close", handoutId: toBoth.id });
       const toLee = await showByForm({ kind: "image", assetId: alone.assetId }, "Lee's letter", ["Lee"]);
       await ops.send({ t: "handout.close", handoutId: toLee.id });
-      // Recent checks an image against the library list it read as it first showed one, which the form's own listing does not refresh, so a reload reads both new images.
-      await openSideTab(dm, "DM");
-      await dm.waitForTimeout(500);
-      const listed = await dm.getByRole("list", { name: "Recent handouts" }).getByRole("button").evaluateAll((els) => els.map((el) => el.getAttribute("aria-label") ?? ""));
-      console.log(`qe-3: before a reload Recent held ${JSON.stringify(listed)}`);
-      await reopenRoom(dm);
-      await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+      // Both were added after Recent first read the library (another device's uploads), and the form's own listing shows them to Recent too, with no reload.
       await recentRow(/^Show Old well to (Pip and Lee|Lee and Pip)$/);
       await recentRow("Show Lee's letter to Lee");
+      // So does an image the form's own Upload a file adds.
+      await pickFile({ name: "Pip's map.png", mimeType: "image/png", buffer: await paper(480, 300, 5) });
+      const form = handoutForm();
+      await form.getByRole("button", { name: "Change" }).waitFor();
+      await form.getByLabel("Title").fill("Pip's map");
+      await form.getByRole("radio", { name: "Chosen players" }).click();
+      for (const name of ["Pip", "Pat", "Lee"]) {
+        const box = form.getByRole("group", { name: "Players to show it to" }).getByRole("checkbox", { name, exact: true });
+        if (name === "Pip") await box.check();
+        else await box.uncheck();
+      }
+      const shownBefore = new Set(Object.keys(dmSocket.state?.handouts ?? {}));
+      await form.getByRole("button", { name: "Show", exact: true }).click();
+      const toPip = await waitFor("Pip's map showing", () => Object.values(dmSocket.state?.handouts ?? {}).find((h) => h !== undefined && !shownBefore.has(h.id) && h.title === "Pip's map"));
+      await ops.send({ t: "handout.close", handoutId: toPip.id });
+      await recentRow("Show Pip's map to Pip");
 
       const gone = await dmContext.request.delete(`${server.origin}/api/rooms/${run.roomId}/members/${leeId}`, { headers: { Origin: server.origin } });
       assert.ok(gone.ok(), `removing Lee answered ${gone.status()}`);

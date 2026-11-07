@@ -48,10 +48,7 @@ export function refreshLibrary(roomId: string): Promise<void> {
   entry.loading = api
     .listAssets(roomId)
     .then(
-      (r) => {
-        entry.rows = new Map(r.assets.map((a) => [a.id, a]));
-        entry.failed = false;
-      },
+      (r) => takeListing(entry, r.assets),
       () => {
         entry.failed = true;
       },
@@ -63,6 +60,23 @@ export function refreshLibrary(roomId: string): Promise<void> {
     });
   emit();
   return entry.loading;
+}
+
+function takeListing(entry: Entry, rows: readonly AssetRow[]): void {
+  entry.rows = new Map(rows.map((a) => [a.id, a]));
+  entry.failed = false;
+}
+
+/**
+ * A whole listing another surface asked for itself (the handout form's
+ * From the library), so every reader of the list, Handouts' Recent among
+ * them, holds what it showed without a reload.
+ */
+export function rememberListing(roomId: string, rows: readonly AssetRow[]): void {
+  const entry = entryFor(roomId);
+  takeListing(entry, rows);
+  entry.loadedAt = Date.now();
+  emit();
 }
 
 /** A row the picker just made (an upload or an import), so its credit shows before the next listing. */
