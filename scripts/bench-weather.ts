@@ -28,6 +28,10 @@
  *   still, where every frame of the pinch is a camera draw.
  * - level after pinches and level after drags: as level after pans, two
  *   fingers pinching or a finger dragging a creature on and off.
+ * - level after a long pinch: two fingers that never lift, pinching out
+ *   and in for 11 s, past the 2 s after which the step-down judges a
+ *   gesture's ticks against frames with the same moves (store.ts
+ *   LONG_INPUT_MS).
  *
  * Gates (6.1): rest busy at most 60 ms a second over none for every kind,
  * no ticks at rest for Still and Off, and, with a GPU, a pan's, a drag's
@@ -108,8 +112,8 @@ export function stepDownSettled(levels: readonly { at: number; level: number }[]
 
 const VIEWS = ["topDown", "isometric"] as const;
 
-/** The levels a gesture on and off from a fresh page leaves, which must stay full with a GPU. */
-export const LEVEL_ROWS = ["level after pans, rain", "level after pinches, rain", "level after drags, rain"] as const;
+/** The levels a gesture on and off from a fresh page, or one that never lifts, leaves, which must stay full with a GPU. */
+export const LEVEL_ROWS = ["level after pans, rain", "level after pinches, rain", "level after drags, rain", "level after a long pinch, rain"] as const;
 
 function rowValue(rows: readonly Row[], row: string, view: View): number | undefined {
   return rows.find((r) => r.row === row && r.view === view)?.value;
@@ -367,6 +371,21 @@ async function main(): Promise<void> {
       for (let i = 19; i >= 0; i--) await touches.move(at(100 + i * 8), 16);
       await touches.end([], 16);
     };
+    /** Two fingers down for 11 s, pinching out and in about the middle with no pause, and the level the weather is left at. */
+    const longPinch = async (view: View) =>
+      throttled(async () => {
+        await fresh(view, HEAVIEST[0]!.weather);
+        const touches = new Touches(cdp);
+        const at = (d: number) => [
+          { x: middle.x - d / 2, y: middle.y, id: 1 },
+          { x: middle.x + d / 2, y: middle.y, id: 2 },
+        ];
+        await touches.start(at(100), 120);
+        const from = Date.now();
+        for (let i = 1; Date.now() - from < 11_000; i++) await touches.move(at(180 - 80 * Math.cos(i / 10)), 16);
+        await touches.end([], 16);
+        return level(page);
+      });
     const pinch = async () =>
       throttled(async () => {
         const stop = await recordFrames(page);
@@ -427,6 +446,7 @@ async function main(): Promise<void> {
       add({ row: "level after pinches, rain", view, value: await onAndOff(view, pinchOnce), unit: "level" });
       let from: { x: number; y: number } | null = null;
       add({ row: "level after drags, rain", view, value: await onAndOff(view, async (touches) => dragOnce(touches, (from ??= await tokenAt()))), unit: "level" });
+      add({ row: "level after a long pinch, rain", view, value: await longPinch(view), unit: "level" });
       // Held still, a pinch draws the weather in every frame as a camera draw, and streaks fade in thirds there.
       await page.evaluate(() => localStorage.setItem("rvtt.weather", "still"));
       await fresh(view, HEAVIEST[0]!.weather);

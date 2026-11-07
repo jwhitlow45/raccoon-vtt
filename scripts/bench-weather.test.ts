@@ -68,8 +68,8 @@ describe("the weather bench's gates", () => {
     assert.deepEqual(gestureOverages(pinch(19.5, 20)), ["topDown pinch: p95 2.5 ms over none", "topDown pinch held still: p95 3.0 ms over none"], "said, not gated");
   });
 
-  test("with a GPU every particle stays after pinches and after drags as after pans, and without one they may not", () => {
-    assert.deepEqual(LEVEL_ROWS, ["level after pans, rain", "level after pinches, rain", "level after drags, rain"]);
+  test("with a GPU every particle stays after pinches, after drags and through a pinch that never lifts as after pans, and without one they may not", () => {
+    assert.deepEqual(LEVEL_ROWS, ["level after pans, rain", "level after pinches, rain", "level after drags, rain", "level after a long pinch, rain"]);
     for (const row of LEVEL_ROWS) {
       const left = (level: number): Row[] => [{ row, view: "isometric", value: level, unit: "level" }];
       assert.deepEqual(gateFailures(left(0)), [], row);
