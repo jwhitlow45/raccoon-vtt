@@ -1194,37 +1194,43 @@ describe("raccoon-vtt: a sheet's field over the phone keyboard", { timeout: 900_
     }
   });
 
-  test("qe-1. with a keyboard joined to Pat's phone, C on Thorn's resting strip grows his bar with Conditions open on their first cell and Escape closes them with focus back on a Conditions button, resting the bar only where the strip shows one, a digit starts his HP change in the strip's field, and on the goblin, not his, neither key does a thing", async () => {
-    await setUp(pat, VIEWS[0]!);
-    const bar = await thornsBar(pat);
-    assert.equal(await bar.getAttribute("data-bar-state"), "rest", "Thorn's bar opens as the strip");
-    // On Thorn's own turn HP, Roll and End turn fill the strip, which then shows no Conditions to come back to.
-    const onStrip = await bar.getByRole("button", { name: "Conditions", exact: true }).isVisible();
+  test("qe-1. with a keyboard joined to Pat's phone, C on Thorn's resting strip grows his bar with Conditions open on their first cell and Escape closes them with focus back on a Conditions button, resting the bar on the goblin's turn, where the strip shows Conditions, and leaving it grown on Thorn's own, where it does not, a digit starts his HP change in the strip's field, and on the goblin, not his, neither key does a thing", async () => {
     const focus = () =>
       pat.evaluate(() => {
         type El = { tagName: string; value?: string; textContent: string | null; getAttribute(n: string): string | null; closest(s: string): El | null };
         const el = (globalThis as unknown as { document: { activeElement: El | null } }).document.activeElement;
         return { tag: el?.tagName ?? "", name: (el?.getAttribute("aria-label") ?? el?.textContent ?? "").trim(), value: el?.value ?? null, group: el?.closest('[role="group"]')?.getAttribute("aria-label") ?? null };
       });
+    // Each Escape branch pinned to its turn: on the goblin's the strip shows Conditions to come back to, and on Thorn's own HP, Roll and End turn fill it.
+    for (const [entryId, onStrip] of [
+      ["e-gob", true],
+      ["e-thorn", false],
+    ] as const) {
+      if (dmSocket.state?.encounter?.activeEntryId !== entryId) await ops.send({ t: "encounter.next" });
+      await waitFor(`${entryId}'s turn on Pat's page`, () => (patSocket.state?.encounter?.activeEntryId === entryId ? true : null));
+      await setUp(pat, VIEWS[0]!);
+      const bar = await thornsBar(pat);
+      assert.equal(await bar.getAttribute("data-bar-state"), "rest", `${entryId}: Thorn's bar opens as the strip`);
+      assert.equal(await bar.getByRole("button", { name: "Conditions", exact: true }).isVisible(), onStrip, `${entryId}: the strip ${onStrip ? "shows" : "has no"} Conditions`);
 
-    await pat.keyboard.press("c");
-    await waitFor("the bar grown with Conditions open", async () => ((await bar.getAttribute("data-bar-state")) === "expanded" ? true : null));
-    await waitFor("focus on Blinded, the first cell", async () => {
-      const f = await focus();
-      return f.name === "Blinded" && f.group === "Conditions" ? true : null;
-    });
-    await shots.take(pat, "qe-1-c-on-strip");
-    await pat.keyboard.press("Escape");
-    await waitFor("focus back on Conditions, as on a computer", async () => {
-      const f = await focus();
-      return f.tag === "BUTTON" && f.name === "Conditions" ? true : null;
-    });
-    assert.equal(await bar.getByRole("group", { name: "Conditions", exact: true }).count(), 0, "Escape left the drawer open");
-    assert.equal(await bar.getAttribute("data-bar-state"), onStrip ? "rest" : "expanded", `the bar after Escape, the strip ${onStrip ? "showing" : "without"} Conditions`);
-    console.log(`qe-1: the strip ${onStrip ? "showed" : "did not show"} Conditions, so Escape left the bar ${onStrip ? "resting" : "grown"}`);
-    assert.ok(await bar.isVisible(), "Escape in the drawer closed Thorn's bar");
-    await bar.getByRole("button", { name: "Close", exact: true }).first().tap();
-    await bar.waitFor({ state: "detached" });
+      await pat.keyboard.press("c");
+      await waitFor("the bar grown with Conditions open", async () => ((await bar.getAttribute("data-bar-state")) === "expanded" ? true : null));
+      await waitFor("focus on Blinded, the first cell", async () => {
+        const f = await focus();
+        return f.name === "Blinded" && f.group === "Conditions" ? true : null;
+      });
+      await shots.take(pat, `qe-1-c-on-strip-${entryId}`);
+      await pat.keyboard.press("Escape");
+      await waitFor("focus back on Conditions, as on a computer", async () => {
+        const f = await focus();
+        return f.tag === "BUTTON" && f.name === "Conditions" ? true : null;
+      });
+      assert.equal(await bar.getByRole("group", { name: "Conditions", exact: true }).count(), 0, `${entryId}: Escape left the drawer open`);
+      assert.equal(await bar.getAttribute("data-bar-state"), onStrip ? "rest" : "expanded", `${entryId}: the bar after Escape, the strip ${onStrip ? "showing" : "without"} Conditions`);
+      assert.ok(await bar.isVisible(), `${entryId}: Escape in the drawer closed Thorn's bar`);
+      await bar.getByRole("button", { name: "Close", exact: true }).first().tap();
+      await bar.waitFor({ state: "detached" });
+    }
 
     const strip = await thornsBar(pat);
     await pat.keyboard.press("6");
