@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import type { Effect, LogEntry } from "#shared/model.ts";
@@ -605,8 +605,10 @@ type Notice = { id: string; text: string; suffix?: string; key?: Effect["key"] }
  * nothing waits, when the first card fits whole there; or else the alerts
  * over the screen, a dialog from the safe top to the toolbar, or to the
  * screen's foot where even that is too short for the first card, with
- * Close, which Escape and Back close too, as does nothing left waiting. The
- * column's cards are the ones it shows, never copies, so a half-answered
+ * Close, which Escape and Back close too, as does nothing left waiting. A
+ * card unfolded in the column that leaves its first card no such room asks
+ * the same way, so the card opened never folds into the row under the tap.
+ * The column's cards are the ones it shows, never copies, so a half-answered
  * roll keeps its total.
  */
 function FightAlerts() {
@@ -1052,7 +1054,37 @@ function FightAlerts() {
     }
     setAsked(askedWhere());
   });
-
+  /*
+   * A card unfolded by its own toggle in the column asks as the row's tap
+   * would, where it leaves the first card too tall for the room above the
+   * tool's options. Without this the cards folded into the row a frame
+   * after the tap, so the card just opened went away (D-261106-391). The
+   * card is measured on the next frame, once React has drawn it open, and
+   * the ask is drawn before that frame paints.
+   */
+  const unfoldAsks = useRef<(firstPx: number) => AskedAlerts | null>(() => null);
+  unfoldAsks.current = (firstPx) => unfoldAsk({ first: firstPx / zoom, toOptions, waiting: roomSummary !== null, folded, asked: asked !== null, forFootCard, forPane, where: askedWhere });
+  useEffect(() => {
+    const cards = cardsRef.current;
+    if (!cards) return;
+    let frame = 0;
+    // On the cards' own box, so it hears the click before React's root listener toggles the card.
+    const onClick = (e: MouseEvent) => {
+      const toggle = e.target instanceof Element ? e.target.closest("button[aria-expanded='false']") : null;
+      if (!toggle || !cards.contains(toggle)) return;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (toggle.getAttribute("aria-expanded") !== "true") return;
+        const where = unfoldAsks.current(firstCardHeight(cards));
+        if (where) flushSync(() => setAsked(where));
+      });
+    };
+    cards.addEventListener("click", onClick);
+    return () => {
+      cancelAnimationFrame(frame);
+      cards.removeEventListener("click", onClick);
+    };
+  }, []);
 
   /*
    * The column scrolls as a whole once its cards outgrow the room between
@@ -1232,6 +1264,19 @@ export function firstCard(cards: HTMLElement): HTMLElement | null {
     if (child.getBoundingClientRect().height > 0) return child;
   }
   return null;
+}
+
+/**
+ * Where a card the viewer has just unfolded in the column asks for the
+ * cards, as the summary row's tap would (barDock.ts askedAlerts), or null
+ * where the column keeps them as they are: the first card, `first` tall now,
+ * still fits whole above the tool's options, or something else already
+ * hides or shows them. A row stands for the cards only while something
+ * waits (`waiting`), so with nothing waiting the column keeps them too.
+ */
+export function unfoldAsk(a: { first: number; toOptions: number; waiting: boolean; folded: boolean; asked: boolean; forFootCard: boolean; forPane: boolean; where(first: number): AskedAlerts }): AskedAlerts | null {
+  if (a.folded || a.asked || a.forFootCard || a.forPane || !a.waiting || a.first <= 0) return null;
+  return a.toOptions < EDGE + a.first ? a.where(a.first) : null;
 }
 
 /** The first card's height as drawn (firstCard). */

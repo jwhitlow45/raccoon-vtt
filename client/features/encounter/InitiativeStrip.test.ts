@@ -7,7 +7,8 @@ import { ON_BOARD, ON_BOARD_STYLE, theme } from "../../lib/theme.ts";
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { trackerTargetLook, TURN_FACE_PX, YourTurn } = await import("./InitiativeStrip.tsx");
+const { trackerTargetLook, TURN_FACE_PX, unfoldAsk, YourTurn } = await import("./InitiativeStrip.tsx");
+const { EDGE } = await import("../../canvas/barDock.ts");
 const { TURN_PILL_PX } = await import("./parts.tsx");
 
 /*
@@ -59,4 +60,25 @@ test("the tracker target wears the board's two-tone ring, at either reach", () =
     assert.equal(look.attrs["data-rvtt-backdrop"], "");
     assert.equal(look.style.top, -reach);
   }
+});
+
+/*
+ * A card the DM unfolds in the alerts column asks for the cards as the
+ * summary row's tap would wherever the row would stand for them: the first
+ * card, open, no longer fits whole above the tool's options. At 844 x 390
+ * at 130% the opened Trip Wire card is 148 px in 139 px of room, and the
+ * column folded into its row a frame after the tap (D-261106-391).
+ */
+test("an unfolded first card too tall for the room above the tool's options asks where the row's tap would, and one that fits asks nothing", () => {
+  const asks: number[] = [];
+  const base = { first: 148, toOptions: 139, waiting: true, folded: false, asked: false, forFootCard: false, forPane: false, where: (first: number) => (asks.push(first), "overlay" as const) };
+  assert.equal(unfoldAsk(base), "overlay", "the 844 x 390 at 130% trip wire card");
+  assert.deepEqual(asks, [148], "where the cards go is read from the open card's height");
+  assert.equal(unfoldAsk({ ...base, where: () => "column" }), "column", "where the toolbar leaves room, the cards stand over the tool's options");
+  assert.equal(unfoldAsk({ ...base, first: 139 - EDGE }), null, "a card that fits whole with the column's 8 px keeps the column as it is");
+  assert.equal(unfoldAsk({ ...base, first: 139 - EDGE + 0.5 }), "overlay", "half a pixel short is short");
+  assert.equal(unfoldAsk({ ...base, waiting: false }), null, "no row stands for cards with nothing waiting");
+  for (const held of ["folded", "asked", "forFootCard", "forPane"] as const) assert.equal(unfoldAsk({ ...base, [held]: true }), null, `${held} already hides or shows the cards`);
+  assert.equal(unfoldAsk({ ...base, first: 0, toOptions: 4 }), null, "a column with no drawn card asks nothing, however short its room");
+  assert.equal(asks.length, 2, "only the asks that go ahead read where");
 });
