@@ -3805,6 +3805,25 @@ export function helperTest(): void {
     assert.deepEqual(sweep.lines, []);
     await assert.rejects(() => sweep.measure(page, "required", vanished), /no roots matched/);
   });
+  test("pf-1. the scenes list's rule leaves out only the players' shorter row beside Move players rows of one height, and keeps unequal Move players rows or a taller Players here row as findings", () => {
+    const row = (name: string, height: number) => `li "${name}" ${height} px`;
+    const line = (screen: string, ...rows: string[]) => `pg-390x844 ${screen}: kind-height 25.4 px, ul "Battle mat Grid, 20 × 14, fog off Players here C": ${rows.join(" | ")}`;
+    const players = (height: number) => row("Battle mat Grid, 20 × 14, fog off Players here", height);
+    const move = (name: string, height: number) => row(`${name} Map, 10 × 8, fog on Move players`, height);
+    // As the sweep logs it at 100%, dark and light, and with the Move players rows within the limit of each other.
+    assert.ok(SCENE_ROWS_BY_DESIGN.test(line("pg-scenes-list", players(97.6), move("Crypt", 123), move("Hex crypt", 123))));
+    assert.ok(SCENE_ROWS_BY_DESIGN.test(line("pg-scenes-list-light", players(97.6), move("Crypt", 123), move("Hex crypt", 123.9))));
+    // Move players rows of two heights are a real finding, beside the players' row or not.
+    assert.ok(!SCENE_ROWS_BY_DESIGN.test(line("pg-scenes-list", players(97.6), move("Crypt", 123), move("Hex crypt", 126))));
+    assert.ok(!SCENE_ROWS_BY_DESIGN.test(line("pg-scenes-list", move("Crypt", 123), move("Hex crypt", 126))));
+    // A players' row as tall as the others, or taller, is not a tag at the words' height.
+    assert.ok(!SCENE_ROWS_BY_DESIGN.test(line("pg-scenes-list", players(150), move("Crypt", 123), move("Hex crypt", 123))));
+    assert.ok(!SCENE_ROWS_BY_DESIGN.test(line("pg-scenes-list", players(123), move("Crypt", 123), move("Hex crypt", 123))));
+    // Two players' rows, a row of another kind, or another screen stay findings.
+    assert.ok(!SCENE_ROWS_BY_DESIGN.test(line("pg-scenes-list", players(97.6), players(97.6), move("Crypt", 123))));
+    assert.ok(!SCENE_ROWS_BY_DESIGN.test(line("pg-scenes-list", players(97.6), move("Crypt", 123), row("Hex crypt Map, 10 × 8 hexes, fog on", 123))));
+    assert.ok(!SCENE_ROWS_BY_DESIGN.test(line("pg-scenes", players(97.6), move("Crypt", 123))));
+  });
   test("fu41-c-font. unbundled glyphs fit their frame at 130% while clipped frames still fail", async () => {
     const page = await dmContext.newPage();
     try {
@@ -6781,15 +6800,22 @@ export function clockTests(): void {
  * its Players here tag at the words' own height, where each other row holds
  * a Move players button a touch target tall (docs/design/design-v1-polish-pass.md
  * 3.10). Rows of one kind are held to one height, so that row reads as out
- * of line, 25.4 px at 100%.
+ * of line, 25.4 px at 100%. Only that shape is left out: the Move players
+ * rows within the limit of each other, and the players' one row shorter
+ * than them. Anything else in the list is still a finding.
  */
 const SCENE_ROWS_BY_DESIGN = {
   test(line: string): boolean {
     const found = /^\S+ pg-scenes-list(-light)?: kind-height [\d.]+ px, ul "[^"]*": (.*)$/.exec(line);
     if (!found) return false;
-    // The rows it names: the players' one, and only rows that offer Move players.
-    const rows = (found[2] ?? "").split(" | ").map((row) => /^li "([^"]*)" [\d.]+ px$/.exec(row)?.[1] ?? null);
-    return rows.every((row) => row !== null) && rows.filter((row) => row!.endsWith("Players here")).length === 1 && rows.filter((row) => row!.endsWith("Move players")).length === rows.length - 1;
+    const rows = (found[2] ?? "").split(" | ").map((row) => /^li "([^"]*)" ([\d.]+) px$/.exec(row));
+    if (rows.some((row) => row === null)) return false;
+    const named = rows.map((row) => ({ name: row![1]!, height: Number(row![2]) }));
+    const players = named.filter((row) => row.name.endsWith("Players here"));
+    const moves = named.filter((row) => row.name.endsWith("Move players"));
+    if (players.length !== 1 || moves.length === 0 || moves.length !== named.length - 1) return false;
+    const heights = moves.map((row) => row.height);
+    return Math.max(...heights) - Math.min(...heights) <= LIMIT_PX && players[0]!.height < Math.min(...heights);
   },
 };
 
