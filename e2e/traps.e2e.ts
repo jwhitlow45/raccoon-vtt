@@ -447,7 +447,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await dm.getByText("From Hidden Pit: Dexterity save, DC 13, 1d6 Bludgeoning, half on a pass.").waitFor();
     const creatures = dm.getByRole("group", { name: "Creatures" });
     await creatures.getByText("Thorn", { exact: true }).first().waitFor();
-    await dm.getByRole("button", { name: "Ask 1 player", exact: true }).click();
+    await dm.getByRole("button", { name: "Ask 1 player and roll damage", exact: true }).click();
     const request = await waitFor("Pat's request", () => Object.values(state(patSocket)?.rolls ?? {}).find((r) => r.targets.some((t) => t.characterId === run.thornChar || t.tokenId === run.thorn)) ?? null);
     assert.equal(request.note, "Trap", "the request names the unfound trap as Trap");
     const ask = pat.getByRole("dialog", { name: "The DM asks for a roll" }).or(pat.locator('[aria-label="The DM asks for a roll"]')).first();
@@ -565,7 +565,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     assert.equal(at.role, "tab", `focus went to ${JSON.stringify(at)}`);
     // Nothing is left inert behind the alerts, and the page's Ask takes a click once scrolled to on this short screen.
     assert.equal(await dm.locator("[inert]").count(), 0, "the page behind the alerts is still inert");
-    const ask = dm.getByRole("button", { name: "Ask 1 player", exact: true });
+    const ask = dm.getByRole("button", { name: "Ask 1 player and roll damage", exact: true });
     await ask.scrollIntoViewIfNeeded();
     assert.ok(await wholeInReach(ask), "the group save in the side panel takes no click");
     await shots.take(dm, "traps-fu20b-save-in-reach");
