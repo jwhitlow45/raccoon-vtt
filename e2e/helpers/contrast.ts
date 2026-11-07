@@ -266,7 +266,8 @@ function readSamples(rootArg: unknown, opts: { halo: string; ringOnly: boolean }
 
   try {
     if (opts.ringOnly) {
-      const el = root;
+      // A control marked to ring its pill draws the ring on its pill, not on its larger target (globals.css `[data-pill-focus]`).
+      const el = (root.matches("[data-pill-focus]") ? root.querySelectorAll(":scope > [data-pill]")[0] : undefined) ?? root;
       const s = css(el);
       const r = el.getBoundingClientRect();
       const width = Number.parseFloat(s.outlineWidth);
