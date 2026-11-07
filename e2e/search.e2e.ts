@@ -6,8 +6,6 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import sharp from "sharp";
-import { DM_CATALOG } from "../client/features/search/catalog/dm.ts";
-import { EVERYONE } from "../client/features/search/catalog/everyone.ts";
 import { ConsoleWatch, OpSocket, readCamera, ROOT, Shots, sleep, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { addSound } from "./soundRoom.ts";
 
@@ -39,6 +37,19 @@ import { addSound } from "./soundRoom.ts";
  * It runs with `pnpm test:e2e` on E2E_PORT plus fifty-five. The other
  * environment variables are the smoke run's (smoke.e2e.ts).
  */
+
+/**
+ * What the run reads of the search's two catalogs (client/features/search/catalog),
+ * loaded by a path the typecheck does not follow: the server's typecheck,
+ * which these files are part of, has no DOM types for the client code
+ * the catalogs import.
+ */
+type CatalogRoute = { panel: string; anchor?: string };
+type CatalogEntry = { id: string; kind: string; title: string; names?: readonly string[]; bets?: readonly string[]; act: { t: string; route?: CatalogRoute } };
+type Catalog = { entries: readonly CatalogEntry[]; fields: readonly { names?: readonly string[]; bets?: readonly string[] }[] };
+const CATALOG_DIR = "../client/features/search/catalog";
+const { DM_CATALOG } = (await import(`${CATALOG_DIR}/dm.ts`)) as { DM_CATALOG: Catalog };
+const { EVERYONE } = (await import(`${CATALOG_DIR}/everyone.ts`)) as { EVERYONE: Catalog };
 
 const PORT = Number(process.env.E2E_PORT ?? 3100) + 55;
 const DATABASE_URL = process.env.DATABASE_URL ?? "postgres://raccoon:raccoon@localhost:5434/raccoon";
@@ -1440,7 +1451,7 @@ describe("the room search", { concurrency: false }, () => {
     assert.ok(own.length >= 30, `the DM chunk holds the catalog's own words: ${own.length} of ${words.length}`);
     // Everyone's entries ship in the room's chunk, never in the DM's: their anchors, and the index's own.
     for (const e of EVERYONE.entries) {
-      const anchor = e.act.t === "open" ? (e.act.route.anchor ?? e.id) : e.id;
+      const anchor = e.act.route?.anchor ?? e.id;
       assert.ok(!dmChunk.includes(`"${anchor}"`), `everyone's ${anchor} is in the DM chunk`);
     }
     assert.ok(!dmChunk.includes("sound.playlist.play"), "the index is not in the DM chunk");

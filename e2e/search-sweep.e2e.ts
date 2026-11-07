@@ -6,10 +6,6 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import sharp from "sharp";
-import { DM_CATALOG, dmMenuViewOf, TWINS } from "../client/features/search/catalog/dm.ts";
-import { EVERYONE } from "../client/features/search/catalog/everyone.ts";
-import type { Catalog } from "../client/features/search/catalog/types.ts";
-import { VIEW_ANCHORS } from "../client/features/search/index.ts";
 import { ConsoleWatch, OpSocket, Shots, sleep, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { addSound, roomSoundScript } from "./soundRoom.ts";
 
@@ -36,6 +32,25 @@ import { addSound, roomSoundScript } from "./soundRoom.ts";
  * It runs with `pnpm test:e2e` on E2E_PORT plus fifty-six. The other
  * environment variables are the smoke run's (smoke.e2e.ts).
  */
+
+/**
+ * What the sweep reads of the search (client/features/search), loaded by a
+ * path the typecheck does not follow: the server's typecheck, which these
+ * files are part of, has no DOM types for the client code the catalogs
+ * import.
+ */
+type CatalogRoute = { panel: string; anchor?: string; press?: boolean };
+type CatalogEntry = { id: string; kind: string; title: string; act: { t: string; route?: CatalogRoute } };
+type FieldDef = { key: string; kind?: "section"; title: string; everyCharacter?: true; token?: { anchor: string }; page?: { anchor: string } };
+type Catalog = { entries: readonly CatalogEntry[]; fields: readonly FieldDef[] };
+const SEARCH_DIR = "../client/features/search";
+const { DM_CATALOG, dmMenuViewOf, TWINS } = (await import(`${SEARCH_DIR}/catalog/dm.ts`)) as {
+  DM_CATALOG: Catalog;
+  dmMenuViewOf(state: { view: null; sceneId: null }): unknown;
+  TWINS: Record<string, (view: unknown) => CatalogRoute>;
+};
+const { EVERYONE } = (await import(`${SEARCH_DIR}/catalog/everyone.ts`)) as { EVERYONE: Catalog };
+const { VIEW_ANCHORS } = (await import(`${SEARCH_DIR}/index.ts`)) as { VIEW_ANCHORS: readonly string[] };
 
 const PORT = Number(process.env.E2E_PORT ?? 3100) + 56;
 const DATABASE_URL = process.env.DATABASE_URL ?? "postgres://raccoon:raccoon@localhost:5434/raccoon";
@@ -308,8 +323,8 @@ const PANEL_TITLES: Record<string, string> = { token: "Token", tracker: "Initiat
 function catalogCases(catalogs: readonly Catalog[]): Case[] {
   return catalogs.flatMap((c) =>
     c.entries.flatMap((e): Case[] => {
-      if (e.act.t !== "open") return [];
-      const route = e.act.route;
+      const route = e.act.t === "open" ? e.act.route : undefined;
+      if (!route) return [];
       return [{ id: e.id, typed: e.title, title: e.title, section: e.kind === "section", anchor: route.anchor ?? null, panel: route.panel, only: route.press === true }];
     }),
   );
@@ -564,7 +579,7 @@ function leftOut(surface: Surface, line: string): boolean {
 function knownAnchors(): Set<string> {
   const known = new Set<string>(VIEW_ANCHORS);
   for (const c of [EVERYONE, DM_CATALOG]) {
-    for (const e of c.entries) if (e.act.t === "open" && e.act.route.anchor) known.add(e.act.route.anchor);
+    for (const e of c.entries) if (e.act.t === "open" && e.act.route?.anchor) known.add(e.act.route.anchor);
     for (const f of c.fields) for (const place of [f.token, f.page]) if (place) known.add(place.anchor);
   }
   const view = dmMenuViewOf({ view: null, sceneId: null });
