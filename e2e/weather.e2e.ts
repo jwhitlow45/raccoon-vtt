@@ -8,7 +8,9 @@ import { chromium, type Browser, type BrowserContext, type Locator, type Page } 
 import sharp from "sharp";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { openGroup } from "./helpers/groups.ts";
-import { ConsoleWatch, OpSocket, openSideTab, pagePoint, pickTool, ROOT, Shots, sideTabName, sleep, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, OpSocket, openSideTab, pagePoint, pickTool, ROOT, Shots, sideTabName, sleep, SocketWatch, startServer, Touches, waitFor, type Server } from "./harness.ts";
+import { lookOf } from "../client/features/weather/looks.ts";
+import { particleCount, WRAP_MARGIN } from "../client/features/weather/sim.ts";
 
 /**
  * Weather over the map (docs/design/design-v1-weather.md, lane WX-C): the
@@ -19,7 +21,10 @@ import { ConsoleWatch, OpSocket, openSideTab, pagePoint, pickTool, ROOT, Shots, 
  * The weather canvas is read through its test hooks
  * (features/weather/WeatherLayer.tsx): `data-weather` ("rain heavy strong",
  * set on a change), and the `weatherTicks` and `weatherCameraDraws`
- * properties, counted apart.
+ * properties, counted apart. The weather's own flag adds what each draw
+ * drew: up to 64 marks seen, each its center before sway and its drawn
+ * center, and the marks seen by their alpha (the wz steps, lane wxbuild,
+ * docs/design/design-v1-weather-zoom.md).
  *
  * The map is the starter Cavern Battlemap (public/starter, CC0), 2,000 px
  * at 50 px a square. A DM on a computer, Pat on a phone held upright at
@@ -37,8 +42,8 @@ const work = mkdtempSync(path.join(tmpdir(), "raccoon-e2e-weather-"));
 const assetDir = path.join(work, "assets");
 const shots = new Shots(SHOT_DIR === "0" ? null : SHOT_DIR);
 
-/** Set before the app's first script: it installs the hook that picks and turns the view without the menu (relief/isoTest.ts). */
-const HOOK_FLAG = "globalThis.__rvttIsoTest = true;";
+/** Set before the app's first script: it installs the hook that picks and turns the view without the menu (relief/isoTest.ts), and the weather's draw hooks (WeatherLayer.tsx WEATHER_TEST_FLAG). */
+const HOOK_FLAG = "globalThis.__rvttIsoTest = true; globalThis.__rvttWeatherTest = true;";
 const BOUNDS = { w: 40, h: 40 };
 const TV = { width: 1280, height: 720 };
 
@@ -645,6 +650,133 @@ describe("weather over the map", { concurrency: false }, () => {
     assert.deepEqual(lines, [], "This device's Weather section out of line");
   });
 
+  test("wz-1. Top-down, held still: a wheel notch, a + press and a pinch on Pat's phone keep every mark on its ground and each drawn center within its sway, and fog's banks grow from the zoom point", async () => {
+    const lines = await heldStill(async () => {
+      const out: string[] = [];
+      for (const k of ZOOM_KINDS) out.push(...(await zoomsHold(k)));
+      out.push(...(await fogHolds()));
+      return out;
+    });
+    console.log(`wz-1 Top-down\n${lines.join("\n")}`);
+  });
+
+  test("wz-2. the same in Isometric, after a turn", async (t) => {
+    await viewAs(dm, "isometric", 1);
+    await viewAs(pat, "isometric", 1);
+    t.after(async () => {
+      await viewAs(dm, "topDown");
+      await viewAs(pat, "topDown");
+    });
+    const lines = await heldStill(async () => {
+      const out: string[] = [];
+      for (const k of ZOOM_KINDS) out.push(...(await zoomsHold(k)));
+      out.push(...(await fogHolds()));
+      return out;
+    });
+    console.log(`wz-2 Isometric\n${lines.join("\n")}`);
+  });
+
+  test("wz-3. moving heavy rain through a pinch on Pat's phone: on each frame with no tick the named marks stand on their ground, the ticks keep about 30 a second, and camera draws count apart", async () => {
+    await setWeather(run.sceneId, { kind: "rain", heavy: true, wind: "strong" });
+    await moving(pat);
+    // Every draw, as it publishes its marks: the draw sets its tick and camera draw counts just before them (WeatherLayer.tsx).
+    await pat.evaluate(() => {
+      type Canvas = { dataset: Record<string, string>; weatherTicks?: number; weatherCameraDraws?: number };
+      type Stage = { visible(): boolean; width(): number; getLayers(): { getCanvas(): { _canvas: Canvas } }[] };
+      const g = globalThis as unknown as { Konva: { stages: Stage[] }; __wz: unknown[]; __wzStop(): void };
+      g.__wz = [];
+      const stage = g.Konva.stages.find((x) => x.visible() && x.width() > 0 && x.getLayers().some((l) => l.getCanvas()._canvas.dataset.weather !== undefined))!;
+      const canvas = stage.getLayers().find((l) => l.getCanvas()._canvas.dataset.weather !== undefined)!.getCanvas()._canvas;
+      let last: unknown = null;
+      Object.defineProperty(canvas, "weatherSpots", {
+        configurable: true,
+        get: () => last,
+        set(spots: unknown) {
+          last = spots;
+          g.__wz.push({ at: performance.now(), ticks: canvas.weatherTicks ?? 0, draws: canvas.weatherCameraDraws ?? 0, spots });
+        },
+      });
+      g.__wzStop = () => Object.defineProperty(canvas, "weatherSpots", { configurable: true, writable: true, value: last });
+    });
+    const touches = new Touches(await patContext.newCDPSession(pat));
+    // Most of a pinch's camera draws share a frame with a tick, and how many do not varies with the machine's load (13, 10 and 4 in three runs of four pinches), so eight.
+    for (let r = 0; r < 8; r++) await pinch(touches, pat, r % 2 === 0 ? 1 : -1, 150);
+    const frames = (await pat.evaluate(() => {
+      const g = globalThis as unknown as { __wz: unknown[]; __wzStop(): void };
+      g.__wzStop();
+      return g.__wz;
+    })) as { at: number; ticks: number; draws: number; spots: Spots | null }[];
+    const seconds = (frames.at(-1)!.at - frames[0]!.at) / 1000;
+    const ticks = frames.at(-1)!.ticks - frames[0]!.ticks;
+    const draws = frames.at(-1)!.draws - frames[0]!.draws;
+    // Each camera draw right after another draw with no tick between: the camera moved and nothing fell, so every named mark is where the ground under it went.
+    const medians: number[] = [];
+    for (let k = 1; k < frames.length; k++) {
+      const a = frames[k - 1]!;
+      const b = frames[k]!;
+      if (b.ticks !== a.ticks || b.draws !== a.draws + 1 || !a.spots || !b.spots || a.spots.camera.join() === b.spots.camera.join()) continue;
+      const offs = sharedMarks(a.spots, b.spots).map((m) => m.center);
+      if (offs.length === 0) continue;
+      offs.sort((x, y) => x - y);
+      medians.push(offs[offs.length >> 1]!);
+    }
+    console.log(`wz-3: ${ticks} ticks and ${draws} camera draws in ${seconds.toFixed(1)} s, ${medians.length} camera draws after a draw with no tick between, their medians up to ${Math.max(...medians).toFixed(3)} px`);
+    assert.ok(medians.length >= 3, `${medians.length} camera draws with no tick between`);
+    for (const m of medians) assert.ok(m < 1, `a named mark's median ${m} px off its ground`);
+    assert.ok(ticks / seconds >= 20 && ticks / seconds <= 40, `${(ticks / seconds).toFixed(1)} ticks a second through the pinch`);
+    assert.ok(draws > 0, "the pinch drew as camera draws, counted apart");
+  });
+
+  test("wz-4. zoomed by the wheel out to the scene's floor and in to 400 px a square, the marks seen are as dense as today's screen, in both views", async (t) => {
+    t.after(async () => {
+      await viewAs(pat, "topDown");
+    });
+    await setWeather(run.sceneId, { kind: "rain", heavy: true, wind: "strong" });
+    const look = lookOf({ kind: "rain", heavy: true, wind: "strong" })!;
+    const lines = await heldStill(async () => {
+      const out: string[] = [];
+      for (const view of ["topDown", "isometric"] as const) {
+        await viewAs(pat, view, 1);
+        await shown(pat, "rain heavy strong");
+        const stops: { scale: number; got: number; want: number }[] = [];
+        const seen = new Set<string>();
+        const read = async () => {
+          const s = await settledSpots(pat);
+          // A notch past the floor or the top leaves the camera where it was: that stop counts once.
+          if (!seen.has(s.camera.join())) stops.push({ scale: s.camera[2], got: s.marks, want: expectedMarks(look, s) });
+          seen.add(s.camera.join());
+          return { s };
+        };
+        // Out to the floor, where the scene stops shrinking.
+        let last = (await read()).s.camera[2];
+        for (let i = 0; i < 30; i++) {
+          await wheelAt(pat, null, 360);
+          const now = (await read()).s.camera[2];
+          if (Math.abs(now - last) < 1e-6) break;
+          last = now;
+        }
+        // Then in to 400 px a square.
+        for (let i = 0; i < 40 && last < 399; i++) {
+          await wheelAt(pat, null, -360);
+          last = (await read()).s.camera[2];
+        }
+        console.log(`wz-4 ${view} stops: ${stops.map((x) => `${x.scale.toFixed(1)}:${x.got.toFixed(0)}/${x.want.toFixed(0)}`).join(" ")}`);
+        // A count of marks spreads by about its root, so each stop, the floor's among them, holds within four of those, and the sum over every stop within 10%.
+        for (const stop of stops) assert.ok(Math.abs(stop.got - stop.want) <= 4 * Math.sqrt(stop.want) + 1, `${view} at ${stop.scale.toFixed(1)} px a square: ${stop.got.toFixed(1)} marks seen, ${stop.want.toFixed(1)} wanted`);
+        const got = stops.reduce((a, x) => a + x.got, 0);
+        const want = stops.reduce((a, x) => a + x.want, 0);
+        assert.ok(Math.abs(got / want - 1) < 0.1, `${view}: ${got.toFixed(0)} marks over every stop, ${want.toFixed(0)} wanted`);
+        const lo = Math.min(...stops.map((x) => x.scale));
+        const hi = Math.max(...stops.map((x) => x.scale));
+        assert.ok(lo < 6 && hi > 399, `${view}: from ${lo} to ${hi} px a square`);
+        const floor = stops.find((x) => x.scale === lo)!;
+        out.push(`${view}: ${stops.length} stops from ${lo.toFixed(2)} to ${hi.toFixed(0)} px a square, ${got.toFixed(0)} of ${want.toFixed(0)} marks, the floor ${floor.got.toFixed(1)} of ${floor.want.toFixed(1)}`);
+      }
+      return out;
+    }, [pat]);
+    console.log(`wz-4\n${lines.join("\n")}`);
+  });
+
   test("wx-12. no console errors on any page", () => {
     for (const c of Object.values(consoles)) assert.deepEqual(c.errors, [], `${c.label} errors`);
   });
@@ -685,4 +817,295 @@ async function page2Rates(page: Page): Promise<{ room: number; preview: number }
   await sleep(1000);
   const b = { room: await probe(page, "room"), preview: await probe(page, "preview") };
   return { room: (b.room?.ticks ?? 0) - (a.room?.ticks ?? 0), preview: (b.preview?.ticks ?? 0) - (a.preview?.ticks ?? 0) };
+}
+
+// ---------------------------------------------------------------- the wz steps: weather on a zoom (docs/design/design-v1-weather-zoom.md 7)
+
+/** What the weather's last draw drew (WeatherLayer.tsx `weatherSpots`, `weatherMarks`), with its canvas's counters and size, and its stage's camera now. */
+type Spots = { camera: [number, number, number]; clip: number[]; spots: Record<string, [number, number, number, number]>; marks: number; draws: number; ticks: number; width: number; height: number; level: string; stage: string };
+
+/** Each kind the wz steps zoom, with its sway in screen px (looks.ts). */
+const ZOOM_KINDS = [
+  { weather: { kind: "rain", heavy: true, wind: "strong" }, key: "rain heavy strong", sway: 0 },
+  { weather: { kind: "snow", heavy: true }, key: "snow heavy calm", sway: 8 },
+  { weather: { kind: "ash", heavy: true }, key: "ash heavy calm", sway: 6 },
+  { weather: { kind: "leaves", heavy: true }, key: "leaves heavy calm", sway: 10 },
+] as const;
+
+function spotsNow(page: Page): Promise<Spots | null> {
+  return page.evaluate(() => {
+    type Canvas = { dataset: Record<string, string>; width: number; height: number; weatherTicks?: number; weatherCameraDraws?: number; weatherLevel?: string; weatherMarks?: number; weatherSpots?: { camera: [number, number, number]; clip: number[]; spots: Record<string, [number, number, number, number]> } };
+    type Stage = { visible(): boolean; width(): number; x(): number; y(): number; scaleX(): number; getLayers(): { getCanvas(): { _canvas: Canvas } }[] };
+    const konva = (globalThis as unknown as { Konva?: { stages: Stage[] } }).Konva;
+    for (const stage of konva?.stages ?? []) {
+      if (!stage.visible() || stage.width() === 0) continue;
+      const c = stage.getLayers().find((l) => l.getCanvas()._canvas.dataset.weather !== undefined)?.getCanvas()._canvas;
+      if (!c?.weatherSpots) continue;
+      return { ...c.weatherSpots, marks: c.weatherMarks ?? 0, draws: c.weatherCameraDraws ?? 0, ticks: c.weatherTicks ?? 0, width: c.width, height: c.height, level: c.weatherLevel ?? "", stage: [stage.x(), stage.y(), stage.scaleX()].join() };
+    }
+    return null;
+  });
+}
+
+/** The last draw once the stage's camera has held still and the weather drew at it: a wheel's or a pinch's zoom may take a few frames. */
+async function settledSpots(page: Page): Promise<Spots> {
+  let last = "";
+  let still = 0;
+  return waitFor("the weather drawn at a camera that holds still", async () => {
+    const s = await spotsNow(page);
+    const camera = s?.stage ?? "";
+    still = camera === last ? still + 1 : 0;
+    last = camera;
+    await sleep(60);
+    return s && still >= 3 && s.camera.join() === camera ? s : null;
+  });
+}
+
+/** Where a screen point under camera `a` goes under camera `b`, as the ground under it does. */
+function carried(a: [number, number, number], b: [number, number, number], x: number, y: number): [number, number] {
+  return [((x - a[0]) / a[2]) * b[2] + b[0], ((y - a[1]) / a[2]) * b[2] + b[1]];
+}
+
+/** The marks two draws both name: how far each center before sway, and each drawn center, stands from where the ground under it went. */
+function sharedMarks(a: Pick<Spots, "camera" | "spots">, b: Pick<Spots, "camera" | "spots">): { center: number; drawn: number }[] {
+  const out: { center: number; drawn: number }[] = [];
+  for (const [key, p] of Object.entries(a.spots)) {
+    const q = b.spots[key];
+    if (!q) continue;
+    const c = carried(a.camera, b.camera, p[0], p[1]);
+    const d = carried(a.camera, b.camera, p[2], p[3]);
+    out.push({ center: Math.hypot(c[0] - q[0], c[1] - q[1]), drawn: Math.hypot(d[0] - q[2], d[1] - q[3]) });
+  }
+  return out;
+}
+
+/** The page box of the stage that shows the weather: in Isometric the hidden Top-down tree's stage is still in the page. */
+async function stageBox(page: Page): Promise<{ x: number; y: number; width: number; height: number }> {
+  const box = await page.evaluate(() => {
+    type Stage = { visible(): boolean; width(): number; container(): { getBoundingClientRect(): { left: number; top: number; width: number; height: number } }; getLayers(): { getCanvas(): { _canvas: { dataset: Record<string, string> } } }[] };
+    const stage = (globalThis as unknown as { Konva: { stages: Stage[] } }).Konva.stages.find((x) => x.visible() && x.width() > 0 && x.getLayers().some((l) => l.getCanvas()._canvas.dataset.weather !== undefined));
+    const r = stage?.container().getBoundingClientRect();
+    return r ? { x: r.left, y: r.top, width: r.width, height: r.height } : null;
+  });
+  assert.ok(box, "a stage that shows the weather");
+  return box;
+}
+
+/** A wheel notch at a page point, the stage's middle by default: up zooms in. A phone at 3x gets a third of the delta, so a phone's notch is 360. */
+async function wheelAt(page: Page, at: { x: number; y: number } | null, dy: number): Promise<void> {
+  const box = await stageBox(page);
+  const p = at ?? { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  await page.mouse.move(p.x, p.y);
+  await page.mouse.wheel(0, dy);
+  await sleep(150);
+}
+
+/**
+ * Two fingers pinching out from 100 to 160 px apart about the stage's
+ * middle, or in by as much. Under an octave, so the two draws always share
+ * a level of the field to name marks in (sim.ts levelsAt): a zoom of 2.5
+ * times can step past both levels the first draw showed.
+ */
+async function pinch(touches: Touches, page: Page, way: 1 | -1, span = 60): Promise<void> {
+  const box = await stageBox(page);
+  const mid = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  const at = (d: number) => [
+    { x: mid.x - d / 2, y: mid.y, id: 1 },
+    { x: mid.x + d / 2, y: mid.y, id: 2 },
+  ];
+  const from = way === 1 ? 100 : 100 + span;
+  await touches.start(at(from), 120);
+  for (let i = 1; i <= 15; i++) await touches.move(at(from + (way * i * span) / 15), 16);
+  await touches.end([], 16);
+  await sleep(200);
+}
+
+/** Runs `check` with the weather held still by reduced motion, so each zoom is camera draws alone, and moving again after. */
+async function heldStill<T>(check: () => Promise<T>, pages: Page[] = [dm, pat]): Promise<T> {
+  for (const p of pages) await p.emulateMedia({ reducedMotion: "reduce" });
+  try {
+    await sleep(300);
+    return await check();
+  } finally {
+    for (const p of pages) await p.emulateMedia({ reducedMotion: "no-preference" });
+  }
+}
+
+/** A zoom by `act` holds every named mark's center on its ground to 1 px, and each drawn center within its sway times |f - 1|, plus 1 px. */
+async function zoomHolds(page: Page, what: string, sway: number, act: () => Promise<void>): Promise<string> {
+  const before = await settledSpots(page);
+  await act();
+  const after = await waitFor(`${what}: a camera draw`, async () => {
+    const s = await settledSpots(page);
+    return s.camera.join() !== before.camera.join() ? s : null;
+  });
+  assert.equal(after.ticks, before.ticks, `${what}: held still, so no tick`);
+  const f = after.camera[2] / before.camera[2];
+  const bound = sway * Math.abs(f - 1) + 1;
+  const shared = sharedMarks(before, after);
+  const center = Math.max(...shared.map((m) => m.center));
+  const drawn = Math.max(...shared.map((m) => m.drawn));
+  console.log(`${what}: zoom ${f.toFixed(3)} from ${before.camera[2].toFixed(1)}, ${shared.length} marks, centers ${center.toFixed(3)}, drawn ${drawn.toFixed(2)} of ${bound.toFixed(2)}`);
+  // Heavy leaves are about 35 marks on a phone, so a zoom keeps only a few of them named in both draws.
+  assert.ok(shared.length >= 3, `${what}: ${shared.length} marks named in both draws`);
+  assert.ok(center <= 1, `${what}: a center ${center.toFixed(2)} px off its ground`);
+  assert.ok(drawn <= bound, `${what}: a drawn center ${drawn.toFixed(2)} px off, over ${bound.toFixed(2)}`);
+  return `${what}: zoom ${f.toFixed(3)}, ${shared.length} marks, centers within ${center.toFixed(3)} px, drawn within ${drawn.toFixed(2)} of ${bound.toFixed(2)}`;
+}
+
+/** Each kind through a wheel notch at a point and back, a + press and a - press on the DM's computer, and a pinch out and in on Pat's phone. */
+async function zoomsHold(k: (typeof ZOOM_KINDS)[number]): Promise<string[]> {
+  await setWeather(run.sceneId, k.weather as Weather);
+  await shown(dm, k.key);
+  await shown(pat, k.key);
+  const box = await stageBox(dm);
+  const point = { x: box.x + box.width * 0.7, y: box.y + box.height * 0.375 };
+  const touches = new Touches(await patContext.newCDPSession(pat));
+  await blurPage(dm);
+  return [
+    await zoomHolds(dm, `${k.key}, a wheel notch in`, k.sway, () => wheelAt(dm, point, -120)),
+    await zoomHolds(dm, `${k.key}, a wheel notch out`, k.sway, () => wheelAt(dm, point, 120)),
+    await zoomHolds(dm, `${k.key}, +`, k.sway, () => dm.keyboard.press("+")),
+    await zoomHolds(dm, `${k.key}, -`, k.sway, () => dm.keyboard.press("-")),
+    await zoomHolds(pat, `${k.key}, Pat's pinch out`, k.sway, () => pinch(touches, pat, 1, 40)),
+    await zoomHolds(pat, `${k.key}, Pat's pinch in`, k.sway, () => pinch(touches, pat, -1, 40)),
+  ];
+}
+
+/**
+ * Heavy fog through a wheel notch and a + press on the DM's computer: the
+ * canvas after, read back through the ground's zoom about its fixed point,
+ * differs from before by less than half what it differs read back by the
+ * stage's pan change alone, which is how fog moved before.
+ */
+async function fogHolds(): Promise<string[]> {
+  await setWeather(run.sceneId, { kind: "fog", heavy: true });
+  await shown(dm, "fog heavy calm");
+  const box = await stageBox(dm);
+  const point = { x: box.x + box.width * 0.7, y: box.y + box.height * 0.375 };
+  await blurPage(dm);
+  const out: string[] = [];
+  const zooms: [string, () => Promise<void>][] = [
+    ["a wheel notch", () => wheelAt(dm, point, -120)],
+    ["+", () => dm.keyboard.press("+")],
+  ];
+  for (const [what, act] of zooms) {
+    await intoOctave(dm, point, 0.8);
+    const before = await fogPixels(dm);
+    await act();
+    await waitFor(`fog, ${what}: a camera draw`, async () => ((await settledSpots(dm)).camera.join() !== before.camera.join() ? true : null));
+    const after = await fogPixels(dm);
+    const [x0, y0, s0] = before.camera;
+    const [x1, y1, s1] = after.camera;
+    const f = s1 / s0;
+    const fixed = { x: (x0 * s1 - x1 * s0) / (s1 - s0), y: (y0 * s1 - y1 * s0) / (s1 - s0) };
+    const ground = alphaDiff(before, after, (x, y) => [fixed.x + (x - fixed.x) / f, fixed.y + (y - fixed.y) / f]);
+    const panned = alphaDiff(before, after, (x, y) => [x - (x1 - x0), y - (y1 - y0)]);
+    const lens = alphaDiff(before, after, (x, y) => [x, y]);
+    console.log(`fog, ${what}: zoom ${f.toFixed(3)} from ${s0.toFixed(1)}, ground ${ground.toFixed(2)}, pan change ${panned.toFixed(2)}, lens ${lens.toFixed(2)}`);
+    assert.ok(ground < panned / 2, `fog, ${what}: ${ground.toFixed(2)} read through the ground's zoom, ${panned.toFixed(2)} through the pan change`);
+    out.push(`fog, ${what}: zoom ${f.toFixed(3)}, ${ground.toFixed(2)} through the ground's zoom against ${panned.toFixed(2)} through the pan change`);
+  }
+  return out;
+}
+
+/**
+ * Zooms by small trackpad pinches (a wheel with Ctrl) until the camera
+ * stands `u` into an octave of fog's sheets (draw.ts SHEET_SCALE_AT). The
+ * sheets crossfade between two octaves through each one (D-261106-301), so
+ * how much a zoom changes their look apart from moving them depends on
+ * where it starts: 0.8 into an octave a notch changes the octaves' weights
+ * least, about a fifth, against half from 0.35.
+ */
+async function intoOctave(page: Page, at: { x: number; y: number }, u: number): Promise<void> {
+  for (let i = 0; i < 8; i++) {
+    const scale = (await settledSpots(page)).camera[2];
+    const octave = Math.log2(scale / 50);
+    const target = 50 * 2 ** (Math.floor(octave - u + 0.5) + u);
+    const step = Math.log(target / scale);
+    if (Math.abs(step) < 0.004) return;
+    await page.mouse.move(at.x, at.y);
+    await page.keyboard.down("Control");
+    // A pinch's wheel zooms by e to the minus a hundredth of its delta, up to 200 a step (camera.ts wheelZoomFactor).
+    await page.mouse.wheel(0, Math.max(-200, Math.min(200, -step * 100)));
+    await page.keyboard.up("Control");
+    await sleep(150);
+  }
+}
+
+/** The weather canvas's alpha, with the camera it was drawn at. */
+async function fogPixels(page: Page): Promise<{ camera: [number, number, number]; width: number; height: number; alpha: Uint8Array }> {
+  const s = await settledSpots(page);
+  const read = await page.evaluate(() => {
+    type Canvas = { dataset: Record<string, string>; width: number; height: number; getContext(type: "2d"): { getImageData(x: number, y: number, w: number, h: number): { data: Uint8ClampedArray } } | null };
+    type Stage = { visible(): boolean; width(): number; getLayers(): { getCanvas(): { _canvas: Canvas } }[] };
+    for (const stage of (globalThis as unknown as { Konva: { stages: Stage[] } }).Konva.stages) {
+      if (!stage.visible() || stage.width() === 0) continue;
+      const c = stage.getLayers().find((l) => l.getCanvas()._canvas.dataset.weather !== undefined)?.getCanvas()._canvas;
+      if (!c) continue;
+      const d = c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data;
+      const a = new Uint8Array(c.width * c.height);
+      for (let i = 0; i < a.length; i++) a[i] = d[i * 4 + 3]!;
+      let text = "";
+      for (let i = 0; i < a.length; i += 0x8000) text += String.fromCharCode(...a.subarray(i, i + 0x8000));
+      return { width: c.width, height: c.height, alpha: (globalThis as unknown as { btoa(s: string): string }).btoa(text) };
+    }
+    return null;
+  });
+  assert.ok(read, "a weather canvas to read");
+  return { camera: s.camera, width: read.width, height: read.height, alpha: new Uint8Array(Buffer.from(read.alpha, "base64")) };
+}
+
+/** The mean alpha difference between `after` and `before` read back through `back`, over the middle of the screen. */
+function alphaDiff(before: { width: number; height: number; alpha: Uint8Array }, after: { width: number; height: number; alpha: Uint8Array }, back: (x: number, y: number) => [number, number]): number {
+  const { width: w, height: h } = after;
+  let sum = 0;
+  let n = 0;
+  for (let y = Math.floor(h * 0.2); y < h * 0.8; y += 2) {
+    for (let x = Math.floor(w * 0.2); x < w * 0.8; x += 2) {
+      const [bx, by] = back(x, y);
+      const ix = Math.round(bx);
+      const iy = Math.round(by);
+      if (ix < 0 || iy < 0 || ix >= before.width || iy >= before.height) continue;
+      sum += Math.abs(after.alpha[y * w + x]! - before.alpha[iy * before.width + ix]!);
+      n++;
+    }
+  }
+  return n ? sum / n : NaN;
+}
+
+/** The marks a draw should show: the screen's count spread over the wrap box (sim.ts tileCount), times the scene's area on screen, halved after a step-down to half. */
+function expectedMarks(look: NonNullable<ReturnType<typeof lookOf>>, s: Spots): number {
+  const density = particleCount(look, s.width, s.height) / ((s.width + 2 * WRAP_MARGIN) * (s.height + 2 * WRAP_MARGIN));
+  return density * areaOnScreen(s.clip, s.width, s.height) * (s.level === "half" ? 0.5 : 1);
+}
+
+/** The area of a polygon clipped to the screen, by Sutherland and Hodgman's clip and the shoelace. */
+function areaOnScreen(poly: readonly number[], w: number, h: number): number {
+  let pts: [number, number][] = [];
+  for (let k = 0; k + 1 < poly.length; k += 2) pts.push([poly[k]!, poly[k + 1]!]);
+  const edges: [(p: [number, number]) => boolean, (a: [number, number], b: [number, number]) => [number, number]][] = [
+    [(p) => p[0] >= 0, (a, b) => [0, a[1] + ((b[1] - a[1]) * (0 - a[0])) / (b[0] - a[0])]],
+    [(p) => p[0] <= w, (a, b) => [w, a[1] + ((b[1] - a[1]) * (w - a[0])) / (b[0] - a[0])]],
+    [(p) => p[1] >= 0, (a, b) => [a[0] + ((b[0] - a[0]) * (0 - a[1])) / (b[1] - a[1]), 0]],
+    [(p) => p[1] <= h, (a, b) => [a[0] + ((b[0] - a[0]) * (h - a[1])) / (b[1] - a[1]), h]],
+  ];
+  for (const [inside, cut] of edges) {
+    const next: [number, number][] = [];
+    for (let k = 0; k < pts.length; k++) {
+      const a = pts[k]!;
+      const b = pts[(k + 1) % pts.length]!;
+      if (inside(a)) next.push(a);
+      if (inside(a) !== inside(b)) next.push(cut(a, b));
+    }
+    pts = next;
+  }
+  let area = 0;
+  for (let k = 0; k < pts.length; k++) area += pts[k]![0] * pts[(k + 1) % pts.length]![1] - pts[(k + 1) % pts.length]![0] * pts[k]![1];
+  return Math.abs(area) / 2;
+}
+
+/** Takes the keyboard's focus off any control, so + and - reach the map. */
+function blurPage(page: Page): Promise<void> {
+  return page.evaluate(() => (globalThis as unknown as { document: { activeElement: { blur?(): void } | null } }).document.activeElement?.blur?.());
 }

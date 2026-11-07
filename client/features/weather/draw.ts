@@ -20,7 +20,7 @@ import { LEAF_CELL, NOISE_SIZE, type TextureSource } from "./textures.ts";
  * on the screen itself.
  */
 export type DrawProbe = {
-  /** Up to `limit` marks by "level particle cx cy": the center before sway, then the drawn center. */
+  /** Up to `limit` marks a level by "level particle cx cy": the center before sway, then the drawn center. A level each, so a zoom across an octave still names marks of the level both draws share. */
   spots: Record<string, [number, number, number, number]>;
   limit: number;
   /** The marks seen, each by the alpha it draws at: its third, or a leaf's fade. */
@@ -129,6 +129,7 @@ function collect(field: Field, camera: Camera, box: readonly [number, number, nu
   probeKeys.length = 0;
   const shade = field.shade;
   let probed = 0;
+  let probing = -1;
   eachMark(field, camera, box[0], box[1], box[2], box[3], (i, x, y, alpha, turn, level, cx, cy) => {
     const tier = tierFor(alpha);
     if (tier === 0) return;
@@ -142,6 +143,10 @@ function collect(field: Field, camera: Camera, box: readonly [number, number, nu
     marks.bucket[k] = (colors > 1 ? shade[i]! : 0) * 4 + tier;
     if (probe && x >= 0 && y >= 0 && x <= field.width && y <= field.height && (!clip || clip.length < 6 || insidePolygon(clip, x, y))) {
       probe.marks += exact ? alpha : tier / 3;
+      if (level !== probing) {
+        probing = level;
+        probed = 0;
+      }
       if (probed < probe.limit) {
         const key = `${level} ${i} ${cx} ${cy}`;
         probe.spots[key] = [x, y, x, y];

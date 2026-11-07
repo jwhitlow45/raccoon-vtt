@@ -21,7 +21,7 @@ export type WeatherCanvas = HTMLCanvasElement & {
   weatherCameraDraws?: number;
   weatherLevel?: string;
   weatherFrameCost?: number;
-  /** Under WEATHER_TEST_FLAG only: the last draw's camera, the scene's outline on screen it clipped to, and up to 64 of its marks seen, each the center before sway and the drawn center (draw.ts DrawProbe). */
+  /** Under WEATHER_TEST_FLAG only: the last draw's camera, the scene's outline on screen it clipped to, and up to 64 of its marks seen a level, each the center before sway and the drawn center (draw.ts DrawProbe). */
   weatherSpots?: { camera: [number, number, number]; clip: number[]; spots: Record<string, [number, number, number, number]> };
   /** Under WEATHER_TEST_FLAG only: the last draw's marks seen, each by the alpha it draws at. */
   weatherMarks?: number;
