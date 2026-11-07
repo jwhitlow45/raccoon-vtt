@@ -737,7 +737,9 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
 
   function pushToast(text: string, tone: Toast["tone"] = "error", die?: ToastDie, action?: ToastAction | ToastSends, logged = false, quiet = false): void {
     const toasts = get().toasts;
-    if (toasts.some((t) => t.text === text)) return;
+    // A toast whose buttons send stands for its own roll, so a second roll that reads the same still brings its Apply to chips.
+    const sends = action !== undefined && "buttons" in action && action.buttons.length > 0;
+    if (!sends && toasts.some((t) => t.text === text)) return;
     const buttons = action === undefined ? {} : "buttons" in action ? (action.buttons.length > 0 ? { actions: action.buttons, actionsLabel: action.label } : {}) : { action };
     store.setState({ toasts: withToast(toasts, { id: ++toastSeq, text, tone, ...(die ? { die } : {}), ...buttons, ...(logged ? { logged: true as const } : {}), ...(quiet ? { quiet: true as const } : {}) }) });
   }

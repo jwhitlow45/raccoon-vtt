@@ -86,6 +86,21 @@ describe("a toast's buttons that wait on the server", () => {
     }
   });
 
+  test("a second roll that reads the same keeps its own toast and chips, while a plain toast that repeats one shown is still dropped", () => {
+    const room = createRoomStore({ roomId: "room", you: { memberId: "dm", role: "dm" }, clientId: "device" });
+    try {
+      const text = "Bree rolled 9 for Longsword damage.";
+      room.ui.notify(text, "info", undefined, { label: "Apply to", buttons: [chip("Goblin 1", deferred().send)] }, true);
+      room.ui.notify(text, "info", undefined, { label: "Apply to", buttons: [chip("Goblin 1", deferred().send)] }, true);
+      assert.equal(room.store.getState().toasts.length, 2, "both rolls' chips");
+      room.ui.notify("Saved.");
+      room.ui.notify("Saved.");
+      assert.equal(room.store.getState().toasts.filter((t) => t.text === "Saved.").length, 1);
+    } finally {
+      room.dispose();
+    }
+  });
+
   test("a send that throws says it could not be sent, and a toast with no buttons left gets none", async () => {
     const room = createRoomStore({ roomId: "room", you: { memberId: "dm", role: "dm" }, clientId: "device" });
     try {
