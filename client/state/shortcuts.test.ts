@@ -1532,8 +1532,34 @@ describe("the room search's key (designs/qol/search.md 5.6, D-261106-141)", () =
     assert.equal(find(k({ ctrlKey: true }), { ...open, apple: true }), "search", "a Mac's Ctrl+K outside a field opens it");
   });
 
-  test("a text area, a select box and an editable block keep every key, as do the room's other keys in any field", () => {
-    for (const target of [{ tagName: "TEXTAREA" }, { tagName: "SELECT" }, { tagName: "DIV", isContentEditable: true }, { tagName: "INPUT", type: "text", isContentEditable: true }]) {
+  test("a select box takes it too, a Mac's Ctrl+K as well, and keeps every other key", () => {
+    // Right after the search lands on a choice such as Automatic walls, focus is on its select box (se-3).
+    const select = { tagName: "SELECT" };
+    assert.equal(isOneLineField(select), false, "no field of one line");
+    for (const role of ["dm", "player"] as const) {
+      assert.equal(find(k({ ctrlKey: true, target: select }), open, role), "search", `${role}, Ctrl+K`);
+      assert.equal(find(k({ metaKey: true, target: select }), open, role), "search", `${role}, Cmd+K`);
+    }
+    assert.equal(find(k({ metaKey: true, target: select }), { ...open, apple: true }), "search", "Cmd+K on a Mac");
+    // A Mac's Ctrl+K deletes to a field's line end, but a select box has no line, so it opens the search there as outside a field.
+    assert.equal(find(k({ ctrlKey: true, target: select }), { ...open, apple: true }), "search", "Ctrl+K on a Mac");
+    assert.equal(find(k({ ctrlKey: true, target: select }), { dialogOpen: true, preview: false }), null, "not with a dialog open");
+    assert.equal(find(k({ ctrlKey: true, target: select }), { dialogOpen: false, preview: true }), null, "not in View as a player");
+    assert.equal(find(k({ ctrlKey: true, shiftKey: true, target: select })), null, "not with Shift");
+    // Every other press stays the select box's: its letters pick an option, its arrows move through them.
+    const keys = [..."abcdefghijklmnopqrstuvwxyz0123456789?/[]", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown", "Delete", "Backspace", "Escape", "Enter", " "];
+    for (const key of keys) {
+      const code = /^[a-z]$/.test(key) ? `Key${key.toUpperCase()}` : /^\d$/.test(key) ? `Digit${key}` : key;
+      for (const mods of [{}, { shiftKey: true }, { ctrlKey: true }, { metaKey: true }, { ctrlKey: true, shiftKey: true }]) {
+        const p = press({ key, code, ...mods, target: select });
+        const want = key === "k" && (p.ctrlKey || p.metaKey) && !p.shiftKey ? "search" : null;
+        for (const apple of [false, true]) assert.equal(find(p, { ...open, apple }), want, `${JSON.stringify(mods)} ${key}${apple ? " on a Mac" : ""}`);
+      }
+    }
+  });
+
+  test("a text area and an editable block keep every key, as do the room's other keys in any field", () => {
+    for (const target of [{ tagName: "TEXTAREA" }, { tagName: "DIV", isContentEditable: true }, { tagName: "INPUT", type: "text", isContentEditable: true }]) {
       assert.equal(isOneLineField(target), false, JSON.stringify(target));
       assert.equal(find(k({ ctrlKey: true, target })), null, JSON.stringify(target));
       assert.equal(find(k({ metaKey: true, target })), null, JSON.stringify(target));

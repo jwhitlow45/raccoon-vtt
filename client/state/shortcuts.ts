@@ -34,8 +34,8 @@ import { useRoomActions, useRoomRoleIfAny, useRoomStore, useRoomUi } from "./vie
  *
  * A shortcut never fires:
  * - while focus is in a field (isTextField), where the keys are typing,
- *   except the search's Ctrl+K or Cmd+K in a one-line field, which types
- *   nothing there (`inFields`),
+ *   except the search's Ctrl+K or Cmd+K in a one-line field or a select
+ *   box, which type nothing there (`inFields`),
  * - while a modal dialog is open (Escape stays the dialog's own),
  * - inside "view as a player", where every key but Escape is ignored. The
  *   preview mounts a second Room page, and Ctrl+Z there used to undo the
@@ -77,7 +77,8 @@ const NOT_TYPED = new Set(["button", "checkbox", "color", "file", "image", "radi
 /**
  * A field of one line that a modifier with a letter types nothing in, so
  * the search's Ctrl+K may open from it (designs/qol/search.md 5.6). A
- * text area, a select box and an editable block keep every key.
+ * text area and an editable block keep every key. A select box is no such
+ * field, but takes the search's key too (takenInField).
  */
 export function isOneLineField(target: unknown): boolean {
   if (!target || typeof target !== "object") return false;
@@ -180,10 +181,10 @@ export type Shortcut = {
   /** Ctrl or Cmd with the key: undo, redo and the search. */
   modifier?: true;
   /**
-   * It works while typing in a one-line field too (isOneLineField), where
-   * the key types nothing: the search's alone. On a Mac Ctrl+K stays the
-   * field's own, deleting to the line's end, and only Cmd+K opens the
-   * search there (search.md 5.6).
+   * It works while typing in a one-line field too (isOneLineField), and in
+   * a select box, where the key types nothing: the search's alone. On a
+   * Mac Ctrl+K stays a one-line field's own, deleting to the line's end,
+   * and only Cmd+K opens the search there (search.md 5.6).
    */
   inFields?: true;
   /** Whether it applies now. Left out, whenever the role has it. */
@@ -1495,9 +1496,18 @@ export function whoText(b: Pick<Behavior, "roles" | "when">): string {
  */
 export type ShortcutGates = { dialogOpen: boolean; preview: boolean; apple?: boolean };
 
-/** Whether a press in a field is still the shortcut's: one that works in a one-line field, there, but for a Mac's Ctrl, which the field keeps. */
+/** Whether a press in a field is still the shortcut's: one that works in fields, in a one-line field but for a Mac's Ctrl, which the field keeps, or in a select box. */
 function takenInField(shortcut: Shortcut, e: KeyPress, apple: boolean): boolean {
-  return shortcut.inFields === true && isOneLineField(e.target) && !(apple && e.ctrlKey && !e.metaKey);
+  if (shortcut.inFields !== true) return false;
+  // A select box picks by letters alone and has no line for a Mac's Ctrl+K to delete to, so either key opens the search from it, as outside a field.
+  if (isSelectBox(e.target)) return true;
+  return isOneLineField(e.target) && !(apple && e.ctrlKey && !e.metaKey);
+}
+
+function isSelectBox(target: unknown): boolean {
+  if (!target || typeof target !== "object") return false;
+  const tag = (target as { tagName?: unknown }).tagName;
+  return typeof tag === "string" && tag.toUpperCase() === "SELECT";
 }
 
 /**
