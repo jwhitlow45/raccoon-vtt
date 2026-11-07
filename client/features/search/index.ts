@@ -258,7 +258,7 @@ export function buildIndex(input: IndexInput): SearchIndex {
     const actor = "inline" in selected.actor ? selected.actor.inline : character?.actor;
     if (character) selectionCharacter = character.id;
     for (const f of fields) {
-      if (!f.token) continue;
+      if (!f.token || f.shown?.({ surface: "token", role, memberId, token: selected, ...(character ? { character } : null) }) === false) continue;
       b.entry(fieldEntry(f, `token:${selected.id}`, name, actor, true, { t: "open", route: fieldRoute("token", f.token) }));
     }
     const effects = actor?.effects ?? [];
@@ -304,7 +304,7 @@ export function buildIndex(input: IndexInput): SearchIndex {
     );
     const page = recordPage("character", ch.id);
     for (const f of fields) {
-      if (!f.page || (role === "dm" && !f.everyCharacter)) continue;
+      if (!f.page || (role === "dm" && !f.everyCharacter) || f.shown?.({ surface: "page", role, memberId, character: ch }) === false) continue;
       // The selected token's own field stands for its character's, so the two never list as twins.
       if (ch.id === selectionCharacter && f.token) continue;
       b.entry(fieldEntry(f, `character:${ch.id}`, ch.name, ch.actor, own, { t: "character", characterId: ch.id, route: fieldRoute("characters", f.page, page) }));

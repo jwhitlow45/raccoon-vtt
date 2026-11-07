@@ -1,3 +1,4 @@
+import type { Character, Token } from "#shared/model.ts";
 import type { ProjectedActor } from "#shared/project.ts";
 import type { IconName } from "../../../components/Icon.tsx";
 import type { DmMenuView } from "../../../pages/chipMenus.ts";
@@ -51,6 +52,9 @@ export type CatalogEntry = SearchEntry & {
 /** Where a creature's surface shows a field: the fold on the way, and the control's `data-search` id. */
 export type FieldPlace = { section?: string; anchor: string };
 
+/** The creature a field is offered for, and who asks: what `FieldDef.shown` reads. */
+export type FieldHolder = { surface: "token" | "page"; role: SearchRole; memberId: string | null; token?: Token; character?: Character };
+
 /**
  * A field of a token's panel or a character's page (search.md 4): the
  * index makes one entry of it for the selected token and for each
@@ -75,6 +79,8 @@ export type FieldDef = {
    * finds every page field of their own characters.
    */
   everyCharacter?: true;
+  /** Offered for a creature only while this holds, for a group the surface draws for some creatures alone (the token panel's Stat block). Left out, always. */
+  shown?(holder: FieldHolder): boolean;
   /**
    * The value its row shows, from the creature's actor as this device holds
    * it: "24 of 24", "Darkvision 60 ft.". A player's view may hold only the
