@@ -198,9 +198,28 @@ export async function expectTool(page: Page, tool: Tool, label: string): Promise
   }
 }
 
+/** How many times the sweep met the QOL pass's controls and checked them, so a sweep that never meets one fails rather than passes empty. */
+export const met = { next: 0, ownEndTurn: 0 };
+
 export async function expectEndTurn(page: Page, label: string): Promise<void> {
   const endTurn = page.locator("header").getByRole("button", { name: "End turn", exact: true });
   if ((await endTurn.count()) > 0 && (await endTurn.isVisible())) await expectReach(label, "End turn", endTurn);
+  // On an upright phone the player's own bar holds End turn too, at its right end where the thumb just acted (designs/qol audit Q6).
+  const own = barFrame(page).getByRole("button", { name: /End turn$/ });
+  if ((await own.count()) > 0 && (await own.first().isVisible())) {
+    met.ownEndTurn += 1;
+    await expectReach(label, "the bar's End turn", own.first());
+  }
+}
+
+/** The DM's Next at the turn chip's or the band's end, in a fight (designs/qol audit Q4, chips C3). The alerts over the screen are modal and may stand over it, as over End turn. */
+export async function expectNext(page: Page, label: string): Promise<void> {
+  if ((await alertsOverlay(page).count()) > 0) return;
+  const next = page.locator("header").getByRole("button", { name: "Next turn", exact: true });
+  if ((await next.count()) > 0 && (await next.isVisible())) {
+    met.next += 1;
+    await expectReach(label, "Next", next);
+  }
 }
 
 export async function expectBarClose(page: Page, label: string): Promise<void> {
@@ -388,6 +407,7 @@ export async function dmStep(label: string, tool: Tool): Promise<void> {
   await waitFor(`a new check, ${label}`, async () => ((await checks.count()) > before ? true : null));
   await dm.waitForTimeout(350);
   await expectBarClose(dm, `${label}, with the bar open`);
+  await expectNext(dm, `${label}, with the bar open`);
   const check = checks.first();
   const passed = check.getByRole("button", { name: "Passed", exact: true });
   if (!(await wholeInReach(passed))) {
@@ -498,6 +518,7 @@ export function playerRollTest(scale: (typeof SCALES)[number]): void {
     await reloadAt(player, scale);
     shotPage = player;
     const before = misses.length;
+    const ownBefore = met.ownEndTurn;
     let steps = 0;
     for (const fight of FIGHTS) {
       await setFight(fight);
@@ -531,7 +552,8 @@ export function playerRollTest(scale: (typeof SCALES)[number]): void {
       await ops.send({ t: "roll.close", rollIds: [id] });
     }
     await setFight("none");
-    console.error(`player at ${scale}: ${steps} steps, ${misses.length - before} misses`);
+    console.error(`player at ${scale}: ${steps} steps, ${misses.length - before} misses, the bar's End turn checked ${met.ownEndTurn - ownBefore} times`);
+    assert.ok(met.ownEndTurn > ownBefore, "no step on Pat's own turn showed End turn on Thorn's bar");
   });
 }
 

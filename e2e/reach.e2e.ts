@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
 import { openSceneGroup, pagePoint, wholeInReach } from "./harness.ts";
 import {
@@ -11,6 +12,7 @@ import {
   dmSocket,
   dmStep,
   expectReach,
+  met,
   miss,
   misses,
   ONLY,
@@ -43,7 +45,8 @@ import {
  *   the card itself where it shows;
  * - once tapped, the card's own controls (what to roll, Later, the total
  *   and Send; a check's Passed and Failed);
- * - End turn when it shows;
+ * - End turn when it shows, on the strip and on the player's own bar;
+ * - in a fight, the DM's Next at the band's end;
  * - the tool's controls in its one row and ⋯ (the Ruler's, with its kept
  *   rulers behind their chip, or Multi-select's Actions and Done);
  * - the token bar's Close when the bar shows, and Move window beside it
@@ -85,6 +88,7 @@ describe("raccoon-vtt short-screen reach", { timeout: 1_800_000 }, () => {
       await reloadAt(dm, scale);
       setShotPage(dm);
       const before = misses.length;
+      const nextBefore = met.next;
       let steps = 0;
       for (const notice of ["none", "Starting view"] as const) {
         for (const size of sizes()) {
@@ -110,7 +114,8 @@ describe("raccoon-vtt short-screen reach", { timeout: 1_800_000 }, () => {
         if (notice === "Starting view") await dm.getByRole("group", { name: "Starting view" }).getByRole("button", { name: "Cancel" }).tap();
       }
       await setFight("none");
-      console.error(`DM at ${scale}: ${steps} steps, ${misses.length - before} misses`);
+      console.error(`DM at ${scale}: ${steps} steps, ${misses.length - before} misses, Next checked ${met.next - nextBefore} times`);
+      assert.ok(met.next > nextBefore, "no step in a fight showed the DM's Next");
     });
   }
 
