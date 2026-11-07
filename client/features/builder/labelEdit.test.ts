@@ -220,6 +220,18 @@ describe("panePlacement", () => {
     assert.deepEqual(panePlacement({ viewport: { width: 369, height: 200 }, insets: short, box, height: 400, lane: null }), { kind: "sheet", bottom: 99, maxHeight: 200 - 99, overBars: true });
   });
 
+  test("a card with less than its least height under the label rises over it, its foot on the bottom bars' edge, never under them", () => {
+    // 844 x 390 at 130% in a fight: 649 x 300 layout px, the top bar and the turn band 100 px, the toolbar 60.
+    const fight = { top: 100, right: 0, bottom: 60, left: 0 };
+    const p = panePlacement({ viewport: { width: 649, height: 300 }, insets: fight, box: { x0: 300, y0: 100, x1: 340, y1: 145 }, height: 400, lane: null });
+    assert.equal(p.kind, "card");
+    if (p.kind !== "card") return;
+    assert.deepEqual([p.top, p.maxHeight], [300 - 60 - 8 - PANE_MIN_HEIGHT, PANE_MIN_HEIGHT]);
+    // With no room for its least height between the bars, it keeps under the top bars.
+    const tight = panePlacement({ viewport: { width: 649, height: 220 }, insets: fight, box: { x0: 300, y0: 100, x1: 340, y1: 145 }, height: 400, lane: null });
+    assert.equal(tight.kind === "card" ? tight.top : null, 108);
+  });
+
   test("a pane taller than either side takes the roomier one and scrolls", () => {
     const p = panePlacement({ viewport: { width: 700, height: 500 }, insets, box: { x0: 300, y0: 150, x1: 400, y1: 170 }, height: 400, lane: null });
     assert.equal(p.kind, "card");

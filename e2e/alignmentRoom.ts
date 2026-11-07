@@ -795,10 +795,11 @@ async function buttonWordLines(root: Locator): Promise<{ words: string; lines: n
 
 /**
  * Puts a trap's pane away by its Done, scrolled to the pane's foot first as
- * a thumb scrolls it. A finding of the product's, left to the coordinator:
- * at 844 x 390 at 130% in a fight the turn band stands over that Done, so a
- * tap there lands on the band. The pane then closes by Escape, it is said
- * in the run's output, and the rest of the sweep goes on.
+ * a thumb scrolls it. Done must take the tap: at 844 x 390 at 130% in a
+ * fight, where the turn band leaves a card less than its least height, the
+ * card once ran under the toolbar, whose fill took the tap
+ * (labelEdit.ts panePlacement). A Done that cannot be tapped is a finding,
+ * and the pane then closes by Escape so the rest of the sweep goes on.
  */
 async function paneDone(sweep: Sweep, page: Page, pane: Locator, screen: string): Promise<void> {
   const done = pane.getByRole("button", { name: "Done", exact: true });
@@ -810,10 +811,10 @@ async function paneDone(sweep: Sweep, page: Page, pane: Locator, screen: string)
     const top = node.ownerDocument.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
     return top !== null && node.contains(top) ? null : (top?.outerHTML.slice(0, 80) ?? "nothing on the screen");
   });
-  // A click scrolls Done into view its own way, which can lift it under the band again, so a click that cannot land counts the same.
+  // A click scrolls Done into view its own way, which can lift it under the bars again, so a click that cannot land counts the same.
   const clicked = over === null && (await done.click({ timeout: 3_000 }).then(() => true, () => false));
   if (!clicked) {
-    console.log(`${sweep.at} ${screen}: Done stands under ${over ?? "the turn band once a click scrolls to it"}, so the pane closes by Escape (a finding of the product's)`);
+    sweep.lines.push(`${sweep.at} ${screen}: Done takes no tap, it stands under ${over ?? "the bars once a click scrolls to it"}`);
     await page.keyboard.press("Escape");
   }
 }

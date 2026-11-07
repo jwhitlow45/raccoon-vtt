@@ -178,6 +178,11 @@ export function sheetPaneRoom(input: { viewport: Size; insets: Insets }): number
  * (`overBars`), which would otherwise hide its header and Close, up to the
  * screen's top at most.
  *
+ * A card with less than its least height under the label rises over the
+ * label, its foot on the bottom bars' edge, rather than reach under them,
+ * as at 844 x 390 at 130% in a fight, where the turn band takes the room
+ * and the toolbar would take a tap on its Done.
+ *
  * A card keeps out of the fight's alerts while their column shows a card
  * (`lane`, canvas/barDock.ts paneLaneBox), whose cards would otherwise
  * cover its header, Close and folds (docs/design/design-v1-look-pass-2.md 2.8):
@@ -208,7 +213,9 @@ export function panePlacement(input: { viewport: Size; insets: Insets; box: Labe
   const spaceAbove = aboveBottom - topLimit;
   const placed = side === null ? null : { lane: side };
   if (height <= spaceBelow || spaceBelow >= spaceAbove) {
-    return { kind: "card", left, top: belowTop, width, maxHeight: Math.max(PANE_MIN_HEIGHT, spaceBelow), ...placed };
+    // Below its least height under the label, it rises over the label rather than run under the bottom bars, whose toolbar would take a tap on its Done.
+    const top = Math.max(topLimit, Math.min(belowTop, bottomLimit - PANE_MIN_HEIGHT));
+    return { kind: "card", left, top, width, maxHeight: Math.max(PANE_MIN_HEIGHT, bottomLimit - top), ...placed };
   }
   return { kind: "card", left, top: Math.max(topLimit, aboveBottom - height), width, maxHeight: Math.max(PANE_MIN_HEIGHT, spaceAbove), ...placed };
 }
