@@ -156,6 +156,19 @@ function intersects(a: Rect, b: Rect): boolean {
   return a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
 }
 
+/**
+ * After a card is opened past the column's room: the cards show over the
+ * screen at once (D-261106-391), and once that view closes the opened card
+ * still does not fit, so the column's row stands for the cards.
+ */
+async function rowStandsForOpenCard(page: Page): Promise<void> {
+  const alerts = page.getByRole("dialog", { name: "Alerts" });
+  await alerts.waitFor();
+  await alerts.getByRole("button", { name: "Close", exact: true }).click();
+  await alerts.waitFor({ state: "detached" });
+  await page.getByRole("button", { name: /went off.*Tap to answer\.$/ }).waitFor();
+}
+
 async function rectOf(locator: Locator): Promise<Rect> {
   const b = await locator.boundingBox();
   assert.ok(b, "nothing on screen to measure");
@@ -579,11 +592,10 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await dm.locator(".konvajs-content").first().waitFor();
     await pickTool(dm, "Ruler");
     await waitFor("springings waiting", () => ((trap(dmSocket)?.rig?.due?.length ?? 0) >= 1 ? true : null));
-    // A phone's card starts folded to its first line. Open, it leaves the column above the Ruler's options too short for it, so the column's row stands for the cards, and its tap shows them over the screen.
+    // A phone's card starts folded to its first line. Open, it leaves the column above the Ruler's options too short for it, so the cards show over the screen at once, as the column's row would show them (D-261106-391).
     const card = dm.getByRole("group", { name: "Hidden Pit went off" }).first();
     const toggle = card.getByRole("button", { name: "Hidden Pit went off", exact: true });
     if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
-    await dm.getByRole("button", { name: /went off.*Tap to answer\.$/ }).click();
     const alerts = dm.getByRole("dialog", { name: "Alerts" });
     await alerts.waitFor();
     const inAlerts = alerts.getByRole("group", { name: "Hidden Pit went off" }).first();
@@ -623,7 +635,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     const card = dm.getByRole("group", { name: "Hidden Pit went off" }).first();
     const toggle = card.getByRole("button", { name: "Hidden Pit went off", exact: true });
     if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
-    await dm.getByRole("button", { name: /went off.*Tap to answer\.$/ }).waitFor();
+    await rowStandsForOpenCard(dm);
     await tapCell(dm, BOUNDS, { x: 6, y: 5 });
     await pane(dm).waitFor();
     const row = dm.locator("[data-rvtt-pane-dock]").getByRole("button", { name: /went off.*Close the pane to answer\.$/ });
@@ -653,7 +665,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     const card = dm.getByRole("group", { name: "Hidden Pit went off" }).first();
     const toggle = card.getByRole("button", { name: "Hidden Pit went off", exact: true });
     if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
-    await dm.getByRole("button", { name: /went off.*Tap to answer\.$/ }).waitFor();
+    await rowStandsForOpenCard(dm);
     await dm.getByRole("button", { name: "Panels", exact: true }).click();
     const panels = dm.getByRole("region", { name: "Panels" });
     await panels.waitFor();
