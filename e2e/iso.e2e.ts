@@ -93,11 +93,13 @@ async function checkBlackoutBar(bar: Locator, scale: number, at: string): Promis
     middles.push(b.y + b.height / 2);
     assert.ok(Math.abs(b.y + b.height / 2 - middle) <= LIMIT_PX, `${at}: a top-bar part is off the row's middle`);
   }
-  const blackout = bar.getByTitle("Players see black", { exact: true }).or(bar.getByRole("img", { name: "You are the DM. Players see black", exact: true }));
+  // Players see black, or where the bar is short the crossed eye standing as the DM chip (designs/qol/chips.md C2).
+  const blackout = bar.locator('[data-chip="blackout"], [data-chip="dm"][data-chip-form="eye"]');
   assert.equal(await blackout.count(), 1, `${at}: one blackout chip`);
   const groups: [Locator, number, string][] = [
     [bar.getByRole("status", { name: "Connected", exact: true }), 10, "connection dot"],
-    [blackout.or(bar.getByText("DM", { exact: true })), 28, "chip"],
+    // A chip is a 44 px tall target, counted with the buttons, around its 28 px pill (chips.md 6).
+    [bar.locator("[data-chip] > span"), 28, "chip"],
     [bar.getByRole("button"), 44, "button"],
   ];
   for (const [members, height, name] of groups) {
@@ -675,8 +677,8 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
             await plain.evaluate((n) => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.uiScale", String(n)), scale);
             await reopenRoom(plain);
             const bar = plain.locator("[data-rvtt-topbar]");
-            const full = bar.getByTitle("Players see black", { exact: true });
-            const compact = bar.getByRole("img", { name: "You are the DM. Players see black", exact: true });
+            const full = bar.locator('[data-chip="blackout"]');
+            const compact = bar.locator('[data-chip="dm"][data-chip-form="eye"]');
             await full.or(compact).waitFor();
             if (size.width === 320 && scale === 1.3) {
               await compact.waitFor();

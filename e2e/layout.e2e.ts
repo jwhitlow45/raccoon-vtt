@@ -1278,12 +1278,15 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
       return e.scrollWidth - e.clientWidth - tuck;
     });
     assert.ok(fits <= 0, `the row overflows by ${fits} px`);
-    assert.equal(await topBar(desk).getByRole("img", { name: "You are the DM" }).isVisible(), true, "the DM chip shows its dot");
+    // Search gives way to its icon first, and never leaves the bar from 900 px up (designs/qol/plan.md 4).
+    assert.equal(await topBar(desk).locator('[data-search-open="bar"]').getAttribute("data-search-form"), "icon", "Search is its icon");
+    assert.equal(await topBar(desk).locator('[data-chip="dm"][data-chip-form="dot"]').isVisible(), true, "the DM chip shows its dot");
     assert.equal(await topBar(desk).getByLabel("Map phase").count(), 0, "the Phase menu left the bar");
     // Full screen leaves before the Phase menu, and Menu, This device and W still reach it.
     assert.equal(await topBar(desk).getByRole("button", { name: "Full screen", exact: true }).count(), 0, "Full screen left the bar");
-    // Once Isometric is offered the gaps narrow next, and the View button keeps its place.
-    assert.equal(await topBar(desk).getByRole("button", { name: /^View: / }).count(), 1, "the View button stays");
+    // Once Isometric is offered the gaps narrow next. The turn chip's Next and Search's icon now share the row, so View folds into the Menu too, before the turn chip's name gives way (designs/qol/plan.md 4, steps 10 and 11).
+    assert.equal(await topBar(desk).getByRole("button", { name: /^View: / }).count(), 0, "the View button folded into the Menu");
+    assert.equal(await topBar(desk).locator("[data-rvtt-strip-name]").isVisible(), true, "the turn chip keeps its name");
     // Fit tucks into the bar's padding, so both stay inside the top bar's own box, short of the side panel.
     const bar = await box(topBar(desk));
     for (const target of [topBar(desk).getByRole("button", { name: "Fit the map to the screen" }), topBar(desk).getByRole("button", { name: /^Initiative, round/ })]) {
@@ -1303,7 +1306,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
       // The compact blackout badge now fits where the DM dot did. A longer turn name still requires View to fold.
       await ops.send({ t: "token.update", tokenId: run.goblin.id, patch: { name: "Goblin captain 1" } });
       await view(desk, deskCdp, { width: 900, height: 800 });
-      await topBar(desk).getByRole("img", { name: "You are the DM. Players see black", exact: true }).waitFor();
+      await topBar(desk).locator('[data-chip="dm"][data-chip-form="eye"]').waitFor();
       const viewButton = topBar(desk).getByRole("button", { name: /^View: / });
       await waitFor("the View button folded into the Menu", async () => ((await viewButton.count()) === 0 ? true : null));
       if (await sidePanel(desk).isHidden()) await toolbar(desk).getByRole("button", { name: "Panels" }).click();
