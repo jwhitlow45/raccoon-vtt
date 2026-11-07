@@ -993,14 +993,20 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
       await fold.click();
       await page.locator("[data-alert] button[aria-expanded=true]").first().waitFor();
       // The mark is on one node. Where the column is drawn again on a new node while it is measured, as on a slow CI page, it is marked again once, and the alerts there are logged.
+      // A column that left and is not drawn again fails with the first measure's error, since that measure already counted the screen as seen.
+      let left: unknown = null;
       for (let attempt = 0; attempt < 2; attempt++) {
         const open = await markColumn(page);
-        if (!open) break;
+        if (!open) {
+          if (left !== null) throw left;
+          break;
+        }
         try {
           await sweep.measure(page, "alerts-column-open", open);
           break;
         } catch (err) {
           if (attempt === 1 || !String(err).includes("no roots matched")) throw err;
+          left = err;
           const alerts = await page.locator("[data-alert]").evaluateAll((els) => els.map((e) => e.getAttribute("data-alert")).join(", "));
           console.log(`${sweep.at} alerts-column-open: the marked column left while measured, marked again (alerts: ${alerts})`);
         }
