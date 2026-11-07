@@ -1354,31 +1354,49 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
 
   /**
    * Whether a box is a chosen option's fill, whose border and padding stand
-   * outside what lines up with its unchosen kin: drawn around the control
-   * it holds, as the scenes list frames the scene on screen in the accent
-   * (features/scenes/SceneList.tsx), painted, no control itself, and its
-   * first control the chosen one. Or a mark drawn beside the control inside
-   * a chosen option, holding no words and no control, where the same part
-   * of an unchosen option draws nothing: a swatch's ring around its disk,
-   * which stands out of the disk as a focus ring does
-   * (components/Swatches.tsx).
+   * outside what lines up with its unchosen kin. Either it is drawn around
+   * the control it holds, as the scenes list frames the scene on screen in
+   * the accent (features/scenes/SceneList.tsx): painted, no control itself,
+   * its first control the chosen one, where the same place in a sibling row
+   * whose first control is not chosen draws nothing. Or it is a mark drawn
+   * beside the control inside a chosen option, holding no words and no
+   * control, where the same part of an unchosen option draws nothing: a
+   * swatch's ring around its disk, which stands out of the disk as a focus
+   * ring does (components/Swatches.tsx). A painted card or bar among painted
+   * kin, or among rows with no control, keeps its own edge, so one shifted
+   * around aligned words is still caught.
    */
   function chosenFill(el: DomElement): boolean {
     if (el.matches(INTERACTIVE) || FIELD.includes(tag(el)) || !paints(el)) return false;
     const first = el.querySelector(INTERACTIVE);
-    if (first) return first.matches(CHOSEN);
+    if (first) {
+      if (!first.matches(CHOSEN)) return false;
+      // The row the frame stands in: the nearest box from it up with a sibling of its own tag, as the scenes list's li.
+      let row = el;
+      const kinless = (n: DomElement) => !Array.from(n.parentElement?.children ?? []).some((o) => o !== n && tag(o) === tag(n));
+      while (row.parentElement && kinless(row)) row = row.parentElement;
+      return samePlaceInKin(el, row).some((n) => {
+        const control = n.querySelector(INTERACTIVE);
+        return !paints(n) && control !== null && !control.matches(CHOSEN);
+      });
+    }
     if ((el.textContent ?? "").trim() !== "") return false;
     const option = el.parentElement?.closest('label, [role="radio"], [role="option"]') ?? null;
     if (!option || !(option.matches(CHOSEN) || (tag(option) === "label" && option.querySelector("input:checked") !== null))) return false;
-    // The same place in a sibling option, by child index from the option down.
+    return samePlaceInKin(el, option).some((n) => !paints(n));
+  }
+
+  /** What stands in `el`'s place in each sibling of `row` of its tag, by child index from the row down. */
+  function samePlaceInKin(el: DomElement, row: DomElement): DomElement[] {
     const path: number[] = [];
-    for (let n: DomElement = el; n !== option && n.parentElement; n = n.parentElement) path.unshift(Array.from(n.parentElement.children).indexOf(n));
-    const kin = Array.from(option.parentElement?.children ?? []).filter((o) => o !== option && tag(o) === tag(option));
-    return kin.some((o) => {
-      let n: DomElement | undefined = o;
-      for (const i of path) n = n?.children[i];
-      return n !== undefined && !paints(n);
-    });
+    for (let n: DomElement = el; n !== row && n.parentElement; n = n.parentElement) path.unshift(Array.from(n.parentElement.children).indexOf(n));
+    return Array.from(row.parentElement?.children ?? [])
+      .filter((o) => o !== row && tag(o) === tag(row))
+      .flatMap((o) => {
+        let n: DomElement | undefined = o;
+        for (const i of path) n = n?.children[i];
+        return n ? [n] : [];
+      });
   }
 
   const spread = (xs: readonly number[]) => Math.max(...xs) - Math.min(...xs);
