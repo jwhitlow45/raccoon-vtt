@@ -201,8 +201,8 @@ describe("what a tick adds to its frame, which the sceneFunc's own timing cannot
    * A screen at `hz` whose board spends `board` ms of each frame, and whose
    * weather tick adds `tick` ms: the draw and, on a canvas without a GPU,
    * its paint. Frames come on the screen's beat, a late one at the next
-   * beat. With `late`, every measure comes back only after the next frame
-   * has started.
+   * beat. A frame's measure for which `late` is true comes back only after
+   * the next frame has started.
    */
   function run(input: {
     hz: number;
@@ -210,12 +210,13 @@ describe("what a tick adds to its frame, which the sceneFunc's own timing cannot
     tick: number;
     board: Board;
     strayEvery?: number;
-    late?: boolean;
+    late?: (frame: number) => boolean;
     between?: (frame: number, ticked: boolean) => number;
     /** The stage's camera x as each frame starts. */
     camera?: (frame: number) => number;
-    /** A pointer, touch or wheel move comes before the frame. */
+    /** A pointer, touch or wheel move comes before the frame, over the board or, with `elsewhere`, over a panel beside it. */
     gesture?: (frame: number) => boolean;
+    elsewhere?: boolean;
     /** The animated map draws in the frame's rendering. */
     map?: (frame: number) => boolean;
   }) {
@@ -226,7 +227,7 @@ describe("what a tick adds to its frame, which the sceneFunc's own timing cannot
     let n = 0;
     let ticked = false;
     let mapDraws = 0;
-    let gestured = null as (() => void) | null;
+    let gestured = null as ((target: EventTarget | null) => void) | null;
     const board: BoardWork = {
       listen(on) {
         gestured = on;
@@ -242,7 +243,7 @@ describe("what a tick adds to its frame, which the sceneFunc's own timing cannot
         // The board's own work runs after the loop's callback and before the paint, and now and then something else's long task runs before the measure's message.
         now += input.board(frame, now) + (input.strayEvery && ++n % input.strayEvery === 0 ? 60 : 0);
         if (input.map?.(frame)) mapDraws++;
-        if (input.late) out.push(after);
+        if (input.late?.(frame)) out.push(after);
         else after();
         // A long task of something else's after the measure, which drops the frames it runs into.
         now += input.between?.(frame, ticked) ?? 0;
@@ -269,6 +270,7 @@ describe("what a tick adds to its frame, which the sceneFunc's own timing cannot
         room.mode.drew(0.1);
       },
       camera: () => ({ x: input.camera?.(frame) ?? 0, y: 0, scale: 40 }),
+      onBoard: (target) => target === ON_BOARD,
     });
     const end = input.seconds * 1000;
     let at = 0;
@@ -281,13 +283,16 @@ describe("what a tick adds to its frame, which the sceneFunc's own timing cannot
       frame++;
       ticked = false;
       const due = out.splice(0);
-      if (input.gesture?.(frame)) gestured?.();
+      if (input.gesture?.(frame)) gestured?.(input.elsewhere ? PANEL : ON_BOARD);
       frames.run(at);
       for (const after of due) after();
       if (at > end / 2 && !ticked) quiet++;
     }
-    return { level: room.state.getState().level, frameCost: room.frameCost, most, ticks, samples, moved, quietPerSecond: quiet / (input.seconds / 2) };
+    return { level: room.state.getState().level, frameCost: room.frameCost, most, ticks, samples, moved, quietPerSecond: quiet / (input.seconds / 2), holdsPerSecond: room.mode.holds / input.seconds };
   }
+  /** What a move's event targets: the stage's canvas, or a panel beside the board. */
+  const ON_BOARD = { on: "board" } as unknown as EventTarget;
+  const PANEL = { on: "panel" } as unknown as EventTarget;
 
   const steady: Board = () => 1;
   /** A 1.5 s pan every 8 s, the board spending 6 ms more in each of its frames. */
@@ -342,6 +347,128 @@ describe("what a tick adds to its frame, which the sceneFunc's own timing cannot
         }
       }
     }
+  });
+
+  /** Thirty seconds of input from the first frame to the last, on a healthy canvas and on one adding 3 ms a tick. */
+  const underInput = (input: Omit<Parameters<typeof run>[0], "seconds" | "tick">) => ({
+    healthy: run({ ...input, seconds: 30, tick: 0.3 }),
+    slow: run({ ...input, seconds: 30, tick: 3 }),
+  });
+
+  /**
+   * A healthy canvas stays full by the costs it measured, not for want of
+   * them, and a slow one steps down to still before the input ends. On a
+   * board whose frames cost the same for the same work, every cost is the
+   * tick's own: a like frame of other work would read its redraw as the
+   * weather's, now and then, which a median hides.
+   */
+  const judgedUnderInput = (at: string, { healthy, slow }: ReturnType<typeof underInput>, exact = true) => {
+    assert.equal(healthy.level, "full", at);
+    const off = healthy.samples.filter((ms) => Math.abs(ms - 0.3) > 0.01);
+    if (exact) assert.deepEqual(off, [], `${at}: costs not the tick's own`);
+    assert.ok(healthy.samples.length >= 4 * 30, `${at}: ${healthy.samples.length} costs in 30 s`);
+    assert.equal(slow.level, "still", `${at}, no GPU`);
+  };
+
+  test("input that never pauses, on every frame or two frames in three, is judged once it has gone on 2 s, its redraw in the move's frame or the next, at 30, 60 and 120 Hz (WXZOOM-SOL-01)", () => {
+    const patterns = [
+      { name: "every frame", phases: 1, moves: (_frame: number, _phase: number) => true },
+      { name: "two frames in three", phases: 3, moves: (frame: number, phase: number) => (frame + phase) % 3 !== 0 },
+    ];
+    for (const hz of RATES) {
+      for (const { name, phases, moves } of patterns) {
+        for (let phase = 0; phase < phases; phase++) {
+          for (const late of [0, 1]) {
+            // A pointer, a finger or a wheel moves over the board for the whole run, and the board redraws for 4 ms more in the move's frame, or in the next where a React render after the paint redraws it.
+            const gesture = (frame: number) => moves(frame, phase);
+            const redraw: Board = (frame) => 1 + (gesture(frame - late) ? 4 : 0);
+            judgedUnderInput(`${name}, phase ${phase}, ${late} late, ${hz} Hz`, underInput({ hz, board: redraw, gesture }));
+          }
+        }
+      }
+    }
+  });
+
+  test("a wheel turned on every other frame for good, each turn's camera change and redraw in the frame after it, so every frame moves: judged by its kind of frame, not by whether it moved (WXZOOM-SOL-01)", () => {
+    for (const hz of RATES) {
+      for (const phase of [0, 1]) {
+        const gesture = (frame: number) => (frame + phase) % 2 === 0;
+        const camera = (frame: number) => Math.floor((frame + phase - 1) / 2);
+        const redraw: Board = (frame) => 1 + (camera(frame) !== camera(frame - 1) ? 4 : 0);
+        judgedUnderInput(`phase ${phase}, ${hz} Hz`, underInput({ hz, board: redraw, gesture, camera }));
+      }
+    }
+  });
+
+  test("a held arrow key's pan, the camera moving on every frame or every other with no pointer at all, is input too, judged once it has gone on 2 s (WXZOOM-SOL-01)", () => {
+    for (const hz of RATES) {
+      for (const every of [1, 2]) {
+        for (let phase = 0; phase < every; phase++) {
+          const camera = (frame: number) => Math.floor((frame + phase) / every);
+          const redraw: Board = (frame) => 1 + (camera(frame) !== camera(frame - 1) ? 4 : 0);
+          judgedUnderInput(`every ${every}, phase ${phase}, ${hz} Hz`, underInput({ hz, board: redraw, camera }));
+        }
+      }
+    }
+  });
+
+  test("a camera change and a hover are different work: the camera easing on every third frame and the mouse moving in the frame after it, never pausing (WXZOOM-SOL-01)", () => {
+    for (const hz of RATES) {
+      for (let phase = 0; phase < 3; phase++) {
+        // The camera's change redraws the whole board, 4 ms more, and the hover only its highlight, half a millisecond.
+        const camera = (frame: number) => Math.floor((frame + phase) / 3);
+        const turned = (frame: number) => camera(frame) !== camera(frame - 1);
+        const gesture = (frame: number) => turned(frame - 1);
+        const board: Board = (frame) => 1 + (turned(frame) ? 4 : 0) + (gesture(frame) ? 0.5 : 0);
+        judgedUnderInput(`phase ${phase}, ${hz} Hz`, underInput({ hz, board, gesture, camera }));
+      }
+    }
+  });
+
+  test("input on every fourth frame, in step with a 30 fps map at 60 Hz, never pausing: judged against like frames up to four frames off (WXZOOM-SOL-01)", () => {
+    for (let phase = 0; phase < 4; phase++) {
+      for (const late of [0, 1]) {
+        const map = (frame: number) => (frame + phase) % 2 === 0;
+        const gesture = (frame: number) => (frame + phase) % 4 === 0;
+        const board: Board = (frame) => 1 + (map(frame) ? 4 : 0) + (gesture(frame - late) ? 4 : 0);
+        judgedUnderInput(`phase ${phase}, ${late} late`, underInput({ hz: 60, board, gesture, map }));
+      }
+    }
+  });
+
+  test("input at random, in a fifth of the frames to four in five, never pausing, on a board that varies by 3 ms: judged, at 30, 60 and 120 Hz (WXZOOM-SOL-01)", () => {
+    for (const hz of RATES) {
+      for (const share of [0.2, 0.5, 0.8]) {
+        for (const seed of [1, 2]) {
+          for (const late of [0, 1]) {
+            // Each run plays the same moves and the same board: the healthy run, then the slow one.
+            const random = () => {
+              const r0 = rng(seed);
+              const moves: boolean[] = [];
+              const noise: number[] = [];
+              const gesture = (frame: number) => (moves[frame] ??= r0() < share);
+              const board: Board = (frame) => 1 + (noise[frame] ??= r0() * 3) + (gesture(frame - late) ? 4 : 0);
+              return { gesture, board };
+            };
+            const at = `${share} of frames, seed ${seed}, ${late} late, ${hz} Hz`;
+            // At 30 Hz the noise alone takes the median of 15 costs (`frameCost`) near 2 ms now and then, as with no input at all, so the level is what counts.
+            judgedUnderInput(at, { healthy: run({ hz, seconds: 30, tick: 0.3, ...random() }), slow: run({ hz, seconds: 30, tick: 3, ...random() }) }, false);
+          }
+        }
+      }
+    }
+  });
+
+  test("a move over a panel beside the board is none of the board's work, and a camera change is, wherever it came from (WZB-7)", () => {
+    // Moves on every frame for a second, then a second's pause, so each burst stays a short gesture.
+    const bursts = (frame: number) => Math.floor(frame / 60) % 2 === 0;
+    const none = run({ hz: 60, seconds: 12, tick: 0.3, board: steady });
+    const elsewhere = run({ hz: 60, seconds: 12, tick: 0.3, board: steady, gesture: bursts, elsewhere: true });
+    assert.deepEqual(elsewhere.samples, none.samples, "a mouse over the side panel drops no tick");
+    const onBoard = run({ hz: 60, seconds: 12, tick: 0.3, board: steady, gesture: bursts });
+    assert.ok(onBoard.samples.length < 0.7 * none.samples.length, `on the board: ${onBoard.samples.length} costs, ${none.samples.length} with none`);
+    const panned = run({ hz: 60, seconds: 12, tick: 0.3, board: steady, gesture: bursts, elsewhere: true, camera: (frame) => (bursts(frame) ? frame : 0) });
+    assert.ok(panned.samples.length < 0.7 * none.samples.length, `a pan driven from a panel: ${panned.samples.length} costs`);
   });
 
   test("a 30 fps animated map playing all along, in step with the ticks or not, at 30, 60 and 120 Hz: healthy weather stays full, and weather adding 3 ms a tick holds still while the map plays (WXZOOM-ASTRA-05)", () => {
@@ -453,7 +580,7 @@ describe("what a tick adds to its frame, which the sceneFunc's own timing cannot
   });
 
   test("a measure that comes back only after the next frame started says nothing", () => {
-    const r = run({ hz: 60, seconds: 12, tick: 3, board: steady, late: true });
+    const r = run({ hz: 60, seconds: 12, tick: 3, board: steady, late: () => true });
     assert.deepEqual(r.samples, []);
     assert.equal(r.frameCost, 0);
     assert.equal(r.level, "full");

@@ -127,6 +127,11 @@ export default function WeatherLayer(props: WeatherLayerProps) {
         const stage = layerRef.current?.getStage();
         return stage ? cameraOfStage(stage) : null;
       },
+      onBoard(target) {
+        // The stage this layer is on takes the board's input in both views: the isometric ground stage under it takes none.
+        const container = layerRef.current?.getStage()?.container();
+        return container !== undefined && target instanceof Node && container.contains(target);
+      },
     });
   }, [room, shown, fieldNow]);
 
