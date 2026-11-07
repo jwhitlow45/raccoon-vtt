@@ -6,6 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import { ConsoleWatch, openSideTab, OpSocket, pagePoint, reopenRoom, Shots, sideTabName, SocketWatch, startServer, tapCell, Touches, waitFor, type Server } from "./harness.ts";
+import { openGroup } from "./helpers/groups.ts";
 
 /**
  * The side panel's tabs in one row with a grouped More menu
@@ -239,6 +240,23 @@ async function oneLine(page: Page): Promise<{ tops: number; scrolls: boolean }> 
     const tops = new Set(Array.from(e.querySelectorAll('[role="tab"]'), (t) => Math.round(t.getBoundingClientRect().top)));
     return { tops: tops.size, scrolls: e.scrollWidth > e.clientWidth };
   });
+}
+
+/**
+ * This device's "Panels that may be tabs" in the side panel's Menu, with
+ * its Tab row group open (designs/qol audit Q10). Only a wide layout draws
+ * the group.
+ */
+async function tabRowTicks(page: Page): Promise<Locator> {
+  await openSideTab(page, "Menu");
+  const panel = page.getByRole("tabpanel", { name: sideTabName("Menu") });
+  const back = panel.getByRole("button", { name: /^Back to Menu/ });
+  if (await back.isVisible()) await back.click();
+  await panel.getByRole("button", { name: /^This device/ }).click();
+  await openGroup(panel, "Tab row");
+  const ticks = panel.getByRole("group", { name: "Panels that may be tabs", exact: true });
+  await ticks.waitFor();
+  return ticks;
 }
 
 function circleFilled(page: Page, color: string): Promise<boolean> {
@@ -910,6 +928,56 @@ describe("raccoon-vtt: the side panel's tabs in one row with a grouped More menu
     } finally {
       await context.close();
     }
+  });
+
+  test("qe-1. This device's Tab row starts with every panel ticked and the row as before, Log, Journal and Areas unticked make DM the fourth tab with them in More, a use moves no tab, and ticking them back gives the row back", async () => {
+    await view(dm, dmCdp, { width: 1280, height: 800 });
+    await reloadAt(dm, 1);
+    assert.equal(await dm.evaluate(() => (globalThis as unknown as { localStorage: { getItem(k: string): string | null } }).localStorage.getItem("rvtt.tabRow")), null, "the Tab row stored before any tick");
+    assert.deepEqual(await rowTitles(dm), ROW, "the row untouched");
+
+    const ticks = await tabRowTicks(dm);
+    const names = await ticks.getByRole("checkbox").evaluateAll((els) => els.map((el) => ((el as unknown as DomEl).getAttribute("aria-label") ?? (el as unknown as { labels: ArrayLike<{ textContent: string | null }> }).labels[0]?.textContent ?? "").trim()));
+    assert.deepEqual(names, DM_PANELS, "one tick for each of the DM's panels, in the registry's order");
+    assert.equal(await ticks.getByRole("checkbox", { checked: false }).count(), 0, "every panel starts ticked");
+    await shots.take(dm, "qe-1-tab-row");
+
+    for (const title of ["Log", "Journal", "Areas"]) await ticks.getByRole("checkbox", { name: title, exact: true }).click();
+    await waitFor("DM in the row", async () => {
+      const row = await rowTitles(dm);
+      return row.join() === ["Token", "Initiative", "Dice", "DM"].join() ? row : null;
+    });
+    const left = JSON.parse((await dm.evaluate(() => (globalThis as unknown as { localStorage: { getItem(k: string): string | null } }).localStorage.getItem("rvtt.tabRow"))) ?? "null") as { dm: string[] };
+    assert.deepEqual([...left.dm].sort(), ["areas", "journal", "log"], "the stored row keeps the panels left out");
+    await more(dm).click();
+    await menu(dm).waitFor();
+    const items = (await menuShape(dm)).filter((s) => !s.startsWith("#") && s !== "---");
+    for (const title of ["Log", "Journal", "Areas"]) assert.ok(items.includes(title), `${title} in More: ${items.join(", ")}`);
+    assert.deepEqual([...(await rowTitles(dm)), ...items].sort(), [...DM_PANELS].sort(), "the row and More hold every panel once");
+    await shots.take(dm, "qe-1-tab-row-more");
+    await dm.keyboard.press("Escape");
+    await menu(dm).waitFor({ state: "detached" });
+
+    // Only the ticks move a tab: panels opened from More leave the row as it is, and so does a reload.
+    for (const title of ["Scenes", "Log", "Library"]) {
+      await more(dm).click();
+      await menu(dm).getByRole("menuitemradio", { name: sideTabName(title) }).click();
+      await dm.getByRole("tabpanel", { name: sideTabName(title) }).waitFor();
+      assert.deepEqual(await rowTitles(dm), ["Token", "Initiative", "Dice", "DM"], `opening ${title} moved a tab`);
+    }
+    await reloadAt(dm, 1);
+    assert.deepEqual(await rowTitles(dm), ["Token", "Initiative", "Dice", "DM"], "a reload lost the Tab row");
+
+    const again = await tabRowTicks(dm);
+    for (const title of ["Log", "Journal", "Areas"]) await again.getByRole("checkbox", { name: title, exact: true }).click();
+    await waitFor("the row as before", async () => ((await rowTitles(dm)).join() === ROW.join() ? true : null));
+
+    // A player's Tab row ticks the panels a player may have, Sound and Time among them though this room has neither yet, and none of the DM's.
+    const pats = await tabRowTicks(pat);
+    const patNames = await pats.getByRole("checkbox").evaluateAll((els) => els.map((el) => ((el as unknown as { labels: ArrayLike<{ textContent: string | null }> }).labels[0]?.textContent ?? "").trim()));
+    assert.deepEqual(patNames, ["Token", "Initiative", "Dice", "Log", "Journal", "Areas", "Sound", "Time", "Characters", "Library", "Menu"], "Pat's ticks are a player's panels");
+    await openSideTab(dm, "Initiative");
+    await openSideTab(pat, "Initiative");
   });
 
   test("10. no page logged an error or a warning", () => {
