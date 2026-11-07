@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import type { Camera } from "../../lib/camera.ts";
 import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import type { RadioCardOption } from "../../components/RadioCards.tsx";
@@ -6,6 +7,7 @@ import { scopeSlot, useScopedIfAny } from "../../state/scope.ts";
 import { useLowPower, WEATHER_MODE_WORDS, type WeatherMode as WeatherSettingValue } from "../device/settings.ts";
 import { sameLook, type Look } from "./looks.ts";
 import { WeatherMode, type ModeInput, type StepLevel } from "./mode.ts";
+import { mapDraws } from "./mapFrames.ts";
 import { setFieldLook, type Field } from "./sim.ts";
 import type { TextureSource } from "./textures.ts";
 
@@ -30,8 +32,40 @@ const BROWSER_FRAMES: Frames = {
   cancel: (id) => cancelAnimationFrame(id),
 };
 
-/** A weather layer that shows: its tick steps the field and draws its Konva layer at once, in the same frame. */
-export type WeatherTarget = { tick(ms: number): void };
+/**
+ * A weather layer that shows: its tick steps the field and draws its Konva
+ * layer at once, in the same frame. Its camera is the one its stage holds,
+ * read as each frame starts, so a frame beside a camera change says nothing
+ * of a tick's cost (#judge).
+ */
+export type WeatherTarget = { tick(ms: number): void; camera?(): Camera | null };
+
+/**
+ * The board's own work beside the weather, which the cost measure must
+ * never read as the weather's (#judge): gestures, and the animated map's
+ * frames. A parameter so a test can play both by hand.
+ */
+export type BoardWork = {
+  /** Calls `moved` on every pointer, touch or wheel move until the returned call stops it. */
+  listen(moved: () => void): () => void;
+  /** The animated map's draws so far (mapFrames.ts). */
+  mapDraws(): number;
+};
+
+/** A gesture's moves. A mouse hovering over the board counts too: its hover redraws are the board's work. */
+const GESTURE_EVENTS = ["pointermove", "touchmove", "wheel"] as const;
+
+const BROWSER_BOARD: BoardWork = {
+  listen(moved) {
+    if (typeof window === "undefined") return () => {};
+    const options = { capture: true, passive: true } as const;
+    for (const type of GESTURE_EVENTS) window.addEventListener(type, moved, options);
+    return () => {
+      for (const type of GESTURE_EVENTS) window.removeEventListener(type, moved, options);
+    };
+  },
+  mapDraws,
+};
 
 /** The textures a layer made, with how to let them go. */
 export type OwnedTextures = TextureSource & { release(): void };
@@ -87,14 +121,27 @@ export class WeatherRoom {
   readonly #added: number[] = [];
   /** Frames in a row that ticked, so a screen at 33 frames a second or fewer, where every frame ticks, holds one now and then. */
   #ticksInARow = 0;
+  /** Ticks in a row that no like frame stood beside (#judge), so a screen where none comes, as with an animated map in step with the ticks, holds one now and then. */
+  #unmatched = 0;
+  readonly #board: BoardWork;
+  /** A gesture's move came since the last frame started. */
+  #gestured = false;
+  #unlisten: (() => void) | null = null;
+  /** The camera the last frame started with. */
+  #camera: Camera | null = null;
+  /** The animated map's draws at the last frame's measure, and whether a frame settled late since saw them change. */
+  #mapDraws = 0;
+  #mapUnsure = false;
   readonly #targets: WeatherTarget[] = [];
   #frame: number | null = null;
   #version = -1;
   #lookChanged = false;
 
-  constructor(frames: Frames = BROWSER_FRAMES, now: () => number = () => performance.now(), afterFrame?: AfterFrame) {
+  constructor(frames: Frames = BROWSER_FRAMES, now: () => number = () => performance.now(), afterFrame?: AfterFrame, board: BoardWork = BROWSER_BOARD) {
     this.#frames = frames;
     this.#now = now;
+    this.#board = board;
+    this.#mapDraws = board.mapDraws();
     this.#afterFrame = afterFrame ?? (typeof window === "undefined" ? (run) => run() : browserAfterFrame());
     this.mode = new WeatherMode(IDLE, now());
     this.state = createStore<WeatherShown>(() => this.#shown());
@@ -168,6 +215,8 @@ export class WeatherRoom {
   dispose(): void {
     if (this.#frame !== null) this.#frames.cancel(this.#frame);
     this.#frame = null;
+    this.#unlisten?.();
+    this.#unlisten = null;
     this.releaseTextures();
     this.field = null;
   }
@@ -194,6 +243,27 @@ export class WeatherRoom {
       this.#frames.cancel(this.#frame);
       this.#frame = null;
     }
+    // Gestures matter only to the cost measure, so the listener lives as long as the loop.
+    if (loop) this.#unlisten ??= this.#board.listen(this.#onGesture);
+    else if (this.#unlisten) {
+      this.#unlisten();
+      this.#unlisten = null;
+    }
+  }
+
+  readonly #onGesture = (): void => {
+    this.#gestured = true;
+  };
+
+  /** Whether the board did a gesture's work since the last frame started: its camera changed, or a pointer, touch or wheel moved. */
+  #moved(): boolean {
+    const camera = this.#targets.at(-1)?.camera?.() ?? null;
+    const last = this.#camera;
+    const changed = camera !== null && (last === null || camera.x !== last.x || camera.y !== last.y || camera.scale !== last.scale);
+    this.#camera = camera;
+    const gestured = this.#gestured;
+    this.#gestured = false;
+    return changed || gestured;
   }
 
   /**
@@ -209,11 +279,16 @@ export class WeatherRoom {
     // A measure still out when the next frame starts ran past it, so it holds that frame's work too and says nothing.
     const last = this.#recent.at(-1);
     if (last && !last.settled) this.#measured(last);
-    const ms = this.mode.frame(time, this.#ticksInARow >= SAMPLE_AFTER && this.mode.wantsCosts);
+    const moved = this.#moved();
+    const hold = (this.#ticksInARow >= SAMPLE_AFTER || this.#unmatched >= SAMPLE_AFTER) && this.mode.wantsCosts;
+    const holds = this.mode.holds;
+    const ms = this.mode.frame(time, hold);
+    // A hold makes the like frames the ticks around it wait for, so the count starts again, and the next frame ticks.
+    if (this.mode.holds !== holds) this.#unmatched = 0;
     const ticked = ms !== null && this.#targets.length > 0;
     if (ms !== null) this.#targets[this.#targets.length - 1]?.tick(ms);
     this.#ticksInARow = ticked ? this.#ticksInARow + 1 : 0;
-    const seen: FrameSeen = { at: time, ticked, spent: null, settled: false };
+    const seen: FrameSeen = { at: time, ticked, spent: null, settled: false, moved, map: null, judged: !ticked };
     this.#recent.push(seen);
     if (this.#recent.length > RECENT_FRAMES) this.#recent.shift();
     this.#settle();
@@ -226,20 +301,70 @@ export class WeatherRoom {
 
   /**
    * A frame's measure is in, or never will be. The tick before it now has
-   * both its neighbours: its cost is its own frame less the mean of the
-   * frames on either side of it with no tick, each within about one frame
-   * of it. So a pan, a drag, the dice or the isometric board's background
-   * work, which every frame around the tick pays too, cancels out within a
-   * frame, and a tick with no such neighbour says nothing.
+   * both its neighbors, and a tick that waits for a like frame two frames
+   * off has that one (#judge).
    */
   #measured(seen: FrameSeen): void {
     seen.settled = true;
+    // The map draws in a frame's rendering, before the paint this measure follows, so what the count gained since the last measure is this frame's.
+    const draws = this.#board.mapDraws();
+    const changed = draws !== this.#mapDraws;
+    if (seen.spent === null) {
+      // Settled as the next frame started, whose draw may already be counted: whose it was is unknown, so the count waits for the next measure.
+      seen.map = changed ? null : false;
+      this.#mapUnsure ||= changed;
+    } else {
+      seen.map = !changed ? false : this.#mapUnsure ? null : true;
+      this.#mapUnsure = false;
+      this.#mapDraws = draws;
+    }
     const i = this.#recent.indexOf(seen);
-    const tick = this.#recent[i - 1];
-    if (!tick?.ticked || tick.spent === null) return;
-    const frame = medianGap(this.#recent);
-    const beside = [this.#recent[i - 2], seen].filter((f): f is FrameSeen => f !== undefined && !f.ticked && f.spent !== null && Math.abs(f.at - tick.at) <= frame * NEIGHBOUR_FRAMES);
-    if (beside.length === 0) return;
+    this.#judge(i - 1, false);
+    this.#judge(i - 2, true);
+  }
+
+  /**
+   * What the tick at `t` added to its frame: its own frame less the mean of
+   * the like frames beside it, each within about one frame of it. A like
+   * frame has no tick and the same board work: no gesture, and the animated
+   * map drawn in both or in neither. So the dice or the isometric board's
+   * background work, which every frame around the tick pays too, cancels
+   * out within a frame, and a tick with no like frame beside it says
+   * nothing.
+   *
+   * A gesture's frames say nothing at all (D-261106-306): its input and its
+   * redraw land in the frames around a move, and a pinch or a drag whose
+   * moves come every other frame, in step with the ticks, put the whole
+   * redraw on the ticks and none on their neighbors, which stepped a GPU
+   * canvas down. A gesture ends, so dropping its frames is bounded.
+   *
+   * An animated map can play all session, so its frames are matched, not
+   * dropped (WXZOOM-ASTRA-05): a tick on a frame where the map drew counts
+   * only against frames where it drew too, and one on a frame without it
+   * only against frames without it. A 30 fps map on a 60 Hz screen draws
+   * every other frame, so with the map playing a tick with no like frame
+   * next to it waits for one two frames off (`far`). Where none comes, the
+   * loop holds a tick to make one (SAMPLE_AFTER).
+   */
+  #judge(t: number, far: boolean): void {
+    const tick = this.#recent[t];
+    if (!tick || tick.judged) return;
+    if (tick.spent === null || tick.map === null || tick.moved || this.#recent[t - 1]?.moved || this.#recent[t + 1]?.moved) {
+      tick.judged = true;
+      return;
+    }
+    const gap = medianGap(this.#recent);
+    const reach = gap * (far ? FAR_FRAMES : NEIGHBOUR_FRAMES);
+    const like = (f: FrameSeen | undefined): f is FrameSeen => f !== undefined && !f.ticked && f.spent !== null && !f.moved && f.map === tick.map && Math.abs(f.at - tick.at) <= reach;
+    const beside = (far ? [this.#recent[t - 2], this.#recent[t + 2]] : [this.#recent[t - 1], this.#recent[t + 1]]).filter(like);
+    if (beside.length === 0) {
+      if (!far && this.#recent.some((f) => f.map === true)) return;
+      tick.judged = true;
+      this.#unmatched++;
+      return;
+    }
+    tick.judged = true;
+    this.#unmatched = 0;
     const cost = Math.max(0, tick.spent - beside.reduce((sum, f) => sum + f.spent!, 0) / beside.length);
     this.mode.added(cost, tick.at);
     this.#added.push(cost);
@@ -253,11 +378,21 @@ export class WeatherRoom {
     this.#recent.length = 0;
     this.#added.length = 0;
     this.#ticksInARow = 0;
+    this.#unmatched = 0;
+    this.#mapDraws = this.#board.mapDraws();
+    this.#mapUnsure = false;
   }
 }
 
-/** One loop frame as the cost measure sees it: its time, whether it ticked, and its main thread time from its start to after its paint, null until measured or when the next frame came first. */
-type FrameSeen = { at: number; ticked: boolean; spent: number | null; settled: boolean };
+/**
+ * One loop frame as the cost measure sees it: its time, whether it ticked,
+ * its main thread time from its start to after its paint (null until
+ * measured, or when the next frame came first), whether a gesture moved the
+ * board since the frame before started, whether the animated map drew in it
+ * (null until measured, or when that cannot be told), and whether its tick,
+ * if any, is judged.
+ */
+type FrameSeen = { at: number; ticked: boolean; spent: number | null; settled: boolean; moved: boolean; map: boolean | null; judged: boolean };
 
 /** How a task after the frame's rendering is asked for: a message, which runs after paint and before the next frame. */
 export type AfterFrame = (run: () => void) => void;
@@ -280,6 +415,8 @@ const COST_TICKS = 15;
 const MIN_TICKS = 5;
 /** A neighbour no further from its tick than this many frames, so no frame was dropped between them. */
 const NEIGHBOUR_FRAMES = 1.5;
+/** The same for a like frame two frames off, with the animated map playing (#judge). */
+const FAR_FRAMES = 2.5;
 /**
  * Ticks in a row before the loop holds one (mode.ts `frame`'s hold), while
  * the window wants costs (mode.ts `wantsCosts`). At 33 frames a second or
@@ -291,7 +428,16 @@ const NEIGHBOUR_FRAMES = 1.5;
  * frame longer, so a window stops holding once its costs are in and well
  * under the limit, a few holds a window on a settled healthy device, and the
  * next tick steps the whole gap (mode.ts HELD_STEP_MS), so they keep their
- * speed (WXB-R3-1). It never happens at 60 or 120 Hz, where ticks skip frames.
+ * speed (WXB-R3-1).
+ *
+ * At 60 or 120 Hz ticks skip frames, so the frames between them are their
+ * like frames, until an animated map plays. In step with the ticks at
+ * 60 Hz, every tick is a map frame and every frame between is empty, and
+ * out of step every frame between is the map's. Neither has a like frame,
+ * so the same count of ticks in a row with none (`#unmatched`) holds one
+ * too: a hold on a map frame leaves a frame where only the map drew, the
+ * next tick lands a frame later, out of step, and the frames on either
+ * side of the hold are like frames for the ticks around it.
  */
 export const SAMPLE_AFTER = 3;
 

@@ -120,6 +120,8 @@ export class WeatherMode {
   /** Ticks, and draws no tick started (a camera change, a mount), counted apart. */
   ticks = 0;
   cameraDraws = 0;
+  /** Frames that would have ticked and were held (`frame`'s hold). */
+  holds = 0;
 
   constructor(input: ModeInput, now: number) {
     this.#input = { ...input };
@@ -166,6 +168,7 @@ export class WeatherMode {
     if (hold) {
       if (this.#windowAt !== null) this.#held = true;
       this.#heldGap = true;
+      this.holds++;
       return null;
     }
     if (last !== null && now - last >= STALL_MS) {

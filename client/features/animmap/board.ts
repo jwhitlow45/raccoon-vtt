@@ -1,5 +1,6 @@
 import type { AssetId, MapVideo } from "#shared/model.ts";
 import { scopeSlot } from "../../state/scope.ts";
+import { mapDrew } from "../weather/mapFrames.ts";
 import { decodable as askDecodable } from "./capabilities.ts";
 import { DrawGate } from "./pacing.ts";
 import { playback, reportWaitsForFrame, type Decodable, type PlaybackInput } from "./playback.ts";
@@ -779,6 +780,8 @@ export class AnimMapBoard {
     this.drawMs.push(this.#env.now() - start);
     if (this.drawMs.length > DRAW_TIMES) this.drawMs.shift();
     this.videoDraws++;
+    // The weather's cost measure judges a frame the map drew in only against others it drew in (weather/store.ts).
+    mapDrew();
     this.#gate.drew(now, mediaMs);
   }
 }

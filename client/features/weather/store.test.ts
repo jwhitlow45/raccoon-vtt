@@ -5,7 +5,7 @@ import { lookOf } from "./looks.ts";
 import { rng } from "#shared/testutil.ts";
 import { TICK_MS } from "./mode.ts";
 import { createField, motionOf } from "./sim.ts";
-import { WeatherRoom, weatherStillReason, type Frames, type WeatherTarget } from "./store.ts";
+import { WeatherRoom, weatherStillReason, type BoardWork, type Frames, type WeatherTarget } from "./store.ts";
 
 /**
  * The room's weather clock (docs/design/design-v1-weather.md 5.2): one loop
@@ -204,13 +204,36 @@ describe("what a tick adds to its frame, which the sceneFunc's own timing cannot
    * beat. With `late`, every measure comes back only after the next frame
    * has started.
    */
-  function run(input: { hz: number; seconds: number; tick: number; board: Board; strayEvery?: number; late?: boolean; between?: (frame: number, ticked: boolean) => number }) {
+  function run(input: {
+    hz: number;
+    seconds: number;
+    tick: number;
+    board: Board;
+    strayEvery?: number;
+    late?: boolean;
+    between?: (frame: number, ticked: boolean) => number;
+    /** The stage's camera x as each frame starts. */
+    camera?: (frame: number) => number;
+    /** A pointer, touch or wheel move comes before the frame. */
+    gesture?: (frame: number) => boolean;
+    /** The animated map draws in the frame's rendering. */
+    map?: (frame: number) => boolean;
+  }) {
     const period = 1000 / input.hz;
     const frames = new HandFrames();
     let now = 0;
     let frame = 0;
     let n = 0;
     let ticked = false;
+    let mapDraws = 0;
+    let gestured = null as (() => void) | null;
+    const board: BoardWork = {
+      listen(on) {
+        gestured = on;
+        return () => (gestured = null);
+      },
+      mapDraws: () => mapDraws,
+    };
     const out: (() => void)[] = [];
     const room = new WeatherRoom(
       frames,
@@ -218,11 +241,13 @@ describe("what a tick adds to its frame, which the sceneFunc's own timing cannot
       (after) => {
         // The board's own work runs after the loop's callback and before the paint, and now and then something else's long task runs before the measure's message.
         now += input.board(frame, now) + (input.strayEvery && ++n % input.strayEvery === 0 ? 60 : 0);
+        if (input.map?.(frame)) mapDraws++;
         if (input.late) out.push(after);
         else after();
         // A long task of something else's after the measure, which drops the frames it runs into.
         now += input.between?.(frame, ticked) ?? 0;
       },
+      board,
     );
     room.setLook(RAIN);
     const samples: number[] = [];
@@ -243,6 +268,7 @@ describe("what a tick adds to its frame, which the sceneFunc's own timing cannot
         most = Math.max(most, room.frameCost);
         room.mode.drew(0.1);
       },
+      camera: () => ({ x: input.camera?.(frame) ?? 0, y: 0, scale: 40 }),
     });
     const end = input.seconds * 1000;
     let at = 0;
@@ -255,6 +281,7 @@ describe("what a tick adds to its frame, which the sceneFunc's own timing cannot
       frame++;
       ticked = false;
       const due = out.splice(0);
+      if (input.gesture?.(frame)) gestured?.();
       frames.run(at);
       for (const after of due) after();
       if (at > end / 2 && !ticked) quiet++;
@@ -285,6 +312,54 @@ describe("what a tick adds to its frame, which the sceneFunc's own timing cannot
       // Each tick is judged by the frames beside it, so only a tick that has the step between its neighbours reads more than its own cost.
       const off = r.samples.filter((ms) => Math.abs(ms - 0.3) > 0.01);
       assert.ok(off.length <= 2, `phase ${phase}: ${off.length} ticks read off: ${off.join(", ")}`);
+    }
+  });
+
+  test("a pinch whose moves come every other frame, in step with the ticks or not, is the board's work: a healthy canvas stays full, and one with no GPU still holds still after it (D-261106-306)", () => {
+    for (const phase of [0, 1]) {
+      // The camera moves on every other frame for the first 20 s, and the board redraws for 4 ms more in each frame it moved in.
+      const camera = (frame: number) => (frame * 16.7 < 20_000 ? Math.floor((frame + phase) / 2) : 0);
+      const pinch: Board = (frame) => 1 + (camera(frame) !== camera(frame - 1) ? 4 : 0);
+      const r = run({ hz: 60, seconds: 20, tick: 0.3, board: pinch, camera });
+      assert.equal(r.level, "full", `phase ${phase}`);
+      assert.ok(r.most < 1, `phase ${phase}: frame cost up to ${r.most}`);
+      assert.equal(run({ hz: 60, seconds: 40, tick: 3, board: pinch, camera }).level, "still", `phase ${phase}, no GPU`);
+    }
+  });
+
+  test("a drag or a hover whose moves come every other frame or every fourth, with no camera change, is the board's work too, its redraw in the move's frame or the next (WZR2-1)", () => {
+    // A pointer moves before every other frame, or every fourth on a busier phone, for the first 20 s, and the drag layer redraws for 4 ms more in that frame, or in the next where the move came after it started.
+    for (const every of [2, 4]) {
+      for (let phase = 0; phase < every; phase++) {
+        for (const late of [0, 1]) {
+          const at = `every ${every} frames, phase ${phase}, ${late} late`;
+          const gesture = (frame: number) => frame * 16.7 < 20_000 && (frame + phase) % every === 0;
+          const drag: Board = (frame) => 1 + (gesture(frame - late) ? 4 : 0);
+          const r = run({ hz: 60, seconds: 20, tick: 0.3, board: drag, gesture });
+          assert.equal(r.level, "full", at);
+          assert.ok(r.most < 1, `${at}: frame cost up to ${r.most}`);
+          assert.equal(run({ hz: 60, seconds: 40, tick: 3, board: drag, gesture }).level, "still", `${at}, no GPU`);
+        }
+      }
+    }
+  });
+
+  test("a 30 fps animated map playing all along, in step with the ticks or not, at 30, 60 and 120 Hz: healthy weather stays full, and weather adding 3 ms a tick holds still while the map plays (WXZOOM-ASTRA-05)", () => {
+    for (const hz of RATES) {
+      const every = hz / 30;
+      for (let phase = 0; phase < every; phase++) {
+        // The map draws every `every` frames for the whole run, and its draw and paint cost 4 ms more in the frames it draws in.
+        const map = (frame: number) => (frame + phase) % every === 0;
+        const playing: Board = (frame) => 1 + (map(frame) ? 4 : 0);
+        const r = run({ hz, seconds: 30, tick: 0.3, board: playing, map });
+        assert.equal(r.level, "full", `${hz} Hz phase ${phase}`);
+        assert.ok(r.most < 1, `${hz} Hz phase ${phase}: frame cost up to ${r.most}`);
+        // The holds that make like frames never stop the weather: it moves as far as the time that passed.
+        assert.ok(r.moved > 0.97 * 30_000, `${hz} Hz phase ${phase}: moved ${r.moved.toFixed(0)} ms in 30 s`);
+        const slow = run({ hz, seconds: 30, tick: 3, board: playing, map });
+        assert.equal(slow.level, "still", `${hz} Hz phase ${phase}, no GPU`);
+        assert.ok(slow.frameCost > 2.5 && slow.frameCost < 3.5, `${hz} Hz phase ${phase}: measured ${slow.frameCost}`);
+      }
     }
   });
 

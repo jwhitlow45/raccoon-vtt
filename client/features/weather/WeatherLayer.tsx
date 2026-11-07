@@ -123,6 +123,10 @@ export default function WeatherLayer(props: WeatherLayerProps) {
         // At once, in this frame: batchDraw would wait a frame and gate a 60 Hz clock down to 20 (5.2).
         layer.draw();
       },
+      camera() {
+        const stage = layerRef.current?.getStage();
+        return stage ? cameraOfStage(stage) : null;
+      },
     });
   }, [room, shown, fieldNow]);
 
