@@ -12,10 +12,9 @@ import { addSound } from "./soundRoom.ts";
 
 /**
  * Time and Sound as panels (docs/design/design-v1-sound-layout.md 3, 4 and
- * 10.3), on the real server serving the production build with ROOM_SOUND
- * on. Dana the DM is at a desk, and on a phone where a step says so. Pat
- * plays on a phone. The Now playing chip is not in this file: it ships
- * with the top bar's own run.
+ * 10.3), and the DM's Now playing chip in the top bar (5), on the real
+ * server serving the production build with ROOM_SOUND on. Dana the DM is
+ * at a desk, and on a phone where a step says so. Pat plays on a phone.
  * - sl-0: the room, Pat, 100 music tracks with Tavern night playing from
  *   its first, and a background sound.
  * - sl-1: the DM's lists: the phone's Run the table, the side panel's row
@@ -23,14 +22,20 @@ import { addSound } from "./soundRoom.ts";
  *   reload's reopen.
  * - sl-2: Pat's Time and Sound, each listed by its own rule, and each kept
  *   with its one line while open after its reason ends.
- * - sl-3: the clock chip into Time with focus on its tab, the clock's toasts while
- *   Time or the Log is on screen or neither, and the chip from a Sound
- *   subpage below with a name typed and focused.
+ * - sl-3: the clock chip's Open Time into Time with focus on its tab, the
+ *   clock's toasts while Time or the Log is on screen or neither, and the
+ *   chip from a Sound subpage below with a name typed and focused.
  * - sl-4: Sound's two views: the start with nothing stored, Up next's fold
  *   kept over a reload, the view, search and scroll reset on each open,
  *   kept through a turn across 900 px, a switch of view at its top, the
  *   idle line's Library link, and Pause in a phone's half sheet.
  * - sl-5: a track's page from a search, and Back to it.
+ * - sl-6: the chip on a computer: its states and Pause, none for Pat, in
+ *   View as Pat or with the server's switch off, its popover with
+ *   Crossfade by a press and a key, the music or every sound stopping
+ *   while it is open, and Open Sound from Library's foot or a track's page.
+ * - sl-7: the chip at 700 x 900 as a card, on a phone as a sheet over
+ *   the open panel, and at 320 x 568 at 130% off the bar, in the DM menu.
  *
  * It runs with `pnpm test:e2e` on E2E_PORT plus fifty-three, one file after
  * another. The other environment variables are the smoke run's
@@ -66,11 +71,17 @@ const run = {
   names: [] as string[],
   tavern: [] as string[],
   loop: "",
+  /** A second background sound, started after Rain, for the player's Background order. */
+  crowd: "",
+  /** A music track of a few seconds, which ends under Repeat off while the chip's player is open. */
+  lastCall: "",
 };
 
 const DESK = { width: 1440, height: 900 };
 const PHONE = { width: 390, height: 844 };
 const SMALL = { width: 320, height: 568 };
+/** Between 600 and 899 px, where the chip opens its player as a centered card (5.3). */
+const CARD = { width: 700, height: 900 };
 /** Under 900 px, so the side panel's Sound becomes the phone's sheet. */
 const NARROW = { width: 860, height: 900 };
 const HOUR = 3_600;
@@ -218,6 +229,106 @@ async function startClock(shown = true): Promise<void> {
 async function stopClock(): Promise<void> {
   if (dmSocket.state?.clock) await ops.send({ t: "clock.stop" });
   await waitFor("no clock", () => (dmSocket.state?.clock == null ? true : null));
+}
+
+/** The ops of `type` the DM's page sent from its `from`th frame on. */
+function sentOps(from: number, type: string): Record<string, unknown>[] {
+  return dmSocket.sent.slice(from).flatMap((f) => {
+    try {
+      const m = JSON.parse(f) as { t: string; op?: Record<string, unknown> };
+      return m.t === "op" && m.op?.t === type ? [m.op] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
+/** The Now playing chip in the DM's top bar (5.2). */
+function nowChip(page: Page = dm): Locator {
+  return page.locator('[data-chip="nowPlaying"]');
+}
+
+/** What opens the chip's player: the name in the full form, the whole chip in the compact one. */
+function nowOpener(page: Page = dm): Locator {
+  return page.locator('[data-chip="nowPlaying"][data-now-open], [data-chip="nowPlaying"] [data-now-open]');
+}
+
+/** The chip's player, a popover, a card or a sheet, each named Now playing (5.3). */
+function nowPlayer(page: Page = dm): Locator {
+  return page.getByRole("dialog", { name: "Now playing", exact: true });
+}
+
+/** Opens the chip's player and waits for its body, loaded with the music's code. */
+async function openNowPlayer(page: Page = dm): Promise<Locator> {
+  await nowOpener(page).click();
+  const player = nowPlayer(page);
+  await player.locator("[data-now-player]").waitFor();
+  return player;
+}
+
+/** A player a failed step left open, closed, so the next step's chip is not held in its stopped state by it. */
+async function closeNowPlayer(page: Page = dm): Promise<void> {
+  const player = nowPlayer(page);
+  if ((await player.count()) === 0) return;
+  // A press on the chip closes its popover, and Escape a card or a sheet, which hold focus inside them.
+  if (await player.first().evaluate((el) => el.hasAttribute("data-rvtt-popover"))) await nowOpener(page).click();
+  else await page.keyboard.press("Escape");
+  await player.first().waitFor({ state: "detached" });
+}
+
+/** Whether `el` holds this page's focus. */
+function focused(el: Locator): Promise<boolean> {
+  return el.evaluate((node) => node === node.ownerDocument.activeElement);
+}
+
+/** The chip in its stopped state while its player stays open (5.1): "Now playing" alone, with no Pause or Play and no track. */
+async function stoppedChip(page: Page = dm): Promise<void> {
+  const chip = nowChip(page);
+  await waitFor("the chip's stopped state", async () => ((await chip.getAttribute("data-chip-state")) === "stopped" ? true : null), 10_000);
+  assert.equal(await nowOpener(page).getAttribute("aria-label"), "Now playing, stopped");
+  assert.equal(await chip.locator("[data-now-pause]").count(), 0, "no Pause or Play once stopped");
+  if ((await chip.getAttribute("data-chip-form")) === "full") assert.equal((await nowOpener(page).innerText()).trim(), "Now playing");
+}
+
+/**
+ * Focus on the map's focus target, read a frame after the render that
+ * took the chip away: focus put on the chip as it went would be lost to
+ * the page, so this is the moment that tells (5.1).
+ */
+async function focusOnMapOnceChipGoes(how: string, page: Page = dm): Promise<void> {
+  await nowChip(page).waitFor({ state: "detached" });
+  const active = await page.locator("body").evaluate(
+    (body) =>
+      new Promise<string>((resolve) =>
+        body.ownerDocument.defaultView!.requestAnimationFrame(() => {
+          const a = body.ownerDocument.activeElement;
+          resolve(a ? `${a.tagName.toLowerCase()} ${a.getAttribute("role") ?? ""} ${a.getAttribute("aria-label") ?? ""}` : "none");
+        }),
+      ),
+  );
+  assert.equal(active, "div img Map", `focus on the map's focus target after ${how}`);
+}
+
+/** Rain, then Crowd a moment later, so the player's Background lists them in that order. */
+async function startLoops(): Promise<void> {
+  await ops.send({ t: "loop.start", id: randomUUID(), soundId: run.loop, volume: 80 });
+  await waitFor("Rain playing", () => (Object.keys(dmSocket.state?.playing?.loops ?? {}).length === 1 ? true : null));
+  await dm.waitForTimeout(50);
+  await ops.send({ t: "loop.start", id: randomUUID(), soundId: run.crowd, volume: 80 });
+  await waitFor("both loops playing", () => (Object.keys(dmSocket.state?.playing?.loops ?? {}).length === 2 ? true : null));
+}
+
+/** Open Sound from the chip's player, which closes as Sound opens. */
+async function openSoundFromChip(): Promise<void> {
+  const player = await openNowPlayer();
+  await player.getByRole("button", { name: "Open Sound", exact: true }).click();
+  await player.waitFor({ state: "detached" });
+}
+
+/** The page's open panel sheets put away, so a step starts with none. */
+async function closeSheets(page: Page = dm): Promise<void> {
+  const open = page.locator("dialog[data-rvtt-sheet]");
+  while ((await open.count()) > 0) await closeSheet(open.first());
 }
 
 describe("Time and Sound as panels", { concurrency: false }, () => {
@@ -402,12 +513,13 @@ describe("Time and Sound as panels", { concurrency: false }, () => {
     await ops.send({ t: "clock.update", shown: true });
   });
 
-  test("sl-3a. the clock chip opens Time with focus on its tab, and a clock step comes as a toast only while neither Time nor the Log is on screen", async () => {
+  test("sl-3a. the clock chip's Open Time opens Time with focus on its tab, and a clock step comes as a toast only while neither Time nor the Log is on screen", async () => {
     await stopClock();
     await startClock();
     await sideTab("Sound");
-    const chip = dm.getByRole("button", { name: /^Time: / });
-    await chip.click();
+    // From 900 px up the DM's chip opens the clock's steps, and their Open Time opens the panel (chips.md C5).
+    await dm.getByRole("button", { name: /^Time: / }).click();
+    await dm.getByRole("dialog", { name: "Time", exact: true }).getByRole("button", { name: "Open Time", exact: true }).click();
     const time = dm.getByRole("tabpanel", { name: sideTabName("Time") });
     await time.locator("[data-clock-date]").waitFor();
     // The top panel's name takes focus: its chosen tab, here More named Time (docs/design/design-v1-split-panel.md 9.2).
@@ -433,7 +545,7 @@ describe("Time and Sound as panels", { concurrency: false }, () => {
     await toasts.filter({ hasText: /Day 3, 11:00 PM/ }).first().waitFor();
   });
 
-  test("sl-3b. the chip with Sound below on a subpage, a name typed and focused: the name saves, Time opens on top, and Sound keeps its subpage", async (t) => {
+  test("sl-3b. the chip and its Open Time with Sound below on a subpage, a name typed and focused: the name saves, Time opens on top, and Sound keeps its subpage", async (t) => {
     t.after(async () => {
       await dm.evaluate(() => localStorage.removeItem("rvtt.sidePanelSplit"));
       await reload(dm);
@@ -448,6 +560,7 @@ describe("Time and Sound as panels", { concurrency: false }, () => {
     assert.equal(await field.evaluate((el) => el === el.ownerDocument.activeElement), true, "the name keeps focus");
     // A dispatched click moves no focus, as Safari's and the chip's own press do not (D-261102-763).
     await dm.getByRole("button", { name: /^Time: / }).dispatchEvent("click");
+    await dm.getByRole("dialog", { name: "Time", exact: true }).getByRole("button", { name: "Open Time", exact: true }).dispatchEvent("click");
     await waitFor("Rain at night saved", () => (dmSocket.state?.sounds?.[run.loop]?.name === "Rain at night" ? true : null));
     const time = dm.getByRole("tabpanel", { name: sideTabName("Time") });
     await time.locator("[data-clock-date]").waitFor();
@@ -638,6 +751,392 @@ describe("Time and Sound as panels", { concurrency: false }, () => {
     assert.equal(await search(panel).inputValue(), "harbor");
     assert.equal(await rows.count(), 10);
     await search(panel).fill("");
+  });
+
+  test("sl-6a. the chip at a desk: the track's name with Pause, then Paused · and Play, one music.pause then one music.resume on a new run, and no chip for Pat, in View as Pat or with the server's switch off", async () => {
+    await closeSheets();
+    await playTavern();
+    const chip = nowChip();
+    await chip.waitFor();
+    const name = nameOf(run.tavern[0]!);
+    assert.equal(await chip.getAttribute("data-chip-form"), "full");
+    assert.equal(await chip.getAttribute("data-chip-state"), "playing");
+    const opener = nowOpener();
+    assert.equal(await opener.getAttribute("aria-label"), `Now playing: ${name}, Tavern night · 1 of 12`);
+    assert.equal((await opener.innerText()).trim(), name);
+    assert.equal(await opener.getAttribute("aria-haspopup"), "dialog");
+    await shots.take(dm, "sl-6a-chip-playing");
+
+    const playingRun = dmSocket.state!.playing!.music!.run;
+    let from = dmSocket.sent.length;
+    await chip.getByRole("button", { name: "Pause", exact: true }).click();
+    await waitFor("the chip paused", async () => ((await chip.getAttribute("data-chip-state")) === "paused" ? true : null), 5_000);
+    assert.equal(sentOps(from, "music.pause").length, 1, "one music.pause");
+    assert.equal((await opener.innerText()).trim(), `Paused · ${name}`);
+    assert.equal(await opener.getAttribute("aria-label"), `Now playing, paused: ${name}, Tavern night · 1 of 12`);
+    await shots.take(dm, "sl-6a-chip-paused");
+    from = dmSocket.sent.length;
+    await chip.getByRole("button", { name: "Play", exact: true }).click();
+    await waitFor("the chip playing again", async () => ((await chip.getAttribute("data-chip-state")) === "playing" ? true : null), 5_000);
+    const resumed = sentOps(from, "music.resume");
+    assert.equal(resumed.length, 1, "one music.resume");
+    assert.notEqual(resumed[0]!.run, playingRun, "the resume places the music again under a new run");
+
+    // A player's bar has no chip: their room goes to their own name (5.5).
+    await waitFor("Pat hears the music", () => (patSocket.state?.playing?.music ? true : null));
+    assert.equal(await nowChip(pat).count(), 0, "no chip on Pat's page");
+
+    // View as Pat draws Pat's own page, with no chip in its bar.
+    await dm.locator('[data-chip="dm"]').click();
+    await dm.getByRole("menu", { name: "DM", exact: true }).getByRole("menuitem", { name: /^View as Pat/ }).click();
+    const preview = dm.locator('dialog[aria-label="Viewing as Pat"]');
+    await preview.waitFor();
+    try {
+      await preview.locator('[data-chip="you"]').waitFor();
+      assert.equal(await preview.locator('[data-chip="nowPlaying"]').count(), 0, "no chip in View as Pat");
+    } finally {
+      await preview.getByRole("button", { name: "Exit", exact: true }).click();
+      await preview.waitFor({ state: "detached" });
+    }
+
+    // The server's switch off: the room still plays, and no chip shows, since no sound file can play.
+    let answered = 0;
+    await dm.route("**/api/config", async (route) => {
+      const response = await route.fetch();
+      const config = (await response.json()) as Record<string, unknown>;
+      answered++;
+      await route.fulfill({ response, json: { ...config, roomSound: false } });
+    });
+    try {
+      await reload(dm);
+      await dm.locator('[data-chip="dm"]').waitFor();
+      await waitFor("the switch read as off", () => (answered > 0 ? true : null), 10_000);
+      // The bar draws the chip in the frame after it learns what plays, so a short wait is enough to see one that would show.
+      await dm.waitForTimeout(1_000);
+      assert.ok(dmSocket.state?.playing?.music, "the music still plays in the room");
+      assert.equal(await nowChip().count(), 0, "no chip with the server's switch off");
+    } finally {
+      await dm.unroute("**/api/config");
+      await reload(dm);
+    }
+    await nowChip().waitFor();
+  });
+
+  test("sl-6b. the chip's name opens its player under it: the next track, the music's volume, both background sounds in the order they started with their Stops, Stop all sound and Open Sound, Crossfade by a press and by ArrowRight with the player still open, and Escape back on the chip", async () => {
+    await closeNowPlayer();
+    await closeSheets();
+    await playTavern();
+    if (!run.crowd) {
+      run.crowd = await addSound({ context: dmContext, origin: server.origin, roomId: run.roomId, ops, id: randomUUID(), name: "Crowd", use: "loop", ms: 3_000 });
+      await waitFor("Crowd in the DM's copy", () => (dmSocket.state?.sounds?.[run.crowd] ? true : null));
+    }
+    for (const id of Object.keys(dmSocket.state?.playing?.loops ?? {})) await ops.send({ t: "loop.stop", id });
+    await waitFor("no loops", () => (Object.keys(dmSocket.state?.playing?.loops ?? {}).length === 0 ? true : null));
+    await startLoops();
+    const rain = dmSocket.state!.sounds![run.loop]!.name;
+    const player = await openNowPlayer();
+    assert.equal(await player.evaluate((el) => el.hasAttribute("data-rvtt-popover")), true, "a popover from 900 px up");
+    await player.locator("[data-now-next]").filter({ hasText: `Next: ${nameOf(run.tavern[1]!)}` }).waitFor();
+    const volume = player.getByRole("slider", { name: "Music volume for everyone", exact: true });
+    await volume.waitFor();
+    const rows = player.locator("[data-now-loop]");
+    await waitFor("two background rows", async () => ((await rows.count()) === 2 ? true : null), 5_000);
+    assert.deepEqual((await rows.allInnerTexts()).map((s) => s.trim()), [rain, "Crowd"], "Background in the order the sounds started");
+    for (const name of [`Stop ${rain}`, "Stop Crowd", "Stop all sound", "Open Sound"]) await player.getByRole("button", { name, exact: true }).waitFor();
+    // Top to bottom: the player, the Next line, the volume, Background, then Stop all sound and Open Sound (5.3).
+    const tops = await Promise.all([player.locator("[data-music-now]").first(), player.locator("[data-now-next]"), volume, player.locator("[data-now-background]"), player.locator("[data-now-foot]")].map(async (l) => (await l.boundingBox())!.y));
+    assert.deepEqual([...tops].sort((a, b) => a - b), tops, `the body's order: ${tops.join(", ")}`);
+    assert.deepEqual(alignmentLines(await measureAlignment(player), "the chip's popover with music and two loops, 1440x900"), []);
+    await shots.take(dm, "sl-6b-popover");
+
+    // Crossfade is a row of its choices here: its menu would be a popover of its own and close this one.
+    assert.equal(await player.getByRole("button", { name: /^Crossfade/ }).count(), 0, "no Crossfade menu in the popover");
+    const fades = player.getByRole("radiogroup", { name: "Crossfade", exact: true });
+    let from = dmSocket.sent.length;
+    await fades.getByRole("radio", { name: "2 s", exact: true }).click();
+    await waitFor("fade 2 sent", () => (sentOps(from, "music.set").some((o) => o.fade === 2) ? true : null), 5_000);
+    assert.equal(await player.isVisible(), true, "still open after a press");
+    from = dmSocket.sent.length;
+    await dm.keyboard.press("ArrowRight");
+    await waitFor("fade 5 sent", () => (sentOps(from, "music.set").some((o) => o.fade === 5) ? true : null), 5_000);
+    await waitFor("5 s chosen", async () => ((await fades.getByRole("radio", { name: "5 s", exact: true }).isChecked()) ? true : null), 5_000);
+    assert.equal(await player.isVisible(), true, "still open after a key");
+
+    // A background sound's Stop leaves the player open.
+    from = dmSocket.sent.length;
+    await player.getByRole("button", { name: "Stop Crowd", exact: true }).click();
+    await waitFor("Crowd's row gone", async () => ((await rows.count()) === 1 ? true : null), 5_000);
+    assert.equal(sentOps(from, "loop.stop").length, 1, "one loop.stop");
+    assert.equal(await player.isVisible(), true, "still open after a Stop");
+
+    await dm.keyboard.press("Escape");
+    await player.waitFor({ state: "detached" });
+    await waitFor("focus back on the chip", async () => ((await focused(nowOpener())) ? true : null), 5_000);
+  });
+
+  test("sl-6c. the music stopped by another DM while the player is open: it says No music is playing., Background and its Stop stay, and the chip shows the one background sound with no Pause", async () => {
+    // Rain still plays from sl-6b, beside Tavern night.
+    const rain = dmSocket.state!.sounds![run.loop]!.name;
+    // The page drew Crowd's Stop before the server's answer reached this watch, so its count waits for that.
+    await waitFor("Rain playing alone", () => (Object.keys(dmSocket.state?.playing?.loops ?? {}).length === 1 ? true : null), 5_000);
+    const player = await openNowPlayer();
+    await ops.send({ t: "music.stop" });
+    await player.getByText("No music is playing.", { exact: true }).waitFor();
+    await player.locator("[data-now-loop]").filter({ hasText: rain }).waitFor();
+    for (const name of [`Stop ${rain}`, "Stop all sound", "Open Sound"]) await player.getByRole("button", { name, exact: true }).waitFor();
+    assert.equal(await player.locator("[data-now-next]").count(), 0, "no Next line with no music");
+    assert.equal(await player.getByRole("slider", { name: "Music volume for everyone", exact: true }).count(), 0, "no music volume with no music");
+    const chip = nowChip();
+    await waitFor("the chip on the background sound", async () => ((await chip.getAttribute("data-chip-state")) === "background" ? true : null), 5_000);
+    assert.equal(await nowOpener().getAttribute("aria-label"), "Now playing: 1 background sound");
+    assert.equal((await nowOpener().innerText()).trim(), "1 background sound");
+    assert.equal(await chip.locator("[data-now-pause]").count(), 0, "no Pause: it pauses music");
+    assert.deepEqual(alignmentLines(await measureAlignment(player), "the chip's popover with a background sound alone, 1440x900"), []);
+    await shots.take(dm, "sl-6c-background-alone");
+    await dm.keyboard.press("Escape");
+    await player.waitFor({ state: "detached" });
+    await waitFor("focus back on the chip", async () => ((await focused(nowOpener())) ? true : null), 5_000);
+  });
+
+  test("sl-6d. playback ending while the player is open keeps the chip in its stopped state, and closing hides it with focus on the map: the music stopped here then Escape, every sound stopped by another DM then a press on the chip, and the last track ending under Repeat off", async () => {
+    await closeNowPlayer();
+    await ops.send({ t: "sound.stopAll" });
+    await waitFor("silence", () => (!dmSocket.state?.playing?.music && Object.keys(dmSocket.state?.playing?.loops ?? {}).length === 0 ? true : null));
+    await nowChip().waitFor({ state: "detached" });
+
+    // The music alone, stopped by the player's own Stop the music.
+    await playTavern();
+    let player = await openNowPlayer();
+    await player.getByRole("button", { name: "Stop the music", exact: true }).click();
+    await stoppedChip();
+    assert.equal(await player.isVisible(), true, "the player stays open");
+    await shots.take(dm, "sl-6d-stopped");
+    await dm.keyboard.press("Escape");
+    await focusOnMapOnceChipGoes("Escape");
+
+    // Another DM's Stop all sound, then a press on the chip.
+    await playTavern();
+    player = await openNowPlayer();
+    await ops.send({ t: "sound.stopAll" });
+    await stoppedChip();
+    await nowOpener().click();
+    await player.waitFor({ state: "detached" });
+    await focusOnMapOnceChipGoes("a press on the chip");
+
+    // The one track ends under Repeat off, and the server's tick stops the run. Music is 30 s at least, so a jump starts it 4 s from its end.
+    if (!run.lastCall) {
+      run.lastCall = await addSound({ context: dmContext, origin: server.origin, roomId: run.roomId, ops, id: randomUUID(), name: "Last call", use: "music", ms: 31_000 });
+      await waitFor("Last call in the DM's copy", () => (dmSocket.state?.sounds?.[run.lastCall] ? true : null));
+    }
+    const lastRun = randomUUID();
+    await ops.send({ t: "music.play", run: lastRun, soundId: run.lastCall, order: [run.lastCall], repeat: "off", fade: 0 });
+    player = await openNowPlayer();
+    await ops.send({ t: "music.jump", run: randomUUID(), from: lastRun, soundId: run.lastCall, ms: dmSocket.state!.sounds![run.lastCall]!.ms - 4_000 });
+    assert.equal((await nowOpener().innerText()).trim(), "Last call");
+    await waitFor("the track's end", () => (dmSocket.state?.playing?.music ? null : true), 20_000);
+    await stoppedChip();
+    await dm.keyboard.press("Escape");
+    await focusOnMapOnceChipGoes("Escape after the last track ended");
+  });
+
+  test("sl-6e. Open Sound from the player, with Sound open on Library at its foot and with Sound closed after that: the player closes, Sound shows Now playing at its top, and focus goes to Sound's tab", async () => {
+    await closeSheets();
+    await playTavern();
+    const tab = dm.getByRole("tablist", { name: "Panels" }).getByRole("tab", { name: sideTabName("Sound"), selected: true });
+    const atNowPlaying = async (why: string) => {
+      const panel = dm.getByRole("tabpanel", { name: sideTabName("Sound") });
+      await waitFor(`Now playing chosen ${why}`, async () => ((await view(panel, "Now playing").isChecked()) ? true : null), 5_000);
+      const player = panel.locator("[data-sound-player]");
+      await player.getByRole("button", { name: "Pause", exact: true }).waitFor();
+      assert.equal((await scrolled(player)).top, 0, `Now playing at its top ${why}`);
+      await waitFor(`focus on Sound's tab ${why}`, async () => ((await focused(tab)) ? true : null), 5_000);
+    };
+    let panel = await sideTab("Sound");
+    await showView(panel, "Library");
+    await search(panel).fill("");
+    await panel.getByRole("list", { name: "Tracks" }).locator("[data-music-row]").nth(99).waitFor();
+    assert.ok((await toFoot(search(panel))) > 2_000, "Library at its foot");
+    await openSoundFromChip();
+    await atNowPlaying("from Library's foot");
+    await shots.take(dm, "sl-6e-open-sound");
+
+    await showView(panel, "Library");
+    assert.ok((await toFoot(search(panel))) > 2_000, "Library at its foot again");
+    await sideTab("Log");
+    await openSoundFromChip();
+    await atNowPlaying("with Sound closed after Library's foot");
+    panel = dm.getByRole("tabpanel", { name: sideTabName("Sound") });
+    await showView(panel, "Now playing");
+  });
+
+  test("sl-6f. Open Sound while a track's page holds a typed name: the name saves, then Sound shows Now playing at its top", async () => {
+    await playTavern();
+    const panel = await sideTab("Sound");
+    await showView(panel, "Library");
+    const track = run.names.find((n) => n.startsWith("Swamp"))!;
+    const id = run.music[run.names.indexOf(track)]!;
+    await search(panel).fill(track);
+    await panel.getByRole("list", { name: "Tracks" }).getByRole("button", { name: `More for ${track}`, exact: true }).click();
+    await dm.getByRole("menuitem", { name: "Rename or delete…", exact: true }).click();
+    const field = panel.getByRole("textbox", { name: "Name" });
+    await field.waitFor();
+    const renamed = `${track} in the fog`;
+    await field.fill(renamed);
+    assert.equal(await focused(field), true, "the name keeps focus");
+    await openSoundFromChip();
+    await waitFor(`${renamed} saved`, () => (dmSocket.state?.sounds?.[id]?.name === renamed ? true : null), 5_000);
+    run.names[run.names.indexOf(track)] = renamed;
+    await waitFor("Now playing chosen", async () => ((await view(panel, "Now playing").isChecked()) ? true : null), 5_000);
+    const player = panel.locator("[data-sound-player]");
+    await player.getByRole("button", { name: "Pause", exact: true }).waitFor();
+    assert.equal((await scrolled(player)).top, 0, "Now playing at its top");
+    assert.equal(await dm.getByRole("button", { name: /^Back to Sound/ }).count(), 0, "the track's page has gone");
+  });
+
+  test("sl-7a. at 700 x 900 the compact chip opens its player as a centered card 440 px wide with the Crossfade menu, Escape returns to the chip, and Close after every sound stopped hides it with focus on the map", async (t) => {
+    t.after(() => dm.setViewportSize(DESK));
+    await playTavern();
+    await dm.setViewportSize(CARD);
+    await closeSheets();
+    const chip = nowChip();
+    await waitFor("the compact chip", async () => ((await chip.getAttribute("data-chip-form").catch(() => null)) === "compact" ? true : null), 5_000);
+    assert.equal(await chip.getAttribute("aria-haspopup"), "dialog");
+    let card = await openNowPlayer();
+    assert.equal(await card.evaluate((el) => el.tagName), "DIALOG", "a card, not a popover");
+    const width = await card.locator(":scope > section").evaluate((el) => el.getBoundingClientRect().width);
+    assert.ok(Math.abs(width - 440) <= 1, `the card is 440 px wide (${width})`);
+    assert.equal(await card.getByRole("radiogroup", { name: "Crossfade", exact: true }).count(), 0, "no inline Crossfade in a card");
+    const from = dmSocket.sent.length;
+    await card.getByRole("button", { name: /^Crossfade: / }).click();
+    await dm.getByRole("menu", { name: "Crossfade", exact: true }).getByRole("menuitemradio", { name: "10 s", exact: true }).click();
+    await waitFor("fade 10 sent", () => (sentOps(from, "music.set").some((o) => o.fade === 10) ? true : null), 5_000);
+    assert.equal(await card.isVisible(), true, "the card stays open after a pick");
+    assert.deepEqual(alignmentLines(await measureAlignment(card.locator(":scope > section")), "the chip's card, 700x900"), []);
+    await shots.take(dm, "sl-7a-card");
+    await dm.keyboard.press("Escape");
+    await card.waitFor({ state: "detached" });
+    await waitFor("focus back on the chip", async () => ((await focused(nowOpener())) ? true : null), 5_000);
+
+    card = await openNowPlayer();
+    await ops.send({ t: "sound.stopAll" });
+    await stoppedChip();
+    await card.getByRole("button", { name: /^Close/ }).first().click();
+    await card.waitFor({ state: "detached" });
+    await focusOnMapOnceChipGoes("Close on the card");
+  });
+
+  test("sl-7b. at 700 x 900 the card's Open Sound shows Sound's sheet on Now playing at its top with focus on its title, from Sound shut and from Sound's sheet open behind on Library", async (t) => {
+    t.after(async () => {
+      await closeSheets();
+      await dm.setViewportSize(DESK);
+    });
+    await playTavern();
+    await dm.setViewportSize(CARD);
+    await closeSheets();
+    const soundSheet = dm.locator('dialog[data-rvtt-sheet][aria-label="Sound"]');
+    const atNowPlaying = async (why: string) => {
+      await soundSheet.waitFor();
+      await waitFor(`Now playing chosen ${why}`, async () => ((await view(soundSheet, "Now playing").isChecked()) ? true : null), 5_000);
+      await soundSheet.locator("[data-sound-player]").getByRole("button", { name: "Pause", exact: true }).waitFor();
+      assert.equal((await scrolled(soundSheet.locator("[data-sound-player]"))).top, 0, `Now playing at its top ${why}`);
+      const title = await waitFor(`focus on the sheet's title ${why}`, () => soundSheet.evaluate((box) => {
+        const a = box.ownerDocument.activeElement;
+        return a && box.contains(a) && /^H[1-6]$/.test(a.tagName) ? (a.textContent ?? "").trim() : null;
+      }), 5_000);
+      assert.match(title, /^Sound/);
+    };
+    await nowChip().waitFor();
+    await openSoundFromChip();
+    await atNowPlaying("from Sound shut");
+
+    await showView(soundSheet, "Library");
+    await openSoundFromChip();
+    await atNowPlaying("from Sound's sheet on Library");
+    await shots.take(dm, "sl-7b-open-sound-sheet");
+  });
+
+  test("sl-7c. on a phone the compact chip opens its player as a sheet over the open Log, Close returns to the chip with the Log still open, and playback ending while it is open hides the chip as the sheet closes, focus on the map", async (t) => {
+    t.after(async () => {
+      await closeSheets();
+      await dm.setViewportSize(DESK);
+      await reload(dm);
+    });
+    await playTavern();
+    await dm.setViewportSize(PHONE);
+    await reload(dm);
+    await closeSheets();
+    const log = await sheet(dm, "Log");
+    const chip = nowChip();
+    await waitFor("the compact chip", async () => ((await chip.getAttribute("data-chip-form").catch(() => null)) === "compact" ? true : null), 5_000);
+    let player = await openNowPlayer();
+    const box = await player.locator(":scope > section").boundingBox();
+    assert.ok(box && Math.abs(box.y + box.height - PHONE.height) <= 1, `a sheet from the screen's foot (${JSON.stringify(box)})`);
+    assert.equal(await log.count(), 1, "the Log's sheet stays behind it");
+    assert.deepEqual(alignmentLines(await measureAlignment(player.locator(":scope > section")), "the chip's sheet, 390x844"), []);
+    await shots.take(dm, "sl-7c-sheet");
+    await player.getByRole("button", { name: /^Close/ }).first().click();
+    await player.waitFor({ state: "detached" });
+    await waitFor("focus back on the chip", async () => ((await focused(nowOpener())) ? true : null), 5_000);
+    assert.equal(await log.isVisible(), true, "the Log is still open");
+
+    player = await openNowPlayer();
+    await ops.send({ t: "sound.stopAll" });
+    await stoppedChip();
+    await player.getByRole("button", { name: /^Close/ }).first().click();
+    await player.waitFor({ state: "detached" });
+    await focusOnMapOnceChipGoes("Close on a phone's sheet");
+    assert.equal(await log.isVisible(), true, "the Log is still open");
+  });
+
+  test("sl-7d. at 320 x 568 at 130% the chip gives way, leaving the bar's row as it is with nothing playing, the DM menu's Now playing opens the player as a sheet, and Escape returns to the DM chip", async (t) => {
+    t.after(async () => {
+      await dm.evaluate(() => localStorage.removeItem("rvtt.uiScale"));
+      await dm.setViewportSize(DESK);
+      await reload(dm);
+    });
+    // The bar's row: each part's width, and any control not whole on the screen.
+    const rowParts = () =>
+      dm.locator("header[data-rvtt-topbar] > div:first-child").evaluate((el) => {
+        type Box = { left: number; right: number; width: number; height: number };
+        type Part = { getBoundingClientRect(): Box; getAttribute(name: string): string | null; textContent: string | null; children: ArrayLike<Part>; querySelectorAll(s: string): ArrayLike<Part>; ownerDocument: { documentElement: { clientWidth: number } } };
+        const row = el as unknown as Part;
+        const screen = row.ownerDocument.documentElement.clientWidth;
+        const off: string[] = [];
+        for (const part of Array.from(row.querySelectorAll("button, a, input"))) {
+          const b = part.getBoundingClientRect();
+          if (b.width > 0 && b.height > 0 && (b.left < -1 || b.right > screen + 1)) off.push(`${part.getAttribute("aria-label") ?? (part.textContent ?? "").trim()} at ${Math.round(b.left)} to ${Math.round(b.right)}`);
+        }
+        const parts = Array.from(row.children).map((c) => `${(c.getAttribute("aria-label") ?? (c.textContent ?? "").trim()).slice(0, 24)} ${Math.round(c.getBoundingClientRect().width)}`);
+        return { parts, off };
+      });
+    await ops.send({ t: "sound.stopAll" });
+    await waitFor("silence", () => (!dmSocket.state?.playing?.music ? true : null));
+    await dm.setViewportSize(SMALL);
+    await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
+    await reload(dm);
+    await closeSheets();
+    const dmChip = dm.locator('[data-chip="dm"]');
+    await dmChip.waitFor();
+    // The bar takes its give-way steps in the frames after it measures, so it is read once they settle.
+    await dm.waitForTimeout(1_000);
+    const quiet = await rowParts();
+    await playTavern();
+    await dm.waitForTimeout(1_000);
+    assert.equal(await nowChip().count(), 0, "the chip gave way");
+    const playing = await rowParts();
+    assert.deepEqual(playing.parts, quiet.parts, "the row as it is with nothing playing");
+    assert.deepEqual(playing.off, [], "every control in the bar's row whole on the screen");
+    await shots.take(dm, "sl-7d-bar-music");
+    await dmChip.click();
+    await dm.getByRole("menu", { name: "DM", exact: true }).getByRole("menuitem", { name: /^Now playing/ }).click();
+    const player = nowPlayer();
+    await player.locator("[data-now-player]").waitFor();
+    assert.equal(await player.evaluate((el) => el.tagName), "DIALOG");
+    assert.deepEqual(alignmentLines(await measureAlignment(player.locator(":scope > section")), "the DM menu's Now playing sheet, 320x568 at 130%"), []);
+    await shots.take(dm, "sl-7d-dm-menu-sheet");
+    await dm.keyboard.press("Escape");
+    await player.waitFor({ state: "detached" });
+    await waitFor("focus back on the DM chip", async () => ((await focused(dmChip)) ? true : null), 5_000);
   });
 
   test("sl-z. no page logged an error", () => {
