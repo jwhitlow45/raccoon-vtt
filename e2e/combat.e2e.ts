@@ -4,11 +4,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
-import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
+import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page, type WebSocketRoute } from "playwright-core";
 import type { LogEvent } from "#shared/model.ts";
 import { loadMonsters, monsterActor } from "#shared/srd/monsters.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
-import { barControl, ConsoleWatch, openPage, openSideTab, OpSocket, Shots, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, openPage, openSideTab, OpSocket, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * The combat flow (docs/design/design-v1-combat-flow.md section 8) on the real
@@ -376,6 +376,89 @@ function goblinState(i: number) {
   return t && "inline" in t.actor ? t.actor.inline : undefined;
 }
 
+/**
+ * A page's room socket run through a route: every frame it sends is kept
+ * in `sent`, and one that matches `hold` waits in `held` until released,
+ * so the server has not seen it and the control that sent it still waits.
+ */
+type Wire = { hold: RegExp | null; held: string[]; sent: string[]; up: WebSocketRoute | null };
+
+async function routedSocket(page: Page): Promise<Wire> {
+  const wire: Wire = { hold: null, held: [], sent: [], up: null };
+  await page.routeWebSocket(/\/ws\?room=/, (ws) => {
+    const upstream = ws.connectToServer();
+    wire.up = upstream;
+    ws.onMessage((m) => {
+      const text = typeof m === "string" ? m : m.toString("utf8");
+      wire.sent.push(text);
+      if (wire.hold?.test(text)) wire.held.push(text);
+      else upstream.send(m);
+    });
+    upstream.onMessage((m) => ws.send(m));
+  });
+  return wire;
+}
+
+/** Sends what waited, and holds nothing more. */
+function release(wire: Wire): void {
+  wire.hold = null;
+  for (const m of wire.held.splice(0)) wire.up!.send(m);
+}
+
+/** How many ops of type `t` the page has sent. */
+function sentOps(wire: Wire, t: string): number {
+  return wire.sent.filter((m) => m.includes(`"t":"${t}"`)).length;
+}
+
+/**
+ * The QOL steps' room (designs/qol audit Q1, Q2 and Q12): a second DM
+ * computer whose socket is routed, a Goblin Warrior with its stat block
+ * beside Bree, a hidden Lurker beside the warrior, and later 90 kobolds,
+ * so a fight of every creature here starts in more than one batch.
+ */
+const qe = {
+  context: null as BrowserContext | null,
+  desk: null as Page | null,
+  wire: null as Wire | null,
+  console: new ConsoleWatch("dm-desk"),
+  warrior: randomUUID(),
+  lurker: randomUUID(),
+  kobolds: [] as string[],
+};
+
+function qeDesk(): { page: Page; wire: Wire } {
+  assert.ok(qe.desk && qe.wire, "qe-1 opened no routed DM computer");
+  return { page: qe.desk, wire: qe.wire };
+}
+
+function breeHp(): number {
+  return dmSocket.state!.characters[run.bree.characterId]!.actor.hp.cur;
+}
+
+/** The newest dice line in the DM's copy with a roll whose label matches, and its total. */
+function newestRoll(label: RegExp): { id: string; total: number } | null {
+  const log = dmSocket.state?.log ?? [];
+  for (let i = log.length - 1; i >= 0; i--) {
+    const data = log[i]!.data;
+    if (data?.type === "dice" && data.rolls.some((r) => label.test(r.label ?? ""))) return { id: log[i]!.id, total: data.rolls.reduce((n, r) => n + r.total, 0) };
+  }
+  return null;
+}
+
+/** The names on a row of Apply to chips, in order. */
+async function chipNames(row: Locator): Promise<string[]> {
+  return (await row.getByRole("group", { name: "Apply to" }).getByRole("button").allInnerTexts()).map((t) => t.trim());
+}
+
+/** The fight's rows in the DM's copy, by their tokens' kind: the party's values, the monsters' and every row. */
+function fightRows(): { party: (number | null)[]; monsters: (number | null)[]; all: number } | null {
+  const state = dmSocket.state;
+  const entries = state?.encounter?.entries;
+  if (!state || !entries) return null;
+  const kind = (tokenId: string | undefined) => (tokenId === undefined ? undefined : state.tokens[tokenId]?.kind);
+  return { party: entries.filter((e) => kind(e.tokenId) === "pc").map((e) => e.value), monsters: entries.filter((e) => kind(e.tokenId) === "monster").map((e) => e.value), all: entries.length };
+}
+
 describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
   before(async () => {
     server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
@@ -522,9 +605,10 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
         assert.ok(mid.sticky, `${label}: the side panel's header should stick`);
         await shots.take(dm, "combat-header-1280-scrolled");
       }
+      // Since the QOL pass's top bar the bars here leave a side sheet too short, so the tracker opens in the very short mode over the whole screen, with the room to stick its header: the form follows the room.
       if (view.width === 844 && view.scale === 1.3) {
-        assert.equal(mid.sticky, false, `${label}: a ${scroller} px sheet has no room for a sticky header`);
-        await shots.take(dm, "combat-header-844-130-static");
+        await shots.take(dm, "combat-header-844-130");
+        assert.equal(mid.sticky, room.form !== "static", `${label}: a ${room.form} header in a ${scroller} px sheet ${mid.sticky ? "sticks" : "scrolls"}`);
       }
       if (view.width === 480) await shots.take(dm, "combat-header-480-130");
     }
@@ -2119,6 +2203,278 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
       await setUp(dm, dmCdp, { ...DESK, scale: 1 });
     }
     assert.deepEqual(off, [], "Lair alone, or out of line by more than 1 px");
+  });
+
+  test("qe-1. a Goblin Warrior's turn card lists Scimitar and Shortbow as the Dice panel's rows, with nothing rolled under them yet, on the DM's computers and not on Ana's (QOL audit Q1)", async () => {
+    const srd = await loadMonsters();
+    const block = monsterActor(srd.find((m) => m.srdId === "goblin-warrior")!);
+    await ops.send({ t: "encounter.end" }).catch(() => {});
+    // Beside Bree, with a hidden goblin beside it, which only the DM's chips may name.
+    await ops.send({ t: "token.create", token: { id: qe.warrior, sceneId: run.sceneId, kind: "monster", name: "Goblin Warrior", size: "small", x: 6, y: 5, visibility: "all", disposition: "hostile", actor: { inline: block } } });
+    await ops.send({ t: "token.create", token: { id: qe.lurker, sceneId: run.sceneId, kind: "monster", name: "Lurker", size: "small", x: 6, y: 6, visibility: "dm", disposition: "hostile", actor: { inline: block } } });
+    await ops.send({ t: "encounter.start", entries: [{ id: "qe-warrior", tokenId: qe.warrior, value: 15 }, { id: "qe-bree", tokenId: run.bree.id, value: 10 }] });
+    await ops.send({ t: "encounter.next" });
+    await waitFor("the warrior's turn", () => (dmSocket.state?.encounter?.activeEntryId === "qe-warrior" ? true : null));
+    // A second DM computer, its socket routed from the start so an op can wait on the wire.
+    qe.context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    await qe.context.addCookies(await dmContext.cookies(server.origin));
+    qe.desk = await qe.context.newPage();
+    qe.console.attach(qe.desk);
+    qe.wire = await routedSocket(qe.desk);
+    const { page } = qeDesk();
+    await page.goto(`${server.origin}/r/${run.roomId}`);
+    await page.getByRole("status", { name: "Connected" }).first().waitFor();
+
+    const attacks = page.getByRole("group", { name: "Goblin Warrior's turn" }).getByRole("group", { name: "Goblin Warrior's attacks" });
+    for (const name of ["Scimitar", "Shortbow"]) await attacks.getByRole("button", { name, exact: true }).waitFor();
+    // The Dice panel's own rows: the name, the bonus and the damage, then Attack, Damage and Critical.
+    const text = (await attacks.innerText()).replace(/\s+/g, " ");
+    assert.match(text, /Scimitar ?\+4 to hit/);
+    assert.match(text, /Shortbow ?\+4 to hit/);
+    for (const name of ["Scimitar damage", "Shortbow damage", "Critical Hit for Scimitar's next damage"]) await attacks.getByRole("button", { name, exact: true }).waitFor();
+    assert.equal(await attacks.locator("[data-card-result], [data-apply-to]").count(), 0, "a result under a row before anything was rolled this turn");
+    await dm.getByRole("group", { name: "Goblin Warrior's attacks" }).waitFor();
+    // A monster's turn card is the DM's: Ana's computer, in the same fight, draws none.
+    await waitFor("the warrior's turn on Ana's computer", () => (anaSocket.state?.encounter?.activeEntryId === "qe-warrior" ? true : null));
+    await ana.waitForTimeout(500);
+    assert.equal(await ana.locator('[data-alert="turn"], [data-card-attacks]').count(), 0, "Ana's computer drew a turn card for the goblin");
+    await shots.take(page, "qe-1-goblin-turn-card");
+  });
+
+  test("qe-2. the card's Scimitar rolls in secret, its results show under the row with Apply to naming the warrior's enemies nearest first, then the hidden Lurker; a chip held on the wire is busy on the card and under the Dice panel's newest roll alike, a second tap sends nothing, and once taken Bree's HP drops by the roll and both rows say Applied to Bree. (QOL audit Q2)", async () => {
+    const { page, wire } = qeDesk();
+    const attacks = page.getByRole("group", { name: "Goblin Warrior's turn" }).getByRole("group", { name: "Goblin Warrior's attacks" });
+    const result = attacks.locator("[data-card-result]");
+    const anaLines = (anaSocket.state?.log ?? []).length;
+    const anaFrames = anaSocket.received.length;
+    await attacks.getByRole("button", { name: "Scimitar", exact: true }).click();
+    await result.getByText(/to hit/).waitFor();
+    // A natural 20 names the damage a Critical Hit.
+    await attacks.getByRole("button", { name: /^Scimitar damage/ }).click();
+    await result.getByText(/Slashing damage/).waitFor();
+    // A monster's rolls start secret, as the Dice panel's do.
+    const line = (await result.innerText()).replace(/\s+/g, " ");
+    assert.match(line, /\d+ ?to hit, Secret/);
+    assert.match(line, /\d+ ?Slashing damage, Secret/);
+
+    const card = attacks.locator("[data-apply-to]");
+    await card.getByRole("group", { name: "Apply to" }).waitFor();
+    const names = await chipNames(card);
+    // The warrior is hostile, so its enemies, the party's side, come first, nearest first: Bree beside it, her Wildfire Spirit, then Cyra. Then everyone else, the DM's hidden Lurker beside the warrior the first of them, though it is nearer than Cyra.
+    assert.deepEqual(names, ["Bree", "Wildfire Spirit", "Cyra", "Lurker"], `the chips: ${names.join(", ")}`);
+    assert.ok(!names.includes("Goblin Warrior"), "the roller among its own chips");
+    const chipLabel = (await card.getByRole("button", { name: /to Bree$/ }).getAttribute("aria-label")) ?? "";
+    const amount = Number(/^Apply (\d+) Slashing damage to Bree$/.exec(chipLabel)?.[1]);
+    assert.ok(amount > 0, `the chip's name: ${chipLabel}`);
+
+    // Secret: Ana's computer gets the bare line, never its words or numbers, and no toast or chips.
+    await waitFor("the secret lines on Ana's computer", () => ((anaSocket.state?.log ?? []).length >= anaLines + 2 ? true : null));
+    assert.ok(!anaSocket.received.slice(anaFrames).some((f) => f.includes("Scimitar")), "the secret roll's words reached Ana");
+    assert.equal(await ana.locator("[data-apply-to], [data-toast-sends]").count(), 0, "Ana's computer offers chips for the DM's secret roll");
+    assert.equal(await ana.locator("[data-toast]").filter({ hasText: /Scimitar/ }).count(), 0, "a toast of the secret roll on Ana's computer");
+
+    // The Dice panel's newest roll is the card's, with the same chips.
+    await openSideTab(page, "Dice");
+    const last = page.locator("[data-dice-last]");
+    await last.getByRole("group", { name: "Apply to" }).waitFor();
+    assert.deepEqual(await chipNames(last), names, "the newest roll's chips differ from the card's");
+
+    const before = breeHp();
+    const applies = sentOps(wire, "actor.hp");
+    wire.hold = /"t":"actor\.hp"/;
+    try {
+      await card.getByRole("button", { name: chipLabel }).click();
+      await waitFor("the apply on the wire", () => (wire.held.length === 1 ? true : null));
+      await waitFor("the card's chip busy", async () => ((await card.getByRole("button", { name: chipLabel }).getAttribute("aria-busy")) === "true" ? true : null), 3_000);
+      assert.equal(await last.getByRole("button", { name: chipLabel }).getAttribute("aria-busy"), "true", "the newest roll's chip is not busy with the card's");
+      await shots.take(page, "qe-2-chip-busy");
+      // A second tap while it waits sends nothing.
+      await card.getByRole("button", { name: chipLabel }).dispatchEvent("click");
+      await last.getByRole("button", { name: chipLabel }).dispatchEvent("click");
+      await page.waitForTimeout(300);
+      assert.equal(sentOps(wire, "actor.hp"), applies + 1, "a second tap sent the damage again");
+    } finally {
+      release(wire);
+    }
+    await waitFor("Bree's HP down by the roll", () => (breeHp() === Math.max(0, before - amount) ? true : null));
+    await card.locator("p").filter({ hasText: /^Applied to Bree\.$/ }).waitFor();
+    await last.locator("p").filter({ hasText: /^Applied to Bree\.$/ }).waitFor();
+    // Bree leaves both rows, so one roll never lands on her twice.
+    assert.ok(!(await chipNames(card)).includes("Bree"), "Bree still on the card's chips");
+    assert.ok(!(await chipNames(last)).includes("Bree"), "Bree still under the newest roll");
+    assert.equal(sentOps(wire, "actor.hp"), applies + 1, "more than one apply went");
+    await shots.take(page, "qe-2-applied");
+  });
+
+  test("qe-3. Undo takes the chip's damage back as one step, and the card's row keeps Applied to Bree. with no chip for her (QOL audit Q2)", async () => {
+    const { page } = qeDesk();
+    const card = page.getByRole("group", { name: "Goblin Warrior's attacks" }).locator("[data-apply-to]");
+    const hurt = breeHp();
+    const max = dmSocket.state!.characters[run.bree.characterId]!.actor.hp.max;
+    await page.getByRole("button", { name: "Undo", exact: true }).first().click();
+    await waitFor("Bree's HP back", () => (breeHp() > hurt || hurt === max ? true : null));
+    await page.waitForTimeout(300);
+    await card.locator("p").filter({ hasText: /^Applied to Bree\.$/ }).waitFor();
+    assert.ok(!(await chipNames(card)).includes("Bree"), "Undo put Bree's chip back");
+  });
+
+  test("qe-4. the warrior's next turn shows its card with its attacks again (QOL audit Q1)", async () => {
+    const { page } = qeDesk();
+    try {
+      // Through Bree's turn, and any row her companions joined with, to the warrior's again.
+      for (let i = 0; i < 4 && !(dmSocket.state?.encounter?.activeEntryId === "qe-warrior" && dmSocket.state.encounter.round === 2); i++) {
+        const seq = dmSocket.state?.encounter?.activeEntryId;
+        await ops.send({ t: "encounter.next" });
+        await waitFor("the next turn", () => (dmSocket.state?.encounter?.activeEntryId !== seq ? true : null));
+      }
+      assert.equal(dmSocket.state?.encounter?.round, 2, "not the warrior's turn in round 2");
+      const attacks = page.getByRole("group", { name: "Goblin Warrior's turn" }).getByRole("group", { name: "Goblin Warrior's attacks" });
+      for (const name of ["Scimitar", "Shortbow"]) await attacks.getByRole("button", { name, exact: true }).waitFor();
+    } finally {
+      await ops.send({ t: "encounter.end" }).catch(() => {});
+    }
+  });
+
+  test("qe-5. Roll monsters' Initiative, on at first: a start of more than one batch waits for the server with Everyone here reading Rolling…, then every monster rolls and the party's rows wait for their players, and Undo takes back the totals, then the whole start, leaving the roll's line (QOL audit Q12)", async () => {
+    const { page, wire } = qeDesk();
+    await ops.send({ t: "encounter.end" }).catch(() => {});
+    // 90 kobolds, so every creature here makes more than the 100 rows one op may carry.
+    for (let i = 0; i < 90; i++) {
+      const id = randomUUID();
+      qe.kobolds.push(id);
+      await ops.send({ t: "token.create", token: { id, sceneId: run.sceneId, kind: "monster", name: "Kobold", size: "small", x: i % 30, y: 15 + Math.floor(i / 30), visibility: "all", disposition: "hostile", actor: { inline: actor(5, 12) } } });
+    }
+    await waitFor("no fight", () => (dmSocket.state && !dmSocket.state.encounter ? true : null));
+    await openSideTab(page, "Initiative");
+    const roll = page.getByRole("switch", { name: /^Roll monsters' Initiative/ });
+    assert.equal(await roll.getAttribute("aria-checked"), "true", "the switch starts on");
+    const everyone = page.getByRole("button", { name: /^Everyone here \(\d+\)$/ });
+    const count = Number(/\((\d+)\)/.exec(await everyone.innerText())?.[1]);
+    assert.ok(count > 100, `only ${count} creatures here`);
+    const rolls = sentOps(wire, "dice.roll");
+    wire.hold = /"t":"encounter\.(start|add)"/;
+    try {
+      await everyone.click();
+      await waitFor("the start's two batches on the wire", () => (wire.held.length === 2 ? true : null));
+      const rolling = page.getByRole("button", { name: "Rolling…", exact: true });
+      await rolling.waitFor();
+      assert.equal(await rolling.getAttribute("aria-busy"), "true");
+      await shots.take(page, "qe-5-rolling");
+      // Nothing rolls before the server takes the start: the rows are not in the view yet.
+      await page.waitForTimeout(500);
+      assert.equal(sentOps(wire, "dice.roll"), rolls, "the monsters rolled before the start was taken");
+      // The batches reach the server one at a time, and nothing rolls until the last is taken, or the second batch's monsters would wait unrolled.
+      wire.hold = null;
+      const [start, add] = wire.held.splice(0);
+      wire.up!.send(start!);
+      await waitFor("the first batch in the fight", () => ((fightRows()?.all ?? 0) >= 100 ? true : null));
+      await page.waitForTimeout(500);
+      assert.equal(sentOps(wire, "dice.roll"), rolls, "the monsters rolled before every batch was taken");
+      wire.up!.send(add!);
+    } finally {
+      release(wire);
+    }
+    await waitFor("every monster's total", () => {
+      const rows = fightRows();
+      return rows && rows.all === count && rows.monsters.every((v) => v !== null) ? true : null;
+    }, 20_000);
+    assert.deepEqual(fightRows()!.party, [null, null], "the party's rows did not wait for their players");
+    await page.getByRole("button", { name: "Rolling…", exact: true }).waitFor({ state: "detached" });
+    assert.ok(sentOps(wire, "dice.roll") > rolls, "no roll went");
+    const line = newestRoll(/Initiative/);
+    assert.ok(line, "no Initiative roll in the log");
+
+    const undo = page.getByRole("button", { name: "Undo", exact: true }).first();
+    await undo.click();
+    await waitFor("the totals taken back, the fight still on", () => {
+      const rows = fightRows();
+      return rows && rows.all === count && rows.monsters.every((v) => v === null) ? true : null;
+    });
+    await undo.click();
+    // Both batches were one step.
+    await waitFor("the whole start taken back", () => (dmSocket.state && !dmSocket.state.encounter ? true : null));
+    assert.ok(dmSocket.state!.log.some((e) => e.id === line.id), "Undo took the roll's line out of the log");
+  });
+
+  test("qe-6. the Selected token start rolls too, and with Monsters use Initiative scores on the switch stays and rolls only the rows still without a value (QOL audit Q12, plan 9 QD-OPUS-29)", async () => {
+    const { page, wire } = qeDesk();
+    await ops.send({ t: "encounter.end" }).catch(() => {});
+    const tracker = page.getByRole("tabpanel", { name: sideTabName("Initiative") });
+    const selected = tracker.getByRole("button", { name: "Goblin Warrior", exact: true });
+    const selectWarrior = async () => {
+      await tapCell(page, run.bounds, { x: 6, y: 5 });
+      await selected.waitFor();
+    };
+    await openSideTab(page, "Initiative");
+    await selectWarrior();
+    let rolls = sentOps(wire, "dice.roll");
+    await selected.click();
+    await waitFor("the warrior rolled", () => {
+      const e = dmSocket.state?.encounter?.entries;
+      return e?.length === 1 && e[0]!.tokenId === qe.warrior && e[0]!.value !== null ? true : null;
+    });
+    assert.equal(sentOps(wire, "dice.roll"), rolls + 1, "the selected token's start rolled other than once");
+    await ops.send({ t: "encounter.end" });
+
+    await ops.send({ t: "room.update", settings: { monsterInitScore: true } });
+    try {
+      await waitFor("no fight", () => (dmSocket.state && !dmSocket.state.encounter ? true : null));
+      await openSideTab(page, "Initiative");
+      await page.getByRole("switch", { name: /^Roll monsters' Initiative/ }).waitFor();
+      // The warrior's block gives it a score, so a fight of it alone has nothing to roll.
+      await selectWarrior();
+      rolls = sentOps(wire, "dice.roll");
+      await selected.click();
+      await waitFor("the warrior's score", () => (dmSocket.state?.encounter?.entries[0]?.value === 12 ? true : null));
+      await page.waitForTimeout(800);
+      assert.equal(sentOps(wire, "dice.roll"), rolls, "a fight of valued rows rolled");
+      await ops.send({ t: "encounter.end" });
+
+      // Everyone here: the warrior and the Lurker by their scores, the goblins and kobolds with none by a roll.
+      await waitFor("no fight", () => (dmSocket.state && !dmSocket.state.encounter ? true : null));
+      await openSideTab(page, "Initiative");
+      await page.getByRole("button", { name: /^Everyone here \(\d+\)$/ }).click();
+      await waitFor("every monster's total", () => {
+        const rows = fightRows();
+        return rows && rows.monsters.length > 100 && rows.monsters.every((v) => v !== null) ? true : null;
+      }, 20_000);
+      const byToken = new Map(dmSocket.state!.encounter!.entries.map((e) => [e.tokenId, e.value]));
+      assert.equal(byToken.get(qe.warrior), 12, "the roll replaced the warrior's score");
+      assert.equal(byToken.get(qe.lurker), 12, "the roll replaced the Lurker's score");
+      assert.ok(sentOps(wire, "dice.roll") > rolls, "the rows with no score did not roll");
+      await ops.send({ t: "encounter.end" });
+    } finally {
+      await ops.send({ t: "room.update", settings: { monsterInitScore: false } });
+    }
+  });
+
+  test("qe-7. with Roll monsters' Initiative off, kept on this device for the room, a start rolls nothing and the monsters wait like the party (QOL audit Q12)", async () => {
+    const { page, wire } = qeDesk();
+    try {
+      await ops.send({ t: "encounter.end" }).catch(() => {});
+      await waitFor("no fight", () => (dmSocket.state && !dmSocket.state.encounter ? true : null));
+      await openSideTab(page, "Initiative");
+      const roll = page.getByRole("switch", { name: /^Roll monsters' Initiative/ });
+      await roll.click();
+      await waitFor("the switch off", async () => ((await roll.getAttribute("aria-checked")) === "false" ? true : null));
+      assert.equal(await page.evaluate((key) => localStorage.getItem(key), `rvtt.autoInitiativeStart.${run.roomId}`), "off");
+      const rolls = sentOps(wire, "dice.roll");
+      await page.getByRole("button", { name: /^Everyone here \(\d+\)$/ }).click();
+      await waitFor("the fight", () => (fightRows()?.monsters.length ?? 0) > 100 || null);
+      await page.waitForTimeout(800);
+      assert.equal(sentOps(wire, "dice.roll"), rolls, "the start rolled with the switch off");
+      assert.ok(fightRows()!.monsters.every((v) => v === null), "a monster got a value with the switch off");
+      await ops.send({ t: "encounter.end" });
+      await roll.click();
+      await waitFor("the switch on", async () => ((await roll.getAttribute("aria-checked")) === "true" ? true : null));
+      assert.deepEqual(qe.console.errors, [], "the routed DM computer logged errors");
+    } finally {
+      await ops.send({ t: "encounter.end" }).catch(() => {});
+      for (const id of [qe.warrior, qe.lurker, ...qe.kobolds]) await ops.send({ t: "token.delete", tokenId: id }).catch(() => {});
+      await qe.context?.close();
+      qe.context = null;
+      qe.desk = null;
+    }
   });
 
   test("14. no page logged an error", () => {
