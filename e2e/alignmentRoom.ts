@@ -521,7 +521,8 @@ async function patCrosses(): Promise<void> {
 }
 
 /** A fresh fight on Thorn's turn, so his walked path starts empty. */
-async function restartFight(): Promise<void> {
+/** Ends the fight and starts it again on Thorn's turn. It returns the new fight's first entry, for a caller that reads the DM's socket after it (fightSeen). */
+async function restartFight(): Promise<string> {
   if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
   const first = randomUUID();
   await ops.send({
@@ -534,7 +535,11 @@ async function restartFight(): Promise<void> {
     ],
   });
   await ops.send({ t: "encounter.next" });
-  // The ops socket's answers can come before the DM's socket sees the new fight, and a caller that reads that socket would find the old fight's ids or none.
+  return first;
+}
+
+/** Waits until the DM's socket shows the fight whose first entry is `first`. The ops socket's answers can come before it, and a read of that socket would find the old fight's ids or none. */
+async function fightSeen(first: string): Promise<void> {
   await waitFor("the DM's socket on the new fight's first turn", () => (dmSocket.state?.encounter?.activeEntryId === first ? true : null));
 }
 
@@ -986,10 +991,20 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
     const fold = column.locator("[data-alert] button[aria-expanded=false]").first();
     if (await visible(fold)) {
       await fold.click();
-      // Marked only once the card shows open: a slow page can draw the open column on a new node after the click, and a mark made before it is lost.
       await page.locator("[data-alert] button[aria-expanded=true]").first().waitFor();
-      const open = await markColumn(page);
-      if (open) await sweep.measure(page, "alerts-column-open", open);
+      // The mark is on one node. Where the column is drawn again on a new node while it is measured, as on a slow CI page, it is marked again once, and the alerts there are logged.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const open = await markColumn(page);
+        if (!open) break;
+        try {
+          await sweep.measure(page, "alerts-column-open", open);
+          break;
+        } catch (err) {
+          if (attempt === 1 || !String(err).includes("no roots matched")) throw err;
+          const alerts = await page.locator("[data-alert]").evaluateAll((els) => els.map((e) => e.getAttribute("data-alert")).join(", "));
+          console.log(`${sweep.at} alerts-column-open: the marked column left while measured, marked again (alerts: ${alerts})`);
+        }
+      }
     }
   }
   await dismissToasts(page);
@@ -9959,7 +9974,7 @@ export function qolBarTests(): void {
       await ops.send({ t: "clock.start", id: randomUUID(), at: 20 * 3_600, shown: true, calendar: { kind: "days" } });
       await ops.send({ t: "music.play", run: randomUUID(), playlistId: lib.playlist, order: lib.music, index: 0, repeat: "all", fade: 5 });
       await ops.send({ t: "room.update", settings: { turnTimerSec: 2 } });
-      await restartFight();
+      await fightSeen(await restartFight());
       const boss = await waitFor("the boss's row in the fight", () => (dmSocket.state?.encounter?.activeEntryId ? dmSocket.state.encounter.entries.find((e) => e.tokenId === run.ids.boss)?.id ?? null : null));
       await turnTo(boss);
       await ops.send({ t: "view.blackout", blackout: true });
