@@ -26,7 +26,7 @@ import { canonicalPanelId, SOUND_PANEL, takeOverPanelScroll } from "../panels.ts
 import { openSoundNow, soundViewSlot, type SoundView } from "../sound/music/open.ts";
 import { characterPageSlot, openCharacterPage } from "../tokens/characterPage.ts";
 import { FOLD_KEYS, PAGE_FOLD_KEYS, panelFoldsSlot, type FoldKey, type RelationFold } from "../tokens/panelFolds.ts";
-import { searchSelector, type SearchRoute } from "./entry.ts";
+import { SEARCH_OFF_ATTR, searchSelector, type SearchRoute } from "./entry.ts";
 
 /*
  * The route (designs/qol/search.md 5.5, D-261106-150): the one way to open
@@ -360,16 +360,34 @@ export function pressable(el: HTMLElement): boolean {
  * panel, counting as the viewer taking the scroller so a remembered offset
  * still being put back never pulls it away, takes focus, wears the ring,
  * and is pressed when the route asks and it is on. Its own confirm, busy
- * state and Undo are then the control's. Returns what took focus.
+ * state and Undo are then the control's.
+ *
+ * A disabled control refuses focus (se-10), so focus goes to the field it
+ * names as why it is off, which comes near the top in its place, and the
+ * control still wears the ring. Returns what took focus, or null where
+ * nothing could, and Room then focuses the panel, as for a route with no
+ * control (D-261106-311).
  */
-export function landOn(el: HTMLElement, press: boolean): HTMLElement {
-  const target = focusTarget(el);
+export function landOn(el: HTMLElement, press: boolean, container?: RouteView["container"]): HTMLElement | null {
+  const control = focusTarget(el);
+  const off = control.matches(":disabled");
+  const reason = off ? offReason(control, container ?? null) : null;
   takeOverPanelScroll(el);
-  startInScrollBox(el, LAND_MARGIN);
-  target.focus({ preventScroll: true });
+  startInScrollBox(reason?.anchor ?? el, LAND_MARGIN);
+  const target = off ? (reason?.target ?? null) : control;
+  target?.focus({ preventScroll: true });
   ring(el);
-  if (press && pressable(target)) target.click();
+  if (press && pressable(control)) control.click();
   return target;
+}
+
+/** The field a disabled control names (SEARCH_OFF_ATTR), drawn and on, and what in it takes focus. */
+function offReason(control: HTMLElement, container: RouteView["container"]): { anchor: HTMLElement; target: HTMLElement } | null {
+  const id = control.getAttribute(SEARCH_OFF_ATTR);
+  const anchor = id ? container?.querySelector<HTMLElement>(searchSelector(id)) : null;
+  if (!anchor) return null;
+  const target = focusTarget(anchor);
+  return target.matches(":disabled") ? null : { anchor, target };
 }
 
 /**

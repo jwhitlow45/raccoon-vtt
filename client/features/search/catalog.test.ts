@@ -336,6 +336,19 @@ describe("every anchor is drawn by exactly one search= in client/**/*.tsx, and t
     }
   });
 
+  test("each field a control names as why it is off is an anchor written beside it, in the same file (route.ts landOn)", () => {
+    const OFF = /(?<![\w-])(?:searchOff|data-search-off)="([^"]*)"/g;
+    const anchors = written();
+    const named: string[] = [];
+    for (const path of sources(client)) {
+      for (const m of readFileSync(path, "utf8").matchAll(OFF)) {
+        named.push(m[1]!);
+        assert.deepEqual(anchors.get(m[1]!), [relative(client, path)], `${m[1]} in ${relative(client, path)}`);
+      }
+    }
+    assert.ok(named.includes("menu.members.password.new"), "Change the password names New player password (se-10)");
+  });
+
   test("each anchor routed to is written or made, the index's own rows' included", () => {
     const drawn = new Set([...written().keys(), ...made()]);
     const missing = [...routed()].filter((id) => !drawn.has(id));

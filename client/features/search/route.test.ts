@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { dmPanelFoldsSlot, scenesFoldsSlot, soundFoldsSlot, thisDeviceFoldsSlot, type FoldRoom } from "../../lib/folds.ts";
+import { theme } from "../../lib/theme.ts";
 import { RoomScope } from "../../state/scope.ts";
 import type { PanelHow } from "../../state/types.ts";
 import { diceFoldsSlot } from "../dice/diceFolds.ts";
@@ -8,7 +9,7 @@ import { journalSlot } from "../journal/store.ts";
 import { soundAskSlot, soundViewSlot } from "../sound/music/open.ts";
 import { characterPageSlot } from "../tokens/characterPage.ts";
 import { createPanelFolds, panelFoldsSlot } from "../tokens/panelFolds.ts";
-import type { SearchRoute } from "./entry.ts";
+import { SEARCH_OFF_ATTR as OFF_ATTR, type SearchRoute } from "./entry.ts";
 import { recordPage as indexPage } from "./index.ts";
 import {
   focusTarget,
@@ -311,19 +312,25 @@ describe("record pages", () => {
 
 /* Fake elements and boxes: what the landing reads of the DOM. */
 
-type Fake = HTMLElement & { focused: number; clicked: number };
+type Fake = HTMLElement & { focused: number; clicked: number; rung: number };
 
-function fake(opts: { self?: boolean; disabled?: boolean; ariaDisabled?: boolean; inside?: Record<string, Fake> } = {}): Fake {
+function fake(opts: { self?: boolean; disabled?: boolean; ariaDisabled?: boolean; inside?: Record<string, Fake>; attrs?: Record<string, string>; in?: Scroller; top?: number } = {}): Fake {
   const el = {
     focused: 0,
     clicked: 0,
-    parentElement: null,
+    rung: 0,
+    parentElement: opts.in ?? null,
+    getBoundingClientRect: () => ({ top: opts.top ?? 0, bottom: (opts.top ?? 0) + 44 }),
     matches: (selector: string) => (selector === ":disabled" ? opts.disabled === true : opts.self === true),
     querySelector: (selector: string) => opts.inside?.[selector] ?? null,
-    getAttribute: (name: string) => (name === "aria-disabled" && opts.ariaDisabled ? "true" : null),
+    getAttribute: (name: string) => (name === "aria-disabled" && opts.ariaDisabled ? "true" : (opts.attrs?.[name] ?? null)),
     dispatchEvent: () => true,
+    animate() {
+      el.rung++;
+    },
+    // A disabled control refuses focus, as the browser's does.
     focus() {
-      el.focused++;
+      if (opts.disabled !== true) el.focused++;
     },
     click() {
       el.clicked++;
@@ -332,11 +339,33 @@ function fake(opts: { self?: boolean; disabled?: boolean; ariaDisabled?: boolean
   return el as unknown as Fake;
 }
 
+/** A panel's body that scrolls, 400 px tall over 2,000 px, at the screen's top, its scroll tops kept. */
+type Scroller = { scrolled: number[] };
+
+function scroller(): Scroller {
+  const box = {
+    scrolled: [] as number[],
+    parentElement: null,
+    scrollTop: 0,
+    scrollHeight: 2_000,
+    clientHeight: 400,
+    offsetHeight: 400,
+    getBoundingClientRect: () => ({ top: 0, bottom: 400 }),
+    scrollTo(to: { top: number }) {
+      box.scrolled.push(to.top);
+    },
+  };
+  return box;
+}
+
 function box(marks: Record<string, Fake>): RouteView["container"] {
   return { querySelector: (selector: string) => marks[selector] ?? null } as RouteView["container"];
 }
 
 const anchor = (id: string) => `[data-search="${id}"]`;
+
+/** What inside an anchor takes its focus (route.ts focusTarget). */
+const INNER = 'button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
 describe("where a route lands (Room's focus kind anchor)", () => {
   const control = fake({ self: true });
@@ -421,11 +450,49 @@ describe("the landing: focus, ring and press (search.md 5.5)", () => {
     assert.deepEqual([button.focused, button.clicked], [2, 1]);
   });
 
-  test("an action whose control is off is focused, not pressed", () => {
+  test("an action whose control is off is not pressed, and one marked off takes focus", () => {
     for (const off of [fake({ self: true, disabled: true }), fake({ self: true, ariaDisabled: true })]) {
       assert.equal(pressable(off), false);
       landOn(off, true);
-      assert.deepEqual([off.focused, off.clicked], [1, 0]);
+      assert.equal(off.clicked, 0);
+    }
+    const marked = fake({ self: true, ariaDisabled: true });
+    assert.equal(landOn(marked, true), marked);
+    assert.equal(marked.focused, 1);
+  });
+
+  test("a disabled control refuses focus, so it goes to the field the control names as why it is off, and the control wears the ring (se-10)", () => {
+    const style = Object.getOwnPropertyDescriptor(globalThis, "getComputedStyle");
+    Object.defineProperty(globalThis, "getComputedStyle", { configurable: true, value: () => ({ getPropertyValue: () => "", overflowY: "auto" }) });
+    try {
+      const body = scroller();
+      const input = fake({ self: true, in: body, top: 900 });
+      const field = fake({ inside: { [INNER]: input }, in: body, top: 880 });
+      const off = { [OFF_ATTR]: "menu.members.password.new" };
+      const change = fake({ self: true, disabled: true, attrs: off, in: body, top: 1_000 });
+      assert.equal(landOn(change, true, box({ [anchor("menu.members.password.new")]: field })), input, "New player password, empty, is why Change the password is off");
+      assert.deepEqual([input.focused, change.clicked, change.rung, field.rung], [1, 0, 1, 0]);
+      assert.deepEqual(body.scrolled, [880 - theme.space(3)], "the field, its label included, comes near the top, with the control under it");
+
+      // Naming none, or a field not drawn or off itself, nothing on the route takes focus, and Room focuses the panel (D-261106-311).
+      const bare = fake({ self: true, disabled: true });
+      assert.equal(landOn(bare, true, box({})), null);
+      assert.equal(bare.rung, 1, "still ringed");
+      assert.equal(landOn(fake({ self: true, disabled: true, attrs: off }), true, box({})), null, "the field is not drawn");
+      assert.equal(landOn(fake({ self: true, disabled: true, attrs: off }), true, null), null, "no box");
+      const shut = fake({ self: true, disabled: true });
+      assert.equal(landOn(fake({ self: true, disabled: true, attrs: off }), true, box({ [anchor("menu.members.password.new")]: shut })), null, "the field is off too");
+      assert.equal(shut.focused, 0);
+
+      // A control that is on keeps its focus and its place, whatever it names.
+      const on = fake({ self: true, attrs: off, in: body, top: 1_000 });
+      body.scrolled.length = 0;
+      assert.equal(landOn(on, false, box({ [anchor("menu.members.password.new")]: field })), on);
+      assert.deepEqual([on.focused, input.focused], [1, 1]);
+      assert.deepEqual(body.scrolled, [1_000 - theme.space(3)]);
+    } finally {
+      if (style) Object.defineProperty(globalThis, "getComputedStyle", style);
+      else delete (globalThis as { getComputedStyle?: unknown }).getComputedStyle;
     }
   });
 

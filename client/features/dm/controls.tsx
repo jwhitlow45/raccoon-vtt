@@ -27,6 +27,8 @@ export function ConfirmAction(props: {
   size?: "md" | "sm";
   /** The room search's anchor id (features/search/entry.ts), on the first button, whose press opens the confirm. */
   search?: string;
+  /** The anchor id of the field that turns it on, where the room search lands focus while it is off (entry.ts SEARCH_OFF_ATTR). */
+  searchOff?: string;
   onConfirm(): void | Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
@@ -37,6 +39,7 @@ export function ConfirmAction(props: {
         variant={props.danger ? "danger" : "secondary"}
         size={size}
         search={props.search}
+        data-search-off={props.searchOff}
         disabled={props.disabled || props.busy}
         onClick={() => setOpen(true)}
         style={{ justifySelf: "start" }}

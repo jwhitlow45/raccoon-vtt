@@ -12,6 +12,7 @@ const { RadioCards } = await import("./RadioCards.tsx");
 const { Button } = await import("./Button.tsx");
 const { Field, FieldRow, Input, Select, TextArea } = await import("./Field.tsx");
 const ui = await import("../features/tokens/ui.tsx");
+const { ConfirmAction } = await import("../features/dm/controls.tsx");
 
 /*
  * The room search's anchors (designs/qol/search.md 5.10): each control of
@@ -106,6 +107,15 @@ describe("the kit's anchors for the room search", () => {
     assert.match(anchored(draw(createElement(ui.TextField, { label: "Notes", value: "", multiline: true, onCommit: noop, search: ID }))), /^<textarea/);
     assert.match(anchored(draw(createElement(ui.NumberField, { label: "AC", value: 15, min: 0, max: 99, onCommit: noop, search: ID }))), /^<input/);
     assert.match(anchored(draw(createElement(ui.Select, { label: "Size", value: "m", options: [{ value: "m", label: "Medium" }], onChange: noop, search: ID }))), /^<select/);
+  });
+
+  test("an action that waits for a confirm: on its first button, with the field that turns it on named while it is off (route.ts landOn)", () => {
+    const action = (searchOff?: string) => draw(createElement(ConfirmAction, { label: "Change the password", warning: "Sure?", disabled: true, search: ID, ...(searchOff ? { searchOff } : null), onConfirm: noop }));
+    const tag = anchored(action("menu.test.field"));
+    assert.match(tag, /^<button/);
+    assert.match(tag, /\sdata-search-off="menu\.test\.field"/);
+    assert.match(tag, /\sdisabled=""/);
+    assert.doesNotMatch(action(), /data-search-off/);
   });
 
   test("without an id, none of them draws an anchor", () => {

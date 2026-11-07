@@ -241,6 +241,7 @@ export function PlayerPassword() {
         <ConfirmAction
           label="Change the password"
           search="menu.members.password.change"
+          searchOff="menu.members.password.new"
           busy={busy}
           danger
           disabled={problem !== null}

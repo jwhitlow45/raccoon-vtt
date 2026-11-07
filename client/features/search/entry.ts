@@ -107,6 +107,14 @@ export type SearchEntry = {
 export const SEARCH_ATTR = "data-search";
 
 /**
+ * The anchor id a control that can be off names as the reason, the field a
+ * DM fills to turn it on, as Change the password names New player
+ * password. A disabled control refuses focus, so the search lands focus
+ * there instead (route.ts landOn).
+ */
+export const SEARCH_OFF_ATTR = "data-search-off";
+
+/**
  * An anchor id: lowercase words joined by hyphens, in dotted parts from
  * the panel down to the control, "dm.screens.blackout" or
  * "menu.room-settings.combat.crit-rule". Each is written whole as a string

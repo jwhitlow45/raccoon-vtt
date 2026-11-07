@@ -1031,10 +1031,8 @@ function RoomPage() {
     }
     focusNext.current = null;
     endRoute();
-    if (step.t === "land") {
-      landOn(step.el, ask.request.press === true);
-      return null;
-    }
+    // A control that is off and names no field to take its focus (route.ts landOn) leaves the panel to take it, as a route with no control does.
+    if (step.t === "land" && landOn(step.el, ask.request.press === true, box)) return null;
     // A page that put focus in itself, on its title, keeps it.
     const active = document.activeElement;
     return box && active && box.contains(active) ? null : { kind: "panel", id };
