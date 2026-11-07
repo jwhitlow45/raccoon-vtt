@@ -986,6 +986,8 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
     const fold = column.locator("[data-alert] button[aria-expanded=false]").first();
     if (await visible(fold)) {
       await fold.click();
+      // Marked only once the card shows open: a slow page can draw the open column on a new node after the click, and a mark made before it is lost.
+      await page.locator("[data-alert] button[aria-expanded=true]").first().waitFor();
       const open = await markColumn(page);
       if (open) await sweep.measure(page, "alerts-column-open", open);
     }
