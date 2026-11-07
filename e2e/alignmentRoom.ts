@@ -10080,8 +10080,8 @@ async function qolAuditScreens(sweep: Sweep, page: Page, at: { size: Size; scale
       await field.fill("2d6");
       await field.press("Enter");
       const last = dice.locator("[data-dice-last]");
-      // The chips' row: the roll's own box above it is the dice pass's root (dp-last), and holds the chips at its foot (see qe-f's report).
-      if (await showsWithin(last.locator("[data-apply-to]"), 5_000)) await sweep.measure(page, "qe-dice-last", last.locator("[data-apply-to]"));
+      // The whole box with the chips at its foot, which keeps its line and chips in its middle (Roller.tsx LastResult).
+      if (await showsWithin(last.locator("[data-apply-to]"), 5_000)) await sweep.measure(page, "qe-dice-last", last);
       else await sweep.missing(page, "qe-dice-last", "a roll with the warrior selected offered no chips");
       await closeSheets(page);
       await escapeAll(page);

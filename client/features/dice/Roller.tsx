@@ -45,6 +45,9 @@ const PAD_TOP = "var(--pane-pad-top, 0px)";
 /** The sticky line's height (Appendix C), a touch target's, so Again at its full 44 px never makes the line taller than it is without it. */
 export const LAST_LINE_PX = theme.touch;
 
+/** The room under the newest roll's Apply to chips, so they never touch the box's border. globals.css gives the same above its line while they show. */
+const CHIPS_ROOM = theme.space(1);
+
 const ROLLING = "Rolling…";
 
 /**
@@ -225,7 +228,8 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
         minWidth: 0,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), minHeight: LAST_LINE_PX, fontSize: theme.font.body14 }}>
+      {/* Apply to's room under its chips is given above the line too, while they show (globals.css --rvtt-chips-room), so the two stay in the box's middle. */}
+      <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), minHeight: LAST_LINE_PX, marginTop: "var(--rvtt-chips-room, 0px)", fontSize: theme.font.body14 }}>
         <div style={{ display: "flex", alignItems: "center", flex: 1, minWidth: 0 }}>{body}</div>
         {again ? (
           <Button size="sm" variant="quiet" icon="again" busy={waiting} {...repeat.buttonProps} style={{ flex: "none", ...repeat.pressStyle }}>
@@ -234,7 +238,7 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
         ) : null}
       </div>
       {receipt?.state === "committed" && !holding && first && head ? (
-        <ApplyTo lines={receipt.lines} style={{ paddingBottom: theme.space(1) }} />
+        <ApplyTo lines={receipt.lines} style={{ paddingBottom: CHIPS_ROOM }} />
       ) : null}
       {repeat.menu}
       <span role="status" aria-live="polite" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>

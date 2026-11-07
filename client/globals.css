@@ -104,6 +104,15 @@ dialog[data-rvtt-sheet]:not([open]) {
   display: none !important;
 }
 
+/* The Dice panel's newest roll keeps its line and Apply to in the middle
+   of its box (features/dice/Roller.tsx LastResult): the 4 px under the
+   chips is given above the line too, only while they show, which only
+   the chips themselves know (ApplyTo draws nothing where none is
+   offered). */
+[data-dice-last]:has(> [data-apply-to]) {
+  --rvtt-chips-room: 4px;
+}
+
 /* The notices under the very short sheet's header keep a gap above its
    body while any shows. */
 [data-rvtt-modal-notices]:has(> :not(:empty):not([data-rvtt-modal-slot="status"])) {
