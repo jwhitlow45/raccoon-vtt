@@ -91,10 +91,14 @@ export function useCombatAlerts(): CombatAlerts {
     participants: shown,
     uses: read.uses,
     attacks: attacks.map((named) => (named ? cardAttacks(named).length : null)),
-    loading: read.loading || rolls.loading,
-    failed: read.failed,
+    ...cardLoad(read, rolls),
     dismissed: local.dismissed,
   });
+}
+
+/** The turn card's wait and failure: its uses' and the rolls table's, which its attacks need as well. */
+export function cardLoad(uses: { loading: boolean; failed: boolean }, rolls: { loading: boolean; failed: boolean }): { loading: boolean; failed: boolean } {
+  return { loading: uses.loading || rolls.loading, failed: uses.failed || rolls.failed };
 }
 
 /** The cards of the turn now for this viewer, free of React for its tests. */
@@ -138,9 +142,9 @@ export function combatAlerts(input: {
     const count = usesCount(rows, resources);
     const skipped = rows.some((r) => r.kind === "skipped");
     const attacks = input.attacks?.[i] ?? 0;
-    // A card whose attacks still load keeps its place, so it never goes and comes back as the rolls table lands.
-    const attacksWait = input.attacks !== undefined && input.attacks[i] === null && input.loading;
-    if (count > 0 || skipped || attacks > 0 || attacksWait || (uses === null && (input.loading || input.failed))) blocks.push({ participant: p, uses, count, attacks });
+    // A card whose attacks still load keeps its place, so it never goes and comes back as the rolls table lands. One whose table failed keeps it with the failure and its reload.
+    const attacksUnknown = input.attacks !== undefined && input.attacks[i] === null && (input.loading || input.failed);
+    if (count > 0 || skipped || attacks > 0 || attacksUnknown || (uses === null && (input.loading || input.failed))) blocks.push({ participant: p, uses, count, attacks });
   });
   const encounter = view.encounter;
   if (blocks.length > 0 && encounter?.activeEntryId) {

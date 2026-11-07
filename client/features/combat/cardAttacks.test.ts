@@ -5,7 +5,7 @@ import { createStore } from "zustand/vanilla";
 import type { NamedRoll } from "#shared/dice/bonus.ts";
 import type { LogEntry, RoomState } from "#shared/model.ts";
 import { actor, character, customMonster, DM, entry, room, token } from "#shared/testutil.ts";
-import { cardAttacks, combatAlerts } from "./alerts.ts";
+import { cardAttacks, cardLoad, combatAlerts } from "./alerts.ts";
 import { turnParticipants } from "./logic.ts";
 
 /*
@@ -65,6 +65,25 @@ describe("the turn card's gating", () => {
     const base = { view, you: dmYou, participants, uses: participants.map(() => []), dismissed: new Set<string>(), failed: false };
     assert.ok(combatAlerts({ ...base, attacks: [null], loading: true }).turn, "loading: it stays");
     assert.equal(combatAlerts({ ...base, attacks: [null], loading: false }).turn, null);
+  });
+
+  test("a rolls table that failed keeps the card with its failure while its attacks cannot be known, uses loaded or not", () => {
+    const view = table();
+    const participants = turnParticipants(view);
+    const base = { view, you: dmYou, participants, dismissed: new Set<string>(), attacks: [null], ...cardLoad({ loading: false, failed: false }, { loading: false, failed: true }) };
+    const card = combatAlerts({ ...base, uses: [[]] }).turn;
+    assert.ok(card, "uses loaded with none: it stays");
+    assert.deepEqual([card.failed, card.loading, card.blocks.length], [true, false, 1], "failed, for AttackRows' reload");
+    assert.equal(combatAlerts({ ...base, uses: [null] }).turn?.failed, true, "uses unknown too");
+  });
+
+  test("the card's wait and failure are the uses' and the rolls table's together", () => {
+    const quiet = { loading: false, failed: false };
+    assert.deepEqual(cardLoad(quiet, { loading: false, failed: true }), { loading: false, failed: true });
+    assert.deepEqual(cardLoad({ loading: false, failed: true }, quiet), { loading: false, failed: true });
+    assert.deepEqual(cardLoad(quiet, { loading: true, failed: false }), { loading: true, failed: false });
+    assert.deepEqual(cardLoad({ loading: true, failed: false }, quiet), { loading: true, failed: false });
+    assert.deepEqual(cardLoad(quiet, quiet), quiet);
   });
 
   test("dismissed, it stays away for the turn as before", () => {
