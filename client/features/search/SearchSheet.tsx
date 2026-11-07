@@ -15,8 +15,8 @@ import { useKeyboardView } from "../../lib/keyboardInset.ts";
 import { useModalDialog } from "../../lib/modalDialog.ts";
 import { footprint } from "../../lib/scene.ts";
 import { statusBand, theme } from "../../lib/theme.ts";
-import { useChipEnv, useDmMenuView } from "../../pages/ChipMenus.tsx";
-import { dmMenuSections, itemsOf, youMenuSections, type ChipAnswer, type ChipEnv, type ChipItem, type ChipUnder } from "../../pages/chipMenus.ts";
+import { LibraryProbe, useChipEnv, useDmMenuView, useImages } from "../../pages/ChipMenus.tsx";
+import { dmMenuSections, itemsOf, youMenuSections, type ChipAnswer, type ChipEnv, type ChipItem, type ChipUnder, type DmMenuView } from "../../pages/chipMenus.ts";
 import { focusMap, mapFocusSlot } from "../../pages/mapFocus.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { keyText, letterOf, searchSheetSlot, setSearchSheet, SHORTCUTS, useKeyHint, useShortcutKeys, withKey, type KeyPress, type ShortcutEnv, type ShortcutTool } from "../../state/shortcuts.ts";
@@ -32,7 +32,7 @@ import type { OutlineRow } from "../outliner/rows.ts";
 import type { PanelsForOptions } from "../panels.ts";
 import { dmCatalog, type DmCatalogState } from "./dmCatalog.ts";
 import type { SearchAct, SearchEntry, SearchRoute } from "./entry.ts";
-import { buildIndex, catalogsFor, recordPage, searchResults, type KeySource, type SearchResults } from "./index.ts";
+import { buildIndex, catalogsFor, recordPage, searchResults, type IndexInput, type KeySource, type SearchIndex, type SearchResults } from "./index.ts";
 import { fold, parseQuery } from "./match.ts";
 import { loadRecentPicks, recentPicksSlot, rememberPick } from "./recent.ts";
 import { openAt } from "./route.ts";
@@ -369,14 +369,34 @@ export function SearchSheetHost(props: SearchHostProps) {
 
 type BodyProps = SearchHostProps & { role: "dm" | "player"; opener: RefObject<HTMLElement | null>; close(): void };
 
-/** A DM's search runs the DM menu's items (chipMenus.ts dmMenuSections). What gave way from the bar is left out: Time and Sound are panels of their own (search.md 4). */
-function DmSearch(props: BodyProps) {
-  const v = useDmMenuView(false, false, null);
-  // A new object each render: kept as one value while what it holds stands, so the index is built again as the room changes, never on each key.
+/**
+ * The DM menu's view as a DM's search reads it: the menu's own, so this
+ * device's recent showings are the search's rows too ("Show Belak's letter
+ * to Pat"), with the library's handout images once `probe` has listed
+ * them, as the menu lists them, so an image deleted since leaves both
+ * alike. What gave way from the bar is left out: Time and Sound are panels
+ * of their own (search.md 4). Kept as one value while what it holds
+ * stands, so the index is built again as the room changes, never on each
+ * key.
+ */
+export function useDmSearchMenu(): { view: DmMenuView; probe: ReactNode } {
+  const [images, setImages] = useImages();
+  const v = useDmMenuView(false, false, images);
   const view = useMemo(() => v, [v.blackout, v.follow, v.viewing, v.playerScene?.id, v.playerScene?.name, v.focusHere, v.handouts, v.handoutDocs, v.members, v.recent, v.images, v.time?.text, v.nowPlaying, v.movingTo, v.revealing, v.outShown]);
+  return { view, probe: view.recent.some((e) => e.kind === "image") ? <LibraryProbe onImages={setImages} /> : null };
+}
+
+/** A DM's search runs the DM menu's items (chipMenus.ts dmMenuSections), found by the menu's view, which its index reads too. */
+function DmSearch(props: BodyProps) {
+  const { view, probe } = useDmSearchMenu();
   const env = useChipEnv(() => props.opener.current);
   const items = useMemo(() => itemsOf(dmMenuSections(view)), [view]);
-  return <SearchDialog {...props} items={items} env={env} />;
+  return (
+    <>
+      {probe}
+      <SearchDialog {...props} items={items} env={env} dmMenu={view} />
+    </>
+  );
 }
 
 /** A player's search runs only their You menu's items (chipMenus.ts youMenuSections), never a DM menu item (QD-OPUS-18). */
@@ -396,7 +416,28 @@ function useDmCatalog(role: "dm" | "player"): DmCatalogState {
   return useSyncExternalStore(subscribe, () => dmCatalog.request(role), () => dmCatalog.peek(role));
 }
 
-function SearchDialog(props: BodyProps & { items: readonly ChipItem[]; env: ChipEnv }) {
+/**
+ * The index the sheet lists (search.md 5.10), built again as the view, the
+ * scene in view or the selection changes, and as the DM menu's view does,
+ * which `dmMenu` carries for a DM's search, never on each key.
+ */
+export function useSheetIndex(input: Omit<IndexInput, "state" | "dmMenu"> & { dmMenu?: DmMenuView | undefined }): SearchIndex {
+  const store = useRoomStore();
+  const view = useRoomView((s) => s.view);
+  const sceneId = useRoomView((s) => s.sceneId);
+  const selectedId = useRoomView((s) => s.local.selectedId);
+  // The Dice panel's creature rows hang on the whole selection (dice/search.ts).
+  const selectedIds = useRoomView((s) => s.local.selectedIds);
+  const you = useRoomView((s) => s.you);
+  const { wide, panelOptions, keys, catalogs, monsters, dmMenu } = input;
+  return useMemo(
+    () => buildIndex({ state: store.getState(), wide, ...(panelOptions ? { panelOptions } : null), keys, catalogs, monsters, ...(dmMenu ? { dmMenu } : null) }),
+    // The store is read whole, so its parts the index reads are the deps.
+    [store, view, sceneId, selectedId, selectedIds, you, wide, panelOptions, keys, catalogs, monsters, dmMenu],
+  );
+}
+
+function SearchDialog(props: BodyProps & { items: readonly ChipItem[]; env: ChipEnv; dmMenu?: DmMenuView }) {
   const { role, close } = props;
   const store = useRoomStore();
   const actions = useRoomActions();
@@ -417,9 +458,6 @@ function SearchDialog(props: BodyProps & { items: readonly ChipItem[]; env: Chip
   const sheet = useLayoutSize().width < SHEET_MAX;
 
   // The index, built again as the view, the scene or the selection changes (search.md 5.10).
-  const view = useRoomView((s) => s.view);
-  const sceneId = useRoomView((s) => s.sceneId);
-  const selectedId = useRoomView((s) => s.local.selectedId);
   const you = useRoomView((s) => s.you);
   const roomId = useRoomView((s) => s.roomId);
   const dm = useDmCatalog(role);
@@ -434,11 +472,7 @@ function SearchDialog(props: BodyProps & { items: readonly ChipItem[]; env: Chip
     const env = shortcutEnv();
     return { applies: (s) => s.id !== "search" && (!s.when || s.when(env)), text: (id) => keyText(id, keyMap) };
   }, [shortcutEnv, keyMap]);
-  const index = useMemo(
-    () => buildIndex({ state: store.getState(), wide: props.wide, panelOptions: props.panelOptions, keys, catalogs, monsters: role === "dm" ? srd.list : null }),
-    // The store is read whole, so its parts the index reads are the deps.
-    [store, view, sceneId, selectedId, you, props.wide, props.panelOptions, keys, catalogs, role, srd.list],
-  );
+  const index = useSheetIndex({ wide: props.wide, panelOptions: props.panelOptions, keys, catalogs, monsters: role === "dm" ? srd.list : null, dmMenu: props.dmMenu });
 
   const recentStore = useScoped(recentPicksSlot);
   const memberId = you?.memberId ?? null;

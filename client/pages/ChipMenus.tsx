@@ -538,7 +538,9 @@ export function useDmMenuView(timeGaveWay: boolean, nowPlayingGaveWay: boolean, 
   const recent = useStore(recentStore, (s) => s.entries);
   const scope = useRoomScope();
   const subscribe = useCallback((listener: () => void) => subscribeFocus(scope, listener), [scope]);
-  const focusScene = useSyncExternalStore(subscribe, () => currentFocus(scope)?.sceneId ?? null);
+  const readFocus = () => currentFocus(scope)?.sceneId ?? null;
+  // The same read serves a render to markup, so the room search's test can draw the menu's view (features/search/SearchSheet.test.ts).
+  const focusScene = useSyncExternalStore(subscribe, readFocus, readFocus);
   const now = clock ? clockNow(clock, encounter) : null;
   return {
     blackout,
@@ -562,10 +564,12 @@ export function useDmMenuView(timeGaveWay: boolean, nowPlayingGaveWay: boolean, 
 /**
  * Lists the library while a recent image might be offered, as the
  * Handouts panel's Recent list does, and hands up its handout images'
- * ids, so a deleted image leaves the menu. Until they come, an image is
- * offered and the server's own check decides (D-261106-208).
+ * ids, so a deleted image leaves the menu, and the room search, which
+ * reads the menu's view (features/search/SearchSheet.tsx). Until they
+ * come, an image is offered and the server's own check decides
+ * (D-261106-208).
  */
-function LibraryProbe(props: { onImages(ids: string | null): void }) {
+export function LibraryProbe(props: { onImages(ids: string | null): void }) {
   const roomId = useRoomView((s) => s.roomId);
   const library = useLibrary(roomId);
   const ids = library.rows ? library.rows.filter((a) => a.kind === "handout").map((a) => a.id).join(" ") : null;
@@ -575,7 +579,7 @@ function LibraryProbe(props: { onImages(ids: string | null): void }) {
 }
 
 /** The library's handout image ids as LibraryProbe hands them up, a string so an unchanged list is the same value. */
-function useImages(): [ReadonlySet<string> | null, (ids: string | null) => void] {
+export function useImages(): [ReadonlySet<string> | null, (ids: string | null) => void] {
   const [ids, setIds] = useState<string | null>(null);
   const images = useMemo(() => (ids === null ? null : new Set(ids.split(" ").filter((id) => id !== ""))), [ids]);
   return [images, setIds];

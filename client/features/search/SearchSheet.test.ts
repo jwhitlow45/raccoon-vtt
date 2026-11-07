@@ -6,7 +6,7 @@ import { DM } from "#shared/testutil.ts";
 import { RoomScope } from "../../state/scope.ts";
 import type { SearchEntry } from "./entry.ts";
 import { searchResults } from "./index.ts";
-import { DM_VIEW, indexOf, PAT_VIEW, seededRoom, viewOf } from "./search.testutil.ts";
+import { DM_VIEW, indexOf, keysOf, PAT_VIEW, seededRoom, viewOf } from "./search.testutil.ts";
 
 /*
  * The room search's sheet (designs/qol/search.md 5.2, 5.5, 5.6, 5.8 and
@@ -318,5 +318,42 @@ describe("the index the sheet lists", () => {
   test("a DM's on another scene still lists the scene's tokens by the view, for the same rows the sheet draws", () => {
     const html = list(searchResults(indexOf(viewOf(seededRoom(), DM, { sceneId: "s2" })), "goblin scout", []), "goblin scout");
     assert.equal(drawnIds(html)[0], "token:far");
+  });
+});
+
+describe("a DM's index reads the DM menu's view (search.md 5.5, plan.md 9)", () => {
+  test("this device's recent showing is a result, titled as the menu titles it with its audience", async () => {
+    const { createStore } = await import("zustand/vanilla");
+    const { RoomProvider } = await import("../../state/view.ts");
+    const { recentHandoutsSlot } = await import("../handouts/recent.ts");
+    const { DM_CATALOG } = await import("./catalog/dm.ts");
+    const { EVERYONE } = await import("./catalog/everyone.ts");
+    const { useDmSearchMenu, useSheetIndex } = await import("./SearchSheet.tsx");
+    const view = DM_VIEW();
+    const scope = new RoomScope();
+    // A store's first state is what a render to markup reads.
+    const recent = scope.get(recentHandoutsSlot);
+    recent.setState({ roomId: view.roomId, entries: [{ kind: "doc", docId: "letter", title: "Belak's letter", to: ["p1"], at: Date.UTC(2026, 10, 6, 12) }] });
+    recent.getInitialState = recent.getState;
+    const store = createStore(() => ({ ...view, connection: "open", pending: [], online: [], displays: 0, accessVersion: 0, joinRequestsVersion: 0 }));
+    function Probe() {
+      const { view: menu } = useDmSearchMenu();
+      const index = useSheetIndex({ wide: true, keys: keysOf(view), catalogs: [EVERYONE, DM_CATALOG], monsters: null, dmMenu: menu });
+      const rows = index.items.filter((i) => i.entry.id.startsWith("item:recent:")).map((i) => `${i.entry.id} ${i.entry.title}`);
+      return createElement("p", null, rows.join("|") || "none");
+    }
+    const html = renderToStaticMarkup(
+      createElement(RoomScopeProvider, {
+        scope,
+        children: createElement(RoomProvider, {
+          store: store as never,
+          actions: { dispatch: () => 1, newId: () => "x", sendEph: () => {} } as never,
+          ui: { notify: () => {}, openPanel: () => {}, closePanel: () => {} } as never,
+          assets: { url: () => "" } as never,
+          children: createElement(Probe),
+        }),
+      }),
+    );
+    assert.equal(html.replace(/&#x27;/g, "'"), "<p>item:recent:doc:letter Show Belak's letter to Pat</p>");
   });
 });
