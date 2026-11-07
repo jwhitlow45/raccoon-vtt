@@ -217,6 +217,11 @@ async function focusLands(page: Page, want: RegExp, after: string): Promise<void
 }
 
 /** Bree's Conditions in her token panel with Combat open, on the room loaded again so no form an earlier step left open stays. */
+/** A condition's tile in the full list. Once used, it shows in Recent above the list too (QOL audit Q13). */
+function conditionTile(conditions: Locator, name: string): Locator {
+  return conditions.locator("button[aria-pressed]").filter({ hasText: name }).last();
+}
+
 async function breeConditions(page: Page): Promise<Locator> {
   await reopenRoom(page);
   await page.getByRole("status", { name: "Connected" }).first().waitFor();
@@ -874,7 +879,7 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     const focusOn = (want: RegExp, after: string) => focusLands(ana, want, after);
 
     await press(conditions.getByRole("button", { name: "Add", exact: true }));
-    await press(conditions.locator("button[aria-pressed]").filter({ hasText: "Poisoned" }));
+    await press(conditionTile(conditions, "Poisoned"));
     await focusOn(/^Back$/, "Poisoned's tile opened its form");
     await press(conditions.getByRole("button", { name: "Add", exact: true }));
     await waitFor("Poisoned on Bree", () => (poisoned() ? true : null));
@@ -937,7 +942,7 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
       assert.equal(await focusedOn(ana), "the page", `after ${after} focus moved`);
     };
     await tap(conditions.getByRole("button", { name: "Add", exact: true }));
-    await tap(conditions.locator("button[aria-pressed]").filter({ hasText: "Poisoned" }));
+    await tap(conditionTile(conditions, "Poisoned"));
     await conditions.getByRole("button", { name: "Back", exact: true }).waitFor();
     await stays("Poisoned's tile opened its form");
     await tap(conditions.getByRole("button", { name: "Back", exact: true }));
@@ -982,7 +987,7 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     const conditions = conditionsIn(page);
     const frightened = () => (anaSocket.state?.characters[run.bree.characterId]?.actor.effects ?? []).some((e) => e.key === "frightened");
     await pressKey(ana, conditions.getByRole("button", { name: "Add", exact: true }));
-    await pressKey(ana, conditions.locator("button[aria-pressed]").filter({ hasText: "Frightened" }));
+    await pressKey(ana, conditionTile(conditions, "Frightened"));
     await focusLands(ana, /^Back$/, "Frightened's tile opened its form");
     await pressKey(ana, conditions.getByRole("button", { name: "Add", exact: true }));
     await waitFor("Frightened on Bree", () => (frightened() ? true : null));
