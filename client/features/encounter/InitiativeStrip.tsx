@@ -86,6 +86,9 @@ import {
 
 /** How long "Your turn" flares when a player's turn arrives. */
 const TURN_NOTICE_MS = 4_000;
+
+/** The acting face in the top bar's turn chip, and the inline "Your turn" beside it, painted while it flares: one height, so the row's painted parts agree. */
+export const TURN_FACE_PX = 26;
 const NOTICE_MS = 6_000;
 const MAX_NOTICES = 3;
 
@@ -229,8 +232,8 @@ function Strip(props: { notice: boolean; stripRef?: Ref<HTMLDivElement>; fit: St
           ...chip(yours),
           gap: theme.space(1.5),
           height: TURN_PILL_PX,
-          // "Your turn" brings its own padding, so the pill stays even at its end.
-          padding: `0 ${yours && props.fit.yourTurn ? 2 : theme.space(3)}px 0 ${theme.space(3)}px`,
+          // "Your turn" brings its own padding, so the chip's end holds its pill by the gap above and below it.
+          padding: `0 ${yours && props.fit.yourTurn ? (TURN_PILL_PX - TURN_FACE_PX) / 2 : theme.space(3)}px 0 ${theme.space(3)}px`,
         }}
       >
         <TrackerTarget label={`Initiative, round ${round}. ${line}. Open the tracker.`} reach={(theme.touch - TURN_PILL_PX) / 2} tip={cut ? tip : undefined} />
@@ -238,9 +241,9 @@ function Strip(props: { notice: boolean; stripRef?: Ref<HTMLDivElement>; fit: St
           R{round}
         </span>
         {current ? (
-          <Portrait entry={current} size={26} ring={theme.color.accentSoft} />
+          <Portrait entry={current} size={TURN_FACE_PX} ring={theme.color.accentSoft} />
         ) : started ? (
-          <span aria-hidden style={{ ...unknownDot, width: 26, height: 26 }}>
+          <span aria-hidden style={{ ...unknownDot, width: TURN_FACE_PX, height: TURN_FACE_PX }}>
             ?
           </span>
         ) : null}
@@ -478,7 +481,8 @@ export function YourTurn(props: { notice: boolean; fontSize: number; inline?: bo
     padding: props.inline ? `0 ${PILL_PAD}px` : 0,
     fontSize: props.fontSize,
     fontWeight: theme.weight.bold,
-    lineHeight: "20px",
+    // Beside the bar's acting face its pill is the face's height (TURN_FACE_PX).
+    lineHeight: props.inline ? `${TURN_FACE_PX}px` : "20px",
     whiteSpace: "nowrap",
     pointerEvents: "none",
     // Under the name in the band it ends in an ellipsis when the row is short of room, as the name does.

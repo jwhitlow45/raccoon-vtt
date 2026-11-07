@@ -1,12 +1,14 @@
 import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { tokenPattern } from "../../components/testing/tokenPattern.ts";
 import { ON_BOARD, ON_BOARD_STYLE, theme } from "../../lib/theme.ts";
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { trackerTargetLook, YourTurn } = await import("./InitiativeStrip.tsx");
+const { trackerTargetLook, TURN_FACE_PX, YourTurn } = await import("./InitiativeStrip.tsx");
+const { TURN_PILL_PX } = await import("./parts.tsx");
 
 /*
  * "Your turn" flares as a cream pill under ink, the fixed `highlightFill`
@@ -22,6 +24,26 @@ test("your turn's flare fills with the fixed cream and settles into the turn's t
   const settled = renderToStaticMarkup(createElement(YourTurn, { notice: false, fontSize: 14 }));
   assert.match(settled, new RegExp(`color:${tokenPattern(theme.color.accentSoft)}`));
   assert.doesNotMatch(settled, /background/);
+});
+
+/*
+ * In the top bar's turn chip "Your turn" sits in one row with the acting
+ * face, both painted while it flares, so they share a height
+ * (measureAlignment's row-height check, which the 20 px pill beside the
+ * 26 px face failed by 6 px for its 4 s). The chip's end then holds the
+ * pill as its top and bottom do. Under the name in the band, nothing
+ * painted shares its row.
+ */
+test("the bar's inline your turn is as tall as the acting face, in its flare and after, and the band's keeps its own line", () => {
+  for (const notice of [true, false]) {
+    const inline = renderToStaticMarkup(createElement(YourTurn, { notice, fontSize: 13, inline: true }));
+    assert.match(inline, new RegExp(`line-height:${TURN_FACE_PX}px`), `inline, notice ${notice}`);
+    assert.match(renderToStaticMarkup(createElement(YourTurn, { notice, fontSize: 13 })), /line-height:20px/, `the band's, notice ${notice}`);
+  }
+  const strip = readFileSync(new URL("./InitiativeStrip.tsx", import.meta.url), "utf8");
+  assert.ok(strip.includes("<Portrait entry={current} size={TURN_FACE_PX}"), "the chip draws the acting face at that size");
+  assert.ok(strip.includes("${yours && props.fit.yourTurn ? (TURN_PILL_PX - TURN_FACE_PX) / 2 : theme.space(3)}px"), "the chip's end is the pill's gap above and below");
+  assert.equal((TURN_PILL_PX - TURN_FACE_PX) / 2, 5);
 });
 
 /*
