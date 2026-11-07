@@ -1194,6 +1194,54 @@ describe("raccoon-vtt: a sheet's field over the phone keyboard", { timeout: 900_
     }
   });
 
+  test("qe-1. with a keyboard joined to Pat's phone, C on Thorn's resting strip grows his bar with Conditions open on their first cell and Escape rests it again, a digit starts his HP change in the strip's field, and on the goblin, not his, neither key does a thing", async () => {
+    await setUp(pat, VIEWS[0]!);
+    const bar = await thornsBar(pat);
+    assert.equal(await bar.getAttribute("data-bar-state"), "rest", "Thorn's bar opens as the strip");
+    const focus = () =>
+      pat.evaluate(() => {
+        type El = { tagName: string; value?: string; textContent: string | null; getAttribute(n: string): string | null; closest(s: string): El | null };
+        const el = (globalThis as unknown as { document: { activeElement: El | null } }).document.activeElement;
+        return { tag: el?.tagName ?? "", name: (el?.getAttribute("aria-label") ?? el?.textContent ?? "").trim(), value: el?.value ?? null, group: el?.closest('[role="group"]')?.getAttribute("aria-label") ?? null };
+      });
+
+    await pat.keyboard.press("c");
+    await waitFor("the bar grown with Conditions open", async () => ((await bar.getAttribute("data-bar-state")) === "expanded" ? true : null));
+    await waitFor("focus on Blinded, the first cell", async () => {
+      const f = await focus();
+      return f.name === "Blinded" && f.group === "Conditions" ? true : null;
+    });
+    await shots.take(pat, "qe-1-c-on-strip");
+    await pat.keyboard.press("Escape");
+    await waitFor("the drawer closed and the strip back at rest", async () => ((await bar.getAttribute("data-bar-state")) === "rest" ? true : null));
+    assert.ok(await bar.isVisible(), "Escape in the drawer closed Thorn's bar");
+    await bar.getByRole("button", { name: "Close", exact: true }).first().tap();
+    await bar.waitFor({ state: "detached" });
+
+    const strip = await thornsBar(pat);
+    await pat.keyboard.press("6");
+    await waitFor("the strip's field focused with 6", async () => {
+      const f = await focus();
+      return f.name === "HP change" && f.value === "6" ? true : null;
+    });
+    const field = strip.getByRole("textbox", { name: "HP change", exact: true });
+    await field.fill("");
+    await field.blur();
+    await strip.getByRole("button", { name: "Close", exact: true }).first().tap();
+    await strip.waitFor({ state: "detached" });
+
+    // The goblin is the DM's: Pat may change neither its conditions nor its HP, so the keys find nothing to open.
+    await tapCell(pat, run.bounds, { x: 9, y: 5 });
+    await pat.waitForTimeout(500);
+    await pat.keyboard.press("c");
+    await pat.keyboard.press("4");
+    await pat.waitForTimeout(500);
+    const after = await focus();
+    assert.ok(after.tag !== "INPUT" && after.group !== "Conditions", `a key on the goblin opened something: ${JSON.stringify(after)}`);
+    assert.equal(await pat.getByRole("group", { name: "Conditions", exact: true }).count(), 0, "C opened the goblin's Conditions for Pat");
+    await pat.keyboard.press("Escape");
+  });
+
   test("kb-19. the raised sheets line up, nothing over 1 px, and the dock rode them on the tall phone", () => {
     assert.deepEqual(sweep, []);
     for (const view of VIEWS.filter((v) => v.height === 844)) assert.ok(docked.has(`Lay on Hands in the fight at ${viewName(view)}`), `no dock on the sheet at ${viewName(view)}`);
