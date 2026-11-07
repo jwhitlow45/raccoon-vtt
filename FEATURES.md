@@ -264,6 +264,7 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
 - Custom statuses take an emoji or a letter, a color and a label.
 - A token's action bar has a quick Conditions grid, each condition named under its icon.
 - **C opens the Conditions** of the selected tokens, with the first condition focused. Escape closes the grid and puts focus back on the Conditions button, with the bar still open.
+  - On a phone, C grows a resting bar with the grid open, and Escape rests the bar again with focus on its Conditions. Where the resting bar has no room for Conditions, as on the creature's own turn, Escape leaves the bar grown instead, focus on its Conditions.
 - **Recent conditions**: the grid, and the Token panel's condition picker, start with a **Recent** row of the three conditions this device added last. The row is the same for every token on this device, and it holds still while the grid is open.
 - A status can carry a counter, such as rounds or charges left, that a tap counts up or down. Where its row has no room for its − and + beside its name, they stand under the row.
 - Durations: a number of rounds, or until the start or end of a chosen creature's turn. They count down with Initiative, and everyone is told when one ends.
@@ -503,7 +504,7 @@ Every roll happens on the server, with a secure random source, so everyone sees 
 The DM asks players for a saving throw or an ability check, and each player rolls it in the app or types the total they rolled.
 
 - "Request a roll" is in the action bar of several selected creatures that players play. For one creature, the bar's Roll opens its options, whose "Ask Bree to roll" switch asks its player. "Ask the party" is in the party bar, shortened to "Ask" while the bar is folded.
-- **Recent DCs** (DM): for a save, the DCs this device sent last stand beside the DC field under **Recent**, as "DC 15", and a tap fills the field. They are kept for each room, lowest first, and never offered for a check, which keeps the typical DCs. The group save's DC field offers the same ones.
+- **Recent DCs** (DM): for a save, the DCs this device sent last stand beside the DC field under **Recent**, as "DC 15", and a tap fills the field. They are kept for each room, lowest first, and never offered for a check, which keeps the typical DCs. The group save offers the same ones, on a line of their own under its DC field.
 - One tap picks the roll: a save or a check by ability, or a skill from a list, which starts at its usual ability and can go with another. Nothing is picked until the DM picks it, and a later tap replaces the whole roll. "Or a second choice" lets the creature pick between two, such as "Strength (Athletics) or Dexterity (Acrobatics)". Either can be removed.
 - The DC, or none, on one row with the typical DCs for a check as chips from 5 (Very easy) to 30 (Nearly impossible).
 - Creatures, as chips. "Ask the party" starts with the characters on the players' scene picked, or every character when the DM is looking at another scene.
