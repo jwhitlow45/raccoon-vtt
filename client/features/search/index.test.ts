@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DM, effect, P1 } from "#shared/testutil.ts";
-import { SHORTCUTS } from "../../state/shortcuts.ts";
+import { keysInEffect, type KeyMap } from "../../state/keyBindings.ts";
+import { DEFAULT_KEYS, keyText, SHORTCUTS } from "../../state/shortcuts.ts";
 import type { RoomView } from "../../state/types.ts";
 import { PANELS, panelsFor } from "../panels.ts";
 import { EVERYONE } from "./catalog/everyone.ts";
@@ -36,6 +37,16 @@ describe("the panels and keys (search.md 5.10 sources 1 and 2)", () => {
       const none = buildIndex({ state: view, wide: true, keys: { applies: () => false, text: () => "K" }, catalogs: [], monsters: null });
       assert.ok(!none.items.some((i) => i.entry.kind === "key"));
     }
+  });
+
+  test("the digits that start an HP change read Change HP, with this device's digits, and their press goes to the HP field", () => {
+    const row = (keys: KeyMap) => buildIndex({ state: DM_VIEW(), wide: true, keys: { applies: (s) => s.id === "hpDigit", text: (id) => keyText(id, keys) }, catalogs: [], monsters: null }).byId.get("key:hpDigit")?.entry;
+    const plain = row(DEFAULT_KEYS)!;
+    assert.deepEqual([plain.title, plain.keys], ["Change HP", "1 to 9"]);
+    assert.deepEqual(plain.act, { t: "key", shortcut: "hpDigit" });
+    assert.equal(row(keysInEffect(DEFAULT_KEYS, { "tool:ruler": "1", "tool:fog": "3" }))?.keys, "2, 4 to 9", "a digit this device moved leaves the row");
+    const every = keysInEffect(DEFAULT_KEYS, Object.fromEntries(["tool:select", "tool:ruler", "tool:area", "tool:draw", "tool:ping", "tool:fog", "tool:pin", "tool:trap", "tool:build"].map((id, i) => [id, String(i + 1)])));
+    assert.equal(row(every)?.keys, "", "no digit left: no key, not No key");
   });
 
   test("a key's row carries its key as the sheet writes it, and a tool reads as the tool", () => {

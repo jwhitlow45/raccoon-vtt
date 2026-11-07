@@ -120,6 +120,8 @@ function keyTitle(s: Shortcut, role: SearchRole): string {
   if (s.id.startsWith("tool:")) return `${s.name ?? s.does} tool`;
   if (s.id === "turn") return role === "dm" ? "Next turn" : "End turn";
   if (s.id === "sheet") return "Show the shortcuts";
+  // The sheet's sentence says what a digit does. The row's press takes the viewer to the HP field to type the change.
+  if (s.id === "hpDigit") return "Change HP";
   return s.does;
 }
 

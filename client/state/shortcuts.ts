@@ -716,7 +716,12 @@ export function useShortcutKeys(): KeyMap {
 /** How the sheet, a tooltip or a line of help writes a shortcut's key on this device: "F", or a fixed row's own words. */
 export function keyText(id: string, keys: KeyMap = shortcutKeys()): string {
   const key = keys[id];
-  return key === undefined ? (SHORTCUTS.find((s) => s.id === id)?.keys ?? "") : keyLabel(key);
+  if (key !== undefined) return keyLabel(key);
+  const s = SHORTCUTS.find((x) => x.id === id);
+  // A row whose keys follow this device's moves, as the digits that start an HP change do, reads them as the sheet writes them.
+  const shown = s?.sheetKeys?.(keys).input;
+  if (shown === undefined) return s?.keys ?? "";
+  return shown === NO_KEY ? "" : shown;
 }
 
 /**
