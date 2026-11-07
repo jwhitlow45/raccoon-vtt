@@ -26,7 +26,7 @@ import { applyEph, clearTokens, keepLocal, keepMembers, nextExpiry, sweepEph } f
 import { SCENE_LOAD_IDLE, sceneLoadFailureText, stepSceneLoad, type SceneLoad, type SceneLoadEvent } from "./sceneLoad.ts";
 import { shareRecord, shareState } from "./share.ts";
 import { backoffDelay, realClock, Timer, type Clock } from "./timing.ts";
-import { addToSelection, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "./selection.ts";
+import { addToSelection, bringToken, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "./selection.ts";
 import { canonicalPanelId, panelById } from "../features/panels.ts";
 import { crossWide, EMPTY_EPHEMERAL, INITIAL_LOCAL, MAX_REFUSED, withoutBelow, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetExpanded, withSheetHidden, withSidePanelHidden, withSplit, withSplitFits, withSwap, type Ended, type LocalUi, type OnAnswer, type OpAnswer, type OpRefusal, type PanelHow, type PendingOp, type RoomView, type Toast, type ToastAction, type ToastDie, type ToastSends, type UnknownCause, type You, hasButtons } from "./types.ts";
 
@@ -270,6 +270,8 @@ export type RoomUi = {
   tap(tokenId: string | null, add?: boolean): void;
   /** Adds tokens to the selection, from a box dragged over them. */
   selectMany(tokenIds: readonly string[]): void;
+  /** Selects a token and opens its bar, adding it to a Multi-select group rather than taking it out (selection.ts bringToken). */
+  bring(tokenId: string): void;
   /** Drops tokens that are gone from the selection. */
   keepSelected(present: (tokenId: string) => boolean): void;
   setMultiSelect(on: boolean): void;
@@ -796,6 +798,9 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     },
     selectMany(tokenIds) {
       setLocal(addToSelection(get().local, tokenIds));
+    },
+    bring(tokenId) {
+      setLocal(bringToken(get().local, tokenId));
     },
     keepSelected(present) {
       setLocal(keepSelected(get().local, present));

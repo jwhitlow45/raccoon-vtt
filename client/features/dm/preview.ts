@@ -2,7 +2,7 @@ import { createStore, type StoreApi } from "zustand/vanilla";
 import { uuidv7 } from "#shared/ids.ts";
 import { realClock, type Clock } from "../../state/timing.ts";
 import { drawnToasts, heldToasts, type RoomStore, type RoomUi } from "../../state/store.ts";
-import { addToSelection, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "../../state/selection.ts";
+import { addToSelection, bringToken, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "../../state/selection.ts";
 import { crossWide, INITIAL_LOCAL, withoutBelow, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetExpanded, withSheetHidden, withSidePanelHidden, withSplit, withSplitFits, withSwap, type RoomActions, type RoomView } from "../../state/types.ts";
 import { canonicalPanelId, panelById } from "../panels.ts";
 
@@ -183,6 +183,7 @@ export function createPreview(source: PreviewSource, memberId: string, options: 
     select: (tokenId, opts) => store.setState({ local: selectToken(store.getState().local, tokenId, opts?.opens === true) }),
     tap: (tokenId, add) => store.setState({ local: tapToken(store.getState().local, tokenId, add) }),
     selectMany: (tokenIds) => store.setState({ local: addToSelection(store.getState().local, tokenIds) }),
+    bring: (tokenId) => store.setState({ local: bringToken(store.getState().local, tokenId) }),
     keepSelected: (present) => store.setState({ local: keepSelected(store.getState().local, present) }),
     setMultiSelect: (on) => store.setState({ local: setMultiSelect(store.getState().local, on) }),
     doneSelecting: () => store.setState({ local: doneSelecting(store.getState().local) }),

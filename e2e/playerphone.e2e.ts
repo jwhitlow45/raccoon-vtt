@@ -1697,7 +1697,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
     await player.getByRole("status", { name: "Connected" }).first().waitFor();
   });
 
-  test("qe-1. Find my token selects Pat's token and opens its bar, and a second press goes on to his next token and opens its bar", async () => {
+  test("qe-1. Find my token selects Pat's token and opens its bar, a second press goes on to his next token and opens its bar, and in Multi-select it adds the token and opens the bar without taking one out", async () => {
     await ops.send({ t: "character.create", character: { id: qe.wren.characterId, name: "Wren", size: "medium", ownerIds: [run.patId], actor: actor(18) } });
     await ops.send({ t: "token.create", token: { id: qe.wren.id, sceneId: run.sceneId, size: "medium", visibility: "all", kind: "pc", name: "Wren", x: 3, y: 3, disposition: "ally", actor: { ref: qe.wren.characterId } } });
     await waitFor("Wren on Pat's map", () => playerSocket.state?.tokens[qe.wren.id]);
@@ -1716,7 +1716,23 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       assert.equal(await player.getByRole("dialog", { name: `${other.name} actions` }).count(), 0, `press ${i + 1}: ${other.name}'s bar stayed open`);
       if (i === 0) await shots.take(player, "qe-1-find-opens-bar");
     }
-    await barFrame(player).getByRole("button", { name: "Close", exact: true }).first().tap();
+
+    // In Multi-select a press adds the next token and never takes one out: the group keeps both, and the bar opens on a token the group already held with the bar hidden.
+    await (await barControl(player.getByRole("dialog", { name: `${order[0]!.name} actions` }), "Multi-select")).tap();
+    await find.tap();
+    const group = player.getByRole("dialog", { name: "2 selected tokens" });
+    await group.waitFor();
+    // Off the bar, where the map shows, as step 10 hides it.
+    await player.waitForTimeout(200);
+    await touch([await emptyPoint(player)]);
+    await barFrame(player).waitFor({ state: "detached" });
+    const options = player.getByRole("toolbar", { name: "Select options" });
+    await options.getByText("2 selected.", { exact: true }).filter({ visible: true }).waitFor();
+    // The next press finds the token the group already holds: a tap's toggle would take it out and leave the bar hidden, so the group's bar never came.
+    await find.tap();
+    await group.waitFor();
+    await shots.take(player, "qe-1-find-in-multi-select");
+    await options.getByRole("button", { name: "Done", exact: true }).tap();
     await barFrame(player).waitFor({ state: "detached" });
     await ops.send({ t: "token.delete", tokenId: qe.wren.id });
     await waitFor("Wren gone from Pat's map", () => (playerSocket.state?.tokens[qe.wren.id] ? null : true));

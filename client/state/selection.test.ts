@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { appleKeys } from "../lib/device.ts";
-import { addsToSelection, addToSelection, allOfKindText, barDismiss, dismissal, doneSelecting, frontToBack, keepSelected, kindOf, nextUnderTap, pluralName, sameKind, selectToken, setMultiSelect, showActions, tapToken, type KindToken } from "./selection.ts";
+import { addsToSelection, addToSelection, allOfKindText, barDismiss, bringToken, dismissal, doneSelecting, frontToBack, keepSelected, kindOf, nextUnderTap, pluralName, sameKind, selectToken, setMultiSelect, showActions, tapToken, type KindToken } from "./selection.ts";
 import { INITIAL_LOCAL, type LocalUi } from "./types.ts";
 import { keepsOpening, type BarSubject } from "../canvas/barDock.ts";
 
@@ -25,6 +25,21 @@ describe("taps, the selection and the action bar", () => {
     assert.equal(selectToken(tapped, "gob2").actionBar, true);
     assert.equal(selectToken(tapped, null).actionBar, false);
     assert.equal(showActions(INITIAL_LOCAL, true).actionBar, false, "no bar with nothing selected");
+  });
+
+  test("Find my token's press selects the token and opens its bar as a tap does, and in Multi-select adds it, never takes it out, and opens the bar on it", () => {
+    const alone = bringToken(tapToken(INITIAL_LOCAL, "gob1"), "thorn");
+    assert.deepEqual([alone.selectedIds, alone.actionBar, alone.opening?.tokenId], [["thorn"], true, "thorn"], "out of Multi-select: as a tap");
+    let group = setMultiSelect(tapToken(INITIAL_LOCAL, "thorn"), true);
+    group = tapToken(group, "gob1");
+    // A tap on empty map hides the bar and keeps the group.
+    group = tapToken(group, null);
+    assert.deepEqual([group.selectedIds, group.actionBar], [["thorn", "gob1"], false]);
+    const found = bringToken(group, "thorn");
+    assert.deepEqual([...found.selectedIds].sort(), ["gob1", "thorn"], "the group keeps Thorn");
+    assert.deepEqual([found.selectedId, found.actionBar, found.opening?.tokenId, found.multi], ["thorn", true, "thorn", true], "its bar opens on Thorn");
+    const added = bringToken(setMultiSelect(tapToken(INITIAL_LOCAL, "gob1"), true), "thorn");
+    assert.deepEqual([added.selectedIds, added.selectedId, added.actionBar], [["gob1", "thorn"], "thorn", true], "a group without it takes it");
   });
 
   test("Shift adds a token or takes it out, and a plain tap picks only one again", () => {

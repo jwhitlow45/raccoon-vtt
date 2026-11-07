@@ -494,8 +494,8 @@ export function FindButton(props: { openSheet(): OpenSheet | null }) {
       return;
     }
     lastRef.current = token.id;
-    // A tap on the token, as the tracker row does. Before the camera: the store shows the bar at once, and the camera keeps the token clear of the bar that is about to open (Stage.tsx show).
-    ui.tap(token.id);
+    // A tap on the token, as the tracker row does, but one that never takes it out of a Multi-select group. Before the camera: the store shows the bar at once, and the camera keeps the token clear of the bar that is about to open (Stage.tsx show).
+    ui.bring(token.id);
     const target = findRect(token);
     const cover = sheetCover(props.openSheet());
     // The open sheet's cover and the token bar's, the larger on each side.

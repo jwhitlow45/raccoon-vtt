@@ -42,6 +42,18 @@ export function tapToken(local: LocalUi, tokenId: string | null, add = false): L
 }
 
 /**
+ * A press that brings the viewer to one token, as Find my token does:
+ * select it and open its action bar, as a tap does. In Multi-select the
+ * group keeps every token it held and takes this one if it lacks it, never
+ * taking it out as a tap would, and the bar opens on it even where the
+ * group already held it with the bar hidden.
+ */
+export function bringToken(local: LocalUi, tokenId: string): LocalUi {
+  if (!local.multi) return tapToken(local, tokenId);
+  return withIds(local, [...local.selectedIds.filter((id) => id !== tokenId), tokenId], true, { tokenId, gather: true });
+}
+
+/**
  * A tap again in the isometric view (docs/design/design-v1-isometric-view.md
  * 6.2): `stack` is every standee under the press, front to back. A tap
  * that lands on the selected one, where others lie under the press too,
