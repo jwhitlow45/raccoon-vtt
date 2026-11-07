@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import sharp from "sharp";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, openSideTab, OpSocket, pagePoint, readCamera, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, OpSocket, pagePoint, readCamera, reopenRoom, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { assetRow, chooseStarterWork, starterWork } from "./starterPick.ts";
 
 /**
@@ -75,6 +75,54 @@ function focused(page: Page): Promise<{ tag: string; role: string | null; name: 
     const name = el.getAttribute("aria-label") ?? el.labels?.[0]?.textContent ?? el.textContent ?? "";
     return { tag: el.tagName.toLowerCase(), role: el.getAttribute("role"), name: name.trim() };
   });
+}
+
+/** The QOL pass's tokens (designs/qol audit Q3, Q7, Q13): four Goblin Warriors in a row, the fourth hidden, and Snik, a fifth by its block, renamed. */
+const qe = {
+  warriors: [1, 2, 3, 4].map((number) => ({ id: randomUUID(), name: "Goblin Warrior", number, x: 1 + number * 2, y: 2 })),
+  snik: { id: randomUUID(), name: "Snik", x: 3, y: 5 },
+};
+
+/** Clicks a token on the map and waits for its bar. */
+async function clickToken(t: { x: number; y: number }, name: string): Promise<Locator> {
+  const p = await pagePoint(dm, run.bounds, { x: t.x + 0.5, y: t.y + 0.5 });
+  await dm.mouse.click(p.x, p.y);
+  const bar = dm.getByRole("dialog", { name: `${name} actions` });
+  await bar.waitFor();
+  return bar;
+}
+
+/** The focused element's name, value and caret, whether it is a field, and the group it stands in. */
+function activeField(page: Page): Promise<{ label: string; value: string | null; caret: number | null; inField: boolean; group: string | null }> {
+  return page.evaluate(() => {
+    type El = { tagName: string; value?: string; selectionStart?: number | null; textContent: string | null; getAttribute(n: string): string | null; closest(s: string): El | null };
+    const el = (globalThis as unknown as { document: { activeElement: El | null } }).document.activeElement;
+    if (!el) return { label: "", value: null, caret: null, inField: false, group: null };
+    const field = el.tagName === "INPUT" || el.tagName === "TEXTAREA";
+    return {
+      label: (el.getAttribute("aria-label") ?? el.textContent ?? "").trim(),
+      value: field ? (el.value ?? "") : null,
+      caret: field ? (el.selectionStart ?? null) : null,
+      inField: field,
+      group: el.closest('[role="group"]')?.getAttribute("aria-label") ?? null,
+    };
+  });
+}
+
+function hp(tokenId: string): number {
+  const t = dmSocket.state?.tokens[tokenId];
+  assert.ok(t && "inline" in t.actor, `no token ${tokenId}`);
+  return t.actor.inline.hp.cur;
+}
+
+function effects(tokenId: string): string[] {
+  const t = dmSocket.state?.tokens[tokenId];
+  return t && "inline" in t.actor ? t.actor.inline.effects.map((e) => e.key) : [];
+}
+
+/** The tiles' words in a Conditions group, in order. */
+function tileNames(group: Locator): Promise<string[]> {
+  return group.getByRole("button").evaluateAll((els) => els.map((el) => (el.textContent ?? "").trim()));
 }
 
 function goblin() {
@@ -450,6 +498,258 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
     assert.equal(row?.credit?.creator, found.work.credit.author, "the credit is the catalog's");
     await shots.take(dm, "sa-a-3-handout-shown");
     await panel.getByRole("button", { name: "Hide" }).first().click();
+  });
+
+  test("qe-1. four Goblin Warriors of the SRD's block, one hidden, and Snik, a fifth renamed, join the goblin, with this device's recent conditions forgotten", async () => {
+    const hardy = { hp: { cur: 40, max: 40, temp: 0 }, life: "alive", ac: 15, speeds: { walk: 30 }, initBonus: 2, passivePerception: 9, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "", srdId: "goblin-warrior" };
+    const create = (t: { id: string; name: string; number?: number; x: number; y: number }, visibility: "all" | "dm") =>
+      ops.send({
+        t: "token.create",
+        token: { id: t.id, sceneId: run.sceneId, size: "medium", visibility, kind: "monster", name: t.name, ...(t.number === undefined ? {} : { number: t.number }), x: t.x, y: t.y, disposition: "hostile", actor: { inline: hardy } },
+      });
+    for (const [i, w] of qe.warriors.entries()) await create(w, i === 3 ? "dm" : "all");
+    await create(qe.snik, "all");
+    await waitFor("the warriors and Snik in the DM's view", () => [...qe.warriors, qe.snik].every((t) => dmSocket.state?.tokens[t.id]) || null);
+    // The device's recent conditions are read once a page loads (tokens/recentConditions.ts), so a reload starts them empty.
+    await dm.evaluate(() => (globalThis as unknown as { localStorage: { removeItem(k: string): void } }).localStorage.removeItem("rvtt.recentConditions"));
+    await reopenRoom(dm);
+    await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+    await dm.locator(".konvajs-content").first().waitFor();
+  });
+
+  test("qe-2. a digit with a token selected starts its HP change: the field takes focus with the digit and the caret after it, Enter applies it and gives focus back, and 0, + and - keep their keys", async () => {
+    const w = qe.warriors[0]!;
+    const bar = await clickToken(w, "Goblin Warrior 1");
+    const field = bar.getByRole("textbox", { name: "HP change", exact: true });
+    assert.equal(await field.inputValue(), "", "the entry starts empty");
+    assert.equal((await activeField(dm)).inField, false, "nothing has focus in a field before the key");
+
+    await dm.keyboard.press("7");
+    await waitFor("the field focused with 7", async () => {
+      const a = await activeField(dm);
+      return a.label === "HP change" && a.value === "7" ? a : null;
+    });
+    assert.equal((await activeField(dm)).caret, 1, "the caret stands after the digit");
+    const hpBefore = hp(w.id);
+    await dm.keyboard.press("Enter");
+    await waitFor("7 damage on Goblin Warrior 1", () => (hp(w.id) === hpBefore - 7 ? true : null));
+    await waitFor("focus back off the field, the field empty", async () => {
+      const a = await activeField(dm);
+      return !a.inField && (await field.inputValue()) === "" ? true : null;
+    });
+
+    // The keys work again at once: the next digit starts a new entry, from the number pad too. The page sends it, since the browser's number pad types PageDown while Num Lock is off, and a page's own key types nothing, so the bar's own typing puts it in.
+    await dm.evaluate(() => {
+      const g = globalThis as unknown as { document: { body: { dispatchEvent(e: unknown): boolean } }; KeyboardEvent: new (t: string, o: Record<string, unknown>) => unknown };
+      g.document.body.dispatchEvent(new g.KeyboardEvent("keydown", { key: "3", code: "Numpad3", location: 3, bubbles: true, cancelable: true }));
+    });
+    await waitFor("the field focused with 3 from the number pad", async () => ((await activeField(dm)).value === "3" ? true : null));
+    await dm.keyboard.press("Enter");
+    await waitFor("3 more damage", () => (hp(w.id) === hpBefore - 10 ? true : null));
+    await waitFor("focus back off the field", async () => (!(await activeField(dm)).inField ? true : null));
+
+    // A layout that types digits with Shift, such as AZERTY's top row: the key event names the digit and the field still takes it.
+    await dm.evaluate(() => {
+      const g = globalThis as unknown as { document: { body: { dispatchEvent(e: unknown): boolean } }; KeyboardEvent: new (t: string, o: Record<string, unknown>) => unknown };
+      g.document.body.dispatchEvent(new g.KeyboardEvent("keydown", { key: "4", code: "Digit4", shiftKey: true, bubbles: true, cancelable: true }));
+    });
+    await waitFor("the field focused with 4 from a Shift digit", async () => {
+      const a = await activeField(dm);
+      return a.label === "HP change" && a.value === "4" ? true : null;
+    });
+
+    // A change the entry cannot read keeps its words and focus: Enter gives focus back only once the field has emptied.
+    await dm.keyboard.type("q");
+    await dm.keyboard.press("Enter");
+    await dm.waitForTimeout(300);
+    const kept = await activeField(dm);
+    assert.equal(kept.label, "HP change", `focus left the field after a change it could not read: ${JSON.stringify(kept)}`);
+    assert.equal(kept.value, "4q");
+    assert.equal(hp(w.id), hpBefore - 10, "nothing applied");
+    await field.fill("");
+    // Leaving the field ends the entry the digit started.
+    await field.blur();
+
+    // An entry started by a click keeps the field's own Enter: focus stays there after Apply.
+    await field.click();
+    await dm.keyboard.type("2");
+    await dm.keyboard.press("Enter");
+    await waitFor("2 more damage", () => (hp(w.id) === hpBefore - 12 ? true : null));
+    await dm.waitForTimeout(300);
+    assert.equal((await activeField(dm)).label, "HP change", "a clicked entry lost focus on Enter");
+
+    // In a field a digit types there, as before: the HP field holds it, and no new entry starts.
+    await dm.keyboard.type("5");
+    assert.equal(await field.inputValue(), "5");
+    await field.fill("");
+    await field.blur();
+
+    // 0 fits the map, + and - zoom, with the bar open and nothing taking the key as an HP change.
+    await clickToken(w, "Goblin Warrior 1");
+    const start = (await readCamera(dm))!;
+    await dm.keyboard.press("+");
+    await waitFor("+ zoomed in", async () => ((await readCamera(dm))!.scale > start.scale ? true : null));
+    const near = (await readCamera(dm))!;
+    await dm.keyboard.press("-");
+    await waitFor("- zoomed out", async () => ((await readCamera(dm))!.scale < near.scale ? true : null));
+    await dm.keyboard.press("+");
+    await dm.keyboard.press("+");
+    await waitFor("+ zoomed in again", async () => ((await readCamera(dm))!.scale > near.scale ? true : null));
+    const close = (await readCamera(dm))!;
+    await dm.keyboard.press("0");
+    await waitFor("0 fitted the map", async () => ((await readCamera(dm))!.scale < close.scale ? true : null));
+    assert.ok(!(await activeField(dm)).inField, "0, + or - put focus in a field");
+    assert.equal(await field.inputValue(), "", "0, + or - typed into the HP field");
+    await dm.keyboard.press("Escape");
+  });
+
+  test("qe-3. a device that moved Ruler to 1 keeps it: 1 picks the Ruler, 2 starts the HP change, and the sheet reads 2 to 9 with 1 is Ruler on this device.", async () => {
+    await dm.evaluate(() => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.keys", JSON.stringify({ v: 1, keys: { "tool:ruler": "1" } })));
+    await reopenRoom(dm);
+    await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+    await dm.locator(".konvajs-content").first().waitFor();
+    try {
+      const w = qe.warriors[1]!;
+      await clickToken(w, "Goblin Warrior 2");
+      await dm.keyboard.press("1");
+      const tools = dm.getByRole("navigation", { name: "Tools" });
+      const ruler = tools.getByRole("button", { name: "Ruler" }).first();
+      await waitFor("1 picked the Ruler", async () => ((await ruler.getAttribute("aria-pressed")) === "true" ? true : null));
+      assert.ok(!(await activeField(dm)).inField, "1 started an HP change");
+      await tools.getByRole("button", { name: "Select" }).first().click();
+      const bar = await clickToken(w, "Goblin Warrior 2");
+      await dm.keyboard.press("2");
+      await waitFor("2 started the HP change", async () => {
+        const a = await activeField(dm);
+        return a.label === "HP change" && a.value === "2" ? true : null;
+      });
+      await bar.getByRole("textbox", { name: "HP change", exact: true }).fill("");
+      await bar.getByRole("textbox", { name: "HP change", exact: true }).blur();
+      await dm.keyboard.press("Escape");
+
+      await dm.keyboard.press("?");
+      const sheet = dm.getByRole("dialog", { name: "Shortcuts" });
+      await sheet.waitFor();
+      const row = sheet.locator("tr").filter({ hasText: "Start an HP change of the selected tokens with that number" });
+      const keys = ((await row.locator("th").textContent()) ?? "").replace(/\s+/g, " ").trim();
+      assert.equal(keys, "2 to 9", "the HP row's keys");
+      const does = ((await row.locator("td").first().textContent()) ?? "").replace(/\s+/g, " ").trim();
+      assert.ok(does.endsWith("1 is Ruler on this device."), `the HP row's note: ${does}`);
+      await shots.take(dm, "qe-3-sheet-hp-row");
+      await dm.keyboard.press("Escape");
+      await sheet.waitFor({ state: "detached" });
+    } finally {
+      await dm.evaluate(() => (globalThis as unknown as { localStorage: { removeItem(k: string): void } }).localStorage.removeItem("rvtt.keys"));
+      await reopenRoom(dm);
+      await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+      await dm.locator(".konvajs-content").first().waitFor();
+    }
+  });
+
+  test("qe-4. C opens the bar's Conditions on their first cell and Escape closes them back on their button, for one token and a group, and Recent holds the three this device used last, newest first, fixed while open", async () => {
+    const w = qe.warriors[0]!;
+    const bar = await clickToken(w, "Goblin Warrior 1");
+    const conditions = bar.getByRole("button", { name: "Conditions", exact: true });
+    const firstCell = (want: string) =>
+      waitFor(`focus on ${want}, the drawer's first cell`, async () => {
+        const a = await activeField(dm);
+        return a.label === want && a.group !== null ? a : null;
+      });
+
+    // No Recent yet: the first cell is the conditions' first, Blinded.
+    await dm.keyboard.press("c");
+    await firstCell("Blinded");
+    assert.equal(await bar.getByRole("group", { name: "Recent", exact: true }).count(), 0, "a Recent row with nothing used");
+    assert.equal(await conditions.getAttribute("aria-pressed"), "true");
+    const grid = bar.getByRole("group", { name: "Conditions", exact: true });
+    await grid.getByRole("button", { name: "Prone", exact: true }).click();
+    await grid.getByRole("button", { name: "Poisoned", exact: true }).click();
+    await waitFor("Prone and Poisoned on Goblin Warrior 1", () => (["prone", "poisoned"].every((k) => effects(w.id).includes(k)) ? true : null));
+    // Fixed while open: nothing moves under the next tap.
+    assert.equal(await bar.getByRole("group", { name: "Recent", exact: true }).count(), 0, "the Recent row changed while the drawer was open");
+    await dm.keyboard.press("Escape");
+    await waitFor("the drawer closed back on Conditions", async () => ((await conditions.getAttribute("aria-pressed")) === "false" && (await activeField(dm)).label === "Conditions" ? true : null));
+    assert.ok(await bar.isVisible(), "Escape in the drawer closed the bar too");
+
+    await dm.keyboard.press("c");
+    await firstCell("Poisoned");
+    const recent = bar.getByRole("group", { name: "Recent", exact: true });
+    assert.deepEqual(await tileNames(recent), ["Poisoned", "Prone"]);
+    await grid.getByRole("button", { name: "Restrained", exact: true }).click();
+    await waitFor("Restrained on Goblin Warrior 1", () => (effects(w.id).includes("restrained") ? true : null));
+    assert.deepEqual(await tileNames(recent), ["Poisoned", "Prone"], "the Recent row moved while open");
+    await dm.keyboard.press("Escape");
+    await dm.keyboard.press("c");
+    await firstCell("Restrained");
+    assert.deepEqual(await tileNames(bar.getByRole("group", { name: "Recent", exact: true })), ["Restrained", "Poisoned", "Prone"]);
+    await shots.take(dm, "qe-4-recent-conditions");
+    await dm.keyboard.press("Escape");
+    assert.deepEqual(await dm.evaluate(() => JSON.parse((globalThis as unknown as { localStorage: { getItem(k: string): string | null } }).localStorage.getItem("rvtt.recentConditions") ?? "null")), ["restrained", "poisoned", "prone"]);
+
+    // The same three first in the Token panel's picker: the list is this device's, not the bar's.
+    await bar.getByRole("button", { name: "Details" }).click();
+    const panel = dm.getByRole("tabpanel", { name: "Token" });
+    const add = panel.getByRole("button", { name: "Add", exact: true }).first();
+    await add.click();
+    assert.deepEqual(await tileNames(panel.getByRole("group", { name: "Recent", exact: true })), ["Restrained", "Poisoned", "Prone"]);
+    await panel.getByRole("button", { name: "Done", exact: true }).first().click();
+
+    // A group's bar: C opens its grid on the first cell too.
+    await clickToken(qe.warriors[1]!, "Goblin Warrior 2");
+    const second = await pagePoint(dm, run.bounds, { x: qe.warriors[2]!.x + 0.5, y: qe.warriors[2]!.y + 0.5 });
+    await dm.keyboard.down("Shift");
+    await dm.mouse.click(second.x, second.y);
+    await dm.keyboard.up("Shift");
+    const group = dm.locator('[role="dialog"][data-bar-mode]');
+    await group.getByText("2 selected").waitFor();
+    await dm.keyboard.press("c");
+    await firstCell("Restrained");
+    assert.equal(await group.getByRole("button", { name: "Conditions", exact: true }).getAttribute("aria-pressed"), "true");
+    await dm.keyboard.press("Escape");
+    await waitFor("the group's drawer closed back on Conditions", async () => ((await activeField(dm)).label === "Conditions" ? true : null));
+    await group.getByRole("button", { name: "Clear", exact: true }).click();
+    await waitFor("nothing selected", async () => ((await dm.locator('[role="dialog"][data-bar-mode]').count()) === 0 ? true : null));
+    // With nothing selected C does nothing.
+    await dm.keyboard.press("c");
+    await dm.waitForTimeout(300);
+    assert.equal(await dm.getByRole("group", { name: "Conditions", exact: true }).count(), 0, "C with nothing selected opened a grid");
+  });
+
+  test("qe-5. All 4 Goblin Warriors in a warrior's bar selects the four, the hidden one too, in number order with focus on the group's frame, Save opens their group save, and a lone goblin or a renamed one has no such button", async () => {
+    const bar = await clickToken(qe.warriors[2]!, "Goblin Warrior 3");
+    const all = bar.getByRole("button", { name: "All 4 Goblin Warriors", exact: true });
+    await all.waitFor();
+    await shots.take(dm, "qe-5-all-of-a-kind");
+    await all.click();
+    const group = dm.locator('[role="dialog"][data-bar-mode]');
+    await group.getByText("4 selected").waitFor();
+    await waitFor("focus on the group's frame", () =>
+      dm.evaluate(() => (globalThis as unknown as { document: { activeElement: { getAttribute(n: string): string | null } | null } }).document.activeElement?.getAttribute("data-bar-mode") ?? null),
+    );
+    const names = (await group.textContent()) ?? "";
+    const at = qe.warriors.map((w) => names.indexOf(`Goblin Warrior ${w.number}`));
+    assert.ok(at.every((n) => n >= 0) && at.every((n, i) => i === 0 || n > at[i - 1]!), `the group names the four in number order: ${names}`);
+
+    // The group bar's Save opens the group save page for the four, with its own ability picker.
+    await group.getByRole("button", { name: "Save", exact: true }).click();
+    // The page takes the side panel's Dice pane, under its own title.
+    const page = dm.locator("aside").getByText("Dexterity save for 4").first();
+    if (!(await page.waitFor({ timeout: 10_000 }).then(() => true, () => false))) {
+      await shots.take(dm, "qe-5-group-save-missing");
+      assert.fail(`Save opened no group save page for the four: the side panel reads ${((await dm.locator("aside").first().textContent()) ?? "").slice(0, 400)}`);
+    }
+    await shots.take(dm, "qe-5-group-save");
+    await group.getByRole("button", { name: "Clear", exact: true }).click();
+
+    for (const [t, name] of [
+      [qe.snik, "Snik"],
+      [run.goblin, "Goblin"],
+    ] as const) {
+      const one = await clickToken(t, name);
+      await one.getByRole("button", { name: "Conditions", exact: true }).waitFor();
+      assert.equal(await one.getByRole("button", { name: /^All \d+ / }).count(), 0, `${name}'s bar offers All of a kind`);
+      await dm.keyboard.press("Escape");
+    }
   });
 
   test("9. no page errors along the way", () => {
