@@ -5,7 +5,7 @@ import { createStore } from "zustand/vanilla";
 import type { NamedRoll } from "#shared/dice/bonus.ts";
 import type { LogEntry, RoomState } from "#shared/model.ts";
 import { actor, character, customMonster, DM, entry, room, token } from "#shared/testutil.ts";
-import { cardAttacks, cardLoad, combatAlerts } from "./alerts.ts";
+import { blockLoad, cardAttacks, cardLoad, combatAlerts } from "./alerts.ts";
 import { turnParticipants } from "./logic.ts";
 
 /*
@@ -79,11 +79,36 @@ describe("the turn card's gating", () => {
 
   test("the card's wait and failure are the uses' and the rolls table's together", () => {
     const quiet = { loading: false, failed: false };
-    assert.deepEqual(cardLoad(quiet, { loading: false, failed: true }), { loading: false, failed: true });
-    assert.deepEqual(cardLoad({ loading: false, failed: true }, quiet), { loading: false, failed: true });
-    assert.deepEqual(cardLoad(quiet, { loading: true, failed: false }), { loading: true, failed: false });
-    assert.deepEqual(cardLoad({ loading: true, failed: false }, quiet), { loading: true, failed: false });
-    assert.deepEqual(cardLoad(quiet, quiet), quiet);
+    const joint = (uses: typeof quiet, rolls: typeof quiet) => { const { loading, failed } = cardLoad(uses, rolls); return { loading, failed }; };
+    assert.deepEqual(joint(quiet, { loading: false, failed: true }), { loading: false, failed: true });
+    assert.deepEqual(joint({ loading: false, failed: true }, quiet), { loading: false, failed: true });
+    assert.deepEqual(joint(quiet, { loading: true, failed: false }), { loading: true, failed: false });
+    assert.deepEqual(joint({ loading: true, failed: false }, quiet), { loading: true, failed: false });
+    assert.deepEqual(joint(quiet, quiet), quiet);
+  });
+
+  test("each line says its own part's wait or failure: the uses never read as failed for the rolls table's sake", () => {
+    const view = table();
+    const participants = turnParticipants(view);
+    const base = { view, you: dmYou, participants, dismissed: new Set<string>(), attacks: [null], uses: [null] };
+    const lines = (uses: { loading: boolean; failed: boolean }, rolls: { loading: boolean; failed: boolean }, known = false) => {
+      const card = combatAlerts({ ...base, ...cardLoad(uses, rolls) }).turn;
+      assert.ok(card, "the card stays while its parts are unknown");
+      return blockLoad(card, known);
+    };
+    const load = { loading: true, failed: false };
+    const fail = { loading: false, failed: true };
+    const done = { loading: false, failed: false };
+    // The table failed while the uses still load: the uses say they load, and the attacks say they failed.
+    assert.deepEqual(lines(load, fail), { uses: load, attacksQuiet: false });
+    // Both failed: the uses' failure and its one reload speak for both.
+    assert.deepEqual(lines(fail, fail), { uses: fail, attacksQuiet: true });
+    assert.deepEqual(lines(fail, done), { uses: fail, attacksQuiet: true });
+    // Both load: one waiting line, the uses'.
+    assert.deepEqual(lines(load, load), { uses: load, attacksQuiet: true });
+    // The uses are known: the attacks say their own wait or failure.
+    assert.deepEqual(lines(done, fail, true), { uses: done, attacksQuiet: false });
+    assert.deepEqual(lines(done, load, true), { uses: done, attacksQuiet: false });
   });
 
   test("dismissed, it stays away for the turn as before", () => {

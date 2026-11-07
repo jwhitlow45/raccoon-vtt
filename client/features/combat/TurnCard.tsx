@@ -4,7 +4,7 @@ import { Icon } from "../../components/Icon.tsx";
 import { theme } from "../../lib/theme.ts";
 import { AttackRows } from "../dice/RollOptions.tsx";
 import { alertCard } from "../encounter/alertCard.ts";
-import type { TurnCardModel } from "./alerts.ts";
+import { blockLoad, type TurnCardModel } from "./alerts.ts";
 import { CombatUses } from "./CombatUses.tsx";
 
 /** The id a turn card has in the alerts column and the dock's summary. */
@@ -114,20 +114,23 @@ export function TurnCard(props: { model: TurnCardModel; folded: boolean; foldabl
         {/* Dismiss is the close every card and sheet draws (docs/design/design-v1-icons-2.md 4). */}
         <Button size="sm" variant="quiet" icon="close" iconOnly="always" aria-label={`Dismiss ${title}`} onClick={props.onDismiss} style={{ flex: "none", marginLeft: "auto" }} />
       </div>
-      {model.blocks.map(({ participant, uses }) => (
-        <div key={participant.holder} role={several ? "group" : undefined} aria-label={several ? participant.name : undefined} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
-          {several ? <div style={{ fontSize: theme.font.small, fontWeight: theme.weight.strong, color: theme.color.textMuted }}>{participant.name}</div> : null}
-          {/* Its results count from the turn's start, so last turn's hit never offers its chips again. While the uses load, they say so for both. */}
-          <AttackRows
-            creature={participant.target}
-            tokenId={"tokenId" in participant.target ? participant.target.tokenId : undefined}
-            name={participant.name}
-            after={model.since}
-            quietWait={uses === null && (model.loading || model.failed)}
-          />
-          <CombatUses target={participant.target} form="card" uses={uses} loading={model.loading} failed={model.failed} ownTurn name={participant.name} />
-        </div>
-      ))}
+      {model.blocks.map(({ participant, uses }) => {
+        const load = blockLoad(model, uses !== null);
+        return (
+          <div key={participant.holder} role={several ? "group" : undefined} aria-label={several ? participant.name : undefined} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
+            {several ? <div style={{ fontSize: theme.font.small, fontWeight: theme.weight.strong, color: theme.color.textMuted }}>{participant.name}</div> : null}
+            {/* Its results count from the turn's start, so last turn's hit never offers its chips again. While the uses load or failed, their line speaks for both unless the rolls table failed alone. */}
+            <AttackRows
+              creature={participant.target}
+              tokenId={"tokenId" in participant.target ? participant.target.tokenId : undefined}
+              name={participant.name}
+              after={model.since}
+              quietWait={load.attacksQuiet}
+            />
+            <CombatUses target={participant.target} form="card" uses={uses} loading={load.uses.loading} failed={load.uses.failed} ownTurn name={participant.name} />
+          </div>
+        );
+      })}
     </section>
   );
 }

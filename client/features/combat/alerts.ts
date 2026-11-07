@@ -56,9 +56,16 @@ export type TurnCardModel = {
    * result shows rather than an earlier turn's with its chips.
    */
   since: number;
+  /** The card's wait and failure, the uses' and the rolls table's joined, which keep its blocks (cardLoad). */
   loading: boolean;
   failed: boolean;
+  /** The uses' own wait and failure, for their line (blockLoad). */
+  usesLoad: Load;
+  /** Whether the rolls table failed, which the attacks' own line says. */
+  rollsFailed: boolean;
 };
+
+type Load = { loading: boolean; failed: boolean };
 
 export type CombatAlerts = {
   regenerations: PromptCard<RegenerationPrompt>[];
@@ -96,9 +103,24 @@ export function useCombatAlerts(): CombatAlerts {
   });
 }
 
-/** The turn card's wait and failure: its uses' and the rolls table's, which its attacks need as well. */
-export function cardLoad(uses: { loading: boolean; failed: boolean }, rolls: { loading: boolean; failed: boolean }): { loading: boolean; failed: boolean } {
-  return { loading: uses.loading || rolls.loading, failed: uses.failed || rolls.failed };
+/**
+ * The turn card's wait and failure: its uses' and the rolls table's, which its
+ * attacks need as well, joined to keep the card. Each part's own goes with
+ * them, so a line names the load that failed.
+ */
+export function cardLoad(uses: Load, rolls: Load): Load & { usesLoad: Load; rollsFailed: boolean } {
+  return { loading: uses.loading || rolls.loading, failed: uses.failed || rolls.failed, usesLoad: { loading: uses.loading, failed: uses.failed }, rollsFailed: rolls.failed };
+}
+
+/**
+ * What a block's lines say while its parts load. The uses' line says the uses'
+ * own wait or failure. The attacks stay quiet only where that line covers them:
+ * the uses failed, and its one reload loads both, or both still load. A failed
+ * rolls table says so itself beside uses that still load.
+ */
+export function blockLoad(model: Pick<TurnCardModel, "usesLoad" | "rollsFailed">, usesKnown: boolean): { uses: Load; attacksQuiet: boolean } {
+  const uses = model.usesLoad;
+  return { uses, attacksQuiet: !usesKnown && (uses.failed || (uses.loading && !model.rollsFailed)) };
 }
 
 /** The cards of the turn now for this viewer, free of React for its tests. */
@@ -111,6 +133,9 @@ export function combatAlerts(input: {
   attacks?: readonly (number | null)[];
   loading: boolean;
   failed: boolean;
+  /** Left out, the uses' wait and failure are the card's, and the rolls table never failed. */
+  usesLoad?: Load;
+  rollsFailed?: boolean;
   dismissed: ReadonlySet<string>;
 }): CombatAlerts {
   const { view, you, dismissed } = input;
@@ -154,7 +179,7 @@ export function combatAlerts(input: {
       const entry = encounter.entries.find((e) => e.id === encounter.activeEntryId);
       const name = landing?.name ?? (entry ? entryName(view, entry) : "This");
       const since = turnSince(view, input.participants) ?? Number.POSITIVE_INFINITY;
-      out.turn = { id, name, blocks, count: blocks.reduce((n, b) => n + b.count, 0), attacks: blocks.reduce((n, b) => n + b.attacks, 0), since, loading: input.loading, failed: input.failed };
+      out.turn = { id, name, blocks, count: blocks.reduce((n, b) => n + b.count, 0), attacks: blocks.reduce((n, b) => n + b.attacks, 0), since, loading: input.loading, failed: input.failed, usesLoad: input.usesLoad ?? { loading: input.loading, failed: input.failed }, rollsFailed: input.rollsFailed ?? false };
     }
   }
   return out;

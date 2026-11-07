@@ -13,7 +13,7 @@ const { renderToStaticMarkup } = await import("react-dom/server");
 const { TurnCard } = await import("./TurnCard.tsx");
 
 function folded(count: number, attacks = 0): string {
-  const model = { id: "t1", name: "Adult Red Dragon", blocks: [], count, attacks, since: 0, loading: false, failed: false };
+  const model = { id: "t1", name: "Adult Red Dragon", blocks: [], count, attacks, since: 0, loading: false, failed: false, usesLoad: { loading: false, failed: false }, rollsFailed: false };
   return renderToStaticMarkup(createElement(TurnCard, { model, folded: true, foldable: true, onShow: () => {}, onDismiss: () => {} }));
 }
 
