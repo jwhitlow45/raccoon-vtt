@@ -633,6 +633,49 @@ async function unfoldAll(root: Locator): Promise<void> {
   }
 }
 
+/**
+ * Waits until the alerts column draws the same box and the same cards for
+ * five frames and 150 ms running, at most `ms`: a card opened in it is
+ * measured on the next frame, and the cards may then stand over the tool's
+ * options or go over the screen.
+ */
+async function columnSettled(page: Page, ms = 3_000): Promise<void> {
+  const settled = await page.evaluate((limit) => {
+    type El = { parentElement: El | null; hidden: boolean; getAttribute(n: string): string | null; getBoundingClientRect(): { top: number; height: number; width: number } };
+    const g = globalThis as unknown as { document: { querySelector(s: string): El | null }; getComputedStyle(e: El): { display: string }; performance: { now(): number }; requestAnimationFrame(f: () => void): void };
+    const box = (el: El | null | undefined) => {
+      const r = el?.getBoundingClientRect();
+      return r ? `${r.top} ${r.height} ${r.width}` : "none";
+    };
+    // The cards' box as markColumn finds it, and the column around it.
+    const look = () => {
+      let cards = g.document.querySelector("[data-alert]")?.parentElement ?? null;
+      while (cards && g.getComputedStyle(cards).display === "contents") cards = cards.parentElement;
+      return `${cards?.hidden} ${cards?.parentElement?.getAttribute("role")} ${box(cards)} ${box(cards?.parentElement)}`;
+    };
+    return new Promise<boolean>((resolve) => {
+      const start = g.performance.now();
+      let last = look();
+      let since = start;
+      let frames = 0;
+      const tick = () => {
+        const now = g.performance.now();
+        const seen = look();
+        if (seen !== last) {
+          last = seen;
+          since = now;
+          frames = 0;
+        } else frames++;
+        if (frames >= 5 && now - since >= 150) resolve(true);
+        else if (now - start > limit) resolve(false);
+        else g.requestAnimationFrame(tick);
+      };
+      g.requestAnimationFrame(tick);
+    });
+  }, ms);
+  assert.ok(settled, `the alerts column still moved ${ms} ms after the card opened`);
+}
+
 /** Marks the alerts column, the box that holds the alert cards (each kind marked `data-alert`), for measuring it as one root. */
 async function markColumn(page: Page): Promise<Locator | null> {
   const marked = await page.evaluate(() => {
@@ -991,25 +1034,15 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
     const fold = column.locator("[data-alert] button[aria-expanded=false]").first();
     if (await visible(fold)) {
       await fold.click();
-      await page.locator("[data-alert] button[aria-expanded=true]").first().waitFor();
-      // The mark is on one node. Where the column is drawn again on a new node while it is measured, as on a slow CI page, it is marked again once, and the alerts there are logged.
-      // A column that left and is not drawn again fails with the first measure's error, since that measure already counted the screen as seen.
-      let left: unknown = null;
-      for (let attempt = 0; attempt < 2; attempt++) {
-        const open = await markColumn(page);
-        if (!open) {
-          if (left !== null) throw left;
-          break;
-        }
-        try {
-          await sweep.measure(page, "alerts-column-open", open);
-          break;
-        } catch (err) {
-          if (attempt === 1 || !String(err).includes("no roots matched")) throw err;
-          left = err;
-          const alerts = await page.locator("[data-alert]").evaluateAll((els) => els.map((e) => e.getAttribute("data-alert")).join(", "));
-          console.log(`${sweep.at} alerts-column-open: the marked column left while measured, marked again (alerts: ${alerts})`);
-        }
+      // The open card's height is read on the frame after the tap. Where it leaves the first card no room above the tool's options, the cards are asked for as the summary row's tap asks for them. A measure taken sooner read a column still moving, which on a slow CI page folded into its row mid-measure.
+      await columnSettled(page);
+      const open = await markColumn(page);
+      if (!open) await sweep.missing(page, "alerts-column-open", "the card opened in the column folded it into its summary row");
+      else {
+        await sweep.measure(page, "alerts-column-open", open);
+        // Asked for, the cards stand over the tool's options until a tap lands outside them, or over the screen until Close. Let them go, so the summary below starts from the row that tap leaves.
+        if (await visible(page.getByRole("dialog", { name: "Alerts" }))) await page.keyboard.press("Escape");
+        else if (await canvasAt(page, { x: 4, y: 4 })) await tapCell(page, BOUNDS, { x: 4, y: 4 });
       }
     }
   }
