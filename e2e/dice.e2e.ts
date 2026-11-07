@@ -475,6 +475,83 @@ async function resultWords(page: Page): Promise<string | null> {
 }
 
 /**
+ * Apply to chips under a damage roll (designs/qol audit Q2), its steps
+ * labeled `qe-`: Thorn's token with a hidden Lurker beside him and two
+ * goblins farther along his row, and a second DM computer whose socket is
+ * routed, so an apply can wait on the wire or reach the server spoiled.
+ */
+const qe = {
+  thorn: randomUUID(),
+  lurker: randomUUID(),
+  goblinA: randomUUID(),
+  goblinB: randomUUID(),
+  row: 0,
+  context: null as BrowserContext | null,
+  desk: null as Page | null,
+  wire: null as Wire | null,
+  console: new ConsoleWatch("dm-desk"),
+};
+
+/**
+ * A page's room socket run through a route: every frame it sends is kept
+ * in `sent`, one that matches `hold` waits in `held` until released, and
+ * `spoil` rewrites the frames it is given, so the server refuses them.
+ */
+type Wire = { hold: RegExp | null; held: string[]; sent: string[]; spoil: ((frame: string) => string) | null; up: WebSocketRoute | null };
+
+async function routedSocket(page: Page): Promise<Wire> {
+  const wire: Wire = { hold: null, held: [], sent: [], spoil: null, up: null };
+  await page.routeWebSocket(/\/ws\?room=/, (ws) => {
+    const upstream = ws.connectToServer();
+    wire.up = upstream;
+    ws.onMessage((m) => {
+      const text = typeof m === "string" ? m : m.toString("utf8");
+      wire.sent.push(text);
+      if (wire.hold?.test(text)) wire.held.push(text);
+      else upstream.send(wire.spoil ? wire.spoil(text) : text);
+    });
+    upstream.onMessage((m) => ws.send(m));
+  });
+  return wire;
+}
+
+/** Sends what waited, and holds nothing more. */
+function release(wire: Wire): void {
+  wire.hold = null;
+  for (const m of wire.held.splice(0)) wire.up!.send(m);
+}
+
+/** How many ops of type `t` a page has sent, from its route or its watch. */
+function sentOps(frames: readonly string[], t: string): number {
+  return frames.filter((m) => m.includes(`"t":"${t}"`)).length;
+}
+
+/** The names on a row of Apply to chips, in order. */
+async function chipNames(row: Locator): Promise<string[]> {
+  return (await row.getByRole("group", { name: "Apply to" }).getByRole("button").allInnerTexts()).map((t) => t.trim());
+}
+
+function hpOf(tokenId: string): number {
+  const t = dmSocket.state!.tokens[tokenId]!;
+  return "inline" in t.actor ? t.actor.inline.hp.cur : dmSocket.state!.characters[t.actor.ref]!.actor.hp.cur;
+}
+
+function qeDesk(): { page: Page; wire: Wire } {
+  assert.ok(qe.desk && qe.wire, "qe-1 opened no routed DM computer");
+  return { page: qe.desk, wire: qe.wire };
+}
+
+/** Pat's Longsword damage from his Dice sheet, and the new line's total. */
+async function patDamage(): Promise<number> {
+  await openDicePhone(player);
+  const count = diceLines(playerSocket.state?.log).length;
+  // A natural 20 on an earlier Attack names the damage a Critical Hit.
+  await thornRolls(player).getByRole("button", { name: /^Longsword damage/ }).tap();
+  const line = await waitFor("Pat's Longsword damage", () => diceLines(playerSocket.state?.log).slice(count).find((l) => l.data.by === run.patId && l.data.rolls.length > 0)?.data ?? null);
+  return line.rolls.reduce((n, r) => n + r.total, 0);
+}
+
+/**
  * The roll header on the token screen (docs/design/design-v1-token-roll-header.md 8),
  * its steps labeled `trh-`: the panel's room, a monster of its own with
  * nothing but its six abilities, so its panel is short, and a second
@@ -2051,6 +2128,206 @@ describe("raccoon-vtt dice", { timeout: 300_000 }, () => {
     } finally {
       await context.close();
       for (const g of goblins) await ops!.send({ t: "token.delete", tokenId: g.id }).catch(() => undefined);
+    }
+  });
+
+  test("qe-1. a damage roll typed with no words offers no chips with nothing selected and one, Thorn, with Thorn alone selected, and Pat's toast of the DM's roll carries none (QOL audit Q2)", async () => {
+    const sceneId = dmSocket.state!.meta.playerSceneId!;
+    const bounds = dmSocket.state!.scenes[sceneId]!.bounds;
+    qe.row = Math.min(12, bounds.h - 2);
+    // A plain creature's numbers, with HP enough that no roll here kills it.
+    const goblin = { ...THORN_ACTOR, hp: { cur: 30, max: 30, temp: 0 }, ac: 12 };
+    await ops!.send({ t: "token.create", token: { id: qe.thorn, sceneId, kind: "pc", name: "Thorn", size: "medium", x: 8, y: qe.row, visibility: "all", disposition: "ally", actor: { ref: run.thornId } } });
+    await ops!.send({ t: "token.create", token: { id: qe.lurker, sceneId, kind: "monster", name: "Lurker", size: "medium", x: 9, y: qe.row, visibility: "dm", disposition: "hostile", actor: { inline: goblin } } });
+    await ops!.send({ t: "token.create", token: { id: qe.goblinA, sceneId, kind: "monster", name: "Goblin A", size: "medium", x: 6, y: qe.row, visibility: "all", disposition: "hostile", actor: { inline: goblin } } });
+    await ops!.send({ t: "token.create", token: { id: qe.goblinB, sceneId, kind: "monster", name: "Goblin B", size: "medium", x: 3, y: qe.row, visibility: "all", disposition: "hostile", actor: { inline: goblin } } });
+    await waitFor("the goblins on Pat's phone", () => playerSocket.state?.tokens[qe.goblinB] ?? null);
+    // A second DM computer, its socket routed from the start so an apply can wait on the wire.
+    qe.context = await browser.newContext({ viewport: { width: 1280, height: 800 }, reducedMotion: "reduce" });
+    await qe.context.addCookies(await dmContext.cookies(server.origin));
+    qe.desk = await qe.context.newPage();
+    qe.console.attach(qe.desk);
+    qe.wire = await routedSocket(qe.desk);
+    const { page } = qeDesk();
+    await page.goto(`${server.origin}/r/${run.roomId}`);
+    await page.getByRole("status", { name: "Connected" }).first().waitFor();
+    await page.locator(".konvajs-content").first().waitFor();
+    await closeAll(player);
+    await player.setViewportSize({ width: 390, height: 844 });
+
+    await openSideTab(page, "Dice");
+    const last = page.locator("[data-dice-last]");
+    const none = await rollWithEnter(page, dmSocket, "2d6");
+    await last.getByText(String(none.rolls[0]!.total), { exact: true }).waitFor();
+    await page.waitForTimeout(300);
+    assert.equal(await last.locator("[data-apply-to]").count(), 0, "chips under a roll for no creature with nothing selected");
+
+    await tapCell(page, bounds, { x: 8, y: qe.row });
+    await page.getByRole("dialog", { name: "Thorn actions" }).waitFor();
+    const one = await rollWithEnter(page, dmSocket, "2d6");
+    await last.getByText(String(one.rolls[0]!.total), { exact: true }).waitFor();
+    await last.getByRole("group", { name: "Apply to" }).waitFor();
+    assert.deepEqual(await chipNames(last), ["Thorn"], "a roll for no creature offers the selection alone");
+    assert.equal(await last.getByRole("button", { name: `Apply ${one.rolls[0]!.total} damage to Thorn`, exact: true }).count(), 1, "the chip's name");
+    // A roll of the DM's that Pat sees comes to him as a toast with no chips: a player's chips are for his own rolls.
+    const patToast = player.locator("[data-toast]").filter({ hasText: new RegExp(`Dana the DM rolled ${one.rolls[0]!.total}`) });
+    await patToast.first().waitFor();
+    assert.equal(await player.locator("[data-toast-sends], [data-apply-to]").count(), 0, "Pat's toast of the DM's roll carries chips");
+    await shots.take(page, "qe-1-typed-roll-thorn-chip");
+  });
+
+  test("qe-2. a chip the server refuses says why under the roll and stays offered, and Thorn's HP stands (QOL audit Q2)", async () => {
+    const { page, wire } = qeDesk();
+    const last = page.locator("[data-dice-last]");
+    const chip = last.getByRole("button", { name: /^Apply \d+ damage to Thorn$/ });
+    const before = hpOf(qe.thorn);
+    // An amount below 0, which the server's own check refuses in its words.
+    wire.spoil = (frame) => (frame.includes('"t":"actor.hp"') ? frame.replace(/"amount":\d+/, '"amount":-1') : frame);
+    try {
+      await chip.click();
+      const said = last.locator("[data-apply-to] p");
+      await said.waitFor();
+      const words = (await said.innerText()).trim();
+      assert.ok(words.length > 0 && words !== "Applied to Thorn.", `the row's words: ${words}`);
+      assert.equal(await chip.count(), 1, "a refused chip left the row");
+      assert.equal(hpOf(qe.thorn), before, "a refused apply changed Thorn's HP");
+      await shots.take(page, "qe-2-refused-in-row");
+    } finally {
+      wire.spoil = null;
+    }
+  });
+
+  test("qe-3. Pat's Longsword damage toasts on the DM's computer with Apply to naming Thorn's enemies nearest first, the hidden Lurker among them: held on the wire, the toast stays with its chip busy and the others off, and a tap on its words closes nothing; taken, it closes with Goblin A's HP down by the roll; refused, it stays and says why (QOL audit Q2)", async () => {
+    const { page, wire } = qeDesk();
+    // Toasts come while the Dice panel is not on screen.
+    await openSideTab(page, "Initiative");
+    const toast = (total: number) => page.locator("[data-toast]").filter({ hasText: new RegExp(`^Pat rolled ${total} for (Thorn, )?Longsword damage`) });
+    const total = await patDamage();
+    const shown = toast(total);
+    await shown.getByRole("group", { name: "Apply to" }).waitFor();
+    const names = await chipNames(shown);
+    assert.deepEqual(names.slice(0, 3), ["Lurker", "Goblin A", "Goblin B"], `the toast's chips: ${names.join(", ")}`);
+    assert.ok(!names.includes("Thorn"), "the roller among his own chips");
+    const chip = shown.getByRole("button", { name: `Apply ${total} Slashing damage to Goblin A`, exact: true });
+    const before = hpOf(qe.goblinA);
+    const applies = sentOps(wire.sent, "actor.hp");
+    wire.hold = /"t":"actor\.hp"/;
+    try {
+      await chip.click();
+      await waitFor("the apply on the wire", () => (wire.held.length === 1 ? true : null));
+      await waitFor("the toast's chip busy", async () => ((await chip.getAttribute("aria-busy")) === "true" ? true : null), 3_000);
+      for (const name of names.filter((n) => n !== "Goblin A")) assert.equal(await shown.getByRole("button", { name: new RegExp(`to ${name}$`) }).isDisabled(), true, `${name}'s chip takes a tap while another waits`);
+      // The words close a toast, but not one that waits.
+      await shown.getByRole("button", { name: /^Pat rolled/ }).click();
+      await page.waitForTimeout(400);
+      assert.equal(await shown.count(), 1, "the toast closed while its chip waited");
+      await shots.take(page, "qe-3-toast-busy");
+    } finally {
+      release(wire);
+    }
+    await shown.waitFor({ state: "detached" });
+    await waitFor("Goblin A hurt by the roll", () => (hpOf(qe.goblinA) === before - total ? true : null));
+    assert.equal(sentOps(wire.sent, "actor.hp"), applies + 1, "more than one apply went");
+
+    const again = await patDamage();
+    const refused = toast(again);
+    await refused.getByRole("group", { name: "Apply to" }).waitFor();
+    wire.spoil = (frame) => (frame.includes('"t":"actor.hp"') ? frame.replace(/"amount":\d+/, '"amount":-1') : frame);
+    try {
+      await refused.getByRole("button", { name: `Apply ${again} Slashing damage to Goblin B`, exact: true }).click();
+      await refused.getByRole("alert").waitFor();
+      assert.ok((await refused.getByRole("alert").innerText()).trim().length > 0, "the refusal says nothing");
+      assert.equal(await refused.count(), 1, "a refused toast closed");
+      await shots.take(page, "qe-3-toast-refused");
+    } finally {
+      wire.spoil = null;
+    }
+    await refused.getByRole("button", { name: /^Pat rolled/ }).click();
+    await refused.waitFor({ state: "detached" });
+  });
+
+  test("qe-4. at 480 x 320 at 130%, where an open sheet stands over the whole screen, Pat's damage toast stands in the sheet as one row with its chips hidden, and a tap shows it whole with them (QOL audit Q2)", async () => {
+    const { page } = qeDesk();
+    const open = async (scale: number, size: { width: number; height: number }) => {
+      await page.setViewportSize(size);
+      await page.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
+      await reopenRoom(page);
+      await page.getByRole("status", { name: "Connected" }).first().waitFor();
+    };
+    await open(1.3, { width: 480, height: 320 });
+    try {
+      await closeAll(page);
+      await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
+      await page.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Log/ }).click();
+      await page.locator('dialog[data-rvtt-sheet][aria-label="Log"]').waitFor();
+      await closeAll(player);
+      const total = await patDamage();
+      const row = page.locator('[data-toast-form="row"]').filter({ has: page.getByRole("button", { name: new RegExp(`^Pat rolled ${total} for (Thorn, )?Longsword damage`) }) });
+      await row.waitFor();
+      // Mounted and hidden in the one row, which has no room for them.
+      const sends = row.locator("[data-toast-sends]");
+      assert.equal(await sends.count(), 1, "the row's chips are not mounted");
+      assert.equal(await sends.isVisible(), false, "the one row shows its chips");
+      await shots.take(page, "qe-4-toast-row");
+      await row.getByRole("button", { name: /^Pat rolled/ }).click();
+      const whole = page.locator('[data-toast-form="whole"]');
+      await whole.locator("[data-toast-sends]").getByRole("button", { name: /to Goblin A$/ }).waitFor();
+      assert.ok(await whole.locator("[data-toast-sends]").isVisible(), "the whole toast hides its chips");
+      await shots.take(page, "qe-4-toast-whole");
+      await whole.getByRole("button", { name: "Close", exact: true }).click();
+    } finally {
+      await closeAll(page);
+      await open(1, { width: 1280, height: 800 });
+    }
+  });
+
+  test("qe-5. with Players can apply damage and healing on, Pat's chips under his own Longsword damage name the goblins nearest Thorn and never the hidden Lurker; a chip closes the Dice sheet and fills Goblin A's HP entry with the roll and its preview, sending nothing until Apply (QOL audit Q2, D-261106-174)", async () => {
+    await ops!.send({ t: "room.update", settings: { playersApplyDamage: true } });
+    try {
+      await waitFor("the setting on Pat's phone", () => playerSocket.state?.meta.settings.playersApplyDamage || null);
+      const total = await patDamage();
+      const sheet = player.locator('dialog[data-rvtt-sheet][aria-label="Dice"]');
+      const last = sheet.locator("[data-dice-last]");
+      await last.getByRole("group", { name: "Apply to" }).waitFor();
+      const names = await chipNames(last);
+      assert.deepEqual(names.slice(0, 2), ["Goblin A", "Goblin B"], `Pat's chips: ${names.join(", ")}`);
+      assert.ok(!names.includes("Lurker"), "Pat's chips name the hidden Lurker");
+      assert.equal(playerSocket.everSaw(qe.lurker), false, "the hidden Lurker reached Pat's phone");
+      const sent = playerSocket.sent.length;
+      const before = hpOf(qe.goblinA);
+      await last.getByRole("button", { name: `Fill ${total} Slashing damage for Goblin A`, exact: true }).tap();
+      await sheet.waitFor({ state: "hidden" });
+      const entry = player.getByLabel("HP change", { exact: true }).first();
+      await waitFor("the entry filled", async () => ((await entry.inputValue()) === String(total) ? true : null));
+      await player.getByText(`${total} Slashing damage`).first().waitFor();
+      // A phone keeps the keyboard down.
+      assert.equal(await entry.evaluate((el) => el === (globalThis as unknown as { document: { activeElement: unknown } }).document.activeElement), false, "the filled field took focus on a phone");
+      await player.waitForTimeout(400);
+      assert.equal(sentOps(playerSocket.sent.slice(sent), "actor.hp"), 0, "the chip sent the damage before Apply");
+      await shots.take(player, "qe-5-pat-chip-filled");
+      await player.getByRole("button", { name: "Apply", exact: true }).first().tap();
+      await waitFor("Goblin A hurt by Pat's Apply", () => (hpOf(qe.goblinA) === before - total ? true : null));
+    } finally {
+      await ops!.send({ t: "room.update", settings: { playersApplyDamage: false } });
+    }
+  });
+
+  test("qe-6. with the setting off, Pat's own damage roll offers no chips (QOL audit Q2)", async () => {
+    await waitFor("the setting off on Pat's phone", () => (playerSocket.state?.meta.settings.playersApplyDamage === false ? true : null));
+    await closeAll(player);
+    const total = await patDamage();
+    const last = player.locator('dialog[data-rvtt-sheet][aria-label="Dice"] [data-dice-last]');
+    await last.getByText(String(total), { exact: true }).waitFor();
+    await player.waitForTimeout(400);
+    assert.equal(await last.locator("[data-apply-to]").count(), 0, "chips for a player with the setting off");
+    try {
+      assert.deepEqual(qe.console.errors, [], "the routed DM computer logged errors");
+    } finally {
+      await closeAll(player);
+      await qe.context?.close();
+      qe.context = null;
+      qe.desk = null;
+      for (const id of [qe.thorn, qe.lurker, qe.goblinA, qe.goblinB]) await ops!.send({ t: "token.delete", tokenId: id }).catch(() => undefined);
     }
   });
 
