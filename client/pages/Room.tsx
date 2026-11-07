@@ -80,6 +80,7 @@ import { useDropHpDraftsOnSelect } from "../features/tokens/hpDraft.ts";
 import { useClearStatBlockOnSelect } from "../features/tokens/statBlockOpen.ts";
 import { panelFoldsSlot } from "../features/tokens/panelFolds.ts";
 import { landing, landOn, routeSlot, type RouteRequest } from "../features/search/route.ts";
+import { PanelsSearchField, SearchButton, SearchSheetHost } from "../features/search/SearchSheet.tsx";
 import { isoOffered, viewFoldSlot } from "../features/view/choice.ts";
 import { fitKey, fitStep, sameRecord, shapeOf, stepsFor, type BarContent, type FitRecord } from "./topBarFit.ts";
 import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
@@ -426,6 +427,8 @@ function RoomPage() {
   const hasClock = useRoomView((s) => !!s.view?.clock);
   const hasSound = useRoomView((s) => somethingPlays(s.view?.playing));
   const panels = panelsFor(role, wide, playerWaits({ clock: hasClock, sound: hasSound }, (id) => panelIsOpen({ panel, tab, below }, id, wide)));
+  // The search lists the panels this list does, for the same reasons (features/search/index.ts), as one value while they hold.
+  const panelOptions = useMemo(() => playerWaits({ clock: hasClock, sound: hasSound }, (id) => panelIsOpen({ panel, tab, below }, id, wide)), [hasClock, hasSound, panel, tab, below, wide]);
   /*
    * The subpage each panel names (features/panels.ts usePanelHeader), for
    * the sheet's header or its pane's in the side panel. Kept by panel, so
@@ -1147,6 +1150,8 @@ function RoomPage() {
           placement={placement}
           // In the bar a player's chip shows only its dot, so the strip has room: from 900 px up below 1,100 px as before, less what a wider side panel takes, and on a phone while the strip is there.
           chipDot={wide ? width - (sideShown ? panelWidth - theme.layout.sidePanelWidth : 0) < theme.layout.chipNameMinWidth : placement === "bar" && fight}
+          // Not in "view as a player" (D-261106-152). The table display has no Room page.
+          search={!preview}
           openSheet={openSheet}
           openTime={() => {
             focusNext.current = { kind: "panel", id: TIME_PANEL };
@@ -1229,7 +1234,12 @@ function RoomPage() {
             closeRef={closeRef}
             titleRef={sheetTitleRef}
             // The list as All panels leaves it, for a swipe back to show under the panel: no panel open, so it marks the side panel's tab, as the list does then.
-            behind={<PanelPicker panels={panels} current={tabId} badges={badges} badgeLabels={badgeLabels} grouped={role === "dm"} onPick={noPick} />}
+            behind={
+              <>
+                {preview ? null : <PanelsSearchField onOpen={noOpen} />}
+                <PanelPicker panels={panels} current={tabId} badges={badges} badgeLabels={badgeLabels} grouped={role === "dm"} onPick={noPick} />
+              </>
+            }
           >
             <PanelBody id={mounted.id} shown={sheet !== undefined} selectedTokenId={selectedId} close={() => ui.closePanel()} onHeader={headerOf(mounted.id)} />
           </Sheet>
@@ -1254,6 +1264,8 @@ function RoomPage() {
             backRef={backRef}
             closeRef={closeRef}
           >
+            {/* Always atop the list, whether or not the top bar holds Search (designs/qol/search.md 5.1, P1). */}
+            {preview ? null : <PanelsSearchField onOpen={() => setPicker(false)} />}
             <PanelPicker
               panels={panels}
               current={panel ?? tabId}
@@ -1362,6 +1374,7 @@ function RoomPage() {
       {/* The DM's one View as a player, from whichever entry opened it. A preview's own page reads as a player and has none. */}
       {role === "dm" && !preview ? <ViewAsHost /> : null}
       <ShortcutSheetHost role={role} />
+      <SearchSheetHost wide={wide} tools={tools} top={topInset} panelOptions={panelOptions} preview={preview} />
       <RoomPasteHost />
     </div>
   );
@@ -1535,6 +1548,8 @@ function TopBar(props: {
   compact: boolean;
   placement: TurnPlacement;
   chipDot: boolean;
+  /** The search's Search, everywhere but in "view as a player". */
+  search: boolean;
   openSheet(): OpenSheet | null;
   openTime(): void;
 }) {
@@ -1581,8 +1596,8 @@ function TopBar(props: {
   const content: BarContent = {
     phone: props.compact,
     role: role ?? null,
-    // Search (qolsearch's S3) sets its own as it lands, and draws it in the shape's form.
-    search: false,
+    // The role must be known: a search opened before then could only search as a player.
+    search: props.search && (role === "dm" || role === "player"),
     nowPlaying: dm && nowKey !== null,
     clock: !props.compact && clockText !== null,
     blackout: dm && blackout,
@@ -1703,6 +1718,8 @@ function TopBar(props: {
           <YouChip dot={props.chipDot} onOpen={raiseFor.you} />
         ) : null}
         {shape.blackout ? <BlackoutChip fallbackFocus={() => dmChipRef.current} onOpen={raiseFor.blackout} /> : null}
+        {/* Below 900 px a step folds it into the Panels list's field, which is always there (topBarFit.ts searchPanels). */}
+        {shape.search === "field" || shape.search === "icon" ? <SearchButton form={shape.search} /> : null}
         <div style={{ flex: 1 }} />
         {dm ? <NowChip form={shape.nowPlaying} popover={!props.compact} dialogOpen={nowDialogOpen} onShows={setNowKey} onOpen={raiseFor.nowPlaying} openDialog={openNowDialog} /> : null}
         {shape.clock ? role === "dm" ? <DmClockChip onOpenTime={props.openTime} onOpen={raiseFor.clock} /> : <ClockChip onOpen={props.openTime} /> : null}
@@ -2671,6 +2688,9 @@ function panelTile(panelId: string): string {
 
 /** A pick on the list drawn under a panel during its swipe back, which no press reaches. */
 function noPick(): void {}
+
+/** The search field atop that list, which no press reaches either. */
+function noOpen(): void {}
 
 /**
  * Every panel the role has, as large buttons, for the phone's Panels sheet:

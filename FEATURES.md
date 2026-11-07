@@ -675,6 +675,7 @@ On any device with a keyboard. They do nothing while you type in a field or a di
 | --- | --- | --- |
 | Ctrl+Z | Undo your last play or board change | everyone |
 | Ctrl+Shift+Z | Redo your last play or board change | everyone |
+| Ctrl+K | Search the room: panels, settings, actions and what is on the map | everyone, also while you type in a field |
 | V, R, A, D, P | Select, Ruler, Area, Draw, Ping | everyone (Draw only for players who may draw) |
 | T, M, X, F, B, G | Add token, Pin, Trap, Fog, Builder, Grid | DM |
 | Arrow keys | Move the selected tokens one square, or one hex on a hex scene. Each press is a move, so walls stop it and it adds to the turn's path | anyone, on tokens they may move |
@@ -737,6 +738,15 @@ On any device. A token that carries others, such as a rider's mount or a holder 
 | Button | Does | Who |
 | --- | --- | --- |
 | Back button | Close what opened last, such as a pop-up, a sheet, a dialog, a handout or the action bar | everyone |
+
+### Search
+
+| Key | Does | Who |
+| --- | --- | --- |
+| Up, Down | Move through the results | everyone |
+| Enter | Go there, or do it | everyone |
+| Shift+Enter | Only go there | everyone |
+| Escape, Ctrl+K | Close it, back where you were | everyone |
 
 ### Toolbar
 

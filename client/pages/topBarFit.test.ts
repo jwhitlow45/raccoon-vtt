@@ -8,9 +8,10 @@ import { fitKey, fitStep, sameRecord, shapeOf, stepsFor, WIDE_STEPS, type BarCon
  * The top bar's give-way (designs/qol chips.md C6 and 5, plan.md 4): after
  * any run of content changes and widths, the bar shows what a page opened
  * now shows for the same content and width. The row here is a model of
- * TopBar's flex row in whole layout px. Search stands in until its lane
- * draws it. Now playing is modelled by its two forms' widths, as
- * features/sound/mini/NowChip.tsx draws them.
+ * TopBar's flex row in whole layout px. Search and Now playing are
+ * modelled by their forms' widths, as features/search/SearchSheet.tsx
+ * (BAR_FIELD_PX and its 44 px icon) and features/sound/mini/NowChip.tsx
+ * draw them.
  */
 
 /** The widths a bar's words and parts take, which the content's `words` stand for. */
@@ -42,7 +43,7 @@ function drawn(bar: Bar, shape: BarShape): { parts: { w: number; min: number }[]
     parts.push(dot ? fixed(32) : { w: words.youName, min: 32 });
   }
   if (shape.blackout) parts.push(fixed(149));
-  if (shape.search === "field") parts.push(fixed(180));
+  if (shape.search === "field") parts.push(fixed(240));
   if (shape.search === "icon") parts.push(fixed(44));
   parts.push(fixed(0));
   if (shape.nowPlaying === "full") parts.push(fixed(words.nowPlaying));

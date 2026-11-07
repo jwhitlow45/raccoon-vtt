@@ -4,8 +4,8 @@ import { STRIP_FACES, STRIP_FACES_FEW, STRIP_NAME_MIN_PX } from "../features/enc
  * The top bar's parts and the order it gives way in (designs/qol plan.md
  * 4, chips.md 5), and the rule that takes the steps (fitStep, shapeOf).
  * A part sets itself in BarContent and draws in the form BarShape gives,
- * as Now playing does (features/sound/mini/NowChip.tsx). Search (S3) will
- * too: until it lands, the rule's randomized test stands in for it.
+ * as Now playing (features/sound/mini/NowChip.tsx) and Search
+ * (features/search/SearchSheet.tsx SearchButton) do.
  */
 
 /**
