@@ -523,16 +523,19 @@ async function patCrosses(): Promise<void> {
 /** A fresh fight on Thorn's turn, so his walked path starts empty. */
 async function restartFight(): Promise<void> {
   if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+  const first = randomUUID();
   await ops.send({
     t: "encounter.start",
     entries: [
-      { id: randomUUID(), tokenId: run.ids.thorn, value: 18 },
+      { id: first, tokenId: run.ids.thorn, value: 18 },
       { id: randomUUID(), tokenId: run.ids.goblin, value: 14 },
       { id: randomUUID(), tokenId: run.ids.horse, value: 12 },
       { id: randomUUID(), tokenId: run.ids.boss, value: 9 },
     ],
   });
   await ops.send({ t: "encounter.next" });
+  // The ops socket's answers can come before the DM's socket sees the new fight, and a caller that reads that socket would find the old fight's ids or none.
+  await waitFor("the DM's socket on the new fight's first turn", () => (dmSocket.state?.encounter?.activeEntryId === first ? true : null));
 }
 
 /** The long wall at x 13 with its door locked, or back to the short wall with the door closed. */
