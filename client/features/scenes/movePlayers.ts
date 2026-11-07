@@ -19,13 +19,21 @@ import { moveSoundOp } from "./moveSound.ts";
 /** The words of a move the server has not answered yet, shown after the shared indicator's delay. */
 export const MOVING_PLAYERS = "Moving players…";
 
-/** What a move reads of the room: the scene the DM looks at, whose sight the view holds, and the sound the scene's own is built from. */
+/** Where the server's room has the players and which scenes it has, as a snapshot that settled a move holds them (RoomView.confirmed). */
+export type ConfirmedRoom = { meta: { playerSceneId: string | null }; scenes: Readonly<Record<string, { name: string } | undefined>> };
+
+/**
+ * What a move reads of the room: the scene the DM looks at, whose sight
+ * the view holds, the sound the scene's own is built from, and, read only
+ * when a snapshot settled the move with its answer lost, the server's room.
+ */
 export type MoveRoom = {
   viewingId: string | null;
   sight: Readonly<Record<string, SightTile | undefined>> | undefined;
   serverSound: ServerSound;
   playlists: Playlists;
   sounds: Sounds;
+  confirmed(): ConfirmedRoom | null | undefined;
 };
 
 /** What a move asks the DM to confirm first, or null when it goes at once. */
@@ -37,10 +45,18 @@ export function moveQuestion(scene: Scene, room: Pick<MoveRoom, "viewingId" | "s
  * How a move that went out ended. `refused` names the op the server
  * refused: the move (the players stayed, and a reveal's lift is refused
  * after it), or for a reveal the lift alone (the players moved, and the
- * blackout stays on). `unknown` is an answer lost to a reconnect, whose
- * snapshot the view already holds.
+ * blackout stays on). `notMoved` is a move whose answer was lost, to a
+ * reconnect or to a resync such as the one a co-DM's delete of the DM's
+ * scene sends, and whose snapshot has the players elsewhere: `sceneGone`
+ * when the move's scene is no longer there, and `playersOn` the name of
+ * the scene they are on. `unknown` is any other answer lost: the lift's,
+ * or a move dropped as too old to send, which the store's toast says.
  */
-export type MoveAnswer = { t: "taken" } | { t: "refused"; step: "move" | "lift"; refusal: OpRefusal | undefined } | { t: "unknown" };
+export type MoveAnswer =
+  | { t: "taken" }
+  | { t: "refused"; step: "move" | "lift"; refusal: OpRefusal | undefined }
+  | { t: "notMoved"; sceneGone: boolean; playersOn: string | null }
+  | { t: "unknown" };
 
 /** A press's result: the question to ask, with nothing sent, or the move sent and its answer to come. */
 export type MoveStep = { t: "ask"; warning: string } | { t: "sent"; answer: Promise<MoveAnswer> };
@@ -69,10 +85,17 @@ export function movePlayers(actions: Pick<RoomActions, "dispatch" | "newId">, sc
   // The first answer that settles the press wins: the move's refusal comes before the lift's, since the server answers in order.
   let resolve!: (answer: MoveAnswer) => void;
   const answer = new Promise<MoveAnswer>((r) => (resolve = r));
-  const settle = (step: "move" | "lift", last: boolean): OnAnswer => (a, refusal) => {
-    if (a === "refused") resolve({ t: "refused", step, refusal });
-    else if (a === "unknown") resolve({ t: "unknown" });
-    else if (last) resolve({ t: "taken" });
+  const settle = (step: "move" | "lift", last: boolean): OnAnswer => (a, refusal, unknown) => {
+    if (a === "refused") return resolve({ t: "refused", step, refusal });
+    if (a === "unknown") {
+      // The answer was lost to a reconnect, or to a resync: the server sends no refusal to a socket without a snapshot
+      // (server/rooms/fanout.ts publishBatch). The store tells only once the snapshot that settled it is in, so where that has the players says.
+      const missed = step === "move" && unknown === "snapshot" ? lostMove(scene.id, room.confirmed()) : null;
+      if (missed === null) return resolve({ t: "unknown" });
+      if (missed.t === "notMoved") return resolve(missed);
+      // The players are on the scene, as if the move were taken: a reveal still waits on its lift.
+    }
+    if (last) resolve({ t: "taken" });
   };
   if (!sent({ t: "room.setPlayerScene", sceneId: scene.id }, settle("move", !opts.reveal))) resolve({ t: "refused", step: "move", refusal: undefined });
   else if (opts.reveal && !sent({ t: "view.blackout", blackout: false, whilePlayersOn: scene.id }, settle("lift", true))) resolve({ t: "refused", step: "lift", refusal: undefined });
@@ -80,6 +103,14 @@ export function movePlayers(actions: Pick<RoomActions, "dispatch" | "newId">, sc
   const sound = moveSoundOp(scene, { serverSound: room.serverSound, playlists: room.playlists, sounds: room.sounds, newId: () => actions.newId() });
   if (sound) actions.dispatch(sound);
   return { t: "sent", answer };
+}
+
+/** What a snapshot that settled a move with its answer lost says of it: the players on the move's scene, or not moved and why. Null without a snapshot to read. */
+function lostMove(sceneId: string, confirmed: ConfirmedRoom | null | undefined): { t: "moved" } | Extract<MoveAnswer, { t: "notMoved" }> | null {
+  if (!confirmed) return null;
+  const on = confirmed.meta.playerSceneId;
+  if (on === sceneId) return { t: "moved" };
+  return { t: "notMoved", sceneGone: confirmed.scenes[sceneId] === undefined, playersOn: on === null ? null : (confirmed.scenes[on]?.name ?? null) };
 }
 
 /** The scene a move this page sent is going to while the server has not answered, or null. */

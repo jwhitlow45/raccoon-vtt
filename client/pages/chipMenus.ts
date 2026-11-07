@@ -15,6 +15,7 @@ import {
   hideTitle,
   moveRefused,
   onScene,
+  playersOn,
   recentDetail,
   sheetOf,
   showPlayers,
@@ -140,8 +141,14 @@ function refusalWords(refusal: OpRefusal | undefined): string {
   return refusal?.code === "gone" ? SCENE_GONE : reasonText(refusal);
 }
 
-/** A move's answer in the item's words (design-v1-qol.md 4, C2's move). An unknown answer is a reconnect's, whose snapshot the view already shows. */
+/**
+ * A move's answer in the item's words (design-v1-qol.md 4, C2's move). A
+ * lost answer whose snapshot has the players elsewhere says so as a refusal
+ * would, and any other lost answer is the snapshot's, which the view
+ * already shows.
+ */
 export function moveWords(answer: MoveAnswer): ChipAnswer {
+  if (answer.t === "notMoved") return { t: "refused", words: moveRefused(answer.sceneGone ? SCENE_GONE : answer.playersOn !== null ? playersOn(answer.playersOn) : reasonText(undefined)) };
   if (answer.t !== "refused") return { t: "taken" };
   return { t: "refused", words: answer.step === "lift" ? CHIP_WORDS.liftRefused : moveRefused(refusalWords(answer.refusal)) };
 }

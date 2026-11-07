@@ -3,9 +3,13 @@ import { describe, test } from "node:test";
 import type { Scene } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import type { Playlist, Sound } from "#shared/sound.ts";
-import { scene as sceneOf } from "#shared/testutil.ts";
+import { DM, room as roomOf, scene as sceneOf } from "#shared/testutil.ts";
+import { LocalServer } from "../../dev/localServer.ts";
+import { moveWords, SCENE_GONE } from "../../pages/chipMenus.ts";
+import { createRoomStore } from "../../state/store.ts";
+import { FakeClock, FakeOutbox } from "../../state/testing.ts";
 import type { OnAnswer, OpRefusal } from "../../state/types.ts";
-import { moveQuestion, movePlayers, movingPlayersTo, type MoveAnswer, type MoveRoom } from "./movePlayers.ts";
+import { moveQuestion, movePlayers, movingPlayersTo, type ConfirmedRoom, type MoveAnswer, type MoveRoom } from "./movePlayers.ts";
 
 /** The one move helper behind the Scenes list's Move players and the DM menu's moves (docs/design/design-v1-qol.md 4, C2's move and 6). */
 
@@ -14,7 +18,7 @@ const playlists: Record<string, Playlist> = { night: { id: "night", rev: 0, name
 const fogged: Scene = sceneOf("crypt", { fogEnabled: true });
 const open: Scene = sceneOf("hall");
 const withSound: Scene = { ...fogged, sound: { music: { playlistId: "night", repeat: "all", fade: 5 }, loops: [] } };
-const room: MoveRoom = { viewingId: "start", sight: undefined, serverSound: "on", playlists, sounds };
+const room: MoveRoom = { viewingId: "start", sight: undefined, serverSound: "on", playlists, sounds, confirmed: () => null };
 
 type Sent = { op: ClientOp; group?: string; quiet?: boolean; onAnswer?: OnAnswer };
 
@@ -151,6 +155,150 @@ describe("a reveal (Show players <scene>)", () => {
     const step = movePlayers(actions, fogged, room, { reveal: true });
     if (step.t !== "sent") return assert.fail("sent");
     assert.deepEqual(await step.answer, { t: "refused", step: "lift", refusal: undefined });
+  });
+});
+
+/** A snapshot's room with the players on `on`, holding the scenes named. */
+function held(on: string | null, scenes: Record<string, string>): ConfirmedRoom {
+  return { meta: { playerSceneId: on }, scenes: Object.fromEntries(Object.entries(scenes).map(([id, name]) => [id, { name }])) };
+}
+
+describe("a move whose answer a snapshot lost (a reconnect, or the resync a co-DM's delete of the DM's scene sends)", () => {
+  test("reads where the snapshot has the players: not moved, the scene deleted or not and where they are, or taken where they are on it", async () => {
+    for (const [snapshot, expected] of [
+      [held("start", { start: "Battle mat" }), { t: "notMoved", sceneGone: true, playersOn: "Battle mat" }],
+      [held("start", { start: "Battle mat", crypt: "Crypt" }), { t: "notMoved", sceneGone: false, playersOn: "Battle mat" }],
+      [held(null, { crypt: "Crypt" }), { t: "notMoved", sceneGone: false, playersOn: null }],
+      [held("crypt", { crypt: "Crypt" }), { t: "taken" }],
+    ] as const) {
+      const actions = fakeActions();
+      const step = movePlayers(actions, fogged, { ...room, confirmed: () => snapshot });
+      if (step.t !== "sent") return assert.fail("sent");
+      actions.sent[0]!.onAnswer!("unknown", undefined, "snapshot");
+      assert.deepEqual(await step.answer, expected);
+    }
+  });
+
+  test("reads the snapshot only once the answer is lost, and a move too old to send, or one with no snapshot to read, stays unknown", async () => {
+    let reads = 0;
+    const gone = () => (reads++, held("start", { start: "Battle mat" }));
+    const actions = fakeActions();
+    const step = movePlayers(actions, fogged, { ...room, confirmed: gone });
+    if (step.t !== "sent") return assert.fail("sent");
+    assert.equal(reads, 0, "nothing read at the press");
+    // Dropped while the store prepared its hello, before any new snapshot: the view may still lack a move that did commit.
+    actions.sent[0]!.onAnswer!("unknown", undefined, "expired");
+    assert.deepEqual(await step.answer, { t: "unknown" });
+    assert.equal(reads, 0);
+
+    const none = fakeActions();
+    const unread = movePlayers(none, fogged, { ...room, confirmed: () => null });
+    if (unread.t !== "sent") return assert.fail("sent");
+    none.sent[0]!.onAnswer!("unknown", undefined, "snapshot");
+    assert.deepEqual(await unread.answer, { t: "unknown" });
+  });
+
+  test("a reveal whose move a snapshot settled with the players on the scene waits on its lift, and one with them elsewhere ends there", async () => {
+    const actions = fakeActions();
+    const step = movePlayers(actions, fogged, { ...room, confirmed: () => held("crypt", { crypt: "Crypt" }) }, { reveal: true });
+    if (step.t !== "sent") return assert.fail("sent");
+    actions.sent[0]!.onAnswer!("unknown", undefined, "snapshot");
+    assert.equal(await settled(step.answer), "waiting", "the lift, still pending, is resent and answered");
+    actions.sent[1]!.onAnswer!("refused", refusal);
+    assert.deepEqual(await step.answer, { t: "refused", step: "lift", refusal });
+
+    const elsewhere = fakeActions();
+    const lost = movePlayers(elsewhere, fogged, { ...room, confirmed: () => held("start", { start: "Battle mat" }) }, { reveal: true });
+    if (lost.t !== "sent") return assert.fail("sent");
+    elsewhere.sent[0]!.onAnswer!("unknown", undefined, "snapshot");
+    elsewhere.sent[1]!.onAnswer!("unknown", undefined, "snapshot");
+    assert.deepEqual(await lost.answer, { t: "notMoved", sceneGone: true, playersOn: "Battle mat" });
+
+    // The move was taken, so a snapshot that has the players elsewhere by the lift's lost answer says only that someone moved them since.
+    const moved = fakeActions();
+    const lift = movePlayers(moved, fogged, { ...room, confirmed: () => held("start", { start: "Battle mat", crypt: "Crypt" }) }, { reveal: true });
+    if (lift.t !== "sent") return assert.fail("sent");
+    moved.sent[0]!.onAnswer!("taken");
+    moved.sent[1]!.onAnswer!("unknown", undefined, "snapshot");
+    assert.deepEqual(await lift.answer, { t: "unknown" });
+  });
+});
+
+/**
+ * se-6 in the store, frame by frame (CI's search.e2e.ts se-6): the DM looks
+ * at Doomed hall and presses Show players or Move players here as a co-DM
+ * deletes it. The server refuses the move, but its delete resynced the
+ * DM's socket first, and a socket without a snapshot is sent no refusal.
+ * Whether the DM's hello reaches the server before the refusal commits
+ * (the refusal comes after the snapshot) or after it (the snapshot settles
+ * the move with no answer) is the network's timing, so every order runs.
+ */
+describe("a move the server refuses while it resyncs the DM's socket", () => {
+  const doomed = sceneOf("doomed", { name: "Doomed hall", fogEnabled: true });
+
+  function play(order: { deleted: boolean; reveal: boolean; helloFirst: boolean; deleteSeen: boolean }) {
+    const state = roomOf({ scenes: { s1: sceneOf("s1", { name: "Battle mat", fogEnabled: true }), doomed } });
+    state.meta.view.blackout = true;
+    const server = new LocalServer(state, DM, "doomed");
+    const outbox = new FakeOutbox();
+    const store = createRoomStore({ roomId: "R1", you: DM, clock: new FakeClock(), random: () => 0.5, clientId: "c1" });
+    store.setOutbox(outbox);
+    store.applySnapshot(server.hello({ resumeFrom: store.prepareHello().resumeFrom, sceneId: "doomed" }));
+    const take = () => {
+      const ops = outbox.sent.flatMap((m) => (m.t === "op" ? [{ n: m.n, op: m.op }] : []));
+      outbox.sent = [];
+      return ops;
+    };
+    const dmRoom: MoveRoom = { viewingId: "doomed", sight: undefined, serverSound: "off", playlists: {}, sounds: {}, confirmed: () => store.store.getState().confirmed };
+    const actions = { dispatch: store.dispatch, newId: () => "g1" };
+    // The co-DM's delete: its frames to the DM's page wait behind the press.
+    const deleteEv = order.deleted ? server.external({ t: "scene.delete", sceneId: "doomed" }, DM) : null;
+    const step = movePlayers(actions, doomed, dmRoom, { reveal: order.reveal, quiet: true, confirmed: true });
+    if (step.t !== "sent") throw new Error("not sent");
+    let answer: MoveAnswer | null = null;
+    void step.answer.then((a) => (answer = a));
+    const sent = take();
+    const hello = () => {
+      if (order.deleteSeen && deleteEv) store.applyEv(deleteEv);
+      store.suspend();
+      // As the room actor does, a DM whose scene was deleted lands on the players' scene.
+      if (!server.state.scenes[server.dmSceneId ?? ""]) server.dmSceneId = server.state.meta.playerSceneId;
+      store.applySnapshot(server.hello({ resumeFrom: store.prepareHello().resumeFrom, sceneId: "doomed" }));
+    };
+    if (order.helloFirst) {
+      hello();
+      // The server takes the press as first sent, and the resend after the snapshot as the duplicate it is.
+      for (const msg of server.batch(sent)) if (msg.t === "ev") store.applyEv(msg);
+      for (const msg of server.batch(take())) if (msg.t === "ev") store.applyEv(msg);
+    } else {
+      // Committed before the hello: its answers go to a socket with no snapshot, which is sent none.
+      server.batch(sent);
+      hello();
+      take();
+    }
+    return { answer: () => answer, store };
+  }
+
+  test("the DM hears the players were not moved, or that they were, in every order", async () => {
+    for (const deleted of [true, false])
+      for (const reveal of [true, false])
+        for (const helloFirst of [true, false])
+          for (const deleteSeen of [true, false]) {
+            const order = { deleted, reveal, helloFirst, deleteSeen };
+            const t = play(order);
+            await new Promise((r) => setTimeout(r, 0));
+            const answer = t.answer();
+            assert.ok(answer, `settled: ${JSON.stringify(order)}`);
+            const meta = t.store.store.getState().confirmed?.meta;
+            if (deleted) {
+              assert.deepEqual(moveWords(answer), { t: "refused", words: `Players not moved. ${SCENE_GONE}` }, `said not moved: ${JSON.stringify(order)}`);
+              assert.equal(meta?.playerSceneId, "s1", "nobody moved");
+              assert.equal(meta?.view.blackout, true, "the blackout stays on");
+            } else {
+              assert.deepEqual(moveWords(answer), { t: "taken" }, `taken: ${JSON.stringify(order)}`);
+              assert.equal(meta?.playerSceneId, "doomed");
+            }
+          }
   });
 });
 

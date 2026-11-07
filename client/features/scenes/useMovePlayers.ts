@@ -2,7 +2,7 @@ import { useCallback, useMemo } from "react";
 import type { Scene } from "#shared/model.ts";
 import { sightOf } from "#shared/keys.ts";
 import { useDelayed } from "../../components/Loading.tsx";
-import { useRoomActions, useRoomView } from "../../state/view.ts";
+import { useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
 import { useServerRoomSoundState } from "../sound/engine/store.ts";
 import { playlistsOf, soundsOf } from "../sound/panel/state.ts";
 import { moveQuestion, movePlayers, movingPlayersTo, type MoveOptions, type MoveRoom, type MoveStep } from "./movePlayers.ts";
@@ -22,6 +22,7 @@ export function useMovePlayers(): {
   shownMovingTo: string | null;
 } {
   const actions = useRoomActions();
+  const store = useRoomStore();
   const viewingId = useRoomView((s) => s.sceneId);
   const sight = useRoomView((s) => (s.view ? sightOf(s.view) : undefined));
   const sounds = useRoomView((s) => soundsOf(s.view));
@@ -29,7 +30,7 @@ export function useMovePlayers(): {
   const serverSound = useServerRoomSoundState();
   const movingTo = useRoomView((s) => movingPlayersTo(s.pending));
   const shownMovingTo = useDelayed(movingTo !== null) ? movingTo : null;
-  const room = useMemo<MoveRoom>(() => ({ viewingId, sight, serverSound, playlists, sounds }), [viewingId, sight, serverSound, playlists, sounds]);
+  const room = useMemo<MoveRoom>(() => ({ viewingId, sight, serverSound, playlists, sounds, confirmed: () => store.getState().confirmed }), [viewingId, sight, serverSound, playlists, sounds, store]);
   const question = useCallback((scene: Scene) => moveQuestion(scene, room), [room]);
   const move = useCallback((scene: Scene, opts?: MoveOptions) => movePlayers(actions, scene, room, opts), [actions, room]);
   return { room, question, move, movingTo, shownMovingTo };

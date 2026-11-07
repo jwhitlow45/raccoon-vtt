@@ -68,10 +68,10 @@ type Sent = { op: ClientOp; group?: string; quiet?: boolean; onAnswer?: OnAnswer
 
 const sounds: Record<string, Sound> = { m1: { id: "m1", rev: 0, name: "Harbor", assetId: "file-m1", ms: 60_000, use: "music" } };
 const playlists: Record<string, Playlist> = { night: { id: "night", rev: 0, name: "Night", sounds: ["m1"], repeat: "all", fade: 5 } };
-const moveRoom: MoveRoom = { viewingId: "crypt", sight: undefined, serverSound: "on", playlists, sounds };
+const moveRoom: MoveRoom = { viewingId: "crypt", sight: undefined, serverSound: "on", playlists, sounds, confirmed: () => null };
 
-/** A room that keeps what each run sent, said and opened. */
-function fakeEnv(focusScene: string | null = "hall") {
+/** A room that keeps what each run sent, said and opened. `confirmed` is the server's room a lost answer reads. */
+function fakeEnv(focusScene: string | null = "hall", confirmed: MoveRoom["confirmed"] = moveRoom.confirmed) {
   const sent: Sent[] = [];
   const eph: EphEvent[] = [];
   const toasts: string[] = [];
@@ -88,7 +88,7 @@ function fakeEnv(focusScene: string | null = "hall") {
       sendEph: (e) => void eph.push(e),
     },
     notify: (text, tone) => void toasts.push(`${tone}: ${text}`),
-    moveRoom,
+    moveRoom: { ...moveRoom, confirmed },
     open: (what) => void opened.push(what),
     focus: () => (focusScene ? { sceneId: focusScene, x: 3, y: 4, zoom: 2 } : null),
     remember: (show) => void remembered.push(show),
@@ -256,6 +256,27 @@ describe("a move from the menu (design-v1-qol.md 4, C2's move)", () => {
     assert.deepEqual(moveWords({ t: "refused", step: "lift", refusal: refused("invalid", "the players are on another scene now") }), { t: "refused", words: CHIP_WORDS.liftRefused });
     assert.deepEqual(moveWords({ t: "unknown" }), { t: "taken" });
     assert.deepEqual(moveWords({ t: "taken" }), { t: "taken" });
+  });
+
+  test("a move whose answer was lost, with the players elsewhere in its snapshot, reads as refused: the scene deleted, or where they are", () => {
+    assert.deepEqual(moveWords({ t: "notMoved", sceneGone: true, playersOn: "Battle mat" }), { t: "refused", words: `Players not moved. ${SCENE_GONE}` });
+    assert.deepEqual(moveWords({ t: "notMoved", sceneGone: false, playersOn: "Battle mat" }), { t: "refused", words: "Players not moved. They are on Battle mat." });
+    assert.deepEqual(moveWords({ t: "notMoved", sceneGone: false, playersOn: null }), { t: "refused", words: "Players not moved. That could not be done." });
+  });
+
+  test("Show players and Move players here, settled by a snapshot that lost the answer, say the players were not moved", async () => {
+    // A co-DM deleted Crypt meanwhile: the snapshot has the players on the hall and no Crypt.
+    const gone = () => ({ meta: { playerSceneId: "hall" }, scenes: { hall: { name: "Hall" } } });
+    for (const [id, view] of [
+      ["showPlayers", viewOf({ blackout: true, viewing: crypt })],
+      ["movePlayers", viewOf({ viewing: crypt })],
+    ] as const) {
+      const room = fakeEnv("hall", gone);
+      const result = item(dmMenuSections(view), id).run(room.env);
+      if (result.t !== "wait") return assert.fail(`${id} waits`);
+      for (const s of room.sent) s.onAnswer?.("unknown", undefined, "snapshot");
+      assert.deepEqual(await result.answer, { t: "refused", words: `Players not moved. ${SCENE_GONE}` }, id);
+    }
   });
 
   test("a refusal said in place shows under the item and as its description, and a busy item says only that it waits", () => {

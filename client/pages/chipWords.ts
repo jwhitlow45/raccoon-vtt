@@ -93,6 +93,8 @@ export const followOnly = (playersScene: string) => `only on ${playersScene}`;
 export const followOnlyDescription = (playersScene: string) => `Players' maps follow yours only while you look at their scene, ${playersScene}.`;
 /** A refused move, with the refusal's own sentence (reasonText). */
 export const moveRefused = (reason: string) => `Players not moved. ${reason}`;
+/** Why a move whose answer was lost did not move the players, where its snapshot has them instead. */
+export const playersOn = (scene: string) => `They are on ${scene}.`;
 export const viewAs = (player: string) => `View as ${player}`;
 export const youChipName = (name: string) => `You are ${name}. Your options`;
 export const sheetOf = (character: string) => `${character}'s sheet`;
