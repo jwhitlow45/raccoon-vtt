@@ -1,7 +1,9 @@
 import type { ProjectedActor } from "#shared/project.ts";
 import { CONDITIONS } from "#shared/srd/conditions.ts";
 import { STATUSES } from "#shared/srd/statuses.ts";
-import type { FieldDef } from "../search/catalog/types.ts";
+import { statBlockShown } from "../monsters/statBlockLink.ts";
+import type { FieldDef, FieldHolder } from "../search/catalog/types.ts";
+import { ownsCharacter } from "./access.ts";
 
 /*
  * A creature's fields in the room search (designs/qol/search.md 4 and
@@ -24,6 +26,25 @@ function conditionsOf(actor: ProjectedActor): string | undefined {
     return name ? [name] : [];
   });
   return names.length > 0 ? names.join(", ") : undefined;
+}
+
+/**
+ * Whether the token panel draws a Stat block for the selection, by the
+ * panel's own rule (statBlockLink.ts). A character's page draws it for
+ * whoever reaches the page, and only its players find it here.
+ */
+function statBlockDrawn(h: FieldHolder): boolean {
+  const { token, character } = h;
+  if (h.surface === "page" || !token) return true;
+  return statBlockShown({
+    dm: h.role === "dm",
+    owner: true,
+    kind: token.kind,
+    actor: "inline" in token.actor ? token.actor.inline : character?.actor,
+    companion: token.companion !== undefined,
+    character: "ref" in token.actor,
+    ownsCharacter: character ? ownsCharacter(h.memberId, character) : undefined,
+  });
 }
 
 export const CREATURE_FIELDS: readonly FieldDef[] = [
@@ -88,4 +109,10 @@ export const CREATURE_FIELDS: readonly FieldDef[] = [
   { key: "combat", kind: "section", title: "Combat", icon: "combat", token: { section: "combat", anchor: "token.combat" }, page: { section: "page.combat", anchor: "character.combat" } },
   { key: "stats", kind: "section", title: "Stats", icon: "stats", token: { section: "stats", anchor: "token.stats" }, page: { section: "page.stats", anchor: "character.stats" } },
   { key: "notes", kind: "section", title: "Notes", icon: "notes", token: { section: "notes", anchor: "token.notes" }, page: { section: "page.notes", anchor: "character.notes" } },
+  // Position holds Elevation, Facing and Shares sight, which stay folded in the sweep and so take their group's anchor. A viewer who finds a creature's fields may change all three.
+  { key: "position", kind: "section", title: "Position", names: ["elevation", "facing", "shares sight", "rotation"], icon: "position", token: { section: "position", anchor: "token.position" } },
+  { key: "image", kind: "section", title: "Image", names: ["picture", "portrait"], icon: "image", token: { section: "image", anchor: "token.image" }, page: { section: "page.image", anchor: "character.image" } },
+  // The one fold a page shares with the panel, so both name it `statBlock`.
+  { key: "stat-block", kind: "section", title: "Stat block", names: ["statblock"], icon: "statBlock", token: { section: "statBlock", anchor: "token.stat-block" }, page: { section: "statBlock", anchor: "character.stat-block" }, shown: statBlockDrawn },
+  { key: "companions", kind: "section", title: "Companions", icon: "companion", page: { section: "page.companions", anchor: "character.companions" } },
 ];

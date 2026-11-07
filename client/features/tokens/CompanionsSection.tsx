@@ -97,7 +97,7 @@ function CompanionPortrait(props: { token: Token; size: number }) {
  * scene this device holds, each a button that shows it on the map with
  * its bar, as a party bar tap does. Folded, it names them.
  */
-export function CharacterCompanions(props: { character: Character; canAdd: boolean; onAdd(): void; onBlocks?(): void; close(): void; group: { open: boolean; onToggle(): void } }) {
+export function CharacterCompanions(props: { search?: string; character: Character; canAdd: boolean; onAdd(): void; onBlocks?(): void; close(): void; group: { open: boolean; onToggle(): void } }) {
   const tokens = useRoomView((s) => s.view?.tokens);
   const blocks = useRoomView((s) => s.view?.companionBlocks);
   const monsters = useRoomView((s) => s.view?.monsters);
@@ -126,7 +126,7 @@ export function CharacterCompanions(props: { character: Character; canAdd: boole
     });
   };
   return (
-    <Group label="Companions" icon="companion" {...props.group} summary={list.length > 0 ? list.map(displayName).join(", ") : "None yet"}>
+    <Group label="Companions" icon="companion" search={props.search} {...props.group} summary={list.length > 0 ? list.map(displayName).join(", ") : "None yet"}>
       {list.length > 0 ? (
         <RowList label={`${props.character.name}'s companions`}>
           {list.map((t) => (

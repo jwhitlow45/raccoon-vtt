@@ -13,6 +13,9 @@ import { SUGGEST } from "../search/index.ts";
 /** The selected token's settings a DM looks for, in Token settings. */
 export const DM_TOKEN_FIELDS: readonly FieldDef[] = [
   { key: "hidden", title: "Hidden from players", names: ["hide the token", "invisible"], icon: "hidden", token: { section: "settings", anchor: "token.hidden" } },
+  // A token's owners and a character's players are the DM's to choose. The page's group is found for every character, as the DM has no other way to its page's fields.
+  { key: "owners", kind: "section", title: "Owners", names: ["who controls"], icon: "group", token: { section: "owners", anchor: "token.owners" } },
+  { key: "players", kind: "section", title: "Players", names: ["owners", "who plays"], icon: "group", page: { section: "page.owners", anchor: "character.owners" }, everyCharacter: true },
   { key: "settings", kind: "section", title: "Token settings", names: ["token name", "disposition", "layer"], icon: "settings", token: { section: "settings", anchor: "token.settings" } },
 ];
 

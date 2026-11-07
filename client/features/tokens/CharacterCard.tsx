@@ -164,7 +164,7 @@ export function CharacterPage(props: { character: Character; close: PanelClose; 
         );
       case "statBlock":
         // The one fold the page shares with the token panel: the `own` relation's, as every viewer of the page plays or runs the character.
-        return <PcStatBlock key={id} character={character} roll={blockRoll} fold={fold("statBlock")} />;
+        return <PcStatBlock key={id} search="character.stat-block" character={character} roll={blockRoll} fold={fold("statBlock")} />;
       case "combat":
         return (
           <Group key={id} label="Combat" icon="combat" search="character.combat" {...fold("page.combat")} summary={combatSummary({ hp: hpWords, effects, reactionUsed: spent })} holds="sections">
@@ -172,7 +172,7 @@ export function CharacterPage(props: { character: Character; close: PanelClose; 
           </Group>
         );
       case "companions":
-        return <CharacterCompanions key={id} character={character} canAdd onAdd={props.onAddCompanion} onBlocks={props.onBlocks} close={props.close} group={fold("page.companions")} />;
+        return <CharacterCompanions key={id} search="character.companions" character={character} canAdd onAdd={props.onAddCompanion} onBlocks={props.onBlocks} close={props.close} group={fold("page.companions")} />;
       case "notes":
         return (
           <Group key={id} label="Notes" icon="notes" search="character.notes" {...fold("page.notes")} summary={noteCount === 0 ? "None yet" : `${noteCount} ${noteCount === 1 ? "note" : "notes"}`}>
@@ -188,7 +188,7 @@ export function CharacterPage(props: { character: Character; close: PanelClose; 
         );
       case "image":
         return (
-          <Group key={id} label="Image" icon="image" {...fold("page.image")}>
+          <Group key={id} label="Image" icon="image" search="character.image" {...fold("page.image")}>
             <ImageField
               value={character.defaultImage}
               onChange={setImage}
@@ -282,7 +282,7 @@ function CharacterOwners(props: { character: Character; members: RoomState["memb
   const players = Object.values(props.members ?? {}).filter((m): m is Member => !!m && m.kind === "player");
   const names = players.filter((m) => owners.includes(m.id)).map((m) => m.name);
   return (
-    <Group label="Players" icon="group" {...props.group} summary={names.length > 0 ? names.join(", ") : "No player yet"}>
+    <Group label="Players" icon="group" search="character.owners" {...props.group} summary={names.length > 0 ? names.join(", ") : "No player yet"}>
       {players.length === 0 ? <Help>No players have joined yet.</Help> : null}
       <div>
         {players.map((m) => (

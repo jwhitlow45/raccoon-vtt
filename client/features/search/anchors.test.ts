@@ -296,7 +296,7 @@ describe("a creature's fields draw their anchors (search.md 4, 5.10)", () => {
       const view = viewOf(fullRoom(), viewer);
       const bree = view.view!.characters.bree!;
       const drawn = anchorsIn(draw(view, CharacterPage as never, { character: bree, close: () => {}, onAddCompanion() {}, onBlocks() {}, onDelete: () => null }));
-      for (const a of places([EVERYONE], "page")) assert.ok(drawn.includes(a), `${a} is not drawn for the ${viewer.role}`);
+      for (const a of places(viewer === DM ? [EVERYONE, DM_CATALOG] : [EVERYONE], "page")) assert.ok(drawn.includes(a), `${a} is not drawn for the ${viewer.role}`);
       assert.equal(new Set(drawn).size, drawn.length, `an anchor drawn twice: ${drawn.join(" ")}`);
     }
   });

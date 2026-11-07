@@ -225,7 +225,7 @@ function TokenDetails(props: PanelProps) {
       case "image":
         return <ImageRow key={id} token={token} name={name} access={access} update={update} />;
       case "statBlock":
-        return <StatBlockSection key={id} token={token} actor={actor} access={access} patchActor={patchActor} />;
+        return <StatBlockSection key={id} search="token.stat-block" token={token} actor={actor} access={access} patchActor={patchActor} />;
       case "hp":
         return <HpSection key={id} actor={actor} hpVisibility={token.hpVisibility} target={{ tokenId: token.id }} access={access} name={name} token={token} search="token.hp" />;
       case "conditions":
@@ -311,8 +311,8 @@ function TokenDetails(props: PanelProps) {
   const groups: Record<PanelGroupId, { label: string; icon: IconName; key: FoldKey; summary?: string; search?: string }> = {
     combat: { label: "Combat", icon: "combat", key: relationKey("combat", relation), summary: combatSummary({ hp: hpWords, effects, reactionUsed: spent, rings }), search: "token.combat" },
     notes: { label: "Notes", icon: "notes", key: relationKey("notes", relation), summary: noteCount === 0 ? "None yet" : `${noteCount} ${noteCount === 1 ? "note" : "notes"}`, search: "token.notes" },
-    position: { label: "Position", icon: "position", key: "position", summary: [height ? `Elevation ${height} ft` : "On the ground", token.rotation ? `facing ${token.rotation}°` : ""].filter(Boolean).join(", ") },
-    image: { label: "Image", icon: "image", key: "image" },
+    position: { label: "Position", icon: "position", key: "position", summary: [height ? `Elevation ${height} ft` : "On the ground", token.rotation ? `facing ${token.rotation}°` : ""].filter(Boolean).join(", "), search: "token.position" },
+    image: { label: "Image", icon: "image", key: "image", search: "token.image" },
   };
   // The stat block's roll header heads the whole panel, and goes with this token's details (docs/design/design-v1-token-roll-header.md 1.3).
   return (
@@ -730,16 +730,16 @@ function Owners(props: { token: Token; update(patch: TokenPatch): void; group: {
   if (token.companion) {
     // A companion's owners are its character's, kept in step by the server (docs/design/design-v1-combat-flow.md 3.6.4).
     return (
-      <Group label="Owners" icon="group" {...props.group} summary={names.length > 0 ? names.join(", ") : "None"}>
+      <OwnersGroup group={props.group} names={names}>
         <CompanionOwners token={token} />
-      </Group>
+      </OwnersGroup>
     );
   }
   const everyone = tokenOwnerIds({ characters: character ? { [character.id]: character } : {} }, token)
     .map((id) => members?.[id]?.name)
     .filter((n): n is string => !!n);
   return (
-    <Group label="Owners" icon="group" {...props.group} summary={everyone.length > 0 ? everyone.join(", ") : "None"}>
+    <OwnersGroup group={props.group} names={everyone}>
       <Note>Owners can move it and edit what their role allows.</Note>
       <div style={{ display: "grid" }}>
         {/* Each player's eye shows what that player sees, owner or not, so the DM can check who sees this token at all. */}
@@ -766,6 +766,15 @@ function Owners(props: { token: Token; update(patch: TokenPatch): void; group: {
           Also owned through {character?.name}: {through.join(", ")}.
         </Note>
       ) : null}
+    </OwnersGroup>
+  );
+}
+
+/** The Owners group, one element for a companion's form and every other token's so the room search anchors it once. Folded, the names show beside its label. */
+function OwnersGroup(props: { group: { open: boolean; onToggle(): void }; names: readonly string[]; children: ReactNode }) {
+  return (
+    <Group label="Owners" icon="group" search="token.owners" {...props.group} summary={props.names.length > 0 ? props.names.join(", ") : "None"}>
+      {props.children}
     </Group>
   );
 }

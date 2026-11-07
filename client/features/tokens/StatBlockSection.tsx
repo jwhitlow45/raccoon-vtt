@@ -63,6 +63,8 @@ type Keeper = { id: string; name: string };
  * not read it.
  */
 export function StatBlockSection(props: {
+  /** The room search's anchor id, on the "Stat block" heading whichever form the section takes. */
+  search?: string;
   token: Token;
   actor: Partial<Actor> | undefined;
   access: TokenAccess;
@@ -117,7 +119,7 @@ export function StatBlockSection(props: {
   if ("ref" in token.actor) {
     return (
       <div ref={ref} data-stat-block="" style={{ scrollMarginTop: theme.space(2), overflowWrap: "anywhere" }}>
-        {pc ? <PcStatBlock character={pc} roll={roll} fold={{ open, onToggle: toggle, foldRef: focusRef }} /> : <Group label="Stat block" icon="statBlock" reserve="chevron" />}
+        {pc ? <PcStatBlock character={pc} roll={roll} search={props.search} fold={{ open, onToggle: toggle, foldRef: focusRef }} /> : <Group label="Stat block" icon="statBlock" reserve="chevron" search={props.search} />}
       </div>
     );
   }
@@ -159,7 +161,7 @@ export function StatBlockSection(props: {
     // Its lines and buttons name the companion's character, whose name may be long and unbroken: it wraps rather than run out of the panel.
     <div ref={ref} data-stat-block="" style={{ scrollMarginTop: theme.space(2), overflowWrap: "anywhere" }}>
       {statBlockFoldable(link) ? (
-        <Group label="Stat block" icon="statBlock" open={open} onToggle={toggle} foldRef={focusRef} summary={linkedBlockSummary(link, srd.list)}>
+        <Group label="Stat block" icon="statBlock" search={props.search} open={open} onToggle={toggle} foldRef={focusRef} summary={linkedBlockSummary(link, srd.list)}>
           {link.kind === "room" ? (
             <>
               <StatBlockView view={viewOf(link.monster)} source="room" roll={roll} />
@@ -208,6 +210,7 @@ export function StatBlockSection(props: {
         <Group
           label="Stat block"
           icon="statBlock"
+          search={props.search}
           reserve="chevron"
           action={
             (link.kind === "none" || (keeper !== null && (link.kind === "deleted" || link.kind === "deletedBlock"))) && (access.dm || keeper !== null) ? (

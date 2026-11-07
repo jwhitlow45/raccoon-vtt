@@ -41,6 +41,8 @@ import { ShapePicker } from "./ShapePicker.tsx";
  */
 export function PcStatBlock(props: {
   character: Character;
+  /** The room search's anchor id, on the "Stat block" heading. */
+  search?: string;
   fold: { open: boolean; onToggle(): void; foldRef?: Ref<HTMLButtonElement> };
   /** Whom its boxes roll for, from the mount it stands in: its token's panel or the character's page (docs/design/design-v1-stat-block-rolls.md 2). The mount computes it once. */
   roll: BlockRoller | null;
@@ -82,7 +84,7 @@ export function PcStatBlock(props: {
   if (!character.stats && !shaped) {
     return (
       <>
-        <Group label="Stat block" icon="statBlock" open={fold.open} onToggle={fold.onToggle} foldRef={fold.foldRef} summary={summary}>
+        <Group label="Stat block" icon="statBlock" search={props.search} open={fold.open} onToggle={fold.onToggle} foldRef={fold.foldRef} summary={summary}>
           {edits ? (
             <>
               <Help>Add this character's stat block, or take a shape such as Wild Shape.</Help>
@@ -99,7 +101,7 @@ export function PcStatBlock(props: {
   }
   return (
     <>
-      <Group label="Stat block" icon="statBlock" open={fold.open} onToggle={fold.onToggle} foldRef={fold.foldRef} summary={summary} action={take}>
+      <Group label="Stat block" icon="statBlock" search={props.search} open={fold.open} onToggle={fold.onToggle} foldRef={fold.foldRef} summary={summary} action={take}>
         {shaped ? <ShapeBody character={character} edits={edits} roll={roll} /> : <PcStatsView character={character} roll={roll} />}
         {edits ? (
           <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
