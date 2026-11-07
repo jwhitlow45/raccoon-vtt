@@ -4,7 +4,7 @@ import type { PcFill } from "#shared/rules/pcFill.ts";
 import { actor, character } from "#shared/testutil.ts";
 import { alsoLines, alsoPatch, alsoSet, pendingCharacter, readLine } from "./fill.ts";
 
-/** The review's "Also set" (docs/design/design-v1-pc-stats.md 6.1). */
+/** The review's "Other fields" (docs/design/design-v1-pc-stats.md 6.1). */
 
 const FILL: PcFill = {
   source: "ddb",

@@ -59,6 +59,6 @@ days have passed since the report, whichever comes first. If a fix needs
 longer, you will be asked before that date.
 
 Once the fix ships, its details are published as a GitHub security advisory
-for this repository, with the fixed version and a CVE when one applies,
+for this repository, with the fixed version, and with a CVE when one applies,
 requested through GitHub. The advisory credits you by the name you choose,
 unless you would rather not be named.

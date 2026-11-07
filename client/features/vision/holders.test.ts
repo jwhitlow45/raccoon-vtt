@@ -14,7 +14,7 @@ import { sceneWalls } from "#shared/rules/walls.ts";
 import { actor, character, DM, effect, member, room, scene, token } from "#shared/testutil.ts";
 import { HOLDERS_UNDER, holderRows, holdersAfter, lendsText, sharedOnlyText, unsharedMounts, untickQuestion } from "./holders.ts";
 
-/** "Who sees for themselves", "Who lends sight" and the mount's note (docs/design/design-v1-per-player-vision.md 7.1), from the DM's view. */
+/** "Who sees for themselves", "Sight sources" and the mount's note (docs/design/design-v1-per-player-vision.md 7.1), from the DM's view. */
 
 const real = { ...visionRules };
 before(() => Object.assign(visionRules, cellVision));

@@ -19,7 +19,7 @@ The source, the docs and the issue tracker are in
   them in, as the DM chooses.
 - Maps from an image, a blank grid, the built-in map builder, or a
   Universal VTT file from Dungeondraft, Dungeon Alchemist, Arkenforge or
-  DungeonFog, top-down or isometric.
+  DungeonFog. Top-down or isometric.
 - Fog of war, and party vision with walls, doors, lights, darkvision and
   raised ground.
 - Tokens with HP, conditions, elevation and lights. Rulers, movement
@@ -96,7 +96,8 @@ docker compose ps
 ```
 
 `raccoon`, `postgres`, `egress` and, with the profile, `caddy` show
-`(healthy)` within about 30 seconds. Without the `https` profile, point
+`(healthy)` within about 30 seconds, and `backup` shows `Up`, since it has
+no health check. Without the `https` profile, point
 your own proxy or tunnel at `http://raccoon:3000` on the `raccoon-edge`
 network. Then `https://<your host>/healthz` answers `{"status":"ok"}`.
 

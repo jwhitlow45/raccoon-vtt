@@ -162,7 +162,8 @@ docker compose ps
 ```
 
 `raccoon`, `postgres`, `egress` and, with the `https` profile, `caddy`
-should show `(healthy)` within about 30 seconds.
+should show `(healthy)` within about 30 seconds, and `backup` should show
+`Up`, since it has no health check.
 [docs/self-hosting.md](docs/self-hosting.md#self-hosting-with-the-published-image)
 has every step, including HTTPS, the firewall rules, updates and backups.
 
