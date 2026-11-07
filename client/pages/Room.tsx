@@ -47,7 +47,7 @@ import { Sheet, paneBodyPadding, type SheetMode } from "../components/Sheet.tsx"
 import { headerStacks, SHEET_HEADER, SHEET_HEADER_STACKED, pageHeightOf, sheetCap, sheetKeyboard, sheetMode, sheetWidth, sideSheetWidth } from "../components/sheetCap.ts";
 import { SHORT_LANDSCAPE_MAX, useBandStep, useTopBars, useTurnPlacement, useTurnPlaces, type TurnPlacement } from "../features/encounter/band.ts";
 import { FightWatch, InitiativeStrip, useYourTurnNotice, type StripFit, type TurnFacts } from "../features/encounter/InitiativeStrip.tsx";
-import { panelById, panelSections, panelsFor, panelSubject, subpageBack, TIME_PANEL, usePanelScroll, useSubpageFocus, type PanelClose, type PanelDef, type PanelHeader } from "../features/panels.ts";
+import { panelById, panelSections, panelsFor, panelSubject, SOUND_PANEL, subpageBack, TIME_PANEL, usePanelScroll, useSubpageFocus, type PanelClose, type PanelDef, type PanelHeader } from "../features/panels.ts";
 import { PartyDock } from "../features/party/PartyDock.tsx";
 import type { OpenSheet } from "../features/find/findToken.ts";
 import { HandoutPopup } from "../features/handouts/HandoutPopup.tsx";
@@ -78,6 +78,8 @@ import { popoverSlot } from "../components/popoverRules.ts";
 import { toolbarSlot, toolChanged, toolVoiceSlot, tuckEvent } from "../state/toolbar.ts";
 import { useDropHpDraftsOnSelect } from "../features/tokens/hpDraft.ts";
 import { useClearStatBlockOnSelect } from "../features/tokens/statBlockOpen.ts";
+import { panelFoldsSlot } from "../features/tokens/panelFolds.ts";
+import { landing, landOn, routeSlot, type RouteRequest } from "../features/search/route.ts";
 import { isoOffered, viewFoldSlot } from "../features/view/choice.ts";
 import { fitKey, fitStep, sameRecord, shapeOf, stepsFor, type BarContent, type FitRecord } from "./topBarFit.ts";
 import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
@@ -86,7 +88,7 @@ import { useWakeLock } from "../lib/wakeLock.ts";
 import type { Insets } from "../lib/camera.ts";
 import { isCoarsePointer } from "../lib/device.ts";
 import { fullscreenSupported } from "../lib/fullscreen.ts";
-import { dmPanelFoldsSlot, panelIsOpen, scenesFoldsSlot, useEndRevealsOnClose } from "../lib/folds.ts";
+import { dmPanelFoldsSlot, panelIsOpen, scenesFoldsSlot, soundFoldsSlot, thisDeviceFoldsSlot, useEndRevealsOnClose } from "../lib/folds.ts";
 import { useFocusedFieldInView, useKeyboardView } from "../lib/keyboardInset.ts";
 import { sheetStepping } from "../lib/modalDialog.ts";
 import { roomPath } from "../lib/roomId.ts";
@@ -402,7 +404,8 @@ function RoomPage() {
    * after useDockFocus below.
    */
   // A panel's request names it when it may be the bottom of two, whose name takes focus in place of the chosen tab (docs/design/design-v1-split-panel.md 9.2).
-  const focusNext = useRef<{ kind: "panel"; id?: string } | { kind: "tile"; panelId: string } | { kind: "panels" } | null>(null);
+  // A route's landing (features/search/route.ts) waits for its panel's page and control, then lands after the panel's own focus placement.
+  const focusNext = useRef<{ kind: "panel"; id?: string } | { kind: "tile"; panelId: string } | { kind: "panels" } | { kind: "anchor"; request: RouteRequest } | null>(null);
 
   // The action bar steps aside once the token's panel is open, and focus, which went with the bar's Details, goes to the panel.
   const openDetails = useCallback(
@@ -532,6 +535,14 @@ function RoomPage() {
   // Here rather than in each panel, which remounts as the layout crosses 900 px: a reveal and a held start last while their panel stays open (docs/design/design-v1-panel-groups.md 6.1).
   useEndRevealsOnClose("dm", dmPanelFoldsSlot, wide);
   useEndRevealsOnClose(SCENES_PANEL, scenesFoldsSlot, wide);
+  // The other folds a route opens on its way (features/search/route.ts routeFolds): This device's in Menu, Sound's, and the token panel's and a character's page's, which share one store.
+  useEndRevealsOnClose("menu", thisDeviceFoldsSlot, wide);
+  useEndRevealsOnClose(SOUND_PANEL, soundFoldsSlot, wide);
+  const creatureFolds = scope.get(panelFoldsSlot);
+  const creatureOpen = useRoomView((s) => panelIsOpen(s.local, "token", wide) || panelIsOpen(s.local, "characters", wide));
+  useLayoutEffect(() => {
+    if (!creatureOpen) creatureFolds.endReveals();
+  }, [creatureOpen, creatureFolds]);
   // The phone sheet that lists every panel, in the room's local state (state/types.ts sheetOpen), so
   // what floats over the map steps aside for it as for a panel. Opening a panel from anywhere takes its place.
   const picker = useRoomView((s) => s.local.panelList);
@@ -960,9 +971,77 @@ function RoomPage() {
   const sheetTitleRef = useRef<HTMLHeadingElement>(null);
   const sideTabRef = useRef<HTMLButtonElement>(null);
   const belowNameRef = useRef<HTMLButtonElement>(null);
-  const placeFocus = () => {
-    const ask = focusNext.current;
+  /*
+   * A route (features/search/route.ts) asks for focus on its landing: its
+   * control by the anchor, a record's row, or else the panel as Room's own
+   * buttons hand it. It waits for the render that draws the panel at the
+   * route's page, which a panel turns in a commit of its own and a panel
+   * whose code is still loading draws later, so a watch on the panel's box
+   * asks again as it fills. It lands in a microtask queued by the commit
+   * that has it all: after that commit's layout effects, where the panel
+   * places its own focus, a sheet or pane focuses a new subpage's title and
+   * Sound moves to its top. The viewer's next press or key, or the panel
+   * closing, ends the wait, so a control that never shows takes no focus
+   * later.
+   */
+  const routeWatch = useRef<{ box: Node; observer: MutationObserver } | null>(null);
+  const routeEnd = useRef<(() => void) | null>(null);
+  const endRoute = useCallback(() => {
+    routeWatch.current?.observer.disconnect();
+    routeWatch.current = null;
+    routeEnd.current?.();
+    routeEnd.current = null;
+  }, []);
+  /** The box a panel draws in while it is on screen: its side pane or its sheet. */
+  const paneOf = (id: string): HTMLElement | null => {
+    if (wide) return sideShows(id) ? (sidePanelRef.current?.querySelector<HTMLElement>(`[data-pane-panel="${id}"]`) ?? null) : null;
+    return sheet?.id === id ? sheetRef.current : null;
+  };
+  /** A route's step: null while it waits, once it has landed and once it has ended, else the panel's own ask, which takes its place. */
+  const routeFocus = (ask: { kind: "anchor"; request: RouteRequest }, now: boolean): { kind: "panel"; id: string } | null => {
+    const id = ask.request.panel;
+    const local = store.getState().local;
+    if (!panelIsOpen(local, id, wide) && local.pendingOpen?.id !== id) {
+      focusNext.current = null;
+      endRoute();
+      return null;
+    }
+    if (local !== localNow) return null;
+    const box = paneOf(id);
+    const step = landing(ask.request, { container: box, subpage: subpages[id]?.id ?? null });
+    if (step.t === "wait") {
+      if (box && routeWatch.current?.box !== box && typeof MutationObserver === "function") {
+        routeWatch.current?.observer.disconnect();
+        const observer = new MutationObserver(() => placeFocusNow.current());
+        observer.observe(box, { childList: true, subtree: true });
+        routeWatch.current = { box, observer };
+      }
+      return null;
+    }
+    if (!now) {
+      queueMicrotask(() => {
+        if (focusNext.current === ask) placeFocusNow.current(true);
+      });
+      return null;
+    }
+    focusNext.current = null;
+    endRoute();
+    if (step.t === "land") {
+      landOn(step.el, ask.request.press === true);
+      return null;
+    }
+    // A page that put focus in itself, on its title, keeps it.
+    const active = document.activeElement;
+    return box && active && box.contains(active) ? null : { kind: "panel", id };
+  };
+  const placeFocus = (now = false) => {
+    let ask = focusNext.current;
     if (!ask) return;
+    if (ask.kind === "anchor") {
+      const next = routeFocus(ask, now);
+      if (!next) return;
+      focusNext.current = ask = next;
+    }
     // The side panel draws no tabs until it has fitted them to its row (pages/SideTabs.tsx), at most one commit later and before paint, and then asks again (onTabsDrawn).
     if (ask.kind === "panel" && wide && sideShown && !sideTabRef.current) return;
     // A panel waiting on the side panel's measure is placed in a commit of its own, before paint (state/types.ts pendingOpen): the request waits for the render that draws it.
@@ -987,6 +1066,41 @@ function RoomPage() {
       panelFocus.focus = null;
     };
   }, [panelFocus]);
+  // The route's ask, which waits for the render that the request draws: Room draws again for each one.
+  const route = scope.get(routeSlot);
+  useStore(route.store, (s) => s.request);
+  const panelsNow = useRef(panels);
+  panelsNow.current = panels;
+  const paneOfNow = useRef(paneOf);
+  paneOfNow.current = paneOf;
+  useLayoutEffect(() => {
+    route.room = {
+      offers: (id) => panelsNow.current.some((p) => p.id === id),
+      ask: (request) => {
+        // A field typed in the panel saves as it blurs, and a change of page would unmount it unsaved. The route's press may come from a menu that took no focus.
+        const active = document.activeElement;
+        if (active instanceof HTMLElement && paneOfNow.current(request.panel)?.contains(active)) active.blur();
+        endRoute();
+        const ask = { kind: "anchor", request } as const;
+        focusNext.current = ask;
+        // Added while the press that asked is under way, past the window's capture, so only a later one ends the wait.
+        const viewerTakes = () => {
+          if (focusNext.current === ask) focusNext.current = null;
+          endRoute();
+        };
+        window.addEventListener("pointerdown", viewerTakes, true);
+        window.addEventListener("keydown", viewerTakes, true);
+        routeEnd.current = () => {
+          window.removeEventListener("pointerdown", viewerTakes, true);
+          window.removeEventListener("keydown", viewerTakes, true);
+        };
+      },
+    };
+    return () => {
+      route.room = null;
+      endRoute();
+    };
+  }, [route, endRoute]);
 
   if (ended) return <EndedScreen ended={ended} roomId={roomId} role={role} />;
   // A blackout is for a break or a reveal (features section 13), so players
@@ -3119,7 +3233,7 @@ function SidePane(props: {
     <SheetHeader compact title={props.cutTitle} />
   ) : null;
   return (
-    <div ref={rootRef} id={props.rootId} hidden={props.hidden} {...props.root} style={{ display: "flex", flexDirection: "column", minHeight: 0, ...props.style }}>
+    <div ref={rootRef} id={props.rootId} hidden={props.hidden} {...props.root} data-pane-panel={props.panelId} style={{ display: "flex", flexDirection: "column", minHeight: 0, ...props.style }}>
       {header ? <div style={{ flex: "none", borderBottom: `${theme.line.border}px solid ${theme.color.border}` }}>{header}</div> : null}
       <div
         ref={bodyRef}
