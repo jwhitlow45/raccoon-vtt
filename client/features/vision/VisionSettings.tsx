@@ -67,8 +67,8 @@ export function LightSettings(props: { scene: Scene }) {
   const unlit = useMemo(() => (tokens ? carriedLightsNote(tokens, scene.id, light) : null), [tokens, scene.id, light]);
   return (
     <>
-      <SettingRow name="Light" help={on ? LIGHT_LEVELS.find((l) => l.value === light)?.note : LIGHT_NEEDS_VISION} wide>
-        <Segmented<LightLevel> label="Light level" search="scenes.light.level" value={light} options={LIGHT_LEVELS} onChange={(level) => update({ vision: lightPatch(scene, level) })} />
+      <SettingRow name="Light" search="scenes.light.level" help={on ? LIGHT_LEVELS.find((l) => l.value === light)?.note : LIGHT_NEEDS_VISION} wide>
+        <Segmented<LightLevel> label="Light level" value={light} options={LIGHT_LEVELS} onChange={(level) => update({ vision: lightPatch(scene, level) })} />
       </SettingRow>
       {unlit ? <Note>{unlit}</Note> : null}
 

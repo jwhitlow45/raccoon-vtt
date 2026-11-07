@@ -113,6 +113,45 @@ function anchorsIn(markup: string): string[] {
   return [...markup.matchAll(/\bdata-search="([^"]+)"/g)].map((m) => m[1]!);
 }
 
+const VOID = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"]);
+
+/**
+ * The anchors on a control that a wide setting row draws under its name,
+ * where the control's only name is the row's: a choice, a list or a field,
+ * not a button, which says what it does. A landing brings its anchor near
+ * the top of the panel, so one on such a control scrolls the name above it
+ * out of view, as the Light row's level did. A row with an
+ * anchor of its own is the landing, and may hold others.
+ */
+function anchorsUnderRowNames(markup: string): string[] {
+  const out: string[] = [];
+  /** Each open element, true for a wide row with no anchor of its own. */
+  const open: boolean[] = [];
+  let wide = 0;
+  let rowJustOpened = false;
+  for (const [, close, tag, attrs, self] of markup.matchAll(/<(\/?)([a-zA-Z][\w-]*)([^>]*?)(\/?)>/g)) {
+    if (close) {
+      if (open.pop()) wide--;
+      continue;
+    }
+    // A wide row's words take the whole line (components/SettingRow.tsx), so its control sits under them.
+    if (rowJustOpened && /flex:1 1 100%/.test(attrs!)) {
+      open[open.length - 1] = true;
+      wide++;
+    }
+    rowJustOpened = false;
+    const search = /\bdata-search="([^"]+)"/.exec(attrs!)?.[1];
+    if (search && wide > 0 && tag !== "button") out.push(search);
+    if (self || VOID.has(tag!)) continue;
+    open.push(false);
+    rowJustOpened = /\bdata-setting-row=""/.test(attrs!) && !search;
+  }
+  return out;
+}
+
+/** Room settings' Room name and New scenes, still anchored on the control under their row's name until a follow-up moves them. */
+const UNDER_ROW_NAMES_FOR_NOW = new Set(["menu.room-settings.name", "menu.room-settings.grid-and-distance.new-scenes"]);
+
 /** The routes of a viewer's catalogs whose entry holds now: each entry's, and each DM menu item's twin. */
 function routes(catalogs: readonly Catalog[], ctx: SearchContext): SearchRoute[] {
   const out: SearchRoute[] = [];
@@ -205,12 +244,14 @@ describe("each entry's control draws its anchor (search.md 5.10)", () => {
       const view = viewOf((surface.room ?? fullRoom)(), role === "dm" ? DM : P1);
       const ctx = contextOf(view, false);
       test(`${surface.name}, as ${role === "dm" ? "the DM" : "a player"}`, () => {
-        const drawn = anchorsIn(draw(view, surface.Component, surface.props));
+        const markup = draw(view, surface.Component, surface.props);
+        const drawn = anchorsIn(markup);
         const want = expected(surface, catalogs, ctx);
         assert.ok(want.length > 0, "the check reads routes to this surface");
         for (const a of want) assert.ok(drawn.includes(a), `${a} is routed to but not drawn`);
         for (const a of drawn) assert.ok(all.has(a), `${a} is drawn but no entry or twin routes to it`);
         assert.equal(new Set(drawn).size, drawn.length, `an anchor drawn twice: ${drawn.join(" ")}`);
+        assert.deepEqual(anchorsUnderRowNames(markup).filter((a) => !UNDER_ROW_NAMES_FOR_NOW.has(a)), [], "a control under a wide row's name is anchored at the row, so a landing shows the name");
       });
     }
   }

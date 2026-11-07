@@ -143,8 +143,8 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
 
       <Group {...group("walls", sceneGroupSummary(scene, "walls"))} search="scenes.walls">
         <BlockMovementSetting scene={scene} />
-        <SettingRow name="Automatic walls" help={AUTO_WALLS_NOTE[autoWallsOf(scene)]} wide>
-          <Select<AutoWalls> label="Automatic walls" search="scenes.walls.auto" value={autoWallsOf(scene)} options={AUTO_WALLS} onChange={(autoWalls) => update({ autoWalls })} />
+        <SettingRow name="Automatic walls" search="scenes.walls.auto" help={AUTO_WALLS_NOTE[autoWallsOf(scene)]} wide>
+          <Select<AutoWalls> label="Automatic walls" value={autoWallsOf(scene)} options={AUTO_WALLS} onChange={(autoWalls) => update({ autoWalls })} />
         </SettingRow>
         <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
           <Button

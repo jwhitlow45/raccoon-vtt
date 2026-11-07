@@ -10,7 +10,14 @@ export type SettingIds = {
 };
 
 /** A row holds its control, or is itself the one button that opens where the setting lives (`onOpen`), never both. */
-export type SettingRowProps = { name: string; help?: ReactNode; wide?: boolean; disabled?: boolean } & (
+export type SettingRowProps = {
+  name: string;
+  help?: ReactNode;
+  wide?: boolean;
+  disabled?: boolean;
+  /** The room search's anchor id (features/search/entry.ts) on the whole row, so a landing shows the setting's name over its control and focuses the control. */
+  search?: string;
+} & (
   | { children: ReactNode | ((ids: SettingIds) => ReactNode); onOpen?: undefined; label?: undefined }
   | {
       /**
@@ -97,7 +104,7 @@ export function SettingRow(props: SettingRowProps) {
   const control = typeof props.children === "function" ? props.children(ids) : props.children;
   return (
     // Marked for the spacing check (e2e/helpers/spacing.ts), which holds a settings section's label one distance over its first row.
-    <div data-setting-row="" style={row}>
+    <div data-setting-row="" data-search={props.search} style={row}>
       <div style={{ flex: props.wide ? "1 1 100%" : "1 1 auto", minWidth: 0, display: "grid", gap: theme.space(0.5) }}>{words}</div>
       <div style={{ flex: props.wide ? "1 1 100%" : "none", minWidth: 0, display: "flex", justifyContent: props.wide ? "flex-start" : "flex-end" }}>{control}</div>
     </div>
