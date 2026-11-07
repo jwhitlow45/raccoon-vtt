@@ -2252,9 +2252,9 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     // A natural 20 names the damage a Critical Hit.
     await attacks.getByRole("button", { name: /^Scimitar damage/ }).click();
     await result.getByText(/Slashing damage/).waitFor();
-    // A monster's rolls start secret, as the Dice panel's do.
+    // A monster's rolls start secret, as the Dice panel's do. A natural 20 or 1 adds its words before Secret (dice/options.ts).
     const line = (await result.innerText()).replace(/\s+/g, " ");
-    assert.match(line, /\d+ ?to hit, Secret/);
+    assert.match(line, /\d+ ?to hit(, Natural (20\. Critical damage next\.|1: a miss))?, Secret/);
     assert.match(line, /\d+ ?Slashing damage, Secret/);
 
     const card = attacks.locator("[data-apply-to]");
