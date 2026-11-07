@@ -630,8 +630,11 @@ restFile(null, () => {
         }
         const r = await rectOf(first);
         assert.ok(Math.abs(r.bottom - r.top - 44 * z) <= 1, `the row is ${r.bottom - r.top} tall`);
-        const end = await rectOf(pat.getByRole("button", { name: "End turn" }));
-        assert.ok(r.bottom <= end.top || r.top >= end.bottom || r.right <= end.left || r.left >= end.right, `the row covers End turn: ${JSON.stringify({ r, end })}`);
+        // The strip's End turn and, since the quicker table, the bar's own: the row clears both.
+        for (const button of await pat.getByRole("button", { name: "End turn" }).all()) {
+          const end = await rectOf(button);
+          assert.ok(r.bottom <= end.top || r.top >= end.bottom || r.right <= end.left || r.left >= end.right, `the row covers End turn: ${JSON.stringify({ r, end })}`);
+        }
         const bottom = strip.top - 8 * z;
         assert.deepEqual(await coveredIn(pat, { left: strip.left, right: strip.right, top: bottom - 44 * z, bottom }), [], "something stands in the band");
         await shots.take(pat, "br-f-11-row");
@@ -1097,7 +1100,7 @@ restFile(null, () => {
         // The first Next starts the fight on Thorn's turn, so End turn stands in the band.
         await ops.send({ t: "encounter.next" });
         try {
-          await pat.getByRole("button", { name: "End turn" }).waitFor();
+          await pat.getByRole("banner").getByRole("button", { name: "End turn" }).waitFor();
           await (await barControl(thorn, "Multi-select")).click();
           await pat.getByRole("toolbar", { name: "Select options" }).waitFor();
           const held = await steady(pat);
