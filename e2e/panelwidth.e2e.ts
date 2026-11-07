@@ -170,9 +170,9 @@ async function barParts(page: Page): Promise<string[]> {
   return parts;
 }
 
-/** Whether a player's chip shows only its dot. */
+/** Whether a player's chip shows only its dot, the you menu's round button. */
 async function chipIsDot(page: Page): Promise<boolean> {
-  return (await topBar(page).getByRole("img", { name: "You are Pat" }).count()) > 0;
+  return (await topBar(page).locator('[data-chip="you"][data-chip-form="dot"]').count()) > 0;
 }
 
 /** What takes a press at a point: the edge, or the tag and role of what does. */
