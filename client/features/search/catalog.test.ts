@@ -4,7 +4,8 @@ import { dirname, join, relative, resolve } from "node:path";
 import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { ClientOp } from "#shared/protocol.ts";
-import { DM, P1, scene } from "#shared/testutil.ts";
+import { DM, scene } from "#shared/testutil.ts";
+import { setRoomSoundChoice } from "../device/settings.ts";
 import { dmMenuSections, itemsOf, type ChipEnv, type DmMenuView } from "../../pages/chipMenus.ts";
 import type { DmItemKind } from "../../pages/chipWords.ts";
 import type { RoomView } from "../../state/types.ts";
@@ -317,5 +318,59 @@ describe("every anchor is drawn by exactly one search= in client/**/*.tsx, and t
     const drawn = new Set([...written().keys(), ...made()]);
     const missing = [...routed()].filter((id) => !drawn.has(id));
     assert.deepEqual(missing, [...VIEW_ANCHORS]);
+  });
+});
+
+describe("what an entry offers and says now (search.md 5.2)", () => {
+  const offered = (catalog: Catalog, ctx: SearchContext) => new Set(catalog.entries.filter((e) => !e.when || e.when(ctx)).map((e) => e.id));
+
+  test("This device offers what this device draws: the Tab row on a wide screen, the volumes while Room sound is on, Full screen where the browser has it", () => {
+    const pat = PAT_VIEW();
+    assert.ok(offered(EVERYONE, ctxOf(pat, { wide: true })).has("setting:menu.this-device.tab-row.panels"));
+    for (const id of ["section:menu.this-device.tab-row", "setting:menu.this-device.tab-row.panels"]) assert.ok(!offered(EVERYONE, ctxOf(pat, { wide: false })).has(id), id);
+    try {
+      setRoomSoundChoice("off");
+      assert.ok(!offered(EVERYONE, ctxOf(pat)).has("setting:menu.this-device.sounds.music"));
+      assert.ok(offered(EVERYONE, ctxOf(pat)).has("setting:menu.this-device.sounds.room"));
+      setRoomSoundChoice(null);
+      assert.ok(offered(EVERYONE, ctxOf(DM_VIEW())).has("setting:menu.this-device.sounds.effects"), "a DM's device plays the room's sound until told not to");
+      assert.ok(!offered(EVERYONE, ctxOf(pat)).has("setting:menu.this-device.sounds.effects"), "a player's waits to be asked");
+      setRoomSoundChoice("on");
+      assert.ok(offered(EVERYONE, ctxOf(pat)).has("setting:menu.this-device.sounds.loops"));
+    } finally {
+      setRoomSoundChoice(null);
+    }
+    // Node has no document, so no full screen, and the server's switch for animated maps is not known.
+    for (const id of ["section:menu.this-device.screen", "setting:menu.this-device.screen.fullscreen", "setting:menu.this-device.map-detail.animated"]) assert.ok(!offered(EVERYONE, ctxOf(pat)).has(id), id);
+  });
+
+  test("Room settings' rows show each setting as the room has it", () => {
+    const room = seededRoom();
+    Object.assign(room.meta.settings, { pcHpVisibleToParty: true, monstersDieAtZero: false, critRule: "doubleDice", feetPerCell: 10, playersMoveAny: ["p1"], turnTimerSec: 60 });
+    const ctx = ctxOf(viewOf(room, DM));
+    const value = (id: string) => DM_CATALOG.entries.find((e) => e.id === id)?.valueNow?.(ctx);
+    assert.equal(value("setting:menu.room-settings.players.pc-hp-visible-to-party"), "On");
+    assert.equal(value("setting:menu.room-settings.combat.monsters-die-at-zero"), "Off");
+    assert.equal(value("setting:menu.room-settings.combat.crit-rule"), "Double the dice rolled");
+    assert.equal(value("setting:menu.room-settings.grid-and-distance.feet-per-cell"), "10 ft.");
+    assert.equal(value("setting:menu.room-settings.players.players-move-any"), "Chosen players");
+    assert.equal(value("setting:menu.room-settings.combat.turn-timer-sec"), "1 minute");
+    assert.equal(value("setting:menu.room-settings.grid-and-distance.new-scenes"), "Squares");
+    assert.equal(value("setting:menu.room-settings.name"), room.meta.name);
+    const chosen = "setting:menu.room-settings.players.players-move-any.chosen";
+    assert.ok(offered(DM_CATALOG, ctx).has(chosen), "the ticks while Chosen players is picked");
+    room.meta.settings.playersMoveAny = "none";
+    assert.ok(!offered(DM_CATALOG, ctxOf(viewOf(room, DM))).has(chosen));
+    assert.ok(DM_CATALOG.entries.find((e) => e.id === "setting:menu.room-settings.grid-and-distance.feet-per-cell")?.names?.includes("Feet per square or hex"), "a room with hexes reads its own label");
+  });
+
+  test("Include sounds while the room holds sounds, Party sight on a scene with party vision", () => {
+    const room = seededRoom();
+    assert.ok(offered(DM_CATALOG, ctxOf(viewOf(room, DM))).has("setting:menu.room-settings.backup.sounds"));
+    assert.ok(!offered(DM_CATALOG, ctxOf(viewOf(room, DM))).has("setting:dm.preview.party-sight"));
+    room.sounds = {};
+    room.scenes.s1 = { ...room.scenes.s1!, vision: { on: true } as never };
+    assert.ok(!offered(DM_CATALOG, ctxOf(viewOf(room, DM))).has("setting:menu.room-settings.backup.sounds"));
+    assert.ok(offered(DM_CATALOG, ctxOf(viewOf(room, DM))).has("setting:dm.preview.party-sight"));
   });
 });
