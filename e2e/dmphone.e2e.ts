@@ -74,7 +74,7 @@ type Win = {
 const BAND_NAME_MIN_PX = 36;
 
 type Box = { left: number; right: number };
-type BandEl = { tagName: string; textContent: string | null; parentElement: BandEl | null; getAttribute(name: string): string | null; getBoundingClientRect(): Box };
+type BandEl = { tagName: string; textContent: string | null; parentElement: BandEl | null; getAttribute(name: string): string | null; getBoundingClientRect(): Box; closest(selector: string): BandEl | null };
 
 /** The turn band's name, timer and Next disks as the page lays them out, and the window's width. */
 function band(page: Page): Promise<{ width: number; name: Box | null; timer: Box | null; next: Box | null; timerText: string }> {
@@ -87,7 +87,8 @@ function band(page: Page): Promise<{ width: number; name: Box | null; timer: Box
       width: g.innerWidth,
       name: box(all.find((el) => el.getAttribute("data-rvtt-strip-name") !== null)),
       timer: box(timer),
-      next: box(all.find((el) => el.tagName === "SPAN" && el.textContent === "Next")?.parentElement),
+      // The disks' own "Next", not the word on the DM's Next button at the band's end (QOL audit Q4).
+      next: box(all.find((el) => el.tagName === "SPAN" && el.textContent === "Next" && el.closest("button") === null)?.parentElement),
       timerText: timer?.textContent ?? "",
     };
   });
@@ -1537,6 +1538,83 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       await brute.remove();
       if (await check.isVisible()) await check.getByRole("button", { name: "Passed", exact: true }).tap();
       await check.waitFor({ state: "detached" });
+    }
+  });
+
+  test("qe-1. in a fight the DM's band ends with Next, a 44 px target with the next faces beside it where they fit; held on the wire, a press shows it busy and a second sends nothing, and the answer moves the turn once (QOL audit Q4, chips C3)", async () => {
+    const entries: { id: string; tokenId: string; value: number }[] = [];
+    for (let i = 1; i <= 4; i++) {
+      const id = randomUUID();
+      await ops.send({ t: "token.create", token: { id, sceneId: run.sceneId, kind: "monster", name: `Kobold ${i}`, x: 4 + i, y: 9, size: "medium", visibility: "all", disposition: "hostile", actor: { inline: goblin() } } });
+      entries.push({ id: randomUUID(), tokenId: id, value: 20 - i });
+    }
+    await ops.send({ t: "encounter.start", entries });
+    await ops.send({ t: "encounter.next" });
+    await waitFor("the first kobold's turn", () => (dmSocket.state?.encounter?.activeEntryId === entries[0]!.id ? true : null));
+    // A second phone of the DM's, its socket routed from the start so Next can wait on the wire.
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    const sent: string[] = [];
+    const wire: { hold: boolean; held: (string | Buffer)[]; send: ((m: string | Buffer) => void) | null } = { hold: false, held: [], send: null };
+    const nexts = () => sent.filter((m) => m.includes('"t":"encounter.next"')).length;
+    try {
+      await context.addCookies(await dmContext.cookies(server.origin));
+      const page = await context.newPage();
+      const watch = new ConsoleWatch("dm-phone-2");
+      watch.attach(page);
+      await page.routeWebSocket(/\/ws\?room=/, (ws) => {
+        const upstream = ws.connectToServer();
+        wire.send = (m) => upstream.send(m);
+        ws.onMessage((m) => {
+          const text = typeof m === "string" ? m : m.toString("utf8");
+          sent.push(text);
+          if (wire.hold && text.includes('"t":"encounter.next"')) wire.held.push(m);
+          else upstream.send(m);
+        });
+        upstream.onMessage((m) => ws.send(m));
+      });
+      for (const scale of [1, 1.3]) {
+        const at = `390 x 844 at ${Math.round(scale * 100)}%`;
+        await page.goto(`${server.origin}/r/${run.roomId}`);
+        await page.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
+        await reopenRoom(page);
+        await page.getByRole("status", { name: "Connected" }).first().waitFor();
+        const next = page.locator("header[data-rvtt-topbar]").getByRole("button", { name: "Next turn", exact: true });
+        await next.waitFor();
+        const box = (await next.boundingBox())!;
+        assert.ok(box.height >= 44 * scale - 0.5 && box.width >= 44 * scale - 0.5, `${at}: Next is ${box.width} x ${box.height}`);
+        // The band's own faces, not the pill's word: the faces' "Next" stands outside any button.
+        const faces = await page.locator("header[data-rvtt-topbar]").evaluate((header) => {
+          type El = { textContent: string | null; parentElement: El | null; children: ArrayLike<unknown>; closest(s: string): unknown };
+          const label = Array.from((header as unknown as { querySelectorAll(s: string): ArrayLike<El> }).querySelectorAll("span")).find((el) => el.textContent === "Next" && el.closest("button") === null);
+          return label?.parentElement ? label.parentElement.children.length - 1 : 0;
+        });
+        const nextBox = (await next.boundingBox())!;
+        assert.ok(nextBox.x + nextBox.width <= 390 + 0.5, `${at}: Next runs off the screen`);
+        if (scale === 1) assert.ok(faces >= 1, `${at}: the band gave up every next face beside Next`);
+        await shots.take(page, `dmphone-qe-1-band-next-${Math.round(scale * 100)}`);
+      }
+
+      const before = nexts();
+      wire.hold = true;
+      const next = page.locator("header[data-rvtt-topbar]").getByRole("button", { name: "Next turn", exact: true });
+      await next.tap();
+      await waitFor("Next on the wire", () => (wire.held.length === 1 ? true : null));
+      await waitFor("Next busy", async () => ((await next.getAttribute("aria-busy")) === "true" ? true : null), 3_000);
+      await next.dispatchEvent("click");
+      await page.waitForTimeout(300);
+      assert.equal(nexts(), before + 1, "a second press while Next waits sent another");
+      await shots.take(page, "dmphone-qe-1-band-next-busy");
+      wire.hold = false;
+      for (const m of wire.held.splice(0)) wire.send!(m);
+      await waitFor("the second kobold's turn", () => (dmSocket.state?.encounter?.activeEntryId === entries[1]!.id ? true : null));
+      await waitFor("Next at rest", async () => ((await next.getAttribute("aria-busy")) === null ? true : null), 3_000);
+      await page.waitForTimeout(400);
+      assert.equal(dmSocket.state?.encounter?.activeEntryId, entries[1]!.id, "the turn moved more than once");
+      assert.deepEqual(watch.errors, []);
+    } finally {
+      await context.close();
+      await ops.send({ t: "encounter.end" }).catch(() => {});
+      for (const e of entries) await ops.send({ t: "token.delete", tokenId: e.tokenId }).catch(() => {});
     }
   });
 });
