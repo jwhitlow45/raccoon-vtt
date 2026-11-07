@@ -136,6 +136,25 @@ async function scrollToFoot(button: Locator): Promise<void> {
   assert.ok(room !== null && room < 8, `the button sits at the panel's foot: ${room} px below it`);
 }
 
+/** Every top, rounded, that the side panel's tab row draws at over `ms`, read on each frame. */
+function tabTops(page: Page, ms: number): Promise<number[]> {
+  return page.evaluate((span) => {
+    type El = { getBoundingClientRect(): { top: number } };
+    const g = globalThis as unknown as { document: { querySelector(s: string): El | null }; performance: { now(): number }; requestAnimationFrame(f: () => void): void };
+    const tops = new Set<number>();
+    return new Promise<number[]>((resolve) => {
+      const start = g.performance.now();
+      const tick = () => {
+        const tabs = g.document.querySelector('[role="tablist"][aria-label="Panels"]');
+        if (tabs) tops.add(Math.round(tabs.getBoundingClientRect().top));
+        if (g.performance.now() - start < span) g.requestAnimationFrame(tick);
+        else resolve([...tops]);
+      };
+      tick();
+    });
+  }, ms);
+}
+
 /** The sheet's scrolling body as it shows on screen. */
 function sheetView(page: Page): Promise<{ top: number; bottom: number }> {
   return page.evaluate(() => {
@@ -954,6 +973,10 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     try {
       // Turned wide, the page closes the phone's sheet and the Dice tab of the side panel shows the same open save and the wyrmling's rolls.
       await dm.getByRole("tablist", { name: "Panels" }).waitFor();
+      // The party bar above the tabs, its code loaded long since, draws with the panel. It came some 300 ms later on a lazy part's first render, pushed the panel down 139 px, and took this question out of view on a slow CI page (D-261106-393).
+      const tops = await tabTops(dm, 500);
+      assert.equal(tops.length, 1, `the side panel's tabs stay where they first drew: ${tops.join(", ")}`);
+      assert.ok(await dm.getByRole("button", { name: "Ask the party" }).isVisible(), "the party bar stands above them");
       await openSideTab(dm, "Dice");
       const panel = dm.getByRole("tabpanel", { name: /^Dice/ });
       const groupSave = panel.locator("[data-roll-options]").getByRole("button", { name: "Group save, DC 13 DEX" });
