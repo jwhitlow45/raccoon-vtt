@@ -1026,7 +1026,7 @@ describe("the music player in the Sound panel", { concurrency: false }, () => {
     }
   });
 
-  test("mu-8. the maker stays open across 900 px with its draft kept", async () => {
+  test("mu-8. the maker stays open across 900 px with its draft kept, and its close puts focus back on New playlist as drawn after the turn", async () => {
     await fresh();
     const panel = await libraryView();
     await panel.getByRole("button", { name: "New playlist", exact: true }).click();
@@ -1050,6 +1050,9 @@ describe("the music player in the Sound panel", { concurrency: false }, () => {
     await win.getByRole("button", { name: /^Close/ }).last().click();
     await win.waitFor({ state: "detached" });
     assert.equal(sentOps(sent, "playlist.create").length, 0);
+    // The turn drew Library afresh twice, so the button that opened the maker is gone: focus goes to the one drawn now, found by its mark (MakerDialog.tsx).
+    const opener = panel.getByRole("button", { name: "New playlist", exact: true });
+    await waitFor("focus back on New playlist", () => opener.evaluate((el) => (el === el.ownerDocument.activeElement ? true : null)), 5_000);
   });
 
   test("mu-9. the player, Up next with Played, Library, the menus, the maker and its tabs at four sizes, 100% and 130%, dark and light: nothing over 1 px out of line", async () => {
