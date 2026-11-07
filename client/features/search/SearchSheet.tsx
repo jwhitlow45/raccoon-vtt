@@ -24,6 +24,7 @@ import type { RoomView } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { useLayoutSize } from "../device/layout.ts";
 import { useUiScale } from "../device/settings.ts";
+import { fillDiceField } from "../dice/fill.ts";
 import { useDicePanel } from "../dice/useDicePanel.ts";
 import { useSrdBlocks } from "../monsters/srdBlocks.ts";
 import { focusOutlineRow } from "../outliner/focus.ts";
@@ -177,9 +178,11 @@ export function stepActive(active: number, count: number, key: "up" | "down"): n
 
 // ---------------------------------------------------------------- what a pick does
 
-/** Initiative and Dice, where a condition's and a dice row's Shift+Enter go. */
+/** The token panel's Conditions, where a condition's Shift+Enter goes, and Dice, where a dice row's roll shows. */
 const TOKEN_CONDITIONS: SearchRoute = Object.freeze({ panel: "token", section: "combat" });
 const DICE: SearchRoute = Object.freeze({ panel: "dice" });
+/** The Dice panel's formula field, where a dice row's Shift+Enter puts its formula unrolled (dice/fill.ts). */
+const DICE_FIELD: SearchRoute = Object.freeze({ panel: "dice", anchor: "dice.formula" });
 
 /**
  * A pick's step (search.md 5.5): a verb does it, a noun goes to it, and
@@ -187,7 +190,8 @@ const DICE: SearchRoute = Object.freeze({ panel: "dice" });
  * A menu item runs the item's own function, and goes to its twin in a
  * panel on Shift+Enter. A token is selected and framed, or its panel
  * opens. A condition goes on or off the selection, or its panel opens at
- * Conditions. A dice formula rolls, or the Dice panel opens.
+ * Conditions. A dice formula rolls, or goes into the Dice panel's field
+ * unrolled.
  */
 export type PickStep =
   | { t: "route"; route: SearchRoute }
@@ -196,7 +200,8 @@ export type PickStep =
   | { t: "tokenPanel"; tokenId: string }
   | { t: "condition"; condition: string; remove: boolean }
   | { t: "item"; itemId: string }
-  | { t: "roll"; formula: string };
+  | { t: "roll"; formula: string }
+  | { t: "fill"; formula: string };
 
 function onlyGoes(route: SearchRoute): SearchRoute {
   if (!route.press) return route;
@@ -219,7 +224,7 @@ export function pickStep(act: SearchAct, only: boolean): PickStep {
     case "item":
       return only ? { t: "route", route: onlyGoes(act.twin) } : { t: "item", itemId: act.itemId };
     case "roll":
-      return only ? { t: "route", route: DICE } : { t: "roll", formula: act.formula };
+      return only ? { t: "fill", formula: act.formula } : { t: "roll", formula: act.formula };
   }
 }
 
@@ -544,6 +549,12 @@ function SearchDialog(props: BodyProps & { items: readonly ChipItem[]; env: Chip
         // As the Dice panel's Roll, with its next-roll choices, then the panel, where the roll's line shows.
         dice.roll([{ formula: step.formula }]);
         openAt(scope, ui, DICE);
+        close();
+        return;
+      case "fill":
+        // The field takes it as the panel draws, then the route lands focus there (search.md 5.5: "puts it in the Dice field without rolling").
+        fillDiceField(scope, step.formula);
+        openAt(scope, ui, DICE_FIELD);
         close();
         return;
       case "tokenPanel":

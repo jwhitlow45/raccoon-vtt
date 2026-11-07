@@ -252,11 +252,11 @@ describe("what a pick does (search.md 5.5, D-261106-144)", () => {
     }
   });
 
-  test("a condition goes on or off the selection, or its Conditions open, and a dice formula rolls, or Dice opens", () => {
+  test("a condition goes on or off the selection, or its Conditions open, and a dice formula rolls, or goes into the Dice field unrolled", () => {
     assert.deepEqual(pickStep({ t: "condition", condition: "prone", remove: true }, false), { t: "condition", condition: "prone", remove: true });
     assert.deepEqual(pickStep({ t: "condition", condition: "prone", remove: false }, true), { t: "route", route: { panel: "token", section: "combat" } });
     assert.deepEqual(pickStep({ t: "roll", formula: "2d6+3" }, false), { t: "roll", formula: "2d6+3" });
-    assert.deepEqual(pickStep({ t: "roll", formula: "2d6+3" }, true), { t: "route", route: { panel: "dice" } });
+    assert.deepEqual(pickStep({ t: "roll", formula: "2d6+3" }, true), { t: "fill", formula: "2d6+3" });
   });
 
   test("a condition sends the token bar picker's op, read against the creature now, and never one that changes nothing", () => {

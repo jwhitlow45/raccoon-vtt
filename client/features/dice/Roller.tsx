@@ -1,4 +1,5 @@
 import { Fragment, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { useStore } from "zustand";
 import { addDie, formatFormula, parseRollText } from "#shared/dice/formula.ts";
 import { labelText } from "#shared/logText.ts";
 import type { DiceRoll, LogEntry } from "#shared/model.ts";
@@ -15,7 +16,9 @@ import { markedBy, ProficiencyLabel, proficiencyFrame, spokenProficiency } from 
 import { ScrollStrip } from "../../components/ScrollStrip.tsx";
 import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
+import { useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
+import { diceFillSlot, takeDiceFill } from "./fill.ts";
 import { answerVerdict, askedRoll, headerRoll, modeRepeat, readHistory, readingOf, rollsOf, rollVerdict, stepHistory, withHistory, writeHistory, type HeaderRoll } from "./logic.ts";
 import { acceptsRollMode, effectiveRollMode, type RollModeOverride } from "./rollMode.ts";
 import { useRollModeMenu } from "./useRollModeMenu.tsx";
@@ -465,6 +468,16 @@ export function Roller() {
     void document.fonts?.ready.then(measure);
     return () => observer.disconnect();
   }, []);
+  // A formula the room search puts here unrolled (fill.ts), taken once, an ask made before the panel drew included.
+  const fill = useScoped(diceFillSlot);
+  const fillSeq = useStore(fill, (f) => f.seq);
+  useLayoutEffect(() => {
+    const asked = takeDiceFill(fill);
+    if (asked === null) return;
+    setText(asked);
+    setAt(-1);
+    setError(null);
+  }, [fill, fillSeq]);
 
   const change = (next: string) => {
     setText(next);
