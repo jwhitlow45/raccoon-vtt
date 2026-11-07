@@ -102,7 +102,8 @@ function panelsButton(page: Page): Locator {
 async function openPanel(page: Page, name: string): Promise<Locator> {
   await panelsButton(page).click();
   await page.getByRole("region", { name: "Panels" }).getByRole("button", { name, exact: true }).click();
-  const sheet = page.locator(`section[aria-label="${name}"]`);
+  // The outer match is the panel's sheet. A panel can draw a section of the same name inside it, as Party's bar does.
+  const sheet = page.locator(`section[aria-label="${name}"]`).first();
   await sheet.waitFor();
   return sheet;
 }

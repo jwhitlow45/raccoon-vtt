@@ -267,7 +267,7 @@ function sheetOf(page: Page, name: string): Locator {
 async function openPanel(page: Page, name: string): Promise<Locator> {
   await page.locator('nav[aria-label="Tools"] button[title="Panels"]').click();
   await page.getByRole("region", { name: "Panels" }).getByRole("button", { name, exact: true }).click();
-  await page.locator(`section[aria-label="${name}"]`).waitFor();
+  await page.locator(`section[aria-label="${name}"]`).first().waitFor();
   const sheet = sheetOf(page, name);
   await steadyRect(sheet);
   return sheet;
@@ -1259,7 +1259,7 @@ async function openPanelBy(page: Page, name: string, tap: boolean): Promise<Loca
   const item = page.getByRole("region", { name: "Panels" }).getByRole("button", { name, exact: true });
   if (tap) await item.tap();
   else await item.click();
-  await page.locator(`section[aria-label="${name}"]`).waitFor();
+  await page.locator(`section[aria-label="${name}"]`).first().waitFor();
   const sheet = sheetOf(page, name);
   await steadyRect(sheet);
   return sheet;

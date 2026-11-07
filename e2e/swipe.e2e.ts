@@ -124,7 +124,7 @@ function panelsButton(page: Page): Locator {
 async function openPanel(page: Page, name: string): Promise<Locator> {
   await panelsButton(page).click();
   await page.getByRole("region", { name: "Panels" }).getByRole("button", { name, exact: true }).click();
-  await page.locator(`section[aria-label="${name}"]`).waitFor();
+  await page.locator(`section[aria-label="${name}"]`).first().waitFor();
   return sheetOf(page, name);
 }
 
