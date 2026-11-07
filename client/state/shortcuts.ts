@@ -16,7 +16,7 @@ import { PLACE_TOOL_ID } from "../features/tokens/placement.ts";
 import { cycleStep, type ToolCycle } from "../features/toolChoices.ts";
 import { isoOffered, kindSaid, otherViewPress, sayView, topDownTool, turnRefused } from "../features/view/choice.ts";
 import { pickView, readView, shownView, turnView, viewKey } from "../features/view/store.ts";
-import { hasKeyboard, noteKeyboard, subscribeKeyboard } from "../lib/device.ts";
+import { hasKeyboard, isAppleDevice, noteKeyboard, subscribeKeyboard } from "../lib/device.ts";
 import { fullscreenSupported, toggleFullscreen } from "../lib/fullscreen.ts";
 import { displayName } from "../lib/scene.ts";
 import { turned } from "../lib/view.ts";
@@ -34,13 +34,15 @@ import { useRoomActions, useRoomRoleIfAny, useRoomStore, useRoomUi } from "./vie
  *
  * A shortcut never fires:
  * - while focus is in a field (isTextField), where the keys are typing,
+ *   except the search's Ctrl+K or Cmd+K in a one-line field, which types
+ *   nothing there (`inFields`),
  * - while a modal dialog is open (Escape stays the dialog's own),
  * - inside "view as a player", where every key but Escape is ignored. The
  *   preview mounts a second Room page, and Ctrl+Z there used to undo the
  *   DM's real last change through the DM's page behind it, whose listener
  *   now finds a modal dialog open and does nothing,
  * - with Ctrl, Cmd or Alt held, so the browser's own shortcuts stay, except
- *   for undo and redo, which are Ctrl or Cmd with Z,
+ *   for undo and redo, which are Ctrl or Cmd with Z, and the search's K,
  * - on a held key's repeats: undo waits for the server, and a held arrow
  *   would queue a dozen moves before the first answer showed.
  *
@@ -71,6 +73,17 @@ export type KeyPress = {
 
 /** Input types that take no typing, where Ctrl+Z has nothing of its own to undo. */
 const NOT_TYPED = new Set(["button", "checkbox", "color", "file", "image", "radio", "range", "reset", "submit"]);
+
+/**
+ * A field of one line that a modifier with a letter types nothing in, so
+ * the search's Ctrl+K may open from it (designs/qol/search.md 5.6). A
+ * text area, a select box and an editable block keep every key.
+ */
+export function isOneLineField(target: unknown): boolean {
+  if (!target || typeof target !== "object") return false;
+  const el = target as { tagName?: unknown; isContentEditable?: unknown };
+  return el.isContentEditable !== true && typeof el.tagName === "string" && el.tagName.toUpperCase() === "INPUT" && isTextField(target);
+}
 
 /** Whether focus is somewhere the keys belong to the field: a text field, or a select box, which picks by typed letters. */
 export function isTextField(target: unknown): boolean {
@@ -164,8 +177,15 @@ export type Shortcut = {
   /** What it does, for the sheet. */
   does: string;
   roles: readonly ("dm" | "player")[];
-  /** Ctrl or Cmd with the key: undo and redo only. */
+  /** Ctrl or Cmd with the key: undo, redo and the search. */
   modifier?: true;
+  /**
+   * It works while typing in a one-line field too (isOneLineField), where
+   * the key types nothing: the search's alone. On a Mac Ctrl+K stays the
+   * field's own, deleting to the line's end, and only Cmd+K opens the
+   * search there (search.md 5.6).
+   */
+  inFields?: true;
   /** Whether it applies now. Left out, whenever the role has it. */
   when?(env: ShortcutEnv): boolean;
   /** Arrow or Page keys, which a focused choice group or slider keeps for itself (ownsNavigationKeys). */
@@ -241,6 +261,21 @@ export const shortcutSheetSlot = scopeSlot(() => ({ open: false, listeners: new 
 
 export function setShortcutSheet(scope: RoomScope, open: boolean): void {
   const sheet = scope.get(shortcutSheetSlot);
+  if (sheet.open === open) return;
+  sheet.open = open;
+  for (const listener of sheet.listeners) listener();
+}
+
+/**
+ * The room search's open state (designs/qol/search.md 5.1), which Ctrl+K
+ * or Cmd+K, the top bar's Search and the Panels field set
+ * (features/search/SearchSheet.tsx). Per Room page, so "view as a player"
+ * has none of its own to open.
+ */
+export const searchSheetSlot = scopeSlot(() => ({ open: false, listeners: new Set<() => void>() }));
+
+export function setSearchSheet(scope: RoomScope, open: boolean): void {
+  const sheet = scope.get(searchSheetSlot);
   if (sheet.open === open) return;
   sheet.open = open;
   for (const listener of sheet.listeners) listener();
@@ -433,6 +468,18 @@ export const SHORTCUTS: readonly Shortcut[] = [
     modifier: true,
     match: (e) => letterOf(e) === "z" && e.shiftKey,
     run: (env) => env.actions.redo(),
+  },
+  {
+    // Fixed, as Ctrl+Z is, so no key a device moves can take it (D-261106-141). A device that moved Fog to K still gets the search here, since a moved key never has Ctrl.
+    id: "search",
+    keys: "Ctrl+K",
+    does: "Search the room: panels, settings, actions and what is on the map",
+    roles: ["dm", "player"],
+    modifier: true,
+    inFields: true,
+    match: (e) => letterOf(e) === "k" && !e.shiftKey,
+    sheetKeys: () => ({ input: "Ctrl+K", note: "also while you type in a field" }),
+    run: (env) => setSearchSheet(env.scope, true),
   },
   toolShortcut("select", "v", "Select", ["dm", "player"]),
   toolShortcut("ruler", "r", "Ruler", ["dm", "player"]),
@@ -683,6 +730,7 @@ export type KeyHint = { text: string; aria: string };
 /** The fixed rows' keys in `aria-keyshortcuts` names, one entry per key the sheet lists, so `part` can pick one. */
 const FIXED_ARIA: Readonly<Record<string, readonly string[]>> = {
   undo: ["Control+Z Meta+Z"],
+  search: ["Control+K Meta+K"],
   redo: ["Control+Shift+Z Meta+Shift+Z"],
   elevation: ["PageUp", "PageDown"],
   delete: ["Delete", "Backspace"],
@@ -804,6 +852,7 @@ export type BehaviorDevice = "keys" | "mouse" | "android" | "pointer";
 
 /** The surfaces whose own keys get a section of the sheet, in the sheet's order. */
 export const SURFACES = [
+  "Search",
   "Toolbar",
   "Tool options",
   "Side panel tabs",
@@ -1337,6 +1386,12 @@ export const BEHAVIORS: readonly Behavior[] = [
     device: "keys",
     surface: "Images",
   },
+
+  // The room search: features/search/SearchSheet.tsx, its field's own keys (designs/qol/search.md 5.6). Its field keeps Home, End, Left and Right.
+  { id: "searchMove", input: "Up, Down", does: "Move through the results", roles: EVERYONE, device: "keys", surface: "Search" },
+  { id: "searchGo", input: "Enter", does: "Go there, or do it", roles: EVERYONE, device: "keys", surface: "Search" },
+  { id: "searchGoOnly", input: "Shift+Enter", does: "Only go there", roles: EVERYONE, device: "keys", surface: "Search" },
+  { id: "searchClose", input: "Escape, Ctrl+K", does: "Close it, back where you were", roles: EVERYONE, device: "keys", surface: "Search" },
 ];
 
 /**
@@ -1433,8 +1488,17 @@ export function whoText(b: Pick<Behavior, "roles" | "when">): string {
   return b.when ? `${who}, ${b.when}` : who;
 }
 
-/** Where a press lands: whether a modal dialog is open, and whether this Room page is a "view as a player" preview. */
-export type ShortcutGates = { dialogOpen: boolean; preview: boolean };
+/**
+ * Where a press lands: whether a modal dialog is open, whether this Room
+ * page is a "view as a player" preview, and whether this device takes
+ * Cmd where others take Ctrl (lib/device.ts isAppleDevice), as a Mac.
+ */
+export type ShortcutGates = { dialogOpen: boolean; preview: boolean; apple?: boolean };
+
+/** Whether a press in a field is still the shortcut's: one that works in a one-line field, there, but for a Mac's Ctrl, which the field keeps. */
+function takenInField(shortcut: Shortcut, e: KeyPress, apple: boolean): boolean {
+  return shortcut.inFields === true && isOneLineField(e.target) && !(apple && e.ctrlKey && !e.metaKey);
+}
 
 /**
  * The shortcut a press runs, or null. Pure but for the conditions, which
@@ -1443,12 +1507,14 @@ export type ShortcutGates = { dialogOpen: boolean; preview: boolean };
  * the Latin letter of its place (keyBindings.ts pressKeys).
  */
 export function shortcutFor(e: KeyPress, env: ShortcutEnv, gates: ShortcutGates, keys: KeyMap = shortcutKeys()): Shortcut | null {
-  if (e.defaultPrevented || e.repeat || gates.preview || gates.dialogOpen || e.altKey || isTextField(e.target)) return null;
+  if (e.defaultPrevented || e.repeat || gates.preview || gates.dialogOpen || e.altKey) return null;
+  const typing = isTextField(e.target);
   const modifier = e.ctrlKey || e.metaKey;
   const mine = SHORTCUTS.filter((s) => s.roles.includes(env.role) && (s.modifier === true) === modifier);
   const bound = (k: string) => mine.find((s) => s.key !== undefined && sameKey(keys[s.id] ?? s.key, k));
   const shortcut = (modifier ? undefined : pressKeys(e).map(bound).find((s) => s !== undefined)) ?? mine.find((s) => s.match?.(e, roleKeys(env.role, keys)) === true);
   if (!shortcut) return null;
+  if (typing && !takenInField(shortcut, e, gates.apple === true)) return null;
   if (shortcut.navigation && ownsNavigationKeys(e.target)) return null;
   return !shortcut.when || shortcut.when(env) ? shortcut : null;
 }
@@ -1464,12 +1530,13 @@ export function useShortcuts(input: { role: "dm" | "player"; tools: readonly Sho
   const latest = useRef(input);
   latest.current = input;
   useEffect(() => {
+    const apple = isAppleDevice();
     const onKey = (e: KeyboardEvent) => {
       if (!isTextField(e.target)) noteKeyboard(e.key);
       const { role, tools, scope, preview } = latest.current;
       const env: ShortcutEnv = { role, tools, getState: () => store.getState(), actions, ui, scope };
       const dialogOpen = document.querySelector('[aria-modal="true"]') !== null;
-      const shortcut = shortcutFor(e, env, { dialogOpen, preview });
+      const shortcut = shortcutFor(e, env, { dialogOpen, preview, apple });
       if (!shortcut) return;
       if (!shortcut.typesThrough) e.preventDefault();
       shortcut.run(env, e);

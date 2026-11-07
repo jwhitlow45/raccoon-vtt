@@ -21,8 +21,10 @@ import {
   DEFAULT_KEYS,
   deletedText,
   hexNudge,
+  isOneLineField,
   isTextField,
   keyHint,
+  searchSheetSlot,
   surfaceKeyHint,
   keySuffix,
   keyText,
@@ -166,7 +168,7 @@ describe("the shortcut table", () => {
       assert.equal(find(e, press({ key: "f", code: "KeyF" })), null, "F is free now");
       assert.equal(find(e, press({ key: "а", code: "KeyF" })), null, "and so is its place");
       assert.equal(find(e, press({ key: "k", code: "KeyK", target: { tagName: "INPUT", type: "text" } })), null, "typing in a field");
-      assert.equal(find(e, press({ key: "k", code: "KeyK", ctrlKey: true })), null, "Ctrl+K stays the browser's");
+      assert.equal(find(e, press({ key: "k", code: "KeyK", ctrlKey: true })), "search", "Ctrl+K opens the search, never the moved Fog");
       assert.equal(find(env({ role: "player" }).env, press({ key: "k", code: "KeyK" })), null, "Fog is still the DM's");
     });
 
@@ -631,7 +633,7 @@ describe("the shortcut table", () => {
       assert.ok(!s.modifier, `${s.id} is one key`);
     }
     // The rows that stay: Ctrl or Cmd, the arrow and Page keys, Delete and Backspace.
-    assert.deepEqual(SHORTCUTS.filter((s) => s.key === undefined).map((s) => s.id), ["undo", "redo", "nudge", "elevation", "delete", "hpDigit"]);
+    assert.deepEqual(SHORTCUTS.filter((s) => s.key === undefined).map((s) => s.id), ["undo", "redo", "search", "nudge", "elevation", "delete", "hpDigit"]);
     const defaults = Object.entries(DEFAULT_KEYS);
     for (const [id, key] of defaults) {
       const others = defaults.filter(([other, k]) => other !== id && sameKey(k, key)).map(([other]) => other);
@@ -1325,6 +1327,7 @@ describe("a control shows the key of the shortcut it does (D-261028-09)", () => 
     ["redo", "client/pages/RoomChrome.tsx", "the top bar's Redo"],
     ["redo", "client/features/drawings/DrawTool.tsx", "Draw's Redo"],
     ["redo", "client/features/builder/Options.tsx", "the builder's Redo"],
+    ["search", "client/features/search/SearchSheet.tsx", "the top bar's Search, as its words or its icon"],
     ["tool:*", "client/pages/Room.tsx", "each tool's button, and its tile in Setup and the tool menu"],
     ["elevation", "client/canvas/TokenActionBar.tsx", "a token's Down 5 feet"],
     ["elevation", "client/canvas/TokenActionBar.tsx", "a token's Up 5 feet"],
@@ -1485,4 +1488,85 @@ test("focused setup keys preserve native editing, repeated keys, and other dialo
   assert.equal(setupHistoryShortcut({ ...key, repeat: true }, yes), null);
   assert.equal(setupHistoryShortcut(key, { ...yes, scope: "play" }), null, "the retained Play sheet keeps the usual dialog key boundary");
   for (const no of [{ focused: false }, { dm: false }, { preview: true }, { confirming: true }]) assert.equal(setupHistoryShortcut(key, { ...yes, ...no }), null);
+});
+
+describe("the room search's key (designs/qol/search.md 5.6, D-261106-141)", () => {
+  const scope = new RoomScope();
+  const env = (role: "dm" | "player" = "dm"): ShortcutEnv => ({
+    role,
+    tools: [],
+    getState: () => ({ you: { memberId: "m1", role }, sceneId: "s1", local: { selectedIds: [], selectedId: null, tool: "" }, view: { tokens: {}, characters: {}, encounter: null, meta: { settings: {} } } }) as unknown as RoomView,
+    actions: {} as RoomActions,
+    ui: {} as RoomUi,
+    scope,
+  });
+  const open = { dialogOpen: false, preview: false };
+  const k = (overrides: Partial<KeyPress> = {}) => press({ key: "k", code: "KeyK", ...overrides });
+  const find = (p: KeyPress, gates: { dialogOpen: boolean; preview: boolean; apple?: boolean } = open, role: "dm" | "player" = "dm") => shortcutFor(p, env(role), gates)?.id ?? null;
+  const field = { tagName: "INPUT", type: "text" };
+
+  test("Ctrl+K and Cmd+K open the search, for the DM and players, and the press opens it", () => {
+    for (const role of ["dm", "player"] as const) {
+      assert.equal(find(k({ ctrlKey: true }), open, role), "search", `${role}, Ctrl`);
+      assert.equal(find(k({ metaKey: true }), open, role), "search", `${role}, Cmd`);
+    }
+    assert.equal(find(k({ ctrlKey: true, key: "K" })), "search", "with Caps Lock");
+    // Russian: the K key types л.
+    assert.equal(find(k({ ctrlKey: true, key: "л" })), "search", "by the key's place on a Cyrillic layout");
+    const sheet = scope.get(searchSheetSlot);
+    let heard = 0;
+    sheet.listeners.add(() => void heard++);
+    shortcutFor(k({ ctrlKey: true }), env(), open)!.run(env(), k({ ctrlKey: true }));
+    assert.equal(sheet.open, true);
+    assert.equal(heard, 1, "the sheet hears it open");
+  });
+
+  test("it works in a one-line field such as the Dice formula, where it types nothing, but a Mac's field keeps Ctrl+K", () => {
+    for (const target of [field, { tagName: "INPUT", type: "search" }, { tagName: "INPUT", type: "number" }, { tagName: "INPUT" }]) {
+      assert.equal(isOneLineField(target), true, JSON.stringify(target));
+      assert.equal(find(k({ ctrlKey: true, target })), "search", `Ctrl+K in ${JSON.stringify(target)}`);
+      assert.equal(find(k({ metaKey: true, target }), { ...open, apple: true }), "search", `Cmd+K on a Mac in ${JSON.stringify(target)}`);
+      // macOS's own Ctrl+K in a field deletes to the line's end.
+      assert.equal(find(k({ ctrlKey: true, target }), { ...open, apple: true }), null, "a Mac's Ctrl+K in a field stays the field's");
+    }
+    assert.equal(find(k({ ctrlKey: true }), { ...open, apple: true }), "search", "a Mac's Ctrl+K outside a field opens it");
+  });
+
+  test("a text area, a select box and an editable block keep every key, as do the room's other keys in any field", () => {
+    for (const target of [{ tagName: "TEXTAREA" }, { tagName: "SELECT" }, { tagName: "DIV", isContentEditable: true }, { tagName: "INPUT", type: "text", isContentEditable: true }]) {
+      assert.equal(isOneLineField(target), false, JSON.stringify(target));
+      assert.equal(find(k({ ctrlKey: true, target })), null, JSON.stringify(target));
+      assert.equal(find(k({ metaKey: true, target })), null, JSON.stringify(target));
+    }
+    for (const target of [body, { tagName: "BUTTON" }, { tagName: "INPUT", type: "checkbox" }, null]) assert.equal(isOneLineField(target), false, JSON.stringify(target));
+    assert.equal(find(press({ ctrlKey: true, target: field })), null, "Ctrl+Z in a field is the field's undo");
+    assert.equal(find(press({ key: "f", code: "KeyF", target: field })), null, "F in a field is typing");
+    assert.equal(find(press({ key: "k", code: "KeyK", target: field })), null, "K in a field is typing");
+  });
+
+  test("it does nothing with another dialog open, in View as a player, with Shift or Alt, or held", () => {
+    assert.equal(find(k({ ctrlKey: true }), { dialogOpen: true, preview: false }), null, "the search's own dialog closes itself on the key (SearchSheet.tsx)");
+    assert.equal(find(k({ ctrlKey: true }), { dialogOpen: false, preview: true }), null);
+    assert.equal(find(k({ ctrlKey: true, shiftKey: true })), null);
+    assert.equal(find(k({ ctrlKey: true, altKey: true })), null);
+    assert.equal(find(k({ ctrlKey: true, repeat: true })), null);
+    assert.equal(find(k({ ctrlKey: true, defaultPrevented: true })), null);
+    assert.equal(find(k()), null, "K alone is no key by default");
+  });
+
+  test("the top bar's Search names it, and the sheet lists it and the search's own keys for everyone", () => {
+    for (const role of ["dm", "player"] as const) {
+      assert.deepEqual(keyHint("search", role, DEFAULT_KEYS), { text: "Ctrl+K", aria: "Control+K Meta+K" });
+      const keys = sheetSections(role, { mouse: true, android: false }).find((x) => x.title === "Keys")!.rows;
+      assert.deepEqual(keys.find((r) => r.id === "search"), { id: "search", input: "Ctrl+K", does: "Search the room: panels, settings, actions and what is on the map", when: "also while you type in a field", keys: true });
+      const search = sheetSections(role, { mouse: false, android: false }).find((x) => x.title === "Search");
+      assert.deepEqual(search?.rows.map((r) => [r.input, r.does]), [
+        ["Up, Down", "Move through the results"],
+        ["Enter", "Go there, or do it"],
+        ["Shift+Enter", "Only go there"],
+        ["Escape, Ctrl+K", "Close it, back where you were"],
+      ]);
+    }
+    assert.equal(withKey("Search", keyHint("search", "dm", DEFAULT_KEYS)), "Search (Ctrl+K)", "its tooltip");
+  });
 });
