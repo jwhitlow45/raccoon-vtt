@@ -2318,7 +2318,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     assert.ok(!(await chipNames(card)).includes("Bree"), "Undo put Bree's chip back");
   });
 
-  test("qe-4. the warrior's next turn shows its card with its attacks again (QOL audit Q1)", async () => {
+  test("qe-4. the warrior's next turn shows its card with its attacks again, and none of last turn's results or chips, though a healthy warrior has no turn record (QOL audit Q1)", async () => {
     const { page } = qeDesk();
     try {
       // Through Bree's turn, and any row her companions joined with, to the warrior's again.
@@ -2328,8 +2328,14 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
         await waitFor("the next turn", () => (dmSocket.state?.encounter?.activeEntryId !== seq ? true : null));
       }
       assert.equal(dmSocket.state?.encounter?.round, 2, "not the warrior's turn in round 2");
+      const warrior = dmSocket.state!.tokens[qe.warrior]!.actor;
+      assert.ok("inline" in warrior && !warrior.inline.turnRecord, "the case under test: the warrior's turn stamped no record");
       const attacks = page.getByRole("group", { name: "Goblin Warrior's turn" }).getByRole("group", { name: "Goblin Warrior's attacks" });
       for (const name of ["Scimitar", "Shortbow"]) await attacks.getByRole("button", { name, exact: true }).waitFor();
+      // A result would draw with the rows, so a moment more settles it.
+      await page.waitForTimeout(300);
+      assert.equal(await attacks.locator("[data-card-result]").count(), 0, "last turn's Scimitar results under the row");
+      assert.equal(await attacks.locator("[data-apply-to]").count(), 0, "last turn's Apply to under the row");
     } finally {
       await ops.send({ t: "encounter.end" }).catch(() => {});
     }

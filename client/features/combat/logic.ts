@@ -39,6 +39,27 @@ export function turnKey(encounter: Pick<Encounter, "activeEntryId" | "round" | "
   return `${encounter.activeEntryId}|${encounter.round}|${seq ?? ""}`;
 }
 
+/**
+ * The room seq the turn now started at, which the turn card counts its
+ * results from, so a creature's next turn never shows last turn's hit and
+ * its Apply to again (QOL audit Q1). A turn record holds it, but a healthy
+ * landing creature gets none (shared/reducer/uses.ts needsRecord), so the
+ * turn's start, then its log line, stand in: the op that started the turn
+ * stamps all three. Null when this view holds none of them.
+ */
+export function turnSince(view: Pick<RoomState, "encounter" | "log">, participants: readonly Pick<Participant, "record">[]): number | null {
+  const encounter = view.encounter;
+  if (!encounter?.activeEntryId) return null;
+  const record = participants.find((p) => p.record)?.record;
+  if (record) return record.id;
+  const start = encounter.turnStart;
+  if (start?.entryId === encounter.activeEntryId && start.seq !== undefined) return start.seq;
+  // Previous takes a turn back to the one before, which keeps the seq of the line that started it, so the newest line for this row and round is that one.
+  const line = view.log.findLast((e) => e.data?.type === "turn" && e.data.entryId === encounter.activeEntryId && e.data.round === encounter.round);
+  const seq = line ? Number(line.id.split(":")[0]) : NaN;
+  return Number.isFinite(seq) ? seq : null;
+}
+
 /** A Roll recharge a uses list sent (combat/state.ts useListRolls): its tag, and the turn the list showed as it rolled (`turnKey`). */
 export type ListRoll = { tag: string; turn: string | null };
 

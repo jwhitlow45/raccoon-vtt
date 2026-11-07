@@ -75,6 +75,37 @@ describe("the turn card's gating", () => {
   });
 });
 
+describe("the turn card's results count from the turn's start", () => {
+  const dmYou = { role: "dm" as const, memberId: "dm1" };
+  const turnLine = (id: string, data: object): LogEntry => ({ id, at: "2026-11-06T20:00:00.000Z", kind: "event", data: { type: "turn", ...data } as never });
+  const since = (view: RoomState) => {
+    const participants = turnParticipants(view);
+    return combatAlerts({ view, you: dmYou, participants, uses: participants.map(() => []), attacks: participants.map(() => 1), loading: false, failed: false, dismissed: new Set() }).turn?.since;
+  };
+
+  test("a healthy lurker has no turn record, so its turn's start names the turn", () => {
+    const view = table();
+    assert.equal(turnParticipants(view)[0]?.record, null, "the case under test: a landing creature without a record");
+    view.encounter!.turnStart = { entryId: "e1", tokenId: "m1", sceneId: "s1", x: 5, y: 5, elevation: 0, seq: 10 };
+    assert.equal(since(view), 10);
+  });
+
+  test("without a start, the turn's newest log line for its row and round, after Previous took the turn back", () => {
+    const view = table();
+    // Round 1's turn, round 2's, then Previous twice back to round 1's.
+    view.log = [turnLine("10:0", { entryId: "e1", round: 1 }), turnLine("11:0", { entryId: "e2", round: 1 }), turnLine("12:0", { entryId: "e1", round: 2 }), turnLine("13:0", { entryId: "e1", round: 2, back: true, to: "e2" }), turnLine("14:0", { entryId: "e2", round: 1, back: true, to: "e1" })];
+    assert.equal(since(view), 10);
+  });
+
+  test("a turn record's seq wins, and with nothing to name the turn no result shows", () => {
+    const view = table();
+    view.tokens.m1!.actor = { inline: { ...actor({ monsterId: "lurker" }), turnRecord: { id: 10, entryId: "e1", round: 1, hp: 7, life: "alive" } } };
+    view.encounter!.turnStart = { entryId: "e1", tokenId: "m1", sceneId: "s1", x: 5, y: 5, elevation: 0, seq: 3 };
+    assert.equal(since(view), 10);
+    assert.equal(since(table()), Number.POSITIVE_INFINITY);
+  });
+});
+
 describe("AttackRows", () => {
   const bite = blockActions(monsterView(statBlockOf(customMonster("lurker")))).find((r) => r.name === "Bite")!;
   const rows = { attack: `t:m1|${bite.key}|attack`, damage: `t:m1|${bite.key}|damage` };

@@ -122,7 +122,7 @@ export function TurnCard(props: { model: TurnCardModel; folded: boolean; foldabl
             creature={participant.target}
             tokenId={"tokenId" in participant.target ? participant.target.tokenId : undefined}
             name={participant.name}
-            after={participant.record?.id}
+            after={model.since}
             quietWait={uses === null && (model.loading || model.failed)}
           />
           <CombatUses target={participant.target} form="card" uses={uses} loading={model.loading} failed={model.failed} ownTurn name={participant.name} />

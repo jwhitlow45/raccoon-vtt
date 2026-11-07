@@ -13,6 +13,7 @@ import {
   characterIdOf,
   promptsOf,
   turnParticipants,
+  turnSince,
   usesCount,
   usesRows,
   type DeathSavePrompt,
@@ -49,6 +50,12 @@ export type TurnCardModel = {
   count: number;
   /** The attacks of every block, for the folded row's words. */
   attacks: number;
+  /**
+   * The room seq the attacks' results count from (logic.ts turnSince).
+   * Infinite when nothing in this view names the turn's start, so no
+   * result shows rather than an earlier turn's with its chips.
+   */
+  since: number;
   loading: boolean;
   failed: boolean;
 };
@@ -92,7 +99,7 @@ export function useCombatAlerts(): CombatAlerts {
 
 /** The cards of the turn now for this viewer, free of React for its tests. */
 export function combatAlerts(input: {
-  view: Pick<RoomState, "tokens" | "characters" | "encounter" | "meta">;
+  view: Pick<RoomState, "tokens" | "characters" | "encounter" | "meta" | "log">;
   you: You;
   participants: readonly Participant[];
   uses: readonly (readonly LimitedUse[] | null)[];
@@ -142,7 +149,8 @@ export function combatAlerts(input: {
       const landing = input.participants.find((p) => p.landing);
       const entry = encounter.entries.find((e) => e.id === encounter.activeEntryId);
       const name = landing?.name ?? (entry ? entryName(view, entry) : "This");
-      out.turn = { id, name, blocks, count: blocks.reduce((n, b) => n + b.count, 0), attacks: blocks.reduce((n, b) => n + b.attacks, 0), loading: input.loading, failed: input.failed };
+      const since = turnSince(view, input.participants) ?? Number.POSITIVE_INFINITY;
+      out.turn = { id, name, blocks, count: blocks.reduce((n, b) => n + b.count, 0), attacks: blocks.reduce((n, b) => n + b.attacks, 0), since, loading: input.loading, failed: input.failed };
     }
   }
   return out;
