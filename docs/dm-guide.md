@@ -111,7 +111,7 @@ When you pick a tool, its options appear in a row just above the toolbar, and an
 
 **Gray means "not right now".** A control you can't use at the moment is drawn in gray, and so is everything on a page that is waiting for something: a roll request while it sends, a class resource or a journal page while it saves, a pin while its **Done** goes through, or a group save that is checking with the server or has lost its connection. A menu opened from such a page grays its choices too, and tapping them does nothing. The words that tell you how things stand keep their colors, so you can still read the page while you wait, and everything comes back as soon as the wait is over.
 
-**The top bar** holds **Undo** (`Ctrl+Z`) and **Redo** (`Ctrl+Shift+Z`), the two curved arrows (with Cmd in place of Ctrl on a Mac), which take back your own play and board changes one at a time and put them back again (saved definitions have their own history in the Menu, see [Undo, Redo and Setup history](#undo-redo-and-setup-history)). Beside them, **View** chooses whether your device shows the map from straight above or tilted, in the [isometric view](#the-isometric-view), and **Fit the map to the screen** (four corners, or the `0` key) brings the map back when you have panned or zoomed it out of sight. On a computer, the last button in the top bar is **Full screen** (`W`), which gives the whole screen to the room. Press it or `W` again to leave. If the window is too narrow for the button, **This device** in the Menu has the same switch, and that is also where you find it on a tablet or an Android phone.
+**The top bar** holds **Undo** (`Ctrl+Z`) and **Redo** (`Ctrl+Shift+Z`), the two curved arrows (with Cmd in place of Ctrl on a Mac), which take back your own play and board changes one at a time and put them back again (saved definitions have their own history in the Menu, see [Undo, Redo and Setup history](#undo-redo-and-setup-history)). Beside them, **View** chooses whether your device shows the map from straight above or tilted, in the [isometric view](#the-isometric-view), and **Fit the map to the screen** (four corners, or the `0` key) brings the map back when you have panned or zoomed it out of sight. On a computer, the last button in the top bar is **Full screen** (`W`), which gives the whole screen to the room. Press it or `W` again to leave. If the window is too narrow for the button, **This device** in the Menu has the same switch, and that is also where you find it on a tablet or an Android phone. Beside the room's name sit the **DM** chip, which opens a menu of the things you reach for during play (see [The DM menu](#the-dm-menu)), and **Players see black** while the screens are dark. As the bar fills, it gives up parts in a fixed order and gets them back as soon as there is room: **Search** shrinks to its icon, a fight's next faces drop, the clock chip and **Now playing** leave for the DM menu, and last of all **View** folds into the Menu.
 
 **The Menu** panel holds the X-card, **Copy player link**, **Members**, **Setup history**, **Room settings**, **This device**, **DM guide**, **About** and **Leave room**. When the top bar is too crowded for the View button, it waits here as a **View** row instead.
 
@@ -124,6 +124,20 @@ These are the panels a DM uses most for maps and fights:
 **Sound** and **Time** are what the whole room shares at the moment. **Sound** runs the music, the background sounds and the effects, and **Time** keeps the in-game clock. Sound comes before Time because you reach for it every scene: on a computer it stays among the side panel's tabs when the panel is widened to 640 px, while Time waits under **More**. With a clock running, a chip in the top bar opens Time too. Weather has no panel of its own: it belongs to a scene, so you set it in the scene's settings in Scenes, and you see it on the map.
 
 The DM panel, Scenes and This device all fold their sections the same way. Tap a section's name to fold it or open it again, and your device remembers. When something sends you to a folded section, such as a pasted picture meant for a new scene or a PDF upload that is waiting on you, it opens by itself.
+
+**Tabs you keep.** On a computer the side panel's row of tabs holds as many panels as fit, and **More** lists the rest. If you keep reaching into **More** for the same panel, open **This device**, find **Tab row** and untick the panels that don't need a tab. Every panel starts ticked, so nothing changes until you untick one, and the row then fills with the panels you left ticked. A player has the same list for their own panels.
+
+### Finding anything
+
+When you can't remember which panel holds a setting, press `Ctrl+K` (`Cmd+K` on a Mac) and type what you want. The top bar's **Search** button opens the same search, and on a phone so does the field at the top of the **Panels** list.
+
+![The search open over the map with "init" typed: the Initiative panel, Start a fight and the settings that name Initiative, each row with its kind and where it lives, and Move, Go or do and Only go there along the foot.](dm-guide/search.webp)
+
+Type a few words in any order, such as `rest long` or `black out`, and the list ranks itself as you type. **Enter** takes the first row. Short forms work too (`hp`, `init`, `lr`), and so does a slip or two in a long word. Panels, settings, keys, the tokens on your scene, characters and their fields, conditions, scenes, monsters, playlists, journal pages and the DM menu's items are all in it. With the field empty it lists the last five things you picked on this device under **Recent**, and under **Suggested** what usually comes next: **Next turn** in a fight, **Start a fight** before one, then handouts, the blackout and a Long Rest.
+
+A row that names a place takes you there. The panel opens, the fold that holds the setting opens for now, and the control takes focus with a ring around it, so you see which one it is. A row that names an action does it through the same button you would have pressed, so its confirmation and its Undo are that button's own. **Shift+Enter** only goes there, which is how you look at a setting before you change it. Type a formula such as `2d6+3` and the first row rolls it.
+
+Your players have the search too. It finds only what their own screens already hold, such as their character, the Dice panel and the tokens they can see, so a hidden monster or one of your settings never turns up in it.
 
 ## Quick start
 
@@ -850,6 +864,8 @@ When you want to move, damage or hide a whole group, select them all first. Ther
 
 Drag any one of the selected tokens to move them all. The group gets an action bar of its own with one **HP entry** for all of them, **Conditions** and elevation, and for you, **Roll**, **Request a roll**, **Hidden**, **Locked**, **Start a fight** or **Add to the fight**, **More** (three dots, which hold the ring, size, layer, image, what players see, and owners), **Delete**, and **Clear** (a cross, which lets go of the group without changing anything). Each change to the group is one undo step. On a phone held upright, the group's bar rests as a strip at the foot of the map, like a single token's, with "4 selected" in its header. Press **Done** in the Multi-select bar when you are finished.
 
+For a pack of monsters of one kind, a monster's action bar offers **All 4 Goblin Warriors** when more than one stands on the scene, and one tap selects the whole pack, hidden ones included. The group's **Save** then opens the group save for the pack, with its own ability picker.
+
 ## HP, damage and conditions
 
 **Changing HP.** Use the HP entry in a token's action bar, the Token panel's **Hit Points** section, or the Combat group on a character's page. Tapping a creature's tracker row opens its action bar. The initiative strip opens the tracker.
@@ -864,6 +880,10 @@ A plain `7` under **Damage**, or `-7` in any mode, deals 7 untyped damage. Choos
 
 After someone rolls damage, a chip such as **Use 9 (Longsword damage)** appears by the entry. Tap it to fill in the newest roll, whether it was yours or a player's, then press **Apply**. The chip keeps each rolled amount and its type, including mixed damage, and the preview shows the breakdown. Editing the total clears that breakdown, so include the types yourself if the corrected damage should use them.
 
+**Apply to.** Under a damage roll, whether on the creature's turn card, in the Dice panel's newest roll or in the toast of a roll a player made, up to four chips name creatures near the roller, its enemies first and nearest first. Tap **Apply to Thorn** and the damage goes through Thorn's defenses at once, as one step that **Undo** takes back, and the chip gives way to "Applied to Thorn." For a player the chip only fills the HP entry, since a player has no Undo, and they press **Apply** themselves.
+
+**Type the number.** On a computer, with a token selected and nothing focused, press a digit from `1` to `9` and the HP entry opens with it, ready for more. **Enter** applies it and gives the keyboard back to the map, so `N` and `H` work again. If you have moved a shortcut to a digit, that digit stays with the shortcut.
+
 With several tokens selected on the map or in the tracker, the same entry applies to each creature using its own defenses. Two tokens linked to one character deal that character the damage once.
 
 **Dropping to 0 HP.** When a monster or NPC reaches 0 HP, it dies, as long as the room setting "Monsters die at 0 HP" is on (it is by default). A player character at 0 HP falls Unconscious and starts making Death Saving Throws instead, and so do monsters and NPCs while that setting is off. If the damage left over after a creature drops to 0 is at least its maximum HP, it dies outright.
@@ -872,7 +892,7 @@ Damage to a creature already at 0 HP counts as a failed Death Saving Throw. For 
 
 Every HP change during a fight goes into the fight's **HP changes** list, where you can take back any single change. See [Initiative](#initiative).
 
-**Conditions.** **Conditions**, in the action bar, opens a grid of the 15 conditions of the 2024 rules and other common statuses: Concentrating, Hidden, Flying, Dodging, Raging, Blessed, Baned, Hasted, Hunter's Mark, Hexed, Heroic Inspiration, Surprised, Marked and Readied action. One tap adds a condition or removes it. Exhaustion goes on at level 1.
+**Conditions.** **Conditions**, in the action bar, opens a grid of the 15 conditions of the 2024 rules and other common statuses: Concentrating, Hidden, Flying, Dodging, Raging, Blessed, Baned, Hasted, Hunter's Mark, Hexed, Heroic Inspiration, Surprised, Marked and Readied action. One tap adds a condition or removes it. Exhaustion goes on at level 1. The grid starts with a **Recent** row of the three conditions this device added last, so Prone is a tap away in a fight full of knockdowns, and the `C` key opens the grid for the selected tokens.
 
 > [!NOTE]
 > The **Hidden** status in this grid means the creature took the Hide action. It is not the same as **Hidden** in the action bar, which hides the token from players.
@@ -909,6 +929,8 @@ With no fight running, **New fight** offers you a choice of who is in it:
 
 If you have two or more tokens selected on the map, their action bar also has **Start a fight**, or **Add to the fight** once a fight is running. While a fight runs, the panel's **More creatures** section offers the same three choices, so latecomers can join. Players add their own creatures with **Your creatures**.
 
+**Roll monsters' Initiative.** Under the choices sits a switch, on at first, that rolls for the monsters as the fight starts, which saves the trip to **Auto Initiative** when the players are not waiting on a roll of their own. The monsters share rolls as **Auto Initiative** is set to, and a monster that already has a value keeps it. The whole start, rolls included, is one step for **Undo**: the first press takes back the totals and the second takes back the start. Turn the switch off, on this device, when you want to type the monsters' values yourself.
+
 ### Initiative values
 
 Each creature needs an Initiative value before the fight can sort them. There are several ways to fill them in:
@@ -936,7 +958,7 @@ Next also asks what the new turn needs. If the creature has a breath weapon to r
 
 **Previous** takes back exactly what the last Next did: whose turn it is, the durations it counted down, the Reaction and Legendary Actions it gave back and a hidden creature it revealed. The turn's cards come back as they were left, results and all. What you changed yourself during the turn, such as a row you added, a value you typed or a condition you set, stays as you left it.
 
-When a player's turn comes, they get "Your turn" and an **End turn** button. A strip under the top bar (or a chip in the top bar on a wide screen) shows everyone whose turn it is, and shows you alone who comes next. Tap it to open the tracker. If you'd like your map to pan to whoever is acting, turn on **Camera follows the turn**, in the Initiative panel's **This device** section.
+When a player's turn comes, they get "Your turn" and an **End turn** button. A strip under the top bar (or a chip in the top bar on a wide screen) shows everyone whose turn it is, and shows you alone who comes next. Tap it to open the tracker. If you'd like your map to pan to whoever is acting, turn on **Camera follows the turn**, in the Initiative panel's **This device** section. The strip carries a **Next** button for you too, or **Start** before the first turn, so on a phone one tap takes the place of opening the tracker, pressing Next and closing it again. A player on a phone also finds **End turn** at the right end of their own token's action bar, where their thumb has just been, and **Find my token** in their top bar now selects the token and opens its bar.
 
 **Hidden creatures in the order.** A hidden monster, such as one waiting in ambush, can be part of the fight from the start without giving itself away: its token and its row both stay hidden from the players. When the time comes, there are two ways to reveal it.
 
@@ -1101,7 +1123,7 @@ There are three ways to open it:
 Then set up the request:
 
 1. Under **Roll**, pick what to roll: a **Save** or **Check** by ability, or a **Skill**. A skill starts at its usual ability, and **with** changes it. **Or a second choice** lets the creature pick between two, such as Athletics or Acrobatics to escape a grapple.
-2. Type the **DC**, or pick a typical one for a check (from 5, Very easy, to 30, Nearly impossible), or leave it empty.
+2. Type the **DC**, or pick a typical one for a check (from 5, Very easy, to 30, Nearly impossible), or leave it empty. For a save, the DCs you sent last stand under **Recent** beside the field, such as **DC 15**, since a save's DC comes from the effect and a session asks for the same few again and again.
 3. Check **Creatures**. **Ask the party** starts with the characters on the players' scene.
 4. Under **Player view**, choose whether **Players see the DC** and **Players see pass or fail**, turn on **Against a spell** (for Magic Resistance) if it applies, and add a note if you like ("against the poison").
 5. Press **Send**. **Recent** keeps your last three requests, so you can send one again with one tap.
@@ -1208,6 +1230,8 @@ When you start it from an area, the page fills itself in from the spell and its 
 6. Press **Apply** ("Apply: 4 take damage"). Temporary HP and Concentration saves are handled for you, and the app confirms: "Applied to 4. Undo takes it all back." Press **Done** to close the page.
 
 Tap a row's damage amount to change what that creature takes. A plain number is the final amount, with `0` preventing its damage. Typed damage such as `11 cold + 3 radiant` replaces that amount and applies the creature's defenses, without applying its save or Evasion again. **Back to 7**, where 7 is the worked-out amount, restores the shared damage and save choices. Clearing the field does the same. If the entry cannot be read, the field explains why and **Apply** waits for you to correct it.
+
+**Fewer presses.** The group bar's **Save** opens the page directly, so a pack of goblins needs the bar and one pick of the ability instead of a trip through the Dice panel. The DC field offers the same **Recent** DCs. Once the **Damage** field holds dice, the roll button reads "Roll 3 saves and damage" and rolls both in one press.
 
 With **No save** ("No save: everyone takes it"), **Apply** shows at once, for damage that everyone in the area simply takes. An open group save stays on your device through a reload, and the Dice panel's **Open** brings you back to it. You can have one open at a time. Starting another while one is open asks first, such as "Discard Fireball's save?", with **Keep it** ready under your finger, so a second press of Enter never throws the first one away.
 
@@ -1321,6 +1345,8 @@ At the start of a creature's turn, whoever answers for it, its player or you for
 - **Regeneration**, while a regenerating creature is hurt: "Troll regenerates 15 HP." with **Apply**, **Skip** and **Dismiss**. A troll at 0 HP that is dying rather than dead reads "Troll is at 0 HP and regenerates 15 HP.", and **Apply** gets it up. If the damage it took since its last turn was Fire or Acid, the card adds "Recorded Fire damage may stop Regeneration." The app knows a hit's damage type when you enter typed damage such as `10 fire`, use a damage roll's **Use** chip, or apply a group save with typed damage. Only parts that deal damage after defenses count. A plain number overriding a group save row keeps that row's worked-out damage types. A plain number typed into the HP entry carries no type, so that damage isn't counted. Either way the choice stays yours, and **Apply** and **Skip** are both there.
 - **Death save**, for a dying creature: "Thorn is dying. Death save: 1 success, 2 failures." with **Roll**, **Skip** and **Dismiss**. It goes to the character's player and to you, so either of you can roll it, and the first roll counts: "Rolled 14: a success." A monster gets one only while "Monsters die at 0 HP" is off. While a Regeneration card for the same creature waits, the death save reads "Waiting for Regeneration", since a troll that regenerates never needs the save.
 - **The turn card**, for the whole of the turn: "Adult Red Dragon's turn" lists what the creature can spend, as its **Uses** does, with **Use** for its Legendary Resistance, its recharge and per-day abilities and a character's class resources. Its Legendary Actions show only their pips, with "After other creatures' turns" under them, since a monster takes them after another creature's turn. A creature that shares the turn, such as a controlled mount, gets a block of its own. A Regeneration or death save you skipped shows here with **Reopen**. On a phone, or where the card would not fit above the action bar, it folds to one row, "Adult Red Dragon's turn: 3 uses", led by a chevron. Press the row to open the card, and the chevron before the open card's title (**Collapse**) to fold it again.
+
+- **Attacks**, for a creature that has them: its turn card lists them as the Dice panel's rows, with this turn's results under each and the **Apply to** chips under a damage result, so a goblin's turn can run from the card alone. The card counts them with its uses, such as "2 attacks, 3 uses".
 
 ![The troll's turn after Ivo's Fire Bolt: its Regeneration card, "Troll regenerates 15 HP.", with "Recorded Fire damage may stop Regeneration.", a note that a plain typed number is not counted, and Apply, Skip and Dismiss, over its turn card with Loathsome Limbs, and its row in the tracker.](dm-guide/regeneration.webp)
 
@@ -1601,6 +1627,16 @@ Follow me and Bring everyone here move the players only while you are looking at
 
 Each section of the DM panel folds. On a phone, the ones you set up once, Preview, Player link and Table display, start folded, while Handouts and Players' screens start open, since you use them during play. A folded section still tells you what it holds, such as "2 showing" for Handouts or "Players on Crypt · Follow me off" when you are looking at another scene. Tap a section's name to open or fold it, and your device remembers. Join requests always sits at the top and stays open while anyone is waiting. A PDF upload that needs you opens Handouts by itself, and a badge on its row tells you about it if you fold it again.
 
+### The DM menu
+
+The **DM** chip in the top bar opens a menu of what you reach for during play, on a computer and a phone alike, and the side panel keeps whatever tab it was on.
+
+- **Handouts**: **Hide** for each handout showing, then **Show** for the last three handouts this device showed, each with its audience ("to Pat"), and **Show a handout…**. A handout shown again goes to the players it went to the first time, less anyone who has left the room, and never to more. **Show a handout…** opens the DM panel's form in a dialog. The same last five handouts are listed under **Recent** in the DM panel's Handouts, each with a button that names its audience.
+- **Players' screens**: **Black out players' screens**, **Follow me**, and **Bring everyone here**, or **Move players here** while you look at a scene the players are not on. If fog is off on that scene, or no one in the party there can see, the item asks first and offers **Move players anyway**.
+- **Map phase** and **Preview** hold the scene's phases and **View as** each player. **Time** and **Now playing** join the menu once their chips have left a crowded bar.
+
+When the screens are dark, the **Players see black** chip opens its own menu. **End the blackout** lifts it. While you look at another scene, **Show players** and the scene's name moves the players there and lifts the blackout in one step, which is the reveal you built the scene for. If the move is refused, or a co-DM moves the players first, the blackout stays on and the menu says why, so no one sees the old scene lit. A player's chip opens a short menu of their own with their characters' sheets and the X-card.
+
 ### View as a player
 
 Sooner or later you'll want to know exactly what a player can see: whether the fog really hides the vault, whether Mara's torch reaches the goblin, or what Ben can see of a scene where each player sees for themselves. **View as a player** shows you the scene as that player sees it, fog, party vision and their own map included, and nothing they can't see. It is drawn on your own device and isn't a mirror of their phone: the preview keeps its own framing of the map and its own panels, so it shows what they can see, not where they are looking right now. It always shows the players' scene, whichever scene you are on, so you can check on the table while you prepare the next map.
@@ -1798,6 +1834,10 @@ If the table needs a moment, the X-card's card gives you **Stop the sound** besi
 
 To keep a backup small, untick **Include sounds** under **Room settings**, **Backup**. The room comes back without your music, background sounds and effects, and the built-in effects still play.
 
+### Now playing in the top bar
+
+While music or a background sound plays, your top bar shows the **Now playing** chip: **Pause** or **Play** beside the track's name, or "2 background sounds". Press the name to open the player under the chip. It holds the next track, the music's volume, each background sound with its own **Stop**, **Stop all sound**, **Crossfade** and **Open Sound**, which takes you to the Sound panel. On a narrower window the player opens as a card, and on a phone as a sheet over the panel you already have open. The chip is yours alone: players never see it. When the bar fills, it shrinks to its icon and then moves into the DM menu, which keeps a **Now playing** item that opens the same player.
+
 ### Library
 
 **Library**, the panel's second view, holds all your music. Type in **Search music** to narrow it down by name, whatever the case or accents, and use the sort button to list your tracks by name, longest first or shortest first. Your device remembers the sort you chose. The search row stays at the top of the panel while the lists scroll, so a long library can be searched from anywhere in it. Your **Playlists** come first, with **New playlist** beside their heading, then all your **Tracks**. Each row has a **Play** button that starts it straight away: Play on a playlist starts it from the top, and Play on a track plays that track alone. Each row's **More** button holds the rest. **Play next** and **Add to queue** put a track, or a whole playlist, into the music that is playing now (see [Up next](#up-next)). **Add to playlist…** adds a track to one of your playlists, **Edit playlist** opens a playlist in the maker, and **Rename or delete…** opens a track's page, where you can rename it, change what it is used as, listen to it on your own device, or delete it. **Back to Sound** on a track's page returns you to Library with your search still in place. A track that is waiting in the queue can be deleted, and it simply leaves the queue. The track that's playing can't be, and neither can the next one once it is about to start: skip the first, or take the second out of Up next, then delete it. **Add music…** and the storage line sit at the foot of Library.
@@ -1859,7 +1899,7 @@ With the clock running, Time's top shows the date, the time and the part of the 
 
 Each step applies at once on every device. A Short Rest never moves the clock on its own, so tap **1 hour** yourself when the party takes one. There is no step backward. If you tapped **8 hours** by mistake, press **Undo** in the top bar, which takes the step back. To turn the clock back on purpose, use **Set the date and time**.
 
-On a computer, a small chip in the top bar shows the date and time, such as "Deepwinter 4, 6:10 AM", from 900 px of screen width. Tap it to open Time. It is the first thing to leave the bar when the bar runs out of room, and it comes back once the window is wider or the date is shorter. On a phone, open Time from **Panels**.
+On a computer, a small chip in the top bar shows the date and time, such as "Deepwinter 4, 6:10 AM", from 900 px of screen width. Press it and the four steps open under it, **10 minutes**, **1 hour**, **8 hours** and **To dawn**, with **Open Time** below them, and the popover stays open for a second step. It is the first thing to leave the bar when the bar runs out of room, and it comes back once the window is wider or the date is shorter. On a phone, open Time from **Panels**.
 
 ### Setting the date and time
 
@@ -2172,7 +2212,7 @@ The party finds a hidden vault, and you want the reveal to land with a bit of dr
 3. Before they open it, go to the **DM** panel and turn on **Black out players' screens**. The players now see "The DM has paused the game."
 4. While the screens are dark, reveal the vault with the **Fog** tool, place or unhide its guardian, and switch to a night phase if the map has one.
 5. In **Handouts**, use **Show a handout** to show the vault's inscription to **Everyone**.
-6. Turn **Black out players' screens** off. The players see the room and the handout together.
+6. Turn **Black out players' screens** off. The players see the room and the handout together. If you set the vault up on its own scene, open the **Players see black** menu instead and press **Show players** and the vault's name (see [The DM menu](#the-dm-menu)).
 
 ![A player's phone during the blackout: "The DM has paused the game." and the X-card.](dm-guide/reveal-blackout.webp)
 
